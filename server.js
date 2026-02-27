@@ -482,17 +482,33 @@ async function trackModems() {
       }
 
       // Uptime tracking -- skip if rotating, rebooting, or IP is resetting
-      // Also skip if EXT_IP is IP_RESET (modem is in rotation but flag might not be set yet)
       if (isRotating || isRebooting || extIp === 'IP_RESET' || extIp === '') {
-        // Do NOT count this check at all -- IP change in progress or no connection info
         continue;
       }
 
       if (!uptimeTracking[key]) {
-        uptimeTracking[key] = { total_checks: 0, online_checks: 0, first_check: now };
+        uptimeTracking[key] = { total_checks: 0, online_checks: 0, first_check: now, consecutive_failures: 0 };
       }
-      uptimeTracking[key].total_checks++;
-      if (isOnline) uptimeTracking[key].online_checks++;
+      if (!uptimeTracking[key].consecutive_failures) uptimeTracking[key].consecutive_failures = 0;
+
+      if (isOnline) {
+        // Online: reset consecutive failures, count as online
+        uptimeTracking[key].consecutive_failures = 0;
+        uptimeTracking[key].total_checks++;
+        uptimeTracking[key].online_checks++;
+      } else {
+        // Offline: increment consecutive failures
+        uptimeTracking[key].consecutive_failures++;
+        // Only count as downtime after 3 consecutive failures
+        if (uptimeTracking[key].consecutive_failures >= 3) {
+          uptimeTracking[key].total_checks++;
+          // don't increment online_checks = counts as downtime
+        } else {
+          // Less than 3 failures: still count as online (100%)
+          uptimeTracking[key].total_checks++;
+          uptimeTracking[key].online_checks++;
+        }
+      }
       totalTracked++;
     }
   }
@@ -1493,24 +1509,21 @@ app.post('/api/tools/check_proxy', authMiddleware, async (req, res) => {
     return res.status(400).json({ error: 'proxies array required' });
   }
   const toCheck = proxies.slice(0, 50);
-  const results = [];
 
   // Check targets in order of reliability
   const checkTargets = [
-    { url: 'http://api.ipify.org?format=json', host: 'api.ipify.org', path: '/?format=json', parseIp: d => { try { return JSON.parse(d).ip; } catch(e) { return null; } } },
-    { url: 'http://ip-api.com/json', host: 'ip-api.com', path: '/json', parseIp: d => { try { return JSON.parse(d).query; } catch(e) { return null; } } },
-    { url: 'http://ifconfig.me/ip', host: 'ifconfig.me', path: '/ip', parseIp: d => d.trim() }
+    { url: 'http://api.ipify.org?format=json', host: 'api.ipify.org', parseIp: d => { try { return JSON.parse(d).ip; } catch(e) { return null; } } },
+    { url: 'http://ip-api.com/json', host: 'ip-api.com', parseIp: d => { try { return JSON.parse(d).query; } catch(e) { return null; } } }
   ];
 
-  for (const proxy of toCheck) {
+  async function checkOneProxy(proxy) {
     const start = Date.now();
-    let worked = false;
     for (const target of checkTargets) {
       try {
         const result = await new Promise((resolve, reject) => {
           const proxyAuth = proxy.login && proxy.password
             ? `${proxy.login}:${proxy.password}` : null;
-          const reqOpts = {
+          const r = http.request({
             hostname: proxy.ip,
             port: parseInt(proxy.port),
             path: target.url,
@@ -1519,65 +1532,43 @@ app.post('/api/tools/check_proxy', authMiddleware, async (req, res) => {
               'Host': target.host,
               ...(proxyAuth ? { 'Proxy-Authorization': 'Basic ' + Buffer.from(proxyAuth).toString('base64') } : {})
             },
-            timeout: 15000
-          };
-          const r = http.request(reqOpts, (proxyRes) => {
+            timeout: 5000
+          }, (proxyRes) => {
             let data = '';
             proxyRes.on('data', chunk => data += chunk);
-            proxyRes.on('end', () => {
-              resolve({ body: data, status: proxyRes.statusCode });
-            });
+            proxyRes.on('end', () => resolve({ body: data, status: proxyRes.statusCode }));
           });
-          r.on('error', (err) => reject(err));
+          r.on('error', reject);
           r.on('timeout', () => { r.destroy(); reject(new Error('Timeout')); });
           r.end();
         });
-
         if (result.status >= 200 && result.status < 400) {
-          const detectedIp = target.parseIp(result.body);
-          results.push({
-            ip: proxy.ip, port: proxy.port,
-            working: true,
-            responseTime: Date.now() - start,
-            detectedIp: detectedIp,
-            status: result.status
-          });
-          worked = true;
-          break;
+          return { ip: proxy.ip, port: proxy.port, working: true, responseTime: Date.now() - start, detectedIp: target.parseIp(result.body), status: result.status };
         }
-        // If proxy responds but with error status, it's still alive - try next target
-      } catch (e) {
-        // Connection failed to this target, try next
-        continue;
-      }
+      } catch (e) { continue; }
     }
-    if (!worked) {
-      // If none of the targets worked, try basic TCP connection check
-      try {
-        await new Promise((resolve, reject) => {
-          const net = require('net');
-          const sock = new net.Socket();
-          sock.setTimeout(10000);
-          sock.connect(parseInt(proxy.port), proxy.ip, () => { sock.destroy(); resolve(true); });
-          sock.on('error', (err) => { sock.destroy(); reject(err); });
-          sock.on('timeout', () => { sock.destroy(); reject(new Error('Timeout')); });
-        });
-        results.push({
-          ip: proxy.ip, port: proxy.port,
-          working: true,
-          responseTime: Date.now() - start,
-          detectedIp: '(порт открыт)',
-          status: 0
-        });
-      } catch (e) {
-        results.push({
-          ip: proxy.ip, port: proxy.port,
-          working: false,
-          responseTime: Date.now() - start,
-          error: e.message
-        });
-      }
+    // TCP fallback
+    try {
+      await new Promise((resolve, reject) => {
+        const net = require('net');
+        const sock = new net.Socket();
+        sock.setTimeout(3000);
+        sock.connect(parseInt(proxy.port), proxy.ip, () => { sock.destroy(); resolve(true); });
+        sock.on('error', (err) => { sock.destroy(); reject(err); });
+        sock.on('timeout', () => { sock.destroy(); reject(new Error('Timeout')); });
+      });
+      return { ip: proxy.ip, port: proxy.port, working: true, responseTime: Date.now() - start, detectedIp: '(порт открыт)', status: 0 };
+    } catch (e) {
+      return { ip: proxy.ip, port: proxy.port, working: false, responseTime: Date.now() - start, error: e.message };
     }
+  }
+
+  // Run checks in parallel (batches of 10)
+  const results = [];
+  for (let i = 0; i < toCheck.length; i += 10) {
+    const batch = toCheck.slice(i, i + 10);
+    const batchResults = await Promise.all(batch.map(p => checkOneProxy(p)));
+    results.push(...batchResults);
   }
 
   res.json({ results });
@@ -1947,12 +1938,12 @@ app.listen(PORT, () => {
   // Schedule nightly TopHosts at 03:00
   scheduleNightly(3, 'TopHosts', aggregateTopHosts);
 
-  // Start modem tracking (IP + uptime) every 10 minutes
-  console.log('[Tracking] Starting IP & uptime tracking (every 10 min)...');
+  // Start modem tracking (IP + uptime) every 5 minutes
+  console.log('[Tracking] Starting IP & uptime tracking (every 5 min)...');
   trackModems().catch(e => console.error('[Tracking] Initial error:', e.message));
   setInterval(() => {
     trackModems().catch(e => console.error('[Tracking] Error:', e.message));
-  }, 10 * 60 * 1000);
+  }, 5 * 60 * 1000);
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {

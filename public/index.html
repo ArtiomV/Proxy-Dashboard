@@ -374,6 +374,7 @@
     .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
     .status-dot.online{background:var(--success);box-shadow:0 0 8px rgba(63,185,80,.5)}
     .status-dot.offline{background:var(--danger)}
+    .pass-hidden{cursor:pointer;color:var(--text-3)}
 
     /* Section heading for proxy credentials on traffic tab */
     .section-heading{
@@ -473,12 +474,35 @@
         <div id="balanceWarning"></div>
         <div id="errorContainer"></div>
 
-        <!-- Export buttons and API info (above the table) -->
-        <div id="proxyExportButtons" style="display:none;margin-bottom:16px;gap:8px;flex-wrap:wrap">
+        <!-- Traffic table: 7 columns: Модем, HTTP, SOCKS5, Логин/Пароль, Сегодня, Вчера, Действия -->
+        <div class="table-wrapper">
+          <div class="loading-overlay" id="loading">
+            <div class="spinner"></div>
+            <span>Загрузка данных...</span>
+          </div>
+          <table id="dataTable" style="display:none">
+            <thead>
+              <tr>
+                <th onclick="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
+                <th>HTTP</th>
+                <th>SOCKS5</th>
+                <th>Логин / Пароль</th>
+                <th onclick="sortTable('dayIn')" class="text-right">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
+                <th onclick="sortTable('yesterdayIn')" class="text-right">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+
+        <!-- Export buttons (below the table) -->
+        <div id="proxyExportButtons" style="display:none;margin-top:16px;gap:8px;flex-wrap:wrap">
           <button class="btn btn-accent" onclick="exportCredentials()">Скачать доступы (TXT)</button>
           <button class="btn" onclick="exportCredentialsCSV()">Скачать CSV</button>
         </div>
-        <div class="api-info-card" id="apiInfoCard" style="display:none;margin-bottom:16px">
+        <!-- API info (below the table) -->
+        <div class="api-info-card" id="apiInfoCard" style="display:none">
           <h4>API доступ</h4>
           <p style="font-size:12px;color:var(--text-2);margin:6px 0">Получайте список прокси программно</p>
           <div class="form-group">
@@ -490,34 +514,6 @@
             <code class="mono" style="display:block;padding:10px;background:var(--bg-3);border-radius:6px;font-size:11px;word-break:break-all;color:var(--text-1)" id="apiExample"></code>
           </div>
         </div>
-
-        <!-- Traffic table: 11 columns: Модем, Аптайм, Скорость, HTTP, SOCKS5, Логин, Пароль, Сегодня, Вчера, Месяц, Действия -->
-        <div class="table-wrapper">
-          <div class="loading-overlay" id="loading">
-            <div class="spinner"></div>
-            <span>Загрузка данных...</span>
-          </div>
-          <table id="dataTable" style="display:none">
-            <thead>
-              <tr>
-                <th onclick="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
-                <th onclick="sortTable('uptimePct')">Аптайм <span class="sort-arrow" id="sort_uptimePct"></span></th>
-                <th onclick="sortTable('speedDl')">Скорость <span class="sort-arrow" id="sort_speedDl"></span></th>
-                <th>HTTP</th>
-                <th>SOCKS5</th>
-                <th>Логин</th>
-                <th>Пароль</th>
-                <th onclick="sortTable('dayIn')" class="text-right">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
-                <th onclick="sortTable('yesterdayIn')" class="text-right">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
-                <th onclick="sortTable('monthIn')" class="text-right">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody id="tableBody"></tbody>
-          </table>
-        </div>
-
-        <!-- Proxy credentials are now merged into the main traffic table above -->
       </div>
     </div>
 
@@ -769,6 +765,10 @@ function showToast(msg,type){
   setTimeout(function(){e.remove()},4000);
 }
 
+function showSpeed(dl,ul){
+  showToast('Скорость: \u2193 '+dl.toFixed(1)+' / \u2191 '+ul.toFixed(1)+' Мбит/с','info');
+}
+
 // --- Clipboard with fallback ---
 function copyText(t,b){
   function onOk(){if(b){var o=b.innerHTML;b.innerHTML='\u2714';setTimeout(function(){b.innerHTML=o},1500)}showToast('Скопировано','info')}
@@ -911,7 +911,7 @@ async function loadData(){
   }
 }
 
-// Traffic table: 11 columns: Модем(+status dot), Аптайм, Скорость, HTTP, SOCKS5, Логин, Пароль, Сегодня, Вчера, Месяц, Действия
+// Traffic table: 7 columns: Модем(+status dot), HTTP, SOCKS5, Логин/Пароль, Сегодня, Вчера, Действия
 function renderTable(){
   var rows=tableData.slice();
 
@@ -932,8 +932,8 @@ function renderTable(){
 
     var va=a[currentSort.key];
     var vb=b[currentSort.key];
-    if(va===null||va===undefined) va=currentSort.key==='uptimePct'?-1:'';
-    if(vb===null||vb===undefined) vb=currentSort.key==='uptimePct'?-1:'';
+    if(va===null||va===undefined) va='';
+    if(vb===null||vb===undefined) vb='';
     if(typeof va==='string'&&typeof vb==='string'){va=va.toLowerCase();vb=vb.toLowerCase()}
     if(va<vb) return currentSort.dir==='asc'?-1:1;
     if(va>vb) return currentSort.dir==='asc'?1:-1;
@@ -956,35 +956,24 @@ function renderTable(){
 
     var name=countryNames[country]||country;
     var count=groupRows.length;
-    var monthIn=0,monthOut=0;
-    for(var j=0;j<groupRows.length;j++){monthIn+=groupRows[j].monthIn;monthOut+=groupRows[j].monthOut}
+    var dayIn=0,dayOut=0,yesterdayIn=0,yesterdayOut=0;
+    for(var j=0;j<groupRows.length;j++){dayIn+=groupRows[j].dayIn;dayOut+=groupRows[j].dayOut;yesterdayIn+=groupRows[j].yesterdayIn;yesterdayOut+=groupRows[j].yesterdayOut}
 
-    // colspan=11 for 11 columns
+    // colspan=7 for 7 columns
     html+='<tr class="country-header">'+
-      '<td colspan="11">'+
+      '<td colspan="7">'+
         name+
         '<span class="country-count">'+count+' модемов</span>'+
-        '<span class="country-stats">Месяц: '+formatBytes(monthIn+monthOut)+' (\u2193 '+formatBytes(monthIn)+' / \u2191 '+formatBytes(monthOut)+')</span>'+
+        '<span class="country-stats">Сегодня: '+formatBytes(dayIn+dayOut)+' | Вчера: '+formatBytes(yesterdayIn+yesterdayOut)+'</span>'+
       '</td>'+
     '</tr>';
 
     for(var k=0;k<groupRows.length;k++){
       var row=groupRows[k];
-      var uptimeHtml='-';
-      if(row.uptimePct!==null){
-        var upCls=parseFloat(row.uptimePct)>=99?'uptime-good':parseFloat(row.uptimePct)>=95?'uptime-warn':'uptime-bad';
-        uptimeHtml='<span class="'+upCls+'">'+row.uptimePct+'%</span>';
-      }
-
-      var speedHtml='-';
-      if(row.speedDl||row.speedUl){
-        speedHtml='<span class="mono"><span class="speed-dl">\u2193 '+Number(row.speedDl).toFixed(1)+'</span> / <span class="speed-ul">\u2191 '+Number(row.speedUl).toFixed(1)+'</span> Мбит/с</span>';
-      }
 
       // Arrow notation for traffic
       var dayHtml='\u2193 '+formatBytes(row.dayIn)+' / \u2191 '+formatBytes(row.dayOut);
       var yesterdayHtml='\u2193 '+formatBytes(row.yesterdayIn)+' / \u2191 '+formatBytes(row.yesterdayOut);
-      var monthHtml='\u2193 '+formatBytes(row.monthIn)+' / \u2191 '+formatBytes(row.monthOut);
 
       // Status dot before modem name
       var statusDotCls=row.online==='yes'?'online':'offline';
@@ -994,8 +983,19 @@ function renderTable(){
       var serverIp=ci2.serverIp||'';
       var httpPortHtml=row.httpPort?'<span class="mono">'+serverIp+':'+row.httpPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.httpPort+'\',this)">📋</button>':'-';
       var socksPortHtml=row.socksPort?'<span class="mono">'+serverIp+':'+row.socksPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.socksPort+'\',this)">📋</button>':'-';
-      var loginHtml=row.proxyLogin?'<span class="mono">'+escapeHtml(row.proxyLogin)+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyLogin)+'\',this)">📋</button>':'-';
-      var passwordHtml=row.proxyPassword?'<span class="mono">'+escapeHtml(row.proxyPassword)+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyPassword)+'\',this)">📋</button>':'-';
+
+      // Merged login/password cell
+      var loginPassHtml='-';
+      if(row.proxyLogin||row.proxyPassword){
+        loginPassHtml='<div><span class="mono">'+escapeHtml(row.proxyLogin)+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyLogin)+'\',this)">📋</button></div>'+
+          '<div><span class="mono pass-hidden" onclick="this.classList.toggle(\'pass-hidden\');this.textContent=this.classList.contains(\'pass-hidden\')?\'••••••••\':\''+escapeHtml(row.proxyPassword)+'\'">••••••••</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyPassword)+'\',this)">📋</button></div>';
+      }
+
+      // Speed button for actions
+      var speedBtn='';
+      if(row.speedDl||row.speedUl){
+        speedBtn='<button class="action-btn-sm" onclick="showSpeed('+Number(row.speedDl).toFixed(1)+','+Number(row.speedUl).toFixed(1)+')" title="Скорость: \u2193'+Number(row.speedDl).toFixed(1)+' / \u2191'+Number(row.speedUl).toFixed(1)+' Мбит/с">\u26A1</button> ';
+      }
 
       html+='<tr>'+
         '<td>'+
@@ -1003,16 +1003,13 @@ function renderTable(){
           '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+
           '<br><span style="font-size:11px;color:var(--text-3);margin-left:14px">'+escapeHtml(row.operator)+'</span>'+
         '</td>'+
-        '<td>'+uptimeHtml+'</td>'+
-        '<td>'+speedHtml+'</td>'+
         '<td>'+httpPortHtml+'</td>'+
         '<td>'+socksPortHtml+'</td>'+
-        '<td>'+loginHtml+'</td>'+
-        '<td>'+passwordHtml+'</td>'+
+        '<td>'+loginPassHtml+'</td>'+
         '<td class="text-right" style="white-space:nowrap">'+dayHtml+'</td>'+
         '<td class="text-right" style="white-space:nowrap">'+yesterdayHtml+'</td>'+
-        '<td class="text-right" style="white-space:nowrap">'+monthHtml+'</td>'+
         '<td>'+
+          speedBtn+
           '<button class="action-btn-sm" onclick="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+row.serverName+'\',this)" title="Сброс IP">\u{1F504}</button> '+
           '<button class="action-btn-sm" onclick="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+row.serverName+'\',\''+escapeHtml(row.imei)+'\')" title="IP история">\u{1F4C3}</button>'+
         '</td>'+

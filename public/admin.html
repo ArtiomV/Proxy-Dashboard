@@ -602,7 +602,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     </div>
     <div class="analytics-card">
       <h3>Тарифная сетка</h3>
-      <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Цена за ГБ зависит от количества прокси. При создании нового клиента цена подставляется автоматически.</p>
+      <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Базовая тарификация за количество портов. За ГБ выставляется индивидуально по клиенту.</p>
       <div id="pricingTiersArea"></div>
       <button class="btn btn-primary btn-sm" onclick="savePricingTiers()" style="margin-top:8px">Сохранить тарифы</button>
     </div>
@@ -615,7 +615,6 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     <div class="modal-header"><h3 id="modalTitle">Детали</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
     <div class="modal-tabs" id="modalTabs">
       <div class="modal-tab active" data-tab="info" onclick="switchTab('info',this)">Инфо</div>
-      <div class="modal-tab" data-tab="rotation" onclick="switchTab('rotation',this)">IP</div>
       <div class="modal-tab" data-tab="iphistory" onclick="switchTab('iphistory',this)">IP История</div>
       <div class="modal-tab" data-tab="speed" onclick="switchTab('speed',this)">Speed</div>
       <div class="modal-tab" data-tab="hosts" onclick="switchTab('hosts',this)">Домены</div>
@@ -773,7 +772,6 @@ function dr(l,v){return'<div class="detail-row"><span class="detail-label">'+l+'
 
 function renderTabContent(tab){var body=document.getElementById('modalBody'),m=currentDetailModem;if(!m)return;
   if(tab==='info'){var port=m.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[m.server]||{};body.innerHTML='<div class="detail-grid"><div class="detail-card"><h4>Модем</h4>'+dr('Ник',m.nick)+dr('IMEI',m.rawImei)+dr('Модель',m.model)+dr('Телефон',m.phone)+dr('Аптайм',formatUptime(m.uptime))+dr('Заметки',m.notes)+'</div><div class="detail-card"><h4>Сеть</h4>'+dr('IP',m.extIp)+dr('Тип',m.netType)+dr('Оператор',m.operator)+dr('Сигнал',m.signal+'/5')+dr('APN',m.apn)+dr('Пинг',m.ping)+dr('До ротации',m.timeToRotation)+'</div><div class="detail-card"><h4>Порт</h4>'+dr('ID',port.portID)+dr('Имя',port.portName)+dr('HTTP',(ci.serverIp||'')+':'+(port.HTTP_PORT||''))+dr('SOCKS',(ci.serverIp||'')+':'+(port.SOCKS_PORT||''))+dr('Логин',port.LOGIN)+dr('Пароль',port.PASSWORD)+'</div><div class="detail-card"><h4>Трафик</h4>'+dr('Сегодня вх',formatTraffic(bw.bandwidth_bytes_day_in))+dr('Месяц вх',formatTraffic(bw.bandwidth_bytes_month_in))+dr('Месяц исх',formatTraffic(bw.bandwidth_bytes_month_out))+dr('Пред.месяц',formatTraffic(bw.bandwidth_bytes_prevmonth_in))+dr('Всего',formatTraffic(bw.bandwidth_bytes_lifetime_in))+'</div></div>'+(port.http_creds?'<div style="margin-top:10px;display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" onclick="copyText(\''+esc(port.http_creds)+'\',this)">HTTP</button>'+(port.socks5_creds?'<button class="btn btn-primary btn-sm" onclick="copyText(\''+esc(port.socks5_creds)+'\',this)">SOCKS5</button>':'')+'<button class="btn btn-sm" onclick="downloadVpn(\''+(port.portID||'').replace(/^S[12]_/,'')+'\',\''+m.server+'\')">VPN</button></div>':'')}
-  else if(tab==='rotation'){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/rotation_log?nick='+encodeURIComponent(m.nick)+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=Array.isArray(data)?data:data.log||[];if(!entries.length){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет записей</div>';return}var h='<table class="log-table"><thead><tr><th>Время</th><th>Старый IP</th><th>Новый IP</th></tr></thead><tbody>';entries.forEach(function(e){h+='<tr><td>'+(e.time||e.timestamp||'-')+'</td><td>'+(e.old_ip||e.from||'-')+'</td><td>'+(e.new_ip||e.to||'-')+'</td></tr>'});body.innerHTML=h+'</tbody></table>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'})}
   else if(tab==='speed'){var sh='<div style="margin-bottom:10px;text-align:center"><button class="btn btn-primary" onclick="runSpeedtest(\''+esc(m.nick)+'\',\''+m.server+'\')">Запустить Speedtest (~1.5 мин)</button></div>';
     // Show latest results if available
     if(m.lastSpeedDl||m.lastSpeedUl){sh+='<div class="detail-grid"><div class="detail-card"><h4>Последний замер</h4>'+dr('Download',Number(m.lastSpeedDl).toFixed(1)+' Mbps')+dr('Upload',Number(m.lastSpeedUl).toFixed(1)+' Mbps')+dr('Дата',m.lastSpeedDate?new Date(m.lastSpeedDate).toLocaleString('ru-RU'):'—')+'</div></div>'}
