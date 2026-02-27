@@ -1,0 +1,1356 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Proxies.Rent — Админ</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+/* ==================== THEME VARIABLES ==================== */
+:root,[data-theme="dark"]{
+  --bg-0:#0a0d12;--bg-1:#0f1419;--bg-2:#151b23;--bg-3:#1c2432;--bg-4:#243044;
+  --border:rgba(255,255,255,0.06);--border-hover:rgba(255,255,255,0.12);
+  --text-0:#f0f6fc;--text-1:#c9d1d9;--text-2:#7d8590;--text-3:#484f58;
+  --accent:#00d4ff;--accent-hover:#33ddff;--accent-bg:rgba(0,212,255,.12);
+  --accent-gradient:linear-gradient(135deg,#00d4ff 0%,#7c3aed 100%);
+  --success:#3fb950;--warning:#d29922;--danger:#f85149;
+  --card-bg:rgba(15,20,25,0.7);--card-border:rgba(255,255,255,0.06);
+  --card-shadow:0 4px 24px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.03);
+}
+[data-theme="light"]{
+  --bg-0:#f5f6f8;--bg-1:#ffffff;--bg-2:#f0f1f3;--bg-3:#e8eaed;--bg-4:#d8dce2;
+  --border:rgba(0,0,0,0.08);--border-hover:rgba(0,0,0,0.15);
+  --text-0:#0f1419;--text-1:#24292f;--text-2:#656d76;--text-3:#8b949e;
+  --accent:#0085ff;--accent-hover:#0070d9;--accent-bg:rgba(0,133,255,.1);
+  --accent-gradient:linear-gradient(135deg,#0085ff 0%,#7c3aed 100%);
+  --success:#1a7f37;--warning:#9a6700;--danger:#cf222e;
+  --card-bg:rgba(255,255,255,0.8);--card-border:rgba(0,0,0,0.08);
+  --card-shadow:0 4px 24px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.04);
+}
+*{margin:0;padding:0;box-sizing:border-box}
+body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg-0);color:var(--text-1);transition:background .3s,color .3s}
+
+/* Login */
+.login-overlay{position:fixed;inset:0;background:var(--bg-0);display:flex;align-items:center;justify-content:center;z-index:9999}
+.login-box{background:var(--card-bg);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:48px 40px;border-radius:16px;width:380px;border:1px solid var(--border);box-shadow:0 24px 48px rgba(0,0,0,.4)}
+.login-box h2{background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:28px;font-size:22px;text-align:center;font-weight:700}
+.login-box input{width:100%;padding:11px 14px;margin-bottom:12px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:14px;outline:none}
+.login-box input:focus{border-color:var(--accent)}
+.login-box button{width:100%;padding:11px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600}
+.login-box button:hover{background:var(--accent-hover)}
+.login-error{color:var(--danger);font-size:13px;margin-top:8px;text-align:center}
+
+/* Header - PAN-OS style */
+.header{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;justify-content:space-between}
+.header-left{display:flex;align-items:center;gap:16px}
+.header h1{font-size:16px;background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;font-weight:700;letter-spacing:-.3px}
+.header-stats{display:flex;gap:10px}
+.stat-badge{background:var(--bg-2);padding:4px 10px;border-radius:5px;font-size:11px;color:var(--text-2);border:1px solid var(--border)}
+.stat-badge span{color:var(--text-0);font-weight:600}
+.header-right{display:flex;align-items:center;gap:8px}
+
+/* Theme toggle */
+.theme-toggle{width:36px;height:20px;border-radius:10px;border:1px solid var(--border);background:var(--bg-3);cursor:pointer;position:relative;transition:all .3s}
+.theme-toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--accent);transition:transform .3s}
+[data-theme="light"] .theme-toggle::after{transform:translateX(16px)}
+
+/* Nav */
+.nav-tabs{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:0;height:40px}
+.nav-tab{padding:0 18px;cursor:pointer;font-size:13px;color:var(--text-2);border-bottom:2px solid transparent;transition:all .2s;font-weight:500;display:flex;align-items:center;height:100%}
+.nav-tab:hover{color:var(--text-1)}
+.nav-tab.active{background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;border-bottom-color:var(--accent)}
+.tab-content{display:none}.tab-content.active{display:block}
+
+/* Buttons */
+.btn{padding:6px 12px;border-radius:5px;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:500;transition:all .15s;display:inline-flex;align-items:center;gap:4px;background:var(--bg-2);color:var(--text-1)}
+.btn:hover{border-color:var(--border-hover);background:var(--bg-3)}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary:hover{background:var(--accent-hover);box-shadow:0 0 16px rgba(0,212,255,.25)}
+.btn-sm{padding:4px 8px;font-size:11px}
+.btn-danger{background:var(--danger);color:#fff;border-color:var(--danger)}
+.btn-success{background:var(--success);color:#fff;border-color:var(--success)}
+.btn-warning{background:var(--warning);color:#fff;border-color:var(--warning)}
+
+/* Toolbar */
+.toolbar{padding:8px 24px;background:var(--bg-1);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+.search-box{background:var(--bg-2);border:1px solid var(--border);border-radius:5px;padding:6px 12px;color:var(--text-0);font-size:12px;width:240px;outline:none}
+.search-box:focus{border-color:var(--accent)}
+.filter-group{display:flex;gap:3px}
+.filter-btn{padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text-2);cursor:pointer;font-size:11px;transition:all .15s}
+.filter-btn:hover{background:var(--bg-3);color:var(--text-1)}
+.filter-btn.active{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}
+
+/* Col selector */
+.col-selector{position:relative}
+.col-dropdown{position:absolute;top:100%;right:0;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:6px;z-index:100;min-width:180px;display:none;box-shadow:0 8px 24px rgba(0,0,0,.3)}
+.col-dropdown.show{display:block}
+.col-dropdown label{display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;font-size:11px;border-radius:3px;white-space:nowrap}
+.col-dropdown label:hover{background:var(--bg-3)}
+
+/* Table */
+.table-wrap{padding:0 24px 24px;overflow-x:auto}
+.country-group{margin-top:14px}
+.country-header{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg-2);border-radius:8px 8px 0 0;border:1px solid var(--border);border-bottom:none}
+.country-flag{font-size:20px}
+.country-name{font-size:13px;font-weight:600;color:var(--text-0)}
+.country-stats{font-size:11px;color:var(--text-2);margin-left:auto;display:flex;gap:12px}
+table{width:100%;border-collapse:collapse;background:var(--bg-1);border:1px solid var(--border);border-top:none}
+th{position:sticky;top:0;background:var(--bg-2);padding:7px 8px;text-align:left;font-size:11px;color:var(--text-2);font-weight:500;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+th:hover{color:var(--text-1)}
+td{padding:5px 8px;font-size:12px;border-bottom:1px solid var(--bg-3);white-space:nowrap}
+tr:hover td{background:var(--bg-2)}
+tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
+
+/* Status dots */
+.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
+.status-dot.online{background:var(--success);box-shadow:0 0 8px rgba(63,185,80,.5)}
+.status-dot.rotating{background:var(--warning);animation:pulse 1.5s infinite}
+.status-dot.offline{background:var(--danger)}
+.status-dot.rebooting{background:#9b59b6;animation:pulse 1s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+
+/* Signal bars */
+.signal-bars{display:inline-flex;align-items:flex-end;gap:2px;height:12px}
+.signal-bar{width:3px;background:var(--bg-4);border-radius:1px}
+.signal-bar.active{background:var(--success)}
+
+/* Net badge */
+.net-badge{padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600}
+.net-lte{background:rgba(0,200,81,.15);color:var(--success)}
+.net-3g{background:rgba(245,166,35,.15);color:var(--warning)}
+.net-2g{background:rgba(255,71,87,.15);color:var(--danger)}
+.net-unknown{background:var(--bg-3);color:var(--text-3)}
+
+.mono{font-family:'JetBrains Mono','SF Mono',Monaco,monospace;font-size:11px}
+.copy-btn{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:12px;padding:1px 3px;border-radius:3px}
+.copy-btn:hover{color:var(--accent)}
+.pass-mask{cursor:pointer;color:var(--text-3);letter-spacing:2px}
+
+/* Actions */
+.actions-cell{display:flex;gap:3px}
+.action-btn{width:24px;height:24px;border-radius:4px;border:none;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s}
+.action-btn:disabled{opacity:.4;cursor:not-allowed}
+.action-btn.reset{background:rgba(52,152,219,.15);color:#3498db}
+.action-btn.reboot{background:rgba(230,126,34,.15);color:#e67e22}
+.action-btn.usb{background:rgba(155,89,182,.15);color:#9b59b6}
+.action-btn.detail{background:rgba(0,120,212,.15);color:var(--accent)}
+.action-btn .spinner{display:none;width:11px;height:11px;border:2px solid transparent;border-top-color:currentColor;border-radius:50%;animation:spin .8s linear infinite}
+.action-btn.loading .btn-icon{display:none}
+.action-btn.loading .spinner{display:block}
+@keyframes spin{to{transform:rotate(360deg)}}
+
+/* Modal */
+.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:1000}
+.modal-overlay.show{display:flex}
+.modal{background:var(--bg-1);border:1px solid var(--border);border-radius:14px;width:780px;max-width:92vw;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 48px rgba(0,0,0,.5)}
+.modal-header{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}
+.modal-header h3{color:var(--text-0);font-size:14px}
+.modal-close{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:18px;padding:2px 6px}
+.modal-close:hover{color:var(--text-0)}
+.modal-body{padding:14px 18px;overflow-y:auto;flex:1}
+.modal-tabs{display:flex;gap:0;padding:0 18px;border-bottom:1px solid var(--border);overflow-x:auto}
+.modal-tab{padding:8px 12px;cursor:pointer;font-size:11px;color:var(--text-2);border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
+.modal-tab:hover{color:var(--text-1)}
+.modal-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+
+/* Detail */
+.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.detail-card{background:var(--bg-2);border-radius:6px;padding:10px;border:1px solid var(--border)}
+.detail-card h4{font-size:10px;color:var(--text-2);text-transform:uppercase;margin-bottom:5px;letter-spacing:.5px}
+.detail-row{display:flex;justify-content:space-between;padding:2px 0;font-size:11px}
+.detail-label{color:var(--text-2)}
+.detail-value{color:var(--text-0);font-family:monospace;font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+
+.log-table{width:100%;border-collapse:collapse}
+.log-table th,.log-table td{padding:5px 8px;text-align:left;font-size:11px;border-bottom:1px solid var(--border)}
+.log-table th{color:var(--text-2);font-weight:500}
+.log-table td{font-family:monospace;color:var(--text-1)}
+
+/* Toast */
+.toast-container{position:fixed;top:16px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:6px}
+.toast{padding:10px 16px;border-radius:6px;font-size:12px;animation:slideIn .3s ease;min-width:200px}
+.toast-success{background:var(--success);color:#fff}
+.toast-error{background:var(--danger);color:#fff}
+.toast-info{background:var(--accent);color:#fff}
+@keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+
+.refresh-bar{height:2px;background:var(--accent);position:fixed;top:0;left:0;z-index:9998;transition:width .3s}
+
+/* Form */
+.form-group{margin-bottom:10px}
+.form-group label{display:block;font-size:11px;color:var(--text-2);margin-bottom:3px;font-weight:500}
+.form-input{width:100%;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:5px;color:var(--text-0);font-size:12px;outline:none}
+.form-input:focus{border-color:var(--accent)}
+.form-row{display:flex;gap:8px}
+.form-row .form-group{flex:1}
+select.form-input{cursor:pointer}
+textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
+
+/* Client cards */
+.client-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:10px;padding:14px 24px}
+.client-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:10px;padding:14px;transition:all .2s}
+.client-card:hover{border-color:var(--accent);box-shadow:0 0 16px rgba(0,212,255,.1)}
+.client-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+.client-card-name{font-size:14px;font-weight:600;color:var(--text-0)}
+.client-card-actions{display:flex;gap:4px}
+.client-card-body{font-size:11px;color:var(--text-2)}
+.client-card-body .row{display:flex;justify-content:space-between;padding:2px 0}
+.client-card-body .val{color:var(--text-1);font-family:monospace;font-size:11px}
+.client-modems{margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
+.client-modem-tag{display:inline-block;padding:1px 6px;border-radius:3px;font-size:10px;background:var(--bg-3);color:var(--text-1);margin:1px}
+.billing-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;margin-left:6px}
+.billing-per-modem{background:rgba(155,89,182,.15);color:#9b59b6}
+.billing-per-gb{background:rgba(0,120,212,.15);color:var(--accent)}
+
+/* Traffic / Analytics */
+.analytics-section{padding:14px 24px}
+.analytics-card{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;box-shadow:var(--card-shadow)}
+.analytics-card h3{font-size:13px;color:var(--text-0);margin-bottom:10px;font-weight:600}
+
+/* ===== PAN-OS ACC Traffic Dashboard ===== */
+.acc-toolbar{display:flex;align-items:center;gap:8px;padding:10px 24px;background:var(--bg-1);border-bottom:1px solid var(--border)}
+.acc-period-group{display:flex;gap:0;border:1px solid var(--border);border-radius:5px;overflow:hidden}
+.acc-period-btn{padding:5px 14px;font-size:11px;cursor:pointer;background:transparent;border:none;color:var(--text-2);transition:all .15s;font-weight:500}
+.acc-period-btn:hover{background:var(--bg-3);color:var(--text-1)}
+.acc-period-btn.active{background:var(--accent);color:#fff}
+.acc-sub-tabs{display:flex;gap:0;padding:0 24px;background:var(--bg-2);border-bottom:1px solid var(--border);height:34px}
+.acc-sub-tab{padding:0 16px;cursor:pointer;font-size:12px;color:var(--text-2);border-bottom:2px solid transparent;display:flex;align-items:center;height:100%;transition:all .15s;font-weight:500;gap:4px}
+.acc-sub-tab:hover{color:var(--text-1);background:var(--bg-3)}
+.acc-sub-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.acc-sub-tab .tab-count{background:var(--bg-4);color:var(--text-2);font-size:9px;padding:1px 5px;border-radius:8px;font-weight:600}
+.acc-sub-content{display:none}.acc-sub-content.active{display:block}
+
+/* Widget row */
+.widget-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:0;padding:14px 24px}
+.widget{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;box-shadow:var(--card-shadow);position:relative;overflow:hidden}
+.widget::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent);opacity:.6}
+.widget-label{font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
+.widget-value{font-size:22px;font-weight:700;color:var(--text-0)}
+.widget-sub{font-size:10px;color:var(--text-2);margin-top:2px}
+.widget-spark{display:flex;align-items:flex-end;gap:1px;height:20px;margin-top:4px}
+.widget-spark-bar{flex:1;background:var(--accent);border-radius:1px 1px 0 0;opacity:.5;min-width:3px}
+
+/* Chart containers */
+.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 24px 14px}
+.chart-card{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:14px;box-shadow:var(--card-shadow)}
+.chart-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
+.chart-card h4{font-size:12px;color:var(--text-0);font-weight:600;margin:0}
+.chart-card canvas{max-height:260px}
+
+/* Horizontal bar chart (CSS) */
+.hbar-list{list-style:none}
+.hbar-item{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px}
+.hbar-item:hover{background:var(--bg-2);border-radius:4px;margin:0 -4px;padding:4px}
+.hbar-rank{width:16px;text-align:center;color:var(--text-3);font-size:10px;font-weight:600}
+.hbar-label{width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-1);font-weight:500}
+.hbar-bar-wrap{flex:1;height:16px;background:var(--bg-3);border-radius:3px;overflow:hidden;position:relative}
+.hbar-bar{height:100%;border-radius:3px;transition:width .5s ease;min-width:2px}
+.hbar-bar.blue{background:linear-gradient(90deg,var(--accent),#2da0f7)}
+.hbar-bar.green{background:linear-gradient(90deg,#00a651,#00d468)}
+.hbar-bar.orange{background:linear-gradient(90deg,#e67e22,#f5a623)}
+.hbar-bar.purple{background:linear-gradient(90deg,#8e44ad,#b86ddb)}
+.hbar-bar.red{background:linear-gradient(90deg,#c0392b,#e74c3c)}
+.hbar-value{width:70px;text-align:right;color:var(--text-0);font-family:monospace;font-size:10px;font-weight:600}
+
+/* Resource table */
+.res-table{width:100%;border-collapse:collapse}
+.res-table th{padding:5px 8px;text-align:left;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);font-weight:500}
+.res-table td{padding:4px 8px;font-size:11px;border-bottom:1px solid var(--bg-3)}
+.res-table tr:hover td{background:var(--bg-2)}
+.res-table .domain{color:var(--accent);font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res-table .count-bar{height:10px;border-radius:2px;background:var(--accent);opacity:.6;transition:width .3s}
+
+/* Flow diagram */
+.flow-diagram{position:relative;padding:10px 0}
+.flow-col{display:flex;flex-direction:column;gap:4px}
+.flow-node{padding:5px 10px;border-radius:4px;font-size:11px;font-weight:500;border:1px solid var(--border);background:var(--bg-2);white-space:nowrap;position:relative;display:flex;align-items:center;gap:6px}
+.flow-node .flow-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.flow-node .flow-val{color:var(--text-2);font-size:10px;margin-left:auto;font-family:monospace}
+
+/* Traffic gauge */
+.gauge-wrap{display:flex;align-items:center;gap:12px;margin:8px 0}
+.gauge{width:80px;height:80px;position:relative}
+.gauge svg{transform:rotate(-90deg)}
+.gauge-bg{fill:none;stroke:var(--bg-4);stroke-width:8}
+.gauge-fill{fill:none;stroke:var(--accent);stroke-width:8;stroke-linecap:round;transition:stroke-dashoffset .8s ease}
+.gauge-text{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;font-size:14px;font-weight:700;color:var(--text-0)}
+.gauge-label{font-size:9px;color:var(--text-2)}
+
+/* Loading state for sections */
+.acc-loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text-3);gap:8px}
+.acc-loading .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
+
+/* SMS */
+.sms-item{background:var(--bg-2);border-radius:5px;padding:8px;margin-bottom:5px;border:1px solid var(--border)}
+.sms-from{font-size:11px;color:var(--accent);font-weight:500}
+.sms-date{font-size:10px;color:var(--text-3);float:right}
+.sms-text{font-size:11px;color:var(--text-1);margin-top:3px;word-break:break-word}
+
+.last-update{font-size:10px;color:var(--text-3)}
+
+/* Stuck IP highlight */
+.ip-stuck{background:rgba(255,71,87,.12);border-radius:3px;padding:1px 4px}
+.ip-stuck-badge{font-size:9px;color:var(--danger);font-weight:600;margin-left:2px}
+.uptime-pct{font-weight:700;font-size:11px}
+.uptime-pct.good{color:var(--success)}
+.uptime-pct.warn{color:var(--warning)}
+.uptime-pct.bad{color:var(--danger)}
+.speed-cell{font-size:10px;font-family:monospace}
+.speed-dl{color:var(--success)}
+.speed-ul{color:var(--accent)}
+
+/* Payment modal */
+.payment-form{background:var(--bg-2);border-radius:6px;padding:10px;margin-top:8px;border:1px solid var(--border)}
+.payment-list{max-height:200px;overflow-y:auto;margin-top:8px}
+.payment-item{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;font-size:11px;border-bottom:1px solid var(--bg-3)}
+.payment-item:hover{background:var(--bg-2)}
+.payment-amount{font-weight:600;color:var(--success)}
+.payment-date{color:var(--text-2)}
+.balance-positive{color:var(--success);font-weight:700}
+.balance-negative{color:var(--danger);font-weight:700}
+
+@media(max-width:768px){
+.header{flex-direction:column;gap:8px;height:auto;padding:10px 16px}
+.toolbar{flex-direction:column}.search-box{width:100%}
+.detail-grid{grid-template-columns:1fr}
+.client-grid{grid-template-columns:1fr}
+.chart-row{grid-template-columns:1fr}
+.widget-grid{grid-template-columns:repeat(2,1fr)}
+}
+</style>
+</head>
+<body>
+
+<div class="login-overlay" id="loginOverlay">
+  <div class="login-box">
+    <h2>Proxies.Rent — Админ</h2>
+    <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
+    <input type="password" id="passInput" placeholder="Пароль" autocomplete="current-password">
+    <button onclick="doLogin()">Войти</button>
+    <div class="login-error" id="loginError"></div>
+  </div>
+</div>
+<div class="refresh-bar" id="refreshBar" style="width:0"></div>
+<div class="toast-container" id="toastContainer"></div>
+
+<div class="header">
+  <div class="header-left">
+    <h1>PROXIES.RENT</h1>
+    <div class="header-stats" id="headerStats"></div>
+  </div>
+  <div class="header-right">
+    <span class="last-update" id="lastUpdate"></span>
+    <button class="btn btn-sm" onclick="loadData()">Обновить</button>
+    <div class="theme-toggle" onclick="toggleTheme()" title="Переключить тему"></div>
+    <button class="btn btn-sm" style="color:var(--danger)" onclick="doLogout()">Выход</button>
+  </div>
+</div>
+
+<div class="nav-tabs">
+  <div class="nav-tab active" onclick="switchMainTab('modems',this)">Модемы</div>
+  <div class="nav-tab" onclick="switchMainTab('traffic',this)">Трафик</div>
+  <div class="nav-tab" onclick="switchMainTab('clients',this)">Клиенты</div>
+  <div class="nav-tab" onclick="switchMainTab('tools',this)">Инструменты</div>
+  <div class="nav-tab" onclick="switchMainTab('analytics',this)">Аналитика</div>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:4px;padding-right:8px">
+    <div class="col-selector" style="position:relative">
+      <button class="btn btn-sm" onclick="toggleFilterDropdown()" style="font-size:11px">⚙ Фильтры</button>
+      <div class="col-dropdown" id="filterDropdown" style="right:0;min-width:240px">
+        <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600">Сервер</div>
+        <div id="serverFilterDD"></div>
+        <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600;border-top:1px solid var(--border);margin-top:4px">Статус</div>
+        <div id="statusFilterDD"></div>
+        <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600;border-top:1px solid var(--border);margin-top:4px">Столбцы</div>
+        <div id="colDropdown"></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: MODEMS -->
+<div class="tab-content active" id="tab-modems">
+  <div class="toolbar">
+    <input type="text" class="search-box" id="searchBox" placeholder="Поиск..." oninput="renderTable()">
+  </div>
+  <div class="table-wrap" id="tableWrap"></div>
+</div>
+
+<!-- TAB: TRAFFIC (PAN-OS ACC Style) -->
+<div class="tab-content" id="tab-traffic">
+  <!-- ACC Sub-navigation -->
+  <div class="acc-sub-tabs">
+    <div class="acc-sub-tab active" onclick="switchAccTab('overview',this)">Обзор</div>
+    <div class="acc-sub-tab" onclick="switchAccTab('regions',this)">Регионы</div>
+    <div class="acc-sub-tab" onclick="switchAccTab('clients_t',this)">Клиенты</div>
+    <div class="acc-sub-tab" onclick="switchAccTab('resources',this)">Ресурсы <span class="tab-count" id="resCount">0</span></div>
+    <div class="acc-sub-tab" onclick="switchAccTab('matrix',this)">Матрица</div>
+  </div>
+  <!-- ACC Toolbar -->
+  <div class="acc-toolbar">
+    <span style="font-size:11px;color:var(--text-2);margin-right:4px">Период:</span>
+    <div class="acc-period-group">
+      <button class="acc-period-btn" onclick="setAccPeriod('day',this)">Сегодня</button>
+      <button class="acc-period-btn active" onclick="setAccPeriod('month',this)">Месяц</button>
+      <button class="acc-period-btn" onclick="setAccPeriod('prevmonth',this)">Пред. мес</button>
+      <button class="acc-period-btn" onclick="setAccPeriod('lifetime',this)">Всё время</button>
+    </div>
+    <button class="btn btn-sm btn-primary" onclick="loadTopHosts(true)" style="margin-left:auto" id="btnLoadRes">⟳ Обновить ресурсы</button>
+  </div>
+
+  <!-- OVERVIEW -->
+  <div class="acc-sub-content active" id="acc-overview">
+    <div class="widget-grid" id="trafficWidgets"></div>
+    <div class="chart-row">
+      <div class="chart-card">
+        <div class="chart-card-header"><h4>Трафик по регионам</h4></div>
+        <div id="regionBars"></div>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-header"><h4>Распределение по клиентам</h4></div>
+        <canvas id="chartClientTraffic" style="max-height:240px"></canvas>
+      </div>
+    </div>
+    <div class="chart-row">
+      <div class="chart-card">
+        <div class="chart-card-header"><h4>Входящий vs Исходящий</h4></div>
+        <canvas id="chartInOut" style="max-height:240px"></canvas>
+      </div>
+      <div class="chart-card">
+        <div class="chart-card-header"><h4>Топ-10 модемов по трафику</h4></div>
+        <canvas id="chartModemTraffic" style="max-height:240px"></canvas>
+      </div>
+    </div>
+  </div>
+
+  <!-- REGIONS -->
+  <div class="acc-sub-content" id="acc-regions">
+    <div style="padding:14px 24px">
+      <div class="chart-row" style="padding:0;margin-bottom:14px">
+        <div class="chart-card">
+          <div class="chart-card-header"><h4>Трафик по серверам / странам</h4></div>
+          <canvas id="chartServerTraffic" style="max-height:260px"></canvas>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header"><h4>Детали по регионам</h4></div>
+          <div id="regionDetailBars"></div>
+        </div>
+      </div>
+      <div class="analytics-card">
+        <h3>Модемы по регионам</h3>
+        <table class="log-table" id="regionModemTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- CLIENTS TRAFFIC -->
+  <div class="acc-sub-content" id="acc-clients_t">
+    <div style="padding:14px 24px">
+      <div class="chart-row" style="padding:0;margin-bottom:14px">
+        <div class="chart-card">
+          <div class="chart-card-header"><h4>Трафик по клиентам</h4></div>
+          <div id="clientTrafficBars"></div>
+        </div>
+        <div class="chart-card">
+          <div class="chart-card-header"><h4>Доля клиентов</h4></div>
+          <canvas id="chartClientPie" style="max-height:260px"></canvas>
+        </div>
+      </div>
+      <div class="analytics-card">
+        <h3>Детальная таблица по клиентам</h3>
+        <table class="log-table" id="clientTrafficTable"></table>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOP RESOURCES (domains) -->
+  <div class="acc-sub-content" id="acc-resources">
+    <div style="padding:14px 24px">
+      <div id="resourcesContent">
+        <div class="acc-loading" id="resLoading" style="display:none"><div class="spinner"></div> Загрузка топ-хостов...</div>
+        <div style="margin-bottom:10px"><select class="form-input" id="resClientFilter" onchange="renderTopResources()" style="width:220px;display:inline-block"><option value="">Все клиенты</option></select></div>
+        <div class="chart-row" style="padding:0;margin-bottom:14px">
+          <div class="chart-card" style="grid-column:span 2">
+            <div class="chart-card-header"><h4>Топ ресурсов</h4><span style="font-size:10px;color:var(--text-3)" id="resLastLoad">Нажмите «Загрузить топ ресурсов»</span></div>
+            <div id="topResourcesList"></div>
+          </div>
+        </div>
+        <div class="chart-row" style="padding:0">
+          <div class="chart-card">
+            <div class="chart-card-header"><h4>Ресурсы по категориям</h4></div>
+            <canvas id="chartResCat" style="max-height:260px"></canvas>
+          </div>
+          <div class="chart-card">
+            <div class="chart-card-header"><h4>Топ-15 доменов</h4></div>
+            <canvas id="chartResBar" style="max-height:260px"></canvas>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODEM MATRIX -->
+  <div class="acc-sub-content" id="acc-matrix">
+    <div style="padding:14px 24px">
+      <div class="analytics-card">
+        <h3>Матрица трафика по модемам</h3>
+        <div style="overflow-x:auto"><table class="log-table" id="trafficMatrix"></table></div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: CLIENTS -->
+<div class="tab-content" id="tab-clients">
+  <div class="toolbar">
+    <button class="btn btn-primary" onclick="showClientForm()">+ Новый клиент</button>
+    <input type="text" class="search-box" id="clientSearch" placeholder="Поиск клиентов..." oninput="renderClients()">
+  </div>
+  <div class="client-grid" id="clientGrid"></div>
+</div>
+
+<!-- TAB: TOOLS -->
+<div class="tab-content" id="tab-tools">
+  <div class="analytics-section">
+    <div class="analytics-card">
+      <h3>Прокси чекер</h3>
+      <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Формат: ip:port:login:pass (по одному на строку, макс 50)</p>
+      <textarea class="form-input mono" id="proxyCheckInput" rows="6" placeholder="1.2.3.4:8080:user:pass&#10;5.6.7.8:1080:user2:pass2" style="font-family:'JetBrains Mono',monospace"></textarea>
+      <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
+        <button class="btn btn-primary" onclick="checkProxies()" id="btnCheckProxies">Проверить</button>
+        <span id="proxyCheckStatus" style="font-size:11px;color:var(--text-2)"></span>
+      </div>
+      <div id="proxyCheckResults" style="margin-top:10px"></div>
+    </div>
+    <div class="analytics-card">
+      <h3>Конвертер форматов</h3>
+      <div class="form-row" style="margin-bottom:8px">
+        <div class="form-group"><label>Из формата</label>
+          <select class="form-input" id="convertFrom">
+            <option value="ipportloginpass">ip:port:login:pass</option>
+            <option value="ipportatloginpass">ip:port@login:pass</option>
+            <option value="loginpassatipport">login:pass@ip:port</option>
+            <option value="loginpassipport">login:pass:ip:port</option>
+            <option value="httpurl">http://login:pass@ip:port</option>
+            <option value="socks5url">socks5://login:pass@ip:port</option>
+            <option value="ipport">ip:port</option>
+          </select>
+        </div>
+        <div class="form-group"><label>В формат</label>
+          <select class="form-input" id="convertTo">
+            <option value="ipportloginpass">ip:port:login:pass</option>
+            <option value="ipportatloginpass">ip:port@login:pass</option>
+            <option value="loginpassatipport">login:pass@ip:port</option>
+            <option value="loginpassipport">login:pass:ip:port</option>
+            <option value="httpurl">http://login:pass@ip:port</option>
+            <option value="socks5url">socks5://login:pass@ip:port</option>
+            <option value="ipport">ip:port</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Ввод</label><textarea class="form-input mono" id="convertInput" rows="5" style="font-family:'JetBrains Mono',monospace"></textarea></div>
+        <div class="form-group"><label>Результат</label><textarea class="form-input mono" id="convertOutput" rows="5" readonly style="font-family:'JetBrains Mono',monospace"></textarea></div>
+      </div>
+      <div style="margin-top:6px;display:flex;gap:6px">
+        <button class="btn btn-primary" onclick="convertFormat()">Конвертировать</button>
+        <button class="btn" onclick="copyText(document.getElementById('convertOutput').value,this)">Копировать результат</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- TAB: ANALYTICS -->
+<div class="tab-content" id="tab-analytics">
+  <div class="analytics-section">
+    <div class="analytics-card">
+      <h3>Уникальность IP (14 дней)</h3>
+      <div class="form-row" style="margin-bottom:10px">
+        <div class="form-group"><select class="form-input" id="uniqueIpsServer"><option value="">Сервер</option></select></div>
+        <div class="form-group"><button class="btn btn-primary" onclick="loadUniqueIps()" style="margin-top:16px">Загрузить</button></div>
+      </div>
+      <div id="uniqueIpsResult"></div>
+    </div>
+    <div class="analytics-card">
+      <h3>Трафик за период</h3>
+      <div class="form-row" style="margin-bottom:10px">
+        <div class="form-group"><label>Сервер</label><select class="form-input" id="bwPeriodServer"></select></div>
+        <div class="form-group"><label>Port ID</label><input class="form-input" id="bwPeriodPort" placeholder="portXXX"></div>
+        <div class="form-group"><label>Начало</label><input class="form-input" type="date" id="bwPeriodStart"></div>
+        <div class="form-group"><label>Конец</label><input class="form-input" type="date" id="bwPeriodEnd"></div>
+      </div>
+      <button class="btn btn-primary" onclick="loadBwPeriod()">Загрузить</button>
+      <div id="bwPeriodResult" style="margin-top:10px"></div>
+    </div>
+    <div class="analytics-card">
+      <h3>Бекап</h3>
+      <div class="form-row">
+        <div class="form-group"><select class="form-input" id="backupServer"><option value="">Сервер</option></select></div>
+        <div class="form-group"><button class="btn btn-success" onclick="downloadBackup()" style="margin-top:16px">Скачать бекап</button></div>
+      </div>
+    </div>
+    <div class="analytics-card">
+      <h3>Настройки спидтестов</h3>
+      <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Время запуска спидтестов (UTC). Через запятую, формат ЧЧ:ММ</p>
+      <div class="form-row">
+        <div class="form-group"><input class="form-input" id="speedtestTimesInput" placeholder="02:00, 14:00"></div>
+        <div class="form-group"><button class="btn btn-primary" onclick="saveSettings()" style="margin-top:0">Сохранить</button></div>
+      </div>
+      <div id="settingsStatus" style="font-size:11px;color:var(--text-2);margin-top:6px"></div>
+    </div>
+  </div>
+</div>
+
+<!-- DETAIL MODAL -->
+<div class="modal-overlay" id="detailModal">
+  <div class="modal">
+    <div class="modal-header"><h3 id="modalTitle">Детали</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-tabs" id="modalTabs">
+      <div class="modal-tab active" data-tab="info" onclick="switchTab('info',this)">Инфо</div>
+      <div class="modal-tab" data-tab="rotation" onclick="switchTab('rotation',this)">IP</div>
+      <div class="modal-tab" data-tab="iphistory" onclick="switchTab('iphistory',this)">IP История</div>
+      <div class="modal-tab" data-tab="speed" onclick="switchTab('speed',this)">Speed</div>
+      <div class="modal-tab" data-tab="hosts" onclick="switchTab('hosts',this)">Домены</div>
+      <div class="modal-tab" data-tab="sms" onclick="switchTab('sms',this)">SMS</div>
+      <div class="modal-tab" data-tab="ussd" onclick="switchTab('ussd',this)">USSD</div>
+      <div class="modal-tab" data-tab="ports" onclick="switchTab('ports',this)">Порты</div>
+      <div class="modal-tab" data-tab="settings" onclick="switchTab('settings',this)">Настройки</div>
+    </div>
+    <div class="modal-body" id="modalBody"></div>
+  </div>
+</div>
+
+<!-- CLIENT FORM MODAL -->
+<div class="modal-overlay" id="clientModal">
+  <div class="modal" style="width:520px">
+    <div class="modal-header"><h3 id="clientModalTitle">Новый клиент</h3><button class="modal-close" onclick="closeClientModal()">&times;</button></div>
+    <div class="modal-body">
+      <input type="hidden" id="clientFormId">
+      <div class="form-row"><div class="form-group"><label>Имя *</label><input class="form-input" id="cfName"></div><div class="form-group"><label>portName *</label><input class="form-input" id="cfPortName"></div></div>
+      <div class="form-row"><div class="form-group"><label>Логин *</label><input class="form-input" id="cfLogin"></div><div class="form-group"><label>Пароль *</label><input class="form-input" id="cfPassword"></div></div>
+      <div class="form-group"><label>Контакт</label><input class="form-input" id="cfContact"></div>
+      <div class="form-row">
+        <div class="form-group"><label>Тарификация</label><select class="form-input" id="cfBillingType"><option value="per_gb">За ГБ</option><option value="per_modem">За модем</option></select></div>
+        <div class="form-group"><label>Цена (руб)</label><input class="form-input" type="number" id="cfPrice" value="0"></div>
+      </div>
+      <div class="form-group"><label>Заметки</label><textarea class="form-input" id="cfNotes"></textarea></div>
+      <div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-primary" onclick="saveClient()">Сохранить</button><button class="btn" onclick="closeClientModal()">Отмена</button></div>
+    </div>
+  </div>
+</div>
+
+<script>
+var API='',authToken=localStorage.getItem('admin_token')||'',currentData=null;
+var sortCol='nick',sortDir='asc',activeServerFilter='all',activeStatusFilter='all';
+var autoRefreshTimer=null,charts={};
+
+var COLUMNS=[
+  {id:'status',label:'',visible:true,sortable:false,width:'30px'},
+  {id:'nick',label:'Модем',visible:true,sortable:true},
+  {id:'server',label:'Сервер',visible:true,sortable:true},
+  {id:'portName',label:'Клиент',visible:true,sortable:true},
+  {id:'serverIp',label:'IP серв.',visible:true,sortable:false},
+  {id:'httpPort',label:'HTTP',visible:true,sortable:true},
+  {id:'socksPort',label:'SOCKS',visible:true,sortable:true},
+  {id:'login',label:'Логин',visible:true,sortable:false},
+  {id:'password',label:'Пароль',visible:true,sortable:false},
+  {id:'extIp',label:'Внеш.IP',visible:true,sortable:false},
+  {id:'netType',label:'Сеть',visible:true,sortable:true},
+  {id:'signal',label:'Сигнал',visible:true,sortable:true},
+  {id:'operator',label:'Оператор',visible:true,sortable:true},
+  {id:'phone',label:'Телефон',visible:false,sortable:false},
+  {id:'trafficDay',label:'Сегодня',visible:true,sortable:true},
+  {id:'trafficMon',label:'Месяц',visible:true,sortable:true},
+  {id:'speedDl',label:'DL',visible:true,sortable:true},
+  {id:'speedUl',label:'UL',visible:true,sortable:true},
+  {id:'uptime',label:'Аптайм',visible:true,sortable:true},
+  {id:'actions',label:'',visible:true,sortable:false,width:'110px'}
+];
+var COUNTRIES={S1:{flag:'\u{1F1F2}\u{1F1E9}',name:'Молдова',serverIp:'89.149.100.92'},S2:{flag:'\u{1F1F7}\u{1F1F4}',name:'Румыния',serverIp:'31.5.194.89'}};
+var COUNTRY_ORDER=['S1','S2'];
+
+// ========== THEME ==========
+function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=t;localStorage.setItem('admin_theme',t);updateChartsTheme()}
+(function(){var t=localStorage.getItem('admin_theme');if(t)document.documentElement.dataset.theme=t})();
+
+function getChartColors(){var d=document.documentElement.dataset.theme==='dark';return{grid:d?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)',text:d?'#8892a6':'#6b7280',bg:d?'#131720':'#ffffff'}}
+
+// ========== AUTH ==========
+function doLogin(){var l=document.getElementById('loginInput').value.trim(),p=document.getElementById('passInput').value;if(!l||!p)return;fetch(API+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login:l,password:p})}).then(function(r){return r.json()}).then(function(d){if(d.error){document.getElementById('loginError').textContent=d.error;return}if(!d.isAdmin){document.getElementById('loginError').textContent='Нет прав администратора';return}authToken=d.token;localStorage.setItem('admin_token',authToken);document.getElementById('loginOverlay').style.display='none';loadData();startAutoRefresh()}).catch(function(){document.getElementById('loginError').textContent='Ошибка подключения'})}
+function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('admin_token');location.reload()}
+
+// ========== NAV ==========
+function switchMainTab(name,el){document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}}
+
+// ========== DATA ==========
+function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU')}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
+
+function processData(){if(!currentData)return;var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(m.net_details?m.net_details.CELLOP:'')||'',apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
+  var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
+  var bw=currentData.bandwidth||{};for(var mi in mm){var mod=mm[mi];for(var p=0;p<mod.ports.length;p++){var pt=mod.ports[p];if(bw[pt.portID])pt._bw=bw[pt.portID]}}
+  // IP tracking & uptime tracking
+  var ipt=currentData.ipTracking||{};
+  var upt=currentData.uptimeTracking||{};
+  var spt=currentData.speedtestLatest||{};
+  var now=Date.now();
+  for(var imei in mm){
+    var m=mm[imei];
+    // Stuck IP detection
+    if(ipt[imei]){
+      var sinceMs=now-ipt[imei].since;
+      m.ipStuck=sinceMs>24*60*60*1000;
+      m.ipSinceHours=Math.floor(sinceMs/3600000);
+    }
+    // Uptime percentage
+    if(upt[imei]&&upt[imei].total_checks>0){
+      m.uptimePct=(upt[imei].online_checks/upt[imei].total_checks*100).toFixed(1);
+    }
+    // Latest speedtest
+    if(spt[imei]){
+      m.lastSpeedDl=spt[imei].download||0;
+      m.lastSpeedUl=spt[imei].upload||0;
+      m.lastSpeedDate=spt[imei].date||'';
+    }
+  }
+  currentData._modemMap=mm;
+}
+
+// ========== MODEM TABLE ==========
+function renderServerFilter(){var sv=currentData.servers||[];var h='<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;font-size:11px;border-radius:3px"><input type="radio" name="srvF" '+(activeServerFilter==='all'?'checked':'')+' onchange="setServerFilter(\'all\')"> Все серверы</label>';for(var i=0;i<sv.length;i++){var s=sv[i],c=COUNTRIES[s.name]||{};h+='<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;font-size:11px;border-radius:3px"><input type="radio" name="srvF" '+(activeServerFilter===s.name?'checked':'')+' onchange="setServerFilter(\''+s.name+'\')"> '+(c.flag||'')+' '+(c.name||s.name)+'</label>'}document.getElementById('serverFilterDD').innerHTML=h;
+  // Status filter
+  var sh='';['all','online','offline'].forEach(function(v){var lbl=v==='all'?'Все статусы':v==='online'?'Online':'Offline';sh+='<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;font-size:11px;border-radius:3px"><input type="radio" name="stF" '+(activeStatusFilter===v?'checked':'')+' onchange="setStatusFilter(\''+v+'\')"> '+lbl+'</label>'});document.getElementById('statusFilterDD').innerHTML=sh}
+function setServerFilter(v){activeServerFilter=v;renderTable()}
+function setStatusFilter(v){activeStatusFilter=v;renderTable()}
+function toggleFilterDropdown(){document.getElementById('filterDropdown').classList.toggle('show')}
+document.addEventListener('click',function(e){if(!e.target.closest('.col-selector'))document.querySelectorAll('.col-dropdown').forEach(function(d){d.classList.remove('show')})})
+function renderColSelector(){var h='';for(var i=0;i<COLUMNS.length;i++){var c=COLUMNS[i];if(c.id==='status'||c.id==='actions')continue;h+='<label><input type="checkbox" '+(c.visible?'checked':'')+' onchange="toggleCol(\''+c.id+'\',this.checked)">'+c.label+'</label>'}document.getElementById('colDropdown').innerHTML=h}
+function toggleCol(id,v){for(var i=0;i<COLUMNS.length;i++){if(COLUMNS[i].id===id){COLUMNS[i].visible=v;break}}var s={};COLUMNS.forEach(function(c){s[c.id]=c.visible});localStorage.setItem('admin_col_state',JSON.stringify(s));renderTable()}
+function toggleColDropdown(){document.getElementById('filterDropdown').classList.toggle('show')}
+function getModemStatus(m){if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';if(m.connectionStatus&&m.connectionStatus.includes('connected'))return'online';if(m.state==='added'&&m.extIp&&m.extIp!=='IP_RESET')return'online';return'offline'}
+function formatUptime(s){if(!s||s<=0)return'-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),mm=Math.floor(s%3600/60);if(d>0)return d+'д '+h+'ч';if(h>0)return h+'ч '+mm+'м';return mm+'м'}
+function formatTraffic(v){if(!v||v===0||v==='0')return'-';return String(v)}
+function renderSignalBars(s){var h='<div class="signal-bars">';for(var i=1;i<=5;i++){h+='<div class="signal-bar'+(i<=s?' active':'')+'" style="height:'+(2+i*2)+'px"></div>'}return h+'</div>'}
+function renderNetBadge(t){if(!t)return'<span class="net-badge net-unknown">?</span>';var c='net-unknown',l=t;if(/lte|4g/i.test(t)){c='net-lte';l='LTE'}else if(/3g|hspa|umts/i.test(t)){c='net-3g';l='3G'}else if(/2g|edge|gprs/i.test(t)){c='net-2g';l='2G'}return'<span class="net-badge '+c+'">'+l+'</span>'}
+function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
+function parseTraffic(v){if(!v||v===0)return 0;var s=String(v),m=s.match(/([\d.]+)\s*(KB|MB|GB|TB)/i);if(!m)return 0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1024:u==='MB'?1048576:u==='GB'?1073741824:u==='TB'?1099511627776:1)}
+function bytesToGb(b){return b/1073741824}
+
+function renderTable(){
+  if(!currentData||!currentData._modemMap)return;var map=currentData._modemMap,search=(document.getElementById('searchBox').value||'').toLowerCase(),cols=COLUMNS.filter(function(c){return c.visible}),wrap=document.getElementById('tableWrap');
+  var groups={};COUNTRY_ORDER.forEach(function(s){groups[s]=[]});
+  for(var imei in map){var modem=map[imei],srv=modem.server;if(activeServerFilter!=='all'&&srv!==activeServerFilter)continue;var status=getModemStatus(modem);if(activeStatusFilter==='online'&&status!=='online'&&status!=='rotating')continue;if(activeStatusFilter==='offline'&&status!=='offline')continue;if(search){var ss=[modem.nick,modem.extIp,modem.operator,modem.phone].join(' ').toLowerCase();modem.ports.forEach(function(p){ss+=' '+(p.portName||'')+' '+(p.LOGIN||'')});if(ss.indexOf(search)===-1)continue}if(!groups[srv])groups[srv]=[];groups[srv].push(modem)}
+  var sortFn=function(a,b){var va=getSortValue(a,sortCol),vb=getSortValue(b,sortCol);var cmp=typeof va==='number'&&typeof vb==='number'?va-vb:String(va).localeCompare(String(vb));return sortDir==='asc'?cmp:-cmp};for(var g in groups)groups[g].sort(sortFn);
+  var html='';COUNTRY_ORDER.forEach(function(srv){var modems=groups[srv];if(!modems||!modems.length)return;var country=COUNTRIES[srv]||{};var online=0;modems.forEach(function(m){var s=getModemStatus(m);if(s==='online'||s==='rotating')online++});
+    html+='<div class="country-group"><div class="country-header"><span class="country-flag">'+country.flag+'</span><span class="country-name">'+country.name+'</span><div class="country-stats"><span>'+modems.length+' модемов</span><span>Online: '+online+'/'+modems.length+'</span></div></div><table><thead><tr>';
+    cols.forEach(function(col){var w=col.width?' style="width:'+col.width+'"':'';var ar=col.sortable&&sortCol===col.id?' '+(sortDir==='asc'?'\u25B2':'\u25BC'):'';var cl=col.sortable?' onclick="setSort(\''+col.id+'\')"':'';html+='<th'+w+cl+'>'+col.label+ar+'</th>'});
+    html+='</tr></thead><tbody>';modems.forEach(function(modem){var status=getModemStatus(modem),port=modem.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[modem.server]||{};var h='<tr>';cols.forEach(function(col){h+='<td>';switch(col.id){case'status':h+='<span class="status-dot '+status+'"></span>';break;case'nick':h+='<strong>'+esc(modem.nick)+'</strong>';break;case'server':h+='<span style="font-size:10px">'+(ci.flag||'')+' '+modem.server+'</span>';break;case'portName':var un=modem.ports.map(function(p){return p.portName}).filter(function(v,i,a){return v&&a.indexOf(v)===i});h+=un.map(function(n){return'<span class="port-badge" style="background:var(--bg-3);color:var(--text-1);padding:1px 6px;border-radius:3px;font-size:10px">'+esc(n)+'</span>'}).join(' ')||'-';break;case'serverIp':h+='<span class="mono">'+(ci.serverIp||'')+'</span>';break;case'httpPort':h+=port.HTTP_PORT?'<span class="mono">'+port.HTTP_PORT+'</span>':'-';break;case'socksPort':h+=port.SOCKS_PORT?'<span class="mono">'+port.SOCKS_PORT+'</span>':'-';break;case'login':h+=port.LOGIN?'<span class="mono">'+esc(port.LOGIN)+'</span> <button class="copy-btn" onclick="copyText(\''+esc(port.LOGIN)+'\',this)">\u{1F4CB}</button>':'-';break;case'password':h+=port.PASSWORD?'<span class="pass-mask" onclick="togglePass(this)" data-pass="'+esc(port.PASSWORD)+'">\u2022\u2022\u2022\u2022</span> <button class="copy-btn" onclick="copyText(\''+esc(port.PASSWORD)+'\',this)">\u{1F4CB}</button>':'-';break;case'extIp':if(modem.extIp==='IP_RESET'||modem.isRotating){h+='<span class="mono" style="color:var(--warning)">Ротация</span>'}else if(modem.extIp){h+='<span class="mono'+(modem.ipStuck?' ip-stuck':'')+'">'+modem.extIp+(modem.ipStuck?'<span class="ip-stuck-badge" title="IP не менялся '+modem.ipSinceHours+'ч"> \u26A0'+modem.ipSinceHours+'ч</span>':'')+'</span>'}else{h+='-'}break;case'netType':h+=renderNetBadge(modem.netType);break;case'signal':h+=renderSignalBars(modem.signal);break;case'operator':h+=esc(modem.operator)||'-';break;case'phone':h+=modem.phone?'<span class="mono">'+esc(modem.phone)+'</span>':'-';break;case'trafficDay':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_day_in)+'</span>';break;case'trafficMon':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_month_in)+'</span>';break;case'speedDl':h+=modem.lastSpeedDl?'<span class="speed-cell speed-dl">\u2193'+Number(modem.lastSpeedDl).toFixed(1)+'</span>':'-';break;case'speedUl':h+=modem.lastSpeedUl?'<span class="speed-cell speed-ul">\u2191'+Number(modem.lastSpeedUl).toFixed(1)+'</span>':'-';break;case'uptime':if(modem.uptimePct!==undefined){var upCls=parseFloat(modem.uptimePct)>=99?'good':parseFloat(modem.uptimePct)>=95?'warn':'bad';h+='<span class="uptime-pct '+upCls+'">'+modem.uptimePct+'%</span><br><span style="font-size:9px;color:var(--text-3)">'+formatUptime(modem.uptime)+'</span>'}else{h+='<span style="font-size:10px;color:var(--text-2)">'+formatUptime(modem.uptime)+'</span>'}break;case'actions':var d='data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'"';h+='<div class="actions-cell"><button class="action-btn reset" '+d+' onclick="resetIp(this)" title="Сброс IP"><span class="btn-icon">\u{1F504}</span><div class="spinner"></div></button><button class="action-btn reboot" '+d+' onclick="rebootModem(this)" title="Ребут"><span class="btn-icon">\u26A1</span><div class="spinner"></div></button><button class="action-btn usb" '+d+' onclick="usbReset(this)" title="USB"><span class="btn-icon">\u{1F50C}</span><div class="spinner"></div></button><button class="action-btn detail" '+d+' onclick="showDetails(this)" title="Детали"><span class="btn-icon">\u{1F4CA}</span><div class="spinner"></div></button></div>';break}h+='</td>'});html+=h+'</tr>'});html+='</tbody></table></div>'});
+  wrap.innerHTML=html;
+}
+function setSort(c){if(sortCol===c)sortDir=sortDir==='asc'?'desc':'asc';else{sortCol=c;sortDir='asc'}renderTable()}
+function getSortValue(m,col){var p=m.ports[0]||{},bw=p._bw||{};switch(col){case'nick':return m.nick;case'server':return m.server;case'portName':return m.ports.map(function(p){return p.portName||''}).join(',');case'httpPort':return parseInt(p.HTTP_PORT)||0;case'socksPort':return parseInt(p.SOCKS_PORT)||0;case'netType':return m.netType;case'signal':return m.signal;case'operator':return m.operator;case'trafficDay':return parseTraffic(bw.bandwidth_bytes_day_in);case'trafficMon':return parseTraffic(bw.bandwidth_bytes_month_in);case'speedDl':return m.lastSpeedDl||0;case'speedUl':return m.lastSpeedUl||0;case'uptime':return parseFloat(m.uptimePct)||m.uptime||0;default:return''}}
+
+// ========== ACTIONS ==========
+function modemAction(btn,url,body,msg,delay){btn.classList.add('loading');btn.disabled=true;fetch(API+url,{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(d){btn.classList.remove('loading');btn.disabled=false;if(d.ok)showToast(msg,'success');else showToast(d.error||'Ошибка','error');setTimeout(loadData,delay||3000)}).catch(function(){btn.classList.remove('loading');btn.disabled=false;showToast('Ошибка сети','error')})}
+function resetIp(b){if(!confirm('Сбросить IP '+b.dataset.nick+'?'))return;modemAction(b,'/api/admin/reset_ip',{imei:b.dataset.imei,serverName:b.dataset.server},'IP сброшен',3000)}
+function rebootModem(b){if(!confirm('Ребут '+b.dataset.nick+'?'))return;modemAction(b,'/api/admin/reboot',{imei:b.dataset.imei,serverName:b.dataset.server},'Ребут запущен',5000)}
+function usbReset(b){if(!confirm('USB ресет '+b.dataset.nick+'?'))return;modemAction(b,'/api/admin/usb_reset',{nick:b.dataset.nick,serverName:b.dataset.server},'USB ресет',10000)}
+
+// ========== DETAIL MODAL ==========
+var currentDetailModem=null;
+function showDetails(btn){var nick=btn.dataset.nick,server=btn.dataset.server,map=currentData._modemMap;for(var imei in map){var m=map[imei];if(m.nick===nick&&m.server===server){currentDetailModem=m;break}}if(!currentDetailModem)return;document.getElementById('modalTitle').textContent=nick+' ('+server+')';switchTab('info',document.querySelector('.modal-tab[data-tab="info"]'));document.getElementById('detailModal').classList.add('show')}
+function closeModal(){document.getElementById('detailModal').classList.remove('show');currentDetailModem=null}
+document.getElementById('detailModal').addEventListener('click',function(e){if(e.target===this)closeModal()});
+document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeModal();closeClientModal()}});
+function switchTab(tab,el){document.querySelectorAll('#modalTabs .modal-tab').forEach(function(t){t.classList.remove('active')});if(el)el.classList.add('active');renderTabContent(tab)}
+function dr(l,v){return'<div class="detail-row"><span class="detail-label">'+l+'</span><span class="detail-value">'+esc(String(v||'-'))+'</span></div>'}
+
+function renderTabContent(tab){var body=document.getElementById('modalBody'),m=currentDetailModem;if(!m)return;
+  if(tab==='info'){var port=m.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[m.server]||{};body.innerHTML='<div class="detail-grid"><div class="detail-card"><h4>Модем</h4>'+dr('Ник',m.nick)+dr('IMEI',m.rawImei)+dr('Модель',m.model)+dr('Телефон',m.phone)+dr('Аптайм',formatUptime(m.uptime))+dr('Заметки',m.notes)+'</div><div class="detail-card"><h4>Сеть</h4>'+dr('IP',m.extIp)+dr('Тип',m.netType)+dr('Оператор',m.operator)+dr('Сигнал',m.signal+'/5')+dr('APN',m.apn)+dr('Пинг',m.ping)+dr('До ротации',m.timeToRotation)+'</div><div class="detail-card"><h4>Порт</h4>'+dr('ID',port.portID)+dr('Имя',port.portName)+dr('HTTP',(ci.serverIp||'')+':'+(port.HTTP_PORT||''))+dr('SOCKS',(ci.serverIp||'')+':'+(port.SOCKS_PORT||''))+dr('Логин',port.LOGIN)+dr('Пароль',port.PASSWORD)+'</div><div class="detail-card"><h4>Трафик</h4>'+dr('Сегодня вх',formatTraffic(bw.bandwidth_bytes_day_in))+dr('Месяц вх',formatTraffic(bw.bandwidth_bytes_month_in))+dr('Месяц исх',formatTraffic(bw.bandwidth_bytes_month_out))+dr('Пред.месяц',formatTraffic(bw.bandwidth_bytes_prevmonth_in))+dr('Всего',formatTraffic(bw.bandwidth_bytes_lifetime_in))+'</div></div>'+(port.http_creds?'<div style="margin-top:10px;display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" onclick="copyText(\''+esc(port.http_creds)+'\',this)">HTTP</button>'+(port.socks5_creds?'<button class="btn btn-primary btn-sm" onclick="copyText(\''+esc(port.socks5_creds)+'\',this)">SOCKS5</button>':'')+'<button class="btn btn-sm" onclick="downloadVpn(\''+(port.portID||'').replace(/^S[12]_/,'')+'\',\''+m.server+'\')">VPN</button></div>':'')}
+  else if(tab==='rotation'){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/rotation_log?nick='+encodeURIComponent(m.nick)+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=Array.isArray(data)?data:data.log||[];if(!entries.length){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет записей</div>';return}var h='<table class="log-table"><thead><tr><th>Время</th><th>Старый IP</th><th>Новый IP</th></tr></thead><tbody>';entries.forEach(function(e){h+='<tr><td>'+(e.time||e.timestamp||'-')+'</td><td>'+(e.old_ip||e.from||'-')+'</td><td>'+(e.new_ip||e.to||'-')+'</td></tr>'});body.innerHTML=h+'</tbody></table>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'})}
+  else if(tab==='speed'){var sh='<div style="margin-bottom:10px;text-align:center"><button class="btn btn-primary" onclick="runSpeedtest(\''+esc(m.nick)+'\',\''+m.server+'\')">Запустить Speedtest (~1.5 мин)</button></div>';
+    // Show latest results if available
+    if(m.lastSpeedDl||m.lastSpeedUl){sh+='<div class="detail-grid"><div class="detail-card"><h4>Последний замер</h4>'+dr('Download',Number(m.lastSpeedDl).toFixed(1)+' Mbps')+dr('Upload',Number(m.lastSpeedUl).toFixed(1)+' Mbps')+dr('Дата',m.lastSpeedDate?new Date(m.lastSpeedDate).toLocaleString('ru-RU'):'—')+'</div></div>'}
+    // Show history
+    sh+='<div style="margin-top:10px"><button class="btn btn-sm" onclick="loadSpeedHistory(\''+m.server+'_'+m.rawImei+'\')">Показать историю</button></div><div id="speedHistoryArea"></div>';
+    body.innerHTML=sh}
+  else if(tab==='hosts'){var port=m.ports[0];if(!port){body.innerHTML='-';return}body.innerHTML='<div style="color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/top_hosts?portId='+encodeURIComponent((port.portID||'').replace(/^S[12]_/,''))+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=[];if(Array.isArray(data))entries=data;else{for(var k in data){if(typeof data[k]!=='object')entries.push({host:k,count:data[k]})}}if(!entries.length){body.innerHTML='Нет данных';return}var h='<table class="log-table"><thead><tr><th>Домен</th><th>Запросов</th></tr></thead><tbody>';entries.forEach(function(e){h+='<tr><td>'+esc(e.host||'')+'</td><td>'+(e.count||'-')+'</td></tr>'});body.innerHTML=h+'</tbody></table>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'})}
+  else if(tab==='sms'){body.innerHTML='Загрузка...';fetch(API+'/api/admin/sms?imei='+encodeURIComponent(m.rawImei)+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var msgs=Array.isArray(data)?data:data.data||data.messages||data.sms||[];var h='<div style="max-height:250px;overflow-y:auto">';if(msgs.length)msgs.forEach(function(s){h+='<div class="sms-item"><span class="sms-from">'+(s.Phone||s.from||'?')+'</span><span class="sms-date">'+(s.Date||s.date||'')+'</span><div class="sms-text">'+esc(s.Content||s.text||s.message||'')+'</div></div>'});else h+='<div style="color:var(--text-3);padding:10px">Нет SMS</div>';h+='</div><div style="margin-top:8px"><button class="btn btn-danger btn-sm" onclick="purgeSms(\''+esc(m.nick)+'\',\''+m.server+'\')">Удалить все</button></div>';h+='<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><div class="form-row"><div class="form-group"><label>Номер</label><input class="form-input" id="smsPhone"></div></div><div class="form-group"><label>Текст</label><textarea class="form-input" id="smsText" rows="2"></textarea></div><button class="btn btn-primary btn-sm" onclick="sendSms(\''+m.rawImei+'\',\''+m.server+'\')">Отправить</button></div>';body.innerHTML=h}).catch(function(e){body.innerHTML=e.message})}
+  else if(tab==='ussd'){body.innerHTML='<div class="detail-card"><h4>USSD-запрос</h4><p style="font-size:11px;color:var(--text-2);margin-bottom:8px">*100# баланс, *111# меню</p><div class="form-row"><div class="form-group"><input class="form-input" id="ussdCode" value="*100#"></div><div class="form-group"><button class="btn btn-primary" onclick="sendUssd(\''+m.rawImei+'\',\''+m.server+'\')">Отправить</button></div></div><div id="ussdResult" style="margin-top:8px"></div></div>'}
+  else if(tab==='ports'){var h='<div style="display:flex;justify-content:space-between;margin-bottom:8px"><strong style="color:var(--text-0);font-size:13px">Порты</strong><button class="btn btn-primary btn-sm" onclick="showNewPortForm(\''+m.rawImei+'\',\''+m.server+'\')">+ Порт</button></div>';if(!m.ports.length){h+='<div style="color:var(--text-3)">Нет портов</div>'}else{h+='<table class="log-table"><thead><tr><th>ID</th><th>Имя</th><th>HTTP</th><th>SOCKS</th><th>Логин</th><th>Пароль</th><th></th></tr></thead><tbody>';m.ports.forEach(function(p){var pid=(p.portID||'').replace(/^S[12]_/,'');h+='<tr><td>'+esc(pid)+'</td><td>'+esc(p.portName||'')+'</td><td>'+esc(p.HTTP_PORT||'')+'</td><td>'+esc(p.SOCKS_PORT||'')+'</td><td class="mono">'+esc(p.LOGIN||'')+'</td><td class="mono">'+esc(p.PASSWORD||'')+'</td><td style="display:flex;gap:3px"><button class="btn btn-sm" onclick="editPortCreds(\''+m.rawImei+'\',\''+m.server+'\',\''+pid+'\',\''+esc(p.LOGIN||'')+'\',\''+esc(p.PASSWORD||'')+'\')" title="Изменить логин/пароль">✏️</button><button class="btn btn-danger btn-sm" onclick="purgePort(\''+pid+'\',\''+m.server+'\')">X</button></td></tr>'});h+='</tbody></table>'}h+='<div id="newPortForm"></div><div id="editPortForm"></div>';body.innerHTML=h}
+  else if(tab==='iphistory'){
+    var key=m.server+'_'+m.rawImei;
+    body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка IP истории...</div>';
+    fetch(API+'/api/admin/ip_history?key='+encodeURIComponent(key),{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+      var entries=data.history||data||[];
+      if(!entries.length){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории IP</div>';return}
+      var h='<table class="log-table"><thead><tr><th>IP адрес</th><th>С</th><th>До</th><th>Длительность</th></tr></thead><tbody>';
+      entries.slice().reverse().forEach(function(e){
+        var from=e.from?new Date(e.from).toLocaleString('ru-RU'):'—';
+        var to=e.to?new Date(e.to).toLocaleString('ru-RU'):'сейчас';
+        var dur='—';
+        if(e.from){var ms=(e.to||Date.now())-e.from;var mins=Math.floor(ms/60000);if(mins<60)dur=mins+'м';else if(mins<1440)dur=Math.floor(mins/60)+'ч '+mins%60+'м';else dur=Math.floor(mins/1440)+'д '+Math.floor(mins%1440/60)+'ч'}
+        h+='<tr><td class="mono" style="color:var(--accent)">'+esc(e.ip)+'</td><td>'+from+'</td><td>'+to+'</td><td>'+dur+'</td></tr>';
+      });
+      body.innerHTML=h+'</tbody></table>';
+    }).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'});
+  }
+  else if(tab==='settings'){body.innerHTML='<div class="detail-card"><h4>Настройки '+esc(m.nick)+'</h4><div class="form-group"><label>Ник</label><input class="form-input" id="msNick" value="'+esc(m.nick)+'"></div><div class="form-group"><label>Телефон</label><input class="form-input" id="msPhone" value="'+esc(m.phone)+'"></div><div class="form-row"><div class="form-group"><label>Авторотация (мин)</label><input class="form-input" id="msAutoRot" value="'+(m.autoRotation||'')+'"></div><div class="form-group"><label>Режим сети</label><select class="form-input" id="msMode"><option value="auto"'+(m.targetMode==='auto'?' selected':'')+'>Авто</option><option value="4g"'+(m.targetMode==='4g'?' selected':'')+'>4G</option><option value="3g"'+(m.targetMode==='3g'?' selected':'')+'>3G</option></select></div></div><div class="form-group"><label>Заметки</label><textarea class="form-input" id="msNotes">'+esc(m.notes)+'</textarea></div><div style="display:flex;gap:6px;margin-top:8px"><button class="btn btn-primary" onclick="saveModemSettings(\''+m.rawImei+'\',\''+m.server+'\')">Сохранить</button><button class="btn btn-warning" onclick="applyModemSettings(\''+m.rawImei+'\',\''+m.server+'\')">Применить</button></div></div>'}
+}
+function runSpeedtest(nick,srv){var body=document.getElementById('modalBody');body.innerHTML='<div style="text-align:center;padding:20px"><div class="spinner" style="display:inline-block;width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite"></div><p style="color:var(--text-2);margin-top:8px">'+nick+'...</p></div>';fetch(API+'/api/admin/speedtest?nick='+encodeURIComponent(nick)+'&serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var h='<div class="detail-card"><h4>Результат</h4>';for(var k in d)h+=dr(k,typeof d[k]==='object'?JSON.stringify(d[k]):d[k]);body.innerHTML=h+'</div>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'})}
+function sendSms(imei,srv){var ph=document.getElementById('smsPhone').value,tx=document.getElementById('smsText').value;if(!ph||!tx)return showToast('Заполните поля','error');fetch(API+'/api/admin/send_sms',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,phone:ph,sms:tx})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Отправлено','success'):showToast(d.error,'error')}).catch(function(){showToast('Ошибка','error')})}
+function purgeSms(nick,srv){if(!confirm('Удалить все SMS?'))return;fetch(API+'/api/admin/purge_sms',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({nick:nick,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалено','success'):showToast(d.error,'error')}).catch(function(){showToast('Ошибка','error')})}
+function sendUssd(imei,srv){var code=document.getElementById('ussdCode').value;if(!code)return;document.getElementById('ussdResult').innerHTML='<span style="color:var(--text-3)">Отправка...</span>';fetch(API+'/api/admin/send_ussd',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,ussd:code})}).then(function(r){return r.json()}).then(function(d){var r=d.result||d;document.getElementById('ussdResult').innerHTML='<div class="detail-card"><pre style="font-size:11px;color:var(--text-1);white-space:pre-wrap">'+esc(typeof r==='object'?JSON.stringify(r,null,2):String(r))+'</pre></div>'}).catch(function(e){document.getElementById('ussdResult').innerHTML='<span style="color:var(--danger)">'+e.message+'</span>'})}
+function showNewPortForm(imei,srv){fetch(API+'/api/admin/free_ports?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var fp=Array.isArray(data)?data:data.free_tcp_ports||[];var h='<div class="detail-card" style="margin-top:8px"><h4>Новый порт</h4><div class="form-row"><div class="form-group"><label>Port ID</label><input class="form-input" id="npPid" value="port'+rnd(8)+'"></div><div class="form-group"><label>Имя</label><input class="form-input" id="npName"></div></div><div class="form-row"><div class="form-group"><label>HTTP</label><input class="form-input" id="npHttp" value="'+(fp[0]||'')+'"></div><div class="form-group"><label>SOCKS</label><input class="form-input" id="npSocks" value="'+(fp[1]||'')+'"></div></div><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="npLogin" value="'+rnd(8)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="npPass" value="'+rnd(8)+'"></div></div><button class="btn btn-primary" onclick="createPort(\''+imei+'\',\''+srv+'\')">Создать</button></div>';document.getElementById('newPortForm').innerHTML=h})}
+function createPort(imei,srv){var d={serverName:srv,IMEI:imei,portID:document.getElementById('npPid').value,portName:document.getElementById('npName').value,http_port:document.getElementById('npHttp').value,socks_port:document.getElementById('npSocks').value,proxy_login:document.getElementById('npLogin').value,proxy_password:document.getElementById('npPass').value};fetch(API+'/api/admin/store_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok){fetch(API+'/api/admin/apply_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:d.portID,serverName:srv})}).then(function(){showToast('Порт создан','success');setTimeout(loadData,2000)})}else showToast(r.error||'Ошибка','error')})}
+function purgePort(pid,srv){if(!confirm('Удалить '+pid+'?'))return;fetch(API+'/api/admin/purge_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:pid,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');setTimeout(loadData,2000)})}
+function saveModemSettings(imei,srv){fetch(API+'/api/admin/store_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,IMEI:imei,name:document.getElementById('msNick').value,PHONE_NUMBER:document.getElementById('msPhone').value,AUTO_IP_ROTATION:document.getElementById('msAutoRot').value||'0',TARGET_MODE:document.getElementById('msMode').value,NOTES:document.getElementById('msNotes').value})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сохранено','success'):showToast(r.error||'Ошибка','error')})}
+function applyModemSettings(imei,srv){fetch(API+'/api/admin/apply_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Применено','success'):showToast(r.error||'Ошибка','error');setTimeout(loadData,3000)})}
+function downloadVpn(pid,srv){window.open(API+'/api/admin/vpn_profile?portId='+encodeURIComponent(pid)+'&serverName='+srv+'&token='+authToken)}
+function rnd(n){var c='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',r='';for(var i=0;i<n;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
+
+function loadSpeedHistory(key){
+  var area=document.getElementById('speedHistoryArea');
+  if(!area)return;
+  area.innerHTML='<div style="color:var(--text-3);padding:8px">Загрузка...</div>';
+  fetch(API+'/api/admin/speedtest_history',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+    var entries=data[key]||[];
+    if(!entries.length){area.innerHTML='<div style="color:var(--text-3);padding:8px">Нет истории</div>';return}
+    var h='<table class="log-table"><thead><tr><th>Дата</th><th>Download</th><th>Upload</th><th>Ping</th></tr></thead><tbody>';
+    entries.slice().reverse().forEach(function(e){
+      h+='<tr><td>'+new Date(e.date).toLocaleString('ru-RU')+'</td><td style="color:var(--success)">'+Number(e.download).toFixed(1)+' Mbps</td><td style="color:var(--accent)">'+Number(e.upload).toFixed(1)+' Mbps</td><td>'+Number(e.ping).toFixed(0)+' ms</td></tr>';
+    });
+    area.innerHTML=h+'</tbody></table>';
+  }).catch(function(e){area.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'});
+}
+
+// ========== TRAFFIC TAB (PAN-OS ACC Style) ==========
+var accPeriod='month';
+var topHostsCache=null;
+var topHostsCachePerPort=null;
+var PALETTE=['#0078d4','#00c851','#f5a623','#ff4757','#9b59b6','#3498db','#e67e22','#1abc9c','#e74c3c','#2ecc71','#f39c12','#8e44ad','#16a085','#d35400','#c0392b'];
+
+// Domain categorization
+var DOMAIN_CATS={
+  'Социальные сети':[/facebook|instagram|tiktok|vk\.com|twitter|x\.com|snapchat|pinterest|linkedin/i],
+  'Поисковики':[/google\.|yandex\.|bing\.|duckduckgo|yahoo/i],
+  'Видео':[/youtube|youtu\.be|vimeo|twitch|dailymotion|rutube/i],
+  'Мессенджеры':[/telegram|whatsapp|viber|signal|discord/i],
+  'CDN/Облако':[/cloudflare|amazonaws|akamai|fastly|cdn\.|azure|gstatic|googleusercontent/i],
+  'Реклама':[/doubleclick|adservice|adsense|facebook.*ad|ads\.|analytics/i],
+  'Почта':[/mail\.|outlook|gmail|smtp|imap|pop3/i],
+  'Прочее':[]
+};
+function categorize(domain){for(var cat in DOMAIN_CATS){var patterns=DOMAIN_CATS[cat];for(var i=0;i<patterns.length;i++){if(patterns[i].test(domain))return cat}}return'Прочее'}
+
+function switchAccTab(name,el){
+  document.querySelectorAll('.acc-sub-tab').forEach(function(t){t.classList.remove('active')});
+  document.querySelectorAll('.acc-sub-content').forEach(function(t){t.classList.remove('active')});
+  if(el)el.classList.add('active');
+  var content=document.getElementById('acc-'+name);
+  if(content)content.classList.add('active');
+  renderAccSubTab(name);
+}
+
+function setAccPeriod(p,el){
+  accPeriod=p;
+  document.querySelectorAll('.acc-period-btn').forEach(function(b){b.classList.remove('active')});
+  if(el)el.classList.add('active');
+  renderTrafficTab();
+}
+
+function getTrafficFields(){
+  switch(accPeriod){
+    case'day':return{inKey:'bandwidth_bytes_day_in',outKey:'bandwidth_bytes_day_out',label:'Сегодня'};
+    case'month':return{inKey:'bandwidth_bytes_month_in',outKey:'bandwidth_bytes_month_out',label:'Текущий месяц'};
+    case'prevmonth':return{inKey:'bandwidth_bytes_prevmonth_in',outKey:'bandwidth_bytes_prevmonth_out',label:'Прошлый месяц'};
+    case'lifetime':return{inKey:'bandwidth_bytes_lifetime_in',outKey:'bandwidth_bytes_lifetime_out',label:'Всё время'};
+    default:return{inKey:'bandwidth_bytes_month_in',outKey:'bandwidth_bytes_month_out',label:'Месяц'};
+  }
+}
+
+function collectTrafficData(){
+  if(!currentData||!currentData._modemMap)return null;
+  var map=currentData._modemMap,fields=getTrafficFields();
+  var totalModems=0,totalOnline=0,totalIn=0,totalOut=0;
+  var modemTraffic=[],clientTraffic={},serverTraffic={},serverIn={},serverOut={};
+  for(var imei in map){
+    var m=map[imei];totalModems++;
+    var st=getModemStatus(m);if(st==='online'||st==='rotating')totalOnline++;
+    var port=m.ports[0]||{},bw=port._bw||{};
+    var din=parseTraffic(bw[fields.inKey]),dout=parseTraffic(bw[fields.outKey]);
+    // also collect all-period data for sparklines
+    var dayIn=parseTraffic(bw.bandwidth_bytes_day_in),dayOut=parseTraffic(bw.bandwidth_bytes_day_out);
+    var monIn=parseTraffic(bw.bandwidth_bytes_month_in),monOut=parseTraffic(bw.bandwidth_bytes_month_out);
+    var prevIn=parseTraffic(bw.bandwidth_bytes_prevmonth_in),prevOut=parseTraffic(bw.bandwidth_bytes_prevmonth_out);
+    var lifeIn=parseTraffic(bw.bandwidth_bytes_lifetime_in),lifeOut=parseTraffic(bw.bandwidth_bytes_lifetime_out);
+    totalIn+=din;totalOut+=dout;
+    var pn=port.portName||'Не назначен';
+    modemTraffic.push({nick:m.nick,server:m.server,pn:pn,tIn:din,tOut:dout,dayIn:dayIn,dayOut:dayOut,monIn:monIn,monOut:monOut,prevIn:prevIn,prevOut:prevOut,lifeIn:lifeIn,lifeOut:lifeOut,online:st==='online'||st==='rotating'});
+    if(!clientTraffic[pn])clientTraffic[pn]={tIn:0,tOut:0,modems:0,online:0};
+    clientTraffic[pn].tIn+=din;clientTraffic[pn].tOut+=dout;clientTraffic[pn].modems++;
+    if(st==='online'||st==='rotating')clientTraffic[pn].online++;
+    if(!serverTraffic[m.server])serverTraffic[m.server]=0;
+    serverTraffic[m.server]+=din+dout;
+    if(!serverIn[m.server])serverIn[m.server]=0;serverIn[m.server]+=din;
+    if(!serverOut[m.server])serverOut[m.server]=0;serverOut[m.server]+=dout;
+  }
+  modemTraffic.sort(function(a,b){return(b.tIn+b.tOut)-(a.tIn+a.tOut)});
+  return{totalModems:totalModems,totalOnline:totalOnline,totalIn:totalIn,totalOut:totalOut,modemTraffic:modemTraffic,clientTraffic:clientTraffic,serverTraffic:serverTraffic,serverIn:serverIn,serverOut:serverOut,label:fields.label};
+}
+
+function fmtGb(b){if(b===0)return'0 B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(2)+' GB'}
+function fmtGbShort(b){if(b<1073741824)return(b/1048576).toFixed(0)+' MB';return(b/1073741824).toFixed(1)+' GB'}
+function pct(v,max){return max?Math.round(v/max*100):0}
+
+function renderHBars(items,maxVal,colorClass){
+  if(!items.length)return'<div style="color:var(--text-3);padding:10px;font-size:11px">Нет данных</div>';
+  var h='<ul class="hbar-list">';
+  items.forEach(function(item,i){
+    h+='<li class="hbar-item"><span class="hbar-rank">'+(i+1)+'</span><span class="hbar-label" title="'+esc(item.label)+'">'+esc(item.label)+'</span><div class="hbar-bar-wrap"><div class="hbar-bar '+(item.color||colorClass||'blue')+'" style="width:'+pct(item.value,maxVal)+'%"></div></div><span class="hbar-value">'+fmtGbShort(item.value)+'</span></li>';
+  });
+  return h+'</ul>';
+}
+
+function renderTrafficTab(){
+  var d=collectTrafficData();if(!d)return;
+  // Summary widgets
+  var avgPerModem=d.totalModems?(d.totalIn+d.totalOut)/d.totalModems:0;
+  var inOutRatio=d.totalOut?d.totalIn/d.totalOut:0;
+  document.getElementById('trafficWidgets').innerHTML=
+    '<div class="widget"><div class="widget-label">Модемов</div><div class="widget-value" style="color:var(--success)">'+d.totalOnline+'<span style="font-size:14px;color:var(--text-2)"> / '+d.totalModems+'</span></div><div class="widget-sub">online / всего</div></div>'+
+    '<div class="widget"><div class="widget-label">Входящий ('+d.label+')</div><div class="widget-value">'+fmtGb(d.totalIn)+'</div></div>'+
+    '<div class="widget"><div class="widget-label">Исходящий ('+d.label+')</div><div class="widget-value">'+fmtGb(d.totalOut)+'</div></div>'+
+    '<div class="widget"><div class="widget-label">Всего ('+d.label+')</div><div class="widget-value" style="color:var(--accent)">'+fmtGb(d.totalIn+d.totalOut)+'</div></div>'+
+    '<div class="widget"><div class="widget-label">Среднее на модем</div><div class="widget-value">'+fmtGb(avgPerModem)+'</div></div>'+
+    '<div class="widget"><div class="widget-label">Клиентов</div><div class="widget-value">'+Object.keys(d.clientTraffic).length+'</div><div class="widget-sub">Вх/Исх: '+inOutRatio.toFixed(1)+'x</div></div>';
+
+  // Render active sub-tab
+  var activeSubTab=document.querySelector('.acc-sub-tab.active');
+  var tabName=activeSubTab?activeSubTab.textContent.trim().split(' ')[0]:'Обзор';
+  // find which tab is active
+  var activeSub=document.querySelector('.acc-sub-content.active');
+  if(activeSub)renderAccSubTab(activeSub.id.replace('acc-',''));
+}
+
+function renderAccSubTab(name){
+  var d=collectTrafficData();if(!d)return;
+  var cc=getChartColors();
+  var chartOpts=function(stacked){return{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:cc.text,font:{size:11}}}},scales:{x:{stacked:!!stacked,ticks:{color:cc.text,font:{size:10}},grid:{color:cc.grid}},y:{stacked:!!stacked,ticks:{color:cc.text,font:{size:10}},grid:{color:cc.grid}}}}};
+
+  if(name==='overview'){
+    // Region bars
+    var srvKeys=Object.keys(d.serverTraffic).sort(function(a,b){return d.serverTraffic[b]-d.serverTraffic[a]});
+    var maxSrv=srvKeys.length?d.serverTraffic[srvKeys[0]]:0;
+    var regionItems=srvKeys.map(function(s,i){var c=COUNTRIES[s]||{};return{label:(c.flag||'')+' '+(c.name||s),value:d.serverTraffic[s],color:['blue','orange','green','purple'][i%4]}});
+    document.getElementById('regionBars').innerHTML=renderHBars(regionItems,maxSrv);
+
+    // Client doughnut
+    var clientNames=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
+    if(charts.client)charts.client.destroy();
+    charts.client=new Chart(document.getElementById('chartClientTraffic'),{type:'doughnut',data:{labels:clientNames,datasets:[{data:clientNames.map(function(n){return bytesToGb(d.clientTraffic[n].tIn+d.clientTraffic[n].tOut).toFixed(2)}),backgroundColor:PALETTE.slice(0,clientNames.length)}]},options:{responsive:true,maintainAspectRatio:false,cutout:'65%',plugins:{legend:{position:'right',labels:{color:cc.text,font:{size:10},padding:8}}}}});
+
+    // In/Out chart
+    var srvLabels=Object.keys(d.serverIn);
+    if(charts.inout)charts.inout.destroy();
+    charts.inout=new Chart(document.getElementById('chartInOut'),{type:'bar',data:{labels:srvLabels.map(function(s){var c=COUNTRIES[s];return c?c.name:s}),datasets:[{label:'Входящий',data:srvLabels.map(function(s){return bytesToGb(d.serverIn[s]).toFixed(2)}),backgroundColor:'rgba(0,120,212,.7)',borderRadius:3},{label:'Исходящий',data:srvLabels.map(function(s){return bytesToGb(d.serverOut[s]).toFixed(2)}),backgroundColor:'rgba(0,200,81,.5)',borderRadius:3}]},options:chartOpts()});
+
+    // Top modems bar
+    var top10=d.modemTraffic.slice(0,10);
+    if(charts.modem)charts.modem.destroy();
+    charts.modem=new Chart(document.getElementById('chartModemTraffic'),{type:'bar',data:{labels:top10.map(function(m){return m.nick}),datasets:[{label:'Входящий',data:top10.map(function(m){return bytesToGb(m.tIn).toFixed(2)}),backgroundColor:'rgba(0,120,212,.7)',borderRadius:2},{label:'Исходящий',data:top10.map(function(m){return bytesToGb(m.tOut).toFixed(2)}),backgroundColor:'rgba(0,200,81,.5)',borderRadius:2}]},options:chartOpts(true)});
+  }
+  else if(name==='regions'){
+    // Server doughnut
+    var srvKeys=Object.keys(d.serverTraffic);
+    if(charts.server)charts.server.destroy();
+    charts.server=new Chart(document.getElementById('chartServerTraffic'),{type:'doughnut',data:{labels:srvKeys.map(function(s){var c=COUNTRIES[s];return c?(c.flag+' '+c.name):s}),datasets:[{data:srvKeys.map(function(s){return bytesToGb(d.serverTraffic[s]).toFixed(2)}),backgroundColor:['#0078d4','#f5a623','#00c851']}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'right',labels:{color:cc.text}}}}});
+
+    // Region detail bars
+    var maxSrv=0;srvKeys.forEach(function(s){if(d.serverTraffic[s]>maxSrv)maxSrv=d.serverTraffic[s]});
+    var rItems=srvKeys.map(function(s,i){var c=COUNTRIES[s]||{};return{label:(c.flag||'')+' '+(c.name||s),value:d.serverTraffic[s],color:['blue','orange','green'][i%3]}});
+    var rh='';srvKeys.forEach(function(s){var c=COUNTRIES[s]||{};
+      rh+='<div style="margin-bottom:12px"><div style="font-size:12px;color:var(--text-0);font-weight:600;margin-bottom:4px">'+(c.flag||'')+' '+(c.name||s)+'</div>';
+      rh+='<div style="display:flex;gap:16px;font-size:11px;color:var(--text-2);margin-bottom:4px"><span>↓ '+fmtGb(d.serverIn[s]||0)+'</span><span>↑ '+fmtGb(d.serverOut[s]||0)+'</span><span style="color:var(--accent);font-weight:600">Σ '+fmtGb(d.serverTraffic[s])+'</span></div>';
+      var p=pct(d.serverTraffic[s],maxSrv);
+      rh+='<div class="hbar-bar-wrap"><div class="hbar-bar blue" style="width:'+p+'%"></div></div></div>'});
+    document.getElementById('regionDetailBars').innerHTML=rh;
+
+    // Region modem table
+    var h='<thead><tr><th>Модем</th><th>Сервер</th><th>Статус</th><th>↓ Входящий</th><th>↑ Исходящий</th><th>Всего</th><th style="width:120px">Доля</th></tr></thead><tbody>';
+    var totalAll=d.totalIn+d.totalOut;
+    d.modemTraffic.forEach(function(m){var total=m.tIn+m.tOut;var ci=COUNTRIES[m.server]||{};
+      h+='<tr><td style="color:var(--accent);font-weight:500">'+esc(m.nick)+'</td><td>'+(ci.flag||'')+' '+m.server+'</td><td><span class="status-dot '+(m.online?'online':'offline')+'"></span></td><td class="mono">'+fmtGb(m.tIn)+'</td><td class="mono">'+fmtGb(m.tOut)+'</td><td class="mono" style="color:var(--text-0);font-weight:600">'+fmtGb(total)+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="hbar-bar blue" style="width:'+pct(total,totalAll)+'%"></div></div></td></tr>'});
+    document.getElementById('regionModemTable').innerHTML=h+'</tbody>';
+  }
+  else if(name==='clients_t'){
+    // Client bars
+    var clientNames=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
+    var maxClient=clientNames.length?(d.clientTraffic[clientNames[0]].tIn+d.clientTraffic[clientNames[0]].tOut):0;
+    var cItems=clientNames.map(function(n,i){return{label:n,value:d.clientTraffic[n].tIn+d.clientTraffic[n].tOut,color:['blue','green','orange','purple','red'][i%5]}});
+    document.getElementById('clientTrafficBars').innerHTML=renderHBars(cItems,maxClient);
+
+    // Client pie
+    if(charts.clientPie)charts.clientPie.destroy();
+    charts.clientPie=new Chart(document.getElementById('chartClientPie'),{type:'doughnut',data:{labels:clientNames,datasets:[{data:clientNames.map(function(n){return bytesToGb(d.clientTraffic[n].tIn+d.clientTraffic[n].tOut).toFixed(2)}),backgroundColor:PALETTE.slice(0,clientNames.length)}]},options:{responsive:true,maintainAspectRatio:false,cutout:'60%',plugins:{legend:{position:'right',labels:{color:cc.text,font:{size:10}}}}}});
+
+    // Client table
+    var h='<thead><tr><th>#</th><th>Клиент</th><th>Модемов</th><th>Online</th><th>↓ Входящий</th><th>↑ Исходящий</th><th>Всего</th><th style="width:150px">Доля</th></tr></thead><tbody>';
+    var totalAll=d.totalIn+d.totalOut;
+    clientNames.forEach(function(n,i){var c=d.clientTraffic[n];var total=c.tIn+c.tOut;
+      h+='<tr><td style="color:var(--text-3)">'+(i+1)+'</td><td style="color:var(--accent);font-weight:500">'+esc(n)+'</td><td>'+c.modems+'</td><td><span class="status-dot online"></span> '+c.online+'</td><td class="mono">'+fmtGb(c.tIn)+'</td><td class="mono">'+fmtGb(c.tOut)+'</td><td class="mono" style="color:var(--text-0);font-weight:600">'+fmtGb(total)+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="hbar-bar '+PALETTE[i%PALETTE.length].replace('#','blue')+'" style="width:'+pct(total,totalAll)+'%;background:'+PALETTE[i%PALETTE.length]+'"></div></div></td></tr>'});
+    document.getElementById('clientTrafficTable').innerHTML=h+'</tbody>';
+  }
+  else if(name==='resources'){
+    if(!topHostsCache){loadTopHosts()}else{renderTopResources()}
+  }
+  else if(name==='matrix'){
+    renderTrafficMatrix(d);
+  }
+}
+
+function renderTrafficMatrix(d){
+  if(!d)d=collectTrafficData();if(!d)return;
+  var h='<thead><tr><th style="cursor:pointer" onclick="matrixSort(\'nick\')">Модем</th><th>Сервер</th><th>Клиент</th><th style="cursor:pointer" onclick="matrixSort(\'tIn\')">↓ Вход</th><th style="cursor:pointer" onclick="matrixSort(\'tOut\')">↑ Выход</th><th style="cursor:pointer" onclick="matrixSort(\'total\')">Σ Всего</th><th>Сегодня</th><th>Месяц</th><th>Пред.мес</th><th>Всё время</th><th style="width:100px">Уровень</th></tr></thead><tbody>';
+  var maxTotal=0;d.modemTraffic.forEach(function(m){var t=m.tIn+m.tOut;if(t>maxTotal)maxTotal=t});
+  d.modemTraffic.forEach(function(m){var total=m.tIn+m.tOut;var ci=COUNTRIES[m.server]||{};
+    h+='<tr><td style="color:var(--accent);font-weight:500">'+esc(m.nick)+'</td><td style="font-size:10px">'+(ci.flag||'')+' '+m.server+'</td><td style="font-size:10px">'+esc(m.pn)+'</td><td class="mono">'+fmtGb(m.tIn)+'</td><td class="mono">'+fmtGb(m.tOut)+'</td><td class="mono" style="color:var(--text-0);font-weight:600">'+fmtGb(total)+'</td><td class="mono" style="font-size:10px">'+fmtGbShort(m.dayIn+m.dayOut)+'</td><td class="mono" style="font-size:10px">'+fmtGbShort(m.monIn+m.monOut)+'</td><td class="mono" style="font-size:10px">'+fmtGbShort(m.prevIn+m.prevOut)+'</td><td class="mono" style="font-size:10px">'+fmtGbShort(m.lifeIn+m.lifeOut)+'</td><td><div class="hbar-bar-wrap" style="height:8px"><div class="hbar-bar blue" style="width:'+pct(total,maxTotal)+'%"></div></div></td></tr>'});
+  document.getElementById('trafficMatrix').innerHTML=h+'</tbody>';
+}
+
+// Top Resources — uses server-side aggregated cache (auto-refreshes nightly at 03:00)
+function loadTopHosts(forceRefresh){
+  document.getElementById('resLoading').style.display='flex';
+  document.getElementById('resLastLoad').textContent='Загрузка...';
+  var url=forceRefresh?API+'/api/admin/top_hosts_refresh':API+'/api/admin/top_hosts_aggregated';
+  var opts=forceRefresh?{method:'POST',headers:{'X-Auth-Token':authToken}}:{headers:{'X-Auth-Token':authToken}};
+  fetch(url,opts).then(function(r){return r.json()}).then(function(result){
+    if(forceRefresh){
+      return fetch(API+'/api/admin/top_hosts_aggregated',{headers:{'X-Auth-Token':authToken}}).then(function(r2){return r2.json()});
+    }
+    return result;
+  }).then(function(cache){
+    var data=cache.data||{};
+    if(Object.keys(data).length===0&&!forceRefresh){
+      // No cached data yet — trigger server-side refresh
+      return loadTopHosts(true);
+    }
+    topHostsCache=data;
+    topHostsCachePerPort=cache.perPort||null;
+    document.getElementById('resLoading').style.display='none';
+    var updatedAt=cache.updatedAt?new Date(cache.updatedAt).toLocaleString('ru-RU'):'нет данных';
+    var stats=cache.stats||{};
+    document.getElementById('resLastLoad').textContent='Обновлено: '+updatedAt+(stats.portsScanned?' | '+stats.portsScanned+' портов, '+stats.errors+' ошибок':'');
+    document.getElementById('resCount').textContent=Object.keys(data).length;
+    renderTopResources();
+  }).catch(function(e){
+    document.getElementById('resLoading').style.display='none';
+    document.getElementById('resLastLoad').textContent='Ошибка: '+(e.message||e);
+  });
+}
+
+function populateResClientFilter(){
+  var sel=document.getElementById('resClientFilter');
+  if(!sel||!currentData)return;
+  var prev=sel.value;
+  sel.innerHTML='<option value="">Все клиенты</option>';
+  var cl=currentData.clients||[];
+  cl.forEach(function(c){sel.innerHTML+='<option value="'+esc(c.portName)+'">'+esc(c.name)+' ('+esc(c.portName)+')</option>'});
+  if(prev)sel.value=prev;
+}
+function renderTopResources(){
+  if(!topHostsCache){
+    document.getElementById('topResourcesList').innerHTML='<div style="color:var(--text-3);padding:30px;text-align:center;font-size:13px"><div class="spinner" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:8px"></div><br>Загрузка данных о ресурсах...</div>';
+    return;
+  }
+  populateResClientFilter();
+  // Filter by client if selected
+  var clientFilter=document.getElementById('resClientFilter');
+  var filterPortName=clientFilter?clientFilter.value:'';
+  var dataSource=topHostsCache;
+  if(filterPortName&&topHostsCachePerPort&&topHostsCachePerPort[filterPortName]){
+    dataSource=topHostsCachePerPort[filterPortName];
+  }
+  var sorted=Object.keys(dataSource).sort(function(a,b){return dataSource[b]-dataSource[a]});
+  var top30=sorted.slice(0,30);
+  var maxCount=top30.length?dataSource[top30[0]]:0;
+
+  // Horizontal bars
+  var items=top30.map(function(h,i){return{label:h,value:dataSource[h],color:['blue','green','orange','purple','red'][i%5]}});
+  document.getElementById('topResourcesList').innerHTML='<div style="max-height:400px;overflow-y:auto">'+renderHBarsRes(items,maxCount)+'</div>';
+
+  // Categories
+  var cats={};sorted.forEach(function(h){var cat=categorize(h);if(!cats[cat])cats[cat]=0;cats[cat]+=dataSource[h]});
+  var catNames=Object.keys(cats).sort(function(a,b){return cats[b]-cats[a]});
+  var cc=getChartColors();
+  if(charts.resCat)charts.resCat.destroy();
+  charts.resCat=new Chart(document.getElementById('chartResCat'),{type:'doughnut',data:{labels:catNames,datasets:[{data:catNames.map(function(c){return cats[c]}),backgroundColor:PALETTE.slice(0,catNames.length)}]},options:{responsive:true,maintainAspectRatio:false,cutout:'55%',plugins:{legend:{position:'right',labels:{color:cc.text,font:{size:10}}}}}});
+
+  // Top 15 bar chart
+  var top15=sorted.slice(0,15);
+  if(charts.resBar)charts.resBar.destroy();
+  charts.resBar=new Chart(document.getElementById('chartResBar'),{type:'bar',data:{labels:top15.map(function(h){return h.length>20?h.substring(0,18)+'..':h}),datasets:[{label:'Запросов',data:top15.map(function(h){return dataSource[h]}),backgroundColor:'rgba(0,120,212,.7)',borderRadius:2}]},options:{indexAxis:'y',responsive:true,maintainAspectRatio:false,plugins:{legend:{display:false}},scales:{x:{ticks:{color:cc.text},grid:{color:cc.grid}},y:{ticks:{color:cc.text,font:{size:10}},grid:{display:false}}}}});
+}
+
+function renderHBarsRes(items,maxVal){
+  if(!items.length)return'';
+  var h='<table class="res-table"><thead><tr><th style="width:24px">#</th><th>Домен</th><th style="width:50px">Кат.</th><th style="width:180px">Запросов</th><th style="width:60px">Кол-во</th></tr></thead><tbody>';
+  items.forEach(function(item,i){
+    var cat=categorize(item.label);
+    var catShort=cat.substring(0,6);
+    h+='<tr><td style="color:var(--text-3);font-size:10px">'+(i+1)+'</td><td class="domain" title="'+esc(item.label)+'">'+esc(item.label)+'</td><td style="font-size:9px;color:var(--text-3)">'+catShort+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="count-bar" style="width:'+pct(item.value,maxVal)+'%"></div></div></td><td style="font-family:monospace;font-size:10px;color:var(--text-0)">'+item.value.toLocaleString()+'</td></tr>';
+  });
+  return h+'</tbody></table>';
+}
+
+function updateChartsTheme(){if(document.getElementById('tab-traffic').classList.contains('active'))renderTrafficTab()}
+
+// ========== CLIENTS TAB ==========
+function renderClients(){if(!currentData)return;var cl=currentData.clients||[];var search=(document.getElementById('clientSearch')||{}).value||'';search=search.toLowerCase();var grid=document.getElementById('clientGrid');if(!grid)return;
+  var pnm={};var map=currentData._modemMap||{};for(var imei in map){var m=map[imei];m.ports.forEach(function(p){if(p.portName){if(!pnm[p.portName])pnm[p.portName]=[];pnm[p.portName].push(m.nick+' ('+m.server+')')}})}
+  // Calc traffic per portName
+  var pnTraffic={};for(var imei in map){var m=map[imei];m.ports.forEach(function(p){if(p.portName&&p._bw){var mi=parseTraffic(p._bw.bandwidth_bytes_month_in)+parseTraffic(p._bw.bandwidth_bytes_month_out);pnTraffic[p.portName]=(pnTraffic[p.portName]||0)+mi}})}
+  var h='';cl.forEach(function(c){if(search&&(c.name+' '+c.portName+' '+c.login+' '+c.contact).toLowerCase().indexOf(search)===-1)return;
+    var modems=pnm[c.portName]||[];var bt=c.billingType||'per_gb';var price=c.price||0;
+    // Calc cost
+    var cost=0,costLabel='';
+    if(bt==='per_modem'){cost=price*modems.length;costLabel=price+' \u0445 '+modems.length+' = '+cost+' \u20BD/мес'}
+    else{var gb=bytesToGb(pnTraffic[c.portName]||0);cost=Math.ceil(gb*price);costLabel=price+' \u0445 '+gb.toFixed(1)+'GB = '+cost+' \u20BD'}
+    h+='<div class="client-card"><div class="client-card-header"><span class="client-card-name">'+esc(c.name)+'<span class="billing-badge billing-'+bt+'">'+(bt==='per_modem'?'за модем':'за ГБ')+'</span></span><div class="client-card-actions"><button class="btn btn-sm" onclick="editClient(\''+c.id+'\')">Изм.</button><button class="btn btn-danger btn-sm" onclick="deleteClient(\''+c.id+'\',\''+esc(c.name)+'\')">X</button></div></div>';
+    h+='<div class="client-card-body">';
+    h+='<div class="row"><span>portName</span><span class="val">'+esc(c.portName)+'</span></div>';
+    h+='<div class="row"><span>Логин</span><span class="val">'+esc(c.login)+'</span></div>';
+    h+='<div class="row"><span>Пароль</span><span class="val">'+esc(c.password)+'</span></div>';
+    h+='<div class="row"><span>Тариф</span><span class="val">'+price+' \u20BD/'+(bt==='per_modem'?'модем':'ГБ')+'</span></div>';
+    h+='<div class="row"><span>Расход</span><span class="val" style="color:var(--accent);font-weight:600">'+costLabel+'</span></div>';
+    // Balance
+    var payments=c.payments||[];
+    var totalPaid=0;payments.forEach(function(p){totalPaid+=parseFloat(p.amount)||0});
+    var balance=totalPaid-cost;
+    h+='<div class="row"><span>Баланс</span><span class="val '+(balance>=0?'balance-positive':'balance-negative')+'">'+Math.round(balance)+' \u20BD</span></div>';
+    h+='<div class="row"><span>Оплачено</span><span class="val">'+Math.round(totalPaid)+' \u20BD</span></div>';
+    if(c.contact)h+='<div class="row"><span>Контакт</span><span class="val">'+esc(c.contact)+'</span></div>';
+    // API Key
+    if(c.apiKey){h+='<div class="row"><span>API Key</span><span class="val" style="font-size:9px;max-width:160px;overflow:hidden;text-overflow:ellipsis">'+esc(c.apiKey)+' <button class="copy-btn" onclick="copyText(\''+esc(c.apiKey)+'\',this)">\u{1F4CB}</button> <button class="copy-btn" onclick="regenerateApiKey(\''+c.id+'\')" title="Перегенерировать">\u{1F504}</button></span></div>'}
+    // Referral
+    if(c.referral_code){h+='<div class="row"><span>Реф. код</span><span class="val">'+esc(c.referral_code)+' <button class="copy-btn" onclick="copyText(\''+esc(c.referral_code)+'\',this)">\u{1F4CB}</button></span></div>'}
+    if(c.referred_by){h+='<div class="row"><span>Привёл</span><span class="val" style="font-size:10px">'+esc(c.referred_by)+'</span></div>'}
+    if(c.referral_balance){h+='<div class="row"><span>Реф. баланс</span><span class="val" style="color:var(--success)">'+Math.floor(c.referral_balance)+'</span></div>'}
+    // Actions: payment & history & documents
+    h+='<div style="margin-top:6px;display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-success btn-sm" onclick="showPaymentForm(\''+c.id+'\')">+ Пополнить</button><button class="btn btn-sm" onclick="showPaymentHistory(\''+c.id+'\')">История</button><button class="btn btn-sm" onclick="showDocumentUpload(\''+c.id+'\')">📄 Документы</button></div>';
+    h+='<div id="paymentArea_'+c.id+'"></div>';
+    h+='<div id="docArea_'+c.id+'"></div>';
+    if(modems.length){h+='<div class="client-modems"><span style="font-size:10px;color:var(--text-3)">Модемы ('+modems.length+'):</span><br>';modems.forEach(function(mn){h+='<span class="client-modem-tag">'+esc(mn)+'</span>'});h+='</div>'}
+    h+='</div></div>'});
+  if(!h)h='<div style="text-align:center;padding:30px;color:var(--text-3);grid-column:span 3">Нет клиентов</div>';grid.innerHTML=h}
+
+function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?data.password:rnd(12);document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('clientModal').classList.add('show')}
+function closeClientModal(){document.getElementById('clientModal').classList.remove('show')}
+document.getElementById('clientModal').addEventListener('click',function(e){if(e.target===this)closeClientModal()});
+function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
+function saveClient(){var id=document.getElementById('clientFormId').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value};if(!d.name||!d.portName||!d.login||!d.password)return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
+function deleteClient(id,name){if(!confirm('Удалить '+name+'?'))return;fetch(API+'/api/admin/clients/'+id,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()})}
+
+// ========== PAYMENTS ==========
+function showPaymentForm(clientId){
+  var area=document.getElementById('paymentArea_'+clientId);
+  if(!area)return;
+  area.innerHTML='<div class="payment-form"><div class="form-row"><div class="form-group"><label>Сумма</label><input class="form-input" type="number" id="payAmount_'+clientId+'" placeholder="5000"></div><div class="form-group"><label>Дата</label><input class="form-input" type="date" id="payDate_'+clientId+'" value="'+new Date().toISOString().slice(0,10)+'"></div></div><div class="form-group"><label>Комментарий</label><input class="form-input" id="payNote_'+clientId+'" placeholder="Пополнение"></div><div style="display:flex;gap:4px;margin-top:6px"><button class="btn btn-primary btn-sm" onclick="addPayment(\''+clientId+'\')">Добавить</button><button class="btn btn-sm" onclick="document.getElementById(\'paymentArea_'+clientId+'\').innerHTML=\'\'">Отмена</button></div></div>';
+}
+function addPayment(clientId){
+  var amount=document.getElementById('payAmount_'+clientId).value;
+  var date=document.getElementById('payDate_'+clientId).value;
+  var note=document.getElementById('payNote_'+clientId).value;
+  if(!amount||!date)return showToast('Заполните сумму и дату','error');
+  fetch(API+'/api/admin/clients/'+clientId+'/payment',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({amount:amount,date:date,note:note})}).then(function(r){return r.json()}).then(function(d){if(d.ok){showToast('Платёж добавлен','success');loadData()}else showToast(d.error,'error')}).catch(function(e){showToast(e.message,'error')});
+}
+function showPaymentHistory(clientId){
+  var area=document.getElementById('paymentArea_'+clientId);
+  if(!area)return;
+  area.innerHTML='<div style="color:var(--text-3);font-size:11px;padding:4px">Загрузка...</div>';
+  fetch(API+'/api/admin/clients/'+clientId+'/payments',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(payments){
+    if(!payments.length){area.innerHTML='<div style="color:var(--text-3);font-size:11px;padding:4px">Нет платежей</div>';return}
+    var h='<div class="payment-list">';
+    payments.forEach(function(p,i){
+      h+='<div class="payment-item"><span><span class="payment-amount">+'+parseFloat(p.amount).toLocaleString()+' \u20BD</span> <span class="payment-date">'+esc(p.date)+'</span> <span style="color:var(--text-3);font-size:10px">'+esc(p.note||'')+'</span></span><button class="btn btn-danger btn-sm" style="padding:2px 6px;font-size:9px" onclick="deletePayment(\''+clientId+'\','+i+')">x</button></div>';
+    });
+    area.innerHTML=h+'</div>';
+  }).catch(function(e){area.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'});
+}
+function deletePayment(clientId,index){
+  if(!confirm('Удалить платёж?'))return;
+  fetch(API+'/api/admin/clients/'+clientId+'/payment/'+index,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){if(d.ok){showToast('Удалён','success');loadData()}else showToast(d.error,'error')});
+}
+
+// ========== ANALYTICS ==========
+function initAnalyticsSelectors(){var sv=currentData?currentData.servers||[]:[];['uniqueIpsServer','bwPeriodServer','backupServer'].forEach(function(id){var sel=document.getElementById(id);if(!sel)return;var v=sel.value;sel.innerHTML='<option value="">Сервер</option>';sv.forEach(function(s){var c=COUNTRIES[s.name]||{};sel.innerHTML+='<option value="'+s.name+'">'+(c.flag||'')+' '+(c.name||s.name)+'</option>'});if(v)sel.value=v})}
+function loadUniqueIps(){var srv=document.getElementById('uniqueIpsServer').value;if(!srv)return showToast('Выберите сервер','error');var res=document.getElementById('uniqueIpsResult');res.innerHTML='Загрузка...';fetch(API+'/api/admin/unique_ips?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var h='<div class="detail-card"><h4>Результат</h4>';for(var k in d)h+=dr(k,typeof d[k]==='object'?JSON.stringify(d[k]):d[k]);res.innerHTML=h+'</div>'}).catch(function(e){res.innerHTML=e.message})}
+function loadBwPeriod(){var srv=document.getElementById('bwPeriodServer').value,pid=document.getElementById('bwPeriodPort').value,s=document.getElementById('bwPeriodStart').value,e=document.getElementById('bwPeriodEnd').value;if(!srv||!pid||!s||!e)return showToast('Заполните все поля','error');var res=document.getElementById('bwPeriodResult');res.innerHTML='Загрузка...';fetch(API+'/api/admin/bandwidth_period?portId='+encodeURIComponent(pid)+'&serverName='+srv+'&start='+encodeURIComponent(s+' 00:00')+'&end='+encodeURIComponent(e+' 23:59:59'),{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var h='<div class="detail-card">';for(var k in d)h+=dr(k,typeof d[k]==='object'?JSON.stringify(d[k]):d[k]);res.innerHTML=h+'</div>'}).catch(function(er){res.innerHTML=er.message})}
+function downloadBackup(){var srv=document.getElementById('backupServer').value;if(!srv)return showToast('Выберите сервер','error');fetch(API+'/api/admin/backup?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_'+srv+'_'+new Date().toISOString().slice(0,10)+'.json';a.click();showToast('Скачан','success')})}
+
+// ========== UTILS ==========
+function copyText(t,b){
+  function onOk(){if(b){var o=b.innerHTML;b.innerHTML='\u2714';setTimeout(function(){b.innerHTML=o},1500)}showToast('Скопировано','info')}
+  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(onOk).catch(doFallback)}else{doFallback()}
+  function doFallback(){var a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;left:-9999px;opacity:0';document.body.appendChild(a);a.select();try{document.execCommand('copy');onOk()}catch(e){showToast('Ошибка копирования','error')}document.body.removeChild(a)}
+}
+function togglePass(el){if(el.classList.contains('revealed')){el.textContent='\u2022\u2022\u2022\u2022';el.classList.remove('revealed');el.style.color='';el.style.letterSpacing=''}else{el.textContent=el.dataset.pass;el.classList.add('revealed');el.style.color='var(--text-0)';el.style.letterSpacing='normal'}}
+function showToast(m,t){var c=document.getElementById('toastContainer'),e=document.createElement('div');e.className='toast toast-'+(t||'info');e.textContent=m;c.appendChild(e);setTimeout(function(){e.remove()},4000)}
+function updateHeaderStats(){if(!currentData||!currentData._modemMap)return;var map=currentData._modemMap,total=0,online=0;for(var i in map){total++;var s=getModemStatus(map[i]);if(s==='online'||s==='rotating')online++}var cl=(currentData.clients||[]).length;document.getElementById('headerStats').innerHTML='<div class="stat-badge">Модемов: <span>'+total+'</span></div><div class="stat-badge">Online: <span style="color:var(--success)">'+online+'</span>/<span>'+total+'</span></div><div class="stat-badge">Клиентов: <span>'+cl+'</span></div>'}
+function startAutoRefresh(){if(autoRefreshTimer)clearInterval(autoRefreshTimer);autoRefreshTimer=setInterval(loadData,60000)}
+
+// ========== TOOLS: PROXY CHECKER + CONVERTER ==========
+function checkProxies(){
+  var input=document.getElementById('proxyCheckInput').value.trim();
+  if(!input){showToast('Введите прокси','error');return}
+  var lines=input.split('\n').filter(function(l){return l.trim()});
+  if(lines.length>50){showToast('Максимум 50 прокси','error');return}
+  var proxies=lines.map(function(l){var p=l.trim().split(':');return{ip:p[0],port:parseInt(p[1])||0,login:p[2]||'',password:p[3]||''}});
+  document.getElementById('btnCheckProxies').disabled=true;
+  document.getElementById('proxyCheckStatus').textContent='Проверяем '+proxies.length+' прокси...';
+  fetch(API+'/api/tools/check_proxy',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({proxies:proxies})}).then(function(r){return r.json()}).then(function(data){
+    document.getElementById('btnCheckProxies').disabled=false;
+    document.getElementById('proxyCheckStatus').textContent='';
+    var results=data.results||[];
+    var working=results.filter(function(r){return r.working}).length;
+    var h='<div style="margin-bottom:6px;font-size:12px;color:var(--text-1)">Рабочих: <span style="color:var(--success);font-weight:600">'+working+'</span> / '+results.length+'</div>';
+    h+='<table class="log-table"><thead><tr><th>IP:Port</th><th>Статус</th><th>Время</th><th>Внешний IP</th><th>Ошибка</th></tr></thead><tbody>';
+    results.forEach(function(r){
+      h+='<tr><td class="mono">'+esc(r.ip)+':'+r.port+'</td><td>'+(r.working?'<span style="color:var(--success)">✓</span>':'<span style="color:var(--danger)">✗</span>')+'</td><td class="mono">'+(r.responseTime?r.responseTime+'ms':'-')+'</td><td class="mono">'+(r.detectedIp||'-')+'</td><td style="font-size:10px;color:var(--text-3)">'+(r.error||'')+'</td></tr>';
+    });
+    document.getElementById('proxyCheckResults').innerHTML=h+'</tbody></table>';
+  }).catch(function(e){
+    document.getElementById('btnCheckProxies').disabled=false;
+    document.getElementById('proxyCheckStatus').textContent='';
+    showToast(e.message,'error');
+  });
+}
+
+function parseProxyLine(line,format){
+  line=line.trim();if(!line)return null;
+  var ip='',port='',login='',pass='';
+  if(format==='httpurl'||format==='socks5url'){
+    var m=line.match(/:\/\/([^:]+):([^@]+)@([^:]+):(\d+)/);
+    if(m){login=m[1];pass=m[2];ip=m[3];port=m[4]}
+  }else if(format==='loginpassatipport'){
+    var m=line.match(/^([^:]+):([^@]+)@([^:]+):(\d+)/);
+    if(m){login=m[1];pass=m[2];ip=m[3];port=m[4]}
+  }else if(format==='ipportatloginpass'){
+    var m=line.match(/^([^:]+):(\d+)@([^:]+):(.+)/);
+    if(m){ip=m[1];port=m[2];login=m[3];pass=m[4]}
+  }else if(format==='loginpassipport'){
+    var p=line.split(':');if(p.length>=4){login=p[0];pass=p[1];ip=p[2];port=p[3]}
+  }else if(format==='ipport'){
+    var p=line.split(':');ip=p[0];port=p[1]||'';
+  }else{
+    var p=line.split(':');ip=p[0];port=p[1]||'';login=p[2]||'';pass=p[3]||'';
+  }
+  return ip?{ip:ip,port:port,login:login,pass:pass}:null;
+}
+function formatProxyLine(p,format){
+  if(format==='httpurl')return'http://'+p.login+':'+p.pass+'@'+p.ip+':'+p.port;
+  if(format==='socks5url')return'socks5://'+p.login+':'+p.pass+'@'+p.ip+':'+p.port;
+  if(format==='loginpassatipport')return p.login+':'+p.pass+'@'+p.ip+':'+p.port;
+  if(format==='ipportatloginpass')return p.ip+':'+p.port+'@'+p.login+':'+p.pass;
+  if(format==='loginpassipport')return p.login+':'+p.pass+':'+p.ip+':'+p.port;
+  if(format==='ipport')return p.ip+':'+p.port;
+  return p.ip+':'+p.port+':'+p.login+':'+p.pass;
+}
+function convertFormat(){
+  var input=document.getElementById('convertInput').value.trim();
+  if(!input){showToast('Введите данные','error');return}
+  var fromFmt=document.getElementById('convertFrom').value;
+  var toFmt=document.getElementById('convertTo').value;
+  var lines=input.split('\n'),out=[];
+  lines.forEach(function(l){var p=parseProxyLine(l,fromFmt);if(p)out.push(formatProxyLine(p,toFmt))});
+  document.getElementById('convertOutput').value=out.join('\n');
+  showToast('Конвертировано: '+out.length+' строк','success');
+}
+
+// ========== SETTINGS ==========
+function loadSettings(){
+  fetch(API+'/api/admin/settings',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(s){
+    var times=s.speedtest_times||['02:00','14:00'];
+    document.getElementById('speedtestTimesInput').value=times.join(', ');
+    document.getElementById('settingsStatus').textContent='Текущее расписание: '+times.join(', ')+' UTC';
+  }).catch(function(){});
+}
+function saveSettings(){
+  var val=document.getElementById('speedtestTimesInput').value;
+  var times=val.split(',').map(function(t){return t.trim()}).filter(function(t){return/^\d{1,2}:\d{2}$/.test(t)});
+  if(!times.length){showToast('Неверный формат','error');return}
+  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({speedtest_times:times})}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Расписание обновлено: '+times.join(', ')+' UTC'}
+    else showToast(d.error||'Ошибка','error');
+  }).catch(function(e){showToast(e.message,'error')});
+}
+
+// ========== DOCUMENTS ==========
+function showDocumentUpload(clientId){
+  var area=document.getElementById('docArea_'+clientId);
+  if(!area)return;
+  area.innerHTML='<div style="color:var(--text-3);font-size:11px;padding:4px">Загрузка...</div>';
+  // Load existing documents
+  var client=(currentData.clients||[]).find(function(c){return c.id===clientId});
+  var docs=client?client.documents||[]:[];
+  var h='<div class="payment-form">';
+  h+='<div style="font-size:11px;color:var(--text-0);font-weight:600;margin-bottom:6px">Документы</div>';
+  if(docs.length){
+    docs.forEach(function(d){
+      h+='<div class="payment-item"><span style="font-size:11px">'+esc(d.name)+' <span style="color:var(--text-3);font-size:10px">'+new Date(d.date).toLocaleDateString('ru-RU')+'</span></span><button class="btn btn-danger btn-sm" style="padding:2px 6px;font-size:9px" onclick="deleteDocument(\''+clientId+'\',\''+d.id+'\')">x</button></div>';
+    });
+  }else{h+='<div style="font-size:10px;color:var(--text-3);margin-bottom:6px">Нет документов</div>'}
+  h+='<div style="margin-top:6px"><input type="file" id="docFile_'+clientId+'" style="font-size:11px"><button class="btn btn-primary btn-sm" onclick="uploadDocument(\''+clientId+'\')" style="margin-top:4px">Загрузить</button></div>';
+  h+='<button class="btn btn-sm" onclick="document.getElementById(\'docArea_'+clientId+'\').innerHTML=\'\'" style="margin-top:4px">Закрыть</button>';
+  area.innerHTML=h+'</div>';
+}
+function uploadDocument(clientId){
+  var fileInput=document.getElementById('docFile_'+clientId);
+  if(!fileInput||!fileInput.files.length){showToast('Выберите файл','error');return}
+  var file=fileInput.files[0];
+  var reader=new FileReader();
+  reader.onload=function(e){
+    var base64=e.target.result.split(',')[1];
+    fetch(API+'/api/admin/clients/'+clientId+'/document',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({name:file.name,data:base64})}).then(function(r){return r.json()}).then(function(d){
+      if(d.ok){showToast('Документ загружен','success');loadData()}else showToast(d.error||'Ошибка','error');
+    }).catch(function(e){showToast(e.message,'error')});
+  };
+  reader.readAsDataURL(file);
+}
+function deleteDocument(clientId,docId){
+  if(!confirm('Удалить документ?'))return;
+  fetch(API+'/api/admin/clients/'+clientId+'/document/'+docId,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){showToast('Удалён','success');loadData()}else showToast(d.error||'Ошибка','error');
+  });
+}
+
+// ========== EDIT PORT CREDENTIALS ==========
+function editPortCreds(imei,server,portId,currentLogin,currentPass){
+  var area=document.getElementById('editPortForm');
+  if(!area)return;
+  area.innerHTML='<div class="detail-card" style="margin-top:8px"><h4>Изменить доступы порта: '+esc(portId)+'</h4><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="editPortLogin" value="'+esc(currentLogin)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="editPortPass" value="'+esc(currentPass)+'"></div></div><div style="display:flex;gap:4px;margin-top:6px"><button class="btn btn-primary btn-sm" onclick="savePortCreds(\''+imei+'\',\''+server+'\',\''+portId+'\')">Сохранить</button><button class="btn btn-sm" onclick="document.getElementById(\'editPortForm\').innerHTML=\'\'">Отмена</button></div></div>';
+}
+function savePortCreds(imei,server,portId){
+  var newLogin=document.getElementById('editPortLogin').value;
+  var newPass=document.getElementById('editPortPass').value;
+  if(!newLogin&&!newPass){showToast('Введите логин или пароль','error');return}
+  fetch(API+'/api/admin/update_port_creds',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:server,IMEI:imei,portID:portId,proxy_login:newLogin,proxy_password:newPass})}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){showToast('Доступы обновлены','success');document.getElementById('editPortForm').innerHTML='';setTimeout(loadData,2000)}
+    else showToast(d.error||'Ошибка','error');
+  }).catch(function(e){showToast(e.message,'error')});
+}
+
+// ========== REGENERATE API KEY ==========
+function regenerateApiKey(clientId){
+  if(!confirm('Перегенерировать API ключ?'))return;
+  fetch(API+'/api/admin/clients/'+clientId+'/regenerate_key',{method:'POST',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){showToast('Новый ключ: '+d.apiKey,'success');loadData()}else showToast(d.error||'Ошибка','error');
+  });
+}
+
+// ========== INIT ==========
+(function(){try{var s=JSON.parse(localStorage.getItem('admin_col_state'));if(s)COLUMNS.forEach(function(c){if(s.hasOwnProperty(c.id))c.visible=s[c.id]})}catch(e){}renderColSelector();if(authToken){document.getElementById('loginOverlay').style.display='none';loadData();startAutoRefresh()}document.getElementById('passInput').addEventListener('keypress',function(e){if(e.key==='Enter')doLogin()});document.getElementById('loginInput').addEventListener('keypress',function(e){if(e.key==='Enter')document.getElementById('passInput').focus()})})();
+</script>
+</body>
+</html>
