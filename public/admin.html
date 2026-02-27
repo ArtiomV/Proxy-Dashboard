@@ -356,6 +356,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <div class="nav-tab" onclick="switchMainTab('tools',this)">Инструменты</div>
   <div class="nav-tab" onclick="switchMainTab('analytics',this)">Аналитика</div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:4px;padding-right:8px">
+    <input type="text" class="search-box" id="searchBox" placeholder="Поиск..." oninput="renderTable()" style="width:180px;height:28px;font-size:11px">
     <div class="col-selector" style="position:relative">
       <button class="btn btn-sm" onclick="toggleFilterDropdown()" style="font-size:11px">⚙ Фильтры</button>
       <div class="col-dropdown" id="filterDropdown" style="right:0;min-width:240px">
@@ -373,7 +374,6 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 <!-- TAB: MODEMS -->
 <div class="tab-content active" id="tab-modems">
   <div class="toolbar">
-    <input type="text" class="search-box" id="searchBox" placeholder="Поиск..." oninput="renderTable()">
   </div>
   <div class="table-wrap" id="tableWrap"></div>
 </div>
@@ -600,6 +600,12 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
       </div>
       <div id="settingsStatus" style="font-size:11px;color:var(--text-2);margin-top:6px"></div>
     </div>
+    <div class="analytics-card">
+      <h3>Тарифная сетка</h3>
+      <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Цена за ГБ зависит от количества прокси. При создании нового клиента цена подставляется автоматически.</p>
+      <div id="pricingTiersArea"></div>
+      <button class="btn btn-primary btn-sm" onclick="savePricingTiers()" style="margin-top:8px">Сохранить тарифы</button>
+    </div>
   </div>
 </div>
 
@@ -663,8 +669,7 @@ var COLUMNS=[
   {id:'phone',label:'Телефон',visible:false,sortable:false},
   {id:'trafficDay',label:'Сегодня',visible:true,sortable:true},
   {id:'trafficMon',label:'Месяц',visible:true,sortable:true},
-  {id:'speedDl',label:'DL',visible:true,sortable:true},
-  {id:'speedUl',label:'UL',visible:true,sortable:true},
+  {id:'speed',label:'Скорость',visible:true,sortable:true},
   {id:'uptime',label:'Аптайм',visible:true,sortable:true},
   {id:'actions',label:'',visible:true,sortable:false,width:'110px'}
 ];
@@ -745,11 +750,11 @@ function renderTable(){
   var html='';COUNTRY_ORDER.forEach(function(srv){var modems=groups[srv];if(!modems||!modems.length)return;var country=COUNTRIES[srv]||{};var online=0;modems.forEach(function(m){var s=getModemStatus(m);if(s==='online'||s==='rotating')online++});
     html+='<div class="country-group"><div class="country-header"><span class="country-flag">'+country.flag+'</span><span class="country-name">'+country.name+'</span><div class="country-stats"><span>'+modems.length+' модемов</span><span>Online: '+online+'/'+modems.length+'</span></div></div><table><thead><tr>';
     cols.forEach(function(col){var w=col.width?' style="width:'+col.width+'"':'';var ar=col.sortable&&sortCol===col.id?' '+(sortDir==='asc'?'\u25B2':'\u25BC'):'';var cl=col.sortable?' onclick="setSort(\''+col.id+'\')"':'';html+='<th'+w+cl+'>'+col.label+ar+'</th>'});
-    html+='</tr></thead><tbody>';modems.forEach(function(modem){var status=getModemStatus(modem),port=modem.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[modem.server]||{};var h='<tr>';cols.forEach(function(col){h+='<td>';switch(col.id){case'status':h+='<span class="status-dot '+status+'"></span>';break;case'nick':h+='<strong>'+esc(modem.nick)+'</strong>';break;case'server':h+='<span style="font-size:10px">'+(ci.flag||'')+' '+modem.server+'</span>';break;case'portName':var un=modem.ports.map(function(p){return p.portName}).filter(function(v,i,a){return v&&a.indexOf(v)===i});h+=un.map(function(n){return'<span class="port-badge" style="background:var(--bg-3);color:var(--text-1);padding:1px 6px;border-radius:3px;font-size:10px">'+esc(n)+'</span>'}).join(' ')||'-';break;case'serverIp':h+='<span class="mono">'+(ci.serverIp||'')+'</span>';break;case'httpPort':h+=port.HTTP_PORT?'<span class="mono">'+port.HTTP_PORT+'</span>':'-';break;case'socksPort':h+=port.SOCKS_PORT?'<span class="mono">'+port.SOCKS_PORT+'</span>':'-';break;case'login':h+=port.LOGIN?'<span class="mono">'+esc(port.LOGIN)+'</span> <button class="copy-btn" onclick="copyText(\''+esc(port.LOGIN)+'\',this)">\u{1F4CB}</button>':'-';break;case'password':h+=port.PASSWORD?'<span class="pass-mask" onclick="togglePass(this)" data-pass="'+esc(port.PASSWORD)+'">\u2022\u2022\u2022\u2022</span> <button class="copy-btn" onclick="copyText(\''+esc(port.PASSWORD)+'\',this)">\u{1F4CB}</button>':'-';break;case'extIp':if(modem.extIp==='IP_RESET'||modem.isRotating){h+='<span class="mono" style="color:var(--warning)">Ротация</span>'}else if(modem.extIp){h+='<span class="mono'+(modem.ipStuck?' ip-stuck':'')+'">'+modem.extIp+(modem.ipStuck?'<span class="ip-stuck-badge" title="IP не менялся '+modem.ipSinceHours+'ч"> \u26A0'+modem.ipSinceHours+'ч</span>':'')+'</span>'}else{h+='-'}break;case'netType':h+=renderNetBadge(modem.netType);break;case'signal':h+=renderSignalBars(modem.signal);break;case'operator':h+=esc(modem.operator)||'-';break;case'phone':h+=modem.phone?'<span class="mono">'+esc(modem.phone)+'</span>':'-';break;case'trafficDay':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_day_in)+'</span>';break;case'trafficMon':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_month_in)+'</span>';break;case'speedDl':h+=modem.lastSpeedDl?'<span class="speed-cell speed-dl">\u2193'+Number(modem.lastSpeedDl).toFixed(1)+'</span>':'-';break;case'speedUl':h+=modem.lastSpeedUl?'<span class="speed-cell speed-ul">\u2191'+Number(modem.lastSpeedUl).toFixed(1)+'</span>':'-';break;case'uptime':if(modem.uptimePct!==undefined){var upCls=parseFloat(modem.uptimePct)>=99?'good':parseFloat(modem.uptimePct)>=95?'warn':'bad';h+='<span class="uptime-pct '+upCls+'">'+modem.uptimePct+'%</span><br><span style="font-size:9px;color:var(--text-3)">'+formatUptime(modem.uptime)+'</span>'}else{h+='<span style="font-size:10px;color:var(--text-2)">'+formatUptime(modem.uptime)+'</span>'}break;case'actions':var d='data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'"';h+='<div class="actions-cell"><button class="action-btn reset" '+d+' onclick="resetIp(this)" title="Сброс IP"><span class="btn-icon">\u{1F504}</span><div class="spinner"></div></button><button class="action-btn reboot" '+d+' onclick="rebootModem(this)" title="Ребут"><span class="btn-icon">\u26A1</span><div class="spinner"></div></button><button class="action-btn usb" '+d+' onclick="usbReset(this)" title="USB"><span class="btn-icon">\u{1F50C}</span><div class="spinner"></div></button><button class="action-btn detail" '+d+' onclick="showDetails(this)" title="Детали"><span class="btn-icon">\u{1F4CA}</span><div class="spinner"></div></button></div>';break}h+='</td>'});html+=h+'</tr>'});html+='</tbody></table></div>'});
+    html+='</tr></thead><tbody>';modems.forEach(function(modem){var status=getModemStatus(modem),port=modem.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[modem.server]||{};var h='<tr>';cols.forEach(function(col){h+='<td>';switch(col.id){case'status':h+='<span class="status-dot '+status+'"></span>';break;case'nick':h+='<strong>'+esc(modem.nick)+'</strong>';break;case'server':h+='<span style="font-size:10px">'+(ci.flag||'')+' '+modem.server+'</span>';break;case'portName':var un=modem.ports.map(function(p){return p.portName}).filter(function(v,i,a){return v&&a.indexOf(v)===i});h+=un.map(function(n){return'<span class="port-badge" style="background:var(--bg-3);color:var(--text-1);padding:1px 6px;border-radius:3px;font-size:10px">'+esc(n)+'</span>'}).join(' ')||'-';break;case'serverIp':h+='<span class="mono">'+(ci.serverIp||'')+'</span>';break;case'httpPort':h+=port.HTTP_PORT?'<span class="mono">'+port.HTTP_PORT+'</span>':'-';break;case'socksPort':h+=port.SOCKS_PORT?'<span class="mono">'+port.SOCKS_PORT+'</span>':'-';break;case'login':h+=port.LOGIN?'<span class="mono">'+esc(port.LOGIN)+'</span> <button class="copy-btn" onclick="copyText(\''+esc(port.LOGIN)+'\',this)">\u{1F4CB}</button>':'-';break;case'password':h+=port.PASSWORD?'<span class="pass-mask" onclick="togglePass(this)" data-pass="'+esc(port.PASSWORD)+'">\u2022\u2022\u2022\u2022</span> <button class="copy-btn" onclick="copyText(\''+esc(port.PASSWORD)+'\',this)">\u{1F4CB}</button>':'-';break;case'extIp':if(modem.extIp==='IP_RESET'||modem.isRotating){h+='<span class="mono" style="color:var(--warning)">Ротация</span>'}else if(modem.extIp){h+='<span class="mono'+(modem.ipStuck?' ip-stuck':'')+'">'+modem.extIp+(modem.ipStuck?'<span class="ip-stuck-badge" title="IP не менялся '+modem.ipSinceHours+'ч"> \u26A0'+modem.ipSinceHours+'ч</span>':'')+'</span>'}else{h+='-'}break;case'netType':h+=renderNetBadge(modem.netType);break;case'signal':h+=renderSignalBars(modem.signal);break;case'operator':h+=esc(modem.operator)||'-';break;case'phone':h+=modem.phone?'<span class="mono">'+esc(modem.phone)+'</span>':'-';break;case'trafficDay':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_day_in)+'</span>';break;case'trafficMon':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_month_in)+'</span>';break;case'speed':if(modem.lastSpeedDl||modem.lastSpeedUl){h+='<span class="speed-cell"><span class="speed-dl">\u2193'+Number(modem.lastSpeedDl||0).toFixed(1)+'</span> / <span class="speed-ul">\u2191'+Number(modem.lastSpeedUl||0).toFixed(1)+'</span></span>'}else{h+='-'}break;case'uptime':if(modem.uptimePct!==undefined){var upCls=parseFloat(modem.uptimePct)>=99?'good':parseFloat(modem.uptimePct)>=95?'warn':'bad';h+='<span class="uptime-pct '+upCls+'">'+modem.uptimePct+'%</span><br><span style="font-size:9px;color:var(--text-3)">'+formatUptime(modem.uptime)+'</span>'}else{h+='<span style="font-size:10px;color:var(--text-2)">'+formatUptime(modem.uptime)+'</span>'}break;case'actions':var d='data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'"';h+='<div class="actions-cell"><button class="action-btn reset" '+d+' onclick="resetIp(this)" title="Сброс IP"><span class="btn-icon">\u{1F504}</span><div class="spinner"></div></button><button class="action-btn reboot" '+d+' onclick="rebootModem(this)" title="Ребут"><span class="btn-icon">\u26A1</span><div class="spinner"></div></button><button class="action-btn usb" '+d+' onclick="usbReset(this)" title="USB"><span class="btn-icon">\u{1F50C}</span><div class="spinner"></div></button><button class="action-btn detail" '+d+' onclick="showDetails(this)" title="Детали"><span class="btn-icon">\u{1F4CA}</span><div class="spinner"></div></button></div>';break}h+='</td>'});html+=h+'</tr>'});html+='</tbody></table></div>'});
   wrap.innerHTML=html;
 }
 function setSort(c){if(sortCol===c)sortDir=sortDir==='asc'?'desc':'asc';else{sortCol=c;sortDir='asc'}renderTable()}
-function getSortValue(m,col){var p=m.ports[0]||{},bw=p._bw||{};switch(col){case'nick':return m.nick;case'server':return m.server;case'portName':return m.ports.map(function(p){return p.portName||''}).join(',');case'httpPort':return parseInt(p.HTTP_PORT)||0;case'socksPort':return parseInt(p.SOCKS_PORT)||0;case'netType':return m.netType;case'signal':return m.signal;case'operator':return m.operator;case'trafficDay':return parseTraffic(bw.bandwidth_bytes_day_in);case'trafficMon':return parseTraffic(bw.bandwidth_bytes_month_in);case'speedDl':return m.lastSpeedDl||0;case'speedUl':return m.lastSpeedUl||0;case'uptime':return parseFloat(m.uptimePct)||m.uptime||0;default:return''}}
+function getSortValue(m,col){var p=m.ports[0]||{},bw=p._bw||{};switch(col){case'nick':return m.nick;case'server':return m.server;case'portName':return m.ports.map(function(p){return p.portName||''}).join(',');case'httpPort':return parseInt(p.HTTP_PORT)||0;case'socksPort':return parseInt(p.SOCKS_PORT)||0;case'netType':return m.netType;case'signal':return m.signal;case'operator':return m.operator;case'trafficDay':return parseTraffic(bw.bandwidth_bytes_day_in);case'trafficMon':return parseTraffic(bw.bandwidth_bytes_month_in);case'speed':return(m.lastSpeedDl||0)+(m.lastSpeedUl||0);case'uptime':return parseFloat(m.uptimePct)||m.uptime||0;default:return''}}
 
 // ========== ACTIONS ==========
 function modemAction(btn,url,body,msg,delay){btn.classList.add('loading');btn.disabled=true;fetch(API+url,{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(d){btn.classList.remove('loading');btn.disabled=false;if(d.ok)showToast(msg,'success');else showToast(d.error||'Ошибка','error');setTimeout(loadData,delay||3000)}).catch(function(){btn.classList.remove('loading');btn.disabled=false;showToast('Ошибка сети','error')})}
@@ -785,13 +790,14 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
     fetch(API+'/api/admin/ip_history?key='+encodeURIComponent(key),{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
       var entries=data.history||data||[];
       if(!entries.length){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории IP</div>';return}
-      var h='<table class="log-table"><thead><tr><th>IP адрес</th><th>С</th><th>До</th><th>Длительность</th></tr></thead><tbody>';
-      entries.slice().reverse().forEach(function(e){
-        var from=e.from?new Date(e.from).toLocaleString('ru-RU'):'—';
-        var to=e.to?new Date(e.to).toLocaleString('ru-RU'):'сейчас';
-        var dur='—';
+      var h='<table class="log-table"><thead><tr><th>Время</th><th>Старый IP</th><th>Новый IP</th><th>Длительность</th></tr></thead><tbody>';
+      var reversed = entries.slice().reverse();
+      reversed.forEach(function(e, idx){
+        var from = e.from ? new Date(e.from).toLocaleString('ru-RU') : '—';
+        var dur = '—';
         if(e.from){var ms=(e.to||Date.now())-e.from;var mins=Math.floor(ms/60000);if(mins<60)dur=mins+'м';else if(mins<1440)dur=Math.floor(mins/60)+'ч '+mins%60+'м';else dur=Math.floor(mins/1440)+'д '+Math.floor(mins%1440/60)+'ч'}
-        h+='<tr><td class="mono" style="color:var(--accent)">'+esc(e.ip)+'</td><td>'+from+'</td><td>'+to+'</td><td>'+dur+'</td></tr>';
+        var oldIp = idx < reversed.length - 1 ? reversed[idx + 1].ip : '—';
+        h+='<tr><td>'+from+'</td><td class="mono" style="color:var(--text-2)">'+esc(oldIp)+'</td><td class="mono" style="color:var(--accent)">'+esc(e.ip)+'</td><td>'+dur+'</td></tr>';
       });
       body.innerHTML=h+'</tbody></table>';
     }).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'});
@@ -1268,12 +1274,39 @@ function convertFormat(){
   showToast('Конвертировано: '+out.length+' строк','success');
 }
 
+// ========== PRICING TIERS ==========
+function renderPricingTiers() {
+  var tiers = (currentData && currentData.settings && currentData.settings.pricing_tiers) || [{min_proxies:1,price:30,label:'1-4'},{min_proxies:5,price:25,label:'5-9'},{min_proxies:10,price:23,label:'10-19'},{min_proxies:20,price:20,label:'20+'}];
+  var h = '<table class="log-table"><thead><tr><th>От (прокси)</th><th>Цена (руб/ГБ)</th><th>Описание</th></tr></thead><tbody>';
+  tiers.forEach(function(t, i) {
+    h += '<tr><td><input class="form-input" type="number" id="tierMin_'+i+'" value="'+t.min_proxies+'" style="width:80px"></td><td><input class="form-input" type="number" id="tierPrice_'+i+'" value="'+t.price+'" style="width:80px"></td><td><input class="form-input" id="tierLabel_'+i+'" value="'+(t.label||'')+'" style="width:120px"></td></tr>';
+  });
+  h += '</tbody></table>';
+  document.getElementById('pricingTiersArea').innerHTML = h;
+}
+function savePricingTiers() {
+  var tiers = [];
+  for (var i = 0; i < 10; i++) {
+    var minEl = document.getElementById('tierMin_'+i);
+    var priceEl = document.getElementById('tierPrice_'+i);
+    var labelEl = document.getElementById('tierLabel_'+i);
+    if (!minEl) break;
+    tiers.push({min_proxies: parseInt(minEl.value)||1, price: parseFloat(priceEl.value)||0, label: labelEl.value||''});
+  }
+  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({pricing_tiers:tiers})}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok) showToast('Тарифы сохранены','success');
+    else showToast(d.error||'Ошибка','error');
+  }).catch(function(e){showToast(e.message,'error')});
+}
+
 // ========== SETTINGS ==========
 function loadSettings(){
   fetch(API+'/api/admin/settings',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(s){
     var times=s.speedtest_times||['02:00','14:00'];
     document.getElementById('speedtestTimesInput').value=times.join(', ');
     document.getElementById('settingsStatus').textContent='Текущее расписание: '+times.join(', ')+' UTC';
+    if(currentData) currentData.settings = s;
+    renderPricingTiers();
   }).catch(function(){});
 }
 function saveSettings(){

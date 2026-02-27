@@ -156,7 +156,15 @@ function generateId() { return crypto.randomBytes(8).toString('hex'); }
 // ==================== SETTINGS ====================
 const SETTINGS_FILE = path.join(__dirname, 'settings.json');
 
-let appSettings = { speedtest_times: ['02:00', '14:00'] };
+let appSettings = {
+  speedtest_times: ['02:00', '14:00'],
+  pricing_tiers: [
+    { min_proxies: 1, price: 30, label: '1-4 прокси' },
+    { min_proxies: 5, price: 25, label: '5-9 прокси' },
+    { min_proxies: 10, price: 23, label: '10-19 прокси' },
+    { min_proxies: 20, price: 20, label: '20+ прокси' }
+  ]
+};
 try {
   if (fs.existsSync(SETTINGS_FILE)) {
     appSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
@@ -166,6 +174,17 @@ try {
 function saveSettings() {
   try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(appSettings, null, 2)); }
   catch (e) { console.error('Failed to save settings:', e.message); }
+}
+
+// ==================== PRICING TIERS ====================
+function getPriceForProxyCount(count) {
+  const tiers = appSettings.pricing_tiers || [];
+  // Sort descending by min_proxies to find the right tier
+  const sorted = tiers.slice().sort((a, b) => b.min_proxies - a.min_proxies);
+  for (const tier of sorted) {
+    if (count >= tier.min_proxies) return tier.price;
+  }
+  return tiers.length > 0 ? tiers[0].price : 23; // fallback
 }
 
 // ==================== DOCUMENTS DIR ====================
@@ -552,6 +571,42 @@ async function runNightlySpeedtests() {
               ping: ping,
               raw: result
             };
+
+            // Re-test if DL or UL is 0 or very close to 0 (< 0.1 Mbps)
+            if ((dl < 0.1 || ul < 0.1) && dl + ul > 0) {
+              console.log(`[Speedtest] ${nick}: DL=${dl} UL=${ul} — near-zero detected, re-testing in 10 min...`);
+              setTimeout(async () => {
+                try {
+                  console.log(`[Speedtest] Re-testing ${nick} (${server.name})...`);
+                  const retryResult = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
+                  let rdl = 0, rul = 0, rping = 0;
+                  if (retryResult && typeof retryResult === 'object') {
+                    rdl = parseFloat(retryResult.download || retryResult.Download || retryResult.dl || 0);
+                    rul = parseFloat(retryResult.upload || retryResult.Upload || retryResult.ul || 0);
+                    rping = parseFloat(retryResult.ping || retryResult.Ping || retryResult.latency || 0);
+                    if (retryResult.raw && typeof retryResult.raw === 'string') {
+                      const rdlM = retryResult.raw.match(/download[:\s]*([\d.]+)/i);
+                      const rulM = retryResult.raw.match(/upload[:\s]*([\d.]+)/i);
+                      const rpM = retryResult.raw.match(/ping[:\s]*([\d.]+)/i);
+                      if (rdlM) rdl = parseFloat(rdlM[1]);
+                      if (rulM) rul = parseFloat(rulM[1]);
+                      if (rpM) rping = parseFloat(rpM[1]);
+                    }
+                  }
+                  // Use retry result if better
+                  if (rdl + rul > dl + ul) {
+                    const retryEntry = { date: new Date().toISOString(), download: rdl, upload: rul, ping: rping, raw: retryResult, retry: true };
+                    if (!speedtestHistory[key]) speedtestHistory[key] = [];
+                    speedtestHistory[key].push(retryEntry);
+                    if (speedtestHistory[key].length > MAX_SPEEDTEST_ENTRIES) speedtestHistory[key] = speedtestHistory[key].slice(-MAX_SPEEDTEST_ENTRIES);
+                    saveSpeedtestHistory();
+                    console.log(`[Speedtest] Re-test ${nick}: DL=${rdl} UL=${rul} (improved)`);
+                  } else {
+                    console.log(`[Speedtest] Re-test ${nick}: DL=${rdl} UL=${rul} (not improved)`);
+                  }
+                } catch (e) { console.error(`[Speedtest] Re-test ${nick} error:`, e.message); }
+              }, 10 * 60 * 1000);
+            }
 
             if (!speedtestHistory[key]) speedtestHistory[key] = [];
             speedtestHistory[key].push(entry);
@@ -1106,9 +1161,16 @@ app.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
-  const { speedtest_times } = req.body;
+  const { speedtest_times, pricing_tiers } = req.body;
   if (speedtest_times && Array.isArray(speedtest_times)) {
     appSettings.speedtest_times = speedtest_times.filter(t => /^\d{2}:\d{2}$/.test(t));
+  }
+  if (pricing_tiers && Array.isArray(pricing_tiers)) {
+    appSettings.pricing_tiers = pricing_tiers.map(t => ({
+      min_proxies: parseInt(t.min_proxies) || 1,
+      price: parseFloat(t.price) || 0,
+      label: t.label || ''
+    }));
   }
   saveSettings();
   rescheduleSpeedtests();
@@ -1695,12 +1757,24 @@ async function autoCreateMissingClients() {
       }
     }
 
+    // Count ports per portName for pricing
+    const portCountMap = {};
+    for (const data of results) {
+      if (typeof data.bw === 'object') {
+        for (const [portId, b] of Object.entries(data.bw)) {
+          if (b.portName) portCountMap[b.portName] = (portCountMap[b.portName] || 0) + 1;
+        }
+      }
+    }
+
     let created = 0;
     for (const pn of allPortNames) {
       if (existingPortNames.has(pn)) continue;
       const login = pn.toLowerCase().replace(/[^a-z0-9_]/g, '_');
       if (users[login]) continue;
 
+      const proxyCount = portCountMap[pn] || 1;
+      const autoPrice = getPriceForProxyCount(proxyCount);
       const password = crypto.randomBytes(8).toString('hex');
       const client = {
         id: generateId(),
@@ -1711,7 +1785,7 @@ async function autoCreateMissingClients() {
         contact: '',
         notes: 'Auto-created from portName',
         billingType: 'per_gb',
-        price: 23,
+        price: autoPrice,
         currency: 'RUB',
         payments: [],
         apiKey: 'prx_' + crypto.randomBytes(24).toString('hex'),

@@ -371,6 +371,10 @@
     .check-result-ok{color:var(--success)}
     .check-result-fail{color:var(--danger)}
 
+    .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
+    .status-dot.online{background:var(--success);box-shadow:0 0 8px rgba(63,185,80,.5)}
+    .status-dot.offline{background:var(--danger)}
+
     /* Section heading for proxy credentials on traffic tab */
     .section-heading{
       font-size:16px;font-weight:700;color:var(--text-0);
@@ -405,7 +409,7 @@
 
   <div id="appMain" style="display:none">
     <div class="header">
-      <h1>Proxies.Rent</h1>
+      <h1>PROXIES.RENT</h1>
       <div class="header-controls">
         <span class="user-info">Клиент: <strong id="currentUser"></strong></span>
         <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Переключить тему"></div>
@@ -428,6 +432,7 @@
       <div class="nav-tab" onclick="switchTab('tools',this)">Инструменты</div>
       <div class="nav-tab" onclick="switchTab('documents',this)">Документы</div>
       <div class="nav-tab" onclick="switchTab('referral',this)">Партнёрская программа</div>
+      <div style="margin-left:auto;display:flex;align-items:center"><input type="text" id="searchInput" class="form-input" placeholder="Поиск по модемам..." style="width:200px;padding:6px 12px;font-size:12px;margin:0" oninput="searchFilter=this.value.toLowerCase();renderTable()"></div>
     </div>
 
     <!-- TAB: Traffic (now includes proxy credentials, export, API info below the traffic table) -->
@@ -468,53 +473,12 @@
         <div id="balanceWarning"></div>
         <div id="errorContainer"></div>
 
-        <!-- Traffic table: 7 columns: Модем, Статус, Аптайм, Скорость, Сегодня, Месяц, Действия -->
-        <div class="table-wrapper">
-          <div class="loading-overlay" id="loading">
-            <div class="spinner"></div>
-            <span>Загрузка данных...</span>
-          </div>
-          <table id="dataTable" style="display:none">
-            <thead>
-              <tr>
-                <th onclick="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
-                <th onclick="sortTable('online')">Статус <span class="sort-arrow" id="sort_online"></span></th>
-                <th onclick="sortTable('uptimePct')">Аптайм <span class="sort-arrow" id="sort_uptimePct"></span></th>
-                <th onclick="sortTable('speedDl')">Скорость <span class="sort-arrow" id="sort_speedDl"></span></th>
-                <th onclick="sortTable('dayIn')" class="text-right">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
-                <th onclick="sortTable('monthIn')" class="text-right">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
-                <th>Действия</th>
-              </tr>
-            </thead>
-            <tbody id="tableBody"></tbody>
-          </table>
-        </div>
-
-        <!-- Proxy Credentials section (moved from separate Прокси tab) -->
-        <h3 class="section-heading" id="proxyCredentialsHeading" style="display:none">Доступы к прокси</h3>
+        <!-- Export buttons and API info (above the table) -->
         <div id="proxyExportButtons" style="display:none;margin-bottom:16px;gap:8px;flex-wrap:wrap">
           <button class="btn btn-accent" onclick="exportCredentials()">Скачать доступы (TXT)</button>
           <button class="btn" onclick="exportCredentialsCSV()">Скачать CSV</button>
         </div>
-        <div class="table-wrapper" id="proxyTableWrapper" style="display:none">
-          <table id="proxyTable">
-            <thead>
-              <tr>
-                <th>Модем</th>
-                <th>Сервер</th>
-                <th>HTTP Порт</th>
-                <th>SOCKS5 Порт</th>
-                <th>Логин</th>
-                <th>Пароль</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody id="proxyBody"></tbody>
-          </table>
-        </div>
-
-        <!-- API info (moved from Прокси tab) -->
-        <div class="api-info-card" id="apiInfoCard" style="display:none">
+        <div class="api-info-card" id="apiInfoCard" style="display:none;margin-bottom:16px">
           <h4>API доступ</h4>
           <p style="font-size:12px;color:var(--text-2);margin:6px 0">Получайте список прокси программно</p>
           <div class="form-group">
@@ -526,6 +490,34 @@
             <code class="mono" style="display:block;padding:10px;background:var(--bg-3);border-radius:6px;font-size:11px;word-break:break-all;color:var(--text-1)" id="apiExample"></code>
           </div>
         </div>
+
+        <!-- Traffic table: 11 columns: Модем, Аптайм, Скорость, HTTP, SOCKS5, Логин, Пароль, Сегодня, Вчера, Месяц, Действия -->
+        <div class="table-wrapper">
+          <div class="loading-overlay" id="loading">
+            <div class="spinner"></div>
+            <span>Загрузка данных...</span>
+          </div>
+          <table id="dataTable" style="display:none">
+            <thead>
+              <tr>
+                <th onclick="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
+                <th onclick="sortTable('uptimePct')">Аптайм <span class="sort-arrow" id="sort_uptimePct"></span></th>
+                <th onclick="sortTable('speedDl')">Скорость <span class="sort-arrow" id="sort_speedDl"></span></th>
+                <th>HTTP</th>
+                <th>SOCKS5</th>
+                <th>Логин</th>
+                <th>Пароль</th>
+                <th onclick="sortTable('dayIn')" class="text-right">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
+                <th onclick="sortTable('yesterdayIn')" class="text-right">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
+                <th onclick="sortTable('monthIn')" class="text-right">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
+                <th>Действия</th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+
+        <!-- Proxy credentials are now merged into the main traffic table above -->
       </div>
     </div>
 
@@ -643,6 +635,7 @@ var modemLogins={};
 var billingData=null;
 var rawData=null;
 var currentSort={key:'modemNick',dir:'asc'};
+var searchFilter='';
 
 // --- Country config ---
 var countryNames={'MD':'\ud83c\uddf2\ud83c\udde9 Молдова','RO':'\ud83c\uddf7\ud83c\uddf4 Румыния','??':'\ud83c\udf10 Другое'};
@@ -888,8 +881,11 @@ async function loadData(){
           proxyPassword:portInfo?portInfo.PASSWORD:'',
           httpCreds:portInfo?portInfo.http_creds:'',
           socks5Creds:portInfo?portInfo.socks5_creds:'',
+          resetSecureLink:portInfo&&portInfo.RESET_SECURE_LINK?portInfo.RESET_SECURE_LINK.URL:'',
           dayIn:parseBW(bw.bandwidth_bytes_day_in),
           dayOut:parseBW(bw.bandwidth_bytes_day_out),
+          yesterdayIn:parseBW(bw.bandwidth_bytes_yesterday_in),
+          yesterdayOut:parseBW(bw.bandwidth_bytes_yesterday_out),
           monthIn:parseBW(bw.bandwidth_bytes_month_in),
           monthOut:parseBW(bw.bandwidth_bytes_month_out),
           _end:0
@@ -915,11 +911,19 @@ async function loadData(){
   }
 }
 
-// Change #7: Traffic table has 7 columns: Модем, Статус, Аптайм, Скорость, Сегодня, Месяц, Действия
-// Change #5: Traffic display with clear Russian labels
-// Change #6: Merged DL/UL into one "Скорость" column
+// Traffic table: 11 columns: Модем(+status dot), Аптайм, Скорость, HTTP, SOCKS5, Логин, Пароль, Сегодня, Вчера, Месяц, Действия
 function renderTable(){
   var rows=tableData.slice();
+
+  // Apply search filter
+  if(searchFilter){
+    rows=rows.filter(function(r){
+      return r.modemNick.toLowerCase().indexOf(searchFilter)!==-1||
+        r.operator.toLowerCase().indexOf(searchFilter)!==-1||
+        r.extIp.toLowerCase().indexOf(searchFilter)!==-1||
+        (r.proxyLogin&&r.proxyLogin.toLowerCase().indexOf(searchFilter)!==-1);
+    });
+  }
 
   rows.sort(function(a,b){
     var ca=countryOrder.indexOf(a.country);
@@ -955,12 +959,12 @@ function renderTable(){
     var monthIn=0,monthOut=0;
     for(var j=0;j<groupRows.length;j++){monthIn+=groupRows[j].monthIn;monthOut+=groupRows[j].monthOut}
 
-    // colspan=7 for 7 columns
+    // colspan=11 for 11 columns
     html+='<tr class="country-header">'+
-      '<td colspan="7">'+
+      '<td colspan="11">'+
         name+
         '<span class="country-count">'+count+' модемов</span>'+
-        '<span class="country-stats">Месяц: '+formatBytes(monthIn+monthOut)+' ('+formatBytes(monthIn)+' / '+formatBytes(monthOut)+')</span>'+
+        '<span class="country-stats">Месяц: '+formatBytes(monthIn+monthOut)+' (\u2193 '+formatBytes(monthIn)+' / \u2191 '+formatBytes(monthOut)+')</span>'+
       '</td>'+
     '</tr>';
 
@@ -972,28 +976,42 @@ function renderTable(){
         uptimeHtml='<span class="'+upCls+'">'+row.uptimePct+'%</span>';
       }
 
-      // Change #6: Merged speed column
       var speedHtml='-';
       if(row.speedDl||row.speedUl){
-        speedHtml='<span class="mono"><span class="speed-dl">\u2193 '+Number(row.speedDl).toFixed(1)+'</span> / <span class="speed-ul">\u2191 '+Number(row.speedUl).toFixed(1)+'</span> \u041C\u0431\u0438\u0442/\u0441</span>';
+        speedHtml='<span class="mono"><span class="speed-dl">\u2193 '+Number(row.speedDl).toFixed(1)+'</span> / <span class="speed-ul">\u2191 '+Number(row.speedUl).toFixed(1)+'</span> Мбит/с</span>';
       }
 
-      // Change #5: Day traffic with clear Russian labels
-      var dayHtml='<span>\u0421\u043A\u0430\u0447\u0430\u043D\u043E: '+formatBytes(row.dayIn)+'</span><br><span class="text-dim">\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E: '+formatBytes(row.dayOut)+'</span>';
+      // Arrow notation for traffic
+      var dayHtml='\u2193 '+formatBytes(row.dayIn)+' / \u2191 '+formatBytes(row.dayOut);
+      var yesterdayHtml='\u2193 '+formatBytes(row.yesterdayIn)+' / \u2191 '+formatBytes(row.yesterdayOut);
+      var monthHtml='\u2193 '+formatBytes(row.monthIn)+' / \u2191 '+formatBytes(row.monthOut);
 
-      // Change #5: Month traffic with clear Russian labels
-      var monthHtml='<span>\u0421\u043A\u0430\u0447\u0430\u043D\u043E: '+formatBytes(row.monthIn)+'</span><br><span class="text-dim">\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E: '+formatBytes(row.monthOut)+'</span>';
+      // Status dot before modem name
+      var statusDotCls=row.online==='yes'?'online':'offline';
+
+      // Proxy credential cells
+      var ci2=COUNTRIES[row.serverName]||{};
+      var serverIp=ci2.serverIp||'';
+      var httpPortHtml=row.httpPort?'<span class="mono">'+serverIp+':'+row.httpPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.httpPort+'\',this)">📋</button>':'-';
+      var socksPortHtml=row.socksPort?'<span class="mono">'+serverIp+':'+row.socksPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.socksPort+'\',this)">📋</button>':'-';
+      var loginHtml=row.proxyLogin?'<span class="mono">'+escapeHtml(row.proxyLogin)+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyLogin)+'\',this)">📋</button>':'-';
+      var passwordHtml=row.proxyPassword?'<span class="mono">'+escapeHtml(row.proxyPassword)+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyPassword)+'\',this)">📋</button>':'-';
 
       html+='<tr>'+
         '<td>'+
+          '<span class="status-dot '+statusDotCls+'"></span>'+
           '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+
-          '<br><span style="font-size:11px;color:var(--text-3)">'+escapeHtml(row.operator)+'</span>'+
+          '<br><span style="font-size:11px;color:var(--text-3);margin-left:14px">'+escapeHtml(row.operator)+'</span>'+
         '</td>'+
-        '<td><span class="online-badge '+(row.online==='yes'?'online-yes':'online-no')+'">'+(row.online==='yes'?'Online':'Offline')+'</span></td>'+
         '<td>'+uptimeHtml+'</td>'+
         '<td>'+speedHtml+'</td>'+
-        '<td class="text-right" style="white-space:normal;min-width:130px">'+dayHtml+'</td>'+
-        '<td class="text-right" style="white-space:normal;min-width:130px">'+monthHtml+'</td>'+
+        '<td>'+httpPortHtml+'</td>'+
+        '<td>'+socksPortHtml+'</td>'+
+        '<td>'+loginHtml+'</td>'+
+        '<td>'+passwordHtml+'</td>'+
+        '<td class="text-right" style="white-space:nowrap">'+dayHtml+'</td>'+
+        '<td class="text-right" style="white-space:nowrap">'+yesterdayHtml+'</td>'+
+        '<td class="text-right" style="white-space:nowrap">'+monthHtml+'</td>'+
         '<td>'+
           '<button class="action-btn-sm" onclick="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+row.serverName+'\',this)" title="Сброс IP">\u{1F504}</button> '+
           '<button class="action-btn-sm" onclick="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+row.serverName+'\',\''+escapeHtml(row.imei)+'\')" title="IP история">\u{1F4C3}</button>'+
@@ -1028,12 +1046,11 @@ function updateSummary(){
     totalMonthOut+=tableData[i].monthOut;
   }
 
-  // Change #10: Main value = total, sub lines = Скачано + Загружено
   document.getElementById('totalDayTotal').innerHTML=formatBytes(totalDayIn+totalDayOut);
-  document.getElementById('totalDaySplit').innerHTML='\u0421\u043A\u0430\u0447\u0430\u043D\u043E: '+formatBytes(totalDayIn)+'<br>\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E: '+formatBytes(totalDayOut);
+  document.getElementById('totalDaySplit').innerHTML='\u2193 '+formatBytes(totalDayIn)+' / \u2191 '+formatBytes(totalDayOut);
 
   document.getElementById('totalMonthTotal').innerHTML=formatBytes(totalMonthIn+totalMonthOut);
-  document.getElementById('totalMonthSplit').innerHTML='\u0421\u043A\u0430\u0447\u0430\u043D\u043E: '+formatBytes(totalMonthIn)+'<br>\u0417\u0430\u0433\u0440\u0443\u0436\u0435\u043D\u043E: '+formatBytes(totalMonthOut);
+  document.getElementById('totalMonthSplit').innerHTML='\u2193 '+formatBytes(totalMonthIn)+' / \u2191 '+formatBytes(totalMonthOut);
 
   // Dynamic billing calculation
   var costEl=document.getElementById('totalMonthCost');
@@ -1133,11 +1150,10 @@ function showIpHistory(nick,serverName,imei){
       .then(function(r){return r.json()}).then(function(hist){
         if(hist.length>0){
           h+='<h4 style="margin-top:16px;margin-bottom:8px;color:var(--text-0);font-size:13px">IP трекинг</h4>';
-          h+='<table class="log-table"><thead><tr><th>IP</th><th>С</th><th>До</th><th>Длительность</th></tr></thead><tbody>';
-          hist.slice().reverse().forEach(function(e){
-            // Change #9: Format date+time as "27.02.2026, 15:07:50"
+          h+='<table class="log-table"><thead><tr><th>Время</th><th>Старый IP</th><th>Новый IP</th><th>Длительность</th></tr></thead><tbody>';
+          var reversed=hist.slice().reverse();
+          reversed.forEach(function(e,idx){
             var from=e.from?formatDateTime(new Date(e.from)):'\u2014';
-            var to=e.to?formatDateTime(new Date(e.to)):'сейчас';
             var dur='';
             if(e.from){
               var ms=(e.to||Date.now())-e.from;
@@ -1145,7 +1161,12 @@ function showIpHistory(nick,serverName,imei){
               var mins=Math.floor((ms%3600000)/60000);
               dur=hrs>0?hrs+'ч '+mins+'м':mins+'м';
             }
-            h+='<tr><td>'+e.ip+'</td><td>'+from+'</td><td>'+to+'</td><td>'+dur+'</td></tr>';
+            // Compute old IP from the previous entry (next in reversed = previous chronologically)
+            var oldIp='\u2014';
+            if(idx<reversed.length-1){
+              oldIp=reversed[idx+1].ip||'\u2014';
+            }
+            h+='<tr><td>'+from+'</td><td>'+oldIp+'</td><td>'+e.ip+'</td><td>'+dur+'</td></tr>';
           });
           h+='</tbody></table>';
         }
@@ -1176,42 +1197,15 @@ function closeIpModal(){document.getElementById('ipModal').classList.remove('sho
 document.getElementById('ipModal').addEventListener('click',function(e){if(e.target===this) closeIpModal()});
 document.addEventListener('keydown',function(e){if(e.key==='Escape') closeIpModal()});
 
-// --- Proxy table (now rendered on traffic tab) ---
-// Change #1: S5 -> SOCKS5 button text
-// Change #2: Moved to traffic tab
+// --- Proxy table: credentials are now inline in the main traffic table ---
 function renderProxyTable(){
-  var html='';
-  var hasProxy=false;
-  tableData.forEach(function(row){
-    if(!row.proxyLogin) return;
-    hasProxy=true;
-    var ci=COUNTRIES[row.serverName]||{};
-    var serverIp=ci.serverIp||'';
-    html+='<tr>'+
-      '<td class="modem-nick">'+escapeHtml(row.modemNick)+'</td>'+
-      '<td class="mono" style="font-size:11px;color:var(--text-2)">'+serverIp+'</td>'+
-      '<td class="mono">'+row.httpPort+' <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.httpPort+'\',this)">\u{1F4CB}</button></td>'+
-      '<td class="mono">'+row.socksPort+' <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.socksPort+'\',this)">\u{1F4CB}</button></td>'+
-      '<td class="mono">'+escapeHtml(row.proxyLogin)+' <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyLogin)+'\',this)">\u{1F4CB}</button></td>'+
-      '<td class="mono">'+escapeHtml(row.proxyPassword)+' <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyPassword)+'\',this)">\u{1F4CB}</button></td>'+
-      '<td>'+
-        (row.httpCreds?'<button class="action-btn-sm" onclick="copyText(\''+escapeHtml(row.httpCreds)+'\',this)" title="HTTP полная строка">HTTP</button> ':'')+
-        (row.socks5Creds?'<button class="action-btn-sm" onclick="copyText(\''+escapeHtml(row.socks5Creds)+'\',this)" title="SOCKS5 полная строка">SOCKS5</button>':'')+
-      '</td>'+
-    '</tr>';
-  });
+  var hasProxy=tableData.some(function(r){return !!r.proxyLogin});
 
-  document.getElementById('proxyBody').innerHTML=html||'<tr><td colspan="7" style="text-align:center;color:var(--text-2);padding:20px">Нет данных</td></tr>';
-
-  // Show/hide proxy section
+  // Show/hide export buttons
   if(hasProxy){
-    document.getElementById('proxyCredentialsHeading').style.display='block';
     document.getElementById('proxyExportButtons').style.display='flex';
-    document.getElementById('proxyTableWrapper').style.display='block';
   }else{
-    document.getElementById('proxyCredentialsHeading').style.display='none';
     document.getElementById('proxyExportButtons').style.display='none';
-    document.getElementById('proxyTableWrapper').style.display='none';
   }
 
   // Show API info if billing has apiKey
@@ -1224,15 +1218,9 @@ function renderProxyTable(){
   }
 }
 
-// Change #4: Direct ProxySmart reset URL, build export from tableData directly
+// Use RESET_SECURE_LINK from API data
 function getResetUrl(row){
-  var nick=row.modemNick;
-  if(nick.startsWith('MD')){
-    return 'http://proxy:1bfbc0e1ecef@89.149.100.92:7002/apix/reset_modem?arg='+encodeURIComponent(nick);
-  }else if(nick.startsWith('RO')){
-    return 'http://proxy:04cd68ce892d@31.5.194.89:7001/apix/reset_modem?arg='+encodeURIComponent(nick);
-  }
-  return '';
+  return row.resetSecureLink||'';
 }
 
 function exportCredentials(){
@@ -1241,7 +1229,7 @@ function exportCredentials(){
     if(!row.proxyLogin) return;
     var ci=COUNTRIES[row.serverName]||{};
     var serverIp=ci.serverIp||'';
-    var resetUrl=getResetUrl(row);
+    var resetUrl=row.resetSecureLink||'';
     lines.push(serverIp+':'+row.httpPort+':'+row.proxyLogin+':'+row.proxyPassword+'|'+resetUrl);
   });
   if(!lines.length){showToast('Нет данных для экспорта','error');return}
@@ -1281,18 +1269,24 @@ function checkProxies(){
   btn.textContent='Проверка...';
   document.getElementById('checkProxyResults').innerHTML='<div class="loading-overlay" style="padding:20px"><div class="spinner"></div><span>Проверяем '+lines.length+' прокси...</span></div>';
 
+  var proxies=lines.map(function(l){
+    var p=l.trim().split(':');
+    return {ip:p[0],port:parseInt(p[1])||0,login:p[2]||'',password:p[3]||''};
+  });
+
   fetch('/api/tools/check_proxy',{
     method:'POST',
     headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-    body:JSON.stringify({proxies:lines})
+    body:JSON.stringify({proxies:proxies})
   }).then(function(r){return r.json()}).then(function(results){
     btn.disabled=false;btn.textContent='Проверить';
     var arr=Array.isArray(results)?results:results.results||[];
     if(!arr.length){document.getElementById('checkProxyResults').innerHTML='<p style="color:var(--text-2)">Нет результатов</p>';return}
-    var h='<table class="data-table"><thead><tr><th>Прокси</th><th>Статус</th><th>Время (мс)</th><th>IP</th></tr></thead><tbody>';
+    var h='<table class="data-table"><thead><tr><th>Прокси</th><th>Статус</th><th>Время (мс)</th><th>IP</th><th>Ошибка</th></tr></thead><tbody>';
     arr.forEach(function(r){
-      var cls=r.ok?'check-result-ok':'check-result-fail';
-      h+='<tr><td class="mono">'+escapeHtml(r.proxy||'')+'</td><td class="'+cls+'">'+(r.ok?'OK':'Fail')+'</td><td>'+(r.time||'-')+'</td><td class="mono">'+(r.ip||'-')+'</td></tr>';
+      var cls=r.working?'check-result-ok':'check-result-fail';
+      var proxyLabel=r.ip+':'+r.port;
+      h+='<tr><td class="mono">'+escapeHtml(proxyLabel)+'</td><td class="'+cls+'">'+(r.working?'OK':'Fail')+'</td><td>'+(r.responseTime||'-')+'</td><td class="mono">'+(r.detectedIp||'-')+'</td><td>'+(r.error?escapeHtml(r.error):'-')+'</td></tr>';
     });
     document.getElementById('checkProxyResults').innerHTML=h+'</tbody></table>';
   }).catch(function(e){
