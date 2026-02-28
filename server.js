@@ -323,6 +323,20 @@ async function fetchServerData(server) {
   return { bw, status, ports, serverName: server.name };
 }
 
+// Fetch data from all servers, skipping unreachable ones instead of failing entirely
+async function fetchAllServersData() {
+  const settled = await Promise.allSettled(apiServers.map(s => fetchServerData(s)));
+  const results = [];
+  for (let i = 0; i < settled.length; i++) {
+    if (settled[i].status === 'fulfilled') {
+      results.push(settled[i].value);
+    } else {
+      console.log(`[API] Server ${apiServers[i].name} unreachable: ${settled[i].reason?.message || 'unknown'}`);
+    }
+  }
+  return results;
+}
+
 function filterByPortName(data, portNameFilter) {
   const { bw, status, ports } = data;
   const allowedPortIds = new Set();
@@ -666,7 +680,7 @@ function getSpeedtestLatest() {
 
 app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
   try {
-    const results = await Promise.all(apiServers.map(s => fetchServerData(s)));
+    const results = await fetchAllServersData();
     const merged = mergeServerData(results, req.user.portNameFilter);
     const clientInfo = clients.find(c => c.login === req.user.login);
     if (clientInfo) {
@@ -768,7 +782,7 @@ app.get('/api/client/ip_history', authMiddleware, (req, res) => {
 
 app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
   try {
-    const results = await Promise.all(apiServers.map(s => fetchServerData(s)));
+    const results = await fetchAllServersData();
     const merged = mergeServerData(results, req.user.portNameFilter);
 
     const COUNTRIES = { S1: { serverIp: '89.149.100.92' }, S2: { serverIp: '31.5.194.89' } };
@@ -876,7 +890,7 @@ app.get('/api/v1/proxies', async (req, res) => {
   if (!client) return res.status(401).json({ error: 'Invalid API key' });
 
   try {
-    const results = await Promise.all(apiServers.map(s => fetchServerData(s)));
+    const results = await fetchAllServersData();
     const merged = mergeServerData(results, client.portName);
 
     const COUNTRIES = { S1: { serverIp: '89.149.100.92' }, S2: { serverIp: '31.5.194.89' } };
@@ -936,7 +950,7 @@ app.get('/api/v1/proxies', async (req, res) => {
 
 app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const results = await Promise.all(apiServers.map(s => fetchServerData(s)));
+    const results = await fetchAllServersData();
     const merged = mergeServerData(results, '*');
     const servers = apiServers.map(s => ({ name: s.name, url: s.url }));
     // Include server auth info for direct reset URLs
@@ -1042,7 +1056,7 @@ app.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req
   const client = clients[idx];
 
   try {
-    const results = await Promise.all(apiServers.map(s => fetchServerData(s)));
+    const results = await fetchAllServersData();
     let hasActivePorts = false;
     for (const data of results) {
       if (typeof data.bw === 'object') {
@@ -1736,7 +1750,7 @@ function scheduleNightly(hour, label, fn) {
 
 async function autoCreateMissingClients() {
   try {
-    const results = await Promise.all(apiServers.map(s => fetchServerData(s)));
+    const results = await fetchAllServersData();
     const existingPortNames = new Set(clients.map(c => c.portName));
     const allPortNames = new Set();
 
