@@ -954,7 +954,106 @@ app.get('/api/client/documents/:docId/download', authMiddleware, (req, res) => {
   res.download(filePath, doc.name);
 });
 
-// ==================== PUBLIC: PROXY API (apiKey-based) ====================
+// ==================== PUBLIC: PROXY API v2 (Evomi-style, apiKey via header or query) ====================
+
+app.get('/api/v1/proxy', async (req, res) => {
+  const apiKey = req.headers['x-api-key'] || req.query.apikey;
+  if (!apiKey) return res.status(401).json({ success: false, error: 'API key required. Pass via X-API-Key header or ?apikey= query parameter.' });
+
+  const client = clients.find(c => c.apiKey === apiKey);
+  if (!client) return res.status(401).json({ success: false, error: 'Invalid API key' });
+
+  try {
+    const results = await fetchAllServersData();
+    const merged = mergeServerData(results, client.portName);
+
+    const COUNTRIES = { S1: { serverIp: '89.149.100.92', country: 'MD', name: 'Moldova' }, S2: { serverIp: '31.5.194.89', country: 'RO', name: 'Romania' } };
+    const serverResetMap = {};
+    for (const s of apiServers) {
+      serverResetMap[s.name] = { url: s.url, user: s.user, pass: s.pass };
+    }
+
+    const proxies = [];
+    for (const [imei, portList] of Object.entries(merged.ports)) {
+      const serverName = imei.startsWith('S1_') ? 'S1' : imei.startsWith('S2_') ? 'S2' : '';
+      const ci = COUNTRIES[serverName] || {};
+      let modemNick = imei;
+      let operator = '', isOnline = false;
+      for (const m of merged.status) {
+        if (m.modem_details?.IMEI === imei) {
+          modemNick = m.modem_details.NICK || imei;
+          operator = m.net_details?.CELLOP || '';
+          isOnline = m.STATE === 'added' && m.IS_REBOOTING !== 'true';
+          break;
+        }
+      }
+      const srv = serverResetMap[serverName];
+      let changeIpUrl = '';
+      if (srv) {
+        const urlObj = new URL(srv.url);
+        changeIpUrl = `${urlObj.protocol}//${srv.user}:${srv.pass}@${urlObj.host}/apix/reset_modem?arg=${encodeURIComponent(modemNick)}`;
+      }
+      for (const p of portList) {
+        if (p.LOGIN && p.PASSWORD && ci.serverIp) {
+          proxies.push({
+            id: modemNick,
+            host: ci.serverIp,
+            ports: { http: parseInt(p.HTTP_PORT) || 0, socks5: parseInt(p.SOCKS_PORT) || 0 },
+            username: p.LOGIN,
+            password: p.PASSWORD,
+            country: ci.country || '',
+            country_name: ci.name || '',
+            operator,
+            online: isOnline,
+            change_ip_url: changeIpUrl
+          });
+        }
+      }
+    }
+
+    // Billing
+    const clientInfo = clients.find(c => c.login === client.login);
+    const totalPayments = clientInfo ? (clientInfo.payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0) : 0;
+
+    // Bandwidth totals (in MB)
+    let monthMb = 0;
+    const parseToMb = (str) => {
+      if (!str || str === 0) return 0;
+      const s = String(str);
+      const m = s.match(/([\d.]+)\s*(TB|GB|MB|KB|B)?/i);
+      if (!m) return 0;
+      const val = parseFloat(m[1]);
+      const u = (m[2] || '').toUpperCase();
+      if (u === 'TB') return val * 1024 * 1024;
+      if (u === 'GB') return val * 1024;
+      if (u === 'MB') return val;
+      if (u === 'KB') return val / 1024;
+      return 0; // no unit = likely 0
+    };
+    for (const b of Object.values(merged.bandwidth)) {
+      monthMb += parseToMb(b.bandwidth_bytes_month_in);
+      monthMb += parseToMb(b.bandwidth_bytes_month_out);
+    }
+
+    res.json({
+      success: true,
+      client: client.name,
+      billing: {
+        type: clientInfo?.billingType || 'per_gb',
+        price_per_gb: clientInfo?.price || 0,
+        currency: clientInfo?.currency || 'RUB',
+        balance: totalPayments,
+        usage_mb: Math.round(monthMb)
+      },
+      proxies,
+      proxy_count: proxies.length
+    });
+  } catch (err) {
+    res.status(502).json({ success: false, error: 'Failed to fetch proxy data' });
+  }
+});
+
+// ==================== PUBLIC: PROXY API v1 (legacy, kept for backward compat) ====================
 
 app.get('/api/v1/proxies', async (req, res) => {
   const { apiKey, format } = req.query;
