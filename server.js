@@ -676,8 +676,8 @@ async function runNightlySpeedtests() {
               raw: result
             };
 
-            // Re-test if DL or UL is 0 or very close to 0 (< 0.1 Mbps)
-            if ((dl < 0.1 || ul < 0.1) && dl + ul > 0) {
+            // Re-test if DL or UL is below 1 Mbps
+            if ((dl < 1 || ul < 1)) {
               console.log(`[Speedtest] ${nick}: DL=${dl} UL=${ul} — near-zero detected, re-testing in 10 min...`);
               setTimeout(async () => {
                 try {
@@ -699,7 +699,7 @@ async function runNightlySpeedtests() {
                   }
                   // Use retry result if better
                   if (rdl + rul > dl + ul) {
-                    const retryEntry = { date: new Date().toISOString(), download: rdl, upload: rul, ping: rping, raw: retryResult, retry: true };
+                    const retryEntry = { date: new Date().toISOString(), download: rdl, upload: rul, ping: rping, raw: retryResult, retry: true, ...(rdl < 1 || rul < 1 ? { _lowSpeed: true } : {}) };
                     if (!speedtestHistory[key]) speedtestHistory[key] = [];
                     speedtestHistory[key].push(retryEntry);
                     if (speedtestHistory[key].length > MAX_SPEEDTEST_ENTRIES) speedtestHistory[key] = speedtestHistory[key].slice(-MAX_SPEEDTEST_ENTRIES);
@@ -744,7 +744,7 @@ function getSpeedtestLatest() {
   for (const [key, entries] of Object.entries(speedtestHistory)) {
     if (entries.length > 0) {
       const last = entries[entries.length - 1];
-      latest[key] = { download: last.download, upload: last.upload, ping: last.ping, date: last.date };
+      latest[key] = { download: last.download, upload: last.upload, ping: last.ping, date: last.date, ...(last._lowSpeed ? { _lowSpeed: true } : {}) };
     }
   }
   return latest;
@@ -1620,7 +1620,7 @@ app.post('/api/tools/check_proxy', authMiddleware, async (req, res) => {
               'Host': target.host,
               ...(proxyAuth ? { 'Proxy-Authorization': 'Basic ' + Buffer.from(proxyAuth).toString('base64') } : {})
             },
-            timeout: 5000
+            timeout: 3000
           }, (proxyRes) => {
             let data = '';
             proxyRes.on('data', chunk => data += chunk);
@@ -1651,10 +1651,10 @@ app.post('/api/tools/check_proxy', authMiddleware, async (req, res) => {
     }
   }
 
-  // Run checks in parallel (batches of 10)
+  // Run checks in parallel (batches of 15)
   const results = [];
-  for (let i = 0; i < toCheck.length; i += 10) {
-    const batch = toCheck.slice(i, i + 10);
+  for (let i = 0; i < toCheck.length; i += 15) {
+    const batch = toCheck.slice(i, i + 15);
     const batchResults = await Promise.all(batch.map(p => checkOneProxy(p)));
     results.push(...batchResults);
   }

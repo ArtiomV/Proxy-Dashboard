@@ -474,7 +474,7 @@
         <div id="balanceWarning"></div>
         <div id="errorContainer"></div>
 
-        <!-- Traffic table: 7 columns: Модем, HTTP, SOCKS5, Логин/Пароль, Сегодня, Вчера, Действия -->
+        <!-- Traffic table: 7 columns: Модем, Реквизиты, Логин:Пароль, Смена IP, Сегодня, Вчера, Месяц -->
         <div class="table-wrapper">
           <div class="loading-overlay" id="loading">
             <div class="spinner"></div>
@@ -484,12 +484,12 @@
             <thead>
               <tr>
                 <th onclick="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
-                <th>HTTP</th>
-                <th>SOCKS5</th>
-                <th>Логин / Пароль</th>
+                <th>Реквизиты</th>
+                <th>Логин:Пароль</th>
+                <th style="text-align:center">Смена IP</th>
                 <th onclick="sortTable('dayIn')" class="text-right">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
                 <th onclick="sortTable('yesterdayIn')" class="text-right">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
-                <th>Действия</th>
+                <th onclick="sortTable('monthIn')" class="text-right">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
               </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -731,9 +731,9 @@ function formatBytes(bytes){
   return bytes.toFixed(1)+' '+units[i];
 }
 
-// Change #8: Cost display without spaces - use Math.ceil(x).toString() instead of toLocaleString
+// Cost display without spaces - use Math.round for proper rounding
 function formatCost(amount){
-  return Math.ceil(amount).toString();
+  return Math.round(amount).toString();
 }
 
 function formatCurrencyLabel(currency){
@@ -763,10 +763,6 @@ function showToast(msg,type){
   e.textContent=msg;
   c.appendChild(e);
   setTimeout(function(){e.remove()},4000);
-}
-
-function showSpeed(dl,ul){
-  showToast('Скорость: \u2193 '+dl.toFixed(1)+' / \u2191 '+ul.toFixed(1)+' Мбит/с','info');
 }
 
 // --- Clipboard with fallback ---
@@ -924,7 +920,7 @@ async function loadData(){
   }
 }
 
-// Traffic table: 7 columns: Модем(+status dot), HTTP, SOCKS5, Логин/Пароль, Сегодня, Вчера, Действия
+// Traffic table: 7 columns: Модем, Реквизиты, Логин:Пароль, Смена IP, Сегодня, Вчера, Месяц
 function renderTable(){
   var rows=tableData.slice();
 
@@ -969,15 +965,12 @@ function renderTable(){
 
     var name=countryNames[country]||country;
     var count=groupRows.length;
-    var dayIn=0,dayOut=0,yesterdayIn=0,yesterdayOut=0;
-    for(var j=0;j<groupRows.length;j++){dayIn+=groupRows[j].dayIn;dayOut+=groupRows[j].dayOut;yesterdayIn+=groupRows[j].yesterdayIn;yesterdayOut+=groupRows[j].yesterdayOut}
 
     // colspan=7 for 7 columns
     html+='<tr class="country-header">'+
       '<td colspan="7">'+
         name+
         '<span class="country-count">'+count+' модемов</span>'+
-        '<span class="country-stats">Сегодня: '+formatBytes(dayIn+dayOut)+' | Вчера: '+formatBytes(yesterdayIn+yesterdayOut)+'</span>'+
       '</td>'+
     '</tr>';
 
@@ -987,46 +980,54 @@ function renderTable(){
       // Arrow notation for traffic
       var dayHtml='\u2193 '+formatBytes(row.dayIn)+' / \u2191 '+formatBytes(row.dayOut);
       var yesterdayHtml='\u2193 '+formatBytes(row.yesterdayIn)+' / \u2191 '+formatBytes(row.yesterdayOut);
+      var monthHtml='\u2193 '+formatBytes(row.monthIn)+' / \u2191 '+formatBytes(row.monthOut);
 
       // Status dot before modem name
       var statusDotCls=row.online==='yes'?'online':'offline';
 
-      // Proxy credential cells
+      // Реквизиты cell: HTTP and SOCKS5 on separate lines with labels
       var ci2=COUNTRIES[row.serverName]||{};
       var serverIp=ci2.serverIp||'';
-      var httpPortHtml=row.httpPort?'<span class="mono">'+serverIp+':'+row.httpPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.httpPort+'\',this)">📋</button>':'-';
-      var socksPortHtml=row.socksPort?'<span class="mono">'+serverIp+':'+row.socksPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.socksPort+'\',this)">📋</button>':'-';
+      var reqHtml='-';
+      if(row.httpPort||row.socksPort){
+        reqHtml='';
+        if(row.httpPort){
+          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">HTTP:</span> <span class="mono">'+serverIp+':'+row.httpPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.httpPort+'\',this)">\ud83d\udccb</button></div>';
+        }
+        if(row.socksPort){
+          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">SOCKS5:</span> <span class="mono">'+serverIp+':'+row.socksPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.socksPort+'\',this)">\ud83d\udccb</button></div>';
+        }
+      }
 
-      // Merged login/password cell
+      // Логин:Пароль cell: one line, plain text, single copy button
       var loginPassHtml='-';
       if(row.proxyLogin||row.proxyPassword){
-        loginPassHtml='<div><span class="mono">'+escapeHtml(row.proxyLogin)+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyLogin)+'\',this)">📋</button></div>'+
-          '<div><span class="mono pass-hidden" onclick="this.classList.toggle(\'pass-hidden\');this.textContent=this.classList.contains(\'pass-hidden\')?\'••••••••\':\''+escapeHtml(row.proxyPassword)+'\'">••••••••</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyPassword)+'\',this)">📋</button></div>';
+        var loginPassStr=escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword);
+        loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword)+'\',this)">\ud83d\udccb</button>';
       }
 
-      // Speed button for actions
-      var speedBtn='';
-      if(row.speedDl||row.speedUl){
-        speedBtn='<button class="action-btn-sm" onclick="showSpeed('+Number(row.speedDl).toFixed(1)+','+Number(row.speedUl).toFixed(1)+')" title="Скорость: \u2193'+Number(row.speedDl).toFixed(1)+' / \u2191'+Number(row.speedUl).toFixed(1)+' Мбит/с">\u26A1</button> ';
+      // Смена IP cell: reset link + IP history button
+      var changeIpHtml='';
+      if(row.resetSecureLink){
+        changeIpHtml+='<a href="'+escapeHtml(row.resetSecureLink)+'" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12px" title="Сброс IP">\ud83d\udd04 Сброс</a> ';
+      }else{
+        changeIpHtml+='<button class="action-btn-sm" onclick="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+row.serverName+'\',this)" title="Сброс IP">\ud83d\udd04</button> ';
       }
+      changeIpHtml+='<button class="action-btn-sm" onclick="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+row.serverName+'\',\''+escapeHtml(row.imei)+'\')" title="IP история" style="font-size:12px">\ud83d\udcc3</button>';
 
       var rowStyle=row._cached?'opacity:0.6':'';
       html+='<tr style="'+rowStyle+'">'+
         '<td>'+
           '<span class="status-dot '+statusDotCls+'"></span>'+
-          '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+(row._cached?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="Данные из кеша — сервер недоступен">КЕШ</span>':'')+
+          '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+(row._cached?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="\u0414\u0430\u043d\u043d\u044b\u0435 \u0438\u0437 \u043a\u0435\u0448\u0430 \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d">\u041a\u0415\u0428</span>':'')+
           '<br><span style="font-size:11px;color:var(--text-3);margin-left:14px">'+escapeHtml(row.operator)+'</span>'+
         '</td>'+
-        '<td>'+httpPortHtml+'</td>'+
-        '<td>'+socksPortHtml+'</td>'+
+        '<td>'+reqHtml+'</td>'+
         '<td>'+loginPassHtml+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+changeIpHtml+'</td>'+
         '<td class="text-right" style="white-space:nowrap">'+dayHtml+'</td>'+
         '<td class="text-right" style="white-space:nowrap">'+yesterdayHtml+'</td>'+
-        '<td>'+
-          speedBtn+
-          '<button class="action-btn-sm" onclick="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+row.serverName+'\',this)" title="Сброс IP">\u{1F504}</button> '+
-          '<button class="action-btn-sm" onclick="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+row.serverName+'\',\''+escapeHtml(row.imei)+'\')" title="IP история">\u{1F4C3}</button>'+
-        '</td>'+
+        '<td class="text-right" style="white-space:nowrap">'+monthHtml+'</td>'+
       '</tr>';
     }
   }
@@ -1100,7 +1101,7 @@ function updateSummary(){
     }
   }else{
     cost=monthGb*23;
-    costEl.textContent=Math.ceil(cost).toString();
+    costEl.textContent=Math.round(cost).toString();
     infoEl.innerHTML='23/\u0413\u0411 \u00D7 '+monthGb.toFixed(2)+' \u0413\u0411';
   }
 
