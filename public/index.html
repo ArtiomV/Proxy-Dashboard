@@ -888,9 +888,22 @@ async function loadData(){
           yesterdayOut:parseBW(bw.bandwidth_bytes_yesterday_out),
           monthIn:parseBW(bw.bandwidth_bytes_month_in),
           monthOut:parseBW(bw.bandwidth_bytes_month_out),
+          _cached:!!bw._cached,
           _end:0
         });
       }
+    }
+
+    // Show warning if some servers returned cached data
+    var cachedServers=data.cachedServers||[];
+    if(cachedServers.length>0){
+      var cacheWarnings=cachedServers.map(function(s){
+        var ago=Math.round((Date.now()-s.cachedAt)/60000);
+        return s.name+' (данные '+ago+' мин. назад)';
+      }).join(', ');
+      document.getElementById('errorContainer').innerHTML=
+        '<div style="padding:10px 16px;background:rgba(210,153,34,0.15);border:1px solid rgba(210,153,34,0.3);border-radius:8px;color:var(--warning);font-size:12px;margin-bottom:12px">'+
+        '\u26A0\uFE0F Сервер недоступен: '+escapeHtml(cacheWarnings)+'. Трафик и доступы отображаются из кеша. Модемы помечены как offline.</div>';
     }
 
     renderTable();
@@ -899,7 +912,7 @@ async function loadData(){
 
     var now=new Date().toLocaleString('ru-RU');
     document.getElementById('lastUpdate').textContent='Обновлено: '+now;
-    setStatus('ok','OK');
+    setStatus(cachedServers.length>0?'loading':'ok',cachedServers.length>0?'Частичные данные':'OK');
 
   }catch(err){
     if(err.message==='Сессия истекла') return;
@@ -997,10 +1010,11 @@ function renderTable(){
         speedBtn='<button class="action-btn-sm" onclick="showSpeed('+Number(row.speedDl).toFixed(1)+','+Number(row.speedUl).toFixed(1)+')" title="Скорость: \u2193'+Number(row.speedDl).toFixed(1)+' / \u2191'+Number(row.speedUl).toFixed(1)+' Мбит/с">\u26A1</button> ';
       }
 
-      html+='<tr>'+
+      var rowStyle=row._cached?'opacity:0.6':'';
+      html+='<tr style="'+rowStyle+'">'+
         '<td>'+
           '<span class="status-dot '+statusDotCls+'"></span>'+
-          '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+
+          '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+(row._cached?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="Данные из кеша — сервер недоступен">КЕШ</span>':'')+
           '<br><span style="font-size:11px;color:var(--text-3);margin-left:14px">'+escapeHtml(row.operator)+'</span>'+
         '</td>'+
         '<td>'+httpPortHtml+'</td>'+

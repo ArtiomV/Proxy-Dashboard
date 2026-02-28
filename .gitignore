@@ -1,0 +1,11 @@
+node_modules/
+.env
+sessions.json
+server_cache.json
+clients.json
+ip_history.json
+ip_tracking.json
+uptime_tracking.json
+speedtest_history.json
+top_hosts_cache.json
+server.js.bak

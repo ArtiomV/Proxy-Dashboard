@@ -314,16 +314,78 @@ function findServer(serverName) {
 
 // ==================== DATA FETCHING & MERGING ====================
 
+// ===== SERVER DATA CACHE =====
+// Preserves modem data + traffic when a server goes down temporarily
+const SERVER_CACHE_FILE = path.join(__dirname, 'server_cache.json');
+let serverCache = {};
+try {
+  if (fs.existsSync(SERVER_CACHE_FILE)) {
+    serverCache = JSON.parse(fs.readFileSync(SERVER_CACHE_FILE, 'utf8'));
+    console.log(`Loaded server cache: ${Object.keys(serverCache).length} server(s) cached`);
+  }
+} catch (e) { console.error('Failed to load server_cache:', e.message); }
+
+function saveServerCache() {
+  try { fs.writeFileSync(SERVER_CACHE_FILE, JSON.stringify(serverCache)); }
+  catch (e) { console.error('Failed to save server_cache:', e.message); }
+}
+
+function cacheServerData(data) {
+  serverCache[data.serverName] = {
+    bw: data.bw,
+    status: data.status,
+    ports: data.ports,
+    serverName: data.serverName,
+    cachedAt: Date.now()
+  };
+  saveServerCache();
+}
+
+// When server is down, mark all modems as offline but keep bandwidth + ports
+function getCachedDataAsOffline(serverName) {
+  const cached = serverCache[serverName];
+  if (!cached) return null;
+
+  const ageMinutes = Math.round((Date.now() - cached.cachedAt) / 60000);
+  console.log(`[Cache] Using cached data for ${serverName} (${ageMinutes} min old)`);
+
+  // Mark all modems in status as offline + _cached flag
+  let offlineStatus = [];
+  if (Array.isArray(cached.status)) {
+    offlineStatus = cached.status.map(m => {
+      const copy = JSON.parse(JSON.stringify(m));
+      if (copy.net_details) {
+        copy.net_details.IS_ONLINE = 'no';
+      }
+      copy._cached = true;
+      copy._cachedAt = cached.cachedAt;
+      return copy;
+    });
+  }
+
+  return {
+    bw: cached.bw || {},
+    status: offlineStatus,
+    ports: cached.ports || {},
+    serverName: serverName,
+    _cached: true,
+    _cachedAt: cached.cachedAt
+  };
+}
+
 async function fetchServerData(server) {
   const [bw, status, ports] = await Promise.all([
     fetchApi(server, '/apix/bandwidth_report_all'),
     fetchApi(server, '/apix/show_status_json'),
     fetchApi(server, '/apix/list_ports_json')
   ]);
-  return { bw, status, ports, serverName: server.name };
+  const result = { bw, status, ports, serverName: server.name };
+  // Cache successful response
+  cacheServerData(result);
+  return result;
 }
 
-// Fetch data from all servers, skipping unreachable ones instead of failing entirely
+// Fetch data from all servers; use cache for unreachable ones
 async function fetchAllServersData() {
   const settled = await Promise.allSettled(apiServers.map(s => fetchServerData(s)));
   const results = [];
@@ -331,7 +393,15 @@ async function fetchAllServersData() {
     if (settled[i].status === 'fulfilled') {
       results.push(settled[i].value);
     } else {
-      console.log(`[API] Server ${apiServers[i].name} unreachable: ${settled[i].reason?.message || 'unknown'}`);
+      const srvName = apiServers[i].name;
+      console.log(`[API] Server ${srvName} unreachable: ${settled[i].reason?.message || 'unknown'}`);
+      // Try to use cached data
+      const cached = getCachedDataAsOffline(srvName);
+      if (cached) {
+        results.push(cached);
+      } else {
+        console.log(`[API] No cache available for ${srvName}`);
+      }
     }
   }
   return results;
@@ -372,13 +442,17 @@ function filterByPortName(data, portNameFilter) {
 
 function mergeServerData(allData, portNameFilter) {
   const mergedBw = {}, mergedStatus = [], mergedPorts = {};
+  const cachedServers = [];
   for (const data of allData) {
     const filtered = portNameFilter === '*' ? data : filterByPortName(data, portNameFilter);
     const prefix = data.serverName + '_';
-    for (const [portId, b] of Object.entries(filtered.bw)) { mergedBw[prefix + portId] = { ...b, _server: data.serverName }; }
+    const isCached = !!data._cached;
+    if (isCached) cachedServers.push({ name: data.serverName, cachedAt: data._cachedAt });
+    for (const [portId, b] of Object.entries(filtered.bw)) { mergedBw[prefix + portId] = { ...b, _server: data.serverName, _cached: isCached }; }
     const statusArr = Array.isArray(filtered.status) ? filtered.status : [];
     for (const m of statusArr) {
       const entry = { ...m, _server: data.serverName };
+      if (isCached) entry._cached = true;
       if (entry.modem_details && entry.modem_details.IMEI) {
         entry.modem_details = { ...entry.modem_details, IMEI: prefix + entry.modem_details.IMEI };
       }
@@ -387,11 +461,11 @@ function mergeServerData(allData, portNameFilter) {
     const portsObj = typeof filtered.ports === 'object' ? filtered.ports : {};
     for (const [imei, portList] of Object.entries(portsObj)) {
       const prefixedImei = prefix + imei;
-      const prefixedPorts = portList.map(p => ({ ...p, portID: p.portID ? prefix + p.portID : p.portID, _server: data.serverName }));
+      const prefixedPorts = portList.map(p => ({ ...p, portID: p.portID ? prefix + p.portID : p.portID, _server: data.serverName, _cached: isCached }));
       mergedPorts[prefixedImei] = (mergedPorts[prefixedImei] || []).concat(prefixedPorts);
     }
   }
-  return { bandwidth: mergedBw, status: mergedStatus, ports: mergedPorts, modemLogins };
+  return { bandwidth: mergedBw, status: mergedStatus, ports: mergedPorts, modemLogins, cachedServers };
 }
 
 // ==================== IP TRACKING & UPTIME TRACKING ====================
