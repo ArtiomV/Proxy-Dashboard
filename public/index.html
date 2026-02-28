@@ -377,6 +377,106 @@
     }
     .api-info-card h4{color:var(--text-0);font-size:14px;font-weight:600;margin-bottom:4px}
 
+    /* API docs */
+    .api-docs{padding:0}
+    .api-docs h2{font-size:20px;font-weight:700;color:var(--text-0);margin:0 0 6px 0}
+    .api-docs .api-lead{color:var(--text-2);font-size:14px;margin-bottom:24px}
+    .api-docs .api-section{
+      background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      border:1px solid var(--card-border);border-radius:12px;
+      padding:20px 24px;margin-bottom:16px;box-shadow:var(--card-shadow);
+    }
+    .api-docs .api-section h3{font-size:15px;font-weight:700;color:var(--text-0);margin:0 0 4px 0;display:flex;align-items:center;gap:8px}
+    .api-docs .api-section h3 .method{
+      font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;
+      font-family:var(--font-mono);letter-spacing:.5px;
+    }
+    .api-docs .api-section h3 .method.get{background:rgba(52,199,89,.15);color:var(--success)}
+    .api-docs .api-section h3 .method.post{background:rgba(25,96,201,.15);color:var(--accent)}
+    .api-docs .api-section .api-path{
+      font-family:var(--font-mono);font-size:13px;color:var(--accent);
+      background:var(--bg-0);padding:8px 12px;border-radius:6px;
+      margin:8px 0 14px 0;display:flex;align-items:center;justify-content:space-between;
+      border:1px solid var(--border);word-break:break-all;
+    }
+    .api-docs .api-section .api-path .copy-btn{
+      cursor:pointer;padding:4px 8px;border-radius:4px;border:none;
+      background:var(--bg-2);color:var(--text-2);font-size:11px;white-space:nowrap;
+      transition:all .2s;flex-shrink:0;margin-left:8px;
+    }
+    .api-docs .api-section .api-path .copy-btn:hover{background:var(--accent);color:#fff}
+    .api-docs .api-desc{color:var(--text-2);font-size:13px;margin-bottom:12px;line-height:1.6}
+    .api-docs .api-note{
+      color:var(--text-2);font-size:12px;padding:10px 14px;margin:12px 0;
+      background:rgba(25,96,201,.06);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;
+      line-height:1.6;
+    }
+    .api-docs .api-note.warn{background:rgba(255,204,0,.06);border-left-color:var(--warning)}
+    .api-docs .api-params{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+    .api-docs .api-params th{
+      text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+      color:var(--text-3);border-bottom:1px solid var(--border);font-weight:600;
+    }
+    .api-docs .api-params td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text-1)}
+    .api-docs .api-params td:first-child{font-family:var(--font-mono);color:var(--accent);font-size:12px;white-space:nowrap}
+    .api-docs .api-params .required{color:var(--danger);font-size:10px;font-weight:700;margin-left:4px}
+    .api-docs .code-block{
+      background:var(--bg-0);border:1px solid var(--border);border-radius:8px;
+      padding:14px 16px;font-family:var(--font-mono);font-size:12px;
+      color:var(--text-1);overflow-x:auto;margin:10px 0;line-height:1.7;
+      position:relative;white-space:pre;
+    }
+    .api-docs .code-block .cb-copy{
+      position:absolute;top:8px;right:8px;cursor:pointer;padding:4px 10px;
+      border-radius:4px;border:none;background:var(--bg-2);color:var(--text-2);
+      font-size:11px;transition:all .2s;
+    }
+    .api-docs .code-block .cb-copy:hover{background:var(--accent);color:#fff}
+    .api-docs .resp-label{font-size:12px;font-weight:600;color:var(--text-2);margin:14px 0 4px 0;text-transform:uppercase;letter-spacing:.5px}
+    .api-docs .api-toc{
+      display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:24px;
+    }
+    .api-docs .api-toc a{
+      display:flex;align-items:center;gap:10px;padding:12px 16px;
+      background:var(--card-bg);border:1px solid var(--card-border);border-radius:10px;
+      text-decoration:none;color:var(--text-1);font-size:13px;transition:all .2s;
+    }
+    .api-docs .api-toc a:hover{border-color:var(--accent);background:var(--accent-dim)}
+    .api-docs .api-toc a .toc-method{font-family:var(--font-mono);font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;flex-shrink:0}
+    .api-docs .api-toc a .toc-method.get{background:rgba(52,199,89,.15);color:var(--success)}
+    .api-docs .api-toc a .toc-method.post{background:rgba(25,96,201,.15);color:var(--accent)}
+    .api-docs .api-quick-start{
+      background:linear-gradient(135deg,var(--accent-dim) 0%,rgba(124,58,237,.1) 100%);
+      border:1px solid var(--card-border);border-radius:12px;
+      padding:20px 24px;margin-bottom:20px;
+    }
+    .api-docs .api-quick-start h3{font-size:16px;font-weight:700;color:var(--text-0);margin-bottom:6px}
+    .api-docs .api-quick-start p{color:var(--text-2);font-size:13px;line-height:1.6}
+    .api-docs .api-quick-start .api-key-box{
+      display:flex;align-items:center;gap:8px;margin-top:12px;
+      background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:10px 14px;
+    }
+    .api-docs .api-quick-start .api-key-box code{font-family:var(--font-mono);font-size:13px;color:var(--accent);flex:1;word-break:break-all}
+    .api-docs .api-quick-start .api-key-box button{
+      flex-shrink:0;padding:6px 12px;border:none;border-radius:6px;
+      background:var(--accent);color:#fff;font-size:12px;cursor:pointer;transition:all .2s;
+    }
+    .api-docs .api-quick-start .api-key-box button:hover{background:var(--accent-hover)}
+    .api-docs .lang-tabs{display:flex;gap:0;margin-bottom:0}
+    .api-docs .lang-tab{
+      padding:6px 14px;font-size:12px;cursor:pointer;
+      color:var(--text-2);background:var(--bg-2);border:1px solid var(--border);
+      border-bottom:none;border-radius:6px 6px 0 0;transition:all .2s;font-weight:500;
+    }
+    .api-docs .lang-tab.active{color:var(--text-0);background:var(--bg-0);border-color:var(--border)}
+    .api-docs .lang-code{display:none}
+    .api-docs .lang-code.active{display:block}
+    .api-docs .lang-code .code-block{margin-top:0;border-top-left-radius:0}
+    .api-docs .api-errors{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+    .api-docs .api-errors th{text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);border-bottom:1px solid var(--border);font-weight:600}
+    .api-docs .api-errors td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text-1)}
+    .api-docs .api-errors td:first-child{font-family:var(--font-mono);font-weight:600;width:60px}
+
     /* Proxy checker results */
     .check-result-ok{color:var(--success)}
     .check-result-fail{color:var(--danger)}
@@ -446,6 +546,7 @@
       <div class="nav-tab active" onclick="switchTab('traffic',this)">Трафик</div>
       <div class="nav-tab" onclick="switchTab('tools',this)">Инструменты</div>
       <div class="nav-tab" onclick="switchTab('documents',this)">Документы</div>
+      <div class="nav-tab" onclick="switchTab('api',this)">API</div>
       <div class="nav-tab" onclick="switchTab('referral',this)">Партнёрская программа</div>
       <div style="margin-left:auto;display:flex;align-items:center"><input type="text" id="searchInput" class="form-input" placeholder="Поиск по модемам..." style="width:200px;padding:6px 12px;font-size:12px;margin:0" oninput="searchFilter=this.value.toLowerCase();renderTable()"></div>
     </div>
@@ -596,6 +697,555 @@
       </div>
     </div>
 
+    <!-- TAB: API -->
+    <div class="tab-pane" id="tab-api">
+      <div class="container api-docs">
+
+        <h2>API документация</h2>
+        <p class="api-lead">Интегрируйте прокси Proxies.rent в ваши приложения и скрипты</p>
+
+        <!-- Quick start -->
+        <div class="api-quick-start">
+          <h3>Быстрый старт</h3>
+          <p>Для работы с API вам понадобится <strong>API-ключ</strong> — с ним можно получить список прокси одним запросом без авторизации. Для расширенного доступа (смена IP, статистика, трафик) используйте авторизацию по логину и паролю.</p>
+          <div class="api-key-box">
+            <span style="color:var(--text-2);font-size:12px;white-space:nowrap">Ваш API-ключ:</span>
+            <code id="apiDocKey">—</code>
+            <button onclick="copyText(document.getElementById('apiDocKey').textContent,this)">Копировать</button>
+          </div>
+        </div>
+
+        <!-- TOC -->
+        <div class="api-toc">
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-login').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method post">POST</span> Авторизация
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-proxies').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get">GET</span> Список прокси (по API-ключу)
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-dashboard').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get">GET</span> Данные дашборда
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-reset').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method post">POST</span> Смена IP
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-reset-link').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get">GET</span> Смена IP по ссылке
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-export').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get">GET</span> Экспорт реквизитов
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-rotation').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get">GET</span> Лог ротации IP
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-history').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get">GET</span> История IP
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-docs').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get">GET</span> Документы
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-errors').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get" style="background:rgba(255,56,60,.12);color:var(--danger)">REF</span> Коды ошибок
+          </a>
+        </div>
+
+        <!-- ==================== 1. LOGIN ==================== -->
+        <div class="api-section" id="api-s-login">
+          <h3><span class="method post">POST</span> Авторизация</h3>
+          <div class="api-path"><span>/api/login</span><button class="copy-btn" onclick="copyText(apiBase+'/api/login',this)">Копировать URL</button></div>
+          <p class="api-desc">Получает токен для доступа ко всем методам API. Токен действует <strong>365 дней</strong>. Передавайте его во все последующие запросы через заголовок <code>X-Auth-Token</code>.</p>
+
+          <div class="resp-label">Параметры запроса (JSON body)</div>
+          <table class="api-params">
+            <thead><tr><th>Параметр</th><th>Тип</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>login<span class="required">*</span></td><td>string</td><td>Ваш логин</td></tr>
+              <tr><td>password<span class="required">*</span></td><td>string</td><td>Ваш пароль</td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Пример запроса</div>
+          <div class="lang-tabs">
+            <div class="lang-tab active" onclick="switchLang(this,'curl','login')">cURL</div>
+            <div class="lang-tab" onclick="switchLang(this,'python','login')">Python</div>
+            <div class="lang-tab" onclick="switchLang(this,'js','login')">JavaScript</div>
+          </div>
+          <div class="lang-code active" data-group="login" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>curl -X POST https://proxies.rent/api/login \
+  -H "Content-Type: application/json" \
+  -d '{"login": "ваш_логин", "password": "ваш_пароль"}'</div></div>
+          <div class="lang-code" data-group="login" data-lang="python"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
+
+r = requests.post("https://proxies.rent/api/login", json={
+    "login": "ваш_логин",
+    "password": "ваш_пароль"
+})
+token = r.json()["token"]
+print(token)</div></div>
+          <div class="lang-code" data-group="login" data-lang="js"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>const res = await fetch("https://proxies.rent/api/login", {
+  method: "POST",
+  headers: { "Content-Type": "application/json" },
+  body: JSON.stringify({ login: "ваш_логин", password: "ваш_пароль" })
+});
+const { token } = await res.json();
+console.log(token);</div></div>
+
+          <div class="resp-label">Ответ</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>{
+  "token": "ae33f05a5dfa256094ce...30de5cb2fb33f",
+  "login": "ваш_логин",
+  "isAdmin": false
+}</div>
+
+          <div class="api-note">Для выхода отправьте <code>POST /api/logout</code> с заголовком <code>X-Auth-Token</code>.</div>
+        </div>
+
+        <!-- ==================== 2. PROXIES (public) ==================== -->
+        <div class="api-section" id="api-s-proxies">
+          <h3><span class="method get">GET</span> Список прокси (по API-ключу)</h3>
+          <div class="api-path"><span>/api/v1/proxies?apiKey=ВАШ_КЛЮЧ</span><button class="copy-btn" onclick="copyText(apiBase+'/api/v1/proxies?apiKey='+encodeURIComponent(document.getElementById('apiDocKey').textContent),this)">Копировать URL</button></div>
+          <p class="api-desc">Самый простой способ получить список прокси. <strong>Не требует токена</strong> — только API-ключ. Поддерживает 3 формата вывода.</p>
+
+          <div class="resp-label">Параметры запроса (query string)</div>
+          <table class="api-params">
+            <thead><tr><th>Параметр</th><th>Тип</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>apiKey<span class="required">*</span></td><td>string</td><td>Ваш API-ключ (показан в блоке «Быстрый старт» выше)</td></tr>
+              <tr><td>format</td><td>string</td><td><code>json</code> (по умолчанию), <code>txt</code> или <code>csv</code></td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Пример запроса</div>
+          <div class="lang-tabs">
+            <div class="lang-tab active" onclick="switchLang(this,'curl','proxies')">cURL</div>
+            <div class="lang-tab" onclick="switchLang(this,'python','proxies')">Python</div>
+            <div class="lang-tab" onclick="switchLang(this,'js','proxies')">JavaScript</div>
+          </div>
+          <div class="lang-code active" data-group="proxies" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button># JSON (по умолчанию)
+curl "https://proxies.rent/api/v1/proxies?apiKey=ВАШ_КЛЮЧ"
+
+# Текстовый формат — IP:PORT:LOGIN:PASSWORD
+curl "https://proxies.rent/api/v1/proxies?apiKey=ВАШ_КЛЮЧ&amp;format=txt"
+
+# CSV формат
+curl "https://proxies.rent/api/v1/proxies?apiKey=ВАШ_КЛЮЧ&amp;format=csv"</div></div>
+          <div class="lang-code" data-group="proxies" data-lang="python"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
+
+API_KEY = "ваш_api_ключ"
+
+# JSON
+proxies = requests.get(f"https://proxies.rent/api/v1/proxies?apiKey={API_KEY}").json()
+for p in proxies["proxies"]:
+    print(f"HTTP:   {p['ip']}:{p['httpPort']}:{p['login']}:{p['password']}")
+    print(f"SOCKS5: {p['ip']}:{p['socksPort']}:{p['login']}:{p['password']}")
+
+# Текстовый формат (для парсинга)
+txt = requests.get(f"https://proxies.rent/api/v1/proxies?apiKey={API_KEY}&amp;format=txt").text
+for line in txt.strip().split("\n"):
+    proxy, reset_url = line.split("|")
+    print(proxy)</div></div>
+          <div class="lang-code" data-group="proxies" data-lang="js"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>const API_KEY = "ваш_api_ключ";
+
+const res = await fetch(`https://proxies.rent/api/v1/proxies?apiKey=${API_KEY}`);
+const { proxies, count } = await res.json();
+
+proxies.forEach(p =&gt; {
+  console.log(`HTTP:   ${p.ip}:${p.httpPort}:${p.login}:${p.password}`);
+  console.log(`SOCKS5: ${p.ip}:${p.socksPort}:${p.login}:${p.password}`);
+});</div></div>
+
+          <div class="resp-label">Ответ (format=json)</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>{
+  "proxies": [
+    {
+      "modem": "MD2_64",
+      "ip": "89.149.100.92",
+      "httpPort": 8040,
+      "socksPort": 5040,
+      "login": "WUIRzA91",
+      "password": "F9RQcuRw",
+      "resetUrl": "http://...reset_modem?arg=MD2_64"
+    }
+  ],
+  "count": 10,
+  "client": "ClientName"
+}</div>
+
+          <div class="resp-label">Ответ (format=txt)</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>89.149.100.92:8040:WUIRzA91:F9RQcuRw|http://...reset_modem?arg=MD2_64
+31.5.194.89:8030:WvAOP2mu:otR4IXJb|http://...reset_modem?arg=RO2_42</div>
+          <div class="api-note">Формат TXT: <code>IP:HTTP_PORT:LOGIN:PASSWORD|RESET_URL</code>. Разделитель между прокси и ссылкой на смену IP — символ <code>|</code>.</div>
+
+          <div class="resp-label">Ответ (format=csv)</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>ip,http_port,socks_port,login,password,reset_url
+89.149.100.92,8040,5040,WUIRzA91,F9RQcuRw,http://...
+31.5.194.89,8030,5030,WvAOP2mu,otR4IXJb,http://...</div>
+        </div>
+
+        <!-- ==================== 3. DASHBOARD DATA ==================== -->
+        <div class="api-section" id="api-s-dashboard">
+          <h3><span class="method get">GET</span> Данные дашборда</h3>
+          <div class="api-path"><span>/api/dashboard_data</span><button class="copy-btn" onclick="copyText(apiBase+'/api/dashboard_data',this)">Копировать URL</button></div>
+          <p class="api-desc">Полные данные клиента: модемы, трафик, биллинг, скорость, IP-трекинг, аптайм. Тот же запрос, который использует личный кабинет.</p>
+
+          <div class="resp-label">Заголовки</div>
+          <table class="api-params">
+            <thead><tr><th>Заголовок</th><th>Значение</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>X-Auth-Token<span class="required">*</span></td><td>string</td><td>Токен из <code>/api/login</code></td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Пример запроса</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>curl https://proxies.rent/api/dashboard_data \
+  -H "X-Auth-Token: ВАШ_ТОКЕН"</div>
+
+          <div class="resp-label">Структура ответа</div>
+          <table class="api-params">
+            <thead><tr><th>Поле</th><th>Тип</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>bandwidth</td><td>object</td><td>Трафик по каждому порту: за сегодня, вчера, месяц, за всё время (IN/OUT)</td></tr>
+              <tr><td>status</td><td>array</td><td>Состояние модемов: онлайн/офлайн, оператор, сигнал, текущий IP, время до ротации</td></tr>
+              <tr><td>ports</td><td>object</td><td>Реквизиты прокси: HTTP/SOCKS5 порты, логин, пароль, готовые строки подключения</td></tr>
+              <tr><td>billing</td><td>object</td><td>Тарификация: тип (<code>per_gb</code>), цена, баланс, API-ключ</td></tr>
+              <tr><td>ipTracking</td><td>object</td><td>Текущий IP каждого модема и timestamp установки</td></tr>
+              <tr><td>uptimeTracking</td><td>object</td><td>Аптайм: total_checks, online_checks — для расчёта % онлайн</td></tr>
+              <tr><td>speedtestLatest</td><td>object</td><td>Последний спидтест: download/upload (Мбит/с), ping (мс)</td></tr>
+              <tr><td>ipHistory</td><td>object</td><td>История IP-адресов (до 100 записей на модем)</td></tr>
+              <tr><td>modemLogins</td><td>object</td><td>Пароли модемов (ключ — NICK модема)</td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Пример: трафик (bandwidth)</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>"bandwidth": {
+  "S1_portwawi1ZeG": {
+    "portName": "ClientName",
+    "bandwidth_bytes_day_in": "10.2 GB",
+    "bandwidth_bytes_day_out": "1.4 GB",
+    "bandwidth_bytes_month_in": "155.1 GB",
+    "bandwidth_bytes_month_out": "24.8 GB",
+    "_server": "S1"
+  }
+}</div>
+
+          <div class="resp-label">Пример: статус модема (status)</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>"status": [{
+  "modem_details": {
+    "NICK": "MD2_43",
+    "IMEI": "S1_304638876046939",
+    "MODEL": "E3372",
+    "TIME_TO_IP_ROTATION": "4 min 19 sec"
+  },
+  "net_details": {
+    "CELLOP": "Moldtelecom",
+    "EXT_IP": "92.115.123.180",
+    "SignalStrength": "-79 dBm"
+  }
+}]</div>
+
+          <div class="resp-label">Пример: реквизиты прокси (ports)</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>"ports": {
+  "S1_301170573234462": [{
+    "HTTP_PORT": "8040",
+    "SOCKS_PORT": "5040",
+    "LOGIN": "WUIRzA91",
+    "PASSWORD": "F9RQcuRw",
+    "http_creds": "89.149.100.92:8040:WUIRzA91:F9RQcuRw",
+    "socks5_creds": "89.149.100.92:5040:WUIRzA91:F9RQcuRw",
+    "conns_stats": { "http": 0, "socks5": 95, "total": 95 }
+  }]
+}</div>
+
+          <div class="resp-label">Пример: биллинг (billing)</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>"billing": {
+  "billingType": "per_gb",
+  "price": 23,
+  "currency": "RUB",
+  "totalPayments": 50000,
+  "balance": 50000,
+  "apiKey": "prx_b9e12d01a25dca947f..."
+}</div>
+
+          <div class="resp-label">Пример: спидтест (speedtestLatest)</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>"speedtestLatest": {
+  "S1_301170573234462": {
+    "download": 25.4,
+    "upload": 10.5,
+    "ping": 42,
+    "date": "2026-02-28T14:10:44.389Z"
+  }
+}</div>
+        </div>
+
+        <!-- ==================== 4. RESET IP ==================== -->
+        <div class="api-section" id="api-s-reset">
+          <h3><span class="method post">POST</span> Смена IP</h3>
+          <div class="api-path"><span>/api/client/reset_ip</span><button class="copy-btn" onclick="copyText(apiBase+'/api/client/reset_ip',this)">Копировать URL</button></div>
+          <p class="api-desc">Принудительная смена IP-адреса на модеме. Новый IP выдаётся через 10–15 секунд.</p>
+
+          <div class="resp-label">Заголовки</div>
+          <table class="api-params">
+            <thead><tr><th>Заголовок</th><th>Значение</th></tr></thead>
+            <tbody>
+              <tr><td>X-Auth-Token<span class="required">*</span></td><td>Токен из <code>/api/login</code></td></tr>
+              <tr><td>Content-Type</td><td>application/json</td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Параметры запроса (JSON body)</div>
+          <table class="api-params">
+            <thead><tr><th>Параметр</th><th>Тип</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>imei<span class="required">*</span></td><td>string</td><td>IMEI модема (из <code>status[].modem_details.IMEI</code>)</td></tr>
+              <tr><td>serverName<span class="required">*</span></td><td>string</td><td>Сервер: <code>S1</code> (Молдова) или <code>S2</code> (Румыния)</td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Пример запроса</div>
+          <div class="lang-tabs">
+            <div class="lang-tab active" onclick="switchLang(this,'curl','reset')">cURL</div>
+            <div class="lang-tab" onclick="switchLang(this,'python','reset')">Python</div>
+          </div>
+          <div class="lang-code active" data-group="reset" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>curl -X POST https://proxies.rent/api/client/reset_ip \
+  -H "X-Auth-Token: ВАШ_ТОКЕН" \
+  -H "Content-Type: application/json" \
+  -d '{"imei": "S1_304638876046939", "serverName": "S1"}'</div></div>
+          <div class="lang-code" data-group="reset" data-lang="python"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>requests.post("https://proxies.rent/api/client/reset_ip",
+    headers={"X-Auth-Token": token},
+    json={"imei": "S1_304638876046939", "serverName": "S1"}
+)</div></div>
+
+          <div class="resp-label">Ответ</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>{"ok": true, "result": {...}}</div>
+        </div>
+
+        <!-- ==================== 5. RESET IP BY TOKEN ==================== -->
+        <div class="api-section" id="api-s-reset-link">
+          <h3><span class="method get">GET</span> Смена IP по ссылке (без авторизации)</h3>
+          <div class="api-path"><span>/api/client/reset_ip_by_token?nick=...&amp;token=...</span><button class="copy-btn" onclick="copyText(apiBase+'/api/client/reset_ip_by_token?nick=MODEM_NICK&token=RESET_TOKEN',this)">Копировать URL</button></div>
+          <p class="api-desc">Самый простой способ сменить IP — по прямой ссылке. Не требует заголовка авторизации. Можно вставить в браузер, скрипт, cron или планировщик задач.</p>
+
+          <div class="resp-label">Параметры запроса (query string)</div>
+          <table class="api-params">
+            <thead><tr><th>Параметр</th><th>Тип</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>nick<span class="required">*</span></td><td>string</td><td>Имя модема, например <code>MD2_43</code></td></tr>
+              <tr><td>token<span class="required">*</span></td><td>string</td><td>Reset-токен (из <code>/api/client/credentials_export</code> → <code>resetToken</code>)</td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Пример</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button># Просто откройте в браузере или вызовите через curl:
+curl "https://proxies.rent/api/client/reset_ip_by_token?nick=MD2_43&amp;token=ваш_reset_token"</div>
+
+          <div class="resp-label">Ответ</div>
+          <div class="code-block">{"ok": true, "result": {...}}</div>
+
+          <div class="api-note">Reset-токен можно получить через метод <code>/api/client/credentials_export</code> — поле <code>resetToken</code>. Также ссылки на смену IP для каждого модема есть в поле <code>resetUrl</code> ответа <code>/api/v1/proxies</code>.</div>
+        </div>
+
+        <!-- ==================== 6. CREDENTIALS EXPORT ==================== -->
+        <div class="api-section" id="api-s-export">
+          <h3><span class="method get">GET</span> Экспорт реквизитов</h3>
+          <div class="api-path"><span>/api/client/credentials_export</span><button class="copy-btn" onclick="copyText(apiBase+'/api/client/credentials_export',this)">Копировать URL</button></div>
+          <p class="api-desc">Все реквизиты прокси одним запросом: IP, порты, логин/пароль, готовые строки подключения и ссылки на смену IP.</p>
+
+          <div class="resp-label">Заголовки</div>
+          <table class="api-params">
+            <thead><tr><th>Заголовок</th><th>Значение</th></tr></thead>
+            <tbody><tr><td>X-Auth-Token<span class="required">*</span></td><td>Токен из <code>/api/login</code></td></tr></tbody>
+          </table>
+
+          <div class="resp-label">Ответ</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>{
+  "credentials": [
+    {
+      "modem": "MD2_64",
+      "server": "S1",
+      "serverIp": "89.149.100.92",
+      "httpPort": "8040",
+      "socksPort": "5040",
+      "login": "WUIRzA91",
+      "password": "F9RQcuRw",
+      "httpProxy": "89.149.100.92:8040",
+      "socks5Proxy": "89.149.100.92:5040",
+      "httpCreds": "89.149.100.92:8040:WUIRzA91:F9RQcuRw",
+      "socks5Creds": "89.149.100.92:5040:WUIRzA91:F9RQcuRw",
+      "resetUrl": "http://...reset_modem?arg=MD2_64"
+    }
+  ],
+  "clientName": "BA_admin",
+  "exportDate": "2026-02-28T14:33:36.615Z",
+  "resetToken": "06c266fb7cb992d73fe9..."
+}</div>
+
+          <div class="resp-label">Описание полей credentials</div>
+          <table class="api-params">
+            <thead><tr><th>Поле</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>httpCreds</td><td>Готовая строка HTTP прокси: <code>IP:PORT:LOGIN:PASSWORD</code></td></tr>
+              <tr><td>socks5Creds</td><td>Готовая строка SOCKS5 прокси: <code>IP:PORT:LOGIN:PASSWORD</code></td></tr>
+              <tr><td>httpProxy</td><td>Адрес HTTP прокси: <code>IP:PORT</code></td></tr>
+              <tr><td>socks5Proxy</td><td>Адрес SOCKS5 прокси: <code>IP:PORT</code></td></tr>
+              <tr><td>resetUrl</td><td>Ссылка для смены IP данного модема</td></tr>
+              <tr><td>resetToken</td><td>Ваш персональный токен для смены IP по ссылке</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- ==================== 7. ROTATION LOG ==================== -->
+        <div class="api-section" id="api-s-rotation">
+          <h3><span class="method get">GET</span> Лог ротации IP</h3>
+          <div class="api-path"><span>/api/client/rotation_log?nick=...&amp;serverName=...</span><button class="copy-btn" onclick="copyText(apiBase+'/api/client/rotation_log?nick=MODEM_NICK&serverName=S1',this)">Копировать URL</button></div>
+          <p class="api-desc">Подробный лог всех смен IP модема: старый/новый IP, время ротации, кто инициировал.</p>
+
+          <div class="resp-label">Параметры (query string)</div>
+          <table class="api-params">
+            <thead><tr><th>Параметр</th><th>Тип</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>nick<span class="required">*</span></td><td>string</td><td>Имя модема: <code>MD2_43</code></td></tr>
+              <tr><td>serverName<span class="required">*</span></td><td>string</td><td>Сервер: <code>S1</code> или <code>S2</code></td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Ответ</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>[
+  {
+    "start_time": "2026-02-28@16:33:08",
+    "end_time": "2026-02-28@16:33:20",
+    "total_time": "12",
+    "old_ip": "188.237.24.215",
+    "new_ip": "212.0.216.109",
+    "attempt": "1",
+    "CALLER": "ByLink"
+  }
+]</div>
+
+          <div class="resp-label">Значения поля CALLER</div>
+          <table class="api-params">
+            <thead><tr><th>Значение</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>ByLink</td><td>Смена IP по ссылке (через API или кнопку)</td></tr>
+              <tr><td>ByTimer</td><td>Автоматическая ротация по таймеру</td></tr>
+              <tr><td>ByAPI</td><td>Смена через ProxySmart API</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+        <!-- ==================== 8. IP HISTORY ==================== -->
+        <div class="api-section" id="api-s-history">
+          <h3><span class="method get">GET</span> История IP</h3>
+          <div class="api-path"><span>/api/client/ip_history?key=...</span><button class="copy-btn" onclick="copyText(apiBase+'/api/client/ip_history?key=IMEI',this)">Копировать URL</button></div>
+          <p class="api-desc">История IP-адресов модема. Хранится до 100 последних записей.</p>
+
+          <div class="resp-label">Параметры (query string)</div>
+          <table class="api-params">
+            <thead><tr><th>Параметр</th><th>Тип</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>key<span class="required">*</span></td><td>string</td><td>IMEI модема (из <code>modem_details.IMEI</code>)</td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Ответ</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>[
+  {"ip": "86.105.210.198", "from": 1772288808025, "to": 1772289108033},
+  {"ip": "92.115.123.180", "from": 1772289108033, "to": null}
+]</div>
+          <div class="api-note"><code>from</code> и <code>to</code> — timestamp в миллисекундах (Unix epoch). <code>to: null</code> означает текущий активный IP-адрес.</div>
+        </div>
+
+        <!-- ==================== 9. DOCUMENTS ==================== -->
+        <div class="api-section" id="api-s-docs">
+          <h3><span class="method get">GET</span> Документы</h3>
+          <div class="api-path"><span>/api/client/documents</span><button class="copy-btn" onclick="copyText(apiBase+'/api/client/documents',this)">Копировать URL</button></div>
+          <p class="api-desc">Список доступных документов (акты, счета).</p>
+
+          <div class="resp-label">Ответ</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>[
+  {"id": "doc_1", "name": "Акт за январь.pdf", "date": "2026-01-31"}
+]</div>
+
+          <p class="api-desc" style="margin-top:12px">Для скачивания файла используйте:</p>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>curl -O https://proxies.rent/api/client/documents/doc_1/download \
+  -H "X-Auth-Token: ВАШ_ТОКЕН"</div>
+        </div>
+
+        <!-- ==================== 10. ERRORS ==================== -->
+        <div class="api-section" id="api-s-errors">
+          <h3><span class="method" style="background:rgba(255,56,60,.12);color:var(--danger)">REF</span> Коды ошибок</h3>
+          <p class="api-desc">Все методы API возвращают ошибки в формате <code>{"error": "описание"}</code> с соответствующим HTTP-кодом.</p>
+
+          <table class="api-errors">
+            <thead><tr><th>Код</th><th>Описание</th><th>Что делать</th></tr></thead>
+            <tbody>
+              <tr><td>400</td><td>Не переданы обязательные параметры</td><td>Проверьте, что все обязательные поля заполнены</td></tr>
+              <tr><td>401</td><td>Невалидный или истёкший токен / Неверные логин и пароль</td><td>Повторите авторизацию через <code>/api/login</code></td></tr>
+              <tr><td>403</td><td>Нет доступа (попытка вызова админских методов)</td><td>Метод доступен только для администраторов</td></tr>
+              <tr><td>404</td><td>Объект не найден (модем, документ, сервер)</td><td>Проверьте правильность IMEI, NICK или ID документа</td></tr>
+              <tr><td>502</td><td>Ошибка при обращении к серверу модемов</td><td>Повторите запрос через 10–30 секунд</td></tr>
+            </tbody>
+          </table>
+
+          <div class="api-note warn">При получении ошибки <strong>401</strong> на любом методе — токен истёк. Получите новый токен через <code>POST /api/login</code> и повторите запрос.</div>
+        </div>
+
+        <!-- ==================== FULL EXAMPLE ==================== -->
+        <div class="api-section">
+          <h3><span class="method" style="background:rgba(124,58,237,.15);color:#7c3aed">RUN</span> Полный пример: Python-скрипт</h3>
+          <p class="api-desc">Готовый скрипт, который авторизуется, получает прокси и меняет IP:</p>
+
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
+
+BASE = "https://proxies.rent"
+
+# 1. Авторизация
+session = requests.Session()
+r = session.post(f"{BASE}/api/login", json={
+    "login": "ваш_логин",
+    "password": "ваш_пароль"
+})
+data = r.json()
+token = data["token"]
+session.headers["X-Auth-Token"] = token
+
+# 2. Получение всех прокси
+export = session.get(f"{BASE}/api/client/credentials_export").json()
+
+print("=== Ваши прокси ===")
+for c in export["credentials"]:
+    print(f"  {c['modem']} ({c['server']})")
+    print(f"    HTTP:   {c['httpCreds']}")
+    print(f"    SOCKS5: {c['socks5Creds']}")
+
+# 3. Получение трафика
+dashboard = session.get(f"{BASE}/api/dashboard_data").json()
+
+print("\n=== Трафик за сегодня ===")
+for key, bw in dashboard["bandwidth"].items():
+    print(f"  IN: {bw['bandwidth_bytes_day_in']}, OUT: {bw['bandwidth_bytes_day_out']}")
+
+# 4. Смена IP на первом модеме
+first = dashboard["status"][0]
+imei = first["modem_details"]["IMEI"]
+server = "S1" if imei.startswith("S1") else "S2"
+r = session.post(f"{BASE}/api/client/reset_ip", json={
+    "imei": imei,
+    "serverName": server
+})
+print(f"\n=== Смена IP ===")
+print(f"  {first['modem_details']['NICK']}: {r.json()}")
+
+# 5. Или ещё проще — по API-ключу (без авторизации):
+api_key = dashboard["billing"]["apiKey"]
+proxies = requests.get(
+    f"{BASE}/api/v1/proxies",
+    params={"apiKey": api_key, "format": "json"}
+).json()
+print(f"\nВсего прокси по API-ключу: {proxies['count']}")</div>
+        </div>
+
+      </div>
+    </div>
+
     <!-- TAB: Referral -->
     <div class="tab-pane" id="tab-referral">
       <div class="container">
@@ -660,6 +1310,7 @@ function switchTab(name,el){
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='traffic') renderProxyTable();
   if(name==='documents') loadDocuments();
+  if(name==='api') loadApiDocs();
   if(name==='referral') loadReferral();
 }
 
@@ -1377,6 +2028,32 @@ function loadDocuments(){
   }).catch(function(e){
     document.getElementById('documentsList').innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
   });
+}
+
+// --- API Docs ---
+var apiBase=window.location.origin;
+
+function loadApiDocs(){
+  var keyEl=document.getElementById('apiDocKey');
+  if(billingData && billingData.apiKey){
+    keyEl.textContent=billingData.apiKey;
+  } else {
+    keyEl.textContent='Загрузите данные на вкладке "Трафик"';
+  }
+}
+
+function switchLang(el,lang,group){
+  el.parentElement.querySelectorAll('.lang-tab').forEach(function(t){t.classList.remove('active')});
+  el.classList.add('active');
+  document.querySelectorAll('.lang-code[data-group="'+group+'"]').forEach(function(c){
+    c.classList.toggle('active',c.getAttribute('data-lang')===lang);
+  });
+}
+
+function copyCodeBlock(btn){
+  var block=btn.parentElement;
+  var code=block.textContent.replace('Копировать','').trim();
+  copyText(code,btn);
 }
 
 // Change #3: Referral simplification - only show stats, no referral code/link
