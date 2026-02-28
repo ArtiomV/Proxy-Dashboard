@@ -76,6 +76,20 @@ function saveClients(clientsList) {
   catch (e) { console.error('Failed to save clients:', e.message); }
 }
 
+// ==================== BILLING LEDGER ====================
+const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json');
+let billingLedger = {};
+try {
+  if (fs.existsSync(BILLING_LEDGER_FILE)) {
+    billingLedger = JSON.parse(fs.readFileSync(BILLING_LEDGER_FILE, 'utf8'));
+  }
+} catch (e) { console.error('Failed to load billing_ledger:', e.message); }
+
+function saveBillingLedger() {
+  try { fs.writeFileSync(BILLING_LEDGER_FILE, JSON.stringify(billingLedger, null, 2)); }
+  catch (e) { console.error('Failed to save billing_ledger:', e.message); }
+}
+
 // Load clients into users map on startup
 let clients = loadClients();
 
@@ -88,6 +102,15 @@ for (const c of clients) {
   if (c.referral_balance === undefined) { c.referral_balance = 0; clientsMigrated = true; }
   if (!c.resetToken) { c.resetToken = crypto.randomBytes(16).toString('hex'); clientsMigrated = true; }
   if (!c.documents) { c.documents = []; clientsMigrated = true; }
+  // Billing persistence: initialize balance from total payments
+  if (c.balance === undefined) {
+    c.balance = (c.payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+    clientsMigrated = true;
+  }
+  if (!c.last_traffic_snapshot) {
+    c.last_traffic_snapshot = { timestamp: null, month_bytes: 0 };
+    clientsMigrated = true;
+  }
 }
 if (clientsMigrated) saveClients(clients);
 
@@ -114,6 +137,8 @@ for (const [login, u] of Object.entries(users)) {
         referral_balance: 0,
         resetToken: crypto.randomBytes(16).toString('hex'),
         documents: [],
+        balance: 0,
+        last_traffic_snapshot: { timestamp: null, month_bytes: 0 },
         createdAt: new Date().toISOString()
       };
       clients.push(client);
@@ -185,6 +210,33 @@ function getPriceForProxyCount(count) {
     if (count >= tier.min_proxies) return tier.price;
   }
   return tiers.length > 0 ? tiers[0].price : 23; // fallback
+}
+
+// ==================== BANDWIDTH PARSING UTILS ====================
+function parseBwToBytes(str) {
+  if (!str || str === 0) return 0;
+  const s = String(str).trim();
+  const m = s.match(/([\d.]+)\s*(TB|GB|MB|KB|B)?/i);
+  if (!m) return 0;
+  const val = parseFloat(m[1]);
+  const u = (m[2] || 'B').toUpperCase();
+  const mult = { 'TB': 1024**4, 'GB': 1024**3, 'MB': 1024**2, 'KB': 1024, 'B': 1 };
+  return val * (mult[u] || 1);
+}
+
+function computeClientMonthBytes(allServerResults, portName) {
+  let totalBytes = 0;
+  for (const data of allServerResults) {
+    if (typeof data.bw === 'object') {
+      for (const [portId, b] of Object.entries(data.bw)) {
+        if (b.portName === portName) {
+          totalBytes += parseBwToBytes(b.bandwidth_bytes_month_in);
+          totalBytes += parseBwToBytes(b.bandwidth_bytes_month_out);
+        }
+      }
+    }
+  }
+  return totalBytes;
 }
 
 // ==================== DOCUMENTS DIR ====================
@@ -758,15 +810,23 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
     const merged = mergeServerData(results, req.user.portNameFilter);
     const clientInfo = clients.find(c => c.login === req.user.login);
     if (clientInfo) {
+      const totalPayments = (clientInfo.payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
+      // Current month expense from billing ledger
+      const ledgerEntries = billingLedger[clientInfo.id] || [];
+      const currentMonthPrefix = new Date().toISOString().slice(0, 7);
+      const monthExpense = ledgerEntries
+        .filter(e => e.type === 'charge' && e.date && e.date.startsWith(currentMonthPrefix))
+        .reduce((sum, e) => sum + (e.cost || 0), 0);
+
       merged.billing = {
         billingType: clientInfo.billingType || 'per_gb',
         price: clientInfo.price || 0,
-        currency: clientInfo.currency || 'RUB'
+        currency: clientInfo.currency || 'RUB',
+        totalPayments,
+        balance: clientInfo.balance !== undefined ? clientInfo.balance : totalPayments,
+        monthExpense: Math.round(monthExpense * 100) / 100,
+        apiKey: clientInfo.apiKey || ''
       };
-      const totalPayments = (clientInfo.payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
-      merged.billing.totalPayments = totalPayments;
-      merged.billing.balance = totalPayments;
-      merged.billing.apiKey = clientInfo.apiKey || '';
     }
 
     // Include tracking data filtered for this user's modems
@@ -1039,7 +1099,7 @@ app.get('/api/v1/proxy', async (req, res) => {
         type: clientInfo?.billingType || 'per_gb',
         price_per_gb: clientInfo?.price || 0,
         currency: clientInfo?.currency || 'RUB',
-        balance: totalPayments,
+        balance: clientInfo?.balance !== undefined ? clientInfo.balance : totalPayments,
         usage_mb: Math.round(monthMb)
       },
       proxies,
@@ -1162,6 +1222,8 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
     referral_balance: 0,
     resetToken: crypto.randomBytes(16).toString('hex'),
     documents: [],
+    balance: 0,
+    last_traffic_snapshot: { timestamp: null, month_bytes: 0 },
     createdAt: new Date().toISOString()
   };
 
@@ -1259,18 +1321,38 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
     createdAt: new Date().toISOString()
   });
 
+  // Update persistent balance
+  const paymentAmount = parseFloat(amount);
+  const balanceBefore = clients[idx].balance || 0;
+  clients[idx].balance = Math.round((balanceBefore + paymentAmount) * 100) / 100;
+
+  // Ledger entry for payment
+  const ledgerKey = clients[idx].id;
+  if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
+  billingLedger[ledgerKey].push({
+    type: 'payment',
+    date: date,
+    timestamp: new Date().toISOString(),
+    amount: paymentAmount,
+    currency: clients[idx].currency || 'RUB',
+    balance_before: balanceBefore,
+    balance_after: clients[idx].balance,
+    note: note || 'Admin payment'
+  });
+
   // Referral: credit 15% to referrer
   if (clients[idx].referred_by) {
     const referrer = clients.find(c => c.id === clients[idx].referred_by);
     if (referrer) {
-      const commission = parseFloat(amount) * 0.15;
+      const commission = paymentAmount * 0.15;
       referrer.referral_balance = (referrer.referral_balance || 0) + commission;
       console.log(`[Referral] Credited ${commission.toFixed(2)} to ${referrer.name} (15% of ${amount})`);
     }
   }
 
   saveClients(clients);
-  res.json({ ok: true, payments: clients[idx].payments });
+  saveBillingLedger();
+  res.json({ ok: true, payments: clients[idx].payments, balance: clients[idx].balance });
 });
 
 app.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req, res) => {
@@ -1286,9 +1368,72 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
   if (!clients[idx].payments || payIdx < 0 || payIdx >= clients[idx].payments.length) {
     return res.status(400).json({ error: 'Invalid payment index' });
   }
+  const deletedPayment = clients[idx].payments[payIdx];
+  const deletedAmount = parseFloat(deletedPayment.amount) || 0;
   clients[idx].payments.splice(payIdx, 1);
+
+  // Update persistent balance
+  const balanceBefore = clients[idx].balance || 0;
+  clients[idx].balance = Math.round((balanceBefore - deletedAmount) * 100) / 100;
+
+  // Ledger entry for reversal
+  const ledgerKey = clients[idx].id;
+  if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
+  billingLedger[ledgerKey].push({
+    type: 'payment_reversal',
+    date: new Date().toISOString().slice(0, 10),
+    timestamp: new Date().toISOString(),
+    amount: -deletedAmount,
+    currency: clients[idx].currency || 'RUB',
+    balance_before: balanceBefore,
+    balance_after: clients[idx].balance,
+    note: 'Payment deleted by admin'
+  });
+
   saveClients(clients);
-  res.json({ ok: true, payments: clients[idx].payments });
+  saveBillingLedger();
+  res.json({ ok: true, payments: clients[idx].payments, balance: clients[idx].balance });
+});
+
+// ==================== ADMIN: BILLING LEDGER ====================
+
+app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const entries = billingLedger[client.id] || [];
+  res.json({
+    balance: client.balance,
+    last_snapshot: client.last_traffic_snapshot,
+    entries: entries.slice(-100) // last 100 entries
+  });
+});
+
+app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddleware, (req, res) => {
+  const idx = clients.findIndex(c => c.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
+  const { amount, note } = req.body;
+  if (amount === undefined) return res.status(400).json({ error: 'amount required' });
+
+  const adjustment = parseFloat(amount);
+  const balanceBefore = clients[idx].balance || 0;
+  clients[idx].balance = Math.round((balanceBefore + adjustment) * 100) / 100;
+
+  const ledgerKey = clients[idx].id;
+  if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
+  billingLedger[ledgerKey].push({
+    type: 'adjustment',
+    date: new Date().toISOString().slice(0, 10),
+    timestamp: new Date().toISOString(),
+    amount: adjustment,
+    currency: clients[idx].currency || 'RUB',
+    balance_before: balanceBefore,
+    balance_after: clients[idx].balance,
+    note: note || 'Manual balance adjustment'
+  });
+
+  saveClients(clients);
+  saveBillingLedger();
+  res.json({ ok: true, balance: clients[idx].balance });
 });
 
 // ==================== ADMIN: DOCUMENTS ====================
@@ -1905,6 +2050,112 @@ function scheduleNightly(hour, label, fn) {
   }, msUntil);
 }
 
+// ==================== DAILY BILLING ====================
+async function runDailyBilling() {
+  console.log('[Billing] Starting daily billing run...');
+  let results;
+  try {
+    results = await fetchAllServersData();
+  } catch (e) {
+    console.error('[Billing] Failed to fetch server data:', e.message);
+    return;
+  }
+
+  let charged = 0, skipped = 0;
+
+  for (const client of clients) {
+    if (!client.portName || !client.price || client.price <= 0) {
+      skipped++;
+      continue;
+    }
+
+    try {
+      const currentMonthBytes = computeClientMonthBytes(results, client.portName);
+      const snapshot = client.last_traffic_snapshot || { timestamp: null, month_bytes: 0 };
+      const previousBytes = snapshot.month_bytes || 0;
+
+      // Compute delta
+      let deltaBytes;
+      if (currentMonthBytes < previousBytes) {
+        // Month reset detected: ProxySmart zeroed the counters
+        console.log(`[Billing] Month reset detected for ${client.name}: prev=${previousBytes}, current=${currentMonthBytes}`);
+        deltaBytes = currentMonthBytes;
+      } else {
+        deltaBytes = currentMonthBytes - previousBytes;
+      }
+
+      // Always update snapshot
+      client.last_traffic_snapshot = {
+        timestamp: new Date().toISOString(),
+        month_bytes: currentMonthBytes
+      };
+
+      if (deltaBytes <= 0) {
+        skipped++;
+        continue;
+      }
+
+      // Compute cost based on billing type
+      let cost = 0;
+      const deltaGb = deltaBytes / (1024 * 1024 * 1024);
+
+      if (client.billingType === 'per_modem') {
+        // Per-modem: daily proration of monthly rate
+        let modemCount = 0;
+        for (const data of results) {
+          if (typeof data.bw === 'object') {
+            for (const [portId, b] of Object.entries(data.bw)) {
+              if (b.portName === client.portName) modemCount++;
+            }
+          }
+        }
+        cost = (client.price * modemCount) / 30;
+      } else {
+        // per_gb billing (default)
+        cost = client.price * deltaGb;
+      }
+
+      cost = Math.round(cost * 100) / 100;
+
+      if (cost <= 0) {
+        skipped++;
+        continue;
+      }
+
+      // Deduct from balance
+      const balanceBefore = client.balance || 0;
+      client.balance = Math.round((balanceBefore - cost) * 100) / 100;
+
+      // Record in ledger
+      const ledgerKey = client.id;
+      if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
+      billingLedger[ledgerKey].push({
+        type: 'charge',
+        date: new Date().toISOString().slice(0, 10),
+        timestamp: new Date().toISOString(),
+        delta_bytes: Math.round(deltaBytes),
+        delta_gb: Math.round(deltaGb * 1000) / 1000,
+        price_per_unit: client.price,
+        billing_type: client.billingType || 'per_gb',
+        cost,
+        currency: client.currency || 'RUB',
+        balance_before: balanceBefore,
+        balance_after: client.balance,
+        note: 'Daily traffic charge'
+      });
+
+      charged++;
+      console.log(`[Billing] ${client.name}: delta=${deltaGb.toFixed(3)}GB, cost=${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
+    } catch (e) {
+      console.error(`[Billing] Error billing ${client.name}:`, e.message);
+    }
+  }
+
+  saveClients(clients);
+  saveBillingLedger();
+  console.log(`[Billing] Complete: ${charged} charged, ${skipped} skipped`);
+}
+
 // ==================== AUTO-CREATE MISSING CLIENTS ====================
 
 async function autoCreateMissingClients() {
@@ -1958,6 +2209,8 @@ async function autoCreateMissingClients() {
         referral_balance: 0,
         resetToken: crypto.randomBytes(16).toString('hex'),
         documents: [],
+        balance: 0,
+        last_traffic_snapshot: { timestamp: null, month_bytes: 0 },
         createdAt: new Date().toISOString()
       };
       clients.push(client);
@@ -2134,4 +2387,30 @@ app.listen(PORT, () => {
 
   // Auto-create client accounts for all portNames that don't have one
   autoCreateMissingClients().catch(e => console.error('[AutoCreate] Error:', e.message));
+
+  // Schedule daily billing at 23:55 UTC
+  scheduleRepeating(23, 55, 'DailyBilling', runDailyBilling);
+
+  // Billing catch-up: if last snapshot is older than 26 hours, run now
+  (async () => {
+    try {
+      const now = Date.now();
+      let needsCatchup = false;
+      for (const c of clients) {
+        if (c.last_traffic_snapshot && c.last_traffic_snapshot.timestamp) {
+          const lastRun = new Date(c.last_traffic_snapshot.timestamp).getTime();
+          if (now - lastRun > 26 * 60 * 60 * 1000) {
+            needsCatchup = true;
+            break;
+          }
+        }
+      }
+      if (needsCatchup) {
+        console.log('[Billing] Catch-up: missed billing detected, running now...');
+        await runDailyBilling();
+      }
+    } catch (e) {
+      console.error('[Billing] Catch-up error:', e.message);
+    }
+  })();
 });

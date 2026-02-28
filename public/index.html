@@ -1444,26 +1444,32 @@ function updateSummary(){
   var infoEl=document.getElementById('billingInfo');
   var monthTotal=totalMonthIn+totalMonthOut;
   var monthGb=monthTotal/(1024*1024*1024);
-  var cost=0;
 
   if(billingData&&billingData.price>0){
-    var currency=billingData.currency||'';
-
-    if(billingData.billingType==='per_modem'){
-      cost=billingData.price*tableData.length;
-      costEl.textContent=formatCost(cost);
-      infoEl.innerHTML=formatCost(billingData.price)+' \u00D7 '+tableData.length+' модемов';
+    // Use server-computed monthExpense from billing ledger if available
+    if(billingData.monthExpense!==undefined){
+      costEl.textContent=formatCost(billingData.monthExpense);
+      if(billingData.billingType==='per_modem'){
+        infoEl.innerHTML=formatCost(billingData.price)+' \u00D7 '+tableData.length+' модемов';
+      }else{
+        infoEl.innerHTML=formatCost(billingData.price)+'/\u0413\u0411 (начислено за месяц)';
+      }
     }else{
-      cost=billingData.price*monthGb;
-      costEl.textContent=formatCost(cost);
-      infoEl.innerHTML=formatCost(billingData.price)+'/\u0413\u0411 \u00D7 '+monthGb.toFixed(2)+' \u0413\u0411';
+      // Fallback to live calculation (pre-migration compatibility)
+      if(billingData.billingType==='per_modem'){
+        costEl.textContent=formatCost(billingData.price*tableData.length);
+        infoEl.innerHTML=formatCost(billingData.price)+' \u00D7 '+tableData.length+' модемов';
+      }else{
+        costEl.textContent=formatCost(billingData.price*monthGb);
+        infoEl.innerHTML=formatCost(billingData.price)+'/\u0413\u0411 \u00D7 '+monthGb.toFixed(2)+' \u0413\u0411';
+      }
     }
 
-    // Balance
+    // Balance — read persisted value from server (never compute locally)
     var balanceEl=document.getElementById('balanceValue');
     var balanceInfoEl=document.getElementById('balanceInfo');
-    if(billingData.totalPayments!==undefined){
-      var balance=billingData.totalPayments-cost;
+    if(billingData.balance!==undefined){
+      var balance=billingData.balance;
       balanceEl.textContent=formatCost(balance);
       balanceEl.className='card-value '+(balance>=0?'balance-positive':'balance-negative');
       balanceInfoEl.textContent='\u041E\u043F\u043B\u0430\u0447\u0435\u043D\u043E: '+formatCost(billingData.totalPayments);
@@ -1475,8 +1481,7 @@ function updateSummary(){
       }
     }
   }else{
-    cost=monthGb*23;
-    costEl.textContent=Math.round(cost).toString();
+    costEl.textContent=Math.round(monthGb*23).toString();
     infoEl.innerHTML='23/\u0413\u0411 \u00D7 '+monthGb.toFixed(2)+' \u0413\u0411';
   }
 
