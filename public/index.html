@@ -416,16 +416,18 @@
     .api-docs .api-params{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
     .api-docs .api-params th{
       text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
-      color:var(--text-3);border-bottom:1px solid var(--border);font-weight:600;
+      color:var(--text-3);border:1px solid var(--border);font-weight:600;
     }
-    .api-docs .api-params td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text-1)}
-    .api-docs .api-params td:first-child{font-family:var(--font-mono);color:var(--accent);font-size:12px;white-space:nowrap}
+    .api-docs .api-params td{padding:8px 10px;border:1px solid var(--border);color:var(--text-1);max-width:0}
+    .api-docs .api-params td code{word-break:break-all;white-space:normal;display:inline}
+    .api-docs .api-params td .api-key-highlight{word-break:break-all;white-space:normal}
+    .api-docs .api-params td:first-child{font-family:var(--font-mono);color:var(--accent);font-size:12px;white-space:nowrap;max-width:none;width:160px}
     .api-docs .api-params .required{color:var(--danger);font-size:10px;font-weight:700;margin-left:4px}
     .api-docs .code-block{
       background:var(--bg-0);border:1px solid var(--border);border-radius:8px;
       padding:14px 16px;font-family:var(--font-mono);font-size:12px;
       color:var(--text-1);overflow-x:auto;margin:10px 0;line-height:1.7;
-      position:relative;white-space:pre;
+      position:relative;white-space:pre-wrap;word-break:break-all;
     }
     .api-docs .code-block .cb-copy{
       position:absolute;top:8px;right:8px;cursor:pointer;padding:4px 10px;
@@ -473,10 +475,11 @@
     .api-docs .lang-code{display:none}
     .api-docs .lang-code.active{display:block}
     .api-docs .lang-code .code-block{margin-top:0;border-top-left-radius:0}
-    .api-docs .api-errors{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
-    .api-docs .api-errors th{text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);border-bottom:1px solid var(--border);font-weight:600}
-    .api-docs .api-errors td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text-1)}
-    .api-docs .api-errors td:first-child{font-family:var(--font-mono);font-weight:600;width:60px}
+    .api-docs .api-errors{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0;table-layout:fixed}
+    .api-docs .api-errors th{text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);border:1px solid var(--border);font-weight:600}
+    .api-docs .api-errors td{padding:8px 10px;border:1px solid var(--border);color:var(--text-1);word-break:break-word;overflow-wrap:anywhere;overflow:hidden}
+    .api-docs .api-errors td:first-child{font-family:var(--font-mono);font-weight:600;white-space:nowrap;overflow:visible}
+    .api-docs .api-errors td code{word-break:break-all;white-space:normal}
 
     /* Proxy checker results */
     .check-result-ok{color:var(--success)}
@@ -727,10 +730,10 @@
           <div class="resp-label">Аутентификация</div>
           <p class="api-desc">Передайте API-ключ одним из двух способов:</p>
           <table class="api-params">
-            <thead><tr><th>Способ</th><th>Пример</th></tr></thead>
+            <thead><tr><th style="width:160px">Способ</th><th>Пример</th></tr></thead>
             <tbody>
-              <tr><td>Заголовок<br><code style="color:var(--text-1)">X-API-Key</code></td><td><code>curl -H "X-API-Key: YOUR_API_KEY" https://dashboard.proxies.rent/api/v1/proxy</code></td></tr>
-              <tr><td>Query-параметр<br><code style="color:var(--text-1)">?apikey=</code></td><td><code>curl https://dashboard.proxies.rent/api/v1/proxy?apikey=YOUR_API_KEY</code></td></tr>
+              <tr><td>Заголовок<br><code style="color:var(--text-1)">X-API-Key</code></td><td style="font-size:12px"><code style="word-break:break-all">curl -H "X-API-Key: YOUR_API_KEY" https://dashboard.proxies.rent/api/v1/proxy</code></td></tr>
+              <tr><td>Query-параметр<br><code style="color:var(--text-1)">?apikey=</code></td><td style="font-size:12px"><code style="word-break:break-all">curl https://dashboard.proxies.rent/api/v1/proxy?apikey=YOUR_API_KEY</code></td></tr>
             </tbody>
           </table>
 
@@ -938,6 +941,7 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
           <div class="code-block">{"success": false, "error": "Invalid API key"}</div>
 
           <table class="api-errors">
+            <colgroup><col style="width:7%"><col style="width:50%"><col style="width:43%"></colgroup>
             <thead><tr><th>Код</th><th>Причина</th><th>Решение</th></tr></thead>
             <tbody>
               <tr><td style="color:var(--warning)">401</td><td>API-ключ не передан или невалиден</td><td>Проверьте заголовок <code>X-API-Key</code> или параметр <code>?apikey=</code></td></tr>
