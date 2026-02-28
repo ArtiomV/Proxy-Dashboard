@@ -219,7 +219,7 @@
     }
     table{width:100%;border-collapse:collapse;font-size:13px}
     thead th{
-      background:var(--bg-2);padding:10px 12px;text-align:left;
+      background:var(--bg-2);padding:10px 12px;text-align:center;
       font-weight:600;color:var(--text-0);
       border-bottom:1px solid var(--border);
       white-space:nowrap;position:sticky;top:0;
@@ -486,10 +486,10 @@
                 <th onclick="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
                 <th>Реквизиты</th>
                 <th>Логин:Пароль</th>
-                <th style="text-align:center">Смена IP</th>
-                <th onclick="sortTable('dayIn')" class="text-right">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
-                <th onclick="sortTable('yesterdayIn')" class="text-right">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
-                <th onclick="sortTable('monthIn')" class="text-right">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
+                <th>Смена IP</th>
+                <th onclick="sortTable('dayIn')">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
+                <th onclick="sortTable('yesterdayIn')">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
+                <th onclick="sortTable('monthIn')">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
               </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -1006,10 +1006,11 @@ function renderTable(){
         loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword)+'\',this)">\ud83d\udccb</button>';
       }
 
-      // Смена IP cell: reset link + IP history button
+      // Смена IP cell: reset link + copy button + IP history button
       var changeIpHtml='';
       if(row.resetSecureLink){
         changeIpHtml+='<a href="'+escapeHtml(row.resetSecureLink)+'" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12px" title="Сброс IP">\ud83d\udd04 Сброс</a> ';
+        changeIpHtml+='<button class="copy-btn" onclick="copyText(\''+escapeHtml(row.resetSecureLink).replace(/'/g,"\\'")+'\',this)" title="Копировать ссылку">\ud83d\udccb</button> ';
       }else{
         changeIpHtml+='<button class="action-btn-sm" onclick="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+row.serverName+'\',this)" title="Сброс IP">\ud83d\udd04</button> ';
       }
@@ -1025,9 +1026,9 @@ function renderTable(){
         '<td>'+reqHtml+'</td>'+
         '<td>'+loginPassHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+changeIpHtml+'</td>'+
-        '<td class="text-right" style="white-space:nowrap">'+dayHtml+'</td>'+
-        '<td class="text-right" style="white-space:nowrap">'+yesterdayHtml+'</td>'+
-        '<td class="text-right" style="white-space:nowrap">'+monthHtml+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+dayHtml+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+yesterdayHtml+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+monthHtml+'</td>'+
       '</tr>';
     }
   }
@@ -1133,62 +1134,40 @@ function resetIp(imei,serverName,btn){
   }).catch(function(){btn.disabled=false;showToast('Ошибка сети','error')});
 }
 
-// Change #9: IP history timestamps with clear date+time format
+// IP history — same format as admin panel
 function showIpHistory(nick,serverName,imei){
   document.getElementById('ipModalTitle').textContent='IP история: '+nick;
-  document.getElementById('ipModalBody').innerHTML='<div style="text-align:center;padding:20px"><div class="spinner" style="display:inline-block"></div> Загрузка...</div>';
+  document.getElementById('ipModalBody').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка IP истории...</div>';
   document.getElementById('ipModal').classList.add('show');
 
-  // Fetch rotation log
-  fetch('/api/client/rotation_log?nick='+encodeURIComponent(nick)+'&serverName='+serverName,{
-    headers:{'X-Auth-Token':authToken}
-  }).then(function(r){return r.json()}).then(function(data){
-    var entries=Array.isArray(data)?data:data.log||[];
-    var h='';
-    if(!entries.length){
-      h='<div style="text-align:center;padding:16px;color:var(--text-2)">Нет записей ротации</div>';
-    }else{
-      h='<h4 style="margin-bottom:8px;color:var(--text-0);font-size:13px">Лог ротации</h4>';
-      h+='<table class="log-table"><thead><tr><th>Время</th><th>Старый IP</th><th>Новый IP</th></tr></thead><tbody>';
-      entries.forEach(function(e){
-        h+='<tr><td>'+(e.time||e.timestamp||'-')+'</td><td>'+(e.old_ip||e.from||'-')+'</td><td>'+(e.new_ip||e.to||'-')+'</td></tr>';
-      });
-      h+='</tbody></table>';
-    }
+  if(!imei){
+    document.getElementById('ipModalBody').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет данных</div>';
+    return;
+  }
 
-    // Also fetch IP tracking history
-    if(imei){
-      fetch('/api/client/ip_history?key='+encodeURIComponent(imei),{headers:{'X-Auth-Token':authToken}})
-      .then(function(r){return r.json()}).then(function(hist){
-        if(hist.length>0){
-          h+='<h4 style="margin-top:16px;margin-bottom:8px;color:var(--text-0);font-size:13px">IP трекинг</h4>';
-          h+='<table class="log-table"><thead><tr><th>Время</th><th>Старый IP</th><th>Новый IP</th><th>Длительность</th></tr></thead><tbody>';
-          var reversed=hist.slice().reverse();
-          reversed.forEach(function(e,idx){
-            var from=e.from?formatDateTime(new Date(e.from)):'\u2014';
-            var dur='';
-            if(e.from){
-              var ms=(e.to||Date.now())-e.from;
-              var hrs=Math.floor(ms/3600000);
-              var mins=Math.floor((ms%3600000)/60000);
-              dur=hrs>0?hrs+'ч '+mins+'м':mins+'м';
-            }
-            // Compute old IP from the previous entry (next in reversed = previous chronologically)
-            var oldIp='\u2014';
-            if(idx<reversed.length-1){
-              oldIp=reversed[idx+1].ip||'\u2014';
-            }
-            h+='<tr><td>'+from+'</td><td>'+oldIp+'</td><td>'+e.ip+'</td><td>'+dur+'</td></tr>';
-          });
-          h+='</tbody></table>';
-        }
-        document.getElementById('ipModalBody').innerHTML=h;
-      }).catch(function(){
-        document.getElementById('ipModalBody').innerHTML=h;
-      });
-    }else{
-      document.getElementById('ipModalBody').innerHTML=h;
+  fetch('/api/client/ip_history?key='+encodeURIComponent(imei),{headers:{'X-Auth-Token':authToken}})
+  .then(function(r){return r.json()}).then(function(data){
+    var entries=Array.isArray(data)?data:(data.history||[]);
+    if(!entries.length){
+      document.getElementById('ipModalBody').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории IP</div>';
+      return;
     }
+    var h='<table class="log-table"><thead><tr><th>Время</th><th>Старый IP</th><th>Новый IP</th><th>Длительность</th></tr></thead><tbody>';
+    var reversed=entries.slice().reverse();
+    reversed.forEach(function(e,idx){
+      var from=e.from?new Date(e.from).toLocaleString('ru-RU'):'\u2014';
+      var dur='\u2014';
+      if(e.from){
+        var ms=(e.to||Date.now())-e.from;
+        var mins=Math.floor(ms/60000);
+        if(mins<60) dur=mins+'\u043c';
+        else if(mins<1440) dur=Math.floor(mins/60)+'\u0447 '+mins%60+'\u043c';
+        else dur=Math.floor(mins/1440)+'\u0434 '+Math.floor(mins%1440/60)+'\u0447';
+      }
+      var oldIp=idx<reversed.length-1?(reversed[idx+1].ip||'\u2014'):'\u2014';
+      h+='<tr><td>'+from+'</td><td class="mono" style="color:var(--text-2)">'+escapeHtml(oldIp)+'</td><td class="mono" style="color:var(--accent)">'+escapeHtml(e.ip)+'</td><td>'+dur+'</td></tr>';
+    });
+    document.getElementById('ipModalBody').innerHTML=h+'</tbody></table>';
   }).catch(function(e){
     document.getElementById('ipModalBody').innerHTML='<div style="color:var(--danger)">'+e.message+'</div>';
   });
