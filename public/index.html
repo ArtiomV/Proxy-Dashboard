@@ -62,73 +62,79 @@
     @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
     @keyframes glowPulse{0%,100%{box-shadow:0 0 20px var(--accent-glow)}50%{box-shadow:0 0 40px var(--accent-glow)}}
 
-    /* Login */
+    /* Login — proxies.rent style */
     .login-overlay{
       position:fixed;inset:0;
-      background:var(--bg-0);
+      background:#0D0D0E;
       display:flex;align-items:center;justify-content:center;
       z-index:1000;
     }
     .login-overlay::before{
       content:'';position:absolute;inset:0;
-      background:radial-gradient(ellipse at 50% 0%,var(--accent-dim) 0%,transparent 60%);
+      background:radial-gradient(ellipse at 50% 0%,rgba(25,96,201,0.15) 0%,transparent 60%);
+      pointer-events:none;
+    }
+    .login-overlay::after{
+      content:'';position:absolute;inset:0;
+      background:radial-gradient(ellipse at 80% 80%,rgba(52,199,89,0.06) 0%,transparent 50%);
       pointer-events:none;
     }
     .login-box{
-      background:var(--card-bg);
-      backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);
-      border:1px solid var(--card-border);
-      border-radius:16px;
-      padding:44px 36px;
-      width:380px;max-width:90vw;
-      box-shadow:var(--card-shadow);
+      background:#1B2237;
+      border:1px solid rgba(255,255,255,0.08);
+      border-radius:20px;
+      padding:48px 40px;
+      width:420px;max-width:90vw;
+      box-shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);
       animation:fadeIn .5s ease;
       position:relative;z-index:1;
     }
-    .login-box h2{
-      color:var(--text-0);font-size:24px;font-weight:700;
-      margin-bottom:6px;text-align:center;
-      background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    .login-logo{
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      margin-bottom:8px;
     }
+    .login-logo img{height:32px;width:auto}
+    .login-logo span{font-size:22px;font-weight:600;color:#fff;letter-spacing:-0.3px}
     .login-box .login-sub{
-      text-align:center;color:var(--text-2);font-size:13px;margin-bottom:28px;
+      text-align:center;color:#B3B3B3;font-size:14px;margin-bottom:32px;font-weight:400;
     }
     .login-box input{
-      width:100%;padding:11px 14px;margin-bottom:14px;
-      background:var(--bg-2);border:1px solid var(--border);border-radius:8px;
-      color:var(--text-1);font-size:14px;font-family:var(--font-sans);
-      transition:border-color .2s,box-shadow .2s;
+      width:100%;padding:14px 16px;margin-bottom:14px;
+      background:rgba(13,13,14,0.6);border:1px solid #5C5967;border-radius:4px;
+      color:#EDEDED;font-size:15px;font-family:var(--font-sans);
+      transition:border-color .3s,box-shadow .3s;
     }
-    .login-box input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
-    .login-box input::placeholder{color:var(--text-3)}
+    .login-box input:focus{outline:none;border-color:#1960C9;box-shadow:0 0 0 3px rgba(25,96,201,0.2)}
+    .login-box input::placeholder{color:#5C5967}
     .login-box .btn-login{
-      width:100%;padding:11px;
-      background:var(--accent-gradient);
-      border:none;border-radius:8px;
-      color:#fff;font-size:15px;font-weight:600;
-      cursor:pointer;transition:opacity .2s,transform .1s;
+      width:100%;padding:14px;margin-top:6px;
+      background:#1960C9;
+      border:1px solid #1960C9;border-radius:100px;
+      color:#fff;font-size:16px;font-weight:600;
+      cursor:pointer;transition:all .3s ease;
       font-family:var(--font-sans);
     }
-    .login-box .btn-login:hover{opacity:.9}
+    .login-box .btn-login:hover{background:#fff;color:#1960C9;border-color:#fff}
     .login-box .btn-login:active{transform:scale(.98)}
     .login-box .btn-login:disabled{opacity:.5;cursor:not-allowed}
-    .login-error{color:var(--danger);font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
+    .login-error{color:#FF383C;font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
 
-    /* Header */
+    /* Header — unified with admin */
     .header{
-      background:linear-gradient(135deg,var(--bg-1) 0%,var(--bg-2) 100%);
+      background:var(--bg-1);
       border-bottom:1px solid var(--border);
-      padding:16px 24px;
+      padding:0 24px;height:52px;
       display:flex;align-items:center;justify-content:space-between;
-      flex-wrap:wrap;gap:12px;
-      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
     }
+    .header-left{display:flex;align-items:center;gap:12px}
+    .header-logo{display:flex;align-items:center;gap:8px;text-decoration:none}
+    .header-logo img{height:22px;width:auto}
     .header h1{
-      font-size:18px;font-weight:700;
+      font-size:16px;font-weight:700;letter-spacing:-0.3px;
       background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
     }
-    .header-controls{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
-    .user-info{font-size:13px;color:var(--text-2)}
+    .header-controls{display:flex;align-items:center;gap:8px}
+    .user-info{font-size:12px;color:var(--text-2)}
     .user-info strong{color:var(--text-0)}
 
     /* Theme toggle */
@@ -180,7 +186,7 @@
       transition:all .2s;font-weight:500;white-space:nowrap;
     }
     .nav-tab:hover{color:var(--text-1)}
-    .nav-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+    .nav-tab.active{background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;border-bottom-color:var(--accent)}
     .tab-pane{display:none}
     .tab-pane.active{display:block;animation:fadeIn .3s ease}
 
@@ -400,7 +406,7 @@
 
   <div class="login-overlay" id="loginOverlay">
     <div class="login-box">
-      <h2>PROXIES.RENT</h2>
+      <div class="login-logo"><img src="https://proxies.rent/img/logo.webp" alt="Proxies.rent"><span>Proxies.rent</span></div>
       <p class="login-sub">Личный кабинет партнёра</p>
       <div class="login-error" id="loginError"></div>
       <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
@@ -411,7 +417,10 @@
 
   <div id="appMain" style="display:none">
     <div class="header">
-      <h1>PROXIES.RENT <span style="font-size:12px;font-weight:400;-webkit-text-fill-color:var(--text-2);background:none">— личный кабинет партнёра</span></h1>
+      <div class="header-left">
+        <a class="header-logo" href="/"><img src="https://proxies.rent/img/logo.webp" alt=""></a>
+        <h1>Proxies.rent <span style="font-size:11px;font-weight:400;-webkit-text-fill-color:var(--text-2);background:none">— личный кабинет партнёра</span></h1>
+      </div>
       <div class="header-controls">
         <span class="user-info">Клиент: <strong id="currentUser"></strong></span>
         <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Переключить тему"></div>
@@ -1023,11 +1032,13 @@ function renderTable(){
       var rowStyle=row._cached?'opacity:0.6':'';
       html+='<tr style="'+rowStyle+'">'+
         '<td>'+
-          '<div style="display:flex;flex-direction:column;align-items:center;gap:4px">'+
-            '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+
-            (row._cached?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="\u0414\u0430\u043d\u043d\u044b\u0435 \u0438\u0437 \u043a\u0435\u0448\u0430 \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d">\u041a\u0415\u0428</span>':'')+
+          '<div style="display:flex;align-items:center;gap:10px">'+
             '<span class="status-dot '+statusDotCls+'"></span>'+
-            '<span style="font-size:11px;color:var(--text-3)">'+escapeHtml(row.operator)+'</span>'+
+            '<div style="display:flex;flex-direction:column;gap:2px">'+
+              '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+
+              (row._cached?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="\u0414\u0430\u043d\u043d\u044b\u0435 \u0438\u0437 \u043a\u0435\u0448\u0430 \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d">\u041a\u0415\u0428</span>':'')+
+              '<span style="font-size:11px;color:var(--text-3)">'+escapeHtml(row.operator)+'</span>'+
+            '</div>'+
           '</div>'+
         '</td>'+
         '<td>'+reqHtml+'</td>'+

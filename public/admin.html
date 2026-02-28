@@ -33,15 +33,26 @@
 *{margin:0;padding:0;box-sizing:border-box}
 body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg-0);color:var(--text-1);transition:background .3s,color .3s}
 
-/* Login */
-.login-overlay{position:fixed;inset:0;background:var(--bg-0);display:flex;align-items:center;justify-content:center;z-index:9999}
-.login-box{background:var(--card-bg);backdrop-filter:blur(20px);-webkit-backdrop-filter:blur(20px);padding:48px 40px;border-radius:16px;width:380px;border:1px solid var(--border);box-shadow:0 24px 48px rgba(0,0,0,.4)}
-.login-box h2{background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;margin-bottom:28px;font-size:22px;text-align:center;font-weight:700}
-.login-box input{width:100%;padding:11px 14px;margin-bottom:12px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:14px;outline:none}
-.login-box input:focus{border-color:var(--accent)}
-.login-box button{width:100%;padding:11px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:14px;cursor:pointer;font-weight:600}
-.login-box button:hover{background:var(--accent-hover)}
-.login-error{color:var(--danger);font-size:13px;margin-top:8px;text-align:center}
+/* Login — proxies.rent style */
+.login-overlay{position:fixed;inset:0;background:#0D0D0E;display:flex;align-items:center;justify-content:center;z-index:9999}
+.login-overlay::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(25,96,201,0.15) 0%,transparent 60%);pointer-events:none}
+.login-overlay::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 80% 80%,rgba(52,199,89,0.06) 0%,transparent 50%);pointer-events:none}
+.login-box{background:#1B2237;border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:48px 40px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);position:relative;z-index:1}
+.login-logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:8px}
+.login-logo img{height:32px;width:auto}
+.login-logo span{font-size:22px;font-weight:600;color:#fff;letter-spacing:-0.3px}
+.login-sub{text-align:center;color:#B3B3B3;font-size:14px;margin-bottom:32px;font-weight:400}
+.login-box input{width:100%;padding:14px 16px;margin-bottom:14px;background:rgba(13,13,14,0.6);border:1px solid #5C5967;border-radius:4px;color:#EDEDED;font-size:15px;outline:none;font-family:'Inter',sans-serif;transition:border-color .3s,box-shadow .3s}
+.login-box input:focus{border-color:#1960C9;box-shadow:0 0 0 3px rgba(25,96,201,0.2)}
+.login-box input::placeholder{color:#5C5967}
+.login-box button{width:100%;padding:14px;margin-top:6px;background:#1960C9;border:1px solid #1960C9;border-radius:100px;color:#fff;font-size:16px;cursor:pointer;font-weight:600;font-family:'Inter',sans-serif;transition:all .3s ease}
+.login-box button:hover{background:#fff;color:#1960C9;border-color:#fff}
+.login-box button:active{transform:scale(.98)}
+.login-error{color:#FF383C;font-size:13px;margin-top:8px;text-align:center}
+
+/* Header logo */
+.header-logo{display:flex;align-items:center;text-decoration:none}
+.header-logo img{height:22px;width:auto}
 
 /* Header - PAN-OS style */
 .header{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;justify-content:space-between}
@@ -336,7 +347,8 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <div class="login-overlay" id="loginOverlay">
   <div class="login-box">
-    <h2>PROXIES.RENT</h2><p style="text-align:center;color:var(--text-2);font-size:13px;margin-bottom:20px">Личный кабинет администратора</p>
+    <div class="login-logo"><img src="https://proxies.rent/img/logo.webp" alt="Proxies.rent"><span>Proxies.rent</span></div>
+    <p class="login-sub">Личный кабинет администратора</p>
     <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
     <input type="password" id="passInput" placeholder="Пароль" autocomplete="current-password">
     <button onclick="doLogin()">Войти</button>
@@ -348,7 +360,8 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <div class="header">
   <div class="header-left">
-    <h1>PROXIES.RENT <span style="font-size:11px;font-weight:400;-webkit-text-fill-color:var(--text-2);background:none">— личный кабинет администратора</span></h1>
+    <a class="header-logo" href="/admin"><img src="https://proxies.rent/img/logo.webp" alt=""></a>
+    <h1>Proxies.rent <span style="font-size:11px;font-weight:400;-webkit-text-fill-color:var(--text-2);background:none">— личный кабинет администратора</span></h1>
     <div class="header-stats" id="headerStats"></div>
   </div>
   <div class="header-right">
