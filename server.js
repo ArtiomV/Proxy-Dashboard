@@ -810,8 +810,13 @@ app.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const result = await fetchApi(server, `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(imei)}`);
-    res.json({ ok: true, result });
-  } catch (err) { res.status(502).json({ error: 'Reset failed', details: err.message }); }
+    const success = result && result.result === 'success';
+    if (success) {
+      res.json({ ok: true, result });
+    } else {
+      res.json({ ok: false, error: result?.message || 'Reset failed', result });
+    }
+  } catch (err) { res.status(502).json({ ok: false, error: 'Reset failed', details: err.message }); }
 });
 
 // ==================== CLIENT: TOKEN-BASED IP RESET (public, no session) ====================
@@ -861,10 +866,6 @@ app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
 
     const COUNTRIES = { S1: { serverIp: '89.149.100.92' }, S2: { serverIp: '31.5.194.89' } };
     // Build server URL map for direct reset URLs
-    const serverResetMap = {};
-    for (const s of apiServers) {
-      serverResetMap[s.name] = { url: s.url, user: s.user, pass: s.pass };
-    }
     const credentials = [];
 
     for (const [imei, portList] of Object.entries(merged.ports)) {
@@ -877,14 +878,6 @@ app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
           break;
         }
       }
-      // Direct ProxySmart reset URL
-      const srv = serverResetMap[serverName];
-      let directResetUrl = '';
-      if (srv) {
-        const urlObj = new URL(srv.url);
-        directResetUrl = `${urlObj.protocol}//${srv.user}:${srv.pass}@${urlObj.host}/apix/reset_modem?arg=${encodeURIComponent(modemNick)}`;
-      }
-
       for (const p of portList) {
         if (p.LOGIN && p.PASSWORD) {
           credentials.push({
@@ -899,7 +892,7 @@ app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
             socks5Proxy: ci.serverIp ? `${ci.serverIp}:${p.SOCKS_PORT}` : '',
             httpCreds: p.http_creds || '',
             socks5Creds: p.socks5_creds || '',
-            resetUrl: directResetUrl
+            resetUrl: p.RESET_SECURE_LINK?.URL || ''
           });
         }
       }
@@ -954,6 +947,18 @@ app.get('/api/client/documents/:docId/download', authMiddleware, (req, res) => {
   res.download(filePath, doc.name);
 });
 
+// ==================== CORS for Public API (Bug #6) ====================
+app.use('/api/v1', (req, res, next) => {
+  res.header('Access-Control-Allow-Origin', '*');
+  res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
+  res.header('Access-Control-Allow-Headers', 'X-API-Key, Content-Type');
+  res.header('Access-Control-Max-Age', '86400');
+  if (req.method === 'OPTIONS') {
+    return res.sendStatus(204);
+  }
+  next();
+});
+
 // ==================== PUBLIC: PROXY API v2 (Evomi-style, apiKey via header or query) ====================
 
 app.get('/api/v1/proxy', async (req, res) => {
@@ -968,10 +973,6 @@ app.get('/api/v1/proxy', async (req, res) => {
     const merged = mergeServerData(results, client.portName);
 
     const COUNTRIES = { S1: { serverIp: '89.149.100.92', country: 'MD', name: 'Moldova' }, S2: { serverIp: '31.5.194.89', country: 'RO', name: 'Romania' } };
-    const serverResetMap = {};
-    for (const s of apiServers) {
-      serverResetMap[s.name] = { url: s.url, user: s.user, pass: s.pass };
-    }
 
     const proxies = [];
     for (const [imei, portList] of Object.entries(merged.ports)) {
@@ -983,18 +984,14 @@ app.get('/api/v1/proxy', async (req, res) => {
         if (m.modem_details?.IMEI === imei) {
           modemNick = m.modem_details.NICK || imei;
           operator = m.net_details?.CELLOP || '';
-          isOnline = m.STATE === 'added' && m.IS_REBOOTING !== 'true';
+          isOnline = m.net_details?.IS_ONLINE === 'yes';
           break;
         }
       }
-      const srv = serverResetMap[serverName];
-      let changeIpUrl = '';
-      if (srv) {
-        const urlObj = new URL(srv.url);
-        changeIpUrl = `${urlObj.protocol}//${srv.user}:${srv.pass}@${urlObj.host}/apix/reset_modem?arg=${encodeURIComponent(modemNick)}`;
-      }
       for (const p of portList) {
         if (p.LOGIN && p.PASSWORD && ci.serverIp) {
+          // Use RESET_SECURE_LINK from port data (direct modem server URL)
+          const changeIpUrl = p.RESET_SECURE_LINK?.URL || '';
           proxies.push({
             id: modemNick,
             host: ci.serverIp,
@@ -1067,11 +1064,6 @@ app.get('/api/v1/proxies', async (req, res) => {
     const merged = mergeServerData(results, client.portName);
 
     const COUNTRIES = { S1: { serverIp: '89.149.100.92' }, S2: { serverIp: '31.5.194.89' } };
-    // Build server URL map for direct reset URLs
-    const serverResetMap = {};
-    for (const s of apiServers) {
-      serverResetMap[s.name] = { url: s.url, user: s.user, pass: s.pass };
-    }
     const proxies = [];
 
     for (const [imei, portList] of Object.entries(merged.ports)) {
@@ -1080,13 +1072,6 @@ app.get('/api/v1/proxies', async (req, res) => {
       let modemNick = imei;
       for (const m of merged.status) {
         if (m.modem_details?.IMEI === imei) { modemNick = m.modem_details.NICK || imei; break; }
-      }
-      // Build direct ProxySmart reset URL
-      const srv = serverResetMap[serverName];
-      let directResetUrl = '';
-      if (srv) {
-        const urlObj = new URL(srv.url);
-        directResetUrl = `${urlObj.protocol}//${srv.user}:${srv.pass}@${urlObj.host}/apix/reset_modem?arg=${encodeURIComponent(modemNick)}`;
       }
       for (const p of portList) {
         if (p.LOGIN && p.PASSWORD && ci.serverIp) {
@@ -1097,7 +1082,7 @@ app.get('/api/v1/proxies', async (req, res) => {
             socksPort: parseInt(p.SOCKS_PORT) || 0,
             login: p.LOGIN,
             password: p.PASSWORD,
-            resetUrl: directResetUrl
+            resetUrl: p.RESET_SECURE_LINK?.URL || ''
           });
         }
       }
@@ -1705,11 +1690,11 @@ app.post('/api/tools/check_proxy', authMiddleware, async (req, res) => {
 
   async function checkOneProxy(proxy) {
     const start = Date.now();
+    const proxyAuth = proxy.login && proxy.password
+      ? `${proxy.login}:${proxy.password}` : null;
     for (const target of checkTargets) {
       try {
         const result = await new Promise((resolve, reject) => {
-          const proxyAuth = proxy.login && proxy.password
-            ? `${proxy.login}:${proxy.password}` : null;
           const r = http.request({
             hostname: proxy.ip,
             port: parseInt(proxy.port),
@@ -1719,7 +1704,7 @@ app.post('/api/tools/check_proxy', authMiddleware, async (req, res) => {
               'Host': target.host,
               ...(proxyAuth ? { 'Proxy-Authorization': 'Basic ' + Buffer.from(proxyAuth).toString('base64') } : {})
             },
-            timeout: 3000
+            timeout: 15000
           }, (proxyRes) => {
             let data = '';
             proxyRes.on('data', chunk => data += chunk);
@@ -1730,21 +1715,22 @@ app.post('/api/tools/check_proxy', authMiddleware, async (req, res) => {
           r.end();
         });
         if (result.status >= 200 && result.status < 400) {
-          return { ip: proxy.ip, port: proxy.port, working: true, responseTime: Date.now() - start, detectedIp: target.parseIp(result.body), status: result.status };
+          const detectedIp = target.parseIp(result.body) || result.body.trim();
+          return { ip: proxy.ip, port: proxy.port, working: true, responseTime: Date.now() - start, detectedIp, status: result.status };
         }
       } catch (e) { continue; }
     }
-    // TCP fallback
+    // TCP fallback — proxy port is open but HTTP check failed
     try {
       await new Promise((resolve, reject) => {
         const net = require('net');
         const sock = new net.Socket();
-        sock.setTimeout(3000);
+        sock.setTimeout(5000);
         sock.connect(parseInt(proxy.port), proxy.ip, () => { sock.destroy(); resolve(true); });
         sock.on('error', (err) => { sock.destroy(); reject(err); });
         sock.on('timeout', () => { sock.destroy(); reject(new Error('Timeout')); });
       });
-      return { ip: proxy.ip, port: proxy.port, working: true, responseTime: Date.now() - start, detectedIp: '(порт открыт)', status: 0 };
+      return { ip: proxy.ip, port: proxy.port, working: true, responseTime: Date.now() - start, detectedIp: '(порт открыт, IP не определён)', status: 0 };
     } catch (e) {
       return { ip: proxy.ip, port: proxy.port, working: false, responseTime: Date.now() - start, error: e.message };
     }
@@ -2113,6 +2099,14 @@ app.get('/api/docs', (req, res) => {
       'Спидтесты выполняются автоматически в 02:00 и 14:00 UTC',
       'IP история обновляется каждые 10 минут'
     ]
+  });
+});
+
+// ==================== JSON fallback for unknown API routes (Bug #5) ====================
+app.use('/api', (req, res) => {
+  res.status(404).json({
+    success: false,
+    error: `Cannot ${req.method} ${req.path}`
   });
 });
 
