@@ -98,7 +98,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .country-name{font-size:13px;font-weight:600;color:var(--text-0)}
 .country-stats{font-size:11px;color:var(--text-2);margin-left:auto;display:flex;gap:12px}
 table{width:100%;border-collapse:collapse;background:var(--bg-1);border:1px solid var(--border);border-top:none}
-th{position:sticky;top:0;background:var(--bg-2);padding:7px 8px;text-align:left;font-size:11px;color:var(--text-2);font-weight:500;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+th{position:sticky;top:0;background:var(--bg-2);padding:7px 8px;text-align:center;font-size:11px;color:var(--text-2);font-weight:500;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
 th:hover{color:var(--text-1)}
 td{padding:5px 8px;font-size:12px;border-bottom:1px solid var(--bg-3);white-space:nowrap}
 tr:hover td{background:var(--bg-2)}
@@ -336,7 +336,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <div class="login-overlay" id="loginOverlay">
   <div class="login-box">
-    <h2>Proxies.Rent — Админ</h2>
+    <h2>PROXIES.RENT</h2><p style="text-align:center;color:var(--text-2);font-size:13px;margin-bottom:20px">Личный кабинет администратора</p>
     <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
     <input type="password" id="passInput" placeholder="Пароль" autocomplete="current-password">
     <button onclick="doLogin()">Войти</button>
@@ -348,7 +348,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <div class="header">
   <div class="header-left">
-    <h1>PROXIES.RENT</h1>
+    <h1>PROXIES.RENT <span style="font-size:11px;font-weight:400;-webkit-text-fill-color:var(--text-2);background:none">— личный кабинет администратора</span></h1>
     <div class="header-stats" id="headerStats"></div>
   </div>
   <div class="header-right">
@@ -361,10 +361,10 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <div class="nav-tabs">
   <div class="nav-tab active" onclick="switchMainTab('modems',this)">Модемы</div>
-  <div class="nav-tab" onclick="switchMainTab('traffic',this)">Трафик</div>
+  <div class="nav-tab" onclick="switchMainTab('traffic',this)">Аналитика</div>
   <div class="nav-tab" onclick="switchMainTab('clients',this)">Клиенты</div>
   <div class="nav-tab" onclick="switchMainTab('tools',this)">Инструменты</div>
-  <div class="nav-tab" onclick="switchMainTab('analytics',this)">Аналитика</div>
+  <div class="nav-tab" onclick="switchMainTab('analytics',this)">Настройки</div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:4px;padding-right:8px">
     <input type="text" class="search-box" id="searchBox" placeholder="Поиск..." oninput="renderTable()" style="width:180px;height:28px;font-size:11px">
     <div class="col-selector" style="position:relative">
@@ -577,9 +577,9 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <div class="analytics-section">
     <div class="analytics-card">
       <h3>Уникальность IP (14 дней)</h3>
-      <div class="form-row" style="margin-bottom:10px">
-        <div class="form-group"><select class="form-input" id="uniqueIpsServer"><option value="">Сервер</option></select></div>
-        <div class="form-group"><button class="btn btn-primary" onclick="loadUniqueIps()" style="margin-top:16px">Загрузить</button></div>
+      <div class="form-row" style="margin-bottom:10px;align-items:flex-end">
+        <div class="form-group"><label>Сервер</label><select class="form-input" id="uniqueIpsServer"><option value="">Сервер</option></select></div>
+        <div class="form-group"><button class="btn btn-primary" onclick="loadUniqueIps()">Загрузить</button></div>
       </div>
       <div id="uniqueIpsResult"></div>
     </div>
@@ -596,9 +596,9 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     </div>
     <div class="analytics-card">
       <h3>Бекап</h3>
-      <div class="form-row">
-        <div class="form-group"><select class="form-input" id="backupServer"><option value="">Сервер</option></select></div>
-        <div class="form-group"><button class="btn btn-success" onclick="downloadBackup()" style="margin-top:16px">Скачать бекап</button></div>
+      <div class="form-row" style="align-items:flex-end">
+        <div class="form-group"><label>Сервер</label><select class="form-input" id="backupServer"><option value="">Сервер</option></select></div>
+        <div class="form-group"><button class="btn btn-success" onclick="downloadBackup()">Скачать бекап</button></div>
       </div>
     </div>
     <div class="analytics-card">

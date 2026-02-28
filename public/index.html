@@ -371,9 +371,10 @@
     .check-result-ok{color:var(--success)}
     .check-result-fail{color:var(--danger)}
 
-    .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block;margin-right:6px;vertical-align:middle}
+    .status-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
     .status-dot.online{background:var(--success);box-shadow:0 0 8px rgba(63,185,80,.5)}
-    .status-dot.offline{background:var(--danger)}
+    .status-dot.offline{background:var(--accent);box-shadow:0 0 8px rgba(0,212,255,.4)}
+    .status-dot.rotating{background:var(--warning);animation:pulse 1.2s infinite;box-shadow:0 0 8px rgba(210,153,34,.5)}
     .pass-hidden{cursor:pointer;color:var(--text-3)}
 
     /* Section heading for proxy credentials on traffic tab */
@@ -399,8 +400,8 @@
 
   <div class="login-overlay" id="loginOverlay">
     <div class="login-box">
-      <h2>Proxies.Rent</h2>
-      <p class="login-sub">Кабинет клиента</p>
+      <h2>PROXIES.RENT</h2>
+      <p class="login-sub">Личный кабинет партнёра</p>
       <div class="login-error" id="loginError"></div>
       <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
       <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="current-password">
@@ -410,7 +411,7 @@
 
   <div id="appMain" style="display:none">
     <div class="header">
-      <h1>PROXIES.RENT</h1>
+      <h1>PROXIES.RENT <span style="font-size:12px;font-weight:400;-webkit-text-fill-color:var(--text-2);background:none">— личный кабинет партнёра</span></h1>
       <div class="header-controls">
         <span class="user-info">Клиент: <strong id="currentUser"></strong></span>
         <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Переключить тему"></div>
@@ -982,8 +983,11 @@ function renderTable(){
       var yesterdayHtml='\u2193 '+formatBytes(row.yesterdayIn)+' / \u2191 '+formatBytes(row.yesterdayOut);
       var monthHtml='\u2193 '+formatBytes(row.monthIn)+' / \u2191 '+formatBytes(row.monthOut);
 
-      // Status dot before modem name
-      var statusDotCls=row.online==='yes'?'online':'offline';
+      // Status dot: online=green, rotating/IP_RESET=yellow blinking, offline=blue
+      var statusDotCls;
+      if(row.extIp==='IP_RESET'||row.online==='rotating'){statusDotCls='rotating'}
+      else if(row.online==='yes'){statusDotCls='online'}
+      else{statusDotCls='offline'}
 
       // Реквизиты cell: HTTP and SOCKS5 on separate lines with labels
       var ci2=COUNTRIES[row.serverName]||{};
@@ -1019,9 +1023,12 @@ function renderTable(){
       var rowStyle=row._cached?'opacity:0.6':'';
       html+='<tr style="'+rowStyle+'">'+
         '<td>'+
-          '<span class="status-dot '+statusDotCls+'"></span>'+
-          '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+(row._cached?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="\u0414\u0430\u043d\u043d\u044b\u0435 \u0438\u0437 \u043a\u0435\u0448\u0430 \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d">\u041a\u0415\u0428</span>':'')+
-          '<br><span style="font-size:11px;color:var(--text-3);margin-left:14px">'+escapeHtml(row.operator)+'</span>'+
+          '<div style="display:flex;flex-direction:column;align-items:center;gap:4px">'+
+            '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+
+            (row._cached?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="\u0414\u0430\u043d\u043d\u044b\u0435 \u0438\u0437 \u043a\u0435\u0448\u0430 \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d">\u041a\u0415\u0428</span>':'')+
+            '<span class="status-dot '+statusDotCls+'"></span>'+
+            '<span style="font-size:11px;color:var(--text-3)">'+escapeHtml(row.operator)+'</span>'+
+          '</div>'+
         '</td>'+
         '<td>'+reqHtml+'</td>'+
         '<td>'+loginPassHtml+'</td>'+
@@ -1358,7 +1365,7 @@ function loadReferral(){
   fetch('/api/client/referral',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
     document.getElementById('referralContent').innerHTML=
       '<div class="referral-info">'+
-      '<div class="referral-hero"><h3>Партнёрская программа</h3><p>Приглашайте клиентов и получайте <strong>15%</strong> от каждого их платежа на свой баланс</p></div>'+
+      '<div class="referral-hero"><h3>Партнёрская программа</h3><p>Рассказывайте о нас и получайте <strong>15%</strong> от каждого их платежа на свой баланс или личную карту. За дополнительной информацией обращайтесь к администратору</p></div>'+
       '<div class="referral-cards">'+
       '<div class="card"><div class="card-label">Привлечено клиентов</div><div class="card-value">'+(data.referrals_count||0)+'</div></div>'+
       '<div class="card"><div class="card-label">Заработано</div><div class="card-value">'+Math.floor(data.referral_balance||0).toString()+'</div></div>'+
