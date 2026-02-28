@@ -3,7 +3,11 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Proxies.Rent — Админ</title>
+<title>Proxies.rent — личный кабинет администратора</title>
+<link rel="icon" type="image/png" href="https://proxies.rent/favicon-96x96.png" sizes="96x96">
+<link rel="icon" type="image/svg+xml" href="https://proxies.rent/favicon.svg">
+<link rel="shortcut icon" href="https://proxies.rent/favicon.ico">
+<link rel="apple-touch-icon" sizes="180x180" href="https://proxies.rent/apple-touch-icon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
@@ -11,22 +15,22 @@
 <style>
 /* ==================== THEME VARIABLES ==================== */
 :root,[data-theme="dark"]{
-  --bg-0:#0a0d12;--bg-1:#0f1419;--bg-2:#151b23;--bg-3:#1c2432;--bg-4:#243044;
+  --bg-0:#0D0D0E;--bg-1:#121724;--bg-2:#1B2237;--bg-3:#1c2432;--bg-4:#243044;
   --border:rgba(255,255,255,0.06);--border-hover:rgba(255,255,255,0.12);
   --text-0:#f0f6fc;--text-1:#c9d1d9;--text-2:#7d8590;--text-3:#484f58;
-  --accent:#00d4ff;--accent-hover:#33ddff;--accent-bg:rgba(0,212,255,.12);
-  --accent-gradient:linear-gradient(135deg,#00d4ff 0%,#7c3aed 100%);
-  --success:#3fb950;--warning:#d29922;--danger:#f85149;
-  --card-bg:rgba(15,20,25,0.7);--card-border:rgba(255,255,255,0.06);
+  --accent:#1960C9;--accent-hover:#2070d9;--accent-bg:rgba(25,96,201,.12);
+  --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
+  --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
+  --card-bg:rgba(18,23,36,0.7);--card-border:rgba(255,255,255,0.06);
   --card-shadow:0 4px 24px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.03);
 }
 [data-theme="light"]{
   --bg-0:#f5f6f8;--bg-1:#ffffff;--bg-2:#f0f1f3;--bg-3:#e8eaed;--bg-4:#d8dce2;
   --border:rgba(0,0,0,0.08);--border-hover:rgba(0,0,0,0.15);
   --text-0:#0f1419;--text-1:#24292f;--text-2:#656d76;--text-3:#8b949e;
-  --accent:#0085ff;--accent-hover:#0070d9;--accent-bg:rgba(0,133,255,.1);
-  --accent-gradient:linear-gradient(135deg,#0085ff 0%,#7c3aed 100%);
-  --success:#1a7f37;--warning:#9a6700;--danger:#cf222e;
+  --accent:#1960C9;--accent-hover:#1450b0;--accent-bg:rgba(25,96,201,.1);
+  --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
+  --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
   --card-bg:rgba(255,255,255,0.8);--card-border:rgba(0,0,0,0.08);
   --card-shadow:0 4px 24px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.04);
 }
@@ -76,10 +80,10 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .tab-content{display:none}.tab-content.active{display:block}
 
 /* Buttons */
-.btn{padding:6px 12px;border-radius:5px;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:500;transition:all .15s;display:inline-flex;align-items:center;gap:4px;background:var(--bg-2);color:var(--text-1)}
+.btn{padding:6px 12px;border-radius:6.25rem;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:500;transition:all .15s;display:inline-flex;align-items:center;gap:4px;background:var(--bg-2);color:var(--text-1)}
 .btn:hover{border-color:var(--border-hover);background:var(--bg-3)}
 .btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
-.btn-primary:hover{background:var(--accent-hover);box-shadow:0 0 16px rgba(0,212,255,.25)}
+.btn-primary:hover{background:var(--accent-hover);box-shadow:0 0 16px rgba(25,96,201,.25)}
 .btn-sm{padding:4px 8px;font-size:11px}
 .btn-danger{background:var(--danger);color:#fff;border-color:var(--danger)}
 .btn-success{background:var(--success);color:#fff;border-color:var(--success)}
@@ -117,7 +121,7 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 
 /* Status dots */
 .status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-.status-dot.online{background:var(--success);box-shadow:0 0 8px rgba(63,185,80,.5)}
+.status-dot.online{background:var(--success);box-shadow:0 0 8px rgba(52,199,89,.5)}
 .status-dot.rotating{background:var(--warning);animation:pulse 1.5s infinite}
 .status-dot.offline{background:var(--danger)}
 .status-dot.rebooting{background:#9b59b6;animation:pulse 1s infinite}
@@ -204,7 +208,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .client-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;padding:20px 24px}
 .client-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:12px;padding:0;transition:all .25s;overflow:hidden;position:relative}
 .client-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent-gradient);opacity:.6;transition:opacity .2s}
-.client-card:hover{border-color:var(--accent);box-shadow:0 4px 24px rgba(0,212,255,.12);transform:translateY(-2px)}
+.client-card:hover{border-color:var(--accent);box-shadow:0 4px 24px rgba(25,96,201,.12);transform:translateY(-2px)}
 .client-card:hover::before{opacity:1}
 .client-card-header{display:flex;justify-content:space-between;align-items:center;padding:14px 16px 10px;border-bottom:1px solid var(--border);background:var(--bg-2)}
 .client-card-name{font-size:15px;font-weight:700;color:var(--text-0);display:flex;align-items:center;gap:8px}
@@ -343,18 +347,9 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 }
 </style>
 </head>
-<body>
+<body style="visibility:hidden">
 
-<div class="login-overlay" id="loginOverlay">
-  <div class="login-box">
-    <div class="login-logo"><img src="https://proxies.rent/img/logo.webp" alt="Proxies.rent"><span>Proxies.rent</span></div>
-    <p class="login-sub">Личный кабинет администратора</p>
-    <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
-    <input type="password" id="passInput" placeholder="Пароль" autocomplete="current-password">
-    <button onclick="doLogin()">Войти</button>
-    <div class="login-error" id="loginError"></div>
-  </div>
-</div>
+<div id="loginOverlay" style="display:none"></div>
 <div class="refresh-bar" id="refreshBar" style="width:0"></div>
 <div class="toast-container" id="toastContainer"></div>
 
@@ -670,7 +665,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 </div>
 
 <script>
-var API='',authToken=localStorage.getItem('admin_token')||'',currentData=null;
+var API='',authToken=localStorage.getItem('pr_token')||'',currentData=null;
 var sortCol='nick',sortDir='asc',activeServerFilter='all',activeStatusFilter='all';
 var autoRefreshTimer=null,charts={};
 
@@ -696,14 +691,14 @@ var COUNTRIES={S1:{flag:'\u{1F1F2}\u{1F1E9}',name:'Молдова',serverIp:'89.
 var COUNTRY_ORDER=['S1','S2'];
 
 // ========== THEME ==========
-function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=t;localStorage.setItem('admin_theme',t);updateChartsTheme()}
-(function(){var t=localStorage.getItem('admin_theme');if(t)document.documentElement.dataset.theme=t})();
+function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=t;localStorage.setItem('pr_admin_theme',t);updateChartsTheme()}
+(function(){var t=localStorage.getItem('pr_admin_theme');if(t)document.documentElement.dataset.theme=t})();
 
 function getChartColors(){var d=document.documentElement.dataset.theme==='dark';return{grid:d?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)',text:d?'#8892a6':'#6b7280',bg:d?'#131720':'#ffffff'}}
 
 // ========== AUTH ==========
-function doLogin(){var l=document.getElementById('loginInput').value.trim(),p=document.getElementById('passInput').value;if(!l||!p)return;fetch(API+'/api/login',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({login:l,password:p})}).then(function(r){return r.json()}).then(function(d){if(d.error){document.getElementById('loginError').textContent=d.error;return}if(!d.isAdmin){document.getElementById('loginError').textContent='Нет прав администратора';return}authToken=d.token;localStorage.setItem('admin_token',authToken);document.getElementById('loginOverlay').style.display='none';loadData();startAutoRefresh()}).catch(function(){document.getElementById('loginError').textContent='Ошибка подключения'})}
-function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('admin_token');location.reload()}
+function doLogin(){window.location.href='/'}
+function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
 function switchMainTab(name,el){document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}}
@@ -1407,7 +1402,25 @@ function regenerateApiKey(clientId){
 }
 
 // ========== INIT ==========
-(function(){try{var s=JSON.parse(localStorage.getItem('admin_col_state'));if(s)COLUMNS.forEach(function(c){if(s.hasOwnProperty(c.id))c.visible=s[c.id]})}catch(e){}renderColSelector();if(authToken){document.getElementById('loginOverlay').style.display='none';loadData();startAutoRefresh()}document.getElementById('passInput').addEventListener('keypress',function(e){if(e.key==='Enter')doLogin()});document.getElementById('loginInput').addEventListener('keypress',function(e){if(e.key==='Enter')document.getElementById('passInput').focus()})})();
+(function(){
+  try{var s=JSON.parse(localStorage.getItem('admin_col_state'));if(s)COLUMNS.forEach(function(c){if(s.hasOwnProperty(c.id))c.visible=s[c.id]})}catch(e){}
+  renderColSelector();
+  if(!authToken){window.location.href='/';return}
+  // Validate admin token
+  fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}})
+    .then(function(r){
+      if(r.status===401||r.status===403){localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/';return null}
+      return r.json()
+    })
+    .then(function(data){
+      if(!data)return;
+      document.body.style.visibility='visible';
+      currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();
+      document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
+      startAutoRefresh()
+    })
+    .catch(function(){window.location.href='/'})
+})();
 </script>
 </body>
 </html>
