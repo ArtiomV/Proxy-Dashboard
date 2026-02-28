@@ -548,7 +548,6 @@
       <div class="nav-tab" onclick="switchTab('tools',this)">Инструменты</div>
       <div class="nav-tab" onclick="switchTab('documents',this)">Документы</div>
       <div class="nav-tab" onclick="switchTab('referral',this)">Партнёрская программа</div>
-      <div style="margin-left:auto;display:flex;align-items:center"><input type="text" id="searchInput" class="form-input" placeholder="Поиск по модемам..." style="width:200px;padding:6px 12px;font-size:12px;margin:0" oninput="searchFilter=this.value.toLowerCase();renderTable()"></div>
     </div>
 
     <!-- TAB: Traffic (now includes proxy credentials, export, API info below the traffic table) -->
@@ -998,7 +997,6 @@ var modemLogins={};
 var billingData=null;
 var rawData=null;
 var currentSort={key:'modemNick',dir:'asc'};
-var searchFilter='';
 
 // --- Country config ---
 var countryNames={'MD':'\ud83c\uddf2\ud83c\udde9 Молдова','RO':'\ud83c\uddf7\ud83c\uddf4 Румыния','??':'\ud83c\udf10 Другое'};
@@ -1296,15 +1294,6 @@ async function loadData(){
 function renderTable(){
   var rows=tableData.slice();
 
-  // Apply search filter
-  if(searchFilter){
-    rows=rows.filter(function(r){
-      return r.modemNick.toLowerCase().indexOf(searchFilter)!==-1||
-        r.operator.toLowerCase().indexOf(searchFilter)!==-1||
-        r.extIp.toLowerCase().indexOf(searchFilter)!==-1||
-        (r.proxyLogin&&r.proxyLogin.toLowerCase().indexOf(searchFilter)!==-1);
-    });
-  }
 
   rows.sort(function(a,b){
     var ca=countryOrder.indexOf(a.country);
