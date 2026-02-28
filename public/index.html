@@ -728,8 +728,8 @@
           <table class="api-params">
             <thead><tr><th>Способ</th><th>Пример</th></tr></thead>
             <tbody>
-              <tr><td>Заголовок<br><code style="color:var(--text-1)">X-API-Key</code></td><td><code>curl -H "X-API-Key: ваш_ключ" https://proxies.rent/api/v1/proxy</code></td></tr>
-              <tr><td>Query-параметр<br><code style="color:var(--text-1)">?apikey=</code></td><td><code>curl https://proxies.rent/api/v1/proxy?apikey=ваш_ключ</code></td></tr>
+              <tr><td>Заголовок<br><code style="color:var(--text-1)">X-API-Key</code></td><td><code>curl -H "X-API-Key: ваш_ключ" https://dashboard.proxies.rent/api/v1/proxy</code></td></tr>
+              <tr><td>Query-параметр<br><code style="color:var(--text-1)">?apikey=</code></td><td><code>curl https://dashboard.proxies.rent/api/v1/proxy?apikey=ваш_ключ</code></td></tr>
             </tbody>
           </table>
 
@@ -739,16 +739,16 @@
             <div class="lang-tab" onclick="switchLang(this,'python','proxy')">Python</div>
             <div class="lang-tab" onclick="switchLang(this,'js','proxy')">JavaScript</div>
           </div>
-          <div class="lang-code active" data-group="proxy" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>curl -H "X-API-Key: ваш_ключ" https://proxies.rent/api/v1/proxy</div></div>
+          <div class="lang-code active" data-group="proxy" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>curl -H "X-API-Key: ваш_ключ" https://dashboard.proxies.rent/api/v1/proxy</div></div>
           <div class="lang-code" data-group="proxy" data-lang="python"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
 
-r = requests.get("https://proxies.rent/api/v1/proxy",
+r = requests.get("https://dashboard.proxies.rent/api/v1/proxy",
     headers={"X-API-Key": "ваш_ключ"})
 data = r.json()
 
 for proxy in data["proxies"]:
     print(f"{proxy['host']}:{proxy['ports']['http']}:{proxy['username']}:{proxy['password']}")</div></div>
-          <div class="lang-code" data-group="proxy" data-lang="js"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>const res = await fetch("https://proxies.rent/api/v1/proxy", {
+          <div class="lang-code" data-group="proxy" data-lang="js"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>const res = await fetch("https://dashboard.proxies.rent/api/v1/proxy", {
   headers: { "X-API-Key": "ваш_ключ" }
 });
 const data = await res.json();
@@ -838,7 +838,7 @@ data.proxies.forEach(p =&gt; {
             <div class="lang-tab" onclick="switchLang(this,'python','changeip')">Python</div>
           </div>
           <div class="lang-code active" data-group="changeip" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button># 1. Получаем прокси
-DATA=$(curl -s -H "X-API-Key: ваш_ключ" https://proxies.rent/api/v1/proxy)
+DATA=$(curl -s -H "X-API-Key: ваш_ключ" https://dashboard.proxies.rent/api/v1/proxy)
 
 # 2. Достаём change_ip_url первого прокси
 URL=$(echo $DATA | python3 -c "import sys,json; print(json.load(sys.stdin)['proxies'][0]['change_ip_url'])")
@@ -848,7 +848,7 @@ curl "$URL"</div></div>
           <div class="lang-code" data-group="changeip" data-lang="python"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
 
 # 1. Получаем прокси
-data = requests.get("https://proxies.rent/api/v1/proxy",
+data = requests.get("https://dashboard.proxies.rent/api/v1/proxy",
     headers={"X-API-Key": "ваш_ключ"}).json()
 
 # 2. Меняем IP на нужном модеме
@@ -872,7 +872,7 @@ for proxy in data["proxies"]:
 API_KEY = "ваш_ключ"
 
 # Получаем прокси
-data = requests.get("https://proxies.rent/api/v1/proxy",
+data = requests.get("https://dashboard.proxies.rent/api/v1/proxy",
     headers={"X-API-Key": API_KEY}).json()
 
 if not data["success"]:
@@ -898,7 +898,7 @@ print(f"IP на {p['id']} сменён")</div>
           <div class="resp-label">JavaScript / Node.js</div>
           <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>const API_KEY = "ваш_ключ";
 
-const res = await fetch("https://proxies.rent/api/v1/proxy", {
+const res = await fetch("https://dashboard.proxies.rent/api/v1/proxy", {
   headers: { "X-API-Key": API_KEY }
 });
 const data = await res.json();
@@ -917,7 +917,7 @@ console.log("IP сменён");</div>
 
           <div class="resp-label">Bash — экспорт в файл</div>
           <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button># Сохранить все прокси в файл proxies.txt (формат IP:PORT:LOGIN:PASS)
-curl -s -H "X-API-Key: ваш_ключ" https://proxies.rent/api/v1/proxy \
+curl -s -H "X-API-Key: ваш_ключ" https://dashboard.proxies.rent/api/v1/proxy \
   | python3 -c "
 import sys, json
 data = json.load(sys.stdin)
