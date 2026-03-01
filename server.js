@@ -90,6 +90,136 @@ function saveBillingLedger() {
   catch (e) { console.error('Failed to save billing_ledger:', e.message); }
 }
 
+// ==================== KNOWN MODEMS (persistence for offline detection) ====================
+const KNOWN_MODEMS_FILE = path.join(__dirname, 'known_modems.json');
+let knownModems = {}; // { serverName: { portId: { portName, imei, nick, model, portInfo, lastSeen } } }
+try {
+  if (fs.existsSync(KNOWN_MODEMS_FILE)) {
+    knownModems = JSON.parse(fs.readFileSync(KNOWN_MODEMS_FILE, 'utf8'));
+  }
+} catch (e) { console.error('Failed to load known_modems:', e.message); }
+
+function saveKnownModems() {
+  try { fs.writeFileSync(KNOWN_MODEMS_FILE, JSON.stringify(knownModems, null, 2)); }
+  catch (e) { console.error('Failed to save known_modems:', e.message); }
+}
+
+/**
+ * Update known modems from fresh (non-cached) server data.
+ * Remembers each modem ever seen so we can inject them as offline later.
+ */
+function updateKnownModems(data) {
+  if (data._cached) return;
+  const srvName = data.serverName;
+  if (!knownModems[srvName]) knownModems[srvName] = {};
+  const km = knownModems[srvName];
+  const now = Date.now();
+
+  // Build portId → imei map from ports data
+  const portIdToImei = {};
+  if (data.ports && typeof data.ports === 'object') {
+    for (const [imei, portList] of Object.entries(data.ports)) {
+      if (Array.isArray(portList)) {
+        for (const p of portList) {
+          if (p.portID) portIdToImei[p.portID] = imei;
+        }
+      }
+    }
+  }
+
+  // Update known modems with currently present data
+  if (data.bw && typeof data.bw === 'object') {
+    for (const [portId, bw] of Object.entries(data.bw)) {
+      const imei = portIdToImei[portId] || '';
+      let modemStatus = null;
+      if (Array.isArray(data.status)) {
+        modemStatus = data.status.find(m => m.modem_details && m.modem_details.IMEI === imei);
+      }
+      let portInfo = null;
+      if (data.ports && data.ports[imei]) {
+        const arr = Array.isArray(data.ports[imei]) ? data.ports[imei] : [];
+        portInfo = arr.find(p => p.portID === portId) || null;
+      }
+
+      km[portId] = {
+        portName: bw.portName || '',
+        imei,
+        nick: (modemStatus && modemStatus.modem_details && modemStatus.modem_details.NICK) || (km[portId] && km[portId].nick) || '',
+        model: (modemStatus && modemStatus.modem_details && (modemStatus.modem_details.MODEL_SHOWN || modemStatus.modem_details.MODEL)) || (km[portId] && km[portId].model) || '',
+        portInfo: portInfo ? JSON.parse(JSON.stringify(portInfo)) : (km[portId] && km[portId].portInfo ? km[portId].portInfo : null),
+        lastSeen: now
+      };
+    }
+  }
+
+  saveKnownModems();
+}
+
+/**
+ * Inject offline modems: for modems in knownModems that are NOT in the current data,
+ * add them back with offline status so they appear in the dashboard.
+ */
+function injectOfflineModems(data) {
+  const srvName = data.serverName;
+  const km = knownModems[srvName];
+  if (!km) return;
+
+  const currentPortIds = new Set(Object.keys(data.bw || {}));
+
+  for (const [portId, info] of Object.entries(km)) {
+    if (currentPortIds.has(portId)) continue;
+
+    // Inject into bw
+    if (!data.bw) data.bw = {};
+    data.bw[portId] = {
+      portName: info.portName || '',
+      bandwidth_bytes_day_in: '0 B',
+      bandwidth_bytes_day_out: '0 B',
+      bandwidth_bytes_yesterday_in: '0 B',
+      bandwidth_bytes_yesterday_out: '0 B',
+      bandwidth_bytes_month_in: '0 B',
+      bandwidth_bytes_month_out: '0 B',
+      bandwidth_bytes_prevmonth_in: '0 B',
+      bandwidth_bytes_prevmonth_out: '0 B',
+      _offline: true
+    };
+
+    // Inject into status
+    if (!Array.isArray(data.status)) data.status = [];
+    if (info.imei) {
+      data.status.push({
+        modem_details: {
+          IMEI: info.imei,
+          NICK: info.nick || '',
+          MODEL_SHOWN: info.model || '',
+          MODEL: info.model || ''
+        },
+        net_details: {
+          IS_ONLINE: 'no',
+          EXT_IP: '',
+          CELLOP: '',
+          CurrentNetworkType: ''
+        },
+        _server: srvName,
+        _offline: true
+      });
+    }
+
+    // Inject into ports
+    if (!data.ports) data.ports = {};
+    if (info.imei && info.portInfo) {
+      if (!data.ports[info.imei]) data.ports[info.imei] = [];
+      const existing = data.ports[info.imei].find(p => p.portID === portId);
+      if (!existing) {
+        data.ports[info.imei].push({
+          ...info.portInfo,
+          _offline: true
+        });
+      }
+    }
+  }
+}
+
 // Load clients into users map on startup
 let clients = loadClients();
 
@@ -443,13 +573,17 @@ async function fetchAllServersData() {
   const results = [];
   for (let i = 0; i < settled.length; i++) {
     if (settled[i].status === 'fulfilled') {
-      results.push(settled[i].value);
+      const data = settled[i].value;
+      updateKnownModems(data);   // remember modems we've seen
+      injectOfflineModems(data); // add back missing modems as offline
+      results.push(data);
     } else {
       const srvName = apiServers[i].name;
       console.log(`[API] Server ${srvName} unreachable: ${settled[i].reason?.message || 'unknown'}`);
       // Try to use cached data
       const cached = getCachedDataAsOffline(srvName);
       if (cached) {
+        injectOfflineModems(cached); // add back missing modems as offline
         results.push(cached);
       } else {
         console.log(`[API] No cache available for ${srvName}`);
@@ -859,6 +993,53 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
   }
+});
+
+// ==================== CLIENT: BILLING HISTORY ====================
+
+app.get('/api/billing_history', authMiddleware, (req, res) => {
+  const clientInfo = clients.find(c => c.login === req.user.login);
+  if (!clientInfo) return res.status(404).json({ error: 'Client not found' });
+
+  const entries = billingLedger[clientInfo.id] || [];
+
+  // Optional filters
+  const { month, limit: limitStr } = req.query;
+  let filtered = entries;
+
+  // Filter by month (e.g. "2026-02")
+  if (month) {
+    filtered = filtered.filter(e => e.date && e.date.startsWith(month));
+  }
+
+  // Sort newest first
+  filtered = filtered.slice().sort((a, b) => (b.timestamp || b.date || '').localeCompare(a.timestamp || a.date || ''));
+
+  // Limit results
+  const limit = parseInt(limitStr) || 200;
+  filtered = filtered.slice(0, limit);
+
+  // Summary: payments, charges, adjustments
+  const allEntries = entries;
+  const totalCharges = allEntries.filter(e => e.type === 'charge').reduce((sum, e) => sum + (e.cost || 0), 0);
+  const totalPayments = allEntries.filter(e => e.type === 'payment').reduce((sum, e) => sum + (e.amount || 0), 0);
+
+  // Current month summary
+  const currentMonthPrefix = new Date().toISOString().slice(0, 7);
+  const monthCharges = allEntries
+    .filter(e => e.type === 'charge' && e.date && e.date.startsWith(currentMonthPrefix))
+    .reduce((sum, e) => sum + (e.cost || 0), 0);
+
+  res.json({
+    balance: clientInfo.balance,
+    currency: clientInfo.currency || 'RUB',
+    summary: {
+      totalCharges: Math.round(totalCharges * 100) / 100,
+      totalPayments: Math.round(totalPayments * 100) / 100,
+      monthCharges: Math.round(monthCharges * 100) / 100
+    },
+    entries: filtered
+  });
 });
 
 // ==================== CLIENT: IP RESET (non-admin) ====================
@@ -1337,7 +1518,7 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
     currency: clients[idx].currency || 'RUB',
     balance_before: balanceBefore,
     balance_after: clients[idx].balance,
-    note: note || 'Admin payment'
+    note: note || 'Пополнение баланса'
   });
 
   // Referral: credit 15% to referrer
@@ -1387,7 +1568,7 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
     currency: clients[idx].currency || 'RUB',
     balance_before: balanceBefore,
     balance_after: clients[idx].balance,
-    note: 'Payment deleted by admin'
+    note: 'Отмена оплаты администратором'
   });
 
   saveClients(clients);
@@ -1428,7 +1609,7 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
     currency: clients[idx].currency || 'RUB',
     balance_before: balanceBefore,
     balance_after: clients[idx].balance,
-    note: note || 'Manual balance adjustment'
+    note: note || 'Ручная корректировка баланса'
   });
 
   saveClients(clients);
@@ -2141,7 +2322,7 @@ async function runDailyBilling() {
         currency: client.currency || 'RUB',
         balance_before: balanceBefore,
         balance_after: client.balance,
-        note: 'Daily traffic charge'
+        note: 'Списание за трафик (' + new Date().toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric'}) + ')'
       });
 
       charged++;

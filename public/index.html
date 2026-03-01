@@ -113,7 +113,7 @@
     .login-box .btn-login{
       width:100%;padding:14px;margin-top:6px;
       background:#1960C9;
-      border:1px solid #1960C9;border-radius:100px;
+      border:1px solid #1960C9;border-radius:8px;
       color:#fff;font-size:16px;font-weight:600;
       cursor:pointer;transition:all .3s ease;
       font-family:var(--font-sans);
@@ -152,7 +152,7 @@
 
     /* Buttons */
     .btn{
-      padding:8px 16px;border:1px solid var(--border);border-radius:6.25rem;
+      padding:8px 16px;border:1px solid var(--border);border-radius:8px;
       background:var(--bg-2);color:var(--text-1);cursor:pointer;
       font-size:13px;font-weight:500;font-family:var(--font-sans);
       transition:all .2s;
@@ -206,7 +206,7 @@
       background:var(--card-bg);
       backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
       border:1px solid var(--card-border);
-      border-radius:12px;padding:18px;
+      border-radius:12px;padding:20px;
       box-shadow:var(--card-shadow);
       transition:all .3s;
     }
@@ -274,7 +274,7 @@
     .modal-overlay.show{display:flex}
     .modal{
       background:var(--bg-1);border:1px solid var(--card-border);
-      border-radius:14px;width:700px;max-width:92vw;max-height:80vh;
+      border-radius:12px;width:700px;max-width:92vw;max-height:80vh;
       overflow:hidden;display:flex;flex-direction:column;
       box-shadow:0 24px 80px rgba(0,0,0,.5);
       animation:fadeIn .2s ease;
@@ -293,7 +293,7 @@
     .log-table td{font-family:var(--font-mono);color:var(--text-1)}
 
     /* Proxy table */
-    .proxy-table td{font-size:12px}
+    .proxy-table td{font-size:13px}
     .copy-btn{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:14px;padding:2px;transition:color .15s}
     .copy-btn:hover{color:var(--accent)}
 
@@ -358,7 +358,7 @@
     .referral-hero{
       text-align:center;padding:30px 20px;margin-bottom:20px;
       background:linear-gradient(135deg,var(--accent-dim) 0%,rgba(124,58,237,.1) 100%);
-      border-radius:12px;border:1px solid var(--card-border);
+      border-radius:12px;border:1px solid var(--card-border);box-shadow:var(--card-shadow);
     }
     .referral-hero h3{
       font-size:20px;font-weight:700;margin-bottom:8px;
@@ -379,15 +379,15 @@
 
     /* API docs */
     .api-key-highlight{background:rgba(16,185,129,.15);color:#10b981;padding:1px 4px;border-radius:3px;font-weight:600}
-    .api-docs{padding:24px 0}
+    .api-docs{}
     .api-docs h2{font-size:20px;font-weight:700;color:var(--text-0);margin:0 0 6px 0}
     .api-docs .api-lead{color:var(--text-2);font-size:14px;margin-bottom:24px}
     .api-docs .api-section{
       background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
       border:1px solid var(--card-border);border-radius:12px;
-      padding:20px 24px;margin-bottom:16px;box-shadow:var(--card-shadow);
+      padding:20px;margin-bottom:16px;box-shadow:var(--card-shadow);
     }
-    .api-docs .api-section h3{font-size:15px;font-weight:700;color:var(--text-0);margin:0 0 4px 0;display:flex;align-items:center;gap:8px}
+    .api-docs .api-section h3{font-size:15px;font-weight:600;color:var(--text-0);margin:0 0 4px 0;display:flex;align-items:center;gap:8px}
     .api-docs .api-section h3 .method{
       font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;
       font-family:var(--font-mono);letter-spacing:.5px;
@@ -415,16 +415,16 @@
     .api-docs .api-note.warn{background:rgba(255,204,0,.06);border-left-color:var(--warning)}
     .api-docs .api-params{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
     .api-docs .api-params th{
-      text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+      text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
       color:var(--text-3);border:1px solid var(--border);font-weight:600;
     }
-    .api-docs .api-params td{padding:8px 10px;border:1px solid var(--border);color:var(--text-1);max-width:0}
+    .api-docs .api-params td{padding:8px 12px;border:1px solid var(--border);color:var(--text-1);max-width:0}
     .api-docs .api-params td code{word-break:break-all;white-space:normal;display:inline}
     .api-docs .api-params td .api-key-highlight{word-break:break-all;white-space:normal}
     .api-docs .api-params td:first-child{font-family:var(--font-mono);color:var(--accent);font-size:12px;white-space:nowrap;max-width:none;width:160px}
     .api-docs .api-params .required{color:var(--danger);font-size:10px;font-weight:700;margin-left:4px}
     .api-docs .code-block{
-      background:var(--bg-0);border:1px solid var(--border);border-radius:8px;
+      background:var(--bg-0);border:1px solid var(--border);border-radius:12px;
       padding:14px 16px;font-family:var(--font-mono);font-size:12px;
       color:var(--text-1);overflow-x:auto;margin:10px 0;line-height:1.7;
       position:relative;white-space:pre-wrap;word-break:break-all;
@@ -441,7 +441,7 @@
     }
     .api-docs .api-toc a{
       display:flex;align-items:center;gap:10px;padding:12px 16px;
-      background:var(--card-bg);border:1px solid var(--card-border);border-radius:10px;
+      background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;
       text-decoration:none;color:var(--text-1);font-size:13px;transition:all .2s;
     }
     .api-docs .api-toc a:hover{border-color:var(--accent);background:var(--accent-dim)}
@@ -451,9 +451,9 @@
     .api-docs .api-quick-start{
       background:linear-gradient(135deg,var(--accent-dim) 0%,rgba(124,58,237,.1) 100%);
       border:1px solid var(--card-border);border-radius:12px;
-      padding:20px 24px;margin-bottom:20px;
+      padding:20px;margin-bottom:20px;
     }
-    .api-docs .api-quick-start h3{font-size:16px;font-weight:700;color:var(--text-0);margin-bottom:6px}
+    .api-docs .api-quick-start h3{font-size:15px;font-weight:600;color:var(--text-0);margin-bottom:6px}
     .api-docs .api-quick-start p{color:var(--text-2);font-size:13px;line-height:1.6}
     .api-docs .api-quick-start .api-key-box{
       display:flex;align-items:center;gap:8px;margin-top:12px;
@@ -476,8 +476,8 @@
     .api-docs .lang-code.active{display:block}
     .api-docs .lang-code .code-block{margin-top:0;border-top-left-radius:0}
     .api-docs .api-errors{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0;table-layout:fixed}
-    .api-docs .api-errors th{text-align:left;padding:8px 10px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);border:1px solid var(--border);font-weight:600}
-    .api-docs .api-errors td{padding:8px 10px;border:1px solid var(--border);color:var(--text-1);word-break:break-word;overflow-wrap:anywhere;overflow:hidden}
+    .api-docs .api-errors th{text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);border:1px solid var(--border);font-weight:600}
+    .api-docs .api-errors td{padding:8px 12px;border:1px solid var(--border);color:var(--text-1);word-break:break-word;overflow-wrap:anywhere;overflow:hidden}
     .api-docs .api-errors td:first-child{font-family:var(--font-mono);font-weight:600;white-space:nowrap;overflow:visible}
     .api-docs .api-errors td code{word-break:break-all;white-space:normal}
 
@@ -548,10 +548,11 @@
     <!-- Tabs: NO Прокси tab -->
     <div class="nav-tabs">
       <div class="nav-tab active" onclick="switchTab('traffic',this)">Панель управления</div>
-      <div class="nav-tab" onclick="switchTab('api',this)">API</div>
-      <div class="nav-tab" onclick="switchTab('tools',this)">Инструменты</div>
+      <div class="nav-tab" onclick="switchTab('billing',this)">История баланса</div>
       <div class="nav-tab" onclick="switchTab('documents',this)">Документы</div>
+      <div class="nav-tab" onclick="switchTab('api',this)">API</div>
       <div class="nav-tab" onclick="switchTab('referral',this)">Партнёрская программа</div>
+      <div class="nav-tab" onclick="switchTab('tools',this)">Инструменты</div>
     </div>
 
     <!-- TAB: Traffic (now includes proxy credentials, export, API info below the traffic table) -->
@@ -571,11 +572,6 @@
             <div class="card-label">Трафик за месяц</div>
             <div class="card-value" id="totalMonthTotal">-</div>
             <div class="card-sub" id="totalMonthSplit"></div>
-          </div>
-          <div class="card">
-            <div class="card-label">Расход за месяц</div>
-            <div class="card-value" id="totalMonthCost">-</div>
-            <div class="card-sub" id="billingInfo"></div>
           </div>
           <div class="card">
             <div class="card-label">Баланс</div>
@@ -689,10 +685,7 @@
 
     <!-- TAB: API -->
     <div class="tab-pane" id="tab-api">
-      <div class="container api-docs" style="max-width:900px">
-
-        <h2>Public API</h2>
-        <p class="api-lead">Один запрос — все ваши прокси. Получайте реквизиты, меняйте IP и отслеживайте баланс программно.</p>
+      <div class="container api-docs">
 
         <!-- API Key -->
         <div class="api-quick-start">
@@ -954,6 +947,62 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
     </div>
 
     <!-- TAB: Referral -->
+    <!-- TAB: BILLING HISTORY -->
+    <div class="tab-pane" id="tab-billing">
+      <div class="container">
+        <div class="tools-section">
+          <h3>История баланса</h3>
+
+          <!-- Summary cards -->
+          <div class="summary-cards" id="billingSummary">
+            <div class="card">
+              <div class="card-label">Баланс</div>
+              <div class="card-value" id="billingBalanceVal">--</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Расход за месяц</div>
+              <div class="card-value" id="billingMonthCharges">--</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Всего оплачено</div>
+              <div class="card-value" id="billingTotalPayments">--</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Всего списано</div>
+              <div class="card-value" id="billingTotalCharges">--</div>
+            </div>
+          </div>
+
+          <!-- Month filter -->
+          <div style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <label style="font-size:14px;color:var(--text-2)">Период:</label>
+            <select id="billingMonthFilter" onchange="loadBillingHistory()" style="padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:14px">
+              <option value="">Все</option>
+            </select>
+          </div>
+
+          <!-- Table -->
+          <div class="table-wrapper">
+            <table class="proxy-table" id="billingTable" style="width:100%">
+              <thead>
+                <tr>
+                  <th style="width:15%;text-align:center">Дата</th>
+                  <th style="width:12%;text-align:center">Тип</th>
+                  <th style="width:15%;text-align:center">Сумма</th>
+                  <th style="width:13%;text-align:center">Трафик (ГБ)</th>
+                  <th style="width:18%;text-align:center">Баланс после</th>
+                  <th style="width:27%;text-align:center">Примечание</th>
+                </tr>
+              </thead>
+              <tbody id="billingTableBody">
+                <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3)">Загрузка...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="tab-pane" id="tab-referral">
       <div class="container">
         <div id="referralContent">
@@ -1018,6 +1067,130 @@ function switchTab(name,el){
   if(name==='documents') loadDocuments();
   if(name==='api') loadApiDocs();
   if(name==='referral') loadReferral();
+  if(name==='billing') loadBillingHistory();
+}
+
+// --- Billing History ---
+var billingHistoryLoaded=false;
+function loadBillingHistory(){
+  var monthFilter=document.getElementById('billingMonthFilter').value;
+  var url='/api/billing_history';
+  if(monthFilter) url+='?month='+monthFilter;
+
+  fetch(url,{headers:{'X-Auth-Token':authToken}})
+  .then(function(r){return r.json()})
+  .then(function(data){
+    if(data.error){
+      document.getElementById('billingTableBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3)">'+data.error+'</td></tr>';
+      return;
+    }
+
+    var curr=data.currency||'RUB';
+    var currSymbol=curr==='RUB'?'\u20BD':(curr==='USD'?'$':(curr==='EUR'?'\u20AC':curr));
+
+    // Update summary
+    document.getElementById('billingBalanceVal').textContent=formatNumber(data.balance)+' '+currSymbol;
+    document.getElementById('billingBalanceVal').style.color=data.balance>=0?'var(--green)':'var(--red)';
+    document.getElementById('billingMonthCharges').textContent=formatNumber(data.summary.monthCharges)+' '+currSymbol;
+    document.getElementById('billingTotalPayments').textContent=formatNumber(data.summary.totalPayments)+' '+currSymbol;
+    document.getElementById('billingTotalCharges').textContent=formatNumber(data.summary.totalCharges)+' '+currSymbol;
+
+    // Populate month filter (only once)
+    if(!billingHistoryLoaded){
+      billingHistoryLoaded=true;
+      var months=new Set();
+      (data.entries||[]).forEach(function(e){if(e.date)months.add(e.date.slice(0,7))});
+      // Always include current month
+      var currentMonth=new Date().toISOString().slice(0,7);
+      months.add(currentMonth);
+      var select=document.getElementById('billingMonthFilter');
+      var existingVals=new Set();
+      for(var i=0;i<select.options.length;i++) existingVals.add(select.options[i].value);
+      var sortedMonths=Array.from(months).sort().reverse();
+      var monthNames=['','Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+      sortedMonths.forEach(function(m){
+        if(!existingVals.has(m)){
+          var opt=document.createElement('option');
+          opt.value=m;
+          var parts=m.split('-');
+          opt.textContent=monthNames[parseInt(parts[1])]+' '+parts[0];
+          select.appendChild(opt);
+        }
+      });
+    }
+
+    // Render table
+    var entries=data.entries||[];
+    if(entries.length===0){
+      document.getElementById('billingTableBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3)">Нет операций</td></tr>';
+      return;
+    }
+
+    var html='';
+    entries.forEach(function(e){
+      var typeLabel='',typeClass='',amountStr='',amountColor='';
+      if(e.type==='charge'){
+        typeLabel='Списание';
+        typeClass='color:var(--red)';
+        amountStr='-'+formatNumber(e.cost)+' '+currSymbol;
+        amountColor='color:var(--red)';
+      } else if(e.type==='payment'){
+        typeLabel='Пополнение';
+        typeClass='color:var(--green)';
+        amountStr='+'+formatNumber(e.amount)+' '+currSymbol;
+        amountColor='color:var(--green)';
+      } else if(e.type==='payment_reversal'){
+        typeLabel='Отмена оплаты';
+        typeClass='color:var(--orange, #f59e0b)';
+        amountStr=formatNumber(e.amount)+' '+currSymbol;
+        amountColor='color:var(--orange, #f59e0b)';
+      } else if(e.type==='adjustment'){
+        typeLabel='Корректировка';
+        typeClass='color:var(--blue)';
+        amountStr=(e.amount>=0?'+':'')+formatNumber(e.amount)+' '+currSymbol;
+        amountColor=e.amount>=0?'color:var(--green)':'color:var(--red)';
+      } else {
+        typeLabel=e.type||'—';
+        typeClass='';
+        amountStr=(e.cost||e.amount||0)+' '+currSymbol;
+      }
+
+      var dateStr=e.date||'—';
+      if(e.timestamp){
+        try{
+          var d=new Date(e.timestamp);
+          dateStr=d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+        }catch(ex){}
+      }
+
+      var trafficStr='—';
+      if(e.type==='charge' && e.delta_gb!==undefined){
+        trafficStr=e.delta_gb.toFixed(3);
+      }
+
+      var balAfter=e.balance_after!==undefined?formatNumber(e.balance_after)+' '+currSymbol:'—';
+      var note=e.note||'';
+
+      html+='<tr>';
+      html+='<td style="white-space:nowrap;font-size:13px;text-align:center">'+dateStr+'</td>';
+      html+='<td style="'+typeClass+';font-weight:600;font-size:13px;text-align:center">'+typeLabel+'</td>';
+      html+='<td style="'+amountColor+';font-weight:600;font-size:13px;text-align:center">'+amountStr+'</td>';
+      html+='<td style="font-size:13px;text-align:center">'+trafficStr+'</td>';
+      html+='<td style="font-size:13px;text-align:center">'+balAfter+'</td>';
+      html+='<td style="font-size:13px;color:var(--text-3);text-align:center">'+note+'</td>';
+      html+='</tr>';
+    });
+
+    document.getElementById('billingTableBody').innerHTML=html;
+  })
+  .catch(function(err){
+    document.getElementById('billingTableBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--red)">Ошибка загрузки: '+err.message+'</td></tr>';
+  });
+}
+
+function formatNumber(n){
+  if(n===undefined||n===null) return '0';
+  return parseFloat(n).toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2});
 }
 
 // --- Init ---
@@ -1260,6 +1433,7 @@ async function loadData(){
           monthIn:parseBW(bw.bandwidth_bytes_month_in),
           monthOut:parseBW(bw.bandwidth_bytes_month_out),
           _cached:!!bw._cached,
+          _offline:!!bw._offline,
           _end:0
         });
       }
@@ -1385,14 +1559,15 @@ function renderTable(){
       }
       changeIpHtml+='<button class="action-btn-sm" onclick="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+row.serverName+'\',\''+escapeHtml(row.imei)+'\')" title="IP история" style="font-size:12px">\ud83d\udcc3</button>';
 
-      var rowStyle=row._cached?'opacity:0.6':'';
+      var rowStyle=row._cached?'opacity:0.6':(row._offline?'opacity:0.45':'');
       html+='<tr style="'+rowStyle+'">'+
         '<td>'+
           '<div style="display:flex;align-items:center;gap:10px">'+
             '<span class="status-dot '+statusDotCls+'"></span>'+
             '<div style="display:flex;flex-direction:column;gap:2px">'+
               '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+
-              (row._cached?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="\u0414\u0430\u043d\u043d\u044b\u0435 \u0438\u0437 \u043a\u0435\u0448\u0430 \u2014 \u0441\u0435\u0440\u0432\u0435\u0440 \u043d\u0435\u0434\u043e\u0441\u0442\u0443\u043f\u0435\u043d">\u041a\u0415\u0428</span>':'')+
+              (row._offline?' <span style="font-size:9px;color:var(--danger);font-weight:600;background:rgba(239,68,68,0.15);padding:1px 5px;border-radius:3px" title="Модем отключён от сервера">OFFLINE</span>':'')+
+              (row._cached&&!row._offline?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="Данные из кеша — сервер недоступен">КЕШ</span>':'')+
               '<span style="font-size:11px;color:var(--text-3)">'+escapeHtml(row.operator)+'</span>'+
             '</div>'+
           '</div>'+
@@ -1440,39 +1615,26 @@ function updateSummary(){
   document.getElementById('totalMonthSplit').innerHTML='\u2193 '+formatBytes(totalMonthIn)+' / \u2191 '+formatBytes(totalMonthOut);
 
   // Dynamic billing calculation
-  var costEl=document.getElementById('totalMonthCost');
-  var infoEl=document.getElementById('billingInfo');
   var monthTotal=totalMonthIn+totalMonthOut;
   var monthGb=monthTotal/(1024*1024*1024);
 
   if(billingData&&billingData.price>0){
-    // Use server-computed monthExpense from billing ledger if available
-    if(billingData.monthExpense!==undefined){
-      costEl.textContent=formatCost(billingData.monthExpense);
-      if(billingData.billingType==='per_modem'){
-        infoEl.innerHTML=formatCost(billingData.price)+' \u00D7 '+tableData.length+' модемов';
-      }else{
-        infoEl.innerHTML=formatCost(billingData.price)+'/\u0413\u0411 (начислено за месяц)';
-      }
+    // Calculate live month expense
+    var liveMonthExpense=0;
+    if(billingData.billingType==='per_modem'){
+      liveMonthExpense=billingData.price*tableData.length;
     }else{
-      // Fallback to live calculation (pre-migration compatibility)
-      if(billingData.billingType==='per_modem'){
-        costEl.textContent=formatCost(billingData.price*tableData.length);
-        infoEl.innerHTML=formatCost(billingData.price)+' \u00D7 '+tableData.length+' модемов';
-      }else{
-        costEl.textContent=formatCost(billingData.price*monthGb);
-        infoEl.innerHTML=formatCost(billingData.price)+'/\u0413\u0411 \u00D7 '+monthGb.toFixed(2)+' \u0413\u0411';
-      }
+      liveMonthExpense=billingData.price*monthGb;
     }
 
-    // Balance — read persisted value from server (never compute locally)
+    // Balance card — show balance + month expense
     var balanceEl=document.getElementById('balanceValue');
     var balanceInfoEl=document.getElementById('balanceInfo');
     if(billingData.balance!==undefined){
       var balance=billingData.balance;
       balanceEl.textContent=formatCost(balance);
       balanceEl.className='card-value '+(balance>=0?'balance-positive':'balance-negative');
-      balanceInfoEl.textContent='\u041E\u043F\u043B\u0430\u0447\u0435\u043D\u043E: '+formatCost(billingData.totalPayments);
+      balanceInfoEl.textContent='Расход за месяц: '+formatCost(liveMonthExpense);
 
       if(balance<0){
         document.getElementById('balanceWarning').innerHTML='<div class="balance-warning">\u26A0\uFE0F Баланс отрицательный. Пожалуйста, свяжитесь с администратором для пополнения.</div>';
@@ -1480,9 +1642,6 @@ function updateSummary(){
         document.getElementById('balanceWarning').innerHTML='';
       }
     }
-  }else{
-    costEl.textContent=Math.round(monthGb*23).toString();
-    infoEl.innerHTML='23/\u0413\u0411 \u00D7 '+monthGb.toFixed(2)+' \u0413\u0411';
   }
 
   // Average uptime
