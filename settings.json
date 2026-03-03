@@ -1,0 +1,28 @@
+{
+  "speedtest_times": [
+    "02:00",
+    "14:00"
+  ],
+  "pricing_tiers": [
+    {
+      "min_proxies": 1,
+      "price": 4500,
+      "label": "1-29 прокси"
+    },
+    {
+      "min_proxies": 30,
+      "price": 4275,
+      "label": "30-49 прокси"
+    },
+    {
+      "min_proxies": 50,
+      "price": 4050,
+      "label": "50-99 прокси"
+    },
+    {
+      "min_proxies": 100,
+      "price": 3825,
+      "label": "100+ прокси"
+    }
+  ]
+}

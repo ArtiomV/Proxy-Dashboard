@@ -1,0 +1,1960 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Proxies.rent — личный кабинет партнёра</title>
+  <link rel="icon" type="image/png" href="https://proxies.rent/favicon-96x96.png" sizes="96x96">
+  <link rel="icon" type="image/svg+xml" href="https://proxies.rent/favicon.svg">
+  <link rel="shortcut icon" href="https://proxies.rent/favicon.ico">
+  <link rel="apple-touch-icon" sizes="180x180" href="https://proxies.rent/apple-touch-icon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <style>
+    *{margin:0;padding:0;box-sizing:border-box}
+
+    :root{
+      --bg-0:#0D0D0E;--bg-1:#121724;--bg-2:#1B2237;--bg-3:#1c2432;--bg-4:#243044;
+      --border:rgba(255,255,255,0.06);--border-hover:rgba(255,255,255,0.12);
+      --text-0:#f0f6fc;--text-1:#c9d1d9;--text-2:#7d8590;--text-3:#484f58;
+      --accent:#1960C9;--accent-hover:#2070d9;--accent-dim:rgba(25,96,201,0.12);
+      --accent-glow:rgba(25,96,201,0.25);
+      --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
+      --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
+      --card-bg:rgba(18,23,36,0.7);--card-border:rgba(255,255,255,0.06);
+      --card-shadow:0 4px 24px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.03);
+      --font-sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+      --font-mono:'JetBrains Mono','SF Mono',Monaco,monospace;
+      --green:#34C759;--green-bg:rgba(52,199,89,0.15);
+      --red:#FF383C;--red-bg:rgba(255,56,60,0.15);
+      --yellow:#FFCC00;
+      --btn-primary-bg:#1960C9;--btn-primary-hover:#2070d9;
+      --row-hover:rgba(255,255,255,0.03);
+      --country-bg:rgba(25,96,201,0.04);
+    }
+
+    [data-theme="light"]{
+      --bg-0:#f5f6f8;--bg-1:#ffffff;--bg-2:#f0f1f3;--bg-3:#e8eaed;--bg-4:#d8dce2;
+      --border:rgba(0,0,0,0.08);--border-hover:rgba(0,0,0,0.15);
+      --text-0:#0f1419;--text-1:#24292f;--text-2:#656d76;--text-3:#8b949e;
+      --accent:#1960C9;--accent-hover:#1450b0;--accent-dim:rgba(25,96,201,0.1);
+      --accent-glow:rgba(25,96,201,0.2);
+      --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
+      --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
+      --card-bg:rgba(255,255,255,0.8);--card-border:rgba(0,0,0,0.08);
+      --card-shadow:0 4px 24px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.04);
+      --green:#1a7f37;--green-bg:rgba(26,127,55,0.12);
+      --red:#FF383C;--red-bg:rgba(255,56,60,0.1);
+      --btn-primary-bg:#1960C9;--btn-primary-hover:#1450b0;
+      --row-hover:rgba(0,0,0,0.02);
+      --country-bg:rgba(25,96,201,0.04);
+    }
+
+    body{
+      font-family:var(--font-sans);
+      background:var(--bg-0);
+      color:var(--text-1);
+      min-height:100vh;
+      transition:background .3s,color .3s;
+    }
+
+    @keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
+    @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    @keyframes slideIn{from{transform:translateX(100%);opacity:0}to{transform:translateX(0);opacity:1}}
+    @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
+    @keyframes glowPulse{0%,100%{box-shadow:0 0 20px var(--accent-glow)}50%{box-shadow:0 0 40px var(--accent-glow)}}
+
+    /* Login — proxies.rent style */
+    .login-overlay{
+      position:fixed;inset:0;
+      background:#0D0D0E;
+      display:flex;align-items:center;justify-content:center;
+      z-index:1000;
+    }
+    .login-overlay::before{
+      content:'';position:absolute;inset:0;
+      background:radial-gradient(ellipse at 50% 0%,rgba(25,96,201,0.15) 0%,transparent 60%);
+      pointer-events:none;
+    }
+    .login-overlay::after{
+      content:'';position:absolute;inset:0;
+      background:radial-gradient(ellipse at 80% 80%,rgba(52,199,89,0.06) 0%,transparent 50%);
+      pointer-events:none;
+    }
+    .login-box{
+      background:#1B2237;
+      border:1px solid rgba(255,255,255,0.08);
+      border-radius:20px;
+      padding:48px 40px;
+      width:420px;max-width:90vw;
+      box-shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);
+      animation:fadeIn .5s ease;
+      position:relative;z-index:1;
+    }
+    .login-logo{
+      display:flex;align-items:center;justify-content:center;gap:10px;
+      margin-bottom:8px;
+    }
+    .login-logo img{height:32px;width:auto}
+    .login-logo span{font-size:22px;font-weight:600;color:#fff;letter-spacing:-0.3px}
+    .login-box .login-sub{
+      text-align:center;color:#B3B3B3;font-size:14px;margin-bottom:32px;font-weight:400;
+    }
+    .login-box input{
+      width:100%;padding:14px 16px;margin-bottom:14px;
+      background:rgba(13,13,14,0.6);border:1px solid #5C5967;border-radius:4px;
+      color:#EDEDED;font-size:15px;font-family:var(--font-sans);
+      transition:border-color .3s,box-shadow .3s;
+    }
+    .login-box input:focus{outline:none;border-color:#1960C9;box-shadow:0 0 0 3px rgba(25,96,201,0.2)}
+    .login-box input::placeholder{color:#5C5967}
+    .login-box .btn-login{
+      width:100%;padding:14px;margin-top:6px;
+      background:#1960C9;
+      border:1px solid #1960C9;border-radius:8px;
+      color:#fff;font-size:16px;font-weight:600;
+      cursor:pointer;transition:all .3s ease;
+      font-family:var(--font-sans);
+    }
+    .login-box .btn-login:hover{background:#fff;color:#1960C9;border-color:#fff}
+    .login-box .btn-login:active{transform:scale(.98)}
+    .login-box .btn-login:disabled{opacity:.5;cursor:not-allowed}
+    .login-error{color:#FF383C;font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
+
+    /* Header — unified with admin */
+    .header{
+      background:var(--bg-1);
+      border-bottom:1px solid var(--border);
+      padding:0 24px;height:52px;
+      display:flex;align-items:center;justify-content:space-between;
+    }
+    .header-left{display:flex;align-items:center;gap:12px}
+    .header-logo{display:flex;align-items:center;gap:8px;text-decoration:none}
+    .header-logo img{height:22px;width:auto}
+    .header h1{
+      font-size:16px;font-weight:700;letter-spacing:-0.3px;
+      background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    }
+    .header-controls{display:flex;align-items:center;gap:8px}
+    .user-info{font-size:12px;color:var(--text-2)}
+    .user-info strong{color:var(--text-0)}
+
+    /* Theme toggle */
+    .theme-toggle{
+      width:36px;height:36px;border-radius:8px;
+      border:1px solid var(--border);background:var(--bg-2);
+      cursor:pointer;display:flex;align-items:center;justify-content:center;
+      font-size:18px;transition:all .2s;user-select:none;
+    }
+    .theme-toggle:hover{background:var(--bg-3);border-color:var(--border-hover)}
+
+    /* Buttons */
+    .btn{
+      padding:8px 16px;border:1px solid var(--border);border-radius:8px;
+      background:var(--bg-2);color:var(--text-1);cursor:pointer;
+      font-size:13px;font-weight:500;font-family:var(--font-sans);
+      transition:all .2s;
+    }
+    .btn:hover{background:var(--bg-3);border-color:var(--border-hover)}
+    .btn:disabled{opacity:.5;cursor:not-allowed}
+    .btn-primary{background:var(--btn-primary-bg);border-color:var(--btn-primary-bg);color:#fff}
+    .btn-primary:hover{background:var(--btn-primary-hover)}
+    .btn-accent{background:var(--accent);border:1px solid var(--accent);color:#fff;font-weight:600}
+    .btn-accent:hover{opacity:.9}
+    .btn-danger{background:transparent;border-color:var(--danger);color:var(--danger)}
+    .btn-danger:hover{background:var(--red-bg)}
+    .btn-sm{padding:5px 10px;font-size:12px}
+
+    /* Status bar */
+    .status-bar{
+      padding:8px 24px;background:var(--bg-1);
+      border-bottom:1px solid var(--border);
+      font-size:12px;color:var(--text-2);
+      display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+    }
+    .status-indicator{width:8px;height:8px;border-radius:50%;display:inline-block}
+    .status-ok{background:var(--success)}
+    .status-error{background:var(--danger)}
+    .status-loading{background:var(--warning);animation:pulse 1s infinite}
+
+    /* Tabs */
+    .nav-tabs{
+      background:var(--bg-1);border-bottom:1px solid var(--border);
+      padding:0 24px;display:flex;gap:0;overflow-x:auto;
+    }
+    .nav-tab{
+      padding:11px 18px;cursor:pointer;font-size:13px;
+      color:var(--text-2);border-bottom:2px solid transparent;
+      transition:all .2s;font-weight:500;white-space:nowrap;
+    }
+    .nav-tab:hover{color:var(--text-1)}
+    .nav-tab.active{background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;border-bottom-color:var(--accent)}
+    .tab-pane{display:none}
+    .tab-pane.active{display:block;animation:fadeIn .3s ease}
+
+    /* Container */
+    .container{padding:24px;max-width:1600px;margin:0 auto}
+
+    /* Summary Cards */
+    .summary-cards{
+      display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));
+      gap:14px;margin-bottom:24px;
+    }
+    .card{
+      background:var(--card-bg);
+      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      border:1px solid var(--card-border);
+      border-radius:12px;padding:20px;
+      box-shadow:var(--card-shadow);
+      transition:all .3s;
+    }
+    .card:hover{border-color:var(--border-hover);transform:translateY(-1px)}
+    .card-label{
+      font-size:11px;color:var(--text-2);text-transform:uppercase;
+      letter-spacing:.8px;margin-bottom:6px;font-weight:500;
+    }
+    .card-value{font-size:22px;font-weight:700;color:var(--text-0)}
+    .card-sub{font-size:11px;color:var(--text-3);margin-top:4px}
+
+    /* Table */
+    .table-wrapper{
+      background:var(--card-bg);
+      backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      border:1px solid var(--card-border);
+      border-radius:12px;overflow-x:auto;
+      box-shadow:var(--card-shadow);
+      transition:all .3s;
+    }
+    table{width:100%;border-collapse:collapse;font-size:13px}
+    thead th{
+      background:var(--bg-2);padding:10px 12px;text-align:center;
+      font-weight:600;color:var(--text-0);
+      border-bottom:1px solid var(--border);
+      white-space:nowrap;position:sticky;top:0;
+      cursor:pointer;user-select:none;font-size:12px;
+    }
+    thead th:hover{background:var(--bg-3)}
+    thead th .sort-arrow{margin-left:4px;font-size:11px;color:var(--text-2)}
+    tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
+    tbody tr:hover{background:var(--row-hover)}
+    tbody td{padding:8px 12px;white-space:nowrap}
+    .text-right{text-align:right}
+    .text-dim{color:var(--text-3);font-size:11px}
+
+    .modem-nick{font-weight:600;color:var(--accent)}
+    .online-badge{display:inline-block;padding:2px 10px;border-radius:12px;font-size:11px;font-weight:500}
+    .online-yes{background:var(--green-bg);color:var(--success)}
+    .online-no{background:var(--red-bg);color:var(--danger)}
+
+    .loading-overlay{display:flex;align-items:center;justify-content:center;padding:60px;color:var(--text-2)}
+    .spinner{width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .6s linear infinite;margin-right:10px}
+    .error-msg{padding:16px 24px;background:var(--red-bg);border:1px solid rgba(248,81,73,.3);border-radius:10px;color:var(--danger);margin-bottom:16px}
+
+    .country-header td{
+      background:var(--country-bg);padding:10px 16px;font-weight:600;
+      font-size:13px;color:var(--text-0);
+      border-bottom:2px solid var(--border);border-top:2px solid var(--border);
+      letter-spacing:.3px;
+    }
+    .country-header:first-child td{border-top:none}
+    .country-header:hover{background:transparent !important}
+    .country-header td .country-count{font-weight:400;color:var(--text-2);font-size:12px;margin-left:8px}
+    .country-header td .country-stats{float:right;font-weight:400;color:var(--text-2);font-size:12px}
+
+    .mono{font-family:var(--font-mono);font-size:12px}
+
+    /* Modal */
+    .modal-overlay{
+      position:fixed;inset:0;background:rgba(0,0,0,.65);
+      backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);
+      display:none;align-items:center;justify-content:center;z-index:1000;
+    }
+    .modal-overlay.show{display:flex}
+    .modal{
+      background:var(--bg-1);border:1px solid var(--card-border);
+      border-radius:12px;width:700px;max-width:92vw;max-height:80vh;
+      overflow:hidden;display:flex;flex-direction:column;
+      box-shadow:0 24px 80px rgba(0,0,0,.5);
+      animation:fadeIn .2s ease;
+    }
+    .modal-header{
+      padding:14px 20px;border-bottom:1px solid var(--border);
+      display:flex;align-items:center;justify-content:space-between;
+    }
+    .modal-header h3{color:var(--text-0);font-size:15px;font-weight:600}
+    .modal-close{background:none;border:none;color:var(--text-2);cursor:pointer;font-size:20px;transition:color .15s}
+    .modal-close:hover{color:var(--text-0)}
+    .modal-body{padding:16px 20px;overflow-y:auto;flex:1}
+    .log-table{width:100%;border-collapse:collapse}
+    .log-table th,.log-table td{padding:6px 10px;text-align:left;font-size:12px;border-bottom:1px solid var(--border)}
+    .log-table th{color:var(--text-2);font-weight:500}
+    .log-table td{font-family:var(--font-mono);color:var(--text-1)}
+
+    /* Proxy table */
+    .proxy-table td{font-size:13px}
+    .copy-btn{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:14px;padding:2px;transition:color .15s}
+    .copy-btn:hover{color:var(--accent)}
+
+    /* Action buttons */
+    .action-btn-sm{
+      padding:3px 8px;border-radius:6px;border:1px solid var(--border);
+      cursor:pointer;font-size:11px;background:var(--bg-2);color:var(--text-2);
+      transition:all .2s;font-family:var(--font-sans);
+    }
+    .action-btn-sm:hover{border-color:var(--accent);color:var(--accent);background:var(--accent-dim)}
+    .action-btn-sm:disabled{opacity:.4;cursor:not-allowed}
+
+    .uptime-good{color:var(--success);font-weight:600}
+    .uptime-warn{color:var(--warning);font-weight:600}
+    .uptime-bad{color:var(--danger);font-weight:600}
+    .speed-dl{color:var(--success)}
+    .speed-ul{color:var(--accent)}
+    .balance-positive{color:var(--success);font-weight:700}
+    .balance-negative{color:var(--danger);font-weight:700}
+    .balance-warning{background:var(--red-bg);border:1px solid rgba(248,81,73,.3);border-radius:8px;padding:10px 14px;color:var(--danger);font-size:12px;margin-bottom:16px}
+
+    /* Toast */
+    .toast-container{position:fixed;top:16px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:6px}
+    .toast{
+      padding:10px 18px;border-radius:8px;font-size:12px;
+      animation:slideIn .3s ease;min-width:200px;color:#fff;
+      backdrop-filter:blur(8px);font-weight:500;
+      box-shadow:0 8px 32px rgba(0,0,0,.3);
+    }
+    .toast-success{background:var(--success)}
+    .toast-error{background:var(--danger)}
+    .toast-info{background:var(--accent)}
+
+    /* Form elements */
+    .form-group{margin-bottom:12px}
+    .form-group label{display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;font-weight:500}
+    .form-input{
+      width:100%;padding:9px 12px;background:var(--bg-2);
+      border:1px solid var(--border);border-radius:8px;
+      color:var(--text-1);font-size:13px;font-family:var(--font-sans);
+      transition:border-color .2s,box-shadow .2s;
+    }
+    .form-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
+    .form-input.mono{font-family:var(--font-mono);font-size:12px}
+    textarea.form-input{resize:vertical;min-height:80px}
+    select.form-input{cursor:pointer}
+
+    /* Data table reusable */
+    .data-table{width:100%;border-collapse:collapse;font-size:13px}
+    .data-table th{background:var(--bg-2);padding:10px 12px;text-align:left;font-weight:600;color:var(--text-0);border-bottom:1px solid var(--border);font-size:12px}
+    .data-table td{padding:8px 12px;border-bottom:1px solid var(--border)}
+
+    /* Tools section */
+    .tools-section{
+      background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      border:1px solid var(--card-border);border-radius:12px;
+      padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow);
+    }
+    .tools-section h3{color:var(--text-0);font-size:15px;font-weight:600;margin-bottom:14px}
+
+    /* Referral */
+    .referral-hero{
+      text-align:center;padding:30px 20px;margin-bottom:20px;
+      background:linear-gradient(135deg,var(--accent-dim) 0%,rgba(124,58,237,.1) 100%);
+      border-radius:12px;border:1px solid var(--card-border);box-shadow:var(--card-shadow);
+    }
+    .referral-hero h3{
+      font-size:20px;font-weight:700;margin-bottom:8px;
+      background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+    }
+    .referral-hero p{color:var(--text-2);font-size:14px}
+    .referral-hero p strong{color:var(--accent)}
+    .referral-cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px}
+
+    /* API info card */
+    .api-info-card{
+      margin-top:16px;padding:18px;
+      background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      border-radius:12px;border:1px solid var(--card-border);
+      box-shadow:var(--card-shadow);
+    }
+    .api-info-card h4{color:var(--text-0);font-size:14px;font-weight:600;margin-bottom:4px}
+
+    /* API docs */
+    .api-key-highlight{background:rgba(16,185,129,.15);color:#10b981;padding:1px 4px;border-radius:3px;font-weight:600}
+    .api-docs{}
+    .api-docs h2{font-size:20px;font-weight:700;color:var(--text-0);margin:0 0 6px 0}
+    .api-docs .api-lead{color:var(--text-2);font-size:14px;margin-bottom:24px}
+    .api-docs .api-section{
+      background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);
+      border:1px solid var(--card-border);border-radius:12px;
+      padding:20px;margin-bottom:16px;box-shadow:var(--card-shadow);
+    }
+    .api-docs .api-section h3{font-size:15px;font-weight:600;color:var(--text-0);margin:0 0 4px 0;display:flex;align-items:center;gap:8px}
+    .api-docs .api-section h3 .method{
+      font-size:11px;font-weight:700;padding:2px 8px;border-radius:4px;
+      font-family:var(--font-mono);letter-spacing:.5px;
+    }
+    .api-docs .api-section h3 .method.get{background:rgba(52,199,89,.15);color:var(--success)}
+    .api-docs .api-section h3 .method.post{background:rgba(25,96,201,.15);color:var(--accent)}
+    .api-docs .api-section .api-path{
+      font-family:var(--font-mono);font-size:13px;color:var(--accent);
+      background:var(--bg-0);padding:8px 12px;border-radius:6px;
+      margin:8px 0 14px 0;display:flex;align-items:center;justify-content:space-between;
+      border:1px solid var(--border);word-break:break-all;
+    }
+    .api-docs .api-section .api-path .copy-btn{
+      cursor:pointer;padding:4px 8px;border-radius:4px;border:none;
+      background:var(--bg-2);color:var(--text-2);font-size:11px;white-space:nowrap;
+      transition:all .2s;flex-shrink:0;margin-left:8px;
+    }
+    .api-docs .api-section .api-path .copy-btn:hover{background:var(--accent);color:#fff}
+    .api-docs .api-desc{color:var(--text-2);font-size:13px;margin-bottom:12px;line-height:1.6}
+    .api-docs .api-note{
+      color:var(--text-2);font-size:12px;padding:10px 14px;margin:12px 0;
+      background:rgba(25,96,201,.06);border-left:3px solid var(--accent);border-radius:0 6px 6px 0;
+      line-height:1.6;
+    }
+    .api-docs .api-note.warn{background:rgba(255,204,0,.06);border-left-color:var(--warning)}
+    .api-docs .api-params{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0}
+    .api-docs .api-params th{
+      text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;
+      color:var(--text-3);border:1px solid var(--border);font-weight:600;
+    }
+    .api-docs .api-params td{padding:8px 12px;border:1px solid var(--border);color:var(--text-1);max-width:0}
+    .api-docs .api-params td code{word-break:break-all;white-space:normal;display:inline}
+    .api-docs .api-params td .api-key-highlight{word-break:break-all;white-space:normal}
+    .api-docs .api-params td:first-child{font-family:var(--font-mono);color:var(--accent);font-size:12px;white-space:nowrap;max-width:none;width:160px}
+    .api-docs .api-params .required{color:var(--danger);font-size:10px;font-weight:700;margin-left:4px}
+    .api-docs .code-block{
+      background:var(--bg-0);border:1px solid var(--border);border-radius:12px;
+      padding:14px 16px;font-family:var(--font-mono);font-size:12px;
+      color:var(--text-1);overflow-x:auto;margin:10px 0;line-height:1.7;
+      position:relative;white-space:pre-wrap;word-break:break-all;
+    }
+    .api-docs .code-block .cb-copy{
+      position:absolute;top:8px;right:8px;cursor:pointer;padding:4px 10px;
+      border-radius:4px;border:none;background:var(--bg-2);color:var(--text-2);
+      font-size:11px;transition:all .2s;
+    }
+    .api-docs .code-block .cb-copy:hover{background:var(--accent);color:#fff}
+    .api-docs .resp-label{font-size:12px;font-weight:600;color:var(--text-2);margin:14px 0 4px 0;text-transform:uppercase;letter-spacing:.5px}
+    .api-docs .api-toc{
+      display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:10px;margin-bottom:24px;
+    }
+    .api-docs .api-toc a{
+      display:flex;align-items:center;gap:10px;padding:12px 16px;
+      background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;
+      text-decoration:none;color:var(--text-1);font-size:13px;transition:all .2s;
+    }
+    .api-docs .api-toc a:hover{border-color:var(--accent);background:var(--accent-dim)}
+    .api-docs .api-toc a .toc-method{font-family:var(--font-mono);font-size:10px;font-weight:700;padding:2px 6px;border-radius:3px;flex-shrink:0}
+    .api-docs .api-toc a .toc-method.get{background:rgba(52,199,89,.15);color:var(--success)}
+    .api-docs .api-toc a .toc-method.post{background:rgba(25,96,201,.15);color:var(--accent)}
+    .api-docs .api-quick-start{
+      background:linear-gradient(135deg,var(--accent-dim) 0%,rgba(124,58,237,.1) 100%);
+      border:1px solid var(--card-border);border-radius:12px;
+      padding:20px;margin-bottom:20px;
+    }
+    .api-docs .api-quick-start h3{font-size:15px;font-weight:600;color:var(--text-0);margin-bottom:6px}
+    .api-docs .api-quick-start p{color:var(--text-2);font-size:13px;line-height:1.6}
+    .api-docs .api-quick-start .api-key-box{
+      display:flex;align-items:center;gap:8px;margin-top:12px;
+      background:var(--bg-0);border:1px solid var(--border);border-radius:8px;padding:10px 14px;
+    }
+    .api-docs .api-quick-start .api-key-box code{font-family:var(--font-mono);font-size:13px;color:var(--accent);flex:1;word-break:break-all}
+    .api-docs .api-quick-start .api-key-box button{
+      flex-shrink:0;padding:6px 12px;border:none;border-radius:6px;
+      background:var(--accent);color:#fff;font-size:12px;cursor:pointer;transition:all .2s;
+    }
+    .api-docs .api-quick-start .api-key-box button:hover{background:var(--accent-hover)}
+    .api-docs .lang-tabs{display:flex;gap:0;margin-bottom:0}
+    .api-docs .lang-tab{
+      padding:6px 14px;font-size:12px;cursor:pointer;
+      color:var(--text-2);background:var(--bg-2);border:1px solid var(--border);
+      border-bottom:none;border-radius:6px 6px 0 0;transition:all .2s;font-weight:500;
+    }
+    .api-docs .lang-tab.active{color:var(--text-0);background:var(--bg-0);border-color:var(--border)}
+    .api-docs .lang-code{display:none}
+    .api-docs .lang-code.active{display:block}
+    .api-docs .lang-code .code-block{margin-top:0;border-top-left-radius:0}
+    .api-docs .api-errors{width:100%;border-collapse:collapse;font-size:13px;margin:10px 0;table-layout:fixed}
+    .api-docs .api-errors th{text-align:left;padding:8px 12px;font-size:11px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);border:1px solid var(--border);font-weight:600}
+    .api-docs .api-errors td{padding:8px 12px;border:1px solid var(--border);color:var(--text-1);word-break:break-word;overflow-wrap:anywhere;overflow:hidden}
+    .api-docs .api-errors td:first-child{font-family:var(--font-mono);font-weight:600;white-space:nowrap;overflow:visible}
+    .api-docs .api-errors td code{word-break:break-all;white-space:normal}
+
+    /* Proxy checker results */
+    .check-result-ok{color:var(--success)}
+    .check-result-fail{color:var(--danger)}
+
+    .status-dot{width:10px;height:10px;border-radius:50%;display:inline-block}
+    .status-dot.online{background:var(--success);box-shadow:0 0 8px rgba(52,199,89,.5)}
+    .status-dot.offline{background:var(--accent);box-shadow:0 0 8px rgba(25,96,201,.4)}
+    .status-dot.rotating{background:var(--warning);animation:pulse 1.2s infinite;box-shadow:0 0 8px rgba(255,204,0,.5)}
+    .pass-hidden{cursor:pointer;color:var(--text-3)}
+
+    /* Section heading for proxy credentials on traffic tab */
+    .section-heading{
+      font-size:16px;font-weight:700;color:var(--text-0);
+      margin:28px 0 14px 0;padding-bottom:8px;
+      border-bottom:1px solid var(--border);
+    }
+
+    @media(max-width:768px){
+      .container{padding:12px}
+      .header{padding:12px 16px;height:auto;flex-wrap:wrap;gap:8px}
+      .header h1{font-size:16px}
+      .header-controls{width:100%;justify-content:flex-end}
+      table{font-size:12px}
+      thead th,tbody td{padding:8px 10px}
+      .summary-cards{grid-template-columns:repeat(2,1fr)}
+      .nav-tabs{padding:0 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+      .nav-tab{padding:10px 12px;font-size:12px;white-space:nowrap}
+      .table-wrapper{overflow-x:auto;-webkit-overflow-scrolling:touch}
+      .referral-hero{padding:16px !important}
+      .referral-hero h2{font-size:18px !important}
+      .tools-section,.api-section,.api-quick-start{padding:14px}
+      .api-toc{flex-wrap:wrap}
+      .code-block{font-size:11px}
+      .code-block pre{overflow-x:auto}
+      .form-row{flex-direction:column}
+      .modal{max-width:95vw}
+      .modal-body{padding:10px 12px}
+      .referral-stats{grid-template-columns:1fr !important}
+    }
+    @media(max-width:480px){
+      .summary-cards{grid-template-columns:1fr}
+      .nav-tab{padding:8px 10px;font-size:11px}
+      .card{padding:14px}
+      .btn{padding:6px 10px;font-size:12px}
+      .header h1{font-size:14px}
+      .header-controls .btn{padding:5px 8px;font-size:11px}
+    }
+  </style>
+</head>
+<body>
+
+  <div class="login-overlay" id="loginOverlay">
+    <div class="login-box">
+      <div class="login-logo"><img src="https://proxies.rent/img/logo.webp" alt="Proxies.rent"><span>Proxies.rent</span></div>
+      <p class="login-sub">Вход в личный кабинет</p>
+      <div class="login-error" id="loginError"></div>
+      <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
+      <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="current-password">
+      <button class="btn-login" id="btnLogin" onclick="doLogin()">Войти</button>
+    </div>
+  </div>
+
+  <div id="appMain" style="display:none">
+    <div class="header">
+      <div class="header-left">
+        <a class="header-logo" href="/"><img src="https://proxies.rent/img/logo.webp" alt=""></a>
+        <h1>Proxies.rent <span style="font-size:11px;font-weight:400;-webkit-text-fill-color:var(--text-2);background:none">— личный кабинет партнёра</span></h1>
+      </div>
+      <div class="header-controls">
+        <span class="user-info">Клиент: <strong id="currentUser"></strong></span>
+        <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Переключить тему"></div>
+        <button class="btn btn-accent" id="btnRefresh" onclick="loadData()">Обновить</button>
+        <button class="btn btn-danger" onclick="doLogout()">Выйти</button>
+      </div>
+    </div>
+
+    <div class="status-bar">
+      <span>
+        <span class="status-indicator" id="statusDot"></span>
+        <span id="statusText">Готово</span>
+      </span>
+      <span id="lastUpdate"></span>
+    </div>
+
+    <!-- Tabs: NO Прокси tab -->
+    <div class="nav-tabs">
+      <div class="nav-tab active" onclick="switchTab('traffic',this)">Панель управления</div>
+      <div class="nav-tab" onclick="switchTab('billing',this)">История баланса</div>
+      <div class="nav-tab" onclick="switchTab('documents',this)">Документы</div>
+      <div class="nav-tab" onclick="switchTab('api',this)">API</div>
+      <div class="nav-tab" onclick="switchTab('referral',this)">Партнёрская программа</div>
+      <div class="nav-tab" onclick="switchTab('tools',this)">Инструменты</div>
+    </div>
+
+    <!-- TAB: Traffic (now includes proxy credentials, export, API info below the traffic table) -->
+    <div class="tab-pane active" id="tab-traffic">
+      <div class="container">
+        <div class="summary-cards" id="summaryCards" style="display:none">
+          <div class="card">
+            <div class="card-label">Всего портов</div>
+            <div class="card-value" id="totalPorts">-</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Трафик сегодня</div>
+            <div class="card-value" id="totalDayTotal">-</div>
+            <div class="card-sub" id="totalDaySplit"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Трафик за месяц</div>
+            <div class="card-value" id="totalMonthTotal">-</div>
+            <div class="card-sub" id="totalMonthSplit"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Баланс</div>
+            <div class="card-value" id="balanceValue">-</div>
+            <div class="card-sub" id="balanceInfo"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Аптайм</div>
+            <div class="card-value" id="avgUptime">-</div>
+            <div class="card-sub" id="uptimeInfo"></div>
+          </div>
+        </div>
+
+        <div id="balanceWarning"></div>
+        <div id="errorContainer"></div>
+
+        <!-- Traffic table: 7 columns: Модем, Реквизиты, Логин:Пароль, Смена IP, Сегодня, Вчера, Месяц -->
+        <div class="table-wrapper">
+          <div class="loading-overlay" id="loading">
+            <div class="spinner"></div>
+            <span>Загрузка данных...</span>
+          </div>
+          <table id="dataTable" style="display:none">
+            <thead>
+              <tr>
+                <th onclick="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
+                <th>Реквизиты</th>
+                <th>Логин:Пароль</th>
+                <th>Смена IP</th>
+                <th onclick="sortTable('dayIn')">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
+                <th onclick="sortTable('yesterdayIn')">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
+                <th onclick="sortTable('monthIn')">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
+              </tr>
+            </thead>
+            <tbody id="tableBody"></tbody>
+          </table>
+        </div>
+
+        <!-- Export buttons (below the table) -->
+        <div id="proxyExportButtons" style="display:none;margin-top:16px;gap:8px;flex-wrap:wrap">
+          <button class="btn btn-accent" onclick="exportCredentials()">Скачать доступы (TXT)</button>
+          <button class="btn" onclick="exportCredentialsCSV()">Скачать CSV</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Tools -->
+    <div class="tab-pane" id="tab-tools">
+      <div class="container">
+        <!-- Proxy Checker -->
+        <div class="tools-section">
+          <h3>Проверка прокси</h3>
+          <div class="form-group">
+            <label>Список прокси (по одному на строку, формат: ip:port или ip:port:login:password)</label>
+            <textarea class="form-input mono" id="checkProxyInput" rows="6" placeholder="1.2.3.4:8080&#10;5.6.7.8:1080:user:pass"></textarea>
+          </div>
+          <button class="btn btn-accent" id="btnCheckProxy" onclick="checkProxies()">Проверить</button>
+          <div id="checkProxyResults" style="margin-top:14px"></div>
+        </div>
+
+        <!-- Format Converter -->
+        <div class="tools-section">
+          <h3>Конвертер форматов</h3>
+          <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">
+            <div class="form-group" style="flex:1;min-width:150px">
+              <label>Из формата</label>
+              <select class="form-input" id="convertFrom">
+                <option value="ipportloginpass">ip:port:login:pass</option>
+                <option value="loginpassipport">login:pass@ip:port</option>
+                <option value="loginpassatipport">login:pass:ip:port</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1;min-width:150px">
+              <label>В формат</label>
+              <select class="form-input" id="convertTo">
+                <option value="loginpassipport">login:pass@ip:port</option>
+                <option value="ipportloginpass">ip:port:login:pass</option>
+                <option value="loginpassatipport">login:pass:ip:port</option>
+              </select>
+            </div>
+          </div>
+          <div style="display:flex;gap:12px;flex-wrap:wrap">
+            <div class="form-group" style="flex:1;min-width:200px">
+              <label>Входные данные</label>
+              <textarea class="form-input mono" id="convertInput" rows="6" placeholder="Вставьте список прокси"></textarea>
+            </div>
+            <div class="form-group" style="flex:1;min-width:200px">
+              <label>Результат</label>
+              <textarea class="form-input mono" id="convertOutput" rows="6" readonly placeholder="Конвертированный список"></textarea>
+            </div>
+          </div>
+          <div style="display:flex;gap:8px;margin-top:8px">
+            <button class="btn btn-accent" onclick="convertFormat()">Конвертировать</button>
+            <button class="btn" onclick="copyText(document.getElementById('convertOutput').value,this)">Копировать результат</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Documents -->
+    <div class="tab-pane" id="tab-documents">
+      <div class="container">
+        <div class="tools-section">
+          <h3>Документы</h3>
+          <div id="documentsList">
+            <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: API -->
+    <div class="tab-pane" id="tab-api">
+      <div class="container api-docs">
+
+        <!-- API Key -->
+        <div class="api-quick-start">
+          <h3>Ваш API-ключ</h3>
+          <p>API-ключ используется для аутентификации. Передавайте его через заголовок <code>X-API-Key</code> или как параметр <code>?apikey=</code> в URL.</p>
+          <div class="api-key-box">
+            <code id="apiDocKey">—</code>
+            <button onclick="copyText(document.getElementById('apiDocKey').textContent,this)">Копировать</button>
+          </div>
+          <div class="api-note" style="margin-top:14px;margin-bottom:0">Никому не сообщайте ваш API-ключ. Если он скомпрометирован — обратитесь к администратору для перевыпуска.</div>
+        </div>
+
+        <!-- TOC -->
+        <div class="api-toc">
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-proxy').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get">GET</span> Получить прокси
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-change-ip').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method get">GET</span> Сменить IP
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-examples').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method" style="background:rgba(124,58,237,.15);color:#7c3aed">CODE</span> Примеры кода
+          </a>
+          <a href="javascript:void(0)" onclick="document.getElementById('api-s-errors').scrollIntoView({behavior:'smooth',block:'start'})">
+            <span class="toc-method" style="background:rgba(255,56,60,.12);color:var(--danger)">REF</span> Ошибки
+          </a>
+        </div>
+
+        <!-- ==================== 1. GET PROXY DATA ==================== -->
+        <div class="api-section" id="api-s-proxy">
+          <h3><span class="method get">GET</span> Получить данные прокси</h3>
+          <div class="api-path"><span>/api/v1/proxy</span><button class="copy-btn" onclick="copyText(apiBase+'/api/v1/proxy',this)">Копировать URL</button></div>
+          <p class="api-desc">Основной метод API. Возвращает все ваши прокси с реквизитами, ссылками на смену IP и информацию о балансе — одним запросом.</p>
+
+          <div class="resp-label">Аутентификация</div>
+          <p class="api-desc">Передайте API-ключ одним из двух способов:</p>
+          <table class="api-params">
+            <thead><tr><th style="width:160px">Способ</th><th>Пример</th></tr></thead>
+            <tbody>
+              <tr><td>Заголовок<br><code style="color:var(--text-1)">X-API-Key</code></td><td style="font-size:12px"><code style="word-break:break-all">curl -H "X-API-Key: YOUR_API_KEY" https://dashboard.proxies.rent/api/v1/proxy</code></td></tr>
+              <tr><td>Query-параметр<br><code style="color:var(--text-1)">?apikey=</code></td><td style="font-size:12px"><code style="word-break:break-all">curl https://dashboard.proxies.rent/api/v1/proxy?apikey=YOUR_API_KEY</code></td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Пример запроса</div>
+          <div class="lang-tabs">
+            <div class="lang-tab active" onclick="switchLang(this,'curl','proxy')">cURL</div>
+            <div class="lang-tab" onclick="switchLang(this,'python','proxy')">Python</div>
+            <div class="lang-tab" onclick="switchLang(this,'js','proxy')">JavaScript</div>
+          </div>
+          <div class="lang-code active" data-group="proxy" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>curl -H "X-API-Key: YOUR_API_KEY" https://dashboard.proxies.rent/api/v1/proxy</div></div>
+          <div class="lang-code" data-group="proxy" data-lang="python"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
+
+r = requests.get("https://dashboard.proxies.rent/api/v1/proxy",
+    headers={"X-API-Key": "YOUR_API_KEY"})
+data = r.json()
+
+for proxy in data["proxies"]:
+    print(f"{proxy['host']}:{proxy['ports']['http']}:{proxy['username']}:{proxy['password']}")</div></div>
+          <div class="lang-code" data-group="proxy" data-lang="js"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>const res = await fetch("https://dashboard.proxies.rent/api/v1/proxy", {
+  headers: { "X-API-Key": "YOUR_API_KEY" }
+});
+const data = await res.json();
+
+data.proxies.forEach(p =&gt; {
+  console.log(`${p.host}:${p.ports.http}:${p.username}:${p.password}`);
+});</div></div>
+
+          <div class="resp-label">Ответ</div>
+          <div class="code-block" style="font-size:12px"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>{
+  "success": true,
+  "client": "ClientName",
+  "billing": {
+    "type": "per_gb",
+    "price_per_gb": 23,
+    "currency": "RUB",
+    "balance": 50000,
+    "usage_mb": 2686976
+  },
+  "proxies": [
+    {
+      "id": "MD2_64",
+      "host": "89.149.100.92",
+      "ports": { "http": 8040, "socks5": 5040 },
+      "username": "WUIRzA91",
+      "password": "F9RQcuRw",
+      "country": "MD",
+      "country_name": "Moldova",
+      "operator": "Orange",
+      "online": true,
+      "change_ip_url": "http://89.149.100.92:7002/apix/reset_ip_secure?hash=aes_ecb:..."
+    }
+  ],
+  "proxy_count": 10
+}</div>
+
+          <div class="resp-label">Описание полей</div>
+          <table class="api-params">
+            <thead><tr><th>Поле</th><th>Тип</th><th>Описание</th></tr></thead>
+            <tbody>
+              <tr><td>success</td><td>boolean</td><td>Статус запроса — <code>true</code> если всё ОК</td></tr>
+              <tr><td>client</td><td>string</td><td>Имя вашего аккаунта</td></tr>
+              <tr><td>billing.type</td><td>string</td><td>Тип тарификации (<code>per_gb</code> — за гигабайт)</td></tr>
+              <tr><td>billing.price_per_gb</td><td>number</td><td>Цена за 1 ГБ трафика</td></tr>
+              <tr><td>billing.currency</td><td>string</td><td>Валюта (<code>RUB</code>)</td></tr>
+              <tr><td>billing.balance</td><td>number</td><td>Сумма оплат</td></tr>
+              <tr><td>billing.usage_mb</td><td>number</td><td>Использованный трафик за месяц (МБ)</td></tr>
+              <tr><td>proxies[].id</td><td>string</td><td>Уникальное имя модема</td></tr>
+              <tr><td>proxies[].host</td><td>string</td><td>IP-адрес прокси-сервера</td></tr>
+              <tr><td>proxies[].ports.http</td><td>number</td><td>Порт для HTTP-подключения</td></tr>
+              <tr><td>proxies[].ports.socks5</td><td>number</td><td>Порт для SOCKS5-подключения</td></tr>
+              <tr><td>proxies[].username</td><td>string</td><td>Логин для авторизации на прокси</td></tr>
+              <tr><td>proxies[].password</td><td>string</td><td>Пароль для авторизации на прокси</td></tr>
+              <tr><td>proxies[].country</td><td>string</td><td>Код страны (<code>MD</code>, <code>RO</code>)</td></tr>
+              <tr><td>proxies[].country_name</td><td>string</td><td>Название страны</td></tr>
+              <tr><td>proxies[].operator</td><td>string</td><td>Мобильный оператор</td></tr>
+              <tr><td>proxies[].online</td><td>boolean</td><td>Модем онлайн — <code>true</code> / <code>false</code></td></tr>
+              <tr><td>proxies[].change_ip_url</td><td>string</td><td>Прямая ссылка для смены IP (см. ниже)</td></tr>
+              <tr><td>proxy_count</td><td>number</td><td>Общее количество прокси</td></tr>
+            </tbody>
+          </table>
+
+          <div class="api-note">Готовая строка подключения: <code>host:ports.http:username:password</code> (для HTTP) или <code>host:ports.socks5:username:password</code> (для SOCKS5).</div>
+        </div>
+
+        <!-- ==================== 2. CHANGE IP ==================== -->
+        <div class="api-section" id="api-s-change-ip">
+          <h3><span class="method get">GET</span> Сменить IP</h3>
+          <div class="api-path"><span>change_ip_url из ответа /api/v1/proxy</span></div>
+          <p class="api-desc">Каждый прокси в ответе <code>/api/v1/proxy</code> содержит поле <code>change_ip_url</code> — прямую ссылку для смены IP-адреса. Просто выполните GET-запрос на этот URL.</p>
+
+          <div class="api-note">Это прямая ссылка на сервер модемов — запрос идёт напрямую, без промежуточного сервера. Новый IP выдаётся через 10–15 секунд.</div>
+
+          <div class="resp-label">Как это работает</div>
+          <table class="api-params">
+            <thead><tr><th>Шаг</th><th>Действие</th></tr></thead>
+            <tbody>
+              <tr><td style="color:var(--text-0);white-space:nowrap">1</td><td>Вызовите <code>GET /api/v1/proxy</code> и получите список прокси</td></tr>
+              <tr><td style="color:var(--text-0);white-space:nowrap">2</td><td>Возьмите <code>change_ip_url</code> нужного прокси</td></tr>
+              <tr><td style="color:var(--text-0);white-space:nowrap">3</td><td>Выполните <code>GET</code>-запрос на этот URL — IP сменится</td></tr>
+            </tbody>
+          </table>
+
+          <div class="resp-label">Пример</div>
+          <div class="lang-tabs">
+            <div class="lang-tab active" onclick="switchLang(this,'curl','changeip')">cURL</div>
+            <div class="lang-tab" onclick="switchLang(this,'python','changeip')">Python</div>
+          </div>
+          <div class="lang-code active" data-group="changeip" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button># 1. Получаем прокси
+DATA=$(curl -s -H "X-API-Key: YOUR_API_KEY" https://dashboard.proxies.rent/api/v1/proxy)
+
+# 2. Достаём change_ip_url первого прокси
+URL=$(echo $DATA | python3 -c "import sys,json; print(json.load(sys.stdin)['proxies'][0]['change_ip_url'])")
+
+# 3. Меняем IP
+curl "$URL"</div></div>
+          <div class="lang-code" data-group="changeip" data-lang="python"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
+
+# 1. Получаем прокси
+data = requests.get("https://dashboard.proxies.rent/api/v1/proxy",
+    headers={"X-API-Key": "YOUR_API_KEY"}).json()
+
+# 2. Меняем IP на нужном модеме
+for proxy in data["proxies"]:
+    if proxy["id"] == "MD2_64":
+        requests.get(proxy["change_ip_url"])
+        print(f"IP сменён на {proxy['id']}")
+        break</div></div>
+
+          <div class="api-note warn">Не вызывайте смену IP чаще, чем раз в 30 секунд на один модем. Частые запросы могут быть заблокированы оператором.</div>
+        </div>
+
+        <!-- ==================== 3. CODE EXAMPLES ==================== -->
+        <div class="api-section" id="api-s-examples">
+          <h3><span class="method" style="background:rgba(124,58,237,.15);color:#7c3aed">CODE</span> Примеры интеграции</h3>
+          <p class="api-desc">Готовые примеры для популярных языков и сценариев.</p>
+
+          <div class="resp-label">Python — получить все прокси и использовать для запросов</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
+
+API_KEY = "YOUR_API_KEY"
+
+# Получаем прокси
+data = requests.get("https://dashboard.proxies.rent/api/v1/proxy",
+    headers={"X-API-Key": API_KEY}).json()
+
+if not data["success"]:
+    print("Ошибка:", data.get("error"))
+    exit()
+
+print(f"Прокси: {data['proxy_count']} шт.")
+print(f"Баланс: {data['billing']['balance']} {data['billing']['currency']}")
+
+# Используем первый прокси для запроса
+p = data["proxies"][0]
+proxy_url = f"http://{p['username']}:{p['password']}@{p['host']}:{p['ports']['http']}"
+
+r = requests.get("https://api.ipify.org?format=json",
+    proxies={"http": proxy_url, "https": proxy_url},
+    timeout=15)
+print(f"Текущий IP через {p['id']}: {r.json()['ip']}")
+
+# Меняем IP
+requests.get(p["change_ip_url"])
+print(f"IP на {p['id']} сменён")</div>
+
+          <div class="resp-label">JavaScript / Node.js</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>const API_KEY = "YOUR_API_KEY";
+
+const res = await fetch("https://dashboard.proxies.rent/api/v1/proxy", {
+  headers: { "X-API-Key": API_KEY }
+});
+const data = await res.json();
+
+console.log(`Прокси: ${data.proxy_count} шт.`);
+
+// Вывести все прокси в формате IP:PORT:LOGIN:PASS
+data.proxies.forEach(p =&gt; {
+  console.log(`HTTP:   ${p.host}:${p.ports.http}:${p.username}:${p.password}`);
+  console.log(`SOCKS5: ${p.host}:${p.ports.socks5}:${p.username}:${p.password}`);
+});
+
+// Сменить IP на первом прокси
+await fetch(data.proxies[0].change_ip_url);
+console.log("IP сменён");</div>
+
+          <div class="resp-label">Bash — экспорт в файл</div>
+          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button># Сохранить все прокси в файл proxies.txt (формат IP:PORT:LOGIN:PASS)
+curl -s -H "X-API-Key: YOUR_API_KEY" https://dashboard.proxies.rent/api/v1/proxy \
+  | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for p in data['proxies']:
+    print(f\"{p['host']}:{p['ports']['http']}:{p['username']}:{p['password']}\")
+" &gt; proxies.txt
+
+echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"</div>
+        </div>
+
+        <!-- ==================== 4. ERRORS ==================== -->
+        <div class="api-section" id="api-s-errors">
+          <h3><span class="method" style="background:rgba(255,56,60,.12);color:var(--danger)">REF</span> Коды ошибок</h3>
+          <p class="api-desc">При ошибке API возвращает JSON с полем <code>success: false</code> и описанием в <code>error</code>.</p>
+
+          <div class="resp-label">Пример ошибки</div>
+          <div class="code-block">{"success": false, "error": "Invalid API key"}</div>
+
+          <table class="api-errors">
+            <colgroup><col style="width:7%"><col style="width:50%"><col style="width:43%"></colgroup>
+            <thead><tr><th>Код</th><th>Причина</th><th>Решение</th></tr></thead>
+            <tbody>
+              <tr><td style="color:var(--warning)">401</td><td>API-ключ не передан или невалиден</td><td>Проверьте заголовок <code>X-API-Key</code> или параметр <code>?apikey=</code></td></tr>
+              <tr><td style="color:var(--danger)">502</td><td>Сервер модемов временно недоступен</td><td>Повторите запрос через 30 секунд</td></tr>
+            </tbody>
+          </table>
+        </div>
+
+      </div>
+    </div>
+
+    <!-- TAB: Referral -->
+    <!-- TAB: BILLING HISTORY -->
+    <div class="tab-pane" id="tab-billing">
+      <div class="container">
+        <div class="tools-section">
+          <h3>История баланса</h3>
+
+          <!-- Summary cards -->
+          <div class="summary-cards" id="billingSummary">
+            <div class="card">
+              <div class="card-label">Баланс</div>
+              <div class="card-value" id="billingBalanceVal">--</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Расход за месяц</div>
+              <div class="card-value" id="billingMonthCharges">--</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Всего оплачено</div>
+              <div class="card-value" id="billingTotalPayments">--</div>
+            </div>
+            <div class="card">
+              <div class="card-label">Всего списано</div>
+              <div class="card-value" id="billingTotalCharges">--</div>
+            </div>
+          </div>
+
+          <!-- Month filter -->
+          <div style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
+            <label style="font-size:14px;color:var(--text-2)">Период:</label>
+            <select id="billingMonthFilter" onchange="loadBillingHistory()" style="padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:14px">
+              <option value="">Все</option>
+            </select>
+          </div>
+
+          <!-- Table -->
+          <div class="table-wrapper">
+            <table class="proxy-table" id="billingTable" style="width:100%">
+              <thead>
+                <tr>
+                  <th style="width:15%;text-align:center">Дата</th>
+                  <th style="width:12%;text-align:center">Тип</th>
+                  <th style="width:15%;text-align:center">Сумма</th>
+                  <th style="width:13%;text-align:center">Трафик (ГБ)</th>
+                  <th style="width:18%;text-align:center">Баланс после</th>
+                  <th style="width:27%;text-align:center">Примечание</th>
+                </tr>
+              </thead>
+              <tbody id="billingTableBody">
+                <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3)">Загрузка...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="tab-pane" id="tab-referral">
+      <div class="container">
+        <div id="referralContent">
+          <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- IP History Modal -->
+  <div class="modal-overlay" id="ipModal">
+    <div class="modal">
+      <div class="modal-header"><h3 id="ipModalTitle">История IP</h3><button class="modal-close" onclick="closeIpModal()">&times;</button></div>
+      <div class="modal-body" id="ipModalBody"></div>
+    </div>
+  </div>
+
+  <div class="toast-container" id="toastContainer"></div>
+
+<script>
+// --- Theme ---
+function getTheme(){return localStorage.getItem('pr_theme')||'dark'}
+
+function applyTheme(theme){
+  document.documentElement.setAttribute('data-theme',theme);
+  var btn=document.getElementById('themeToggle');
+  if(btn) btn.textContent=theme==='dark'?'\u2600\uFE0F':'\uD83C\uDF19';
+}
+
+function toggleTheme(){
+  var current=getTheme();
+  var next=current==='dark'?'light':'dark';
+  localStorage.setItem('pr_theme',next);
+  applyTheme(next);
+}
+
+applyTheme(getTheme());
+
+// --- Auth state ---
+var authToken=localStorage.getItem('pr_token')||'';
+var authLogin=localStorage.getItem('pr_login')||'';
+
+// --- State ---
+var tableData=[];
+var modemLogins={};
+var billingData=null;
+var rawData=null;
+var currentSort={key:'modemNick',dir:'asc'};
+
+// --- Country config ---
+var countryNames={'MD':'\ud83c\uddf2\ud83c\udde9 Молдова','RO':'\ud83c\uddf7\ud83c\uddf4 Румыния','??':'\ud83c\udf10 Другое'};
+var countryOrder=['MD','RO','??'];
+var COUNTRIES={S1:{serverIp:'89.149.100.92'},S2:{serverIp:'31.5.194.89'}};
+
+// --- Tabs ---
+function switchTab(name,el){
+  document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});
+  document.querySelectorAll('.tab-pane').forEach(function(t){t.classList.remove('active')});
+  if(el) el.classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+  if(name==='traffic') renderProxyTable();
+  if(name==='documents') loadDocuments();
+  if(name==='api') loadApiDocs();
+  if(name==='referral') loadReferral();
+  if(name==='billing') loadBillingHistory();
+}
+
+// --- Billing History ---
+var billingHistoryLoaded=false;
+function loadBillingHistory(){
+  var monthFilter=document.getElementById('billingMonthFilter').value;
+  var url='/api/billing_history';
+  if(monthFilter) url+='?month='+monthFilter;
+
+  fetch(url,{headers:{'X-Auth-Token':authToken}})
+  .then(function(r){return r.json()})
+  .then(function(data){
+    if(data.error){
+      document.getElementById('billingTableBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3)">'+data.error+'</td></tr>';
+      return;
+    }
+
+    var curr=data.currency||'RUB';
+    var currSymbol=curr==='RUB'?'\u20BD':(curr==='USD'?'$':(curr==='EUR'?'\u20AC':curr));
+
+    // Update summary
+    document.getElementById('billingBalanceVal').textContent=formatNumber(data.balance)+' '+currSymbol;
+    document.getElementById('billingBalanceVal').style.color=data.balance>=0?'var(--green)':'var(--red)';
+    document.getElementById('billingMonthCharges').textContent=formatNumber(data.summary.monthCharges)+' '+currSymbol;
+    document.getElementById('billingTotalPayments').textContent=formatNumber(data.summary.totalPayments)+' '+currSymbol;
+    document.getElementById('billingTotalCharges').textContent=formatNumber(data.summary.totalCharges)+' '+currSymbol;
+
+    // Populate month filter (only once)
+    if(!billingHistoryLoaded){
+      billingHistoryLoaded=true;
+      var months=new Set();
+      (data.entries||[]).forEach(function(e){if(e.date)months.add(e.date.slice(0,7))});
+      // Always include current month
+      var currentMonth=new Date().toISOString().slice(0,7);
+      months.add(currentMonth);
+      var select=document.getElementById('billingMonthFilter');
+      var existingVals=new Set();
+      for(var i=0;i<select.options.length;i++) existingVals.add(select.options[i].value);
+      var sortedMonths=Array.from(months).sort().reverse();
+      var monthNames=['','Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+      sortedMonths.forEach(function(m){
+        if(!existingVals.has(m)){
+          var opt=document.createElement('option');
+          opt.value=m;
+          var parts=m.split('-');
+          opt.textContent=monthNames[parseInt(parts[1])]+' '+parts[0];
+          select.appendChild(opt);
+        }
+      });
+    }
+
+    // Render table
+    var entries=data.entries||[];
+    if(entries.length===0){
+      document.getElementById('billingTableBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3)">Нет операций</td></tr>';
+      return;
+    }
+
+    var html='';
+    entries.forEach(function(e){
+      var typeLabel='',typeClass='',amountStr='',amountColor='';
+      if(e.type==='charge'){
+        typeLabel='Списание';
+        typeClass='color:var(--red)';
+        amountStr='-'+formatNumber(e.cost)+' '+currSymbol;
+        amountColor='color:var(--red)';
+      } else if(e.type==='payment'){
+        typeLabel='Пополнение';
+        typeClass='color:var(--green)';
+        amountStr='+'+formatNumber(e.amount)+' '+currSymbol;
+        amountColor='color:var(--green)';
+      } else if(e.type==='payment_reversal'){
+        typeLabel='Отмена оплаты';
+        typeClass='color:var(--orange, #f59e0b)';
+        amountStr=formatNumber(e.amount)+' '+currSymbol;
+        amountColor='color:var(--orange, #f59e0b)';
+      } else if(e.type==='adjustment'){
+        typeLabel='Корректировка';
+        typeClass='color:var(--blue)';
+        amountStr=(e.amount>=0?'+':'')+formatNumber(e.amount)+' '+currSymbol;
+        amountColor=e.amount>=0?'color:var(--green)':'color:var(--red)';
+      } else {
+        typeLabel=e.type||'—';
+        typeClass='';
+        amountStr=(e.cost||e.amount||0)+' '+currSymbol;
+      }
+
+      var dateStr=e.date||'—';
+      if(e.timestamp){
+        try{
+          var d=new Date(e.timestamp);
+          dateStr=d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+        }catch(ex){}
+      }
+
+      var trafficStr='—';
+      if(e.type==='charge' && e.delta_gb!==undefined){
+        trafficStr=e.delta_gb.toFixed(3);
+      }
+
+      var balAfter=e.balance_after!==undefined?formatNumber(e.balance_after)+' '+currSymbol:'—';
+      var note=e.note||'';
+
+      html+='<tr>';
+      html+='<td style="white-space:nowrap;font-size:13px;text-align:center">'+dateStr+'</td>';
+      html+='<td style="'+typeClass+';font-weight:600;font-size:13px;text-align:center">'+typeLabel+'</td>';
+      html+='<td style="'+amountColor+';font-weight:600;font-size:13px;text-align:center">'+amountStr+'</td>';
+      html+='<td style="font-size:13px;text-align:center">'+trafficStr+'</td>';
+      html+='<td style="font-size:13px;text-align:center">'+balAfter+'</td>';
+      html+='<td style="font-size:13px;color:var(--text-3);text-align:center">'+note+'</td>';
+      html+='</tr>';
+    });
+
+    document.getElementById('billingTableBody').innerHTML=html;
+  })
+  .catch(function(err){
+    document.getElementById('billingTableBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--red)">Ошибка загрузки: '+err.message+'</td></tr>';
+  });
+}
+
+function formatNumber(n){
+  if(n===undefined||n===null) return '0';
+  return parseFloat(n).toLocaleString('ru-RU',{minimumFractionDigits:2,maximumFractionDigits:2});
+}
+
+// --- Init ---
+(function init(){
+  // Support admin impersonation via ?impersonate=TOKEN
+  var params=new URLSearchParams(window.location.search);
+  var impToken=params.get('impersonate');
+  if(impToken){
+    authToken=impToken;
+    authLogin='(admin view)';
+    // Clean URL without reloading
+    window.history.replaceState({},'',window.location.pathname);
+  }
+  if(authToken){showApp()}else{showLogin()}
+  document.getElementById('passwordInput').addEventListener('keydown',function(e){if(e.key==='Enter')doLogin()});
+  document.getElementById('loginInput').addEventListener('keydown',function(e){if(e.key==='Enter')document.getElementById('passwordInput').focus()});
+})();
+
+function showLogin(){
+  document.getElementById('loginOverlay').style.display='flex';
+  document.getElementById('appMain').style.display='none';
+  document.getElementById('loginInput').focus();
+}
+
+var refreshInterval=null;
+
+function showApp(){
+  document.getElementById('loginOverlay').style.display='none';
+  document.getElementById('appMain').style.display='block';
+  document.getElementById('currentUser').textContent=authLogin;
+  loadData();
+  if(refreshInterval) clearInterval(refreshInterval);
+  refreshInterval=setInterval(loadData,60*60*1000);
+}
+
+async function doLogin(){
+  var login=document.getElementById('loginInput').value.trim();
+  var password=document.getElementById('passwordInput').value;
+  var errorEl=document.getElementById('loginError');
+  var btn=document.getElementById('btnLogin');
+
+  if(!login||!password){errorEl.textContent='Введите логин и пароль';return}
+  btn.disabled=true;errorEl.textContent='';
+
+  try{
+    var resp=await fetch('/api/login',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({login:login,password:password})
+    });
+    var data=await resp.json();
+    if(!resp.ok){errorEl.textContent=data.error||'Ошибка входа';return}
+    authToken=data.token;
+    authLogin=data.login;
+    localStorage.setItem('pr_token',authToken);
+    localStorage.setItem('pr_login',authLogin);
+    if(data.isAdmin){
+      window.location.href='/admin';
+      return;
+    }
+    showApp();
+  }catch(err){
+    errorEl.textContent='Ошибка соединения';
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+function doLogout(){
+  fetch('/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}}).catch(function(){});
+  authToken='';authLogin='';
+  localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');
+  tableData=[];billingData=null;rawData=null;
+  if(refreshInterval){clearInterval(refreshInterval);refreshInterval=null}
+  showLogin();
+}
+
+function parseBW(val){
+  if(val===0||val==='0'||val===null||val===undefined) return 0;
+  if(typeof val==='number') return val;
+  var str=String(val).trim();
+  var match=str.match(/^([\d.]+)\s*(B|KB|MB|GB|TB)?$/i);
+  if(!match) return 0;
+  var num=parseFloat(match[1]);
+  var unit=(match[2]||'B').toUpperCase();
+  var multipliers={'B':1,'KB':1024,'MB':1024*1024,'GB':1024*1024*1024,'TB':1024*1024*1024*1024};
+  return num*(multipliers[unit]||1);
+}
+
+function formatBytes(bytes){
+  if(bytes===0) return '0 B';
+  var units=['B','KB','MB','GB','TB'];
+  var i=0;
+  while(bytes>=1024&&i<units.length-1){bytes/=1024;i++}
+  return bytes.toFixed(1)+' '+units[i];
+}
+
+// Cost display without spaces - use Math.round for proper rounding
+function formatCost(amount){
+  return Math.round(amount).toString();
+}
+
+function formatCurrencyLabel(currency){
+  return currency||'';
+}
+
+async function fetchJSON(url){
+  var resp=await fetch(url,{headers:{'X-Auth-Token':authToken}});
+  if(resp.status===401){doLogout();throw new Error('Сессия истекла')}
+  if(!resp.ok) throw new Error('HTTP '+resp.status+': '+resp.statusText);
+  return resp.json();
+}
+
+function setStatus(state,text){
+  var dot=document.getElementById('statusDot');
+  var txt=document.getElementById('statusText');
+  dot.className='status-indicator status-'+state;
+  txt.textContent=text;
+}
+
+function escapeHtml(str){var div=document.createElement('div');div.textContent=str;return div.innerHTML}
+
+function showToast(msg,type){
+  var c=document.getElementById('toastContainer');
+  var e=document.createElement('div');
+  e.className='toast toast-'+(type||'info');
+  e.textContent=msg;
+  c.appendChild(e);
+  setTimeout(function(){e.remove()},4000);
+}
+
+// --- Clipboard with fallback ---
+function copyText(t,b){
+  function onOk(){if(b){var o=b.innerHTML;b.innerHTML='\u2714';setTimeout(function(){b.innerHTML=o},1500)}showToast('Скопировано','info')}
+  if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(onOk).catch(doFallback)}else{doFallback()}
+  function doFallback(){var a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;left:-9999px;opacity:0';document.body.appendChild(a);a.select();try{document.execCommand('copy');onOk()}catch(e){showToast('Ошибка','error')}document.body.removeChild(a)}
+}
+
+// --- Load Data ---
+async function loadData(){
+  var btn=document.getElementById('btnRefresh');
+  btn.disabled=true;
+  setStatus('loading','Загрузка...');
+  document.getElementById('errorContainer').innerHTML='';
+
+  try{
+    var data=await fetchJSON('/api/dashboard_data');
+    rawData=data;
+    var bwData=data.bandwidth;
+    var statusData=data.status;
+    var portsData=data.ports;
+    modemLogins=data.modemLogins||{};
+    billingData=data.billing||null;
+
+    var ipTracking=data.ipTracking||{};
+    var uptimeTracking=data.uptimeTracking||{};
+    var speedtestLatest=data.speedtestLatest||{};
+
+    var modemMap={};
+    if(Array.isArray(statusData)){
+      statusData.forEach(function(m){
+        var imei=m.modem_details&&m.modem_details.IMEI;
+        if(imei){
+          modemMap[imei]={
+            nick:m.modem_details.NICK||imei,
+            model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',
+            online:(m.net_details&&m.net_details.IS_ONLINE)||'no',
+            extIp:(m.net_details&&m.net_details.EXT_IP)||'',
+            operator:(m.net_details&&m.net_details.CELLOP)||'',
+            networkType:(m.net_details&&m.net_details.CurrentNetworkType)||'',
+            server:m._server||''
+          };
+        }
+      });
+    }
+
+    var portImeiMap={};
+    if(portsData&&typeof portsData==='object'){
+      for(var imeiKey in portsData){
+        var ports=portsData[imeiKey];
+        if(Array.isArray(ports)){
+          ports.forEach(function(p){if(p.portID) portImeiMap[p.portID]=imeiKey});
+        }
+      }
+    }
+
+    tableData=[];
+    if(bwData&&typeof bwData==='object'){
+      for(var portId in bwData){
+        var bw=bwData[portId];
+        var imei=portImeiMap[portId]||'';
+        var modem=modemMap[imei]||{nick:imei||'?',model:'',online:'?',extIp:'',operator:'',networkType:'',server:''};
+
+        var country=modem.nick.startsWith('MD')?'MD':modem.nick.startsWith('RO')?'RO':'??';
+        var serverName=modem.server||(imei.startsWith('S1_')?'S1':imei.startsWith('S2_')?'S2':'');
+        var rawImei=imei.replace(/^S[12]_/,'');
+
+        // IP tracking info
+        var ipInfo=ipTracking[imei]||null;
+
+        // Uptime percentage
+        var uptimePct=null;
+        if(uptimeTracking[imei]&&uptimeTracking[imei].total_checks>0){
+          uptimePct=(uptimeTracking[imei].online_checks/uptimeTracking[imei].total_checks*100).toFixed(1);
+        }
+
+        // Speed
+        var speedDl=0,speedUl=0;
+        if(speedtestLatest[imei]){
+          speedDl=speedtestLatest[imei].download||0;
+          speedUl=speedtestLatest[imei].upload||0;
+        }
+
+        // Port info
+        var portInfo=null;
+        if(portsData&&portsData[imei]&&Array.isArray(portsData[imei])){
+          portInfo=portsData[imei][0];
+        }
+
+        tableData.push({
+          portId:portId,
+          imei:imei,
+          rawImei:rawImei,
+          serverName:serverName,
+          country:country,
+          modemNick:modem.nick,
+          modemLogin:modemLogins[modem.nick]||'',
+          modemModel:modem.model,
+          online:modem.online,
+          extIp:modem.extIp,
+          ipSince:ipInfo&&ipInfo.since?ipInfo.since:null,
+          operator:modem.operator,
+          networkType:modem.networkType,
+          portName:bw.portName||portId,
+          uptimePct:uptimePct,
+          speedDl:speedDl,
+          speedUl:speedUl,
+          httpPort:portInfo?portInfo.HTTP_PORT:'',
+          socksPort:portInfo?portInfo.SOCKS_PORT:'',
+          proxyLogin:portInfo?portInfo.LOGIN:'',
+          proxyPassword:portInfo?portInfo.PASSWORD:'',
+          httpCreds:portInfo?portInfo.http_creds:'',
+          socks5Creds:portInfo?portInfo.socks5_creds:'',
+          resetSecureLink:portInfo&&portInfo.RESET_SECURE_LINK?portInfo.RESET_SECURE_LINK.URL:'',
+          dayIn:parseBW(bw.bandwidth_bytes_day_in),
+          dayOut:parseBW(bw.bandwidth_bytes_day_out),
+          yesterdayIn:parseBW(bw.bandwidth_bytes_yesterday_in),
+          yesterdayOut:parseBW(bw.bandwidth_bytes_yesterday_out),
+          monthIn:parseBW(bw.bandwidth_bytes_month_in),
+          monthOut:parseBW(bw.bandwidth_bytes_month_out),
+          _cached:!!bw._cached,
+          _offline:!!bw._offline,
+          _end:0
+        });
+      }
+    }
+
+    // Show warning if some servers returned cached data
+    var cachedServers=data.cachedServers||[];
+    if(cachedServers.length>0){
+      var cacheWarnings=cachedServers.map(function(s){
+        var ago=Math.round((Date.now()-s.cachedAt)/60000);
+        return s.name+' (данные '+ago+' мин. назад)';
+      }).join(', ');
+      document.getElementById('errorContainer').innerHTML=
+        '<div style="padding:10px 16px;background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.3);border-radius:8px;color:var(--warning);font-size:12px;margin-bottom:12px">'+
+        '\u26A0\uFE0F Сервер недоступен: '+escapeHtml(cacheWarnings)+'. Трафик и доступы отображаются из кеша. Модемы помечены как offline.</div>';
+    }
+
+    renderTable();
+    renderProxyTable();
+    updateSummary();
+
+    var now=new Date().toLocaleString('ru-RU');
+    document.getElementById('lastUpdate').textContent='Обновлено: '+now;
+    setStatus(cachedServers.length>0?'loading':'ok',cachedServers.length>0?'Частичные данные':'OK');
+
+  }catch(err){
+    if(err.message==='Сессия истекла') return;
+    setStatus('error','Ошибка');
+    document.getElementById('errorContainer').innerHTML=
+      '<div class="error-msg">Не удалось загрузить данные: '+escapeHtml(err.message)+'</div>';
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+// Traffic table: 7 columns: Модем, Реквизиты, Логин:Пароль, Смена IP, Сегодня, Вчера, Месяц
+function renderTable(){
+  var rows=tableData.slice();
+
+
+  rows.sort(function(a,b){
+    var ca=countryOrder.indexOf(a.country);
+    var cb=countryOrder.indexOf(b.country);
+    if(ca!==cb) return ca-cb;
+
+    var va=a[currentSort.key];
+    var vb=b[currentSort.key];
+    if(va===null||va===undefined) va='';
+    if(vb===null||vb===undefined) vb='';
+    if(typeof va==='string'&&typeof vb==='string'){va=va.toLowerCase();vb=vb.toLowerCase()}
+    if(va<vb) return currentSort.dir==='asc'?-1:1;
+    if(va>vb) return currentSort.dir==='asc'?1:-1;
+    return 0;
+  });
+
+  var groups={};
+  for(var i=0;i<rows.length;i++){
+    var r=rows[i];
+    if(!groups[r.country]) groups[r.country]=[];
+    groups[r.country].push(r);
+  }
+
+  var html='';
+
+  for(var ci=0;ci<countryOrder.length;ci++){
+    var country=countryOrder[ci];
+    var groupRows=groups[country];
+    if(!groupRows||groupRows.length===0) continue;
+
+    var name=countryNames[country]||country;
+    var count=groupRows.length;
+
+    // colspan=7 for 7 columns
+    html+='<tr class="country-header">'+
+      '<td colspan="7">'+
+        name+
+        '<span class="country-count">'+count+' модемов</span>'+
+      '</td>'+
+    '</tr>';
+
+    for(var k=0;k<groupRows.length;k++){
+      var row=groupRows[k];
+
+      // Arrow notation for traffic
+      var dayHtml='\u2193 '+formatBytes(row.dayIn)+' / \u2191 '+formatBytes(row.dayOut);
+      var yesterdayHtml='\u2193 '+formatBytes(row.yesterdayIn)+' / \u2191 '+formatBytes(row.yesterdayOut);
+      var monthHtml='\u2193 '+formatBytes(row.monthIn)+' / \u2191 '+formatBytes(row.monthOut);
+
+      // Status dot: online=green, rotating/IP_RESET=yellow blinking, offline=blue
+      var statusDotCls;
+      if(row.extIp==='IP_RESET'||row.online==='rotating'){statusDotCls='rotating'}
+      else if(row.online==='yes'){statusDotCls='online'}
+      else{statusDotCls='offline'}
+
+      // Реквизиты cell: HTTP and SOCKS5 on separate lines with labels
+      var ci2=COUNTRIES[row.serverName]||{};
+      var serverIp=ci2.serverIp||'';
+      var reqHtml='-';
+      if(row.httpPort||row.socksPort){
+        reqHtml='';
+        if(row.httpPort){
+          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">HTTP:</span> <span class="mono">'+serverIp+':'+row.httpPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.httpPort+'\',this)">\ud83d\udccb</button></div>';
+        }
+        if(row.socksPort){
+          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">SOCKS5:</span> <span class="mono">'+serverIp+':'+row.socksPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.socksPort+'\',this)">\ud83d\udccb</button></div>';
+        }
+      }
+
+      // Логин:Пароль cell: one line, plain text, single copy button
+      var loginPassHtml='-';
+      if(row.proxyLogin||row.proxyPassword){
+        var loginPassStr=escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword);
+        loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword)+'\',this)">\ud83d\udccb</button>';
+      }
+
+      // Смена IP cell: reset link + copy button + IP history button
+      var changeIpHtml='';
+      if(row.resetSecureLink){
+        changeIpHtml+='<a href="'+escapeHtml(row.resetSecureLink)+'" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12px" title="Сброс IP">\ud83d\udd04 Сброс</a> ';
+        changeIpHtml+='<button class="copy-btn" onclick="copyText(\''+escapeHtml(row.resetSecureLink).replace(/'/g,"\\'")+'\',this)" title="Копировать ссылку">\ud83d\udccb</button> ';
+      }else{
+        changeIpHtml+='<button class="action-btn-sm" onclick="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+row.serverName+'\',this)" title="Сброс IP">\ud83d\udd04</button> ';
+      }
+      changeIpHtml+='<button class="action-btn-sm" onclick="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+row.serverName+'\',\''+escapeHtml(row.imei)+'\')" title="IP история" style="font-size:12px">\ud83d\udcc3</button>';
+
+      var rowStyle=row._cached?'opacity:0.6':(row._offline?'opacity:0.45':'');
+      html+='<tr style="'+rowStyle+'">'+
+        '<td>'+
+          '<div style="display:flex;align-items:center;gap:10px">'+
+            '<span class="status-dot '+statusDotCls+'"></span>'+
+            '<div style="display:flex;flex-direction:column;gap:2px">'+
+              '<span class="modem-nick">'+escapeHtml(row.modemNick)+'</span>'+
+              (row._offline?' <span style="font-size:9px;color:var(--danger);font-weight:600;background:rgba(239,68,68,0.15);padding:1px 5px;border-radius:3px" title="Модем отключён от сервера">OFFLINE</span>':'')+
+              (row._cached&&!row._offline?' <span style="font-size:9px;color:var(--warning);font-weight:600" title="Данные из кеша — сервер недоступен">КЕШ</span>':'')+
+              '<span style="font-size:11px;color:var(--text-3)">'+escapeHtml(row.operator)+'</span>'+
+            '</div>'+
+          '</div>'+
+        '</td>'+
+        '<td>'+reqHtml+'</td>'+
+        '<td>'+loginPassHtml+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+changeIpHtml+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+dayHtml+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+yesterdayHtml+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+monthHtml+'</td>'+
+      '</tr>';
+    }
+  }
+
+  document.getElementById('tableBody').innerHTML=html;
+  document.getElementById('loading').style.display='none';
+  document.getElementById('dataTable').style.display='table';
+
+  document.querySelectorAll('.sort-arrow').forEach(function(el){el.textContent=''});
+  var arrow=document.getElementById('sort_'+currentSort.key);
+  if(arrow) arrow.textContent=currentSort.dir==='asc'?'\u25B2':'\u25BC';
+}
+
+function sortTable(key){
+  if(currentSort.key===key){currentSort.dir=currentSort.dir==='asc'?'desc':'asc'}
+  else{currentSort.key=key;currentSort.dir='asc'}
+  renderTable();
+}
+
+// Change #10 & #5: Summary card traffic with clear Russian labels on separate lines
+function updateSummary(){
+  document.getElementById('totalPorts').textContent=tableData.length;
+  var totalDayIn=0,totalDayOut=0,totalMonthIn=0,totalMonthOut=0;
+  for(var i=0;i<tableData.length;i++){
+    totalDayIn+=tableData[i].dayIn;
+    totalDayOut+=tableData[i].dayOut;
+    totalMonthIn+=tableData[i].monthIn;
+    totalMonthOut+=tableData[i].monthOut;
+  }
+
+  document.getElementById('totalDayTotal').innerHTML=formatBytes(totalDayIn+totalDayOut);
+  document.getElementById('totalDaySplit').innerHTML='\u2193 '+formatBytes(totalDayIn)+' / \u2191 '+formatBytes(totalDayOut);
+
+  document.getElementById('totalMonthTotal').innerHTML=formatBytes(totalMonthIn+totalMonthOut);
+  document.getElementById('totalMonthSplit').innerHTML='\u2193 '+formatBytes(totalMonthIn)+' / \u2191 '+formatBytes(totalMonthOut);
+
+  // Billing display — use actual charged amount from ledger (monthExpense from server)
+  var monthTotal=totalMonthIn+totalMonthOut;
+  var monthGb=monthTotal/(1024*1024*1024);
+
+  if(billingData&&billingData.price>0){
+    // Use monthExpense from server ledger (actual charges), not live calculation
+    var displayExpense=billingData.monthExpense||0;
+
+    // Balance card — show balance + month expense
+    var balanceEl=document.getElementById('balanceValue');
+    var balanceInfoEl=document.getElementById('balanceInfo');
+    if(billingData.balance!==undefined){
+      var balance=billingData.balance;
+      balanceEl.textContent=formatCost(balance);
+      balanceEl.className='card-value '+(balance>=0?'balance-positive':'balance-negative');
+      balanceInfoEl.textContent='Расход за месяц: '+formatCost(displayExpense);
+
+      if(balance<0){
+        document.getElementById('balanceWarning').innerHTML='<div class="balance-warning">\u26A0\uFE0F Баланс отрицательный. Пожалуйста, свяжитесь с администратором для пополнения.</div>';
+      }else{
+        document.getElementById('balanceWarning').innerHTML='';
+      }
+    }
+  }
+
+  // Average uptime
+  var uptimePcts=tableData.filter(function(r){return r.uptimePct!==null}).map(function(r){return parseFloat(r.uptimePct)});
+  if(uptimePcts.length>0){
+    var avgUp=uptimePcts.reduce(function(a,b){return a+b},0)/uptimePcts.length;
+    var upEl=document.getElementById('avgUptime');
+    upEl.textContent=avgUp.toFixed(1)+'%';
+    upEl.className='card-value '+(avgUp>=99?'uptime-good':avgUp>=95?'uptime-warn':'uptime-bad');
+    document.getElementById('uptimeInfo').textContent=uptimePcts.length+' модемов отслеживается';
+  }
+
+  document.getElementById('summaryCards').style.display='grid';
+}
+
+// --- Actions ---
+function resetIp(imei,serverName,btn){
+  if(!confirm('Сбросить IP?')) return;
+  btn.disabled=true;
+  fetch('/api/client/reset_ip',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
+    body:JSON.stringify({imei:imei,serverName:serverName})
+  }).then(function(r){return r.json()}).then(function(d){
+    btn.disabled=false;
+    if(d.ok){showToast('IP сброшен','success');setTimeout(loadData,3000)}
+    else showToast(d.error||'Ошибка','error');
+  }).catch(function(){btn.disabled=false;showToast('Ошибка сети','error')});
+}
+
+// IP history — same format as admin panel
+function showIpHistory(nick,serverName,imei){
+  document.getElementById('ipModalTitle').textContent='IP история: '+nick;
+  document.getElementById('ipModalBody').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка IP истории...</div>';
+  document.getElementById('ipModal').classList.add('show');
+
+  if(!imei){
+    document.getElementById('ipModalBody').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет данных</div>';
+    return;
+  }
+
+  fetch('/api/client/ip_history?key='+encodeURIComponent(imei),{headers:{'X-Auth-Token':authToken}})
+  .then(function(r){return r.json()}).then(function(data){
+    var entries=Array.isArray(data)?data:(data.history||[]);
+    if(!entries.length){
+      document.getElementById('ipModalBody').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории IP</div>';
+      return;
+    }
+    var h='<table class="log-table"><thead><tr><th>Время</th><th>Старый IP</th><th>Новый IP</th><th>Длительность</th></tr></thead><tbody>';
+    var reversed=entries.slice().reverse();
+    reversed.forEach(function(e,idx){
+      var from=e.from?new Date(e.from).toLocaleString('ru-RU'):'\u2014';
+      var dur='\u2014';
+      if(e.from){
+        var ms=(e.to||Date.now())-e.from;
+        var mins=Math.floor(ms/60000);
+        if(mins<60) dur=mins+'\u043c';
+        else if(mins<1440) dur=Math.floor(mins/60)+'\u0447 '+mins%60+'\u043c';
+        else dur=Math.floor(mins/1440)+'\u0434 '+Math.floor(mins%1440/60)+'\u0447';
+      }
+      var oldIp=idx<reversed.length-1?(reversed[idx+1].ip||'\u2014'):'\u2014';
+      h+='<tr><td>'+from+'</td><td class="mono" style="color:var(--text-2)">'+escapeHtml(oldIp)+'</td><td class="mono" style="color:var(--accent)">'+escapeHtml(e.ip)+'</td><td>'+dur+'</td></tr>';
+    });
+    document.getElementById('ipModalBody').innerHTML=h+'</tbody></table>';
+  }).catch(function(e){
+    document.getElementById('ipModalBody').innerHTML='<div style="color:var(--danger)">'+e.message+'</div>';
+  });
+}
+
+// Change #9: Helper to format date+time as "DD.MM.YYYY, HH:MM:SS"
+function formatDateTime(d){
+  var day=String(d.getDate()).padStart(2,'0');
+  var month=String(d.getMonth()+1).padStart(2,'0');
+  var year=d.getFullYear();
+  var hours=String(d.getHours()).padStart(2,'0');
+  var minutes=String(d.getMinutes()).padStart(2,'0');
+  var seconds=String(d.getSeconds()).padStart(2,'0');
+  return day+'.'+month+'.'+year+', '+hours+':'+minutes+':'+seconds;
+}
+
+function closeIpModal(){document.getElementById('ipModal').classList.remove('show')}
+document.getElementById('ipModal').addEventListener('click',function(e){if(e.target===this) closeIpModal()});
+document.addEventListener('keydown',function(e){if(e.key==='Escape') closeIpModal()});
+
+// --- Proxy table: credentials are now inline in the main traffic table ---
+function renderProxyTable(){
+  var hasProxy=tableData.some(function(r){return !!r.proxyLogin});
+
+  // Show/hide export buttons
+  if(hasProxy){
+    document.getElementById('proxyExportButtons').style.display='flex';
+  }else{
+    document.getElementById('proxyExportButtons').style.display='none';
+  }
+
+}
+
+// Use RESET_SECURE_LINK from API data
+function getResetUrl(row){
+  return row.resetSecureLink||'';
+}
+
+function exportCredentials(){
+  var lines=[];
+  tableData.forEach(function(row){
+    if(!row.proxyLogin) return;
+    var ci=COUNTRIES[row.serverName]||{};
+    var serverIp=ci.serverIp||'';
+    var resetUrl=row.resetSecureLink||'';
+    lines.push(serverIp+':'+row.httpPort+':'+row.proxyLogin+':'+row.proxyPassword+'|'+resetUrl);
+  });
+  if(!lines.length){showToast('Нет данных для экспорта','error');return}
+  downloadFile(lines.join('\n'),'proxies_rent.txt','text/plain');
+  showToast('Файл скачан','success');
+}
+
+function exportCredentialsCSV(){
+  var lines=['Modem,Server,Protocol,IP,Port,Login,Password,Full'];
+  tableData.forEach(function(row){
+    if(!row.proxyLogin) return;
+    var ci=COUNTRIES[row.serverName]||{};
+    var serverIp=ci.serverIp||'';
+    lines.push([row.modemNick,row.serverName,'HTTP',serverIp,row.httpPort,row.proxyLogin,row.proxyPassword,row.httpCreds||''].join(','));
+    lines.push([row.modemNick,row.serverName,'SOCKS5',serverIp,row.socksPort,row.proxyLogin,row.proxyPassword,row.socks5Creds||''].join(','));
+  });
+  if(lines.length<=1){showToast('Нет данных для экспорта','error');return}
+  downloadFile(lines.join('\n'),'proxies_rent_credentials.csv','text/csv');
+  showToast('CSV скачан','success');
+}
+
+function downloadFile(content,filename,type){
+  var blob=new Blob([content],{type:type});
+  var a=document.createElement('a');
+  a.href=URL.createObjectURL(blob);
+  a.download=filename;
+  a.click();
+}
+
+// --- Proxy Checker ---
+function checkProxies(){
+  var input=document.getElementById('checkProxyInput').value.trim();
+  if(!input){showToast('Введите список прокси','error');return}
+  var lines=input.split('\n').filter(function(l){return l.trim()});
+  var btn=document.getElementById('btnCheckProxy');
+  btn.disabled=true;
+  btn.textContent='Проверка...';
+  document.getElementById('checkProxyResults').innerHTML='<div class="loading-overlay" style="padding:20px"><div class="spinner"></div><span>Проверяем '+lines.length+' прокси...</span></div>';
+
+  var proxies=lines.map(function(l){
+    var p=l.trim().split(':');
+    return {ip:p[0],port:parseInt(p[1])||0,login:p[2]||'',password:p[3]||''};
+  });
+
+  fetch('/api/tools/check_proxy',{
+    method:'POST',
+    headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
+    body:JSON.stringify({proxies:proxies})
+  }).then(function(r){return r.json()}).then(function(results){
+    btn.disabled=false;btn.textContent='Проверить';
+    var arr=Array.isArray(results)?results:results.results||[];
+    if(!arr.length){document.getElementById('checkProxyResults').innerHTML='<p style="color:var(--text-2)">Нет результатов</p>';return}
+    var h='<table class="data-table"><thead><tr><th>Прокси</th><th>Статус</th><th>Время (мс)</th><th>IP</th><th>Ошибка</th></tr></thead><tbody>';
+    arr.forEach(function(r){
+      var cls=r.working?'check-result-ok':'check-result-fail';
+      var proxyLabel=r.ip+':'+r.port;
+      h+='<tr><td class="mono">'+escapeHtml(proxyLabel)+'</td><td class="'+cls+'">'+(r.working?'OK':'Fail')+'</td><td>'+(r.responseTime||'-')+'</td><td class="mono">'+(r.detectedIp||'-')+'</td><td>'+(r.error?escapeHtml(r.error):'-')+'</td></tr>';
+    });
+    document.getElementById('checkProxyResults').innerHTML=h+'</tbody></table>';
+  }).catch(function(e){
+    btn.disabled=false;btn.textContent='Проверить';
+    document.getElementById('checkProxyResults').innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
+  });
+}
+
+// --- Format Converter ---
+function parseProxyLine(line,format){
+  line=line.trim();if(!line) return null;
+  var parts;
+  if(format==='ipportloginpass'){
+    parts=line.split(':');
+    if(parts.length>=4) return {ip:parts[0],port:parts[1],login:parts[2],pass:parts.slice(3).join(':')};
+    if(parts.length===2) return {ip:parts[0],port:parts[1],login:'',pass:''};
+  }else if(format==='loginpassipport'){
+    var at=line.indexOf('@');
+    if(at>-1){
+      var cred=line.substring(0,at).split(':');
+      var addr=line.substring(at+1).split(':');
+      return {ip:addr[0]||'',port:addr[1]||'',login:cred[0]||'',pass:cred.slice(1).join(':')||''};
+    }
+    parts=line.split(':');
+    if(parts.length>=2) return {ip:parts[0],port:parts[1],login:'',pass:''};
+  }else if(format==='loginpassatipport'){
+    parts=line.split(':');
+    if(parts.length>=4) return {ip:parts[2],port:parts[3],login:parts[0],pass:parts[1]};
+    if(parts.length===2) return {ip:parts[0],port:parts[1],login:'',pass:''};
+  }
+  return null;
+}
+
+function formatProxyLine(p,format){
+  if(!p) return '';
+  if(format==='ipportloginpass'){
+    return p.login?p.ip+':'+p.port+':'+p.login+':'+p.pass:p.ip+':'+p.port;
+  }else if(format==='loginpassipport'){
+    return p.login?p.login+':'+p.pass+'@'+p.ip+':'+p.port:p.ip+':'+p.port;
+  }else if(format==='loginpassatipport'){
+    return p.login?p.login+':'+p.pass+':'+p.ip+':'+p.port:p.ip+':'+p.port;
+  }
+  return '';
+}
+
+function convertFormat(){
+  var input=document.getElementById('convertInput').value.trim();
+  var fromFmt=document.getElementById('convertFrom').value;
+  var toFmt=document.getElementById('convertTo').value;
+  if(!input){showToast('Введите данные','error');return}
+  var lines=input.split('\n');
+  var out=[];
+  lines.forEach(function(line){
+    var p=parseProxyLine(line,fromFmt);
+    if(p) out.push(formatProxyLine(p,toFmt));
+  });
+  document.getElementById('convertOutput').value=out.join('\n');
+  showToast('Конвертировано: '+out.length+' строк','success');
+}
+
+// --- Documents ---
+function loadDocuments(){
+  fetch('/api/client/documents',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(docs){
+    var el=document.getElementById('documentsList');
+    if(!docs.length){el.innerHTML='<p style="color:var(--text-2);text-align:center;padding:40px">Документов пока нет</p>';return}
+    var h='<table class="data-table"><thead><tr><th>Документ</th><th>Дата</th><th></th></tr></thead><tbody>';
+    docs.forEach(function(d){
+      h+='<tr><td>'+escapeHtml(d.name)+'</td><td>'+new Date(d.date).toLocaleDateString('ru-RU')+'</td><td><a href="/api/client/documents/'+d.id+'/download" class="btn btn-sm">Скачать</a></td></tr>';
+    });
+    el.innerHTML=h+'</tbody></table>';
+  }).catch(function(e){
+    document.getElementById('documentsList').innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
+  });
+}
+
+// --- API Docs ---
+var apiBase=window.location.origin;
+
+function loadApiDocs(){
+  var keyEl=document.getElementById('apiDocKey');
+  var realKey=billingData && billingData.apiKey ? billingData.apiKey : '';
+  if(realKey){
+    keyEl.textContent=realKey;
+    // Replace YOUR_API_KEY with real key in all code blocks, highlighted
+    document.querySelectorAll('#tab-api .code-block, #tab-api code, #tab-api td').forEach(function(el){
+      if(el.innerHTML.indexOf('YOUR_API_KEY')!==-1){
+        el.innerHTML=el.innerHTML.replace(/YOUR_API_KEY/g,'<span class="api-key-highlight">'+realKey+'</span>');
+      }
+    });
+  } else {
+    keyEl.textContent='Загрузите данные на вкладке «Панель управления»';
+  }
+}
+
+function switchLang(el,lang,group){
+  el.parentElement.querySelectorAll('.lang-tab').forEach(function(t){t.classList.remove('active')});
+  el.classList.add('active');
+  document.querySelectorAll('.lang-code[data-group="'+group+'"]').forEach(function(c){
+    c.classList.toggle('active',c.getAttribute('data-lang')===lang);
+  });
+}
+
+function copyCodeBlock(btn){
+  var block=btn.parentElement;
+  var code=block.textContent.replace('Копировать','').trim();
+  copyText(code,btn);
+}
+
+// Change #3: Referral simplification - only show stats, no referral code/link
+function loadReferral(){
+  fetch('/api/client/referral',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+    document.getElementById('referralContent').innerHTML=
+      '<div class="referral-info">'+
+      '<div class="referral-hero"><h3>Партнёрская программа</h3><p>Рассказывайте о нас и получайте <strong>15%</strong> от каждого их платежа на свой баланс или личную карту. За дополнительной информацией обращайтесь к администратору</p></div>'+
+      '<div class="referral-cards">'+
+      '<div class="card"><div class="card-label">Привлечено клиентов</div><div class="card-value">'+(data.referrals_count||0)+'</div></div>'+
+      '<div class="card"><div class="card-label">Заработано</div><div class="card-value">'+Math.floor(data.referral_balance||0).toString()+'</div></div>'+
+      '</div></div>';
+  }).catch(function(e){
+    document.getElementById('referralContent').innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
+  });
+}
+</script>
+
+</body>
+</html>
