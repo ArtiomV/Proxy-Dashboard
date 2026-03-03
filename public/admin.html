@@ -754,7 +754,7 @@ function formatTraffic(v){if(!v||v===0||v==='0')return'-';return String(v)}
 function renderSignalBars(s){var h='<div class="signal-bars">';for(var i=1;i<=5;i++){h+='<div class="signal-bar'+(i<=s?' active':'')+'" style="height:'+(2+i*2)+'px"></div>'}return h+'</div>'}
 function renderNetBadge(t){if(!t)return'<span class="net-badge net-unknown">?</span>';var c='net-unknown',l=t;if(/lte|4g/i.test(t)){c='net-lte';l='LTE'}else if(/3g|hspa|umts/i.test(t)){c='net-3g';l='3G'}else if(/2g|edge|gprs/i.test(t)){c='net-2g';l='2G'}return'<span class="net-badge '+c+'">'+l+'</span>'}
 function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
-function parseTraffic(v){if(!v||v===0)return 0;var s=String(v),m=s.match(/([\d.]+)\s*(KB|MB|GB|TB)/i);if(!m)return 0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1024:u==='MB'?1048576:u==='GB'?1073741824:u==='TB'?1099511627776:1)}
+function parseTraffic(v){if(v===0||v==='0'||v===null||v===undefined)return 0;if(typeof v==='number')return v;var s=String(v).trim(),m=s.match(/^([\d.]+)\s*(B|KB|MB|GB|TB)?$/i);if(!m)return 0;var n=parseFloat(m[1]),u=(m[2]||'B').toUpperCase();return n*({'B':1,'KB':1024,'MB':1048576,'GB':1073741824,'TB':1099511627776}[u]||1)}
 function bytesToGb(b){return b/1073741824}
 
 function renderTable(){
@@ -896,15 +896,20 @@ function collectTrafficData(){
   for(var imei in map){
     var m=map[imei];totalModems++;
     var st=getModemStatus(m);if(st==='online'||st==='rotating')totalOnline++;
-    var port=m.ports[0]||{},bw=port._bw||{};
-    var din=parseTraffic(bw[fields.inKey]),dout=parseTraffic(bw[fields.outKey]);
-    // also collect all-period data for sparklines
-    var dayIn=parseTraffic(bw.bandwidth_bytes_day_in),dayOut=parseTraffic(bw.bandwidth_bytes_day_out);
-    var monIn=parseTraffic(bw.bandwidth_bytes_month_in),monOut=parseTraffic(bw.bandwidth_bytes_month_out);
-    var prevIn=parseTraffic(bw.bandwidth_bytes_prevmonth_in),prevOut=parseTraffic(bw.bandwidth_bytes_prevmonth_out);
-    var lifeIn=parseTraffic(bw.bandwidth_bytes_lifetime_in),lifeOut=parseTraffic(bw.bandwidth_bytes_lifetime_out);
+    // Sum traffic from ALL ports of the modem, not just ports[0]
+    var din=0,dout=0,dayIn=0,dayOut=0,monIn=0,monOut=0,prevIn=0,prevOut=0,lifeIn=0,lifeOut=0;
+    var pn='Не назначен';
+    for(var pi=0;pi<m.ports.length;pi++){
+      var port=m.ports[pi],bw=port._bw||{};
+      din+=parseTraffic(bw[fields.inKey]);dout+=parseTraffic(bw[fields.outKey]);
+      dayIn+=parseTraffic(bw.bandwidth_bytes_day_in);dayOut+=parseTraffic(bw.bandwidth_bytes_day_out);
+      monIn+=parseTraffic(bw.bandwidth_bytes_month_in);monOut+=parseTraffic(bw.bandwidth_bytes_month_out);
+      prevIn+=parseTraffic(bw.bandwidth_bytes_prevmonth_in);prevOut+=parseTraffic(bw.bandwidth_bytes_prevmonth_out);
+      lifeIn+=parseTraffic(bw.bandwidth_bytes_lifetime_in);lifeOut+=parseTraffic(bw.bandwidth_bytes_lifetime_out);
+      // Use portName from bandwidth data (consistent with client filtering)
+      if(bw.portName)pn=bw.portName;else if(port.portName)pn=port.portName;
+    }
     totalIn+=din;totalOut+=dout;
-    var pn=port.portName||'Не назначен';
     modemTraffic.push({nick:m.nick,server:m.server,pn:pn,tIn:din,tOut:dout,dayIn:dayIn,dayOut:dayOut,monIn:monIn,monOut:monOut,prevIn:prevIn,prevOut:prevOut,lifeIn:lifeIn,lifeOut:lifeOut,online:st==='online'||st==='rotating'});
     if(!clientTraffic[pn])clientTraffic[pn]={tIn:0,tOut:0,modems:0,online:0};
     clientTraffic[pn].tIn+=din;clientTraffic[pn].tOut+=dout;clientTraffic[pn].modems++;
@@ -1126,15 +1131,20 @@ function updateChartsTheme(){if(document.getElementById('tab-traffic').classList
 
 // ========== CLIENTS TAB ==========
 function renderClients(){if(!currentData)return;var cl=currentData.clients||[];var search=(document.getElementById('clientSearch')||{}).value||'';search=search.toLowerCase();var grid=document.getElementById('clientGrid');if(!grid)return;
-  var pnm={};var map=currentData._modemMap||{};for(var imei in map){var m=map[imei];m.ports.forEach(function(p){if(p.portName){if(!pnm[p.portName])pnm[p.portName]=[];pnm[p.portName].push(m.nick+' ('+m.server+')')}})}
-  // Calc traffic per portName
-  var pnTraffic={};for(var imei in map){var m=map[imei];m.ports.forEach(function(p){if(p.portName&&p._bw){var mi=parseTraffic(p._bw.bandwidth_bytes_month_in)+parseTraffic(p._bw.bandwidth_bytes_month_out);pnTraffic[p.portName]=(pnTraffic[p.portName]||0)+mi}})}
+  var pnm={};var map=currentData._modemMap||{};for(var imei in map){var m=map[imei];m.ports.forEach(function(p){var pname=p._bw&&p._bw.portName?p._bw.portName:p.portName;if(pname){if(!pnm[pname])pnm[pname]=[];pnm[pname].push(m.nick+' ('+m.server+')')}})}
+  // Calc traffic per portName using bandwidth data (consistent with client dashboard)
+  var pnTraffic={};var pnPrevTraffic={};var bwAll=currentData.bandwidth||{};for(var pid in bwAll){var b=bwAll[pid];if(b.portName){var mi=parseTraffic(b.bandwidth_bytes_month_in)+parseTraffic(b.bandwidth_bytes_month_out);pnTraffic[b.portName]=(pnTraffic[b.portName]||0)+mi;var pi=parseTraffic(b.bandwidth_bytes_prevmonth_in)+parseTraffic(b.bandwidth_bytes_prevmonth_out);pnPrevTraffic[b.portName]=(pnPrevTraffic[b.portName]||0)+pi}}
   var h='';cl.forEach(function(c){if(search&&(c.name+' '+c.portName+' '+c.login+' '+c.contact).toLowerCase().indexOf(search)===-1)return;
     var modems=pnm[c.portName]||[];var bt=c.billingType||'per_gb';var price=c.price||0;
     // Calc cost
     var cost=0,costLabel='';
+    var gb=bytesToGb(pnTraffic[c.portName]||0);
+    var prevGb=bytesToGb(pnPrevTraffic[c.portName]||0);
     if(bt==='per_modem'){cost=price*modems.length;costLabel=price+' \u00D7 '+modems.length+' = '+cost+' \u20BD/мес'}
-    else{var gb=bytesToGb(pnTraffic[c.portName]||0);cost=Math.ceil(gb*price);costLabel=price+' \u00D7 '+gb.toFixed(1)+'GB = '+cost+' \u20BD'}
+    else{cost=Math.ceil(gb*price);costLabel=price+' \u00D7 '+gb.toFixed(2)+'GB = '+cost+' \u20BD'}
+    var prevCostLabel='';
+    if(bt==='per_gb'&&prevGb>0){var prevCost=Math.ceil(prevGb*price);prevCostLabel=price+' \u00D7 '+prevGb.toFixed(2)+'GB = '+prevCost+' \u20BD'}
+    else if(bt==='per_modem'){prevCostLabel=costLabel}
     // Balance
     var payments=c.payments||[];
     var totalPaid=0;payments.forEach(function(p){totalPaid+=parseFloat(p.amount)||0});
@@ -1153,7 +1163,8 @@ function renderClients(){if(!currentData)return;var cl=currentData.clients||[];v
     h+='<div class="row"><span>Логин</span><span class="val">'+esc(c.login)+'</span></div>';
     h+='<div class="row"><span>Пароль</span><span class="val">'+esc(c.password)+'</span></div>';
     h+='<div class="row"><span>Тариф</span><span class="val">'+price+' \u20BD/'+(bt==='per_modem'?'модем':'ГБ')+'</span></div>';
-    h+='<div class="row"><span>Расход</span><span class="val" style="color:var(--accent);font-weight:600">'+costLabel+'</span></div>';
+    h+='<div class="row"><span>Расход (мес)</span><span class="val" style="color:var(--accent);font-weight:600">'+costLabel+'</span></div>';
+    if(prevCostLabel){h+='<div class="row"><span>Расход (пр.мес)</span><span class="val" style="color:var(--text-2)">'+prevCostLabel+'</span></div>'}
     h+='<div class="row"><span>Оплачено</span><span class="val">'+Math.round(totalPaid)+' \u20BD</span></div>';
     if(c.contact)h+='<div class="row"><span>Контакт</span><span class="val">'+esc(c.contact)+'</span></div>';
     // API Key

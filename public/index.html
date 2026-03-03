@@ -574,6 +574,21 @@
             <div class="card-sub" id="totalMonthSplit"></div>
           </div>
           <div class="card">
+            <div class="card-label">Трафик за пр. месяц</div>
+            <div class="card-value" id="totalPrevMonthTotal">-</div>
+            <div class="card-sub" id="totalPrevMonthSplit"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Расход за месяц</div>
+            <div class="card-value" id="totalMonthCost">-</div>
+            <div class="card-sub" id="billingInfo"></div>
+          </div>
+          <div class="card">
+            <div class="card-label">Расход за пр. месяц</div>
+            <div class="card-value" id="totalPrevMonthCost">-</div>
+            <div class="card-sub" id="prevBillingInfo"></div>
+          </div>
+          <div class="card">
             <div class="card-label">Баланс</div>
             <div class="card-value" id="balanceValue">-</div>
             <div class="card-sub" id="balanceInfo"></div>
@@ -1276,7 +1291,8 @@ function formatBytes(bytes){
   var units=['B','KB','MB','GB','TB'];
   var i=0;
   while(bytes>=1024&&i<units.length-1){bytes/=1024;i++}
-  return bytes.toFixed(1)+' '+units[i];
+  var decimals=i>=3?2:1;
+  return bytes.toFixed(decimals)+' '+units[i];
 }
 
 // Cost display without spaces - use Math.round for proper rounding
@@ -1432,6 +1448,8 @@ async function loadData(){
           yesterdayOut:parseBW(bw.bandwidth_bytes_yesterday_out),
           monthIn:parseBW(bw.bandwidth_bytes_month_in),
           monthOut:parseBW(bw.bandwidth_bytes_month_out),
+          prevMonthIn:parseBW(bw.bandwidth_bytes_prevmonth_in),
+          prevMonthOut:parseBW(bw.bandwidth_bytes_prevmonth_out),
           _cached:!!bw._cached,
           _offline:!!bw._offline,
           _end:0
@@ -1600,12 +1618,14 @@ function sortTable(key){
 // Change #10 & #5: Summary card traffic with clear Russian labels on separate lines
 function updateSummary(){
   document.getElementById('totalPorts').textContent=tableData.length;
-  var totalDayIn=0,totalDayOut=0,totalMonthIn=0,totalMonthOut=0;
+  var totalDayIn=0,totalDayOut=0,totalMonthIn=0,totalMonthOut=0,totalPrevMonthIn=0,totalPrevMonthOut=0;
   for(var i=0;i<tableData.length;i++){
     totalDayIn+=tableData[i].dayIn;
     totalDayOut+=tableData[i].dayOut;
     totalMonthIn+=tableData[i].monthIn;
     totalMonthOut+=tableData[i].monthOut;
+    totalPrevMonthIn+=tableData[i].prevMonthIn;
+    totalPrevMonthOut+=tableData[i].prevMonthOut;
   }
 
   document.getElementById('totalDayTotal').innerHTML=formatBytes(totalDayIn+totalDayOut);
@@ -1614,17 +1634,38 @@ function updateSummary(){
   document.getElementById('totalMonthTotal').innerHTML=formatBytes(totalMonthIn+totalMonthOut);
   document.getElementById('totalMonthSplit').innerHTML='\u2193 '+formatBytes(totalMonthIn)+' / \u2191 '+formatBytes(totalMonthOut);
 
+  document.getElementById('totalPrevMonthTotal').innerHTML=formatBytes(totalPrevMonthIn+totalPrevMonthOut);
+  document.getElementById('totalPrevMonthSplit').innerHTML='\u2193 '+formatBytes(totalPrevMonthIn)+' / \u2191 '+formatBytes(totalPrevMonthOut);
+
   // Dynamic billing calculation
+  var costEl=document.getElementById('totalMonthCost');
+  var infoEl=document.getElementById('billingInfo');
+  var prevCostEl=document.getElementById('totalPrevMonthCost');
+  var prevInfoEl=document.getElementById('prevBillingInfo');
   var monthTotal=totalMonthIn+totalMonthOut;
   var monthGb=monthTotal/(1024*1024*1024);
+  var prevMonthTotal=totalPrevMonthIn+totalPrevMonthOut;
+  var prevMonthGb=prevMonthTotal/(1024*1024*1024);
 
   if(billingData&&billingData.price>0){
     // Calculate live month expense
     var liveMonthExpense=0;
+    var prevMonthExpense=0;
+    var currency=billingData.currency||'';
     if(billingData.billingType==='per_modem'){
       liveMonthExpense=billingData.price*tableData.length;
+      prevMonthExpense=liveMonthExpense;
+      costEl.textContent=formatCost(liveMonthExpense);
+      infoEl.innerHTML=formatCost(billingData.price)+' \u00D7 '+tableData.length+' модемов';
+      prevCostEl.textContent=formatCost(prevMonthExpense);
+      prevInfoEl.innerHTML=formatCost(billingData.price)+' \u00D7 '+tableData.length+' модемов';
     }else{
       liveMonthExpense=billingData.price*monthGb;
+      prevMonthExpense=billingData.price*prevMonthGb;
+      costEl.textContent=formatCost(liveMonthExpense);
+      infoEl.innerHTML=formatCost(billingData.price)+'/ГБ \u00D7 '+monthGb.toFixed(2)+' ГБ';
+      prevCostEl.textContent=formatCost(prevMonthExpense);
+      prevInfoEl.innerHTML=formatCost(billingData.price)+'/ГБ \u00D7 '+prevMonthGb.toFixed(2)+' ГБ';
     }
 
     // Balance card — show balance + month expense
@@ -1642,6 +1683,14 @@ function updateSummary(){
         document.getElementById('balanceWarning').innerHTML='';
       }
     }
+  }else{
+    // Default pricing fallback
+    var cost=monthGb*23;
+    costEl.textContent=Math.ceil(cost).toLocaleString('ru-RU');
+    infoEl.innerHTML='23/ГБ \u00D7 '+monthGb.toFixed(2)+' ГБ';
+    var prevCost=prevMonthGb*23;
+    prevCostEl.textContent=Math.ceil(prevCost).toLocaleString('ru-RU');
+    prevInfoEl.innerHTML='23/ГБ \u00D7 '+prevMonthGb.toFixed(2)+' ГБ';
   }
 
   // Average uptime
