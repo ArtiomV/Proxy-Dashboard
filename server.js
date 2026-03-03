@@ -1,6 +1,7 @@
 const express = require('express');
 const path = require('path');
 const http = require('http');
+const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
 
@@ -2649,3 +2650,470 @@ app.listen(PORT, () => {
     }
   })();
 });
+
+// ==================== TELEGRAM BOT ====================
+
+const TG_PROXIES_FILE = path.join(__dirname, 'telegram_proxies.json');
+let tgProxies = [];
+try {
+  if (fs.existsSync(TG_PROXIES_FILE)) {
+    tgProxies = JSON.parse(fs.readFileSync(TG_PROXIES_FILE, 'utf8'));
+    console.log(`[TelegramBot] Loaded ${tgProxies.length} proxy record(s)`);
+  }
+} catch (e) { console.error('[TelegramBot] Failed to load proxies:', e.message); }
+
+function saveTgProxies() {
+  try { fs.writeFileSync(TG_PROXIES_FILE, JSON.stringify(tgProxies, null, 2)); }
+  catch (e) { console.error('[TelegramBot] Failed to save proxies:', e.message); }
+}
+
+const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
+const TG_PRICE = parseInt(process.env.TELEGRAM_BOT_PRICE) || 599;
+const SERVER_IPS = { S1: '89.149.100.92', S2: '31.5.194.89' };
+
+const PLANS = {
+  test:  { label: 'Тест (1 час)',   price: 0,   days: 0, hours: 1 },
+  '1m':  { label: '1 месяц',        price: 599, days: 30 },
+  '6m':  { label: '6 месяцев',      price: 499, days: 180 },
+  '12m': { label: '12 месяцев',     price: 399, days: 360 }
+};
+
+function telegramApi(method, body, reqTimeout = 15000) {
+  return new Promise((resolve, reject) => {
+    const postData = JSON.stringify(body || {});
+    const req = https.request({
+      hostname: 'api.telegram.org',
+      path: `/bot${TG_TOKEN}/${method}`,
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
+      timeout: reqTimeout
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { resolve({ ok: false, raw: data }); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Telegram API timeout')); });
+    req.write(postData);
+    req.end();
+  });
+}
+
+function tgSend(chatId, text, options = {}) {
+  return telegramApi('sendMessage', {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    ...options
+  });
+}
+
+async function findLeastLoadedModem() {
+  const results = await fetchAllServersData();
+  const portCounts = {}; // { 'S1_IMEI': { imei, serverName, server, count } }
+  const onlineModems = new Set();
+
+  for (const data of results) {
+    if (data._cached) continue;
+    // Collect online modems
+    if (Array.isArray(data.status)) {
+      for (const m of data.status) {
+        if (m.net_details?.IS_ONLINE === 'yes' && m.modem_details?.IMEI) {
+          onlineModems.add(data.serverName + '_' + m.modem_details.IMEI);
+        }
+      }
+    }
+    // Count ports per IMEI
+    if (typeof data.ports === 'object') {
+      for (const [imei, ports] of Object.entries(data.ports)) {
+        const key = data.serverName + '_' + imei;
+        portCounts[key] = {
+          imei,
+          serverName: data.serverName,
+          server: findServer(data.serverName),
+          count: Array.isArray(ports) ? ports.length : 0
+        };
+      }
+    }
+  }
+
+  // Find online modem with fewest ports
+  let best = null;
+  for (const [key, info] of Object.entries(portCounts)) {
+    if (!onlineModems.has(key)) continue;
+    if (!info.server) continue;
+    if (!best || info.count < best.count) {
+      best = info;
+    }
+  }
+  return best;
+}
+
+async function createProxyForTelegram(chatId, username, planKey) {
+  const plan = PLANS[planKey];
+  if (!plan) throw new Error('Unknown plan');
+
+  const modem = await findLeastLoadedModem();
+  if (!modem) throw new Error('Нет доступных модемов');
+
+  // Get free TCP ports
+  const freePorts = await fetchApi(modem.server, '/apix/get_free_tcp_ports');
+  const freeList = Array.isArray(freePorts) ? freePorts : (freePorts.free_tcp_ports || []);
+  if (freeList.length < 2) throw new Error('Нет свободных портов на сервере');
+
+  const portID = 'tg_' + crypto.randomBytes(4).toString('hex');
+  const portName = username ? ('@' + username) : ('tg_' + chatId);
+  const login = crypto.randomBytes(4).toString('hex');
+  const password = crypto.randomBytes(4).toString('hex');
+  const httpPort = freeList[0];
+  const socksPort = freeList[1];
+
+  // Create port on ProxySmart
+  const portData = {
+    IMEI: modem.imei,
+    portID,
+    portName,
+    http_port: String(httpPort),
+    socks_port: String(socksPort),
+    proxy_login: login,
+    proxy_password: password
+  };
+  await postApi(modem.server, '/crud/store_port', portData);
+  await fetchApi(modem.server, `/apix/apply_port?arg=${encodeURIComponent(portID)}`);
+
+  const serverIp = SERVER_IPS[modem.serverName] || new URL(modem.server.url).hostname;
+
+  // Compute expiration
+  let expiresAt;
+  if (plan.hours) {
+    expiresAt = new Date(Date.now() + plan.hours * 3600000).toISOString();
+  } else {
+    expiresAt = new Date(Date.now() + plan.days * 86400000).toISOString();
+  }
+
+  const record = {
+    chatId,
+    username: username || null,
+    portID,
+    portName,
+    serverName: modem.serverName,
+    imei: modem.imei,
+    serverIp,
+    httpPort,
+    socksPort,
+    login,
+    password,
+    plan: planKey,
+    createdAt: new Date().toISOString(),
+    expiresAt,
+    notified_7d: false,
+    notified_1d: false
+  };
+
+  tgProxies.push(record);
+  saveTgProxies();
+
+  console.log(`[TelegramBot] Created proxy ${portID} on ${modem.serverName}/${modem.imei} for @${username || chatId} (plan: ${planKey})`);
+  return record;
+}
+
+async function deleteProxyRecord(record, notify = true) {
+  try {
+    const server = findServer(record.serverName);
+    if (server) {
+      await fetchApi(server, `/apix/purge_port?arg=${encodeURIComponent(record.portID)}`);
+      console.log(`[TelegramBot] Purged port ${record.portID} from ${record.serverName}`);
+    }
+  } catch (e) {
+    console.error(`[TelegramBot] Failed to purge ${record.portID}:`, e.message);
+  }
+
+  tgProxies = tgProxies.filter(p => p.portID !== record.portID);
+  saveTgProxies();
+
+  if (notify) {
+    const isTest = record.plan === 'test';
+    const text = isTest
+      ? '⏰ <b>Тестовый период завершён</b>\n\nВаш прокси отключён. Оформите подписку для постоянного доступа!'
+      : '⚠️ <b>Подписка истекла</b>\n\nВаш прокси отключён. Возобновите подписку для продолжения!';
+
+    await tgSend(record.chatId, text, {
+      reply_markup: { inline_keyboard: [[{ text: '📋 Тарифы', callback_data: 'show_plans' }]] }
+    });
+  }
+}
+
+function formatProxyMessage(record, planLabel) {
+  const deepLink = `https://t.me/socks?server=${record.serverIp}&port=${record.socksPort}&user=${record.login}&pass=${record.password}`;
+  const expiresDate = new Date(record.expiresAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  return {
+    text: `✅ <b>Ваш прокси готов!</b>\n\n` +
+      `📋 Тариф: ${planLabel}\n` +
+      `⏳ Действует до: ${expiresDate}\n\n` +
+      `<b>SOCKS5 подключение:</b>\n` +
+      `<code>${record.serverIp}:${record.socksPort}</code>\n` +
+      `Логин: <code>${record.login}</code>\n` +
+      `Пароль: <code>${record.password}</code>\n\n` +
+      `<b>HTTP подключение:</b>\n` +
+      `<code>${record.serverIp}:${record.httpPort}</code>\n\n` +
+      `👇 Нажмите кнопку ниже, чтобы мгновенно добавить прокси в Telegram:`,
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🔗 Добавить прокси в Telegram', url: deepLink }],
+        [{ text: '🔄 Сменить IP', callback_data: `change_ip:${record.portID}:${record.serverName}` }],
+        [{ text: '📱 Мои прокси', callback_data: 'my_proxies' }]
+      ]
+    }
+  };
+}
+
+// ---- Telegram message handlers ----
+
+async function handleStart(chatId) {
+  const text =
+    `🛡 <b>Proxies.Rent — Прокси для Telegram</b>\n\n` +
+    `Стабильный доступ к Telegram при любых ограничениях.\n\n` +
+    `🔒 Мобильные SOCKS5-прокси\n` +
+    `⚡ Мгновенное подключение в 1 клик\n` +
+    `🔄 Смена IP по кнопке\n` +
+    `📶 Работа через 4G-модемы\n\n` +
+    `Попробуйте бесплатно или выберите тариф:`;
+
+  await tgSend(chatId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: '🎁 Попробовать бесплатно (1 час)', callback_data: 'test_proxy' }],
+        [{ text: '📋 Тарифы', callback_data: 'show_plans' }],
+        [{ text: '📱 Мои прокси', callback_data: 'my_proxies' }]
+      ]
+    }
+  });
+}
+
+async function handleShowPlans(chatId) {
+  const text =
+    `📋 <b>Тарифы</b>\n\n` +
+    `<b>1 месяц</b> — ${PLANS['1m'].price} ₽/мес\n` +
+    `<b>6 месяцев</b> — ${PLANS['6m'].price} ₽/мес (выгода 17%)\n` +
+    `<b>12 месяцев</b> — ${PLANS['12m'].price} ₽/мес (выгода 33%)\n\n` +
+    `Мобильный SOCKS5-прокси с мгновенным подключением.\nВыберите подходящий тариф:`;
+
+  await tgSend(chatId, text, {
+    reply_markup: {
+      inline_keyboard: [
+        [{ text: `📅 1 месяц — ${PLANS['1m'].price} ₽`, callback_data: 'buy_1m' }],
+        [{ text: `📅 6 месяцев — ${PLANS['6m'].price} ₽/мес`, callback_data: 'buy_6m' }],
+        [{ text: `📅 12 месяцев — ${PLANS['12m'].price} ₽/мес`, callback_data: 'buy_12m' }],
+        [{ text: '🎁 Бесплатный тест (1 час)', callback_data: 'test_proxy' }]
+      ]
+    }
+  });
+}
+
+async function handleBuy(chatId, username, planKey) {
+  const plan = PLANS[planKey];
+  if (!plan) return;
+
+  // Check if user already has an active test proxy
+  if (planKey === 'test') {
+    const existing = tgProxies.find(p => p.chatId === chatId && p.plan === 'test');
+    if (existing) {
+      return tgSend(chatId, '⚠️ У вас уже есть активный тестовый прокси. Дождитесь окончания тестового периода или оформите подписку.');
+    }
+  }
+
+  await tgSend(chatId, '⏳ Создаю ваш прокси...');
+
+  try {
+    const record = await createProxyForTelegram(chatId, username, planKey);
+    const msg = formatProxyMessage(record, plan.label);
+    await tgSend(chatId, msg.text, { reply_markup: msg.reply_markup });
+  } catch (e) {
+    console.error(`[TelegramBot] Create proxy error for ${username || chatId}:`, e.message);
+    await tgSend(chatId, `❌ Ошибка при создании прокси: ${e.message}\n\nПопробуйте позже или обратитесь в поддержку.`);
+  }
+}
+
+async function handleMyProxies(chatId) {
+  const userProxies = tgProxies.filter(p => p.chatId === chatId);
+  if (userProxies.length === 0) {
+    return tgSend(chatId, '📱 У вас пока нет активных прокси.', {
+      reply_markup: {
+        inline_keyboard: [
+          [{ text: '🎁 Попробовать бесплатно', callback_data: 'test_proxy' }],
+          [{ text: '📋 Тарифы', callback_data: 'show_plans' }]
+        ]
+      }
+    });
+  }
+
+  let text = '📱 <b>Ваши прокси:</b>\n\n';
+  const buttons = [];
+
+  for (const p of userProxies) {
+    const plan = PLANS[p.plan] || { label: p.plan };
+    const expires = new Date(p.expiresAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+    const deepLink = `https://t.me/socks?server=${p.serverIp}&port=${p.socksPort}&user=${p.login}&pass=${p.password}`;
+
+    text += `<b>${plan.label}</b>\n`;
+    text += `SOCKS5: <code>${p.serverIp}:${p.socksPort}</code>\n`;
+    text += `Логин: <code>${p.login}</code> | Пароль: <code>${p.password}</code>\n`;
+    text += `Истекает: ${expires}\n\n`;
+
+    buttons.push([{ text: `🔗 Добавить в Telegram (${p.portID})`, url: deepLink }]);
+    buttons.push([{ text: `🔄 Сменить IP (${p.portID})`, callback_data: `change_ip:${p.portID}:${p.serverName}` }]);
+  }
+
+  buttons.push([{ text: '📋 Тарифы', callback_data: 'show_plans' }]);
+
+  await tgSend(chatId, text, { reply_markup: { inline_keyboard: buttons } });
+}
+
+async function handleChangeIp(chatId, portID, serverName) {
+  const record = tgProxies.find(p => p.portID === portID && p.chatId === chatId);
+  if (!record) return tgSend(chatId, '❌ Прокси не найден.');
+
+  try {
+    const server = findServer(serverName);
+    if (!server) throw new Error('Сервер не найден');
+
+    // Find modem IMEI for this port to get its nick
+    const results = await fetchAllServersData();
+    let nick = null;
+    for (const data of results) {
+      if (data.serverName !== serverName) continue;
+      if (Array.isArray(data.status)) {
+        for (const m of data.status) {
+          if (m.modem_details?.IMEI === record.imei) {
+            nick = m.modem_details.NICK;
+            break;
+          }
+        }
+      }
+    }
+
+    if (nick) {
+      await fetchApi(server, `/apix/reset_modem?arg=${encodeURIComponent(nick)}`, 30000);
+    } else {
+      await fetchApi(server, `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(record.imei)}`, 30000);
+    }
+
+    await tgSend(chatId, '✅ IP-адрес меняется. Это может занять 10-30 секунд.');
+  } catch (e) {
+    await tgSend(chatId, `❌ Ошибка смены IP: ${e.message}`);
+  }
+}
+
+// ---- Expiration checker ----
+
+async function checkTgProxyExpirations() {
+  const now = Date.now();
+
+  for (const record of [...tgProxies]) {
+    const expiresAt = new Date(record.expiresAt).getTime();
+    const remaining = expiresAt - now;
+
+    if (remaining <= 0) {
+      // Expired — delete
+      console.log(`[TelegramBot] Proxy ${record.portID} expired, removing...`);
+      await deleteProxyRecord(record, true);
+      continue;
+    }
+
+    // 7-day notification
+    if (!record.notified_7d && remaining <= 7 * 86400000 && record.plan !== 'test') {
+      record.notified_7d = true;
+      saveTgProxies();
+      await tgSend(record.chatId,
+        '📢 <b>Напоминание</b>\n\nВаша подписка заканчивается через 7 дней. Продлите, чтобы не потерять доступ!',
+        { reply_markup: { inline_keyboard: [[{ text: '📋 Продлить', callback_data: 'show_plans' }]] } }
+      );
+    }
+
+    // 1-day notification
+    if (!record.notified_1d && remaining <= 86400000 && record.plan !== 'test') {
+      record.notified_1d = true;
+      saveTgProxies();
+      await tgSend(record.chatId,
+        '🔴 <b>Подписка заканчивается завтра!</b>\n\nПродлите сейчас, чтобы прокси не был отключён.',
+        { reply_markup: { inline_keyboard: [[{ text: '📋 Продлить сейчас', callback_data: 'show_plans' }]] } }
+      );
+    }
+  }
+}
+
+// ---- Long polling ----
+
+function startTelegramPolling() {
+  let offset = 0;
+
+  async function poll() {
+    try {
+      const data = await telegramApi('getUpdates', { offset, timeout: 30 }, 35000);
+      if (data.ok && Array.isArray(data.result)) {
+        for (const update of data.result) {
+          offset = update.update_id + 1;
+          try {
+            await processUpdate(update);
+          } catch (e) {
+            console.error('[TelegramBot] Error processing update:', e.message);
+          }
+        }
+      }
+    } catch (e) {
+      console.error('[TelegramBot] Polling error:', e.message);
+      await new Promise(r => setTimeout(r, 5000));
+    }
+    setImmediate(poll);
+  }
+
+  async function processUpdate(update) {
+    if (update.message) {
+      const msg = update.message;
+      const chatId = msg.chat.id;
+      const text = (msg.text || '').trim();
+      const username = msg.from?.username || null;
+
+      if (text === '/start') return handleStart(chatId);
+      if (text === '/myproxies') return handleMyProxies(chatId);
+    }
+
+    if (update.callback_query) {
+      const cb = update.callback_query;
+      const chatId = cb.message?.chat?.id || cb.from?.id;
+      const username = cb.from?.username || null;
+      const data = cb.data || '';
+
+      // Answer callback to remove loading spinner
+      telegramApi('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
+
+      if (data === 'test_proxy') return handleBuy(chatId, username, 'test');
+      if (data === 'buy_1m') return handleBuy(chatId, username, '1m');
+      if (data === 'buy_6m') return handleBuy(chatId, username, '6m');
+      if (data === 'buy_12m') return handleBuy(chatId, username, '12m');
+      if (data === 'show_plans') return handleShowPlans(chatId);
+      if (data === 'my_proxies') return handleMyProxies(chatId);
+
+      if (data.startsWith('change_ip:')) {
+        const parts = data.split(':');
+        return handleChangeIp(chatId, parts[1], parts[2]);
+      }
+    }
+  }
+
+  // Start polling
+  console.log('[TelegramBot] Starting long polling...');
+  poll();
+
+  // Expiration checker every 10 minutes
+  checkTgProxyExpirations();
+  setInterval(checkTgProxyExpirations, 10 * 60 * 1000);
+}
+
+if (TG_TOKEN) {
+  startTelegramPolling();
+}
