@@ -11,6 +11,7 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
   <style>
     *{margin:0;padding:0;box-sizing:border-box}
 
@@ -41,7 +42,7 @@
       --accent:#1960C9;--accent-hover:#1450b0;--accent-dim:rgba(25,96,201,0.1);
       --accent-glow:rgba(25,96,201,0.2);
       --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
-      --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
+      --success:#1a7f37;--warning:#FFCC00;--danger:#FF383C;
       --card-bg:rgba(255,255,255,0.8);--card-border:rgba(0,0,0,0.08);
       --card-shadow:0 4px 24px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.04);
       --green:#1a7f37;--green-bg:rgba(26,127,55,0.12);
@@ -568,6 +569,7 @@
     <!-- Tabs: NO Прокси tab -->
     <div class="nav-tabs">
       <div class="nav-tab active" onclick="switchTab('traffic',this)">Панель управления</div>
+      <div class="nav-tab" onclick="switchTab('analytics',this)">Аналитика</div>
       <div class="nav-tab" onclick="switchTab('billing',this)">История баланса</div>
       <div class="nav-tab" onclick="switchTab('documents',this)">Документы</div>
       <div class="nav-tab" onclick="switchTab('api',this)">API</div>
@@ -638,6 +640,68 @@
       </div>
     </div>
 
+    <!-- TAB: Analytics -->
+    <div class="tab-pane" id="tab-analytics">
+      <div class="container">
+        <h2 style="font-size:18px;font-weight:600;margin-bottom:16px;color:var(--text-0)">Аналитика потребления трафика</h2>
+
+        <!-- Summary cards -->
+        <div class="summary-cards" id="analyticsSummary" style="display:none">
+          <div class="card">
+            <div class="card-label">Всего за месяц</div>
+            <div class="card-value" id="analyticsMonthTotal">-</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Среднее в сутки</div>
+            <div class="card-value" id="analyticsAvgDay">-</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Модемов</div>
+            <div class="card-value" id="analyticsModemCount">-</div>
+          </div>
+          <div class="card">
+            <div class="card-label">Среднее на модем/сутки</div>
+            <div class="card-value" id="analyticsAvgPerModem">-</div>
+          </div>
+        </div>
+
+        <!-- Chart: Daily consumption (line chart with per-modem + total) -->
+        <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
+            <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Потребление трафика по дням</h3>
+            <div style="display:flex;gap:8px;align-items:center">
+              <label style="font-size:11px;color:var(--text-2)">С:</label>
+              <input type="date" id="dailyChartFrom" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px">
+              <label style="font-size:11px;color:var(--text-2)">По:</label>
+              <input type="date" id="dailyChartTo" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px">
+              <label style="font-size:11px;color:var(--text-2);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="dailyChartToday" style="margin:0"> Сегодня</label>
+              <button onclick="reloadDailyChart()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer">Показать</button>
+            </div>
+          </div>
+          <div id="dailyChartLoading" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px">Загрузка данных...</div>
+          <div style="height:360px"><canvas id="analyticsDailyChart"></canvas></div>
+        </div>
+
+        <!-- Chart: Traffic per modem (bar chart) -->
+        <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
+          <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--text-0)">Трафик по модемам (месяц)</h3>
+          <div style="height:320px"><canvas id="analyticsModemChart"></canvas></div>
+        </div>
+
+        <!-- Country + In/Out charts row -->
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
+          <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;box-shadow:var(--card-shadow)">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--text-0)">Трафик по странам</h3>
+            <div style="height:240px"><canvas id="analyticsCountryChart"></canvas></div>
+          </div>
+          <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;box-shadow:var(--card-shadow)">
+            <h3 style="font-size:14px;font-weight:600;margin-bottom:12px;color:var(--text-0)">Входящий / Исходящий</h3>
+            <div style="height:240px"><canvas id="analyticsInOutChart"></canvas></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <!-- TAB: Tools -->
     <div class="tab-pane" id="tab-tools">
       <div class="container">
@@ -695,7 +759,13 @@
     <div class="tab-pane" id="tab-documents">
       <div class="container">
         <div class="tools-section">
-          <h3>Документы</h3>
+          <h3 style="display:flex;align-items:center;gap:8px">📃 Закрывающие документы (акты) <span id="unsignedBadge" style="display:none;background:var(--red);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600"></span></h3>
+          <div id="closingDocsList">
+            <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
+          </div>
+        </div>
+        <div class="tools-section" style="margin-top:20px">
+          <h3>Загруженные документы</h3>
           <div id="documentsList">
             <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
           </div>
@@ -993,31 +1063,9 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
             </div>
           </div>
 
-          <!-- Month filter -->
-          <div style="margin-bottom:16px;display:flex;align-items:center;gap:12px;flex-wrap:wrap">
-            <label style="font-size:14px;color:var(--text-2)">Период:</label>
-            <select id="billingMonthFilter" onchange="loadBillingHistory()" style="padding:6px 12px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:14px">
-              <option value="">Все</option>
-            </select>
-          </div>
-
-          <!-- Table -->
-          <div class="table-wrapper">
-            <table class="proxy-table" id="billingTable" style="width:100%">
-              <thead>
-                <tr>
-                  <th style="width:15%;text-align:center">Дата</th>
-                  <th style="width:12%;text-align:center">Тип</th>
-                  <th style="width:15%;text-align:center">Сумма</th>
-                  <th style="width:13%;text-align:center">Трафик (ГБ)</th>
-                  <th style="width:18%;text-align:center">Баланс после</th>
-                  <th style="width:27%;text-align:center">Примечание</th>
-                </tr>
-              </thead>
-              <tbody id="billingTableBody">
-                <tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3)">Загрузка...</td></tr>
-              </tbody>
-            </table>
+          <!-- Accordion by months -->
+          <div id="billingAccordion">
+            <div style="text-align:center;padding:40px;color:var(--text-3)">Загрузка...</div>
           </div>
         </div>
       </div>
@@ -1084,128 +1132,372 @@ function switchTab(name,el){
   if(el) el.classList.add('active');
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='traffic') renderProxyTable();
+  if(name==='analytics') renderAnalytics();
   if(name==='documents') loadDocuments();
   if(name==='api') loadApiDocs();
   if(name==='referral') loadReferral();
   if(name==='billing') loadBillingHistory();
 }
 
-// --- Billing History ---
-var billingHistoryLoaded=false;
-function loadBillingHistory(){
-  var monthFilter=document.getElementById('billingMonthFilter').value;
-  var url='/api/billing_history';
-  if(monthFilter) url+='?month='+monthFilter;
+// --- Analytics ---
+var analyticsCharts={};
+var analyticsLoaded=false;
 
+function renderAnalytics(){
+  if(!tableData||!tableData.length) return;
+
+  var daysElapsed=new Date().getDate()||1;
+
+  // Calculate summaries
+  var totalMonthIn=0,totalMonthOut=0;
+  var countryData={};
+  tableData.forEach(function(r){
+    totalMonthIn+=r.monthIn;totalMonthOut+=r.monthOut;
+    // Country aggregation
+    var cc=r.country||'??';
+    if(!countryData[cc])countryData[cc]={in:0,out:0,count:0};
+    countryData[cc].in+=r.monthIn;
+    countryData[cc].out+=r.monthOut;
+    countryData[cc].count++;
+  });
+  var totalMonth=totalMonthIn+totalMonthOut;
+  var modemCount=tableData.length;
+  var avgDay=totalMonth/daysElapsed;
+  var avgPerModem=modemCount?avgDay/modemCount:0;
+
+  document.getElementById('analyticsSummary').style.display='';
+  document.getElementById('analyticsMonthTotal').textContent=formatBytes(totalMonth);
+  document.getElementById('analyticsAvgDay').textContent=formatBytes(avgDay);
+  document.getElementById('analyticsModemCount').textContent=modemCount;
+  document.getElementById('analyticsAvgPerModem').textContent=formatBytes(avgPerModem);
+
+  // Sort modems by month traffic desc
+  var sorted=tableData.slice().sort(function(a,b){return(b.monthIn+b.monthOut)-(a.monthIn+a.monthOut)});
+
+  // Destroy old charts
+  for(var k in analyticsCharts){if(analyticsCharts[k]){analyticsCharts[k].destroy();delete analyticsCharts[k]}}
+
+  var isDark=document.documentElement.getAttribute('data-theme')!=='light';
+  var textColor=isDark?'#c9d1d9':'#24292f';
+  var gridColor=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.08)';
+
+  // Bar chart: traffic per modem
+  var labels=sorted.map(function(r){return r.modemNick});
+  var dataIn=sorted.map(function(r){return+(r.monthIn/1073741824).toFixed(2)});
+  var dataOut=sorted.map(function(r){return+(r.monthOut/1073741824).toFixed(2)});
+
+  var ctx1=document.getElementById('analyticsModemChart').getContext('2d');
+  analyticsCharts.modem=new Chart(ctx1,{type:'bar',data:{labels:labels,datasets:[
+    {label:'Входящий (GB)',data:dataIn,backgroundColor:'rgba(25,96,201,0.7)',borderRadius:4},
+    {label:'Исходящий (GB)',data:dataOut,backgroundColor:'rgba(52,199,89,0.7)',borderRadius:4}
+  ]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor,font:{size:11}}}},scales:{x:{stacked:true,ticks:{color:textColor,font:{size:10},maxRotation:45},grid:{color:gridColor}},y:{stacked:true,ticks:{color:textColor,font:{size:10},callback:function(v){return v+' GB'}},grid:{color:gridColor}}}}});
+
+  // Country chart (doughnut)
+  var countryNames={'MD':'Молдова','RO':'Румыния','??':'Другое'};
+  var countryColors={'MD':'rgba(25,96,201,0.8)','RO':'rgba(52,199,89,0.8)','??':'rgba(255,204,0,0.8)'};
+  var ccLabels=[],ccData=[],ccColors=[];
+  for(var cc in countryData){
+    ccLabels.push((countryNames[cc]||cc)+' ('+countryData[cc].count+' мод.)');
+    ccData.push(+((countryData[cc].in+countryData[cc].out)/1073741824).toFixed(2));
+    ccColors.push(countryColors[cc]||'rgba(124,58,237,0.8)');
+  }
+  if(ccLabels.length>1){
+    var ctx4=document.getElementById('analyticsCountryChart').getContext('2d');
+    analyticsCharts.country=new Chart(ctx4,{type:'doughnut',data:{labels:ccLabels,datasets:[{data:ccData,backgroundColor:ccColors,borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor,font:{size:12}}}}}});
+  } else {
+    // Single country - show as message
+    document.getElementById('analyticsCountryChart').parentElement.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:13px">Все модемы в одной стране: '+(ccLabels[0]||'')+'<br>'+formatBytes(totalMonth)+' общий трафик</div>';
+  }
+
+  // Pie chart: input/output ratio
+  var ctx2=document.getElementById('analyticsInOutChart').getContext('2d');
+  analyticsCharts.inout=new Chart(ctx2,{type:'doughnut',data:{labels:['Входящий','Исходящий'],datasets:[{data:[+(totalMonthIn/1073741824).toFixed(2),+(totalMonthOut/1073741824).toFixed(2)],backgroundColor:['rgba(25,96,201,0.8)','rgba(52,199,89,0.8)'],borderWidth:0}]},options:{responsive:true,maintainAspectRatio:false,plugins:{legend:{labels:{color:textColor,font:{size:12}}}}}});
+
+  // Load daily traffic chart
+  if(!analyticsLoaded){
+    analyticsLoaded=true;
+    // Set default dates: 30 days ago to yesterday
+    var d30=new Date();d30.setDate(d30.getDate()-30);
+    var yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);
+    document.getElementById('dailyChartFrom').value=d30.toLocaleDateString('en-CA');
+    document.getElementById('dailyChartTo').value=yesterday.toLocaleDateString('en-CA');
+    loadDailyTrafficChart(textColor,gridColor);
+  }
+}
+
+function reloadDailyChart(){
+  var isDark=document.documentElement.getAttribute('data-theme')!=='light';
+  var textColor=isDark?'#c9d1d9':'#24292f';
+  var gridColor=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.08)';
+  if(analyticsCharts.daily){analyticsCharts.daily.destroy();delete analyticsCharts.daily}
+  // Re-create canvas (in case it was replaced with message)
+  var container=document.getElementById('analyticsDailyChart');
+  if(!container||container.tagName!=='CANVAS'){
+    var wrap=container?container.parentElement:document.querySelector('#tab-analytics .container');
+    if(wrap){var c2=document.createElement('canvas');c2.id='analyticsDailyChart';wrap.innerHTML='';wrap.appendChild(c2)}
+  }
+  var loading=document.getElementById('dailyChartLoading');
+  if(loading){loading.style.display='';loading.textContent='Загрузка данных...'}
+  loadDailyTrafficChart(textColor,gridColor);
+}
+
+function loadDailyTrafficChart(textColor,gridColor){
+  var loading=document.getElementById('dailyChartLoading');
+  var fromDate=(document.getElementById('dailyChartFrom')||{}).value||'';
+  var toDate=(document.getElementById('dailyChartTo')||{}).value||'';
+  var includeToday=(document.getElementById('dailyChartToday')||{}).checked;
+  var url='/api/client/daily_traffic?';
+  if(fromDate) url+='from='+fromDate+'&';
+  if(toDate) url+='to='+toDate+'&';
+  if(includeToday) url+='include_today=1&';
   fetch(url,{headers:{'X-Auth-Token':authToken}})
   .then(function(r){return r.json()})
   .then(function(data){
+    if(loading)loading.style.display='none';
+
+    // Collect all dates
+    var allDates=new Set();
+    var daily=data.daily||{};
+    var today=data.today||{};
+    var todayDate=data.todayDate||'';
+
+    for(var pn in daily){
+      for(var d in daily[pn]) allDates.add(d);
+    }
+    // Add today only if checkbox is checked and data exists
+    if(includeToday&&todayDate&&Object.keys(today).length>0) allDates.add(todayDate);
+
+    var dates=Array.from(allDates).sort();
+    if(dates.length===0){
+      var canvas=document.getElementById('analyticsDailyChart');
+      if(canvas)canvas.parentElement.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:13px">Нет данных за выбранный период.<br>Данные накапливаются каждый день автоматически.</div>';
+      return;
+    }
+
+    // Build per-modem datasets + total
+    var modemNicks={};// portId -> nick
+    tableData.forEach(function(r){modemNicks[r.portId]=r.modemNick});
+
+    // Aggregate by nick
+    var nickTotals={};// nick -> { date -> total GB }
+    var totalByDate={};
+
+    // Process historical daily data
+    for(var pn in daily){
+      for(var d in daily[pn]){
+        var entry=daily[pn][d];
+        var nick=entry.nick||pn;
+        if(modemNicks[nick]) nick=modemNicks[nick];
+        if(!nickTotals[nick]) nickTotals[nick]={};
+        var gb=(entry.in+entry.out)/1073741824;
+        nickTotals[nick][d]=(nickTotals[nick][d]||0)+gb;
+        totalByDate[d]=(totalByDate[d]||0)+gb;
+      }
+    }
+
+    // Add today's live data (only if checkbox checked)
+    if(includeToday&&todayDate){
+      for(var portId in today){
+        var entry=today[portId];
+        var nick=modemNicks[portId]||entry.nick||portId;
+        if(!nickTotals[nick]) nickTotals[nick]={};
+        var gb=(entry.in+entry.out)/1073741824;
+        nickTotals[nick][todayDate]=(nickTotals[nick][todayDate]||0)+gb;
+        totalByDate[todayDate]=(totalByDate[todayDate]||0)+gb;
+      }
+    }
+
+    // Format date labels as DD.MM
+    var dateLabels=dates.map(function(d){var parts=d.split('-');return parts[2]+'.'+parts[1]});
+
+    // Colors for modems
+    var modemColors=['#1960C9','#34C759','#FF383C','#FFCC00','#9b59b6','#e67e22','#1abc9c','#e74c3c','#3498db','#2ecc71','#f39c12','#8e44ad','#00bcd4','#ff5722','#795548','#607d8b','#cddc39','#ff9800','#4caf50','#2196f3'];
+
+    var datasets=[];
+    var nickList=Object.keys(nickTotals).sort(function(a,b){
+      var ta=0,tb=0;
+      for(var d in nickTotals[a])ta+=nickTotals[a][d];
+      for(var d in nickTotals[b])tb+=nickTotals[b][d];
+      return tb-ta;
+    });
+
+    // Per-modem lines
+    nickList.forEach(function(nick,i){
+      var lineData=dates.map(function(d){return+(nickTotals[nick][d]||0).toFixed(3)});
+      datasets.push({
+        label:nick,
+        data:lineData,
+        borderColor:modemColors[i%modemColors.length],
+        backgroundColor:modemColors[i%modemColors.length]+'33',
+        borderWidth:1.5,
+        pointRadius:2,
+        tension:0.3,
+        fill:false
+      });
+    });
+
+    // Total line (bold, dashed)
+    var totalData=dates.map(function(d){return+(totalByDate[d]||0).toFixed(3)});
+    datasets.push({
+      label:'ИТОГО',
+      data:totalData,
+      borderColor:'#fff',
+      backgroundColor:'rgba(255,255,255,0.1)',
+      borderWidth:3,
+      borderDash:[6,3],
+      pointRadius:3,
+      tension:0.3,
+      fill:false
+    });
+
+    var ctx=document.getElementById('analyticsDailyChart').getContext('2d');
+    analyticsCharts.daily=new Chart(ctx,{type:'line',data:{labels:dateLabels,datasets:datasets},options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{position:'bottom',labels:{color:textColor,font:{size:10},boxWidth:12,padding:8}},
+        tooltip:{mode:'index',intersect:false,callbacks:{label:function(ctx){return ctx.dataset.label+': '+ctx.parsed.y.toFixed(2)+' GB'}}}
+      },
+      scales:{
+        x:{ticks:{color:textColor,font:{size:10}},grid:{color:gridColor}},
+        y:{ticks:{color:textColor,font:{size:10},callback:function(v){return v.toFixed(1)+' GB'}},grid:{color:gridColor}}
+      }
+    }});
+  })
+  .catch(function(err){
+    if(loading)loading.textContent='Ошибка загрузки: '+err.message;
+  });
+}
+
+// --- Billing History (Accordion by Month) ---
+function loadBillingHistory(){
+  fetch('/api/billing_history',{headers:{'X-Auth-Token':authToken}})
+  .then(function(r){return r.json()})
+  .then(function(data){
     if(data.error){
-      document.getElementById('billingTableBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3)">'+data.error+'</td></tr>';
+      document.getElementById('billingAccordion').innerHTML='<div style="text-align:center;padding:40px;color:var(--text-3)">'+data.error+'</div>';
       return;
     }
 
     var curr=data.currency||'RUB';
-    var currSymbol=curr==='RUB'?'\u20BD':(curr==='USD'?'$':(curr==='EUR'?'\u20AC':curr));
+    var cs=curr==='RUB'?'\u20BD':(curr==='USD'?'$':(curr==='EUR'?'\u20AC':curr));
 
-    // Update summary
-    document.getElementById('billingBalanceVal').textContent=formatNumber(data.balance)+' '+currSymbol;
+    // Update summary cards
+    document.getElementById('billingBalanceVal').textContent=formatNumber(data.balance)+' '+cs;
     document.getElementById('billingBalanceVal').style.color=data.balance>=0?'var(--green)':'var(--red)';
-    document.getElementById('billingMonthCharges').textContent=formatNumber(data.summary.monthCharges)+' '+currSymbol;
-    document.getElementById('billingTotalPayments').textContent=formatNumber(data.summary.totalPayments)+' '+currSymbol;
-    document.getElementById('billingTotalCharges').textContent=formatNumber(data.summary.totalCharges)+' '+currSymbol;
+    document.getElementById('billingMonthCharges').textContent=formatNumber(data.summary.monthCharges)+' '+cs;
+    document.getElementById('billingTotalPayments').textContent=formatNumber(data.summary.totalPayments)+' '+cs;
+    document.getElementById('billingTotalCharges').textContent=formatNumber(data.summary.totalCharges)+' '+cs;
 
-    // Populate month filter (only once)
-    if(!billingHistoryLoaded){
-      billingHistoryLoaded=true;
-      var months=new Set();
-      (data.entries||[]).forEach(function(e){if(e.date)months.add(e.date.slice(0,7))});
-      // Always include current month
-      var currentMonth=new Date().toISOString().slice(0,7);
-      months.add(currentMonth);
-      var select=document.getElementById('billingMonthFilter');
-      var existingVals=new Set();
-      for(var i=0;i<select.options.length;i++) existingVals.add(select.options[i].value);
-      var sortedMonths=Array.from(months).sort().reverse();
-      var monthNames=['','Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
-      sortedMonths.forEach(function(m){
-        if(!existingVals.has(m)){
-          var opt=document.createElement('option');
-          opt.value=m;
-          var parts=m.split('-');
-          opt.textContent=monthNames[parseInt(parts[1])]+' '+parts[0];
-          select.appendChild(opt);
-        }
-      });
-    }
-
-    // Render table
     var entries=data.entries||[];
-    if(entries.length===0){
-      document.getElementById('billingTableBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--text-3)">Нет операций</td></tr>';
+    if(!entries.length){
+      document.getElementById('billingAccordion').innerHTML='<div style="text-align:center;padding:40px;color:var(--text-3)">Нет операций</div>';
       return;
     }
 
-    var html='';
+    // Group entries by month (YYYY-MM)
+    var monthMap={};
     entries.forEach(function(e){
-      var typeLabel='',typeClass='',amountStr='',amountColor='';
-      if(e.type==='charge'){
-        typeLabel='Списание';
-        typeClass='color:var(--red)';
-        amountStr='-'+formatNumber(e.cost)+' '+currSymbol;
-        amountColor='color:var(--red)';
-      } else if(e.type==='payment'){
-        typeLabel='Пополнение';
-        typeClass='color:var(--green)';
-        amountStr='+'+formatNumber(e.amount)+' '+currSymbol;
-        amountColor='color:var(--green)';
-      } else if(e.type==='payment_reversal'){
-        typeLabel='Отмена оплаты';
-        typeClass='color:var(--orange, #f59e0b)';
-        amountStr=formatNumber(e.amount)+' '+currSymbol;
-        amountColor='color:var(--orange, #f59e0b)';
-      } else if(e.type==='adjustment'){
-        typeLabel='Корректировка';
-        typeClass='color:var(--blue)';
-        amountStr=(e.amount>=0?'+':'')+formatNumber(e.amount)+' '+currSymbol;
-        amountColor=e.amount>=0?'color:var(--green)':'color:var(--red)';
-      } else {
-        typeLabel=e.type||'—';
-        typeClass='';
-        amountStr=(e.cost||e.amount||0)+' '+currSymbol;
-      }
-
-      var dateStr=e.date||'—';
-      if(e.timestamp){
-        try{
-          var d=new Date(e.timestamp);
-          dateStr=d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric'})+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
-        }catch(ex){}
-      }
-
-      var trafficStr='—';
-      if(e.type==='charge' && e.delta_gb!==undefined){
-        trafficStr=e.delta_gb.toFixed(3);
-      }
-
-      var balAfter=e.balance_after!==undefined?formatNumber(e.balance_after)+' '+currSymbol:'—';
-      var note=e.note||'';
-
-      html+='<tr>';
-      html+='<td style="white-space:nowrap;font-size:13px;text-align:center">'+dateStr+'</td>';
-      html+='<td style="'+typeClass+';font-weight:600;font-size:13px;text-align:center">'+typeLabel+'</td>';
-      html+='<td style="'+amountColor+';font-weight:600;font-size:13px;text-align:center">'+amountStr+'</td>';
-      html+='<td style="font-size:13px;text-align:center">'+trafficStr+'</td>';
-      html+='<td style="font-size:13px;text-align:center">'+balAfter+'</td>';
-      html+='<td style="font-size:13px;color:var(--text-3);text-align:center">'+note+'</td>';
-      html+='</tr>';
+      var key='unknown';
+      if(e.date) key=e.date.slice(0,7);
+      else if(e.timestamp) key=e.timestamp.slice(0,7);
+      if(!monthMap[key]) monthMap[key]={entries:[],totalCharge:0,totalPayment:0,totalTraffic:0};
+      monthMap[key].entries.push(e);
+      if(e.type==='charge'){monthMap[key].totalCharge+=(e.cost||0);monthMap[key].totalTraffic+=(e.delta_gb||0)}
+      else if(e.type==='payment'||e.type==='bank_payment'){monthMap[key].totalPayment+=(e.amount||0)}
     });
 
-    document.getElementById('billingTableBody').innerHTML=html;
+    var sortedMonths=Object.keys(monthMap).sort().reverse();
+    var monthNames=['','Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+    var currentMonth=new Date().toISOString().slice(0,7);
+
+    var html='';
+    sortedMonths.forEach(function(monthKey, idx){
+      var mg=monthMap[monthKey];
+      var parts=monthKey.split('-');
+      var mi=parseInt(parts[1]||0,10);
+      var monthLabel=(mi>=1&&mi<=12)?monthNames[mi]+' '+parts[0]:monthKey;
+      var isOpen=(idx===0);  // first month open by default
+      var isCurrent=(monthKey===currentMonth);
+
+      // Month header
+      html+='<div style="border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">';
+      html+='<div onclick="toggleBillingMonth(this)" style="cursor:pointer;padding:14px 18px;background:var(--bg-2);display:flex;align-items:center;justify-content:space-between;gap:12px;user-select:none">';
+      html+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
+      html+='<span style="font-size:15px;font-weight:700;color:var(--text-1)">'+monthLabel+'</span>';
+      if(isCurrent) html+='<span style="background:var(--green);color:#fff;font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600">Текущий</span>';
+      html+='</div>';
+      html+='<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap">';
+      if(mg.totalTraffic>0){
+        html+='<div style="text-align:center"><div style="font-size:10px;color:var(--text-3)">Трафик</div><div style="font-size:14px;font-weight:600;color:var(--text-1)">'+mg.totalTraffic.toFixed(2)+' ГБ</div></div>';
+      }
+      if(mg.totalCharge>0){
+        html+='<div style="text-align:center"><div style="font-size:10px;color:var(--text-3)">Списано</div><div style="font-size:14px;font-weight:600;color:var(--red)">-'+formatNumber(mg.totalCharge)+' '+cs+'</div></div>';
+      }
+      if(mg.totalPayment>0){
+        html+='<div style="text-align:center"><div style="font-size:10px;color:var(--text-3)">Оплачено</div><div style="font-size:14px;font-weight:600;color:var(--green)">+'+formatNumber(mg.totalPayment)+' '+cs+'</div></div>';
+      }
+      html+='<span class="billing-chevron" style="font-size:18px;transition:transform .2s;transform:rotate('+(isOpen?'180':'0')+'deg)">\u25BC</span>';
+      html+='</div></div>';
+
+      // Month body (entries table)
+      html+='<div class="billing-month-body" style="'+(isOpen?'':'display:none;')+'">';
+      html+='<table style="width:100%;border-collapse:collapse;font-size:13px">';
+      html+='<thead><tr style="background:var(--bg-3)"><th style="padding:8px 12px;text-align:center;color:var(--text-2);font-weight:500">Дата</th><th style="padding:8px 12px;text-align:center;color:var(--text-2);font-weight:500">Тип</th><th style="padding:8px 12px;text-align:center;color:var(--text-2);font-weight:500">Сумма</th><th style="padding:8px 12px;text-align:center;color:var(--text-2);font-weight:500">Трафик</th><th style="padding:8px 12px;text-align:center;color:var(--text-2);font-weight:500">Баланс после</th><th style="padding:8px 12px;text-align:center;color:var(--text-2);font-weight:500">Примечание</th></tr></thead>';
+      html+='<tbody>';
+
+      // Sort entries within month: newest first
+      mg.entries.sort(function(a,b){
+        var da=a.timestamp||a.date||'';
+        var db=b.timestamp||b.date||'';
+        return db.localeCompare(da);
+      });
+
+      mg.entries.forEach(function(e){
+        var typeLabel='',typeStyle='',amountStr='',amountStyle='';
+        if(e.type==='charge'){typeLabel='Списание';typeStyle='color:var(--red)';amountStr='-'+formatNumber(e.cost||0)+' '+cs;amountStyle='color:var(--red)'}
+        else if(e.type==='payment'){typeLabel='Пополнение';typeStyle='color:var(--green)';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)'}
+        else if(e.type==='bank_payment'){typeLabel='\u{1F3E6} Банк';typeStyle='color:#6366f1';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)'}
+        else if(e.type==='payment_reversal'){typeLabel='Отмена';typeStyle='color:var(--orange,#f59e0b)';amountStr=formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--orange,#f59e0b)'}
+        else if(e.type==='adjustment'){typeLabel='Корректировка';typeStyle='color:var(--blue)';amountStr=((e.amount||0)>=0?'+':'')+formatNumber(e.amount||0)+' '+cs;amountStyle=(e.amount||0)>=0?'color:var(--green)':'color:var(--red)'}
+        else{typeLabel=e.type||'\u2014';amountStr=(e.cost||e.amount||0)+' '+cs}
+
+        var dateStr=e.date||'\u2014';
+        if(e.timestamp){try{var d=new Date(e.timestamp);dateStr=d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})}catch(ex){}}
+        var trafficStr=e.type==='charge'&&e.delta_gb!==undefined?e.delta_gb.toFixed(3)+' ГБ':'\u2014';
+        var balAfter=e.balance_after!==undefined?formatNumber(e.balance_after)+' '+cs:'\u2014';
+        var note=e.note||'';
+
+        html+='<tr style="border-bottom:1px solid var(--border)">';
+        html+='<td style="padding:7px 12px;text-align:center;white-space:nowrap">'+dateStr+'</td>';
+        html+='<td style="padding:7px 12px;text-align:center;font-weight:600;'+typeStyle+'">'+typeLabel+'</td>';
+        html+='<td style="padding:7px 12px;text-align:center;font-weight:600;'+amountStyle+'">'+amountStr+'</td>';
+        html+='<td style="padding:7px 12px;text-align:center">'+trafficStr+'</td>';
+        html+='<td style="padding:7px 12px;text-align:center">'+balAfter+'</td>';
+        html+='<td style="padding:7px 12px;text-align:center;color:var(--text-3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+escapeHtml(note)+'">'+escapeHtml(note)+'</td>';
+        html+='</tr>';
+      });
+
+      html+='</tbody></table></div></div>';
+    });
+
+    document.getElementById('billingAccordion').innerHTML=html;
   })
   .catch(function(err){
-    document.getElementById('billingTableBody').innerHTML='<tr><td colspan="6" style="text-align:center;padding:40px;color:var(--red)">Ошибка загрузки: '+err.message+'</td></tr>';
+    document.getElementById('billingAccordion').innerHTML='<div style="text-align:center;padding:40px;color:var(--red)">Ошибка загрузки: '+err.message+'</div>';
   });
+}
+
+function toggleBillingMonth(header){
+  var body=header.nextElementSibling;
+  var chevron=header.querySelector('.billing-chevron');
+  if(body.style.display==='none'){
+    body.style.display='';
+    if(chevron)chevron.style.transform='rotate(180deg)';
+  } else {
+    body.style.display='none';
+    if(chevron)chevron.style.transform='rotate(0deg)';
+  }
 }
 
 function formatNumber(n){
@@ -1894,6 +2186,7 @@ function convertFormat(){
 
 // --- Documents ---
 function loadDocuments(){
+  loadClosingDocs();
   fetch('/api/client/documents',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(docs){
     var el=document.getElementById('documentsList');
     if(!docs.length){el.innerHTML='<p style="color:var(--text-2);text-align:center;padding:40px">Документов пока нет</p>';return}
@@ -1905,6 +2198,52 @@ function loadDocuments(){
   }).catch(function(e){
     document.getElementById('documentsList').innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
   });
+}
+
+// --- Closing Documents (Acts) ---
+function loadClosingDocs(){
+  fetch('/api/client/closing_documents',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+    var docs=data.documents||[];
+    var el=document.getElementById('closingDocsList');
+    var badge=document.getElementById('unsignedBadge');
+    var unsigned=docs.filter(function(d){return d.status!=='signed'});
+    if(badge){
+      if(unsigned.length>0){badge.style.display='inline';badge.textContent=unsigned.length+' не подписан'+(unsigned.length>1?(unsigned.length<5?'о':'о'):'');}
+      else{badge.style.display='none';}
+    }
+    if(!docs.length){el.innerHTML='<p style="color:var(--text-2);text-align:center;padding:40px">Закрывающих документов пока нет</p>';return}
+    var h='<table class="data-table" style="width:100%"><thead><tr><th style="text-align:left;padding:10px 12px">Период</th><th style="text-align:left;padding:10px 12px">Номер</th><th style="text-align:right;padding:10px 12px">Сумма</th><th style="text-align:center;padding:10px 12px">Статус</th><th style="text-align:center;padding:10px 12px">Действия</th></tr></thead><tbody>';
+    docs.sort(function(a,b){return (b.period||'').localeCompare(a.period||'')});
+    docs.forEach(function(d){
+      var isSigned=d.status==='signed';
+      var rowBg=isSigned?'':'background:rgba(239,68,68,0.08);';
+      var statusHtml=isSigned
+        ?'<span style="color:var(--green);font-weight:600">\u2705 \u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d</span>'
+        :'<span style="color:var(--red);font-weight:600">\u274c \u041d\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d</span>';
+      var periodLabel=d.period||'\u2014';
+      if(d.period&&d.period.length===7){
+        var parts=d.period.split('-');
+        var months=['\u042f\u043d\u0432','\u0424\u0435\u0432','\u041c\u0430\u0440','\u0410\u043f\u0440','\u041c\u0430\u0439','\u0418\u044e\u043d','\u0418\u044e\u043b','\u0410\u0432\u0433','\u0421\u0435\u043d','\u041e\u043a\u0442','\u041d\u043e\u044f','\u0414\u0435\u043a'];
+        var mi=parseInt(parts[1],10)-1;
+        if(mi>=0&&mi<12) periodLabel=months[mi]+' '+parts[0];
+      }
+      h+='<tr style="border-bottom:1px solid var(--border);'+rowBg+'">';
+      h+='<td style="padding:10px 12px;font-weight:500">'+escapeHtml(periodLabel)+'</td>';
+      h+='<td style="padding:10px 12px;color:var(--text-3)">'+(d.actNumber||'\u2014')+'</td>';
+      h+='<td style="padding:10px 12px;text-align:right;font-weight:600">'+formatNumber(d.totalAmount||0)+' \u20BD</td>';
+      h+='<td style="padding:10px 12px;text-align:center">'+statusHtml+'</td>';
+      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" onclick="downloadClosingPdf(\''+d.id+'\')" style="font-size:12px;padding:4px 10px">\u{1F4E5} PDF</button></td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table>';
+    el.innerHTML=h;
+  }).catch(function(e){
+    document.getElementById('closingDocsList').innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
+  });
+}
+
+function downloadClosingPdf(docId){
+  window.open('/api/client/closing_documents/'+docId+'/pdf?token='+encodeURIComponent(authToken),'_blank');
 }
 
 // --- API Docs ---

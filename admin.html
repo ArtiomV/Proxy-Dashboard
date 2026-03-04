@@ -30,7 +30,7 @@
   --text-0:#0f1419;--text-1:#24292f;--text-2:#656d76;--text-3:#8b949e;
   --accent:#1960C9;--accent-hover:#1450b0;--accent-bg:rgba(25,96,201,.1);
   --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
-  --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
+  --success:#1a7f37;--warning:#FFCC00;--danger:#FF383C;
   --card-bg:rgba(255,255,255,0.8);--card-border:rgba(0,0,0,0.08);
   --card-shadow:0 4px 24px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.04);
 }
@@ -416,6 +416,8 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <div class="nav-tab" onclick="switchMainTab('clients',this)">Клиенты</div>
   <div class="nav-tab" onclick="switchMainTab('tools',this)">Инструменты</div>
   <div class="nav-tab" onclick="switchMainTab('analytics',this)">Настройки</div>
+  <div class="nav-tab" onclick="switchMainTab('telegram',this)">Telegram</div>
+  <div class="nav-tab" onclick="switchMainTab('bank',this)">🏦 Банк</div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:4px;padding-right:8px">
     <input type="text" class="search-box" id="searchBox" placeholder="Поиск..." oninput="renderTable()" style="width:180px;height:28px;font-size:11px">
     <div class="col-selector" style="position:relative">
@@ -571,7 +573,34 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     <button class="btn btn-primary" onclick="showClientForm()">+ Новый клиент</button>
     <input type="text" class="search-box" id="clientSearch" placeholder="Поиск клиентов..." oninput="renderClients()">
   </div>
-  <div class="client-grid" id="clientGrid"></div>
+  <div style="padding:0 24px 24px;overflow-x:auto">
+    <table class="log-table" id="clientTable" style="width:100%">
+      <thead>
+        <tr>
+          <th style="text-align:left;min-width:150px">Клиент</th>
+          <th style="text-align:center">Тарификация</th>
+          <th style="text-align:right">Баланс</th>
+          <th style="text-align:right">Расход/мес</th>
+          <th style="text-align:center">Модемов</th>
+          <th style="text-align:left;min-width:100px">Контакт</th>
+          <th style="text-align:center">Действия</th>
+        </tr>
+      </thead>
+      <tbody id="clientTableBody"></tbody>
+    </table>
+  </div>
+  <!-- Expandable rows content -->
+  <div id="clientExpandArea"></div>
+
+</div>
+
+<!-- TAB: BANK -->
+<div class="tab-content" id="tab-bank">
+  <div style="padding:14px 24px">
+    <div id="bankConfigSection"></div>
+    <div id="bankDocumentsSection" style="margin-top:16px"></div>
+    <div id="bankPaymentsSection" style="margin-top:16px"></div>
+  </div>
 </div>
 
 <!-- TAB: TOOLS -->
@@ -704,8 +733,66 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
         <div class="form-group"><label>Цена (руб)</label><input class="form-input" type="number" id="cfPrice" value="0"></div>
       </div>
       <div class="form-group"><label>Заметки</label><textarea class="form-input" id="cfNotes"></textarea></div>
+      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+        <label style="font-size:11px;color:var(--text-2);margin-bottom:6px;display:block;font-weight:600">Реквизиты (для банка)</label>
+        <div class="form-row"><div class="form-group"><label>ИНН</label><input class="form-input" id="cfInn" placeholder="1234567890"></div><div class="form-group"><label>КПП</label><input class="form-input" id="cfKpp" placeholder="123456789"></div></div>
+        <div class="form-group"><label>Юр. название</label><input class="form-input" id="cfLegalName" placeholder='ООО "Компания"'></div>
+        <div class="form-group"><label>Адрес (юридический)</label><textarea class="form-input" id="cfAddress" rows="2" placeholder='119334, Г.МОСКВА, УЛ КОСЫГИНА, Д. 13' style="resize:vertical"></textarea></div>
+        <div class="form-group"><label>Основание (договор)</label><input class="form-input" id="cfContractInfo" placeholder='Договор №123 от 01.01.2026'></div>
+      </div>
+      <div id="cfApiKeySection" style="display:none;margin-top:12px;padding:10px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border)">
+        <label style="font-size:11px;color:var(--text-2);margin-bottom:4px;display:block">API Key</label>
+        <div style="display:flex;align-items:center;gap:6px">
+          <input class="form-input" id="cfApiKey" readonly style="font-size:10px;font-family:'JetBrains Mono',monospace;flex:1">
+          <button class="btn btn-sm" onclick="copyText(document.getElementById('cfApiKey').value,this)" title="Копировать">📋</button>
+          <button class="btn btn-warning btn-sm" onclick="regenerateApiKeyInForm()" title="Перегенерировать">🔄</button>
+        </div>
+      </div>
       <div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-primary" onclick="saveClient()">Сохранить</button><button class="btn" onclick="closeClientModal()">Отмена</button></div>
     </div>
+  </div>
+</div>
+
+<!-- CLIENT OPERATIONS MODAL -->
+<div class="modal-overlay" id="clientOpsModal">
+  <div class="modal" style="width:760px;max-height:85vh">
+    <div class="modal-header">
+      <h3 id="clientOpsTitle">Операции клиента</h3>
+      <button class="modal-close" onclick="closeClientOpsModal()">&times;</button>
+    </div>
+    <div style="display:flex;gap:0;border-bottom:1px solid var(--border);padding:0 4px">
+      <div class="modal-tab active" id="opsTab_history" onclick="switchOpsTab('history')" style="cursor:pointer">💰 Операции</div>
+      <div class="modal-tab" id="opsTab_documents" onclick="switchOpsTab('documents')" style="cursor:pointer">📋 Документы</div>
+      <div class="modal-tab" id="opsTab_acts" onclick="switchOpsTab('acts')" style="cursor:pointer">📃 Акты</div>
+    </div>
+    <div class="modal-body" id="clientOpsBody" style="max-height:calc(85vh - 120px);overflow-y:auto">
+    </div>
+  </div>
+</div>
+
+<!-- TAB: TELEGRAM USERS -->
+<div class="tab-content" id="tab-telegram">
+  <div class="toolbar" style="margin-bottom:12px">
+    <input type="text" class="search-box" id="tgUserSearch" placeholder="Поиск по username..." oninput="renderTelegramUsers()" style="width:250px">
+    <span id="tgUserCount" style="margin-left:12px;color:#888;font-size:12px"></span>
+  </div>
+  <div class="table-wrap">
+    <table class="log-table" id="tgUsersTable">
+      <thead>
+        <tr>
+          <th>Username</th>
+          <th>Тариф</th>
+          <th>Статус</th>
+          <th>Действует до</th>
+          <th>Сервер</th>
+          <th>Скорость</th>
+          <th>NPS</th>
+          <th>Отзыв</th>
+          <th>Регистрация</th>
+        </tr>
+      </thead>
+      <tbody id="tgUsersBody"></tbody>
+    </table>
   </div>
 </div>
 
@@ -746,10 +833,10 @@ function doLogin(){window.location.href='/'}
 function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
-function switchMainTab(name,el){document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}}
+function switchMainTab(name,el){document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings()}if(name==='telegram')renderTelegramUsers();if(name==='bank'){renderBankConfig();renderBankDocuments();renderBankPayments()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}}
 
 // ========== DATA ==========
-function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU')}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
+function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();renderBankPayments();renderBankDocuments();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU')}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
 
 function processData(){if(!currentData)return;var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(m.net_details?m.net_details.CELLOP:'')||'',apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
@@ -995,14 +1082,18 @@ function populateAccClientFilter(){
 function renderTrafficTab(){
   var d=collectTrafficData();if(!d)return;
   // Summary widgets
-  var avgPerModem=d.totalModems?(d.totalIn+d.totalOut)/d.totalModems:0;
+  var daysElapsed=1;
+  if(accPeriod==='month'){daysElapsed=new Date().getDate()||1}
+  else if(accPeriod==='prevmonth'){var prev=new Date();prev.setDate(0);daysElapsed=prev.getDate()||30}
+  else if(accPeriod==='lifetime'){daysElapsed=30}
+  var avgPerModem=d.totalModems?(d.totalIn+d.totalOut)/d.totalModems/daysElapsed:0;
   var inOutRatio=d.totalOut?d.totalIn/d.totalOut:0;
   document.getElementById('trafficWidgets').innerHTML=
     '<div class="widget"><div class="widget-label">Модемов</div><div class="widget-value" style="color:var(--success)">'+d.totalOnline+'<span style="font-size:14px;color:var(--text-2)"> / '+d.totalModems+'</span></div><div class="widget-sub">online / всего</div></div>'+
     '<div class="widget"><div class="widget-label">Входящий ('+d.label+')</div><div class="widget-value">'+fmtGb(d.totalIn)+'</div></div>'+
     '<div class="widget"><div class="widget-label">Исходящий ('+d.label+')</div><div class="widget-value">'+fmtGb(d.totalOut)+'</div></div>'+
     '<div class="widget"><div class="widget-label">Всего ('+d.label+')</div><div class="widget-value" style="color:var(--accent)">'+fmtGb(d.totalIn+d.totalOut)+'</div></div>'+
-    '<div class="widget"><div class="widget-label">Среднее на модем</div><div class="widget-value">'+fmtGb(avgPerModem)+'</div></div>'+
+    '<div class="widget"><div class="widget-label">Среднее на модем в сутки</div><div class="widget-value">'+fmtGb(avgPerModem)+'</div></div>'+
     '<div class="widget"><div class="widget-label">Клиентов</div><div class="widget-value">'+Object.keys(d.clientTraffic).length+'</div><div class="widget-sub">Вх/Исх: '+inOutRatio.toFixed(1)+'x</div></div>';
 
   // Render active sub-tab
@@ -1185,63 +1276,151 @@ function renderHBarsRes(items,maxVal){
 
 function updateChartsTheme(){if(document.getElementById('tab-traffic').classList.contains('active'))renderTrafficTab()}
 
+// ========== TELEGRAM USERS TAB ==========
+function renderTelegramUsers(){
+  if(!currentData)return;
+  var users=currentData.telegramUsers||{};
+  var proxies=currentData.telegramProxies||[];
+  var feedback=currentData.telegramFeedback||[];
+  var search=(document.getElementById('tgUserSearch')||{}).value||'';
+  search=search.toLowerCase();
+  var tbody=document.getElementById('tgUsersBody');
+  if(!tbody)return;
+
+  // Build per-user data by merging users, proxies, feedback
+  var rows=[];
+  // First, collect all known chatIds from users DB
+  var allIds=Object.keys(users);
+  // Also add any chatIds from proxies not in users
+  proxies.forEach(function(p){if(allIds.indexOf(String(p.chatId))===-1)allIds.push(String(p.chatId))});
+
+  allIds.forEach(function(cid){
+    var u=users[cid]||{};
+    var proxy=null;
+    for(var i=0;i<proxies.length;i++){if(String(proxies[i].chatId)===cid){proxy=proxies[i];break}}
+    var uname=u.username||( proxy?proxy.username:null)||cid;
+    if(search&&uname.toLowerCase().indexOf(search)===-1)return;
+
+    // Find feedback for this user
+    var userFb=feedback.filter(function(f){return String(f.chatId)===cid});
+    var npsRecords=userFb.filter(function(f){return f.type==='nps'||f.type==='satisfaction'});
+    var lastNps=npsRecords.length?npsRecords[npsRecords.length-1]:null;
+    var textFb=userFb.filter(function(f){return f.type==='feedback'||(f.comment)});
+    var lastText=null;
+    for(var i=textFb.length-1;i>=0;i--){var t=textFb[i].message||textFb[i].comment;if(t){lastText=t;break}}
+
+    // Speed tests
+    var speeds=u.speedTests||[];
+    var lastSpeed=speeds.length?speeds[speeds.length-1]:null;
+
+    // Plan & status
+    var plan=proxy?proxy.plan:(u.plan||'—');
+    var planLabel={'test':'Тест','1m':'1 мес','6m':'6 мес','12m':'12 мес'}[plan]||plan;
+    var isActive=proxy&&new Date(proxy.expiresAt).getTime()>Date.now();
+    var status=proxy?(isActive?'Активен':'Истёк'):'Нет прокси';
+    var statusClass=isActive?'color:#27ae60':'color:#e74c3c';
+    if(!proxy)statusClass='color:#888';
+
+    var expires='—';
+    if(proxy){
+      if(proxy.plan==='test'){expires='Тест (1 ч)'}
+      else{expires=new Date(proxy.expiresAt).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'UTC'})}
+    }
+
+    var server=proxy?(proxy.serverName||'—'):'—';
+    var speedStr=lastSpeed?(lastSpeed.speed+' Мбит/с'):'—';
+    var npsStr=lastNps?(lastNps.score+'/10'):'—';
+    var fbStr=lastText?('<span title="'+esc(lastText)+'">'+esc(lastText.substring(0,40))+(lastText.length>40?'...':'')+'</span>'):'—';
+    var regDate=u.registeredAt?new Date(u.registeredAt).toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'UTC'}):'—';
+
+    rows.push('<tr>'+
+      '<td><b>@'+esc(uname)+'</b></td>'+
+      '<td>'+esc(planLabel)+'</td>'+
+      '<td style="'+statusClass+'"><b>'+status+'</b></td>'+
+      '<td>'+expires+'</td>'+
+      '<td>'+esc(server)+'</td>'+
+      '<td>'+speedStr+'</td>'+
+      '<td>'+npsStr+'</td>'+
+      '<td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+fbStr+'</td>'+
+      '<td>'+regDate+'</td>'+
+    '</tr>');
+  });
+
+  tbody.innerHTML=rows.length?rows.join(''):'<tr><td colspan="9" style="text-align:center;color:#888;padding:20px">Нет пользователей</td></tr>';
+  var countEl=document.getElementById('tgUserCount');
+  if(countEl)countEl.textContent='Пользователей: '+rows.length;
+}
+
 // ========== CLIENTS TAB ==========
-function renderClients(){if(!currentData)return;var cl=currentData.clients||[];var search=(document.getElementById('clientSearch')||{}).value||'';search=search.toLowerCase();var grid=document.getElementById('clientGrid');if(!grid)return;
+function renderClients(){if(!currentData)return;var cl=currentData.clients||[];var search=(document.getElementById('clientSearch')||{}).value||'';search=search.toLowerCase();var tbody=document.getElementById('clientTableBody');if(!tbody)return;
   var pnm={};var map=currentData._modemMap||{};for(var imei in map){var m=map[imei];m.ports.forEach(function(p){if(p.portName){if(!pnm[p.portName])pnm[p.portName]=[];pnm[p.portName].push(m.nick+' ('+m.server+')')}})}
-  // Calc traffic per portName
-  var pnTraffic={};for(var imei in map){var m=map[imei];m.ports.forEach(function(p){if(p.portName&&p._bw){var mi=parseTraffic(p._bw.bandwidth_bytes_month_in)+parseTraffic(p._bw.bandwidth_bytes_month_out);pnTraffic[p.portName]=(pnTraffic[p.portName]||0)+mi}})}
-  var h='';cl.forEach(function(c){if(search&&(c.name+' '+c.portName+' '+c.login+' '+c.contact).toLowerCase().indexOf(search)===-1)return;
+  var h='';var count=0;
+  cl.forEach(function(c){if(search&&(c.name+' '+c.portName+' '+c.login+' '+c.contact).toLowerCase().indexOf(search)===-1)return;
+    count++;
     var modems=pnm[c.portName]||[];var bt=c.billingType||'per_gb';var price=c.price||0;
-    // Calc cost from billing ledger (actual charges for current month)
-    var cost=0,costLabel='';
     var ledger=currentData.billingLedger||{};var entries=ledger[c.id]||[];
     var curMonthPfx=new Date().toISOString().slice(0,7);
     var monthCharges=entries.filter(function(e){return e.type==='charge'&&e.date&&e.date.startsWith(curMonthPfx)});
-    cost=monthCharges.reduce(function(s,e){return s+(e.cost||0)},0);
+    var cost=monthCharges.reduce(function(s,e){return s+(e.cost||0)},0);
     cost=Math.round(cost*100)/100;
     var monthGbCharged=monthCharges.reduce(function(s,e){return s+(e.delta_gb||0)},0);
-    if(bt==='per_modem'){costLabel=price+' \u00D7 '+modems.length+' мод. = '+Math.round(cost)+' \u20BD/мес'}
-    else{costLabel=price+' \u00D7 '+monthGbCharged.toFixed(1)+'GB = '+Math.round(cost)+' \u20BD'}
-    // Balance — use persistent balance from clients.json (same as client dashboard)
-    var payments=c.payments||[];
-    var totalPaid=0;payments.forEach(function(p){totalPaid+=parseFloat(p.amount)||0});
+    var costLabel='';
+    if(bt==='per_modem'){costLabel=price+' \u00D7 '+modems.length+' = '+Math.round(cost)+' \u20BD'}
+    else{costLabel=monthGbCharged.toFixed(1)+' GB \u00D7 '+price+' = '+Math.round(cost)+' \u20BD'}
     var balance=c.balance!==undefined?c.balance:0;
-    // Card header
-    h+='<div class="client-card"><div class="client-card-header"><span class="client-card-name">'+esc(c.name)+'<span class="billing-badge billing-'+bt+'">'+(bt==='per_modem'?'за модем':'за ГБ')+'</span></span><div class="client-card-actions"><button class="btn btn-sm" onclick="editClient(\''+c.id+'\')">✏️</button><button class="btn btn-danger btn-sm" onclick="deleteClient(\''+c.id+'\',\''+esc(c.name)+'\')">✕</button></div></div>';
-    // Balance summary cards
-    h+='<div class="client-card-body">';
-    h+='<div class="client-balance-card">';
-    h+='<div class="client-balance-item"><div class="label">Баланс</div><div class="value '+(balance>=0?'balance-positive':'balance-negative')+'">'+Math.round(balance)+' \u20BD</div></div>';
-    h+='<div class="client-balance-item"><div class="label">Расход</div><div class="value" style="color:var(--accent)">'+Math.round(cost)+' \u20BD</div></div>';
-    h+='<div class="client-balance-item"><div class="label">Модемов</div><div class="value" style="color:var(--text-0)">'+modems.length+'</div></div>';
+    var balClass=balance>=0?'balance-positive':'balance-negative';
+    // Main row
+    h+='<tr style="cursor:pointer" onclick="toggleClientRow(\''+c.id+'\')">';
+    h+='<td style="text-align:left"><div style="font-weight:600;color:var(--text-0)">'+esc(c.name)+'</div><div style="font-size:10px;color:var(--text-3)">'+esc(c.portName)+' / '+esc(c.login)+'</div></td>';
+    h+='<td style="text-align:center;font-weight:600;color:var(--text-0)">'+price+' \u20BD<span style="font-size:10px;color:var(--text-2);font-weight:400">/'+(bt==='per_modem'?'мод':'ГБ')+'</span></td>';
+    h+='<td style="text-align:right;font-weight:700" class="'+balClass+'">'+Math.round(balance)+' \u20BD</td>';
+    h+='<td style="text-align:right"><div style="font-weight:600;color:var(--accent)">'+Math.round(cost)+' \u20BD</div><div style="font-size:10px;color:var(--text-3)">'+costLabel+'</div></td>';
+    h+='<td style="text-align:center;font-weight:600">'+modems.length+'</td>';
+    h+='<td style="text-align:left;font-size:11px;color:var(--text-2)">'+esc(c.contact||'\u2014')+'</td>';
+    h+='<td style="text-align:center;white-space:nowrap">';
+    h+='<button class="btn btn-sm" onclick="event.stopPropagation();openClientOpsModal(\''+c.id+'\',\'history\')" title="Баланс и операции">\u{1F4B0}</button> ';
+    h+='<button class="btn btn-sm" onclick="event.stopPropagation();openClientOpsModal(\''+c.id+'\',\'documents\')" title="Документы">\u{1F4CB}</button> ';
+    h+='<button class="btn btn-sm" onclick="event.stopPropagation();editClient(\''+c.id+'\')" title="Редактировать">\u270F\uFE0F</button> ';
+    h+='<button class="btn btn-sm" onclick="event.stopPropagation();impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" title="Войти в ЛК">\u{1F464}</button> ';
+    h+='<button class="btn btn-sm" onclick="event.stopPropagation();deleteClient(\''+c.id+'\',\''+esc(c.name)+'\')" title="Удалить" style="color:var(--danger)">\u2715</button>';
+    h+='</td>';
+    h+='</tr>';
+    // Expandable detail row (hidden by default)
+    h+='<tr id="clientRow_'+c.id+'" style="display:none"><td colspan="7" style="padding:0;background:var(--bg-2);border-bottom:2px solid var(--accent)">';
+    h+='<div style="padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">';
+    // Column 1: Credentials
+    h+='<div>';
+    h+='<div style="font-size:11px;font-weight:600;color:var(--text-0);margin-bottom:6px">Реквизиты</div>';
+    h+='<div style="font-size:11px;color:var(--text-2)"><div>Логин: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.login)+'</span></div>';
+    h+='<div>Пароль: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.password)+'</span></div>';
+    h+='<div>portName: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.portName)+'</span></div>';
+    if(c.notes)h+='<div style="margin-top:4px;color:var(--text-3);font-size:10px">'+esc(c.notes)+'</div>';
+    h+='</div></div>';
+    // Column 2: Modems
+    h+='<div>';
+    h+='<div style="font-size:11px;font-weight:600;color:var(--text-0);margin-bottom:6px">Модемы ('+modems.length+')</div>';
+    if(modems.length){h+='<div style="display:flex;flex-wrap:wrap;gap:2px">';modems.forEach(function(mn){h+='<span class="client-modem-tag">'+esc(mn)+'</span>'});h+='</div>'}
+    else{h+='<div style="font-size:10px;color:var(--text-3)">Нет подключённых модемов</div>'}
     h+='</div>';
-    // Details
-    h+='<div class="row"><span>portName</span><span class="val">'+esc(c.portName)+'</span></div>';
-    h+='<div class="row"><span>Логин</span><span class="val">'+esc(c.login)+'</span></div>';
-    h+='<div class="row"><span>Пароль</span><span class="val">'+esc(c.password)+'</span></div>';
-    h+='<div class="row"><span>Тариф</span><span class="val">'+price+' \u20BD/'+(bt==='per_modem'?'модем':'ГБ')+'</span></div>';
-    h+='<div class="row"><span>Расход</span><span class="val" style="color:var(--accent);font-weight:600">'+costLabel+'</span></div>';
-    h+='<div class="row"><span>Оплачено</span><span class="val">'+Math.round(totalPaid)+' \u20BD</span></div>';
-    if(c.contact)h+='<div class="row"><span>Контакт</span><span class="val">'+esc(c.contact)+'</span></div>';
-    // API Key
-    if(c.apiKey){h+='<div class="row"><span>API Key</span><span class="val" style="font-size:9px;max-width:160px;overflow:hidden;text-overflow:ellipsis">'+esc(c.apiKey)+' <button class="copy-btn" onclick="copyText(\''+esc(c.apiKey)+'\',this)">\u{1F4CB}</button> <button class="copy-btn" onclick="regenerateApiKey(\''+c.id+'\')" title="Перегенерировать">\u{1F504}</button></span></div>'}
-    // Referral (only show balance if any)
-    if(c.referral_balance){h+='<div class="row"><span>Реф. баланс</span><span class="val" style="color:var(--success)">'+Math.floor(c.referral_balance)+' \u20BD</span></div>'}
-    // Actions: payment & history & documents
-    h+='<div style="margin-top:10px;display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-success btn-sm" onclick="showPaymentForm(\''+c.id+'\')">+ Пополнить</button><button class="btn btn-sm" onclick="showPaymentHistory(\''+c.id+'\')">История</button><button class="btn btn-sm" onclick="showDocumentUpload(\''+c.id+'\')">📄 Документы</button><button class="btn btn-sm" onclick="impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" title="Войти в ЛК клиента" style="background:var(--accent);color:#fff">👤 ЛК</button></div>';
-    h+='<div id="paymentArea_'+c.id+'"></div>';
-    h+='<div id="docArea_'+c.id+'"></div>';
     h+='</div>';
-    // Modems section
-    if(modems.length){h+='<div class="client-modems"><div class="client-modems-label">Модемы ('+modems.length+')</div>';modems.forEach(function(mn){h+='<span class="client-modem-tag">'+esc(mn)+'</span>'});h+='</div>'}
-    h+='</div>'});
-  if(!h)h='<div style="text-align:center;padding:40px;color:var(--text-3);grid-column:span 3;font-size:14px">Нет клиентов</div>';grid.innerHTML=h}
+    h+='<div id="paymentArea_'+c.id+'" style="padding:0 16px 12px"></div>';
+    h+='</td></tr>';
+  });
+  if(!count)h='<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-3);font-size:14px">Нет клиентов</td></tr>';
+  tbody.innerHTML=h;
+}
 
-function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?data.password:rnd(12);document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('clientModal').classList.add('show')}
+function toggleClientRow(id){
+  var row=document.getElementById('clientRow_'+id);
+  if(!row)return;
+  row.style.display=row.style.display==='none'?'':'none';
+}
+
+function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?data.password:rnd(12);document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
 function closeClientModal(){document.getElementById('clientModal').classList.remove('show')}
 document.getElementById('clientModal').addEventListener('click',function(e){if(e.target===this)closeClientModal()});
 function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
-function saveClient(){var id=document.getElementById('clientFormId').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value};if(!d.name||!d.portName||!d.login||!d.password)return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
+function saveClient(){var id=document.getElementById('clientFormId').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value};if(!d.name||!d.portName||!d.login||!d.password)return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
 function deleteClient(id,name){if(!confirm('Удалить '+name+'?'))return;fetch(API+'/api/admin/clients/'+id,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()})}
 
 function impersonateClient(id,name){
@@ -1283,6 +1462,47 @@ function showPaymentHistory(clientId){
 function deletePayment(clientId,index){
   if(!confirm('Удалить платёж?'))return;
   fetch(API+'/api/admin/clients/'+clientId+'/payment/'+index,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){if(d.ok){showToast('Удалён','success');loadData()}else showToast(d.error,'error')});
+}
+
+// ========== BILLING HISTORY (FULL LEDGER) ==========
+function showBillingHistory(clientId){
+  var area=document.getElementById('billingArea_'+clientId);
+  if(!area)return;
+  // Toggle: if already open, close it
+  if(area.innerHTML){area.innerHTML='';return}
+  area.innerHTML='<div style="color:var(--text-3);font-size:11px;padding:8px">Загрузка операций...</div>';
+  fetch(API+'/api/admin/clients/'+clientId+'/ledger',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+    var entries=data.entries||[];
+    if(!entries.length){area.innerHTML='<div style="color:var(--text-3);font-size:11px;padding:8px">Нет операций</div>';return}
+    // Sort newest first
+    entries.sort(function(a,b){return(b.timestamp||b.date||'').localeCompare(a.timestamp||a.date||'')});
+    var h='<div style="margin-top:8px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border);overflow:hidden">';
+    h+='<div style="padding:8px 10px;font-size:12px;font-weight:600;color:var(--text-0);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><span>История операций ('+entries.length+')</span><button class="btn btn-sm" style="padding:2px 8px;font-size:10px" onclick="document.getElementById(\'billingArea_'+clientId+'\').innerHTML=\'\'">✕</button></div>';
+    h+='<div style="max-height:300px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:4px 6px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:4px 6px;text-align:center;color:var(--text-2)">Тип</th><th style="padding:4px 6px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:4px 6px;text-align:right;color:var(--text-2)">ГБ</th><th style="padding:4px 6px;text-align:right;color:var(--text-2)">Баланс</th><th style="padding:4px 6px;text-align:left;color:var(--text-2)">Примечание</th></tr></thead><tbody>';
+    entries.forEach(function(e){
+      var typeLabel='',typeColor='',amountStr='',amountColor='';
+      if(e.type==='charge'){typeLabel='Списание';typeColor='color:var(--danger)';amountStr='-'+((e.cost||0).toFixed(2))+' \u20BD';amountColor='color:var(--danger)'}
+      else if(e.type==='payment'){typeLabel='Пополнение';typeColor='color:var(--success)';amountStr='+'+(e.amount||0).toFixed(2)+' \u20BD';amountColor='color:var(--success)'}
+      else if(e.type==='payment_reversal'){typeLabel='Отмена';typeColor='color:var(--warning)';amountStr=(e.amount||0).toFixed(2)+' \u20BD';amountColor='color:var(--warning)'}
+      else if(e.type==='adjustment'){typeLabel='Коррекция';typeColor='color:var(--accent)';amountStr=((e.amount||0)>=0?'+':'')+(e.amount||0).toFixed(2)+' \u20BD';amountColor=(e.amount||0)>=0?'color:var(--success)':'color:var(--danger)'}
+      else{typeLabel=e.type||'\u2014';amountStr=(e.cost||e.amount||0)+' \u20BD'}
+      var dateStr=e.date||'\u2014';
+      if(e.timestamp){try{var d=new Date(e.timestamp);dateStr=d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',timeZone:'Europe/Moscow'})}catch(ex){}}
+      var trafficStr=e.type==='charge'&&e.delta_gb!==undefined?e.delta_gb.toFixed(3):'\u2014';
+      var balAfter=e.balance_after!==undefined?e.balance_after.toFixed(2)+' \u20BD':'\u2014';
+      var note=e.note||'';
+      h+='<tr style="border-bottom:1px solid var(--border)">';
+      h+='<td style="padding:3px 6px;white-space:nowrap">'+dateStr+'</td>';
+      h+='<td style="padding:3px 6px;text-align:center;'+typeColor+';font-weight:500">'+typeLabel+'</td>';
+      h+='<td style="padding:3px 6px;text-align:right;'+amountColor+';font-weight:600">'+amountStr+'</td>';
+      h+='<td style="padding:3px 6px;text-align:right">'+trafficStr+'</td>';
+      h+='<td style="padding:3px 6px;text-align:right">'+balAfter+'</td>';
+      h+='<td style="padding:3px 6px;color:var(--text-3);font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(note)+'">'+esc(note)+'</td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table></div></div>';
+    area.innerHTML=h;
+  }).catch(function(e){area.innerHTML='<div style="color:var(--danger);padding:4px">'+e.message+'</div>'});
 }
 
 // ========== ANALYTICS ==========
@@ -1441,7 +1661,7 @@ function uploadDocument(clientId){
   var reader=new FileReader();
   reader.onload=function(e){
     var base64=e.target.result.split(',')[1];
-    fetch(API+'/api/admin/clients/'+clientId+'/document',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({name:file.name,data:base64})}).then(function(r){return r.json()}).then(function(d){
+    fetch(API+'/api/admin/clients/'+clientId+'/document',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({name:file.name,fileBase64:base64,mimeType:file.type})}).then(function(r){return r.json()}).then(function(d){
       if(d.ok){showToast('Документ загружен','success');loadData()}else showToast(d.error||'Ошибка','error');
     }).catch(function(e){showToast(e.message,'error')});
   };
@@ -1452,6 +1672,592 @@ function deleteDocument(clientId,docId){
   fetch(API+'/api/admin/clients/'+clientId+'/document/'+docId,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
     if(d.ok){showToast('Удалён','success');loadData()}else showToast(d.error||'Ошибка','error');
   });
+}
+
+// ========== CLIENT OPERATIONS MODAL ==========
+var currentOpsClientId = null;
+
+function openClientOpsModal(clientId, tab) {
+  currentOpsClientId = clientId;
+  var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
+  document.getElementById('clientOpsTitle').textContent = client ? client.name : 'Клиент';
+  document.getElementById('clientOpsModal').classList.add('show');
+  switchOpsTab(tab || 'history');
+}
+
+function closeClientOpsModal() {
+  document.getElementById('clientOpsModal').classList.remove('show');
+  currentOpsClientId = null;
+}
+document.getElementById('clientOpsModal').addEventListener('click', function(e) { if (e.target === this) closeClientOpsModal(); });
+
+function switchOpsTab(tab) {
+  document.getElementById('opsTab_history').classList.toggle('active', tab === 'history');
+  document.getElementById('opsTab_documents').classList.toggle('active', tab === 'documents');
+  document.getElementById('opsTab_acts').classList.toggle('active', tab === 'acts');
+  if (tab === 'history') renderOpsHistory(currentOpsClientId);
+  else if (tab === 'documents') renderOpsDocuments(currentOpsClientId);
+  else if (tab === 'acts') renderOpsActs(currentOpsClientId);
+}
+
+function renderOpsHistory(clientId) {
+  var body = document.getElementById('clientOpsBody');
+  body.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:40px;text-align:center">Загрузка операций...</div>';
+  fetch(API + '/api/admin/clients/' + clientId + '/ledger', { headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var entries = data.entries || [];
+      entries.forEach(function(e, i) { e._origIndex = i; });
+      entries.sort(function(a, b) { return (b.timestamp || b.date || '').localeCompare(a.timestamp || a.date || ''); });
+      var client = (currentData.clients || []).find(function(x) { return x.id === clientId; });
+      var bal = client ? (client.balance !== undefined ? client.balance : 0) : 0;
+      var balColor = bal >= 0 ? 'var(--success)' : 'var(--danger)';
+      var h = '<div style="display:flex;gap:12px;align-items:stretch;margin-bottom:12px">';
+      h += '<div style="flex:1;padding:10px 12px;background:var(--bg-3);border-radius:8px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">';
+      h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Сумма</label><input class="form-input" type="number" id="opsPayAmount" placeholder="5000" style="width:100px;font-size:12px;padding:4px 8px"></div>';
+      h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Дата</label><input class="form-input" type="date" id="opsPayDate" value="' + new Date().toISOString().slice(0, 10) + '" style="width:130px;font-size:12px;padding:4px 8px"></div>';
+      h += '<div style="flex:1;min-width:100px"><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Комментарий</label><input class="form-input" id="opsPayNote" placeholder="Пополнение" style="width:100%;font-size:12px;padding:4px 8px"></div>';
+      h += '<button class="btn btn-success btn-sm" onclick="addPaymentFromModal(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px">+ Пополнить</button>';
+      h += '</div>';
+      h += '<div style="padding:10px 16px;background:var(--bg-3);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:100px"><div style="font-size:10px;color:var(--text-2)">Баланс</div><div style="font-size:20px;font-weight:700;color:' + balColor + '">' + Math.round(bal) + ' \u20BD</div></div>';
+      h += '</div>';
+      if (!entries.length) {
+        h += '<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Нет операций</div>';
+      } else {
+      h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Тип</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">ГБ</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">Баланс</th><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Примечание</th><th style="padding:8px 10px;text-align:center;color:var(--text-2);width:30px"></th></tr></thead><tbody>';
+      entries.forEach(function(e, eIdx) {
+        var typeLabel = '', typeColor = '', amountStr = '', amountColor = '';
+        if (e.type === 'charge') { typeLabel = 'Списание'; typeColor = 'color:var(--danger)'; amountStr = '-' + ((e.cost || 0).toFixed(2)) + ' \u20BD'; amountColor = 'color:var(--danger)'; }
+        else if (e.type === 'payment') { typeLabel = 'Пополнение'; typeColor = 'color:var(--success)'; amountStr = '+' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--success)'; }
+        else if (e.type === 'payment_reversal') { typeLabel = 'Отмена'; typeColor = 'color:var(--warning)'; amountStr = (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--warning)'; }
+        else if (e.type === 'adjustment') { typeLabel = 'Коррекция'; typeColor = 'color:var(--accent)'; amountStr = ((e.amount || 0) >= 0 ? '+' : '') + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = (e.amount || 0) >= 0 ? 'color:var(--success)' : 'color:var(--danger)'; }
+        else if (e.type === 'bank_payment') { typeLabel = '\u{1F3E6} \u0411\u0430\u043D\u043A'; typeColor = 'color:#6366f1'; amountStr = '+' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--success)'; }
+        else { typeLabel = e.type || '\u2014'; amountStr = (e.cost || e.amount || 0) + ' \u20BD'; }
+        var dateStr = '\u2014';
+        var dateSource = e.date || e.timestamp;
+        if (dateSource) { try { var d = new Date(dateSource); if (!isNaN(d.getTime())) { dateStr = d.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'Europe/Moscow' }); } } catch (ex) {} }
+        var trafficStr = e.type === 'charge' && e.delta_gb !== undefined ? e.delta_gb.toFixed(3) : '\u2014';
+        var balAfter = e.balance_after !== undefined ? e.balance_after.toFixed(2) + ' \u20BD' : '\u2014';
+        var note = e.note || '';
+        h += '<tr style="border-bottom:1px solid var(--border)">';
+        h += '<td style="padding:6px 10px;white-space:nowrap">' + dateStr + '</td>';
+        h += '<td style="padding:6px 10px;text-align:center;' + typeColor + ';font-weight:500">' + typeLabel + '</td>';
+        h += '<td style="padding:6px 10px;text-align:right;' + amountColor + ';font-weight:600">' + amountStr + '</td>';
+        h += '<td style="padding:6px 10px;text-align:right">' + trafficStr + '</td>';
+        h += '<td style="padding:6px 10px;text-align:right">' + balAfter + '</td>';
+        h += '<td style="padding:6px 10px;color:var(--text-3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(note) + '">' + esc(note) + '</td>';
+        h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:transparent;color:var(--danger);border:1px solid var(--danger)" onclick="deleteLedgerEntry(\'' + clientId + '\',' + e._origIndex + ')" title="\u0423\u0434\u0430\u043B\u0438\u0442\u044C">\u2716</button></td>';
+        h += '</tr>';
+      });
+      h += '</tbody></table>';
+      }
+      body.innerHTML = h;
+    })
+    .catch(function(e) { body.innerHTML = '<div style="color:var(--danger);padding:20px">' + e.message + '</div>'; });
+}
+
+function renderOpsDocuments(clientId) {
+  var body = document.getElementById('clientOpsBody');
+  var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
+  var docs = client ? client.documents || [] : [];
+  var h = '<div style="padding:8px 0">';
+  if (docs.length) {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Документ</th><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
+    docs.forEach(function(d) {
+      h += '<tr style="border-bottom:1px solid var(--border)">';
+      h += '<td style="padding:6px 10px">' + esc(d.name) + '</td>';
+      h += '<td style="padding:6px 10px;color:var(--text-3)">' + new Date(d.date).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' }) + '</td>';
+      h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-danger btn-sm" onclick="deleteDocumentModal(\'' + clientId + '\',\'' + d.id + '\')">Удалить</button></td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+  } else {
+    h += '<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Нет загруженных документов</div>';
+  }
+  h += '<div style="padding:16px 0;border-top:1px solid var(--border);margin-top:12px;display:flex;align-items:center;gap:8px">';
+  h += '<input type="file" id="docFileModal" style="font-size:12px;flex:1">';
+  h += '<button class="btn btn-primary btn-sm" onclick="uploadDocumentModal(\'' + clientId + '\')">Загрузить</button>';
+  h += '</div></div>';
+  body.innerHTML = h;
+}
+
+function uploadDocumentModal(clientId) {
+  var fileInput = document.getElementById('docFileModal');
+  if (!fileInput || !fileInput.files.length) { showToast('Выберите файл', 'error'); return; }
+  var file = fileInput.files[0];
+  var reader = new FileReader();
+  reader.onload = function(e) {
+    var base64 = e.target.result.split(',')[1];
+    fetch(API + '/api/admin/clients/' + clientId + '/document', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ name: file.name, fileBase64: base64, mimeType: file.type }) })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.ok) { showToast('Документ загружен', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
+        else showToast(d.error || 'Ошибка', 'error');
+      }).catch(function(e) { showToast(e.message, 'error'); });
+  };
+  reader.readAsDataURL(file);
+}
+
+function deleteLedgerEntry(clientId, entryIndex) {
+  if (!confirm('\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u044D\u0442\u0443 \u043E\u043F\u0435\u0440\u0430\u0446\u0438\u044E? \u0411\u0430\u043B\u0430\u043D\u0441 \u0431\u0443\u0434\u0435\u0442 \u043F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u0430\u043D.')) return;
+  fetch(API + '/api/admin/clients/' + clientId + '/ledger/' + entryIndex, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('\u041E\u043F\u0435\u0440\u0430\u0446\u0438\u044F \u0443\u0434\u0430\u043B\u0435\u043D\u0430', 'success'); renderOpsHistory(clientId); loadData(); }
+      else showToast(d.error || '\u041E\u0448\u0438\u0431\u043A\u0430', 'error');
+    });
+}
+
+function addPaymentFromModal(clientId) {
+  var amount = document.getElementById('opsPayAmount').value;
+  var date = document.getElementById('opsPayDate').value;
+  var note = document.getElementById('opsPayNote').value;
+  if (!amount || !date) return showToast('Заполните сумму и дату', 'error');
+  fetch(API + '/api/admin/clients/' + clientId + '/payment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ amount: amount, date: date, note: note }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('Платёж добавлен', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsHistory(clientId); }, 1500); }
+      else showToast(d.error, 'error');
+    }).catch(function(e) { showToast(e.message, 'error'); });
+}
+
+function deleteDocumentModal(clientId, docId) {
+  if (!confirm('Удалить документ?')) return;
+  fetch(API + '/api/admin/clients/' + clientId + '/document/' + docId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
+      else showToast(d.error || 'Ошибка', 'error');
+    });
+}
+
+// ========== CLOSING DOCUMENTS (ACTS) ==========
+function renderOpsActs(clientId) {
+  var body = document.getElementById('clientOpsBody');
+  var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
+  var docs = client ? client.closingDocuments || [] : [];
+  docs = docs.slice().sort(function(a, b) { return (b.period || '').localeCompare(a.period || ''); });
+  var h = '<div style="padding:8px 0">';
+  // Create act form
+  h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px;padding:10px 12px;background:var(--bg-3);border-radius:8px">';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><input class="form-input" type="month" id="actPeriod" style="width:150px;font-size:12px;padding:4px 8px"></div>';
+  h += '<button class="btn btn-primary btn-sm" onclick="createAct(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px">➕ Создать акт</button>';
+  h += '</div>';
+  if (docs.length) {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Период</th><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Номер</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
+    docs.forEach(function(d) {
+      var isSigned = d.status === 'signed';
+      var statusHtml = isSigned
+        ? '<span style="color:var(--success);font-weight:600">\u2705 Подписан</span>'
+        : '<span style="color:var(--danger);font-weight:600">\u274C Не подписан</span>';
+      var toggleBtn = isSigned
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'unsigned\')">\u274C Снять подпись</button>'
+        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'signed\')">\u2705 Подписан</button>';
+      var pdfBtn = d.tochkaDocumentId
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadActPdf(\'' + clientId + '\',\'' + d.id + '\')">📥 PDF</button>'
+        : '<span style="font-size:10px;color:var(--text-3)">нет PDF</span>';
+      h += '<tr style="border-bottom:1px solid var(--border);' + (isSigned ? '' : 'background:rgba(220,38,38,0.05)') + '">';
+      h += '<td style="padding:6px 10px;font-weight:500">' + esc(d.period) + '</td>';
+      h += '<td style="padding:6px 10px;color:var(--text-3)">' + esc(d.actNumber || '') + '</td>';
+      h += '<td style="padding:6px 10px;text-align:right;font-weight:600">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
+      h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
+      h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\u2715</button></td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+  } else {
+    h += '<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Нет закрывающих документов</div>';
+  }
+  h += '</div>';
+  body.innerHTML = h;
+}
+
+function createAct(clientId) {
+  var period = document.getElementById('actPeriod').value;
+  if (!period) return showToast('Выберите период', 'error');
+  fetch(API + '/api/admin/tochka/create_act', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ clientId: clientId, period: period }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('Акт создан', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsActs(clientId); }, 1500); }
+      else showToast(d.error || 'Ошибка', 'error');
+    }).catch(function(e) { showToast(e.message, 'error'); });
+}
+
+function toggleActStatus(clientId, docId, status) {
+  fetch(API + '/api/admin/clients/' + clientId + '/closing_document_status', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ docId: docId, status: status }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast(status === 'signed' ? 'Отмечен как подписанный' : 'Подпись снята', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsActs(clientId); }, 1500); }
+      else showToast(d.error || 'Ошибка', 'error');
+    });
+}
+
+function downloadActPdf(clientId, docId) {
+  window.open(API + '/api/admin/clients/' + clientId + '/closing_documents/' + docId + '/pdf?token=' + authToken, '_blank');
+}
+
+function deleteAct(clientId, docId) {
+  if (!confirm('Удалить закрывающий документ?')) return;
+  fetch(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsActs(clientId); }, 1500); }
+      else showToast(d.error || 'Ошибка', 'error');
+    });
+}
+
+// ========== BANK CONFIG (Tochka) ==========
+function renderBankConfig() {
+  var container = document.getElementById('bankConfigSection');
+  if (!container) return;
+  var tc = currentData.tochkaConfig || {};
+  var tochkaOk = currentData.tochkaConfigured;
+  var h = '<div class="detail-card">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
+  h += '<h3 style="margin:0">\u{1F3E6} \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0422\u043E\u0447\u043A\u0430 \u0411\u0430\u043D\u043A</h3>';
+  if (tochkaOk) {
+    h += '<span class="badge" style="background:var(--success);color:#fff;font-size:11px;padding:3px 10px;border-radius:8px">\u2705 API \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0451\u043D</span>';
+  } else {
+    h += '<span class="badge" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px;border-radius:8px">\u274C API \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D</span>';
+  }
+  h += '</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px;font-weight:600">JWT \u0422\u043E\u043A\u0435\u043D *</label><input class="form-input" id="bankJwt" placeholder="\u0412\u0441\u0442\u0430\u0432\u044C\u0442\u0435 JWT \u0442\u043E\u043A\u0435\u043D" style="font-size:12px" value="' + esc(tc.jwt || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px;font-weight:600">Client ID *</label><input class="form-input" id="bankClientId" placeholder="client_id" style="font-size:12px" value="' + esc(tc.clientId || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Customer Code</label><input class="form-input" id="bankCustomerCode" placeholder="customer_code" style="font-size:12px" value="' + esc(tc.customerCode || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Account ID</label><input class="form-input" id="bankAccountId" placeholder="account_id" style="font-size:12px" value="' + esc(tc.accountId || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438</label><input class="form-input" id="bankCompanyName" placeholder=\'\u041E\u041E\u041E "\u041A\u043E\u043C\u043F\u0430\u043D\u0438\u044F"\' style="font-size:12px" value="' + esc(tc.companyName || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">\u0418\u041D\u041D \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438</label><input class="form-input" id="bankCompanyInn" placeholder="1234567890" style="font-size:12px" value="' + esc(tc.companyInn || '') + '"></div>';
+  h += '</div>';
+  h += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
+  h += '<button class="btn btn-primary" onclick="saveBankConfig()">\u{1F4BE} \u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C</button>';
+  if (tochkaOk) {
+    h += '<button class="btn" style="background:#f59e0b;color:#fff" onclick="autodetectBank()">\u{1F50D} \u0410\u0432\u0442\u043E\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C</button>';
+    h += '<button class="btn btn-success" onclick="registerWebhook()">\u{1F517} \u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C webhook</button>';
+    h += '<button class="btn" style="background:#6366f1;color:#fff" onclick="syncPayments()">\u{1F504} \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u043B\u0430\u0442\u0435\u0436\u0438</button>';
+  }
+  h += '</div>';
+  if (tochkaOk) {
+    h += '<div style="margin-top:12px;padding:10px;background:var(--bg-3);border-radius:8px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">';
+    h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">\u0421 \u0434\u0430\u0442\u044B</label><input class="form-input" type="date" id="syncDateFrom" value="2024-01-01" style="font-size:12px;padding:4px 8px"></div>';
+    h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">\u041F\u043E \u0434\u0430\u0442\u0443</label><input class="form-input" type="date" id="syncDateTo" value="' + new Date().toISOString().slice(0, 10) + '" style="font-size:12px;padding:4px 8px"></div>';
+    h += '<div id="syncStatus" style="font-size:12px;color:var(--text-3)"></div>';
+    h += '</div>';
+  }
+  h += '</div>';
+  container.innerHTML = h;
+  // Load full config (with unmasked jwt) for editing
+  fetch(API + '/api/admin/tochka/config', { headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(cfg) {
+      if (cfg.jwt) document.getElementById('bankJwt').value = cfg.jwt;
+      if (cfg.clientId) document.getElementById('bankClientId').value = cfg.clientId;
+      if (cfg.customerCode) document.getElementById('bankCustomerCode').value = cfg.customerCode;
+      if (cfg.accountId) document.getElementById('bankAccountId').value = cfg.accountId;
+      if (cfg.companyName) document.getElementById('bankCompanyName').value = cfg.companyName;
+      if (cfg.companyInn) document.getElementById('bankCompanyInn').value = cfg.companyInn;
+    }).catch(function() {});
+}
+
+function saveBankConfig() {
+  var data = {
+    jwt: document.getElementById('bankJwt').value,
+    clientId: document.getElementById('bankClientId').value,
+    customerCode: document.getElementById('bankCustomerCode').value,
+    accountId: document.getElementById('bankAccountId').value,
+    companyName: document.getElementById('bankCompanyName').value,
+    companyInn: document.getElementById('bankCompanyInn').value
+  };
+  fetch(API + '/api/admin/tochka/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('\u041A\u043E\u043D\u0444\u0438\u0433 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D. \u041F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u0435\u0440\u0432\u0435\u0440 \u0434\u043B\u044F \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0438\u044F', 'success'); loadData(); }
+      else showToast(d.error || '\u041E\u0448\u0438\u0431\u043A\u0430', 'error');
+    });
+}
+
+function autodetectBank() {
+  showToast('\u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u044E \u0434\u0430\u043D\u043D\u044B\u0435 \u0438\u0437 \u0422\u043E\u0447\u043A\u0438...', 'info');
+  fetch(API + '/api/admin/tochka/autodetect', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok && d.detected) {
+        var det = d.detected;
+        var msg = '\u041D\u0430\u0439\u0434\u0435\u043D\u043E:';
+        if (det.customerCode) { document.getElementById('bankCustomerCode').value = det.customerCode; msg += ' CustomerCode=' + det.customerCode; }
+        if (det.accountId) { document.getElementById('bankAccountId').value = det.accountId; msg += ' AccountID=' + det.accountId; }
+        if (det.companyName) { document.getElementById('bankCompanyName').value = det.companyName; msg += ' ' + det.companyName; }
+        if (det.companyInn) { document.getElementById('bankCompanyInn').value = det.companyInn; }
+        showToast(msg, 'success');
+        loadData();
+        setTimeout(function() { renderBankConfig(); }, 500);
+      } else {
+        showToast(d.error || '\u041D\u0435 \u0443\u0434\u0430\u043B\u043E\u0441\u044C \u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C', 'error');
+      }
+    })
+    .catch(function(e) { showToast(e.message, 'error'); });
+}
+
+function registerWebhook() {
+  var url = window.location.origin + '/api/tochka/webhook';
+  if (!confirm('\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C webhook?\n\nURL: ' + url)) return;
+  fetch(API + '/api/admin/tochka/register_webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ webhookUrl: url }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) showToast('Webhook \u0437\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043E\u0432\u0430\u043D!', 'success');
+      else showToast(d.error || '\u041E\u0448\u0438\u0431\u043A\u0430', 'error');
+    });
+}
+
+function syncPayments() {
+  var dateFrom = document.getElementById('syncDateFrom') ? document.getElementById('syncDateFrom').value : '2024-01-01';
+  var dateTo = document.getElementById('syncDateTo') ? document.getElementById('syncDateTo').value : new Date().toISOString().slice(0, 10);
+  var statusEl = document.getElementById('syncStatus');
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">\u23F3 \u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u044E \u0432\u044B\u043F\u0438\u0441\u043A\u0443... (\u0434\u043E 30 \u0441\u0435\u043A)</span>';
+  fetch(API + '/api/admin/tochka/sync', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ dateFrom: dateFrom, dateTo: dateTo }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        var msg = '\u2705 \u0413\u043E\u0442\u043E\u0432\u043E! \u0412\u0441\u0435\u0433\u043E: ' + d.total + ', \u0438\u043C\u043F\u043E\u0440\u0442: ' + d.imported + ', \u043F\u0440\u0438\u0432\u044F\u0437\u0430\u043D\u043E: ' + d.matched + ', \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E: ' + d.skipped;
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">' + msg + '</span>';
+        showToast(msg, 'success');
+        loadData();
+      } else {
+        var errMsg = d.error || '\u041E\u0448\u0438\u0431\u043A\u0430';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + errMsg + '</span>';
+        showToast(errMsg, 'error');
+      }
+    })
+    .catch(function(e) {
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + e.message + '</span>';
+      showToast(e.message, 'error');
+    });
+}
+
+// ========== BANK DOCUMENTS (Closing Documents / Акты) ==========
+function renderBankDocuments() {
+  var container = document.getElementById('bankDocumentsSection');
+  if (!container) return;
+  var tochkaOk = currentData.tochkaConfigured;
+  var h = '<div class="detail-card">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+  h += '<h3 style="margin:0">📃 Документооборот</h3>';
+  h += '</div>';
+
+  // Bulk generation form
+  h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px;padding:10px 12px;background:var(--bg-3);border-radius:8px;flex-wrap:wrap">';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><input class="form-input" type="month" id="bulkActPeriod" style="width:160px;font-size:12px;padding:4px 8px"></div>';
+  h += '<button class="btn btn-primary btn-sm" onclick="generateBulkActs()" style="white-space:nowrap;padding:4px 12px">📃 Сгенерировать акты для всех клиентов</button>';
+  h += '<div id="bulkActStatus" style="font-size:12px;color:var(--text-3)"></div>';
+  h += '</div>';
+
+  // Load and display all acts
+  h += '<div id="allActsList"><div style="color:var(--text-3);font-size:12px;text-align:center;padding:10px">Загрузка...</div></div>';
+  h += '</div>';
+  container.innerHTML = h;
+  loadAllActs();
+}
+
+function loadAllActs() {
+  fetch(API + '/api/admin/tochka/all_acts', { headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var docs = data.documents || [];
+      var el = document.getElementById('allActsList');
+      if (!el) return;
+      if (!docs.length) {
+        el.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:20px;text-align:center">Закрывающих документов пока нет. Выберите период и нажмите «Сгенерировать акты».</div>';
+        return;
+      }
+      // Group by period
+      var periods = {};
+      docs.forEach(function(d) {
+        var p = d.period || 'unknown';
+        if (!periods[p]) periods[p] = [];
+        periods[p].push(d);
+      });
+      var sortedPeriods = Object.keys(periods).sort(function(a, b) { return b.localeCompare(a); });
+      var months = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+      var h = '';
+      sortedPeriods.forEach(function(period, pi) {
+        var pdocs = periods[period];
+        var totalSum = pdocs.reduce(function(s, d) { return s + (d.totalAmount || 0); }, 0);
+        var unsigned = pdocs.filter(function(d) { return d.status !== 'signed'; }).length;
+        var signed = pdocs.length - unsigned;
+        var parts = period.split('-');
+        var monthLabel = months[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
+        var isOpen = pi === 0;
+        h += '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden">';
+        h += '<div onclick="toggleActPeriod(this)" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg-3);user-select:none">';
+        h += '<div style="display:flex;align-items:center;gap:10px">';
+        h += '<span style="font-size:14px;transition:transform .2s;transform:rotate(' + (isOpen ? '90' : '0') + 'deg)">▶</span>';
+        h += '<span style="font-weight:600;font-size:14px">' + esc(monthLabel) + '</span>';
+        h += '<span style="font-size:11px;color:var(--text-3)">' + pdocs.length + ' акт' + (pdocs.length > 1 ? (pdocs.length < 5 ? 'а' : 'ов') : '') + '</span>';
+        h += '</div>';
+        h += '<div style="display:flex;align-items:center;gap:12px">';
+        h += '<span style="font-weight:600;font-size:13px">' + totalSum.toLocaleString('ru-RU') + ' ₽</span>';
+        if (unsigned > 0) h += '<span style="background:var(--danger);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + unsigned + ' не подписан</span>';
+        if (signed > 0) h += '<span style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + signed + ' подписан</span>';
+        h += '</div></div>';
+        h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0">';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
+        pdocs.forEach(function(d) {
+          var isSigned = d.status === 'signed';
+          var statusHtml = isSigned
+            ? '<span style="color:var(--success);font-weight:600">✅ Подписан</span>'
+            : '<span style="color:var(--danger);font-weight:600">❌ Не подписан</span>';
+          var toggleBtn = isSigned
+            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + d.clientId + '\',\'' + d.id + '\',\'unsigned\')">❌</button>'
+            : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + d.clientId + '\',\'' + d.id + '\',\'signed\')">✅</button>';
+          var pdfBtn = d.tochkaDocumentId
+            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadActPdf(\'' + d.clientId + '\',\'' + d.id + '\')">📥</button>'
+            : '';
+          h += '<tr style="border-bottom:1px solid var(--border);' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
+          h += '<td style="padding:6px 10px;font-weight:500">' + esc(d.clientName || '') + '</td>';
+          h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.clientInn || '') + '</td>';
+          h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
+          h += '<td style="padding:6px 10px;text-align:right;font-weight:600">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' ₽</td>';
+          h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
+          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">✕</button></td>';
+          h += '</tr>';
+        });
+        h += '</tbody></table></div></div>';
+      });
+      el.innerHTML = h;
+    }).catch(function(e) {
+      var el = document.getElementById('allActsList');
+      if (el) el.innerHTML = '<div style="color:var(--danger);font-size:12px;padding:10px">' + esc(e.message) + '</div>';
+    });
+}
+
+function toggleActPeriod(header) {
+  var content = header.nextElementSibling;
+  var arrow = header.querySelector('span');
+  if (content.style.display === 'none') {
+    content.style.display = 'block';
+    arrow.style.transform = 'rotate(90deg)';
+  } else {
+    content.style.display = 'none';
+    arrow.style.transform = 'rotate(0deg)';
+  }
+}
+
+function generateBulkActs() {
+  var period = document.getElementById('bulkActPeriod').value;
+  if (!period) return showToast('Выберите период', 'error');
+  var statusEl = document.getElementById('bulkActStatus');
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">⏳ Генерирую акты...</span>';
+  fetch(API + '/api/admin/tochka/generate_acts', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ period: period }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        var msg = '✅ Создано: ' + d.generated + ', пропущено: ' + d.skipped;
+        if (d.errors > 0) msg += ', ошибок: ' + d.errors;
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">' + msg + '</span>';
+        showToast(msg, 'success');
+        loadData();
+        setTimeout(function() { loadAllActs(); }, 1500);
+      } else {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + (d.error || 'Ошибка') + '</span>';
+        showToast(d.error || 'Ошибка', 'error');
+      }
+    }).catch(function(e) {
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + e.message + '</span>';
+      showToast(e.message, 'error');
+    });
+}
+
+function deleteActFromBank(clientId, docId) {
+  if (!confirm('Удалить закрывающий документ?')) return;
+  fetch(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { loadAllActs(); }, 1500); }
+      else showToast(d.error || 'Ошибка', 'error');
+    });
+}
+
+// ========== BANK PAYMENTS (Tochka) ==========
+function renderBankPayments() {
+  var container = document.getElementById('bankPaymentsSection');
+  if (!container) return;
+  var bp = currentData.bankPayments || [];
+  var tochkaOk = currentData.tochkaConfigured;
+  var h = '<div class="detail-card">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+  h += '<h3 style="margin:0">\u{1F3E6} Банк Точка</h3>';
+  if (tochkaOk) {
+    h += '<span class="badge" style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:8px">API подключён</span>';
+  } else {
+    h += '<span class="badge" style="background:var(--danger);color:#fff;font-size:10px;padding:2px 8px;border-radius:8px">API не настроен</span>';
+  }
+  h += '</div>';
+  var unmatched = bp.filter(function(p) { return !p.matched && !p.dismissed && p.webhookType === 'incomingPayment'; });
+  if (unmatched.length > 0) {
+    h += '<div style="background:rgba(220,38,38,0.1);border:1px solid var(--danger);border-radius:8px;padding:10px;margin-bottom:12px">';
+    h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
+    h += '<span style="font-weight:600;color:var(--danger)">\u26A0\uFE0F \u041D\u0435\u043E\u043F\u043E\u0437\u043D\u0430\u043D\u043D\u044B\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438: ' + unmatched.length + '</span>';
+    h += '<button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg-3)" onclick="dismissAllUnmatched()">\u2716 \u0423\u0431\u0440\u0430\u0442\u044C \u0432\u0441\u0435</button>';
+    h += '</div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:left">\u0418\u041D\u041D</th><th style="padding:4px 6px;text-align:right">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435</th><th style="padding:4px 6px">\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F</th></tr></thead><tbody>';
+    unmatched.forEach(function(p) {
+      h += '<tr style="border-bottom:1px solid var(--border)">';
+      h += '<td style="padding:4px 6px">' + esc(p.date) + '</td>';
+      h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
+      h += '<td style="padding:4px 6px">' + esc(p.payerInn) + '</td>';
+      h += '<td style="padding:4px 6px;text-align:right;font-weight:600;white-space:nowrap">' + p.amount + ' \u20BD</td>';
+      h += '<td style="padding:4px 6px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(p.purpose) + '">' + esc(p.purpose || '') + '</td>';
+      h += '<td style="padding:4px 6px;white-space:nowrap"><select id="matchClient_' + p.id + '" style="font-size:10px;padding:2px;max-width:100px">';
+      h += '<option value="">---</option>';
+      (currentData.clients || []).forEach(function(c) { h += '<option value="' + c.id + '">' + esc(c.name) + '</option>'; });
+      h += '</select> <button class="btn btn-sm btn-primary" style="font-size:9px;padding:1px 6px" onclick="matchPayment(\'' + p.id + '\')">OK</button>';
+      h += ' <button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:var(--bg-3)" onclick="dismissPayment(\'' + p.id + '\')" title="\u0423\u0431\u0440\u0430\u0442\u044C">\u2716</button></td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table></div>';
+  }
+  var matched = bp.filter(function(p) { return p.matched && p.webhookType === 'incomingPayment'; }).slice(0, 30);
+  if (matched.length > 0) {
+    h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438</div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:right">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041A\u043B\u0438\u0435\u043D\u0442</th></tr></thead><tbody>';
+    matched.forEach(function(p) {
+      h += '<tr style="border-bottom:1px solid var(--border)">';
+      h += '<td style="padding:4px 6px">' + esc(p.date) + '</td>';
+      h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
+      h += '<td style="padding:4px 6px;text-align:right;font-weight:500">' + p.amount + ' \u20BD</td>';
+      h += '<td style="padding:4px 6px;color:var(--success);font-weight:500">\u2705 ' + esc(p.matchedClientName || '') + '</td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+  } else if (tochkaOk) {
+    h += '<div style="color:var(--text-3);font-size:12px;padding:20px;text-align:center">\u041F\u043B\u0430\u0442\u0435\u0436\u0435\u0439 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442</div>';
+  }
+  h += '</div>';
+  container.innerHTML = h;
+}
+
+function matchPayment(paymentId) {
+  var sel = document.getElementById('matchClient_' + paymentId);
+  if (!sel || !sel.value) return showToast('Выберите клиента', 'error');
+  fetch(API + '/api/admin/tochka/match_payment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ paymentId: paymentId, clientId: sel.value }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('Платёж привязан', 'success'); loadData(); }
+      else showToast(d.error || 'Ошибка', 'error');
+    });
+}
+
+function dismissPayment(paymentId) {
+  fetch(API + '/api/admin/tochka/dismiss_payment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ paymentId: paymentId }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) { if (d.ok) { loadData(); } });
+}
+
+function dismissAllUnmatched() {
+  if (!confirm('\u0423\u0431\u0440\u0430\u0442\u044C \u0432\u0441\u0435 \u043D\u0435\u043E\u043F\u043E\u0437\u043D\u0430\u043D\u043D\u044B\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438?')) return;
+  fetch(API + '/api/admin/tochka/dismiss_unmatched', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) { if (d.ok) { showToast('\u0423\u0431\u0440\u0430\u043D\u043E: ' + d.dismissed, 'success'); loadData(); } });
 }
 
 // ========== EDIT PORT CREDENTIALS ==========
@@ -1475,6 +2281,14 @@ function regenerateApiKey(clientId){
   if(!confirm('Перегенерировать API ключ?'))return;
   fetch(API+'/api/admin/clients/'+clientId+'/regenerate_key',{method:'POST',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
     if(d.ok){showToast('Новый ключ: '+d.apiKey,'success');loadData()}else showToast(d.error||'Ошибка','error');
+  });
+}
+function regenerateApiKeyInForm(){
+  var clientId=document.getElementById('clientFormId').value;
+  if(!clientId){showToast('Сначала сохраните клиента','error');return}
+  if(!confirm('Перегенерировать API ключ?'))return;
+  fetch(API+'/api/admin/clients/'+clientId+'/regenerate_key',{method:'POST',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){document.getElementById('cfApiKey').value=d.apiKey;showToast('Ключ обновлён','success');loadData()}else showToast(d.error||'Ошибка','error');
   });
 }
 

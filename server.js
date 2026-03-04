@@ -91,6 +91,188 @@ function saveBillingLedger() {
   catch (e) { console.error('Failed to save billing_ledger:', e.message); }
 }
 
+// ==================== TOCHKA BANK API ====================
+const TOCHKA_CONFIG_FILE = path.join(__dirname, 'tochka_config.json');
+let tochkaConfig = { jwt: '', clientId: '', customerCode: '', accountId: '', companyName: '', companyInn: '', companyKpp: '' };
+try {
+  if (fs.existsSync(TOCHKA_CONFIG_FILE)) {
+    Object.assign(tochkaConfig, JSON.parse(fs.readFileSync(TOCHKA_CONFIG_FILE, 'utf8')));
+  }
+} catch (e) { console.log('[Tochka] Error loading config file:', e.message); }
+// .env overrides file config
+if (process.env.TOCHKA_JWT_TOKEN) tochkaConfig.jwt = process.env.TOCHKA_JWT_TOKEN;
+if (process.env.TOCHKA_CLIENT_ID) tochkaConfig.clientId = process.env.TOCHKA_CLIENT_ID;
+if (process.env.TOCHKA_CUSTOMER_CODE) tochkaConfig.customerCode = process.env.TOCHKA_CUSTOMER_CODE;
+if (process.env.TOCHKA_ACCOUNT_ID) tochkaConfig.accountId = process.env.TOCHKA_ACCOUNT_ID;
+if (process.env.TOCHKA_COMPANY_NAME) tochkaConfig.companyName = process.env.TOCHKA_COMPANY_NAME;
+if (process.env.TOCHKA_COMPANY_INN) tochkaConfig.companyInn = process.env.TOCHKA_COMPANY_INN;
+if (process.env.TOCHKA_COMPANY_KPP) tochkaConfig.companyKpp = process.env.TOCHKA_COMPANY_KPP;
+function saveTochkaConfig() { try { fs.writeFileSync(TOCHKA_CONFIG_FILE, JSON.stringify(tochkaConfig, null, 2)); } catch(e) { console.error('[Tochka] Save config error:', e.message); } }
+if (tochkaConfig.jwt) { saveTochkaConfig(); console.log(`[Tochka] API configured (client_id: ${tochkaConfig.clientId})`); }
+else console.log('[Tochka] No JWT token configured, bank integration disabled');
+
+// Tochka API helper — HTTPS requests to enter.tochka.com
+function tochkaRequest(method, apiPath, body) {
+  return new Promise((resolve, reject) => {
+    const postData = body ? JSON.stringify(body) : null;
+    const headers = {
+      'Authorization': `Bearer ${tochkaConfig.jwt}`,
+      'Content-Type': 'application/json',
+      'Accept': 'application/json'
+    };
+    if (tochkaConfig.customerCode) headers['CustomerCode'] = tochkaConfig.customerCode;
+    if (postData) headers['Content-Length'] = Buffer.byteLength(postData);
+    const req = https.request({
+      hostname: 'enter.tochka.com',
+      port: 443,
+      path: apiPath,
+      method: method,
+      headers,
+      timeout: 30000
+    }, (res) => {
+      const chunks = [];
+      res.on('data', chunk => chunks.push(chunk));
+      res.on('end', () => {
+        const buf = Buffer.concat(chunks);
+        const ct = res.headers['content-type'] || '';
+        if (ct.includes('application/json')) {
+          try { resolve({ status: res.statusCode, data: JSON.parse(buf.toString()), headers: res.headers }); }
+          catch (e) { resolve({ status: res.statusCode, data: buf.toString(), headers: res.headers }); }
+        } else if (ct.includes('application/pdf') || ct.includes('application/octet-stream')) {
+          resolve({ status: res.statusCode, buffer: buf, headers: res.headers });
+        } else {
+          resolve({ status: res.statusCode, data: buf.toString(), headers: res.headers });
+        }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Tochka API timeout')); });
+    if (postData) req.write(postData);
+    req.end();
+  });
+}
+
+// Bank payments log
+const BANK_PAYMENTS_FILE = path.join(__dirname, 'bank_payments.json');
+let bankPayments = [];
+try {
+  if (fs.existsSync(BANK_PAYMENTS_FILE)) {
+    bankPayments = JSON.parse(fs.readFileSync(BANK_PAYMENTS_FILE, 'utf8'));
+  }
+} catch (e) { console.error('Failed to load bank_payments:', e.message); }
+
+function saveBankPayments() {
+  try { fs.writeFileSync(BANK_PAYMENTS_FILE, JSON.stringify(bankPayments, null, 2)); }
+  catch (e) { console.error('Failed to save bank_payments:', e.message); }
+}
+
+// Decode JWT payload (without verification — verification is optional via public key)
+function decodeJwtPayload(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const payload = Buffer.from(parts[1], 'base64url').toString('utf8');
+    return JSON.parse(payload);
+  } catch (e) {
+    // Try standard base64 with padding fix
+    try {
+      const parts = token.split('.');
+      let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
+      while (b64.length % 4) b64 += '=';
+      const payload = Buffer.from(b64, 'base64').toString('utf8');
+      return JSON.parse(payload);
+    } catch (e2) { return null; }
+  }
+}
+
+// Track last act generation month to avoid duplicates
+let lastActGenerationMonth = '';
+
+// Russian month names (prepositional case for "в январе")
+const MONTH_NAMES_RU = ['январе','феврале','марте','апреле','мае','июне','июле','августе','сентябре','октябре','ноябре','декабре'];
+
+// Helper: build Tochka closing document request body
+function buildTochkaActBody(client, period, actItems, actNumber) {
+  const [year, month] = period.split('-').map(Number);
+  const lastDay = new Date(year, month, 0).getDate();
+  const monthNameRu = MONTH_NAMES_RU[month - 1] || '';
+  const serviceName = `Услуги по обеспечению подключения к прокси-серверу в ${monthNameRu} ${year}г`;
+  const totalAmount = actItems.reduce((s, i) => s + (i.amount || 0), 0);
+  const isIP = client.inn && client.inn.length === 12;
+
+  // Build full counterparty name with address (ИНН/КПП добавляется Точкой автоматически)
+  let secondSideName = client.legalName || client.name;
+  if (client.address) {
+    secondSideName += `, ${client.address}`;
+  }
+
+  // Build Act object
+  // NB: поле "Основание" не поддерживается API Точки для закрывающих документов — заполняется вручную
+  const act = {
+    Positions: actItems.map((item, idx) => ({
+      positionName: serviceName,
+      quantity: item.quantity || 1,
+      unitCode: 'услуга.',
+      totalAmount: item.amount || 0,
+      ndsKind: 'without_nds',
+      price: item.amount || 0,
+      positionNumber: idx + 1
+    })),
+    actDate: `${period}-${String(lastDay).padStart(2, '0')}`,
+    number: actNumber,
+    totalAmount: Math.round(totalAmount * 100) / 100
+  };
+
+  return {
+    Data: {
+      accountId: tochkaConfig.accountId,
+      customerCode: tochkaConfig.customerCode,
+      SecondSide: {
+        secondSideType: isIP ? 'individual_entrepreneur' : 'legal_entity',
+        type: isIP ? 'ip' : 'company',
+        inn: client.inn || '',
+        taxCode: client.inn || '',
+        kpp: client.kpp || '',
+        name: secondSideName
+      },
+      Content: {
+        Act: act,
+        PackingList: {},
+        Invoicef: {},
+        Upd: {}
+      }
+    }
+  };
+}
+
+// ==================== DAILY TRAFFIC HISTORY ====================
+const DAILY_TRAFFIC_FILE = path.join(__dirname, 'traffic_daily.json');
+let dailyTraffic = {}; // { portName: { "2026-03-01": { in: bytes, out: bytes }, ... } }
+let lastDailyTrafficDate = '';
+try {
+  if (fs.existsSync(DAILY_TRAFFIC_FILE)) {
+    dailyTraffic = JSON.parse(fs.readFileSync(DAILY_TRAFFIC_FILE, 'utf8'));
+  }
+} catch (e) { console.error('Failed to load daily_traffic:', e.message); }
+
+function saveDailyTraffic() {
+  try { fs.writeFileSync(DAILY_TRAFFIC_FILE, JSON.stringify(dailyTraffic, null, 2)); }
+  catch (e) { console.error('Failed to save daily_traffic:', e.message); }
+}
+
+// Parse traffic value like "10.5 GB" to bytes
+function parseTrafficValue(val) {
+  if (!val || val === '0 B') return 0;
+  if (typeof val === 'number') return val;
+  const str = String(val).trim();
+  const match = str.match(/^([\d.]+)\s*(B|KB|MB|GB|TB)?$/i);
+  if (!match) return 0;
+  const num = parseFloat(match[1]);
+  const unit = (match[2] || 'B').toUpperCase();
+  const mult = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824, TB: 1099511627776 };
+  return num * (mult[unit] || 1);
+}
+
 // ==================== KNOWN MODEMS (persistence for offline detection) ====================
 const KNOWN_MODEMS_FILE = path.join(__dirname, 'known_modems.json');
 let knownModems = {}; // { serverName: { portId: { portName, imei, nick, model, portInfo, lastSeen } } }
@@ -242,6 +424,13 @@ for (const c of clients) {
     c.last_traffic_snapshot = { timestamp: null, month_bytes: 0 };
     clientsMigrated = true;
   }
+  // Tochka Bank integration fields
+  if (c.inn === undefined) { c.inn = ''; clientsMigrated = true; }
+  if (c.kpp === undefined) { c.kpp = ''; clientsMigrated = true; }
+  if (c.legalName === undefined) { c.legalName = ''; clientsMigrated = true; }
+  if (!c.closingDocuments) { c.closingDocuments = []; clientsMigrated = true; }
+  if (c.contractInfo === undefined) { c.contractInfo = ''; clientsMigrated = true; }
+  if (c.address === undefined) { c.address = ''; clientsMigrated = true; }
 }
 if (clientsMigrated) saveClients(clients);
 
@@ -276,6 +465,15 @@ for (const [login, u] of Object.entries(users)) {
       console.log(`  Auto-migrated user ${login} -> client "${u.portNameFilter}"`);
     }
   }
+}
+// Remove any accidentally created tg_ clients (Telegram bot users don't get dashboard accounts)
+const tgClientsRemoved = clients.filter(c => c.portName && c.portName.startsWith('tg_'));
+if (tgClientsRemoved.length > 0) {
+  for (const tc of tgClientsRemoved) {
+    delete users[tc.login];
+    console.log(`  Removed tg_ client "${tc.portName}" from dashboard`);
+  }
+  clients = clients.filter(c => !(c.portName && c.portName.startsWith('tg_')));
 }
 saveClients(clients);
 
@@ -411,7 +609,7 @@ app.use(express.static(path.join(__dirname, 'public')));
 // ==================== AUTH ====================
 
 function authMiddleware(req, res, next) {
-  const token = req.headers['x-auth-token'];
+  const token = req.headers['x-auth-token'] || req.query.token;
   const sess = token ? sessions[token] : null;
   if (!sess || sess.expiresAt < Date.now()) {
     if (sess) { delete sessions[token]; saveSessions(); }
@@ -529,6 +727,31 @@ function postApi(server, apiPath, body, timeout = 10000) {
     req.on('error', (err) => reject(err));
     req.on('timeout', () => { req.destroy(); reject(new Error('Timeout from ' + server.name)); });
     req.write(postData);
+    req.end();
+  });
+}
+
+function postFormApi(server, apiPath, formData, timeout = 10000) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(apiPath, server.url);
+    const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
+    const req = http.request({
+      hostname: url.hostname, port: url.port,
+      path: url.pathname + url.search, method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(formData)
+      },
+      timeout
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout from ' + server.name)); });
+    req.write(formData);
     req.end();
   });
 }
@@ -677,9 +900,14 @@ function mergeServerData(allData, portNameFilter) {
     const prefix = data.serverName + '_';
     const isCached = !!data._cached;
     if (isCached) cachedServers.push({ name: data.serverName, cachedAt: data._cachedAt });
-    for (const [portId, b] of Object.entries(filtered.bw)) { mergedBw[prefix + portId] = { ...b, _server: data.serverName, _cached: isCached }; }
+    for (const [portId, b] of Object.entries(filtered.bw)) {
+      if (portId.startsWith('tg_') || (b.portName && b.portName.startsWith('tg_'))) continue; // skip Telegram bot ports
+      mergedBw[prefix + portId] = { ...b, _server: data.serverName, _cached: isCached };
+    }
     const statusArr = Array.isArray(filtered.status) ? filtered.status : [];
     for (const m of statusArr) {
+      // Skip ghost entries from deleted ports (no STATE, no proxy_creds)
+      if (!m.STATE || m.STATE === '?') continue;
       const entry = { ...m, _server: data.serverName };
       if (isCached) entry._cached = true;
       if (entry.modem_details && entry.modem_details.IMEI) {
@@ -690,8 +918,9 @@ function mergeServerData(allData, portNameFilter) {
     const portsObj = typeof filtered.ports === 'object' ? filtered.ports : {};
     for (const [imei, portList] of Object.entries(portsObj)) {
       const prefixedImei = prefix + imei;
-      const prefixedPorts = portList.map(p => ({ ...p, portID: p.portID ? prefix + p.portID : p.portID, _server: data.serverName, _cached: isCached }));
-      mergedPorts[prefixedImei] = (mergedPorts[prefixedImei] || []).concat(prefixedPorts);
+      const filteredPortList = portList.filter(p => !p.portID || (!p.portID.startsWith('tg_') && !(p.portName && p.portName.startsWith('tg_'))));
+      const prefixedPorts = filteredPortList.map(p => ({ ...p, portID: p.portID ? prefix + p.portID : p.portID, _server: data.serverName, _cached: isCached }));
+      if (prefixedPorts.length > 0) mergedPorts[prefixedImei] = (mergedPorts[prefixedImei] || []).concat(prefixedPorts);
     }
   }
   return { bandwidth: mergedBw, status: mergedStatus, ports: mergedPorts, modemLogins, cachedServers };
@@ -834,6 +1063,61 @@ async function trackModems() {
   saveUptimeTracking();
   saveIpHistory();
   console.log(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);
+
+  // Daily traffic snapshot: capture "yesterday" data once per day
+  await captureDailyTrafficSnapshot();
+}
+
+async function captureDailyTrafficSnapshot() {
+  // Use Moscow timezone for date to match billing
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' }); // YYYY-MM-DD
+  if (lastDailyTrafficDate === today) return; // already captured today
+
+  console.log(`[DailyTraffic] Capturing snapshot for today=${today}...`);
+
+  try {
+    const results = await fetchAllServersData();
+    const merged = mergeServerData(results, '*');
+    const bw = merged.bandwidth || {};
+    let captured = 0;
+
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    const yesterdayStr = yesterday.toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
+
+    for (const [portId, b] of Object.entries(bw)) {
+      const pn = b.portName || '';
+      if (pn.startsWith('tg_') || portId.startsWith('tg_')) continue;
+
+      // Key by portId (each modem separately)
+      if (!dailyTraffic[portId]) dailyTraffic[portId] = {};
+
+      // Save yesterday's traffic
+      const yIn = parseTrafficValue(b.bandwidth_bytes_yesterday_in);
+      const yOut = parseTrafficValue(b.bandwidth_bytes_yesterday_out);
+      if ((yIn > 0 || yOut > 0) && !dailyTraffic[portId][yesterdayStr]) {
+        dailyTraffic[portId][yesterdayStr] = { in: yIn, out: yOut, portName: pn };
+        captured++;
+      }
+    }
+
+    // Prune: keep only last 365 days
+    const cutoff = new Date();
+    cutoff.setDate(cutoff.getDate() - 366);
+    const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
+    for (const pid of Object.keys(dailyTraffic)) {
+      for (const d of Object.keys(dailyTraffic[pid])) {
+        if (d < cutoffStr) delete dailyTraffic[pid][d];
+      }
+      if (Object.keys(dailyTraffic[pid]).length === 0) delete dailyTraffic[pid];
+    }
+
+    lastDailyTrafficDate = today;
+    saveDailyTraffic();
+    console.log(`[DailyTraffic] Captured ${captured} port snapshots for ${yesterdayStr} (${Object.keys(bw).length} ports total)`);
+  } catch (e) {
+    console.error('[DailyTraffic] Error:', e.message);
+  }
 }
 
 // ==================== SPEEDTEST HISTORY ====================
@@ -1035,6 +1319,65 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
     res.json(merged);
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
+  }
+});
+
+// ==================== CLIENT: DAILY TRAFFIC HISTORY ====================
+
+app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
+  const clientInfo = clients.find(c => c.login === req.user.login);
+  if (!clientInfo) return res.status(404).json({ error: 'Client not found' });
+
+  const portNameFilter = clientInfo.portName || req.user.portNameFilter;
+  const fromDate = req.query.from || '';
+  const toDate = req.query.to || '';
+  const includeToday = req.query.include_today === '1';
+  const result = {};
+
+  // Collect daily traffic for ports matching this client's portName
+  for (const [portId, days] of Object.entries(dailyTraffic)) {
+    let match = false;
+    if (portNameFilter === '*') {
+      match = true;
+    } else {
+      const firstDay = Object.values(days)[0];
+      if (firstDay && firstDay.portName === portNameFilter) match = true;
+    }
+    if (match) {
+      // Filter by date range
+      const filtered = {};
+      for (const [d, entry] of Object.entries(days)) {
+        if (fromDate && d < fromDate) continue;
+        if (toDate && d > toDate) continue;
+        filtered[d] = entry;
+      }
+      if (Object.keys(filtered).length > 0) {
+        result[portId] = filtered;
+      }
+    }
+  }
+
+  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
+
+  if (includeToday) {
+    // Add today's live data from ProxySmart
+    try {
+      const results = await fetchAllServersData();
+      const merged = mergeServerData(results, portNameFilter);
+      const todayData = {};
+      for (const [portId, b] of Object.entries(merged.bandwidth || {})) {
+        const dIn = parseTrafficValue(b.bandwidth_bytes_day_in);
+        const dOut = parseTrafficValue(b.bandwidth_bytes_day_out);
+        if (dIn > 0 || dOut > 0) {
+          todayData[portId] = { in: dIn, out: dOut, portName: b.portName || '' };
+        }
+      }
+      res.json({ daily: result, today: todayData, todayDate: today });
+    } catch (err) {
+      res.json({ daily: result, today: {}, todayDate: today });
+    }
+  } else {
+    res.json({ daily: result, today: {}, todayDate: today });
   }
 });
 
@@ -1411,7 +1754,13 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       uptimeTracking,
       speedtestLatest: getSpeedtestLatest(),
       ipHistory,
-      settings: appSettings
+      settings: appSettings,
+      telegramUsers: tgUsers,
+      telegramProxies: tgProxies,
+      telegramFeedback: tgFeedback,
+      bankPayments: bankPayments,
+      tochkaConfigured: !!tochkaConfig.jwt,
+      tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp }
     });
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
@@ -1425,7 +1774,7 @@ app.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 app.post('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
-  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, address } = req.body;
   if (!name || !portName || !login || !password) {
     return res.status(400).json({ error: 'name, portName, login, password required' });
   }
@@ -1449,6 +1798,12 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
     documents: [],
     balance: 0,
     last_traffic_snapshot: { timestamp: null, month_bytes: 0 },
+    inn: inn || '',
+    kpp: kpp || '',
+    legalName: legalName || '',
+    contractInfo: contractInfo || '',
+    address: address || '',
+    closingDocuments: [],
     createdAt: new Date().toISOString()
   };
 
@@ -1470,7 +1825,7 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, (req, res) =>
   const idx = clients.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Client not found' });
   const old = clients[idx];
-  const { name, portName, login, password, contact, notes, billingType, price, currency } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address } = req.body;
   if (login && login !== old.login) {
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
     delete users[old.login];
@@ -1485,7 +1840,12 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, (req, res) =>
     notes: notes !== undefined ? notes : old.notes,
     billingType: billingType !== undefined ? billingType : (old.billingType || 'per_gb'),
     price: price !== undefined ? parseFloat(price) : (old.price || 0),
-    currency: currency !== undefined ? currency : (old.currency || 'RUB')
+    currency: currency !== undefined ? currency : (old.currency || 'RUB'),
+    inn: inn !== undefined ? inn : (old.inn || ''),
+    kpp: kpp !== undefined ? kpp : (old.kpp || ''),
+    legalName: legalName !== undefined ? legalName : (old.legalName || ''),
+    contractInfo: contractInfo !== undefined ? contractInfo : (old.contractInfo || ''),
+    address: address !== undefined ? address : (old.address || '')
   };
   clients[idx] = updated;
   saveClients(clients);
@@ -1629,8 +1989,35 @@ app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, 
   res.json({
     balance: client.balance,
     last_snapshot: client.last_traffic_snapshot,
-    entries: entries.slice(-100) // last 100 entries
+    entries: entries
   });
+});
+
+// Delete ledger entry + revert balance
+app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const entries = billingLedger[client.id] || [];
+  const idx = parseInt(req.params.entryIndex, 10);
+  if (isNaN(idx) || idx < 0 || idx >= entries.length) return res.status(400).json({ error: 'Invalid entry index' });
+
+  const entry = entries[idx];
+  // Revert balance impact
+  if (entry.type === 'charge' && entry.cost) {
+    client.balance = (client.balance || 0) + entry.cost; // refund charge
+  } else if ((entry.type === 'payment' || entry.type === 'bank_payment') && entry.amount) {
+    client.balance = (client.balance || 0) - entry.amount; // remove payment
+  } else if (entry.type === 'adjustment' && entry.amount) {
+    client.balance = (client.balance || 0) - entry.amount;
+  }
+  client.balance = Math.round(client.balance * 100) / 100;
+
+  entries.splice(idx, 1);
+  billingLedger[client.id] = entries;
+  saveBillingLedger();
+  saveClients();
+  console.log(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, new balance: ${client.balance}`);
+  res.json({ ok: true, newBalance: client.balance });
 });
 
 app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddleware, (req, res) => {
@@ -1944,9 +2331,10 @@ app.post('/api/admin/purge_port', authMiddleware, adminMiddleware, async (req, r
     if (!portId || !serverName) return res.status(400).json({ error: 'portId and serverName required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, `/apix/purge_port?arg=${encodeURIComponent(portId)}`);
+    const result = await fetchApi(server, `/conf/delete_port/${encodeURIComponent(portId)}`);
+    console.log(`[Admin] Deleted port ${portId} from ${serverName} via ProxySmart`);
     res.json({ ok: true, result });
-  } catch (err) { res.status(502).json({ error: 'Purge port failed', details: err.message }); }
+  } catch (err) { res.status(502).json({ error: 'Delete port failed', details: err.message }); }
 });
 
 app.get('/api/admin/free_ports', authMiddleware, adminMiddleware, async (req, res) => {
@@ -2294,6 +2682,13 @@ async function runDailyBilling() {
       continue;
     }
 
+    // Skip billing if not all servers returned data (prevents partial billing)
+    if (results.length < apiServers.length) {
+      console.log(`[Billing] Skipping ${client.name}: only ${results.length}/${apiServers.length} servers returned data`);
+      skipped++;
+      continue;
+    }
+
     // Skip billing if any server with this client's ports has cached/stale data
     const cachedServers = getClientCachedServers(results, client.portName);
     if (cachedServers.length > 0) {
@@ -2403,7 +2798,9 @@ async function autoCreateMissingClients() {
     for (const data of results) {
       if (typeof data.bw === 'object') {
         for (const [portId, b] of Object.entries(data.bw)) {
-          if (b.portName) allPortNames.add(b.portName);
+          if (b.portName && !portId.startsWith('tg_') && !b.portName.startsWith('tg_')) {
+            allPortNames.add(b.portName);
+          }
         }
       }
     }
@@ -2413,7 +2810,9 @@ async function autoCreateMissingClients() {
     for (const data of results) {
       if (typeof data.bw === 'object') {
         for (const [portId, b] of Object.entries(data.bw)) {
-          if (b.portName) portCountMap[b.portName] = (portCountMap[b.portName] || 0) + 1;
+          if (b.portName && !portId.startsWith('tg_') && !b.portName.startsWith('tg_')) {
+            portCountMap[b.portName] = (portCountMap[b.portName] || 0) + 1;
+          }
         }
       }
     }
@@ -2421,6 +2820,7 @@ async function autoCreateMissingClients() {
     let created = 0;
     for (const pn of allPortNames) {
       if (existingPortNames.has(pn)) continue;
+      if (pn.startsWith('tg_')) continue; // Telegram bot clients don't get dashboard accounts
       const login = pn.toLowerCase().replace(/[^a-z0-9_]/g, '_');
       if (users[login]) continue;
 
@@ -2591,6 +2991,824 @@ app.get('/api/docs', (req, res) => {
   });
 });
 
+// ==================== TOCHKA BANK: WEBHOOK (public, no auth) ====================
+
+// Accept raw text body for webhook
+app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
+  console.log('[Tochka Webhook] Received webhook');
+  try {
+    // Body is JWT string
+    const jwtToken = typeof req.body === 'string' ? req.body.trim() : JSON.stringify(req.body);
+    const payload = decodeJwtPayload(jwtToken);
+    if (!payload) {
+      console.error('[Tochka Webhook] Failed to decode JWT payload');
+      return res.status(200).json({ ok: true, processed: false, reason: 'invalid_jwt' });
+    }
+
+    console.log('[Tochka Webhook] Decoded payload:', JSON.stringify(payload).slice(0, 500));
+
+    const webhookType = payload.webhookType || '';
+    const payerInn = payload.SidePayer?.inn || '';
+    const payerName = payload.SidePayer?.name || '';
+    const amount = parseFloat(payload.SidePayer?.amount || payload.amount || '0');
+    const purpose = payload.purpose || '';
+    const paymentId = payload.paymentId || '';
+    const paymentDate = payload.date || new Date().toISOString().slice(0, 10);
+    const customerCode = payload.customerCode || '';
+
+    // Log the payment
+    const bankPayment = {
+      id: crypto.randomBytes(8).toString('hex'),
+      webhookType,
+      payerInn,
+      payerName,
+      amount,
+      purpose,
+      paymentId,
+      date: paymentDate,
+      customerCode,
+      receivedAt: new Date().toISOString(),
+      matched: false,
+      matchedClientId: null,
+      autoCredit: false
+    };
+
+    // Only process incoming payments
+    if (webhookType === 'incomingPayment') {
+      // Find client by INN
+      const matchedClient = payerInn ? clients.find(c => c.inn && c.inn === payerInn) : null;
+
+      if (matchedClient) {
+        bankPayment.matched = true;
+        bankPayment.matchedClientId = matchedClient.id;
+        bankPayment.matchedClientName = matchedClient.name;
+
+        // Auto-credit balance
+        const idx = clients.findIndex(c => c.id === matchedClient.id);
+        if (idx !== -1) {
+          const balanceBefore = clients[idx].balance || 0;
+          clients[idx].balance = Math.round((balanceBefore + amount) * 100) / 100;
+
+          // Add payment record
+          if (!clients[idx].payments) clients[idx].payments = [];
+          clients[idx].payments.push({
+            amount,
+            date: paymentDate,
+            note: `Банк Точка: ${payerName} — ${purpose}`.slice(0, 200),
+            createdAt: new Date().toISOString(),
+            source: 'tochka_webhook',
+            paymentId
+          });
+
+          // Ledger entry
+          const ledgerKey = clients[idx].id;
+          if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
+          billingLedger[ledgerKey].push({
+            type: 'bank_payment',
+            date: paymentDate,
+            timestamp: new Date().toISOString(),
+            amount,
+            currency: 'RUB',
+            balance_before: balanceBefore,
+            balance_after: clients[idx].balance,
+            note: `Банк Точка (ИНН: ${payerInn}): ${purpose}`.slice(0, 300),
+            source: 'tochka_webhook',
+            paymentId
+          });
+
+          // Referral commission
+          if (clients[idx].referred_by) {
+            const referrer = clients.find(c => c.id === clients[idx].referred_by);
+            if (referrer) {
+              const commission = amount * 0.15;
+              referrer.referral_balance = (referrer.referral_balance || 0) + commission;
+            }
+          }
+
+          bankPayment.autoCredit = true;
+          saveClients(clients);
+          saveBillingLedger();
+          console.log(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
+        }
+      } else {
+        console.log(`[Tochka Webhook] Unmatched payment: INN=${payerInn}, amount=${amount}, purpose=${purpose}`);
+      }
+    }
+
+    bankPayments.push(bankPayment);
+    // Keep last 1000 entries
+    if (bankPayments.length > 1000) bankPayments = bankPayments.slice(-1000);
+    saveBankPayments();
+
+    res.status(200).json({ ok: true, processed: true, matched: bankPayment.matched });
+  } catch (err) {
+    console.error('[Tochka Webhook] Error:', err.message);
+    res.status(200).json({ ok: true, processed: false, reason: err.message });
+  }
+});
+
+// ==================== TOCHKA BANK: ADMIN ENDPOINTS ====================
+
+// Save Tochka config from admin UI
+app.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res) => {
+  const { jwt, clientId, customerCode, accountId, companyName, companyInn, companyKpp } = req.body;
+  if (jwt !== undefined) tochkaConfig.jwt = jwt.trim();
+  if (clientId !== undefined) tochkaConfig.clientId = clientId.trim();
+  if (customerCode !== undefined) tochkaConfig.customerCode = customerCode.trim();
+  if (accountId !== undefined) tochkaConfig.accountId = accountId.trim();
+  if (companyName !== undefined) tochkaConfig.companyName = companyName.trim();
+  if (companyInn !== undefined) tochkaConfig.companyInn = companyInn.trim();
+  if (companyKpp !== undefined) tochkaConfig.companyKpp = companyKpp.trim();
+  saveTochkaConfig();
+  console.log('[Tochka] Config updated from admin UI, jwt=' + (tochkaConfig.jwt ? 'set' : 'empty') + ', clientId=' + tochkaConfig.clientId);
+  res.json({ ok: true, configured: !!tochkaConfig.jwt });
+});
+
+// Get Tochka config
+app.get('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res) => {
+  res.json({
+    jwt: tochkaConfig.jwt,
+    clientId: tochkaConfig.clientId,
+    customerCode: tochkaConfig.customerCode,
+    accountId: tochkaConfig.accountId,
+    companyName: tochkaConfig.companyName,
+    companyInn: tochkaConfig.companyInn,
+    companyKpp: tochkaConfig.companyKpp
+  });
+});
+
+// Auto-detect Customer Code and Account ID from Tochka API
+app.post('/api/admin/tochka/autodetect', authMiddleware, adminMiddleware, async (req, res) => {
+  if (!tochkaConfig.jwt) {
+    return res.status(400).json({ error: 'JWT токен не заполнен' });
+  }
+  try {
+    const results = {};
+    // 1. Get customers list -> customerCode
+    try {
+      const custResult = await tochkaRequest('GET', '/uapi/open-banking/v1.0/customers');
+      const cd = custResult.data?.Data || custResult.data || {};
+      const customers = cd.Customer || cd.Customers || cd.customers || (Array.isArray(cd) ? cd : []);
+      console.log('[Tochka Autodetect] Customers raw:', JSON.stringify(custResult.data).slice(0, 500));
+      if (Array.isArray(customers) && customers.length > 0) {
+        const c = customers[0];
+        results.customerCode = c.customerCode || c.CustomerCode || c.code || '';
+        results.companyName = c.fullName || c.shortName || c.name || c.Name || c.organizationName || '';
+        results.companyInn = c.taxCode || c.inn || c.Inn || c.INN || '';
+        results.companyKpp = c.kpp || c.Kpp || c.KPP || '';
+      }
+    } catch (e) { console.log('[Tochka Autodetect] Customers error:', e.message); }
+    // 2. Get accounts list -> accountId
+    try {
+      const accResult = await tochkaRequest('GET', '/uapi/open-banking/v1.0/accounts');
+      const ad = accResult.data?.Data || accResult.data || {};
+      const accounts = ad.Account || ad.Accounts || ad.accounts || (Array.isArray(ad) ? ad : []);
+      console.log('[Tochka Autodetect] Accounts raw:', JSON.stringify(accResult.data).slice(0, 500));
+      if (Array.isArray(accounts) && accounts.length > 0) {
+        const rub = accounts.find(a => (a.currency === 'RUB' || a.Currency === 'RUB')) || accounts[0];
+        results.accountId = rub.accountId || rub.AccountId || rub.resourceId || '';
+        if (!results.customerCode && rub.customerCode) results.customerCode = rub.customerCode;
+      }
+    } catch (e) { console.log('[Tochka Autodetect] Accounts error:', e.message); }
+    // Save detected values
+    if (results.customerCode) tochkaConfig.customerCode = results.customerCode;
+    if (results.accountId) tochkaConfig.accountId = results.accountId;
+    if (results.companyName) tochkaConfig.companyName = results.companyName;
+    if (results.companyInn) tochkaConfig.companyInn = results.companyInn;
+    if (results.companyKpp) tochkaConfig.companyKpp = results.companyKpp;
+    saveTochkaConfig();
+    console.log('[Tochka Autodetect] Results:', JSON.stringify(results));
+    res.json({ ok: true, detected: results });
+  } catch (err) {
+    res.status(502).json({ error: 'Ошибка автоопределения', details: err.message });
+  }
+});
+
+// Register webhook in Tochka
+app.post('/api/admin/tochka/register_webhook', authMiddleware, adminMiddleware, async (req, res) => {
+  if (!tochkaConfig.jwt || !tochkaConfig.clientId) {
+    return res.status(400).json({ error: 'Tochka API not configured. Введите JWT токен и Client ID в разделе Банк.' });
+  }
+  const { webhookUrl } = req.body;
+  if (!webhookUrl) return res.status(400).json({ error: 'webhookUrl required' });
+
+  try {
+    const result = await tochkaRequest('PUT', `/uapi/webhook/v1.0/${tochkaConfig.clientId}`, {
+      webhookUrl,
+      webhookType: 'incomingPayment'
+    });
+    console.log('[Tochka] Webhook registered:', JSON.stringify(result.data));
+    res.json({ ok: true, result: result.data });
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to register webhook', details: err.message });
+  }
+});
+
+// Sync historical payments from Tochka (Init Statement → poll → match)
+app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, res) => {
+  if (!tochkaConfig.jwt || !tochkaConfig.accountId) {
+    return res.status(400).json({ error: 'Tochka API не настроен. Заполните JWT и Account ID.' });
+  }
+
+  const { dateFrom, dateTo } = req.body;
+  const from = dateFrom || '2024-01-01';
+  const to = dateTo || new Date().toISOString().slice(0, 10);
+
+  console.log(`[Tochka Sync] Requesting statement ${from} — ${to}`);
+
+  try {
+    // Step 1: Init Statement
+    const initResult = await tochkaRequest('POST', '/uapi/open-banking/v1.0/statements', {
+      Data: {
+        Statement: {
+          accountId: tochkaConfig.accountId,
+          startDateTime: from + 'T00:00:00+00:00',
+          endDateTime: to + 'T00:00:00+00:00'
+        }
+      }
+    });
+
+    const statementId = initResult.data?.Data?.Statement?.statementId
+      || initResult.data?.Data?.statementId
+      || initResult.data?.statementId;
+
+    if (!statementId) {
+      console.log('[Tochka Sync] Init response:', JSON.stringify(initResult.data));
+      return res.status(502).json({ error: 'Не удалось создать выписку', details: initResult.data });
+    }
+
+    console.log(`[Tochka Sync] Statement initiated: ${statementId}`);
+
+    // Step 2: Poll for Ready status (max 30 seconds)
+    let statement = null;
+    for (let attempt = 0; attempt < 15; attempt++) {
+      await new Promise(r => setTimeout(r, 2000));
+      const getResult = await tochkaRequest('GET',
+        `/uapi/open-banking/v1.0/accounts/${tochkaConfig.accountId}/statements/${statementId}`);
+      const stData = getResult.data?.Data?.Statement?.[0] || getResult.data?.Data?.Statement || getResult.data;
+      const status = stData?.status || stData?.Status || '';
+      console.log(`[Tochka Sync] Poll #${attempt + 1}: status=${status}`);
+      if (status === 'Ready' || status === 'ready') {
+        statement = stData;
+        break;
+      }
+    }
+
+    if (!statement) {
+      return res.status(504).json({ error: 'Выписка не готова. Попробуйте позже.' });
+    }
+
+    // Step 3: Extract transactions
+    const transactions = statement.Transaction || statement.transactions || [];
+    console.log(`[Tochka Sync] Got ${transactions.length} transactions`);
+
+    let imported = 0, matched = 0, skipped = 0;
+    let loggedSample = false;
+
+    for (const tx of transactions) {
+      // Only process incoming (credit) payments
+      const indicator = tx.creditDebitIndicator || tx.CreditDebitIndicator || '';
+      if (indicator !== 'Credit' && indicator !== 'credit') continue;
+
+      if (!loggedSample) {
+        console.log('[Tochka Sync] Sample credit transaction:', JSON.stringify(tx).slice(0, 1500));
+        loggedSample = true;
+      }
+
+      const amount = parseFloat(tx.Amount?.amount || tx.amount || 0);
+      // DebtorParty = плательщик (кто платит нам), CreditorParty = получатель
+      const debtor = tx.DebtorParty || tx.CounterParty || tx.SidePayer || {};
+      const payerInn = debtor.inn || debtor.Inn || debtor.taxCode || '';
+      const payerName = debtor.name || debtor.Name || debtor.fullName || '';
+      const purpose = tx.description || tx.Description || tx.TransactionInformation || '';
+      const paymentId = tx.transactionId || tx.TransactionId || tx.paymentId || ('tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
+      const date = tx.documentProcessDate || tx.bookingDateTime || tx.valueDateTime || tx.date || to;
+
+      // Check if already processed
+      const alreadyExists = bankPayments.some(bp => bp.tochkaPaymentId === paymentId);
+      if (alreadyExists) { skipped++; continue; }
+
+      // Create bank payment record
+      const bankPayment = {
+        id: 'bp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+        tochkaPaymentId: paymentId,
+        webhookType: 'incomingPayment',
+        source: 'sync',
+        date: typeof date === 'string' ? date.slice(0, 10) : date,
+        amount: amount,
+        payerInn: payerInn,
+        payerName: payerName,
+        purpose: purpose,
+        matched: false,
+        matchedClientId: null,
+        matchedClientName: null,
+        receivedAt: new Date().toISOString()
+      };
+
+      // Try to match by INN
+      if (payerInn) {
+        const client = clients.find(c => c.inn && c.inn === payerInn);
+        if (client) {
+          bankPayment.matched = true;
+          bankPayment.matchedClientId = client.id;
+          bankPayment.matchedClientName = client.name;
+
+          // Credit client balance
+          client.balance = (client.balance || 0) + amount;
+          const ledgerEntry = {
+            type: 'bank_payment',
+            amount: amount,
+            date: bankPayment.date,
+            timestamp: new Date().toISOString(),
+            note: 'Синхронизация из Точки: ' + (purpose || '').slice(0, 100),
+            source: 'tochka_sync',
+            tochkaPaymentId: paymentId,
+            balance_after: client.balance
+          };
+          // Write to global billingLedger (used by billing_history API)
+          const ledgerKey = client.id;
+          if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
+          billingLedger[ledgerKey].push(ledgerEntry);
+          matched++;
+        }
+      }
+
+      bankPayments.push(bankPayment);
+      imported++;
+    }
+
+    // Save
+    if (imported > 0) {
+      saveBankPayments();
+      saveClients();
+      if (matched > 0) saveBillingLedger();
+    }
+
+    console.log(`[Tochka Sync] Done: ${imported} imported, ${matched} matched, ${skipped} skipped (duplicates)`);
+    res.json({ ok: true, total: transactions.length, imported, matched, skipped });
+
+  } catch (err) {
+    console.error('[Tochka Sync] Error:', err.message);
+    res.status(502).json({ error: 'Ошибка синхронизации', details: err.message });
+  }
+});
+
+// Get Tochka status / bank payments log
+app.get('/api/admin/tochka/payments', authMiddleware, adminMiddleware, (req, res) => {
+  res.json({
+    configured: !!tochkaConfig.jwt,
+    payments: bankPayments.slice().reverse(),
+    unmatchedCount: bankPayments.filter(p => !p.matched && !p.dismissed && p.webhookType === 'incomingPayment').length
+  });
+});
+
+// Dismiss unmatched payments (hide them)
+app.post('/api/admin/tochka/dismiss_unmatched', authMiddleware, adminMiddleware, (req, res) => {
+  let count = 0;
+  bankPayments.forEach(p => {
+    if (!p.matched && p.webhookType === 'incomingPayment') {
+      p.dismissed = true;
+      count++;
+    }
+  });
+  saveBankPayments();
+  console.log(`[Tochka] Dismissed ${count} unmatched payments`);
+  res.json({ ok: true, dismissed: count });
+});
+
+// Dismiss single payment
+app.post('/api/admin/tochka/dismiss_payment', authMiddleware, adminMiddleware, (req, res) => {
+  const { paymentId } = req.body;
+  const bp = bankPayments.find(p => p.id === paymentId);
+  if (!bp) return res.status(404).json({ error: 'Payment not found' });
+  bp.dismissed = true;
+  saveBankPayments();
+  res.json({ ok: true });
+});
+
+// Manually match unmatched payment to client
+app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (req, res) => {
+  const { paymentId, clientId } = req.body;
+  if (!paymentId || !clientId) return res.status(400).json({ error: 'paymentId and clientId required' });
+
+  const bp = bankPayments.find(p => p.id === paymentId);
+  if (!bp) return res.status(404).json({ error: 'Payment not found' });
+  const idx = clients.findIndex(c => c.id === clientId);
+  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
+
+  // Credit balance
+  const amount = bp.amount;
+  const balanceBefore = clients[idx].balance || 0;
+  clients[idx].balance = Math.round((balanceBefore + amount) * 100) / 100;
+
+  if (!clients[idx].payments) clients[idx].payments = [];
+  clients[idx].payments.push({
+    amount,
+    date: bp.date,
+    note: `Ручная привязка: ${bp.payerName} — ${bp.purpose}`.slice(0, 200),
+    createdAt: new Date().toISOString(),
+    source: 'tochka_manual',
+    paymentId: bp.paymentId
+  });
+
+  const ledgerKey = clients[idx].id;
+  if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
+  billingLedger[ledgerKey].push({
+    type: 'bank_payment',
+    date: bp.date,
+    timestamp: new Date().toISOString(),
+    amount,
+    currency: 'RUB',
+    balance_before: balanceBefore,
+    balance_after: clients[idx].balance,
+    note: `Ручная привязка (ИНН: ${bp.payerInn}): ${bp.purpose}`.slice(0, 300),
+    source: 'tochka_manual',
+    paymentId: bp.paymentId
+  });
+
+  bp.matched = true;
+  bp.matchedClientId = clients[idx].id;
+  bp.matchedClientName = clients[idx].name;
+  bp.autoCredit = false;
+
+  saveClients(clients);
+  saveBillingLedger();
+  saveBankPayments();
+  res.json({ ok: true, balance: clients[idx].balance });
+});
+
+// ==================== TOCHKA BANK: CLOSING DOCUMENTS ====================
+
+// Create closing document (Акт выполненных работ)
+app.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (req, res) => {
+  const { clientId, period, items } = req.body;
+  if (!clientId || !period) return res.status(400).json({ error: 'clientId and period required' });
+
+  const client = clients.find(c => c.id === clientId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  // Calculate items from billing ledger if not provided
+  let actItems = items;
+  if (!actItems || actItems.length === 0) {
+    const ledgerEntries = billingLedger[clientId] || [];
+    const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
+    const totalGb = monthCharges.reduce((sum, e) => sum + (e.gb || 0), 0);
+    const totalCost = monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0);
+    const modemCharges = monthCharges.filter(e => e.billing_type === 'per_modem');
+    const gbCharges = monthCharges.filter(e => e.billing_type !== 'per_modem');
+
+    actItems = [];
+    if (gbCharges.length > 0) {
+      actItems.push({
+        name: 'Услуги мобильных прокси (трафик)',
+        quantity: Math.round(totalGb * 100) / 100,
+        unit: 'ГБ',
+        price: client.price || 23,
+        amount: Math.round(gbCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
+      });
+    }
+    if (modemCharges.length > 0) {
+      const modemCount = new Set(modemCharges.map(e => e.note || '')).size || 1;
+      actItems.push({
+        name: 'Услуги мобильных прокси (аренда модемов)',
+        quantity: modemCount,
+        unit: 'шт',
+        price: client.price || 0,
+        amount: Math.round(modemCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
+      });
+    }
+    if (actItems.length === 0) {
+      actItems.push({
+        name: 'Услуги мобильных прокси',
+        quantity: 1,
+        unit: 'мес',
+        price: 0,
+        amount: Math.round(totalCost * 100) / 100
+      });
+    }
+  }
+
+  const totalAmount = actItems.reduce((s, i) => s + (i.amount || 0), 0);
+
+  // Try to create via Tochka API if configured
+  let tochkaDocumentId = null;
+  const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
+  if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
+    try {
+      const actData = buildTochkaActBody(client, period, actItems, actNumber);
+      const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/closing-documents', actData);
+      if (result.status === 200 && result.data?.Data?.documentId) {
+        tochkaDocumentId = result.data.Data.documentId;
+        console.log(`[Tochka] Created act ${tochkaDocumentId} for ${client.name}, period ${period}`);
+      } else {
+        console.error('[Tochka] Create act response:', JSON.stringify(result.data));
+      }
+    } catch (err) {
+      console.error('[Tochka] Create act error:', err.message);
+    }
+  }
+
+  // Save locally regardless of Tochka API success
+  const docId = crypto.randomBytes(8).toString('hex');
+  const closingDoc = {
+    id: docId,
+    tochkaDocumentId,
+    period,
+    createdAt: new Date().toISOString(),
+    status: 'unsigned', // unsigned | signed
+    totalAmount: Math.round(totalAmount * 100) / 100,
+    items: actItems,
+    actNumber,
+    contractInfo: client.contractInfo || ''
+  };
+
+  if (!client.closingDocuments) client.closingDocuments = [];
+  client.closingDocuments.push(closingDoc);
+  saveClients(clients);
+
+  res.json({ ok: true, document: closingDoc });
+});
+
+// Get closing documents for client (client-side)
+app.get('/api/client/closing_documents', authMiddleware, (req, res) => {
+  const client = clients.find(c => c.login === req.user.login);
+  if (!client) return res.json({ documents: [] });
+  res.json({ documents: (client.closingDocuments || []).map(d => ({
+    id: d.id,
+    period: d.period,
+    totalAmount: d.totalAmount,
+    status: d.status,
+    createdAt: d.createdAt,
+    actNumber: d.actNumber,
+    items: d.items
+  }))});
+});
+
+// Download closing document PDF from Tochka
+app.get('/api/client/closing_documents/:docId/pdf', authMiddleware, async (req, res) => {
+  const client = clients.find(c => c.login === req.user.login);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const doc = (client.closingDocuments || []).find(d => d.id === req.params.docId);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+  if (!doc.tochkaDocumentId) {
+    return res.status(404).json({ error: 'Документ не связан с Точкой. PDF недоступен.' });
+  }
+
+  try {
+    const result = await tochkaRequest('GET', `/uapi/invoice/v1.0/closing-documents/${tochkaConfig.customerCode}/${doc.tochkaDocumentId}/file`);
+    if (result.buffer) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${doc.actNumber || 'act'}.pdf"`);
+      res.send(result.buffer);
+    } else {
+      res.status(502).json({ error: 'Failed to get PDF from Tochka' });
+    }
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to get PDF', details: err.message });
+  }
+});
+
+// Admin: download closing document PDF
+app.get('/api/admin/clients/:id/closing_documents/:docId/pdf', authMiddleware, adminMiddleware, async (req, res) => {
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const doc = (client.closingDocuments || []).find(d => d.id === req.params.docId);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+
+  if (!doc.tochkaDocumentId) {
+    return res.status(404).json({ error: 'Документ не связан с Точкой. PDF недоступен.' });
+  }
+
+  try {
+    const result = await tochkaRequest('GET', `/uapi/invoice/v1.0/closing-documents/${tochkaConfig.customerCode}/${doc.tochkaDocumentId}/file`);
+    if (result.buffer) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename="${doc.actNumber || 'act'}.pdf"`);
+      res.send(result.buffer);
+    } else {
+      res.status(502).json({ error: 'Failed to get PDF from Tochka' });
+    }
+  } catch (err) {
+    res.status(502).json({ error: 'Failed to get PDF', details: err.message });
+  }
+});
+
+// Admin: change closing document status (signed/unsigned)
+app.post('/api/admin/clients/:id/closing_document_status', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const { docId, status } = req.body;
+  if (!docId || !['signed', 'unsigned'].includes(status)) {
+    return res.status(400).json({ error: 'docId and status (signed/unsigned) required' });
+  }
+  const doc = (client.closingDocuments || []).find(d => d.id === docId);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  doc.status = status;
+  if (status === 'signed') doc.signedAt = new Date().toISOString();
+  saveClients(clients);
+  res.json({ ok: true, document: doc });
+});
+
+// Admin: delete closing document
+app.delete('/api/admin/clients/:id/closing_document/:docId', authMiddleware, adminMiddleware, async (req, res) => {
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const docIdx = (client.closingDocuments || []).findIndex(d => d.id === req.params.docId);
+  if (docIdx === -1) return res.status(404).json({ error: 'Document not found' });
+
+  const doc = client.closingDocuments[docIdx];
+  // Try to delete from Tochka too
+  if (doc.tochkaDocumentId && tochkaConfig.jwt) {
+    try {
+      await tochkaRequest('DELETE', `/uapi/invoice/v1.0/closing-documents/${tochkaConfig.customerCode}/${doc.tochkaDocumentId}`);
+    } catch (e) { console.warn('[Tochka] Delete doc error:', e.message); }
+  }
+
+  client.closingDocuments.splice(docIdx, 1);
+  saveClients(clients);
+  res.json({ ok: true });
+});
+
+// Admin: get closing documents for a client
+app.get('/api/admin/clients/:id/closing_documents', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  res.json(client.closingDocuments || []);
+});
+
+// Admin: get ALL closing documents across all clients (for bank tab overview)
+app.get('/api/admin/tochka/all_acts', authMiddleware, adminMiddleware, (req, res) => {
+  const allDocs = [];
+  for (const client of clients) {
+    (client.closingDocuments || []).forEach(d => {
+      allDocs.push({
+        ...d,
+        clientId: client.id,
+        clientName: client.name,
+        clientInn: client.inn || ''
+      });
+    });
+  }
+  allDocs.sort((a, b) => (b.period || '').localeCompare(a.period || '') || (b.createdAt || '').localeCompare(a.createdAt || ''));
+  res.json({ documents: allDocs });
+});
+
+// Admin: bulk generate acts for a specific period for all clients with charges
+app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, async (req, res) => {
+  const { period } = req.body; // YYYY-MM
+  if (!period || !/^\d{4}-\d{2}$/.test(period)) return res.status(400).json({ error: 'period required (YYYY-MM)' });
+
+  let generated = 0, skipped = 0, errors = 0;
+  const results = [];
+
+  for (const client of clients) {
+    const ledgerEntries = billingLedger[client.id] || [];
+    const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
+    if (monthCharges.length === 0) { skipped++; continue; }
+
+    // Skip if act already exists for this period
+    if ((client.closingDocuments || []).some(d => d.period === period)) {
+      skipped++;
+      results.push({ client: client.name, status: 'exists' });
+      continue;
+    }
+
+    try {
+      const totalGb = monthCharges.reduce((sum, e) => sum + (e.gb || 0), 0);
+      const totalCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
+      if (totalCost <= 0) { skipped++; continue; }
+
+      const actItems = [{
+        name: 'Услуги мобильных прокси',
+        quantity: Math.round(totalGb * 100) / 100 || 1,
+        unit: totalGb > 0 ? 'ГБ' : 'мес',
+        price: client.price || 23,
+        amount: totalCost
+      }];
+
+      // Try Tochka API
+      let tochkaDocumentId = null;
+      const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
+      if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
+        try {
+          const actData = buildTochkaActBody(client, period, actItems, actNumber);
+          const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/closing-documents', actData);
+          if (result.status === 200 && result.data?.Data?.documentId) {
+            tochkaDocumentId = result.data.Data.documentId;
+          }
+        } catch (e) { console.error(`[Tochka BulkActs] API error for ${client.name}:`, e.message); }
+      }
+
+      const docId = crypto.randomBytes(8).toString('hex');
+      if (!client.closingDocuments) client.closingDocuments = [];
+      client.closingDocuments.push({
+        id: docId,
+        tochkaDocumentId,
+        period,
+        createdAt: new Date().toISOString(),
+        status: 'unsigned',
+        totalAmount: totalCost,
+        items: actItems,
+        actNumber,
+        contractInfo: client.contractInfo || ''
+      });
+      generated++;
+      results.push({ client: client.name, status: 'created', amount: totalCost });
+      console.log(`[Tochka BulkActs] Created act for ${client.name}: ${totalCost} RUB (period ${period})`);
+    } catch (e) {
+      errors++;
+      results.push({ client: client.name, status: 'error', error: e.message });
+    }
+  }
+
+  if (generated > 0) saveClients(clients);
+  res.json({ ok: true, generated, skipped, errors, results });
+});
+
+// ==================== TOCHKA: AUTO-GENERATE ACTS (1st of month) ====================
+async function autoGenerateMonthlyActs() {
+  const now = new Date();
+  const moscowDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+  const day = moscowDate.getDate();
+  const hour = moscowDate.getHours();
+
+  // Only run on 1st of month, after 8:00 Moscow time
+  if (day !== 1 || hour < 8) return;
+
+  // Previous month
+  const prevMonth = new Date(moscowDate);
+  prevMonth.setMonth(prevMonth.getMonth() - 1);
+  const period = prevMonth.toISOString().slice(0, 7); // YYYY-MM
+
+  // Prevent duplicate generation
+  if (lastActGenerationMonth === period) return;
+
+  console.log(`[Tochka AutoActs] Generating acts for period ${period}...`);
+  let generated = 0;
+
+  for (const client of clients) {
+    // Skip clients without charges
+    const ledgerEntries = billingLedger[client.id] || [];
+    const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
+    if (monthCharges.length === 0) continue;
+
+    // Skip if act already exists for this period
+    if ((client.closingDocuments || []).some(d => d.period === period)) continue;
+
+    try {
+      // Calculate totals
+      const totalGb = monthCharges.reduce((sum, e) => sum + (e.gb || 0), 0);
+      const totalCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
+
+      const actItems = [{
+        name: 'Услуги мобильных прокси',
+        quantity: Math.round(totalGb * 100) / 100 || 1,
+        unit: totalGb > 0 ? 'ГБ' : 'мес',
+        price: client.price || 23,
+        amount: totalCost
+      }];
+
+      // Try Tochka API
+      let tochkaDocumentId = null;
+      const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
+      if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
+        try {
+          const actData = buildTochkaActBody(client, period, actItems, actNumber);
+          const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/closing-documents', actData);
+          if (result.status === 200 && result.data?.Data?.documentId) {
+            tochkaDocumentId = result.data.Data.documentId;
+          }
+        } catch (e) { console.error(`[Tochka AutoActs] API error for ${client.name}:`, e.message); }
+      }
+
+      const docId = crypto.randomBytes(8).toString('hex');
+      if (!client.closingDocuments) client.closingDocuments = [];
+      client.closingDocuments.push({
+        id: docId,
+        tochkaDocumentId,
+        period,
+        createdAt: new Date().toISOString(),
+        status: 'unsigned',
+        totalAmount: totalCost,
+        items: actItems,
+        actNumber,
+        contractInfo: client.contractInfo || ''
+      });
+      generated++;
+      console.log(`[Tochka AutoActs] Created act for ${client.name}: ${totalCost} RUB`);
+    } catch (e) {
+      console.error(`[Tochka AutoActs] Error for ${client.name}:`, e.message);
+    }
+  }
+
+  if (generated > 0) {
+    saveClients(clients);
+    console.log(`[Tochka AutoActs] Generated ${generated} acts for ${period}`);
+  }
+  lastActGenerationMonth = period;
+}
+
 // ==================== JSON fallback for unknown API routes (Bug #5) ====================
 app.use('/api', (req, res) => {
   res.status(404).json({
@@ -2626,6 +3844,9 @@ app.listen(PORT, () => {
 
   // Schedule daily billing at 23:55 UTC
   scheduleRepeating(23, 55, 'DailyBilling', runDailyBilling);
+
+  // Auto-generate closing documents (acts) on 1st of each month at 08:05 Moscow (05:05 UTC)
+  scheduleRepeating(5, 5, 'MonthlyActs', autoGenerateMonthlyActs);
 
   // Billing catch-up: if last snapshot is older than 26 hours, run now
   (async () => {
@@ -2667,16 +3888,107 @@ function saveTgProxies() {
   catch (e) { console.error('[TelegramBot] Failed to save proxies:', e.message); }
 }
 
+// Telegram user database — persistent per-user info
+const TG_USERS_FILE = path.join(__dirname, 'telegram_users.json');
+let tgUsers = {}; // { chatId: { username, testUsed, plan, speedTests: [{speed,date}], registeredAt } }
+try {
+  if (fs.existsSync(TG_USERS_FILE)) {
+    tgUsers = JSON.parse(fs.readFileSync(TG_USERS_FILE, 'utf8'));
+    console.log(`[TelegramBot] Loaded ${Object.keys(tgUsers).length} user record(s)`);
+  }
+} catch (e) { console.error('[TelegramBot] Failed to load users:', e.message); }
+
+function saveTgUsers() {
+  try { fs.writeFileSync(TG_USERS_FILE, JSON.stringify(tgUsers, null, 2)); }
+  catch (e) { console.error('[TelegramBot] Failed to save users:', e.message); }
+}
+
+function getTgUser(chatId, username) {
+  if (!tgUsers[chatId]) {
+    tgUsers[chatId] = { username: username || null, testUsed: false, plan: null, speedTests: [], registeredAt: new Date().toISOString() };
+    saveTgUsers();
+  } else if (username && tgUsers[chatId].username !== username) {
+    tgUsers[chatId].username = username;
+    saveTgUsers();
+  }
+  return tgUsers[chatId];
+}
+
+// Migrate existing proxy records into tgUsers if not already there
+(function migrateTgUsers() {
+  let migrated = 0;
+  for (const p of tgProxies) {
+    if (!tgUsers[p.chatId]) {
+      tgUsers[p.chatId] = {
+        username: p.username || null,
+        testUsed: p.plan === 'test' || false,
+        plan: p.plan,
+        speedTests: [],
+        registeredAt: p.createdAt || new Date().toISOString()
+      };
+      migrated++;
+    }
+    // Mark testUsed if they ever had a test plan
+    if (p.plan === 'test') tgUsers[p.chatId].testUsed = true;
+  }
+  if (migrated > 0) {
+    saveTgUsers();
+    console.log(`[TelegramBot] Migrated ${migrated} user(s) from proxies`);
+  }
+})();
+
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TG_PRICE = parseInt(process.env.TELEGRAM_BOT_PRICE) || 599;
 const SERVER_IPS = { S1: '89.149.100.92', S2: '31.5.194.89' };
 
 const PLANS = {
-  test:  { label: 'Тест (1 час)',   price: 0,   days: 0, hours: 1 },
+  test:  { label: 'Тест (1 день)',  price: 0,   days: 1 },
   '1m':  { label: '1 месяц',        price: 599, days: 30 },
   '6m':  { label: '6 месяцев',      price: 499, days: 180 },
   '12m': { label: '12 месяцев',     price: 399, days: 360 }
 };
+
+// Reply keyboard layouts
+const KB_MAIN = { keyboard: [
+  ['🎁 Тест (1 день)', '📋 Тарифы'],
+  ['📱 Мои прокси', '🚀 Скорость'],
+  ['❓ Инструкция', '💬 Обратная связь']
+], resize_keyboard: true };
+
+const KB_PLANS = { keyboard: [
+  ['📅 1 мес — 599 ₽'],
+  ['📅 6 мес — 499 ₽/мес'],
+  ['📅 12 мес — 399 ₽/мес'],
+  ['🎁 Тест (1 день)', '◀️ Назад']
+], resize_keyboard: true };
+
+const KB_SPEED = { keyboard: [
+  ['✅ Скачал!'],
+  ['◀️ Отмена']
+], resize_keyboard: true };
+
+// Speed test state
+let speedTestFileId = null;
+const speedTestSessions = {};
+const SPEED_TEST_SIZE = 10 * 1024 * 1024; // 10 MB
+
+// Feedback storage
+const TG_FEEDBACK_FILE = path.join(__dirname, 'telegram_feedback.json');
+let tgFeedback = [];
+try {
+  if (fs.existsSync(TG_FEEDBACK_FILE)) {
+    tgFeedback = JSON.parse(fs.readFileSync(TG_FEEDBACK_FILE, 'utf8'));
+    console.log(`[TelegramBot] Loaded ${tgFeedback.length} feedback record(s)`);
+  }
+} catch (e) { console.error('[TelegramBot] Failed to load feedback:', e.message); }
+
+function saveTgFeedback() {
+  try { fs.writeFileSync(TG_FEEDBACK_FILE, JSON.stringify(tgFeedback, null, 2)); }
+  catch (e) { console.error('[TelegramBot] Failed to save feedback:', e.message); }
+}
+
+// User states for feedback flow
+const userStates = {}; // { chatId: { state: 'awaiting_feedback'|'awaiting_nps_comment', score, type } }
 
 function telegramApi(method, body, reqTimeout = 15000) {
   return new Promise((resolve, reject) => {
@@ -2759,39 +4071,36 @@ async function createProxyForTelegram(chatId, username, planKey) {
   const modem = await findLeastLoadedModem();
   if (!modem) throw new Error('Нет доступных модемов');
 
-  // Get free TCP ports
+  // Get free TCP ports — separate HTTP (8xxx) and SOCKS (5xxx) ranges
   const freePorts = await fetchApi(modem.server, '/apix/get_free_tcp_ports');
   const freeList = Array.isArray(freePorts) ? freePorts : (freePorts.free_tcp_ports || []);
-  if (freeList.length < 2) throw new Error('Нет свободных портов на сервере');
+  const freeHttp = freeList.filter(p => p >= 8001 && p <= 8999);
+  const freeSocks = freeList.filter(p => p >= 5001 && p <= 5999);
+  if (!freeHttp.length || !freeSocks.length) throw new Error('Нет свободных портов на сервере');
 
   const portID = 'tg_' + crypto.randomBytes(4).toString('hex');
-  const portName = username ? ('@' + username) : ('tg_' + chatId);
+  const portName = username ? ('tg_' + username) : ('tg_' + chatId);
   const login = crypto.randomBytes(4).toString('hex');
   const password = crypto.randomBytes(4).toString('hex');
-  const httpPort = freeList[0];
-  const socksPort = freeList[1];
+  const httpPort = freeHttp[0];
+  const socksPort = freeSocks[0];
 
-  // Create port on ProxySmart
-  const portData = {
-    IMEI: modem.imei,
-    portID,
-    portName,
-    http_port: String(httpPort),
-    socks_port: String(socksPort),
-    proxy_login: login,
-    proxy_password: password
-  };
-  await postApi(modem.server, '/crud/store_port', portData);
-  await fetchApi(modem.server, `/apix/apply_port?arg=${encodeURIComponent(portID)}`);
+  // Create port via ProxySmart web form (/conf/add_port)
+  const formData = `IMEI=${encodeURIComponent(modem.imei)}&portID=${encodeURIComponent(portID)}&portName=${encodeURIComponent(portName)}&http_port=${httpPort}&socks_port=${socksPort}&proxy_login=${encodeURIComponent(login)}&proxy_password=${encodeURIComponent(password)}`;
+  const addResult = await postFormApi(modem.server, `/conf/add_port?imei=${encodeURIComponent(modem.imei)}`, formData);
+  console.log(`[TelegramBot] add_port response: status=${addResult.status}`);
 
   const serverIp = SERVER_IPS[modem.serverName] || new URL(modem.server.url).hostname;
 
   // Compute expiration
   let expiresAt;
   if (plan.hours) {
+    // Test plan: expires in N hours
     expiresAt = new Date(Date.now() + plan.hours * 3600000).toISOString();
   } else {
-    expiresAt = new Date(Date.now() + plan.days * 86400000).toISOString();
+    // Monthly plans: expires at 00:00 UTC on (today + days + 1)
+    const now = new Date();
+    expiresAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + plan.days + 1, 0, 0, 0)).toISOString();
   }
 
   const record = {
@@ -2824,11 +4133,11 @@ async function deleteProxyRecord(record, notify = true) {
   try {
     const server = findServer(record.serverName);
     if (server) {
-      await fetchApi(server, `/apix/purge_port?arg=${encodeURIComponent(record.portID)}`);
-      console.log(`[TelegramBot] Purged port ${record.portID} from ${record.serverName}`);
+      await fetchApi(server, `/conf/delete_port/${encodeURIComponent(record.portID)}`);
+      console.log(`[TelegramBot] Deleted port ${record.portID} from ${record.serverName}`);
     }
   } catch (e) {
-    console.error(`[TelegramBot] Failed to purge ${record.portID}:`, e.message);
+    console.error(`[TelegramBot] Failed to delete ${record.portID}:`, e.message);
   }
 
   tgProxies = tgProxies.filter(p => p.portID !== record.portID);
@@ -2840,20 +4149,25 @@ async function deleteProxyRecord(record, notify = true) {
       ? '⏰ <b>Тестовый период завершён</b>\n\nВаш прокси отключён. Оформите подписку для постоянного доступа!'
       : '⚠️ <b>Подписка истекла</b>\n\nВаш прокси отключён. Возобновите подписку для продолжения!';
 
-    await tgSend(record.chatId, text, {
-      reply_markup: { inline_keyboard: [[{ text: '📋 Тарифы', callback_data: 'show_plans' }]] }
-    });
+    await tgSend(record.chatId, text, { reply_markup: KB_MAIN });
   }
 }
 
 function formatProxyMessage(record, planLabel) {
   const deepLink = `https://t.me/socks?server=${record.serverIp}&port=${record.socksPort}&user=${record.login}&pass=${record.password}`;
-  const expiresDate = new Date(record.expiresAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+
+  let expiresLine;
+  if (record.plan === 'test') {
+    expiresLine = '⏳ Прокси перестанет работать через 24 часа';
+  } else {
+    const expiresDate = new Date(record.expiresAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+    expiresLine = `⏳ Действует до: ${expiresDate}`;
+  }
 
   return {
     text: `✅ <b>Ваш прокси готов!</b>\n\n` +
       `📋 Тариф: ${planLabel}\n` +
-      `⏳ Действует до: ${expiresDate}\n\n` +
+      `${expiresLine}\n\n` +
       `<b>SOCKS5 подключение:</b>\n` +
       `<code>${record.serverIp}:${record.socksPort}</code>\n` +
       `Логин: <code>${record.login}</code>\n` +
@@ -2864,8 +4178,7 @@ function formatProxyMessage(record, planLabel) {
     reply_markup: {
       inline_keyboard: [
         [{ text: '🔗 Добавить прокси в Telegram', url: deepLink }],
-        [{ text: '🔄 Сменить IP', callback_data: `change_ip:${record.portID}:${record.serverName}` }],
-        [{ text: '📱 Мои прокси', callback_data: 'my_proxies' }]
+        [{ text: '🔄 Сменить IP', callback_data: `change_ip:${record.portID}:${record.serverName}` }]
       ]
     }
   };
@@ -2874,6 +4187,9 @@ function formatProxyMessage(record, planLabel) {
 // ---- Telegram message handlers ----
 
 async function handleStart(chatId) {
+  // Clear any active speed test session
+  delete speedTestSessions[chatId];
+
   const text =
     `🛡 <b>Proxies.Rent — Прокси для Telegram</b>\n\n` +
     `Стабильный доступ к Telegram при любых ограничениях.\n\n` +
@@ -2881,17 +4197,9 @@ async function handleStart(chatId) {
     `⚡ Мгновенное подключение в 1 клик\n` +
     `🔄 Смена IP по кнопке\n` +
     `📶 Работа через 4G-модемы\n\n` +
-    `Попробуйте бесплатно или выберите тариф:`;
+    `Используйте меню ниже для навигации:`;
 
-  await tgSend(chatId, text, {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '🎁 Попробовать бесплатно (1 час)', callback_data: 'test_proxy' }],
-        [{ text: '📋 Тарифы', callback_data: 'show_plans' }],
-        [{ text: '📱 Мои прокси', callback_data: 'my_proxies' }]
-      ]
-    }
-  });
+  await tgSend(chatId, text, { reply_markup: KB_MAIN });
 }
 
 async function handleShowPlans(chatId) {
@@ -2900,55 +4208,102 @@ async function handleShowPlans(chatId) {
     `<b>1 месяц</b> — ${PLANS['1m'].price} ₽/мес\n` +
     `<b>6 месяцев</b> — ${PLANS['6m'].price} ₽/мес (выгода 17%)\n` +
     `<b>12 месяцев</b> — ${PLANS['12m'].price} ₽/мес (выгода 33%)\n\n` +
-    `Мобильный SOCKS5-прокси с мгновенным подключением.\nВыберите подходящий тариф:`;
+    `Мобильный SOCKS5-прокси с мгновенным подключением.\nВыберите тариф на клавиатуре ниже:`;
 
-  await tgSend(chatId, text, {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: `📅 1 месяц — ${PLANS['1m'].price} ₽`, callback_data: 'buy_1m' }],
-        [{ text: `📅 6 месяцев — ${PLANS['6m'].price} ₽/мес`, callback_data: 'buy_6m' }],
-        [{ text: `📅 12 месяцев — ${PLANS['12m'].price} ₽/мес`, callback_data: 'buy_12m' }],
-        [{ text: '🎁 Бесплатный тест (1 час)', callback_data: 'test_proxy' }]
-      ]
-    }
-  });
+  await tgSend(chatId, text, { reply_markup: KB_PLANS });
 }
 
 async function handleBuy(chatId, username, planKey) {
   const plan = PLANS[planKey];
   if (!plan) return;
 
-  // Check if user already has an active test proxy
+  const user = getTgUser(chatId, username);
+
+  // Find existing active proxy for this user
+  const existing = tgProxies.find(p => p.chatId === chatId);
+
+  // Test plan: only ONE TIME per account ever
   if (planKey === 'test') {
-    const existing = tgProxies.find(p => p.chatId === chatId && p.plan === 'test');
-    if (existing) {
-      return tgSend(chatId, '⚠️ У вас уже есть активный тестовый прокси. Дождитесь окончания тестового периода или оформите подписку.');
+    if (user.testUsed) {
+      return tgSend(chatId, '⚠️ Тестовый доступ можно активировать только один раз.\n\nОформите подписку для получения прокси:', { reply_markup: KB_PLANS });
     }
+    if (existing) {
+      return tgSend(chatId, '⚠️ У вас уже есть активный прокси.', { reply_markup: KB_MAIN });
+    }
+    // Mark test as used BEFORE creating
+    user.testUsed = true;
+    user.plan = 'test';
+    saveTgUsers();
+
+    await tgSend(chatId, '⏳ Создаю ваш прокси...');
+    try {
+      const record = await createProxyForTelegram(chatId, username, planKey);
+      const msg = formatProxyMessage(record, plan.label);
+      await tgSend(chatId, msg.text, { reply_markup: msg.reply_markup });
+      await tgSend(chatId, '👆 Нажмите «Добавить прокси в Telegram» для подключения в 1 клик.', { reply_markup: KB_MAIN });
+    } catch (e) {
+      console.error(`[TelegramBot] Create proxy error for ${username || chatId}:`, e.message);
+      await tgSend(chatId, `❌ Ошибка при создании прокси: ${e.message}\n\nПопробуйте позже или обратитесь в поддержку.`, { reply_markup: KB_MAIN });
+    }
+    return;
   }
 
-  await tgSend(chatId, '⏳ Создаю ваш прокси...');
+  // Paid plan: update user record
+  user.plan = planKey;
+  saveTgUsers();
 
+  // If user already has an active proxy — extend it
+  if (existing) {
+    const currentExpiry = new Date(existing.expiresAt).getTime();
+    const base = Math.max(currentExpiry, Date.now());
+    const baseDate = new Date(base);
+    const newExpiry = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate() + plan.days + 1, 0, 0, 0));
+
+    existing.expiresAt = newExpiry.toISOString();
+    existing.plan = planKey;
+    existing.notified_7d = false;
+    existing.notified_1d = false;
+    delete existing.npsLastSent;
+    saveTgProxies();
+
+    const expiresDate = newExpiry.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+    console.log(`[TelegramBot] Extended proxy ${existing.portID} for @${username || chatId} (plan: ${planKey}, expires: ${expiresDate})`);
+
+    const deepLink = `https://t.me/socks?server=${existing.serverIp}&port=${existing.socksPort}&user=${existing.login}&pass=${existing.password}`;
+    await tgSend(chatId,
+      `✅ <b>Подписка продлена!</b>\n\n` +
+      `📋 Тариф: ${plan.label}\n` +
+      `⏳ Действует до: ${expiresDate}\n\n` +
+      `Ваши реквизиты не изменились:\n` +
+      `SOCKS5: <code>${existing.serverIp}:${existing.socksPort}</code>\n` +
+      `Логин: <code>${existing.login}</code>\n` +
+      `Пароль: <code>${existing.password}</code>`,
+      { reply_markup: { inline_keyboard: [
+        [{ text: '🔗 Добавить прокси в Telegram', url: deepLink }],
+        [{ text: '🔄 Сменить IP', callback_data: `change_ip:${existing.portID}:${existing.serverName}` }]
+      ] } }
+    );
+    await tgSend(chatId, '👍 Прокси продлён. Реквизиты прежние — ничего менять не нужно.', { reply_markup: KB_MAIN });
+    return;
+  }
+
+  // No existing proxy — create new one
+  await tgSend(chatId, '⏳ Создаю ваш прокси...');
   try {
     const record = await createProxyForTelegram(chatId, username, planKey);
     const msg = formatProxyMessage(record, plan.label);
     await tgSend(chatId, msg.text, { reply_markup: msg.reply_markup });
+    await tgSend(chatId, '👆 Нажмите «Добавить прокси в Telegram» для подключения в 1 клик.', { reply_markup: KB_MAIN });
   } catch (e) {
     console.error(`[TelegramBot] Create proxy error for ${username || chatId}:`, e.message);
-    await tgSend(chatId, `❌ Ошибка при создании прокси: ${e.message}\n\nПопробуйте позже или обратитесь в поддержку.`);
+    await tgSend(chatId, `❌ Ошибка при создании прокси: ${e.message}\n\nПопробуйте позже или обратитесь в поддержку.`, { reply_markup: KB_MAIN });
   }
 }
 
 async function handleMyProxies(chatId) {
   const userProxies = tgProxies.filter(p => p.chatId === chatId);
   if (userProxies.length === 0) {
-    return tgSend(chatId, '📱 У вас пока нет активных прокси.', {
-      reply_markup: {
-        inline_keyboard: [
-          [{ text: '🎁 Попробовать бесплатно', callback_data: 'test_proxy' }],
-          [{ text: '📋 Тарифы', callback_data: 'show_plans' }]
-        ]
-      }
-    });
+    return tgSend(chatId, '📱 У вас пока нет активных прокси.\n\nИспользуйте меню ниже, чтобы получить прокси.', { reply_markup: KB_MAIN });
   }
 
   let text = '📱 <b>Ваши прокси:</b>\n\n';
@@ -2956,21 +4311,162 @@ async function handleMyProxies(chatId) {
 
   for (const p of userProxies) {
     const plan = PLANS[p.plan] || { label: p.plan };
-    const expires = new Date(p.expiresAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
     const deepLink = `https://t.me/socks?server=${p.serverIp}&port=${p.socksPort}&user=${p.login}&pass=${p.password}`;
 
     text += `<b>${plan.label}</b>\n`;
     text += `SOCKS5: <code>${p.serverIp}:${p.socksPort}</code>\n`;
     text += `Логин: <code>${p.login}</code> | Пароль: <code>${p.password}</code>\n`;
-    text += `Истекает: ${expires}\n\n`;
+    if (p.plan === 'test') {
+      text += `⏳ Тестовый доступ (1 день)\n\n`;
+    } else {
+      const expires = new Date(p.expiresAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
+      text += `Действует до: ${expires}\n\n`;
+    }
 
     buttons.push([{ text: `🔗 Добавить в Telegram (${p.portID})`, url: deepLink }]);
     buttons.push([{ text: `🔄 Сменить IP (${p.portID})`, callback_data: `change_ip:${p.portID}:${p.serverName}` }]);
   }
 
-  buttons.push([{ text: '📋 Тарифы', callback_data: 'show_plans' }]);
-
   await tgSend(chatId, text, { reply_markup: { inline_keyboard: buttons } });
+}
+
+async function handleHelp(chatId) {
+  const text =
+    `❓ <b>Как подключить и отключить прокси</b>\n\n` +
+
+    `📱 <b>iPhone / iPad:</b>\n` +
+    `<b>Включить:</b>\n` +
+    `1. Нажмите кнопку «Добавить прокси в Telegram» — он добавится автоматически\n` +
+    `2. Или вручную: Настройки → Данные и память → Прокси → Добавить прокси\n` +
+    `3. Тип: <b>SOCKS5</b>, введите сервер, порт, логин и пароль\n` +
+    `4. Включите тумблер «Использовать прокси»\n\n` +
+    `<b>Отключить:</b>\n` +
+    `Настройки → Данные и память → Прокси → выключите тумблер\n\n` +
+
+    `📱 <b>Android:</b>\n` +
+    `<b>Включить:</b>\n` +
+    `1. Нажмите кнопку «Добавить прокси в Telegram» — он добавится автоматически\n` +
+    `2. Или вручную: ≡ Меню → Настройки → Данные и память → Прокси-сервер\n` +
+    `3. Нажмите «Добавить прокси», тип: <b>SOCKS5</b>\n` +
+    `4. Введите сервер, порт, логин и пароль\n\n` +
+    `<b>Отключить:</b>\n` +
+    `≡ Настройки → Данные и память → Прокси-сервер → выключите тумблер\n\n` +
+
+    `💻 <b>Telegram Desktop (ПК):</b>\n` +
+    `<b>Включить:</b>\n` +
+    `1. Нажмите кнопку «Добавить прокси в Telegram»\n` +
+    `2. Или: Настройки → Продвинутые настройки → Тип соединения → Прокси\n` +
+    `3. Добавить, тип SOCKS5, заполнить данные\n\n` +
+    `<b>Отключить:</b>\n` +
+    `Настройки → Продвинутые настройки → Тип соединения → отключить прокси\n\n` +
+
+    `💡 <b>Подсказки:</b>\n` +
+    `• Если прокси не подключается — нажмите «Сменить IP» и попробуйте снова\n` +
+    `• Прокси работает только в Telegram, остальные приложения используют обычный интернет\n` +
+    `• При смене IP может потребоваться 10-30 секунд для переподключения`;
+
+  await tgSend(chatId, text, { reply_markup: KB_MAIN });
+}
+
+function telegramSendDocument(chatId, fileBuffer, filename, caption) {
+  return new Promise((resolve, reject) => {
+    const boundary = 'boundary' + crypto.randomBytes(16).toString('hex');
+
+    const parts = [];
+    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}`);
+    if (caption) {
+      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}`);
+      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="parse_mode"\r\n\r\nHTML`);
+    }
+    const preamble = Buffer.from(parts.join('\r\n') + `\r\n--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
+    const epilogue = Buffer.from(`\r\n--${boundary}--\r\n`);
+    const fullBody = Buffer.concat([preamble, fileBuffer, epilogue]);
+
+    const req = https.request({
+      hostname: 'api.telegram.org',
+      path: `/bot${TG_TOKEN}/sendDocument`,
+      method: 'POST',
+      headers: {
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+        'Content-Length': fullBody.length
+      },
+      timeout: 60000
+    }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { resolve({ ok: false, raw: data }); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Telegram sendDocument timeout')); });
+    req.write(fullBody);
+    req.end();
+  });
+}
+
+async function handleSpeedTest(chatId) {
+  const userProxy = tgProxies.find(p => p.chatId === chatId);
+  if (!userProxy) {
+    return tgSend(chatId, '❌ У вас нет активных прокси. Сначала подключите прокси, чтобы замерить скорость.', { reply_markup: KB_MAIN });
+  }
+
+  await tgSend(chatId, '🚀 <b>Тест скорости</b>\n\nСейчас отправлю тестовый файл (10 МБ).\nСкачайте его и сразу нажмите «✅ Скачал!»', { reply_markup: KB_SPEED });
+
+  try {
+    let sendResult;
+    if (speedTestFileId) {
+      // Reuse cached file_id
+      sendResult = await telegramApi('sendDocument', { chat_id: chatId, document: speedTestFileId });
+    } else {
+      // First time: generate and upload random file
+      const testBuffer = crypto.randomBytes(SPEED_TEST_SIZE);
+      sendResult = await telegramSendDocument(chatId, testBuffer, 'speedtest_10mb.bin');
+      if (sendResult.ok && sendResult.result?.document?.file_id) {
+        speedTestFileId = sendResult.result.document.file_id;
+        console.log(`[TelegramBot] Speed test file cached, file_id: ${speedTestFileId}`);
+      }
+    }
+
+    if (!sendResult.ok) {
+      console.error('[TelegramBot] Failed to send speed test file:', sendResult);
+      return tgSend(chatId, '❌ Не удалось отправить тестовый файл. Попробуйте позже.', { reply_markup: KB_MAIN });
+    }
+
+    // Record session start time
+    speedTestSessions[chatId] = { startTime: Date.now(), fileSize: SPEED_TEST_SIZE };
+  } catch (e) {
+    console.error('[TelegramBot] Speed test error:', e.message);
+    await tgSend(chatId, '❌ Ошибка при отправке тестового файла. Попробуйте позже.', { reply_markup: KB_MAIN });
+  }
+}
+
+async function handleSpeedDone(chatId) {
+  const session = speedTestSessions[chatId];
+  if (!session) {
+    return tgSend(chatId, '❓ Нет активного теста скорости. Нажмите «🚀 Скорость» чтобы начать.', { reply_markup: KB_MAIN });
+  }
+
+  const elapsed = (Date.now() - session.startTime) / 1000;
+  const speedMbps = (session.fileSize * 8 / elapsed / 1_000_000).toFixed(1);
+  const fileSizeMB = (session.fileSize / 1_048_576).toFixed(0);
+
+  delete speedTestSessions[chatId];
+
+  // Save speed test result to user record
+  const user = getTgUser(chatId, null);
+  user.speedTests.push({ speed: parseFloat(speedMbps), date: new Date().toISOString() });
+  saveTgUsers();
+
+  const text =
+    `🚀 <b>Результат теста скорости</b>\n\n` +
+    `⬇️ Скорость скачивания: <b>${speedMbps} Мбит/с</b>\n` +
+    `📦 Размер файла: ${fileSizeMB} МБ\n` +
+    `⏱ Время загрузки: ${elapsed.toFixed(1)} сек\n\n` +
+    `💡 <i>Результат приблизительный и зависит от скорости вашего интернета + прокси</i>`;
+
+  await tgSend(chatId, text, { reply_markup: KB_MAIN });
 }
 
 async function handleChangeIp(chatId, portID, serverName) {
@@ -3008,6 +4504,79 @@ async function handleChangeIp(chatId, portID, serverName) {
   }
 }
 
+// ---- Feedback & NPS handlers ----
+
+function ratingKeyboard(type) {
+  return {
+    inline_keyboard: [
+      [1,2,3,4,5].map(n => ({ text: String(n), callback_data: `rate:${type}:${n}` })),
+      [6,7,8,9,10].map(n => ({ text: String(n), callback_data: `rate:${type}:${n}` }))
+    ]
+  };
+}
+
+async function handleFeedback(chatId) {
+  userStates[chatId] = { state: 'awaiting_feedback' };
+  await tgSend(chatId,
+    '💬 <b>Обратная связь</b>\n\nКак мы можем стать для вас лучше?\nНапишите ваше сообщение:',
+    { reply_markup: { keyboard: [['◀️ Отмена']], resize_keyboard: true } }
+  );
+}
+
+async function handleFeedbackText(chatId, username, text) {
+  const state = userStates[chatId];
+  if (!state) return false;
+
+  if (state.state === 'awaiting_feedback') {
+    delete userStates[chatId];
+    tgFeedback.push({
+      chatId, username: username || null,
+      type: 'feedback',
+      message: text,
+      createdAt: new Date().toISOString()
+    });
+    saveTgFeedback();
+    await tgSend(chatId, '✅ Спасибо за обратную связь! Мы обязательно учтём ваше мнение.', { reply_markup: KB_MAIN });
+    return true;
+  }
+
+  if (state.state === 'awaiting_nps_comment') {
+    // Save comment to the existing feedback record
+    const lastRecord = tgFeedback.filter(f => f.chatId === chatId && f.type === state.type).pop();
+    if (lastRecord) lastRecord.comment = text;
+    saveTgFeedback();
+    delete userStates[chatId];
+    await tgSend(chatId, '✅ Спасибо за комментарий!', { reply_markup: KB_MAIN });
+    return true;
+  }
+
+  return false;
+}
+
+async function handleRating(chatId, username, type, score) {
+  tgFeedback.push({
+    chatId, username: username || null,
+    type, // 'nps' | 'satisfaction'
+    score,
+    createdAt: new Date().toISOString()
+  });
+  saveTgFeedback();
+
+  if (type === 'satisfaction') {
+    await tgSend(chatId,
+      `✅ Спасибо за оценку <b>${score}/10</b>!\n\nОформите подписку, чтобы продолжить пользоваться прокси.`,
+      { reply_markup: KB_MAIN }
+    );
+  } else {
+    // NPS — ask for optional comment
+    userStates[chatId] = { state: 'awaiting_nps_comment', type };
+    await tgSend(chatId,
+      `✅ Спасибо за оценку <b>${score}/10</b>!\n\nЕсли хотите добавить комментарий — просто напишите его.\nИли нажмите любую кнопку меню для продолжения.`,
+      { reply_markup: KB_MAIN }
+    );
+  }
+}
+
 // ---- Expiration checker ----
 
 async function checkTgProxyExpirations() {
@@ -3024,13 +4593,23 @@ async function checkTgProxyExpirations() {
       continue;
     }
 
+    // Test plan: satisfaction survey 1 hour before expiry
+    if (record.plan === 'test' && !record.satisfactionSent && remaining <= 60 * 60 * 1000 && remaining > 0) {
+      record.satisfactionSent = true;
+      saveTgProxies();
+      await tgSend(record.chatId,
+        '⏰ <b>Через 1 час тестовый прокси будет отключён</b>\n\nОцените качество прокси от 1 до 10:',
+        { reply_markup: ratingKeyboard('satisfaction') }
+      );
+    }
+
     // 7-day notification
     if (!record.notified_7d && remaining <= 7 * 86400000 && record.plan !== 'test') {
       record.notified_7d = true;
       saveTgProxies();
       await tgSend(record.chatId,
-        '📢 <b>Напоминание</b>\n\nВаша подписка заканчивается через 7 дней. Продлите, чтобы не потерять доступ!',
-        { reply_markup: { inline_keyboard: [[{ text: '📋 Продлить', callback_data: 'show_plans' }]] } }
+        '📢 <b>Напоминание</b>\n\nВаша подписка заканчивается через 7 дней. Нажмите «📋 Тарифы», чтобы продлить!',
+        { reply_markup: KB_MAIN }
       );
     }
 
@@ -3039,9 +4618,22 @@ async function checkTgProxyExpirations() {
       record.notified_1d = true;
       saveTgProxies();
       await tgSend(record.chatId,
-        '🔴 <b>Подписка заканчивается завтра!</b>\n\nПродлите сейчас, чтобы прокси не был отключён.',
-        { reply_markup: { inline_keyboard: [[{ text: '📋 Продлить сейчас', callback_data: 'show_plans' }]] } }
+        '🔴 <b>Подписка заканчивается завтра!</b>\n\nНажмите «📋 Тарифы», чтобы продлить прокси!',
+        { reply_markup: KB_MAIN }
       );
+    }
+
+    // Monthly NPS survey (every 30 days for paid plans)
+    if (record.plan !== 'test' && remaining > 0) {
+      const lastNps = record.npsLastSent ? new Date(record.npsLastSent).getTime() : 0;
+      if (now - lastNps > 30 * 86400000) {
+        record.npsLastSent = new Date().toISOString();
+        saveTgProxies();
+        await tgSend(record.chatId,
+          '📊 <b>Мы хотим стать лучше!</b>\n\nНасколько вы порекомендуете наш сервис друзьям?\nОт 1 (точно нет) до 10 (обязательно порекомендую):',
+          { reply_markup: ratingKeyboard('nps') }
+        );
+      }
     }
   }
 }
@@ -3078,8 +4670,33 @@ function startTelegramPolling() {
       const text = (msg.text || '').trim();
       const username = msg.from?.username || null;
 
-      if (text === '/start') return handleStart(chatId);
+      // Slash commands
+      if (text === '/start') { delete userStates[chatId]; return handleStart(chatId); }
+      if (text === '/help') return handleHelp(chatId);
       if (text === '/myproxies') return handleMyProxies(chatId);
+
+      // Reply keyboard buttons
+      if (text === '🎁 Тест (1 день)')           { delete userStates[chatId]; return handleBuy(chatId, username, 'test'); }
+      if (text === '📋 Тарифы')                 { delete userStates[chatId]; return handleShowPlans(chatId); }
+      if (text === '📱 Мои прокси')             { delete userStates[chatId]; return handleMyProxies(chatId); }
+      if (text === '🚀 Скорость')               { delete userStates[chatId]; return handleSpeedTest(chatId); }
+      if (text === '❓ Инструкция')              { delete userStates[chatId]; return handleHelp(chatId); }
+      if (text === '💬 Обратная связь')          return handleFeedback(chatId);
+      if (text === '◀️ Назад' || text === '◀️ Отмена') {
+        delete speedTestSessions[chatId];
+        delete userStates[chatId];
+        return handleStart(chatId);
+      }
+      if (text === '✅ Скачал!')                 return handleSpeedDone(chatId);
+      if (text === '📅 1 мес — 599 ₽')          { delete userStates[chatId]; return handleBuy(chatId, username, '1m'); }
+      if (text === '📅 6 мес — 499 ₽/мес')      { delete userStates[chatId]; return handleBuy(chatId, username, '6m'); }
+      if (text === '📅 12 мес — 399 ₽/мес')     { delete userStates[chatId]; return handleBuy(chatId, username, '12m'); }
+
+      // State-based text handling (feedback/NPS comment)
+      if (userStates[chatId] && text) {
+        const handled = await handleFeedbackText(chatId, username, text);
+        if (handled) return;
+      }
     }
 
     if (update.callback_query) {
@@ -3091,13 +4708,15 @@ function startTelegramPolling() {
       // Answer callback to remove loading spinner
       telegramApi('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
 
-      if (data === 'test_proxy') return handleBuy(chatId, username, 'test');
-      if (data === 'buy_1m') return handleBuy(chatId, username, '1m');
-      if (data === 'buy_6m') return handleBuy(chatId, username, '6m');
-      if (data === 'buy_12m') return handleBuy(chatId, username, '12m');
-      if (data === 'show_plans') return handleShowPlans(chatId);
-      if (data === 'my_proxies') return handleMyProxies(chatId);
+      // Rating callbacks (NPS / satisfaction)
+      if (data.startsWith('rate:')) {
+        const parts = data.split(':');
+        const type = parts[1]; // 'nps' or 'satisfaction'
+        const score = parseInt(parts[2]);
+        return handleRating(chatId, username, type, score);
+      }
 
+      // Change IP per-proxy
       if (data.startsWith('change_ip:')) {
         const parts = data.split(':');
         return handleChangeIp(chatId, parts[1], parts[2]);
