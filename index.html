@@ -765,6 +765,12 @@
           </div>
         </div>
         <div class="tools-section" style="margin-top:20px">
+          <h3 style="display:flex;align-items:center;gap:8px">💳 Счета на оплату <span id="unpaidBadge" style="display:none;background:var(--red);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600"></span></h3>
+          <div id="billsList">
+            <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
+          </div>
+        </div>
+        <div class="tools-section" style="margin-top:20px">
           <h3>Загруженные документы</h3>
           <div id="documentsList">
             <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
@@ -2187,6 +2193,7 @@ function convertFormat(){
 // --- Documents ---
 function loadDocuments(){
   loadClosingDocs();
+  loadBills();
   fetch('/api/client/documents',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(docs){
     var el=document.getElementById('documentsList');
     if(!docs.length){el.innerHTML='<p style="color:var(--text-2);text-align:center;padding:40px">Документов пока нет</p>';return}
@@ -2244,6 +2251,52 @@ function loadClosingDocs(){
 
 function downloadClosingPdf(docId){
   window.open('/api/client/closing_documents/'+docId+'/pdf?token='+encodeURIComponent(authToken),'_blank');
+}
+
+// --- Bills (Счета на оплату) ---
+function loadBills(){
+  fetch('/api/client/bills',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+    var bills=data.bills||[];
+    var el=document.getElementById('billsList');
+    var badge=document.getElementById('unpaidBadge');
+    var unpaid=bills.filter(function(b){return b.status!=='paid'});
+    if(badge){
+      if(unpaid.length>0){badge.style.display='inline';badge.textContent=unpaid.length+' не оплачен';}
+      else{badge.style.display='none';}
+    }
+    if(!bills.length){el.innerHTML='<p style="color:var(--text-2);text-align:center;padding:40px">Счетов на оплату пока нет</p>';return}
+    var h='<table class="data-table" style="width:100%"><thead><tr><th style="text-align:left;padding:10px 12px">Период</th><th style="text-align:left;padding:10px 12px">Номер</th><th style="text-align:right;padding:10px 12px">Сумма</th><th style="text-align:center;padding:10px 12px">Статус</th><th style="text-align:center;padding:10px 12px">Действия</th></tr></thead><tbody>';
+    bills.sort(function(a,b){return (b.period||'').localeCompare(a.period||'')});
+    bills.forEach(function(b){
+      var isPaid=b.status==='paid';
+      var rowBg=isPaid?'':'background:rgba(239,68,68,0.08);';
+      var statusHtml=isPaid
+        ?'<span style="color:var(--green);font-weight:600">✅ Оплачен</span>'
+        :'<span style="color:var(--red);font-weight:600">⏳ Не оплачен</span>';
+      var periodLabel=b.period||'—';
+      if(b.period&&b.period.length===7){
+        var parts=b.period.split('-');
+        var months=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+        var mi=parseInt(parts[1],10)-1;
+        if(mi>=0&&mi<12) periodLabel=months[mi]+' '+parts[0];
+      }
+      h+='<tr style="border-bottom:1px solid var(--border);'+rowBg+'">';
+      h+='<td style="padding:10px 12px;font-weight:500">'+escapeHtml(periodLabel)+'</td>';
+      h+='<td style="padding:10px 12px;color:var(--text-3)">'+(b.billNumber||'—')+'</td>';
+      h+='<td style="padding:10px 12px;text-align:right;font-weight:600">'+formatNumber(b.amount||0)+' ₽</td>';
+      h+='<td style="padding:10px 12px;text-align:center">'+statusHtml+'</td>';
+      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" onclick="downloadBillPdf(\''+b.id+'\')" style="font-size:12px;padding:4px 10px">📥 PDF</button></td>';
+      h+='</tr>';
+    });
+    h+='</tbody></table>';
+    el.innerHTML=h;
+  }).catch(function(e){
+    document.getElementById('billsList').innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
+  });
+}
+
+function downloadBillPdf(billId){
+  window.open('/api/client/bills/'+billId+'/pdf?token='+encodeURIComponent(authToken),'_blank');
 }
 
 // --- API Docs ---

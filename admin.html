@@ -599,6 +599,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <div style="padding:14px 24px">
     <div id="bankConfigSection"></div>
     <div id="bankDocumentsSection" style="margin-top:16px"></div>
+    <div id="bankBillsSection" style="margin-top:16px"></div>
     <div id="bankPaymentsSection" style="margin-top:16px"></div>
   </div>
 </div>
@@ -764,6 +765,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
       <div class="modal-tab active" id="opsTab_history" onclick="switchOpsTab('history')" style="cursor:pointer">💰 Операции</div>
       <div class="modal-tab" id="opsTab_documents" onclick="switchOpsTab('documents')" style="cursor:pointer">📋 Документы</div>
       <div class="modal-tab" id="opsTab_acts" onclick="switchOpsTab('acts')" style="cursor:pointer">📃 Акты</div>
+      <div class="modal-tab" id="opsTab_bills" onclick="switchOpsTab('bills')" style="cursor:pointer">💳 Счета</div>
     </div>
     <div class="modal-body" id="clientOpsBody" style="max-height:calc(85vh - 120px);overflow-y:auto">
     </div>
@@ -833,10 +835,10 @@ function doLogin(){window.location.href='/'}
 function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
-function switchMainTab(name,el){document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings()}if(name==='telegram')renderTelegramUsers();if(name==='bank'){renderBankConfig();renderBankDocuments();renderBankPayments()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}}
+function switchMainTab(name,el){document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings()}if(name==='telegram')renderTelegramUsers();if(name==='bank'){renderBankConfig();renderBankDocuments();renderBankBills();renderBankPayments()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}}
 
 // ========== DATA ==========
-function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();renderBankPayments();renderBankDocuments();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU')}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
+function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();renderBankPayments();renderBankDocuments();renderBankBills();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU')}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
 
 function processData(){if(!currentData)return;var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(m.net_details?m.net_details.CELLOP:'')||'',apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
@@ -1695,9 +1697,11 @@ function switchOpsTab(tab) {
   document.getElementById('opsTab_history').classList.toggle('active', tab === 'history');
   document.getElementById('opsTab_documents').classList.toggle('active', tab === 'documents');
   document.getElementById('opsTab_acts').classList.toggle('active', tab === 'acts');
+  document.getElementById('opsTab_bills').classList.toggle('active', tab === 'bills');
   if (tab === 'history') renderOpsHistory(currentOpsClientId);
   else if (tab === 'documents') renderOpsDocuments(currentOpsClientId);
   else if (tab === 'acts') renderOpsActs(currentOpsClientId);
+  else if (tab === 'bills') renderOpsBills(currentOpsClientId);
 }
 
 function renderOpsHistory(clientId) {
@@ -1902,6 +1906,85 @@ function deleteAct(clientId, docId) {
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsActs(clientId); }, 1500); }
+      else showToast(d.error || 'Ошибка', 'error');
+    });
+}
+
+// ========== BILLS (СЧЕТА НА ОПЛАТУ) ==========
+function renderOpsBills(clientId) {
+  var body = document.getElementById('clientOpsBody');
+  var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
+  var bills = client ? client.bills || [] : [];
+  bills = bills.slice().sort(function(a, b) { return (b.period || '').localeCompare(a.period || ''); });
+  var h = '<div style="padding:8px 0">';
+  // Create bill form
+  h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px;padding:10px 12px;background:var(--bg-3);border-radius:8px;flex-wrap:wrap">';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><input class="form-input" type="month" id="billPeriod" style="width:150px;font-size:12px;padding:4px 8px"></div>';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Сумма (авто если пусто)</label><input class="form-input" type="number" id="billAmount" placeholder="авто" style="width:120px;font-size:12px;padding:4px 8px"></div>';
+  h += '<button class="btn btn-primary btn-sm" onclick="createBill(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px">➕ Выставить счёт</button>';
+  h += '</div>';
+  if (bills.length) {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Период</th><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Номер</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
+    bills.forEach(function(b) {
+      var isPaid = b.status === 'paid';
+      var statusHtml = isPaid
+        ? '<span style="color:var(--success);font-weight:600">✅ Оплачен</span>'
+        : '<span style="color:var(--danger);font-weight:600">⏳ Не оплачен</span>';
+      var toggleBtn = isPaid
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'unpaid\')">↩ Не оплачен</button>'
+        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'paid\')">✅ Оплачен</button>';
+      var pdfBtn = b.tochkaBillId
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadBillPdf(\'' + clientId + '\',\'' + b.id + '\')">📥 PDF</button>'
+        : '<span style="font-size:10px;color:var(--text-3)">нет PDF</span>';
+      h += '<tr style="border-bottom:1px solid var(--border);' + (isPaid ? '' : 'background:rgba(220,38,38,0.05)') + '">';
+      h += '<td style="padding:6px 10px;font-weight:500">' + esc(b.period) + '</td>';
+      h += '<td style="padding:6px 10px;color:var(--text-3)">' + esc(b.billNumber || '') + '</td>';
+      h += '<td style="padding:6px 10px;text-align:right;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
+      h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
+      h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\u2715</button></td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+  } else {
+    h += '<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Нет выставленных счетов</div>';
+  }
+  h += '</div>';
+  body.innerHTML = h;
+}
+
+function createBill(clientId) {
+  var period = document.getElementById('billPeriod').value;
+  if (!period) return showToast('Выберите период', 'error');
+  var amountVal = document.getElementById('billAmount').value;
+  var payload = { clientId: clientId, period: period };
+  if (amountVal && parseFloat(amountVal) > 0) payload.amount = parseFloat(amountVal);
+  fetch(API + '/api/admin/tochka/create_bill', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(payload) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('Счёт выставлен: ' + (d.amount || 0).toLocaleString('ru-RU') + ' \u20BD', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsBills(clientId); }, 1500); }
+      else showToast(d.error || 'Ошибка', 'error');
+    }).catch(function(e) { showToast(e.message, 'error'); });
+}
+
+function toggleBillStatus(clientId, billId, status) {
+  fetch(API + '/api/admin/clients/' + clientId + '/bill_status', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ billId: billId, status: status }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast(status === 'paid' ? 'Отмечен как оплаченный' : 'Отмечен как неоплаченный', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsBills(clientId); }, 1500); }
+      else showToast(d.error || 'Ошибка', 'error');
+    });
+}
+
+function downloadBillPdf(clientId, billId) {
+  window.open(API + '/api/admin/clients/' + clientId + '/bills/' + billId + '/pdf?token=' + authToken, '_blank');
+}
+
+function deleteBill(clientId, billId) {
+  if (!confirm('Удалить счёт?')) return;
+  fetch(API + '/api/admin/clients/' + clientId + '/bill/' + billId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('Счёт удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsBills(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
     });
 }
@@ -2173,6 +2256,149 @@ function deleteActFromBank(clientId, docId) {
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { loadAllActs(); }, 1500); }
+      else showToast(d.error || 'Ошибка', 'error');
+    });
+}
+
+// ========== BANK BILLS (Счета на оплату) ==========
+function renderBankBills() {
+  var container = document.getElementById('bankBillsSection');
+  if (!container) return;
+  var tochkaOk = currentData.tochkaConfigured;
+  var h = '<div class="detail-card">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
+  h += '<h3 style="margin:0">💳 Счета на оплату</h3>';
+  h += '</div>';
+
+  // Bulk generation form
+  h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px;padding:10px 12px;background:var(--bg-3);border-radius:8px;flex-wrap:wrap">';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><input class="form-input" type="month" id="bulkBillPeriod" style="width:160px;font-size:12px;padding:4px 8px"></div>';
+  h += '<button class="btn btn-primary btn-sm" onclick="generateBulkBills()" style="white-space:nowrap;padding:4px 12px">💳 Выставить счета всем клиентам</button>';
+  h += '<div id="bulkBillStatus" style="font-size:12px;color:var(--text-3)"></div>';
+  h += '</div>';
+
+  // Load and display all bills
+  h += '<div id="allBillsList"><div style="color:var(--text-3);font-size:12px;text-align:center;padding:10px">Загрузка...</div></div>';
+  h += '</div>';
+  container.innerHTML = h;
+  loadAllBills();
+}
+
+function loadAllBills() {
+  fetch(API + '/api/admin/tochka/all_bills', { headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      var bills = data.bills || [];
+      var el = document.getElementById('allBillsList');
+      if (!el) return;
+      if (!bills.length) {
+        el.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:20px;text-align:center">Счетов пока нет. Выберите период и нажмите «Выставить счета всем клиентам».</div>';
+        return;
+      }
+      // Group by period
+      var periods = {};
+      bills.forEach(function(b) {
+        var p = b.period || 'unknown';
+        if (!periods[p]) periods[p] = [];
+        periods[p].push(b);
+      });
+      var sortedPeriods = Object.keys(periods).sort(function(a, b) { return b.localeCompare(a); });
+      var months = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+      var h = '';
+      sortedPeriods.forEach(function(period, pi) {
+        var pbills = periods[period];
+        var totalSum = pbills.reduce(function(s, b) { return s + (b.amount || 0); }, 0);
+        var unpaid = pbills.filter(function(b) { return b.status !== 'paid'; }).length;
+        var paid = pbills.length - unpaid;
+        var parts = period.split('-');
+        var monthLabel = months[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
+        var isOpen = pi === 0;
+        h += '<div style="border:1px solid var(--border);border-radius:8px;margin-bottom:8px;overflow:hidden">';
+        h += '<div onclick="toggleBillPeriod(this)" style="cursor:pointer;display:flex;justify-content:space-between;align-items:center;padding:10px 14px;background:var(--bg-3);user-select:none">';
+        h += '<div style="display:flex;align-items:center;gap:10px">';
+        h += '<span style="font-size:14px;transition:transform .2s;transform:rotate(' + (isOpen ? '90' : '0') + 'deg)">▶</span>';
+        h += '<span style="font-weight:600;font-size:14px">' + esc(monthLabel) + '</span>';
+        h += '<span style="font-size:11px;color:var(--text-3)">' + pbills.length + ' счёт' + (pbills.length > 1 ? (pbills.length < 5 ? 'а' : 'ов') : '') + '</span>';
+        h += '</div>';
+        h += '<div style="display:flex;align-items:center;gap:12px">';
+        h += '<span style="font-weight:600;font-size:13px">' + totalSum.toLocaleString('ru-RU') + ' \u20BD</span>';
+        if (unpaid > 0) h += '<span style="background:var(--danger);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + unpaid + ' не оплачен</span>';
+        if (paid > 0) h += '<span style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + paid + ' оплачен</span>';
+        h += '</div></div>';
+        h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0">';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
+        pbills.forEach(function(b) {
+          var isPaid = b.status === 'paid';
+          var statusHtml = isPaid
+            ? '<span style="color:var(--success);font-weight:600">✅ Оплачен</span>'
+            : '<span style="color:var(--danger);font-weight:600">⏳ Не оплачен</span>';
+          var toggleBtn = isPaid
+            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + b.clientId + '\',\'' + b.id + '\',\'unpaid\')">↩</button>'
+            : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + b.clientId + '\',\'' + b.id + '\',\'paid\')">✅</button>';
+          var pdfBtn = b.tochkaBillId
+            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadBillPdf(\'' + b.clientId + '\',\'' + b.id + '\')">📥</button>'
+            : '';
+          h += '<tr style="border-bottom:1px solid var(--border);' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
+          h += '<td style="padding:6px 10px;font-weight:500">' + esc(b.clientName || '') + '</td>';
+          h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.clientInn || '') + '</td>';
+          h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
+          h += '<td style="padding:6px 10px;text-align:right;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
+          h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
+          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteBillFromBank(\'' + b.clientId + '\',\'' + b.id + '\')">✕</button></td>';
+          h += '</tr>';
+        });
+        h += '</tbody></table></div></div>';
+      });
+      el.innerHTML = h;
+    }).catch(function(e) {
+      var el = document.getElementById('allBillsList');
+      if (el) el.innerHTML = '<div style="color:var(--danger);font-size:12px;padding:10px">' + esc(e.message) + '</div>';
+    });
+}
+
+function toggleBillPeriod(header) {
+  var content = header.nextElementSibling;
+  var arrow = header.querySelector('span');
+  if (content.style.display === 'none') {
+    content.style.display = 'block';
+    arrow.style.transform = 'rotate(90deg)';
+  } else {
+    content.style.display = 'none';
+    arrow.style.transform = 'rotate(0deg)';
+  }
+}
+
+function generateBulkBills() {
+  var period = document.getElementById('bulkBillPeriod').value;
+  if (!period) return showToast('Выберите период', 'error');
+  var statusEl = document.getElementById('bulkBillStatus');
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">⏳ Генерирую счета...</span>';
+  fetch(API + '/api/admin/tochka/generate_bills', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ period: period }) })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) {
+        var msg = '✅ Создано: ' + d.generated + ', пропущено: ' + d.skipped;
+        if (d.errors > 0) msg += ', ошибок: ' + d.errors;
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">' + msg + '</span>';
+        showToast(msg, 'success');
+        loadData();
+        setTimeout(function() { loadAllBills(); }, 1500);
+      } else {
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + (d.error || 'Ошибка') + '</span>';
+        showToast(d.error || 'Ошибка', 'error');
+      }
+    }).catch(function(e) {
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + e.message + '</span>';
+      showToast(e.message, 'error');
+    });
+}
+
+function deleteBillFromBank(clientId, billId) {
+  if (!confirm('Удалить счёт?')) return;
+  fetch(API + '/api/admin/clients/' + clientId + '/bill/' + billId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.ok) { showToast('Счёт удалён', 'success'); loadData(); setTimeout(function() { loadAllBills(); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
     });
 }

@@ -185,8 +185,9 @@ function decodeJwtPayload(token) {
   }
 }
 
-// Track last act generation month to avoid duplicates
+// Track last act/bill generation month to avoid duplicates
 let lastActGenerationMonth = '';
+let lastBillGenerationMonth = '';
 
 // Russian month names (prepositional case for "в январе")
 const MONTH_NAMES_RU = ['январе','феврале','марте','апреле','мае','июне','июле','августе','сентябре','октябре','ноябре','декабре'];
@@ -243,6 +244,94 @@ function buildTochkaActBody(client, period, actItems, actNumber) {
       }
     }
   };
+}
+
+// Helper: build Tochka bill (счёт на оплату) request body
+function buildTochkaBillBody(client, amount, billNumber, billDate) {
+  const isIP = client.inn && client.inn.length === 12;
+
+  // Build full counterparty name with address (ИНН/КПП добавляется Точкой автоматически)
+  let secondSideName = client.legalName || client.name;
+  if (client.address) {
+    secondSideName += `, ${client.address}`;
+  }
+
+  return {
+    Data: {
+      accountId: tochkaConfig.accountId,
+      customerCode: tochkaConfig.customerCode,
+      SecondSide: {
+        secondSideType: isIP ? 'individual_entrepreneur' : 'legal_entity',
+        type: isIP ? 'ip' : 'company',
+        inn: client.inn || '',
+        taxCode: client.inn || '',
+        kpp: client.kpp || '',
+        name: secondSideName
+      },
+      Content: {
+        Invoice: {
+          Positions: [{
+            positionName: 'Предоплата за услуги мобильных прокси',
+            quantity: 1,
+            unitCode: 'услуга.',
+            totalAmount: amount,
+            ndsKind: 'without_nds',
+            price: amount,
+            positionNumber: 1
+          }],
+          invoiceDate: billDate,
+          number: billNumber,
+          totalAmount: amount
+        }
+      }
+    }
+  };
+}
+
+// Helper: calculate monthly bill amount for a client
+function calculateMonthlyBillAmount(client, cachedResults) {
+  let baseAmount = 0;
+
+  if (client.billingType === 'per_modem') {
+    // Fixed: price * modem count
+    let modemCount = 0;
+    if (cachedResults && cachedResults.length > 0) {
+      for (const data of cachedResults) {
+        if (typeof data.bw === 'object') {
+          for (const [portId, b] of Object.entries(data.bw)) {
+            if (b.portName === client.portName) modemCount++;
+          }
+        }
+      }
+    }
+    if (modemCount === 0) modemCount = 1; // fallback
+    baseAmount = client.price * modemCount;
+  } else {
+    // per_gb: sum charges from previous month
+    const now = new Date();
+    const prevMonth = new Date(now);
+    prevMonth.setMonth(prevMonth.getMonth() - 1);
+    const prevPeriod = prevMonth.toISOString().slice(0, 7); // YYYY-MM
+
+    const ledgerEntries = billingLedger[client.id] || [];
+    const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(prevPeriod));
+    baseAmount = monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0);
+
+    if (baseAmount <= 0) return 0; // no charges last month — skip
+  }
+
+  // Add negative balance (debt) to the amount
+  let totalAmount = baseAmount;
+  if ((client.balance || 0) < 0) {
+    totalAmount += Math.abs(client.balance);
+  }
+
+  // For per_gb: round up to nearest 10,000₽
+  if (client.billingType !== 'per_modem') {
+    totalAmount = Math.ceil(totalAmount / 10000) * 10000;
+  }
+
+  return Math.round(totalAmount * 100) / 100;
 }
 
 // ==================== DAILY TRAFFIC HISTORY ====================
@@ -431,6 +520,7 @@ for (const c of clients) {
   if (!c.closingDocuments) { c.closingDocuments = []; clientsMigrated = true; }
   if (c.contractInfo === undefined) { c.contractInfo = ''; clientsMigrated = true; }
   if (c.address === undefined) { c.address = ''; clientsMigrated = true; }
+  if (!c.bills) { c.bills = []; clientsMigrated = true; }
 }
 if (clientsMigrated) saveClients(clients);
 
@@ -1804,6 +1894,7 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
     contractInfo: contractInfo || '',
     address: address || '',
     closingDocuments: [],
+    bills: [],
     createdAt: new Date().toISOString()
   };
 
@@ -3726,6 +3817,223 @@ app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, asy
   res.json({ ok: true, generated, skipped, errors, results });
 });
 
+// ==================== TOCHKA BANK: BILLS (СЧЕТА НА ОПЛАТУ) ====================
+
+// Create bill for a client
+app.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (req, res) => {
+  const { clientId, amount: manualAmount, period } = req.body;
+  if (!clientId) return res.status(400).json({ error: 'clientId required' });
+
+  const client = clients.find(c => c.id === clientId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  // Calculate amount or use manual
+  const now = new Date();
+  const billPeriod = period || now.toISOString().slice(0, 7);
+  let serverData = [];
+  if (!manualAmount) {
+    try { serverData = await fetchAllServersData(); } catch (e) { console.error('[Bills] fetchAllServersData error:', e.message); }
+  }
+  let amount = manualAmount || calculateMonthlyBillAmount(client, serverData);
+  if (!amount || amount <= 0) return res.status(400).json({ error: 'Cannot calculate bill amount (no charges found)' });
+
+  const billNumber = `СЧЁТ-${billPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
+  const billDate = now.toISOString().slice(0, 10);
+
+  let tochkaBillId = null;
+  if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
+    try {
+      const billData = buildTochkaBillBody(client, amount, billNumber, billDate);
+      const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
+      if (result.status === 200 && result.data?.Data?.documentId) {
+        tochkaBillId = result.data.Data.documentId;
+        console.log(`[Tochka] Created bill ${tochkaBillId} for ${client.name}, amount ${amount}`);
+      } else {
+        console.error('[Tochka] Create bill response:', JSON.stringify(result.data));
+      }
+    } catch (err) {
+      console.error('[Tochka] Create bill error:', err.message);
+    }
+  }
+
+  const billId = crypto.randomBytes(8).toString('hex');
+  const bill = {
+    id: billId,
+    tochkaBillId,
+    period: billPeriod,
+    createdAt: new Date().toISOString(),
+    amount: Math.round(amount * 100) / 100,
+    status: 'unpaid',
+    billNumber
+  };
+
+  if (!client.bills) client.bills = [];
+  client.bills.push(bill);
+  saveClients(clients);
+
+  res.json({ ok: true, bill });
+});
+
+// Generate bills for all clients
+app.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, async (req, res) => {
+  const { period } = req.body;
+  const now = new Date();
+  const billPeriod = period || now.toISOString().slice(0, 7);
+  const billDate = now.toISOString().slice(0, 10);
+
+  let generated = 0, skipped = 0, errors = 0;
+  const results = [];
+  let serverData = [];
+  try { serverData = await fetchAllServersData(); } catch (e) { console.error('[Bills] fetchAllServersData error:', e.message); }
+
+  for (const client of clients) {
+    if (!client.inn) { skipped++; continue; }
+    if ((client.bills || []).some(b => b.period === billPeriod)) { skipped++; continue; }
+
+    const amount = calculateMonthlyBillAmount(client, serverData);
+    if (!amount || amount <= 0) { skipped++; continue; }
+
+    const billNumber = `СЧЁТ-${billPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
+    let tochkaBillId = null;
+
+    if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId) {
+      try {
+        const billData = buildTochkaBillBody(client, amount, billNumber, billDate);
+        const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
+        if (result.status === 200 && result.data?.Data?.documentId) {
+          tochkaBillId = result.data.Data.documentId;
+        } else {
+          console.error(`[Tochka] Bill error for ${client.name}:`, JSON.stringify(result.data));
+        }
+      } catch (err) {
+        console.error(`[Tochka] Bill error for ${client.name}:`, err.message);
+      }
+    }
+
+    const billId = crypto.randomBytes(8).toString('hex');
+    if (!client.bills) client.bills = [];
+    client.bills.push({
+      id: billId,
+      tochkaBillId,
+      period: billPeriod,
+      createdAt: new Date().toISOString(),
+      amount: Math.round(amount * 100) / 100,
+      status: 'unpaid',
+      billNumber
+    });
+
+    generated++;
+    results.push({ client: client.name, status: 'created', amount: Math.round(amount * 100) / 100 });
+  }
+
+  if (generated > 0) saveClients(clients);
+  res.json({ ok: true, generated, skipped, errors, results });
+});
+
+// Get all bills across all clients
+app.get('/api/admin/tochka/all_bills', authMiddleware, adminMiddleware, (req, res) => {
+  const allBills = [];
+  for (const client of clients) {
+    for (const b of (client.bills || [])) {
+      allBills.push({
+        ...b,
+        clientId: client.id,
+        clientName: client.name,
+        clientInn: client.inn || ''
+      });
+    }
+  }
+  allBills.sort((a, b) => (b.createdAt || '').localeCompare(a.createdAt || ''));
+  res.json({ bills: allBills });
+});
+
+// Download bill PDF
+app.get('/api/admin/clients/:id/bills/:billId/pdf', authMiddleware, adminMiddleware, async (req, res) => {
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const bill = (client.bills || []).find(b => b.id === req.params.billId);
+  if (!bill || !bill.tochkaBillId) return res.status(404).json({ error: 'Bill not found or no Tochka ID' });
+
+  try {
+    const result = await tochkaRequest('GET', `/uapi/invoice/v1.0/bills/${tochkaConfig.customerCode}/${bill.tochkaBillId}/file`);
+    if (result.status === 200 && result.buffer) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(bill.billNumber + '.pdf')}`);
+      res.send(result.buffer);
+    } else {
+      res.status(500).json({ error: 'Failed to download PDF' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// Change bill status
+app.post('/api/admin/clients/:id/bill_status', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const { billId, status } = req.body;
+  const bill = (client.bills || []).find(b => b.id === billId);
+  if (!bill) return res.status(404).json({ error: 'Bill not found' });
+  bill.status = status === 'paid' ? 'paid' : 'unpaid';
+  saveClients(clients);
+  res.json({ ok: true, bill });
+});
+
+// Delete bill
+app.delete('/api/admin/clients/:id/bill/:billId', authMiddleware, adminMiddleware, async (req, res) => {
+  const client = clients.find(c => c.id === req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const idx = (client.bills || []).findIndex(b => b.id === req.params.billId);
+  if (idx === -1) return res.status(404).json({ error: 'Bill not found' });
+
+  const bill = client.bills[idx];
+  if (bill.tochkaBillId && tochkaConfig.jwt) {
+    try {
+      await tochkaRequest('DELETE', `/uapi/invoice/v1.0/bills/${tochkaConfig.customerCode}/${bill.tochkaBillId}`);
+    } catch (e) { console.error('[Tochka] Delete bill error:', e.message); }
+  }
+  client.bills.splice(idx, 1);
+  saveClients(clients);
+  res.json({ ok: true });
+});
+
+// Client-side: get bills
+app.get('/api/client/bills', authMiddleware, (req, res) => {
+  const client = clients.find(c => c.login === req.user.login);
+  if (!client) return res.json({ bills: [] });
+  res.json({ bills: (client.bills || []).map(b => ({
+    id: b.id,
+    period: b.period,
+    amount: b.amount,
+    status: b.status,
+    createdAt: b.createdAt,
+    billNumber: b.billNumber,
+    hasPdf: !!b.tochkaBillId
+  }))});
+});
+
+// Client-side: download bill PDF
+app.get('/api/client/bills/:billId/pdf', authMiddleware, async (req, res) => {
+  const client = clients.find(c => c.login === req.user.login);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const bill = (client.bills || []).find(b => b.id === req.params.billId);
+  if (!bill || !bill.tochkaBillId) return res.status(404).json({ error: 'Bill not found' });
+
+  try {
+    const result = await tochkaRequest('GET', `/uapi/invoice/v1.0/bills/${tochkaConfig.customerCode}/${bill.tochkaBillId}/file`);
+    if (result.status === 200 && result.buffer) {
+      res.setHeader('Content-Type', 'application/pdf');
+      res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(bill.billNumber + '.pdf')}`);
+      res.send(result.buffer);
+    } else {
+      res.status(500).json({ error: 'Failed to download PDF' });
+    }
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ==================== TOCHKA: AUTO-GENERATE ACTS (1st of month) ====================
 async function autoGenerateMonthlyActs() {
   const now = new Date();
@@ -3809,6 +4117,83 @@ async function autoGenerateMonthlyActs() {
   lastActGenerationMonth = period;
 }
 
+// ==================== TOCHKA: AUTO-GENERATE BILLS (1st of month) ====================
+async function autoGenerateMonthlyBills() {
+  const now = new Date();
+  const moscowDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+  const day = moscowDate.getDate();
+  const hour = moscowDate.getHours();
+
+  // Only run on 1st of month, after 8:00 Moscow time
+  if (day !== 1 || hour < 8) return;
+
+  // Current month (bills are for the current month, unlike acts which are for previous)
+  const currentPeriod = `${moscowDate.getFullYear()}-${String(moscowDate.getMonth() + 1).padStart(2, '0')}`;
+
+  // Prevent duplicate generation
+  if (lastBillGenerationMonth === currentPeriod) return;
+
+  console.log(`[Tochka AutoBills] Generating bills for period ${currentPeriod}...`);
+  let generated = 0;
+  let serverData = [];
+  try { serverData = await fetchAllServersData(); } catch (e) { console.error('[AutoBills] fetchAllServersData error:', e.message); }
+
+  for (const client of clients) {
+    // Skip clients without INN
+    if (!client.inn) continue;
+
+    // Skip if bill already exists for this period
+    if ((client.bills || []).some(b => b.period === currentPeriod)) continue;
+
+    try {
+      const amount = calculateMonthlyBillAmount(client, serverData);
+      if (amount <= 0) {
+        console.log(`[Tochka AutoBills] Skipping ${client.name}: amount is 0`);
+        continue;
+      }
+
+      const billNumber = `СЧЁТ-${currentPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
+      const billDate = `${currentPeriod}-01`;
+
+      let tochkaBillId = null;
+      if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId) {
+        try {
+          const billData = buildTochkaBillBody(client, amount, billNumber, billDate);
+          const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
+          if (result.status === 200 && result.data?.Data?.documentId) {
+            tochkaBillId = result.data.Data.documentId;
+          }
+        } catch (e) {
+          console.error(`[Tochka AutoBills] API error for ${client.name}:`, e.message);
+        }
+      }
+
+      const billId = crypto.randomBytes(8).toString('hex');
+      if (!client.bills) client.bills = [];
+      client.bills.push({
+        id: billId,
+        tochkaBillId,
+        period: currentPeriod,
+        createdAt: new Date().toISOString(),
+        amount,
+        status: 'unpaid',
+        billNumber,
+        billDate
+      });
+      generated++;
+      console.log(`[Tochka AutoBills] Created bill for ${client.name}: ${amount} RUB`);
+    } catch (e) {
+      console.error(`[Tochka AutoBills] Error for ${client.name}:`, e.message);
+    }
+  }
+
+  if (generated > 0) {
+    saveClients(clients);
+    console.log(`[Tochka AutoBills] Generated ${generated} bills for ${currentPeriod}`);
+  }
+  lastBillGenerationMonth = currentPeriod;
+}
+
 // ==================== JSON fallback for unknown API routes (Bug #5) ====================
 app.use('/api', (req, res) => {
   res.status(404).json({
@@ -3847,6 +4232,9 @@ app.listen(PORT, () => {
 
   // Auto-generate closing documents (acts) on 1st of each month at 08:05 Moscow (05:05 UTC)
   scheduleRepeating(5, 5, 'MonthlyActs', autoGenerateMonthlyActs);
+
+  // Auto-generate bills on 1st of each month at 08:10 Moscow (05:10 UTC)
+  scheduleRepeating(5, 10, 'MonthlyBills', autoGenerateMonthlyBills);
 
   // Billing catch-up: if last snapshot is older than 26 hours, run now
   (async () => {
