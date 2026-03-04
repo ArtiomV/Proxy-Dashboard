@@ -521,6 +521,8 @@ for (const c of clients) {
   if (c.contractInfo === undefined) { c.contractInfo = ''; clientsMigrated = true; }
   if (c.address === undefined) { c.address = ''; clientsMigrated = true; }
   if (!c.bills) { c.bills = []; clientsMigrated = true; }
+  if (c.autoActs === undefined) { c.autoActs = true; clientsMigrated = true; }
+  if (c.autoBills === undefined) { c.autoBills = true; clientsMigrated = true; }
 }
 if (clientsMigrated) saveClients(clients);
 
@@ -1895,6 +1897,8 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
     address: address || '',
     closingDocuments: [],
     bills: [],
+    autoActs: true,
+    autoBills: true,
     createdAt: new Date().toISOString()
   };
 
@@ -1916,7 +1920,7 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, (req, res) =>
   const idx = clients.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Client not found' });
   const old = clients[idx];
-  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address, autoActs, autoBills } = req.body;
   if (login && login !== old.login) {
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
     delete users[old.login];
@@ -1936,7 +1940,9 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, (req, res) =>
     kpp: kpp !== undefined ? kpp : (old.kpp || ''),
     legalName: legalName !== undefined ? legalName : (old.legalName || ''),
     contractInfo: contractInfo !== undefined ? contractInfo : (old.contractInfo || ''),
-    address: address !== undefined ? address : (old.address || '')
+    address: address !== undefined ? address : (old.address || ''),
+    autoActs: autoActs !== undefined ? autoActs : (old.autoActs !== undefined ? old.autoActs : true),
+    autoBills: autoBills !== undefined ? autoBills : (old.autoBills !== undefined ? old.autoBills : true)
   };
   clients[idx] = updated;
   saveClients(clients);
@@ -4056,6 +4062,9 @@ async function autoGenerateMonthlyActs() {
   let generated = 0;
 
   for (const client of clients) {
+    // Skip clients with autoActs disabled
+    if (client.autoActs === false) continue;
+
     // Skip clients without charges
     const ledgerEntries = billingLedger[client.id] || [];
     const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
@@ -4139,6 +4148,9 @@ async function autoGenerateMonthlyBills() {
   try { serverData = await fetchAllServersData(); } catch (e) { console.error('[AutoBills] fetchAllServersData error:', e.message); }
 
   for (const client of clients) {
+    // Skip clients with autoBills disabled
+    if (client.autoBills === false) continue;
+
     // Skip clients without INN
     if (!client.inn) continue;
 

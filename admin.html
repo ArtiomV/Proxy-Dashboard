@@ -740,6 +740,10 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
         <div class="form-group"><label>Юр. название</label><input class="form-input" id="cfLegalName" placeholder='ООО "Компания"'></div>
         <div class="form-group"><label>Адрес (юридический)</label><textarea class="form-input" id="cfAddress" rows="2" placeholder='119334, Г.МОСКВА, УЛ КОСЫГИНА, Д. 13' style="resize:vertical"></textarea></div>
         <div class="form-group"><label>Основание (договор)</label><input class="form-input" id="cfContractInfo" placeholder='Договор №123 от 01.01.2026'></div>
+        <div style="display:flex;gap:16px;margin-top:8px">
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-1);cursor:pointer"><input type="checkbox" id="cfAutoActs" checked style="cursor:pointer"> Авто-акты</label>
+          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-1);cursor:pointer"><input type="checkbox" id="cfAutoBills" checked style="cursor:pointer"> Авто-счета</label>
+        </div>
       </div>
       <div id="cfApiKeySection" style="display:none;margin-top:12px;padding:10px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border)">
         <label style="font-size:11px;color:var(--text-2);margin-bottom:4px;display:block">API Key</label>
@@ -763,9 +767,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     </div>
     <div style="display:flex;gap:0;border-bottom:1px solid var(--border);padding:0 4px">
       <div class="modal-tab active" id="opsTab_history" onclick="switchOpsTab('history')" style="cursor:pointer">💰 Операции</div>
-      <div class="modal-tab" id="opsTab_documents" onclick="switchOpsTab('documents')" style="cursor:pointer">📋 Документы</div>
-      <div class="modal-tab" id="opsTab_acts" onclick="switchOpsTab('acts')" style="cursor:pointer">📃 Акты</div>
-      <div class="modal-tab" id="opsTab_bills" onclick="switchOpsTab('bills')" style="cursor:pointer">💳 Счета</div>
+      <div class="modal-tab" id="opsTab_documents" onclick="switchOpsTab('documents')" style="cursor:pointer">📄 Документы</div>
     </div>
     <div class="modal-body" id="clientOpsBody" style="max-height:calc(85vh - 120px);overflow-y:auto">
     </div>
@@ -1418,11 +1420,11 @@ function toggleClientRow(id){
   row.style.display=row.style.display==='none'?'':'none';
 }
 
-function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?data.password:rnd(12);document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
+function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?data.password:rnd(12);document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';document.getElementById('cfAutoActs').checked=data?(data.autoActs!==false):true;document.getElementById('cfAutoBills').checked=data?(data.autoBills!==false):true;var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
 function closeClientModal(){document.getElementById('clientModal').classList.remove('show')}
 document.getElementById('clientModal').addEventListener('click',function(e){if(e.target===this)closeClientModal()});
 function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
-function saveClient(){var id=document.getElementById('clientFormId').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value};if(!d.name||!d.portName||!d.login||!d.password)return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
+function saveClient(){var id=document.getElementById('clientFormId').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked};if(!d.name||!d.portName||!d.login||!d.password)return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
 function deleteClient(id,name){if(!confirm('Удалить '+name+'?'))return;fetch(API+'/api/admin/clients/'+id,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()})}
 
 function impersonateClient(id,name){
@@ -1696,12 +1698,8 @@ document.getElementById('clientOpsModal').addEventListener('click', function(e) 
 function switchOpsTab(tab) {
   document.getElementById('opsTab_history').classList.toggle('active', tab === 'history');
   document.getElementById('opsTab_documents').classList.toggle('active', tab === 'documents');
-  document.getElementById('opsTab_acts').classList.toggle('active', tab === 'acts');
-  document.getElementById('opsTab_bills').classList.toggle('active', tab === 'bills');
   if (tab === 'history') renderOpsHistory(currentOpsClientId);
   else if (tab === 'documents') renderOpsDocuments(currentOpsClientId);
-  else if (tab === 'acts') renderOpsActs(currentOpsClientId);
-  else if (tab === 'bills') renderOpsBills(currentOpsClientId);
 }
 
 function renderOpsHistory(clientId) {
@@ -1763,25 +1761,103 @@ function renderOpsHistory(clientId) {
 function renderOpsDocuments(clientId) {
   var body = document.getElementById('clientOpsBody');
   var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
-  var docs = client ? client.documents || [] : [];
-  var h = '<div style="padding:8px 0">';
-  if (docs.length) {
-    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Документ</th><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
-    docs.forEach(function(d) {
-      h += '<tr style="border-bottom:1px solid var(--border)">';
-      h += '<td style="padding:6px 10px">' + esc(d.name) + '</td>';
-      h += '<td style="padding:6px 10px;color:var(--text-3)">' + new Date(d.date).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' }) + '</td>';
-      h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-danger btn-sm" onclick="deleteDocumentModal(\'' + clientId + '\',\'' + d.id + '\')">Удалить</button></td>';
+  var actDocs = client ? (client.closingDocuments || []).slice().sort(function(a,b){ return (b.period||'').localeCompare(a.period||''); }) : [];
+  var bills = client ? (client.bills || []).slice().sort(function(a,b){ return (b.period||'').localeCompare(a.period||''); }) : [];
+  var fileDocs = client ? client.documents || [] : [];
+
+  var h = '<div style="padding:4px 0">';
+
+  // === SECTION: АКТЫ ===
+  h += '<div style="margin-bottom:16px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">📃 Закрывающие документы (акты)</h4></div>';
+  h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:var(--bg-3);border-radius:6px">';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период</label><input class="form-input" type="month" id="actPeriod" style="width:140px;font-size:12px;padding:4px 8px"></div>';
+  h += '<button class="btn btn-primary btn-sm" onclick="createAct(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">➕ Создать акт</button>';
+  h += '</div>';
+  if (actDocs.length) {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+    actDocs.forEach(function(d) {
+      var isSigned = d.status === 'signed';
+      var statusHtml = isSigned
+        ? '<span style="color:var(--success);font-size:11px">✅ Подписан</span>'
+        : '<span style="color:var(--danger);font-size:11px">❌ Не подписан</span>';
+      var toggleBtn = isSigned
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'unsigned\')">❌</button>'
+        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'signed\')">✅</button>';
+      var pdfBtn = d.tochkaDocumentId
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadActPdf(\'' + clientId + '\',\'' + d.id + '\')">📥</button>'
+        : '<span style="font-size:10px;color:var(--text-3)">—</span>';
+      h += '<tr style="border-bottom:1px solid var(--border);' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
+      h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(d.period) + '</td>';
+      h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
+      h += '<td style="padding:5px 10px;text-align:right;font-weight:600;font-size:12px">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
+      h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\u2715</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table>';
   } else {
-    h += '<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Нет загруженных документов</div>';
+    h += '<div style="color:var(--text-3);font-size:12px;padding:16px;text-align:center;border:1px dashed var(--border);border-radius:6px">Нет закрывающих документов</div>';
   }
-  h += '<div style="padding:16px 0;border-top:1px solid var(--border);margin-top:12px;display:flex;align-items:center;gap:8px">';
-  h += '<input type="file" id="docFileModal" style="font-size:12px;flex:1">';
-  h += '<button class="btn btn-primary btn-sm" onclick="uploadDocumentModal(\'' + clientId + '\')">Загрузить</button>';
+  h += '</div>';
+
+  // === SECTION: СЧЕТА ===
+  h += '<div style="margin-bottom:16px">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">💳 Счета на оплату</h4></div>';
+  h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:var(--bg-3);border-radius:6px;flex-wrap:wrap">';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период</label><input class="form-input" type="month" id="billPeriod" style="width:140px;font-size:12px;padding:4px 8px"></div>';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Сумма (авто)</label><input class="form-input" type="number" id="billAmount" placeholder="авто" style="width:100px;font-size:12px;padding:4px 8px"></div>';
+  h += '<button class="btn btn-primary btn-sm" onclick="createBill(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">➕ Выставить счёт</button>';
+  h += '</div>';
+  if (bills.length) {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+    bills.forEach(function(b) {
+      var isPaid = b.status === 'paid';
+      var statusHtml = isPaid
+        ? '<span style="color:var(--success);font-size:11px">✅ Оплачен</span>'
+        : '<span style="color:var(--danger);font-size:11px">⏳ Не оплачен</span>';
+      var toggleBtn = isPaid
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'unpaid\')">↩</button>'
+        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'paid\')">✅</button>';
+      var pdfBtn = b.tochkaBillId
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadBillPdf(\'' + clientId + '\',\'' + b.id + '\')">📥</button>'
+        : '<span style="font-size:10px;color:var(--text-3)">—</span>';
+      h += '<tr style="border-bottom:1px solid var(--border);' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
+      h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(b.period) + '</td>';
+      h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
+      h += '<td style="padding:5px 10px;text-align:right;font-weight:600;font-size:12px">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
+      h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\u2715</button></td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+  } else {
+    h += '<div style="color:var(--text-3);font-size:12px;padding:16px;text-align:center;border:1px dashed var(--border);border-radius:6px">Нет выставленных счетов</div>';
+  }
+  h += '</div>';
+
+  // === SECTION: ФАЙЛЫ ===
+  h += '<div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">📎 Загруженные документы</h4></div>';
+  if (fileDocs.length) {
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Документ</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Дата</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+    fileDocs.forEach(function(d) {
+      h += '<tr style="border-bottom:1px solid var(--border)">';
+      h += '<td style="padding:5px 10px;font-size:12px">' + esc(d.name) + '</td>';
+      h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + new Date(d.date).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' }) + '</td>';
+      h += '<td style="padding:5px 10px;text-align:center"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteDocumentModal(\'' + clientId + '\',\'' + d.id + '\')">Удалить</button></td>';
+      h += '</tr>';
+    });
+    h += '</tbody></table>';
+  } else {
+    h += '<div style="color:var(--text-3);font-size:12px;padding:16px;text-align:center;border:1px dashed var(--border);border-radius:6px">Нет загруженных документов</div>';
+  }
+  h += '<div style="padding:10px 0;margin-top:8px;display:flex;align-items:center;gap:8px">';
+  h += '<input type="file" id="docFileModal" style="font-size:11px;flex:1">';
+  h += '<button class="btn btn-primary btn-sm" onclick="uploadDocumentModal(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">Загрузить</button>';
   h += '</div></div>';
+
+  h += '</div>';
   body.innerHTML = h;
 }
 
@@ -1835,54 +1911,14 @@ function deleteDocumentModal(clientId, docId) {
     });
 }
 
-// ========== CLOSING DOCUMENTS (ACTS) ==========
-function renderOpsActs(clientId) {
-  var body = document.getElementById('clientOpsBody');
-  var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
-  var docs = client ? client.closingDocuments || [] : [];
-  docs = docs.slice().sort(function(a, b) { return (b.period || '').localeCompare(a.period || ''); });
-  var h = '<div style="padding:8px 0">';
-  // Create act form
-  h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px;padding:10px 12px;background:var(--bg-3);border-radius:8px">';
-  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><input class="form-input" type="month" id="actPeriod" style="width:150px;font-size:12px;padding:4px 8px"></div>';
-  h += '<button class="btn btn-primary btn-sm" onclick="createAct(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px">➕ Создать акт</button>';
-  h += '</div>';
-  if (docs.length) {
-    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Период</th><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Номер</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
-    docs.forEach(function(d) {
-      var isSigned = d.status === 'signed';
-      var statusHtml = isSigned
-        ? '<span style="color:var(--success);font-weight:600">\u2705 Подписан</span>'
-        : '<span style="color:var(--danger);font-weight:600">\u274C Не подписан</span>';
-      var toggleBtn = isSigned
-        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'unsigned\')">\u274C Снять подпись</button>'
-        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'signed\')">\u2705 Подписан</button>';
-      var pdfBtn = d.tochkaDocumentId
-        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadActPdf(\'' + clientId + '\',\'' + d.id + '\')">📥 PDF</button>'
-        : '<span style="font-size:10px;color:var(--text-3)">нет PDF</span>';
-      h += '<tr style="border-bottom:1px solid var(--border);' + (isSigned ? '' : 'background:rgba(220,38,38,0.05)') + '">';
-      h += '<td style="padding:6px 10px;font-weight:500">' + esc(d.period) + '</td>';
-      h += '<td style="padding:6px 10px;color:var(--text-3)">' + esc(d.actNumber || '') + '</td>';
-      h += '<td style="padding:6px 10px;text-align:right;font-weight:600">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
-      h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\u2715</button></td>';
-      h += '</tr>';
-    });
-    h += '</tbody></table>';
-  } else {
-    h += '<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Нет закрывающих документов</div>';
-  }
-  h += '</div>';
-  body.innerHTML = h;
-}
-
+// ========== CLOSING DOCUMENTS (ACTS) — helper functions ==========
 function createAct(clientId) {
   var period = document.getElementById('actPeriod').value;
   if (!period) return showToast('Выберите период', 'error');
   fetch(API + '/api/admin/tochka/create_act', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ clientId: clientId, period: period }) })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d.ok) { showToast('Акт создан', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsActs(clientId); }, 1500); }
+      if (d.ok) { showToast('Акт создан', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
     }).catch(function(e) { showToast(e.message, 'error'); });
 }
@@ -1891,7 +1927,7 @@ function toggleActStatus(clientId, docId, status) {
   fetch(API + '/api/admin/clients/' + clientId + '/closing_document_status', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ docId: docId, status: status }) })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d.ok) { showToast(status === 'signed' ? 'Отмечен как подписанный' : 'Подпись снята', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsActs(clientId); }, 1500); }
+      if (d.ok) { showToast(status === 'signed' ? 'Отмечен как подписанный' : 'Подпись снята', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
     });
 }
@@ -1905,53 +1941,12 @@ function deleteAct(clientId, docId) {
   fetch(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsActs(clientId); }, 1500); }
+      if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
     });
 }
 
-// ========== BILLS (СЧЕТА НА ОПЛАТУ) ==========
-function renderOpsBills(clientId) {
-  var body = document.getElementById('clientOpsBody');
-  var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
-  var bills = client ? client.bills || [] : [];
-  bills = bills.slice().sort(function(a, b) { return (b.period || '').localeCompare(a.period || ''); });
-  var h = '<div style="padding:8px 0">';
-  // Create bill form
-  h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:12px;padding:10px 12px;background:var(--bg-3);border-radius:8px;flex-wrap:wrap">';
-  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><input class="form-input" type="month" id="billPeriod" style="width:150px;font-size:12px;padding:4px 8px"></div>';
-  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Сумма (авто если пусто)</label><input class="form-input" type="number" id="billAmount" placeholder="авто" style="width:120px;font-size:12px;padding:4px 8px"></div>';
-  h += '<button class="btn btn-primary btn-sm" onclick="createBill(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px">➕ Выставить счёт</button>';
-  h += '</div>';
-  if (bills.length) {
-    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Период</th><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Номер</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
-    bills.forEach(function(b) {
-      var isPaid = b.status === 'paid';
-      var statusHtml = isPaid
-        ? '<span style="color:var(--success);font-weight:600">✅ Оплачен</span>'
-        : '<span style="color:var(--danger);font-weight:600">⏳ Не оплачен</span>';
-      var toggleBtn = isPaid
-        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'unpaid\')">↩ Не оплачен</button>'
-        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'paid\')">✅ Оплачен</button>';
-      var pdfBtn = b.tochkaBillId
-        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadBillPdf(\'' + clientId + '\',\'' + b.id + '\')">📥 PDF</button>'
-        : '<span style="font-size:10px;color:var(--text-3)">нет PDF</span>';
-      h += '<tr style="border-bottom:1px solid var(--border);' + (isPaid ? '' : 'background:rgba(220,38,38,0.05)') + '">';
-      h += '<td style="padding:6px 10px;font-weight:500">' + esc(b.period) + '</td>';
-      h += '<td style="padding:6px 10px;color:var(--text-3)">' + esc(b.billNumber || '') + '</td>';
-      h += '<td style="padding:6px 10px;text-align:right;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
-      h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\u2715</button></td>';
-      h += '</tr>';
-    });
-    h += '</tbody></table>';
-  } else {
-    h += '<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Нет выставленных счетов</div>';
-  }
-  h += '</div>';
-  body.innerHTML = h;
-}
-
+// ========== BILLS (СЧЕТА НА ОПЛАТУ) — helper functions ==========
 function createBill(clientId) {
   var period = document.getElementById('billPeriod').value;
   if (!period) return showToast('Выберите период', 'error');
@@ -1961,7 +1956,7 @@ function createBill(clientId) {
   fetch(API + '/api/admin/tochka/create_bill', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(payload) })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d.ok) { showToast('Счёт выставлен: ' + (d.amount || 0).toLocaleString('ru-RU') + ' \u20BD', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsBills(clientId); }, 1500); }
+      if (d.ok) { showToast('Счёт выставлен: ' + (d.amount || 0).toLocaleString('ru-RU') + ' \u20BD', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
     }).catch(function(e) { showToast(e.message, 'error'); });
 }
@@ -1970,7 +1965,7 @@ function toggleBillStatus(clientId, billId, status) {
   fetch(API + '/api/admin/clients/' + clientId + '/bill_status', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ billId: billId, status: status }) })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d.ok) { showToast(status === 'paid' ? 'Отмечен как оплаченный' : 'Отмечен как неоплаченный', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsBills(clientId); }, 1500); }
+      if (d.ok) { showToast(status === 'paid' ? 'Отмечен как оплаченный' : 'Отмечен как неоплаченный', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
     });
 }
@@ -1984,7 +1979,7 @@ function deleteBill(clientId, billId) {
   fetch(API + '/api/admin/clients/' + clientId + '/bill/' + billId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d.ok) { showToast('Счёт удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsBills(clientId); }, 1500); }
+      if (d.ok) { showToast('Счёт удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
     });
 }
@@ -2183,7 +2178,7 @@ function loadAllActs() {
         if (signed > 0) h += '<span style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + signed + ' подписан</span>';
         h += '</div></div>';
         h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0">';
-        h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border)"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
         pdocs.forEach(function(d) {
           var isSigned = d.status === 'signed';
           var statusHtml = isSigned
@@ -2326,7 +2321,7 @@ function loadAllBills() {
         if (paid > 0) h += '<span style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + paid + ' оплачен</span>';
         h += '</div></div>';
         h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0">';
-        h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Действия</th></tr></thead><tbody>';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border)"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
         pbills.forEach(function(b) {
           var isPaid = b.status === 'paid';
           var statusHtml = isPaid
