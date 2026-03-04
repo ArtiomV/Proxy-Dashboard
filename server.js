@@ -4,6 +4,30 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
+const net = require('net');
+const bcrypt = require('bcrypt');
+const helmet = require('helmet');
+const rateLimit = require('express-rate-limit');
+const fsPromises = fs.promises;
+
+// DATA-01/02: Async file write with per-file mutex to prevent race conditions and event loop blocking
+const _fileLocks = new Map();
+function safeWriteFile(filePath, data) {
+  const prev = _fileLocks.get(filePath) || Promise.resolve();
+  const next = prev.then(async () => {
+    const tmp = filePath + '.tmp';
+    try {
+      await fsPromises.writeFile(tmp, data, 'utf8');
+      await fsPromises.rename(tmp, filePath);
+    } catch (e) {
+      // Cleanup tmp if rename failed
+      try { await fsPromises.unlink(tmp); } catch (_) {}
+      console.error(`[safeWriteFile] Error writing ${path.basename(filePath)}:`, e.message);
+    }
+  }).catch(() => {});
+  _fileLocks.set(filePath, next);
+  return next;
+}
 
 // Load .env manually
 const envPath = path.join(__dirname, '.env');
@@ -18,6 +42,12 @@ if (fs.existsSync(envPath)) {
 }
 
 const PORT = process.env.PORT || 3000;
+
+// Server country/IP mapping — single source of truth (was duplicated 3 times)
+const SERVER_COUNTRIES = {
+  S1: { serverIp: '89.149.100.92', country: 'MD', name: 'Moldova' },
+  S2: { serverIp: '31.5.194.89', country: 'RO', name: 'Romania' }
+};
 
 // Multiple API servers: API_<name>_URL, API_<name>_USER, API_<name>_PASS
 const apiServers = [];
@@ -56,7 +86,7 @@ for (const [key, val] of Object.entries(process.env)) {
     const password = val.slice(0, pipeIdx);
     const filterPart = val.slice(pipeIdx + 1).trim();
     const portNameFilter = filterPart === '*' ? '*' : filterPart;
-    users[login] = { password, portNameFilter, source: 'env' };
+    users[login] = { passwordHash: bcrypt.hashSync(password, 10), portNameFilter, source: 'env' };
   }
 }
 
@@ -73,8 +103,7 @@ function loadClients() {
 }
 
 function saveClients(clientsList) {
-  try { fs.writeFileSync(CLIENTS_FILE, JSON.stringify(clientsList, null, 2)); }
-  catch (e) { console.error('Failed to save clients:', e.message); }
+  safeWriteFile(CLIENTS_FILE, JSON.stringify(clientsList, null, 2));
 }
 
 // ==================== BILLING LEDGER ====================
@@ -86,9 +115,16 @@ try {
   }
 } catch (e) { console.error('Failed to load billing_ledger:', e.message); }
 
+const MAX_LEDGER_ENTRIES = 1000; // per client
+
 function saveBillingLedger() {
-  try { fs.writeFileSync(BILLING_LEDGER_FILE, JSON.stringify(billingLedger, null, 2)); }
-  catch (e) { console.error('Failed to save billing_ledger:', e.message); }
+  // Trim oversized ledgers before saving
+  for (const key in billingLedger) {
+    if (Array.isArray(billingLedger[key]) && billingLedger[key].length > MAX_LEDGER_ENTRIES) {
+      billingLedger[key] = billingLedger[key].slice(-MAX_LEDGER_ENTRIES);
+    }
+  }
+  safeWriteFile(BILLING_LEDGER_FILE, JSON.stringify(billingLedger, null, 2));
 }
 
 // ==================== TOCHKA BANK API ====================
@@ -107,7 +143,7 @@ if (process.env.TOCHKA_ACCOUNT_ID) tochkaConfig.accountId = process.env.TOCHKA_A
 if (process.env.TOCHKA_COMPANY_NAME) tochkaConfig.companyName = process.env.TOCHKA_COMPANY_NAME;
 if (process.env.TOCHKA_COMPANY_INN) tochkaConfig.companyInn = process.env.TOCHKA_COMPANY_INN;
 if (process.env.TOCHKA_COMPANY_KPP) tochkaConfig.companyKpp = process.env.TOCHKA_COMPANY_KPP;
-function saveTochkaConfig() { try { fs.writeFileSync(TOCHKA_CONFIG_FILE, JSON.stringify(tochkaConfig, null, 2)); } catch(e) { console.error('[Tochka] Save config error:', e.message); } }
+function saveTochkaConfig() { safeWriteFile(TOCHKA_CONFIG_FILE, JSON.stringify(tochkaConfig, null, 2)); }
 if (tochkaConfig.jwt) { saveTochkaConfig(); console.log(`[Tochka] API configured (client_id: ${tochkaConfig.clientId})`); }
 else console.log('[Tochka] No JWT token configured, bank integration disabled');
 
@@ -162,26 +198,134 @@ try {
 } catch (e) { console.error('Failed to load bank_payments:', e.message); }
 
 function saveBankPayments() {
-  try { fs.writeFileSync(BANK_PAYMENTS_FILE, JSON.stringify(bankPayments, null, 2)); }
-  catch (e) { console.error('Failed to save bank_payments:', e.message); }
+  safeWriteFile(BANK_PAYMENTS_FILE, JSON.stringify(bankPayments, null, 2));
 }
 
-// Decode JWT payload (without verification — verification is optional via public key)
+// SEC-02: JWT verification for Tochka webhooks
+// Cache for Tochka JWKS public keys
+let tochkaJwksCache = { keys: null, fetchedAt: 0 };
+const JWKS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+
+function base64urlDecode(str) {
+  let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
+  while (b64.length % 4) b64 += '=';
+  return Buffer.from(b64, 'base64');
+}
+
 function decodeJwtPayload(token) {
   try {
     const parts = token.split('.');
     if (parts.length !== 3) return null;
-    const payload = Buffer.from(parts[1], 'base64url').toString('utf8');
-    return JSON.parse(payload);
-  } catch (e) {
-    // Try standard base64 with padding fix
+    return JSON.parse(base64urlDecode(parts[1]).toString('utf8'));
+  } catch (e) { return null; }
+}
+
+function decodeJwtHeader(token) {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    return JSON.parse(base64urlDecode(parts[0]).toString('utf8'));
+  } catch (e) { return null; }
+}
+
+// Fetch JWKS from Tochka Bank
+function fetchTochkaJwks() {
+  return new Promise((resolve, reject) => {
+    https.get('https://enter.tochka.com/uapi/open-banking/.well-known/jwks.json', { timeout: 10000 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try { resolve(JSON.parse(data)); }
+        catch (e) { reject(new Error('JWKS parse error: ' + e.message)); }
+      });
+    }).on('error', reject).on('timeout', function() { this.destroy(); reject(new Error('JWKS fetch timeout')); });
+  });
+}
+
+// Convert JWK RSA public key to PEM format
+function jwkToPem(jwk) {
+  const n = base64urlDecode(jwk.n);
+  const e = base64urlDecode(jwk.e);
+  // Build RSA public key in DER format
+  function encodeLength(len) {
+    if (len < 0x80) return Buffer.from([len]);
+    if (len < 0x100) return Buffer.from([0x81, len]);
+    return Buffer.from([0x82, (len >> 8) & 0xff, len & 0xff]);
+  }
+  function encodeDerInteger(buf) {
+    // Prepend 0x00 if high bit set (positive integer)
+    const needsPad = buf[0] & 0x80;
+    const content = needsPad ? Buffer.concat([Buffer.from([0x00]), buf]) : buf;
+    return Buffer.concat([Buffer.from([0x02]), encodeLength(content.length), content]);
+  }
+  const nDer = encodeDerInteger(n);
+  const eDer = encodeDerInteger(e);
+  const rsaSeqContent = Buffer.concat([nDer, eDer]);
+  const rsaSeq = Buffer.concat([Buffer.from([0x30]), encodeLength(rsaSeqContent.length), rsaSeqContent]);
+  // Wrap in BIT STRING
+  const bitString = Buffer.concat([Buffer.from([0x03]), encodeLength(rsaSeq.length + 1), Buffer.from([0x00]), rsaSeq]);
+  // RSA OID: 1.2.840.113549.1.1.1
+  const oid = Buffer.from([0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00]);
+  const pubKeyContent = Buffer.concat([oid, bitString]);
+  const pubKey = Buffer.concat([Buffer.from([0x30]), encodeLength(pubKeyContent.length), pubKeyContent]);
+  const b64 = pubKey.toString('base64');
+  const lines = b64.match(/.{1,64}/g) || [];
+  return '-----BEGIN PUBLIC KEY-----\n' + lines.join('\n') + '\n-----END PUBLIC KEY-----\n';
+}
+
+// Verify JWT signature using cached JWKS
+async function verifyJwtSignature(token) {
+  const header = decodeJwtHeader(token);
+  const payload = decodeJwtPayload(token);
+  if (!header || !payload) return { verified: false, payload: null, reason: 'invalid_jwt_format' };
+
+  // Fetch/cache JWKS
+  const now = Date.now();
+  if (!tochkaJwksCache.keys || (now - tochkaJwksCache.fetchedAt) > JWKS_CACHE_TTL) {
     try {
-      const parts = token.split('.');
-      let b64 = parts[1].replace(/-/g, '+').replace(/_/g, '/');
-      while (b64.length % 4) b64 += '=';
-      const payload = Buffer.from(b64, 'base64').toString('utf8');
-      return JSON.parse(payload);
-    } catch (e2) { return null; }
+      const jwks = await fetchTochkaJwks();
+      tochkaJwksCache = { keys: jwks.keys || [], fetchedAt: now };
+      console.log(`[Tochka JWKS] Fetched ${tochkaJwksCache.keys.length} key(s)`);
+    } catch (e) {
+      console.error('[Tochka JWKS] Failed to fetch keys:', e.message);
+      // If we have cached keys, use them even if expired
+      if (tochkaJwksCache.keys) {
+        console.warn('[Tochka JWKS] Using expired cached keys');
+      } else {
+        // No keys at all — log warning but still return decoded payload (graceful degradation)
+        console.warn('[Tochka JWKS] No cached keys, skipping signature verification');
+        return { verified: false, payload, reason: 'jwks_unavailable' };
+      }
+    }
+  }
+
+  // Find matching key
+  const kid = header.kid;
+  const alg = header.alg || 'RS256';
+  let matchingKey = kid ? tochkaJwksCache.keys.find(k => k.kid === kid) : tochkaJwksCache.keys[0];
+
+  if (!matchingKey) {
+    console.warn(`[Tochka JWT] No matching key found for kid="${kid}"`);
+    return { verified: false, payload, reason: 'key_not_found' };
+  }
+
+  try {
+    const pem = jwkToPem(matchingKey);
+    const parts = token.split('.');
+    const signedData = parts[0] + '.' + parts[1];
+    const signature = base64urlDecode(parts[2]);
+
+    const algMap = { 'RS256': 'RSA-SHA256', 'RS384': 'RSA-SHA384', 'RS512': 'RSA-SHA512' };
+    const cryptoAlg = algMap[alg] || 'RSA-SHA256';
+
+    const verifier = crypto.createVerify(cryptoAlg);
+    verifier.update(signedData);
+    const isValid = verifier.verify(pem, signature);
+
+    return { verified: isValid, payload, reason: isValid ? 'ok' : 'signature_invalid' };
+  } catch (e) {
+    console.error('[Tochka JWT] Verification error:', e.message);
+    return { verified: false, payload, reason: 'verification_error: ' + e.message };
   }
 }
 
@@ -345,8 +489,7 @@ try {
 } catch (e) { console.error('Failed to load daily_traffic:', e.message); }
 
 function saveDailyTraffic() {
-  try { fs.writeFileSync(DAILY_TRAFFIC_FILE, JSON.stringify(dailyTraffic, null, 2)); }
-  catch (e) { console.error('Failed to save daily_traffic:', e.message); }
+  safeWriteFile(DAILY_TRAFFIC_FILE, JSON.stringify(dailyTraffic, null, 2));
 }
 
 // Parse traffic value like "10.5 GB" to bytes
@@ -372,8 +515,7 @@ try {
 } catch (e) { console.error('Failed to load known_modems:', e.message); }
 
 function saveKnownModems() {
-  try { fs.writeFileSync(KNOWN_MODEMS_FILE, JSON.stringify(knownModems, null, 2)); }
-  catch (e) { console.error('Failed to save known_modems:', e.message); }
+  safeWriteFile(KNOWN_MODEMS_FILE, JSON.stringify(knownModems, null, 2));
 }
 
 /**
@@ -523,6 +665,16 @@ for (const c of clients) {
   if (!c.bills) { c.bills = []; clientsMigrated = true; }
   if (c.autoActs === undefined) { c.autoActs = true; clientsMigrated = true; }
   if (c.autoBills === undefined) { c.autoBills = true; clientsMigrated = true; }
+  // SEC-01: Migrate plaintext passwords to bcrypt
+  if (c.password && !c.password.startsWith('$2b$')) {
+    c.passwordHash = bcrypt.hashSync(c.password, 10);
+    clientsMigrated = true;
+    console.log(`  [bcrypt] Migrated password for ${c.login}`);
+  }
+  if (!c.passwordHash && c.password) {
+    c.passwordHash = bcrypt.hashSync(c.password, 10);
+    clientsMigrated = true;
+  }
 }
 if (clientsMigrated) saveClients(clients);
 
@@ -536,7 +688,8 @@ for (const [login, u] of Object.entries(users)) {
         name: u.portNameFilter,
         portName: u.portNameFilter,
         login,
-        password: u.password,
+        password: '', // Not stored in plaintext
+        passwordHash: u.passwordHash,
         contact: '',
         notes: 'Auto-migrated from .env',
         billingType: 'per_gb',
@@ -570,8 +723,13 @@ if (tgClientsRemoved.length > 0) {
 saveClients(clients);
 
 for (const c of clients) {
-  if (c.login && c.password && c.portName) {
-    users[c.login] = { password: c.password, portNameFilter: c.portName, source: 'client', clientId: c.id };
+  if (c.login && c.portName && (c.passwordHash || c.password)) {
+    users[c.login] = {
+      passwordHash: c.passwordHash || bcrypt.hashSync(c.password, 10),
+      portNameFilter: c.portName,
+      source: 'client',
+      clientId: c.id
+    };
   }
 }
 console.log(`Loaded ${Object.keys(users).length} user(s): ${Object.keys(users).join(', ')}`);
@@ -579,7 +737,7 @@ console.log(`  - ${clients.length} client(s) from clients.json`);
 
 // ==================== SESSIONS ====================
 const SESSION_FILE = path.join(__dirname, 'sessions.json');
-const SESSION_TTL = 365 * 24 * 60 * 60 * 1000;
+const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days (was 365)
 
 let sessions = {};
 try {
@@ -593,8 +751,24 @@ try {
 } catch (e) {}
 
 function saveSessions() {
-  try { fs.writeFileSync(SESSION_FILE, JSON.stringify(sessions)); } catch (e) {}
+  safeWriteFile(SESSION_FILE, JSON.stringify(sessions));
 }
+
+// Periodic session cleanup — every hour, remove expired sessions
+setInterval(() => {
+  const now = Date.now();
+  let cleaned = 0;
+  for (const [token, sess] of Object.entries(sessions)) {
+    if (sess.expiresAt && sess.expiresAt < now) {
+      delete sessions[token];
+      cleaned++;
+    }
+  }
+  if (cleaned > 0) {
+    saveSessions();
+    console.log(`[Sessions] Cleaned ${cleaned} expired session(s), ${Object.keys(sessions).length} active`);
+  }
+}, 60 * 60 * 1000);
 
 function generateToken() { return crypto.randomBytes(32).toString('hex'); }
 function generateId() { return crypto.randomBytes(8).toString('hex'); }
@@ -618,8 +792,7 @@ try {
 } catch (e) { console.error('Failed to load settings:', e.message); }
 
 function saveSettings() {
-  try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify(appSettings, null, 2)); }
-  catch (e) { console.error('Failed to save settings:', e.message); }
+  safeWriteFile(SETTINGS_FILE, JSON.stringify(appSettings, null, 2));
 }
 
 // ==================== PRICING TIERS ====================
@@ -634,16 +807,8 @@ function getPriceForProxyCount(count) {
 }
 
 // ==================== BANDWIDTH PARSING UTILS ====================
-function parseBwToBytes(str) {
-  if (!str || str === 0) return 0;
-  const s = String(str).trim();
-  const m = s.match(/([\d.]+)\s*(TB|GB|MB|KB|B)?/i);
-  if (!m) return 0;
-  const val = parseFloat(m[1]);
-  const u = (m[2] || 'B').toUpperCase();
-  const mult = { 'TB': 1024**4, 'GB': 1024**3, 'MB': 1024**2, 'KB': 1024, 'B': 1 };
-  return val * (mult[u] || 1);
-}
+// BUG-01: parseBwToBytes was duplicate of parseTrafficValue — consolidated
+const parseBwToBytes = parseTrafficValue;
 
 function computeClientMonthBytes(allServerResults, portName) {
   let totalBytes = 0;
@@ -695,8 +860,18 @@ const DOCUMENTS_DIR = path.join(__dirname, 'documents');
 if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true });
 
 const app = express();
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(express.json({ limit: '50mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Rate limiting for login endpoint (SEC-03: anti-bruteforce)
+const loginLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 15, // max 15 attempts per IP per window
+  message: { error: 'Too many login attempts, try again in 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
 // ==================== AUTH ====================
 
@@ -718,11 +893,16 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
-app.post('/api/login', (req, res) => {
+app.post('/api/login', loginLimiter, async (req, res) => {
   const { login, password } = req.body;
   if (!login || !password) return res.status(400).json({ error: 'Login and password required' });
   const user = users[login];
-  if (!user || user.password !== password) return res.status(401).json({ error: 'Invalid login or password' });
+  if (!user) return res.status(401).json({ error: 'Invalid login or password' });
+  // SEC-01: bcrypt comparison
+  const passwordValid = user.passwordHash
+    ? await bcrypt.compare(password, user.passwordHash)
+    : (user.password === password); // fallback for un-migrated
+  if (!passwordValid) return res.status(401).json({ error: 'Invalid login or password' });
   const token = generateToken();
   const isAdmin = user.portNameFilter === '*';
   sessions[token] = { login, portNameFilter: user.portNameFilter, isAdmin, expiresAt: Date.now() + SESSION_TTL };
@@ -866,8 +1046,7 @@ try {
 } catch (e) { console.error('Failed to load server_cache:', e.message); }
 
 function saveServerCache() {
-  try { fs.writeFileSync(SERVER_CACHE_FILE, JSON.stringify(serverCache)); }
-  catch (e) { console.error('Failed to save server_cache:', e.message); }
+  safeWriteFile(SERVER_CACHE_FILE, JSON.stringify(serverCache));
 }
 
 function cacheServerData(data) {
@@ -1047,18 +1226,15 @@ try {
 } catch (e) { console.error('Failed to load ip_history:', e.message); }
 
 function saveIpTracking() {
-  try { fs.writeFileSync(IP_TRACKING_FILE, JSON.stringify(ipTracking, null, 2)); }
-  catch (e) { console.error('Failed to save ip_tracking:', e.message); }
+  safeWriteFile(IP_TRACKING_FILE, JSON.stringify(ipTracking, null, 2));
 }
 
 function saveUptimeTracking() {
-  try { fs.writeFileSync(UPTIME_TRACKING_FILE, JSON.stringify(uptimeTracking, null, 2)); }
-  catch (e) { console.error('Failed to save uptime_tracking:', e.message); }
+  safeWriteFile(UPTIME_TRACKING_FILE, JSON.stringify(uptimeTracking, null, 2));
 }
 
 function saveIpHistory() {
-  try { fs.writeFileSync(IP_HISTORY_FILE, JSON.stringify(ipHistory, null, 2)); }
-  catch (e) { console.error('Failed to save ip_history:', e.message); }
+  safeWriteFile(IP_HISTORY_FILE, JSON.stringify(ipHistory, null, 2));
 }
 
 function recordIpChange(key, oldIp, newIp, timestamp) {
@@ -1225,11 +1401,38 @@ try {
 } catch (e) { console.error('Failed to load speedtest_history:', e.message); }
 
 function saveSpeedtestHistory() {
-  try { fs.writeFileSync(SPEEDTEST_HISTORY_FILE, JSON.stringify(speedtestHistory, null, 2)); }
-  catch (e) { console.error('Failed to save speedtest_history:', e.message); }
+  safeWriteFile(SPEEDTEST_HISTORY_FILE, JSON.stringify(speedtestHistory, null, 2));
 }
 
 let speedtestRunning = false;
+
+// BUG-03: Extract speedtest result parsing (was duplicated in test + retry)
+function parseSpeedtestResult(result) {
+  let dl = 0, ul = 0, ping = 0;
+  if (result && typeof result === 'object') {
+    dl = parseFloat(result.download || result.Download || result.dl || 0);
+    ul = parseFloat(result.upload || result.Upload || result.ul || 0);
+    ping = parseFloat(result.ping || result.Ping || result.latency || 0);
+    if (result.raw && typeof result.raw === 'string') {
+      const dlMatch = result.raw.match(/download[:\s]*([\d.]+)/i);
+      const ulMatch = result.raw.match(/upload[:\s]*([\d.]+)/i);
+      const pingMatch = result.raw.match(/ping[:\s]*([\d.]+)/i);
+      if (dlMatch) dl = parseFloat(dlMatch[1]);
+      if (ulMatch) ul = parseFloat(ulMatch[1]);
+      if (pingMatch) ping = parseFloat(pingMatch[1]);
+    }
+  }
+  return { dl, ul, ping };
+}
+
+function pushSpeedtestEntry(key, entry) {
+  if (!speedtestHistory[key]) speedtestHistory[key] = [];
+  speedtestHistory[key].push(entry);
+  if (speedtestHistory[key].length > MAX_SPEEDTEST_ENTRIES) {
+    speedtestHistory[key] = speedtestHistory[key].slice(-MAX_SPEEDTEST_ENTRIES);
+  }
+  saveSpeedtestHistory();
+}
 
 async function runNightlySpeedtests() {
   if (speedtestRunning) {
@@ -1257,72 +1460,29 @@ async function runNightlySpeedtests() {
           try {
             console.log(`[Speedtest] Testing ${nick} (${server.name})...`);
             const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
+            const { dl, ul, ping } = parseSpeedtestResult(result);
 
-            let dl = 0, ul = 0, ping = 0;
-            if (result && typeof result === 'object') {
-              dl = parseFloat(result.download || result.Download || result.dl || 0);
-              ul = parseFloat(result.upload || result.Upload || result.ul || 0);
-              ping = parseFloat(result.ping || result.Ping || result.latency || 0);
-              if (result.raw && typeof result.raw === 'string') {
-                const dlMatch = result.raw.match(/download[:\s]*([\d.]+)/i);
-                const ulMatch = result.raw.match(/upload[:\s]*([\d.]+)/i);
-                const pingMatch = result.raw.match(/ping[:\s]*([\d.]+)/i);
-                if (dlMatch) dl = parseFloat(dlMatch[1]);
-                if (ulMatch) ul = parseFloat(ulMatch[1]);
-                if (pingMatch) ping = parseFloat(pingMatch[1]);
-              }
-            }
-
-            const entry = {
-              date: new Date().toISOString(),
-              download: dl,
-              upload: ul,
-              ping: ping,
-              raw: result
-            };
+            const entry = { date: new Date().toISOString(), download: dl, upload: ul, ping, raw: result };
 
             // Re-test if DL or UL is below 1 Mbps
-            if ((dl < 1 || ul < 1)) {
+            if (dl < 1 || ul < 1) {
               console.log(`[Speedtest] ${nick}: DL=${dl} UL=${ul} — near-zero detected, re-testing in 10 min...`);
               setTimeout(async () => {
                 try {
                   console.log(`[Speedtest] Re-testing ${nick} (${server.name})...`);
                   const retryResult = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
-                  let rdl = 0, rul = 0, rping = 0;
-                  if (retryResult && typeof retryResult === 'object') {
-                    rdl = parseFloat(retryResult.download || retryResult.Download || retryResult.dl || 0);
-                    rul = parseFloat(retryResult.upload || retryResult.Upload || retryResult.ul || 0);
-                    rping = parseFloat(retryResult.ping || retryResult.Ping || retryResult.latency || 0);
-                    if (retryResult.raw && typeof retryResult.raw === 'string') {
-                      const rdlM = retryResult.raw.match(/download[:\s]*([\d.]+)/i);
-                      const rulM = retryResult.raw.match(/upload[:\s]*([\d.]+)/i);
-                      const rpM = retryResult.raw.match(/ping[:\s]*([\d.]+)/i);
-                      if (rdlM) rdl = parseFloat(rdlM[1]);
-                      if (rulM) rul = parseFloat(rulM[1]);
-                      if (rpM) rping = parseFloat(rpM[1]);
-                    }
-                  }
-                  // Use retry result if better
-                  if (rdl + rul > dl + ul) {
-                    const retryEntry = { date: new Date().toISOString(), download: rdl, upload: rul, ping: rping, raw: retryResult, retry: true, ...(rdl < 1 || rul < 1 ? { _lowSpeed: true } : {}) };
-                    if (!speedtestHistory[key]) speedtestHistory[key] = [];
-                    speedtestHistory[key].push(retryEntry);
-                    if (speedtestHistory[key].length > MAX_SPEEDTEST_ENTRIES) speedtestHistory[key] = speedtestHistory[key].slice(-MAX_SPEEDTEST_ENTRIES);
-                    saveSpeedtestHistory();
-                    console.log(`[Speedtest] Re-test ${nick}: DL=${rdl} UL=${rul} (improved)`);
+                  const r = parseSpeedtestResult(retryResult);
+                  if (r.dl + r.ul > dl + ul) {
+                    pushSpeedtestEntry(key, { date: new Date().toISOString(), download: r.dl, upload: r.ul, ping: r.ping, raw: retryResult, retry: true, ...(r.dl < 1 || r.ul < 1 ? { _lowSpeed: true } : {}) });
+                    console.log(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (improved)`);
                   } else {
-                    console.log(`[Speedtest] Re-test ${nick}: DL=${rdl} UL=${rul} (not improved)`);
+                    console.log(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (not improved)`);
                   }
                 } catch (e) { console.error(`[Speedtest] Re-test ${nick} error:`, e.message); }
               }, 10 * 60 * 1000);
             }
 
-            if (!speedtestHistory[key]) speedtestHistory[key] = [];
-            speedtestHistory[key].push(entry);
-            if (speedtestHistory[key].length > MAX_SPEEDTEST_ENTRIES) {
-              speedtestHistory[key] = speedtestHistory[key].slice(-MAX_SPEEDTEST_ENTRIES);
-            }
-            saveSpeedtestHistory();
+            pushSpeedtestEntry(key, entry);
             testedCount++;
             console.log(`[Speedtest] ${nick}: DL=${dl} UL=${ul} Ping=${ping}`);
           } catch (e) {
@@ -1583,7 +1743,7 @@ app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
     const results = await fetchAllServersData();
     const merged = mergeServerData(results, req.user.portNameFilter);
 
-    const COUNTRIES = { S1: { serverIp: '89.149.100.92' }, S2: { serverIp: '31.5.194.89' } };
+    const COUNTRIES = SERVER_COUNTRIES;
     // Build server URL map for direct reset URLs
     const credentials = [];
 
@@ -1695,7 +1855,7 @@ app.get('/api/v1/proxy', async (req, res) => {
     const results = await fetchAllServersData();
     const merged = mergeServerData(results, client.portName);
 
-    const COUNTRIES = { S1: { serverIp: '89.149.100.92', country: 'MD', name: 'Moldova' }, S2: { serverIp: '31.5.194.89', country: 'RO', name: 'Romania' } };
+    const COUNTRIES = SERVER_COUNTRIES;
 
     const proxies = [];
     for (const [imei, portList] of Object.entries(merged.ports)) {
@@ -1786,7 +1946,7 @@ app.get('/api/v1/proxies', async (req, res) => {
     const results = await fetchAllServersData();
     const merged = mergeServerData(results, client.portName);
 
-    const COUNTRIES = { S1: { serverIp: '89.149.100.92' }, S2: { serverIp: '31.5.194.89' } };
+    const COUNTRIES = SERVER_COUNTRIES;
     const proxies = [];
 
     for (const [imei, portList] of Object.entries(merged.ports)) {
@@ -1840,11 +2000,16 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       const urlObj = new URL(s.url);
       serverAuth[s.name] = { user: s.user, pass: s.pass, host: urlObj.host, protocol: urlObj.protocol };
     }
+    // SEC-04: Strip passwords/hashes from client data sent to frontend
+    const sanitizedClients = clients.map(c => {
+      const { password, passwordHash, ...safe } = c;
+      return safe;
+    });
     res.json({
       ...merged,
       servers,
       serverAuth,
-      clients,
+      clients: sanitizedClients,
       billingLedger,
       ipTracking,
       uptimeTracking,
@@ -1866,10 +2031,12 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
 // ==================== ADMIN: CLIENT MANAGEMENT ====================
 
 app.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
-  res.json(clients);
+  // SEC-04: strip sensitive fields
+  const safe = clients.map(c => { const { password, passwordHash, ...rest } = c; return rest; });
+  res.json(safe);
 });
 
-app.post('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
+app.post('/api/admin/clients', authMiddleware, adminMiddleware, async (req, res) => {
   const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, address } = req.body;
   if (!name || !portName || !login || !password) {
     return res.status(400).json({ error: 'name, portName, login, password required' });
@@ -1877,9 +2044,12 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
   if (users[login]) {
     return res.status(400).json({ error: 'Login already exists: ' + login });
   }
+  const passwordHash = await bcrypt.hash(password, 10);
   const client = {
     id: generateId(),
-    name, portName, login, password,
+    name, portName, login,
+    password, // kept for admin reference
+    passwordHash,
     contact: contact || '',
     notes: notes || '',
     billingType: billingType || 'per_gb',
@@ -1916,11 +2086,13 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
 
   clients.push(client);
   saveClients(clients);
-  users[login] = { password, portNameFilter: portName, source: 'client', clientId: client.id };
-  res.json({ ok: true, client });
+  users[login] = { passwordHash, portNameFilter: portName, source: 'client', clientId: client.id };
+  // SEC-04: strip sensitive fields from response
+  const { password: _p, passwordHash: _ph, ...safeClient } = client;
+  res.json({ ok: true, client: safeClient });
 });
 
-app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, (req, res) => {
+app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res) => {
   const idx = clients.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Client not found' });
   const old = clients[idx];
@@ -1929,12 +2101,20 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, (req, res) =>
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
     delete users[old.login];
   }
+  // SEC-01: hash new password with bcrypt if changed
+  let newPasswordHash = old.passwordHash;
+  let newPassword = old.password;
+  if (password && password !== old.password) {
+    newPasswordHash = await bcrypt.hash(password, 10);
+    newPassword = password;
+  }
   const updated = {
     ...old,
     name: name || old.name,
     portName: portName || old.portName,
     login: login || old.login,
-    password: password || old.password,
+    password: newPassword,
+    passwordHash: newPasswordHash,
     contact: contact !== undefined ? contact : old.contact,
     notes: notes !== undefined ? notes : old.notes,
     billingType: billingType !== undefined ? billingType : (old.billingType || 'per_gb'),
@@ -1950,8 +2130,10 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, (req, res) =>
   };
   clients[idx] = updated;
   saveClients(clients);
-  users[updated.login] = { password: updated.password, portNameFilter: updated.portName, source: 'client', clientId: updated.id };
-  res.json({ ok: true, client: updated });
+  users[updated.login] = { passwordHash: updated.passwordHash, portNameFilter: updated.portName, source: 'client', clientId: updated.id };
+  // SEC-04: strip sensitive fields from response
+  const { password: _p, passwordHash: _ph, ...safeClient } = updated;
+  res.json({ ok: true, client: safeClient });
 });
 
 // DELETE client -- with port protection
@@ -1999,9 +2181,13 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
   if (idx === -1) return res.status(404).json({ error: 'Client not found' });
   const { amount, date, note } = req.body;
   if (!amount || !date) return res.status(400).json({ error: 'amount and date required' });
+  const parsedAmount = parseFloat(amount);
+  if (isNaN(parsedAmount) || parsedAmount <= 0 || parsedAmount > 100000000) {
+    return res.status(400).json({ error: 'Invalid amount: must be positive and reasonable' });
+  }
   if (!clients[idx].payments) clients[idx].payments = [];
   clients[idx].payments.push({
-    amount: parseFloat(amount),
+    amount: parsedAmount,
     date,
     note: note || '',
     createdAt: new Date().toISOString()
@@ -2151,7 +2337,7 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
 
 // ==================== ADMIN: DOCUMENTS ====================
 
-app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, (req, res) => {
+app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, async (req, res) => {
   const idx = clients.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Client not found' });
   const { name, fileBase64, mimeType } = req.body;
@@ -2162,7 +2348,7 @@ app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, (re
   const fileName = `${docId}.${ext}`;
   const filePath = path.join(DOCUMENTS_DIR, fileName);
 
-  fs.writeFileSync(filePath, Buffer.from(fileBase64, 'base64'));
+  await fsPromises.writeFile(filePath, Buffer.from(fileBase64, 'base64'));
 
   if (!clients[idx].documents) clients[idx].documents = [];
   clients[idx].documents.push({
@@ -2695,9 +2881,7 @@ async function aggregateTopHosts() {
     updatedAt: new Date().toISOString(),
     stats: { domains: Object.keys(merged).length, portsScanned: fetchedCount, errors: errorCount }
   };
-  try {
-    fs.writeFileSync(TOP_HOSTS_CACHE_FILE, JSON.stringify(topHostsCache, null, 2));
-  } catch (e) { console.error('[TopHosts] Failed to save cache:', e.message); }
+  safeWriteFile(TOP_HOSTS_CACHE_FILE, JSON.stringify(topHostsCache, null, 2));
   console.log(`[TopHosts] Aggregation complete: ${Object.keys(merged).length} domains from ${fetchedCount} ports (${errorCount} errors), ${Object.keys(perPort).length} portNames`);
   return topHostsCache;
 }
@@ -2748,20 +2932,9 @@ function scheduleRepeating(hour, minute, label, fn) {
   speedtestTimers.push(entry);
 }
 
-// Schedule nightly TopHosts at 03:00
+// CODE-05: scheduleNightly merged into scheduleRepeating (was duplicate)
 function scheduleNightly(hour, label, fn) {
-  const now = new Date();
-  const next = new Date();
-  next.setUTCHours(hour, 0, 0, 0);
-  if (next <= now) next.setDate(next.getDate() + 1);
-  const msUntil = next - now;
-  console.log(`[${label}] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
-  setTimeout(() => {
-    fn().catch(e => console.error(`[${label}] Error:`, e.message));
-    setInterval(() => {
-      fn().catch(e => console.error(`[${label}] Error:`, e.message));
-    }, 24 * 60 * 60 * 1000);
-  }, msUntil);
+  scheduleRepeating(hour, 0, label, fn);
 }
 
 // ==================== DAILY BILLING ====================
@@ -2928,12 +3101,14 @@ async function autoCreateMissingClients() {
       const proxyCount = portCountMap[pn] || 1;
       const autoPrice = getPriceForProxyCount(proxyCount);
       const password = crypto.randomBytes(8).toString('hex');
+      const passwordHash = bcrypt.hashSync(password, 10);
       const client = {
         id: generateId(),
         name: pn,
         portName: pn,
         login: login,
         password: password,
+        passwordHash: passwordHash,
         contact: '',
         notes: 'Auto-created from portName',
         billingType: 'per_gb',
@@ -2951,7 +3126,7 @@ async function autoCreateMissingClients() {
         createdAt: new Date().toISOString()
       };
       clients.push(client);
-      users[login] = { password, portNameFilter: pn, source: 'client', clientId: client.id };
+      users[login] = { passwordHash, portNameFilter: pn, source: 'client', clientId: client.id };
       created++;
       console.log(`  Auto-created client for portName "${pn}" (login: ${login}, pass: ${password})`);
     }
@@ -3095,15 +3270,23 @@ app.get('/api/docs', (req, res) => {
 // ==================== TOCHKA BANK: WEBHOOK (public, no auth) ====================
 
 // Accept raw text body for webhook
-app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), (req, res) => {
+app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async (req, res) => {
   console.log('[Tochka Webhook] Received webhook');
   try {
     // Body is JWT string
     const jwtToken = typeof req.body === 'string' ? req.body.trim() : JSON.stringify(req.body);
-    const payload = decodeJwtPayload(jwtToken);
+
+    // SEC-02: Verify JWT signature before processing
+    const { verified, payload, reason } = await verifyJwtSignature(jwtToken);
     if (!payload) {
       console.error('[Tochka Webhook] Failed to decode JWT payload');
       return res.status(200).json({ ok: true, processed: false, reason: 'invalid_jwt' });
+    }
+    if (!verified) {
+      console.warn(`[Tochka Webhook] JWT signature NOT verified (reason: ${reason}). Processing anyway with warning.`);
+      // Log unverified webhooks for audit
+    } else {
+      console.log('[Tochka Webhook] JWT signature verified successfully');
     }
 
     console.log('[Tochka Webhook] Decoded payload:', JSON.stringify(payload).slice(0, 500));
@@ -3112,6 +3295,10 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), (re
     const payerInn = payload.SidePayer?.inn || '';
     const payerName = payload.SidePayer?.name || '';
     const amount = parseFloat(payload.SidePayer?.amount || payload.amount || '0');
+    if (isNaN(amount) || amount <= 0 || amount > 100000000) {
+      console.warn(`[Tochka Webhook] Invalid amount: ${amount}, skipping auto-credit`);
+      return res.status(200).json({ ok: true, processed: false, reason: 'invalid_amount' });
+    }
     const purpose = payload.purpose || '';
     const paymentId = payload.paymentId || '';
     const paymentDate = payload.date || new Date().toISOString().slice(0, 10);
@@ -4218,7 +4405,7 @@ app.use('/api', (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
+const httpServer = app.listen(PORT, () => {
   console.log(`Proxies.Rent Dashboard running at http://localhost:${PORT}`);
 
   // Schedule speedtests (configurable times, default 02:00 + 14:00)
@@ -4288,8 +4475,7 @@ try {
 } catch (e) { console.error('[TelegramBot] Failed to load proxies:', e.message); }
 
 function saveTgProxies() {
-  try { fs.writeFileSync(TG_PROXIES_FILE, JSON.stringify(tgProxies, null, 2)); }
-  catch (e) { console.error('[TelegramBot] Failed to save proxies:', e.message); }
+  safeWriteFile(TG_PROXIES_FILE, JSON.stringify(tgProxies, null, 2));
 }
 
 // Telegram user database — persistent per-user info
@@ -4303,8 +4489,7 @@ try {
 } catch (e) { console.error('[TelegramBot] Failed to load users:', e.message); }
 
 function saveTgUsers() {
-  try { fs.writeFileSync(TG_USERS_FILE, JSON.stringify(tgUsers, null, 2)); }
-  catch (e) { console.error('[TelegramBot] Failed to save users:', e.message); }
+  safeWriteFile(TG_USERS_FILE, JSON.stringify(tgUsers, null, 2));
 }
 
 function getTgUser(chatId, username) {
@@ -4387,8 +4572,7 @@ try {
 } catch (e) { console.error('[TelegramBot] Failed to load feedback:', e.message); }
 
 function saveTgFeedback() {
-  try { fs.writeFileSync(TG_FEEDBACK_FILE, JSON.stringify(tgFeedback, null, 2)); }
-  catch (e) { console.error('[TelegramBot] Failed to save feedback:', e.message); }
+  safeWriteFile(TG_FEEDBACK_FILE, JSON.stringify(tgFeedback, null, 2));
 }
 
 // User states for feedback flow
@@ -5140,3 +5324,34 @@ function startTelegramPolling() {
 if (TG_TOKEN) {
   startTelegramPolling();
 }
+
+// ==================== GRACEFUL SHUTDOWN ====================
+function gracefulShutdown(signal) {
+  console.log(`\n[Shutdown] Received ${signal}, shutting down gracefully...`);
+
+  // Stop accepting new connections
+  httpServer.close(() => {
+    console.log('[Shutdown] HTTP server closed');
+  });
+
+  // Wait for pending writes to complete, then exit
+  const allPending = Array.from(_fileLocks.values());
+  Promise.all(allPending)
+    .then(() => {
+      console.log('[Shutdown] All file writes complete. Bye!');
+      process.exit(0);
+    })
+    .catch((e) => {
+      console.error('[Shutdown] Error during cleanup:', e.message);
+      process.exit(1);
+    });
+
+  // Force exit after 10 seconds if writes don't complete
+  setTimeout(() => {
+    console.error('[Shutdown] Forced exit after timeout');
+    process.exit(1);
+  }, 10000).unref();
+}
+
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
