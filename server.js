@@ -1663,7 +1663,11 @@ app.get('/api/client/documents/:docId/download', authMiddleware, (req, res) => {
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   const filePath = path.join(DOCUMENTS_DIR, doc.fileName);
   if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'File not found' });
-  res.download(filePath, doc.name);
+  const ext = path.extname(doc.name || doc.fileName);
+  const mimeTypes = { '.pdf': 'application/pdf', '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', '.doc': 'application/msword', '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', '.png': 'image/png', '.jpg': 'image/jpeg' };
+  res.setHeader('Content-Type', mimeTypes[ext] || 'application/octet-stream');
+  res.setHeader('Content-Disposition', `attachment; filename*=UTF-8''${encodeURIComponent(doc.name)}`);
+  fs.createReadStream(filePath).pipe(res);
 });
 
 // ==================== CORS for Public API (Bug #6) ====================
