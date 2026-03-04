@@ -8,7 +8,79 @@ const net = require('net');
 const bcrypt = require('bcrypt');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
+const Database = require('better-sqlite3');
 const fsPromises = fs.promises;
+
+// ==================== SQLite DATABASE (TASK-M) ====================
+const DB_PATH = path.join(__dirname, 'dashboard.db');
+const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
+const db = new Database(DB_PATH);
+db.pragma('journal_mode = WAL');
+db.pragma('foreign_keys = ON');
+
+// Apply schema on startup (CREATE IF NOT EXISTS is safe to re-run)
+if (fs.existsSync(SCHEMA_PATH)) {
+  db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
+  console.log('[SQLite] Schema applied, database ready');
+}
+
+// Auto-migrate from JSON if DB is empty but JSON files exist
+function autoMigrateIfNeeded() {
+  const clientCount = db.prepare('SELECT COUNT(*) as cnt FROM clients').get().cnt;
+  const jsonExists = fs.existsSync(path.join(__dirname, 'clients.json'));
+  if (clientCount === 0 && jsonExists) {
+    console.log('[SQLite] Empty database detected with existing JSON files. Running auto-migration...');
+    try {
+      require('child_process').execSync('node migrate.js', { cwd: __dirname, stdio: 'inherit' });
+      console.log('[SQLite] Auto-migration complete');
+    } catch (e) {
+      console.error('[SQLite] Auto-migration failed:', e.message);
+      console.log('[SQLite] Run "node migrate.js" manually');
+    }
+  }
+}
+autoMigrateIfNeeded();
+
+// Safe ALTER TABLE — add columns if they don't exist (for existing DBs)
+function safeAddColumn(table, column, type) {
+  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`); } catch (e) { /* already exists */ }
+}
+safeAddColumn('bank_payments', 'dismissed', 'INTEGER DEFAULT 0');
+safeAddColumn('bank_payments', 'source', "TEXT DEFAULT ''");
+safeAddColumn('bank_payments', 'tochka_payment_id', 'TEXT');
+try { db.exec('CREATE INDEX IF NOT EXISTS idx_bank_payments_tochka_id ON bank_payments(tochka_payment_id)'); } catch (e) {}
+
+// Prepared statements for common operations
+const dbStmts = {
+  // Sessions — fully SQLite-backed
+  getSession: db.prepare('SELECT token, login, port_name_filter AS portNameFilter, is_admin AS isAdmin, expires_at AS expiresAt FROM sessions WHERE token = ? AND expires_at > ?'),
+  insertSession: db.prepare('INSERT OR REPLACE INTO sessions (token, login, port_name_filter, is_admin, expires_at) VALUES (?, ?, ?, ?, ?)'),
+  deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
+  deleteSessionsByLogin: db.prepare('DELETE FROM sessions WHERE login = ?'),
+  cleanExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
+  countSessions: db.prepare('SELECT COUNT(*) as cnt FROM sessions WHERE expires_at > ?'),
+
+  // Bank payments — fully SQLite-backed
+  getBankPayments: db.prepare('SELECT * FROM bank_payments ORDER BY received_at DESC'),
+  insertBankPayment: db.prepare(`INSERT OR IGNORE INTO bank_payments
+    (id, webhook_type, payer_inn, payer_name, amount, purpose, payment_id, date,
+     customer_code, matched, matched_client_id, matched_client_name, auto_credit,
+     dismissed, source, tochka_payment_id, received_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+  findBankPaymentByPaymentId: db.prepare('SELECT * FROM bank_payments WHERE payment_id = ? AND auto_credit = 1 LIMIT 1'),
+  findBankPaymentByTochkaId: db.prepare('SELECT id FROM bank_payments WHERE tochka_payment_id = ? LIMIT 1'),
+  updateBankPaymentMatch: db.prepare('UPDATE bank_payments SET matched = ?, matched_client_id = ?, matched_client_name = ?, auto_credit = ? WHERE id = ?'),
+  dismissBankPayment: db.prepare('UPDATE bank_payments SET dismissed = 1 WHERE id = ?'),
+  dismissAllUnmatched: db.prepare("UPDATE bank_payments SET dismissed = 1 WHERE matched = 0 AND webhook_type = 'incomingPayment'"),
+  countUnmatchedPayments: db.prepare("SELECT COUNT(*) as cnt FROM bank_payments WHERE matched = 0 AND dismissed = 0 AND webhook_type = 'incomingPayment'"),
+  getBankPaymentById: db.prepare('SELECT * FROM bank_payments WHERE id = ?'),
+
+  // Audit log — fully SQLite-backed
+  insertAudit: db.prepare('INSERT INTO audit_log (timestamp, admin, action, details) VALUES (?, ?, ?, ?)'),
+  getAuditLog: db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?'),
+  countAuditLog: db.prepare('SELECT COUNT(*) as cnt FROM audit_log'),
+  cleanOldAudit: db.prepare("DELETE FROM audit_log WHERE timestamp < datetime('now', '-90 days')"),
+};
 
 // DATA-01/02: Async file write with per-file mutex to prevent race conditions and event loop blocking
 const _fileLocks = new Map();
@@ -43,13 +115,8 @@ if (fs.existsSync(envPath)) {
 
 const PORT = process.env.PORT || 3000;
 
-// Server country/IP mapping — single source of truth (was duplicated 3 times)
-const SERVER_COUNTRIES = {
-  S1: { serverIp: '89.149.100.92', country: 'MD', name: 'Moldova' },
-  S2: { serverIp: '31.5.194.89', country: 'RO', name: 'Romania' }
-};
-
 // Multiple API servers: API_<name>_URL, API_<name>_USER, API_<name>_PASS
+// Optional: API_<name>_PUBLIC_IP, API_<name>_COUNTRY, API_<name>_COUNTRY_NAME
 const apiServers = [];
 const serverKeys = new Set();
 for (const key of Object.keys(process.env)) {
@@ -57,12 +124,27 @@ for (const key of Object.keys(process.env)) {
   if (m) serverKeys.add(m[1]);
 }
 for (const name of serverKeys) {
+  const urlObj = new URL(process.env[`API_${name}_URL`]);
   apiServers.push({
     name,
     url: process.env[`API_${name}_URL`],
     user: process.env[`API_${name}_USER`] || 'proxy',
-    pass: process.env[`API_${name}_PASS`] || 'proxy'
+    pass: process.env[`API_${name}_PASS`] || 'proxy',
+    publicIp: process.env[`API_${name}_PUBLIC_IP`] || urlObj.hostname
   });
+}
+
+// TASK-K: Server country/IP mapping — built from env, no hardcoded IPs
+// Fallback defaults for known servers (used if env vars not set)
+const _defaultCountries = { S1: { country: 'MD', name: 'Moldova' }, S2: { country: 'RO', name: 'Romania' } };
+const SERVER_COUNTRIES = {};
+for (const s of apiServers) {
+  const dc = _defaultCountries[s.name] || {};
+  SERVER_COUNTRIES[s.name] = {
+    serverIp: s.publicIp,
+    country: process.env[`API_${s.name}_COUNTRY`] || dc.country || '',
+    name: process.env[`API_${s.name}_COUNTRY_NAME`] || dc.name || s.name
+  };
 }
 console.log(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.name + ' (' + s.url + ')').join(', ')}`);
 
@@ -103,6 +185,10 @@ function loadClients() {
 }
 
 function saveClients(clientsList) {
+  if (!Array.isArray(clientsList)) {
+    console.error('[CRITICAL] saveClients called without array argument! Aborting write.');
+    return;
+  }
   safeWriteFile(CLIENTS_FILE, JSON.stringify(clientsList, null, 2));
 }
 
@@ -125,6 +211,16 @@ function saveBillingLedger() {
     }
   }
   safeWriteFile(BILLING_LEDGER_FILE, JSON.stringify(billingLedger, null, 2));
+}
+
+// ==================== AUDIT LOG (TASK-J) — SQLite-backed ====================
+function auditLog(adminLogin, action, details = {}) {
+  try {
+    const { timestamp, admin, action: _a, ...rest } = { timestamp: new Date().toISOString(), admin: adminLogin, action, ...details };
+    dbStmts.insertAudit.run(new Date().toISOString(), adminLogin, action, JSON.stringify(rest));
+  } catch (e) {
+    console.error('[AuditLog] Write failed:', e.message);
+  }
 }
 
 // ==================== TOCHKA BANK API ====================
@@ -188,17 +284,34 @@ function tochkaRequest(method, apiPath, body) {
   });
 }
 
-// Bank payments log
-const BANK_PAYMENTS_FILE = path.join(__dirname, 'bank_payments.json');
-let bankPayments = [];
-try {
-  if (fs.existsSync(BANK_PAYMENTS_FILE)) {
-    bankPayments = JSON.parse(fs.readFileSync(BANK_PAYMENTS_FILE, 'utf8'));
-  }
-} catch (e) { console.error('Failed to load bank_payments:', e.message); }
+// ==================== BANK PAYMENTS — SQLite-backed ====================
+// Helper: convert SQLite row to JS object with camelCase keys
+function bankPaymentFromRow(row) {
+  if (!row) return null;
+  return {
+    id: row.id, webhookType: row.webhook_type, payerInn: row.payer_inn,
+    payerName: row.payer_name, amount: row.amount, purpose: row.purpose,
+    paymentId: row.payment_id, date: row.date, customerCode: row.customer_code,
+    matched: !!row.matched, matchedClientId: row.matched_client_id,
+    matchedClientName: row.matched_client_name, autoCredit: !!row.auto_credit,
+    dismissed: !!row.dismissed, source: row.source || '',
+    tochkaPaymentId: row.tochka_payment_id || '', receivedAt: row.received_at
+  };
+}
 
-function saveBankPayments() {
-  safeWriteFile(BANK_PAYMENTS_FILE, JSON.stringify(bankPayments, null, 2));
+function insertBankPaymentToDb(bp) {
+  dbStmts.insertBankPayment.run(
+    bp.id, bp.webhookType || '', bp.payerInn || '', bp.payerName || '',
+    bp.amount || 0, bp.purpose || '', bp.paymentId || '', bp.date || '',
+    bp.customerCode || '', bp.matched ? 1 : 0, bp.matchedClientId || null,
+    bp.matchedClientName || null, bp.autoCredit ? 1 : 0,
+    bp.dismissed ? 1 : 0, bp.source || '', bp.tochkaPaymentId || '',
+    bp.receivedAt || new Date().toISOString()
+  );
+}
+
+function getAllBankPayments() {
+  return dbStmts.getBankPayments.all().map(bankPaymentFromRow);
 }
 
 // SEC-02: JWT verification for Tochka webhooks
@@ -478,18 +591,36 @@ function calculateMonthlyBillAmount(client, cachedResults) {
   return Math.round(totalAmount * 100) / 100;
 }
 
-// ==================== DAILY TRAFFIC HISTORY ====================
-const DAILY_TRAFFIC_FILE = path.join(__dirname, 'traffic_daily.json');
+// ==================== DAILY TRAFFIC HISTORY — SQLite-backed ====================
 let dailyTraffic = {}; // { portName: { "2026-03-01": { in: bytes, out: bytes }, ... } }
 let lastDailyTrafficDate = '';
+// Load from SQLite
 try {
-  if (fs.existsSync(DAILY_TRAFFIC_FILE)) {
-    dailyTraffic = JSON.parse(fs.readFileSync(DAILY_TRAFFIC_FILE, 'utf8'));
+  const rows = db.prepare('SELECT port_name, date, bytes_in, bytes_out FROM daily_traffic').all();
+  for (const r of rows) {
+    if (!dailyTraffic[r.port_name]) dailyTraffic[r.port_name] = {};
+    dailyTraffic[r.port_name][r.date] = { in: r.bytes_in, out: r.bytes_out };
   }
-} catch (e) { console.error('Failed to load daily_traffic:', e.message); }
+  if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} daily traffic entries`);
+} catch (e) { console.error('Failed to load daily_traffic from SQLite:', e.message); }
+
+const _dtUpsert = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
+const _dtCleanup = db.prepare("DELETE FROM daily_traffic WHERE date < date('now', '-90 days')");
 
 function saveDailyTraffic() {
-  safeWriteFile(DAILY_TRAFFIC_FILE, JSON.stringify(dailyTraffic, null, 2));
+  try {
+    const batch = db.transaction(() => {
+      for (const [portName, days] of Object.entries(dailyTraffic)) {
+        for (const [date, data] of Object.entries(days)) {
+          const bIn = typeof data === 'object' ? (data.in || 0) : 0;
+          const bOut = typeof data === 'object' ? (data.out || 0) : 0;
+          _dtUpsert.run(portName, date, bIn, bOut);
+        }
+      }
+      _dtCleanup.run();
+    });
+    batch();
+  } catch (e) { console.error('[saveDailyTraffic] SQLite error:', e.message); }
 }
 
 // Parse traffic value like "10.5 GB" to bytes
@@ -637,6 +768,19 @@ function injectOfflineModems(data) {
 // Load clients into users map on startup
 let clients = loadClients();
 
+// TASK-E: Map indexes for O(1) client lookups
+let clientById = new Map();
+let clientByLogin = new Map();
+let clientByApiKey = new Map();
+let clientByInn = new Map();
+
+function rebuildClientMaps() {
+  clientById = new Map(clients.map(c => [c.id, c]));
+  clientByLogin = new Map(clients.map(c => [c.login, c]));
+  clientByApiKey = new Map(clients.filter(c => c.apiKey).map(c => [c.apiKey, c]));
+  clientByInn = new Map(clients.filter(c => c.inn).map(c => [c.inn, c]));
+}
+
 // Ensure all clients have required fields (migration)
 let clientsMigrated = false;
 for (const c of clients) {
@@ -681,7 +825,7 @@ if (clientsMigrated) saveClients(clients);
 // Auto-migrate .env users (non-admin) to clients.json if not already there
 for (const [login, u] of Object.entries(users)) {
   if (u.source === 'env' && u.portNameFilter !== '*') {
-    const exists = clients.find(c => c.login === login);
+    const exists = clientByLogin.get(login);
     if (!exists) {
       const client = {
         id: crypto.randomBytes(8).toString('hex'),
@@ -721,6 +865,7 @@ if (tgClientsRemoved.length > 0) {
   clients = clients.filter(c => !(c.portName && c.portName.startsWith('tg_')));
 }
 saveClients(clients);
+rebuildClientMaps();
 
 for (const c of clients) {
   if (c.login && c.portName && (c.passwordHash || c.password)) {
@@ -734,39 +879,37 @@ for (const c of clients) {
 }
 console.log(`Loaded ${Object.keys(users).length} user(s): ${Object.keys(users).join(', ')}`);
 console.log(`  - ${clients.length} client(s) from clients.json`);
+rebuildClientMaps();
 
-// ==================== SESSIONS ====================
-const SESSION_FILE = path.join(__dirname, 'sessions.json');
-const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days (was 365)
+// ==================== SESSIONS — SQLite-backed ====================
+const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
 
-let sessions = {};
-try {
-  if (fs.existsSync(SESSION_FILE)) {
-    const raw = JSON.parse(fs.readFileSync(SESSION_FILE, 'utf8'));
-    const now = Date.now();
-    for (const [token, sess] of Object.entries(raw)) {
-      if (sess.expiresAt > now) sessions[token] = sess;
-    }
-  }
-} catch (e) {}
+function getSession(token) {
+  if (!token) return null;
+  return dbStmts.getSession.get(token, Date.now()) || null;
+}
 
-function saveSessions() {
-  safeWriteFile(SESSION_FILE, JSON.stringify(sessions));
+function createSession(token, login, portNameFilter, isAdmin, expiresAt) {
+  dbStmts.insertSession.run(token, login, portNameFilter || '', isAdmin ? 1 : 0, expiresAt);
+}
+
+function deleteSession(token) {
+  if (token) dbStmts.deleteSession.run(token);
+}
+
+function deleteSessionsByLogin(login) {
+  dbStmts.deleteSessionsByLogin.run(login);
+}
+
+function getSessionCount() {
+  return dbStmts.countSessions.get(Date.now()).cnt;
 }
 
 // Periodic session cleanup — every hour, remove expired sessions
 setInterval(() => {
-  const now = Date.now();
-  let cleaned = 0;
-  for (const [token, sess] of Object.entries(sessions)) {
-    if (sess.expiresAt && sess.expiresAt < now) {
-      delete sessions[token];
-      cleaned++;
-    }
-  }
-  if (cleaned > 0) {
-    saveSessions();
-    console.log(`[Sessions] Cleaned ${cleaned} expired session(s), ${Object.keys(sessions).length} active`);
+  const result = dbStmts.cleanExpiredSessions.run(Date.now());
+  if (result.changes > 0) {
+    console.log(`[Sessions] Cleaned ${result.changes} expired session(s)`);
   }
 }, 60 * 60 * 1000);
 
@@ -877,9 +1020,8 @@ const loginLimiter = rateLimit({
 
 function authMiddleware(req, res, next) {
   const token = req.headers['x-auth-token'] || req.query.token;
-  const sess = token ? sessions[token] : null;
-  if (!sess || sess.expiresAt < Date.now()) {
-    if (sess) { delete sessions[token]; saveSessions(); }
+  const sess = getSession(token);
+  if (!sess) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   req.user = sess;
@@ -893,6 +1035,19 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
+// TASK-H: Health-check endpoint (no auth required)
+app.get('/health', (req, res) => {
+  res.json({
+    status: 'ok',
+    uptime_seconds: Math.round(process.uptime()),
+    clients: clients.length,
+    sessions: getSessionCount(),
+    servers: apiServers.length,
+    memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    timestamp: new Date().toISOString()
+  });
+});
+
 app.post('/api/login', loginLimiter, async (req, res) => {
   const { login, password } = req.body;
   if (!login || !password) return res.status(400).json({ error: 'Login and password required' });
@@ -905,26 +1060,24 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   if (!passwordValid) return res.status(401).json({ error: 'Invalid login or password' });
   const token = generateToken();
   const isAdmin = user.portNameFilter === '*';
-  sessions[token] = { login, portNameFilter: user.portNameFilter, isAdmin, expiresAt: Date.now() + SESSION_TTL };
-  saveSessions();
+  createSession(token, login, user.portNameFilter, isAdmin, Date.now() + SESSION_TTL);
   res.json({ token, login, isAdmin });
 });
 
 app.post('/api/logout', (req, res) => {
   const token = req.headers['x-auth-token'];
-  if (token) { delete sessions[token]; saveSessions(); }
+  deleteSession(token);
   res.json({ ok: true });
 });
 
 // Admin: impersonate client (create session as client)
 app.post('/api/admin/impersonate/:id', authMiddleware, adminMiddleware, (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const user = users[client.login];
   if (!user) return res.status(400).json({ error: 'Client user not found' });
   const token = generateToken();
-  sessions[token] = { login: client.login, portNameFilter: user.portNameFilter, isAdmin: false, expiresAt: Date.now() + SESSION_TTL };
-  saveSessions();
+  createSession(token, client.login, user.portNameFilter, false, Date.now() + SESSION_TTL);
   res.json({ ok: true, token, login: client.login });
 });
 
@@ -1130,6 +1283,21 @@ async function fetchAllServersData() {
   return results;
 }
 
+// TASK-D: In-memory cache for fetchAllServersData (TTL 10s + in-flight dedup)
+let _psCache = null;
+let _psCacheTs = 0;
+let _psFetchPromise = null;
+const PS_CACHE_TTL = 10 * 1000;
+
+async function fetchAllServersDataCached() {
+  if (_psCache && (Date.now() - _psCacheTs) < PS_CACHE_TTL) return _psCache;
+  if (_psFetchPromise) return _psFetchPromise;
+  _psFetchPromise = fetchAllServersData()
+    .then(r => { _psCache = r; _psCacheTs = Date.now(); _psFetchPromise = null; return r; })
+    .catch(e => { _psFetchPromise = null; throw e; });
+  return _psFetchPromise;
+}
+
 function filterByPortName(data, portNameFilter) {
   const { bw, status, ports } = data;
   const allowedPortIds = new Set();
@@ -1197,44 +1365,76 @@ function mergeServerData(allData, portNameFilter) {
   return { bandwidth: mergedBw, status: mergedStatus, ports: mergedPorts, modemLogins, cachedServers };
 }
 
-// ==================== IP TRACKING & UPTIME TRACKING ====================
+// ==================== IP TRACKING & UPTIME TRACKING — SQLite-backed ====================
 
-const IP_TRACKING_FILE = path.join(__dirname, 'ip_tracking.json');
-const UPTIME_TRACKING_FILE = path.join(__dirname, 'uptime_tracking.json');
-const IP_HISTORY_FILE = path.join(__dirname, 'ip_history.json');
 const MAX_IP_HISTORY = 100;
 
+// Load IP tracking from SQLite
 let ipTracking = {};
 try {
-  if (fs.existsSync(IP_TRACKING_FILE)) {
-    ipTracking = JSON.parse(fs.readFileSync(IP_TRACKING_FILE, 'utf8'));
-  }
-} catch (e) { console.error('Failed to load ip_tracking:', e.message); }
+  const rows = db.prepare('SELECT key, ip, updated_at FROM ip_tracking').all();
+  for (const r of rows) ipTracking[r.key] = { ip: r.ip, since: r.updated_at };
+  if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} IP tracking entries`);
+} catch (e) { console.error('Failed to load ip_tracking from SQLite:', e.message); }
 
+// Load uptime tracking from SQLite
 let uptimeTracking = {};
 try {
-  if (fs.existsSync(UPTIME_TRACKING_FILE)) {
-    uptimeTracking = JSON.parse(fs.readFileSync(UPTIME_TRACKING_FILE, 'utf8'));
-  }
-} catch (e) { console.error('Failed to load uptime_tracking:', e.message); }
+  const rows = db.prepare('SELECT key, data FROM uptime_tracking').all();
+  for (const r of rows) { try { uptimeTracking[r.key] = JSON.parse(r.data); } catch (e) {} }
+  if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} uptime tracking entries`);
+} catch (e) { console.error('Failed to load uptime_tracking from SQLite:', e.message); }
 
+// Load IP history from SQLite
 let ipHistory = {};
 try {
-  if (fs.existsSync(IP_HISTORY_FILE)) {
-    ipHistory = JSON.parse(fs.readFileSync(IP_HISTORY_FILE, 'utf8'));
+  const rows = db.prepare('SELECT key, ip, started_at, ended_at FROM ip_history ORDER BY id ASC').all();
+  for (const r of rows) {
+    if (!ipHistory[r.key]) ipHistory[r.key] = [];
+    ipHistory[r.key].push({ ip: r.ip, from: r.started_at, to: r.ended_at || null });
   }
-} catch (e) { console.error('Failed to load ip_history:', e.message); }
+  if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} IP history entries`);
+} catch (e) { console.error('Failed to load ip_history from SQLite:', e.message); }
+
+const _ipUpsert = db.prepare('INSERT OR REPLACE INTO ip_tracking (key, ip, updated_at) VALUES (?, ?, ?)');
+const _utUpsert = db.prepare('INSERT OR REPLACE INTO uptime_tracking (key, data) VALUES (?, ?)');
+const _ihDelete = db.prepare('DELETE FROM ip_history');
+const _ihInsert = db.prepare('INSERT INTO ip_history (key, ip, started_at, ended_at) VALUES (?, ?, ?, ?)');
 
 function saveIpTracking() {
-  safeWriteFile(IP_TRACKING_FILE, JSON.stringify(ipTracking, null, 2));
+  try {
+    const batch = db.transaction(() => {
+      for (const [key, data] of Object.entries(ipTracking)) {
+        _ipUpsert.run(key, data.ip || '', data.since || '');
+      }
+    });
+    batch();
+  } catch (e) { console.error('[saveIpTracking] SQLite error:', e.message); }
 }
 
 function saveUptimeTracking() {
-  safeWriteFile(UPTIME_TRACKING_FILE, JSON.stringify(uptimeTracking, null, 2));
+  try {
+    const batch = db.transaction(() => {
+      for (const [key, data] of Object.entries(uptimeTracking)) {
+        _utUpsert.run(key, JSON.stringify(data));
+      }
+    });
+    batch();
+  } catch (e) { console.error('[saveUptimeTracking] SQLite error:', e.message); }
 }
 
 function saveIpHistory() {
-  safeWriteFile(IP_HISTORY_FILE, JSON.stringify(ipHistory, null, 2));
+  try {
+    const batch = db.transaction(() => {
+      _ihDelete.run();
+      for (const [key, entries] of Object.entries(ipHistory)) {
+        for (const e of entries) {
+          _ihInsert.run(key, e.ip || '', e.from || '', e.to || '');
+        }
+      }
+    });
+    batch();
+  } catch (e) { console.error('[saveIpHistory] SQLite error:', e.message); }
 }
 
 function recordIpChange(key, oldIp, newIp, timestamp) {
@@ -1253,7 +1453,7 @@ function recordIpChange(key, oldIp, newIp, timestamp) {
   }
 }
 
-// Combined tracking: IP changes + uptime percentage (runs every 10 min)
+// Combined tracking: IP changes + uptime percentage (runs every 5 min)
 // Uptime fix: skip rotating/rebooting modems, skip unreachable servers
 async function trackModems() {
   const now = Date.now();
@@ -1519,9 +1719,9 @@ function getSpeedtestLatest() {
 
 app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
   try {
-    const results = await fetchAllServersData();
+    const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, req.user.portNameFilter);
-    const clientInfo = clients.find(c => c.login === req.user.login);
+    const clientInfo = clientByLogin.get(req.user.login);
     if (clientInfo) {
       const totalPayments = (clientInfo.payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
       // Current month expense from billing ledger
@@ -1577,7 +1777,7 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
 // ==================== CLIENT: DAILY TRAFFIC HISTORY ====================
 
 app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
-  const clientInfo = clients.find(c => c.login === req.user.login);
+  const clientInfo = clientByLogin.get(req.user.login);
   if (!clientInfo) return res.status(404).json({ error: 'Client not found' });
 
   const portNameFilter = clientInfo.portName || req.user.portNameFilter;
@@ -1614,7 +1814,7 @@ app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
   if (includeToday) {
     // Add today's live data from ProxySmart
     try {
-      const results = await fetchAllServersData();
+      const results = await fetchAllServersDataCached();
       const merged = mergeServerData(results, portNameFilter);
       const todayData = {};
       for (const [portId, b] of Object.entries(merged.bandwidth || {})) {
@@ -1636,7 +1836,7 @@ app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
 // ==================== CLIENT: BILLING HISTORY ====================
 
 app.get('/api/billing_history', authMiddleware, (req, res) => {
-  const clientInfo = clients.find(c => c.login === req.user.login);
+  const clientInfo = clientByLogin.get(req.user.login);
   if (!clientInfo) return res.status(404).json({ error: 'Client not found' });
 
   const entries = billingLedger[clientInfo.id] || [];
@@ -1740,7 +1940,7 @@ app.get('/api/client/ip_history', authMiddleware, (req, res) => {
 
 app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
   try {
-    const results = await fetchAllServersData();
+    const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, req.user.portNameFilter);
 
     const COUNTRIES = SERVER_COUNTRIES;
@@ -1777,20 +1977,13 @@ app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
       }
     }
 
-    // Also include server info so frontend can build direct URLs
-    const serverInfo = {};
-    for (const s of apiServers) {
-      const urlObj = new URL(s.url);
-      serverInfo[s.name] = { url: s.url, user: s.user, pass: s.pass, host: urlObj.host };
-    }
-
-    const clientInfo = clients.find(c => c.login === req.user.login);
+    // SEC: serverInfo with user/pass removed — clients use /api/client/reset_ip instead
+    const clientInfo = clientByLogin.get(req.user.login);
     res.json({
       credentials,
       clientName: req.user.login,
       exportDate: new Date().toISOString(),
-      resetToken: clientInfo ? clientInfo.resetToken : '',
-      serverInfo
+      resetToken: clientInfo ? clientInfo.resetToken : ''
     });
   } catch (err) { res.status(502).json({ error: 'Export failed', details: err.message }); }
 });
@@ -1798,7 +1991,7 @@ app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
 // ==================== CLIENT: REFERRAL PROGRAM ====================
 
 app.get('/api/client/referral', authMiddleware, (req, res) => {
-  const client = clients.find(c => c.login === req.user.login);
+  const client = clientByLogin.get(req.user.login);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const referrals = clients.filter(c => c.referred_by === client.id);
   res.json({
@@ -1811,13 +2004,13 @@ app.get('/api/client/referral', authMiddleware, (req, res) => {
 // ==================== CLIENT: DOCUMENTS ====================
 
 app.get('/api/client/documents', authMiddleware, (req, res) => {
-  const client = clients.find(c => c.login === req.user.login);
+  const client = clientByLogin.get(req.user.login);
   if (!client) return res.json([]);
   res.json((client.documents || []).map(d => ({ id: d.id, name: d.name, date: d.date })));
 });
 
 app.get('/api/client/documents/:docId/download', authMiddleware, (req, res) => {
-  const client = clients.find(c => c.login === req.user.login);
+  const client = clientByLogin.get(req.user.login);
   if (!client) return res.status(404).json({ error: 'Not found' });
   const doc = (client.documents || []).find(d => d.id === req.params.docId);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -1848,11 +2041,11 @@ app.get('/api/v1/proxy', async (req, res) => {
   const apiKey = req.headers['x-api-key'] || req.query.apikey;
   if (!apiKey) return res.status(401).json({ success: false, error: 'API key required. Pass via X-API-Key header or ?apikey= query parameter.' });
 
-  const client = clients.find(c => c.apiKey === apiKey);
+  const client = clientByApiKey.get(apiKey);
   if (!client) return res.status(401).json({ success: false, error: 'Invalid API key' });
 
   try {
-    const results = await fetchAllServersData();
+    const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, client.portName);
 
     const COUNTRIES = SERVER_COUNTRIES;
@@ -1892,7 +2085,7 @@ app.get('/api/v1/proxy', async (req, res) => {
     }
 
     // Billing
-    const clientInfo = clients.find(c => c.login === client.login);
+    const clientInfo = clientByLogin.get(client.login);
     const totalPayments = clientInfo ? (clientInfo.payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0) : 0;
 
     // Bandwidth totals (in MB)
@@ -1939,11 +2132,11 @@ app.get('/api/v1/proxies', async (req, res) => {
   const { apiKey, format } = req.query;
   if (!apiKey) return res.status(400).json({ error: 'apiKey required' });
 
-  const client = clients.find(c => c.apiKey === apiKey);
+  const client = clientByApiKey.get(apiKey);
   if (!client) return res.status(401).json({ error: 'Invalid API key' });
 
   try {
-    const results = await fetchAllServersData();
+    const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, client.portName);
 
     const COUNTRIES = SERVER_COUNTRIES;
@@ -1989,9 +2182,17 @@ app.get('/api/v1/proxies', async (req, res) => {
 
 // ==================== ADMIN: FULL DATA ====================
 
+// TASK-D: Cache invalidation endpoint
+app.post('/api/admin/cache/invalidate', authMiddleware, adminMiddleware, (req, res) => {
+  _psCache = null;
+  _psCacheTs = 0;
+  console.log('[Cache] ProxySmart cache invalidated by admin');
+  res.json({ ok: true, message: 'Cache invalidated' });
+});
+
 app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const results = await fetchAllServersData();
+    const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, '*');
     const servers = apiServers.map(s => ({ name: s.name, url: s.url }));
     // Include server auth info for direct reset URLs
@@ -2019,7 +2220,7 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       telegramUsers: tgUsers,
       telegramProxies: tgProxies,
       telegramFeedback: tgFeedback,
-      bankPayments: bankPayments,
+      bankPayments: getAllBankPayments(),
       tochkaConfigured: !!tochkaConfig.jwt,
       tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp }
     });
@@ -2086,6 +2287,7 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, async (req, res)
 
   clients.push(client);
   saveClients(clients);
+  rebuildClientMaps();
   users[login] = { passwordHash, portNameFilter: portName, source: 'client', clientId: client.id };
   // SEC-04: strip sensitive fields from response
   const { password: _p, passwordHash: _ph, ...safeClient } = client;
@@ -2130,6 +2332,7 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, r
   };
   clients[idx] = updated;
   saveClients(clients);
+  rebuildClientMaps();
   users[updated.login] = { passwordHash: updated.passwordHash, portNameFilter: updated.portName, source: 'client', clientId: updated.id };
   // SEC-04: strip sensitive fields from response
   const { password: _p, passwordHash: _ph, ...safeClient } = updated;
@@ -2144,7 +2347,7 @@ app.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req
   const client = clients[idx];
 
   try {
-    const results = await fetchAllServersData();
+    const results = await fetchAllServersDataCached();
     let hasActivePorts = false;
     for (const data of results) {
       if (typeof data.bw === 'object') {
@@ -2166,11 +2369,10 @@ app.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req
 
   const removed = clients.splice(idx, 1)[0];
   saveClients(clients);
+  rebuildClientMaps();
   delete users[removed.login];
-  for (const [token, sess] of Object.entries(sessions)) {
-    if (sess.login === removed.login) delete sessions[token];
-  }
-  saveSessions();
+  deleteSessionsByLogin(removed.login);
+  auditLog(req.user.login, 'delete_client', { clientId: removed.id, clientName: removed.name });
   res.json({ ok: true });
 });
 
@@ -2224,11 +2426,12 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
 
   saveClients(clients);
   saveBillingLedger();
+  auditLog(req.user.login, 'add_payment', { clientId: clients[idx].id, amount: parsedAmount, note: note || '' });
   res.json({ ok: true, payments: clients[idx].payments, balance: clients[idx].balance });
 });
 
 app.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   res.json(client.payments || []);
 });
@@ -2270,7 +2473,7 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
 // ==================== ADMIN: BILLING LEDGER ====================
 
 app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const entries = billingLedger[client.id] || [];
   res.json({
@@ -2282,7 +2485,7 @@ app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, 
 
 // Delete ledger entry + revert balance
 app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMiddleware, (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const entries = billingLedger[client.id] || [];
   const idx = parseInt(req.params.entryIndex, 10);
@@ -2302,8 +2505,9 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
   entries.splice(idx, 1);
   billingLedger[client.id] = entries;
   saveBillingLedger();
-  saveClients();
+  saveClients(clients);
   console.log(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, new balance: ${client.balance}`);
+  auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, entryType: entry.type, amount: entry.amount });
   res.json({ ok: true, newBalance: client.balance });
 });
 
@@ -2332,6 +2536,7 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
 
   saveClients(clients);
   saveBillingLedger();
+  auditLog(req.user.login, 'balance_adjust', { clientId: clients[idx].id, amount: adjustment, note: note || '' });
   res.json({ ok: true, balance: clients[idx].balance });
 });
 
@@ -2384,6 +2589,22 @@ app.post('/api/admin/clients/:id/regenerate_key', authMiddleware, adminMiddlewar
   clients[idx].apiKey = 'prx_' + crypto.randomBytes(24).toString('hex');
   saveClients(clients);
   res.json({ ok: true, apiKey: clients[idx].apiKey });
+});
+
+// ==================== ADMIN: AUDIT LOG (TASK-J) ====================
+
+app.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
+  const offset = parseInt(req.query.offset) || 0;
+  const total = dbStmts.countAuditLog.get().cnt;
+  const rows = dbStmts.getAuditLog.all(limit, offset);
+  // Parse details JSON back to object for frontend
+  const entries = rows.map(r => {
+    let details = {};
+    try { details = JSON.parse(r.details || '{}'); } catch (e) {}
+    return { timestamp: r.timestamp, admin: r.admin, action: r.action, ...details };
+  });
+  res.json({ total, offset, limit, entries });
 });
 
 // ==================== ADMIN: SETTINGS ====================
@@ -3014,7 +3235,9 @@ async function runDailyBilling() {
             }
           }
         }
-        cost = (client.price * modemCount) / 30;
+        const now = new Date();
+        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        cost = (client.price * modemCount) / daysInMonth;
       } else {
         // per_gb billing (default)
         cost = client.price * deltaGb;
@@ -3128,11 +3351,12 @@ async function autoCreateMissingClients() {
       clients.push(client);
       users[login] = { passwordHash, portNameFilter: pn, source: 'client', clientId: client.id };
       created++;
-      console.log(`  Auto-created client for portName "${pn}" (login: ${login}, pass: ${password})`);
+      console.log(`  Auto-created client: login=${login}, portName=${pn}`);
     }
 
     if (created > 0) {
       saveClients(clients);
+      rebuildClientMaps();
       console.log(`[AutoCreate] Created ${created} new client(s)`);
     } else {
       console.log('[AutoCreate] All portNames have client accounts');
@@ -3304,6 +3528,12 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
     const paymentDate = payload.date || new Date().toISOString().slice(0, 10);
     const customerCode = payload.customerCode || '';
 
+    // TASK-C: Deduplicate — skip if paymentId already processed (SQLite query)
+    if (paymentId && dbStmts.findBankPaymentByPaymentId.get(paymentId)) {
+      console.log(`[Tochka Webhook] Duplicate paymentId=${paymentId}, skipping`);
+      return res.status(200).json({ ok: true, processed: false, reason: 'duplicate' });
+    }
+
     // Log the payment
     const bankPayment = {
       id: crypto.randomBytes(8).toString('hex'),
@@ -3324,7 +3554,7 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
     // Only process incoming payments
     if (webhookType === 'incomingPayment') {
       // Find client by INN
-      const matchedClient = payerInn ? clients.find(c => c.inn && c.inn === payerInn) : null;
+      const matchedClient = payerInn ? clientByInn.get(payerInn) : null;
 
       if (matchedClient) {
         bankPayment.matched = true;
@@ -3383,10 +3613,7 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
       }
     }
 
-    bankPayments.push(bankPayment);
-    // Keep last 1000 entries
-    if (bankPayments.length > 1000) bankPayments = bankPayments.slice(-1000);
-    saveBankPayments();
+    insertBankPaymentToDb(bankPayment);
 
     res.status(200).json({ ok: true, processed: true, matched: bankPayment.matched });
   } catch (err) {
@@ -3572,8 +3799,8 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
       const paymentId = tx.transactionId || tx.TransactionId || tx.paymentId || ('tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
       const date = tx.documentProcessDate || tx.bookingDateTime || tx.valueDateTime || tx.date || to;
 
-      // Check if already processed
-      const alreadyExists = bankPayments.some(bp => bp.tochkaPaymentId === paymentId);
+      // Check if already processed (SQLite query)
+      const alreadyExists = dbStmts.findBankPaymentByTochkaId.get(paymentId);
       if (alreadyExists) { skipped++; continue; }
 
       // Create bank payment record
@@ -3595,7 +3822,7 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
 
       // Try to match by INN
       if (payerInn) {
-        const client = clients.find(c => c.inn && c.inn === payerInn);
+        const client = clientByInn.get(payerInn);
         if (client) {
           bankPayment.matched = true;
           bankPayment.matchedClientId = client.id;
@@ -3621,14 +3848,13 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
         }
       }
 
-      bankPayments.push(bankPayment);
+      insertBankPaymentToDb(bankPayment);
       imported++;
     }
 
     // Save
     if (imported > 0) {
-      saveBankPayments();
-      saveClients();
+      saveClients(clients);
       if (matched > 0) saveBillingLedger();
     }
 
@@ -3643,34 +3869,27 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
 
 // Get Tochka status / bank payments log
 app.get('/api/admin/tochka/payments', authMiddleware, adminMiddleware, (req, res) => {
+  const payments = getAllBankPayments();
   res.json({
     configured: !!tochkaConfig.jwt,
-    payments: bankPayments.slice().reverse(),
-    unmatchedCount: bankPayments.filter(p => !p.matched && !p.dismissed && p.webhookType === 'incomingPayment').length
+    payments,
+    unmatchedCount: dbStmts.countUnmatchedPayments.get().cnt
   });
 });
 
 // Dismiss unmatched payments (hide them)
 app.post('/api/admin/tochka/dismiss_unmatched', authMiddleware, adminMiddleware, (req, res) => {
-  let count = 0;
-  bankPayments.forEach(p => {
-    if (!p.matched && p.webhookType === 'incomingPayment') {
-      p.dismissed = true;
-      count++;
-    }
-  });
-  saveBankPayments();
-  console.log(`[Tochka] Dismissed ${count} unmatched payments`);
-  res.json({ ok: true, dismissed: count });
+  const result = dbStmts.dismissAllUnmatched.run();
+  console.log(`[Tochka] Dismissed ${result.changes} unmatched payments`);
+  res.json({ ok: true, dismissed: result.changes });
 });
 
 // Dismiss single payment
 app.post('/api/admin/tochka/dismiss_payment', authMiddleware, adminMiddleware, (req, res) => {
   const { paymentId } = req.body;
-  const bp = bankPayments.find(p => p.id === paymentId);
-  if (!bp) return res.status(404).json({ error: 'Payment not found' });
-  bp.dismissed = true;
-  saveBankPayments();
+  const row = dbStmts.getBankPaymentById.get(paymentId);
+  if (!row) return res.status(404).json({ error: 'Payment not found' });
+  dbStmts.dismissBankPayment.run(paymentId);
   res.json({ ok: true });
 });
 
@@ -3679,8 +3898,9 @@ app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (re
   const { paymentId, clientId } = req.body;
   if (!paymentId || !clientId) return res.status(400).json({ error: 'paymentId and clientId required' });
 
-  const bp = bankPayments.find(p => p.id === paymentId);
-  if (!bp) return res.status(404).json({ error: 'Payment not found' });
+  const bpRow = dbStmts.getBankPaymentById.get(paymentId);
+  if (!bpRow) return res.status(404).json({ error: 'Payment not found' });
+  const bp = bankPaymentFromRow(bpRow);
   const idx = clients.findIndex(c => c.id === clientId);
   if (idx === -1) return res.status(404).json({ error: 'Client not found' });
 
@@ -3714,14 +3934,11 @@ app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (re
     paymentId: bp.paymentId
   });
 
-  bp.matched = true;
-  bp.matchedClientId = clients[idx].id;
-  bp.matchedClientName = clients[idx].name;
-  bp.autoCredit = false;
+  // Update bank payment in SQLite
+  dbStmts.updateBankPaymentMatch.run(1, clients[idx].id, clients[idx].name, 0, paymentId);
 
   saveClients(clients);
   saveBillingLedger();
-  saveBankPayments();
   res.json({ ok: true, balance: clients[idx].balance });
 });
 
@@ -3732,7 +3949,7 @@ app.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async 
   const { clientId, period, items } = req.body;
   if (!clientId || !period) return res.status(400).json({ error: 'clientId and period required' });
 
-  const client = clients.find(c => c.id === clientId);
+  const client = clientById.get(clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
   // Calculate items from billing ledger if not provided
@@ -3819,7 +4036,7 @@ app.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async 
 
 // Get closing documents for client (client-side)
 app.get('/api/client/closing_documents', authMiddleware, (req, res) => {
-  const client = clients.find(c => c.login === req.user.login);
+  const client = clientByLogin.get(req.user.login);
   if (!client) return res.json({ documents: [] });
   res.json({ documents: (client.closingDocuments || []).map(d => ({
     id: d.id,
@@ -3834,7 +4051,7 @@ app.get('/api/client/closing_documents', authMiddleware, (req, res) => {
 
 // Download closing document PDF from Tochka
 app.get('/api/client/closing_documents/:docId/pdf', authMiddleware, async (req, res) => {
-  const client = clients.find(c => c.login === req.user.login);
+  const client = clientByLogin.get(req.user.login);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const doc = (client.closingDocuments || []).find(d => d.id === req.params.docId);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -3859,7 +4076,7 @@ app.get('/api/client/closing_documents/:docId/pdf', authMiddleware, async (req, 
 
 // Admin: download closing document PDF
 app.get('/api/admin/clients/:id/closing_documents/:docId/pdf', authMiddleware, adminMiddleware, async (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const doc = (client.closingDocuments || []).find(d => d.id === req.params.docId);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
@@ -3884,7 +4101,7 @@ app.get('/api/admin/clients/:id/closing_documents/:docId/pdf', authMiddleware, a
 
 // Admin: change closing document status (signed/unsigned)
 app.post('/api/admin/clients/:id/closing_document_status', authMiddleware, adminMiddleware, (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const { docId, status } = req.body;
   if (!docId || !['signed', 'unsigned'].includes(status)) {
@@ -3900,7 +4117,7 @@ app.post('/api/admin/clients/:id/closing_document_status', authMiddleware, admin
 
 // Admin: delete closing document
 app.delete('/api/admin/clients/:id/closing_document/:docId', authMiddleware, adminMiddleware, async (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const docIdx = (client.closingDocuments || []).findIndex(d => d.id === req.params.docId);
   if (docIdx === -1) return res.status(404).json({ error: 'Document not found' });
@@ -3920,7 +4137,7 @@ app.delete('/api/admin/clients/:id/closing_document/:docId', authMiddleware, adm
 
 // Admin: get closing documents for a client
 app.get('/api/admin/clients/:id/closing_documents', authMiddleware, adminMiddleware, (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   res.json(client.closingDocuments || []);
 });
@@ -4011,6 +4228,7 @@ app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, asy
   }
 
   if (generated > 0) saveClients(clients);
+  auditLog(req.user.login, 'generate_acts', { period: period || 'auto', generated, skipped, errors });
   res.json({ ok: true, generated, skipped, errors, results });
 });
 
@@ -4021,7 +4239,7 @@ app.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async
   const { clientId, amount: manualAmount, period } = req.body;
   if (!clientId) return res.status(400).json({ error: 'clientId required' });
 
-  const client = clients.find(c => c.id === clientId);
+  const client = clientById.get(clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
   // Calculate amount or use manual
@@ -4029,7 +4247,7 @@ app.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async
   const billPeriod = period || now.toISOString().slice(0, 7);
   let serverData = [];
   if (!manualAmount) {
-    try { serverData = await fetchAllServersData(); } catch (e) { console.error('[Bills] fetchAllServersData error:', e.message); }
+    try { serverData = await fetchAllServersDataCached(); } catch (e) { console.error('[Bills] fetchAllServersData error:', e.message); }
   }
   let amount = manualAmount || calculateMonthlyBillAmount(client, serverData);
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Cannot calculate bill amount (no charges found)' });
@@ -4081,7 +4299,7 @@ app.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, as
   let generated = 0, skipped = 0, errors = 0;
   const results = [];
   let serverData = [];
-  try { serverData = await fetchAllServersData(); } catch (e) { console.error('[Bills] fetchAllServersData error:', e.message); }
+  try { serverData = await fetchAllServersDataCached(); } catch (e) { console.error('[Bills] fetchAllServersData error:', e.message); }
 
   for (const client of clients) {
     if (!client.inn) { skipped++; continue; }
@@ -4124,6 +4342,7 @@ app.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, as
   }
 
   if (generated > 0) saveClients(clients);
+  auditLog(req.user.login, 'generate_bills', { period: billPeriod, generated, skipped, errors });
   res.json({ ok: true, generated, skipped, errors, results });
 });
 
@@ -4146,7 +4365,7 @@ app.get('/api/admin/tochka/all_bills', authMiddleware, adminMiddleware, (req, re
 
 // Download bill PDF
 app.get('/api/admin/clients/:id/bills/:billId/pdf', authMiddleware, adminMiddleware, async (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const bill = (client.bills || []).find(b => b.id === req.params.billId);
   if (!bill || !bill.tochkaBillId) return res.status(404).json({ error: 'Bill not found or no Tochka ID' });
@@ -4167,7 +4386,7 @@ app.get('/api/admin/clients/:id/bills/:billId/pdf', authMiddleware, adminMiddlew
 
 // Change bill status
 app.post('/api/admin/clients/:id/bill_status', authMiddleware, adminMiddleware, (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const { billId, status } = req.body;
   const bill = (client.bills || []).find(b => b.id === billId);
@@ -4179,7 +4398,7 @@ app.post('/api/admin/clients/:id/bill_status', authMiddleware, adminMiddleware, 
 
 // Delete bill
 app.delete('/api/admin/clients/:id/bill/:billId', authMiddleware, adminMiddleware, async (req, res) => {
-  const client = clients.find(c => c.id === req.params.id);
+  const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const idx = (client.bills || []).findIndex(b => b.id === req.params.billId);
   if (idx === -1) return res.status(404).json({ error: 'Bill not found' });
@@ -4197,7 +4416,7 @@ app.delete('/api/admin/clients/:id/bill/:billId', authMiddleware, adminMiddlewar
 
 // Client-side: get bills
 app.get('/api/client/bills', authMiddleware, (req, res) => {
-  const client = clients.find(c => c.login === req.user.login);
+  const client = clientByLogin.get(req.user.login);
   if (!client) return res.json({ bills: [] });
   res.json({ bills: (client.bills || []).map(b => ({
     id: b.id,
@@ -4212,7 +4431,7 @@ app.get('/api/client/bills', authMiddleware, (req, res) => {
 
 // Client-side: download bill PDF
 app.get('/api/client/bills/:billId/pdf', authMiddleware, async (req, res) => {
-  const client = clients.find(c => c.login === req.user.login);
+  const client = clientByLogin.get(req.user.login);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const bill = (client.bills || []).find(b => b.id === req.params.billId);
   if (!bill || !bill.tochkaBillId) return res.status(404).json({ error: 'Bill not found' });
@@ -4414,12 +4633,13 @@ const httpServer = app.listen(PORT, () => {
   // Schedule nightly TopHosts at 03:00
   scheduleNightly(3, 'TopHosts', aggregateTopHosts);
 
-  // Start modem tracking (IP + uptime) every 5 minutes
-  console.log('[Tracking] Starting IP & uptime tracking (every 5 min)...');
+  // Start modem tracking (IP + uptime)
+  const TRACKING_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
+  console.log(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
   trackModems().catch(e => console.error('[Tracking] Initial error:', e.message));
   setInterval(() => {
     trackModems().catch(e => console.error('[Tracking] Error:', e.message));
-  }, 5 * 60 * 1000);
+  }, TRACKING_INTERVAL_MS);
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {
@@ -4465,31 +4685,76 @@ const httpServer = app.listen(PORT, () => {
 
 // ==================== TELEGRAM BOT ====================
 
-const TG_PROXIES_FILE = path.join(__dirname, 'telegram_proxies.json');
+// ==================== TELEGRAM DATA — SQLite-backed ====================
 let tgProxies = [];
 try {
-  if (fs.existsSync(TG_PROXIES_FILE)) {
-    tgProxies = JSON.parse(fs.readFileSync(TG_PROXIES_FILE, 'utf8'));
-    console.log(`[TelegramBot] Loaded ${tgProxies.length} proxy record(s)`);
-  }
+  const rows = db.prepare('SELECT * FROM telegram_proxies').all();
+  tgProxies = rows.map(r => ({
+    id: r.id, chatId: String(r.chat_id), portName: r.port_name, server: r.server,
+    httpPort: r.http_port, socksPort: r.socks_port, login: r.login, password: r.password,
+    plan: r.plan, createdAt: r.created_at, expiresAt: r.expires_at, active: !!r.active
+  }));
+  console.log(`[TelegramBot] Loaded ${tgProxies.length} proxy record(s)`);
 } catch (e) { console.error('[TelegramBot] Failed to load proxies:', e.message); }
 
+const _tgProxyInsert = db.prepare('INSERT INTO telegram_proxies (chat_id, port_name, server, http_port, socks_port, login, password, plan, created_at, expires_at, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+const _tgProxyDelete = db.prepare('DELETE FROM telegram_proxies WHERE id = ?');
+const _tgProxyDeactivate = db.prepare('UPDATE telegram_proxies SET active = 0 WHERE id = ?');
+
 function saveTgProxies() {
-  safeWriteFile(TG_PROXIES_FILE, JSON.stringify(tgProxies, null, 2));
+  try {
+    const batch = db.transaction(() => {
+      db.prepare('DELETE FROM telegram_proxies').run();
+      for (const p of tgProxies) {
+        _tgProxyInsert.run(
+          p.chatId || '', p.portName || '', p.server || '', p.httpPort || 0,
+          p.socksPort || 0, p.login || '', p.password || '', p.plan || '',
+          p.createdAt || '', p.expiresAt || '', p.active !== false ? 1 : 0
+        );
+      }
+    });
+    batch();
+  } catch (e) { console.error('[saveTgProxies] SQLite error:', e.message); }
 }
 
-// Telegram user database — persistent per-user info
-const TG_USERS_FILE = path.join(__dirname, 'telegram_users.json');
+// Telegram user database — persistent per-user info (SQLite-backed)
 let tgUsers = {}; // { chatId: { username, testUsed, plan, speedTests: [{speed,date}], registeredAt } }
 try {
-  if (fs.existsSync(TG_USERS_FILE)) {
-    tgUsers = JSON.parse(fs.readFileSync(TG_USERS_FILE, 'utf8'));
-    console.log(`[TelegramBot] Loaded ${Object.keys(tgUsers).length} user record(s)`);
+  const rows = db.prepare('SELECT * FROM telegram_users').all();
+  const stRows = db.prepare('SELECT * FROM telegram_speedtests ORDER BY id ASC').all();
+  for (const r of rows) {
+    tgUsers[String(r.chat_id)] = {
+      username: r.username, testUsed: !!r.test_used, plan: r.plan,
+      speedTests: [], registeredAt: r.registered_at, updatedAt: r.updated_at
+    };
   }
+  for (const st of stRows) {
+    const cid = String(st.chat_id);
+    if (tgUsers[cid]) {
+      tgUsers[cid].speedTests.push({ speed: st.speed, date: st.tested_at });
+    }
+  }
+  console.log(`[TelegramBot] Loaded ${Object.keys(tgUsers).length} user record(s)`);
 } catch (e) { console.error('[TelegramBot] Failed to load users:', e.message); }
 
+const _tgUserUpsert = db.prepare('INSERT OR REPLACE INTO telegram_users (chat_id, username, test_used, plan, registered_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
+const _tgStDelete = db.prepare('DELETE FROM telegram_speedtests WHERE chat_id = ?');
+const _tgStInsert = db.prepare('INSERT INTO telegram_speedtests (chat_id, speed, tested_at) VALUES (?, ?, ?)');
+
 function saveTgUsers() {
-  safeWriteFile(TG_USERS_FILE, JSON.stringify(tgUsers, null, 2));
+  try {
+    const batch = db.transaction(() => {
+      for (const [chatId, u] of Object.entries(tgUsers)) {
+        _tgUserUpsert.run(chatId, u.username || '', u.testUsed ? 1 : 0, u.plan || null, u.registeredAt || '', u.updatedAt || '');
+        // Save speedtests: delete old + re-insert
+        _tgStDelete.run(chatId);
+        for (const st of (u.speedTests || [])) {
+          _tgStInsert.run(chatId, st.speed || 0, st.date || '');
+        }
+      }
+    });
+    batch();
+  } catch (e) { console.error('[saveTgUsers] SQLite error:', e.message); }
 }
 
 function getTgUser(chatId, username) {
@@ -4528,7 +4793,8 @@ function getTgUser(chatId, username) {
 
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TG_PRICE = parseInt(process.env.TELEGRAM_BOT_PRICE) || 599;
-const SERVER_IPS = { S1: '89.149.100.92', S2: '31.5.194.89' };
+// TASK-K: Use publicIp from apiServers instead of hardcoded IPs
+const SERVER_IPS = Object.fromEntries(apiServers.map(s => [s.name, s.publicIp]));
 
 const PLANS = {
   test:  { label: 'Тест (1 день)',  price: 0,   days: 1 },
@@ -4561,18 +4827,31 @@ let speedTestFileId = null;
 const speedTestSessions = {};
 const SPEED_TEST_SIZE = 10 * 1024 * 1024; // 10 MB
 
-// Feedback storage
-const TG_FEEDBACK_FILE = path.join(__dirname, 'telegram_feedback.json');
+// Feedback storage — SQLite-backed
 let tgFeedback = [];
 try {
-  if (fs.existsSync(TG_FEEDBACK_FILE)) {
-    tgFeedback = JSON.parse(fs.readFileSync(TG_FEEDBACK_FILE, 'utf8'));
-    console.log(`[TelegramBot] Loaded ${tgFeedback.length} feedback record(s)`);
-  }
+  const rows = db.prepare('SELECT * FROM telegram_feedback ORDER BY id ASC').all();
+  tgFeedback = rows.map(r => ({
+    chatId: String(r.chat_id), username: r.username, type: r.type,
+    score: r.score, message: r.message, createdAt: r.created_at
+  }));
+  console.log(`[TelegramBot] Loaded ${tgFeedback.length} feedback record(s)`);
 } catch (e) { console.error('[TelegramBot] Failed to load feedback:', e.message); }
 
+const _tgFbInsert = db.prepare('INSERT INTO telegram_feedback (chat_id, username, type, score, message, created_at) VALUES (?, ?, ?, ?, ?, ?)');
+
 function saveTgFeedback() {
-  safeWriteFile(TG_FEEDBACK_FILE, JSON.stringify(tgFeedback, null, 2));
+  // Append-only: just insert the latest entry
+  try {
+    if (tgFeedback.length > 0) {
+      const f = tgFeedback[tgFeedback.length - 1];
+      // Check if already in DB by count
+      const dbCount = db.prepare('SELECT COUNT(*) as cnt FROM telegram_feedback').get().cnt;
+      if (dbCount < tgFeedback.length) {
+        _tgFbInsert.run(f.chatId || '', f.username || '', f.type || 'text', f.score || null, f.message || '', f.createdAt || '');
+      }
+    }
+  } catch (e) { console.error('[saveTgFeedback] SQLite error:', e.message); }
 }
 
 // User states for feedback flow
@@ -5334,14 +5613,16 @@ function gracefulShutdown(signal) {
     console.log('[Shutdown] HTTP server closed');
   });
 
-  // Wait for pending writes to complete, then exit
+  // Wait for pending writes to complete, then close DB and exit
   const allPending = Array.from(_fileLocks.values());
   Promise.all(allPending)
     .then(() => {
-      console.log('[Shutdown] All file writes complete. Bye!');
+      try { db.close(); console.log('[Shutdown] SQLite database closed'); } catch (e) {}
+      console.log('[Shutdown] All writes complete. Bye!');
       process.exit(0);
     })
     .catch((e) => {
+      try { db.close(); } catch (_) {}
       console.error('[Shutdown] Error during cleanup:', e.message);
       process.exit(1);
     });
