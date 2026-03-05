@@ -24,27 +24,27 @@ if (fs.existsSync(SCHEMA_PATH)) {
   console.log('[SQLite] Schema applied, database ready');
 }
 
-// TASK-02: Auto-migrate from JSON if DB is empty but JSON files exist (async, no execSync)
+// BUG-01 fix: Synchronous migration via spawnSync — blocks until complete,
+// preventing race condition where loadClients() runs before DB is populated.
+// WAL mode allows concurrent access; spawnSync is safe (fixed command, no shell).
 function autoMigrateIfNeeded() {
   const clientCount = db.prepare('SELECT COUNT(*) as cnt FROM clients').get().cnt;
-  const jsonExists = fs.existsSync(path.join(__dirname, 'clients.json'));
-  if (clientCount === 0 && jsonExists) {
-    console.log('[SQLite] Empty database detected with existing JSON files. Running auto-migration...');
-    try {
-      const { execFile } = require('child_process');
-      execFile('node', ['migrate.js'], { cwd: __dirname }, (err, stdout, stderr) => {
-        if (err) {
-          console.error('[SQLite] Auto-migration failed:', err.message);
-          console.log('[SQLite] Run "node migrate.js" manually');
-        } else {
-          if (stdout) console.log(stdout);
-          console.log('[SQLite] Auto-migration complete');
-        }
-      });
-    } catch (e) {
-      console.error('[SQLite] Auto-migration failed:', e.message);
-      console.log('[SQLite] Run "node migrate.js" manually');
+  if (clientCount > 0) return;
+  const jsonPath = path.join(__dirname, 'clients.json');
+  if (!fs.existsSync(jsonPath)) return;
+  console.log('[SQLite] Empty database with existing JSON files. Running sync migration...');
+  try {
+    const { spawnSync } = require('child_process');
+    const result = spawnSync(process.execPath, ['migrate.js'], {
+      cwd: __dirname, stdio: 'inherit', timeout: 30000
+    });
+    if (result.status !== 0) {
+      console.error('[SQLite] Migration exited with code', result.status);
+    } else {
+      console.log('[SQLite] Migration complete');
     }
+  } catch (e) {
+    console.error('[SQLite] Migration failed:', e.message, '— run "node migrate.js" manually');
   }
 }
 autoMigrateIfNeeded();
@@ -208,15 +208,22 @@ const _clientUpsert = db.prepare(`INSERT INTO clients (id, login, password, pass
 const _clientDelete = db.prepare('DELETE FROM clients WHERE id = ?');
 const _clientGetIds = db.prepare('SELECT id FROM clients');
 
-// TASK-03: Atomic balance operations — prevent data corruption from concurrent updates
+// TASK-03+BUG-02+BUG-03: Atomic balance+ledger operations in ONE transaction
 const _clientGetBalance = db.prepare('SELECT balance FROM clients WHERE id = ?');
 const _clientUpdateBalance = db.prepare('UPDATE clients SET balance = ?, updated_at = datetime(\'now\') WHERE id = ?');
+// BUG-09 fix: Persist referral_balance to DB immediately
+const _clientUpdateReferralBalance = db.prepare('UPDATE clients SET referral_balance = ?, updated_at = datetime(\'now\') WHERE id = ?');
 
 /**
- * atomicCredit — atomically add amount to client balance (payment, refund)
- * Returns { balanceBefore, balanceAfter } or throws
+ * atomicCredit — atomically add amount to client balance AND insert ledger entry
+ * BUG-02 fix: balance + ledger in single transaction (no partial state)
+ * BUG-03 fix: uses clientById.get() for O(1) in-memory sync
+ * @param {string} clientId
+ * @param {number} amount
+ * @param {object} [ledgerEntry] — if provided, inserted in same transaction
+ * Returns { balanceBefore, balanceAfter }
  */
-function atomicCredit(clientId, amount) {
+function atomicCredit(clientId, amount, ledgerEntry) {
   amount = Math.round(parseFloat(amount) * 100) / 100;
   if (isNaN(amount) || amount === 0) throw new Error('atomicCredit: invalid amount');
   let balanceBefore, balanceAfter;
@@ -226,18 +233,25 @@ function atomicCredit(clientId, amount) {
     balanceBefore = row.balance || 0;
     balanceAfter = Math.round((balanceBefore + amount) * 100) / 100;
     _clientUpdateBalance.run(balanceAfter, clientId);
+    if (ledgerEntry) {
+      const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
+      const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
+      entry.db_id = result.lastInsertRowid; // BUG-05 fix
+      if (!billingLedger[clientId]) billingLedger[clientId] = [];
+      billingLedger[clientId].push(entry);
+    }
   })();
-  // Sync in-memory
-  const client = clients.find(c => c.id === clientId);
+  // BUG-03 fix: O(1) in-memory sync
+  const client = clientById.get(clientId);
   if (client) client.balance = balanceAfter;
   return { balanceBefore, balanceAfter };
 }
 
 /**
- * atomicDebit — atomically subtract amount from client balance (charge)
- * Returns { balanceBefore, balanceAfter } or throws
+ * atomicDebit — atomically subtract amount from client balance AND insert ledger entry
+ * Same BUG-02/03/05 fixes as atomicCredit
  */
-function atomicDebit(clientId, amount) {
+function atomicDebit(clientId, amount, ledgerEntry) {
   amount = Math.round(parseFloat(amount) * 100) / 100;
   if (isNaN(amount) || amount === 0) throw new Error('atomicDebit: invalid amount');
   let balanceBefore, balanceAfter;
@@ -247,9 +261,16 @@ function atomicDebit(clientId, amount) {
     balanceBefore = row.balance || 0;
     balanceAfter = Math.round((balanceBefore - amount) * 100) / 100;
     _clientUpdateBalance.run(balanceAfter, clientId);
+    if (ledgerEntry) {
+      const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
+      const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
+      entry.db_id = result.lastInsertRowid; // BUG-05 fix
+      if (!billingLedger[clientId]) billingLedger[clientId] = [];
+      billingLedger[clientId].push(entry);
+    }
   })();
-  // Sync in-memory
-  const client = clients.find(c => c.id === clientId);
+  // BUG-03 fix: O(1) in-memory sync
+  const client = clientById.get(clientId);
   if (client) client.balance = balanceAfter;
   return { balanceBefore, balanceAfter };
 }
@@ -404,6 +425,7 @@ let billingLedger = {};
       if (r.details && r.details !== '{}') {
         try { Object.assign(entry, JSON.parse(r.details)); } catch (e) {}
       }
+      entry.db_id = r.id; // BUG-05 fix: track SQLite rowid for point deletion
       billingLedger[r.client_id].push(entry);
     }
     console.log(`[SQLite] Loaded ${_blRows.length} billing ledger entries`);
@@ -438,18 +460,23 @@ function _ledgerEntryParams(clientId, e) {
 }
 
 /**
- * TASK-04: Incremental appendLedgerEntry — inserts single entry to SQLite + in-memory
- * Use this instead of push + saveBillingLedger() for single entries
+ * TASK-04+BUG-05: Incremental appendLedgerEntry — inserts single entry to SQLite + in-memory
+ * Saves db_id (lastInsertRowid) back to entry for point deletion
+ * NOTE: For balance-changing operations, prefer atomicCredit/atomicDebit with ledgerEntry param
  */
 function appendLedgerEntry(clientId, entry) {
   if (!billingLedger[clientId]) billingLedger[clientId] = [];
-  billingLedger[clientId].push(entry);
   try {
-    _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
+    const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
+    entry.db_id = result.lastInsertRowid; // BUG-05 fix: track SQLite rowid
   } catch (e) {
     console.error('[SQLite] Error appending ledger entry:', e.message);
   }
+  billingLedger[clientId].push(entry);
 }
+
+// BUG-04 fix: Point deletion by SQLite rowid instead of DELETE+reinsert
+const _ledgerDeleteById = db.prepare('DELETE FROM billing_ledger WHERE id = ?');
 
 // TASK-04: Full save — only for bulk operations (migration, ledger trimming, entry deletion)
 function saveBillingLedger() {
@@ -2797,10 +2824,11 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, r
 
 // DELETE client -- with port protection
 app.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res) => {
-  const idx = clients.findIndex(c => c.id === req.params.id);
+  // BUG-08 fix: O(1) lookup first, then find index only for splice
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const idx = clients.indexOf(client);
   if (idx === -1) return res.status(404).json({ error: 'Client not found' });
-
-  const client = clients[idx];
 
   try {
     const results = await fetchAllServersDataCached();
@@ -2835,51 +2863,47 @@ app.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req
 // ==================== ADMIN: PAYMENTS ====================
 
 app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req, res) => {
-  const idx = clients.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
+  // BUG-08 fix: O(1) lookup
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
   const { amount, date, note } = req.body;
   if (!amount || !date) return res.status(400).json({ error: 'amount and date required' });
   const parsedAmount = parseFloat(amount);
   if (isNaN(parsedAmount) || parsedAmount <= 0 || parsedAmount > 100000000) {
     return res.status(400).json({ error: 'Invalid amount: must be positive and reasonable' });
   }
-  if (!clients[idx].payments) clients[idx].payments = [];
-  clients[idx].payments.push({
+  if (!client.payments) client.payments = [];
+  client.payments.push({
     amount: parsedAmount,
     date,
     note: note || '',
     createdAt: new Date().toISOString()
   });
 
-  // TASK-03: Atomic balance update
-  const paymentAmount = parseFloat(amount);
-  const { balanceBefore, balanceAfter } = atomicCredit(clients[idx].id, paymentAmount);
-
-  // TASK-04: Incremental ledger entry
-  appendLedgerEntry(clients[idx].id, {
+  // BUG-02 fix: Atomic balance + ledger in ONE transaction
+  const { balanceBefore, balanceAfter } = atomicCredit(client.id, parsedAmount, {
     type: 'payment',
     date: date,
     timestamp: new Date().toISOString(),
-    amount: paymentAmount,
-    currency: clients[idx].currency || 'RUB',
-    balance_before: balanceBefore,
-    balance_after: balanceAfter,
+    amount: parsedAmount,
+    currency: client.currency || 'RUB',
     note: note || 'Пополнение баланса'
   });
 
-  // Referral: credit 15% to referrer
-  if (clients[idx].referred_by) {
-    const referrer = clients.find(c => c.id === clients[idx].referred_by);
+  // BUG-09 fix: Referral commission — O(1) lookup, round, persist to DB
+  if (client.referred_by) {
+    const referrer = clientById.get(client.referred_by);
     if (referrer) {
-      const commission = paymentAmount * 0.15;
-      referrer.referral_balance = (referrer.referral_balance || 0) + commission;
-      console.log(`[Referral] Credited ${commission.toFixed(2)} to ${referrer.name} (15% of ${amount})`);
+      const commission = Math.round(parsedAmount * 0.15 * 100) / 100;
+      referrer.referral_balance = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
+      _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
+      console.log(`[Referral] Credited ${commission.toFixed(2)} to ${referrer.name} (15% of ${parsedAmount})`);
     }
   }
 
   saveClients(clients);
-  auditLog(req.user.login, 'add_payment', { clientId: clients[idx].id, amount: parsedAmount, note: note || '' });
-  res.json({ ok: true, payments: clients[idx].payments, balance: clients[idx].balance });
+  auditLog(req.user.login, 'add_payment', { clientId: client.id, amount: parsedAmount, note: note || '' });
+  res.json({ ok: true, payments: client.payments, balance: client.balance });
 });
 
 app.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req, res) => {
@@ -2889,34 +2913,29 @@ app.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req
 });
 
 app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddleware, (req, res) => {
-  const idx = clients.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
+  // BUG-08 fix: O(1) lookup
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
   const payIdx = parseInt(req.params.index);
-  if (!clients[idx].payments || payIdx < 0 || payIdx >= clients[idx].payments.length) {
+  if (!client.payments || payIdx < 0 || payIdx >= client.payments.length) {
     return res.status(400).json({ error: 'Invalid payment index' });
   }
-  const deletedPayment = clients[idx].payments[payIdx];
+  const deletedPayment = client.payments[payIdx];
   const deletedAmount = parseFloat(deletedPayment.amount) || 0;
-  clients[idx].payments.splice(payIdx, 1);
+  client.payments.splice(payIdx, 1);
 
-  // TASK-03: Atomic balance update (reverse payment = debit)
-  const { balanceBefore, balanceAfter } = atomicDebit(clients[idx].id, deletedAmount);
-
-  // Ledger entry for reversal
-  // TASK-04: Incremental ledger entry
-  appendLedgerEntry(clients[idx].id, {
+  // BUG-02 fix: Atomic balance + ledger in ONE transaction
+  const { balanceBefore, balanceAfter } = atomicDebit(client.id, deletedAmount, {
     type: 'payment_reversal',
     date: new Date().toISOString().slice(0, 10),
     timestamp: new Date().toISOString(),
     amount: -deletedAmount,
-    currency: clients[idx].currency || 'RUB',
-    balance_before: balanceBefore,
-    balance_after: balanceAfter,
+    currency: client.currency || 'RUB',
     note: 'Отмена оплаты администратором'
   });
 
   saveClients(clients);
-  res.json({ ok: true, payments: clients[idx].payments, balance: clients[idx].balance });
+  res.json({ ok: true, payments: client.payments, balance: client.balance });
 });
 
 // ==================== ADMIN: BILLING LEDGER ====================
@@ -2939,7 +2958,7 @@ app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, 
   });
 });
 
-// Delete ledger entry + revert balance
+// BUG-06 fix: Delete ledger entry + revert balance — point deletion, no saveClients, single auditLog
 app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -2948,7 +2967,7 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
   if (isNaN(idx) || idx < 0 || idx >= entries.length) return res.status(400).json({ error: 'Invalid entry index' });
 
   const entry = entries[idx];
-  // TASK-03: Atomic revert of balance impact
+  // Atomic revert of balance impact (no ledger entry for revert — it's a deletion)
   if (entry.type === 'charge' && entry.cost) {
     atomicCredit(client.id, entry.cost); // refund charge
   } else if ((entry.type === 'payment' || entry.type === 'bank_payment') && entry.amount) {
@@ -2958,45 +2977,48 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
     else atomicCredit(client.id, -entry.amount);
   }
 
+  // BUG-04 fix: Point deletion by db_id instead of full DELETE+reinsert
+  if (entry.db_id) {
+    _ledgerDeleteById.run(entry.db_id);
+  } else {
+    // Fallback for entries without db_id (pre-migration data)
+    saveBillingLedger();
+  }
   entries.splice(idx, 1);
   billingLedger[client.id] = entries;
-  saveBillingLedger();
-  saveClients(clients);
+
   console.log(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, new balance: ${client.balance}`);
-  auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, entryType: entry.type, amount: entry.amount });
+  auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, entryType: entry.type, amount: entry.amount || entry.cost });
   res.json({ ok: true, newBalance: client.balance });
 });
 
 app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddleware, (req, res) => {
-  const idx = clients.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
+  // BUG-08 fix: O(1) lookup
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
   const { amount, note } = req.body;
   if (amount === undefined) return res.status(400).json({ error: 'amount required' });
 
-  // TASK-03: Atomic balance adjustment
+  // BUG-02 fix: Atomic balance + ledger in ONE transaction
   const adjustment = parseFloat(amount);
-  let balanceBefore, balanceAfter;
-  if (adjustment >= 0) {
-    ({ balanceBefore, balanceAfter } = atomicCredit(clients[idx].id, adjustment));
-  } else {
-    ({ balanceBefore, balanceAfter } = atomicDebit(clients[idx].id, -adjustment));
-  }
-
-  // TASK-04: Incremental ledger entry
-  appendLedgerEntry(clients[idx].id, {
+  const ledgerEntry = {
     type: 'adjustment',
     date: new Date().toISOString().slice(0, 10),
     timestamp: new Date().toISOString(),
     amount: adjustment,
-    currency: clients[idx].currency || 'RUB',
-    balance_before: balanceBefore,
-    balance_after: balanceAfter,
+    currency: client.currency || 'RUB',
     note: note || 'Ручная корректировка баланса'
-  });
+  };
+  let balanceBefore, balanceAfter;
+  if (adjustment >= 0) {
+    ({ balanceBefore, balanceAfter } = atomicCredit(client.id, adjustment, ledgerEntry));
+  } else {
+    ({ balanceBefore, balanceAfter } = atomicDebit(client.id, -adjustment, ledgerEntry));
+  }
 
   saveClients(clients);
-  auditLog(req.user.login, 'balance_adjust', { clientId: clients[idx].id, amount: adjustment, note: note || '' });
-  res.json({ ok: true, balance: clients[idx].balance });
+  auditLog(req.user.login, 'balance_adjust', { clientId: client.id, amount: adjustment, note: note || '' });
+  res.json({ ok: true, balance: client.balance });
 });
 
 // ==================== ADMIN: DOCUMENTS ====================
@@ -3719,11 +3741,8 @@ async function runDailyBilling() {
         continue;
       }
 
-      // TASK-03+05: Atomic debit for billing
-      const { balanceBefore, balanceAfter } = atomicDebit(client.id, cost);
-
-      // TASK-04: Incremental ledger entry
-      appendLedgerEntry(client.id, {
+      // BUG-02 fix: Atomic debit + ledger in ONE transaction
+      const { balanceBefore, balanceAfter } = atomicDebit(client.id, cost, {
         type: 'charge',
         date: new Date().toISOString().slice(0, 10),
         timestamp: new Date().toISOString(),
@@ -3733,8 +3752,6 @@ async function runDailyBilling() {
         billing_type: client.billingType || 'per_gb',
         cost,
         currency: client.currency || 'RUB',
-        balance_before: balanceBefore,
-        balance_after: balanceAfter,
         note: 'Списание за трафик (' + new Date().toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric'}) + ')'
       });
 
@@ -3983,8 +4000,9 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
     const webhookType = payload.webhookType || '';
     const payerInn = payload.SidePayer?.inn || '';
     const payerName = payload.SidePayer?.name || '';
+    // BUG-07 fix: payload.amount takes priority (top-level is the actual payment amount)
     // TASK-09: Round amount to 2 decimal places to avoid floating-point drift
-    const amount = Math.round(parseFloat(payload.SidePayer?.amount || payload.amount || '0') * 100) / 100;
+    const amount = Math.round(parseFloat(payload.amount || payload.SidePayer?.amount || '0') * 100) / 100;
     if (isNaN(amount) || amount <= 0 || amount > 100000000) {
       console.warn(`[Tochka Webhook] Invalid amount: ${amount}, skipping auto-credit`);
       return res.status(200).json({ ok: true, processed: false, reason: 'invalid_amount' });
@@ -4027,10 +4045,8 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
         bankPayment.matchedClientId = matchedClient.id;
         bankPayment.matchedClientName = matchedClient.name;
 
-        // TASK-03: Atomic credit for webhook payment
+        // BUG-02 fix: Atomic credit + ledger in ONE transaction
         {
-          const { balanceBefore, balanceAfter } = atomicCredit(matchedClient.id, amount);
-
           // Add payment record
           if (!matchedClient.payments) matchedClient.payments = [];
           matchedClient.payments.push({
@@ -4042,26 +4058,24 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
             paymentId
           });
 
-          // TASK-04: Incremental ledger entry
-          appendLedgerEntry(matchedClient.id, {
+          const { balanceBefore, balanceAfter } = atomicCredit(matchedClient.id, amount, {
             type: 'bank_payment',
             date: paymentDate,
             timestamp: new Date().toISOString(),
             amount,
             currency: 'RUB',
-            balance_before: balanceBefore,
-            balance_after: balanceAfter,
             note: `Банк Точка (ИНН: ${payerInn}): ${purpose}`.slice(0, 300),
             source: 'tochka_webhook',
             paymentId
           });
 
-          // Referral commission
+          // BUG-09 fix: Referral commission — O(1) lookup, round, persist to DB
           if (matchedClient.referred_by) {
-            const referrer = clients.find(c => c.id === matchedClient.referred_by);
+            const referrer = clientById.get(matchedClient.referred_by);
             if (referrer) {
-              const commission = amount * 0.15;
-              referrer.referral_balance = (referrer.referral_balance || 0) + commission;
+              const commission = Math.round(amount * 0.15 * 100) / 100;
+              referrer.referral_balance = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
+              _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
             }
           }
 
@@ -4290,21 +4304,16 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
           bankPayment.matchedClientId = client.id;
           bankPayment.matchedClientName = client.name;
 
-          // TASK-03: Atomic credit for tochka sync
-          const { balanceBefore: syncBB, balanceAfter: syncBA } = atomicCredit(client.id, amount);
-          const ledgerEntry = {
+          // BUG-02 fix: Atomic credit + ledger in ONE transaction
+          atomicCredit(client.id, amount, {
             type: 'bank_payment',
             amount: Math.round(amount * 100) / 100,
             date: bankPayment.date,
             timestamp: new Date().toISOString(),
             note: 'Синхронизация из Точки: ' + (purpose || '').slice(0, 100),
             source: 'tochka_sync',
-            tochkaPaymentId: paymentId,
-            balance_before: syncBB,
-            balance_after: syncBA
-          };
-          // TASK-04: Incremental ledger entry
-          appendLedgerEntry(client.id, ledgerEntry);
+            tochkaPaymentId: paymentId
+          });
           matched++;
         }
       }
@@ -4361,15 +4370,15 @@ app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (re
   const bpRow = dbStmts.getBankPaymentById.get(paymentId);
   if (!bpRow) return res.status(404).json({ error: 'Payment not found' });
   const bp = bankPaymentFromRow(bpRow);
-  const idx = clients.findIndex(c => c.id === clientId);
-  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
+  // BUG-08 fix: O(1) lookup
+  const client = clientById.get(clientId);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
 
-  // TASK-03: Atomic credit for manual match
+  // BUG-02 fix: Atomic credit + ledger in ONE transaction
   const amount = bp.amount;
-  const { balanceBefore, balanceAfter } = atomicCredit(clients[idx].id, amount);
 
-  if (!clients[idx].payments) clients[idx].payments = [];
-  clients[idx].payments.push({
+  if (!client.payments) client.payments = [];
+  client.payments.push({
     amount,
     date: bp.date,
     note: `Ручная привязка: ${bp.payerName} — ${bp.purpose}`.slice(0, 200),
@@ -4378,25 +4387,22 @@ app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (re
     paymentId: bp.paymentId
   });
 
-  // TASK-04: Incremental ledger entry
-  appendLedgerEntry(clients[idx].id, {
+  const { balanceBefore, balanceAfter } = atomicCredit(client.id, amount, {
     type: 'bank_payment',
     date: bp.date,
     timestamp: new Date().toISOString(),
     amount,
     currency: 'RUB',
-    balance_before: balanceBefore,
-    balance_after: balanceAfter,
     note: `Ручная привязка (ИНН: ${bp.payerInn}): ${bp.purpose}`.slice(0, 300),
     source: 'tochka_manual',
     paymentId: bp.paymentId
   });
 
   // Update bank payment in SQLite
-  dbStmts.updateBankPaymentMatch.run(1, clients[idx].id, clients[idx].name, 0, paymentId);
+  dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 0, paymentId);
 
   saveClients(clients);
-  res.json({ ok: true, balance: clients[idx].balance });
+  res.json({ ok: true, balance: client.balance });
 });
 
 // ==================== TOCHKA BANK: CLOSING DOCUMENTS ====================
