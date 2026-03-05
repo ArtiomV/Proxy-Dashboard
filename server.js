@@ -469,10 +469,11 @@ function appendLedgerEntry(clientId, entry) {
   try {
     const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
     entry.db_id = result.lastInsertRowid; // BUG-05 fix: track SQLite rowid
+    billingLedger[clientId].push(entry); // NEW-02 fix: only push on successful insert
   } catch (e) {
     console.error('[SQLite] Error appending ledger entry:', e.message);
+    // NOT adding to in-memory — keeps state consistent with DB
   }
-  billingLedger[clientId].push(entry);
 }
 
 // BUG-04 fix: Point deletion by SQLite rowid instead of DELETE+reinsert
@@ -2265,7 +2266,8 @@ app.get('/api/billing_history', authMiddleware, (req, res) => {
       totalPayments: Math.round(totalPayments * 100) / 100,
       monthCharges: Math.round(monthCharges * 100) / 100
     },
-    entries: filtered
+    // OLD-01 fix: strip internal db_id from API response
+    entries: filtered.map(({ db_id, ...e }) => e)
   });
 });
 
@@ -2922,14 +2924,21 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
   }
   const deletedPayment = client.payments[payIdx];
   const deletedAmount = parseFloat(deletedPayment.amount) || 0;
+
+  // OLD-03 fix: verify amount to prevent wrong-payment deletion under concurrency
+  const expectedAmount = parseFloat(req.query.amount || req.body?.amount);
+  if (expectedAmount && Math.abs(expectedAmount - deletedAmount) > 0.01) {
+    return res.status(409).json({ error: 'Payment amount mismatch — list may have changed, please refresh' });
+  }
   client.payments.splice(payIdx, 1);
 
   // BUG-02 fix: Atomic balance + ledger in ONE transaction
+  // NEW-01 fix: amount positive — type indicates the meaning of the operation
   const { balanceBefore, balanceAfter } = atomicDebit(client.id, deletedAmount, {
     type: 'payment_reversal',
     date: new Date().toISOString().slice(0, 10),
     timestamp: new Date().toISOString(),
-    amount: -deletedAmount,
+    amount: deletedAmount,
     currency: client.currency || 'RUB',
     note: 'Отмена оплаты администратором'
   });
@@ -2951,7 +2960,8 @@ app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, 
   res.json({
     balance: client.balance,
     last_snapshot: client.last_traffic_snapshot,
-    entries,
+    // OLD-01 fix: strip internal db_id from API response
+    entries: entries.map(({ db_id, ...e }) => e),
     total: allEntries.length,
     limit,
     offset
@@ -3000,12 +3010,14 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
   if (amount === undefined) return res.status(400).json({ error: 'amount required' });
 
   // BUG-02 fix: Atomic balance + ledger in ONE transaction
+  // NEW-01 fix: ledger amount always positive — sign conveyed by credit vs debit
+  // OLD-05 fix: removed unnecessary saveClients (balance already persisted via _clientUpdateBalance)
   const adjustment = parseFloat(amount);
   const ledgerEntry = {
     type: 'adjustment',
     date: new Date().toISOString().slice(0, 10),
     timestamp: new Date().toISOString(),
-    amount: adjustment,
+    amount: Math.abs(adjustment),
     currency: client.currency || 'RUB',
     note: note || 'Ручная корректировка баланса'
   };
@@ -3016,7 +3028,6 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
     ({ balanceBefore, balanceAfter } = atomicDebit(client.id, -adjustment, ledgerEntry));
   }
 
-  saveClients(clients);
   auditLog(req.user.login, 'balance_adjust', { clientId: client.id, amount: adjustment, note: note || '' });
   res.json({ ok: true, balance: client.balance });
 });
@@ -5213,12 +5224,27 @@ const _tgUserUpsert = db.prepare('INSERT OR REPLACE INTO telegram_users (chat_id
 const _tgStDelete = db.prepare('DELETE FROM telegram_speedtests WHERE chat_id = ?');
 const _tgStInsert = db.prepare('INSERT INTO telegram_speedtests (chat_id, speed, tested_at) VALUES (?, ?, ?)');
 
+// OLD-04 fix: saveTgUser saves single user; saveTgSpeedtest inserts single speedtest incrementally
+function saveTgUser(chatId) {
+  const u = tgUsers[chatId];
+  if (!u) return;
+  try {
+    _tgUserUpsert.run(chatId, u.username || '', u.testUsed ? 1 : 0, u.plan || null, u.registeredAt || '', u.updatedAt || '');
+  } catch (e) { console.error('[saveTgUser] SQLite error:', e.message); }
+}
+
+function saveTgSpeedtest(chatId, speedtest) {
+  try {
+    _tgStInsert.run(chatId, speedtest.speed || 0, speedtest.date || '');
+  } catch (e) { console.error('[saveTgSpeedtest] SQLite error:', e.message); }
+}
+
+// Legacy bulk save — only for migration or rare bulk ops
 function saveTgUsers() {
   try {
     const batch = db.transaction(() => {
       for (const [chatId, u] of Object.entries(tgUsers)) {
         _tgUserUpsert.run(chatId, u.username || '', u.testUsed ? 1 : 0, u.plan || null, u.registeredAt || '', u.updatedAt || '');
-        // Save speedtests: delete old + re-insert
         _tgStDelete.run(chatId);
         for (const st of (u.speedTests || [])) {
           _tgStInsert.run(chatId, st.speed || 0, st.date || '');
@@ -5232,10 +5258,10 @@ function saveTgUsers() {
 function getTgUser(chatId, username) {
   if (!tgUsers[chatId]) {
     tgUsers[chatId] = { username: username || null, testUsed: false, plan: null, speedTests: [], registeredAt: new Date().toISOString() };
-    saveTgUsers();
+    saveTgUser(chatId); // OLD-04 fix: save single user, not all
   } else if (username && tgUsers[chatId].username !== username) {
     tgUsers[chatId].username = username;
-    saveTgUsers();
+    saveTgUser(chatId); // OLD-04 fix: save single user, not all
   }
   return tgUsers[chatId];
 }
@@ -5320,7 +5346,24 @@ function insertTgFeedbackDB(f) {
 }
 
 // User states for feedback flow
-const userStates = {}; // { chatId: { state: 'awaiting_feedback'|'awaiting_nps_comment', score, type } }
+const userStates = {}; // { chatId: { state: 'awaiting_feedback'|'awaiting_nps_comment', score, type, ts } }
+
+// OLD-07 fix: TTL cleanup for speedTestSessions (5 min) and userStates (30 min)
+const SPEED_SESSION_TTL = 5 * 60 * 1000;  // 5 min — speed test should complete quickly
+const USER_STATE_TTL = 30 * 60 * 1000;    // 30 min — feedback session timeout
+_intervals.push(setInterval(() => {
+  const now = Date.now();
+  for (const chatId in speedTestSessions) {
+    if (now - speedTestSessions[chatId].startTime > SPEED_SESSION_TTL) {
+      delete speedTestSessions[chatId];
+    }
+  }
+  for (const chatId in userStates) {
+    if (userStates[chatId].ts && now - userStates[chatId].ts > USER_STATE_TTL) {
+      delete userStates[chatId];
+    }
+  }
+}, 5 * 60 * 1000)); // run every 5 minutes
 
 function telegramApi(method, body, reqTimeout = 15000) {
   return new Promise((resolve, reject) => {
@@ -5557,7 +5600,7 @@ async function handleBuy(chatId, username, planKey) {
     // Mark test as used BEFORE creating
     user.testUsed = true;
     user.plan = 'test';
-    saveTgUsers();
+    saveTgUser(chatId); // OLD-04 fix: save single user
 
     await tgSend(chatId, '⏳ Создаю ваш прокси...');
     try {
@@ -5574,7 +5617,7 @@ async function handleBuy(chatId, username, planKey) {
 
   // Paid plan: update user record
   user.plan = planKey;
-  saveTgUsers();
+  saveTgUser(chatId); // OLD-04 fix: save single user
 
   // If user already has an active proxy — extend it
   if (existing) {
@@ -5780,8 +5823,9 @@ async function handleSpeedDone(chatId) {
 
   // Save speed test result to user record
   const user = getTgUser(chatId, null);
-  user.speedTests.push({ speed: parseFloat(speedMbps), date: new Date().toISOString() });
-  saveTgUsers();
+  const speedtest = { speed: parseFloat(speedMbps), date: new Date().toISOString() };
+  user.speedTests.push(speedtest);
+  saveTgSpeedtest(chatId, speedtest); // OLD-04 fix: incremental insert instead of full resave
 
   const text =
     `🚀 <b>Результат теста скорости</b>\n\n` +
@@ -5840,7 +5884,7 @@ function ratingKeyboard(type) {
 }
 
 async function handleFeedback(chatId) {
-  userStates[chatId] = { state: 'awaiting_feedback' };
+  userStates[chatId] = { state: 'awaiting_feedback', ts: Date.now() };
   await tgSend(chatId,
     '💬 <b>Обратная связь</b>\n\nКак мы можем стать для вас лучше?\nНапишите ваше сообщение:',
     { reply_markup: { keyboard: [['◀️ Отмена']], resize_keyboard: true } }
@@ -5892,7 +5936,7 @@ async function handleRating(chatId, username, type, score) {
     );
   } else {
     // NPS — ask for optional comment
-    userStates[chatId] = { state: 'awaiting_nps_comment', type };
+    userStates[chatId] = { state: 'awaiting_nps_comment', type, ts: Date.now() };
     await tgSend(chatId,
       `✅ Спасибо за оценку <b>${score}/10</b>!\n\nЕсли хотите добавить комментарий — просто напишите его.\nИли нажмите любую кнопку меню для продолжения.`,
       { reply_markup: KB_MAIN }
