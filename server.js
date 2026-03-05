@@ -49,6 +49,10 @@ safeAddColumn('bank_payments', 'dismissed', 'INTEGER DEFAULT 0');
 safeAddColumn('bank_payments', 'source', "TEXT DEFAULT ''");
 safeAddColumn('bank_payments', 'tochka_payment_id', 'TEXT');
 try { db.exec('CREATE INDEX IF NOT EXISTS idx_bank_payments_tochka_id ON bank_payments(tochka_payment_id)'); } catch (e) {}
+safeAddColumn('billing_ledger', 'details', "TEXT DEFAULT '{}'");
+safeAddColumn('closing_documents', 'contract_info', "TEXT DEFAULT ''");
+safeAddColumn('clients', 'client_type', "TEXT DEFAULT 'legal'");
+safeAddColumn('closing_documents', 'signed_at', 'TEXT');
 
 // Prepared statements for common operations
 const dbStmts = {
@@ -172,16 +176,95 @@ for (const [key, val] of Object.entries(process.env)) {
   }
 }
 
-// ==================== CLIENT MANAGEMENT (JSON storage) ====================
-const CLIENTS_FILE = path.join(__dirname, 'clients.json');
+// ==================== CLIENT MANAGEMENT (SQLite-backed, BUG-01/ARCH-01) ====================
+const CLIENTS_FILE = path.join(__dirname, 'clients.json'); // JSON fallback for first-time migration
+
+// Prepared statements for client & sub-table persistence
+const _clientUpsert = db.prepare(`INSERT INTO clients (id, login, password, password_hash, port_name, name, contact, notes,
+    billing_type, price, currency, balance, api_key, referral_code, referred_by, referral_balance,
+    reset_token, inn, kpp, legal_name, contract_info, address, auto_acts, auto_bills,
+    last_traffic_snapshot, created_at, client_type)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(id) DO UPDATE SET
+    login=excluded.login, password=excluded.password, password_hash=excluded.password_hash,
+    port_name=excluded.port_name, name=excluded.name, contact=excluded.contact,
+    notes=excluded.notes, billing_type=excluded.billing_type, price=excluded.price,
+    currency=excluded.currency, balance=excluded.balance, api_key=excluded.api_key,
+    referral_code=excluded.referral_code, referred_by=excluded.referred_by,
+    referral_balance=excluded.referral_balance, reset_token=excluded.reset_token,
+    inn=excluded.inn, kpp=excluded.kpp, legal_name=excluded.legal_name,
+    contract_info=excluded.contract_info, address=excluded.address,
+    auto_acts=excluded.auto_acts, auto_bills=excluded.auto_bills,
+    last_traffic_snapshot=excluded.last_traffic_snapshot, client_type=excluded.client_type,
+    updated_at=datetime('now')`);
+const _clientDelete = db.prepare('DELETE FROM clients WHERE id = ?');
+const _clientGetIds = db.prepare('SELECT id FROM clients');
+const _paymentDeleteByClient = db.prepare('DELETE FROM payments WHERE client_id = ?');
+const _paymentInsert = db.prepare('INSERT INTO payments (client_id, amount, date, note, source, payment_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
+const _docDeleteByClient = db.prepare('DELETE FROM client_documents WHERE client_id = ?');
+const _docInsert = db.prepare('INSERT INTO client_documents (id, client_id, name, file_name, mime_type, date) VALUES (?, ?, ?, ?, ?, ?)');
+const _closingDocDeleteByClient = db.prepare('DELETE FROM closing_documents WHERE client_id = ?');
+const _closingDocInsert = db.prepare('INSERT INTO closing_documents (id, client_id, tochka_doc_id, period, type, act_number, items, total_amount, status, contract_info, signed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
+const _billDeleteByClient = db.prepare('DELETE FROM bills WHERE client_id = ?');
+const _billInsert = db.prepare('INSERT INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+const _getPayments = db.prepare('SELECT * FROM payments WHERE client_id = ? ORDER BY date DESC, id DESC');
+const _getDocs = db.prepare('SELECT * FROM client_documents WHERE client_id = ? ORDER BY date');
+const _getClosingDocs = db.prepare('SELECT * FROM closing_documents WHERE client_id = ? ORDER BY created_at');
+const _getBills = db.prepare('SELECT * FROM bills WHERE client_id = ? ORDER BY created_at');
+
+function clientFromRow(r) {
+  return {
+    id: r.id, login: r.login, password: r.password || '', passwordHash: r.password_hash || '',
+    portName: r.port_name || '', name: r.name, contact: r.contact || '', notes: r.notes || '',
+    billingType: r.billing_type || 'per_gb', price: r.price || 0, currency: r.currency || 'RUB',
+    balance: r.balance || 0, apiKey: r.api_key || '', referral_code: r.referral_code || '',
+    referred_by: r.referred_by || null, referral_balance: r.referral_balance || 0,
+    resetToken: r.reset_token || '', inn: r.inn || '', kpp: r.kpp || '',
+    legalName: r.legal_name || '', contractInfo: r.contract_info || '',
+    address: r.address || '', autoActs: r.auto_acts !== 0, autoBills: r.auto_bills !== 0,
+    clientType: r.client_type || 'legal',
+    last_traffic_snapshot: r.last_traffic_snapshot
+      ? (typeof r.last_traffic_snapshot === 'string' ? JSON.parse(r.last_traffic_snapshot) : r.last_traffic_snapshot)
+      : { timestamp: null, month_bytes: 0 },
+    createdAt: r.created_at || '',
+    payments: [], documents: [], closingDocuments: [], bills: []
+  };
+}
 
 function loadClients() {
-  try {
-    if (fs.existsSync(CLIENTS_FILE)) {
-      return JSON.parse(fs.readFileSync(CLIENTS_FILE, 'utf8'));
-    }
-  } catch (e) { console.error('Failed to load clients:', e.message); }
-  return [];
+  const rows = db.prepare('SELECT * FROM clients').all();
+  if (rows.length === 0) {
+    // JSON fallback for first-time migration
+    try {
+      if (fs.existsSync(CLIENTS_FILE)) {
+        const jsonClients = JSON.parse(fs.readFileSync(CLIENTS_FILE, 'utf8'));
+        if (jsonClients.length > 0) return jsonClients;
+      }
+    } catch (e) { console.error('[SQLite] Failed to load clients from JSON fallback:', e.message); }
+    return [];
+  }
+  const clientsList = rows.map(clientFromRow);
+  for (const client of clientsList) {
+    client.payments = _getPayments.all(client.id).map(r => ({
+      amount: r.amount, date: r.date, note: r.note || '', source: r.source || 'manual',
+      paymentId: r.payment_id || undefined, createdAt: r.created_at || ''
+    }));
+    client.documents = _getDocs.all(client.id).map(r => ({
+      id: r.id, name: r.name, fileName: r.file_name, mimeType: r.mime_type || '', date: r.date || ''
+    }));
+    client.closingDocuments = _getClosingDocs.all(client.id).map(r => ({
+      id: r.id, tochkaDocumentId: r.tochka_doc_id || '', period: r.period, type: r.type || 'act',
+      actNumber: r.act_number || '', items: JSON.parse(r.items || '[]'), totalAmount: r.total_amount || 0,
+      status: r.status || 'unsigned', contractInfo: r.contract_info || '',
+      signedAt: r.signed_at || undefined, createdAt: r.created_at || ''
+    }));
+    client.bills = _getBills.all(client.id).map(r => ({
+      id: r.id, tochkaBillId: r.tochka_bill_id || '', period: r.period,
+      billNumber: r.bill_number || '', amount: r.amount || 0,
+      status: r.status || 'unpaid', createdAt: r.created_at || ''
+    }));
+  }
+  return clientsList;
 }
 
 function saveClients(clientsList) {
@@ -189,28 +272,135 @@ function saveClients(clientsList) {
     console.error('[CRITICAL] saveClients called without array argument! Aborting write.');
     return;
   }
-  safeWriteFile(CLIENTS_FILE, JSON.stringify(clientsList, null, 2));
+  try {
+    db.transaction(() => {
+      // Remove deleted clients (ON DELETE CASCADE cleans sub-tables)
+      const liveIds = new Set(clientsList.map(c => c.id));
+      for (const r of _clientGetIds.all()) {
+        if (!liveIds.has(r.id)) _clientDelete.run(r.id);
+      }
+      // Upsert clients + sync sub-arrays
+      for (const c of clientsList) {
+        _clientUpsert.run(
+          c.id, c.login, c.password || '', c.passwordHash || '', c.portName || '', c.name || '',
+          c.contact || '', c.notes || '', c.billingType || 'per_gb', c.price || 0,
+          c.currency || 'RUB', c.balance || 0, c.apiKey || '', c.referral_code || '',
+          c.referred_by || null, c.referral_balance || 0, c.resetToken || '',
+          c.inn || '', c.kpp || '', c.legalName || '', c.contractInfo || '',
+          c.address || '', c.autoActs !== false ? 1 : 0, c.autoBills !== false ? 1 : 0,
+          JSON.stringify(c.last_traffic_snapshot || {}), c.createdAt || new Date().toISOString(),
+          c.clientType || 'legal'
+        );
+        // Sync payments
+        _paymentDeleteByClient.run(c.id);
+        for (const p of (c.payments || [])) {
+          _paymentInsert.run(c.id, p.amount, p.date || '', p.note || '', p.source || 'manual',
+            p.paymentId || null, p.createdAt || new Date().toISOString());
+        }
+        // Sync documents
+        _docDeleteByClient.run(c.id);
+        for (const d of (c.documents || [])) {
+          _docInsert.run(d.id, c.id, d.name || '', d.fileName || '', d.mimeType || '', d.date || '');
+        }
+        // Sync closing documents
+        _closingDocDeleteByClient.run(c.id);
+        for (const d of (c.closingDocuments || [])) {
+          _closingDocInsert.run(d.id, c.id, d.tochkaDocumentId || '', d.period || '', d.type || 'act',
+            d.actNumber || '', JSON.stringify(d.items || []), d.totalAmount || 0, d.status || 'unsigned',
+            d.contractInfo || '', d.signedAt || null, d.createdAt || new Date().toISOString());
+        }
+        // Sync bills
+        _billDeleteByClient.run(c.id);
+        for (const b of (c.bills || [])) {
+          _billInsert.run(b.id, c.id, b.tochkaBillId || '', b.period || '', b.billNumber || '',
+            b.amount || 0, b.status || 'unpaid', b.createdAt || new Date().toISOString());
+        }
+      }
+    })();
+  } catch (e) {
+    console.error('[SQLite] Error saving clients:', e.message);
+  }
 }
 
-// ==================== BILLING LEDGER ====================
-const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json');
+// ==================== BILLING LEDGER (SQLite-backed, BUG-01/ARCH-01) ====================
+const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json'); // JSON fallback
+const _ledgerDeleteByClient = db.prepare('DELETE FROM billing_ledger WHERE client_id = ?');
+const _ledgerInsert = db.prepare(`INSERT INTO billing_ledger
+  (client_id, type, date, timestamp, amount, currency, balance_before, balance_after,
+   gb_used, modem_count, days_in_month, note, source, payment_id, details)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
 let billingLedger = {};
-try {
-  if (fs.existsSync(BILLING_LEDGER_FILE)) {
-    billingLedger = JSON.parse(fs.readFileSync(BILLING_LEDGER_FILE, 'utf8'));
+{
+  const _blRows = db.prepare('SELECT * FROM billing_ledger ORDER BY id').all();
+  if (_blRows.length > 0) {
+    for (const r of _blRows) {
+      if (!billingLedger[r.client_id]) billingLedger[r.client_id] = [];
+      const entry = { type: r.type, date: r.date, timestamp: r.timestamp || '' };
+      if (r.type === 'charge') { entry.cost = r.amount; } else { entry.amount = r.amount; }
+      entry.currency = r.currency || 'RUB';
+      if (r.balance_before != null) entry.balance_before = r.balance_before;
+      if (r.balance_after != null) entry.balance_after = r.balance_after;
+      if (r.gb_used != null) entry.delta_gb = r.gb_used;
+      if (r.modem_count != null) entry.modem_count = r.modem_count;
+      if (r.days_in_month != null) entry.days_in_month = r.days_in_month;
+      if (r.note) entry.note = r.note;
+      if (r.source) entry.source = r.source;
+      if (r.payment_id) entry.paymentId = r.payment_id;
+      if (r.details && r.details !== '{}') {
+        try { Object.assign(entry, JSON.parse(r.details)); } catch (e) {}
+      }
+      billingLedger[r.client_id].push(entry);
+    }
+    console.log(`[SQLite] Loaded ${_blRows.length} billing ledger entries`);
+  } else {
+    try {
+      if (fs.existsSync(BILLING_LEDGER_FILE)) {
+        billingLedger = JSON.parse(fs.readFileSync(BILLING_LEDGER_FILE, 'utf8'));
+        const total = Object.values(billingLedger).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
+        if (total > 0) console.log(`[SQLite] Loaded ${total} billing ledger entries from JSON fallback`);
+      }
+    } catch (e) { console.error('[SQLite] Failed to load billing_ledger from JSON:', e.message); }
   }
-} catch (e) { console.error('Failed to load billing_ledger:', e.message); }
+}
 
 const MAX_LEDGER_ENTRIES = 1000; // per client
 
 function saveBillingLedger() {
-  // Trim oversized ledgers before saving
-  for (const key in billingLedger) {
-    if (Array.isArray(billingLedger[key]) && billingLedger[key].length > MAX_LEDGER_ENTRIES) {
-      billingLedger[key] = billingLedger[key].slice(-MAX_LEDGER_ENTRIES);
-    }
+  try {
+    // Only save entries for clients that exist in DB (skip orphaned entries)
+    const validIds = new Set(_clientGetIds.all().map(r => r.id));
+    db.transaction(() => {
+      for (const clientId in billingLedger) {
+        if (!validIds.has(clientId)) continue; // skip orphaned entries
+        let entries = billingLedger[clientId];
+        if (!Array.isArray(entries)) continue;
+        // Trim oversized ledgers
+        if (entries.length > MAX_LEDGER_ENTRIES) {
+          entries = entries.slice(-MAX_LEDGER_ENTRIES);
+          billingLedger[clientId] = entries;
+        }
+        _ledgerDeleteByClient.run(clientId);
+        for (const e of entries) {
+          const amount = e.type === 'charge' ? (e.cost || 0) : (e.amount || 0);
+          const details = {};
+          if (e.delta_bytes != null) details.delta_bytes = e.delta_bytes;
+          if (e.price_per_unit != null) details.price_per_unit = e.price_per_unit;
+          if (e.billing_type) details.billing_type = e.billing_type;
+          if (e.tochkaPaymentId) details.tochkaPaymentId = e.tochkaPaymentId;
+          _ledgerInsert.run(
+            clientId, e.type || '', e.date || '', e.timestamp || '', amount,
+            e.currency || 'RUB', e.balance_before ?? null, e.balance_after ?? null,
+            e.delta_gb ?? null, e.modem_count ?? null, e.days_in_month ?? null,
+            e.note || '', e.source || null, e.paymentId || null,
+            Object.keys(details).length > 0 ? JSON.stringify(details) : null
+          );
+        }
+      }
+    })();
+  } catch (e) {
+    console.error('[SQLite] Error saving billing ledger:', e.message);
   }
-  safeWriteFile(BILLING_LEDGER_FILE, JSON.stringify(billingLedger, null, 2));
 }
 
 // ==================== AUDIT LOG (TASK-J) — SQLite-backed ====================
@@ -823,8 +1013,9 @@ for (const c of clients) {
   }
 }
 if (clientsMigrated) saveClients(clients);
+rebuildClientMaps(); // Build maps before auto-migration check
 
-// Auto-migrate .env users (non-admin) to clients.json if not already there
+// Auto-migrate .env users (non-admin) to clients if not already there
 for (const [login, u] of Object.entries(users)) {
   if (u.source === 'env' && u.portNameFilter !== '*') {
     const exists = clientByLogin.get(login);
@@ -880,7 +1071,7 @@ for (const c of clients) {
   }
 }
 console.log(`Loaded ${Object.keys(users).length} user(s): ${Object.keys(users).join(', ')}`);
-console.log(`  - ${clients.length} client(s) from clients.json`);
+console.log(`  - ${clients.length} client(s) from SQLite`);
 rebuildClientMaps();
 
 // ==================== SESSIONS — SQLite-backed ====================
@@ -1406,21 +1597,22 @@ try {
   if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} uptime tracking entries`);
 } catch (e) { console.error('Failed to load uptime_tracking from SQLite:', e.message); }
 
-// Load IP history from SQLite
+// Load IP history from SQLite (with db_id for incremental updates)
 let ipHistory = {};
 try {
-  const rows = db.prepare('SELECT key, ip, started_at, ended_at FROM ip_history ORDER BY id ASC').all();
+  const rows = db.prepare('SELECT id, key, ip, started_at, ended_at FROM ip_history ORDER BY id ASC').all();
   for (const r of rows) {
     if (!ipHistory[r.key]) ipHistory[r.key] = [];
-    ipHistory[r.key].push({ ip: r.ip, from: r.started_at, to: r.ended_at || null });
+    ipHistory[r.key].push({ db_id: r.id, ip: r.ip, from: r.started_at, to: r.ended_at || null });
   }
   if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} IP history entries`);
 } catch (e) { console.error('Failed to load ip_history from SQLite:', e.message); }
 
 const _ipUpsert = db.prepare('INSERT OR REPLACE INTO ip_tracking (key, ip, updated_at) VALUES (?, ?, ?)');
 const _utUpsert = db.prepare('INSERT OR REPLACE INTO uptime_tracking (key, data) VALUES (?, ?)');
-const _ihDelete = db.prepare('DELETE FROM ip_history');
 const _ihInsert = db.prepare('INSERT INTO ip_history (key, ip, started_at, ended_at) VALUES (?, ?, ?, ?)');
+const _ihUpdateEnd = db.prepare('UPDATE ip_history SET ended_at = ? WHERE id = ?');
+const _ihDeleteById = db.prepare('DELETE FROM ip_history WHERE id = ?');
 
 function saveIpTracking() {
   try {
@@ -1444,32 +1636,43 @@ function saveUptimeTracking() {
   } catch (e) { console.error('[saveUptimeTracking] SQLite error:', e.message); }
 }
 
+// BUG-02: Incremental saveIpHistory — only save entries without db_id (fallback/edge case)
 function saveIpHistory() {
   try {
-    const batch = db.transaction(() => {
-      _ihDelete.run();
+    db.transaction(() => {
       for (const [key, entries] of Object.entries(ipHistory)) {
         for (const e of entries) {
-          _ihInsert.run(key, e.ip || '', e.from || '', e.to || '');
+          if (!e.db_id) {
+            const result = _ihInsert.run(key, e.ip || '', e.from || '', e.to || '');
+            e.db_id = result.lastInsertRowid;
+          }
         }
       }
-    });
-    batch();
+    })();
   } catch (e) { console.error('[saveIpHistory] SQLite error:', e.message); }
 }
 
+// BUG-02: recordIpChange — direct incremental DB writes (no full rewrite)
 function recordIpChange(key, oldIp, newIp, timestamp) {
   if (!ipHistory[key]) ipHistory[key] = [];
   const entries = ipHistory[key];
   // Close previous entry
   if (entries.length > 0) {
     const last = entries[entries.length - 1];
-    if (!last.to) last.to = timestamp;
+    if (!last.to) {
+      last.to = timestamp;
+      if (last.db_id) _ihUpdateEnd.run(timestamp, last.db_id);
+    }
   }
-  // Add new entry
-  entries.push({ ip: newIp, from: timestamp, to: null });
+  // Add new entry with direct INSERT
+  const result = _ihInsert.run(key, newIp, timestamp, '');
+  entries.push({ db_id: result.lastInsertRowid, ip: newIp, from: timestamp, to: null });
   // Trim to MAX_IP_HISTORY
   if (entries.length > MAX_IP_HISTORY) {
+    const toDelete = entries.slice(0, entries.length - MAX_IP_HISTORY);
+    for (const e of toDelete) {
+      if (e.db_id) _ihDeleteById.run(e.db_id);
+    }
     ipHistory[key] = entries.slice(-MAX_IP_HISTORY);
   }
 }
@@ -1550,7 +1753,7 @@ async function trackModems() {
 
   saveIpTracking();
   saveUptimeTracking();
-  saveIpHistory();
+  // BUG-02: saveIpHistory() removed — recordIpChange() now does direct DB writes
   console.log(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);
 
   // Daily traffic snapshot: capture "yesterday" data once per day
@@ -1807,6 +2010,18 @@ app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
   const includeToday = req.query.include_today === '1';
   const result = {};
 
+  // Sprint-4 Task 4c: Build portId→portName mapping from cached bandwidth data
+  // After server restart, daily_traffic entries loaded from SQLite lack portName field
+  const portNameMap = {};
+  try {
+    const cachedResults = await fetchAllServersDataCached();
+    for (const data of cachedResults) {
+      for (const [pid, b] of Object.entries(data.bw || {})) {
+        if (b.portName) portNameMap[pid] = b.portName;
+      }
+    }
+  } catch (e) { /* cache may not be ready yet */ }
+
   // Collect daily traffic for ports matching this client's portName
   for (const [portId, days] of Object.entries(dailyTraffic)) {
     let match = false;
@@ -1814,7 +2029,8 @@ app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
       match = true;
     } else {
       const firstDay = Object.values(days)[0];
-      if (firstDay && firstDay.portName === portNameFilter) match = true;
+      const pn = (firstDay && firstDay.portName) || portNameMap[portId] || portId;
+      if (pn === portNameFilter) match = true;
     }
     if (match) {
       // Filter by date range
@@ -2227,12 +2443,25 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       const { password, passwordHash, ...safe } = c;
       return safe;
     });
+    // BUG-11: billingLedger removed from bulk response — use /api/admin/clients/:id/ledger instead
+    // Sprint-4 Task 1: Compute monthly charges server-side (replaces client-side billingLedger lookup)
+    const clientMonthCharges = {};
+    const curMonthPfx = new Date().toISOString().slice(0, 7);
+    for (const [clientId, entries] of Object.entries(billingLedger)) {
+      let cost = 0;
+      for (const e of entries) {
+        if (e.type === 'charge' && e.date && e.date.startsWith(curMonthPfx)) {
+          cost += (e.cost || 0);
+        }
+      }
+      if (cost !== 0) clientMonthCharges[clientId] = Math.round(cost * 100) / 100;
+    }
     res.json({
+      clientMonthCharges,
       ...merged,
       servers,
       serverAuth,
       clients: sanitizedClients,
-      billingLedger,
       ipTracking,
       uptimeTracking,
       speedtestLatest: getSpeedtestLatest(),
@@ -2252,17 +2481,68 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
 
 // ==================== ADMIN: CLIENT MANAGEMENT ====================
 
+// BUG-12: Input validation for admin routes
+function validateClientInput(body, isCreate = false) {
+  if (body.name !== undefined) {
+    if (typeof body.name !== 'string' || body.name.length > 200) return 'name max 200 chars';
+    if (isCreate && body.name.trim().length === 0) return 'name is required';
+  }
+  if (body.login !== undefined) {
+    if (!/^[a-zA-Z0-9_]{3,50}$/.test(body.login)) return 'login must be 3-50 alphanumeric chars or underscores';
+  }
+  if (body.inn !== undefined && body.inn !== '') {
+    if (!/^\d{10}(\d{2})?$/.test(body.inn)) return 'inn must be 10 or 12 digits';
+  }
+  if (body.kpp !== undefined && body.kpp !== '') {
+    if (!/^\d{9}$/.test(body.kpp)) return 'kpp must be 9 digits';
+  }
+  if (body.price !== undefined) {
+    const p = parseFloat(body.price);
+    if (isNaN(p) || p < 0) return 'price must be a non-negative number';
+  }
+  if (body.billingType !== undefined) {
+    if (!['per_gb', 'per_modem', 'flat'].includes(body.billingType)) return 'billingType must be per_gb, per_modem, or flat';
+  }
+  if (body.currency !== undefined) {
+    if (!['RUB', 'USD', 'EUR'].includes(body.currency)) return 'currency must be RUB, USD, or EUR';
+  }
+  if (body.contact !== undefined && typeof body.contact === 'string' && body.contact.length > 500) return 'contact max 500 chars';
+  if (body.notes !== undefined && typeof body.notes === 'string' && body.notes.length > 2000) return 'notes max 2000 chars';
+  if (body.clientType !== undefined) {
+    if (!['individual', 'legal'].includes(body.clientType)) return 'clientType must be individual or legal';
+  }
+  return null;
+}
+
+// BUG-11: Pagination for admin clients list
 app.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 50, 200);
+  const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  const search = (req.query.search || '').toLowerCase().trim();
   // SEC-04: strip sensitive fields
-  const safe = clients.map(c => { const { password, passwordHash, ...rest } = c; return rest; });
-  res.json(safe);
+  let filtered = clients;
+  if (search) {
+    filtered = clients.filter(c =>
+      (c.name || '').toLowerCase().includes(search) ||
+      (c.login || '').toLowerCase().includes(search) ||
+      (c.portName || '').toLowerCase().includes(search) ||
+      (c.contact || '').toLowerCase().includes(search)
+    );
+  }
+  const total = filtered.length;
+  const page = filtered.slice(offset, offset + limit);
+  const safe = page.map(c => { const { password, passwordHash, ...rest } = c; return rest; });
+  res.json({ clients: safe, total, limit, offset });
 });
 
 app.post('/api/admin/clients', authMiddleware, adminMiddleware, async (req, res) => {
-  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, address } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, address, clientType } = req.body;
   if (!name || !portName || !login || !password) {
     return res.status(400).json({ error: 'name, portName, login, password required' });
   }
+  // BUG-12: Validate input
+  const valErr = validateClientInput(req.body, true);
+  if (valErr) return res.status(400).json({ error: valErr });
   if (users[login]) {
     return res.status(400).json({ error: 'Login already exists: ' + login });
   }
@@ -2295,6 +2575,7 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, async (req, res)
     bills: [],
     autoActs: true,
     autoBills: true,
+    clientType: clientType || 'legal',
     createdAt: new Date().toISOString()
   };
 
@@ -2318,8 +2599,11 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, async (req, res)
 app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res) => {
   const idx = clients.findIndex(c => c.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'Client not found' });
+  // BUG-12: Validate input
+  const valErr = validateClientInput(req.body, false);
+  if (valErr) return res.status(400).json({ error: valErr });
   const old = clients[idx];
-  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address, autoActs, autoBills } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address, autoActs, autoBills, clientType } = req.body;
   if (login && login !== old.login) {
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
     delete users[old.login];
@@ -2349,7 +2633,8 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, r
     contractInfo: contractInfo !== undefined ? contractInfo : (old.contractInfo || ''),
     address: address !== undefined ? address : (old.address || ''),
     autoActs: autoActs !== undefined ? autoActs : (old.autoActs !== undefined ? old.autoActs : true),
-    autoBills: autoBills !== undefined ? autoBills : (old.autoBills !== undefined ? old.autoBills : true)
+    autoBills: autoBills !== undefined ? autoBills : (old.autoBills !== undefined ? old.autoBills : true),
+    clientType: clientType !== undefined ? clientType : (old.clientType || 'legal')
   };
   clients[idx] = updated;
   saveClients(clients);
@@ -2496,11 +2781,18 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
 app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
-  const entries = billingLedger[client.id] || [];
+  const allEntries = billingLedger[client.id] || [];
+  // BUG-11: Pagination support
+  const limit = Math.min(parseInt(req.query.limit) || 100, 500);
+  const offset = Math.max(parseInt(req.query.offset) || 0, 0);
+  const entries = allEntries.slice(offset, offset + limit);
   res.json({
     balance: client.balance,
     last_snapshot: client.last_traffic_snapshot,
-    entries: entries
+    entries,
+    total: allEntries.length,
+    limit,
+    offset
   });
 });
 
@@ -3986,7 +4278,7 @@ app.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async 
   if (!actItems || actItems.length === 0) {
     const ledgerEntries = billingLedger[clientId] || [];
     const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
-    const totalGb = monthCharges.reduce((sum, e) => sum + (e.gb || 0), 0);
+    const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
     const totalCost = monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0);
     const modemCharges = monthCharges.filter(e => e.billing_type === 'per_modem');
     const gbCharges = monthCharges.filter(e => e.billing_type !== 'per_modem');
@@ -4209,7 +4501,7 @@ app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, asy
     }
 
     try {
-      const totalGb = monthCharges.reduce((sum, e) => sum + (e.gb || 0), 0);
+      const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
       const totalCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
       if (totalCost <= 0) { skipped++; continue; }
 
@@ -4514,7 +4806,7 @@ async function autoGenerateMonthlyActs() {
 
     try {
       // Calculate totals
-      const totalGb = monthCharges.reduce((sum, e) => sum + (e.gb || 0), 0);
+      const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
       const totalCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
 
       const actItems = [{
@@ -4729,21 +5021,30 @@ try {
 const _tgProxyInsert = db.prepare('INSERT INTO telegram_proxies (chat_id, port_name, server, http_port, socks_port, login, password, plan, created_at, expires_at, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
 const _tgProxyDelete = db.prepare('DELETE FROM telegram_proxies WHERE id = ?');
 const _tgProxyDeactivate = db.prepare('UPDATE telegram_proxies SET active = 0 WHERE id = ?');
+const _tgProxyUpdate = db.prepare('UPDATE telegram_proxies SET expires_at = ?, plan = ?, active = ? WHERE id = ?');
 
-function saveTgProxies() {
+// BUG-03: Incremental DB operations instead of DELETE ALL + re-INSERT
+function insertTgProxyDB(record) {
   try {
-    const batch = db.transaction(() => {
-      db.prepare('DELETE FROM telegram_proxies').run();
-      for (const p of tgProxies) {
-        _tgProxyInsert.run(
-          p.chatId || '', p.portName || '', p.server || '', p.httpPort || 0,
-          p.socksPort || 0, p.login || '', p.password || '', p.plan || '',
-          p.createdAt || '', p.expiresAt || '', p.active !== false ? 1 : 0
-        );
-      }
-    });
-    batch();
-  } catch (e) { console.error('[saveTgProxies] SQLite error:', e.message); }
+    const result = _tgProxyInsert.run(
+      record.chatId || '', record.portName || '', record.server || '', record.httpPort || 0,
+      record.socksPort || 0, record.login || '', record.password || '', record.plan || '',
+      record.createdAt || '', record.expiresAt || '', record.active !== false ? 1 : 0
+    );
+    record.id = result.lastInsertRowid;
+  } catch (e) { console.error('[insertTgProxy] SQLite error:', e.message); }
+}
+
+function deleteTgProxyDB(record) {
+  try {
+    if (record.id) _tgProxyDelete.run(record.id);
+  } catch (e) { console.error('[deleteTgProxy] SQLite error:', e.message); }
+}
+
+function updateTgProxyDB(record) {
+  try {
+    if (record.id) _tgProxyUpdate.run(record.expiresAt || '', record.plan || '', record.active !== false ? 1 : 0, record.id);
+  } catch (e) { console.error('[updateTgProxy] SQLite error:', e.message); }
 }
 
 // Telegram user database — persistent per-user info (SQLite-backed)
@@ -4869,18 +5170,11 @@ try {
 
 const _tgFbInsert = db.prepare('INSERT INTO telegram_feedback (chat_id, username, type, score, message, created_at) VALUES (?, ?, ?, ?, ?, ?)');
 
-function saveTgFeedback() {
-  // Append-only: just insert the latest entry
+// BUG-04: Direct INSERT instead of count-based logic
+function insertTgFeedbackDB(f) {
   try {
-    if (tgFeedback.length > 0) {
-      const f = tgFeedback[tgFeedback.length - 1];
-      // Check if already in DB by count
-      const dbCount = db.prepare('SELECT COUNT(*) as cnt FROM telegram_feedback').get().cnt;
-      if (dbCount < tgFeedback.length) {
-        _tgFbInsert.run(f.chatId || '', f.username || '', f.type || 'text', f.score || null, f.message || '', f.createdAt || '');
-      }
-    }
-  } catch (e) { console.error('[saveTgFeedback] SQLite error:', e.message); }
+    _tgFbInsert.run(f.chatId || '', f.username || '', f.type || 'text', f.score || null, f.message || '', f.createdAt || '');
+  } catch (e) { console.error('[insertTgFeedback] SQLite error:', e.message); }
 }
 
 // User states for feedback flow
@@ -5011,7 +5305,7 @@ async function createProxyForTelegram(chatId, username, planKey) {
   };
 
   tgProxies.push(record);
-  saveTgProxies();
+  insertTgProxyDB(record);
 
   console.log(`[TelegramBot] Created proxy ${portID} on ${modem.serverName}/${modem.imei} for @${username || chatId} (plan: ${planKey})`);
   return record;
@@ -5028,8 +5322,8 @@ async function deleteProxyRecord(record, notify = true) {
     console.error(`[TelegramBot] Failed to delete ${record.portID}:`, e.message);
   }
 
+  deleteTgProxyDB(record);
   tgProxies = tgProxies.filter(p => p.portID !== record.portID);
-  saveTgProxies();
 
   if (notify) {
     const isTest = record.plan === 'test';
@@ -5152,7 +5446,7 @@ async function handleBuy(chatId, username, planKey) {
     existing.notified_7d = false;
     existing.notified_1d = false;
     delete existing.npsLastSent;
-    saveTgProxies();
+    updateTgProxyDB(existing);
 
     const expiresDate = newExpiry.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
     console.log(`[TelegramBot] Extended proxy ${existing.portID} for @${username || chatId} (plan: ${planKey}, expires: ${expiresDate})`);
@@ -5423,16 +5717,15 @@ async function handleFeedbackText(chatId, username, text) {
       message: text,
       createdAt: new Date().toISOString()
     });
-    saveTgFeedback();
+    insertTgFeedbackDB(tgFeedback[tgFeedback.length - 1]);
     await tgSend(chatId, '✅ Спасибо за обратную связь! Мы обязательно учтём ваше мнение.', { reply_markup: KB_MAIN });
     return true;
   }
 
   if (state.state === 'awaiting_nps_comment') {
-    // Save comment to the existing feedback record
+    // Save comment to the existing feedback record (in-memory only; comment column not in DB schema)
     const lastRecord = tgFeedback.filter(f => f.chatId === chatId && f.type === state.type).pop();
     if (lastRecord) lastRecord.comment = text;
-    saveTgFeedback();
     delete userStates[chatId];
     await tgSend(chatId, '✅ Спасибо за комментарий!', { reply_markup: KB_MAIN });
     return true;
@@ -5448,7 +5741,7 @@ async function handleRating(chatId, username, type, score) {
     score,
     createdAt: new Date().toISOString()
   });
-  saveTgFeedback();
+  insertTgFeedbackDB(tgFeedback[tgFeedback.length - 1]);
 
   if (type === 'satisfaction') {
     await tgSend(chatId,
@@ -5484,7 +5777,7 @@ async function checkTgProxyExpirations() {
     // Test plan: satisfaction survey 1 hour before expiry
     if (record.plan === 'test' && !record.satisfactionSent && remaining <= 60 * 60 * 1000 && remaining > 0) {
       record.satisfactionSent = true;
-      saveTgProxies();
+      // BUG-03: ephemeral flag, no DB write needed
       await tgSend(record.chatId,
         '⏰ <b>Через 1 час тестовый прокси будет отключён</b>\n\nОцените качество прокси от 1 до 10:',
         { reply_markup: ratingKeyboard('satisfaction') }
@@ -5494,7 +5787,7 @@ async function checkTgProxyExpirations() {
     // 7-day notification
     if (!record.notified_7d && remaining <= 7 * 86400000 && record.plan !== 'test') {
       record.notified_7d = true;
-      saveTgProxies();
+      // BUG-03: ephemeral flag, no DB write needed
       await tgSend(record.chatId,
         '📢 <b>Напоминание</b>\n\nВаша подписка заканчивается через 7 дней. Нажмите «📋 Тарифы», чтобы продлить!',
         { reply_markup: KB_MAIN }
@@ -5504,7 +5797,7 @@ async function checkTgProxyExpirations() {
     // 1-day notification
     if (!record.notified_1d && remaining <= 86400000 && record.plan !== 'test') {
       record.notified_1d = true;
-      saveTgProxies();
+      // BUG-03: ephemeral flag, no DB write needed
       await tgSend(record.chatId,
         '🔴 <b>Подписка заканчивается завтра!</b>\n\nНажмите «📋 Тарифы», чтобы продлить прокси!',
         { reply_markup: KB_MAIN }
@@ -5516,7 +5809,7 @@ async function checkTgProxyExpirations() {
       const lastNps = record.npsLastSent ? new Date(record.npsLastSent).getTime() : 0;
       if (now - lastNps > 30 * 86400000) {
         record.npsLastSent = new Date().toISOString();
-        saveTgProxies();
+        // BUG-03: ephemeral flag, no DB write needed
         await tgSend(record.chatId,
           '📊 <b>Мы хотим стать лучше!</b>\n\nНасколько вы порекомендуете наш сервис друзьям?\nОт 1 (точно нет) до 10 (обязательно порекомендую):',
           { reply_markup: ratingKeyboard('nps') }

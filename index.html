@@ -670,16 +670,25 @@
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
             <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Потребление трафика по дням</h3>
             <div style="display:flex;gap:8px;align-items:center">
+              <button onclick="shiftDailyMonth(-1)" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);padding:4px 10px;cursor:pointer;font-size:13px">◀</button>
+              <span id="dailyMonthLabel" style="font-size:12px;font-weight:600;color:var(--text-0);min-width:100px;text-align:center"></span>
+              <button onclick="shiftDailyMonth(1)" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);padding:4px 10px;cursor:pointer;font-size:13px">▶</button>
+              <button onclick="toggleDailyCustomRange()" id="btnDailyCustom" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);padding:4px 10px;cursor:pointer;font-size:11px">Выбрать даты</button>
+            </div>
+          </div>
+          <div id="dailyCustomRange" style="display:none;margin-bottom:10px;padding:8px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border)">
+            <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <label style="font-size:11px;color:var(--text-2)">С:</label>
-              <input type="date" id="dailyChartFrom" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px">
+              <input type="date" id="dailyChartFrom" style="background:var(--bg-1);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px">
               <label style="font-size:11px;color:var(--text-2)">По:</label>
-              <input type="date" id="dailyChartTo" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px">
+              <input type="date" id="dailyChartTo" style="background:var(--bg-1);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px">
               <label style="font-size:11px;color:var(--text-2);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="dailyChartToday" style="margin:0"> Сегодня</label>
-              <button onclick="reloadDailyChart()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer">Показать</button>
+              <button onclick="applyDailyCustomRange()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer">Показать</button>
             </div>
           </div>
           <div id="dailyChartLoading" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px">Загрузка данных...</div>
-          <div style="height:360px"><canvas id="analyticsDailyChart"></canvas></div>
+          <div id="dailyChartEmpty" style="display:none;align-items:center;justify-content:center;height:360px;color:var(--text-3);font-size:13px;text-align:center">Нет данных за выбранный период.<br>Данные накапливаются каждый день автоматически.</div>
+          <div id="dailyChartWrap" style="height:360px"><canvas id="analyticsDailyChart"></canvas></div>
         </div>
 
         <!-- Chart: Traffic per modem (bar chart) -->
@@ -1133,6 +1142,7 @@ var COUNTRIES={S1:{serverIp:'89.149.100.92'},S2:{serverIp:'31.5.194.89'}};
 
 // --- Tabs ---
 function switchTab(name,el){
+  localStorage.setItem('pr_active_tab',name);
   document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});
   document.querySelectorAll('.tab-pane').forEach(function(t){t.classList.remove('active')});
   if(el) el.classList.add('active');
@@ -1148,6 +1158,38 @@ function switchTab(name,el){
 // --- Analytics ---
 var analyticsCharts={};
 var analyticsLoaded=false;
+var dailyMonth=new Date();
+var dailyCustomMode=false;
+var dailyMonthNames=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+
+function getDailyMonthRange(){
+  var y=dailyMonth.getFullYear(),m=dailyMonth.getMonth();
+  return {from:new Date(y,m,1).toLocaleDateString('en-CA'),to:new Date(y,m+1,0).toLocaleDateString('en-CA')};
+}
+function updateDailyMonthLabel(){
+  var el=document.getElementById('dailyMonthLabel');
+  if(el)el.textContent=dailyMonthNames[dailyMonth.getMonth()]+' '+dailyMonth.getFullYear();
+}
+function shiftDailyMonth(delta){
+  dailyMonth.setMonth(dailyMonth.getMonth()+delta);
+  updateDailyMonthLabel();
+  dailyCustomMode=false;
+  var r=getDailyMonthRange();
+  document.getElementById('dailyChartFrom').value=r.from;
+  document.getElementById('dailyChartTo').value=r.to;
+  document.getElementById('dailyCustomRange').style.display='none';
+  document.getElementById('btnDailyCustom').style.background='';
+  reloadDailyChart();
+}
+function toggleDailyCustomRange(){
+  var el=document.getElementById('dailyCustomRange');
+  el.style.display=el.style.display==='none'?'':'none';
+}
+function applyDailyCustomRange(){
+  dailyCustomMode=true;
+  document.getElementById('btnDailyCustom').style.background='var(--accent)';
+  reloadDailyChart();
+}
 
 function renderAnalytics(){
   if(!tableData||!tableData.length) return;
@@ -1222,11 +1264,11 @@ function renderAnalytics(){
   // Load daily traffic chart
   if(!analyticsLoaded){
     analyticsLoaded=true;
-    // Set default dates: 30 days ago to yesterday
-    var d30=new Date();d30.setDate(d30.getDate()-30);
-    var yesterday=new Date();yesterday.setDate(yesterday.getDate()-1);
-    document.getElementById('dailyChartFrom').value=d30.toLocaleDateString('en-CA');
-    document.getElementById('dailyChartTo').value=yesterday.toLocaleDateString('en-CA');
+    // Default: current month
+    var mr=getDailyMonthRange();
+    document.getElementById('dailyChartFrom').value=mr.from;
+    document.getElementById('dailyChartTo').value=mr.to;
+    updateDailyMonthLabel();
     loadDailyTrafficChart(textColor,gridColor);
   }
 }
@@ -1236,12 +1278,6 @@ function reloadDailyChart(){
   var textColor=isDark?'#c9d1d9':'#24292f';
   var gridColor=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.08)';
   if(analyticsCharts.daily){analyticsCharts.daily.destroy();delete analyticsCharts.daily}
-  // Re-create canvas (in case it was replaced with message)
-  var container=document.getElementById('analyticsDailyChart');
-  if(!container||container.tagName!=='CANVAS'){
-    var wrap=container?container.parentElement:document.querySelector('#tab-analytics .container');
-    if(wrap){var c2=document.createElement('canvas');c2.id='analyticsDailyChart';wrap.innerHTML='';wrap.appendChild(c2)}
-  }
   var loading=document.getElementById('dailyChartLoading');
   if(loading){loading.style.display='';loading.textContent='Загрузка данных...'}
   loadDailyTrafficChart(textColor,gridColor);
@@ -1275,10 +1311,12 @@ function loadDailyTrafficChart(textColor,gridColor){
 
     var dates=Array.from(allDates).sort();
     if(dates.length===0){
-      var canvas=document.getElementById('analyticsDailyChart');
-      if(canvas)canvas.parentElement.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:13px">Нет данных за выбранный период.<br>Данные накапливаются каждый день автоматически.</div>';
+      document.getElementById('dailyChartWrap').style.display='none';
+      document.getElementById('dailyChartEmpty').style.display='flex';
       return;
     }
+    document.getElementById('dailyChartWrap').style.display='';
+    document.getElementById('dailyChartEmpty').style.display='none';
 
     // Build per-modem datasets + total
     var modemNicks={};// portId -> nick
@@ -1781,6 +1819,10 @@ async function loadData(){
     renderTable();
     renderProxyTable();
     updateSummary();
+
+    // Restore saved tab
+    var _savedTab=localStorage.getItem('pr_active_tab');
+    if(_savedTab){var _tabEl=document.querySelector('.nav-tab[onclick*="\''+_savedTab+'\'"]');if(_tabEl)switchTab(_savedTab,_tabEl)}
 
     var now=new Date().toLocaleString('ru-RU');
     document.getElementById('lastUpdate').textContent='Обновлено: '+now;

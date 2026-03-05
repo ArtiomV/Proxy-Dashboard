@@ -417,7 +417,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <div class="nav-tab" onclick="switchMainTab('tools',this)">Инструменты</div>
   <div class="nav-tab" onclick="switchMainTab('analytics',this)">Настройки</div>
   <div class="nav-tab" onclick="switchMainTab('telegram',this)">Telegram</div>
-  <div class="nav-tab" onclick="switchMainTab('bank',this)">🏦 Банк</div>
+  <div class="nav-tab" onclick="switchMainTab('bank',this)">Документооборот и операции</div>
   <div style="margin-left:auto;display:flex;align-items:center;gap:4px;padding-right:8px">
     <input type="text" class="search-box" id="searchBox" placeholder="Поиск..." oninput="renderTable()" style="width:180px;height:28px;font-size:11px">
     <div class="col-selector" style="position:relative">
@@ -456,6 +456,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     <span style="font-size:11px;color:var(--text-2);margin-right:4px">Период:</span>
     <div class="acc-period-group">
       <button class="acc-period-btn" onclick="setAccPeriod('day',this)">Сегодня</button>
+      <button class="acc-period-btn" onclick="setAccPeriod('yesterday',this)">Вчера</button>
       <button class="acc-period-btn active" onclick="setAccPeriod('month',this)">Месяц</button>
       <button class="acc-period-btn" onclick="setAccPeriod('prevmonth',this)">Пред. мес</button>
       <button class="acc-period-btn" onclick="setAccPeriod('lifetime',this)">Всё время</button>
@@ -594,11 +595,10 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 </div>
 
-<!-- TAB: BANK -->
+<!-- TAB: BANK (Документооборот и операции) -->
 <div class="tab-content" id="tab-bank">
   <div style="padding:14px 24px">
-    <div id="bankConfigSection"></div>
-    <div id="bankDocumentsSection" style="margin-top:16px"></div>
+    <div id="bankDocumentsSection"></div>
     <div id="bankBillsSection" style="margin-top:16px"></div>
     <div id="bankPaymentsSection" style="margin-top:16px"></div>
   </div>
@@ -655,8 +655,9 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   </div>
 </div>
 
-<!-- TAB: ANALYTICS -->
+<!-- TAB: ANALYTICS (Настройки) -->
 <div class="tab-content" id="tab-analytics">
+  <div id="bankConfigSection" style="padding:0 24px 16px"></div>
   <div class="analytics-section">
     <div class="analytics-card">
       <h3>Уникальность IP (14 дней)</h3>
@@ -734,7 +735,8 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
         <div class="form-group"><label>Цена (руб)</label><input class="form-input" type="number" id="cfPrice" value="0"></div>
       </div>
       <div class="form-group"><label>Заметки</label><textarea class="form-input" id="cfNotes"></textarea></div>
-      <div style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
+      <div class="form-row"><div class="form-group"><label>Тип клиента</label><select class="form-input" id="cfClientType" onchange="toggleBankFields()"><option value="legal">Юр. лицо</option><option value="individual">Физ. лицо</option></select></div></div>
+      <div id="bankFieldsSection" style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
         <label style="font-size:11px;color:var(--text-2);margin-bottom:6px;display:block;font-weight:600">Реквизиты (для банка)</label>
         <div class="form-row"><div class="form-group"><label>ИНН</label><input class="form-input" id="cfInn" placeholder="1234567890"></div><div class="form-group"><label>КПП</label><input class="form-input" id="cfKpp" placeholder="123456789"></div></div>
         <div class="form-group"><label>Юр. название</label><input class="form-input" id="cfLegalName" placeholder='ООО "Компания"'></div>
@@ -837,10 +839,10 @@ function doLogin(){window.location.href='/'}
 function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
-function switchMainTab(name,el){document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings()}if(name==='telegram')renderTelegramUsers();if(name==='bank'){renderBankConfig();renderBankDocuments();renderBankBills();renderBankPayments()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}}
+function switchMainTab(name,el){localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig()}if(name==='telegram')renderTelegramUsers();if(name==='bank'){renderBankDocuments();renderBankBills();renderBankPayments()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}}
 
 // ========== DATA ==========
-function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();renderBankPayments();renderBankDocuments();renderBankBills();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU')}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
+function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();renderBankPayments();renderBankDocuments();renderBankBills();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
 
 function processData(){if(!currentData)return;var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(m.net_details?m.net_details.CELLOP:'')||'',apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
@@ -890,6 +892,7 @@ function formatTraffic(v){if(!v||v===0||v==='0')return'-';return String(v)}
 function renderSignalBars(s){var h='<div class="signal-bars">';for(var i=1;i<=5;i++){h+='<div class="signal-bar'+(i<=s?' active':'')+'" style="height:'+(2+i*2)+'px"></div>'}return h+'</div>'}
 function renderNetBadge(t){if(!t)return'<span class="net-badge net-unknown">?</span>';var c='net-unknown',l=t;if(/lte|4g/i.test(t)){c='net-lte';l='LTE'}else if(/3g|hspa|umts/i.test(t)){c='net-3g';l='3G'}else if(/2g|edge|gprs/i.test(t)){c='net-2g';l='2G'}return'<span class="net-badge '+c+'">'+l+'</span>'}
 function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
+function fmtDateRu(d){if(!d)return'';var p=d.split('-');return p.length===3?(p[2]+'.'+p[1]+'.'+p[0]):d}
 function parseTraffic(v){if(!v||v===0)return 0;var s=String(v),m=s.match(/([\d.]+)\s*(KB|MB|GB|TB)/i);if(!m)return 0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1024:u==='MB'?1048576:u==='GB'?1073741824:u==='TB'?1099511627776:1)}
 function bytesToGb(b){return b/1073741824}
 
@@ -1017,6 +1020,7 @@ function setAccPeriod(p,el){
 function getTrafficFields(){
   switch(accPeriod){
     case'day':return{inKey:'bandwidth_bytes_day_in',outKey:'bandwidth_bytes_day_out',label:'Сегодня'};
+    case'yesterday':return{inKey:'bandwidth_bytes_yesterday_in',outKey:'bandwidth_bytes_yesterday_out',label:'Вчера'};
     case'month':return{inKey:'bandwidth_bytes_month_in',outKey:'bandwidth_bytes_month_out',label:'Текущий месяц'};
     case'prevmonth':return{inKey:'bandwidth_bytes_prevmonth_in',outKey:'bandwidth_bytes_prevmonth_out',label:'Прошлый месяц'};
     case'lifetime':return{inKey:'bandwidth_bytes_lifetime_in',outKey:'bandwidth_bytes_lifetime_out',label:'Всё время'};
@@ -1088,6 +1092,7 @@ function renderTrafficTab(){
   // Summary widgets
   var daysElapsed=1;
   if(accPeriod==='month'){daysElapsed=new Date().getDate()||1}
+  else if(accPeriod==='yesterday'){daysElapsed=1}
   else if(accPeriod==='prevmonth'){var prev=new Date();prev.setDate(0);daysElapsed=prev.getDate()||30}
   else if(accPeriod==='lifetime'){daysElapsed=30}
   var avgPerModem=d.totalModems?(d.totalIn+d.totalOut)/d.totalModems/daysElapsed:0;
@@ -1243,16 +1248,23 @@ function renderTopResources(){
   var clientFilter=document.getElementById('resClientFilter');
   var filterPortName=clientFilter?clientFilter.value:'';
   var dataSource=topHostsCache;
-  if(filterPortName&&topHostsCachePerPort&&topHostsCachePerPort[filterPortName]){
-    dataSource=topHostsCachePerPort[filterPortName];
+  var showAll=false;
+  if(filterPortName&&topHostsCachePerPort){
+    if(topHostsCachePerPort[filterPortName]){
+      dataSource=topHostsCachePerPort[filterPortName];
+      showAll=true;
+    }else{
+      document.getElementById('topResourcesList').innerHTML='<div style="color:var(--text-3);padding:30px;text-align:center;font-size:13px">Нет данных для этого клиента.<br>Нажмите «Обновить ресурсы» для загрузки.</div>';
+      return;
+    }
   }
   var sorted=Object.keys(dataSource).sort(function(a,b){return dataSource[b]-dataSource[a]});
-  var top30=sorted.slice(0,30);
-  var maxCount=top30.length?dataSource[top30[0]]:0;
+  var displayItems=showAll?sorted:sorted.slice(0,30);
+  var maxCount=displayItems.length?dataSource[displayItems[0]]:0;
 
   // Horizontal bars
-  var items=top30.map(function(h,i){return{label:h,value:dataSource[h],color:['blue','green','orange','purple','red'][i%5]}});
-  document.getElementById('topResourcesList').innerHTML='<div style="max-height:400px;overflow-y:auto">'+renderHBarsRes(items,maxCount)+'</div>';
+  var items=displayItems.map(function(h,i){return{label:h,value:dataSource[h],color:['blue','green','orange','purple','red'][i%5]}});
+  document.getElementById('topResourcesList').innerHTML='<div style="max-height:600px;overflow-y:auto">'+renderHBarsRes(items,maxCount)+'</div>';
 
   // Categories
   var cats={};sorted.forEach(function(h){var cat=categorize(h);if(!cats[cat])cats[cat]=0;cats[cat]+=dataSource[h]});
@@ -1362,12 +1374,8 @@ function renderClients(){if(!currentData)return;var cl=currentData.clients||[];v
   cl.forEach(function(c){if(search&&(c.name+' '+c.portName+' '+c.login+' '+c.contact).toLowerCase().indexOf(search)===-1)return;
     count++;
     var modems=pnm[c.portName]||[];var bt=c.billingType||'per_gb';var price=c.price||0;
-    var ledger=currentData.billingLedger||{};var entries=ledger[c.id]||[];
-    var curMonthPfx=new Date().toISOString().slice(0,7);
-    var monthCharges=entries.filter(function(e){return e.type==='charge'&&e.date&&e.date.startsWith(curMonthPfx)});
-    var cost=monthCharges.reduce(function(s,e){return s+(e.cost||0)},0);
-    cost=Math.round(cost*100)/100;
-    var monthGbCharged=monthCharges.reduce(function(s,e){return s+(e.delta_gb||0)},0);
+    var cost=Math.round(((currentData.clientMonthCharges||{})[c.id]||0)*100)/100;
+    var monthGbCharged=0;
     var costLabel='';
     if(bt==='per_modem'){costLabel=price+' \u00D7 '+modems.length+' = '+Math.round(cost)+' \u20BD'}
     else{costLabel=monthGbCharged.toFixed(1)+' GB \u00D7 '+price+' = '+Math.round(cost)+' \u20BD'}
@@ -1396,7 +1404,7 @@ function renderClients(){if(!currentData)return;var cl=currentData.clients||[];v
     h+='<div>';
     h+='<div style="font-size:11px;font-weight:600;color:var(--text-0);margin-bottom:6px">Реквизиты</div>';
     h+='<div style="font-size:11px;color:var(--text-2)"><div>Логин: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.login)+'</span></div>';
-    h+='<div>Пароль: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.password)+'</span></div>';
+    h+='<div>Пароль: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+(c.password?'••••••••':'—')+'</span></div>';
     h+='<div>portName: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.portName)+'</span></div>';
     if(c.notes)h+='<div style="margin-top:4px;color:var(--text-3);font-size:10px">'+esc(c.notes)+'</div>';
     h+='</div></div>';
@@ -1420,11 +1428,12 @@ function toggleClientRow(id){
   row.style.display=row.style.display==='none'?'':'none';
 }
 
-function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?data.password:rnd(12);document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';document.getElementById('cfAutoActs').checked=data?(data.autoActs!==false):true;document.getElementById('cfAutoBills').checked=data?(data.autoBills!==false):true;var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
+function toggleBankFields(){document.getElementById('bankFieldsSection').style.display=document.getElementById('cfClientType').value==='legal'?'':'none'}
+function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?data.password:rnd(12);document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfClientType').value=data?(data.clientType||'legal'):'legal';toggleBankFields();document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';document.getElementById('cfAutoActs').checked=data?(data.autoActs!==false):true;document.getElementById('cfAutoBills').checked=data?(data.autoBills!==false):true;var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
 function closeClientModal(){document.getElementById('clientModal').classList.remove('show')}
 document.getElementById('clientModal').addEventListener('click',function(e){if(e.target===this)closeClientModal()});
 function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
-function saveClient(){var id=document.getElementById('clientFormId').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked};if(!d.name||!d.portName||!d.login||!d.password)return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
+function saveClient(){var id=document.getElementById('clientFormId').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked};if(!d.name||!d.portName||!d.login||!d.password)return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
 function deleteClient(id,name){if(!confirm('Удалить '+name+'?'))return;fetch(API+'/api/admin/clients/'+id,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()})}
 
 function impersonateClient(id,name){
@@ -1458,7 +1467,7 @@ function showPaymentHistory(clientId){
     if(!payments.length){area.innerHTML='<div style="color:var(--text-3);font-size:11px;padding:4px">Нет платежей</div>';return}
     var h='<div class="payment-list">';
     payments.forEach(function(p,i){
-      h+='<div class="payment-item"><span><span class="payment-amount">+'+parseFloat(p.amount).toLocaleString()+' \u20BD</span> <span class="payment-date">'+esc(p.date)+'</span> <span style="color:var(--text-3);font-size:10px">'+esc(p.note||'')+'</span></span><button class="btn btn-danger btn-sm" style="padding:2px 6px;font-size:9px" onclick="deletePayment(\''+clientId+'\','+i+')">x</button></div>';
+      h+='<div class="payment-item"><span><span class="payment-amount">+'+parseFloat(p.amount).toLocaleString()+' \u20BD</span> <span class="payment-date">'+fmtDateRu(p.date)+'</span> <span style="color:var(--text-3);font-size:10px">'+esc(p.note||'')+'</span></span><button class="btn btn-danger btn-sm" style="padding:2px 6px;font-size:9px" onclick="deletePayment(\''+clientId+'\','+i+')">x</button></div>';
     });
     area.innerHTML=h+'</div>';
   }).catch(function(e){area.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'});
