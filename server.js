@@ -160,6 +160,24 @@ for (const s of apiServers) {
 }
 console.log(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.name + ' (' + s.url + ')').join(', ')}`);
 
+// TASK-19: Startup validation — warn about missing critical configuration
+{
+  const warnings = [];
+  if (apiServers.length === 0) warnings.push('No API servers configured (API_<name>_URL). Dashboard will have no modem data.');
+  if (!fs.existsSync(DB_PATH) && !fs.existsSync(path.join(__dirname, 'clients.json'))) {
+    warnings.push('No database or clients.json found — starting with empty data.');
+  }
+  if (!fs.existsSync(SCHEMA_PATH)) warnings.push('schema.sql not found — database tables may be missing.');
+  for (const s of apiServers) {
+    if (!s.url) warnings.push(`API server ${s.name} has no URL.`);
+    if (s.user === 'proxy' && s.pass === 'proxy') warnings.push(`API server ${s.name} uses default credentials.`);
+  }
+  if (warnings.length > 0) {
+    console.warn('[Startup] ⚠️  Warnings:');
+    warnings.forEach(w => console.warn(`  - ${w}`));
+  }
+}
+
 // Modem login mapping: MODEM_LOGIN_<nick>=<login>
 const modemLogins = {};
 for (const [key, val] of Object.entries(process.env)) {
@@ -226,7 +244,7 @@ const _clientUpdateReferralBalance = db.prepare('UPDATE clients SET referral_bal
 function atomicCredit(clientId, amount, ledgerEntry) {
   amount = Math.round(parseFloat(amount) * 100) / 100;
   if (isNaN(amount) || amount === 0) throw new Error('atomicCredit: invalid amount');
-  let balanceBefore, balanceAfter;
+  let balanceBefore, balanceAfter, ledgerDbId;
   db.transaction(() => {
     const row = _clientGetBalance.get(clientId);
     if (!row) throw new Error(`atomicCredit: client ${clientId} not found`);
@@ -236,15 +254,15 @@ function atomicCredit(clientId, amount, ledgerEntry) {
     if (ledgerEntry) {
       const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
       const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-      entry.db_id = result.lastInsertRowid; // BUG-05 fix
+      entry.db_id = result.lastInsertRowid;
+      ledgerDbId = entry.db_id; // OLD-02 fix: expose to caller
       if (!billingLedger[clientId]) billingLedger[clientId] = [];
       billingLedger[clientId].push(entry);
     }
   })();
-  // BUG-03 fix: O(1) in-memory sync
   const client = clientById.get(clientId);
   if (client) client.balance = balanceAfter;
-  return { balanceBefore, balanceAfter };
+  return { balanceBefore, balanceAfter, ledgerDbId };
 }
 
 /**
@@ -254,7 +272,7 @@ function atomicCredit(clientId, amount, ledgerEntry) {
 function atomicDebit(clientId, amount, ledgerEntry) {
   amount = Math.round(parseFloat(amount) * 100) / 100;
   if (isNaN(amount) || amount === 0) throw new Error('atomicDebit: invalid amount');
-  let balanceBefore, balanceAfter;
+  let balanceBefore, balanceAfter, ledgerDbId;
   db.transaction(() => {
     const row = _clientGetBalance.get(clientId);
     if (!row) throw new Error(`atomicDebit: client ${clientId} not found`);
@@ -264,15 +282,15 @@ function atomicDebit(clientId, amount, ledgerEntry) {
     if (ledgerEntry) {
       const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
       const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-      entry.db_id = result.lastInsertRowid; // BUG-05 fix
+      entry.db_id = result.lastInsertRowid;
+      ledgerDbId = entry.db_id; // OLD-02 fix: expose to caller
       if (!billingLedger[clientId]) billingLedger[clientId] = [];
       billingLedger[clientId].push(entry);
     }
   })();
-  // BUG-03 fix: O(1) in-memory sync
   const client = clientById.get(clientId);
   if (client) client.balance = balanceAfter;
-  return { balanceBefore, balanceAfter };
+  return { balanceBefore, balanceAfter, ledgerDbId };
 }
 const _paymentDeleteByClient = db.prepare('DELETE FROM payments WHERE client_id = ?');
 const _paymentInsert = db.prepare('INSERT INTO payments (client_id, amount, date, note, source, payment_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
@@ -791,6 +809,47 @@ function buildTochkaActBody(client, period, actItems, actNumber) {
       }
     }
   };
+}
+
+// TASK-06: Shared helper — build act items from billing ledger for a given period
+function buildActItemsFromLedger(client, period) {
+  const ledgerEntries = billingLedger[client.id] || [];
+  const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
+  const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
+  const totalCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
+  const modemCharges = monthCharges.filter(e => e.billing_type === 'per_modem');
+  const gbCharges = monthCharges.filter(e => e.billing_type !== 'per_modem');
+
+  const actItems = [];
+  if (gbCharges.length > 0) {
+    actItems.push({
+      name: 'Услуги мобильных прокси (трафик)',
+      quantity: Math.round(totalGb * 100) / 100,
+      unit: 'ГБ',
+      price: client.price || 23,
+      amount: Math.round(gbCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
+    });
+  }
+  if (modemCharges.length > 0) {
+    const modemCount = new Set(modemCharges.map(e => e.note || '')).size || 1;
+    actItems.push({
+      name: 'Услуги мобильных прокси (аренда модемов)',
+      quantity: modemCount,
+      unit: 'шт',
+      price: client.price || 0,
+      amount: Math.round(modemCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
+    });
+  }
+  if (actItems.length === 0) {
+    actItems.push({
+      name: 'Услуги мобильных прокси',
+      quantity: Math.round(totalGb * 100) / 100 || 1,
+      unit: totalGb > 0 ? 'ГБ' : 'мес',
+      price: client.price || 23,
+      amount: totalCost
+    });
+  }
+  return { actItems, totalCost, monthCharges };
 }
 
 // Helper: build Tochka bill (счёт на оплату) request body
@@ -1348,14 +1407,33 @@ function adminMiddleware(req, res, next) {
 }
 
 // TASK-H: Health-check endpoint (no auth required)
+// TASK-22: Expanded /health endpoint with DB stats and ledger info
 app.get('/health', (req, res) => {
+  const mem = process.memoryUsage();
+  const ledgerEntryCount = Object.values(billingLedger).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
+  const dbSize = fs.existsSync(DB_PATH) ? Math.round(fs.statSync(DB_PATH).size / 1024) : 0;
   res.json({
     status: 'ok',
     uptime_seconds: Math.round(process.uptime()),
     clients: clients.length,
     sessions: getSessionCount(),
     servers: apiServers.length,
-    memory_mb: Math.round(process.memoryUsage().rss / 1024 / 1024),
+    memory: {
+      rss_mb: Math.round(mem.rss / 1024 / 1024),
+      heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
+      heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024)
+    },
+    database: {
+      size_kb: dbSize,
+      ledger_entries: ledgerEntryCount,
+      wal_mode: true
+    },
+    telegram: {
+      bot_active: !!TG_TOKEN,
+      users: Object.keys(tgUsers).length,
+      active_proxies: tgProxies.filter(p => p.active !== false).length
+    },
+    intervals: _intervals.length,
     timestamp: new Date().toISOString()
   });
 });
@@ -4426,45 +4504,10 @@ app.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async 
   const client = clientById.get(clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
-  // Calculate items from billing ledger if not provided
+  // TASK-06: Use shared helper for act items
   let actItems = items;
   if (!actItems || actItems.length === 0) {
-    const ledgerEntries = billingLedger[clientId] || [];
-    const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
-    const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
-    const totalCost = monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0);
-    const modemCharges = monthCharges.filter(e => e.billing_type === 'per_modem');
-    const gbCharges = monthCharges.filter(e => e.billing_type !== 'per_modem');
-
-    actItems = [];
-    if (gbCharges.length > 0) {
-      actItems.push({
-        name: 'Услуги мобильных прокси (трафик)',
-        quantity: Math.round(totalGb * 100) / 100,
-        unit: 'ГБ',
-        price: client.price || 23,
-        amount: Math.round(gbCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
-      });
-    }
-    if (modemCharges.length > 0) {
-      const modemCount = new Set(modemCharges.map(e => e.note || '')).size || 1;
-      actItems.push({
-        name: 'Услуги мобильных прокси (аренда модемов)',
-        quantity: modemCount,
-        unit: 'шт',
-        price: client.price || 0,
-        amount: Math.round(modemCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
-      });
-    }
-    if (actItems.length === 0) {
-      actItems.push({
-        name: 'Услуги мобильных прокси',
-        quantity: 1,
-        unit: 'мес',
-        price: 0,
-        amount: Math.round(totalCost * 100) / 100
-      });
-    }
+    ({ actItems } = buildActItemsFromLedger(client, period));
   }
 
   const totalAmount = actItems.reduce((s, i) => s + (i.amount || 0), 0);
@@ -4654,17 +4697,9 @@ app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, asy
     }
 
     try {
-      const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
-      const totalCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
+      // TASK-06: Use shared helper
+      const { actItems, totalCost } = buildActItemsFromLedger(client, period);
       if (totalCost <= 0) { skipped++; continue; }
-
-      const actItems = [{
-        name: 'Услуги мобильных прокси',
-        quantity: Math.round(totalGb * 100) / 100 || 1,
-        unit: totalGb > 0 ? 'ГБ' : 'мес',
-        price: client.price || 23,
-        amount: totalCost
-      }];
 
       // Try Tochka API
       let tochkaDocumentId = null;
@@ -4958,17 +4993,8 @@ async function autoGenerateMonthlyActs() {
     if ((client.closingDocuments || []).some(d => d.period === period)) continue;
 
     try {
-      // Calculate totals
-      const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
-      const totalCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
-
-      const actItems = [{
-        name: 'Услуги мобильных прокси',
-        quantity: Math.round(totalGb * 100) / 100 || 1,
-        unit: totalGb > 0 ? 'ГБ' : 'мес',
-        price: client.price || 23,
-        amount: totalCost
-      }];
+      // TASK-06: Use shared helper
+      const { actItems, totalCost } = buildActItemsFromLedger(client, period);
 
       // Try Tochka API
       let tochkaDocumentId = null;
@@ -5290,15 +5316,17 @@ function getTgUser(chatId, username) {
 })();
 
 const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-const TG_PRICE = parseInt(process.env.TELEGRAM_BOT_PRICE) || 599;
+// TASK-18: Removed dead TG_PRICE (was unused — PLANS define prices per plan)
 // TASK-K: Use publicIp from apiServers instead of hardcoded IPs
 const SERVER_IPS = Object.fromEntries(apiServers.map(s => [s.name, s.publicIp]));
 
+// TASK-17: Telegram bot plans — configurable via env vars
+// Env format: TG_PLAN_<KEY>_PRICE, TG_PLAN_<KEY>_DAYS, TG_PLAN_<KEY>_LABEL
 const PLANS = {
-  test:  { label: 'Тест (1 день)',  price: 0,   days: 1 },
-  '1m':  { label: '1 месяц',        price: 599, days: 30 },
-  '6m':  { label: '6 месяцев',      price: 499, days: 180 },
-  '12m': { label: '12 месяцев',     price: 399, days: 360 }
+  test:  { label: 'Тест (1 день)',  price: parseInt(process.env.TG_PLAN_TEST_PRICE) || 0,   days: parseInt(process.env.TG_PLAN_TEST_DAYS) || 1 },
+  '1m':  { label: '1 месяц',        price: parseInt(process.env.TG_PLAN_1M_PRICE)   || 599, days: parseInt(process.env.TG_PLAN_1M_DAYS)   || 30 },
+  '6m':  { label: '6 месяцев',      price: parseInt(process.env.TG_PLAN_6M_PRICE)   || 499, days: parseInt(process.env.TG_PLAN_6M_DAYS)   || 180 },
+  '12m': { label: '12 месяцев',     price: parseInt(process.env.TG_PLAN_12M_PRICE)  || 399, days: parseInt(process.env.TG_PLAN_12M_DAYS)  || 360 }
 };
 
 // Reply keyboard layouts
@@ -5308,10 +5336,11 @@ const KB_MAIN = { keyboard: [
   ['❓ Инструкция', '💬 Обратная связь']
 ], resize_keyboard: true };
 
+// TASK-17: Dynamic keyboard from PLANS config
 const KB_PLANS = { keyboard: [
-  ['📅 1 мес — 599 ₽'],
-  ['📅 6 мес — 499 ₽/мес'],
-  ['📅 12 мес — 399 ₽/мес'],
+  [`📅 1 мес — ${PLANS['1m'].price} ₽`],
+  [`📅 6 мес — ${PLANS['6m'].price} ₽/мес`],
+  [`📅 12 мес — ${PLANS['12m'].price} ₽/мес`],
   ['🎁 Тест (1 день)', '◀️ Назад']
 ], resize_keyboard: true };
 
