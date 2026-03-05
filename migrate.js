@@ -70,8 +70,8 @@ const insertDocStmt = db.prepare(`
 `);
 
 const insertClosingDocStmt = db.prepare(`
-  INSERT OR IGNORE INTO closing_documents (id, client_id, tochka_doc_id, period, type, act_number, items, total_amount, status, created_at)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT OR IGNORE INTO closing_documents (id, client_id, tochka_doc_id, period, type, act_number, items, total_amount, status, contract_info, signed_at, created_at)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 const insertBillStmt = db.prepare(`
@@ -112,7 +112,8 @@ const migrateClientsTransaction = db.transaction(() => {
       insertClosingDocStmt.run(
         cd.id, c.id, cd.tochkaDocumentId || '', cd.period || '', cd.type || 'act',
         cd.actNumber || '', JSON.stringify(cd.items || []), cd.totalAmount || 0,
-        cd.status || 'unsigned', cd.createdAt || new Date().toISOString()
+        cd.status || 'unsigned', cd.contractInfo || '', cd.signedAt || null,
+        cd.createdAt || new Date().toISOString()
       );
       closingDocCount++;
     }
@@ -135,8 +136,8 @@ console.log(`  ${clientCount} clients, ${paymentCount} payments, ${docCount} doc
 console.log('\n[3/8] Migrating billing ledger...');
 const ledger = loadJson('billing_ledger.json', {});
 const insertLedger = db.prepare(`
-  INSERT INTO billing_ledger (client_id, type, date, timestamp, amount, currency, balance_before, balance_after, gb_used, modem_count, days_in_month, note, source, payment_id)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  INSERT INTO billing_ledger (client_id, type, date, timestamp, amount, currency, balance_before, balance_after, gb_used, modem_count, days_in_month, note, source, payment_id, details)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 `);
 
 let ledgerCount = 0;
@@ -144,11 +145,20 @@ const migrateLedgerTransaction = db.transaction(() => {
   for (const [clientId, entries] of Object.entries(ledger)) {
     if (!Array.isArray(entries)) continue;
     for (const e of entries) {
+      // For charges, the amount is stored in 'cost'; for others in 'amount'
+      const amount = e.type === 'charge' ? (e.cost || 0) : (e.amount || 0);
+      // Extra fields not in schema → details JSON
+      const details = {};
+      if (e.delta_bytes != null) details.delta_bytes = e.delta_bytes;
+      if (e.price_per_unit != null) details.price_per_unit = e.price_per_unit;
+      if (e.billing_type) details.billing_type = e.billing_type;
+      if (e.tochkaPaymentId) details.tochkaPaymentId = e.tochkaPaymentId;
       insertLedger.run(
-        clientId, e.type || '', e.date || '', e.timestamp || '', e.amount || 0,
+        clientId, e.type || '', e.date || '', e.timestamp || '', amount,
         e.currency || 'RUB', e.balance_before ?? null, e.balance_after ?? null,
-        e.gb_used ?? null, e.modem_count ?? null, e.days_in_month ?? null,
-        e.note || '', e.source || null, e.paymentId || null
+        e.delta_gb ?? null, e.modem_count ?? null, e.days_in_month ?? null,
+        e.note || '', e.source || null, e.paymentId || null,
+        Object.keys(details).length > 0 ? JSON.stringify(details) : null
       );
       ledgerCount++;
     }

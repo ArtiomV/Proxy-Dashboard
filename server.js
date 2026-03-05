@@ -24,15 +24,23 @@ if (fs.existsSync(SCHEMA_PATH)) {
   console.log('[SQLite] Schema applied, database ready');
 }
 
-// Auto-migrate from JSON if DB is empty but JSON files exist
+// TASK-02: Auto-migrate from JSON if DB is empty but JSON files exist (async, no execSync)
 function autoMigrateIfNeeded() {
   const clientCount = db.prepare('SELECT COUNT(*) as cnt FROM clients').get().cnt;
   const jsonExists = fs.existsSync(path.join(__dirname, 'clients.json'));
   if (clientCount === 0 && jsonExists) {
     console.log('[SQLite] Empty database detected with existing JSON files. Running auto-migration...');
     try {
-      require('child_process').execSync('node migrate.js', { cwd: __dirname, stdio: 'inherit' });
-      console.log('[SQLite] Auto-migration complete');
+      const { execFile } = require('child_process');
+      execFile('node', ['migrate.js'], { cwd: __dirname }, (err, stdout, stderr) => {
+        if (err) {
+          console.error('[SQLite] Auto-migration failed:', err.message);
+          console.log('[SQLite] Run "node migrate.js" manually');
+        } else {
+          if (stdout) console.log(stdout);
+          console.log('[SQLite] Auto-migration complete');
+        }
+      });
     } catch (e) {
       console.error('[SQLite] Auto-migration failed:', e.message);
       console.log('[SQLite] Run "node migrate.js" manually');
@@ -199,6 +207,52 @@ const _clientUpsert = db.prepare(`INSERT INTO clients (id, login, password, pass
     updated_at=datetime('now')`);
 const _clientDelete = db.prepare('DELETE FROM clients WHERE id = ?');
 const _clientGetIds = db.prepare('SELECT id FROM clients');
+
+// TASK-03: Atomic balance operations — prevent data corruption from concurrent updates
+const _clientGetBalance = db.prepare('SELECT balance FROM clients WHERE id = ?');
+const _clientUpdateBalance = db.prepare('UPDATE clients SET balance = ?, updated_at = datetime(\'now\') WHERE id = ?');
+
+/**
+ * atomicCredit — atomically add amount to client balance (payment, refund)
+ * Returns { balanceBefore, balanceAfter } or throws
+ */
+function atomicCredit(clientId, amount) {
+  amount = Math.round(parseFloat(amount) * 100) / 100;
+  if (isNaN(amount) || amount === 0) throw new Error('atomicCredit: invalid amount');
+  let balanceBefore, balanceAfter;
+  db.transaction(() => {
+    const row = _clientGetBalance.get(clientId);
+    if (!row) throw new Error(`atomicCredit: client ${clientId} not found`);
+    balanceBefore = row.balance || 0;
+    balanceAfter = Math.round((balanceBefore + amount) * 100) / 100;
+    _clientUpdateBalance.run(balanceAfter, clientId);
+  })();
+  // Sync in-memory
+  const client = clients.find(c => c.id === clientId);
+  if (client) client.balance = balanceAfter;
+  return { balanceBefore, balanceAfter };
+}
+
+/**
+ * atomicDebit — atomically subtract amount from client balance (charge)
+ * Returns { balanceBefore, balanceAfter } or throws
+ */
+function atomicDebit(clientId, amount) {
+  amount = Math.round(parseFloat(amount) * 100) / 100;
+  if (isNaN(amount) || amount === 0) throw new Error('atomicDebit: invalid amount');
+  let balanceBefore, balanceAfter;
+  db.transaction(() => {
+    const row = _clientGetBalance.get(clientId);
+    if (!row) throw new Error(`atomicDebit: client ${clientId} not found`);
+    balanceBefore = row.balance || 0;
+    balanceAfter = Math.round((balanceBefore - amount) * 100) / 100;
+    _clientUpdateBalance.run(balanceAfter, clientId);
+  })();
+  // Sync in-memory
+  const client = clients.find(c => c.id === clientId);
+  if (client) client.balance = balanceAfter;
+  return { balanceBefore, balanceAfter };
+}
 const _paymentDeleteByClient = db.prepare('DELETE FROM payments WHERE client_id = ?');
 const _paymentInsert = db.prepare('INSERT INTO payments (client_id, amount, date, note, source, payment_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
 const _docDeleteByClient = db.prepare('DELETE FROM client_documents WHERE client_id = ?');
@@ -366,35 +420,53 @@ let billingLedger = {};
 
 const MAX_LEDGER_ENTRIES = 1000; // per client
 
+// TASK-04: Helper to build details JSON and amount for SQLite insert
+function _ledgerEntryParams(clientId, e) {
+  const amount = e.type === 'charge' ? (e.cost || 0) : (e.amount || 0);
+  const details = {};
+  if (e.delta_bytes != null) details.delta_bytes = e.delta_bytes;
+  if (e.price_per_unit != null) details.price_per_unit = e.price_per_unit;
+  if (e.billing_type) details.billing_type = e.billing_type;
+  if (e.tochkaPaymentId) details.tochkaPaymentId = e.tochkaPaymentId;
+  return [
+    clientId, e.type || '', e.date || '', e.timestamp || '', amount,
+    e.currency || 'RUB', e.balance_before ?? null, e.balance_after ?? null,
+    e.delta_gb ?? null, e.modem_count ?? null, e.days_in_month ?? null,
+    e.note || '', e.source || null, e.paymentId || null,
+    Object.keys(details).length > 0 ? JSON.stringify(details) : null
+  ];
+}
+
+/**
+ * TASK-04: Incremental appendLedgerEntry — inserts single entry to SQLite + in-memory
+ * Use this instead of push + saveBillingLedger() for single entries
+ */
+function appendLedgerEntry(clientId, entry) {
+  if (!billingLedger[clientId]) billingLedger[clientId] = [];
+  billingLedger[clientId].push(entry);
+  try {
+    _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
+  } catch (e) {
+    console.error('[SQLite] Error appending ledger entry:', e.message);
+  }
+}
+
+// TASK-04: Full save — only for bulk operations (migration, ledger trimming, entry deletion)
 function saveBillingLedger() {
   try {
-    // Only save entries for clients that exist in DB (skip orphaned entries)
     const validIds = new Set(_clientGetIds.all().map(r => r.id));
     db.transaction(() => {
       for (const clientId in billingLedger) {
-        if (!validIds.has(clientId)) continue; // skip orphaned entries
+        if (!validIds.has(clientId)) continue;
         let entries = billingLedger[clientId];
         if (!Array.isArray(entries)) continue;
-        // Trim oversized ledgers
         if (entries.length > MAX_LEDGER_ENTRIES) {
           entries = entries.slice(-MAX_LEDGER_ENTRIES);
           billingLedger[clientId] = entries;
         }
         _ledgerDeleteByClient.run(clientId);
         for (const e of entries) {
-          const amount = e.type === 'charge' ? (e.cost || 0) : (e.amount || 0);
-          const details = {};
-          if (e.delta_bytes != null) details.delta_bytes = e.delta_bytes;
-          if (e.price_per_unit != null) details.price_per_unit = e.price_per_unit;
-          if (e.billing_type) details.billing_type = e.billing_type;
-          if (e.tochkaPaymentId) details.tochkaPaymentId = e.tochkaPaymentId;
-          _ledgerInsert.run(
-            clientId, e.type || '', e.date || '', e.timestamp || '', amount,
-            e.currency || 'RUB', e.balance_before ?? null, e.balance_after ?? null,
-            e.delta_gb ?? null, e.modem_count ?? null, e.days_in_month ?? null,
-            e.note || '', e.source || null, e.paymentId || null,
-            Object.keys(details).length > 0 ? JSON.stringify(details) : null
-          );
+          _ledgerInsert.run(..._ledgerEntryParams(clientId, e));
         }
       }
     })();
@@ -1098,13 +1170,14 @@ function getSessionCount() {
   return dbStmts.countSessions.get(Date.now()).cnt;
 }
 
-// Periodic session cleanup — every hour, remove expired sessions
-setInterval(() => {
+// TASK-13: Store interval refs for graceful shutdown
+const _intervals = [];
+_intervals.push(setInterval(() => {
   const result = dbStmts.cleanExpiredSessions.run(Date.now());
   if (result.changes > 0) {
     console.log(`[Sessions] Cleaned ${result.changes} expired session(s)`);
   }
-}, 60 * 60 * 1000);
+}, 60 * 60 * 1000));
 
 function generateToken() { return crypto.randomBytes(32).toString('hex'); }
 function generateId() { return crypto.randomBytes(8).toString('hex'); }
@@ -1214,6 +1287,15 @@ const resetTokenLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10, // max 10 attempts per IP per minute
   message: { error: 'Too many requests, try again in 1 minute' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// TASK-12: Rate limiting for check_proxy (heavy network ops)
+const checkProxyLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 5, // max 5 batch checks per IP per minute
+  message: { error: 'Too many proxy check requests, try again in 1 minute' },
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -1558,7 +1640,10 @@ function mergeServerData(allData, portNameFilter) {
     const statusArr = Array.isArray(filtered.status) ? filtered.status : [];
     for (const m of statusArr) {
       // Skip ghost entries from deleted ports (no STATE, no proxy_creds)
-      if (!m.STATE || m.STATE === '?') continue;
+      // But allow rebooting modems and offline-injected modems through
+      if (!m.STATE || m.STATE === '?') {
+        if (m.IS_REBOOTING !== 'true' && !m._offline) continue;
+      }
       const entry = { ...m, _server: data.serverName };
       if (isCached) entry._cached = true;
       if (entry.modem_details && entry.modem_details.IMEI) {
@@ -1574,6 +1659,29 @@ function mergeServerData(allData, portNameFilter) {
       if (prefixedPorts.length > 0) mergedPorts[prefixedImei] = (mergedPorts[prefixedImei] || []).concat(prefixedPorts);
     }
   }
+
+  // Ensure every modem in ports has a status entry (handles modems present in bw/ports but missing from status during reboot)
+  const statusImeis = new Set(mergedStatus.map(m => m.modem_details ? m.modem_details.IMEI : null).filter(Boolean));
+  for (const [imei, portList] of Object.entries(mergedPorts)) {
+    if (statusImeis.has(imei)) continue;
+    // Find server name and nick from port data or knownModems
+    const srv = (portList[0] && portList[0]._server) || '';
+    const rawImei = imei.replace(/^S\d+_/, '');
+    let nick = '', model = '';
+    const km = knownModems[srv];
+    if (km) {
+      for (const info of Object.values(km)) {
+        if (info.imei === rawImei) { nick = info.nick || ''; model = info.model || ''; break; }
+      }
+    }
+    mergedStatus.push({
+      modem_details: { IMEI: imei, NICK: nick, MODEL_SHOWN: model, MODEL: model },
+      net_details: { IS_ONLINE: 'no', EXT_IP: '', CELLOP: '', CurrentNetworkType: '' },
+      _server: srv,
+      _offline: true
+    });
+  }
+
   return { bandwidth: mergedBw, status: mergedStatus, ports: mergedPorts, modemLogins, cachedServers };
 }
 
@@ -1955,6 +2063,19 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
         .filter(e => e.type === 'charge' && e.date && e.date.startsWith(currentMonthPrefix))
         .reduce((sum, e) => sum + (e.cost || 0), 0);
 
+      // TRAFFIC-FIX: Compute live month traffic from ProxySmart real-time data for this client
+      let liveMonthBytes = 0;
+      for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+        liveMonthBytes += parseBwToBytes(bwData.bandwidth_bytes_month_in);
+        liveMonthBytes += parseBwToBytes(bwData.bandwidth_bytes_month_out);
+      }
+      const liveMonthGb = Math.round((liveMonthBytes / (1024 * 1024 * 1024)) * 1000) / 1000;
+
+      // Billed month GB from ledger (for comparison)
+      const billedMonthGb = ledgerEntries
+        .filter(e => e.type === 'charge' && e.date && e.date.startsWith(currentMonthPrefix))
+        .reduce((sum, e) => sum + (e.delta_gb || 0), 0);
+
       merged.billing = {
         billingType: clientInfo.billingType || 'per_gb',
         price: clientInfo.price || 0,
@@ -1962,6 +2083,8 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
         totalPayments,
         balance: clientInfo.balance !== undefined ? clientInfo.balance : totalPayments,
         monthExpense: Math.round(monthExpense * 100) / 100,
+        liveMonthGb,
+        billedMonthGb: Math.round(billedMonthGb * 1000) / 1000,
         apiKey: clientInfo.apiKey || ''
       };
     }
@@ -2012,12 +2135,14 @@ app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
 
   // Sprint-4 Task 4c: Build portId→portName mapping from cached bandwidth data
   // After server restart, daily_traffic entries loaded from SQLite lack portName field
+  // FIX: prepend server prefix (e.g. "S1_") to match dailyTraffic keys
   const portNameMap = {};
   try {
     const cachedResults = await fetchAllServersDataCached();
     for (const data of cachedResults) {
+      const prefix = (data.serverName || '') + '_';
       for (const [pid, b] of Object.entries(data.bw || {})) {
-        if (b.portName) portNameMap[pid] = b.portName;
+        if (b.portName) portNameMap[prefix + pid] = b.portName;
       }
     }
   } catch (e) { /* cache may not be ready yet */ }
@@ -2432,12 +2557,7 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
     const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, '*');
     const servers = apiServers.map(s => ({ name: s.name, url: s.url }));
-    // Include server auth info for direct reset URLs
-    const serverAuth = {};
-    for (const s of apiServers) {
-      const urlObj = new URL(s.url);
-      serverAuth[s.name] = { user: s.user, pass: s.pass, host: urlObj.host, protocol: urlObj.protocol };
-    }
+    // TASK-01 (SEC): serverAuth removed — credentials must never reach the frontend
     // SEC-04: Strip passwords/hashes from client data sent to frontend
     const sanitizedClients = clients.map(c => {
       const { password, passwordHash, ...safe } = c;
@@ -2446,21 +2566,50 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
     // BUG-11: billingLedger removed from bulk response — use /api/admin/clients/:id/ledger instead
     // Sprint-4 Task 1: Compute monthly charges server-side (replaces client-side billingLedger lookup)
     const clientMonthCharges = {};
+    const clientMonthGb = {};
     const curMonthPfx = new Date().toISOString().slice(0, 7);
     for (const [clientId, entries] of Object.entries(billingLedger)) {
-      let cost = 0;
+      let cost = 0, gb = 0;
       for (const e of entries) {
         if (e.type === 'charge' && e.date && e.date.startsWith(curMonthPfx)) {
           cost += (e.cost || 0);
+          gb += (e.delta_gb || 0);
         }
       }
       if (cost !== 0) clientMonthCharges[clientId] = Math.round(cost * 100) / 100;
+      if (gb !== 0) clientMonthGb[clientId] = Math.round(gb * 1000) / 1000;
     }
+
+    // TRAFFIC-FIX: Compute live month traffic per client from ProxySmart real-time data
+    // This fixes discrepancy between admin client list (was showing billed delta only)
+    // and admin analytics / client portal (showing live counters)
+    const clientLiveMonthGb = {};
+    const portNameToClientId = {};
+    for (const c of clients) {
+      if (c.portName) portNameToClientId[c.portName] = c.id;
+    }
+    // Sum bandwidth_bytes_month_in + _out for each portName from live data
+    const portNameBytes = {};
+    for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+      const pn = bwData.portName;
+      if (!pn || !portNameToClientId[pn]) continue;
+      if (!portNameBytes[pn]) portNameBytes[pn] = 0;
+      portNameBytes[pn] += parseBwToBytes(bwData.bandwidth_bytes_month_in);
+      portNameBytes[pn] += parseBwToBytes(bwData.bandwidth_bytes_month_out);
+    }
+    for (const [pn, bytes] of Object.entries(portNameBytes)) {
+      const cid = portNameToClientId[pn];
+      if (cid && bytes > 0) {
+        clientLiveMonthGb[cid] = Math.round((bytes / (1024 * 1024 * 1024)) * 1000) / 1000;
+      }
+    }
+
     res.json({
       clientMonthCharges,
+      clientMonthGb,
+      clientLiveMonthGb,
       ...merged,
       servers,
-      serverAuth,
       clients: sanitizedClients,
       ipTracking,
       uptimeTracking,
@@ -2597,12 +2746,13 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, async (req, res)
 });
 
 app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res) => {
-  const idx = clients.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
+  // TASK-10: O(1) lookup + index needed for array replacement
+  const old = clientById.get(req.params.id);
+  if (!old) return res.status(404).json({ error: 'Client not found' });
+  const idx = clients.indexOf(old);
   // BUG-12: Validate input
   const valErr = validateClientInput(req.body, false);
   if (valErr) return res.status(400).json({ error: valErr });
-  const old = clients[idx];
   const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address, autoActs, autoBills, clientType } = req.body;
   if (login && login !== old.login) {
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
@@ -2701,22 +2851,19 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
     createdAt: new Date().toISOString()
   });
 
-  // Update persistent balance
+  // TASK-03: Atomic balance update
   const paymentAmount = parseFloat(amount);
-  const balanceBefore = clients[idx].balance || 0;
-  clients[idx].balance = Math.round((balanceBefore + paymentAmount) * 100) / 100;
+  const { balanceBefore, balanceAfter } = atomicCredit(clients[idx].id, paymentAmount);
 
-  // Ledger entry for payment
-  const ledgerKey = clients[idx].id;
-  if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
-  billingLedger[ledgerKey].push({
+  // TASK-04: Incremental ledger entry
+  appendLedgerEntry(clients[idx].id, {
     type: 'payment',
     date: date,
     timestamp: new Date().toISOString(),
     amount: paymentAmount,
     currency: clients[idx].currency || 'RUB',
     balance_before: balanceBefore,
-    balance_after: clients[idx].balance,
+    balance_after: balanceAfter,
     note: note || 'Пополнение баланса'
   });
 
@@ -2731,7 +2878,6 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
   }
 
   saveClients(clients);
-  saveBillingLedger();
   auditLog(req.user.login, 'add_payment', { clientId: clients[idx].id, amount: parsedAmount, note: note || '' });
   res.json({ ok: true, payments: clients[idx].payments, balance: clients[idx].balance });
 });
@@ -2753,26 +2899,23 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
   const deletedAmount = parseFloat(deletedPayment.amount) || 0;
   clients[idx].payments.splice(payIdx, 1);
 
-  // Update persistent balance
-  const balanceBefore = clients[idx].balance || 0;
-  clients[idx].balance = Math.round((balanceBefore - deletedAmount) * 100) / 100;
+  // TASK-03: Atomic balance update (reverse payment = debit)
+  const { balanceBefore, balanceAfter } = atomicDebit(clients[idx].id, deletedAmount);
 
   // Ledger entry for reversal
-  const ledgerKey = clients[idx].id;
-  if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
-  billingLedger[ledgerKey].push({
+  // TASK-04: Incremental ledger entry
+  appendLedgerEntry(clients[idx].id, {
     type: 'payment_reversal',
     date: new Date().toISOString().slice(0, 10),
     timestamp: new Date().toISOString(),
     amount: -deletedAmount,
     currency: clients[idx].currency || 'RUB',
     balance_before: balanceBefore,
-    balance_after: clients[idx].balance,
+    balance_after: balanceAfter,
     note: 'Отмена оплаты администратором'
   });
 
   saveClients(clients);
-  saveBillingLedger();
   res.json({ ok: true, payments: clients[idx].payments, balance: clients[idx].balance });
 });
 
@@ -2805,15 +2948,15 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
   if (isNaN(idx) || idx < 0 || idx >= entries.length) return res.status(400).json({ error: 'Invalid entry index' });
 
   const entry = entries[idx];
-  // Revert balance impact
+  // TASK-03: Atomic revert of balance impact
   if (entry.type === 'charge' && entry.cost) {
-    client.balance = (client.balance || 0) + entry.cost; // refund charge
+    atomicCredit(client.id, entry.cost); // refund charge
   } else if ((entry.type === 'payment' || entry.type === 'bank_payment') && entry.amount) {
-    client.balance = (client.balance || 0) - entry.amount; // remove payment
+    atomicDebit(client.id, entry.amount); // remove payment
   } else if (entry.type === 'adjustment' && entry.amount) {
-    client.balance = (client.balance || 0) - entry.amount;
+    if (entry.amount > 0) atomicDebit(client.id, entry.amount);
+    else atomicCredit(client.id, -entry.amount);
   }
-  client.balance = Math.round(client.balance * 100) / 100;
 
   entries.splice(idx, 1);
   billingLedger[client.id] = entries;
@@ -2830,25 +2973,28 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
   const { amount, note } = req.body;
   if (amount === undefined) return res.status(400).json({ error: 'amount required' });
 
+  // TASK-03: Atomic balance adjustment
   const adjustment = parseFloat(amount);
-  const balanceBefore = clients[idx].balance || 0;
-  clients[idx].balance = Math.round((balanceBefore + adjustment) * 100) / 100;
+  let balanceBefore, balanceAfter;
+  if (adjustment >= 0) {
+    ({ balanceBefore, balanceAfter } = atomicCredit(clients[idx].id, adjustment));
+  } else {
+    ({ balanceBefore, balanceAfter } = atomicDebit(clients[idx].id, -adjustment));
+  }
 
-  const ledgerKey = clients[idx].id;
-  if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
-  billingLedger[ledgerKey].push({
+  // TASK-04: Incremental ledger entry
+  appendLedgerEntry(clients[idx].id, {
     type: 'adjustment',
     date: new Date().toISOString().slice(0, 10),
     timestamp: new Date().toISOString(),
     amount: adjustment,
     currency: clients[idx].currency || 'RUB',
     balance_before: balanceBefore,
-    balance_after: clients[idx].balance,
+    balance_after: balanceAfter,
     note: note || 'Ручная корректировка баланса'
   });
 
   saveClients(clients);
-  saveBillingLedger();
   auditLog(req.user.login, 'balance_adjust', { clientId: clients[idx].id, amount: adjustment, note: note || '' });
   res.json({ ok: true, balance: clients[idx].balance });
 });
@@ -2856,8 +3002,9 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
 // ==================== ADMIN: DOCUMENTS ====================
 
 app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, async (req, res) => {
-  const idx = clients.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
+  // TASK-10: O(1) lookup
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
   const { name, fileBase64, mimeType } = req.body;
   if (!name || !fileBase64) return res.status(400).json({ error: 'name and fileBase64 required' });
 
@@ -2879,8 +3026,8 @@ app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, asy
 
   await fsPromises.writeFile(filePath, Buffer.from(fileBase64, 'base64'));
 
-  if (!clients[idx].documents) clients[idx].documents = [];
-  clients[idx].documents.push({
+  if (!client.documents) client.documents = [];
+  client.documents.push({
     id: docId,
     name,
     fileName,
@@ -2892,15 +3039,16 @@ app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, asy
 });
 
 app.delete('/api/admin/clients/:id/document/:docId', authMiddleware, adminMiddleware, (req, res) => {
-  const idx = clients.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
-  if (!clients[idx].documents) return res.status(404).json({ error: 'No documents' });
-  const docIdx = clients[idx].documents.findIndex(d => d.id === req.params.docId);
+  // TASK-10: O(1) lookup
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  if (!client.documents) return res.status(404).json({ error: 'No documents' });
+  const docIdx = client.documents.findIndex(d => d.id === req.params.docId);
   if (docIdx === -1) return res.status(404).json({ error: 'Document not found' });
-  const doc = clients[idx].documents[docIdx];
+  const doc = client.documents[docIdx];
   // Delete file
   try { fs.unlinkSync(path.join(DOCUMENTS_DIR, doc.fileName)); } catch (e) {}
-  clients[idx].documents.splice(docIdx, 1);
+  client.documents.splice(docIdx, 1);
   saveClients(clients);
   res.json({ ok: true });
 });
@@ -2908,11 +3056,12 @@ app.delete('/api/admin/clients/:id/document/:docId', authMiddleware, adminMiddle
 // ==================== ADMIN: API KEY MANAGEMENT ====================
 
 app.post('/api/admin/clients/:id/regenerate_key', authMiddleware, adminMiddleware, (req, res) => {
-  const idx = clients.findIndex(c => c.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
-  clients[idx].apiKey = 'prx_' + crypto.randomBytes(24).toString('hex');
+  // TASK-10: O(1) lookup
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  client.apiKey = 'prx_' + crypto.randomBytes(24).toString('hex');
   saveClients(clients);
-  res.json({ ok: true, apiKey: clients[idx].apiKey });
+  res.json({ ok: true, apiKey: client.apiKey });
 });
 
 // ==================== ADMIN: AUDIT LOG (TASK-J) ====================
@@ -3265,7 +3414,7 @@ app.get('/api/admin/shop_report', authMiddleware, adminMiddleware, async (req, r
 
 // ==================== TOOLS: PROXY CHECKER ====================
 
-app.post('/api/tools/check_proxy', authMiddleware, async (req, res) => {
+app.post('/api/tools/check_proxy', checkProxyLimiter, authMiddleware, async (req, res) => {
   const { proxies } = req.body;
   if (!Array.isArray(proxies) || proxies.length === 0) {
     return res.status(400).json({ error: 'proxies array required' });
@@ -3313,7 +3462,6 @@ app.post('/api/tools/check_proxy', authMiddleware, async (req, res) => {
     // TCP fallback — proxy port is open but HTTP check failed
     try {
       await new Promise((resolve, reject) => {
-        const net = require('net');
         const sock = new net.Socket();
         sock.setTimeout(5000);
         sock.connect(parseInt(proxy.port), proxy.ip, () => { sock.destroy(); resolve(true); });
@@ -3571,14 +3719,11 @@ async function runDailyBilling() {
         continue;
       }
 
-      // Deduct from balance
-      const balanceBefore = client.balance || 0;
-      client.balance = Math.round((balanceBefore - cost) * 100) / 100;
+      // TASK-03+05: Atomic debit for billing
+      const { balanceBefore, balanceAfter } = atomicDebit(client.id, cost);
 
-      // Record in ledger
-      const ledgerKey = client.id;
-      if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
-      billingLedger[ledgerKey].push({
+      // TASK-04: Incremental ledger entry
+      appendLedgerEntry(client.id, {
         type: 'charge',
         date: new Date().toISOString().slice(0, 10),
         timestamp: new Date().toISOString(),
@@ -3589,7 +3734,7 @@ async function runDailyBilling() {
         cost,
         currency: client.currency || 'RUB',
         balance_before: balanceBefore,
-        balance_after: client.balance,
+        balance_after: balanceAfter,
         note: 'Списание за трафик (' + new Date().toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric'}) + ')'
       });
 
@@ -3601,7 +3746,6 @@ async function runDailyBilling() {
   }
 
   saveClients(clients);
-  saveBillingLedger();
   console.log(`[Billing] Complete: ${charged} charged, ${skipped} skipped`);
 }
 
@@ -3839,7 +3983,8 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
     const webhookType = payload.webhookType || '';
     const payerInn = payload.SidePayer?.inn || '';
     const payerName = payload.SidePayer?.name || '';
-    const amount = parseFloat(payload.SidePayer?.amount || payload.amount || '0');
+    // TASK-09: Round amount to 2 decimal places to avoid floating-point drift
+    const amount = Math.round(parseFloat(payload.SidePayer?.amount || payload.amount || '0') * 100) / 100;
     if (isNaN(amount) || amount <= 0 || amount > 100000000) {
       console.warn(`[Tochka Webhook] Invalid amount: ${amount}, skipping auto-credit`);
       return res.status(200).json({ ok: true, processed: false, reason: 'invalid_amount' });
@@ -3882,15 +4027,13 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
         bankPayment.matchedClientId = matchedClient.id;
         bankPayment.matchedClientName = matchedClient.name;
 
-        // Auto-credit balance
-        const idx = clients.findIndex(c => c.id === matchedClient.id);
-        if (idx !== -1) {
-          const balanceBefore = clients[idx].balance || 0;
-          clients[idx].balance = Math.round((balanceBefore + amount) * 100) / 100;
+        // TASK-03: Atomic credit for webhook payment
+        {
+          const { balanceBefore, balanceAfter } = atomicCredit(matchedClient.id, amount);
 
           // Add payment record
-          if (!clients[idx].payments) clients[idx].payments = [];
-          clients[idx].payments.push({
+          if (!matchedClient.payments) matchedClient.payments = [];
+          matchedClient.payments.push({
             amount,
             date: paymentDate,
             note: `Банк Точка: ${payerName} — ${purpose}`.slice(0, 200),
@@ -3899,25 +4042,23 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
             paymentId
           });
 
-          // Ledger entry
-          const ledgerKey = clients[idx].id;
-          if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
-          billingLedger[ledgerKey].push({
+          // TASK-04: Incremental ledger entry
+          appendLedgerEntry(matchedClient.id, {
             type: 'bank_payment',
             date: paymentDate,
             timestamp: new Date().toISOString(),
             amount,
             currency: 'RUB',
             balance_before: balanceBefore,
-            balance_after: clients[idx].balance,
+            balance_after: balanceAfter,
             note: `Банк Точка (ИНН: ${payerInn}): ${purpose}`.slice(0, 300),
             source: 'tochka_webhook',
             paymentId
           });
 
           // Referral commission
-          if (clients[idx].referred_by) {
-            const referrer = clients.find(c => c.id === clients[idx].referred_by);
+          if (matchedClient.referred_by) {
+            const referrer = clients.find(c => c.id === matchedClient.referred_by);
             if (referrer) {
               const commission = amount * 0.15;
               referrer.referral_balance = (referrer.referral_balance || 0) + commission;
@@ -3926,7 +4067,6 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
 
           bankPayment.autoCredit = true;
           saveClients(clients);
-          saveBillingLedger();
           console.log(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
         }
       } else {
@@ -4111,7 +4251,8 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
         loggedSample = true;
       }
 
-      const amount = parseFloat(tx.Amount?.amount || tx.amount || 0);
+      // TASK-08: Round amount to 2 decimal places
+      const amount = Math.round(parseFloat(tx.Amount?.amount || tx.amount || 0) * 100) / 100;
       // DebtorParty = плательщик (кто платит нам), CreditorParty = получатель
       const debtor = tx.DebtorParty || tx.CounterParty || tx.SidePayer || {};
       const payerInn = debtor.inn || debtor.Inn || debtor.taxCode || '';
@@ -4149,22 +4290,21 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
           bankPayment.matchedClientId = client.id;
           bankPayment.matchedClientName = client.name;
 
-          // Credit client balance
-          client.balance = (client.balance || 0) + amount;
+          // TASK-03: Atomic credit for tochka sync
+          const { balanceBefore: syncBB, balanceAfter: syncBA } = atomicCredit(client.id, amount);
           const ledgerEntry = {
             type: 'bank_payment',
-            amount: amount,
+            amount: Math.round(amount * 100) / 100,
             date: bankPayment.date,
             timestamp: new Date().toISOString(),
             note: 'Синхронизация из Точки: ' + (purpose || '').slice(0, 100),
             source: 'tochka_sync',
             tochkaPaymentId: paymentId,
-            balance_after: client.balance
+            balance_before: syncBB,
+            balance_after: syncBA
           };
-          // Write to global billingLedger (used by billing_history API)
-          const ledgerKey = client.id;
-          if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
-          billingLedger[ledgerKey].push(ledgerEntry);
+          // TASK-04: Incremental ledger entry
+          appendLedgerEntry(client.id, ledgerEntry);
           matched++;
         }
       }
@@ -4173,10 +4313,9 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
       imported++;
     }
 
-    // Save
+    // Save clients (ledger entries already saved incrementally)
     if (imported > 0) {
       saveClients(clients);
-      if (matched > 0) saveBillingLedger();
     }
 
     console.log(`[Tochka Sync] Done: ${imported} imported, ${matched} matched, ${skipped} skipped (duplicates)`);
@@ -4225,10 +4364,9 @@ app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (re
   const idx = clients.findIndex(c => c.id === clientId);
   if (idx === -1) return res.status(404).json({ error: 'Client not found' });
 
-  // Credit balance
+  // TASK-03: Atomic credit for manual match
   const amount = bp.amount;
-  const balanceBefore = clients[idx].balance || 0;
-  clients[idx].balance = Math.round((balanceBefore + amount) * 100) / 100;
+  const { balanceBefore, balanceAfter } = atomicCredit(clients[idx].id, amount);
 
   if (!clients[idx].payments) clients[idx].payments = [];
   clients[idx].payments.push({
@@ -4240,16 +4378,15 @@ app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (re
     paymentId: bp.paymentId
   });
 
-  const ledgerKey = clients[idx].id;
-  if (!billingLedger[ledgerKey]) billingLedger[ledgerKey] = [];
-  billingLedger[ledgerKey].push({
+  // TASK-04: Incremental ledger entry
+  appendLedgerEntry(clients[idx].id, {
     type: 'bank_payment',
     date: bp.date,
     timestamp: new Date().toISOString(),
     amount,
     currency: 'RUB',
     balance_before: balanceBefore,
-    balance_after: clients[idx].balance,
+    balance_after: balanceAfter,
     note: `Ручная привязка (ИНН: ${bp.payerInn}): ${bp.purpose}`.slice(0, 300),
     source: 'tochka_manual',
     paymentId: bp.paymentId
@@ -4259,7 +4396,6 @@ app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (re
   dbStmts.updateBankPaymentMatch.run(1, clients[idx].id, clients[idx].name, 0, paymentId);
 
   saveClients(clients);
-  saveBillingLedger();
   res.json({ ok: true, balance: clients[idx].balance });
 });
 
@@ -4958,9 +5094,9 @@ const httpServer = app.listen(PORT, () => {
   const TRACKING_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
   console.log(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
   trackModems().catch(e => console.error('[Tracking] Initial error:', e.message));
-  setInterval(() => {
+  _intervals.push(setInterval(() => {
     trackModems().catch(e => console.error('[Tracking] Error:', e.message));
-  }, TRACKING_INTERVAL_MS);
+  }, TRACKING_INTERVAL_MS));
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {
@@ -5911,7 +6047,7 @@ function startTelegramPolling() {
 
   // Expiration checker every 10 minutes
   checkTgProxyExpirations();
-  setInterval(checkTgProxyExpirations, 10 * 60 * 1000);
+  _intervals.push(setInterval(checkTgProxyExpirations, 10 * 60 * 1000));
 }
 
 if (TG_TOKEN) {
@@ -5921,6 +6057,10 @@ if (TG_TOKEN) {
 // ==================== GRACEFUL SHUTDOWN ====================
 function gracefulShutdown(signal) {
   console.log(`\n[Shutdown] Received ${signal}, shutting down gracefully...`);
+
+  // TASK-13: Clear all intervals to prevent memory leaks
+  for (const iv of _intervals) clearInterval(iv);
+  _intervals.length = 0;
 
   // Stop accepting new connections
   httpServer.close(() => {

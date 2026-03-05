@@ -18,30 +18,50 @@
   --bg-0:#0D0D0E;--bg-1:#121724;--bg-2:#1B2237;--bg-3:#1c2432;--bg-4:#243044;
   --border:rgba(255,255,255,0.06);--border-hover:rgba(255,255,255,0.12);
   --text-0:#f0f6fc;--text-1:#c9d1d9;--text-2:#7d8590;--text-3:#484f58;
-  --accent:#1960C9;--accent-hover:#2070d9;--accent-bg:rgba(25,96,201,.12);
+  --accent:#1960C9;--accent-hover:#2070d9;--accent-dim:rgba(25,96,201,0.12);
+  --accent-glow:rgba(25,96,201,0.25);
   --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
   --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
   --card-bg:rgba(18,23,36,0.7);--card-border:rgba(255,255,255,0.06);
   --card-shadow:0 4px 24px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.03);
+  --font-sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',Monaco,monospace;
+  --green:#34C759;--green-bg:rgba(52,199,89,0.15);
+  --red:#FF383C;--red-bg:rgba(255,56,60,0.15);--yellow:#FFCC00;
+  --blue:#3498db;--blue-bg:rgba(52,152,219,.15);
+  --orange:#e67e22;--orange-bg:rgba(230,126,34,.15);
+  --purple:#9b59b6;--purple-bg:rgba(155,89,182,.15);
+  --btn-primary-bg:#1960C9;--btn-primary-hover:#2070d9;
+  --row-hover:rgba(255,255,255,0.03);
+  --country-bg:rgba(25,96,201,0.04);
 }
 [data-theme="light"]{
   --bg-0:#f5f6f8;--bg-1:#ffffff;--bg-2:#f0f1f3;--bg-3:#e8eaed;--bg-4:#d8dce2;
   --border:rgba(0,0,0,0.08);--border-hover:rgba(0,0,0,0.15);
   --text-0:#0f1419;--text-1:#24292f;--text-2:#656d76;--text-3:#8b949e;
-  --accent:#1960C9;--accent-hover:#1450b0;--accent-bg:rgba(25,96,201,.1);
+  --accent:#1960C9;--accent-hover:#1450b0;--accent-dim:rgba(25,96,201,0.1);
+  --accent-glow:rgba(25,96,201,0.2);
   --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
   --success:#1a7f37;--warning:#FFCC00;--danger:#FF383C;
   --card-bg:rgba(255,255,255,0.8);--card-border:rgba(0,0,0,0.08);
   --card-shadow:0 4px 24px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.04);
+  --green:#1a7f37;--green-bg:rgba(26,127,55,0.12);
+  --red:#FF383C;--red-bg:rgba(255,56,60,0.1);--yellow:#FFCC00;
+  --blue:#2980b9;--blue-bg:rgba(41,128,185,.12);
+  --orange:#d35400;--orange-bg:rgba(211,84,0,.12);
+  --purple:#8e44ad;--purple-bg:rgba(142,68,173,.12);
+  --btn-primary-bg:#1960C9;--btn-primary-hover:#1450b0;
+  --row-hover:rgba(0,0,0,0.02);
+  --country-bg:rgba(25,96,201,0.04);
 }
 *{margin:0;padding:0;box-sizing:border-box}
-body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:var(--bg-0);color:var(--text-1);transition:background .3s,color .3s}
+body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);transition:background .3s,color .3s}
 
 /* Login — proxies.rent style */
-.login-overlay{position:fixed;inset:0;background:#0D0D0E;display:flex;align-items:center;justify-content:center;z-index:9999}
+.login-overlay{position:fixed;inset:0;background:#0D0D0E;display:flex;align-items:center;justify-content:center;z-index:1000}
 .login-overlay::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(25,96,201,0.15) 0%,transparent 60%);pointer-events:none}
 .login-overlay::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 80% 80%,rgba(52,199,89,0.06) 0%,transparent 50%);pointer-events:none}
-.login-box{background:#1B2237;border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:48px 40px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);position:relative;z-index:1}
+.login-box{background:#1B2237;border:1px solid rgba(255,255,255,0.08);border-radius:20px;padding:48px 40px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);position:relative;z-index:1;animation:fadeIn .5s ease}
 .login-logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:8px}
 .login-logo img{height:32px;width:auto}
 .login-logo span{font-size:22px;font-weight:600;color:#fff;letter-spacing:-0.3px}
@@ -52,7 +72,8 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .login-box button{width:100%;padding:14px;margin-top:6px;background:#1960C9;border:1px solid #1960C9;border-radius:8px;color:#fff;font-size:16px;cursor:pointer;font-weight:600;font-family:'Inter',sans-serif;transition:all .3s ease}
 .login-box button:hover{background:#fff;color:#1960C9;border-color:#fff}
 .login-box button:active{transform:scale(.98)}
-.login-error{color:#FF383C;font-size:13px;margin-top:8px;text-align:center}
+.login-error{color:#FF383C;font-size:13px;margin-bottom:12px;text-align:center}
+@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
 
 /* Header logo */
 .header-logo{display:flex;align-items:center;text-decoration:none}
@@ -63,7 +84,7 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .header-left{display:flex;align-items:center;gap:16px}
 .header h1{font-size:16px;background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;font-weight:700;letter-spacing:-.3px}
 .header-stats{display:flex;gap:10px}
-.stat-badge{background:var(--bg-2);padding:4px 10px;border-radius:5px;font-size:11px;color:var(--text-2);border:1px solid var(--border)}
+.stat-badge{background:var(--bg-2);padding:4px 10px;border-radius:4px;font-size:11px;color:var(--text-2);border:1px solid var(--border)}
 .stat-badge span{color:var(--text-0);font-weight:600}
 .header-right{display:flex;align-items:center;gap:8px}
 
@@ -80,11 +101,11 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .tab-content{display:none}.tab-content.active{display:block}
 
 /* Buttons */
-.btn{padding:6px 12px;border-radius:8px;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:500;transition:all .15s;display:inline-flex;align-items:center;gap:4px;background:var(--bg-2);color:var(--text-1)}
+.btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:500;transition:all .2s;display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);color:var(--text-1);font-family:var(--font-sans)}
 .btn:hover{border-color:var(--border-hover);background:var(--bg-3)}
-.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-primary{background:var(--btn-primary-bg);color:#fff;border-color:var(--btn-primary-bg)}
 .btn-primary:hover{background:var(--accent-hover);box-shadow:0 0 16px rgba(25,96,201,.25)}
-.btn-sm{padding:4px 8px;font-size:11px}
+.btn-sm{padding:5px 10px;font-size:11px}
 .btn-danger{background:var(--danger);color:#fff;border-color:var(--danger)}
 .btn-success{background:var(--success);color:#fff;border-color:var(--success)}
 .btn-warning{background:var(--warning);color:#fff;border-color:var(--warning)}
@@ -94,15 +115,15 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .search-box{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--text-0);font-size:12px;width:240px;outline:none}
 .search-box:focus{border-color:var(--accent)}
 .filter-group{display:flex;gap:3px}
-.filter-btn{padding:4px 10px;border-radius:5px;border:1px solid var(--border);background:transparent;color:var(--text-2);cursor:pointer;font-size:11px;transition:all .15s}
+.filter-btn{padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text-2);cursor:pointer;font-size:11px;transition:all .15s}
 .filter-btn:hover{background:var(--bg-3);color:var(--text-1)}
-.filter-btn.active{background:var(--accent-bg);color:var(--accent);border-color:var(--accent)}
+.filter-btn.active{background:var(--accent-dim);color:var(--accent);border-color:var(--accent)}
 
 /* Col selector */
 .col-selector{position:relative}
 .col-dropdown{position:absolute;top:100%;right:0;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:6px;z-index:100;min-width:180px;display:none;box-shadow:0 8px 24px rgba(0,0,0,.3)}
 .col-dropdown.show{display:block}
-.col-dropdown label{display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;font-size:11px;border-radius:3px;white-space:nowrap}
+.col-dropdown label{display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;font-size:11px;border-radius:4px;white-space:nowrap}
 .col-dropdown label:hover{background:var(--bg-3)}
 
 /* Table */
@@ -113,10 +134,10 @@ body{font-family:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;background:
 .country-name{font-size:13px;font-weight:600;color:var(--text-0)}
 .country-stats{font-size:11px;color:var(--text-2);margin-left:auto;display:flex;gap:12px}
 table{width:100%;border-collapse:collapse;background:var(--bg-1);border:1px solid var(--border);border-top:none}
-th{position:sticky;top:0;background:var(--bg-2);padding:7px 8px;text-align:center;font-size:11px;color:var(--text-2);font-weight:500;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+th{position:sticky;top:0;background:var(--bg-2);padding:8px 10px;text-align:center;font-size:11px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
 th:hover{color:var(--text-1)}
-td{padding:5px 8px;font-size:12px;border-bottom:1px solid var(--bg-3);white-space:nowrap}
-tr:hover td{background:var(--bg-2)}
+td{padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bg-3);white-space:nowrap}
+tr:hover td{background:var(--row-hover)}
 tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 
 /* Status dots */
@@ -124,7 +145,7 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .status-dot.online{background:var(--success);box-shadow:0 0 8px rgba(52,199,89,.5)}
 .status-dot.rotating{background:var(--warning);animation:pulse 1.5s infinite}
 .status-dot.offline{background:var(--danger)}
-.status-dot.rebooting{background:#9b59b6;animation:pulse 1s infinite}
+.status-dot.rebooting{background:var(--purple);animation:pulse 1s infinite}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 /* Signal bars */
@@ -139,7 +160,7 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .net-2g{background:rgba(255,71,87,.15);color:var(--danger)}
 .net-unknown{background:var(--bg-3);color:var(--text-3)}
 
-.mono{font-family:'JetBrains Mono','SF Mono',Monaco,monospace;font-size:11px}
+.mono{font-family:var(--font-mono);font-size:11px}
 .copy-btn{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:12px;padding:1px 3px;border-radius:3px}
 .copy-btn:hover{color:var(--accent)}
 .pass-mask{cursor:pointer;color:var(--text-3);letter-spacing:2px}
@@ -148,9 +169,9 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .actions-cell{display:flex;gap:3px}
 .action-btn{width:24px;height:24px;border-radius:4px;border:none;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s}
 .action-btn:disabled{opacity:.4;cursor:not-allowed}
-.action-btn.reset{background:rgba(52,152,219,.15);color:#3498db}
-.action-btn.reboot{background:rgba(230,126,34,.15);color:#e67e22}
-.action-btn.usb{background:rgba(155,89,182,.15);color:#9b59b6}
+.action-btn.reset{background:var(--blue-bg);color:var(--blue)}
+.action-btn.reboot{background:var(--orange-bg);color:var(--orange)}
+.action-btn.usb{background:var(--purple-bg);color:var(--purple)}
 .action-btn.detail{background:rgba(0,120,212,.15);color:var(--accent)}
 .action-btn .spinner{display:none;width:11px;height:11px;border:2px solid transparent;border-top-color:currentColor;border-radius:50%;animation:spin .8s linear infinite}
 .action-btn.loading .btn-icon{display:none}
@@ -160,12 +181,12 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 /* Modal */
 .modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:1000}
 .modal-overlay.show{display:flex}
-.modal{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;width:780px;max-width:92vw;max-height:88vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 48px rgba(0,0,0,.5)}
-.modal-header{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.modal-header h3{color:var(--text-0);font-size:14px}
-.modal-close{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:18px;padding:2px 6px}
+.modal{background:var(--bg-1);border:1px solid var(--card-border);border-radius:12px;width:740px;max-width:92vw;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+.modal-header{padding:14px 20px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
+.modal-header h3{color:var(--text-0);font-size:15px}
+.modal-close{background:none;border:none;color:var(--text-2);cursor:pointer;font-size:18px;padding:2px 6px}
 .modal-close:hover{color:var(--text-0)}
-.modal-body{padding:14px 18px;overflow-y:auto;flex:1;min-height:0}
+.modal-body{padding:16px 20px;overflow-y:auto;flex:1;min-height:0}
 .modal-tabs{display:flex;gap:0;padding:0 18px;border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0}
 .modal-tab{padding:8px 12px;cursor:pointer;font-size:11px;color:var(--text-2);border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
 .modal-tab:hover{color:var(--text-1)}
@@ -173,20 +194,20 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 
 /* Detail */
 .detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.detail-card{background:var(--bg-2);border-radius:6px;padding:10px;border:1px solid var(--border)}
+.detail-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:8px;padding:10px;border:1px solid var(--card-border)}
 .detail-card h4{font-size:10px;color:var(--text-2);text-transform:uppercase;margin-bottom:5px;letter-spacing:.5px}
 .detail-row{display:flex;justify-content:space-between;padding:2px 0;font-size:11px}
 .detail-label{color:var(--text-2)}
-.detail-value{color:var(--text-0);font-family:monospace;font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis}
+.detail-value{color:var(--text-0);font-family:var(--font-mono);font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis}
 
 .log-table{width:100%;border-collapse:collapse}
-.log-table th,.log-table td{padding:5px 8px;text-align:left;font-size:11px;border-bottom:1px solid var(--border)}
+.log-table th,.log-table td{padding:6px 10px;text-align:left;font-size:11px;border-bottom:1px solid var(--border)}
 .log-table th{color:var(--text-2);font-weight:500}
-.log-table td{font-family:monospace;color:var(--text-1)}
+.log-table td{font-family:var(--font-mono);color:var(--text-1)}
 
 /* Toast */
 .toast-container{position:fixed;top:16px;right:16px;z-index:2000;display:flex;flex-direction:column;gap:6px}
-.toast{padding:10px 16px;border-radius:8px;font-size:12px;animation:slideIn .3s ease;min-width:200px}
+.toast{padding:10px 18px;border-radius:8px;font-size:12px;font-weight:500;animation:slideIn .3s ease;min-width:200px;backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);box-shadow:0 8px 32px rgba(0,0,0,.3)}
 .toast-success{background:var(--success);color:#fff}
 .toast-error{background:var(--danger);color:#fff}
 .toast-info{background:var(--accent);color:#fff}
@@ -196,9 +217,9 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 
 /* Form */
 .form-group{margin-bottom:10px}
-.form-group label{display:block;font-size:11px;color:var(--text-2);margin-bottom:3px;font-weight:500}
-.form-input{width:100%;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;outline:none}
-.form-input:focus{border-color:var(--accent)}
+.form-group label{display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;font-weight:500}
+.form-input{width:100%;padding:8px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-sans);outline:none;transition:border-color .2s,box-shadow .2s}
+.form-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
 .form-row{display:flex;gap:8px}
 .form-row .form-group{flex:1}
 select.form-input{cursor:pointer}
@@ -216,28 +237,28 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .client-card-body{font-size:12px;color:var(--text-2);padding:12px 16px}
 .client-card-body .row{display:flex;justify-content:space-between;padding:3px 0;align-items:center}
 .client-card-body .row:hover{background:var(--bg-2);margin:0 -8px;padding:3px 8px;border-radius:4px}
-.client-card-body .val{color:var(--text-1);font-family:'JetBrains Mono',monospace;font-size:11px}
+.client-card-body .val{color:var(--text-1);font-family:var(--font-mono);font-size:11px}
 .client-card-body .section-divider{height:1px;background:var(--border);margin:8px 0}
 .client-modems{padding:10px 16px;border-top:1px solid var(--border);background:var(--bg-2)}
 .client-modems-label{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:500}
 .client-modem-tag{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;background:var(--bg-3);color:var(--text-1);margin:2px;border:1px solid var(--border);transition:all .15s}
 .client-modem-tag:hover{border-color:var(--accent);color:var(--accent)}
 .billing-badge{display:inline-block;padding:2px 8px;border-radius:4px;font-size:10px;font-weight:600;margin-left:6px}
-.billing-per-modem{background:rgba(155,89,182,.15);color:#9b59b6}
-.billing-per-gb{background:rgba(0,120,212,.15);color:var(--accent)}
-.client-balance-card{display:flex;gap:10px;margin:8px 0;padding:8px 10px;background:var(--bg-2);border-radius:6px;border:1px solid var(--border)}
+.billing-per-modem{background:var(--purple-bg);color:var(--purple)}
+.billing-per-gb{background:var(--blue-bg);color:var(--accent)}
+.client-balance-card{display:flex;gap:10px;margin:8px 0;padding:8px 10px;background:var(--card-bg);border-radius:8px;border:1px solid var(--card-border)}
 .client-balance-item{flex:1;text-align:center}
 .client-balance-item .label{font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px}
 .client-balance-item .value{font-size:14px;font-weight:700;margin-top:2px}
 
 /* Traffic / Analytics */
 .analytics-section{padding:14px 24px}
-.analytics-card{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:14px;margin-bottom:10px;box-shadow:var(--card-shadow)}
+.analytics-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--card-shadow)}
 .analytics-card h3{font-size:13px;color:var(--text-0);margin-bottom:10px;font-weight:600}
 
 /* ===== PAN-OS ACC Traffic Dashboard ===== */
 .acc-toolbar{display:flex;align-items:center;gap:8px;padding:10px 24px;background:var(--bg-1);border-bottom:1px solid var(--border)}
-.acc-period-group{display:flex;gap:0;border:1px solid var(--border);border-radius:5px;overflow:hidden}
+.acc-period-group{display:flex;gap:0;border:1px solid var(--border);border-radius:4px;overflow:hidden}
 .acc-period-btn{padding:5px 14px;font-size:11px;cursor:pointer;background:transparent;border:none;color:var(--text-2);transition:all .15s;font-weight:500}
 .acc-period-btn:hover{background:var(--bg-3);color:var(--text-1)}
 .acc-period-btn.active{background:var(--accent);color:#fff}
@@ -250,7 +271,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 /* Widget row */
 .widget-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:0;padding:14px 24px}
-.widget{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;box-shadow:var(--card-shadow);position:relative;overflow:hidden}
+.widget{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;padding:12px;box-shadow:var(--card-shadow);position:relative;overflow:hidden}
 .widget::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent);opacity:.6}
 .widget-label{font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
 .widget-value{font-size:22px;font-weight:700;color:var(--text-0)}
@@ -260,7 +281,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 /* Chart containers */
 .chart-row{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding:0 24px 14px}
-.chart-card{background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:14px;box-shadow:var(--card-shadow)}
+.chart-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;padding:14px;box-shadow:var(--card-shadow)}
 .chart-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
 .chart-card h4{font-size:12px;color:var(--text-0);font-weight:600;margin:0}
 .chart-card canvas{max-height:260px}
@@ -278,13 +299,13 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .hbar-bar.orange{background:linear-gradient(90deg,#e67e22,#f5a623)}
 .hbar-bar.purple{background:linear-gradient(90deg,#8e44ad,#b86ddb)}
 .hbar-bar.red{background:linear-gradient(90deg,#c0392b,#e74c3c)}
-.hbar-value{width:70px;text-align:right;color:var(--text-0);font-family:monospace;font-size:10px;font-weight:600}
+.hbar-value{width:70px;text-align:right;color:var(--text-0);font-family:var(--font-mono);font-size:10px;font-weight:600}
 
 /* Resource table */
 .res-table{width:100%;border-collapse:collapse}
-.res-table th{padding:5px 8px;text-align:left;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);font-weight:500}
-.res-table td{padding:4px 8px;font-size:11px;border-bottom:1px solid var(--bg-3)}
-.res-table tr:hover td{background:var(--bg-2)}
+.res-table th{padding:6px 10px;text-align:left;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);font-weight:600}
+.res-table td{padding:6px 10px;font-size:11px;border-bottom:1px solid var(--bg-3)}
+.res-table tr:hover td{background:var(--row-hover)}
 .res-table .domain{color:var(--accent);font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .res-table .count-bar{height:10px;border-radius:2px;background:var(--accent);opacity:.6;transition:width .3s}
 
@@ -293,7 +314,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .flow-col{display:flex;flex-direction:column;gap:4px}
 .flow-node{padding:5px 10px;border-radius:4px;font-size:11px;font-weight:500;border:1px solid var(--border);background:var(--bg-2);white-space:nowrap;position:relative;display:flex;align-items:center;gap:6px}
 .flow-node .flow-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
-.flow-node .flow-val{color:var(--text-2);font-size:10px;margin-left:auto;font-family:monospace}
+.flow-node .flow-val{color:var(--text-2);font-size:10px;margin-left:auto;font-family:var(--font-mono)}
 
 /* Traffic gauge */
 .gauge-wrap{display:flex;align-items:center;gap:12px;margin:8px 0}
@@ -309,7 +330,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .acc-loading .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
 
 /* SMS */
-.sms-item{background:var(--bg-2);border-radius:5px;padding:8px;margin-bottom:5px;border:1px solid var(--border)}
+.sms-item{background:var(--card-bg);border-radius:8px;padding:8px;margin-bottom:5px;border:1px solid var(--card-border)}
 .sms-from{font-size:11px;color:var(--accent);font-weight:500}
 .sms-date{font-size:10px;color:var(--text-3);float:right}
 .sms-text{font-size:11px;color:var(--text-1);margin-top:3px;word-break:break-word}
@@ -323,12 +344,12 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .uptime-pct.good{color:var(--success)}
 .uptime-pct.warn{color:var(--warning)}
 .uptime-pct.bad{color:var(--danger)}
-.speed-cell{font-size:10px;font-family:monospace}
+.speed-cell{font-size:10px;font-family:var(--font-mono)}
 .speed-dl{color:var(--success)}
 .speed-ul{color:var(--accent)}
 
 /* Payment modal */
-.payment-form{background:var(--bg-2);border-radius:6px;padding:10px;margin-top:8px;border:1px solid var(--border)}
+.payment-form{background:var(--card-bg);border-radius:8px;padding:10px;margin-top:8px;border:1px solid var(--card-border)}
 .payment-list{max-height:200px;overflow-y:auto;margin-top:8px}
 .payment-item{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;font-size:11px;border-bottom:1px solid var(--bg-3)}
 .payment-item:hover{background:var(--bg-2)}
@@ -462,7 +483,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
       <button class="acc-period-btn" onclick="setAccPeriod('lifetime',this)">Всё время</button>
     </div>
     <span style="font-size:11px;color:var(--text-2);margin-left:12px">Клиент:</span>
-    <select class="form-input" id="accClientFilter" onchange="renderTrafficTab()" style="width:200px;height:28px;font-size:11px;display:inline-block"></select>
+    <select class="form-input" id="accClientFilter" onchange="renderTrafficTab();var _as=document.querySelector('.acc-sub-content.active');if(_as&&_as.id==='acc-resources')renderTopResources()" style="width:200px;height:28px;font-size:11px;display:inline-block"></select>
     <button class="btn btn-sm btn-primary" onclick="loadTopHosts(true)" style="margin-left:auto" id="btnLoadRes">⟳ Обновить ресурсы</button>
   </div>
 
@@ -536,7 +557,6 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     <div style="padding:14px 24px">
       <div id="resourcesContent">
         <div class="acc-loading" id="resLoading" style="display:none"><div class="spinner"></div> Загрузка топ-хостов...</div>
-        <div style="margin-bottom:10px"><select class="form-input" id="resClientFilter" onchange="renderTopResources()" style="width:220px;display:inline-block"><option value="">Все клиенты</option></select></div>
         <div class="chart-row" style="padding:0;margin-bottom:14px">
           <div class="chart-card" style="grid-column:span 2">
             <div class="chart-card-header"><h4>Топ ресурсов</h4><span style="font-size:10px;color:var(--text-3)" id="resLastLoad">Нажмите «Загрузить топ ресурсов»</span></div>
@@ -904,7 +924,7 @@ function renderTable(){
   var html='';COUNTRY_ORDER.forEach(function(srv){var modems=groups[srv];if(!modems||!modems.length)return;var country=COUNTRIES[srv]||{};var online=0;modems.forEach(function(m){var s=getModemStatus(m);if(s==='online'||s==='rotating')online++});
     html+='<div class="country-group"><div class="country-header"><span class="country-flag">'+country.flag+'</span><span class="country-name">'+country.name+'</span><div class="country-stats"><span>'+modems.length+' модемов</span><span>Online: '+online+'/'+modems.length+'</span></div></div><table><thead><tr>';
     cols.forEach(function(col){var w=col.width?' style="width:'+col.width+'"':'';var ar=col.sortable&&sortCol===col.id?' '+(sortDir==='asc'?'\u25B2':'\u25BC'):'';var cl=col.sortable?' onclick="setSort(\''+col.id+'\')"':'';html+='<th'+w+cl+'>'+col.label+ar+'</th>'});
-    html+='</tr></thead><tbody>';modems.forEach(function(modem){var status=getModemStatus(modem),port=modem.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[modem.server]||{};var h='<tr>';cols.forEach(function(col){h+='<td>';switch(col.id){case'status':h+='<span class="status-dot '+status+'"></span>';break;case'nick':h+='<strong>'+esc(modem.nick)+'</strong>';break;case'server':h+='<span style="font-size:10px">'+(ci.flag||'')+' '+modem.server+'</span>';break;case'portName':var un=modem.ports.map(function(p){return p.portName}).filter(function(v,i,a){return v&&a.indexOf(v)===i});h+=un.map(function(n){return'<span class="port-badge" style="background:var(--bg-3);color:var(--text-1);padding:1px 6px;border-radius:3px;font-size:10px">'+esc(n)+'</span>'}).join(' ')||'-';break;case'creds':if(port.HTTP_PORT||port.SOCKS_PORT){var sip=ci.serverIp||'';if(port.HTTP_PORT)h+='<div><span style="color:var(--text-2);font-size:10px">HTTP:</span> <span class="mono">'+sip+':'+port.HTTP_PORT+'</span> <button class="copy-btn" onclick="copyText(\''+sip+':'+port.HTTP_PORT+'\',this)">\u{1F4CB}</button></div>';if(port.SOCKS_PORT)h+='<div><span style="color:var(--text-2);font-size:10px">SOCKS5:</span> <span class="mono">'+sip+':'+port.SOCKS_PORT+'</span> <button class="copy-btn" onclick="copyText(\''+sip+':'+port.SOCKS_PORT+'\',this)">\u{1F4CB}</button></div>'}else{h+='-'}break;case'loginpass':if(port.LOGIN||port.PASSWORD){var lp=esc(port.LOGIN)+':'+esc(port.PASSWORD);h+='<span class="mono">'+lp+'</span> <button class="copy-btn" onclick="copyText(\''+esc(port.LOGIN)+':'+esc(port.PASSWORD)+'\',this)">\u{1F4CB}</button>'}else{h+='-'}break;case'extIp':if(modem.extIp==='IP_RESET'||modem.isRotating){h+='<span class="mono" style="color:var(--warning)">Ротация</span>'}else if(modem.extIp){h+='<span class="mono'+(modem.ipStuck?' ip-stuck':'')+'">'+modem.extIp+(modem.ipStuck?'<span class="ip-stuck-badge" title="IP не менялся '+modem.ipSinceHours+'ч"> \u26A0'+modem.ipSinceHours+'ч</span>':'')+'</span>'}else{h+='-'}break;case'netType':h+=renderNetBadge(modem.netType);break;case'signal':h+=renderSignalBars(modem.signal);break;case'operator':h+=esc(modem.operator)||'-';break;case'phone':h+=modem.phone?'<span class="mono">'+esc(modem.phone)+'</span>':'-';break;case'trafficDay':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_day_in)+'</span>';break;case'trafficMon':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_month_in)+'</span>';break;case'speed':if(modem.lastSpeedDl||modem.lastSpeedUl){var lowCls=modem.lowSpeed?' style="color:var(--danger);font-weight:600"':'';h+='<span class="speed-cell"'+lowCls+'><span class="'+(modem.lowSpeed?'':'speed-dl')+'">\u2193'+Number(modem.lastSpeedDl||0).toFixed(1)+'</span> / <span class="'+(modem.lowSpeed?'':'speed-ul')+'">\u2191'+Number(modem.lastSpeedUl||0).toFixed(1)+'</span>'+(modem.lowSpeed?' \u26A0':'')+'</span>'}else{h+='-'}break;case'uptime':if(modem.uptimePct!==undefined){var upCls=parseFloat(modem.uptimePct)>=99?'good':parseFloat(modem.uptimePct)>=95?'warn':'bad';h+='<span class="uptime-pct '+upCls+'">'+modem.uptimePct+'%</span><br><span style="font-size:9px;color:var(--text-3)">'+formatUptime(modem.uptime)+'</span>'}else{h+='<span style="font-size:10px;color:var(--text-2)">'+formatUptime(modem.uptime)+'</span>'}break;case'actions':var d='data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'"';h+='<div class="actions-cell"><button class="action-btn reset" '+d+' onclick="resetIp(this)" title="Сброс IP"><span class="btn-icon">\u{1F504}</span><div class="spinner"></div></button><button class="action-btn reboot" '+d+' onclick="rebootModem(this)" title="Ребут"><span class="btn-icon">\u26A1</span><div class="spinner"></div></button><button class="action-btn usb" '+d+' onclick="usbReset(this)" title="USB"><span class="btn-icon">\u{1F50C}</span><div class="spinner"></div></button><button class="action-btn detail" '+d+' onclick="showDetails(this)" title="Детали"><span class="btn-icon">\u{1F4CA}</span><div class="spinner"></div></button></div>';break}h+='</td>'});html+=h+'</tr>'});html+='</tbody></table></div>'});
+    html+='</tr></thead><tbody>';modems.forEach(function(modem){var status=getModemStatus(modem),port=modem.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[modem.server]||{};var h='<tr>';cols.forEach(function(col){h+='<td>';switch(col.id){case'status':h+='<span class="status-dot '+status+'"></span>';break;case'nick':h+='<strong>'+esc(modem.nick)+'</strong>';break;case'server':h+='<span style="font-size:10px">'+(ci.flag||'')+' '+modem.server+'</span>';break;case'portName':var un=modem.ports.map(function(p){return p.portName}).filter(function(v,i,a){return v&&a.indexOf(v)===i});h+=un.map(function(n){return'<span class="port-badge" style="background:var(--bg-3);color:var(--text-1);padding:1px 6px;border-radius:3px;font-size:10px">'+esc(n)+'</span>'}).join(' ')||'-';break;case'creds':if(port.HTTP_PORT||port.SOCKS_PORT){var sip=ci.serverIp||'';if(port.HTTP_PORT)h+='<div><span style="color:var(--text-2);font-size:10px">HTTP:</span> <span class="mono">'+sip+':'+port.HTTP_PORT+'</span> <button class="copy-btn" onclick="copyText(\''+sip+':'+port.HTTP_PORT+'\',this)">\u{1F4CB}</button></div>';if(port.SOCKS_PORT)h+='<div><span style="color:var(--text-2);font-size:10px">SOCKS5:</span> <span class="mono">'+sip+':'+port.SOCKS_PORT+'</span> <button class="copy-btn" onclick="copyText(\''+sip+':'+port.SOCKS_PORT+'\',this)">\u{1F4CB}</button></div>'}else{h+='-'}break;case'loginpass':if(port.LOGIN){h+='<span class="mono">'+esc(port.LOGIN)+':••••</span> <button class="copy-btn" onclick="copyText(\''+esc(port.LOGIN)+':'+esc(port.PASSWORD||'')+'\',this)">\u{1F4CB}</button>'}else{h+='-'}break;case'extIp':if(modem.extIp==='IP_RESET'||modem.isRotating){h+='<span class="mono" style="color:var(--warning)">Ротация</span>'}else if(modem.extIp){h+='<span class="mono'+(modem.ipStuck?' ip-stuck':'')+'">'+modem.extIp+(modem.ipStuck?'<span class="ip-stuck-badge" title="IP не менялся '+modem.ipSinceHours+'ч"> \u26A0'+modem.ipSinceHours+'ч</span>':'')+'</span>'}else{h+='-'}break;case'netType':h+=renderNetBadge(modem.netType);break;case'signal':h+=renderSignalBars(modem.signal);break;case'operator':h+=esc(modem.operator)||'-';break;case'phone':h+=modem.phone?'<span class="mono">'+esc(modem.phone)+'</span>':'-';break;case'trafficDay':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_day_in)+'</span>';break;case'trafficMon':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_month_in)+'</span>';break;case'speed':if(modem.lastSpeedDl||modem.lastSpeedUl){var lowCls=modem.lowSpeed?' style="color:var(--danger);font-weight:600"':'';h+='<span class="speed-cell"'+lowCls+'><span class="'+(modem.lowSpeed?'':'speed-dl')+'">\u2193'+Number(modem.lastSpeedDl||0).toFixed(1)+'</span> / <span class="'+(modem.lowSpeed?'':'speed-ul')+'">\u2191'+Number(modem.lastSpeedUl||0).toFixed(1)+'</span>'+(modem.lowSpeed?' \u26A0':'')+'</span>'}else{h+='-'}break;case'uptime':if(modem.uptimePct!==undefined){var upCls=parseFloat(modem.uptimePct)>=99?'good':parseFloat(modem.uptimePct)>=95?'warn':'bad';h+='<span class="uptime-pct '+upCls+'">'+modem.uptimePct+'%</span><br><span style="font-size:9px;color:var(--text-3)">'+formatUptime(modem.uptime)+'</span>'}else{h+='<span style="font-size:10px;color:var(--text-2)">'+formatUptime(modem.uptime)+'</span>'}break;case'actions':var d='data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'"';h+='<div class="actions-cell"><button class="action-btn reset" '+d+' onclick="resetIp(this)" title="Сброс IP"><span class="btn-icon">\u{1F504}</span><div class="spinner"></div></button><button class="action-btn reboot" '+d+' onclick="rebootModem(this)" title="Ребут"><span class="btn-icon">\u26A1</span><div class="spinner"></div></button><button class="action-btn usb" '+d+' onclick="usbReset(this)" title="USB"><span class="btn-icon">\u{1F50C}</span><div class="spinner"></div></button><button class="action-btn detail" '+d+' onclick="showDetails(this)" title="Детали"><span class="btn-icon">\u{1F4CA}</span><div class="spinner"></div></button></div>';break}h+='</td>'});html+=h+'</tr>'});html+='</tbody></table></div>'});
   wrap.innerHTML=html;
 }
 function setSort(c){if(sortCol===c)sortDir=sortDir==='asc'?'desc':'asc';else{sortCol=c;sortDir='asc'}renderTable()}
@@ -926,7 +946,7 @@ function switchTab(tab,el){document.querySelectorAll('#modalTabs .modal-tab').fo
 function dr(l,v){return'<div class="detail-row"><span class="detail-label">'+l+'</span><span class="detail-value">'+esc(String(v||'-'))+'</span></div>'}
 
 function renderTabContent(tab){var body=document.getElementById('modalBody'),m=currentDetailModem;if(!m)return;
-  if(tab==='info'){var port=m.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[m.server]||{};body.innerHTML='<div class="detail-grid"><div class="detail-card"><h4>Модем</h4>'+dr('Ник',m.nick)+dr('IMEI',m.rawImei)+dr('Модель',m.model)+dr('Телефон',m.phone)+dr('Аптайм',formatUptime(m.uptime))+dr('Заметки',m.notes)+'</div><div class="detail-card"><h4>Сеть</h4>'+dr('IP',m.extIp)+dr('Тип',m.netType)+dr('Оператор',m.operator)+dr('Сигнал',m.signal+'/5')+dr('APN',m.apn)+dr('Пинг',m.ping)+dr('До ротации',m.timeToRotation)+'</div><div class="detail-card"><h4>Порт</h4>'+dr('ID',port.portID)+dr('Имя',port.portName)+dr('HTTP',(ci.serverIp||'')+':'+(port.HTTP_PORT||''))+dr('SOCKS',(ci.serverIp||'')+':'+(port.SOCKS_PORT||''))+dr('Логин',port.LOGIN)+dr('Пароль',port.PASSWORD)+'</div><div class="detail-card"><h4>Трафик</h4>'+dr('Сегодня вх',formatTraffic(bw.bandwidth_bytes_day_in))+dr('Месяц вх',formatTraffic(bw.bandwidth_bytes_month_in))+dr('Месяц исх',formatTraffic(bw.bandwidth_bytes_month_out))+dr('Пред.месяц',formatTraffic(bw.bandwidth_bytes_prevmonth_in))+dr('Всего',formatTraffic(bw.bandwidth_bytes_lifetime_in))+'</div></div>'+(port.http_creds?'<div style="margin-top:10px;display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" onclick="copyText(\''+esc(port.http_creds)+'\',this)">HTTP</button>'+(port.socks5_creds?'<button class="btn btn-primary btn-sm" onclick="copyText(\''+esc(port.socks5_creds)+'\',this)">SOCKS5</button>':'')+'<button class="btn btn-sm" onclick="downloadVpn(\''+(port.portID||'').replace(/^S[12]_/,'')+'\',\''+m.server+'\')">VPN</button></div>':'')}
+  if(tab==='info'){var port=m.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[m.server]||{};body.innerHTML='<div class="detail-grid"><div class="detail-card"><h4>Модем</h4>'+dr('Ник',m.nick)+dr('IMEI',m.rawImei)+dr('Модель',m.model)+dr('Телефон',m.phone)+dr('Аптайм',formatUptime(m.uptime))+dr('Заметки',m.notes)+'</div><div class="detail-card"><h4>Сеть</h4>'+dr('IP',m.extIp)+dr('Тип',m.netType)+dr('Оператор',m.operator)+dr('Сигнал',m.signal+'/5')+dr('APN',m.apn)+dr('Пинг',m.ping)+dr('До ротации',m.timeToRotation)+'</div><div class="detail-card"><h4>Порт</h4>'+dr('ID',port.portID)+dr('Имя',port.portName)+dr('HTTP',(ci.serverIp||'')+':'+(port.HTTP_PORT||''))+dr('SOCKS',(ci.serverIp||'')+':'+(port.SOCKS_PORT||''))+dr('Логин',port.LOGIN)+dr('Пароль',port.LOGIN?'••••••••':'-')+'</div><div class="detail-card"><h4>Трафик</h4>'+dr('Сегодня вх',formatTraffic(bw.bandwidth_bytes_day_in))+dr('Месяц вх',formatTraffic(bw.bandwidth_bytes_month_in))+dr('Месяц исх',formatTraffic(bw.bandwidth_bytes_month_out))+dr('Пред.месяц',formatTraffic(bw.bandwidth_bytes_prevmonth_in))+dr('Всего',formatTraffic(bw.bandwidth_bytes_lifetime_in))+'</div></div>'+(port.http_creds?'<div style="margin-top:10px;display:flex;gap:4px;flex-wrap:wrap"><button class="btn btn-primary btn-sm" onclick="copyText(\''+esc(port.http_creds)+'\',this)">HTTP</button>'+(port.socks5_creds?'<button class="btn btn-primary btn-sm" onclick="copyText(\''+esc(port.socks5_creds)+'\',this)">SOCKS5</button>':'')+'<button class="btn btn-sm" onclick="downloadVpn(\''+(port.portID||'').replace(/^S[12]_/,'')+'\',\''+m.server+'\')">VPN</button></div>':'')}
   else if(tab==='speed'){var sh='<div style="margin-bottom:10px;text-align:center"><button class="btn btn-primary" onclick="runSpeedtest(\''+esc(m.nick)+'\',\''+m.server+'\')">Запустить Speedtest (~1.5 мин)</button></div>';
     sh+='<div id="speedHistoryArea"><div style="color:var(--text-3);padding:8px">Загрузка истории...</div></div>';
     body.innerHTML=sh;
@@ -1098,10 +1118,9 @@ function renderTrafficTab(){
   var avgPerModem=d.totalModems?(d.totalIn+d.totalOut)/d.totalModems/daysElapsed:0;
   var inOutRatio=d.totalOut?d.totalIn/d.totalOut:0;
   document.getElementById('trafficWidgets').innerHTML=
-    '<div class="widget"><div class="widget-label">Модемов</div><div class="widget-value" style="color:var(--success)">'+d.totalOnline+'<span style="font-size:14px;color:var(--text-2)"> / '+d.totalModems+'</span></div><div class="widget-sub">online / всего</div></div>'+
-    '<div class="widget"><div class="widget-label">Входящий ('+d.label+')</div><div class="widget-value">'+fmtGb(d.totalIn)+'</div></div>'+
-    '<div class="widget"><div class="widget-label">Исходящий ('+d.label+')</div><div class="widget-value">'+fmtGb(d.totalOut)+'</div></div>'+
-    '<div class="widget"><div class="widget-label">Всего ('+d.label+')</div><div class="widget-value" style="color:var(--accent)">'+fmtGb(d.totalIn+d.totalOut)+'</div></div>'+
+    '<div class="widget"><div class="widget-label">Входящий</div><div class="widget-value">'+fmtGb(d.totalIn)+'</div></div>'+
+    '<div class="widget"><div class="widget-label">Исходящий</div><div class="widget-value">'+fmtGb(d.totalOut)+'</div></div>'+
+    '<div class="widget"><div class="widget-label">Всего</div><div class="widget-value" style="color:var(--accent)">'+fmtGb(d.totalIn+d.totalOut)+'</div></div>'+
     '<div class="widget"><div class="widget-label">Среднее на модем в сутки</div><div class="widget-value">'+fmtGb(avgPerModem)+'</div></div>'+
     '<div class="widget"><div class="widget-label">Клиентов</div><div class="widget-value">'+Object.keys(d.clientTraffic).length+'</div><div class="widget-sub">Вх/Исх: '+inOutRatio.toFixed(1)+'x</div></div>';
 
@@ -1229,23 +1248,13 @@ function loadTopHosts(forceRefresh){
   });
 }
 
-function populateResClientFilter(){
-  var sel=document.getElementById('resClientFilter');
-  if(!sel||!currentData)return;
-  var prev=sel.value;
-  sel.innerHTML='<option value="">Все клиенты</option>';
-  var cl=currentData.clients||[];
-  cl.forEach(function(c){sel.innerHTML+='<option value="'+esc(c.portName)+'">'+esc(c.name)+' ('+esc(c.portName)+')</option>'});
-  if(prev)sel.value=prev;
-}
 function renderTopResources(){
   if(!topHostsCache){
     document.getElementById('topResourcesList').innerHTML='<div style="color:var(--text-3);padding:30px;text-align:center;font-size:13px"><div class="spinner" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:8px"></div><br>Загрузка данных о ресурсах...</div>';
     return;
   }
-  populateResClientFilter();
-  // Filter by client if selected
-  var clientFilter=document.getElementById('resClientFilter');
+  // Use shared accClientFilter from toolbar
+  var clientFilter=document.getElementById('accClientFilter');
   var filterPortName=clientFilter?clientFilter.value:'';
   var dataSource=topHostsCache;
   var showAll=false;
@@ -1375,10 +1384,11 @@ function renderClients(){if(!currentData)return;var cl=currentData.clients||[];v
     count++;
     var modems=pnm[c.portName]||[];var bt=c.billingType||'per_gb';var price=c.price||0;
     var cost=Math.round(((currentData.clientMonthCharges||{})[c.id]||0)*100)/100;
-    var monthGbCharged=0;
+    var monthGbBilled=Math.round(((currentData.clientMonthGb||{})[c.id]||0)*10)/10;
+    var monthGbLive=Math.round(((currentData.clientLiveMonthGb||{})[c.id]||0)*10)/10;
     var costLabel='';
     if(bt==='per_modem'){costLabel=price+' \u00D7 '+modems.length+' = '+Math.round(cost)+' \u20BD'}
-    else{costLabel=monthGbCharged.toFixed(1)+' GB \u00D7 '+price+' = '+Math.round(cost)+' \u20BD'}
+    else{costLabel=monthGbLive.toFixed(1)+' GB \u00D7 '+price+' = '+Math.round(cost)+' \u20BD'}
     var balance=c.balance!==undefined?c.balance:0;
     var balClass=balance>=0?'balance-positive':'balance-negative';
     // Main row
@@ -1404,7 +1414,7 @@ function renderClients(){if(!currentData)return;var cl=currentData.clients||[];v
     h+='<div>';
     h+='<div style="font-size:11px;font-weight:600;color:var(--text-0);margin-bottom:6px">Реквизиты</div>';
     h+='<div style="font-size:11px;color:var(--text-2)"><div>Логин: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.login)+'</span></div>';
-    h+='<div>Пароль: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+(c.password?'••••••••':'—')+'</span></div>';
+    h+='<div>Пароль: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">••••••••</span></div>';
     h+='<div>portName: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.portName)+'</span></div>';
     if(c.notes)h+='<div style="margin-top:4px;color:var(--text-3);font-size:10px">'+esc(c.notes)+'</div>';
     h+='</div></div>';
@@ -1429,11 +1439,11 @@ function toggleClientRow(id){
 }
 
 function toggleBankFields(){document.getElementById('bankFieldsSection').style.display=document.getElementById('cfClientType').value==='legal'?'':'none'}
-function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?data.password:rnd(12);document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfClientType').value=data?(data.clientType||'legal'):'legal';toggleBankFields();document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';document.getElementById('cfAutoActs').checked=data?(data.autoActs!==false):true;document.getElementById('cfAutoBills').checked=data?(data.autoBills!==false):true;var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
+function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?'':rnd(12);document.getElementById('cfPassword').placeholder=data?'Без изменений':'';document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfClientType').value=data?(data.clientType||'legal'):'legal';toggleBankFields();document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';document.getElementById('cfAutoActs').checked=data?(data.autoActs!==false):true;document.getElementById('cfAutoBills').checked=data?(data.autoBills!==false):true;var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
 function closeClientModal(){document.getElementById('clientModal').classList.remove('show')}
 document.getElementById('clientModal').addEventListener('click',function(e){if(e.target===this)closeClientModal()});
 function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
-function saveClient(){var id=document.getElementById('clientFormId').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked};if(!d.name||!d.portName||!d.login||!d.password)return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
+function saveClient(){var id=document.getElementById('clientFormId').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked};if(!d.name||!d.portName||!d.login||(!id&&!d.password))return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
 function deleteClient(id,name){if(!confirm('Удалить '+name+'?'))return;fetch(API+'/api/admin/clients/'+id,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()})}
 
 function impersonateClient(id,name){
@@ -2422,7 +2432,7 @@ function renderBankPayments() {
     h += '<span class="badge" style="background:var(--danger);color:#fff;font-size:10px;padding:2px 8px;border-radius:8px">API не настроен</span>';
   }
   h += '</div>';
-  var unmatched = bp.filter(function(p) { return !p.matched && !p.dismissed && p.webhookType === 'incomingPayment'; });
+  var unmatched = bp.filter(function(p) { return !p.matched && !p.dismissed && p.webhookType === 'incomingPayment'; }).sort(function(a,b){return(b.date||'').localeCompare(a.date||'')});
   if (unmatched.length > 0) {
     h += '<div style="background:rgba(220,38,38,0.1);border:1px solid var(--danger);border-radius:8px;padding:10px;margin-bottom:12px">';
     h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
@@ -2432,7 +2442,7 @@ function renderBankPayments() {
     h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:left">\u0418\u041D\u041D</th><th style="padding:4px 6px;text-align:right">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435</th><th style="padding:4px 6px">\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F</th></tr></thead><tbody>';
     unmatched.forEach(function(p) {
       h += '<tr style="border-bottom:1px solid var(--border)">';
-      h += '<td style="padding:4px 6px">' + esc(p.date) + '</td>';
+      h += '<td style="padding:4px 6px">' + fmtDateRu(p.date) + '</td>';
       h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
       h += '<td style="padding:4px 6px">' + esc(p.payerInn) + '</td>';
       h += '<td style="padding:4px 6px;text-align:right;font-weight:600;white-space:nowrap">' + p.amount + ' \u20BD</td>';
@@ -2446,13 +2456,13 @@ function renderBankPayments() {
     });
     h += '</tbody></table></div>';
   }
-  var matched = bp.filter(function(p) { return p.matched && p.webhookType === 'incomingPayment'; }).slice(0, 30);
+  var matched = bp.filter(function(p) { return p.matched && p.webhookType === 'incomingPayment'; }).sort(function(a,b){return(b.date||'').localeCompare(a.date||'')}).slice(0, 30);
   if (matched.length > 0) {
     h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438</div>';
     h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:right">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041A\u043B\u0438\u0435\u043D\u0442</th></tr></thead><tbody>';
     matched.forEach(function(p) {
       h += '<tr style="border-bottom:1px solid var(--border)">';
-      h += '<td style="padding:4px 6px">' + esc(p.date) + '</td>';
+      h += '<td style="padding:4px 6px">' + fmtDateRu(p.date) + '</td>';
       h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
       h += '<td style="padding:4px 6px;text-align:right;font-weight:500">' + p.amount + ' \u20BD</td>';
       h += '<td style="padding:4px 6px;color:var(--success);font-weight:500">\u2705 ' + esc(p.matchedClientName || '') + '</td>';
@@ -2538,6 +2548,7 @@ function regenerateApiKeyInForm(){
       document.body.style.visibility='visible';
       currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
+      var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}
       startAutoRefresh()
     })
     .catch(function(){window.location.href='/'})

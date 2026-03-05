@@ -153,10 +153,10 @@
 
     /* Buttons */
     .btn{
-      padding:8px 16px;border:1px solid var(--border);border-radius:8px;
+      padding:8px 14px;border:1px solid var(--border);border-radius:8px;
       background:var(--bg-2);color:var(--text-1);cursor:pointer;
-      font-size:13px;font-weight:500;font-family:var(--font-sans);
-      transition:all .2s;
+      font-size:12px;font-weight:500;font-family:var(--font-sans);
+      transition:all .2s;display:inline-flex;align-items:center;gap:6px;
     }
     .btn:hover{background:var(--bg-3);border-color:var(--border-hover)}
     .btn:disabled{opacity:.5;cursor:not-allowed}
@@ -230,17 +230,18 @@
     }
     table{width:100%;border-collapse:collapse;font-size:13px}
     thead th{
-      background:var(--bg-2);padding:10px 12px;text-align:center;
-      font-weight:600;color:var(--text-0);
+      background:var(--bg-2);padding:8px 10px;text-align:center;
+      font-weight:600;color:var(--text-2);
       border-bottom:1px solid var(--border);
       white-space:nowrap;position:sticky;top:0;
-      cursor:pointer;user-select:none;font-size:12px;
+      cursor:pointer;user-select:none;font-size:11px;
+      text-transform:uppercase;letter-spacing:.4px;
     }
     thead th:hover{background:var(--bg-3)}
     thead th .sort-arrow{margin-left:4px;font-size:11px;color:var(--text-2)}
     tbody tr{border-bottom:1px solid var(--border);transition:background .1s}
     tbody tr:hover{background:var(--row-hover)}
-    tbody td{padding:8px 12px;white-space:nowrap}
+    tbody td{padding:6px 10px;white-space:nowrap;font-size:12px}
     .text-right{text-align:right}
     .text-dim{color:var(--text-3);font-size:11px}
 
@@ -275,9 +276,9 @@
     .modal-overlay.show{display:flex}
     .modal{
       background:var(--bg-1);border:1px solid var(--card-border);
-      border-radius:12px;width:700px;max-width:92vw;max-height:80vh;
+      border-radius:12px;width:740px;max-width:92vw;max-height:85vh;
       overflow:hidden;display:flex;flex-direction:column;
-      box-shadow:0 24px 80px rgba(0,0,0,.5);
+      box-shadow:0 24px 64px rgba(0,0,0,.5);
       animation:fadeIn .2s ease;
     }
     .modal-header{
@@ -332,9 +333,9 @@
     .form-group{margin-bottom:12px}
     .form-group label{display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;font-weight:500}
     .form-input{
-      width:100%;padding:9px 12px;background:var(--bg-2);
+      width:100%;padding:8px 12px;background:var(--bg-2);
       border:1px solid var(--border);border-radius:8px;
-      color:var(--text-1);font-size:13px;font-family:var(--font-sans);
+      color:var(--text-0);font-size:12px;font-family:var(--font-sans);
       transition:border-color .2s,box-shadow .2s;
     }
     .form-input:focus{outline:none;border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
@@ -379,7 +380,7 @@
     .api-info-card h4{color:var(--text-0);font-size:14px;font-weight:600;margin-bottom:4px}
 
     /* API docs */
-    .api-key-highlight{background:rgba(16,185,129,.15);color:#10b981;padding:1px 4px;border-radius:3px;font-weight:600}
+    .api-key-highlight{background:var(--green-bg);color:var(--success);padding:1px 4px;border-radius:3px;font-weight:600}
     .api-docs{}
     .api-docs h2{font-size:20px;font-weight:700;color:var(--text-0);margin:0 0 6px 0}
     .api-docs .api-lead{color:var(--text-2);font-size:14px;margin-bottom:24px}
@@ -656,10 +657,6 @@
             <div class="card-value" id="analyticsAvgDay">-</div>
           </div>
           <div class="card">
-            <div class="card-label">Модемов</div>
-            <div class="card-value" id="analyticsModemCount">-</div>
-          </div>
-          <div class="card">
             <div class="card-label">Среднее на модем/сутки</div>
             <div class="card-value" id="analyticsAvgPerModem">-</div>
           </div>
@@ -671,19 +668,17 @@
             <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Потребление трафика по дням</h3>
             <div style="display:flex;gap:8px;align-items:center">
               <button onclick="shiftDailyMonth(-1)" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);padding:4px 10px;cursor:pointer;font-size:13px">◀</button>
-              <span id="dailyMonthLabel" style="font-size:12px;font-weight:600;color:var(--text-0);min-width:100px;text-align:center"></span>
+              <span id="dailyMonthLabel" onclick="toggleDailyCustomRange()" style="font-size:12px;font-weight:600;color:var(--accent);min-width:100px;text-align:center;cursor:pointer;text-decoration:underline;text-underline-offset:3px"></span>
               <button onclick="shiftDailyMonth(1)" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);padding:4px 10px;cursor:pointer;font-size:13px">▶</button>
-              <button onclick="toggleDailyCustomRange()" id="btnDailyCustom" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);padding:4px 10px;cursor:pointer;font-size:11px">Выбрать даты</button>
             </div>
           </div>
           <div id="dailyCustomRange" style="display:none;margin-bottom:10px;padding:8px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border)">
             <div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">
               <label style="font-size:11px;color:var(--text-2)">С:</label>
-              <input type="date" id="dailyChartFrom" style="background:var(--bg-1);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px">
+              <input type="date" id="dailyChartFrom" style="background:var(--bg-1);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px" onchange="applyDailyCustomRange()">
               <label style="font-size:11px;color:var(--text-2)">По:</label>
-              <input type="date" id="dailyChartTo" style="background:var(--bg-1);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px">
-              <label style="font-size:11px;color:var(--text-2);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="dailyChartToday" style="margin:0"> Сегодня</label>
-              <button onclick="applyDailyCustomRange()" style="background:var(--accent);color:#fff;border:none;border-radius:6px;padding:4px 12px;font-size:11px;cursor:pointer">Показать</button>
+              <input type="date" id="dailyChartTo" style="background:var(--bg-1);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 8px" onchange="applyDailyCustomRange()">
+              <label style="font-size:11px;color:var(--text-2);display:flex;align-items:center;gap:3px;cursor:pointer"><input type="checkbox" id="dailyChartToday" style="margin:0" onchange="applyDailyCustomRange()"> Сегодня</label>
             </div>
           </div>
           <div id="dailyChartLoading" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px">Загрузка данных...</div>
@@ -1178,7 +1173,7 @@ function shiftDailyMonth(delta){
   document.getElementById('dailyChartFrom').value=r.from;
   document.getElementById('dailyChartTo').value=r.to;
   document.getElementById('dailyCustomRange').style.display='none';
-  document.getElementById('btnDailyCustom').style.background='';
+  document.getElementById('dailyMonthLabel').style.color='var(--accent)';
   reloadDailyChart();
 }
 function toggleDailyCustomRange(){
@@ -1187,7 +1182,7 @@ function toggleDailyCustomRange(){
 }
 function applyDailyCustomRange(){
   dailyCustomMode=true;
-  document.getElementById('btnDailyCustom').style.background='var(--accent)';
+  document.getElementById('dailyMonthLabel').style.color='var(--warning)';
   reloadDailyChart();
 }
 
@@ -1216,7 +1211,6 @@ function renderAnalytics(){
   document.getElementById('analyticsSummary').style.display='';
   document.getElementById('analyticsMonthTotal').textContent=formatBytes(totalMonth);
   document.getElementById('analyticsAvgDay').textContent=formatBytes(avgDay);
-  document.getElementById('analyticsModemCount').textContent=modemCount;
   document.getElementById('analyticsAvgPerModem').textContent=formatBytes(avgPerModem);
 
   // Sort modems by month traffic desc
@@ -1990,6 +1984,8 @@ function updateSummary(){
   if(billingData&&billingData.price>0){
     // Use monthExpense from server ledger (actual charges), not live calculation
     var displayExpense=billingData.monthExpense||0;
+    // TRAFFIC-FIX: Use live traffic from server (same source as analytics tab)
+    var liveGb=billingData.liveMonthGb||Math.round(monthGb*1000)/1000;
 
     // Balance card — show balance + month expense
     var balanceEl=document.getElementById('balanceValue');
@@ -1998,7 +1994,7 @@ function updateSummary(){
       var balance=billingData.balance;
       balanceEl.textContent=formatCost(balance);
       balanceEl.className='card-value '+(balance>=0?'balance-positive':'balance-negative');
-      balanceInfoEl.textContent='Расход за месяц: '+formatCost(displayExpense);
+      balanceInfoEl.textContent='Расход за месяц: '+formatCost(displayExpense)+' ('+liveGb.toFixed(1)+' ГБ)';
 
       if(balance<0){
         document.getElementById('balanceWarning').innerHTML='<div class="balance-warning">\u26A0\uFE0F Баланс отрицательный. Пожалуйста, свяжитесь с администратором для пополнения.</div>';
