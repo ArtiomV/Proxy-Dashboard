@@ -216,8 +216,8 @@ function saveBillingLedger() {
 // ==================== AUDIT LOG (TASK-J) — SQLite-backed ====================
 function auditLog(adminLogin, action, details = {}) {
   try {
-    const { timestamp, admin, action: _a, ...rest } = { timestamp: new Date().toISOString(), admin: adminLogin, action, ...details };
-    dbStmts.insertAudit.run(new Date().toISOString(), adminLogin, action, JSON.stringify(rest));
+    const ts = new Date().toISOString();
+    dbStmts.insertAudit.run(ts, adminLogin, action, JSON.stringify(details));
   } catch (e) {
     console.error('[AuditLog] Write failed:', e.message);
   }
@@ -773,12 +773,14 @@ let clientById = new Map();
 let clientByLogin = new Map();
 let clientByApiKey = new Map();
 let clientByInn = new Map();
+let clientByResetToken = new Map();
 
 function rebuildClientMaps() {
   clientById = new Map(clients.map(c => [c.id, c]));
   clientByLogin = new Map(clients.map(c => [c.login, c]));
   clientByApiKey = new Map(clients.filter(c => c.apiKey).map(c => [c.apiKey, c]));
   clientByInn = new Map(clients.filter(c => c.inn).map(c => [c.inn, c]));
+  clientByResetToken = new Map(clients.filter(c => c.resetToken).map(c => [c.resetToken, c]));
 }
 
 // Ensure all clients have required fields (migration)
@@ -1004,7 +1006,7 @@ if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true
 
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
-app.use(express.json({ limit: '50mb' }));
+app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
 // Rate limiting for login endpoint (SEC-03: anti-bruteforce)
@@ -1012,6 +1014,15 @@ const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
   max: 15, // max 15 attempts per IP per window
   message: { error: 'Too many login attempts, try again in 15 minutes' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// SEC-03: Rate limiting for reset_ip_by_token (public endpoint)
+const resetTokenLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 10, // max 10 attempts per IP per minute
+  message: { error: 'Too many requests, try again in 1 minute' },
   standardHeaders: true,
   legacyHeaders: false
 });
@@ -1029,7 +1040,7 @@ function authMiddleware(req, res, next) {
 }
 
 function adminMiddleware(req, res, next) {
-  if (req.user.portNameFilter !== '*') {
+  if (!req.user.isAdmin) {
     return res.status(403).json({ error: 'Admin access required' });
   }
   next();
@@ -1083,11 +1094,21 @@ app.post('/api/admin/impersonate/:id', authMiddleware, adminMiddleware, (req, re
 
 // ==================== ProxySmart API helpers ====================
 
+// OPT-05: Extract server name from prefixed ID (e.g., "S1_port123" → "S1")
+function extractServerName(prefixedId) {
+  return apiServers.map(s => s.name).find(n => prefixedId.startsWith(n + '_')) || '';
+}
+
+// BUG-05: Detect protocol from URL to use http or https
+function getHttpLib(url) {
+  return url.protocol === 'https:' ? https : http;
+}
+
 function fetchApi(server, apiPath, timeout = 10000) {
   return new Promise((resolve, reject) => {
     const url = new URL(apiPath, server.url);
     const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
-    const req = http.request({
+    const req = getHttpLib(url).request({
       hostname: url.hostname, port: url.port,
       path: url.pathname + url.search, method: 'GET',
       headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' },
@@ -1110,7 +1131,7 @@ function fetchApiRaw(server, apiPath, timeout = 10000) {
   return new Promise((resolve, reject) => {
     const url = new URL(apiPath, server.url);
     const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
-    const req = http.request({
+    const req = getHttpLib(url).request({
       hostname: url.hostname, port: url.port,
       path: url.pathname + url.search, method: 'GET',
       headers: { 'Authorization': `Basic ${auth}` },
@@ -1131,7 +1152,7 @@ function postApi(server, apiPath, body, timeout = 10000) {
     const url = new URL(apiPath, server.url);
     const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
     const postData = typeof body === 'string' ? body : JSON.stringify(body);
-    const req = http.request({
+    const req = getHttpLib(url).request({
       hostname: url.hostname, port: url.port,
       path: url.pathname + url.search, method: 'POST',
       headers: {
@@ -1160,7 +1181,7 @@ function postFormApi(server, apiPath, formData, timeout = 10000) {
   return new Promise((resolve, reject) => {
     const url = new URL(apiPath, server.url);
     const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
-    const req = http.request({
+    const req = getHttpLib(url).request({
       hostname: url.hostname, port: url.port,
       path: url.pathname + url.search, method: 'POST',
       headers: {
@@ -1900,10 +1921,10 @@ app.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
 
 // ==================== CLIENT: TOKEN-BASED IP RESET (public, no session) ====================
 
-app.get('/api/client/reset_ip_by_token', async (req, res) => {
+app.get('/api/client/reset_ip_by_token', resetTokenLimiter, async (req, res) => {
   const { nick, token } = req.query;
   if (!nick || !token) return res.status(400).json({ error: 'nick and token required' });
-  const client = clients.find(c => c.resetToken === token);
+  const client = clientByResetToken.get(token);
   if (!client) return res.status(401).json({ error: 'Invalid token' });
   // Try all servers
   for (const server of apiServers) {
@@ -1948,7 +1969,7 @@ app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
     const credentials = [];
 
     for (const [imei, portList] of Object.entries(merged.ports)) {
-      const serverName = imei.startsWith('S1_') ? 'S1' : imei.startsWith('S2_') ? 'S2' : '';
+      const serverName = extractServerName(imei);
       const ci = COUNTRIES[serverName] || {};
       let modemNick = imei;
       for (const m of merged.status) {
@@ -2052,7 +2073,7 @@ app.get('/api/v1/proxy', async (req, res) => {
 
     const proxies = [];
     for (const [imei, portList] of Object.entries(merged.ports)) {
-      const serverName = imei.startsWith('S1_') ? 'S1' : imei.startsWith('S2_') ? 'S2' : '';
+      const serverName = extractServerName(imei);
       const ci = COUNTRIES[serverName] || {};
       let modemNick = imei;
       let operator = '', isOnline = false;
@@ -2143,7 +2164,7 @@ app.get('/api/v1/proxies', async (req, res) => {
     const proxies = [];
 
     for (const [imei, portList] of Object.entries(merged.ports)) {
-      const serverName = imei.startsWith('S1_') ? 'S1' : imei.startsWith('S2_') ? 'S2' : '';
+      const serverName = extractServerName(imei);
       const ci = COUNTRIES[serverName] || {};
       let modemNick = imei;
       for (const m of merged.status) {
@@ -2548,8 +2569,19 @@ app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, asy
   const { name, fileBase64, mimeType } = req.body;
   if (!name || !fileBase64) return res.status(400).json({ error: 'name and fileBase64 required' });
 
+  // SEC-04: Validate file extension
+  const ALLOWED_EXTENSIONS = new Set(['pdf', 'docx', 'doc', 'xlsx', 'xls', 'png', 'jpg', 'jpeg']);
+  const ext = (name.split('.').pop() || '').toLowerCase();
+  if (!ext || !ALLOWED_EXTENSIONS.has(ext)) {
+    return res.status(400).json({ error: `File type .${ext} not allowed. Allowed: ${[...ALLOWED_EXTENSIONS].join(', ')}` });
+  }
+
+  // Validate file size (base64 → ~75% of original, max 10MB decoded)
+  if (fileBase64.length > 14 * 1024 * 1024) {
+    return res.status(400).json({ error: 'File too large (max 10MB)' });
+  }
+
   const docId = generateId();
-  const ext = name.split('.').pop() || 'pdf';
   const fileName = `${docId}.${ext}`;
   const filePath = path.join(DOCUMENTS_DIR, fileName);
 
@@ -3153,10 +3185,7 @@ function scheduleRepeating(hour, minute, label, fn) {
   speedtestTimers.push(entry);
 }
 
-// CODE-05: scheduleNightly merged into scheduleRepeating (was duplicate)
-function scheduleNightly(hour, label, fn) {
-  scheduleRepeating(hour, 0, label, fn);
-}
+// OPT-02: scheduleNightly removed — use scheduleRepeating directly
 
 // ==================== DAILY BILLING ====================
 async function runDailyBilling() {
@@ -3642,7 +3671,7 @@ app.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res)
 // Get Tochka config
 app.get('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res) => {
   res.json({
-    jwt: tochkaConfig.jwt,
+    jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '',
     clientId: tochkaConfig.clientId,
     customerCode: tochkaConfig.customerCode,
     accountId: tochkaConfig.accountId,
@@ -4631,7 +4660,7 @@ const httpServer = app.listen(PORT, () => {
   rescheduleSpeedtests();
 
   // Schedule nightly TopHosts at 03:00
-  scheduleNightly(3, 'TopHosts', aggregateTopHosts);
+  scheduleRepeating(3, 0, 'TopHosts', aggregateTopHosts);
 
   // Start modem tracking (IP + uptime)
   const TRACKING_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
@@ -4959,16 +4988,8 @@ async function createProxyForTelegram(chatId, username, planKey) {
 
   const serverIp = SERVER_IPS[modem.serverName] || new URL(modem.server.url).hostname;
 
-  // Compute expiration
-  let expiresAt;
-  if (plan.hours) {
-    // Test plan: expires in N hours
-    expiresAt = new Date(Date.now() + plan.hours * 3600000).toISOString();
-  } else {
-    // Monthly plans: expires at 00:00 UTC on (today + days + 1)
-    const now = new Date();
-    expiresAt = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + plan.days + 1, 0, 0, 0)).toISOString();
-  }
+  // Compute expiration: now + plan.days (in exact hours for precision)
+  const expiresAt = new Date(Date.now() + plan.days * 24 * 3600000).toISOString();
 
   const record = {
     chatId,
