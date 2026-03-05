@@ -410,6 +410,18 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   .acc-period-btn{padding:4px 10px;font-size:10px}
 }
 </style>
+<!-- Yandex.Metrika counter -->
+<script type="text/javascript">
+    (function(m,e,t,r,i,k,a){
+        m[i]=m[i]||function(){(m[i].a=m[i].a||[]).push(arguments)};
+        m[i].l=1*new Date();
+        for (var j = 0; j < document.scripts.length; j++) {if (document.scripts[j].src === r) { return; }}
+        k=e.createElement(t),a=e.getElementsByTagName(t)[0],k.async=1,k.src=r,a.parentNode.insertBefore(k,a)
+    })(window, document,'script','https://mc.yandex.ru/metrika/tag.js?id=107161941', 'ym');
+    ym(107161941, 'init', {ssr:true, webvisor:true, clickmap:true, ecommerce:"dataLayer", referrer: document.referrer, url: location.href, accurateTrackBounce:true, trackLinks:true});
+</script>
+<noscript><div><img src="https://mc.yandex.ru/watch/107161941" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
+<!-- /Yandex.Metrika counter -->
 </head>
 <body style="visibility:hidden">
 
@@ -1388,7 +1400,8 @@ function renderClients(){if(!currentData)return;var cl=currentData.clients||[];v
     var monthGbLive=Math.round(((currentData.clientLiveMonthGb||{})[c.id]||0)*10)/10;
     var costLabel='';
     if(bt==='per_modem'){costLabel=price+' \u00D7 '+modems.length+' = '+Math.round(cost)+' \u20BD'}
-    else{costLabel=monthGbLive.toFixed(1)+' GB \u00D7 '+price+' = '+Math.round(cost)+' \u20BD'}
+    else{costLabel=monthGbBilled.toFixed(1)+' GB \u00D7 '+price+' \u2248 '+Math.round(cost)+' \u20BD'}
+    var liveLabel=(bt!=='per_modem'&&monthGbLive>0&&Math.abs(monthGbLive-monthGbBilled)>0.2)?'<div style="font-size:9px;color:var(--text-3)">live: '+monthGbLive.toFixed(1)+' GB</div>':'';
     var balance=c.balance!==undefined?c.balance:0;
     var balClass=balance>=0?'balance-positive':'balance-negative';
     // Main row
@@ -1396,7 +1409,7 @@ function renderClients(){if(!currentData)return;var cl=currentData.clients||[];v
     h+='<td style="text-align:left"><div style="font-weight:600;color:var(--text-0)">'+esc(c.name)+'</div><div style="font-size:10px;color:var(--text-3)">'+esc(c.portName)+' / '+esc(c.login)+'</div></td>';
     h+='<td style="text-align:center;font-weight:600;color:var(--text-0)">'+price+' \u20BD<span style="font-size:10px;color:var(--text-2);font-weight:400">/'+(bt==='per_modem'?'мод':'ГБ')+'</span></td>';
     h+='<td style="text-align:right;font-weight:700" class="'+balClass+'">'+Math.round(balance)+' \u20BD</td>';
-    h+='<td style="text-align:right"><div style="font-weight:600;color:var(--accent)">'+Math.round(cost)+' \u20BD</div><div style="font-size:10px;color:var(--text-3)">'+costLabel+'</div></td>';
+    h+='<td style="text-align:right"><div style="font-weight:600;color:var(--accent)">'+Math.round(cost)+' \u20BD</div><div style="font-size:10px;color:var(--text-3)">'+costLabel+'</div>'+liveLabel+'</td>';
     h+='<td style="text-align:center;font-weight:600">'+modems.length+'</td>';
     h+='<td style="text-align:left;font-size:11px;color:var(--text-2)">'+esc(c.contact||'\u2014')+'</td>';
     h+='<td style="text-align:center;white-space:nowrap">';
