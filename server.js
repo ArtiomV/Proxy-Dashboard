@@ -3779,22 +3779,49 @@ async function runDailyBilling() {
 
       // Compute delta
       let deltaBytes;
+      let skipSnapshotUpdate = false;
+      const now = new Date();
+      const dayOfMonth = now.getDate();
+
       if (currentMonthBytes < previousBytes) {
-        // Month reset detected: ProxySmart zeroed the counters
-        // Charge the gap from last snapshot to real end of prev month (from prevmonth counters)
-        const prevMonthTotal = computeClientPrevMonthBytes(results, client.portName);
-        const gapBytes = Math.max(0, prevMonthTotal - previousBytes);
-        console.log(`[Billing] Month reset detected for ${client.name}: snapshot=${previousBytes}, prevMonthTotal=${prevMonthTotal}, gap=${gapBytes}, newMonth=${currentMonthBytes}`);
-        deltaBytes = gapBytes + currentMonthBytes;
+        if (dayOfMonth <= 3) {
+          // Genuine month reset (first 3 days): ProxySmart zeroed the counters
+          const prevMonthTotal = computeClientPrevMonthBytes(results, client.portName);
+          const gapBytes = Math.max(0, prevMonthTotal - previousBytes);
+          console.log(`[Billing] Month reset for ${client.name} (day ${dayOfMonth}): snapshot=${previousBytes}, prevMonthTotal=${prevMonthTotal}, gap=${gapBytes}, newMonth=${currentMonthBytes}`);
+          deltaBytes = gapBytes + currentMonthBytes;
+        } else {
+          // Mid-month counter drop — modem restart or ProxySmart server issue, NOT a real reset
+          console.log(`[Billing] Counter drop for ${client.name} (day ${dayOfMonth}): current=${currentMonthBytes} < snapshot=${previousBytes}. Skipping (not a month boundary).`);
+          deltaBytes = 0;
+          skipSnapshotUpdate = true; // Preserve old snapshot to avoid cumulative drift
+        }
       } else {
         deltaBytes = currentMonthBytes - previousBytes;
       }
 
-      // Always update snapshot
-      client.last_traffic_snapshot = {
-        timestamp: new Date().toISOString(),
-        month_bytes: currentMonthBytes
-      };
+      // Sanity check: if delta is suspiciously large (>10x recent average), skip to prevent overcharge
+      if (deltaBytes > 0) {
+        const recentCharges = (billingLedger[client.id] || [])
+          .filter(e => e.type === 'charge' && e.delta_bytes > 0)
+          .slice(-7);
+        if (recentCharges.length >= 3) {
+          const avgDelta = recentCharges.reduce((s, e) => s + e.delta_bytes, 0) / recentCharges.length;
+          if (avgDelta > 0 && deltaBytes > avgDelta * 10) {
+            console.error(`[Billing] ANOMALY for ${client.name}: delta=${deltaBytes} is ${(deltaBytes/avgDelta).toFixed(1)}x average (${Math.round(avgDelta)}). Skipping to prevent overcharge.`);
+            deltaBytes = 0;
+            skipSnapshotUpdate = true;
+          }
+        }
+      }
+
+      // Update snapshot (unless counter drop detected mid-month)
+      if (!skipSnapshotUpdate) {
+        client.last_traffic_snapshot = {
+          timestamp: new Date().toISOString(),
+          month_bytes: currentMonthBytes
+        };
+      }
 
       if (deltaBytes <= 0) {
         skipped++;
