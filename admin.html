@@ -925,7 +925,7 @@ function renderSignalBars(s){var h='<div class="signal-bars">';for(var i=1;i<=5;
 function renderNetBadge(t){if(!t)return'<span class="net-badge net-unknown">?</span>';var c='net-unknown',l=t;if(/lte|4g/i.test(t)){c='net-lte';l='LTE'}else if(/3g|hspa|umts/i.test(t)){c='net-3g';l='3G'}else if(/2g|edge|gprs/i.test(t)){c='net-2g';l='2G'}return'<span class="net-badge '+c+'">'+l+'</span>'}
 function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
 function fmtDateRu(d){if(!d)return'';var p=d.split('-');return p.length===3?(p[2]+'.'+p[1]+'.'+p[0]):d}
-function parseTraffic(v){if(!v||v===0)return 0;var s=String(v),m=s.match(/([\d.]+)\s*(KB|MB|GB|TB)/i);if(!m)return 0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1024:u==='MB'?1048576:u==='GB'?1073741824:u==='TB'?1099511627776:1)}
+function parseTraffic(v){if(!v||v===0)return 0;if(typeof v==='number')return v;var s=String(v),m=s.match(/([\d.]+)\s*(KB|MB|GB|TB)/i);if(!m)return parseFloat(s)||0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1024:u==='MB'?1048576:u==='GB'?1073741824:u==='TB'?1099511627776:1)}
 function bytesToGb(b){return b/1073741824}
 
 function renderTable(){

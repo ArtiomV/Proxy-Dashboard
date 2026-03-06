@@ -2711,6 +2711,18 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       }
     }
 
+    // Override yesterday bandwidth with recorded daily_traffic (stable, not degraded by modem restarts)
+    const _yesterday = new Date();
+    _yesterday.setDate(_yesterday.getDate() - 1);
+    const _yesterdayStr = _yesterday.toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
+    for (const [portId, bwData] of Object.entries(merged.bandwidth || {})) {
+      const dt = dailyTraffic[portId]?.[_yesterdayStr];
+      if (dt) {
+        bwData.bandwidth_bytes_yesterday_in = dt.in || 0;
+        bwData.bandwidth_bytes_yesterday_out = dt.out || 0;
+      }
+    }
+
     res.json({
       clientMonthCharges,
       clientMonthGb,
