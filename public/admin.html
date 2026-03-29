@@ -917,7 +917,7 @@ function switchMainTab(name,el){localStorage.setItem('admin_active_tab',name);do
 // ========== DATA ==========
 function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
 
-function processData(){if(!currentData)return;var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var n={'unite':'Moldtelecom','orange':'Orange','vodafone ro':'Vodafone RO','moldtelecom':'Moldtelecom'};return n[r.toLowerCase()]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
+function processData(){if(!currentData)return;var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[r.toLowerCase()]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
   var bw=currentData.bandwidth||{};for(var mi in mm){var mod=mm[mi];for(var p=0;p<mod.ports.length;p++){var pt=mod.ports[p];if(bw[pt.portID])pt._bw=bw[pt.portID]}}
   // IP tracking & uptime tracking
@@ -1244,8 +1244,7 @@ function collectTrafficData(){
       if(!serverIn[m.server])serverIn[m.server]=0;serverIn[m.server]+=din;
       if(!serverOut[m.server])serverOut[m.server]=0;serverOut[m.server]+=dout;
       var rawOp=m.operator||'Неизвестный';
-      var OP_NORM={'unite':'Moldtelecom','orange':'Orange','vodafone ro':'Vodafone RO','moldtelecom':'Moldtelecom'};
-      var op=OP_NORM[rawOp.toLowerCase()]||rawOp;
+      var op=rawOp;
       if(!serverOpTraffic[m.server])serverOpTraffic[m.server]={};
       if(!serverOpTraffic[m.server][op])serverOpTraffic[m.server][op]={tIn:0,tOut:0,count:0};
       serverOpTraffic[m.server][op].tIn+=din;serverOpTraffic[m.server][op].tOut+=dout;serverOpTraffic[m.server][op].count++;
@@ -1325,12 +1324,8 @@ function renderTrafficTab(){
   document.getElementById('trafficWidgets').innerHTML=
     mkWidget('Всего',fmtGb(total),'за '+d.label,'var(--accent)')+
     mkWidget('Выручка/мес',revPrefix+revLabel,revIsApprox?'~ (месяц не закончен)':'итого за период','var(--success)')+
-    mkWidget('Входящий',fmtGb(d.totalIn),inPct+'% от всего')+
-    mkWidget('Исходящий',fmtGb(d.totalOut),outPct+'% от всего')+
-    mkWidget('Активных модемов','<span style="color:'+onlineColor+'">'+onlineModemsAll+'</span>/'+totalModemsAll,onlineModemsAll===totalModemsAll?'100% онлайн':(totalModemsAll-onlineModemsAll)+' оффлайн')+
     mkWidget('Ср. на модем/сут',fmtGb(avgPerModem),'за '+daysElapsed+' дн.')+
-    mkWidget('Топ клиент',esc(topClientName.length>14?topClientName.slice(0,13)+'…':topClientName),topClientPct+'% трафика')+
-    mkWidget('Клиентов',totalClients,clientNames.length+' с трафиком');
+    mkWidget('Топ клиент',esc(topClientName.length>14?topClientName.slice(0,13)+'…':topClientName),topClientPct+'% трафика');
 
   // Render active sub-tab
   var activeSubTab=document.querySelector('.acc-sub-tab.active');
@@ -1434,12 +1429,12 @@ function renderAccSubTab(name){
 
       // --- Операторы ---
       var allOps={};
-      d.modemTraffic.forEach(function(m){var op=m.operator||'Другие';if(!allOps[op])allOps[op]={t:0,cnt:0};allOps[op].t+=m.tIn+m.tOut;allOps[op].cnt++;});
+      d.modemTraffic.forEach(function(m){var op=m.operator||m.operator||'—';if(!allOps[op])allOps[op]={t:0,cnt:0};allOps[op].t+=m.tIn+m.tOut;allOps[op].cnt++;});
       var opList=Object.keys(allOps).sort(function(a,b){return allOps[b].t-allOps[a].t});
       var opMax=opList.length?allOps[opList[0]].t||1:1;
       var opH='<div class="analytics-card" style="margin:0">';
       opH+='<div style="font-size:11px;font-weight:700;color:var(--text-0);margin-bottom:8px">📡 Операторы</div>';
-      opList.slice(0,4).forEach(function(op,oi){var v=allOps[op];var w=Math.max(v.t/opMax*100,2);
+      opList.forEach(function(op,oi){var v=allOps[op];var w=Math.max(v.t/opMax*100,2);
         opH+='<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-2);margin-bottom:2px"><span>'+esc(op)+'</span><span style="color:var(--text-1);font-weight:600">'+fmtGb(v.t)+'</span></div>';
         opH+='<div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+CHART_COLORS.operators[oi%CHART_COLORS.operators.length]+';width:'+w+'%"></div></div></div>';
       });
