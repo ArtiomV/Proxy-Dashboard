@@ -472,7 +472,6 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   </div>
   <div class="header-right">
     <span class="last-update" id="lastUpdate"></span>
-    <button class="btn btn-sm" onclick="loadData()">Обновить</button>
     <div class="theme-toggle" onclick="toggleTheme()" title="Переключить тему"></div>
     <button class="btn btn-sm btn-danger" onclick="doLogout()">Выход</button>
   </div>
@@ -1542,9 +1541,8 @@ function renderAccSubTab(name){
       hc+='<div style="flex:1;text-align:right;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tIn)+'</div>';
       hc+='<div style="flex:1;text-align:right;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tOut)+'</div>';
       hc+='<div style="flex:1;text-align:right;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(total)+'</div>';
-      hc+='<div style="flex:0.9;display:flex;align-items:center;justify-content:flex-end;gap:4px">';
+      hc+='<div style="flex:0.9;display:flex;align-items:center;justify-content:center">';
       hc+=sparkH;
-      hc+='<span style="font-size:11px;font-weight:600;color:'+trendColor+'">'+trendStr+'</span>';
       hc+='</div>';
       hc+='<div style="flex:1.4;padding:0 8px"><div class="hbar-bar-wrap" style="height:8px"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div></div>';
       hc+='<div style="flex:0.5;text-align:right;font-size:11px;color:var(--text-2);padding-right:8px">'+sharePct+'%</div>';
