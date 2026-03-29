@@ -1018,7 +1018,7 @@ try {
 } catch (e) { console.error('Failed to load daily_traffic from SQLite:', e.message); }
 
 const _dtUpsert = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
-const _dtCleanup = db.prepare("DELETE FROM daily_traffic WHERE date < date('now', '-90 days')");
+// daily_traffic never cleaned — needed for long-term trend charts
 const _htUpsert = db.prepare('INSERT OR REPLACE INTO traffic_hourly (server_name, nick, operator, client_name, hour_start, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?, ?)');
 const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
 const _metaCleanup = db.prepare("DELETE FROM modem_meta WHERE updated_at < datetime('now', '-30 days')");
@@ -1072,7 +1072,6 @@ function saveDailyTraffic() {
           _dtUpsert.run(portName, date, bIn, bOut);
         }
       }
-      _dtCleanup.run();
     });
     batch();
   } catch (e) { console.error('[saveDailyTraffic] SQLite error:', e.message); }
@@ -6244,12 +6243,11 @@ const httpServer = app.listen(PORT, () => {
   // Nightly DB cleanup at 00:30 UTC — remove old data
   scheduleRepeating(0, 30, 'DbCleanup', () => {
     try {
-      const dtDel = _dtCleanup.run();
       const htDel = _htCleanup.run();
       const metaDel = _metaCleanup.run();
       const rotDel = _rotLogCleanup.run();
-      const total = dtDel.changes + htDel.changes + metaDel.changes + rotDel.changes;
-      if (total > 0) console.log(`[DbCleanup] Removed ${total} old rows (daily:${dtDel.changes} hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes})`);
+      const total = htDel.changes + metaDel.changes + rotDel.changes;
+      if (total > 0) console.log(`[DbCleanup] Removed ${total} old rows (hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes})`);
     } catch (e) { console.error('[DbCleanup] Error:', e.message); }
   });
 
