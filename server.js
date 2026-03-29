@@ -62,6 +62,27 @@ safeAddColumn('closing_documents', 'contract_info', "TEXT DEFAULT ''");
 safeAddColumn('clients', 'client_type', "TEXT DEFAULT 'legal'");
 safeAddColumn('closing_documents', 'signed_at', 'TEXT');
 
+// External proxies table
+db.exec(`CREATE TABLE IF NOT EXISTS external_proxies (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  label TEXT DEFAULT '',
+  protocol TEXT DEFAULT 'HTTP',
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  login TEXT DEFAULT '',
+  password TEXT DEFAULT '',
+  change_ip_url TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (client_id) REFERENCES clients(id)
+)`);
+safeAddColumn('external_proxies', 'change_ip_url', "TEXT DEFAULT ''");
+safeAddColumn('external_proxies', 'valid_until', 'TEXT');
+safeAddColumn('external_proxies', 'billing_type', "TEXT DEFAULT 'monthly'");
+safeAddColumn('external_proxies', 'price', 'REAL DEFAULT 0');
+safeAddColumn('external_proxies', 'traffic_used_gb', 'REAL DEFAULT 0');
+
 // Prepared statements for common operations
 const dbStmts = {
   // Sessions — fully SQLite-backed
@@ -941,8 +962,7 @@ function calculateMonthlyBillAmount(client, cachedResults) {
 }
 
 // ==================== DAILY TRAFFIC HISTORY — SQLite-backed ====================
-let dailyTraffic = {}; // { portName: { "2026-03-01": { in: bytes, out: bytes }, ... } }
-let lastDailyTrafficDate = '';
+let dailyTraffic = {}; // { portKey: { "2026-03-01": { in: bytes, out: bytes, portName }, ... } }
 // Load from SQLite
 try {
   const rows = db.prepare('SELECT port_name, date, bytes_in, bytes_out FROM daily_traffic').all();
@@ -984,6 +1004,45 @@ function parseTrafficValue(val) {
   const mult = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824, TB: 1099511627776 };
   return num * (mult[unit] || 1);
 }
+
+// ==================== BILLING HELPERS ====================
+
+function getMoscowNow() {
+  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+}
+
+function getMoscowToday() {
+  return getMoscowNow().toLocaleDateString('en-CA'); // "YYYY-MM-DD"
+}
+
+function getMoscowYesterday() {
+  const d = getMoscowNow();
+  d.setDate(d.getDate() - 1);
+  return d.toLocaleDateString('en-CA');
+}
+
+function trafficBytesToGb(bytes) {
+  return Math.round(bytes / (1024 * 1024 * 1024) * 1000) / 1000;
+}
+
+// Global portKey→portName mapping: "S1_port123" → "Brandanalytics"
+let portKeyToPortName = {};
+function refreshPortKeyMapping(allServerResults) {
+  const map = {};
+  for (const data of allServerResults) {
+    if (typeof data.bw === 'object') {
+      const prefix = (data.serverName || '') + '_';
+      for (const [portId, b] of Object.entries(data.bw)) {
+        if (b.portName) map[prefix + portId] = b.portName;
+      }
+    }
+  }
+  portKeyToPortName = map;
+}
+
+// Last billing run metadata (for /health and retry logic)
+let lastBillingRunSummary = null;
+let lastReconciliationMonth = '';
 
 // ==================== KNOWN MODEMS (persistence for offline detection) ====================
 const KNOWN_MODEMS_FILE = path.join(__dirname, 'known_modems.json');
@@ -1059,10 +1118,17 @@ function injectOfflineModems(data) {
   if (!km) return;
 
   const currentPortIds = new Set(Object.keys(data.bw || {}));
+  // Build set of IMEIs already present in status to avoid duplicates
+  const currentImeis = new Set(
+    (Array.isArray(data.status) ? data.status : [])
+      .map(m => m.modem_details ? m.modem_details.IMEI : null)
+      .filter(Boolean)
+  );
 
   for (const [portId, info] of Object.entries(km)) {
     if (currentPortIds.has(portId)) continue;
-
+    // Skip if this modem's IMEI is already in status (online under different portId)
+    if (info.imei && currentImeis.has(info.imei)) continue;
     // Inject into bw
     if (!data.bw) data.bw = {};
     data.bw[portId] = {
@@ -1075,6 +1141,8 @@ function injectOfflineModems(data) {
       bandwidth_bytes_month_out: '0 B',
       bandwidth_bytes_prevmonth_in: '0 B',
       bandwidth_bytes_prevmonth_out: '0 B',
+      bandwidth_bytes_lifetime_in: '0 B',
+      bandwidth_bytes_lifetime_out: '0 B',
       _offline: true
     };
 
@@ -1207,15 +1275,6 @@ for (const [login, u] of Object.entries(users)) {
     }
   }
 }
-// Remove any accidentally created tg_ clients (Telegram bot users don't get dashboard accounts)
-const tgClientsRemoved = clients.filter(c => c.portName && c.portName.startsWith('tg_'));
-if (tgClientsRemoved.length > 0) {
-  for (const tc of tgClientsRemoved) {
-    delete users[tc.login];
-    console.log(`  Removed tg_ client "${tc.portName}" from dashboard`);
-  }
-  clients = clients.filter(c => !(c.portName && c.portName.startsWith('tg_')));
-}
 saveClients(clients);
 rebuildClientMaps();
 
@@ -1321,6 +1380,21 @@ function computeClientMonthBytes(allServerResults, portName) {
   return totalBytes;
 }
 
+function computeClientYesterdayBytes(allServerResults, portName) {
+  let totalBytes = 0;
+  for (const data of allServerResults) {
+    if (typeof data.bw === 'object') {
+      for (const [portId, b] of Object.entries(data.bw)) {
+        if (b.portName === portName) {
+          totalBytes += parseBwToBytes(b.bandwidth_bytes_yesterday_in);
+          totalBytes += parseBwToBytes(b.bandwidth_bytes_yesterday_out);
+        }
+      }
+    }
+  }
+  return totalBytes;
+}
+
 function computeClientPrevMonthBytes(allServerResults, portName) {
   let totalBytes = 0;
   for (const data of allServerResults) {
@@ -1331,6 +1405,22 @@ function computeClientPrevMonthBytes(allServerResults, portName) {
           totalBytes += parseBwToBytes(b.bandwidth_bytes_prevmonth_out);
         }
       }
+    }
+  }
+  return totalBytes;
+}
+
+// Sum stored daily_traffic bytes for a client over a month (e.g. "2026-03")
+function getClientStoredMonthBytes(clientPortName, monthPrefix) {
+  let totalBytes = 0;
+  for (const [portKey, days] of Object.entries(dailyTraffic)) {
+    // Match by portName from stored data or global mapping
+    const firstDay = Object.values(days)[0];
+    const pn = (firstDay && firstDay.portName) || portKeyToPortName[portKey] || '';
+    if (pn !== clientPortName) continue;
+    for (const [date, entry] of Object.entries(days)) {
+      if (!date.startsWith(monthPrefix)) continue;
+      totalBytes += (entry.in || 0) + (entry.out || 0);
     }
   }
   return totalBytes;
@@ -1428,11 +1518,8 @@ app.get('/health', (req, res) => {
       ledger_entries: ledgerEntryCount,
       wal_mode: true
     },
-    telegram: {
-      bot_active: !!TG_TOKEN,
-      users: Object.keys(tgUsers).length,
-      active_proxies: tgProxies.filter(p => p.active !== false).length
-    },
+    billing: lastBillingRunSummary || { last_run: null },
+    reconciliation: { last_month: lastReconciliationMonth || null },
     intervals: _intervals.length,
     timestamp: new Date().toISOString()
   });
@@ -1645,6 +1732,56 @@ function getCachedDataAsOffline(serverName) {
   };
 }
 
+// ==================== AUTO_IP_ROTATION cache (from ProxySmart /conf/edit/) ====================
+const modemRotationCache = {}; // { "S1:IMEI" -> minutes }
+let rotationCacheUpdatedAt = 0;
+const ROTATION_CACHE_TTL = 5 * 60 * 1000; // refresh every 5 min
+
+async function refreshRotationCache() {
+  for (const server of apiServers) {
+    try {
+      let statusData;
+      try { statusData = await fetchApi(server, '/apix/show_status_json'); } catch (e) {
+        console.log(`[Rotation] ${server.name} status fetch failed: ${e.message}`);
+        continue;
+      }
+      const modems = Array.isArray(statusData) ? statusData : [];
+      if (modems.length === 0) { console.log(`[Rotation] ${server.name}: 0 modems, skipping`); continue; }
+      let fetched = 0;
+      // Fetch sequentially to avoid hammering the server
+      for (const m of modems) {
+        const imei = m.modem_details?.IMEI;
+        if (!imei) continue;
+        try {
+          const raw = await fetchApiRaw(server, `/conf/edit/${imei}`);
+          const html = raw.buffer ? raw.buffer.toString('utf8') : String(raw);
+          const match = html.match(/AUTO_IP_ROTATION[^>]*value="(\d*)"/);
+          const mins = match && match[1] ? parseInt(match[1]) : 0;
+          modemRotationCache[server.name + ':' + imei] = mins;
+          fetched++;
+        } catch (e) { /* skip */ }
+      }
+      console.log(`[Rotation] ${server.name}: fetched ${fetched}/${modems.length} modems`);
+    } catch (e) { console.log(`[Rotation] Failed for ${server.name}: ${e.message}`); }
+  }
+  rotationCacheUpdatedAt = Date.now();
+  const total = Object.keys(modemRotationCache).length;
+  console.log(`[Rotation] Total cached: ${total} modem rotation values`);
+}
+
+// Inject AUTO_IP_ROTATION into status data
+function injectRotationData(result) {
+  const statusArr = Array.isArray(result.status) ? result.status : [];
+  for (const m of statusArr) {
+    const imei = m.modem_details?.IMEI;
+    if (!imei) continue;
+    const key = result.serverName + ':' + imei;
+    if (modemRotationCache[key] !== undefined) {
+      m.modem_details.AUTO_IP_ROTATION = String(modemRotationCache[key]);
+    }
+  }
+}
+
 async function fetchServerData(server) {
   const [bw, status, ports] = await Promise.all([
     fetchApi(server, '/apix/bandwidth_report_all'),
@@ -1652,10 +1789,16 @@ async function fetchServerData(server) {
     fetchApi(server, '/apix/list_ports_json')
   ]);
   const result = { bw, status, ports, serverName: server.name };
+  // Inject rotation data from cache
+  injectRotationData(result);
   // Cache successful response
   cacheServerData(result);
   return result;
 }
+
+// Refresh rotation cache on startup and periodically
+setTimeout(() => refreshRotationCache(), 10000);
+setInterval(() => refreshRotationCache(), ROTATION_CACHE_TTL);
 
 // Fetch data from all servers; use cache for unreachable ones
 async function fetchAllServersData() {
@@ -1740,7 +1883,6 @@ function mergeServerData(allData, portNameFilter) {
     const isCached = !!data._cached;
     if (isCached) cachedServers.push({ name: data.serverName, cachedAt: data._cachedAt });
     for (const [portId, b] of Object.entries(filtered.bw)) {
-      if (portId.startsWith('tg_') || (b.portName && b.portName.startsWith('tg_'))) continue; // skip Telegram bot ports
       mergedBw[prefix + portId] = { ...b, _server: data.serverName, _cached: isCached };
     }
     const statusArr = Array.isArray(filtered.status) ? filtered.status : [];
@@ -1760,7 +1902,7 @@ function mergeServerData(allData, portNameFilter) {
     const portsObj = typeof filtered.ports === 'object' ? filtered.ports : {};
     for (const [imei, portList] of Object.entries(portsObj)) {
       const prefixedImei = prefix + imei;
-      const filteredPortList = portList.filter(p => !p.portID || (!p.portID.startsWith('tg_') && !(p.portName && p.portName.startsWith('tg_'))));
+      const filteredPortList = portList;
       const prefixedPorts = filteredPortList.map(p => ({ ...p, portID: p.portID ? prefix + p.portID : p.portID, _server: data.serverName, _cached: isCached }));
       if (prefixedPorts.length > 0) mergedPorts[prefixedImei] = (mergedPorts[prefixedImei] || []).concat(prefixedPorts);
     }
@@ -1939,28 +2081,41 @@ async function trackModems() {
       }
 
       if (!uptimeTracking[key]) {
-        uptimeTracking[key] = { total_checks: 0, online_checks: 0, first_check: now, consecutive_failures: 0 };
+        uptimeTracking[key] = { total_checks: 0, online_checks: 0, first_check: now, consecutive_failures: 0, daily: {} };
       }
       if (!uptimeTracking[key].consecutive_failures) uptimeTracking[key].consecutive_failures = 0;
+      if (!uptimeTracking[key].daily) uptimeTracking[key].daily = {};
+
+      // Daily bucket for 30-day uptime
+      const todayBucket = new Date().toLocaleDateString('en-CA');
+      if (!uptimeTracking[key].daily[todayBucket]) uptimeTracking[key].daily[todayBucket] = { online: 0, total: 0 };
 
       if (isOnline) {
-        // Online: reset consecutive failures, count as online
         uptimeTracking[key].consecutive_failures = 0;
         uptimeTracking[key].total_checks++;
         uptimeTracking[key].online_checks++;
+        uptimeTracking[key].daily[todayBucket].total++;
+        uptimeTracking[key].daily[todayBucket].online++;
       } else {
-        // Offline: increment consecutive failures
         uptimeTracking[key].consecutive_failures++;
-        // Only count as downtime after 3 consecutive failures
         if (uptimeTracking[key].consecutive_failures >= 3) {
           uptimeTracking[key].total_checks++;
-          // don't increment online_checks = counts as downtime
+          uptimeTracking[key].daily[todayBucket].total++;
+          // don't increment online = downtime
         } else {
-          // Less than 3 failures: still count as online (100%)
           uptimeTracking[key].total_checks++;
           uptimeTracking[key].online_checks++;
+          uptimeTracking[key].daily[todayBucket].total++;
+          uptimeTracking[key].daily[todayBucket].online++;
         }
       }
+
+      // Prune daily buckets older than 35 days
+      const cutoffPrune = new Date(now - 35 * 86400000).toLocaleDateString('en-CA');
+      for (const d of Object.keys(uptimeTracking[key].daily)) {
+        if (d < cutoffPrune) delete uptimeTracking[key].daily[d];
+      }
+
       totalTracked++;
     }
   }
@@ -1969,61 +2124,6 @@ async function trackModems() {
   saveUptimeTracking();
   // BUG-02: saveIpHistory() removed — recordIpChange() now does direct DB writes
   console.log(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);
-
-  // Daily traffic snapshot: capture "yesterday" data once per day
-  await captureDailyTrafficSnapshot();
-}
-
-async function captureDailyTrafficSnapshot() {
-  // Use Moscow timezone for date to match billing
-  const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' }); // YYYY-MM-DD
-  if (lastDailyTrafficDate === today) return; // already captured today
-
-  console.log(`[DailyTraffic] Capturing snapshot for today=${today}...`);
-
-  try {
-    const results = await fetchAllServersData();
-    const merged = mergeServerData(results, '*');
-    const bw = merged.bandwidth || {};
-    let captured = 0;
-
-    const yesterday = new Date();
-    yesterday.setDate(yesterday.getDate() - 1);
-    const yesterdayStr = yesterday.toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
-
-    for (const [portId, b] of Object.entries(bw)) {
-      const pn = b.portName || '';
-      if (pn.startsWith('tg_') || portId.startsWith('tg_')) continue;
-
-      // Key by portId (each modem separately)
-      if (!dailyTraffic[portId]) dailyTraffic[portId] = {};
-
-      // Save yesterday's traffic
-      const yIn = parseTrafficValue(b.bandwidth_bytes_yesterday_in);
-      const yOut = parseTrafficValue(b.bandwidth_bytes_yesterday_out);
-      if ((yIn > 0 || yOut > 0) && !dailyTraffic[portId][yesterdayStr]) {
-        dailyTraffic[portId][yesterdayStr] = { in: yIn, out: yOut, portName: pn };
-        captured++;
-      }
-    }
-
-    // Prune: keep only last 365 days
-    const cutoff = new Date();
-    cutoff.setDate(cutoff.getDate() - 366);
-    const cutoffStr = cutoff.toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
-    for (const pid of Object.keys(dailyTraffic)) {
-      for (const d of Object.keys(dailyTraffic[pid])) {
-        if (d < cutoffStr) delete dailyTraffic[pid][d];
-      }
-      if (Object.keys(dailyTraffic[pid]).length === 0) delete dailyTraffic[pid];
-    }
-
-    lastDailyTrafficDate = today;
-    saveDailyTraffic();
-    console.log(`[DailyTraffic] Captured ${captured} port snapshots for ${yesterdayStr} (${Object.keys(bw).length} ports total)`);
-  } catch (e) {
-    console.error('[DailyTraffic] Error:', e.message);
-  }
 }
 
 // ==================== SPEEDTEST HISTORY ====================
@@ -2169,13 +2269,13 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
         .filter(e => e.type === 'charge' && e.date && e.date.startsWith(currentMonthPrefix))
         .reduce((sum, e) => sum + (e.cost || 0), 0);
 
-      // TRAFFIC-FIX: Compute live month traffic from ProxySmart real-time data for this client
+      // Live month traffic from ProxySmart
       let liveMonthBytes = 0;
       for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
         liveMonthBytes += parseBwToBytes(bwData.bandwidth_bytes_month_in);
         liveMonthBytes += parseBwToBytes(bwData.bandwidth_bytes_month_out);
       }
-      const liveMonthGb = Math.round((liveMonthBytes / (1024 * 1024 * 1024)) * 1000) / 1000;
+      const liveMonthGb = trafficBytesToGb(liveMonthBytes);
 
       // Billed month GB from ledger (for comparison)
       const billedMonthGb = ledgerEntries
@@ -2208,9 +2308,24 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
         clientImeis.add(imei);
       }
 
+      const cutoff30 = new Date(Date.now() - 30 * 86400000).toLocaleDateString('en-CA');
+
       for (const imei of clientImeis) {
         if (ipTracking[imei]) filteredIpTracking[imei] = ipTracking[imei];
-        if (uptimeTracking[imei]) filteredUptimeTracking[imei] = uptimeTracking[imei];
+        if (uptimeTracking[imei]) {
+          const ut = uptimeTracking[imei];
+          // Compute 30-day uptime from daily buckets
+          let online30 = 0, total30 = 0;
+          for (const [date, bucket] of Object.entries(ut.daily || {})) {
+            if (date >= cutoff30) { online30 += bucket.online; total30 += bucket.total; }
+          }
+          filteredUptimeTracking[imei] = {
+            total_checks: ut.total_checks,
+            online_checks: ut.online_checks,
+            first_check: ut.first_check,
+            uptime30d: total30 > 0 ? Math.round(online30 / total30 * 1000) / 10 : null
+          };
+        }
         if (speedLatest[imei]) filteredSpeedtest[imei] = speedLatest[imei];
         if (ipHistory[imei]) filteredIpHistory[imei] = ipHistory[imei];
       }
@@ -2239,19 +2354,15 @@ app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
   const includeToday = req.query.include_today === '1';
   const result = {};
 
-  // Sprint-4 Task 4c: Build portId→portName mapping from cached bandwidth data
-  // After server restart, daily_traffic entries loaded from SQLite lack portName field
-  // FIX: prepend server prefix (e.g. "S1_") to match dailyTraffic keys
-  const portNameMap = {};
-  try {
-    const cachedResults = await fetchAllServersDataCached();
-    for (const data of cachedResults) {
-      const prefix = (data.serverName || '') + '_';
-      for (const [pid, b] of Object.entries(data.bw || {})) {
-        if (b.portName) portNameMap[prefix + pid] = b.portName;
-      }
-    }
-  } catch (e) { /* cache may not be ready yet */ }
+  // Use global portKey→portName mapping (refreshed by billing)
+  // Fallback: refresh from cache if mapping is empty
+  if (Object.keys(portKeyToPortName).length === 0) {
+    try {
+      const cachedResults = await fetchAllServersDataCached();
+      refreshPortKeyMapping(cachedResults);
+    } catch (e) { /* cache may not be ready yet */ }
+  }
+  const portNameMap = portKeyToPortName;
 
   // Collect daily traffic for ports matching this client's portName
   for (const [portId, days] of Object.entries(dailyTraffic)) {
@@ -2336,13 +2447,25 @@ app.get('/api/billing_history', authMiddleware, (req, res) => {
     .filter(e => e.type === 'charge' && e.date && e.date.startsWith(currentMonthPrefix))
     .reduce((sum, e) => sum + (e.cost || 0), 0);
 
+  // Average daily charge over last 7 days: sum charges for days [today-7 .. today-1] / 7
+  const today = getMoscowToday(); // "YYYY-MM-DD"
+  const d7 = getMoscowNow();
+  d7.setDate(d7.getDate() - 7);
+  const sevenDaysAgoStr = d7.toLocaleDateString('en-CA'); // exclusive lower bound
+  const last7dTotal = allEntries
+    .filter(e => e.type === 'charge' && e.date && e.date > sevenDaysAgoStr && e.date < today)
+    .reduce((sum, e) => sum + (e.cost || 0), 0);
+  const avgDailyCharge7d = Math.round((last7dTotal / 7) * 100) / 100;
+
   res.json({
     balance: clientInfo.balance,
     currency: clientInfo.currency || 'RUB',
     summary: {
       totalCharges: Math.round(totalCharges * 100) / 100,
       totalPayments: Math.round(totalPayments * 100) / 100,
-      monthCharges: Math.round(monthCharges * 100) / 100
+      monthCharges: Math.round(monthCharges * 100) / 100,
+      avgDailyCharge7d,
+      daysUntilZero: avgDailyCharge7d > 0 ? Math.floor(clientInfo.balance / avgDailyCharge7d) : null
     },
     // OLD-01 fix: strip internal db_id from API response
     entries: filtered.map(({ db_id, ...e }) => e)
@@ -2395,6 +2518,56 @@ app.get('/api/client/rotation_log', authMiddleware, async (req, res) => {
     const result = await fetchApi(server, `/apix/get_rotation_log?arg=${encodeURIComponent(nick)}`);
     res.json(result);
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
+});
+
+// ==================== CLIENT: SET ROTATION INTERVAL ====================
+
+app.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
+  try {
+    const { nick, serverName, minutes } = req.body;
+    if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
+    const mins = parseInt(minutes);
+    if (isNaN(mins) || mins < 0 || mins > 1440) return res.status(400).json({ error: 'minutes must be 0-1440' });
+
+    // Verify modem belongs to this client
+    const portNameFilter = req.user.portNameFilter;
+    if (portNameFilter === '*') { /* admin — allow */ }
+    else {
+      const cached = getCachedData();
+      if (!cached) return res.status(503).json({ error: 'Data not loaded yet' });
+      const allPorts = cached.ports || {};
+      let owned = false;
+      for (const srv in allPorts) {
+        const ports = allPorts[srv] || [];
+        for (const p of ports) {
+          if (p.portName === portNameFilter) {
+            const pNick = (p.portID || '').replace(/^S[12]_/, '');
+            if (pNick === nick) { owned = true; break; }
+          }
+        }
+        if (owned) break;
+      }
+      if (!owned) return res.status(403).json({ error: 'Modem not assigned to your account' });
+    }
+
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+
+    // Get current modem IMEI from status
+    const statusData = await fetchApi(server, '/apix/show_status_json');
+    const modems = Array.isArray(statusData) ? statusData : [];
+    const modem = modems.find(m => m.modem_details && m.modem_details.NICK === nick);
+    if (!modem) return res.status(404).json({ error: 'Modem not found' });
+
+    const imei = modem.modem_details.IMEI;
+    // Store rotation setting
+    await postApi(server, '/crud/store_modem', { IMEI: imei, AUTO_IP_ROTATION: String(mins) });
+    // Apply settings
+    await postApi(server, '/modem/settings', { imei });
+
+    console.log(`[Rotation] Client ${req.user.login} set ${nick} rotation to ${mins} min`);
+    res.json({ ok: true, minutes: mins });
+  } catch (err) { res.status(502).json({ error: 'Failed to set rotation', details: err.message }); }
 });
 
 // ==================== CLIENT: IP HISTORY ====================
@@ -2557,25 +2730,13 @@ app.get('/api/v1/proxy', async (req, res) => {
     const clientInfo = clientByLogin.get(client.login);
     const totalPayments = clientInfo ? (clientInfo.payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0) : 0;
 
-    // Bandwidth totals (in MB)
-    let monthMb = 0;
-    const parseToMb = (str) => {
-      if (!str || str === 0) return 0;
-      const s = String(str);
-      const m = s.match(/([\d.]+)\s*(TB|GB|MB|KB|B)?/i);
-      if (!m) return 0;
-      const val = parseFloat(m[1]);
-      const u = (m[2] || '').toUpperCase();
-      if (u === 'TB') return val * 1024 * 1024;
-      if (u === 'GB') return val * 1024;
-      if (u === 'MB') return val;
-      if (u === 'KB') return val / 1024;
-      return 0; // no unit = likely 0
-    };
+    // Bandwidth totals (in MB) — use parseBwToBytes → GB → MB
+    let monthBytes = 0;
     for (const b of Object.values(merged.bandwidth)) {
-      monthMb += parseToMb(b.bandwidth_bytes_month_in);
-      monthMb += parseToMb(b.bandwidth_bytes_month_out);
+      monthBytes += parseBwToBytes(b.bandwidth_bytes_month_in);
+      monthBytes += parseBwToBytes(b.bandwidth_bytes_month_out);
     }
+    const monthMb = Math.round(trafficBytesToGb(monthBytes) * 1024);
 
     res.json({
       success: true,
@@ -2659,6 +2820,66 @@ app.post('/api/admin/cache/invalidate', authMiddleware, adminMiddleware, (req, r
   res.json({ ok: true, message: 'Cache invalidated' });
 });
 
+app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req, res) => {
+  // Return daily traffic aggregated by client (portName) for each day
+  const results = await fetchAllServersDataCached();
+  if (Object.keys(portKeyToPortName).length === 0) refreshPortKeyMapping(results);
+  const pnMap = portKeyToPortName;
+  // Aggregate: { clientName: { "2026-03-01": { in: bytes, out: bytes }, ... } }
+  // Also track per-server: { clientName: { "2026-03-01": { in, out, servers: { S1: {in,out}, S2: {in,out} } } } }
+  const byClient = {};
+  // Build portId -> serverName mapping
+  const portIdToServer = {};
+  for (const data of results) {
+    const srvName = data.serverName || '';
+    if (typeof data.bw === 'object') {
+      for (const portId of Object.keys(data.bw)) {
+        portIdToServer[portId] = srvName;
+        portIdToServer[srvName + '_' + portId] = srvName;
+      }
+    }
+  }
+  // Historical days from dailyTraffic
+  for (const [portId, days] of Object.entries(dailyTraffic)) {
+    const pn = (Object.values(days)[0] && Object.values(days)[0].portName) || pnMap[portId] || 'Не назначен';
+    const srv = portIdToServer[portId] || '';
+    if (!byClient[pn]) byClient[pn] = {};
+    for (const [date, entry] of Object.entries(days)) {
+      if (!byClient[pn][date]) byClient[pn][date] = { in: 0, out: 0, servers: {} };
+      byClient[pn][date].in += entry.in || 0;
+      byClient[pn][date].out += entry.out || 0;
+      if (srv) {
+        if (!byClient[pn][date].servers[srv]) byClient[pn][date].servers[srv] = { in: 0, out: 0 };
+        byClient[pn][date].servers[srv].in += entry.in || 0;
+        byClient[pn][date].servers[srv].out += entry.out || 0;
+      }
+    }
+  }
+  // Today's live data from bandwidth cache
+  const todayStr = new Date().toISOString().slice(0, 10);
+  for (const data of results) {
+    if (typeof data.bw !== 'object') continue;
+    const srvName = data.serverName || '';
+    for (const [portId, b] of Object.entries(data.bw)) {
+      const pn = b.portName || pnMap[(data.serverName || '') + '_' + portId] || 'Не назначен';
+      const dayIn = parseBwToBytes(b.bandwidth_bytes_day_in);
+      const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
+      if (dayIn > 0 || dayOut > 0) {
+        if (!byClient[pn]) byClient[pn] = {};
+        if (!byClient[pn][todayStr]) byClient[pn][todayStr] = { in: 0, out: 0, servers: {} };
+        byClient[pn][todayStr].in += dayIn;
+        byClient[pn][todayStr].out += dayOut;
+        if (srvName) {
+          if (!byClient[pn][todayStr].servers[srvName]) byClient[pn][todayStr].servers[srvName] = { in: 0, out: 0 };
+          byClient[pn][todayStr].servers[srvName].in += dayIn;
+          byClient[pn][todayStr].servers[srvName].out += dayOut;
+        }
+      }
+    }
+  }
+  res.json(byClient);
+});
+
 app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const results = await fetchAllServersDataCached();
@@ -2707,14 +2928,12 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
     for (const [pn, bytes] of Object.entries(portNameBytes)) {
       const cid = portNameToClientId[pn];
       if (cid && bytes > 0) {
-        clientLiveMonthGb[cid] = Math.round((bytes / (1024 * 1024 * 1024)) * 1000) / 1000;
+        clientLiveMonthGb[cid] = trafficBytesToGb(bytes);
       }
     }
 
     // Override yesterday bandwidth with recorded daily_traffic (stable, not degraded by modem restarts)
-    const _yesterday = new Date();
-    _yesterday.setDate(_yesterday.getDate() - 1);
-    const _yesterdayStr = _yesterday.toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
+    const _yesterdayStr = getMoscowYesterday();
     for (const [portId, bwData] of Object.entries(merged.bandwidth || {})) {
       const dt = dailyTraffic[portId]?.[_yesterdayStr];
       if (dt) {
@@ -2735,9 +2954,6 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       speedtestLatest: getSpeedtestLatest(),
       ipHistory,
       settings: appSettings,
-      telegramUsers: tgUsers,
-      telegramProxies: tgProxies,
-      telegramFeedback: tgFeedback,
       bankPayments: getAllBankPayments(),
       tochkaConfigured: !!tochkaConfig.jwt,
       tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp }
@@ -2998,6 +3214,31 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
   res.json({ ok: true, payments: client.payments, balance: client.balance });
 });
 
+// Manual charge (debit) from client balance
+app.post('/api/admin/clients/:id/charge', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const { amount, date, note } = req.body;
+  if (!amount || !date) return res.status(400).json({ error: 'amount and date required' });
+  const parsedAmount = parseFloat(amount);
+  if (isNaN(parsedAmount) || parsedAmount <= 0 || parsedAmount > 100000000) {
+    return res.status(400).json({ error: 'Invalid amount: must be positive and reasonable' });
+  }
+
+  const { balanceBefore, balanceAfter } = atomicDebit(client.id, parsedAmount, {
+    type: 'manual_charge',
+    date: date,
+    timestamp: new Date().toISOString(),
+    amount: parsedAmount,
+    currency: client.currency || 'RUB',
+    note: note || 'Ручное списание'
+  });
+
+  saveClients(clients);
+  auditLog(req.user.login, 'manual_charge', { clientId: client.id, amount: parsedAmount, note: note || '' });
+  res.json({ ok: true, balance: client.balance, balanceBefore, balanceAfter });
+});
+
 app.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -3067,27 +3308,29 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
   if (isNaN(idx) || idx < 0 || idx >= entries.length) return res.status(400).json({ error: 'Invalid entry index' });
 
   const entry = entries[idx];
-  // Atomic revert of balance impact (no ledger entry for revert — it's a deletion)
-  if (entry.type === 'charge' && entry.cost) {
-    atomicCredit(client.id, entry.cost); // refund charge
-  } else if ((entry.type === 'payment' || entry.type === 'bank_payment') && entry.amount) {
-    atomicDebit(client.id, entry.amount); // remove payment
-  } else if (entry.type === 'adjustment' && entry.amount) {
-    if (entry.amount > 0) atomicDebit(client.id, entry.amount);
-    else atomicCredit(client.id, -entry.amount);
-  }
 
-  // BUG-04 fix: Point deletion by db_id instead of full DELETE+reinsert
+  // Delete from SQLite
   if (entry.db_id) {
     _ledgerDeleteById.run(entry.db_id);
-  } else {
-    // Fallback for entries without db_id (pre-migration data)
-    saveBillingLedger();
   }
   entries.splice(idx, 1);
   billingLedger[client.id] = entries;
 
-  console.log(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, new balance: ${client.balance}`);
+  // Recalculate balance from scratch using all remaining ledger entries
+  let recalcBalance = 0;
+  for (const e of entries) {
+    const isCredit = ['payment', 'bank_payment', 'credit', 'manual_credit', 'adjustment_credit'].includes(e.type)
+      || (e.type === 'adjustment' && (e.amount || 0) > 0);
+    const amt = e.amount || e.cost || 0;
+    if (isCredit) recalcBalance += amt;
+    else recalcBalance -= amt;
+  }
+  recalcBalance = Math.round(recalcBalance * 100) / 100;
+  _clientUpdateBalance.run(recalcBalance, client.id);
+  client.balance = recalcBalance;
+
+  saveBillingLedger();
+  console.log(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, recalculated balance: ${client.balance}`);
   auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, entryType: entry.type, amount: entry.amount || entry.cost });
   res.json({ ok: true, newBalance: client.balance });
 });
@@ -3120,6 +3363,73 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
 
   auditLog(req.user.login, 'balance_adjust', { clientId: client.id, amount: adjustment, note: note || '' });
   res.json({ ok: true, balance: client.balance });
+});
+
+// ==================== ADMIN: BILLING RECONCILIATION ====================
+
+app.get('/api/admin/billing/reconciliation', authMiddleware, adminMiddleware, async (req, res) => {
+  const period = req.query.period || getMoscowToday().slice(0, 7); // "YYYY-MM"
+
+  // Ensure portKey mapping is populated for matching dailyTraffic → clients
+  if (Object.keys(portKeyToPortName).length === 0) {
+    try {
+      const cachedResults = await fetchAllServersDataCached();
+      refreshPortKeyMapping(cachedResults);
+    } catch (e) { /* best effort */ }
+  }
+
+  const results = [];
+
+  for (const client of clients) {
+    if (!client.portName || !client.price || client.price <= 0) continue;
+
+    // Sum stored daily_traffic bytes for this month
+    const storedBytes = getClientStoredMonthBytes(client.portName, period);
+    const storedGb = trafficBytesToGb(storedBytes);
+
+    // Sum ledger charges for this month
+    const entries = billingLedger[client.id] || [];
+    const monthCharges = entries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
+    const billedGb = Math.round(monthCharges.reduce((s, e) => s + (e.delta_gb || 0), 0) * 1000) / 1000;
+    const billedCost = Math.round(monthCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100;
+
+    // Count days with traffic vs days with billing
+    const trafficDays = new Set();
+    for (const [portKey, days] of Object.entries(dailyTraffic)) {
+      const firstDay = Object.values(days)[0];
+      const pn = (firstDay && firstDay.portName) || portKeyToPortName[portKey] || '';
+      if (pn !== client.portName) continue;
+      for (const date of Object.keys(days)) {
+        if (date.startsWith(period)) trafficDays.add(date);
+      }
+    }
+    const billingDays = new Set(monthCharges.map(e => e.date));
+
+    const diffGb = Math.round((storedGb - billedGb) * 1000) / 1000;
+    let status = 'ok';
+    if (Math.abs(diffGb) > 0.01) status = 'mismatch';
+    if (trafficDays.size > 0 && billingDays.size === 0) status = 'missing_billing';
+    if (trafficDays.size === 0 && billingDays.size > 0) status = 'missing_traffic';
+
+    // Find missing days (traffic recorded but no charge)
+    const missingDays = [...trafficDays].filter(d => !billingDays.has(d)).sort();
+
+    results.push({
+      client_id: client.id,
+      client_name: client.name,
+      billing_type: client.billingType || 'per_gb',
+      stored_gb: storedGb,
+      billed_gb: billedGb,
+      diff_gb: diffGb,
+      billed_cost: billedCost,
+      traffic_days: trafficDays.size,
+      billing_days: billingDays.size,
+      missing_days: missingDays,
+      status
+    });
+  }
+
+  res.json({ period, clients: results });
 });
 
 // ==================== ADMIN: DOCUMENTS ====================
@@ -3203,6 +3513,8 @@ app.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
   res.json({ total, offset, limit, entries });
 });
 
+// CRM translate endpoint removed — translations applied directly to DB
+
 // ==================== ADMIN: SETTINGS ====================
 
 app.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
@@ -3261,6 +3573,49 @@ app.post('/api/admin/usb_reset', authMiddleware, adminMiddleware, async (req, re
   } catch (err) { res.status(502).json({ error: 'USB reset failed', details: err.message }); }
 });
 
+app.post('/api/admin/reboot_server', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { serverName, password } = req.body;
+    if (!serverName) return res.status(400).json({ error: 'serverName required' });
+    const adminUser = users[req.user.login];
+    if (!adminUser) return res.status(403).json({ error: 'Пользователь не найден' });
+    const pwdValid = adminUser.passwordHash ? await bcrypt.compare(password || '', adminUser.passwordHash) : (adminUser.password === password);
+    if (!pwdValid) return res.status(403).json({ error: 'Неверный пароль' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+    const result = await fetchApi(server, '/apix/reboot_server', 30000);
+    console.log(`[Admin] Server ${serverName} reboot requested`);
+    res.json({ ok: true, result });
+  } catch (err) { res.status(502).json({ error: 'Reboot server failed', details: err.message }); }
+});
+
+app.post('/api/admin/reset_complete', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { serverName, password } = req.body;
+    if (!serverName) return res.status(400).json({ error: 'serverName required' });
+    const adminUser = users[req.user.login];
+    if (!adminUser) return res.status(403).json({ error: 'Пользователь не найден' });
+    const pwdValid = adminUser.passwordHash ? await bcrypt.compare(password || '', adminUser.passwordHash) : (adminUser.password === password);
+    if (!pwdValid) return res.status(403).json({ error: 'Неверный пароль' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+    // Reset IP for all modems on this server
+    const statusData = await fetchApi(server, '/apix/show_status_json');
+    const modems = Array.isArray(statusData) ? statusData : [];
+    let resetCount = 0;
+    for (const m of modems) {
+      const imei = m.modem_details?.IMEI;
+      if (!imei) continue;
+      try {
+        await fetchApi(server, `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(imei)}`, 15000);
+        resetCount++;
+      } catch (e) { /* skip failed */ }
+    }
+    console.log(`[Admin] Reset complete on ${serverName}: ${resetCount}/${modems.length} modems`);
+    res.json({ ok: true, total: modems.length, reset: resetCount });
+  } catch (err) { res.status(502).json({ error: 'Reset complete failed', details: err.message }); }
+});
+
 app.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { serverName, ...modemData } = req.body;
@@ -3281,6 +3636,145 @@ app.post('/api/admin/apply_modem', authMiddleware, adminMiddleware, async (req, 
     const result = await postApi(server, '/modem/settings', { imei });
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Apply modem failed', details: err.message }); }
+});
+
+// ==================== ADMIN: ASSIGN/UNASSIGN MODEM TO CLIENT ====================
+// Changes portName on ProxySmart server via form POST to /conf/edit_port/{portID}
+function postFormApi(server, apiPath, formData, timeout = 10000) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(apiPath, server.url);
+    const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
+    const postData = new URLSearchParams(formData).toString();
+    const req = getHttpLib(url).request({
+      hostname: url.hostname, port: url.port,
+      path: url.pathname + url.search, method: 'POST',
+      headers: {
+        'Authorization': `Basic ${auth}`,
+        'Content-Type': 'application/x-www-form-urlencoded',
+        'Content-Length': Buffer.byteLength(postData)
+      },
+      timeout, rejectUnauthorized: false
+    }, (proxyRes) => {
+      let data = '';
+      proxyRes.on('data', chunk => data += chunk);
+      proxyRes.on('end', () => resolve({ status: proxyRes.statusCode, raw: data.slice(0, 500) }));
+    });
+    req.on('error', (err) => reject(err));
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+    req.write(postData);
+    req.end();
+  });
+}
+
+app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { serverName, portID, newPortName } = req.body;
+    if (!serverName || !portID || !newPortName) return res.status(400).json({ error: 'serverName, portID, newPortName required' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+
+    // First read current port config from edit page
+    const editPageRaw = await fetchApiRaw(server, `/conf/edit_port/${portID}`);
+    const editHtml = editPageRaw || '';
+    // Extract existing form values to preserve them
+    const extract = (name) => { const m = editHtml.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`)); return m ? m[1] : ''; };
+    const formData = {
+      portID: extract('portID') || portID,
+      portName: newPortName,
+      http_port: extract('http_port'),
+      socks_port: extract('socks_port'),
+      proxy_login: extract('proxy_login'),
+      proxy_password: extract('proxy_password'),
+      MAXCONN: extract('MAXCONN'),
+      CONNLIM: extract('CONNLIM'),
+      bandlimin: extract('bandlimin'),
+      bandlimout: extract('bandlimout'),
+      bw_quota: extract('bw_quota'),
+      CREATED_AT: extract('CREATED_AT'),
+      PROXY_VALID_BEFORE: extract('PROXY_VALID_BEFORE')
+    };
+
+    const result = await postFormApi(server, `/conf/edit_port/${portID}`, formData);
+    console.log(`[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`);
+    // Invalidate cache so changes appear immediately
+    serverDataCache.clear();
+    auditLog(req.user.login, 'assign_modem', { serverName, portID, newPortName });
+    res.json({ ok: true });
+  } catch (err) {
+    console.error('[AssignModem] Error:', err.message);
+    res.status(502).json({ error: 'Failed to assign modem', details: err.message });
+  }
+});
+
+// ==================== EXTERNAL PROXIES ====================
+app.get('/api/admin/external_proxies', authMiddleware, adminMiddleware, (req, res) => {
+  const rows = db.prepare('SELECT * FROM external_proxies ORDER BY created_at DESC').all();
+  res.json(rows);
+});
+
+app.post('/api/admin/external_proxies', authMiddleware, adminMiddleware, (req, res) => {
+  const { client_id, label, protocol, host, port, login, password, change_ip_url, note, valid_until, billing_type, price, traffic_used_gb } = req.body;
+  if (!client_id || !host || !port) return res.status(400).json({ error: 'client_id, host, port required' });
+  const id = crypto.randomBytes(8).toString('hex');
+  db.prepare('INSERT INTO external_proxies (id, client_id, label, protocol, host, port, login, password, change_ip_url, note, valid_until, billing_type, price, traffic_used_gb) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
+    .run(id, client_id, label || '', protocol || 'HTTP', host, parseInt(port), login || '', password || '', change_ip_url || '', note || '', valid_until || null, billing_type || 'monthly', parseFloat(price) || 0, parseFloat(traffic_used_gb) || 0);
+  auditLog(req.user.login, 'add_external_proxy', { id, client_id, host, port });
+  res.json({ ok: true, id });
+});
+
+app.put('/api/admin/external_proxies/:id', authMiddleware, adminMiddleware, (req, res) => {
+  const { label, protocol, host, port, login, password, change_ip_url, note, valid_until, billing_type, price, traffic_used_gb } = req.body;
+  const existing = db.prepare('SELECT id FROM external_proxies WHERE id = ?').get(req.params.id);
+  if (!existing) return res.status(404).json({ error: 'Not found' });
+  db.prepare('UPDATE external_proxies SET label=?, protocol=?, host=?, port=?, login=?, password=?, change_ip_url=?, note=?, valid_until=?, billing_type=?, price=?, traffic_used_gb=? WHERE id=?')
+    .run(label || '', protocol || 'HTTP', host || '', parseInt(port) || 0, login || '', password || '', change_ip_url || '', note || '', valid_until || null, billing_type || 'monthly', parseFloat(price) || 0, parseFloat(traffic_used_gb) || 0, req.params.id);
+  res.json({ ok: true });
+});
+
+app.delete('/api/admin/external_proxies/:id', authMiddleware, adminMiddleware, (req, res) => {
+  db.prepare('DELETE FROM external_proxies WHERE id = ?').run(req.params.id);
+  res.json({ ok: true });
+});
+
+// Client: view own external proxies
+app.get('/api/client/external_proxies', authMiddleware, (req, res) => {
+  const clientInfo = clientByLogin.get(req.user.login);
+  if (!clientInfo) return res.json([]);
+  const rows = db.prepare('SELECT id, label, protocol, host, port, login, password, change_ip_url, note, billing_type, price, traffic_used_gb FROM external_proxies WHERE client_id = ? ORDER BY created_at DESC').all(clientInfo.id);
+  res.json(rows);
+});
+
+app.get('/api/admin/available_modems', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const results = await fetchAllServersDataCached();
+    const available = [];
+    for (const srv of Object.keys(results)) {
+      const ports = results[srv].ports || {};
+      const status = results[srv].status || [];
+      const modemMap = {};
+      status.forEach(m => { const imei = m.modem_details?.IMEI; if (imei) modemMap[imei] = m; });
+      for (const imei of Object.keys(ports)) {
+        const modemPorts = ports[imei];
+        const modem = modemMap[imei];
+        const nick = modem?.modem_details?.NICK || imei;
+        modemPorts.forEach(p => {
+          available.push({
+            server: srv,
+            imei,
+            nick,
+            portID: p.portID,
+            portName: p.portName || '',
+            httpPort: p.HTTP_PORT,
+            socksPort: p.SOCKS_PORT,
+            login: p.LOGIN
+          });
+        });
+      }
+    }
+    res.json({ modems: available });
+  } catch (err) {
+    res.status(502).json({ error: err.message });
+  }
 });
 
 app.get('/api/admin/modem_status', authMiddleware, adminMiddleware, async (req, res) => {
@@ -3751,101 +4245,90 @@ function scheduleRepeating(hour, minute, label, fn) {
 // OPT-02: scheduleNightly removed — use scheduleRepeating directly
 
 // ==================== DAILY BILLING ====================
-async function runDailyBilling() {
-  console.log('[Billing] Starting daily billing run...');
+// Single flow: fetch → save daily_traffic → charge → retry on failure
+async function runDailyBilling(retryClientIds) {
+  const isRetry = Array.isArray(retryClientIds) && retryClientIds.length > 0;
+  console.log(`[Billing] Starting ${isRetry ? 'RETRY' : 'daily'} billing run...`);
+
   let results;
   try {
     results = await fetchAllServersData();
   } catch (e) {
     console.error('[Billing] Failed to fetch server data:', e.message);
+    lastBillingRunSummary = { error: e.message, timestamp: new Date().toISOString() };
     return;
   }
 
-  let charged = 0, skipped = 0;
+  // Refresh global portKey mapping for reconciliation/analytics
+  refreshPortKeyMapping(results);
 
-  for (const client of clients) {
+  const yesterdayStr = getMoscowYesterday();
+  const moscowYesterday = getMoscowNow();
+  moscowYesterday.setDate(moscowYesterday.getDate() - 1);
+  const yesterdayLabel = moscowYesterday.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+
+  let charged = 0, skipped = 0;
+  const skippedClients = []; // for retry
+
+  // 1. Save ALL ports' yesterday traffic to dailyTraffic (single source of truth)
+  for (const data of results) {
+    if (data._cached || typeof data.bw !== 'object') continue;
+    const prefix = data.serverName + '_';
+    for (const [portId, b] of Object.entries(data.bw)) {
+      if (!b.portName) continue;
+      const key = prefix + portId;
+      if (!dailyTraffic[key]) dailyTraffic[key] = {};
+      if (!dailyTraffic[key][yesterdayStr]) {
+        const yIn = parseBwToBytes(b.bandwidth_bytes_yesterday_in);
+        const yOut = parseBwToBytes(b.bandwidth_bytes_yesterday_out);
+        if (yIn > 0 || yOut > 0) {
+          dailyTraffic[key][yesterdayStr] = { in: yIn, out: yOut, portName: b.portName };
+        }
+      }
+    }
+  }
+
+  // 2. Bill each client
+  const clientsToBill = isRetry
+    ? clients.filter(c => retryClientIds.includes(c.id))
+    : clients;
+
+  for (const client of clientsToBill) {
     if (!client.portName || !client.price || client.price <= 0) {
       skipped++;
       continue;
     }
 
-    // Skip billing if not all servers returned data (prevents partial billing)
-    if (results.length < apiServers.length) {
-      console.log(`[Billing] Skipping ${client.name}: only ${results.length}/${apiServers.length} servers returned data`);
-      skipped++;
-      continue;
-    }
-
-    // Skip billing if any server with this client's ports has cached/stale data
+    // Check server availability for this client's ports
     const cachedServers = getClientCachedServers(results, client.portName);
-    if (cachedServers.length > 0) {
-      console.log(`[Billing] Skipping ${client.name}: servers [${cachedServers.join(', ')}] have cached data, snapshot preserved`);
+    if (cachedServers.length > 0 || results.length < apiServers.length) {
+      const reason = cachedServers.length > 0
+        ? `cached data on [${cachedServers.join(', ')}]`
+        : `only ${results.length}/${apiServers.length} servers`;
+      console.log(`[Billing] Skipping ${client.name}: ${reason}`);
+      skippedClients.push(client.id);
       skipped++;
       continue;
     }
 
     try {
-      const currentMonthBytes = computeClientMonthBytes(results, client.portName);
-      const snapshot = client.last_traffic_snapshot || { timestamp: null, month_bytes: 0 };
-      const previousBytes = snapshot.month_bytes || 0;
+      const deltaBytes = computeClientYesterdayBytes(results, client.portName);
+      const deltaGb = trafficBytesToGb(deltaBytes);
 
-      // Compute delta
-      let deltaBytes;
-      let skipSnapshotUpdate = false;
-      const now = new Date();
-      const dayOfMonth = now.getDate();
-
-      if (currentMonthBytes < previousBytes) {
-        if (dayOfMonth <= 3) {
-          // Genuine month reset (first 3 days): ProxySmart zeroed the counters
-          const prevMonthTotal = computeClientPrevMonthBytes(results, client.portName);
-          const gapBytes = Math.max(0, prevMonthTotal - previousBytes);
-          console.log(`[Billing] Month reset for ${client.name} (day ${dayOfMonth}): snapshot=${previousBytes}, prevMonthTotal=${prevMonthTotal}, gap=${gapBytes}, newMonth=${currentMonthBytes}`);
-          deltaBytes = gapBytes + currentMonthBytes;
-        } else {
-          // Mid-month counter drop — modem restart or ProxySmart server issue, NOT a real reset
-          console.log(`[Billing] Counter drop for ${client.name} (day ${dayOfMonth}): current=${currentMonthBytes} < snapshot=${previousBytes}. Skipping (not a month boundary).`);
-          deltaBytes = 0;
-          skipSnapshotUpdate = true; // Preserve old snapshot to avoid cumulative drift
-        }
-      } else {
-        deltaBytes = currentMonthBytes - previousBytes;
-      }
-
-      // Sanity check: if delta is suspiciously large (>10x recent average), skip to prevent overcharge
-      if (deltaBytes > 0) {
-        const recentCharges = (billingLedger[client.id] || [])
-          .filter(e => e.type === 'charge' && e.delta_bytes > 0)
-          .slice(-7);
-        if (recentCharges.length >= 3) {
-          const avgDelta = recentCharges.reduce((s, e) => s + e.delta_bytes, 0) / recentCharges.length;
-          if (avgDelta > 0 && deltaBytes > avgDelta * 10) {
-            console.error(`[Billing] ANOMALY for ${client.name}: delta=${deltaBytes} is ${(deltaBytes/avgDelta).toFixed(1)}x average (${Math.round(avgDelta)}). Skipping to prevent overcharge.`);
-            deltaBytes = 0;
-            skipSnapshotUpdate = true;
-          }
-        }
-      }
-
-      // Update snapshot (unless counter drop detected mid-month)
-      if (!skipSnapshotUpdate) {
-        client.last_traffic_snapshot = {
-          timestamp: new Date().toISOString(),
-          month_bytes: currentMonthBytes
-        };
-      }
+      // Update snapshot for diagnostics
+      client.last_traffic_snapshot = {
+        timestamp: new Date().toISOString(),
+        month_bytes: computeClientMonthBytes(results, client.portName)
+      };
 
       if (deltaBytes <= 0) {
         skipped++;
         continue;
       }
 
-      // Compute cost based on billing type
+      // Compute cost
       let cost = 0;
-      const deltaGb = deltaBytes / (1024 * 1024 * 1024);
-
       if (client.billingType === 'per_modem') {
-        // Per-modem: daily proration of monthly rate
         let modemCount = 0;
         for (const data of results) {
           if (typeof data.bw === 'object') {
@@ -3854,44 +4337,146 @@ async function runDailyBilling() {
             }
           }
         }
-        const now = new Date();
-        const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        const mn = getMoscowNow();
+        const daysInMonth = new Date(mn.getFullYear(), mn.getMonth() + 1, 0).getDate();
         cost = (client.price * modemCount) / daysInMonth;
       } else {
-        // per_gb billing (default)
         cost = client.price * deltaGb;
       }
-
       cost = Math.round(cost * 100) / 100;
+      if (cost <= 0) { skipped++; continue; }
 
-      if (cost <= 0) {
-        skipped++;
-        continue;
-      }
-
-      // BUG-02 fix: Atomic debit + ledger in ONE transaction
-      const { balanceBefore, balanceAfter } = atomicDebit(client.id, cost, {
+      atomicDebit(client.id, cost, {
         type: 'charge',
-        date: new Date().toISOString().slice(0, 10),
+        date: yesterdayStr,
         timestamp: new Date().toISOString(),
         delta_bytes: Math.round(deltaBytes),
-        delta_gb: Math.round(deltaGb * 1000) / 1000,
+        delta_gb: deltaGb,
         price_per_unit: client.price,
         billing_type: client.billingType || 'per_gb',
         cost,
         currency: client.currency || 'RUB',
-        note: 'Списание за трафик (' + new Date().toLocaleDateString('ru-RU', {day:'2-digit',month:'2-digit',year:'numeric'}) + ')'
+        note: `Списание за трафик (${yesterdayLabel})`,
+        traffic_source: 'daily_billing'
       });
 
       charged++;
-      console.log(`[Billing] ${client.name}: delta=${deltaGb.toFixed(3)}GB, cost=${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
+      console.log(`[Billing] ${client.name}: ${deltaGb}GB, ${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
     } catch (e) {
       console.error(`[Billing] Error billing ${client.name}:`, e.message);
     }
   }
 
   saveClients(clients);
+  saveDailyTraffic();
+
+  lastBillingRunSummary = {
+    timestamp: new Date().toISOString(),
+    billed_date: yesterdayStr,
+    charged,
+    skipped,
+    skipped_clients: skippedClients,
+    is_retry: isRetry
+  };
+
   console.log(`[Billing] Complete: ${charged} charged, ${skipped} skipped`);
+
+  // 3. Schedule retry if clients were skipped due to server issues (max 1 retry, not on retry runs)
+  if (!isRetry && skippedClients.length > 0) {
+    console.log(`[Billing] Scheduling retry in 1 hour for ${skippedClients.length} skipped client(s)...`);
+    setTimeout(() => {
+      runDailyBilling(skippedClients).catch(e => console.error('[Billing] Retry error:', e.message));
+    }, 60 * 60 * 1000);
+  }
+}
+
+// ==================== MONTHLY RECONCILIATION ====================
+// Runs on 1st of each month at 03:00 UTC (06:00 MSK), before acts generation
+async function runMonthlyReconciliation() {
+  const mn = getMoscowNow();
+  const currentMonth = getMoscowToday().slice(0, 7); // "YYYY-MM"
+
+  // Only run on 1st of month
+  if (mn.getDate() !== 1) {
+    console.log('[MonthlyRecon] Not 1st of month, skipping');
+    return;
+  }
+
+  // Guard: don't run twice for same month
+  // Previous month is what we reconcile
+  const prevMonth = new Date(mn.getFullYear(), mn.getMonth() - 1, 1);
+  const prevMonthStr = prevMonth.toLocaleDateString('en-CA').slice(0, 7); // "YYYY-MM"
+  if (lastReconciliationMonth === prevMonthStr) {
+    console.log(`[MonthlyRecon] Already reconciled ${prevMonthStr}, skipping`);
+    return;
+  }
+
+  console.log(`[MonthlyRecon] Starting reconciliation for ${prevMonthStr}...`);
+
+  // Refresh port mapping
+  try {
+    const results = await fetchAllServersDataCached();
+    refreshPortKeyMapping(results);
+  } catch (e) { /* mapping may already be populated */ }
+
+  let corrections = 0;
+  for (const client of clients) {
+    if (!client.portName || !client.price || client.price <= 0) continue;
+
+    // Per-modem clients — fixed rate, just log
+    if (client.billingType === 'per_modem') {
+      console.log(`[MonthlyRecon] ${client.name}: per_modem — skipped (fixed rate)`);
+      continue;
+    }
+
+    const storedBytes = getClientStoredMonthBytes(client.portName, prevMonthStr);
+    const storedGb = trafficBytesToGb(storedBytes);
+
+    const entries = billingLedger[client.id] || [];
+    const monthCharges = entries.filter(e =>
+      e.type === 'charge' && e.date && e.date.startsWith(prevMonthStr) &&
+      (!e.traffic_source || e.traffic_source !== 'monthly_reconciliation')
+    );
+    const billedBytes = monthCharges.reduce((s, e) => s + (e.delta_bytes || 0), 0);
+    const billedGb = trafficBytesToGb(billedBytes);
+
+    const diffGb = Math.round((storedGb - billedGb) * 1000) / 1000;
+
+    if (diffGb <= 0.01) {
+      console.log(`[MonthlyRecon] ${client.name}: ok (stored=${storedGb}GB, billed=${billedGb}GB)`);
+      continue;
+    }
+
+    // Correction needed
+    const correctionCost = Math.round(diffGb * client.price * 100) / 100;
+    if (correctionCost <= 0) continue;
+
+    // Last day of previous month as billing date
+    const lastDay = new Date(mn.getFullYear(), mn.getMonth(), 0);
+    const lastDayStr = lastDay.toLocaleDateString('en-CA');
+    const monthLabel = prevMonth.toLocaleDateString('ru-RU', { month: '2-digit', year: 'numeric' });
+
+    atomicDebit(client.id, correctionCost, {
+      type: 'charge',
+      date: lastDayStr,
+      timestamp: new Date().toISOString(),
+      delta_bytes: Math.round((storedBytes - billedBytes)),
+      delta_gb: diffGb,
+      price_per_unit: client.price,
+      billing_type: 'per_gb',
+      cost: correctionCost,
+      currency: client.currency || 'RUB',
+      note: `Корректировка за месяц (${monthLabel})`,
+      traffic_source: 'monthly_reconciliation'
+    });
+
+    corrections++;
+    console.log(`[MonthlyRecon] ${client.name}: +${diffGb}GB (+${correctionCost}₽)`);
+  }
+
+  lastReconciliationMonth = prevMonthStr;
+  saveClients(clients);
+  console.log(`[MonthlyRecon] Complete: ${corrections} correction(s)`);
 }
 
 // ==================== AUTO-CREATE MISSING CLIENTS ====================
@@ -3905,7 +4490,7 @@ async function autoCreateMissingClients() {
     for (const data of results) {
       if (typeof data.bw === 'object') {
         for (const [portId, b] of Object.entries(data.bw)) {
-          if (b.portName && !portId.startsWith('tg_') && !b.portName.startsWith('tg_')) {
+          if (b.portName) {
             allPortNames.add(b.portName);
           }
         }
@@ -3917,17 +4502,18 @@ async function autoCreateMissingClients() {
     for (const data of results) {
       if (typeof data.bw === 'object') {
         for (const [portId, b] of Object.entries(data.bw)) {
-          if (b.portName && !portId.startsWith('tg_') && !b.portName.startsWith('tg_')) {
+          if (b.portName) {
             portCountMap[b.portName] = (portCountMap[b.portName] || 0) + 1;
           }
         }
       }
     }
 
+    const IGNORED_PORTNAMES = new Set(['Test', 'test', 'TEST', 'Не назначен', '', 'debug', 'Demo', 'demo']);
     let created = 0;
     for (const pn of allPortNames) {
       if (existingPortNames.has(pn)) continue;
-      if (pn.startsWith('tg_')) continue; // Telegram bot clients don't get dashboard accounts
+      if (IGNORED_PORTNAMES.has(pn)) continue;
       const login = pn.toLowerCase().replace(/[^a-z0-9_]/g, '_');
       if (users[login]) continue;
 
@@ -5188,9 +5774,16 @@ const httpServer = app.listen(PORT, () => {
 
   // Auto-create client accounts for all portNames that don't have one
   autoCreateMissingClients().catch(e => console.error('[AutoCreate] Error:', e.message));
+  // Re-check every 10 minutes so new portNames get accounts without restart
+  _intervals.push(setInterval(() => {
+    autoCreateMissingClients().catch(e => console.error('[AutoCreate] Error:', e.message));
+  }, 10 * 60 * 1000));
 
-  // Schedule daily billing at 23:55 UTC
-  scheduleRepeating(23, 55, 'DailyBilling', runDailyBilling);
+  // Schedule daily billing at 01:00 UTC (04:00 MSK, 4h after ProxySmart midnight reset)
+  scheduleRepeating(1, 0, 'DailyBilling', runDailyBilling);
+
+  // Monthly reconciliation at 03:00 UTC (06:00 MSK) on 1st of month — before acts
+  scheduleRepeating(3, 0, 'MonthlyReconciliation', runMonthlyReconciliation);
 
   // Auto-generate closing documents (acts) on 1st of each month at 08:05 Moscow (05:05 UTC)
   scheduleRepeating(5, 5, 'MonthlyActs', autoGenerateMonthlyActs);
@@ -5222,955 +5815,69 @@ const httpServer = app.listen(PORT, () => {
   })();
 });
 
-// ==================== TELEGRAM BOT ====================
 
-// ==================== TELEGRAM DATA — SQLite-backed ====================
-let tgProxies = [];
-try {
-  const rows = db.prepare('SELECT * FROM telegram_proxies').all();
-  tgProxies = rows.map(r => ({
-    id: r.id, chatId: String(r.chat_id), portName: r.port_name, server: r.server,
-    httpPort: r.http_port, socksPort: r.socks_port, login: r.login, password: r.password,
-    plan: r.plan, createdAt: r.created_at, expiresAt: r.expires_at, active: !!r.active
-  }));
-  console.log(`[TelegramBot] Loaded ${tgProxies.length} proxy record(s)`);
-} catch (e) { console.error('[TelegramBot] Failed to load proxies:', e.message); }
 
-const _tgProxyInsert = db.prepare('INSERT INTO telegram_proxies (chat_id, port_name, server, http_port, socks_port, login, password, plan, created_at, expires_at, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-const _tgProxyDelete = db.prepare('DELETE FROM telegram_proxies WHERE id = ?');
-const _tgProxyDeactivate = db.prepare('UPDATE telegram_proxies SET active = 0 WHERE id = ?');
-const _tgProxyUpdate = db.prepare('UPDATE telegram_proxies SET expires_at = ?, plan = ?, active = ? WHERE id = ?');
+// ==================== CRM PAYMENT TRACKING ====================
+const CRM_DB_URL = 'postgresql://twenty:TwentyCRM2026x@172.18.0.5:5432/default';
+const CRM_WS = 'workspace_1wekp8bkkvyv4c57kfv5uljgp';
 
-// BUG-03: Incremental DB operations instead of DELETE ALL + re-INSERT
-function insertTgProxyDB(record) {
+async function checkCrmPaymentConfirmations() {
+  let pgClient;
   try {
-    const result = _tgProxyInsert.run(
-      record.chatId || '', record.portName || '', record.server || '', record.httpPort || 0,
-      record.socksPort || 0, record.login || '', record.password || '', record.plan || '',
-      record.createdAt || '', record.expiresAt || '', record.active !== false ? 1 : 0
+    const { Client } = require('pg');
+    pgClient = new Client({ connectionString: CRM_DB_URL });
+    await pgClient.connect();
+
+    // Find deals where paymentConfirmed = true
+    const confirmed = await pgClient.query(
+      `SELECT id, name, "nextPaymentDate", "companyId" FROM "${CRM_WS}".opportunity WHERE "paymentConfirmed" = true AND "deletedAt" IS NULL`
     );
-    record.id = result.lastInsertRowid;
-  } catch (e) { console.error('[insertTgProxy] SQLite error:', e.message); }
-}
 
-function deleteTgProxyDB(record) {
-  try {
-    if (record.id) _tgProxyDelete.run(record.id);
-  } catch (e) { console.error('[deleteTgProxy] SQLite error:', e.message); }
-}
-
-function updateTgProxyDB(record) {
-  try {
-    if (record.id) _tgProxyUpdate.run(record.expiresAt || '', record.plan || '', record.active !== false ? 1 : 0, record.id);
-  } catch (e) { console.error('[updateTgProxy] SQLite error:', e.message); }
-}
-
-// Telegram user database — persistent per-user info (SQLite-backed)
-let tgUsers = {}; // { chatId: { username, testUsed, plan, speedTests: [{speed,date}], registeredAt } }
-try {
-  const rows = db.prepare('SELECT * FROM telegram_users').all();
-  const stRows = db.prepare('SELECT * FROM telegram_speedtests ORDER BY id ASC').all();
-  for (const r of rows) {
-    tgUsers[String(r.chat_id)] = {
-      username: r.username, testUsed: !!r.test_used, plan: r.plan,
-      speedTests: [], registeredAt: r.registered_at, updatedAt: r.updated_at
-    };
-  }
-  for (const st of stRows) {
-    const cid = String(st.chat_id);
-    if (tgUsers[cid]) {
-      tgUsers[cid].speedTests.push({ speed: st.speed, date: st.tested_at });
+    for (const deal of confirmed.rows) {
+      const now = new Date();
+      const nextPayment = new Date(now);
+      nextPayment.setMonth(nextPayment.getMonth() + 1); // same date next month (JS handles overflow: Jan 31 → Feb 28)
+      await pgClient.query(
+        `UPDATE "${CRM_WS}".opportunity SET "lastPaymentDate" = $1, "nextPaymentDate" = $2, "paymentConfirmed" = false, "updatedAt" = $1 WHERE id = $3`,
+        [now.toISOString(), nextPayment.toISOString(), deal.id]
+      );
+      console.log(`[CRM] Payment confirmed for deal "${deal.name}": next payment ${nextPayment.toISOString().slice(0, 10)}`);
     }
-  }
-  console.log(`[TelegramBot] Loaded ${Object.keys(tgUsers).length} user record(s)`);
-} catch (e) { console.error('[TelegramBot] Failed to load users:', e.message); }
 
-const _tgUserUpsert = db.prepare('INSERT OR REPLACE INTO telegram_users (chat_id, username, test_used, plan, registered_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)');
-const _tgStDelete = db.prepare('DELETE FROM telegram_speedtests WHERE chat_id = ?');
-const _tgStInsert = db.prepare('INSERT INTO telegram_speedtests (chat_id, speed, tested_at) VALUES (?, ?, ?)');
+    // Find deals with nextPaymentDate within 3 days — log reminder
+    const reminderDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const upcoming = await pgClient.query(
+      `SELECT o.id, o.name, o."nextPaymentDate", o.amount, c.name as company_name
+       FROM "${CRM_WS}".opportunity o
+       LEFT JOIN "${CRM_WS}".company c ON o."companyId" = c.id
+       WHERE o."nextPaymentDate" IS NOT NULL AND o."nextPaymentDate" <= $1 AND o."nextPaymentDate" >= NOW()
+       AND o.stage = 'AKTIVNYY_KLIENT' AND o."deletedAt" IS NULL`,
+      [reminderDate.toISOString()]
+    );
 
-// OLD-04 fix: saveTgUser saves single user; saveTgSpeedtest inserts single speedtest incrementally
-function saveTgUser(chatId) {
-  const u = tgUsers[chatId];
-  if (!u) return;
-  try {
-    _tgUserUpsert.run(chatId, u.username || '', u.testUsed ? 1 : 0, u.plan || null, u.registeredAt || '', u.updatedAt || '');
-  } catch (e) { console.error('[saveTgUser] SQLite error:', e.message); }
-}
-
-function saveTgSpeedtest(chatId, speedtest) {
-  try {
-    _tgStInsert.run(chatId, speedtest.speed || 0, speedtest.date || '');
-  } catch (e) { console.error('[saveTgSpeedtest] SQLite error:', e.message); }
-}
-
-// Legacy bulk save — only for migration or rare bulk ops
-function saveTgUsers() {
-  try {
-    const batch = db.transaction(() => {
-      for (const [chatId, u] of Object.entries(tgUsers)) {
-        _tgUserUpsert.run(chatId, u.username || '', u.testUsed ? 1 : 0, u.plan || null, u.registeredAt || '', u.updatedAt || '');
-        _tgStDelete.run(chatId);
-        for (const st of (u.speedTests || [])) {
-          _tgStInsert.run(chatId, st.speed || 0, st.date || '');
-        }
+    if (upcoming.rows.length > 0) {
+      console.log(`[CRM] Payment reminders (due within 3 days):`);
+      for (const deal of upcoming.rows) {
+        const dueDate = new Date(deal.nextPaymentDate).toISOString().slice(0, 10);
+        console.log(`  - ${deal.company_name || deal.name}: ${deal.amount || '?'} RUB, due ${dueDate}`);
       }
-    });
-    batch();
-  } catch (e) { console.error('[saveTgUsers] SQLite error:', e.message); }
-}
-
-function getTgUser(chatId, username) {
-  if (!tgUsers[chatId]) {
-    tgUsers[chatId] = { username: username || null, testUsed: false, plan: null, speedTests: [], registeredAt: new Date().toISOString() };
-    saveTgUser(chatId); // OLD-04 fix: save single user, not all
-  } else if (username && tgUsers[chatId].username !== username) {
-    tgUsers[chatId].username = username;
-    saveTgUser(chatId); // OLD-04 fix: save single user, not all
-  }
-  return tgUsers[chatId];
-}
-
-// Migrate existing proxy records into tgUsers if not already there
-(function migrateTgUsers() {
-  let migrated = 0;
-  for (const p of tgProxies) {
-    if (!tgUsers[p.chatId]) {
-      tgUsers[p.chatId] = {
-        username: p.username || null,
-        testUsed: p.plan === 'test' || false,
-        plan: p.plan,
-        speedTests: [],
-        registeredAt: p.createdAt || new Date().toISOString()
-      };
-      migrated++;
     }
-    // Mark testUsed if they ever had a test plan
-    if (p.plan === 'test') tgUsers[p.chatId].testUsed = true;
+
+    await pgClient.end();
+  } catch (e) {
+    if (pgClient) try { await pgClient.end(); } catch (_) {}
+    // pg module might not be installed — skip silently
+    if (e.code !== 'MODULE_NOT_FOUND') {
+      console.error('[CRM] Payment check error:', e.message);
+    }
   }
-  if (migrated > 0) {
-    saveTgUsers();
-    console.log(`[TelegramBot] Migrated ${migrated} user(s) from proxies`);
-  }
-})();
-
-const TG_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
-// TASK-18: Removed dead TG_PRICE (was unused — PLANS define prices per plan)
-// TASK-K: Use publicIp from apiServers instead of hardcoded IPs
-const SERVER_IPS = Object.fromEntries(apiServers.map(s => [s.name, s.publicIp]));
-
-// TASK-17: Telegram bot plans — configurable via env vars
-// Env format: TG_PLAN_<KEY>_PRICE, TG_PLAN_<KEY>_DAYS, TG_PLAN_<KEY>_LABEL
-const PLANS = {
-  test:  { label: 'Тест (1 день)',  price: parseInt(process.env.TG_PLAN_TEST_PRICE) || 0,   days: parseInt(process.env.TG_PLAN_TEST_DAYS) || 1 },
-  '1m':  { label: '1 месяц',        price: parseInt(process.env.TG_PLAN_1M_PRICE)   || 599, days: parseInt(process.env.TG_PLAN_1M_DAYS)   || 30 },
-  '6m':  { label: '6 месяцев',      price: parseInt(process.env.TG_PLAN_6M_PRICE)   || 499, days: parseInt(process.env.TG_PLAN_6M_DAYS)   || 180 },
-  '12m': { label: '12 месяцев',     price: parseInt(process.env.TG_PLAN_12M_PRICE)  || 399, days: parseInt(process.env.TG_PLAN_12M_DAYS)  || 360 }
-};
-
-// Reply keyboard layouts
-const KB_MAIN = { keyboard: [
-  ['🎁 Тест (1 день)', '📋 Тарифы'],
-  ['📱 Мои прокси', '🚀 Скорость'],
-  ['❓ Инструкция', '💬 Обратная связь']
-], resize_keyboard: true };
-
-// TASK-17: Dynamic keyboard from PLANS config
-const KB_PLANS = { keyboard: [
-  [`📅 1 мес — ${PLANS['1m'].price} ₽`],
-  [`📅 6 мес — ${PLANS['6m'].price} ₽/мес`],
-  [`📅 12 мес — ${PLANS['12m'].price} ₽/мес`],
-  ['🎁 Тест (1 день)', '◀️ Назад']
-], resize_keyboard: true };
-
-const KB_SPEED = { keyboard: [
-  ['✅ Скачал!'],
-  ['◀️ Отмена']
-], resize_keyboard: true };
-
-// Speed test state
-let speedTestFileId = null;
-const speedTestSessions = {};
-const SPEED_TEST_SIZE = 10 * 1024 * 1024; // 10 MB
-
-// Feedback storage — SQLite-backed
-let tgFeedback = [];
-try {
-  const rows = db.prepare('SELECT * FROM telegram_feedback ORDER BY id ASC').all();
-  tgFeedback = rows.map(r => ({
-    chatId: String(r.chat_id), username: r.username, type: r.type,
-    score: r.score, message: r.message, createdAt: r.created_at
-  }));
-  console.log(`[TelegramBot] Loaded ${tgFeedback.length} feedback record(s)`);
-} catch (e) { console.error('[TelegramBot] Failed to load feedback:', e.message); }
-
-const _tgFbInsert = db.prepare('INSERT INTO telegram_feedback (chat_id, username, type, score, message, created_at) VALUES (?, ?, ?, ?, ?, ?)');
-
-// BUG-04: Direct INSERT instead of count-based logic
-function insertTgFeedbackDB(f) {
-  try {
-    _tgFbInsert.run(f.chatId || '', f.username || '', f.type || 'text', f.score || null, f.message || '', f.createdAt || '');
-  } catch (e) { console.error('[insertTgFeedback] SQLite error:', e.message); }
 }
 
-// User states for feedback flow
-const userStates = {}; // { chatId: { state: 'awaiting_feedback'|'awaiting_nps_comment', score, type, ts } }
-
-// OLD-07 fix: TTL cleanup for speedTestSessions (5 min) and userStates (30 min)
-const SPEED_SESSION_TTL = 5 * 60 * 1000;  // 5 min — speed test should complete quickly
-const USER_STATE_TTL = 30 * 60 * 1000;    // 30 min — feedback session timeout
+// Run CRM payment check every 10 minutes
+checkCrmPaymentConfirmations().catch(() => {});
 _intervals.push(setInterval(() => {
-  const now = Date.now();
-  for (const chatId in speedTestSessions) {
-    if (now - speedTestSessions[chatId].startTime > SPEED_SESSION_TTL) {
-      delete speedTestSessions[chatId];
-    }
-  }
-  for (const chatId in userStates) {
-    if (userStates[chatId].ts && now - userStates[chatId].ts > USER_STATE_TTL) {
-      delete userStates[chatId];
-    }
-  }
-}, 5 * 60 * 1000)); // run every 5 minutes
-
-function telegramApi(method, body, reqTimeout = 15000) {
-  return new Promise((resolve, reject) => {
-    const postData = JSON.stringify(body || {});
-    const req = https.request({
-      hostname: 'api.telegram.org',
-      path: `/bot${TG_TOKEN}/${method}`,
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(postData) },
-      timeout: reqTimeout
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { resolve({ ok: false, raw: data }); }
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Telegram API timeout')); });
-    req.write(postData);
-    req.end();
-  });
-}
-
-function tgSend(chatId, text, options = {}) {
-  return telegramApi('sendMessage', {
-    chat_id: chatId,
-    text,
-    parse_mode: 'HTML',
-    ...options
-  });
-}
-
-async function findLeastLoadedModem() {
-  const results = await fetchAllServersData();
-  const portCounts = {}; // { 'S1_IMEI': { imei, serverName, server, count } }
-  const onlineModems = new Set();
-
-  for (const data of results) {
-    if (data._cached) continue;
-    // Collect online modems
-    if (Array.isArray(data.status)) {
-      for (const m of data.status) {
-        if (m.net_details?.IS_ONLINE === 'yes' && m.modem_details?.IMEI) {
-          onlineModems.add(data.serverName + '_' + m.modem_details.IMEI);
-        }
-      }
-    }
-    // Count ports per IMEI
-    if (typeof data.ports === 'object') {
-      for (const [imei, ports] of Object.entries(data.ports)) {
-        const key = data.serverName + '_' + imei;
-        portCounts[key] = {
-          imei,
-          serverName: data.serverName,
-          server: findServer(data.serverName),
-          count: Array.isArray(ports) ? ports.length : 0
-        };
-      }
-    }
-  }
-
-  // Find online modem with fewest ports
-  let best = null;
-  for (const [key, info] of Object.entries(portCounts)) {
-    if (!onlineModems.has(key)) continue;
-    if (!info.server) continue;
-    if (!best || info.count < best.count) {
-      best = info;
-    }
-  }
-  return best;
-}
-
-async function createProxyForTelegram(chatId, username, planKey) {
-  const plan = PLANS[planKey];
-  if (!plan) throw new Error('Unknown plan');
-
-  const modem = await findLeastLoadedModem();
-  if (!modem) throw new Error('Нет доступных модемов');
-
-  // Get free TCP ports — separate HTTP (8xxx) and SOCKS (5xxx) ranges
-  const freePorts = await fetchApi(modem.server, '/apix/get_free_tcp_ports');
-  const freeList = Array.isArray(freePorts) ? freePorts : (freePorts.free_tcp_ports || []);
-  const freeHttp = freeList.filter(p => p >= 8001 && p <= 8999);
-  const freeSocks = freeList.filter(p => p >= 5001 && p <= 5999);
-  if (!freeHttp.length || !freeSocks.length) throw new Error('Нет свободных портов на сервере');
-
-  const portID = 'tg_' + crypto.randomBytes(4).toString('hex');
-  const portName = username ? ('tg_' + username) : ('tg_' + chatId);
-  const login = crypto.randomBytes(4).toString('hex');
-  const password = crypto.randomBytes(4).toString('hex');
-  const httpPort = freeHttp[0];
-  const socksPort = freeSocks[0];
-
-  // Create port via ProxySmart web form (/conf/add_port)
-  const formData = `IMEI=${encodeURIComponent(modem.imei)}&portID=${encodeURIComponent(portID)}&portName=${encodeURIComponent(portName)}&http_port=${httpPort}&socks_port=${socksPort}&proxy_login=${encodeURIComponent(login)}&proxy_password=${encodeURIComponent(password)}`;
-  const addResult = await postFormApi(modem.server, `/conf/add_port?imei=${encodeURIComponent(modem.imei)}`, formData);
-  console.log(`[TelegramBot] add_port response: status=${addResult.status}`);
-
-  const serverIp = SERVER_IPS[modem.serverName] || new URL(modem.server.url).hostname;
-
-  // Compute expiration: now + plan.days (in exact hours for precision)
-  const expiresAt = new Date(Date.now() + plan.days * 24 * 3600000).toISOString();
-
-  const record = {
-    chatId,
-    username: username || null,
-    portID,
-    portName,
-    serverName: modem.serverName,
-    imei: modem.imei,
-    serverIp,
-    httpPort,
-    socksPort,
-    login,
-    password,
-    plan: planKey,
-    createdAt: new Date().toISOString(),
-    expiresAt,
-    notified_7d: false,
-    notified_1d: false
-  };
-
-  tgProxies.push(record);
-  insertTgProxyDB(record);
-
-  console.log(`[TelegramBot] Created proxy ${portID} on ${modem.serverName}/${modem.imei} for @${username || chatId} (plan: ${planKey})`);
-  return record;
-}
-
-async function deleteProxyRecord(record, notify = true) {
-  try {
-    const server = findServer(record.serverName);
-    if (server) {
-      await fetchApi(server, `/conf/delete_port/${encodeURIComponent(record.portID)}`);
-      console.log(`[TelegramBot] Deleted port ${record.portID} from ${record.serverName}`);
-    }
-  } catch (e) {
-    console.error(`[TelegramBot] Failed to delete ${record.portID}:`, e.message);
-  }
-
-  deleteTgProxyDB(record);
-  tgProxies = tgProxies.filter(p => p.portID !== record.portID);
-
-  if (notify) {
-    const isTest = record.plan === 'test';
-    const text = isTest
-      ? '⏰ <b>Тестовый период завершён</b>\n\nВаш прокси отключён. Оформите подписку для постоянного доступа!'
-      : '⚠️ <b>Подписка истекла</b>\n\nВаш прокси отключён. Возобновите подписку для продолжения!';
-
-    await tgSend(record.chatId, text, { reply_markup: KB_MAIN });
-  }
-}
-
-function formatProxyMessage(record, planLabel) {
-  const deepLink = `https://t.me/socks?server=${record.serverIp}&port=${record.socksPort}&user=${record.login}&pass=${record.password}`;
-
-  let expiresLine;
-  if (record.plan === 'test') {
-    expiresLine = '⏳ Прокси перестанет работать через 24 часа';
-  } else {
-    const expiresDate = new Date(record.expiresAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
-    expiresLine = `⏳ Действует до: ${expiresDate}`;
-  }
-
-  return {
-    text: `✅ <b>Ваш прокси готов!</b>\n\n` +
-      `📋 Тариф: ${planLabel}\n` +
-      `${expiresLine}\n\n` +
-      `<b>SOCKS5 подключение:</b>\n` +
-      `<code>${record.serverIp}:${record.socksPort}</code>\n` +
-      `Логин: <code>${record.login}</code>\n` +
-      `Пароль: <code>${record.password}</code>\n\n` +
-      `<b>HTTP подключение:</b>\n` +
-      `<code>${record.serverIp}:${record.httpPort}</code>\n\n` +
-      `👇 Нажмите кнопку ниже, чтобы мгновенно добавить прокси в Telegram:`,
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: '🔗 Добавить прокси в Telegram', url: deepLink }],
-        [{ text: '🔄 Сменить IP', callback_data: `change_ip:${record.portID}:${record.serverName}` }]
-      ]
-    }
-  };
-}
-
-// ---- Telegram message handlers ----
-
-async function handleStart(chatId) {
-  // Clear any active speed test session
-  delete speedTestSessions[chatId];
-
-  const text =
-    `🛡 <b>Proxies.Rent — Прокси для Telegram</b>\n\n` +
-    `Стабильный доступ к Telegram при любых ограничениях.\n\n` +
-    `🔒 Мобильные SOCKS5-прокси\n` +
-    `⚡ Мгновенное подключение в 1 клик\n` +
-    `🔄 Смена IP по кнопке\n` +
-    `📶 Работа через 4G-модемы\n\n` +
-    `Используйте меню ниже для навигации:`;
-
-  await tgSend(chatId, text, { reply_markup: KB_MAIN });
-}
-
-async function handleShowPlans(chatId) {
-  const text =
-    `📋 <b>Тарифы</b>\n\n` +
-    `<b>1 месяц</b> — ${PLANS['1m'].price} ₽/мес\n` +
-    `<b>6 месяцев</b> — ${PLANS['6m'].price} ₽/мес (выгода 17%)\n` +
-    `<b>12 месяцев</b> — ${PLANS['12m'].price} ₽/мес (выгода 33%)\n\n` +
-    `Мобильный SOCKS5-прокси с мгновенным подключением.\nВыберите тариф на клавиатуре ниже:`;
-
-  await tgSend(chatId, text, { reply_markup: KB_PLANS });
-}
-
-async function handleBuy(chatId, username, planKey) {
-  const plan = PLANS[planKey];
-  if (!plan) return;
-
-  const user = getTgUser(chatId, username);
-
-  // Find existing active proxy for this user
-  const existing = tgProxies.find(p => p.chatId === chatId);
-
-  // Test plan: only ONE TIME per account ever
-  if (planKey === 'test') {
-    if (user.testUsed) {
-      return tgSend(chatId, '⚠️ Тестовый доступ можно активировать только один раз.\n\nОформите подписку для получения прокси:', { reply_markup: KB_PLANS });
-    }
-    if (existing) {
-      return tgSend(chatId, '⚠️ У вас уже есть активный прокси.', { reply_markup: KB_MAIN });
-    }
-    // Mark test as used BEFORE creating
-    user.testUsed = true;
-    user.plan = 'test';
-    saveTgUser(chatId); // OLD-04 fix: save single user
-
-    await tgSend(chatId, '⏳ Создаю ваш прокси...');
-    try {
-      const record = await createProxyForTelegram(chatId, username, planKey);
-      const msg = formatProxyMessage(record, plan.label);
-      await tgSend(chatId, msg.text, { reply_markup: msg.reply_markup });
-      await tgSend(chatId, '👆 Нажмите «Добавить прокси в Telegram» для подключения в 1 клик.', { reply_markup: KB_MAIN });
-    } catch (e) {
-      console.error(`[TelegramBot] Create proxy error for ${username || chatId}:`, e.message);
-      await tgSend(chatId, `❌ Ошибка при создании прокси: ${e.message}\n\nПопробуйте позже или обратитесь в поддержку.`, { reply_markup: KB_MAIN });
-    }
-    return;
-  }
-
-  // Paid plan: update user record
-  user.plan = planKey;
-  saveTgUser(chatId); // OLD-04 fix: save single user
-
-  // If user already has an active proxy — extend it
-  if (existing) {
-    const currentExpiry = new Date(existing.expiresAt).getTime();
-    const base = Math.max(currentExpiry, Date.now());
-    const baseDate = new Date(base);
-    const newExpiry = new Date(Date.UTC(baseDate.getUTCFullYear(), baseDate.getUTCMonth(), baseDate.getUTCDate() + plan.days + 1, 0, 0, 0));
-
-    existing.expiresAt = newExpiry.toISOString();
-    existing.plan = planKey;
-    existing.notified_7d = false;
-    existing.notified_1d = false;
-    delete existing.npsLastSent;
-    updateTgProxyDB(existing);
-
-    const expiresDate = newExpiry.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
-    console.log(`[TelegramBot] Extended proxy ${existing.portID} for @${username || chatId} (plan: ${planKey}, expires: ${expiresDate})`);
-
-    const deepLink = `https://t.me/socks?server=${existing.serverIp}&port=${existing.socksPort}&user=${existing.login}&pass=${existing.password}`;
-    await tgSend(chatId,
-      `✅ <b>Подписка продлена!</b>\n\n` +
-      `📋 Тариф: ${plan.label}\n` +
-      `⏳ Действует до: ${expiresDate}\n\n` +
-      `Ваши реквизиты не изменились:\n` +
-      `SOCKS5: <code>${existing.serverIp}:${existing.socksPort}</code>\n` +
-      `Логин: <code>${existing.login}</code>\n` +
-      `Пароль: <code>${existing.password}</code>`,
-      { reply_markup: { inline_keyboard: [
-        [{ text: '🔗 Добавить прокси в Telegram', url: deepLink }],
-        [{ text: '🔄 Сменить IP', callback_data: `change_ip:${existing.portID}:${existing.serverName}` }]
-      ] } }
-    );
-    await tgSend(chatId, '👍 Прокси продлён. Реквизиты прежние — ничего менять не нужно.', { reply_markup: KB_MAIN });
-    return;
-  }
-
-  // No existing proxy — create new one
-  await tgSend(chatId, '⏳ Создаю ваш прокси...');
-  try {
-    const record = await createProxyForTelegram(chatId, username, planKey);
-    const msg = formatProxyMessage(record, plan.label);
-    await tgSend(chatId, msg.text, { reply_markup: msg.reply_markup });
-    await tgSend(chatId, '👆 Нажмите «Добавить прокси в Telegram» для подключения в 1 клик.', { reply_markup: KB_MAIN });
-  } catch (e) {
-    console.error(`[TelegramBot] Create proxy error for ${username || chatId}:`, e.message);
-    await tgSend(chatId, `❌ Ошибка при создании прокси: ${e.message}\n\nПопробуйте позже или обратитесь в поддержку.`, { reply_markup: KB_MAIN });
-  }
-}
-
-async function handleMyProxies(chatId) {
-  const userProxies = tgProxies.filter(p => p.chatId === chatId);
-  if (userProxies.length === 0) {
-    return tgSend(chatId, '📱 У вас пока нет активных прокси.\n\nИспользуйте меню ниже, чтобы получить прокси.', { reply_markup: KB_MAIN });
-  }
-
-  let text = '📱 <b>Ваши прокси:</b>\n\n';
-  const buttons = [];
-
-  for (const p of userProxies) {
-    const plan = PLANS[p.plan] || { label: p.plan };
-    const deepLink = `https://t.me/socks?server=${p.serverIp}&port=${p.socksPort}&user=${p.login}&pass=${p.password}`;
-
-    text += `<b>${plan.label}</b>\n`;
-    text += `SOCKS5: <code>${p.serverIp}:${p.socksPort}</code>\n`;
-    text += `Логин: <code>${p.login}</code> | Пароль: <code>${p.password}</code>\n`;
-    if (p.plan === 'test') {
-      text += `⏳ Тестовый доступ (1 день)\n\n`;
-    } else {
-      const expires = new Date(p.expiresAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
-      text += `Действует до: ${expires}\n\n`;
-    }
-
-    buttons.push([{ text: `🔗 Добавить в Telegram (${p.portID})`, url: deepLink }]);
-    buttons.push([{ text: `🔄 Сменить IP (${p.portID})`, callback_data: `change_ip:${p.portID}:${p.serverName}` }]);
-  }
-
-  await tgSend(chatId, text, { reply_markup: { inline_keyboard: buttons } });
-}
-
-async function handleHelp(chatId) {
-  const text =
-    `❓ <b>Как подключить и отключить прокси</b>\n\n` +
-
-    `📱 <b>iPhone / iPad:</b>\n` +
-    `<b>Включить:</b>\n` +
-    `1. Нажмите кнопку «Добавить прокси в Telegram» — он добавится автоматически\n` +
-    `2. Или вручную: Настройки → Данные и память → Прокси → Добавить прокси\n` +
-    `3. Тип: <b>SOCKS5</b>, введите сервер, порт, логин и пароль\n` +
-    `4. Включите тумблер «Использовать прокси»\n\n` +
-    `<b>Отключить:</b>\n` +
-    `Настройки → Данные и память → Прокси → выключите тумблер\n\n` +
-
-    `📱 <b>Android:</b>\n` +
-    `<b>Включить:</b>\n` +
-    `1. Нажмите кнопку «Добавить прокси в Telegram» — он добавится автоматически\n` +
-    `2. Или вручную: ≡ Меню → Настройки → Данные и память → Прокси-сервер\n` +
-    `3. Нажмите «Добавить прокси», тип: <b>SOCKS5</b>\n` +
-    `4. Введите сервер, порт, логин и пароль\n\n` +
-    `<b>Отключить:</b>\n` +
-    `≡ Настройки → Данные и память → Прокси-сервер → выключите тумблер\n\n` +
-
-    `💻 <b>Telegram Desktop (ПК):</b>\n` +
-    `<b>Включить:</b>\n` +
-    `1. Нажмите кнопку «Добавить прокси в Telegram»\n` +
-    `2. Или: Настройки → Продвинутые настройки → Тип соединения → Прокси\n` +
-    `3. Добавить, тип SOCKS5, заполнить данные\n\n` +
-    `<b>Отключить:</b>\n` +
-    `Настройки → Продвинутые настройки → Тип соединения → отключить прокси\n\n` +
-
-    `💡 <b>Подсказки:</b>\n` +
-    `• Если прокси не подключается — нажмите «Сменить IP» и попробуйте снова\n` +
-    `• Прокси работает только в Telegram, остальные приложения используют обычный интернет\n` +
-    `• При смене IP может потребоваться 10-30 секунд для переподключения`;
-
-  await tgSend(chatId, text, { reply_markup: KB_MAIN });
-}
-
-function telegramSendDocument(chatId, fileBuffer, filename, caption) {
-  return new Promise((resolve, reject) => {
-    const boundary = 'boundary' + crypto.randomBytes(16).toString('hex');
-
-    const parts = [];
-    parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="chat_id"\r\n\r\n${chatId}`);
-    if (caption) {
-      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="caption"\r\n\r\n${caption}`);
-      parts.push(`--${boundary}\r\nContent-Disposition: form-data; name="parse_mode"\r\n\r\nHTML`);
-    }
-    const preamble = Buffer.from(parts.join('\r\n') + `\r\n--${boundary}\r\nContent-Disposition: form-data; name="document"; filename="${filename}"\r\nContent-Type: application/octet-stream\r\n\r\n`);
-    const epilogue = Buffer.from(`\r\n--${boundary}--\r\n`);
-    const fullBody = Buffer.concat([preamble, fileBuffer, epilogue]);
-
-    const req = https.request({
-      hostname: 'api.telegram.org',
-      path: `/bot${TG_TOKEN}/sendDocument`,
-      method: 'POST',
-      headers: {
-        'Content-Type': `multipart/form-data; boundary=${boundary}`,
-        'Content-Length': fullBody.length
-      },
-      timeout: 60000
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { resolve({ ok: false, raw: data }); }
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Telegram sendDocument timeout')); });
-    req.write(fullBody);
-    req.end();
-  });
-}
-
-async function handleSpeedTest(chatId) {
-  const userProxy = tgProxies.find(p => p.chatId === chatId);
-  if (!userProxy) {
-    return tgSend(chatId, '❌ У вас нет активных прокси. Сначала подключите прокси, чтобы замерить скорость.', { reply_markup: KB_MAIN });
-  }
-
-  await tgSend(chatId, '🚀 <b>Тест скорости</b>\n\nСейчас отправлю тестовый файл (10 МБ).\nСкачайте его и сразу нажмите «✅ Скачал!»', { reply_markup: KB_SPEED });
-
-  try {
-    let sendResult;
-    if (speedTestFileId) {
-      // Reuse cached file_id
-      sendResult = await telegramApi('sendDocument', { chat_id: chatId, document: speedTestFileId });
-    } else {
-      // First time: generate and upload random file
-      const testBuffer = crypto.randomBytes(SPEED_TEST_SIZE);
-      sendResult = await telegramSendDocument(chatId, testBuffer, 'speedtest_10mb.bin');
-      if (sendResult.ok && sendResult.result?.document?.file_id) {
-        speedTestFileId = sendResult.result.document.file_id;
-        console.log(`[TelegramBot] Speed test file cached, file_id: ${speedTestFileId}`);
-      }
-    }
-
-    if (!sendResult.ok) {
-      console.error('[TelegramBot] Failed to send speed test file:', sendResult);
-      return tgSend(chatId, '❌ Не удалось отправить тестовый файл. Попробуйте позже.', { reply_markup: KB_MAIN });
-    }
-
-    // Record session start time
-    speedTestSessions[chatId] = { startTime: Date.now(), fileSize: SPEED_TEST_SIZE };
-  } catch (e) {
-    console.error('[TelegramBot] Speed test error:', e.message);
-    await tgSend(chatId, '❌ Ошибка при отправке тестового файла. Попробуйте позже.', { reply_markup: KB_MAIN });
-  }
-}
-
-async function handleSpeedDone(chatId) {
-  const session = speedTestSessions[chatId];
-  if (!session) {
-    return tgSend(chatId, '❓ Нет активного теста скорости. Нажмите «🚀 Скорость» чтобы начать.', { reply_markup: KB_MAIN });
-  }
-
-  const elapsed = (Date.now() - session.startTime) / 1000;
-  const speedMbps = (session.fileSize * 8 / elapsed / 1_000_000).toFixed(1);
-  const fileSizeMB = (session.fileSize / 1_048_576).toFixed(0);
-
-  delete speedTestSessions[chatId];
-
-  // Save speed test result to user record
-  const user = getTgUser(chatId, null);
-  const speedtest = { speed: parseFloat(speedMbps), date: new Date().toISOString() };
-  user.speedTests.push(speedtest);
-  saveTgSpeedtest(chatId, speedtest); // OLD-04 fix: incremental insert instead of full resave
-
-  const text =
-    `🚀 <b>Результат теста скорости</b>\n\n` +
-    `⬇️ Скорость скачивания: <b>${speedMbps} Мбит/с</b>\n` +
-    `📦 Размер файла: ${fileSizeMB} МБ\n` +
-    `⏱ Время загрузки: ${elapsed.toFixed(1)} сек\n\n` +
-    `💡 <i>Результат приблизительный и зависит от скорости вашего интернета + прокси</i>`;
-
-  await tgSend(chatId, text, { reply_markup: KB_MAIN });
-}
-
-async function handleChangeIp(chatId, portID, serverName) {
-  const record = tgProxies.find(p => p.portID === portID && p.chatId === chatId);
-  if (!record) return tgSend(chatId, '❌ Прокси не найден.');
-
-  try {
-    const server = findServer(serverName);
-    if (!server) throw new Error('Сервер не найден');
-
-    // Find modem IMEI for this port to get its nick
-    const results = await fetchAllServersData();
-    let nick = null;
-    for (const data of results) {
-      if (data.serverName !== serverName) continue;
-      if (Array.isArray(data.status)) {
-        for (const m of data.status) {
-          if (m.modem_details?.IMEI === record.imei) {
-            nick = m.modem_details.NICK;
-            break;
-          }
-        }
-      }
-    }
-
-    if (nick) {
-      await fetchApi(server, `/apix/reset_modem?arg=${encodeURIComponent(nick)}`, 30000);
-    } else {
-      await fetchApi(server, `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(record.imei)}`, 30000);
-    }
-
-    await tgSend(chatId, '✅ IP-адрес меняется. Это может занять 10-30 секунд.');
-  } catch (e) {
-    await tgSend(chatId, `❌ Ошибка смены IP: ${e.message}`);
-  }
-}
-
-// ---- Feedback & NPS handlers ----
-
-function ratingKeyboard(type) {
-  return {
-    inline_keyboard: [
-      [1,2,3,4,5].map(n => ({ text: String(n), callback_data: `rate:${type}:${n}` })),
-      [6,7,8,9,10].map(n => ({ text: String(n), callback_data: `rate:${type}:${n}` }))
-    ]
-  };
-}
-
-async function handleFeedback(chatId) {
-  userStates[chatId] = { state: 'awaiting_feedback', ts: Date.now() };
-  await tgSend(chatId,
-    '💬 <b>Обратная связь</b>\n\nКак мы можем стать для вас лучше?\nНапишите ваше сообщение:',
-    { reply_markup: { keyboard: [['◀️ Отмена']], resize_keyboard: true } }
-  );
-}
-
-async function handleFeedbackText(chatId, username, text) {
-  const state = userStates[chatId];
-  if (!state) return false;
-
-  if (state.state === 'awaiting_feedback') {
-    delete userStates[chatId];
-    tgFeedback.push({
-      chatId, username: username || null,
-      type: 'feedback',
-      message: text,
-      createdAt: new Date().toISOString()
-    });
-    insertTgFeedbackDB(tgFeedback[tgFeedback.length - 1]);
-    await tgSend(chatId, '✅ Спасибо за обратную связь! Мы обязательно учтём ваше мнение.', { reply_markup: KB_MAIN });
-    return true;
-  }
-
-  if (state.state === 'awaiting_nps_comment') {
-    // Save comment to the existing feedback record (in-memory only; comment column not in DB schema)
-    const lastRecord = tgFeedback.filter(f => f.chatId === chatId && f.type === state.type).pop();
-    if (lastRecord) lastRecord.comment = text;
-    delete userStates[chatId];
-    await tgSend(chatId, '✅ Спасибо за комментарий!', { reply_markup: KB_MAIN });
-    return true;
-  }
-
-  return false;
-}
-
-async function handleRating(chatId, username, type, score) {
-  tgFeedback.push({
-    chatId, username: username || null,
-    type, // 'nps' | 'satisfaction'
-    score,
-    createdAt: new Date().toISOString()
-  });
-  insertTgFeedbackDB(tgFeedback[tgFeedback.length - 1]);
-
-  if (type === 'satisfaction') {
-    await tgSend(chatId,
-      `✅ Спасибо за оценку <b>${score}/10</b>!\n\nОформите подписку, чтобы продолжить пользоваться прокси.`,
-      { reply_markup: KB_MAIN }
-    );
-  } else {
-    // NPS — ask for optional comment
-    userStates[chatId] = { state: 'awaiting_nps_comment', type, ts: Date.now() };
-    await tgSend(chatId,
-      `✅ Спасибо за оценку <b>${score}/10</b>!\n\nЕсли хотите добавить комментарий — просто напишите его.\nИли нажмите любую кнопку меню для продолжения.`,
-      { reply_markup: KB_MAIN }
-    );
-  }
-}
-
-// ---- Expiration checker ----
-
-async function checkTgProxyExpirations() {
-  const now = Date.now();
-
-  for (const record of [...tgProxies]) {
-    const expiresAt = new Date(record.expiresAt).getTime();
-    const remaining = expiresAt - now;
-
-    if (remaining <= 0) {
-      // Expired — delete
-      console.log(`[TelegramBot] Proxy ${record.portID} expired, removing...`);
-      await deleteProxyRecord(record, true);
-      continue;
-    }
-
-    // Test plan: satisfaction survey 1 hour before expiry
-    if (record.plan === 'test' && !record.satisfactionSent && remaining <= 60 * 60 * 1000 && remaining > 0) {
-      record.satisfactionSent = true;
-      // BUG-03: ephemeral flag, no DB write needed
-      await tgSend(record.chatId,
-        '⏰ <b>Через 1 час тестовый прокси будет отключён</b>\n\nОцените качество прокси от 1 до 10:',
-        { reply_markup: ratingKeyboard('satisfaction') }
-      );
-    }
-
-    // 7-day notification
-    if (!record.notified_7d && remaining <= 7 * 86400000 && record.plan !== 'test') {
-      record.notified_7d = true;
-      // BUG-03: ephemeral flag, no DB write needed
-      await tgSend(record.chatId,
-        '📢 <b>Напоминание</b>\n\nВаша подписка заканчивается через 7 дней. Нажмите «📋 Тарифы», чтобы продлить!',
-        { reply_markup: KB_MAIN }
-      );
-    }
-
-    // 1-day notification
-    if (!record.notified_1d && remaining <= 86400000 && record.plan !== 'test') {
-      record.notified_1d = true;
-      // BUG-03: ephemeral flag, no DB write needed
-      await tgSend(record.chatId,
-        '🔴 <b>Подписка заканчивается завтра!</b>\n\nНажмите «📋 Тарифы», чтобы продлить прокси!',
-        { reply_markup: KB_MAIN }
-      );
-    }
-
-    // Monthly NPS survey (every 30 days for paid plans)
-    if (record.plan !== 'test' && remaining > 0) {
-      const lastNps = record.npsLastSent ? new Date(record.npsLastSent).getTime() : 0;
-      if (now - lastNps > 30 * 86400000) {
-        record.npsLastSent = new Date().toISOString();
-        // BUG-03: ephemeral flag, no DB write needed
-        await tgSend(record.chatId,
-          '📊 <b>Мы хотим стать лучше!</b>\n\nНасколько вы порекомендуете наш сервис друзьям?\nОт 1 (точно нет) до 10 (обязательно порекомендую):',
-          { reply_markup: ratingKeyboard('nps') }
-        );
-      }
-    }
-  }
-}
-
-// ---- Long polling ----
-
-function startTelegramPolling() {
-  let offset = 0;
-
-  async function poll() {
-    try {
-      const data = await telegramApi('getUpdates', { offset, timeout: 30 }, 35000);
-      if (data.ok && Array.isArray(data.result)) {
-        for (const update of data.result) {
-          offset = update.update_id + 1;
-          try {
-            await processUpdate(update);
-          } catch (e) {
-            console.error('[TelegramBot] Error processing update:', e.message);
-          }
-        }
-      }
-    } catch (e) {
-      console.error('[TelegramBot] Polling error:', e.message);
-      await new Promise(r => setTimeout(r, 5000));
-    }
-    setImmediate(poll);
-  }
-
-  async function processUpdate(update) {
-    if (update.message) {
-      const msg = update.message;
-      const chatId = msg.chat.id;
-      const text = (msg.text || '').trim();
-      const username = msg.from?.username || null;
-
-      // Slash commands
-      if (text === '/start') { delete userStates[chatId]; return handleStart(chatId); }
-      if (text === '/help') return handleHelp(chatId);
-      if (text === '/myproxies') return handleMyProxies(chatId);
-
-      // Reply keyboard buttons
-      if (text === '🎁 Тест (1 день)')           { delete userStates[chatId]; return handleBuy(chatId, username, 'test'); }
-      if (text === '📋 Тарифы')                 { delete userStates[chatId]; return handleShowPlans(chatId); }
-      if (text === '📱 Мои прокси')             { delete userStates[chatId]; return handleMyProxies(chatId); }
-      if (text === '🚀 Скорость')               { delete userStates[chatId]; return handleSpeedTest(chatId); }
-      if (text === '❓ Инструкция')              { delete userStates[chatId]; return handleHelp(chatId); }
-      if (text === '💬 Обратная связь')          return handleFeedback(chatId);
-      if (text === '◀️ Назад' || text === '◀️ Отмена') {
-        delete speedTestSessions[chatId];
-        delete userStates[chatId];
-        return handleStart(chatId);
-      }
-      if (text === '✅ Скачал!')                 return handleSpeedDone(chatId);
-      if (text === '📅 1 мес — 599 ₽')          { delete userStates[chatId]; return handleBuy(chatId, username, '1m'); }
-      if (text === '📅 6 мес — 499 ₽/мес')      { delete userStates[chatId]; return handleBuy(chatId, username, '6m'); }
-      if (text === '📅 12 мес — 399 ₽/мес')     { delete userStates[chatId]; return handleBuy(chatId, username, '12m'); }
-
-      // State-based text handling (feedback/NPS comment)
-      if (userStates[chatId] && text) {
-        const handled = await handleFeedbackText(chatId, username, text);
-        if (handled) return;
-      }
-    }
-
-    if (update.callback_query) {
-      const cb = update.callback_query;
-      const chatId = cb.message?.chat?.id || cb.from?.id;
-      const username = cb.from?.username || null;
-      const data = cb.data || '';
-
-      // Answer callback to remove loading spinner
-      telegramApi('answerCallbackQuery', { callback_query_id: cb.id }).catch(() => {});
-
-      // Rating callbacks (NPS / satisfaction)
-      if (data.startsWith('rate:')) {
-        const parts = data.split(':');
-        const type = parts[1]; // 'nps' or 'satisfaction'
-        const score = parseInt(parts[2]);
-        return handleRating(chatId, username, type, score);
-      }
-
-      // Change IP per-proxy
-      if (data.startsWith('change_ip:')) {
-        const parts = data.split(':');
-        return handleChangeIp(chatId, parts[1], parts[2]);
-      }
-    }
-  }
-
-  // Start polling
-  console.log('[TelegramBot] Starting long polling...');
-  poll();
-
-  // Expiration checker every 10 minutes
-  checkTgProxyExpirations();
-  _intervals.push(setInterval(checkTgProxyExpirations, 10 * 60 * 1000));
-}
-
-if (TG_TOKEN) {
-  startTelegramPolling();
-}
+  checkCrmPaymentConfirmations().catch(() => {});
+}, 10 * 60 * 1000));
 
 // ==================== GRACEFUL SHUTDOWN ====================
 function gracefulShutdown(signal) {

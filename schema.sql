@@ -70,6 +70,7 @@ CREATE TABLE IF NOT EXISTS billing_ledger (
   note        TEXT DEFAULT '',
   source      TEXT,
   payment_id  TEXT,
+  details     TEXT,
   created_at  TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_ledger_client_id ON billing_ledger(client_id);
@@ -135,6 +136,8 @@ CREATE TABLE IF NOT EXISTS closing_documents (
   items           TEXT DEFAULT '[]',
   total_amount    REAL DEFAULT 0,
   status          TEXT DEFAULT 'unsigned',
+  contract_info   TEXT,
+  signed_at       TEXT,
   created_at      TEXT DEFAULT (datetime('now'))
 );
 CREATE INDEX IF NOT EXISTS idx_closing_docs_client ON closing_documents(client_id);
@@ -202,49 +205,3 @@ CREATE TABLE IF NOT EXISTS daily_traffic (
 );
 CREATE INDEX IF NOT EXISTS idx_daily_traffic_port_date ON daily_traffic(port_name, date);
 
--- Telegram users (replaces telegram_users.json)
-CREATE TABLE IF NOT EXISTS telegram_users (
-  chat_id     TEXT PRIMARY KEY,
-  username    TEXT,
-  test_used   INTEGER DEFAULT 0,
-  plan        TEXT,
-  registered_at TEXT DEFAULT (datetime('now')),
-  updated_at  TEXT DEFAULT (datetime('now'))
-);
-
--- Telegram speedtests (from telegram_users speedTests[])
-CREATE TABLE IF NOT EXISTS telegram_speedtests (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  chat_id     TEXT NOT NULL REFERENCES telegram_users(chat_id) ON DELETE CASCADE,
-  speed       REAL,
-  tested_at   TEXT DEFAULT (datetime('now'))
-);
-
--- Telegram proxies (replaces telegram_proxies.json)
-CREATE TABLE IF NOT EXISTS telegram_proxies (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  chat_id     TEXT NOT NULL,
-  port_name   TEXT,
-  server      TEXT,
-  http_port   INTEGER,
-  socks_port  INTEGER,
-  login       TEXT,
-  password    TEXT,
-  plan        TEXT,
-  created_at  TEXT DEFAULT (datetime('now')),
-  expires_at  TEXT,
-  active      INTEGER DEFAULT 1
-);
-CREATE INDEX IF NOT EXISTS idx_tg_proxies_chat ON telegram_proxies(chat_id);
-CREATE INDEX IF NOT EXISTS idx_tg_proxies_active ON telegram_proxies(active);
-
--- Telegram feedback (replaces telegram_feedback.json)
-CREATE TABLE IF NOT EXISTS telegram_feedback (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  chat_id     TEXT NOT NULL,
-  username    TEXT,
-  type        TEXT DEFAULT 'text',
-  score       INTEGER,
-  message     TEXT NOT NULL,
-  created_at  TEXT DEFAULT (datetime('now'))
-);

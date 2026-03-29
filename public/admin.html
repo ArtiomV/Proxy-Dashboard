@@ -285,7 +285,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .acc-sub-content{display:none}.acc-sub-content.active{display:block}
 
 /* Widget row */
-.widget-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;margin-bottom:0;padding:14px 24px}
+.widget-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:0;padding:14px 24px}
 .widget{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;padding:12px;box-shadow:var(--card-shadow);position:relative;overflow:hidden}
 .widget::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent);opacity:.6}
 .widget-label{font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
@@ -399,7 +399,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   .client-card-body .row{flex-direction:column;gap:2px;padding:4px 0}
   /* Charts */
   .chart-row{grid-template-columns:1fr;padding:0 12px 12px}
-  .widget-grid{grid-template-columns:repeat(2,1fr);padding:8px 12px}
+  .widget-grid{grid-template-columns:repeat(2,1fr);padding:8px 12px;gap:6px}
   /* Modals */
   .modal{width:95vw;max-height:90vh}
   .modal-body{padding:10px 12px}
@@ -473,11 +473,10 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <div class="nav-tab active" onclick="switchMainTab('modems',this)">Модемы</div>
   <div class="nav-tab" onclick="switchMainTab('traffic',this)">Аналитика</div>
   <div class="nav-tab" onclick="switchMainTab('clients',this)">Клиенты</div>
-  <div class="nav-tab" onclick="switchMainTab('tools',this)">Инструменты</div>
   <div class="nav-tab" onclick="switchMainTab('analytics',this)">Настройки</div>
   <div class="nav-tab" onclick="switchMainTab('bank',this)">Документооборот и операции</div>
   <div class="nav-tab" onclick="switchMainTab('crm',this)">CRM</div>
-  <div style="margin-left:auto;display:flex;align-items:center;gap:4px;padding-right:8px">
+  <div id="modemSearchArea" style="margin-left:auto;display:flex;align-items:center;gap:4px;padding-right:8px">
     <input type="text" class="search-box" id="searchBox" placeholder="Поиск по модему..." oninput="renderTable()" style="width:180px;height:28px;font-size:11px">
     <span id="searchCounter" style="font-size:10px;color:var(--text-3);white-space:nowrap;display:none"></span>
     <div class="col-selector" style="position:relative">
@@ -508,8 +507,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <!-- ACC Sub-navigation -->
   <div class="acc-sub-tabs">
     <div class="acc-sub-tab active" onclick="switchAccTab('overview',this)">Обзор</div>
-    <div class="acc-sub-tab" onclick="switchAccTab('clients_t',this)">Клиенты</div>
-    <div class="acc-sub-tab" onclick="switchAccTab('resources',this)">Ресурсы <span class="tab-count" id="resCount">0</span></div>
+    <div class="acc-sub-tab" onclick="switchAccTab('resources',this)">Ресурсы <span class="tab-count" id="resCount" style="display:none"></span></div>
   </div>
   <!-- ACC Toolbar -->
   <div class="acc-toolbar">
@@ -535,25 +533,14 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
         <div id="regionDetailBars"></div>
       </div>
       <div class="chart-card">
-        <div class="chart-card-header"><h4>Топ-5 модемов</h4><span id="matrixTopLink" style="font-size:10px;color:var(--accent);cursor:pointer" onclick="document.querySelector('[onclick*=\'clients_t\']').parentNode.querySelectorAll('.acc-sub-tab')[1].click();switchAccTab('clients_t',document.querySelectorAll('.acc-sub-tab')[1])"></span></div>
+        <div class="chart-card-header"><h4>Топ-5 модемов</h4></div>
         <div id="top5ModemTable"></div>
       </div>
     </div>
-    <div class="analytics-card" style="margin:0 24px 24px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <h3 style="margin:0">Матрица трафика по модемам</h3>
-        <span style="font-size:10px;color:var(--text-3)">Сортировка по клику на заголовок</span>
-      </div>
-      <div style="overflow-x:auto"><table class="log-table" id="trafficMatrix"></table></div>
-    </div>
-  </div>
-
-
-  <!-- CLIENTS TRAFFIC -->
-  <div class="acc-sub-content" id="acc-clients_t">
-    <div style="padding:14px 24px">
+    <!-- Клиенты — перенесено из отдельной вкладки -->
+    <div style="padding:0 24px 14px">
       <div class="analytics-card" style="margin-bottom:14px">
-        <h3 style="margin:0 0 10px">Детальная таблица по клиентам</h3>
+        <h3 style="margin:0 0 10px">Клиенты</h3>
         <table class="log-table" id="clientTrafficTable"></table>
       </div>
       <div class="analytics-card">
@@ -566,8 +553,15 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
             </select>
           </div>
         </div>
-        <div style="height:320px"><canvas id="chartDailyClientTraffic"></canvas></div>
+        <div style="height:280px"><canvas id="chartDailyClientTraffic"></canvas></div>
       </div>
+    </div>
+    <div class="analytics-card" style="margin:0 24px 24px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+        <h3 style="margin:0">Матрица трафика по модемам</h3>
+        <span style="font-size:10px;color:var(--text-3)">Сортировка по клику на заголовок</span>
+      </div>
+      <div style="overflow-x:auto"><table class="log-table" id="trafficMatrix"></table></div>
     </div>
   </div>
 
@@ -600,29 +594,15 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <!-- TAB: CLIENTS -->
 <div class="tab-content" id="tab-clients">
-  <div class="toolbar">
-    <button class="btn btn-primary" onclick="showClientForm()">+ Новый клиент</button>
-    <input type="text" class="search-box" id="clientSearch" placeholder="Поиск клиентов..." oninput="renderClients()">
+  <div class="toolbar" style="justify-content:space-between">
+    <div style="display:flex;align-items:center;gap:8px">
+      <button class="btn btn-primary" onclick="showClientForm()">+ Новый клиент</button>
+      <input type="text" class="search-box" id="clientSearch" placeholder="Поиск клиентов..." oninput="renderClients()" style="width:200px">
+      <button class="btn btn-sm" id="btnFilterProblematic" onclick="toggleProblematicFilter()" style="font-size:11px">⚠ Проблемные</button>
+    </div>
+    <div id="clientSummary" style="font-size:11px;color:var(--text-2)"></div>
   </div>
-  <div style="padding:0 24px 24px;overflow-x:auto">
-    <table class="log-table" id="clientTable" style="width:100%">
-      <thead>
-        <tr>
-          <th style="text-align:left;min-width:150px">Клиент</th>
-          <th style="text-align:center">Модемов</th>
-          <th style="text-align:center">Тарификация</th>
-          <th style="text-align:right">Баланс</th>
-          <th style="text-align:right">Расход/мес</th>
-          <th style="text-align:right">Трафик/мес</th>
-          <th style="text-align:center">Действия</th>
-        </tr>
-      </thead>
-      <tbody id="clientTableBody"></tbody>
-    </table>
-  </div>
-  <!-- Expandable rows content -->
-  <div id="clientExpandArea"></div>
-
+  <div style="padding:0 24px 24px" id="clientCardList"></div>
 </div>
 
 <!-- TAB: BANK (Документооборот и операции) -->
@@ -742,9 +722,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
       <div class="modal-tab" data-tab="iphistory" onclick="switchTab('iphistory',this)">IP История</div>
       <div class="modal-tab" data-tab="speed" onclick="switchTab('speed',this)">Speed</div>
       <div class="modal-tab" data-tab="hosts" onclick="switchTab('hosts',this)">Домены</div>
-      <div class="modal-tab" data-tab="sms" onclick="switchTab('sms',this)">SMS</div>
-      <div class="modal-tab" data-tab="ussd" onclick="switchTab('ussd',this)">USSD</div>
-      <div class="modal-tab" data-tab="ports" onclick="switchTab('ports',this)">Порты</div>
+      <div class="modal-tab" data-tab="sim" onclick="switchTab('sim',this)">SMS & USSD</div>
       <div class="modal-tab" data-tab="settings" onclick="switchTab('settings',this)">Настройки</div>
     </div>
     <div class="modal-body" id="modalBody"></div>
@@ -879,7 +857,7 @@ function doLogin(){window.location.href='/'}
 function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
-function switchMainTab(name,el){localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig()}if(name==='bank'){renderBankDocuments();renderBankBills();renderBankPayments()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}}
+function switchMainTab(name,el){localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig()}if(name==='bank'){renderBankDocuments();renderBankBills();renderBankPayments()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}}
 
 // ========== DATA ==========
 function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();renderBankPayments();renderBankDocuments();renderBankBills();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
@@ -948,7 +926,7 @@ function renderTable(){
   if(ctr){var hasFilter=search||activeClientFilter||activeServerFilter!=='all'||activeStatusFilter!=='all';ctr.style.display=hasFilter?'':'none';if(hasFilter)ctr.textContent='Найдено: '+totalFiltered+' из '+totalAll}
   var sortFn=function(a,b){var va=getSortValue(a,sortCol),vb=getSortValue(b,sortCol);var cmp=typeof va==='number'&&typeof vb==='number'?va-vb:String(va).localeCompare(String(vb));return sortDir==='asc'?cmp:-cmp};for(var g in groups)groups[g].sort(sortFn);
   var html='';COUNTRY_ORDER.forEach(function(srv){var modems=groups[srv];if(!modems||!modems.length)return;var country=COUNTRIES[srv]||{};var online=0;modems.forEach(function(m){var s=getModemStatus(m);if(s==='online'||s==='rotating')online++});
-    html+='<div class="country-group"><div class="country-header"><span class="country-flag">'+country.flag+'</span><span class="country-name">'+country.name+'</span><span style="font-size:12px;color:var(--text-2);margin-left:6px">'+modems.length+' модемов</span><div class="country-stats"><span style="color:'+(online===modems.length?'var(--success)':'var(--warning)')+'">Online: '+online+'/'+modems.length+'</span></div><div style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" style="font-size:10px;padding:3px 8px" onclick="resetCompleteServer(\''+srv+'\')">Reset Complete</button><button class="btn btn-sm btn-warning" style="font-size:10px;padding:3px 8px" onclick="rebootServer(\''+srv+'\')">Перезагрузка</button></div></div><table><thead><tr>';
+    html+='<div class="country-group"><div class="country-header"><span class="country-flag">'+country.flag+'</span><span class="country-name">'+country.name+'</span><span style="font-size:12px;font-weight:600;color:'+(online===modems.length?'var(--success)':'var(--warning)')+';margin-left:8px">Online: '+online+'/'+modems.length+'</span><div class="country-stats"></div><div style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" style="font-size:10px;padding:3px 8px" onclick="resetCompleteServer(\''+srv+'\')">Reset</button><button class="btn btn-sm btn-warning" style="font-size:10px;padding:3px 8px" onclick="rebootServer(\''+srv+'\')">Reboot</button></div></div><table><thead><tr>';
     cols.forEach(function(col){var w=col.width?' style="width:'+col.width+'"':'';var ar=col.sortable&&sortCol===col.id?' '+(sortDir==='asc'?'\u25B2':'\u25BC'):'';var cl=col.sortable?' onclick="setSort(\''+col.id+'\')"':'';html+='<th'+w+cl+'>'+col.label+ar+'</th>'});
     html+='</tr></thead><tbody>';modems.forEach(function(modem){var status=getModemStatus(modem),port=modem.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[modem.server]||{};var h='<tr>';cols.forEach(function(col){h+='<td>';switch(col.id){case'status':h+='<span class="status-dot '+status+'"></span>';break;case'nick':h+='<strong>'+esc(modem.nick)+'</strong>';break;case'server':h+='<span style="font-size:10px">'+(ci.flag||'')+' '+modem.server+'</span>';break;case'portName':var un=modem.ports.map(function(p){return p.portName}).filter(function(v,i,a){return v&&a.indexOf(v)===i});if(!un.length){h+='-'}else{h+=un.slice(0,2).map(function(n){return'<span class="port-badge" style="background:var(--bg-3);color:var(--text-1);padding:1px 8px;border-radius:20px;font-size:10px;border:1px solid var(--border)">'+esc(n)+'</span>'}).join(' ');if(un.length>2)h+=' <span class="port-badge" title="'+esc(un.slice(2).join(', '))+'" style="background:var(--accent-dim);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:10px;cursor:default">+'+(un.length-2)+'</span>'}break;case'creds':if(port.HTTP_PORT||port.SOCKS_PORT){var sip=ci.serverIp||'';if(port.HTTP_PORT)h+='<div><span style="color:var(--text-2);font-size:10px">HTTP:</span> <span class="mono">'+sip+':'+port.HTTP_PORT+'</span> <button class="copy-btn" onclick="copyText(\''+sip+':'+port.HTTP_PORT+'\',this)">\u{1F4CB}</button></div>';if(port.SOCKS_PORT)h+='<div><span style="color:var(--text-2);font-size:10px">SOCKS5:</span> <span class="mono">'+sip+':'+port.SOCKS_PORT+'</span> <button class="copy-btn" onclick="copyText(\''+sip+':'+port.SOCKS_PORT+'\',this)">\u{1F4CB}</button></div>'}else{h+='-'}break;case'loginpass':if(port.LOGIN){h+='<span class="mono">'+esc(port.LOGIN)+':••••</span> <button class="copy-btn" onclick="copyText(\''+esc(port.LOGIN)+':'+esc(port.PASSWORD||'')+'\',this)">\u{1F4CB}</button>'}else{h+='-'}break;case'extIp':if(modem.extIp==='IP_RESET'||modem.isRotating){h+='<span class="mono" style="color:var(--warning)">Ротация</span>'}else if(modem.extIp){h+='<span class="mono'+(modem.ipStuck?' ip-stuck':'')+'">'+modem.extIp+(modem.ipStuck?'<span class="ip-stuck-badge" title="IP не менялся '+modem.ipSinceHours+'ч"> \u26A0'+modem.ipSinceHours+'ч</span>':'')+'</span>'}else{h+='-'}break;case'netType':h+=renderNetBadge(modem.netType);break;case'signal':h+=renderSignalBars(modem.signal);break;case'operator':h+=esc(modem.operator)||'-';break;case'phone':h+=modem.phone?'<span class="mono">'+esc(modem.phone)+'</span>':'-';break;case'trafficDay':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_day_in)+'</span>';break;case'trafficMon':h+='<span class="mono">'+formatTraffic(bw.bandwidth_bytes_month_in)+'</span>';break;case'speed':if(modem.lastSpeedDl||modem.lastSpeedUl){var lowCls=modem.lowSpeed?' style="color:var(--danger);font-weight:600"':'';h+='<span class="speed-cell"'+lowCls+'><span class="'+(modem.lowSpeed?'':'speed-dl')+'">\u2193'+Number(modem.lastSpeedDl||0).toFixed(1)+'</span> / <span class="'+(modem.lowSpeed?'':'speed-ul')+'">\u2191'+Number(modem.lastSpeedUl||0).toFixed(1)+'</span>'+(modem.lowSpeed?' \u26A0':'')+'</span>'}else{h+='-'}break;case'uptime':if(modem.uptimePct!==undefined){var upCls=parseFloat(modem.uptimePct)>=99?'good':parseFloat(modem.uptimePct)>=95?'warn':'bad';h+='<span class="uptime-pct '+upCls+'">'+modem.uptimePct+'%</span><br><span style="font-size:9px;color:var(--text-3)">'+formatUptime(modem.uptime)+'</span>'}else{h+='<span style="font-size:10px;color:var(--text-2)">'+formatUptime(modem.uptime)+'</span>'}break;case'actions':var d='data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'"';h+='<div class="actions-cell"><button class="action-btn reset" '+d+' onclick="resetIp(this)" title="Сброс IP"><span class="btn-icon">\u{1F504}</span><div class="spinner"></div></button><button class="action-btn reboot" '+d+' onclick="rebootModem(this)" title="Ребут"><span class="btn-icon">\u26A1</span><div class="spinner"></div></button><button class="action-btn usb" '+d+' onclick="usbReset(this)" title="USB"><span class="btn-icon">\u{1F50C}</span><div class="spinner"></div></button><button class="action-btn detail" '+d+' onclick="showDetails(this)" title="Детали"><span class="btn-icon">\u{1F4CA}</span><div class="spinner"></div></button></div>';break}h+='</td>'});html+=h+'</tr>'});html+='</tbody></table></div>'});
   wrap.innerHTML=html;
@@ -980,9 +958,25 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
     body.innerHTML=sh;
     loadSpeedHistory(m.server+'_'+m.rawImei)}
   else if(tab==='hosts'){var port=m.ports[0];if(!port){body.innerHTML='-';return}body.innerHTML='<div style="color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/top_hosts?portId='+encodeURIComponent((port.portID||'').replace(/^S[12]_/,''))+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=[];if(Array.isArray(data))entries=data;else{for(var k in data){if(typeof data[k]!=='object')entries.push({host:k,count:data[k]})}}if(!entries.length){body.innerHTML='Нет данных';return}var h='<table class="log-table"><thead><tr><th>Домен</th><th>Запросов</th></tr></thead><tbody>';entries.forEach(function(e){h+='<tr><td>'+esc(e.host||'')+'</td><td>'+(e.count||'-')+'</td></tr>'});body.innerHTML=h+'</tbody></table>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'})}
-  else if(tab==='sms'){body.innerHTML='Загрузка...';fetch(API+'/api/admin/sms?imei='+encodeURIComponent(m.rawImei)+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var msgs=Array.isArray(data)?data:data.data||data.messages||data.sms||[];var h='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:11px;font-weight:600;color:var(--text-1)">'+msgs.length+' сообщений</span><button class="btn btn-sm" style="font-size:10px;color:var(--danger);border-color:var(--danger);background:transparent" onclick="purgeSms(\''+esc(m.nick)+'\',\''+m.server+'\')" title="Удалить все SMS">Удалить все</button></div>';h+='<div style="max-height:250px;overflow-y:auto">';if(msgs.length)msgs.forEach(function(s){h+='<div class="sms-item"><span class="sms-from">'+(s.Phone||s.from||'?')+'</span><span class="sms-date">'+(s.Date||s.date||'')+'</span><div class="sms-text">'+esc(s.Content||s.text||s.message||'')+'</div></div>'});else h+='<div style="color:var(--text-3);padding:10px">Нет SMS</div>';h+='</div>';h+='<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><div class="form-row"><div class="form-group"><label>Номер</label><input class="form-input" id="smsPhone"></div></div><div class="form-group"><label>Текст</label><textarea class="form-input" id="smsText" rows="2"></textarea></div><button class="btn btn-primary btn-sm" onclick="sendSms(\''+m.rawImei+'\',\''+m.server+'\')">Отправить</button></div>';body.innerHTML=h}).catch(function(e){body.innerHTML=e.message})}
-  else if(tab==='ussd'){body.innerHTML='<div class="detail-card"><h4>USSD-запрос</h4><p style="font-size:11px;color:var(--text-2);margin-bottom:8px">*100# баланс, *111# меню</p><div class="form-row"><div class="form-group"><input class="form-input" id="ussdCode" value="*100#"></div><div class="form-group"><button class="btn btn-primary" onclick="sendUssd(\''+m.rawImei+'\',\''+m.server+'\')">Отправить</button></div></div><div id="ussdResult" style="margin-top:8px"></div></div>'}
-  else if(tab==='ports'){var h='<div style="display:flex;justify-content:space-between;margin-bottom:8px"><strong style="color:var(--text-0);font-size:13px">Порты</strong><button class="btn btn-primary btn-sm" onclick="showNewPortForm(\''+m.rawImei+'\',\''+m.server+'\')">+ Порт</button></div>';if(!m.ports.length){h+='<div style="color:var(--text-3)">Нет портов</div>'}else{h+='<table class="log-table"><thead><tr><th>ID</th><th>Имя</th><th>HTTP</th><th>SOCKS</th><th>Логин</th><th>Пароль</th><th></th></tr></thead><tbody>';m.ports.forEach(function(p){var pid=(p.portID||'').replace(/^S[12]_/,'');h+='<tr><td>'+esc(pid)+'</td><td>'+esc(p.portName||'')+'</td><td>'+esc(p.HTTP_PORT||'')+'</td><td>'+esc(p.SOCKS_PORT||'')+'</td><td class="mono">'+esc(p.LOGIN||'')+'</td><td class="mono">'+esc(p.PASSWORD||'')+'</td><td style="display:flex;gap:3px"><button class="btn btn-sm" onclick="editPortCreds(\''+m.rawImei+'\',\''+m.server+'\',\''+pid+'\',\''+esc(p.LOGIN||'')+'\',\''+esc(p.PASSWORD||'')+'\')" title="Изменить логин/пароль">✏️</button><button class="btn btn-danger btn-sm" onclick="purgePort(\''+pid+'\',\''+m.server+'\')">X</button></td></tr>'});h+='</tbody></table>'}h+='<div id="newPortForm"></div><div id="editPortForm"></div>';body.innerHTML=h}
+  else if(tab==='sim'){
+    var simH='<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:12px">'
+      +'<div id="simTab_sms" onclick="switchSimTab(\'sms\')" style="padding:6px 16px;font-size:12px;font-weight:500;cursor:pointer;border-bottom:2px solid var(--accent);color:var(--accent)">SMS</div>'
+      +'<div id="simTab_ussd" onclick="switchSimTab(\'ussd\')" style="padding:6px 16px;font-size:12px;font-weight:500;cursor:pointer;border-bottom:2px solid transparent;color:var(--text-2)">USSD</div>'
+      +'</div>'
+      +'<div id="simContent_sms">Загрузка...</div>'
+      +'<div id="simContent_ussd" style="display:none"><div class="detail-card"><h4>USSD-запрос</h4><p style="font-size:11px;color:var(--text-2);margin-bottom:8px">*100# баланс, *111# меню</p><div class="form-row"><div class="form-group"><input class="form-input" id="ussdCode" value="*100#"></div><div class="form-group"><button class="btn btn-primary" onclick="sendUssd(\''+m.rawImei+'\',\''+m.server+'\')">Отправить</button></div></div><div id="ussdResult" style="margin-top:8px"></div></div></div>';
+    body.innerHTML=simH;
+    window._simModem=m;
+    fetch(API+'/api/admin/sms?imei='+encodeURIComponent(m.rawImei)+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+      var msgs=Array.isArray(data)?data:data.data||data.messages||data.sms||[];
+      var h='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px"><span style="font-size:11px;font-weight:600;color:var(--text-1)">'+msgs.length+' сообщений</span><button class="btn btn-sm" style="font-size:10px;color:var(--danger);border-color:var(--danger);background:transparent" onclick="purgeSms(\''+esc(m.nick)+'\',\''+m.server+'\')" title="Удалить все SMS">Удалить все</button></div>';
+      h+='<div style="max-height:200px;overflow-y:auto">';
+      if(msgs.length)msgs.forEach(function(s){h+='<div class="sms-item"><span class="sms-from">'+(s.Phone||s.from||'?')+'</span><span class="sms-date">'+(s.Date||s.date||'')+'</span><div class="sms-text">'+esc(s.Content||s.text||s.message||'')+'</div></div>'});
+      else h+='<div style="color:var(--text-3);padding:10px">Нет SMS</div>';
+      h+='</div><div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><div class="form-row"><div class="form-group"><label>Номер</label><input class="form-input" id="smsPhone"></div></div><div class="form-group"><label>Текст</label><textarea class="form-input" id="smsText" rows="2"></textarea></div><button class="btn btn-primary btn-sm" onclick="sendSms(\''+m.rawImei+'\',\''+m.server+'\')">Отправить</button></div>';
+      var sc=document.getElementById('simContent_sms');if(sc)sc.innerHTML=h;
+    }).catch(function(e){var sc=document.getElementById('simContent_sms');if(sc)sc.innerHTML=e.message});
+  }
   else if(tab==='iphistory'){
     var key=m.server+'_'+m.rawImei;
     body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка IP истории...</div>';
@@ -1003,7 +997,60 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
       body.innerHTML=h+'</tbody></table>';
     }).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'});
   }
-  else if(tab==='settings'){body.innerHTML='<div class="detail-card"><h4>Настройки '+esc(m.nick)+'</h4><div class="form-group"><label>Ник</label><input class="form-input" id="msNick" value="'+esc(m.nick)+'"></div><div class="form-group"><label>Телефон</label><input class="form-input" id="msPhone" value="'+esc(m.phone)+'"></div><div class="form-row"><div class="form-group"><label>Авторотация (мин)</label><input class="form-input" id="msAutoRot" value="'+(m.autoRotation||'')+'"></div><div class="form-group"><label>Режим сети</label><select class="form-input" id="msMode"><option value="auto"'+(m.targetMode==='auto'?' selected':'')+'>Авто</option><option value="4g"'+(m.targetMode==='4g'?' selected':'')+'>4G</option><option value="3g"'+(m.targetMode==='3g'?' selected':'')+'>3G</option></select></div></div><div class="form-group"><label>Заметки</label><textarea class="form-input" id="msNotes">'+esc(m.notes)+'</textarea></div><div style="display:flex;gap:6px;margin-top:8px"><button class="btn btn-primary" onclick="saveModemSettings(\''+m.rawImei+'\',\''+m.server+'\')" title="Сохранить настройки без перезапуска">Сохранить</button><button class="btn btn-warning" onclick="applyModemSettings(\''+m.rawImei+'\',\''+m.server+'\')" title="Сохранить и перезапустить модем">Применить</button></div></div>'}
+  else if(tab==='settings'){
+    var ROT_VALS=[5,10,15,30,60,120,240,480,720,1440];
+    var ROT_LABELS=['5м','10м','15м','30м','1ч','2ч','4ч','8ч','12ч','24ч'];
+    var curRot=parseInt(m.autoRotation)||10;
+    var rotIdx=ROT_VALS.indexOf(curRot);if(rotIdx===-1)rotIdx=1;
+    var ci=COUNTRIES[m.server]||{};
+    // Ports section
+    var portsH='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+      +'<span style="font-size:12px;color:var(--text-2)">'+m.ports.length+' порт(ов)</span>'
+      +'<button class="btn btn-primary btn-sm" onclick="showNewPortForm(\''+m.rawImei+'\',\''+m.server+'\')">+ Добавить</button>'
+      +'</div>';
+    if(!m.ports.length){portsH+='<div style="color:var(--text-3);font-size:12px">Нет портов</div>'}
+    else{m.ports.forEach(function(p){var pid=(p.portID||'').replace(/^S[12]_/,'');portsH+='<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border);margin-bottom:6px">'
+      +'<div><div style="font-size:12px;font-weight:600;color:var(--text-0)">'+esc(p.portName||pid)+'</div>'
+      +'<div style="font-size:11px;color:var(--text-2);margin-top:2px">HTTP: '+(ci.serverIp||'')+':'+esc(p.HTTP_PORT||'—')+' · SOCKS5: '+(ci.serverIp||'')+':'+esc(p.SOCKS_PORT||'—')+'</div>'
+      +'<div style="font-size:11px;color:var(--text-3);font-family:monospace;margin-top:1px">'+esc(p.LOGIN||'')+'</div></div>'
+      +'<div style="display:flex;gap:4px"><button class="btn btn-sm" onclick="editPortCreds(\''+m.rawImei+'\',\''+m.server+'\',\''+pid+'\',\''+esc(p.LOGIN||'')+'\',\''+esc(p.PASSWORD||'')+'\')" title="Изменить">✏️</button>'
+      +'<button class="btn btn-danger btn-sm" onclick="purgePort(\''+pid+'\',\''+m.server+'\')" title="Удалить">✕</button></div>'
+      +'</div>'});}
+    portsH+='<div id="newPortForm"></div><div id="editPortForm"></div>';
+
+    body.innerHTML='<div style="display:flex;flex-direction:column;gap:16px;padding:4px 0">'
+      // Section 1: Идентификация
+      +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'
+      +'<div style="padding:7px 14px;background:var(--bg-2);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em">Идентификация</div>'
+      +'<div style="padding:14px;display:flex;flex-direction:column;gap:12px">'
+      +'<div style="display:grid;grid-template-columns:110px 1fr;align-items:center;gap:10px"><label style="font-size:12px;color:var(--text-2)">Ник модема</label><input class="form-input" id="msNick" value="'+esc(m.nick)+'"></div>'
+      +'<div style="display:grid;grid-template-columns:110px 1fr;align-items:center;gap:10px"><label style="font-size:12px;color:var(--text-2)">Телефон SIM</label><input class="form-input" id="msPhone" value="'+esc(m.phone)+'"></div>'
+      +'<div style="display:grid;grid-template-columns:110px 1fr;align-items:flex-start;gap:10px"><label style="font-size:12px;color:var(--text-2);padding-top:6px">Заметки</label><textarea class="form-input" id="msNotes" rows="2" style="resize:vertical">'+esc(m.notes)+'</textarea></div>'
+      +'</div></div>'
+      // Section 2: Сеть и ротация
+      +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'
+      +'<div style="padding:7px 14px;background:var(--bg-2);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em">Сеть и ротация</div>'
+      +'<div style="padding:14px;display:flex;flex-direction:column;gap:14px">'
+      +'<div style="display:grid;grid-template-columns:110px 1fr;align-items:center;gap:10px"><label style="font-size:12px;color:var(--text-2)">Режим сети</label>'
+      +'<select class="form-input" id="msMode" style="max-width:160px"><option value="auto"'+(m.targetMode==='auto'?' selected':'')+'>Авто</option><option value="4g"'+(m.targetMode==='4g'?' selected':'')+'>4G / LTE</option><option value="3g"'+(m.targetMode==='3g'?' selected':'')+'>3G</option></select></div>'
+      +'<div><div style="display:grid;grid-template-columns:110px 1fr;align-items:center;gap:10px;margin-bottom:8px"><label style="font-size:12px;color:var(--text-2)">Авторотация</label>'
+      +'<span id="msRotLabel" style="font-size:13px;font-weight:600;color:var(--accent)">'+ROT_LABELS[rotIdx]+'</span></div>'
+      +'<input type="range" id="msAutoRot" min="0" max="'+(ROT_VALS.length-1)+'" step="1" value="'+rotIdx+'" style="width:100%;accent-color:var(--accent)" oninput="(function(i){document.getElementById(\'msRotLabel\').textContent=[\'5м\',\'10м\',\'15м\',\'30м\',\'1ч\',\'2ч\',\'4ч\',\'8ч\',\'12ч\',\'24ч\'][+i]})(this.value)">'
+      +'<div style="display:flex;justify-content:space-between;font-size:9px;color:var(--text-3);margin-top:2px"><span>5м</span><span>10м</span><span>15м</span><span>30м</span><span>1ч</span><span>2ч</span><span>4ч</span><span>8ч</span><span>12ч</span><span>24ч</span></div></div>'
+      +'<div><button class="btn btn-sm btn-warning" onclick="(function(){var b=document.querySelector(\'[data-imei=\\\"'+m.rawImei+'\\\"]\');if(b){resetIp(b)}else{fetch(API+\'/api/admin/reset_ip\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\',\'X-Auth-Token\':authToken},body:JSON.stringify({imei:\''+m.rawImei+'\',serverName:\''+m.server+'\'})}).then(function(r){return r.json()}).then(function(d){showToast(d.ok?\'IP сброшен\':d.error,d.ok?\'success\':\'error\')})}})()" style="font-size:11px">🔄 Сбросить IP сейчас</button></div>'
+      +'</div></div>'
+      // Section 3: Порты
+      +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'
+      +'<div style="padding:7px 14px;background:var(--bg-2);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em">Порты</div>'
+      +'<div style="padding:14px">'+portsH+'</div>'
+      +'</div>'
+      // Save buttons
+      +'<div style="display:flex;gap:8px;padding-top:4px">'
+      +'<button class="btn btn-primary" onclick="saveModemSettingsNew(\''+m.rawImei+'\',\''+m.server+'\')">Сохранить</button>'
+      +'<button class="btn btn-sm" style="color:var(--text-2);font-size:11px" onclick="applyModemSettings(\''+m.rawImei+'\',\''+m.server+'\')" title="Сохранить и перезапустить модем">Сохранить и перезапустить</button>'
+      +'</div>'
+      +'</div>';
+  }
 }
 function runSpeedtest(nick,srv){var body=document.getElementById('modalBody');body.innerHTML='<div style="text-align:center;padding:20px"><div class="spinner" style="display:inline-block;width:24px;height:24px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite"></div><p style="color:var(--text-2);margin-top:8px">'+nick+'...</p></div>';fetch(API+'/api/admin/speedtest?nick='+encodeURIComponent(nick)+'&serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var h='<div class="detail-card"><h4>Результат</h4>';for(var k in d)h+=dr(k,typeof d[k]==='object'?JSON.stringify(d[k]):d[k]);body.innerHTML=h+'</div>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'})}
 function sendSms(imei,srv){var ph=document.getElementById('smsPhone').value,tx=document.getElementById('smsText').value;if(!ph||!tx)return showToast('Заполните поля','error');fetch(API+'/api/admin/send_sms',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,phone:ph,sms:tx})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Отправлено','success'):showToast(d.error,'error')}).catch(function(){showToast('Ошибка','error')})}
@@ -1012,7 +1059,9 @@ function sendUssd(imei,srv){var code=document.getElementById('ussdCode').value;i
 function showNewPortForm(imei,srv){fetch(API+'/api/admin/free_ports?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var fp=Array.isArray(data)?data:data.free_tcp_ports||[];var h='<div class="detail-card" style="margin-top:8px"><h4>Новый порт</h4><div class="form-row"><div class="form-group"><label>Port ID</label><input class="form-input" id="npPid" value="port'+rnd(8)+'"></div><div class="form-group"><label>Имя</label><input class="form-input" id="npName"></div></div><div class="form-row"><div class="form-group"><label>HTTP</label><input class="form-input" id="npHttp" value="'+(fp[0]||'')+'"></div><div class="form-group"><label>SOCKS</label><input class="form-input" id="npSocks" value="'+(fp[1]||'')+'"></div></div><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="npLogin" value="'+rnd(8)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="npPass" value="'+rnd(8)+'"></div></div><button class="btn btn-primary" onclick="createPort(\''+imei+'\',\''+srv+'\')">Создать</button></div>';document.getElementById('newPortForm').innerHTML=h})}
 function createPort(imei,srv){var d={serverName:srv,IMEI:imei,portID:document.getElementById('npPid').value,portName:document.getElementById('npName').value,http_port:document.getElementById('npHttp').value,socks_port:document.getElementById('npSocks').value,proxy_login:document.getElementById('npLogin').value,proxy_password:document.getElementById('npPass').value};fetch(API+'/api/admin/store_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok){fetch(API+'/api/admin/apply_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:d.portID,serverName:srv})}).then(function(){showToast('Порт создан','success');setTimeout(loadData,2000)})}else showToast(r.error||'Ошибка','error')})}
 function purgePort(pid,srv){if(!confirm('Удалить '+pid+'?'))return;fetch(API+'/api/admin/purge_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:pid,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');setTimeout(loadData,2000)})}
+function switchSimTab(t){['sms','ussd'].forEach(function(n){var tab=document.getElementById('simTab_'+n);var cnt=document.getElementById('simContent_'+n);if(tab){tab.style.borderBottomColor=n===t?'var(--accent)':'transparent';tab.style.color=n===t?'var(--accent)':'var(--text-2)'}if(cnt)cnt.style.display=n===t?'':'none'})}
 function saveModemSettings(imei,srv){fetch(API+'/api/admin/store_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,IMEI:imei,name:document.getElementById('msNick').value,PHONE_NUMBER:document.getElementById('msPhone').value,AUTO_IP_ROTATION:document.getElementById('msAutoRot').value||'0',TARGET_MODE:document.getElementById('msMode').value,NOTES:document.getElementById('msNotes').value})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сохранено','success'):showToast(r.error||'Ошибка','error')})}
+function saveModemSettingsNew(imei,srv){var ROT_VALS=[5,10,15,30,60,120,240,480,720,1440];var rotSlider=document.getElementById('msAutoRot');var rotVal=rotSlider?ROT_VALS[+rotSlider.value]||10:10;fetch(API+'/api/admin/store_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,IMEI:imei,name:document.getElementById('msNick').value,PHONE_NUMBER:document.getElementById('msPhone').value,AUTO_IP_ROTATION:String(rotVal),TARGET_MODE:document.getElementById('msMode').value,NOTES:document.getElementById('msNotes').value})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сохранено ✓','success'):showToast(r.error||'Ошибка','error')})}
 function applyModemSettings(imei,srv){fetch(API+'/api/admin/apply_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Применено','success'):showToast(r.error||'Ошибка','error');setTimeout(loadData,3000)})}
 function downloadVpn(pid,srv){window.open(API+'/api/admin/vpn_profile?portId='+encodeURIComponent(pid)+'&serverName='+srv+'&token='+authToken)}
 function rnd(n){var c='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',r='';for(var i=0;i<n;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
@@ -1026,6 +1075,7 @@ function loadSpeedHistory(key){
     if(!entries.length){area.innerHTML='<div style="color:var(--text-3);padding:8px">Нет истории</div>';return}
     var h='<table class="log-table"><thead><tr><th>Дата</th><th>Download</th><th>Upload</th><th>Ping</th></tr></thead><tbody>';
     entries.slice().reverse().forEach(function(e){
+      if(!Number(e.download)&&!Number(e.upload))return;
       h+='<tr><td>'+new Date(e.date).toLocaleString('ru-RU')+'</td><td style="color:var(--success)">'+Number(e.download).toFixed(1)+' Mbps</td><td style="color:var(--accent)">'+Number(e.upload).toFixed(1)+' Mbps</td><td>'+Number(e.ping).toFixed(0)+' ms</td></tr>';
     });
     area.innerHTML=h+'</tbody></table>';
@@ -1108,6 +1158,8 @@ function collectTrafficData(){
   var accClientFilter=(document.getElementById('accClientFilter')||{}).value||'';
   var totalModems=0,totalOnline=0,totalIn=0,totalOut=0;
   var modemTraffic=[],clientTraffic={},serverTraffic={},serverIn={},serverOut={},serverOpTraffic={};
+  // Only track portNames that belong to registered clients
+  var registeredPortNames=new Set((currentData.clients||[]).map(function(c){return c.portName}).filter(Boolean));
   for(var imei in map){
     var m=map[imei];
     var st=getModemStatus(m);
@@ -1127,6 +1179,8 @@ function collectTrafficData(){
       var lifeIn=parseTraffic(bw.bandwidth_bytes_lifetime_in),lifeOut=parseTraffic(bw.bandwidth_bytes_lifetime_out);
       totalIn+=din;totalOut+=dout;
       modemTraffic.push({nick:m.nick,operator:op,server:m.server,pn:pn,tIn:din,tOut:dout,dayIn:dayIn,dayOut:dayOut,monIn:monIn,monOut:monOut,prevIn:prevIn,prevOut:prevOut,lifeIn:lifeIn,lifeOut:lifeOut,online:isOn});
+      // Only add to clientTraffic if this portName belongs to a registered client
+      if(!registeredPortNames.has(pn))continue;
       if(!clientTraffic[pn])clientTraffic[pn]={tIn:0,tOut:0,modems:0,online:0};
       clientTraffic[pn].tIn+=din;clientTraffic[pn].tOut+=dout;clientTraffic[pn].modems++;
       if(isOn)clientTraffic[pn].online++;
@@ -1181,12 +1235,39 @@ function renderTrafficTab(){
   else if(accPeriod==='lifetime'){daysElapsed=30}
   var avgPerModem=d.totalModems?(d.totalIn+d.totalOut)/d.totalModems/daysElapsed:0;
   var inOutRatio=d.totalOut?d.totalIn/d.totalOut:0;
+  var total=d.totalIn+d.totalOut;
+  var inPct=total?Math.round(d.totalIn/total*100):0;
+  var outPct=total?Math.round(d.totalOut/total*100):0;
+  // Forecast (only for current month)
+  var forecastH='';
+  if(accPeriod==='month'){
+    var daysInMonth=new Date(new Date().getFullYear(),new Date().getMonth()+1,0).getDate();
+    var daysLeft=daysInMonth-daysElapsed;
+    var forecast=daysElapsed?total/daysElapsed*daysInMonth:0;
+    forecastH='<div class="widget-sub">ещё '+daysLeft+' дн. в месяце</div>';
+    var forecastVal=fmtGb(forecast);
+  } else {forecastVal=fmtGb(total);forecastH='<div class="widget-sub">за период</div>';}
+  // Top client
+  var clientNames=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
+  var topClientName=clientNames[0]||'—';
+  var topClientTotal=clientNames[0]?d.clientTraffic[clientNames[0]].tIn+d.clientTraffic[clientNames[0]].tOut:0;
+  var topClientPct=total?Math.round(topClientTotal/total*100):0;
+  // Online modems
+  var mapAll=currentData._modemMap;var totalModemsAll=0,onlineModemsAll=0;
+  for(var _i in mapAll){totalModemsAll++;var _s=getModemStatus(mapAll[_i]);if(_s==='online'||_s==='rotating')onlineModemsAll++}
+  var onlineColor=onlineModemsAll===totalModemsAll?'var(--success)':'var(--warning)';
+
+  function mkWidget(label,val,sub,valColor){return'<div class="widget"><div class="widget-label">'+label+'</div><div class="widget-value"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div>'+(sub?'<div class="widget-sub">'+sub+'</div>':'')+'</div>';}
+
   document.getElementById('trafficWidgets').innerHTML=
-    '<div class="widget"><div class="widget-label">Входящий</div><div class="widget-value">'+fmtGb(d.totalIn)+'</div></div>'+
-    '<div class="widget"><div class="widget-label">Исходящий</div><div class="widget-value">'+fmtGb(d.totalOut)+'</div></div>'+
-    '<div class="widget"><div class="widget-label">Всего</div><div class="widget-value" style="color:var(--accent)">'+fmtGb(d.totalIn+d.totalOut)+'</div></div>'+
-    '<div class="widget"><div class="widget-label">Среднее на модем в сутки</div><div class="widget-value">'+fmtGb(avgPerModem)+'</div></div>'+
-    '<div class="widget"><div class="widget-label">Клиентов</div><div class="widget-value">'+Object.keys(d.clientTraffic).length+'</div><div class="widget-sub">Вх/Исх: '+inOutRatio.toFixed(1)+'x</div></div>';
+    mkWidget('Всего',fmtGb(total),'за '+d.label,'var(--accent)')+
+    mkWidget('Прогноз месяца',forecastVal,forecastH.replace(/<[^>]+>/g,''))+
+    mkWidget('Входящий',fmtGb(d.totalIn),inPct+'% от всего')+
+    mkWidget('Исходящий',fmtGb(d.totalOut),outPct+'% от всего')+
+    mkWidget('Активных модемов','<span style="color:'+onlineColor+'">'+onlineModemsAll+'</span>/'+totalModemsAll,onlineModemsAll===totalModemsAll?'100% онлайн':(totalModemsAll-onlineModemsAll)+' оффлайн')+
+    mkWidget('Ср. на модем/сут',fmtGb(avgPerModem),'за '+daysElapsed+' дн.')+
+    mkWidget('Топ клиент',esc(topClientName.length>14?topClientName.slice(0,13)+'…':topClientName),topClientPct+'% трафика')+
+    mkWidget('Клиентов',clientNames.length,clientNames.length===Object.keys(currentData._modemMap||{}).length?'все активны':'');
 
   // Render active sub-tab
   var activeSubTab=document.querySelector('.acc-sub-tab.active');
@@ -1257,38 +1338,35 @@ function renderAccSubTab(name){
 
     // Matrix
     renderTrafficMatrix(d);
-  }
-  else if(name==='clients_t'){
-    // Client table with color swatch + % share bar
-    var clientNames=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
-    var totalAll=d.totalIn+d.totalOut||1;
-    var h='<thead><tr><th></th><th>#</th><th>Клиент</th><th style="text-align:center">Live</th><th>↓ Входящий</th><th>↑ Исходящий</th><th>Всего</th><th style="width:120px">Доля</th></tr></thead><tbody>';
-    clientNames.forEach(function(n,i){var c=d.clientTraffic[n];var total=c.tIn+c.tOut;
+
+    // Client table (now always rendered on overview)
+    var clientNamesOv=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
+    var totalAllOv=d.totalIn+d.totalOut||1;
+    var hc='<thead><tr><th></th><th>#</th><th>Клиент</th><th style="text-align:center">Live</th><th>↓ Входящий</th><th>↑ Исходящий</th><th>Всего</th><th style="width:120px">Доля</th></tr></thead><tbody>';
+    clientNamesOv.forEach(function(n,i){var c=d.clientTraffic[n];var total=c.tIn+c.tOut;
       var liveColor=c.online===c.modems?'var(--success)':(c.online>0?'var(--warning)':'var(--danger)');
       var clientColor=CHART_COLORS.clients[i%CHART_COLORS.clients.length];
-      var sharePct=pct(total,totalAll);
-      h+='<tr>';
-      h+='<td style="padding:0;width:3px"><div style="width:3px;height:100%;min-height:36px;background:'+clientColor+';border-radius:2px 0 0 2px"></div></td>';
-      h+='<td style="color:var(--text-3)">'+(i+1)+'</td>';
-      h+='<td style="font-weight:500"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+clientColor+';margin-right:6px;vertical-align:middle"></span>'+esc(n)+'</td>';
-      h+='<td style="text-align:center;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</td>';
-      h+='<td class="mono" style="color:var(--text-2)">'+fmtGb(c.tIn)+'</td>';
-      h+='<td class="mono" style="color:var(--text-2)">'+fmtGb(c.tOut)+'</td>';
-      h+='<td class="mono" style="color:var(--text-0);font-weight:600">'+fmtGb(total)+'</td>';
-      h+='<td><div style="display:flex;align-items:center;gap:6px"><div class="hbar-bar-wrap" style="height:8px;flex:1"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div><span style="font-size:10px;color:var(--text-2);width:28px;text-align:right">'+sharePct+'%</span></div></td>';
-      h+='</tr>';
+      var sharePct=pct(total,totalAllOv);
+      hc+='<tr>';
+      hc+='<td style="padding:0;width:3px"><div style="width:3px;height:100%;min-height:36px;background:'+clientColor+';border-radius:2px 0 0 2px"></div></td>';
+      hc+='<td style="color:var(--text-3)">'+(i+1)+'</td>';
+      hc+='<td style="font-weight:500"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+clientColor+';margin-right:6px;vertical-align:middle"></span>'+esc(n)+'</td>';
+      hc+='<td style="text-align:center;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</td>';
+      hc+='<td class="mono" style="color:var(--text-2)">'+fmtGb(c.tIn)+'</td>';
+      hc+='<td class="mono" style="color:var(--text-2)">'+fmtGb(c.tOut)+'</td>';
+      hc+='<td class="mono" style="color:var(--text-0);font-weight:600">'+fmtGb(total)+'</td>';
+      hc+='<td><div style="display:flex;align-items:center;gap:6px"><div class="hbar-bar-wrap" style="height:8px;flex:1"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div><span style="font-size:10px;color:var(--text-2);width:28px;text-align:right">'+sharePct+'%</span></div></td>';
+      hc+='</tr>';
     });
-    document.getElementById('clientTrafficTable').innerHTML=h+'</tbody>';
+    var ctEl=document.getElementById('clientTrafficTable');
+    if(ctEl)ctEl.innerHTML=hc+'</tbody>';
 
-    // Daily traffic chart per client
+    // Daily chart
     if(!window._dailyTrafficCache){
       fetch(API+'/api/admin/daily_traffic',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
-        window._dailyTrafficCache=data;
-        renderDailyClientChart(data,cc);
+        window._dailyTrafficCache=data;renderDailyClientChart(data,cc);
       });
-    } else {
-      renderDailyClientChart(window._dailyTrafficCache,cc);
-    }
+    } else {renderDailyClientChart(window._dailyTrafficCache,cc);}
   }
   else if(name==='resources'){
     if(!topHostsCache){loadTopHosts()}else{renderTopResources()}
@@ -1528,70 +1606,90 @@ function renderHBarsRes(items,maxVal){
 function updateChartsTheme(){if(document.getElementById('tab-traffic').classList.contains('active'))renderTrafficTab()}
 
 // ========== CLIENTS TAB ==========
-function renderClients(){if(!currentData)return;var cl=currentData.clients||[];var search=(document.getElementById('clientSearch')||{}).value||'';search=search.toLowerCase();var tbody=document.getElementById('clientTableBody');if(!tbody)return;
-  var pnm={};var map=currentData._modemMap||{};for(var imei in map){var m=map[imei];m.ports.forEach(function(p){if(p.portName){if(!pnm[p.portName])pnm[p.portName]=[];pnm[p.portName].push(m.nick+' ('+m.server+')')}})}
-  var h='';var count=0;
-  cl.forEach(function(c){if(search&&(c.name+' '+c.portName+' '+c.login+' '+c.contact).toLowerCase().indexOf(search)===-1)return;
+var _filterProblematic=false;
+function toggleProblematicFilter(){
+  _filterProblematic=!_filterProblematic;
+  var btn=document.getElementById('btnFilterProblematic');
+  if(btn){btn.style.background=_filterProblematic?'var(--warning)':'';btn.style.color=_filterProblematic?'#fff':'';}
+  renderClients();
+}
+function renderClients(){
+  if(!currentData)return;
+  var cl=currentData.clients||[];
+  var search=(document.getElementById('clientSearch')||{}).value||'';
+  search=search.toLowerCase();
+  var container=document.getElementById('clientCardList');
+  if(!container)return;
+  var pnm={};var map=currentData._modemMap||{};
+  for(var imei in map){var mm=map[imei];mm.ports.forEach(function(p){if(p.portName){if(!pnm[p.portName])pnm[p.portName]=[];pnm[p.portName].push({nick:mm.nick,server:mm.server})}})}
+  var h='';var count=0;var colors=CHART_COLORS.clients;
+  cl.forEach(function(c,i){
+    if(search&&(c.name+' '+c.portName+' '+c.login+' '+(c.contact||'')+' '+(c.legalName||'')).toLowerCase().indexOf(search)===-1)return;
+    var balance=c.balance!==undefined?c.balance:0;
+    if(_filterProblematic&&balance>=0)return;
     count++;
     var modems=pnm[c.portName]||[];var bt=c.billingType||'per_gb';var price=c.price||0;
     var cost=Math.round(((currentData.clientMonthCharges||{})[c.id]||0)*100)/100;
-    var monthGbBilled=Math.round(((currentData.clientMonthGb||{})[c.id]||0)*10)/10;
     var monthGbLive=Math.round(((currentData.clientLiveMonthGb||{})[c.id]||0)*10)/10;
-    var costLabel='';
-    if(bt==='per_modem'){costLabel=price+' \u00D7 '+modems.length+' = '+Math.round(cost)+' \u20BD'}
-    else{costLabel=monthGbBilled.toFixed(1)+' GB \u00D7 '+price+' \u2248 '+Math.round(cost)+' \u20BD'}
-    var balance=c.balance!==undefined?c.balance:0;
-    var balClass=balance>=0?'balance-positive':'balance-negative';
-    var ctLabel=(c.clientType||'legal')==='individual'?'физ. лицо':'юр. лицо';
-    // Main row
-    h+='<tr style="cursor:pointer" onclick="toggleClientRow(\''+c.id+'\')">';
-    h+='<td style="text-align:left"><div style="font-weight:600;color:var(--text-0)">'+esc(c.name)+'</div><div style="font-size:10px;color:var(--text-3)">'+esc(c.portName)+' / '+esc(c.login)+'</div></td>';
-    h+='<td style="text-align:center;font-weight:600">'+modems.length+'</td>';
-    h+='<td style="text-align:center"><div style="font-weight:600;color:var(--text-0)">'+price+' \u20BD<span style="font-size:10px;color:var(--text-2);font-weight:400">/'+(bt==='per_modem'?'мод':'ГБ')+'</span></div><div style="font-size:10px;color:var(--text-3)">'+ctLabel+'</div></td>';
-    h+='<td style="text-align:right;font-weight:700" class="'+balClass+'">'+Math.round(balance)+' \u20BD</td>';
-    h+='<td style="text-align:right"><div style="font-weight:600;color:var(--accent)">'+Math.round(cost)+' \u20BD</div><div style="font-size:10px;color:var(--text-3)">'+costLabel+'</div></td>';
-    h+='<td style="text-align:right"><div style="font-weight:600;color:var(--text-0)">'+monthGbLive.toFixed(1)+' GB</div></td>';
-    h+='<td style="text-align:center;white-space:nowrap">';
-    h+='<button class="btn btn-sm" onclick="event.stopPropagation();openClientOpsModal(\''+c.id+'\',\'history\')" title="Баланс и операции">\u{1F4B0}</button> ';
-    h+='<button class="btn btn-sm" onclick="event.stopPropagation();openClientOpsModal(\''+c.id+'\',\'documents\')" title="Документы">\u{1F4CB}</button> ';
-    h+='<button class="btn btn-sm" onclick="event.stopPropagation();editClient(\''+c.id+'\')" title="Редактировать">\u270F\uFE0F</button> ';
-    h+='<button class="btn btn-sm" onclick="event.stopPropagation();impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" title="Войти в ЛК">\u{1F464}</button> ';
-    h+='<button class="btn btn-sm" onclick="event.stopPropagation();deleteClient(\''+c.id+'\',\''+esc(c.name)+'\')" title="Удалить" style="color:var(--danger)">\u2715</button>';
-    h+='</td>';
-    h+='</tr>';
-    // Expandable detail row (hidden by default)
-    h+='<tr id="clientRow_'+c.id+'" style="display:none"><td colspan="7" style="padding:0;background:var(--bg-2);border-bottom:2px solid var(--accent)">';
-    h+='<div style="padding:12px 16px;display:grid;grid-template-columns:1fr 1fr;gap:16px">';
-    // Column 1: Credentials
-    h+='<div>';
-    h+='<div style="font-size:11px;font-weight:600;color:var(--text-0);margin-bottom:6px">Реквизиты</div>';
-    h+='<div style="font-size:11px;color:var(--text-2)"><div>Логин: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.login)+'</span></div>';
-    h+='<div>Пароль: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">••••••••</span></div>';
-    h+='<div>portName: <span style="color:var(--text-1);font-family:\'JetBrains Mono\',mono;font-size:10px">'+esc(c.portName)+'</span></div>';
-    if(c.notes)h+='<div style="margin-top:4px;color:var(--text-3);font-size:10px">'+esc(c.notes)+'</div>';
+    var tariffLabel=price+(bt==='per_modem'?'\u20BD/мод':'\u20BD/\u0413\u0411');
+    var ctLabel=(c.clientType||'legal')==='individual'?'Физ. лицо':'Юр. лицо';
+    var balWarn=balance<0?'\u26A0':'';
+    var color=colors[(count-1)%colors.length];
+    h+='<div class="client-card" style="border-left:4px solid '+color+';background:var(--bg-1);border-radius:8px;margin-bottom:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)">';
+    // Header
+    h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px">';
+    h+='<div style="display:flex;align-items:center;gap:10px"><span style="width:10px;height:10px;border-radius:50%;background:'+color+';display:inline-block;flex-shrink:0"></span>';
+    h+='<span style="font-weight:700;font-size:15px;color:var(--text-0)">'+esc(c.name)+'</span></div>';
+    h+='<div style="display:flex;gap:6px">';
+    h+='<button class="btn btn-sm" onclick="editClient(\''+c.id+'\')" style="font-size:11px">\u270F Ред.</button>';
+    h+='<button class="btn btn-sm" onclick="openClientOpsModal(\''+c.id+'\',\'history\')" style="font-size:11px">\uD83D\uDCB0 Баланс</button>';
+    h+='<button class="btn btn-sm" onclick="impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" style="font-size:11px">\uD83D\uDC64</button>';
+    h+='<button class="btn btn-sm" onclick="deleteClient(\''+c.id+'\',\''+esc(c.name)+'\')" style="font-size:11px;color:var(--danger)">\u2715</button>';
     h+='</div></div>';
-    // Column 2: Modems
-    h+='<div>';
-    h+='<div style="display:flex;align-items:center;gap:8px;margin-bottom:6px"><div style="font-size:11px;font-weight:600;color:var(--text-0)">Модемы ('+modems.length+')</div>';
-    h+='<button class="btn btn-sm" onclick="event.stopPropagation();openAssignModemModal(\''+c.id+'\',\''+esc(c.portName)+'\')" style="font-size:9px;padding:1px 6px;background:var(--accent);color:#fff">+ Модем</button>';
-    h+='<button class="btn btn-sm" onclick="event.stopPropagation();openExternalProxiesModal(\''+c.id+'\',\''+esc(c.companyName||c.portName)+'\')" style="font-size:9px;padding:1px 6px;background:var(--text-2);color:#fff">+ Внешний прокси</button></div>';
-    if(modems.length){h+='<div style="display:flex;flex-wrap:wrap;gap:2px">';modems.forEach(function(mn){
-      h+='<span class="client-modem-tag" style="display:inline-flex;align-items:center;gap:4px">'+esc(mn)+' <span onclick="event.stopPropagation();unassignModem(\''+esc(mn)+'\',\''+esc(c.portName)+'\')" style="cursor:pointer;color:var(--danger);font-size:12px;line-height:1" title="Отвязать">&times;</span></span>'});h+='</div>'}
-    else{h+='<div style="font-size:10px;color:var(--text-3)">Нет подключённых модемов</div>'}
+    // Subtitle
+    h+='<div style="padding:0 16px 10px;font-size:12px;color:var(--text-2)">';
+    if(c.legalName)h+=esc(c.legalName)+' \u00B7 ';
+    h+=ctLabel+' \u00B7 <span style="font-family:monospace;color:var(--text-1)">'+esc(c.login)+'</span>';
+    if(c.portName)h+=' / <span style="font-family:monospace;font-size:11px;color:var(--text-3)">'+esc(c.portName)+'</span>';
+    h+='</div>';
+    // Metrics
+    h+='<div style="display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">';
+    var mets=[['МОДЕМОВ',''+modems.length,'var(--text-0)'],['ТАРИФ',tariffLabel,'var(--text-0)'],['БАЛАНС',Math.round(balance)+'\u20BD'+balWarn,balance>=0?'var(--text-0)':'var(--danger)'],['РАСХОД/МЕС',Math.round(cost)+'\u20BD','var(--accent)'],['ТРАФИК/МЕС',monthGbLive.toFixed(1)+' GB','var(--text-0)']];
+    mets.forEach(function(met,mi){h+='<div style="padding:10px 12px;text-align:center'+(mi<4?';border-right:1px solid var(--border)':'')+'">'+'<div style="font-size:9px;font-weight:600;color:var(--text-3);letter-spacing:.5px;margin-bottom:4px">'+met[0]+'</div>'+'<div style="font-size:14px;font-weight:700;color:'+met[2]+'">'+met[1]+'</div></div>';});
+    h+='</div>';
+    // Actions
+    h+='<div style="display:flex;align-items:center;gap:8px;padding:10px 16px">';
+    h+='<button class="btn btn-sm" onclick="openClientOpsModal(\''+c.id+'\',\'history\')" style="font-size:11px">Операции</button>';
+    h+='<button class="btn btn-sm" onclick="openClientOpsModal(\''+c.id+'\',\'documents\')" style="font-size:11px">Документы</button>';
+    h+='<button class="btn btn-sm" id="btnModems_'+c.id+'" onclick="toggleClientCard(\''+c.id+'\')" style="font-size:11px">Модемы ('+modems.length+') \u25BE</button>';
+    h+='</div>';
+    // Expandable modems
+    h+='<div id="clientCard_'+c.id+'" style="display:none;padding:0 16px 14px;border-top:1px solid var(--border)">';
+    h+='<div style="display:flex;align-items:center;gap:8px;margin:10px 0 8px">';
+    h+='<span style="font-size:11px;font-weight:600;color:var(--text-0)">Модемы ('+modems.length+')</span>';
+    h+='<button class="btn btn-sm" onclick="openAssignModemModal(\''+c.id+'\',\''+esc(c.portName)+'\')" style="font-size:9px;padding:1px 6px;background:var(--accent);color:#fff">+ Модем</button>';
+    h+='<button class="btn btn-sm" onclick="openExternalProxiesModal(\''+c.id+'\',\''+esc(c.companyName||c.portName)+'\')" style="font-size:9px;padding:1px 6px;background:var(--text-2);color:#fff">+ Внешний прокси</button>';
+    h+='</div>';
+    if(modems.length){h+='<div style="display:flex;flex-wrap:wrap;gap:4px">';modems.forEach(function(md){var mn=md.nick+' ('+md.server+')';h+='<span class="client-modem-tag" style="display:inline-flex;align-items:center;gap:4px">'+esc(mn)+' <span onclick="unassignModem(\''+esc(mn)+'\',\''+esc(c.portName)+'\')" style="cursor:pointer;color:var(--danger);font-size:12px;line-height:1" title="Отвязать">&times;</span></span>';});h+='</div>';}
+    else{h+='<div style="font-size:11px;color:var(--text-3)">Нет подключённых модемов</div>';}
+    h+='<div id="paymentArea_'+c.id+'" style="margin-top:8px"></div>';
     h+='</div>';
     h+='</div>';
-    h+='<div id="paymentArea_'+c.id+'" style="padding:0 16px 12px"></div>';
-    h+='</td></tr>';
   });
-  if(!count)h='<tr><td colspan="7" style="text-align:center;padding:40px;color:var(--text-3);font-size:14px">Нет клиентов</td></tr>';
-  tbody.innerHTML=h;
+  if(!count)h='<div style="text-align:center;padding:60px;color:var(--text-3);font-size:14px">Нет клиентов</div>';
+  var summary=document.getElementById('clientSummary');
+  if(summary)summary.textContent=count+' клиент'+(count===1?'':'ов');
+  container.innerHTML=h;
+}
+function toggleClientCard(id){
+  var panel=document.getElementById('clientCard_'+id);
+  var btn=document.getElementById('btnModems_'+id);
+  if(!panel)return;
+  var open=panel.style.display==='none';
+  panel.style.display=open?'':'none';
+  if(btn)btn.innerHTML=btn.innerHTML.replace(open?'\u25BE':'\u25B4',open?'\u25B4':'\u25BE');
 }
 
-function toggleClientRow(id){
-  var row=document.getElementById('clientRow_'+id);
-  if(!row)return;
-  row.style.display=row.style.display==='none'?'':'none';
-}
 
 function toggleBankFields(){document.getElementById('bankFieldsSection').style.display=document.getElementById('cfClientType').value==='legal'?'':'none'}
 function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?'':rnd(12);document.getElementById('cfPassword').placeholder=data?'Без изменений':'';document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfClientType').value=data?(data.clientType||'legal'):'legal';toggleBankFields();document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';document.getElementById('cfAutoActs').checked=data?(data.autoActs!==false):true;document.getElementById('cfAutoBills').checked=data?(data.autoBills!==false):true;var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}

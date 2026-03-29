@@ -22,7 +22,7 @@ db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
 // Execute schema
-console.log('[1/8] Creating schema...');
+console.log('[1/7] Creating schema...');
 const schema = fs.readFileSync(SCHEMA_PATH, 'utf8');
 db.exec(schema);
 console.log('  Schema applied successfully.');
@@ -41,7 +41,7 @@ function loadJson(filename, defaultValue = []) {
 }
 
 // [2] Migrate clients
-console.log('\n[2/8] Migrating clients...');
+console.log('\n[2/7] Migrating clients...');
 const clients = loadJson('clients.json');
 const insertClient = db.prepare(`
   INSERT OR IGNORE INTO clients (
@@ -133,7 +133,7 @@ migrateClientsTransaction();
 console.log(`  ${clientCount} clients, ${paymentCount} payments, ${docCount} documents, ${closingDocCount} closing docs, ${billCount} bills`);
 
 // [3] Migrate billing ledger
-console.log('\n[3/8] Migrating billing ledger...');
+console.log('\n[3/7] Migrating billing ledger...');
 const ledger = loadJson('billing_ledger.json', {});
 const insertLedger = db.prepare(`
   INSERT INTO billing_ledger (client_id, type, date, timestamp, amount, currency, balance_before, balance_after, gb_used, modem_count, days_in_month, note, source, payment_id, details)
@@ -168,7 +168,7 @@ migrateLedgerTransaction();
 console.log(`  ${ledgerCount} ledger entries`);
 
 // [4] Migrate sessions
-console.log('\n[4/8] Migrating sessions...');
+console.log('\n[4/7] Migrating sessions...');
 const sessions = loadJson('sessions.json', {});
 const insertSession = db.prepare(`
   INSERT OR IGNORE INTO sessions (token, login, port_name_filter, is_admin, expires_at)
@@ -189,7 +189,7 @@ migrateSessionsTransaction();
 console.log(`  ${sessionCount} active sessions (expired sessions skipped)`);
 
 // [5] Migrate bank payments
-console.log('\n[5/8] Migrating bank payments...');
+console.log('\n[5/7] Migrating bank payments...');
 const bankPayments = loadJson('bank_payments.json');
 const insertBankPayment = db.prepare(`
   INSERT OR IGNORE INTO bank_payments (id, webhook_type, payer_inn, payer_name, amount, purpose, payment_id, date, customer_code, matched, matched_client_id, matched_client_name, auto_credit, dismissed, source, tochka_payment_id, received_at)
@@ -213,7 +213,7 @@ migrateBpTransaction();
 console.log(`  ${bpCount} bank payments`);
 
 // [6] Migrate IP tracking, uptime tracking, IP history
-console.log('\n[6/8] Migrating tracking data...');
+console.log('\n[6/7] Migrating tracking data...');
 const ipTracking = loadJson('ip_tracking.json', {});
 const uptimeTracking = loadJson('uptime_tracking.json', {});
 const ipHistory = loadJson('ip_history.json', {});
@@ -244,7 +244,7 @@ migrateTrackingTransaction();
 console.log(`  ${ipCount} IP records, ${uptimeCount} uptime records, ${historyCount} IP history entries`);
 
 // [7] Migrate daily traffic
-console.log('\n[7/8] Migrating daily traffic...');
+console.log('\n[7/7] Migrating daily traffic...');
 const dailyTraffic = loadJson('daily_traffic.json', {});
 const insertDailyTraffic = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
 
@@ -262,53 +262,6 @@ const migrateTrafficTransaction = db.transaction(() => {
 });
 migrateTrafficTransaction();
 console.log(`  ${trafficCount} daily traffic entries`);
-
-// [8] Migrate telegram data
-console.log('\n[8/8] Migrating Telegram data...');
-const tgUsers = loadJson('telegram_users.json', {});
-const tgProxies = loadJson('telegram_proxies.json');
-const tgFeedback = loadJson('telegram_feedback.json');
-
-const insertTgUser = db.prepare(`
-  INSERT OR IGNORE INTO telegram_users (chat_id, username, test_used, plan, registered_at, updated_at)
-  VALUES (?, ?, ?, ?, ?, ?)
-`);
-const insertTgSpeedtest = db.prepare(`
-  INSERT INTO telegram_speedtests (chat_id, speed, tested_at) VALUES (?, ?, ?)
-`);
-const insertTgProxy = db.prepare(`
-  INSERT INTO telegram_proxies (chat_id, port_name, server, http_port, socks_port, login, password, plan, created_at, expires_at, active)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-`);
-const insertTgFeedback = db.prepare(`
-  INSERT INTO telegram_feedback (chat_id, username, type, score, message, created_at)
-  VALUES (?, ?, ?, ?, ?, ?)
-`);
-
-let tgUserCount = 0, tgSpeedtestCount = 0, tgProxyCount = 0, tgFeedbackCount = 0;
-const migrateTgTransaction = db.transaction(() => {
-  for (const [chatId, u] of Object.entries(tgUsers)) {
-    insertTgUser.run(chatId, u.username || '', u.testUsed ? 1 : 0, u.plan || null, u.registeredAt || '', u.updatedAt || '');
-    tgUserCount++;
-    for (const st of (u.speedTests || [])) {
-      insertTgSpeedtest.run(chatId, st.speed || 0, st.date || '');
-      tgSpeedtestCount++;
-    }
-  }
-  for (const p of tgProxies) {
-    insertTgProxy.run(
-      p.chatId || '', p.portName || '', p.server || '', p.httpPort || 0, p.socksPort || 0,
-      p.login || '', p.password || '', p.plan || '', p.createdAt || '', p.expiresAt || '', p.active !== false ? 1 : 0
-    );
-    tgProxyCount++;
-  }
-  for (const f of tgFeedback) {
-    insertTgFeedback.run(f.chatId || '', f.username || '', f.type || 'text', f.score || null, f.message || '', f.createdAt || '');
-    tgFeedbackCount++;
-  }
-});
-migrateTgTransaction();
-console.log(`  ${tgUserCount} TG users, ${tgSpeedtestCount} speedtests, ${tgProxyCount} proxies, ${tgFeedbackCount} feedback`);
 
 // Migrate audit log if exists
 const auditEntries = loadJson('audit_log.json');
