@@ -1522,16 +1522,22 @@ function renderAccSubTab(name){
         trendStr=ts;trendColor=tc;
       }
       // Sparkline: bar chart, 7 bars with varying heights
-      var yestAvg=daysEl>1?(sumMonIn-sumDayIn)/(daysEl-1):sumMonIn/Math.max(daysEl,1);
-      var spkBase=yestAvg||1;
-      var seeds=[0.72,0.88,1.12,0.95,1.06,0.83,sumDayIn/spkBase];
-      var spkPts=seeds.map(function(s){return spkBase*s;});
+      // Sparkline: 14 bars from real daily cache data
+      var spkDays=14,spkPts=[];
+      var spkNow=new Date();
+      for(var di=spkDays-1;di>=0;di--){
+        var spkD=new Date(spkNow);spkD.setDate(spkD.getDate()-di);
+        var spkDs=spkD.getFullYear()+'-'+String(spkD.getMonth()+1).padStart(2,'0')+'-'+String(spkD.getDate()).padStart(2,'0');
+        var spkEntry=window._dailyTrafficCache&&window._dailyTrafficCache[n]&&window._dailyTrafficCache[n][spkDs];
+        spkPts.push(spkEntry?((spkEntry.in||0)+(spkEntry.out||0)):0);
+      }
       var spkMax=Math.max.apply(null,spkPts)||1;
-      var sparkH='<div style="display:inline-flex;align-items:flex-end;gap:2px;height:16px;width:52px;flex-shrink:0;vertical-align:middle">';
-      for(var si=0;si<7;si++){
-        var hPx=Math.max(Math.round(spkPts[si]/spkMax*14),2);
-        var isToday=si===6;
-        sparkH+='<div style="width:5px;height:'+hPx+'px;background:'+clientColor+';border-radius:1px 1px 0 0;opacity:'+(isToday?'1':'0.45')+'"></div>';
+      var spkBarW=4;
+      var sparkH='<div style="display:inline-flex;align-items:flex-end;gap:1px;height:16px;width:'+(spkBarW*spkDays+spkDays-1)+'px;flex-shrink:0;vertical-align:middle">';
+      for(var si=0;si<spkDays;si++){
+        var hPx=spkPts[si]>0?Math.max(Math.round(spkPts[si]/spkMax*14),2):1;
+        var isToday=si===spkDays-1;
+        sparkH+='<div style="width:'+spkBarW+'px;height:'+hPx+'px;background:'+clientColor+';border-radius:1px 1px 0 0;opacity:'+(isToday?'1':'0.5')+'"></div>';
       }
       sparkH+='</div>';
       hc+='<div class="ct-row" data-client="'+esc(n)+'" onclick="selectClient(\''+esc(n)+'\')">';
@@ -1609,6 +1615,9 @@ function renderAccSubTab(name){
           var wrap=document.querySelector('#acc-overview .chart-wrap-daily');
           if(wrap){wrap.innerHTML='<canvas id="chartDailyClientTraffic"></canvas>';}
           renderDailyClientChart(data,cc);
+          // re-render client table now that cache is available (sparklines use real data)
+          var activeSub=document.querySelector('.acc-sub-tab.active');
+          if(activeSub&&activeSub.id.replace('acc-tab-','').replace('acc-','')!=='resources')renderAccSubTab('overview');
         })
         .catch(function(e){
           var w=document.querySelector('#acc-overview .chart-wrap-daily');
