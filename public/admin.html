@@ -143,7 +143,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);tra
 table{width:100%;border-collapse:collapse;background:var(--bg-1);border:1px solid var(--border);border-top:none}
 th{position:sticky;top:0;background:var(--bg-2);padding:8px 10px;text-align:center;font-size:12px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:.4px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
 th:hover{color:var(--text-1)}
-td{padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bg-3);white-space:nowrap}
+td{padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bg-3);white-space:nowrap;text-align:center}
 tr:hover td{background:var(--row-hover)}
 tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 
@@ -215,7 +215,7 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .confirm-box .confirm-actions{display:flex;gap:8px;justify-content:flex-end}
 
 .log-table{width:100%;border-collapse:collapse}
-.log-table th,.log-table td{padding:6px 10px;text-align:left;font-size:11px;border-bottom:1px solid var(--border)}
+.log-table th,.log-table td{padding:6px 10px;text-align:center;font-size:11px;border-bottom:1px solid var(--border)}
 .log-table th{color:var(--text-2);font-weight:500}
 .log-table td{font-family:var(--font-mono);color:var(--text-1)}
 
@@ -317,7 +317,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .hbar-bar.orange{background:var(--orange)}
 .hbar-bar.purple{background:var(--purple)}
 .hbar-bar.red{background:var(--danger)}
-.hbar-value{width:70px;text-align:right;color:var(--text-0);font-family:var(--font-mono);font-size:10px;font-weight:600}
+.hbar-value{width:70px;text-align:center;color:var(--text-0);font-family:var(--font-mono);font-size:10px;font-weight:600}
 
 /* Resource table */
 .res-table{width:100%;border-collapse:collapse}
@@ -1390,13 +1390,13 @@ function renderAccSubTab(name){
     else{
       top5.forEach(function(m,i){var total=m.tIn+m.tOut;var ci=COUNTRIES[m.server]||{};
         t5h+='<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid var(--border)">';
-        t5h+='<span style="font-size:10px;color:var(--text-3);width:14px;text-align:right">'+(i+1)+'</span>';
+        t5h+='<span style="font-size:10px;color:var(--text-3);width:14px;text-align:center">'+(i+1)+'</span>';
         t5h+='<span style="font-size:11px;color:var(--accent);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(m.nick)+'">'+esc(m.nick)+'</span>';
         t5h+='<span style="font-size:10px;color:var(--text-3)">'+(ci.flag||'')+' '+m.server+'</span>';
-        t5h+='<span style="font-size:11px;color:var(--text-0);font-weight:500;width:72px;text-align:right">'+fmtGb(total)+'</span>';
+        t5h+='<span style="font-size:11px;color:var(--text-0);font-weight:500;width:72px;text-align:center">'+fmtGb(total)+'</span>';
         t5h+='</div>';
       });
-      t5h+='<div style="padding-top:8px;text-align:right"><span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="document.getElementById(\'trafficMatrix\').scrollIntoView({behavior:\'smooth\'})">Все модемы ↓</span></div>';
+      t5h+='<div style="padding-top:8px;text-align:center"><span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="document.getElementById(\'trafficMatrix\').scrollIntoView({behavior:\'smooth\'})">Все модемы ↓</span></div>';
     }
     document.getElementById('top5ModemTable').innerHTML=t5h;
 
@@ -1497,12 +1497,12 @@ function renderAccSubTab(name){
     hc+='<div style="width:4px;flex-shrink:0"></div>';
     hc+='<div style="flex:2.2;padding:0 10px;min-width:0">Клиент</div>';
     hc+='<div style="flex:0.7;text-align:center">Live</div>';
-    hc+='<div style="flex:1;text-align:right">Входящий</div>';
-    hc+='<div style="flex:1;text-align:right">Исходящий</div>';
-    hc+='<div style="flex:1;text-align:right;font-weight:600">Всего</div>';
+    hc+='<div style="flex:1;text-align:center">Входящий</div>';
+    hc+='<div style="flex:1;text-align:center">Исходящий</div>';
+    hc+='<div style="flex:1;text-align:center;font-weight:600">Всего</div>';
     hc+='<div style="flex:0.9;text-align:center">Тренд</div>';
     hc+='<div style="flex:1.4;padding:0 8px">Доля</div>';
-    hc+='<div style="flex:0.5;text-align:right;padding-right:8px">%</div>';
+    hc+='<div style="flex:0.5;text-align:center;padding-right:8px">%</div>';
     hc+='</div>';
     clientNamesOv.forEach(function(n,i){
       var c=d.clientTraffic[n];var total=c.tIn+c.tOut;
@@ -1538,14 +1538,14 @@ function renderAccSubTab(name){
       hc+='<div style="width:4px;height:36px;background:'+clientColor+';flex-shrink:0;border-radius:2px 0 0 2px"></div>';
       hc+='<div style="flex:2.2;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+esc(n)+'</div>';
       hc+='<div style="flex:0.7;text-align:center;font-size:11px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</div>';
-      hc+='<div style="flex:1;text-align:right;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tIn)+'</div>';
-      hc+='<div style="flex:1;text-align:right;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tOut)+'</div>';
-      hc+='<div style="flex:1;text-align:right;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(total)+'</div>';
+      hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tIn)+'</div>';
+      hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tOut)+'</div>';
+      hc+='<div style="flex:1;text-align:center;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(total)+'</div>';
       hc+='<div style="flex:0.9;display:flex;align-items:center;justify-content:center">';
       hc+=sparkH;
       hc+='</div>';
       hc+='<div style="flex:1.4;padding:0 8px"><div class="hbar-bar-wrap" style="height:8px"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div></div>';
-      hc+='<div style="flex:0.5;text-align:right;font-size:11px;color:var(--text-2);padding-right:8px">'+sharePct+'%</div>';
+      hc+='<div style="flex:0.5;text-align:center;font-size:11px;color:var(--text-2);padding-right:8px">'+sharePct+'%</div>';
       hc+='</div>';
     });
     var ctEl=document.getElementById('clientTrafficTable');
@@ -1841,7 +1841,7 @@ function renderTopResources(){
     catH+='<div style="display:flex;align-items:baseline;margin-bottom:3px;font-size:12px">';
     catH+='<span style="flex:1;color:var(--text-0)">'+esc(cat)+'</span>';
     catH+='<span style="font-size:11px;color:var(--text-2);margin-right:8px">'+cnt.toLocaleString('ru-RU')+' запросов</span>';
-    catH+='<span style="font-weight:500;width:36px;text-align:right;font-size:12px">'+pct+'%</span>';
+    catH+='<span style="font-weight:500;width:36px;text-align:center;font-size:12px">'+pct+'%</span>';
     catH+='</div>';
     catH+='<div style="height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden">';
     catH+='<div style="height:6px;border-radius:3px;background:'+col+';width:'+pct+'%"></div>';
@@ -2099,7 +2099,7 @@ function loadExternalProxies(clientId) {
           '<td style="padding:4px;font-family:monospace">' + (p.login ? esc(p.login) + ':' + esc(p.password) : '-') + '</td>' +
           '<td style="padding:4px"><span style="color:' + validColor + '">' + validStr + '</span><br><span style="color:var(--text-2)">' + priceStr + '</span></td>' +
           '<td style="padding:4px;font-family:monospace">' + trafficStr + '</td>' +
-          '<td style="padding:4px;text-align:right;white-space:nowrap">' +
+          '<td style="padding:4px;text-align:center;white-space:nowrap">' +
           '<button class="btn btn-sm" style="font-size:10px;padding:1px 6px;margin-right:2px" onclick="editExternalProxy(\'' + p.id + '\',\'' + p.client_id + '\')">✎</button>' +
           '<button class="btn btn-sm" style="font-size:10px;padding:1px 6px;color:var(--danger);background:none;border:1px solid var(--danger)" onclick="deleteExternalProxy(\'' + p.id + '\',\'' + p.client_id + '\')">✕</button></td></tr>';
       });
@@ -2230,7 +2230,7 @@ function showBillingHistory(clientId){
     entries.sort(function(a,b){return(b.timestamp||b.date||'').localeCompare(a.timestamp||a.date||'')});
     var h='<div style="margin-top:8px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border);overflow:hidden">';
     h+='<div style="padding:8px 10px;font-size:12px;font-weight:600;color:var(--text-0);border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center"><span>История операций ('+entries.length+')</span><button class="btn btn-sm" style="padding:2px 8px;font-size:10px" onclick="document.getElementById(\'billingArea_'+clientId+'\').innerHTML=\'\'">✕</button></div>';
-    h+='<div style="max-height:300px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:4px 6px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:4px 6px;text-align:center;color:var(--text-2)">Тип</th><th style="padding:4px 6px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:4px 6px;text-align:right;color:var(--text-2)">ГБ</th><th style="padding:4px 6px;text-align:right;color:var(--text-2)">Баланс</th><th style="padding:4px 6px;text-align:left;color:var(--text-2)">Примечание</th></tr></thead><tbody>';
+    h+='<div style="max-height:300px;overflow-y:auto"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:4px 6px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:4px 6px;text-align:center;color:var(--text-2)">Тип</th><th style="padding:4px 6px;text-align:center;color:var(--text-2)">Сумма</th><th style="padding:4px 6px;text-align:center;color:var(--text-2)">ГБ</th><th style="padding:4px 6px;text-align:center;color:var(--text-2)">Баланс</th><th style="padding:4px 6px;text-align:left;color:var(--text-2)">Примечание</th></tr></thead><tbody>';
     entries.forEach(function(e){
       var typeLabel='',typeColor='',amountStr='',amountColor='';
       if(e.type==='charge'){typeLabel='Списание';typeColor='color:var(--danger)';amountStr='-'+((e.cost||0).toFixed(2))+' \u20BD';amountColor='color:var(--danger)'}
@@ -2246,9 +2246,9 @@ function showBillingHistory(clientId){
       h+='<tr style="border-bottom:1px solid var(--border)">';
       h+='<td style="padding:3px 6px;white-space:nowrap">'+dateStr+'</td>';
       h+='<td style="padding:3px 6px;text-align:center;'+typeColor+';font-weight:500">'+typeLabel+'</td>';
-      h+='<td style="padding:3px 6px;text-align:right;'+amountColor+';font-weight:600">'+amountStr+'</td>';
-      h+='<td style="padding:3px 6px;text-align:right">'+trafficStr+'</td>';
-      h+='<td style="padding:3px 6px;text-align:right">'+balAfter+'</td>';
+      h+='<td style="padding:3px 6px;text-align:center;'+amountColor+';font-weight:600">'+amountStr+'</td>';
+      h+='<td style="padding:3px 6px;text-align:center">'+trafficStr+'</td>';
+      h+='<td style="padding:3px 6px;text-align:center">'+balAfter+'</td>';
       h+='<td style="padding:3px 6px;color:var(--text-3);font-size:10px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(note)+'">'+esc(note)+'</td>';
       h+='</tr>';
     });
@@ -2487,7 +2487,7 @@ function renderOpsHistory(clientId) {
       if (!entries.length) {
         h += '<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Нет операций</div>';
       } else {
-      h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Тип</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">Сумма</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">ГБ</th><th style="padding:8px 10px;text-align:right;color:var(--text-2)">Баланс</th><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Примечание</th><th style="padding:8px 10px;text-align:center;color:var(--text-2);width:30px"></th></tr></thead><tbody>';
+      h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Тип</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Сумма</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">ГБ</th><th style="padding:8px 10px;text-align:center;color:var(--text-2)">Баланс</th><th style="padding:8px 10px;text-align:left;color:var(--text-2)">Примечание</th><th style="padding:8px 10px;text-align:center;color:var(--text-2);width:30px"></th></tr></thead><tbody>';
       entries.forEach(function(e, eIdx) {
         var typeLabel = '', typeColor = '', amountStr = '', amountColor = '';
         if (e.type === 'charge') { typeLabel = 'Списание'; typeColor = 'color:var(--danger)'; amountStr = '-' + ((e.cost || 0).toFixed(2)) + ' \u20BD'; amountColor = 'color:var(--danger)'; }
@@ -2506,9 +2506,9 @@ function renderOpsHistory(clientId) {
         h += '<tr style="border-bottom:1px solid var(--border)">';
         h += '<td style="padding:6px 10px;white-space:nowrap">' + dateStr + '</td>';
         h += '<td style="padding:6px 10px;text-align:center;' + typeColor + ';font-weight:500">' + typeLabel + '</td>';
-        h += '<td style="padding:6px 10px;text-align:right;' + amountColor + ';font-weight:600">' + amountStr + '</td>';
-        h += '<td style="padding:6px 10px;text-align:right">' + trafficStr + '</td>';
-        h += '<td style="padding:6px 10px;text-align:right">' + balAfter + '</td>';
+        h += '<td style="padding:6px 10px;text-align:center;' + amountColor + ';font-weight:600">' + amountStr + '</td>';
+        h += '<td style="padding:6px 10px;text-align:center">' + trafficStr + '</td>';
+        h += '<td style="padding:6px 10px;text-align:center">' + balAfter + '</td>';
         h += '<td style="padding:6px 10px;color:var(--text-3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(note) + '">' + esc(note) + '</td>';
         h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:transparent;color:var(--danger);border:1px solid var(--danger)" onclick="deleteLedgerEntry(\'' + clientId + '\',' + e._origIndex + ')" title="\u0423\u0434\u0430\u043B\u0438\u0442\u044C">\u2716</button></td>';
         h += '</tr>';
@@ -2537,7 +2537,7 @@ function renderOpsDocuments(clientId) {
   h += '<button class="btn btn-primary btn-sm" onclick="createAct(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">➕ Создать акт</button>';
   h += '</div>';
   if (actDocs.length) {
-    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
     actDocs.forEach(function(d) {
       var isSigned = d.status === 'signed';
       var statusHtml = isSigned
@@ -2552,7 +2552,7 @@ function renderOpsDocuments(clientId) {
       h += '<tr style="border-bottom:1px solid var(--border);' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
       h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(d.period) + '</td>';
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
-      h += '<td style="padding:5px 10px;text-align:right;font-weight:600;font-size:12px">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
+      h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\u2715</button></td>';
       h += '</tr>';
@@ -2572,7 +2572,7 @@ function renderOpsDocuments(clientId) {
   h += '<button class="btn btn-primary btn-sm" onclick="createBill(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">➕ Выставить счёт</button>';
   h += '</div>';
   if (bills.length) {
-    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
     bills.forEach(function(b) {
       var isPaid = b.status === 'paid';
       var statusHtml = isPaid
@@ -2587,7 +2587,7 @@ function renderOpsDocuments(clientId) {
       h += '<tr style="border-bottom:1px solid var(--border);' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
       h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(b.period) + '</td>';
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
-      h += '<td style="padding:5px 10px;text-align:right;font-weight:600;font-size:12px">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
+      h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\u2715</button></td>';
       h += '</tr>';
@@ -2954,7 +2954,7 @@ function loadAllActs() {
         if (signed > 0) h += '<span style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + signed + ' подписан</span>';
         h += '</div></div>';
         h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0">';
-        h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border)"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border)"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
         pdocs.forEach(function(d) {
           var isSigned = d.status === 'signed';
           var statusHtml = isSigned
@@ -2970,7 +2970,7 @@ function loadAllActs() {
           h += '<td style="padding:6px 10px;font-weight:500">' + esc(d.clientName || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.clientInn || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
-          h += '<td style="padding:6px 10px;text-align:right;font-weight:600">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' ₽</td>';
+          h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' ₽</td>';
           h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">✕</button></td>';
           h += '</tr>';
@@ -3097,7 +3097,7 @@ function loadAllBills() {
         if (paid > 0) h += '<span style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + paid + ' оплачен</span>';
         h += '</div></div>';
         h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0">';
-        h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border)"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:right;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border)"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
         pbills.forEach(function(b) {
           var isPaid = b.status === 'paid';
           var statusHtml = isPaid
@@ -3113,7 +3113,7 @@ function loadAllBills() {
           h += '<td style="padding:6px 10px;font-weight:500">' + esc(b.clientName || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.clientInn || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
-          h += '<td style="padding:6px 10px;text-align:right;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
+          h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
           h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteBillFromBank(\'' + b.clientId + '\',\'' + b.id + '\')">✕</button></td>';
           h += '</tr>';
@@ -3206,13 +3206,13 @@ function renderBankPayments() {
     h += '<span style="font-weight:600;color:var(--danger)">\u26A0\uFE0F \u041D\u0435\u043E\u043F\u043E\u0437\u043D\u0430\u043D\u043D\u044B\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438: ' + unmatched.length + '</span>';
     h += '<button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg-3)" onclick="dismissAllUnmatched()">\u2716 \u0423\u0431\u0440\u0430\u0442\u044C \u0432\u0441\u0435</button>';
     h += '</div>';
-    h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:left">\u0418\u041D\u041D</th><th style="padding:4px 6px;text-align:right">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435</th><th style="padding:4px 6px">\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F</th></tr></thead><tbody>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:left">\u0418\u041D\u041D</th><th style="padding:4px 6px;text-align:center">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435</th><th style="padding:4px 6px">\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F</th></tr></thead><tbody>';
     unmatched.forEach(function(p) {
       h += '<tr style="border-bottom:1px solid var(--border)">';
       h += '<td style="padding:4px 6px">' + fmtDateRu(p.date) + '</td>';
       h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
       h += '<td style="padding:4px 6px">' + esc(p.payerInn) + '</td>';
-      h += '<td style="padding:4px 6px;text-align:right;font-weight:600;white-space:nowrap">' + p.amount + ' \u20BD</td>';
+      h += '<td style="padding:4px 6px;text-align:center;font-weight:600;white-space:nowrap">' + p.amount + ' \u20BD</td>';
       h += '<td style="padding:4px 6px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(p.purpose) + '">' + esc(p.purpose || '') + '</td>';
       h += '<td style="padding:4px 6px;white-space:nowrap"><select id="matchClient_' + p.id + '" style="font-size:10px;padding:2px;max-width:100px">';
       h += '<option value="">---</option>';
@@ -3228,13 +3228,13 @@ function renderBankPayments() {
   matched=matched.slice(0,50);
   if (matched.length > 0) {
     h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438</div>';
-    h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:right">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041A\u043B\u0438\u0435\u043D\u0442</th></tr></thead><tbody>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:center">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041A\u043B\u0438\u0435\u043D\u0442</th></tr></thead><tbody>';
     matched.forEach(function(p) {
       var isUnmatched=!p.client_id&&!p.matchedClientName;
       h += '<tr style="border-bottom:1px solid var(--border)'+(isUnmatched?';background:rgba(220,38,38,0.06)':'')+'">';
       h += '<td style="padding:4px 6px">' + fmtDateRu(p.date) + '</td>';
       h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
-      h += '<td style="padding:4px 6px;text-align:right;font-weight:500'+(isUnmatched?';color:var(--danger)':'')+'">' + p.amount + ' \u20BD</td>';
+      h += '<td style="padding:4px 6px;text-align:center;font-weight:500'+(isUnmatched?';color:var(--danger)':'')+'">' + p.amount + ' \u20BD</td>';
       h += '<td style="padding:4px 6px;color:var(--success);font-weight:500">'+(isUnmatched?'<span style="color:var(--danger)">⚠ Не привязан</span>':'\u2705 ' + esc(p.matchedClientName || ''))+'</td>';
       h += '</tr>';
     });
