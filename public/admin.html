@@ -222,11 +222,11 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 /* Toast */
 .toast-container{position:fixed;bottom:24px;right:24px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
 .toast{padding:12px 16px;border-radius:8px;font-size:12px;font-weight:500;animation:slideIn .2s ease;min-width:220px;max-width:360px;pointer-events:all;background:var(--bg-1);border:1px solid var(--border);border-left-width:3px;box-shadow:0 4px 16px rgba(0,0,0,.25);color:var(--text-0);display:flex;align-items:flex-start;gap:8px}
-.toast-success{border-left-color:var(--success)}
-.toast-error{border-left-color:var(--danger)}
-.toast-info{border-left-color:var(--accent)}
-.toast-warning{border-left-color:var(--warning)}
-@keyframes slideIn{from{transform:translateX(8px);opacity:0}to{transform:translateX(0);opacity:1}}
+.toast-success,.toast--success{border-left-color:#1D9E75}
+.toast-error,.toast--error{border-left-color:#E24B4A}
+.toast-info,.toast--info{border-left-color:#185FA5}
+.toast-warning,.toast--warning{border-left-color:#EF9F27}
+@keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1}}
 
 .refresh-bar{height:2px;background:var(--accent);position:fixed;top:0;left:0;z-index:9998;transition:width .3s}
 
@@ -375,6 +375,12 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .payment-date{color:var(--text-2)}
 .balance-positive{color:var(--success);font-weight:700}
 .balance-negative{color:var(--danger);font-weight:700}
+
+/* Client traffic table rows */
+.ct-row{display:flex;align-items:center;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;min-height:36px}
+.ct-row:hover{background:var(--bg-2)}
+.ct-row.active{background:#1a2d4a}
+[data-theme="light"] .ct-row.active{background:#EEF5FD}
 
 @media(max-width:768px){
   /* Layout */
@@ -543,7 +549,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     <div style="padding:0 24px 14px">
       <div class="analytics-card" style="margin-bottom:14px">
         <h3 style="margin:0 0 10px">Клиенты</h3>
-        <table class="log-table" id="clientTrafficTable"></table>
+        <div id="clientTrafficTable"></div>
       </div>
       <div class="analytics-card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
@@ -687,7 +693,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
           <h3>Бекап</h3>
           <div class="form-row" style="align-items:flex-end">
             <div class="form-group"><label>Сервер</label><select class="form-input" id="backupServer"><option value="">Сервер</option></select></div>
-            <div class="form-group"><button class="btn btn-success" onclick="downloadBackup()">Скачать бекап</button></div>
+            <div class="form-group"><button class="btn" onclick="downloadBackup()">Скачать бекап</button></div>
           </div>
         </div>
       </div>
@@ -1113,7 +1119,7 @@ function purgeSms(nick,srv){confirmDialog('Удалить все SMS для мо
 function sendUssd(imei,srv){var code=document.getElementById('ussdCode').value;if(!code)return;document.getElementById('ussdResult').innerHTML='<span style="color:var(--text-3)">Отправка...</span>';fetch(API+'/api/admin/send_ussd',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,ussd:code})}).then(function(r){return r.json()}).then(function(d){var r=d.result||d;document.getElementById('ussdResult').innerHTML='<div class="detail-card"><pre style="font-size:11px;color:var(--text-1);white-space:pre-wrap">'+esc(typeof r==='object'?JSON.stringify(r,null,2):String(r))+'</pre></div>'}).catch(function(e){document.getElementById('ussdResult').innerHTML='<span style="color:var(--danger)">'+e.message+'</span>'})}
 function showNewPortForm(imei,srv){fetch(API+'/api/admin/free_ports?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var fp=Array.isArray(data)?data:data.free_tcp_ports||[];var h='<div class="detail-card" style="margin-top:8px"><h4>Новый порт</h4><div class="form-row"><div class="form-group"><label>Port ID</label><input class="form-input" id="npPid" value="port'+rnd(8)+'"></div><div class="form-group"><label>Имя</label><input class="form-input" id="npName"></div></div><div class="form-row"><div class="form-group"><label>HTTP</label><input class="form-input" id="npHttp" value="'+(fp[0]||'')+'"></div><div class="form-group"><label>SOCKS</label><input class="form-input" id="npSocks" value="'+(fp[1]||'')+'"></div></div><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="npLogin" value="'+rnd(8)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="npPass" value="'+rnd(8)+'"></div></div><button class="btn btn-primary" onclick="createPort(\''+imei+'\',\''+srv+'\')">Создать</button></div>';document.getElementById('newPortForm').innerHTML=h})}
 function createPort(imei,srv){var d={serverName:srv,IMEI:imei,portID:document.getElementById('npPid').value,portName:document.getElementById('npName').value,http_port:document.getElementById('npHttp').value,socks_port:document.getElementById('npSocks').value,proxy_login:document.getElementById('npLogin').value,proxy_password:document.getElementById('npPass').value};fetch(API+'/api/admin/store_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok){fetch(API+'/api/admin/apply_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:d.portID,serverName:srv})}).then(function(){showToast('Порт создан','success');setTimeout(loadData,2000)})}else showToast(r.error||'Ошибка','error')})}
-function purgePort(pid,srv){if(!confirm('Удалить '+pid+'?'))return;fetch(API+'/api/admin/purge_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:pid,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');setTimeout(loadData,2000)})}
+function purgePort(pid,srv){confirmDialog('Удалить порт «'+pid+'»? Это действие нельзя отменить.',function(){fetch(API+'/api/admin/purge_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:pid,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');setTimeout(loadData,2000)});},'Удалить','Удалить порт')}
 function switchSimTab(t){['sms','ussd'].forEach(function(n){var tab=document.getElementById('simTab_'+n);var cnt=document.getElementById('simContent_'+n);if(tab){tab.style.borderBottomColor=n===t?'var(--accent)':'transparent';tab.style.color=n===t?'var(--accent)':'var(--text-2)'}if(cnt)cnt.style.display=n===t?'':'none'})}
 function saveModemSettings(imei,srv){fetch(API+'/api/admin/store_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,IMEI:imei,name:document.getElementById('msNick').value,PHONE_NUMBER:document.getElementById('msPhone').value,AUTO_IP_ROTATION:document.getElementById('msAutoRot').value||'0',TARGET_MODE:document.getElementById('msMode').value,NOTES:document.getElementById('msNotes').value})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сохранено','success'):showToast(r.error||'Ошибка','error')})}
 function saveModemSettingsNew(imei,srv){var ROT_VALS=[5,10,15,30,60,120,240,480,720,1440];var rotSlider=document.getElementById('msAutoRot');var rotVal=rotSlider?ROT_VALS[+rotSlider.value]||10:10;fetch(API+'/api/admin/store_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,IMEI:imei,name:document.getElementById('msNick').value,PHONE_NUMBER:document.getElementById('msPhone').value,AUTO_IP_ROTATION:String(rotVal),TARGET_MODE:document.getElementById('msMode').value,NOTES:document.getElementById('msNotes').value})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сохранено ✓','success'):showToast(r.error||'Ошибка','error')})}
@@ -1431,12 +1437,29 @@ function renderAccSubTab(name){
       var allOps={};
       d.modemTraffic.forEach(function(m){var op=m.operator;if(!op)return;if(!allOps[op])allOps[op]={t:0,cnt:0};allOps[op].t+=m.tIn+m.tOut;allOps[op].cnt++;});
       var opList=Object.keys(allOps).sort(function(a,b){return allOps[b].t-allOps[a].t});
-      var opMax=opList.length?allOps[opList[0]].t||1:1;
+      var opDays=getDaysElapsed();
+      var opMax=opList.length?(allOps[opList[0]].t/opDays)||1:1;
       var opH='<div class="analytics-card" style="margin:0">';
       opH+='<div style="font-size:11px;font-weight:700;color:var(--text-0);margin-bottom:8px">📡 Операторы</div>';
-      opList.forEach(function(op,oi){var v=allOps[op];var w=Math.max(v.t/opMax*100,2);
-        opH+='<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-2);margin-bottom:2px"><span>'+esc(op)+'</span><span style="color:var(--text-1);font-weight:600">'+fmtGb(v.t)+'</span></div>';
-        opH+='<div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+CHART_COLORS.operators[oi%CHART_COLORS.operators.length]+';width:'+w+'%"></div></div></div>';
+      opList.forEach(function(op,oi){var v=allOps[op];
+        var flag='';
+        var opLower=op.toLowerCase();
+        if(opLower.indexOf('orange ro')!==-1||opLower.indexOf('vodafone ro')!==-1){flag='🇷🇴 ';}
+        else if(opLower.indexOf('orange md')!==-1||opLower.indexOf('moldtelecom')!==-1){flag='🇲🇩 ';}
+        var avg_per_modem_day=fmtGb(v.cnt&&opDays?v.t/v.cnt/opDays:0);
+        var total_per_day=v.t/opDays;
+        var w=Math.max(total_per_day/opMax*100,2);
+        var col=CHART_COLORS.operators[oi%CHART_COLORS.operators.length];
+        opH+='<div style="margin-bottom:8px">';
+        opH+='<div style="display:flex;align-items:baseline;font-size:10px;color:var(--text-2);margin-bottom:2px;gap:4px">';
+        opH+='<span style="flex:1;color:var(--text-1);font-weight:500">'+flag+esc(op)+'</span>';
+        opH+='<span style="color:var(--text-2)">'+avg_per_modem_day+'/мод/сут</span>';
+        opH+='<span style="color:var(--text-3)">·</span>';
+        opH+='<span style="color:var(--text-2)">суммарно '+fmtGb(total_per_day)+'/сут</span>';
+        opH+='<span style="color:var(--text-3)">·</span>';
+        opH+='<span style="color:var(--text-3)">'+v.cnt+' мод.</span>';
+        opH+='</div>';
+        opH+='<div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+col+';width:'+w+'%"></div></div></div>';
       });
       opH+='</div>';
 
@@ -1458,27 +1481,105 @@ function renderAccSubTab(name){
     // Matrix
     renderTrafficMatrix(d);
 
-    // Client table (now always rendered on overview)
+    // Client table (flex layout with sparkline + trend)
     var clientNamesOv=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
     var totalAllOv=d.totalIn+d.totalOut||1;
-    var hc='<thead><tr><th></th><th>#</th><th>Клиент</th><th style="text-align:center">Live</th><th>↓ Входящий</th><th>↑ Исходящий</th><th>Всего</th><th style="width:120px">Доля</th></tr></thead><tbody>';
-    clientNamesOv.forEach(function(n,i){var c=d.clientTraffic[n];var total=c.tIn+c.tOut;
+    var daysEl=getDaysElapsed();
+    // Header row
+    var hc='<div style="display:flex;align-items:center;padding:4px 0;border-bottom:2px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px">';
+    hc+='<div style="width:4px;flex-shrink:0"></div>';
+    hc+='<div style="flex:1;padding:0 10px">Клиент</div>';
+    hc+='<div style="width:70px;text-align:center">Live</div>';
+    hc+='<div style="width:90px;text-align:right">Входящий</div>';
+    hc+='<div style="width:90px;text-align:right;font-weight:600">Всего</div>';
+    hc+='<div style="width:100px;text-align:center">Спарклайн</div>';
+    hc+='<div style="width:65px;text-align:right">Тренд</div>';
+    hc+='<div style="width:120px;padding:0 8px">Доля</div>';
+    hc+='<div style="width:45px;text-align:right;padding-right:8px">%</div>';
+    hc+='</div>';
+    clientNamesOv.forEach(function(n,i){
+      var c=d.clientTraffic[n];var total=c.tIn+c.tOut;
       var liveColor=c.online===c.modems?'var(--success)':(c.online>0?'var(--warning)':'var(--danger)');
       var clientColor=CHART_COLORS.clients[i%CHART_COLORS.clients.length];
       var sharePct=pct(total,totalAllOv);
-      hc+='<tr>';
-      hc+='<td style="padding:0;width:3px"><div style="width:3px;height:100%;min-height:36px;background:'+clientColor+';border-radius:2px 0 0 2px"></div></td>';
-      hc+='<td style="color:var(--text-3)">'+(i+1)+'</td>';
-      hc+='<td style="font-weight:500"><span style="display:inline-block;width:8px;height:8px;border-radius:50%;background:'+clientColor+';margin-right:6px;vertical-align:middle"></span>'+esc(n)+'</td>';
-      hc+='<td style="text-align:center;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</td>';
-      hc+='<td class="mono" style="color:var(--text-2)">'+fmtGb(c.tIn)+'</td>';
-      hc+='<td class="mono" style="color:var(--text-2)">'+fmtGb(c.tOut)+'</td>';
-      hc+='<td class="mono" style="color:var(--text-0);font-weight:600">'+fmtGb(total)+'</td>';
-      hc+='<td><div style="display:flex;align-items:center;gap:6px"><div class="hbar-bar-wrap" style="height:8px;flex:1"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div><span style="font-size:10px;color:var(--text-2);width:28px;text-align:right">'+sharePct+'%</span></div></td>';
-      hc+='</tr>';
+      // Trend: today vs average daily (using monIn data from modemTraffic)
+      var clientModems=d.modemTraffic.filter(function(m){return m.pn===n});
+      var sumDayIn=clientModems.reduce(function(s,m){return s+m.dayIn},0);
+      var sumMonIn=clientModems.reduce(function(s,m){return s+m.monIn},0);
+      var avgDailyIn=daysEl?sumMonIn/daysEl:0;
+      var trendPctCl=avgDailyIn>0?Math.round((sumDayIn-avgDailyIn)/avgDailyIn*100):null;
+      var trendStr='—';var trendColor='var(--text-3)';
+      if(trendPctCl!==null){
+        var tc=trendPctCl>=0?'var(--success)':'var(--danger)';
+        var ts=trendPctCl>999?'+999%+':(trendPctCl<-99?'<−99%':(trendPctCl>=0?'+':'')+trendPctCl+'%');
+        trendStr=ts;trendColor=tc;
+      }
+      // Sparkline: 7 mini bars, last bar = today ratio, others = average
+      var sparkH='<div style="display:flex;align-items:flex-end;gap:1px;height:18px;padding:0 4px">';
+      for(var si=0;si<7;si++){
+        var isLast=si===6;
+        var barH=isLast&&avgDailyIn>0?Math.max(Math.min(sumDayIn/avgDailyIn,2)*50,4):50;
+        var barOp=isLast?'1':'0.35';
+        sparkH+='<div style="flex:1;background:'+clientColor+';border-radius:1px 1px 0 0;height:'+barH+'%;opacity:'+barOp+'"></div>';
+      }
+      sparkH+='</div>';
+      hc+='<div class="ct-row" data-client="'+esc(n)+'" onclick="selectClient(\''+esc(n)+'\')">';
+      hc+='<div style="width:4px;height:36px;background:'+clientColor+';flex-shrink:0;border-radius:2px 0 0 2px"></div>';
+      hc+='<div style="flex:1;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(n)+'</div>';
+      hc+='<div style="width:70px;text-align:center;font-size:11px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</div>';
+      hc+='<div style="width:90px;text-align:right;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tIn)+'</div>';
+      hc+='<div style="width:90px;text-align:right;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(total)+'</div>';
+      hc+='<div style="width:100px">'+sparkH+'</div>';
+      hc+='<div style="width:65px;text-align:right;font-size:11px;font-weight:600;color:'+trendColor+'">'+trendStr+'</div>';
+      hc+='<div style="width:120px;padding:0 8px"><div class="hbar-bar-wrap" style="height:8px"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div></div>';
+      hc+='<div style="width:45px;text-align:right;font-size:11px;color:var(--text-2);padding-right:8px">'+sharePct+'%</div>';
+      hc+='</div>';
     });
     var ctEl=document.getElementById('clientTrafficTable');
-    if(ctEl)ctEl.innerHTML=hc+'</tbody>';
+    if(ctEl)ctEl.innerHTML=hc;
+
+    // Anomaly detection block
+    var anomalies=[];
+    d.modemTraffic.forEach(function(m){
+      var avg_daily=m.monIn/Math.max(getDaysElapsed(),1);
+      var today=m.dayIn;
+      if(avg_daily>0&&Math.abs((today-avg_daily)/avg_daily)>0.4){
+        var ratio=(today-avg_daily)/avg_daily;
+        anomalies.push({nick:m.nick,operator:m.operator,server:m.server,today:today,avg:avg_daily,ratio:ratio});
+      }
+    });
+    var anomalyBlockEl=document.getElementById('clientAnomalyBlock');
+    if(!anomalyBlockEl){
+      var anomalyContainer=document.createElement('div');
+      anomalyContainer.id='clientAnomalyBlock';
+      // insert after client table analytics card
+      var clientTableCard=ctEl?ctEl.closest('.analytics-card'):null;
+      if(clientTableCard&&clientTableCard.parentNode){
+        clientTableCard.parentNode.insertBefore(anomalyContainer,clientTableCard.nextSibling);
+      }
+      anomalyBlockEl=anomalyContainer;
+    }
+    if(anomalies.length>0&&anomalyBlockEl){
+      var ah='<div style="background:#FAEEDA;border:0.5px solid #EF9F27;border-radius:10px;padding:12px 16px;margin:0 0 12px">';
+      ah+='<div style="font-size:12px;font-weight:500;color:#633806;margin-bottom:8px;display:flex;align-items:center;gap:6px">';
+      ah+='<span style="width:14px;height:14px;border-radius:50%;background:#EF9F27;flex-shrink:0;display:inline-block"></span>';
+      ah+='Аномалии трафика сегодня</div>';
+      anomalies.forEach(function(a){
+        var isHigh=a.ratio>0;
+        var pctStr=(isHigh?'+':'')+Math.round(a.ratio*100)+'%';
+        var ci=COUNTRIES[a.server]||{};
+        ah+='<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px;border-bottom:1px solid rgba(239,159,39,0.2)">';
+        ah+='<span style="color:#633806;font-weight:500">'+esc(a.nick)+'</span>';
+        ah+='<span style="color:#8B5500;font-size:10px">'+(ci.flag||'')+' '+esc(a.operator||'')+'</span>';
+        ah+='<span style="margin-left:auto;font-weight:600;color:'+(isHigh?'#D85A30':'#185FA5')+'">'+pctStr+'</span>';
+        ah+='<span style="color:#8B5500;font-size:10px">сег: '+fmtGb(a.today)+' / ср: '+fmtGb(a.avg)+'</span>';
+        ah+='</div>';
+      });
+      ah+='</div>';
+      anomalyBlockEl.innerHTML=ah;
+    }else if(anomalyBlockEl){
+      anomalyBlockEl.innerHTML='';
+    }
 
     // Daily chart
     if(!window._dailyTrafficCache){
@@ -1563,7 +1664,7 @@ function renderDailyClientChart(data,cc){
       }
       return 0;
     });
-    return{label:client,data:values,borderColor:color,backgroundColor:color+'26',fill:false,tension:0.3,pointRadius:2,pointHoverRadius:5,pointBackgroundColor:color,borderWidth:2};
+    return{label:client,clientName:client,data:values,borderColor:color,backgroundColor:color+'26',fill:false,tension:0.3,pointRadius:2,pointHoverRadius:5,pointBackgroundColor:color,borderWidth:2};
   });
 
   // Custom HTML legend
@@ -1579,6 +1680,23 @@ function renderDailyClientChart(data,cc){
   charts.dailyClient=new Chart(document.getElementById('chartDailyClientTraffic'),{type:'line',data:{labels:displayLabels,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{backgroundColor:'#ffffff',titleColor:'#1A1A1A',bodyColor:'#6B6B68',borderColor:'rgba(0,0,0,.12)',borderWidth:1,callbacks:{label:function(ctx){return' '+ctx.dataset.label+': '+ctx.parsed.y+' GB'}}}},scales:{x:{ticks:{color:cc.text,font:{size:9}},grid:{display:false}},y:{beginAtZero:true,ticks:{color:cc.text,font:{size:10},callback:function(v){return v+' GB'}},grid:{color:cc.grid}}}}});
 }
 
+var _selectedClient=null;
+function selectClient(name){
+  _selectedClient=_selectedClient===name?null:name;
+  document.querySelectorAll('.ct-row').forEach(function(r){r.classList.toggle('active',r.dataset.client===name&&_selectedClient===name)});
+  updateClientChartHighlight();
+}
+function updateClientChartHighlight(){
+  if(!charts.dailyClient)return;
+  charts.dailyClient.data.datasets.forEach(function(ds,i){
+    var sel=_selectedClient;
+    var isActive=!sel||ds.clientName===sel;
+    ds.borderColor=isActive?CHART_COLORS.clients[i%CHART_COLORS.clients.length]:'rgba(180,178,169,0.2)';
+    ds.borderWidth=isActive?2.5:1;
+    ds.pointRadius=isActive?3:0;
+  });
+  charts.dailyClient.update('none');
+}
 var _matrixSortKey='total',_matrixSortDir=-1;
 function matrixSort(key){
   if(_matrixSortKey===key){_matrixSortDir*=-1}else{_matrixSortKey=key;_matrixSortDir=-1}
@@ -1599,13 +1717,13 @@ function renderTrafficMatrix(d){
     return _matrixSortDir*(av-bv);
   });
   var sortArrow=function(k){return _matrixSortKey===k?(_matrixSortDir>0?' ↑':' ↓'):''};
-  var h='<thead><tr><th style="cursor:pointer;width:3px;padding:0"></th><th style="cursor:pointer" onclick="matrixSort(\'nick\')">Модем'+sortArrow('nick')+'</th><th>Оператор</th><th>Сервер</th><th>Клиент</th><th style="cursor:pointer" onclick="matrixSort(\'tIn\')">↓ Вход'+sortArrow('tIn')+'</th><th style="cursor:pointer" onclick="matrixSort(\'tOut\')">↑ Выход'+sortArrow('tOut')+'</th><th style="cursor:pointer" onclick="matrixSort(\'total\')">Σ Всего'+sortArrow('total')+'</th><th>Сегодня</th><th>Месяц</th><th style="width:90px">Тренд мес.</th></tr></thead><tbody>';
+  var h='<thead><tr><th style="cursor:pointer;width:3px;padding:0"></th><th style="cursor:pointer" onclick="matrixSort(\'nick\')">Модем'+sortArrow('nick')+'</th><th>Оператор</th><th>Сервер</th><th>Клиент</th><th style="cursor:pointer" onclick="matrixSort(\'tIn\')">↓ Вход'+sortArrow('tIn')+'</th><th style="cursor:pointer" onclick="matrixSort(\'tOut\')">↑ Выход'+sortArrow('tOut')+'</th><th style="cursor:pointer" onclick="matrixSort(\'total\')">Σ Всего'+sortArrow('total')+'</th><th>Сегодня</th><th>Месяц</th><th style="width:90px" title="Изменение трафика текущего месяца относительно предыдущего">Тренд мес. <span style="font-size:10px;color:var(--accent);cursor:help" title="Изменение трафика текущего месяца относительно предыдущего">ⓘ</span></th></tr></thead><tbody>';
   sorted.forEach(function(m){var total=m.tIn+m.tOut;var ci=COUNTRIES[m.server]||{};
     var clientColor=clientColorMap[m.pn]||'var(--border)';
     // Month vs prev-month change
     var monT=m.monIn+m.monOut,prevT=m.prevIn+m.prevOut;
     var trendHtml='';
-    if(prevT>0){var chg=Math.round((monT-prevT)/prevT*100);var chgColor=chg>=0?'var(--success)':'var(--danger)';trendHtml='<span style="font-size:10px;font-weight:600;color:'+chgColor+'">'+(chg>=0?'+':'')+chg+'%</span>'}
+    if(prevT>0){var chg=Math.round((monT-prevT)/prevT*100);var chgColor=chg>=0?'var(--success)':'var(--danger)';var chgStr;if(chg>999){chgStr='+999%+'}else if(chg<-99){chgStr='<−99%'}else{chgStr=(chg>=0?'+':'')+chg+'%'}trendHtml='<span style="font-size:10px;font-weight:600;color:'+chgColor+'">'+chgStr+'</span>'}
     else if(monT>0){trendHtml='<span style="font-size:10px;color:var(--text-3)">—</span>'}
     h+='<tr>';
     h+='<td style="padding:0;width:3px"><div style="width:3px;height:100%;min-height:32px;background:'+clientColor+'"></div></td>';
@@ -1682,27 +1800,28 @@ function renderTopResources(){
   var items=displayItems.map(function(h,i){return{label:h,value:dataSource[h],color:['blue','green','orange','purple','red'][i%5]}});
   document.getElementById('topResourcesList').innerHTML='<div style="max-height:600px;overflow-y:auto">'+renderHBarsRes(items,maxCount)+'</div>';
 
-  // Categories
-  var cats={};sorted.forEach(function(h){var cat=categorize(h);if(!cats[cat])cats[cat]=0;cats[cat]+=dataSource[h]});
-  var catNames=Object.keys(cats).sort(function(a,b){return cats[b]-cats[a]});
-  var cc=getChartColors();
-  var catTotal=catNames.reduce(function(s,c){return s+cats[c]},0)||1;
-  var maxCat=catNames.length?cats[catNames[0]]:0;
-  var catH=catNames.map(function(cat){
-    var val=cats[cat];var pctV=Math.round(val/catTotal*100);var barW=Math.round(val/maxCat*100);
+  // Categories — progress bars
+  var categoryCounts={};sorted.forEach(function(h){var cat=categorize(h);if(!categoryCounts[cat])categoryCounts[cat]=0;categoryCounts[cat]+=dataSource[h]});
+  var catH='<div style="padding:8px 0">';
+  var cats=Object.keys(categoryCounts).sort(function(a,b){return categoryCounts[b]-categoryCounts[a]});
+  var catTotal=cats.reduce(function(s,c){return s+categoryCounts[c]},0)||1;
+  cats.forEach(function(cat){
+    var cnt=categoryCounts[cat];
+    var pct=Math.round(cnt/catTotal*100);
     var col=CHART_COLORS.categories[cat]||'#B4B2A9';
-    return'<div style="margin-bottom:8px">'+
-      '<div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px">'+
-        '<span style="color:var(--text-1)"><span style="display:inline-block;width:8px;height:8px;border-radius:2px;background:'+col+';margin-right:5px;vertical-align:middle"></span>'+esc(cat)+'</span>'+
-        '<span style="color:var(--text-2)">'+val.toLocaleString()+' <span style="color:var(--text-3)">('+pctV+'%)</span></span>'+
-      '</div>'+
-      '<div style="height:8px;background:var(--bg-3);border-radius:4px;overflow:hidden">'+
-        '<div style="height:100%;width:'+barW+'%;background:'+col+';border-radius:4px"></div>'+
-      '</div>'+
-    '</div>';
-  }).join('');
+    catH+='<div style="margin-bottom:10px">';
+    catH+='<div style="display:flex;align-items:baseline;margin-bottom:3px;font-size:12px">';
+    catH+='<span style="flex:1;color:var(--text-0)">'+esc(cat)+'</span>';
+    catH+='<span style="font-size:11px;color:var(--text-2);margin-right:8px">'+cnt.toLocaleString('ru-RU')+' запросов</span>';
+    catH+='<span style="font-weight:500;width:36px;text-align:right;font-size:12px">'+pct+'%</span>';
+    catH+='</div>';
+    catH+='<div style="height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden">';
+    catH+='<div style="height:6px;border-radius:3px;background:'+col+';width:'+pct+'%"></div>';
+    catH+='</div></div>';
+  });
+  catH+='</div>';
   var catEl=document.getElementById('catBars');
-  if(catEl)catEl.innerHTML=catH||'<div style="color:var(--text-3);font-size:11px">Нет данных</div>';
+  if(catEl)catEl.innerHTML=cats.length?catH:'<div style="color:var(--text-3);font-size:11px">Нет данных</div>';
 
   // Top 15 bar chart
   var top15=sorted.slice(0,15);
@@ -2753,7 +2872,7 @@ function renderBankDocuments() {
 
   // Bulk generation form
   h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px;padding:10px 12px;background:var(--bg-3);border-radius:8px;flex-wrap:wrap">';
-  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><input class="form-input" type="month" id="bulkActPeriod" style="width:160px;font-size:12px;padding:4px 8px"></div>';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+(function(){var btns='';var now=new Date();for(var mi=0;mi<4;mi++){var d2=new Date(now.getFullYear(),now.getMonth()-mi,1);var val=d2.getFullYear()+'-'+String(d2.getMonth()+1).padStart(2,'0');var months=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];var lbl=months[d2.getMonth()]+' '+d2.getFullYear();btns+='<button class="btn btn-sm" style="font-size:10px;padding:2px 8px" onclick="document.getElementById(\'bulkActPeriod\').value=\''+val+'\'">'+lbl+'</button>';}return btns;}())+'<input class="form-input" type="month" id="bulkActPeriod" style="width:140px;font-size:12px;padding:4px 8px"></div></div>';
   h += '<button class="btn btn-primary btn-sm" onclick="generateBulkActs()" style="white-space:nowrap;padding:4px 12px">📃 Сгенерировать акты для всех клиентов</button>';
   h += '<div id="bulkActStatus" style="font-size:12px;color:var(--text-3)"></div>';
   h += '</div>';
@@ -2896,7 +3015,7 @@ function renderBankBills() {
 
   // Bulk generation form
   h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px;padding:10px 12px;background:var(--bg-3);border-radius:8px;flex-wrap:wrap">';
-  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><input class="form-input" type="month" id="bulkBillPeriod" style="width:160px;font-size:12px;padding:4px 8px"></div>';
+  h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+(function(){var btns='';var now=new Date();for(var mi=0;mi<4;mi++){var d2=new Date(now.getFullYear(),now.getMonth()-mi,1);var val=d2.getFullYear()+'-'+String(d2.getMonth()+1).padStart(2,'0');var months=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];var lbl=months[d2.getMonth()]+' '+d2.getFullYear();btns+='<button class="btn btn-sm" style="font-size:10px;padding:2px 8px" onclick="document.getElementById(\'bulkBillPeriod\').value=\''+val+'\'">'+lbl+'</button>';}return btns;}())+'<input class="form-input" type="month" id="bulkBillPeriod" style="width:140px;font-size:12px;padding:4px 8px"></div></div>';
   h += '<button class="btn btn-primary btn-sm" onclick="generateBulkBills()" style="white-space:nowrap;padding:4px 12px">💳 Выставить счета всем клиентам</button>';
   h += '<div id="bulkBillStatus" style="font-size:12px;color:var(--text-3)"></div>';
   h += '</div>';
@@ -3028,11 +3147,14 @@ function deleteBillFromBank(clientId, billId) {
 }
 
 // ========== BANK PAYMENTS (Tochka) ==========
+var _paymentsSearch='';
+function filterPayments(){_paymentsSearch=(document.getElementById('paymentsSearchInput')||{}).value||'';renderBankPayments();}
 function renderBankPayments() {
   var container = document.getElementById('bankPaymentsSection');
   if (!container) return;
   var bp = currentData.bankPayments || [];
   var tochkaOk = currentData.tochkaConfigured;
+  var searchVal=_paymentsSearch.toLowerCase();
   var h = '<div class="detail-card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
   h += '<h3 style="margin:0">\u{1F3E6} Банк Точка</h3>';
@@ -3042,7 +3164,14 @@ function renderBankPayments() {
     h += '<span class="badge" style="background:var(--danger);color:#fff;font-size:10px;padding:2px 8px;border-radius:8px">API не настроен</span>';
   }
   h += '</div>';
+  // Search toolbar
+  h += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:8px 10px;background:var(--bg-3);border-radius:8px">';
+  h += '<input id="paymentsSearchInput" class="form-input" placeholder="Поиск по плательщику, ИНН, назначению..." oninput="filterPayments()" value="'+esc(searchVal)+'" style="flex:1;font-size:12px;padding:5px 10px">';
+  var unmatchedCount=bp.filter(function(p){return!p.matched&&!p.dismissed&&p.webhookType==='incomingPayment'}).length;
+  if(unmatchedCount>0)h+='<span style="font-size:11px;color:var(--danger);font-weight:600;white-space:nowrap">⚠ Неопознанных: '+unmatchedCount+'</span>';
+  h += '</div>';
   var unmatched = bp.filter(function(p) { return !p.matched && !p.dismissed && p.webhookType === 'incomingPayment'; }).sort(function(a,b){return(b.date||'').localeCompare(a.date||'')});
+  if(searchVal){unmatched=unmatched.filter(function(p){return(p.payerName||'').toLowerCase().indexOf(searchVal)!==-1||(p.payerInn||'').toLowerCase().indexOf(searchVal)!==-1||(p.purpose||'').toLowerCase().indexOf(searchVal)!==-1;})}
   if (unmatched.length > 0) {
     h += '<div style="background:rgba(220,38,38,0.1);border:1px solid var(--danger);border-radius:8px;padding:10px;margin-bottom:12px">';
     h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
@@ -3066,16 +3195,19 @@ function renderBankPayments() {
     });
     h += '</tbody></table></div>';
   }
-  var matched = bp.filter(function(p) { return p.matched && p.webhookType === 'incomingPayment'; }).sort(function(a,b){return(b.date||'').localeCompare(a.date||'')}).slice(0, 30);
+  var matched = bp.filter(function(p) { return p.matched && p.webhookType === 'incomingPayment'; }).sort(function(a,b){return(b.date||'').localeCompare(a.date||'')});
+  if(searchVal){matched=matched.filter(function(p){return(p.payerName||'').toLowerCase().indexOf(searchVal)!==-1||(p.payerInn||'').toLowerCase().indexOf(searchVal)!==-1||(p.purpose||'').toLowerCase().indexOf(searchVal)!==-1||(p.matchedClientName||'').toLowerCase().indexOf(searchVal)!==-1;});}
+  matched=matched.slice(0,50);
   if (matched.length > 0) {
     h += '<div style="font-size:12px;font-weight:600;margin-bottom:6px">\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438</div>';
     h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:right">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041A\u043B\u0438\u0435\u043D\u0442</th></tr></thead><tbody>';
     matched.forEach(function(p) {
-      h += '<tr style="border-bottom:1px solid var(--border)">';
+      var isUnmatched=!p.client_id&&!p.matchedClientName;
+      h += '<tr style="border-bottom:1px solid var(--border)'+(isUnmatched?';background:rgba(220,38,38,0.06)':'')+'">';
       h += '<td style="padding:4px 6px">' + fmtDateRu(p.date) + '</td>';
       h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
-      h += '<td style="padding:4px 6px;text-align:right;font-weight:500">' + p.amount + ' \u20BD</td>';
-      h += '<td style="padding:4px 6px;color:var(--success);font-weight:500">\u2705 ' + esc(p.matchedClientName || '') + '</td>';
+      h += '<td style="padding:4px 6px;text-align:right;font-weight:500'+(isUnmatched?';color:var(--danger)':'')+'">' + p.amount + ' \u20BD</td>';
+      h += '<td style="padding:4px 6px;color:var(--success);font-weight:500">'+(isUnmatched?'<span style="color:var(--danger)">⚠ Не привязан</span>':'\u2705 ' + esc(p.matchedClientName || ''))+'</td>';
       h += '</tr>';
     });
     h += '</tbody></table>';
