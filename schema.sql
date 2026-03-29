@@ -1,8 +1,6 @@
 -- Proxies.Rent Dashboard — SQLite Schema
 -- Replaces: clients.json, billing_ledger.json, sessions.json, bank_payments.json,
---           ip_tracking.json, uptime_tracking.json, daily_traffic.json,
---           telegram_users.json, telegram_proxies.json, telegram_feedback.json,
---           audit_log.json
+--           ip_tracking.json, uptime_tracking.json, daily_traffic.json, audit_log.json
 
 -- Clients (replaces clients.json)
 CREATE TABLE IF NOT EXISTS clients (

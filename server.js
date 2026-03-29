@@ -65,6 +65,7 @@ try { db.exec('CREATE INDEX IF NOT EXISTS idx_bank_payments_tochka_id ON bank_pa
 safeAddColumn('billing_ledger', 'details', "TEXT DEFAULT '{}'");
 safeAddColumn('closing_documents', 'contract_info', "TEXT DEFAULT ''");
 safeAddColumn('clients', 'client_type', "TEXT DEFAULT 'legal'");
+safeAddColumn('clients', 'billing_paused', "INTEGER DEFAULT 0");
 safeAddColumn('closing_documents', 'signed_at', 'TEXT');
 
 // External proxies table
@@ -247,8 +248,8 @@ const CLIENTS_FILE = path.join(__dirname, 'clients.json'); // JSON fallback for 
 const _clientUpsert = db.prepare(`INSERT INTO clients (id, login, password, password_hash, port_name, name, contact, notes,
     billing_type, price, currency, balance, api_key, referral_code, referred_by, referral_balance,
     reset_token, inn, kpp, legal_name, contract_info, address, auto_acts, auto_bills,
-    last_traffic_snapshot, created_at, client_type)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    last_traffic_snapshot, created_at, client_type, billing_paused)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET
     login=excluded.login, password=excluded.password, password_hash=excluded.password_hash,
     port_name=excluded.port_name, name=excluded.name, contact=excluded.contact,
@@ -260,7 +261,7 @@ const _clientUpsert = db.prepare(`INSERT INTO clients (id, login, password, pass
     contract_info=excluded.contract_info, address=excluded.address,
     auto_acts=excluded.auto_acts, auto_bills=excluded.auto_bills,
     last_traffic_snapshot=excluded.last_traffic_snapshot, client_type=excluded.client_type,
-    updated_at=datetime('now')`);
+    billing_paused=excluded.billing_paused, updated_at=datetime('now')`);
 const _clientDelete = db.prepare('DELETE FROM clients WHERE id = ?');
 const _clientGetIds = db.prepare('SELECT id FROM clients');
 
@@ -353,7 +354,7 @@ function clientFromRow(r) {
     resetToken: r.reset_token || '', inn: r.inn || '', kpp: r.kpp || '',
     legalName: r.legal_name || '', contractInfo: r.contract_info || '',
     address: r.address || '', autoActs: r.auto_acts !== 0, autoBills: r.auto_bills !== 0,
-    clientType: r.client_type || 'legal',
+    billingPaused: r.billing_paused === 1, clientType: r.client_type || 'legal',
     last_traffic_snapshot: r.last_traffic_snapshot
       ? (typeof r.last_traffic_snapshot === 'string' ? JSON.parse(r.last_traffic_snapshot) : r.last_traffic_snapshot)
       : { timestamp: null, month_bytes: 0 },
@@ -420,7 +421,7 @@ function saveClients(clientsList) {
           c.inn || '', c.kpp || '', c.legalName || '', c.contractInfo || '',
           c.address || '', c.autoActs !== false ? 1 : 0, c.autoBills !== false ? 1 : 0,
           JSON.stringify(c.last_traffic_snapshot || {}), c.createdAt || new Date().toISOString(),
-          c.clientType || 'legal'
+          c.clientType || 'legal', c.billingPaused ? 1 : 0
         );
         // Sync payments
         _paymentDeleteByClient.run(c.id);
@@ -1717,30 +1718,7 @@ function postApi(server, apiPath, body, timeout = 10000) {
   });
 }
 
-function postFormApi(server, apiPath, formData, timeout = 10000) {
-  return new Promise((resolve, reject) => {
-    const url = new URL(apiPath, server.url);
-    const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
-    const req = getHttpLib(url).request({
-      hostname: url.hostname, port: url.port,
-      path: url.pathname + url.search, method: 'POST',
-      headers: {
-        'Authorization': `Basic ${auth}`,
-        'Content-Type': 'application/x-www-form-urlencoded',
-        'Content-Length': Buffer.byteLength(formData)
-      },
-      timeout
-    }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => resolve({ status: res.statusCode, body: data }));
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout from ' + server.name)); });
-    req.write(formData);
-    req.end();
-  });
-}
+// postFormApi defined below in ASSIGN/UNASSIGN section (single definition)
 
 function findServer(serverName) {
   return apiServers.find(s => s.name === serverName);
@@ -2644,9 +2622,10 @@ app.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
     const portNameFilter = req.user.portNameFilter;
     if (portNameFilter === '*') { /* admin — allow */ }
     else {
-      const cached = getCachedData();
-      if (!cached) return res.status(503).json({ error: 'Data not loaded yet' });
-      const allPorts = cached.ports || {};
+      const results = await fetchAllServersDataCached();
+      const merged = mergeServerData(results, '*');
+      if (!merged) return res.status(503).json({ error: 'Data not loaded yet' });
+      const allPorts = merged.ports || {};
       let owned = false;
       for (const srv in allPorts) {
         const ports = allPorts[srv] || [];
@@ -3937,7 +3916,7 @@ app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req,
 
     // First read current port config from edit page
     const editPageRaw = await fetchApiRaw(server, `/conf/edit_port/${portID}`);
-    const editHtml = editPageRaw || '';
+    const editHtml = editPageRaw?.buffer ? editPageRaw.buffer.toString('utf8') : '';
     // Extract existing form values to preserve them
     const extract = (name) => { const m = editHtml.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`)); return m ? m[1] : ''; };
     const formData = {
@@ -3959,7 +3938,7 @@ app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req,
     const result = await postFormApi(server, `/conf/edit_port/${portID}`, formData);
     console.log(`[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`);
     // Invalidate cache so changes appear immediately
-    serverDataCache.clear();
+    _psCache = null; _psCacheTs = 0;
     auditLog(req.user.login, 'assign_modem', { serverName, portID, newPortName, ip: getClientIp(req) });
     res.json({ ok: true });
   } catch (err) {
@@ -4010,9 +3989,10 @@ app.get('/api/admin/available_modems', authMiddleware, adminMiddleware, async (r
   try {
     const results = await fetchAllServersDataCached();
     const available = [];
-    for (const srv of Object.keys(results)) {
-      const ports = results[srv].ports || {};
-      const status = results[srv].status || [];
+    for (const data of results) {
+      const srvName = data.serverName || '';
+      const ports = data.ports || {};
+      const status = Array.isArray(data.status) ? data.status : [];
       const modemMap = {};
       status.forEach(m => { const imei = m.modem_details?.IMEI; if (imei) modemMap[imei] = m; });
       for (const imei of Object.keys(ports)) {
@@ -4021,7 +4001,7 @@ app.get('/api/admin/available_modems', authMiddleware, adminMiddleware, async (r
         const nick = modem?.modem_details?.NICK || imei;
         modemPorts.forEach(p => {
           available.push({
-            server: srv,
+            server: srvName,
             imei,
             nick,
             portID: p.portID,
@@ -4281,7 +4261,7 @@ app.post('/api/admin/save_port_config', authMiddleware, adminMiddleware, async (
     const result = await postFormApi(server, `/conf/edit_port/${portId}`, formData);
     // Apply the port changes
     await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`);
-    serverDataCache.clear();
+    _psCache = null; _psCacheTs = 0;
     auditLog(req.user.login, 'save_port_config', { serverName, portId, fields: Object.keys(fields), ip: getClientIp(req) });
     res.json({ ok: true, status: result.status });
   } catch (err) {
