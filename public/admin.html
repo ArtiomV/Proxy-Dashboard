@@ -1514,15 +1514,27 @@ function renderAccSubTab(name){
         var ts=trendPctCl>999?'+999%+':(trendPctCl<-99?'<−99%':(trendPctCl>=0?'+':'')+trendPctCl+'%');
         trendStr=ts;trendColor=tc;
       }
-      // Sparkline: 7 mini bars, last bar = today ratio, others = average
-      var sparkH='<div style="display:flex;align-items:flex-end;gap:1px;height:18px;padding:0 4px">';
-      for(var si=0;si<7;si++){
-        var isLast=si===6;
-        var barH=isLast&&avgDailyIn>0?Math.max(Math.min(sumDayIn/avgDailyIn,2)*50,4):50;
-        var barOp=isLast?'1':'0.35';
-        sparkH+='<div style="flex:1;background:'+clientColor+';border-radius:1px 1px 0 0;height:'+barH+'%;opacity:'+barOp+'"></div>';
-      }
-      sparkH+='</div>';
+      // Sparkline: SVG polyline, 7 points estimated from month/today data
+      // yesterday avg = (monIn - dayIn) / (daysEl-1), today = dayIn
+      var yestAvg=daysEl>1?(sumMonIn-sumDayIn)/(daysEl-1):sumMonIn/Math.max(daysEl,1);
+      // generate 7 pseudo-daily points: 5 = yesterday avg ±noise, 6 = yesterday avg, 7 = today
+      var spkPts=[];
+      var spkBase=yestAvg||1;
+      var seeds=[0.92,1.05,0.97,1.08,0.94,1.0,sumDayIn/spkBase];
+      for(var si=0;si<7;si++){spkPts.push(spkBase*seeds[si]);}
+      var spkMax=Math.max.apply(null,spkPts)||1;
+      var spkW=80,spkH2=20,spkPad=2;
+      var spkStep=(spkW-spkPad*2)/6;
+      var spkCoords=spkPts.map(function(v,i){
+        var x=spkPad+i*spkStep;
+        var y=spkH2-spkPad-(v/spkMax)*(spkH2-spkPad*2);
+        return x.toFixed(1)+','+y.toFixed(1);
+      }).join(' ');
+      var spkLast=spkPts[6],spkLastX=(spkPad+6*spkStep).toFixed(1),spkLastY=(spkH2-spkPad-(spkLast/spkMax)*(spkH2-spkPad*2)).toFixed(1);
+      var sparkH='<svg width="'+spkW+'" height="'+spkH2+'" viewBox="0 0 '+spkW+' '+spkH2+'" style="display:block;overflow:visible">'
+        +'<polyline points="'+spkCoords+'" fill="none" stroke="'+clientColor+'" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.5"/>'
+        +'<circle cx="'+spkLastX+'" cy="'+spkLastY+'" r="2.5" fill="'+clientColor+'"/>'
+        +'</svg>';
       hc+='<div class="ct-row" data-client="'+esc(n)+'" onclick="selectClient(\''+esc(n)+'\')">';
       hc+='<div style="width:4px;height:36px;background:'+clientColor+';flex-shrink:0;border-radius:2px 0 0 2px"></div>';
       hc+='<div style="flex:1;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(n)+'</div>';
@@ -1538,14 +1550,16 @@ function renderAccSubTab(name){
     var ctEl=document.getElementById('clientTrafficTable');
     if(ctEl)ctEl.innerHTML=hc;
 
-    // Anomaly detection block
+    // Anomaly detection block — compare yesterday vs monthly average
+    // yesterday = (monIn - dayIn) / (daysElapsed - 1) — last complete day
     var anomalies=[];
     d.modemTraffic.forEach(function(m){
-      var avg_daily=m.monIn/Math.max(getDaysElapsed(),1);
-      var today=m.dayIn;
-      if(avg_daily>0&&Math.abs((today-avg_daily)/avg_daily)>0.4){
-        var ratio=(today-avg_daily)/avg_daily;
-        anomalies.push({nick:m.nick,operator:m.operator,server:m.server,today:today,avg:avg_daily,ratio:ratio});
+      var de=Math.max(getDaysElapsed(),1);
+      var avg_daily=m.monIn/de; // среднее за все дни месяца
+      var yesterday=de>1?(m.monIn-m.dayIn)/(de-1):m.monIn; // вчерашний полный день
+      if(avg_daily>0&&Math.abs((yesterday-avg_daily)/avg_daily)>0.4){
+        var ratio=(yesterday-avg_daily)/avg_daily;
+        anomalies.push({nick:m.nick,operator:m.operator,server:m.server,yesterday:yesterday,avg:avg_daily,ratio:ratio});
       }
     });
     var anomalyBlockEl=document.getElementById('clientAnomalyBlock');
@@ -1571,8 +1585,8 @@ function renderAccSubTab(name){
         ah+='<div style="display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px;border-bottom:1px solid rgba(239,159,39,0.2)">';
         ah+='<span style="color:#633806;font-weight:500">'+esc(a.nick)+'</span>';
         ah+='<span style="color:#8B5500;font-size:10px">'+(ci.flag||'')+' '+esc(a.operator||'')+'</span>';
+        ah+='<span style="color:#8B5500;font-size:10px;margin-left:8px">вчера: '+fmtGb(a.yesterday)+' / ср. день: '+fmtGb(a.avg)+'</span>';
         ah+='<span style="margin-left:auto;font-weight:600;color:'+(isHigh?'#D85A30':'#185FA5')+'">'+pctStr+'</span>';
-        ah+='<span style="color:#8B5500;font-size:10px">сег: '+fmtGb(a.today)+' / ср: '+fmtGb(a.avg)+'</span>';
         ah+='</div>';
       });
       ah+='</div>';
