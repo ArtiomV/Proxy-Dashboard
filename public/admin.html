@@ -561,7 +561,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
             </select>
           </div>
         </div>
-        <div style="height:280px"><canvas id="chartDailyClientTraffic"></canvas></div>
+        <div class="chart-wrap-daily" style="height:280px"><canvas id="chartDailyClientTraffic"></canvas></div>
       </div>
     </div>
     <div class="analytics-card" style="margin:0 24px 24px">
@@ -1197,6 +1197,7 @@ function switchAccTab(name,el){
 
 function setAccPeriod(p,el){
   accPeriod=p;
+  window._dailyTrafficCache=null; // reset cache so chart reloads fresh
   document.querySelectorAll('.acc-period-btn').forEach(function(b){b.classList.remove('active')});
   if(el)el.classList.add('active');
   renderTrafficTab();
@@ -1434,8 +1435,17 @@ function renderAccSubTab(name){
       recH+='</div>';
 
       // --- Операторы ---
+      // Build allOps from same source as serverOpTraffic to keep values consistent
       var allOps={};
-      d.modemTraffic.forEach(function(m){var op=m.operator;if(!op)return;if(!allOps[op])allOps[op]={t:0,cnt:0};allOps[op].t+=m.tIn+m.tOut;allOps[op].cnt++;});
+      Object.keys(d.serverOpTraffic).forEach(function(s){
+        Object.keys(d.serverOpTraffic[s]).forEach(function(op){
+          if(!op)return;
+          if(!allOps[op])allOps[op]={t:0,cnt:0};
+          var v=d.serverOpTraffic[s][op];
+          allOps[op].t+=v.tIn+v.tOut;
+          allOps[op].cnt+=v.count;
+        });
+      });
       var opList=Object.keys(allOps).sort(function(a,b){return allOps[b].t-allOps[a].t});
       var opDays=getDaysElapsed();
       var opMax=opList.length?(allOps[opList[0]].t/opDays)||1:1;
@@ -1589,10 +1599,23 @@ function renderAccSubTab(name){
     }
 
     // Daily chart
+    var chartEl=document.getElementById('chartDailyClientTraffic');
+    if(!chartEl)return;
     if(!window._dailyTrafficCache){
-      fetch(API+'/api/admin/daily_traffic',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
-        window._dailyTrafficCache=data;renderDailyClientChart(data,cc);
-      });
+      chartEl.parentElement.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:12px">Загрузка графика...</div>';
+      fetch(API+'/api/admin/daily_traffic',{headers:{'X-Auth-Token':authToken}})
+        .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+        .then(function(data){
+          window._dailyTrafficCache=data;
+          // restore canvas
+          var wrap=document.querySelector('#acc-overview .chart-wrap-daily');
+          if(wrap){wrap.innerHTML='<canvas id="chartDailyClientTraffic"></canvas>';}
+          renderDailyClientChart(data,cc);
+        })
+        .catch(function(e){
+          var w=document.querySelector('#acc-overview .chart-wrap-daily');
+          if(w)w.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--danger);font-size:12px">Ошибка загрузки графика: '+e.message+'</div>';
+        });
     } else {renderDailyClientChart(window._dailyTrafficCache,cc);}
   }
   else if(name==='resources'){
