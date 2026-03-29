@@ -1429,7 +1429,7 @@ function renderAccSubTab(name){
 
       // --- Операторы ---
       var allOps={};
-      d.modemTraffic.forEach(function(m){var op=m.operator||m.operator||'—';if(!allOps[op])allOps[op]={t:0,cnt:0};allOps[op].t+=m.tIn+m.tOut;allOps[op].cnt++;});
+      d.modemTraffic.forEach(function(m){var op=m.operator;if(!op)return;if(!allOps[op])allOps[op]={t:0,cnt:0};allOps[op].t+=m.tIn+m.tOut;allOps[op].cnt++;});
       var opList=Object.keys(allOps).sort(function(a,b){return allOps[b].t-allOps[a].t});
       var opMax=opList.length?allOps[opList[0]].t||1:1;
       var opH='<div class="analytics-card" style="margin:0">';
