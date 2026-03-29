@@ -208,6 +208,21 @@ CREATE INDEX IF NOT EXISTS idx_rotation_log_nick ON rotation_log(server_name, ni
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rotation_log_uniq ON rotation_log(server_name, nick, started_at);
 
 -- Hourly traffic aggregates (for heatmap and trend analytics)
+-- Modem metadata cache (static data from ProxySmart, updated periodically)
+CREATE TABLE IF NOT EXISTS modem_meta (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_name TEXT NOT NULL,
+  imei        TEXT NOT NULL,
+  nick        TEXT NOT NULL DEFAULT '',
+  operator    TEXT NOT NULL DEFAULT '',
+  model       TEXT NOT NULL DEFAULT '',
+  phone       TEXT NOT NULL DEFAULT '',
+  updated_at  TEXT NOT NULL DEFAULT (datetime('now')),
+  UNIQUE(server_name, imei)
+);
+CREATE INDEX IF NOT EXISTS idx_modem_meta_nick ON modem_meta(nick);
+
+-- Hourly traffic per modem
 CREATE TABLE IF NOT EXISTS traffic_hourly (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   server_name TEXT NOT NULL DEFAULT '',

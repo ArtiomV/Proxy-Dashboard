@@ -1004,6 +1004,39 @@ const _dtCleanup = db.prepare("DELETE FROM daily_traffic WHERE date < date('now'
 const _htUpsert = db.prepare('INSERT OR REPLACE INTO traffic_hourly (server_name, nick, operator, client_name, hour_start, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?, ?)');
 const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
 
+// Save yesterday's traffic from live ProxySmart data — called every 5 min
+async function syncYesterdayTraffic() {
+  try {
+    const results = await fetchAllServersDataCached();
+    const now = new Date();
+    const yesterday = new Date(now.getTime() - 24 * 3600 * 1000);
+    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+    let count = 0;
+    const batch = db.transaction(() => {
+      for (const data of results) {
+        if (data._cached || typeof data.bw !== 'object') continue;
+        const prefix = data.serverName + '_';
+        for (const [portId, b] of Object.entries(data.bw)) {
+          if (!b.portName) continue;
+          const key = prefix + portId;
+          const yIn = parseBwToBytes(b.bandwidth_bytes_yesterday_in);
+          const yOut = parseBwToBytes(b.bandwidth_bytes_yesterday_out);
+          if (yIn > 0 || yOut > 0) {
+            _dtUpsert.run(key, yesterdayStr, yIn, yOut);
+            if (!dailyTraffic[key]) dailyTraffic[key] = {};
+            dailyTraffic[key][yesterdayStr] = { in: yIn, out: yOut, portName: b.portName };
+            count++;
+          }
+        }
+      }
+    });
+    batch();
+    if (count > 0) console.log(`[DailySync] Saved ${count} yesterday traffic entries for ${yesterdayStr}`);
+  } catch (e) {
+    console.error('[DailySync] Error:', e.message);
+  }
+}
+
 function saveDailyTraffic() {
   try {
     const batch = db.transaction(() => {
@@ -2146,6 +2179,8 @@ function recordIpChange(key, oldIp, newIp, timestamp) {
 
 // Combined tracking: IP changes + uptime percentage (runs every 5 min)
 // Uptime fix: skip rotating/rebooting modems, skip unreachable servers
+const _modemMetaUpsert = db.prepare(`INSERT OR REPLACE INTO modem_meta (server_name, imei, nick, operator, model, phone, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`);
+
 async function trackModems() {
   const now = Date.now();
   let totalTracked = 0;
@@ -2156,12 +2191,24 @@ async function trackModems() {
       const data = await fetchServerData(server);
       statusArr = Array.isArray(data.status) ? data.status : [];
     } catch (e) {
-      // Server unreachable -- skip all modems on this server (don't count as offline)
       console.log(`[Tracking] Server ${server.name} unreachable, skipping: ${e.message}`);
       continue;
     }
 
     const prefix = server.name + '_';
+
+    // Sync modem metadata to SQLite (nick, operator, model, phone — rarely changes)
+    try {
+      const metaBatch = db.transaction(() => {
+        for (const m of statusArr) {
+          const md = m.modem_details || {};
+          const imei = md.IMEI;
+          if (!imei) continue;
+          _modemMetaUpsert.run(server.name, imei, md.NICK || '', md.OPERATOR || '', md.MODEL || '', md.PHONE_NUMBER || '');
+        }
+      });
+      metaBatch();
+    } catch (e) { /* non-critical */ }
 
     for (const m of statusArr) {
       const imei = m.modem_details?.IMEI;
@@ -6122,8 +6169,10 @@ const httpServer = app.listen(PORT, () => {
   const TRACKING_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
   console.log(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
   trackModems().catch(e => console.error('[Tracking] Initial error:', e.message));
+  syncYesterdayTraffic().catch(e => console.error('[DailySync] Initial error:', e.message));
   _intervals.push(setInterval(() => {
     trackModems().catch(e => console.error('[Tracking] Error:', e.message));
+    syncYesterdayTraffic().catch(e => console.error('[DailySync] Error:', e.message));
   }, TRACKING_INTERVAL_MS));
 
   // If no cached top_hosts data, do initial aggregation
