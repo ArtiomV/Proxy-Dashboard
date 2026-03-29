@@ -1021,6 +1021,8 @@ const _dtUpsert = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, d
 const _dtCleanup = db.prepare("DELETE FROM daily_traffic WHERE date < date('now', '-90 days')");
 const _htUpsert = db.prepare('INSERT OR REPLACE INTO traffic_hourly (server_name, nick, operator, client_name, hour_start, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?, ?)');
 const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
+const _metaCleanup = db.prepare("DELETE FROM modem_meta WHERE updated_at < datetime('now', '-30 days')");
+const _rotLogCleanup = db.prepare("DELETE FROM rotation_log WHERE started_at < datetime('now', '-90 days')");
 
 // Save yesterday's traffic from live ProxySmart data — called every 5 min
 async function syncYesterdayTraffic() {
@@ -1887,7 +1889,7 @@ function getCachedDataAsOffline(serverName) {
 // ==================== AUTO_IP_ROTATION cache (from ProxySmart /conf/edit/) ====================
 const modemRotationCache = {}; // { "S1:IMEI" -> minutes }
 let rotationCacheUpdatedAt = 0;
-const ROTATION_CACHE_TTL = 5 * 60 * 1000; // refresh every 5 min
+const ROTATION_CACHE_TTL = 30 * 60 * 1000; // refresh every 30 min (settings rarely change)
 
 async function refreshRotationCache() {
   for (const server of apiServers) {
@@ -6211,15 +6213,20 @@ const httpServer = app.listen(PORT, () => {
   // Schedule nightly TopHosts at 03:00
   scheduleRepeating(3, 0, 'TopHosts', aggregateTopHosts);
 
-  // Start modem tracking (IP + uptime)
-  const TRACKING_INTERVAL_MS = 5 * 60 * 1000; // every 5 minutes
+  // Start modem tracking (IP + uptime) — every 5 min
+  const TRACKING_INTERVAL_MS = 5 * 60 * 1000;
   console.log(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
   trackModems().catch(e => console.error('[Tracking] Initial error:', e.message));
-  syncYesterdayTraffic().catch(e => console.error('[DailySync] Initial error:', e.message));
   _intervals.push(setInterval(() => {
     trackModems().catch(e => console.error('[Tracking] Error:', e.message));
-    syncYesterdayTraffic().catch(e => console.error('[DailySync] Error:', e.message));
   }, TRACKING_INTERVAL_MS));
+
+  // Sync yesterday traffic — every 60 min (data changes once per day at local midnight)
+  const DAILY_SYNC_INTERVAL_MS = 60 * 60 * 1000;
+  syncYesterdayTraffic().catch(e => console.error('[DailySync] Initial error:', e.message));
+  _intervals.push(setInterval(() => {
+    syncYesterdayTraffic().catch(e => console.error('[DailySync] Error:', e.message));
+  }, DAILY_SYNC_INTERVAL_MS));
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {
@@ -6234,11 +6241,23 @@ const httpServer = app.listen(PORT, () => {
     autoCreateMissingClients().catch(e => console.error('[AutoCreate] Error:', e.message));
   }, 10 * 60 * 1000));
 
+  // Nightly DB cleanup at 00:30 UTC — remove old data
+  scheduleRepeating(0, 30, 'DbCleanup', () => {
+    try {
+      const dtDel = _dtCleanup.run();
+      const htDel = _htCleanup.run();
+      const metaDel = _metaCleanup.run();
+      const rotDel = _rotLogCleanup.run();
+      const total = dtDel.changes + htDel.changes + metaDel.changes + rotDel.changes;
+      if (total > 0) console.log(`[DbCleanup] Removed ${total} old rows (daily:${dtDel.changes} hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes})`);
+    } catch (e) { console.error('[DbCleanup] Error:', e.message); }
+  });
+
   // Schedule daily billing at 01:00 UTC (04:00 MSK, 4h after ProxySmart midnight reset)
   scheduleRepeating(1, 0, 'DailyBilling', runDailyBilling);
 
-  // Monthly reconciliation at 03:00 UTC (06:00 MSK) on 1st of month — before acts
-  scheduleRepeating(3, 0, 'MonthlyReconciliation', runMonthlyReconciliation);
+  // Monthly reconciliation at 03:30 UTC (06:30 MSK) on 1st of month — after TopHosts, before acts
+  scheduleRepeating(3, 30, 'MonthlyReconciliation', runMonthlyReconciliation);
 
   // Auto-generate closing documents (acts) on 1st of each month at 08:05 Moscow (05:05 UTC)
   scheduleRepeating(5, 5, 'MonthlyActs', autoGenerateMonthlyActs);
@@ -6246,11 +6265,11 @@ const httpServer = app.listen(PORT, () => {
   // Auto-generate bills on 1st of each month at 08:10 Moscow (05:10 UTC)
   scheduleRepeating(5, 10, 'MonthlyBills', autoGenerateMonthlyBills);
 
-  // Hourly traffic aggregation at :01 each hour (reads day counter delta → stores in traffic_hourly)
+  // Hourly traffic aggregation at :05 each hour (5 min buffer for ProxySmart counter updates)
   (function scheduleHourlyAgg() {
     const now = new Date();
     const next = new Date(now);
-    next.setMinutes(1, 0, 0);
+    next.setMinutes(5, 0, 0);
     if (next <= now) next.setHours(next.getHours() + 1);
     const msUntil = next - now;
     console.log(`[HourlyAgg] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
