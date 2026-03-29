@@ -1923,11 +1923,10 @@ function renderFinancesTab(d){
     var monBytes=clModems.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
     var monGb=monBytes/1073741824;
     var charged=0;var tariffStr='—';
-    if(cl.tariff_type==='per_gb'||cl.billing==='per_gb'){
-      var price=cl.price||cl.price_per_gb||0;
+    var bt=cl.billingType||'';var price=cl.price||0;
+    if(bt==='per_gb'){
       charged=monGb*price;tariffStr=price+'₽/ГБ';
-    } else if(cl.tariff_type==='per_modem'||cl.billing==='per_modem'){
-      var price=cl.price||cl.price_per_modem||0;
+    } else if(bt==='per_modem'){
       charged=price*modemCount;tariffStr=price+'₽/мод';
     }
     totalRevenue+=charged;
@@ -1957,9 +1956,9 @@ function renderFinancesTab(d){
     var modemCount=clModems.length;
     var monBytes=clModems.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
     var monGb=monBytes/1073741824;
-    var charged=0;
-    if(cl.tariff_type==='per_gb'||cl.billing==='per_gb'){charged=monGb*(cl.price||cl.price_per_gb||0);}
-    else if(cl.tariff_type==='per_modem'||cl.billing==='per_modem'){charged=(cl.price||cl.price_per_modem||0)*modemCount;}
+    var charged=0;var bt2=cl.billingType||'';var price2=cl.price||0;
+    if(bt2==='per_gb'){charged=monGb*price2;}
+    else if(bt2==='per_modem'){charged=price2*modemCount;}
     if(charged>0)clientRevs.push({name:cl.name||ctKey,rev:charged,color:CHART_COLORS.clients[i%CHART_COLORS.clients.length]});
     totalRev+=charged;
   });
@@ -1999,8 +1998,9 @@ function renderFinancesTab(d){
     var cl=(currentData.clients||[]).find(function(c){return(c.portName||c.username)===m.pn});
     if(cl){
       var tGb=((m.monIn||0)+(m.monOut||0))/1073741824;
-      if(cl.tariff_type==='per_gb'||cl.billing==='per_gb'){opStats[op].rev+=tGb*(cl.price||cl.price_per_gb||0);}
-      else if(cl.tariff_type==='per_modem'||cl.billing==='per_modem'){opStats[op].rev+=(cl.price||cl.price_per_modem||0);}
+      var cbt=cl.billingType||'';var cp=cl.price||0;
+      if(cbt==='per_gb'){opStats[op].rev+=tGb*cp;}
+      else if(cbt==='per_modem'){opStats[op].rev+=cp;}
     }
   });
   Object.keys(opStats).sort(function(a,b){return opStats[b].rev-opStats[a].rev}).forEach(function(op){
