@@ -500,8 +500,6 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <!-- TAB: MODEMS -->
 <div class="tab-content active" id="tab-modems">
-  <div class="toolbar">
-  </div>
   <div class="table-wrap" id="tableWrap"></div>
 </div>
 
@@ -1316,15 +1314,23 @@ function renderTrafficTab(){
 
   function mkWidget(label,val,sub,valColor){return'<div class="widget"><div class="widget-label">'+label+'</div><div class="widget-value"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div>'+(sub?'<div class="widget-sub">'+sub+'</div>':'')+'</div>';}
 
+  // Revenue: sum of all clientMonthCharges
+  var monthCharges=currentData.clientMonthCharges||{};
+  var totalRevenue=0;Object.keys(monthCharges).forEach(function(id){totalRevenue+=monthCharges[id]||0;});
+  var revIsApprox=accPeriod==='month';// ~ if current month not yet complete
+  var revLabel=Math.round(totalRevenue).toLocaleString('ru-RU')+' ₽';
+  var revPrefix=revIsApprox?'~ ':'';
+  var totalClients=(currentData.clients||[]).length;
+
   document.getElementById('trafficWidgets').innerHTML=
     mkWidget('Всего',fmtGb(total),'за '+d.label,'var(--accent)')+
-    mkWidget('Прогноз месяца',forecastVal,forecastH.replace(/<[^>]+>/g,''))+
+    mkWidget('Выручка/мес',revPrefix+revLabel,revIsApprox?'~ (месяц не закончен)':'итого за период','var(--success)')+
     mkWidget('Входящий',fmtGb(d.totalIn),inPct+'% от всего')+
     mkWidget('Исходящий',fmtGb(d.totalOut),outPct+'% от всего')+
     mkWidget('Активных модемов','<span style="color:'+onlineColor+'">'+onlineModemsAll+'</span>/'+totalModemsAll,onlineModemsAll===totalModemsAll?'100% онлайн':(totalModemsAll-onlineModemsAll)+' оффлайн')+
     mkWidget('Ср. на модем/сут',fmtGb(avgPerModem),'за '+daysElapsed+' дн.')+
     mkWidget('Топ клиент',esc(topClientName.length>14?topClientName.slice(0,13)+'…':topClientName),topClientPct+'% трафика')+
-    mkWidget('Клиентов',clientNames.length,clientNames.length===Object.keys(currentData._modemMap||{}).length?'все активны':'');
+    mkWidget('Клиентов',totalClients,clientNames.length+' с трафиком');
 
   // Render active sub-tab
   var activeSubTab=document.querySelector('.acc-sub-tab.active');
