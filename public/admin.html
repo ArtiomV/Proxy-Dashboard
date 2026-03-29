@@ -535,16 +535,6 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <div class="acc-sub-content active" id="acc-overview">
     <div class="widget-grid" id="trafficWidgets"></div>
     <div id="extendedWidgetsRow" style="padding:0 24px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px"></div>
-    <div class="chart-row">
-      <div class="chart-card">
-        <div class="chart-card-header"><h4>Детали по регионам</h4></div>
-        <div id="regionDetailBars"></div>
-      </div>
-      <div class="chart-card">
-        <div class="chart-card-header"><h4>Топ-5 модемов</h4></div>
-        <div id="top5ModemTable"></div>
-      </div>
-    </div>
     <!-- Клиенты — перенесено из отдельной вкладки -->
     <div style="padding:0 24px 14px">
       <div class="analytics-card" style="margin-bottom:14px">
@@ -1371,10 +1361,6 @@ function renderAccSubTab(name){
   if(name==='overview'){
     // Task 1: Clear top metric widgets
     var twEl=document.getElementById('trafficWidgets');if(twEl)twEl.innerHTML='';
-    // Task 2: Clear regionDetailBars
-    document.getElementById('regionDetailBars').innerHTML='';
-    // Task 3: Clear top5 modems
-    document.getElementById('top5ModemTable').innerHTML='';
 
     // Extended widgets: Аномалии (inline), Рекорды, Тренд (redesigned)
     var extRow=document.getElementById('extendedWidgetsRow');
@@ -1458,9 +1444,46 @@ function renderAccSubTab(name){
       trendH+='<div style="font-size:10px;color:var(--text-3);margin-top:4px">Прогноз: '+fmtGb(forecast)+'</div>';
       trendH+='</div>';
 
-      // Only 3 cards now: anomaly, records, trend (operator card removed)
-      extRow.style.gridTemplateColumns='repeat(3,1fr)';
-      extRow.innerHTML=anomH+recH+trendH;
+      // Operators card
+      var allOps={};
+      Object.keys(d.serverOpTraffic).forEach(function(s){
+        Object.keys(d.serverOpTraffic[s]).forEach(function(op){
+          if(!op)return;
+          if(!allOps[op])allOps[op]={t:0,cnt:0};
+          var v=d.serverOpTraffic[s][op];
+          allOps[op].t+=v.tIn+v.tOut;
+          allOps[op].cnt+=v.count;
+        });
+      });
+      var opDays=getDaysElapsed();
+      var opList=Object.keys(allOps).sort(function(a,b){return allOps[b].t-allOps[a].t});
+      var opMax=opList.length?(allOps[opList[0]].t/opDays)||1:1;
+      var opH='<div class="analytics-card" style="margin:0">';
+      opH+='<div style="font-size:11px;font-weight:700;color:var(--text-0);margin-bottom:8px">📡 Операторы</div>';
+      opList.forEach(function(op,oi){
+        var v=allOps[op];
+        var flag='';var opL=op.toLowerCase();
+        if(opL.indexOf('orange ro')!==-1||opL.indexOf('vodafone ro')!==-1)flag='🇷🇴 ';
+        else if(opL.indexOf('orange md')!==-1||opL.indexOf('moldtelecom')!==-1)flag='🇲🇩 ';
+        var avg_per_modem_day=fmtGb(v.cnt&&opDays?v.t/v.cnt/opDays:0);
+        var total_per_day=v.t/opDays;
+        var w=Math.max(total_per_day/opMax*100,2);
+        var col=CHART_COLORS.operators[oi%CHART_COLORS.operators.length];
+        opH+='<div style="margin-bottom:8px">';
+        opH+='<div style="display:flex;align-items:baseline;font-size:10px;margin-bottom:2px;gap:4px">';
+        opH+='<span style="flex:1;color:var(--text-1);font-weight:500">'+flag+esc(op)+'</span>';
+        opH+='<span style="color:var(--text-2)">'+avg_per_modem_day+'/мод/сут</span>';
+        opH+='<span style="color:var(--text-3)">·</span>';
+        opH+='<span style="color:var(--text-3)">'+v.cnt+' мод.</span>';
+        opH+='</div>';
+        opH+='<div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+col+';width:'+w+'%"></div></div>';
+        opH+='</div>';
+      });
+      opH+='</div>';
+
+      // 4 cards: anomaly, records, trend, operators
+      extRow.style.gridTemplateColumns='repeat(4,1fr)';
+      extRow.innerHTML=anomH+recH+trendH+opH;
     }
 
     // Matrix
