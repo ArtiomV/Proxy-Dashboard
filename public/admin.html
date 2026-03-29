@@ -559,10 +559,10 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     <div class="analytics-card" style="margin:0 24px 24px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <h3 style="margin:0">Матрица трафика</h3>
-        <div style="display:flex;align-items:center;gap:8px">
-          <div style="display:flex;gap:4px">
-            <button id="matrixViewModem" class="btn btn-sm active" onclick="setMatrixView('modem')" style="font-size:11px">По модему</button>
-            <button id="matrixViewClient" class="btn btn-sm" onclick="setMatrixView('client')" style="font-size:11px">По клиенту</button>
+        <div style="display:flex;align-items:center;gap:16px">
+          <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
+            <button id="matrixViewModem" onclick="setMatrixView('modem')" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 12px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По модемам</button>
+            <button id="matrixViewClient" onclick="setMatrixView('client')" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 12px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
           </div>
           <span style="font-size:10px;color:var(--text-3)">Сортировка по клику на заголовок</span>
         </div>
@@ -1777,8 +1777,15 @@ function matrixSort(key){
 }
 function setMatrixView(v){
   _matrixView=v;_matrixShowAll=false;
-  document.getElementById('matrixViewModem').classList.toggle('active',v==='modem');
-  document.getElementById('matrixViewClient').classList.toggle('active',v==='client');
+  var bm=document.getElementById('matrixViewModem'),bc=document.getElementById('matrixViewClient');
+  if(bm&&bc){
+    bm.style.borderBottomColor=v==='modem'?'var(--accent)':'transparent';
+    bm.style.color=v==='modem'?'var(--accent)':'var(--text-2)';
+    bm.style.fontWeight=v==='modem'?'600':'500';
+    bc.style.borderBottomColor=v==='client'?'var(--accent)':'transparent';
+    bc.style.color=v==='client'?'var(--accent)':'var(--text-2)';
+    bc.style.fontWeight=v==='client'?'600':'500';
+  }
   var d=collectTrafficData();if(d)renderTrafficMatrix(d);
 }
 function showAllMatrixRows(){
