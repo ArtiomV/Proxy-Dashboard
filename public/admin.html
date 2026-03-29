@@ -1776,12 +1776,6 @@ function renderClients(){
     var mets=[['МОДЕМОВ',''+modems.length,'var(--text-0)'],['ТАРИФ',tariffLabel,'var(--text-0)'],['БАЛАНС',Math.round(balance)+'\u20BD'+balWarn,balance>=0?'var(--text-0)':'var(--danger)'],['РАСХОД/МЕС',Math.round(cost)+'\u20BD','var(--accent)'],['ТРАФИК/МЕС',monthGbLive.toFixed(1)+' GB','var(--text-0)']];
     mets.forEach(function(met,mi){h+='<div style="padding:10px 12px;text-align:center'+(mi<4?';border-right:1px solid var(--border)':'')+'">'+'<div style="font-size:9px;font-weight:600;color:var(--text-3);letter-spacing:.5px;margin-bottom:4px">'+met[0]+'</div>'+'<div style="font-size:14px;font-weight:700;color:'+met[2]+'">'+met[1]+'</div></div>';});
     h+='</div>';
-    // Actions
-    h+='<div style="display:flex;align-items:center;gap:8px;padding:10px 16px">';
-    h+='<button class="btn btn-sm" onclick="openClientOpsModal(\''+c.id+'\',\'history\')" style="font-size:11px">Операции</button>';
-    h+='<button class="btn btn-sm" onclick="openClientOpsModal(\''+c.id+'\',\'documents\')" style="font-size:11px">Документы</button>';
-    h+='<button class="btn btn-sm" id="btnModems_'+c.id+'" onclick="toggleClientCard(\''+c.id+'\')" style="font-size:11px">Модемы ('+modems.length+') \u25BE</button>';
-    h+='</div>';
     // Expandable modems
     h+='<div id="clientCard_'+c.id+'" style="display:none;padding:0 16px 14px;border-top:1px solid var(--border)">';
     h+='<div style="display:flex;align-items:center;gap:8px;margin:10px 0 8px">';
