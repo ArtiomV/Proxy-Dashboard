@@ -1008,9 +1008,12 @@ const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < dat
 async function syncYesterdayTraffic() {
   try {
     const results = await fetchAllServersDataCached();
+    // ProxySmart resets "yesterday" at midnight Moscow time (UTC+3)
     const now = new Date();
-    const yesterday = new Date(now.getTime() - 24 * 3600 * 1000);
-    const yesterdayStr = yesterday.toISOString().slice(0, 10);
+    const mskNow = new Date(now.getTime() + 3 * 3600 * 1000);
+    const mskYesterday = new Date(mskNow);
+    mskYesterday.setUTCDate(mskYesterday.getUTCDate() - 1);
+    const yesterdayStr = mskYesterday.toISOString().slice(0, 10);
     let count = 0;
     const batch = db.transaction(() => {
       for (const data of results) {
@@ -1461,10 +1464,11 @@ _intervals.push(setInterval(() => {
 function generateToken() { return crypto.randomBytes(32).toString('hex'); }
 function generateId() { return crypto.randomBytes(8).toString('hex'); }
 
-// ==================== SETTINGS ====================
-const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+// ==================== SETTINGS (SQLite kv_store) ====================
+const _kvGet = db.prepare('SELECT value FROM kv_store WHERE key = ?');
+const _kvSet = db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime('now'))");
 
-let appSettings = {
+const SETTINGS_DEFAULTS = {
   speedtest_times: ['02:00', '14:00'],
   pricing_tiers: [
     { min_proxies: 1, price: 30, label: '1-4 прокси' },
@@ -1473,14 +1477,28 @@ let appSettings = {
     { min_proxies: 20, price: 20, label: '20+ прокси' }
   ]
 };
+
+let appSettings = { ...SETTINGS_DEFAULTS };
+// Load from SQLite, fallback to settings.json for migration
 try {
-  if (fs.existsSync(SETTINGS_FILE)) {
-    appSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+  const row = _kvGet.get('app_settings');
+  if (row) {
+    appSettings = JSON.parse(row.value);
+  } else {
+    // One-time migration from settings.json
+    const SETTINGS_FILE = path.join(__dirname, 'settings.json');
+    if (fs.existsSync(SETTINGS_FILE)) {
+      appSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      _kvSet.run('app_settings', JSON.stringify(appSettings));
+      console.log('[Settings] Migrated from settings.json to SQLite');
+    } else {
+      _kvSet.run('app_settings', JSON.stringify(appSettings));
+    }
   }
 } catch (e) { console.error('Failed to load settings:', e.message); }
 
 function saveSettings() {
-  safeWriteFile(SETTINGS_FILE, JSON.stringify(appSettings, null, 2));
+  _kvSet.run('app_settings', JSON.stringify(appSettings));
 }
 
 // ==================== PRICING TIERS ====================
@@ -4509,13 +4527,21 @@ app.post('/api/tools/check_proxy', checkProxyLimiter, authMiddleware, async (req
 });
 
 // ==================== TOP HOSTS AGGREGATION (auto-nightly) ====================
-const TOP_HOSTS_CACHE_FILE = path.join(__dirname, 'top_hosts_cache.json');
-
 let topHostsCache = { data: {}, perPort: {}, updatedAt: null };
 try {
-  if (fs.existsSync(TOP_HOSTS_CACHE_FILE)) {
-    topHostsCache = JSON.parse(fs.readFileSync(TOP_HOSTS_CACHE_FILE, 'utf8'));
+  const row = _kvGet.get('top_hosts_cache');
+  if (row) {
+    topHostsCache = JSON.parse(row.value);
     if (!topHostsCache.perPort) topHostsCache.perPort = {};
+  } else {
+    // One-time migration from top_hosts_cache.json
+    const TOP_HOSTS_CACHE_FILE = path.join(__dirname, 'top_hosts_cache.json');
+    if (fs.existsSync(TOP_HOSTS_CACHE_FILE)) {
+      topHostsCache = JSON.parse(fs.readFileSync(TOP_HOSTS_CACHE_FILE, 'utf8'));
+      if (!topHostsCache.perPort) topHostsCache.perPort = {};
+      _kvSet.run('top_hosts_cache', JSON.stringify(topHostsCache));
+      console.log('[TopHosts] Migrated from top_hosts_cache.json to SQLite');
+    }
   }
 } catch (e) { console.error('Failed to load top_hosts cache:', e.message); }
 
@@ -4597,7 +4623,7 @@ async function aggregateTopHosts() {
     updatedAt: new Date().toISOString(),
     stats: { domains: Object.keys(merged).length, portsScanned: fetchedCount, errors: errorCount }
   };
-  safeWriteFile(TOP_HOSTS_CACHE_FILE, JSON.stringify(topHostsCache, null, 2));
+  _kvSet.run('top_hosts_cache', JSON.stringify(topHostsCache));
   console.log(`[TopHosts] Aggregation complete: ${Object.keys(merged).length} domains from ${fetchedCount} ports (${errorCount} errors), ${Object.keys(perPort).length} portNames`);
   return topHostsCache;
 }

@@ -208,6 +208,13 @@ CREATE INDEX IF NOT EXISTS idx_rotation_log_nick ON rotation_log(server_name, ni
 CREATE UNIQUE INDEX IF NOT EXISTS idx_rotation_log_uniq ON rotation_log(server_name, nick, started_at);
 
 -- Hourly traffic aggregates (for heatmap and trend analytics)
+-- Key-value store for app settings and caches (replaces settings.json, top_hosts_cache.json)
+CREATE TABLE IF NOT EXISTS kv_store (
+  key   TEXT PRIMARY KEY,
+  value TEXT NOT NULL DEFAULT '{}',
+  updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
 -- Modem metadata cache (static data from ProxySmart, updated periodically)
 CREATE TABLE IF NOT EXISTS modem_meta (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
