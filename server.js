@@ -18,14 +18,25 @@ const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
 db.pragma('foreign_keys = ON');
 
+// Migrate traffic_hourly to per-modem schema BEFORE schema apply (v2: server_name+nick+operator+client_name)
+try {
+  const htExists = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='traffic_hourly'").get();
+  if (htExists) {
+    const htInfo = db.prepare("PRAGMA table_info(traffic_hourly)").all();
+    const hasNick = htInfo.some(c => c.name === 'nick');
+    if (!hasNick) {
+      console.log('[Migration] Recreating traffic_hourly with per-modem columns...');
+      db.exec('DROP TABLE IF EXISTS traffic_hourly');
+      db.exec('DROP INDEX IF EXISTS idx_traffic_hourly_hour');
+      db.exec('DROP INDEX IF EXISTS idx_traffic_hourly_port');
+      console.log('[Migration] traffic_hourly dropped, will be recreated by schema');
+    }
+  }
+} catch (e) { console.error('[Migration] traffic_hourly pre-check:', e.message); }
+
 // Apply schema on startup (CREATE IF NOT EXISTS is safe to re-run)
 if (fs.existsSync(SCHEMA_PATH)) {
   db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
-  // Clean old traffic_hourly rows without server prefix (SRV: format)
-  try {
-    const cleaned = db.prepare("DELETE FROM traffic_hourly WHERE port_name NOT LIKE '%:%'").run();
-    if (cleaned.changes > 0) console.log(`[SQLite] Cleaned ${cleaned.changes} old traffic_hourly rows without server prefix`);
-  } catch(e) {}
   console.log('[SQLite] Schema applied, database ready');
 }
 
@@ -68,6 +79,8 @@ safeAddColumn('clients', 'client_type', "TEXT DEFAULT 'legal'");
 safeAddColumn('clients', 'billing_paused', "INTEGER DEFAULT 0");
 safeAddColumn('closing_documents', 'signed_at', 'TEXT');
 
+
+
 // External proxies table
 db.exec(`CREATE TABLE IF NOT EXISTS external_proxies (
   id TEXT PRIMARY KEY,
@@ -88,18 +101,6 @@ safeAddColumn('external_proxies', 'valid_until', 'TEXT');
 safeAddColumn('external_proxies', 'billing_type', "TEXT DEFAULT 'monthly'");
 safeAddColumn('external_proxies', 'price', 'REAL DEFAULT 0');
 safeAddColumn('external_proxies', 'traffic_used_gb', 'REAL DEFAULT 0');
-
-// Hourly traffic aggregates table
-db.exec(`CREATE TABLE IF NOT EXISTS traffic_hourly (
-  id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  port_name   TEXT NOT NULL,
-  hour_start  TEXT NOT NULL,
-  bytes_in    INTEGER DEFAULT 0,
-  bytes_out   INTEGER DEFAULT 0,
-  UNIQUE(port_name, hour_start)
-)`);
-db.exec('CREATE INDEX IF NOT EXISTS idx_traffic_hourly_hour ON traffic_hourly(hour_start)');
-db.exec('CREATE INDEX IF NOT EXISTS idx_traffic_hourly_port ON traffic_hourly(port_name, hour_start)');
 
 // Prepared statements for common operations
 const dbStmts = {
@@ -1000,7 +1001,7 @@ try {
 
 const _dtUpsert = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
 const _dtCleanup = db.prepare("DELETE FROM daily_traffic WHERE date < date('now', '-90 days')");
-const _htUpsert = db.prepare('INSERT OR REPLACE INTO traffic_hourly (port_name, hour_start, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
+const _htUpsert = db.prepare('INSERT OR REPLACE INTO traffic_hourly (server_name, nick, operator, client_name, hour_start, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?, ?)');
 const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
 
 function saveDailyTraffic() {
@@ -1020,8 +1021,8 @@ function saveDailyTraffic() {
 }
 
 // ==================== HOURLY TRAFFIC AGGREGATION ====================
-// In-memory snapshots of daily counters, used to derive per-hour increments
-let hourlyDaySnapshots = {}; // { portName: { in: bytes, out: bytes, date: 'YYYY-MM-DD' } }
+// Per-modem snapshots of daily counters, used to derive per-hour increments
+let hourlyDaySnapshots = {}; // { 'SRV_nick': { in: bytes, out: bytes, date: 'YYYY-MM-DD' } }
 
 async function aggregateHourlyTraffic() {
   try {
@@ -1030,34 +1031,62 @@ async function aggregateHourlyTraffic() {
     const pnMap = portKeyToPortName;
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
-    // The hour window that just completed (e.g. at 14:01 → store 13:00–14:00)
     const prevH = new Date(now);
     prevH.setHours(prevH.getHours() - 1, 0, 0, 0);
     const hourStart = prevH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
 
+    let count = 0;
     const batch = db.transaction(() => {
       for (const data of results) {
-        if (typeof data.bw !== 'object') continue;
         const srv = data.serverName || '';
+        const statusArr = Array.isArray(data.status) ? data.status : [];
+        const portsMap = data.ports || {}; // { IMEI: [{ portID, portName }] }
+
+        // Build portID → { nick, operator, clientName } from status + ports
+        const portIdInfo = {}; // { portID: { nick, operator, clientName } }
+        for (const m of statusArr) {
+          const md = m.modem_details || {};
+          const imei = md.IMEI || '';
+          const nick = md.NICK || imei;
+          const operator = md.OPERATOR || '';
+          if (!imei) continue;
+          const modemPorts = portsMap[imei] || [];
+          for (const p of modemPorts) {
+            portIdInfo[p.portID] = { nick, operator, clientName: p.portName || '' };
+          }
+          // If no ports found, still track by IMEI
+          if (modemPorts.length === 0) {
+            portIdInfo['_imei_' + imei] = { nick, operator, clientName: '' };
+          }
+        }
+
+        if (typeof data.bw !== 'object') continue;
         for (const [portId, b] of Object.entries(data.bw)) {
-          const clientName = b.portName || pnMap[srv + '_' + portId] || '';
-          if (!clientName) continue;
-          const portName = srv + ':' + clientName; // prefix with server for per-country separation
+          // Look up nick/operator via portID → status cross-reference
+          const info = portIdInfo[portId] || {};
+          const nick = info.nick || pnMap[srv + '_' + portId] || portId;
+          const operator = info.operator || '';
+          const clientName = info.clientName || b.portName || '';
+          const snapKey = srv + '_' + nick;
+
           const dayIn  = parseBwToBytes(b.bandwidth_bytes_day_in);
           const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
-          const snap = hourlyDaySnapshots[portName];
+          const snap = hourlyDaySnapshots[snapKey];
           if (snap && snap.date === todayStr) {
             const incIn  = Math.max(0, dayIn  - snap.in);
             const incOut = Math.max(0, dayOut - snap.out);
-            if (incIn + incOut > 0) _htUpsert.run(portName, hourStart, incIn, incOut);
+            if (incIn + incOut > 0) {
+              _htUpsert.run(srv, nick, operator, clientName, hourStart, incIn, incOut);
+              count++;
+            }
           }
-          hourlyDaySnapshots[portName] = { in: dayIn, out: dayOut, date: todayStr };
+          hourlyDaySnapshots[snapKey] = { in: dayIn, out: dayOut, date: todayStr };
         }
       }
       _htCleanup.run();
     });
     batch();
-    console.log(`[HourlyAgg] Stored ${hourStart}, ports tracked: ${Object.keys(hourlyDaySnapshots).length}`);
+    console.log(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
   } catch (e) {
     console.error('[HourlyAgg] Error:', e.message);
   }
@@ -3016,57 +3045,15 @@ app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req,
 });
 
 app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res) => {
-  const { view = 'country', id = 'moldova' } = req.query;
+  const { view = 'country', id = 'all' } = req.query;
   const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
   try {
-    const results = await fetchAllServersDataCached();
-    if (Object.keys(portKeyToPortName).length === 0) refreshPortKeyMapping(results);
-    const pnMap = portKeyToPortName;
-    // Build portName → countries/operators sets from live data
-    const portCountries = {}, portOperators = {};
-    for (const data of results) {
-      const srv = (data.serverName || '').toLowerCase();
-      const ctr = ((SERVER_COUNTRIES[data.serverName] || {}).country || '').toLowerCase();
-      const ctrName = ((SERVER_COUNTRIES[data.serverName] || {}).name || '').toLowerCase();
-      if (typeof data.bw !== 'object') continue;
-      for (const [portId, b] of Object.entries(data.bw)) {
-        const pn = b.portName || pnMap[(data.serverName || '') + '_' + portId] || '';
-        if (!pn) continue;
-        if (!portCountries[pn]) portCountries[pn] = new Set();
-        portCountries[pn].add(srv); portCountries[pn].add(ctr); portCountries[pn].add(ctrName);
-        if (!portOperators[pn]) portOperators[pn] = new Set();
-        if (b.operator) portOperators[pn].add(b.operator.toLowerCase().replace(/[\s.]+/g, '_'));
-      }
-    }
     const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
     // Build server→country mapping
-    const serverCountryMap = {}; // { 'S1': 'moldova', 'S2': 'romania' }
+    const serverCountryMap = {};
     for (const s of apiServers) {
       const cn = ((SERVER_COUNTRIES[s.name] || {}).name || '').toLowerCase();
       if (cn) serverCountryMap[s.name] = cn;
-    }
-    let filterPortNames = null;
-    let filterServerPrefix = null; // for hourly data with 'SRV:portName' format
-    if (idKey === 'all') {
-      filterPortNames = null; filterServerPrefix = null; // no filter
-    } else if (view === 'country') {
-      // Find which server(s) belong to this country
-      filterServerPrefix = [];
-      for (const [srv, cn] of Object.entries(serverCountryMap)) {
-        if (cn.includes(idKey) || idKey.includes(cn)) filterServerPrefix.push(srv);
-      }
-      // Also build portNames filter for daily_traffic (S1_portXXX format)
-      filterPortNames = new Set();
-      for (const [pn, set] of Object.entries(portCountries))
-        for (const c of set) if (c && (c.includes(idKey) || idKey.includes(c))) { filterPortNames.add(pn); break; }
-    } else if (view === 'operator') {
-      filterPortNames = new Set();
-      for (const [pn, set] of Object.entries(portOperators))
-        for (const op of set) if (op && (op.includes(idKey) || idKey.includes(op) || op.replace(/_/g,'').includes(idKey.replace(/_/g,'')))) { filterPortNames.add(pn); break; }
-    } else if (view === 'client') {
-      filterPortNames = new Set([id]);
-      // For hourly: client ports exist on multiple servers with prefix
-      filterServerPrefix = null; // match by client name part
     }
     // Date list in Moscow time (UTC+3)
     const now2 = new Date();
@@ -3077,40 +3064,54 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
       dateList.push(d.toISOString().slice(0, 10));
     }
     const startDate = dateList[0];
-    // Fetch from 3h before startDate (MSK 00:00 = UTC 21:00 prev day)
     const utcFetchStart = startDate + 'T00:00:00Z';
     const utcFetchStartShifted = new Date(new Date(utcFetchStart).getTime() - 3 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
     const matrix = dateList.map(() => new Array(24).fill(0));
-    const checkRows = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start >= ?').get(utcFetchStartShifted);
-    if (checkRows.cnt > 0) {
-      // Real hourly data — port_name format is 'SRV:clientName'
-      let sql = "SELECT strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as day, CAST(strftime('%H', datetime(hour_start, '+3 hours')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE hour_start >= ?";
-      const params = [utcFetchStartShifted];
-      if (filterServerPrefix && filterServerPrefix.length > 0) {
-        // Filter by server prefix (country view): port_name LIKE 'S1:%' OR port_name LIKE 'S2:%'
-        sql += ' AND (' + filterServerPrefix.map(() => "port_name LIKE ?").join(' OR ') + ')';
-        filterServerPrefix.forEach(s => params.push(s + ':%'));
-      } else if (view === 'client' && id) {
-        // Filter by client name suffix: port_name LIKE '%:clientName'
-        sql += " AND port_name LIKE ?";
-        params.push('%:' + id);
+
+    // Build SQL filter based on view type — all filtering is on per-modem columns
+    let sql = "SELECT strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as day, CAST(strftime('%H', datetime(hour_start, '+3 hours')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE hour_start >= ?";
+    const params = [utcFetchStartShifted];
+
+    if (idKey !== 'all') {
+      if (view === 'country') {
+        // Find server names for this country
+        const servers = [];
+        for (const [srv, cn] of Object.entries(serverCountryMap)) {
+          if (cn.includes(idKey) || idKey.includes(cn)) servers.push(srv);
+        }
+        if (servers.length > 0) {
+          sql += ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
+          params.push(...servers);
+        }
+      } else if (view === 'operator') {
+        // Filter by operator column (case-insensitive LIKE)
+        sql += " AND LOWER(REPLACE(operator, ' ', '_')) LIKE ?";
+        params.push('%' + idKey + '%');
+      } else if (view === 'client') {
+        // Filter by client_name column (exact match)
+        sql += " AND client_name = ?";
+        params.push(id);
       }
-      sql += ' GROUP BY day, hour ORDER BY day, hour';
-      for (const r of db.prepare(sql).all(...params)) {
-        const di = dateList.indexOf(r.day);
-        if (di >= 0 && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
-      }
-    } else {
-      // No hourly data available — matrix stays empty (all zeros)
-      // Daily data can't provide hourly resolution, showing fake flat bars is misleading
     }
+
+    sql += ' GROUP BY day, hour ORDER BY day, hour';
+    const rows = db.prepare(sql).all(...params);
+    let hasData = false;
+    for (const r of rows) {
+      const di = dateList.indexOf(r.day);
+      if (di >= 0 && r.hour >= 0 && r.hour < 24) {
+        matrix[di][r.hour] = r.bytes / 1073741824;
+        hasData = true;
+      }
+    }
+
     const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
     const dayMeta = dateList.map(date => {
       const d = new Date(date + 'T00:00:00');
       return { date, label: DAYS_RU[d.getDay()], dateShort: date.slice(5) };
     });
     res.json({
-      meta: { id, modems_count: filterPortNames ? filterPortNames.size : Object.keys(portCountries).length, days: dateList, day_meta: dayMeta, has_hourly: checkRows.cnt > 0 },
+      meta: { id, days: dateList, day_meta: dayMeta, has_hourly: hasData },
       matrix
     });
   } catch (e) {
