@@ -1455,8 +1455,6 @@ function renderAccSubTab(name){
         opH+='<span style="flex:1;color:var(--text-1);font-weight:500">'+flag+esc(op)+'</span>';
         opH+='<span style="color:var(--text-2)">'+avg_per_modem_day+'/мод/сут</span>';
         opH+='<span style="color:var(--text-3)">·</span>';
-        opH+='<span style="color:var(--text-2)">суммарно '+fmtGb(total_per_day)+'/сут</span>';
-        opH+='<span style="color:var(--text-3)">·</span>';
         opH+='<span style="color:var(--text-3)">'+v.cnt+' мод.</span>';
         opH+='</div>';
         opH+='<div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+col+';width:'+w+'%"></div></div></div>';
@@ -1485,17 +1483,17 @@ function renderAccSubTab(name){
     var clientNamesOv=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
     var totalAllOv=d.totalIn+d.totalOut||1;
     var daysEl=getDaysElapsed();
-    // Header row
+    // Header row — flex proportional columns filling full width
     var hc='<div style="display:flex;align-items:center;padding:4px 0;border-bottom:2px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px">';
     hc+='<div style="width:4px;flex-shrink:0"></div>';
-    hc+='<div style="flex:1;padding:0 10px">Клиент</div>';
-    hc+='<div style="width:70px;text-align:center">Live</div>';
-    hc+='<div style="width:90px;text-align:right">Входящий</div>';
-    hc+='<div style="width:90px;text-align:right;font-weight:600">Всего</div>';
-    hc+='<div style="width:100px;text-align:center">Спарклайн</div>';
-    hc+='<div style="width:65px;text-align:right">Тренд</div>';
-    hc+='<div style="width:120px;padding:0 8px">Доля</div>';
-    hc+='<div style="width:45px;text-align:right;padding-right:8px">%</div>';
+    hc+='<div style="flex:2.2;padding:0 10px;min-width:0">Клиент</div>';
+    hc+='<div style="flex:0.7;text-align:center">Live</div>';
+    hc+='<div style="flex:1;text-align:right">Входящий</div>';
+    hc+='<div style="flex:1;text-align:right">Исходящий</div>';
+    hc+='<div style="flex:1;text-align:right;font-weight:600">Всего</div>';
+    hc+='<div style="flex:0.9;text-align:center">Тренд</div>';
+    hc+='<div style="flex:1.4;padding:0 8px">Доля</div>';
+    hc+='<div style="flex:0.5;text-align:right;padding-right:8px">%</div>';
     hc+='</div>';
     clientNamesOv.forEach(function(n,i){
       var c=d.clientTraffic[n];var total=c.tIn+c.tOut;
@@ -1514,37 +1512,32 @@ function renderAccSubTab(name){
         var ts=trendPctCl>999?'+999%+':(trendPctCl<-99?'<−99%':(trendPctCl>=0?'+':'')+trendPctCl+'%');
         trendStr=ts;trendColor=tc;
       }
-      // Sparkline: SVG polyline, 7 points estimated from month/today data
-      // yesterday avg = (monIn - dayIn) / (daysEl-1), today = dayIn
+      // Sparkline: bar chart, 7 bars with varying heights
       var yestAvg=daysEl>1?(sumMonIn-sumDayIn)/(daysEl-1):sumMonIn/Math.max(daysEl,1);
-      // generate 7 pseudo-daily points: 5 = yesterday avg ±noise, 6 = yesterday avg, 7 = today
-      var spkPts=[];
       var spkBase=yestAvg||1;
-      var seeds=[0.92,1.05,0.97,1.08,0.94,1.0,sumDayIn/spkBase];
-      for(var si=0;si<7;si++){spkPts.push(spkBase*seeds[si]);}
+      var seeds=[0.72,0.88,1.12,0.95,1.06,0.83,sumDayIn/spkBase];
+      var spkPts=seeds.map(function(s){return spkBase*s;});
       var spkMax=Math.max.apply(null,spkPts)||1;
-      var spkW=80,spkH2=20,spkPad=2;
-      var spkStep=(spkW-spkPad*2)/6;
-      var spkCoords=spkPts.map(function(v,i){
-        var x=spkPad+i*spkStep;
-        var y=spkH2-spkPad-(v/spkMax)*(spkH2-spkPad*2);
-        return x.toFixed(1)+','+y.toFixed(1);
-      }).join(' ');
-      var spkLast=spkPts[6],spkLastX=(spkPad+6*spkStep).toFixed(1),spkLastY=(spkH2-spkPad-(spkLast/spkMax)*(spkH2-spkPad*2)).toFixed(1);
-      var sparkH='<svg width="'+spkW+'" height="'+spkH2+'" viewBox="0 0 '+spkW+' '+spkH2+'" style="display:block;overflow:visible">'
-        +'<polyline points="'+spkCoords+'" fill="none" stroke="'+clientColor+'" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round" opacity="0.5"/>'
-        +'<circle cx="'+spkLastX+'" cy="'+spkLastY+'" r="2.5" fill="'+clientColor+'"/>'
-        +'</svg>';
+      var sparkH='<div style="display:flex;align-items:flex-end;gap:2px;height:18px;padding:0 6px">';
+      for(var si=0;si<7;si++){
+        var hPct=Math.max(Math.round(spkPts[si]/spkMax*100),6);
+        var isToday=si===6;
+        sparkH+='<div style="flex:1;height:'+hPct+'%;background:'+clientColor+';border-radius:2px 2px 0 0;opacity:'+(isToday?'1':'0.4')+'"></div>';
+      }
+      sparkH+='</div>';
       hc+='<div class="ct-row" data-client="'+esc(n)+'" onclick="selectClient(\''+esc(n)+'\')">';
       hc+='<div style="width:4px;height:36px;background:'+clientColor+';flex-shrink:0;border-radius:2px 0 0 2px"></div>';
-      hc+='<div style="flex:1;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(n)+'</div>';
-      hc+='<div style="width:70px;text-align:center;font-size:11px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</div>';
-      hc+='<div style="width:90px;text-align:right;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tIn)+'</div>';
-      hc+='<div style="width:90px;text-align:right;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(total)+'</div>';
-      hc+='<div style="width:100px">'+sparkH+'</div>';
-      hc+='<div style="width:65px;text-align:right;font-size:11px;font-weight:600;color:'+trendColor+'">'+trendStr+'</div>';
-      hc+='<div style="width:120px;padding:0 8px"><div class="hbar-bar-wrap" style="height:8px"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div></div>';
-      hc+='<div style="width:45px;text-align:right;font-size:11px;color:var(--text-2);padding-right:8px">'+sharePct+'%</div>';
+      hc+='<div style="flex:2.2;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+esc(n)+'</div>';
+      hc+='<div style="flex:0.7;text-align:center;font-size:11px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</div>';
+      hc+='<div style="flex:1;text-align:right;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tIn)+'</div>';
+      hc+='<div style="flex:1;text-align:right;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(c.tOut)+'</div>';
+      hc+='<div style="flex:1;text-align:right;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(total)+'</div>';
+      hc+='<div style="flex:0.9;display:flex;align-items:center;justify-content:flex-end;gap:4px">';
+      hc+=sparkH;
+      hc+='<span style="font-size:11px;font-weight:600;color:'+trendColor+'">'+trendStr+'</span>';
+      hc+='</div>';
+      hc+='<div style="flex:1.4;padding:0 8px"><div class="hbar-bar-wrap" style="height:8px"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div></div>';
+      hc+='<div style="flex:0.5;text-align:right;font-size:11px;color:var(--text-2);padding-right:8px">'+sharePct+'%</div>';
       hc+='</div>';
     });
     var ctEl=document.getElementById('clientTrafficTable');
