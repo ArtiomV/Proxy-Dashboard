@@ -188,14 +188,32 @@ for (const name of serverKeys) {
 
 // TASK-K: Server country/IP mapping — built from env, no hardcoded IPs
 // Fallback defaults for known servers (used if env vars not set)
-const _defaultCountries = { S1: { country: 'MD', name: 'Moldova' }, S2: { country: 'RO', name: 'Romania' } };
+// Server locations with timezone offsets (hours from UTC)
+// Moldova (Chisinau) and Romania (Bucharest) are both EET: UTC+2 winter, UTC+3 summer (EEST)
+const _defaultCountries = { S1: { country: 'MD', name: 'Moldova', tz: 'Europe/Chisinau' }, S2: { country: 'RO', name: 'Romania', tz: 'Europe/Bucharest' } };
+
+// Get current UTC offset for a timezone name (handles DST automatically)
+function getTzOffset(tzName) {
+  try {
+    const now = new Date();
+    const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tzName, timeZoneName: 'shortOffset' });
+    const parts = fmt.formatToParts(now);
+    const tzPart = parts.find(p => p.type === 'timeZoneName');
+    if (tzPart) {
+      const m = tzPart.value.match(/GMT([+-]\d+)/);
+      if (m) return parseInt(m[1]);
+    }
+  } catch (e) {}
+  return 3; // fallback to UTC+3 (MSK)
+}
 const SERVER_COUNTRIES = {};
 for (const s of apiServers) {
   const dc = _defaultCountries[s.name] || {};
   SERVER_COUNTRIES[s.name] = {
     serverIp: s.publicIp,
     country: process.env[`API_${s.name}_COUNTRY`] || dc.country || '',
-    name: process.env[`API_${s.name}_COUNTRY_NAME`] || dc.name || s.name
+    name: process.env[`API_${s.name}_COUNTRY_NAME`] || dc.name || s.name,
+    tz: process.env[`API_${s.name}_TZ`] || dc.tz || 'Europe/Moscow'
   };
 }
 console.log(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.name + ' (' + s.url + ')').join(', ')}`);
@@ -1008,17 +1026,19 @@ const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < dat
 async function syncYesterdayTraffic() {
   try {
     const results = await fetchAllServersDataCached();
-    // ProxySmart resets "yesterday" at midnight Moscow time (UTC+3)
     const now = new Date();
-    const mskNow = new Date(now.getTime() + 3 * 3600 * 1000);
-    const mskYesterday = new Date(mskNow);
-    mskYesterday.setUTCDate(mskYesterday.getUTCDate() - 1);
-    const yesterdayStr = mskYesterday.toISOString().slice(0, 10);
     let count = 0;
     const batch = db.transaction(() => {
       for (const data of results) {
         if (data._cached || typeof data.bw !== 'object') continue;
         const prefix = data.serverName + '_';
+        // Each server has its own timezone — "yesterday" depends on local midnight
+        const srvTz = (SERVER_COUNTRIES[data.serverName] || {}).tz || 'Europe/Moscow';
+        const tzOffset = getTzOffset(srvTz);
+        const localNow = new Date(now.getTime() + tzOffset * 3600 * 1000);
+        const localYesterday = new Date(localNow);
+        localYesterday.setUTCDate(localYesterday.getUTCDate() - 1);
+        const yesterdayStr = localYesterday.toISOString().slice(0, 10);
         for (const [portId, b] of Object.entries(data.bw)) {
           if (!b.portName) continue;
           const key = prefix + portId;
@@ -1034,7 +1054,7 @@ async function syncYesterdayTraffic() {
       }
     });
     batch();
-    if (count > 0) console.log(`[DailySync] Saved ${count} yesterday traffic entries for ${yesterdayStr}`);
+    if (count > 0) console.log(`[DailySync] Saved ${count} yesterday traffic entries`);
   } catch (e) {
     console.error('[DailySync] Error:', e.message);
   }
