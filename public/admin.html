@@ -516,9 +516,8 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     <div class="acc-sub-tab" onclick="switchAccTab('resources',this)">Ресурсы <span class="tab-count" id="resCount" style="display:none"></span></div>
     <div class="acc-sub-tab" onclick="switchAccTab('finances',this)">Финансы</div>
   </div>
-  <!-- ACC Toolbar -->
-  <div class="acc-toolbar">
-    <span style="font-size:11px;color:var(--text-2);margin-right:4px">Период:</span>
+  <!-- hidden period/client controls (used by Resources tab) -->
+  <div style="display:none">
     <div class="acc-period-group">
       <button class="acc-period-btn" onclick="setAccPeriod('day',this)">Сегодня</button>
       <button class="acc-period-btn" onclick="setAccPeriod('yesterday',this)">Вчера</button>
@@ -526,9 +525,8 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
       <button class="acc-period-btn" onclick="setAccPeriod('prevmonth',this)">Пред. мес</button>
       <button class="acc-period-btn" onclick="setAccPeriod('lifetime',this)">Всё время</button>
     </div>
-    <span style="font-size:11px;color:var(--text-2);margin-left:12px">Клиент:</span>
-    <select class="form-input" id="accClientFilter" onchange="renderTrafficTab();var _as=document.querySelector('.acc-sub-content.active');if(_as&&_as.id==='acc-resources')renderTopResources()" style="width:200px;height:32px;font-size:11px;display:inline-block;line-height:normal"></select>
-    <button class="btn btn-sm btn-primary" onclick="loadTopHosts(true)" style="margin-left:auto" id="btnLoadRes">⟳ Обновить ресурсы</button>
+    <select id="accClientFilter" onchange="renderTrafficTab()"></select>
+    <button id="btnLoadRes" onclick="loadTopHosts(true)">⟳ Обновить ресурсы</button>
   </div>
 
   <!-- OVERVIEW -->
