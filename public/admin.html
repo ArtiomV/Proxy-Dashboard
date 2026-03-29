@@ -269,6 +269,9 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 /* Traffic / Analytics */
 .analytics-section{padding:14px 24px}
 .analytics-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--card-shadow)}
+.settings-nav-item{padding:9px 20px;cursor:pointer;font-size:13px;color:var(--text-2);border-left:3px solid transparent;transition:all .15s;user-select:none}
+.settings-nav-item:hover{color:var(--text-1);background:var(--bg-2)}
+.settings-nav-item.active{color:var(--accent);font-weight:600;border-left-color:var(--accent);background:var(--bg-2)}
 .analytics-card h3{font-size:14px;color:var(--text-0);margin-bottom:10px;font-weight:600}
 
 /* ===== PAN-OS ACC Traffic Dashboard ===== */
@@ -527,6 +530,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <!-- OVERVIEW -->
   <div class="acc-sub-content active" id="acc-overview">
     <div class="widget-grid" id="trafficWidgets"></div>
+    <div id="extendedWidgetsRow" style="padding:0 24px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px"></div>
     <div class="chart-row">
       <div class="chart-card">
         <div class="chart-card-header"><h4>Детали по регионам</h4></div>
@@ -607,108 +611,136 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <!-- TAB: BANK (Документооборот и операции) -->
 <div class="tab-content" id="tab-bank">
-  <div style="padding:14px 24px">
-    <div id="bankDocumentsSection"></div>
-    <div id="bankBillsSection" style="margin-top:16px"></div>
-    <div id="bankPaymentsSection" style="margin-top:16px"></div>
+  <!-- Sub-tabs -->
+  <div style="display:flex;gap:0;border-bottom:1px solid var(--border);background:var(--bg-1);padding:0 24px">
+    <div class="acc-sub-tab active" id="bsub_acts" onclick="switchBankTab('acts')" style="gap:6px">📃 Акты</div>
+    <div class="acc-sub-tab" id="bsub_bills" onclick="switchBankTab('bills')" style="gap:6px">💳 Счета</div>
+    <div class="acc-sub-tab" id="bsub_payments" onclick="switchBankTab('payments')" style="gap:6px">💰 Платежи</div>
+  </div>
+  <div style="padding:16px 24px;overflow-y:auto">
+    <div id="bankDocumentsSection" class="bank-sub-section"></div>
+    <div id="bankBillsSection" class="bank-sub-section" style="display:none"></div>
+    <div id="bankPaymentsSection" class="bank-sub-section" style="display:none"></div>
   </div>
 </div>
 
-<!-- TAB: TOOLS -->
-<div class="tab-content" id="tab-tools">
-  <div class="analytics-section">
-    <div class="analytics-card">
-      <h3>Прокси чекер</h3>
-      <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Формат: ip:port:login:pass (по одному на строку, макс 50)</p>
-      <textarea class="form-input mono" id="proxyCheckInput" rows="6" placeholder="1.2.3.4:8080:user:pass&#10;5.6.7.8:1080:user2:pass2" style="font-family:'JetBrains Mono',monospace"></textarea>
-      <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
-        <button class="btn btn-primary" onclick="checkProxies()" id="btnCheckProxies">Проверить</button>
-        <span id="proxyCheckStatus" style="font-size:11px;color:var(--text-2)"></span>
-      </div>
-      <div id="proxyCheckResults" style="margin-top:10px"></div>
-    </div>
-    <div class="analytics-card">
-      <h3>Конвертер форматов</h3>
-      <div class="form-row" style="margin-bottom:8px">
-        <div class="form-group"><label>Из формата</label>
-          <select class="form-input" id="convertFrom">
-            <option value="ipportloginpass">ip:port:login:pass</option>
-            <option value="ipportatloginpass">ip:port@login:pass</option>
-            <option value="loginpassatipport">login:pass@ip:port</option>
-            <option value="loginpassipport">login:pass:ip:port</option>
-            <option value="httpurl">http://login:pass@ip:port</option>
-            <option value="socks5url">socks5://login:pass@ip:port</option>
-            <option value="ipport">ip:port</option>
-          </select>
-        </div>
-        <div class="form-group"><label>В формат</label>
-          <select class="form-input" id="convertTo">
-            <option value="ipportloginpass">ip:port:login:pass</option>
-            <option value="ipportatloginpass">ip:port@login:pass</option>
-            <option value="loginpassatipport">login:pass@ip:port</option>
-            <option value="loginpassipport">login:pass:ip:port</option>
-            <option value="httpurl">http://login:pass@ip:port</option>
-            <option value="socks5url">socks5://login:pass@ip:port</option>
-            <option value="ipport">ip:port</option>
-          </select>
-        </div>
-      </div>
-      <div class="form-row">
-        <div class="form-group"><label>Ввод</label><textarea class="form-input mono" id="convertInput" rows="5" style="font-family:'JetBrains Mono',monospace"></textarea></div>
-        <div class="form-group"><label>Результат</label><textarea class="form-input mono" id="convertOutput" rows="5" readonly style="font-family:'JetBrains Mono',monospace"></textarea></div>
-      </div>
-      <div style="margin-top:6px;display:flex;gap:6px">
-        <button class="btn btn-primary" onclick="convertFormat()">Конвертировать</button>
-        <button class="btn" onclick="copyText(document.getElementById('convertOutput').value,this)">Копировать результат</button>
-      </div>
-    </div>
-  </div>
-</div>
 
 <!-- TAB: ANALYTICS (Настройки) -->
 <div class="tab-content" id="tab-analytics">
-  <div id="bankConfigSection" style="padding:0 24px 16px"></div>
-  <div class="analytics-section">
-    <div class="analytics-card">
-      <h3>Уникальность IP (14 дней)</h3>
-      <div class="form-row" style="margin-bottom:10px;align-items:flex-end">
-        <div class="form-group"><label>Сервер</label><select class="form-input" id="uniqueIpsServer"><option value="">Сервер</option></select></div>
-        <div class="form-group"><button class="btn btn-primary" onclick="loadUniqueIps()">Загрузить</button></div>
-      </div>
-      <div id="uniqueIpsResult"></div>
+  <div style="display:flex;height:100%;min-height:0">
+    <!-- Sidebar -->
+    <div style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
+      <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">НАСТРОЙКИ</div>
+      <div class="settings-nav-item active" id="snav_bank" onclick="switchSettingsSection('bank')">🏦 Банк</div>
+      <div class="settings-nav-item" id="snav_tariffs" onclick="switchSettingsSection('tariffs')">💵 Тарифы</div>
+      <div class="settings-nav-item" id="snav_speedtests" onclick="switchSettingsSection('speedtests')">⚡ Спидтесты</div>
+      <div class="settings-nav-item" id="snav_data" onclick="switchSettingsSection('data')">📊 Данные</div>
+      <div class="settings-nav-item" id="snav_tools" onclick="switchSettingsSection('tools')">🔧 Инструменты</div>
     </div>
-    <div class="analytics-card">
-      <h3>Трафик за период</h3>
-      <div class="form-row" style="margin-bottom:10px">
-        <div class="form-group"><label>Сервер</label><select class="form-input" id="bwPeriodServer"></select></div>
-        <div class="form-group"><label>Port ID</label><input class="form-input" id="bwPeriodPort" placeholder="portXXX"></div>
-        <div class="form-group"><label>Начало</label><input class="form-input" type="date" id="bwPeriodStart"></div>
-        <div class="form-group"><label>Конец</label><input class="form-input" type="date" id="bwPeriodEnd"></div>
+    <!-- Content -->
+    <div style="flex:1;overflow-y:auto;padding:24px">
+      <!-- Банк -->
+      <div id="settingsSection_bank" class="settings-section">
+        <div id="bankConfigSection"></div>
       </div>
-      <button class="btn btn-primary" onclick="loadBwPeriod()">Загрузить</button>
-      <div id="bwPeriodResult" style="margin-top:10px"></div>
-    </div>
-    <div class="analytics-card">
-      <h3>Бекап</h3>
-      <div class="form-row" style="align-items:flex-end">
-        <div class="form-group"><label>Сервер</label><select class="form-input" id="backupServer"><option value="">Сервер</option></select></div>
-        <div class="form-group"><button class="btn btn-success" onclick="downloadBackup()">Скачать бекап</button></div>
+      <!-- Тарифы -->
+      <div id="settingsSection_tariffs" class="settings-section" style="display:none">
+        <div class="analytics-card">
+          <h3>Тарифная сетка (за модем/порт)</h3>
+          <p style="font-size:11px;color:var(--text-2);margin-bottom:12px">Тарификация в зависимости от количества портов. Чем больше портов — тем ниже цена за единицу.</p>
+          <div id="pricingTiersArea"></div>
+          <button class="btn btn-primary btn-sm" onclick="savePricingTiers()" style="margin-top:12px">Сохранить тарифы</button>
+        </div>
       </div>
-    </div>
-    <div class="analytics-card">
-      <h3>Настройки спидтестов</h3>
-      <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Время запуска спидтестов (UTC). Через запятую, формат ЧЧ:ММ</p>
-      <div class="form-row">
-        <div class="form-group"><input class="form-input" id="speedtestTimesInput" placeholder="02:00, 14:00"></div>
-        <div class="form-group"><button class="btn btn-primary" onclick="saveSettings()" style="margin-top:0">Сохранить</button></div>
+      <!-- Спидтесты -->
+      <div id="settingsSection_speedtests" class="settings-section" style="display:none">
+        <div class="analytics-card">
+          <h3>Настройки спидтестов</h3>
+          <p style="font-size:11px;color:var(--text-2);margin-bottom:12px">Время запуска спидтестов (UTC). Через запятую, формат ЧЧ:ММ</p>
+          <div class="form-row">
+            <div class="form-group"><input class="form-input" id="speedtestTimesInput" placeholder="02:00, 14:00"></div>
+            <div class="form-group"><button class="btn btn-primary" onclick="saveSettings()" style="margin-top:0">Сохранить</button></div>
+          </div>
+          <div id="settingsStatus" style="font-size:11px;color:var(--text-2);margin-top:8px"></div>
+        </div>
       </div>
-      <div id="settingsStatus" style="font-size:11px;color:var(--text-2);margin-top:6px"></div>
-    </div>
-    <div class="analytics-card">
-      <h3>Тарифная сетка (за модем/порт)</h3>
-      <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Тарификация в зависимости от количества портов. Чем больше портов — тем ниже цена за единицу.</p>
-      <div id="pricingTiersArea"></div>
-      <button class="btn btn-primary btn-sm" onclick="savePricingTiers()" style="margin-top:8px">Сохранить тарифы</button>
+      <!-- Данные -->
+      <div id="settingsSection_data" class="settings-section" style="display:none">
+        <div class="analytics-card" style="margin-bottom:16px">
+          <h3>Уникальность IP (14 дней)</h3>
+          <div class="form-row" style="margin-bottom:10px;align-items:flex-end">
+            <div class="form-group"><label>Сервер</label><select class="form-input" id="uniqueIpsServer"><option value="">Сервер</option></select></div>
+            <div class="form-group"><button class="btn btn-primary" onclick="loadUniqueIps()">Загрузить</button></div>
+          </div>
+          <div id="uniqueIpsResult"></div>
+        </div>
+        <div class="analytics-card" style="margin-bottom:16px">
+          <h3>Трафик за период</h3>
+          <div class="form-row" style="margin-bottom:10px">
+            <div class="form-group"><label>Сервер</label><select class="form-input" id="bwPeriodServer"></select></div>
+            <div class="form-group"><label>Port ID</label><input class="form-input" id="bwPeriodPort" placeholder="portXXX"></div>
+            <div class="form-group"><label>Начало</label><input class="form-input" type="date" id="bwPeriodStart"></div>
+            <div class="form-group"><label>Конец</label><input class="form-input" type="date" id="bwPeriodEnd"></div>
+          </div>
+          <button class="btn btn-primary" onclick="loadBwPeriod()">Загрузить</button>
+          <div id="bwPeriodResult" style="margin-top:10px"></div>
+        </div>
+        <div class="analytics-card">
+          <h3>Бекап</h3>
+          <div class="form-row" style="align-items:flex-end">
+            <div class="form-group"><label>Сервер</label><select class="form-input" id="backupServer"><option value="">Сервер</option></select></div>
+            <div class="form-group"><button class="btn btn-success" onclick="downloadBackup()">Скачать бекап</button></div>
+          </div>
+        </div>
+      </div>
+      <!-- Инструменты -->
+      <div id="settingsSection_tools" class="settings-section" style="display:none">
+        <div class="analytics-card" style="margin-bottom:16px">
+          <h3>Прокси чекер</h3>
+          <p style="font-size:11px;color:var(--text-2);margin-bottom:8px">Формат: ip:port:login:pass (по одному на строку, макс 50)</p>
+          <textarea class="form-input mono" id="proxyCheckInput" rows="6" placeholder="1.2.3.4:8080:user:pass&#10;5.6.7.8:1080:user2:pass2" style="font-family:'JetBrains Mono',monospace"></textarea>
+          <div style="margin-top:8px;display:flex;gap:6px;align-items:center">
+            <button class="btn btn-primary" onclick="checkProxies()" id="btnCheckProxies">Проверить</button>
+            <span id="proxyCheckStatus" style="font-size:11px;color:var(--text-2)"></span>
+          </div>
+          <div id="proxyCheckResults" style="margin-top:10px"></div>
+        </div>
+        <div class="analytics-card">
+          <h3>Конвертер форматов</h3>
+          <div class="form-row" style="margin-bottom:8px">
+            <div class="form-group"><label>Из формата</label>
+              <select class="form-input" id="convertFrom">
+                <option value="ipportloginpass">ip:port:login:pass</option>
+                <option value="ipportatloginpass">ip:port@login:pass</option>
+                <option value="loginpassatipport">login:pass@ip:port</option>
+                <option value="loginpassipport">login:pass:ip:port</option>
+                <option value="httpurl">http://login:pass@ip:port</option>
+                <option value="socks5url">socks5://login:pass@ip:port</option>
+                <option value="ipport">ip:port</option>
+              </select>
+            </div>
+            <div class="form-group"><label>В формат</label>
+              <select class="form-input" id="convertTo">
+                <option value="ipportloginpass">ip:port:login:pass</option>
+                <option value="ipportatloginpass">ip:port@login:pass</option>
+                <option value="loginpassatipport">login:pass@ip:port</option>
+                <option value="loginpassipport">login:pass:ip:port</option>
+                <option value="httpurl">http://login:pass@ip:port</option>
+                <option value="socks5url">socks5://login:pass@ip:port</option>
+                <option value="ipport">ip:port</option>
+              </select>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Ввод</label><textarea class="form-input mono" id="convertInput" rows="5" style="font-family:'JetBrains Mono',monospace"></textarea></div>
+            <div class="form-group"><label>Результат</label><textarea class="form-input mono" id="convertOutput" rows="5" readonly style="font-family:'JetBrains Mono',monospace"></textarea></div>
+          </div>
+          <div style="margin-top:6px;display:flex;gap:6px">
+            <button class="btn btn-primary" onclick="convertFormat()">Конвертировать</button>
+            <button class="btn" onclick="copyText(document.getElementById('convertOutput').value,this)">Копировать результат</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </div>
@@ -857,10 +889,35 @@ function doLogin(){window.location.href='/'}
 function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
-function switchMainTab(name,el){localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig()}if(name==='bank'){renderBankDocuments();renderBankBills();renderBankPayments()}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}}
+var _activeBankTab='acts';
+function switchBankTab(name){
+  ['acts','bills','payments'].forEach(function(t){
+    var tab=document.getElementById('bsub_'+t);
+    var secMap={acts:'bankDocumentsSection',bills:'bankBillsSection',payments:'bankPaymentsSection'};
+    var sec=document.getElementById(secMap[t]);
+    if(tab)tab.classList.toggle('active',t===name);
+    if(sec)sec.style.display=t===name?'':'none';
+  });
+  _activeBankTab=name;
+  if(name==='acts'&&currentData)renderBankDocuments();
+  else if(name==='bills'&&currentData)renderBankBills();
+  else if(name==='payments'&&currentData)renderBankPayments();
+}
+var _activeSettingsSection='bank';
+function switchSettingsSection(name){
+  ['bank','tariffs','speedtests','data','tools'].forEach(function(s){
+    var sec=document.getElementById('settingsSection_'+s);
+    var nav=document.getElementById('snav_'+s);
+    if(sec)sec.style.display=s===name?'':'none';
+    if(nav){nav.classList.toggle('active',s===name);}
+  });
+  _activeSettingsSection=name;
+  localStorage.setItem('admin_settings_section',name);
+}
+function switchMainTab(name,el){localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'bank';switchSettingsSection(ss);}if(name==='bank'){switchBankTab(_activeBankTab||'acts');}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}}
 
 // ========== DATA ==========
-function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();renderBankPayments();renderBankDocuments();renderBankBills();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
+function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
 
 function processData(){if(!currentData)return;var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var n={'unite':'Moldtelecom','orange':'Orange','vodafone ro':'Vodafone RO','moldtelecom':'Moldtelecom'};return n[r.toLowerCase()]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
@@ -1335,6 +1392,67 @@ function renderAccSubTab(name){
       t5h+='<div style="padding-top:8px;text-align:right"><span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="document.getElementById(\'trafficMatrix\').scrollIntoView({behavior:\'smooth\'})">Все модемы ↓</span></div>';
     }
     document.getElementById('top5ModemTable').innerHTML=t5h;
+
+    // Extended widgets: Аномалии, Рекорды, Операторы, Тренд
+    var extRow=document.getElementById('extendedWidgetsRow');
+    if(extRow){
+      // --- Аномалии ---
+      var map2=currentData._modemMap||{};
+      var offlineModems=[];var slowModems=[];
+      for(var imi in map2){var md2=map2[imi];if(!md2.isOnline)offlineModems.push(md2);else if(md2.lowSpeed)slowModems.push(md2);}
+      var anomH='<div class="analytics-card" style="margin:0">';
+      anomH+='<div style="font-size:11px;font-weight:700;color:var(--text-0);margin-bottom:8px;display:flex;align-items:center;gap:6px">⚠ Аномалии';
+      var anomCount=offlineModems.length+slowModems.length;
+      if(anomCount)anomH+='<span style="background:var(--danger);color:#fff;border-radius:10px;padding:1px 7px;font-size:10px">'+anomCount+'</span>';
+      anomH+='</div>';
+      if(!anomCount){anomH+='<div style="font-size:11px;color:var(--success)">✅ Все модемы в норме</div>';}
+      else{
+        if(offlineModems.length)anomH+='<div style="font-size:11px;color:var(--danger);margin-bottom:4px">🔴 Оффлайн: <b>'+offlineModems.length+'</b> <span style="color:var(--text-3)">'+(offlineModems.slice(0,3).map(function(x){return esc(x.nick)}).join(', '))+(offlineModems.length>3?'…':'')+'</span></div>';
+        if(slowModems.length)anomH+='<div style="font-size:11px;color:var(--warning)">🐢 Низкая скорость: <b>'+slowModems.length+'</b> <span style="color:var(--text-3)">'+(slowModems.slice(0,3).map(function(x){return esc(x.nick)}).join(', '))+(slowModems.length>3?'…':'')+'</span></div>';
+      }
+      anomH+='</div>';
+
+      // --- Рекорды ---
+      var topModem=d.modemTraffic[0]||null;
+      var topModemTotal=topModem?(topModem.tIn+topModem.tOut):0;
+      var topModemDay=topModem?(topModem.dayIn+topModem.dayOut):0;
+      var recH='<div class="analytics-card" style="margin:0">';
+      recH+='<div style="font-size:11px;font-weight:700;color:var(--text-0);margin-bottom:8px">🏆 Рекорды</div>';
+      if(topModem){
+        recH+='<div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Топ месяц: <span style="color:var(--text-0);font-weight:600">'+esc(topModem.nick)+'</span> <b style="color:var(--accent)">'+fmtGb(topModemTotal)+'</b></div>';
+        recH+='<div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Топ сегодня: <span style="color:var(--text-0);font-weight:600">'+esc(topModem.nick)+'</span> <b style="color:var(--accent)">'+fmtGb(topModemDay)+'</b></div>';
+      }
+      var topCl2=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)})[0];
+      if(topCl2){var cl2v=d.clientTraffic[topCl2];recH+='<div style="font-size:11px;color:var(--text-2)">Топ клиент: <span style="color:var(--text-0);font-weight:600">'+esc(topCl2)+'</span> <b style="color:var(--accent)">'+fmtGb(cl2v.tIn+cl2v.tOut)+'</b></div>';}
+      recH+='</div>';
+
+      // --- Операторы ---
+      var allOps={};
+      d.modemTraffic.forEach(function(m){var op=m.operator||'Другие';if(!allOps[op])allOps[op]={t:0,cnt:0};allOps[op].t+=m.tIn+m.tOut;allOps[op].cnt++;});
+      var opList=Object.keys(allOps).sort(function(a,b){return allOps[b].t-allOps[a].t});
+      var opMax=opList.length?allOps[opList[0]].t||1:1;
+      var opH='<div class="analytics-card" style="margin:0">';
+      opH+='<div style="font-size:11px;font-weight:700;color:var(--text-0);margin-bottom:8px">📡 Операторы</div>';
+      opList.slice(0,4).forEach(function(op,oi){var v=allOps[op];var w=Math.max(v.t/opMax*100,2);
+        opH+='<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-2);margin-bottom:2px"><span>'+esc(op)+'</span><span style="color:var(--text-1);font-weight:600">'+fmtGb(v.t)+'</span></div>';
+        opH+='<div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+CHART_COLORS.operators[oi%CHART_COLORS.operators.length]+';width:'+w+'%"></div></div></div>';
+      });
+      opH+='</div>';
+
+      // --- Тренд ---
+      var prevTotal=d.modemTraffic.reduce(function(s,m){return s+m.prevIn+m.prevOut},0);
+      var currTotal=d.totalIn+d.totalOut;
+      var trendPct=prevTotal>0?Math.round((currTotal-prevTotal)/prevTotal*100):null;
+      var trendH='<div class="analytics-card" style="margin:0">';
+      trendH+='<div style="font-size:11px;font-weight:700;color:var(--text-0);margin-bottom:8px">📈 Тренд</div>';
+      trendH+='<div style="font-size:11px;color:var(--text-2);margin-bottom:4px">Текущий период: <b style="color:var(--text-0)">'+fmtGb(currTotal)+'</b></div>';
+      trendH+='<div style="font-size:11px;color:var(--text-2);margin-bottom:8px">Прошлый месяц: <b style="color:var(--text-0)">'+fmtGb(prevTotal)+'</b></div>';
+      if(trendPct!==null){var tColor=trendPct>=0?'var(--success)':'var(--danger)';var tSign=trendPct>=0?'+':'';trendH+='<div style="font-size:22px;font-weight:700;color:'+tColor+'">'+tSign+trendPct+'%</div><div style="font-size:10px;color:var(--text-3)">vs прошлый месяц</div>';}
+      else{trendH+='<div style="font-size:11px;color:var(--text-3)">Недостаточно данных</div>';}
+      trendH+='</div>';
+
+      extRow.innerHTML=anomH+recH+opH+trendH;
+    }
 
     // Matrix
     renderTrafficMatrix(d);
