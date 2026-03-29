@@ -550,8 +550,8 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
               <option value="all">Все страны</option>
             </select>
             <select id="dailyModeFilter" onchange="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
-              <option value="clients">По клиентам</option>
               <option value="countries">По странам</option>
+              <option value="clients">По клиентам</option>
             </select>
           </div>
         </div>
@@ -560,7 +560,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
     </div>
     <div class="analytics-card" style="margin:0 24px 24px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <h3 style="margin:0">Матрица трафика по модемам</h3>
+        <h3 style="margin:0">Матрица трафика</h3>
         <div style="display:flex;align-items:center;gap:8px">
           <div style="display:flex;gap:4px">
             <button id="matrixViewModem" class="btn btn-sm active" onclick="setMatrixView('modem')" style="font-size:11px">По модему</button>
@@ -1838,19 +1838,59 @@ function renderTrafficMatrix(d){
       toShow.forEach(function(m){h+=_matrixRowHtml(m,color)});
     });
   } else {
-    var toShow=_matrixShowAll?sorted:sorted.slice(0,10);
-    toShow.forEach(function(m){h+=_matrixRowHtml(m,clientColorMap[m.pn]||'var(--border)')});
+    // "По модемам": aggregate all ports/clients per modem nick
+    var modemAgg={};
+    sorted.forEach(function(m){
+      var key=m.nick+'|'+m.server;
+      if(!modemAgg[key]){
+        modemAgg[key]={nick:m.nick,server:m.server,operator:m.operator,
+          tIn:0,tOut:0,dayIn:0,dayOut:0,monIn:0,monOut:0,prevIn:0,prevOut:0,
+          clients:[],online:m.online};
+      }
+      var agg=modemAgg[key];
+      agg.tIn+=m.tIn;agg.tOut+=m.tOut;
+      agg.dayIn+=m.dayIn;agg.dayOut+=m.dayOut;
+      agg.monIn+=m.monIn;agg.monOut+=m.monOut;
+      agg.prevIn+=m.prevIn||0;agg.prevOut+=m.prevOut||0;
+      if(m.pn&&agg.clients.indexOf(m.pn)===-1)agg.clients.push(m.pn);
+    });
+    var aggList=Object.values(modemAgg).sort(function(a,b){
+      if(_matrixSortKey==='nick')return _matrixSortDir*(a.nick.localeCompare(b.nick));
+      if(_matrixSortKey==='tIn')return _matrixSortDir*(a.tIn-b.tIn);
+      if(_matrixSortKey==='tOut')return _matrixSortDir*(a.tOut-b.tOut);
+      return _matrixSortDir*((a.tIn+a.tOut)-(b.tIn+b.tOut));
+    });
+    var toShow=_matrixShowAll?aggList:aggList.slice(0,10);
+    toShow.forEach(function(m){
+      // pick color by first client or mixed
+      var col=m.clients.length===1?(clientColorMap[m.clients[0]]||'var(--border)'):'var(--border)';
+      // pn = joined clients list
+      var origPn=m.pn;m.pn=m.clients.join(', ');
+      h+=_matrixRowHtml(m,col);
+      m.pn=origPn;
+    });
+    // update show-more count to reflect aggregated rows
+    var showMoreEl=document.getElementById('trafficMatrixShowMore');
+    if(showMoreEl){
+      if(!_matrixShowAll&&aggList.length>10){
+        showMoreEl.style.display='';
+        showMoreEl.querySelector('button').textContent='Показать все '+aggList.length+' модемов ↓';
+      } else {showMoreEl.style.display='none';}
+    }
   }
   document.getElementById('trafficMatrix').innerHTML=h+'</tbody>';
+  // show-more for client view (modem view handles it inline above)
+  if(_matrixView==='client'){
   var showMoreEl=document.getElementById('trafficMatrixShowMore');
   if(showMoreEl){
     var totalRows=sorted.length;
     if(!_matrixShowAll&&totalRows>10){
       showMoreEl.style.display='';
-      showMoreEl.querySelector('button').textContent='Показать все '+totalRows+' модемов ↓';
+      showMoreEl.querySelector('button').textContent='Показать все '+totalRows+' строк ↓';
     } else {
       showMoreEl.style.display='none';
     }
+  }
   }
 }
 
