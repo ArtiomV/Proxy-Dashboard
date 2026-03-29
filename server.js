@@ -21,6 +21,11 @@ db.pragma('foreign_keys = ON');
 // Apply schema on startup (CREATE IF NOT EXISTS is safe to re-run)
 if (fs.existsSync(SCHEMA_PATH)) {
   db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
+  // Clean old traffic_hourly rows without server prefix (SRV: format)
+  try {
+    const cleaned = db.prepare("DELETE FROM traffic_hourly WHERE port_name NOT LIKE '%:%'").run();
+    if (cleaned.changes > 0) console.log(`[SQLite] Cleaned ${cleaned.changes} old traffic_hourly rows without server prefix`);
+  } catch(e) {}
   console.log('[SQLite] Schema applied, database ready');
 }
 
@@ -564,6 +569,13 @@ function auditLog(adminLogin, action, details = {}) {
   }
 }
 
+function getClientIp(req) {
+  return (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+    || req.headers['x-real-ip']
+    || req.socket?.remoteAddress
+    || 'unknown';
+}
+
 // ==================== TOCHKA BANK API ====================
 const TOCHKA_CONFIG_FILE = path.join(__dirname, 'tochka_config.json');
 let tochkaConfig = { jwt: '', clientId: '', customerCode: '', accountId: '', companyName: '', companyInn: '', companyKpp: '' };
@@ -1025,9 +1037,11 @@ async function aggregateHourlyTraffic() {
     const batch = db.transaction(() => {
       for (const data of results) {
         if (typeof data.bw !== 'object') continue;
+        const srv = data.serverName || '';
         for (const [portId, b] of Object.entries(data.bw)) {
-          const portName = b.portName || pnMap[(data.serverName || '') + '_' + portId] || '';
-          if (!portName) continue;
+          const clientName = b.portName || pnMap[srv + '_' + portId] || '';
+          if (!clientName) continue;
+          const portName = srv + ':' + clientName; // prefix with server for per-country separation
           const dayIn  = parseBwToBytes(b.bandwidth_bytes_day_in);
           const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
           const snap = hourlyDaySnapshots[portName];
@@ -1594,6 +1608,10 @@ app.post('/api/login', loginLimiter, async (req, res) => {
   const token = generateToken();
   const isAdmin = user.portNameFilter === '*';
   createSession(token, login, user.portNameFilter, isAdmin, Date.now() + SESSION_TTL);
+  // Log client logins (not admin)
+  if (!isAdmin) {
+    auditLog(login, 'client_login', { ip: getClientIp(req), portNameFilter: user.portNameFilter });
+  }
   res.json({ token, login, isAdmin });
 });
 
@@ -1855,6 +1873,36 @@ async function fetchServerData(server) {
 // Refresh rotation cache on startup and periodically
 setTimeout(() => refreshRotationCache(), 10000);
 setInterval(() => refreshRotationCache(), ROTATION_CACHE_TTL);
+
+// ==================== ROTATION LOG SYNC (ProxySmart → SQLite) ====================
+const ROTATION_LOG_SYNC_INTERVAL = 30 * 60 * 1000; // every 30 min
+async function syncAllRotationLogs() {
+  let totalSynced = 0;
+  for (const server of apiServers) {
+    try {
+      const statusData = await fetchApi(server, '/apix/show_status_json');
+      const modems = Array.isArray(statusData) ? statusData : [];
+      for (const m of modems) {
+        const nick = m.modem_details?.NICK || m.modem_details?.name || m.modem_details?.IMEI;
+        if (!nick) continue;
+        try {
+          const result = await fetchApi(server, `/apix/get_rotation_log?arg=${encodeURIComponent(nick)}`);
+          const entries = Array.isArray(result) ? result : (result?.log || result?.logs || result?.data || []);
+          if (entries.length) {
+            syncRotationLog(server.name, nick, entries);
+            totalSynced += entries.length;
+          }
+        } catch (e) { /* skip individual modem */ }
+      }
+    } catch (e) {
+      console.log(`[RotLogSync] ${server.name} failed: ${e.message}`);
+    }
+  }
+  console.log(`[RotLogSync] Synced ${totalSynced} rotation entries across all servers`);
+}
+// Initial sync after 30 sec, then every 30 min
+setTimeout(() => syncAllRotationLogs().catch(e => console.error('[RotLogSync]', e.message)), 30000);
+setInterval(() => syncAllRotationLogs().catch(e => console.error('[RotLogSync]', e.message)), ROTATION_LOG_SYNC_INTERVAL);
 
 // Fetch data from all servers; use cache for unreachable ones
 async function fetchAllServersData() {
@@ -2538,6 +2586,7 @@ app.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const result = await fetchApi(server, `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(imei)}`);
     const success = result && result.result === 'success';
+    auditLog(req.user.login, 'client_reset_ip', { imei, serverName, ip: getClientIp(req), success });
     if (success) {
       res.json({ ok: true, result });
     } else {
@@ -2571,8 +2620,14 @@ app.get('/api/client/rotation_log', authMiddleware, async (req, res) => {
     if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, `/apix/get_rotation_log?arg=${encodeURIComponent(nick)}`);
-    res.json(result);
+    // Fetch from ProxySmart and sync to DB (same as admin)
+    try {
+      const result = await fetchApi(server, `/apix/get_rotation_log?arg=${encodeURIComponent(nick)}`);
+      const entries = Array.isArray(result) ? result : (result?.log || result?.logs || result?.data || []);
+      syncRotationLog(serverName, nick, entries);
+    } catch (fetchErr) { /* serve from DB if ProxySmart fails */ }
+    const rows = _rlSelect.all(serverName, nick);
+    res.json(rows);
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
 });
 
@@ -2622,6 +2677,7 @@ app.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
     await postApi(server, '/modem/settings', { imei });
 
     console.log(`[Rotation] Client ${req.user.login} set ${nick} rotation to ${mins} min`);
+    auditLog(req.user.login, 'client_set_rotation', { nick, serverName, minutes: mins, ip: getClientIp(req) });
     res.json({ ok: true, minutes: mins });
   } catch (err) { res.status(502).json({ error: 'Failed to set rotation', details: err.message }); }
 });
@@ -2677,6 +2733,7 @@ app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
 
     // SEC: serverInfo with user/pass removed — clients use /api/client/reset_ip instead
     const clientInfo = clientByLogin.get(req.user.login);
+    auditLog(req.user.login, 'client_export_creds', { count: credentials.length, ip: getClientIp(req) });
     res.json({
       credentials,
       clientName: req.user.login,
@@ -3003,8 +3060,23 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
       }
     }
     const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
+    // Build server→country mapping
+    const serverCountryMap = {}; // { 'S1': 'moldova', 'S2': 'romania' }
+    for (const s of apiServers) {
+      const cn = ((SERVER_COUNTRIES[s.name] || {}).name || '').toLowerCase();
+      if (cn) serverCountryMap[s.name] = cn;
+    }
     let filterPortNames = null;
-    if (view === 'country') {
+    let filterServerPrefix = null; // for hourly data with 'SRV:portName' format
+    if (idKey === 'all') {
+      filterPortNames = null; filterServerPrefix = null; // no filter
+    } else if (view === 'country') {
+      // Find which server(s) belong to this country
+      filterServerPrefix = [];
+      for (const [srv, cn] of Object.entries(serverCountryMap)) {
+        if (cn.includes(idKey) || idKey.includes(cn)) filterServerPrefix.push(srv);
+      }
+      // Also build portNames filter for daily_traffic (S1_portXXX format)
       filterPortNames = new Set();
       for (const [pn, set] of Object.entries(portCountries))
         for (const c of set) if (c && (c.includes(idKey) || idKey.includes(c))) { filterPortNames.add(pn); break; }
@@ -3014,24 +3086,35 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
         for (const op of set) if (op && (op.includes(idKey) || idKey.includes(op) || op.replace(/_/g,'').includes(idKey.replace(/_/g,'')))) { filterPortNames.add(pn); break; }
     } else if (view === 'client') {
       filterPortNames = new Set([id]);
+      // For hourly: client ports exist on multiple servers with prefix
+      filterServerPrefix = null; // match by client name part
     }
-    // Date list
+    // Date list in Moscow time (UTC+3)
     const now2 = new Date();
+    const mskNow = new Date(now2.getTime() + 3 * 3600 * 1000);
     const dateList = [];
     for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now2.getFullYear(), now2.getMonth(), now2.getDate() - i);
+      const d = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate() - i));
       dateList.push(d.toISOString().slice(0, 10));
     }
     const startDate = dateList[0];
+    // Fetch from 3h before startDate (MSK 00:00 = UTC 21:00 prev day)
+    const utcFetchStart = startDate + 'T00:00:00Z';
+    const utcFetchStartShifted = new Date(new Date(utcFetchStart).getTime() - 3 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
     const matrix = dateList.map(() => new Array(24).fill(0));
-    const checkRows = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start >= ?').get(startDate + ' 00:00');
+    const checkRows = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start >= ?').get(utcFetchStartShifted);
     if (checkRows.cnt > 0) {
-      // Real hourly data
-      let sql = 'SELECT strftime(\'%Y-%m-%d\', hour_start) as day, CAST(strftime(\'%H\', hour_start) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE hour_start >= ?';
-      const params = [startDate + ' 00:00'];
-      if (filterPortNames && filterPortNames.size > 0) {
-        sql += ' AND port_name IN (' + [...filterPortNames].map(() => '?').join(',') + ')';
-        params.push(...filterPortNames);
+      // Real hourly data — port_name format is 'SRV:clientName'
+      let sql = "SELECT strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as day, CAST(strftime('%H', datetime(hour_start, '+3 hours')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE hour_start >= ?";
+      const params = [utcFetchStartShifted];
+      if (filterServerPrefix && filterServerPrefix.length > 0) {
+        // Filter by server prefix (country view): port_name LIKE 'S1:%' OR port_name LIKE 'S2:%'
+        sql += ' AND (' + filterServerPrefix.map(() => "port_name LIKE ?").join(' OR ') + ')';
+        filterServerPrefix.forEach(s => params.push(s + ':%'));
+      } else if (view === 'client' && id) {
+        // Filter by client name suffix: port_name LIKE '%:clientName'
+        sql += " AND port_name LIKE ?";
+        params.push('%:' + id);
       }
       sql += ' GROUP BY day, hour ORDER BY day, hour';
       for (const r of db.prepare(sql).all(...params)) {
@@ -3039,18 +3122,8 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
         if (di >= 0 && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
       }
     } else {
-      // Fallback: daily data distributed evenly across 24 hours
-      let sql = 'SELECT date, SUM(bytes_in+bytes_out) as bytes FROM daily_traffic WHERE date >= ?';
-      const params = [startDate];
-      if (filterPortNames && filterPortNames.size > 0) {
-        sql += ' AND port_name IN (' + [...filterPortNames].map(() => '?').join(',') + ')';
-        params.push(...filterPortNames);
-      }
-      sql += ' GROUP BY date';
-      for (const r of db.prepare(sql).all(...params)) {
-        const di = dateList.indexOf(r.date);
-        if (di >= 0) { const hg = r.bytes / 1073741824 / 24; for (let h = 0; h < 24; h++) matrix[di][h] = hg; }
-      }
+      // No hourly data available — matrix stays empty (all zeros)
+      // Daily data can't provide hourly resolution, showing fake flat bars is misleading
     }
     const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
     const dayMeta = dateList.map(date => {
@@ -3246,6 +3319,7 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, async (req, res)
     bills: [],
     autoActs: true,
     autoBills: true,
+    billingPaused: false,
     clientType: clientType || 'legal',
     createdAt: new Date().toISOString()
   };
@@ -3275,7 +3349,7 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, r
   // BUG-12: Validate input
   const valErr = validateClientInput(req.body, false);
   if (valErr) return res.status(400).json({ error: valErr });
-  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address, autoActs, autoBills, clientType } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address, autoActs, autoBills, billingPaused, clientType } = req.body;
   if (login && login !== old.login) {
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
     delete users[old.login];
@@ -3306,6 +3380,7 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, r
     address: address !== undefined ? address : (old.address || ''),
     autoActs: autoActs !== undefined ? autoActs : (old.autoActs !== undefined ? old.autoActs : true),
     autoBills: autoBills !== undefined ? autoBills : (old.autoBills !== undefined ? old.autoBills : true),
+    billingPaused: billingPaused !== undefined ? billingPaused : (old.billingPaused || false),
     clientType: clientType !== undefined ? clientType : (old.clientType || 'legal')
   };
   clients[idx] = updated;
@@ -3351,7 +3426,7 @@ app.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req
   rebuildClientMaps();
   delete users[removed.login];
   deleteSessionsByLogin(removed.login);
-  auditLog(req.user.login, 'delete_client', { clientId: removed.id, clientName: removed.name });
+  auditLog(req.user.login, 'delete_client', { clientId: removed.id, clientName: removed.name, ip: getClientIp(req) });
   res.json({ ok: true });
 });
 
@@ -3397,7 +3472,7 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
   }
 
   saveClients(clients);
-  auditLog(req.user.login, 'add_payment', { clientId: client.id, amount: parsedAmount, note: note || '' });
+  auditLog(req.user.login, 'add_payment', { clientId: client.id, clientName: client.name, amount: parsedAmount, note: note || '', ip: getClientIp(req) });
   res.json({ ok: true, payments: client.payments, balance: client.balance });
 });
 
@@ -3422,7 +3497,7 @@ app.post('/api/admin/clients/:id/charge', authMiddleware, adminMiddleware, (req,
   });
 
   saveClients(clients);
-  auditLog(req.user.login, 'manual_charge', { clientId: client.id, amount: parsedAmount, note: note || '' });
+  auditLog(req.user.login, 'manual_charge', { clientId: client.id, clientName: client.name, amount: parsedAmount, note: note || '', ip: getClientIp(req) });
   res.json({ ok: true, balance: client.balance, balanceBefore, balanceAfter });
 });
 
@@ -3518,7 +3593,7 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
 
   saveBillingLedger();
   console.log(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, recalculated balance: ${client.balance}`);
-  auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, entryType: entry.type, amount: entry.amount || entry.cost });
+  auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, clientName: client.name, entryType: entry.type, amount: entry.amount || entry.cost, ip: getClientIp(req) });
   res.json({ ok: true, newBalance: client.balance });
 });
 
@@ -3548,7 +3623,7 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
     ({ balanceBefore, balanceAfter } = atomicDebit(client.id, -adjustment, ledgerEntry));
   }
 
-  auditLog(req.user.login, 'balance_adjust', { clientId: client.id, amount: adjustment, note: note || '' });
+  auditLog(req.user.login, 'balance_adjust', { clientId: client.id, clientName: client.name, amount: adjustment, note: note || '', ip: getClientIp(req) });
   res.json({ ok: true, balance: client.balance });
 });
 
@@ -3885,7 +3960,7 @@ app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req,
     console.log(`[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`);
     // Invalidate cache so changes appear immediately
     serverDataCache.clear();
-    auditLog(req.user.login, 'assign_modem', { serverName, portID, newPortName });
+    auditLog(req.user.login, 'assign_modem', { serverName, portID, newPortName, ip: getClientIp(req) });
     res.json({ ok: true });
   } catch (err) {
     console.error('[AssignModem] Error:', err.message);
@@ -3905,7 +3980,7 @@ app.post('/api/admin/external_proxies', authMiddleware, adminMiddleware, (req, r
   const id = crypto.randomBytes(8).toString('hex');
   db.prepare('INSERT INTO external_proxies (id, client_id, label, protocol, host, port, login, password, change_ip_url, note, valid_until, billing_type, price, traffic_used_gb) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
     .run(id, client_id, label || '', protocol || 'HTTP', host, parseInt(port), login || '', password || '', change_ip_url || '', note || '', valid_until || null, billing_type || 'monthly', parseFloat(price) || 0, parseFloat(traffic_used_gb) || 0);
-  auditLog(req.user.login, 'add_external_proxy', { id, client_id, host, port });
+  auditLog(req.user.login, 'add_external_proxy', { id, client_id, host, port, ip: getClientIp(req) });
   res.json({ ok: true, id });
 });
 
@@ -3975,24 +4050,66 @@ app.get('/api/admin/modem_status', authMiddleware, adminMiddleware, async (req, 
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
 });
 
+// Rotation log: fetch from ProxySmart, sync to SQLite, return from DB
+const _rlUpsert = db.prepare(`INSERT OR IGNORE INTO rotation_log (server_name, nick, old_ip, new_ip, started_at, ended_at, took_sec, attempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+const _rlSelect = db.prepare(`SELECT * FROM rotation_log WHERE server_name = ? AND nick = ? ORDER BY started_at DESC LIMIT 200`);
+
+function syncRotationLog(serverName, nick, entries) {
+  if (!Array.isArray(entries) || !entries.length) return;
+  let inserted = 0;
+  const insert = db.transaction((rows) => {
+    for (const e of rows) {
+      const start = e.start_time || e.Start || e.start || e.StartTime || '';
+      const end = e.end_time || e.End || e.end || e.EndTime || '';
+      const took = parseFloat(e.total_time || e['Time took (seconds)'] || e.Took || e.took || 0);
+      const attempt = parseInt(e.attempt || e.Attempt || 1);
+      const oldIp = e.old_ip || e['Old IPv4'] || e.OldIPv4 || e.oldIp || '';
+      const newIp = e.new_ip || e['New IPv4'] || e.NewIPv4 || e.newIp || '';
+      if (!start) continue;
+      try { _rlUpsert.run(serverName, nick, oldIp, newIp, start, end, took, attempt); inserted++; } catch(e) { /* dup */ }
+    }
+  });
+  insert(entries);
+  return inserted;
+}
+
 app.get('/api/admin/rotation_log', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { nick, serverName } = req.query;
     if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, `/apix/get_rotation_log?arg=${encodeURIComponent(nick)}`);
-    res.json(result);
+    // Fetch fresh data from ProxySmart and sync to DB
+    try {
+      const result = await fetchApi(server, `/apix/get_rotation_log?arg=${encodeURIComponent(nick)}`);
+      const entries = Array.isArray(result) ? result : (result?.log || result?.logs || result?.data || []);
+      syncRotationLog(serverName, nick, entries);
+    } catch (fetchErr) {
+      console.log(`[RotationLog] ProxySmart fetch failed for ${nick}@${serverName}: ${fetchErr.message}, serving from DB`);
+    }
+    // Always return from DB (has synced data + any previous data)
+    const rows = _rlSelect.all(serverName, nick);
+    res.json(rows);
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
 });
 
 app.get('/api/admin/speedtest', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { nick, serverName } = req.query;
+    const { nick, serverName, imei } = req.query;
     if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 120000);
+    const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
+    // Save to history when imei provided and result is valid
+    if (imei && result && !result.error) {
+      const key = `${serverName}_${imei}`;
+      const dl = parseFloat(result.download || result.Download || result.dl || 0);
+      const ul = parseFloat(result.upload || result.Upload || result.ul || 0);
+      const ping = parseFloat(result.ping || result.Ping || result.latency || 0);
+      if (dl > 0 || ul > 0) {
+        pushSpeedtestEntry(key, { date: new Date().toISOString(), download: dl, upload: ul, ping, raw: result });
+      }
+    }
     res.json(result);
   } catch (err) { res.status(502).json({ error: 'Speedtest failed', details: err.message }); }
 });
@@ -4097,6 +4214,80 @@ app.post('/api/admin/update_port_creds', authMiddleware, adminMiddleware, async 
     const applyResult = await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portID)}`);
     res.json({ ok: true, storeResult, applyResult });
   } catch (err) { res.status(502).json({ error: 'Update credentials failed', details: err.message }); }
+});
+
+// Get full port configuration from ProxySmart edit form
+app.get('/api/admin/get_port_config', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { serverName, portId } = req.query;
+    if (!serverName || !portId) return res.status(400).json({ error: 'serverName and portId required' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+    const raw = await fetchApiRaw(server, `/conf/edit_port/${portId}`);
+    const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
+    const extract = (name) => {
+      const m = html.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`));
+      if (m) return m[1];
+      const m2 = html.match(new RegExp(`value="([^"]*)"[^>]*name="${name}"`));
+      return m2 ? m2[1] : '';
+    };
+    const extractSelected = (name) => {
+      const re = new RegExp(`<select[^>]*name="${name}"[\\s\\S]*?</select>`);
+      const blockM = html.match(re);
+      if (!blockM) return '';
+      const block = blockM[0];
+      const sel = block.match(/<option[^>]*selected[^>]*value="([^"]*)"/);
+      if (sel) return sel[1];
+      const sel2 = block.match(/<option[^>]*value="([^"]*)"[^>]*selected/);
+      return sel2 ? sel2[1] : '';
+    };
+    res.json({
+      portID: extract('portID') || portId,
+      portName: extract('portName'),
+      http_port: extract('http_port'),
+      socks_port: extract('socks_port'),
+      proxy_login: extract('proxy_login'),
+      proxy_password: extract('proxy_password'),
+      MAXCONN: extract('MAXCONN'),
+      CONNLIM: extract('CONNLIM'),
+      bandlimin: extract('bandlimin'),
+      bandlimout: extract('bandlimout'),
+      bw_quota: extract('bw_quota'),
+      PROXY_VALID_BEFORE: extract('PROXY_VALID_BEFORE'),
+      CREATED_AT: extract('CREATED_AT'),
+      OS_SPOOF: extractSelected('OS_SPOOF'),
+      IP_VERSION: extractSelected('IP_VERSION'),
+    });
+  } catch (err) {
+    console.error('[GetPortConfig]', err.message);
+    res.status(502).json({ error: 'Get port config failed', details: err.message });
+  }
+});
+
+// Save full port configuration via ProxySmart form endpoint
+app.post('/api/admin/save_port_config', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { serverName, portId, ...fields } = req.body;
+    if (!serverName || !portId) return res.status(400).json({ error: 'serverName and portId required' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+    // Read current config to preserve hidden fields (CREATED_AT, etc.)
+    const raw = await fetchApiRaw(server, `/conf/edit_port/${portId}`);
+    const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
+    const extract = (name) => { const m = html.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`)); return m ? m[1] : ''; };
+    const formData = { portID: portId, CREATED_AT: extract('CREATED_AT'), ...fields };
+    // Remove internal fields not needed by ProxySmart form
+    delete formData.serverName; delete formData.IMEI;
+    const result = await postFormApi(server, `/conf/edit_port/${portId}`, formData);
+    // Apply the port changes
+    await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`);
+    serverDataCache.clear();
+    auditLog(req.user.login, 'save_port_config', { serverName, portId, fields: Object.keys(fields), ip: getClientIp(req) });
+    res.json({ ok: true, status: result.status });
+  } catch (err) {
+    console.error('[SavePortConfig]', err.message);
+    res.status(502).json({ error: 'Save port config failed', details: err.message });
+  }
 });
 
 app.post('/api/admin/apply_port', authMiddleware, adminMiddleware, async (req, res) => {
@@ -4481,7 +4672,8 @@ async function runDailyBilling(retryClientIds) {
     : clients;
 
   for (const client of clientsToBill) {
-    if (!client.portName || !client.price || client.price <= 0) {
+    if (!client.portName || !client.price || client.price <= 0 || client.billingPaused) {
+      if (client.billingPaused) console.log(`[Billing] Skipping ${client.name} — billing paused`);
       skipped++;
       continue;
     }
@@ -5549,7 +5741,7 @@ app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, asy
   }
 
   if (generated > 0) saveClients(clients);
-  auditLog(req.user.login, 'generate_acts', { period: period || 'auto', generated, skipped, errors });
+  auditLog(req.user.login, 'generate_acts', { period: period || 'auto', generated, skipped, errors, ip: getClientIp(req) });
   res.json({ ok: true, generated, skipped, errors, results });
 });
 
@@ -5663,7 +5855,7 @@ app.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, as
   }
 
   if (generated > 0) saveClients(clients);
-  auditLog(req.user.login, 'generate_bills', { period: billPeriod, generated, skipped, errors });
+  auditLog(req.user.login, 'generate_bills', { period: billPeriod, generated, skipped, errors, ip: getClientIp(req) });
   res.json({ ok: true, generated, skipped, errors, results });
 });
 

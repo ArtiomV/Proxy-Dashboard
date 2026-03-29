@@ -194,6 +194,21 @@ CREATE TABLE IF NOT EXISTS ip_history (
 );
 CREATE INDEX IF NOT EXISTS idx_ip_history_key ON ip_history(key);
 
+-- Rotation log synced from ProxySmart
+CREATE TABLE IF NOT EXISTS rotation_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_name TEXT NOT NULL,
+  nick        TEXT NOT NULL,
+  old_ip      TEXT,
+  new_ip      TEXT,
+  started_at  TEXT NOT NULL,
+  ended_at    TEXT,
+  took_sec    REAL,
+  attempt     INTEGER DEFAULT 1
+);
+CREATE INDEX IF NOT EXISTS idx_rotation_log_nick ON rotation_log(server_name, nick);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_rotation_log_uniq ON rotation_log(server_name, nick, started_at);
+
 -- Hourly traffic aggregates (for heatmap and trend analytics)
 CREATE TABLE IF NOT EXISTS traffic_hourly (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
