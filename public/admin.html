@@ -1528,11 +1528,11 @@ function renderAccSubTab(name){
       var seeds=[0.72,0.88,1.12,0.95,1.06,0.83,sumDayIn/spkBase];
       var spkPts=seeds.map(function(s){return spkBase*s;});
       var spkMax=Math.max.apply(null,spkPts)||1;
-      var sparkH='<div style="display:flex;align-items:flex-end;gap:2px;height:18px;padding:0 6px">';
+      var sparkH='<div style="display:inline-flex;align-items:flex-end;gap:2px;height:16px;width:52px;flex-shrink:0;vertical-align:middle">';
       for(var si=0;si<7;si++){
-        var hPct=Math.max(Math.round(spkPts[si]/spkMax*100),6);
+        var hPx=Math.max(Math.round(spkPts[si]/spkMax*14),2);
         var isToday=si===6;
-        sparkH+='<div style="flex:1;height:'+hPct+'%;background:'+clientColor+';border-radius:2px 2px 0 0;opacity:'+(isToday?'1':'0.4')+'"></div>';
+        sparkH+='<div style="width:5px;height:'+hPx+'px;background:'+clientColor+';border-radius:1px 1px 0 0;opacity:'+(isToday?'1':'0.45')+'"></div>';
       }
       sparkH+='</div>';
       hc+='<div class="ct-row" data-client="'+esc(n)+'" onclick="selectClient(\''+esc(n)+'\')">';
