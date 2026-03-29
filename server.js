@@ -83,6 +83,18 @@ safeAddColumn('external_proxies', 'billing_type', "TEXT DEFAULT 'monthly'");
 safeAddColumn('external_proxies', 'price', 'REAL DEFAULT 0');
 safeAddColumn('external_proxies', 'traffic_used_gb', 'REAL DEFAULT 0');
 
+// Hourly traffic aggregates table
+db.exec(`CREATE TABLE IF NOT EXISTS traffic_hourly (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  port_name   TEXT NOT NULL,
+  hour_start  TEXT NOT NULL,
+  bytes_in    INTEGER DEFAULT 0,
+  bytes_out   INTEGER DEFAULT 0,
+  UNIQUE(port_name, hour_start)
+)`);
+db.exec('CREATE INDEX IF NOT EXISTS idx_traffic_hourly_hour ON traffic_hourly(hour_start)');
+db.exec('CREATE INDEX IF NOT EXISTS idx_traffic_hourly_port ON traffic_hourly(port_name, hour_start)');
+
 // Prepared statements for common operations
 const dbStmts = {
   // Sessions — fully SQLite-backed
@@ -975,6 +987,8 @@ try {
 
 const _dtUpsert = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
 const _dtCleanup = db.prepare("DELETE FROM daily_traffic WHERE date < date('now', '-90 days')");
+const _htUpsert = db.prepare('INSERT OR REPLACE INTO traffic_hourly (port_name, hour_start, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
+const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
 
 function saveDailyTraffic() {
   try {
@@ -990,6 +1004,48 @@ function saveDailyTraffic() {
     });
     batch();
   } catch (e) { console.error('[saveDailyTraffic] SQLite error:', e.message); }
+}
+
+// ==================== HOURLY TRAFFIC AGGREGATION ====================
+// In-memory snapshots of daily counters, used to derive per-hour increments
+let hourlyDaySnapshots = {}; // { portName: { in: bytes, out: bytes, date: 'YYYY-MM-DD' } }
+
+async function aggregateHourlyTraffic() {
+  try {
+    const results = await fetchAllServersDataCached();
+    if (Object.keys(portKeyToPortName).length === 0) refreshPortKeyMapping(results);
+    const pnMap = portKeyToPortName;
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    // The hour window that just completed (e.g. at 14:01 → store 13:00–14:00)
+    const prevH = new Date(now);
+    prevH.setHours(prevH.getHours() - 1, 0, 0, 0);
+    const hourStart = prevH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
+
+    const batch = db.transaction(() => {
+      for (const data of results) {
+        if (typeof data.bw !== 'object') continue;
+        for (const [portId, b] of Object.entries(data.bw)) {
+          const portName = b.portName || pnMap[(data.serverName || '') + '_' + portId] || '';
+          if (!portName) continue;
+          const dayIn  = parseBwToBytes(b.bandwidth_bytes_day_in);
+          const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
+          const snap = hourlyDaySnapshots[portName];
+          if (snap && snap.date === todayStr) {
+            const incIn  = Math.max(0, dayIn  - snap.in);
+            const incOut = Math.max(0, dayOut - snap.out);
+            if (incIn + incOut > 0) _htUpsert.run(portName, hourStart, incIn, incOut);
+          }
+          hourlyDaySnapshots[portName] = { in: dayIn, out: dayOut, date: todayStr };
+        }
+      }
+      _htCleanup.run();
+    });
+    batch();
+    console.log(`[HourlyAgg] Stored ${hourStart}, ports tracked: ${Object.keys(hourlyDaySnapshots).length}`);
+  } catch (e) {
+    console.error('[HourlyAgg] Error:', e.message);
+  }
 }
 
 // Parse traffic value like "10.5 GB" to bytes
@@ -2878,6 +2934,137 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
     }
   }
   res.json(byClient);
+});
+
+// ==================== ANALYTICS ENDPOINTS ====================
+
+app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req, res) => {
+  const months = Math.min(parseInt(req.query.months) || 6, 12);
+  const now = new Date();
+  const startDate = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1)
+    .toISOString().slice(0, 10);
+  try {
+    const rows = db.prepare(
+      'SELECT substr(date,1,7) as month, SUM(bytes_in+bytes_out) as total_bytes ' +
+      'FROM daily_traffic WHERE date >= ? GROUP BY month ORDER BY month'
+    ).all(startDate);
+    const byMonth = {};
+    for (const r of rows) byMonth[r.month] = r.total_bytes || 0;
+    // Add today's bytes from in-memory store (saved nightly, so today may be partial)
+    const todayStr = now.toISOString().slice(0, 10);
+    const curMonth = todayStr.slice(0, 7);
+    for (const days of Object.values(dailyTraffic)) {
+      const t = days[todayStr];
+      if (t) byMonth[curMonth] = (byMonth[curMonth] || 0) + (t.in || 0) + (t.out || 0);
+    }
+    const MONTHS_RU = ['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+    const result = [];
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
+      const mStr = d.toISOString().slice(0, 7);
+      const totalGb = Math.round((byMonth[mStr] || 0) / 1073741824 * 10) / 10;
+      const entry = { month: mStr, label: MONTHS_RU[d.getMonth()], total_gb: totalGb };
+      if (i === 0) {
+        entry.is_current = true;
+        const dom = now.getDate();
+        const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+        if (dom > 0 && totalGb > 0) entry.forecast_gb = Math.round(totalGb / dom * dim * 10) / 10;
+      }
+      result.push(entry);
+    }
+    res.json(result);
+  } catch (e) {
+    console.error('[monthly_traffic]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res) => {
+  const { view = 'country', id = 'moldova' } = req.query;
+  const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+  try {
+    const results = await fetchAllServersDataCached();
+    if (Object.keys(portKeyToPortName).length === 0) refreshPortKeyMapping(results);
+    const pnMap = portKeyToPortName;
+    // Build portName → countries/operators sets from live data
+    const portCountries = {}, portOperators = {};
+    for (const data of results) {
+      const srv = (data.serverName || '').toLowerCase();
+      const ctr = ((SERVER_COUNTRIES[data.serverName] || {}).country || '').toLowerCase();
+      const ctrName = ((SERVER_COUNTRIES[data.serverName] || {}).name || '').toLowerCase();
+      if (typeof data.bw !== 'object') continue;
+      for (const [portId, b] of Object.entries(data.bw)) {
+        const pn = b.portName || pnMap[(data.serverName || '') + '_' + portId] || '';
+        if (!pn) continue;
+        if (!portCountries[pn]) portCountries[pn] = new Set();
+        portCountries[pn].add(srv); portCountries[pn].add(ctr); portCountries[pn].add(ctrName);
+        if (!portOperators[pn]) portOperators[pn] = new Set();
+        if (b.operator) portOperators[pn].add(b.operator.toLowerCase().replace(/[\s.]+/g, '_'));
+      }
+    }
+    const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
+    let filterPortNames = null;
+    if (view === 'country') {
+      filterPortNames = new Set();
+      for (const [pn, set] of Object.entries(portCountries))
+        for (const c of set) if (c && (c.includes(idKey) || idKey.includes(c))) { filterPortNames.add(pn); break; }
+    } else if (view === 'operator') {
+      filterPortNames = new Set();
+      for (const [pn, set] of Object.entries(portOperators))
+        for (const op of set) if (op && (op.includes(idKey) || idKey.includes(op) || op.replace(/_/g,'').includes(idKey.replace(/_/g,'')))) { filterPortNames.add(pn); break; }
+    } else if (view === 'client') {
+      filterPortNames = new Set([id]);
+    }
+    // Date list
+    const now2 = new Date();
+    const dateList = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now2.getFullYear(), now2.getMonth(), now2.getDate() - i);
+      dateList.push(d.toISOString().slice(0, 10));
+    }
+    const startDate = dateList[0];
+    const matrix = dateList.map(() => new Array(24).fill(0));
+    const checkRows = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start >= ?').get(startDate + ' 00:00');
+    if (checkRows.cnt > 0) {
+      // Real hourly data
+      let sql = 'SELECT strftime(\'%Y-%m-%d\', hour_start) as day, CAST(strftime(\'%H\', hour_start) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE hour_start >= ?';
+      const params = [startDate + ' 00:00'];
+      if (filterPortNames && filterPortNames.size > 0) {
+        sql += ' AND port_name IN (' + [...filterPortNames].map(() => '?').join(',') + ')';
+        params.push(...filterPortNames);
+      }
+      sql += ' GROUP BY day, hour ORDER BY day, hour';
+      for (const r of db.prepare(sql).all(...params)) {
+        const di = dateList.indexOf(r.day);
+        if (di >= 0 && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
+      }
+    } else {
+      // Fallback: daily data distributed evenly across 24 hours
+      let sql = 'SELECT date, SUM(bytes_in+bytes_out) as bytes FROM daily_traffic WHERE date >= ?';
+      const params = [startDate];
+      if (filterPortNames && filterPortNames.size > 0) {
+        sql += ' AND port_name IN (' + [...filterPortNames].map(() => '?').join(',') + ')';
+        params.push(...filterPortNames);
+      }
+      sql += ' GROUP BY date';
+      for (const r of db.prepare(sql).all(...params)) {
+        const di = dateList.indexOf(r.date);
+        if (di >= 0) { const hg = r.bytes / 1073741824 / 24; for (let h = 0; h < 24; h++) matrix[di][h] = hg; }
+      }
+    }
+    const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    const dayMeta = dateList.map(date => {
+      const d = new Date(date + 'T00:00:00');
+      return { date, label: DAYS_RU[d.getDay()], dateShort: date.slice(5) };
+    });
+    res.json({
+      meta: { id, modems_count: filterPortNames ? filterPortNames.size : Object.keys(portCountries).length, days: dateList, day_meta: dayMeta, has_hourly: checkRows.cnt > 0 },
+      matrix
+    });
+  } catch (e) {
+    console.error('[heatmap]', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => {
@@ -5790,6 +5977,20 @@ const httpServer = app.listen(PORT, () => {
 
   // Auto-generate bills on 1st of each month at 08:10 Moscow (05:10 UTC)
   scheduleRepeating(5, 10, 'MonthlyBills', autoGenerateMonthlyBills);
+
+  // Hourly traffic aggregation at :01 each hour (reads day counter delta → stores in traffic_hourly)
+  (function scheduleHourlyAgg() {
+    const now = new Date();
+    const next = new Date(now);
+    next.setMinutes(1, 0, 0);
+    if (next <= now) next.setHours(next.getHours() + 1);
+    const msUntil = next - now;
+    console.log(`[HourlyAgg] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
+    setTimeout(() => {
+      aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg]', e.message));
+      setInterval(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg]', e.message)), 60 * 60 * 1000);
+    }, msUntil);
+  })();
 
   // Billing catch-up: if last snapshot is older than 26 hours, run now
   (async () => {

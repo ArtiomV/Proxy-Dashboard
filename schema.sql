@@ -194,6 +194,18 @@ CREATE TABLE IF NOT EXISTS ip_history (
 );
 CREATE INDEX IF NOT EXISTS idx_ip_history_key ON ip_history(key);
 
+-- Hourly traffic aggregates (for heatmap and trend analytics)
+CREATE TABLE IF NOT EXISTS traffic_hourly (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  port_name   TEXT NOT NULL,
+  hour_start  TEXT NOT NULL,     -- '2026-03-29 14:00'
+  bytes_in    INTEGER DEFAULT 0,
+  bytes_out   INTEGER DEFAULT 0,
+  UNIQUE(port_name, hour_start)
+);
+CREATE INDEX IF NOT EXISTS idx_traffic_hourly_hour ON traffic_hourly(hour_start);
+CREATE INDEX IF NOT EXISTS idx_traffic_hourly_port ON traffic_hourly(port_name, hour_start);
+
 -- Daily traffic (replaces daily_traffic.json)
 CREATE TABLE IF NOT EXISTS daily_traffic (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
