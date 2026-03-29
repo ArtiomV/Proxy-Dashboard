@@ -1903,37 +1903,43 @@ function renderFinancesTab(d){
   finH+='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin-bottom:12px">Финансы по клиентам</div>';
   finH+='<table style="width:100%;border-collapse:collapse;font-size:11px">';
   finH+='<thead><tr style="background:var(--bg-3)">';
-  ['Клиент','Тариф','Трафик','Начислено','Баланс','₽/ГБ'].forEach(function(h){
-    finH+='<th style="padding:6px 8px;font-size:10px;color:var(--text-2);text-align:left">'+h+'</th>';
+  ['Клиент','Тариф','Трафик (мес)','Модемов','Начислено','Баланс','₽/ГБ'].forEach(function(h){
+    finH+='<th style="padding:6px 8px;font-size:10px;color:var(--text-2);text-align:center">'+h+'</th>';
   });
   finH+='</tr></thead><tbody>';
   var sortedClients=(currentData.clients||[]).slice().sort(function(a,b){
-    var aT=d.clientTraffic[a.portName||a.username]||{};
-    var bT=d.clientTraffic[b.portName||b.username]||{};
-    return((bT.tIn||0)+(bT.tOut||0))-((aT.tIn||0)+(aT.tOut||0));
+    var aKey=a.portName||a.username||'';var bKey=b.portName||b.username||'';
+    var aM=d.modemTraffic.filter(function(m){return m.pn===aKey});
+    var bM=d.modemTraffic.filter(function(m){return m.pn===bKey});
+    var aT=aM.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
+    var bT=bM.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
+    return bT-aT;
   });
   var totalRevenue=0;
   sortedClients.forEach(function(cl,i){
     var ctKey=cl.portName||cl.username||cl.name||'';
-    var ct=d.clientTraffic[ctKey]||{tIn:0,tOut:0,modems:0};
-    var trafficGb=(ct.tIn+ct.tOut)/1073741824;
+    var clModems=d.modemTraffic.filter(function(m){return m.pn===ctKey});
+    var modemCount=clModems.length;
+    var monBytes=clModems.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
+    var monGb=monBytes/1073741824;
     var charged=0;var tariffStr='—';
     if(cl.tariff_type==='per_gb'||cl.billing==='per_gb'){
       var price=cl.price||cl.price_per_gb||0;
-      charged=trafficGb*price;tariffStr=price+'₽/ГБ';
+      charged=monGb*price;tariffStr=price+'₽/ГБ';
     } else if(cl.tariff_type==='per_modem'||cl.billing==='per_modem'){
       var price=cl.price||cl.price_per_modem||0;
-      charged=price*(ct.modems||0);tariffStr=price+'₽/мод';
+      charged=price*modemCount;tariffStr=price+'₽/мод';
     }
     totalRevenue+=charged;
     var balance=cl.balance||0;
-    var costPerGb=trafficGb>0?Math.round(charged/trafficGb):0;
+    var costPerGb=monGb>0?Math.round(charged/monGb):0;
     var balColor=balance>=0?'var(--success)':'var(--danger)';
     var color=CHART_COLORS.clients[i%CHART_COLORS.clients.length];
     finH+='<tr>';
-    finH+='<td style="padding:6px 8px"><div style="display:flex;align-items:center;gap:6px"><div style="width:3px;height:16px;border-radius:1px;background:'+color+'"></div>'+esc(cl.name||ctKey)+'</div></td>';
+    finH+='<td style="padding:6px 8px"><div style="display:flex;align-items:center;gap:6px;justify-content:center"><div style="width:3px;height:16px;border-radius:1px;background:'+color+'"></div>'+esc(cl.name||ctKey)+'</div></td>';
     finH+='<td style="padding:6px 8px">'+esc(tariffStr)+'</td>';
-    finH+='<td style="padding:6px 8px;font-family:var(--font-mono)">'+fmtGb(ct.tIn+ct.tOut)+'</td>';
+    finH+='<td style="padding:6px 8px;font-family:var(--font-mono)">'+fmtGb(monBytes)+'</td>';
+    finH+='<td style="padding:6px 8px">'+modemCount+'</td>';
     finH+='<td style="padding:6px 8px;font-family:var(--font-mono);font-weight:500">'+Math.round(charged).toLocaleString('ru-RU')+' ₽</td>';
     finH+='<td style="padding:6px 8px;font-weight:600;color:'+balColor+'">'+balance.toLocaleString('ru-RU')+' ₽</td>';
     finH+='<td style="padding:6px 8px;color:var(--text-2)">'+(costPerGb>0?costPerGb+' ₽/ГБ':'—')+'</td>';
@@ -1947,11 +1953,13 @@ function renderFinancesTab(d){
   var clientRevs=[];var totalRev=0;
   sortedClients.forEach(function(cl,i){
     var ctKey=cl.portName||cl.username||cl.name||'';
-    var ct=d.clientTraffic[ctKey]||{tIn:0,tOut:0,modems:0};
-    var trafficGb=(ct.tIn+ct.tOut)/1073741824;
+    var clModems=d.modemTraffic.filter(function(m){return m.pn===ctKey});
+    var modemCount=clModems.length;
+    var monBytes=clModems.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
+    var monGb=monBytes/1073741824;
     var charged=0;
-    if(cl.tariff_type==='per_gb'||cl.billing==='per_gb'){charged=trafficGb*(cl.price||cl.price_per_gb||0);}
-    else if(cl.tariff_type==='per_modem'||cl.billing==='per_modem'){charged=(cl.price||cl.price_per_modem||0)*(ct.modems||0);}
+    if(cl.tariff_type==='per_gb'||cl.billing==='per_gb'){charged=monGb*(cl.price||cl.price_per_gb||0);}
+    else if(cl.tariff_type==='per_modem'||cl.billing==='per_modem'){charged=(cl.price||cl.price_per_modem||0)*modemCount;}
     if(charged>0)clientRevs.push({name:cl.name||ctKey,rev:charged,color:CHART_COLORS.clients[i%CHART_COLORS.clients.length]});
     totalRev+=charged;
   });
@@ -1978,8 +1986,8 @@ function renderFinancesTab(d){
   opFinH+='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin-bottom:12px">Эффективность операторов</div>';
   opFinH+='<table style="width:100%;border-collapse:collapse;font-size:11px">';
   opFinH+='<thead><tr style="background:var(--bg-3)">';
-  ['Оператор','Модемов','Трафик','Выручка','₽/мод/мес','₽/ГБ'].forEach(function(h){
-    opFinH+='<th style="padding:6px 8px;font-size:10px;color:var(--text-2);text-align:left">'+h+'</th>';
+  ['Оператор','Модемов','Трафик (мес)','Выручка','₽/мод/мес','₽/ГБ'].forEach(function(h){
+    opFinH+='<th style="padding:6px 8px;font-size:10px;color:var(--text-2);text-align:center">'+h+'</th>';
   });
   opFinH+='</tr></thead><tbody>';
   var opStats={};
@@ -1987,18 +1995,18 @@ function renderFinancesTab(d){
     var op=m.operator;if(!op)return;
     if(!opStats[op])opStats[op]={cnt:0,t:0,rev:0};
     opStats[op].cnt++;
-    opStats[op].t+=m.tIn+m.tOut;
+    opStats[op].t+=(m.monIn||0)+(m.monOut||0);
     var cl=(currentData.clients||[]).find(function(c){return(c.portName||c.username)===m.pn});
     if(cl){
-      var tGb=(m.tIn+m.tOut)/1073741824;
+      var tGb=((m.monIn||0)+(m.monOut||0))/1073741824;
       if(cl.tariff_type==='per_gb'||cl.billing==='per_gb'){opStats[op].rev+=tGb*(cl.price||cl.price_per_gb||0);}
-      else if(cl.tariff_type==='per_modem'||cl.billing==='per_modem'){opStats[op].rev+=(cl.price||cl.price_per_modem||0)/Math.max(daysEl,1)*daysEl;}
+      else if(cl.tariff_type==='per_modem'||cl.billing==='per_modem'){opStats[op].rev+=(cl.price||cl.price_per_modem||0);}
     }
   });
   Object.keys(opStats).sort(function(a,b){return opStats[b].rev-opStats[a].rev}).forEach(function(op){
     var v=opStats[op];
     var tGb=v.t/1073741824;
-    var revPerMod=v.cnt>0?Math.round(v.rev/v.cnt/Math.max(daysEl,1)*30):0;
+    var revPerMod=v.cnt>0?Math.round(v.rev/v.cnt):0;
     var revPerGb=tGb>0?Math.round(v.rev/tGb):0;
     var flag='';var opL=op.toLowerCase();
     if(opL.indexOf('orange ro')>-1||opL.indexOf('vodafone ro')>-1)flag='🇷🇴 ';
