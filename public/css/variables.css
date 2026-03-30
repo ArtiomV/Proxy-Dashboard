@@ -1,0 +1,41 @@
+/* ==================== THEME VARIABLES ==================== */
+:root,[data-theme="dark"]{
+  --bg-0:#0D0D0E;--bg-1:#121724;--bg-2:#1B2237;--bg-3:#1c2432;--bg-4:#243044;
+  --border:rgba(255,255,255,0.06);--border-hover:rgba(255,255,255,0.12);
+  --text-0:#f0f6fc;--text-1:#c9d1d9;--text-2:#7d8590;--text-3:#484f58;
+  --accent:#1960C9;--accent-hover:#2070d9;--accent-dim:rgba(25,96,201,0.12);
+  --accent-glow:rgba(25,96,201,0.25);
+  --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
+  --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
+  --card-bg:rgba(18,23,36,0.7);--card-border:rgba(255,255,255,0.06);
+  --card-shadow:0 4px 24px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.03);
+  --font-sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',Monaco,monospace;
+  --green:#34C759;--green-bg:rgba(52,199,89,0.15);
+  --red:#FF383C;--red-bg:rgba(255,56,60,0.15);--yellow:#FFCC00;
+  --blue:#3498db;--blue-bg:rgba(52,152,219,.15);
+  --orange:#e67e22;--orange-bg:rgba(230,126,34,.15);
+  --purple:#9b59b6;--purple-bg:rgba(155,89,182,.15);
+  --btn-primary-bg:#1960C9;--btn-primary-hover:#2070d9;
+  --row-hover:rgba(255,255,255,0.03);
+  --country-bg:rgba(25,96,201,0.04);
+}
+[data-theme="light"]{
+  --bg-0:#f5f6f8;--bg-1:#ffffff;--bg-2:#f0f1f3;--bg-3:#e8eaed;--bg-4:#d8dce2;
+  --border:rgba(0,0,0,0.08);--border-hover:rgba(0,0,0,0.15);
+  --text-0:#0f1419;--text-1:#24292f;--text-2:#656d76;--text-3:#8b949e;
+  --accent:#1960C9;--accent-hover:#1450b0;--accent-dim:rgba(25,96,201,0.1);
+  --accent-glow:rgba(25,96,201,0.2);
+  --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
+  --success:#1a7f37;--warning:#FFCC00;--danger:#FF383C;
+  --card-bg:rgba(255,255,255,0.8);--card-border:rgba(0,0,0,0.08);
+  --card-shadow:0 4px 24px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.04);
+  --green:#1a7f37;--green-bg:rgba(26,127,55,0.12);
+  --red:#FF383C;--red-bg:rgba(255,56,60,0.1);--yellow:#FFCC00;
+  --blue:#2980b9;--blue-bg:rgba(41,128,185,.12);
+  --orange:#d35400;--orange-bg:rgba(211,84,0,.12);
+  --purple:#8e44ad;--purple-bg:rgba(142,68,173,.12);
+  --btn-primary-bg:#1960C9;--btn-primary-hover:#1450b0;
+  --row-hover:rgba(0,0,0,0.02);
+  --country-bg:rgba(25,96,201,0.04);
+}

@@ -1009,7 +1009,9 @@ function calculateMonthlyBillAmount(client, cachedResults) {
 let dailyTraffic = {}; // { portKey: { "2026-03-01": { in: bytes, out: bytes, portName }, ... } }
 // Load from SQLite
 try {
-  const rows = db.prepare('SELECT port_name, date, bytes_in, bytes_out FROM daily_traffic').all();
+  // Load only last 90 days to limit memory usage
+  db.prepare("DELETE FROM daily_traffic WHERE date < date('now', '-90 days')").run();
+  const rows = db.prepare("SELECT port_name, date, bytes_in, bytes_out FROM daily_traffic WHERE date >= date('now', '-90 days')").all();
   for (const r of rows) {
     if (!dailyTraffic[r.port_name]) dailyTraffic[r.port_name] = {};
     dailyTraffic[r.port_name][r.date] = { in: r.bytes_in, out: r.bytes_out };
@@ -1047,6 +1049,10 @@ async function syncYesterdayTraffic() {
           const yIn = parseBwToBytes(b.bandwidth_bytes_yesterday_in);
           const yOut = parseBwToBytes(b.bandwidth_bytes_yesterday_out);
           if (yIn > 0 || yOut > 0) {
+            // Skip if yesterday data already exists and today's data is identical (ProxySmart hasn't reset yet)
+            const todayStr = localNow.toISOString().slice(0, 10);
+            const existingToday = dailyTraffic[key] && dailyTraffic[key][todayStr];
+            if (existingToday && existingToday.in === yIn && existingToday.out === yOut) continue;
             _dtUpsert.run(key, yesterdayStr, yIn, yOut);
             if (!dailyTraffic[key]) dailyTraffic[key] = {};
             dailyTraffic[key][yesterdayStr] = { in: yIn, out: yOut, portName: b.portName };
@@ -1081,6 +1087,18 @@ function saveDailyTraffic() {
 // Per-modem snapshots of daily counters, used to derive per-hour increments
 let hourlyDaySnapshots = {}; // { 'SRV_nick': { in: bytes, out: bytes, date: 'YYYY-MM-DD' } }
 
+// Persist snapshots to SQLite so they survive server restarts
+function saveHourlySnapshots() {
+  try { _kvSet.run('hourly_day_snapshots', JSON.stringify(hourlyDaySnapshots)); } catch (e) {}
+}
+function loadHourlySnapshots() {
+  try {
+    const row = _kvGet.get('hourly_day_snapshots');
+    if (row) { hourlyDaySnapshots = JSON.parse(row.value); console.log(`[HourlyAgg] Restored ${Object.keys(hourlyDaySnapshots).length} snapshots from DB`); }
+  } catch (e) {}
+}
+loadHourlySnapshots();
+
 async function aggregateHourlyTraffic() {
   try {
     const results = await fetchAllServersDataCached();
@@ -1105,7 +1123,8 @@ async function aggregateHourlyTraffic() {
           const md = m.modem_details || {};
           const imei = md.IMEI || '';
           const nick = md.NICK || imei;
-          const operator = md.OPERATOR || '';
+          const nd = m.net_details || {};
+          const operator = nd.CELLOP || md.OPERATOR || '';
           if (!imei) continue;
           const modemPorts = portsMap[imei] || [];
           for (const p of modemPorts) {
@@ -1122,7 +1141,16 @@ async function aggregateHourlyTraffic() {
           // Look up nick/operator via portID → status cross-reference
           const info = portIdInfo[portId] || {};
           const nick = info.nick || pnMap[srv + '_' + portId] || portId;
-          const operator = info.operator || '';
+          // Normalize operator: lowercase CELLOP + server context → canonical name
+          let rawOp = (info.operator || '').toLowerCase().trim();
+          // Fallback: if API returned no operator, check modem_meta DB
+          if (!rawOp && nick) {
+            const meta = db.prepare('SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1').get(srv, nick);
+            if (meta && meta.operator) rawOp = meta.operator.toLowerCase().trim();
+          }
+          const isRO = srv === 'S2' || srv.indexOf('S2') === 0;
+          const opMap = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
+          const operator = opMap[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
           const clientName = info.clientName || b.portName || '';
           const snapKey = srv + '_' + nick;
 
@@ -1143,6 +1171,7 @@ async function aggregateHourlyTraffic() {
       _htCleanup.run();
     });
     batch();
+    saveHourlySnapshots();
     console.log(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
   } catch (e) {
     console.error('[HourlyAgg] Error:', e.message);
@@ -2230,7 +2259,18 @@ async function trackModems() {
       const data = await fetchServerData(server);
       statusArr = Array.isArray(data.status) ? data.status : [];
     } catch (e) {
-      console.log(`[Tracking] Server ${server.name} unreachable, skipping: ${e.message}`);
+      console.log(`[Tracking] Server ${server.name} unreachable: ${e.message} — marking all modems as down`);
+      // Server unreachable = all its modems are down
+      const todayBucket = new Date().toLocaleDateString('en-CA');
+      for (const k of Object.keys(uptimeTracking)) {
+        if (k.startsWith(server.name + '_')) {
+          if (!uptimeTracking[k].daily) uptimeTracking[k].daily = {};
+          if (!uptimeTracking[k].daily[todayBucket]) uptimeTracking[k].daily[todayBucket] = { online: 0, total: 0 };
+          uptimeTracking[k].total_checks++;
+          uptimeTracking[k].daily[todayBucket].total++;
+          // don't increment online = downtime
+        }
+      }
       continue;
     }
 
@@ -2243,7 +2283,12 @@ async function trackModems() {
           const md = m.modem_details || {};
           const imei = md.IMEI;
           if (!imei) continue;
-          _modemMetaUpsert.run(server.name, imei, md.NICK || '', md.OPERATOR || '', md.MODEL || '', md.PHONE_NUMBER || '');
+          const nd = m.net_details || {};
+          const rawOp = (nd.CELLOP || md.OPERATOR || '').toLowerCase().trim();
+          const isRO = server.name === 'S2' || server.name.indexOf('S2') === 0;
+          const _opNorm = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
+          const normOp = _opNorm[rawOp] || nd.CELLOP || md.OPERATOR || '';
+          _modemMetaUpsert.run(server.name, imei, md.NICK || '', normOp, md.MODEL || '', md.PHONE_NUMBER || '');
         }
       });
       metaBatch();
@@ -2272,39 +2317,23 @@ async function trackModems() {
         // else same IP -- keep existing `since`
       }
 
-      // Uptime tracking -- skip if rotating, rebooting, or IP is resetting
-      if (isRotating || isRebooting || extIp === 'IP_RESET' || extIp === '') {
-        continue;
-      }
-
+      // Uptime tracking
+      // Rotating/rebooting = online (normal operation, not downtime)
+      // Offline = immediately count as downtime (no threshold)
       if (!uptimeTracking[key]) {
-        uptimeTracking[key] = { total_checks: 0, online_checks: 0, first_check: now, consecutive_failures: 0, daily: {} };
+        uptimeTracking[key] = { total_checks: 0, online_checks: 0, first_check: now, daily: {} };
       }
-      if (!uptimeTracking[key].consecutive_failures) uptimeTracking[key].consecutive_failures = 0;
       if (!uptimeTracking[key].daily) uptimeTracking[key].daily = {};
 
-      // Daily bucket for 30-day uptime
       const todayBucket = new Date().toLocaleDateString('en-CA');
       if (!uptimeTracking[key].daily[todayBucket]) uptimeTracking[key].daily[todayBucket] = { online: 0, total: 0 };
 
-      if (isOnline) {
-        uptimeTracking[key].consecutive_failures = 0;
-        uptimeTracking[key].total_checks++;
+      const isUp = isOnline || isRotating || isRebooting || extIp === 'IP_RESET';
+      uptimeTracking[key].total_checks++;
+      uptimeTracking[key].daily[todayBucket].total++;
+      if (isUp) {
         uptimeTracking[key].online_checks++;
-        uptimeTracking[key].daily[todayBucket].total++;
         uptimeTracking[key].daily[todayBucket].online++;
-      } else {
-        uptimeTracking[key].consecutive_failures++;
-        if (uptimeTracking[key].consecutive_failures >= 3) {
-          uptimeTracking[key].total_checks++;
-          uptimeTracking[key].daily[todayBucket].total++;
-          // don't increment online = downtime
-        } else {
-          uptimeTracking[key].total_checks++;
-          uptimeTracking[key].online_checks++;
-          uptimeTracking[key].daily[todayBucket].total++;
-          uptimeTracking[key].daily[todayBucket].online++;
-        }
       }
 
       // Prune daily buckets older than 35 days
@@ -3210,11 +3239,21 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
   try {
     const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, '*');
-    const servers = apiServers.map(s => ({ name: s.name, url: s.url }));
+    const servers = apiServers.map(s => {
+      const sc = SERVER_COUNTRIES[s.name] || {};
+      return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz };
+    });
     // TASK-01 (SEC): serverAuth removed — credentials must never reach the frontend
     // SEC-04: Strip passwords/hashes from client data sent to frontend
+    // Count modems per client from live bandwidth data
+    const _clientModemCounts = {};
+    for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+      const pn = bwData.portName;
+      if (pn) _clientModemCounts[pn] = (_clientModemCounts[pn] || 0) + 1;
+    }
     const sanitizedClients = clients.map(c => {
       const { password, passwordHash, ...safe } = c;
+      safe.modemCount = _clientModemCounts[c.portName] || 0;
       return safe;
     });
     // BUG-11: billingLedger removed from bulk response — use /api/admin/clients/:id/ledger instead
@@ -3864,6 +3903,46 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   saveSettings();
   rescheduleSpeedtests();
   res.json({ ok: true, settings: appSettings });
+});
+
+// ==================== CRM PROXY (credentials stay server-side) ====================
+app.get('/api/admin/crm_token', authMiddleware, adminMiddleware, async (req, res) => {
+  const crmUrl = process.env.CRM_URL || '';
+  const crmEmail = process.env.CRM_EMAIL || '';
+  const crmPass = process.env.CRM_PASSWORD || '';
+  if (!crmUrl || !crmEmail || !crmPass) {
+    return res.json({ error: 'CRM not configured', url: crmUrl || null });
+  }
+  try {
+    const https = require('https');
+    const http = require('http');
+    const lib = crmUrl.startsWith('https') ? https : http;
+    const body = JSON.stringify({
+      query: `mutation{getLoginTokenFromCredentials(email:"${crmEmail}",password:"${crmPass}",origin:"${crmUrl}"){loginToken{token}}}`
+    });
+    const url = new URL(crmUrl + '/metadata');
+    const result = await new Promise((resolve, reject) => {
+      const r = lib.request({
+        hostname: url.hostname, port: url.port, path: url.pathname, method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) },
+        timeout: 10000
+      }, (resp) => {
+        let d = ''; resp.on('data', c => d += c);
+        resp.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(new Error('CRM вернул не-JSON ответ (возможно сервер перезагружается)')); } });
+      });
+      r.on('error', reject);
+      r.on('timeout', () => { r.destroy(); reject(new Error('CRM timeout')); });
+      r.write(body); r.end();
+    });
+    const token = result?.data?.getLoginTokenFromCredentials?.loginToken?.token;
+    if (token) {
+      res.json({ token, url: crmUrl });
+    } else {
+      res.json({ error: 'CRM login failed', url: crmUrl });
+    }
+  } catch (e) {
+    res.json({ error: e.message, url: crmUrl });
+  }
 });
 
 // ==================== ADMIN: MODEM ACTIONS ====================
@@ -6213,7 +6292,7 @@ const httpServer = app.listen(PORT, () => {
   scheduleRepeating(3, 0, 'TopHosts', aggregateTopHosts);
 
   // Start modem tracking (IP + uptime) — every 5 min
-  const TRACKING_INTERVAL_MS = 5 * 60 * 1000;
+  const TRACKING_INTERVAL_MS = 3 * 60 * 1000;
   console.log(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
   trackModems().catch(e => console.error('[Tracking] Initial error:', e.message));
   _intervals.push(setInterval(() => {
@@ -6277,6 +6356,23 @@ const httpServer = app.listen(PORT, () => {
     }, msUntil);
   })();
 
+  // Startup warmup: capture snapshots immediately + retry at 5 and 10 min
+  // This ensures that after restart, we quickly have baseline snapshots for the next hourly run
+  const snapshotCount = Object.keys(hourlyDaySnapshots).length;
+  if (snapshotCount === 0) {
+    console.log('[HourlyAgg] No snapshots found — running startup warmup (now, +5min, +10min)');
+    // Immediate: just capture snapshots (aggregateHourlyTraffic will set them even if no increments computed)
+    setTimeout(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg:warmup]', e.message)), 15000);
+    // +5 min: now we have baseline snapshots, can compute first increments
+    setTimeout(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg:warmup+5]', e.message)), 5 * 60 * 1000);
+    // +10 min: second catch-up pass
+    setTimeout(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg:warmup+10]', e.message)), 10 * 60 * 1000);
+  } else {
+    console.log(`[HourlyAgg] Restored ${snapshotCount} snapshots — running catch-up in 30s`);
+    // Snapshots survived restart — run once quickly to capture any missed hour
+    setTimeout(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg:catchup]', e.message)), 30000);
+  }
+
   // Billing catch-up: if last snapshot is older than 26 hours, run now
   (async () => {
     try {
@@ -6304,8 +6400,8 @@ const httpServer = app.listen(PORT, () => {
 
 
 // ==================== CRM PAYMENT TRACKING ====================
-const CRM_DB_URL = 'postgresql://twenty:TwentyCRM2026x@172.18.0.5:5432/default';
-const CRM_WS = 'workspace_1wekp8bkkvyv4c57kfv5uljgp';
+const CRM_DB_URL = process.env.CRM_DB_URL || '';
+const CRM_WS = process.env.CRM_WORKSPACE || 'workspace_1wekp8bkkvyv4c57kfv5uljgp';
 
 async function checkCrmPaymentConfirmations() {
   let pgClient;

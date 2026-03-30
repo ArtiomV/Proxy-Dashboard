@@ -1,0 +1,53 @@
+/* Main table */
+.table-wrap{padding:0 24px 24px;overflow-x:auto}
+.country-group{margin-top:14px}
+.country-header{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg-2);border-radius:8px 8px 0 0;border:1px solid var(--border);border-bottom:none}
+.country-flag{font-size:20px}
+.country-name{font-size:13px;font-weight:600;color:var(--text-0)}
+.country-stats{font-size:11px;color:var(--text-2);margin-left:auto;display:flex;gap:12px}
+table{width:100%;border-collapse:collapse;background:var(--bg-1);border:1px solid var(--border);border-top:none;table-layout:fixed}
+th{position:sticky;top:0;background:var(--bg-2);padding:8px 14px;text-align:center;font-size:10px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+th:hover{color:var(--text-1)}
+td{padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bg-3);white-space:nowrap;text-align:center}
+tr:hover td{background:var(--row-hover)}
+tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
+
+/* Log table */
+.log-table{width:100%;border-collapse:collapse}
+.log-table th,.log-table td{padding:8px 14px;text-align:left;font-size:11px;border-bottom:1px solid var(--border)}
+.log-table th{color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;background:var(--bg-1);z-index:2;box-shadow:0 1px 0 var(--border)}
+.log-table td{color:var(--text-1)}
+.log-table tr:hover td{background:var(--row-hover)}
+
+/* Finance table */
+.fin-table{width:100%;border-collapse:collapse;font-size:11px}
+.fin-table th{padding:6px 14px;background:var(--bg-2);border-bottom:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;text-align:center;white-space:nowrap}
+.fin-table td{padding:8px 14px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text-1);text-align:center}
+.fin-table tr:last-child td{border-bottom:none}.fin-table tr:hover td{background:var(--row-hover)}
+
+/* Resource table */
+.res-table{width:100%;border-collapse:collapse}
+.res-table th{padding:8px 14px;text-align:left;font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);font-weight:600;position:sticky;top:0;background:var(--bg-1);z-index:2;box-shadow:0 1px 0 var(--border)}
+.res-table td{padding:8px 14px;font-size:11px;border-bottom:1px solid var(--border)}
+.res-table tr:hover td{background:var(--row-hover)}
+.res-table .domain{color:var(--accent);font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.res-table .count-bar{height:10px;border-radius:2px;background:var(--accent);opacity:.6;transition:width .3s}
+
+/* Horizontal bar chart (CSS) */
+.hbar-list{list-style:none}
+.hbar-item{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px}
+.hbar-item:hover{background:var(--bg-2);border-radius:4px;margin:0 -4px;padding:4px}
+.hbar-rank{width:16px;text-align:center;color:var(--text-3);font-size:10px;font-weight:600}
+.hbar-label{width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-1);font-weight:500}
+.hbar-bar-wrap{flex:1;height:16px;background:var(--bg-3);border-radius:3px;overflow:hidden;position:relative}
+.hbar-bar{height:100%;border-radius:3px;transition:width .5s ease;min-width:2px}
+.hbar-bar.blue{background:var(--accent)}
+.hbar-bar.green{background:var(--success)}
+.hbar-bar.orange{background:var(--orange)}
+.hbar-bar.purple{background:var(--purple)}
+.hbar-bar.red{background:var(--danger)}
+.hbar-value{width:70px;text-align:center;color:var(--text-0);font-family:var(--font-mono);font-size:10px;font-weight:600}
+
+/* Badges */
+.badge-pos{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;background:var(--green-bg);color:var(--green)}
+.badge-neg{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;background:var(--red-bg);color:var(--red)}

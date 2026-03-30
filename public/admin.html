@@ -12,487 +12,12 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
-<style>
-/* ==================== THEME VARIABLES ==================== */
-:root,[data-theme="dark"]{
-  --bg-0:#0D0D0E;--bg-1:#121724;--bg-2:#1B2237;--bg-3:#1c2432;--bg-4:#243044;
-  --border:rgba(255,255,255,0.06);--border-hover:rgba(255,255,255,0.12);
-  --text-0:#f0f6fc;--text-1:#c9d1d9;--text-2:#7d8590;--text-3:#484f58;
-  --accent:#1960C9;--accent-hover:#2070d9;--accent-dim:rgba(25,96,201,0.12);
-  --accent-glow:rgba(25,96,201,0.25);
-  --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
-  --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
-  --card-bg:rgba(18,23,36,0.7);--card-border:rgba(255,255,255,0.06);
-  --card-shadow:0 4px 24px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.03);
-  --font-sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
-  --font-mono:'JetBrains Mono','SF Mono',Monaco,monospace;
-  --green:#34C759;--green-bg:rgba(52,199,89,0.15);
-  --red:#FF383C;--red-bg:rgba(255,56,60,0.15);--yellow:#FFCC00;
-  --blue:#3498db;--blue-bg:rgba(52,152,219,.15);
-  --orange:#e67e22;--orange-bg:rgba(230,126,34,.15);
-  --purple:#9b59b6;--purple-bg:rgba(155,89,182,.15);
-  --btn-primary-bg:#1960C9;--btn-primary-hover:#2070d9;
-  --row-hover:rgba(255,255,255,0.03);
-  --country-bg:rgba(25,96,201,0.04);
-}
-[data-theme="light"]{
-  --bg-0:#f5f6f8;--bg-1:#ffffff;--bg-2:#f0f1f3;--bg-3:#e8eaed;--bg-4:#d8dce2;
-  --border:rgba(0,0,0,0.08);--border-hover:rgba(0,0,0,0.15);
-  --text-0:#0f1419;--text-1:#24292f;--text-2:#656d76;--text-3:#8b949e;
-  --accent:#1960C9;--accent-hover:#1450b0;--accent-dim:rgba(25,96,201,0.1);
-  --accent-glow:rgba(25,96,201,0.2);
-  --accent-gradient:linear-gradient(135deg,#1960C9 0%,#7c3aed 100%);
-  --success:#1a7f37;--warning:#FFCC00;--danger:#FF383C;
-  --card-bg:rgba(255,255,255,0.8);--card-border:rgba(0,0,0,0.08);
-  --card-shadow:0 4px 24px rgba(0,0,0,.06),0 0 0 1px rgba(0,0,0,.04);
-  --green:#1a7f37;--green-bg:rgba(26,127,55,0.12);
-  --red:#FF383C;--red-bg:rgba(255,56,60,0.1);--yellow:#FFCC00;
-  --blue:#2980b9;--blue-bg:rgba(41,128,185,.12);
-  --orange:#d35400;--orange-bg:rgba(211,84,0,.12);
-  --purple:#8e44ad;--purple-bg:rgba(142,68,173,.12);
-  --btn-primary-bg:#1960C9;--btn-primary-hover:#1450b0;
-  --row-hover:rgba(0,0,0,0.02);
-  --country-bg:rgba(25,96,201,0.04);
-}
-*{margin:0;padding:0;box-sizing:border-box}
-body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);transition:background .3s,color .3s}
-
-/* Login — proxies.rent style */
-.login-overlay{position:fixed;inset:0;background:#0D0D0E;display:flex;align-items:center;justify-content:center;z-index:1000}
-.login-overlay::before{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 50% 0%,rgba(25,96,201,0.15) 0%,transparent 60%);pointer-events:none}
-.login-overlay::after{content:'';position:absolute;inset:0;background:radial-gradient(ellipse at 80% 80%,rgba(52,199,89,0.06) 0%,transparent 50%);pointer-events:none}
-.login-box{background:var(--bg-2);border:1px solid var(--border);border-radius:20px;padding:48px 40px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);position:relative;z-index:1;animation:fadeIn .5s ease}
-.login-logo{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:8px}
-.login-logo img{height:32px;width:auto}
-.login-logo span{font-size:22px;font-weight:600;color:#fff;letter-spacing:-0.3px}
-.login-sub{text-align:center;color:#B3B3B3;font-size:14px;margin-bottom:32px;font-weight:400}
-.login-box input{width:100%;padding:14px 16px;margin-bottom:14px;background:rgba(13,13,14,0.6);border:1px solid #5C5967;border-radius:4px;color:#EDEDED;font-size:15px;outline:none;font-family:'Inter',sans-serif;transition:border-color .3s,box-shadow .3s}
-.login-box input:focus{border-color:#1960C9;box-shadow:0 0 0 3px rgba(25,96,201,0.2)}
-.login-box input::placeholder{color:#5C5967}
-.login-box button{width:100%;padding:14px;margin-top:6px;background:#1960C9;border:1px solid #1960C9;border-radius:8px;color:#fff;font-size:16px;cursor:pointer;font-weight:600;font-family:'Inter',sans-serif;transition:all .3s ease}
-.login-box button:hover{background:#fff;color:#1960C9;border-color:#fff}
-.login-box button:active{transform:scale(.98)}
-.login-error{color:#FF383C;font-size:13px;margin-bottom:12px;text-align:center}
-@keyframes fadeIn{from{opacity:0;transform:translateY(8px)}to{opacity:1;transform:translateY(0)}}
-
-/* Header logo */
-.header-logo{display:flex;align-items:center;text-decoration:none}
-.header-logo img{height:22px;width:auto}
-
-/* Header - PAN-OS style */
-.header{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;justify-content:space-between}
-.header-left{display:flex;align-items:center;gap:16px}
-.header h1{font-size:18px;background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;font-weight:700;letter-spacing:-.3px}
-.header-stats{display:flex;gap:10px}
-.stat-badge{background:var(--bg-2);padding:4px 10px;border-radius:4px;font-size:11px;color:var(--text-2);border:1px solid var(--border)}
-.stat-badge span{color:var(--text-0);font-weight:600}
-.header-right{display:flex;align-items:center;gap:8px}
-
-/* Theme toggle */
-.theme-toggle{width:36px;height:20px;border-radius:10px;border:1px solid var(--border);background:var(--bg-3);cursor:pointer;position:relative;transition:all .3s}
-.theme-toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--accent);transition:transform .3s}
-[data-theme="light"] .theme-toggle::after{transform:translateX(16px)}
-
-/* Nav */
-.nav-tabs{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:0;height:40px}
-.nav-tab{padding:0 18px;cursor:pointer;font-size:13px;color:var(--text-2);border-bottom:2px solid transparent;transition:all .2s;font-weight:500;display:flex;align-items:center;height:100%}
-.nav-tab:hover{color:var(--text-1)}
-.nav-tab.active{background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;border-bottom-color:var(--accent)}
-.tab-content{display:none!important}.tab-content.active{display:block!important}
-.tab-content.tab-flex.active{display:flex!important;flex-direction:column}
-
-/* Buttons */
-.btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:500;transition:all .2s;display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);color:var(--text-1);font-family:var(--font-sans)}
-.btn:hover{border-color:var(--border-hover);background:var(--bg-3)}
-.btn-primary{background:var(--btn-primary-bg);color:#fff;border-color:var(--btn-primary-bg)}
-.btn-primary:hover{background:var(--accent-hover);box-shadow:0 0 16px rgba(25,96,201,.25)}
-.btn-sm{padding:5px 10px;font-size:11px}
-.btn-secondary{background:var(--bg-2);color:var(--text-1);border-color:var(--border)}
-.btn-secondary:hover{border-color:var(--border-hover);background:var(--bg-3)}
-.btn-ghost{background:transparent;color:var(--accent);border-color:transparent}
-.btn-ghost:hover{background:var(--accent-dim)}
-.btn-danger{background:var(--red-bg);color:var(--red);border-color:var(--danger)}
-.btn-danger:hover{background:var(--danger);color:#fff}
-.btn-success{background:transparent;color:var(--success);border-color:var(--success)}
-.btn-success:hover{background:var(--green-bg)}
-.btn-warning{background:transparent;color:var(--warning);border-color:var(--warning)}
-.btn-warning:hover{background:var(--orange-bg)}
-
-/* Toolbar */
-.toolbar{padding:8px 24px;background:var(--bg-1);border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-.search-box{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:6px 12px;color:var(--text-0);font-size:12px;width:240px;outline:none}
-.search-box:focus{border-color:var(--accent)}
-.filter-group{display:flex;gap:3px}
-.filter-btn{padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text-2);cursor:pointer;font-size:11px;transition:all .15s}
-.filter-btn:hover{background:var(--bg-3);color:var(--text-1)}
-.filter-btn.active{background:var(--accent-dim);color:var(--accent);border-color:var(--accent)}
-
-/* Col selector */
-.col-selector{position:relative}
-.col-dropdown{position:absolute;top:100%;right:0;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:6px;z-index:100;min-width:180px;display:none;box-shadow:0 8px 24px rgba(0,0,0,.3)}
-.col-dropdown.show{display:block}
-.col-dropdown label{display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;font-size:11px;border-radius:4px;white-space:nowrap}
-.col-dropdown label:hover{background:var(--bg-3)}
-
-/* Table */
-.table-wrap{padding:0 24px 24px;overflow-x:auto}
-.country-group{margin-top:14px}
-.country-header{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg-2);border-radius:8px 8px 0 0;border:1px solid var(--border);border-bottom:none}
-.country-flag{font-size:20px}
-.country-name{font-size:13px;font-weight:600;color:var(--text-0)}
-.country-stats{font-size:11px;color:var(--text-2);margin-left:auto;display:flex;gap:12px}
-table{width:100%;border-collapse:collapse;background:var(--bg-1);border:1px solid var(--border);border-top:none}
-th{position:sticky;top:0;background:var(--bg-2);padding:8px 14px;text-align:center;font-size:10px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
-th:hover{color:var(--text-1)}
-td{padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bg-3);white-space:nowrap;text-align:center}
-tr:hover td{background:var(--row-hover)}
-tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
-
-/* Status dots */
-.status-dot{width:8px;height:8px;border-radius:50%;display:inline-block}
-.status-dot.online{background:var(--success);box-shadow:0 0 8px rgba(52,199,89,.5)}
-.status-dot.rotating{background:var(--warning);animation:pulse 1.5s infinite}
-.status-dot.offline{background:var(--danger)}
-.status-dot.rebooting{background:var(--purple);animation:pulse 1s infinite}
-@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
-
-/* Signal bars */
-.signal-bars{display:inline-flex;align-items:flex-end;gap:2px;height:12px}
-.signal-bar{width:3px;background:var(--bg-4);border-radius:1px}
-.signal-bar.active{background:var(--success)}
-
-/* Net badge */
-.net-badge{padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600}
-.net-lte{background:rgba(52,199,89,.15);color:var(--success)}
-.net-3g{background:rgba(230,126,34,.15);color:var(--warning)}
-.net-2g{background:rgba(255,56,60,.15);color:var(--danger)}
-.net-unknown{background:var(--bg-3);color:var(--text-3)}
-
-.mono{font-family:var(--font-mono);font-size:11px}
-.copy-btn{background:none;border:none;color:var(--text-3);cursor:pointer;font-size:12px;padding:1px 3px;border-radius:3px}
-.copy-btn:hover{color:var(--accent)}
-.pass-mask{cursor:pointer;color:var(--text-3);letter-spacing:2px}
-
-/* Actions */
-.actions-cell{display:flex;gap:3px}
-.action-btn{width:24px;height:24px;border-radius:4px;border:none;cursor:pointer;font-size:12px;display:flex;align-items:center;justify-content:center;transition:all .15s}
-.action-btn:disabled{opacity:.4;cursor:not-allowed}
-.action-btn.reset{background:var(--blue-bg);color:var(--blue)}
-.action-btn.reboot{background:var(--orange-bg);color:var(--orange)}
-.action-btn.usb{background:var(--purple-bg);color:var(--purple)}
-.action-btn.detail{background:rgba(25,96,201,.15);color:var(--accent)}
-.action-btn .spinner{display:none;width:11px;height:11px;border:2px solid transparent;border-top-color:currentColor;border-radius:50%;animation:spin .8s linear infinite}
-.action-btn.loading .btn-icon{display:none}
-.action-btn.loading .spinner{display:block}
-@keyframes spin{to{transform:rotate(360deg)}}
-
-/* Modal */
-.modal-overlay{position:fixed;inset:0;background:rgba(0,0,0,.6);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:none;align-items:center;justify-content:center;z-index:1000}
-.modal-overlay.show{display:flex}
-.modal{background:var(--bg-1);border:1px solid var(--card-border);border-radius:12px;width:740px;max-width:92vw;max-height:85vh;overflow:hidden;display:flex;flex-direction:column;box-shadow:0 24px 64px rgba(0,0,0,.5)}
-.modal-header{padding:14px 24px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;flex-shrink:0}
-.modal-header h3{color:var(--text-0);font-size:14px}
-.modal-close{background:none;border:none;color:var(--text-2);cursor:pointer;font-size:18px;padding:2px 6px}
-.modal-close:hover{color:var(--text-0)}
-.modal-body{padding:14px 24px;overflow-y:auto;flex:1;min-height:0}
-.modal-tabs{display:flex;gap:0;padding:0 24px;border-bottom:1px solid var(--border);overflow-x:auto;flex-shrink:0}
-.modal-tab{padding:4px 10px;cursor:pointer;font-size:11px;color:var(--text-2);font-weight:500;border-bottom:2px solid transparent;transition:all .15s;white-space:nowrap}
-.modal-tab:hover{color:var(--text-1)}
-.modal-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-
-/* Detail */
-.detail-grid{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.detail-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:12px;padding:14px;border:1px solid var(--card-border)}
-.detail-card h4{font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:5px;letter-spacing:.5px}
-.detail-row{display:flex;justify-content:space-between;padding:2px 0;font-size:11px}
-.detail-label{color:var(--text-2)}
-.detail-value{color:var(--text-0);font-family:var(--font-mono);font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis}
-
-/* Confirm dialog */
-.confirm-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px);display:flex;align-items:center;justify-content:center;z-index:3000}
-.confirm-box{background:var(--bg-1);border:1px solid var(--card-border);border-radius:12px;padding:24px;max-width:380px;width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)}
-.confirm-box h4{font-size:14px;font-weight:600;color:var(--text-0);margin-bottom:8px}
-.confirm-box p{font-size:12px;color:var(--text-2);line-height:1.6;margin-bottom:20px}
-.confirm-box .confirm-actions{display:flex;gap:8px;justify-content:flex-end}
-
-.log-table{width:100%;border-collapse:collapse}
-.log-table th,.log-table td{padding:8px 14px;text-align:left;font-size:11px;border-bottom:1px solid var(--border)}
-.log-table th{color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px;position:sticky;top:0;background:var(--bg-1);z-index:2;box-shadow:0 1px 0 var(--border)}
-.log-table td{color:var(--text-1)}
-.log-table tr:hover td{background:var(--row-hover)}
-
-/* Toast */
-.toast-container{position:fixed;bottom:24px;right:24px;z-index:2000;display:flex;flex-direction:column;gap:8px;pointer-events:none}
-.toast{padding:12px 16px;border-radius:8px;font-size:12px;font-weight:500;animation:slideIn .2s ease;min-width:220px;max-width:360px;pointer-events:all;background:var(--bg-1);border:1px solid var(--border);border-left-width:3px;box-shadow:0 4px 16px rgba(0,0,0,.25);color:var(--text-0);display:flex;align-items:flex-start;gap:8px}
-.toast-success,.toast--success{border-left-color:#1D9E75}
-.toast-error,.toast--error{border-left-color:#E24B4A}
-.toast-info,.toast--info{border-left-color:#185FA5}
-.toast-warning,.toast--warning{border-left-color:#EF9F27}
-@keyframes slideIn{from{transform:translateX(40px);opacity:0}to{transform:translateX(0);opacity:1}}
-.toast-icon{width:18px;height:18px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;font-weight:700;color:#fff;flex-shrink:0}
-.toast-success .toast-icon,.toast--success .toast-icon{background:#1D9E75}
-.toast-error .toast-icon,.toast--error .toast-icon{background:#E24B4A}
-.toast-info .toast-icon,.toast--info .toast-icon{background:#185FA5}
-.toast-warning .toast-icon,.toast--warning .toast-icon{background:#EF9F27}
-.toast-text{flex:1;line-height:1.4}
-.toast-close{background:none;border:none;cursor:pointer;color:var(--text-3);font-size:13px;padding:0 2px;flex-shrink:0;line-height:1;opacity:.7}
-.toast-close:hover{opacity:1}
-/* Task 1 – Проблемные button */
-.btn-filter--alert{border-color:rgba(226,75,74,.3)!important;color:#A32D2D!important}
-.btn-filter--alert:hover{background:#FCEBEB!important}
-.btn-filter--alert.active{background:#FCEBEB!important;border-color:#E24B4A!important}
-/* Task 2 – Инфо button */
-.btn-details{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg-1);font-size:11px;font-weight:500;color:var(--text-2);cursor:pointer;font-family:inherit;white-space:nowrap;transition:background .12s,color .12s}
-.btn-details:hover{background:var(--bg-3);color:var(--text-0)}
-/* Task 3 – Speed column hint */
-.th-hint{font-size:11px;color:var(--text-2);cursor:help;margin-left:3px;opacity:.55}
-.th-hint:hover{opacity:1}
-/* Finance page — unified with analytics-card/widget patterns */
-.fin-summary{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
-.fin-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:12px;padding:14px;border:1px solid var(--card-border);box-shadow:var(--card-shadow)}
-.fin-card--alert{border-color:rgba(255,56,60,.2);background:var(--red-bg)}
-.fc-label{font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-.fc-value{font-size:22px;font-weight:700;line-height:1.2;margin-bottom:3px;color:var(--text-0)}
-.fc-sub{font-size:10px;color:var(--text-2);margin-top:2px}.fc-sub.up{color:var(--success)}.fc-sub.dn{color:var(--danger)}
-.fin-table-wrap{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;overflow:hidden;margin-bottom:12px;box-shadow:var(--card-shadow)}
-.fin-table-header{display:flex;justify-content:space-between;align-items:center;padding:14px;border-bottom:1px solid var(--border)}
-.fin-table-title{font-size:14px;font-weight:600;color:var(--text-0)}
-.fin-table{width:100%;border-collapse:collapse;font-size:11px}
-.fin-table th{padding:6px 14px;background:var(--bg-2);border-bottom:1px solid var(--border);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;text-align:center;white-space:nowrap}
-.fin-table td{padding:8px 14px;border-bottom:1px solid var(--border);vertical-align:middle;color:var(--text-1);text-align:center}
-.fin-table tr:last-child td{border-bottom:none}.fin-table tr:hover td{background:var(--row-hover)}
-.period-btn{padding:4px 10px;border-radius:14px;border:1px solid var(--border);background:transparent;font-size:11px;cursor:pointer;color:var(--text-2);font-family:inherit;font-weight:500;transition:all .12s}
-.period-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
-.period-btn:hover:not(.active){background:var(--bg-3)}
-.badge-pos{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;background:var(--green-bg);color:var(--green)}
-.badge-neg{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;background:var(--red-bg);color:var(--red)}
-.fin-bottom{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch;margin-bottom:12px}
-.show-more-row{text-align:center;padding:12px;border-top:1px solid var(--border)}
-.show-more-row button{font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;font-family:inherit}
-/* Task 11 – Debt count badge + inactive */
-.debt-count{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;border-radius:9px;background:var(--danger);color:#fff;font-size:10px;font-weight:700;margin-left:4px;padding:0 4px}
-.inactive-badge{display:inline-block;padding:1px 8px;border-radius:10px;font-size:10px;font-weight:500;background:var(--bg-3);color:var(--text-3);margin-left:8px;vertical-align:middle}
-.client-card--inactive{opacity:.6}
-/* Task 13 – Bulk actions panel */
-.bulk-panel{position:fixed;bottom:24px;left:50%;transform:translateX(-50%);display:flex;align-items:center;gap:10px;padding:10px 18px;background:var(--bg-1);color:var(--text-0);border:1px solid var(--border);border-radius:12px;font-size:12px;z-index:500;box-shadow:var(--card-shadow);white-space:nowrap}
-.bulk-panel button{padding:5px 12px;border-radius:6px;border:.5px solid rgba(255,255,255,.2);background:rgba(255,255,255,.1);color:#fff;font-size:11px;cursor:pointer;font-family:inherit}
-.bulk-panel button:hover{background:rgba(255,255,255,.2)}
-.bulk-cancel{opacity:.6}
-.bulk-count{font-weight:600;margin-right:4px}
-/* Task 14 – Notification bell */
-.header-notif-btn{position:relative;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;color:var(--text-2);background:none;border:none;padding:0;flex-shrink:0}
-.header-notif-btn:hover{background:var(--bg-3)}
-.notif-badge{position:absolute;top:3px;right:3px;min-width:14px;height:14px;border-radius:7px;background:var(--danger);color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px;pointer-events:none}
-.notif-panel{position:fixed;top:52px;right:12px;width:320px;background:var(--bg-1);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.2);z-index:800;overflow:hidden}
-.notif-panel-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text-0)}
-.notif-panel-hdr button{background:none;border:none;font-size:11px;color:var(--accent);cursor:pointer;padding:0}
-.notif-list{max-height:340px;overflow-y:auto}
-.notif-item{display:flex;gap:10px;padding:10px 14px;border-bottom:0.5px solid var(--border);cursor:pointer;transition:background .1s}
-.notif-item:hover{background:var(--bg-2)}
-.notif-item.unread{background:var(--bg-2)}
-.notif-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
-.notif-icon--danger{background:#FCEBEB}.notif-icon--warning{background:#FAEEDA}.notif-icon--success{background:#EAF3DE}.notif-icon--info{background:#E6F1FB}
-.notif-body{flex:1;min-width:0}
-.notif-text{font-size:11px;color:var(--text-0);line-height:1.4;margin-bottom:2px}
-.notif-time{font-size:10px;color:var(--text-3)}
-.notif-empty{padding:24px;text-align:center;font-size:12px;color:var(--text-3)}
-/* Task 15 – Audit log */
-.audit-action{display:inline-block;padding:2px 7px;border-radius:6px;font-size:10px;font-weight:500}
-.audit-create{background:#EAF3DE;color:#3B6D11}
-.audit-update{background:#E6F1FB;color:#185FA5}
-.audit-delete{background:#FCEBEB;color:#A32D2D}
-.audit-billing{background:#FAEEDA;color:#854F0B}
-
-.refresh-bar{height:2px;background:var(--accent);position:fixed;top:0;left:0;z-index:9998;transition:width .3s}
-
-/* Form */
-.form-group{margin-bottom:10px}
-.form-group label{display:block;font-size:12px;color:var(--text-2);margin-bottom:4px;font-weight:500}
-.form-input{width:100%;padding:8px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-sans);outline:none;transition:border-color .2s,box-shadow .2s}
-.form-input:focus{border-color:var(--accent);box-shadow:0 0 0 3px var(--accent-dim)}
-.form-row{display:flex;gap:8px}
-.form-row .form-group{flex:1}
-select.form-input{cursor:pointer}
-textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
-
-/* Client cards */
-.client-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(360px,1fr));gap:16px;padding:20px 24px}
-.client-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--border);border-radius:12px;padding:0;transition:all .25s;overflow:hidden;position:relative}
-.client-card::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent-gradient);opacity:.6;transition:opacity .2s}
-.client-card:hover{border-color:var(--accent);box-shadow:0 4px 24px rgba(25,96,201,.12);transform:translateY(-2px)}
-.client-card:hover::before{opacity:1}
-.client-card-header{display:flex;justify-content:space-between;align-items:center;padding:14px;border-bottom:1px solid var(--border);background:var(--bg-2)}
-.client-card-name{font-size:15px;font-weight:700;color:var(--text-0);display:flex;align-items:center;gap:8px}
-.client-card-actions{display:flex;gap:4px}
-.client-card-body{font-size:12px;color:var(--text-2);padding:14px}
-.client-card-body .row{display:flex;justify-content:space-between;padding:3px 0;align-items:center}
-.client-card-body .row:hover{background:var(--bg-2);margin:0 -8px;padding:3px 8px;border-radius:4px}
-.client-card-body .val{color:var(--text-1);font-family:var(--font-mono);font-size:11px}
-.client-card-body .section-divider{height:1px;background:var(--border);margin:8px 0}
-.client-modems{padding:14px;border-top:1px solid var(--border);background:var(--bg-2)}
-.client-modems-label{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:6px;font-weight:500}
-.client-modem-tag{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;background:var(--bg-3);color:var(--text-1);margin:2px;border:1px solid var(--border);transition:all .15s}
-.client-modem-tag:hover{border-color:var(--accent);color:var(--accent)}
-.billing-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;margin-left:6px}
-.billing-per-modem{background:var(--purple-bg);color:var(--purple)}
-.billing-per-gb{background:var(--blue-bg);color:var(--accent)}
-.client-balance-card{display:flex;gap:12px;margin:8px 0;padding:14px;background:var(--card-bg);border-radius:12px;border:1px solid var(--card-border)}
-.client-balance-item{flex:1;text-align:center}
-.client-balance-item .label{font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px}
-.client-balance-item .value{font-size:14px;font-weight:700;margin-top:2px}
-
-/* Traffic / Analytics */
-.analytics-section{padding:14px 24px}
-.analytics-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--card-shadow);display:flex;flex-direction:column}
-.settings-nav-item{padding:9px 20px;cursor:pointer;font-size:13px;color:var(--text-2);border-left:3px solid transparent;transition:all .15s;user-select:none}
-.settings-nav-item:hover{color:var(--text-1);background:var(--bg-2)}
-.settings-nav-item.active{color:var(--accent);font-weight:600;border-left-color:var(--accent);background:var(--bg-2)}
-.analytics-card h3{font-size:14px;color:var(--text-0);margin-bottom:10px;font-weight:600}
-
-/* ===== PAN-OS ACC Traffic Dashboard ===== */
-.acc-toolbar{display:flex;align-items:center;gap:8px;padding:10px 24px;background:var(--bg-1);border-bottom:1px solid var(--border)}
-.acc-period-group{display:flex;gap:0;border:1px solid var(--border);border-radius:4px;overflow:hidden}
-.acc-period-btn{padding:5px 14px;font-size:11px;cursor:pointer;background:transparent;border:none;color:var(--text-2);transition:all .15s;font-weight:500}
-.acc-period-btn:hover{background:var(--bg-3);color:var(--text-1)}
-.acc-period-btn.active{background:var(--accent);color:#fff}
-.acc-sub-tabs{display:flex;gap:0;padding:0 24px;background:var(--bg-2);border-bottom:1px solid var(--border);height:34px}
-.acc-sub-tab{padding:0 16px;cursor:pointer;font-size:12px;color:var(--text-2);border-bottom:2px solid transparent;display:flex;align-items:center;height:100%;transition:all .15s;font-weight:500;gap:4px}
-.acc-sub-tab:hover{color:var(--text-1);background:var(--bg-3)}
-.acc-sub-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
-.acc-sub-tab .tab-count{background:var(--bg-4);color:var(--text-2);font-size:9px;padding:1px 5px;border-radius:8px;font-weight:600}
-.acc-sub-content{display:none}.acc-sub-content.active{display:block}
-
-/* Widget row */
-.widget-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:0;padding:14px 24px}
-.widget{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;padding:12px;box-shadow:var(--card-shadow);position:relative;overflow:hidden}
-.widget::before{content:'';position:absolute;top:0;left:0;right:0;height:3px;background:var(--accent);opacity:.6}
-.widget-label{font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px}
-.widget-value{font-size:22px;font-weight:700;color:var(--text-0)}
-.widget-sub{font-size:10px;color:var(--text-2);margin-top:2px}
-.widget-spark{display:flex;align-items:flex-end;gap:1px;height:20px;margin-top:4px}
-.widget-spark-bar{flex:1;background:var(--accent);border-radius:1px 1px 0 0;opacity:.5;min-width:3px}
-
-/* Chart containers */
-.chart-row{display:grid;grid-template-columns:1fr 1fr;gap:12px;padding:0 24px 14px}
-.chart-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;padding:14px;box-shadow:var(--card-shadow)}
-.chart-card-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:10px}
-.chart-card h4{font-size:13px;color:var(--text-0);font-weight:600;margin:0}
-.chart-card canvas{max-height:260px}
-
-/* Horizontal bar chart (CSS) */
-.hbar-list{list-style:none}
-.hbar-item{display:flex;align-items:center;gap:8px;padding:4px 0;font-size:11px}
-.hbar-item:hover{background:var(--bg-2);border-radius:4px;margin:0 -4px;padding:4px}
-.hbar-rank{width:16px;text-align:center;color:var(--text-3);font-size:10px;font-weight:600}
-.hbar-label{width:130px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;color:var(--text-1);font-weight:500}
-.hbar-bar-wrap{flex:1;height:16px;background:var(--bg-3);border-radius:3px;overflow:hidden;position:relative}
-.hbar-bar{height:100%;border-radius:3px;transition:width .5s ease;min-width:2px}
-.hbar-bar.blue{background:var(--accent)}
-.hbar-bar.green{background:var(--success)}
-.hbar-bar.orange{background:var(--orange)}
-.hbar-bar.purple{background:var(--purple)}
-.hbar-bar.red{background:var(--danger)}
-.hbar-value{width:70px;text-align:center;color:var(--text-0);font-family:var(--font-mono);font-size:10px;font-weight:600}
-
-/* Resource table */
-.res-table{width:100%;border-collapse:collapse}
-.res-table th{padding:8px 14px;text-align:left;font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;border-bottom:1px solid var(--border);font-weight:600;position:sticky;top:0;background:var(--bg-1);z-index:2;box-shadow:0 1px 0 var(--border)}
-.res-table td{padding:8px 14px;font-size:11px;border-bottom:1px solid var(--border)}
-.res-table tr:hover td{background:var(--row-hover)}
-.res-table .domain{color:var(--accent);font-weight:500;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.res-table .count-bar{height:10px;border-radius:2px;background:var(--accent);opacity:.6;transition:width .3s}
-
-/* Loading state for sections */
-.acc-loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text-3);gap:8px}
-.acc-loading .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
-
-/* SMS */
-.sms-item{background:var(--card-bg);border-radius:8px;padding:8px;margin-bottom:5px;border:1px solid var(--card-border)}
-.sms-from{font-size:11px;color:var(--accent);font-weight:500}
-.sms-date{font-size:10px;color:var(--text-3);float:right}
-.sms-text{font-size:11px;color:var(--text-1);margin-top:3px;word-break:break-word}
-
-.last-update{font-size:10px;color:var(--text-3)}
-
-/* Stuck IP highlight */
-.ip-stuck{background:rgba(255,56,60,.12);border-radius:3px;padding:1px 4px}
-.ip-stuck-badge{font-size:9px;color:var(--danger);font-weight:600;margin-left:2px}
-.uptime-pct{font-weight:700;font-size:11px}
-.uptime-pct.good{color:var(--success)}
-.uptime-pct.warn{color:var(--warning)}
-.uptime-pct.bad{color:var(--danger)}
-.speed-cell{font-size:10px;font-family:var(--font-mono)}
-.speed-dl{color:var(--success)}
-.speed-ul{color:var(--accent)}
-
-/* Payment modal */
-.payment-form{background:var(--card-bg);border-radius:12px;padding:14px;margin-top:8px;border:1px solid var(--card-border)}
-.payment-list{max-height:200px;overflow-y:auto;margin-top:8px}
-.payment-item{display:flex;justify-content:space-between;align-items:center;padding:4px 8px;font-size:11px;border-bottom:1px solid var(--bg-3)}
-.payment-item:hover{background:var(--bg-2)}
-.payment-amount{font-weight:600;color:var(--success)}
-.payment-date{color:var(--text-2)}
-.balance-positive{color:var(--success);font-weight:700}
-.balance-negative{color:var(--danger);font-weight:700}
-
-/* Client traffic table rows */
-.ct-row{display:flex;align-items:center;border-bottom:1px solid var(--border);cursor:pointer;transition:background .1s;min-height:36px}
-.ct-row:hover{background:var(--bg-2)}
-.ct-row.active{background:#1a2d4a}
-[data-theme="light"] .ct-row.active{background:#EEF5FD}
-
-@media(max-width:768px){
-  /* Layout */
-  .header{flex-direction:column;gap:8px;height:auto;padding:10px 16px}
-  .header-left{flex-wrap:wrap;gap:8px}
-  .header h1{font-size:14px}
-  .header-stats{display:none}
-  .header-right{width:100%;justify-content:flex-end}
-  /* Navigation */
-  .nav-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 8px;height:36px}
-  .nav-tab{padding:0 12px;font-size:12px;white-space:nowrap}
-  /* Toolbar */
-  .toolbar{flex-direction:column;padding:8px 12px}
-  .search-box{width:100%}
-  /* Tables */
-  .table-wrap{padding:0 8px 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table{font-size:11px}
-  th{padding:5px 6px;font-size:10px}
-  td{padding:4px 6px;font-size:11px}
-  .actions-cell{flex-wrap:wrap}
-  .country-header{flex-direction:column;gap:4px;padding:8px 10px}
-  .country-stats{margin-left:0}
-  /* Client cards */
-  .client-grid{grid-template-columns:1fr;padding:12px}
-  .client-card-body .row{flex-direction:column;gap:2px;padding:4px 0}
-  /* Charts */
-  .chart-row{grid-template-columns:1fr;padding:0 12px 12px}
-  .widget-grid{grid-template-columns:repeat(2,1fr);padding:8px 12px;gap:8px}
-  /* Modals */
-  .modal{width:95vw;max-height:90vh}
-  .modal-body{padding:10px 12px}
-  .detail-grid{grid-template-columns:1fr}
-  .modal-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  .modal-tab{white-space:nowrap}
-  /* Analytics */
-  .analytics-section{padding:10px 12px}
-  .form-row{flex-direction:column}
-  /* ACC */
-  .acc-toolbar{flex-direction:column;gap:6px;padding:8px 12px}
-  .acc-sub-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 8px;height:32px}
-  .acc-sub-tab{padding:0 10px;font-size:11px;white-space:nowrap}
-  /* Misc */
-  .hbar-label{width:80px}
-  .hbar-value{width:50px;font-size:9px}
-}
-@media(max-width:480px){
-  .widget-grid{grid-template-columns:1fr}
-  .client-balance-card{flex-direction:column;gap:4px}
-  .header-right .btn{padding:4px 6px;font-size:10px}
-  .nav-tab{padding:0 10px;font-size:11px}
-  .acc-period-btn{padding:4px 10px;font-size:10px}
-}
-</style>
+<link rel="stylesheet" href="css/variables.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/tables.css">
+<link rel="stylesheet" href="css/cards.css">
+<link rel="stylesheet" href="css/modal.css">
+<link rel="stylesheet" href="css/layout.css">
 <!-- Yandex.Metrika counter -->
 <script type="text/javascript">
     (function(m,e,t,r,i,k,a){
@@ -555,6 +80,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
       <span class="notif-badge" id="notifBadge" style="display:none">0</span>
     </button>
+    <button class="burger-btn" onclick="document.querySelector('.nav-tabs').classList.toggle('burger-open')" style="display:none;align-items:center;justify-content:center;width:44px;height:44px;background:none;border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--text-1);flex-shrink:0"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><line x1="3" y1="5" x2="17" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="3" y1="15" x2="17" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
     <button class="btn btn-sm btn-danger" onclick="doLogout()">Выход</button>
   </div>
 </div>
@@ -631,7 +157,7 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
         <div id="heatmapGrid" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
           <div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>
         </div>
-        <div id="heatmapSummary" style="display:none"></div>
+        <div id="heatmapSummary" style="display:none;margin-top:16px;padding-top:16px;border-top:0.5px solid rgba(0,0,0,0.08)"></div>
       </div>
 
       <div class="analytics-card" style="margin-bottom:14px">
@@ -677,11 +203,18 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   <!-- TOP RESOURCES (domains) -->
   <div class="acc-sub-content" id="acc-resources">
     <div style="padding:14px 24px">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
+        <select id="resClientFilter" onchange="renderTopResources()" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-0)">
+          <option value="">Все клиенты</option>
+        </select>
+        <button class="btn btn-sm" onclick="loadTopHosts(true)" style="font-size:11px">⟳ Обновить</button>
+        <span style="font-size:10px;color:var(--text-3)" id="resLastLoad">Нажмите «Обновить» для загрузки</span>
+      </div>
       <div id="resourcesContent">
         <div class="acc-loading" id="resLoading" style="display:none"><div class="spinner"></div> Загрузка топ-хостов...</div>
         <div class="chart-row" style="padding:0;margin-bottom:14px">
           <div class="chart-card" style="grid-column:span 2">
-            <div class="chart-card-header"><h4>Топ ресурсов</h4><span style="font-size:10px;color:var(--text-3)" id="resLastLoad">Нажмите «Загрузить топ ресурсов»</span></div>
+            <div class="chart-card-header"><h4>Топ ресурсов</h4><span id="resCount" class="tab-count" style="display:none"></span></div>
             <div id="topResourcesList"></div>
           </div>
         </div>
@@ -706,9 +239,9 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <!-- TAB: BANK (Документооборот и операции) -->
 <div class="tab-content tab-flex" id="tab-bank" style="height:calc(100vh - 50px)">
-  <div style="display:flex;flex:1;min-height:0">
+  <div class="tab-sidebar-layout" style="display:flex;flex:1;min-height:0">
     <!-- Sidebar -->
-    <div style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
+    <div class="tab-sidebar" style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
       <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">ДОКУМЕНТЫ</div>
       <div class="settings-nav-item active" id="bnav_acts" onclick="switchBankNav('acts')">📃 Акты</div>
       <div class="settings-nav-item" id="bnav_bills" onclick="switchBankNav('bills')">💳 Счета</div>
@@ -726,9 +259,9 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 <!-- TAB: ANALYTICS (Настройки) -->
 <div class="tab-content tab-flex" id="tab-analytics" style="height:calc(100vh - 50px)">
-  <div style="display:flex;flex:1;min-height:0">
+  <div class="tab-sidebar-layout" style="display:flex;flex:1;min-height:0">
     <!-- Sidebar -->
-    <div style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
+    <div class="tab-sidebar" style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
       <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">НАСТРОЙКИ</div>
       <div class="settings-nav-item active" id="snav_audit" onclick="switchSettingsSection('audit')">📋 Логи</div>
       <div class="settings-nav-item" id="snav_bank" onclick="switchSettingsSection('bank')">🏦 Банк</div>
@@ -885,55 +418,53 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 var API='',authToken=localStorage.getItem('pr_token')||'',currentData=null;
 var sortCol='nick',sortDir='asc',activeServerFilter='all',activeStatusFilter='all',activeClientFilter='';
 var autoRefreshTimer=null,charts={};
-var CRM_URL='https://crm.proxies.rent';
-var CRM_EMAIL='artiom@avasilev.com';
 var _crmLoaded=false;
 
 function crmAutoLogin(){
   var frame=document.getElementById('crmFrame');
   var status=document.getElementById('crmStatus');
-  if(_crmLoaded&&frame.src.indexOf('crm.proxies')!==-1){return}
+  if(_crmLoaded&&frame.src.indexOf('crm.')!==-1){return}
   status.textContent='Подключение...';status.style.color='var(--warning)';
-  fetch(CRM_URL+'/metadata',{method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({query:'mutation{getLoginTokenFromCredentials(email:"'+CRM_EMAIL+'",password:"ProxyAdmin2026x",origin:"'+CRM_URL+'"){loginToken{token}}}'})
-  }).then(function(r){return r.json()}).then(function(d){
-    if(d.data&&d.data.getLoginTokenFromCredentials){
-      var token=d.data.getLoginTokenFromCredentials.loginToken.token;
-      frame.src=CRM_URL+'/verify?loginToken='+token;
+  fetch(API+'/api/admin/crm_token',{headers:{'X-Auth-Token':authToken}})
+  .then(function(r){return r.json()}).then(function(d){
+    if(d.token&&d.url){
+      frame.src=d.url+'/verify?loginToken='+d.token;
       _crmLoaded=true;
       status.textContent='Подключено';status.style.color='var(--success)';
       setTimeout(function(){status.textContent=''},3000);
     }else{
-      status.textContent='Ошибка входа';status.style.color='var(--danger)';
-      frame.src=CRM_URL;_crmLoaded=true;
+      status.textContent=d.error||'Ошибка входа';status.style.color='var(--danger)';
+      if(d.url){frame.src=d.url;_crmLoaded=true}
     }
   }).catch(function(e){
     status.textContent='CRM недоступна';status.style.color='var(--danger)';
-    frame.src=CRM_URL;_crmLoaded=true;
   });
 }
 
 var COLUMNS=[
   {id:'bulk',label:'<input type="checkbox" id="bulkSelectAll" onclick="bulkToggleAll(this)" style="cursor:pointer;margin:0">',visible:true,sortable:false,width:'28px'},
   {id:'status',label:'',visible:true,sortable:false,width:'30px'},
-  {id:'nick',label:'Модем',visible:true,sortable:true},
-  {id:'server',label:'Сервер',visible:true,sortable:true},
-  {id:'portName',label:'Клиент',visible:true,sortable:true},
-  {id:'creds',label:'Реквизиты',visible:true,sortable:false},
-  {id:'loginpass',label:'Логин:Пароль',visible:true,sortable:false},
-  {id:'extIp',label:'Внеш.IP',visible:false,sortable:false},
-  {id:'netType',label:'Сеть',visible:true,sortable:true},
-  {id:'signal',label:'Сигнал',visible:true,sortable:true},
-  {id:'operator',label:'Оператор',visible:true,sortable:true},
-  {id:'phone',label:'Телефон',visible:false,sortable:false},
-  {id:'trafficDay',label:'Сегодня',visible:true,sortable:true},
-  {id:'trafficMon',label:'Месяц',visible:true,sortable:true},
-  {id:'speed',label:'Скорость <span class="th-hint" title="Download ↓ / Upload ↑ в Mbps&#10;Зелёный: > 30 Mbps&#10;Синий: 10–30 Mbps&#10;Оранжевый: < 10 Mbps&#10;⚠ — значение аномально низкое">ⓘ</span>',visible:true,sortable:true},
-  {id:'uptime',label:'Аптайм',visible:true,sortable:true},
-  {id:'actions',label:'',visible:true,sortable:false,width:'110px'}
+  {id:'nick',label:'Модем',visible:true,sortable:true,width:'90px'},
+  {id:'server',label:'Сервер',visible:true,sortable:true,width:'60px'},
+  {id:'portName',label:'Клиент',visible:true,sortable:true,width:'120px'},
+  {id:'creds',label:'Реквизиты',visible:true,sortable:false,width:'160px'},
+  {id:'loginpass',label:'Логин:Пароль',visible:true,sortable:false,width:'140px'},
+  {id:'extIp',label:'Внеш.IP',visible:false,sortable:false,width:'110px'},
+  {id:'netType',label:'Сеть',visible:true,sortable:true,width:'50px'},
+  {id:'signal',label:'Сигнал',visible:true,sortable:true,width:'50px'},
+  {id:'operator',label:'Оператор',visible:true,sortable:true,width:'90px'},
+  {id:'phone',label:'Телефон',visible:false,sortable:false,width:'110px'},
+  {id:'trafficDay',label:'Сегодня',visible:true,sortable:true,width:'70px'},
+  {id:'trafficMon',label:'Месяц',visible:true,sortable:true,width:'70px'},
+  {id:'speed',label:'Скорость <span class="th-hint" title="Download ↓ / Upload ↑ в Mbps&#10;Зелёный: > 30 Mbps&#10;Синий: 10–30 Mbps&#10;Оранжевый: < 10 Mbps&#10;⚠ — значение аномально низкое">ⓘ</span>',visible:true,sortable:true,width:'100px'},
+  {id:'uptime',label:'Аптайм',visible:true,sortable:true,width:'70px'},
+  {id:'actions',label:'',visible:true,sortable:false,width:'80px'}
 ];
-var COUNTRIES={S1:{flag:'\u{1F1F2}\u{1F1E9}',name:'Молдова',serverIp:'89.149.100.92'},S2:{flag:'\u{1F1F7}\u{1F1F4}',name:'Румыния',serverIp:'31.5.194.89'}};
-var COUNTRY_ORDER=['S1','S2'];
+var _countryFlags={'MD':'\u{1F1F2}\u{1F1E9}','RO':'\u{1F1F7}\u{1F1F4}','US':'\u{1F1FA}\u{1F1F8}','DE':'\u{1F1E9}\u{1F1EA}'};
+var _countryNamesRu={'Moldova':'\u041c\u043e\u043b\u0434\u043e\u0432\u0430','Romania':'\u0420\u0443\u043c\u044b\u043d\u0438\u044f'};
+var COUNTRIES={};
+var COUNTRY_ORDER=[];
+function _initServers(servers){if(!servers||!servers.length)return;COUNTRIES={};COUNTRY_ORDER=[];servers.forEach(function(s){COUNTRIES[s.name]={flag:_countryFlags[s.country]||'',name:_countryNamesRu[s.countryName]||s.countryName||s.name,serverIp:s.publicIp||''};COUNTRY_ORDER.push(s.name);});}
 
 // ========== THEME ==========
 function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=t;localStorage.setItem('pr_admin_theme',t);updateChartsTheme()}
@@ -972,12 +503,12 @@ function switchSettingsSection(name){
   localStorage.setItem('admin_settings_section',name);
   if(name==='audit')loadAuditLog();
 }
-function switchMainTab(name,el){localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'audit';switchSettingsSection(ss);}if(name==='bank'){switchBankNav(_activeBankTab||'acts');}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}}
+function switchMainTab(name,el){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'audit';switchSettingsSection(ss);}if(name==='bank'){switchBankNav(_activeBankTab||'acts');}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}}
 
 // ========== DATA ==========
 function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
 
-function processData(){if(!currentData)return;var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[r.toLowerCase()]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
+function processData(){if(!currentData)return;_initServers(currentData.servers);var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[r.toLowerCase()]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
   var bw=currentData.bandwidth||{};for(var mi in mm){var mod=mm[mi];for(var p=0;p<mod.ports.length;p++){var pt=mod.ports[p];if(bw[pt.portID])pt._bw=bw[pt.portID]}}
   // IP tracking & uptime tracking
@@ -1072,7 +603,7 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
     sh+='<div id="speedHistoryArea"><div style="color:var(--text-3);padding:8px">Загрузка истории...</div></div>';
     body.innerHTML=sh;
     loadSpeedHistory(m.server+'_'+m.rawImei)}
-  else if(tab==='hosts'){var port=m.ports[0];if(!port){body.innerHTML='-';return}body.innerHTML='<div style="color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/top_hosts?portId='+encodeURIComponent((port.portID||'').replace(/^S[12]_/,''))+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=[];if(Array.isArray(data))entries=data;else{for(var k in data){if(typeof data[k]!=='object')entries.push({host:k,count:data[k]})}}entries.sort(function(a,b){return(b.count||0)-(a.count||0)});if(!entries.length){body.innerHTML='Нет данных';return}var maxCnt=entries[0]?(entries[0].count||1):1;var h='<table class="res-table"><thead><tr><th style="width:24px">#</th><th>Домен</th><th style="width:60px">Кат.</th><th style="width:150px">Запросов</th><th style="width:55px">Кол-во</th></tr></thead><tbody>';entries.forEach(function(e,i){var cat=categorize(e.host||'');var pw=pct(e.count||0,maxCnt);h+='<tr><td style="color:var(--text-3);font-size:10px">'+(i+1)+'</td><td class="domain" title="'+esc(e.host||'')+'">'+esc(e.host||'')+'</td><td style="font-size:9px;color:var(--text-3)">'+cat.substring(0,6)+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="count-bar" style="width:'+pw+'%"></div></div></td><td style="font-family:monospace;font-size:10px;color:var(--text-0)">'+(e.count||'-')+'</td></tr>'});body.innerHTML=h+'</tbody></table>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'})}
+  else if(tab==='hosts'){var port=m.ports[0];if(!port){body.innerHTML='-';return}body.innerHTML='<div style="color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/top_hosts?portId='+encodeURIComponent((port.portID||'').replace(/^S[12]_/,''))+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=[];if(Array.isArray(data))entries=data;else{for(var k in data){if(typeof data[k]!=='object')entries.push({host:k,count:data[k]})}}entries.sort(function(a,b){return(b.count||0)-(a.count||0)});if(!entries.length){body.innerHTML='Нет данных';return}var maxCnt=entries[0]?(entries[0].count||1):1;var h='<table class="res-table"><thead><tr><th style="width:24px">#</th><th>Домен</th><th style="width:60px">Кат.</th><th style="width:150px">Запросов</th><th style="width:55px">Кол-во</th></tr></thead><tbody>';entries.forEach(function(e,i){var cat=categorize(e.host||'');var pw=pct(e.count||0,maxCnt);h+='<tr><td style="color:var(--text-3);font-size:10px">'+(i+1)+'</td><td class="domain" title="'+esc(e.host||'')+'">'+esc(e.host||'')+'</td><td style="font-size:9px;color:var(--text-3)">'+cat.substring(0,6)+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="count-bar" style="width:'+pw+'%"></div></div></td><td style="font-family:monospace;font-size:10px;color:var(--text-0)">'+(e.count||'-')+'</td></tr>'});body.innerHTML=h+'</tbody></table>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'})}
   else if(tab==='sim'){
     var simH='<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:12px">'
       +'<div id="simTab_sms" onclick="switchSimTab(\'sms\')" style="padding:6px 16px;font-size:12px;font-weight:500;cursor:pointer;border-bottom:2px solid var(--accent);color:var(--accent)">SMS</div>'
@@ -1090,7 +621,7 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
       else h+='<div style="color:var(--text-3);padding:10px">Нет SMS</div>';
       h+='</div><div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><div class="form-row"><div class="form-group"><label>Номер</label><input class="form-input" id="smsPhone"></div></div><div class="form-group"><label>Текст</label><textarea class="form-input" id="smsText" rows="2"></textarea></div><button class="btn btn-primary btn-sm" onclick="sendSms(\''+m.rawImei+'\',\''+m.server+'\')">Отправить</button></div>';
       var sc=document.getElementById('simContent_sms');if(sc)sc.innerHTML=h;
-    }).catch(function(e){var sc=document.getElementById('simContent_sms');if(sc)sc.innerHTML=e.message});
+    }).catch(function(e){var sc=document.getElementById('simContent_sms');if(sc)sc.innerHTML=esc(e.message)});
   }
   else if(tab==='iphistory'){
     body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка лога ротации...</div>';
@@ -1116,7 +647,7 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
         h+='</tr>';
       });
       body.innerHTML=h+'</tbody></table>';
-    }).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'});
+    }).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'});
   }
   else if(tab==='settings'){
     var actH='';
@@ -1208,7 +739,7 @@ function runSpeedtest(nick,srv,imei){
 }
 function sendSms(imei,srv){var ph=document.getElementById('smsPhone').value,tx=document.getElementById('smsText').value;if(!ph||!tx)return showToast('Заполните поля','error');fetch(API+'/api/admin/send_sms',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,phone:ph,sms:tx})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Отправлено','success'):showToast(d.error,'error')}).catch(function(){showToast('Ошибка','error')})}
 function purgeSms(nick,srv){confirmDialog('Удалить все SMS для модема «'+nick+'»? Это действие нельзя отменить.',function(){fetch(API+'/api/admin/purge_sms',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({nick:nick,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалено','success'):showToast(d.error,'error')}).catch(function(){showToast('Ошибка','error')});},'Удалить','Удалить SMS')}
-function sendUssd(imei,srv){var code=document.getElementById('ussdCode').value;if(!code)return;document.getElementById('ussdResult').innerHTML='<span style="color:var(--text-3)">Отправка...</span>';fetch(API+'/api/admin/send_ussd',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,ussd:code})}).then(function(r){return r.json()}).then(function(d){var r=d.result||d;document.getElementById('ussdResult').innerHTML='<div class="detail-card"><pre style="font-size:11px;color:var(--text-1);white-space:pre-wrap">'+esc(typeof r==='object'?JSON.stringify(r,null,2):String(r))+'</pre></div>'}).catch(function(e){document.getElementById('ussdResult').innerHTML='<span style="color:var(--danger)">'+e.message+'</span>'})}
+function sendUssd(imei,srv){var code=document.getElementById('ussdCode').value;if(!code)return;document.getElementById('ussdResult').innerHTML='<span style="color:var(--text-3)">Отправка...</span>';fetch(API+'/api/admin/send_ussd',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,ussd:code})}).then(function(r){return r.json()}).then(function(d){var r=d.result||d;document.getElementById('ussdResult').innerHTML='<div class="detail-card"><pre style="font-size:11px;color:var(--text-1);white-space:pre-wrap">'+esc(typeof r==='object'?JSON.stringify(r,null,2):String(r))+'</pre></div>'}).catch(function(e){document.getElementById('ussdResult').innerHTML='<span style="color:var(--danger)">'+(esc(e.message))+'</span>'})}
 function showNewPortForm(imei,srv){fetch(API+'/api/admin/free_ports?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var fp=Array.isArray(data)?data:data.free_tcp_ports||[];var h='<div class="detail-card" style="margin-top:8px"><h4>Новый порт</h4><div class="form-row"><div class="form-group"><label>Port ID</label><input class="form-input" id="npPid" value="port'+rnd(8)+'"></div><div class="form-group"><label>Имя</label><input class="form-input" id="npName"></div></div><div class="form-row"><div class="form-group"><label>HTTP</label><input class="form-input" id="npHttp" value="'+(fp[0]||'')+'"></div><div class="form-group"><label>SOCKS</label><input class="form-input" id="npSocks" value="'+(fp[1]||'')+'"></div></div><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="npLogin" value="'+rnd(8)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="npPass" value="'+rnd(8)+'"></div></div><button class="btn btn-primary" onclick="createPort(\''+imei+'\',\''+srv+'\')">Создать</button></div>';document.getElementById('newPortForm').innerHTML=h})}
 function createPort(imei,srv){var d={serverName:srv,IMEI:imei,portID:document.getElementById('npPid').value,portName:document.getElementById('npName').value,http_port:document.getElementById('npHttp').value,socks_port:document.getElementById('npSocks').value,proxy_login:document.getElementById('npLogin').value,proxy_password:document.getElementById('npPass').value};fetch(API+'/api/admin/store_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok){fetch(API+'/api/admin/apply_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:d.portID,serverName:srv})}).then(function(){showToast('Порт создан','success');setTimeout(loadData,2000)})}else showToast(r.error||'Ошибка','error')})}
 function purgePort(pid,srv){confirmDialog('Удалить порт «'+pid+'»? Это действие нельзя отменить.',function(){fetch(API+'/api/admin/purge_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:pid,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');setTimeout(loadData,2000)});},'Удалить','Удалить порт')}
@@ -1242,7 +773,7 @@ function loadSpeedHistory(key){
       h+='<tr><td>'+new Date(e.date).toLocaleString('ru-RU')+'</td><td style="color:var(--success)">'+Number(e.download).toFixed(1)+' Mbps</td><td style="color:var(--accent)">'+Number(e.upload).toFixed(1)+' Mbps</td><td>'+Number(e.ping).toFixed(0)+' ms</td></tr>';
     });
     area.innerHTML=h+'</tbody></table>';
-  }).catch(function(e){area.innerHTML='<div style="color:var(--danger)">'+e.message+'</div>'});
+  }).catch(function(e){area.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'});
 }
 
 // ========== TRAFFIC TAB (PAN-OS ACC Style) ==========
@@ -1387,6 +918,16 @@ function populateAccClientFilter(){
     sel.innerHTML+='<option value="'+esc(c.portName)+'">'+esc(c.name)+' ('+esc(c.portName)+')</option>';
   });
   if(prev)sel.value=prev;
+  // Also populate resClientFilter on resources tab
+  var resSel=document.getElementById('resClientFilter');
+  if(resSel){
+    var resPrev=resSel.value;
+    resSel.innerHTML='<option value="">Все клиенты</option>';
+    cls.forEach(function(c){
+      resSel.innerHTML+='<option value="'+esc(c.portName)+'">'+esc(c.name)+'</option>';
+    });
+    if(resPrev)resSel.value=resPrev;
+  }
 }
 
 function renderTrafficTab(){
@@ -1673,13 +1214,13 @@ function renderAccSubTab(name){
         })
         .catch(function(e){
           var w=document.querySelector('#acc-overview .chart-wrap-daily');
-          if(w)w.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--danger);font-size:12px">Ошибка загрузки графика: '+e.message+'</div>';
+          if(w)w.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--danger);font-size:12px">Ошибка загрузки графика: '+(esc(e.message))+'</div>';
         });
     } else {renderDailyClientChart(window._dailyTrafficCache,cc);}
     // Init heatmap once on first overview load
     if(!window._heatmapInitialized){
       window._heatmapInitialized=true;
-      _heatmapConfig.client=(currentData&&currentData.clients||[]).map(function(c){return{id:c.portName,label:c.name}});
+      _heatmapConfig.client=(currentData&&currentData.clients||[]).map(function(c){return{id:c.portName,label:c.name,modems:c.modemCount||1}});
       renderHeatmapSubTabs();
       loadHeatmapData();
     }
@@ -1737,9 +1278,11 @@ function loadTrendData(){
     .then(function(data){_trendData=data;renderTrendCard(data);})
     .catch(function(){});
 }
-function trendFmt(gb){if(!gb&&gb!==0)return'0 ГБ';return gb>=1000?(gb/1000).toFixed(1)+' ТБ':gb.toFixed(1)+' ГБ';}
+function trendFmt(gb){if(!gb&&gb!==0)return'0 МБ';if(gb>=1000)return(gb/1000).toFixed(1)+' ТБ';if(gb>=1)return gb.toFixed(1)+' ГБ';return Math.round(gb*1024)+' МБ';}
 var _MONTHS_RU_GEN=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 function fmtDateRuLong(ds){if(!ds)return'—';var p=ds.split('-');if(p.length<3)return ds;var m=parseInt(p[1],10)-1,day=parseInt(p[2],10);return day+' '+(_MONTHS_RU_GEN[m]||'');}
+function pluralModem(n){var a=Math.abs(n)%100,b=a%10;if(a>10&&a<20)return n+' модемов';if(b>1&&b<5)return n+' модема';if(b===1)return n+' модем';return n+' модемов';}
+function pluralPort(n){var a=Math.abs(n)%100,b=a%10;if(a>10&&a<20)return n+' портов';if(b>1&&b<5)return n+' порта';if(b===1)return n+' порт';return n+' портов';}
 var _MSK_OFFSET=3;
 function fmtHourMsk(hr){return String((hr+_MSK_OFFSET)%24).padStart(2,'0')+':00';}
 function renderTrendCard(months){
@@ -1814,8 +1357,8 @@ function showOpTT(op,total,perDay,perModem,cnt,event){
 // ==================== HEATMAP ====================
 var _heatmapView='country',_heatmapId='all',_heatmapCache={};
 var _heatmapConfig={
-  country:[{id:'all',label:'🌍 Все страны'},{id:'moldova',label:'🇲🇩 Молдова'},{id:'romania',label:'🇷🇴 Румыния'}],
-  operator:[{id:'orange_ro',label:'🇷🇴 Orange RO'},{id:'vodafone_ro',label:'🇷🇴 Vodafone RO'},{id:'moldtelecom',label:'🇲🇩 Moldtelecom'},{id:'orange_md',label:'🇲🇩 Orange MD'}],
+  country:[{id:'all',label:'🌍 Все страны',modems:51},{id:'moldova',label:'🇲🇩 Молдова',modems:28},{id:'romania',label:'🇷🇴 Румыния',modems:23}],
+  operator:[{id:'orange_ro',label:'🇷🇴 Orange RO',modems:6},{id:'vodafone_ro',label:'🇷🇴 Vodafone RO',modems:17},{id:'moldtelecom',label:'🇲🇩 Moldtelecom',modems:23},{id:'orange_md',label:'🇲🇩 Orange MD',modems:5}],
   client:[]
 };
 function hmAccent(view,id){
@@ -1827,7 +1370,7 @@ function hmAccent(view,id){
 }
 function setHeatmapView(view){
   _heatmapView=view;
-  if(view==='client'){_heatmapConfig.client=(currentData&&currentData.clients||[]).map(function(c){return{id:c.portName,label:c.name}});}
+  if(view==='client'){_heatmapConfig.client=(currentData&&currentData.clients||[]).map(function(c){return{id:c.portName,label:c.name,modems:c.modemCount||1}});}
   var cfg=_heatmapConfig[view]||[];
   if(cfg.length)_heatmapId=cfg[0].id;
   ['country','operator','client'].forEach(function(v){
@@ -1841,7 +1384,7 @@ function setHeatmapView(view){
 function renderHeatmapSubTabs(){
   var c=document.getElementById('heatmapSubTabs');if(!c)return;
   var view=_heatmapView;
-  var cfg=view==='client'?(currentData&&currentData.clients||[]).map(function(x){return{id:x.portName,label:x.name};}):(_heatmapConfig[view]||[]);
+  var cfg=view==='client'?(currentData&&currentData.clients||[]).map(function(x){return{id:x.portName,label:x.name,modems:x.modemCount||1};}):(_heatmapConfig[view]||[]);
   var h='';
   cfg.forEach(function(item){
     var active=item.id===_heatmapId;var col=hmAccent(view,item.id);
@@ -1858,7 +1401,7 @@ function loadHeatmapData(){
   fetch(API+'/api/analytics/heatmap?view='+_heatmapView+'&id='+encodeURIComponent(_heatmapId)+'&days=7',{headers:{'X-Auth-Token':authToken}})
     .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
     .then(function(data){_heatmapCache[key]=data;renderHeatmap(data);})
-    .catch(function(e){var g=document.getElementById('heatmapGrid');if(g)g.innerHTML='<div style="padding:20px;color:var(--danger);font-size:12px">Ошибка: '+e.message+'</div>';});
+    .catch(function(e){var g=document.getElementById('heatmapGrid');if(g)g.innerHTML='<div style="padding:20px;color:var(--danger);font-size:12px">Ошибка: '+(esc(e.message))+'</div>';});
 }
 function lerpCol(a,b,t){
   var ah=parseInt(a.slice(1),16),bh=parseInt(b.slice(1),16);
@@ -1882,92 +1425,166 @@ function renderHeatmap(data){
   var g=document.getElementById('heatmapGrid'),sum=document.getElementById('heatmapSummary');
   if(!g||!data||!data.matrix)return;
   var mat=data.matrix,days=data.meta&&data.meta.days||[],dm=data.meta&&data.meta.day_meta||[];
-  var mCnt=(data.meta&&data.meta.modems_count)||1;
+  var mCnt=getHeatmapModems(),mDiv=mCnt||1;
   var accent=hmAccent(_heatmapView,_heatmapId);
-  var maxV=0;mat.forEach(function(row){row.forEach(function(v){if(v>maxV)maxV=v;})});
+  // Build per-modem matrix for coloring and display
+  var perModem=mat.map(function(row){return row.map(function(v){return v/mDiv;})});
+  var maxV=0;perModem.forEach(function(row){row.forEach(function(v){if(v>maxV)maxV=v;})});
   var DAYS_RU=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   var h='<div style="min-width:560px">';
-  // Hour axis labels (every 2h, Moscow time — server already returns MSK-adjusted data)
   h+='<div style="display:flex;margin-left:58px;margin-bottom:4px">';
   for(var hi=0;hi<24;hi+=2){
     h+='<div style="flex:1;text-align:center;font-size:9px;color:#9b9b98">'+String(hi).padStart(2,'0')+'</div>';
     h+='<div style="flex:1"></div>';
   }
   h+='</div>';
-  // Rows
   mat.forEach(function(row,di){
     var ds=days[di]||'';var dMeta=dm[di]||{};
     var d=new Date(ds+'T00:00:00');
     var dn=DAYS_RU[d.getDay()]||dMeta.label||'';
-    var dShort=fmtDateRuLong(ds)||dMeta.dateShort||'';
+    var dShort=fmtDateRuLong(ds);
     h+='<div style="display:flex;align-items:center;margin-bottom:3px">';
     h+='<div style="width:58px;font-size:10px;color:#6b6b68;flex-shrink:0;text-align:right;padding-right:8px;line-height:1.3">';
     h+='<div style="font-weight:500">'+dn+'</div><div style="font-size:9px;color:#9b9b98">'+dShort+'</div></div>';
     h+='<div style="display:flex;flex:1;gap:2px">';
     row.forEach(function(val,hr){
-      var col=heatColor(val,maxV,accent);
+      var pmVal=perModem[di][hr];
+      var col=heatColor(pmVal,maxV,accent);
       h+='<div style="flex:1;height:28px;border-radius:3px;background:'+col+';cursor:pointer;transition:opacity .1s"';
       h+=' onmouseenter="showHeatTT('+di+','+hr+',event,this)" onmouseleave="hideFloatTooltip(\'heatTT\')">';
       h+='</div>';
     });
     h+='</div></div>';
   });
-  // Legend
+  // Legend (per-modem scale)
   h+='<div style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:10px;color:#9b9b98">';
   h+='<span>0</span><div style="display:flex;gap:2px">';
   for(var li=0;li<=8;li++)h+='<div style="width:16px;height:10px;border-radius:2px;background:'+heatColor(li/8*maxV,maxV,accent)+'"></div>';
-  h+='</div><span>'+trendFmt(maxV)+'</span></div>';
+  h+='</div><span>'+trendFmt(maxV)+'/мод</span></div>';
   h+='</div>';
   g.innerHTML=h;
-  // Summary
+  // Summary metrics
+  var mCnt=getHeatmapModems(),mDiv=mCnt||1;
   var flat=[];mat.forEach(function(r){r.forEach(function(v){flat.push(v);})});
   var total=flat.reduce(function(a,b){return a+b},0);
+  var n=mat.length||7;
   var dTotals=mat.map(function(r){return r.reduce(function(a,b){return a+b},0)});
   var hTotals=Array.from({length:24},function(_,hh){return mat.reduce(function(s,r){return s+(r[hh]||0)},0)});
   var peakH=hTotals.indexOf(Math.max.apply(null,hTotals));
+  var positiveHours=hTotals.filter(function(v){return v>0});
+  var quietH=positiveHours.length>0?hTotals.indexOf(Math.min.apply(null,positiveHours)):0;
   var peakD=dTotals.indexOf(Math.max.apply(null,dTotals));
-  var nightTotal=flat.filter(function(_,i){var hh=i%24;return hh<=5;}).reduce(function(a,b){return a+b},0);
-  var nights=total>0?Math.round(nightTotal/total*100):0;
-  var n=mat.length||7;
-  if(sum)sum.innerHTML=
-    hmSumItem('Всего',trendFmt(total),'')
-    +hmSumItem('Ср/сутки',trendFmt(total/n),'')
-    +hmSumItem('Пик час',String(peakH).padStart(2,'0')+':00',trendFmt(hTotals[peakH]))
-    +hmSumItem('Пик день',fmtDateRuLong(days[peakD]||''),trendFmt(dTotals[peakD]))
-    +hmSumItem('Ночной %',nights+'%','00–06ч');
+  var nightTotal=flat.filter(function(_,i){var hh=i%24;return hh>=0&&hh<=5;}).reduce(function(a,b){return a+b},0);
+  var nightPct=total>0?Math.round(nightTotal/total*100):0;
+
+  if(sum){
+    sum.style.display='flex';
+    sum.innerHTML=
+      hmSumItem('Всего за 7 дней',trendFmt(total),pluralModem(mCnt),false)
+      +hmSumItem('Ср. на модем/сут',trendFmt(total/n/mDiv),trendFmt(total/n)+' среднесуточно',false)
+      +hmSumItem('Пиковый час',String(peakH).padStart(2,'0')+':00',trendFmt(hTotals[peakH]/n/mDiv)+'/мод в среднем',true)
+      +hmSumItem('Тихий час',String(quietH).padStart(2,'0')+':00','Лучшее время для тех. работ',false)
+      +hmSumItem('Пиковый день',(dm[peakD]?dm[peakD].label+', '+fmtDateRuLong(days[peakD]||''):fmtDateRuLong(days[peakD]||'')),trendFmt(dTotals[peakD]/mDiv)+'/мод',true)
+      +hmSumItem('Ночной трафик',nightPct+'%','00:00–06:00',false);
+  }
   window._heatmapData=data;
 }
-function hmSumItem(label,val,sub){
-  return'<div style="display:flex;flex-direction:column;gap:2px">'
-    +'<div style="font-size:10px;color:#9b9b98;text-transform:uppercase;letter-spacing:.04em">'+label+'</div>'
-    +'<div style="font-size:14px;font-weight:500;color:var(--text-0)">'+val+'</div>'
-    +(sub?'<div style="font-size:10px;color:#6b6b68">'+sub+'</div>':'')
+function hmSumItem(label,val,sub,isPeak){
+  return'<div style="flex:1;display:flex;flex-direction:column;gap:3px;padding:0 20px;border-right:0.5px solid rgba(0,0,0,0.08)">'
+    +'<div style="font-size:10px;color:#9b9b98;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">'+label+'</div>'
+    +'<div style="font-size:15px;font-weight:500;line-height:1.2;white-space:nowrap;'+(isPeak?'color:#185FA5':'color:var(--text-0)')+'">'+val+'</div>'
+    +(sub?'<div style="font-size:10px;color:#9b9b98;white-space:nowrap">'+sub+'</div>':'')
     +'</div>';
+}
+function getHeatmapModems(){
+  var view=_heatmapView,id=_heatmapId;
+  // Count unique modems (IMEIs) from status — not ports from bandwidth
+  if(currentData&&currentData.status){
+    var status=currentData.status||[];
+    var byCountry={},byOp={},byClient={},totalModems=0;
+    var seen={};
+    status.forEach(function(m){
+      var imei=m.modem_details&&m.modem_details.IMEI;if(!imei||seen[imei])return;
+      seen[imei]=true;
+      totalModems++;
+      var srv=m._server||'';
+      var cn=(COUNTRIES[srv]||{}).name||srv;
+      byCountry[cn]=(byCountry[cn]||0)+1;
+      var op=(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var isRO=srv.indexOf('S2')===0;var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[r.toLowerCase()]||r})();
+      if(op)byOp[op]=(byOp[op]||0)+1;
+      // Map IMEI to client portName via ports
+      var ports=currentData.ports&&currentData.ports[imei];
+      if(ports&&ports.length>0){var pn=ports[0].portName;if(pn)byClient[pn]=(byClient[pn]||0)+1;}
+    });
+    // Map country config ids to COUNTRIES names
+    var _countryIdToName={'moldova':'Молдова','romania':'Румыния'};
+    _heatmapConfig.country.forEach(function(c){
+      if(c.id==='all')c.modems=totalModems;
+      else{var target=_countryIdToName[c.id]||c.id;c.modems=byCountry[target]||0;}
+    });
+    _heatmapConfig.operator.forEach(function(o){
+      var opName=o.label.replace(/[^\w\s]/g,'').trim();
+      o.modems=byOp[opName]||0;
+    });
+  }
+  // For clients — count PORTS (bandwidth entries), not modems
+  // Each port generates its own traffic, so per-client heatmap divides by port count
+  var cfg;
+  if(view==='client'){
+    var _byClient={};
+    if(currentData&&currentData.bandwidth){for(var _bk in currentData.bandwidth){var _pn=currentData.bandwidth[_bk].portName;if(_pn)_byClient[_pn]=(_byClient[_pn]||0)+1;}}
+    cfg=(currentData&&currentData.clients||[]).map(function(c){return{id:c.portName,label:c.name,modems:_byClient[c.portName]||0};});
+  } else {
+    cfg=_heatmapConfig[view]||[];
+  }
+  var found=cfg.find(function(s){return s.id===id});
+  if(found&&found.modems!==undefined)return found.modems||0;
+  // Fallback for 'all': use totalModems from status
+  if(id==='all'&&currentData&&currentData.status){
+    var _seen={};var _t=0;currentData.status.forEach(function(m){var i=m.modem_details&&m.modem_details.IMEI;if(i&&!_seen[i]){_seen[i]=1;_t++;}});
+    return _t;
+  }
+  return 0;
 }
 function showHeatTT(di,hr,event,cell){
   var data=window._heatmapData;if(!data||!data.matrix||!data.matrix[di])return;
   var mat=data.matrix;var days=data.meta&&data.meta.days||[];var dm=data.meta&&data.meta.day_meta||[];
-  var mCnt=(data.meta&&data.meta.modems_count)||1;
+  var mCnt=getHeatmapModems(),mDiv=mCnt||1;
   var val=mat[di][hr]||0;
   var DAYS_RU=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   var ds=days[di]||'';var d=new Date(ds+'T00:00:00');
   var dn=DAYS_RU[d.getDay()]||(dm[di]&&dm[di].label)||'';
-  var dShort=fmtDateRuLong(ds)||(dm[di]&&dm[di].dateShort)||'';
-  var dayTotal=mat[di].reduce(function(a,b){return a+b},0);
-  var hourAvg=mat.reduce(function(s,r){return s+(r[hr]||0)},0)/(mat.length||1);
-  var prevV=hr>0?mat[di][hr-1]:null;
-  var vsAvg=hourAvg>0?Math.round((val-hourAvg)/hourAvg*100):0;
-  var ac=vsAvg>=0?'#3B6D11':'#A32D2D';
-  var lines=[
-    '<b>'+dn+' '+dShort+' &nbsp;'+String(hr).padStart(2,'0')+':00 GMT+3 (МСК)</b>',
-    'Трафик: <b>'+trendFmt(val)+'</b>',
-    'На модем: '+trendFmt(val/mCnt),
-    '<span style="opacity:.4">—</span>',
-    '% от дня: '+(dayTotal>0?Math.round(val/dayTotal*100)+'%':'—')+' &nbsp; Итого: '+trendFmt(dayTotal),
-    'Ср. этот час: '+trendFmt(hourAvg)+' &nbsp; vs ср.: <span style="color:'+ac+';font-weight:600">'+(vsAvg>=0?'+':'')+vsAvg+'%</span>',
-  ];
-  if(prevV!==null)lines.push('Предыдущий час: '+trendFmt(prevV));
-  showFloatTooltip('heatTT',event,lines);
+  var dShort=fmtDateRuLong(ds);
+  var hrEnd=String((hr+1)%24).padStart(2,'0');
+
+  var tt=document.getElementById('heatTT');
+  if(!tt){tt=document.createElement('div');tt.id='heatTT';tt.style.cssText='position:fixed;z-index:9999;pointer-events:none;background:#fff;border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:170px;box-shadow:0 4px 20px rgba(0,0,0,0.09)';document.body.appendChild(tt);}
+
+  if(val<0.01){
+    tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2,'0')+':00–'+hrEnd+':00</div>'
+      +'<div style="font-size:20px;font-weight:500;color:#1a1a1a;line-height:1">—</div>'
+      +'<div style="height:0.5px;background:rgba(0,0,0,0.08);margin:8px 0"></div>'
+      +'<div style="font-size:11px;color:#9b9b98;font-style:italic">Нет трафика</div>';
+  } else {
+    var perModem=val/mDiv;
+    var hourVals=mat.map(function(row){return row[hr]});
+    var hourAvg=hourVals.reduce(function(a,b){return a+b},0)/hourVals.length;
+    var avgPerModem=hourAvg/mDiv;
+
+    tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2,'0')+':00–'+hrEnd+':00</div>'
+      +'<div style="font-size:20px;font-weight:500;color:#1a1a1a;line-height:1">'+trendFmt(perModem)+' <span style="font-size:11px;font-weight:400;color:#9b9b98">на модем</span></div>'
+      +'<div style="height:0.5px;background:rgba(0,0,0,0.08);margin:8px 0"></div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:2px 0"><span style="font-size:11px;color:#9b9b98">Обычно в этот час</span><span style="font-size:12px;font-weight:500;color:#1a1a1a">'+trendFmt(avgPerModem)+'</span></div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:2px 0"><span style="font-size:11px;color:#9b9b98">Общий трафик</span><span style="font-size:12px;font-weight:500;color:#1a1a1a">'+trendFmt(val)+'</span></div>';
+  }
+
+  tt.style.display='block';tt.style.left='-9999px';tt.style.top='-9999px';
+  var tw=tt.offsetWidth||200,th=tt.offsetHeight||100;
+  var x=event.clientX+12,y=event.clientY-20;
+  if(x+tw+8>window.innerWidth)x=event.clientX-tw-12;
+  if(y+th+8>window.innerHeight)y=event.clientY-th-8;
+  if(x<4)x=4;if(y<4)y=4;
+  tt.style.left=x+'px';tt.style.top=y+'px';
 }
 
 function renderDailyClientChart(data,cc){
@@ -2416,8 +2033,8 @@ function renderTopResources(){
     document.getElementById('topResourcesList').innerHTML='<div style="color:var(--text-3);padding:30px;text-align:center;font-size:13px"><div class="spinner" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite;margin-bottom:8px"></div><br>Загрузка данных о ресурсах...</div>';
     return;
   }
-  // Use shared accClientFilter from toolbar
-  var clientFilter=document.getElementById('accClientFilter');
+  // Use resClientFilter on resources page
+  var clientFilter=document.getElementById('resClientFilter');
   var filterPortName=clientFilter?clientFilter.value:'';
   var dataSource=topHostsCache;
   var showAll=false;
@@ -2430,31 +2047,13 @@ function renderTopResources(){
       return;
     }
   }
-  // Apply domain filter
-  var _resFilter=window._resFilter||'all';
-  var _socialPat=/facebook|instagram|tiktok|vk\.com|twitter|x\.com|snapchat|pinterest|linkedin/i;
-  var _wbPat=/wildberries|wb\.ru|wbx\.|wbbasket|wbstatic/i;
-  var filteredSource={};
-  for(var _hk in dataSource){
-    if(_resFilter==='no_social'&&_socialPat.test(_hk))continue;
-    if(_resFilter==='only_wb'&&!_wbPat.test(_hk))continue;
-    if(_resFilter==='only_social'&&!_socialPat.test(_hk))continue;
-    filteredSource[_hk]=dataSource[_hk];
-  }
-  var sorted=Object.keys(filteredSource).sort(function(a,b){return filteredSource[b]-filteredSource[a]});
-  var displayItems=showAll?sorted:sorted.slice(0,30);
-  var maxCount=displayItems.length?filteredSource[displayItems[0]]:0;
+  var sorted=Object.keys(dataSource).sort(function(a,b){return dataSource[b]-dataSource[a]});
+  var displayItems=showAll?sorted:sorted.slice(0,50);
+  var maxCount=displayItems.length?dataSource[displayItems[0]]:0;
 
-  // Filter buttons
-  var fBtnH='<div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">';
-  [['all','Все'],['no_social','Без соцсетей'],['only_wb','Только Wildberries'],['only_social','Только соцсети']].forEach(function(f){
-    fBtnH+='<button class="period-btn'+(_resFilter===f[0]?' active':'')+'" onclick="window._resFilter=\''+f[0]+'\';renderTopResources()">'+f[1]+'</button>';
-  });
-  fBtnH+='</div>';
-
-  // Horizontal bars
-  var items=displayItems.map(function(h,i){return{label:h,value:filteredSource[h],color:['blue','green','orange','purple','red'][i%5]}});
-  document.getElementById('topResourcesList').innerHTML=fBtnH+'<div style="max-height:600px;overflow-y:auto">'+renderHBarsRes(items,maxCount)+'</div>';
+  // Horizontal bars (no quick filters)
+  var items=displayItems.map(function(h,i){return{label:h,value:dataSource[h],color:['blue','green','orange','purple','red'][i%5]}});
+  document.getElementById('topResourcesList').innerHTML='<div style="max-height:600px;overflow-y:auto">'+renderHBarsRes(items,maxCount)+'</div>';
 
   // Categories — progress bars
   var categoryCounts={};sorted.forEach(function(h){var cat=categorize(h);if(!categoryCounts[cat])categoryCounts[cat]=0;categoryCounts[cat]+=dataSource[h]});
@@ -2990,7 +2589,7 @@ function deletePayment(clientId,index){
 
 // ========== ANALYTICS ==========
 function initAnalyticsSelectors(){var sv=currentData?currentData.servers||[]:[];['uniqueIpsServer','bwPeriodServer','backupServer'].forEach(function(id){var sel=document.getElementById(id);if(!sel)return;var v=sel.value;sel.innerHTML='<option value="">Сервер</option>';sv.forEach(function(s){var c=COUNTRIES[s.name]||{};sel.innerHTML+='<option value="'+s.name+'">'+(c.flag||'')+' '+(c.name||s.name)+'</option>'});if(v)sel.value=v})}
-function loadUniqueIps(){var srv=document.getElementById('uniqueIpsServer').value;if(!srv)return showToast('Выберите сервер','error');var res=document.getElementById('uniqueIpsResult');res.innerHTML='Загрузка...';fetch(API+'/api/admin/unique_ips?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var h='<div class="detail-card"><h4>Результат</h4>';for(var k in d)h+=dr(k,typeof d[k]==='object'?JSON.stringify(d[k]):d[k]);res.innerHTML=h+'</div>'}).catch(function(e){res.innerHTML=e.message})}
+function loadUniqueIps(){var srv=document.getElementById('uniqueIpsServer').value;if(!srv)return showToast('Выберите сервер','error');var res=document.getElementById('uniqueIpsResult');res.innerHTML='Загрузка...';fetch(API+'/api/admin/unique_ips?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var h='<div class="detail-card"><h4>Результат</h4>';for(var k in d)h+=dr(k,typeof d[k]==='object'?JSON.stringify(d[k]):d[k]);res.innerHTML=h+'</div>'}).catch(function(e){res.innerHTML=esc(e.message)})}
 function loadBwPeriod(){var srv=document.getElementById('bwPeriodServer').value,pid=document.getElementById('bwPeriodPort').value,s=document.getElementById('bwPeriodStart').value,e=document.getElementById('bwPeriodEnd').value;if(!srv||!pid||!s||!e)return showToast('Заполните все поля','error');var res=document.getElementById('bwPeriodResult');res.innerHTML='Загрузка...';fetch(API+'/api/admin/bandwidth_period?portId='+encodeURIComponent(pid)+'&serverName='+srv+'&start='+encodeURIComponent(s+' 00:00')+'&end='+encodeURIComponent(e+' 23:59:59'),{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var h='<div class="detail-card">';for(var k in d)h+=dr(k,typeof d[k]==='object'?JSON.stringify(d[k]):d[k]);res.innerHTML=h+'</div>'}).catch(function(er){res.innerHTML=er.message})}
 function downloadBackup(){var srv=document.getElementById('backupServer').value;if(!srv)return showToast('Выберите сервер','error');fetch(API+'/api/admin/backup?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_'+srv+'_'+new Date().toISOString().slice(0,10)+'.json';a.click();showToast('Скачан','success')})}
 
@@ -3050,7 +2649,7 @@ function startAutoRefresh(){if(autoRefreshTimer)clearInterval(autoRefreshTimer);
 // ========== PRICING TIERS ==========
 function renderPricingTiers() {
   var tiers = (currentData && currentData.settings && currentData.settings.pricing_tiers) || [{min_proxies:1,price:30,label:'1-4'},{min_proxies:5,price:25,label:'5-9'},{min_proxies:10,price:23,label:'10-19'},{min_proxies:20,price:20,label:'20+'}];
-  var h = '<table class="log-table"><thead><tr><th>От (портов)</th><th>Цена (руб/порт)</th><th>Описание</th></tr></thead><tbody>';
+  var h = '<table class="log-table"><thead><tr><th>От (портов)</th><th>Цена (руб/мод)</th><th>Описание</th></tr></thead><tbody>';
   tiers.forEach(function(t, i) {
     h += '<tr><td><input class="form-input" type="number" id="tierMin_'+i+'" value="'+t.min_proxies+'" style="width:80px"></td><td><input class="form-input" type="number" id="tierPrice_'+i+'" value="'+t.price+'" style="width:80px"></td><td><input class="form-input" id="tierLabel_'+i+'" value="'+(t.label||'')+'" style="width:120px"></td></tr>';
   });
@@ -3192,7 +2791,7 @@ function renderOpsHistory(clientId) {
       }
       body.innerHTML = h;
     })
-    .catch(function(e) { body.innerHTML = '<div style="color:var(--danger);padding:20px">' + e.message + '</div>'; });
+    .catch(function(e) { body.innerHTML = '<div style="color:var(--danger);padding:20px">' + esc(e.message) + '</div>'; });
 }
 
 function renderOpsDocuments(clientId) {
@@ -3558,7 +3157,7 @@ function syncPayments() {
       }
     })
     .catch(function(e) {
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + e.message + '</span>';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + esc(e.message) + '</span>';
       showToast(e.message, 'error');
     });
 }
@@ -3687,11 +3286,11 @@ function generateBulkActs() {
         loadData();
         setTimeout(function() { loadAllActs(); }, 1500);
       } else {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + (d.error || 'Ошибка') + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + esc(d.error || 'Ошибка') + '</span>';
         showToast(d.error || 'Ошибка', 'error');
       }
     }).catch(function(e) {
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + e.message + '</span>';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + esc(e.message) + '</span>';
       showToast(e.message, 'error');
     });
 }
@@ -3830,11 +3429,11 @@ function generateBulkBills() {
         loadData();
         setTimeout(function() { loadAllBills(); }, 1500);
       } else {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + (d.error || 'Ошибка') + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + esc(d.error || 'Ошибка') + '</span>';
         showToast(d.error || 'Ошибка', 'error');
       }
     }).catch(function(e) {
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + e.message + '</span>';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + esc(e.message) + '</span>';
       showToast(e.message, 'error');
     });
 }
