@@ -1,10 +1,11 @@
 node_modules/
 dist/
-dashboard.db
-dashboard.db-shm
-dashboard.db-wal
-*.db-journal
 .env
+*.db
+*.db-wal
+*.db-shm
+*.db-journal
 server_cache.json
 known_modems.json
 top_hosts_cache.json
+documents/

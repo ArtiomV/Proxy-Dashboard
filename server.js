@@ -1,3 +1,4 @@
+require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const http = require('http');
@@ -9,9 +10,12 @@ const bcrypt = require('bcrypt');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const Database = require('better-sqlite3');
+const { v4: uuidv4 } = require('uuid');
 const fsPromises = fs.promises;
+const logger = require('./src/logger');
+const { validate } = require('./src/middleware/validate');
+const { LoginSchema, ClientCreateSchema, ClientUpdateSchema, PaymentSchema, BalanceAdjustSchema } = require('./src/schemas');
 
-// ==================== SQLite DATABASE (TASK-M) ====================
 const DB_PATH = path.join(__dirname, 'dashboard.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 const db = new Database(DB_PATH);
@@ -25,82 +29,62 @@ try {
     const htInfo = db.prepare("PRAGMA table_info(traffic_hourly)").all();
     const hasNick = htInfo.some(c => c.name === 'nick');
     if (!hasNick) {
-      console.log('[Migration] Recreating traffic_hourly with per-modem columns...');
+      logger.info('[Migration] Recreating traffic_hourly with per-modem columns...');
       db.exec('DROP TABLE IF EXISTS traffic_hourly');
       db.exec('DROP INDEX IF EXISTS idx_traffic_hourly_hour');
       db.exec('DROP INDEX IF EXISTS idx_traffic_hourly_port');
-      console.log('[Migration] traffic_hourly dropped, will be recreated by schema');
+      logger.info('[Migration] traffic_hourly dropped, will be recreated by schema');
     }
   }
-} catch (e) { console.error('[Migration] traffic_hourly pre-check:', e.message); }
+} catch (e) { logger.error('[Migration] traffic_hourly pre-check:', e.message); }
 
 // Apply schema on startup (CREATE IF NOT EXISTS is safe to re-run)
 if (fs.existsSync(SCHEMA_PATH)) {
   db.exec(fs.readFileSync(SCHEMA_PATH, 'utf8'));
-  console.log('[SQLite] Schema applied, database ready');
+  logger.info('[SQLite] Schema applied, database ready');
 }
 
-// BUG-01 fix: Synchronous migration via spawnSync — blocks until complete,
-// preventing race condition where loadClients() runs before DB is populated.
-// WAL mode allows concurrent access; spawnSync is safe (fixed command, no shell).
+// JSON→SQLite migration check
 function autoMigrateIfNeeded() {
-  const clientCount = db.prepare('SELECT COUNT(*) as cnt FROM clients').get().cnt;
-  if (clientCount > 0) return;
   const jsonPath = path.join(__dirname, 'clients.json');
   if (!fs.existsSync(jsonPath)) return;
-  console.log('[SQLite] Empty database with existing JSON files. Running sync migration...');
-  try {
-    const { spawnSync } = require('child_process');
-    const result = spawnSync(process.execPath, ['migrate.js'], {
-      cwd: __dirname, stdio: 'inherit', timeout: 30000
-    });
-    if (result.status !== 0) {
-      console.error('[SQLite] Migration exited with code', result.status);
-    } else {
-      console.log('[SQLite] Migration complete');
-    }
-  } catch (e) {
-    console.error('[SQLite] Migration failed:', e.message, '— run "node migrate.js" manually');
-  }
+  const clientCount = db.prepare('SELECT COUNT(*) as cnt FROM clients').get().cnt;
+  if (clientCount > 0) return;
+  logger.error('[Migration] Found clients.json but database is empty.');
+  logger.error('[Migration] Run: node migrate.js');
+  logger.error('[Migration] Then restart the server.');
+  process.exit(1);
 }
 autoMigrateIfNeeded();
 
-// Safe ALTER TABLE — add columns if they don't exist (for existing DBs)
-function safeAddColumn(table, column, type) {
-  try { db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${type}`); } catch (e) { /* already exists */ }
+// Run SQL migrations from migrations/ directory
+function runMigrations() {
+  db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    applied_at TEXT DEFAULT (datetime('now'))
+  )`);
+  const migrationsDir = path.join(__dirname, 'migrations');
+  if (!fs.existsSync(migrationsDir)) return;
+  const applied = new Set(db.prepare('SELECT name FROM _migrations').all().map(r => r.name));
+  const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
+  for (const file of files) {
+    if (applied.has(file)) continue;
+    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
+    try {
+      db.transaction(() => {
+        for (const stmt of sql.split(';').map(s => s.trim()).filter(Boolean)) {
+          try { db.exec(stmt); } catch (e) { /* column/index already exists — ok */ }
+        }
+        db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(file);
+      })();
+      logger.info(`[Migration] Applied: ${file}`);
+    } catch (e) {
+      logger.error(`[Migration] Failed: ${file}`, e.message);
+    }
+  }
 }
-safeAddColumn('bank_payments', 'dismissed', 'INTEGER DEFAULT 0');
-safeAddColumn('bank_payments', 'source', "TEXT DEFAULT ''");
-safeAddColumn('bank_payments', 'tochka_payment_id', 'TEXT');
-try { db.exec('CREATE INDEX IF NOT EXISTS idx_bank_payments_tochka_id ON bank_payments(tochka_payment_id)'); } catch (e) {}
-safeAddColumn('billing_ledger', 'details', "TEXT DEFAULT '{}'");
-safeAddColumn('closing_documents', 'contract_info', "TEXT DEFAULT ''");
-safeAddColumn('clients', 'client_type', "TEXT DEFAULT 'legal'");
-safeAddColumn('clients', 'billing_paused', "INTEGER DEFAULT 0");
-safeAddColumn('closing_documents', 'signed_at', 'TEXT');
-
-
-
-// External proxies table
-db.exec(`CREATE TABLE IF NOT EXISTS external_proxies (
-  id TEXT PRIMARY KEY,
-  client_id TEXT NOT NULL,
-  label TEXT DEFAULT '',
-  protocol TEXT DEFAULT 'HTTP',
-  host TEXT NOT NULL,
-  port INTEGER NOT NULL,
-  login TEXT DEFAULT '',
-  password TEXT DEFAULT '',
-  change_ip_url TEXT DEFAULT '',
-  note TEXT DEFAULT '',
-  created_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (client_id) REFERENCES clients(id)
-)`);
-safeAddColumn('external_proxies', 'change_ip_url', "TEXT DEFAULT ''");
-safeAddColumn('external_proxies', 'valid_until', 'TEXT');
-safeAddColumn('external_proxies', 'billing_type', "TEXT DEFAULT 'monthly'");
-safeAddColumn('external_proxies', 'price', 'REAL DEFAULT 0');
-safeAddColumn('external_proxies', 'traffic_used_gb', 'REAL DEFAULT 0');
+runMigrations();
 
 // Prepared statements for common operations
 const dbStmts = {
@@ -134,7 +118,6 @@ const dbStmts = {
   cleanOldAudit: db.prepare("DELETE FROM audit_log WHERE timestamp < datetime('now', '-90 days')"),
 };
 
-// DATA-01/02: Async file write with per-file mutex to prevent race conditions and event loop blocking
 const _fileLocks = new Map();
 function safeWriteFile(filePath, data) {
   const prev = _fileLocks.get(filePath) || Promise.resolve();
@@ -146,24 +129,14 @@ function safeWriteFile(filePath, data) {
     } catch (e) {
       // Cleanup tmp if rename failed
       try { await fsPromises.unlink(tmp); } catch (_) {}
-      console.error(`[safeWriteFile] Error writing ${path.basename(filePath)}:`, e.message);
+      logger.error(`[safeWriteFile] Error writing ${path.basename(filePath)}:`, e.message);
     }
   }).catch(() => {});
   _fileLocks.set(filePath, next);
   return next;
 }
 
-// Load .env manually
-const envPath = path.join(__dirname, '.env');
-if (fs.existsSync(envPath)) {
-  fs.readFileSync(envPath, 'utf8').split('\n').forEach(line => {
-    const trimmed = line.trim();
-    if (trimmed && !trimmed.startsWith('#')) {
-      const [key, ...vals] = trimmed.split('=');
-      process.env[key.trim()] = vals.join('=').trim();
-    }
-  });
-}
+// .env loaded by dotenv at top of file
 
 const PORT = process.env.PORT || 3000;
 
@@ -186,7 +159,6 @@ for (const name of serverKeys) {
   });
 }
 
-// TASK-K: Server country/IP mapping — built from env, no hardcoded IPs
 // Fallback defaults for known servers (used if env vars not set)
 // Server locations with timezone offsets (hours from UTC)
 // Moldova (Chisinau) and Romania (Bucharest) are both EET: UTC+2 winter, UTC+3 summer (EEST)
@@ -216,9 +188,8 @@ for (const s of apiServers) {
     tz: process.env[`API_${s.name}_TZ`] || dc.tz || 'Europe/Moscow'
   };
 }
-console.log(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.name + ' (' + s.url + ')').join(', ')}`);
+logger.info(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.name + ' (' + s.url + ')').join(', ')}`);
 
-// TASK-19: Startup validation — warn about missing critical configuration
 {
   const warnings = [];
   if (apiServers.length === 0) warnings.push('No API servers configured (API_<name>_URL). Dashboard will have no modem data.');
@@ -231,8 +202,8 @@ console.log(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.
     if (s.user === 'proxy' && s.pass === 'proxy') warnings.push(`API server ${s.name} uses default credentials.`);
   }
   if (warnings.length > 0) {
-    console.warn('[Startup] ⚠️  Warnings:');
-    warnings.forEach(w => console.warn(`  - ${w}`));
+    logger.warn('[Startup] ⚠️  Warnings:');
+    warnings.forEach(w => logger.warn(`  - ${w}`));
   }
 }
 
@@ -244,7 +215,7 @@ for (const [key, val] of Object.entries(process.env)) {
     modemLogins[nick] = val;
   }
 }
-console.log(`Loaded ${Object.keys(modemLogins).length} modem login mapping(s)`);
+logger.info(`Loaded ${Object.keys(modemLogins).length} modem login mapping(s)`);
 
 // Parse users from .env: USER_<login>=<password>|<portName>
 const users = {};
@@ -260,7 +231,6 @@ for (const [key, val] of Object.entries(process.env)) {
   }
 }
 
-// ==================== CLIENT MANAGEMENT (SQLite-backed, BUG-01/ARCH-01) ====================
 const CLIENTS_FILE = path.join(__dirname, 'clients.json'); // JSON fallback for first-time migration
 
 // Prepared statements for client & sub-table persistence
@@ -287,7 +257,7 @@ const _clientGetIds = db.prepare('SELECT id FROM clients');
 // TASK-03+BUG-02+BUG-03: Atomic balance+ledger operations in ONE transaction
 const _clientGetBalance = db.prepare('SELECT balance FROM clients WHERE id = ?');
 const _clientUpdateBalance = db.prepare('UPDATE clients SET balance = ?, updated_at = datetime(\'now\') WHERE id = ?');
-// BUG-09 fix: Persist referral_balance to DB immediately
+
 const _clientUpdateReferralBalance = db.prepare('UPDATE clients SET referral_balance = ?, updated_at = datetime(\'now\') WHERE id = ?');
 
 /**
@@ -313,7 +283,7 @@ function atomicCredit(clientId, amount, ledgerEntry) {
       const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
       const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
       entry.db_id = result.lastInsertRowid;
-      ledgerDbId = entry.db_id; // OLD-02 fix: expose to caller
+      ledgerDbId = entry.db_id; 
       if (!billingLedger[clientId]) billingLedger[clientId] = [];
       billingLedger[clientId].push(entry);
     }
@@ -341,7 +311,7 @@ function atomicDebit(clientId, amount, ledgerEntry) {
       const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
       const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
       entry.db_id = result.lastInsertRowid;
-      ledgerDbId = entry.db_id; // OLD-02 fix: expose to caller
+      ledgerDbId = entry.db_id; 
       if (!billingLedger[clientId]) billingLedger[clientId] = [];
       billingLedger[clientId].push(entry);
     }
@@ -391,7 +361,7 @@ function loadClients() {
         const jsonClients = JSON.parse(fs.readFileSync(CLIENTS_FILE, 'utf8'));
         if (jsonClients.length > 0) return jsonClients;
       }
-    } catch (e) { console.error('[SQLite] Failed to load clients from JSON fallback:', e.message); }
+    } catch (e) { logger.error('[SQLite] Failed to load clients from JSON fallback:', e.message); }
     return [];
   }
   const clientsList = rows.map(clientFromRow);
@@ -420,7 +390,7 @@ function loadClients() {
 
 function saveClients(clientsList) {
   if (!Array.isArray(clientsList)) {
-    console.error('[CRITICAL] saveClients called without array argument! Aborting write.');
+    logger.error('[CRITICAL] saveClients called without array argument! Aborting write.');
     return;
   }
   try {
@@ -433,7 +403,7 @@ function saveClients(clientsList) {
       // Upsert clients + sync sub-arrays
       for (const c of clientsList) {
         _clientUpsert.run(
-          c.id, c.login, c.password || '', c.passwordHash || '', c.portName || '', c.name || '',
+          c.id, c.login, null, c.passwordHash || '', c.portName || '', c.name || '',
           c.contact || '', c.notes || '', c.billingType || 'per_gb', c.price || 0,
           c.currency || 'RUB', c.balance || 0, c.apiKey || '', c.referral_code || '',
           c.referred_by || null, c.referral_balance || 0, c.resetToken || '',
@@ -469,11 +439,10 @@ function saveClients(clientsList) {
       }
     })();
   } catch (e) {
-    console.error('[SQLite] Error saving clients:', e.message);
+    logger.error('[SQLite] Error saving clients:', e.message);
   }
 }
 
-// ==================== BILLING LEDGER (SQLite-backed, BUG-01/ARCH-01) ====================
 const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json'); // JSON fallback
 const _ledgerDeleteByClient = db.prepare('DELETE FROM billing_ledger WHERE client_id = ?');
 const _ledgerInsert = db.prepare(`INSERT INTO billing_ledger
@@ -501,24 +470,23 @@ let billingLedger = {};
       if (r.details && r.details !== '{}') {
         try { Object.assign(entry, JSON.parse(r.details)); } catch (e) {}
       }
-      entry.db_id = r.id; // BUG-05 fix: track SQLite rowid for point deletion
+      entry.db_id = r.id; 
       billingLedger[r.client_id].push(entry);
     }
-    console.log(`[SQLite] Loaded ${_blRows.length} billing ledger entries`);
+    logger.info(`[SQLite] Loaded ${_blRows.length} billing ledger entries`);
   } else {
     try {
       if (fs.existsSync(BILLING_LEDGER_FILE)) {
         billingLedger = JSON.parse(fs.readFileSync(BILLING_LEDGER_FILE, 'utf8'));
         const total = Object.values(billingLedger).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
-        if (total > 0) console.log(`[SQLite] Loaded ${total} billing ledger entries from JSON fallback`);
+        if (total > 0) logger.info(`[SQLite] Loaded ${total} billing ledger entries from JSON fallback`);
       }
-    } catch (e) { console.error('[SQLite] Failed to load billing_ledger from JSON:', e.message); }
+    } catch (e) { logger.error('[SQLite] Failed to load billing_ledger from JSON:', e.message); }
   }
 }
 
 const MAX_LEDGER_ENTRIES = 1000; // per client
 
-// TASK-04: Helper to build details JSON and amount for SQLite insert
 function _ledgerEntryParams(clientId, e) {
   const amount = e.type === 'charge' ? (e.cost || 0) : (e.amount || 0);
   const details = {};
@@ -544,18 +512,16 @@ function appendLedgerEntry(clientId, entry) {
   if (!billingLedger[clientId]) billingLedger[clientId] = [];
   try {
     const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-    entry.db_id = result.lastInsertRowid; // BUG-05 fix: track SQLite rowid
-    billingLedger[clientId].push(entry); // NEW-02 fix: only push on successful insert
+    entry.db_id = result.lastInsertRowid; 
+    billingLedger[clientId].push(entry); 
   } catch (e) {
-    console.error('[SQLite] Error appending ledger entry:', e.message);
+    logger.error('[SQLite] Error appending ledger entry:', e.message);
     // NOT adding to in-memory — keeps state consistent with DB
   }
 }
 
-// BUG-04 fix: Point deletion by SQLite rowid instead of DELETE+reinsert
 const _ledgerDeleteById = db.prepare('DELETE FROM billing_ledger WHERE id = ?');
 
-// TASK-04: Full save — only for bulk operations (migration, ledger trimming, entry deletion)
 function saveBillingLedger() {
   try {
     const validIds = new Set(_clientGetIds.all().map(r => r.id));
@@ -575,17 +541,16 @@ function saveBillingLedger() {
       }
     })();
   } catch (e) {
-    console.error('[SQLite] Error saving billing ledger:', e.message);
+    logger.error('[SQLite] Error saving billing ledger:', e.message);
   }
 }
 
-// ==================== AUDIT LOG (TASK-J) — SQLite-backed ====================
 function auditLog(adminLogin, action, details = {}) {
   try {
     const ts = new Date().toISOString();
     dbStmts.insertAudit.run(ts, adminLogin, action, JSON.stringify(details));
   } catch (e) {
-    console.error('[AuditLog] Write failed:', e.message);
+    logger.error('[AuditLog] Write failed:', e.message);
   }
 }
 
@@ -596,14 +561,13 @@ function getClientIp(req) {
     || 'unknown';
 }
 
-// ==================== TOCHKA BANK API ====================
 const TOCHKA_CONFIG_FILE = path.join(__dirname, 'tochka_config.json');
 let tochkaConfig = { jwt: '', clientId: '', customerCode: '', accountId: '', companyName: '', companyInn: '', companyKpp: '' };
 try {
   if (fs.existsSync(TOCHKA_CONFIG_FILE)) {
     Object.assign(tochkaConfig, JSON.parse(fs.readFileSync(TOCHKA_CONFIG_FILE, 'utf8')));
   }
-} catch (e) { console.log('[Tochka] Error loading config file:', e.message); }
+} catch (e) { logger.info('[Tochka] Error loading config file:', e.message); }
 // .env overrides file config
 if (process.env.TOCHKA_JWT_TOKEN) tochkaConfig.jwt = process.env.TOCHKA_JWT_TOKEN;
 if (process.env.TOCHKA_CLIENT_ID) tochkaConfig.clientId = process.env.TOCHKA_CLIENT_ID;
@@ -613,8 +577,8 @@ if (process.env.TOCHKA_COMPANY_NAME) tochkaConfig.companyName = process.env.TOCH
 if (process.env.TOCHKA_COMPANY_INN) tochkaConfig.companyInn = process.env.TOCHKA_COMPANY_INN;
 if (process.env.TOCHKA_COMPANY_KPP) tochkaConfig.companyKpp = process.env.TOCHKA_COMPANY_KPP;
 function saveTochkaConfig() { safeWriteFile(TOCHKA_CONFIG_FILE, JSON.stringify(tochkaConfig, null, 2)); }
-if (tochkaConfig.jwt) { saveTochkaConfig(); console.log(`[Tochka] API configured (client_id: ${tochkaConfig.clientId})`); }
-else console.log('[Tochka] No JWT token configured, bank integration disabled');
+if (tochkaConfig.jwt) { saveTochkaConfig(); logger.info(`[Tochka] API configured (client_id: ${tochkaConfig.clientId})`); }
+else logger.info('[Tochka] No JWT token configured, bank integration disabled');
 
 // Tochka API helper — HTTPS requests to enter.tochka.com
 function tochkaRequest(method, apiPath, body) {
@@ -657,7 +621,6 @@ function tochkaRequest(method, apiPath, body) {
   });
 }
 
-// ==================== BANK PAYMENTS — SQLite-backed ====================
 // Helper: convert SQLite row to JS object with camelCase keys
 function bankPaymentFromRow(row) {
   if (!row) return null;
@@ -687,7 +650,6 @@ function getAllBankPayments() {
   return dbStmts.getBankPayments.all().map(bankPaymentFromRow);
 }
 
-// SEC-02: JWT verification for Tochka webhooks
 // Cache for Tochka JWKS public keys
 let tochkaJwksCache = { keys: null, fetchedAt: 0 };
 const JWKS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
@@ -771,15 +733,15 @@ async function verifyJwtSignature(token) {
     try {
       const jwks = await fetchTochkaJwks();
       tochkaJwksCache = { keys: jwks.keys || [], fetchedAt: now };
-      console.log(`[Tochka JWKS] Fetched ${tochkaJwksCache.keys.length} key(s)`);
+      logger.info(`[Tochka JWKS] Fetched ${tochkaJwksCache.keys.length} key(s)`);
     } catch (e) {
-      console.error('[Tochka JWKS] Failed to fetch keys:', e.message);
+      logger.error('[Tochka JWKS] Failed to fetch keys:', e.message);
       // If we have cached keys, use them even if expired
       if (tochkaJwksCache.keys) {
-        console.warn('[Tochka JWKS] Using expired cached keys');
+        logger.warn('[Tochka JWKS] Using expired cached keys');
       } else {
         // No keys at all — log warning but still return decoded payload (graceful degradation)
-        console.warn('[Tochka JWKS] No cached keys, skipping signature verification');
+        logger.warn('[Tochka JWKS] No cached keys, skipping signature verification');
         return { verified: false, payload, reason: 'jwks_unavailable' };
       }
     }
@@ -791,7 +753,7 @@ async function verifyJwtSignature(token) {
   let matchingKey = kid ? tochkaJwksCache.keys.find(k => k.kid === kid) : tochkaJwksCache.keys[0];
 
   if (!matchingKey) {
-    console.warn(`[Tochka JWT] No matching key found for kid="${kid}"`);
+    logger.warn(`[Tochka JWT] No matching key found for kid="${kid}"`);
     return { verified: false, payload, reason: 'key_not_found' };
   }
 
@@ -810,7 +772,7 @@ async function verifyJwtSignature(token) {
 
     return { verified: isValid, payload, reason: isValid ? 'ok' : 'signature_invalid' };
   } catch (e) {
-    console.error('[Tochka JWT] Verification error:', e.message);
+    logger.error('[Tochka JWT] Verification error:', e.message);
     return { verified: false, payload, reason: 'verification_error: ' + e.message };
   }
 }
@@ -876,7 +838,6 @@ function buildTochkaActBody(client, period, actItems, actNumber) {
   };
 }
 
-// TASK-06: Shared helper — build act items from billing ledger for a given period
 function buildActItemsFromLedger(client, period) {
   const ledgerEntries = billingLedger[client.id] || [];
   const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
@@ -1005,7 +966,6 @@ function calculateMonthlyBillAmount(client, cachedResults) {
   return Math.round(totalAmount * 100) / 100;
 }
 
-// ==================== DAILY TRAFFIC HISTORY — SQLite-backed ====================
 let dailyTraffic = {}; // { portKey: { "2026-03-01": { in: bytes, out: bytes, portName }, ... } }
 // Load from SQLite
 try {
@@ -1016,8 +976,8 @@ try {
     if (!dailyTraffic[r.port_name]) dailyTraffic[r.port_name] = {};
     dailyTraffic[r.port_name][r.date] = { in: r.bytes_in, out: r.bytes_out };
   }
-  if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} daily traffic entries`);
-} catch (e) { console.error('Failed to load daily_traffic from SQLite:', e.message); }
+  if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} daily traffic entries`);
+} catch (e) { logger.error('Failed to load daily_traffic from SQLite:', e.message); }
 
 const _dtUpsert = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
 // daily_traffic never cleaned — needed for long-term trend charts
@@ -1062,9 +1022,9 @@ async function syncYesterdayTraffic() {
       }
     });
     batch();
-    if (count > 0) console.log(`[DailySync] Saved ${count} yesterday traffic entries`);
+    if (count > 0) logger.info(`[DailySync] Saved ${count} yesterday traffic entries`);
   } catch (e) {
-    console.error('[DailySync] Error:', e.message);
+    logger.error('[DailySync] Error:', e.message);
   }
 }
 
@@ -1080,10 +1040,9 @@ function saveDailyTraffic() {
       }
     });
     batch();
-  } catch (e) { console.error('[saveDailyTraffic] SQLite error:', e.message); }
+  } catch (e) { logger.error('[saveDailyTraffic] SQLite error:', e.message); }
 }
 
-// ==================== HOURLY TRAFFIC AGGREGATION ====================
 // Per-modem snapshots of daily counters, used to derive per-hour increments
 let hourlyDaySnapshots = {}; // { 'SRV_nick': { in: bytes, out: bytes, date: 'YYYY-MM-DD' } }
 
@@ -1094,7 +1053,7 @@ function saveHourlySnapshots() {
 function loadHourlySnapshots() {
   try {
     const row = _kvGet.get('hourly_day_snapshots');
-    if (row) { hourlyDaySnapshots = JSON.parse(row.value); console.log(`[HourlyAgg] Restored ${Object.keys(hourlyDaySnapshots).length} snapshots from DB`); }
+    if (row) { hourlyDaySnapshots = JSON.parse(row.value); logger.info(`[HourlyAgg] Restored ${Object.keys(hourlyDaySnapshots).length} snapshots from DB`); }
   } catch (e) {}
 }
 loadHourlySnapshots();
@@ -1172,9 +1131,9 @@ async function aggregateHourlyTraffic() {
     });
     batch();
     saveHourlySnapshots();
-    console.log(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
+    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
   } catch (e) {
-    console.error('[HourlyAgg] Error:', e.message);
+    logger.error('[HourlyAgg] Error:', e.message);
   }
 }
 
@@ -1190,8 +1149,6 @@ function parseTrafficValue(val) {
   const mult = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824, TB: 1099511627776 };
   return num * (mult[unit] || 1);
 }
-
-// ==================== BILLING HELPERS ====================
 
 function getMoscowNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
@@ -1230,14 +1187,13 @@ function refreshPortKeyMapping(allServerResults) {
 let lastBillingRunSummary = null;
 let lastReconciliationMonth = '';
 
-// ==================== KNOWN MODEMS (persistence for offline detection) ====================
 const KNOWN_MODEMS_FILE = path.join(__dirname, 'known_modems.json');
 let knownModems = {}; // { serverName: { portId: { portName, imei, nick, model, portInfo, lastSeen } } }
 try {
   if (fs.existsSync(KNOWN_MODEMS_FILE)) {
     knownModems = JSON.parse(fs.readFileSync(KNOWN_MODEMS_FILE, 'utf8'));
   }
-} catch (e) { console.error('Failed to load known_modems:', e.message); }
+} catch (e) { logger.error('Failed to load known_modems:', e.message); }
 
 function saveKnownModems() {
   safeWriteFile(KNOWN_MODEMS_FILE, JSON.stringify(knownModems, null, 2));
@@ -1371,7 +1327,6 @@ function injectOfflineModems(data) {
 // Load clients into users map on startup
 let clients = loadClients();
 
-// TASK-E: Map indexes for O(1) client lookups
 let clientById = new Map();
 let clientByLogin = new Map();
 let clientByApiKey = new Map();
@@ -1414,14 +1369,15 @@ for (const c of clients) {
   if (!c.bills) { c.bills = []; clientsMigrated = true; }
   if (c.autoActs === undefined) { c.autoActs = true; clientsMigrated = true; }
   if (c.autoBills === undefined) { c.autoBills = true; clientsMigrated = true; }
-  // SEC-01: Migrate plaintext passwords to bcrypt
+  // Migrate plaintext passwords to bcrypt then nullify plaintext
   if (c.password && !c.password.startsWith('$2b$')) {
     c.passwordHash = bcrypt.hashSync(c.password, 10);
+    c.password = null;
     clientsMigrated = true;
-    console.log(`  [bcrypt] Migrated password for ${c.login}`);
   }
   if (!c.passwordHash && c.password) {
     c.passwordHash = bcrypt.hashSync(c.password, 10);
+    c.password = null;
     clientsMigrated = true;
   }
 }
@@ -1457,7 +1413,7 @@ for (const [login, u] of Object.entries(users)) {
         createdAt: new Date().toISOString()
       };
       clients.push(client);
-      console.log(`  Auto-migrated user ${login} -> client "${u.portNameFilter}"`);
+      logger.info(`  Auto-migrated user ${login} -> client "${u.portNameFilter}"`);
     }
   }
 }
@@ -1474,11 +1430,10 @@ for (const c of clients) {
     };
   }
 }
-console.log(`Loaded ${Object.keys(users).length} user(s): ${Object.keys(users).join(', ')}`);
-console.log(`  - ${clients.length} client(s) from SQLite`);
+logger.info(`Loaded ${Object.keys(users).length} user(s): ${Object.keys(users).join(', ')}`);
+logger.info(`  - ${clients.length} client(s) from SQLite`);
 rebuildClientMaps();
 
-// ==================== SESSIONS — SQLite-backed ====================
 const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
 
 function getSession(token) {
@@ -1502,19 +1457,17 @@ function getSessionCount() {
   return dbStmts.countSessions.get(Date.now()).cnt;
 }
 
-// TASK-13: Store interval refs for graceful shutdown
 const _intervals = [];
 _intervals.push(setInterval(() => {
   const result = dbStmts.cleanExpiredSessions.run(Date.now());
   if (result.changes > 0) {
-    console.log(`[Sessions] Cleaned ${result.changes} expired session(s)`);
+    logger.info(`[Sessions] Cleaned ${result.changes} expired session(s)`);
   }
 }, 60 * 60 * 1000));
 
 function generateToken() { return crypto.randomBytes(32).toString('hex'); }
 function generateId() { return crypto.randomBytes(8).toString('hex'); }
 
-// ==================== SETTINGS (SQLite kv_store) ====================
 const _kvGet = db.prepare('SELECT value FROM kv_store WHERE key = ?');
 const _kvSet = db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime('now'))");
 
@@ -1540,18 +1493,17 @@ try {
     if (fs.existsSync(SETTINGS_FILE)) {
       appSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
       _kvSet.run('app_settings', JSON.stringify(appSettings));
-      console.log('[Settings] Migrated from settings.json to SQLite');
+      logger.info('[Settings] Migrated from settings.json to SQLite');
     } else {
       _kvSet.run('app_settings', JSON.stringify(appSettings));
     }
   }
-} catch (e) { console.error('Failed to load settings:', e.message); }
+} catch (e) { logger.error('Failed to load settings:', e.message); }
 
 function saveSettings() {
   _kvSet.run('app_settings', JSON.stringify(appSettings));
 }
 
-// ==================== PRICING TIERS ====================
 function getPriceForProxyCount(count) {
   const tiers = appSettings.pricing_tiers || [];
   // Sort descending by min_proxies to find the right tier
@@ -1562,7 +1514,6 @@ function getPriceForProxyCount(count) {
   return tiers.length > 0 ? tiers[0].price : 23; // fallback
 }
 
-// ==================== BANDWIDTH PARSING UTILS ====================
 // BUG-01: parseBwToBytes was duplicate of parseTrafficValue — consolidated
 const parseBwToBytes = parseTrafficValue;
 
@@ -1642,14 +1593,20 @@ function getClientCachedServers(allServerResults, portName) {
   return cachedServers;
 }
 
-// ==================== DOCUMENTS DIR ====================
 const DOCUMENTS_DIR = path.join(__dirname, 'documents');
 if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true });
 
 const app = express();
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
-app.use(express.json({ limit: '10mb' }));
+app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
+
+// Request ID for logging
+app.use((req, res, next) => {
+  req.id = uuidv4();
+  res.set('X-Request-Id', req.id);
+  next();
+});
 
 // Rate limiting for login endpoint (SEC-03: anti-bruteforce)
 const loginLimiter = rateLimit({
@@ -1660,7 +1617,6 @@ const loginLimiter = rateLimit({
   legacyHeaders: false
 });
 
-// SEC-03: Rate limiting for reset_ip_by_token (public endpoint)
 const resetTokenLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10, // max 10 attempts per IP per minute
@@ -1669,7 +1625,6 @@ const resetTokenLimiter = rateLimit({
   legacyHeaders: false
 });
 
-// TASK-12: Rate limiting for check_proxy (heavy network ops)
 const checkProxyLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5, // max 5 batch checks per IP per minute
@@ -1678,10 +1633,8 @@ const checkProxyLimiter = rateLimit({
   legacyHeaders: false
 });
 
-// ==================== AUTH ====================
-
 function authMiddleware(req, res, next) {
-  const token = req.headers['x-auth-token'] || req.query.token;
+  const token = req.headers['x-auth-token'];
   const sess = getSession(token);
   if (!sess) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -1697,9 +1650,13 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
-// TASK-H: Health-check endpoint (no auth required)
-// TASK-22: Expanded /health endpoint with DB stats and ledger info
+// Public health — minimal info
 app.get('/health', (req, res) => {
+  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
+// Admin health — detailed info
+app.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
   const mem = process.memoryUsage();
   const ledgerEntryCount = Object.values(billingLedger).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
   const dbSize = fs.existsSync(DB_PATH) ? Math.round(fs.statSync(DB_PATH).size / 1024) : 0;
@@ -1714,11 +1671,7 @@ app.get('/health', (req, res) => {
       heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
       heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024)
     },
-    database: {
-      size_kb: dbSize,
-      ledger_entries: ledgerEntryCount,
-      wal_mode: true
-    },
+    database: { size_kb: dbSize, ledger_entries: ledgerEntryCount, wal_mode: true },
     billing: lastBillingRunSummary || { last_run: null },
     reconciliation: { last_month: lastReconciliationMonth || null },
     intervals: _intervals.length,
@@ -1726,12 +1679,12 @@ app.get('/health', (req, res) => {
   });
 });
 
-app.post('/api/login', loginLimiter, async (req, res) => {
+app.post('/api/login', loginLimiter, validate(LoginSchema), async (req, res) => {
   const { login, password } = req.body;
   if (!login || !password) return res.status(400).json({ error: 'Login and password required' });
   const user = users[login];
   if (!user) return res.status(401).json({ error: 'Invalid login or password' });
-  // SEC-01: bcrypt comparison
+  
   const passwordValid = user.passwordHash
     ? await bcrypt.compare(password, user.passwordHash)
     : (user.password === password); // fallback for un-migrated
@@ -1763,9 +1716,6 @@ app.post('/api/admin/impersonate/:id', authMiddleware, adminMiddleware, (req, re
   res.json({ ok: true, token, login: client.login });
 });
 
-// ==================== ProxySmart API helpers ====================
-
-// OPT-05: Extract server name from prefixed ID (e.g., "S1_port123" → "S1")
 function extractServerName(prefixedId) {
   return apiServers.map(s => s.name).find(n => prefixedId.startsWith(n + '_')) || '';
 }
@@ -1854,8 +1804,6 @@ function findServer(serverName) {
   return apiServers.find(s => s.name === serverName);
 }
 
-// ==================== DATA FETCHING & MERGING ====================
-
 // ===== SERVER DATA CACHE =====
 // Preserves modem data + traffic when a server goes down temporarily
 const SERVER_CACHE_FILE = path.join(__dirname, 'server_cache.json');
@@ -1863,9 +1811,9 @@ let serverCache = {};
 try {
   if (fs.existsSync(SERVER_CACHE_FILE)) {
     serverCache = JSON.parse(fs.readFileSync(SERVER_CACHE_FILE, 'utf8'));
-    console.log(`Loaded server cache: ${Object.keys(serverCache).length} server(s) cached`);
+    logger.info(`Loaded server cache: ${Object.keys(serverCache).length} server(s) cached`);
   }
-} catch (e) { console.error('Failed to load server_cache:', e.message); }
+} catch (e) { logger.error('Failed to load server_cache:', e.message); }
 
 function saveServerCache() {
   safeWriteFile(SERVER_CACHE_FILE, JSON.stringify(serverCache));
@@ -1888,7 +1836,7 @@ function getCachedDataAsOffline(serverName) {
   if (!cached) return null;
 
   const ageMinutes = Math.round((Date.now() - cached.cachedAt) / 60000);
-  console.log(`[Cache] Using cached data for ${serverName} (${ageMinutes} min old)`);
+  logger.info(`[Cache] Using cached data for ${serverName} (${ageMinutes} min old)`);
 
   // Mark all modems in status as offline + _cached flag
   let offlineStatus = [];
@@ -1914,7 +1862,6 @@ function getCachedDataAsOffline(serverName) {
   };
 }
 
-// ==================== AUTO_IP_ROTATION cache (from ProxySmart /conf/edit/) ====================
 const modemRotationCache = {}; // { "S1:IMEI" -> minutes }
 let rotationCacheUpdatedAt = 0;
 const ROTATION_CACHE_TTL = 30 * 60 * 1000; // refresh every 30 min (settings rarely change)
@@ -1924,11 +1871,11 @@ async function refreshRotationCache() {
     try {
       let statusData;
       try { statusData = await fetchApi(server, '/apix/show_status_json'); } catch (e) {
-        console.log(`[Rotation] ${server.name} status fetch failed: ${e.message}`);
+        logger.info(`[Rotation] ${server.name} status fetch failed: ${e.message}`);
         continue;
       }
       const modems = Array.isArray(statusData) ? statusData : [];
-      if (modems.length === 0) { console.log(`[Rotation] ${server.name}: 0 modems, skipping`); continue; }
+      if (modems.length === 0) { logger.info(`[Rotation] ${server.name}: 0 modems, skipping`); continue; }
       let fetched = 0;
       // Fetch sequentially to avoid hammering the server
       for (const m of modems) {
@@ -1943,12 +1890,12 @@ async function refreshRotationCache() {
           fetched++;
         } catch (e) { /* skip */ }
       }
-      console.log(`[Rotation] ${server.name}: fetched ${fetched}/${modems.length} modems`);
-    } catch (e) { console.log(`[Rotation] Failed for ${server.name}: ${e.message}`); }
+      logger.info(`[Rotation] ${server.name}: fetched ${fetched}/${modems.length} modems`);
+    } catch (e) { logger.info(`[Rotation] Failed for ${server.name}: ${e.message}`); }
   }
   rotationCacheUpdatedAt = Date.now();
   const total = Object.keys(modemRotationCache).length;
-  console.log(`[Rotation] Total cached: ${total} modem rotation values`);
+  logger.info(`[Rotation] Total cached: ${total} modem rotation values`);
 }
 
 // Inject AUTO_IP_ROTATION into status data
@@ -1982,7 +1929,6 @@ async function fetchServerData(server) {
 setTimeout(() => refreshRotationCache(), 10000);
 setInterval(() => refreshRotationCache(), ROTATION_CACHE_TTL);
 
-// ==================== ROTATION LOG SYNC (ProxySmart → SQLite) ====================
 const ROTATION_LOG_SYNC_INTERVAL = 30 * 60 * 1000; // every 30 min
 async function syncAllRotationLogs() {
   let totalSynced = 0;
@@ -2003,14 +1949,14 @@ async function syncAllRotationLogs() {
         } catch (e) { /* skip individual modem */ }
       }
     } catch (e) {
-      console.log(`[RotLogSync] ${server.name} failed: ${e.message}`);
+      logger.info(`[RotLogSync] ${server.name} failed: ${e.message}`);
     }
   }
-  console.log(`[RotLogSync] Synced ${totalSynced} rotation entries across all servers`);
+  logger.info(`[RotLogSync] Synced ${totalSynced} rotation entries across all servers`);
 }
 // Initial sync after 30 sec, then every 30 min
-setTimeout(() => syncAllRotationLogs().catch(e => console.error('[RotLogSync]', e.message)), 30000);
-setInterval(() => syncAllRotationLogs().catch(e => console.error('[RotLogSync]', e.message)), ROTATION_LOG_SYNC_INTERVAL);
+setTimeout(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), 30000);
+setInterval(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), ROTATION_LOG_SYNC_INTERVAL);
 
 // Fetch data from all servers; use cache for unreachable ones
 async function fetchAllServersData() {
@@ -2024,21 +1970,20 @@ async function fetchAllServersData() {
       results.push(data);
     } else {
       const srvName = apiServers[i].name;
-      console.log(`[API] Server ${srvName} unreachable: ${settled[i].reason?.message || 'unknown'}`);
+      logger.info(`[API] Server ${srvName} unreachable: ${settled[i].reason?.message || 'unknown'}`);
       // Try to use cached data
       const cached = getCachedDataAsOffline(srvName);
       if (cached) {
         injectOfflineModems(cached); // add back missing modems as offline
         results.push(cached);
       } else {
-        console.log(`[API] No cache available for ${srvName}`);
+        logger.info(`[API] No cache available for ${srvName}`);
       }
     }
   }
   return results;
 }
 
-// TASK-D: In-memory cache for fetchAllServersData (TTL 10s + in-flight dedup)
 let _psCache = null;
 let _psCacheTs = 0;
 let _psFetchPromise = null;
@@ -2145,8 +2090,6 @@ function mergeServerData(allData, portNameFilter) {
   return { bandwidth: mergedBw, status: mergedStatus, ports: mergedPorts, modemLogins, cachedServers };
 }
 
-// ==================== IP TRACKING & UPTIME TRACKING — SQLite-backed ====================
-
 const MAX_IP_HISTORY = 100;
 
 // Load IP tracking from SQLite
@@ -2154,16 +2097,16 @@ let ipTracking = {};
 try {
   const rows = db.prepare('SELECT key, ip, updated_at FROM ip_tracking').all();
   for (const r of rows) ipTracking[r.key] = { ip: r.ip, since: r.updated_at };
-  if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} IP tracking entries`);
-} catch (e) { console.error('Failed to load ip_tracking from SQLite:', e.message); }
+  if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} IP tracking entries`);
+} catch (e) { logger.error('Failed to load ip_tracking from SQLite:', e.message); }
 
 // Load uptime tracking from SQLite
 let uptimeTracking = {};
 try {
   const rows = db.prepare('SELECT key, data FROM uptime_tracking').all();
   for (const r of rows) { try { uptimeTracking[r.key] = JSON.parse(r.data); } catch (e) {} }
-  if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} uptime tracking entries`);
-} catch (e) { console.error('Failed to load uptime_tracking from SQLite:', e.message); }
+  if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} uptime tracking entries`);
+} catch (e) { logger.error('Failed to load uptime_tracking from SQLite:', e.message); }
 
 // Load IP history from SQLite (with db_id for incremental updates)
 let ipHistory = {};
@@ -2173,8 +2116,8 @@ try {
     if (!ipHistory[r.key]) ipHistory[r.key] = [];
     ipHistory[r.key].push({ db_id: r.id, ip: r.ip, from: r.started_at, to: r.ended_at || null });
   }
-  if (rows.length > 0) console.log(`[SQLite] Loaded ${rows.length} IP history entries`);
-} catch (e) { console.error('Failed to load ip_history from SQLite:', e.message); }
+  if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} IP history entries`);
+} catch (e) { logger.error('Failed to load ip_history from SQLite:', e.message); }
 
 const _ipUpsert = db.prepare('INSERT OR REPLACE INTO ip_tracking (key, ip, updated_at) VALUES (?, ?, ?)');
 const _utUpsert = db.prepare('INSERT OR REPLACE INTO uptime_tracking (key, data) VALUES (?, ?)');
@@ -2190,7 +2133,7 @@ function saveIpTracking() {
       }
     });
     batch();
-  } catch (e) { console.error('[saveIpTracking] SQLite error:', e.message); }
+  } catch (e) { logger.error('[saveIpTracking] SQLite error:', e.message); }
 }
 
 function saveUptimeTracking() {
@@ -2201,7 +2144,7 @@ function saveUptimeTracking() {
       }
     });
     batch();
-  } catch (e) { console.error('[saveUptimeTracking] SQLite error:', e.message); }
+  } catch (e) { logger.error('[saveUptimeTracking] SQLite error:', e.message); }
 }
 
 // BUG-02: Incremental saveIpHistory — only save entries without db_id (fallback/edge case)
@@ -2217,7 +2160,7 @@ function saveIpHistory() {
         }
       }
     })();
-  } catch (e) { console.error('[saveIpHistory] SQLite error:', e.message); }
+  } catch (e) { logger.error('[saveIpHistory] SQLite error:', e.message); }
 }
 
 // BUG-02: recordIpChange — direct incremental DB writes (no full rewrite)
@@ -2259,7 +2202,7 @@ async function trackModems() {
       const data = await fetchServerData(server);
       statusArr = Array.isArray(data.status) ? data.status : [];
     } catch (e) {
-      console.log(`[Tracking] Server ${server.name} unreachable: ${e.message} — marking all modems as down`);
+      logger.info(`[Tracking] Server ${server.name} unreachable: ${e.message} — marking all modems as down`);
       // Server unreachable = all its modems are down
       const todayBucket = new Date().toLocaleDateString('en-CA');
       for (const k of Object.keys(uptimeTracking)) {
@@ -2349,10 +2292,8 @@ async function trackModems() {
   saveIpTracking();
   saveUptimeTracking();
   // BUG-02: saveIpHistory() removed — recordIpChange() now does direct DB writes
-  console.log(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);
+  logger.info(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);
 }
-
-// ==================== SPEEDTEST HISTORY ====================
 
 const SPEEDTEST_HISTORY_FILE = path.join(__dirname, 'speedtest_history.json');
 const MAX_SPEEDTEST_ENTRIES = 30;
@@ -2362,7 +2303,7 @@ try {
   if (fs.existsSync(SPEEDTEST_HISTORY_FILE)) {
     speedtestHistory = JSON.parse(fs.readFileSync(SPEEDTEST_HISTORY_FILE, 'utf8'));
   }
-} catch (e) { console.error('Failed to load speedtest_history:', e.message); }
+} catch (e) { logger.error('Failed to load speedtest_history:', e.message); }
 
 function saveSpeedtestHistory() {
   safeWriteFile(SPEEDTEST_HISTORY_FILE, JSON.stringify(speedtestHistory, null, 2));
@@ -2400,11 +2341,11 @@ function pushSpeedtestEntry(key, entry) {
 
 async function runNightlySpeedtests() {
   if (speedtestRunning) {
-    console.log('[Speedtest] Already running, skipping...');
+    logger.info('[Speedtest] Already running, skipping...');
     return;
   }
   speedtestRunning = true;
-  console.log('[Speedtest] Starting speedtest run...');
+  logger.info('[Speedtest] Starting speedtest run...');
   let testedCount = 0, errorCount = 0;
 
   try {
@@ -2412,7 +2353,7 @@ async function runNightlySpeedtests() {
       try {
         const statusData = await fetchApi(server, '/apix/show_status_json');
         const modems = Array.isArray(statusData) ? statusData : [];
-        console.log(`[Speedtest] ${server.name}: ${modems.length} modems to test`);
+        logger.info(`[Speedtest] ${server.name}: ${modems.length} modems to test`);
 
         for (const m of modems) {
           const nick = m.modem_details?.NICK;
@@ -2422,7 +2363,7 @@ async function runNightlySpeedtests() {
 
           const key = server.name + '_' + imei;
           try {
-            console.log(`[Speedtest] Testing ${nick} (${server.name})...`);
+            logger.info(`[Speedtest] Testing ${nick} (${server.name})...`);
             const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
             const { dl, ul, ping } = parseSpeedtestResult(result);
 
@@ -2430,34 +2371,34 @@ async function runNightlySpeedtests() {
 
             // Re-test if DL or UL is below 1 Mbps
             if (dl < 1 || ul < 1) {
-              console.log(`[Speedtest] ${nick}: DL=${dl} UL=${ul} — near-zero detected, re-testing in 10 min...`);
+              logger.info(`[Speedtest] ${nick}: DL=${dl} UL=${ul} — near-zero detected, re-testing in 10 min...`);
               setTimeout(async () => {
                 try {
-                  console.log(`[Speedtest] Re-testing ${nick} (${server.name})...`);
+                  logger.info(`[Speedtest] Re-testing ${nick} (${server.name})...`);
                   const retryResult = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
                   const r = parseSpeedtestResult(retryResult);
                   if (r.dl + r.ul > dl + ul) {
                     pushSpeedtestEntry(key, { date: new Date().toISOString(), download: r.dl, upload: r.ul, ping: r.ping, raw: retryResult, retry: true, ...(r.dl < 1 || r.ul < 1 ? { _lowSpeed: true } : {}) });
-                    console.log(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (improved)`);
+                    logger.info(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (improved)`);
                   } else {
-                    console.log(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (not improved)`);
+                    logger.info(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (not improved)`);
                   }
-                } catch (e) { console.error(`[Speedtest] Re-test ${nick} error:`, e.message); }
+                } catch (e) { logger.error(`[Speedtest] Re-test ${nick} error:`, e.message); }
               }, 10 * 60 * 1000);
             }
 
             pushSpeedtestEntry(key, entry);
             testedCount++;
-            console.log(`[Speedtest] ${nick}: DL=${dl} UL=${ul} Ping=${ping}`);
+            logger.info(`[Speedtest] ${nick}: DL=${dl} UL=${ul} Ping=${ping}`);
           } catch (e) {
-            console.error(`[Speedtest] Error testing ${nick}:`, e.message);
+            logger.error(`[Speedtest] Error testing ${nick}:`, e.message);
             errorCount++;
           }
 
           await new Promise(r => setTimeout(r, 2000));
         }
       } catch (e) {
-        console.error(`[Speedtest] Error on server ${server.name}:`, e.message);
+        logger.error(`[Speedtest] Error on server ${server.name}:`, e.message);
         errorCount++;
       }
     }
@@ -2465,7 +2406,7 @@ async function runNightlySpeedtests() {
     speedtestRunning = false;
   }
 
-  console.log(`[Speedtest] Complete: ${testedCount} tested, ${errorCount} errors`);
+  logger.info(`[Speedtest] Complete: ${testedCount} tested, ${errorCount} errors`);
 }
 
 function getSpeedtestLatest() {
@@ -2478,8 +2419,6 @@ function getSpeedtestLatest() {
   }
   return latest;
 }
-
-// ==================== CLIENT DASHBOARD API ====================
 
 app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
   try {
@@ -2568,8 +2507,6 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
   }
 });
 
-// ==================== CLIENT: DAILY TRAFFIC HISTORY ====================
-
 app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
   const clientInfo = clientByLogin.get(req.user.login);
   if (!clientInfo) return res.status(404).json({ error: 'Client not found' });
@@ -2638,8 +2575,6 @@ app.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
   }
 });
 
-// ==================== CLIENT: BILLING HISTORY ====================
-
 app.get('/api/billing_history', authMiddleware, (req, res) => {
   const clientInfo = clientByLogin.get(req.user.login);
   if (!clientInfo) return res.status(404).json({ error: 'Client not found' });
@@ -2693,12 +2628,10 @@ app.get('/api/billing_history', authMiddleware, (req, res) => {
       avgDailyCharge7d,
       daysUntilZero: avgDailyCharge7d > 0 ? Math.floor(clientInfo.balance / avgDailyCharge7d) : null
     },
-    // OLD-01 fix: strip internal db_id from API response
+    
     entries: filtered.map(({ db_id, ...e }) => e)
   });
 });
-
-// ==================== CLIENT: IP RESET (non-admin) ====================
 
 app.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
   try {
@@ -2717,8 +2650,6 @@ app.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
   } catch (err) { res.status(502).json({ ok: false, error: 'Reset failed', details: err.message }); }
 });
 
-// ==================== CLIENT: TOKEN-BASED IP RESET (public, no session) ====================
-
 app.get('/api/client/reset_ip_by_token', resetTokenLimiter, async (req, res) => {
   const { nick, token } = req.query;
   if (!nick || !token) return res.status(400).json({ error: 'nick and token required' });
@@ -2733,8 +2664,6 @@ app.get('/api/client/reset_ip_by_token', resetTokenLimiter, async (req, res) => 
   }
   res.status(404).json({ error: 'Modem not found' });
 });
-
-// ==================== CLIENT: ROTATION LOG ====================
 
 app.get('/api/client/rotation_log', authMiddleware, async (req, res) => {
   try {
@@ -2752,8 +2681,6 @@ app.get('/api/client/rotation_log', authMiddleware, async (req, res) => {
     res.json(rows);
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
 });
-
-// ==================== CLIENT: SET ROTATION INTERVAL ====================
 
 app.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
   try {
@@ -2799,21 +2726,17 @@ app.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
     // Apply settings
     await postApi(server, '/modem/settings', { imei });
 
-    console.log(`[Rotation] Client ${req.user.login} set ${nick} rotation to ${mins} min`);
+    logger.info(`[Rotation] Client ${req.user.login} set ${nick} rotation to ${mins} min`);
     auditLog(req.user.login, 'client_set_rotation', { nick, serverName, minutes: mins, ip: getClientIp(req) });
     res.json({ ok: true, minutes: mins });
   } catch (err) { res.status(502).json({ error: 'Failed to set rotation', details: err.message }); }
 });
-
-// ==================== CLIENT: IP HISTORY ====================
 
 app.get('/api/client/ip_history', authMiddleware, (req, res) => {
   const { key } = req.query;
   if (!key) return res.status(400).json({ error: 'key required' });
   res.json(ipHistory[key] || []);
 });
-
-// ==================== CLIENT: CREDENTIALS EXPORT ====================
 
 app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
   try {
@@ -2866,8 +2789,6 @@ app.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
   } catch (err) { res.status(502).json({ error: 'Export failed', details: err.message }); }
 });
 
-// ==================== CLIENT: REFERRAL PROGRAM ====================
-
 app.get('/api/client/referral', authMiddleware, (req, res) => {
   const client = clientByLogin.get(req.user.login);
   if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -2878,8 +2799,6 @@ app.get('/api/client/referral', authMiddleware, (req, res) => {
     referrals: referrals.map(r => ({ name: r.name, createdAt: r.createdAt }))
   });
 });
-
-// ==================== CLIENT: DOCUMENTS ====================
 
 app.get('/api/client/documents', authMiddleware, (req, res) => {
   const client = clientByLogin.get(req.user.login);
@@ -2901,7 +2820,6 @@ app.get('/api/client/documents/:docId/download', authMiddleware, (req, res) => {
   fs.createReadStream(filePath).pipe(res);
 });
 
-// ==================== CORS for Public API (Bug #6) ====================
 app.use('/api/v1', (req, res, next) => {
   res.header('Access-Control-Allow-Origin', '*');
   res.header('Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS');
@@ -2912,8 +2830,6 @@ app.use('/api/v1', (req, res, next) => {
   }
   next();
 });
-
-// ==================== PUBLIC: PROXY API v2 (Evomi-style, apiKey via header or query) ====================
 
 app.get('/api/v1/proxy', async (req, res) => {
   const apiKey = req.headers['x-api-key'] || req.query.apikey;
@@ -2992,8 +2908,6 @@ app.get('/api/v1/proxy', async (req, res) => {
   }
 });
 
-// ==================== PUBLIC: PROXY API v1 (legacy, kept for backward compat) ====================
-
 app.get('/api/v1/proxies', async (req, res) => {
   const { apiKey, format } = req.query;
   if (!apiKey) return res.status(400).json({ error: 'apiKey required' });
@@ -3046,13 +2960,10 @@ app.get('/api/v1/proxies', async (req, res) => {
   }
 });
 
-// ==================== ADMIN: FULL DATA ====================
-
-// TASK-D: Cache invalidation endpoint
 app.post('/api/admin/cache/invalidate', authMiddleware, adminMiddleware, (req, res) => {
   _psCache = null;
   _psCacheTs = 0;
-  console.log('[Cache] ProxySmart cache invalidated by admin');
+  logger.info('[Cache] ProxySmart cache invalidated by admin');
   res.json({ ok: true, message: 'Cache invalidated' });
 });
 
@@ -3116,8 +3027,6 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
   res.json(byClient);
 });
 
-// ==================== ANALYTICS ENDPOINTS ====================
-
 app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req, res) => {
   const months = Math.min(parseInt(req.query.months) || 6, 12);
   const now = new Date();
@@ -3154,7 +3063,7 @@ app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req,
     }
     res.json(result);
   } catch (e) {
-    console.error('[monthly_traffic]', e.message);
+    logger.error('[monthly_traffic]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -3230,7 +3139,7 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
       matrix
     });
   } catch (e) {
-    console.error('[heatmap]', e.message);
+    logger.error('[heatmap]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -3244,7 +3153,7 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz };
     });
     // TASK-01 (SEC): serverAuth removed — credentials must never reach the frontend
-    // SEC-04: Strip passwords/hashes from client data sent to frontend
+    
     // Count modems per client from live bandwidth data
     const _clientModemCounts = {};
     for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
@@ -3257,7 +3166,7 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       return safe;
     });
     // BUG-11: billingLedger removed from bulk response — use /api/admin/clients/:id/ledger instead
-    // Sprint-4 Task 1: Compute monthly charges server-side (replaces client-side billingLedger lookup)
+    
     const clientMonthCharges = {};
     const clientMonthGb = {};
     const curMonthPfx = new Date().toISOString().slice(0, 7);
@@ -3328,8 +3237,6 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
   }
 });
 
-// ==================== ADMIN: CLIENT MANAGEMENT ====================
-
 // BUG-12: Input validation for admin routes
 function validateClientInput(body, isCreate = false) {
   if (body.name !== undefined) {
@@ -3368,7 +3275,7 @@ app.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset = Math.max(parseInt(req.query.offset) || 0, 0);
   const search = (req.query.search || '').toLowerCase().trim();
-  // SEC-04: strip sensitive fields
+  
   let filtered = clients;
   if (search) {
     filtered = clients.filter(c =>
@@ -3384,7 +3291,7 @@ app.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
   res.json({ clients: safe, total, limit, offset });
 });
 
-app.post('/api/admin/clients', authMiddleware, adminMiddleware, async (req, res) => {
+app.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCreateSchema), async (req, res) => {
   const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, address, clientType } = req.body;
   if (!name || !portName || !login || !password) {
     return res.status(400).json({ error: 'name, portName, login, password required' });
@@ -3441,13 +3348,13 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, async (req, res)
   saveClients(clients);
   rebuildClientMaps();
   users[login] = { passwordHash, portNameFilter: portName, source: 'client', clientId: client.id };
-  // SEC-04: strip sensitive fields from response
+  
   const { password: _p, passwordHash: _ph, ...safeClient } = client;
   res.json({ ok: true, client: safeClient });
 });
 
 app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res) => {
-  // TASK-10: O(1) lookup + index needed for array replacement
+  
   const old = clientById.get(req.params.id);
   if (!old) return res.status(404).json({ error: 'Client not found' });
   const idx = clients.indexOf(old);
@@ -3459,7 +3366,7 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, r
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
     delete users[old.login];
   }
-  // SEC-01: hash new password with bcrypt if changed
+  
   let newPasswordHash = old.passwordHash;
   let newPassword = old.password;
   if (password && password !== old.password) {
@@ -3492,14 +3399,14 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, r
   saveClients(clients);
   rebuildClientMaps();
   users[updated.login] = { passwordHash: updated.passwordHash, portNameFilter: updated.portName, source: 'client', clientId: updated.id };
-  // SEC-04: strip sensitive fields from response
+  
   const { password: _p, passwordHash: _ph, ...safeClient } = updated;
   res.json({ ok: true, client: safeClient });
 });
 
 // DELETE client -- with port protection
 app.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res) => {
-  // BUG-08 fix: O(1) lookup first, then find index only for splice
+  
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const idx = clients.indexOf(client);
@@ -3523,7 +3430,7 @@ app.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req
       });
     }
   } catch (e) {
-    console.warn('[DeleteClient] Could not verify ports, proceeding with deletion:', e.message);
+    logger.warn('[DeleteClient] Could not verify ports, proceeding with deletion:', e.message);
   }
 
   const removed = clients.splice(idx, 1)[0];
@@ -3535,10 +3442,8 @@ app.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req
   res.json({ ok: true });
 });
 
-// ==================== ADMIN: PAYMENTS ====================
-
-app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req, res) => {
-  // BUG-08 fix: O(1) lookup
+app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, validate(PaymentSchema), (req, res) => {
+  
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const { amount, date, note } = req.body;
@@ -3555,7 +3460,7 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
     createdAt: new Date().toISOString()
   });
 
-  // BUG-02 fix: Atomic balance + ledger in ONE transaction
+  
   const { balanceBefore, balanceAfter } = atomicCredit(client.id, parsedAmount, {
     type: 'payment',
     date: date,
@@ -3565,14 +3470,14 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, (req
     note: note || 'Пополнение баланса'
   });
 
-  // BUG-09 fix: Referral commission — O(1) lookup, round, persist to DB
+  
   if (client.referred_by) {
     const referrer = clientById.get(client.referred_by);
     if (referrer) {
       const commission = Math.round(parsedAmount * 0.15 * 100) / 100;
       referrer.referral_balance = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
       _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
-      console.log(`[Referral] Credited ${commission.toFixed(2)} to ${referrer.name} (15% of ${parsedAmount})`);
+      logger.info(`[Referral] Credited ${commission.toFixed(2)} to ${referrer.name} (15% of ${parsedAmount})`);
     }
   }
 
@@ -3613,7 +3518,7 @@ app.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req
 });
 
 app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddleware, (req, res) => {
-  // BUG-08 fix: O(1) lookup
+  
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const payIdx = parseInt(req.params.index);
@@ -3623,15 +3528,15 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
   const deletedPayment = client.payments[payIdx];
   const deletedAmount = parseFloat(deletedPayment.amount) || 0;
 
-  // OLD-03 fix: verify amount to prevent wrong-payment deletion under concurrency
+  
   const expectedAmount = parseFloat(req.query.amount || req.body?.amount);
   if (expectedAmount && Math.abs(expectedAmount - deletedAmount) > 0.01) {
     return res.status(409).json({ error: 'Payment amount mismatch — list may have changed, please refresh' });
   }
   client.payments.splice(payIdx, 1);
 
-  // BUG-02 fix: Atomic balance + ledger in ONE transaction
-  // NEW-01 fix: amount positive — type indicates the meaning of the operation
+  
+  
   const { balanceBefore, balanceAfter } = atomicDebit(client.id, deletedAmount, {
     type: 'payment_reversal',
     date: new Date().toISOString().slice(0, 10),
@@ -3645,8 +3550,6 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
   res.json({ ok: true, payments: client.payments, balance: client.balance });
 });
 
-// ==================== ADMIN: BILLING LEDGER ====================
-
 app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -3658,7 +3561,7 @@ app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, 
   res.json({
     balance: client.balance,
     last_snapshot: client.last_traffic_snapshot,
-    // OLD-01 fix: strip internal db_id from API response
+    
     entries: entries.map(({ db_id, ...e }) => e),
     total: allEntries.length,
     limit,
@@ -3666,7 +3569,6 @@ app.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, 
   });
 });
 
-// BUG-06 fix: Delete ledger entry + revert balance — point deletion, no saveClients, single auditLog
 app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -3697,21 +3599,21 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
   client.balance = recalcBalance;
 
   saveBillingLedger();
-  console.log(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, recalculated balance: ${client.balance}`);
+  logger.info(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, recalculated balance: ${client.balance}`);
   auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, clientName: client.name, entryType: entry.type, amount: entry.amount || entry.cost, ip: getClientIp(req) });
   res.json({ ok: true, newBalance: client.balance });
 });
 
-app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddleware, (req, res) => {
-  // BUG-08 fix: O(1) lookup
+app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddleware, validate(BalanceAdjustSchema), (req, res) => {
+  
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const { amount, note } = req.body;
   if (amount === undefined) return res.status(400).json({ error: 'amount required' });
 
-  // BUG-02 fix: Atomic balance + ledger in ONE transaction
-  // NEW-01 fix: ledger amount always positive — sign conveyed by credit vs debit
-  // OLD-05 fix: removed unnecessary saveClients (balance already persisted via _clientUpdateBalance)
+  
+  
+  
   const adjustment = parseFloat(amount);
   const ledgerEntry = {
     type: 'adjustment',
@@ -3731,8 +3633,6 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
   auditLog(req.user.login, 'balance_adjust', { clientId: client.id, clientName: client.name, amount: adjustment, note: note || '', ip: getClientIp(req) });
   res.json({ ok: true, balance: client.balance });
 });
-
-// ==================== ADMIN: BILLING RECONCILIATION ====================
 
 app.get('/api/admin/billing/reconciliation', authMiddleware, adminMiddleware, async (req, res) => {
   const period = req.query.period || getMoscowToday().slice(0, 7); // "YYYY-MM"
@@ -3799,16 +3699,14 @@ app.get('/api/admin/billing/reconciliation', authMiddleware, adminMiddleware, as
   res.json({ period, clients: results });
 });
 
-// ==================== ADMIN: DOCUMENTS ====================
-
 app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, async (req, res) => {
-  // TASK-10: O(1) lookup
+  
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const { name, fileBase64, mimeType } = req.body;
   if (!name || !fileBase64) return res.status(400).json({ error: 'name and fileBase64 required' });
 
-  // SEC-04: Validate file extension
+  
   const ALLOWED_EXTENSIONS = new Set(['pdf', 'docx', 'doc', 'xlsx', 'xls', 'png', 'jpg', 'jpeg']);
   const ext = (name.split('.').pop() || '').toLowerCase();
   if (!ext || !ALLOWED_EXTENSIONS.has(ext)) {
@@ -3839,7 +3737,7 @@ app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, asy
 });
 
 app.delete('/api/admin/clients/:id/document/:docId', authMiddleware, adminMiddleware, (req, res) => {
-  // TASK-10: O(1) lookup
+  
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   if (!client.documents) return res.status(404).json({ error: 'No documents' });
@@ -3853,18 +3751,14 @@ app.delete('/api/admin/clients/:id/document/:docId', authMiddleware, adminMiddle
   res.json({ ok: true });
 });
 
-// ==================== ADMIN: API KEY MANAGEMENT ====================
-
 app.post('/api/admin/clients/:id/regenerate_key', authMiddleware, adminMiddleware, (req, res) => {
-  // TASK-10: O(1) lookup
+  
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   client.apiKey = 'prx_' + crypto.randomBytes(24).toString('hex');
   saveClients(clients);
   res.json({ ok: true, apiKey: client.apiKey });
 });
-
-// ==================== ADMIN: AUDIT LOG (TASK-J) ====================
 
 app.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
@@ -3881,8 +3775,6 @@ app.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 // CRM translate endpoint removed — translations applied directly to DB
-
-// ==================== ADMIN: SETTINGS ====================
 
 app.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   res.json(appSettings);
@@ -3905,7 +3797,6 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   res.json({ ok: true, settings: appSettings });
 });
 
-// ==================== CRM PROXY (credentials stay server-side) ====================
 app.get('/api/admin/crm_token', authMiddleware, adminMiddleware, async (req, res) => {
   const crmUrl = process.env.CRM_URL || '';
   const crmEmail = process.env.CRM_EMAIL || '';
@@ -3918,7 +3809,12 @@ app.get('/api/admin/crm_token', authMiddleware, adminMiddleware, async (req, res
     const http = require('http');
     const lib = crmUrl.startsWith('https') ? https : http;
     const body = JSON.stringify({
-      query: `mutation{getLoginTokenFromCredentials(email:"${crmEmail}",password:"${crmPass}",origin:"${crmUrl}"){loginToken{token}}}`
+      query: `mutation GetToken($email: String!, $pass: String!, $origin: String!) {
+        getLoginTokenFromCredentials(email: $email, password: $pass, origin: $origin) {
+          loginToken { token }
+        }
+      }`,
+      variables: { email: crmEmail, pass: crmPass, origin: crmUrl }
     });
     const url = new URL(crmUrl + '/metadata');
     const result = await new Promise((resolve, reject) => {
@@ -3944,8 +3840,6 @@ app.get('/api/admin/crm_token', authMiddleware, adminMiddleware, async (req, res
     res.json({ error: e.message, url: crmUrl });
   }
 });
-
-// ==================== ADMIN: MODEM ACTIONS ====================
 
 app.post('/api/admin/reset_ip', authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -3991,7 +3885,7 @@ app.post('/api/admin/reboot_server', authMiddleware, adminMiddleware, async (req
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const result = await fetchApi(server, '/apix/reboot_server', 30000);
-    console.log(`[Admin] Server ${serverName} reboot requested`);
+    logger.info(`[Admin] Server ${serverName} reboot requested`);
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Reboot server failed', details: err.message }); }
 });
@@ -4018,7 +3912,7 @@ app.post('/api/admin/reset_complete', authMiddleware, adminMiddleware, async (re
         resetCount++;
       } catch (e) { /* skip failed */ }
     }
-    console.log(`[Admin] Reset complete on ${serverName}: ${resetCount}/${modems.length} modems`);
+    logger.info(`[Admin] Reset complete on ${serverName}: ${resetCount}/${modems.length} modems`);
     res.json({ ok: true, total: modems.length, reset: resetCount });
   } catch (err) { res.status(502).json({ error: 'Reset complete failed', details: err.message }); }
 });
@@ -4045,7 +3939,6 @@ app.post('/api/admin/apply_modem', authMiddleware, adminMiddleware, async (req, 
   } catch (err) { res.status(502).json({ error: 'Apply modem failed', details: err.message }); }
 });
 
-// ==================== ADMIN: ASSIGN/UNASSIGN MODEM TO CLIENT ====================
 // Changes portName on ProxySmart server via form POST to /conf/edit_port/{portID}
 function postFormApi(server, apiPath, formData, timeout = 10000) {
   return new Promise((resolve, reject) => {
@@ -4102,18 +3995,17 @@ app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req,
     };
 
     const result = await postFormApi(server, `/conf/edit_port/${portID}`, formData);
-    console.log(`[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`);
+    logger.info(`[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`);
     // Invalidate cache so changes appear immediately
     _psCache = null; _psCacheTs = 0;
     auditLog(req.user.login, 'assign_modem', { serverName, portID, newPortName, ip: getClientIp(req) });
     res.json({ ok: true });
   } catch (err) {
-    console.error('[AssignModem] Error:', err.message);
+    logger.error('[AssignModem] Error:', err.message);
     res.status(502).json({ error: 'Failed to assign modem', details: err.message });
   }
 });
 
-// ==================== EXTERNAL PROXIES ====================
 app.get('/api/admin/external_proxies', authMiddleware, adminMiddleware, (req, res) => {
   const rows = db.prepare('SELECT * FROM external_proxies ORDER BY created_at DESC').all();
   res.json(rows);
@@ -4231,7 +4123,7 @@ app.get('/api/admin/rotation_log', authMiddleware, adminMiddleware, async (req, 
       const entries = Array.isArray(result) ? result : (result?.log || result?.logs || result?.data || []);
       syncRotationLog(serverName, nick, entries);
     } catch (fetchErr) {
-      console.log(`[RotationLog] ProxySmart fetch failed for ${nick}@${serverName}: ${fetchErr.message}, serving from DB`);
+      logger.info(`[RotationLog] ProxySmart fetch failed for ${nick}@${serverName}: ${fetchErr.message}, serving from DB`);
     }
     // Always return from DB (has synced data + any previous data)
     const rows = _rlSelect.all(serverName, nick);
@@ -4284,8 +4176,6 @@ app.get('/api/admin/ip_history', authMiddleware, adminMiddleware, (req, res) => 
   }
 });
 
-// ==================== ADMIN: SMS / USSD ====================
-
 app.get('/api/admin/sms', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { imei, serverName } = req.query;
@@ -4329,8 +4219,6 @@ app.post('/api/admin/purge_sms', authMiddleware, adminMiddleware, async (req, re
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Purge SMS failed', details: err.message }); }
 });
-
-// ==================== ADMIN: PORT CRUD ====================
 
 app.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -4405,7 +4293,7 @@ app.get('/api/admin/get_port_config', authMiddleware, adminMiddleware, async (re
       IP_VERSION: extractSelected('IP_VERSION'),
     });
   } catch (err) {
-    console.error('[GetPortConfig]', err.message);
+    logger.error('[GetPortConfig]', err.message);
     res.status(502).json({ error: 'Get port config failed', details: err.message });
   }
 });
@@ -4431,7 +4319,7 @@ app.post('/api/admin/save_port_config', authMiddleware, adminMiddleware, async (
     auditLog(req.user.login, 'save_port_config', { serverName, portId, fields: Object.keys(fields), ip: getClientIp(req) });
     res.json({ ok: true, status: result.status });
   } catch (err) {
-    console.error('[SavePortConfig]', err.message);
+    logger.error('[SavePortConfig]', err.message);
     res.status(502).json({ error: 'Save port config failed', details: err.message });
   }
 });
@@ -4454,7 +4342,7 @@ app.post('/api/admin/purge_port', authMiddleware, adminMiddleware, async (req, r
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const result = await fetchApi(server, `/conf/delete_port/${encodeURIComponent(portId)}`);
-    console.log(`[Admin] Deleted port ${portId} from ${serverName} via ProxySmart`);
+    logger.info(`[Admin] Deleted port ${portId} from ${serverName} via ProxySmart`);
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Delete port failed', details: err.message }); }
 });
@@ -4469,8 +4357,6 @@ app.get('/api/admin/free_ports', authMiddleware, adminMiddleware, async (req, re
     res.json(result);
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
 });
-
-// ==================== ADMIN: BANDWIDTH ====================
 
 app.get('/api/admin/bandwidth_single', authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -4504,8 +4390,6 @@ app.post('/api/admin/reset_bandwidth', authMiddleware, adminMiddleware, async (r
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
 });
-
-// ==================== ADMIN: ANALYTICS ====================
 
 app.get('/api/admin/unique_ips', authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -4552,8 +4436,6 @@ app.get('/api/admin/shop_report', authMiddleware, adminMiddleware, async (req, r
     res.json(result);
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
 });
-
-// ==================== TOOLS: PROXY CHECKER ====================
 
 app.post('/api/tools/check_proxy', checkProxyLimiter, authMiddleware, async (req, res) => {
   const { proxies } = req.body;
@@ -4626,7 +4508,6 @@ app.post('/api/tools/check_proxy', checkProxyLimiter, authMiddleware, async (req
   res.json({ results });
 });
 
-// ==================== TOP HOSTS AGGREGATION (auto-nightly) ====================
 let topHostsCache = { data: {}, perPort: {}, updatedAt: null };
 try {
   const row = _kvGet.get('top_hosts_cache');
@@ -4640,13 +4521,13 @@ try {
       topHostsCache = JSON.parse(fs.readFileSync(TOP_HOSTS_CACHE_FILE, 'utf8'));
       if (!topHostsCache.perPort) topHostsCache.perPort = {};
       _kvSet.run('top_hosts_cache', JSON.stringify(topHostsCache));
-      console.log('[TopHosts] Migrated from top_hosts_cache.json to SQLite');
+      logger.info('[TopHosts] Migrated from top_hosts_cache.json to SQLite');
     }
   }
-} catch (e) { console.error('Failed to load top_hosts cache:', e.message); }
+} catch (e) { logger.error('Failed to load top_hosts cache:', e.message); }
 
 async function aggregateTopHosts() {
-  console.log('[TopHosts] Starting aggregation...');
+  logger.info('[TopHosts] Starting aggregation...');
   const merged = {};
   const perPort = {};
   let fetchedCount = 0;
@@ -4667,13 +4548,13 @@ async function aggregateTopHosts() {
       }
 
       const portKeys = portsResult ? Object.keys(portsResult).filter(k => k !== 'raw') : [];
-      console.log(`[TopHosts] ${server.name} list_ports_json: ${portKeys.length} IMEIs`);
+      logger.info(`[TopHosts] ${server.name} list_ports_json: ${portKeys.length} IMEIs`);
 
       let portsMap = {};
       if (portsResult && typeof portsResult === 'object' && !portsResult.raw) {
         portsMap = portsResult;
       } else if (portsResult && portsResult.raw) {
-        try { portsMap = JSON.parse(portsResult.raw); } catch(e) { console.log('[TopHosts] Failed to parse raw'); }
+        try { portsMap = JSON.parse(portsResult.raw); } catch(e) { logger.info('[TopHosts] Failed to parse raw'); }
       }
 
       const portIds = [];
@@ -4684,7 +4565,7 @@ async function aggregateTopHosts() {
           ports.forEach(p => { if (p.portID) portIds.push(p.portID); });
         }
       }
-      console.log(`[TopHosts] ${server.name}: found ${portIds.length} ports to scan`);
+      logger.info(`[TopHosts] ${server.name}: found ${portIds.length} ports to scan`);
 
       for (const portId of portIds) {
         try {
@@ -4712,7 +4593,7 @@ async function aggregateTopHosts() {
         } catch (e) { errorCount++; }
       }
     } catch (e) {
-      console.error(`[TopHosts] Error on server ${server.name}:`, e.message);
+      logger.error(`[TopHosts] Error on server ${server.name}:`, e.message);
       errorCount++;
     }
   }
@@ -4724,7 +4605,7 @@ async function aggregateTopHosts() {
     stats: { domains: Object.keys(merged).length, portsScanned: fetchedCount, errors: errorCount }
   };
   _kvSet.run('top_hosts_cache', JSON.stringify(topHostsCache));
-  console.log(`[TopHosts] Aggregation complete: ${Object.keys(merged).length} domains from ${fetchedCount} ports (${errorCount} errors), ${Object.keys(perPort).length} portNames`);
+  logger.info(`[TopHosts] Aggregation complete: ${Object.keys(merged).length} domains from ${fetchedCount} ports (${errorCount} errors), ${Object.keys(perPort).length} portNames`);
   return topHostsCache;
 }
 
@@ -4738,8 +4619,6 @@ app.post('/api/admin/top_hosts_refresh', authMiddleware, adminMiddleware, async 
     res.json({ ok: true, stats: result.stats, updatedAt: result.updatedAt });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
-
-// ==================== SCHEDULERS ====================
 
 // Dynamic speedtest scheduler (supports multiple times per day)
 let speedtestTimers = [];
@@ -4763,30 +4642,27 @@ function scheduleRepeating(hour, minute, label, fn) {
   next.setUTCHours(hour, minute, 0, 0);
   if (next <= now) next.setDate(next.getDate() + 1);
   const msUntil = next - now;
-  console.log(`[${label}] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
+  logger.info(`[${label}] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
   const entry = {};
   entry.timeout = setTimeout(() => {
-    fn().catch(e => console.error(`[${label}] Error:`, e.message));
+    fn().catch(e => logger.error(`[${label}] Error:`, e.message));
     entry.interval = setInterval(() => {
-      fn().catch(e => console.error(`[${label}] Error:`, e.message));
+      fn().catch(e => logger.error(`[${label}] Error:`, e.message));
     }, 24 * 60 * 60 * 1000);
   }, msUntil);
   speedtestTimers.push(entry);
 }
 
-// OPT-02: scheduleNightly removed — use scheduleRepeating directly
-
-// ==================== DAILY BILLING ====================
 // Single flow: fetch → save daily_traffic → charge → retry on failure
 async function runDailyBilling(retryClientIds) {
   const isRetry = Array.isArray(retryClientIds) && retryClientIds.length > 0;
-  console.log(`[Billing] Starting ${isRetry ? 'RETRY' : 'daily'} billing run...`);
+  logger.info(`[Billing] Starting ${isRetry ? 'RETRY' : 'daily'} billing run...`);
 
   let results;
   try {
     results = await fetchAllServersData();
   } catch (e) {
-    console.error('[Billing] Failed to fetch server data:', e.message);
+    logger.error('[Billing] Failed to fetch server data:', e.message);
     lastBillingRunSummary = { error: e.message, timestamp: new Date().toISOString() };
     return;
   }
@@ -4827,7 +4703,7 @@ async function runDailyBilling(retryClientIds) {
 
   for (const client of clientsToBill) {
     if (!client.portName || !client.price || client.price <= 0 || client.billingPaused) {
-      if (client.billingPaused) console.log(`[Billing] Skipping ${client.name} — billing paused`);
+      if (client.billingPaused) logger.info(`[Billing] Skipping ${client.name} — billing paused`);
       skipped++;
       continue;
     }
@@ -4838,7 +4714,7 @@ async function runDailyBilling(retryClientIds) {
       const reason = cachedServers.length > 0
         ? `cached data on [${cachedServers.join(', ')}]`
         : `only ${results.length}/${apiServers.length} servers`;
-      console.log(`[Billing] Skipping ${client.name}: ${reason}`);
+      logger.info(`[Billing] Skipping ${client.name}: ${reason}`);
       skippedClients.push(client.id);
       skipped++;
       continue;
@@ -4894,9 +4770,9 @@ async function runDailyBilling(retryClientIds) {
       });
 
       charged++;
-      console.log(`[Billing] ${client.name}: ${deltaGb}GB, ${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
+      logger.info(`[Billing] ${client.name}: ${deltaGb}GB, ${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
     } catch (e) {
-      console.error(`[Billing] Error billing ${client.name}:`, e.message);
+      logger.error(`[Billing] Error billing ${client.name}:`, e.message);
     }
   }
 
@@ -4912,18 +4788,17 @@ async function runDailyBilling(retryClientIds) {
     is_retry: isRetry
   };
 
-  console.log(`[Billing] Complete: ${charged} charged, ${skipped} skipped`);
+  logger.info(`[Billing] Complete: ${charged} charged, ${skipped} skipped`);
 
   // 3. Schedule retry if clients were skipped due to server issues (max 1 retry, not on retry runs)
   if (!isRetry && skippedClients.length > 0) {
-    console.log(`[Billing] Scheduling retry in 1 hour for ${skippedClients.length} skipped client(s)...`);
+    logger.info(`[Billing] Scheduling retry in 1 hour for ${skippedClients.length} skipped client(s)...`);
     setTimeout(() => {
-      runDailyBilling(skippedClients).catch(e => console.error('[Billing] Retry error:', e.message));
+      runDailyBilling(skippedClients).catch(e => logger.error('[Billing] Retry error:', e.message));
     }, 60 * 60 * 1000);
   }
 }
 
-// ==================== MONTHLY RECONCILIATION ====================
 // Runs on 1st of each month at 03:00 UTC (06:00 MSK), before acts generation
 async function runMonthlyReconciliation() {
   const mn = getMoscowNow();
@@ -4931,7 +4806,7 @@ async function runMonthlyReconciliation() {
 
   // Only run on 1st of month
   if (mn.getDate() !== 1) {
-    console.log('[MonthlyRecon] Not 1st of month, skipping');
+    logger.info('[MonthlyRecon] Not 1st of month, skipping');
     return;
   }
 
@@ -4940,11 +4815,11 @@ async function runMonthlyReconciliation() {
   const prevMonth = new Date(mn.getFullYear(), mn.getMonth() - 1, 1);
   const prevMonthStr = prevMonth.toLocaleDateString('en-CA').slice(0, 7); // "YYYY-MM"
   if (lastReconciliationMonth === prevMonthStr) {
-    console.log(`[MonthlyRecon] Already reconciled ${prevMonthStr}, skipping`);
+    logger.info(`[MonthlyRecon] Already reconciled ${prevMonthStr}, skipping`);
     return;
   }
 
-  console.log(`[MonthlyRecon] Starting reconciliation for ${prevMonthStr}...`);
+  logger.info(`[MonthlyRecon] Starting reconciliation for ${prevMonthStr}...`);
 
   // Refresh port mapping
   try {
@@ -4958,7 +4833,7 @@ async function runMonthlyReconciliation() {
 
     // Per-modem clients — fixed rate, just log
     if (client.billingType === 'per_modem') {
-      console.log(`[MonthlyRecon] ${client.name}: per_modem — skipped (fixed rate)`);
+      logger.info(`[MonthlyRecon] ${client.name}: per_modem — skipped (fixed rate)`);
       continue;
     }
 
@@ -4976,7 +4851,7 @@ async function runMonthlyReconciliation() {
     const diffGb = Math.round((storedGb - billedGb) * 1000) / 1000;
 
     if (diffGb <= 0.01) {
-      console.log(`[MonthlyRecon] ${client.name}: ok (stored=${storedGb}GB, billed=${billedGb}GB)`);
+      logger.info(`[MonthlyRecon] ${client.name}: ok (stored=${storedGb}GB, billed=${billedGb}GB)`);
       continue;
     }
 
@@ -5004,15 +4879,13 @@ async function runMonthlyReconciliation() {
     });
 
     corrections++;
-    console.log(`[MonthlyRecon] ${client.name}: +${diffGb}GB (+${correctionCost}₽)`);
+    logger.info(`[MonthlyRecon] ${client.name}: +${diffGb}GB (+${correctionCost}₽)`);
   }
 
   lastReconciliationMonth = prevMonthStr;
   saveClients(clients);
-  console.log(`[MonthlyRecon] Complete: ${corrections} correction(s)`);
+  logger.info(`[MonthlyRecon] Complete: ${corrections} correction(s)`);
 }
-
-// ==================== AUTO-CREATE MISSING CLIENTS ====================
 
 async function autoCreateMissingClients() {
   try {
@@ -5080,28 +4953,24 @@ async function autoCreateMissingClients() {
       clients.push(client);
       users[login] = { passwordHash, portNameFilter: pn, source: 'client', clientId: client.id };
       created++;
-      console.log(`  Auto-created client: login=${login}, portName=${pn}`);
+      logger.info(`  Auto-created client: login=${login}, portName=${pn}`);
     }
 
     if (created > 0) {
       saveClients(clients);
       rebuildClientMaps();
-      console.log(`[AutoCreate] Created ${created} new client(s)`);
+      logger.info(`[AutoCreate] Created ${created} new client(s)`);
     } else {
-      console.log('[AutoCreate] All portNames have client accounts');
+      logger.info('[AutoCreate] All portNames have client accounts');
     }
   } catch (e) {
-    console.error('[AutoCreate] Error:', e.message);
+    logger.error('[AutoCreate] Error:', e.message);
   }
 }
-
-// ==================== PAGES ====================
 
 app.get('/admin', (req, res) => {
   res.sendFile(path.join(__dirname, 'public', 'admin.html'));
 });
-
-// ==================== API DOCUMENTATION ====================
 
 app.get('/api/docs', (req, res) => {
   const baseUrl = `${req.protocol}://${req.get('host')}`;
@@ -5220,38 +5089,36 @@ app.get('/api/docs', (req, res) => {
   });
 });
 
-// ==================== TOCHKA BANK: WEBHOOK (public, no auth) ====================
-
 // Accept raw text body for webhook
 app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async (req, res) => {
-  console.log('[Tochka Webhook] Received webhook');
+  logger.info('[Tochka Webhook] Received webhook');
   try {
     // Body is JWT string
     const jwtToken = typeof req.body === 'string' ? req.body.trim() : JSON.stringify(req.body);
 
-    // SEC-02: Verify JWT signature before processing
+    
     const { verified, payload, reason } = await verifyJwtSignature(jwtToken);
     if (!payload) {
-      console.error('[Tochka Webhook] Failed to decode JWT payload');
+      logger.error('[Tochka Webhook] Failed to decode JWT payload');
       return res.status(200).json({ ok: true, processed: false, reason: 'invalid_jwt' });
     }
     if (!verified) {
-      console.warn(`[Tochka Webhook] JWT signature NOT verified (reason: ${reason}). Processing anyway with warning.`);
+      logger.warn(`[Tochka Webhook] JWT signature NOT verified (reason: ${reason}). Processing anyway with warning.`);
       // Log unverified webhooks for audit
     } else {
-      console.log('[Tochka Webhook] JWT signature verified successfully');
+      logger.info('[Tochka Webhook] JWT signature verified successfully');
     }
 
-    console.log('[Tochka Webhook] Decoded payload:', JSON.stringify(payload).slice(0, 500));
+    logger.info('[Tochka Webhook] Decoded payload:', JSON.stringify(payload).slice(0, 500));
 
     const webhookType = payload.webhookType || '';
     const payerInn = payload.SidePayer?.inn || '';
     const payerName = payload.SidePayer?.name || '';
-    // BUG-07 fix: payload.amount takes priority (top-level is the actual payment amount)
-    // TASK-09: Round amount to 2 decimal places to avoid floating-point drift
+    
+    
     const amount = Math.round(parseFloat(payload.amount || payload.SidePayer?.amount || '0') * 100) / 100;
     if (isNaN(amount) || amount <= 0 || amount > 100000000) {
-      console.warn(`[Tochka Webhook] Invalid amount: ${amount}, skipping auto-credit`);
+      logger.warn(`[Tochka Webhook] Invalid amount: ${amount}, skipping auto-credit`);
       return res.status(200).json({ ok: true, processed: false, reason: 'invalid_amount' });
     }
     const purpose = payload.purpose || '';
@@ -5259,9 +5126,9 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
     const paymentDate = payload.date || new Date().toISOString().slice(0, 10);
     const customerCode = payload.customerCode || '';
 
-    // TASK-C: Deduplicate — skip if paymentId already processed (SQLite query)
+    
     if (paymentId && dbStmts.findBankPaymentByPaymentId.get(paymentId)) {
-      console.log(`[Tochka Webhook] Duplicate paymentId=${paymentId}, skipping`);
+      logger.info(`[Tochka Webhook] Duplicate paymentId=${paymentId}, skipping`);
       return res.status(200).json({ ok: true, processed: false, reason: 'duplicate' });
     }
 
@@ -5292,7 +5159,7 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
         bankPayment.matchedClientId = matchedClient.id;
         bankPayment.matchedClientName = matchedClient.name;
 
-        // BUG-02 fix: Atomic credit + ledger in ONE transaction
+        
         {
           // Add payment record
           if (!matchedClient.payments) matchedClient.payments = [];
@@ -5316,7 +5183,7 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
             paymentId
           });
 
-          // BUG-09 fix: Referral commission — O(1) lookup, round, persist to DB
+          
           if (matchedClient.referred_by) {
             const referrer = clientById.get(matchedClient.referred_by);
             if (referrer) {
@@ -5328,10 +5195,10 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
 
           bankPayment.autoCredit = true;
           saveClients(clients);
-          console.log(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
+          logger.info(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
         }
       } else {
-        console.log(`[Tochka Webhook] Unmatched payment: INN=${payerInn}, amount=${amount}, purpose=${purpose}`);
+        logger.info(`[Tochka Webhook] Unmatched payment: INN=${payerInn}, amount=${amount}, purpose=${purpose}`);
       }
     }
 
@@ -5339,12 +5206,10 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
 
     res.status(200).json({ ok: true, processed: true, matched: bankPayment.matched });
   } catch (err) {
-    console.error('[Tochka Webhook] Error:', err.message);
+    logger.error('[Tochka Webhook] Error:', err.message);
     res.status(200).json({ ok: true, processed: false, reason: err.message });
   }
 });
-
-// ==================== TOCHKA BANK: ADMIN ENDPOINTS ====================
 
 // Save Tochka config from admin UI
 app.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res) => {
@@ -5357,7 +5222,7 @@ app.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res)
   if (companyInn !== undefined) tochkaConfig.companyInn = companyInn.trim();
   if (companyKpp !== undefined) tochkaConfig.companyKpp = companyKpp.trim();
   saveTochkaConfig();
-  console.log('[Tochka] Config updated from admin UI, jwt=' + (tochkaConfig.jwt ? 'set' : 'empty') + ', clientId=' + tochkaConfig.clientId);
+  logger.info('[Tochka] Config updated from admin UI, jwt=' + (tochkaConfig.jwt ? 'set' : 'empty') + ', clientId=' + tochkaConfig.clientId);
   res.json({ ok: true, configured: !!tochkaConfig.jwt });
 });
 
@@ -5386,7 +5251,7 @@ app.post('/api/admin/tochka/autodetect', authMiddleware, adminMiddleware, async 
       const custResult = await tochkaRequest('GET', '/uapi/open-banking/v1.0/customers');
       const cd = custResult.data?.Data || custResult.data || {};
       const customers = cd.Customer || cd.Customers || cd.customers || (Array.isArray(cd) ? cd : []);
-      console.log('[Tochka Autodetect] Customers raw:', JSON.stringify(custResult.data).slice(0, 500));
+      logger.info('[Tochka Autodetect] Customers raw:', JSON.stringify(custResult.data).slice(0, 500));
       if (Array.isArray(customers) && customers.length > 0) {
         const c = customers[0];
         results.customerCode = c.customerCode || c.CustomerCode || c.code || '';
@@ -5394,19 +5259,19 @@ app.post('/api/admin/tochka/autodetect', authMiddleware, adminMiddleware, async 
         results.companyInn = c.taxCode || c.inn || c.Inn || c.INN || '';
         results.companyKpp = c.kpp || c.Kpp || c.KPP || '';
       }
-    } catch (e) { console.log('[Tochka Autodetect] Customers error:', e.message); }
+    } catch (e) { logger.info('[Tochka Autodetect] Customers error:', e.message); }
     // 2. Get accounts list -> accountId
     try {
       const accResult = await tochkaRequest('GET', '/uapi/open-banking/v1.0/accounts');
       const ad = accResult.data?.Data || accResult.data || {};
       const accounts = ad.Account || ad.Accounts || ad.accounts || (Array.isArray(ad) ? ad : []);
-      console.log('[Tochka Autodetect] Accounts raw:', JSON.stringify(accResult.data).slice(0, 500));
+      logger.info('[Tochka Autodetect] Accounts raw:', JSON.stringify(accResult.data).slice(0, 500));
       if (Array.isArray(accounts) && accounts.length > 0) {
         const rub = accounts.find(a => (a.currency === 'RUB' || a.Currency === 'RUB')) || accounts[0];
         results.accountId = rub.accountId || rub.AccountId || rub.resourceId || '';
         if (!results.customerCode && rub.customerCode) results.customerCode = rub.customerCode;
       }
-    } catch (e) { console.log('[Tochka Autodetect] Accounts error:', e.message); }
+    } catch (e) { logger.info('[Tochka Autodetect] Accounts error:', e.message); }
     // Save detected values
     if (results.customerCode) tochkaConfig.customerCode = results.customerCode;
     if (results.accountId) tochkaConfig.accountId = results.accountId;
@@ -5414,7 +5279,7 @@ app.post('/api/admin/tochka/autodetect', authMiddleware, adminMiddleware, async 
     if (results.companyInn) tochkaConfig.companyInn = results.companyInn;
     if (results.companyKpp) tochkaConfig.companyKpp = results.companyKpp;
     saveTochkaConfig();
-    console.log('[Tochka Autodetect] Results:', JSON.stringify(results));
+    logger.info('[Tochka Autodetect] Results:', JSON.stringify(results));
     res.json({ ok: true, detected: results });
   } catch (err) {
     res.status(502).json({ error: 'Ошибка автоопределения', details: err.message });
@@ -5434,7 +5299,7 @@ app.post('/api/admin/tochka/register_webhook', authMiddleware, adminMiddleware, 
       webhookUrl,
       webhookType: 'incomingPayment'
     });
-    console.log('[Tochka] Webhook registered:', JSON.stringify(result.data));
+    logger.info('[Tochka] Webhook registered:', JSON.stringify(result.data));
     res.json({ ok: true, result: result.data });
   } catch (err) {
     res.status(502).json({ error: 'Failed to register webhook', details: err.message });
@@ -5451,7 +5316,7 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
   const from = dateFrom || '2024-01-01';
   const to = dateTo || new Date().toISOString().slice(0, 10);
 
-  console.log(`[Tochka Sync] Requesting statement ${from} — ${to}`);
+  logger.info(`[Tochka Sync] Requesting statement ${from} — ${to}`);
 
   try {
     // Step 1: Init Statement
@@ -5470,11 +5335,11 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
       || initResult.data?.statementId;
 
     if (!statementId) {
-      console.log('[Tochka Sync] Init response:', JSON.stringify(initResult.data));
+      logger.info('[Tochka Sync] Init response:', JSON.stringify(initResult.data));
       return res.status(502).json({ error: 'Не удалось создать выписку', details: initResult.data });
     }
 
-    console.log(`[Tochka Sync] Statement initiated: ${statementId}`);
+    logger.info(`[Tochka Sync] Statement initiated: ${statementId}`);
 
     // Step 2: Poll for Ready status (max 30 seconds)
     let statement = null;
@@ -5484,7 +5349,7 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
         `/uapi/open-banking/v1.0/accounts/${tochkaConfig.accountId}/statements/${statementId}`);
       const stData = getResult.data?.Data?.Statement?.[0] || getResult.data?.Data?.Statement || getResult.data;
       const status = stData?.status || stData?.Status || '';
-      console.log(`[Tochka Sync] Poll #${attempt + 1}: status=${status}`);
+      logger.info(`[Tochka Sync] Poll #${attempt + 1}: status=${status}`);
       if (status === 'Ready' || status === 'ready') {
         statement = stData;
         break;
@@ -5497,7 +5362,7 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
 
     // Step 3: Extract transactions
     const transactions = statement.Transaction || statement.transactions || [];
-    console.log(`[Tochka Sync] Got ${transactions.length} transactions`);
+    logger.info(`[Tochka Sync] Got ${transactions.length} transactions`);
 
     let imported = 0, matched = 0, skipped = 0;
     let loggedSample = false;
@@ -5508,11 +5373,11 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
       if (indicator !== 'Credit' && indicator !== 'credit') continue;
 
       if (!loggedSample) {
-        console.log('[Tochka Sync] Sample credit transaction:', JSON.stringify(tx).slice(0, 1500));
+        logger.info('[Tochka Sync] Sample credit transaction:', JSON.stringify(tx).slice(0, 1500));
         loggedSample = true;
       }
 
-      // TASK-08: Round amount to 2 decimal places
+      
       const amount = Math.round(parseFloat(tx.Amount?.amount || tx.amount || 0) * 100) / 100;
       // DebtorParty = плательщик (кто платит нам), CreditorParty = получатель
       const debtor = tx.DebtorParty || tx.CounterParty || tx.SidePayer || {};
@@ -5551,7 +5416,7 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
           bankPayment.matchedClientId = client.id;
           bankPayment.matchedClientName = client.name;
 
-          // BUG-02 fix: Atomic credit + ledger in ONE transaction
+          
           atomicCredit(client.id, amount, {
             type: 'bank_payment',
             amount: Math.round(amount * 100) / 100,
@@ -5574,11 +5439,11 @@ app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, 
       saveClients(clients);
     }
 
-    console.log(`[Tochka Sync] Done: ${imported} imported, ${matched} matched, ${skipped} skipped (duplicates)`);
+    logger.info(`[Tochka Sync] Done: ${imported} imported, ${matched} matched, ${skipped} skipped (duplicates)`);
     res.json({ ok: true, total: transactions.length, imported, matched, skipped });
 
   } catch (err) {
-    console.error('[Tochka Sync] Error:', err.message);
+    logger.error('[Tochka Sync] Error:', err.message);
     res.status(502).json({ error: 'Ошибка синхронизации', details: err.message });
   }
 });
@@ -5596,7 +5461,7 @@ app.get('/api/admin/tochka/payments', authMiddleware, adminMiddleware, (req, res
 // Dismiss unmatched payments (hide them)
 app.post('/api/admin/tochka/dismiss_unmatched', authMiddleware, adminMiddleware, (req, res) => {
   const result = dbStmts.dismissAllUnmatched.run();
-  console.log(`[Tochka] Dismissed ${result.changes} unmatched payments`);
+  logger.info(`[Tochka] Dismissed ${result.changes} unmatched payments`);
   res.json({ ok: true, dismissed: result.changes });
 });
 
@@ -5617,11 +5482,11 @@ app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (re
   const bpRow = dbStmts.getBankPaymentById.get(paymentId);
   if (!bpRow) return res.status(404).json({ error: 'Payment not found' });
   const bp = bankPaymentFromRow(bpRow);
-  // BUG-08 fix: O(1) lookup
+  
   const client = clientById.get(clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
-  // BUG-02 fix: Atomic credit + ledger in ONE transaction
+  
   const amount = bp.amount;
 
   if (!client.payments) client.payments = [];
@@ -5652,8 +5517,6 @@ app.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (re
   res.json({ ok: true, balance: client.balance });
 });
 
-// ==================== TOCHKA BANK: CLOSING DOCUMENTS ====================
-
 // Create closing document (Акт выполненных работ)
 app.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (req, res) => {
   const { clientId, period, items } = req.body;
@@ -5662,7 +5525,7 @@ app.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async 
   const client = clientById.get(clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
-  // TASK-06: Use shared helper for act items
+  
   let actItems = items;
   if (!actItems || actItems.length === 0) {
     ({ actItems } = buildActItemsFromLedger(client, period));
@@ -5679,12 +5542,12 @@ app.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async 
       const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/closing-documents', actData);
       if (result.status === 200 && result.data?.Data?.documentId) {
         tochkaDocumentId = result.data.Data.documentId;
-        console.log(`[Tochka] Created act ${tochkaDocumentId} for ${client.name}, period ${period}`);
+        logger.info(`[Tochka] Created act ${tochkaDocumentId} for ${client.name}, period ${period}`);
       } else {
-        console.error('[Tochka] Create act response:', JSON.stringify(result.data));
+        logger.error('[Tochka] Create act response:', JSON.stringify(result.data));
       }
     } catch (err) {
-      console.error('[Tochka] Create act error:', err.message);
+      logger.error('[Tochka] Create act error:', err.message);
     }
   }
 
@@ -5802,7 +5665,7 @@ app.delete('/api/admin/clients/:id/closing_document/:docId', authMiddleware, adm
   if (doc.tochkaDocumentId && tochkaConfig.jwt) {
     try {
       await tochkaRequest('DELETE', `/uapi/invoice/v1.0/closing-documents/${tochkaConfig.customerCode}/${doc.tochkaDocumentId}`);
-    } catch (e) { console.warn('[Tochka] Delete doc error:', e.message); }
+    } catch (e) { logger.warn('[Tochka] Delete doc error:', e.message); }
   }
 
   client.closingDocuments.splice(docIdx, 1);
@@ -5855,7 +5718,7 @@ app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, asy
     }
 
     try {
-      // TASK-06: Use shared helper
+      
       const { actItems, totalCost } = buildActItemsFromLedger(client, period);
       if (totalCost <= 0) { skipped++; continue; }
 
@@ -5869,7 +5732,7 @@ app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, asy
           if (result.status === 200 && result.data?.Data?.documentId) {
             tochkaDocumentId = result.data.Data.documentId;
           }
-        } catch (e) { console.error(`[Tochka BulkActs] API error for ${client.name}:`, e.message); }
+        } catch (e) { logger.error(`[Tochka BulkActs] API error for ${client.name}:`, e.message); }
       }
 
       const docId = crypto.randomBytes(8).toString('hex');
@@ -5887,7 +5750,7 @@ app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, asy
       });
       generated++;
       results.push({ client: client.name, status: 'created', amount: totalCost });
-      console.log(`[Tochka BulkActs] Created act for ${client.name}: ${totalCost} RUB (period ${period})`);
+      logger.info(`[Tochka BulkActs] Created act for ${client.name}: ${totalCost} RUB (period ${period})`);
     } catch (e) {
       errors++;
       results.push({ client: client.name, status: 'error', error: e.message });
@@ -5898,8 +5761,6 @@ app.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, asy
   auditLog(req.user.login, 'generate_acts', { period: period || 'auto', generated, skipped, errors, ip: getClientIp(req) });
   res.json({ ok: true, generated, skipped, errors, results });
 });
-
-// ==================== TOCHKA BANK: BILLS (СЧЕТА НА ОПЛАТУ) ====================
 
 // Create bill for a client
 app.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (req, res) => {
@@ -5914,7 +5775,7 @@ app.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async
   const billPeriod = period || now.toISOString().slice(0, 7);
   let serverData = [];
   if (!manualAmount) {
-    try { serverData = await fetchAllServersDataCached(); } catch (e) { console.error('[Bills] fetchAllServersData error:', e.message); }
+    try { serverData = await fetchAllServersDataCached(); } catch (e) { logger.error('[Bills] fetchAllServersData error:', e.message); }
   }
   let amount = manualAmount || calculateMonthlyBillAmount(client, serverData);
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Cannot calculate bill amount (no charges found)' });
@@ -5929,12 +5790,12 @@ app.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async
       const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
       if (result.status === 200 && result.data?.Data?.documentId) {
         tochkaBillId = result.data.Data.documentId;
-        console.log(`[Tochka] Created bill ${tochkaBillId} for ${client.name}, amount ${amount}`);
+        logger.info(`[Tochka] Created bill ${tochkaBillId} for ${client.name}, amount ${amount}`);
       } else {
-        console.error('[Tochka] Create bill response:', JSON.stringify(result.data));
+        logger.error('[Tochka] Create bill response:', JSON.stringify(result.data));
       }
     } catch (err) {
-      console.error('[Tochka] Create bill error:', err.message);
+      logger.error('[Tochka] Create bill error:', err.message);
     }
   }
 
@@ -5966,7 +5827,7 @@ app.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, as
   let generated = 0, skipped = 0, errors = 0;
   const results = [];
   let serverData = [];
-  try { serverData = await fetchAllServersDataCached(); } catch (e) { console.error('[Bills] fetchAllServersData error:', e.message); }
+  try { serverData = await fetchAllServersDataCached(); } catch (e) { logger.error('[Bills] fetchAllServersData error:', e.message); }
 
   for (const client of clients) {
     if (!client.inn) { skipped++; continue; }
@@ -5985,10 +5846,10 @@ app.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, as
         if (result.status === 200 && result.data?.Data?.documentId) {
           tochkaBillId = result.data.Data.documentId;
         } else {
-          console.error(`[Tochka] Bill error for ${client.name}:`, JSON.stringify(result.data));
+          logger.error(`[Tochka] Bill error for ${client.name}:`, JSON.stringify(result.data));
         }
       } catch (err) {
-        console.error(`[Tochka] Bill error for ${client.name}:`, err.message);
+        logger.error(`[Tochka] Bill error for ${client.name}:`, err.message);
       }
     }
 
@@ -6074,7 +5935,7 @@ app.delete('/api/admin/clients/:id/bill/:billId', authMiddleware, adminMiddlewar
   if (bill.tochkaBillId && tochkaConfig.jwt) {
     try {
       await tochkaRequest('DELETE', `/uapi/invoice/v1.0/bills/${tochkaConfig.customerCode}/${bill.tochkaBillId}`);
-    } catch (e) { console.error('[Tochka] Delete bill error:', e.message); }
+    } catch (e) { logger.error('[Tochka] Delete bill error:', e.message); }
   }
   client.bills.splice(idx, 1);
   saveClients(clients);
@@ -6117,7 +5978,6 @@ app.get('/api/client/bills/:billId/pdf', authMiddleware, async (req, res) => {
   }
 });
 
-// ==================== TOCHKA: AUTO-GENERATE ACTS (1st of month) ====================
 async function autoGenerateMonthlyActs() {
   const now = new Date();
   const moscowDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
@@ -6135,7 +5995,7 @@ async function autoGenerateMonthlyActs() {
   // Prevent duplicate generation
   if (lastActGenerationMonth === period) return;
 
-  console.log(`[Tochka AutoActs] Generating acts for period ${period}...`);
+  logger.info(`[Tochka AutoActs] Generating acts for period ${period}...`);
   let generated = 0;
 
   for (const client of clients) {
@@ -6151,7 +6011,7 @@ async function autoGenerateMonthlyActs() {
     if ((client.closingDocuments || []).some(d => d.period === period)) continue;
 
     try {
-      // TASK-06: Use shared helper
+      
       const { actItems, totalCost } = buildActItemsFromLedger(client, period);
 
       // Try Tochka API
@@ -6164,7 +6024,7 @@ async function autoGenerateMonthlyActs() {
           if (result.status === 200 && result.data?.Data?.documentId) {
             tochkaDocumentId = result.data.Data.documentId;
           }
-        } catch (e) { console.error(`[Tochka AutoActs] API error for ${client.name}:`, e.message); }
+        } catch (e) { logger.error(`[Tochka AutoActs] API error for ${client.name}:`, e.message); }
       }
 
       const docId = crypto.randomBytes(8).toString('hex');
@@ -6181,20 +6041,19 @@ async function autoGenerateMonthlyActs() {
         contractInfo: client.contractInfo || ''
       });
       generated++;
-      console.log(`[Tochka AutoActs] Created act for ${client.name}: ${totalCost} RUB`);
+      logger.info(`[Tochka AutoActs] Created act for ${client.name}: ${totalCost} RUB`);
     } catch (e) {
-      console.error(`[Tochka AutoActs] Error for ${client.name}:`, e.message);
+      logger.error(`[Tochka AutoActs] Error for ${client.name}:`, e.message);
     }
   }
 
   if (generated > 0) {
     saveClients(clients);
-    console.log(`[Tochka AutoActs] Generated ${generated} acts for ${period}`);
+    logger.info(`[Tochka AutoActs] Generated ${generated} acts for ${period}`);
   }
   lastActGenerationMonth = period;
 }
 
-// ==================== TOCHKA: AUTO-GENERATE BILLS (1st of month) ====================
 async function autoGenerateMonthlyBills() {
   const now = new Date();
   const moscowDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
@@ -6210,10 +6069,10 @@ async function autoGenerateMonthlyBills() {
   // Prevent duplicate generation
   if (lastBillGenerationMonth === currentPeriod) return;
 
-  console.log(`[Tochka AutoBills] Generating bills for period ${currentPeriod}...`);
+  logger.info(`[Tochka AutoBills] Generating bills for period ${currentPeriod}...`);
   let generated = 0;
   let serverData = [];
-  try { serverData = await fetchAllServersData(); } catch (e) { console.error('[AutoBills] fetchAllServersData error:', e.message); }
+  try { serverData = await fetchAllServersData(); } catch (e) { logger.error('[AutoBills] fetchAllServersData error:', e.message); }
 
   for (const client of clients) {
     // Skip clients with autoBills disabled
@@ -6228,7 +6087,7 @@ async function autoGenerateMonthlyBills() {
     try {
       const amount = calculateMonthlyBillAmount(client, serverData);
       if (amount <= 0) {
-        console.log(`[Tochka AutoBills] Skipping ${client.name}: amount is 0`);
+        logger.info(`[Tochka AutoBills] Skipping ${client.name}: amount is 0`);
         continue;
       }
 
@@ -6244,7 +6103,7 @@ async function autoGenerateMonthlyBills() {
             tochkaBillId = result.data.Data.documentId;
           }
         } catch (e) {
-          console.error(`[Tochka AutoBills] API error for ${client.name}:`, e.message);
+          logger.error(`[Tochka AutoBills] API error for ${client.name}:`, e.message);
         }
       }
 
@@ -6261,20 +6120,19 @@ async function autoGenerateMonthlyBills() {
         billDate
       });
       generated++;
-      console.log(`[Tochka AutoBills] Created bill for ${client.name}: ${amount} RUB`);
+      logger.info(`[Tochka AutoBills] Created bill for ${client.name}: ${amount} RUB`);
     } catch (e) {
-      console.error(`[Tochka AutoBills] Error for ${client.name}:`, e.message);
+      logger.error(`[Tochka AutoBills] Error for ${client.name}:`, e.message);
     }
   }
 
   if (generated > 0) {
     saveClients(clients);
-    console.log(`[Tochka AutoBills] Generated ${generated} bills for ${currentPeriod}`);
+    logger.info(`[Tochka AutoBills] Generated ${generated} bills for ${currentPeriod}`);
   }
   lastBillGenerationMonth = currentPeriod;
 }
 
-// ==================== JSON fallback for unknown API routes (Bug #5) ====================
 app.use('/api', (req, res) => {
   res.status(404).json({
     success: false,
@@ -6283,7 +6141,7 @@ app.use('/api', (req, res) => {
 });
 
 const httpServer = app.listen(PORT, () => {
-  console.log(`Proxies.Rent Dashboard running at http://localhost:${PORT}`);
+  logger.info(`Proxies.Rent Dashboard running at http://localhost:${PORT}`);
 
   // Schedule speedtests (configurable times, default 02:00 + 14:00)
   rescheduleSpeedtests();
@@ -6293,30 +6151,30 @@ const httpServer = app.listen(PORT, () => {
 
   // Start modem tracking (IP + uptime) — every 5 min
   const TRACKING_INTERVAL_MS = 3 * 60 * 1000;
-  console.log(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
-  trackModems().catch(e => console.error('[Tracking] Initial error:', e.message));
+  logger.info(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
+  trackModems().catch(e => logger.error('[Tracking] Initial error:', e.message));
   _intervals.push(setInterval(() => {
-    trackModems().catch(e => console.error('[Tracking] Error:', e.message));
+    trackModems().catch(e => logger.error('[Tracking] Error:', e.message));
   }, TRACKING_INTERVAL_MS));
 
   // Sync yesterday traffic — every 60 min (data changes once per day at local midnight)
   const DAILY_SYNC_INTERVAL_MS = 60 * 60 * 1000;
-  syncYesterdayTraffic().catch(e => console.error('[DailySync] Initial error:', e.message));
+  syncYesterdayTraffic().catch(e => logger.error('[DailySync] Initial error:', e.message));
   _intervals.push(setInterval(() => {
-    syncYesterdayTraffic().catch(e => console.error('[DailySync] Error:', e.message));
+    syncYesterdayTraffic().catch(e => logger.error('[DailySync] Error:', e.message));
   }, DAILY_SYNC_INTERVAL_MS));
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {
-    console.log('[TopHosts] No cached data, running initial aggregation...');
-    aggregateTopHosts().catch(e => console.error('[TopHosts] Initial error:', e.message));
+    logger.info('[TopHosts] No cached data, running initial aggregation...');
+    aggregateTopHosts().catch(e => logger.error('[TopHosts] Initial error:', e.message));
   }
 
   // Auto-create client accounts for all portNames that don't have one
-  autoCreateMissingClients().catch(e => console.error('[AutoCreate] Error:', e.message));
+  autoCreateMissingClients().catch(e => logger.error('[AutoCreate] Error:', e.message));
   // Re-check every 10 minutes so new portNames get accounts without restart
   _intervals.push(setInterval(() => {
-    autoCreateMissingClients().catch(e => console.error('[AutoCreate] Error:', e.message));
+    autoCreateMissingClients().catch(e => logger.error('[AutoCreate] Error:', e.message));
   }, 10 * 60 * 1000));
 
   // Nightly DB cleanup at 00:30 UTC — remove old data
@@ -6326,8 +6184,8 @@ const httpServer = app.listen(PORT, () => {
       const metaDel = _metaCleanup.run();
       const rotDel = _rotLogCleanup.run();
       const total = htDel.changes + metaDel.changes + rotDel.changes;
-      if (total > 0) console.log(`[DbCleanup] Removed ${total} old rows (hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes})`);
-    } catch (e) { console.error('[DbCleanup] Error:', e.message); }
+      if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes})`);
+    } catch (e) { logger.error('[DbCleanup] Error:', e.message); }
   });
 
   // Schedule daily billing at 01:00 UTC (04:00 MSK, 4h after ProxySmart midnight reset)
@@ -6349,10 +6207,10 @@ const httpServer = app.listen(PORT, () => {
     next.setMinutes(5, 0, 0);
     if (next <= now) next.setHours(next.getHours() + 1);
     const msUntil = next - now;
-    console.log(`[HourlyAgg] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
+    logger.info(`[HourlyAgg] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
     setTimeout(() => {
-      aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg]', e.message));
-      setInterval(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg]', e.message)), 60 * 60 * 1000);
+      aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg]', e.message));
+      setInterval(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg]', e.message)), 60 * 60 * 1000);
     }, msUntil);
   })();
 
@@ -6360,17 +6218,17 @@ const httpServer = app.listen(PORT, () => {
   // This ensures that after restart, we quickly have baseline snapshots for the next hourly run
   const snapshotCount = Object.keys(hourlyDaySnapshots).length;
   if (snapshotCount === 0) {
-    console.log('[HourlyAgg] No snapshots found — running startup warmup (now, +5min, +10min)');
+    logger.info('[HourlyAgg] No snapshots found — running startup warmup (now, +5min, +10min)');
     // Immediate: just capture snapshots (aggregateHourlyTraffic will set them even if no increments computed)
-    setTimeout(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg:warmup]', e.message)), 15000);
+    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:warmup]', e.message)), 15000);
     // +5 min: now we have baseline snapshots, can compute first increments
-    setTimeout(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg:warmup+5]', e.message)), 5 * 60 * 1000);
+    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:warmup+5]', e.message)), 5 * 60 * 1000);
     // +10 min: second catch-up pass
-    setTimeout(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg:warmup+10]', e.message)), 10 * 60 * 1000);
+    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:warmup+10]', e.message)), 10 * 60 * 1000);
   } else {
-    console.log(`[HourlyAgg] Restored ${snapshotCount} snapshots — running catch-up in 30s`);
+    logger.info(`[HourlyAgg] Restored ${snapshotCount} snapshots — running catch-up in 30s`);
     // Snapshots survived restart — run once quickly to capture any missed hour
-    setTimeout(() => aggregateHourlyTraffic().catch(e => console.error('[HourlyAgg:catchup]', e.message)), 30000);
+    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:catchup]', e.message)), 30000);
   }
 
   // Billing catch-up: if last snapshot is older than 26 hours, run now
@@ -6388,18 +6246,15 @@ const httpServer = app.listen(PORT, () => {
         }
       }
       if (needsCatchup) {
-        console.log('[Billing] Catch-up: missed billing detected, running now...');
+        logger.info('[Billing] Catch-up: missed billing detected, running now...');
         await runDailyBilling();
       }
     } catch (e) {
-      console.error('[Billing] Catch-up error:', e.message);
+      logger.error('[Billing] Catch-up error:', e.message);
     }
   })();
 });
 
-
-
-// ==================== CRM PAYMENT TRACKING ====================
 const CRM_DB_URL = process.env.CRM_DB_URL || '';
 const CRM_WS = process.env.CRM_WORKSPACE || 'workspace_1wekp8bkkvyv4c57kfv5uljgp';
 
@@ -6423,7 +6278,7 @@ async function checkCrmPaymentConfirmations() {
         `UPDATE "${CRM_WS}".opportunity SET "lastPaymentDate" = $1, "nextPaymentDate" = $2, "paymentConfirmed" = false, "updatedAt" = $1 WHERE id = $3`,
         [now.toISOString(), nextPayment.toISOString(), deal.id]
       );
-      console.log(`[CRM] Payment confirmed for deal "${deal.name}": next payment ${nextPayment.toISOString().slice(0, 10)}`);
+      logger.info(`[CRM] Payment confirmed for deal "${deal.name}": next payment ${nextPayment.toISOString().slice(0, 10)}`);
     }
 
     // Find deals with nextPaymentDate within 3 days — log reminder
@@ -6438,10 +6293,10 @@ async function checkCrmPaymentConfirmations() {
     );
 
     if (upcoming.rows.length > 0) {
-      console.log(`[CRM] Payment reminders (due within 3 days):`);
+      logger.info(`[CRM] Payment reminders (due within 3 days):`);
       for (const deal of upcoming.rows) {
         const dueDate = new Date(deal.nextPaymentDate).toISOString().slice(0, 10);
-        console.log(`  - ${deal.company_name || deal.name}: ${deal.amount || '?'} RUB, due ${dueDate}`);
+        logger.info(`  - ${deal.company_name || deal.name}: ${deal.amount || '?'} RUB, due ${dueDate}`);
       }
     }
 
@@ -6450,7 +6305,7 @@ async function checkCrmPaymentConfirmations() {
     if (pgClient) try { await pgClient.end(); } catch (_) {}
     // pg module might not be installed — skip silently
     if (e.code !== 'MODULE_NOT_FOUND') {
-      console.error('[CRM] Payment check error:', e.message);
+      logger.error('[CRM] Payment check error:', e.message);
     }
   }
 }
@@ -6461,36 +6316,35 @@ _intervals.push(setInterval(() => {
   checkCrmPaymentConfirmations().catch(() => {});
 }, 10 * 60 * 1000));
 
-// ==================== GRACEFUL SHUTDOWN ====================
 function gracefulShutdown(signal) {
-  console.log(`\n[Shutdown] Received ${signal}, shutting down gracefully...`);
+  logger.info(`\n[Shutdown] Received ${signal}, shutting down gracefully...`);
 
-  // TASK-13: Clear all intervals to prevent memory leaks
+  
   for (const iv of _intervals) clearInterval(iv);
   _intervals.length = 0;
 
   // Stop accepting new connections
   httpServer.close(() => {
-    console.log('[Shutdown] HTTP server closed');
+    logger.info('[Shutdown] HTTP server closed');
   });
 
   // Wait for pending writes to complete, then close DB and exit
   const allPending = Array.from(_fileLocks.values());
   Promise.all(allPending)
     .then(() => {
-      try { db.close(); console.log('[Shutdown] SQLite database closed'); } catch (e) {}
-      console.log('[Shutdown] All writes complete. Bye!');
+      try { db.close(); logger.info('[Shutdown] SQLite database closed'); } catch (e) {}
+      logger.info('[Shutdown] All writes complete. Bye!');
       process.exit(0);
     })
     .catch((e) => {
       try { db.close(); } catch (_) {}
-      console.error('[Shutdown] Error during cleanup:', e.message);
+      logger.error('[Shutdown] Error during cleanup:', e.message);
       process.exit(1);
     });
 
   // Force exit after 10 seconds if writes don't complete
   setTimeout(() => {
-    console.error('[Shutdown] Forced exit after timeout');
+    logger.error('[Shutdown] Forced exit after timeout');
     process.exit(1);
   }, 10000).unref();
 }

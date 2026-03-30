@@ -262,3 +262,10 @@ CREATE INDEX IF NOT EXISTS idx_ledger_client_date ON billing_ledger(client_id, d
 CREATE INDEX IF NOT EXISTS idx_bank_matched ON bank_payments(matched_client_id);
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_operator ON traffic_hourly(operator, hour_start);
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_client ON traffic_hourly(client_name, hour_start);
+
+-- Migrations tracking
+CREATE TABLE IF NOT EXISTS _migrations (
+  id         INTEGER PRIMARY KEY AUTOINCREMENT,
+  name       TEXT UNIQUE NOT NULL,
+  applied_at TEXT DEFAULT (datetime('now'))
+);
