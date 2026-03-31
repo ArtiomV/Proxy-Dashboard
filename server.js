@@ -1037,6 +1037,53 @@ async function syncYesterdayTraffic() {
   }
 }
 
+// Post-correction: scale hourly data to match daily_traffic totals
+// Fixes gaps from restarts, missed hours, or stale snapshots
+function correctHourlyFromDaily(dateStr) {
+  try {
+    // dateStr = 'YYYY-MM-DD' in MSK
+    // Convert to UTC range: MSK 00:00 = UTC (dateStr-1) 21:00, MSK 23:59 = UTC dateStr 20:59
+    const utcStart = new Date(new Date(dateStr + 'T00:00:00Z').getTime() - 3 * 3600 * 1000)
+      .toISOString().slice(0, 16).replace('T', ' ');
+    const utcEnd = new Date(new Date(dateStr + 'T23:59:59Z').getTime() - 3 * 3600 * 1000)
+      .toISOString().slice(0, 16).replace('T', ' ');
+
+    // Get daily_traffic total for this date
+    const dtRows = db.prepare("SELECT port_name, bytes_in, bytes_out FROM daily_traffic WHERE date = ?").all(dateStr);
+    if (!dtRows.length) return;
+    const dailyTotal = dtRows.reduce((s, r) => s + r.bytes_in + r.bytes_out, 0);
+    if (dailyTotal === 0) return;
+
+    // Get hourly total for this MSK date
+    const htRow = db.prepare(
+      "SELECT SUM(bytes_in + bytes_out) as total FROM traffic_hourly WHERE hour_start >= ? AND hour_start <= ?"
+    ).get(utcStart, utcEnd);
+    const hourlyTotal = htRow?.total || 0;
+
+    if (hourlyTotal === 0) return; // No hourly data at all — can't scale
+    const ratio = dailyTotal / hourlyTotal;
+
+    // Only correct if deviation > 5%
+    if (ratio > 0.95 && ratio < 1.05) return;
+
+    // Scale all hourly entries for this date
+    const entries = db.prepare(
+      "SELECT id, bytes_in, bytes_out FROM traffic_hourly WHERE hour_start >= ? AND hour_start <= ?"
+    ).all(utcStart, utcEnd);
+
+    db.transaction(() => {
+      for (const e of entries) {
+        db.prepare("UPDATE traffic_hourly SET bytes_in = ?, bytes_out = ? WHERE id = ?")
+          .run(Math.round(e.bytes_in * ratio), Math.round(e.bytes_out * ratio), e.id);
+      }
+    })();
+
+    logger.info(`[HourlyCorrection] ${dateStr}: scaled ${entries.length} entries by ${ratio.toFixed(3)} (daily=${Math.round(dailyTotal/1073741824)}GB, hourly was ${Math.round(hourlyTotal/1073741824)}GB)`);
+  } catch (e) {
+    logger.error(`[HourlyCorrection] Error for ${dateStr}:`, e.message);
+  }
+}
+
 function saveDailyTraffic() {
   try {
     const batch = db.transaction(() => {
@@ -1066,6 +1113,7 @@ function loadHourlySnapshots() {
   } catch (e) {}
 }
 loadHourlySnapshots();
+let _hourlySnapshotStale = true; // After restart, first run only updates snapshots without writing to DB
 
 async function aggregateHourlyTraffic() {
   try {
@@ -1127,7 +1175,9 @@ async function aggregateHourlyTraffic() {
           const dayIn  = parseBwToBytes(b.bandwidth_bytes_day_in);
           const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
           const snap = hourlyDaySnapshots[snapKey];
-          if (snap) {
+          // After restart: first pass only refreshes snapshots, doesn't write to DB
+          // This prevents bogus increments from stale snapshots
+          if (!_hourlySnapshotStale && snap) {
             if (snap.date === todayStr) {
               const incIn  = Math.max(0, dayIn  - snap.in);
               const incOut = Math.max(0, dayOut - snap.out);
@@ -1149,7 +1199,12 @@ async function aggregateHourlyTraffic() {
     });
     batch();
     saveHourlySnapshots();
-    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
+    if (_hourlySnapshotStale) {
+      _hourlySnapshotStale = false;
+      logger.info(`[HourlyAgg] Snapshots refreshed after restart (${Object.keys(hourlyDaySnapshots).length} ports), next run will record data`);
+    } else {
+      logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
+    }
   } catch (e) {
     logger.error('[HourlyAgg] Error:', e.message);
   }
@@ -6367,6 +6422,12 @@ const httpServer = app.listen(PORT, () => {
 
   // Schedule daily billing at 01:00 UTC (04:00 MSK, 4h after ProxySmart midnight reset)
   scheduleRepeating(1, 0, 'DailyBilling', runDailyBilling);
+
+  // Post-correct hourly data at 01:30 UTC (04:30 MSK) — after daily sync + billing
+  scheduleRepeating(1, 30, 'HourlyCorrection', async () => {
+    const yesterday = getMoscowYesterday();
+    correctHourlyFromDaily(yesterday);
+  });
 
   // Monthly reconciliation at 03:30 UTC (06:30 MSK) on 1st of month — after TopHosts, before acts
   scheduleRepeating(3, 30, 'MonthlyReconciliation', runMonthlyReconciliation);
