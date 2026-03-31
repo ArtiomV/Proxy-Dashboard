@@ -990,7 +990,12 @@ try {
 
 const _dtUpsert = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
 // daily_traffic never cleaned — needed for long-term trend charts
-const _htUpsert = db.prepare('INSERT OR REPLACE INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
+// Accumulating upsert: if row exists for this port+hour, ADD to existing bytes (not replace)
+const _htUpsert = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(port_id, hour_start) DO UPDATE SET
+    bytes_in = bytes_in + excluded.bytes_in,
+    bytes_out = bytes_out + excluded.bytes_out`);
 const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
 const _metaCleanup = db.prepare("DELETE FROM modem_meta WHERE updated_at < datetime('now', '-30 days')");
 const _rotLogCleanup = db.prepare("DELETE FROM rotation_log WHERE started_at < datetime('now', '-90 days')");
