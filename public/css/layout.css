@@ -196,7 +196,7 @@
   .acc-period-btn{padding:4px 10px;font-size:10px;min-height:36px}
   .acc-period-group{flex-wrap:wrap}
   /* Analytics cards */
-  .analytics-section{padding:6px 8px}
+  .analytics-section{padding:6px 8px!important}
   .analytics-card{padding:10px;border-radius:8px}
   /* Toasts above bottom nav */
   .toast-container{bottom:72px!important}
@@ -229,8 +229,7 @@
   input[style*="width:1"],input[style*="width:8"]{max-width:100%!important}
   /* Country group in modems tab */
   .country-group{overflow-x:auto;-webkit-overflow-scrolling:touch}
-  /* Padding reduction */
-  .analytics-section{padding:6px!important}
+  /* Padding reduction — merged into .analytics-section above */
   div[style*="padding:14px 24px"]{padding:10px 12px!important}
   div[style*="padding:0 24px"]{padding:0 12px!important}
   /* Bank/analytics content area */

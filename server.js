@@ -3820,7 +3820,7 @@ app.get('/api/admin/billing/reconciliation', authMiddleware, adminMiddleware, as
     if (trafficDays.size === 0 && billingDays.size > 0) status = 'missing_traffic';
 
     // Find missing days (traffic recorded but no charge)
-    const missingDays = [...trafficDays].filter(d => !billingDays.has(d)).sort();
+    const missingDays = [...trafficDays].filter(d => !billingDays.has(d)).sort((a, b) => a.localeCompare(b));
 
     results.push({
       client_id: client.id,
@@ -3860,8 +3860,11 @@ app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, asy
   }
 
   const docId = generateId();
-  const fileName = `${docId}.${ext}`;
+  const safeExt = ext.replace(/[^a-zA-Z0-9]/g, '');
+  const fileName = `${docId}.${safeExt}`;
   const filePath = path.join(DOCUMENTS_DIR, fileName);
+  // Prevent path traversal
+  if (!filePath.startsWith(DOCUMENTS_DIR)) return res.status(400).json({ error: 'Invalid file path' });
 
   await fsPromises.writeFile(filePath, Buffer.from(fileBase64, 'base64'));
 
@@ -3885,8 +3888,9 @@ app.delete('/api/admin/clients/:id/document/:docId', authMiddleware, adminMiddle
   const docIdx = client.documents.findIndex(d => d.id === req.params.docId);
   if (docIdx === -1) return res.status(404).json({ error: 'Document not found' });
   const doc = client.documents[docIdx];
-  // Delete file
-  try { fs.unlinkSync(path.join(DOCUMENTS_DIR, doc.fileName)); } catch (e) {}
+  // Delete file (with path traversal protection)
+  const delPath = path.join(DOCUMENTS_DIR, path.basename(doc.fileName));
+  if (delPath.startsWith(DOCUMENTS_DIR)) { try { fs.unlinkSync(delPath); } catch (e) {} }
   client.documents.splice(docIdx, 1);
   saveClients(clients);
   res.json({ ok: true });
