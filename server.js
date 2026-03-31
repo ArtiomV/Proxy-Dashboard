@@ -1073,7 +1073,7 @@ function correctHourlyFromDaily(dateStr) {
 
     db.transaction(() => {
       for (const e of entries) {
-        db.prepare("UPDATE traffic_hourly SET bytes_in = ?, bytes_out = ? WHERE id = ?")
+        db.prepare("UPDATE traffic_hourly SET bytes_in = ?, bytes_out = ?, corrected = 1 WHERE id = ?")
           .run(Math.round(e.bytes_in * ratio), Math.round(e.bytes_out * ratio), e.id);
       }
     })();
@@ -3250,7 +3250,7 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
     const matrix = dateList.map(() => new Array(24).fill(0));
 
     // Build SQL filter based on view type — all filtering is on per-modem columns
-    let sql = "SELECT strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as day, CAST(strftime('%H', datetime(hour_start, '+3 hours')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE hour_start >= ?";
+    let sql = "SELECT strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as day, CAST(strftime('%H', datetime(hour_start, '+3 hours')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes, MAX(corrected) as corrected FROM traffic_hourly WHERE hour_start >= ?";
     const params = [utcFetchStartShifted];
 
     if (idKey !== 'all') {
@@ -3278,10 +3278,12 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
     sql += ' GROUP BY day, hour ORDER BY day, hour';
     const rows = db.prepare(sql).all(...params);
     let hasData = false;
+    const correctedCells = dateList.map(() => new Array(24).fill(false));
     for (const r of rows) {
       const di = dateList.indexOf(r.day);
       if (di >= 0 && r.hour >= 0 && r.hour < 24) {
         matrix[di][r.hour] = r.bytes / 1073741824;
+        if (r.corrected) correctedCells[di][r.hour] = true;
         hasData = true;
       }
     }
@@ -3292,7 +3294,7 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
       return { date, label: DAYS_RU[d.getDay()], dateShort: date.slice(5) };
     });
     res.json({
-      meta: { id, days: dateList, day_meta: dayMeta, has_hourly: hasData },
+      meta: { id, days: dateList, day_meta: dayMeta, has_hourly: hasData, corrected: correctedCells },
       matrix
     });
   } catch (e) {

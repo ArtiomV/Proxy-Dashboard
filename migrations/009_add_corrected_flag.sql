@@ -1,0 +1,1 @@
+ALTER TABLE traffic_hourly ADD COLUMN corrected INTEGER DEFAULT 0;
