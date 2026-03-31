@@ -18,6 +18,7 @@ const ClientCreateSchema = z.object({
   clientType: z.enum(['legal', 'individual']).default('legal'),
   autoActs: z.boolean().default(true),
   autoBills: z.boolean().default(true),
+  referred_by: z.string().max(20).optional(),
 });
 
 const ClientUpdateSchema = ClientCreateSchema.partial().extend({

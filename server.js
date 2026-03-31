@@ -131,7 +131,9 @@ function safeWriteFile(filePath, data) {
       try { await fsPromises.unlink(tmp); } catch (_) {}
       logger.error(`[safeWriteFile] Error writing ${path.basename(filePath)}:`, e.message);
     }
-  }).catch(() => {});
+  }).catch(() => {}).finally(() => {
+    if (_fileLocks.get(filePath) === next) _fileLocks.delete(filePath);
+  });
   _fileLocks.set(filePath, next);
   return next;
 }
@@ -554,11 +556,15 @@ function auditLog(adminLogin, action, details = {}) {
   }
 }
 
+const TRUSTED_PROXIES = (process.env.TRUSTED_PROXY || '127.0.0.1,::1').split(',').map(s => s.trim());
 function getClientIp(req) {
-  return (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
-    || req.headers['x-real-ip']
-    || req.socket?.remoteAddress
-    || 'unknown';
+  const remote = req.socket?.remoteAddress || '';
+  const isTrusted = TRUSTED_PROXIES.some(p => remote.includes(p));
+  if (isTrusted) {
+    return (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
+      || req.headers['x-real-ip'] || remote || 'unknown';
+  }
+  return remote || 'unknown';
 }
 
 const TOCHKA_CONFIG_FILE = path.join(__dirname, 'tochka_config.json');
@@ -857,7 +863,7 @@ function buildActItemsFromLedger(client, period) {
     });
   }
   if (modemCharges.length > 0) {
-    const modemCount = new Set(modemCharges.map(e => e.note || '')).size || 1;
+    const modemCount = Math.max(...modemCharges.map(e => e.modem_count || 0)) || 1;
     actItems.push({
       name: 'Услуги мобильных прокси (аренда модемов)',
       quantity: modemCount,
@@ -936,7 +942,10 @@ function calculateMonthlyBillAmount(client, cachedResults) {
         }
       }
     }
-    if (modemCount === 0) modemCount = 1; // fallback
+    if (modemCount === 0) {
+      logger.warn(`[Bill] Cannot determine modemCount for ${client.name}, skipping`);
+      return 0;
+    }
     baseAmount = client.price * modemCount;
   } else {
     // per_gb: sum charges from previous month
@@ -981,7 +990,7 @@ try {
 
 const _dtUpsert = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
 // daily_traffic never cleaned — needed for long-term trend charts
-const _htUpsert = db.prepare('INSERT OR REPLACE INTO traffic_hourly (server_name, nick, operator, client_name, hour_start, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?, ?)');
+const _htUpsert = db.prepare('INSERT OR REPLACE INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
 const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
 const _metaCleanup = db.prepare("DELETE FROM modem_meta WHERE updated_at < datetime('now', '-30 days')");
 const _rotLogCleanup = db.prepare("DELETE FROM rotation_log WHERE started_at < datetime('now', '-90 days')");
@@ -1011,8 +1020,8 @@ async function syncYesterdayTraffic() {
           if (yIn > 0 || yOut > 0) {
             // Skip if yesterday data already exists and today's data is identical (ProxySmart hasn't reset yet)
             const todayStr = localNow.toISOString().slice(0, 10);
-            const existingToday = dailyTraffic[key] && dailyTraffic[key][todayStr];
-            if (existingToday && existingToday.in === yIn && existingToday.out === yOut) continue;
+            const existingYesterday = dailyTraffic[key] && dailyTraffic[key][yesterdayStr];
+            if (existingYesterday && existingYesterday.in === yIn && existingYesterday.out === yOut) continue;
             _dtUpsert.run(key, yesterdayStr, yIn, yOut);
             if (!dailyTraffic[key]) dailyTraffic[key] = {};
             dailyTraffic[key][yesterdayStr] = { in: yIn, out: yOut, portName: b.portName };
@@ -1111,17 +1120,26 @@ async function aggregateHourlyTraffic() {
           const opMap = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
           const operator = opMap[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
           const clientName = info.clientName || b.portName || '';
-          const snapKey = srv + '_' + nick;
+          // Use srv_portId as snapshot and DB key (unique across servers)
+          const fullPortId = srv + '_' + portId;
+          const snapKey = fullPortId;
 
           const dayIn  = parseBwToBytes(b.bandwidth_bytes_day_in);
           const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
           const snap = hourlyDaySnapshots[snapKey];
-          if (snap && snap.date === todayStr) {
-            const incIn  = Math.max(0, dayIn  - snap.in);
-            const incOut = Math.max(0, dayOut - snap.out);
-            if (incIn + incOut > 0) {
-              _htUpsert.run(srv, nick, operator, clientName, hourStart, incIn, incOut);
-              count++;
+          if (snap) {
+            if (snap.date === todayStr) {
+              const incIn  = Math.max(0, dayIn  - snap.in);
+              const incOut = Math.max(0, dayOut - snap.out);
+              if (incIn + incOut > 0) {
+                _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut);
+                count++;
+              }
+            } else {
+              if (dayIn + dayOut > 0) {
+                _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, dayIn, dayOut);
+                count++;
+              }
             }
           }
           hourlyDaySnapshots[snapKey] = { in: dayIn, out: dayOut, date: todayStr };
@@ -1725,6 +1743,14 @@ function getHttpLib(url) {
   return url.protocol === 'https:' ? https : http;
 }
 
+// Manual billing trigger
+app.post('/api/admin/run_billing', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    await runDailyBilling();
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 function fetchApi(server, apiPath, timeout = 10000) {
   return new Promise((resolve, reject) => {
     const url = new URL(apiPath, server.url);
@@ -1738,6 +1764,10 @@ function fetchApi(server, apiPath, timeout = 10000) {
       let data = '';
       proxyRes.on('data', chunk => data += chunk);
       proxyRes.on('end', () => {
+        if (proxyRes.statusCode >= 400) {
+          reject(new Error(`${server.name} HTTP ${proxyRes.statusCode}: ${data.slice(0, 200)}`));
+          return;
+        }
         try { resolve(JSON.parse(data)); }
         catch (e) { resolve({ raw: data }); }
       });
@@ -1787,6 +1817,10 @@ function postApi(server, apiPath, body, timeout = 10000) {
       let data = '';
       proxyRes.on('data', chunk => data += chunk);
       proxyRes.on('end', () => {
+        if (proxyRes.statusCode >= 400) {
+          reject(new Error(`${server.name} HTTP ${proxyRes.statusCode}: ${data.slice(0, 200)}`));
+          return;
+        }
         try { resolve(JSON.parse(data)); }
         catch (e) { resolve({ raw: data }); }
       });
@@ -1864,6 +1898,11 @@ function getCachedDataAsOffline(serverName) {
 
 const modemRotationCache = {}; // { "S1:IMEI" -> minutes }
 let rotationCacheUpdatedAt = 0;
+// Load persisted rotation cache
+try {
+  const _rcRow = _kvGet.get('rotation_cache');
+  if (_rcRow) { Object.assign(modemRotationCache, JSON.parse(_rcRow.value)); logger.info(`[Rotation] Restored ${Object.keys(modemRotationCache).length} cached rotation values`); }
+} catch (e) {}
 const ROTATION_CACHE_TTL = 30 * 60 * 1000; // refresh every 30 min (settings rarely change)
 
 async function refreshRotationCache() {
@@ -1896,6 +1935,7 @@ async function refreshRotationCache() {
   rotationCacheUpdatedAt = Date.now();
   const total = Object.keys(modemRotationCache).length;
   logger.info(`[Rotation] Total cached: ${total} modem rotation values`);
+  try { _kvSet.run('rotation_cache', JSON.stringify(modemRotationCache)); } catch (e) {}
 }
 
 // Inject AUTO_IP_ROTATION into status data
@@ -3024,6 +3064,68 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
       }
     }
   }
+  // If detail=modems, also return per-modem (per-nick) breakdown
+  if (req.query.detail === 'modems') {
+    const byModem = {};
+    // Build portId → nick mapping from known modems + status
+    // Build portId→nick from known_modems.json (reliable) + live status (fresh)
+    const portIdToNick = {};
+    const portIdToClientName = {};
+    // known_modems.json: { "S1": { "portXXX": { nick, portName } }, "S2": { ... } }
+    for (const srv in knownModems) {
+      for (const portId in knownModems[srv]) {
+        const info = knownModems[srv][portId];
+        if (info.nick) portIdToNick[srv + '_' + portId] = info.nick;
+        if (info.portName) portIdToClientName[srv + '_' + portId] = info.portName;
+      }
+    }
+    // Override with live status (may have newer nicks)
+    for (const data of results) {
+      const statusArr = Array.isArray(data.status) ? data.status : [];
+      const portsMap = data.ports || {};
+      for (const m of statusArr) {
+        const md = m.modem_details || {};
+        const imei = md.IMEI;
+        const nick = md.NICK || imei;
+        if (!imei) continue;
+        const modemPorts = portsMap[imei] || [];
+        for (const p of modemPorts) {
+          portIdToNick[p.portID] = nick;
+          if (p.portName) portIdToClientName[p.portID] = p.portName;
+        }
+      }
+    }
+    // Historical from dailyTraffic — group by nick+portName (one modem can serve multiple clients)
+    for (const [portId, days] of Object.entries(dailyTraffic)) {
+      const nick = portIdToNick[portId] || portId.replace(/^S\d+_port/, '');
+      const pn = portIdToClientName[portId] || (Object.values(days)[0] && Object.values(days)[0].portName) || pnMap[portId] || '';
+      const srv = portIdToServer[portId] || '';
+      const modemKey = nick + (pn ? ':' + pn : '');
+      if (!byModem[modemKey]) byModem[modemKey] = { portName: pn, server: srv, nick: nick, days: {} };
+      for (const [date, entry] of Object.entries(days)) {
+        if (!byModem[modemKey].days[date]) byModem[modemKey].days[date] = 0;
+        byModem[modemKey].days[date] += (entry.in || 0) + (entry.out || 0);
+      }
+    }
+    // Today's live (bw keys already prefixed in merged data: S1_portXXX)
+    const todayStr2 = new Date().toISOString().slice(0, 10);
+    for (const data of results) {
+      if (typeof data.bw !== 'object') continue;
+      for (const [portId, b] of Object.entries(data.bw)) {
+        const nick = portIdToNick[portId] || portId;
+        const pn2 = b.portName || portIdToClientName[portId] || '';
+        const modemKey2 = nick + (pn2 ? ':' + pn2 : '');
+        const dayIn = parseBwToBytes(b.bandwidth_bytes_day_in);
+        const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
+        if (dayIn + dayOut > 0) {
+          if (!byModem[modemKey2]) byModem[modemKey2] = { portName: pn2, server: data.serverName, nick: nick, days: {} };
+          if (!byModem[modemKey2].days[todayStr2]) byModem[modemKey2].days[todayStr2] = 0;
+          byModem[modemKey2].days[todayStr2] += dayIn + dayOut;
+        }
+      }
+    }
+    return res.json({ clients: byClient, modems: byModem });
+  }
   res.json(byClient);
 });
 
@@ -3140,6 +3242,48 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
     });
   } catch (e) {
     logger.error('[heatmap]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Per-port heatmap for a specific modem (nick)
+app.get('/api/analytics/modem_heatmap', authMiddleware, async (req, res) => {
+  const { nick, serverName } = req.query;
+  if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
+  const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+  try {
+    const now2 = new Date();
+    const mskNow = new Date(now2.getTime() + 3 * 3600 * 1000);
+    const dateList = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate() - i));
+      dateList.push(d.toISOString().slice(0, 10));
+    }
+    const startDate = dateList[0];
+    const utcStart = new Date(new Date(startDate + 'T00:00:00Z').getTime() - 3 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+
+    // Get all ports for this modem
+    const ports = db.prepare("SELECT DISTINCT port_id, client_name FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ?").all(nick, serverName, utcStart);
+
+    const result = {};
+    for (const p of ports) {
+      const portLabel = p.client_name || p.port_id;
+      const matrix = dateList.map(() => new Array(24).fill(0));
+      const rows = db.prepare("SELECT strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as day, CAST(strftime('%H', datetime(hour_start, '+3 hours')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE port_id = ? AND hour_start >= ? GROUP BY day, hour").all(p.port_id, utcStart);
+      for (const r of rows) {
+        const di = dateList.indexOf(r.day);
+        if (di >= 0 && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
+      }
+      result[portLabel] = { portId: p.port_id, clientName: p.client_name, matrix };
+    }
+
+    const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    const dayMeta = dateList.map(date => {
+      const d = new Date(date + 'T00:00:00');
+      return { date, label: DAYS_RU[d.getDay()] };
+    });
+    res.json({ nick, serverName, days: dateList, day_meta: dayMeta, ports: result });
+  } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
@@ -3296,9 +3440,7 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientC
   if (!name || !portName || !login || !password) {
     return res.status(400).json({ error: 'name, portName, login, password required' });
   }
-  // BUG-12: Validate input
-  const valErr = validateClientInput(req.body, true);
-  if (valErr) return res.status(400).json({ error: valErr });
+  // Validation handled by zod middleware (validate(ClientCreateSchema))
   if (users[login]) {
     return res.status(400).json({ error: 'Login already exists: ' + login });
   }
@@ -3528,9 +3670,9 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
   const deletedPayment = client.payments[payIdx];
   const deletedAmount = parseFloat(deletedPayment.amount) || 0;
 
-  
+  // Require amount confirmation to prevent race condition with index shifts
   const expectedAmount = parseFloat(req.query.amount || req.body?.amount);
-  if (expectedAmount && Math.abs(expectedAmount - deletedAmount) > 0.01) {
+  if (!expectedAmount || Math.abs(expectedAmount - deletedAmount) > 0.01) {
     return res.status(409).json({ error: 'Payment amount mismatch — list may have changed, please refresh' });
   }
   client.payments.splice(payIdx, 1);
@@ -3588,8 +3730,7 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
   // Recalculate balance from scratch using all remaining ledger entries
   let recalcBalance = 0;
   for (const e of entries) {
-    const isCredit = ['payment', 'bank_payment', 'credit', 'manual_credit', 'adjustment_credit'].includes(e.type)
-      || (e.type === 'adjustment' && (e.amount || 0) > 0);
+    const isCredit = ['payment', 'bank_payment', 'credit', 'manual_credit', 'adjustment_credit', 'adjustment'].includes(e.type);
     const amt = e.amount || e.cost || 0;
     if (isCredit) recalcBalance += amt;
     else recalcBalance -= amt;
@@ -3616,7 +3757,7 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
   
   const adjustment = parseFloat(amount);
   const ledgerEntry = {
-    type: 'adjustment',
+    type: adjustment >= 0 ? 'adjustment_credit' : 'adjustment_debit',
     date: new Date().toISOString().slice(0, 10),
     timestamp: new Date().toISOString(),
     amount: Math.abs(adjustment),
@@ -3953,7 +4094,7 @@ function postFormApi(server, apiPath, formData, timeout = 10000) {
         'Content-Type': 'application/x-www-form-urlencoded',
         'Content-Length': Buffer.byteLength(postData)
       },
-      timeout, rejectUnauthorized: false
+      timeout
     }, (proxyRes) => {
       let data = '';
       proxyRes.on('data', chunk => data += chunk);
@@ -4229,6 +4370,23 @@ app.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, r
     const result = await postApi(server, '/crud/store_port', portData);
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Store port failed', details: err.message }); }
+});
+
+// Move port to a different modem (change IMEI assignment)
+app.post('/api/admin/move_port', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { serverName, portID, newIMEI } = req.body;
+    if (!serverName || !portID || !newIMEI) return res.status(400).json({ error: 'serverName, portID, newIMEI required' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+    // Store port with new IMEI
+    const storeResult = await postApi(server, '/crud/store_port', { IMEI: newIMEI, portID });
+    // Apply changes
+    const applyResult = await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portID)}`);
+    auditLog(req.user.login, 'move_port', { serverName, portID, newIMEI, ip: getClientIp(req) });
+    invalidateCache();
+    res.json({ ok: true, storeResult, applyResult });
+  } catch (err) { res.status(502).json({ error: 'Move port failed', details: err.message }); }
 });
 
 // Update proxy credentials (login/password) for an existing port
@@ -4632,11 +4790,12 @@ function rescheduleSpeedtests() {
   for (const timeStr of times) {
     const parts = timeStr.split(':').map(Number);
     if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) continue;
-    scheduleRepeating(parts[0], parts[1], 'Speedtest-' + timeStr, runNightlySpeedtests);
+    scheduleRepeating(parts[0], parts[1], 'Speedtest-' + timeStr, runNightlySpeedtests, true);
   }
 }
 
-function scheduleRepeating(hour, minute, label, fn) {
+const _cronTimers = []; // Non-speedtest cron timers (billing, reconciliation, etc.)
+function scheduleRepeating(hour, minute, label, fn, isSpeedtest) {
   const now = new Date();
   const next = new Date();
   next.setUTCHours(hour, minute, 0, 0);
@@ -4650,12 +4809,22 @@ function scheduleRepeating(hour, minute, label, fn) {
       fn().catch(e => logger.error(`[${label}] Error:`, e.message));
     }, 24 * 60 * 60 * 1000);
   }, msUntil);
-  speedtestTimers.push(entry);
+  if (isSpeedtest) speedtestTimers.push(entry);
+  else _cronTimers.push(entry);
 }
 
 // Single flow: fetch → save daily_traffic → charge → retry on failure
 async function runDailyBilling(retryClientIds) {
   const isRetry = Array.isArray(retryClientIds) && retryClientIds.length > 0;
+  // Guard: prevent double billing for same date
+  const yesterdayCheck = getMoscowYesterday();
+  if (!isRetry) {
+    const existingCharge = db.prepare("SELECT id FROM billing_ledger WHERE date = ? AND type = 'charge' LIMIT 1").get(yesterdayCheck);
+    if (existingCharge) {
+      logger.warn(`[Billing] Already billed for ${yesterdayCheck}, skipping to prevent double charge`);
+      return;
+    }
+  }
   logger.info(`[Billing] Starting ${isRetry ? 'RETRY' : 'daily'} billing run...`);
 
   let results;
@@ -4932,7 +5101,7 @@ async function autoCreateMissingClients() {
         name: pn,
         portName: pn,
         login: login,
-        password: password,
+        password: null,
         passwordHash: passwordHash,
         contact: '',
         notes: 'Auto-created from portName',
@@ -4940,14 +5109,19 @@ async function autoCreateMissingClients() {
         price: autoPrice,
         currency: 'RUB',
         payments: [],
+        documents: [],
+        closingDocuments: [],
+        bills: [],
         apiKey: 'prx_' + crypto.randomBytes(24).toString('hex'),
         referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
         referred_by: null,
         referral_balance: 0,
         resetToken: crypto.randomBytes(16).toString('hex'),
-        documents: [],
         balance: 0,
         last_traffic_snapshot: { timestamp: null, month_bytes: 0 },
+        inn: '', kpp: '', legalName: '', contractInfo: '', address: '',
+        autoActs: true, autoBills: true, billingPaused: false,
+        clientType: 'legal',
         createdAt: new Date().toISOString()
       };
       clients.push(client);
@@ -5103,11 +5277,10 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
       return res.status(200).json({ ok: true, processed: false, reason: 'invalid_jwt' });
     }
     if (!verified) {
-      logger.warn(`[Tochka Webhook] JWT signature NOT verified (reason: ${reason}). Processing anyway with warning.`);
-      // Log unverified webhooks for audit
-    } else {
-      logger.info('[Tochka Webhook] JWT signature verified successfully');
+      logger.error(`[Tochka Webhook] JWT NOT verified: ${reason}. REJECTING payment.`);
+      return res.status(200).json({ ok: true, processed: false, reason });
     }
+    logger.info('[Tochka Webhook] JWT signature verified successfully');
 
     logger.info('[Tochka Webhook] Decoded payload:', JSON.stringify(payload).slice(0, 500));
 
@@ -6322,6 +6495,7 @@ function gracefulShutdown(signal) {
   
   for (const iv of _intervals) clearInterval(iv);
   _intervals.length = 0;
+  for (const t of speedtestTimers.concat(_cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }
 
   // Stop accepting new connections
   httpServer.close(() => {

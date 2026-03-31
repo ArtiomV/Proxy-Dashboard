@@ -229,21 +229,23 @@ CREATE TABLE IF NOT EXISTS modem_meta (
 );
 CREATE INDEX IF NOT EXISTS idx_modem_meta_nick ON modem_meta(nick);
 
--- Hourly traffic per modem
+-- Hourly traffic per port (bandwidth entry)
 CREATE TABLE IF NOT EXISTS traffic_hourly (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   server_name TEXT NOT NULL DEFAULT '',
+  port_id     TEXT NOT NULL DEFAULT '',
   nick        TEXT NOT NULL DEFAULT '',
   operator    TEXT NOT NULL DEFAULT '',
   client_name TEXT NOT NULL DEFAULT '',
   hour_start  TEXT NOT NULL,     -- '2026-03-29 14:00'
   bytes_in    INTEGER DEFAULT 0,
   bytes_out   INTEGER DEFAULT 0,
-  UNIQUE(server_name, nick, hour_start)
+  UNIQUE(port_id, hour_start)
 );
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_hour ON traffic_hourly(hour_start);
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_srv ON traffic_hourly(server_name, hour_start);
-CREATE INDEX IF NOT EXISTS idx_traffic_hourly_nick ON traffic_hourly(nick, hour_start);
+CREATE INDEX IF NOT EXISTS idx_traffic_hourly_nick2 ON traffic_hourly(nick, hour_start);
+CREATE INDEX IF NOT EXISTS idx_traffic_hourly_client ON traffic_hourly(client_name, hour_start);
 
 -- Daily traffic (replaces daily_traffic.json)
 CREATE TABLE IF NOT EXISTS daily_traffic (

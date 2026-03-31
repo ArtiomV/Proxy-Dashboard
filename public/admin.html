@@ -173,9 +173,13 @@
             <select id="dailyServerFilter" onchange="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
               <option value="all">Все страны</option>
             </select>
-            <select id="dailyModeFilter" onchange="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
+            <select id="dailyModeFilter" onchange="onDailyModeChange()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
               <option value="countries">По странам</option>
               <option value="clients">По клиентам</option>
+              <option value="modems">По модемам</option>
+            </select>
+            <select id="dailyClientFilter" onchange="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px;display:none">
+              <option value="all">Все клиенты</option>
             </select>
           </div>
         </div>
@@ -339,6 +343,7 @@
       <div class="modal-tab" data-tab="iphistory" onclick="switchTab('iphistory',this)">История IP</div>
       <div class="modal-tab" data-tab="speed" onclick="switchTab('speed',this)">История скорости</div>
       <div class="modal-tab" data-tab="hosts" onclick="switchTab('hosts',this)">Домены</div>
+      <div class="modal-tab" data-tab="traffic" onclick="switchTab('traffic',this)">Трафик</div>
       <div class="modal-tab" data-tab="sim" onclick="switchTab('sim',this)">SMS & USSD</div>
       <div class="modal-tab" data-tab="settings" onclick="switchTab('settings',this)">Настройки</div>
     </div>
@@ -604,6 +609,50 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
     body.innerHTML=sh;
     loadSpeedHistory(m.server+'_'+m.rawImei)}
   else if(tab==='hosts'){var port=m.ports[0];if(!port){body.innerHTML='-';return}body.innerHTML='<div style="color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/top_hosts?portId='+encodeURIComponent((port.portID||'').replace(/^S[12]_/,''))+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=[];if(Array.isArray(data))entries=data;else{for(var k in data){if(typeof data[k]!=='object')entries.push({host:k,count:data[k]})}}entries.sort(function(a,b){return(b.count||0)-(a.count||0)});if(!entries.length){body.innerHTML='Нет данных';return}var maxCnt=entries[0]?(entries[0].count||1):1;var h='<table class="res-table"><thead><tr><th style="width:24px">#</th><th>Домен</th><th style="width:60px">Кат.</th><th style="width:150px">Запросов</th><th style="width:55px">Кол-во</th></tr></thead><tbody>';entries.forEach(function(e,i){var cat=categorize(e.host||'');var pw=pct(e.count||0,maxCnt);h+='<tr><td style="color:var(--text-3);font-size:10px">'+(i+1)+'</td><td class="domain" title="'+esc(e.host||'')+'">'+esc(e.host||'')+'</td><td style="font-size:9px;color:var(--text-3)">'+cat.substring(0,6)+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="count-bar" style="width:'+pw+'%"></div></div></td><td style="font-family:monospace;font-size:10px;color:var(--text-0)">'+(e.count||'-')+'</td></tr>'});body.innerHTML=h+'</tbody></table>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'})}
+  else if(tab==='traffic'){
+    body.innerHTML='<div style="color:var(--text-3);text-align:center;padding:20px">Загрузка тепловой карты...</div>';
+    fetch(API+'/api/analytics/modem_heatmap?nick='+encodeURIComponent(m.nick)+'&serverName='+encodeURIComponent(m.server)+'&days=7',{headers:{'X-Auth-Token':authToken}})
+    .then(function(r){return r.json()})
+    .then(function(data){
+      if(!data.ports||!Object.keys(data.ports).length){body.innerHTML='<div style="color:var(--text-3);text-align:center;padding:20px">Нет данных за 7 дней</div>';return;}
+      var days=data.days||[],dm=data.day_meta||[];
+      var DAYS_RU=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+      var h='';
+      for(var portLabel in data.ports){
+        var portData=data.ports[portLabel];
+        var mat=portData.matrix;
+        var maxV=0;mat.forEach(function(row){row.forEach(function(v){if(v>maxV)maxV=v})});
+        h+='<div style="margin-bottom:20px">';
+        h+='<div style="font-size:13px;font-weight:600;color:var(--text-0);margin-bottom:8px">'+esc(portLabel)+'</div>';
+        h+='<div style="overflow-x:auto;min-width:400px">';
+        // Hour labels
+        h+='<div style="display:flex;margin-left:50px;margin-bottom:3px">';
+        for(var hi=0;hi<24;hi+=2)h+='<div style="flex:1;text-align:center;font-size:8px;color:#9b9b98">'+String(hi).padStart(2,'0')+'</div><div style="flex:1"></div>';
+        h+='</div>';
+        // Rows
+        mat.forEach(function(row,di){
+          var ds=days[di]||'';var d=new Date(ds+'T00:00:00');
+          var dn=DAYS_RU[d.getDay()]||(dm[di]&&dm[di].label)||'';
+          h+='<div style="display:flex;align-items:center;margin-bottom:2px">';
+          h+='<div style="width:50px;font-size:9px;color:#6b6b68;flex-shrink:0;text-align:right;padding-right:6px">'+dn+' '+ds.slice(8)+'.'+ds.slice(5,7)+'</div>';
+          h+='<div style="display:flex;flex:1;gap:1px">';
+          row.forEach(function(val){
+            var col=val>0?heatColor(val,maxV,'#185FA5'):'var(--bg-3)';
+            h+='<div style="flex:1;height:20px;border-radius:2px;background:'+col+'" title="'+trendFmt(val)+'"></div>';
+          });
+          h+='</div></div>';
+        });
+        // Legend
+        h+='<div style="display:flex;align-items:center;gap:4px;margin-top:6px;font-size:9px;color:#9b9b98">';
+        h+='<span>0</span><div style="display:flex;gap:1px">';
+        for(var li=0;li<=6;li++)h+='<div style="width:12px;height:8px;border-radius:1px;background:'+heatColor(li/6*maxV,maxV,'#185FA5')+'"></div>';
+        h+='</div><span>'+trendFmt(maxV)+'</span></div>';
+        h+='</div></div>';
+      }
+      body.innerHTML=h;
+    })
+    .catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+esc(e.message)+'</div>'});
+  }
   else if(tab==='sim'){
     var simH='<div style="display:flex;gap:0;border-bottom:1px solid var(--border);margin-bottom:12px">'
       +'<div id="simTab_sms" onclick="switchSimTab(\'sms\')" style="padding:6px 16px;font-size:12px;font-weight:500;cursor:pointer;border-bottom:2px solid var(--accent);color:var(--accent)">SMS</div>'
@@ -666,7 +715,8 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
       +'<div><div style="font-size:12px;font-weight:600;color:var(--text-0)">'+esc(p.portName||pid)+'</div>'
       +'<div style="font-size:11px;color:var(--text-2);margin-top:2px">HTTP: '+(ci.serverIp||'')+':'+esc(p.HTTP_PORT||'—')+' · SOCKS5: '+(ci.serverIp||'')+':'+esc(p.SOCKS_PORT||'—')+'</div>'
       +'<div style="font-size:11px;color:var(--text-3);font-family:monospace;margin-top:1px">'+esc(p.LOGIN||'')+'</div></div>'
-      +'<div style="display:flex;gap:4px"><button class="btn btn-sm" onclick="editPortFull(\''+m.rawImei+'\',\''+m.server+'\',\''+pid+'\')" title="Настройки порта">⚙️</button>'
+      +'<div style="display:flex;gap:4px"><button class="btn btn-sm" onclick="movePortPrompt(\''+pid+'\',\''+m.server+'\',\''+esc(p.portName||pid)+'\')" title="Перекинуть на другой модем">↔</button>'
+      +'<button class="btn btn-sm" onclick="editPortFull(\''+m.rawImei+'\',\''+m.server+'\',\''+pid+'\')" title="Настройки порта">⚙️</button>'
       +'<button class="btn btn-danger btn-sm" onclick="purgePort(\''+pid+'\',\''+m.server+'\')" title="Удалить">✕</button></div>'
       +'</div>'});}
     portsH+='<div id="newPortForm"></div><div id="editPortForm"></div>';
@@ -742,6 +792,42 @@ function purgeSms(nick,srv){confirmDialog('Удалить все SMS для мо
 function sendUssd(imei,srv){var code=document.getElementById('ussdCode').value;if(!code)return;document.getElementById('ussdResult').innerHTML='<span style="color:var(--text-3)">Отправка...</span>';fetch(API+'/api/admin/send_ussd',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,ussd:code})}).then(function(r){return r.json()}).then(function(d){var r=d.result||d;document.getElementById('ussdResult').innerHTML='<div class="detail-card"><pre style="font-size:11px;color:var(--text-1);white-space:pre-wrap">'+esc(typeof r==='object'?JSON.stringify(r,null,2):String(r))+'</pre></div>'}).catch(function(e){document.getElementById('ussdResult').innerHTML='<span style="color:var(--danger)">'+(esc(e.message))+'</span>'})}
 function showNewPortForm(imei,srv){fetch(API+'/api/admin/free_ports?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var fp=Array.isArray(data)?data:data.free_tcp_ports||[];var h='<div class="detail-card" style="margin-top:8px"><h4>Новый порт</h4><div class="form-row"><div class="form-group"><label>Port ID</label><input class="form-input" id="npPid" value="port'+rnd(8)+'"></div><div class="form-group"><label>Имя</label><input class="form-input" id="npName"></div></div><div class="form-row"><div class="form-group"><label>HTTP</label><input class="form-input" id="npHttp" value="'+(fp[0]||'')+'"></div><div class="form-group"><label>SOCKS</label><input class="form-input" id="npSocks" value="'+(fp[1]||'')+'"></div></div><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="npLogin" value="'+rnd(8)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="npPass" value="'+rnd(8)+'"></div></div><button class="btn btn-primary" onclick="createPort(\''+imei+'\',\''+srv+'\')">Создать</button></div>';document.getElementById('newPortForm').innerHTML=h})}
 function createPort(imei,srv){var d={serverName:srv,IMEI:imei,portID:document.getElementById('npPid').value,portName:document.getElementById('npName').value,http_port:document.getElementById('npHttp').value,socks_port:document.getElementById('npSocks').value,proxy_login:document.getElementById('npLogin').value,proxy_password:document.getElementById('npPass').value};fetch(API+'/api/admin/store_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok){fetch(API+'/api/admin/apply_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:d.portID,serverName:srv})}).then(function(){showToast('Порт создан','success');setTimeout(loadData,2000)})}else showToast(r.error||'Ошибка','error')})}
+function movePortPrompt(pid,srv,label){
+  // Build list of available modems on this server
+  var modemList=[];
+  if(currentData&&currentData._modemMap){
+    for(var imei in currentData._modemMap){
+      var m=currentData._modemMap[imei];
+      if(m.server===srv)modemList.push({imei:m.rawImei,nick:m.nick});
+    }
+  }
+  modemList.sort(function(a,b){return a.nick.localeCompare(b.nick)});
+  var opts=modemList.map(function(m){return'<option value="'+esc(m.imei)+'">'+esc(m.nick)+' ('+m.imei+')</option>'}).join('');
+  var overlay=document.createElement('div');
+  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
+  overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
+  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:400px;max-width:90vw;box-shadow:0 10px 40px rgba(0,0,0,.3)" onclick="event.stopPropagation()">'
+    +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">Перекинуть порт '+esc(label)+'</h3>'
+    +'<p style="font-size:12px;color:var(--text-2);margin-bottom:12px">Выберите модем, на который нужно перекинуть порт:</p>'
+    +'<select id="movePortTarget" class="form-input" style="width:100%;margin-bottom:12px">'+opts+'</select>'
+    +'<div style="display:flex;gap:8px;justify-content:flex-end">'
+    +'<button class="btn btn-sm" onclick="this.closest(\'div[style*=fixed]\').remove()">Отмена</button>'
+    +'<button class="btn btn-primary btn-sm" id="movePortBtn" onclick="doMovePort(\''+esc(pid)+'\',\''+esc(srv)+'\',this)">Перекинуть</button>'
+    +'</div></div>';
+  document.body.appendChild(overlay);
+}
+function doMovePort(pid,srv,btn){
+  var newIMEI=document.getElementById('movePortTarget').value;
+  if(!newIMEI)return showToast('Выберите модем','error');
+  btn.disabled=true;btn.textContent='Перекидываю...';
+  fetch(API+'/api/admin/move_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,portID:pid,newIMEI:newIMEI})})
+  .then(function(r){return r.json()})
+  .then(function(d){
+    if(d.ok){showToast('Порт перекинут','success');btn.closest('div[style*=fixed]').remove();setTimeout(loadData,3000);}
+    else showToast(d.error||'Ошибка','error');
+    btn.disabled=false;btn.textContent='Перекинуть';
+  }).catch(function(e){showToast(esc(e.message),'error');btn.disabled=false;btn.textContent='Перекинуть';});
+}
 function purgePort(pid,srv){confirmDialog('Удалить порт «'+pid+'»? Это действие нельзя отменить.',function(){fetch(API+'/api/admin/purge_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:pid,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');setTimeout(loadData,2000)});},'Удалить','Удалить порт')}
 function switchSimTab(t){['sms','ussd'].forEach(function(n){var tab=document.getElementById('simTab_'+n);var cnt=document.getElementById('simContent_'+n);if(tab){tab.style.borderBottomColor=n===t?'var(--accent)':'transparent';tab.style.color=n===t?'var(--accent)':'var(--text-2)'}if(cnt)cnt.style.display=n===t?'':'none'})}
 function saveModemSettingsNew(imei,srv){var ROT_VALS=[5,10,15,30,60,120,240,480,720,1440];var rotSlider=document.getElementById('msAutoRot');var rotVal=rotSlider?ROT_VALS[+rotSlider.value]||10:10;fetch(API+'/api/admin/store_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,IMEI:imei,name:document.getElementById('msNick').value,PHONE_NUMBER:document.getElementById('msPhone').value,AUTO_IP_ROTATION:String(rotVal),TARGET_MODE:document.getElementById('msMode').value,NOTES:document.getElementById('msNotes').value})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сохранено ✓','success'):showToast(r.error||'Ошибка','error')})}
@@ -1658,9 +1744,11 @@ function renderDailyClientChart(data,cc){
     clients=Object.keys(serverTotals);
   } else {
   // Sort clients by total traffic desc (with server filter)
+  // If a client is selected in the table, show only that client
   var clientTotals={};
   for(var client in data){
     if(client==='Не назначен')continue;
+    if(_selectedClient&&client!==_selectedClient)continue;
     var total=0;
     for(var dt in data[client]){
       var entry=data[client][dt];
@@ -1689,7 +1777,39 @@ function renderDailyClientChart(data,cc){
     });
     return{label:client,clientName:client,data:values,borderColor:color,backgroundColor:color+'26',fill:false,tension:0.3,pointRadius:2,pointHoverRadius:5,pointBackgroundColor:color,borderWidth:2};
   });
-  } // end else (clients mode)
+  }
+  if(mode==='modems'){
+    // Per-modem view using modem data from API
+    var modemData=window._modemTrafficCache;
+    if(modemData){
+      var modemTotals={};
+      for(var nick in modemData){
+        var md=modemData[nick];
+        // Filter by selected client
+        if(_selectedClient&&md.portName!==_selectedClient)continue;
+        // Filter by server
+        if(serverFilter!=='all'&&md.server!==serverFilter)continue;
+        var t=0;for(var dt in md.days)t+=md.days[dt];
+        if(t>0)modemTotals[nick]=t;
+      }
+      clients=Object.keys(modemTotals).sort(function(a,b){return modemTotals[b]-modemTotals[a]});
+      datasets=clients.map(function(nick,i){
+        var color=CHART_COLORS.clients[i%CHART_COLORS.clients.length];
+        var values=labels.map(function(dt){return parseFloat((modemData[nick].days[dt]||0)/1073741824).toFixed(2)});
+        return{label:nick,clientName:nick,data:values,borderColor:color,backgroundColor:color+'26',fill:false,tension:0.3,pointRadius:2,pointHoverRadius:5,pointBackgroundColor:color,borderWidth:1.5};
+      });
+    }
+  } // end modems mode
+
+  // Add "Все" (Total) line — only for countries mode
+  if(mode==='countries'){
+    var totalValues=labels.map(function(dt,idx){
+      var sum=0;
+      datasets.forEach(function(ds){sum+=parseFloat(ds.data[idx])||0;});
+      return sum.toFixed(2);
+    });
+    datasets.unshift({label:'Все',clientName:'__total__',data:totalValues,borderColor:'#1A1A1A',backgroundColor:'transparent',fill:false,tension:0.3,pointRadius:0,borderWidth:2.5,borderDash:[6,3]});
+  }
 
   // Custom HTML legend
   var legendEl=document.getElementById('dailyClientLegend');
@@ -1704,22 +1824,29 @@ function renderDailyClientChart(data,cc){
   charts.dailyClient=new Chart(document.getElementById('chartDailyClientTraffic'),{type:'line',data:{labels:displayLabels,datasets:datasets},options:{responsive:true,maintainAspectRatio:false,interaction:{mode:'index',intersect:false},plugins:{legend:{display:false},tooltip:{backgroundColor:'#ffffff',titleColor:'#1A1A1A',bodyColor:'#6B6B68',borderColor:'rgba(0,0,0,.12)',borderWidth:1,callbacks:{label:function(ctx){return' '+ctx.dataset.label+': '+ctx.parsed.y+' GB'}}}},scales:{x:{ticks:{color:cc.text,font:{size:9}},grid:{display:false}},y:{beginAtZero:true,ticks:{color:cc.text,font:{size:10},callback:function(v){return v+' GB'}},grid:{color:cc.grid}}}}});
 }
 
+function onDailyModeChange(){
+  var mode=document.getElementById('dailyModeFilter').value;
+  document.getElementById('dailyClientFilter').style.display='none';
+  if(mode==='modems'&&!window._modemTrafficCache){
+    // Load per-modem data from API
+    fetch(API+'/api/admin/daily_traffic?detail=modems',{headers:{'X-Auth-Token':authToken}})
+      .then(function(r){return r.json()})
+      .then(function(d){
+        window._dailyTrafficCache=d.clients;
+        window._modemTrafficCache=d.modems;
+        renderDailyClientChart(d.clients);
+      })
+      .catch(function(e){showToast('Ошибка: '+esc(e.message),'error')});
+    return;
+  }
+  renderDailyClientChart(window._dailyTrafficCache);
+}
 var _selectedClient=null;
 function selectClient(name){
   _selectedClient=_selectedClient===name?null:name;
   document.querySelectorAll('.ct-row').forEach(function(r){r.classList.toggle('active',r.dataset.client===name&&_selectedClient===name)});
-  updateClientChartHighlight();
-}
-function updateClientChartHighlight(){
-  if(!charts.dailyClient)return;
-  charts.dailyClient.data.datasets.forEach(function(ds,i){
-    var sel=_selectedClient;
-    var isActive=!sel||ds.clientName===sel;
-    ds.borderColor=isActive?CHART_COLORS.clients[i%CHART_COLORS.clients.length]:'rgba(180,178,169,0.2)';
-    ds.borderWidth=isActive?2.5:1;
-    ds.pointRadius=isActive?3:0;
-  });
-  charts.dailyClient.update('none');
+  // Re-render chart showing only selected client (or all if deselected)
+  renderDailyClientChart(window._dailyTrafficCache);
 }
 var _matrixSortKey='total',_matrixSortDir=-1,_matrixView='modem',_matrixShowAll=false;
 function matrixSort(key){
