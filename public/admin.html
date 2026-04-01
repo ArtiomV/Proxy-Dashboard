@@ -1232,7 +1232,7 @@ function renderAccSubTab(name){
       // Compute today, yesterday, month from modemTraffic
       var clientModems=d.modemTraffic.filter(function(m){return m.pn===n});
       var todayBytes=clientModems.reduce(function(s,m){return s+(m.dayIn||0)+(m.dayOut||0)},0);
-      var clientObj=(d.clients||[]).find(function(cl){return cl.portName===n});
+      var clientObj=(currentData.clients||[]).find(function(cl){return cl.portName===n});
       var lhGb=clientObj?((currentData.clientLastHourGb||{})[clientObj.id]||0):0;
       var lhStr=lhGb>0?(lhGb>=1?lhGb.toFixed(2)+' GB':Math.round(lhGb*1024)+' MB'):'—';
       var yestBytes=clientModems.reduce(function(s,m){return s+(m.yestIn||0)+(m.yestOut||0)},0);
