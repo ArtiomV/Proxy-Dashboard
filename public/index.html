@@ -727,7 +727,7 @@
         <!-- Summary cards -->
         <div class="summary-cards" id="analyticsSummary" style="display:none">
           <div class="card">
-            <div class="card-label">Трафик за месяц</div>
+            <div class="card-label" id="analyticsMonthLabel">Трафик за период</div>
             <div class="card-value" id="analyticsMonthTotal">-</div>
             <div class="card-sub" id="analyticsMonthTrend"></div>
           </div>
@@ -1522,23 +1522,6 @@ document.addEventListener('click',function(e){
 function renderAnalytics(){
   if(!tableData||!tableData.length) return;
 
-  var daysElapsed=new Date().getDate()||1;
-
-  // Calculate summaries
-  var totalMonthIn=0,totalMonthOut=0;
-  var countryData={};
-  tableData.forEach(function(r){
-    totalMonthIn+=r.monthIn;totalMonthOut+=r.monthOut;
-    // Country aggregation
-    var cc=r.country||'??';
-    if(!countryData[cc])countryData[cc]={in:0,out:0,count:0};
-    countryData[cc].in+=r.monthIn;
-    countryData[cc].out+=r.monthOut;
-    countryData[cc].count++;
-  });
-  var totalMonth=totalMonthIn+totalMonthOut;
-  var modemCount=tableData.length;
-
   document.getElementById('analyticsSummary').style.display='';
   // Last hour card in analytics
   if(billingData&&billingData.lastHourGb>0){
@@ -1547,145 +1530,20 @@ function renderAnalytics(){
     document.getElementById('lastHourValue').textContent=lhStr;
     document.getElementById('lastHourCard').style.display='';
   }
-  document.getElementById('analyticsMonthTotal').textContent=formatBytes(totalMonth);
+  document.getElementById('analyticsMonthTotal').textContent='...';
   document.getElementById('analyticsAvgDay').textContent='...';
   document.getElementById('analyticsAvgPerModem').textContent='...';
+  document.getElementById('analyticsMonthForecast').textContent='...';
+  document.getElementById('analyticsForecastSub').textContent='';
+  document.getElementById('analyticsMonthTrend').textContent='';
 
-  // Fetch last 7 days of daily_traffic for accurate averages (skip zero days)
-  var d7=new Date();d7.setDate(d7.getDate()-7);
-  var fromStr7=d7.toLocaleDateString('en-CA');
-  var todayStr=new Date().toLocaleDateString('en-CA');
-  fetch('/api/client/daily_traffic?from='+fromStr7+'&to='+todayStr,{headers:{'X-Auth-Token':authToken}})
-  .then(function(r){return r.json()})
-  .then(function(data){
-    var daily=data.daily||{};
-    var dayTotals={};
-    for(var pn in daily){
-      for(var d in daily[pn]){
-        if(d>=todayStr) continue; // exclude today (incomplete)
-        var entry=daily[pn][d];
-        dayTotals[d]=(dayTotals[d]||0)+(entry.in||0)+(entry.out||0);
-      }
-    }
-    // Collect non-zero days
-    var nonZeroDays=[];
-    for(var date in dayTotals){
-      if(dayTotals[date]>0) nonZeroDays.push(dayTotals[date]);
-    }
-    var avgDayBytes=nonZeroDays.length?nonZeroDays.reduce(function(a,b){return a+b},0)/nonZeroDays.length:0;
-    var avgPerModemBytes=modemCount?avgDayBytes/modemCount:0;
-    document.getElementById('analyticsAvgDay').textContent=formatBytes(avgDayBytes);
-    document.getElementById('analyticsAvgPerModem').textContent=formatBytes(avgPerModemBytes)+'/модем';
-  }).catch(function(){
-    document.getElementById('analyticsAvgDay').textContent=formatBytes(0);
-    document.getElementById('analyticsAvgPerModem').textContent=formatBytes(0)+'/модем';
-  });
-
-  // Sort modems by month traffic desc
-  var sorted=tableData.slice().sort(function(a,b){return(b.monthIn+b.monthOut)-(a.monthIn+a.monthOut)});
-
-  // Destroy old charts (only modem bar chart now)
-  for(var k in analyticsCharts){if(analyticsCharts[k]){analyticsCharts[k].destroy();delete analyticsCharts[k]}}
-
-  var isDark=document.documentElement.getAttribute('data-theme')!=='light';
-  var textColor=isDark?'#c9d1d9':'#24292f';
-  var gridColor=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.08)';
-
-  // --- Horizontal bar chart: traffic per modem ---
-  sortedModemData=sorted;
-  renderModemBar();
-
-  // --- Country stat cards ---
-  var countryMeta={S1:{name:'Молдова',flag:'🇲🇩',color:'rgba(25,96,201,0.8)',bg:'rgba(25,96,201,0.08)'},S2:{name:'Румыния',flag:'🇷🇴',color:'rgba(52,199,89,0.8)',bg:'rgba(52,199,89,0.08)'}};
-  // Build by serverName
-  var cnByServer={};
-  tableData.forEach(function(r){
-    var sn=r.serverName||'??';
-    if(!cnByServer[sn])cnByServer[sn]={in:0,out:0,count:0};
-    cnByServer[sn].in+=r.monthIn;cnByServer[sn].out+=r.monthOut;cnByServer[sn].count++;
-  });
-  var totalGB=totalMonth/1073741824;
-  var ccHtml='';
-  var servers=Object.keys(cnByServer).sort();
-  servers.forEach(function(sn){
-    var m=countryMeta[sn]||{name:sn,flag:'🌍',color:'var(--text-2)',bg:'var(--bg-2)'};
-    var gb=((cnByServer[sn].in+cnByServer[sn].out)/1073741824);
-    var pct=totalGB>0?Math.round(gb/totalGB*100):0;
-    var inGb=(cnByServer[sn].in/1073741824).toFixed(1);
-    var outGb=(cnByServer[sn].out/1073741824).toFixed(1);
-    ccHtml+='<div style="margin-bottom:14px">';
-    ccHtml+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
-    ccHtml+='<span style="font-size:13px;font-weight:600;color:var(--text-0)">'+m.flag+' '+m.name+'</span>';
-    ccHtml+='<span style="font-size:12px;color:var(--text-1);font-weight:700">'+gb.toFixed(1)+' GB</span>';
-    ccHtml+='</div>';
-    ccHtml+='<div style="background:var(--bg-2);border-radius:4px;height:7px;overflow:hidden;margin-bottom:4px"><div style="background:'+m.color+';height:100%;width:'+pct+'%;border-radius:4px;transition:width .4s"></div></div>';
-    ccHtml+='<div style="font-size:11px;color:var(--text-3)">↓ '+inGb+' GB &nbsp;↑ '+outGb+' GB &nbsp;·&nbsp; '+cnByServer[sn].count+' мод. &nbsp;·&nbsp; '+pct+'%</div>';
-    ccHtml+='</div>';
-  });
-  var ccEl=document.getElementById('analyticsCountryCards');
-  if(ccEl) ccEl.innerHTML=ccHtml||'<div style="color:var(--text-3);font-size:13px">Нет данных</div>';
-
-  // --- In/Out stat display ---
-  var inGbTotal=(totalMonthIn/1073741824),outGbTotal=(totalMonthOut/1073741824);
-  var inPct=totalMonth>0?Math.round(totalMonthIn/totalMonth*100):0;
-  var outPct=100-inPct;
-  var ioHtml=
-    '<div style="display:flex;gap:16px;margin-bottom:18px">'+
-    '<div style="flex:1;text-align:center;padding:14px;background:rgba(25,96,201,0.07);border-radius:10px;border:1px solid rgba(25,96,201,0.15)">'+
-    '<div style="font-size:20px;font-weight:700;color:rgba(25,96,201,0.9)">↓ '+inGbTotal.toFixed(1)+' GB</div>'+
-    '<div style="font-size:11px;color:var(--text-3);margin-top:3px">Входящий · '+inPct+'%</div>'+
-    '</div>'+
-    '<div style="flex:1;text-align:center;padding:14px;background:rgba(230,126,34,0.07);border-radius:10px;border:1px solid rgba(230,126,34,0.15)">'+
-    '<div style="font-size:20px;font-weight:700;color:rgba(230,126,34,0.9)">↑ '+outGbTotal.toFixed(1)+' GB</div>'+
-    '<div style="font-size:11px;color:var(--text-3);margin-top:3px">Исходящий · '+outPct+'%</div>'+
-    '</div>'+
-    '</div>'+
-    '<div style="background:var(--bg-2);border-radius:6px;height:10px;overflow:hidden;display:flex">'+
-    '<div style="background:rgba(25,96,201,0.75);width:'+inPct+'%;transition:width .4s"></div>'+
-    '<div style="background:rgba(230,126,34,0.65);flex:1"></div>'+
-    '</div>'+
-    '<div style="font-size:11px;color:var(--text-3);margin-top:6px;text-align:center">Всего '+formatBytes(totalMonth)+'</div>';
-  var ioEl=document.getElementById('analyticsInOutCards');
-  if(ioEl) ioEl.innerHTML=ioHtml;
-
-  // --- Forecast & trend ---
-  var now2=new Date();
-  var daysElapsed=now2.getDate();
-  var daysInMonth=new Date(now2.getFullYear(),now2.getMonth()+1,0).getDate();
-  var daysLeft=daysInMonth-daysElapsed;
-  if(daysElapsed>0&&totalMonth>0){
-    var forecast=totalMonth/daysElapsed*daysInMonth;
-    document.getElementById('analyticsMonthForecast').textContent=formatBytes(forecast);
-    document.getElementById('analyticsForecastSub').textContent='ещё '+daysLeft+' дн. в месяце';
-  } else {
-    document.getElementById('analyticsMonthForecast').textContent='—';
-    document.getElementById('analyticsForecastSub').textContent='';
-  }
-
-  // Fetch prev month for trend
-  var prevMonthStart=new Date(now2.getFullYear(),now2.getMonth()-1,1);
-  var prevMonthEnd=new Date(now2.getFullYear(),now2.getMonth(),0);
-  var _f=function(d){var y=d.getFullYear(),m=d.getMonth()+1,dd=d.getDate();return y+'-'+(m<10?'0':'')+m+'-'+(dd<10?'0':'')+dd;};
-  fetch('/api/client/daily_traffic?from='+_f(prevMonthStart)+'&to='+_f(prevMonthEnd),{headers:{'X-Auth-Token':authToken}})
-  .then(function(r){return r.json()})
-  .then(function(d){
-    var prevTotal=0;
-    for(var pn in (d.daily||{})){for(var dt in d.daily[pn]){var e=d.daily[pn][dt];prevTotal+=(e.in||0)+(e.out||0);}}
-    var trendEl=document.getElementById('analyticsMonthTrend');
-    if(trendEl&&prevTotal>0){
-      var delta=totalMonth-prevTotal;
-      var deltaPct=Math.round(Math.abs(delta)/prevTotal*100);
-      var up=delta>=0;
-      trendEl.innerHTML='<span style="color:'+(up?'var(--success)':'var(--danger)')+';">'+(up?'▲':'▼')+' '+deltaPct+'% к прошлому мес.</span>';
-    }
-  }).catch(function(){});
-
-  // Load daily traffic chart
+  // Destroy old charts on first render
   if(!analyticsLoaded){
+    for(var k in analyticsCharts){if(analyticsCharts[k]){analyticsCharts[k].destroy();delete analyticsCharts[k]}}
     analyticsLoaded=true;
     setDailyPeriod('month');
   } else {
-    loadDailyTrafficChart(textColor,gridColor);
+    reloadDailyChart();
   }
 }
 
@@ -1789,6 +1647,141 @@ function loadDailyTrafficChart(textColor,gridColor){
       tdEl.textContent=peakVal.toFixed(1)+' GB';
       var pp=peakDate.split('-');tdDEl.textContent=(pp[2]||'')+'.'+(pp[1]||'')+'.'+( pp[0]||'');
     }
+
+    // === Update ALL analytics from filtered daily data ===
+    // Total traffic for period
+    var periodTotalIn=0,periodTotalOut=0;
+    for(var pn in daily){
+      for(var d in daily[pn]){
+        periodTotalIn+=(daily[pn][d].in||0);
+        periodTotalOut+=(daily[pn][d].out||0);
+      }
+    }
+    if(includeToday&&todayDate){
+      for(var pid in today){
+        periodTotalIn+=(today[pid].in||0);
+        periodTotalOut+=(today[pid].out||0);
+      }
+    }
+    var periodTotal=periodTotalIn+periodTotalOut;
+    document.getElementById('analyticsMonthTotal').textContent=formatBytes(periodTotal);
+
+    // Daily average (non-zero days)
+    var dayTotalsAvg={};
+    for(var pn2 in daily){
+      for(var d2 in daily[pn2]){
+        dayTotalsAvg[d2]=(dayTotalsAvg[d2]||0)+(daily[pn2][d2].in||0)+(daily[pn2][d2].out||0);
+      }
+    }
+    var nonZeroDays=[];
+    for(var dt in dayTotalsAvg){if(dayTotalsAvg[dt]>0)nonZeroDays.push(dayTotalsAvg[dt]);}
+    var modemCount=tableData.length||1;
+    var avgDayBytes=nonZeroDays.length?nonZeroDays.reduce(function(a,b){return a+b},0)/nonZeroDays.length:0;
+    document.getElementById('analyticsAvgDay').textContent=formatBytes(avgDayBytes);
+    document.getElementById('analyticsAvgPerModem').textContent=formatBytes(modemCount?avgDayBytes/modemCount:0)+'/модем';
+
+    // Forecast — only for current month period
+    var now2=new Date();
+    var curMonthFrom=now2.getFullYear()+'-'+String(now2.getMonth()+1).padStart(2,'0')+'-01';
+    var isCurrentMonth=(!fromDate||fromDate<=curMonthFrom)&&(!toDate||toDate>=curMonthFrom);
+    var fcEl=document.getElementById('analyticsMonthForecast');
+    var fcSub=document.getElementById('analyticsForecastSub');
+    if(isCurrentMonth&&periodTotal>0){
+      var daysElapsed=now2.getDate();
+      var daysInMonth=new Date(now2.getFullYear(),now2.getMonth()+1,0).getDate();
+      var daysLeft=daysInMonth-daysElapsed;
+      var forecast=periodTotal/daysElapsed*daysInMonth;
+      fcEl.textContent=formatBytes(forecast);
+      fcSub.textContent='ещё '+daysLeft+' дн. в месяце';
+    } else {
+      fcEl.textContent='—';
+      fcSub.textContent='не текущий месяц';
+    }
+
+    // Trend vs prev month — hide if not current month
+    var trendEl=document.getElementById('analyticsMonthTrend');
+    if(trendEl) trendEl.textContent='';
+
+    // Per-modem aggregation for bar chart
+    var modemAgg={};// nick -> {in, out, nick, operator, serverName}
+    for(var pn3 in daily){
+      var modemRow=null;
+      tableData.forEach(function(r){if(r.portId===pn3||r.modemNick===pn3) modemRow=r;});
+      var mNick=modemRow?modemRow.modemNick:pn3;
+      var mOp=modemRow?modemRow.operator:'';
+      var mSn=modemRow?modemRow.serverName:'??';
+      if(!modemAgg[mNick]) modemAgg[mNick]={in:0,out:0,nick:mNick,operator:mOp,serverName:mSn};
+      for(var d3 in daily[pn3]){
+        modemAgg[mNick].in+=(daily[pn3][d3].in||0);
+        modemAgg[mNick].out+=(daily[pn3][d3].out||0);
+      }
+    }
+    if(includeToday&&todayDate){
+      for(var pid2 in today){
+        var mr2=null;
+        tableData.forEach(function(r){if(r.portId===pid2) mr2=r;});
+        var mNick2=mr2?mr2.modemNick:pid2;
+        var mOp2=mr2?mr2.operator:'';
+        var mSn2=mr2?mr2.serverName:'??';
+        if(!modemAgg[mNick2]) modemAgg[mNick2]={in:0,out:0,nick:mNick2,operator:mOp2,serverName:mSn2};
+        modemAgg[mNick2].in+=(today[pid2].in||0);
+        modemAgg[mNick2].out+=(today[pid2].out||0);
+      }
+    }
+    var modemList=Object.values(modemAgg).sort(function(a,b){return(b.in+b.out)-(a.in+a.out)});
+    sortedModemData=modemList.map(function(m){return{modemNick:m.nick,operator:m.operator,serverName:m.serverName,monthIn:m.in,monthOut:m.out}});
+    renderModemBar();
+
+    // Country cards from filtered data
+    var countryMeta={S1:{name:'Молдова',flag:'🇲🇩',color:'rgba(25,96,201,0.8)',bg:'rgba(25,96,201,0.08)'},S2:{name:'Румыния',flag:'🇷🇴',color:'rgba(52,199,89,0.8)',bg:'rgba(52,199,89,0.08)'}};
+    var cnByServer={};
+    modemList.forEach(function(m){
+      var sn=m.serverName||'??';
+      if(!cnByServer[sn])cnByServer[sn]={in:0,out:0,count:0};
+      cnByServer[sn].in+=m.in;cnByServer[sn].out+=m.out;cnByServer[sn].count++;
+    });
+    var totalGB=periodTotal/1073741824;
+    var ccHtml='';
+    Object.keys(cnByServer).sort().forEach(function(sn){
+      var m=countryMeta[sn]||{name:sn,flag:'🌍',color:'var(--text-2)',bg:'var(--bg-2)'};
+      var gb=(cnByServer[sn].in+cnByServer[sn].out)/1073741824;
+      var pct=totalGB>0?Math.round(gb/totalGB*100):0;
+      var inGb=(cnByServer[sn].in/1073741824).toFixed(1);
+      var outGb=(cnByServer[sn].out/1073741824).toFixed(1);
+      ccHtml+='<div style="margin-bottom:14px">';
+      ccHtml+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
+      ccHtml+='<span style="font-size:13px;font-weight:600;color:var(--text-0)">'+m.flag+' '+m.name+'</span>';
+      ccHtml+='<span style="font-size:12px;color:var(--text-1);font-weight:700">'+gb.toFixed(1)+' GB</span>';
+      ccHtml+='</div>';
+      ccHtml+='<div style="background:var(--bg-2);border-radius:4px;height:7px;overflow:hidden;margin-bottom:4px"><div style="background:'+m.color+';height:100%;width:'+pct+'%;border-radius:4px;transition:width .4s"></div></div>';
+      ccHtml+='<div style="font-size:11px;color:var(--text-3)">↓ '+inGb+' GB &nbsp;↑ '+outGb+' GB &nbsp;·&nbsp; '+cnByServer[sn].count+' мод. &nbsp;·&nbsp; '+pct+'%</div>';
+      ccHtml+='</div>';
+    });
+    var ccEl=document.getElementById('analyticsCountryCards');
+    if(ccEl) ccEl.innerHTML=ccHtml||'<div style="color:var(--text-3);font-size:13px">Нет данных</div>';
+
+    // In/Out cards from filtered data
+    var inGbTotal=periodTotalIn/1073741824,outGbTotal=periodTotalOut/1073741824;
+    var inPct=periodTotal>0?Math.round(periodTotalIn/periodTotal*100):0;
+    var outPct=100-inPct;
+    var ioHtml=
+      '<div style="display:flex;gap:16px;margin-bottom:18px">'+
+      '<div style="flex:1;text-align:center;padding:14px;background:rgba(25,96,201,0.07);border-radius:10px;border:1px solid rgba(25,96,201,0.15)">'+
+      '<div style="font-size:20px;font-weight:700;color:rgba(25,96,201,0.9)">↓ '+inGbTotal.toFixed(1)+' GB</div>'+
+      '<div style="font-size:11px;color:var(--text-3);margin-top:3px">Входящий · '+inPct+'%</div>'+
+      '</div>'+
+      '<div style="flex:1;text-align:center;padding:14px;background:rgba(230,126,34,0.07);border-radius:10px;border:1px solid rgba(230,126,34,0.15)">'+
+      '<div style="font-size:20px;font-weight:700;color:rgba(230,126,34,0.9)">↑ '+outGbTotal.toFixed(1)+' GB</div>'+
+      '<div style="font-size:11px;color:var(--text-3);margin-top:3px">Исходящий · '+outPct+'%</div>'+
+      '</div>'+
+      '</div>'+
+      '<div style="background:var(--bg-2);border-radius:6px;height:10px;overflow:hidden;display:flex">'+
+      '<div style="background:rgba(25,96,201,0.75);width:'+inPct+'%;transition:width .4s"></div>'+
+      '<div style="background:rgba(230,126,34,0.65);flex:1"></div>'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--text-3);margin-top:6px;text-align:center">Всего '+formatBytes(periodTotal)+'</div>';
+    var ioEl=document.getElementById('analyticsInOutCards');
+    if(ioEl) ioEl.innerHTML=ioHtml;
 
     // --- Build datasets based on chartViewMode ---
     if(chartViewMode==='total'){
