@@ -15,6 +15,10 @@ const fsPromises = fs.promises;
 const logger = require('./src/logger');
 const { validate } = require('./src/middleware/validate');
 const { LoginSchema, ClientCreateSchema, ClientUpdateSchema, PaymentSchema, BalanceAdjustSchema } = require('./src/schemas');
+const { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday } = require('./src/utils/time');
+const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator } = require('./src/utils/traffic');
+const { escHtml } = require('./src/utils/html');
+const { safeWriteFile: _safeWriteFile } = require('./src/utils/files');
 
 const DB_PATH = path.join(__dirname, 'dashboard.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -118,25 +122,9 @@ const dbStmts = {
   cleanOldAudit: db.prepare("DELETE FROM audit_log WHERE timestamp < datetime('now', '-90 days')"),
 };
 
-const _fileLocks = new Map();
-function safeWriteFile(filePath, data) {
-  const prev = _fileLocks.get(filePath) || Promise.resolve();
-  const next = prev.then(async () => {
-    const tmp = filePath + '.tmp';
-    try {
-      await fsPromises.writeFile(tmp, data, 'utf8');
-      await fsPromises.rename(tmp, filePath);
-    } catch (e) {
-      // Cleanup tmp if rename failed
-      try { await fsPromises.unlink(tmp); } catch (_) {}
-      logger.error(`[safeWriteFile] Error writing ${path.basename(filePath)}:`, e.message);
-    }
-  }).catch(() => {}).finally(() => {
-    if (_fileLocks.get(filePath) === next) _fileLocks.delete(filePath);
-  });
-  _fileLocks.set(filePath, next);
-  return next;
-}
+// _fileLocks moved to src/utils/files.js
+// safeWriteFile extracted to src/utils/files.js
+function safeWriteFile(filePath, data) { return _safeWriteFile(filePath, data, logger); }
 
 // .env loaded by dotenv at top of file
 
@@ -166,20 +154,7 @@ for (const name of serverKeys) {
 // Moldova (Chisinau) and Romania (Bucharest) are both EET: UTC+2 winter, UTC+3 summer (EEST)
 const _defaultCountries = { S1: { country: 'MD', name: 'Moldova', tz: 'Europe/Chisinau' }, S2: { country: 'RO', name: 'Romania', tz: 'Europe/Bucharest' } };
 
-// Get current UTC offset for a timezone name (handles DST automatically)
-function getTzOffset(tzName) {
-  try {
-    const now = new Date();
-    const fmt = new Intl.DateTimeFormat('en-US', { timeZone: tzName, timeZoneName: 'shortOffset' });
-    const parts = fmt.formatToParts(now);
-    const tzPart = parts.find(p => p.type === 'timeZoneName');
-    if (tzPart) {
-      const m = tzPart.value.match(/GMT([+-]\d+)/);
-      if (m) return parseInt(m[1]);
-    }
-  } catch (e) {}
-  return 3; // fallback to UTC+3 (MSK)
-}
+// getTzOffset extracted to src/utils/time.js
 const SERVER_COUNTRIES = {};
 for (const s of apiServers) {
   const dc = _defaultCountries[s.name] || {};
@@ -1169,36 +1144,7 @@ async function aggregateHourlyTraffic() {
   }
 }
 
-// Parse traffic value like "10.5 GB" to bytes
-function parseTrafficValue(val) {
-  if (!val || val === '0 B') return 0;
-  if (typeof val === 'number') return val;
-  const str = String(val).trim();
-  const match = str.match(/^([\d.]+)\s*(B|KB|MB|GB|TB)?$/i);
-  if (!match) return 0;
-  const num = parseFloat(match[1]);
-  const unit = (match[2] || 'B').toUpperCase();
-  const mult = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824, TB: 1099511627776 };
-  return num * (mult[unit] || 1);
-}
-
-function getMoscowNow() {
-  return new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
-}
-
-function getMoscowToday() {
-  return getMoscowNow().toLocaleDateString('en-CA'); // "YYYY-MM-DD"
-}
-
-function getMoscowYesterday() {
-  const d = getMoscowNow();
-  d.setDate(d.getDate() - 1);
-  return d.toLocaleDateString('en-CA');
-}
-
-function trafficBytesToGb(bytes) {
-  return Math.round(bytes / (1024 * 1024 * 1024) * 1000) / 1000;
-}
+// parseTrafficValue, getMoscow*, trafficBytesToGb extracted to src/utils/
 
 // Global portKey→portName mapping: "S1_port123" → "Brandanalytics"
 let portKeyToPortName = {};
@@ -1548,13 +1494,7 @@ function getPriceForProxyCount(count) {
   return tiers.length > 0 ? tiers[0].price : 23; // fallback
 }
 
-// BUG-01: parseBwToBytes was duplicate of parseTrafficValue — consolidated
-const parseBwToBytes = parseTrafficValue;
-
-function normalizeOperator(rawOp, isRO) {
-  const map = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': isRO ? 'Orange RO' : 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
-  return map[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
-}
+// parseBwToBytes, normalizeOperator extracted to src/utils/traffic.js
 
 function computeClientMonthBytes(allServerResults, portName) {
   let totalBytes = 0;
@@ -5915,8 +5855,7 @@ app.get('/api/admin/clients/:id/closing_documents/:docId/pdf', authMiddleware, a
   }
 });
 
-// HTML escape for user-controlled data in printable documents
-function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+// escHtml extracted to src/utils/html.js
 
 // Build printable HTML for act or bill
 function buildDocHtml(type, doc, client, billAmount) {
