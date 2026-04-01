@@ -1277,6 +1277,7 @@ function renderAccSubTab(name){
       hc+='<div style="flex:2.2;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+esc(n)+'</div>';
       hc+='<div style="flex:0.7;text-align:center;font-size:11px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</div>';
       hc+='<div style="flex:1;text-align:center;font-size:11px;font-family:var(--font-mono);color:'+(lhGb>0?'var(--text-0)':'var(--text-3)')+'">'+lhStr+'</div>';
+      hc+='<div style="flex:1;text-align:center;font-size:11px;font-family:var(--font-mono)">'+fmtGb(todayBytes)+'</div>';
       hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(yestBytes)+'</div>';
       hc+='<div style="flex:1;text-align:center;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(monBytes)+'</div>';
       hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(prevMonBytes)+'</div>';
