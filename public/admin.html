@@ -1196,33 +1196,9 @@ function renderAccSubTab(name){
       });
       opH+='</div>';
 
-      // 5th card: last hour traffic per client
-      var lhData=currentData.clientLastHourGb||{};
-      var cls=currentData.clients||[];
-      var lhItems=cls.map(function(c){return{name:c.name,gb:lhData[c.id]||0}}).filter(function(x){return x.gb>0}).sort(function(a,b){return b.gb-a.gb});
-      var lhH='<div class="analytics-card" style="margin:0;overflow:hidden">';
-      lhH+='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin-bottom:8px;flex-shrink:0">⏱ Посл. час (клиенты)</div>';
-      if(lhItems.length){
-        var lhMax=lhItems[0].gb||1;
-        lhItems.forEach(function(item){
-          var w=Math.max(item.gb/lhMax*100,2);
-          var gbStr=item.gb>=1?item.gb.toFixed(2)+' ГБ':Math.round(item.gb*1024)+' МБ';
-          lhH+='<div style="margin-bottom:6px">';
-          lhH+='<div style="display:flex;justify-content:space-between;font-size:10px;margin-bottom:2px">';
-          lhH+='<span style="color:var(--text-1);font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:70%">'+esc(item.name)+'</span>';
-          lhH+='<span style="color:var(--text-2);flex-shrink:0">'+gbStr+'</span>';
-          lhH+='</div>';
-          lhH+='<div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:#185FA5;width:'+w+'%"></div></div>';
-          lhH+='</div>';
-        });
-      } else {
-        lhH+='<div style="font-size:11px;color:var(--text-3);padding:4px 0">Нет данных</div>';
-      }
-      lhH+='</div>';
-
-      // 5 cards: anomaly, resources-by-category, trend, operators, last-hour-clients
-      extRow.style.gridTemplateColumns='repeat(5,1fr)';extRow.style.alignItems='stretch';
-      extRow.innerHTML=anomH+recH+trendH+opH+lhH;
+      // 4 cards: anomaly, resources-by-category, trend, operators
+      extRow.style.gridTemplateColumns='repeat(4,1fr)';extRow.style.alignItems='stretch';
+      extRow.innerHTML=anomH+recH+trendH+opH;
       loadTrendData();
       loadAnalyticsCategoryCard();
     }
@@ -2479,9 +2455,10 @@ function renderClients(){
     if(c.portName)h+=' / <span style="font-family:monospace;font-size:11px;color:var(--text-3)">'+esc(c.portName)+'</span>';
     h+='</div>';
     // Metrics
-    var todayGb=Math.round(((currentData.clientTodayGb||{})[c.id]||0)*10)/10;
+    var lastHourGbClient=Math.round(((currentData.clientLastHourGb||{})[c.id]||0)*100)/100;
+    var lastHourClientStr=lastHourGbClient>=1?lastHourGbClient.toFixed(2)+' GB':Math.round(lastHourGbClient*1024)+' MB';
     h+='<div style="display:grid;grid-template-columns:repeat(6,1fr);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">';
-    var mets=[['МОДЕМОВ',''+modems.length,'var(--text-0)'],['ТАРИФ',tariffLabel,'var(--text-0)'],['БАЛАНС',Math.round(balance)+'\u20BD'+balWarn,balance>=0?'var(--text-0)':'var(--danger)'],['РАСХОД/МЕС',Math.round(cost)+'\u20BD','var(--accent)'],['ТРАФИК/МЕС',monthGbLive.toFixed(1)+' GB','var(--text-0)'],['СЕГОДНЯ',todayGb.toFixed(1)+' GB','var(--text-0)']];
+    var mets=[['МОДЕМОВ',''+modems.length,'var(--text-0)'],['ТАРИФ',tariffLabel,'var(--text-0)'],['БАЛАНС',Math.round(balance)+'\u20BD'+balWarn,balance>=0?'var(--text-0)':'var(--danger)'],['РАСХОД/МЕС',Math.round(cost)+'\u20BD','var(--accent)'],['ТРАФИК/МЕС',monthGbLive.toFixed(1)+' GB','var(--text-0)'],['ПОСЛ.ЧАС',lastHourGbClient>0?lastHourClientStr:'—','var(--text-0)']];
     mets.forEach(function(met,mi){h+='<div style="padding:10px 8px;text-align:center'+(mi<5?';border-right:1px solid var(--border)':'')+'">'+'<div style="font-size:9px;font-weight:600;color:var(--text-3);letter-spacing:.5px;margin-bottom:4px">'+met[0]+'</div>'+'<div style="font-size:13px;font-weight:700;color:'+met[2]+'">'+met[1]+'</div></div>';});
     h+='</div>';
     // Expandable modems

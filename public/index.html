@@ -2695,8 +2695,8 @@ function updateSummary(){
   }
 
   // --- Last hour card ---
-  if(billingData&&billingData.lastHourGb!==undefined){
-    var lhGb=billingData.lastHourGb||0;
+  if(billingData&&billingData.lastHourGb>0){
+    var lhGb=billingData.lastHourGb;
     var lhStr=lhGb>=1?lhGb.toFixed(2)+' ГБ':Math.round(lhGb*1024)+' МБ';
     document.getElementById('lastHourValue').textContent=lhStr;
     document.getElementById('lastHourCard').style.display='';
