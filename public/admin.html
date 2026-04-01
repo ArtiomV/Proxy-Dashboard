@@ -1901,10 +1901,11 @@ function showAllMatrixRows(){
 }
 function _matrixRowHtml(m,clientColor){
   var total=m.tIn+m.tOut;var ci=COUNTRIES[m.server]||{};
-  var monT=m.monIn+m.monOut,prevT=m.prevIn+m.prevOut;
+  var dayT=m.dayIn+m.dayOut;var monT=m.monIn+m.monOut;
+  var dom=new Date().getDate();var avgDaily=dom>1?monT/(dom-1):0;// avg over completed days (excl today)
   var trendHtml='';
-  if(prevT>0){var chg=Math.round((monT-prevT)/prevT*100);var chgColor=chg>=0?'var(--success)':'var(--danger)';var chgStr;if(chg>999){chgStr='+999%+'}else if(chg<-99){chgStr='<−99%'}else{chgStr=(chg>=0?'+':'')+chg+'%'}trendHtml='<span style="font-size:10px;font-weight:600;color:'+chgColor+'">'+chgStr+'</span>'}
-  else if(monT>0){trendHtml='<span style="font-size:10px;color:var(--text-3)">—</span>'}
+  if(avgDaily>0&&dayT>0){var chg=Math.round((dayT-avgDaily)/avgDaily*100);var chgColor=chg>=0?'var(--success)':'var(--danger)';var chgStr;if(chg>999){chgStr='+999%+'}else if(chg<-99){chgStr='<−99%'}else{chgStr=(chg>=0?'+':'')+chg+'%'}trendHtml='<span style="font-size:10px;font-weight:600;color:'+chgColor+'" title="Сегодня vs среднее/день">'+chgStr+'</span>'}
+  else if(dayT>0){trendHtml='<span style="font-size:10px;color:var(--text-3)">—</span>'}
   var row='<tr>';
   row+='<td style="padding:0;width:3px"><div style="width:3px;height:100%;min-height:32px;background:'+clientColor+'"></div></td>';
   row+='<td style="color:var(--accent);font-weight:500">'+esc(m.nick)+'</td>';

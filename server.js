@@ -3192,7 +3192,26 @@ app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req,
         entry.is_current = true;
         const dom = now.getDate();
         const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-        if (dom > 0 && totalGb > 0) entry.forecast_gb = Math.round(totalGb / dom * dim * 10) / 10;
+        // Forecast: use current month extrapolation if enough data, else previous month as baseline
+        if (dom >= 3 && totalGb > 0) {
+          entry.forecast_gb = Math.round(totalGb / dom * dim * 10) / 10;
+        } else {
+          // Use previous month total as initial plan
+          const prevMStr = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
+          const prevGb = Math.round((byMonth[prevMStr] || 0) / 1073741824 * 10) / 10;
+          if (prevGb > 0) entry.forecast_gb = prevGb;
+        }
+      }
+      // Include today's live bandwidth for current month (from ProxySmart API cache)
+      if (i === 0 && totalGb === 0) {
+        // Try to get current month data from daily_traffic in-memory
+        let todayTotal = 0;
+        const todayStr2 = now.toISOString().slice(0, 10);
+        for (const days of Object.values(dailyTraffic)) {
+          const t = days[todayStr2];
+          if (t) todayTotal += (t.in || 0) + (t.out || 0);
+        }
+        if (todayTotal > 0) entry.total_gb = Math.round(todayTotal / 1073741824 * 10) / 10;
       }
       result.push(entry);
     }
