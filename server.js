@@ -6578,43 +6578,35 @@ const httpServer = app.listen(PORT, () => {
   scheduleRepeating(5, 10, 'MonthlyBills', autoGenerateMonthlyBills);
 
   // Resilient hourly traffic aggregation with retry logic:
-  // Attempts at :59, :00, :01, :02, :03 (5 tries). If all fail — fallback at :30 (interpolation).
+  // Attempts at :00, :01, :02, :03, :04 (5 tries). If all fail — mid-hour snapshot at :30 will interpolate.
   let _hourlyLastRecordedHour = null; // e.g. '2026-03-31 12:00'
   (function scheduleHourlyAggRetry() {
-    // Find next :59
+    // Find next :00 (top of the hour)
     const now = new Date();
-    const next59 = new Date(now);
-    next59.setMinutes(59, 0, 0);
-    if (next59 <= now) next59.setTime(next59.getTime() + 60 * 60 * 1000);
-    const msUntil = next59 - now;
-    logger.info(`[HourlyAgg] Resilient schedule: first attempt at ${next59.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
+    const next00 = new Date(now);
+    next00.setMinutes(0, 0, 0);
+    next00.setTime(next00.getTime() + 60 * 60 * 1000); // always next hour's :00
+    const msUntil = next00 - now;
+    logger.info(`[HourlyAgg] Resilient schedule: first attempt at ${next00.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
 
     setTimeout(function hourlyLoop() {
-      // Target hour: the hour that just ended (or is about to end)
-      // At :59 we capture the snapshot for the current hour
-      // At :00-:03 we record the increment for the previous hour
-      const ATTEMPT_OFFSETS = [0, 60, 120, 180, 240]; // seconds after :59 → :59, :00, :01, :02, :03
+      // At :00, aggregateHourlyTraffic() writes to prevH = now - 1h (the hour that just ended)
+      const ATTEMPT_OFFSETS = [0, 60, 120, 180, 240]; // seconds after :00 → :00, :01, :02, :03, :04
       let attemptIdx = 0;
 
+      // Target is always the hour that just ended (now - 1h), computed once at loop start
+      const targetH = new Date();
+      targetH.setHours(targetH.getHours() - 1, 0, 0, 0);
+      const targetHourStr = targetH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
+
+      // Skip if already recorded (e.g. after restart)
+      if (_hourlyLastRecordedHour === targetHourStr) {
+        logger.info(`[HourlyAgg] Hour ${targetHourStr} already recorded, skipping`);
+        setTimeout(hourlyLoop, 60 * 60 * 1000);
+        return;
+      }
+
       function tryRecord() {
-        const nowA = new Date();
-        // The target hour_start is the hour that's ending/just ended
-        const targetH = new Date(nowA);
-        if (targetH.getMinutes() >= 59) {
-          // We're at :59 — target is this hour (e.g. 12:00 if now is 12:59)
-          targetH.setMinutes(0, 0, 0);
-        } else {
-          // We're at :00-:03 — target is previous hour
-          targetH.setHours(targetH.getHours() - 1, 0, 0, 0);
-        }
-        const targetHourStr = targetH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
-
-        // Skip if already recorded
-        if (_hourlyLastRecordedHour === targetHourStr) {
-          logger.info(`[HourlyAgg] Hour ${targetHourStr} already recorded, skipping`);
-          return;
-        }
-
         aggregateHourlyTraffic().then(() => {
           // Check if we actually inserted rows for this hour
           const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
@@ -6638,14 +6630,13 @@ const httpServer = app.listen(PORT, () => {
             const delay = (ATTEMPT_OFFSETS[attemptIdx] - ATTEMPT_OFFSETS[attemptIdx - 1]) * 1000;
             setTimeout(tryRecord, delay);
           } else {
-            logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr}, scheduling fallback at :30`);
-            scheduleFallbackInterpolation(targetHourStr);
+            logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr}, mid-hour snapshot will interpolate`);
           }
         });
       }
 
       tryRecord();
-      // Schedule next hour's :59
+      // Schedule next hour's :00
       setTimeout(hourlyLoop, 60 * 60 * 1000);
     }, msUntil);
   })();
