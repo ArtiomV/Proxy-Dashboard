@@ -3217,13 +3217,7 @@ function renderBankConfig() {
   h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">КПП компании</label><input class="form-input" id="bankCompanyKpp" placeholder="123456789" style="font-size:12px" value="' + esc(tc.companyKpp || '') + '"></div>';
   h += '<div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Адрес компании</label><input class="form-input" id="bankCompanyAddress" placeholder="119334, г. Москва, ул. ..." style="font-size:12px" value="' + esc(tc.companyAddress || '') + '"></div>';
   h += '</div>';
-  h += '<div style="font-size:11px;font-weight:600;color:var(--text-1);margin:10px 0 6px">Банковские реквизиты для документов</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
-  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Расчётный счёт (р/с)</label><input class="form-input" id="bankAccount" placeholder="40702810..." style="font-size:12px" value="' + esc(tc.bankAccount || '') + '"></div>';
-  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Банк</label><input class="form-input" id="bankNameField" placeholder=\'АО "АЛЬФА-БАНК"\' style="font-size:12px" value="' + esc(tc.bankName || '') + '"></div>';
-  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">БИК</label><input class="form-input" id="bankBic" placeholder="044525593" style="font-size:12px" value="' + esc(tc.bankBic || '') + '"></div>';
-  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Корр. счёт (к/с)</label><input class="form-input" id="bankCorrAccount" placeholder="30101810..." style="font-size:12px" value="' + esc(tc.bankCorrAccount || '') + '"></div>';
-  h += '</div>';
+  // Bank details fields removed from UI (still stored in tochka_config if set)
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
   h += '<button class="btn btn-primary" onclick="saveBankConfig()">\u{1F4BE} \u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C</button>';
   if (tochkaOk) {
