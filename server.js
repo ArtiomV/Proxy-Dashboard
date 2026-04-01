@@ -988,7 +988,7 @@ try {
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} daily traffic entries`);
 } catch (e) { logger.error('Failed to load daily_traffic from SQLite:', e.message); }
 
-const _dtUpsert = db.prepare('INSERT OR REPLACE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
+const _dtUpsert = db.prepare('INSERT OR IGNORE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
 // daily_traffic never cleaned — needed for long-term trend charts
 // If hour already recorded for this port — skip (don't overwrite or accumulate)
 const _htUpsert = db.prepare(`INSERT OR IGNORE INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
@@ -4866,11 +4866,10 @@ function scheduleRepeating(hour, minute, label, fn, isSpeedtest) {
   const msUntil = next - now;
   logger.info(`[${label}] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
   const entry = {};
+  const safeFn = () => { try { const r = fn(); if (r && r.catch) r.catch(e => logger.error(`[${label}] Error:`, e.message)); } catch (e) { logger.error(`[${label}] Error:`, e.message); } };
   entry.timeout = setTimeout(() => {
-    fn().catch(e => logger.error(`[${label}] Error:`, e.message));
-    entry.interval = setInterval(() => {
-      fn().catch(e => logger.error(`[${label}] Error:`, e.message));
-    }, 24 * 60 * 60 * 1000);
+    safeFn();
+    entry.interval = setInterval(safeFn, 24 * 60 * 60 * 1000);
   }, msUntil);
   if (isSpeedtest) speedtestTimers.push(entry);
   else _cronTimers.push(entry);
@@ -6393,12 +6392,9 @@ const httpServer = app.listen(PORT, () => {
     trackModems().catch(e => logger.error('[Tracking] Error:', e.message));
   }, TRACKING_INTERVAL_MS));
 
-  // Sync yesterday traffic — every 60 min (data changes once per day at local midnight)
-  const DAILY_SYNC_INTERVAL_MS = 60 * 60 * 1000;
+  // Sync yesterday traffic — once at startup, then daily at 00:45 UTC (03:45 MSK)
   syncYesterdayTraffic().catch(e => logger.error('[DailySync] Initial error:', e.message));
-  _intervals.push(setInterval(() => {
-    syncYesterdayTraffic().catch(e => logger.error('[DailySync] Error:', e.message));
-  }, DAILY_SYNC_INTERVAL_MS));
+  scheduleRepeating(0, 45, 'DailySync', syncYesterdayTraffic);
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {
