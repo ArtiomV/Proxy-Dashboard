@@ -133,4 +133,6 @@ async function aggregateHourlyTraffic() {
   }
 }
 
-module.exports = { init, aggregateHourlyTraffic, saveHourlySnapshots, loadHourlySnapshots };
+function getSnapshotCount() { return Object.keys(hourlyDaySnapshots).length; }
+
+module.exports = { init, aggregateHourlyTraffic, saveHourlySnapshots, loadHourlySnapshots, getSnapshotCount };

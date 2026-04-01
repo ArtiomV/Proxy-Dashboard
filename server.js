@@ -5860,7 +5860,7 @@ const httpServer = app.listen(PORT, () => {
 
   // Startup: capture snapshots immediately for warmup
   // Startup: capture snapshots immediately so first :00 has a baseline
-  const snapshotCount = Object.keys(hourlyDaySnapshots).length;
+  const snapshotCount = hourlyTraffic.getSnapshotCount();
   logger.info(`[HourlyAgg] ${snapshotCount} snapshots loaded, running startup capture in 15s`);
   setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:startup]', e.message)), 15000);
 
