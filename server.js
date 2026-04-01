@@ -6464,8 +6464,7 @@ const httpServer = app.listen(PORT, () => {
               logger.warn(`[HourlyAgg] Attempt ${attemptIdx}/5 for ${targetHourStr}: no data recorded, retry in ${delay / 1000}s`);
               setTimeout(tryRecord, delay);
             } else {
-              logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr}, scheduling fallback at :30`);
-              scheduleFallbackInterpolation(targetHourStr);
+              logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr} — mid-hour snapshot at :30 will interpolate`);
             }
           }
         }).catch(e => {
@@ -6487,93 +6486,112 @@ const httpServer = app.listen(PORT, () => {
     }, msUntil);
   })();
 
-  // Fallback interpolation: runs at :30, takes accumulated traffic since last snapshot,
-  // splits 50/50 between the missed hour and the current one
-  function scheduleFallbackInterpolation(missedHourStr) {
+  // Mid-hour snapshot at :30 — runs EVERY hour to capture intermediate data.
+  // Records current-hour traffic so heatmap gradually fills, and updates snapshots.
+  // If the previous hour was missed (no data at :59-:03), also interpolates for it.
+  (function scheduleMidHourSnapshot() {
     const now = new Date();
     const next30 = new Date(now);
     next30.setMinutes(30, 0, 0);
     if (next30 <= now) next30.setTime(next30.getTime() + 60 * 60 * 1000);
     const delay = next30 - now;
-    logger.info(`[HourlyAgg:Fallback] Will interpolate for ${missedHourStr} at ${next30.toISOString()}`);
+    logger.info(`[HourlyAgg:Mid] Next mid-hour snapshot at ${next30.toISOString()} (in ${Math.round(delay / 60000)} min)`);
 
-    setTimeout(async () => {
-      if (_hourlyLastRecordedHour === missedHourStr) return; // recorded in meantime
-      try {
-        const results = await fetchAllServersDataCached();
-        if (Object.keys(portKeyToPortName).length === 0) refreshPortKeyMapping(results);
-        const pnMap = portKeyToPortName;
-        const todayStr = new Date().toISOString().slice(0, 10);
-        // Current hour_start (the hour we're in now at :30)
-        const curH = new Date();
-        curH.setMinutes(0, 0, 0);
-        const curHourStr = curH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
+    setTimeout(function midHourLoop() {
+      (async () => {
+        try {
+          const results = await fetchAllServersDataCached();
+          if (Object.keys(portKeyToPortName).length === 0) refreshPortKeyMapping(results);
+          const pnMap = portKeyToPortName;
+          const todayStr = new Date().toISOString().slice(0, 10);
+          // Current hour (we're at :30 of this hour)
+          const curH = new Date();
+          curH.setMinutes(0, 0, 0);
+          const curHourStr = curH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
+          // Previous hour
+          const prevH = new Date(curH);
+          prevH.setHours(prevH.getHours() - 1);
+          const prevHourStr = prevH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
 
-        let countMissed = 0, countCur = 0;
-        const batch = db.transaction(() => {
-          for (const data of results) {
-            const srv = data.serverName || '';
-            const statusArr = Array.isArray(data.status) ? data.status : [];
-            const portsMap = data.ports || {};
-            const portIdInfo = {};
-            for (const m of statusArr) {
-              const md = m.modem_details || {};
-              const imei = md.IMEI || '';
-              const nick = md.NICK || imei;
-              const nd = m.net_details || {};
-              const operator = nd.CELLOP || md.OPERATOR || '';
-              if (!imei) continue;
-              const modemPorts = portsMap[imei] || [];
-              for (const p of modemPorts) {
-                portIdInfo[p.portID] = { nick, operator, clientName: p.portName || '' };
-              }
-            }
+          // Check if previous hour was recorded
+          const prevCheck = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(prevHourStr);
+          const prevMissed = !prevCheck || prevCheck.cnt === 0;
 
-            if (typeof data.bw !== 'object') continue;
-            for (const [portId, b] of Object.entries(data.bw)) {
-              const info = portIdInfo[portId] || {};
-              const nick = info.nick || pnMap[srv + '_' + portId] || portId;
-              let rawOp = (info.operator || '').toLowerCase().trim();
-              if (!rawOp && nick) {
-                const meta = db.prepare('SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1').get(srv, nick);
-                if (meta && meta.operator) rawOp = meta.operator.toLowerCase().trim();
-              }
-              const isRO = srv === 'S2' || srv.indexOf('S2') === 0;
-              const opMap = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
-              const operator = opMap[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
-              const clientName = info.clientName || b.portName || '';
-              const fullPortId = srv + '_' + portId;
-              const snapKey = fullPortId;
-
-              const dayIn = parseBwToBytes(b.bandwidth_bytes_day_in);
-              const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
-              const snap = hourlyDaySnapshots[snapKey];
-
-              if (snap && snap.date === todayStr) {
-                const totalIncIn = Math.max(0, dayIn - snap.in);
-                const totalIncOut = Math.max(0, dayOut - snap.out);
-                if (totalIncIn + totalIncOut > 0) {
-                  // Split 50/50 between missed hour and current hour
-                  const halfIn = Math.round(totalIncIn / 2);
-                  const halfOut = Math.round(totalIncOut / 2);
-                  _htUpsert.run(srv, fullPortId, nick, operator, clientName, missedHourStr, halfIn, halfOut);
-                  _htUpsert.run(srv, fullPortId, nick, operator, clientName, curHourStr, totalIncIn - halfIn, totalIncOut - halfOut);
-                  countMissed++; countCur++;
+          let countCur = 0, countPrev = 0;
+          const batch = db.transaction(() => {
+            for (const data of results) {
+              const srv = data.serverName || '';
+              const statusArr = Array.isArray(data.status) ? data.status : [];
+              const portsMap = data.ports || {};
+              const portIdInfo = {};
+              for (const m of statusArr) {
+                const md = m.modem_details || {};
+                const imei = md.IMEI || '';
+                const nick = md.NICK || imei;
+                const nd = m.net_details || {};
+                const operator = nd.CELLOP || md.OPERATOR || '';
+                if (!imei) continue;
+                const modemPorts = portsMap[imei] || [];
+                for (const p of modemPorts) {
+                  portIdInfo[p.portID] = { nick, operator, clientName: p.portName || '' };
                 }
               }
-              hourlyDaySnapshots[snapKey] = { in: dayIn, out: dayOut, date: todayStr };
+
+              if (typeof data.bw !== 'object') continue;
+              for (const [portId, b] of Object.entries(data.bw)) {
+                const info = portIdInfo[portId] || {};
+                const nick = info.nick || pnMap[srv + '_' + portId] || portId;
+                let rawOp = (info.operator || '').toLowerCase().trim();
+                if (!rawOp && nick) {
+                  const meta = db.prepare('SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1').get(srv, nick);
+                  if (meta && meta.operator) rawOp = meta.operator.toLowerCase().trim();
+                }
+                const isRO = srv === 'S2' || srv.indexOf('S2') === 0;
+                const opMap = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
+                const operator = opMap[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
+                const clientName = info.clientName || b.portName || '';
+                const fullPortId = srv + '_' + portId;
+                const snapKey = fullPortId;
+
+                const dayIn = parseBwToBytes(b.bandwidth_bytes_day_in);
+                const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
+                const snap = hourlyDaySnapshots[snapKey];
+
+                if (snap && snap.date === todayStr) {
+                  const incIn = Math.max(0, dayIn - snap.in);
+                  const incOut = Math.max(0, dayOut - snap.out);
+                  if (incIn + incOut > 0) {
+                    if (prevMissed) {
+                      // Previous hour missed — split 50/50
+                      const halfIn = Math.round(incIn / 2);
+                      const halfOut = Math.round(incOut / 2);
+                      _htUpsert.run(srv, fullPortId, nick, operator, clientName, prevHourStr, halfIn, halfOut);
+                      _htUpsert.run(srv, fullPortId, nick, operator, clientName, curHourStr, incIn - halfIn, incOut - halfOut);
+                      countPrev++;
+                    } else {
+                      // Previous hour OK — record all as current hour
+                      _htUpsert.run(srv, fullPortId, nick, operator, clientName, curHourStr, incIn, incOut);
+                    }
+                    countCur++;
+                  }
+                }
+                hourlyDaySnapshots[snapKey] = { in: dayIn, out: dayOut, date: todayStr };
+              }
             }
+          });
+          batch();
+          saveHourlySnapshots();
+          if (prevMissed && countPrev > 0) {
+            logger.info(`[HourlyAgg:Mid] Interpolated ${countPrev} entries for missed ${prevHourStr}`);
           }
-        });
-        batch();
-        saveHourlySnapshots();
-        _hourlyLastRecordedHour = missedHourStr;
-        logger.info(`[HourlyAgg:Fallback] Interpolated ${countMissed} entries for ${missedHourStr}, ${countCur} for ${curHourStr}`);
-      } catch (e) {
-        logger.error(`[HourlyAgg:Fallback] Error: ${e.message}`);
-      }
+          logger.info(`[HourlyAgg:Mid] Recorded ${countCur} entries for ${curHourStr} (mid-hour snapshot)`);
+        } catch (e) {
+          logger.error(`[HourlyAgg:Mid] Error: ${e.message}`);
+        }
+      })();
+      setTimeout(midHourLoop, 60 * 60 * 1000);
     }, delay);
-  }
+  })();
 
   // Startup: capture snapshots immediately for warmup
   const snapshotCount = Object.keys(hourlyDaySnapshots).length;
