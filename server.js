@@ -273,7 +273,8 @@ const _clientUpdateReferralBalance = db.prepare('UPDATE clients SET referral_bal
  */
 function atomicCredit(clientId, amount, ledgerEntry) {
   amount = Math.round(parseFloat(amount) * 100) / 100;
-  if (isNaN(amount) || amount === 0) throw new Error('atomicCredit: invalid amount');
+  if (isNaN(amount)) throw new Error('atomicCredit: invalid amount');
+  if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
   let balanceBefore, balanceAfter, ledgerDbId;
   db.transaction(() => {
     const row = _clientGetBalance.get(clientId);
@@ -301,7 +302,8 @@ function atomicCredit(clientId, amount, ledgerEntry) {
  */
 function atomicDebit(clientId, amount, ledgerEntry) {
   amount = Math.round(parseFloat(amount) * 100) / 100;
-  if (isNaN(amount) || amount === 0) throw new Error('atomicDebit: invalid amount');
+  if (isNaN(amount)) throw new Error('atomicDebit: invalid amount');
+  if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
   let balanceBefore, balanceAfter, ledgerDbId;
   db.transaction(() => {
     const row = _clientGetBalance.get(clientId);
@@ -1125,7 +1127,7 @@ async function aggregateHourlyTraffic() {
           let rawOp = (info.operator || '').toLowerCase().trim();
           // Fallback: if API returned no operator, check modem_meta DB
           if (!rawOp && nick) {
-            const meta = db.prepare('SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1').get(srv, nick);
+            const meta = _metaOpGet.get(srv, nick);
             if (meta && meta.operator) rawOp = meta.operator.toLowerCase().trim();
           }
           const isRO = srv === 'S2' || srv.indexOf('S2') === 0;
@@ -1550,7 +1552,7 @@ function getPriceForProxyCount(count) {
 const parseBwToBytes = parseTrafficValue;
 
 function normalizeOperator(rawOp, isRO) {
-  const map = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
+  const map = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': isRO ? 'Orange RO' : 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
   return map[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
 }
 
@@ -1907,9 +1909,9 @@ function getCachedDataAsOffline(serverName) {
   }
 
   return {
-    bw: cached.bw || {},
+    bw: JSON.parse(JSON.stringify(cached.bw || {})),
     status: offlineStatus,
-    ports: cached.ports || {},
+    ports: JSON.parse(JSON.stringify(cached.ports || {})),
     serverName: serverName,
     _cached: true,
     _cachedAt: cached.cachedAt
@@ -2251,6 +2253,7 @@ function recordIpChange(key, oldIp, newIp, timestamp) {
 // Combined tracking: IP changes + uptime percentage (runs every 5 min)
 // Uptime fix: skip rotating/rebooting modems, skip unreachable servers
 const _modemMetaUpsert = db.prepare(`INSERT OR REPLACE INTO modem_meta (server_name, imei, nick, operator, model, phone, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`);
+const _metaOpGet = db.prepare('SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1');
 
 async function trackModems() {
   const now = Date.now();
@@ -2289,8 +2292,7 @@ async function trackModems() {
           const nd = m.net_details || {};
           const rawOp = (nd.CELLOP || md.OPERATOR || '').toLowerCase().trim();
           const isRO = server.name === 'S2' || server.name.indexOf('S2') === 0;
-          const _opNorm = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
-          const normOp = _opNorm[rawOp] || nd.CELLOP || md.OPERATOR || '';
+          const normOp = normalizeOperator(rawOp, isRO) || nd.CELLOP || md.OPERATOR || '';
           _modemMetaUpsert.run(server.name, imei, md.NICK || '', normOp, md.MODEL || '', md.PHONE_NUMBER || '');
         }
       });
@@ -2309,13 +2311,13 @@ async function trackModems() {
       // IP tracking (always, regardless of status)
       if (extIp && extIp !== 'IP_RESET') {
         if (!ipTracking[key]) {
-          ipTracking[key] = { ip: extIp, since: now };
+          ipTracking[key] = { ip: extIp, since: new Date(now).toISOString() };
           // Record initial IP in history
           recordIpChange(key, null, extIp, now);
         } else if (ipTracking[key].ip !== extIp) {
           // IP changed! Record in history with timestamp
           recordIpChange(key, ipTracking[key].ip, extIp, now);
-          ipTracking[key] = { ip: extIp, since: now };
+          ipTracking[key] = { ip: extIp, since: new Date(now).toISOString() };
         }
         // else same IP -- keep existing `since`
       }
@@ -2489,7 +2491,7 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
       const totalPayments = (clientInfo.payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
       // Current month expense from billing ledger
       const ledgerEntries = billingLedger[clientInfo.id] || [];
-      const currentMonthPrefix = new Date().toISOString().slice(0, 7);
+      const currentMonthPrefix = getMoscowToday().slice(0, 7);
       const monthExpense = ledgerEntries
         .filter(e => e.type === 'charge' && e.date && e.date.startsWith(currentMonthPrefix))
         .reduce((sum, e) => sum + (e.cost || 0), 0);
@@ -3227,7 +3229,8 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
     const matrix = dateList.map(() => new Array(24).fill(0));
 
     // Build SQL filter based on view type — all filtering is on per-modem columns
-    let sql = "SELECT strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as day, CAST(strftime('%H', datetime(hour_start, '+3 hours')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes, MAX(corrected) as corrected FROM traffic_hourly WHERE hour_start >= ?";
+    const tzStr = (mskOffset >= 0 ? '+' : '') + mskOffset + ' hours';
+    let sql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes, MAX(corrected) as corrected FROM traffic_hourly WHERE hour_start >= ?`;
     const params = [utcFetchStartShifted];
 
     if (idKey !== 'all') {
@@ -3304,7 +3307,8 @@ app.get('/api/analytics/modem_heatmap', authMiddleware, async (req, res) => {
     for (const p of ports) {
       const portLabel = p.client_name || p.port_id;
       const matrix = dateList.map(() => new Array(24).fill(0));
-      const rows = db.prepare("SELECT strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as day, CAST(strftime('%H', datetime(hour_start, '+3 hours')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE port_id = ? AND hour_start >= ? GROUP BY day, hour").all(p.port_id, utcStart);
+      const tzStr2 = (mskOffset2 >= 0 ? '+' : '') + mskOffset2 + ' hours';
+      const rows = db.prepare(`SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr2}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr2}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE port_id = ? AND hour_start >= ? GROUP BY day, hour`).all(p.port_id, utcStart);
       for (const r of rows) {
         const di = dateList.indexOf(r.day);
         if (di >= 0 && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
@@ -3655,14 +3659,7 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, vali
     return res.status(400).json({ error: 'Invalid amount: must be positive and reasonable' });
   }
   if (!client.payments) client.payments = [];
-  client.payments.push({
-    amount: parsedAmount,
-    date,
-    note: note || '',
-    createdAt: new Date().toISOString()
-  });
 
-  
   const { balanceBefore, balanceAfter } = atomicCredit(client.id, parsedAmount, {
     type: 'payment',
     date: date,
@@ -3672,7 +3669,9 @@ app.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, vali
     note: note || 'Пополнение баланса'
   });
 
-  
+  // Push payment AFTER atomicCredit succeeds (МЕД-3)
+  client.payments.push({ amount: parsedAmount, date, note: note || '', createdAt: new Date().toISOString() });
+
   if (client.referred_by) {
     const referrer = clientById.get(client.referred_by);
     if (referrer) {
@@ -3748,6 +3747,17 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
     note: 'Отмена оплаты администратором'
   });
 
+  // Reverse referral commission (МЕД-4)
+  if (client.referred_by) {
+    const referrer = clientById.get(client.referred_by);
+    if (referrer) {
+      const commission = Math.round(deletedAmount * 0.15 * 100) / 100;
+      referrer.referral_balance = Math.round(((referrer.referral_balance || 0) - commission) * 100) / 100;
+      _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
+      logger.info(`[Referral] Reversed ${commission.toFixed(2)} from ${referrer.name} (payment deletion)`);
+    }
+  }
+
   saveClients(clients);
   res.json({ ok: true, payments: client.payments, balance: client.balance });
 });
@@ -3796,7 +3806,7 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
   _clientUpdateBalance.run(newBalance, client.id);
   client.balance = newBalance;
 
-  saveBillingLedger();
+  // saveBillingLedger() removed (КРИТ-3): _ledgerDeleteById already deleted atomically, full rewrite invalidates db_id
   logger.info(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, recalculated balance: ${client.balance}`);
   auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, clientName: client.name, entryType: entry.type, amount: entry.amount || entry.cost, ip: getClientIp(req) });
   res.json({ ok: true, newBalance: client.balance });
@@ -4669,7 +4679,11 @@ app.post('/api/tools/check_proxy', checkProxyLimiter, authMiddleware, async (req
     { url: 'http://ip-api.com/json', host: 'ip-api.com', parseIp: d => { try { return JSON.parse(d).query; } catch(e) { return null; } } }
   ];
 
+  const PRIVATE_IP_RE = /^(10\.|172\.(1[6-9]|2\d|3[01])\.|192\.168\.|127\.|::1|0\.|169\.254\.|fc|fd)/;
   async function checkOneProxy(proxy) {
+    if (PRIVATE_IP_RE.test(proxy.ip)) {
+      return { ip: proxy.ip, port: proxy.port, working: false, error: 'Private IP not allowed' };
+    }
     const start = Date.now();
     const proxyAuth = proxy.login && proxy.password
       ? `${proxy.login}:${proxy.password}` : null;
@@ -4915,12 +4929,14 @@ async function runDailyBilling(retryClientIds) {
       if (!b.portName) continue;
       const key = prefix + portId;
       if (!dailyTraffic[key]) dailyTraffic[key] = {};
-      if (!dailyTraffic[key][yesterdayStr]) {
-        const yIn = parseBwToBytes(b.bandwidth_bytes_yesterday_in);
-        const yOut = parseBwToBytes(b.bandwidth_bytes_yesterday_out);
-        if (yIn > 0 || yOut > 0) {
-          dailyTraffic[key][yesterdayStr] = { in: yIn, out: yOut, portName: b.portName };
-        }
+      const yIn = parseBwToBytes(b.bandwidth_bytes_yesterday_in);
+      const yOut = parseBwToBytes(b.bandwidth_bytes_yesterday_out);
+      if (yIn > 0 || yOut > 0) {
+        const existing = dailyTraffic[key][yesterdayStr];
+        const newIn = Math.max(existing?.in || 0, yIn);
+        const newOut = Math.max(existing?.out || 0, yOut);
+        _dtUpsert.run(key, yesterdayStr, newIn, newOut);
+        dailyTraffic[key][yesterdayStr] = { in: newIn, out: newOut, portName: b.portName };
       }
     }
   }
@@ -6615,22 +6631,11 @@ const httpServer = app.listen(PORT, () => {
 
       function tryRecord() {
         aggregateHourlyTraffic().then(() => {
-          // Check if we actually inserted rows for this hour
+          // Success = no exception, even if cnt=0 (all modems offline)
+          _hourlyLastRecordedHour = targetHourStr;
+          try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch(e) {}
           const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
-          if (check && check.cnt > 0) {
-            _hourlyLastRecordedHour = targetHourStr;
-            try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch(e) {}
-            logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${check.cnt} rows)`);
-          } else {
-            attemptIdx++;
-            if (attemptIdx < ATTEMPT_OFFSETS.length) {
-              const delay = (ATTEMPT_OFFSETS[attemptIdx] - ATTEMPT_OFFSETS[attemptIdx - 1]) * 1000;
-              logger.warn(`[HourlyAgg] Attempt ${attemptIdx}/5 for ${targetHourStr}: no data recorded, retry in ${delay / 1000}s`);
-              setTimeout(tryRecord, delay);
-            } else {
-              logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr} — hour will be empty`);
-            }
-          }
+          logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${(check && check.cnt) || 0} rows)`);
         }).catch(e => {
           logger.error(`[HourlyAgg] Attempt ${attemptIdx + 1}/5 error: ${e.message}`);
           attemptIdx++;
@@ -6663,6 +6668,7 @@ const httpServer = app.listen(PORT, () => {
       const now = Date.now();
       let needsCatchup = false;
       for (const c of clients) {
+        if (c.billingPaused) continue;
         if (c.last_traffic_snapshot && c.last_traffic_snapshot.timestamp) {
           const lastRun = new Date(c.last_traffic_snapshot.timestamp).getTime();
           if (now - lastRun > 26 * 60 * 60 * 1000) {
