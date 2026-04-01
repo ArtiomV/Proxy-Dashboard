@@ -21,6 +21,7 @@ const { escHtml } = require('./src/utils/html');
 const { safeWriteFile: _safeWriteFile } = require('./src/utils/files');
 const { decodeJwtPayload, decodeJwtHeader, fetchTochkaJwks, jwkToPem, verifyJwtSignature } = require('./src/tochka/jwt');
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
+const billing = require('./src/billing/atomic');
 const { MONTH_NAMES_RU, buildActItemsFromLedger: _buildActItemsFromLedger, buildTochkaActBody: _buildTochkaActBody, buildTochkaBillBody: _buildTochkaBillBody, calculateMonthlyBillAmount: _calculateMonthlyBillAmount } = require('./src/tochka/documents');
 
 const DB_PATH = path.join(__dirname, 'dashboard.db');
@@ -240,68 +241,9 @@ const _clientUpdateBalance = db.prepare('UPDATE clients SET balance = ?, updated
 
 const _clientUpdateReferralBalance = db.prepare('UPDATE clients SET referral_balance = ?, updated_at = datetime(\'now\') WHERE id = ?');
 
-/**
- * atomicCredit — atomically add amount to client balance AND insert ledger entry
- * BUG-02 fix: balance + ledger in single transaction (no partial state)
- * BUG-03 fix: uses clientById.get() for O(1) in-memory sync
- * @param {string} clientId
- * @param {number} amount
- * @param {object} [ledgerEntry] — if provided, inserted in same transaction
- * Returns { balanceBefore, balanceAfter }
- */
-function atomicCredit(clientId, amount, ledgerEntry) {
-  amount = Math.round(parseFloat(amount) * 100) / 100;
-  if (isNaN(amount)) throw new Error('atomicCredit: invalid amount');
-  if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
-  let balanceBefore, balanceAfter, ledgerDbId;
-  db.transaction(() => {
-    const row = _clientGetBalance.get(clientId);
-    if (!row) throw new Error(`atomicCredit: client ${clientId} not found`);
-    balanceBefore = row.balance || 0;
-    balanceAfter = Math.round((balanceBefore + amount) * 100) / 100;
-    _clientUpdateBalance.run(balanceAfter, clientId);
-    if (ledgerEntry) {
-      const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
-      const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-      entry.db_id = result.lastInsertRowid;
-      ledgerDbId = entry.db_id; 
-      if (!billingLedger[clientId]) billingLedger[clientId] = [];
-      billingLedger[clientId].push(entry);
-    }
-  })();
-  const client = clientById.get(clientId);
-  if (client) client.balance = balanceAfter;
-  return { balanceBefore, balanceAfter, ledgerDbId };
-}
-
-/**
- * atomicDebit — atomically subtract amount from client balance AND insert ledger entry
- * Same BUG-02/03/05 fixes as atomicCredit
- */
-function atomicDebit(clientId, amount, ledgerEntry) {
-  amount = Math.round(parseFloat(amount) * 100) / 100;
-  if (isNaN(amount)) throw new Error('atomicDebit: invalid amount');
-  if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
-  let balanceBefore, balanceAfter, ledgerDbId;
-  db.transaction(() => {
-    const row = _clientGetBalance.get(clientId);
-    if (!row) throw new Error(`atomicDebit: client ${clientId} not found`);
-    balanceBefore = row.balance || 0;
-    balanceAfter = Math.round((balanceBefore - amount) * 100) / 100;
-    _clientUpdateBalance.run(balanceAfter, clientId);
-    if (ledgerEntry) {
-      const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
-      const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-      entry.db_id = result.lastInsertRowid;
-      ledgerDbId = entry.db_id; 
-      if (!billingLedger[clientId]) billingLedger[clientId] = [];
-      billingLedger[clientId].push(entry);
-    }
-  })();
-  const client = clientById.get(clientId);
-  if (client) client.balance = balanceAfter;
-  return { balanceBefore, balanceAfter, ledgerDbId };
-}
+/** atomicCredit / atomicDebit — delegated to src/billing/atomic.js */
+function atomicCredit(...args) { return billing.atomicCredit(...args); }
+function atomicDebit(...args) { return billing.atomicDebit(...args); }
 const _paymentDeleteByClient = db.prepare('DELETE FROM payments WHERE client_id = ?');
 const _paymentInsert = db.prepare('INSERT INTO payments (client_id, amount, date, note, source, payment_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
 const _docDeleteByClient = db.prepare('DELETE FROM client_documents WHERE client_id = ?');
@@ -1029,6 +971,7 @@ for (const c of clients) {
 }
 if (clientsMigrated) saveClients(clients);
 rebuildClientMaps(); // Build maps before auto-migration check
+billing.init({ db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams, billingLedger, clientById });
 
 // Auto-migrate .env users (non-admin) to clients if not already there
 for (const [login, u] of Object.entries(users)) {
