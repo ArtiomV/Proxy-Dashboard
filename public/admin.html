@@ -1216,6 +1216,7 @@ function renderAccSubTab(name){
     hc+='<div style="flex:2.2;padding:0 10px;min-width:0">Клиент</div>';
     hc+='<div style="flex:0.7;text-align:center">Live</div>';
     hc+='<div style="flex:1;text-align:center">Посл.час</div>';
+    hc+='<div style="flex:1;text-align:center">Сегодня</div>';
     hc+='<div style="flex:1;text-align:center">Вчера</div>';
     hc+='<div style="flex:1;text-align:center;font-weight:600">Месяц</div>';
     hc+='<div style="flex:1;text-align:center">Пр.месяц</div>';
@@ -1230,6 +1231,7 @@ function renderAccSubTab(name){
       var sharePct=pct(total,totalAllOv);
       // Compute today, yesterday, month from modemTraffic
       var clientModems=d.modemTraffic.filter(function(m){return m.pn===n});
+      var todayBytes=clientModems.reduce(function(s,m){return s+(m.dayIn||0)+(m.dayOut||0)},0);
       var clientObj=(d.clients||[]).find(function(cl){return cl.portName===n});
       var lhGb=clientObj?((currentData.clientLastHourGb||{})[clientObj.id]||0):0;
       var lhStr=lhGb>0?(lhGb>=1?lhGb.toFixed(2)+' GB':Math.round(lhGb*1024)+' MB'):'—';
@@ -2457,11 +2459,9 @@ function renderClients(){
     if(c.portName)h+=' / <span style="font-family:monospace;font-size:11px;color:var(--text-3)">'+esc(c.portName)+'</span>';
     h+='</div>';
     // Metrics
-    var lastHourGbClient=Math.round(((currentData.clientLastHourGb||{})[c.id]||0)*100)/100;
-    var lastHourClientStr=lastHourGbClient>=1?lastHourGbClient.toFixed(2)+' GB':Math.round(lastHourGbClient*1024)+' MB';
-    h+='<div style="display:grid;grid-template-columns:repeat(6,1fr);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">';
-    var mets=[['МОДЕМОВ',''+modems.length,'var(--text-0)'],['ТАРИФ',tariffLabel,'var(--text-0)'],['БАЛАНС',Math.round(balance)+'\u20BD'+balWarn,balance>=0?'var(--text-0)':'var(--danger)'],['РАСХОД/МЕС',Math.round(cost)+'\u20BD','var(--accent)'],['ТРАФИК/МЕС',monthGbLive.toFixed(1)+' GB','var(--text-0)'],['ПОСЛ.ЧАС',lastHourGbClient>0?lastHourClientStr:'—','var(--text-0)']];
-    mets.forEach(function(met,mi){h+='<div style="padding:10px 8px;text-align:center'+(mi<5?';border-right:1px solid var(--border)':'')+'">'+'<div style="font-size:9px;font-weight:600;color:var(--text-3);letter-spacing:.5px;margin-bottom:4px">'+met[0]+'</div>'+'<div style="font-size:13px;font-weight:700;color:'+met[2]+'">'+met[1]+'</div></div>';});
+    h+='<div style="display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">';
+    var mets=[['МОДЕМОВ',''+modems.length,'var(--text-0)'],['ТАРИФ',tariffLabel,'var(--text-0)'],['БАЛАНС',Math.round(balance)+'\u20BD'+balWarn,balance>=0?'var(--text-0)':'var(--danger)'],['РАСХОД/МЕС',Math.round(cost)+'\u20BD','var(--accent)'],['ТРАФИК/МЕС',monthGbLive.toFixed(1)+' GB','var(--text-0)']];
+    mets.forEach(function(met,mi){h+='<div style="padding:10px 8px;text-align:center'+(mi<4?';border-right:1px solid var(--border)':'')+'">'+'<div style="font-size:9px;font-weight:600;color:var(--text-3);letter-spacing:.5px;margin-bottom:4px">'+met[0]+'</div>'+'<div style="font-size:13px;font-weight:700;color:'+met[2]+'">'+met[1]+'</div></div>';});
     h+='</div>';
     // Expandable modems
     h+='<div id="clientCard_'+c.id+'" style="display:none;padding:0 16px 14px;border-top:1px solid var(--border)">';
