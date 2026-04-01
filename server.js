@@ -5915,6 +5915,9 @@ app.get('/api/admin/clients/:id/closing_documents/:docId/pdf', authMiddleware, a
   }
 });
 
+// HTML escape for user-controlled data in printable documents
+function escHtml(s) { return String(s || '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+
 // Build printable HTML for act or bill
 function buildDocHtml(type, doc, client, billAmount) {
   const tc = tochkaConfig;
@@ -5933,12 +5936,12 @@ function buildDocHtml(type, doc, client, billAmount) {
   const buyerAddress = client.address || '';
 
   const hasBankDetails = bankAccount && bankName && bankBic;
-  const sellerBlock = `${sellerName}, ИНН/КПП ${sellerInn}/${sellerKpp}, ${sellerAddress}` +
-    (hasBankDetails ? `, р/с ${bankAccount}, в банке ${bankName}, БИК ${bankBic}` + (bankCorrAccount ? `, к/с ${bankCorrAccount}` : '') : '');
+  const sellerBlock = `${escHtml(sellerName)}, ИНН/КПП ${escHtml(sellerInn)}/${escHtml(sellerKpp)}, ${escHtml(sellerAddress)}` +
+    (hasBankDetails ? `, р/с ${escHtml(bankAccount)}, в банке ${escHtml(bankName)}, БИК ${escHtml(bankBic)}` + (bankCorrAccount ? `, к/с ${escHtml(bankCorrAccount)}` : '') : '');
 
-  const buyerBlock = `${buyerName}` +
-    (buyerInn ? `, ИНН${buyerKpp ? '/КПП' : ''} ${buyerInn}${buyerKpp ? '/' + buyerKpp : ''}` : '') +
-    (buyerAddress ? `, ${buyerAddress}` : '');
+  const buyerBlock = `${escHtml(buyerName)}` +
+    (buyerInn ? `, ИНН${buyerKpp ? '/КПП' : ''} ${escHtml(buyerInn)}${buyerKpp ? '/' + escHtml(buyerKpp) : ''}` : '') +
+    (buyerAddress ? `, ${escHtml(buyerAddress)}` : '');
 
   let tableRows = '';
   let totalSum = 0;
@@ -5957,8 +5960,8 @@ function buildDocHtml(type, doc, client, billAmount) {
     totalSum += amount;
     tableRows += `<tr>
       <td style="border:1px solid #ccc;padding:6px 8px;text-align:center">${idx + 1}</td>
-      <td style="border:1px solid #ccc;padding:6px 8px">${item.name || 'Услуги мобильных прокси'}</td>
-      <td style="border:1px solid #ccc;padding:6px 8px;text-align:center">${item.unit || 'услуга'}</td>
+      <td style="border:1px solid #ccc;padding:6px 8px">${escHtml(item.name || 'Услуги мобильных прокси')}</td>
+      <td style="border:1px solid #ccc;padding:6px 8px;text-align:center">${escHtml(item.unit || 'услуга')}</td>
       <td style="border:1px solid #ccc;padding:6px 8px;text-align:right">${qty.toLocaleString('ru-RU', { maximumFractionDigits: 3 })}</td>
       <td style="border:1px solid #ccc;padding:6px 8px;text-align:right">${price.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
       <td style="border:1px solid #ccc;padding:6px 8px;text-align:right;font-weight:600">${amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>

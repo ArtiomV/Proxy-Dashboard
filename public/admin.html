@@ -420,7 +420,7 @@
     <span id="crmStatus" style="font-size:11px;color:var(--text-3)"></span>
     <a href="https://crm.proxies.rent" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;margin-left:auto" title="Открыть в новом окне">↗ Открыть отдельно</a>
   </div>
-  <iframe id="crmFrame" src="" style="width:100%;height:calc(100vh - 100px);border:none;display:block" allow="clipboard-write"></iframe>
+  <iframe id="crmFrame" title="CRM" src="" style="width:100%;height:calc(100vh - 100px);border:none;display:block" allow="clipboard-write"></iframe>
 </div>
 
 <script>
@@ -2300,7 +2300,7 @@ function bulkReboot(){
   confirmDialog('Перезагрузить '+items.length+' модемов?',function(){
     var promises=items.map(function(imei){var s=window._bulkSel[imei];return fetch(API+'/api/admin/reboot',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,server:s.server})}).then(function(r){return r.json()})});
     Promise.all(promises).then(function(){showToast('Ребут отправлен для '+items.length+' модемов','success');clearBulkSel();setTimeout(loadData,5000)});
-  },'Перезагрузить','Массовый ребут',null,true);
+  },'Перезагрузить','Массовый ребут',true);
 }
 
 // ========== TASK 14: NOTIFICATION BELL ==========
