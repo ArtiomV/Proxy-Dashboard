@@ -19,6 +19,9 @@ const { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday } = requir
 const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator } = require('./src/utils/traffic');
 const { escHtml } = require('./src/utils/html');
 const { safeWriteFile: _safeWriteFile } = require('./src/utils/files');
+const { decodeJwtPayload, decodeJwtHeader, fetchTochkaJwks, jwkToPem, verifyJwtSignature } = require('./src/tochka/jwt');
+const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
+const { MONTH_NAMES_RU, buildActItemsFromLedger: _buildActItemsFromLedger, buildTochkaActBody: _buildTochkaActBody, buildTochkaBillBody: _buildTochkaBillBody, calculateMonthlyBillAmount: _calculateMonthlyBillAmount } = require('./src/tochka/documents');
 
 const DB_PATH = path.join(__dirname, 'dashboard.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -568,45 +571,9 @@ function saveTochkaConfig() { safeWriteFile(TOCHKA_CONFIG_FILE, JSON.stringify(t
 if (tochkaConfig.jwt) { saveTochkaConfig(); logger.info(`[Tochka] API configured (client_id: ${tochkaConfig.clientId})`); }
 else logger.info('[Tochka] No JWT token configured, bank integration disabled');
 
-// Tochka API helper — HTTPS requests to enter.tochka.com
+// Extracted to src/tochka/api.js
 function tochkaRequest(method, apiPath, body) {
-  return new Promise((resolve, reject) => {
-    const postData = body ? JSON.stringify(body) : null;
-    const headers = {
-      'Authorization': `Bearer ${tochkaConfig.jwt}`,
-      'Content-Type': 'application/json',
-      'Accept': 'application/json'
-    };
-    if (tochkaConfig.customerCode) headers['CustomerCode'] = tochkaConfig.customerCode;
-    if (postData) headers['Content-Length'] = Buffer.byteLength(postData);
-    const req = https.request({
-      hostname: 'enter.tochka.com',
-      port: 443,
-      path: apiPath,
-      method: method,
-      headers,
-      timeout: 30000
-    }, (res) => {
-      const chunks = [];
-      res.on('data', chunk => chunks.push(chunk));
-      res.on('end', () => {
-        const buf = Buffer.concat(chunks);
-        const ct = res.headers['content-type'] || '';
-        if (ct.includes('application/json')) {
-          try { resolve({ status: res.statusCode, data: JSON.parse(buf.toString()), headers: res.headers }); }
-          catch (e) { resolve({ status: res.statusCode, data: buf.toString(), headers: res.headers }); }
-        } else if (ct.includes('application/pdf') || ct.includes('application/octet-stream')) {
-          resolve({ status: res.statusCode, buffer: buf, headers: res.headers });
-        } else {
-          resolve({ status: res.statusCode, data: buf.toString(), headers: res.headers });
-        }
-      });
-    });
-    req.on('error', reject);
-    req.on('timeout', () => { req.destroy(); reject(new Error('Tochka API timeout')); });
-    if (postData) req.write(postData);
-    req.end();
-  });
+  return _tochkaRequest(tochkaConfig, method, apiPath, body);
 }
 
 // Helper: convert SQLite row to JS object with camelCase keys
@@ -638,323 +605,24 @@ function getAllBankPayments() {
   return dbStmts.getBankPayments.all().map(bankPaymentFromRow);
 }
 
-// Cache for Tochka JWKS public keys
-let tochkaJwksCache = { keys: null, fetchedAt: 0 };
-const JWKS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
-
-function base64urlDecode(str) {
-  let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
-  while (b64.length % 4) b64 += '=';
-  return Buffer.from(b64, 'base64');
-}
-
-function decodeJwtPayload(token) {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    return JSON.parse(base64urlDecode(parts[1]).toString('utf8'));
-  } catch (e) { return null; }
-}
-
-function decodeJwtHeader(token) {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    return JSON.parse(base64urlDecode(parts[0]).toString('utf8'));
-  } catch (e) { return null; }
-}
-
-// Fetch JWKS from Tochka Bank
-function fetchTochkaJwks() {
-  return new Promise((resolve, reject) => {
-    https.get('https://enter.tochka.com/uapi/open-banking/.well-known/jwks.json', { timeout: 10000 }, (res) => {
-      let data = '';
-      res.on('data', chunk => data += chunk);
-      res.on('end', () => {
-        try { resolve(JSON.parse(data)); }
-        catch (e) { reject(new Error('JWKS parse error: ' + e.message)); }
-      });
-    }).on('error', reject).on('timeout', function() { this.destroy(); reject(new Error('JWKS fetch timeout')); });
-  });
-}
-
-// Convert JWK RSA public key to PEM format
-function jwkToPem(jwk) {
-  const n = base64urlDecode(jwk.n);
-  const e = base64urlDecode(jwk.e);
-  // Build RSA public key in DER format
-  function encodeLength(len) {
-    if (len < 0x80) return Buffer.from([len]);
-    if (len < 0x100) return Buffer.from([0x81, len]);
-    return Buffer.from([0x82, (len >> 8) & 0xff, len & 0xff]);
-  }
-  function encodeDerInteger(buf) {
-    // Prepend 0x00 if high bit set (positive integer)
-    const needsPad = buf[0] & 0x80;
-    const content = needsPad ? Buffer.concat([Buffer.from([0x00]), buf]) : buf;
-    return Buffer.concat([Buffer.from([0x02]), encodeLength(content.length), content]);
-  }
-  const nDer = encodeDerInteger(n);
-  const eDer = encodeDerInteger(e);
-  const rsaSeqContent = Buffer.concat([nDer, eDer]);
-  const rsaSeq = Buffer.concat([Buffer.from([0x30]), encodeLength(rsaSeqContent.length), rsaSeqContent]);
-  // Wrap in BIT STRING
-  const bitString = Buffer.concat([Buffer.from([0x03]), encodeLength(rsaSeq.length + 1), Buffer.from([0x00]), rsaSeq]);
-  // RSA OID: 1.2.840.113549.1.1.1
-  const oid = Buffer.from([0x30, 0x0d, 0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x01, 0x01, 0x05, 0x00]);
-  const pubKeyContent = Buffer.concat([oid, bitString]);
-  const pubKey = Buffer.concat([Buffer.from([0x30]), encodeLength(pubKeyContent.length), pubKeyContent]);
-  const b64 = pubKey.toString('base64');
-  const lines = b64.match(/.{1,64}/g) || [];
-  return '-----BEGIN PUBLIC KEY-----\n' + lines.join('\n') + '\n-----END PUBLIC KEY-----\n';
-}
-
-// Verify JWT signature using cached JWKS
-async function verifyJwtSignature(token) {
-  const header = decodeJwtHeader(token);
-  const payload = decodeJwtPayload(token);
-  if (!header || !payload) return { verified: false, payload: null, reason: 'invalid_jwt_format' };
-
-  // Fetch/cache JWKS
-  const now = Date.now();
-  if (!tochkaJwksCache.keys || (now - tochkaJwksCache.fetchedAt) > JWKS_CACHE_TTL) {
-    try {
-      const jwks = await fetchTochkaJwks();
-      tochkaJwksCache = { keys: jwks.keys || [], fetchedAt: now };
-      logger.info(`[Tochka JWKS] Fetched ${tochkaJwksCache.keys.length} key(s)`);
-    } catch (e) {
-      logger.error('[Tochka JWKS] Failed to fetch keys:', e.message);
-      // If we have cached keys, use them even if expired
-      if (tochkaJwksCache.keys) {
-        logger.warn('[Tochka JWKS] Using expired cached keys');
-      } else {
-        // No keys at all — log warning but still return decoded payload (graceful degradation)
-        logger.warn('[Tochka JWKS] No cached keys, skipping signature verification');
-        return { verified: false, payload, reason: 'jwks_unavailable' };
-      }
-    }
-  }
-
-  // Find matching key
-  const kid = header.kid;
-  const alg = header.alg || 'RS256';
-  let matchingKey = kid ? tochkaJwksCache.keys.find(k => k.kid === kid) : tochkaJwksCache.keys[0];
-
-  if (!matchingKey) {
-    logger.warn(`[Tochka JWT] No matching key found for kid="${kid}"`);
-    return { verified: false, payload, reason: 'key_not_found' };
-  }
-
-  try {
-    const pem = jwkToPem(matchingKey);
-    const parts = token.split('.');
-    const signedData = parts[0] + '.' + parts[1];
-    const signature = base64urlDecode(parts[2]);
-
-    const algMap = { 'RS256': 'RSA-SHA256', 'RS384': 'RSA-SHA384', 'RS512': 'RSA-SHA512' };
-    const cryptoAlg = algMap[alg] || 'RSA-SHA256';
-
-    const verifier = crypto.createVerify(cryptoAlg);
-    verifier.update(signedData);
-    const isValid = verifier.verify(pem, signature);
-
-    return { verified: isValid, payload, reason: isValid ? 'ok' : 'signature_invalid' };
-  } catch (e) {
-    logger.error('[Tochka JWT] Verification error:', e.message);
-    return { verified: false, payload, reason: 'verification_error: ' + e.message };
-  }
-}
+// Extracted to src/tochka/jwt.js — decodeJwtPayload, decodeJwtHeader, fetchTochkaJwks, jwkToPem, verifyJwtSignature
 
 // Track last act/bill generation month to avoid duplicates
 let lastActGenerationMonth = '';
 let lastBillGenerationMonth = '';
 
-// Russian month names (prepositional case for "в январе")
-const MONTH_NAMES_RU = ['январе','феврале','марте','апреле','мае','июне','июле','августе','сентябре','октябре','ноябре','декабре'];
-
-// Helper: build Tochka closing document request body
-function buildTochkaActBody(client, period, actItems, actNumber) {
-  const [year, month] = period.split('-').map(Number);
-  const lastDay = new Date(year, month, 0).getDate();
-  const monthNameRu = MONTH_NAMES_RU[month - 1] || '';
-  const serviceName = `Услуги по обеспечению подключения к прокси-серверу в ${monthNameRu} ${year}г`;
-  const totalAmount = actItems.reduce((s, i) => s + (i.amount || 0), 0);
-  const isIP = client.inn && client.inn.length === 12;
-
-  // Build full counterparty name with address (ИНН/КПП добавляется Точкой автоматически)
-  let secondSideName = client.legalName || client.name;
-  if (client.address) {
-    secondSideName += `, ${client.address}`;
-  }
-
-  // Build Act object
-  // NB: поле "Основание" не поддерживается API Точки для закрывающих документов — заполняется вручную
-  const act = {
-    Positions: actItems.map((item, idx) => ({
-      positionName: serviceName,
-      quantity: item.quantity || 1,
-      unitCode: item.unit === 'ГБ' ? 'Гбайт' : (item.unit === 'шт' ? 'шт' : 'услуга.'),
-      totalAmount: item.amount || 0,
-      ndsKind: 'without_nds',
-      price: item.price || 0,
-      positionNumber: idx + 1
-    })),
-    actDate: `${period}-${String(lastDay).padStart(2, '0')}`,
-    number: actNumber,
-    totalAmount: Math.round(totalAmount * 100) / 100
-  };
-
-  return {
-    Data: {
-      accountId: tochkaConfig.accountId,
-      customerCode: tochkaConfig.customerCode,
-      SecondSide: {
-        secondSideType: isIP ? 'individual_entrepreneur' : 'legal_entity',
-        type: isIP ? 'ip' : 'company',
-        inn: client.inn || '',
-        taxCode: client.inn || '',
-        kpp: client.kpp || '',
-        name: secondSideName
-      },
-      Content: {
-        Act: act,
-        PackingList: {},
-        Invoicef: {},
-        Upd: {}
-      }
-    }
-  };
-}
-
+// Extracted to src/tochka/documents.js — buildTochkaActBody, buildActItemsFromLedger, buildTochkaBillBody, calculateMonthlyBillAmount, MONTH_NAMES_RU
 function buildActItemsFromLedger(client, period) {
-  const ledgerEntries = billingLedger[client.id] || [];
-  const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
-  const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
-  const totalCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
-  const modemCharges = monthCharges.filter(e => e.billing_type === 'per_modem');
-  const gbCharges = monthCharges.filter(e => e.billing_type !== 'per_modem');
-
-  const actItems = [];
-  if (gbCharges.length > 0) {
-    actItems.push({
-      name: 'Услуги мобильных прокси (трафик)',
-      quantity: Math.round(totalGb * 100) / 100,
-      unit: 'ГБ',
-      price: client.price || 23,
-      amount: Math.round(gbCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
-    });
-  }
-  if (modemCharges.length > 0) {
-    const modemCount = Math.max(...modemCharges.map(e => e.modem_count || 0)) || 1;
-    actItems.push({
-      name: 'Услуги мобильных прокси (аренда модемов)',
-      quantity: modemCount,
-      unit: 'шт',
-      price: client.price || 0,
-      amount: Math.round(modemCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
-    });
-  }
-  if (actItems.length === 0) {
-    actItems.push({
-      name: 'Услуги мобильных прокси',
-      quantity: Math.round(totalGb * 100) / 100 || 1,
-      unit: totalGb > 0 ? 'ГБ' : 'мес',
-      price: client.price || 23,
-      amount: totalCost
-    });
-  }
-  return { actItems, totalCost, monthCharges };
+  return _buildActItemsFromLedger(client, period, billingLedger);
 }
-
-// Helper: build Tochka bill (счёт на оплату) request body
+function buildTochkaActBody(client, period, actItems, actNumber) {
+  return _buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber);
+}
 function buildTochkaBillBody(client, amount, billNumber, billDate) {
-  const isIP = client.inn && client.inn.length === 12;
-
-  // Build full counterparty name with address (ИНН/КПП добавляется Точкой автоматически)
-  let secondSideName = client.legalName || client.name;
-  if (client.address) {
-    secondSideName += `, ${client.address}`;
-  }
-
-  return {
-    Data: {
-      accountId: tochkaConfig.accountId,
-      customerCode: tochkaConfig.customerCode,
-      SecondSide: {
-        secondSideType: isIP ? 'individual_entrepreneur' : 'legal_entity',
-        type: isIP ? 'ip' : 'company',
-        inn: client.inn || '',
-        taxCode: client.inn || '',
-        kpp: client.kpp || '',
-        name: secondSideName
-      },
-      Content: {
-        Invoice: {
-          Positions: [{
-            positionName: 'Предоплата за услуги мобильных прокси',
-            quantity: 1,
-            unitCode: 'услуга.',
-            totalAmount: amount,
-            ndsKind: 'without_nds',
-            price: amount,
-            positionNumber: 1
-          }],
-          invoiceDate: billDate,
-          number: billNumber,
-          totalAmount: amount
-        }
-      }
-    }
-  };
+  return _buildTochkaBillBody(tochkaConfig, client, amount, billNumber, billDate);
 }
-
-// Helper: calculate monthly bill amount for a client
 function calculateMonthlyBillAmount(client, cachedResults) {
-  let baseAmount = 0;
-
-  if (client.billingType === 'per_modem') {
-    // Fixed: price * modem count
-    let modemCount = 0;
-    if (cachedResults && cachedResults.length > 0) {
-      for (const data of cachedResults) {
-        if (typeof data.bw === 'object') {
-          for (const [portId, b] of Object.entries(data.bw)) {
-            if (b.portName === client.portName) modemCount++;
-          }
-        }
-      }
-    }
-    if (modemCount === 0) {
-      logger.warn(`[Bill] Cannot determine modemCount for ${client.name}, skipping`);
-      return 0;
-    }
-    baseAmount = client.price * modemCount;
-  } else {
-    // per_gb: sum charges from previous month
-    const now = new Date();
-    const prevMonth = new Date(now);
-    prevMonth.setMonth(prevMonth.getMonth() - 1);
-    const prevPeriod = prevMonth.toISOString().slice(0, 7); // YYYY-MM
-
-    const ledgerEntries = billingLedger[client.id] || [];
-    const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(prevPeriod));
-    baseAmount = monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0);
-
-    if (baseAmount <= 0) return 0; // no charges last month — skip
-  }
-
-  // Add negative balance (debt) to the amount
-  let totalAmount = baseAmount;
-  if ((client.balance || 0) < 0) {
-    totalAmount += Math.abs(client.balance);
-  }
-
-  // For per_gb: round up to nearest 10,000₽
-  if (client.billingType !== 'per_modem') {
-    totalAmount = Math.ceil(totalAmount / 10000) * 10000;
-  }
-
-  return Math.round(totalAmount * 100) / 100;
+  return _calculateMonthlyBillAmount(client, cachedResults, billingLedger);
 }
 
 let dailyTraffic = {}; // { portKey: { "2026-03-01": { in: bytes, out: bytes, portName }, ... } }
