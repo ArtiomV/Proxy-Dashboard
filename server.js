@@ -1039,48 +1039,56 @@ async function syncYesterdayTraffic() {
   }
 }
 
-// Post-correction: scale hourly data to match daily_traffic totals
-// Fixes gaps from restarts, missed hours, or stale snapshots
+// Post-correction: scale hourly data per-client to match daily_traffic
 function correctHourlyFromDaily(dateStr) {
   try {
-    // dateStr = 'YYYY-MM-DD' in MSK
-    // Convert to UTC range: MSK 00:00 = UTC (dateStr-1) 21:00, MSK 23:59 = UTC dateStr 20:59
     const utcStart = new Date(new Date(dateStr + 'T00:00:00Z').getTime() - 3 * 3600 * 1000)
       .toISOString().slice(0, 16).replace('T', ' ');
     const utcEnd = new Date(new Date(dateStr + 'T23:59:59Z').getTime() - 3 * 3600 * 1000)
       .toISOString().slice(0, 16).replace('T', ' ');
 
-    // Get daily_traffic total for this date
+    // Build daily total per client from daily_traffic
     const dtRows = db.prepare("SELECT port_name, bytes_in, bytes_out FROM daily_traffic WHERE date = ?").all(dateStr);
     if (!dtRows.length) return;
-    const dailyTotal = dtRows.reduce((s, r) => s + r.bytes_in + r.bytes_out, 0);
-    if (dailyTotal === 0) return;
+    const dailyByClient = {};
+    for (const r of dtRows) {
+      const pn = r.port_name; // e.g. S1_portXXX
+      // Find client_name via portKeyToPortName or known_modems
+      const clientName = portKeyToPortName[pn] || '';
+      if (!clientName) continue;
+      dailyByClient[clientName] = (dailyByClient[clientName] || 0) + r.bytes_in + r.bytes_out;
+    }
 
-    // Get hourly total for this MSK date
-    const htRow = db.prepare(
-      "SELECT SUM(bytes_in + bytes_out) as total FROM traffic_hourly WHERE hour_start >= ? AND hour_start <= ?"
-    ).get(utcStart, utcEnd);
-    const hourlyTotal = htRow?.total || 0;
-
-    if (hourlyTotal === 0) return; // No hourly data at all — can't scale
-    const ratio = dailyTotal / hourlyTotal;
-
-    // Only correct if deviation > 5%
-    if (ratio > 0.95 && ratio < 1.05) return;
-
-    // Scale all hourly entries for this date
-    const entries = db.prepare(
-      "SELECT id, bytes_in, bytes_out FROM traffic_hourly WHERE hour_start >= ? AND hour_start <= ?"
+    // Build hourly total per client
+    const htRows = db.prepare(
+      "SELECT client_name, SUM(bytes_in+bytes_out) as total FROM traffic_hourly WHERE hour_start >= ? AND hour_start <= ? AND client_name != '' GROUP BY client_name"
     ).all(utcStart, utcEnd);
+    const hourlyByClient = {};
+    for (const r of htRows) hourlyByClient[r.client_name] = r.total;
 
+    // Scale per client
+    let totalFixed = 0;
     db.transaction(() => {
-      for (const e of entries) {
-        db.prepare("UPDATE traffic_hourly SET bytes_in = ?, bytes_out = ?, corrected = 1 WHERE id = ?")
-          .run(Math.round(e.bytes_in * ratio), Math.round(e.bytes_out * ratio), e.id);
+      for (const [client, dailyTotal] of Object.entries(dailyByClient)) {
+        const hourlyTotal = hourlyByClient[client] || 0;
+        if (hourlyTotal === 0 || dailyTotal === 0) continue;
+        const ratio = dailyTotal / hourlyTotal;
+        if (ratio > 0.95 && ratio < 1.05) continue;
+
+        const entries = db.prepare(
+          "SELECT id, bytes_in, bytes_out FROM traffic_hourly WHERE client_name = ? AND hour_start >= ? AND hour_start <= ?"
+        ).all(client, utcStart, utcEnd);
+
+        for (const e of entries) {
+          db.prepare("UPDATE traffic_hourly SET bytes_in = ?, bytes_out = ?, corrected = 1 WHERE id = ?")
+            .run(Math.round(e.bytes_in * ratio), Math.round(e.bytes_out * ratio), e.id);
+          totalFixed++;
+        }
+        logger.info(`[HourlyCorrection] ${dateStr} ${client}: ratio=${ratio.toFixed(3)} (daily=${Math.round(dailyTotal/1073741824)}GB, hourly=${Math.round(hourlyTotal/1073741824)}GB)`);
       }
     })();
 
-    logger.info(`[HourlyCorrection] ${dateStr}: scaled ${entries.length} entries by ${ratio.toFixed(3)} (daily=${Math.round(dailyTotal/1073741824)}GB, hourly was ${Math.round(hourlyTotal/1073741824)}GB)`);
+    if (totalFixed > 0) logger.info(`[HourlyCorrection] ${dateStr}: corrected ${totalFixed} entries`);
   } catch (e) {
     logger.error(`[HourlyCorrection] Error for ${dateStr}:`, e.message);
   }
@@ -1115,7 +1123,8 @@ function loadHourlySnapshots() {
   } catch (e) {}
 }
 loadHourlySnapshots();
-let _hourlySnapshotStale = true; // After restart, first run only updates snapshots without writing to DB
+const _hourlyStartedAt = Date.now(); // Don't write hourly data until snapshots have aged >= 30 min
+const HOURLY_WARMUP_MS = 30 * 60 * 1000;
 
 async function aggregateHourlyTraffic() {
   try {
@@ -1179,7 +1188,7 @@ async function aggregateHourlyTraffic() {
           const snap = hourlyDaySnapshots[snapKey];
           // After restart: first pass only refreshes snapshots, doesn't write to DB
           // This prevents bogus increments from stale snapshots
-          if (!_hourlySnapshotStale && snap) {
+          if ((Date.now() - _hourlyStartedAt >= HOURLY_WARMUP_MS) && snap) {
             if (snap.date === todayStr) {
               const incIn  = Math.max(0, dayIn  - snap.in);
               const incOut = Math.max(0, dayOut - snap.out);
@@ -1201,9 +1210,9 @@ async function aggregateHourlyTraffic() {
     });
     batch();
     saveHourlySnapshots();
-    if (_hourlySnapshotStale) {
-      _hourlySnapshotStale = false;
-      logger.info(`[HourlyAgg] Snapshots refreshed after restart (${Object.keys(hourlyDaySnapshots).length} ports), next run will record data`);
+    const warmupRemaining = Math.max(0, HOURLY_WARMUP_MS - (Date.now() - _hourlyStartedAt));
+    if (warmupRemaining > 0) {
+      logger.info(`[HourlyAgg] Warmup: snapshots updated (${Object.keys(hourlyDaySnapshots).length} ports), recording starts in ${Math.round(warmupRemaining / 60000)} min`);
     } else {
       logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
     }

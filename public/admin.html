@@ -167,7 +167,11 @@
 
       <div class="analytics-card">
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <h3 style="margin:0">Потребление по дням</h3>
+          <div style="display:flex;align-items:center;gap:8px">
+            <button onclick="shiftDailyMonth(-1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">←</button>
+            <h3 style="margin:0" id="dailyMonthLabel">Потребление по дням</h3>
+            <button onclick="shiftDailyMonth(1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">→</button>
+          </div>
           <div style="display:flex;align-items:center;gap:8px">
             <div id="dailyClientLegend" style="display:flex;flex-wrap:wrap;gap:10px"></div>
             <select id="dailyServerFilter" onchange="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
@@ -1677,6 +1681,14 @@ function showHeatTT(di,hr,event,cell){
   tt.style.left=x+'px';tt.style.top=y+'px';
 }
 
+var _dailyMonthOffset=0; // 0=current, -1=prev, etc
+var _MONTHS_RU_NOM=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+function shiftDailyMonth(dir){
+  _dailyMonthOffset+=dir;
+  if(_dailyMonthOffset>0)_dailyMonthOffset=0;
+  if(_dailyMonthOffset<-11)_dailyMonthOffset=-11;
+  renderDailyClientChart(window._dailyTrafficCache);
+}
 function renderDailyClientChart(data,cc){
   if(!cc)cc=getChartColors();
   if(!data)return;
@@ -1706,11 +1718,13 @@ function renderDailyClientChart(data,cc){
     sel.value=serverFilter;
   }
 
-  // Build date labels for current month
+  // Build date labels for selected month
   var now=new Date();
-  var year=now.getFullYear(),month=now.getMonth();
+  var targetDate=new Date(now.getFullYear(),now.getMonth()+_dailyMonthOffset,1);
+  var year=targetDate.getFullYear(),month=targetDate.getMonth();
   var daysInMonth=new Date(year,month+1,0).getDate();
-  var today=now.getDate();
+  var isCurrentMonth=(_dailyMonthOffset===0);
+  var today=isCurrentMonth?now.getDate():daysInMonth;
   var labels=[];
   for(var d=1;d<=Math.min(today,daysInMonth);d++){
     var dd=String(d).padStart(2,'0');
@@ -1718,6 +1732,9 @@ function renderDailyClientChart(data,cc){
     labels.push(year+'-'+mm+'-'+dd);
   }
   var displayLabels=labels.map(function(l){return l.slice(8)+'.'+l.slice(5,7)});
+  // Update month label
+  var lbl=document.getElementById('dailyMonthLabel');
+  if(lbl)lbl.textContent=_MONTHS_RU_NOM[month]+' '+year;
 
   var datasets;
   var clients;
