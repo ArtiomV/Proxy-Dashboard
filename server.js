@@ -5819,10 +5819,10 @@ const httpServer = app.listen(PORT, () => {
       const ATTEMPT_OFFSETS = [0, 60, 120, 180, 240]; // seconds after :00 → :00, :01, :02, :03, :04
       let attemptIdx = 0;
 
-      // Target is always the hour that just ended (now - 1h), computed once at loop start
-      const targetH = new Date();
-      targetH.setHours(targetH.getHours() - 1, 0, 0, 0);
-      const targetHourStr = targetH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
+      // Target is always the hour that just ended — use UTC methods to avoid timezone/rounding issues
+      const nowMs = Date.now();
+      const currentHourMs = nowMs - (nowMs % 3600000); // round down to current hour start
+      const targetHourStr = new Date(currentHourMs - 3600000).toISOString().slice(0, 13).replace('T', ' ') + ':00';
 
       // Skip if already recorded (e.g. after restart)
       if (_hourlyLastRecordedHour === targetHourStr) {
