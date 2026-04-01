@@ -1039,60 +1039,8 @@ async function syncYesterdayTraffic() {
   }
 }
 
-// Post-correction: scale hourly data per-client to match daily_traffic
-function correctHourlyFromDaily(dateStr) {
-  try {
-    const utcStart = new Date(new Date(dateStr + 'T00:00:00Z').getTime() - 3 * 3600 * 1000)
-      .toISOString().slice(0, 16).replace('T', ' ');
-    const utcEnd = new Date(new Date(dateStr + 'T23:59:59Z').getTime() - 3 * 3600 * 1000)
-      .toISOString().slice(0, 16).replace('T', ' ');
-
-    // Build daily total per client from daily_traffic
-    const dtRows = db.prepare("SELECT port_name, bytes_in, bytes_out FROM daily_traffic WHERE date = ?").all(dateStr);
-    if (!dtRows.length) return;
-    const dailyByClient = {};
-    for (const r of dtRows) {
-      const pn = r.port_name; // e.g. S1_portXXX
-      // Find client_name via portKeyToPortName or known_modems
-      const clientName = portKeyToPortName[pn] || '';
-      if (!clientName) continue;
-      dailyByClient[clientName] = (dailyByClient[clientName] || 0) + r.bytes_in + r.bytes_out;
-    }
-
-    // Build hourly total per client
-    const htRows = db.prepare(
-      "SELECT client_name, SUM(bytes_in+bytes_out) as total FROM traffic_hourly WHERE hour_start >= ? AND hour_start <= ? AND client_name != '' GROUP BY client_name"
-    ).all(utcStart, utcEnd);
-    const hourlyByClient = {};
-    for (const r of htRows) hourlyByClient[r.client_name] = r.total;
-
-    // Scale per client
-    let totalFixed = 0;
-    db.transaction(() => {
-      for (const [client, dailyTotal] of Object.entries(dailyByClient)) {
-        const hourlyTotal = hourlyByClient[client] || 0;
-        if (hourlyTotal === 0 || dailyTotal === 0) continue;
-        const ratio = dailyTotal / hourlyTotal;
-        if (ratio > 0.95 && ratio < 1.05) continue;
-
-        const entries = db.prepare(
-          "SELECT id, bytes_in, bytes_out FROM traffic_hourly WHERE client_name = ? AND hour_start >= ? AND hour_start <= ?"
-        ).all(client, utcStart, utcEnd);
-
-        for (const e of entries) {
-          db.prepare("UPDATE traffic_hourly SET bytes_in = ?, bytes_out = ?, corrected = 1 WHERE id = ?")
-            .run(Math.round(e.bytes_in * ratio), Math.round(e.bytes_out * ratio), e.id);
-          totalFixed++;
-        }
-        logger.info(`[HourlyCorrection] ${dateStr} ${client}: ratio=${ratio.toFixed(3)} (daily=${Math.round(dailyTotal/1073741824)}GB, hourly=${Math.round(hourlyTotal/1073741824)}GB)`);
-      }
-    })();
-
-    if (totalFixed > 0) logger.info(`[HourlyCorrection] ${dateStr}: corrected ${totalFixed} entries`);
-  } catch (e) {
-    logger.error(`[HourlyCorrection] Error for ${dateStr}:`, e.message);
-  }
-}
+// Removed: correctHourlyFromDaily — hourly data should be correct at write time.
+// Gaps from restarts are expected; daily_traffic is the source of truth for billing.
 
 function saveDailyTraffic() {
   try {
@@ -6433,11 +6381,6 @@ const httpServer = app.listen(PORT, () => {
   scheduleRepeating(1, 0, 'DailyBilling', runDailyBilling);
 
   // Post-correct hourly data at 01:30 UTC (04:30 MSK) — after daily sync + billing
-  scheduleRepeating(1, 30, 'HourlyCorrection', async () => {
-    const yesterday = getMoscowYesterday();
-    correctHourlyFromDaily(yesterday);
-  });
-
   // Monthly reconciliation at 03:30 UTC (06:30 MSK) on 1st of month — after TopHosts, before acts
   scheduleRepeating(3, 30, 'MonthlyReconciliation', runMonthlyReconciliation);
 
