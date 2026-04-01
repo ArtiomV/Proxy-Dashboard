@@ -1215,7 +1215,7 @@ function renderAccSubTab(name){
     hc+='<div style="width:4px;flex-shrink:0"></div>';
     hc+='<div style="flex:2.2;padding:0 10px;min-width:0">Клиент</div>';
     hc+='<div style="flex:0.7;text-align:center">Live</div>';
-    hc+='<div style="flex:1;text-align:center">Сегодня</div>';
+    hc+='<div style="flex:1;text-align:center">Посл.час</div>';
     hc+='<div style="flex:1;text-align:center">Вчера</div>';
     hc+='<div style="flex:1;text-align:center;font-weight:600">Месяц</div>';
     hc+='<div style="flex:1;text-align:center">Пр.месяц</div>';
@@ -1230,7 +1230,9 @@ function renderAccSubTab(name){
       var sharePct=pct(total,totalAllOv);
       // Compute today, yesterday, month from modemTraffic
       var clientModems=d.modemTraffic.filter(function(m){return m.pn===n});
-      var todayBytes=clientModems.reduce(function(s,m){return s+(m.dayIn||0)+(m.dayOut||0)},0);
+      var clientObj=(d.clients||[]).find(function(cl){return cl.portName===n});
+      var lhGb=clientObj?((currentData.clientLastHourGb||{})[clientObj.id]||0):0;
+      var lhStr=lhGb>0?(lhGb>=1?lhGb.toFixed(2)+' GB':Math.round(lhGb*1024)+' MB'):'—';
       var yestBytes=clientModems.reduce(function(s,m){return s+(m.yestIn||0)+(m.yestOut||0)},0);
       var monBytes=clientModems.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
       var prevMonBytes=clientModems.reduce(function(s,m){return s+(m.prevIn||0)+(m.prevOut||0)},0);
@@ -1272,7 +1274,7 @@ function renderAccSubTab(name){
       hc+='<div style="width:4px;height:36px;background:'+clientColor+';flex-shrink:0;border-radius:2px 0 0 2px"></div>';
       hc+='<div style="flex:2.2;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+esc(n)+'</div>';
       hc+='<div style="flex:0.7;text-align:center;font-size:11px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</div>';
-      hc+='<div style="flex:1;text-align:center;font-size:11px;font-family:var(--font-mono)">'+fmtGb(todayBytes)+'</div>';
+      hc+='<div style="flex:1;text-align:center;font-size:11px;font-family:var(--font-mono);color:'+(lhGb>0?'var(--text-0)':'var(--text-3)')+'">'+lhStr+'</div>';
       hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(yestBytes)+'</div>';
       hc+='<div style="flex:1;text-align:center;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(monBytes)+'</div>';
       hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(prevMonBytes)+'</div>';
