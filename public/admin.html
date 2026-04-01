@@ -169,7 +169,7 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <div style="display:flex;align-items:center;gap:8px">
             <button onclick="shiftDailyMonth(-1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">←</button>
-            <h3 style="margin:0" id="dailyMonthLabel">Потребление по дням</h3>
+            <h3 style="margin:0;min-width:140px;text-align:center" id="dailyMonthLabel">Потребление по дням</h3>
             <button onclick="shiftDailyMonth(1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">→</button>
           </div>
           <div style="display:flex;align-items:center;gap:8px">
@@ -1218,6 +1218,7 @@ function renderAccSubTab(name){
     hc+='<div style="flex:1;text-align:center">Сегодня</div>';
     hc+='<div style="flex:1;text-align:center">Вчера</div>';
     hc+='<div style="flex:1;text-align:center;font-weight:600">Месяц</div>';
+    hc+='<div style="flex:1;text-align:center">Пр.месяц</div>';
     hc+='<div style="flex:0.9;text-align:center">Тренд</div>';
     hc+='<div style="flex:1.4;padding:0 8px">Доля</div>';
     hc+='<div style="flex:0.5;text-align:center;padding-right:8px">%</div>';
@@ -1232,6 +1233,7 @@ function renderAccSubTab(name){
       var todayBytes=clientModems.reduce(function(s,m){return s+(m.dayIn||0)+(m.dayOut||0)},0);
       var yestBytes=clientModems.reduce(function(s,m){return s+(m.yestIn||0)+(m.yestOut||0)},0);
       var monBytes=clientModems.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
+      var prevMonBytes=clientModems.reduce(function(s,m){return s+(m.prevIn||0)+(m.prevOut||0)},0);
       // Trend: today vs average daily
       var sumDayIn=clientModems.reduce(function(s,m){return s+m.dayIn},0);
       var sumMonIn=clientModems.reduce(function(s,m){return s+m.monIn},0);
@@ -1273,6 +1275,7 @@ function renderAccSubTab(name){
       hc+='<div style="flex:1;text-align:center;font-size:11px;font-family:var(--font-mono)">'+fmtGb(todayBytes)+'</div>';
       hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(yestBytes)+'</div>';
       hc+='<div style="flex:1;text-align:center;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(monBytes)+'</div>';
+      hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(prevMonBytes)+'</div>';
       hc+='<div style="flex:0.9;display:flex;align-items:center;justify-content:center">';
       hc+=sparkH;
       hc+='</div>';
@@ -2918,6 +2921,7 @@ function renderOpsHistory(clientId) {
         else if (e.type === 'adjustment') { typeLabel = 'Коррекция'; typeColor = 'color:var(--accent)'; amountStr = ((e.amount || 0) >= 0 ? '+' : '') + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = (e.amount || 0) >= 0 ? 'color:var(--success)' : 'color:var(--danger)'; }
         else if (e.type === 'bank_payment') { typeLabel = '\u{1F3E6} \u0411\u0430\u043D\u043A'; typeColor = 'color:#6366f1'; amountStr = '+' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--success)'; }
         else if (e.type === 'manual_charge') { typeLabel = 'Ручное списание'; typeColor = 'color:var(--danger)'; amountStr = '-' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--danger)'; }
+        else if (e.type === 'correction') { typeLabel = 'Корректировка'; typeColor = 'color:var(--warning)'; amountStr = '-' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--warning)'; }
         else { typeLabel = e.type || '\u2014'; amountStr = (e.cost || e.amount || 0) + ' \u20BD'; }
         var dateStr = '\u2014';
         var dateSource = e.date || e.timestamp;

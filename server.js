@@ -1062,17 +1062,18 @@ let hourlyDaySnapshots = {}; // { 'SRV_nick': { in: bytes, out: bytes, date: 'YY
 
 // Persist snapshots to SQLite so they survive server restarts
 function saveHourlySnapshots() {
-  try { _kvSet.run('hourly_day_snapshots', JSON.stringify(hourlyDaySnapshots)); } catch (e) {}
+  try { db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES ('hourly_day_snapshots', ?, datetime('now'))").run(JSON.stringify(hourlyDaySnapshots)); } catch (e) {}
 }
 function loadHourlySnapshots() {
   try {
-    const row = _kvGet.get('hourly_day_snapshots');
+    const row = db.prepare("SELECT value FROM kv_store WHERE key = 'hourly_day_snapshots'").get();
     if (row) { hourlyDaySnapshots = JSON.parse(row.value); logger.info(`[HourlyAgg] Restored ${Object.keys(hourlyDaySnapshots).length} snapshots from DB`); }
-  } catch (e) {}
+  } catch (e) { logger.error('[HourlyAgg] Failed to load snapshots:', e.message); }
 }
 loadHourlySnapshots();
-const _hourlyStartedAt = Date.now(); // Don't write hourly data until snapshots have aged >= 30 min
-const HOURLY_WARMUP_MS = 30 * 60 * 1000;
+const _hourlyStartedAt = Date.now();
+// If snapshots restored from DB — they're fresh, short warmup. If not — need longer warmup.
+const HOURLY_WARMUP_MS = Object.keys(hourlyDaySnapshots).length > 0 ? 5 * 60 * 1000 : 30 * 60 * 1000;
 
 async function aggregateHourlyTraffic() {
   try {
@@ -3656,12 +3657,12 @@ app.post('/api/admin/clients/:id/charge', authMiddleware, adminMiddleware, (req,
   }
 
   const { balanceBefore, balanceAfter } = atomicDebit(client.id, parsedAmount, {
-    type: 'manual_charge',
+    type: 'correction',
     date: date,
     timestamp: new Date().toISOString(),
     amount: parsedAmount,
     currency: client.currency || 'RUB',
-    note: note || 'Ручное списание'
+    note: note || 'Корректировка: ручное списание'
   });
 
   saveClients(clients);
@@ -3743,17 +3744,14 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
   entries.splice(idx, 1);
   billingLedger[client.id] = entries;
 
-  // Recalculate balance from scratch using all remaining ledger entries
-  let recalcBalance = 0;
-  for (const e of entries) {
-    const isCredit = ['payment', 'bank_payment', 'credit', 'manual_credit', 'adjustment_credit', 'adjustment'].includes(e.type);
-    const amt = e.amount || e.cost || 0;
-    if (isCredit) recalcBalance += amt;
-    else recalcBalance -= amt;
-  }
-  recalcBalance = Math.round(recalcBalance * 100) / 100;
-  _clientUpdateBalance.run(recalcBalance, client.id);
-  client.balance = recalcBalance;
+  // Reverse the deleted entry's effect on balance
+  // Use stored balance_before/balance_after to determine exact impact
+  const entryImpact = (entry.balance_after != null && entry.balance_before != null)
+    ? entry.balance_after - entry.balance_before
+    : ((['payment', 'bank_payment', 'credit'].includes(entry.type)) ? (entry.amount || 0) : -(entry.amount || entry.cost || 0));
+  const newBalance = Math.round((client.balance - entryImpact) * 100) / 100;
+  _clientUpdateBalance.run(newBalance, client.id);
+  client.balance = newBalance;
 
   saveBillingLedger();
   logger.info(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, recalculated balance: ${client.balance}`);
@@ -3773,12 +3771,12 @@ app.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddlewar
   
   const adjustment = parseFloat(amount);
   const ledgerEntry = {
-    type: adjustment >= 0 ? 'adjustment_credit' : 'adjustment_debit',
+    type: 'correction',
     date: new Date().toISOString().slice(0, 10),
     timestamp: new Date().toISOString(),
     amount: Math.abs(adjustment),
     currency: client.currency || 'RUB',
-    note: note || 'Ручная корректировка баланса'
+    note: note || 'Корректировка баланса'
   };
   let balanceBefore, balanceAfter;
   if (adjustment >= 0) {
