@@ -3367,6 +3367,29 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       }
     }
 
+    // Per-client last completed hour traffic from traffic_hourly
+    const clientLastHourGb = {};
+    const clientTodayGb = {};
+    {
+      // Last completed hour
+      const lastHourRow = db.prepare(`SELECT hour_start FROM traffic_hourly ORDER BY hour_start DESC LIMIT 1`).get();
+      if (lastHourRow) {
+        const rows = db.prepare(`SELECT client_name, SUM(bytes_in + bytes_out) as total FROM traffic_hourly WHERE hour_start = ? AND client_name != '' GROUP BY client_name`).all(lastHourRow.hour_start);
+        for (const r of rows) {
+          const cid = clients.find(c => c.portName === r.client_name)?.id;
+          if (cid) clientLastHourGb[cid] = trafficBytesToGb(r.total);
+        }
+      }
+      // Today per client from live data
+      for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+        const pn = bwData.portName;
+        if (!pn || !portNameToClientId[pn]) continue;
+        const cid = portNameToClientId[pn];
+        if (!clientTodayGb[cid]) clientTodayGb[cid] = 0;
+        clientTodayGb[cid] += trafficBytesToGb(parseBwToBytes(bwData.bandwidth_bytes_day_in) + parseBwToBytes(bwData.bandwidth_bytes_day_out));
+      }
+    }
+
     // Override yesterday bandwidth with recorded daily_traffic (stable, not degraded by modem restarts)
     const _yesterdayStr = getMoscowYesterday();
     for (const [portId, bwData] of Object.entries(merged.bandwidth || {})) {
@@ -3381,6 +3404,8 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       clientMonthCharges,
       clientMonthGb,
       clientLiveMonthGb,
+      clientLastHourGb,
+      clientTodayGb,
       ...merged,
       servers,
       clients: sanitizedClients,
@@ -6388,35 +6413,177 @@ const httpServer = app.listen(PORT, () => {
   // Auto-generate bills on 1st of each month at 08:10 Moscow (05:10 UTC)
   scheduleRepeating(5, 10, 'MonthlyBills', autoGenerateMonthlyBills);
 
-  // Hourly traffic aggregation at :05 each hour (5 min buffer for ProxySmart counter updates)
-  (function scheduleHourlyAgg() {
+  // Resilient hourly traffic aggregation with retry logic:
+  // Attempts at :59, :00, :01, :02, :03 (5 tries). If all fail — fallback at :30 (interpolation).
+  let _hourlyLastRecordedHour = null; // e.g. '2026-03-31 12:00'
+  (function scheduleHourlyAggRetry() {
+    // Find next :59
     const now = new Date();
-    const next = new Date(now);
-    next.setMinutes(5, 0, 0);
-    if (next <= now) next.setHours(next.getHours() + 1);
-    const msUntil = next - now;
-    logger.info(`[HourlyAgg] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
-    setTimeout(() => {
-      aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg]', e.message));
-      setInterval(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg]', e.message)), 60 * 60 * 1000);
+    const next59 = new Date(now);
+    next59.setMinutes(59, 0, 0);
+    if (next59 <= now) next59.setTime(next59.getTime() + 60 * 60 * 1000);
+    const msUntil = next59 - now;
+    logger.info(`[HourlyAgg] Resilient schedule: first attempt at ${next59.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
+
+    setTimeout(function hourlyLoop() {
+      // Target hour: the hour that just ended (or is about to end)
+      // At :59 we capture the snapshot for the current hour
+      // At :00-:03 we record the increment for the previous hour
+      const ATTEMPT_OFFSETS = [0, 60, 120, 180, 240]; // seconds after :59 → :59, :00, :01, :02, :03
+      let attemptIdx = 0;
+
+      function tryRecord() {
+        const nowA = new Date();
+        // The target hour_start is the hour that's ending/just ended
+        const targetH = new Date(nowA);
+        if (targetH.getMinutes() >= 59) {
+          // We're at :59 — target is this hour (e.g. 12:00 if now is 12:59)
+          targetH.setMinutes(0, 0, 0);
+        } else {
+          // We're at :00-:03 — target is previous hour
+          targetH.setHours(targetH.getHours() - 1, 0, 0, 0);
+        }
+        const targetHourStr = targetH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
+
+        // Skip if already recorded
+        if (_hourlyLastRecordedHour === targetHourStr) {
+          logger.info(`[HourlyAgg] Hour ${targetHourStr} already recorded, skipping`);
+          return;
+        }
+
+        aggregateHourlyTraffic().then(() => {
+          // Check if we actually inserted rows for this hour
+          const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
+          if (check && check.cnt > 0) {
+            _hourlyLastRecordedHour = targetHourStr;
+            logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${check.cnt} rows)`);
+          } else {
+            attemptIdx++;
+            if (attemptIdx < ATTEMPT_OFFSETS.length) {
+              const delay = (ATTEMPT_OFFSETS[attemptIdx] - ATTEMPT_OFFSETS[attemptIdx - 1]) * 1000;
+              logger.warn(`[HourlyAgg] Attempt ${attemptIdx}/5 for ${targetHourStr}: no data recorded, retry in ${delay / 1000}s`);
+              setTimeout(tryRecord, delay);
+            } else {
+              logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr}, scheduling fallback at :30`);
+              scheduleFallbackInterpolation(targetHourStr);
+            }
+          }
+        }).catch(e => {
+          logger.error(`[HourlyAgg] Attempt ${attemptIdx + 1}/5 error: ${e.message}`);
+          attemptIdx++;
+          if (attemptIdx < ATTEMPT_OFFSETS.length) {
+            const delay = (ATTEMPT_OFFSETS[attemptIdx] - ATTEMPT_OFFSETS[attemptIdx - 1]) * 1000;
+            setTimeout(tryRecord, delay);
+          } else {
+            logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr}, scheduling fallback at :30`);
+            scheduleFallbackInterpolation(targetHourStr);
+          }
+        });
+      }
+
+      tryRecord();
+      // Schedule next hour's :59
+      setTimeout(hourlyLoop, 60 * 60 * 1000);
     }, msUntil);
   })();
 
-  // Startup warmup: capture snapshots immediately + retry at 5 and 10 min
-  // This ensures that after restart, we quickly have baseline snapshots for the next hourly run
+  // Fallback interpolation: runs at :30, takes accumulated traffic since last snapshot,
+  // splits 50/50 between the missed hour and the current one
+  function scheduleFallbackInterpolation(missedHourStr) {
+    const now = new Date();
+    const next30 = new Date(now);
+    next30.setMinutes(30, 0, 0);
+    if (next30 <= now) next30.setTime(next30.getTime() + 60 * 60 * 1000);
+    const delay = next30 - now;
+    logger.info(`[HourlyAgg:Fallback] Will interpolate for ${missedHourStr} at ${next30.toISOString()}`);
+
+    setTimeout(async () => {
+      if (_hourlyLastRecordedHour === missedHourStr) return; // recorded in meantime
+      try {
+        const results = await fetchAllServersDataCached();
+        if (Object.keys(portKeyToPortName).length === 0) refreshPortKeyMapping(results);
+        const pnMap = portKeyToPortName;
+        const todayStr = new Date().toISOString().slice(0, 10);
+        // Current hour_start (the hour we're in now at :30)
+        const curH = new Date();
+        curH.setMinutes(0, 0, 0);
+        const curHourStr = curH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
+
+        let countMissed = 0, countCur = 0;
+        const batch = db.transaction(() => {
+          for (const data of results) {
+            const srv = data.serverName || '';
+            const statusArr = Array.isArray(data.status) ? data.status : [];
+            const portsMap = data.ports || {};
+            const portIdInfo = {};
+            for (const m of statusArr) {
+              const md = m.modem_details || {};
+              const imei = md.IMEI || '';
+              const nick = md.NICK || imei;
+              const nd = m.net_details || {};
+              const operator = nd.CELLOP || md.OPERATOR || '';
+              if (!imei) continue;
+              const modemPorts = portsMap[imei] || [];
+              for (const p of modemPorts) {
+                portIdInfo[p.portID] = { nick, operator, clientName: p.portName || '' };
+              }
+            }
+
+            if (typeof data.bw !== 'object') continue;
+            for (const [portId, b] of Object.entries(data.bw)) {
+              const info = portIdInfo[portId] || {};
+              const nick = info.nick || pnMap[srv + '_' + portId] || portId;
+              let rawOp = (info.operator || '').toLowerCase().trim();
+              if (!rawOp && nick) {
+                const meta = db.prepare('SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1').get(srv, nick);
+                if (meta && meta.operator) rawOp = meta.operator.toLowerCase().trim();
+              }
+              const isRO = srv === 'S2' || srv.indexOf('S2') === 0;
+              const opMap = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
+              const operator = opMap[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
+              const clientName = info.clientName || b.portName || '';
+              const fullPortId = srv + '_' + portId;
+              const snapKey = fullPortId;
+
+              const dayIn = parseBwToBytes(b.bandwidth_bytes_day_in);
+              const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
+              const snap = hourlyDaySnapshots[snapKey];
+
+              if (snap && snap.date === todayStr) {
+                const totalIncIn = Math.max(0, dayIn - snap.in);
+                const totalIncOut = Math.max(0, dayOut - snap.out);
+                if (totalIncIn + totalIncOut > 0) {
+                  // Split 50/50 between missed hour and current hour
+                  const halfIn = Math.round(totalIncIn / 2);
+                  const halfOut = Math.round(totalIncOut / 2);
+                  _htUpsert.run(srv, fullPortId, nick, operator, clientName, missedHourStr, halfIn, halfOut);
+                  _htUpsert.run(srv, fullPortId, nick, operator, clientName, curHourStr, totalIncIn - halfIn, totalIncOut - halfOut);
+                  countMissed++; countCur++;
+                }
+              }
+              hourlyDaySnapshots[snapKey] = { in: dayIn, out: dayOut, date: todayStr };
+            }
+          }
+        });
+        batch();
+        saveHourlySnapshots();
+        _hourlyLastRecordedHour = missedHourStr;
+        logger.info(`[HourlyAgg:Fallback] Interpolated ${countMissed} entries for ${missedHourStr}, ${countCur} for ${curHourStr}`);
+      } catch (e) {
+        logger.error(`[HourlyAgg:Fallback] Error: ${e.message}`);
+      }
+    }, delay);
+  }
+
+  // Startup: capture snapshots immediately for warmup
   const snapshotCount = Object.keys(hourlyDaySnapshots).length;
   if (snapshotCount === 0) {
-    logger.info('[HourlyAgg] No snapshots found — running startup warmup (now, +5min, +10min)');
-    // Immediate: just capture snapshots (aggregateHourlyTraffic will set them even if no increments computed)
+    logger.info('[HourlyAgg] No snapshots found — running startup warmup (now, +5min)');
     setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:warmup]', e.message)), 15000);
-    // +5 min: now we have baseline snapshots, can compute first increments
     setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:warmup+5]', e.message)), 5 * 60 * 1000);
-    // +10 min: second catch-up pass
-    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:warmup+10]', e.message)), 10 * 60 * 1000);
   } else {
-    logger.info(`[HourlyAgg] Restored ${snapshotCount} snapshots — running catch-up in 30s`);
-    // Snapshots survived restart — run once quickly to capture any missed hour
-    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:catchup]', e.message)), 30000);
+    logger.info(`[HourlyAgg] Restored ${snapshotCount} snapshots — catch-up in ${Math.round(HOURLY_WARMUP_MS/60000)} min`);
+    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:catchup]', e.message)), HOURLY_WARMUP_MS + 15000);
   }
 
   // Billing catch-up: if last snapshot is older than 26 hours, run now
