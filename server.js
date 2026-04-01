@@ -568,7 +568,7 @@ function getClientIp(req) {
 }
 
 const TOCHKA_CONFIG_FILE = path.join(__dirname, 'tochka_config.json');
-let tochkaConfig = { jwt: '', clientId: '', customerCode: '', accountId: '', companyName: '', companyInn: '', companyKpp: '' };
+let tochkaConfig = { jwt: '', clientId: '', customerCode: '', accountId: '', companyName: '', companyInn: '', companyKpp: '', companyAddress: '', bankAccount: '', bankName: '', bankBic: '', bankCorrAccount: '' };
 try {
   if (fs.existsSync(TOCHKA_CONFIG_FILE)) {
     Object.assign(tochkaConfig, JSON.parse(fs.readFileSync(TOCHKA_CONFIG_FILE, 'utf8')));
@@ -582,6 +582,11 @@ if (process.env.TOCHKA_ACCOUNT_ID) tochkaConfig.accountId = process.env.TOCHKA_A
 if (process.env.TOCHKA_COMPANY_NAME) tochkaConfig.companyName = process.env.TOCHKA_COMPANY_NAME;
 if (process.env.TOCHKA_COMPANY_INN) tochkaConfig.companyInn = process.env.TOCHKA_COMPANY_INN;
 if (process.env.TOCHKA_COMPANY_KPP) tochkaConfig.companyKpp = process.env.TOCHKA_COMPANY_KPP;
+if (process.env.TOCHKA_COMPANY_ADDRESS) tochkaConfig.companyAddress = process.env.TOCHKA_COMPANY_ADDRESS;
+if (process.env.TOCHKA_BANK_ACCOUNT) tochkaConfig.bankAccount = process.env.TOCHKA_BANK_ACCOUNT;
+if (process.env.TOCHKA_BANK_NAME) tochkaConfig.bankName = process.env.TOCHKA_BANK_NAME;
+if (process.env.TOCHKA_BANK_BIC) tochkaConfig.bankBic = process.env.TOCHKA_BANK_BIC;
+if (process.env.TOCHKA_BANK_CORR_ACCOUNT) tochkaConfig.bankCorrAccount = process.env.TOCHKA_BANK_CORR_ACCOUNT;
 function saveTochkaConfig() { safeWriteFile(TOCHKA_CONFIG_FILE, JSON.stringify(tochkaConfig, null, 2)); }
 if (tochkaConfig.jwt) { saveTochkaConfig(); logger.info(`[Tochka] API configured (client_id: ${tochkaConfig.clientId})`); }
 else logger.info('[Tochka] No JWT token configured, bank integration disabled');
@@ -811,10 +816,10 @@ function buildTochkaActBody(client, period, actItems, actNumber) {
     Positions: actItems.map((item, idx) => ({
       positionName: serviceName,
       quantity: item.quantity || 1,
-      unitCode: 'услуга.',
+      unitCode: item.unit === 'ГБ' ? 'Гбайт' : (item.unit === 'шт' ? 'шт' : 'услуга.'),
       totalAmount: item.amount || 0,
       ndsKind: 'without_nds',
-      price: item.amount || 0,
+      price: item.price || 0,
       positionNumber: idx + 1
     })),
     actDate: `${period}-${String(lastDay).padStart(2, '0')}`,
@@ -3427,7 +3432,7 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       settings: appSettings,
       bankPayments: getAllBankPayments(),
       tochkaConfigured: !!tochkaConfig.jwt,
-      tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp }
+      tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp, companyAddress: tochkaConfig.companyAddress, bankAccount: tochkaConfig.bankAccount, bankName: tochkaConfig.bankName, bankBic: tochkaConfig.bankBic, bankCorrAccount: tochkaConfig.bankCorrAccount }
     });
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
@@ -5439,7 +5444,7 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
 
 // Save Tochka config from admin UI
 app.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res) => {
-  const { jwt, clientId, customerCode, accountId, companyName, companyInn, companyKpp } = req.body;
+  const { jwt, clientId, customerCode, accountId, companyName, companyInn, companyKpp, companyAddress, bankAccount, bankName, bankBic, bankCorrAccount } = req.body;
   if (jwt !== undefined) tochkaConfig.jwt = jwt.trim();
   if (clientId !== undefined) tochkaConfig.clientId = clientId.trim();
   if (customerCode !== undefined) tochkaConfig.customerCode = customerCode.trim();
@@ -5447,6 +5452,11 @@ app.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res)
   if (companyName !== undefined) tochkaConfig.companyName = companyName.trim();
   if (companyInn !== undefined) tochkaConfig.companyInn = companyInn.trim();
   if (companyKpp !== undefined) tochkaConfig.companyKpp = companyKpp.trim();
+  if (companyAddress !== undefined) tochkaConfig.companyAddress = companyAddress.trim();
+  if (bankAccount !== undefined) tochkaConfig.bankAccount = bankAccount.trim();
+  if (bankName !== undefined) tochkaConfig.bankName = bankName.trim();
+  if (bankBic !== undefined) tochkaConfig.bankBic = bankBic.trim();
+  if (bankCorrAccount !== undefined) tochkaConfig.bankCorrAccount = bankCorrAccount.trim();
   saveTochkaConfig();
   logger.info('[Tochka] Config updated from admin UI, jwt=' + (tochkaConfig.jwt ? 'set' : 'empty') + ', clientId=' + tochkaConfig.clientId);
   res.json({ ok: true, configured: !!tochkaConfig.jwt });
@@ -5461,7 +5471,12 @@ app.get('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res) 
     accountId: tochkaConfig.accountId,
     companyName: tochkaConfig.companyName,
     companyInn: tochkaConfig.companyInn,
-    companyKpp: tochkaConfig.companyKpp
+    companyKpp: tochkaConfig.companyKpp,
+    companyAddress: tochkaConfig.companyAddress,
+    bankAccount: tochkaConfig.bankAccount,
+    bankName: tochkaConfig.bankName,
+    bankBic: tochkaConfig.bankBic,
+    bankCorrAccount: tochkaConfig.bankCorrAccount
   });
 });
 
@@ -5863,6 +5878,134 @@ app.get('/api/admin/clients/:id/closing_documents/:docId/pdf', authMiddleware, a
   }
 });
 
+// Build printable HTML for act or bill
+function buildDocHtml(type, doc, client, billAmount) {
+  const tc = tochkaConfig;
+  const sellerName = tc.companyName || 'ООО "ПАЛИТРУМЛАБ"';
+  const sellerInn = tc.companyInn || '7727796050';
+  const sellerKpp = tc.companyKpp || '773601001';
+  const sellerAddress = tc.companyAddress || '119334, г. Москва, ул. Косыгина, д. 13, помещ. 1Ц';
+  const bankAccount = tc.bankAccount || '';
+  const bankName = tc.bankName || '';
+  const bankBic = tc.bankBic || '';
+  const bankCorrAccount = tc.bankCorrAccount || '';
+
+  const buyerName = client.legalName || client.name;
+  const buyerInn = client.inn || '';
+  const buyerKpp = client.kpp || '';
+  const buyerAddress = client.address || '';
+
+  const hasBankDetails = bankAccount && bankName && bankBic;
+  const sellerBlock = `${sellerName}, ИНН/КПП ${sellerInn}/${sellerKpp}, ${sellerAddress}` +
+    (hasBankDetails ? `, р/с ${bankAccount}, в банке ${bankName}, БИК ${bankBic}` + (bankCorrAccount ? `, к/с ${bankCorrAccount}` : '') : '');
+
+  const buyerBlock = `${buyerName}` +
+    (buyerInn ? `, ИНН${buyerKpp ? '/КПП' : ''} ${buyerInn}${buyerKpp ? '/' + buyerKpp : ''}` : '') +
+    (buyerAddress ? `, ${buyerAddress}` : '');
+
+  let tableRows = '';
+  let totalSum = 0;
+  const items = type === 'act' ? (doc.items || []) : [{
+    name: 'Предоплата за услуги мобильных прокси',
+    quantity: 1,
+    unit: 'услуга',
+    price: billAmount || doc.amount || 0,
+    amount: billAmount || doc.amount || 0
+  }];
+
+  items.forEach((item, idx) => {
+    const qty = item.quantity || 1;
+    const price = item.price || 0;
+    const amount = item.amount || (qty * price);
+    totalSum += amount;
+    tableRows += `<tr>
+      <td style="border:1px solid #ccc;padding:6px 8px;text-align:center">${idx + 1}</td>
+      <td style="border:1px solid #ccc;padding:6px 8px">${item.name || 'Услуги мобильных прокси'}</td>
+      <td style="border:1px solid #ccc;padding:6px 8px;text-align:center">${item.unit || 'услуга'}</td>
+      <td style="border:1px solid #ccc;padding:6px 8px;text-align:right">${qty.toLocaleString('ru-RU', { maximumFractionDigits: 3 })}</td>
+      <td style="border:1px solid #ccc;padding:6px 8px;text-align:right">${price.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+      <td style="border:1px solid #ccc;padding:6px 8px;text-align:right;font-weight:600">${amount.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</td>
+    </tr>`;
+  });
+
+  const isAct = type === 'act';
+  const docTitle = isAct
+    ? `АКТ оказанных услуг № ${doc.actNumber || doc.id} от ${(doc.period || '').replace('-', '.')} г.`
+    : `СЧЁТ НА ОПЛАТУ № ${doc.billNumber || doc.id} от ${(doc.period || '').replace('-', '.')} г.`;
+  const totalFormatted = totalSum.toLocaleString('ru-RU', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  const contract = doc.contractInfo || client.contractInfo || '';
+
+  return `<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>${docTitle}</title>
+<style>
+  body { font-family: Arial, sans-serif; font-size: 12px; color: #000; margin: 20px 40px; }
+  h2 { font-size: 15px; text-align: center; margin: 16px 0 8px; }
+  .parties { display: flex; gap: 40px; margin: 12px 0; }
+  .party { flex: 1; background: #f5f5f5; padding: 8px 12px; border-radius: 4px; font-size: 11px; line-height: 1.5; }
+  .party strong { display: block; font-size: 12px; margin-bottom: 2px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 11px; }
+  th { background: #f0f0f0; border: 1px solid #ccc; padding: 6px 8px; text-align: center; font-weight: 600; }
+  .total-row td { font-weight: 700; border-top: 2px solid #333; font-size: 12px; }
+  .footer { margin-top: 20px; font-size: 11px; }
+  .sign-row { display: flex; gap: 60px; margin-top: 30px; }
+  .sign-block { flex: 1; }
+  .sign-line { border-top: 1px solid #000; margin-top: 40px; font-size: 10px; color: #555; }
+  @media print { body { margin: 10px; } button { display: none; } }
+</style>
+</head>
+<body>
+<div style="text-align:right;margin-bottom:8px"><button onclick="window.print()" style="padding:6px 16px;background:#185FA5;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px">🖨 Печать</button></div>
+<h2>${docTitle}</h2>
+${contract ? `<p style="text-align:center;font-size:11px;color:#555">Основание: ${contract}</p>` : ''}
+<div class="parties">
+  <div class="party"><strong>Исполнитель:</strong>${sellerBlock}</div>
+  <div class="party"><strong>Заказчик:</strong>${buyerBlock}</div>
+</div>
+<table>
+  <thead><tr>
+    <th style="width:30px">№</th>
+    <th>Наименование</th>
+    <th style="width:60px">Ед. изм.</th>
+    <th style="width:80px">Количество</th>
+    <th style="width:100px">Цена, руб.</th>
+    <th style="width:110px">Сумма, руб.</th>
+  </tr></thead>
+  <tbody>${tableRows}
+  <tr class="total-row">
+    <td colspan="5" style="border:1px solid #ccc;padding:6px 8px;text-align:right">ИТОГО без НДС:</td>
+    <td style="border:1px solid #ccc;padding:6px 8px;text-align:right">${totalFormatted}</td>
+  </tr>
+  <tr>
+    <td colspan="5" style="border:1px solid #ccc;padding:4px 8px;text-align:right;color:#555">НДС не облагается</td>
+    <td style="border:1px solid #ccc;padding:4px 8px;text-align:right;color:#555">—</td>
+  </tr>
+  </tbody>
+</table>
+<div class="footer">
+  <p><strong>Всего оказано услуг на сумму: ${totalFormatted} руб. (НДС не облагается)</strong></p>
+  ${isAct ? `<p style="margin-top:16px">Вышеперечисленные услуги выполнены полностью и в срок. Заказчик претензий по объёму, качеству и срокам оказания услуг не имеет.</p>` : `<p>Оплата в течение 5 (пяти) банковских дней с момента выставления счёта.</p>`}
+</div>
+${isAct ? `<div class="sign-row">
+  <div class="sign-block"><strong>ИСПОЛНИТЕЛЬ:</strong><div class="sign-line">${sellerName}</div></div>
+  <div class="sign-block"><strong>ЗАКАЗЧИК:</strong><div class="sign-line">${buyerName}</div></div>
+</div>` : ''}
+</body>
+</html>`;
+}
+
+// Admin: HTML print for closing document (act)
+app.get('/api/admin/clients/:id/closing_documents/:docId/print', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const doc = (client.closingDocuments || []).find(d => d.id === req.params.docId);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(buildDocHtml('act', doc, client));
+});
+
 // Admin: change closing document status (signed/unsigned)
 app.post('/api/admin/clients/:id/closing_document_status', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
@@ -6136,6 +6279,16 @@ app.get('/api/admin/clients/:id/bills/:billId/pdf', authMiddleware, adminMiddlew
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Admin: HTML print for bill
+app.get('/api/admin/clients/:id/bills/:billId/print', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const bill = (client.bills || []).find(b => b.id === req.params.billId);
+  if (!bill) return res.status(404).json({ error: 'Bill not found' });
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.send(buildDocHtml('bill', bill, client, bill.amount));
 });
 
 // Change bill status

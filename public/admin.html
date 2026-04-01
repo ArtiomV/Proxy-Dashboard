@@ -2997,9 +2997,9 @@ function renderOpsDocuments(clientId) {
       var toggleBtn = isSigned
         ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'unsigned\')">❌</button>'
         : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'signed\')">✅</button>';
-      var pdfBtn = d.tochkaDocumentId
-        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadActPdf(\'' + clientId + '\',\'' + d.id + '\')">📥</button>'
-        : '<span style="font-size:10px;color:var(--text-3)">—</span>';
+      var pdfBtn = (d.tochkaDocumentId
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadActPdf(\'' + clientId + '\',\'' + d.id + '\')">📥 PDF</button> '
+        : '') + '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="window.open(API+\'/api/admin/clients/'+clientId+'/closing_documents/'+d.id+'/print?token=\'+authToken,\'_blank\')">🖨</button>';
       h += '<tr style="border-bottom:1px solid var(--border);' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
       h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(d.period) + '</td>';
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
@@ -3032,9 +3032,9 @@ function renderOpsDocuments(clientId) {
       var toggleBtn = isPaid
         ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'unpaid\')">↩</button>'
         : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" onclick="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'paid\')">✅</button>';
-      var pdfBtn = b.tochkaBillId
-        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadBillPdf(\'' + clientId + '\',\'' + b.id + '\')">📥</button>'
-        : '<span style="font-size:10px;color:var(--text-3)">—</span>';
+      var pdfBtn = (b.tochkaBillId
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadBillPdf(\'' + clientId + '\',\'' + b.id + '\')">📥 PDF</button> '
+        : '') + '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="window.open(API+\'/api/admin/clients/'+clientId+'/bills/'+b.id+'/print?token=\'+authToken,\'_blank\')">🖨</button>';
       h += '<tr style="border-bottom:1px solid var(--border);' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
       h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(b.period) + '</td>';
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
@@ -3231,8 +3231,17 @@ function renderBankConfig() {
   h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px;font-weight:600">Client ID *</label><input class="form-input" id="bankClientId" placeholder="client_id" style="font-size:12px" value="' + esc(tc.clientId || '') + '"></div>';
   h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Customer Code</label><input class="form-input" id="bankCustomerCode" placeholder="customer_code" style="font-size:12px" value="' + esc(tc.customerCode || '') + '"></div>';
   h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Account ID</label><input class="form-input" id="bankAccountId" placeholder="account_id" style="font-size:12px" value="' + esc(tc.accountId || '') + '"></div>';
-  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">\u041D\u0430\u0437\u0432\u0430\u043D\u0438\u0435 \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438</label><input class="form-input" id="bankCompanyName" placeholder=\'\u041E\u041E\u041E "\u041A\u043E\u043C\u043F\u0430\u043D\u0438\u044F"\' style="font-size:12px" value="' + esc(tc.companyName || '') + '"></div>';
-  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">\u0418\u041D\u041D \u043A\u043E\u043C\u043F\u0430\u043D\u0438\u0438</label><input class="form-input" id="bankCompanyInn" placeholder="1234567890" style="font-size:12px" value="' + esc(tc.companyInn || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Название компании</label><input class="form-input" id="bankCompanyName" placeholder=\'ООО "Компания"\' style="font-size:12px" value="' + esc(tc.companyName || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">ИНН компании</label><input class="form-input" id="bankCompanyInn" placeholder="1234567890" style="font-size:12px" value="' + esc(tc.companyInn || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">КПП компании</label><input class="form-input" id="bankCompanyKpp" placeholder="123456789" style="font-size:12px" value="' + esc(tc.companyKpp || '') + '"></div>';
+  h += '<div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Адрес компании</label><input class="form-input" id="bankCompanyAddress" placeholder="119334, г. Москва, ул. ..." style="font-size:12px" value="' + esc(tc.companyAddress || '') + '"></div>';
+  h += '</div>';
+  h += '<div style="font-size:11px;font-weight:600;color:var(--text-1);margin:10px 0 6px">Банковские реквизиты для документов</div>';
+  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Расчётный счёт (р/с)</label><input class="form-input" id="bankAccount" placeholder="40702810..." style="font-size:12px" value="' + esc(tc.bankAccount || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Банк</label><input class="form-input" id="bankNameField" placeholder=\'АО "АЛЬФА-БАНК"\' style="font-size:12px" value="' + esc(tc.bankName || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">БИК</label><input class="form-input" id="bankBic" placeholder="044525593" style="font-size:12px" value="' + esc(tc.bankBic || '') + '"></div>';
+  h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Корр. счёт (к/с)</label><input class="form-input" id="bankCorrAccount" placeholder="30101810..." style="font-size:12px" value="' + esc(tc.bankCorrAccount || '') + '"></div>';
   h += '</div>';
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
   h += '<button class="btn btn-primary" onclick="saveBankConfig()">\u{1F4BE} \u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C</button>';
@@ -3271,7 +3280,13 @@ function saveBankConfig() {
     customerCode: document.getElementById('bankCustomerCode').value,
     accountId: document.getElementById('bankAccountId').value,
     companyName: document.getElementById('bankCompanyName').value,
-    companyInn: document.getElementById('bankCompanyInn').value
+    companyInn: document.getElementById('bankCompanyInn').value,
+    companyKpp: document.getElementById('bankCompanyKpp').value,
+    companyAddress: document.getElementById('bankCompanyAddress').value,
+    bankAccount: document.getElementById('bankAccount').value,
+    bankName: document.getElementById('bankNameField').value,
+    bankBic: document.getElementById('bankBic').value,
+    bankCorrAccount: document.getElementById('bankCorrAccount').value
   };
   fetch(API + '/api/admin/tochka/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) })
     .then(function(r) { return r.json(); })
