@@ -2502,6 +2502,16 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
         .filter(e => e.type === 'charge' && e.date && e.date.startsWith(currentMonthPrefix))
         .reduce((sum, e) => sum + (e.delta_gb || 0), 0);
 
+      // Last hour traffic from traffic_hourly for this client's portName
+      let lastHourGb = 0;
+      if (clientInfo.portName) {
+        const lastHourRow = db.prepare(`SELECT hour_start FROM traffic_hourly ORDER BY hour_start DESC LIMIT 1`).get();
+        if (lastHourRow) {
+          const lhRow = db.prepare(`SELECT SUM(bytes_in + bytes_out) as total FROM traffic_hourly WHERE hour_start = ? AND client_name = ?`).get(lastHourRow.hour_start, clientInfo.portName);
+          if (lhRow && lhRow.total) lastHourGb = trafficBytesToGb(lhRow.total);
+        }
+      }
+
       merged.billing = {
         billingType: clientInfo.billingType || 'per_gb',
         price: clientInfo.price || 0,
@@ -2511,6 +2521,7 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
         monthExpense: Math.round(monthExpense * 100) / 100,
         liveMonthGb,
         billedMonthGb: Math.round(billedMonthGb * 1000) / 1000,
+        lastHourGb,
         apiKey: clientInfo.apiKey || ''
       };
     }

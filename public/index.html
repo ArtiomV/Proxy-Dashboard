@@ -680,6 +680,11 @@
             <div class="card-value" id="avgUptime">-</div>
             <div class="card-sub" id="uptimeInfo">За последние 30 дней</div>
           </div>
+          <div class="card" id="lastHourCard" style="display:none">
+            <div class="card-label">Посл. час</div>
+            <div class="card-value" id="lastHourValue">-</div>
+            <div class="card-sub" id="lastHourSub"></div>
+          </div>
         </div>
 
         <div id="balanceWarning"></div>
@@ -2687,6 +2692,14 @@ function updateSummary(){
     var upEl=document.getElementById('avgUptime');
     upEl.textContent=avgUp.toFixed(1)+'%';
     upEl.className='card-value '+(avgUp>=99?'uptime-good':avgUp>=95?'uptime-warn':'uptime-bad');
+  }
+
+  // --- Last hour card ---
+  if(billingData&&billingData.lastHourGb!==undefined){
+    var lhGb=billingData.lastHourGb||0;
+    var lhStr=lhGb>=1?lhGb.toFixed(2)+' ГБ':Math.round(lhGb*1024)+' МБ';
+    document.getElementById('lastHourValue').textContent=lhStr;
+    document.getElementById('lastHourCard').style.display='';
   }
 
   document.getElementById('summaryCards').style.display='grid';
