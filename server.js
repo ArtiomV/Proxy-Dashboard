@@ -993,7 +993,10 @@ try {
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} daily traffic entries`);
 } catch (e) { logger.error('Failed to load daily_traffic from SQLite:', e.message); }
 
-const _dtUpsert = db.prepare('INSERT OR IGNORE INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)');
+const _dtUpsert = db.prepare(`INSERT INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)
+  ON CONFLICT(port_name, date) DO UPDATE SET
+  bytes_in = MAX(bytes_in, excluded.bytes_in),
+  bytes_out = MAX(bytes_out, excluded.bytes_out)`);
 // daily_traffic never cleaned — needed for long-term trend charts
 // If hour already recorded for this port — skip (don't overwrite or accumulate)
 const _htUpsert = db.prepare(`INSERT OR IGNORE INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
@@ -1026,7 +1029,6 @@ async function syncYesterdayTraffic() {
           const yOut = parseBwToBytes(b.bandwidth_bytes_yesterday_out);
           if (yIn > 0 || yOut > 0) {
             // Skip if yesterday data already exists and today's data is identical (ProxySmart hasn't reset yet)
-            const todayStr = localNow.toISOString().slice(0, 10);
             const existingYesterday = dailyTraffic[key] && dailyTraffic[key][yesterdayStr];
             if (existingYesterday && existingYesterday.in === yIn && existingYesterday.out === yOut) continue;
             _dtUpsert.run(key, yesterdayStr, yIn, yOut);
@@ -1076,9 +1078,6 @@ function loadHourlySnapshots() {
   } catch (e) { logger.error('[HourlyAgg] Failed to load snapshots:', e.message); }
 }
 loadHourlySnapshots();
-const _hourlyStartedAt = Date.now();
-// If snapshots restored from DB — they're fresh, short warmup. If not — need longer warmup.
-const HOURLY_WARMUP_MS = Object.keys(hourlyDaySnapshots).length > 0 ? 5 * 60 * 1000 : 30 * 60 * 1000;
 
 async function aggregateHourlyTraffic() {
   try {
@@ -1130,8 +1129,7 @@ async function aggregateHourlyTraffic() {
             if (meta && meta.operator) rawOp = meta.operator.toLowerCase().trim();
           }
           const isRO = srv === 'S2' || srv.indexOf('S2') === 0;
-          const opMap = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
-          const operator = opMap[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
+          const operator = normalizeOperator(rawOp, isRO);
           const clientName = info.clientName || b.portName || '';
           // Use srv_portId as snapshot and DB key (unique across servers)
           const fullPortId = srv + '_' + portId;
@@ -1140,9 +1138,8 @@ async function aggregateHourlyTraffic() {
           const dayIn  = parseBwToBytes(b.bandwidth_bytes_day_in);
           const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
           const snap = hourlyDaySnapshots[snapKey];
-          // After restart: first pass only refreshes snapshots, doesn't write to DB
-          // This prevents bogus increments from stale snapshots
-          if ((Date.now() - _hourlyStartedAt >= HOURLY_WARMUP_MS) && snap) {
+          // Record hourly increment if snapshot exists (snap.date check prevents cross-day bogus data)
+          if (snap) {
             if (snap.date === todayStr) {
               const incIn  = Math.max(0, dayIn  - snap.in);
               const incOut = Math.max(0, dayOut - snap.out);
@@ -1164,12 +1161,7 @@ async function aggregateHourlyTraffic() {
     });
     batch();
     saveHourlySnapshots();
-    const warmupRemaining = Math.max(0, HOURLY_WARMUP_MS - (Date.now() - _hourlyStartedAt));
-    if (warmupRemaining > 0) {
-      logger.info(`[HourlyAgg] Warmup: snapshots updated (${Object.keys(hourlyDaySnapshots).length} ports), recording starts in ${Math.round(warmupRemaining / 60000)} min`);
-    } else {
-      logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
-    }
+    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
   } catch (e) {
     logger.error('[HourlyAgg] Error:', e.message);
   }
@@ -1496,6 +1488,8 @@ function getSessionCount() {
 }
 
 const _intervals = [];
+let _hourlyLoopTimeout = null;
+let _hourlyAggStopped = false;
 _intervals.push(setInterval(() => {
   const result = dbStmts.cleanExpiredSessions.run(Date.now());
   if (result.changes > 0) {
@@ -1555,6 +1549,11 @@ function getPriceForProxyCount(count) {
 // BUG-01: parseBwToBytes was duplicate of parseTrafficValue — consolidated
 const parseBwToBytes = parseTrafficValue;
 
+function normalizeOperator(rawOp, isRO) {
+  const map = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
+  return map[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
+}
+
 function computeClientMonthBytes(allServerResults, portName) {
   let totalBytes = 0;
   for (const data of allServerResults) {
@@ -1605,8 +1604,9 @@ function getClientStoredMonthBytes(clientPortName, monthPrefix) {
   let totalBytes = 0;
   for (const [portKey, days] of Object.entries(dailyTraffic)) {
     // Match by portName from stored data or global mapping
-    const firstDay = Object.values(days)[0];
-    const pn = (firstDay && firstDay.portName) || portKeyToPortName[portKey] || '';
+    const pn = portKeyToPortName[portKey]
+      || (Object.values(days)[0] && Object.values(days)[0].portName)
+      || '';
     if (pn !== clientPortName) continue;
     for (const [date, entry] of Object.entries(days)) {
       if (!date.startsWith(monthPrefix)) continue;
@@ -1987,7 +1987,7 @@ async function fetchServerData(server) {
 
 // Refresh rotation cache on startup and periodically
 setTimeout(() => refreshRotationCache(), 10000);
-setInterval(() => refreshRotationCache(), ROTATION_CACHE_TTL);
+_intervals.push(setInterval(() => refreshRotationCache(), ROTATION_CACHE_TTL));
 
 const ROTATION_LOG_SYNC_INTERVAL = 30 * 60 * 1000; // every 30 min
 async function syncAllRotationLogs() {
@@ -2016,7 +2016,7 @@ async function syncAllRotationLogs() {
 }
 // Initial sync after 30 sec, then every 30 min
 setTimeout(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), 30000);
-setInterval(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), ROTATION_LOG_SYNC_INTERVAL);
+_intervals.push(setInterval(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), ROTATION_LOG_SYNC_INTERVAL));
 
 // Fetch data from all servers; use cache for unreachable ones
 async function fetchAllServersData() {
@@ -3212,9 +3212,10 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
       const cn = ((SERVER_COUNTRIES[s.name] || {}).name || '').toLowerCase();
       if (cn) serverCountryMap[s.name] = cn;
     }
-    // Date list in Moscow time (UTC+3)
+    // Date list in Moscow time (dynamic offset via getTzOffset)
     const now2 = new Date();
-    const mskNow = new Date(now2.getTime() + 3 * 3600 * 1000);
+    const mskOffset = getTzOffset('Europe/Moscow');
+    const mskNow = new Date(now2.getTime() + mskOffset * 3600 * 1000);
     const dateList = [];
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate() - i));
@@ -3222,7 +3223,7 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
     }
     const startDate = dateList[0];
     const utcFetchStart = startDate + 'T00:00:00Z';
-    const utcFetchStartShifted = new Date(new Date(utcFetchStart).getTime() - 3 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+    const utcFetchStartShifted = new Date(new Date(utcFetchStart).getTime() - mskOffset * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
     const matrix = dateList.map(() => new Array(24).fill(0));
 
     // Build SQL filter based on view type — all filtering is on per-modem columns
@@ -3286,14 +3287,15 @@ app.get('/api/analytics/modem_heatmap', authMiddleware, async (req, res) => {
   const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
   try {
     const now2 = new Date();
-    const mskNow = new Date(now2.getTime() + 3 * 3600 * 1000);
+    const mskOffset2 = getTzOffset('Europe/Moscow');
+    const mskNow = new Date(now2.getTime() + mskOffset2 * 3600 * 1000);
     const dateList = [];
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate() - i));
       dateList.push(d.toISOString().slice(0, 10));
     }
     const startDate = dateList[0];
-    const utcStart = new Date(new Date(startDate + 'T00:00:00Z').getTime() - 3 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+    const utcStart = new Date(new Date(startDate + 'T00:00:00Z').getTime() - mskOffset2 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
     // Get all ports for this modem
     const ports = db.prepare("SELECT DISTINCT port_id, client_name FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ?").all(nick, serverName, utcStart);
@@ -4443,7 +4445,7 @@ app.post('/api/admin/move_port', authMiddleware, adminMiddleware, async (req, re
     // Apply changes
     const applyResult = await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portID)}`);
     auditLog(req.user.login, 'move_port', { serverName, portID, newIMEI, ip: getClientIp(req) });
-    invalidateCache();
+    _psCache = null; _psCacheTs = 0;
     res.json({ ok: true, storeResult, applyResult });
   } catch (err) { res.status(502).json({ error: 'Move port failed', details: err.message }); }
 });
@@ -5116,7 +5118,7 @@ async function runMonthlyReconciliation() {
 
 async function autoCreateMissingClients() {
   try {
-    const results = await fetchAllServersData();
+    const results = await fetchAllServersDataCached();
     const existingPortNames = new Set(clients.map(c => c.portName));
     const allPortNames = new Set();
 
@@ -6539,6 +6541,8 @@ const httpServer = app.listen(PORT, () => {
   // Sync yesterday traffic — once at startup, then daily at 00:45 UTC (03:45 MSK)
   syncYesterdayTraffic().catch(e => logger.error('[DailySync] Initial error:', e.message));
   scheduleRepeating(0, 45, 'DailySync', syncYesterdayTraffic);
+  scheduleRepeating(7, 0, 'DailySync-07:00', syncYesterdayTraffic);
+  scheduleRepeating(15, 0, 'DailySync-15:00', syncYesterdayTraffic);
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {
@@ -6578,8 +6582,10 @@ const httpServer = app.listen(PORT, () => {
   scheduleRepeating(5, 10, 'MonthlyBills', autoGenerateMonthlyBills);
 
   // Resilient hourly traffic aggregation with retry logic:
-  // Attempts at :00, :01, :02, :03, :04 (5 tries). If all fail — mid-hour snapshot at :30 will interpolate.
+  // Attempts at :00, :01, :02, :03, :04 (5 tries).
   let _hourlyLastRecordedHour = null; // e.g. '2026-03-31 12:00'
+  try { const r = _kvGet.get('hourly_last_recorded'); if (r) _hourlyLastRecordedHour = r.value; } catch(e) {}
+  // _hourlyLoopTimeout and _hourlyAggStopped declared at module level for gracefulShutdown
   (function scheduleHourlyAggRetry() {
     // Find next :00 (top of the hour)
     const now = new Date();
@@ -6589,7 +6595,8 @@ const httpServer = app.listen(PORT, () => {
     const msUntil = next00 - now;
     logger.info(`[HourlyAgg] Resilient schedule: first attempt at ${next00.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
 
-    setTimeout(function hourlyLoop() {
+    _hourlyLoopTimeout = setTimeout(function hourlyLoop() {
+      if (_hourlyAggStopped) return;
       // At :00, aggregateHourlyTraffic() writes to prevH = now - 1h (the hour that just ended)
       const ATTEMPT_OFFSETS = [0, 60, 120, 180, 240]; // seconds after :00 → :00, :01, :02, :03, :04
       let attemptIdx = 0;
@@ -6612,6 +6619,7 @@ const httpServer = app.listen(PORT, () => {
           const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
           if (check && check.cnt > 0) {
             _hourlyLastRecordedHour = targetHourStr;
+            try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch(e) {}
             logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${check.cnt} rows)`);
           } else {
             attemptIdx++;
@@ -6620,7 +6628,7 @@ const httpServer = app.listen(PORT, () => {
               logger.warn(`[HourlyAgg] Attempt ${attemptIdx}/5 for ${targetHourStr}: no data recorded, retry in ${delay / 1000}s`);
               setTimeout(tryRecord, delay);
             } else {
-              logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr} — mid-hour snapshot at :30 will interpolate`);
+              logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr} — hour will be empty`);
             }
           }
         }).catch(e => {
@@ -6630,134 +6638,24 @@ const httpServer = app.listen(PORT, () => {
             const delay = (ATTEMPT_OFFSETS[attemptIdx] - ATTEMPT_OFFSETS[attemptIdx - 1]) * 1000;
             setTimeout(tryRecord, delay);
           } else {
-            logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr}, mid-hour snapshot will interpolate`);
+            logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr} — hour will be empty`);
           }
         });
       }
 
       tryRecord();
       // Schedule next hour's :00
-      setTimeout(hourlyLoop, 60 * 60 * 1000);
+      _hourlyLoopTimeout = setTimeout(hourlyLoop, 60 * 60 * 1000);
     }, msUntil);
   })();
 
-  // Mid-hour snapshot at :30 — runs EVERY hour to capture intermediate data.
-  // Records current-hour traffic so heatmap gradually fills, and updates snapshots.
-  // If the previous hour was missed (no data at :59-:03), also interpolates for it.
-  (function scheduleMidHourSnapshot() {
-    const now = new Date();
-    const next30 = new Date(now);
-    next30.setMinutes(30, 0, 0);
-    if (next30 <= now) next30.setTime(next30.getTime() + 60 * 60 * 1000);
-    const delay = next30 - now;
-    logger.info(`[HourlyAgg:Mid] Next mid-hour snapshot at ${next30.toISOString()} (in ${Math.round(delay / 60000)} min)`);
-
-    setTimeout(function midHourLoop() {
-      (async () => {
-        try {
-          const results = await fetchAllServersDataCached();
-          if (Object.keys(portKeyToPortName).length === 0) refreshPortKeyMapping(results);
-          const pnMap = portKeyToPortName;
-          const todayStr = new Date().toISOString().slice(0, 10);
-          // Current hour (we're at :30 of this hour)
-          const curH = new Date();
-          curH.setMinutes(0, 0, 0);
-          const curHourStr = curH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
-          // Previous hour
-          const prevH = new Date(curH);
-          prevH.setHours(prevH.getHours() - 1);
-          const prevHourStr = prevH.toISOString().slice(0, 13).replace('T', ' ') + ':00';
-
-          // Check if previous hour was recorded
-          const prevCheck = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(prevHourStr);
-          const prevMissed = !prevCheck || prevCheck.cnt === 0;
-
-          let countCur = 0, countPrev = 0;
-          const batch = db.transaction(() => {
-            for (const data of results) {
-              const srv = data.serverName || '';
-              const statusArr = Array.isArray(data.status) ? data.status : [];
-              const portsMap = data.ports || {};
-              const portIdInfo = {};
-              for (const m of statusArr) {
-                const md = m.modem_details || {};
-                const imei = md.IMEI || '';
-                const nick = md.NICK || imei;
-                const nd = m.net_details || {};
-                const operator = nd.CELLOP || md.OPERATOR || '';
-                if (!imei) continue;
-                const modemPorts = portsMap[imei] || [];
-                for (const p of modemPorts) {
-                  portIdInfo[p.portID] = { nick, operator, clientName: p.portName || '' };
-                }
-              }
-
-              if (typeof data.bw !== 'object') continue;
-              for (const [portId, b] of Object.entries(data.bw)) {
-                const info = portIdInfo[portId] || {};
-                const nick = info.nick || pnMap[srv + '_' + portId] || portId;
-                let rawOp = (info.operator || '').toLowerCase().trim();
-                if (!rawOp && nick) {
-                  const meta = db.prepare('SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1').get(srv, nick);
-                  if (meta && meta.operator) rawOp = meta.operator.toLowerCase().trim();
-                }
-                const isRO = srv === 'S2' || srv.indexOf('S2') === 0;
-                const opMap = { 'unite': 'Moldtelecom', 'moldtelecom': 'Moldtelecom', 'orange': isRO ? 'Orange RO' : 'Orange MD', 'orange ro': 'Orange RO', 'orange md': 'Orange MD', 'vodafone ro': 'Vodafone RO', 'vodafone': 'Vodafone RO' };
-                const operator = opMap[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
-                const clientName = info.clientName || b.portName || '';
-                const fullPortId = srv + '_' + portId;
-                const snapKey = fullPortId;
-
-                const dayIn = parseBwToBytes(b.bandwidth_bytes_day_in);
-                const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
-                const snap = hourlyDaySnapshots[snapKey];
-
-                if (snap && snap.date === todayStr) {
-                  const incIn = Math.max(0, dayIn - snap.in);
-                  const incOut = Math.max(0, dayOut - snap.out);
-                  if (incIn + incOut > 0) {
-                    if (prevMissed) {
-                      // Previous hour missed — split 50/50
-                      const halfIn = Math.round(incIn / 2);
-                      const halfOut = Math.round(incOut / 2);
-                      _htUpsert.run(srv, fullPortId, nick, operator, clientName, prevHourStr, halfIn, halfOut);
-                      _htUpsert.run(srv, fullPortId, nick, operator, clientName, curHourStr, incIn - halfIn, incOut - halfOut);
-                      countPrev++;
-                    } else {
-                      // Previous hour OK — record all as current hour
-                      _htUpsert.run(srv, fullPortId, nick, operator, clientName, curHourStr, incIn, incOut);
-                    }
-                    countCur++;
-                  }
-                }
-                hourlyDaySnapshots[snapKey] = { in: dayIn, out: dayOut, date: todayStr };
-              }
-            }
-          });
-          batch();
-          saveHourlySnapshots();
-          if (prevMissed && countPrev > 0) {
-            logger.info(`[HourlyAgg:Mid] Interpolated ${countPrev} entries for missed ${prevHourStr}`);
-          }
-          logger.info(`[HourlyAgg:Mid] Recorded ${countCur} entries for ${curHourStr} (mid-hour snapshot)`);
-        } catch (e) {
-          logger.error(`[HourlyAgg:Mid] Error: ${e.message}`);
-        }
-      })();
-      setTimeout(midHourLoop, 60 * 60 * 1000);
-    }, delay);
-  })();
+  // Mid-hour snapshot removed (FIX-13): 5 retry attempts at :00-:04 are sufficient.
 
   // Startup: capture snapshots immediately for warmup
+  // Startup: capture snapshots immediately so first :00 has a baseline
   const snapshotCount = Object.keys(hourlyDaySnapshots).length;
-  if (snapshotCount === 0) {
-    logger.info('[HourlyAgg] No snapshots found — running startup warmup (now, +5min)');
-    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:warmup]', e.message)), 15000);
-    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:warmup+5]', e.message)), 5 * 60 * 1000);
-  } else {
-    logger.info(`[HourlyAgg] Restored ${snapshotCount} snapshots — catch-up in ${Math.round(HOURLY_WARMUP_MS/60000)} min`);
-    setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:catchup]', e.message)), HOURLY_WARMUP_MS + 15000);
-  }
+  logger.info(`[HourlyAgg] ${snapshotCount} snapshots loaded, running startup capture in 15s`);
+  setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:startup]', e.message)), 15000);
 
   // Billing catch-up: if last snapshot is older than 26 hours, run now
   (async () => {
@@ -6847,7 +6745,8 @@ _intervals.push(setInterval(() => {
 function gracefulShutdown(signal) {
   logger.info(`\n[Shutdown] Received ${signal}, shutting down gracefully...`);
 
-  
+  _hourlyAggStopped = true;
+  if (_hourlyLoopTimeout) clearTimeout(_hourlyLoopTimeout);
   for (const iv of _intervals) clearInterval(iv);
   _intervals.length = 0;
   for (const t of speedtestTimers.concat(_cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }
