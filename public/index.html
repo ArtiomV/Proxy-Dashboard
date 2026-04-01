@@ -1219,6 +1219,7 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
 
   <div class="toast-container" id="toastContainer"></div>
 
+<script src="/js/utils.js"></script>
 <script>
 // --- Theme ---
 function getTheme(){return localStorage.getItem('pr_theme')||'dark'}
@@ -2123,25 +2124,8 @@ function doLogout(){
   showLogin();
 }
 
-function parseBW(val){
-  if(val===0||val==='0'||val===null||val===undefined) return 0;
-  if(typeof val==='number') return val;
-  var str=String(val).trim();
-  var match=str.match(/^([\d.]+)\s*(B|KB|MB|GB|TB)?$/i);
-  if(!match) return 0;
-  var num=parseFloat(match[1]);
-  var unit=(match[2]||'B').toUpperCase();
-  var multipliers={'B':1,'KB':1024,'MB':1024*1024,'GB':1024*1024*1024,'TB':1024*1024*1024*1024};
-  return num*(multipliers[unit]||1);
-}
-
-function formatBytes(bytes){
-  if(bytes===0) return '0 B';
-  var units=['B','KB','MB','GB','TB'];
-  var i=0;
-  while(bytes>=1024&&i<units.length-1){bytes/=1024;i++}
-  return bytes.toFixed(1)+' '+units[i];
-}
+// parseBW and formatBytes moved to /js/utils.js
+var parseBW=parseTraffic; // alias for backward compatibility
 
 // Cost display without spaces - use Math.round for proper rounding
 function formatCost(amount){
@@ -2166,15 +2150,8 @@ function setStatus(state,text){
   txt.textContent=text;
 }
 
-function escapeHtml(str){var div=document.createElement('div');div.textContent=str;return div.innerHTML}
-
-function showToast(msg,type){
-  var c=document.getElementById('toastContainer');
-  var e=document.createElement('div');
-  e.className='toast toast-'+(type||'info');
-  e.textContent=msg;
-  c.appendChild(e);
-  setTimeout(function(){e.remove()},4000);
+function escapeHtml(str){return esc(str)}
+// showToast moved to /js/utils.js
 }
 
 // --- Clipboard with fallback ---

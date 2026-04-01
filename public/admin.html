@@ -423,6 +423,7 @@
   <iframe id="crmFrame" title="CRM" src="" style="width:100%;height:calc(100vh - 100px);border:none;display:block" allow="clipboard-write"></iframe>
 </div>
 
+<script src="/js/utils.js"></script>
 <script>
 var API='',authToken=localStorage.getItem('pr_token')||'',currentData=null;
 var sortCol='nick',sortDir='asc',activeServerFilter='all',activeStatusFilter='all',activeClientFilter='';
@@ -479,7 +480,7 @@ function _initServers(servers){if(!servers||!servers.length)return;COUNTRIES={};
 function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=t;localStorage.setItem('pr_admin_theme',t);updateChartsTheme()}
 (function(){var t=localStorage.getItem('pr_admin_theme');if(t)document.documentElement.dataset.theme=t})();
 
-function getChartColors(){var d=document.documentElement.dataset.theme==='dark';return{grid:d?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)',text:d?'#8892a6':'#6b7280',bg:d?'#131720':'#ffffff'}}
+// getChartColors moved to /js/utils.js
 
 // ========== AUTH ==========
 function doLogin(){window.location.href='/'}
@@ -560,15 +561,8 @@ function toggleFilterDropdown(){document.getElementById('filterDropdown').classL
 document.addEventListener('click',function(e){if(!e.target.closest('.col-selector'))document.querySelectorAll('.col-dropdown').forEach(function(d){d.classList.remove('show')})})
 function renderColSelector(){var h='';for(var i=0;i<COLUMNS.length;i++){var c=COLUMNS[i];if(c.id==='status'||c.id==='actions'||c.id==='bulk')continue;h+='<label><input type="checkbox" '+(c.visible?'checked':'')+' onchange="toggleCol(\''+c.id+'\',this.checked)">'+c.label+'</label>'}document.getElementById('colDropdown').innerHTML=h}
 function toggleCol(id,v){for(var i=0;i<COLUMNS.length;i++){if(COLUMNS[i].id===id){COLUMNS[i].visible=v;break}}var s={};COLUMNS.forEach(function(c){s[c.id]=c.visible});localStorage.setItem('admin_col_state',JSON.stringify(s));renderTable()}
-function getModemStatus(m){if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';if(m.connectionStatus&&m.connectionStatus.includes('connected'))return'online';if(m.state==='added'&&m.extIp&&m.extIp!=='IP_RESET')return'online';return'offline'}
-function formatUptime(s){if(!s||s<=0)return'-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),mm=Math.floor(s%3600/60);if(d>0)return d+'д '+h+'ч';if(h>0)return h+'ч '+mm+'м';return mm+'м'}
-function formatTraffic(v){if(!v||v===0||v==='0')return'-';return String(v)}
-function renderSignalBars(s){var h='<div class="signal-bars">';for(var i=1;i<=5;i++){h+='<div class="signal-bar'+(i<=s?' active':'')+'" style="height:'+(2+i*2)+'px"></div>'}return h+'</div>'}
-function renderNetBadge(t){if(!t)return'<span class="net-badge net-unknown">?</span>';var c='net-unknown',l=t;if(/lte|4g/i.test(t)){c='net-lte';l='LTE'}else if(/3g|hspa|umts/i.test(t)){c='net-3g';l='3G'}else if(/2g|edge|gprs/i.test(t)){c='net-2g';l='2G'}return'<span class="net-badge '+c+'">'+l+'</span>'}
-function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
-function fmtDateRu(d){if(!d)return'';var p=d.split('-');return p.length===3?(p[2]+'.'+p[1]+'.'+p[0]):d}
-function parseTraffic(v){if(!v||v===0)return 0;if(typeof v==='number')return v;var s=String(v),m=s.match(/([\d.]+)\s*(KB|MB|GB|TB)/i);if(!m)return parseFloat(s)||0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1024:u==='MB'?1048576:u==='GB'?1073741824:u==='TB'?1099511627776:1)}
-function bytesToGb(b){return b/1073741824}
+// getModemStatus, formatUptime, formatTraffic, renderSignalBars, renderNetBadge,
+// esc, fmtDateRu, parseTraffic, bytesToGb moved to /js/utils.js
 
 function renderTable(){
   if(!currentData||!currentData._modemMap)return;var map=currentData._modemMap,search=(document.getElementById('searchBox').value||'').toLowerCase(),cols=COLUMNS.filter(function(c){return c.visible}),wrap=document.getElementById('tableWrap');
@@ -985,9 +979,7 @@ function collectTrafficData(){
   return{totalModems:totalModems,totalOnline:totalOnline,totalIn:totalIn,totalOut:totalOut,modemTraffic:modemTraffic,clientTraffic:clientTraffic,serverTraffic:serverTraffic,serverIn:serverIn,serverOut:serverOut,serverOpTraffic:serverOpTraffic,label:fields.label};
 }
 
-function fmtGb(b){if(!b||b===0)return'0 B';if(b<1048576)return(b/1024).toFixed(1)+' KB';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';var gb=b/1073741824;if(gb>=1000)return(gb/1024).toFixed(1)+' TB';if(gb>=100)return Math.round(gb)+' GB';return gb.toFixed(1)+' GB'}
-function fmtGbShort(b){if(b<1073741824)return(b/1048576).toFixed(0)+' MB';return(b/1073741824).toFixed(1)+' GB'}
-function pct(v,max){return max?Math.round(v/max*100):0}
+// fmtGb, fmtGbShort, pct moved to /js/utils.js
 
 function renderHBars(items,maxVal,colorClass){
   if(!items.length)return'<div style="color:var(--text-3);padding:10px;font-size:11px">Нет данных</div>';
@@ -2757,15 +2749,7 @@ function copyText(t,b){
   function doFallback(){var a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;left:-9999px;opacity:0';document.body.appendChild(a);a.select();try{document.execCommand('copy');onOk()}catch(e){showToast('Ошибка копирования','error')}document.body.removeChild(a)}
 }
 function togglePass(el){if(el.classList.contains('revealed')){el.textContent='\u2022\u2022\u2022\u2022';el.classList.remove('revealed');el.style.color='';el.style.letterSpacing=''}else{el.textContent=el.dataset.pass;el.classList.add('revealed');el.style.color='var(--text-0)';el.style.letterSpacing='normal'}}
-function showToast(m,t,dur){
-  var c=document.getElementById('toastContainer');if(!c)return;
-  var tp=t||'info';var icons={success:'✓',error:'✕',warning:'!',info:'i'};
-  var ms=dur||(tp==='error'?6000:4000);
-  var e=document.createElement('div');e.className='toast toast-'+tp;
-  e.innerHTML='<span class="toast-icon">'+icons[tp]+'</span><span class="toast-text">'+m+'</span><button class="toast-close" onclick="this.parentElement.remove()">✕</button>';
-  c.appendChild(e);
-  setTimeout(function(){if(e.parentNode)e.remove();},ms);
-}
+// showToast moved to /js/utils.js
 var _confirmCb=null;
 function showProblemPopup(label,key){
   var items=(window._problemData&&window._problemData[key])||[];
