@@ -8,5 +8,5 @@ dist/
 server_cache.json
 known_modems.json
 top_hosts_cache.json
-documents/
+/documents/
 logs/
