@@ -5,6 +5,7 @@ const logger = require('../logger');
 
 // Tochka API helper — HTTPS requests to enter.tochka.com
 function tochkaRequest(tochkaConfig, method, apiPath, body) {
+  if (typeof apiPath !== 'string' || apiPath.includes('..')) throw new Error('Invalid Tochka API path');
   return new Promise((resolve, reject) => {
     const postData = body ? JSON.stringify(body) : null;
     const headers = {

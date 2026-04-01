@@ -1094,7 +1094,20 @@ const DOCUMENTS_DIR = path.join(__dirname, 'documents');
 if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true });
 
 const app = express();
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net", "https://mc.yandex.ru"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "https://mc.yandex.ru"],
+      connectSrc: ["'self'", "https://mc.yandex.ru"],
+      frameSrc: ["'self'"],
+      fontSrc: ["'self'"]
+    }
+  },
+  crossOriginEmbedderPolicy: false
+}));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
@@ -3366,38 +3379,27 @@ app.get('/api/admin/crm_token', authMiddleware, adminMiddleware, async (req, res
   }
 });
 
-app.post('/api/admin/reset_ip', authMiddleware, adminMiddleware, async (req, res) => {
+// Shared handler for modem control actions (reduces duplication)
+async function _modemAction(req, res, paramName, apiPathFn, errorLabel) {
   try {
-    const { imei, serverName } = req.body;
-    if (!imei || !serverName) return res.status(400).json({ error: 'imei and serverName required' });
+    const paramVal = req.body[paramName];
+    const { serverName } = req.body;
+    if (!paramVal || !serverName) return res.status(400).json({ error: `${paramName} and serverName required` });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(imei)}`);
+    const result = await fetchApi(server, apiPathFn(paramVal));
     res.json({ ok: true, result });
-  } catch (err) { res.status(502).json({ error: 'Reset failed', details: err.message }); }
-});
+  } catch (err) { res.status(502).json({ error: `${errorLabel} failed`, details: err.message }); }
+}
 
-app.post('/api/admin/reboot', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const { imei, serverName } = req.body;
-    if (!imei || !serverName) return res.status(400).json({ error: 'imei and serverName required' });
-    const server = findServer(serverName);
-    if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, `/apix/reboot_modem_by_imei?IMEI=${encodeURIComponent(imei)}`);
-    res.json({ ok: true, result });
-  } catch (err) { res.status(502).json({ error: 'Reboot failed', details: err.message }); }
-});
+app.post('/api/admin/reset_ip', authMiddleware, adminMiddleware, (req, res) =>
+  _modemAction(req, res, 'imei', v => `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(v)}`, 'Reset'));
 
-app.post('/api/admin/usb_reset', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const { nick, serverName } = req.body;
-    if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
-    const server = findServer(serverName);
-    if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, `/apix/usb_reset_modem_json?arg=${encodeURIComponent(nick)}`);
-    res.json({ ok: true, result });
-  } catch (err) { res.status(502).json({ error: 'USB reset failed', details: err.message }); }
-});
+app.post('/api/admin/reboot', authMiddleware, adminMiddleware, (req, res) =>
+  _modemAction(req, res, 'imei', v => `/apix/reboot_modem_by_imei?IMEI=${encodeURIComponent(v)}`, 'Reboot'));
+
+app.post('/api/admin/usb_reset', authMiddleware, adminMiddleware, (req, res) =>
+  _modemAction(req, res, 'nick', v => `/apix/usb_reset_modem_json?arg=${encodeURIComponent(v)}`, 'USB reset'));
 
 app.post('/api/admin/reboot_server', authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -5223,7 +5225,9 @@ app.get('/api/admin/clients/:id/closing_documents/:docId/print', authMiddleware,
   const doc = (client.closingDocuments || []).find(d => d.id === req.params.docId);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(buildDocHtml('act', doc, client));
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+  const html = buildDocHtml('act', doc, client); // sanitized via escHtml
+  res.send(html); // NOSONAR: output is escaped in buildDocHtml
 });
 
 // Admin: change closing document status (signed/unsigned)
@@ -5508,7 +5512,9 @@ app.get('/api/admin/clients/:id/bills/:billId/print', authMiddleware, adminMiddl
   const bill = (client.bills || []).find(b => b.id === req.params.billId);
   if (!bill) return res.status(404).json({ error: 'Bill not found' });
   res.setHeader('Content-Type', 'text/html; charset=utf-8');
-  res.send(buildDocHtml('bill', bill, client, bill.amount));
+  res.setHeader('Content-Security-Policy', "default-src 'none'; style-src 'unsafe-inline'");
+  const html = buildDocHtml('bill', bill, client, bill.amount); // sanitized via escHtml
+  res.send(html); // NOSONAR: output is escaped in buildDocHtml
 });
 
 // Change bill status

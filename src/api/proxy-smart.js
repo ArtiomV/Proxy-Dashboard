@@ -74,7 +74,14 @@ function findServer(serverName) {
 // HTTP fetch helpers
 // ---------------------------------------------------------------------------
 
+// Validate API path to prevent path traversal (SSRF mitigation)
+function _validateApiPath(apiPath) {
+  if (typeof apiPath !== 'string') throw new Error('Invalid API path');
+  if (apiPath.includes('..') || apiPath.includes('\x00')) throw new Error('Path traversal blocked');
+}
+
 function fetchApi(server, apiPath, timeout = 10000) {
+  _validateApiPath(apiPath);
   return new Promise((resolve, reject) => {
     const url = new URL(apiPath, server.url);
     const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
@@ -102,6 +109,7 @@ function fetchApi(server, apiPath, timeout = 10000) {
 }
 
 function fetchApiRaw(server, apiPath, timeout = 10000) {
+  _validateApiPath(apiPath);
   return new Promise((resolve, reject) => {
     const url = new URL(apiPath, server.url);
     const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
