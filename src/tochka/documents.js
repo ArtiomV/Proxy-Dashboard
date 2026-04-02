@@ -8,9 +8,13 @@ const MONTH_NAMES_RU = ['январе','феврале','марте','апрел
 // Helper: build act line items from billing ledger entries
 function buildActItemsFromLedger(client, period, billingLedger) {
   const ledgerEntries = billingLedger[client.id] || [];
-  const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(period));
+  const monthEntries = ledgerEntries.filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(period));
+  const monthCharges = monthEntries.filter(e => e.type === 'charge');
+  const monthCorrections = monthEntries.filter(e => e.type === 'correction');
   const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
-  const totalCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
+  const chargeCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
+  const correctionCost = Math.round(monthCorrections.reduce((sum, e) => sum + (e.amount || 0), 0) * 100) / 100;
+  const totalCost = Math.round((chargeCost + correctionCost) * 100) / 100;
   const modemCharges = monthCharges.filter(e => e.billing_type === 'per_modem');
   const gbCharges = monthCharges.filter(e => e.billing_type !== 'per_modem');
 
@@ -34,6 +38,16 @@ function buildActItemsFromLedger(client, period, billingLedger) {
       amount: Math.round(modemCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
     });
   }
+  // Include corrections as a separate line item if any exist
+  if (correctionCost !== 0) {
+    actItems.push({
+      name: 'Корректировка',
+      quantity: 1,
+      unit: 'услуга',
+      price: correctionCost,
+      amount: correctionCost
+    });
+  }
   if (actItems.length === 0) {
     actItems.push({
       name: 'Услуги мобильных прокси',
@@ -43,7 +57,7 @@ function buildActItemsFromLedger(client, period, billingLedger) {
       amount: totalCost
     });
   }
-  return { actItems, totalCost, monthCharges };
+  return { actItems, totalCost, monthCharges: monthEntries };
 }
 
 // Helper: build Tochka closing document (act) request body
