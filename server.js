@@ -260,6 +260,19 @@ const _getDocs = db.prepare('SELECT * FROM client_documents WHERE client_id = ? 
 const _getClosingDocs = db.prepare('SELECT * FROM closing_documents WHERE client_id = ? ORDER BY created_at');
 const _getBills = db.prepare('SELECT * FROM bills WHERE client_id = ? ORDER BY created_at');
 
+// Get signed expense amount from ledger entry:
+// charges: always positive (cost), corrections: signed based on balance change
+function ledgerExpense(e) {
+  if (e.type === 'correction') {
+    // Use balance delta to determine direction (debit=expense, credit=income)
+    if (e.balance_before != null && e.balance_after != null) {
+      return Math.round((e.balance_before - e.balance_after) * 100) / 100; // positive=expense, negative=refund
+    }
+    return e.cost || e.amount || 0;
+  }
+  return e.cost || e.amount || 0;
+}
+
 function clientFromRow(r) {
   return {
     id: r.id, login: r.login, password: r.password || '', passwordHash: r.password_hash || '',
@@ -1794,7 +1807,7 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
       const currentMonthPrefix = getMoscowToday().slice(0, 7);
       const monthExpense = ledgerEntries
         .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(currentMonthPrefix))
-        .reduce((sum, e) => sum + (e.cost || e.amount || 0), 0);
+        .reduce((sum, e) => sum + ledgerExpense(e), 0);
 
       // Live month traffic from ProxySmart
       let liveMonthBytes = 0;
@@ -1972,14 +1985,14 @@ app.get('/api/billing_history', authMiddleware, (req, res) => {
 
   // Summary: payments, charges, adjustments
   const allEntries = entries;
-  const totalCharges = allEntries.filter(e => e.type === 'charge' || e.type === 'correction').reduce((sum, e) => sum + (e.cost || e.amount || 0), 0);
+  const totalCharges = allEntries.filter(e => e.type === 'charge' || e.type === 'correction').reduce((sum, e) => sum + ledgerExpense(e), 0);
   const totalPayments = allEntries.filter(e => e.type === 'payment').reduce((sum, e) => sum + (e.amount || 0), 0);
 
   // Current month summary
   const currentMonthPrefix = new Date().toISOString().slice(0, 7);
   const monthCharges = allEntries
     .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(currentMonthPrefix))
-    .reduce((sum, e) => sum + (e.cost || e.amount || 0), 0);
+    .reduce((sum, e) => sum + ledgerExpense(e), 0);
 
   // Average daily charge over last 7 days: sum charges for days [today-7 .. today-1] / 7
   const today = getMoscowToday(); // "YYYY-MM-DD"
@@ -1988,7 +2001,7 @@ app.get('/api/billing_history', authMiddleware, (req, res) => {
   const sevenDaysAgoStr = d7.toLocaleDateString('en-CA'); // exclusive lower bound
   const last7dTotal = allEntries
     .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date > sevenDaysAgoStr && e.date < today)
-    .reduce((sum, e) => sum + (e.cost || e.amount || 0), 0);
+    .reduce((sum, e) => sum + ledgerExpense(e), 0);
   const avgDailyCharge7d = Math.round((last7dTotal / 7) * 100) / 100;
 
   res.json({
@@ -2676,7 +2689,7 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       let cost = 0, gb = 0;
       for (const e of entries) {
         if ((e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(curMonthPfx)) {
-          cost += (e.cost || e.amount || 0);
+          cost += ledgerExpense(e);
           gb += (e.delta_gb || 0);
         }
       }
@@ -3185,7 +3198,7 @@ app.get('/api/admin/billing/reconciliation', authMiddleware, adminMiddleware, as
     const entries = billingLedger[client.id] || [];
     const monthCharges = entries.filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(period));
     const billedGb = Math.round(monthCharges.reduce((s, e) => s + (e.delta_gb || 0), 0) * 1000) / 1000;
-    const billedCost = Math.round(monthCharges.reduce((s, e) => s + (e.cost || e.amount || 0), 0) * 100) / 100;
+    const billedCost = Math.round(monthCharges.reduce((s, e) => s + ledgerExpense(e), 0) * 100) / 100;
 
     // Count days with traffic vs days with billing
     const trafficDays = new Set();

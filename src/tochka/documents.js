@@ -13,7 +13,11 @@ function buildActItemsFromLedger(client, period, billingLedger) {
   const monthCorrections = monthEntries.filter(e => e.type === 'correction');
   const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
   const chargeCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
-  const correctionCost = Math.round(monthCorrections.reduce((sum, e) => sum + (e.amount || 0), 0) * 100) / 100;
+  // Signed correction amount: debit=positive expense, credit=negative (refund)
+  const correctionCost = Math.round(monthCorrections.reduce((sum, e) => {
+    if (e.balance_before != null && e.balance_after != null) return sum + (e.balance_before - e.balance_after);
+    return sum + (e.cost || e.amount || 0);
+  }, 0) * 100) / 100;
   const totalCost = Math.round((chargeCost + correctionCost) * 100) / 100;
   const modemCharges = monthCharges.filter(e => e.billing_type === 'per_modem');
   const gbCharges = monthCharges.filter(e => e.billing_type !== 'per_modem');
