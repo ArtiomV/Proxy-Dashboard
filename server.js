@@ -5111,7 +5111,7 @@ app.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async 
         tochkaDocumentId = result.data.Data.documentId;
         logger.info(`[Tochka] Created act ${tochkaDocumentId} for ${client.name}, period ${period}`);
       } else {
-        logger.error('[Tochka] Create act response:', JSON.stringify(result.data));
+        logger.error({ tochkaResponse: result.data, status: result.status }, '[Tochka] Create act unexpected response');
       }
     } catch (err) {
       logger.error('[Tochka] Create act error:', err.message);

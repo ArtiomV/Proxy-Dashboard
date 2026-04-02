@@ -67,7 +67,7 @@ function buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber) {
     Positions: actItems.map((item, idx) => ({
       positionName: serviceName,
       quantity: item.quantity || 1,
-      unitCode: item.unit === 'ГБ' ? 'Гбайт' : (item.unit === 'шт' ? 'шт' : 'услуга.'),
+      unitCode: item.unit === 'ГБ' ? 'усл.ед.' : (item.unit === 'шт' ? 'шт.' : 'услуга.'),
       totalAmount: item.amount || 0,
       ndsKind: 'without_nds',
       price: item.price || 0,
@@ -91,10 +91,7 @@ function buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber) {
         name: secondSideName
       },
       Content: {
-        Act: act,
-        PackingList: {},
-        Invoicef: {},
-        Upd: {}
+        Act: act
       }
     }
   };
