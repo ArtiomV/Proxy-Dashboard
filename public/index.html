@@ -2119,6 +2119,7 @@ async function doLogin(){
     localStorage.setItem('pr_token',authToken);
     localStorage.setItem('pr_login',authLogin);
     if(data.isAdmin){
+      localStorage.setItem('pr_admin_token',authToken);
       window.location.href='/admin';
       return;
     }

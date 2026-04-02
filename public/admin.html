@@ -442,7 +442,7 @@ if(typeof esc==='undefined'){
   function showToast(m,t,dur){var c=document.getElementById('toastContainer');if(!c)return;var tp=t||'info';var ms=dur||(tp==='error'?6000:4000);var e=document.createElement('div');e.className='toast toast-'+tp;e.innerHTML='<span class="toast-icon">'+(tp==='success'?'✓':tp==='error'?'✕':'i')+'</span><span class="toast-text">'+m+'</span>';c.appendChild(e);setTimeout(function(){if(e.parentNode)e.remove();},ms)}
   function getChartColors(){var d=document.documentElement.dataset.theme==='dark';return{grid:d?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)',text:d?'#8892a6':'#6b7280',bg:d?'#131720':'#ffffff'}}
 }
-var API='',authToken=localStorage.getItem('pr_token')||'',currentData=null;
+var API='',authToken=localStorage.getItem('pr_admin_token')||'',currentData=null;
 var sortCol='nick',sortDir='asc',activeServerFilter='all',activeStatusFilter='all',activeClientFilter='';
 var autoRefreshTimer=null,charts={};
 var _crmLoaded=false;
@@ -501,7 +501,7 @@ function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'li
 
 // ========== AUTH ==========
 function doLogin(){window.location.href='/'}
-function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
+function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_admin_token');localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
 var _activeBankTab='acts';
@@ -3805,7 +3805,7 @@ function regenerateApiKeyInForm(){
   // Validate admin token
   fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}})
     .then(function(r){
-      if(r.status===401||r.status===403){localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/';return null}
+      if(r.status===401||r.status===403){localStorage.removeItem('pr_admin_token');localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/';return null}
       return r.json()
     })
     .then(function(data){
