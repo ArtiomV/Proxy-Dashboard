@@ -2061,7 +2061,9 @@ function formatNumber(n){
     localStorage.setItem('pr_login','(admin view)');
     // Clean URL without reloading
     window.history.replaceState({},'',window.location.pathname);
+    console.log('[Impersonate] Token set, calling showApp');
   }
+  console.log('[Init] authToken='+(authToken?authToken.slice(0,8)+'...':'(empty)')+', impToken='+(impToken||'none'));
   if(authToken){showApp()}else{showLogin()}
   document.getElementById('passwordInput').addEventListener('keydown',function(e){if(e.key==='Enter')doLogin()});
   document.getElementById('loginInput').addEventListener('keydown',function(e){if(e.key==='Enter')document.getElementById('passwordInput').focus()});
