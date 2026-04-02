@@ -1221,17 +1221,15 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
 
 <script src="/js/utils.js"></script>
 <script>
-// Fallback: if utils.js failed to load, define critical functions inline
-if(typeof esc==='undefined'){
-  function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
-  function parseTraffic(v){if(!v||v===0)return 0;if(typeof v==='number')return v;var s=String(v).slice(0,30),m=s.match(/^(\d+(?:\.\d+)?)\s*(KB|MB|GB|TB)$/i);if(!m)return parseFloat(s)||0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1024:u==='MB'?1048576:u==='GB'?1073741824:u==='TB'?1099511627776:1)}
-  function formatBytes(b){if(!b||b===0)return'0 B';var units=['B','KB','MB','GB','TB'];var i=0;while(b>=1024&&i<units.length-1){b/=1024;i++}return b.toFixed(1)+' '+units[i]}
-  function showToast(m,t){var c=document.getElementById('toastContainer');if(!c)return;var e=document.createElement('div');e.className='toast toast-'+(t||'info');e.textContent=m;c.appendChild(e);setTimeout(function(){e.remove()},4000)}
-  function getModemStatus(m){if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';return'offline'}
-  function bytesToGb(b){return b/1073741824}
-  function fmtGb(b){if(!b||b===0)return'0 B';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(1)+' GB'}
-  function pct(v,max){return max?Math.round(v/max*100):0}
-}
+// Ensure critical utils exist (defined in /js/utils.js, fallback here)
+if(typeof esc!=='function'){esc=function(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}}
+if(typeof parseTraffic!=='function'){parseTraffic=function(v){if(!v||v===0)return 0;if(typeof v==='number')return v;var s=String(v).slice(0,30),m=s.match(/^(\d+(?:\.\d+)?)\s*(KB|MB|GB|TB)$/i);if(!m)return parseFloat(s)||0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1024:u==='MB'?1048576:u==='GB'?1073741824:u==='TB'?1099511627776:1)}}
+if(typeof formatBytes!=='function'){formatBytes=function(b){if(!b||b===0)return'0 B';var units=['B','KB','MB','GB','TB'];var i=0;while(b>=1024&&i<units.length-1){b/=1024;i++}return b.toFixed(1)+' '+units[i]}}
+if(typeof showToast!=='function'){showToast=function(m,t){var c=document.getElementById('toastContainer');if(!c)return;var e=document.createElement('div');e.className='toast toast-'+(t||'info');e.textContent=m;c.appendChild(e);setTimeout(function(){e.remove()},4000)}}
+if(typeof getModemStatus!=='function'){getModemStatus=function(m){if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';return'offline'}}
+if(typeof bytesToGb!=='function'){bytesToGb=function(b){return b/1073741824}}
+if(typeof fmtGb!=='function'){fmtGb=function(b){if(!b||b===0)return'0 B';if(b<1073741824)return(b/1048576).toFixed(1)+' MB';return(b/1073741824).toFixed(1)+' GB'}}
+if(typeof pct!=='function'){pct=function(v,max){return max?Math.round(v/max*100):0}}
 // --- Theme ---
 function getTheme(){return localStorage.getItem('pr_theme')||'dark'}
 
