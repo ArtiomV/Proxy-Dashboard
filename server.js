@@ -1094,21 +1094,7 @@ const DOCUMENTS_DIR = path.join(__dirname, 'documents');
 if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true });
 
 const app = express();
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "'unsafe-inline'", "'unsafe-eval'", "https://cdn.jsdelivr.net", "https://mc.yandex.ru"],
-      scriptSrcAttr: ["'unsafe-inline'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
-      imgSrc: ["'self'", "data:", "https://mc.yandex.ru"],
-      connectSrc: ["'self'", "https://mc.yandex.ru"],
-      frameSrc: ["'self'", "https://crm.proxies.rent"],
-      fontSrc: ["'self'"]
-    }
-  },
-  crossOriginEmbedderPolicy: false
-}));
+app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 
