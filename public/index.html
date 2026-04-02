@@ -1950,19 +1950,18 @@ function loadBillingHistory(){
       html+='</div></div>';
 
       // Type counts for filter buttons
-      var typeCounts={all:mg.entries.length,charge:0,payment:0,adjustment:0};
+      var typeCounts={all:mg.entries.length,charge:0,payment:0,correction:0};
       mg.entries.forEach(function(e){
         if(e.type==='charge')typeCounts.charge++;
-        else if(e.type==='correction')typeCounts.charge++;
+        else if(e.type==='correction')typeCounts.correction++;
         else if(e.type==='payment'||e.type==='bank_payment')typeCounts.payment++;
-        else if(e.type==='adjustment')typeCounts.adjustment++;
       });
 
       // Month body (entries table)
       html+='<div class="billing-month-body" style="'+(isOpen?'':'display:none;')+'">';
       // Filter bar
       html+='<div style="padding:10px 14px;border-bottom:1px solid var(--border);display:flex;gap:4px;background:var(--bg-1)">';
-      [['all','Все'],['charge','Списания'],['payment','Пополнения'],['adjustment','Корректировки']].forEach(function(f){
+      [['all','Все'],['charge','Списания'],['payment','Пополнения'],['correction','Корректировки']].forEach(function(f){
         var isActive=f[0]==='all';
         var cnt=typeCounts[f[0]]||0;
         html+='<button onclick="filterBillingMonth(this,\''+monthKey+'\',\''+f[0]+'\')" data-ftype="'+f[0]+'" style="padding:4px 10px;border-radius:6px;border:'+(isActive?'1px solid var(--accent)':'1px solid var(--border)')+';background:'+(isActive?'var(--accent)':'var(--bg-2)')+';color:'+(isActive?'#fff':'var(--text-2)')+';font-size:11px;cursor:pointer;display:flex;align-items:center;gap:5px;font-weight:'+(isActive?'600':'400')+'">'+f[1]+'<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:rgba(0,0,0,0.1);color:inherit">'+cnt+'</span></button>';
@@ -1987,7 +1986,7 @@ function loadBillingHistory(){
           var isDebit=cDelta<0;
           typeLabel='Корректировка';typeStyle='color:#8b5cf6';
           amountStr=(isDebit?'':'+') + formatNumber(cDelta) + ' ' + cs;
-          amountStyle=isDebit?'color:var(--red)':'color:var(--green)';ftype='charge';
+          amountStyle=isDebit?'color:var(--red)':'color:var(--green)';ftype='correction';
         }
         else if(e.type==='payment'){typeLabel='Пополнение';typeStyle='color:var(--green)';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
         else if(e.type==='bank_payment'){typeLabel='🏦 Банк';typeStyle='color:#6366f1';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
