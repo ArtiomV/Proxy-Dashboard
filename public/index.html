@@ -1912,7 +1912,7 @@ function loadBillingHistory(){
       if(!monthMap[key]) monthMap[key]={entries:[],totalCharge:0,totalPayment:0,totalTraffic:0};
       monthMap[key].entries.push(e);
       if(e.type==='charge'){monthMap[key].totalCharge+=(e.cost||0);monthMap[key].totalTraffic+=(e.delta_gb||0)}
-      else if(e.type==='correction'){var cd=(e.balance_before!=null&&e.balance_after!=null)?(e.balance_before-e.balance_after):(e.amount||0);monthMap[key].totalCharge+=cd}
+      else if(e.type==='correction'){var cd=(e.balance_before!=null&&e.balance_after!=null)?(e.balance_before-e.balance_after):(e.amount||0);monthMap[key].totalCharge+=cd;if(e.delta_gb)monthMap[key].totalTraffic+=(cd>0?e.delta_gb:-e.delta_gb)}
       else if(e.type==='payment'||e.type==='bank_payment'){monthMap[key].totalPayment+=(e.amount||0)}
     });
 
@@ -1996,7 +1996,7 @@ function loadBillingHistory(){
 
         var dateStr=e.date||'—';
         if(e.timestamp){try{var d=new Date(e.timestamp);dateStr=d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});}catch(ex){}}
-        var trafficStr=e.type==='charge'&&e.delta_gb!==undefined?e.delta_gb.toFixed(3)+' ГБ':'—';
+        var trafficStr=(e.type==='charge'||e.type==='correction')&&e.delta_gb?e.delta_gb.toFixed(3)+' ГБ':'—';
         var balAfter=e.balance_after!==undefined?formatNumber(e.balance_after)+' '+cs:'—';
         var note=e.note||'';
         var noteTd=note.length>40
