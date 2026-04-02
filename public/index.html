@@ -1912,6 +1912,7 @@ function loadBillingHistory(){
       if(!monthMap[key]) monthMap[key]={entries:[],totalCharge:0,totalPayment:0,totalTraffic:0};
       monthMap[key].entries.push(e);
       if(e.type==='charge'){monthMap[key].totalCharge+=(e.cost||0);monthMap[key].totalTraffic+=(e.delta_gb||0)}
+      else if(e.type==='correction'){var cd=(e.balance_before!=null&&e.balance_after!=null)?(e.balance_before-e.balance_after):(e.amount||0);monthMap[key].totalCharge+=cd}
       else if(e.type==='payment'||e.type==='bank_payment'){monthMap[key].totalPayment+=(e.amount||0)}
     });
 
@@ -1952,6 +1953,7 @@ function loadBillingHistory(){
       var typeCounts={all:mg.entries.length,charge:0,payment:0,adjustment:0};
       mg.entries.forEach(function(e){
         if(e.type==='charge')typeCounts.charge++;
+        else if(e.type==='correction')typeCounts.charge++;
         else if(e.type==='payment'||e.type==='bank_payment')typeCounts.payment++;
         else if(e.type==='adjustment')typeCounts.adjustment++;
       });
@@ -1980,6 +1982,13 @@ function loadBillingHistory(){
       mg.entries.forEach(function(e){
         var typeLabel='',typeStyle='',amountStr='',amountStyle='',ftype='other';
         if(e.type==='charge'){typeLabel='Списание';typeStyle='color:var(--red)';amountStr='-'+formatNumber(e.cost||0)+' '+cs;amountStyle='color:var(--red)';ftype='charge';}
+        else if(e.type==='correction'){
+          var cDelta=(e.balance_before!=null&&e.balance_after!=null)?(e.balance_after-e.balance_before):(e.amount||0);
+          var isDebit=cDelta<0;
+          typeLabel='Корректировка';typeStyle='color:#8b5cf6';
+          amountStr=(isDebit?'':'+') + formatNumber(cDelta) + ' ' + cs;
+          amountStyle=isDebit?'color:var(--red)':'color:var(--green)';ftype='charge';
+        }
         else if(e.type==='payment'){typeLabel='Пополнение';typeStyle='color:var(--green)';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
         else if(e.type==='bank_payment'){typeLabel='🏦 Банк';typeStyle='color:#6366f1';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
         else if(e.type==='payment_reversal'){typeLabel='Отмена';typeStyle='color:var(--orange,#f59e0b)';amountStr=formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--orange,#f59e0b)';}
