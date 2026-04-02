@@ -1844,12 +1844,11 @@ function loadDailyTrafficChart(textColor,gridColor){
 
     var genLineLabels=function(chart){
       var labs=Chart.defaults.plugins.legend.labels.generateLabels(chart);
-      labs.forEach(function(l){l.fillStyle=l.strokeStyle;l.lineWidth=0;});
+      labs.forEach(function(l){l.fillStyle=l.strokeStyle;l.strokeStyle='transparent';l.lineWidth=0;});
       return labs;
     };
     var ctx=document.getElementById('analyticsDailyChart').getContext('2d');
     if(analyticsCharts.daily){
-      // Update in-place — no destroy, no layout jump
       var ch=analyticsCharts.daily;
       ch.data.labels=dateLabels;
       ch.data.datasets=datasets;
@@ -1860,7 +1859,7 @@ function loadDailyTrafficChart(textColor,gridColor){
         responsive:true,maintainAspectRatio:false,
         interaction:{mode:'index',intersect:false},
         plugins:{
-          legend:{position:'bottom',labels:{color:textColor,font:{size:10},boxWidth:12,padding:8,generateLabels:genLineLabels}},
+          legend:{position:'bottom',labels:{color:textColor,font:{size:10},boxWidth:12,padding:8,usePointStyle:false,generateLabels:genLineLabels}},
           tooltip:{mode:'index',intersect:false,callbacks:{label:function(ctx){return ctx.dataset.label+': '+ctx.parsed.y.toFixed(2)+' GB'}}}
         },
         scales:{
