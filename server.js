@@ -1103,7 +1103,7 @@ app.use(helmet({
       styleSrc: ["'self'", "'unsafe-inline'"],
       imgSrc: ["'self'", "data:", "https://mc.yandex.ru"],
       connectSrc: ["'self'", "https://mc.yandex.ru"],
-      frameSrc: ["'self'"],
+      frameSrc: ["'self'", "https://crm.proxies.rent"],
       fontSrc: ["'self'"]
     }
   },
