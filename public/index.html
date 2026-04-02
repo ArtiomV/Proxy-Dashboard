@@ -2057,6 +2057,8 @@ function formatNumber(n){
   if(impToken){
     authToken=impToken;
     authLogin='(admin view)';
+    localStorage.setItem('pr_token',impToken);
+    localStorage.setItem('pr_login','(admin view)');
     // Clean URL without reloading
     window.history.replaceState({},'',window.location.pathname);
   }
