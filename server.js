@@ -672,6 +672,7 @@ function saveDailyTraffic() {
 function saveHourlySnapshots() { hourlyTraffic.saveHourlySnapshots(); }
 function loadHourlySnapshots() { hourlyTraffic.loadHourlySnapshots(); }
 async function aggregateHourlyTraffic() { return hourlyTraffic.aggregateHourlyTraffic(); }
+async function capturePreResetSnapshot() { return hourlyTraffic.capturePreResetSnapshot(); }
 
 // parseTrafficValue, getMoscow*, trafficBytesToGb extracted to src/utils/
 
@@ -5833,6 +5834,9 @@ const httpServer = app.listen(PORT, () => {
   scheduleRepeating(0, 45, 'DailySync', syncYesterdayTraffic);
   scheduleRepeating(7, 0, 'DailySync-07:00', syncYesterdayTraffic);
   scheduleRepeating(15, 0, 'DailySync-15:00', syncYesterdayTraffic);
+
+  // Pre-reset snapshot at 20:50 UTC (23:50 MSK) — captures month counters before ProxySmart resets them at 21:00 UTC
+  scheduleRepeating(20, 50, 'PreResetSnapshot', capturePreResetSnapshot);
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {

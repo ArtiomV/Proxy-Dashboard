@@ -2161,7 +2161,7 @@ function copyText(t,b){
 // --- Load Data ---
 async function loadData(){
   var btn=document.getElementById('btnRefresh');
-  btn.disabled=true;
+  if(btn)btn.disabled=true;
   setStatus('loading','Загрузка...');
   document.getElementById('errorContainer').innerHTML='';
 
