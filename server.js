@@ -2755,12 +2755,41 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       }
     }
 
+    // Modem trend: compare first N days of current month vs first N days of previous month
+    const modemTrend = {};
+    {
+      const mskNow = getMoscowNow();
+      const completedDays = Math.max(mskNow.getDate() - 1, 0); // yesterday = last completed day
+      if (completedDays > 0) {
+        const curYear = mskNow.getFullYear(), curMon = mskNow.getMonth();
+        const curPrefix = `${curYear}-${String(curMon + 1).padStart(2, '0')}`;
+        const prevDate = new Date(curYear, curMon - 1, 1);
+        const prevPrefix = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+        // Build cutoff: first N days = date <= YYYY-MM-NN
+        const curCutoff = `${curPrefix}-${String(completedDays).padStart(2, '0')}`;
+        const prevCutoff = `${prevPrefix}-${String(completedDays).padStart(2, '0')}`;
+        for (const [portKey, days] of Object.entries(dailyTraffic)) {
+          let curBytes = 0, prevBytes = 0;
+          for (const [date, entry] of Object.entries(days)) {
+            if (date.startsWith(curPrefix) && date <= curCutoff) curBytes += (entry.in || 0) + (entry.out || 0);
+            else if (date.startsWith(prevPrefix) && date <= prevCutoff) prevBytes += (entry.in || 0) + (entry.out || 0);
+          }
+          if (prevBytes > 0) {
+            modemTrend[portKey] = Math.round((curBytes - prevBytes) / prevBytes * 100);
+          } else if (curBytes > 0) {
+            modemTrend[portKey] = null; // new modem, no comparison
+          }
+        }
+      }
+    }
+
     res.json({
       clientMonthCharges,
       clientMonthGb,
       clientLiveMonthGb,
       clientLastHourGb,
       clientTodayGb,
+      modemTrend,
       ...merged,
       servers,
       clients: sanitizedClients,
