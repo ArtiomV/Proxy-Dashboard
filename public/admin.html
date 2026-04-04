@@ -2462,7 +2462,6 @@ function renderClients(){
     h+='</div></div>';
     // Subtitle
     h+='<div style="padding:0 16px 10px;font-size:12px;color:var(--text-2)">';
-    if(c.legalName)h+=esc(c.legalName)+' \u00B7 ';
     h+=ctLabel+' \u00B7 <span style="font-family:monospace;color:var(--text-1)">'+esc(c.login)+'</span>';
     if(c.portName)h+=' / <span style="font-family:monospace;font-size:11px;color:var(--text-3)">'+esc(c.portName)+'</span>';
     h+='</div>';
