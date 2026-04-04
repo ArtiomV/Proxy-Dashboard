@@ -1217,7 +1217,7 @@ function renderAccSubTab(name){
     var totalAllOv=d.totalIn+d.totalOut||1;
     var daysEl=getDaysElapsed();
     // Header row — flex proportional columns filling full width
-    var hc='<div style="display:flex;align-items:center;padding:4px 0;border-bottom:2px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px">';
+    var hc='<div class="ct-header" style="display:flex;align-items:center;padding:4px 0;border-bottom:2px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px">';
     hc+='<div style="width:4px;flex-shrink:0"></div>';
     hc+='<div style="flex:2.2;padding:0 10px;min-width:0">Клиент</div>';
     hc+='<div style="flex:0.7;text-align:center">Live</div>';
@@ -1279,19 +1279,22 @@ function renderAccSubTab(name){
       }
       sparkH+='</div>';
       hc+='<div class="ct-row" data-client="'+esc(n)+'" onclick="selectClient(\''+esc(n)+'\')">';
-      hc+='<div style="width:4px;height:36px;background:'+clientColor+';flex-shrink:0;border-radius:2px 0 0 2px"></div>';
-      hc+='<div style="flex:2.2;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+esc(n)+'</div>';
-      hc+='<div style="flex:0.7;text-align:center;font-size:11px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</div>';
-      hc+='<div style="flex:1;text-align:center;font-size:11px;font-family:var(--font-mono);color:'+(lhGb>0?'var(--text-0)':'var(--text-3)')+'">'+lhStr+'</div>';
-      hc+='<div style="flex:1;text-align:center;font-size:11px;font-family:var(--font-mono)">'+fmtGb(todayBytes)+'</div>';
-      hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(yestBytes)+'</div>';
-      hc+='<div style="flex:1;text-align:center;font-size:12px;font-weight:500;font-family:var(--font-mono)">'+fmtGb(monBytes)+'</div>';
-      hc+='<div style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)">'+fmtGb(prevMonBytes)+'</div>';
-      hc+='<div style="flex:0.9;display:flex;align-items:center;justify-content:center">';
+      hc+='<div class="ct-color" style="width:4px;height:36px;background:'+clientColor+';flex-shrink:0;border-radius:2px 0 0 2px"></div>';
+      hc+='<div class="ct-name" style="flex:2.2;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+esc(n)+'</div>';
+      hc+='<div class="ct-live" style="flex:0.7;text-align:center;font-size:11px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</div>';
+      hc+='<div class="ct-metrics" style="display:contents">';
+      hc+='<div class="ct-metric" style="flex:1;text-align:center;font-size:11px;font-family:var(--font-mono);color:'+(lhGb>0?'var(--text-0)':'var(--text-3)')+'"><span class="ct-metric-label">Посл.час</span><span class="ct-metric-value">'+lhStr+'</span></div>';
+      hc+='<div class="ct-metric" style="flex:1;text-align:center;font-size:11px;font-family:var(--font-mono)"><span class="ct-metric-label">Сегодня</span><span class="ct-metric-value">'+fmtGb(todayBytes)+'</span></div>';
+      hc+='<div class="ct-metric" style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)"><span class="ct-metric-label">Вчера</span><span class="ct-metric-value">'+fmtGb(yestBytes)+'</span></div>';
+      hc+='<div class="ct-metric" style="flex:1;text-align:center;font-size:12px;font-weight:500;font-family:var(--font-mono)"><span class="ct-metric-label">Месяц</span><span class="ct-metric-value">'+fmtGb(monBytes)+'</span></div>';
+      hc+='<div class="ct-metric" style="flex:1;text-align:center;font-size:11px;color:var(--text-2);font-family:var(--font-mono)"><span class="ct-metric-label">Пр.месяц</span><span class="ct-metric-value">'+fmtGb(prevMonBytes)+'</span></div>';
+      hc+='<div class="ct-metric" style="flex:0.9;text-align:center"><span class="ct-metric-label">Тренд</span><span class="ct-metric-value" style="color:'+trendColor+'">'+trendStr+'</span></div>';
+      hc+='</div>';
+      hc+='<div class="ct-sparkline" style="flex:0.9;display:flex;align-items:center;justify-content:center">';
       hc+=sparkH;
       hc+='</div>';
-      hc+='<div style="flex:1.4;padding:0 8px"><div class="hbar-bar-wrap" style="height:8px"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div></div>';
-      hc+='<div style="flex:0.5;text-align:center;font-size:11px;color:var(--text-2);padding-right:8px">'+sharePct+'%</div>';
+      hc+='<div class="ct-share" style="flex:1.4;padding:0 8px"><div class="hbar-bar-wrap" style="height:8px"><div class="hbar-bar" style="width:'+sharePct+'%;background:'+clientColor+'"></div></div></div>';
+      hc+='<div class="ct-pct" style="flex:0.5;text-align:center;font-size:11px;color:var(--text-2);padding-right:8px">'+sharePct+'%</div>';
       hc+='</div>';
     });
     var ctEl=document.getElementById('clientTrafficTable');
