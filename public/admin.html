@@ -1010,7 +1010,7 @@ function populateAccClientFilter(){
   var prev=sel.value;
   var cls=currentData.clients||[];
   sel.innerHTML='<option value="">Все клиенты</option>';
-  cls.forEach(function(c){
+  cls.filter(function(c){return c.modemCount>0}).forEach(function(c){
     sel.innerHTML+='<option value="'+esc(c.portName)+'">'+esc(c.name)+' ('+esc(c.portName)+')</option>';
   });
   if(prev)sel.value=prev;
@@ -1019,7 +1019,7 @@ function populateAccClientFilter(){
   if(resSel){
     var resPrev=resSel.value;
     resSel.innerHTML='<option value="">Все клиенты</option>';
-    cls.forEach(function(c){
+    cls.filter(function(c){return c.modemCount>0}).forEach(function(c){
       resSel.innerHTML+='<option value="'+esc(c.portName)+'">'+esc(c.name)+'</option>';
     });
     if(resPrev)resSel.value=resPrev;
@@ -1213,7 +1213,7 @@ function renderAccSubTab(name){
     renderTrafficMatrix(d);
 
     // Client table (flex layout with sparkline + trend)
-    var clientNamesOv=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
+    var clientNamesOv=Object.keys(d.clientTraffic).filter(function(n){return d.clientTraffic[n].modems>0}).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
     var totalAllOv=d.totalIn+d.totalOut||1;
     var daysEl=getDaysElapsed();
     // Header row — flex proportional columns filling full width
@@ -2438,11 +2438,12 @@ function renderClients(){
   for(var imei in map){var mm=map[imei];mm.ports.forEach(function(p){if(p.portName){if(!pnm[p.portName])pnm[p.portName]=[];pnm[p.portName].push({nick:mm.nick,server:mm.server})}})}
   var h='';var count=0;var colors=CHART_COLORS.clients;
   cl.forEach(function(c,i){
+    var modems=pnm[c.portName]||[];
+    if(!modems.length&&!c.modemCount)return; // hide clients without active modems
     if(search&&(c.name+' '+c.portName+' '+c.login+' '+(c.contact||'')+' '+(c.legalName||'')).toLowerCase().indexOf(search)===-1)return;
     var balance=c.balance!==undefined?c.balance:0;
     if(_filterProblematic&&balance>=0)return;
-    count++;
-    var modems=pnm[c.portName]||[];var bt=c.billingType||'per_gb';var price=c.price||0;
+    count++;var bt=c.billingType||'per_gb';var price=c.price||0;
     var cost=Math.round(((currentData.clientMonthCharges||{})[c.id]||0)*100)/100;
     var monthGbLive=Math.round(((currentData.clientLiveMonthGb||{})[c.id]||0)*10)/10;
     var tariffLabel=price+(bt==='per_modem'?'\u20BD/мод':'\u20BD/\u0413\u0411');
