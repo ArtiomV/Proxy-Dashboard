@@ -262,7 +262,6 @@
   .ct-metric-label{display:block!important;font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.3px;margin-bottom:2px}
   .ct-row .ct-metric-value{font-size:12px;font-family:var(--font-mono)}
   .ct-row .ct-sparkline{display:none!important}
-  .ct-row .ct-share{flex:none!important;width:100%!important;padding:8px 0 0 8px!important}
-  .ct-row .ct-share .hbar-bar-wrap{height:6px!important}
-  .ct-row .ct-pct{position:absolute;bottom:12px;right:12px;flex:none!important}
+  .ct-row .ct-trend{display:none!important}
+  .ct-row .ct-trend-mobile{display:block!important}
 }
