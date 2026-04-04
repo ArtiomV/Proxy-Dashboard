@@ -106,10 +106,11 @@ async function aggregateHourlyTraffic() {
           const snap = hourlyDaySnapshots[snapKey];
           // Record hourly increment if snapshot exists
           if (snap) {
-            // Detect counter reset: if current < previous, ProxySmart reset daily counters
-            const counterReset = (dayIn < snap.in * 0.5) || (dayOut < snap.out * 0.5);
-            if (snap.date === todayStr && !counterReset) {
-              // Same day, normal increment
+            // Detect counter reset: current < previous means ProxySmart reset daily counters
+            // (midnight UTC or midnight local time of ProxySmart server)
+            const counterReset = (snap.in > 0 && dayIn < snap.in) || (snap.out > 0 && dayOut < snap.out);
+            if (!counterReset) {
+              // Normal increment (same counter epoch)
               const incIn  = Math.max(0, dayIn  - snap.in);
               const incOut = Math.max(0, dayOut - snap.out);
               if (incIn + incOut > 0) {
@@ -117,7 +118,7 @@ async function aggregateHourlyTraffic() {
                 count++;
               }
             } else {
-              // New day or counter reset — dayIn/dayOut IS the traffic since reset
+              // Counter reset — dayIn/dayOut IS the full traffic since reset
               if (dayIn + dayOut > 0) {
                 _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, dayIn, dayOut);
                 count++;
