@@ -1227,7 +1227,6 @@ function renderAccSubTab(name){
     hc+='<div style="flex:1;text-align:center;font-weight:600">Месяц</div>';
     hc+='<div style="flex:1;text-align:center">Пр.месяц</div>';
     hc+='<div style="flex:0.9;text-align:center">Тренд</div>';
-    hc+='<div style="flex:0.7;text-align:center;padding-right:8px">Доля</div>';
     hc+='</div>';
     clientNamesOv.forEach(function(n,i){
       var c=d.clientTraffic[n];var total=c.tIn+c.tOut;
@@ -1289,7 +1288,7 @@ function renderAccSubTab(name){
       hc+='<div class="ct-sparkline" style="flex:0.9;display:flex;align-items:center;justify-content:center">';
       hc+=sparkH;
       hc+='</div>';
-      hc+='<div class="ct-pct" style="flex:0.7;text-align:center;font-size:11px;color:var(--text-2);padding-right:8px">'+sharePct+'%</div>';
+      // share % removed
       hc+='</div>';
     });
     var ctEl=document.getElementById('clientTrafficTable');
