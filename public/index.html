@@ -2298,11 +2298,11 @@ async function loadData(){
         '\u26A0\uFE0F Сервер недоступен: '+escapeHtml(cacheWarnings)+'. Трафик и доступы отображаются из кеша. Модемы помечены как offline.</div>';
     }
 
-    renderTable();
-    renderProxyTable();
-    updateSummary();
-    loadExternalProxies();
-    initOnboarding();
+    try{renderTable()}catch(e){console.error('[loadData] renderTable:',e)}
+    try{renderProxyTable()}catch(e){console.error('[loadData] renderProxyTable:',e)}
+    try{updateSummary()}catch(e){console.error('[loadData] updateSummary:',e)}
+    try{loadExternalProxies()}catch(e){console.error('[loadData] loadExternalProxies:',e)}
+    try{initOnboarding()}catch(e){console.error('[loadData] initOnboarding:',e)}
 
     // Restore saved tab
     var _savedTab=localStorage.getItem('pr_active_tab');
@@ -2318,7 +2318,7 @@ async function loadData(){
     document.getElementById('errorContainer').innerHTML=
       '<div class="error-msg">Не удалось загрузить данные: '+escapeHtml(err.message)+'</div>';
   }finally{
-    btn.disabled=false;
+    if(btn)btn.disabled=false;
   }
 }
 
