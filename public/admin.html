@@ -2342,6 +2342,13 @@ function generateNotifications(){
   (currentData.clients||[]).forEach(function(c){
     if((c.balance||0)<-10)notifs.push({type:'danger',icon:'💸',text:'Долг: <b>'+esc(c.name)+'</b> — '+Math.round(c.balance)+'₽',key:'debt_'+c.id});
   });
+  // CRM reminders
+  if(window._crmReminders&&window._crmReminders.length){
+    window._crmReminders.forEach(function(r){
+      var dt=r.reminderDate?new Date(r.reminderDate).toLocaleDateString('ru-RU'):'';
+      notifs.push({type:'warning',icon:'🔔',text:'Напоминание: <b>'+esc(r.name||'Сделка')+'</b>'+(dt?' ('+dt+')':''),key:'crm_'+r.id});
+    });
+  }
   window._notifs=notifs;
   // Check against localStorage read timestamp — compute hash of current notif keys
   var nHash=notifs.map(function(n){return n.key}).sort().join('|');
@@ -3826,7 +3833,9 @@ function regenerateApiKeyInForm(){
     .then(function(data){
       if(!data)return;
       document.body.style.visibility='visible';
-      currentData=data;processData();renderServerFilter();renderClientFilterDD();renderTable();updateHeaderStats();populateAccClientFilter();generateNotifications();
+      currentData=data;processData();renderServerFilter();renderClientFilterDD();renderTable();updateHeaderStats();populateAccClientFilter();
+      // Load CRM reminders then generate notifications
+      fetch(API+'/api/admin/crm_reminders',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){window._crmReminders=d.reminders||[];}).catch(function(){window._crmReminders=[];}).finally(function(){generateNotifications()});
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
       var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}
       startAutoRefresh()

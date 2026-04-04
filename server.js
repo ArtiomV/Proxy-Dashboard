@@ -3402,6 +3402,28 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   res.json({ ok: true, settings: appSettings });
 });
 
+// CRM reminders — check opportunities with reminderDate <= now
+app.get('/api/admin/crm_reminders', authMiddleware, adminMiddleware, async (req, res) => {
+  const dbUrl = process.env.CRM_DB_URL;
+  const workspace = process.env.CRM_WORKSPACE;
+  if (!dbUrl || !workspace) return res.json({ reminders: [] });
+  try {
+    const { Pool } = require('pg');
+    const pool = new Pool({ connectionString: dbUrl, max: 1, idleTimeoutMillis: 5000 });
+    const result = await pool.query(
+      `SELECT id, name, "reminderDate", stage, amount, "closeDate"
+       FROM ${workspace}.opportunity
+       WHERE "reminderDate" IS NOT NULL AND "reminderDate" <= NOW() AND "deletedAt" IS NULL
+       ORDER BY "reminderDate" ASC LIMIT 50`
+    );
+    await pool.end();
+    res.json({ reminders: result.rows });
+  } catch (e) {
+    logger.error('[CRM] Reminders query error:', e.message);
+    res.json({ reminders: [], error: e.message });
+  }
+});
+
 app.get('/api/admin/crm_token', authMiddleware, adminMiddleware, async (req, res) => {
   const crmUrl = process.env.CRM_URL || '';
   const crmEmail = process.env.CRM_EMAIL || '';
