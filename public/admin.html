@@ -1324,7 +1324,7 @@ function renderAccSubTab(name){
     // Init heatmap once on first overview load
     if(!window._heatmapInitialized){
       window._heatmapInitialized=true;
-      _heatmapConfig.client=(currentData&&currentData.clients||[]).map(function(c){return{id:c.portName,label:c.name,modems:c.modemCount||1}});
+      _heatmapConfig.client=(currentData&&currentData.clients||[]).filter(function(c){return c.modemCount>0}).map(function(c){return{id:c.portName,label:c.name,modems:c.modemCount||1}});
       renderHeatmapSubTabs();
       loadHeatmapData();
     }
@@ -1474,7 +1474,7 @@ function hmAccent(view,id){
 }
 function setHeatmapView(view){
   _heatmapView=view;
-  if(view==='client'){_heatmapConfig.client=(currentData&&currentData.clients||[]).map(function(c){return{id:c.portName,label:c.name,modems:c.modemCount||1}});}
+  if(view==='client'){_heatmapConfig.client=(currentData&&currentData.clients||[]).filter(function(c){return c.modemCount>0}).map(function(c){return{id:c.portName,label:c.name,modems:c.modemCount||1}});}
   var cfg=_heatmapConfig[view]||[];
   if(cfg.length)_heatmapId=cfg[0].id;
   ['country','operator','client'].forEach(function(v){
@@ -1488,7 +1488,7 @@ function setHeatmapView(view){
 function renderHeatmapSubTabs(){
   var c=document.getElementById('heatmapSubTabs');if(!c)return;
   var view=_heatmapView;
-  var cfg=view==='client'?(currentData&&currentData.clients||[]).map(function(x){return{id:x.portName,label:x.name,modems:x.modemCount||1};}):(_heatmapConfig[view]||[]);
+  var cfg=view==='client'?(currentData&&currentData.clients||[]).filter(function(x){return x.modemCount>0}).map(function(x){return{id:x.portName,label:x.name,modems:x.modemCount||1};}):(_heatmapConfig[view]||[]);
   var h='';
   cfg.forEach(function(item){
     var active=item.id===_heatmapId;var col=hmAccent(view,item.id);
@@ -1639,7 +1639,7 @@ function getHeatmapModems(){
   if(view==='client'){
     var _byClient={};
     if(currentData&&currentData.bandwidth){for(var _bk in currentData.bandwidth){var _pn=currentData.bandwidth[_bk].portName;if(_pn)_byClient[_pn]=(_byClient[_pn]||0)+1;}}
-    cfg=(currentData&&currentData.clients||[]).map(function(c){return{id:c.portName,label:c.name,modems:_byClient[c.portName]||0};});
+    cfg=(currentData&&currentData.clients||[]).filter(function(c){return c.modemCount>0}).map(function(c){return{id:c.portName,label:c.name,modems:_byClient[c.portName]||0};});
   } else {
     cfg=_heatmapConfig[view]||[];
   }
