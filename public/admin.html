@@ -2330,23 +2330,36 @@ function bulkReboot(){
 
 // ========== TASK 14: NOTIFICATION BELL ==========
 window._notifs=[];
+function timeAgo(ts){
+  if(!ts)return'сейчас';
+  var ms=Date.now()-new Date(ts).getTime();
+  if(ms<0)ms=0;
+  var s=Math.floor(ms/1000),m=Math.floor(s/60),h=Math.floor(m/60),d=Math.floor(h/24);
+  if(d>0)return d+'д назад';
+  if(h>0)return h+'ч назад';
+  if(m>0)return m+'м назад';
+  return'только что';
+}
 function generateNotifications(){
   if(!currentData||!currentData._modemMap)return;
   var map=currentData._modemMap;var notifs=[];
+  var ipTr=currentData.ipTracking||{};
+  var upTr=currentData.uptimeTracking||{};
   for(var imei in map){
     var m=map[imei];var status=getModemStatus(m);
-    if(status==='offline')notifs.push({type:'danger',icon:'📴',text:'Модем <b>'+esc(m.nick)+'</b> офлайн',key:'off_'+imei});
-    else if(m.lowSpeed)notifs.push({type:'warning',icon:'🐢',text:'Низкая скорость: <b>'+esc(m.nick)+'</b> — '+Number(m.lastSpeedDl||0).toFixed(1)+' Mbps↓',key:'spd_'+imei});
-    else if(m.ipStuck)notifs.push({type:'warning',icon:'⚠️',text:'IP завис: <b>'+esc(m.nick)+'</b> ('+m.ipSinceHours+'ч без смены)',key:'ip_'+imei});
+    var lastSeen=upTr[imei]&&upTr[imei].last_check?upTr[imei].last_check:null;
+    if(status==='offline')notifs.push({type:'danger',icon:'📴',text:'Модем <b>'+esc(m.nick)+'</b> офлайн',key:'off_'+imei,time:lastSeen});
+    else if(m.lowSpeed)notifs.push({type:'warning',icon:'🐢',text:'Низкая скорость: <b>'+esc(m.nick)+'</b> — '+Number(m.lastSpeedDl||0).toFixed(1)+' Mbps↓',key:'spd_'+imei,time:lastSeen});
+    else if(m.ipStuck){var ipSince=ipTr[imei]&&ipTr[imei].since?ipTr[imei].since:null;notifs.push({type:'warning',icon:'⚠️',text:'IP завис: <b>'+esc(m.nick)+'</b> ('+m.ipSinceHours+'ч без смены)',key:'ip_'+imei,time:ipSince})}
   }
   (currentData.clients||[]).forEach(function(c){
-    if((c.balance||0)<-10)notifs.push({type:'danger',icon:'💸',text:'Долг: <b>'+esc(c.name)+'</b> — '+Math.round(c.balance)+'₽',key:'debt_'+c.id});
+    if((c.balance||0)<-10)notifs.push({type:'danger',icon:'💸',text:'Долг: <b>'+esc(c.name)+'</b> — '+Math.round(c.balance)+'₽',key:'debt_'+c.id,time:null});
   });
   // CRM reminders
   if(window._crmReminders&&window._crmReminders.length){
     window._crmReminders.forEach(function(r){
       var dt=r.reminderDate?new Date(r.reminderDate).toLocaleDateString('ru-RU'):'';
-      notifs.push({type:'warning',icon:'🔔',text:'Напоминание: <b>'+esc(r.name||'Сделка')+'</b>'+(dt?' ('+dt+')':''),key:'crm_'+r.id});
+      notifs.push({type:'warning',icon:'🔔',text:'Напоминание: <b>'+esc(r.name||'Сделка')+'</b>'+(dt?' ('+dt+')':''),key:'crm_'+r.id,time:r.reminderDate});
     });
   }
   window._notifs=notifs;
@@ -2365,7 +2378,7 @@ function renderNotifPanel(){
   var h='';
   notifs.forEach(function(n){
     h+='<div class="notif-item"><div class="notif-icon notif-icon--'+n.type+'">'+n.icon+'</div>';
-    h+='<div class="notif-body"><div class="notif-text">'+n.text+'</div><div class="notif-time">сейчас</div></div></div>';
+    h+='<div class="notif-body"><div class="notif-text">'+n.text+'</div><div class="notif-time">'+timeAgo(n.time)+'</div></div></div>';
   });
   list.innerHTML=h;
 }
