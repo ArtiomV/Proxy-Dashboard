@@ -5934,11 +5934,10 @@ const httpServer = app.listen(PORT, () => {
 
   // Mid-hour snapshot removed (FIX-13): 5 retry attempts at :00-:04 are sufficient.
 
-  // Startup: capture snapshots immediately for warmup
-  // Startup: capture snapshots immediately so first :00 has a baseline
+  // Startup: refresh snapshots only (NO DB writes) — prevents restart-induced data loss
   const snapshotCount = hourlyTraffic.getSnapshotCount();
-  logger.info(`[HourlyAgg] ${snapshotCount} snapshots loaded, running startup capture in 15s`);
-  setTimeout(() => aggregateHourlyTraffic().catch(e => logger.error('[HourlyAgg:startup]', e.message)), 15000);
+  logger.info(`[HourlyAgg] ${snapshotCount} snapshots loaded, refreshing in 15s (no DB write)`);
+  setTimeout(() => hourlyTraffic.refreshSnapshotsOnly().catch(e => logger.error('[HourlyAgg:startup]', e.message)), 15000);
 
   // Billing catch-up: if last snapshot is older than 26 hours, run now
   (async () => {

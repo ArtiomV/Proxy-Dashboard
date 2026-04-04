@@ -156,6 +156,31 @@ async function aggregateHourlyTraffic() {
   }
 }
 
+// Refresh snapshots only — NO writes to traffic_hourly. Safe for restarts.
+async function refreshSnapshotsOnly() {
+  try {
+    const results = await fetchAllServersDataCached();
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    let updated = 0;
+    for (const data of results) {
+      const srv = data.serverName || '';
+      if (typeof data.bw !== 'object') continue;
+      for (const [portId, b] of Object.entries(data.bw)) {
+        const fullPortId = srv + '_' + portId;
+        const monIn  = parseBwToBytes(b.bandwidth_bytes_month_in);
+        const monOut = parseBwToBytes(b.bandwidth_bytes_month_out);
+        hourlyDaySnapshots[fullPortId] = { in: monIn, out: monOut, date: todayStr };
+        updated++;
+      }
+    }
+    saveHourlySnapshots();
+    logger.info(`[HourlyAgg] Snapshots refreshed (no DB write): ${updated} ports`);
+  } catch (e) {
+    logger.error('[HourlyAgg] refreshSnapshotsOnly error:', e.message);
+  }
+}
+
 function getSnapshotCount() { return Object.keys(hourlyDaySnapshots).length; }
 
-module.exports = { init, aggregateHourlyTraffic, capturePreResetSnapshot, saveHourlySnapshots, loadHourlySnapshots, getSnapshotCount };
+module.exports = { init, aggregateHourlyTraffic, capturePreResetSnapshot, refreshSnapshotsOnly, saveHourlySnapshots, loadHourlySnapshots, getSnapshotCount };
