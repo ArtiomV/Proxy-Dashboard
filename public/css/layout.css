@@ -1,11 +1,11 @@
 /* Client metric labels — hidden on desktop, shown on mobile via media query */
 .ct-metric-label{display:none}
 
-/* Nav */
-.nav-tabs{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 24px;display:flex;gap:0;height:40px}
-.nav-tab{padding:0 18px;cursor:pointer;font-size:13px;color:var(--text-2);border-bottom:2px solid transparent;transition:all .2s;font-weight:500;display:flex;align-items:center;height:100%}
-.nav-tab:hover{color:var(--text-1)}
-.nav-tab.active{background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;border-bottom-color:var(--accent)}
+/* Nav — embedded inside header */
+.nav-tabs{display:flex;align-items:center;gap:2px;flex:1;height:100%;overflow:visible;background:none;border:none;padding:0}
+.nav-tab{padding:5px 11px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-2);border-radius:6px;border-bottom:none;transition:background .15s,color .15s;white-space:nowrap;display:flex;align-items:center;height:auto}
+.nav-tab:hover{background:var(--bg-2);color:var(--text-1)}
+.nav-tab.active{background:rgba(99,102,241,0.12);color:var(--accent);-webkit-text-fill-color:unset;background-clip:unset;-webkit-background-clip:unset;border-bottom:none}
 .tab-content{display:none!important}.tab-content.active{display:block!important}
 .tab-content.tab-flex.active{display:flex!important;flex-direction:column}
 
@@ -53,15 +53,17 @@
 
 /* ==================== RESPONSIVE — TABLET (768px) ==================== */
 @media(max-width:768px){
-  /* Header */
-  .header{flex-direction:column;gap:8px;height:auto;padding:10px 16px}
-  .header-left{flex-wrap:wrap;gap:8px}
-  .header h1{font-size:14px}
+  /* Header — collapse on tablet */
+  .header{flex-wrap:wrap;height:auto;padding:8px 12px;gap:8px}
+  .header-left{gap:8px}
+  .header-admin-badge{display:none}
   .header-stats{display:none}
-  .header-right{width:100%;justify-content:flex-end}
-  /* Navigation */
-  .nav-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;padding:0 8px;height:40px}
-  .nav-tab{padding:0 12px;font-size:12px;white-space:nowrap;min-height:40px}
+  .header-right{gap:6px}
+  /* Navigation — horizontal scroll */
+  .nav-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex:none!important;width:100%;order:3}
+  .nav-tab{padding:6px 12px;font-size:12px;white-space:nowrap;flex-shrink:0}
+  /* Finance cards responsive */
+  .fin-cards-grid{grid-template-columns:repeat(2,1fr)!important}
   /* Toolbar */
   .toolbar{flex-direction:column;padding:8px 12px}
   .toolbar>div{width:100%;flex-wrap:wrap}
@@ -132,15 +134,12 @@
 
 /* ==================== RESPONSIVE — MOBILE (480px) ==================== */
 @media(max-width:480px){
-  /* Header */
+  /* Header — mobile */
   .header{padding:8px 12px;gap:6px}
-  .header h1{font-size:13px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:calc(100vw - 150px)}
-  .header h1 span{display:none!important}
   .header-left{overflow:hidden;min-width:0}
-  .header-right .btn{padding:4px 6px;font-size:10px;min-height:44px;min-width:44px;display:flex;align-items:center;justify-content:center}
   /* Navigation — burger menu overlay */
   .nav-tabs{
-    display:none;
+    display:none!important;
     position:fixed;top:0;left:0;right:0;bottom:0;
     z-index:950;
     background:var(--bg-1);
@@ -149,8 +148,9 @@
     gap:0;
     height:auto;
     overflow-y:auto;
+    width:100%;
   }
-  .nav-tabs.burger-open{display:flex}
+  .nav-tabs.burger-open{display:flex!important}
   .nav-tab{
     padding:14px 16px;
     font-size:15px;
@@ -158,19 +158,21 @@
     min-height:48px;
     border-bottom:1px solid var(--border);
     border-left:3px solid transparent;
+    border-radius:0;
     white-space:nowrap;
   }
   .nav-tab.active{
     border-bottom-color:var(--border);
     border-left-color:var(--accent);
     background:none!important;
-    -webkit-background-clip:unset!important;
+    color:var(--accent)!important;
     -webkit-text-fill-color:var(--accent)!important;
-    background-clip:unset!important;
   }
   #modemSearchArea{display:none!important}
   /* Burger button */
   .burger-btn{display:flex!important}
+  /* Finance cards mobile */
+  .fin-cards-grid{grid-template-columns:1fr!important}
   /* Widgets */
   .widget-grid{grid-template-columns:1fr}
   #extendedWidgetsRow{grid-template-columns:1fr!important}

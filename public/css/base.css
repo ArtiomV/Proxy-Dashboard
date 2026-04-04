@@ -23,14 +23,17 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);tra
 .header-logo{display:flex;align-items:center;text-decoration:none}
 .header-logo img{height:22px;width:auto}
 
-/* Header - PAN-OS style */
-.header{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 24px;height:52px;display:flex;align-items:center;justify-content:space-between}
-.header-left{display:flex;align-items:center;gap:16px}
-.header h1{font-size:18px;background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;font-weight:700;letter-spacing:-.3px}
+/* Header — single row with embedded nav */
+.header{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 20px;height:52px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
+.header-left{display:flex;align-items:center;gap:10px;flex-shrink:0}
+.header h1{display:none}
+.header-admin-badge{font-size:10px;font-weight:600;letter-spacing:.05em;background:rgba(99,102,241,0.1);color:var(--accent);padding:2px 7px;border-radius:4px}
 .header-stats{display:flex;gap:10px}
 .stat-badge{background:var(--bg-2);padding:4px 10px;border-radius:4px;font-size:11px;color:var(--text-2);border:1px solid var(--border)}
 .stat-badge span{color:var(--text-0);font-weight:600}
-.header-right{display:flex;align-items:center;gap:8px}
+.header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.btn-logout{width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:none;border:none;border-radius:6px;cursor:pointer;color:var(--text-3);flex-shrink:0;transition:color .2s,background .15s}
+.btn-logout:hover{color:var(--danger);background:var(--bg-3)}
 
 /* Theme toggle */
 .theme-toggle{width:36px;height:20px;border-radius:10px;border:1px solid var(--border);background:var(--bg-3);cursor:pointer;position:relative;transition:all .3s}
@@ -223,6 +226,12 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .billing-badge{display:inline-block;padding:2px 8px;border-radius:20px;font-size:10px;font-weight:600;margin-left:6px}
 .billing-per-modem{background:var(--purple-bg);color:var(--purple)}
 .billing-per-gb{background:var(--blue-bg);color:var(--accent)}
+
+/* Finance metric cards */
+.fin-card{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
+.fc-label{font-size:11px;color:var(--text-3);font-weight:500;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
+.fc-value{font-size:22px;font-weight:600;color:var(--text-0);line-height:1.2}
+.fc-sub{font-size:11px;color:var(--text-3);margin-top:3px}
 
 /* ==================== MOBILE TOUCH TARGETS ==================== */
 @media(max-width:480px){
