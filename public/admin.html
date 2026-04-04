@@ -2439,7 +2439,6 @@ function renderClients(){
   var h='';var count=0;var colors=CHART_COLORS.clients;
   cl.forEach(function(c,i){
     var modems=pnm[c.portName]||[];
-    if(!modems.length&&!c.modemCount)return; // hide clients without active modems
     if(search&&(c.name+' '+c.portName+' '+c.login+' '+(c.contact||'')+' '+(c.legalName||'')).toLowerCase().indexOf(search)===-1)return;
     var balance=c.balance!==undefined?c.balance:0;
     if(_filterProblematic&&balance>=0)return;
@@ -2800,7 +2799,7 @@ function confirmDialog(msg,onConfirm,okLabel,title,isDanger){
 }
 function _confirmOk(){var cb=_confirmCb;_confirmCb=null;document.getElementById('confirmOverlay').style.display='none';if(cb)cb();}
 function _confirmCancel(){_confirmCb=null;document.getElementById('confirmOverlay').style.display='none';}
-function updateHeaderStats(){if(!currentData||!currentData._modemMap)return;var map=currentData._modemMap,total=0,online=0;for(var i in map){total++;var s=getModemStatus(map[i]);if(s==='online'||s==='rotating')online++}var cl=(currentData.clients||[]).length;document.getElementById('headerStats').innerHTML='<div class="stat-badge">Online: <span style="color:var(--success)">'+online+'</span>/<span>'+total+'</span></div><div class="stat-badge">Клиентов: <span>'+cl+'</span></div>'}
+function updateHeaderStats(){if(!currentData||!currentData._modemMap)return;var map=currentData._modemMap,total=0,online=0;for(var i in map){total++;var s=getModemStatus(map[i]);if(s==='online'||s==='rotating')online++}var cl=(currentData.clients||[]).filter(function(c){return c.modemCount>0}).length;document.getElementById('headerStats').innerHTML='<div class="stat-badge">Online: <span style="color:var(--success)">'+online+'</span>/<span>'+total+'</span></div><div class="stat-badge">Клиентов: <span>'+cl+'</span></div>'}
 function startAutoRefresh(){if(autoRefreshTimer)clearInterval(autoRefreshTimer);autoRefreshTimer=setInterval(loadData,60000)}
 
 // ========== PRICING TIERS ==========
