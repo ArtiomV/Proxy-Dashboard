@@ -101,31 +101,30 @@ async function aggregateHourlyTraffic() {
           const fullPortId = srv + '_' + portId;
           const snapKey = fullPortId;
 
-          const dayIn  = parseBwToBytes(b.bandwidth_bytes_day_in);
-          const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
+          // Use MONTH counters for hourly increment — they never reset mid-month
+          // (day counters reset at midnight and cause anomalies)
+          const monIn  = parseBwToBytes(b.bandwidth_bytes_month_in);
+          const monOut = parseBwToBytes(b.bandwidth_bytes_month_out);
           const snap = hourlyDaySnapshots[snapKey];
-          // Record hourly increment if snapshot exists
           if (snap) {
-            // Detect counter reset: current < previous means ProxySmart reset daily counters
-            // (midnight UTC or midnight local time of ProxySmart server)
-            const counterReset = (snap.in > 0 && dayIn < snap.in) || (snap.out > 0 && dayOut < snap.out);
-            if (!counterReset) {
-              // Normal increment (same counter epoch)
-              const incIn  = Math.max(0, dayIn  - snap.in);
-              const incOut = Math.max(0, dayOut - snap.out);
+            // Detect month rollover: current month < previous month
+            const monthReset = (snap.in > 0 && monIn < snap.in * 0.1);
+            if (!monthReset) {
+              const incIn  = Math.max(0, monIn  - snap.in);
+              const incOut = Math.max(0, monOut - snap.out);
               if (incIn + incOut > 0) {
                 _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut);
                 count++;
               }
             } else {
-              // Counter reset — dayIn/dayOut IS the full traffic since reset
-              if (dayIn + dayOut > 0) {
-                _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, dayIn, dayOut);
+              // Month rollover — monIn/monOut IS traffic since start of new month
+              if (monIn + monOut > 0) {
+                _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, monIn, monOut);
                 count++;
               }
             }
           }
-          hourlyDaySnapshots[snapKey] = { in: dayIn, out: dayOut, date: todayStr };
+          hourlyDaySnapshots[snapKey] = { in: monIn, out: monOut, date: todayStr };
         }
       }
       _htCleanup.run();
