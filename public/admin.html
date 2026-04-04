@@ -1244,15 +1244,12 @@ function renderAccSubTab(name){
       var yestBytes=clientModems.reduce(function(s,m){return s+(m.yestIn||0)+(m.yestOut||0)},0);
       var monBytes=clientModems.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
       var prevMonBytes=clientModems.reduce(function(s,m){return s+(m.prevIn||0)+(m.prevOut||0)},0);
-      // Trend: today vs average daily
-      var sumDayIn=clientModems.reduce(function(s,m){return s+m.dayIn},0);
-      var sumMonIn=clientModems.reduce(function(s,m){return s+m.monIn},0);
-      var avgDailyIn=daysEl?sumMonIn/daysEl:0;
-      var trendPctCl=avgDailyIn>0?Math.round((sumDayIn-avgDailyIn)/avgDailyIn*100):null;
+      // Trend: first N days this month vs first N days prev month (from server clientTrend)
+      var ctVal=(currentData.clientTrend||{})[n];
       var trendStr='—';var trendColor='var(--text-3)';
-      if(trendPctCl!==null){
-        var tc=trendPctCl>=0?'var(--success)':'var(--danger)';
-        var ts=trendPctCl>999?'+999%+':(trendPctCl<-99?'<−99%':(trendPctCl>=0?'+':'')+trendPctCl+'%');
+      if(ctVal!==undefined&&ctVal!==null){
+        var tc=ctVal>=0?'var(--success)':'var(--danger)';
+        var ts=ctVal>999?'+999%+':(ctVal<-99?'<−99%':(ctVal>=0?'+':'')+ctVal+'%');
         trendStr=ts;trendColor=tc;
       }
       // Sparkline: 14 bars from real daily cache data

@@ -2783,6 +2783,35 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       }
     }
 
+    // Client trend: aggregate modem trend by portName (client)
+    const clientTrend = {};
+    {
+      const mskNow2 = getMoscowNow();
+      const cd2 = Math.max(mskNow2.getDate() - 1, 0);
+      if (cd2 > 0) {
+        const cy = mskNow2.getFullYear(), cm = mskNow2.getMonth();
+        const cp = `${cy}-${String(cm + 1).padStart(2, '0')}`;
+        const pd = new Date(cy, cm - 1, 1);
+        const pp = `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, '0')}`;
+        const cc = `${cp}-${String(cd2).padStart(2, '0')}`;
+        const pc = `${pp}-${String(cd2).padStart(2, '0')}`;
+        const byClient = {}; // portName -> { cur, prev }
+        for (const [portKey, days] of Object.entries(dailyTraffic)) {
+          const pn = portKeyToPortName[portKey] || (Object.values(days)[0] && Object.values(days)[0].portName) || '';
+          if (!pn) continue;
+          if (!byClient[pn]) byClient[pn] = { cur: 0, prev: 0 };
+          for (const [date, entry] of Object.entries(days)) {
+            if (date.startsWith(cp) && date <= cc) byClient[pn].cur += (entry.in || 0) + (entry.out || 0);
+            else if (date.startsWith(pp) && date <= pc) byClient[pn].prev += (entry.in || 0) + (entry.out || 0);
+          }
+        }
+        for (const [pn, d] of Object.entries(byClient)) {
+          if (d.prev > 0) clientTrend[pn] = Math.round((d.cur - d.prev) / d.prev * 100);
+          else if (d.cur > 0) clientTrend[pn] = null;
+        }
+      }
+    }
+
     res.json({
       clientMonthCharges,
       clientMonthGb,
@@ -2790,6 +2819,7 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       clientLastHourGb,
       clientTodayGb,
       modemTrend,
+      clientTrend,
       ...merged,
       servers,
       clients: sanitizedClients,
