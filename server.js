@@ -2505,9 +2505,10 @@ app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req,
         entry.is_current = true;
         const dom = now.getDate();
         const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
-        // Forecast: use current month extrapolation if enough data, else previous month as baseline
-        if (dom >= 3 && totalGb > 0) {
-          entry.forecast_gb = Math.round(totalGb / dom * dim * 10) / 10;
+        // Forecast: extrapolate from completed days (dom-1, since today is incomplete)
+        const completedDays = Math.max(dom - 1, 1);
+        if (completedDays >= 2 && totalGb > 0) {
+          entry.forecast_gb = Math.round(totalGb / completedDays * dim * 10) / 10;
         } else {
           // Use previous month total as initial plan
           const prevMStr = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
