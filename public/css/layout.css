@@ -264,4 +264,23 @@
   .ct-row .ct-sparkline{display:none!important}
   .ct-row .ct-trend{display:none!important}
   .ct-row .ct-trend-mobile{display:block!important}
+
+  /* Daily traffic chart — mobile layout */
+  .analytics-card .daily-chart-controls{
+    flex-direction:column!important;gap:8px!important;align-items:stretch!important;
+  }
+  .analytics-card .daily-chart-nav{
+    justify-content:space-between!important;width:100%!important;
+  }
+  .analytics-card .daily-chart-nav h3{font-size:14px!important;min-width:auto!important}
+  .analytics-card .daily-chart-filters{
+    display:grid!important;grid-template-columns:1fr 1fr!important;gap:6px!important;width:100%!important;
+  }
+  .analytics-card .daily-chart-filters select{width:100%!important;font-size:11px!important}
+  .analytics-card .daily-chart-legend{
+    order:3!important;width:100%!important;justify-content:center!important;
+    padding-top:4px!important;gap:8px!important;
+  }
+  .analytics-card .daily-chart-legend>div{font-size:10px!important}
+  .analytics-card .chart-wrap-daily{height:220px!important}
 }

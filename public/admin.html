@@ -166,14 +166,14 @@
       </div>
 
       <div class="analytics-card">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div style="display:flex;align-items:center;gap:8px">
+        <div class="daily-chart-controls" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div class="daily-chart-nav" style="display:flex;align-items:center;gap:8px">
             <button onclick="shiftDailyMonth(-1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">←</button>
             <h3 style="margin:0;min-width:140px;text-align:center" id="dailyMonthLabel">Потребление по дням</h3>
             <button onclick="shiftDailyMonth(1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">→</button>
           </div>
-          <div style="display:flex;align-items:center;gap:8px">
-            <div id="dailyClientLegend" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+          <div class="daily-chart-legend" id="dailyClientLegend" style="display:flex;flex-wrap:wrap;gap:10px"></div>
+          <div class="daily-chart-filters" style="display:flex;align-items:center;gap:8px">
             <select id="dailyServerFilter" onchange="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
               <option value="all">Все страны</option>
             </select>
