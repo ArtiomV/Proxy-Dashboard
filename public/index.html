@@ -1720,28 +1720,34 @@ function loadDailyTrafficChart(textColor,gridColor){
     renderModemBar();
 
     // Country cards from filtered data
-    var countryMeta={S1:{name:'Молдова',flag:'🇲🇩',color:'rgba(25,96,201,0.8)',bg:'rgba(25,96,201,0.08)'},S2:{name:'Румыния',flag:'🇷🇴',color:'rgba(52,199,89,0.8)',bg:'rgba(52,199,89,0.08)'}};
-    var cnByServer={};
+    var _cFlags={'MD':'🇲🇩','RO':'🇷🇴'};
+    var _cColors={'MD':{color:'rgba(25,96,201,0.8)',bg:'rgba(25,96,201,0.08)'},'RO':{color:'rgba(52,199,89,0.8)',bg:'rgba(52,199,89,0.08)'}};
+    // Group by country instead of server
+    var cnByCountry={};
     modemList.forEach(function(m){
       var sn=m.serverName||'??';
-      if(!cnByServer[sn])cnByServer[sn]={in:0,out:0,count:0};
-      cnByServer[sn].in+=m.in;cnByServer[sn].out+=m.out;cnByServer[sn].count++;
+      var ci=COUNTRIES[sn]||{};
+      var cc=ci.country||'??';
+      if(!cnByCountry[cc])cnByCountry[cc]={in:0,out:0,count:0,name:ci.name||sn};
+      cnByCountry[cc].in+=m.in;cnByCountry[cc].out+=m.out;cnByCountry[cc].count++;
     });
     var totalGB=periodTotal/1073741824;
     var ccHtml='';
-    Object.keys(cnByServer).sort().forEach(function(sn){
-      var m=countryMeta[sn]||{name:sn,flag:'🌍',color:'var(--text-2)',bg:'var(--bg-2)'};
-      var gb=(cnByServer[sn].in+cnByServer[sn].out)/1073741824;
+    Object.keys(cnByCountry).sort().forEach(function(cc){
+      var cData=cnByCountry[cc];
+      var flag=_cFlags[cc]||'🌍';
+      var clr=_cColors[cc]||{color:'var(--text-2)',bg:'var(--bg-2)'};
+      var gb=(cData.in+cData.out)/1073741824;
       var pct=totalGB>0?Math.round(gb/totalGB*100):0;
-      var inGb=(cnByServer[sn].in/1073741824).toFixed(1);
-      var outGb=(cnByServer[sn].out/1073741824).toFixed(1);
+      var inGb=(cData.in/1073741824).toFixed(1);
+      var outGb=(cData.out/1073741824).toFixed(1);
       ccHtml+='<div style="margin-bottom:14px">';
       ccHtml+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
-      ccHtml+='<span style="font-size:13px;font-weight:600;color:var(--text-0)">'+m.flag+' '+m.name+'</span>';
+      ccHtml+='<span style="font-size:13px;font-weight:600;color:var(--text-0)">'+flag+' '+cData.name+'</span>';
       ccHtml+='<span style="font-size:12px;color:var(--text-1);font-weight:700">'+gb.toFixed(1)+' GB</span>';
       ccHtml+='</div>';
-      ccHtml+='<div style="background:var(--bg-2);border-radius:4px;height:7px;overflow:hidden;margin-bottom:4px"><div style="background:'+m.color+';height:100%;width:'+pct+'%;border-radius:4px;transition:width .4s"></div></div>';
-      ccHtml+='<div style="font-size:11px;color:var(--text-3)">↓ '+inGb+' GB &nbsp;↑ '+outGb+' GB &nbsp;·&nbsp; '+cnByServer[sn].count+' мод. &nbsp;·&nbsp; '+pct+'%</div>';
+      ccHtml+='<div style="background:var(--bg-2);border-radius:4px;height:7px;overflow:hidden;margin-bottom:4px"><div style="background:'+clr.color+';height:100%;width:'+pct+'%;border-radius:4px;transition:width .4s"></div></div>';
+      ccHtml+='<div style="font-size:11px;color:var(--text-3)">↓ '+inGb+' GB &nbsp;↑ '+outGb+' GB &nbsp;·&nbsp; '+cData.count+' мод. &nbsp;·&nbsp; '+pct+'%</div>';
       ccHtml+='</div>';
     });
     var ccEl=document.getElementById('analyticsCountryCards');
@@ -1801,10 +1807,21 @@ function loadDailyTrafficChart(textColor,gridColor){
           locTotals[sn2][todayDate]=(locTotals[sn2][todayDate]||0)+gb2;
         }
       }
-      var locMeta={S1:{name:'Молдова 🇲🇩',color:'rgba(25,96,201,0.85)',bg:'rgba(25,96,201,0.08)'},S2:{name:'Румыния 🇷🇴',color:'rgba(52,199,89,0.85)',bg:'rgba(52,199,89,0.08)'}};
-      Object.keys(locTotals).sort().forEach(function(sn){
-        var m=locMeta[sn]||{name:sn,color:'rgba(255,204,0,0.85)',bg:'rgba(255,204,0,0.08)'};
-        var d2=dates.map(function(d){return+(locTotals[sn][d]||0).toFixed(3)});
+      var _locFlags={'MD':'🇲🇩','RO':'🇷🇴'};
+      var _locClr={'MD':{color:'rgba(25,96,201,0.85)',bg:'rgba(25,96,201,0.08)'},'RO':{color:'rgba(52,199,89,0.85)',bg:'rgba(52,199,89,0.08)'}};
+      // Aggregate locTotals by country
+      var locByCountry={};
+      Object.keys(locTotals).forEach(function(sn){
+        var ci=COUNTRIES[sn]||{};var cc=ci.country||sn;
+        if(!locByCountry[cc])locByCountry[cc]={dates:{},name:ci.name||sn};
+        for(var d in locTotals[sn])locByCountry[cc].dates[d]=(locByCountry[cc].dates[d]||0)+locTotals[sn][d];
+      });
+      Object.keys(locByCountry).sort().forEach(function(cc){
+        var lc=locByCountry[cc];
+        var clr=_locClr[cc]||{color:'rgba(255,204,0,0.85)',bg:'rgba(255,204,0,0.08)'};
+        var flag=_locFlags[cc]||'🌍';
+        var m={name:lc.name+' '+flag,color:clr.color,bg:clr.bg};
+        var d2=dates.map(function(d){return+(lc.dates[d]||0).toFixed(3)});
         datasets.push({label:m.name,data:d2,borderColor:m.color,backgroundColor:m.bg,borderWidth:2,pointRadius:3,tension:0.35,fill:true});
       });
       // ИТОГО dashed
@@ -2603,16 +2620,19 @@ function loadExternalProxies() {
 function updateSummary(){
   // --- Ports card: active / total, split by country ---
   var total=tableData.length;
-  var countryCounts={};
-  var countryNames={S1:'Молдова',S2:'Румыния'};
-  var countryFlags={S1:'🇲🇩',S2:'🇷🇴'};
+  // Group by country (not server) using COUNTRIES data
+  var byCountry={};
   tableData.forEach(function(r){
     var sn=r.serverName||'??';
-    countryCounts[sn]=(countryCounts[sn]||0)+1;
+    var ci=COUNTRIES[sn]||{};
+    var cc=ci.country||'??';
+    if(!byCountry[cc])byCountry[cc]={count:0,name:ci.name||sn};
+    byCountry[cc].count++;
   });
+  var countryFlags={'MD':'🇲🇩','RO':'🇷🇴'};
   document.getElementById('totalPorts').textContent=total+' / '+total;
-  var splitParts=Object.keys(countryCounts).sort().map(function(sn){
-    return (countryFlags[sn]||'🌍')+' '+(countryNames[sn]||sn)+': '+countryCounts[sn];
+  var splitParts=Object.keys(byCountry).sort().map(function(cc){
+    return (countryFlags[cc]||'🌍')+' '+byCountry[cc].name+': '+byCountry[cc].count;
   });
   document.getElementById('portsCountrySplit').textContent=splitParts.join(' · ');
 
@@ -3101,7 +3121,7 @@ var exportFormat='txt_login_at';
 var exportProto='http';
 var exportRotation=true;
 var exportTxtOrder='login_at'; // 'login_at' | 'host_colon'
-var exportLocFilter=[];   // [] = все, ['S1'] = Молдова, ['S2'] = Румыния
+var exportLocFilter=[];   // [] = все, ['MD'] = Молдова, ['RO'] = Румыния
 var exportModemFilter=[]; // [] = все, [...nicks]
 
 var EXPORT_FORMATS={
@@ -3201,8 +3221,7 @@ function buildExportModal(){
     '<div><div style="font-size:10px;color:var(--text-3);margin-bottom:4px">Локация</div>'+
     '<div style="display:flex;gap:4px">'+
     '<button onclick="toggleExportLoc(\'\')" id="eloc-all" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff">Все</button>'+
-    '<button onclick="toggleExportLoc(\'S1\')" id="eloc-S1" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">🇲🇩 Молдова</button>'+
-    '<button onclick="toggleExportLoc(\'S2\')" id="eloc-S2" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">🇷🇴 Румыния</button>'+
+    (function(){var _cf={'MD':'🇲🇩','RO':'🇷🇴'};var btns='';var seen={};Object.keys(COUNTRIES).forEach(function(sn){var ci=COUNTRIES[sn];var cc=ci.country||sn;if(seen[cc])return;seen[cc]=true;var flag=_cf[cc]||'🌍';btns+='<button onclick="toggleExportLoc(\''+cc+'\')" id="eloc-'+cc+'" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">'+flag+' '+ci.name+'</button>'});return btns})()+
     '</div></div>'+
     '</div></div>'+
     '<div style="padding:8px 24px 4px;flex-shrink:0;display:flex;justify-content:space-between;align-items:center">'+
@@ -3236,14 +3255,15 @@ function _renderExportModemButtons(){
   wrap.innerHTML=html;
 }
 
-function toggleExportLoc(srv){
-  if(srv===''){exportLocFilter=[];}
-  else{var i=exportLocFilter.indexOf(srv);if(i===-1)exportLocFilter.push(srv);else exportLocFilter.splice(i,1);}
+function toggleExportLoc(cc){
+  if(cc===''){exportLocFilter=[];}
+  else{var i=exportLocFilter.indexOf(cc);if(i===-1)exportLocFilter.push(cc);else exportLocFilter.splice(i,1);}
   var none=exportLocFilter.length===0;
-  [{k:'all',active:none},{k:'S1',active:exportLocFilter.indexOf('S1')!==-1},{k:'S2',active:exportLocFilter.indexOf('S2')!==-1}].forEach(function(o){
-    var btn=document.getElementById('eloc-'+o.k);if(!btn)return;
-    btn.style.background=o.active?'var(--accent)':'var(--bg-2)';btn.style.color=o.active?'#fff':'var(--text-1)';btn.style.border='1px solid '+(o.active?'var(--accent)':'var(--border)');
-  });
+  // Update all location buttons
+  var allBtn=document.getElementById('eloc-all');
+  if(allBtn){allBtn.style.background=none?'var(--accent)':'var(--bg-2)';allBtn.style.color=none?'#fff':'var(--text-1)';allBtn.style.border='1px solid '+(none?'var(--accent)':'var(--border)');}
+  var seen={};
+  Object.keys(COUNTRIES).forEach(function(sn){var c=COUNTRIES[sn].country||sn;if(seen[c])return;seen[c]=true;var btn=document.getElementById('eloc-'+c);if(!btn)return;var active=exportLocFilter.indexOf(c)!==-1;btn.style.background=active?'var(--accent)':'var(--bg-2)';btn.style.color=active?'#fff':'var(--text-1)';btn.style.border='1px solid '+(active?'var(--accent)':'var(--border)');});
   refreshExportPreview();
 }
 function toggleExportModem(nick){
@@ -3331,7 +3351,7 @@ function setCustomTpl(tpl){
 function getExportProxies(){
   var proto=exportProto;
   var rows=tableData.filter(function(r){return r.proxyLogin;});
-  if(exportLocFilter.length>0) rows=rows.filter(function(r){return exportLocFilter.indexOf(r.serverName)!==-1;});
+  if(exportLocFilter.length>0) rows=rows.filter(function(r){var ci=COUNTRIES[r.serverName]||{};return exportLocFilter.indexOf(ci.country||r.serverName)!==-1;});
   if(exportModemFilter.length>0) rows=rows.filter(function(r){return exportModemFilter.indexOf(r.modemNick)!==-1;});
   var mapped=rows.map(function(r){
     var ci=COUNTRIES[r.serverName]||{};
