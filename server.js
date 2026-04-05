@@ -3543,8 +3543,11 @@ app.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, 
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     // Strip server prefix from IMEI (e.g. "S2_012345" → "012345")
-    modemData.IMEI = modemData.IMEI.replace(/^S\d+_/, '');
-    const result = await postFormApi(server, '/crud/store_modem', modemData);
+    const rawImei = modemData.IMEI.replace(/^S\d+_/, '');
+    modemData.IMEI = rawImei;
+    // Use /conf/edit/{IMEI} endpoint (ProxySmart's actual config save)
+    const result = await postFormApi(server, `/conf/edit/${rawImei}`, modemData);
+    auditLog(req.user.login, 'store_modem', { serverName, IMEI: rawImei, ip: getClientIp(req) });
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Store modem failed', details: err.message }); }
 });
