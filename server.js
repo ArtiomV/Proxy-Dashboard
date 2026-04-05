@@ -3545,8 +3545,21 @@ app.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, 
     // Strip server prefix from IMEI (e.g. "S2_012345" → "012345")
     const rawImei = modemData.IMEI.replace(/^S\d+_/, '');
     modemData.IMEI = rawImei;
-    // Use /conf/edit/{IMEI} endpoint (ProxySmart's actual config save)
-    const result = await postFormApi(server, `/conf/edit/${rawImei}`, modemData);
+    // First GET current config to preserve existing fields
+    const confHtml = await fetchApiRaw(server, `/conf/edit/${rawImei}`);
+    const html = confHtml.buffer ? confHtml.buffer.toString('utf8') : String(confHtml);
+    const currentFields = {};
+    const fieldMatches = html.matchAll(/name="([^"]+)"[^>]*value="([^"]*)"/g);
+    for (const fm of fieldMatches) currentFields[fm[1]] = fm[2];
+    // Merge: user changes override current values, keep rest
+    const merged = { ...currentFields, ...modemData };
+    // Remove empty values that were not in original
+    for (const k of Object.keys(merged)) {
+      if (merged[k] === '' && currentFields[k]) merged[k] = currentFields[k];
+    }
+    logger.info({ merged, rawImei, serverName }, '[StoreModem] Sending to ProxySmart');
+    const result = await postFormApi(server, `/conf/edit/${rawImei}`, merged);
+    logger.info({ status: result.status }, '[StoreModem] Response');
     auditLog(req.user.login, 'store_modem', { serverName, IMEI: rawImei, ip: getClientIp(req) });
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Store modem failed', details: err.message }); }
