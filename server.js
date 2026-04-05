@@ -3561,6 +3561,10 @@ app.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, 
     const result = await postFormApi(server, `/conf/edit/${rawImei}`, merged);
     logger.info({ status: result.status }, '[StoreModem] Response');
     auditLog(req.user.login, 'store_modem', { serverName, IMEI: rawImei, ip: getClientIp(req) });
+    // Update rotation cache immediately so dashboard reflects the change
+    const newRot = parseInt(modemData.AUTO_IP_ROTATION) || 0;
+    modemRotationCache[serverName + ':' + rawImei] = newRot;
+    _psCache = null; _psCacheTs = 0; // invalidate data cache
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Store modem failed', details: err.message }); }
 });
