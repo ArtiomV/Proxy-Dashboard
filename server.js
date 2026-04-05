@@ -3542,6 +3542,8 @@ app.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, 
     if (!serverName || !modemData.IMEI) return res.status(400).json({ error: 'serverName and IMEI required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
+    // Strip server prefix from IMEI (e.g. "S2_012345" → "012345")
+    modemData.IMEI = modemData.IMEI.replace(/^S\d+_/, '');
     const result = await postFormApi(server, '/crud/store_modem', modemData);
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Store modem failed', details: err.message }); }
@@ -3549,11 +3551,13 @@ app.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, 
 
 app.post('/api/admin/apply_modem', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const { serverName, imei } = req.body;
+    let { serverName, imei } = req.body;
     if (!serverName || !imei) return res.status(400).json({ error: 'serverName and imei required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await postApi(server, '/modem/settings', { imei });
+    // Strip server prefix from IMEI
+    imei = imei.replace(/^S\d+_/, '');
+    const result = await postFormApi(server, '/modem/settings', { imei });
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Apply modem failed', details: err.message }); }
 });
