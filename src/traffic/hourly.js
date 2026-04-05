@@ -124,7 +124,9 @@ async function aggregateHourlyTraffic() {
               // Normal increment
               const incIn  = Math.max(0, monIn  - snap.in);
               const incOut = Math.max(0, monOut - snap.out);
-              if (incIn + incOut > 0) {
+              // Sanity check: reject anomalous increments (>2 GB per modem per hour = likely stale snapshot)
+              const MAX_HOURLY_BYTES = 2 * 1073741824;
+              if (incIn + incOut > 0 && incIn + incOut < MAX_HOURLY_BYTES) {
                 _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut);
                 count++;
               }
