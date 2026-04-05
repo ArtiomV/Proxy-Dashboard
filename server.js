@@ -1407,7 +1407,8 @@ function mergeServerData(allData, portNameFilter) {
     const isCached = !!data._cached;
     if (isCached) cachedServers.push({ name: data.serverName, cachedAt: data._cachedAt });
     for (const [portId, b] of Object.entries(filtered.bw)) {
-      mergedBw[prefix + portId] = { ...b, _server: data.serverName, _cached: isCached };
+      const bwOverride = process.env[`PORTNAME_OVERRIDE_${data.serverName}`];
+      mergedBw[prefix + portId] = { ...b, _server: data.serverName, _cached: isCached, ...(bwOverride ? { portName: bwOverride } : {}) };
     }
     const statusArr = Array.isArray(filtered.status) ? filtered.status : [];
     for (const m of statusArr) {
@@ -1427,7 +1428,15 @@ function mergeServerData(allData, portNameFilter) {
     for (const [imei, portList] of Object.entries(portsObj)) {
       const prefixedImei = prefix + imei;
       const filteredPortList = portList;
-      const prefixedPorts = filteredPortList.map(p => ({ ...p, portID: p.portID ? prefix + p.portID : p.portID, _server: data.serverName, _cached: isCached }));
+      // Apply portName override for servers where ProxySmart doesn't support port renaming
+      const portNameOverride = process.env[`PORTNAME_OVERRIDE_${data.serverName}`];
+      const prefixedPorts = filteredPortList.map(p => ({
+        ...p,
+        portName: portNameOverride || p.portName,
+        portID: p.portID ? prefix + p.portID : p.portID,
+        _server: data.serverName,
+        _cached: isCached
+      }));
       if (prefixedPorts.length > 0) mergedPorts[prefixedImei] = (mergedPorts[prefixedImei] || []).concat(prefixedPorts);
     }
   }
