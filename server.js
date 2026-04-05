@@ -137,15 +137,14 @@ function safeWriteFile(filePath, data) { return _safeWriteFile(filePath, data, l
 
 const PORT = process.env.PORT || 3000;
 
-// Multiple API servers: API_<name>_URL, API_<name>_USER, API_<name>_PASS
-// Optional: API_<name>_PUBLIC_IP, API_<name>_COUNTRY, API_<name>_COUNTRY_NAME
+// API servers: loaded from .env (legacy) + SQLite kv_store (new additions via UI)
 const apiServers = [];
-const serverKeys = new Set();
+const _envServerKeys = new Set();
 for (const key of Object.keys(process.env)) {
   const m = key.match(/^API_(.+)_URL$/);
-  if (m) serverKeys.add(m[1]);
+  if (m) _envServerKeys.add(m[1]);
 }
-for (const name of serverKeys) {
+for (const name of _envServerKeys) {
   const urlObj = new URL(process.env[`API_${name}_URL`]);
   apiServers.push({
     name,
@@ -155,6 +154,22 @@ for (const name of serverKeys) {
     publicIp: process.env[`API_${name}_PUBLIC_IP`] || urlObj.hostname
   });
 }
+// Load additional servers from DB (added via Settings UI)
+try {
+  const _dbRow = db.prepare("SELECT value FROM kv_store WHERE key = 'api_servers'").get();
+  if (_dbRow) {
+    const dbServers = JSON.parse(_dbRow.value);
+    for (const s of dbServers) {
+      if (!apiServers.find(e => e.name === s.name)) apiServers.push(s);
+    }
+  }
+} catch (e) {}
+function saveApiServersToDb() {
+  // Save ALL servers (env + db-added) so DB becomes single source of truth over time
+  try { db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES ('api_servers', ?, datetime('now'))").run(JSON.stringify(apiServers)); } catch (e) {}
+}
+// Auto-migrate: save env servers to DB on first run
+if (apiServers.length > 0) saveApiServersToDb();
 
 // Fallback defaults for known servers (used if env vars not set)
 // Server locations with timezone offsets (hours from UTC)
@@ -3410,23 +3425,25 @@ app.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res)
     // Add to runtime
     apiServers.push(testServer);
     SERVER_COUNTRIES[name] = { country: country || '', name: countryName || name, tz: tz || 'Europe/Moscow', serverIp: testServer.publicIp };
-    // Append to .env
-    const envLines = [
-      `API_${name}_URL=${url}`,
-      `API_${name}_USER=${user}`,
-      `API_${name}_PASS=${pass}`,
-      publicIp ? `API_${name}_PUBLIC_IP=${publicIp}` : null,
-      country ? `API_${name}_COUNTRY=${country}` : null,
-      countryName ? `API_${name}_COUNTRY_NAME=${countryName}` : null,
-      tz ? `API_${name}_TZ=${tz}` : null
-    ].filter(Boolean).join('\n');
-    fs.appendFileSync(path.join(__dirname, '.env'), '\n' + envLines + '\n');
+    // Save to DB (not .env)
+    saveApiServersToDb();
     auditLog(req.user.login, 'add_server', { name, url, modemCount, ip: getClientIp(req) });
     _psCache = null; _psCacheTs = 0;
     res.json({ ok: true, modemCount });
   } catch (e) {
     res.status(502).json({ error: 'Server unreachable', details: e.message });
   }
+});
+
+app.delete('/api/admin/servers/:name', authMiddleware, adminMiddleware, (req, res) => {
+  const idx = apiServers.findIndex(s => s.name === req.params.name);
+  if (idx === -1) return res.status(404).json({ error: 'Server not found' });
+  apiServers.splice(idx, 1);
+  delete SERVER_COUNTRIES[req.params.name];
+  saveApiServersToDb();
+  _psCache = null; _psCacheTs = 0;
+  auditLog(req.user.login, 'delete_server', { name: req.params.name, ip: getClientIp(req) });
+  res.json({ ok: true });
 });
 
 app.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {

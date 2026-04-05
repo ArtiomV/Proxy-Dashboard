@@ -2897,10 +2897,10 @@ function loadServersList(){
   fetch(API+'/api/admin/servers',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
     var el=document.getElementById('serversList');if(!el)return;
     if(!d.servers||!d.servers.length){el.innerHTML='<div style="color:var(--text-3);font-size:12px">Нет серверов</div>';return}
-    var h='<table class="log-table"><thead><tr><th>Имя</th><th>URL</th><th>Public IP</th><th>Страна</th></tr></thead><tbody>';
+    var h='<table class="log-table"><thead><tr><th>Имя</th><th>URL</th><th>Public IP</th><th>Страна</th><th></th></tr></thead><tbody>';
     d.servers.forEach(function(s){
       var cn=s.country||{};
-      h+='<tr><td><strong>'+esc(s.name)+'</strong></td><td class="mono" style="font-size:11px">'+esc(s.url)+'</td><td class="mono">'+esc(s.publicIp||'')+'</td><td>'+(cn.country==='MD'?'🇲🇩':cn.country==='RO'?'🇷🇴':'🌍')+' '+esc(cn.name||'')+'</td></tr>';
+      h+='<tr><td><strong>'+esc(s.name)+'</strong></td><td class="mono" style="font-size:11px">'+esc(s.url)+'</td><td class="mono">'+esc(s.publicIp||'')+'</td><td>'+(cn.country==='MD'?'🇲🇩':cn.country==='RO'?'🇷🇴':'🌍')+' '+esc(cn.name||'')+'</td><td><button class="btn btn-sm" style="color:var(--danger);font-size:10px" onclick="deleteServer(\''+esc(s.name)+'\')">✕</button></td></tr>';
     });
     h+='</tbody></table>';
     el.innerHTML=h;
@@ -2923,6 +2923,14 @@ function addServer(){
     if(d.ok){status.textContent='Добавлен! '+d.modemCount+' модемов';status.style.color='var(--success)';loadServersList();setTimeout(loadData,2000)}
     else{status.textContent=d.error||'Ошибка';status.style.color='var(--danger)'}
   }).catch(function(e){status.textContent=e.message;status.style.color='var(--danger)'})
+}
+
+function deleteServer(name){
+  if(!confirm('Удалить сервер '+name+'?'))return;
+  fetch(API+'/api/admin/servers/'+name,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+    if(d.ok){showToast('Сервер '+name+' удалён','success');loadServersList();setTimeout(loadData,2000)}
+    else showToast(d.error||'Ошибка','error')
+  })
 }
 
 // ========== SETTINGS ==========
