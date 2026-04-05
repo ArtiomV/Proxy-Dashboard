@@ -1915,6 +1915,13 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
       merged.ipHistory = filteredIpHistory;
     }
 
+    // Include server info for client portal (needed for IP addresses)
+    merged.servers = apiServers.map(s => ({
+      name: s.name, publicIp: s.publicIp,
+      country: (SERVER_COUNTRIES[s.name] || {}).country || '',
+      countryName: (SERVER_COUNTRIES[s.name] || {}).name || s.name
+    }));
+
     res.json(merged);
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
