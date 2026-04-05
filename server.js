@@ -3915,14 +3915,21 @@ app.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, r
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const rawImei = portData.IMEI.replace(/^S\d+_/, '');
-    // Use /conf/add_port?imei={IMEI} (ProxySmart's actual port creation endpoint)
+    // GET pre-filled form values from ProxySmart (portID, http_port, login, password)
+    const formHtml = await fetchApiRaw(server, `/conf/add_port?imei=${rawImei}`);
+    const html = formHtml.buffer ? formHtml.buffer.toString('utf8') : String(formHtml);
+    const prefilled = {};
+    const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
+    let fm;
+    while ((fm = fieldRe.exec(html)) !== null) prefilled[fm[1]] = fm[2];
+    // Merge: user values override pre-filled, keep generated portID/ports/creds
     const formData = {
-      IMEI: rawImei,
-      portName: portData.portName || '',
-      http_port: portData.http_port || '',
-      socks_port: portData.socks_port || '',
-      proxy_login: portData.proxy_login || '',
-      proxy_password: portData.proxy_password || ''
+      ...prefilled,
+      portName: portData.portName || prefilled.portName || '',
+      ...(portData.http_port ? { http_port: portData.http_port } : {}),
+      ...(portData.socks_port ? { socks_port: portData.socks_port } : {}),
+      ...(portData.proxy_login ? { proxy_login: portData.proxy_login } : {}),
+      ...(portData.proxy_password ? { proxy_password: portData.proxy_password } : {})
     };
     const result = await postFormApi(server, `/conf/add_port?imei=${rawImei}`, formData);
     _psCache = null; _psCacheTs = 0;
