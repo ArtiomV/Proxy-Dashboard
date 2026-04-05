@@ -1240,7 +1240,7 @@ var currentSort={key:'modemNick',dir:'asc'};
 // --- Country config ---
 var countryNames={'MD':'\ud83c\uddf2\ud83c\udde9 Молдова','RO':'\ud83c\uddf7\ud83c\uddf4 Румыния','??':'\ud83c\udf10 Другое'};
 var countryOrder=['MD','RO','??'];
-var COUNTRIES={S1:{serverIp:'89.149.100.92'},S2:{serverIp:'31.5.194.89'}};
+var COUNTRIES={}; // populated from server data in loadData
 
 // --- Tabs ---
 function switchTab(name,el){
@@ -2168,6 +2168,11 @@ async function loadData(){
   try{
     var data=await fetchJSON('/api/dashboard_data');
     rawData=data;
+    // Populate COUNTRIES from server data
+    if(data.servers&&data.servers.length){
+      COUNTRIES={};
+      data.servers.forEach(function(s){COUNTRIES[s.name]={serverIp:s.publicIp||'',country:s.country||'',name:s.countryName||s.name}});
+    }
     var bwData=data.bandwidth;
     var statusData=data.status;
     var portsData=data.ports;
