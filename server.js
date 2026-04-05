@@ -602,8 +602,11 @@ const _dtUpsert = db.prepare(`INSERT INTO daily_traffic (port_name, date, bytes_
   bytes_out = MAX(bytes_out, excluded.bytes_out)`);
 // daily_traffic never cleaned — needed for long-term trend charts
 // If hour already recorded for this port — skip (don't overwrite or accumulate)
-const _htUpsert = db.prepare(`INSERT OR IGNORE INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+const _htUpsert = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+  ON CONFLICT(port_id, hour_start) DO UPDATE SET
+  bytes_in  = CASE WHEN bytes_in  = 0 THEN excluded.bytes_in  ELSE bytes_in  END,
+  bytes_out = CASE WHEN bytes_out = 0 THEN excluded.bytes_out ELSE bytes_out END`);
 const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
 const _metaCleanup = db.prepare("DELETE FROM modem_meta WHERE updated_at < datetime('now', '-30 days')");
 const _rotLogCleanup = db.prepare("DELETE FROM rotation_log WHERE started_at < datetime('now', '-90 days')");
@@ -5859,6 +5862,7 @@ const httpServer = app.listen(PORT, () => {
 
   // Pre-reset snapshot at 20:50 UTC (23:50 MSK) — captures month counters before ProxySmart resets them at 21:00 UTC
   scheduleRepeating(20, 50, 'PreResetSnapshot', capturePreResetSnapshot);
+  scheduleRepeating(23, 50, 'PreResetSnapshot-2350', capturePreResetSnapshot); // Б1: second capture for UTC midnight reset
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {
@@ -5930,12 +5934,17 @@ const httpServer = app.listen(PORT, () => {
       }
 
       function tryRecord() {
-        aggregateHourlyTraffic().then(() => {
+        aggregateHourlyTraffic().then(async () => {
           // Success = no exception, even if cnt=0 (all modems offline)
           _hourlyLastRecordedHour = targetHourStr;
           try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch(e) {}
           const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
           logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${(check && check.cnt) || 0} rows)`);
+          // Б1: capture preReset snapshot right after aggregation of hour 20:xx UTC (= 23:xx MSK)
+          const utcH = new Date().getUTCHours();
+          if (utcH === 21) { // just finished aggregating 20:00-21:00 UTC
+            await capturePreResetSnapshot();
+          }
         }).catch(e => {
           logger.error(`[HourlyAgg] Attempt ${attemptIdx + 1}/5 error: ${e.message}`);
           attemptIdx++;
