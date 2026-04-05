@@ -3384,6 +3384,42 @@ app.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
 
 // CRM translate endpoint removed — translations applied directly to DB
 
+// API Servers management
+app.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
+  res.json({ servers: apiServers.map(s => ({ name: s.name, url: s.url, publicIp: s.publicIp, country: SERVER_COUNTRIES[s.name] || {} })) });
+});
+
+app.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) => {
+  const { name, url, user, pass, publicIp, country, countryName, tz } = req.body;
+  if (!name || !url || !user || !pass) return res.status(400).json({ error: 'name, url, user, pass required' });
+  if (apiServers.find(s => s.name === name)) return res.status(409).json({ error: 'Server name already exists' });
+  // Test connectivity
+  try {
+    const testServer = { name, url, user, pass, publicIp: publicIp || new URL(url).hostname };
+    const status = await fetchApi(testServer, '/apix/show_status_json', 10000);
+    const modemCount = Array.isArray(status) ? status.length : 0;
+    // Add to runtime
+    apiServers.push(testServer);
+    SERVER_COUNTRIES[name] = { country: country || '', name: countryName || name, tz: tz || 'Europe/Moscow', serverIp: testServer.publicIp };
+    // Append to .env
+    const envLines = [
+      `API_${name}_URL=${url}`,
+      `API_${name}_USER=${user}`,
+      `API_${name}_PASS=${pass}`,
+      publicIp ? `API_${name}_PUBLIC_IP=${publicIp}` : null,
+      country ? `API_${name}_COUNTRY=${country}` : null,
+      countryName ? `API_${name}_COUNTRY_NAME=${countryName}` : null,
+      tz ? `API_${name}_TZ=${tz}` : null
+    ].filter(Boolean).join('\n');
+    fs.appendFileSync(path.join(__dirname, '.env'), '\n' + envLines + '\n');
+    auditLog(req.user.login, 'add_server', { name, url, modemCount, ip: getClientIp(req) });
+    _psCache = null; _psCacheTs = 0;
+    res.json({ ok: true, modemCount });
+  } catch (e) {
+    res.status(502).json({ error: 'Server unreachable', details: e.message });
+  }
+});
+
 app.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   res.json(appSettings);
 });

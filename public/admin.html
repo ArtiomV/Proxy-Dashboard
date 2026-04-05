@@ -275,6 +275,7 @@
     <div class="tab-sidebar" style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
       <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">НАСТРОЙКИ</div>
       <div class="settings-nav-item active" id="snav_audit" onclick="switchSettingsSection('audit')">📋 Логи</div>
+      <div class="settings-nav-item" id="snav_servers" onclick="switchSettingsSection('servers')">🖥 Серверы</div>
       <div class="settings-nav-item" id="snav_bank" onclick="switchSettingsSection('bank')">🏦 Банк</div>
       <div class="settings-nav-item" id="snav_data" onclick="switchSettingsSection('data')">📦 Прочее</div>
     </div>
@@ -293,6 +294,31 @@
             <button class="btn btn-sm audit-filter-btn" data-f="client" onclick="setAuditFilter('client')" style="font-size:11px">👤 Клиенты</button>
           </div>
           <div id="auditLogTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Нажмите «Обновить» для загрузки</div></div>
+        </div>
+      </div>
+      <!-- Серверы -->
+      <div id="settingsSection_servers" class="settings-section" style="display:none">
+        <div class="analytics-card" style="margin-bottom:16px">
+          <h3>API Серверы ProxySmart</h3>
+          <div id="serversList" style="margin:12px 0"></div>
+          <div style="border-top:1px solid var(--border);padding-top:12px;margin-top:12px">
+            <h4 style="font-size:13px;margin-bottom:8px">Добавить сервер</h4>
+            <div class="form-row" style="gap:8px;flex-wrap:wrap">
+              <div class="form-group"><label>Имя (S5, S6..)</label><input class="form-input" id="newSrvName" placeholder="S5" style="width:80px"></div>
+              <div class="form-group"><label>URL</label><input class="form-input" id="newSrvUrl" placeholder="http://IP:PORT" style="width:200px"></div>
+              <div class="form-group"><label>Логин</label><input class="form-input" id="newSrvUser" placeholder="proxy" style="width:100px"></div>
+              <div class="form-group"><label>Пароль</label><input class="form-input" id="newSrvPass" placeholder="password" style="width:140px"></div>
+              <div class="form-group"><label>Public IP</label><input class="form-input" id="newSrvIp" placeholder="1.2.3.4" style="width:120px"></div>
+              <div class="form-group"><label>Страна</label>
+                <select class="form-input" id="newSrvCountry" style="width:120px">
+                  <option value="MD">Moldova 🇲🇩</option>
+                  <option value="RO">Romania 🇷🇴</option>
+                </select>
+              </div>
+            </div>
+            <button class="btn btn-primary" onclick="addServer()" style="margin-top:8px">Добавить и проверить</button>
+            <span id="addSrvStatus" style="font-size:11px;margin-left:8px"></span>
+          </div>
         </div>
       </div>
       <!-- Банк -->
@@ -521,7 +547,7 @@ function switchBankNav(name){
 }
 var _activeSettingsSection='audit';
 function switchSettingsSection(name){
-  ['bank','data','audit'].forEach(function(s){
+  ['bank','data','audit','servers'].forEach(function(s){
     var sec=document.getElementById('settingsSection_'+s);
     var nav=document.getElementById('snav_'+s);
     if(sec)sec.style.display=s===name?'':'none';
@@ -530,6 +556,7 @@ function switchSettingsSection(name){
   _activeSettingsSection=name;
   localStorage.setItem('admin_settings_section',name);
   if(name==='audit')loadAuditLog();
+  if(name==='servers')loadServersList();
 }
 function switchMainTab(name,el){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'audit';switchSettingsSection(ss);}if(name==='bank'){switchBankNav(_activeBankTab||'acts');}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}}
 
@@ -2863,6 +2890,39 @@ function savePricingTiers() {
     if(d.ok) showToast('Тарифы сохранены','success');
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
+}
+
+// ========== SERVERS ==========
+function loadServersList(){
+  fetch(API+'/api/admin/servers',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+    var el=document.getElementById('serversList');if(!el)return;
+    if(!d.servers||!d.servers.length){el.innerHTML='<div style="color:var(--text-3);font-size:12px">Нет серверов</div>';return}
+    var h='<table class="log-table"><thead><tr><th>Имя</th><th>URL</th><th>Public IP</th><th>Страна</th></tr></thead><tbody>';
+    d.servers.forEach(function(s){
+      var cn=s.country||{};
+      h+='<tr><td><strong>'+esc(s.name)+'</strong></td><td class="mono" style="font-size:11px">'+esc(s.url)+'</td><td class="mono">'+esc(s.publicIp||'')+'</td><td>'+(cn.country==='MD'?'🇲🇩':cn.country==='RO'?'🇷🇴':'🌍')+' '+esc(cn.name||'')+'</td></tr>';
+    });
+    h+='</tbody></table>';
+    el.innerHTML=h;
+  }).catch(function(){})
+}
+function addServer(){
+  var name=document.getElementById('newSrvName').value.trim();
+  var url=document.getElementById('newSrvUrl').value.trim();
+  var user=document.getElementById('newSrvUser').value.trim()||'proxy';
+  var pass=document.getElementById('newSrvPass').value.trim();
+  var publicIp=document.getElementById('newSrvIp').value.trim();
+  var country=document.getElementById('newSrvCountry').value;
+  var countryName=country==='MD'?'Moldova':'Romania';
+  var tz=country==='MD'?'Europe/Chisinau':'Europe/Bucharest';
+  var status=document.getElementById('addSrvStatus');
+  if(!name||!url||!pass){status.textContent='Заполните имя, URL и пароль';status.style.color='var(--danger)';return}
+  status.textContent='Проверяю подключение...';status.style.color='var(--warning)';
+  fetch(API+'/api/admin/servers',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({name:name,url:url,user:user,pass:pass,publicIp:publicIp,country:country,countryName:countryName,tz:tz})})
+  .then(function(r){return r.json()}).then(function(d){
+    if(d.ok){status.textContent='Добавлен! '+d.modemCount+' модемов';status.style.color='var(--success)';loadServersList();setTimeout(loadData,2000)}
+    else{status.textContent=d.error||'Ошибка';status.style.color='var(--danger)'}
+  }).catch(function(e){status.textContent=e.message;status.style.color='var(--danger)'})
 }
 
 // ========== SETTINGS ==========
