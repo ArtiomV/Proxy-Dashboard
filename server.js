@@ -3902,10 +3902,22 @@ app.post('/api/admin/purge_sms', authMiddleware, adminMiddleware, async (req, re
 app.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { serverName, ...portData } = req.body;
-    if (!serverName || !portData.IMEI || !portData.portID) return res.status(400).json({ error: 'serverName, IMEI, portID required' });
+    if (!serverName || !portData.IMEI) return res.status(400).json({ error: 'serverName and IMEI required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await postApi(server, '/crud/store_port', portData);
+    const rawImei = portData.IMEI.replace(/^S\d+_/, '');
+    // Use /conf/add_port?imei={IMEI} (ProxySmart's actual port creation endpoint)
+    const formData = {
+      IMEI: rawImei,
+      portName: portData.portName || '',
+      http_port: portData.http_port || '',
+      socks_port: portData.socks_port || '',
+      proxy_login: portData.proxy_login || '',
+      proxy_password: portData.proxy_password || ''
+    };
+    const result = await postFormApi(server, `/conf/add_port?imei=${rawImei}`, formData);
+    _psCache = null; _psCacheTs = 0;
+    auditLog(req.user.login, 'store_port', { serverName, IMEI: rawImei, portName: portData.portName, ip: getClientIp(req) });
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Store port failed', details: err.message }); }
 });
