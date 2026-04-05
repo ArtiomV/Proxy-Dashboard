@@ -171,20 +171,15 @@ function saveApiServersToDb() {
 // Auto-migrate: save env servers to DB on first run
 if (apiServers.length > 0) saveApiServersToDb();
 
-// Fallback defaults for known servers (used if env vars not set)
-// Server locations with timezone offsets (hours from UTC)
-// Moldova (Chisinau) and Romania (Bucharest) are both EET: UTC+2 winter, UTC+3 summer (EEST)
-const _defaultCountries = { S1: { country: 'MD', name: 'Moldova', tz: 'Europe/Chisinau' }, S2: { country: 'RO', name: 'Romania', tz: 'Europe/Bucharest' } };
-
+// Server country config — loaded from DB server objects (country, countryName, tz fields)
 // getTzOffset extracted to src/utils/time.js
 const SERVER_COUNTRIES = {};
 for (const s of apiServers) {
-  const dc = _defaultCountries[s.name] || {};
   SERVER_COUNTRIES[s.name] = {
     serverIp: s.publicIp,
-    country: process.env[`API_${s.name}_COUNTRY`] || dc.country || '',
-    name: process.env[`API_${s.name}_COUNTRY_NAME`] || dc.name || s.name,
-    tz: process.env[`API_${s.name}_TZ`] || dc.tz || 'Europe/Moscow'
+    country: s.country || '',
+    name: s.countryName || s.name,
+    tz: s.tz || 'Europe/Moscow'
   };
 }
 logger.info(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.name + ' (' + s.url + ')').join(', ')}`);
@@ -3426,12 +3421,12 @@ app.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res)
   if (apiServers.find(s => s.name === name)) return res.status(409).json({ error: 'Server name already exists' });
   // Test connectivity
   try {
-    const testServer = { name, url, user, pass, publicIp: publicIp || new URL(url).hostname };
+    const testServer = { name, url, user, pass, publicIp: publicIp || new URL(url).hostname, country: country || '', countryName: countryName || name, tz: tz || 'Europe/Moscow' };
     const status = await fetchApi(testServer, '/apix/show_status_json', 10000);
     const modemCount = Array.isArray(status) ? status.length : 0;
     // Add to runtime
     apiServers.push(testServer);
-    SERVER_COUNTRIES[name] = { country: country || '', name: countryName || name, tz: tz || 'Europe/Moscow', serverIp: testServer.publicIp };
+    SERVER_COUNTRIES[name] = { country: testServer.country, name: testServer.countryName, tz: testServer.tz, serverIp: testServer.publicIp };
     // Save to DB (not .env)
     saveApiServersToDb();
     auditLog(req.user.login, 'add_server', { name, url, modemCount, ip: getClientIp(req) });
