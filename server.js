@@ -3542,7 +3542,7 @@ app.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, 
     if (!serverName || !modemData.IMEI) return res.status(400).json({ error: 'serverName and IMEI required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await postApi(server, '/crud/store_modem', modemData);
+    const result = await postFormApi(server, '/crud/store_modem', modemData);
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Store modem failed', details: err.message }); }
 });
