@@ -2502,6 +2502,17 @@ function renderClients(){
   if(!container)return;
   var pnm={};var map=currentData._modemMap||{};
   for(var imei in map){var mm=map[imei];mm.ports.forEach(function(p){if(p.portName){if(!pnm[p.portName])pnm[p.portName]=[];pnm[p.portName].push({nick:mm.nick,server:mm.server})}})}
+  // Sort: active clients by monthly expense desc, inactive at bottom
+  var charges=currentData.clientMonthCharges||{};
+  cl=cl.slice().sort(function(a,b){
+    var aActive=(a.modemCount||0)>0||(pnm[a.portName]||[]).length>0;
+    var bActive=(b.modemCount||0)>0||(pnm[b.portName]||[]).length>0;
+    if(aActive&&!bActive)return-1;
+    if(!aActive&&bActive)return 1;
+    var aCost=charges[a.id]||0;
+    var bCost=charges[b.id]||0;
+    return bCost-aCost;
+  });
   var h='';var count=0;var colors=CHART_COLORS.clients;
   cl.forEach(function(c,i){
     var modems=pnm[c.portName]||[];
