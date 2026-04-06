@@ -2238,7 +2238,7 @@ async function loadData(){
         var modem=modemMap[imei]||{nick:imei||'?',model:'',online:'?',extIp:'',operator:'',networkType:'',server:''};
 
         var country=modem.nick.startsWith('MD')?'MD':modem.nick.startsWith('RO')?'RO':'??';
-        var serverName=modem.server||(imei.match(/^(S\d+)_/)?imei.match(/^(S\d+)_/)[1]:'');
+        var serverName=modem.server||bw._server||(imei.match(/^(S\d+)_/)?imei.match(/^(S\d+)_/)[1]:'')||(portId.match(/^(S\d+)_/)?portId.match(/^(S\d+)_/)[1]:'');
         var rawImei=imei.replace(/^S\d+_/,'');
 
         // IP tracking info
@@ -3359,10 +3359,10 @@ function getExportProxies(){
     var port=proto==='http'?(r.httpPort||''):(r.socksPort||'');
     return {host:host,port:port,login:r.proxyLogin,pass:r.proxyPassword,proto:proto,changeip:r.resetSecureLink||'',nick:r.modemNick||''};
   }).filter(function(p){return p.port;});
-  // Deduplicate by host:port
+  // Deduplicate by login:pass@host:port (not just host:port — same IP may serve different modems)
   var seen={};
   var deduped=mapped.filter(function(p){
-    var key=p.host+':'+p.port;
+    var key=p.login+':'+p.pass+'@'+p.host+':'+p.port;
     if(seen[key])return false;
     seen[key]=true;return true;
   });

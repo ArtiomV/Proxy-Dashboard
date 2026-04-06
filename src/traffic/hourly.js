@@ -3,9 +3,11 @@
 const { parseBwToBytes, normalizeOperator } = require('../utils/traffic');
 
 let db, logger, fetchAllServersDataCached, refreshPortKeyMapping, portKeyToPortNameRef;
-let hourlyDaySnapshots = {};
-let preResetSnapshots = {};
-let _htUpsert, _htCleanup, _metaOpGet;
+let _htUpsert, _htCleanup, _metaOpGet, _snapUpsert, _snapGet, _snapGetAll;
+let SERVER_COUNTRIES = {};
+
+// In-memory cache of hourly_snapshots table (port_id → row)
+const snapCache = new Map();
 
 function init(deps) {
   db = deps.db;
@@ -16,87 +18,121 @@ function init(deps) {
   _htUpsert = deps._htUpsert;
   _htCleanup = deps._htCleanup;
   _metaOpGet = deps._metaOpGet;
-  loadHourlySnapshots();
-  loadPreResetSnapshots();
+  _snapUpsert = deps._snapUpsert;
+  _snapGet = deps._snapGet;
+  _snapGetAll = deps._snapGetAll;
+  SERVER_COUNTRIES = deps.SERVER_COUNTRIES || {};
+
+  // Migrate old kv_store snapshots → hourly_snapshots table (one-time)
+  migrateSnapshotsToTable();
+
+  // Load all snapshots into memory
+  loadSnapCache();
 }
 
-function saveHourlySnapshots() {
-  try { db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES ('hourly_day_snapshots', ?, datetime('now'))").run(JSON.stringify(hourlyDaySnapshots)); } catch (e) {}
-}
-
-function loadHourlySnapshots() {
+function loadSnapCache() {
   try {
-    const row = db.prepare("SELECT value FROM kv_store WHERE key = 'hourly_day_snapshots'").get();
-    if (row) { hourlyDaySnapshots = JSON.parse(row.value); logger.info(`[HourlyAgg] Restored ${Object.keys(hourlyDaySnapshots).length} snapshots from DB`); }
-  } catch (e) { logger.error('[HourlyAgg] Failed to load snapshots:', e.message); }
-}
-
-function loadPreResetSnapshots() {
-  try {
-    const row = db.prepare("SELECT value FROM kv_store WHERE key = 'pre_reset_snapshots'").get();
-    if (row) { preResetSnapshots = JSON.parse(row.value); logger.info(`[HourlyAgg] Restored ${Object.keys(preResetSnapshots).length} pre-reset snapshots`); }
-  } catch (e) {}
-}
-
-// Б3 fix: temp object + merge by max, never clear before fetch
-async function capturePreResetSnapshot() {
-  try {
-    const results = await fetchAllServersDataCached();
-    const newSnapshots = {};
-    for (const data of results) {
-      const srv = data.serverName || '';
-      if (typeof data.bw !== 'object') continue;
-      for (const [portId, b] of Object.entries(data.bw)) {
-        const fullPortId = srv + '_' + portId;
-        const monIn  = parseBwToBytes(b.bandwidth_bytes_month_in);
-        const monOut = parseBwToBytes(b.bandwidth_bytes_month_out);
-        if (monIn > 0 || monOut > 0) {
-          newSnapshots[fullPortId] = { in: monIn, out: monOut, capturedAt: Date.now() };
-        }
-      }
-    }
-    // Merge: keep max per port (Б3)
-    let merged = 0;
-    for (const [key, val] of Object.entries(newSnapshots)) {
-      if (!preResetSnapshots[key] || preResetSnapshots[key].in < val.in) {
-        preResetSnapshots[key] = val;
-        merged++;
-      }
-    }
-    try { db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES ('pre_reset_snapshots', ?, datetime('now'))").run(JSON.stringify(preResetSnapshots)); } catch(e) {}
-    logger.info(`[HourlyAgg] PreResetSnapshot merged: ${merged} ports (total ${Object.keys(preResetSnapshots).length})`);
+    const rows = _snapGetAll.all();
+    snapCache.clear();
+    for (const r of rows) snapCache.set(r.port_id, r);
+    logger.info(`[HourlyAgg] Loaded ${snapCache.size} snapshots from hourly_snapshots table`);
   } catch (e) {
-    // Б3: preResetSnapshots NOT cleared on error
-    logger.error('[HourlyAgg] PreResetSnapshot error:', e.message);
+    logger.error('[HourlyAgg] Failed to load snap cache:', e.message);
   }
 }
 
-// Б2 fix: don't overwrite snap with zero for offline modems
+function migrateSnapshotsToTable() {
+  try {
+    const existing = db.prepare('SELECT COUNT(*) as c FROM hourly_snapshots').get();
+    if (existing.c > 0) return; // already migrated
+
+    const row = db.prepare("SELECT value FROM kv_store WHERE key = 'hourly_day_snapshots'").get();
+    if (!row) return;
+
+    const old = JSON.parse(row.value);
+    const stmt = db.prepare(`INSERT OR IGNORE INTO hourly_snapshots
+      (port_id, day_in, day_out, month_in, month_out, pending, captured_at)
+      VALUES (?, ?, ?, ?, ?, 0, datetime('now'))`);
+
+    const tx = db.transaction(() => {
+      for (const [portId, snap] of Object.entries(old)) {
+        // Old snapshots stored month counters in 'in'/'out' fields
+        // Use them as both day and month initial values
+        stmt.run(portId, snap.in || 0, snap.out || 0, snap.in || 0, snap.out || 0);
+      }
+    });
+    tx();
+    logger.info(`[HourlyAgg] Migrated ${Object.keys(old).length} snapshots to hourly_snapshots table`);
+  } catch (e) {
+    logger.error('[HourlyAgg] Migration error:', e.message);
+  }
+}
+
+function upsertSnap(portId, fields) {
+  _snapUpsert.run(
+    portId,
+    fields.day_in || 0, fields.day_out || 0,
+    fields.month_in || 0, fields.month_out || 0,
+    fields.yesterday_in || 0, fields.yesterday_out || 0,
+    fields.prev_month_in || 0, fields.prev_month_out || 0,
+    fields.day_at_last_hour_start_in || 0, fields.day_at_last_hour_start_out || 0,
+    fields.mon_at_last_hour_start_in || 0, fields.mon_at_last_hour_start_out || 0,
+    fields.pending || 0
+  );
+  // Update in-memory cache
+  snapCache.set(portId, { port_id: portId, ...fields });
+}
+
+// Startup: refresh snapshots from live data WITHOUT writing to traffic_hourly
 async function refreshSnapshotsOnly() {
   try {
     const results = await fetchAllServersDataCached();
-    const now = new Date();
-    const todayStr = now.toISOString().slice(0, 10);
     let updated = 0;
-    for (const data of results) {
-      const srv = data.serverName || '';
-      if (typeof data.bw !== 'object') continue;
-      for (const [portId, b] of Object.entries(data.bw)) {
-        const fullPortId = srv + '_' + portId;
-        const monIn  = parseBwToBytes(b.bandwidth_bytes_month_in);
-        const monOut = parseBwToBytes(b.bandwidth_bytes_month_out);
-        if (monIn > 0 || monOut > 0) {
-          hourlyDaySnapshots[fullPortId] = { in: monIn, out: monOut, date: todayStr };
-          updated++;
-        } else if (!hourlyDaySnapshots[fullPortId]) {
-          // New port with no data yet — mark as pending baseline
-          hourlyDaySnapshots[fullPortId] = { in: 0, out: 0, date: todayStr, pending: true };
+    const tx = db.transaction(() => {
+      for (const data of results) {
+        const srv = data.serverName || '';
+        if (typeof data.bw !== 'object') continue;
+        for (const [portId, b] of Object.entries(data.bw)) {
+          const fullPortId = srv + '_' + portId;
+          const dayIn  = parseBwToBytes(b.bandwidth_bytes_day_in);
+          const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
+          const monIn  = parseBwToBytes(b.bandwidth_bytes_month_in);
+          const monOut = parseBwToBytes(b.bandwidth_bytes_month_out);
+          const yesIn  = parseBwToBytes(b.bandwidth_bytes_yesterday_in);
+          const yesOut = parseBwToBytes(b.bandwidth_bytes_yesterday_out);
+          const pmIn   = parseBwToBytes(b.bandwidth_bytes_prev_month_in);
+          const pmOut  = parseBwToBytes(b.bandwidth_bytes_prev_month_out);
+
+          const snap = snapCache.get(fullPortId);
+
+          if (dayIn > 0 || dayOut > 0 || monIn > 0 || monOut > 0) {
+            upsertSnap(fullPortId, {
+              day_in: dayIn, day_out: dayOut,
+              month_in: monIn, month_out: monOut,
+              yesterday_in: yesIn, yesterday_out: yesOut,
+              prev_month_in: pmIn, prev_month_out: pmOut,
+              day_at_last_hour_start_in: dayIn,
+              day_at_last_hour_start_out: dayOut,
+              mon_at_last_hour_start_in: monIn,
+              mon_at_last_hour_start_out: monOut,
+              pending: 0,
+            });
+            updated++;
+          } else if (!snap) {
+            upsertSnap(fullPortId, {
+              day_in: 0, day_out: 0, month_in: 0, month_out: 0,
+              yesterday_in: 0, yesterday_out: 0, prev_month_in: 0, prev_month_out: 0,
+              day_at_last_hour_start_in: 0, day_at_last_hour_start_out: 0,
+              mon_at_last_hour_start_in: 0, mon_at_last_hour_start_out: 0,
+              pending: 1,
+            });
+          }
+          // If snap exists and all counters = 0 → keep old snap (offline modem)
         }
-        // If snap exists and monIn=0 — keep old snap (Б2: don't overwrite with zero)
       }
-    }
-    saveHourlySnapshots();
-    logger.info(`[HourlyAgg] Snapshots refreshed (no DB write): ${updated} ports`);
+    });
+    tx();
+    logger.info(`[HourlyAgg] Snapshots refreshed (no traffic_hourly write): ${updated} ports`);
   } catch (e) {
     logger.error('[HourlyAgg] refreshSnapshotsOnly error:', e.message);
   }
@@ -111,14 +147,19 @@ async function aggregateHourlyTraffic() {
     const nowMs = now.getTime();
     const prevHourStart = nowMs - (nowMs % 3600000) - 3600000;
     const hourStart = new Date(prevHourStart).toISOString().slice(0, 13).replace('T', ' ') + ':00';
-    const todayStr = new Date(prevHourStart).toISOString().slice(0, 10);
 
     let count = 0;
+    let uncertainCount = 0;
     const MAX_HOURLY_BYTES = 2 * 1073741824; // 2 GB sanity cap per modem
+    const UNCERTAIN_THRESHOLD = 50 * 1048576; // 50 MB minimum for uncertain flag
 
     const batch = db.transaction(() => {
       for (const data of results) {
         const srv = data.serverName || '';
+        const srvCountry = (SERVER_COUNTRIES[srv] || {}).country || '';
+        const isRO = srvCountry === 'RO';
+
+        // Build portId → modem info map
         const statusArr = Array.isArray(data.status) ? data.status : [];
         const portsMap = data.ports || {};
         const portIdInfo = {};
@@ -147,74 +188,161 @@ async function aggregateHourlyTraffic() {
             const meta = _metaOpGet.get(srv, nick);
             if (meta && meta.operator) rawOp = meta.operator.toLowerCase().trim();
           }
-          const isRO = srv === 'S2' || srv.indexOf('S2') === 0;
           const operator = normalizeOperator(rawOp, isRO);
           const clientName = info.clientName || b.portName || '';
           const fullPortId = srv + '_' + portId;
-          const snapKey = fullPortId;
 
-          const monIn  = parseBwToBytes(b.bandwidth_bytes_month_in);
-          const monOut = parseBwToBytes(b.bandwidth_bytes_month_out);
-          const snap = hourlyDaySnapshots[snapKey];
+          // Read all 8 counters
+          const dayIn   = parseBwToBytes(b.bandwidth_bytes_day_in);
+          const dayOut  = parseBwToBytes(b.bandwidth_bytes_day_out);
+          const monIn   = parseBwToBytes(b.bandwidth_bytes_month_in);
+          const monOut  = parseBwToBytes(b.bandwidth_bytes_month_out);
+          const yesIn   = parseBwToBytes(b.bandwidth_bytes_yesterday_in);
+          const yesOut  = parseBwToBytes(b.bandwidth_bytes_yesterday_out);
+          const pmIn    = parseBwToBytes(b.bandwidth_bytes_prev_month_in);
+          const pmOut   = parseBwToBytes(b.bandwidth_bytes_prev_month_out);
 
-          // Б2: skip pending baseline snaps (first seen, no real data yet)
-          if (snap && snap.pending) {
-            if (monIn > 0 || monOut > 0) {
-              hourlyDaySnapshots[snapKey] = { in: monIn, out: monOut, date: todayStr };
+          const snap = snapCache.get(fullPortId);
+
+          // --- 1. No snapshot → baseline ---
+          if (!snap) {
+            upsertSnap(fullPortId, {
+              day_in: dayIn, day_out: dayOut,
+              month_in: monIn, month_out: monOut,
+              yesterday_in: yesIn, yesterday_out: yesOut,
+              prev_month_in: pmIn, prev_month_out: pmOut,
+              day_at_last_hour_start_in: dayIn, day_at_last_hour_start_out: dayOut,
+              mon_at_last_hour_start_in: monIn, mon_at_last_hour_start_out: monOut,
+              pending: (dayIn > 0 || monIn > 0) ? 0 : 1,
+            });
+            continue;
+          }
+
+          // --- 2. Pending baseline → wait for real data ---
+          if (snap.pending) {
+            if (dayIn > 0 || dayOut > 0 || monIn > 0 || monOut > 0) {
+              upsertSnap(fullPortId, {
+                ...snap,
+                day_in: dayIn, day_out: dayOut,
+                month_in: monIn, month_out: monOut,
+                yesterday_in: yesIn, yesterday_out: yesOut,
+                prev_month_in: pmIn, prev_month_out: pmOut,
+                day_at_last_hour_start_in: dayIn, day_at_last_hour_start_out: dayOut,
+                mon_at_last_hour_start_in: monIn, mon_at_last_hour_start_out: monOut,
+                pending: 0,
+              });
             }
             continue;
           }
 
-          if (snap) {
-            const monthReset = (snap.in > 0 && monIn < snap.in * 0.1);
-            if (!monthReset) {
-              // Normal increment
-              const incIn  = Math.max(0, monIn  - snap.in);
-              const incOut = Math.max(0, monOut - snap.out);
-              // Sanity cap (prevents stale snap anomalies)
-              if (incIn + incOut > 0 && incIn + incOut < MAX_HOURLY_BYTES) {
-                _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut);
-                count++;
+          // --- 3. Day reset detection ---
+          const dayReset = yesIn > snap.day_in
+                        && yesIn !== snap.yesterday_in;
+
+          if (dayReset) {
+            // Last hour of the day: yesterday_total - day_at_last_hour_start
+            const incIn  = Math.max(0, yesIn  - snap.day_at_last_hour_start_in);
+            const incOut = Math.max(0, yesOut - snap.day_at_last_hour_start_out);
+            if (incIn + incOut > 0 && incIn + incOut < MAX_HOURLY_BYTES) {
+              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut, 0);
+              count++;
+            }
+            // Update snap to new day's values
+            upsertSnap(fullPortId, {
+              day_in: dayIn, day_out: dayOut,
+              month_in: monIn, month_out: monOut,
+              yesterday_in: yesIn, yesterday_out: yesOut,
+              prev_month_in: pmIn, prev_month_out: pmOut,
+              day_at_last_hour_start_in: dayIn, day_at_last_hour_start_out: dayOut,
+              mon_at_last_hour_start_in: monIn, mon_at_last_hour_start_out: monOut,
+              pending: 0,
+            });
+            continue;
+          }
+
+          // --- 4. Month reset detection ---
+          const monthReset = pmIn > snap.month_in
+                          && monIn < snap.month_in * 0.1;
+
+          if (monthReset) {
+            const incIn  = Math.max(0, pmIn  - snap.mon_at_last_hour_start_in);
+            const incOut = Math.max(0, pmOut - snap.mon_at_last_hour_start_out);
+            if (incIn + incOut > 0 && incIn + incOut < MAX_HOURLY_BYTES) {
+              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut, 0);
+              count++;
+            }
+            upsertSnap(fullPortId, {
+              day_in: dayIn, day_out: dayOut,
+              month_in: monIn, month_out: monOut,
+              yesterday_in: yesIn, yesterday_out: yesOut,
+              prev_month_in: pmIn, prev_month_out: pmOut,
+              day_at_last_hour_start_in: dayIn, day_at_last_hour_start_out: dayOut,
+              mon_at_last_hour_start_in: monIn, mon_at_last_hour_start_out: monOut,
+              pending: 0,
+            });
+            continue;
+          }
+
+          // --- 5. Normal hour: day-delta with month cross-validation ---
+          const incInDay  = Math.max(0, dayIn  - snap.day_in);
+          const incOutDay = Math.max(0, dayOut - snap.day_out);
+          const deltaDay  = incInDay + incOutDay;
+
+          const incInMon  = Math.max(0, monIn  - snap.month_in);
+          const incOutMon = Math.max(0, monOut - snap.month_out);
+          const deltaMon  = incInMon + incOutMon;
+
+          // Cross-validation
+          let uncertain = 0;
+          let finalIncIn  = incInDay;
+          let finalIncOut = incOutDay;
+
+          if (deltaDay > 0 && deltaMon > 0) {
+            const maxDelta = Math.max(deltaDay, deltaMon);
+            const discrepancy = Math.abs(deltaDay - deltaMon) / maxDelta;
+            if (discrepancy > 0.05 && maxDelta > UNCERTAIN_THRESHOLD) {
+              uncertain = 2;
+              uncertainCount++;
+              logger.warn(`[HourlyAgg] uncertain: nick=${nick} day_delta=${(deltaDay/1048576).toFixed(1)}MB month_delta=${(deltaMon/1048576).toFixed(1)}MB discrepancy=${(discrepancy*100).toFixed(1)}%`);
+              // Use the smaller value (conservative)
+              if (deltaMon < deltaDay) {
+                finalIncIn  = incInMon;
+                finalIncOut = incOutMon;
               }
-            } else {
-              // Б5: monthReset — use preSnap for last hour delta
-              const preSnap = preResetSnapshots[snapKey];
-              const preSnapAge = preSnap && preSnap.capturedAt ? (Date.now() - preSnap.capturedAt) / 3600000 : Infinity;
-              if (preSnap && preSnap.in > 0 && preSnapAge < 4) {
-                const incIn  = Math.max(0, preSnap.in  - snap.in);
-                const incOut = Math.max(0, preSnap.out - snap.out);
-                if (incIn + incOut > 0 && incIn + incOut < MAX_HOURLY_BYTES) {
-                  _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut);
-                  count++;
-                }
-              } else {
-                logger.warn(`[HourlyAgg] monthReset: no valid preSnap for ${nick} (age=${preSnapAge.toFixed(1)}h)`);
-              }
-              // Б5: ALWAYS update snap to post-reset value, then continue
-              hourlyDaySnapshots[snapKey] = { in: monIn, out: monOut, date: todayStr };
-              continue; // skip default snap update below
             }
           }
 
-          // Default snap update (only if monIn > 0, Б2)
-          if (monIn > 0 || monOut > 0) {
-            hourlyDaySnapshots[snapKey] = { in: monIn, out: monOut, date: todayStr };
-          } else if (!snap) {
-            hourlyDaySnapshots[snapKey] = { in: 0, out: 0, date: todayStr, pending: true };
+          // Sanity cap
+          const totalInc = finalIncIn + finalIncOut;
+          if (totalInc > 0 && totalInc < MAX_HOURLY_BYTES) {
+            _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, finalIncIn, finalIncOut, uncertain);
+            count++;
           }
-          // If snap exists and monIn=0 — keep old snap (Б2)
+
+          // Update snap (only if counters are non-zero — protect against offline modems)
+          if (dayIn > 0 || dayOut > 0 || monIn > 0 || monOut > 0) {
+            upsertSnap(fullPortId, {
+              day_in: dayIn, day_out: dayOut,
+              month_in: monIn, month_out: monOut,
+              yesterday_in: yesIn, yesterday_out: yesOut,
+              prev_month_in: pmIn, prev_month_out: pmOut,
+              day_at_last_hour_start_in: dayIn, day_at_last_hour_start_out: dayOut,
+              mon_at_last_hour_start_in: monIn, mon_at_last_hour_start_out: monOut,
+              pending: 0,
+            });
+          }
         }
       }
       _htCleanup.run();
     });
     batch();
-    saveHourlySnapshots();
-    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${Object.keys(hourlyDaySnapshots).length} tracked`);
+    const extra = uncertainCount > 0 ? `, ${uncertainCount} uncertain` : '';
+    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${snapCache.size} tracked${extra}`);
   } catch (e) {
     logger.error('[HourlyAgg] Error:', e.message);
   }
 }
 
-function getSnapshotCount() { return Object.keys(hourlyDaySnapshots).length; }
+function getSnapshotCount() { return snapCache.size; }
 
-module.exports = { init, aggregateHourlyTraffic, capturePreResetSnapshot, refreshSnapshotsOnly, saveHourlySnapshots, loadHourlySnapshots, getSnapshotCount };
+module.exports = { init, aggregateHourlyTraffic, refreshSnapshotsOnly, getSnapshotCount };

@@ -518,7 +518,7 @@ var _countryFlags={'MD':'\u{1F1F2}\u{1F1E9}','RO':'\u{1F1F7}\u{1F1F4}','US':'\u{
 var _countryNamesRu={'Moldova':'\u041c\u043e\u043b\u0434\u043e\u0432\u0430','Romania':'\u0420\u0443\u043c\u044b\u043d\u0438\u044f'};
 var COUNTRIES={};
 var COUNTRY_ORDER=[];
-function _initServers(servers){if(!servers||!servers.length)return;COUNTRIES={};COUNTRY_ORDER=[];servers.forEach(function(s){COUNTRIES[s.name]={flag:_countryFlags[s.country]||'',name:_countryNamesRu[s.countryName]||s.countryName||s.name,serverIp:s.publicIp||''};COUNTRY_ORDER.push(s.name);});}
+function _initServers(servers){if(!servers||!servers.length)return;COUNTRIES={};COUNTRY_ORDER=[];servers.forEach(function(s){COUNTRIES[s.name]={flag:_countryFlags[s.country]||'',name:_countryNamesRu[s.countryName]||s.countryName||s.name,serverIp:s.publicIp||'',country:s.country||''};COUNTRY_ORDER.push(s.name);});}
 
 // ========== THEME ==========
 function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=t;localStorage.setItem('pr_admin_theme',t);updateChartsTheme()}
@@ -563,7 +563,7 @@ function switchMainTab(name,el){var nt=document.querySelector('.nav-tabs');if(nt
 // ========== DATA ==========
 function loadData(){if(!authToken)return;var bar=document.getElementById('refreshBar');bar.style.width='30%';fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}}).then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()}).then(function(data){bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);currentData=data;processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}}).catch(function(e){bar.style.width='0';if(e.message!=='x')showToast('Ошибка: '+e.message,'error')})}
 
-function processData(){if(!currentData)return;_initServers(currentData.servers);var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S[12]_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[r.toLowerCase()]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
+function processData(){if(!currentData)return;_initServers(currentData.servers);var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S\d+_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[r.toLowerCase()]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:m.net_details?m.net_details.IS_ONLINE==='yes':false,isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
   var bw=currentData.bandwidth||{};for(var mi in mm){var mod=mm[mi];for(var p=0;p<mod.ports.length;p++){var pt=mod.ports[p];if(bw[pt.portID])pt._bw=bw[pt.portID]}}
   // IP tracking & uptime tracking
@@ -1752,11 +1752,14 @@ function renderDailyClientChart(data,cc){
   var sel=document.getElementById('dailyServerFilter');
   if(sel&&sel.options.length<=1){
     var srvNames=Object.keys(allServers).sort();
-    var countryMap={'S1':'🇲🇩 Молдова','S2':'🇷🇴 Румыния'};
+    var seen={};
     srvNames.forEach(function(s){
+      var ci=COUNTRIES[s]||{};
+      var cc=ci.country||s;
+      if(seen[cc])return;seen[cc]=true;
       var opt=document.createElement('option');
-      opt.value=s;
-      opt.textContent=countryMap[s]||s;
+      opt.value=cc;
+      opt.textContent=(ci.flag||'')+' '+(ci.name||s);
       sel.appendChild(opt);
     });
     sel.value=serverFilter;
@@ -1785,28 +1788,30 @@ function renderDailyClientChart(data,cc){
 
   if(mode==='countries'){
     // Build datasets per server (country)
-    var countryColors={'S1':'#3B9DD8','S2':'#E05C2C'};
-    var countryNames={'S1':'🇲🇩 Молдова','S2':'🇷🇴 Румыния'};
-    var serverTotals={};
+    var countryColors={'MD':'#3B9DD8','RO':'#E05C2C'};
+    var countryLabels={'MD':'🇲🇩 Молдова','RO':'🇷🇴 Румыния'};
+    var countryTotals={};
     for(var client in data){
       for(var dt in data[client]){
         var srvs=data[client][dt].servers;
         if(!srvs)continue;
         for(var s in srvs){
-          if(!serverTotals[s])serverTotals[s]={};
-          if(!serverTotals[s][dt])serverTotals[s][dt]=0;
-          if(serverFilter==='all'||serverFilter===s){
-            serverTotals[s][dt]+=(srvs[s].in||0)+(srvs[s].out||0);
+          var ci=COUNTRIES[s]||{};
+          var cc=ci.country||s;
+          if(!countryTotals[cc])countryTotals[cc]={};
+          if(!countryTotals[cc][dt])countryTotals[cc][dt]=0;
+          if(serverFilter==='all'||serverFilter===cc){
+            countryTotals[cc][dt]+=(srvs[s].in||0)+(srvs[s].out||0);
           }
         }
       }
     }
-    datasets=Object.keys(serverTotals).sort().map(function(s,i){
-      var color=countryColors[s]||CHART_COLORS.clients[i];
-      var values=labels.map(function(dt){return parseFloat((serverTotals[s][dt]||0)/1073741824).toFixed(2)});
-      return{label:countryNames[s]||s,clientName:s,data:values,borderColor:color,backgroundColor:color+'26',fill:false,tension:0.3,pointRadius:2,pointHoverRadius:5,pointBackgroundColor:color,borderWidth:2};
+    datasets=Object.keys(countryTotals).sort().map(function(cc,i){
+      var color=countryColors[cc]||CHART_COLORS.clients[i];
+      var values=labels.map(function(dt){return parseFloat((countryTotals[cc][dt]||0)/1073741824).toFixed(2)});
+      return{label:countryLabels[cc]||cc,clientName:cc,data:values,borderColor:color,backgroundColor:color+'26',fill:false,tension:0.3,pointRadius:2,pointHoverRadius:5,pointBackgroundColor:color,borderWidth:2};
     });
-    clients=Object.keys(serverTotals);
+    clients=Object.keys(countryTotals);
   } else {
   // Sort clients by total traffic desc (with server filter)
   // If a client is selected in the table, show only that client
@@ -1819,8 +1824,8 @@ function renderDailyClientChart(data,cc){
       var entry=data[client][dt];
       if(serverFilter==='all'){
         total+=(entry.in||0)+(entry.out||0);
-      } else if(entry.servers&&entry.servers[serverFilter]){
-        total+=(entry.servers[serverFilter].in||0)+(entry.servers[serverFilter].out||0);
+      } else if(entry.servers){
+        for(var _s in entry.servers){var _ci=COUNTRIES[_s]||{};if((_ci.country||_s)===serverFilter){total+=(entry.servers[_s].in||0)+(entry.servers[_s].out||0);}}
       }
     }
     if(total>0)clientTotals[client]=total;
@@ -1835,8 +1840,9 @@ function renderDailyClientChart(data,cc){
       if(!entry)return 0;
       if(serverFilter==='all'){
         return parseFloat(((entry.in||0)+(entry.out||0))/1073741824).toFixed(2);
-      } else if(entry.servers&&entry.servers[serverFilter]){
-        return parseFloat(((entry.servers[serverFilter].in||0)+(entry.servers[serverFilter].out||0))/1073741824).toFixed(2);
+      } else if(entry.servers){
+        var _t=0;for(var _s in entry.servers){var _ci=COUNTRIES[_s]||{};if((_ci.country||_s)===serverFilter){_t+=(entry.servers[_s].in||0)+(entry.servers[_s].out||0);}}
+        return parseFloat(_t/1073741824).toFixed(2);
       }
       return 0;
     });
@@ -2908,14 +2914,45 @@ function loadServersList(){
   fetch(API+'/api/admin/servers',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
     var el=document.getElementById('serversList');if(!el)return;
     if(!d.servers||!d.servers.length){el.innerHTML='<div style="color:var(--text-3);font-size:12px">Нет серверов</div>';return}
-    var h='<table class="log-table"><thead><tr><th>Имя</th><th>URL</th><th>Public IP</th><th>Страна</th><th></th></tr></thead><tbody>';
+    var h='';
     d.servers.forEach(function(s){
       var cn=s.country||{};
-      h+='<tr><td><strong>'+esc(s.name)+'</strong></td><td class="mono" style="font-size:11px">'+esc(s.url)+'</td><td class="mono">'+esc(s.publicIp||'')+'</td><td>'+(cn.country==='MD'?'🇲🇩':cn.country==='RO'?'🇷🇴':'🌍')+' '+esc(cn.name||'')+'</td><td><button class="btn btn-sm" style="color:var(--danger);font-size:10px" onclick="deleteServer(\''+esc(s.name)+'\')">✕</button></td></tr>';
+      var flag=cn.country==='MD'?'🇲🇩':cn.country==='RO'?'🇷🇴':'🌍';
+      h+='<div style="border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin-bottom:12px;background:var(--bg-2)">';
+      h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">';
+      h+='<div style="display:flex;align-items:center;gap:10px"><span style="font-size:15px;font-weight:700">'+esc(s.name)+'</span><span style="font-size:12px;color:var(--text-2)">'+flag+' '+(cn.name||'')+'</span><span class="mono" style="font-size:11px;color:var(--text-3)">'+esc(s.url)+'</span><span class="mono" style="font-size:11px;color:var(--text-2)">IP: '+esc(s.publicIp||'')+'</span></div>';
+      h+='<button class="btn btn-sm" style="color:var(--danger);font-size:10px" onclick="deleteServer(\''+esc(s.name)+'\')">✕ Удалить</button>';
+      h+='</div>';
+      // OS credentials
+      h+='<div style="display:flex;gap:16px;flex-wrap:wrap;margin-bottom:8px">';
+      h+='<div style="flex:1;min-width:200px"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Доступ к ОС (SSH)</div>';
+      h+='<div style="display:flex;gap:6px">';
+      h+='<input class="form-input" placeholder="root" value="'+esc(s.osLogin||'')+'" id="osLogin_'+esc(s.name)+'" style="width:120px;font-size:12px">';
+      h+='<input class="form-input" placeholder="пароль" value="'+esc(s.osPassword||'')+'" id="osPass_'+esc(s.name)+'" style="width:160px;font-size:12px">';
+      h+='</div></div>';
+      // Hardware
+      h+='<div style="flex:2;min-width:300px"><div style="font-size:10px;color:var(--text-3);margin-bottom:3px;text-transform:uppercase;letter-spacing:.5px">Характеристики оборудования</div>';
+      h+='<input class="form-input" placeholder="CPU, RAM, Disk, OS..." value="'+esc(s.hardware||'')+'" id="hw_'+esc(s.name)+'" style="width:100%;font-size:12px">';
+      h+='</div>';
+      h+='</div>';
+      h+='<button class="btn btn-sm" onclick="saveServerMeta(\''+esc(s.name)+'\')" style="font-size:11px;padding:3px 12px">💾 Сохранить</button>';
+      h+='<span id="srvSaveStatus_'+esc(s.name)+'" style="font-size:11px;margin-left:8px"></span>';
+      h+='</div>';
     });
-    h+='</tbody></table>';
     el.innerHTML=h;
   }).catch(function(){})
+}
+function saveServerMeta(name){
+  var osLogin=document.getElementById('osLogin_'+name).value;
+  var osPass=document.getElementById('osPass_'+name).value;
+  var hw=document.getElementById('hw_'+name).value;
+  var st=document.getElementById('srvSaveStatus_'+name);
+  st.textContent='Сохраняю...';st.style.color='var(--warning)';
+  fetch(API+'/api/admin/servers/'+name,{method:'PATCH',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({osLogin:osLogin,osPassword:osPass,hardware:hw})})
+  .then(function(r){return r.json()}).then(function(d){
+    if(d.ok){st.textContent='Сохранено';st.style.color='var(--success)';setTimeout(function(){st.textContent=''},2000)}
+    else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
+  }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'})
 }
 function addServer(){
   var name=document.getElementById('newSrvName').value.trim();

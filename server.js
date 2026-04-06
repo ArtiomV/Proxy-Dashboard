@@ -612,11 +612,29 @@ const _dtUpsert = db.prepare(`INSERT INTO daily_traffic (port_name, date, bytes_
   bytes_out = MAX(bytes_out, excluded.bytes_out)`);
 // daily_traffic never cleaned — needed for long-term trend charts
 // If hour already recorded for this port — skip (don't overwrite or accumulate)
-const _htUpsert = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+const _htUpsert = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(port_id, hour_start) DO UPDATE SET
   bytes_in  = CASE WHEN bytes_in  = 0 THEN excluded.bytes_in  ELSE bytes_in  END,
-  bytes_out = CASE WHEN bytes_out = 0 THEN excluded.bytes_out ELSE bytes_out END`);
+  bytes_out = CASE WHEN bytes_out = 0 THEN excluded.bytes_out ELSE bytes_out END,
+  uncertain = CASE WHEN excluded.uncertain > uncertain THEN excluded.uncertain ELSE uncertain END`);
+const _snapUpsert = db.prepare(`INSERT INTO hourly_snapshots
+  (port_id, day_in, day_out, month_in, month_out, yesterday_in, yesterday_out,
+   prev_month_in, prev_month_out, day_at_last_hour_start_in, day_at_last_hour_start_out,
+   mon_at_last_hour_start_in, mon_at_last_hour_start_out, pending, captured_at)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+  ON CONFLICT(port_id) DO UPDATE SET
+  day_in=excluded.day_in, day_out=excluded.day_out,
+  month_in=excluded.month_in, month_out=excluded.month_out,
+  yesterday_in=excluded.yesterday_in, yesterday_out=excluded.yesterday_out,
+  prev_month_in=excluded.prev_month_in, prev_month_out=excluded.prev_month_out,
+  day_at_last_hour_start_in=excluded.day_at_last_hour_start_in,
+  day_at_last_hour_start_out=excluded.day_at_last_hour_start_out,
+  mon_at_last_hour_start_in=excluded.mon_at_last_hour_start_in,
+  mon_at_last_hour_start_out=excluded.mon_at_last_hour_start_out,
+  pending=excluded.pending, captured_at=excluded.captured_at`);
+const _snapGet = db.prepare('SELECT * FROM hourly_snapshots WHERE port_id = ?');
+const _snapGetAll = db.prepare('SELECT * FROM hourly_snapshots');
 const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
 const _metaCleanup = db.prepare("DELETE FROM modem_meta WHERE updated_at < datetime('now', '-30 days')");
 const _rotLogCleanup = db.prepare("DELETE FROM rotation_log WHERE started_at < datetime('now', '-90 days')");
@@ -682,10 +700,7 @@ function saveDailyTraffic() {
 
 // Hourly traffic aggregation extracted to src/traffic/hourly.js
 // Init is called after _metaOpGet is defined (see below)
-function saveHourlySnapshots() { hourlyTraffic.saveHourlySnapshots(); }
-function loadHourlySnapshots() { hourlyTraffic.loadHourlySnapshots(); }
 async function aggregateHourlyTraffic() { return hourlyTraffic.aggregateHourlyTraffic(); }
-async function capturePreResetSnapshot() { return hourlyTraffic.capturePreResetSnapshot(); }
 
 // parseTrafficValue, getMoscow*, trafficBytesToGb extracted to src/utils/
 
@@ -1589,6 +1604,10 @@ hourlyTraffic.init({
   _htUpsert,
   _htCleanup,
   _metaOpGet,
+  _snapUpsert,
+  _snapGet,
+  _snapGetAll,
+  SERVER_COUNTRIES,
 });
 
 async function trackModems() {
@@ -3412,7 +3431,19 @@ app.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
 
 // API Servers management
 app.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
-  res.json({ servers: apiServers.map(s => ({ name: s.name, url: s.url, publicIp: s.publicIp, country: SERVER_COUNTRIES[s.name] || {} })) });
+  res.json({ servers: apiServers.map(s => ({ name: s.name, url: s.url, publicIp: s.publicIp, country: SERVER_COUNTRIES[s.name] || {}, osLogin: s.osLogin || '', osPassword: s.osPassword || '', hardware: s.hardware || '' })) });
+});
+
+app.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, (req, res) => {
+  const srv = apiServers.find(s => s.name === req.params.name);
+  if (!srv) return res.status(404).json({ error: 'Server not found' });
+  const { osLogin, osPassword, hardware } = req.body;
+  if (osLogin !== undefined) srv.osLogin = osLogin;
+  if (osPassword !== undefined) srv.osPassword = osPassword;
+  if (hardware !== undefined) srv.hardware = hardware;
+  saveApiServersToDb();
+  auditLog(req.user.login, 'update_server', { name: req.params.name, ip: getClientIp(req) });
+  res.json({ ok: true });
 });
 
 app.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) => {
@@ -5967,9 +5998,7 @@ const httpServer = app.listen(PORT, () => {
   scheduleRepeating(7, 0, 'DailySync-07:00', syncYesterdayTraffic);
   scheduleRepeating(15, 0, 'DailySync-15:00', syncYesterdayTraffic);
 
-  // Pre-reset snapshot at 20:50 UTC (23:50 MSK) — captures month counters before ProxySmart resets them at 21:00 UTC
-  scheduleRepeating(20, 50, 'PreResetSnapshot', capturePreResetSnapshot);
-  scheduleRepeating(23, 50, 'PreResetSnapshot-2350', capturePreResetSnapshot); // Б1: second capture for UTC midnight reset
+  // Pre-reset snapshots removed — day-counter based detection handles resets automatically
 
   // If no cached top_hosts data, do initial aggregation
   if (!topHostsCache.updatedAt) {
@@ -6047,11 +6076,7 @@ const httpServer = app.listen(PORT, () => {
           try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch(e) {}
           const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
           logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${(check && check.cnt) || 0} rows)`);
-          // Б1: capture preReset snapshot right after aggregation of hour 20:xx UTC (= 23:xx MSK)
-          const utcH = new Date().getUTCHours();
-          if (utcH === 21) { // just finished aggregating 20:00-21:00 UTC
-            await capturePreResetSnapshot();
-          }
+          // Pre-reset capture removed — day-counter detection handles resets
         }).catch(e => {
           logger.error(`[HourlyAgg] Attempt ${attemptIdx + 1}/5 error: ${e.message}`);
           attemptIdx++;
