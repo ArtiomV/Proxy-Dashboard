@@ -322,6 +322,11 @@ async function aggregateHourlyTraffic() {
               logger.warn(`[HourlyAgg] uncertain: nick=${nick} day_delta=${(deltaDay/1048576).toFixed(1)}MB month_delta=${(deltaMon/1048576).toFixed(1)}MB discrepancy=${(discrepancy*100).toFixed(1)}%`);
               // Day counter is primary — always use day delta, just flag as uncertain
             }
+          } else if ((deltaDay > UNCERTAIN_THRESHOLD && deltaMon === 0) || (deltaMon > UNCERTAIN_THRESHOLD && deltaDay === 0)) {
+            // One counter has significant traffic but the other shows zero — counter anomaly
+            uncertain = 2;
+            uncertainCount++;
+            logger.warn(`[HourlyAgg] uncertain (counter mismatch): nick=${nick} day_delta=${(deltaDay/1048576).toFixed(1)}MB month_delta=${(deltaMon/1048576).toFixed(1)}MB`);
           }
 
           // Sanity cap

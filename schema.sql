@@ -240,6 +240,8 @@ CREATE TABLE IF NOT EXISTS traffic_hourly (
   hour_start  TEXT NOT NULL,     -- '2026-03-29 14:00'
   bytes_in    INTEGER DEFAULT 0,
   bytes_out   INTEGER DEFAULT 0,
+  uncertain   INTEGER NOT NULL DEFAULT 0,
+  corrected   INTEGER DEFAULT 0,
   UNIQUE(port_id, hour_start)
 );
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_hour ON traffic_hourly(hour_start);
@@ -264,6 +266,43 @@ CREATE INDEX IF NOT EXISTS idx_ledger_client_date ON billing_ledger(client_id, d
 CREATE INDEX IF NOT EXISTS idx_bank_matched ON bank_payments(matched_client_id);
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_operator ON traffic_hourly(operator, hour_start);
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_client ON traffic_hourly(client_name, hour_start);
+
+-- Hourly snapshots (bandwidth counter baselines for delta calculation)
+CREATE TABLE IF NOT EXISTS hourly_snapshots (
+  port_id                    TEXT PRIMARY KEY,
+  day_in                     INTEGER NOT NULL DEFAULT 0,
+  day_out                    INTEGER NOT NULL DEFAULT 0,
+  month_in                   INTEGER NOT NULL DEFAULT 0,
+  month_out                  INTEGER NOT NULL DEFAULT 0,
+  yesterday_in               INTEGER NOT NULL DEFAULT 0,
+  yesterday_out              INTEGER NOT NULL DEFAULT 0,
+  prev_month_in              INTEGER NOT NULL DEFAULT 0,
+  prev_month_out             INTEGER NOT NULL DEFAULT 0,
+  day_at_last_hour_start_in  INTEGER NOT NULL DEFAULT 0,
+  day_at_last_hour_start_out INTEGER NOT NULL DEFAULT 0,
+  mon_at_last_hour_start_in  INTEGER NOT NULL DEFAULT 0,
+  mon_at_last_hour_start_out INTEGER NOT NULL DEFAULT 0,
+  pending                    INTEGER NOT NULL DEFAULT 0,
+  captured_at                TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+-- Proxy latency checks
+CREATE TABLE IF NOT EXISTS proxy_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_name TEXT NOT NULL,
+  nick TEXT NOT NULL,
+  client_name TEXT NOT NULL DEFAULT '',
+  operator TEXT NOT NULL DEFAULT '',
+  checked_at TEXT NOT NULL,
+  connect_ms INTEGER,
+  total_ms INTEGER,
+  status_code INTEGER,
+  error TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pc_nick ON proxy_checks(nick);
+CREATE INDEX IF NOT EXISTS idx_pc_checked ON proxy_checks(checked_at);
+CREATE INDEX IF NOT EXISTS idx_pc_operator ON proxy_checks(operator);
 
 -- Migrations tracking
 CREATE TABLE IF NOT EXISTS _migrations (

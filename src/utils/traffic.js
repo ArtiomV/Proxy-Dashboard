@@ -8,7 +8,7 @@ function parseTrafficValue(val) {
   if (!val || val === '0 B') return 0;
   if (typeof val === 'number') return val;
   const str = String(val).trim();
-  const match = str.match(/^([\d.]+)\s*(B|KB|MB|GB|TB)?$/i);
+  const match = str.match(/^(\d+(?:\.\d+)?)\s*(B|KB|MB|GB|TB)?$/i);
   if (!match) return 0;
   const num = parseFloat(match[1]);
   const unit = (match[2] || 'B').toUpperCase();
@@ -35,7 +35,7 @@ function normalizeOperator(rawOp, isRO) {
     'moldtelecom moldtelecom': 'Moldtelecom',
     'orange': isRO ? 'Orange RO' : 'Orange MD',
     'orange ro': 'Orange RO',
-    'orange md': isRO ? 'Orange RO' : 'Orange MD',
+    'orange md': 'Orange MD',
     'vodafone ro': 'Vodafone RO',
     'vodafone': 'Vodafone RO'
   };

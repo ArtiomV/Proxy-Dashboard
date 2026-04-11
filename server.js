@@ -21,7 +21,7 @@ const proxySmart = require('./src/api/proxy-smart');
 const hourlyTraffic = require('./src/traffic/hourly');
 const { escHtml } = require('./src/utils/html');
 const { buildDocHtml: _buildDocHtml } = require('./src/documents/generator');
-const { safeWriteFile: _safeWriteFile } = require('./src/utils/files');
+const { safeWriteFile: _safeWriteFile, _fileLocks } = require('./src/utils/files');
 const { decodeJwtPayload, decodeJwtHeader, fetchTochkaJwks, jwkToPem, verifyJwtSignature } = require('./src/tochka/jwt');
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
 const billing = require('./src/billing/atomic');
@@ -116,6 +116,7 @@ const dbStmts = {
      dismissed, source, tochka_payment_id, received_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   findBankPaymentByPaymentId: db.prepare('SELECT * FROM bank_payments WHERE payment_id = ? AND auto_credit = 1 LIMIT 1'),
+  findBankPaymentByPaymentIdAny: db.prepare('SELECT id FROM bank_payments WHERE payment_id = ? LIMIT 1'),
   findBankPaymentByTochkaId: db.prepare('SELECT id FROM bank_payments WHERE tochka_payment_id = ? LIMIT 1'),
   updateBankPaymentMatch: db.prepare('UPDATE bank_payments SET matched = ?, matched_client_id = ?, matched_client_name = ?, auto_credit = ? WHERE id = ?'),
   dismissBankPayment: db.prepare('UPDATE bank_payments SET dismissed = 1 WHERE id = ?'),
@@ -568,6 +569,14 @@ function bankPaymentFromRow(row) {
 }
 
 function insertBankPaymentToDb(bp) {
+  // Prevent duplicate payments by payment_id
+  if (bp.paymentId) {
+    const existing = dbStmts.findBankPaymentByPaymentIdAny.get(bp.paymentId);
+    if (existing) {
+      logger.warn(`[BankPayment] Duplicate payment_id ${bp.paymentId}, skipping insert`);
+      return false;
+    }
+  }
   dbStmts.insertBankPayment.run(
     bp.id, bp.webhookType || '', bp.payerInn || '', bp.payerName || '',
     bp.amount || 0, bp.purpose || '', bp.paymentId || '', bp.date || '',
@@ -576,6 +585,7 @@ function insertBankPaymentToDb(bp) {
     bp.dismissed ? 1 : 0, bp.source || '', bp.tochkaPaymentId || '',
     bp.receivedAt || new Date().toISOString()
   );
+  return true;
 }
 
 function getAllBankPayments() {
@@ -585,8 +595,8 @@ function getAllBankPayments() {
 // Extracted to src/tochka/jwt.js — decodeJwtPayload, decodeJwtHeader, fetchTochkaJwks, jwkToPem, verifyJwtSignature
 
 // Track last act/bill generation month to avoid duplicates
-let lastActGenerationMonth = '';
-let lastBillGenerationMonth = '';
+let lastActGenerationMonth = (db.prepare("SELECT value FROM kv_store WHERE key = 'last_act_generation_month'").get() || {}).value || '';
+let lastBillGenerationMonth = (db.prepare("SELECT value FROM kv_store WHERE key = 'last_bill_generation_month'").get() || {}).value || '';
 
 // Extracted to src/tochka/documents.js — buildTochkaActBody, buildActItemsFromLedger, buildTochkaBillBody, calculateMonthlyBillAmount, MONTH_NAMES_RU
 function buildActItemsFromLedger(client, period) {
@@ -730,7 +740,7 @@ function refreshPortKeyMapping(allServerResults) {
 
 // Last billing run metadata (for /health and retry logic)
 let lastBillingRunSummary = null;
-let lastReconciliationMonth = '';
+let lastReconciliationMonth = (db.prepare("SELECT value FROM kv_store WHERE key = 'last_reconciliation_month'").get() || {}).value || '';
 
 const KNOWN_MODEMS_FILE = path.join(__dirname, 'known_modems.json');
 let knownModems = {}; // { serverName: { portId: { portName, imei, nick, model, portInfo, lastSeen } } }
@@ -1515,6 +1525,10 @@ try {
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} IP tracking entries`);
 } catch (e) { logger.error('Failed to load ip_tracking from SQLite:', e.message); }
 
+// Auto-recovery: track offline modems for automatic USB reset
+// { 'S1_IMEI': { offlineSince: timestamp, attempts: 0, lastAttempt: timestamp } }
+const autoRecovery = {};
+
 // Load uptime tracking from SQLite
 let uptimeTracking = {};
 try {
@@ -1582,17 +1596,18 @@ function saveIpHistory() {
 function recordIpChange(key, oldIp, newIp, timestamp) {
   if (!ipHistory[key]) ipHistory[key] = [];
   const entries = ipHistory[key];
+  const ts = typeof timestamp === 'number' ? new Date(timestamp).toISOString() : timestamp;
   // Close previous entry
   if (entries.length > 0) {
     const last = entries[entries.length - 1];
     if (!last.to) {
-      last.to = timestamp;
-      if (last.db_id) _ihUpdateEnd.run(timestamp, last.db_id);
+      last.to = ts;
+      if (last.db_id) _ihUpdateEnd.run(ts, last.db_id);
     }
   }
   // Add new entry with direct INSERT
-  const result = _ihInsert.run(key, newIp, timestamp, '');
-  entries.push({ db_id: result.lastInsertRowid, ip: newIp, from: timestamp, to: null });
+  const result = _ihInsert.run(key, newIp, ts, '');
+  entries.push({ db_id: result.lastInsertRowid, ip: newIp, from: ts, to: null });
   // Trim to MAX_IP_HISTORY
   if (entries.length > MAX_IP_HISTORY) {
     const toDelete = entries.slice(0, entries.length - MAX_IP_HISTORY);
@@ -1627,6 +1642,7 @@ hourlyTraffic.init({
 async function trackModems() {
   const now = Date.now();
   let totalTracked = 0;
+  const seenRecoveryKeys = new Set();
 
   for (const server of apiServers) {
     let statusArr;
@@ -1639,6 +1655,7 @@ async function trackModems() {
       const todayBucket = new Date().toLocaleDateString('en-CA');
       for (const k of Object.keys(uptimeTracking)) {
         if (k.startsWith(server.name + '_')) {
+          seenRecoveryKeys.add(k); // preserve autoRecovery state for unreachable servers
           if (!uptimeTracking[k].daily) uptimeTracking[k].daily = {};
           if (!uptimeTracking[k].daily[todayBucket]) uptimeTracking[k].daily[todayBucket] = { online: 0, total: 0 };
           uptimeTracking[k].total_checks++;
@@ -1716,8 +1733,54 @@ async function trackModems() {
         if (d < cutoffPrune) delete uptimeTracking[key].daily[d];
       }
 
+      // Auto-recovery: USB reset for offline modems
+      const recoveryKey = key; // prefix + imei
+      seenRecoveryKeys.add(recoveryKey);
+      const nick = m.modem_details?.NICK || imei;
+      if (isUp) {
+        if (autoRecovery[recoveryKey]) {
+          if (autoRecovery[recoveryKey].attempts > 0) {
+            logger.info(`[AutoRecovery] ${nick} back online after ${autoRecovery[recoveryKey].attempts} reset(s)`);
+          }
+          delete autoRecovery[recoveryKey];
+        }
+      } else {
+        if (!autoRecovery[recoveryKey]) {
+          autoRecovery[recoveryKey] = { offlineSince: now, attempts: 0, lastAttempt: 0 };
+        }
+        const rec = autoRecovery[recoveryKey];
+        const offlineSec = (now - rec.offlineSince) / 1000;
+        if (offlineSec >= 60 && rec.attempts < 3 && (now - rec.lastAttempt) >= 180000) {
+          rec.attempts++;
+          rec.lastAttempt = now;
+          logger.warn(`[AutoRecovery] USB reset #${rec.attempts}/3 for ${nick} (${server.name}), offline ${Math.round(offlineSec)}s`);
+          fetchApi(server, `/apix/usb_reset_modem_json?arg=${encodeURIComponent(nick)}`)
+            .catch(e => logger.error(`[AutoRecovery] USB reset failed for ${nick}: ${e.message}`));
+          if (rec.attempts >= 3) {
+            logger.warn(`[AutoRecovery] ${nick} exhausted 3 attempts, giving up`);
+          }
+        }
+      }
+
       totalTracked++;
     }
+  }
+
+  // Prune stale modem keys from uptimeTracking (modems removed or not seen in 7+ days)
+  const MAX_UPTIME_KEYS = 500;
+  const uptimeKeys = Object.keys(uptimeTracking);
+  if (uptimeKeys.length > MAX_UPTIME_KEYS) {
+    const now7d = new Date(Date.now() - 7 * 86400000).toLocaleDateString('en-CA');
+    for (const k of uptimeKeys) {
+      const days = Object.keys(uptimeTracking[k].daily || {});
+      const latest = days.length ? days.sort().pop() : '';
+      if (latest < now7d) { delete uptimeTracking[k]; }
+    }
+  }
+
+  // Prune autoRecovery keys for modems no longer in the system
+  for (const rk of Object.keys(autoRecovery)) {
+    if (!seenRecoveryKeys.has(rk)) delete autoRecovery[rk];
   }
 
   saveIpTracking();
@@ -1758,9 +1821,12 @@ function curlCheckProxy(proxyUrl, targetUrl) {
       }
       const parts = stdout.trim().split('|||');
       if (parts.length === 3) {
-        const connectMs = Math.round(parseFloat(parts[0]) * 1000) || null;
-        const totalMs = Math.round(parseFloat(parts[1]) * 1000) || null;
-        const statusCode = parseInt(parts[2]) || null;
+        const connectRaw = parseFloat(parts[0]);
+        const totalRaw = parseFloat(parts[1]);
+        const statusRaw = parseInt(parts[2]);
+        const connectMs = isNaN(connectRaw) ? null : Math.round(connectRaw * 1000);
+        const totalMs = isNaN(totalRaw) ? null : Math.round(totalRaw * 1000);
+        const statusCode = isNaN(statusRaw) ? null : statusRaw;
         const error = (statusCode && statusCode >= 400) ? `HTTP ${statusCode}` : null;
         resolve({ connect_ms: connectMs, total_ms: totalMs, status_code: statusCode, error });
       } else {
@@ -2207,6 +2273,13 @@ app.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
   try {
     const { imei, serverName } = req.body;
     if (!imei || !serverName) return res.status(400).json({ error: 'imei and serverName required' });
+    // Verify client owns this modem
+    const pnf = req.user.portNameFilter;
+    if (pnf !== '*') {
+      const results = await fetchAllServersDataCached();
+      const merged = mergeServerData(results, pnf);
+      if (!merged.ports[imei]) return res.status(403).json({ error: 'Modem not assigned to this client' });
+    }
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const result = await fetchApi(server, `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(imei)}`);
@@ -2242,6 +2315,12 @@ app.get('/api/client/rotation_log', authMiddleware, async (req, res) => {
   try {
     const { nick, serverName } = req.query;
     if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
+    // Verify client owns this modem
+    const pnf = req.user.portNameFilter;
+    if (pnf !== '*') {
+      const allowed = db.prepare("SELECT 1 FROM traffic_hourly WHERE nick = ? AND client_name = ? LIMIT 1").get(nick, pnf);
+      if (!allowed) return res.status(403).json({ error: 'Modem not assigned to this client' });
+    }
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     // Fetch from ProxySmart and sync to DB (same as admin)
@@ -2305,9 +2384,16 @@ app.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
   } catch (err) { res.status(502).json({ error: 'Failed to set rotation', details: err.message }); }
 });
 
-app.get('/api/client/ip_history', authMiddleware, (req, res) => {
+app.get('/api/client/ip_history', authMiddleware, async (req, res) => {
   const { key } = req.query;
   if (!key) return res.status(400).json({ error: 'key required' });
+  // Verify client owns this modem (key is IMEI)
+  const pnf = req.user.portNameFilter;
+  if (pnf !== '*') {
+    const results = await fetchAllServersDataCached();
+    const merged = mergeServerData(results, pnf);
+    if (!merged.ports[key]) return res.status(403).json({ error: 'Modem not assigned to this client' });
+  }
   res.json(ipHistory[key] || []);
 });
 
@@ -2641,7 +2727,8 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
       }
     }
     // Today's live (bw keys already prefixed in merged data: S1_portXXX)
-    const todayStr2 = new Date().toISOString().slice(0, 10);
+    const _nowLocal2 = new Date(Date.now() + 3 * 3600000);
+    const todayStr2 = _nowLocal2.toISOString().slice(0, 10);
     for (const data of results) {
       if (typeof data.bw !== 'object') continue;
       for (const [portId, b] of Object.entries(data.bw)) {
@@ -2749,7 +2836,8 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
     const matrix = dateList.map(() => new Array(24).fill(0));
 
     // Build SQL filter based on view type — all filtering is on per-modem columns
-    const tzStr = (mskOffset >= 0 ? '+' : '') + mskOffset + ' hours';
+    const tzHours = Math.round(Math.max(-12, Math.min(14, mskOffset)));
+    const tzStr = (tzHours >= 0 ? '+' : '') + tzHours + ' hours';
     let sql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes, MAX(uncertain) as corrected FROM traffic_hourly WHERE hour_start >= ?`;
     const params = [utcFetchStartShifted];
 
@@ -2779,9 +2867,10 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
     const rows = db.prepare(sql).all(...params);
     let hasData = false;
     const correctedCells = dateList.map(() => new Array(24).fill(false));
+    const dateIdx = new Map(dateList.map((d, i) => [d, i]));
     for (const r of rows) {
-      const di = dateList.indexOf(r.day);
-      if (di >= 0 && r.hour >= 0 && r.hour < 24) {
+      const di = dateIdx.get(r.day);
+      if (di !== undefined && r.hour >= 0 && r.hour < 24) {
         matrix[di][r.hour] = r.bytes / 1073741824;
         if (r.corrected) correctedCells[di][r.hour] = true;
         hasData = true;
@@ -2807,11 +2896,11 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
           opParams.push(...servers);
         }
       }
-      opSql += ' GROUP BY day, hour, operator ORDER BY day, hour';
+      opSql += ' GROUP BY day, hour, operator ORDER BY day, hour, operator';
       const opRows = db.prepare(opSql).all(...opParams);
       for (const r of opRows) {
-        const di = dateList.indexOf(r.day);
-        if (di >= 0 && r.hour >= 0 && r.hour < 24 && r.operator) {
+        const di = dateIdx.get(r.day);
+        if (di !== undefined && r.hour >= 0 && r.hour < 24 && r.operator) {
           operator_breakdown[di][r.hour][r.operator] = r.bytes / 1073741824;
         }
       }
@@ -2835,7 +2924,7 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
 });
 
 // Per-port heatmap for a specific modem (nick)
-app.get('/api/analytics/modem_heatmap', authMiddleware, async (req, res) => {
+app.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (req, res) => {
   const { nick, serverName } = req.query;
   if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
   const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
@@ -2855,14 +2944,16 @@ app.get('/api/analytics/modem_heatmap', authMiddleware, async (req, res) => {
     const ports = db.prepare("SELECT DISTINCT port_id, client_name FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ?").all(nick, serverName, utcStart);
 
     const result = {};
+    const dateIdx2 = new Map(dateList.map((d, i) => [d, i]));
     for (const p of ports) {
       const portLabel = p.client_name || p.port_id;
       const matrix = dateList.map(() => new Array(24).fill(0));
-      const tzStr2 = (mskOffset2 >= 0 ? '+' : '') + mskOffset2 + ' hours';
+      const tzH2 = Math.round(Math.max(-12, Math.min(14, mskOffset2)));
+      const tzStr2 = (tzH2 >= 0 ? '+' : '') + tzH2 + ' hours';
       const rows = db.prepare(`SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr2}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr2}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE port_id = ? AND hour_start >= ? GROUP BY day, hour`).all(p.port_id, utcStart);
       for (const r of rows) {
-        const di = dateList.indexOf(r.day);
-        if (di >= 0 && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
+        const di = dateIdx2.get(r.day);
+        if (di !== undefined && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
       }
       result[portLabel] = { portId: p.port_id, clientName: p.client_name, matrix };
     }
@@ -3091,12 +3182,15 @@ app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, r
     const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
     const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
 
+    const mskOffset = getTzOffset('Europe/Moscow');
+    const tzHours2 = Math.round(Math.max(-12, Math.min(14, mskOffset)));
+    const tzStr = (tzHours2 >= 0 ? '+' : '') + tzHours2 + ' hours';
     const now2 = new Date();
     const since = new Date(now2.getTime() - days * 86400000).toISOString();
 
-    let sql = `SELECT date(checked_at) as day, total_ms FROM proxy_checks WHERE checked_at >= ? AND total_ms IS NOT NULL AND error IS NULL`;
-    let errSql = `SELECT date(checked_at) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND error IS NOT NULL`;
-    let totalSql = `SELECT date(checked_at) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ?`;
+    let sql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, total_ms FROM proxy_checks WHERE checked_at >= ? AND total_ms IS NOT NULL AND error IS NULL`;
+    let errSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND error IS NOT NULL`;
+    let totalSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ?`;
     const params = [since];
     const errParams = [since];
     const totalParams = [since];
@@ -3153,10 +3247,11 @@ app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, r
     const totalMap = {};
     for (const r of totalRows) totalMap[r.day] = r.cnt;
 
-    // Build date list
+    // Build date list in Moscow time (consistent with heatmap)
+    const mskNow = new Date(now2.getTime() + mskOffset * 3600 * 1000);
     const dateList = [];
     for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(now2.getTime() - i * 86400000);
+      const d = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate() - i));
       dateList.push(d.toISOString().slice(0, 10));
     }
 
@@ -3170,10 +3265,12 @@ app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, r
         result.avg_ms.push(null);
         result.p95_ms.push(null);
       } else {
-        const sorted = vals; // already sorted by SQL ORDER BY
-        result.median_ms.push(sorted[Math.floor(sorted.length / 2)]);
+        const sorted = vals.slice().sort((a, b) => a - b);
+        const mid = Math.floor(sorted.length / 2);
+        const median = sorted.length % 2 === 0 ? Math.round((sorted[mid - 1] + sorted[mid]) / 2) : sorted[mid];
+        result.median_ms.push(median);
         result.avg_ms.push(Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length));
-        result.p95_ms.push(sorted[Math.floor(sorted.length * 0.95)]);
+        result.p95_ms.push(sorted[Math.min(Math.ceil(sorted.length * 0.95) - 1, sorted.length - 1)]);
       }
       result.error_pct.push(total > 0 ? Math.round(errs / total * 100) : null);
       result.total_checks.push(total);
@@ -3535,7 +3632,7 @@ app.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlew
 
   // Require amount confirmation to prevent race condition with index shifts
   const expectedAmount = parseFloat(req.query.amount || req.body?.amount);
-  if (!expectedAmount || Math.abs(expectedAmount - deletedAmount) > 0.01) {
+  if (isNaN(expectedAmount) || Math.abs(Math.round(expectedAmount * 100) - Math.round(deletedAmount * 100)) > 0) {
     return res.status(409).json({ error: 'Payment amount mismatch — list may have changed, please refresh' });
   }
   client.payments.splice(payIdx, 1);
@@ -3654,7 +3751,7 @@ app.get('/api/admin/billing/reconciliation', authMiddleware, adminMiddleware, as
     try {
       const cachedResults = await fetchAllServersDataCached();
       refreshPortKeyMapping(cachedResults);
-    } catch (e) { /* best effort */ }
+    } catch (e) { logger.warn('[Reconciliation] Failed to refresh port mapping:', e.message); }
   }
 
   const results = [];
@@ -3733,11 +3830,15 @@ app.post('/api/admin/clients/:id/document', authMiddleware, adminMiddleware, asy
   const docId = generateId();
   const safeExt = ext.replace(/[^a-zA-Z0-9]/g, '');
   const fileName = `${docId}.${safeExt}`;
-  const filePath = path.join(DOCUMENTS_DIR, fileName);
+  const filePath = path.resolve(DOCUMENTS_DIR, fileName);
   // Prevent path traversal
-  if (!filePath.startsWith(DOCUMENTS_DIR)) return res.status(400).json({ error: 'Invalid file path' });
+  if (!filePath.startsWith(path.resolve(DOCUMENTS_DIR) + path.sep)) return res.status(400).json({ error: 'Invalid file path' });
 
-  await fsPromises.writeFile(filePath, Buffer.from(fileBase64, 'base64'));
+  try {
+    await fsPromises.writeFile(filePath, Buffer.from(fileBase64, 'base64'));
+  } catch (err) {
+    return res.status(500).json({ error: 'Failed to save file', details: err.message });
+  }
 
   if (!client.documents) client.documents = [];
   client.documents.push({
@@ -3886,20 +3987,22 @@ app.get('/api/admin/crm_reminders', authMiddleware, adminMiddleware, async (req,
   const dbUrl = process.env.CRM_DB_URL;
   const workspace = process.env.CRM_WORKSPACE;
   if (!dbUrl || !workspace || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(workspace)) return res.json({ reminders: [] });
+  let pool;
   try {
     const { Pool } = require('pg');
-    const pool = new Pool({ connectionString: dbUrl, max: 1, idleTimeoutMillis: 5000 });
+    pool = new Pool({ connectionString: dbUrl, max: 1, idleTimeoutMillis: 5000 });
     const result = await pool.query(
       `SELECT id, name, "reminderDate", stage, amount, "closeDate"
        FROM ${workspace}.opportunity
        WHERE "reminderDate" IS NOT NULL AND "reminderDate" <= NOW() AND "deletedAt" IS NULL
        ORDER BY "reminderDate" ASC LIMIT 50`
     );
-    await pool.end();
     res.json({ reminders: result.rows });
   } catch (e) {
     logger.error('[CRM] Reminders query error:', e.message);
     res.json({ reminders: [], error: e.message });
+  } finally {
+    if (pool) pool.end().catch(() => {});
   }
 });
 
@@ -3930,7 +4033,10 @@ app.get('/api/admin/crm_token', authMiddleware, adminMiddleware, async (req, res
         timeout: 10000
       }, (resp) => {
         let d = ''; resp.on('data', c => d += c);
-        resp.on('end', () => { try { resolve(JSON.parse(d)); } catch (e) { reject(new Error('CRM вернул не-JSON ответ (возможно сервер перезагружается)')); } });
+        resp.on('end', () => {
+          if (resp.statusCode >= 400) { reject(new Error(`CRM HTTP ${resp.statusCode}: ${d.slice(0, 200)}`)); return; }
+          try { resolve(JSON.parse(d)); } catch (e) { reject(new Error('CRM вернул не-JSON ответ (возможно сервер перезагружается)')); }
+        });
       });
       r.on('error', reject);
       r.on('timeout', () => { r.destroy(); reject(new Error('CRM timeout')); });
@@ -3956,8 +4062,8 @@ async function _modemAction(req, res, paramName, apiPathFn, errorLabel) {
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const result = await fetchApi(server, apiPathFn(paramVal));
-    res.json({ ok: true, result });
-  } catch (err) { res.status(502).json({ error: `${errorLabel} failed`, details: err.message }); }
+    return res.json({ ok: true, result });
+  } catch (err) { return res.status(502).json({ error: `${errorLabel} failed`, details: err.message }); }
 }
 
 app.post('/api/admin/reset_ip', authMiddleware, adminMiddleware, (req, res) =>
@@ -4135,43 +4241,6 @@ app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req,
   }
 });
 
-app.get('/api/admin/external_proxies', authMiddleware, adminMiddleware, (req, res) => {
-  const rows = db.prepare('SELECT * FROM external_proxies ORDER BY created_at DESC').all();
-  res.json(rows);
-});
-
-app.post('/api/admin/external_proxies', authMiddleware, adminMiddleware, (req, res) => {
-  const { client_id, label, protocol, host, port, login, password, change_ip_url, note, valid_until, billing_type, price, traffic_used_gb } = req.body;
-  if (!client_id || !host || !port) return res.status(400).json({ error: 'client_id, host, port required' });
-  const id = crypto.randomBytes(8).toString('hex');
-  db.prepare('INSERT INTO external_proxies (id, client_id, label, protocol, host, port, login, password, change_ip_url, note, valid_until, billing_type, price, traffic_used_gb) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)')
-    .run(id, client_id, label || '', protocol || 'HTTP', host, parseInt(port), login || '', password || '', change_ip_url || '', note || '', valid_until || null, billing_type || 'monthly', parseFloat(price) || 0, parseFloat(traffic_used_gb) || 0);
-  auditLog(req.user.login, 'add_external_proxy', { id, client_id, host, port, ip: getClientIp(req) });
-  res.json({ ok: true, id });
-});
-
-app.put('/api/admin/external_proxies/:id', authMiddleware, adminMiddleware, (req, res) => {
-  const { label, protocol, host, port, login, password, change_ip_url, note, valid_until, billing_type, price, traffic_used_gb } = req.body;
-  const existing = db.prepare('SELECT id FROM external_proxies WHERE id = ?').get(req.params.id);
-  if (!existing) return res.status(404).json({ error: 'Not found' });
-  db.prepare('UPDATE external_proxies SET label=?, protocol=?, host=?, port=?, login=?, password=?, change_ip_url=?, note=?, valid_until=?, billing_type=?, price=?, traffic_used_gb=? WHERE id=?')
-    .run(label || '', protocol || 'HTTP', host || '', parseInt(port) || 0, login || '', password || '', change_ip_url || '', note || '', valid_until || null, billing_type || 'monthly', parseFloat(price) || 0, parseFloat(traffic_used_gb) || 0, req.params.id);
-  res.json({ ok: true });
-});
-
-app.delete('/api/admin/external_proxies/:id', authMiddleware, adminMiddleware, (req, res) => {
-  db.prepare('DELETE FROM external_proxies WHERE id = ?').run(req.params.id);
-  res.json({ ok: true });
-});
-
-// Client: view own external proxies
-app.get('/api/client/external_proxies', authMiddleware, (req, res) => {
-  const clientInfo = clientByLogin.get(req.user.login);
-  if (!clientInfo) return res.json([]);
-  const rows = db.prepare('SELECT id, label, protocol, host, port, login, password, change_ip_url, note, billing_type, price, traffic_used_gb FROM external_proxies WHERE client_id = ? ORDER BY created_at DESC').all(clientInfo.id);
-  res.json(rows);
-});
-
 app.get('/api/admin/available_modems', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const results = await fetchAllServersDataCached();
@@ -4233,7 +4302,7 @@ function syncRotationLog(serverName, nick, entries) {
       const oldIp = e.old_ip || e['Old IPv4'] || e.OldIPv4 || e.oldIp || '';
       const newIp = e.new_ip || e['New IPv4'] || e.NewIPv4 || e.newIp || '';
       if (!start) continue;
-      try { _rlUpsert.run(serverName, nick, oldIp, newIp, start, end, took, attempt); inserted++; } catch(e) { /* dup */ }
+      try { _rlUpsert.run(serverName, nick, oldIp, newIp, start, end, took, attempt); inserted++; } catch(dupErr) { if (!dupErr.message.includes('UNIQUE')) logger.error('[SyncRotationLog] Insert error:', dupErr.message); }
     }
   });
   insert(entries);
@@ -4795,9 +4864,10 @@ app.post('/api/tools/check_proxy', checkProxyLimiter, authMiddleware, async (req
       await new Promise((resolve, reject) => {
         const sock = new net.Socket();
         sock.setTimeout(5000);
-        sock.connect(parseInt(proxy.port), proxy.ip, () => { sock.destroy(); resolve(true); });
-        sock.on('error', (err) => { sock.destroy(); reject(err); });
-        sock.on('timeout', () => { sock.destroy(); reject(new Error('Timeout')); });
+        sock.once('connect', () => { sock.destroy(); resolve(true); });
+        sock.once('error', (err) => { sock.removeAllListeners(); sock.destroy(); reject(err); });
+        sock.once('timeout', () => { sock.removeAllListeners(); sock.destroy(); reject(new Error('Timeout')); });
+        try { sock.connect(parseInt(proxy.port), proxy.ip); } catch (e) { sock.destroy(); reject(e); }
       });
       return { ip: proxy.ip, port: proxy.port, working: true, responseTime: Date.now() - start, detectedIp: '(порт открыт, IP не определён)', status: 0 };
     } catch (e) {
@@ -4967,14 +5037,24 @@ function scheduleRepeating(hour, minute, label, fn, isSpeedtest) {
 // Single flow: fetch → save daily_traffic → charge → retry on failure
 async function runDailyBilling(retryClientIds) {
   const isRetry = Array.isArray(retryClientIds) && retryClientIds.length > 0;
-  // Guard: prevent double billing for same date
+  // Guard: prevent double billing for same date (atomic check)
   const yesterdayCheck = getMoscowYesterday();
-  if (!isRetry) {
-    const existingCharge = db.prepare("SELECT id FROM billing_ledger WHERE date = ? AND type = 'charge' LIMIT 1").get(yesterdayCheck);
-    if (existingCharge) {
-      logger.warn(`[Billing] Already billed for ${yesterdayCheck}, skipping to prevent double charge`);
-      return;
+  const skipResult = db.transaction(() => {
+    if (!isRetry) {
+      const existingCharge = db.prepare("SELECT id FROM billing_ledger WHERE date = ? AND type = 'charge' LIMIT 1").get(yesterdayCheck);
+      if (existingCharge) return { skip: true, reason: `Already billed for ${yesterdayCheck}` };
+    } else {
+      const chargedIds = db.prepare("SELECT DISTINCT client_id FROM billing_ledger WHERE date = ? AND type = 'charge'").all(yesterdayCheck).map(r => r.client_id);
+      if (chargedIds.length > 0) {
+        retryClientIds = retryClientIds.filter(id => !chargedIds.includes(id));
+        if (retryClientIds.length === 0) return { skip: true, reason: 'Retry: all clients already billed' };
+      }
     }
+    return { skip: false };
+  })();
+  if (skipResult.skip) {
+    logger.warn(`[Billing] ${skipResult.reason}, skipping`);
+    return;
   }
   logger.info(`[Billing] Starting ${isRetry ? 'RETRY' : 'daily'} billing run...`);
 
@@ -5205,6 +5285,7 @@ async function runMonthlyReconciliation() {
   }
 
   lastReconciliationMonth = prevMonthStr;
+  db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_reconciliation_month', ?)").run(prevMonthStr);
   saveClients(clients);
   logger.info(`[MonthlyRecon] Complete: ${corrections} correction(s)`);
 }
@@ -5484,51 +5565,51 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
         bankPayment.matched = true;
         bankPayment.matchedClientId = matchedClient.id;
         bankPayment.matchedClientName = matchedClient.name;
+        bankPayment.autoCredit = true;
 
-        
-        {
-          // Add payment record
-          if (!matchedClient.payments) matchedClient.payments = [];
-          matchedClient.payments.push({
-            amount,
-            date: paymentDate,
-            note: `Банк Точка: ${payerName} — ${purpose}`.slice(0, 200),
-            createdAt: new Date().toISOString(),
-            source: 'tochka_webhook',
-            paymentId
-          });
+        // Insert bank payment BEFORE crediting to prevent double-credit on crash/restart
+        insertBankPaymentToDb(bankPayment);
 
-          const { balanceBefore, balanceAfter } = atomicCredit(matchedClient.id, amount, {
-            type: 'bank_payment',
-            date: paymentDate,
-            timestamp: new Date().toISOString(),
-            amount,
-            currency: 'RUB',
-            note: `Банк Точка (ИНН: ${payerInn}): ${purpose}`.slice(0, 300),
-            source: 'tochka_webhook',
-            paymentId
-          });
+        // Add payment record
+        if (!matchedClient.payments) matchedClient.payments = [];
+        matchedClient.payments.push({
+          amount,
+          date: paymentDate,
+          note: `Банк Точка: ${payerName} — ${purpose}`.slice(0, 200),
+          createdAt: new Date().toISOString(),
+          source: 'tochka_webhook',
+          paymentId
+        });
 
-          
-          if (matchedClient.referred_by) {
-            const referrer = clientById.get(matchedClient.referred_by);
-            if (referrer) {
-              const commission = Math.round(amount * 0.15 * 100) / 100;
-              referrer.referral_balance = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
-              _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
-            }
+        atomicCredit(matchedClient.id, amount, {
+          type: 'bank_payment',
+          date: paymentDate,
+          timestamp: new Date().toISOString(),
+          amount,
+          currency: 'RUB',
+          note: `Банк Точка (ИНН: ${payerInn}): ${purpose}`.slice(0, 300),
+          source: 'tochka_webhook',
+          paymentId
+        });
+
+        if (matchedClient.referred_by) {
+          const referrer = clientById.get(matchedClient.referred_by);
+          if (referrer) {
+            const commission = Math.round(amount * 0.15 * 100) / 100;
+            referrer.referral_balance = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
+            _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
           }
-
-          bankPayment.autoCredit = true;
-          saveClients(clients);
-          logger.info(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
         }
+
+        saveClients(clients);
+        logger.info(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
       } else {
+        insertBankPaymentToDb(bankPayment);
         logger.info(`[Tochka Webhook] Unmatched payment: INN=${payerInn}, amount=${amount}, purpose=${purpose}`);
       }
+    } else {
+      insertBankPaymentToDb(bankPayment);
     }
-
-    insertBankPaymentToDb(bankPayment);
 
     res.status(200).json({ ok: true, processed: true, matched: bankPayment.matched });
   } catch (err) {
@@ -6346,8 +6427,7 @@ app.get('/api/client/bills/:billId/pdf', authMiddleware, async (req, res) => {
 });
 
 async function autoGenerateMonthlyActs() {
-  const now = new Date();
-  const moscowDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+  const moscowDate = getMoscowNow();
   const day = moscowDate.getDate();
   const hour = moscowDate.getHours();
 
@@ -6419,11 +6499,11 @@ async function autoGenerateMonthlyActs() {
     logger.info(`[Tochka AutoActs] Generated ${generated} acts for ${period}`);
   }
   lastActGenerationMonth = period;
+  db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_act_generation_month', ?)").run(period);
 }
 
 async function autoGenerateMonthlyBills() {
-  const now = new Date();
-  const moscowDate = new Date(now.toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
+  const moscowDate = getMoscowNow();
   const day = moscowDate.getDate();
   const hour = moscowDate.getHours();
 
@@ -6498,12 +6578,13 @@ async function autoGenerateMonthlyBills() {
     logger.info(`[Tochka AutoBills] Generated ${generated} bills for ${currentPeriod}`);
   }
   lastBillGenerationMonth = currentPeriod;
+  db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_bill_generation_month', ?)").run(currentPeriod);
 }
 
 app.use('/api', (req, res) => {
   res.status(404).json({
     success: false,
-    error: `Cannot ${req.method} ${req.path}`
+    error: 'Endpoint not found'
   });
 });
 
@@ -6726,9 +6807,9 @@ async function checkCrmPaymentConfirmations() {
 }
 
 // Run CRM payment check every 10 minutes
-checkCrmPaymentConfirmations().catch(() => {});
+checkCrmPaymentConfirmations().catch(e => { if (e.code !== 'MODULE_NOT_FOUND') logger.error('[CRM] Initial check error:', e.message); });
 _intervals.push(setInterval(() => {
-  checkCrmPaymentConfirmations().catch(() => {});
+  checkCrmPaymentConfirmations().catch(e => { if (e.code !== 'MODULE_NOT_FOUND') logger.error('[CRM] Interval error:', e.message); });
 }, 10 * 60 * 1000));
 
 function gracefulShutdown(signal) {
@@ -6736,6 +6817,7 @@ function gracefulShutdown(signal) {
 
   _hourlyAggStopped = true;
   if (_hourlyLoopTimeout) clearTimeout(_hourlyLoopTimeout);
+  if (_proxyCheckInterval) clearInterval(_proxyCheckInterval);
   for (const iv of _intervals) clearInterval(iv);
   _intervals.length = 0;
   for (const t of speedtestTimers.concat(_cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }

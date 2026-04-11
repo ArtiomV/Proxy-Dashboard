@@ -28,4 +28,4 @@ function safeWriteFile(filePath, data, logger) {
   return next;
 }
 
-module.exports = { safeWriteFile };
+module.exports = { safeWriteFile, _fileLocks };
