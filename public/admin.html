@@ -293,6 +293,7 @@
     <div class="tab-sidebar" style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
       <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">НАСТРОЙКИ</div>
       <div class="settings-nav-item active" id="snav_audit" onclick="switchSettingsSection('audit')">📋 Логи</div>
+      <div class="settings-nav-item" id="snav_syslog" onclick="switchSettingsSection('syslog')">🔧 Системный лог</div>
       <div class="settings-nav-item" id="snav_servers" onclick="switchSettingsSection('servers')">🖥 Серверы</div>
       <div class="settings-nav-item" id="snav_bank" onclick="switchSettingsSection('bank')">🏦 Банк</div>
       <div class="settings-nav-item" id="snav_data" onclick="switchSettingsSection('data')">📦 Прочее</div>
@@ -312,6 +313,44 @@
             <button class="btn btn-sm audit-filter-btn" data-f="client" onclick="setAuditFilter('client')" style="font-size:11px">👤 Клиенты</button>
           </div>
           <div id="auditLogTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Нажмите «Обновить» для загрузки</div></div>
+        </div>
+      </div>
+      <!-- Системный лог -->
+      <div id="settingsSection_syslog" class="settings-section" style="display:none">
+        <div class="analytics-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <h3 style="margin:0">Системный лог</h3>
+            <div style="display:flex;gap:6px;align-items:center">
+              <label style="font-size:11px;color:var(--text-2)"><input type="checkbox" id="syslogAutoRefresh" checked onchange="toggleSyslogAutoRefresh()"> Авто</label>
+              <button class="btn btn-sm" onclick="loadSystemLog()">Обновить</button>
+            </div>
+          </div>
+          <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+            <select id="syslogCategory" onchange="loadSystemLog()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2)">
+              <option value="">Все категории</option>
+              <option value="modem">Модемы</option>
+              <option value="recovery">Восстановление</option>
+              <option value="speedtest">Speedtest</option>
+              <option value="proxy_check">Proxy Check</option>
+              <option value="rotation">Ротация</option>
+              <option value="billing">Биллинг</option>
+              <option value="traffic">Трафик</option>
+              <option value="system">Система</option>
+            </select>
+            <select id="syslogLevel" onchange="loadSystemLog()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2)">
+              <option value="">Все уровни</option>
+              <option value="info">info</option>
+              <option value="warn">warn</option>
+              <option value="error">error</option>
+            </select>
+            <select id="syslogPeriod" onchange="loadSystemLog()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2)">
+              <option value="1">1 день</option>
+              <option value="3">3 дня</option>
+              <option value="7" selected>7 дней</option>
+              <option value="30">30 дней</option>
+            </select>
+          </div>
+          <div id="syslogTable" style="max-height:65vh;overflow-y:auto"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div></div>
         </div>
       </div>
       <!-- Серверы -->
@@ -597,7 +636,7 @@ function switchBankNav(name){
 }
 var _activeSettingsSection='audit';
 function switchSettingsSection(name){
-  ['bank','data','audit','servers'].forEach(function(s){
+  ['bank','data','audit','servers','syslog'].forEach(function(s){
     var sec=document.getElementById('settingsSection_'+s);
     var nav=document.getElementById('snav_'+s);
     if(sec)sec.style.display=s===name?'':'none';
@@ -607,6 +646,7 @@ function switchSettingsSection(name){
   localStorage.setItem('admin_settings_section',name);
   if(name==='audit')loadAuditLog();
   if(name==='servers')loadServersList();
+  if(name==='syslog')loadSystemLog();
 }
 function switchMainTab(name,el){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'audit';switchSettingsSection(ss);}if(name==='bank'){switchBankNav(_activeBankTab||'acts');}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}}
 
@@ -2994,6 +3034,54 @@ function renderAuditLog(){
   h+='</tbody></table>';
   el.innerHTML=h;
 }
+
+// ========== SYSTEM LOG ==========
+var _syslogTimer=null;
+var _syslogEntries=[];
+function loadSystemLog(){
+  var el=document.getElementById('syslogTable');if(!el)return;
+  var cat=document.getElementById('syslogCategory').value;
+  var lvl=document.getElementById('syslogLevel').value;
+  var days=parseInt(document.getElementById('syslogPeriod').value)||7;
+  var from=new Date(Date.now()-days*86400000).toISOString();
+  var url=API+'/api/admin/system_log?limit=500&from='+encodeURIComponent(from);
+  if(cat)url+='&category='+encodeURIComponent(cat);
+  if(lvl)url+='&level='+encodeURIComponent(lvl);
+  fetch(url,{headers:{'X-Auth-Token':authToken}})
+    .then(function(r){return r.json()})
+    .then(function(d){_syslogEntries=d.entries||[];renderSystemLog()})
+    .catch(function(e){el.innerHTML='<div style="color:var(--danger);padding:12px;font-size:12px">Ошибка: '+esc(e.message)+'</div>'});
+}
+function renderSystemLog(){
+  var el=document.getElementById('syslogTable');if(!el)return;
+  if(!_syslogEntries.length){el.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Нет записей</div>';return}
+  var catLabels={modem:'Модем',recovery:'Восст.',speedtest:'Speedtest',proxy_check:'Proxy',rotation:'Ротация',billing:'Биллинг',traffic:'Трафик',system:'Система'};
+  var levelColors={info:'#6b7280',warn:'#d97706',error:'#dc2626'};
+  var h='<table class="log-table" style="width:100%"><thead><tr><th style="width:130px">Время</th><th style="width:80px">Категория</th><th style="width:50px">Ур.</th><th style="width:120px">Действие</th><th style="width:100px">Цель</th><th>Сообщение</th></tr></thead><tbody>';
+  _syslogEntries.forEach(function(e){
+    var ts=(e.timestamp||'').replace('T',' ').substring(0,16);
+    var cat=catLabels[e.category]||e.category;
+    var lvlColor=levelColors[e.level]||'#6b7280';
+    var lvlBg=e.level==='error'?'rgba(220,38,38,0.1)':e.level==='warn'?'rgba(217,119,6,0.1)':'transparent';
+    h+='<tr style="background:'+lvlBg+'">';
+    h+='<td style="font-size:10px;color:var(--text-2);font-family:monospace;white-space:nowrap">'+ts+'</td>';
+    h+='<td style="font-size:10px"><span style="background:var(--bg-2);padding:2px 6px;border-radius:4px;font-size:10px">'+esc(cat)+'</span></td>';
+    h+='<td style="font-size:10px;font-weight:600;color:'+lvlColor+'">'+esc(e.level)+'</td>';
+    h+='<td style="font-size:11px;font-family:var(--font-mono);font-size:10px">'+esc(e.action||'')+'</td>';
+    h+='<td style="font-size:11px">'+esc(e.target||'—')+'</td>';
+    h+='<td style="font-size:11px;color:var(--text-1)">'+esc(e.message||'')+'</td>';
+    h+='</tr>';
+  });
+  h+='</tbody></table>';
+  el.innerHTML=h;
+}
+function toggleSyslogAutoRefresh(){
+  if(_syslogTimer){clearInterval(_syslogTimer);_syslogTimer=null}
+  if(document.getElementById('syslogAutoRefresh').checked){
+    _syslogTimer=setInterval(function(){if(_activeSettingsSection==='syslog')loadSystemLog()},30000);
+  }
+}
+toggleSyslogAutoRefresh();
 
 // ========== CLIENTS TAB ==========
 var _filterProblematic=false;

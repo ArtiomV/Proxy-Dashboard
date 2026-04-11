@@ -137,6 +137,12 @@ const dbStmts = {
   proxyCheckSummary: db.prepare(`SELECT nick, server_name, COUNT(*) as total_checks, AVG(total_ms) as avg_ms, SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as error_count FROM proxy_checks WHERE checked_at >= ? GROUP BY nick, server_name`),
   proxyCheckLast: db.prepare(`SELECT nick, server_name, connect_ms, total_ms, status_code, error, checked_at FROM proxy_checks WHERE id IN (SELECT MAX(id) FROM proxy_checks GROUP BY nick, server_name)`),
   proxyCheckCleanOld: db.prepare(`DELETE FROM proxy_checks WHERE checked_at < datetime('now', '-30 days')`),
+
+  // System activity log
+  systemLogInsert: db.prepare('INSERT INTO system_log (category, level, action, target, message, details) VALUES (?, ?, ?, ?, ?, ?)'),
+  systemLogQuery: db.prepare('SELECT * FROM system_log WHERE timestamp >= ? ORDER BY id DESC LIMIT ?'),
+  systemLogQueryFiltered: db.prepare('SELECT * FROM system_log WHERE timestamp >= ? AND (? IS NULL OR category = ?) AND (? IS NULL OR level = ?) ORDER BY id DESC LIMIT ?'),
+  systemLogClean: db.prepare("DELETE FROM system_log WHERE timestamp < datetime('now', '-30 days')"),
 };
 
 // _fileLocks moved to src/utils/files.js
@@ -514,6 +520,15 @@ function auditLog(adminLogin, action, details = {}) {
   }
 }
 
+function logActivity(category, level, action, target, message, details = null) {
+  try {
+    const detailsStr = details ? (typeof details === 'string' ? details : JSON.stringify(details)) : null;
+    dbStmts.systemLogInsert.run(category, level, action, target || null, message, detailsStr);
+  } catch (e) {
+    logger.error(`[SystemLog] Write failed: ${e.message}`);
+  }
+}
+
 const TRUSTED_PROXIES = (process.env.TRUSTED_PROXY || '127.0.0.1,::1').split(',').map(s => s.trim());
 function getClientIp(req) {
   const remote = req.socket?.remoteAddress || '';
@@ -693,9 +708,13 @@ async function syncYesterdayTraffic() {
       }
     });
     batch();
-    if (count > 0) logger.info(`[DailySync] Saved ${count} yesterday traffic entries`);
+    if (count > 0) {
+      logger.info(`[DailySync] Saved ${count} yesterday traffic entries`);
+      logActivity('traffic', 'info', 'daily_sync', null, `Saved ${count} yesterday traffic entries`, { count });
+    }
   } catch (e) {
     logger.error('[DailySync] Error:', e.message);
+    logActivity('traffic', 'error', 'daily_sync_error', null, `Daily traffic sync failed: ${e.message}`);
   }
 }
 
@@ -1020,6 +1039,7 @@ _intervals.push(setInterval(() => {
   const result = dbStmts.cleanExpiredSessions.run(Date.now());
   if (result.changes > 0) {
     logger.info(`[Sessions] Cleaned ${result.changes} expired session(s)`);
+    logActivity('system', 'info', 'session_cleanup', null, `Cleaned ${result.changes} expired session(s)`, { removed: result.changes });
   }
 }, 60 * 60 * 1000));
 
@@ -1350,6 +1370,7 @@ async function refreshRotationCache() {
   rotationCacheUpdatedAt = Date.now();
   const total = Object.keys(modemRotationCache).length;
   logger.info(`[Rotation] Total cached: ${total} modem rotation values`);
+  logActivity('rotation', 'info', 'cache_refreshed', null, `Rotation cache refreshed: ${total} modems`, { total });
   try { _kvSet.run('rotation_cache', JSON.stringify(modemRotationCache)); } catch (e) {}
 }
 
@@ -1401,9 +1422,11 @@ async function syncAllRotationLogs() {
       }
     } catch (e) {
       logger.info(`[RotLogSync] ${server.name} failed: ${e.message}`);
+      logActivity('rotation', 'error', 'sync_error', server.name, `Rotation log sync failed: ${e.message}`);
     }
   }
   logger.info(`[RotLogSync] Synced ${totalSynced} rotation entries across all servers`);
+  logActivity('rotation', 'info', 'sync_complete', null, `Synced ${totalSynced} rotation log entries`, { total: totalSynced });
 }
 // Initial sync after 30 sec, then every 30 min
 setTimeout(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), 30000);
@@ -1651,6 +1674,7 @@ async function trackModems() {
       statusArr = Array.isArray(data.status) ? data.status : [];
     } catch (e) {
       logger.info(`[Tracking] Server ${server.name} unreachable: ${e.message} — marking all modems as down`);
+      logActivity('modem', 'warn', 'server_unreachable', server.name, `Server unreachable: ${e.message}`);
       // Server unreachable = all its modems are down
       const todayBucket = new Date().toLocaleDateString('en-CA');
       for (const k of Object.keys(uptimeTracking)) {
@@ -1703,6 +1727,7 @@ async function trackModems() {
         } else if (ipTracking[key].ip !== extIp) {
           // IP changed! Record in history with timestamp
           recordIpChange(key, ipTracking[key].ip, extIp, now);
+          logActivity('modem', 'info', 'ip_changed', nick, `IP changed: ${ipTracking[key].ip} → ${extIp}`, { server: server.name, old_ip: ipTracking[key].ip, new_ip: extIp });
           ipTracking[key] = { ip: extIp, since: new Date(now).toISOString() };
         }
         // else same IP -- keep existing `since`
@@ -1741,6 +1766,7 @@ async function trackModems() {
         if (autoRecovery[recoveryKey]) {
           if (autoRecovery[recoveryKey].attempts > 0) {
             logger.info(`[AutoRecovery] ${nick} back online after ${autoRecovery[recoveryKey].attempts} reset(s)`);
+            logActivity('recovery', 'info', 'modem_recovered', nick, `Back online after ${autoRecovery[recoveryKey].attempts} USB reset(s)`, { server: server.name, attempts: autoRecovery[recoveryKey].attempts });
           }
           delete autoRecovery[recoveryKey];
         }
@@ -1754,10 +1780,15 @@ async function trackModems() {
           rec.attempts++;
           rec.lastAttempt = now;
           logger.warn(`[AutoRecovery] USB reset #${rec.attempts}/3 for ${nick} (${server.name}), offline ${Math.round(offlineSec)}s`);
+          logActivity('recovery', 'warn', 'usb_reset', nick, `USB reset #${rec.attempts}/3 (offline ${Math.round(offlineSec)}s)`, { server: server.name, attempt: rec.attempts, offline_sec: Math.round(offlineSec) });
           fetchApi(server, `/apix/usb_reset_modem_json?arg=${encodeURIComponent(nick)}`)
-            .catch(e => logger.error(`[AutoRecovery] USB reset failed for ${nick}: ${e.message}`));
+            .catch(e => {
+              logger.error(`[AutoRecovery] USB reset failed for ${nick}: ${e.message}`);
+              logActivity('recovery', 'error', 'usb_reset_failed', nick, `USB reset failed: ${e.message}`, { server: server.name });
+            });
           if (rec.attempts >= 3) {
             logger.warn(`[AutoRecovery] ${nick} exhausted 3 attempts, giving up`);
+            logActivity('recovery', 'warn', 'recovery_exhausted', nick, `Exhausted 3 USB reset attempts, giving up`, { server: server.name });
           }
         }
       }
@@ -1787,6 +1818,7 @@ async function trackModems() {
   saveUptimeTracking();
   // BUG-02: saveIpHistory() removed — recordIpChange() now does direct DB writes
   logger.info(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);
+  logActivity('modem', 'info', 'tracking_complete', null, `Tracked ${totalTracked} modems across ${apiServers.length} servers`, { modem_count: totalTracked, ip_count: Object.keys(ipTracking).length });
 }
 
 // ========== PROXY LATENCY MONITORING ==========
@@ -1908,8 +1940,10 @@ async function checkProxyLatency() {
 
     batch(entries);
     logger.info(`[ProxyCheck] Checked ${entries.length} proxies: ${ok} ok, ${errors} errors`);
+    logActivity('proxy_check', errors > 0 ? 'warn' : 'info', 'check_complete', null, `Checked ${entries.length} proxies: ${ok} ok, ${errors} errors`, { total: entries.length, ok, errors });
   } catch (e) {
     logger.error('[ProxyCheck] Error:', e.message);
+    logActivity('proxy_check', 'error', 'check_error', null, `Proxy latency check failed: ${e.message}`);
   }
 }
 
@@ -2008,8 +2042,14 @@ async function runNightlySpeedtests() {
             pushSpeedtestEntry(key, entry);
             testedCount++;
             logger.info(`[Speedtest] ${nick}: DL=${dl} UL=${ul} Ping=${ping}`);
+            if (dl < 1 || ul < 1) {
+              logActivity('speedtest', 'warn', 'low_speed', nick, `Low speed: DL=${dl} UL=${ul} Ping=${ping}`, { server: server.name, dl, ul, ping });
+            } else {
+              logActivity('speedtest', 'info', 'test_result', nick, `DL=${dl} UL=${ul} Ping=${ping}`, { server: server.name, dl, ul, ping });
+            }
           } catch (e) {
             logger.error(`[Speedtest] Error testing ${nick}:`, e.message);
+            logActivity('speedtest', 'error', 'test_error', nick, `Speedtest failed: ${e.message}`, { server: server.name });
             errorCount++;
           }
 
@@ -2025,6 +2065,7 @@ async function runNightlySpeedtests() {
   }
 
   logger.info(`[Speedtest] Complete: ${testedCount} tested, ${errorCount} errors`);
+  logActivity('speedtest', errorCount > 0 ? 'warn' : 'info', 'run_complete', null, `Speedtest complete: ${testedCount} tested, ${errorCount} errors`, { tested: testedCount, errors: errorCount });
 }
 
 function getSpeedtestLatest() {
@@ -4984,6 +5025,7 @@ async function aggregateTopHosts() {
   };
   _kvSet.run('top_hosts_cache', JSON.stringify(topHostsCache));
   logger.info(`[TopHosts] Aggregation complete: ${Object.keys(merged).length} domains from ${fetchedCount} ports (${errorCount} errors), ${Object.keys(perPort).length} portNames`);
+  logActivity('system', 'info', 'top_hosts_complete', null, `Top hosts: ${Object.keys(merged).length} domains from ${fetchedCount} ports`, { domains: Object.keys(merged).length, ports_scanned: fetchedCount, errors: errorCount });
   return topHostsCache;
 }
 
@@ -5054,9 +5096,11 @@ async function runDailyBilling(retryClientIds) {
   })();
   if (skipResult.skip) {
     logger.warn(`[Billing] ${skipResult.reason}, skipping`);
+    logActivity('billing', 'info', 'billing_skip', null, skipResult.reason);
     return;
   }
   logger.info(`[Billing] Starting ${isRetry ? 'RETRY' : 'daily'} billing run...`);
+  logActivity('billing', 'info', 'billing_start', null, `Starting ${isRetry ? 'RETRY' : 'daily'} billing run`);
 
   let results;
   try {
@@ -5173,8 +5217,10 @@ async function runDailyBilling(retryClientIds) {
 
       charged++;
       logger.info(`[Billing] ${client.name}: ${deltaGb}GB, ${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
+      logActivity('billing', 'info', 'daily_charge', client.name, `Charged ${cost} ${client.currency || 'RUB'} for ${deltaGb}GB`, { client_id: client.id, gb: deltaGb, cost, balance: client.balance });
     } catch (e) {
       logger.error(`[Billing] Error billing ${client.name}:`, e.message);
+      logActivity('billing', 'error', 'billing_error', client.name, `Billing error: ${e.message}`, { client_id: client.id });
     }
   }
 
@@ -5191,6 +5237,7 @@ async function runDailyBilling(retryClientIds) {
   };
 
   logger.info(`[Billing] Complete: ${charged} charged, ${skipped} skipped`);
+  logActivity('billing', charged > 0 ? 'info' : 'warn', 'billing_complete', null, `Billing complete: ${charged} charged, ${skipped} skipped`, { charged, skipped, date: yesterdayStr, is_retry: isRetry });
 
   // 3. Schedule retry if clients were skipped due to server issues (max 1 retry, not on retry runs)
   if (!isRetry && skippedClients.length > 0) {
@@ -5288,6 +5335,7 @@ async function runMonthlyReconciliation() {
   db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_reconciliation_month', ?)").run(prevMonthStr);
   saveClients(clients);
   logger.info(`[MonthlyRecon] Complete: ${corrections} correction(s)`);
+  logActivity('billing', 'info', 'reconciliation_complete', null, `Monthly reconciliation for ${prevMonthStr}: ${corrections} correction(s)`, { period: prevMonthStr, corrections });
 }
 
 async function autoCreateMissingClients() {
@@ -5362,17 +5410,18 @@ async function autoCreateMissingClients() {
       users[login] = { passwordHash, portNameFilter: pn, source: 'client', clientId: client.id };
       created++;
       logger.info(`  Auto-created client: login=${login}, portName=${pn}`);
+      logActivity('system', 'info', 'client_auto_created', pn, `Auto-created client: login=${login}, portName=${pn}`, { login, portName: pn, price: autoPrice, proxy_count: proxyCount });
     }
 
     if (created > 0) {
       saveClients(clients);
       rebuildClientMaps();
       logger.info(`[AutoCreate] Created ${created} new client(s)`);
-    } else {
-      logger.info('[AutoCreate] All portNames have client accounts');
+      logActivity('system', 'info', 'auto_create_complete', null, `Auto-created ${created} new client(s)`, { created });
     }
   } catch (e) {
     logger.error('[AutoCreate] Error:', e.message);
+    logActivity('system', 'error', 'auto_create_error', null, `Auto-create clients error: ${e.message}`);
   }
 }
 
@@ -6489,8 +6538,10 @@ async function autoGenerateMonthlyActs() {
       });
       generated++;
       logger.info(`[Tochka AutoActs] Created act for ${client.name}: ${totalCost} RUB`);
+      logActivity('billing', 'info', 'act_created', client.name, `Act created: ${totalCost} RUB for ${period}`, { client_id: client.id, amount: totalCost, period, act_number: actNumber });
     } catch (e) {
       logger.error(`[Tochka AutoActs] Error for ${client.name}:`, e.message);
+      logActivity('billing', 'error', 'act_error', client.name, `Act generation error: ${e.message}`, { client_id: client.id, period });
     }
   }
 
@@ -6498,6 +6549,7 @@ async function autoGenerateMonthlyActs() {
     saveClients(clients);
     logger.info(`[Tochka AutoActs] Generated ${generated} acts for ${period}`);
   }
+  logActivity('billing', 'info', 'acts_complete', null, `Monthly acts generation: ${generated} created for ${period}`, { generated, period });
   lastActGenerationMonth = period;
   db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_act_generation_month', ?)").run(period);
 }
@@ -6568,8 +6620,10 @@ async function autoGenerateMonthlyBills() {
       });
       generated++;
       logger.info(`[Tochka AutoBills] Created bill for ${client.name}: ${amount} RUB`);
+      logActivity('billing', 'info', 'bill_created', client.name, `Bill created: ${amount} RUB for ${currentPeriod}`, { client_id: client.id, amount, period: currentPeriod, bill_number: billNumber });
     } catch (e) {
       logger.error(`[Tochka AutoBills] Error for ${client.name}:`, e.message);
+      logActivity('billing', 'error', 'bill_error', client.name, `Bill generation error: ${e.message}`, { client_id: client.id, period: currentPeriod });
     }
   }
 
@@ -6577,9 +6631,26 @@ async function autoGenerateMonthlyBills() {
     saveClients(clients);
     logger.info(`[Tochka AutoBills] Generated ${generated} bills for ${currentPeriod}`);
   }
+  logActivity('billing', 'info', 'bills_complete', null, `Monthly bills generation: ${generated} created for ${currentPeriod}`, { generated, period: currentPeriod });
   lastBillGenerationMonth = currentPeriod;
   db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_bill_generation_month', ?)").run(currentPeriod);
 }
+
+// System activity log viewer
+app.get('/api/admin/system_log', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+    const category = req.query.category || null;
+    const level = req.query.level || null;
+    const from = req.query.from || new Date(Date.now() - 7 * 86400000).toISOString();
+
+    const rows = dbStmts.systemLogQueryFiltered.all(from, category, category, level, level, limit);
+    res.json({ success: true, entries: rows, total: rows.length });
+  } catch (e) {
+    logger.error('[SystemLog API] Error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
 
 app.use('/api', (req, res) => {
   res.status(404).json({
@@ -6643,9 +6714,15 @@ const httpServer = app.listen(PORT, () => {
       const metaDel = _metaCleanup.run();
       const rotDel = _rotLogCleanup.run();
       const pcDel = dbStmts.proxyCheckCleanOld.run();
-      const total = htDel.changes + metaDel.changes + rotDel.changes + pcDel.changes;
-      if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes} proxy_checks:${pcDel.changes})`);
-    } catch (e) { logger.error('[DbCleanup] Error:', e.message); }
+      const auditDel = dbStmts.cleanOldAudit.run();
+      const sysLogDel = dbStmts.systemLogClean.run();
+      const total = htDel.changes + metaDel.changes + rotDel.changes + pcDel.changes + auditDel.changes + sysLogDel.changes;
+      if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes} proxy:${pcDel.changes} audit:${auditDel.changes} syslog:${sysLogDel.changes})`);
+      logActivity('system', 'info', 'db_cleanup', null, `DB cleanup: ${total} rows removed`, { hourly: htDel.changes, meta: metaDel.changes, rotation: rotDel.changes, proxy_checks: pcDel.changes, audit: auditDel.changes, system_log: sysLogDel.changes });
+    } catch (e) {
+      logger.error('[DbCleanup] Error:', e.message);
+      logActivity('system', 'error', 'db_cleanup_error', null, `DB cleanup error: ${e.message}`);
+    }
   });
 
   // Schedule daily billing at 01:00 UTC (04:00 MSK, 4h after ProxySmart midnight reset)
@@ -6700,6 +6777,7 @@ const httpServer = app.listen(PORT, () => {
           try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch(e) {}
           const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
           logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${(check && check.cnt) || 0} rows)`);
+          logActivity('traffic', 'info', 'hourly_agg', null, `Hourly traffic aggregated for ${targetHourStr}: ${(check && check.cnt) || 0} rows (attempt ${attemptIdx + 1})`, { hour: targetHourStr, rows: (check && check.cnt) || 0, attempt: attemptIdx + 1 });
           // Pre-reset capture removed — day-counter detection handles resets
         }).catch(e => {
           logger.error(`[HourlyAgg] Attempt ${attemptIdx + 1}/5 error: ${e.message}`);
@@ -6709,6 +6787,7 @@ const httpServer = app.listen(PORT, () => {
             setTimeout(tryRecord, delay);
           } else {
             logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr} — hour will be empty`);
+            logActivity('traffic', 'error', 'hourly_agg_failed', null, `All 5 attempts failed for ${targetHourStr}`, { hour: targetHourStr });
           }
         });
       }
@@ -6743,6 +6822,7 @@ const httpServer = app.listen(PORT, () => {
       }
       if (needsCatchup) {
         logger.info('[Billing] Catch-up: missed billing detected, running now...');
+        logActivity('billing', 'warn', 'billing_catchup', null, 'Missed billing detected, running catch-up');
         await runDailyBilling();
       }
     } catch (e) {
@@ -6775,6 +6855,7 @@ async function checkCrmPaymentConfirmations() {
         [now.toISOString(), nextPayment.toISOString(), deal.id]
       );
       logger.info(`[CRM] Payment confirmed for deal "${deal.name}": next payment ${nextPayment.toISOString().slice(0, 10)}`);
+      logActivity('system', 'info', 'crm_payment_confirmed', deal.name, `Payment confirmed, next: ${nextPayment.toISOString().slice(0, 10)}`);
     }
 
     // Find deals with nextPaymentDate within 3 days — log reminder

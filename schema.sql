@@ -169,6 +169,21 @@ CREATE INDEX IF NOT EXISTS idx_audit_admin ON audit_log(admin);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
 
+-- System activity log (automated processes: speedtest, billing, recovery, etc.)
+CREATE TABLE IF NOT EXISTS system_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp   TEXT NOT NULL DEFAULT (datetime('now')),
+  category    TEXT NOT NULL,
+  level       TEXT NOT NULL DEFAULT 'info',
+  action      TEXT NOT NULL,
+  target      TEXT,
+  message     TEXT NOT NULL,
+  details     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_ts ON system_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_syslog_cat ON system_log(category, timestamp);
+CREATE INDEX IF NOT EXISTS idx_syslog_level ON system_log(level, timestamp);
+
 -- IP tracking (replaces ip_tracking.json)
 CREATE TABLE IF NOT EXISTS ip_tracking (
   key         TEXT PRIMARY KEY,
