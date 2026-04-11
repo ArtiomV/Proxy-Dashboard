@@ -106,15 +106,21 @@ async function refreshSnapshotsOnly() {
           const snap = snapCache.get(fullPortId);
 
           if (dayIn > 0 || dayOut > 0 || monIn > 0 || monOut > 0) {
+            // BUG-FIX: preserve day_in/month_in baseline from previous snapshot
+            // so the next aggregation computes delta from where it left off.
+            // Previously day_in was overwritten with live counter, losing traffic
+            // between last aggregation and restart.
             upsertSnap(fullPortId, {
-              day_in: dayIn, day_out: dayOut,
-              month_in: monIn, month_out: monOut,
+              day_in: snap ? snap.day_in : dayIn,
+              day_out: snap ? snap.day_out : dayOut,
+              month_in: snap ? snap.month_in : monIn,
+              month_out: snap ? snap.month_out : monOut,
               yesterday_in: yesIn, yesterday_out: yesOut,
               prev_month_in: pmIn, prev_month_out: pmOut,
-              day_at_last_hour_start_in: dayIn,
-              day_at_last_hour_start_out: dayOut,
-              mon_at_last_hour_start_in: monIn,
-              mon_at_last_hour_start_out: monOut,
+              day_at_last_hour_start_in: snap ? snap.day_at_last_hour_start_in : dayIn,
+              day_at_last_hour_start_out: snap ? snap.day_at_last_hour_start_out : dayOut,
+              mon_at_last_hour_start_in: snap ? snap.mon_at_last_hour_start_in : monIn,
+              mon_at_last_hour_start_out: snap ? snap.mon_at_last_hour_start_out : monOut,
               pending: 0,
             });
             updated++;
@@ -236,8 +242,14 @@ async function aggregateHourlyTraffic() {
           }
 
           // --- 3. Day reset detection ---
-          const dayReset = yesIn > snap.day_in
-                        && yesIn !== snap.yesterday_in;
+          // Primary: day counter dropped significantly below day_at_last_hour_start (counter reset)
+          // Secondary: yesterday changed (classic detector)
+          const dayDropped = snap.day_at_last_hour_start_in > 0
+                          && dayIn < snap.day_at_last_hour_start_in * 0.5
+                          && yesIn > 0;
+          const yesterdayChanged = yesIn > snap.day_in
+                                && yesIn !== snap.yesterday_in;
+          const dayReset = dayDropped || yesterdayChanged;
 
           if (dayReset) {
             // Last hour of the day: yesterday_total - day_at_last_hour_start
@@ -247,13 +259,15 @@ async function aggregateHourlyTraffic() {
               _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut, 0);
               count++;
             }
-            // Update snap to new day's values
+            // BUG-FIX: set day baseline to 0 so next aggregation captures ALL
+            // post-midnight traffic via delta (dayIn - 0 = dayIn).
+            // Previously day_in was set to dayIn, making that traffic invisible.
             upsertSnap(fullPortId, {
-              day_in: dayIn, day_out: dayOut,
+              day_in: 0, day_out: 0,
               month_in: monIn, month_out: monOut,
               yesterday_in: yesIn, yesterday_out: yesOut,
               prev_month_in: pmIn, prev_month_out: pmOut,
-              day_at_last_hour_start_in: dayIn, day_at_last_hour_start_out: dayOut,
+              day_at_last_hour_start_in: 0, day_at_last_hour_start_out: 0,
               mon_at_last_hour_start_in: monIn, mon_at_last_hour_start_out: monOut,
               pending: 0,
             });
@@ -271,13 +285,15 @@ async function aggregateHourlyTraffic() {
               _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut, 0);
               count++;
             }
+            // BUG-FIX: set month baseline to 0 so next cross-validation
+            // captures all post-reset month traffic
             upsertSnap(fullPortId, {
               day_in: dayIn, day_out: dayOut,
-              month_in: monIn, month_out: monOut,
+              month_in: 0, month_out: 0,
               yesterday_in: yesIn, yesterday_out: yesOut,
               prev_month_in: pmIn, prev_month_out: pmOut,
               day_at_last_hour_start_in: dayIn, day_at_last_hour_start_out: dayOut,
-              mon_at_last_hour_start_in: monIn, mon_at_last_hour_start_out: monOut,
+              mon_at_last_hour_start_in: 0, mon_at_last_hour_start_out: 0,
               pending: 0,
             });
             continue;
@@ -304,11 +320,7 @@ async function aggregateHourlyTraffic() {
               uncertain = 2;
               uncertainCount++;
               logger.warn(`[HourlyAgg] uncertain: nick=${nick} day_delta=${(deltaDay/1048576).toFixed(1)}MB month_delta=${(deltaMon/1048576).toFixed(1)}MB discrepancy=${(discrepancy*100).toFixed(1)}%`);
-              // Use the smaller value (conservative)
-              if (deltaMon < deltaDay) {
-                finalIncIn  = incInMon;
-                finalIncOut = incOutMon;
-              }
+              // Day counter is primary — always use day delta, just flag as uncertain
             }
           }
 

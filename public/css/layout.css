@@ -64,18 +64,29 @@
   .nav-tab{padding:6px 12px;font-size:12px;white-space:nowrap;flex-shrink:0}
   /* Finance cards responsive */
   .fin-cards-grid{grid-template-columns:repeat(2,1fr)!important}
+  .fin-summary{grid-template-columns:repeat(2,1fr)!important}
+  .widget-grid{grid-template-columns:repeat(2,1fr)!important}
+  .fin-bottom{grid-template-columns:1fr!important}
+  .add-form{grid-template-columns:1fr 1fr!important}
+  .server-body{grid-template-columns:1fr!important}
   /* Toolbar */
   .toolbar{flex-direction:column;padding:8px 12px}
   .toolbar>div{width:100%;flex-wrap:wrap}
   .search-box{width:100%!important}
   /* Tables — ensure all scrollable */
   .table-wrap{padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
-  table{font-size:11px;min-width:600px}
-  th{padding:5px 6px;font-size:10px}
-  td{padding:4px 6px;font-size:11px}
+  .country-group{margin-top:8px}
+  table{font-size:10px;min-width:800px}
+  th{padding:4px 5px;font-size:9px}
+  td{padding:3px 5px;font-size:10px}
   .actions-cell{flex-wrap:wrap}
-  .country-header{flex-direction:column;gap:4px;padding:8px 10px}
+  .country-header{flex-wrap:wrap;gap:4px;padding:6px 10px}
   .country-stats{margin-left:0}
+  .server-header{flex-wrap:wrap;gap:6px;padding:8px 12px}
+  .server-header-left{flex-wrap:wrap;gap:6px}
+  .server-body{padding:12px}
+  .server-footer{flex-wrap:wrap;gap:6px;padding:8px 12px}
+  .add-form{grid-template-columns:1fr!important}
   /* Client cards */
   .client-grid{grid-template-columns:1fr;padding:12px}
   .client-card-body .row{flex-direction:column;gap:2px;padding:4px 0}

@@ -35,7 +35,7 @@ function showToast(m,t,dur){
   var tp=t||'info';var icons={success:'✓',error:'✕',warning:'!',info:'i'};
   var ms=dur||(tp==='error'?6000:4000);
   var e=document.createElement('div');e.className='toast toast-'+tp;
-  e.innerHTML='<span class="toast-icon">'+icons[tp]+'</span><span class="toast-text">'+m+'</span><button class="toast-close" onclick="this.parentElement.remove()">✕</button>';
+  e.innerHTML='<span class="toast-icon">'+icons[tp]+'</span><span class="toast-text">'+esc(m)+'</span><button class="toast-close" onclick="this.parentElement.remove()">✕</button>';
   c.appendChild(e);
   setTimeout(function(){if(e.parentNode)e.remove();},ms);
 }

@@ -26,6 +26,7 @@ const { decodeJwtPayload, decodeJwtHeader, fetchTochkaJwks, jwkToPem, verifyJwtS
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
 const billing = require('./src/billing/atomic');
 const { MONTH_NAMES_RU, buildActItemsFromLedger: _buildActItemsFromLedger, buildTochkaActBody: _buildTochkaActBody, buildTochkaBillBody: _buildTochkaBillBody, calculateMonthlyBillAmount: _calculateMonthlyBillAmount } = require('./src/tochka/documents');
+const { execFile } = require('child_process');
 
 const DB_PATH = path.join(__dirname, 'dashboard.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
@@ -127,6 +128,14 @@ const dbStmts = {
   getAuditLog: db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?'),
   countAuditLog: db.prepare('SELECT COUNT(*) as cnt FROM audit_log'),
   cleanOldAudit: db.prepare("DELETE FROM audit_log WHERE timestamp < datetime('now', '-90 days')"),
+
+  // Proxy latency monitoring
+  proxyCheckInsert: db.prepare(`INSERT INTO proxy_checks (server_name, nick, client_name, operator, checked_at, connect_ms, total_ms, status_code, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
+  proxyCheckRecent: db.prepare(`SELECT * FROM proxy_checks WHERE checked_at >= ? ORDER BY checked_at DESC LIMIT 1000`),
+  proxyCheckByNick: db.prepare(`SELECT * FROM proxy_checks WHERE nick = ? AND checked_at >= ? ORDER BY checked_at DESC LIMIT 100`),
+  proxyCheckSummary: db.prepare(`SELECT nick, server_name, COUNT(*) as total_checks, AVG(total_ms) as avg_ms, SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as error_count FROM proxy_checks WHERE checked_at >= ? GROUP BY nick, server_name`),
+  proxyCheckLast: db.prepare(`SELECT nick, server_name, connect_ms, total_ms, status_code, error, checked_at FROM proxy_checks WHERE id IN (SELECT MAX(id) FROM proxy_checks GROUP BY nick, server_name)`),
+  proxyCheckCleanOld: db.prepare(`DELETE FROM proxy_checks WHERE checked_at < datetime('now', '-30 days')`),
 };
 
 // _fileLocks moved to src/utils/files.js
@@ -1017,7 +1026,11 @@ const SETTINGS_DEFAULTS = {
     { min_proxies: 5, price: 25, label: '5-9 прокси' },
     { min_proxies: 10, price: 23, label: '10-19 прокси' },
     { min_proxies: 20, price: 20, label: '20+ прокси' }
-  ]
+  ],
+  proxy_check_target: 'https://www.instagram.com/',
+  proxy_check_warn_ms: 500,
+  proxy_check_bad_ms: 2000,
+  proxy_check_interval_min: 60
 };
 
 let appSettings = { ...SETTINGS_DEFAULTS };
@@ -1156,7 +1169,8 @@ app.use((req, res, next) => {
 // Rate limiting for login endpoint (SEC-03: anti-bruteforce)
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 15, // max 15 attempts per IP per window
+  max: 5, // max 5 attempts per real client IP per window
+  keyGenerator: (req) => getClientIp(req), // use real IP behind nginx, not proxy IP
   message: { error: 'Too many login attempts, try again in 15 minutes' },
   standardHeaders: true,
   legacyHeaders: false
@@ -1712,6 +1726,127 @@ async function trackModems() {
   logger.info(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);
 }
 
+// ========== PROXY LATENCY MONITORING ==========
+let _proxyCheckInterval = null;
+function rescheduleProxyCheck() {
+  if (_proxyCheckInterval) clearInterval(_proxyCheckInterval);
+  const min = appSettings.proxy_check_interval_min || 60;
+  _proxyCheckInterval = setInterval(() => {
+    checkProxyLatency().catch(e => logger.error('[ProxyCheck] Error:', e.message));
+  }, min * 60 * 1000);
+  logger.info(`[ProxyCheck] Rescheduled: every ${min} min`);
+}
+const PROXY_CHECK_TIMEOUT = 15; // seconds
+const PROXY_CHECK_CONCURRENCY = 10;
+
+function curlCheckProxy(proxyUrl, targetUrl) {
+  const target = targetUrl || appSettings.proxy_check_target || 'https://www.instagram.com/';
+  return new Promise((resolve) => {
+    const args = [
+      '-x', proxyUrl,
+      '-w', '%{time_connect}|||%{time_total}|||%{http_code}',
+      '-o', '/dev/null', '-s',
+      '--max-time', String(PROXY_CHECK_TIMEOUT),
+      '-L', // follow redirects
+      target
+    ];
+    execFile('curl', args, { timeout: (PROXY_CHECK_TIMEOUT + 5) * 1000 }, (err, stdout) => {
+      if (err) {
+        const isTimeout = err.killed || (err.message && err.message.includes('timed out'));
+        resolve({ connect_ms: null, total_ms: null, status_code: null, error: isTimeout ? 'TIMEOUT' : err.message.slice(0, 200) });
+        return;
+      }
+      const parts = stdout.trim().split('|||');
+      if (parts.length === 3) {
+        const connectMs = Math.round(parseFloat(parts[0]) * 1000) || null;
+        const totalMs = Math.round(parseFloat(parts[1]) * 1000) || null;
+        const statusCode = parseInt(parts[2]) || null;
+        const error = (statusCode && statusCode >= 400) ? `HTTP ${statusCode}` : null;
+        resolve({ connect_ms: connectMs, total_ms: totalMs, status_code: statusCode, error });
+      } else {
+        resolve({ connect_ms: null, total_ms: null, status_code: null, error: 'Parse error' });
+      }
+    });
+  });
+}
+
+async function checkProxyLatency() {
+  try {
+    const results = await fetchAllServersDataCached();
+    const nowIso = new Date().toISOString();
+
+    // Build list of proxies to check
+    const proxies = [];
+    for (const data of results) {
+      const srv = data.serverName || '';
+      const sc = SERVER_COUNTRIES[srv] || {};
+      const serverIp = sc.serverIp || '';
+      if (!serverIp) continue;
+      const statusArr = Array.isArray(data.status) ? data.status : [];
+      const portsMap = data.ports || {};
+
+      // Map IMEI → modem info
+      const modemInfo = {};
+      for (const m of statusArr) {
+        const md = m.modem_details || {};
+        const imei = md.IMEI;
+        if (!imei) continue;
+        modemInfo[imei] = {
+          nick: md.NICK || imei,
+          isOnline: m.net_details?.IS_ONLINE === 'yes',
+          isRotating: m.IS_ROTATED === 'true' || m.IS_ROTATED === true,
+          operator: normalizeOperator(m.net_details?.CELLOP, srv === 'S2' || srv.startsWith('S2')),
+        };
+      }
+
+      for (const [imei, portList] of Object.entries(portsMap)) {
+        const info = modemInfo[imei];
+        if (!info) continue;
+        // Skip offline modems (not rotating)
+        if (!info.isOnline && !info.isRotating) continue;
+        for (const p of portList) {
+          if (!p.HTTP_PORT || !p.LOGIN || !p.PASSWORD) continue;
+          proxies.push({
+            server: srv,
+            nick: info.nick,
+            client: p.portName || '',
+            operator: info.operator || '',
+            proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
+          });
+          break; // one check per modem is enough
+        }
+      }
+    }
+
+    // Run checks with concurrency limit
+    let ok = 0, errors = 0;
+    const batch = db.transaction((entries) => {
+      for (const e of entries) {
+        dbStmts.proxyCheckInsert.run(e.server, e.nick, e.client, e.operator || '', nowIso, e.connect_ms, e.total_ms, e.status_code, e.error);
+      }
+    });
+
+    const entries = [];
+    for (let i = 0; i < proxies.length; i += PROXY_CHECK_CONCURRENCY) {
+      const chunk = proxies.slice(i, i + PROXY_CHECK_CONCURRENCY);
+      const results = await Promise.all(chunk.map(async (p) => {
+        const r = await curlCheckProxy(p.proxyUrl);
+        return { server: p.server, nick: p.nick, client: p.client, operator: p.operator, ...r };
+      }));
+      for (const r of results) {
+        entries.push(r);
+        if (r.error) errors++;
+        else ok++;
+      }
+    }
+
+    batch(entries);
+    logger.info(`[ProxyCheck] Checked ${entries.length} proxies: ${ok} ok, ${errors} errors`);
+  } catch (e) {
+    logger.error('[ProxyCheck] Error:', e.message);
+  }
+}
+
 const SPEEDTEST_HISTORY_FILE = path.join(__dirname, 'speedtest_history.json');
 const MAX_SPEEDTEST_ENTRIES = 30;
 
@@ -1867,7 +2002,7 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
       // Last hour traffic from traffic_hourly for this client's portName
       let lastHourGb = 0;
       if (clientInfo.portName) {
-        const lastHourRow = db.prepare(`SELECT hour_start FROM traffic_hourly ORDER BY hour_start DESC LIMIT 1`).get();
+        const lastHourRow = db.prepare(`SELECT hour_start FROM traffic_hourly WHERE client_name = ? ORDER BY hour_start DESC LIMIT 1`).get(clientInfo.portName);
         if (lastHourRow) {
           const lhRow = db.prepare(`SELECT SUM(bytes_in + bytes_out) as total FROM traffic_hourly WHERE hour_start = ? AND client_name = ?`).get(lastHourRow.hour_start, clientInfo.portName);
           if (lhRow && lhRow.total) lastHourGb = trafficBytesToGb(lhRow.total);
@@ -2090,6 +2225,9 @@ app.get('/api/client/reset_ip_by_token', resetTokenLimiter, async (req, res) => 
   if (!nick || !token) return res.status(400).json({ error: 'nick and token required' });
   const client = clientByResetToken.get(token);
   if (!client) return res.status(401).json({ error: 'Invalid token' });
+  // Verify nick belongs to this client's portName
+  const allowed = db.prepare("SELECT 1 FROM traffic_hourly WHERE nick = ? AND client_name = ? LIMIT 1").get(nick, client.portName);
+  if (!allowed) return res.status(403).json({ error: 'Modem not assigned to this client' });
   // Try all servers
   for (const server of apiServers) {
     try {
@@ -2405,26 +2543,24 @@ app.post('/api/admin/cache/invalidate', authMiddleware, adminMiddleware, (req, r
 app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req, res) => {
   // Return daily traffic aggregated by client (portName) for each day
   const results = await fetchAllServersDataCached();
-  if (Object.keys(portKeyToPortName).length === 0) refreshPortKeyMapping(results);
-  const pnMap = portKeyToPortName;
-  // Aggregate: { clientName: { "2026-03-01": { in: bytes, out: bytes }, ... } }
-  // Also track per-server: { clientName: { "2026-03-01": { in, out, servers: { S1: {in,out}, S2: {in,out} } } } }
-  const byClient = {};
-  // Build portId -> serverName mapping
+  // Build fresh portId -> portName and portId -> serverName mappings from live data
+  const pnMap = {};
   const portIdToServer = {};
   for (const data of results) {
     const srvName = data.serverName || '';
-    if (typeof data.bw === 'object') {
-      for (const portId of Object.keys(data.bw)) {
-        portIdToServer[portId] = srvName;
-        portIdToServer[srvName + '_' + portId] = srvName;
-      }
+    if (typeof data.bw !== 'object') continue;
+    for (const [portId, b] of Object.entries(data.bw)) {
+      const fullKey = srvName + '_' + portId;
+      portIdToServer[portId] = srvName;
+      portIdToServer[fullKey] = srvName;
+      if (b.portName) { pnMap[fullKey] = b.portName; pnMap[portId] = b.portName; }
     }
   }
+  const byClient = {};
   // Historical days from dailyTraffic
   for (const [portId, days] of Object.entries(dailyTraffic)) {
-    const pn = (Object.values(days)[0] && Object.values(days)[0].portName) || pnMap[portId] || 'Не назначен';
-    const srv = portIdToServer[portId] || '';
+    const pn = pnMap[portId] || 'Не назначен';
+    const srv = portIdToServer[portId] || (portId.match(/^(S\d+)_/) ? portId.match(/^(S\d+)_/)[1] : '');
     if (!byClient[pn]) byClient[pn] = {};
     for (const [date, entry] of Object.entries(days)) {
       if (!byClient[pn][date]) byClient[pn][date] = { in: 0, out: 0, servers: {} };
@@ -2438,7 +2574,9 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
     }
   }
   // Today's live data from bandwidth cache
-  const todayStr = new Date().toISOString().slice(0, 10);
+  // Use Moscow time (GMT+3) for "today" since most servers are in Moldova/Romania (GMT+3/+3)
+  const _nowLocal = new Date(Date.now() + 3 * 3600000);
+  const todayStr = _nowLocal.toISOString().slice(0, 10);
   for (const data of results) {
     if (typeof data.bw !== 'object') continue;
     const srvName = data.serverName || '';
@@ -2612,7 +2750,7 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
 
     // Build SQL filter based on view type — all filtering is on per-modem columns
     const tzStr = (mskOffset >= 0 ? '+' : '') + mskOffset + ' hours';
-    let sql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes, MAX(corrected) as corrected FROM traffic_hourly WHERE hour_start >= ?`;
+    let sql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes, MAX(uncertain) as corrected FROM traffic_hourly WHERE hour_start >= ?`;
     const params = [utcFetchStartShifted];
 
     if (idKey !== 'all') {
@@ -2650,15 +2788,46 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
       }
     }
 
+    // Per-operator breakdown for country and client views
+    let operator_breakdown;
+    if (view === 'country' || view === 'client') {
+      operator_breakdown = dateList.map(() => Array.from({ length: 24 }, () => ({})));
+      let opSql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, operator, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE hour_start >= ?`;
+      const opParams = [utcFetchStartShifted];
+      if (view === 'client') {
+        opSql += ' AND client_name = ?';
+        opParams.push(id);
+      } else if (view === 'country') {
+        const servers = [];
+        for (const [srv, cn] of Object.entries(serverCountryMap)) {
+          if (cn.includes(idKey) || idKey.includes(cn)) servers.push(srv);
+        }
+        if (servers.length > 0) {
+          opSql += ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
+          opParams.push(...servers);
+        }
+      }
+      opSql += ' GROUP BY day, hour, operator ORDER BY day, hour';
+      const opRows = db.prepare(opSql).all(...opParams);
+      for (const r of opRows) {
+        const di = dateList.indexOf(r.day);
+        if (di >= 0 && r.hour >= 0 && r.hour < 24 && r.operator) {
+          operator_breakdown[di][r.hour][r.operator] = r.bytes / 1073741824;
+        }
+      }
+    }
+
     const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
     const dayMeta = dateList.map(date => {
       const d = new Date(date + 'T00:00:00');
       return { date, label: DAYS_RU[d.getDay()], dateShort: date.slice(5) };
     });
-    res.json({
+    const resp = {
       meta: { id, days: dateList, day_meta: dayMeta, has_hourly: hasData, corrected: correctedCells },
       matrix
-    });
+    };
+    if (operator_breakdown) resp.operator_breakdown = operator_breakdown;
+    res.json(resp);
   } catch (e) {
     logger.error('[heatmap]', e.message);
     res.status(500).json({ error: e.message });
@@ -2715,7 +2884,7 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
     const merged = mergeServerData(results, '*');
     const servers = apiServers.map(s => {
       const sc = SERVER_COUNTRIES[s.name] || {};
-      return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz };
+      return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz, address: s.address || '' };
     });
     // TASK-01 (SEC): serverAuth removed — credentials must never reach the frontend
     
@@ -2879,10 +3048,204 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       settings: appSettings,
       bankPayments: getAllBankPayments(),
       tochkaConfigured: !!tochkaConfig.jwt,
-      tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp, companyAddress: tochkaConfig.companyAddress, bankAccount: tochkaConfig.bankAccount, bankName: tochkaConfig.bankName, bankBic: tochkaConfig.bankBic, bankCorrAccount: tochkaConfig.bankCorrAccount }
+      tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp, companyAddress: tochkaConfig.companyAddress, bankAccount: tochkaConfig.bankAccount, bankName: tochkaConfig.bankName, bankBic: tochkaConfig.bankBic, bankCorrAccount: tochkaConfig.bankCorrAccount },
+      proxyCheckSummary: getProxyCheckSummary(),
     });
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
+  }
+});
+
+// Proxy check summary helper
+function getProxyCheckSummary() {
+  try {
+    const todayStart = getMoscowToday() + 'T00:00:00.000Z';
+    const summary = dbStmts.proxyCheckSummary.all(todayStart);
+    const last = dbStmts.proxyCheckLast.all();
+    return { summary, last };
+  } catch (e) { return { summary: [], last: [] }; }
+}
+
+// Detailed proxy check history API
+app.get('/api/admin/proxy_checks', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const nick = req.query.nick;
+    const days = Math.min(parseInt(req.query.days) || 7, 30);
+    const since = new Date(Date.now() - days * 86400000).toISOString();
+    if (nick) {
+      const checks = dbStmts.proxyCheckByNick.all(nick, since);
+      res.json({ checks });
+    } else {
+      const checks = dbStmts.proxyCheckRecent.all(since);
+      res.json({ checks });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Latency analytics — median/avg/p95 per day with view filtering
+app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const { view = 'country', id = 'all' } = req.query;
+    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+    const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
+
+    const now2 = new Date();
+    const since = new Date(now2.getTime() - days * 86400000).toISOString();
+
+    let sql = `SELECT date(checked_at) as day, total_ms FROM proxy_checks WHERE checked_at >= ? AND total_ms IS NOT NULL AND error IS NULL`;
+    let errSql = `SELECT date(checked_at) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND error IS NOT NULL`;
+    let totalSql = `SELECT date(checked_at) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ?`;
+    const params = [since];
+    const errParams = [since];
+    const totalParams = [since];
+
+    // Build server→country mapping
+    const serverCountryMap = {};
+    for (const s of apiServers) {
+      const cn = ((SERVER_COUNTRIES[s.name] || {}).name || '').toLowerCase();
+      if (cn) serverCountryMap[s.name] = cn;
+    }
+
+    let filter = '';
+    if (idKey !== 'all') {
+      if (view === 'country') {
+        const servers = [];
+        for (const [srv, cn] of Object.entries(serverCountryMap)) {
+          if (cn.includes(idKey) || idKey.includes(cn)) servers.push(srv);
+        }
+        if (servers.length > 0) {
+          filter = ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
+          params.push(...servers);
+          errParams.push(...servers);
+          totalParams.push(...servers);
+        }
+      } else if (view === 'operator') {
+        filter = " AND LOWER(REPLACE(operator, ' ', '_')) LIKE ?";
+        params.push('%' + idKey + '%');
+        errParams.push('%' + idKey + '%');
+        totalParams.push('%' + idKey + '%');
+      } else if (view === 'client') {
+        filter = " AND client_name = ?";
+        params.push(id);
+        errParams.push(id);
+        totalParams.push(id);
+      }
+    }
+
+    sql += filter + ' ORDER BY day, total_ms';
+    errSql += filter + ' GROUP BY day';
+    totalSql += filter + ' GROUP BY day';
+
+    const rows = db.prepare(sql).all(...params);
+    const errRows = db.prepare(errSql).all(...errParams);
+    const totalRows = db.prepare(totalSql).all(...totalParams);
+
+    // Group by day
+    const byDay = {};
+    for (const r of rows) {
+      if (!byDay[r.day]) byDay[r.day] = [];
+      byDay[r.day].push(r.total_ms);
+    }
+    const errMap = {};
+    for (const r of errRows) errMap[r.day] = r.cnt;
+    const totalMap = {};
+    for (const r of totalRows) totalMap[r.day] = r.cnt;
+
+    // Build date list
+    const dateList = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(now2.getTime() - i * 86400000);
+      dateList.push(d.toISOString().slice(0, 10));
+    }
+
+    const result = { days: dateList, median_ms: [], avg_ms: [], p95_ms: [], error_pct: [], total_checks: [] };
+    for (const day of dateList) {
+      const vals = byDay[day] || [];
+      const total = totalMap[day] || 0;
+      const errs = errMap[day] || 0;
+      if (vals.length === 0) {
+        result.median_ms.push(null);
+        result.avg_ms.push(null);
+        result.p95_ms.push(null);
+      } else {
+        const sorted = vals; // already sorted by SQL ORDER BY
+        result.median_ms.push(sorted[Math.floor(sorted.length / 2)]);
+        result.avg_ms.push(Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length));
+        result.p95_ms.push(sorted[Math.floor(sorted.length * 0.95)]);
+      }
+      result.error_pct.push(total > 0 ? Math.round(errs / total * 100) : null);
+      result.total_checks.push(total);
+    }
+
+    res.json(result);
+  } catch (e) {
+    logger.error('[latency_stats]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Manual proxy check (single or bulk)
+app.post('/api/admin/proxy_check', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { modems } = req.body; // [{nick, server}] or single {nick, server}
+    const list = Array.isArray(modems) ? modems : (req.body.nick ? [{ nick: req.body.nick, server: req.body.server }] : []);
+    if (!list.length) return res.status(400).json({ error: 'No modems specified' });
+    if (list.length > 50) return res.status(400).json({ error: 'Max 50 modems per request' });
+
+    const results = await fetchAllServersDataCached();
+    const nowIso = new Date().toISOString();
+
+    // Build proxy map: nick+server → proxyUrl
+    const proxyMap = {};
+    for (const data of results) {
+      const srv = data.serverName || '';
+      const sc = SERVER_COUNTRIES[srv] || {};
+      const serverIp = sc.serverIp || '';
+      if (!serverIp) continue;
+      const statusArr = Array.isArray(data.status) ? data.status : [];
+      const portsMap = data.ports || {};
+      const modemInfo = {};
+      for (const m of statusArr) {
+        const md = m.modem_details || {};
+        const imei = md.IMEI;
+        if (!imei) continue;
+        modemInfo[imei] = { nick: md.NICK || imei, operator: normalizeOperator(m.net_details?.CELLOP, srv === 'S2' || srv.startsWith('S2')) };
+      }
+      for (const [imei, portList] of Object.entries(portsMap)) {
+        const info = modemInfo[imei];
+        if (!info) continue;
+        for (const p of portList) {
+          if (!p.HTTP_PORT || !p.LOGIN || !p.PASSWORD) continue;
+          proxyMap[info.nick + '|' + srv] = {
+            server: srv, nick: info.nick, client: p.portName || '', operator: info.operator || '',
+            proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
+          };
+          break;
+        }
+      }
+    }
+
+    // Run checks
+    const checks = [];
+    for (const item of list) {
+      const key = (item.nick || '') + '|' + (item.server || '');
+      const proxy = proxyMap[key];
+      if (!proxy) {
+        checks.push({ nick: item.nick, server: item.server, error: 'Proxy not found' });
+        continue;
+      }
+      const r = await curlCheckProxy(proxy.proxyUrl);
+      const entry = { server: proxy.server, nick: proxy.nick, client: proxy.client, operator: proxy.operator, ...r };
+      dbStmts.proxyCheckInsert.run(entry.server, entry.nick, entry.client, entry.operator || '', nowIso, entry.connect_ms, entry.total_ms, entry.status_code, entry.error);
+      checks.push(entry);
+    }
+
+    res.json({ ok: true, checks });
+  } catch (e) {
+    logger.error('[ProxyCheck] Manual check error:', e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 
@@ -3431,16 +3794,17 @@ app.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
 
 // API Servers management
 app.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
-  res.json({ servers: apiServers.map(s => ({ name: s.name, url: s.url, publicIp: s.publicIp, country: SERVER_COUNTRIES[s.name] || {}, osLogin: s.osLogin || '', osPassword: s.osPassword || '', hardware: s.hardware || '' })) });
+  res.json({ servers: apiServers.map(s => ({ name: s.name, url: s.url, publicIp: s.publicIp, country: SERVER_COUNTRIES[s.name] || {}, osLogin: s.osLogin || '', osPassword: s.osPassword || '', hardware: s.hardware || '', address: s.address || '' })) });
 });
 
 app.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, (req, res) => {
   const srv = apiServers.find(s => s.name === req.params.name);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  const { osLogin, osPassword, hardware } = req.body;
+  const { osLogin, osPassword, hardware, address } = req.body;
   if (osLogin !== undefined) srv.osLogin = osLogin;
   if (osPassword !== undefined) srv.osPassword = osPassword;
   if (hardware !== undefined) srv.hardware = hardware;
+  if (address !== undefined) srv.address = address;
   saveApiServersToDb();
   auditLog(req.user.login, 'update_server', { name: req.params.name, ip: getClientIp(req) });
   res.json({ ok: true });
@@ -3484,9 +3848,12 @@ app.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
-  const { speedtest_times, pricing_tiers } = req.body;
+  const { speedtest_times, pricing_tiers, min_speed_threshold, proxy_check_target, proxy_check_warn_ms, proxy_check_bad_ms } = req.body;
   if (speedtest_times && Array.isArray(speedtest_times)) {
     appSettings.speedtest_times = speedtest_times.filter(t => /^\d{2}:\d{2}$/.test(t));
+  }
+  if (min_speed_threshold != null) {
+    appSettings.min_speed_threshold = parseFloat(min_speed_threshold) || 2;
   }
   if (pricing_tiers && Array.isArray(pricing_tiers)) {
     appSettings.pricing_tiers = pricing_tiers.map(t => ({
@@ -3494,6 +3861,20 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
       price: parseFloat(t.price) || 0,
       label: t.label || ''
     }));
+  }
+  if (proxy_check_target != null) {
+    const url = String(proxy_check_target).trim();
+    if (url && /^https?:\/\/.+/.test(url)) appSettings.proxy_check_target = url;
+  }
+  if (proxy_check_warn_ms != null) {
+    appSettings.proxy_check_warn_ms = Math.max(50, parseInt(proxy_check_warn_ms) || 500);
+  }
+  if (proxy_check_bad_ms != null) {
+    appSettings.proxy_check_bad_ms = Math.max(100, parseInt(proxy_check_bad_ms) || 2000);
+  }
+  if (req.body.proxy_check_interval_min != null) {
+    appSettings.proxy_check_interval_min = Math.max(5, Math.min(1440, parseInt(req.body.proxy_check_interval_min) || 60));
+    rescheduleProxyCheck();
   }
   saveSettings();
   rescheduleSpeedtests();
@@ -3504,7 +3885,7 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
 app.get('/api/admin/crm_reminders', authMiddleware, adminMiddleware, async (req, res) => {
   const dbUrl = process.env.CRM_DB_URL;
   const workspace = process.env.CRM_WORKSPACE;
-  if (!dbUrl || !workspace) return res.json({ reminders: [] });
+  if (!dbUrl || !workspace || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(workspace)) return res.json({ reminders: [] });
   try {
     const { Pool } = require('pg');
     const pool = new Pool({ connectionString: dbUrl, max: 1, idleTimeoutMillis: 5000 });
@@ -3711,26 +4092,36 @@ app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req,
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
 
-    // First read current port config from edit page
+    // Read full current form to preserve ALL required fields
     const editPageRaw = await fetchApiRaw(server, `/conf/edit_port/${portID}`);
     const editHtml = editPageRaw?.buffer ? editPageRaw.buffer.toString('utf8') : '';
-    // Extract existing form values to preserve them
-    const extract = (name) => { const m = editHtml.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`)); return m ? m[1] : ''; };
-    const formData = {
-      portID: extract('portID') || portID,
-      portName: newPortName,
-      http_port: extract('http_port'),
-      socks_port: extract('socks_port'),
-      proxy_login: extract('proxy_login'),
-      proxy_password: extract('proxy_password'),
-      MAXCONN: extract('MAXCONN'),
-      CONNLIM: extract('CONNLIM'),
-      bandlimin: extract('bandlimin'),
-      bandlimout: extract('bandlimout'),
-      bw_quota: extract('bw_quota'),
-      CREATED_AT: extract('CREATED_AT'),
-      PROXY_VALID_BEFORE: extract('PROXY_VALID_BEFORE')
-    };
+    // Extract input fields
+    const formData = {};
+    const _fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
+    let _fm;
+    while ((_fm = _fieldRe.exec(editHtml)) !== null) formData[_fm[1]] = _fm[2];
+    // Extract select fields (selected or first option as default)
+    const _selRe = /<select\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g;
+    let _sm;
+    while ((_sm = _selRe.exec(editHtml)) !== null) {
+      const selMatch = _sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*\s+selected/);
+      if (selMatch) { formData[_sm[1]] = selMatch[1]; }
+      else { const first = _sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"/); if (first) formData[_sm[1]] = first[1]; }
+    }
+    // Get proxy_password from port API data (not in HTML form)
+    if (!formData.proxy_password) {
+      try {
+        const portsData = await fetchApi(server, '/apix/list_ports_json');
+        for (const [, plist] of Object.entries(portsData)) {
+          for (const port of plist) {
+            if (port.portID === portID && port.PASSWORD) { formData.proxy_password = port.PASSWORD; break; }
+          }
+          if (formData.proxy_password) break;
+        }
+      } catch (e) { /* ignore */ }
+    }
+    // Apply the rename
+    formData.portName = newPortName;
 
     const result = await postFormApi(server, `/conf/edit_port/${portID}`, formData);
     logger.info(`[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`);
@@ -3965,6 +4356,7 @@ app.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, r
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const rawImei = portData.IMEI.replace(/^S\d+_/, '');
+    if (portData.portName && portData.portName.length < 4) return res.status(400).json({ error: 'portName must be at least 4 characters' });
     // GET pre-filled form values from ProxySmart (portID, http_port, login, password)
     const formHtml = await fetchApiRaw(server, `/conf/add_port?imei=${rawImei}`);
     const html = formHtml.buffer ? formHtml.buffer.toString('utf8') : String(formHtml);
@@ -3973,14 +4365,13 @@ app.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, r
     let fm;
     while ((fm = fieldRe.exec(html)) !== null) prefilled[fm[1]] = fm[2];
     // Merge: user values override pre-filled, keep generated portID/ports/creds
-    const formData = {
-      ...prefilled,
-      portName: portData.portName || prefilled.portName || '',
-      ...(portData.http_port ? { http_port: portData.http_port } : {}),
-      ...(portData.socks_port ? { socks_port: portData.socks_port } : {}),
-      ...(portData.proxy_login ? { proxy_login: portData.proxy_login } : {}),
-      ...(portData.proxy_password ? { proxy_password: portData.proxy_password } : {})
-    };
+    // Only include fields that exist in the original form (ProxySmart versions differ)
+    const formData = { ...prefilled };
+    if (portData.portName) formData.portName = portData.portName;
+    if (portData.http_port && prefilled.http_port !== undefined) formData.http_port = portData.http_port;
+    if (portData.socks_port && prefilled.socks_port !== undefined) formData.socks_port = portData.socks_port;
+    if (portData.proxy_login && prefilled.proxy_login !== undefined) formData.proxy_login = portData.proxy_login;
+    if (portData.proxy_password && prefilled.proxy_password !== undefined) formData.proxy_password = portData.proxy_password;
     const result = await postFormApi(server, `/conf/add_port?imei=${rawImei}`, formData);
     _psCache = null; _psCacheTs = 0;
     auditLog(req.user.login, 'store_port', { serverName, IMEI: rawImei, portName: portData.portName, ip: getClientIp(req) });
@@ -3995,13 +4386,38 @@ app.post('/api/admin/move_port', authMiddleware, adminMiddleware, async (req, re
     if (!serverName || !portID || !newIMEI) return res.status(400).json({ error: 'serverName, portID, newIMEI required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    // Store port with new IMEI
-    const storeResult = await postApi(server, '/crud/store_port', { IMEI: newIMEI, portID });
-    // Apply changes
-    const applyResult = await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portID)}`);
+    // Read full current port form
+    const raw = await fetchApiRaw(server, `/conf/edit_port/${portID}`);
+    const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
+    const formData = {};
+    const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
+    let fm;
+    while ((fm = fieldRe.exec(html)) !== null) formData[fm[1]] = fm[2];
+    const selRe = /<select\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g;
+    let sm;
+    while ((sm = selRe.exec(html)) !== null) {
+      const selMatch = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*\s+selected/);
+      if (selMatch) { formData[sm[1]] = selMatch[1]; }
+      else { const first = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"/); if (first) formData[sm[1]] = first[1]; }
+    }
+    // Get proxy_password from port API
+    if (!formData.proxy_password) {
+      try {
+        const portsData = await fetchApi(server, '/apix/list_ports_json');
+        for (const [, plist] of Object.entries(portsData)) {
+          for (const port of plist) {
+            if (port.portID === portID && port.PASSWORD) { formData.proxy_password = port.PASSWORD; break; }
+          }
+          if (formData.proxy_password) break;
+        }
+      } catch (e) { /* ignore */ }
+    }
+    // Change IMEI to move port to new modem
+    formData.IMEI = newIMEI;
+    await postFormApi(server, `/conf/edit_port/${portID}`, formData);
     auditLog(req.user.login, 'move_port', { serverName, portID, newIMEI, ip: getClientIp(req) });
     _psCache = null; _psCacheTs = 0;
-    res.json({ ok: true, storeResult, applyResult });
+    res.json({ ok: true });
   } catch (err) { res.status(502).json({ error: 'Move port failed', details: err.message }); }
 });
 
@@ -4044,9 +4460,9 @@ app.get('/api/admin/get_port_config', authMiddleware, adminMiddleware, async (re
       const blockM = html.match(re);
       if (!blockM) return '';
       const block = blockM[0];
-      const sel = block.match(/<option[^>]*selected[^>]*value="([^"]*)"/);
+      const sel = block.match(/<option[^>]*selected[^>]*value\s*=\s*"([^"]*)"/);
       if (sel) return sel[1];
-      const sel2 = block.match(/<option[^>]*value="([^"]*)"[^>]*selected/);
+      const sel2 = block.match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*selected/);
       return sel2 ? sel2[1] : '';
     };
     res.json({
@@ -4063,8 +4479,8 @@ app.get('/api/admin/get_port_config', authMiddleware, adminMiddleware, async (re
       bw_quota: extract('bw_quota'),
       PROXY_VALID_BEFORE: extract('PROXY_VALID_BEFORE'),
       CREATED_AT: extract('CREATED_AT'),
-      OS_SPOOF: extractSelected('OS_SPOOF'),
-      IP_VERSION: extractSelected('IP_VERSION'),
+      OS: extractSelected('OS'),
+      IP_MODE: extractSelected('IP_MODE'),
     });
   } catch (err) {
     logger.error('[GetPortConfig]', err.message);
@@ -4079,23 +4495,137 @@ app.post('/api/admin/save_port_config', authMiddleware, adminMiddleware, async (
     if (!serverName || !portId) return res.status(400).json({ error: 'serverName and portId required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    // Read current config to preserve hidden fields (CREATED_AT, etc.)
+    // Read full current form to preserve ALL required fields
     const raw = await fetchApiRaw(server, `/conf/edit_port/${portId}`);
     const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
-    const extract = (name) => { const m = html.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`)); return m ? m[1] : ''; };
-    const formData = { portID: portId, CREATED_AT: extract('CREATED_AT'), ...fields };
+    // Extract input fields
+    const formData = {};
+    const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
+    let fm;
+    while ((fm = fieldRe.exec(html)) !== null) formData[fm[1]] = fm[2];
+    // Extract select fields — selected option or first option as default
+    const selRe = /<select\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g;
+    let sm;
+    while ((sm = selRe.exec(html)) !== null) {
+      const selMatch = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*\s+selected/);
+      if (selMatch) { formData[sm[1]] = selMatch[1]; }
+      else { const first = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"/); if (first) formData[sm[1]] = first[1]; }
+    }
+    // Get proxy_password from port API data (not in HTML form)
+    if (!formData.proxy_password) {
+      try {
+        const portsData = await fetchApi(server, '/apix/list_ports_json');
+        for (const [, plist] of Object.entries(portsData)) {
+          for (const port of plist) {
+            if (port.portID === portId && port.PASSWORD) { formData.proxy_password = port.PASSWORD; break; }
+          }
+          if (formData.proxy_password) break;
+        }
+      } catch (e) { /* ignore — password may already be in fields */ }
+    }
+    // Merge user changes on top of current values
+    for (const [k, v] of Object.entries(fields)) {
+      if (k === 'OS_SPOOF') formData.OS = v; // Map dashboard → ProxySmart field names
+      else if (k === 'IP_VERSION') formData.IP_MODE = v;
+      else formData[k] = v;
+    }
     // Remove internal fields not needed by ProxySmart form
-    delete formData.serverName; delete formData.IMEI;
+    delete formData.serverName; delete formData.OS_SPOOF; delete formData.IP_VERSION;
     const result = await postFormApi(server, `/conf/edit_port/${portId}`, formData);
     // Apply the port changes
     await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`);
     _psCache = null; _psCacheTs = 0;
     auditLog(req.user.login, 'save_port_config', { serverName, portId, fields: Object.keys(fields), ip: getClientIp(req) });
-    res.json({ ok: true, status: result.status });
+    const success = result.status === 302 || result.status === 200;
+    res.json({ ok: success, status: result.status });
   } catch (err) {
     logger.error('[SavePortConfig]', err.message);
     res.status(502).json({ error: 'Save port config failed', details: err.message });
   }
+});
+
+// Bulk set OS spoofing on multiple ports
+// Bulk set OS spoofing on multiple ports
+app.post('/api/admin/bulk_os_spoof', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { ports, os } = req.body;
+    if (!Array.isArray(ports) || !ports.length) return res.status(400).json({ error: 'ports array required' });
+    // Pre-fetch passwords per server (cache list_ports_json once per server)
+    const pwCache = {};
+    const serverNames = [...new Set(ports.map(p => p.serverName))];
+    for (const sn of serverNames) {
+      const server = findServer(sn);
+      if (!server) continue;
+      try {
+        const portsData = await fetchApi(server, '/apix/list_ports_json');
+        pwCache[sn] = {};
+        for (const [, plist] of Object.entries(portsData)) {
+          for (const port of plist) {
+            if (port.portID && port.PASSWORD) pwCache[sn][port.portID] = port.PASSWORD;
+          }
+        }
+      } catch (e) { logger.warn(`[BulkOS] Failed to fetch ports for ${sn}: ${e.message}`); }
+    }
+    let ok = 0, failed = 0;
+    for (const p of ports) {
+      try {
+        const server = findServer(p.serverName);
+        if (!server) { failed++; continue; }
+        const raw = await fetchApiRaw(server, `/conf/edit_port/${p.portId}`);
+        const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
+        const fields = {};
+        const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
+        let fm;
+        while ((fm = fieldRe.exec(html)) !== null) fields[fm[1]] = fm[2];
+        const selRe = /<select\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g;
+        let sm;
+        while ((sm = selRe.exec(html)) !== null) {
+          const selMatch = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*\s+selected/);
+          if (selMatch) { fields[sm[1]] = selMatch[1]; }
+          else { const first = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"/); if (first) fields[sm[1]] = first[1]; }
+        }
+        // Password from pre-fetched cache
+        const pw = (pwCache[p.serverName] || {})[p.portId];
+        if (pw) fields.proxy_password = pw;
+        fields.OS = os || '';
+        const result = await postFormApi(server, `/conf/edit_port/${p.portId}`, fields);
+        if (result.status === 302) ok++;
+        else failed++;
+      } catch (e) { failed++; }
+    }
+    _psCache = null; _psCacheTs = 0;
+    auditLog(req.user.login, 'bulk_os_spoof', { os, count: ports.length, ok, failed, ip: getClientIp(req) });
+    res.json({ ok: true, updated: ok, failed });
+  } catch (err) { res.status(500).json({ error: err.message }); }
+});
+
+// Bulk set auto-rotation on multiple modems
+app.post('/api/admin/bulk_rotation', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { modems, rotation } = req.body;
+    if (!Array.isArray(modems) || !modems.length) return res.status(400).json({ error: 'modems array required' });
+    const rotVal = String(rotation != null ? rotation : 10);
+    let ok = 0, failed = 0;
+    for (const m of modems) {
+      try {
+        const server = findServer(m.serverName);
+        if (!server) { failed++; continue; }
+        const raw = await fetchApiRaw(server, `/conf/edit/${m.imei}`);
+        const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
+        const fields = {};
+        const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
+        let fm;
+        while ((fm = fieldRe.exec(html)) !== null) fields[fm[1]] = fm[2];
+        fields.AUTO_IP_ROTATION = rotVal;
+        await postFormApi(server, `/conf/edit/${m.imei}`, fields);
+        modemRotationCache[m.serverName + ':' + m.imei] = parseInt(rotVal) || 0;
+        ok++;
+      } catch (e) { failed++; }
+    }
+    _psCache = null; _psCacheTs = 0;
+    auditLog(req.user.login, 'bulk_rotation', { rotation: rotVal, count: modems.length, ok, failed, ip: getClientIp(req) });
+    res.json({ ok: true, updated: ok, failed });
+  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
 app.post('/api/admin/apply_port', authMiddleware, adminMiddleware, async (req, res) => {
@@ -4407,10 +4937,12 @@ function rescheduleSpeedtests() {
   speedtestTimers = [];
 
   const times = appSettings.speedtest_times || ['02:00', '14:00'];
+  const mskOff = getTzOffset('Europe/Moscow');
   for (const timeStr of times) {
     const parts = timeStr.split(':').map(Number);
     if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) continue;
-    scheduleRepeating(parts[0], parts[1], 'Speedtest-' + timeStr, runNightlySpeedtests, true);
+    const utcHour = (parts[0] - mskOff + 24) % 24;
+    scheduleRepeating(utcHour, parts[1], 'Speedtest-' + timeStr + ' MSK', runNightlySpeedtests, true);
   }
 }
 
@@ -6013,14 +6545,25 @@ const httpServer = app.listen(PORT, () => {
     autoCreateMissingClients().catch(e => logger.error('[AutoCreate] Error:', e.message));
   }, 10 * 60 * 1000));
 
+  // Proxy latency monitoring
+  const pcMin = appSettings.proxy_check_interval_min || 60;
+  logger.info(`[ProxyCheck] Starting proxy latency monitoring (every ${pcMin} min)...`);
+  setTimeout(() => {
+    checkProxyLatency().catch(e => logger.error('[ProxyCheck] Initial error:', e.message));
+  }, 30 * 1000);
+  _proxyCheckInterval = setInterval(() => {
+    checkProxyLatency().catch(e => logger.error('[ProxyCheck] Error:', e.message));
+  }, pcMin * 60 * 1000);
+
   // Nightly DB cleanup at 00:30 UTC — remove old data
   scheduleRepeating(0, 30, 'DbCleanup', () => {
     try {
       const htDel = _htCleanup.run();
       const metaDel = _metaCleanup.run();
       const rotDel = _rotLogCleanup.run();
-      const total = htDel.changes + metaDel.changes + rotDel.changes;
-      if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes})`);
+      const pcDel = dbStmts.proxyCheckCleanOld.run();
+      const total = htDel.changes + metaDel.changes + rotDel.changes + pcDel.changes;
+      if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes} proxy_checks:${pcDel.changes})`);
     } catch (e) { logger.error('[DbCleanup] Error:', e.message); }
   });
 

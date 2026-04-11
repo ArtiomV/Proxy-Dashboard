@@ -28,16 +28,18 @@ function trafficBytesToGb(bytes) {
  * @param {boolean} isRO - true if server is S2 (Romania)
  */
 function normalizeOperator(rawOp, isRO) {
+  const clean = (rawOp || '').replace(/\s+/g, ' ').trim().toLowerCase();
   const map = {
     'unite': 'Moldtelecom',
     'moldtelecom': 'Moldtelecom',
+    'moldtelecom moldtelecom': 'Moldtelecom',
     'orange': isRO ? 'Orange RO' : 'Orange MD',
     'orange ro': 'Orange RO',
     'orange md': isRO ? 'Orange RO' : 'Orange MD',
     'vodafone ro': 'Vodafone RO',
     'vodafone': 'Vodafone RO'
   };
-  return map[rawOp] || (rawOp ? rawOp.charAt(0).toUpperCase() + rawOp.slice(1) : '');
+  return map[clean] || (clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : '');
 }
 
 module.exports = { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator };
