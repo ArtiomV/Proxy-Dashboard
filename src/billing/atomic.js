@@ -47,31 +47,58 @@ function atomicCredit(clientId, amount, ledgerEntry) {
 
 /**
  * atomicDebit — atomically subtract amount from client balance AND insert ledger entry
- * Same BUG-02/03/05 fixes as atomicCredit
+ * Same BUG-02/03/05 fixes as atomicCredit.
+ * Options:
+ *   - minBalance (number, default null) — if set, transaction aborts if balanceAfter < minBalance
+ *     → throws Error('insufficient_balance') with balanceBefore attached.
+ * Duplicate-charge protection:
+ *   - If UNIQUE index idx_ledger_unique_charge rejects insert (migration 015),
+ *     returns { duplicate: true, balanceBefore } without modifying balance.
  */
-function atomicDebit(clientId, amount, ledgerEntry) {
+function atomicDebit(clientId, amount, ledgerEntry, opts) {
+  opts = opts || {};
   amount = Math.round(parseFloat(amount) * 100) / 100;
   if (isNaN(amount)) throw new Error('atomicDebit: invalid amount');
   if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
-  let balanceBefore, balanceAfter, ledgerDbId;
-  db.transaction(() => {
-    const row = _clientGetBalance.get(clientId);
-    if (!row) throw new Error(`atomicDebit: client ${clientId} not found`);
-    balanceBefore = row.balance || 0;
-    balanceAfter = Math.round((balanceBefore - amount) * 100) / 100;
-    _clientUpdateBalance.run(balanceAfter, clientId);
-    if (ledgerEntry) {
-      const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
-      const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-      entry.db_id = result.lastInsertRowid;
-      ledgerDbId = entry.db_id;
-      if (!billingLedger[clientId]) billingLedger[clientId] = [];
-      billingLedger[clientId].push(entry);
+  let balanceBefore, balanceAfter, ledgerDbId, duplicate = false;
+  try {
+    db.transaction(() => {
+      const row = _clientGetBalance.get(clientId);
+      if (!row) throw new Error(`atomicDebit: client ${clientId} not found`);
+      balanceBefore = row.balance || 0;
+      balanceAfter = Math.round((balanceBefore - amount) * 100) / 100;
+      if (opts.minBalance != null && balanceAfter < opts.minBalance) {
+        const err = new Error('insufficient_balance');
+        err.code = 'INSUFFICIENT_BALANCE';
+        err.balanceBefore = balanceBefore;
+        err.balanceAfter = balanceAfter;
+        err.minBalance = opts.minBalance;
+        throw err;
+      }
+      _clientUpdateBalance.run(balanceAfter, clientId);
+      if (ledgerEntry) {
+        const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
+        const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
+        entry.db_id = result.lastInsertRowid;
+        ledgerDbId = entry.db_id;
+        if (!billingLedger[clientId]) billingLedger[clientId] = [];
+        billingLedger[clientId].push(entry);
+      }
+    })();
+  } catch (e) {
+    // SQLite raises SQLITE_CONSTRAINT_UNIQUE if the partial unique index on
+    // billing_ledger(client_id, date, type) WHERE type='charge' matches an
+    // existing row. That means the charge for this day already posted;
+    // skip without retry/double-billing.
+    if (e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''))) {
+      const row = _clientGetBalance.get(clientId);
+      return { duplicate: true, balanceBefore: row ? row.balance : 0, balanceAfter: row ? row.balance : 0 };
     }
-  })();
+    throw e;
+  }
   const client = clientById.get(clientId);
   if (client) client.balance = balanceAfter;
-  return { balanceBefore, balanceAfter, ledgerDbId };
+  return { balanceBefore, balanceAfter, ledgerDbId, duplicate };
 }
 
 module.exports = { init, atomicCredit, atomicDebit };

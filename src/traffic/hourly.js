@@ -156,8 +156,9 @@ async function aggregateHourlyTraffic() {
 
     let count = 0;
     let uncertainCount = 0;
-    const MAX_HOURLY_BYTES = 2 * 1073741824; // 2 GB sanity cap per modem
-    const UNCERTAIN_THRESHOLD = 50 * 1048576; // 50 MB minimum for uncertain flag
+    const MAX_HOURLY_BYTES = 20 * 1073741824; // 20 GB sanity cap per port
+    const UNCERTAIN_THRESHOLD = 150 * 1048576; // 150 MB minimum for uncertain flag (above month counter granularity)
+    const MONTH_COUNTER_STEP = 107374182; // 0.1 GB — ProxySmart month counter granularity
 
     const batch = db.transaction(() => {
       for (const data of results) {
@@ -314,26 +315,69 @@ async function aggregateHourlyTraffic() {
           let finalIncOut = incOutDay;
 
           if (deltaDay > 0 && deltaMon > 0) {
-            const maxDelta = Math.max(deltaDay, deltaMon);
-            const discrepancy = Math.abs(deltaDay - deltaMon) / maxDelta;
-            if (discrepancy > 0.05 && maxDelta > UNCERTAIN_THRESHOLD) {
+            const absDiff = Math.abs(deltaDay - deltaMon);
+            // Tolerance must scale with traffic volume:
+            //   - Floor: 2× month counter step (~214 MB) for low-traffic hours
+            //   - Proportional: 25% of deltaDay for high-traffic hours
+            // Pure 214 MB floor was too tight for 1-3 GB hours where 0.1 GB
+            // counter quantization can produce >300 MB absolute drift.
+            const tolerance = Math.max(2 * MONTH_COUNTER_STEP, deltaDay * 0.25);
+            if (absDiff > tolerance && deltaDay > UNCERTAIN_THRESHOLD) {
               uncertain = 2;
               uncertainCount++;
-              logger.warn(`[HourlyAgg] uncertain: nick=${nick} day_delta=${(deltaDay/1048576).toFixed(1)}MB month_delta=${(deltaMon/1048576).toFixed(1)}MB discrepancy=${(discrepancy*100).toFixed(1)}%`);
-              // Day counter is primary — always use day delta, just flag as uncertain
+              logger.warn(`[HourlyAgg] uncertain: nick=${nick} day_delta=${(deltaDay/1048576).toFixed(1)}MB month_delta=${(deltaMon/1048576).toFixed(1)}MB diff=${(absDiff/1048576).toFixed(1)}MB tolerance=${(tolerance/1048576).toFixed(1)}MB`);
             }
-          } else if ((deltaDay > UNCERTAIN_THRESHOLD && deltaMon === 0) || (deltaMon > UNCERTAIN_THRESHOLD && deltaDay === 0)) {
-            // One counter has significant traffic but the other shows zero — counter anomaly
+          } else if (deltaMon > UNCERTAIN_THRESHOLD && deltaDay === 0) {
+            // Month counter grew significantly but day counter shows zero — counter anomaly
             uncertain = 2;
             uncertainCount++;
-            logger.warn(`[HourlyAgg] uncertain (counter mismatch): nick=${nick} day_delta=${(deltaDay/1048576).toFixed(1)}MB month_delta=${(deltaMon/1048576).toFixed(1)}MB`);
+            logger.warn(`[HourlyAgg] uncertain (month>0, day=0): nick=${nick} day_delta=${(deltaDay/1048576).toFixed(1)}MB month_delta=${(deltaMon/1048576).toFixed(1)}MB`);
+          }
+          // NOTE: deltaDay > 0 && deltaMon === 0 is NORMAL — month counter has 0.1GB quantization
+          // and won't increment for small traffic bursts. Don't flag this as uncertain.
+
+          // --- Gap detection: split delta across missed hours ---
+          // If last_updated_at is more than ~1.5h in the past, the ProxySmart
+          // server was likely offline. Spread the accumulated delta evenly
+          // across the missed hours (marked uncertain=1 to distinguish from
+          // counter anomalies which use uncertain=2).
+          let missedHours = 0;
+          if (snap.last_updated_at) {
+            const lastMs = Date.parse(snap.last_updated_at.replace(' ', 'T') + 'Z');
+            if (!isNaN(lastMs)) {
+              const gapMs = nowMs - lastMs;
+              // More than 1 hour 30 minutes → gap
+              if (gapMs > 5400000) {
+                missedHours = Math.min(Math.floor(gapMs / 3600000), 48);
+              }
+            }
           }
 
-          // Sanity cap
           const totalInc = finalIncIn + finalIncOut;
           if (totalInc > 0 && totalInc < MAX_HOURLY_BYTES) {
-            _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, finalIncIn, finalIncOut, uncertain);
-            count++;
+            if (missedHours > 1) {
+              // Split delta evenly across missed hours, keep the current hour row as uncertain=1
+              const splitCount = missedHours;
+              const perHourIn  = Math.floor(finalIncIn  / splitCount);
+              const perHourOut = Math.floor(finalIncOut / splitCount);
+              let remIn  = finalIncIn  - perHourIn  * splitCount;
+              let remOut = finalIncOut - perHourOut * splitCount;
+              for (let k = splitCount - 1; k >= 0; k--) {
+                const bucketMs = prevHourStart - k * 3600000;
+                const bucketHourStart = new Date(bucketMs).toISOString().slice(0,13).replace('T',' ') + ':00';
+                const bin  = perHourIn  + (remIn  > 0 ? 1 : 0);  if (remIn  > 0) remIn--;
+                const bout = perHourOut + (remOut > 0 ? 1 : 0);  if (remOut > 0) remOut--;
+                if (bin + bout > 0) {
+                  _htUpsert.run(srv, fullPortId, nick, operator, clientName, bucketHourStart, bin, bout, 1);
+                }
+              }
+              count++;
+              uncertainCount++;
+              logger.warn(`[HourlyAgg] gap filled: nick=${nick} missed ${missedHours}h, total=${(totalInc/1048576).toFixed(1)}MB split evenly`);
+            } else {
+              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, finalIncIn, finalIncOut, uncertain);
+              count++;
+            }
           }
 
           // Update snap (only if counters are non-zero — protect against offline modems)
@@ -349,12 +393,13 @@ async function aggregateHourlyTraffic() {
             });
           }
         }
+
       }
-      _htCleanup.run();
+      _htCleanup();
     });
     batch();
     const extra = uncertainCount > 0 ? `, ${uncertainCount} uncertain` : '';
-    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} modem entries, ${snapCache.size} tracked${extra}`);
+    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} port entries, ${snapCache.size} tracked${extra}`);
   } catch (e) {
     logger.error('[HourlyAgg] Error:', e.message);
   }

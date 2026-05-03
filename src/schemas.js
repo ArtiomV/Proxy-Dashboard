@@ -18,6 +18,12 @@ const ClientCreateSchema = z.object({
   clientType: z.enum(['legal', 'individual']).default('legal'),
   autoActs: z.boolean().default(true),
   autoBills: z.boolean().default(true),
+  allowDebt: z.boolean().default(false),
+  maxDebt: z.coerce.number().min(0).max(10_000_000).optional(),
+  slaUptimePct: z.coerce.number().min(0).max(100).optional(),
+  slaMaxLatencyMs: z.coerce.number().int().min(1).max(60000).optional(),
+  slaMaxErrorPct: z.coerce.number().min(0).max(100).optional(),
+  slaAutoCredit: z.boolean().optional(),
   referred_by: z.string().max(20).optional(),
 });
 

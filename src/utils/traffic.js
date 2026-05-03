@@ -13,7 +13,7 @@ function parseTrafficValue(val) {
   const num = parseFloat(match[1]);
   const unit = (match[2] || 'B').toUpperCase();
   const mult = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824, TB: 1099511627776 };
-  return num * (mult[unit] || 1);
+  return Math.round(num * (mult[unit] || 1));
 }
 
 const parseBwToBytes = parseTrafficValue;

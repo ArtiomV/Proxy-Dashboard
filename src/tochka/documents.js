@@ -4,63 +4,126 @@ const logger = require('../logger');
 
 // Russian month names (prepositional case for "в январе")
 const MONTH_NAMES_RU = ['январе','феврале','марте','апреле','мае','июне','июле','августе','сентябре','октябре','ноябре','декабре'];
+// Accusative case for "за январь"
+const MONTH_NAMES_ACC = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
 
-// Helper: build act line items from billing ledger entries
+// Helper: build act line items from billing ledger entries.
+// Invariants enforced for every line item:
+//   amount === round(quantity × price, 2)
+// Without this Tochka renders inconsistent positions (qty=1 × price=4250
+// = "totalAmount=43816" — visually nonsense for the client).
 function buildActItemsFromLedger(client, period, billingLedger) {
   const ledgerEntries = billingLedger[client.id] || [];
-  const monthEntries = ledgerEntries.filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(period));
-  const monthCharges = monthEntries.filter(e => e.type === 'charge');
+  const monthEntries  = ledgerEntries.filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(period));
+  const monthCharges    = monthEntries.filter(e => e.type === 'charge');
   const monthCorrections = monthEntries.filter(e => e.type === 'correction');
-  const totalGb = monthCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
-  const chargeCost = Math.round(monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0) * 100) / 100;
+
   // Signed correction amount: debit=positive expense, credit=negative (refund)
   const correctionCost = Math.round(monthCorrections.reduce((sum, e) => {
     if (e.balance_before != null && e.balance_after != null) return sum + (e.balance_before - e.balance_after);
     return sum + (e.cost || e.amount || 0);
   }, 0) * 100) / 100;
-  const totalCost = Math.round((chargeCost + correctionCost) * 100) / 100;
-  const modemCharges = monthCharges.filter(e => e.billing_type === 'per_modem');
-  const gbCharges = monthCharges.filter(e => e.billing_type !== 'per_modem');
 
+  const modemCharges = monthCharges.filter(e => e.billing_type === 'per_modem');
+  const gbCharges    = monthCharges.filter(e => e.billing_type !== 'per_modem');
+
+  const round2 = v => Math.round(v * 100) / 100;
+  const round4 = v => Math.round(v * 10000) / 10000;
   const actItems = [];
+
+  // "за апрель 2026" (винительный падеж)
+  const [yyyy, mm] = period.split('-').map(Number);
+  const periodLabel = `${MONTH_NAMES_ACC[mm - 1] || ''} ${yyyy}`;
+
+  // ---- Per-GB tariff: одна строка ----
   if (gbCharges.length > 0) {
+    const totalCost = round2(gbCharges.reduce((s, e) => s + (e.cost     || 0), 0));
+    const totalGb   = round2(gbCharges.reduce((s, e) => s + (e.delta_gb || 0), 0));
+    // qty = реальные ГБ из ledger; price = ставка такая, чтобы qty × price = amount.
+    // Если по какой-то причине нет delta_gb — back-derive qty из cost.
+    const ppgFromLedger = gbCharges.find(e => e.price_per_unit > 0)?.price_per_unit || client.price || 23;
+    const qty   = totalGb > 0 ? totalGb : round4(totalCost / ppgFromLedger);
+    const price = qty > 0 ? round4(totalCost / qty) : round2(ppgFromLedger);
     actItems.push({
-      name: 'Услуги мобильных прокси (трафик)',
-      quantity: Math.round(totalGb * 100) / 100,
+      name: `Услуги мобильных прокси (трафик за ${periodLabel})`,
+      quantity: qty,
       unit: 'ГБ',
-      price: client.price || 23,
-      amount: Math.round(gbCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
+      price,
+      amount: totalCost
     });
   }
+
+  // ---- Per-modem tariff: одна строка ----
   if (modemCharges.length > 0) {
-    const modemCount = Math.max(...modemCharges.map(e => e.modem_count || 0)) || 1;
+    const totalCost = round2(modemCharges.reduce((s, e) => s + (e.cost || 0), 0));
+
+    // Находим средневзвешенное кол-во модемов за биллинговые дни.
+    // Для каждого charge: mc = cost × daysInMonth / price (если в ledger не сохранено).
+    let totalModemDays = 0;
+    let billedDays = 0;
+    const ppmSamples = [];
+    const dimSamples = [];
+    for (const e of modemCharges) {
+      const ppm = e.price_per_unit || client.price || 0;
+      const dim = e.days_in_month  || 30;
+      let mc = e.modem_count;
+      if (mc == null && ppm > 0 && dim > 0) mc = (e.cost || 0) * dim / ppm;
+      totalModemDays += mc || 0;
+      billedDays++;
+      if (ppm > 0) ppmSamples.push(ppm);
+      if (dim > 0) dimSamples.push(dim);
+    }
+    const avgModems = billedDays > 0 ? totalModemDays / billedDays : 0;
+    // qty = округлённое среднее число модемов
+    // price = totalCost / qty — реальная "стоимость за модем за период биллинга"
+    // (учитывает что биллинг шёл не весь месяц)
+    const qty = round2(avgModems) || 1;
+    const price = round4(totalCost / qty);
     actItems.push({
-      name: 'Услуги мобильных прокси (аренда модемов)',
-      quantity: modemCount,
+      name: `Услуги мобильных прокси (аренда модемов за ${periodLabel})`,
+      quantity: qty,
       unit: 'шт',
-      price: client.price || 0,
-      amount: Math.round(modemCharges.reduce((s, e) => s + (e.cost || 0), 0) * 100) / 100
+      price,
+      amount: totalCost
     });
   }
-  // Include corrections as a separate line item if any exist
+
+  // Corrections — show as separate line, signed
   if (correctionCost !== 0) {
     actItems.push({
-      name: 'Корректировка',
+      name: correctionCost > 0 ? 'Корректировка (доначисление)' : 'Корректировка (возврат)',
       quantity: 1,
       unit: 'услуга',
       price: correctionCost,
       amount: correctionCost
     });
   }
+
+  // Empty fallback (no charges this month)
   if (actItems.length === 0) {
     actItems.push({
       name: 'Услуги мобильных прокси',
-      quantity: Math.round(totalGb * 100) / 100 || 1,
-      unit: totalGb > 0 ? 'ГБ' : 'мес',
-      price: client.price || 23,
-      amount: totalCost
+      quantity: 1,
+      unit: 'мес',
+      price: 0,
+      amount: 0
     });
   }
+
+  // Tochka API requires price and amount to have ≤2 decimal places, and
+  // quantity ≤4. Enforce here so the invariant qty × price ≈ amount survives
+  // round-tripping through the bank.
+  for (const it of actItems) {
+    it.price    = Math.round((it.price    || 0) * 100) / 100;
+    it.amount   = Math.round((it.amount   || 0) * 100) / 100;
+    it.quantity = Math.round((it.quantity || 0) * 10000) / 10000;
+    const expected = round2((it.quantity || 0) * (it.price || 0));
+    if (Math.abs(expected - it.amount) > 0.05) {
+      logger.warn(`[Act] math mismatch on item "${it.name}": qty=${it.quantity} × price=${it.price} = ${expected} but amount=${it.amount}`);
+    }
+  }
+
+  const totalCost = round2(actItems.reduce((s, i) => s + (i.amount || 0), 0));
   return { actItems, totalCost, monthCharges: monthEntries };
 }
 
@@ -208,6 +271,7 @@ function calculateMonthlyBillAmount(client, cachedResults, billingLedger) {
 
 module.exports = {
   MONTH_NAMES_RU,
+  MONTH_NAMES_ACC,
   buildActItemsFromLedger,
   buildTochkaActBody,
   buildTochkaBillBody,

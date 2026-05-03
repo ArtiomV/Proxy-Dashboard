@@ -4,9 +4,11 @@ const https = require('https');
 const crypto = require('crypto');
 const logger = require('../logger');
 
-// Cache for Tochka JWKS public keys
+// Cache for Tochka JWKS public keys.
+// Keep TTL short — Tochka rotates signing keys without notice, and stale cache
+// means every webhook arriving after rotation is rejected as `key_not_found`.
 let tochkaJwksCache = { keys: null, fetchedAt: 0 };
-const JWKS_CACHE_TTL = 24 * 60 * 60 * 1000; // 24 hours
+const JWKS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
 
 function base64urlDecode(str) {
   let b64 = str.replace(/-/g, '+').replace(/_/g, '/');
@@ -106,8 +108,23 @@ async function verifyJwtSignature(token) {
   const alg = header.alg || 'RS256';
   let matchingKey = kid ? tochkaJwksCache.keys.find(k => k.kid === kid) : tochkaJwksCache.keys[0];
 
+  // Tochka may rotate signing keys at any time. If kid not found in cache,
+  // force-refresh the JWKS once and try again before rejecting.
   if (!matchingKey) {
-    logger.warn(`[Tochka JWT] No matching key found for kid="${kid}"`);
+    logger.warn(`[Tochka JWT] kid="${kid}" not in cache — force-refreshing JWKS`);
+    try {
+      const jwks = await fetchTochkaJwks();
+      tochkaJwksCache = { keys: jwks.keys || [], fetchedAt: Date.now() };
+      logger.info(`[Tochka JWKS] Force-refreshed: ${tochkaJwksCache.keys.length} key(s)`);
+      matchingKey = kid ? tochkaJwksCache.keys.find(k => k.kid === kid) : tochkaJwksCache.keys[0];
+    } catch (e) {
+      logger.error('[Tochka JWT] Force-refresh failed:', e.message);
+    }
+  }
+
+  if (!matchingKey) {
+    const known = tochkaJwksCache.keys.map(k => k.kid).join(', ');
+    logger.warn(`[Tochka JWT] kid="${kid}" still not found after refresh. Known kids: [${known}]`);
     return { verified: false, payload, reason: 'key_not_found' };
   }
 

@@ -70,6 +70,19 @@ function autoMigrateIfNeeded() {
 autoMigrateIfNeeded();
 
 // Run SQL migrations from migrations/ directory
+// Benign SQLite errors we can safely ignore when re-running migrations:
+// re-applied ALTER TABLE ADD COLUMN, re-applied CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS,
+// and similar "already applied" cases. Anything else aborts the migration (fail-fast).
+const BENIGN_MIGRATION_ERRORS = [
+  /duplicate column name/i,
+  /already exists/i,
+  /no such column/i,      // safe for UPDATE re-runs that reference a column that was dropped earlier in same file
+];
+function isBenignMigrationError(err) {
+  const msg = (err && err.message) || String(err);
+  return BENIGN_MIGRATION_ERRORS.some(rx => rx.test(msg));
+}
+
 function runMigrations() {
   db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -84,15 +97,32 @@ function runMigrations() {
     if (applied.has(file)) continue;
     const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
     try {
+      // Run the whole migration in a single atomic transaction.
+      // Pre-scan: if the whole file runs as one exec and fails with a non-benign
+      // error, roll back AND don't mark as applied.
       db.transaction(() => {
-        for (const stmt of sql.split(';').map(s => s.trim()).filter(Boolean)) {
-          try { db.exec(stmt); } catch (e) { /* column/index already exists — ok */ }
+        try {
+          db.exec(sql);
+        } catch (e) {
+          // Fall back to per-statement execution only to tolerate benign
+          // "already applied" errors (so re-runs work). Anything else re-throws.
+          for (const stmt of sql.split(';').map(s => s.trim()).filter(Boolean)) {
+            try { db.exec(stmt); }
+            catch (stmtErr) {
+              if (!isBenignMigrationError(stmtErr)) {
+                throw new Error(`statement failed: ${stmtErr.message}\n  SQL: ${stmt.slice(0, 200)}`);
+              }
+            }
+          }
         }
         db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(file);
       })();
       logger.info(`[Migration] Applied: ${file}`);
     } catch (e) {
-      logger.error(`[Migration] Failed: ${file}`, e.message);
+      // Hard fail: migration left DB unchanged; surface the actual error.
+      logger.error(`[Migration] FAILED ${file}:`, e.message);
+      // Don't silently continue — abort startup so deploy is visibly broken.
+      throw new Error(`Migration ${file} failed — aborting startup. ${e.message}`);
     }
   }
 }
@@ -128,7 +158,7 @@ const dbStmts = {
   insertAudit: db.prepare('INSERT INTO audit_log (timestamp, admin, action, details) VALUES (?, ?, ?, ?)'),
   getAuditLog: db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?'),
   countAuditLog: db.prepare('SELECT COUNT(*) as cnt FROM audit_log'),
-  cleanOldAudit: db.prepare("DELETE FROM audit_log WHERE timestamp < datetime('now', '-90 days')"),
+  // cleanOldAudit — moved to runRetentionCleanup()
 
   // Proxy latency monitoring
   proxyCheckInsert: db.prepare(`INSERT INTO proxy_checks (server_name, nick, client_name, operator, checked_at, connect_ms, total_ms, status_code, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
@@ -136,13 +166,13 @@ const dbStmts = {
   proxyCheckByNick: db.prepare(`SELECT * FROM proxy_checks WHERE nick = ? AND checked_at >= ? ORDER BY checked_at DESC LIMIT 100`),
   proxyCheckSummary: db.prepare(`SELECT nick, server_name, COUNT(*) as total_checks, AVG(total_ms) as avg_ms, SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as error_count FROM proxy_checks WHERE checked_at >= ? GROUP BY nick, server_name`),
   proxyCheckLast: db.prepare(`SELECT nick, server_name, connect_ms, total_ms, status_code, error, checked_at FROM proxy_checks WHERE id IN (SELECT MAX(id) FROM proxy_checks GROUP BY nick, server_name)`),
-  proxyCheckCleanOld: db.prepare(`DELETE FROM proxy_checks WHERE checked_at < datetime('now', '-30 days')`),
+  // proxyCheckCleanOld — moved to runRetentionCleanup()
 
   // System activity log
   systemLogInsert: db.prepare('INSERT INTO system_log (category, level, action, target, message, details) VALUES (?, ?, ?, ?, ?, ?)'),
   systemLogQuery: db.prepare('SELECT * FROM system_log WHERE timestamp >= ? ORDER BY id DESC LIMIT ?'),
   systemLogQueryFiltered: db.prepare('SELECT * FROM system_log WHERE timestamp >= ? AND (? IS NULL OR category = ?) AND (? IS NULL OR level = ?) ORDER BY id DESC LIMIT ?'),
-  systemLogClean: db.prepare("DELETE FROM system_log WHERE timestamp < datetime('now', '-30 days')"),
+  // systemLogClean — moved to runRetentionCleanup()
 };
 
 // _fileLocks moved to src/utils/files.js
@@ -247,20 +277,33 @@ const CLIENTS_FILE = path.join(__dirname, 'clients.json'); // JSON fallback for 
 const _clientUpsert = db.prepare(`INSERT INTO clients (id, login, password, password_hash, port_name, name, contact, notes,
     billing_type, price, currency, balance, api_key, referral_code, referred_by, referral_balance,
     reset_token, inn, kpp, legal_name, contract_info, address, auto_acts, auto_bills,
-    last_traffic_snapshot, created_at, client_type, billing_paused)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    last_traffic_snapshot, created_at, client_type, billing_paused, allow_debt, max_debt,
+    sla_uptime_pct, sla_max_latency_ms, sla_max_error_pct, sla_auto_credit)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   ON CONFLICT(id) DO UPDATE SET
     login=excluded.login, password=excluded.password, password_hash=excluded.password_hash,
     port_name=excluded.port_name, name=excluded.name, contact=excluded.contact,
     notes=excluded.notes, billing_type=excluded.billing_type, price=excluded.price,
-    currency=excluded.currency, balance=excluded.balance, api_key=excluded.api_key,
+    currency=excluded.currency,
+    -- balance INTENTIONALLY NOT updated here.
+    -- It is owned exclusively by atomicCredit/atomicDebit/_clientUpdateBalance
+    -- and delete_ledger_entry. Including it here used to overwrite live balance
+    -- with stale in-memory value when saveClients was called concurrently with
+    -- billing (race observed for ВАЙЛДБОКС: -8766.45 → 0).
+    api_key=excluded.api_key,
     referral_code=excluded.referral_code, referred_by=excluded.referred_by,
     referral_balance=excluded.referral_balance, reset_token=excluded.reset_token,
     inn=excluded.inn, kpp=excluded.kpp, legal_name=excluded.legal_name,
     contract_info=excluded.contract_info, address=excluded.address,
     auto_acts=excluded.auto_acts, auto_bills=excluded.auto_bills,
     last_traffic_snapshot=excluded.last_traffic_snapshot, client_type=excluded.client_type,
-    billing_paused=excluded.billing_paused, updated_at=datetime('now')`);
+    billing_paused=excluded.billing_paused, allow_debt=excluded.allow_debt,
+    max_debt=excluded.max_debt,
+    sla_uptime_pct=excluded.sla_uptime_pct,
+    sla_max_latency_ms=excluded.sla_max_latency_ms,
+    sla_max_error_pct=excluded.sla_max_error_pct,
+    sla_auto_credit=excluded.sla_auto_credit,
+    updated_at=datetime('now')`);
 const _clientDelete = db.prepare('DELETE FROM clients WHERE id = ?');
 const _clientGetIds = db.prepare('SELECT id FROM clients');
 
@@ -310,6 +353,12 @@ function clientFromRow(r) {
     legalName: r.legal_name || '', contractInfo: r.contract_info || '',
     address: r.address || '', autoActs: r.auto_acts !== 0, autoBills: r.auto_bills !== 0,
     billingPaused: r.billing_paused === 1, clientType: r.client_type || 'legal',
+    allowDebt: r.allow_debt === 1,
+    maxDebt: r.max_debt != null ? r.max_debt : null,
+    slaUptimePct:    r.sla_uptime_pct    != null ? r.sla_uptime_pct : 99,
+    slaMaxLatencyMs: r.sla_max_latency_ms != null ? r.sla_max_latency_ms : 1000,
+    slaMaxErrorPct:  r.sla_max_error_pct  != null ? r.sla_max_error_pct : 5,
+    slaAutoCredit:   r.sla_auto_credit === 1,
     last_traffic_snapshot: r.last_traffic_snapshot
       ? (typeof r.last_traffic_snapshot === 'string' ? JSON.parse(r.last_traffic_snapshot) : r.last_traffic_snapshot)
       : { timestamp: null, month_bytes: 0 },
@@ -376,7 +425,13 @@ function saveClients(clientsList) {
           c.inn || '', c.kpp || '', c.legalName || '', c.contractInfo || '',
           c.address || '', c.autoActs !== false ? 1 : 0, c.autoBills !== false ? 1 : 0,
           JSON.stringify(c.last_traffic_snapshot || {}), c.createdAt || new Date().toISOString(),
-          c.clientType || 'legal', c.billingPaused ? 1 : 0
+          c.clientType || 'legal', c.billingPaused ? 1 : 0,
+          c.allowDebt ? 1 : 0,
+          typeof c.maxDebt === 'number' ? c.maxDebt : null,
+          typeof c.slaUptimePct    === 'number' ? c.slaUptimePct    : 99,
+          typeof c.slaMaxLatencyMs === 'number' ? c.slaMaxLatencyMs : 1000,
+          typeof c.slaMaxErrorPct  === 'number' ? c.slaMaxErrorPct  : 5,
+          c.slaAutoCredit ? 1 : 0
         );
         // Sync payments
         _paymentDeleteByClient.run(c.id);
@@ -529,13 +584,22 @@ function logActivity(category, level, action, target, message, details = null) {
   }
 }
 
-const TRUSTED_PROXIES = (process.env.TRUSTED_PROXY || '127.0.0.1,::1').split(',').map(s => s.trim());
+const TRUSTED_PROXIES = (process.env.TRUSTED_PROXY || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
+function normalizeIp(ip) {
+  if (!ip) return '';
+  // Strip ::ffff: prefix (IPv6-mapped IPv4)
+  return ip.replace(/^::ffff:/i, '').trim();
+}
 function getClientIp(req) {
-  const remote = req.socket?.remoteAddress || '';
-  const isTrusted = TRUSTED_PROXIES.some(p => remote.includes(p));
+  const raw = req.socket?.remoteAddress || '';
+  const remote = normalizeIp(raw);
+  const isTrusted = TRUSTED_PROXIES.some(p => normalizeIp(p) === remote || remote.includes(normalizeIp(p)));
   if (isTrusted) {
-    return (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
-      || req.headers['x-real-ip'] || remote || 'unknown';
+    const xff = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    const realIp = req.headers['x-real-ip'] || '';
+    const clientIp = normalizeIp(xff) || normalizeIp(realIp);
+    // Return actual client IP; fallback to req.ip (Express trust proxy) or remote
+    return clientIp || normalizeIp(req.ip) || remote || 'unknown';
   }
   return remote || 'unknown';
 }
@@ -655,8 +719,8 @@ const _htUpsert = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, 
 const _snapUpsert = db.prepare(`INSERT INTO hourly_snapshots
   (port_id, day_in, day_out, month_in, month_out, yesterday_in, yesterday_out,
    prev_month_in, prev_month_out, day_at_last_hour_start_in, day_at_last_hour_start_out,
-   mon_at_last_hour_start_in, mon_at_last_hour_start_out, pending, captured_at)
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
+   mon_at_last_hour_start_in, mon_at_last_hour_start_out, pending, captured_at, last_updated_at)
+  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
   ON CONFLICT(port_id) DO UPDATE SET
   day_in=excluded.day_in, day_out=excluded.day_out,
   month_in=excluded.month_in, month_out=excluded.month_out,
@@ -666,12 +730,65 @@ const _snapUpsert = db.prepare(`INSERT INTO hourly_snapshots
   day_at_last_hour_start_out=excluded.day_at_last_hour_start_out,
   mon_at_last_hour_start_in=excluded.mon_at_last_hour_start_in,
   mon_at_last_hour_start_out=excluded.mon_at_last_hour_start_out,
-  pending=excluded.pending, captured_at=excluded.captured_at`);
+  pending=excluded.pending, captured_at=excluded.captured_at,
+  last_updated_at=datetime('now')`);
 const _snapGet = db.prepare('SELECT * FROM hourly_snapshots WHERE port_id = ?');
 const _snapGetAll = db.prepare('SELECT * FROM hourly_snapshots');
-const _htCleanup = db.prepare("DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-90 days')");
-const _metaCleanup = db.prepare("DELETE FROM modem_meta WHERE updated_at < datetime('now', '-30 days')");
-const _rotLogCleanup = db.prepare("DELETE FROM rotation_log WHERE started_at < datetime('now', '-90 days')");
+// API usage tracking (Phase 2)
+const _apiUsageInsert = db.prepare(`INSERT INTO api_usage
+  (client_id, client_name, api_key_prefix, endpoint, method, status_code,
+   response_time_ms, user_agent, ip, error)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+// Retention cleanup — dynamic SQL using appSettings retention values
+function runRetentionCleanup() {
+  const retentions = {
+    traffic_hourly: { col: 'hour_start', key: 'retention_traffic_hourly', def: 90 },
+    modem_meta:     { col: 'updated_at', key: 'retention_modem_meta', def: 30 },
+    rotation_log:   { col: 'started_at', key: 'retention_rotation_log', def: 90 },
+    proxy_checks:   { col: 'checked_at', key: 'retention_proxy_checks', def: 30 },
+    audit_log:      { col: 'timestamp',  key: 'retention_audit_log', def: 90 },
+    system_log:     { col: 'timestamp',  key: 'retention_system_log', def: 30 },
+    api_usage:      { col: 'timestamp',  key: 'retention_api_usage', def: 30 },
+    // DB-level audit (triggers): keep 365 days by default — financial forensics
+    db_audit:         { col: 'ts', key: 'retention_db_audit', def: 365 },
+    db_audit_context: { col: 'ts', key: 'retention_db_audit', def: 365 },
+    // Auto-reboot log — 90 days
+    auto_reboot_log:  { col: 'rebooted_at', key: 'retention_auto_reboot', def: 90 },
+  };
+  const results = {};
+  for (const [table, { col, key, def }] of Object.entries(retentions)) {
+    const raw = appSettings[key];
+    const days = Number.isInteger(raw) && raw >= 7 ? raw : def;
+    results[table] = db.prepare(`DELETE FROM ${table} WHERE ${col} < datetime('now', '-${days} days')`).run();
+  }
+  // In-memory dailyTraffic cleanup (mirrors daily_traffic table retention)
+  try {
+    const rawDt = appSettings.retention_daily_traffic;
+    const dtDays = Number.isInteger(rawDt) && rawDt >= 7 ? rawDt : 90;
+    const cutoff = new Date(Date.now() - dtDays * 86400000).toISOString().slice(0, 10);
+    let removedDays = 0, removedKeys = 0;
+    for (const [key, days] of Object.entries(dailyTraffic)) {
+      for (const date of Object.keys(days)) {
+        if (date < cutoff) { delete days[date]; removedDays++; }
+      }
+      if (!Object.keys(days).length) { delete dailyTraffic[key]; removedKeys++; }
+    }
+    // Also prune the daily_traffic table to stay in sync with memory
+    const dbRes = db.prepare('DELETE FROM daily_traffic WHERE date < ?').run(cutoff);
+    results.daily_traffic_memory = { changes: removedDays, removedKeys };
+    results.daily_traffic = dbRes;
+  } catch (e) {
+    logger.error('[Retention] dailyTraffic cleanup error:', e.message);
+  }
+  return results;
+}
+
+// Closure for hourly.js dependency (replaces prepared statement)
+const _htCleanup = () => {
+  const days = Number.isInteger(appSettings.retention_traffic_hourly) && appSettings.retention_traffic_hourly >= 7
+    ? appSettings.retention_traffic_hourly : 90;
+  return db.prepare(`DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-${days} days')`).run();
+};
 
 // Save yesterday's traffic from live ProxySmart data — called every 5 min
 async function syncYesterdayTraffic() {
@@ -959,6 +1076,11 @@ if (clientsMigrated) saveClients(clients);
 rebuildClientMaps(); // Build maps before auto-migration check
 billing.init({ db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams, billingLedger, clientById });
 
+// DB-level audit (triggers + JS context layer). Initialized after migrations
+// so triggers exist; harmless if already initialized.
+const dbAudit = require('./src/audit/db_audit');
+dbAudit.init({ db, logger });
+
 // Auto-migrate .env users (non-admin) to clients if not already there
 for (const [login, u] of Object.entries(users)) {
   if (u.source === 'env' && u.portNameFilter !== '*') {
@@ -1009,7 +1131,7 @@ logger.info(`Loaded ${Object.keys(users).length} user(s): ${Object.keys(users).j
 logger.info(`  - ${clients.length} client(s) from SQLite`);
 rebuildClientMaps();
 
-const SESSION_TTL = 30 * 24 * 60 * 60 * 1000; // 30 days
+function getSessionTTL() { return (appSettings.session_ttl_days || 30) * 86400000; }
 
 function getSession(token) {
   if (!token) return null;
@@ -1060,7 +1182,48 @@ const SETTINGS_DEFAULTS = {
   proxy_check_target: 'https://www.instagram.com/',
   proxy_check_warn_ms: 500,
   proxy_check_bad_ms: 2000,
-  proxy_check_interval_min: 60
+  proxy_check_interval_min: 60,
+  // Auto-recovery
+  recovery_offline_sec: 60,
+  recovery_max_attempts: 3,
+  recovery_retry_min: 3,
+  // Modem tracking & rotation
+  tracking_interval_min: 3,
+  rotation_cache_ttl_min: 30,
+  rotation_sync_interval_min: 30,
+  // Proxy check (additional)
+  proxy_check_timeout_sec: 15,
+  proxy_check_concurrency: 10,
+  error_rate_threshold: 15, // % errors to highlight red in modem table
+  // "Сбоит прокси" alerts (Проблемы инфраструктуры): per-modem flaky thresholds
+  proxy_alert_latency_ms: 1500, // avg latency above which modem is flagged as flaky
+  proxy_alert_error_pct:  5,    // error % above which modem is flagged as flaky
+  proxy_alert_window_min: 60,   // evaluation window (minutes)
+  // Auto-reboot of flaky modems (high latency / high errors only — NOT for rotation-fail)
+  auto_reboot_enabled:         false, // disabled by default — admin enables in Settings
+  auto_reboot_min_interval_min: 60,   // throttle: don't reboot same modem more often than this
+  // Speedtest (additional)
+  speedtest_low_threshold: 1,
+  speedtest_retest_delay_min: 10,
+  speedtest_max_history: 30,
+  // Data retention (days)
+  retention_traffic_hourly: 90,
+  retention_daily_traffic: 90,
+  retention_audit_log: 90,
+  retention_system_log: 30,
+  retention_rotation_log: 90,
+  retention_proxy_checks: 30,
+  retention_modem_meta: 30,
+  retention_api_usage: 30,
+  retention_db_audit: 365,
+  // Session & billing
+  session_ttl_days: 30,
+  billing_retry_delay_hours: 1,
+  reconciliation_tolerance_gb: 0.01,
+  // CRM & auto-create
+  auto_create_interval_min: 10,
+  crm_check_interval_min: 10,
+  crm_reminder_days: 3
 };
 
 let appSettings = { ...SETTINGS_DEFAULTS };
@@ -1068,7 +1231,7 @@ let appSettings = { ...SETTINGS_DEFAULTS };
 try {
   const row = _kvGet.get('app_settings');
   if (row) {
-    appSettings = JSON.parse(row.value);
+    appSettings = { ...SETTINGS_DEFAULTS, ...JSON.parse(row.value) };
   } else {
     // One-time migration from settings.json
     const SETTINGS_FILE = path.join(__dirname, 'settings.json');
@@ -1113,6 +1276,19 @@ function computeClientMonthBytes(allServerResults, portName) {
   return totalBytes;
 }
 
+// Russian plural for "модем" in genitive case (used in "Списание за аренду N модем*")
+// 1 → модема (singular gen), 2-4 → модема (sing gen), 5-20 → модемов (plur gen),
+// 21 → модема (after 1 ending), 22-24 → модема (2-4 ending), 25-30 → модемов, etc.
+// Special case: 11-14 always "модемов".
+function modemPlural(n) {
+  n = Math.abs(Math.round(Number(n) || 0)) % 100;
+  const last = n % 10;
+  if (n >= 11 && n <= 14) return 'модемов';
+  if (last === 1) return 'модема';
+  if (last >= 2 && last <= 4) return 'модема';
+  return 'модемов';
+}
+
 function computeClientYesterdayBytes(allServerResults, portName) {
   let totalBytes = 0;
   for (const data of allServerResults) {
@@ -1126,6 +1302,36 @@ function computeClientYesterdayBytes(allServerResults, portName) {
     }
   }
   return totalBytes;
+}
+
+// Compute bytes for a client on a specific MSK date.
+// Source priority:
+//   1. traffic_hourly grouped by client_name (independent of ProxySmart yesterday counter,
+//      so it survives ProxySmart restarts that zero the daily counters)
+//   2. fallback to daily_traffic table joined via portKeyToPortName mapping
+// Returns total bytes (in + out).
+function getClientBytesForMskDate(portName, date) {
+  if (!portName || !date) return 0;
+  const r1 = db.prepare(`
+    SELECT COALESCE(SUM(bytes_in + bytes_out), 0) as bytes
+    FROM traffic_hourly
+    WHERE client_name = ?
+      AND substr(datetime(hour_start, '+3 hours'), 1, 10) = ?
+  `).get(portName, date);
+  if (r1.bytes > 0) return r1.bytes;
+  // Fallback — daily_traffic stores by port_id; resolve via in-memory map
+  const portIds = [];
+  for (const [k, v] of Object.entries(portKeyToPortName)) {
+    if (v === portName) portIds.push(k);
+  }
+  if (portIds.length === 0) return 0;
+  const placeholders = portIds.map(() => '?').join(',');
+  const r2 = db.prepare(`
+    SELECT COALESCE(SUM(bytes_in + bytes_out), 0) as bytes
+    FROM daily_traffic
+    WHERE date = ? AND port_name IN (${placeholders})
+  `).get(date, ...portIds);
+  return r2.bytes || 0;
 }
 
 function computeClientPrevMonthBytes(allServerResults, portName) {
@@ -1179,6 +1385,7 @@ const DOCUMENTS_DIR = path.join(__dirname, 'documents');
 if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true });
 
 const app = express();
+app.set('trust proxy', 1); // trust first proxy (nginx) — req.ip uses x-forwarded-for
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
@@ -1196,19 +1403,25 @@ app.use((req, res, next) => {
   next();
 });
 
-// Rate limiting for login endpoint (SEC-03: anti-bruteforce)
+// DB-audit per-request context (lazy: only inserts a context_id row when
+// the handler does an actual DB write that hits an audited table).
+app.use(dbAudit.expressMiddleware);
+
+// Rate limiting for login endpoint (SEC-03: anti-bruteforce, per real client IP)
 const loginLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 5, // max 5 attempts per real client IP per window
+  max: 10, // max 10 attempts per real client IP per window
   keyGenerator: (req) => getClientIp(req), // use real IP behind nginx, not proxy IP
   message: { error: 'Too many login attempts, try again in 15 minutes' },
   standardHeaders: true,
-  legacyHeaders: false
+  legacyHeaders: false,
+  skipSuccessfulRequests: true // don't count successful logins
 });
 
 const resetTokenLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 10, // max 10 attempts per IP per minute
+  keyGenerator: (req) => getClientIp(req),
   message: { error: 'Too many requests, try again in 1 minute' },
   standardHeaders: true,
   legacyHeaders: false
@@ -1217,6 +1430,7 @@ const resetTokenLimiter = rateLimit({
 const checkProxyLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5, // max 5 batch checks per IP per minute
+  keyGenerator: (req) => getClientIp(req),
   message: { error: 'Too many proxy check requests, try again in 1 minute' },
   standardHeaders: true,
   legacyHeaders: false
@@ -1229,6 +1443,12 @@ function authMiddleware(req, res, next) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
   req.user = sess;
+  // Ensure DB-audit knows who's behind any subsequent write in this request.
+  // Cheap (one INSERT per write request) — no-op for read-only GETs that
+  // never trigger watched tables.
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    try { dbAudit.ensureRequestContext(req.method + ' ' + (req.originalUrl || req.path || '').split('?')[0]); } catch (_) {}
+  }
   next();
 }
 
@@ -1280,7 +1500,7 @@ app.post('/api/login', loginLimiter, validate(LoginSchema), async (req, res) => 
   if (!passwordValid) return res.status(401).json({ error: 'Invalid login or password' });
   const token = generateToken();
   const isAdmin = user.portNameFilter === '*';
-  createSession(token, login, user.portNameFilter, isAdmin, Date.now() + SESSION_TTL);
+  createSession(token, login, user.portNameFilter, isAdmin, Date.now() + getSessionTTL());
   // Log client logins (not admin)
   if (!isAdmin) {
     auditLog(login, 'client_login', { ip: getClientIp(req), portNameFilter: user.portNameFilter });
@@ -1301,7 +1521,7 @@ app.post('/api/admin/impersonate/:id', authMiddleware, adminMiddleware, (req, re
   const user = users[client.login];
   if (!user) return res.status(400).json({ error: 'Client user not found' });
   const token = generateToken();
-  createSession(token, client.login, user.portNameFilter, false, Date.now() + SESSION_TTL);
+  createSession(token, client.login, user.portNameFilter, false, Date.now() + getSessionTTL());
   res.json({ ok: true, token, login: client.login });
 });
 
@@ -1310,11 +1530,520 @@ const extractServerName = proxySmart.extractServerName;
 const getHttpLib = proxySmart.getHttpLib;
 
 // Manual billing trigger
+// =========== Финансовая аналитика ===========
+
+// Категории затрат и их subkey-структура
+const COST_CATEGORIES = {
+  server:      { label: 'Аренда серверов', perItem: true,  itemType: 'server' },   // subkey = S1/S2/...
+  sim:         { label: 'SIM-карты',       perItem: true,  itemType: 'operator' }, // subkey = Orange MD / Moldtelecom / ...
+  electricity: { label: 'Электричество',   perItem: false },
+  hosting:     { label: 'Хостинг/связь',   perItem: false },
+  salary:      { label: 'Зарплата',        perItem: false },
+  other:       { label: 'Прочее',          perItem: false }
+};
+
+// GET /api/admin/monthly_costs?period=YYYY-MM
+// Возвращает все строки затрат за период + meta (категории, операторы, серверы для UI).
+app.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const period = String(req.query.period || '').match(/^\d{4}-\d{2}$/) ? req.query.period
+                 : new Date().toISOString().slice(0, 7);
+    const rows = db.prepare(`SELECT id, period, category, subkey, amount, notes, updated_at
+      FROM monthly_costs WHERE period = ? ORDER BY category, subkey`).all(period);
+    // Если за период пусто — auto-fill из предыдущего месяца (как шаблон, без сохранения)
+    let template = null;
+    if (rows.length === 0) {
+      const prev = db.prepare("SELECT MAX(period) as p FROM monthly_costs WHERE period < ?").get(period).p;
+      if (prev) {
+        template = db.prepare(`SELECT category, subkey, amount, notes
+          FROM monthly_costs WHERE period = ?`).all(prev);
+      }
+    }
+    // Список операторов (для SIM): из live ProxySmart
+    const operators = db.prepare(`SELECT DISTINCT operator FROM modem_meta
+      WHERE operator != '' ORDER BY operator`).all().map(r => r.operator);
+    const servers = apiServers.map(s => s.name);
+    res.json({
+      period, rows, template,
+      categories: COST_CATEGORIES,
+      meta: { operators, servers }
+    });
+  } catch (e) {
+    logger.error('[monthly_costs/get]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/admin/monthly_costs
+// Body: { period: 'YYYY-MM', items: [{category, subkey, amount, notes}, ...] }
+// Перезаписывает строки за период (атомарно).
+app.post('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const period = String(req.body?.period || '');
+    if (!/^\d{4}-\d{2}$/.test(period)) return res.status(400).json({ error: 'period YYYY-MM required' });
+    const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    db.transaction(() => {
+      db.prepare('DELETE FROM monthly_costs WHERE period = ?').run(period);
+      const ins = db.prepare(`INSERT INTO monthly_costs (period, category, subkey, amount, notes)
+        VALUES (?, ?, ?, ?, ?)`);
+      for (const it of items) {
+        if (!it || !it.category) continue;
+        const amount = Number(it.amount);
+        if (!Number.isFinite(amount) || amount < 0) continue;
+        if (!COST_CATEGORIES[it.category]) continue;
+        ins.run(period, it.category, it.subkey || null, amount, (it.notes || '').slice(0, 500));
+      }
+    })();
+    auditLog(req.user.login, 'monthly_costs_save', { period, count: items.length });
+    res.json({ ok: true, period, saved: items.length });
+  } catch (e) {
+    logger.error('[monthly_costs/post]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// GET /api/admin/finance_dashboard
+// Считает все метрики для финансового дашборда.
+// MRR — trailing 30d revenue per client. NRR — 3-month cohort.
+app.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const now = new Date();
+    const todayStr = now.toISOString().slice(0, 10);
+    const period = String(req.query.period || '').match(/^\d{4}-\d{2}$/) ? req.query.period
+                 : todayStr.slice(0, 7);
+
+    // Date helpers
+    const isoDay = d => d.toISOString().slice(0, 10);
+    const dayMs = 86400000;
+    const since30 = isoDay(new Date(now.getTime() - 30 * dayMs));
+    const since60 = isoDay(new Date(now.getTime() - 60 * dayMs));
+    const since90 = isoDay(new Date(now.getTime() - 90 * dayMs));
+    const since120 = isoDay(new Date(now.getTime() - 120 * dayMs));
+    const since365 = isoDay(new Date(now.getTime() - 365 * dayMs));
+
+    // -- per-client MRR (trailing 30d revenue) --
+    const mrrRows = db.prepare(`SELECT client_id, SUM(amount) as mrr
+      FROM billing_ledger WHERE type='charge' AND date >= ? GROUP BY client_id`).all(since30);
+    const mrrByClient = Object.fromEntries(mrrRows.map(r => [r.client_id, Math.round(r.mrr * 100) / 100]));
+
+    // -- per-client previous 30d (60..30 days ago) --
+    const prevMrrRows = db.prepare(`SELECT client_id, SUM(amount) as mrr
+      FROM billing_ledger WHERE type='charge' AND date >= ? AND date < ? GROUP BY client_id`).all(since60, since30);
+    const prevMrrByClient = Object.fromEntries(prevMrrRows.map(r => [r.client_id, Math.round(r.mrr * 100) / 100]));
+
+    // -- 3 months ago window (120..90 days ago) for NRR baseline --
+    const baseRows = db.prepare(`SELECT client_id, SUM(amount) as rev
+      FROM billing_ledger WHERE type='charge' AND date >= ? AND date < ? GROUP BY client_id`).all(since120, since90);
+    const baseByClient = Object.fromEntries(baseRows.map(r => [r.client_id, Math.round(r.rev * 100) / 100]));
+
+    // -- per-tariff split --
+    const totalMrr = Object.values(mrrByClient).reduce((s, v) => s + v, 0);
+    const prevTotalMrr = Object.values(prevMrrByClient).reduce((s, v) => s + v, 0);
+    const mrrGrowthPct = prevTotalMrr > 0 ? Math.round(((totalMrr - prevTotalMrr) / prevTotalMrr) * 1000) / 10 : null;
+
+    // Per-tariff revenue
+    const perTariffRows = db.prepare(`SELECT
+      COALESCE(json_extract(details, '$.billing_type'), 'per_gb') as bt,
+      SUM(amount) as rev
+      FROM billing_ledger WHERE type='charge' AND date >= ? GROUP BY bt`).all(since30);
+    const perTariff = {};
+    perTariffRows.forEach(r => { perTariff[r.bt || 'per_gb'] = Math.round(r.rev * 100) / 100; });
+
+    // -- ARR --
+    const arr = Math.round(totalMrr * 12);
+
+    // -- Active / new / churned --
+    const activeClients = clients.filter(c => !c.billingPaused && (mrrByClient[c.id] || 0) > 0);
+    const periodFirstDay = period + '-01';
+    const newClients = clients.filter(c => (c.createdAt || '').slice(0, 10) >= periodFirstDay
+                                          && (c.createdAt || '').slice(0, 7) === period);
+    // Churned: had revenue in [60..30d ago], no revenue in last 30d, and (paused OR balance < 0)
+    const churnedClients = clients.filter(c => {
+      const had = (prevMrrByClient[c.id] || 0) > 0;
+      const has = (mrrByClient[c.id] || 0) > 0;
+      return had && !has;
+    });
+
+    // -- ARPU --
+    const arpu = activeClients.length > 0 ? Math.round(totalMrr / activeClients.length) : 0;
+
+    // -- Top-N concentration --
+    const sortedByMrr = Object.entries(mrrByClient)
+      .map(([cid, mrr]) => ({ cid, mrr, name: (clientById.get(cid) || {}).name || cid }))
+      .sort((a, b) => b.mrr - a.mrr);
+    const topN = (n) => sortedByMrr.slice(0, n).reduce((s, x) => s + x.mrr, 0);
+    const top1 = sortedByMrr[0] || null;
+    const concentration = totalMrr > 0 ? {
+      top1_pct:  Math.round((topN(1) / totalMrr) * 1000) / 10,
+      top1_name: top1 ? top1.name : '—',
+      top3_pct:  Math.round((topN(3) / totalMrr) * 1000) / 10,
+      top5_pct:  Math.round((topN(5) / totalMrr) * 1000) / 10
+    } : { top1_pct: 0, top1_name: '—', top3_pct: 0, top5_pct: 0 };
+
+    // -- NRR (3-month cohort) --
+    // Cohort = clients that had revenue in [120..90d ago].
+    // Their revenue then vs their revenue now (last 30d).
+    const cohortIds = Object.keys(baseByClient);
+    const cohortRevenueThen = cohortIds.reduce((s, id) => s + (baseByClient[id] || 0), 0);
+    // Their CURRENT 30-day revenue (only the same cohort, including expansions)
+    const cohortRevenueNow = cohortIds.reduce((s, id) => s + (mrrByClient[id] || 0), 0);
+    // Normalize "then" to a 30-day window (the baseRows window is also 30 days, so direct ratio)
+    const nrrPct = cohortRevenueThen > 0 ? Math.round((cohortRevenueNow / cohortRevenueThen) * 1000) / 10 : null;
+
+    // -- Churn rate --
+    const startOfPeriodActive = clients.filter(c => (prevMrrByClient[c.id] || 0) > 0).length;
+    const churnRatePct = startOfPeriodActive > 0
+      ? Math.round((churnedClients.length / startOfPeriodActive) * 1000) / 10
+      : 0;
+
+    // -- Modem utilization (live data) --
+    let liveResults = [];
+    try { liveResults = await fetchAllServersDataCached(); } catch (_) {}
+    let totalModems = 0, rentedModems = 0;
+    const modemsByServer = {};
+    const modemsByOperator = {};
+    const modemsByPortName = {};
+    for (const data of liveResults) {
+      const srv = data.serverName;
+      if (typeof data.bw !== 'object') continue;
+      modemsByServer[srv] = modemsByServer[srv] || { total: 0, rented: 0 };
+      const isRO = (SERVER_COUNTRIES[srv] || {}).country === 'RO';
+      const statusArr = Array.isArray(data.status) ? data.status : [];
+      const opByImei = {};
+      for (const m of statusArr) {
+        const md = m.modem_details || {};
+        if (md.IMEI) {
+          const op = normalizeOperator(((m.net_details || {}).CELLOP || md.OPERATOR || ''), isRO);
+          opByImei[md.IMEI] = op;
+        }
+      }
+      const portsMap = data.ports || {};
+      for (const [portId, b] of Object.entries(data.bw)) {
+        totalModems++;
+        modemsByServer[srv].total++;
+        if (b.portName) {
+          rentedModems++;
+          modemsByServer[srv].rented++;
+          modemsByPortName[b.portName] = modemsByPortName[b.portName] || { count: 0, server: srv };
+          modemsByPortName[b.portName].count++;
+        }
+        // Operator from status
+        // Find IMEI for this portId
+        for (const imei in portsMap) {
+          if (Array.isArray(portsMap[imei])) {
+            for (const p of portsMap[imei]) {
+              if (p.portID === portId) {
+                const op = opByImei[imei];
+                if (op) {
+                  modemsByOperator[op] = modemsByOperator[op] || { total: 0, rented: 0 };
+                  modemsByOperator[op].total++;
+                  if (b.portName) modemsByOperator[op].rented++;
+                }
+                break;
+              }
+            }
+          }
+        }
+      }
+    }
+    const utilPct = totalModems > 0 ? Math.round((rentedModems / totalModems) * 1000) / 10 : 0;
+
+    // -- Costs (current period) --
+    const costRows = db.prepare(`SELECT category, subkey, amount FROM monthly_costs WHERE period = ?`).all(period);
+    const totalCost = costRows.reduce((s, r) => s + (r.amount || 0), 0);
+    const costByCategory = {};
+    costRows.forEach(r => {
+      costByCategory[r.category] = (costByCategory[r.category] || 0) + (r.amount || 0);
+    });
+    const costPerModem = totalModems > 0 ? Math.round((totalCost / totalModems) * 100) / 100 : 0;
+
+    // -- RPM (revenue per rented modem) --
+    const rpm = rentedModems > 0 ? Math.round((totalMrr / rentedModems) * 100) / 100 : 0;
+    const marginPerModem = Math.round((rpm - costPerModem) * 100) / 100;
+
+    // -- Revenue per server / per operator (revenue allocated by client portName→server) --
+    const portKeyToClient = {};
+    for (const c of clients) if (c.portName) portKeyToClient[c.portName] = c.id;
+    const revBySrv = {}, revByOp = {};
+    for (const data of liveResults) {
+      const srv = data.serverName;
+      if (typeof data.bw !== 'object') continue;
+      const portClientCount = {};
+      for (const b of Object.values(data.bw)) {
+        if (b.portName) portClientCount[b.portName] = (portClientCount[b.portName] || 0) + 1;
+      }
+      // For each client on this server: their MRR proportional to number of modems on this server
+      for (const [pn, modemCount] of Object.entries(portClientCount)) {
+        const cid = portKeyToClient[pn];
+        if (!cid) continue;
+        const cMrr = mrrByClient[cid] || 0;
+        const totalModemsOfClient = (modemsByPortName[pn] || {}).count || modemCount;
+        const portion = totalModemsOfClient > 0 ? cMrr * (modemCount / totalModemsOfClient) : 0;
+        revBySrv[srv] = (revBySrv[srv] || 0) + portion;
+      }
+    }
+    // Per-server table
+    const perServer = Object.keys(modemsByServer).sort().map(s => {
+      const total = modemsByServer[s].total;
+      const rented = modemsByServer[s].rented;
+      const rev = Math.round(revBySrv[s] || 0);
+      return {
+        server: s,
+        total, rented,
+        utilization_pct: total > 0 ? Math.round((rented / total) * 1000) / 10 : 0,
+        revenue: rev,
+        revenue_per_modem: rented > 0 ? Math.round((rev / rented) * 100) / 100 : 0
+      };
+    });
+    const perOperator = Object.keys(modemsByOperator).sort().map(op => ({
+      operator: op,
+      total:    modemsByOperator[op].total,
+      rented:   modemsByOperator[op].rented,
+      utilization_pct: modemsByOperator[op].total > 0
+        ? Math.round((modemsByOperator[op].rented / modemsByOperator[op].total) * 1000) / 10 : 0
+    }));
+
+    // -- Per-client breakdown --
+    const perClient = clients
+      .map(c => {
+        const cMrr  = mrrByClient[c.id]     || 0;
+        const cPrev = prevMrrByClient[c.id] || 0;
+        const delta = cPrev > 0 ? Math.round(((cMrr - cPrev) / cPrev) * 1000) / 10 : null;
+        const sharePct = totalMrr > 0 ? Math.round((cMrr / totalMrr) * 1000) / 10 : 0;
+        return {
+          id: c.id,
+          name: c.name,
+          billingType: c.billingType || 'per_gb',
+          price: c.price || 0,
+          balance: c.balance || 0,
+          mrr: cMrr,
+          mrr_prev: cPrev,
+          mrr_delta_pct: delta,
+          share_pct: sharePct,
+          paused: !!c.billingPaused
+        };
+      })
+      .sort((a, b) => b.mrr - a.mrr);
+
+    // -- Pricing variance --
+    const perGbPrices = clients.filter(c => c.billingType === 'per_gb' && c.price > 0).map(c => c.price);
+    const perModemPrices = clients.filter(c => c.billingType === 'per_modem' && c.price > 0).map(c => c.price);
+    function stats(arr) {
+      if (arr.length === 0) return null;
+      const min = Math.min(...arr), max = Math.max(...arr);
+      const avg = Math.round(arr.reduce((s, v) => s + v, 0) / arr.length * 100) / 100;
+      return { count: arr.length, min, max, avg };
+    }
+
+    // -- MRR trend (last 12 months) --
+    const trendRows = db.prepare(`SELECT substr(date, 1, 7) as month, SUM(amount) as revenue
+      FROM billing_ledger WHERE type='charge' AND date >= ? GROUP BY month ORDER BY month`).all(since365);
+    const trend = [];
+    // Also detail by tariff
+    const trendTariffRows = db.prepare(`SELECT substr(date, 1, 7) as month,
+      COALESCE(json_extract(details, '$.billing_type'), 'per_gb') as bt, SUM(amount) as revenue
+      FROM billing_ledger WHERE type='charge' AND date >= ? GROUP BY month, bt ORDER BY month`).all(since365);
+    const trendIdx = {};
+    for (const r of trendRows) {
+      const o = { month: r.month, total: Math.round(r.revenue), per_gb: 0, per_modem: 0 };
+      trendIdx[r.month] = o; trend.push(o);
+    }
+    for (const r of trendTariffRows) {
+      if (trendIdx[r.month]) trendIdx[r.month][r.bt] = Math.round(r.revenue);
+    }
+
+    // -- EOM forecast for current month --
+    const monthStart = todayStr.slice(0, 7) + '-01';
+    const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dayOfMonth = now.getDate();
+    const daysLeft = daysInMonth - dayOfMonth;
+    const monthRevenueSoFar = db.prepare(`SELECT SUM(amount) s FROM billing_ledger
+      WHERE type='charge' AND date >= ? AND date <= ?`).get(monthStart, todayStr).s || 0;
+    // Per-day average rate from current month so far
+    const dailyRateSoFar = dayOfMonth > 0 ? monthRevenueSoFar / dayOfMonth : 0;
+    const forecastEOM = Math.round(monthRevenueSoFar + dailyRateSoFar * daysLeft);
+
+    // -- Daily revenue last 30 days for sparkline --
+    const dailyRows = db.prepare(`SELECT date, SUM(amount) as rev FROM billing_ledger
+      WHERE type='charge' AND date >= ? GROUP BY date ORDER BY date`).all(since30);
+
+    res.json({
+      period,
+      now: now.toISOString(),
+      summary: {
+        mrr: Math.round(totalMrr),
+        mrr_prev: Math.round(prevTotalMrr),
+        mrr_growth_pct: mrrGrowthPct,
+        arr,
+        active_clients: activeClients.length,
+        new_clients: newClients.length,
+        churned_clients: churnedClients.length,
+        churn_rate_pct: churnRatePct,
+        arpu,
+        nrr_pct: nrrPct,
+        nrr_cohort_size: cohortIds.length,
+        utilization_pct: utilPct,
+        total_modems: totalModems,
+        rented_modems: rentedModems,
+        rpm,
+        cpm: costPerModem,
+        margin_per_modem: marginPerModem,
+        total_cost: Math.round(totalCost),
+        forecast_eom: forecastEOM,
+        forecast_so_far: Math.round(monthRevenueSoFar)
+      },
+      concentration,
+      per_tariff_revenue: perTariff,
+      pricing: {
+        per_gb: stats(perGbPrices),
+        per_modem: stats(perModemPrices)
+      },
+      cost_by_category: costByCategory,
+      per_server: perServer,
+      per_operator: perOperator,
+      per_client: perClient,
+      trend,
+      churned: churnedClients.map(c => ({ id: c.id, name: c.name, last_mrr: prevMrrByClient[c.id] || 0 })),
+      new: newClients.map(c => ({ id: c.id, name: c.name, created: c.createdAt, mrr: mrrByClient[c.id] || 0 })),
+      daily_revenue: dailyRows.map(r => ({ date: r.date, revenue: Math.round(r.rev) }))
+    });
+  } catch (e) {
+    logger.error('[finance_dashboard]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.post('/api/admin/run_billing', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     await runDailyBilling();
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Re-run billing for a specific past MSK date.
+// Use case: a ProxySmart server was offline at midnight, its yesterday counters
+// reset to 0, and the original daily billing produced empty / partial charges.
+// This recomputes from the durable traffic_hourly source.
+//
+// Body: { date: "YYYY-MM-DD", client_ids?: [string], dry_run?: bool }
+// - date is required and must be in the past (today is still active)
+// - client_ids optional; if omitted, processes all clients without an existing charge
+// - dry_run prints what would happen without writing
+app.post('/api/admin/billing_rerun', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const date = String((req.body && req.body.date) || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: 'date YYYY-MM-DD required' });
+    const today = getMoscowToday();
+    if (date >= today) return res.status(400).json({ error: 'date must be strictly in the past' });
+
+    const targetClientIds = Array.isArray(req.body && req.body.client_ids) ? new Set(req.body.client_ids) : null;
+    const dryRun = !!(req.body && req.body.dry_run);
+
+    // Already-charged client ids for that date
+    const alreadyCharged = new Set(
+      db.prepare("SELECT DISTINCT client_id FROM billing_ledger WHERE type='charge' AND date = ?").all(date).map(r => r.client_id)
+    );
+
+    const dt = new Date(date + 'T12:00:00Z');
+    const dateLabel = dt.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+    const daysInMonth = new Date(dt.getUTCFullYear(), dt.getUTCMonth() + 1, 0).getDate();
+
+    const report = [];
+    let charged = 0, skipped = 0, totalCost = 0;
+
+    for (const client of clients) {
+      if (targetClientIds && !targetClientIds.has(client.id)) continue;
+      if (!client.portName || !client.price || client.price <= 0 || client.billingPaused) {
+        report.push({ client_id: client.id, name: client.name, status: 'skip', reason: 'no_billing' });
+        skipped++; continue;
+      }
+      if (alreadyCharged.has(client.id)) {
+        report.push({ client_id: client.id, name: client.name, status: 'skip', reason: 'already_billed' });
+        skipped++; continue;
+      }
+
+      const deltaBytes = getClientBytesForMskDate(client.portName, date);
+      const deltaGb = trafficBytesToGb(deltaBytes);
+
+      if (deltaBytes <= 0) {
+        report.push({ client_id: client.id, name: client.name, status: 'skip', reason: 'no_traffic' });
+        skipped++; continue;
+      }
+
+      let cost = 0;
+      let modemCount = 0;
+      if (client.billingType === 'per_modem') {
+        // Modem count from traffic_hourly distinct nicks for that day
+        modemCount = db.prepare(`
+          SELECT COUNT(DISTINCT nick) as n FROM traffic_hourly
+          WHERE client_name = ?
+            AND substr(datetime(hour_start, '+3 hours'), 1, 10) = ?
+        `).get(client.portName, date).n || 0;
+        cost = (client.price * modemCount) / daysInMonth;
+      } else {
+        cost = client.price * deltaGb;
+      }
+      cost = Math.round(cost * 100) / 100;
+      if (cost <= 0) { skipped++; continue; }
+
+      if (dryRun) {
+        report.push({ client_id: client.id, name: client.name, status: 'would_charge', gb: deltaGb, cost });
+        continue;
+      }
+
+      // Charges always proceed; only enforce admin-set hard floor if any.
+      let minBalance = null;
+      if (typeof client.maxDebt === 'number' && client.maxDebt > 0) {
+        minBalance = -Math.abs(client.maxDebt);
+      }
+
+      try {
+        const debitRes = atomicDebit(client.id, cost, {
+          type: 'charge',
+          date,
+          timestamp: new Date().toISOString(),
+          delta_bytes: Math.round(deltaBytes),
+          delta_gb: deltaGb,
+          price_per_unit: client.price,
+          billing_type: client.billingType || 'per_gb',
+          modem_count: modemCount || null,
+          days_in_month: daysInMonth,
+          cost,
+          currency: client.currency || 'RUB',
+          note: client.billingType === 'per_modem'
+            ? `Списание за аренду ${modemCount} ${modemPlural(modemCount)} (${dateLabel}) — recomputed`
+            : `Списание за трафик (${dateLabel}) — recomputed`,
+          traffic_source: 'billing_rerun'
+        }, { minBalance });
+
+        if (debitRes && debitRes.duplicate) {
+          report.push({ client_id: client.id, name: client.name, status: 'skip', reason: 'duplicate_at_db' });
+          skipped++; continue;
+        }
+        report.push({ client_id: client.id, name: client.name, status: 'charged', gb: deltaGb, cost, balance_after: debitRes.balanceAfter });
+        charged++; totalCost += cost;
+        logActivity('billing', 'info', 'billing_rerun_charge', client.name,
+          `Rerun charge ${cost} ${client.currency || 'RUB'} for ${deltaGb}GB on ${date}`,
+          { client_id: client.id, gb: deltaGb, cost, date });
+      } catch (e) {
+        if (e && e.code === 'INSUFFICIENT_BALANCE') {
+          report.push({ client_id: client.id, name: client.name, status: 'fail', reason: 'insufficient_balance', cost });
+        } else {
+          report.push({ client_id: client.id, name: client.name, status: 'error', error: e.message });
+          logger.error(`[Billing rerun] ${client.name}:`, e.message);
+        }
+      }
+    }
+
+    if (!dryRun && charged > 0) saveClients(clients);
+
+    logger.info(`[Billing rerun] date=${date} charged=${charged} skipped=${skipped} total=${totalCost.toFixed(2)} dry=${dryRun}`);
+    auditLog(req.user.login, 'billing_rerun', { date, charged, skipped, total: totalCost, dry_run: dryRun });
+    res.json({ ok: true, date, charged, skipped, total_cost: Math.round(totalCost * 100) / 100, dry_run: dryRun, report });
+  } catch (e) {
+    logger.error('[billing_rerun]', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // fetchApi, fetchApiRaw, postApi, findServer -> moved to src/api/proxy-smart.js
@@ -1338,7 +2067,7 @@ try {
   const _rcRow = _kvGet.get('rotation_cache');
   if (_rcRow) { Object.assign(modemRotationCache, JSON.parse(_rcRow.value)); logger.info(`[Rotation] Restored ${Object.keys(modemRotationCache).length} cached rotation values`); }
 } catch (e) {}
-const ROTATION_CACHE_TTL = 30 * 60 * 1000; // refresh every 30 min (settings rarely change)
+const ROTATION_CACHE_TTL = () => (appSettings.rotation_cache_ttl_min || 30) * 60000;
 
 async function refreshRotationCache() {
   for (const server of apiServers) {
@@ -1399,9 +2128,9 @@ proxySmart.init({
 
 // Refresh rotation cache on startup and periodically
 setTimeout(() => refreshRotationCache(), 10000);
-_intervals.push(setInterval(() => refreshRotationCache(), ROTATION_CACHE_TTL));
+_intervals.push(setInterval(() => refreshRotationCache(), ROTATION_CACHE_TTL()));
 
-const ROTATION_LOG_SYNC_INTERVAL = 30 * 60 * 1000; // every 30 min
+const ROTATION_LOG_SYNC_INTERVAL = () => (appSettings.rotation_sync_interval_min || 30) * 60000;
 async function syncAllRotationLogs() {
   let totalSynced = 0;
   for (const server of apiServers) {
@@ -1430,7 +2159,7 @@ async function syncAllRotationLogs() {
 }
 // Initial sync after 30 sec, then every 30 min
 setTimeout(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), 30000);
-_intervals.push(setInterval(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), ROTATION_LOG_SYNC_INTERVAL));
+_intervals.push(setInterval(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), ROTATION_LOG_SYNC_INTERVAL()));
 
 // fetchAllServersData, fetchAllServersDataCached, _psCache, _psCacheTs, _psFetchPromise, PS_CACHE_TTL
 // -> moved to src/api/proxy-smart.js
@@ -1662,6 +2391,12 @@ hourlyTraffic.init({
   SERVER_COUNTRIES,
 });
 
+// One-time cleanup: clear false positive uncertain flags from old 50MB threshold era
+try {
+  const cleaned = db.prepare(`UPDATE traffic_hourly SET uncertain = 0 WHERE uncertain > 0 AND (bytes_in + bytes_out) < ${150 * 1048576}`).run();
+  if (cleaned.changes > 0) logger.info(`[HourlyAgg] Cleared ${cleaned.changes} false positive uncertain flags (old 50MB threshold)`);
+} catch (e) { /* ignore */ }
+
 async function trackModems() {
   const now = Date.now();
   let totalTracked = 0;
@@ -1776,19 +2511,22 @@ async function trackModems() {
         }
         const rec = autoRecovery[recoveryKey];
         const offlineSec = (now - rec.offlineSince) / 1000;
-        if (offlineSec >= 60 && rec.attempts < 3 && (now - rec.lastAttempt) >= 180000) {
+        const _recOffSec = appSettings.recovery_offline_sec || 60;
+        const _recMaxAtt = appSettings.recovery_max_attempts || 3;
+        const _recRetryMs = (appSettings.recovery_retry_min || 3) * 60000;
+        if (offlineSec >= _recOffSec && rec.attempts < _recMaxAtt && (now - rec.lastAttempt) >= _recRetryMs) {
           rec.attempts++;
           rec.lastAttempt = now;
-          logger.warn(`[AutoRecovery] USB reset #${rec.attempts}/3 for ${nick} (${server.name}), offline ${Math.round(offlineSec)}s`);
-          logActivity('recovery', 'warn', 'usb_reset', nick, `USB reset #${rec.attempts}/3 (offline ${Math.round(offlineSec)}s)`, { server: server.name, attempt: rec.attempts, offline_sec: Math.round(offlineSec) });
+          logger.warn(`[AutoRecovery] USB reset #${rec.attempts}/${_recMaxAtt} for ${nick} (${server.name}), offline ${Math.round(offlineSec)}s`);
+          logActivity('recovery', 'warn', 'usb_reset', nick, `USB reset #${rec.attempts}/${_recMaxAtt} (offline ${Math.round(offlineSec)}s)`, { server: server.name, attempt: rec.attempts, offline_sec: Math.round(offlineSec) });
           fetchApi(server, `/apix/usb_reset_modem_json?arg=${encodeURIComponent(nick)}`)
             .catch(e => {
               logger.error(`[AutoRecovery] USB reset failed for ${nick}: ${e.message}`);
               logActivity('recovery', 'error', 'usb_reset_failed', nick, `USB reset failed: ${e.message}`, { server: server.name });
             });
-          if (rec.attempts >= 3) {
-            logger.warn(`[AutoRecovery] ${nick} exhausted 3 attempts, giving up`);
-            logActivity('recovery', 'warn', 'recovery_exhausted', nick, `Exhausted 3 USB reset attempts, giving up`, { server: server.name });
+          if (rec.attempts >= _recMaxAtt) {
+            logger.warn(`[AutoRecovery] ${nick} exhausted ${_recMaxAtt} attempts, giving up`);
+            logActivity('recovery', 'warn', 'recovery_exhausted', nick, `Exhausted ${_recMaxAtt} USB reset attempts, giving up`, { server: server.name });
           }
         }
       }
@@ -1831,8 +2569,8 @@ function rescheduleProxyCheck() {
   }, min * 60 * 1000);
   logger.info(`[ProxyCheck] Rescheduled: every ${min} min`);
 }
-const PROXY_CHECK_TIMEOUT = 15; // seconds
-const PROXY_CHECK_CONCURRENCY = 10;
+function getProxyCheckTimeout() { return appSettings.proxy_check_timeout_sec || 15; }
+function getProxyCheckConcurrency() { return appSettings.proxy_check_concurrency || 10; }
 
 function curlCheckProxy(proxyUrl, targetUrl) {
   const target = targetUrl || appSettings.proxy_check_target || 'https://www.instagram.com/';
@@ -1841,11 +2579,11 @@ function curlCheckProxy(proxyUrl, targetUrl) {
       '-x', proxyUrl,
       '-w', '%{time_connect}|||%{time_total}|||%{http_code}',
       '-o', '/dev/null', '-s',
-      '--max-time', String(PROXY_CHECK_TIMEOUT),
+      '--max-time', String(getProxyCheckTimeout()),
       '-L', // follow redirects
       target
     ];
-    execFile('curl', args, { timeout: (PROXY_CHECK_TIMEOUT + 5) * 1000 }, (err, stdout) => {
+    execFile('curl', args, { timeout: (getProxyCheckTimeout() + 5) * 1000 }, (err, stdout) => {
       if (err) {
         const isTimeout = err.killed || (err.message && err.message.includes('timed out'));
         resolve({ connect_ms: null, total_ms: null, status_code: null, error: isTimeout ? 'TIMEOUT' : err.message.slice(0, 200) });
@@ -1904,10 +2642,14 @@ async function checkProxyLatency() {
         if (!info.isOnline && !info.isRotating) continue;
         for (const p of portList) {
           if (!p.HTTP_PORT || !p.LOGIN || !p.PASSWORD) continue;
+          // Skip unassigned proxies (no client renting this port).
+          // ProxySmart blocks traffic on unbound ports → would always error
+          // and inflate error_rate, falsely flagging modems as flaky.
+          if (!p.portName || !p.portName.trim()) continue;
           proxies.push({
             server: srv,
             nick: info.nick,
-            client: p.portName || '',
+            client: p.portName,
             operator: info.operator || '',
             proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
           });
@@ -1925,8 +2667,8 @@ async function checkProxyLatency() {
     });
 
     const entries = [];
-    for (let i = 0; i < proxies.length; i += PROXY_CHECK_CONCURRENCY) {
-      const chunk = proxies.slice(i, i + PROXY_CHECK_CONCURRENCY);
+    for (let i = 0; i < proxies.length; i += getProxyCheckConcurrency()) {
+      const chunk = proxies.slice(i, i + getProxyCheckConcurrency());
       const results = await Promise.all(chunk.map(async (p) => {
         const r = await curlCheckProxy(p.proxyUrl);
         return { server: p.server, nick: p.nick, client: p.client, operator: p.operator, ...r };
@@ -1948,7 +2690,7 @@ async function checkProxyLatency() {
 }
 
 const SPEEDTEST_HISTORY_FILE = path.join(__dirname, 'speedtest_history.json');
-const MAX_SPEEDTEST_ENTRIES = 30;
+function getMaxSpeedtestEntries() { return appSettings.speedtest_max_history || 30; }
 
 let speedtestHistory = {};
 try {
@@ -1985,8 +2727,8 @@ function parseSpeedtestResult(result) {
 function pushSpeedtestEntry(key, entry) {
   if (!speedtestHistory[key]) speedtestHistory[key] = [];
   speedtestHistory[key].push(entry);
-  if (speedtestHistory[key].length > MAX_SPEEDTEST_ENTRIES) {
-    speedtestHistory[key] = speedtestHistory[key].slice(-MAX_SPEEDTEST_ENTRIES);
+  if (speedtestHistory[key].length > getMaxSpeedtestEntries()) {
+    speedtestHistory[key] = speedtestHistory[key].slice(-getMaxSpeedtestEntries());
   }
   saveSpeedtestHistory();
 }
@@ -2021,28 +2763,30 @@ async function runNightlySpeedtests() {
 
             const entry = { date: new Date().toISOString(), download: dl, upload: ul, ping, raw: result };
 
-            // Re-test if DL or UL is below 1 Mbps
-            if (dl < 1 || ul < 1) {
-              logger.info(`[Speedtest] ${nick}: DL=${dl} UL=${ul} — near-zero detected, re-testing in 10 min...`);
+            // Re-test if DL or UL is below threshold
+            const _stLowThresh = appSettings.speedtest_low_threshold || 1;
+            const _stRetestMs = (appSettings.speedtest_retest_delay_min || 10) * 60000;
+            if (dl < _stLowThresh || ul < _stLowThresh) {
+              logger.info(`[Speedtest] ${nick}: DL=${dl} UL=${ul} — below ${_stLowThresh} Mbps, re-testing in ${appSettings.speedtest_retest_delay_min || 10} min...`);
               setTimeout(async () => {
                 try {
                   logger.info(`[Speedtest] Re-testing ${nick} (${server.name})...`);
                   const retryResult = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
                   const r = parseSpeedtestResult(retryResult);
                   if (r.dl + r.ul > dl + ul) {
-                    pushSpeedtestEntry(key, { date: new Date().toISOString(), download: r.dl, upload: r.ul, ping: r.ping, raw: retryResult, retry: true, ...(r.dl < 1 || r.ul < 1 ? { _lowSpeed: true } : {}) });
+                    pushSpeedtestEntry(key, { date: new Date().toISOString(), download: r.dl, upload: r.ul, ping: r.ping, raw: retryResult, retry: true, ...(r.dl < _stLowThresh || r.ul < _stLowThresh ? { _lowSpeed: true } : {}) });
                     logger.info(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (improved)`);
                   } else {
                     logger.info(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (not improved)`);
                   }
                 } catch (e) { logger.error(`[Speedtest] Re-test ${nick} error:`, e.message); }
-              }, 10 * 60 * 1000);
+              }, _stRetestMs);
             }
 
             pushSpeedtestEntry(key, entry);
             testedCount++;
             logger.info(`[Speedtest] ${nick}: DL=${dl} UL=${ul} Ping=${ping}`);
-            if (dl < 1 || ul < 1) {
+            if (dl < _stLowThresh || ul < _stLowThresh) {
               logActivity('speedtest', 'warn', 'low_speed', nick, `Low speed: DL=${dl} UL=${ul} Ping=${ping}`, { server: server.name, dl, ul, ping });
             } else {
               logActivity('speedtest', 'info', 'test_result', nick, `DL=${dl} UL=${ul} Ping=${ping}`, { server: server.name, dl, ul, ping });
@@ -2106,14 +2850,17 @@ app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
         .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(currentMonthPrefix))
         .reduce((sum, e) => sum + (e.delta_gb || 0), 0);
 
-      // Last hour traffic from traffic_hourly for this client's portName
+      // Last hour traffic from traffic_hourly for this client's portName —
+      // single bulk query with scalar subquery to compute max hour once.
       let lastHourGb = 0;
       if (clientInfo.portName) {
-        const lastHourRow = db.prepare(`SELECT hour_start FROM traffic_hourly WHERE client_name = ? ORDER BY hour_start DESC LIMIT 1`).get(clientInfo.portName);
-        if (lastHourRow) {
-          const lhRow = db.prepare(`SELECT SUM(bytes_in + bytes_out) as total FROM traffic_hourly WHERE hour_start = ? AND client_name = ?`).get(lastHourRow.hour_start, clientInfo.portName);
-          if (lhRow && lhRow.total) lastHourGb = trafficBytesToGb(lhRow.total);
-        }
+        const lhRow = db.prepare(`
+          SELECT SUM(bytes_in + bytes_out) as total
+          FROM traffic_hourly
+          WHERE client_name = ?
+            AND hour_start = (SELECT MAX(hour_start) FROM traffic_hourly WHERE client_name = ?)
+        `).get(clientInfo.portName, clientInfo.portName);
+        if (lhRow && lhRow.total) lastHourGb = trafficBytesToGb(lhRow.total);
       }
 
       merged.billing = {
@@ -2531,6 +3278,35 @@ app.use('/api/v1', (req, res, next) => {
   next();
 });
 
+// Phase 2: log every /api/v1/* request with response time and status.
+// Applied after the CORS handler so OPTIONS preflight doesn't spam the log.
+app.use('/api/v1', (req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  const start = Date.now();
+  const apiKey = req.headers['x-api-key'] || req.query.apikey || req.query.apiKey || '';
+  res.on('finish', () => {
+    try {
+      const client = apiKey ? clientByApiKey.get(apiKey) : null;
+      // Only log requests that presented an API key. Anonymous 401s are noise.
+      if (!client) return;
+      const errMsg = (res.statusCode >= 400 && res.locals && res.locals.apiError) || null;
+      _apiUsageInsert.run(
+        client.id || null,
+        client.name || null,
+        String(apiKey).slice(0, 8),
+        req.path || req.originalUrl || '',
+        req.method,
+        res.statusCode,
+        Date.now() - start,
+        (req.headers['user-agent'] || '').slice(0, 300),
+        getClientIp(req) || '',
+        errMsg
+      );
+    } catch (_e) { /* never break the request on logging failure */ }
+  });
+  next();
+});
+
 app.get('/api/v1/proxy', async (req, res) => {
   const apiKey = req.headers['x-api-key'] || req.query.apikey;
   if (!apiKey) return res.status(401).json({ success: false, error: 'API key required. Pass via X-API-Key header or ?apikey= query parameter.' });
@@ -2790,6 +3566,221 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
   res.json(byClient);
 });
 
+// Auto-reboot history — last N reboots triggered by the flaky-modem watcher
+app.get('/api/admin/auto_reboot_log', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 1000);
+    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 90);
+    const rows = db.prepare(`
+      SELECT id, server_name, nick, imei, rebooted_at, reason, status, error
+        FROM auto_reboot_log
+       WHERE rebooted_at >= datetime('now', '-${days} days')
+       ORDER BY id DESC
+       LIMIT ?
+    `).all(limit);
+    res.json({ count: rows.length, days, rows });
+  } catch (e) {
+    logger.error('[auto_reboot_log]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// DB-level audit explorer — every INSERT/UPDATE/DELETE on financial tables
+// captured by SQL triggers, with per-write context (who/why/when).
+//
+// Query params:
+//   table      — billing_ledger | bank_payments | clients.balance | payments | closing_documents | bills | clients
+//   operation  — INSERT | UPDATE | DELETE
+//   row_id     — exact row id (e.g. ledger row id, client_id)
+//   actor      — admin login or 'system'
+//   source     — http | scheduler | webhook | manual | unknown_http | startup
+//   since/until — ISO timestamp filters
+//   limit      — max rows (default 200, max 5000)
+app.get('/api/admin/db_audit', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const { table, operation, row_id, actor, source, since, until } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 5000);
+    let rows;
+    if (row_id && table) {
+      rows = dbAudit.getRowHistory(table, row_id, limit);
+    } else {
+      rows = dbAudit.search({ table, operation, actor, source, since, until, limit });
+    }
+    res.json({ count: rows.length, rows });
+  } catch (e) {
+    logger.error('[db_audit]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Phase 2: API usage stats + recent log for a given client.
+// Query params: client_id (required), days (1-30, default 7), limit (1-500, default 100).
+app.get('/api/admin/api_usage', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const clientId = String(req.query.client_id || '').trim();
+    if (!clientId) return res.status(400).json({ error: 'client_id required' });
+    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
+
+    const sinceExpr = `datetime('now', '-${days} days')`;
+
+    // Aggregate
+    const totals = db.prepare(`
+      SELECT COUNT(*) as total,
+             SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errors,
+             AVG(response_time_ms) as avg_ms,
+             MIN(timestamp) as first_ts,
+             MAX(timestamp) as last_ts
+      FROM api_usage
+      WHERE client_id = ? AND timestamp >= ${sinceExpr}
+    `).get(clientId);
+
+    // Per-day buckets (for chart)
+    const perDay = db.prepare(`
+      SELECT substr(timestamp, 1, 10) as date,
+             COUNT(*) as count,
+             SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errors,
+             AVG(response_time_ms) as avg_ms
+      FROM api_usage
+      WHERE client_id = ? AND timestamp >= ${sinceExpr}
+      GROUP BY date
+      ORDER BY date
+    `).all(clientId);
+
+    // Per-endpoint breakdown
+    const perEndpoint = db.prepare(`
+      SELECT endpoint, method,
+             COUNT(*) as count,
+             SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errors,
+             AVG(response_time_ms) as avg_ms
+      FROM api_usage
+      WHERE client_id = ? AND timestamp >= ${sinceExpr}
+      GROUP BY endpoint, method
+      ORDER BY count DESC
+    `).all(clientId);
+
+    // Latest requests
+    const recent = db.prepare(`
+      SELECT endpoint, method, status_code, response_time_ms, user_agent, ip, timestamp, error
+      FROM api_usage
+      WHERE client_id = ?
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(clientId, limit);
+
+    // Active flag: any request in last 24h
+    const recent24h = db.prepare(`
+      SELECT COUNT(*) as c FROM api_usage
+      WHERE client_id = ? AND timestamp >= datetime('now', '-1 day')
+    `).get(clientId).c;
+
+    const total = totals.total || 0;
+    const errors = totals.errors || 0;
+    res.json({
+      client_id: clientId,
+      days,
+      active_24h: recent24h > 0,
+      requests_24h: recent24h,
+      summary: {
+        total,
+        errors,
+        error_rate_pct: total > 0 ? Math.round((errors / total) * 1000) / 10 : 0,
+        avg_response_ms: totals.avg_ms ? Math.round(totals.avg_ms) : null,
+        first_request: totals.first_ts,
+        last_request: totals.last_ts,
+      },
+      per_day: perDay,
+      per_endpoint: perEndpoint,
+      recent,
+    });
+  } catch (e) {
+    logger.error('[api_usage]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Backfill daily_traffic for a given MSK date by summing traffic_hourly rows.
+// Use when bandwidth_bytes_yesterday_* came back as 0 from ProxySmart
+// (e.g. after a ProxySmart restart around midnight) and the daily chart
+// shows a hole. traffic_hourly is written independently by hourly.js and
+// survives these cases. Safe to run multiple times — UPSERT uses MAX.
+app.post('/api/admin/backfill_daily_traffic', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const date = String(req.body?.date || '').trim();
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      return res.status(400).json({ error: 'date required in YYYY-MM-DD (MSK)' });
+    }
+    // Reject future / today (today is still live)
+    const todayMsk = getMoscowToday();
+    if (date >= todayMsk) {
+      return res.status(400).json({ error: 'date must be in the past (today is live via bandwidth_bytes_day_*)' });
+    }
+    // Aggregate per port_id for the given MSK day
+    const rows = db.prepare(`
+      SELECT port_id, client_name,
+             SUM(bytes_in)  AS bytes_in,
+             SUM(bytes_out) AS bytes_out,
+             COUNT(*)       AS hours
+      FROM traffic_hourly
+      WHERE substr(datetime(hour_start, '+3 hours'), 1, 10) = ?
+      GROUP BY port_id
+    `).all(date);
+
+    if (rows.length === 0) {
+      return res.status(404).json({ error: 'no traffic_hourly data for that MSK day', date });
+    }
+
+    let written = 0, totalBytes = 0, skippedExisting = 0;
+    const force = req.body?.force === true;
+
+    const tx = db.transaction(() => {
+      for (const r of rows) {
+        const bIn  = Number(r.bytes_in  || 0);
+        const bOut = Number(r.bytes_out || 0);
+        if (bIn === 0 && bOut === 0) continue;
+
+        // If an existing daily_traffic row has non-zero data, respect it
+        // unless caller explicitly passes force=true.
+        if (!force) {
+          const existing = db.prepare(
+            'SELECT bytes_in, bytes_out FROM daily_traffic WHERE port_name = ? AND date = ?'
+          ).get(r.port_id, date);
+          if (existing && (existing.bytes_in > 0 || existing.bytes_out > 0)) {
+            skippedExisting++;
+            continue;
+          }
+        }
+
+        _dtUpsert.run(r.port_id, date, bIn, bOut);
+        // Sync in-memory so the daily chart reflects the backfill immediately
+        if (!dailyTraffic[r.port_id]) dailyTraffic[r.port_id] = {};
+        dailyTraffic[r.port_id][date] = {
+          in: bIn, out: bOut, portName: r.client_name || ''
+        };
+        written++;
+        totalBytes += bIn + bOut;
+      }
+    });
+    tx();
+
+    const totalGb = Math.round(totalBytes / 1073741824 * 1000) / 1000;
+    logger.info(`[Backfill] daily_traffic for ${date}: ${written} ports, ${totalGb} GB (skipped ${skippedExisting} existing)`);
+    logActivity('traffic', 'info', 'backfill_daily', null,
+      `Backfilled daily_traffic for ${date}: ${written} ports, ${totalGb} GB`,
+      { date, written, total_gb: totalGb, skipped_existing: skippedExisting });
+
+    res.json({
+      ok: true, date,
+      written, skipped_existing: skippedExisting,
+      total_bytes: totalBytes, total_gb: totalGb,
+      port_count: rows.length
+    });
+  } catch (e) {
+    logger.error('[Backfill] daily_traffic error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req, res) => {
   const months = Math.min(parseInt(req.query.months) || 6, 12);
   const now = new Date();
@@ -2851,10 +3842,21 @@ app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req,
   }
 });
 
+// Heatmap response cache: key=view|id|days, TTL 5 min.
+// Heatmap data only changes once per hour (when hourly aggregation runs),
+// so a 5-min cache saves ~hundreds of strftime invocations per request.
+const _heatmapCache = new Map();
+const HEATMAP_TTL_MS = 5 * 60 * 1000;
+
 app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res) => {
   const { view = 'country', id = 'all' } = req.query;
   const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
   try {
+    const cacheKey = `${view}|${id}|${days}`;
+    const cached = _heatmapCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < HEATMAP_TTL_MS) {
+      return res.json(cached.data);
+    }
     const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
     // Build server→country mapping
     const serverCountryMap = {};
@@ -2957,6 +3959,12 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
       matrix
     };
     if (operator_breakdown) resp.operator_breakdown = operator_breakdown;
+    _heatmapCache.set(cacheKey, { ts: Date.now(), data: resp });
+    // Bound cache size — evict oldest when > 200 entries (very defensive)
+    if (_heatmapCache.size > 200) {
+      const oldestKey = _heatmapCache.keys().next().value;
+      _heatmapCache.delete(oldestKey);
+    }
     res.json(resp);
   } catch (e) {
     logger.error('[heatmap]', e.message);
@@ -2970,6 +3978,11 @@ app.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (
   if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
   const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
   try {
+    const mhCacheKey = `modem|${serverName}|${nick}|${days}`;
+    const mhCached = _heatmapCache.get(mhCacheKey);
+    if (mhCached && Date.now() - mhCached.ts < HEATMAP_TTL_MS) {
+      return res.json(mhCached.data);
+    }
     const now2 = new Date();
     const mskOffset2 = getTzOffset('Europe/Moscow');
     const mskNow = new Date(now2.getTime() + mskOffset2 * 3600 * 1000);
@@ -2981,30 +3994,29 @@ app.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (
     const startDate = dateList[0];
     const utcStart = new Date(new Date(startDate + 'T00:00:00Z').getTime() - mskOffset2 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
-    // Get all ports for this modem
-    const ports = db.prepare("SELECT DISTINCT port_id, client_name FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ?").all(nick, serverName, utcStart);
-
+    // Get combined traffic for this modem (aggregated across all ports)
     const result = {};
     const dateIdx2 = new Map(dateList.map((d, i) => [d, i]));
-    for (const p of ports) {
-      const portLabel = p.client_name || p.port_id;
-      const matrix = dateList.map(() => new Array(24).fill(0));
-      const tzH2 = Math.round(Math.max(-12, Math.min(14, mskOffset2)));
-      const tzStr2 = (tzH2 >= 0 ? '+' : '') + tzH2 + ' hours';
-      const rows = db.prepare(`SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr2}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr2}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE port_id = ? AND hour_start >= ? GROUP BY day, hour`).all(p.port_id, utcStart);
-      for (const r of rows) {
-        const di = dateIdx2.get(r.day);
-        if (di !== undefined && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
-      }
-      result[portLabel] = { portId: p.port_id, clientName: p.client_name, matrix };
+    const clientRow = db.prepare("SELECT client_name FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? LIMIT 1").get(nick, serverName, utcStart);
+    const clientLabel = (clientRow && clientRow.client_name) || nick;
+    const matrix = dateList.map(() => new Array(24).fill(0));
+    const tzH2 = Math.round(Math.max(-12, Math.min(14, mskOffset2)));
+    const tzStr2 = (tzH2 >= 0 ? '+' : '') + tzH2 + ' hours';
+    const rows = db.prepare(`SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr2}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr2}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? GROUP BY day, hour`).all(nick, serverName, utcStart);
+    for (const r of rows) {
+      const di = dateIdx2.get(r.day);
+      if (di !== undefined && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
     }
+    result[clientLabel] = { portId: nick, clientName: clientLabel, matrix };
 
     const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
     const dayMeta = dateList.map(date => {
       const d = new Date(date + 'T00:00:00');
       return { date, label: DAYS_RU[d.getDay()] };
     });
-    res.json({ nick, serverName, days: dateList, day_meta: dayMeta, ports: result });
+    const mhResp = { nick, serverName, days: dateList, day_meta: dayMeta, ports: result };
+    _heatmapCache.set(mhCacheKey, { ts: Date.now(), data: mhResp });
+    res.json(mhResp);
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -3077,13 +4089,18 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
     const clientTodayGb = {};
     {
       // Last completed hour
-      const lastHourRow = db.prepare(`SELECT hour_start FROM traffic_hourly ORDER BY hour_start DESC LIMIT 1`).get();
-      if (lastHourRow) {
-        const rows = db.prepare(`SELECT client_name, SUM(bytes_in + bytes_out) as total FROM traffic_hourly WHERE hour_start = ? AND client_name != '' GROUP BY client_name`).all(lastHourRow.hour_start);
-        for (const r of rows) {
-          const cid = clients.find(c => c.portName === r.client_name)?.id;
-          if (cid) clientLastHourGb[cid] = trafficBytesToGb(r.total);
-        }
+      // N+1 fix: use single bulk query with scalar subquery so "max hour" is
+      // computed once; O(1) client lookup via portNameToClientId map.
+      const rows = db.prepare(`
+        SELECT client_name, SUM(bytes_in + bytes_out) as total
+        FROM traffic_hourly
+        WHERE client_name != ''
+          AND hour_start = (SELECT MAX(hour_start) FROM traffic_hourly WHERE client_name != '')
+        GROUP BY client_name
+      `).all();
+      for (const r of rows) {
+        const cid = portNameToClientId[r.client_name];
+        if (cid) clientLastHourGb[cid] = trafficBytesToGb(r.total);
       }
       // Today per client from live data
       for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
@@ -3182,17 +4199,146 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       tochkaConfigured: !!tochkaConfig.jwt,
       tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp, companyAddress: tochkaConfig.companyAddress, bankAccount: tochkaConfig.bankAccount, bankName: tochkaConfig.bankName, bankBic: tochkaConfig.bankBic, bankCorrAccount: tochkaConfig.bankCorrAccount },
       proxyCheckSummary: getProxyCheckSummary(),
+      proxyIssues: computeProxyIssues(),
     });
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
   }
 });
 
-// Proxy check summary helper
+// "Сбоит прокси" — качество прокси-сервиса (latency + error rate).
+// Триггеры:
+//   1) avg latency за окно > proxy_alert_latency_ms
+//   2) error_rate за окно > proxy_alert_error_pct
+// IP-ротация НЕ учитывается — для этого есть отдельная карточка "Завис IP",
+// которая опирается на ip_tracking (живые проверки IP), а не на rotation_log
+// (который часто содержит исторические/auto-rotation записи без реального
+// смысла "проблемы").
+function computeProxyIssues() {
+  try {
+    const winMin   = Math.max(5, Math.min(720, appSettings.proxy_alert_window_min || 60));
+    const latLimit = Math.max(100, Math.min(60000, appSettings.proxy_alert_latency_ms || 1500));
+    const errLimit = Math.max(0, Math.min(100, appSettings.proxy_alert_error_pct || 5));
+    const sinceExpr = `datetime('now', '-${winMin} minutes')`;
+
+    const checkRows = db.prepare(`
+      SELECT server_name, nick,
+             AVG(total_ms) FILTER (WHERE error IS NULL) AS avg_ms,
+             COUNT(*)                                  AS total,
+             SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors,
+             MAX(client_name)                          AS client_name,
+             MAX(operator)                             AS operator
+        FROM proxy_checks
+       WHERE checked_at >= ${sinceExpr}
+       GROUP BY server_name, nick
+    `).all();
+
+    const issues = [];
+    for (const c of checkRows) {
+      const errPct  = c.total > 0 ? Math.round(c.errors / c.total * 1000) / 10 : 0;
+      const latency = c.avg_ms != null ? Math.round(c.avg_ms) : null;
+      const reasons = [];
+      if (latency != null && latency > latLimit) reasons.push(`задержка ${latency}мс`);
+      if (errPct > errLimit) reasons.push(`ошибки ${errPct}%`);
+      if (reasons.length === 0) continue;
+      issues.push({
+        nick: c.nick,
+        server: c.server_name,
+        operator: c.operator || '',
+        client: c.client_name || '',
+        latency,
+        errorPct: errPct,
+        reasons,
+        detail: reasons.join(' · ')
+      });
+    }
+    issues.sort((a, b) => b.reasons.length - a.reasons.length || (b.errorPct - a.errorPct));
+    return issues;
+  } catch (e) {
+    logger.error('[proxyIssues]', e.message);
+    return [];
+  }
+}
+
+// Auto-reboot of flaky modems.
+// Triggers when a modem appears in proxyIssues with reasons OTHER than just
+// rotation-fail (i.e. actual quality problems: high latency or high error %).
+// Throttle: never reboots the same modem more often than auto_reboot_min_interval_min.
+// Safe by design — opt-in via appSettings.auto_reboot_enabled.
+const _autoRebootInsert = (() => {
+  try {
+    return db.prepare(`INSERT INTO auto_reboot_log
+      (server_name, nick, imei, reason, status, error)
+      VALUES (?, ?, ?, ?, ?, ?)`);
+  } catch (_) { return null; }
+})();
+
+async function runAutoReboot() {
+  if (!appSettings.auto_reboot_enabled) return;
+  const minInterval = Math.max(15, parseInt(appSettings.auto_reboot_min_interval_min) || 60);
+
+  // computeProxyIssues already returns only latency/error-driven issues
+  const candidates = computeProxyIssues();
+  if (candidates.length === 0) return;
+
+  // Build IMEI lookup: nick + server_name → imei (need IMEI for reboot API)
+  let live;
+  try { live = await fetchAllServersDataCached(); } catch (e) { live = []; }
+  const imeiMap = {};   // server|nick → imei
+  for (const data of live) {
+    const srv = data.serverName;
+    if (!Array.isArray(data.status)) continue;
+    for (const m of data.status) {
+      const md = m.modem_details || {};
+      if (md.NICK && md.IMEI) imeiMap[srv + '|' + md.NICK] = md.IMEI;
+    }
+  }
+
+  // Throttle check via DB — last reboot timestamp per modem
+  const sinceExpr = `datetime('now', '-${minInterval} minutes')`;
+  const recent = db.prepare(`
+    SELECT server_name, nick, MAX(rebooted_at) AS last
+      FROM auto_reboot_log
+     WHERE rebooted_at >= ${sinceExpr}
+     GROUP BY server_name, nick
+  `).all();
+  const recentSet = new Set(recent.map(r => r.server_name + '|' + r.nick));
+
+  let attempted = 0, succeeded = 0;
+  for (const it of candidates) {
+    const key = it.server + '|' + it.nick;
+    if (recentSet.has(key)) continue; // already rebooted recently
+    const imei = imeiMap[key];
+    if (!imei) {
+      logger.warn(`[AutoReboot] no IMEI for ${it.server}/${it.nick}, skipping`);
+      continue;
+    }
+    const server = findServer(it.server);
+    if (!server) continue;
+    attempted++;
+    try {
+      await fetchApi(server, `/apix/reboot_modem_by_imei?IMEI=${encodeURIComponent(imei)}`);
+      if (_autoRebootInsert) _autoRebootInsert.run(it.server, it.nick, imei, it.detail, 'success', null);
+      logger.warn(`[AutoReboot] ${it.server}/${it.nick} IMEI=${imei} reason="${it.detail}"`);
+      logActivity('modem', 'warn', 'auto_reboot', it.nick,
+        `Auto-reboot triggered: ${it.detail}`,
+        { server: it.server, nick: it.nick, imei, reasons: it.reasons });
+      succeeded++;
+    } catch (e) {
+      if (_autoRebootInsert) _autoRebootInsert.run(it.server, it.nick, imei, it.detail, 'failed', e.message);
+      logger.error(`[AutoReboot] ${it.server}/${it.nick} failed:`, e.message);
+    }
+  }
+  if (attempted > 0) {
+    logger.info(`[AutoReboot] cycle: ${succeeded}/${attempted} reboots, ${candidates.length - attempted} throttled`);
+  }
+}
+
+// Proxy check summary helper — last 7 days
 function getProxyCheckSummary() {
   try {
-    const todayStart = getMoscowToday() + 'T00:00:00.000Z';
-    const summary = dbStmts.proxyCheckSummary.all(todayStart);
+    const since7d = new Date(Date.now() - 7 * 86400000).toISOString();
+    const summary = dbStmts.proxyCheckSummary.all(since7d);
     const last = dbStmts.proxyCheckLast.all();
     return { summary, last };
   } catch (e) { return { summary: [], last: [] }; }
@@ -3324,6 +4470,825 @@ app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, r
   }
 });
 
+// Latency per-day scatter — individual check points for a single day
+app.get('/api/analytics/latency_day', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const { view = 'country', id = 'all', date } = req.query;
+    const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
+
+    // Determine MSK date
+    const mskOffset = getTzOffset('Europe/Moscow');
+    let mskDate;
+    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
+      mskDate = date;
+    } else {
+      const now = new Date();
+      const mskNow = new Date(now.getTime() + mskOffset * 3600 * 1000);
+      mskDate = mskNow.toISOString().slice(0, 10);
+    }
+
+    // Convert MSK day boundaries to UTC
+    const dayStartMsk = new Date(mskDate + 'T00:00:00Z');
+    const dayStartUtc = new Date(dayStartMsk.getTime() - mskOffset * 3600 * 1000);
+    const dayEndUtc = new Date(dayStartUtc.getTime() + 86400000);
+    const utcFrom = dayStartUtc.toISOString();
+    const utcTo = dayEndUtc.toISOString();
+
+    // Build filter (same logic as latency_stats)
+    const serverCountryMap = {};
+    for (const s of apiServers) {
+      const cn = ((SERVER_COUNTRIES[s.name] || {}).name || '').toLowerCase();
+      if (cn) serverCountryMap[s.name] = cn;
+    }
+
+    let filter = '';
+    const params = [utcFrom, utcTo];
+    if (idKey !== 'all') {
+      if (view === 'country') {
+        const servers = [];
+        for (const [srv, cn] of Object.entries(serverCountryMap)) {
+          if (cn.includes(idKey) || idKey.includes(cn)) servers.push(srv);
+        }
+        if (servers.length > 0) {
+          filter = ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
+          params.push(...servers);
+        }
+      } else if (view === 'operator') {
+        filter = " AND LOWER(REPLACE(operator, ' ', '_')) LIKE ?";
+        params.push('%' + idKey + '%');
+      } else if (view === 'client') {
+        filter = " AND client_name = ?";
+        params.push(id);
+      }
+    }
+
+    const sql = `SELECT nick, server_name, operator, client_name, checked_at,
+      connect_ms, total_ms, status_code, error
+      FROM proxy_checks
+      WHERE checked_at >= ? AND checked_at < ?${filter}
+      ORDER BY checked_at ASC`;
+
+    const rows = db.prepare(sql).all(...params);
+
+    // Build points with MSK time
+    const points = [];
+    let okCount = 0, errCount = 0, totalMsArr = [];
+    for (const r of rows) {
+      const utcMs = new Date(r.checked_at).getTime();
+      const mskMs = utcMs + mskOffset * 3600 * 1000;
+      const mskD = new Date(mskMs);
+      const h = mskD.getUTCHours();
+      const m = mskD.getUTCMinutes();
+      const minutes = h * 60 + m;
+      const timeStr = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+
+      points.push({
+        t: timeStr,
+        min: minutes,
+        nick: r.nick,
+        op: r.operator || '',
+        client: r.client_name || '',
+        connect: r.connect_ms,
+        total: r.total_ms,
+        status: r.status_code,
+        error: r.error || null
+      });
+
+      if (r.error) {
+        errCount++;
+      } else {
+        okCount++;
+        if (r.total_ms != null) totalMsArr.push(r.total_ms);
+      }
+    }
+
+    // Summary
+    const sorted = totalMsArr.slice().sort((a, b) => a - b);
+    const summary = {
+      total: points.length,
+      ok: okCount,
+      errors: errCount,
+      median_ms: null,
+      p95_ms: null,
+      avg_ms: null
+    };
+    if (sorted.length > 0) {
+      const mid = Math.floor(sorted.length / 2);
+      summary.median_ms = sorted.length % 2 === 0 ? Math.round((sorted[mid - 1] + sorted[mid]) / 2) : sorted[mid];
+      summary.avg_ms = Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length);
+      summary.p95_ms = sorted[Math.min(Math.ceil(sorted.length * 0.95) - 1, sorted.length - 1)];
+    }
+
+    res.json({ date: mskDate, points, summary });
+  } catch (e) {
+    logger.error('[latency_day]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================================
+// PHASE 3 — "Система" tab analytics endpoints
+// ============================================================================
+
+// 3.1 Modem health: per-modem uptime, latency, errors, rotations, traffic, score
+app.get('/api/analytics/modem_health', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+    const sinceExpr = `datetime('now', '-${days} days')`;
+    const badMs = Number(appSettings.proxy_check_bad_ms) || 1500;
+    const errThreshold = Number(appSettings.error_rate_threshold) || 15;
+
+    // Base set: modems active in the period (have proxy_checks OR traffic_hourly).
+    // Deduplicates historical/moved modem_meta entries (e.g. modems migrated
+    // between servers — multiple rows with same nick). Picks the most recently
+    // updated modem_meta row per (server, nick) as authoritative source of operator.
+    const modems = db.prepare(`
+      WITH active AS (
+        SELECT DISTINCT server_name, nick FROM proxy_checks
+        WHERE checked_at >= ${sinceExpr}
+        UNION
+        SELECT DISTINCT server_name, nick FROM traffic_hourly
+        WHERE hour_start >= ${sinceExpr}
+      ),
+      meta_latest AS (
+        SELECT server_name, nick, operator,
+               ROW_NUMBER() OVER (PARTITION BY server_name, nick ORDER BY updated_at DESC) as rn
+        FROM modem_meta
+      )
+      SELECT a.server_name, a.nick, COALESCE(m.operator, '') as operator
+      FROM active a
+      LEFT JOIN meta_latest m
+        ON m.server_name = a.server_name AND m.nick = a.nick AND m.rn = 1
+      ORDER BY a.server_name, a.nick
+    `).all();
+    if (modems.length === 0) return res.json({ modems: [], summary: { total: 0 } });
+
+    // Batch per-modem queries grouped to avoid N+1. One pass per metric.
+    const checksRows = db.prepare(`
+      SELECT server_name, nick,
+             AVG(total_ms) FILTER (WHERE error IS NULL) as avg_latency,
+             COUNT(*) as total_checks,
+             SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as err_checks
+      FROM proxy_checks
+      WHERE checked_at >= ${sinceExpr}
+      GROUP BY server_name, nick
+    `).all();
+    const checksMap = {};
+    for (const r of checksRows) checksMap[r.server_name + '|' + r.nick] = r;
+
+    const rotRows = db.prepare(`
+      SELECT server_name, nick,
+             COUNT(*) as total,
+             SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
+             AVG(took_sec) as avg_sec
+      FROM rotation_log
+      WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL
+      GROUP BY server_name, nick
+    `).all();
+    const rotMap = {};
+    for (const r of rotRows) rotMap[r.server_name + '|' + r.nick] = r;
+
+    // Count active HOURS (not days) — day-level counting crosses ~days+1
+    // distinct UTC dates for a rolling N-day window, producing >100% uptime.
+    // Hours are bounded by the actual elapsed time × 24.
+    const trafRows = db.prepare(`
+      SELECT server_name, nick,
+             SUM(bytes_in + bytes_out) as bytes,
+             COUNT(DISTINCT substr(hour_start, 1, 13)) as active_hours
+      FROM traffic_hourly
+      WHERE hour_start >= ${sinceExpr}
+      GROUP BY server_name, nick
+    `).all();
+    const trafMap = {};
+    for (const r of trafRows) trafMap[r.server_name + '|' + r.nick] = r;
+    // Exact elapsed hours (so 1-day selector = last 24 h, 7-day = 168 h, etc.)
+    const expectedHours = days * 24;
+
+    const out = modems.map(m => {
+      const key = m.server_name + '|' + m.nick;
+      const ch = checksMap[key] || {};
+      const rot = rotMap[key] || {};
+      const tr = trafMap[key] || {};
+      const errPct = ch.total_checks > 0 ? (ch.err_checks / ch.total_checks) * 100 : null;
+      const latency = ch.avg_latency != null ? Math.round(ch.avg_latency) : null;
+      const activeHours = tr.active_hours || 0;
+      const uptimePct = expectedHours > 0
+        ? Math.min(100, Math.round(activeHours / expectedHours * 1000) / 10)
+        : 0;
+
+      // Health score 0-100
+      let score = 100;
+      if (errPct != null) score -= Math.min(errPct * 2, 60);
+      if (latency != null && latency > badMs) score *= 0.7;
+      if (expectedHours > 0) score *= (activeHours / expectedHours);
+      score = Math.max(0, Math.min(100, Math.round(score)));
+
+      const rotFailedPct = rot.total > 0 ? (rot.failed / rot.total) * 100 : 0;
+
+      return {
+        nick: m.nick,
+        server_name: m.server_name,
+        operator: m.operator || '',
+        latency_ms: latency,
+        error_pct: errPct != null ? Math.round(errPct * 10) / 10 : null,
+        total_checks: ch.total_checks || 0,
+        rotations: rot.total || 0,
+        rotations_failed_pct: Math.round(rotFailedPct * 10) / 10,
+        avg_rotation_sec: rot.avg_sec != null ? Math.round(rot.avg_sec * 10) / 10 : null,
+        traffic_gb: tr.bytes ? Math.round(tr.bytes / 1073741824 * 100) / 100 : 0,
+        active_hours: activeHours,
+        uptime_pct: uptimePct,
+        health_score: score,
+        status: score >= 80 ? 'good' : score >= 50 ? 'warn' : 'bad'
+      };
+    });
+
+    const summary = {
+      total: out.length,
+      good: out.filter(x => x.status === 'good').length,
+      warn: out.filter(x => x.status === 'warn').length,
+      bad: out.filter(x => x.status === 'bad').length,
+      err_threshold_pct: errThreshold
+    };
+    res.json({ modems: out, summary, days });
+  } catch (e) {
+    logger.error('[modem_health]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 3.2 Rotation analytics
+app.get('/api/analytics/rotations', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+    const sinceExpr = `datetime('now', '-${days} days')`;
+
+    const totals = db.prepare(`
+      SELECT COUNT(*) as total,
+             SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
+             AVG(took_sec) as avg_sec,
+             MAX(took_sec) as max_sec,
+             MIN(took_sec) as min_sec
+      FROM rotation_log
+      WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL
+    `).get();
+
+    const perDay = db.prepare(`
+      SELECT substr(started_at, 1, 10) as date,
+             COUNT(*) as total,
+             SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
+             AVG(took_sec) as avg_sec
+      FROM rotation_log
+      WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL
+      GROUP BY date
+      ORDER BY date
+    `).all();
+
+    const perModem = db.prepare(`
+      SELECT r.server_name, r.nick, m.operator,
+             COUNT(*) as total,
+             SUM(CASE WHEN r.old_ip = r.new_ip THEN 1 ELSE 0 END) as failed,
+             AVG(r.took_sec) as avg_sec,
+             MAX(r.took_sec) as max_sec
+      FROM rotation_log r
+      LEFT JOIN modem_meta m ON m.nick = r.nick AND m.server_name = r.server_name
+      WHERE r.started_at >= ${sinceExpr} AND r.ended_at IS NOT NULL
+      GROUP BY r.server_name, r.nick
+      ORDER BY total DESC
+      LIMIT 200
+    `).all();
+
+    const perOperator = db.prepare(`
+      SELECT COALESCE(m.operator, 'unknown') as operator,
+             COUNT(*) as total,
+             SUM(CASE WHEN r.old_ip = r.new_ip THEN 1 ELSE 0 END) as failed,
+             AVG(r.took_sec) as avg_sec
+      FROM rotation_log r
+      LEFT JOIN modem_meta m ON m.nick = r.nick AND m.server_name = r.server_name
+      WHERE r.started_at >= ${sinceExpr} AND r.ended_at IS NOT NULL
+      GROUP BY operator
+      ORDER BY total DESC
+    `).all();
+
+    const recentFailed = db.prepare(`
+      SELECT server_name, nick, old_ip, new_ip, started_at, took_sec
+      FROM rotation_log
+      WHERE old_ip IS NOT NULL AND new_ip IS NOT NULL AND old_ip = new_ip
+        AND started_at >= ${sinceExpr}
+      ORDER BY started_at DESC
+      LIMIT 50
+    `).all();
+
+    const success = totals.total > 0 ? ((totals.total - totals.failed) / totals.total) * 100 : 0;
+    res.json({
+      days,
+      summary: {
+        total: totals.total || 0,
+        failed: totals.failed || 0,
+        success_pct: Math.round(success * 10) / 10,
+        avg_sec: totals.avg_sec != null ? Math.round(totals.avg_sec * 10) / 10 : null,
+        max_sec: totals.max_sec != null ? Math.round(totals.max_sec * 10) / 10 : null,
+        min_sec: totals.min_sec != null ? Math.round(totals.min_sec * 10) / 10 : null,
+      },
+      per_day: perDay,
+      per_modem: perModem,
+      per_operator: perOperator,
+      recent_failed: recentFailed
+    });
+  } catch (e) {
+    logger.error('[rotations]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 3.3 IP analytics
+app.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 90);
+    const sinceExpr = `datetime('now', '-${days} days')`;
+
+    const uniqueIps = db.prepare(`
+      SELECT COUNT(DISTINCT ip) as c FROM ip_history
+      WHERE started_at >= ${sinceExpr}
+    `).get().c;
+
+    const totalAssignments = db.prepare(`
+      SELECT COUNT(*) as c FROM ip_history WHERE started_at >= ${sinceExpr}
+    `).get().c;
+
+    // Reused IPs: more than 1 distinct key uses it
+    const reused = db.prepare(`
+      SELECT ip, COUNT(*) as uses, COUNT(DISTINCT key) as modems,
+             MIN(started_at) as first, MAX(started_at) as last
+      FROM ip_history
+      WHERE started_at >= ${sinceExpr}
+      GROUP BY ip
+      HAVING modems > 1
+      ORDER BY uses DESC
+      LIMIT 100
+    `).all();
+
+    // Average lifetime: only rows with ended_at
+    const lifetimeAll = db.prepare(`
+      SELECT AVG((julianday(ended_at) - julianday(started_at)) * 86400) as avg_sec
+      FROM ip_history
+      WHERE ended_at IS NOT NULL AND started_at >= ${sinceExpr}
+    `).get().avg_sec;
+
+    // Pool size per server (distinct IPs per server prefix in key, e.g. "S1_port123")
+    const poolsRows = db.prepare(`
+      SELECT substr(key, 1, instr(key, '_') - 1) as server,
+             COUNT(DISTINCT ip) as ip_count,
+             COUNT(*) as total_assignments,
+             AVG(CASE WHEN ended_at IS NOT NULL THEN (julianday(ended_at) - julianday(started_at)) * 86400 END) as avg_lifetime_sec
+      FROM ip_history
+      WHERE started_at >= ${sinceExpr} AND instr(key, '_') > 0
+      GROUP BY server
+      ORDER BY ip_count DESC
+    `).all();
+
+    res.json({
+      days,
+      summary: {
+        unique_ips: uniqueIps,
+        total_assignments: totalAssignments,
+        reuse_ratio: uniqueIps > 0 ? Math.round(totalAssignments / uniqueIps * 100) / 100 : 0,
+        avg_lifetime_sec: lifetimeAll != null ? Math.round(lifetimeAll) : null,
+        reused_count: reused.length
+      },
+      reused,
+      pools: poolsRows
+    });
+  } catch (e) {
+    logger.error('[ip_stats]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 3.4 Traffic forecast — per-client linear regression + runway (days of balance left)
+app.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days) || 30, 7), 60);
+    const sinceExpr = `datetime('now', '-${days} days')`;
+    const mskToday = getMoscowToday();
+    const mskNow = getMoscowNow();
+    const daysInMonth = new Date(mskNow.getFullYear(), mskNow.getMonth() + 1, 0).getDate();
+    const dayOfMonth = mskNow.getDate();
+    const daysLeftInMonth = daysInMonth - dayOfMonth;
+
+    // Per-client per-day gb totals from daily_traffic
+    const rows = db.prepare(`
+      SELECT port_name, date, SUM(bytes_in + bytes_out) as bytes
+      FROM daily_traffic
+      WHERE date >= substr(${sinceExpr}, 1, 10)
+      GROUP BY port_name, date
+    `).all();
+
+    // Build client → port_names
+    const portToClient = {};
+    for (const c of clients) if (c.portName) portToClient[c.portName] = c;
+    const portIdToClient = {}; // Fallback: port_id like "S1_portXXX" → client via modem_meta
+
+    // Per-client aggregation
+    const perClient = {};
+    for (const r of rows) {
+      // port_name in daily_traffic is the full port_id (S1_portXXX), not client portName.
+      // Match via live portKey mapping.
+      const pnCandidate = portKeyToPortName[r.port_name] || r.port_name;
+      const client = portToClient[pnCandidate];
+      if (!client) continue;
+      if (!perClient[client.id]) perClient[client.id] = { id: client.id, name: client.name, portName: client.portName, price: client.price || 0, currency: client.currency || 'RUB', balance: client.balance || 0, billingType: client.billingType || 'per_gb', days: {} };
+      if (!perClient[client.id].days[r.date]) perClient[client.id].days[r.date] = 0;
+      perClient[client.id].days[r.date] += r.bytes || 0;
+    }
+
+    const forecasts = Object.values(perClient).map(c => {
+      const arr = Object.entries(c.days).sort((a, b) => a[0].localeCompare(b[0]));
+      const xs = arr.map((_, i) => i);
+      const ys = arr.map(a => a[1] / 1073741824); // GB
+      const n = xs.length;
+      let slope = 0, mean = 0;
+      if (n >= 2) {
+        const sumX = xs.reduce((s, v) => s + v, 0);
+        const sumY = ys.reduce((s, v) => s + v, 0);
+        const sumXY = xs.reduce((s, v, i) => s + v * ys[i], 0);
+        const sumX2 = xs.reduce((s, v) => s + v * v, 0);
+        const meanX = sumX / n, meanY = sumY / n;
+        const denom = sumX2 - n * meanX * meanX;
+        slope = denom !== 0 ? (sumXY - n * meanX * meanY) / denom : 0;
+        mean = meanY;
+      } else if (n === 1) {
+        mean = ys[0];
+      }
+
+      const avgDailyGb = mean;
+      // Forecast end of month: current month accumulated so far + avgDaily * days_left
+      const thisMonthRows = arr.filter(a => a[0].startsWith(mskToday.slice(0, 7)));
+      const monthGbSoFar = thisMonthRows.reduce((s, a) => s + a[1] / 1073741824, 0);
+      const forecastMonthGb = monthGbSoFar + avgDailyGb * daysLeftInMonth;
+
+      // Runway: how many days current balance lasts at current rate
+      let runwayDays = null;
+      if (c.billingType === 'per_gb' && c.price > 0 && avgDailyGb > 0) {
+        runwayDays = Math.max(0, Math.floor(c.balance / (avgDailyGb * c.price)));
+      } else if (c.billingType === 'per_modem' && c.price > 0) {
+        // rough approx — divide balance by (price per modem / days in month) × modem count
+        runwayDays = Math.floor(c.balance / (c.price / daysInMonth));
+      }
+
+      return {
+        client_id: c.id,
+        client_name: c.name,
+        avg_daily_gb: Math.round(avgDailyGb * 100) / 100,
+        trend_gb_per_day: Math.round(slope * 100) / 100,
+        month_gb_so_far: Math.round(monthGbSoFar * 10) / 10,
+        forecast_month_gb: Math.round(forecastMonthGb * 10) / 10,
+        balance: c.balance,
+        currency: c.currency,
+        runway_days: runwayDays,
+        low_balance_alert: runwayDays !== null && runwayDays <= 7
+      };
+    }).sort((a, b) => (a.runway_days || 9999) - (b.runway_days || 9999));
+
+    res.json({
+      days,
+      mskToday,
+      days_left_in_month: daysLeftInMonth,
+      forecasts
+    });
+  } catch (e) {
+    logger.error('[traffic_forecast]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 3.5 Capacity planning
+app.get('/api/analytics/capacity', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const days = Math.min(Math.max(parseInt(req.query.days) || 30, 7), 180);
+    const sinceExpr = `datetime('now', '-${days} days')`;
+
+    // Per-server utilization
+    const servers = db.prepare(`
+      SELECT server_name,
+             COUNT(DISTINCT nick) as modem_count,
+             SUM(bytes_in + bytes_out) as total_bytes,
+             AVG(bytes_in + bytes_out) as avg_hour_bytes,
+             MAX(bytes_in + bytes_out) as max_hour_bytes,
+             COUNT(DISTINCT substr(hour_start, 1, 10)) as active_days
+      FROM traffic_hourly
+      WHERE hour_start >= ${sinceExpr}
+      GROUP BY server_name
+      ORDER BY total_bytes DESC
+    `).all();
+
+    // Modem count growth by month
+    const modemGrowth = db.prepare(`
+      SELECT substr(updated_at, 1, 7) as month,
+             COUNT(DISTINCT imei) as modems
+      FROM modem_meta
+      GROUP BY month
+      ORDER BY month
+    `).all();
+
+    // Overall totals
+    const totals = db.prepare(`
+      SELECT SUM(bytes_in + bytes_out) as total_bytes,
+             COUNT(DISTINCT nick) as total_modems,
+             COUNT(DISTINCT server_name) as total_servers
+      FROM traffic_hourly
+      WHERE hour_start >= ${sinceExpr}
+    `).get();
+
+    const totalGb = totals.total_bytes ? totals.total_bytes / 1073741824 : 0;
+    const avgPerModem = totals.total_modems > 0 ? totalGb / totals.total_modems : 0;
+
+    res.json({
+      days,
+      summary: {
+        total_gb: Math.round(totalGb * 10) / 10,
+        total_modems: totals.total_modems || 0,
+        total_servers: totals.total_servers || 0,
+        avg_gb_per_modem: Math.round(avgPerModem * 100) / 100,
+      },
+      servers: servers.map(s => ({
+        server_name: s.server_name,
+        modems: s.modem_count,
+        total_gb: Math.round(s.total_bytes / 1073741824 * 10) / 10,
+        avg_hour_mb: Math.round(s.avg_hour_bytes / 1048576 * 10) / 10,
+        max_hour_mb: Math.round(s.max_hour_bytes / 1048576 * 10) / 10,
+        active_days: s.active_days,
+        utilization_pct: s.max_hour_bytes > 0
+          ? Math.round(s.avg_hour_bytes / s.max_hour_bytes * 100)
+          : 0
+      })),
+      modem_growth: modemGrowth
+    });
+  } catch (e) {
+    logger.error('[capacity]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// 3.6 System health dashboard
+app.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    // Billing success 24h
+    const billing24 = db.prepare(`
+      SELECT level, COUNT(*) as c FROM system_log
+      WHERE category = 'billing' AND timestamp >= datetime('now', '-1 day')
+      GROUP BY level
+    `).all();
+    const billingByLevel = {};
+    for (const r of billing24) billingByLevel[r.level] = r.c;
+
+    // API error rate
+    const apiErrors24 = db.prepare(`
+      SELECT COUNT(*) as c FROM system_log
+      WHERE category = 'api' AND level = 'error' AND timestamp >= datetime('now', '-1 day')
+    `).get().c;
+
+    // Per-day system_log errors for trend
+    const errorsByDay = db.prepare(`
+      SELECT substr(timestamp, 1, 10) as date,
+             SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) as errors,
+             SUM(CASE WHEN level = 'warn'  THEN 1 ELSE 0 END) as warns
+      FROM system_log
+      WHERE timestamp >= datetime('now', '-7 days')
+      GROUP BY date
+      ORDER BY date
+    `).all();
+
+    // DB size
+    let dbSizeBytes = 0;
+    try {
+      const dbPath = path.join(__dirname, 'dashboard.db');
+      if (fs.existsSync(dbPath)) dbSizeBytes = fs.statSync(dbPath).size;
+    } catch (_e) {}
+
+    // Sessions
+    const sessionCount = db.prepare("SELECT COUNT(*) as c FROM sessions WHERE expires_at > datetime('now')").get().c;
+
+    // Memory
+    const memUsage = process.memoryUsage();
+
+    // Recent critical events
+    const recentCritical = db.prepare(`
+      SELECT id, timestamp, level, category, action, target, message, details
+      FROM system_log
+      WHERE level IN ('error', 'warn')
+      ORDER BY id DESC
+      LIMIT 50
+    `).all();
+
+    // Per-server uptime (from uptime_tracking via live data)
+    const serverStatus = apiServers.map(s => {
+      const sc = SERVER_COUNTRIES[s.name] || {};
+      return {
+        name: s.name,
+        country: sc.name || '',
+        publicIp: s.publicIp || ''
+      };
+    });
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      billing_24h: billingByLevel,
+      api_errors_24h: apiErrors24,
+      errors_by_day: errorsByDay,
+      db: {
+        size_bytes: dbSizeBytes,
+        size_mb: Math.round(dbSizeBytes / 1048576 * 10) / 10
+      },
+      sessions: sessionCount,
+      memory: {
+        rss_mb: Math.round(memUsage.rss / 1048576),
+        heap_mb: Math.round(memUsage.heapUsed / 1048576),
+        heap_total_mb: Math.round(memUsage.heapTotal / 1048576)
+      },
+      uptime_sec: Math.round(process.uptime()),
+      recent_critical: recentCritical,
+      servers: serverStatus
+    });
+  } catch (e) {
+    logger.error('[system_health]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ============================================================================
+// PHASE 4 — SLA per client
+// ============================================================================
+
+// Compute SLA metrics for a single client.
+// Uptime is measured over 30 days (contractual SLA horizon).
+// Latency and error_pct use last 24 h (current service quality).
+// Returns { uptime_pct, avg_latency_ms, error_pct, total_checks } or null if no data.
+function computeClientSlaMetrics(client) {
+  if (!client.portName) return null;
+  // Latency + error rate (24 h)
+  const checks = db.prepare(`
+    SELECT AVG(total_ms) FILTER (WHERE error IS NULL) as avg_ms,
+           COUNT(*) as total,
+           SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as errors
+    FROM proxy_checks
+    WHERE client_name = ? AND checked_at >= datetime('now', '-1 day')
+  `).get(client.portName);
+
+  // Uptime over 30 days — active_hours / (30 × 24).
+  // Capped at 100 % (rolling window can pick up a marginal 31st hour edge).
+  const UPTIME_DAYS = 30;
+  const traffic = db.prepare(`
+    SELECT COUNT(DISTINCT substr(hour_start, 1, 13)) as active_hours
+    FROM traffic_hourly
+    WHERE client_name = ? AND hour_start >= datetime('now', ?)
+  `).get(client.portName, `-${UPTIME_DAYS} days`);
+
+  if (checks.total === 0 && traffic.active_hours === 0) return null;
+  const expectedHours = UPTIME_DAYS * 24;
+  const uptimePct = traffic.active_hours != null
+    ? Math.min(100, Math.round(traffic.active_hours / expectedHours * 1000) / 10)
+    : null;
+  const errorPct = checks.total > 0 ? Math.round(checks.errors / checks.total * 1000) / 10 : 0;
+  return {
+    uptime_pct: uptimePct,
+    uptime_window_days: UPTIME_DAYS,
+    avg_latency_ms: checks.avg_ms != null ? Math.round(checks.avg_ms) : null,
+    error_pct: errorPct,
+    total_checks: checks.total
+  };
+}
+
+// Evaluate SLA, write violations to DB. Optionally auto-credit.
+async function runSlaCheck() {
+  try {
+    const today = getMoscowToday();
+    let violationsCount = 0, creditsCount = 0;
+    const insertViolation = db.prepare(`INSERT INTO sla_violations
+      (client_id, date, metric, expected, actual, credited_amount)
+      VALUES (?, ?, ?, ?, ?, ?)`);
+    const existsStmt = db.prepare(`SELECT id FROM sla_violations WHERE client_id = ? AND date = ? AND metric = ?`);
+
+    for (const client of clients) {
+      if (!client.portName || !client.price) continue;
+      const m = computeClientSlaMetrics(client);
+      if (!m) continue;
+      const breaches = [];
+      if (m.uptime_pct != null && client.slaUptimePct != null && m.uptime_pct < client.slaUptimePct) {
+        breaches.push({ metric: 'uptime', expected: client.slaUptimePct, actual: m.uptime_pct });
+      }
+      if (m.avg_latency_ms != null && client.slaMaxLatencyMs != null && m.avg_latency_ms > client.slaMaxLatencyMs) {
+        breaches.push({ metric: 'latency', expected: client.slaMaxLatencyMs, actual: m.avg_latency_ms });
+      }
+      if (m.error_pct != null && client.slaMaxErrorPct != null && m.error_pct > client.slaMaxErrorPct) {
+        breaches.push({ metric: 'errors', expected: client.slaMaxErrorPct, actual: m.error_pct });
+      }
+      for (const b of breaches) {
+        // Skip if already logged today
+        if (existsStmt.get(client.id, today, b.metric)) continue;
+        // Auto-credit: 1% of daily rate per breach (per_gb only, cap at 10%)
+        let credit = 0;
+        if (client.slaAutoCredit && client.price > 0 && client.billingType === 'per_gb') {
+          credit = Math.min(client.price * 0.01, client.price * 0.1);
+          credit = Math.round(credit * 100) / 100;
+          if (credit > 0) {
+            try {
+              atomicCredit(client.id, credit, {
+                type: 'adjustment',
+                date: today,
+                timestamp: new Date().toISOString(),
+                amount: credit,
+                currency: client.currency || 'RUB',
+                note: `SLA кредит: ${b.metric} ${b.actual} (норма ${b.expected})`,
+                traffic_source: 'sla_auto'
+              });
+              creditsCount++;
+            } catch (e) {
+              logger.error(`[SLA] credit error for ${client.name}:`, e.message);
+              credit = 0;
+            }
+          }
+        }
+        insertViolation.run(client.id, today, b.metric, b.expected, b.actual, credit);
+        violationsCount++;
+        logger.warn(`[SLA] ${client.name} breach: ${b.metric} actual=${b.actual} expected=${b.expected} credit=${credit}`);
+      }
+    }
+    if (violationsCount > 0 || creditsCount > 0) {
+      logActivity('system', 'warn', 'sla_check', null,
+        `SLA check: ${violationsCount} breaches, ${creditsCount} credits applied`,
+        { violations: violationsCount, credits: creditsCount, date: today });
+    }
+  } catch (e) {
+    logger.error('[SLA]', e.message);
+  }
+}
+
+// Endpoint: per-client SLA status
+app.get('/api/admin/clients/:id/sla', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const client = clientById.get(req.params.id);
+    if (!client) return res.status(404).json({ error: 'not found' });
+    const metrics = computeClientSlaMetrics(client);
+    const violations = db.prepare(`
+      SELECT * FROM sla_violations
+      WHERE client_id = ?
+      ORDER BY id DESC
+      LIMIT 100
+    `).all(client.id);
+    const thresholds = {
+      uptime_pct:    client.slaUptimePct    != null ? client.slaUptimePct    : 99,
+      max_latency_ms: client.slaMaxLatencyMs != null ? client.slaMaxLatencyMs : 1000,
+      max_error_pct: client.slaMaxErrorPct  != null ? client.slaMaxErrorPct  : 5,
+      auto_credit:   !!client.slaAutoCredit
+    };
+    let status = 'ok';
+    if (metrics) {
+      if ((metrics.uptime_pct != null && metrics.uptime_pct < thresholds.uptime_pct) ||
+          (metrics.avg_latency_ms != null && metrics.avg_latency_ms > thresholds.max_latency_ms) ||
+          (metrics.error_pct != null && metrics.error_pct > thresholds.max_error_pct)) {
+        status = 'breach';
+      }
+    }
+    res.json({ client_id: client.id, status, metrics, thresholds, violations });
+  } catch (e) {
+    logger.error('[sla]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Endpoint: overall SLA status across all clients (for dashboard widget)
+app.get('/api/admin/sla_overview', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const out = { ok: 0, breach: 0, no_data: 0, clients: [] };
+    for (const client of clients) {
+      if (!client.portName || !client.price) continue;
+      const m = computeClientSlaMetrics(client);
+      if (!m) { out.no_data++; continue; }
+      const expected = {
+        uptime: client.slaUptimePct    != null ? client.slaUptimePct    : 99,
+        latency: client.slaMaxLatencyMs != null ? client.slaMaxLatencyMs : 1000,
+        errors: client.slaMaxErrorPct  != null ? client.slaMaxErrorPct  : 5,
+      };
+      const breach =
+        (m.uptime_pct     != null && m.uptime_pct     < expected.uptime) ||
+        (m.avg_latency_ms != null && m.avg_latency_ms > expected.latency) ||
+        (m.error_pct      != null && m.error_pct      > expected.errors);
+      if (breach) out.breach++; else out.ok++;
+      out.clients.push({
+        id: client.id, name: client.name,
+        status: breach ? 'breach' : 'ok',
+        uptime_pct: m.uptime_pct, avg_latency_ms: m.avg_latency_ms, error_pct: m.error_pct,
+        expected
+      });
+    }
+    res.json(out);
+  } catch (e) {
+    logger.error('[sla_overview]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // Manual proxy check (single or bulk)
 app.post('/api/admin/proxy_check', authMiddleware, adminMiddleware, async (req, res) => {
   try {
@@ -3372,6 +5337,17 @@ app.post('/api/admin/proxy_check', authMiddleware, adminMiddleware, async (req, 
       const proxy = proxyMap[key];
       if (!proxy) {
         checks.push({ nick: item.nick, server: item.server, error: 'Proxy not found' });
+        continue;
+      }
+      // Unassigned proxies don't accept connections in ProxySmart.
+      // Skip the actual check and return a clear explanation instead of
+      // a misleading "connection refused" / "407" error.
+      if (!proxy.client || !proxy.client.trim()) {
+        checks.push({
+          nick: proxy.nick, server: proxy.server, client: '',
+          operator: proxy.operator, status_code: null, total_ms: null, connect_ms: null,
+          error: 'Прокси не в аренде — присвойте portName клиенту, чтобы порт стал активным в ProxySmart'
+        });
         continue;
       }
       const r = await curlCheckProxy(proxy.proxyUrl);
@@ -3442,7 +5418,7 @@ app.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 app.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCreateSchema), async (req, res) => {
-  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, address, clientType } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, address, clientType, allowDebt, maxDebt, slaUptimePct, slaMaxLatencyMs, slaMaxErrorPct, slaAutoCredit } = req.body;
   if (!name || !portName || !login || !password) {
     return res.status(400).json({ error: 'name, portName, login, password required' });
   }
@@ -3480,6 +5456,12 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientC
     autoActs: true,
     autoBills: true,
     billingPaused: false,
+    allowDebt: !!allowDebt,
+    maxDebt: typeof maxDebt === 'number' ? maxDebt : null,
+    slaUptimePct:    typeof slaUptimePct    === 'number' ? slaUptimePct    : 99,
+    slaMaxLatencyMs: typeof slaMaxLatencyMs === 'number' ? slaMaxLatencyMs : 1000,
+    slaMaxErrorPct:  typeof slaMaxErrorPct  === 'number' ? slaMaxErrorPct  : 5,
+    slaAutoCredit:   !!slaAutoCredit,
     clientType: clientType || 'legal',
     createdAt: new Date().toISOString()
   };
@@ -3493,10 +5475,20 @@ app.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientC
   }
 
   clients.push(client);
-  saveClients(clients);
+  try {
+    saveClients(clients);
+  } catch (e) {
+    // Race: two concurrent POSTs hit the in-memory check before either ran saveClients.
+    // SQLite UNIQUE(login) catches it here — roll back the in-memory push.
+    clients.pop();
+    if (e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''))) {
+      return res.status(409).json({ error: 'Login or API key already exists (race detected)' });
+    }
+    throw e;
+  }
   rebuildClientMaps();
   users[login] = { passwordHash, portNameFilter: portName, source: 'client', clientId: client.id };
-  
+
   const { password: _p, passwordHash: _ph, ...safeClient } = client;
   res.json({ ok: true, client: safeClient });
 });
@@ -3509,7 +5501,7 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, r
   // BUG-12: Validate input
   const valErr = validateClientInput(req.body, false);
   if (valErr) return res.status(400).json({ error: valErr });
-  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address, autoActs, autoBills, billingPaused, clientType } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address, autoActs, autoBills, billingPaused, clientType, allowDebt, maxDebt, slaUptimePct, slaMaxLatencyMs, slaMaxErrorPct, slaAutoCredit } = req.body;
   if (login && login !== old.login) {
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
     delete users[old.login];
@@ -3541,6 +5533,12 @@ app.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, r
     autoActs: autoActs !== undefined ? autoActs : (old.autoActs !== undefined ? old.autoActs : true),
     autoBills: autoBills !== undefined ? autoBills : (old.autoBills !== undefined ? old.autoBills : true),
     billingPaused: billingPaused !== undefined ? billingPaused : (old.billingPaused || false),
+    allowDebt: allowDebt !== undefined ? !!allowDebt : !!old.allowDebt,
+    maxDebt: maxDebt !== undefined ? (typeof maxDebt === 'number' ? maxDebt : null) : (old.maxDebt !== undefined ? old.maxDebt : null),
+    slaUptimePct:    slaUptimePct    !== undefined ? Number(slaUptimePct)    : (typeof old.slaUptimePct    === 'number' ? old.slaUptimePct    : 99),
+    slaMaxLatencyMs: slaMaxLatencyMs !== undefined ? Number(slaMaxLatencyMs) : (typeof old.slaMaxLatencyMs === 'number' ? old.slaMaxLatencyMs : 1000),
+    slaMaxErrorPct:  slaMaxErrorPct  !== undefined ? Number(slaMaxErrorPct)  : (typeof old.slaMaxErrorPct  === 'number' ? old.slaMaxErrorPct  : 5),
+    slaAutoCredit:   slaAutoCredit   !== undefined ? !!slaAutoCredit         : !!old.slaAutoCredit,
     clientType: clientType !== undefined ? clientType : (old.clientType || 'legal')
   };
   clients[idx] = updated;
@@ -3936,19 +5934,47 @@ app.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
 
 // API Servers management
 app.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
-  res.json({ servers: apiServers.map(s => ({ name: s.name, url: s.url, publicIp: s.publicIp, country: SERVER_COUNTRIES[s.name] || {}, osLogin: s.osLogin || '', osPassword: s.osPassword || '', hardware: s.hardware || '', address: s.address || '' })) });
+  res.json({ servers: apiServers.map(s => ({
+    name: s.name, url: s.url, publicIp: s.publicIp,
+    country: SERVER_COUNTRIES[s.name] || {},
+    panelUser: s.user || '', panelPassword: s.pass || '',
+    osLogin: s.osLogin || '', osPassword: s.osPassword || '',
+    hardware: s.hardware || '', address: s.address || ''
+  })) });
 });
 
-app.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, (req, res) => {
+app.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, async (req, res) => {
   const srv = apiServers.find(s => s.name === req.params.name);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  const { osLogin, osPassword, hardware, address } = req.body;
-  if (osLogin !== undefined) srv.osLogin = osLogin;
-  if (osPassword !== undefined) srv.osPassword = osPassword;
-  if (hardware !== undefined) srv.hardware = hardware;
-  if (address !== undefined) srv.address = address;
+  const { osLogin, osPassword, hardware, address, panelUser, panelPassword } = req.body;
+  if (osLogin     !== undefined) srv.osLogin    = osLogin;
+  if (osPassword  !== undefined) srv.osPassword = osPassword;
+  if (hardware    !== undefined) srv.hardware   = hardware;
+  if (address     !== undefined) srv.address    = address;
+
+  // Panel credentials change → validate against ProxySmart before persisting,
+  // otherwise we can lock ourselves out of the server with a typo.
+  if (panelUser !== undefined || panelPassword !== undefined) {
+    const candidate = {
+      ...srv,
+      user: panelUser !== undefined ? String(panelUser).trim() || 'proxy' : srv.user,
+      pass: panelPassword !== undefined ? String(panelPassword) : srv.pass
+    };
+    if (!candidate.user || !candidate.pass) {
+      return res.status(400).json({ error: 'panel user and password cannot be empty' });
+    }
+    try {
+      await fetchApi(candidate, '/apix/show_status_json', 8000);
+    } catch (e) {
+      return res.status(502).json({ error: 'Panel auth failed — credentials not saved', details: e.message });
+    }
+    srv.user = candidate.user;
+    srv.pass = candidate.pass;
+    _psCache = null; _psCacheTs = 0;
+  }
+
   saveApiServersToDb();
-  auditLog(req.user.login, 'update_server', { name: req.params.name, ip: getClientIp(req) });
+  auditLog(req.user.login, 'update_server', { name: req.params.name, fields: Object.keys(req.body || {}), ip: getClientIp(req) });
   res.json({ ok: true });
 });
 
@@ -3997,6 +6023,24 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (min_speed_threshold != null) {
     appSettings.min_speed_threshold = parseFloat(min_speed_threshold) || 2;
   }
+  if (req.body.error_rate_threshold != null) {
+    appSettings.error_rate_threshold = Math.max(1, Math.min(100, parseInt(req.body.error_rate_threshold) || 15));
+  }
+  if (req.body.proxy_alert_latency_ms != null) {
+    appSettings.proxy_alert_latency_ms = Math.max(100, Math.min(60000, parseInt(req.body.proxy_alert_latency_ms) || 1500));
+  }
+  if (req.body.proxy_alert_error_pct != null) {
+    appSettings.proxy_alert_error_pct = Math.max(0, Math.min(100, parseFloat(req.body.proxy_alert_error_pct) || 5));
+  }
+  if (req.body.proxy_alert_window_min != null) {
+    appSettings.proxy_alert_window_min = Math.max(5, Math.min(720, parseInt(req.body.proxy_alert_window_min) || 60));
+  }
+  if (req.body.auto_reboot_enabled != null) {
+    appSettings.auto_reboot_enabled = !!req.body.auto_reboot_enabled;
+  }
+  if (req.body.auto_reboot_min_interval_min != null) {
+    appSettings.auto_reboot_min_interval_min = Math.max(15, Math.min(720, parseInt(req.body.auto_reboot_min_interval_min) || 60));
+  }
   if (pricing_tiers && Array.isArray(pricing_tiers)) {
     appSettings.pricing_tiers = pricing_tiers.map(t => ({
       min_proxies: parseInt(t.min_proxies) || 1,
@@ -4018,6 +6062,39 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
     appSettings.proxy_check_interval_min = Math.max(5, Math.min(1440, parseInt(req.body.proxy_check_interval_min) || 60));
     rescheduleProxyCheck();
   }
+  // Auto-recovery
+  if (req.body.recovery_offline_sec != null) appSettings.recovery_offline_sec = Math.max(10, Math.min(600, parseInt(req.body.recovery_offline_sec) || 60));
+  if (req.body.recovery_max_attempts != null) appSettings.recovery_max_attempts = Math.max(1, Math.min(10, parseInt(req.body.recovery_max_attempts) || 3));
+  if (req.body.recovery_retry_min != null) appSettings.recovery_retry_min = Math.max(1, Math.min(60, parseInt(req.body.recovery_retry_min) || 3));
+  // Modem tracking & rotation
+  if (req.body.tracking_interval_min != null) appSettings.tracking_interval_min = Math.max(1, Math.min(30, parseInt(req.body.tracking_interval_min) || 3));
+  if (req.body.rotation_cache_ttl_min != null) appSettings.rotation_cache_ttl_min = Math.max(5, Math.min(240, parseInt(req.body.rotation_cache_ttl_min) || 30));
+  if (req.body.rotation_sync_interval_min != null) appSettings.rotation_sync_interval_min = Math.max(5, Math.min(240, parseInt(req.body.rotation_sync_interval_min) || 30));
+  // Proxy check (additional)
+  if (req.body.proxy_check_timeout_sec != null) appSettings.proxy_check_timeout_sec = Math.max(5, Math.min(120, parseInt(req.body.proxy_check_timeout_sec) || 15));
+  if (req.body.proxy_check_concurrency != null) appSettings.proxy_check_concurrency = Math.max(1, Math.min(50, parseInt(req.body.proxy_check_concurrency) || 10));
+  // Speedtest (additional)
+  if (req.body.speedtest_low_threshold != null) appSettings.speedtest_low_threshold = Math.max(0.1, Math.min(50, parseFloat(req.body.speedtest_low_threshold) || 1));
+  if (req.body.speedtest_retest_delay_min != null) appSettings.speedtest_retest_delay_min = Math.max(1, Math.min(120, parseInt(req.body.speedtest_retest_delay_min) || 10));
+  if (req.body.speedtest_max_history != null) appSettings.speedtest_max_history = Math.max(5, Math.min(200, parseInt(req.body.speedtest_max_history) || 30));
+  // Data retention (days)
+  if (req.body.retention_traffic_hourly != null) appSettings.retention_traffic_hourly = Math.max(7, Math.min(365, parseInt(req.body.retention_traffic_hourly) || 90));
+  if (req.body.retention_daily_traffic != null) appSettings.retention_daily_traffic = Math.max(7, Math.min(365, parseInt(req.body.retention_daily_traffic) || 90));
+  if (req.body.retention_api_usage != null) appSettings.retention_api_usage = Math.max(7, Math.min(365, parseInt(req.body.retention_api_usage) || 30));
+  if (req.body.retention_audit_log != null) appSettings.retention_audit_log = Math.max(7, Math.min(365, parseInt(req.body.retention_audit_log) || 90));
+  if (req.body.retention_system_log != null) appSettings.retention_system_log = Math.max(7, Math.min(365, parseInt(req.body.retention_system_log) || 30));
+  if (req.body.retention_rotation_log != null) appSettings.retention_rotation_log = Math.max(7, Math.min(365, parseInt(req.body.retention_rotation_log) || 90));
+  if (req.body.retention_proxy_checks != null) appSettings.retention_proxy_checks = Math.max(7, Math.min(365, parseInt(req.body.retention_proxy_checks) || 30));
+  if (req.body.retention_modem_meta != null) appSettings.retention_modem_meta = Math.max(7, Math.min(365, parseInt(req.body.retention_modem_meta) || 30));
+  // Session & billing
+  if (req.body.session_ttl_days != null) appSettings.session_ttl_days = Math.max(1, Math.min(365, parseInt(req.body.session_ttl_days) || 30));
+  if (req.body.billing_retry_delay_hours != null) appSettings.billing_retry_delay_hours = Math.max(0.5, Math.min(24, parseFloat(req.body.billing_retry_delay_hours) || 1));
+  if (req.body.reconciliation_tolerance_gb != null) appSettings.reconciliation_tolerance_gb = Math.max(0.001, Math.min(1, parseFloat(req.body.reconciliation_tolerance_gb) || 0.01));
+  // CRM & auto-create
+  if (req.body.auto_create_interval_min != null) appSettings.auto_create_interval_min = Math.max(1, Math.min(60, parseInt(req.body.auto_create_interval_min) || 10));
+  if (req.body.crm_check_interval_min != null) appSettings.crm_check_interval_min = Math.max(5, Math.min(120, parseInt(req.body.crm_check_interval_min) || 10));
+  if (req.body.crm_reminder_days != null) appSettings.crm_reminder_days = Math.max(1, Math.min(30, parseInt(req.body.crm_reminder_days) || 3));
+
   saveSettings();
   rescheduleSpeedtests();
   res.json({ ok: true, settings: appSettings });
@@ -4130,6 +6207,14 @@ app.post('/api/admin/reboot_server', authMiddleware, adminMiddleware, async (req
     logger.info(`[Admin] Server ${serverName} reboot requested`);
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Reboot server failed', details: err.message }); }
+});
+
+// Restart the dashboard process (pm2 will auto-restart)
+app.post('/api/admin/restart_dashboard', authMiddleware, adminMiddleware, (req, res) => {
+  logger.info(`[Admin] Dashboard restart requested by ${req.user.login}`);
+  logActivity('admin', 'warn', 'dashboard_restart', null, `Dashboard restart requested by ${req.user.login}`);
+  res.json({ ok: true, message: 'Restarting...' });
+  setTimeout(() => process.exit(0), 500);
 });
 
 app.post('/api/admin/reset_complete', authMiddleware, adminMiddleware, async (req, res) => {
@@ -4949,14 +7034,18 @@ async function aggregateTopHosts() {
   logger.info('[TopHosts] Starting aggregation...');
   const merged = {};
   const perPort = {};
+  const detailRows = []; // [server_name, port_id, nick, client_name, operator, country, host, count]
   let fetchedCount = 0;
   let errorCount = 0;
 
   for (const server of apiServers) {
+    const srvCountry = (SERVER_COUNTRIES[server.name] || {}).country || '';
+    const isRO = srvCountry === 'RO';
     try {
-      const [portsResult, bwResult] = await Promise.all([
+      const [portsResult, bwResult, statusResult] = await Promise.all([
         fetchApi(server, '/apix/list_ports_json'),
-        fetchApi(server, '/apix/bandwidth_report_all')
+        fetchApi(server, '/apix/bandwidth_report_all'),
+        fetchApi(server, '/apix/show_status_json').catch(() => null)
       ]);
 
       const portNameMap = {};
@@ -4966,23 +7055,28 @@ async function aggregateTopHosts() {
         }
       }
 
-      const portKeys = portsResult ? Object.keys(portsResult).filter(k => k !== 'raw') : [];
-      logger.info(`[TopHosts] ${server.name} list_ports_json: ${portKeys.length} IMEIs`);
-
+      // portId → {nick, operator} from status
+      const portIdInfo = {};
+      const statusArr = Array.isArray(statusResult) ? statusResult : [];
       let portsMap = {};
-      if (portsResult && typeof portsResult === 'object' && !portsResult.raw) {
-        portsMap = portsResult;
-      } else if (portsResult && portsResult.raw) {
-        try { portsMap = JSON.parse(portsResult.raw); } catch(e) { logger.info('[TopHosts] Failed to parse raw'); }
+      if (portsResult && typeof portsResult === 'object' && !portsResult.raw) portsMap = portsResult;
+      else if (portsResult && portsResult.raw) { try { portsMap = JSON.parse(portsResult.raw); } catch(_) {} }
+
+      for (const m of statusArr) {
+        const md = m.modem_details || {};
+        const imei = md.IMEI || '';
+        const nick = md.NICK || imei;
+        const rawOp = ((m.net_details || {}).CELLOP || md.OPERATOR || '').toLowerCase().trim();
+        const op = normalizeOperator(rawOp, isRO);
+        const ports = portsMap[imei] || [];
+        for (const p of ports) if (p.portID) portIdInfo[p.portID] = { nick, operator: op };
       }
 
       const portIds = [];
       for (const imei in portsMap) {
         if (imei === 'raw' || imei === '_server') continue;
         const ports = portsMap[imei];
-        if (Array.isArray(ports)) {
-          ports.forEach(p => { if (p.portID) portIds.push(p.portID); });
-        }
+        if (Array.isArray(ports)) ports.forEach(p => { if (p.portID) portIds.push(p.portID); });
       }
       logger.info(`[TopHosts] ${server.name}: found ${portIds.length} ports to scan`);
 
@@ -4998,14 +7092,21 @@ async function aggregateTopHosts() {
               }
             }
 
-            const portName = portNameMap[portId] || portId;
+            const portName = portNameMap[portId] || '';
+            const info = portIdInfo[portId] || {};
+            const nick = info.nick || portId;
+            const op = info.operator || '';
+            const fullPortId = server.name + '_' + portId;
 
             entries.forEach(e => {
               const h = e.host || e.domain || 'unknown';
               const count = e.count || e.requests || 1;
               merged[h] = (merged[h] || 0) + count;
-              if (!perPort[portName]) perPort[portName] = {};
-              perPort[portName][h] = (perPort[portName][h] || 0) + count;
+              if (portName) {
+                if (!perPort[portName]) perPort[portName] = {};
+                perPort[portName][h] = (perPort[portName][h] || 0) + count;
+              }
+              detailRows.push([server.name, fullPortId, nick, portName || '', op, srvCountry, h, count]);
             });
             if (entries.length > 0) fetchedCount++;
           }
@@ -5017,20 +7118,156 @@ async function aggregateTopHosts() {
     }
   }
 
+  // Persist detailed matrix — atomic replace so queries see a consistent snapshot.
+  const snapshotAt = new Date().toISOString();
+  try {
+    const insertDetail = db.prepare(`INSERT INTO top_hosts_detail
+      (snapshot_at, server_name, port_id, nick, client_name, operator, country, host, count)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    db.transaction(() => {
+      db.prepare('DELETE FROM top_hosts_detail').run();
+      for (const r of detailRows) insertDetail.run(snapshotAt, r[0], r[1], r[2], r[3], r[4], r[5], r[6], r[7]);
+    })();
+  } catch (e) {
+    logger.error('[TopHosts] Failed to persist detail rows:', e.message);
+  }
+
   topHostsCache = {
     data: merged,
     perPort,
-    updatedAt: new Date().toISOString(),
-    stats: { domains: Object.keys(merged).length, portsScanned: fetchedCount, errors: errorCount }
+    updatedAt: snapshotAt,
+    stats: { domains: Object.keys(merged).length, portsScanned: fetchedCount, errors: errorCount, detailRows: detailRows.length }
   };
   _kvSet.run('top_hosts_cache', JSON.stringify(topHostsCache));
-  logger.info(`[TopHosts] Aggregation complete: ${Object.keys(merged).length} domains from ${fetchedCount} ports (${errorCount} errors), ${Object.keys(perPort).length} portNames`);
-  logActivity('system', 'info', 'top_hosts_complete', null, `Top hosts: ${Object.keys(merged).length} domains from ${fetchedCount} ports`, { domains: Object.keys(merged).length, ports_scanned: fetchedCount, errors: errorCount });
+  logger.info(`[TopHosts] Aggregation complete: ${Object.keys(merged).length} domains, ${detailRows.length} detail rows from ${fetchedCount} ports (${errorCount} errors)`);
+  logActivity('system', 'info', 'top_hosts_complete', null, `Top hosts: ${Object.keys(merged).length} domains, ${detailRows.length} detail rows`, { domains: Object.keys(merged).length, detail_rows: detailRows.length, ports_scanned: fetchedCount, errors: errorCount });
   return topHostsCache;
 }
 
 app.get('/api/admin/top_hosts_aggregated', authMiddleware, adminMiddleware, (req, res) => {
   res.json(topHostsCache);
+});
+
+// Phase 5: comprehensive domain-log explorer.
+// Returns everything useful from the top_hosts_detail snapshot plus pre-computed
+// aggregates across every dimension so the UI can render breakdowns without
+// re-aggregating. Supports filtering by host pattern, client, operator, server.
+//
+// Query params (all optional):
+//   host       — substring match on host (case-insensitive)
+//   client     — exact client_name
+//   operator   — exact operator
+//   server     — exact server_name
+//   nick       — exact nick
+//   limit      — max raw rows returned (default 2000, max 20000)
+//   min_count  — drop rows with count < N (default 1)
+app.get('/api/analytics/logs_domains_full', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const { host = '', client = '', operator = '', server = '', nick = '' } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 2000, 1), 20000);
+    const minCount = Math.max(parseInt(req.query.min_count) || 1, 1);
+
+    const where = ['count >= ?'];
+    const params = [minCount];
+    if (host)     { where.push('LOWER(host) LIKE ?');   params.push('%' + String(host).toLowerCase() + '%'); }
+    if (client)   { where.push('client_name = ?');      params.push(client); }
+    if (operator) { where.push('operator = ?');         params.push(operator); }
+    if (server)   { where.push('server_name = ?');      params.push(server); }
+    if (nick)     { where.push('nick = ?');             params.push(nick); }
+    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
+
+    // Snapshot meta
+    const snap = db.prepare('SELECT MIN(snapshot_at) as ts, COUNT(*) as total_rows FROM top_hosts_detail').get();
+
+    // Filtered raw rows (capped)
+    const rows = db.prepare(`
+      SELECT server_name, port_id, nick, client_name, operator, country, host, count
+      FROM top_hosts_detail
+      ${whereSql}
+      ORDER BY count DESC
+      LIMIT ${limit}
+    `).all(...params);
+
+    // Summary of the filtered set
+    const totals = db.prepare(`
+      SELECT COUNT(*) as rows,
+             SUM(count) as hits,
+             COUNT(DISTINCT host) as unique_hosts,
+             COUNT(DISTINCT client_name) as clients,
+             COUNT(DISTINCT operator) as operators,
+             COUNT(DISTINCT server_name) as servers,
+             COUNT(DISTINCT nick) as modems
+      FROM top_hosts_detail
+      ${whereSql}
+    `).get(...params);
+
+    // Each aggregation runs independently — no O(rows²) client-side work needed
+    const agg = sql => db.prepare(sql).all(...params);
+    const topHosts = agg(`
+      SELECT host, SUM(count) as hits, COUNT(DISTINCT nick) as modems, COUNT(DISTINCT client_name) as clients
+      FROM top_hosts_detail ${whereSql}
+      GROUP BY host ORDER BY hits DESC LIMIT 100`);
+    const byClient = agg(`
+      SELECT client_name, SUM(count) as hits, COUNT(DISTINCT host) as unique_hosts
+      FROM top_hosts_detail ${whereSql}
+      GROUP BY client_name ORDER BY hits DESC`);
+    const byOperator = agg(`
+      SELECT operator, SUM(count) as hits, COUNT(DISTINCT host) as unique_hosts
+      FROM top_hosts_detail ${whereSql}
+      GROUP BY operator ORDER BY hits DESC`);
+    const byServer = agg(`
+      SELECT server_name, country, SUM(count) as hits, COUNT(DISTINCT host) as unique_hosts, COUNT(DISTINCT nick) as modems
+      FROM top_hosts_detail ${whereSql}
+      GROUP BY server_name ORDER BY hits DESC`);
+    const byModem = agg(`
+      SELECT server_name, nick, operator, SUM(count) as hits, COUNT(DISTINCT host) as unique_hosts
+      FROM top_hosts_detail ${whereSql}
+      GROUP BY server_name, nick ORDER BY hits DESC LIMIT 100`);
+
+    // TLD / IP split — computed in JS because SQLite lacks rinstr/reverse.
+    const tldRows = db.prepare(`
+      SELECT host, SUM(count) as hits, COUNT(DISTINCT nick) as mods
+      FROM top_hosts_detail ${whereSql}
+      GROUP BY host
+    `).all(...params);
+    const tldMap = {};
+    const IP_RE = /^\d+\.\d+\.\d+\.\d+$/;
+    for (const r of tldRows) {
+      let tld;
+      if (IP_RE.test(r.host)) tld = '(IP)';
+      else {
+        const dot = r.host.lastIndexOf('.');
+        tld = dot === -1 ? '(none)' : r.host.slice(dot + 1).toLowerCase();
+      }
+      if (!tldMap[tld]) tldMap[tld] = { tld, hits: 0, unique_hosts: 0 };
+      tldMap[tld].hits += r.hits;
+      tldMap[tld].unique_hosts += 1;
+    }
+    const byTld = Object.values(tldMap).sort((a, b) => b.hits - a.hits).slice(0, 50);
+
+    // Facet lists (unfiltered — for populating filter dropdowns)
+    const facetClients = db.prepare('SELECT DISTINCT client_name FROM top_hosts_detail WHERE client_name != \'\' ORDER BY client_name').all().map(r => r.client_name);
+    const facetOperators = db.prepare('SELECT DISTINCT operator FROM top_hosts_detail WHERE operator != \'\' ORDER BY operator').all().map(r => r.operator);
+    const facetServers = db.prepare('SELECT DISTINCT server_name FROM top_hosts_detail ORDER BY server_name').all().map(r => r.server_name);
+
+    res.json({
+      snapshot_at: snap.ts,
+      total_rows_in_snapshot: snap.total_rows,
+      filters: { host, client, operator, server, nick, limit, min_count: minCount },
+      summary: totals,
+      top_hosts: topHosts,
+      by_client: byClient,
+      by_operator: byOperator,
+      by_server: byServer,
+      by_modem: byModem,
+      by_tld: byTld,
+      rows,
+      facets: { clients: facetClients, operators: facetOperators, servers: facetServers }
+    });
+  } catch (e) {
+    logger.error('[logs_domains_full]', e.message);
+    res.status(500).json({ error: e.message });
+  }
 });
 
 app.post('/api/admin/top_hosts_refresh', authMiddleware, adminMiddleware, async (req, res) => {
@@ -5167,8 +7404,17 @@ async function runDailyBilling(retryClientIds) {
     }
 
     try {
-      const deltaBytes = computeClientYesterdayBytes(results, client.portName);
+      // Primary source: durable traffic_hourly / daily_traffic. Survives ProxySmart restarts
+      // that zero the bandwidth_bytes_yesterday_* counters (which has caused missed bills
+      // when a server reboots across midnight).
+      const deltaBytesDurable = getClientBytesForMskDate(client.portName, yesterdayStr);
+      const deltaBytesLive = computeClientYesterdayBytes(results, client.portName);
+      const deltaBytes = Math.max(deltaBytesDurable, deltaBytesLive);
       const deltaGb = trafficBytesToGb(deltaBytes);
+
+      if (deltaBytesDurable > deltaBytesLive * 1.1 && deltaBytesLive > 0) {
+        logger.warn(`[Billing] ${client.name}: durable source wins (${trafficBytesToGb(deltaBytesDurable)} GB) over ProxySmart yesterday (${trafficBytesToGb(deltaBytesLive)} GB) — server likely restarted`);
+      }
 
       // Update snapshot for diagnostics
       client.last_traffic_snapshot = {
@@ -5183,8 +7429,13 @@ async function runDailyBilling(retryClientIds) {
 
       // Compute cost
       let cost = 0;
+      let modemCount = 0;
+      const mn = getMoscowNow();
+      // yesterdayStr is yesterday's MSK date — use that month for daysInMonth
+      const _ystY = parseInt(yesterdayStr.slice(0,4));
+      const _ystM = parseInt(yesterdayStr.slice(5,7));
+      const daysInMonth = new Date(_ystY, _ystM, 0).getDate();
       if (client.billingType === 'per_modem') {
-        let modemCount = 0;
         for (const data of results) {
           if (typeof data.bw === 'object') {
             for (const [portId, b] of Object.entries(data.bw)) {
@@ -5192,8 +7443,6 @@ async function runDailyBilling(retryClientIds) {
             }
           }
         }
-        const mn = getMoscowNow();
-        const daysInMonth = new Date(mn.getFullYear(), mn.getMonth() + 1, 0).getDate();
         cost = (client.price * modemCount) / daysInMonth;
       } else {
         cost = client.price * deltaGb;
@@ -5201,19 +7450,51 @@ async function runDailyBilling(retryClientIds) {
       cost = Math.round(cost * 100) / 100;
       if (cost <= 0) { skipped++; continue; }
 
-      atomicDebit(client.id, cost, {
-        type: 'charge',
-        date: yesterdayStr,
-        timestamp: new Date().toISOString(),
-        delta_bytes: Math.round(deltaBytes),
-        delta_gb: deltaGb,
-        price_per_unit: client.price,
-        billing_type: client.billingType || 'per_gb',
-        cost,
-        currency: client.currency || 'RUB',
-        note: `Списание за трафик (${yesterdayLabel})`,
-        traffic_source: 'daily_billing'
-      });
+      // Debt policy: by default charges ALWAYS go through, even if balance
+      // goes far negative — clients accumulate debt and admin reconciles
+      // via top-up. Hard floor only applies if admin sets client.maxDebt
+      // explicitly (e.g. to refuse charges past -100k).
+      let minBalance = null;
+      if (typeof client.maxDebt === 'number' && client.maxDebt > 0) {
+        minBalance = -Math.abs(client.maxDebt);
+      }
+
+      let debitRes;
+      try {
+        debitRes = atomicDebit(client.id, cost, {
+          type: 'charge',
+          date: yesterdayStr,
+          timestamp: new Date().toISOString(),
+          delta_bytes: Math.round(deltaBytes),
+          delta_gb: deltaGb,
+          price_per_unit: client.price,
+          billing_type: client.billingType || 'per_gb',
+          modem_count: modemCount || null,
+          days_in_month: daysInMonth,
+          cost,
+          currency: client.currency || 'RUB',
+          note: client.billingType === 'per_modem'
+            ? `Списание за аренду ${modemCount} ${modemPlural(modemCount)} (${yesterdayLabel})`
+            : `Списание за трафик (${yesterdayLabel})`,
+          traffic_source: 'daily_billing'
+        }, { minBalance });
+      } catch (e) {
+        if (e && e.code === 'INSUFFICIENT_BALANCE') {
+          logger.warn(`[Billing] ${client.name}: insufficient balance (${e.balanceBefore} → ${e.balanceAfter}, min=${e.minBalance}), charge blocked`);
+          logActivity('billing', 'warn', 'insufficient_balance', client.name,
+            `Insufficient balance: would go from ${e.balanceBefore} to ${e.balanceAfter} (limit ${e.minBalance})`,
+            { client_id: client.id, cost, balance: e.balanceBefore, minBalance: e.minBalance });
+          skipped++;
+          continue;
+        }
+        throw e;
+      }
+
+      if (debitRes && debitRes.duplicate) {
+        logger.info(`[Billing] ${client.name}: charge for ${yesterdayStr} already posted (duplicate), skipping`);
+        skipped++;
+        continue;
+      }
 
       charged++;
       logger.info(`[Billing] ${client.name}: ${deltaGb}GB, ${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
@@ -5241,10 +7522,11 @@ async function runDailyBilling(retryClientIds) {
 
   // 3. Schedule retry if clients were skipped due to server issues (max 1 retry, not on retry runs)
   if (!isRetry && skippedClients.length > 0) {
-    logger.info(`[Billing] Scheduling retry in 1 hour for ${skippedClients.length} skipped client(s)...`);
+    const _retryHours = appSettings.billing_retry_delay_hours || 1;
+    logger.info(`[Billing] Scheduling retry in ${_retryHours}h for ${skippedClients.length} skipped client(s)...`);
     setTimeout(() => {
       runDailyBilling(skippedClients).catch(e => logger.error('[Billing] Retry error:', e.message));
-    }, 60 * 60 * 1000);
+    }, _retryHours * 3600000);
   }
 }
 
@@ -5270,11 +7552,19 @@ async function runMonthlyReconciliation() {
 
   logger.info(`[MonthlyRecon] Starting reconciliation for ${prevMonthStr}...`);
 
-  // Refresh port mapping
+  // CRITICAL: persist the marker BEFORE any debits, so a crash mid-loop won't
+  // cause a re-run on next start (which would double-bill corrections).
+  // We accept the small risk of "marked-but-skipped" in exchange for no double-billing.
+  db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_reconciliation_month', ?)").run(prevMonthStr);
+  lastReconciliationMonth = prevMonthStr;
+
+  // Refresh port mapping (don't swallow — log the failure)
   try {
     const results = await fetchAllServersDataCached();
     refreshPortKeyMapping(results);
-  } catch (e) { /* mapping may already be populated */ }
+  } catch (e) {
+    logger.warn('[MonthlyRecon] port mapping refresh failed (using cached):', e.message);
+  }
 
   let corrections = 0;
   for (const client of clients) {
@@ -5299,7 +7589,7 @@ async function runMonthlyReconciliation() {
 
     const diffGb = Math.round((storedGb - billedGb) * 1000) / 1000;
 
-    if (diffGb <= 0.01) {
+    if (diffGb <= (appSettings.reconciliation_tolerance_gb || 0.01)) {
       logger.info(`[MonthlyRecon] ${client.name}: ok (stored=${storedGb}GB, billed=${billedGb}GB)`);
       continue;
     }
@@ -5331,8 +7621,7 @@ async function runMonthlyReconciliation() {
     logger.info(`[MonthlyRecon] ${client.name}: +${diffGb}GB (+${correctionCost}₽)`);
   }
 
-  lastReconciliationMonth = prevMonthStr;
-  db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_reconciliation_month', ?)").run(prevMonthStr);
+  // Marker already persisted at start; just save client balances and log.
   saveClients(clients);
   logger.info(`[MonthlyRecon] Complete: ${corrections} correction(s)`);
   logActivity('billing', 'info', 'reconciliation_complete', null, `Monthly reconciliation for ${prevMonthStr}: ${corrections} correction(s)`, { period: prevMonthStr, corrections });
@@ -5549,6 +7838,8 @@ app.get('/api/docs', (req, res) => {
 // Accept raw text body for webhook
 app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async (req, res) => {
   logger.info('[Tochka Webhook] Received webhook');
+  // Audit context — every webhook-driven write tags as source=webhook actor=tochka
+  dbAudit.setActiveContext({ source: 'webhook', actor: 'tochka', ip: getClientIp(req), reason: 'tochka_webhook' });
   try {
     // Body is JWT string
     const jwtToken = typeof req.body === 'string' ? req.body.trim() : JSON.stringify(req.body);
@@ -5559,11 +7850,16 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
       logger.error('[Tochka Webhook] Failed to decode JWT payload');
       return res.status(200).json({ ok: true, processed: false, reason: 'invalid_jwt' });
     }
+    // If verification fails (e.g. Tochka rotated keys faster than our cache),
+    // STILL save the decoded payload so admin can review and credit manually
+    // — losing payment data was the worse failure mode.
+    // Auto-credit only happens when verified = true.
     if (!verified) {
-      logger.error(`[Tochka Webhook] JWT NOT verified: ${reason}. REJECTING payment.`);
-      return res.status(200).json({ ok: true, processed: false, reason });
+      logger.error(`[Tochka Webhook] JWT NOT verified: ${reason}. Saving as unverified for manual review.`);
+      // fall through — don't return, let it land in bank_payments as unmatched
+    } else {
+      logger.info('[Tochka Webhook] JWT signature verified successfully');
     }
-    logger.info('[Tochka Webhook] JWT signature verified successfully');
 
     logger.info('[Tochka Webhook] Decoded payload:', JSON.stringify(payload).slice(0, 500));
 
@@ -5583,12 +7879,7 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
     const customerCode = payload.customerCode || '';
 
     
-    if (paymentId && dbStmts.findBankPaymentByPaymentId.get(paymentId)) {
-      logger.info(`[Tochka Webhook] Duplicate paymentId=${paymentId}, skipping`);
-      return res.status(200).json({ ok: true, processed: false, reason: 'duplicate' });
-    }
-
-    // Log the payment
+    // Build the bank-payment record up front
     const bankPayment = {
       id: crypto.randomBytes(8).toString('hex'),
       webhookType,
@@ -5602,68 +7893,78 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
       receivedAt: new Date().toISOString(),
       matched: false,
       matchedClientId: null,
+      matchedClientName: null,
       autoCredit: false
     };
 
-    // Only process incoming payments
-    if (webhookType === 'incomingPayment') {
-      // Find client by INN
-      const matchedClient = payerInn ? clientByInn.get(payerInn) : null;
-
-      if (matchedClient) {
-        bankPayment.matched = true;
-        bankPayment.matchedClientId = matchedClient.id;
-        bankPayment.matchedClientName = matchedClient.name;
-        bankPayment.autoCredit = true;
-
-        // Insert bank payment BEFORE crediting to prevent double-credit on crash/restart
-        insertBankPaymentToDb(bankPayment);
-
-        // Add payment record
-        if (!matchedClient.payments) matchedClient.payments = [];
-        matchedClient.payments.push({
-          amount,
-          date: paymentDate,
-          note: `Банк Точка: ${payerName} — ${purpose}`.slice(0, 200),
-          createdAt: new Date().toISOString(),
-          source: 'tochka_webhook',
-          paymentId
-        });
-
-        atomicCredit(matchedClient.id, amount, {
-          type: 'bank_payment',
-          date: paymentDate,
-          timestamp: new Date().toISOString(),
-          amount,
-          currency: 'RUB',
-          note: `Банк Точка (ИНН: ${payerInn}): ${purpose}`.slice(0, 300),
-          source: 'tochka_webhook',
-          paymentId
-        });
-
-        if (matchedClient.referred_by) {
-          const referrer = clientById.get(matchedClient.referred_by);
-          if (referrer) {
-            const commission = Math.round(amount * 0.15 * 100) / 100;
-            referrer.referral_balance = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
-            _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
-          }
-        }
-
-        saveClients(clients);
-        logger.info(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
-      } else {
-        insertBankPaymentToDb(bankPayment);
-        logger.info(`[Tochka Webhook] Unmatched payment: INN=${payerInn}, amount=${amount}, purpose=${purpose}`);
-      }
-    } else {
+    // Atomic insert — UNIQUE(payment_id) on bank_payments enforces idempotency
+    // even under concurrent webhook delivery. Two parallel webhook requests
+    // with the same paymentId can no longer both insert + double-credit.
+    let inserted = false;
+    try {
       insertBankPaymentToDb(bankPayment);
+      inserted = true;
+    } catch (e) {
+      if (e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''))) {
+        logger.info(`[Tochka Webhook] Duplicate paymentId=${paymentId} (race-safe)`);
+        return res.status(200).json({ ok: true, processed: false, reason: 'duplicate' });
+      }
+      throw e;
     }
 
-    res.status(200).json({ ok: true, processed: true, matched: bankPayment.matched });
+    // Auto-credit only when (a) JWT was verified, (b) it's an incoming payment,
+    // and (c) we just won the race to insert the row. The DB-level UNIQUE
+    // guarantees no concurrent webhook can also reach this branch for the same paymentId.
+    if (verified && webhookType === 'incomingPayment') {
+      const matchedClient = payerInn ? clientByInn.get(payerInn) : null;
+      if (matchedClient) {
+        try {
+          atomicCredit(matchedClient.id, amount, {
+            type: 'bank_payment',
+            date: paymentDate,
+            timestamp: new Date().toISOString(),
+            amount, currency: 'RUB',
+            note: `Банк Точка (ИНН: ${payerInn}): ${purpose}`.slice(0, 300),
+            source: 'tochka_webhook',
+            paymentId
+          });
+          dbStmts.updateBankPaymentMatch.run(1, matchedClient.id, matchedClient.name, 1, paymentId);
+          if (!matchedClient.payments) matchedClient.payments = [];
+          matchedClient.payments.push({
+            amount, date: paymentDate,
+            note: `Банк Точка: ${payerName} — ${purpose}`.slice(0, 200),
+            createdAt: new Date().toISOString(),
+            source: 'tochka_webhook',
+            paymentId
+          });
+          if (matchedClient.referred_by) {
+            const referrer = clientById.get(matchedClient.referred_by);
+            if (referrer) {
+              const commission = Math.round(amount * 0.15 * 100) / 100;
+              referrer.referral_balance = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
+              _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
+            }
+          }
+          saveClients(clients);
+          bankPayment.matched = true;
+          bankPayment.matchedClientId = matchedClient.id;
+          bankPayment.autoCredit = true;
+          logger.info(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
+        } catch (e) {
+          logger.error(`[Tochka Webhook] credit failed for ${matchedClient.name}:`, e.message);
+          // Row stays unmatched — admin can attribute manually.
+        }
+      } else {
+        logger.info(`[Tochka Webhook] Unmatched: INN=${payerInn}, amount=${amount}, purpose=${purpose}`);
+      }
+    }
+
+    res.status(200).json({ ok: true, processed: true, inserted, matched: bankPayment.matched, verified });
   } catch (err) {
     logger.error('[Tochka Webhook] Error:', err.message);
     res.status(200).json({ ok: true, processed: false, reason: err.message });
+  } finally {
+    dbAudit.clearActiveContext();
   }
 });
 
@@ -5773,145 +8074,140 @@ app.post('/api/admin/tochka/register_webhook', authMiddleware, adminMiddleware, 
 });
 
 // Sync historical payments from Tochka (Init Statement → poll → match)
-app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, res) => {
+// Tochka statement sync — extracted into reusable function so it can be called
+// from the manual admin endpoint AND from the scheduled poller.
+// Returns { ok, total?, imported?, matched?, skipped?, error? }.
+async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
   if (!tochkaConfig.jwt || !tochkaConfig.accountId) {
-    return res.status(400).json({ error: 'Tochka API не настроен. Заполните JWT и Account ID.' });
+    return { ok: false, error: 'tochka_not_configured' };
   }
-
-  const { dateFrom, dateTo } = req.body;
   const from = dateFrom || '2024-01-01';
-  const to = dateTo || new Date().toISOString().slice(0, 10);
+  const to   = dateTo   || new Date().toISOString().slice(0, 10);
+  logger.info(`[Tochka Sync:${source}] Requesting statement ${from} — ${to}`);
 
-  logger.info(`[Tochka Sync] Requesting statement ${from} — ${to}`);
-
+  // 1) Init statement
+  let initResult;
   try {
-    // Step 1: Init Statement
-    const initResult = await tochkaRequest('POST', '/uapi/open-banking/v1.0/statements', {
-      Data: {
-        Statement: {
-          accountId: tochkaConfig.accountId,
-          startDateTime: from + 'T00:00:00+00:00',
-          endDateTime: to + 'T00:00:00+00:00'
-        }
-      }
+    initResult = await tochkaRequest('POST', '/uapi/open-banking/v1.0/statements', {
+      Data: { Statement: {
+        accountId: tochkaConfig.accountId,
+        startDateTime: from + 'T00:00:00+00:00',
+        endDateTime:   to   + 'T00:00:00+00:00'
+      } }
     });
+  } catch (e) {
+    return { ok: false, error: 'init_failed', details: e.message };
+  }
+  const statementId =
+       initResult.data?.Data?.Statement?.statementId
+    || initResult.data?.Data?.statementId
+    || initResult.data?.statementId;
+  if (!statementId) {
+    return { ok: false, error: 'no_statement_id', details: initResult.data };
+  }
+  logger.info(`[Tochka Sync:${source}] statement=${statementId}`);
 
-    const statementId = initResult.data?.Data?.Statement?.statementId
-      || initResult.data?.Data?.statementId
-      || initResult.data?.statementId;
-
-    if (!statementId) {
-      logger.info('[Tochka Sync] Init response:', JSON.stringify(initResult.data));
-      return res.status(502).json({ error: 'Не удалось создать выписку', details: initResult.data });
-    }
-
-    logger.info(`[Tochka Sync] Statement initiated: ${statementId}`);
-
-    // Step 2: Poll for Ready status (max 30 seconds)
-    let statement = null;
-    for (let attempt = 0; attempt < 15; attempt++) {
-      await new Promise(r => setTimeout(r, 2000));
-      const getResult = await tochkaRequest('GET',
+  // 2) Poll until Ready (cap 30s)
+  let statement = null;
+  for (let attempt = 0; attempt < 15; attempt++) {
+    await new Promise(r => setTimeout(r, 2000));
+    let getResult;
+    try {
+      getResult = await tochkaRequest('GET',
         `/uapi/open-banking/v1.0/accounts/${tochkaConfig.accountId}/statements/${statementId}`);
-      const stData = getResult.data?.Data?.Statement?.[0] || getResult.data?.Data?.Statement || getResult.data;
-      const status = stData?.status || stData?.Status || '';
-      logger.info(`[Tochka Sync] Poll #${attempt + 1}: status=${status}`);
-      if (status === 'Ready' || status === 'ready') {
-        statement = stData;
-        break;
-      }
+    } catch (e) {
+      logger.warn(`[Tochka Sync:${source}] poll #${attempt+1} error:`, e.message);
+      continue;
     }
+    const stData = getResult.data?.Data?.Statement?.[0]
+                || getResult.data?.Data?.Statement
+                || getResult.data;
+    const status = stData?.status || stData?.Status || '';
+    if (status === 'Ready' || status === 'ready') { statement = stData; break; }
+  }
+  if (!statement) return { ok: false, error: 'statement_not_ready' };
 
-    if (!statement) {
-      return res.status(504).json({ error: 'Выписка не готова. Попробуйте позже.' });
-    }
+  // 3) Process credits — auto-credit by INN, save all to bank_payments
+  const transactions = statement.Transaction || statement.transactions || [];
+  let imported = 0, matched = 0, skipped = 0;
+  for (const tx of transactions) {
+    const indicator = tx.creditDebitIndicator || tx.CreditDebitIndicator || '';
+    if (indicator !== 'Credit' && indicator !== 'credit') continue;
 
-    // Step 3: Extract transactions
-    const transactions = statement.Transaction || statement.transactions || [];
-    logger.info(`[Tochka Sync] Got ${transactions.length} transactions`);
+    const amount = Math.round(parseFloat(tx.Amount?.amount || tx.amount || 0) * 100) / 100;
+    if (!(amount > 0)) continue;
+    const debtor = tx.DebtorParty || tx.CounterParty || tx.SidePayer || {};
+    const payerInn  = debtor.inn || debtor.Inn || debtor.taxCode || '';
+    const payerName = debtor.name || debtor.Name || debtor.fullName || '';
+    const purpose   = tx.description || tx.Description || tx.TransactionInformation || '';
+    const paymentId = tx.transactionId || tx.TransactionId || tx.paymentId
+                   || ('tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
+    const date = tx.documentProcessDate || tx.bookingDateTime || tx.valueDateTime || tx.date || to;
 
-    let imported = 0, matched = 0, skipped = 0;
-    let loggedSample = false;
+    if (dbStmts.findBankPaymentByTochkaId.get(paymentId)) { skipped++; continue; }
 
-    for (const tx of transactions) {
-      // Only process incoming (credit) payments
-      const indicator = tx.creditDebitIndicator || tx.CreditDebitIndicator || '';
-      if (indicator !== 'Credit' && indicator !== 'credit') continue;
+    const bankPayment = {
+      id: 'bp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
+      tochkaPaymentId: paymentId,
+      webhookType: 'incomingPayment',
+      source: 'sync',
+      date: typeof date === 'string' ? date.slice(0, 10) : date,
+      amount, payerInn, payerName, purpose,
+      matched: false, matchedClientId: null, matchedClientName: null,
+      receivedAt: new Date().toISOString()
+    };
 
-      if (!loggedSample) {
-        logger.info('[Tochka Sync] Sample credit transaction:', JSON.stringify(tx).slice(0, 1500));
-        loggedSample = true;
-      }
-
-      
-      const amount = Math.round(parseFloat(tx.Amount?.amount || tx.amount || 0) * 100) / 100;
-      // DebtorParty = плательщик (кто платит нам), CreditorParty = получатель
-      const debtor = tx.DebtorParty || tx.CounterParty || tx.SidePayer || {};
-      const payerInn = debtor.inn || debtor.Inn || debtor.taxCode || '';
-      const payerName = debtor.name || debtor.Name || debtor.fullName || '';
-      const purpose = tx.description || tx.Description || tx.TransactionInformation || '';
-      const paymentId = tx.transactionId || tx.TransactionId || tx.paymentId || ('tx_' + Date.now() + '_' + Math.random().toString(36).slice(2, 6));
-      const date = tx.documentProcessDate || tx.bookingDateTime || tx.valueDateTime || tx.date || to;
-
-      // Check if already processed (SQLite query)
-      const alreadyExists = dbStmts.findBankPaymentByTochkaId.get(paymentId);
-      if (alreadyExists) { skipped++; continue; }
-
-      // Create bank payment record
-      const bankPayment = {
-        id: 'bp_' + Date.now() + '_' + Math.random().toString(36).slice(2, 8),
-        tochkaPaymentId: paymentId,
-        webhookType: 'incomingPayment',
-        source: 'sync',
-        date: typeof date === 'string' ? date.slice(0, 10) : date,
-        amount: amount,
-        payerInn: payerInn,
-        payerName: payerName,
-        purpose: purpose,
-        matched: false,
-        matchedClientId: null,
-        matchedClientName: null,
-        receivedAt: new Date().toISOString()
-      };
-
-      // Try to match by INN
-      if (payerInn) {
-        const client = clientByInn.get(payerInn);
-        if (client) {
-          bankPayment.matched = true;
-          bankPayment.matchedClientId = client.id;
-          bankPayment.matchedClientName = client.name;
-
-          
+    if (payerInn) {
+      const client = clientByInn.get(payerInn);
+      if (client) {
+        bankPayment.matched = true;
+        bankPayment.matchedClientId = client.id;
+        bankPayment.matchedClientName = client.name;
+        try {
           atomicCredit(client.id, amount, {
             type: 'bank_payment',
-            amount: Math.round(amount * 100) / 100,
-            date: bankPayment.date,
+            amount, date: bankPayment.date,
             timestamp: new Date().toISOString(),
             note: 'Синхронизация из Точки: ' + (purpose || '').slice(0, 100),
             source: 'tochka_sync',
             tochkaPaymentId: paymentId
           });
           matched++;
+        } catch (e) {
+          logger.error(`[Tochka Sync:${source}] credit failed for ${client.name}:`, e.message);
+          bankPayment.matched = false;
+          bankPayment.matchedClientId = null;
+          bankPayment.matchedClientName = null;
         }
       }
-
-      insertBankPaymentToDb(bankPayment);
-      imported++;
     }
-
-    // Save clients (ledger entries already saved incrementally)
-    if (imported > 0) {
-      saveClients(clients);
-    }
-
-    logger.info(`[Tochka Sync] Done: ${imported} imported, ${matched} matched, ${skipped} skipped (duplicates)`);
-    res.json({ ok: true, total: transactions.length, imported, matched, skipped });
-
-  } catch (err) {
-    logger.error('[Tochka Sync] Error:', err.message);
-    res.status(502).json({ error: 'Ошибка синхронизации', details: err.message });
+    insertBankPaymentToDb(bankPayment);
+    imported++;
   }
+  if (imported > 0) saveClients(clients);
+
+  logger.info(`[Tochka Sync:${source}] done: total=${transactions.length} imported=${imported} matched=${matched} skipped=${skipped}`);
+  if (imported > 0 || matched > 0) {
+    logActivity('billing', 'info', 'tochka_sync', null,
+      `Tochka sync (${source}): ${imported} new, ${matched} auto-credited`,
+      { from, to, total: transactions.length, imported, matched, skipped });
+  }
+  return { ok: true, total: transactions.length, imported, matched, skipped };
+}
+
+app.post('/api/admin/tochka/sync', authMiddleware, adminMiddleware, async (req, res) => {
+  const result = await runTochkaSync({
+    dateFrom: req.body?.dateFrom,
+    dateTo:   req.body?.dateTo,
+    source:   'manual'
+  });
+  if (!result.ok) {
+    const status = result.error === 'tochka_not_configured' ? 400
+                 : result.error === 'statement_not_ready'   ? 504
+                 : 502;
+    return res.status(status).json({ error: result.error, details: result.details });
+  }
+  res.json(result);
 });
 
 // Get Tochka status / bank payments log
@@ -6669,7 +8965,7 @@ const httpServer = app.listen(PORT, () => {
   scheduleRepeating(3, 0, 'TopHosts', aggregateTopHosts);
 
   // Start modem tracking (IP + uptime) — every 5 min
-  const TRACKING_INTERVAL_MS = 3 * 60 * 1000;
+  const TRACKING_INTERVAL_MS = (appSettings.tracking_interval_min || 3) * 60000;
   logger.info(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
   trackModems().catch(e => logger.error('[Tracking] Initial error:', e.message));
   _intervals.push(setInterval(() => {
@@ -6692,10 +8988,10 @@ const httpServer = app.listen(PORT, () => {
 
   // Auto-create client accounts for all portNames that don't have one
   autoCreateMissingClients().catch(e => logger.error('[AutoCreate] Error:', e.message));
-  // Re-check every 10 minutes so new portNames get accounts without restart
+  // Re-check periodically so new portNames get accounts without restart
   _intervals.push(setInterval(() => {
     autoCreateMissingClients().catch(e => logger.error('[AutoCreate] Error:', e.message));
-  }, 10 * 60 * 1000));
+  }, (appSettings.auto_create_interval_min || 10) * 60000));
 
   // Proxy latency monitoring
   const pcMin = appSettings.proxy_check_interval_min || 60;
@@ -6707,18 +9003,62 @@ const httpServer = app.listen(PORT, () => {
     checkProxyLatency().catch(e => logger.error('[ProxyCheck] Error:', e.message));
   }, pcMin * 60 * 1000);
 
-  // Nightly DB cleanup at 00:30 UTC — remove old data
+  // Phase 4: SLA check every 6 hours. First run 5 min after start.
+  setTimeout(() => {
+    dbAudit.runJobAsync('SlaCheck', 'initial', () => runSlaCheck())
+      .catch(e => logger.error('[SLA] Initial error:', e.message));
+  }, 5 * 60 * 1000);
+  _intervals.push(setInterval(() => {
+    dbAudit.runJobAsync('SlaCheck', 'periodic', () => runSlaCheck())
+      .catch(e => logger.error('[SLA] Periodic error:', e.message));
+  }, 6 * 60 * 60 * 1000));
+
+  // Auto-reboot flaky modems every 15 min.
+  // The throttle inside (auto_reboot_min_interval_min, default 60) ensures the
+  // same modem isn't rebooted more than once per hour even if checked every 15.
+  // Disabled by default — admin enables in Settings.
+  setTimeout(() => {
+    dbAudit.runJobAsync('AutoReboot', 'initial', () => runAutoReboot())
+      .catch(e => logger.error('[AutoReboot] Initial error:', e.message));
+  }, 10 * 60 * 1000);
+  _intervals.push(setInterval(() => {
+    dbAudit.runJobAsync('AutoReboot', 'periodic', () => runAutoReboot())
+      .catch(e => logger.error('[AutoReboot] Periodic error:', e.message));
+  }, 15 * 60 * 1000));
+
+  // Phase 6: Tochka bank statement sync every 4 hours.
+  // Acts as a reliable backup to webhook delivery — webhooks can be lost during
+  // Tochka key rotation, network blips, or our process restarts. Polling guarantees
+  // payments eventually land in bank_payments and auto-credit by INN.
+  // Skips silently if tochkaConfig is incomplete.
+  // Window: last 14 days (idempotent — duplicates skipped via tochka_payment_id).
+  function _scheduledTochkaSync(reason) {
+    if (!tochkaConfig.jwt || !tochkaConfig.accountId) {
+      logger.debug('[Tochka Sync:scheduled] skipped — config incomplete');
+      return;
+    }
+    const today = new Date();
+    const dateTo   = today.toISOString().slice(0, 10);
+    const dateFrom = new Date(today.getTime() - 14 * 86400000).toISOString().slice(0, 10);
+    dbAudit.runJobAsync('TochkaSync', reason, () =>
+      runTochkaSync({ dateFrom, dateTo, source: reason })
+    )
+      .then(r => {
+        if (!r.ok) logger.warn(`[Tochka Sync:${reason}] failed:`, r.error, r.details || '');
+      })
+      .catch(e => logger.error(`[Tochka Sync:${reason}] exception:`, e.message));
+  }
+  // Initial run 90s after start (after DB warm-up + cache populate)
+  setTimeout(() => _scheduledTochkaSync('startup'), 90 * 1000);
+  _intervals.push(setInterval(() => _scheduledTochkaSync('periodic'), 4 * 60 * 60 * 1000));
+
+  // Nightly DB cleanup at 00:30 UTC — remove old data using dynamic retention settings
   scheduleRepeating(0, 30, 'DbCleanup', () => {
     try {
-      const htDel = _htCleanup.run();
-      const metaDel = _metaCleanup.run();
-      const rotDel = _rotLogCleanup.run();
-      const pcDel = dbStmts.proxyCheckCleanOld.run();
-      const auditDel = dbStmts.cleanOldAudit.run();
-      const sysLogDel = dbStmts.systemLogClean.run();
-      const total = htDel.changes + metaDel.changes + rotDel.changes + pcDel.changes + auditDel.changes + sysLogDel.changes;
-      if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${htDel.changes} meta:${metaDel.changes} rot:${rotDel.changes} proxy:${pcDel.changes} audit:${auditDel.changes} syslog:${sysLogDel.changes})`);
-      logActivity('system', 'info', 'db_cleanup', null, `DB cleanup: ${total} rows removed`, { hourly: htDel.changes, meta: metaDel.changes, rotation: rotDel.changes, proxy_checks: pcDel.changes, audit: auditDel.changes, system_log: sysLogDel.changes });
+      const res = runRetentionCleanup();
+      const total = Object.values(res).reduce((s, r) => s + r.changes, 0);
+      if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${res.traffic_hourly.changes} meta:${res.modem_meta.changes} rot:${res.rotation_log.changes} proxy:${res.proxy_checks.changes} audit:${res.audit_log.changes} syslog:${res.system_log.changes})`);
+      logActivity('system', 'info', 'db_cleanup', null, `DB cleanup: ${total} rows removed`, { hourly: res.traffic_hourly.changes, meta: res.modem_meta.changes, rotation: res.rotation_log.changes, proxy_checks: res.proxy_checks.changes, audit: res.audit_log.changes, system_log: res.system_log.changes });
     } catch (e) {
       logger.error('[DbCleanup] Error:', e.message);
       logActivity('system', 'error', 'db_cleanup_error', null, `DB cleanup error: ${e.message}`);
@@ -6726,11 +9066,13 @@ const httpServer = app.listen(PORT, () => {
   });
 
   // Schedule daily billing at 01:00 UTC (04:00 MSK, 4h after ProxySmart midnight reset)
-  scheduleRepeating(1, 0, 'DailyBilling', runDailyBilling);
+  scheduleRepeating(1, 0, 'DailyBilling', () =>
+    dbAudit.runJobAsync('DailyBilling', null, () => runDailyBilling()));
 
   // Post-correct hourly data at 01:30 UTC (04:30 MSK) — after daily sync + billing
   // Monthly reconciliation at 03:30 UTC (06:30 MSK) on 1st of month — after TopHosts, before acts
-  scheduleRepeating(3, 30, 'MonthlyReconciliation', runMonthlyReconciliation);
+  scheduleRepeating(3, 30, 'MonthlyReconciliation', () =>
+    dbAudit.runJobAsync('MonthlyReconciliation', null, () => runMonthlyReconciliation()));
 
   // Auto-generate closing documents (acts) on 1st of each month at 08:05 Moscow (05:05 UTC)
   scheduleRepeating(5, 5, 'MonthlyActs', autoGenerateMonthlyActs);
@@ -6859,7 +9201,8 @@ async function checkCrmPaymentConfirmations() {
     }
 
     // Find deals with nextPaymentDate within 3 days — log reminder
-    const reminderDate = new Date(Date.now() + 3 * 24 * 60 * 60 * 1000);
+    const _crmDays = appSettings.crm_reminder_days || 3;
+    const reminderDate = new Date(Date.now() + _crmDays * 86400000);
     const upcoming = await pgClient.query(
       `SELECT o.id, o.name, o."nextPaymentDate", o.amount, c.name as company_name
        FROM "${CRM_WS}".opportunity o
@@ -6870,7 +9213,7 @@ async function checkCrmPaymentConfirmations() {
     );
 
     if (upcoming.rows.length > 0) {
-      logger.info(`[CRM] Payment reminders (due within 3 days):`);
+      logger.info(`[CRM] Payment reminders (due within ${_crmDays} days):`);
       for (const deal of upcoming.rows) {
         const dueDate = new Date(deal.nextPaymentDate).toISOString().slice(0, 10);
         logger.info(`  - ${deal.company_name || deal.name}: ${deal.amount || '?'} RUB, due ${dueDate}`);
@@ -6887,11 +9230,11 @@ async function checkCrmPaymentConfirmations() {
   }
 }
 
-// Run CRM payment check every 10 minutes
+// Run CRM payment check periodically
 checkCrmPaymentConfirmations().catch(e => { if (e.code !== 'MODULE_NOT_FOUND') logger.error('[CRM] Initial check error:', e.message); });
 _intervals.push(setInterval(() => {
   checkCrmPaymentConfirmations().catch(e => { if (e.code !== 'MODULE_NOT_FOUND') logger.error('[CRM] Interval error:', e.message); });
-}, 10 * 60 * 1000));
+}, (appSettings.crm_check_interval_min || 10) * 60000));
 
 function gracefulShutdown(signal) {
   logger.info(`\n[Shutdown] Received ${signal}, shutting down gracefully...`);
