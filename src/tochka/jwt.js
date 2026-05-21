@@ -8,7 +8,9 @@ const logger = require('../logger');
 // Keep TTL short — Tochka rotates signing keys without notice, and stale cache
 // means every webhook arriving after rotation is rejected as `key_not_found`.
 let tochkaJwksCache = { keys: null, fetchedAt: 0 };
-const JWKS_CACHE_TTL = 60 * 60 * 1000; // 1 hour
+// 15 min — short window so a rotation isn't masked beyond a quarter-hour.
+// force-refresh-on-miss in verifyJwtSignature handles in-window rotations.
+const JWKS_CACHE_TTL = 15 * 60 * 1000;
 
 function base64urlDecode(str) {
   let b64 = str.replace(/-/g, '+').replace(/_/g, '/');

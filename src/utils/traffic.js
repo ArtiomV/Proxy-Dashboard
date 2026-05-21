@@ -12,14 +12,17 @@ function parseTrafficValue(val) {
   if (!match) return 0;
   const num = parseFloat(match[1]);
   const unit = (match[2] || 'B').toUpperCase();
-  const mult = { B: 1, KB: 1024, MB: 1048576, GB: 1073741824, TB: 1099511627776 };
+  // Decimal SI units: 1 KB = 1000 B, 1 MB = 1e6 B, 1 GB = 1e9 B (matches billing).
+  // ProxySmart almost always returns raw byte counts (numeric strings), so the unit map
+  // only kicks in for legacy formatted strings.
+  const mult = { B: 1, KB: 1e3, MB: 1e6, GB: 1e9, TB: 1e12 };
   return Math.round(num * (mult[unit] || 1));
 }
 
 const parseBwToBytes = parseTrafficValue;
 
 function trafficBytesToGb(bytes) {
-  return Math.round(bytes / (1024 * 1024 * 1024) * 1000) / 1000;
+  return Math.round(bytes / 1e9 * 1000) / 1000;
 }
 
 /**

@@ -76,16 +76,37 @@ function buildActItemsFromLedger(client, period, billingLedger) {
     const avgModems = billedDays > 0 ? totalModemDays / billedDays : 0;
     // qty = округлённое среднее число модемов
     // price = totalCost / qty — реальная "стоимость за модем за период биллинга"
-    // (учитывает что биллинг шёл не весь месяц)
-    const qty = round2(avgModems) || 1;
-    const price = round4(totalCost / qty);
+    // (учитывает что биллинг шёл не весь месяц).
+    // Guard against div-by-zero: if we have charges but somehow avgModems
+    // rounds to 0 (e.g. legacy data with all modem_count=null and bad ppm),
+    // fall back to qty=1 + full cost as price so the act still validates.
+    let qty = round2(avgModems);
+    if (!qty || qty <= 0) qty = 1;
+    // Round directly to 2 decimals (Tochka enforces ≤2 anyway). Reconcile
+    // amount to qty × price so the invariant qty×price ≈ amount holds within
+    // the 0.05 tolerance Tochka tolerates — previously round4(price) then
+    // round2 in post-processing could drift up to 0.5 RUB on the act.
+    const price = qty > 0 ? round2(totalCost / qty) : 0;
+    const amount = round2(qty * price);
     actItems.push({
       name: `Услуги мобильных прокси (аренда модемов за ${periodLabel})`,
       quantity: qty,
       unit: 'шт',
       price,
-      amount: totalCost
+      amount
     });
+    // If rounding lost a kopeck or two from totalCost, surface it as a
+    // correction line so the act sums exactly to what was billed.
+    const drift = round2(totalCost - amount);
+    if (Math.abs(drift) >= 0.01) {
+      actItems.push({
+        name: 'Корректировка округления',
+        quantity: 1,
+        unit: 'услуга',
+        price: drift,
+        amount: drift
+      });
+    }
   }
 
   // Corrections — show as separate line, signed

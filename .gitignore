@@ -10,3 +10,10 @@ known_modems.json
 top_hosts_cache.json
 /documents/
 logs/
+# Encrypted bank credentials — never commit
+tochka_config.json
+tochka_config.json.bak*
+# Recovery scripts (one-shot, contain hostnames)
+_recover_*.js
+# OS / editor
+.DS_Store

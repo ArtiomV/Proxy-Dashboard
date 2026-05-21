@@ -26,6 +26,10 @@ const { decodeJwtPayload, decodeJwtHeader, fetchTochkaJwks, jwkToPem, verifyJwtS
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
 const billing = require('./src/billing/atomic');
 const { MONTH_NAMES_RU, buildActItemsFromLedger: _buildActItemsFromLedger, buildTochkaActBody: _buildTochkaActBody, buildTochkaBillBody: _buildTochkaBillBody, calculateMonthlyBillAmount: _calculateMonthlyBillAmount } = require('./src/tochka/documents');
+const tgBot = require('./src/telegram/bot');
+const tgSummary = require('./src/telegram/daily_summary');
+const aiInsights = require('./src/telegram/ai_insights');
+const simulator = require('./src/simulator/engine');
 const { execFile } = require('child_process');
 
 const DB_PATH = path.join(__dirname, 'dashboard.db');
@@ -126,7 +130,78 @@ function runMigrations() {
     }
   }
 }
-runMigrations();
+try {
+  runMigrations();
+} catch (e) {
+  // Migrations failed — abort startup so pm2 records the failure and ops
+  // notices the bad deploy. Continuing with mismatched schema risks data
+  // corruption far worse than a restart loop.
+  logger.error('[Migration] FATAL on startup: ' + (e.stack || e.message));
+  process.exit(1);
+}
+
+// ─── kv_store loss-prevention layer ────────────────────────────────────────────
+// History + refuse-to-shrink guard for critical kv entries. See migration 028.
+//
+// Each critical key registers a `shape()` function that summarises the value's
+// "fill level" (e.g., how many populated metadata fields per server). When a
+// new write would strictly REGRESS the shape (any tracked count drops), the
+// guard refuses unless explicitly allowed via the `allowRegression` flag —
+// catching whole classes of silent data-loss bugs at write-time.
+//
+// Defined here (right after migrations) so it's available during the
+// env↔DB merge at startup, NOT later in the file where most other helpers live.
+const _kvGet = db.prepare('SELECT value FROM kv_store WHERE key = ?');
+const _kvSet = db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime('now'))");
+const _kvHistoryInsert = db.prepare(`INSERT INTO kv_store_history (key, old_value, new_value, source, shape_signature, regressed) VALUES (?,?,?,?,?,?)`);
+const _kvHistoryPrune = db.prepare(`DELETE FROM kv_store_history WHERE key = ? AND id NOT IN (SELECT id FROM kv_store_history WHERE key = ? ORDER BY id DESC LIMIT 50)`);
+
+const { KV_CRITICAL_SHAPES, shapeRegressions: _shapeRegressions, mergeDbMetadataIntoEnvServers, DB_META_FIELDS: _DB_META_FIELDS } = require('./src/utils/kv-guard');
+
+// Write a critical kv entry. Refuses if shape regresses (unless allowed).
+// Returns { ok: true } on success, or { ok: false, error, regressions } on refusal.
+// Uses logActivity if available (it's a hoisted function declaration, so the
+// reference resolves even though the body isn't reachable until later in the
+// file — but logActivity's own try/catch keeps it safe if its deps aren't ready).
+function kvSetCritical(key, value, opts) {
+  opts = opts || {};
+  const source = opts.source || 'unknown';
+  const allowRegression = !!opts.allowRegression;
+  const shapeFn = KV_CRITICAL_SHAPES[key];
+  const oldRow = _kvGet.get(key);
+  const oldValue = oldRow ? oldRow.value : null;
+  const newShape = shapeFn ? shapeFn(value) : null;
+  const oldShape = (shapeFn && oldValue) ? shapeFn(oldValue) : null;
+  const regressions = (oldShape && newShape) ? _shapeRegressions(oldShape, newShape) : [];
+
+  if (regressions.length > 0 && !allowRegression) {
+    logger.warn(`[kvGuard] REFUSED write to '${key}' from '${source}': shape regression ${JSON.stringify(regressions)}`);
+    try { if (typeof logActivity === 'function') logActivity('system', 'warn', 'kv_write_refused', null, `Refused regressive write to ${key}`, { key, source, regressions }); } catch (_) {}
+    return { ok: false, error: 'shape regression', regressions };
+  }
+
+  try {
+    _kvHistoryInsert.run(key, oldValue, value, source, newShape ? JSON.stringify(newShape) : null, regressions.length > 0 ? 1 : 0);
+    _kvSet.run(key, value);
+    _kvHistoryPrune.run(key, key);
+    if (regressions.length > 0) {
+      logger.warn(`[kvGuard] ALLOWED regressive write to '${key}' from '${source}' (explicit override): ${JSON.stringify(regressions)}`);
+    }
+    return { ok: true };
+  } catch (e) {
+    logger.error(`[kvGuard] write to '${key}' failed: ${e.message}`);
+    return { ok: false, error: e.message };
+  }
+}
+
+function kvCurrentShape(key) {
+  const fn = KV_CRITICAL_SHAPES[key];
+  if (!fn) return null;
+  const row = _kvGet.get(key);
+  if (!row) return null;
+  return fn(row.value);
+}
+// ───────────────────────────────────────────────────────────────────────────────
 
 // Prepared statements for common operations
 const dbStmts = {
@@ -162,8 +237,10 @@ const dbStmts = {
 
   // Proxy latency monitoring
   proxyCheckInsert: db.prepare(`INSERT INTO proxy_checks (server_name, nick, client_name, operator, checked_at, connect_ms, total_ms, status_code, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-  proxyCheckRecent: db.prepare(`SELECT * FROM proxy_checks WHERE checked_at >= ? ORDER BY checked_at DESC LIMIT 1000`),
-  proxyCheckByNick: db.prepare(`SELECT * FROM proxy_checks WHERE nick = ? AND checked_at >= ? ORDER BY checked_at DESC LIMIT 100`),
+  // Explicit columns instead of SELECT * — proxy_checks has 11 columns; the UI
+  // only reads 7. Returning 1000 rows × unused columns wastes bytes on the wire.
+  proxyCheckRecent: db.prepare(`SELECT checked_at, server_name, nick, client_name, operator, connect_ms, total_ms, error FROM proxy_checks WHERE checked_at >= ? ORDER BY checked_at DESC LIMIT 1000`),
+  proxyCheckByNick: db.prepare(`SELECT checked_at, server_name, nick, client_name, operator, connect_ms, total_ms, error FROM proxy_checks WHERE nick = ? AND checked_at >= ? ORDER BY checked_at DESC LIMIT 100`),
   proxyCheckSummary: db.prepare(`SELECT nick, server_name, COUNT(*) as total_checks, AVG(total_ms) as avg_ms, SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as error_count FROM proxy_checks WHERE checked_at >= ? GROUP BY nick, server_name`),
   proxyCheckLast: db.prepare(`SELECT nick, server_name, connect_ms, total_ms, status_code, error, checked_at FROM proxy_checks WHERE id IN (SELECT MAX(id) FROM proxy_checks GROUP BY nick, server_name)`),
   // proxyCheckCleanOld — moved to runRetentionCleanup()
@@ -200,19 +277,28 @@ for (const name of _envServerKeys) {
     publicIp: process.env[`API_${name}_PUBLIC_IP`] || urlObj.hostname
   });
 }
-// Load additional servers from DB (added via Settings UI)
+// Load additional servers from DB (added via Settings UI) AND merge DB-stored
+// metadata into env-defined servers. Env owns connection (url/user/pass/publicIp);
+// DB owns metadata set via UI (address, hardware, ssh creds, country/tz).
+// Without the merge, env servers lose UI-set fields on every restart because
+// saveApiServersToDb() below would persist the impoverished env-only version
+// and overwrite the DB's metadata — silent data loss on every pm2 restart.
+// Merge logic lives in src/utils/kv-guard.js and has dedicated tests.
 try {
   const _dbRow = db.prepare("SELECT value FROM kv_store WHERE key = 'api_servers'").get();
   if (_dbRow) {
     const dbServers = JSON.parse(_dbRow.value);
-    for (const s of dbServers) {
-      if (!apiServers.find(e => e.name === s.name)) apiServers.push(s);
-    }
+    mergeDbMetadataIntoEnvServers(apiServers, dbServers);
   }
 } catch (e) {}
-function saveApiServersToDb() {
-  // Save ALL servers (env + db-added) so DB becomes single source of truth over time
-  try { db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES ('api_servers', ?, datetime('now'))").run(JSON.stringify(apiServers)); } catch (e) {}
+function saveApiServersToDb(source) {
+  // Routes through kvSetCritical so the write is history-logged AND refused if
+  // it would silently shrink any tracked metadata count (address/ssh/etc).
+  const payload = JSON.stringify(apiServers);
+  const r = kvSetCritical('api_servers', payload, { source: source || 'saveApiServersToDb' });
+  if (!r.ok) {
+    logger.error(`[saveApiServersToDb] refused: ${r.error}; regressions=${JSON.stringify(r.regressions || [])}`);
+  }
 }
 // Auto-migrate: save env servers to DB on first run
 if (apiServers.length > 0) saveApiServersToDb();
@@ -229,6 +315,44 @@ for (const s of apiServers) {
   };
 }
 logger.info(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.name + ' (' + s.url + ')').join(', ')}`);
+
+// ─── Startup integrity check ───────────────────────────────────────────────────
+// Compare current api_servers shape (servers × populated metadata fields)
+// against the baseline saved at last successful startup. If anything regressed,
+// log loud WARN + an audit event so ops can intervene before the regressed
+// state gets persisted further. Baseline is updated after the check.
+//
+// Catches: any future merge bug, accidental kv_store edit, env config drift
+// that strips fields silently.
+(function checkApiServersIntegrity() {
+  try {
+    const currentShape = KV_CRITICAL_SHAPES.api_servers(JSON.stringify(apiServers));
+    const baselineRow = _kvGet.get('integrity_baseline_api_servers');
+    let baseline = null;
+    if (baselineRow) { try { baseline = JSON.parse(baselineRow.value); } catch (_) {} }
+    if (baseline) {
+      const regs = _shapeRegressions(baseline, currentShape);
+      if (regs.length > 0) {
+        logger.warn(`[Integrity] api_servers REGRESSED since last startup: ${JSON.stringify(regs)}`);
+        logger.warn(`[Integrity]   baseline: ${JSON.stringify(baseline)}`);
+        logger.warn(`[Integrity]   current : ${JSON.stringify(currentShape)}`);
+        // logActivity isn't defined yet at this point (hoisted as a function but
+        // its db dependency dbStmts may not exist) — defer the audit event.
+        process.nextTick(() => {
+          try { logActivity('system', 'critical', 'integrity_regression', 'api_servers', `Server metadata regressed at boot: ${regs.map(r => r.field + ' ' + r.before + '→' + r.after).join(', ')}`, { regressions: regs, baseline, current: currentShape }); } catch (_) {}
+        });
+      } else {
+        logger.info(`[Integrity] api_servers OK: ${JSON.stringify(currentShape)}`);
+      }
+    } else {
+      logger.info(`[Integrity] api_servers baseline initialised: ${JSON.stringify(currentShape)}`);
+    }
+    _kvSet.run('integrity_baseline_api_servers', JSON.stringify(currentShape));
+  } catch (e) {
+    logger.error('[Integrity] check failed: ' + e.message);
+  }
+})();
+// ───────────────────────────────────────────────────────────────────────────────
 
 {
   const warnings = [];
@@ -575,6 +699,29 @@ function auditLog(adminLogin, action, details = {}) {
   }
 }
 
+// Response envelope helpers — preferred shape for NEW endpoints:
+//   apiOk(res, data?)     →  { ok: true, ...data }
+//   apiErr(res, code, msg) →  { ok: false, error: msg, code }
+// (Existing endpoints keep their idiosyncratic shapes for back-compat.
+//  Migrate to apiOk/apiErr gradually when touching each route.)
+function apiOk(res, data) { return res.json(Object.assign({ ok: true }, data || {})); }
+function apiErr(res, statusCode, code, msg) {
+  return res.status(statusCode).json({ ok: false, error: msg || code, code });
+}
+
+// Pagination helper — same shape across endpoints. Caps limit at `hardMax`
+// (route-defined) and `MAX_PAGE_LIMIT` (global). Returns { limit, offset }.
+// Usage: const { limit, offset } = parsePage(req, { defaultLimit: 50, hardMax: 200 });
+const MAX_PAGE_LIMIT = 1000;
+function parsePage(req, opts) {
+  const o = opts || {};
+  const cap = Math.min(o.hardMax || MAX_PAGE_LIMIT, MAX_PAGE_LIMIT);
+  const def = Math.min(o.defaultLimit || 50, cap);
+  const limit = Math.max(1, Math.min(parseInt(req.query.limit) || def, cap));
+  const offset = Math.max(0, parseInt(req.query.offset) || 0);
+  return { limit, offset };
+}
+
 function logActivity(category, level, action, target, message, details = null) {
   try {
     const detailsStr = details ? (typeof details === 'string' ? details : JSON.stringify(details)) : null;
@@ -582,6 +729,50 @@ function logActivity(category, level, action, target, message, details = null) {
   } catch (e) {
     logger.error(`[SystemLog] Write failed: ${e.message}`);
   }
+  // Urgent alert: forward critical/error events to Telegram immediately if
+  // configured. Throttled per (action, target) to avoid alert storms — only
+  // first occurrence per 15 min for the same key.
+  try {
+    if (level === 'critical' || (level === 'error' && _shouldUrgentAlert(action))) {
+      _emitUrgentAlert(level, action, target, message);
+    }
+  } catch (_) { /* never let alert path break logActivity */ }
+}
+
+// Critical actions that always trigger an immediate alert (when level=error).
+const URGENT_ACTIONS = new Set([
+  'server_unreachable',
+  'billing_failed',
+  'billing_unique_conflict',
+  'tochka_sync_failed',
+  'tochka_unverified_webhook',
+  'db_backup_failed',
+  'uncaught_exception',
+  'unhandled_rejection',
+  'telegram_summary_failed'
+]);
+function _shouldUrgentAlert(action) { return URGENT_ACTIONS.has(action); }
+
+const _urgentAlertCooldown = new Map();
+function _emitUrgentAlert(level, action, target, message) {
+  if (typeof tgBot === 'undefined' || typeof tgBot.sendMessage !== 'function') return;
+  const token = appSettings.telegram_bot_token;
+  const chatId = appSettings.telegram_chat_id;
+  if (!token || !chatId || !appSettings.telegram_summary_enabled) return;
+  const key = action + '|' + (target || '');
+  const now = Date.now();
+  const last = _urgentAlertCooldown.get(key) || 0;
+  if (now - last < 15 * 60 * 1000) return; // 15-min cooldown
+  _urgentAlertCooldown.set(key, now);
+  // Trim cooldown map periodically — never grows beyond a few dozen keys.
+  if (_urgentAlertCooldown.size > 200) {
+    for (const [k, t] of _urgentAlertCooldown) if (now - t > 60 * 60 * 1000) _urgentAlertCooldown.delete(k);
+  }
+  const icon = level === 'critical' ? '🚨' : '⚠️';
+  const txt = `${icon} <b>${level.toUpperCase()}</b>\n<code>${String(action).slice(0, 60)}</code>${target ? ' · ' + String(target).slice(0, 60) : ''}\n${String(message).slice(0, 800)}`;
+  tgBot.sendMessage(token, chatId, txt, { parse_mode: 'HTML' }).catch(e => {
+    logger.warn('[UrgentAlert] Telegram send failed: ' + e.message);
+  });
 }
 
 const TRUSTED_PROXIES = (process.env.TRUSTED_PROXY || '127.0.0.1,::1,::ffff:127.0.0.1').split(',').map(s => s.trim());
@@ -606,11 +797,70 @@ function getClientIp(req) {
 
 const TOCHKA_CONFIG_FILE = path.join(__dirname, 'tochka_config.json');
 let tochkaConfig = { jwt: '', clientId: '', customerCode: '', accountId: '', companyName: '', companyInn: '', companyKpp: '', companyAddress: '', bankAccount: '', bankName: '', bankBic: '', bankCorrAccount: '' };
+
+// AES-256-GCM at-rest encryption for tochka_config.json. Key comes from
+// $TOCHKA_CONFIG_KEY (32 random bytes hex). If absent we fall back to a
+// derived key based on hostname + process.platform — enough to make the
+// file non-trivially readable to anyone who only got the file (not root),
+// but the production deployment SHOULD set $TOCHKA_CONFIG_KEY explicitly.
+function _tochkaCryptKey() {
+  const env = process.env.TOCHKA_CONFIG_KEY;
+  if (env && /^[0-9a-f]{64}$/i.test(env)) return Buffer.from(env, 'hex');
+  // Derived fallback (deterministic per host so saves stay readable on restart).
+  return require('crypto').createHash('sha256')
+    .update('tochka-config-v1|' + require('os').hostname() + '|' + process.platform)
+    .digest();
+}
+function _encryptJson(obj) {
+  const crypto = require('crypto');
+  const key = _tochkaCryptKey();
+  const iv = crypto.randomBytes(12);
+  const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
+  const enc = Buffer.concat([cipher.update(JSON.stringify(obj), 'utf8'), cipher.final()]);
+  const tag = cipher.getAuthTag();
+  return JSON.stringify({ v: 1, iv: iv.toString('base64'), tag: tag.toString('base64'), ct: enc.toString('base64') });
+}
+function _decryptJson(payload) {
+  const crypto = require('crypto');
+  const wrap = JSON.parse(payload);
+  if (!wrap || wrap.v !== 1) throw new Error('not an encrypted v1 payload');
+  const key = _tochkaCryptKey();
+  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(wrap.iv, 'base64'));
+  decipher.setAuthTag(Buffer.from(wrap.tag, 'base64'));
+  const buf = Buffer.concat([decipher.update(Buffer.from(wrap.ct, 'base64')), decipher.final()]);
+  return JSON.parse(buf.toString('utf8'));
+}
+
 try {
   if (fs.existsSync(TOCHKA_CONFIG_FILE)) {
-    Object.assign(tochkaConfig, JSON.parse(fs.readFileSync(TOCHKA_CONFIG_FILE, 'utf8')));
+    const raw = fs.readFileSync(TOCHKA_CONFIG_FILE, 'utf8');
+    let parsed;
+    if (raw.trim().startsWith('{"v":1')) {
+      try { parsed = _decryptJson(raw); }
+      catch (e) {
+        const hasExplicitKey = !!(process.env.TOCHKA_CONFIG_KEY && /^[0-9a-f]{64}$/i.test(process.env.TOCHKA_CONFIG_KEY));
+        const hostNow = require('os').hostname();
+        // Distinguish "wrong explicit key" from "derived key drift after hostname change" —
+        // both are decrypt failures but they need different fixes from the operator.
+        if (hasExplicitKey) {
+          logger.error(`[Tochka] DECRYPT FAILED with explicit $TOCHKA_CONFIG_KEY. File was encrypted with a different key. ${e.message}`);
+        } else {
+          logger.error(`[Tochka] DECRYPT FAILED with derived key (hostname=${hostNow}). Most likely the hostname changed since the file was last saved. Set TOCHKA_CONFIG_KEY in .env or restore the previous hostname. ${e.message}`);
+        }
+        // Also surface in system_log so it shows up in the admin UI without needing SSH.
+        try { logActivity('system', 'error', 'tochka_decrypt_failed', null,
+          `Не удалось расшифровать tochka_config.json (hostname=${hostNow}). Проверьте \$TOCHKA_CONFIG_KEY или восстановите hostname.`,
+          { hostname: hostNow, hasExplicitKey }); } catch (_) {}
+        parsed = null;
+      }
+    } else {
+      // Plaintext legacy file → load and re-encrypt on first save.
+      parsed = JSON.parse(raw);
+      logger.info('[Tochka] Legacy plaintext config detected — will re-encrypt on next save');
+    }
+    if (parsed) Object.assign(tochkaConfig, parsed);
   }
-} catch (e) { logger.info('[Tochka] Error loading config file:', e.message); }
+} catch (e) { logger.info('[Tochka] Error loading config file: ' + e.message); }
 // .env overrides file config
 if (process.env.TOCHKA_JWT_TOKEN) tochkaConfig.jwt = process.env.TOCHKA_JWT_TOKEN;
 if (process.env.TOCHKA_CLIENT_ID) tochkaConfig.clientId = process.env.TOCHKA_CLIENT_ID;
@@ -624,7 +874,15 @@ if (process.env.TOCHKA_BANK_ACCOUNT) tochkaConfig.bankAccount = process.env.TOCH
 if (process.env.TOCHKA_BANK_NAME) tochkaConfig.bankName = process.env.TOCHKA_BANK_NAME;
 if (process.env.TOCHKA_BANK_BIC) tochkaConfig.bankBic = process.env.TOCHKA_BANK_BIC;
 if (process.env.TOCHKA_BANK_CORR_ACCOUNT) tochkaConfig.bankCorrAccount = process.env.TOCHKA_BANK_CORR_ACCOUNT;
-function saveTochkaConfig() { safeWriteFile(TOCHKA_CONFIG_FILE, JSON.stringify(tochkaConfig, null, 2)); }
+function saveTochkaConfig() { safeWriteFile(TOCHKA_CONFIG_FILE, _encryptJson(tochkaConfig)); }
+
+// Tochka response field lookup that tolerates case variation. Tries the
+// provided keys in order, returns the first non-undefined value.
+function _pickField(obj, keys) {
+  if (!obj) return undefined;
+  for (const k of keys) if (obj[k] !== undefined) return obj[k];
+  return undefined;
+}
 if (tochkaConfig.jwt) { saveTochkaConfig(); logger.info(`[Tochka] API configured (client_id: ${tochkaConfig.clientId})`); }
 else logger.info('[Tochka] No JWT token configured, bank integration disabled');
 
@@ -692,6 +950,64 @@ function calculateMonthlyBillAmount(client, cachedResults) {
 }
 
 let dailyTraffic = {}; // { portKey: { "2026-03-01": { in: bytes, out: bytes, portName }, ... } }
+
+// Cached trend computations — invalidated whenever dailyTraffic is mutated
+// (syncYesterdayTraffic, runDailyBilling, retention cleanup). TTL backstop 60s.
+let _modemTrendCache = null;
+let _clientTrendCache = null;
+let _trendCacheTs = 0;
+const TREND_CACHE_TTL_MS = 60 * 1000;
+function _invalidateTrendCache() { _modemTrendCache = null; _clientTrendCache = null; _trendCacheTs = 0; }
+function _computeTrends() {
+  const mskNow = getMoscowNow();
+  const completedDays = Math.max(mskNow.getDate() - 1, 0);
+  if (completedDays === 0) return { modem: {}, client: {} };
+  const cy = mskNow.getFullYear(), cm = mskNow.getMonth();
+  const curPrefix  = `${cy}-${String(cm + 1).padStart(2, '0')}`;
+  const prevDate   = new Date(cy, cm - 1, 1);
+  const prevPrefix = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
+  const curCutoff  = `${curPrefix}-${String(completedDays).padStart(2, '0')}`;
+  const prevCutoff = `${prevPrefix}-${String(completedDays).padStart(2, '0')}`;
+  const modem = {};
+  const byClient = {};
+  for (const [portKey, days] of Object.entries(dailyTraffic)) {
+    let curBytes = 0, prevBytes = 0;
+    for (const [date, entry] of Object.entries(days)) {
+      const b = (entry.in || 0) + (entry.out || 0);
+      if (date.startsWith(curPrefix) && date <= curCutoff) curBytes += b;
+      else if (date.startsWith(prevPrefix) && date <= prevCutoff) prevBytes += b;
+    }
+    if (prevBytes > 0)       modem[portKey] = Math.round((curBytes - prevBytes) / prevBytes * 100);
+    else if (curBytes > 0)   modem[portKey] = null;
+    // Aggregate by client portName for clientTrend
+    const pn = (typeof portKeyToPortName !== 'undefined' && portKeyToPortName[portKey])
+            || (Object.values(days)[0] && Object.values(days)[0].portName)
+            || '';
+    if (pn) {
+      if (!byClient[pn]) byClient[pn] = { cur: 0, prev: 0 };
+      byClient[pn].cur += curBytes;
+      byClient[pn].prev += prevBytes;
+    }
+  }
+  const client = {};
+  for (const [pn, d] of Object.entries(byClient)) {
+    if (d.prev > 0)     client[pn] = Math.round((d.cur - d.prev) / d.prev * 100);
+    else if (d.cur > 0) client[pn] = null;
+  }
+  return { modem, client };
+}
+function _getModemTrend() {
+  if (_modemTrendCache && (Date.now() - _trendCacheTs) < TREND_CACHE_TTL_MS) return _modemTrendCache;
+  const t = _computeTrends();
+  _modemTrendCache = t.modem; _clientTrendCache = t.client; _trendCacheTs = Date.now();
+  return _modemTrendCache;
+}
+function _getClientTrend() {
+  if (_clientTrendCache && (Date.now() - _trendCacheTs) < TREND_CACHE_TTL_MS) return _clientTrendCache;
+  const t = _computeTrends();
+  _modemTrendCache = t.modem; _clientTrendCache = t.client; _trendCacheTs = Date.now();
+  return _clientTrendCache;
+}
 // Load from SQLite
 try {
   // Load only last 90 days to limit memory usage
@@ -744,7 +1060,7 @@ function runRetentionCleanup() {
   const retentions = {
     traffic_hourly: { col: 'hour_start', key: 'retention_traffic_hourly', def: 90 },
     modem_meta:     { col: 'updated_at', key: 'retention_modem_meta', def: 30 },
-    rotation_log:   { col: 'started_at', key: 'retention_rotation_log', def: 90 },
+    rotation_log:   { col: 'started_at', key: 'retention_rotation_log', def: 30 }, // grows ~25k/day; 30d default keeps it manageable
     proxy_checks:   { col: 'checked_at', key: 'retention_proxy_checks', def: 30 },
     audit_log:      { col: 'timestamp',  key: 'retention_audit_log', def: 90 },
     system_log:     { col: 'timestamp',  key: 'retention_system_log', def: 30 },
@@ -754,6 +1070,8 @@ function runRetentionCleanup() {
     db_audit_context: { col: 'ts', key: 'retention_db_audit', def: 365 },
     // Auto-reboot log — 90 days
     auto_reboot_log:  { col: 'rebooted_at', key: 'retention_auto_reboot', def: 90 },
+    // Simulator runs — 30 days; CASCADE on simulator_samples handles the rest.
+    simulator_runs:   { col: 'started_at', key: 'retention_simulator_runs', def: 30 },
   };
   const results = {};
   for (const [table, { col, key, def }] of Object.entries(retentions)) {
@@ -780,7 +1098,196 @@ function runRetentionCleanup() {
   } catch (e) {
     logger.error('[Retention] dailyTraffic cleanup error:', e.message);
   }
+  // Stale port mapping cleanup: remove daily_traffic rows + known_modems entries
+  // for port_ids that disappeared from live ProxySmart > N days ago.
+  // (Was a manual fix on 2026-05-04 — automated here so the WildBox-style
+  // ghost-port issue can't recur.)
+  results.stale_ports = cleanupStalePortMappings();
+  // Prune in-memory tracking maps so they don't grow forever as modems churn.
+  // ipTracking/uptimeTracking/modemRotationCache key on serverName+IMEI; entries
+  // for IMEIs not seen in live data for >30 days are dead weight.
+  try {
+    const liveImeis = new Set();
+    try {
+      const fs2 = require('fs');
+      const cache = JSON.parse(fs2.readFileSync(SERVER_CACHE_FILE, 'utf8'));
+      for (const srv of Object.keys(cache || {})) {
+        const status = Array.isArray(cache[srv].status) ? cache[srv].status : [];
+        for (const m of status) {
+          const imei = m.modem_details && m.modem_details.IMEI;
+          if (imei) liveImeis.add(srv + '_' + imei);
+        }
+      }
+    } catch (_) {}
+    let ipPruned = 0, upPruned = 0, rotPruned = 0;
+    if (liveImeis.size > 0) {
+      for (const k of Object.keys(ipTracking)) if (!liveImeis.has(k)) { delete ipTracking[k]; ipPruned++; }
+      for (const k of Object.keys(uptimeTracking)) if (!liveImeis.has(k)) { delete uptimeTracking[k]; upPruned++; }
+      for (const k of Object.keys(modemRotationCache)) {
+        // modemRotationCache keys are `serverName:imei` — different prefix style
+        const [srv, imei] = k.split(':');
+        if (srv && imei && !liveImeis.has(srv + '_' + imei)) { delete modemRotationCache[k]; rotPruned++; }
+      }
+    }
+    results.tracking_pruned = { ipTracking: ipPruned, uptimeTracking: upPruned, modemRotationCache: rotPruned };
+  } catch (e) {
+    logger.warn('[Retention] tracking-map pruning error: ' + e.message);
+  }
   return results;
+}
+
+/**
+ * Remove ports that no longer exist in live ProxySmart for >N days.
+ * - Skips servers whose cache is older than 30 min (we don't trust stale caches
+ *   to decide what's "live"; better to keep data than delete prematurely).
+ * - Default threshold: 14 days. Configurable via appSettings.retention_stale_ports_days.
+ */
+function cleanupStalePortMappings() {
+  try {
+    const rawDays = appSettings.retention_stale_ports_days;
+    // Default 3 days: a disconnected modem stays visible as offline for ~3
+    // days, then its known_modems entry is dropped so the row disappears.
+    // Minimum 1 day to allow tighter behavior if needed.
+    const days = Number.isInteger(rawDays) && rawDays >= 1 ? rawDays : 3;
+    const cutoffDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    const cutoffMs   = Date.now() - days * 86400000;
+
+    // Build set of CURRENTLY LIVE port_ids from server_cache.json.
+    // Only trust servers whose cache is fresh (≤30 min old) — for unreachable
+    // servers we have no authoritative info on what's still live, so skip them.
+    let serverCache = {};
+    try {
+      serverCache = JSON.parse(fs.readFileSync(SERVER_CACHE_FILE, 'utf-8'));
+    } catch (_) { return { skipped: 'no_cache' }; }
+
+    const FRESHNESS_MS = 30 * 60 * 1000;
+    const liveIds = new Set();
+    const skippedSrv = [];
+    for (const [srvName, entry] of Object.entries(serverCache)) {
+      if (!entry || !entry.bw) continue;
+      const age = Date.now() - (entry.cachedAt || 0);
+      if (age > FRESHNESS_MS) { skippedSrv.push(srvName); continue; }
+      for (const pid of Object.keys(entry.bw)) liveIds.add(srvName + '_' + pid);
+    }
+    if (liveIds.size === 0) {
+      return { skipped: 'no_fresh_servers', skippedSrv };
+    }
+
+    // 1. daily_traffic table: stale port_ids whose latest activity < cutoff.
+    const stale = db.prepare(`
+      SELECT port_name FROM daily_traffic
+      GROUP BY port_name HAVING MAX(date) < ?
+    `).all(cutoffDate);
+    let dtDeleted = 0;
+    if (stale.length) {
+      const stmt = db.prepare('DELETE FROM daily_traffic WHERE port_name = ?');
+      const tx = db.transaction(() => {
+        for (const r of stale) {
+          if (liveIds.has(r.port_name)) continue;     // still live → keep
+          dtDeleted += stmt.run(r.port_name).changes;
+        }
+      });
+      tx();
+    }
+
+    // 2. In-memory dailyTraffic: drop matching keys.
+    let dtMemKeys = 0;
+    for (const k of Object.keys(dailyTraffic)) {
+      if (liveIds.has(k)) continue;
+      const dates = Object.keys(dailyTraffic[k]);
+      const lastDate = dates.length ? dates.sort().slice(-1)[0] : '';
+      if (lastDate && lastDate < cutoffDate) {
+        delete dailyTraffic[k];
+        dtMemKeys++;
+      }
+    }
+
+    // 3. known_modems.json: remove entries with stale lastSeen, only on
+    //    servers that ARE fresh (skipped servers untouched).
+    //    Also handle "IMEI reassigned": if the same IMEI has multiple km
+    //    entries (modem was moved between clients/ports), keep only the
+    //    newest by lastSeen and remove older ones that are not in live bw.
+    let kmRemoved = 0, kmChanged = false;
+
+    // Build per-IMEI index globally across all (fresh) servers.
+    const byImei = {};   // imei -> [{srv, pid, lastSeen}]
+    for (const srvName of Object.keys(knownModems || {})) {
+      if (skippedSrv.includes(srvName)) continue;
+      const km = knownModems[srvName];
+      for (const [pid, info] of Object.entries(km)) {
+        if (!info.imei) continue;
+        if (!byImei[info.imei]) byImei[info.imei] = [];
+        byImei[info.imei].push({ srv: srvName, pid, lastSeen: info.lastSeen || 0 });
+      }
+    }
+    // Build live-IMEI set per server (modem currently visible in ProxySmart status,
+    // regardless of whether its port is in bw — could be a default/random port).
+    const liveImeisByServer = {};
+    for (const srvName of Object.keys(serverCache)) {
+      if (skippedSrv.includes(srvName)) continue;
+      liveImeisByServer[srvName] = new Set();
+      const stArr = Array.isArray(serverCache[srvName].status) ? serverCache[srvName].status : [];
+      for (const m of stArr) {
+        const imei = m.modem_details && m.modem_details.IMEI;
+        if (imei) liveImeisByServer[srvName].add(imei);
+      }
+    }
+    // Pass A: IMEI-dedup — newer wins (modem reassigned to different port).
+    for (const list of Object.values(byImei)) {
+      if (list.length < 2) continue;
+      list.sort((a, b) => b.lastSeen - a.lastSeen);
+      for (let i = 1; i < list.length; i++) {
+        const old = list[i];
+        if (liveIds.has(old.srv + '_' + old.pid)) continue;
+        delete knownModems[old.srv][old.pid];
+        kmRemoved++; kmChanged = true;
+      }
+    }
+    // Pass B: stale lastSeen — original retention (modem disconnected long ago).
+    for (const srvName of Object.keys(knownModems || {})) {
+      if (skippedSrv.includes(srvName)) continue;
+      const km = knownModems[srvName];
+      for (const pid of Object.keys(km)) {
+        const fullId = srvName + '_' + pid;
+        if (liveIds.has(fullId)) continue;
+        const lastSeen = km[pid].lastSeen || 0;
+        if (lastSeen > cutoffMs) continue;
+        delete km[pid];
+        kmRemoved++; kmChanged = true;
+      }
+    }
+    // Pass C: port deleted but IMEI still online (modem moved to a different port,
+    // typically an auto-generated "randomport*" default after we removed the named
+    // port). The stale km entry would otherwise misattribute the modem to a former
+    // client. Detect by: port not in live bw AND IMEI is currently online on the
+    // same server — the bind is no longer authoritative.
+    for (const srvName of Object.keys(knownModems || {})) {
+      if (skippedSrv.includes(srvName)) continue;
+      const liveImeis = liveImeisByServer[srvName] || new Set();
+      const km = knownModems[srvName];
+      for (const pid of Object.keys(km)) {
+        if (liveIds.has(srvName + '_' + pid)) continue;        // port still live
+        const imei = km[pid].imei;
+        if (!imei) continue;
+        if (!liveImeis.has(imei)) continue;                    // modem also offline → keep (will be injected as ghost)
+        // Modem is online but on a different port → old assignment is stale
+        delete km[pid];
+        kmRemoved++; kmChanged = true;
+      }
+    }
+    if (kmChanged) saveKnownModems();
+
+    if (dtDeleted || dtMemKeys || kmRemoved) {
+      logger.info(`[Retention] Stale port cleanup: daily_traffic=${dtDeleted} rows, dailyTraffic=${dtMemKeys} keys, known_modems=${kmRemoved} entries (threshold ${days}d)`);
+      logActivity('system', 'info', 'stale_port_cleanup', null,
+        `Cleaned ${dtDeleted} daily_traffic rows, ${dtMemKeys} memory keys, ${kmRemoved} known_modems entries`,
+        { days, dtDeleted, dtMemKeys, kmRemoved, skippedSrv });
+    }
+    return { dtDeleted, dtMemKeys, kmRemoved, skippedSrv, days };
+  } catch (e) {
+    logger.error('[Retention] stale port cleanup error: ' + e.message);
+    return { error: e.message };
+  }
 }
 
 // Closure for hourly.js dependency (replaces prepared statement)
@@ -927,12 +1434,16 @@ function updateKnownModems(data) {
         portInfo = arr.find(p => p.portID === portId) || null;
       }
 
+      // Ignore ProxySmart's auto-generated "randomport*" placeholders — these
+      // are not real client bindings, and remembering them would re-create
+      // ghosts on disconnect.
+      const cleanPortName = /^randomport\d+$/i.test(bw.portName || '') ? '' : (bw.portName || '');
       km[portId] = {
-        portName: bw.portName || '',
+        portName: cleanPortName,
         imei,
         nick: (modemStatus && modemStatus.modem_details && modemStatus.modem_details.NICK) || (km[portId] && km[portId].nick) || '',
         model: (modemStatus && modemStatus.modem_details && (modemStatus.modem_details.MODEL_SHOWN || modemStatus.modem_details.MODEL)) || (km[portId] && km[portId].model) || '',
-        portInfo: portInfo ? JSON.parse(JSON.stringify(portInfo)) : (km[portId] && km[portId].portInfo ? km[portId].portInfo : null),
+        portInfo: portInfo ? (typeof structuredClone === 'function' ? structuredClone(portInfo) : JSON.parse(JSON.stringify(portInfo))) : (km[portId] && km[portId].portInfo ? km[portId].portInfo : null),
         lastSeen: now
       };
     }
@@ -1030,6 +1541,17 @@ function rebuildClientMaps() {
   clientByApiKey = new Map(clients.filter(c => c.apiKey).map(c => [c.apiKey, c]));
   clientByInn = new Map(clients.filter(c => c.inn).map(c => [c.inn, c]));
   clientByResetToken = new Map(clients.filter(c => c.resetToken).map(c => [c.resetToken, c]));
+}
+
+// Async mutex for runDailyBilling vs saveClients. Both mutate ledger/balance
+// or rebuild the in-memory client maps. Without serialization, billing could
+// run on a stale snapshot while saveClients-from-webhook is mid-rebuild.
+let _clientsLock = Promise.resolve();
+function withClientsLock(fn) {
+  const next = _clientsLock.then(() => fn(), () => fn());
+  // Don't propagate rejections to subsequent waiters.
+  _clientsLock = next.catch(() => {});
+  return next;
 }
 
 // Ensure all clients have required fields (migration)
@@ -1168,8 +1690,8 @@ _intervals.push(setInterval(() => {
 function generateToken() { return crypto.randomBytes(32).toString('hex'); }
 function generateId() { return crypto.randomBytes(8).toString('hex'); }
 
-const _kvGet = db.prepare('SELECT value FROM kv_store WHERE key = ?');
-const _kvSet = db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime('now'))");
+// (kv_store helpers moved earlier — see right after runMigrations() so they're
+// available when api_servers loads from the DB during initial bootstrap.)
 
 const SETTINGS_DEFAULTS = {
   speedtest_times: ['02:00', '14:00'],
@@ -1216,6 +1738,7 @@ const SETTINGS_DEFAULTS = {
   retention_modem_meta: 30,
   retention_api_usage: 30,
   retention_db_audit: 365,
+  retention_simulator_runs: 30,
   // Session & billing
   session_ttl_days: 30,
   billing_retry_delay_hours: 1,
@@ -1223,7 +1746,17 @@ const SETTINGS_DEFAULTS = {
   // CRM & auto-create
   auto_create_interval_min: 10,
   crm_check_interval_min: 10,
-  crm_reminder_days: 3
+  crm_reminder_days: 3,
+  // Telegram daily summary
+  telegram_bot_token: '',
+  telegram_chat_id: '',
+  telegram_summary_enabled: true,
+  telegram_summary_time: '08:00', // HH:MM МСК
+  telegram_last_sent_date: '',    // YYYY-MM-DD — written after each successful send
+  // Strict mode for Tochka webhook signatures: when true, unverified webhooks
+  // are rejected outright instead of being saved for manual review. Default
+  // false — lossy mode preferred during JWKS rotation flakes.
+  tochka_strict_webhook: false
 };
 
 let appSettings = { ...SETTINGS_DEFAULTS };
@@ -1387,6 +1920,21 @@ if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true
 const app = express();
 app.set('trust proxy', 1); // trust first proxy (nginx) — req.ip uses x-forwarded-for
 app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+// Per-request correlation ID — propagated through logs so we can grep a
+// single request's lifecycle across multiple subsystems. Honour caller's
+// X-Request-Id if they supplied one (lets nginx/edge inject a trace ID),
+// otherwise generate one. Echo back in response so clients can quote it
+// when reporting bugs.
+app.use((req, res, next) => {
+  const incoming = req.headers['x-request-id'];
+  const id = (typeof incoming === 'string' && /^[a-zA-Z0-9-]{4,64}$/.test(incoming))
+    ? incoming
+    : crypto.randomBytes(6).toString('hex');
+  req.id = id;
+  res.set('X-Request-Id', id);
+  next();
+});
+
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, filePath) => {
@@ -1436,8 +1984,50 @@ const checkProxyLimiter = rateLimit({
   legacyHeaders: false
 });
 
+// Public client API — 120 requests/min per IP+key combo. Per-key keying so
+// one abusive integration can't starve other clients sharing an IP.
+const apiV1Limiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  keyGenerator: (req) => (req.headers['x-api-key'] || req.query.apikey || getClientIp(req)),
+  message: { success: false, error: 'Rate limit exceeded — slow down' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// Admin/client dashboard data — heavy endpoint that hits all 4 ProxySmart
+// servers. 60 requests/min per session token (= one admin tab refreshing
+// every ~1s is the soft ceiling).
+const dashboardLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => (req.headers['x-auth-token'] || getClientIp(req)),
+  message: { error: 'Dashboard rate limit exceeded — wait a few seconds' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+// CSRF posture (rationale):
+//   • Primary auth uses X-Auth-Token header (custom header).
+//   • Browser cross-origin requests cannot set custom headers without an
+//     explicit Access-Control-Allow-Headers OK from this server (CORS).
+//   • Cookie support (pr_session) is httpOnly + SameSite=Strict, which means
+//     other sites cannot ride along — the cookie is only sent on same-origin
+//     navigation/AJAX from dashboard.proxies.rent itself.
+//   • Therefore standard CSRF tokens are not required at this time. If we
+//     ever switch to cookie-only with SameSite=Lax/None, add a CSRF token
+//     (double-submit cookie pattern is the cheap fix).
+function _readSessionToken(req) {
+  // Header takes priority for backwards compatibility (existing frontend).
+  // Cookie is the safer transport — httpOnly means XSS can't steal it.
+  if (req.headers['x-auth-token']) return req.headers['x-auth-token'];
+  const cookieHdr = req.headers['cookie'] || '';
+  const m = cookieHdr.match(/(?:^|;\s*)pr_session=([^;]+)/);
+  return m ? decodeURIComponent(m[1]) : null;
+}
+
 function authMiddleware(req, res, next) {
-  const token = req.headers['x-auth-token'];
+  const token = _readSessionToken(req);
   const sess = getSession(token);
   if (!sess) {
     return res.status(401).json({ error: 'Unauthorized' });
@@ -1459,9 +2049,58 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
-// Public health — minimal info
+// Minimal Prometheus-compatible /metrics — text format. Lets ops scrape this
+// from Grafana/Prometheus without installing prom-client (zero deps).
+app.get('/metrics', (req, res) => {
+  try {
+    const mem = process.memoryUsage();
+    const ledgerCount = Object.values(billingLedger).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
+    const dbSize = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
+    const lines = [
+      '# HELP proxy_dashboard_uptime_seconds Process uptime in seconds',
+      '# TYPE proxy_dashboard_uptime_seconds counter',
+      `proxy_dashboard_uptime_seconds ${Math.round(process.uptime())}`,
+      '# HELP proxy_dashboard_memory_rss_bytes Resident memory in bytes',
+      '# TYPE proxy_dashboard_memory_rss_bytes gauge',
+      `proxy_dashboard_memory_rss_bytes ${mem.rss}`,
+      '# HELP proxy_dashboard_memory_heap_used_bytes Node heap used',
+      '# TYPE proxy_dashboard_memory_heap_used_bytes gauge',
+      `proxy_dashboard_memory_heap_used_bytes ${mem.heapUsed}`,
+      '# HELP proxy_dashboard_memory_heap_total_bytes Node heap total',
+      '# TYPE proxy_dashboard_memory_heap_total_bytes gauge',
+      `proxy_dashboard_memory_heap_total_bytes ${mem.heapTotal}`,
+      '# HELP proxy_dashboard_clients_total Number of clients',
+      '# TYPE proxy_dashboard_clients_total gauge',
+      `proxy_dashboard_clients_total ${clients.length}`,
+      '# HELP proxy_dashboard_ledger_entries_total In-memory ledger entries',
+      '# TYPE proxy_dashboard_ledger_entries_total gauge',
+      `proxy_dashboard_ledger_entries_total ${ledgerCount}`,
+      '# HELP proxy_dashboard_db_size_bytes SQLite file size',
+      '# TYPE proxy_dashboard_db_size_bytes gauge',
+      `proxy_dashboard_db_size_bytes ${dbSize}`,
+      '# HELP proxy_dashboard_sessions_total Active sessions',
+      '# TYPE proxy_dashboard_sessions_total gauge',
+      `proxy_dashboard_sessions_total ${getSessionCount()}`,
+      ''
+    ];
+    res.set('Content-Type', 'text/plain; version=0.0.4');
+    res.send(lines.join('\n'));
+  } catch (e) {
+    res.status(500).set('Content-Type', 'text/plain').send('# metrics_error\n');
+  }
+});
+
+// Public health — verifies DB read works. Returns 503 if DB unhealthy so
+// load-balancers / monitoring tools can detect "process alive but broken".
 app.get('/health', (req, res) => {
-  res.json({ status: 'ok', timestamp: new Date().toISOString() });
+  try {
+    const ok = db.prepare('SELECT 1 AS ok').get();
+    if (!ok || ok.ok !== 1) throw new Error('sqlite returned unexpected row');
+    res.json({ status: 'ok', timestamp: new Date().toISOString(), db: 'ok' });
+  } catch (e) {
+    logger.error('[/health] DB check failed: ' + e.message);
+    res.status(503).json({ status: 'unhealthy', timestamp: new Date().toISOString(), error: 'db_check_failed' });
+  }
 });
 
 // Admin health — detailed info
@@ -1494,9 +2133,13 @@ app.post('/api/login', loginLimiter, validate(LoginSchema), async (req, res) => 
   const user = users[login];
   if (!user) return res.status(401).json({ error: 'Invalid login or password' });
   
-  const passwordValid = user.passwordHash
-    ? await bcrypt.compare(password, user.passwordHash)
-    : (user.password === password); // fallback for un-migrated
+  // All users must have a bcrypt password_hash. Plaintext fallback removed —
+  // all 8 prod clients have been migrated. Refuse login if hash missing.
+  if (!user.passwordHash) {
+    logger.error(`[Login] User ${login} has no password_hash — auto-migration must run before they can log in`);
+    return res.status(401).json({ error: 'Invalid login or password' });
+  }
+  const passwordValid = await bcrypt.compare(password, user.passwordHash);
   if (!passwordValid) return res.status(401).json({ error: 'Invalid login or password' });
   const token = generateToken();
   const isAdmin = user.portNameFilter === '*';
@@ -1505,12 +2148,19 @@ app.post('/api/login', loginLimiter, validate(LoginSchema), async (req, res) => 
   if (!isAdmin) {
     auditLog(login, 'client_login', { ip: getClientIp(req), portNameFilter: user.portNameFilter });
   }
+  // Set httpOnly cookie alongside the body token. The body token is kept for
+  // backwards-compat with the current frontend (which still uses localStorage);
+  // new clients can ignore the body and rely on the cookie.
+  const ttlSec = Math.round(getSessionTTL() / 1000);
+  const secureFlag = req.secure || (req.headers['x-forwarded-proto'] === 'https') ? '; Secure' : '';
+  res.setHeader('Set-Cookie', `pr_session=${encodeURIComponent(token)}; Path=/; Max-Age=${ttlSec}; HttpOnly; SameSite=Strict${secureFlag}`);
   res.json({ token, login, isAdmin });
 });
 
 app.post('/api/logout', (req, res) => {
-  const token = req.headers['x-auth-token'];
+  const token = _readSessionToken(req);
   deleteSession(token);
+  res.setHeader('Set-Cookie', 'pr_session=; Path=/; Max-Age=0; HttpOnly; SameSite=Strict');
   res.json({ ok: true });
 });
 
@@ -1605,12 +2255,21 @@ app.post('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res)
 // GET /api/admin/finance_dashboard
 // Считает все метрики для финансового дашборда.
 // MRR — trailing 30d revenue per client. NRR — 3-month cohort.
+// Cached for 60s — recomputation is heavy (~200ms with 30+ aggregations).
+let _financeCache = null;
+let _financeCacheTs = 0;
+let _financeCacheKey = '';
+const FINANCE_CACHE_TTL_MS = 60 * 1000;
 app.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
     const period = String(req.query.period || '').match(/^\d{4}-\d{2}$/) ? req.query.period
                  : todayStr.slice(0, 7);
+    const cacheKey = period;
+    if (_financeCache && _financeCacheKey === cacheKey && (Date.now() - _financeCacheTs) < FINANCE_CACHE_TTL_MS) {
+      return res.json(_financeCache);
+    }
 
     // Date helpers
     const isoDay = d => d.toISOString().slice(0, 10);
@@ -1867,7 +2526,7 @@ app.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (
     const dailyRows = db.prepare(`SELECT date, SUM(amount) as rev FROM billing_ledger
       WHERE type='charge' AND date >= ? GROUP BY date ORDER BY date`).all(since30);
 
-    res.json({
+    const payload = {
       period,
       now: now.toISOString(),
       summary: {
@@ -1906,18 +2565,55 @@ app.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (
       churned: churnedClients.map(c => ({ id: c.id, name: c.name, last_mrr: prevMrrByClient[c.id] || 0 })),
       new: newClients.map(c => ({ id: c.id, name: c.name, created: c.createdAt, mrr: mrrByClient[c.id] || 0 })),
       daily_revenue: dailyRows.map(r => ({ date: r.date, revenue: Math.round(r.rev) }))
-    });
+    };
+    _financeCache = payload; _financeCacheKey = cacheKey; _financeCacheTs = Date.now();
+    res.json(payload);
   } catch (e) {
-    logger.error('[finance_dashboard]', e.message);
-    res.status(500).json({ error: e.message });
+    logger.error('[finance_dashboard] ' + (e.stack || e.message));
+    res.status(500).json({ error: 'Finance dashboard failed' });
   }
+});
+
+// Invalidator — called whenever ledger or settings change that affect finance metrics.
+function invalidateFinanceCache() { _financeCache = null; _financeCacheTs = 0; }
+
+// Async-fire-and-track pattern: launch billing in background, return a job ID.
+// Caller polls /api/admin/jobs/:id for completion. Avoids HTTP timeouts
+// when billing takes >30s.
+const _jobs = new Map(); // jobId → { status, startedAt, finishedAt, error, result }
+function _startJob(name, fn) {
+  const jobId = crypto.randomBytes(8).toString('hex');
+  const job = { id: jobId, name, status: 'running', startedAt: new Date().toISOString() };
+  _jobs.set(jobId, job);
+  // Trim job map at 200 entries
+  if (_jobs.size > 200) {
+    const oldest = Array.from(_jobs.keys()).slice(0, _jobs.size - 200);
+    for (const k of oldest) _jobs.delete(k);
+  }
+  Promise.resolve().then(() => fn()).then(result => {
+    job.status = 'done'; job.finishedAt = new Date().toISOString(); job.result = result;
+  }).catch(e => {
+    job.status = 'failed'; job.finishedAt = new Date().toISOString(); job.error = e.message;
+  });
+  return jobId;
+}
+app.get('/api/admin/jobs/:id', authMiddleware, adminMiddleware, (req, res) => {
+  const job = _jobs.get(req.params.id);
+  if (!job) return res.status(404).json({ ok: false, error: 'Job not found' });
+  res.json({ ok: true, job });
 });
 
 app.post('/api/admin/run_billing', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    await runDailyBilling();
-    res.json({ ok: true });
-  } catch (e) { res.status(500).json({ error: e.message }); }
+    // sync=1 → wait for completion (preserves old behavior).
+    // default async — returns immediately with job ID.
+    if (req.query.sync === '1') {
+      await runDailyBilling();
+      return res.json({ ok: true });
+    }
+    const jobId = _startJob('run_billing', () => runDailyBilling());
+    res.json({ ok: true, jobId, status_url: `/api/admin/jobs/${jobId}` });
+  } catch (e) { res.status(500).json({ error: 'Internal error' }); }
 });
 
 // Re-run billing for a specific past MSK date.
@@ -2199,6 +2895,14 @@ function filterByPortName(data, portNameFilter) {
   return { bw: filteredBw, status: filteredStatus, ports: filteredPorts };
 }
 
+// ProxySmart auto-generates fallback ports like "randomport3905" when a real
+// port is deleted but the modem is still connected. The portName equals the
+// portId and doesn't represent a real client. Normalize to empty so it doesn't
+// pollute client lists / counts / billing.
+function _isAutoRandomPort(name) {
+  return typeof name === 'string' && /^randomport\d+$/i.test(name);
+}
+
 function mergeServerData(allData, portNameFilter) {
   const mergedBw = {}, mergedStatus = [], mergedPorts = {};
   const cachedServers = [];
@@ -2209,7 +2913,8 @@ function mergeServerData(allData, portNameFilter) {
     if (isCached) cachedServers.push({ name: data.serverName, cachedAt: data._cachedAt });
     for (const [portId, b] of Object.entries(filtered.bw)) {
       const bwOverride = process.env[`PORTNAME_OVERRIDE_${data.serverName}`];
-      mergedBw[prefix + portId] = { ...b, _server: data.serverName, _cached: isCached, ...(bwOverride ? { portName: bwOverride } : {}) };
+      const cleanName = _isAutoRandomPort(b.portName) ? '' : b.portName;
+      mergedBw[prefix + portId] = { ...b, portName: cleanName, _server: data.serverName, _cached: isCached, ...(bwOverride ? { portName: bwOverride } : {}) };
     }
     const statusArr = Array.isArray(filtered.status) ? filtered.status : [];
     for (const m of statusArr) {
@@ -2233,7 +2938,7 @@ function mergeServerData(allData, portNameFilter) {
       const portNameOverride = process.env[`PORTNAME_OVERRIDE_${data.serverName}`];
       const prefixedPorts = filteredPortList.map(p => ({
         ...p,
-        portName: portNameOverride || p.portName,
+        portName: portNameOverride || (_isAutoRandomPort(p.portName) ? '' : p.portName),
         portID: p.portID ? prefix + p.portID : p.portID,
         _server: data.serverName,
         _cached: isCached
@@ -2393,7 +3098,7 @@ hourlyTraffic.init({
 
 // One-time cleanup: clear false positive uncertain flags from old 50MB threshold era
 try {
-  const cleaned = db.prepare(`UPDATE traffic_hourly SET uncertain = 0 WHERE uncertain > 0 AND (bytes_in + bytes_out) < ${150 * 1048576}`).run();
+  const cleaned = db.prepare(`UPDATE traffic_hourly SET uncertain = 0 WHERE uncertain > 0 AND (bytes_in + bytes_out) < ${150 * 1e6}`).run();
   if (cleaned.changes > 0) logger.info(`[HourlyAgg] Cleared ${cleaned.changes} false positive uncertain flags (old 50MB threshold)`);
 } catch (e) { /* ignore */ }
 
@@ -2448,6 +3153,7 @@ async function trackModems() {
       const imei = m.modem_details?.IMEI;
       if (!imei) continue;
       const key = prefix + imei;
+      const nick = m.modem_details?.NICK || imei;  // hoisted from below to fix TDZ in IP-change log
       const extIp = m.net_details?.EXT_IP || '';
       const isOnline = m.net_details?.IS_ONLINE === 'yes';
       const isRotating = m.IS_ROTATED === 'true' || m.IS_ROTATED === true;
@@ -2496,7 +3202,7 @@ async function trackModems() {
       // Auto-recovery: USB reset for offline modems
       const recoveryKey = key; // prefix + imei
       seenRecoveryKeys.add(recoveryKey);
-      const nick = m.modem_details?.NICK || imei;
+      // `nick` already declared at top of loop body (hoisted)
       if (isUp) {
         if (autoRecovery[recoveryKey]) {
           if (autoRecovery[recoveryKey].attempts > 0) {
@@ -2823,7 +3529,7 @@ function getSpeedtestLatest() {
   return latest;
 }
 
-app.get('/api/dashboard_data', authMiddleware, async (req, res) => {
+app.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) => {
   try {
     const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, req.user.portNameFilter);
@@ -3081,7 +3787,18 @@ app.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
   } catch (err) { res.status(502).json({ ok: false, error: 'Reset failed', details: err.message }); }
 });
 
-app.get('/api/client/reset_ip_by_token', resetTokenLimiter, async (req, res) => {
+// Accept BOTH POST (correct semantic for state-changing op) and GET
+// (backwards-compat for existing client integrations & emailed URLs).
+// New integrations should use POST.
+const _resetIpHandler = async (req, res) => {
+  const nick = (req.body && req.body.nick) || req.query.nick;
+  const token = (req.body && req.body.token) || req.query.token;
+  req.query.nick = nick; req.query.token = token; // for downstream code
+  return _resetIpImpl(req, res);
+};
+app.post('/api/client/reset_ip_by_token', resetTokenLimiter, _resetIpHandler);
+app.get('/api/client/reset_ip_by_token', resetTokenLimiter, _resetIpHandler);
+async function _resetIpImpl(req, res) {
   const { nick, token } = req.query;
   if (!nick || !token) return res.status(400).json({ error: 'nick and token required' });
   const client = clientByResetToken.get(token);
@@ -3097,7 +3814,7 @@ app.get('/api/client/reset_ip_by_token', resetTokenLimiter, async (req, res) => 
     } catch (e) { /* try next server */ }
   }
   res.status(404).json({ error: 'Modem not found' });
-});
+}
 
 app.get('/api/client/rotation_log', authMiddleware, async (req, res) => {
   try {
@@ -3280,10 +3997,27 @@ app.use('/api/v1', (req, res, next) => {
 
 // Phase 2: log every /api/v1/* request with response time and status.
 // Applied after the CORS handler so OPTIONS preflight doesn't spam the log.
-app.use('/api/v1', (req, res, next) => {
+// Accept API key from X-API-Key header (preferred) or query string (deprecated).
+// Query-string keys leak into nginx logs, proxy caches, and browser history;
+// we keep the fallback for now but stamp a Deprecation header so integrations
+// can migrate. Plan: drop query-string after a few months.
+function _readApiKey(req, res) {
+  const fromHeader = req.headers['x-api-key'];
+  if (fromHeader) return String(fromHeader);
+  const fromQuery = req.query && (req.query.apikey || req.query.apiKey);
+  if (fromQuery) {
+    res.set('Deprecation', 'true');
+    res.set('Sunset', 'Wed, 31 Dec 2026 23:59:59 GMT');
+    res.set('Warning', '299 - "apikey query param is deprecated; use X-API-Key header"');
+    return String(fromQuery);
+  }
+  return '';
+}
+
+app.use('/api/v1', apiV1Limiter, (req, res, next) => {
   if (req.method === 'OPTIONS') return next();
   const start = Date.now();
-  const apiKey = req.headers['x-api-key'] || req.query.apikey || req.query.apiKey || '';
+  const apiKey = _readApiKey(req, res);
   res.on('finish', () => {
     try {
       const client = apiKey ? clientByApiKey.get(apiKey) : null;
@@ -3308,8 +4042,8 @@ app.use('/api/v1', (req, res, next) => {
 });
 
 app.get('/api/v1/proxy', async (req, res) => {
-  const apiKey = req.headers['x-api-key'] || req.query.apikey;
-  if (!apiKey) return res.status(401).json({ success: false, error: 'API key required. Pass via X-API-Key header or ?apikey= query parameter.' });
+  const apiKey = _readApiKey(req, res);
+  if (!apiKey) return res.status(401).json({ success: false, error: 'API key required. Pass via X-API-Key header.' });
 
   const client = clientByApiKey.get(apiKey);
   if (!client) return res.status(401).json({ success: false, error: 'Invalid API key' });
@@ -3480,6 +4214,42 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
   // Use Moscow time (GMT+3) for "today" since most servers are in Moldova/Romania (GMT+3/+3)
   const _nowLocal = new Date(Date.now() + 3 * 3600000);
   const todayStr = _nowLocal.toISOString().slice(0, 10);
+  // For PAST days: override byClient with traffic_hourly aggregation.
+  // traffic_hourly is updated every hour from counter deltas and uses UTC timestamps,
+  // so we MSK-shift here to attribute traffic to the right calendar day.
+  // This avoids the midnight "drop to zero" that happens when ProxySmart's
+  // bandwidth_bytes_yesterday_* counter shifts later than MSK midnight (e.g., MD/RO winter TZ).
+  try {
+    const hourlyRows = db.prepare(`
+      SELECT client_name as pn, server_name as srv,
+             strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as date,
+             SUM(bytes_in) as bin, SUM(bytes_out) as bout
+      FROM traffic_hourly
+      WHERE hour_start >= datetime('now', '-31 days') AND client_name != ''
+      GROUP BY pn, srv, date
+    `).all();
+    for (const r of hourlyRows) {
+      if (r.date === todayStr) continue; // today comes from live counter below
+      if (!byClient[r.pn]) byClient[r.pn] = {};
+      // Authoritative override: traffic_hourly is the source of truth for past days
+      if (!byClient[r.pn][r.date]) byClient[r.pn][r.date] = { in: 0, out: 0, servers: {} };
+      // First time we see this (pn,date) combo: reset before summing servers
+      if (byClient[r.pn][r.date]._th_seen !== true) {
+        byClient[r.pn][r.date] = { in: 0, out: 0, servers: {}, _th_seen: true };
+      }
+      byClient[r.pn][r.date].in += r.bin;
+      byClient[r.pn][r.date].out += r.bout;
+      if (r.srv) {
+        if (!byClient[r.pn][r.date].servers[r.srv]) byClient[r.pn][r.date].servers[r.srv] = { in: 0, out: 0 };
+        byClient[r.pn][r.date].servers[r.srv].in = (byClient[r.pn][r.date].servers[r.srv].in || 0) + r.bin;
+        byClient[r.pn][r.date].servers[r.srv].out = (byClient[r.pn][r.date].servers[r.srv].out || 0) + r.bout;
+      }
+    }
+    // Strip helper flag before sending response
+    for (const pn in byClient) for (const dt in byClient[pn]) delete byClient[pn][dt]._th_seen;
+  } catch (e) {
+    logger.warn('[daily_traffic] traffic_hourly override failed: ' + e.message);
+  }
   for (const data of results) {
     if (typeof data.bw !== 'object') continue;
     const srvName = data.serverName || '';
@@ -3507,6 +4277,7 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
     // Build portId→nick from known_modems.json (reliable) + live status (fresh)
     const portIdToNick = {};
     const portIdToClientName = {};
+    const portIdToOperator = {};
     // known_modems.json: { "S1": { "portXXX": { nick, portName } }, "S2": { ... } }
     for (const srv in knownModems) {
       for (const portId in knownModems[srv]) {
@@ -3515,19 +4286,37 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
         if (info.portName) portIdToClientName[srv + '_' + portId] = info.portName;
       }
     }
-    // Override with live status (may have newer nicks)
+    // Override with live status (may have newer nicks) + capture operator
     for (const data of results) {
       const statusArr = Array.isArray(data.status) ? data.status : [];
       const portsMap = data.ports || {};
+      const srvName = data.serverName || '';
+      const srvCountry = (SERVER_COUNTRIES[srvName] || {}).country || '';
+      const isRO = srvCountry === 'RO';
       for (const m of statusArr) {
         const md = m.modem_details || {};
         const imei = md.IMEI;
         const nick = md.NICK || imei;
         if (!imei) continue;
+        const rawOp = (m.net_details && m.net_details.CELLOP) || md.OPERATOR || '';
+        const op = normalizeOperator(rawOp.toLowerCase().trim(), isRO);
         const modemPorts = portsMap[imei] || [];
         for (const p of modemPorts) {
-          portIdToNick[p.portID] = nick;
-          if (p.portName) portIdToClientName[p.portID] = p.portName;
+          // dailyTraffic keys are server-prefixed ("S2_portXXX"); raw data.ports
+          // entries have bare portIDs. Write BOTH so dailyTraffic loop below
+          // resolves no matter which form it iterates over.
+          const bareId = p.portID;
+          const prefId = srvName + '_' + bareId;
+          portIdToNick[bareId] = nick;
+          portIdToNick[prefId] = nick;
+          if (op) {
+            portIdToOperator[bareId] = op;
+            portIdToOperator[prefId] = op;
+          }
+          if (p.portName) {
+            portIdToClientName[bareId] = p.portName;
+            portIdToClientName[prefId] = p.portName;
+          }
         }
       }
     }
@@ -3536,8 +4325,10 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
       const nick = portIdToNick[portId] || portId.replace(/^S\d+_port/, '');
       const pn = portIdToClientName[portId] || (Object.values(days)[0] && Object.values(days)[0].portName) || pnMap[portId] || '';
       const srv = portIdToServer[portId] || '';
+      const op = portIdToOperator[portId] || '';
       const modemKey = nick + (pn ? ':' + pn : '');
-      if (!byModem[modemKey]) byModem[modemKey] = { portName: pn, server: srv, nick: nick, days: {} };
+      if (!byModem[modemKey]) byModem[modemKey] = { portName: pn, server: srv, nick: nick, operator: op, days: {} };
+      else if (!byModem[modemKey].operator && op) byModem[modemKey].operator = op;
       for (const [date, entry] of Object.entries(days)) {
         if (!byModem[modemKey].days[date]) byModem[modemKey].days[date] = 0;
         byModem[modemKey].days[date] += (entry.in || 0) + (entry.out || 0);
@@ -3555,7 +4346,7 @@ app.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req,
         const dayIn = parseBwToBytes(b.bandwidth_bytes_day_in);
         const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
         if (dayIn + dayOut > 0) {
-          if (!byModem[modemKey2]) byModem[modemKey2] = { portName: pn2, server: data.serverName, nick: nick, days: {} };
+          if (!byModem[modemKey2]) byModem[modemKey2] = { portName: pn2, server: data.serverName, nick: nick, operator: portIdToOperator[portId] || '', days: {} };
           if (!byModem[modemKey2].days[todayStr2]) byModem[modemKey2].days[todayStr2] = 0;
           byModem[modemKey2].days[todayStr2] += dayIn + dayOut;
         }
@@ -3763,7 +4554,7 @@ app.post('/api/admin/backfill_daily_traffic', authMiddleware, adminMiddleware, (
     });
     tx();
 
-    const totalGb = Math.round(totalBytes / 1073741824 * 1000) / 1000;
+    const totalGb = Math.round(totalBytes / 1e9 * 1000) / 1000;
     logger.info(`[Backfill] daily_traffic for ${date}: ${written} ports, ${totalGb} GB (skipped ${skippedExisting} existing)`);
     logActivity('traffic', 'info', 'backfill_daily', null,
       `Backfilled daily_traffic for ${date}: ${written} ports, ${totalGb} GB`,
@@ -3805,7 +4596,7 @@ app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req,
     for (let i = months - 1; i >= 0; i--) {
       const d = new Date(now.getFullYear(), now.getMonth() - i, 1);
       const mStr = d.toISOString().slice(0, 7);
-      const totalGb = Math.round((byMonth[mStr] || 0) / 1073741824 * 10) / 10;
+      const totalGb = Math.round((byMonth[mStr] || 0) / 1e9 * 10) / 10;
       const entry = { month: mStr, label: MONTHS_RU[d.getMonth()], total_gb: totalGb };
       if (i === 0) {
         entry.is_current = true;
@@ -3818,7 +4609,7 @@ app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req,
         } else {
           // Use previous month total as initial plan
           const prevMStr = new Date(now.getFullYear(), now.getMonth() - 1, 1).toISOString().slice(0, 7);
-          const prevGb = Math.round((byMonth[prevMStr] || 0) / 1073741824 * 10) / 10;
+          const prevGb = Math.round((byMonth[prevMStr] || 0) / 1e9 * 10) / 10;
           if (prevGb > 0) entry.forecast_gb = prevGb;
         }
       }
@@ -3831,7 +4622,7 @@ app.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req,
           const t = days[todayStr2];
           if (t) todayTotal += (t.in || 0) + (t.out || 0);
         }
-        if (todayTotal > 0) entry.total_gb = Math.round(todayTotal / 1073741824 * 10) / 10;
+        if (todayTotal > 0) entry.total_gb = Math.round(todayTotal / 1e9 * 10) / 10;
       }
       result.push(entry);
     }
@@ -3914,7 +4705,7 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
     for (const r of rows) {
       const di = dateIdx.get(r.day);
       if (di !== undefined && r.hour >= 0 && r.hour < 24) {
-        matrix[di][r.hour] = r.bytes / 1073741824;
+        matrix[di][r.hour] = r.bytes / 1e9;
         if (r.corrected) correctedCells[di][r.hour] = true;
         hasData = true;
       }
@@ -3944,7 +4735,7 @@ app.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, r
       for (const r of opRows) {
         const di = dateIdx.get(r.day);
         if (di !== undefined && r.hour >= 0 && r.hour < 24 && r.operator) {
-          operator_breakdown[di][r.hour][r.operator] = r.bytes / 1073741824;
+          operator_breakdown[di][r.hour][r.operator] = r.bytes / 1e9;
         }
       }
     }
@@ -4005,7 +4796,7 @@ app.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (
     const rows = db.prepare(`SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr2}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr2}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? GROUP BY day, hour`).all(nick, serverName, utcStart);
     for (const r of rows) {
       const di = dateIdx2.get(r.day);
-      if (di !== undefined && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1073741824;
+      if (di !== undefined && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1e9;
     }
     result[clientLabel] = { portId: nick, clientName: clientLabel, matrix };
 
@@ -4022,7 +4813,7 @@ app.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (
   }
 });
 
-app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => {
+app.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, '*');
@@ -4122,37 +4913,15 @@ app.get('/api/admin/data', authMiddleware, adminMiddleware, async (req, res) => 
       }
     }
 
-    // Modem trend: compare first N days of current month vs first N days of previous month
-    const modemTrend = {};
-    {
-      const mskNow = getMoscowNow();
-      const completedDays = Math.max(mskNow.getDate() - 1, 0); // yesterday = last completed day
-      if (completedDays > 0) {
-        const curYear = mskNow.getFullYear(), curMon = mskNow.getMonth();
-        const curPrefix = `${curYear}-${String(curMon + 1).padStart(2, '0')}`;
-        const prevDate = new Date(curYear, curMon - 1, 1);
-        const prevPrefix = `${prevDate.getFullYear()}-${String(prevDate.getMonth() + 1).padStart(2, '0')}`;
-        // Build cutoff: first N days = date <= YYYY-MM-NN
-        const curCutoff = `${curPrefix}-${String(completedDays).padStart(2, '0')}`;
-        const prevCutoff = `${prevPrefix}-${String(completedDays).padStart(2, '0')}`;
-        for (const [portKey, days] of Object.entries(dailyTraffic)) {
-          let curBytes = 0, prevBytes = 0;
-          for (const [date, entry] of Object.entries(days)) {
-            if (date.startsWith(curPrefix) && date <= curCutoff) curBytes += (entry.in || 0) + (entry.out || 0);
-            else if (date.startsWith(prevPrefix) && date <= prevCutoff) prevBytes += (entry.in || 0) + (entry.out || 0);
-          }
-          if (prevBytes > 0) {
-            modemTrend[portKey] = Math.round((curBytes - prevBytes) / prevBytes * 100);
-          } else if (curBytes > 0) {
-            modemTrend[portKey] = null; // new modem, no comparison
-          }
-        }
-      }
-    }
+    // Modem trend: compare first N days of current month vs first N days of previous month.
+    // This was a hot O(ports × days) loop on every /api/admin/data hit (~50 admin
+    // page-views/day each iterating ~11k port/date pairs). Cached for 60s.
+    const modemTrend = _getModemTrend();
 
     // Client trend: aggregate modem trend by portName (client)
-    const clientTrend = {};
-    {
+    const clientTrend = _getClientTrend();
+    // Skip the inline computation below — handled by _getClientTrend cache.
+    if (false) {
       const mskNow2 = getMoscowNow();
       const cd2 = Math.max(mskNow2.getDate() - 1, 0);
       if (cd2 > 0) {
@@ -4362,7 +5131,8 @@ app.get('/api/admin/proxy_checks', authMiddleware, adminMiddleware, (req, res) =
   }
 });
 
-// Latency analytics — median/avg/p95 per day with view filtering
+// Latency analytics — daily percentiles, overall distribution, and prior-period
+// comparison. Used by the "Распределение задержек" card.
 app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const { view = 'country', id = 'all' } = req.query;
@@ -4374,13 +5144,9 @@ app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, r
     const tzStr = (tzHours2 >= 0 ? '+' : '') + tzHours2 + ' hours';
     const now2 = new Date();
     const since = new Date(now2.getTime() - days * 86400000).toISOString();
-
-    let sql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, total_ms FROM proxy_checks WHERE checked_at >= ? AND total_ms IS NOT NULL AND error IS NULL`;
-    let errSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND error IS NOT NULL`;
-    let totalSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ?`;
-    const params = [since];
-    const errParams = [since];
-    const totalParams = [since];
+    // Prior period: equal-length window immediately preceding `since`.
+    const priorSince = new Date(now2.getTime() - days * 2 * 86400000).toISOString();
+    const priorUntil = since;
 
     // Build server→country mapping
     const serverCountryMap = {};
@@ -4390,6 +5156,7 @@ app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, r
     }
 
     let filter = '';
+    const filterParams = [];
     if (idKey !== 'all') {
       if (view === 'country') {
         const servers = [];
@@ -4398,43 +5165,51 @@ app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, r
         }
         if (servers.length > 0) {
           filter = ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
-          params.push(...servers);
-          errParams.push(...servers);
-          totalParams.push(...servers);
+          filterParams.push(...servers);
         }
       } else if (view === 'operator') {
         filter = " AND LOWER(REPLACE(operator, ' ', '_')) LIKE ?";
-        params.push('%' + idKey + '%');
-        errParams.push('%' + idKey + '%');
-        totalParams.push('%' + idKey + '%');
+        filterParams.push('%' + idKey + '%');
       } else if (view === 'client') {
         filter = " AND client_name = ?";
-        params.push(id);
-        errParams.push(id);
-        totalParams.push(id);
+        filterParams.push(id);
       }
     }
 
-    sql += filter + ' ORDER BY day, total_ms';
-    errSql += filter + ' GROUP BY day';
-    totalSql += filter + ' GROUP BY day';
+    // Current window: per-day values + counts. total_ms = full request (modem→site),
+    // connect_ms = TCP handshake to modem only. Both reported separately so the
+    // operator can tell whether slow checks are modem-side or upstream.
+    const dayValsSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, total_ms, connect_ms FROM proxy_checks WHERE checked_at >= ? AND total_ms IS NOT NULL AND error IS NULL${filter} ORDER BY day, total_ms`;
+    const errSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND error IS NOT NULL${filter} GROUP BY day`;
+    const totalSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ?${filter} GROUP BY day`;
+    const rows = db.prepare(dayValsSql).all(since, ...filterParams);
+    const errRows = db.prepare(errSql).all(since, ...filterParams);
+    const totalRows = db.prepare(totalSql).all(since, ...filterParams);
 
-    const rows = db.prepare(sql).all(...params);
-    const errRows = db.prepare(errSql).all(...errParams);
-    const totalRows = db.prepare(totalSql).all(...totalParams);
-
-    // Group by day
     const byDay = {};
+    const allVals = [];
+    const allConnectVals = [];
     for (const r of rows) {
       if (!byDay[r.day]) byDay[r.day] = [];
       byDay[r.day].push(r.total_ms);
+      allVals.push(r.total_ms);
+      if (r.connect_ms != null) allConnectVals.push(r.connect_ms);
     }
     const errMap = {};
-    for (const r of errRows) errMap[r.day] = r.cnt;
+    let totalErrs = 0;
+    for (const r of errRows) { errMap[r.day] = r.cnt; totalErrs += r.cnt; }
     const totalMap = {};
-    for (const r of totalRows) totalMap[r.day] = r.cnt;
+    let totalChecks = 0;
+    for (const r of totalRows) { totalMap[r.day] = r.cnt; totalChecks += r.cnt; }
 
-    // Build date list in Moscow time (consistent with heatmap)
+    // Percentile helper — input must already be sorted ascending.
+    const pctile = (sorted, p) => {
+      if (!sorted.length) return null;
+      const idx = Math.min(Math.ceil(sorted.length * p) - 1, sorted.length - 1);
+      return sorted[Math.max(0, idx)];
+    };
+
+    // Date list in Moscow time (consistent with heatmap)
     const mskNow = new Date(now2.getTime() + mskOffset * 3600 * 1000);
     const dateList = [];
     for (let i = days - 1; i >= 0; i--) {
@@ -4442,7 +5217,11 @@ app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, r
       dateList.push(d.toISOString().slice(0, 10));
     }
 
-    const result = { days: dateList, median_ms: [], avg_ms: [], p95_ms: [], error_pct: [], total_checks: [] };
+    const result = {
+      days: dateList,
+      median_ms: [], avg_ms: [], p75_ms: [], p95_ms: [], p99_ms: [],
+      error_pct: [], total_checks: []
+    };
     for (const day of dateList) {
       const vals = byDay[day] || [];
       const total = totalMap[day] || 0;
@@ -4450,20 +5229,83 @@ app.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, r
       if (vals.length === 0) {
         result.median_ms.push(null);
         result.avg_ms.push(null);
+        result.p75_ms.push(null);
         result.p95_ms.push(null);
+        result.p99_ms.push(null);
       } else {
-        const sorted = vals.slice().sort((a, b) => a - b);
-        const mid = Math.floor(sorted.length / 2);
-        const median = sorted.length % 2 === 0 ? Math.round((sorted[mid - 1] + sorted[mid]) / 2) : sorted[mid];
-        result.median_ms.push(median);
-        result.avg_ms.push(Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length));
-        result.p95_ms.push(sorted[Math.min(Math.ceil(sorted.length * 0.95) - 1, sorted.length - 1)]);
+        // vals already sorted ascending (SQL ORDER BY day, total_ms)
+        result.median_ms.push(pctile(vals, 0.5));
+        result.p75_ms.push(pctile(vals, 0.75));
+        result.p95_ms.push(pctile(vals, 0.95));
+        result.p99_ms.push(pctile(vals, 0.99));
+        result.avg_ms.push(Math.round(vals.reduce((a, b) => a + b, 0) / vals.length));
       }
       result.error_pct.push(total > 0 ? Math.round(errs / total * 100) : null);
       result.total_checks.push(total);
     }
 
-    res.json(result);
+    // Overall percentiles across the whole window
+    const allSorted = allVals.slice().sort((a, b) => a - b);
+    const connectSorted = allConnectVals.slice().sort((a, b) => a - b);
+    const overall = {
+      total_checks: totalChecks,
+      ok_checks: allVals.length,
+      errors: totalErrs,
+      error_pct: totalChecks > 0 ? Math.round(totalErrs / totalChecks * 1000) / 10 : null,
+      p50: pctile(allSorted, 0.5),
+      p75: pctile(allSorted, 0.75),
+      p95: pctile(allSorted, 0.95),
+      p99: pctile(allSorted, 0.99),
+      // Connect-only percentiles (TCP handshake to modem, excludes upstream request)
+      connect_p50: pctile(connectSorted, 0.5),
+      connect_p75: pctile(connectSorted, 0.75),
+      connect_p95: pctile(connectSorted, 0.95),
+      connect_p99: pctile(connectSorted, 0.99),
+    };
+
+    // Distribution buckets — uses configured warn/bad thresholds.
+    // very_slow boundary is 2× bad: visibly catastrophic checks.
+    const warnMs = Number(appSettings.proxy_check_warn_ms) || 500;
+    const badMs = Number(appSettings.proxy_check_bad_ms) || 2000;
+    const verySlowMs = badMs * 2;
+    const buckets = { fast: 0, ok: 0, slow: 0, very_slow: 0 };
+    for (const v of allVals) {
+      if (v < warnMs) buckets.fast++;
+      else if (v < badMs) buckets.ok++;
+      else if (v < verySlowMs) buckets.slow++;
+      else buckets.very_slow++;
+    }
+
+    // Prior period (same filter, equal-length window immediately before `since`)
+    const priorValsSql = `SELECT total_ms, connect_ms FROM proxy_checks WHERE checked_at >= ? AND checked_at < ? AND total_ms IS NOT NULL AND error IS NULL${filter}`;
+    const priorTotalSql = `SELECT COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND checked_at < ?${filter}`;
+    const priorErrSql = `SELECT COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND checked_at < ? AND error IS NOT NULL${filter}`;
+    const priorRows = db.prepare(priorValsSql).all(priorSince, priorUntil, ...filterParams);
+    const priorTotal = db.prepare(priorTotalSql).get(priorSince, priorUntil, ...filterParams).cnt || 0;
+    const priorErrs = db.prepare(priorErrSql).get(priorSince, priorUntil, ...filterParams).cnt || 0;
+    const priorSorted = priorRows.map(r => r.total_ms).sort((a, b) => a - b);
+    const priorConnectSorted = priorRows.map(r => r.connect_ms).filter(v => v != null).sort((a, b) => a - b);
+    const prior = {
+      total_checks: priorTotal,
+      errors: priorErrs,
+      error_pct: priorTotal > 0 ? Math.round(priorErrs / priorTotal * 1000) / 10 : null,
+      p50: pctile(priorSorted, 0.5),
+      p75: pctile(priorSorted, 0.75),
+      p95: pctile(priorSorted, 0.95),
+      p99: pctile(priorSorted, 0.99),
+      connect_p50: pctile(priorConnectSorted, 0.5),
+      connect_p75: pctile(priorConnectSorted, 0.75),
+      connect_p95: pctile(priorConnectSorted, 0.95),
+      connect_p99: pctile(priorConnectSorted, 0.99),
+    };
+
+    res.json({
+      ...result,
+      overall,
+      buckets,
+      prior,
+      thresholds: { warn_ms: warnMs, bad_ms: badMs, very_slow_ms: verySlowMs }
+    });
   } catch (e) {
     logger.error('[latency_stats]', e.message);
     res.status(500).json({ error: e.message });
@@ -4611,11 +5453,11 @@ app.get('/api/analytics/modem_health', authMiddleware, adminMiddleware, (req, re
         WHERE hour_start >= ${sinceExpr}
       ),
       meta_latest AS (
-        SELECT server_name, nick, operator,
+        SELECT server_name, nick, imei, operator,
                ROW_NUMBER() OVER (PARTITION BY server_name, nick ORDER BY updated_at DESC) as rn
         FROM modem_meta
       )
-      SELECT a.server_name, a.nick, COALESCE(m.operator, '') as operator
+      SELECT a.server_name, a.nick, COALESCE(m.imei, '') as imei, COALESCE(m.operator, '') as operator
       FROM active a
       LEFT JOIN meta_latest m
         ON m.server_name = a.server_name AND m.nick = a.nick AND m.rn = 1
@@ -4648,21 +5490,38 @@ app.get('/api/analytics/modem_health', authMiddleware, adminMiddleware, (req, re
     const rotMap = {};
     for (const r of rotRows) rotMap[r.server_name + '|' + r.nick] = r;
 
-    // Count active HOURS (not days) — day-level counting crosses ~days+1
-    // distinct UTC dates for a rolling N-day window, producing >100% uptime.
-    // Hours are bounded by the actual elapsed time × 24.
+    // Traffic totals (for the traffic_gb display only — NOT for uptime).
+    // Uptime is computed from polling data (uptimeTracking) so it reflects
+    // "modem reachable" not "client sent traffic". See uptime computation below.
     const trafRows = db.prepare(`
-      SELECT server_name, nick,
-             SUM(bytes_in + bytes_out) as bytes,
-             COUNT(DISTINCT substr(hour_start, 1, 13)) as active_hours
+      SELECT server_name, nick, SUM(bytes_in + bytes_out) as bytes
       FROM traffic_hourly
       WHERE hour_start >= ${sinceExpr}
       GROUP BY server_name, nick
     `).all();
     const trafMap = {};
     for (const r of trafRows) trafMap[r.server_name + '|' + r.nick] = r;
-    // Exact elapsed hours (so 1-day selector = last 24 h, 7-day = 168 h, etc.)
-    const expectedHours = days * 24;
+
+    // Uptime — polling-based: 5-min ping checks against ProxySmart aggregated
+    // into per-day buckets in uptimeTracking[server+'_'+imei].daily[YYYY-MM-DD].
+    // online/total over the last N days = ratio. Reflects "modem available"
+    // independent of client traffic activity. (Traffic-based active_hours was
+    // misleading: a modem with no client traffic looked offline.)
+    const utCutoffDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
+    function pollingUptime(server, imei) {
+      if (!imei) return null;
+      const ut = uptimeTracking[server + '_' + imei];
+      if (!ut || !ut.daily) return null;
+      let online = 0, total = 0;
+      for (const d in ut.daily) {
+        if (d >= utCutoffDate) {
+          online += ut.daily[d].online || 0;
+          total  += ut.daily[d].total  || 0;
+        }
+      }
+      if (total === 0) return null;
+      return { online, total, ratio: online / total };
+    }
 
     const out = modems.map(m => {
       const key = m.server_name + '|' + m.nick;
@@ -4671,19 +5530,160 @@ app.get('/api/analytics/modem_health', authMiddleware, adminMiddleware, (req, re
       const tr = trafMap[key] || {};
       const errPct = ch.total_checks > 0 ? (ch.err_checks / ch.total_checks) * 100 : null;
       const latency = ch.avg_latency != null ? Math.round(ch.avg_latency) : null;
-      const activeHours = tr.active_hours || 0;
-      const uptimePct = expectedHours > 0
-        ? Math.min(100, Math.round(activeHours / expectedHours * 1000) / 10)
-        : 0;
 
-      // Health score 0-100
+      // Replaces the old traffic-based activeHours/expectedHours formula.
+      const up = pollingUptime(m.server_name, m.imei);
+      const uptimeRatio = up ? up.ratio : 0;
+      const uptimePct   = up ? Math.round(uptimeRatio * 1000) / 10 : 0;
+      const upOnline    = up ? up.online : 0;
+      const upTotal     = up ? up.total  : 0;
+
+      // Health score 0-100 — computed alongside a per-factor `breakdown` so
+      // the UI can show *why* a modem scored low (used by the «Здоровье» tab
+      // in the modem detail modal). Each breakdown entry records value+norm+
+      // impact (points subtracted from the initial 100).
       let score = 100;
-      if (errPct != null) score -= Math.min(errPct * 2, 60);
-      if (latency != null && latency > badMs) score *= 0.7;
-      if (expectedHours > 0) score *= (activeHours / expectedHours);
-      score = Math.max(0, Math.min(100, Math.round(score)));
+      const breakdown = [];
 
+      // Thresholds for the health score. Calibrated to the actual modem fleet
+      // (typical baseline: ~1.8s latency, ~12s rotation). Deliberately
+      // decoupled from `proxy_check_bad_ms` — that setting controls the table
+      // cell coloring and is tuned for a different purpose.
+      const ERROR_NORMAL_PCT = 5;           // ≤ 5% is normal — no penalty
+      const LAT_WARN_MS = 2000;             // ≤ 2000ms is normal
+      const LAT_BAD_MS  = 4000;             // > 4000ms is severe
+      const ROT_NORMAL_SEC = 15;            // ≤ 15s is normal
+      const ROT_BAD_SEC    = 30;            // > 30s is severe
+
+      // Factor 1: Error rate. Norm is 0-5% (real-world traffic always has some
+      // noise from upstream / target sites). Penalty applies only above 5%:
+      // (errPct - 5) × 2 points, capped at 50.
+      const errCost = errPct != null && errPct > ERROR_NORMAL_PCT
+        ? Math.min((errPct - ERROR_NORMAL_PCT) * 2, 50)
+        : 0;
+      score -= errCost;
+      breakdown.push({
+        factor: 'error_pct',
+        label: 'Ошибки',
+        value: errPct != null ? Math.round(errPct * 10) / 10 : null,
+        unit: '%',
+        norm: '≤ ' + ERROR_NORMAL_PCT + '%',
+        warn_at: '> ' + ERROR_NORMAL_PCT + '%',
+        bad_at: '≥ ' + errThreshold + '%',
+        impact: -Math.round(errCost * 10) / 10,
+        impact_explain: errPct == null ? 'нет данных'
+          : errPct <= ERROR_NORMAL_PCT ? 'в норме (до 5%), штрафа нет'
+          : `−${Math.round(errCost*10)/10} баллов ((${Math.round(errPct*10)/10}% − ${ERROR_NORMAL_PCT}%) × 2, max −50)`,
+        status: errPct == null ? 'unknown'
+          : errPct >= errThreshold ? 'bad'
+          : errPct > ERROR_NORMAL_PCT ? 'warn'
+          : 'good',
+      });
+
+      // Factor 2: Latency — stepped multiplier so there's no harsh cliff.
+      // ≤ warn (1500ms): no penalty. warn-bad (1500-3000ms): ×0.9 (−10%).
+      // > bad (3000ms): ×0.75 (−25%).
+      const beforeLatency = score;
+      let latencyMult = 1, latencyTier = 'good';
+      if (latency != null) {
+        if (latency > LAT_BAD_MS)       { latencyMult = 0.75; latencyTier = 'bad';  }
+        else if (latency > LAT_WARN_MS) { latencyMult = 0.9;  latencyTier = 'warn'; }
+      } else {
+        latencyTier = 'unknown';
+      }
+      score *= latencyMult;
+      const latencyCost = beforeLatency - score;
+      breakdown.push({
+        factor: 'latency_ms',
+        label: 'Задержка',
+        value: latency,
+        unit: 'мс',
+        norm: '≤ ' + LAT_WARN_MS + ' мс',
+        warn_at: '> ' + LAT_WARN_MS + ' мс',
+        bad_at: '> ' + LAT_BAD_MS + ' мс',
+        impact: -Math.round(latencyCost * 10) / 10,
+        impact_explain: latency == null ? 'нет данных'
+          : latencyMult === 1 ? 'в норме, штрафа нет'
+          : `× ${latencyMult} (${latencyTier === 'bad' ? '−25%' : '−10%'}) → −${Math.round(latencyCost*10)/10} баллов`,
+        status: latencyTier,
+      });
+
+      // Factor 3: Rotation duration — new. If IP rotation takes too long the
+      // proxy effectively pauses. ≤5s normal, 5-15s ×0.95, >15s ×0.85.
+      const beforeRot = score;
+      const rotAvg = rot.avg_sec != null ? rot.avg_sec : null;
+      let rotMult = 1, rotTier = 'good';
+      if (rotAvg != null) {
+        if (rotAvg > ROT_BAD_SEC)         { rotMult = 0.85; rotTier = 'bad';  }
+        else if (rotAvg > ROT_NORMAL_SEC) { rotMult = 0.95; rotTier = 'warn'; }
+      } else if (rot.total === 0) {
+        rotTier = 'unknown';
+      }
+      score *= rotMult;
+      const rotCost = beforeRot - score;
+      breakdown.push({
+        factor: 'rotation_avg_sec',
+        label: 'Длительность ротации',
+        value: rotAvg != null ? Math.round(rotAvg * 10) / 10 : null,
+        unit: 'с',
+        norm: '≤ ' + ROT_NORMAL_SEC + ' с',
+        warn_at: '> ' + ROT_NORMAL_SEC + ' с',
+        bad_at: '> ' + ROT_BAD_SEC + ' с',
+        impact: -Math.round(rotCost * 10) / 10,
+        impact_explain: rotAvg == null ? (rot.total === 0 ? 'нет ротаций за период' : 'нет данных')
+          : rotMult === 1 ? 'в норме, штрафа нет'
+          : `× ${rotMult} (${rotTier === 'bad' ? '−15%' : '−5%'}) → −${Math.round(rotCost*10)/10} баллов`,
+        status: rotTier,
+      });
+
+      // Factor 4: Uptime — polling-based. Multiplies score by ratio of
+      // successful pings to total pings over the period.
+      const beforeUptime = score;
+      if (up) score *= uptimeRatio;
+      const uptimeCost = beforeUptime - score;
+      breakdown.push({
+        factor: 'uptime_pct',
+        label: 'Аптайм',
+        value: uptimePct,
+        unit: '%',
+        norm: '100%',
+        warn_at: '< 99%',
+        bad_at: '< 95%',
+        impact: -Math.round(uptimeCost * 10) / 10,
+        impact_explain: !up ? 'нет данных пингов'
+          : uptimeRatio >= 1 ? 'в норме, штрафа нет'
+          : `× ${Math.round(uptimeRatio*100)/100} (${upOnline} из ${upTotal} проверок онлайн, каждые 5 мин) → −${Math.round(uptimeCost*10)/10} баллов`,
+        status: !up ? 'unknown' : uptimePct >= 99 ? 'good' : uptimePct >= 95 ? 'warn' : 'bad',
+      });
+
+      // Informational only (do NOT affect score, but useful in the detail view).
       const rotFailedPct = rot.total > 0 ? (rot.failed / rot.total) * 100 : 0;
+      breakdown.push({
+        factor: 'rotations_failed_pct',
+        label: 'Неуспешные ротации',
+        value: Math.round(rotFailedPct * 10) / 10,
+        unit: '%',
+        norm: '< 5%',
+        warn_at: '> 5%',
+        bad_at: '> 15%',
+        impact: 0,
+        impact_explain: rot.total === 0 ? 'нет ротаций за период' : 'информационно, на скор не влияет',
+        status: rot.total === 0 ? 'unknown' : rotFailedPct >= 15 ? 'bad' : rotFailedPct >= 5 ? 'warn' : 'good',
+      });
+      breakdown.push({
+        factor: 'total_checks',
+        label: 'Всего проверок',
+        value: ch.total_checks || 0,
+        unit: '',
+        norm: '> 100 / день',
+        warn_at: '< 50 / день',
+        bad_at: '< 10 / день',
+        impact: 0,
+        impact_explain: 'информационно, контекст для других метрик',
+        status: 'unknown',
+      });
+
+      score = Math.max(0, Math.min(100, Math.round(score)));
 
       return {
         nick: m.nick,
@@ -4695,11 +5695,13 @@ app.get('/api/analytics/modem_health', authMiddleware, adminMiddleware, (req, re
         rotations: rot.total || 0,
         rotations_failed_pct: Math.round(rotFailedPct * 10) / 10,
         avg_rotation_sec: rot.avg_sec != null ? Math.round(rot.avg_sec * 10) / 10 : null,
-        traffic_gb: tr.bytes ? Math.round(tr.bytes / 1073741824 * 100) / 100 : 0,
-        active_hours: activeHours,
+        traffic_gb: tr.bytes ? Math.round(tr.bytes / 1e9 * 100) / 100 : 0,
+        uptime_online_checks: upOnline,
+        uptime_total_checks: upTotal,
         uptime_pct: uptimePct,
         health_score: score,
-        status: score >= 80 ? 'good' : score >= 50 ? 'warn' : 'bad'
+        status: score >= 80 ? 'good' : score >= 50 ? 'warn' : 'bad',
+        breakdown,
       };
     });
 
@@ -4770,6 +5772,18 @@ app.get('/api/analytics/rotations', authMiddleware, adminMiddleware, (req, res) 
       ORDER BY total DESC
     `).all();
 
+    const perServer = db.prepare(`
+      SELECT server_name,
+             COUNT(*) as total,
+             SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
+             AVG(took_sec) as avg_sec,
+             MAX(took_sec) as max_sec
+      FROM rotation_log
+      WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL
+      GROUP BY server_name
+      ORDER BY total DESC
+    `).all();
+
     const recentFailed = db.prepare(`
       SELECT server_name, nick, old_ip, new_ip, started_at, took_sec
       FROM rotation_log
@@ -4791,6 +5805,7 @@ app.get('/api/analytics/rotations', authMiddleware, adminMiddleware, (req, res) 
         min_sec: totals.min_sec != null ? Math.round(totals.min_sec * 10) / 10 : null,
       },
       per_day: perDay,
+      per_server: perServer,
       per_modem: perModem,
       per_operator: perOperator,
       recent_failed: recentFailed
@@ -4905,7 +5920,7 @@ app.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req
     const forecasts = Object.values(perClient).map(c => {
       const arr = Object.entries(c.days).sort((a, b) => a[0].localeCompare(b[0]));
       const xs = arr.map((_, i) => i);
-      const ys = arr.map(a => a[1] / 1073741824); // GB
+      const ys = arr.map(a => a[1] / 1e9); // GB
       const n = xs.length;
       let slope = 0, mean = 0;
       if (n >= 2) {
@@ -4924,7 +5939,7 @@ app.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req
       const avgDailyGb = mean;
       // Forecast end of month: current month accumulated so far + avgDaily * days_left
       const thisMonthRows = arr.filter(a => a[0].startsWith(mskToday.slice(0, 7)));
-      const monthGbSoFar = thisMonthRows.reduce((s, a) => s + a[1] / 1073741824, 0);
+      const monthGbSoFar = thisMonthRows.reduce((s, a) => s + a[1] / 1e9, 0);
       const forecastMonthGb = monthGbSoFar + avgDailyGb * daysLeftInMonth;
 
       // Runway: how many days current balance lasts at current rate
@@ -5000,7 +6015,7 @@ app.get('/api/analytics/capacity', authMiddleware, adminMiddleware, (req, res) =
       WHERE hour_start >= ${sinceExpr}
     `).get();
 
-    const totalGb = totals.total_bytes ? totals.total_bytes / 1073741824 : 0;
+    const totalGb = totals.total_bytes ? totals.total_bytes / 1e9 : 0;
     const avgPerModem = totals.total_modems > 0 ? totalGb / totals.total_modems : 0;
 
     res.json({
@@ -5014,7 +6029,7 @@ app.get('/api/analytics/capacity', authMiddleware, adminMiddleware, (req, res) =
       servers: servers.map(s => ({
         server_name: s.server_name,
         modems: s.modem_count,
-        total_gb: Math.round(s.total_bytes / 1073741824 * 10) / 10,
+        total_gb: Math.round(s.total_bytes / 1e9 * 10) / 10,
         avg_hour_mb: Math.round(s.avg_hour_bytes / 1048576 * 10) / 10,
         max_hour_mb: Math.round(s.max_hour_bytes / 1048576 * 10) / 10,
         active_days: s.active_days,
@@ -5135,24 +6150,44 @@ function computeClientSlaMetrics(client) {
     WHERE client_name = ? AND checked_at >= datetime('now', '-1 day')
   `).get(client.portName);
 
-  // Uptime over 30 days — active_hours / (30 × 24).
-  // Capped at 100 % (rolling window can pick up a marginal 31st hour edge).
+  // Uptime over 30 days — polling-based, aggregated across the client's modems.
+  // Uses the same uptimeTracking source as the per-modem health score so all
+  // dashboard uptime numbers are computed from one canonical signal (5-min
+  // ping checks against ProxySmart). Replaces the old traffic-based formula
+  // which inflated downtime whenever clients didn't transmit traffic.
   const UPTIME_DAYS = 30;
-  const traffic = db.prepare(`
-    SELECT COUNT(DISTINCT substr(hour_start, 1, 13)) as active_hours
-    FROM traffic_hourly
-    WHERE client_name = ? AND hour_start >= datetime('now', ?)
-  `).get(client.portName, `-${UPTIME_DAYS} days`);
+  const utCutoffDate = new Date(Date.now() - UPTIME_DAYS * 86400000).toISOString().slice(0, 10);
 
-  if (checks.total === 0 && traffic.active_hours === 0) return null;
-  const expectedHours = UPTIME_DAYS * 24;
-  const uptimePct = traffic.active_hours != null
-    ? Math.min(100, Math.round(traffic.active_hours / expectedHours * 1000) / 10)
-    : null;
+  // Find this client's modems (any that produced proxy_check rows in the window).
+  // Includes the IMEI for the uptimeTracking lookup.
+  const clientModems = db.prepare(`
+    SELECT DISTINCT pc.server_name, pc.nick, COALESCE(mm.imei, '') as imei
+    FROM proxy_checks pc
+    LEFT JOIN modem_meta mm ON mm.server_name = pc.server_name AND mm.nick = pc.nick
+    WHERE pc.client_name = ? AND pc.checked_at >= datetime('now', ?)
+  `).all(client.portName, `-${UPTIME_DAYS} days`);
+
+  let upOnline = 0, upTotal = 0;
+  for (const mm of clientModems) {
+    if (!mm.imei) continue;
+    const ut = uptimeTracking[mm.server_name + '_' + mm.imei];
+    if (!ut || !ut.daily) continue;
+    for (const d in ut.daily) {
+      if (d >= utCutoffDate) {
+        upOnline += ut.daily[d].online || 0;
+        upTotal  += ut.daily[d].total  || 0;
+      }
+    }
+  }
+
+  if (checks.total === 0 && upTotal === 0) return null;
+  const uptimePct = upTotal > 0 ? Math.round(upOnline / upTotal * 1000) / 10 : null;
   const errorPct = checks.total > 0 ? Math.round(checks.errors / checks.total * 1000) / 10 : 0;
   return {
     uptime_pct: uptimePct,
     uptime_window_days: UPTIME_DAYS,
+    uptime_online_checks: upOnline,
+    uptime_total_checks: upTotal,
     avg_latency_ms: checks.avg_ms != null ? Math.round(checks.avg_ms) : null,
     error_pct: errorPct,
     total_checks: checks.total
@@ -5730,20 +6765,26 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
 
   const entry = entries[idx];
 
-  // Delete from SQLite
-  if (entry.db_id) {
-    _ledgerDeleteById.run(entry.db_id);
-  }
-  entries.splice(idx, 1);
-  billingLedger[client.id] = entries;
-
-  // Reverse the deleted entry's effect on balance
-  // Use stored balance_before/balance_after to determine exact impact
+  // Reverse the deleted entry's effect on balance using stored snapshot.
   const entryImpact = (entry.balance_after != null && entry.balance_before != null)
     ? entry.balance_after - entry.balance_before
     : ((['payment', 'bank_payment', 'credit'].includes(entry.type)) ? (entry.amount || 0) : -(entry.amount || entry.cost || 0));
   const newBalance = Math.round((client.balance - entryImpact) * 100) / 100;
-  _clientUpdateBalance.run(newBalance, client.id);
+
+  // SQLite transaction — DELETE and UPDATE happen as one unit. Previously
+  // these were two separate statements and a crash between them left
+  // balance and ledger out of sync.
+  try {
+    db.transaction(() => {
+      if (entry.db_id) _ledgerDeleteById.run(entry.db_id);
+      _clientUpdateBalance.run(newBalance, client.id);
+    })();
+  } catch (e) {
+    logger.error('[Ledger] Delete transaction failed: ' + e.message);
+    return res.status(500).json({ error: 'Delete failed', details: e.message });
+  }
+  entries.splice(idx, 1);
+  billingLedger[client.id] = entries;
   client.balance = newBalance;
 
   // saveBillingLedger() removed (КРИТ-3): _ledgerDeleteById already deleted atomically, full rewrite invalidates db_id
@@ -6050,7 +7091,20 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   }
   if (proxy_check_target != null) {
     const url = String(proxy_check_target).trim();
-    if (url && /^https?:\/\/.+/.test(url)) appSettings.proxy_check_target = url;
+    // SSRF-defense: reject internal/loopback/metadata hosts. proxy_check_target
+    // is fed to curl from each ProxySmart server, so a malicious admin could
+    // pivot to internal services on those machines (or use server as a probe).
+    let ok = false;
+    if (url && /^https?:\/\/.+/.test(url)) {
+      try {
+        const u = new URL(url);
+        const host = u.hostname.toLowerCase();
+        const bad = /^(localhost$|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.|169\.254\.|::1$|fc00:|fe80:|metadata\.)/i;
+        if (!bad.test(host) && !/^\d+$/.test(host) && host !== '0.0.0.0') ok = true;
+      } catch (_) { ok = false; }
+    }
+    if (ok) appSettings.proxy_check_target = url;
+    else return res.status(400).json({ error: 'proxy_check_target rejected (internal/loopback/metadata host)' });
   }
   if (proxy_check_warn_ms != null) {
     appSettings.proxy_check_warn_ms = Math.max(50, parseInt(proxy_check_warn_ms) || 500);
@@ -6094,10 +7148,66 @@ app.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.auto_create_interval_min != null) appSettings.auto_create_interval_min = Math.max(1, Math.min(60, parseInt(req.body.auto_create_interval_min) || 10));
   if (req.body.crm_check_interval_min != null) appSettings.crm_check_interval_min = Math.max(5, Math.min(120, parseInt(req.body.crm_check_interval_min) || 10));
   if (req.body.crm_reminder_days != null) appSettings.crm_reminder_days = Math.max(1, Math.min(30, parseInt(req.body.crm_reminder_days) || 3));
+  // Telegram daily summary
+  if (req.body.telegram_bot_token != null) appSettings.telegram_bot_token = String(req.body.telegram_bot_token).trim();
+  if (req.body.telegram_chat_id != null) appSettings.telegram_chat_id = String(req.body.telegram_chat_id).trim();
+  if (req.body.telegram_summary_enabled != null) appSettings.telegram_summary_enabled = !!req.body.telegram_summary_enabled;
+  if (req.body.telegram_summary_time != null) {
+    const t = String(req.body.telegram_summary_time);
+    if (/^\d{2}:\d{2}$/.test(t)) appSettings.telegram_summary_time = t;
+  }
 
   saveSettings();
   rescheduleSpeedtests();
   res.json({ ok: true, settings: appSettings });
+});
+
+// Send a test telegram summary for an arbitrary date (default = yesterday MSK).
+app.post('/api/admin/telegram/send_test', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const token = appSettings.telegram_bot_token;
+    const chatId = appSettings.telegram_chat_id;
+    if (!token) return res.status(400).json({ error: 'telegram_bot_token not set' });
+    if (!chatId) return res.status(400).json({ error: 'telegram_chat_id not set — send /start to the bot first' });
+    const date = req.body && req.body.date && /^\d{4}-\d{2}-\d{2}$/.test(req.body.date)
+      ? req.body.date
+      : new Date(Date.now() + 3*3600000 - 86400000).toISOString().slice(0, 10);
+    const { text, parse_mode } = await tgSummary.buildDailySummary(date);
+    const r = await tgBot.sendMessage(token, chatId, text, { parse_mode });
+    res.json({ ok: true, date, telegram: r });
+  } catch (e) {
+    res.status(502).json({ error: e.message });
+  }
+});
+
+// Preview just the AI-insights block for a given date, without sending to Telegram.
+// Useful for tuning the prompt or sanity-checking output before the morning send.
+app.get('/api/admin/ai_insights/preview', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const date = (req.query.date && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date))
+      ? req.query.date
+      : new Date(Date.now() + 3*3600000 - 86400000).toISOString().slice(0, 10);
+    const includeContext = req.query.include_context === '1';
+    const text = await aiInsights.generateInsights(date);
+    const out = { ok: true, date, text };
+    if (includeContext) out.context = aiInsights.buildDayContext(date);
+    res.json(out);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Preview the summary text without sending.
+app.get('/api/admin/telegram/preview', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const date = (req.query.date && /^\d{4}-\d{2}-\d{2}$/.test(req.query.date))
+      ? req.query.date
+      : new Date(Date.now() + 3*3600000 - 86400000).toISOString().slice(0, 10);
+    const r = await tgSummary.buildDailySummary(date);
+    res.json({ ok: true, date, text: r.text, parse_mode: r.parse_mode });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
 });
 
 // CRM reminders — check opportunities with reminderDate <= now
@@ -6291,7 +7401,7 @@ app.post('/api/admin/apply_modem', authMiddleware, adminMiddleware, async (req, 
 });
 
 // Changes portName on ProxySmart server via form POST to /conf/edit_port/{portID}
-function postFormApi(server, apiPath, formData, timeout = 10000) {
+function postFormApi(server, apiPath, formData, timeout = 15000) {
   return new Promise((resolve, reject) => {
     const url = new URL(apiPath, server.url);
     const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
@@ -6307,14 +7417,64 @@ function postFormApi(server, apiPath, formData, timeout = 10000) {
       timeout
     }, (proxyRes) => {
       let data = '';
-      proxyRes.on('data', chunk => data += chunk);
-      proxyRes.on('end', () => resolve({ status: proxyRes.statusCode, raw: data.slice(0, 500) }));
+      let bytes = 0;
+      proxyRes.on('data', chunk => {
+        bytes += chunk.length;
+        // Cap response body at 256 KB — protect against runaway HTML
+        if (bytes <= 256 * 1024) data += chunk;
+      });
+      proxyRes.on('end', () => {
+        // ProxySmart returns 302 redirects on successful form submission — keep them.
+        // 4xx/5xx = real failure that callers must see (was silently swallowed before).
+        if (proxyRes.statusCode >= 400) {
+          reject(new Error(`HTTP ${proxyRes.statusCode} from ${server.name}: ${data.slice(0, 200)}`));
+          return;
+        }
+        resolve({ status: proxyRes.statusCode, raw: data.slice(0, 1024) });
+      });
     });
     req.on('error', (err) => reject(err));
-    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout')); });
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout from ' + server.name)); });
     req.write(postData);
     req.end();
   });
+}
+
+// Tolerant <input name="..." value="..."> parser — handles either attribute
+// order, multi-line tags, single/double quotes, and self-closing slashes.
+// Returns plain object { name: value, ... }.
+function parseHtmlInputFields(html) {
+  const fields = {};
+  if (!html) return fields;
+  const inputRe = /<input\b[^>]*?>/gi;
+  let m;
+  while ((m = inputRe.exec(html)) !== null) {
+    const tag = m[0];
+    const nameMatch  = tag.match(/\bname\s*=\s*["']([^"']+)["']/i);
+    const valueMatch = tag.match(/\bvalue\s*=\s*["']([^"']*)["']/i);
+    if (nameMatch && valueMatch !== null) {
+      fields[nameMatch[1]] = valueMatch ? valueMatch[1] : '';
+    }
+  }
+  // <select> with selected <option> — keep selected value
+  const selectRe = /<select\b[^>]*?\bname\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/select>/gi;
+  while ((m = selectRe.exec(html)) !== null) {
+    const name = m[1], body = m[2];
+    const selOpt = body.match(/<option\b[^>]*\bselected\b[^>]*\bvalue\s*=\s*["']([^"']*)["']/i)
+                || body.match(/<option\b[^>]*\bvalue\s*=\s*["']([^"']*)["'][^>]*\bselected\b/i);
+    if (selOpt) {
+      fields[name] = selOpt[1];
+    } else {
+      const first = body.match(/<option\b[^>]*\bvalue\s*=\s*["']([^"']*)["']/i);
+      if (first) fields[name] = first[1];
+    }
+  }
+  // <textarea name="...">body</textarea>
+  const textareaRe = /<textarea\b[^>]*?\bname\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/textarea>/gi;
+  while ((m = textareaRe.exec(html)) !== null) {
+    fields[m[1]] = m[2].trim();
+  }
+  return fields;
 }
 
 app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req, res) => {
@@ -6327,19 +7487,7 @@ app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req,
     // Read full current form to preserve ALL required fields
     const editPageRaw = await fetchApiRaw(server, `/conf/edit_port/${portID}`);
     const editHtml = editPageRaw?.buffer ? editPageRaw.buffer.toString('utf8') : '';
-    // Extract input fields
-    const formData = {};
-    const _fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
-    let _fm;
-    while ((_fm = _fieldRe.exec(editHtml)) !== null) formData[_fm[1]] = _fm[2];
-    // Extract select fields (selected or first option as default)
-    const _selRe = /<select\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g;
-    let _sm;
-    while ((_sm = _selRe.exec(editHtml)) !== null) {
-      const selMatch = _sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*\s+selected/);
-      if (selMatch) { formData[_sm[1]] = selMatch[1]; }
-      else { const first = _sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"/); if (first) formData[_sm[1]] = first[1]; }
-    }
+    const formData = parseHtmlInputFields(editHtml);
     // Get proxy_password from port API data (not in HTML form)
     if (!formData.proxy_password) {
       try {
@@ -6555,23 +7703,48 @@ app.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, r
     // GET pre-filled form values from ProxySmart (portID, http_port, login, password)
     const formHtml = await fetchApiRaw(server, `/conf/add_port?imei=${rawImei}`);
     const html = formHtml.buffer ? formHtml.buffer.toString('utf8') : String(formHtml);
-    const prefilled = {};
-    const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
-    let fm;
-    while ((fm = fieldRe.exec(html)) !== null) prefilled[fm[1]] = fm[2];
-    // Merge: user values override pre-filled, keep generated portID/ports/creds
-    // Only include fields that exist in the original form (ProxySmart versions differ)
+    const prefilled = parseHtmlInputFields(html);
+
+    // Sanity check — without portID and http_port the form will fail server-side
+    if (!prefilled.portID) {
+      return res.status(502).json({ error: 'ProxySmart add_port form returned no portID', html_snippet: html.slice(0, 300) });
+    }
+
+    // Merge: user values override pre-filled, but only for fields the form supports.
+    // portID/proxy_login/proxy_password generated by ProxySmart are used as-is unless user supplied a value.
     const formData = { ...prefilled };
     if (portData.portName) formData.portName = portData.portName;
-    if (portData.http_port && prefilled.http_port !== undefined) formData.http_port = portData.http_port;
+    if (portData.http_port  && prefilled.http_port  !== undefined) formData.http_port  = portData.http_port;
     if (portData.socks_port && prefilled.socks_port !== undefined) formData.socks_port = portData.socks_port;
-    if (portData.proxy_login && prefilled.proxy_login !== undefined) formData.proxy_login = portData.proxy_login;
+    if (portData.proxy_login    && prefilled.proxy_login    !== undefined) formData.proxy_login    = portData.proxy_login;
     if (portData.proxy_password && prefilled.proxy_password !== undefined) formData.proxy_password = portData.proxy_password;
-    const result = await postFormApi(server, `/conf/add_port?imei=${rawImei}`, formData);
+
+    const actualPortId = formData.portID;
+
+    // Submit the form. postFormApi now rejects on HTTP 4xx/5xx (was silently
+    // swallowing failures before).
+    await postFormApi(server, `/conf/add_port?imei=${rawImei}`, formData);
+
+    // Auto-apply the new port. Previously the frontend had to make a second
+    // request, but it was passing the client-side generated portID instead of
+    // the one ProxySmart actually used → apply_port always 404'd → port was
+    // created but never activated. Doing it here uses the authoritative ID.
+    let applied = false;
+    try {
+      await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(actualPortId)}`);
+      applied = true;
+    } catch (e) {
+      logger.warn(`[store_port] apply_port failed for ${actualPortId}: ${e.message}`);
+    }
+
     _psCache = null; _psCacheTs = 0;
-    auditLog(req.user.login, 'store_port', { serverName, IMEI: rawImei, portName: portData.portName, ip: getClientIp(req) });
-    res.json({ ok: true, result });
-  } catch (err) { res.status(502).json({ error: 'Store port failed', details: err.message }); }
+    auditLog(req.user.login, 'store_port', { serverName, IMEI: rawImei, portName: portData.portName, portId: actualPortId, applied, ip: getClientIp(req) });
+    logActivity('modem', 'info', 'port_created', portData.portName || actualPortId, `Port created on ${serverName}/${rawImei} (id=${actualPortId})`, { applied });
+    res.json({ ok: true, portId: actualPortId, applied });
+  } catch (err) {
+    logger.error('[store_port] ' + err.message);
+    res.status(502).json({ error: 'Store port failed', details: err.message });
+  }
 });
 
 // Move port to a different modem (change IMEI assignment)
@@ -6584,17 +7757,7 @@ app.post('/api/admin/move_port', authMiddleware, adminMiddleware, async (req, re
     // Read full current port form
     const raw = await fetchApiRaw(server, `/conf/edit_port/${portID}`);
     const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
-    const formData = {};
-    const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
-    let fm;
-    while ((fm = fieldRe.exec(html)) !== null) formData[fm[1]] = fm[2];
-    const selRe = /<select\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g;
-    let sm;
-    while ((sm = selRe.exec(html)) !== null) {
-      const selMatch = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*\s+selected/);
-      if (selMatch) { formData[sm[1]] = selMatch[1]; }
-      else { const first = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"/); if (first) formData[sm[1]] = first[1]; }
-    }
+    const formData = parseHtmlInputFields(html);
     // Get proxy_password from port API
     if (!formData.proxy_password) {
       try {
@@ -6610,6 +7773,9 @@ app.post('/api/admin/move_port', authMiddleware, adminMiddleware, async (req, re
     // Change IMEI to move port to new modem
     formData.IMEI = newIMEI;
     await postFormApi(server, `/conf/edit_port/${portID}`, formData);
+    // Re-apply so ProxySmart picks up the new IMEI binding
+    try { await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portID)}`); }
+    catch (e) { logger.warn(`[move_port] apply_port failed for ${portID}: ${e.message}`); }
     auditLog(req.user.login, 'move_port', { serverName, portID, newIMEI, ip: getClientIp(req) });
     _psCache = null; _psCacheTs = 0;
     res.json({ ok: true });
@@ -6693,19 +7859,7 @@ app.post('/api/admin/save_port_config', authMiddleware, adminMiddleware, async (
     // Read full current form to preserve ALL required fields
     const raw = await fetchApiRaw(server, `/conf/edit_port/${portId}`);
     const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
-    // Extract input fields
-    const formData = {};
-    const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
-    let fm;
-    while ((fm = fieldRe.exec(html)) !== null) formData[fm[1]] = fm[2];
-    // Extract select fields — selected option or first option as default
-    const selRe = /<select\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g;
-    let sm;
-    while ((sm = selRe.exec(html)) !== null) {
-      const selMatch = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*\s+selected/);
-      if (selMatch) { formData[sm[1]] = selMatch[1]; }
-      else { const first = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"/); if (first) formData[sm[1]] = first[1]; }
-    }
+    const formData = parseHtmlInputFields(html);
     // Get proxy_password from port API data (not in HTML form)
     if (!formData.proxy_password) {
       try {
@@ -6768,23 +7922,13 @@ app.post('/api/admin/bulk_os_spoof', authMiddleware, adminMiddleware, async (req
         if (!server) { failed++; continue; }
         const raw = await fetchApiRaw(server, `/conf/edit_port/${p.portId}`);
         const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
-        const fields = {};
-        const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
-        let fm;
-        while ((fm = fieldRe.exec(html)) !== null) fields[fm[1]] = fm[2];
-        const selRe = /<select\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/select>/g;
-        let sm;
-        while ((sm = selRe.exec(html)) !== null) {
-          const selMatch = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"[^>]*\s+selected/);
-          if (selMatch) { fields[sm[1]] = selMatch[1]; }
-          else { const first = sm[2].match(/<option[^>]*value\s*=\s*"([^"]*)"/); if (first) fields[sm[1]] = first[1]; }
-        }
+        const fields = parseHtmlInputFields(html);
         // Password from pre-fetched cache
         const pw = (pwCache[p.serverName] || {})[p.portId];
         if (pw) fields.proxy_password = pw;
         fields.OS = os || '';
         const result = await postFormApi(server, `/conf/edit_port/${p.portId}`, fields);
-        if (result.status === 302) ok++;
+        if (result.status === 302 || result.status === 200) ok++;
         else failed++;
       } catch (e) { failed++; }
     }
@@ -6807,10 +7951,7 @@ app.post('/api/admin/bulk_rotation', authMiddleware, adminMiddleware, async (req
         if (!server) { failed++; continue; }
         const raw = await fetchApiRaw(server, `/conf/edit/${m.imei}`);
         const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
-        const fields = {};
-        const fieldRe = /name="([^"]+)"[^>]*value="([^"]*)"/g;
-        let fm;
-        while ((fm = fieldRe.exec(html)) !== null) fields[fm[1]] = fm[2];
+        const fields = parseHtmlInputFields(html);
         fields.AUTO_IP_ROTATION = rotVal;
         await postFormApi(server, `/conf/edit/${m.imei}`, fields);
         modemRotationCache[m.serverName + ':' + m.imei] = parseInt(rotVal) || 0;
@@ -7315,6 +8456,11 @@ function scheduleRepeating(hour, minute, label, fn, isSpeedtest) {
 
 // Single flow: fetch → save daily_traffic → charge → retry on failure
 async function runDailyBilling(retryClientIds) {
+  // Mutex: serialize billing vs saveClients to avoid reading stale client snapshots.
+  return withClientsLock(() => _runDailyBillingImpl(retryClientIds));
+}
+
+async function _runDailyBillingImpl(retryClientIds) {
   const isRetry = Array.isArray(retryClientIds) && retryClientIds.length > 0;
   // Guard: prevent double billing for same date (atomic check)
   const yesterdayCheck = getMoscowYesterday();
@@ -7856,6 +9002,13 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
     // Auto-credit only happens when verified = true.
     if (!verified) {
       logger.error(`[Tochka Webhook] JWT NOT verified: ${reason}. Saving as unverified for manual review.`);
+      // Surface the security event in system_log so it shows up in the
+      // admin "events" feed instead of buried in pino-only logs.
+      try { logActivity('system', 'warn', 'tochka_unverified_webhook', null, `Unverified Tochka webhook accepted (reason: ${reason})`, { reason: String(reason || '').slice(0, 200), payerInn: _pickField(payload, ['SidePayer','sidePayer','payer'])?.inn || '', amount: payload.amount || payload.Amount || '' }); } catch (_) {}
+      if (appSettings.tochka_strict_webhook) {
+        // Strict mode: refuse to persist unverified payments at all. Off by default.
+        return res.status(401).json({ ok: false, processed: false, reason: 'jwt_verification_failed' });
+      }
       // fall through — don't return, let it land in bank_payments as unmatched
     } else {
       logger.info('[Tochka Webhook] JWT signature verified successfully');
@@ -7863,12 +9016,14 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
 
     logger.info('[Tochka Webhook] Decoded payload:', JSON.stringify(payload).slice(0, 500));
 
-    const webhookType = payload.webhookType || '';
-    const payerInn = payload.SidePayer?.inn || '';
-    const payerName = payload.SidePayer?.name || '';
-    
-    
-    const amount = Math.round(parseFloat(payload.amount || payload.SidePayer?.amount || '0') * 100) / 100;
+    const webhookType = payload.webhookType || payload.WebhookType || '';
+    // Tochka has been observed returning both CamelCase ("SidePayer") and
+    // camelCase ("sidePayer") depending on endpoint. Use a small helper that
+    // tries every case-variant for the same logical field.
+    const sidePayer = _pickField(payload, ['SidePayer', 'sidePayer', 'payer', 'Payer']) || {};
+    const payerInn  = sidePayer.inn || sidePayer.Inn || sidePayer.taxCode || '';
+    const payerName = sidePayer.name || sidePayer.Name || '';
+    const amount = Math.round(parseFloat(payload.amount || payload.Amount || sidePayer.amount || sidePayer.Amount || '0') * 100) / 100;
     if (isNaN(amount) || amount <= 0 || amount > 100000000) {
       logger.warn(`[Tochka Webhook] Invalid amount: ${amount}, skipping auto-credit`);
       return res.status(200).json({ ok: true, processed: false, reason: 'invalid_amount' });
@@ -7928,7 +9083,22 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
             source: 'tochka_webhook',
             paymentId
           });
-          dbStmts.updateBankPaymentMatch.run(1, matchedClient.id, matchedClient.name, 1, paymentId);
+          // Match-mark + payment-record + referral commission in ONE transaction.
+          // Previously each was a separate statement, so a partial failure
+          // (e.g. crash between match-mark and referral credit) could leave
+          // referral_balance double-credited on webhook retry.
+          db.transaction(() => {
+            dbStmts.updateBankPaymentMatch.run(1, matchedClient.id, matchedClient.name, 1, paymentId);
+            if (matchedClient.referred_by) {
+              const referrer = clientById.get(matchedClient.referred_by);
+              if (referrer) {
+                const commission = Math.round(amount * 0.15 * 100) / 100;
+                const newRefBal = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
+                _clientUpdateReferralBalance.run(newRefBal, referrer.id);
+                referrer.referral_balance = newRefBal;  // sync in-memory only after DB succeeded
+              }
+            }
+          })();
           if (!matchedClient.payments) matchedClient.payments = [];
           matchedClient.payments.push({
             amount, date: paymentDate,
@@ -7937,14 +9107,6 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
             source: 'tochka_webhook',
             paymentId
           });
-          if (matchedClient.referred_by) {
-            const referrer = clientById.get(matchedClient.referred_by);
-            if (referrer) {
-              const commission = Math.round(amount * 0.15 * 100) / 100;
-              referrer.referral_balance = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
-              _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
-            }
-          }
           saveClients(clients);
           bankPayment.matched = true;
           bankPayment.matchedClientId = matchedClient.id;
@@ -8081,7 +9243,9 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
   if (!tochkaConfig.jwt || !tochkaConfig.accountId) {
     return { ok: false, error: 'tochka_not_configured' };
   }
-  const from = dateFrom || '2024-01-01';
+  // Default to "last 12 months" instead of hardcoded 2024 (time-bomb when
+  // anyone copies this code post-2027 — they'd silently scan 3 years).
+  const from = dateFrom || new Date(Date.now() - 365 * 86400000).toISOString().slice(0, 10);
   const to   = dateTo   || new Date().toISOString().slice(0, 10);
   logger.info(`[Tochka Sync:${source}] Requesting statement ${from} — ${to}`);
 
@@ -8107,16 +9271,19 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
   }
   logger.info(`[Tochka Sync:${source}] statement=${statementId}`);
 
-  // 2) Poll until Ready (cap 30s)
+  // 2) Poll until Ready — exponential backoff (1.5x), capped at 10s per wait,
+  // ~10 attempts → total ~60s. Previously: 15 fixed 2s polls = self-DOS on Tochka.
   let statement = null;
-  for (let attempt = 0; attempt < 15; attempt++) {
-    await new Promise(r => setTimeout(r, 2000));
+  let delay = 1000;
+  for (let attempt = 0; attempt < 10; attempt++) {
+    await new Promise(r => setTimeout(r, delay));
     let getResult;
     try {
       getResult = await tochkaRequest('GET',
         `/uapi/open-banking/v1.0/accounts/${tochkaConfig.accountId}/statements/${statementId}`);
     } catch (e) {
-      logger.warn(`[Tochka Sync:${source}] poll #${attempt+1} error:`, e.message);
+      logger.warn(`[Tochka Sync:${source}] poll #${attempt+1} error: ${e.message}`);
+      delay = Math.min(delay * 1.5, 10000);
       continue;
     }
     const stData = getResult.data?.Data?.Statement?.[0]
@@ -8124,6 +9291,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
                 || getResult.data;
     const status = stData?.status || stData?.Status || '';
     if (status === 'Ready' || status === 'ready') { statement = stData; break; }
+    delay = Math.min(delay * 1.5, 10000);
   }
   if (!statement) return { ok: false, error: 'statement_not_ready' };
 
@@ -8948,11 +10116,576 @@ app.get('/api/admin/system_log', authMiddleware, adminMiddleware, (req, res) => 
   }
 });
 
+// ─── Load Simulator ────────────────────────────────────────────────────────────
+//
+// Endpoints for the synthetic-load simulator. All admin-only.
+// The engine is a singleton; only one run can be active at a time.
+
+// Build {server,nick} → proxyUrl map from the live ProxySmart cache.
+// Reused by /run (to resolve target modems before handing them to engine.start).
+async function _resolveProxyUrls(targets) {
+  const results = await fetchAllServersDataCached();
+  const proxyMap = {};
+  for (const data of results) {
+    const srv = data.serverName || '';
+    const sc = SERVER_COUNTRIES[srv] || {};
+    const serverIp = sc.serverIp || '';
+    if (!serverIp) continue;
+    const statusArr = Array.isArray(data.status) ? data.status : [];
+    const portsMap = data.ports || {};
+    const nickByImei = {};
+    for (const m of statusArr) {
+      const md = m.modem_details || {};
+      if (md.IMEI && md.NICK) nickByImei[md.IMEI] = md.NICK;
+    }
+    for (const [imei, portList] of Object.entries(portsMap)) {
+      const nick = nickByImei[imei];
+      if (!nick) continue;
+      for (const p of portList) {
+        if (!p.HTTP_PORT || !p.LOGIN || !p.PASSWORD) continue;
+        proxyMap[nick + '|' + srv] = {
+          server: srv, nick,
+          proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
+        };
+        break;
+      }
+    }
+  }
+  const resolved = [];
+  const missing = [];
+  for (const t of targets) {
+    const key = (t.nick || '') + '|' + (t.server || '');
+    if (proxyMap[key]) resolved.push(proxyMap[key]);
+    else missing.push(t);
+  }
+  return { resolved, missing };
+}
+
+// Toggle is_test_pool flag for a modem. Upserts modem_meta if needed.
+app.post('/api/admin/modem/test-pool', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const { server, nick, enabled } = req.body || {};
+    if (!server || !nick) return res.status(400).json({ error: 'server и nick обязательны' });
+    const want = enabled ? 1 : 0;
+    // Ensure a meta row exists first (otherwise UPDATE matches 0 rows).
+    const exists = db.prepare('SELECT 1 FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1').get(server, nick);
+    if (!exists) {
+      db.prepare(`INSERT INTO modem_meta (server_name, nick, imei, operator, is_test_pool, updated_at)
+                  VALUES (?, ?, ?, '', ?, datetime('now'))`).run(server, nick, '', want);
+    } else {
+      db.prepare(`UPDATE modem_meta SET is_test_pool = ?, updated_at = datetime('now')
+                  WHERE server_name = ? AND nick = ?`).run(want, server, nick);
+    }
+    auditLog(req.user.login, 'modem_test_pool_toggle', { server, nick, enabled: !!want });
+    res.json({ ok: true, enabled: !!want });
+  } catch (e) {
+    logger.error('[Simulator/TestPool] toggle error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// All live modems across all servers, annotated with current is_test_pool flag.
+// Used by the simulator page to manage the pool inline without jumping to the
+// modem detail modal.
+app.get('/api/admin/simulator/all-modems', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const pool = new Set(
+      db.prepare("SELECT server_name || '|' || nick AS k FROM modem_meta WHERE is_test_pool = 1").all().map(r => r.k)
+    );
+    let live = [];
+    try { live = await fetchAllServersDataCached(); } catch (e) { logger.warn('[Simulator/AllModems] fetchAllServersDataCached threw: ' + e.message); }
+    const items = [];
+    const seen = new Set();
+    for (const data of live) {
+      const srv = data.serverName || '';
+      const downSet = new Set();
+      // (We don't surface "server down" specifically — just per-modem online below.)
+      for (const m of (data.status || [])) {
+        const md = m.modem_details || {};
+        const nick = md.NICK;
+        if (!nick) continue;
+        const key = srv + '|' + nick;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        const operatorRaw = (m.net_details && m.net_details.CELLOP) || '';
+        const isOnline = !m._cached && m.net_details && m.net_details.IS_ONLINE === 'yes';
+        items.push({
+          server: srv,
+          nick,
+          imei: md.IMEI || '',
+          operator: operatorRaw,
+          model: md.MODEL_SHOWN || md.MODEL || '',
+          phone: md.PHONE_NUMBER || '',
+          online: !!isOnline,
+          in_pool: pool.has(key),
+        });
+      }
+    }
+    // Also include modem_meta rows flagged in pool but not live (so they don't
+    // silently disappear from the management UI).
+    const ghostRows = db.prepare(`SELECT server_name, nick, operator, model, phone
+                                  FROM modem_meta WHERE is_test_pool = 1`).all();
+    for (const g of ghostRows) {
+      const key = g.server_name + '|' + g.nick;
+      if (seen.has(key)) continue;
+      items.push({
+        server: g.server_name, nick: g.nick, imei: '',
+        operator: g.operator || '', model: g.model || '', phone: g.phone || '',
+        online: false, in_pool: true, _ghost: true,
+      });
+    }
+    items.sort((a,b) => a.server.localeCompare(b.server) || a.nick.localeCompare(b.nick));
+    res.json({ ok: true, items });
+  } catch (e) {
+    logger.error('[Simulator/AllModems] error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// List all modems flagged is_test_pool=1, with live status info.
+app.get('/api/admin/simulator/test-pool', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const flagged = db.prepare(`
+      SELECT server_name, nick, operator, model, phone
+      FROM modem_meta WHERE is_test_pool = 1 ORDER BY server_name, nick
+    `).all();
+    // Annotate with live status (online/offline) from cache so the UI can warn
+    // if a flagged modem isn't currently reachable.
+    let live = [];
+    try { live = await fetchAllServersDataCached(); } catch (_) {}
+    const liveByKey = {};
+    for (const data of live) {
+      const srv = data.serverName || '';
+      for (const m of (data.status || [])) {
+        const md = m.modem_details || {};
+        if (md.NICK) liveByKey[md.NICK + '|' + srv] = { online: m.online !== false };
+      }
+    }
+    const items = flagged.map(r => ({
+      server: r.server_name, nick: r.nick, operator: r.operator,
+      model: r.model, phone: r.phone,
+      online: (liveByKey[r.nick + '|' + r.server_name] || {}).online === true,
+    }));
+    res.json({ ok: true, items });
+  } catch (e) {
+    logger.error('[Simulator/TestPool] list error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Profiles CRUD ──────────────────────────────────────────────────────────
+app.get('/api/admin/simulator/profiles', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const rows = db.prepare(`SELECT id, name, description, config_json, created_at, created_by, updated_at
+                             FROM simulator_profiles ORDER BY name`).all();
+    const items = rows.map(r => ({
+      id: r.id, name: r.name, description: r.description,
+      config: JSON.parse(r.config_json), created_at: r.created_at,
+      created_by: r.created_by, updated_at: r.updated_at,
+    }));
+    res.json({ ok: true, items });
+  } catch (e) {
+    logger.error('[Simulator/Profiles] list error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+app.post('/api/admin/simulator/profiles', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const { name, description, config } = req.body || {};
+    if (!name || typeof name !== 'string') return res.status(400).json({ error: 'name обязателен' });
+    if (!config || typeof config !== 'object') return res.status(400).json({ error: 'config обязателен' });
+    const r = db.prepare(`INSERT INTO simulator_profiles (name, description, config_json, created_by)
+                          VALUES (?, ?, ?, ?) RETURNING id`)
+      .get(name, description || null, JSON.stringify(config), req.user.login);
+    auditLog(req.user.login, 'sim_profile_create', { id: r.id, name });
+    res.json({ ok: true, id: r.id });
+  } catch (e) {
+    if (/UNIQUE/i.test(e.message)) return res.status(409).json({ error: 'Профиль с таким именем уже есть' });
+    logger.error('[Simulator/Profiles] create error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+app.patch('/api/admin/simulator/profiles/:id', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { name, description, config } = req.body || {};
+    const cur = db.prepare('SELECT * FROM simulator_profiles WHERE id = ?').get(id);
+    if (!cur) return res.status(404).json({ error: 'Профиль не найден' });
+    db.prepare(`UPDATE simulator_profiles
+                SET name = ?, description = ?, config_json = ?, updated_at = datetime('now')
+                WHERE id = ?`).run(
+      name || cur.name,
+      description != null ? description : cur.description,
+      config ? JSON.stringify(config) : cur.config_json,
+      id
+    );
+    auditLog(req.user.login, 'sim_profile_update', { id });
+    res.json({ ok: true });
+  } catch (e) {
+    logger.error('[Simulator/Profiles] update error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+app.delete('/api/admin/simulator/profiles/:id', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = db.prepare('DELETE FROM simulator_profiles WHERE id = ?').run(id);
+    if (r.changes === 0) return res.status(404).json({ error: 'Профиль не найден' });
+    auditLog(req.user.login, 'sim_profile_delete', { id });
+    res.json({ ok: true });
+  } catch (e) {
+    logger.error('[Simulator/Profiles] delete error:', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ─── Runs ───────────────────────────────────────────────────────────────────
+app.post('/api/admin/simulator/run', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    let profile = req.body && req.body.profile;
+    const profileId = req.body && req.body.profile_id;
+    if (!profile && profileId) {
+      const row = db.prepare('SELECT id, name, config_json FROM simulator_profiles WHERE id = ?').get(profileId);
+      if (!row) return res.status(404).json({ error: 'Профиль не найден' });
+      profile = { id: row.id, name: row.name, ...JSON.parse(row.config_json) };
+    }
+    if (!profile) return res.status(400).json({ error: 'Передайте profile или profile_id' });
+
+    // Resolve proxy URLs for the target modems from the live cache.
+    const { resolved, missing } = await _resolveProxyUrls(profile.target_modems || []);
+    if (missing.length) {
+      return res.status(400).json({
+        error: 'Не удалось зарезолвить прокси для модемов',
+        missing: missing.map(m => `${m.server}/${m.nick}`),
+      });
+    }
+
+    const runId = simulator.start(profile, {
+      resolvedModems: resolved,
+      startedBy: req.user.login,
+    });
+    auditLog(req.user.login, 'sim_run_start', { run_id: runId, profile: profile.name });
+    res.json({ ok: true, run_id: runId });
+  } catch (e) {
+    logger.error('[Simulator/Run] start error:', e.message);
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.post('/api/admin/simulator/run/:id/abort', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    simulator.abort(id);
+    auditLog(req.user.login, 'sim_run_abort', { run_id: id });
+    res.json({ ok: true });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
+});
+
+app.get('/api/admin/simulator/active', authMiddleware, adminMiddleware, (req, res) => {
+  res.json({ ok: true, active: simulator.getActive() });
+});
+
+app.get('/api/admin/simulator/runs', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 500);
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const rows = db.prepare(`SELECT id, profile_id, profile_name, started_at, ended_at, status,
+                                    summary_json, started_by, error_msg
+                             FROM simulator_runs ORDER BY started_at DESC LIMIT ? OFFSET ?`)
+      .all(limit, offset);
+    const items = rows.map(r => ({
+      id: r.id, profile_id: r.profile_id, profile_name: r.profile_name,
+      started_at: r.started_at, ended_at: r.ended_at, status: r.status,
+      summary: r.summary_json ? JSON.parse(r.summary_json) : null,
+      started_by: r.started_by, error_msg: r.error_msg,
+    }));
+    res.json({ ok: true, items });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/admin/simulator/run/:id', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const r = db.prepare('SELECT * FROM simulator_runs WHERE id = ?').get(id);
+    if (!r) return res.status(404).json({ error: 'Run не найден' });
+    res.json({
+      ok: true, run: {
+        id: r.id, profile_id: r.profile_id, profile_name: r.profile_name,
+        started_at: r.started_at, ended_at: r.ended_at, status: r.status,
+        config: JSON.parse(r.config_json),
+        summary: r.summary_json ? JSON.parse(r.summary_json) : null,
+        started_by: r.started_by, error_msg: r.error_msg,
+      }
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+app.get('/api/admin/simulator/run/:id/samples', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const limit = Math.min(parseInt(req.query.limit) || 500, 5000);
+    const offset = Math.max(0, parseInt(req.query.offset) || 0);
+    const rows = db.prepare(`SELECT ts_ms, worker_id, modem_nick, server_name, status, http_status,
+                                    total_ms, connect_ms, ttfb_ms, bytes, url, error_msg
+                             FROM simulator_samples WHERE run_id = ? ORDER BY ts_ms LIMIT ? OFFSET ?`)
+      .all(id, limit, offset);
+    const total = db.prepare('SELECT COUNT(*) AS n FROM simulator_samples WHERE run_id = ?').get(id).n;
+    res.json({ ok: true, items: rows, total });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Per-modem aggregate: which modems hog the timeouts, which have the worst
+// connect time, etc. Computed from all samples — for big runs the percentiles
+// require sorting per-group so we cap at 100 modems (which would be a lot).
+app.get('/api/admin/simulator/run/:id/by-modem', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    // We need percentiles per modem → can't do in pure SQL without window funcs.
+    // Pull all sample rows (small per-run; bounded by duration × rps).
+    const rows = db.prepare(`SELECT modem_nick, server_name, status, total_ms, connect_ms, ttfb_ms
+                             FROM simulator_samples WHERE run_id = ?`).all(id);
+    const byKey = {};
+    for (const r of rows) {
+      const k = r.server_name + '|' + r.modem_nick;
+      if (!byKey[k]) byKey[k] = {
+        modem_nick: r.modem_nick, server_name: r.server_name,
+        total: 0, success: 0, timeout: 0, http_error: 0, conn_error: 0,
+        lats: [], connects: [], ttfbs: [],
+      };
+      const g = byKey[k];
+      g.total++;
+      g[r.status] = (g[r.status] || 0) + 1;
+      g.lats.push(r.total_ms);
+      if (r.connect_ms) g.connects.push(r.connect_ms);
+      if (r.ttfb_ms) g.ttfbs.push(r.ttfb_ms);
+    }
+    const pct = (arr, p) => arr.length ? arr[Math.min(arr.length-1, Math.floor(arr.length*p))] : 0;
+    const avg = (arr) => arr.length ? Math.round(arr.reduce((s,v)=>s+v,0) / arr.length) : 0;
+    const items = Object.values(byKey).map(g => {
+      g.lats.sort((a,b)=>a-b); g.connects.sort((a,b)=>a-b); g.ttfbs.sort((a,b)=>a-b);
+      return {
+        modem_nick: g.modem_nick, server_name: g.server_name,
+        total: g.total,
+        success_pct: g.total ? Math.round(g.success/g.total*1000)/10 : 0,
+        timeout_pct: g.total ? Math.round(g.timeout/g.total*1000)/10 : 0,
+        error_pct: g.total ? Math.round((g.http_error + g.conn_error)/g.total*1000)/10 : 0,
+        p50_ms: pct(g.lats, 0.5),
+        p95_ms: pct(g.lats, 0.95),
+        avg_connect_ms: avg(g.connects),
+        avg_ttfb_ms: avg(g.ttfbs),
+      };
+    });
+    // Sort: worst timeout rate first — that's what the client cares about.
+    items.sort((a,b) => b.timeout_pct - a.timeout_pct || b.p95_ms - a.p95_ms);
+    res.json({ ok: true, items });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Time-bucketed series for charts (rps + P95 per N-second bucket).
+// Defaults: 2-second buckets. Caps at 1200 buckets (40 min @ 2s).
+app.get('/api/admin/simulator/run/:id/series', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const bucketSec = Math.max(1, Math.min(60, parseInt(req.query.bucket) || 2));
+    const bucketMs = bucketSec * 1000;
+    const rows = db.prepare(`SELECT ts_ms, status, total_ms, connect_ms, ttfb_ms
+                             FROM simulator_samples WHERE run_id = ? ORDER BY ts_ms`).all(id);
+    const buckets = {};
+    for (const r of rows) {
+      const b = Math.floor(r.ts_ms / bucketMs);
+      if (!buckets[b]) buckets[b] = { count: 0, success: 0, timeout: 0, lats: [] };
+      buckets[b].count++;
+      if (r.status === 'success') buckets[b].success++;
+      if (r.status === 'timeout') buckets[b].timeout++;
+      buckets[b].lats.push(r.total_ms);
+    }
+    const keys = Object.keys(buckets).map(Number).sort((a,b)=>a-b);
+    const series = keys.map(k => {
+      const g = buckets[k];
+      g.lats.sort((a,b)=>a-b);
+      const p50 = g.lats.length ? g.lats[Math.floor(g.lats.length/2)] : 0;
+      const p95 = g.lats.length ? g.lats[Math.min(g.lats.length-1, Math.floor(g.lats.length*0.95))] : 0;
+      return {
+        t_sec: k * bucketSec,
+        rps: Math.round(g.count / bucketSec * 10) / 10,
+        timeout_pct: g.count ? Math.round(g.timeout/g.count*1000)/10 : 0,
+        p50_ms: p50,
+        p95_ms: p95,
+      };
+    });
+    res.json({ ok: true, bucket_sec: bucketSec, series });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Side-by-side comparison of multiple runs (max 5). Returns per-run summary + key metrics.
+app.get('/api/admin/simulator/compare', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const ids = String(req.query.run_ids || '').split(',').map(s => parseInt(s,10)).filter(Boolean).slice(0, 5);
+    if (ids.length < 2) return res.status(400).json({ error: 'Передайте 2-5 run_ids' });
+    const items = ids.map(id => {
+      const r = db.prepare('SELECT * FROM simulator_runs WHERE id = ?').get(id);
+      if (!r) return { id, error: 'not found' };
+      const cfg = JSON.parse(r.config_json);
+      const sum = r.summary_json ? JSON.parse(r.summary_json) : null;
+      return {
+        id: r.id, profile_name: r.profile_name, status: r.status,
+        started_at: r.started_at, ended_at: r.ended_at,
+        concurrency: cfg.concurrency, duration_ms: cfg.duration_ms, timeout_ms: cfg.timeout_ms,
+        target_modems_count: (cfg.target_modems||[]).length,
+        targets_count: (cfg.targets||[]).length,
+        summary: sum,
+      };
+    });
+    res.json({ ok: true, items });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Breaking-point detector for ramp runs: find the worker count at which
+// timeout_pct first crosses 5% OR p95 doubles vs. the first stable bucket.
+// Returns null if no breaking point (run was too short / stable throughout).
+app.get('/api/admin/simulator/run/:id/breaking-point', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const run = db.prepare('SELECT config_json FROM simulator_runs WHERE id = ?').get(id);
+    if (!run) return res.status(404).json({ error: 'Run не найден' });
+    const cfg = JSON.parse(run.config_json);
+    if (!cfg.concurrency || cfg.concurrency.mode !== 'ramp') {
+      return res.json({ ok: true, applicable: false, reason: 'Breaking-point detection works only on ramp runs' });
+    }
+    const start = cfg.concurrency.start || 1;
+    const end = cfg.concurrency.end || 20;
+    const rampSec = cfg.concurrency.ramp_seconds || 30;
+
+    const rows = db.prepare(`SELECT ts_ms, status, total_ms FROM simulator_samples
+                             WHERE run_id = ? ORDER BY ts_ms`).all(id);
+    if (rows.length < 10) return res.json({ ok: true, applicable: true, breaking_point: null, reason: 'Слишком мало сэмплов' });
+
+    // Bucket every 2 seconds → compute timeout_pct and P95
+    const bucketMs = 2000;
+    const buckets = {};
+    for (const r of rows) {
+      const b = Math.floor(r.ts_ms / bucketMs);
+      if (!buckets[b]) buckets[b] = { count: 0, timeout: 0, lats: [] };
+      buckets[b].count++;
+      if (r.status === 'timeout') buckets[b].timeout++;
+      buckets[b].lats.push(r.total_ms);
+    }
+    const keys = Object.keys(buckets).map(Number).sort((a,b)=>a-b);
+    // Use first 3 buckets as baseline (assumes stable behavior at start of ramp)
+    const baseline = keys.slice(0, 3).map(k => {
+      const g = buckets[k];
+      g.lats.sort((a,b)=>a-b);
+      return { p95: g.lats[Math.floor(g.lats.length*0.95)] || 0, to: g.count ? g.timeout/g.count : 0 };
+    });
+    const baseP95 = Math.max(1, baseline.reduce((s,b)=>s+b.p95,0) / Math.max(1, baseline.length));
+
+    // Scan forward — flag first bucket where:
+    //   timeout_pct >= 5%  OR  p95 >= 2x baseline_p95
+    let bpBucket = null;
+    for (const k of keys.slice(3)) {
+      const g = buckets[k];
+      g.lats.sort((a,b)=>a-b);
+      const p95 = g.lats[Math.floor(g.lats.length*0.95)] || 0;
+      const to = g.count ? g.timeout/g.count : 0;
+      if (to >= 0.05 || p95 >= baseP95 * 2) {
+        bpBucket = { t_sec: k * (bucketMs/1000), p95_ms: p95, timeout_pct: Math.round(to*1000)/10, base_p95_ms: Math.round(baseP95) };
+        break;
+      }
+    }
+    let bpWorkers = null;
+    if (bpBucket) {
+      // Convert ramp time back to worker count: at t_sec into the ramp,
+      // workers = start + (end-start) * t_sec / rampSec  (clamped at end after rampSec)
+      if (bpBucket.t_sec >= rampSec) bpWorkers = end;
+      else bpWorkers = Math.round(start + (end - start) * (bpBucket.t_sec / rampSec));
+      bpBucket.workers = bpWorkers;
+    }
+    res.json({ ok: true, applicable: true, breaking_point: bpBucket, baseline_p95_ms: Math.round(baseP95) });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// CSV / JSON export of samples for a run.
+app.get('/api/admin/simulator/run/:id/export', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const format = (req.query.format || 'json').toLowerCase();
+    const rows = db.prepare(`SELECT ts_ms, worker_id, modem_nick, server_name, status, http_status,
+                                    total_ms, connect_ms, ttfb_ms, bytes, url, error_msg
+                             FROM simulator_samples WHERE run_id = ? ORDER BY ts_ms`).all(id);
+    if (format === 'csv') {
+      const cols = ['ts_ms','worker_id','modem_nick','server_name','status','http_status',
+                    'total_ms','connect_ms','ttfb_ms','bytes','url','error_msg'];
+      const esc = (v) => {
+        if (v == null) return '';
+        const s = String(v);
+        return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+      };
+      const lines = [cols.join(',')].concat(rows.map(r => cols.map(c => esc(r[c])).join(',')));
+      res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="simulator-run-${id}.csv"`);
+      res.send(lines.join('\n'));
+    } else {
+      res.setHeader('Content-Disposition', `attachment; filename="simulator-run-${id}.json"`);
+      res.json({ ok: true, run_id: id, samples: rows });
+    }
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// SSE: live event stream for a specific run.
+app.get('/api/admin/simulator/run/:id/stream', authMiddleware, adminMiddleware, (req, res) => {
+  const id = parseInt(req.params.id, 10);
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    'Connection': 'keep-alive',
+    'X-Accel-Buffering': 'no',
+  });
+  res.flushHeaders && res.flushHeaders();
+  const send = (event) => {
+    try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch (_) {}
+  };
+  // Heartbeat to detect dead clients (and prevent NGINX idle close).
+  const hb = setInterval(() => { try { res.write(': hb\n\n'); } catch (_) {} }, 25000);
+  const unsub = simulator.subscribe(id, send);
+  req.on('close', () => { clearInterval(hb); unsub(); });
+});
+
 app.use('/api', (req, res) => {
   res.status(404).json({
     success: false,
     error: 'Endpoint not found'
   });
+});
+
+// Final Express error middleware — catches errors thrown from async handlers
+// that weren't caught by inline try/catch. Logs full stack server-side,
+// returns generic message to client (no internal-path or SQL leakage).
+app.use((err, req, res, next) => {
+  const msg = (err && err.stack) || (err && err.message) || String(err);
+  logger.error(`[Express] ${req.method} ${req.path}: ${msg}`);
+  try { logActivity('system', 'error', 'unhandled_express', null, `${req.method} ${req.path}: ${(err && err.message) || ''}`, { path: req.path, method: req.method }); } catch (_) {}
+  if (res.headersSent) return next(err);
+  // Admins get the message for debugging; everyone else gets generic.
+  const isAdmin = req.user && req.user.isAdmin;
+  res.status(500).json(isAdmin ? { error: 'Internal error', details: (err && err.message) || '' } : { error: 'Internal error' });
 });
 
 const httpServer = app.listen(PORT, () => {
@@ -9065,6 +10798,81 @@ const httpServer = app.listen(PORT, () => {
     }
   });
 
+  // Heap & disk watchdog — fires every 5 min, alerts on threshold crossings.
+  // Heap > 85% of total → log + system_log (telegram alert via logActivity).
+  // Disk free < 500 MB on backup volume → same.
+  _intervals.push(setInterval(() => {
+    try {
+      const mem = process.memoryUsage();
+      const pct = Math.round((mem.heapUsed / mem.heapTotal) * 100);
+      if (pct > 85) {
+        logActivity('system', 'warn', 'heap_high', null, `Heap ${pct}% (${Math.round(mem.heapUsed/1e6)}MB / ${Math.round(mem.heapTotal/1e6)}MB)`, { pct, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal });
+      }
+    } catch (_) {}
+    try {
+      // Disk free via statfs (Node 18.15+)
+      const target = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
+      if (fs.statfs) {
+        fs.statfs(fs.existsSync(target) ? target : '/', (err, st) => {
+          if (err) return;
+          const freeBytes = st.bavail * st.bsize;
+          const freeMb = Math.round(freeBytes / 1e6);
+          if (freeMb < 500) {
+            logActivity('system', 'critical', 'disk_low', null, `Free disk ${freeMb} MB on ${target}`, { freeMb });
+          }
+        });
+      }
+    } catch (_) {}
+  }, 5 * 60 * 1000));
+
+  // Nightly DB backup at 02:00 UTC (05:00 MSK) — uses SQLite Online Backup
+  // API (db.backup) so it's safe to run while the dashboard is live.
+  // Keeps last 14 snapshots; oldest pruned automatically.
+  scheduleRepeating(2, 0, 'DbBackup', async () => {
+    try {
+      const backupDir = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
+      try { fs.mkdirSync(backupDir, { recursive: true }); } catch (_) {}
+      const ts = new Date().toISOString().slice(0, 10);
+      const dest = path.join(backupDir, `dashboard-${ts}.db`);
+      // better-sqlite3 .backup() is a promise that streams pages to disk.
+      await db.backup(dest);
+      // Verify the backup opens & has clients table.
+      const Database = require('better-sqlite3');
+      const bdb = new Database(dest, { readonly: true });
+      const ok = bdb.prepare("SELECT count(*) c FROM sqlite_master WHERE name='clients'").get();
+      bdb.close();
+      if (!ok || !ok.c) throw new Error('backup verification: clients table missing');
+      // Prune backups older than 14 days
+      const files = fs.readdirSync(backupDir).filter(f => /^dashboard-\d{4}-\d{2}-\d{2}\.db$/.test(f));
+      const cutoff = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+      let pruned = 0;
+      for (const f of files) {
+        const fileDate = f.slice(10, 20);
+        if (fileDate < cutoff) {
+          try { fs.unlinkSync(path.join(backupDir, f)); pruned++; } catch (_) {}
+        }
+      }
+      const sizeMb = Math.round(fs.statSync(dest).size / 1024 / 1024 * 10) / 10;
+      logger.info(`[DbBackup] ${dest} (${sizeMb} MB), pruned ${pruned} old backups`);
+      logActivity('system', 'info', 'db_backup_complete', null, `Backed up ${sizeMb} MB to ${dest}`, { sizeMb, pruned });
+    } catch (e) {
+      logger.error('[DbBackup] FAILED: ' + (e.stack || e.message));
+      logActivity('system', 'critical', 'db_backup_failed', null, 'DB backup failed', { error: e.message });
+    }
+  });
+
+  // Hourly: just the stale-port mapping cleanup (cheap, keeps the "modem
+  // disconnected ≥ N days → vanish" window precise to the hour instead of
+  // ±1 day from the nightly run).
+  _intervals.push(setInterval(() => {
+    try {
+      const res = cleanupStalePortMappings();
+      if (res && (res.dtDeleted || res.dtMemKeys || res.kmRemoved)) {
+        logger.info(`[StalePortsHourly] dt=${res.dtDeleted} mem=${res.dtMemKeys} km=${res.kmRemoved}`);
+      }
+    } catch (e) { logger.error('[StalePortsHourly] ' + e.message); }
+  }, 60 * 60 * 1000));
+
   // Schedule daily billing at 01:00 UTC (04:00 MSK, 4h after ProxySmart midnight reset)
   scheduleRepeating(1, 0, 'DailyBilling', () =>
     dbAudit.runJobAsync('DailyBilling', null, () => runDailyBilling()));
@@ -9079,6 +10887,82 @@ const httpServer = app.listen(PORT, () => {
 
   // Auto-generate bills on 1st of each month at 08:10 Moscow (05:10 UTC)
   scheduleRepeating(5, 10, 'MonthlyBills', autoGenerateMonthlyBills);
+
+  // ---------------------------------------------------------------------------
+  // Telegram bot — daily summary + /start auto-registration
+  // ---------------------------------------------------------------------------
+  aiInsights.init({
+    db, logger,
+    getSetting: (key, def) => (appSettings[key] !== undefined ? appSettings[key] : def),
+  });
+  // Load-simulator engine. Only init here — proxy-URL resolution happens in
+  // the per-request endpoint (Day 2), which calls fetchAllServersDataCached()
+  // and builds full proxyUrls for the chosen target modems before passing
+  // them to simulator.start().
+  simulator.init({
+    db, logger,
+    getSetting: (key, def) => (appSettings[key] !== undefined ? appSettings[key] : def),
+  });
+  tgSummary.init({
+    db, logger,
+    clientById,
+    getSetting: (key, def) => (appSettings[key] !== undefined ? appSettings[key] : def),
+    aiInsights,
+  });
+  tgBot.init({
+    logger,
+    getSetting: (key, def) => (appSettings[key] !== undefined ? appSettings[key] : def),
+    setSetting: (key, val) => { appSettings[key] = val; saveSettings(); },
+    buildDailySummary: tgSummary.buildDailySummary,
+  });
+  // Start the long-poll loop (handles /start, /today, /yesterday, /status)
+  tgBot.start();
+
+  // Daily summary scheduler — checks every 60s if MSK time has reached
+  // appSettings.telegram_summary_time and we haven't already sent today.
+  // Note: time check is `>= target` (not `===`), so a missed minute due to
+  // event-loop lag still delivers the message later in the day.
+  _intervals.push(setInterval(async () => {
+    try {
+      if (!appSettings.telegram_summary_enabled) return;
+      const token  = appSettings.telegram_bot_token;
+      const chatId = appSettings.telegram_chat_id;
+      const time   = appSettings.telegram_summary_time || '08:00';
+      if (!token || !chatId) return;
+      // MSK now
+      const mskNow = new Date(Date.now() + 3 * 3600000);
+      const hh = String(mskNow.getUTCHours()).padStart(2, '0');
+      const mm = String(mskNow.getUTCMinutes()).padStart(2, '0');
+      const nowHM = `${hh}:${mm}`;
+      if (nowHM < time) return;          // not yet
+      const todayMsk = mskNow.toISOString().slice(0, 10);
+      if (appSettings.telegram_last_sent_date === todayMsk) return; // already sent today
+      const yMsk = new Date(mskNow.getTime() - 86400000).toISOString().slice(0, 10);
+      const { text, parse_mode } = await tgSummary.buildDailySummary(yMsk);
+      // Retry up to 3 times on transient network errors (ECONNRESET, timeout)
+      let lastErr = null;
+      for (let attempt = 1; attempt <= 3; attempt++) {
+        try {
+          const resp = await tgBot.sendMessage(token, chatId, text, { parse_mode });
+          if (resp && resp.ok === false) throw new Error('Telegram: ' + (resp.description || JSON.stringify(resp)));
+          lastErr = null; break;
+        } catch (e) {
+          lastErr = e;
+          logger.warn(`[Telegram] daily send attempt ${attempt}/3 failed: ${e.message || e}`);
+          await new Promise(r => setTimeout(r, 2000 * attempt));
+        }
+      }
+      if (lastErr) throw lastErr;
+      appSettings.telegram_last_sent_date = todayMsk;
+      saveSettings();
+      logger.info(`[Telegram] Daily summary sent for ${yMsk} → chat ${chatId}`);
+      logActivity('system', 'info', 'telegram_summary_sent', null, `Daily summary sent for ${yMsk}`, { date: yMsk, chatId });
+    } catch (e) {
+      const detail = (e && e.stack) ? e.stack : (e && e.message) ? e.message : JSON.stringify(e);
+      logger.error('[Telegram] daily tick failed: ' + detail);
+      logActivity('system', 'error', 'telegram_summary_failed', null, 'Daily summary failed', { error: detail.slice(0, 500) });
+    }
+  }, 60 * 1000));
 
   // Resilient hourly traffic aggregation with retry logic:
   // Attempts at :00, :01, :02, :03, :04 (5 tries).
@@ -9113,14 +10997,20 @@ const httpServer = app.listen(PORT, () => {
       }
 
       function tryRecord() {
-        aggregateHourlyTraffic().then(async () => {
-          // Success = no exception, even if cnt=0 (all modems offline)
-          _hourlyLastRecordedHour = targetHourStr;
-          try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch(e) {}
-          const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
-          logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${(check && check.cnt) || 0} rows)`);
-          logActivity('traffic', 'info', 'hourly_agg', null, `Hourly traffic aggregated for ${targetHourStr}: ${(check && check.cnt) || 0} rows (attempt ${attemptIdx + 1})`, { hour: targetHourStr, rows: (check && check.cnt) || 0, attempt: attemptIdx + 1 });
-          // Pre-reset capture removed — day-counter detection handles resets
+        // Mark inner block as async-fn whose errors propagate to the outer .catch
+        // (was `.then(async () => {...})` whose internal throws produced
+        // unhandledRejection instead of being caught).
+        aggregateHourlyTraffic().then(() => {
+          try {
+            // Success = no exception, even if cnt=0 (all modems offline)
+            _hourlyLastRecordedHour = targetHourStr;
+            try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch(e) {}
+            const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
+            logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${(check && check.cnt) || 0} rows)`);
+            logActivity('traffic', 'info', 'hourly_agg', null, `Hourly traffic aggregated for ${targetHourStr}: ${(check && check.cnt) || 0} rows (attempt ${attemptIdx + 1})`, { hour: targetHourStr, rows: (check && check.cnt) || 0, attempt: attemptIdx + 1 });
+          } catch (e) {
+            logger.error(`[HourlyAgg] post-success bookkeeping failed: ${e.stack || e.message}`);
+          }
         }).catch(e => {
           logger.error(`[HourlyAgg] Attempt ${attemptIdx + 1}/5 error: ${e.message}`);
           attemptIdx++;
@@ -9236,7 +11126,10 @@ _intervals.push(setInterval(() => {
   checkCrmPaymentConfirmations().catch(e => { if (e.code !== 'MODULE_NOT_FOUND') logger.error('[CRM] Interval error:', e.message); });
 }, (appSettings.crm_check_interval_min || 10) * 60000));
 
+let _shutdownInProgress = false;
 function gracefulShutdown(signal) {
+  if (_shutdownInProgress) return; // re-entrant SIGTERM during shutdown
+  _shutdownInProgress = true;
   logger.info(`\n[Shutdown] Received ${signal}, shutting down gracefully...`);
 
   _hourlyAggStopped = true;
@@ -9245,6 +11138,8 @@ function gracefulShutdown(signal) {
   for (const iv of _intervals) clearInterval(iv);
   _intervals.length = 0;
   for (const t of speedtestTimers.concat(_cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }
+  // Stop the telegram poll loop (avoid hanging in long-poll for 25s after SIGTERM)
+  try { if (tgBot && tgBot.stop) tgBot.stop(); } catch (_) {}
 
   // Stop accepting new connections
   httpServer.close(() => {
@@ -9274,3 +11169,25 @@ function gracefulShutdown(signal) {
 
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+
+// ---------------------------------------------------------------------------
+// Crash-resilience: log unhandled async errors but keep the process alive.
+// Without these handlers a single forgotten .catch() inside setInterval
+// can take the dashboard down. We log to stderr, pino, and system_log so
+// nothing slips through, then continue. uncaughtException is the only one
+// we treat as fatal (per Node best practice the V8 state may be unsafe).
+// ---------------------------------------------------------------------------
+process.on('unhandledRejection', (reason, promise) => {
+  const msg = (reason && reason.stack) || (reason && reason.message) || String(reason);
+  try { logger.error('[UnhandledRejection] ' + msg); } catch (_) { console.error('[UnhandledRejection]', msg); }
+  try { logActivity('system', 'error', 'unhandled_rejection', null, 'Unhandled promise rejection', { reason: String(msg).slice(0, 1000) }); } catch (_) {}
+});
+
+process.on('uncaughtException', (err) => {
+  const msg = (err && err.stack) || (err && err.message) || String(err);
+  try { logger.error('[UncaughtException] ' + msg); } catch (_) { console.error('[UncaughtException]', msg); }
+  try { logActivity('system', 'critical', 'uncaught_exception', null, 'Uncaught exception — restarting', { error: String(msg).slice(0, 1000) }); } catch (_) {}
+  // Per Node docs: after uncaughtException the process is in undefined state.
+  // Trigger graceful shutdown so pm2 restarts cleanly.
+  try { gracefulShutdown('uncaughtException'); } catch (_) { process.exit(1); }
+});
