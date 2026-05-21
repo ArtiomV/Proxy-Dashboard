@@ -34,6 +34,8 @@ const tgSummary = require('./src/telegram/daily_summary');
 const aiInsights = require('./src/telegram/ai_insights');
 const simulator = require('./src/simulator/engine');
 const simulatorDb = require('./src/db/simulator');
+const paymentsDb = require('./src/db/payments');
+const documentsDb = require('./src/db/documents');
 const { execFile } = require('child_process');
 
 // DASHBOARD_DB_PATH override lets tests point at an isolated temp DB
@@ -150,6 +152,8 @@ try {
 // a table-group and exposes named functions used by routes. Inited here so
 // statements are prepared exactly once after migrations have run.
 simulatorDb.init(db);
+paymentsDb.init(db);
+documentsDb.init(db);
 
 // ─── kv_store loss-prevention layer ────────────────────────────────────────────
 // History + refuse-to-shrink guard for critical kv entries. See migration 028.
@@ -451,18 +455,9 @@ const _clientUpdateReferralBalance = db.prepare('UPDATE clients SET referral_bal
 /** atomicCredit / atomicDebit — delegated to src/billing/atomic.js */
 function atomicCredit(...args) { return billing.atomicCredit(...args); }
 function atomicDebit(...args) { return billing.atomicDebit(...args); }
-const _paymentDeleteByClient = db.prepare('DELETE FROM payments WHERE client_id = ?');
-const _paymentInsert = db.prepare('INSERT INTO payments (client_id, amount, date, note, source, payment_id, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)');
-const _docDeleteByClient = db.prepare('DELETE FROM client_documents WHERE client_id = ?');
-const _docInsert = db.prepare('INSERT INTO client_documents (id, client_id, name, file_name, mime_type, date) VALUES (?, ?, ?, ?, ?, ?)');
-const _closingDocDeleteByClient = db.prepare('DELETE FROM closing_documents WHERE client_id = ?');
-const _closingDocInsert = db.prepare('INSERT INTO closing_documents (id, client_id, tochka_doc_id, period, type, act_number, items, total_amount, status, contract_info, signed_at, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)');
-const _billDeleteByClient = db.prepare('DELETE FROM bills WHERE client_id = ?');
-const _billInsert = db.prepare('INSERT INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-const _getPayments = db.prepare('SELECT * FROM payments WHERE client_id = ? ORDER BY date DESC, id DESC');
-const _getDocs = db.prepare('SELECT * FROM client_documents WHERE client_id = ? ORDER BY date');
-const _getClosingDocs = db.prepare('SELECT * FROM closing_documents WHERE client_id = ? ORDER BY created_at');
-const _getBills = db.prepare('SELECT * FROM bills WHERE client_id = ? ORDER BY created_at');
+// payments + documents + closing + bills prepared statements moved into
+// src/db/payments.js and src/db/documents.js (Stage 2). Callers use the
+// named functions on those modules.
 
 // Get signed expense amount from ledger entry:
 // charges: always positive (cost), corrections: signed based on balance change
@@ -516,20 +511,20 @@ function loadClients() {
   }
   const clientsList = rows.map(clientFromRow);
   for (const client of clientsList) {
-    client.payments = _getPayments.all(client.id).map(r => ({
+    client.payments = paymentsDb.listByClient(client.id).map(r => ({
       amount: r.amount, date: r.date, note: r.note || '', source: r.source || 'manual',
       paymentId: r.payment_id || undefined, createdAt: r.created_at || ''
     }));
-    client.documents = _getDocs.all(client.id).map(r => ({
+    client.documents = documentsDb.listDocs(client.id).map(r => ({
       id: r.id, name: r.name, fileName: r.file_name, mimeType: r.mime_type || '', date: r.date || ''
     }));
-    client.closingDocuments = _getClosingDocs.all(client.id).map(r => ({
+    client.closingDocuments = documentsDb.listClosing(client.id).map(r => ({
       id: r.id, tochkaDocumentId: r.tochka_doc_id || '', period: r.period, type: r.type || 'act',
       actNumber: r.act_number || '', items: JSON.parse(r.items || '[]'), totalAmount: r.total_amount || 0,
       status: r.status || 'unsigned', contractInfo: r.contract_info || '',
       signedAt: r.signed_at || undefined, createdAt: r.created_at || ''
     }));
-    client.bills = _getBills.all(client.id).map(r => ({
+    client.bills = documentsDb.listBills(client.id).map(r => ({
       id: r.id, tochkaBillId: r.tochka_bill_id || '', period: r.period,
       billNumber: r.bill_number || '', amount: r.amount || 0,
       status: r.status || 'unpaid', createdAt: r.created_at || ''
@@ -569,29 +564,22 @@ function saveClients(clientsList) {
           c.slaAutoCredit ? 1 : 0
         );
         // Sync payments
-        _paymentDeleteByClient.run(c.id);
+        paymentsDb.deleteByClient(c.id);
         for (const p of (c.payments || [])) {
-          _paymentInsert.run(c.id, p.amount, p.date || '', p.note || '', p.source || 'manual',
-            p.paymentId || null, p.createdAt || new Date().toISOString());
+          paymentsDb.insert({
+            clientId: c.id, amount: p.amount, date: p.date, note: p.note,
+            source: p.source, paymentId: p.paymentId, createdAt: p.createdAt,
+          });
         }
         // Sync documents
-        _docDeleteByClient.run(c.id);
-        for (const d of (c.documents || [])) {
-          _docInsert.run(d.id, c.id, d.name || '', d.fileName || '', d.mimeType || '', d.date || '');
-        }
+        documentsDb.deleteDocsByClient(c.id);
+        for (const d of (c.documents || [])) documentsDb.insertDoc(d, c.id);
         // Sync closing documents
-        _closingDocDeleteByClient.run(c.id);
-        for (const d of (c.closingDocuments || [])) {
-          _closingDocInsert.run(d.id, c.id, d.tochkaDocumentId || '', d.period || '', d.type || 'act',
-            d.actNumber || '', JSON.stringify(d.items || []), d.totalAmount || 0, d.status || 'unsigned',
-            d.contractInfo || '', d.signedAt || null, d.createdAt || new Date().toISOString());
-        }
+        documentsDb.deleteClosingByClient(c.id);
+        for (const d of (c.closingDocuments || [])) documentsDb.insertClosing(d, c.id);
         // Sync bills
-        _billDeleteByClient.run(c.id);
-        for (const b of (c.bills || [])) {
-          _billInsert.run(b.id, c.id, b.tochkaBillId || '', b.period || '', b.billNumber || '',
-            b.amount || 0, b.status || 'unpaid', b.createdAt || new Date().toISOString());
-        }
+        documentsDb.deleteBillsByClient(c.id);
+        for (const b of (c.bills || [])) documentsDb.insertBill(b, c.id);
       }
     })();
   } catch (e) {
