@@ -33,6 +33,7 @@ const tgBot = require('./src/telegram/bot');
 const tgSummary = require('./src/telegram/daily_summary');
 const aiInsights = require('./src/telegram/ai_insights');
 const simulator = require('./src/simulator/engine');
+const simulatorDb = require('./src/db/simulator');
 const { execFile } = require('child_process');
 
 // DASHBOARD_DB_PATH override lets tests point at an isolated temp DB
@@ -144,6 +145,11 @@ try {
   logger.error('[Migration] FATAL on startup: ' + (e.stack || e.message));
   process.exit(1);
 }
+
+// Domain-DB repositories (Stage 2). Each one wraps prepared statements for
+// a table-group and exposes named functions used by routes. Inited here so
+// statements are prepared exactly once after migrations have run.
+simulatorDb.init(db);
 
 // ─── kv_store loss-prevention layer ────────────────────────────────────────────
 // History + refuse-to-shrink guard for critical kv entries. See migration 028.
@@ -10171,16 +10177,7 @@ app.post('/api/admin/modem/test-pool', authMiddleware, adminMiddleware, (req, re
   try {
     const { server, nick, enabled } = req.body || {};
     if (!server || !nick) return res.status(400).json({ error: 'server и nick обязательны' });
-    const want = enabled ? 1 : 0;
-    // Ensure a meta row exists first (otherwise UPDATE matches 0 rows).
-    const exists = db.prepare('SELECT 1 FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1').get(server, nick);
-    if (!exists) {
-      db.prepare(`INSERT INTO modem_meta (server_name, nick, imei, operator, is_test_pool, updated_at)
-                  VALUES (?, ?, ?, '', ?, datetime('now'))`).run(server, nick, '', want);
-    } else {
-      db.prepare(`UPDATE modem_meta SET is_test_pool = ?, updated_at = datetime('now')
-                  WHERE server_name = ? AND nick = ?`).run(want, server, nick);
-    }
+    const want = simulatorDb.setTestPoolFlag(server, nick, enabled);
     auditLog(req.user.login, 'modem_test_pool_toggle', { server, nick, enabled: !!want });
     res.json({ ok: true, enabled: !!want });
   } catch (e) {
@@ -10194,9 +10191,7 @@ app.post('/api/admin/modem/test-pool', authMiddleware, adminMiddleware, (req, re
 // modem detail modal.
 app.get('/api/admin/simulator/all-modems', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const pool = new Set(
-      db.prepare("SELECT server_name || '|' || nick AS k FROM modem_meta WHERE is_test_pool = 1").all().map(r => r.k)
-    );
+    const pool = simulatorDb.testPoolKeySet();
     let live = [];
     try { live = await fetchAllServersDataCached(); } catch (e) { logger.warn('[Simulator/AllModems] fetchAllServersDataCached threw: ' + e.message); }
     const items = [];
@@ -10228,8 +10223,7 @@ app.get('/api/admin/simulator/all-modems', authMiddleware, adminMiddleware, asyn
     }
     // Also include modem_meta rows flagged in pool but not live (so they don't
     // silently disappear from the management UI).
-    const ghostRows = db.prepare(`SELECT server_name, nick, operator, model, phone
-                                  FROM modem_meta WHERE is_test_pool = 1`).all();
+    const ghostRows = simulatorDb.listTestPool();
     for (const g of ghostRows) {
       const key = g.server_name + '|' + g.nick;
       if (seen.has(key)) continue;
@@ -10250,10 +10244,7 @@ app.get('/api/admin/simulator/all-modems', authMiddleware, adminMiddleware, asyn
 // List all modems flagged is_test_pool=1, with live status info.
 app.get('/api/admin/simulator/test-pool', authMiddleware, adminMiddleware, async (req, res) => {
   try {
-    const flagged = db.prepare(`
-      SELECT server_name, nick, operator, model, phone
-      FROM modem_meta WHERE is_test_pool = 1 ORDER BY server_name, nick
-    `).all();
+    const flagged = simulatorDb.listTestPool();
     // Annotate with live status (online/offline) from cache so the UI can warn
     // if a flagged modem isn't currently reachable.
     let live = [];
@@ -10281,8 +10272,7 @@ app.get('/api/admin/simulator/test-pool', authMiddleware, adminMiddleware, async
 // ─── Profiles CRUD ──────────────────────────────────────────────────────────
 app.get('/api/admin/simulator/profiles', authMiddleware, adminMiddleware, (req, res) => {
   try {
-    const rows = db.prepare(`SELECT id, name, description, config_json, created_at, created_by, updated_at
-                             FROM simulator_profiles ORDER BY name`).all();
+    const rows = simulatorDb.listProfiles();
     const items = rows.map(r => ({
       id: r.id, name: r.name, description: r.description,
       config: JSON.parse(r.config_json), created_at: r.created_at,
@@ -10299,9 +10289,9 @@ app.post('/api/admin/simulator/profiles', authMiddleware, adminMiddleware, (req,
     const { name, description, config } = req.body || {};
     if (!name || typeof name !== 'string') return res.status(400).json({ error: 'name обязателен' });
     if (!config || typeof config !== 'object') return res.status(400).json({ error: 'config обязателен' });
-    const r = db.prepare(`INSERT INTO simulator_profiles (name, description, config_json, created_by)
-                          VALUES (?, ?, ?, ?) RETURNING id`)
-      .get(name, description || null, JSON.stringify(config), req.user.login);
+    const r = simulatorDb.createProfile({
+      name, description, configJson: JSON.stringify(config), createdBy: req.user.login,
+    });
     auditLog(req.user.login, 'sim_profile_create', { id: r.id, name });
     res.json({ ok: true, id: r.id });
   } catch (e) {
@@ -10314,16 +10304,14 @@ app.patch('/api/admin/simulator/profiles/:id', authMiddleware, adminMiddleware, 
   try {
     const id = parseInt(req.params.id, 10);
     const { name, description, config } = req.body || {};
-    const cur = db.prepare('SELECT * FROM simulator_profiles WHERE id = ?').get(id);
+    const cur = simulatorDb.getProfile(id);
     if (!cur) return res.status(404).json({ error: 'Профиль не найден' });
-    db.prepare(`UPDATE simulator_profiles
-                SET name = ?, description = ?, config_json = ?, updated_at = datetime('now')
-                WHERE id = ?`).run(
-      name || cur.name,
-      description != null ? description : cur.description,
-      config ? JSON.stringify(config) : cur.config_json,
-      id
-    );
+    simulatorDb.updateProfile({
+      id,
+      name: name || cur.name,
+      description: description != null ? description : cur.description,
+      configJson: config ? JSON.stringify(config) : cur.config_json,
+    });
     auditLog(req.user.login, 'sim_profile_update', { id });
     res.json({ ok: true });
   } catch (e) {
@@ -10334,7 +10322,7 @@ app.patch('/api/admin/simulator/profiles/:id', authMiddleware, adminMiddleware, 
 app.delete('/api/admin/simulator/profiles/:id', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const r = db.prepare('DELETE FROM simulator_profiles WHERE id = ?').run(id);
+    const r = simulatorDb.deleteProfile(id);
     if (r.changes === 0) return res.status(404).json({ error: 'Профиль не найден' });
     auditLog(req.user.login, 'sim_profile_delete', { id });
     res.json({ ok: true });
@@ -10350,7 +10338,7 @@ app.post('/api/admin/simulator/run', authMiddleware, adminMiddleware, async (req
     let profile = req.body && req.body.profile;
     const profileId = req.body && req.body.profile_id;
     if (!profile && profileId) {
-      const row = db.prepare('SELECT id, name, config_json FROM simulator_profiles WHERE id = ?').get(profileId);
+      const row = simulatorDb.getProfileForRun(profileId);
       if (!row) return res.status(404).json({ error: 'Профиль не найден' });
       profile = { id: row.id, name: row.name, ...JSON.parse(row.config_json) };
     }
@@ -10396,10 +10384,7 @@ app.get('/api/admin/simulator/runs', authMiddleware, adminMiddleware, (req, res)
   try {
     const limit = Math.min(parseInt(req.query.limit) || 50, 500);
     const offset = Math.max(0, parseInt(req.query.offset) || 0);
-    const rows = db.prepare(`SELECT id, profile_id, profile_name, started_at, ended_at, status,
-                                    summary_json, started_by, error_msg
-                             FROM simulator_runs ORDER BY started_at DESC LIMIT ? OFFSET ?`)
-      .all(limit, offset);
+    const rows = simulatorDb.listRuns({ limit, offset });
     const items = rows.map(r => ({
       id: r.id, profile_id: r.profile_id, profile_name: r.profile_name,
       started_at: r.started_at, ended_at: r.ended_at, status: r.status,
@@ -10415,7 +10400,7 @@ app.get('/api/admin/simulator/runs', authMiddleware, adminMiddleware, (req, res)
 app.get('/api/admin/simulator/run/:id', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const r = db.prepare('SELECT * FROM simulator_runs WHERE id = ?').get(id);
+    const r = simulatorDb.getRun(id);
     if (!r) return res.status(404).json({ error: 'Run не найден' });
     res.json({
       ok: true, run: {
@@ -10436,11 +10421,8 @@ app.get('/api/admin/simulator/run/:id/samples', authMiddleware, adminMiddleware,
     const id = parseInt(req.params.id, 10);
     const limit = Math.min(parseInt(req.query.limit) || 500, 5000);
     const offset = Math.max(0, parseInt(req.query.offset) || 0);
-    const rows = db.prepare(`SELECT ts_ms, worker_id, modem_nick, server_name, status, http_status,
-                                    total_ms, connect_ms, ttfb_ms, bytes, url, error_msg
-                             FROM simulator_samples WHERE run_id = ? ORDER BY ts_ms LIMIT ? OFFSET ?`)
-      .all(id, limit, offset);
-    const total = db.prepare('SELECT COUNT(*) AS n FROM simulator_samples WHERE run_id = ?').get(id).n;
+    const rows = simulatorDb.listSamples({ runId: id, limit, offset });
+    const total = simulatorDb.countSamples(id);
     res.json({ ok: true, items: rows, total });
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -10455,8 +10437,7 @@ app.get('/api/admin/simulator/run/:id/by-modem', authMiddleware, adminMiddleware
     const id = parseInt(req.params.id, 10);
     // We need percentiles per modem → can't do in pure SQL without window funcs.
     // Pull all sample rows (small per-run; bounded by duration × rps).
-    const rows = db.prepare(`SELECT modem_nick, server_name, status, total_ms, connect_ms, ttfb_ms
-                             FROM simulator_samples WHERE run_id = ?`).all(id);
+    const rows = simulatorDb.allSamplesForRun(id);
     const byKey = {};
     for (const r of rows) {
       const k = r.server_name + '|' + r.modem_nick;
@@ -10503,8 +10484,7 @@ app.get('/api/admin/simulator/run/:id/series', authMiddleware, adminMiddleware, 
     const id = parseInt(req.params.id, 10);
     const bucketSec = Math.max(1, Math.min(60, parseInt(req.query.bucket) || 2));
     const bucketMs = bucketSec * 1000;
-    const rows = db.prepare(`SELECT ts_ms, status, total_ms, connect_ms, ttfb_ms
-                             FROM simulator_samples WHERE run_id = ? ORDER BY ts_ms`).all(id);
+    const rows = simulatorDb.samplesSeries(id);
     const buckets = {};
     for (const r of rows) {
       const b = Math.floor(r.ts_ms / bucketMs);
@@ -10540,7 +10520,7 @@ app.get('/api/admin/simulator/compare', authMiddleware, adminMiddleware, (req, r
     const ids = String(req.query.run_ids || '').split(',').map(s => parseInt(s,10)).filter(Boolean).slice(0, 5);
     if (ids.length < 2) return res.status(400).json({ error: 'Передайте 2-5 run_ids' });
     const items = ids.map(id => {
-      const r = db.prepare('SELECT * FROM simulator_runs WHERE id = ?').get(id);
+      const r = simulatorDb.getRun(id);
       if (!r) return { id, error: 'not found' };
       const cfg = JSON.parse(r.config_json);
       const sum = r.summary_json ? JSON.parse(r.summary_json) : null;
@@ -10565,7 +10545,7 @@ app.get('/api/admin/simulator/compare', authMiddleware, adminMiddleware, (req, r
 app.get('/api/admin/simulator/run/:id/breaking-point', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
-    const run = db.prepare('SELECT config_json FROM simulator_runs WHERE id = ?').get(id);
+    const run = simulatorDb.getRunConfigJson(id);
     if (!run) return res.status(404).json({ error: 'Run не найден' });
     const cfg = JSON.parse(run.config_json);
     if (!cfg.concurrency || cfg.concurrency.mode !== 'ramp') {
@@ -10575,8 +10555,7 @@ app.get('/api/admin/simulator/run/:id/breaking-point', authMiddleware, adminMidd
     const end = cfg.concurrency.end || 20;
     const rampSec = cfg.concurrency.ramp_seconds || 30;
 
-    const rows = db.prepare(`SELECT ts_ms, status, total_ms FROM simulator_samples
-                             WHERE run_id = ? ORDER BY ts_ms`).all(id);
+    const rows = simulatorDb.samplesForBreakingPoint(id);
     if (rows.length < 10) return res.json({ ok: true, applicable: true, breaking_point: null, reason: 'Слишком мало сэмплов' });
 
     // Bucket every 2 seconds → compute timeout_pct and P95
@@ -10630,9 +10609,7 @@ app.get('/api/admin/simulator/run/:id/export', authMiddleware, adminMiddleware, 
   try {
     const id = parseInt(req.params.id, 10);
     const format = (req.query.format || 'json').toLowerCase();
-    const rows = db.prepare(`SELECT ts_ms, worker_id, modem_nick, server_name, status, http_status,
-                                    total_ms, connect_ms, ttfb_ms, bytes, url, error_msg
-                             FROM simulator_samples WHERE run_id = ? ORDER BY ts_ms`).all(id);
+    const rows = simulatorDb.exportSamples(id);
     if (format === 'csv') {
       const cols = ['ts_ms','worker_id','modem_nick','server_name','status','http_status',
                     'total_ms','connect_ms','ttfb_ms','bytes','url','error_msg'];
