@@ -387,6 +387,24 @@ CREATE TABLE IF NOT EXISTS proxy_checks (
 );
 CREATE INDEX IF NOT EXISTS idx_pc_nick ON proxy_checks(nick);
 CREATE INDEX IF NOT EXISTS idx_pc_checked ON proxy_checks(checked_at);
+
+-- External proxies (non-modem proxies a client owns and routes through us).
+-- Base columns only; migrations 005, etc. add extended ones. On existing prod
+-- DBs IF NOT EXISTS makes this a no-op. On fresh DBs it gives migration 005's
+-- ALTER TABLE statements something to ALTER.
+CREATE TABLE IF NOT EXISTS external_proxies (
+  id TEXT PRIMARY KEY,
+  client_id TEXT NOT NULL,
+  label TEXT DEFAULT '',
+  protocol TEXT DEFAULT 'HTTP',
+  host TEXT NOT NULL,
+  port INTEGER NOT NULL,
+  login TEXT DEFAULT '',
+  password TEXT DEFAULT '',
+  note TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')),
+  FOREIGN KEY (client_id) REFERENCES clients(id)
+);
 CREATE INDEX IF NOT EXISTS idx_pc_operator ON proxy_checks(operator);
 
 -- Migrations tracking

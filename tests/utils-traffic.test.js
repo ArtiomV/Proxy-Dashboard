@@ -1,7 +1,7 @@
 // Starter tests for src/utils/traffic.js — the bytes-parse helpers.
 // Run with `npm test`. Add more files as we extract more pure modules.
-const { describe, it, expect } = require('vitest');
-const { parseTrafficValue, trafficBytesToGb, normalizeOperator } = require('../src/utils/traffic.js');
+import { describe, it, expect } from 'vitest';
+import { parseTrafficValue, trafficBytesToGb, normalizeOperator } from '../src/utils/traffic.js';
 
 describe('parseTrafficValue', () => {
   it('returns 0 for null/empty/"0 B"', () => {

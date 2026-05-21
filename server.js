@@ -1,4 +1,7 @@
-require('dotenv').config();
+// Skip .env injection under NODE_ENV=test — the supertest harness sets
+// its own env in tests/_helpers/setup-env.js and must not be overridden
+// by whatever the developer happens to have in .env. Prod path unchanged.
+if (process.env.NODE_ENV !== 'test') require('dotenv').config();
 const express = require('express');
 const path = require('path');
 const http = require('http');
@@ -32,7 +35,9 @@ const aiInsights = require('./src/telegram/ai_insights');
 const simulator = require('./src/simulator/engine');
 const { execFile } = require('child_process');
 
-const DB_PATH = path.join(__dirname, 'dashboard.db');
+// DASHBOARD_DB_PATH override lets tests point at an isolated temp DB
+// without disturbing the production path. Unset in prod → identical behavior.
+const DB_PATH = process.env.DASHBOARD_DB_PATH || path.join(__dirname, 'dashboard.db');
 const SCHEMA_PATH = path.join(__dirname, 'schema.sql');
 const db = new Database(DB_PATH);
 db.pragma('journal_mode = WAL');
@@ -10688,7 +10693,12 @@ app.use((err, req, res, next) => {
   res.status(500).json(isAdmin ? { error: 'Internal error', details: (err && err.message) || '' } : { error: 'Internal error' });
 });
 
-const httpServer = app.listen(PORT, () => {
+// When required as a module under NODE_ENV=test (supertest harness), skip
+// binding a port and skip all cron/tracking/Telegram side effects — tests
+// only need `app` + `db` exposed via module.exports below. Production code
+// path (node server.js) is unchanged.
+const IS_TEST = process.env.NODE_ENV === 'test';
+const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   logger.info(`Proxies.Rent Dashboard running at http://localhost:${PORT}`);
 
   // Schedule speedtests (configurable times, default 02:00 + 14:00)
@@ -11141,8 +11151,8 @@ function gracefulShutdown(signal) {
   // Stop the telegram poll loop (avoid hanging in long-poll for 25s after SIGTERM)
   try { if (tgBot && tgBot.stop) tgBot.stop(); } catch (_) {}
 
-  // Stop accepting new connections
-  httpServer.close(() => {
+  // Stop accepting new connections (no-op in test mode where httpServer is null)
+  if (httpServer) httpServer.close(() => {
     logger.info('[Shutdown] HTTP server closed');
   });
 
@@ -11191,3 +11201,8 @@ process.on('uncaughtException', (err) => {
   // Trigger graceful shutdown so pm2 restarts cleanly.
   try { gracefulShutdown('uncaughtException'); } catch (_) { process.exit(1); }
 });
+
+// Expose internals for the supertest harness (NODE_ENV=test). Production
+// code paths don't reach for this — the start-via-`node server.js` flow
+// runs to completion above and never `require()`s its own exports.
+module.exports = { app, db };
