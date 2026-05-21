@@ -203,7 +203,7 @@ function kvSetCritical(key, value, opts) {
 
   if (regressions.length > 0 && !allowRegression) {
     logger.warn(`[kvGuard] REFUSED write to '${key}' from '${source}': shape regression ${JSON.stringify(regressions)}`);
-    try { if (typeof logActivity === 'function') logActivity('system', 'warn', 'kv_write_refused', null, `Refused regressive write to ${key}`, { key, source, regressions }); } catch (_) {}
+    try { if (typeof logActivity === 'function') logActivity('system', 'warn', 'kv_write_refused', null, `Refused regressive write to ${key}`, { key, source, regressions }); } catch (_) { /* best-effort: error intentionally swallowed */ }
     return { ok: false, error: 'shape regression', regressions };
   }
 
@@ -317,7 +317,7 @@ try {
     const dbServers = JSON.parse(_dbRow.value);
     mergeDbMetadataIntoEnvServers(apiServers, dbServers);
   }
-} catch (e) {}
+} catch (_) { /* best-effort: error intentionally swallowed */ }
 function saveApiServersToDb(source) {
   // Routes through kvSetCritical so the write is history-logged AND refused if
   // it would silently shrink any tracked metadata count (address/ssh/etc).
@@ -356,7 +356,7 @@ logger.info(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.
     const currentShape = KV_CRITICAL_SHAPES.api_servers(JSON.stringify(apiServers));
     const baselineRow = _kvGet.get('integrity_baseline_api_servers');
     let baseline = null;
-    if (baselineRow) { try { baseline = JSON.parse(baselineRow.value); } catch (_) {} }
+    if (baselineRow) { try { baseline = JSON.parse(baselineRow.value); } catch (_) { /* best-effort: error intentionally swallowed */ } }
     if (baseline) {
       const regs = _shapeRegressions(baseline, currentShape);
       if (regs.length > 0) {
@@ -366,7 +366,7 @@ logger.info(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.
         // logActivity isn't defined yet at this point (hoisted as a function but
         // its db dependency dbStmts may not exist) — defer the audit event.
         process.nextTick(() => {
-          try { logActivity('system', 'critical', 'integrity_regression', 'api_servers', `Server metadata regressed at boot: ${regs.map(r => r.field + ' ' + r.before + '→' + r.after).join(', ')}`, { regressions: regs, baseline, current: currentShape }); } catch (_) {}
+          try { logActivity('system', 'critical', 'integrity_regression', 'api_servers', `Server metadata regressed at boot: ${regs.map(r => r.field + ' ' + r.before + '→' + r.after).join(', ')}`, { regressions: regs, baseline, current: currentShape }); } catch (_) { /* best-effort: error intentionally swallowed */ }
         });
       } else {
         logger.info(`[Integrity] api_servers OK: ${JSON.stringify(currentShape)}`);
@@ -570,7 +570,7 @@ let billingLedger = {};
       if (r.source) entry.source = r.source;
       if (r.payment_id) entry.paymentId = r.payment_id;
       if (r.details && r.details !== '{}') {
-        try { Object.assign(entry, JSON.parse(r.details)); } catch (e) {}
+        try { Object.assign(entry, JSON.parse(r.details)); } catch (_) { /* best-effort: error intentionally swallowed */ }
       }
       entry.db_id = r.id; 
       billingLedger[r.client_id].push(entry);
@@ -805,7 +805,7 @@ try {
         // Also surface in system_log so it shows up in the admin UI without needing SSH.
         try { logActivity('system', 'error', 'tochka_decrypt_failed', null,
           `Не удалось расшифровать tochka_config.json (hostname=${hostNow}). Проверьте \$TOCHKA_CONFIG_KEY или восстановите hostname.`,
-          { hostname: hostNow, hasExplicitKey }); } catch (_) {}
+          { hostname: hostNow, hasExplicitKey }); } catch (_) { /* best-effort: error intentionally swallowed */ }
         parsed = null;
       }
     } else {
@@ -1072,7 +1072,7 @@ function runRetentionCleanup() {
           if (imei) liveImeis.add(srv + '_' + imei);
         }
       }
-    } catch (_) {}
+    } catch (_) { /* best-effort: error intentionally swallowed */ }
     let ipPruned = 0, upPruned = 0, rotPruned = 0;
     if (liveImeis.size > 0) {
       for (const k of Object.keys(ipTracking)) if (!liveImeis.has(k)) { delete ipTracking[k]; ipPruned++; }
@@ -1991,7 +1991,7 @@ function authMiddleware(req, res, next) {
   // Cheap (one INSERT per write request) — no-op for read-only GETs that
   // never trigger watched tables.
   if (req.method !== 'GET' && req.method !== 'HEAD') {
-    try { dbAudit.ensureRequestContext(req.method + ' ' + (req.originalUrl || req.path || '').split('?')[0]); } catch (_) {}
+    try { dbAudit.ensureRequestContext(req.method + ' ' + (req.originalUrl || req.path || '').split('?')[0]); } catch (_) { /* best-effort: error intentionally swallowed */ }
   }
   next();
 }
@@ -2267,7 +2267,7 @@ app.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (
 
     // -- Modem utilization (live data) --
     let liveResults = [];
-    try { liveResults = await fetchAllServersDataCached(); } catch (_) {}
+    try { liveResults = await fetchAllServersDataCached(); } catch (_) { /* best-effort: error intentionally swallowed */ }
     let totalModems = 0, rentedModems = 0;
     const modemsByServer = {};
     const modemsByOperator = {};
@@ -2672,7 +2672,7 @@ let rotationCacheUpdatedAt = 0;
 try {
   const _rcRow = _kvGet.get('rotation_cache');
   if (_rcRow) { Object.assign(modemRotationCache, JSON.parse(_rcRow.value)); logger.info(`[Rotation] Restored ${Object.keys(modemRotationCache).length} cached rotation values`); }
-} catch (e) {}
+} catch (_) { /* best-effort: error intentionally swallowed */ }
 const ROTATION_CACHE_TTL = () => (appSettings.rotation_cache_ttl_min || 30) * 60000;
 
 async function refreshRotationCache() {
@@ -2706,7 +2706,7 @@ async function refreshRotationCache() {
   const total = Object.keys(modemRotationCache).length;
   logger.info(`[Rotation] Total cached: ${total} modem rotation values`);
   logActivity('rotation', 'info', 'cache_refreshed', null, `Rotation cache refreshed: ${total} modems`, { total });
-  try { _kvSet.run('rotation_cache', JSON.stringify(modemRotationCache)); } catch (e) {}
+  try { _kvSet.run('rotation_cache', JSON.stringify(modemRotationCache)); } catch (_) { /* best-effort: error intentionally swallowed */ }
 }
 
 // Inject AUTO_IP_ROTATION into status data
@@ -2900,7 +2900,7 @@ const autoRecovery = {};
 let uptimeTracking = {};
 try {
   const rows = db.prepare('SELECT key, data FROM uptime_tracking').all();
-  for (const r of rows) { try { uptimeTracking[r.key] = JSON.parse(r.data); } catch (e) {} }
+  for (const r of rows) { try { uptimeTracking[r.key] = JSON.parse(r.data); } catch (_) { /* best-effort: error intentionally swallowed */ } }
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} uptime tracking entries`);
 } catch (e) { logger.error('Failed to load uptime_tracking from SQLite:', e.message); }
 
@@ -5988,7 +5988,7 @@ app.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) 
     try {
       const dbPath = path.join(__dirname, 'dashboard.db');
       if (fs.existsSync(dbPath)) dbSizeBytes = fs.statSync(dbPath).size;
-    } catch (_e) {}
+    } catch (_) { /* best-effort: error intentionally swallowed */ }
 
     // Sessions
     const sessionCount = db.prepare("SELECT COUNT(*) as c FROM sessions WHERE expires_at > datetime('now')").get().c;
@@ -6851,7 +6851,7 @@ app.delete('/api/admin/clients/:id/document/:docId', authMiddleware, adminMiddle
   const doc = client.documents[docIdx];
   // Delete file (with path traversal protection)
   const delPath = path.join(DOCUMENTS_DIR, path.basename(doc.fileName));
-  if (delPath.startsWith(DOCUMENTS_DIR)) { try { fs.unlinkSync(delPath); } catch (e) {} }
+  if (delPath.startsWith(DOCUMENTS_DIR)) { try { fs.unlinkSync(delPath); } catch (_) { /* best-effort: error intentionally swallowed */ } }
   client.documents.splice(docIdx, 1);
   saveClients(clients);
   res.json({ ok: true });
@@ -6874,7 +6874,7 @@ app.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
   // Parse details JSON back to object for frontend
   const entries = rows.map(r => {
     let details = {};
-    try { details = JSON.parse(r.details || '{}'); } catch (e) {}
+    try { details = JSON.parse(r.details || '{}'); } catch (_) { /* best-effort: error intentionally swallowed */ }
     return { timestamp: r.timestamp, admin: r.admin, action: r.action, ...details };
   });
   res.json({ total, offset, limit, entries });
@@ -8110,7 +8110,7 @@ async function aggregateTopHosts() {
       const statusArr = Array.isArray(statusResult) ? statusResult : [];
       let portsMap = {};
       if (portsResult && typeof portsResult === 'object' && !portsResult.raw) portsMap = portsResult;
-      else if (portsResult && portsResult.raw) { try { portsMap = JSON.parse(portsResult.raw); } catch(_) {} }
+      else if (portsResult && portsResult.raw) { try { portsMap = JSON.parse(portsResult.raw); } catch (_) { /* best-effort: error intentionally swallowed */ } }
 
       for (const m of statusArr) {
         const md = m.modem_details || {};
@@ -8913,7 +8913,7 @@ app.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), asy
       logger.error(`[Tochka Webhook] JWT NOT verified: ${reason}. Saving as unverified for manual review.`);
       // Surface the security event in system_log so it shows up in the
       // admin "events" feed instead of buried in pino-only logs.
-      try { logActivity('system', 'warn', 'tochka_unverified_webhook', null, `Unverified Tochka webhook accepted (reason: ${reason})`, { reason: String(reason || '').slice(0, 200), payerInn: _pickField(payload, ['SidePayer','sidePayer','payer'])?.inn || '', amount: payload.amount || payload.Amount || '' }); } catch (_) {}
+      try { logActivity('system', 'warn', 'tochka_unverified_webhook', null, `Unverified Tochka webhook accepted (reason: ${reason})`, { reason: String(reason || '').slice(0, 200), payerInn: _pickField(payload, ['SidePayer','sidePayer','payer'])?.inn || '', amount: payload.amount || payload.Amount || '' }); } catch (_) { /* best-effort: error intentionally swallowed */ }
       if (appSettings.tochka_strict_webhook) {
         // Strict mode: refuse to persist unverified payments at all. Off by default.
         return res.status(401).json({ ok: false, processed: false, reason: 'jwt_verification_failed' });
@@ -10146,7 +10146,7 @@ app.get('/api/admin/simulator/test-pool', authMiddleware, adminMiddleware, async
     // Annotate with live status (online/offline) from cache so the UI can warn
     // if a flagged modem isn't currently reachable.
     let live = [];
-    try { live = await fetchAllServersDataCached(); } catch (_) {}
+    try { live = await fetchAllServersDataCached(); } catch (_) { /* best-effort: error intentionally swallowed */ }
     const liveByKey = {};
     for (const data of live) {
       const srv = data.serverName || '';
@@ -10540,10 +10540,10 @@ app.get('/api/admin/simulator/run/:id/stream', authMiddleware, adminMiddleware, 
   });
   res.flushHeaders && res.flushHeaders();
   const send = (event) => {
-    try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch (_) {}
+    try { res.write(`data: ${JSON.stringify(event)}\n\n`); } catch (_) { /* best-effort: error intentionally swallowed */ }
   };
   // Heartbeat to detect dead clients (and prevent NGINX idle close).
-  const hb = setInterval(() => { try { res.write(': hb\n\n'); } catch (_) {} }, 25000);
+  const hb = setInterval(() => { try { res.write(': hb\n\n'); } catch (_) { /* best-effort: error intentionally swallowed */ } }, 25000);
   const unsub = simulator.subscribe(id, send);
   req.on('close', () => { clearInterval(hb); unsub(); });
 });
@@ -10561,7 +10561,7 @@ app.use('/api', (req, res) => {
 app.use((err, req, res, next) => {
   const msg = (err && err.stack) || (err && err.message) || String(err);
   logger.error(`[Express] ${req.method} ${req.path}: ${msg}`);
-  try { logActivity('system', 'error', 'unhandled_express', null, `${req.method} ${req.path}: ${(err && err.message) || ''}`, { path: req.path, method: req.method }); } catch (_) {}
+  try { logActivity('system', 'error', 'unhandled_express', null, `${req.method} ${req.path}: ${(err && err.message) || ''}`, { path: req.path, method: req.method }); } catch (_) { /* best-effort: error intentionally swallowed */ }
   if (res.headersSent) return next(err);
   // Admins get the message for debugging; everyone else gets generic.
   const isAdmin = req.user && req.user.isAdmin;
@@ -10693,7 +10693,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
       if (pct > 85) {
         logActivity('system', 'warn', 'heap_high', null, `Heap ${pct}% (${Math.round(mem.heapUsed/1e6)}MB / ${Math.round(mem.heapTotal/1e6)}MB)`, { pct, heapUsed: mem.heapUsed, heapTotal: mem.heapTotal });
       }
-    } catch (_) {}
+    } catch (_) { /* best-effort: error intentionally swallowed */ }
     try {
       // Disk free via statfs (Node 18.15+)
       const target = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
@@ -10707,7 +10707,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
           }
         });
       }
-    } catch (_) {}
+    } catch (_) { /* best-effort: error intentionally swallowed */ }
   }, 5 * 60 * 1000));
 
   // Nightly DB backup at 02:00 UTC (05:00 MSK) — uses SQLite Online Backup
@@ -10716,7 +10716,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   scheduleRepeating(2, 0, 'DbBackup', async () => {
     try {
       const backupDir = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
-      try { fs.mkdirSync(backupDir, { recursive: true }); } catch (_) {}
+      try { fs.mkdirSync(backupDir, { recursive: true }); } catch (_) { /* best-effort: error intentionally swallowed */ }
       const ts = new Date().toISOString().slice(0, 10);
       const dest = path.join(backupDir, `dashboard-${ts}.db`);
       // better-sqlite3 .backup() is a promise that streams pages to disk.
@@ -10734,7 +10734,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
       for (const f of files) {
         const fileDate = f.slice(10, 20);
         if (fileDate < cutoff) {
-          try { fs.unlinkSync(path.join(backupDir, f)); pruned++; } catch (_) {}
+          try { fs.unlinkSync(path.join(backupDir, f)); pruned++; } catch (_) { /* best-effort: error intentionally swallowed */ }
         }
       }
       const sizeMb = Math.round(fs.statSync(dest).size / 1024 / 1024 * 10) / 10;
@@ -10852,7 +10852,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   // Resilient hourly traffic aggregation with retry logic:
   // Attempts at :00, :01, :02, :03, :04 (5 tries).
   let _hourlyLastRecordedHour = null; // e.g. '2026-03-31 12:00'
-  try { const r = _kvGet.get('hourly_last_recorded'); if (r) _hourlyLastRecordedHour = r.value; } catch(e) {}
+  try { const r = _kvGet.get('hourly_last_recorded'); if (r) _hourlyLastRecordedHour = r.value; } catch (_) { /* best-effort: error intentionally swallowed */ }
   // _hourlyLoopTimeout and _hourlyAggStopped declared at module level for gracefulShutdown
   (function scheduleHourlyAggRetry() {
     // Find next :00 (top of the hour)
@@ -10889,7 +10889,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
           try {
             // Success = no exception, even if cnt=0 (all modems offline)
             _hourlyLastRecordedHour = targetHourStr;
-            try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch(e) {}
+            try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch (_) { /* best-effort: error intentionally swallowed */ }
             const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
             logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${(check && check.cnt) || 0} rows)`);
             logActivity('traffic', 'info', 'hourly_agg', null, `Hourly traffic aggregated for ${targetHourStr}: ${(check && check.cnt) || 0} rows (attempt ${attemptIdx + 1})`, { hour: targetHourStr, rows: (check && check.cnt) || 0, attempt: attemptIdx + 1 });
@@ -10997,7 +10997,7 @@ async function checkCrmPaymentConfirmations() {
 
     await pgClient.end();
   } catch (e) {
-    if (pgClient) try { await pgClient.end(); } catch (_) {}
+    if (pgClient) try { await pgClient.end(); } catch (_) { /* best-effort: error intentionally swallowed */ }
     // pg module might not be installed — skip silently
     if (e.code !== 'MODULE_NOT_FOUND') {
       logger.error('[CRM] Payment check error:', e.message);
@@ -11024,7 +11024,7 @@ function gracefulShutdown(signal) {
   _intervals.length = 0;
   for (const t of speedtestTimers.concat(_cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }
   // Stop the telegram poll loop (avoid hanging in long-poll for 25s after SIGTERM)
-  try { if (tgBot && tgBot.stop) tgBot.stop(); } catch (_) {}
+  try { if (tgBot && tgBot.stop) tgBot.stop(); } catch (_) { /* best-effort: error intentionally swallowed */ }
 
   // Stop accepting new connections (no-op in test mode where httpServer is null)
   if (httpServer) httpServer.close(() => {
@@ -11035,12 +11035,12 @@ function gracefulShutdown(signal) {
   const allPending = Array.from(_fileLocks.values());
   Promise.all(allPending)
     .then(() => {
-      try { db.close(); logger.info('[Shutdown] SQLite database closed'); } catch (e) {}
+      try { db.close(); logger.info('[Shutdown] SQLite database closed'); } catch (_) { /* best-effort: error intentionally swallowed */ }
       logger.info('[Shutdown] All writes complete. Bye!');
       process.exit(0);
     })
     .catch((e) => {
-      try { db.close(); } catch (_) {}
+      try { db.close(); } catch (_) { /* best-effort: error intentionally swallowed */ }
       logger.error('[Shutdown] Error during cleanup:', e.message);
       process.exit(1);
     });
@@ -11065,13 +11065,13 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 process.on('unhandledRejection', (reason, promise) => {
   const msg = (reason && reason.stack) || (reason && reason.message) || String(reason);
   try { logger.error('[UnhandledRejection] ' + msg); } catch (_) { console.error('[UnhandledRejection]', msg); }
-  try { logActivity('system', 'error', 'unhandled_rejection', null, 'Unhandled promise rejection', { reason: String(msg).slice(0, 1000) }); } catch (_) {}
+  try { logActivity('system', 'error', 'unhandled_rejection', null, 'Unhandled promise rejection', { reason: String(msg).slice(0, 1000) }); } catch (_) { /* best-effort: error intentionally swallowed */ }
 });
 
 process.on('uncaughtException', (err) => {
   const msg = (err && err.stack) || (err && err.message) || String(err);
   try { logger.error('[UncaughtException] ' + msg); } catch (_) { console.error('[UncaughtException]', msg); }
-  try { logActivity('system', 'critical', 'uncaught_exception', null, 'Uncaught exception — restarting', { error: String(msg).slice(0, 1000) }); } catch (_) {}
+  try { logActivity('system', 'critical', 'uncaught_exception', null, 'Uncaught exception — restarting', { error: String(msg).slice(0, 1000) }); } catch (_) { /* best-effort: error intentionally swallowed */ }
   // Per Node docs: after uncaughtException the process is in undefined state.
   // Trigger graceful shutdown so pm2 restarts cleanly.
   try { gracefulShutdown('uncaughtException'); } catch (_) { process.exit(1); }

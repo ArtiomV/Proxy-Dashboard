@@ -21,7 +21,7 @@ function safeWriteFile(filePath, data, logger) {
       await fsPromises.writeFile(tmp, data, 'utf8');
       await fsPromises.rename(tmp, filePath);
     } catch (e) {
-      try { await fsPromises.unlink(tmp); } catch (_) {}
+      try { await fsPromises.unlink(tmp); } catch (_) { /* best-effort */ }
       // ENOSPC = disk full; surface as critical so it's visible in dashboards
       // and Telegram alerts (system_log subscription). Throttle to 1/min to
       // avoid log-storm when 100 writes fail in a row.

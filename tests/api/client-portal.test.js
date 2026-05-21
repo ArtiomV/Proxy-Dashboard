@@ -34,8 +34,8 @@ beforeAll(async () => {
 });
 
 afterAll(() => {
-  try { db.prepare('DELETE FROM clients WHERE login = ?').run(clientLogin); } catch (_) {}
-  try { db.prepare('DELETE FROM sessions WHERE login = ?').run(clientLogin); } catch (_) {}
+  try { db.prepare('DELETE FROM clients WHERE login = ?').run(clientLogin); } catch (_) { /* best-effort */ }
+  try { db.prepare('DELETE FROM sessions WHERE login = ?').run(clientLogin); } catch (_) { /* best-effort */ }
 });
 
 describe('GET /api/dashboard_data', () => {

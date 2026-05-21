@@ -81,7 +81,7 @@ async function executeRequest({ url, method, headers, body, proxyUrl, timeoutMs 
     errMsg = m.slice(0, 240);
   } finally {
     clearTimeout(timer);
-    try { dispatcher.close(); } catch (_) {}
+    try { dispatcher.close(); } catch (_) { /* best-effort */ }
   }
 
   const totalMs = Number((process.hrtime.bigint() - t0) / 1000000n);

@@ -201,7 +201,7 @@ async function buildDailySummary(date) {
   try {
     const sla = db.prepare(`SELECT COUNT(*) c FROM sla_violations WHERE date = ?`).get(date);
     slaCount = (sla && sla.c) || 0;
-  } catch (_) {}
+  } catch (_) { /* best-effort */ }
 
   lines.push('');
   lines.push('⚙️ <b>Инфраструктура</b>');
@@ -222,7 +222,7 @@ async function buildDailySummary(date) {
       FROM rotation_log
       WHERE started_at >= ? AND started_at < ?
     `).get(utcStartStr, utcEndStr);
-  } catch (_) {}
+  } catch (_) { /* best-effort */ }
 
   if (rotRow && rotRow.total > 0) {
     lines.push('');

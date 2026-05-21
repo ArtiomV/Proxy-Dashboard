@@ -324,7 +324,7 @@ function _computeSummary(run) {
 function _broadcast(event) {
   for (const l of listeners) {
     if (!event.runId || event.runId === l.runId) {
-      try { l.send(event); } catch (_) {}
+      try { l.send(event); } catch (_) { /* best-effort */ }
     }
   }
 }

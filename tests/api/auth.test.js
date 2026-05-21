@@ -42,8 +42,8 @@ beforeAll(async () => {
 afterAll(() => {
   // Cleanup so re-runs in the same DB don't trip the UNIQUE login constraint.
   if (testClientLogin) {
-    try { db.prepare('DELETE FROM clients WHERE login = ?').run(testClientLogin); } catch (_) {}
-    try { db.prepare('DELETE FROM sessions WHERE login = ?').run(testClientLogin); } catch (_) {}
+    try { db.prepare('DELETE FROM clients WHERE login = ?').run(testClientLogin); } catch (_) { /* best-effort */ }
+    try { db.prepare('DELETE FROM sessions WHERE login = ?').run(testClientLogin); } catch (_) { /* best-effort */ }
   }
 });
 

@@ -15,7 +15,7 @@ function getTzOffset(tzName) {
       const m = tzPart.value.match(/GMT([+-]\d{1,2})(?::(\d{2}))?/);
       if (m) return parseInt(m[1]) + (m[2] ? parseInt(m[2]) / 60 * (m[1].startsWith('-') ? -1 : 1) : 0);
     }
-  } catch (e) {}
+  } catch (_) { /* best-effort */ }
   return 3; // fallback to UTC+3 (MSK)
 }
 

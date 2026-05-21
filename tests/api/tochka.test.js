@@ -31,7 +31,7 @@ function makeUnverifiedJwt(payload) {
 
 afterEach(() => {
   // Drop test webhook rows so each suite starts clean.
-  try { db.prepare("DELETE FROM bank_payments WHERE purpose LIKE 'test:%'").run(); } catch (_) {}
+  try { db.prepare("DELETE FROM bank_payments WHERE purpose LIKE 'test:%'").run(); } catch (_) { /* best-effort */ }
 });
 
 describe('POST /api/tochka/webhook', () => {
