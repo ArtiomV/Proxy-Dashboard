@@ -63,6 +63,24 @@ they go here instead of into the working commits.
   `tests/api/clients.test.js` work around this by asserting DB balance
   instead of response body balance.
 
+## Stage 2 — remaining db.prepare() migrations
+
+Stage 2 extracted the **billing-critical** domains: simulator, clients,
+ledger, payments, documents (43 statements → 5 repos). Remaining 162
+inline `db.prepare()` calls in server.js are mostly inside route bodies
+for tracking / traffic / kv / proxy-checks / analytics. These will move
+into per-domain modules naturally during **Stage 3** (route slicing) —
+each `src/routes/<domain>.js` file will own its prepared statements via
+a sibling `src/db/<domain>.js`. Doing it in Stage 2 first would mean
+touching the same routes twice; folding it into Stage 3 keeps the
+review surface smaller.
+
+Domains still to extract (will happen alongside Stage 3 commits):
+  - `kv` (4 stmts; coupled with kv-guard so will keep current layering)
+  - `traffic` (~5 stmts: daily_traffic, traffic_hourly, hourly_snapshots)
+  - `tracking` (~7 stmts: ip_tracking, uptime_tracking, ip_history,
+    modem_meta, rotation_log, proxy_checks, api_usage)
+
 ## Behavior questions to confirm before changing
 
 - The `BENIGN_MIGRATION_ERRORS` regex set includes `/no such column/i` with a
