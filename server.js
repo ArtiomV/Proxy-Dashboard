@@ -39,6 +39,7 @@ const documentsDb = require('./src/db/documents');
 const clientsDb = require('./src/db/clients');
 const ledgerDb = require('./src/db/ledger');
 const { execFile } = require('child_process');
+const os = require('os');
 
 // DASHBOARD_DB_PATH override lets tests point at an isolated temp DB
 // without disturbing the production path. Unset in prod → identical behavior.
@@ -763,12 +764,11 @@ function _tochkaCryptKey() {
   const env = process.env.TOCHKA_CONFIG_KEY;
   if (env && /^[0-9a-f]{64}$/i.test(env)) return Buffer.from(env, 'hex');
   // Derived fallback (deterministic per host so saves stay readable on restart).
-  return require('crypto').createHash('sha256')
-    .update('tochka-config-v1|' + require('os').hostname() + '|' + process.platform)
+  return crypto.createHash('sha256')
+    .update('tochka-config-v1|' + os.hostname() + '|' + process.platform)
     .digest();
 }
 function _encryptJson(obj) {
-  const crypto = require('crypto');
   const key = _tochkaCryptKey();
   const iv = crypto.randomBytes(12);
   const cipher = crypto.createCipheriv('aes-256-gcm', key, iv);
@@ -777,7 +777,6 @@ function _encryptJson(obj) {
   return JSON.stringify({ v: 1, iv: iv.toString('base64'), tag: tag.toString('base64'), ct: enc.toString('base64') });
 }
 function _decryptJson(payload) {
-  const crypto = require('crypto');
   const wrap = JSON.parse(payload);
   if (!wrap || wrap.v !== 1) throw new Error('not an encrypted v1 payload');
   const key = _tochkaCryptKey();
@@ -795,7 +794,7 @@ try {
       try { parsed = _decryptJson(raw); }
       catch (e) {
         const hasExplicitKey = !!(process.env.TOCHKA_CONFIG_KEY && /^[0-9a-f]{64}$/i.test(process.env.TOCHKA_CONFIG_KEY));
-        const hostNow = require('os').hostname();
+        const hostNow = os.hostname();
         // Distinguish "wrong explicit key" from "derived key drift after hostname change" —
         // both are decrypt failures but they need different fixes from the operator.
         if (hasExplicitKey) {
@@ -1065,8 +1064,7 @@ function runRetentionCleanup() {
   try {
     const liveImeis = new Set();
     try {
-      const fs2 = require('fs');
-      const cache = JSON.parse(fs2.readFileSync(SERVER_CACHE_FILE, 'utf8'));
+      const cache = JSON.parse(fs.readFileSync(SERVER_CACHE_FILE, 'utf8'));
       for (const srv of Object.keys(cache || {})) {
         const status = Array.isArray(cache[srv].status) ? cache[srv].status : [];
         for (const m of status) {
@@ -4083,8 +4081,7 @@ app.get('/api/v1/proxies', async (req, res) => {
 });
 
 app.post('/api/admin/cache/invalidate', authMiddleware, adminMiddleware, (req, res) => {
-  _psCache = null;
-  _psCacheTs = 0;
+  proxySmart.invalidateCache();
   logger.info('[Cache] ProxySmart cache invalidated by admin');
   res.json({ ok: true, message: 'Cache invalidated' });
 });
@@ -6923,7 +6920,7 @@ app.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, async (re
     }
     srv.user = candidate.user;
     srv.pass = candidate.pass;
-    _psCache = null; _psCacheTs = 0;
+    proxySmart.invalidateCache();
   }
 
   saveApiServersToDb();
@@ -6946,7 +6943,7 @@ app.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res)
     // Save to DB (not .env)
     saveApiServersToDb();
     auditLog(req.user.login, 'add_server', { name, url, modemCount, ip: getClientIp(req) });
-    _psCache = null; _psCacheTs = 0;
+    proxySmart.invalidateCache();
     res.json({ ok: true, modemCount });
   } catch (e) {
     res.status(502).json({ error: 'Server unreachable', details: e.message });
@@ -6959,7 +6956,7 @@ app.delete('/api/admin/servers/:name', authMiddleware, adminMiddleware, (req, re
   apiServers.splice(idx, 1);
   delete SERVER_COUNTRIES[req.params.name];
   saveApiServersToDb();
-  _psCache = null; _psCacheTs = 0;
+  proxySmart.invalidateCache();
   auditLog(req.user.login, 'delete_server', { name: req.params.name, ip: getClientIp(req) });
   res.json({ ok: true });
 });
@@ -7294,7 +7291,7 @@ app.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, 
     // Update rotation cache immediately so dashboard reflects the change
     const newRot = parseInt(modemData.AUTO_IP_ROTATION) || 0;
     modemRotationCache[serverName + ':' + rawImei] = newRot;
-    _psCache = null; _psCacheTs = 0; // invalidate data cache
+    proxySmart.invalidateCache(); // invalidate data cache
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Store modem failed', details: err.message }); }
 });
@@ -7418,7 +7415,7 @@ app.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req,
     const result = await postFormApi(server, `/conf/edit_port/${portID}`, formData);
     logger.info(`[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`);
     // Invalidate cache so changes appear immediately
-    _psCache = null; _psCacheTs = 0;
+    proxySmart.invalidateCache();
     auditLog(req.user.login, 'assign_modem', { serverName, portID, newPortName, ip: getClientIp(req) });
     res.json({ ok: true });
   } catch (err) {
@@ -7649,7 +7646,7 @@ app.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, r
       logger.warn(`[store_port] apply_port failed for ${actualPortId}: ${e.message}`);
     }
 
-    _psCache = null; _psCacheTs = 0;
+    proxySmart.invalidateCache();
     auditLog(req.user.login, 'store_port', { serverName, IMEI: rawImei, portName: portData.portName, portId: actualPortId, applied, ip: getClientIp(req) });
     logActivity('modem', 'info', 'port_created', portData.portName || actualPortId, `Port created on ${serverName}/${rawImei} (id=${actualPortId})`, { applied });
     res.json({ ok: true, portId: actualPortId, applied });
@@ -7689,7 +7686,7 @@ app.post('/api/admin/move_port', authMiddleware, adminMiddleware, async (req, re
     try { await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portID)}`); }
     catch (e) { logger.warn(`[move_port] apply_port failed for ${portID}: ${e.message}`); }
     auditLog(req.user.login, 'move_port', { serverName, portID, newIMEI, ip: getClientIp(req) });
-    _psCache = null; _psCacheTs = 0;
+    proxySmart.invalidateCache();
     res.json({ ok: true });
   } catch (err) { res.status(502).json({ error: 'Move port failed', details: err.message }); }
 });
@@ -7795,7 +7792,7 @@ app.post('/api/admin/save_port_config', authMiddleware, adminMiddleware, async (
     const result = await postFormApi(server, `/conf/edit_port/${portId}`, formData);
     // Apply the port changes
     await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`);
-    _psCache = null; _psCacheTs = 0;
+    proxySmart.invalidateCache();
     auditLog(req.user.login, 'save_port_config', { serverName, portId, fields: Object.keys(fields), ip: getClientIp(req) });
     const success = result.status === 302 || result.status === 200;
     res.json({ ok: success, status: result.status });
@@ -7844,7 +7841,7 @@ app.post('/api/admin/bulk_os_spoof', authMiddleware, adminMiddleware, async (req
         else failed++;
       } catch (e) { failed++; }
     }
-    _psCache = null; _psCacheTs = 0;
+    proxySmart.invalidateCache();
     auditLog(req.user.login, 'bulk_os_spoof', { os, count: ports.length, ok, failed, ip: getClientIp(req) });
     res.json({ ok: true, updated: ok, failed });
   } catch (err) { res.status(500).json({ error: err.message }); }
@@ -7870,7 +7867,7 @@ app.post('/api/admin/bulk_rotation', authMiddleware, adminMiddleware, async (req
         ok++;
       } catch (e) { failed++; }
     }
-    _psCache = null; _psCacheTs = 0;
+    proxySmart.invalidateCache();
     auditLog(req.user.login, 'bulk_rotation', { rotation: rotVal, count: modems.length, ok, failed, ip: getClientIp(req) });
     res.json({ ok: true, updated: ok, failed });
   } catch (err) { res.status(500).json({ error: err.message }); }

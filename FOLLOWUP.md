@@ -44,6 +44,20 @@ they go here instead of into the working commits.
   across hostname changes), or require explicit `$TOCHKA_CONFIG_KEY` and refuse
   to derive silently.
 
+## Production bugs surfaced by lint / Stage 6
+
+- **Proxy-cache invalidation was completely broken.** server.js had 12
+  spots doing `_psCache = null; _psCacheTs = 0;` to drop the ProxySmart
+  cache. Those identifiers don't exist in server.js scope — they live
+  inside `src/api/proxy-smart.js`. Without `'use strict'`, the
+  assignments became silent no-ops, so every cache-invalidate code path
+  (manual /api/admin/cache/invalidate, post-rotation, after-bulk-port-
+  change, etc.) had been doing nothing for an unknown amount of time.
+  Stage 6 commit added `proxySmart.invalidateCache()` and rewrote all
+  12 callsites. Symptom in prod: changes to ports / rotations / clients
+  could take up to PS_CACHE_TTL (30s) to appear in the dashboard for
+  every user — admins probably just refreshed twice.
+
 ## Production bugs surfaced by characterization tests
 
 - **`atomicCredit` / `atomicDebit` keep a stale `clientById` reference after

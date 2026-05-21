@@ -380,5 +380,11 @@ module.exports = {
   get serverCache() { return serverCache; },
   get _psCache() { return _psCache; },
   get _psCacheTs() { return _psCacheTs; },
+  // Drop the multi-server fetchAllServersDataCached() cache so the next call
+  // re-fetches from ProxySmart. Server.js previously did this via
+  //   _psCache = null; _psCacheTs = 0;
+  // which was a silent no-op (identifiers don't exist in server.js scope) —
+  // every cache-invalidate code path was broken before this function existed.
+  invalidateCache() { _psCache = null; _psCacheTs = 0; },
   PS_CACHE_TTL,
 };
