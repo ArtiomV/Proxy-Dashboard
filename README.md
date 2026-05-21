@@ -97,31 +97,70 @@ CRM_WORKSPACE=workspace_name
 
 ```
 project/
-├── server.js              — Бэкенд: API, бизнес-логика, интеграции (~6800 строк)
+├── server.js              — Бэкенд bootstrap + 166 ещё-не-сегментированных роутов (~11 000 строк)
 ├── public/
-│   ├── admin.html         — Админ-панель SPA (~4300 строк)
-│   └── index.html         — Личный кабинет клиента SPA (~3000 строк)
+│   ├── admin.html         — Админ-панель SPA (~7 300 строк, inline JS — Stage 5 to-do)
+│   └── index.html         — Личный кабинет клиента SPA (~3 400 строк)
 ├── src/
 │   ├── api/
-│   │   └── proxy-smart.js — Клиент API ProxySmart (fetchApi, fetchServerData)
+│   │   └── proxy-smart.js — Клиент API ProxySmart + cache invalidation
 │   ├── billing/
 │   │   └── atomic.js      — Атомарные операции с балансом (atomicCredit/Debit)
-│   ├── tochka/
-│   │   ├── api.js         — HTTP-клиент Точка Банк API
-│   │   └── documents.js   — Генерация актов и счетов
-│   ├── traffic/
-│   │   └── hourly.js      — Почасовая агрегация трафика (v2)
-│   └── utils/
-│       ├── files.js       — Безопасная запись файлов (atomic write с tmp)
-│       ├── time.js        — Работа с таймзонами (MSK)
-│       └── traffic.js     — Парсинг трафика, нормализация операторов
-├── schema.sql             — SQLite-схема (20+ таблиц)
-├── migrations/            — SQL-миграции
-├── migrate.js             — Миграция JSON -> SQLite
-├── package.json           — Зависимости Node.js
-├── .env                   — Переменные окружения
+│   ├── db/                — Per-domain prepared-statement repositories (Stage 2)
+│   │   ├── clients.js     — clients table CRUD + balance + referral
+│   │   ├── ledger.js      — billing_ledger inserts + bulk delete
+│   │   ├── payments.js    — per-client payments
+│   │   ├── documents.js   — client_documents + closing_documents + bills
+│   │   └── simulator.js   — simulator_profiles/runs/samples + test pool
+│   ├── routes/            — Sliced Express routers (Stage 3, in progress)
+│   │   └── ops.js         — /health, /metrics (template factory)
+│   ├── tochka/            — Tochka Bank API + document generation
+│   ├── traffic/           — Hourly traffic aggregation
+│   ├── simulator/         — Load simulator engine + HTTP worker
+│   ├── telegram/          — Bot, daily summary, AI insights (Claude)
+│   ├── audit/             — DB-level audit (triggers + context)
+│   └── utils/             — files, time, traffic, kv-guard, html
+├── schema.sql             — Initial SQLite schema (≈ migration 000)
+├── migrations/            — 029 SQL миграций, idempotent re-run
+├── tests/                 — Vitest + supertest (69 tests, 9 files)
+│   ├── _helpers/          — Boot harness with isolated temp DB
+│   └── api/               — Characterization tests + route snapshot (168)
+├── eslint.config.js       — Flat config (no-empty:strict, no-undef, eqeqeq)
+├── FOLLOWUP.md            — Refactor TODOs / found bugs awaiting fix
+├── package.json
+├── .env                   — Переменные окружения (не коммитится)
 └── dashboard.db           — SQLite база (создаётся автоматически)
 ```
+
+### Тесты + лоадер
+
+```bash
+npm test                     # vitest run — 69 tests, ~3s
+npm run test:watch           # watch mode
+npm run lint                 # ESLint — 0 errors policy
+```
+
+Тестовая обвязка поднимает app через supertest на временной БД
+(`DASHBOARD_DB_PATH` env override) под `NODE_ENV=test` — без app.listen,
+cron, телеграма. Route snapshot (`tests/api/__snapshots__/routes.json`)
+фиксирует все 168 (method, path) пар; любой случайный сдвиг во время
+Stage 3 нарезки немедленно ломает тест.
+
+### Чистая БД
+
+`schema.sql` рассматривается как initial baseline (migration 000), все
+дальнейшие правки — через `migrations/NNN_*.sql`. На свежем environment
+запуск `node server.js` сам применит `schema.sql + migrations/*.sql` в
+правильном порядке (idempotent через `_migrations` таблицу).
+
+### Stage refactor status (см. FOLLOWUP.md)
+
+- **Stage 1** ✅ — Characterization tests + route snapshot
+- **Stage 2** 🟡 — Billing-критичные репозитории вынесены (5 of 8)
+- **Stage 3** 🟡 — Pattern введён (src/routes/ops.js), 166 роутов остаются
+- **Stage 4** ⏸ — State centralization, fix billingLedger mirror
+- **Stage 5** ⏸ — Inline JS extraction, restore CSP
+- **Stage 6** 🟡 — Lint ✅, hoisted requires ✅, silent catches ✅, dead code ⏸
 
 ### Принцип работы
 
