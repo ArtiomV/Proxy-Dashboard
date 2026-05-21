@@ -100,7 +100,7 @@ describe('POST /api/admin/clients', () => {
 });
 
 describe('POST /api/admin/clients/:id/payment', () => {
-  it('credits the balance and appends a ledger entry (DB authoritative)', async () => {
+  it('credits the balance and appends a ledger entry (HTTP body matches DB)', async () => {
     const c = await createClient();
     expect(dbBalance(c.id)).toBe(0);
     const before = ledgerCount(c.id);
@@ -110,9 +110,9 @@ describe('POST /api/admin/clients/:id/payment', () => {
       .send({ amount: 100, date: '2026-03-01', note: 'first payment' });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    // NB: res.body.balance reads from the stale in-memory `client` mirror
-    // (see FOLLOWUP.md — clientById rebinding bug). The DB row is the source
-    // of truth — that's what we assert.
+    // After Stage 4 fix (billing/atomic.js getClientById getter), HTTP balance
+    // matches DB. Previously this was 0 due to stale clientById ref.
+    expect(res.body.balance).toBe(100);
     expect(dbBalance(c.id)).toBe(100);
     expect(ledgerCount(c.id)).toBe(before + 1);
   });
@@ -154,9 +154,7 @@ describe('POST /api/admin/clients/:id/charge', () => {
       .set('X-Auth-Token', adminToken)
       .send({ amount: 50, date: '2026-04-02', note: 'fix' });
     expect(res.status).toBe(200);
-    // balanceBefore / balanceAfter come from atomicDebit's return value
-    // (read straight from DB), so they're correct even with the stale
-    // clientById bug. See FOLLOWUP.md.
+    expect(res.body.balance).toBe(150);   // Stage 4 fix
     expect(res.body.balanceBefore).toBe(200);
     expect(res.body.balanceAfter).toBe(150);
 
@@ -166,7 +164,7 @@ describe('POST /api/admin/clients/:id/charge', () => {
 });
 
 describe('POST /api/admin/clients/:id/balance_adjust', () => {
-  // NB: res.body.balance is stale (see FOLLOWUP.md). Assert via DB only.
+  // After Stage 4 fix, res.body.balance is correct (was stale before).
   it('positive amount credits via atomicCredit', async () => {
     const c = await createClient();
     const res = await request(app)
@@ -174,6 +172,7 @@ describe('POST /api/admin/clients/:id/balance_adjust', () => {
       .set('X-Auth-Token', adminToken)
       .send({ amount: 75.5, note: 'adj+' });
     expect(res.status).toBe(200);
+    expect(res.body.balance).toBe(75.5);
     expect(dbBalance(c.id)).toBe(75.5);
   });
 
@@ -184,6 +183,7 @@ describe('POST /api/admin/clients/:id/balance_adjust', () => {
       .set('X-Auth-Token', adminToken)
       .send({ amount: -30, note: 'adj-' });
     expect(res.status).toBe(200);
+    expect(res.body.balance).toBe(-30);
     expect(dbBalance(c.id)).toBe(-30);
   });
 });

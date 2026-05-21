@@ -60,22 +60,16 @@ they go here instead of into the working commits.
 
 ## Production bugs surfaced by characterization tests
 
-- **`atomicCredit` / `atomicDebit` keep a stale `clientById` reference after
-  `rebuildClientMaps()`.** server.js does
-  `billing.init({ ..., clientById })`, but later `rebuildClientMaps()`
-  reassigns the *binding* `clientById = new Map(...)` (a fresh Map). Billing's
-  closure still points at the original (now-empty) Map, so after a
-  `rebuildClientMaps()` (triggered by any client create/update/delete) the
-  `if (client) client.balance = balanceAfter` line in atomic.js is a no-op.
-  **Effect:** `/api/admin/clients/:id/payment` and friends return
-  `{ balance: 0 }` in the HTTP body even though the DB row updates correctly.
-  The DB is authoritative — money accounting is fine — but the API contract
-  is broken until the next server restart.
-  Fix candidate (Stage 4): wrap the binding in a getter
-  (`init({ getClientById: () => clientById })`), or reassign the Map's
-  contents instead of the binding in rebuildClientMaps. Tests in
-  `tests/api/clients.test.js` work around this by asserting DB balance
-  instead of response body balance.
+- ✅ **FIXED in Stage 4 (commit refactor/stage-4):** `atomicCredit` /
+  `atomicDebit` used to keep a stale `clientById` reference after
+  `rebuildClientMaps()` because server.js passed the Map by value and
+  later rebound the global. Billing's closure pointed at the (now-empty)
+  original Map → `if (client) client.balance = balanceAfter` no-op.
+  `/api/admin/clients/:id/payment` returned `balance: 0` even though DB
+  was correct. Stage 4 fix: `billing.init({ getClientById, getBillingLedger })`
+  takes getters so every credit/debit re-reads the current binding.
+  Characterization tests now assert HTTP body balance matches DB —
+  previously they pinned to DB only to avoid red.
 
 ## Stage 2 — remaining db.prepare() migrations
 

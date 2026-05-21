@@ -1,5 +1,22 @@
 'use strict';
-let db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams, billingLedger, clientById;
+// Stage 4 fix: the previous init() captured the `clientById` Map by value.
+// server.js then ran `rebuildClientMaps()` which reassigns the *binding*
+// `clientById = new Map(...)`, so this module's reference pointed at the
+// stale (now-empty) Map. The `if (client) client.balance = balanceAfter`
+// line below was effectively dead code after any client create/update.
+//
+// Net effect in prod: HTTP responses from /api/admin/clients/:id/payment
+// returned `balance: 0` even though the DB row updated correctly — the
+// stale in-memory client object never got its balance synced. See
+// FOLLOWUP.md → "billing/atomic.js stale clientById reference".
+//
+// Fix: take a `getClientById` getter (read on every call) instead of the
+// Map directly. Same approach for `billingLedger` — it's a let-rebound
+// object in server.js. Backwards-compatible: callers can still pass
+// `clientById: someMap` and we'll wrap it in a getter.
+
+let db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams;
+let getBillingLedger, getClientById;
 
 function init(deps) {
   db = deps.db;
@@ -7,8 +24,20 @@ function init(deps) {
   _clientUpdateBalance = deps._clientUpdateBalance;
   _ledgerInsert = deps._ledgerInsert;
   _ledgerEntryParams = deps._ledgerEntryParams;
-  billingLedger = deps.billingLedger;
-  clientById = deps.clientById;
+
+  // Accept either a getter (preferred) or the raw object/map (legacy).
+  if (typeof deps.getBillingLedger === 'function') {
+    getBillingLedger = deps.getBillingLedger;
+  } else if (deps.billingLedger) {
+    const ledger = deps.billingLedger;
+    getBillingLedger = () => ledger;
+  }
+  if (typeof deps.getClientById === 'function') {
+    getClientById = deps.getClientById;
+  } else if (deps.clientById) {
+    const map = deps.clientById;
+    getClientById = (id) => map.get(id);
+  }
 }
 
 /**
@@ -36,11 +65,14 @@ function atomicCredit(clientId, amount, ledgerEntry) {
       const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
       entry.db_id = result.lastInsertRowid;
       ledgerDbId = entry.db_id;
-      if (!billingLedger[clientId]) billingLedger[clientId] = [];
-      billingLedger[clientId].push(entry);
+      const ledger = getBillingLedger && getBillingLedger();
+      if (ledger) {
+        if (!ledger[clientId]) ledger[clientId] = [];
+        ledger[clientId].push(entry);
+      }
     }
   })();
-  const client = clientById.get(clientId);
+  const client = getClientById && getClientById(clientId);
   if (client) client.balance = balanceAfter;
   return { balanceBefore, balanceAfter, ledgerDbId };
 }
@@ -81,8 +113,11 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
         const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
         entry.db_id = result.lastInsertRowid;
         ledgerDbId = entry.db_id;
-        if (!billingLedger[clientId]) billingLedger[clientId] = [];
-        billingLedger[clientId].push(entry);
+        const ledger = getBillingLedger && getBillingLedger();
+        if (ledger) {
+          if (!ledger[clientId]) ledger[clientId] = [];
+          ledger[clientId].push(entry);
+        }
       }
     })();
   } catch (e) {
@@ -96,7 +131,7 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
     }
     throw e;
   }
-  const client = clientById.get(clientId);
+  const client = getClientById && getClientById(clientId);
   if (client) client.balance = balanceAfter;
   return { balanceBefore, balanceAfter, ledgerDbId, duplicate };
 }

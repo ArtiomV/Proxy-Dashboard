@@ -1550,7 +1550,16 @@ for (const c of clients) {
 }
 if (clientsMigrated) saveClients(clients);
 rebuildClientMaps(); // Build maps before auto-migration check
-billing.init({ db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams, billingLedger, clientById });
+// Stage 4: pass getters instead of the maps directly. server.js rebinds
+// `clientById = new Map(...)` and `billingLedger = {...}` during state
+// rebuilds; getters re-read the current value on every credit/debit so
+// the in-memory mirror stays in sync (previously the captured Map went
+// stale → HTTP responses showed `balance: 0` after any client create).
+billing.init({
+  db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams,
+  getBillingLedger: () => billingLedger,
+  getClientById: (id) => clientById.get(id),
+});
 
 // DB-level audit (triggers + JS context layer). Initialized after migrations
 // so triggers exist; harmless if already initialized.
