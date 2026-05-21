@@ -36,6 +36,8 @@ const simulator = require('./src/simulator/engine');
 const simulatorDb = require('./src/db/simulator');
 const paymentsDb = require('./src/db/payments');
 const documentsDb = require('./src/db/documents');
+const clientsDb = require('./src/db/clients');
+const ledgerDb = require('./src/db/ledger');
 const { execFile } = require('child_process');
 
 // DASHBOARD_DB_PATH override lets tests point at an isolated temp DB
@@ -154,6 +156,15 @@ try {
 simulatorDb.init(db);
 paymentsDb.init(db);
 documentsDb.init(db);
+clientsDb.init(db);
+ledgerDb.init(db);
+// Aliases for legacy callsites that still hold raw prepared-statement refs.
+// These are passed to billing.init() and used by atomicCredit/atomicDebit
+// on the hot path — wrapping in a function would add a per-credit call.
+const _clientGetBalance = clientsDb.getBalanceStmt();
+const _clientUpdateBalance = clientsDb.updateBalanceStmt();
+const _clientUpdateReferralBalance = clientsDb.updateReferralBalanceStmt();
+const _ledgerInsert = ledgerDb.insertStmt();
 
 // ─── kv_store loss-prevention layer ────────────────────────────────────────────
 // History + refuse-to-shrink guard for critical kv entries. See migration 028.
@@ -412,45 +423,9 @@ for (const [key, val] of Object.entries(process.env)) {
 
 const CLIENTS_FILE = path.join(__dirname, 'clients.json'); // JSON fallback for first-time migration
 
-// Prepared statements for client & sub-table persistence
-const _clientUpsert = db.prepare(`INSERT INTO clients (id, login, password, password_hash, port_name, name, contact, notes,
-    billing_type, price, currency, balance, api_key, referral_code, referred_by, referral_balance,
-    reset_token, inn, kpp, legal_name, contract_info, address, auto_acts, auto_bills,
-    last_traffic_snapshot, created_at, client_type, billing_paused, allow_debt, max_debt,
-    sla_uptime_pct, sla_max_latency_ms, sla_max_error_pct, sla_auto_credit)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(id) DO UPDATE SET
-    login=excluded.login, password=excluded.password, password_hash=excluded.password_hash,
-    port_name=excluded.port_name, name=excluded.name, contact=excluded.contact,
-    notes=excluded.notes, billing_type=excluded.billing_type, price=excluded.price,
-    currency=excluded.currency,
-    -- balance INTENTIONALLY NOT updated here.
-    -- It is owned exclusively by atomicCredit/atomicDebit/_clientUpdateBalance
-    -- and delete_ledger_entry. Including it here used to overwrite live balance
-    -- with stale in-memory value when saveClients was called concurrently with
-    -- billing (race observed for ВАЙЛДБОКС: -8766.45 → 0).
-    api_key=excluded.api_key,
-    referral_code=excluded.referral_code, referred_by=excluded.referred_by,
-    referral_balance=excluded.referral_balance, reset_token=excluded.reset_token,
-    inn=excluded.inn, kpp=excluded.kpp, legal_name=excluded.legal_name,
-    contract_info=excluded.contract_info, address=excluded.address,
-    auto_acts=excluded.auto_acts, auto_bills=excluded.auto_bills,
-    last_traffic_snapshot=excluded.last_traffic_snapshot, client_type=excluded.client_type,
-    billing_paused=excluded.billing_paused, allow_debt=excluded.allow_debt,
-    max_debt=excluded.max_debt,
-    sla_uptime_pct=excluded.sla_uptime_pct,
-    sla_max_latency_ms=excluded.sla_max_latency_ms,
-    sla_max_error_pct=excluded.sla_max_error_pct,
-    sla_auto_credit=excluded.sla_auto_credit,
-    updated_at=datetime('now')`);
-const _clientDelete = db.prepare('DELETE FROM clients WHERE id = ?');
-const _clientGetIds = db.prepare('SELECT id FROM clients');
-
-// TASK-03+BUG-02+BUG-03: Atomic balance+ledger operations in ONE transaction
-const _clientGetBalance = db.prepare('SELECT balance FROM clients WHERE id = ?');
-const _clientUpdateBalance = db.prepare('UPDATE clients SET balance = ?, updated_at = datetime(\'now\') WHERE id = ?');
-
-const _clientUpdateReferralBalance = db.prepare('UPDATE clients SET referral_balance = ?, updated_at = datetime(\'now\') WHERE id = ?');
+// Clients prepared statements moved into src/db/clients.js (Stage 2).
+// Hot-path balance/referral statements aliased near the top of this file
+// after `clientsDb.init(db)` for billing.init() consumption.
 
 /** atomicCredit / atomicDebit — delegated to src/billing/atomic.js */
 function atomicCredit(...args) { return billing.atomicCredit(...args); }
@@ -542,27 +517,12 @@ function saveClients(clientsList) {
     db.transaction(() => {
       // Remove deleted clients (ON DELETE CASCADE cleans sub-tables)
       const liveIds = new Set(clientsList.map(c => c.id));
-      for (const r of _clientGetIds.all()) {
-        if (!liveIds.has(r.id)) _clientDelete.run(r.id);
+      for (const r of clientsDb.allIds()) {
+        if (!liveIds.has(r.id)) clientsDb.deleteById(r.id);
       }
       // Upsert clients + sync sub-arrays
       for (const c of clientsList) {
-        _clientUpsert.run(
-          c.id, c.login, null, c.passwordHash || '', c.portName || '', c.name || '',
-          c.contact || '', c.notes || '', c.billingType || 'per_gb', c.price || 0,
-          c.currency || 'RUB', c.balance || 0, c.apiKey || '', c.referral_code || '',
-          c.referred_by || null, c.referral_balance || 0, c.resetToken || '',
-          c.inn || '', c.kpp || '', c.legalName || '', c.contractInfo || '',
-          c.address || '', c.autoActs !== false ? 1 : 0, c.autoBills !== false ? 1 : 0,
-          JSON.stringify(c.last_traffic_snapshot || {}), c.createdAt || new Date().toISOString(),
-          c.clientType || 'legal', c.billingPaused ? 1 : 0,
-          c.allowDebt ? 1 : 0,
-          typeof c.maxDebt === 'number' ? c.maxDebt : null,
-          typeof c.slaUptimePct    === 'number' ? c.slaUptimePct    : 99,
-          typeof c.slaMaxLatencyMs === 'number' ? c.slaMaxLatencyMs : 1000,
-          typeof c.slaMaxErrorPct  === 'number' ? c.slaMaxErrorPct  : 5,
-          c.slaAutoCredit ? 1 : 0
-        );
+        clientsDb.upsertRow(c);
         // Sync payments
         paymentsDb.deleteByClient(c.id);
         for (const p of (c.payments || [])) {
@@ -588,11 +548,8 @@ function saveClients(clientsList) {
 }
 
 const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json'); // JSON fallback
-const _ledgerDeleteByClient = db.prepare('DELETE FROM billing_ledger WHERE client_id = ?');
-const _ledgerInsert = db.prepare(`INSERT INTO billing_ledger
-  (client_id, type, date, timestamp, amount, currency, balance_before, balance_after,
-   gb_used, modem_count, days_in_month, note, source, payment_id, details)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+// _ledgerDeleteByClient / _ledgerInsert moved into src/db/ledger.js.
+// _ledgerInsert alias is already created near the init block at the top.
 
 let billingLedger = {};
 {
@@ -664,11 +621,11 @@ function appendLedgerEntry(clientId, entry) {
   }
 }
 
-const _ledgerDeleteById = db.prepare('DELETE FROM billing_ledger WHERE id = ?');
+// _ledgerDeleteById moved into src/db/ledger.js (Stage 2).
 
 function saveBillingLedger() {
   try {
-    const validIds = new Set(_clientGetIds.all().map(r => r.id));
+    const validIds = new Set(clientsDb.allIds().map(r => r.id));
     db.transaction(() => {
       for (const clientId in billingLedger) {
         if (!validIds.has(clientId)) continue;
@@ -678,7 +635,7 @@ function saveBillingLedger() {
           entries = entries.slice(-MAX_LEDGER_ENTRIES);
           billingLedger[clientId] = entries;
         }
-        _ledgerDeleteByClient.run(clientId);
+        ledgerDb.deleteByClient(clientId);
         for (const e of entries) {
           _ledgerInsert.run(..._ledgerEntryParams(clientId, e));
         }
@@ -6775,7 +6732,7 @@ app.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMid
   // balance and ledger out of sync.
   try {
     db.transaction(() => {
-      if (entry.db_id) _ledgerDeleteById.run(entry.db_id);
+      if (entry.db_id) ledgerDb.deleteById(entry.db_id);
       _clientUpdateBalance.run(newBalance, client.id);
     })();
   } catch (e) {
