@@ -44,6 +44,25 @@ they go here instead of into the working commits.
   across hostname changes), or require explicit `$TOCHKA_CONFIG_KEY` and refuse
   to derive silently.
 
+## Production bugs surfaced by characterization tests
+
+- **`atomicCredit` / `atomicDebit` keep a stale `clientById` reference after
+  `rebuildClientMaps()`.** server.js does
+  `billing.init({ ..., clientById })`, but later `rebuildClientMaps()`
+  reassigns the *binding* `clientById = new Map(...)` (a fresh Map). Billing's
+  closure still points at the original (now-empty) Map, so after a
+  `rebuildClientMaps()` (triggered by any client create/update/delete) the
+  `if (client) client.balance = balanceAfter` line in atomic.js is a no-op.
+  **Effect:** `/api/admin/clients/:id/payment` and friends return
+  `{ balance: 0 }` in the HTTP body even though the DB row updates correctly.
+  The DB is authoritative — money accounting is fine — but the API contract
+  is broken until the next server restart.
+  Fix candidate (Stage 4): wrap the binding in a getter
+  (`init({ getClientById: () => clientById })`), or reassign the Map's
+  contents instead of the binding in rebuildClientMaps. Tests in
+  `tests/api/clients.test.js` work around this by asserting DB balance
+  instead of response body balance.
+
 ## Behavior questions to confirm before changing
 
 - The `BENIGN_MIGRATION_ERRORS` regex set includes `/no such column/i` with a
