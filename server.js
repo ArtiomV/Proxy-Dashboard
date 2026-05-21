@@ -2005,59 +2005,15 @@ function adminMiddleware(req, res, next) {
   next();
 }
 
-// Minimal Prometheus-compatible /metrics — text format. Lets ops scrape this
-// from Grafana/Prometheus without installing prom-client (zero deps).
-app.get('/metrics', (req, res) => {
-  try {
-    const mem = process.memoryUsage();
-    const ledgerCount = Object.values(billingLedger).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
-    const dbSize = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
-    const lines = [
-      '# HELP proxy_dashboard_uptime_seconds Process uptime in seconds',
-      '# TYPE proxy_dashboard_uptime_seconds counter',
-      `proxy_dashboard_uptime_seconds ${Math.round(process.uptime())}`,
-      '# HELP proxy_dashboard_memory_rss_bytes Resident memory in bytes',
-      '# TYPE proxy_dashboard_memory_rss_bytes gauge',
-      `proxy_dashboard_memory_rss_bytes ${mem.rss}`,
-      '# HELP proxy_dashboard_memory_heap_used_bytes Node heap used',
-      '# TYPE proxy_dashboard_memory_heap_used_bytes gauge',
-      `proxy_dashboard_memory_heap_used_bytes ${mem.heapUsed}`,
-      '# HELP proxy_dashboard_memory_heap_total_bytes Node heap total',
-      '# TYPE proxy_dashboard_memory_heap_total_bytes gauge',
-      `proxy_dashboard_memory_heap_total_bytes ${mem.heapTotal}`,
-      '# HELP proxy_dashboard_clients_total Number of clients',
-      '# TYPE proxy_dashboard_clients_total gauge',
-      `proxy_dashboard_clients_total ${clients.length}`,
-      '# HELP proxy_dashboard_ledger_entries_total In-memory ledger entries',
-      '# TYPE proxy_dashboard_ledger_entries_total gauge',
-      `proxy_dashboard_ledger_entries_total ${ledgerCount}`,
-      '# HELP proxy_dashboard_db_size_bytes SQLite file size',
-      '# TYPE proxy_dashboard_db_size_bytes gauge',
-      `proxy_dashboard_db_size_bytes ${dbSize}`,
-      '# HELP proxy_dashboard_sessions_total Active sessions',
-      '# TYPE proxy_dashboard_sessions_total gauge',
-      `proxy_dashboard_sessions_total ${getSessionCount()}`,
-      ''
-    ];
-    res.set('Content-Type', 'text/plain; version=0.0.4');
-    res.send(lines.join('\n'));
-  } catch (e) {
-    res.status(500).set('Content-Type', 'text/plain').send('# metrics_error\n');
-  }
-});
-
-// Public health — verifies DB read works. Returns 503 if DB unhealthy so
-// load-balancers / monitoring tools can detect "process alive but broken".
-app.get('/health', (req, res) => {
-  try {
-    const ok = db.prepare('SELECT 1 AS ok').get();
-    if (!ok || ok.ok !== 1) throw new Error('sqlite returned unexpected row');
-    res.json({ status: 'ok', timestamp: new Date().toISOString(), db: 'ok' });
-  } catch (e) {
-    logger.error('[/health] DB check failed: ' + e.message);
-    res.status(503).json({ status: 'unhealthy', timestamp: new Date().toISOString(), error: 'db_check_failed' });
-  }
-});
+// /metrics + /health moved into src/routes/ops.js (Stage 3). Mounted below.
+app.use(require('./src/routes/ops')({
+  db, logger, DB_PATH,
+  getSessionCount: () => getSessionCount(),
+  // Getter forms so the router sees the current `billingLedger` and `clients`
+  // bindings — they're `let`s that get rebound on reload.
+  getBillingLedger: () => billingLedger,
+  getClients: () => clients,
+}));
 
 // Admin health — detailed info
 app.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
