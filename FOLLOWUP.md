@@ -89,42 +89,35 @@ Domains still to extract (will happen alongside Stage 3 commits):
   - `tracking` (~7 stmts: ip_tracking, uptime_tracking, ip_history,
     modem_meta, rotation_log, proxy_checks, api_usage)
 
-## Stage 4 — billingLedger in-memory mirror (deferred)
+## Stage 4 — billingLedger removal (DONE)
 
-**The main bug is fixed** (atomic.js stale `clientById` getter pattern — Stage 4
-✅). What's still pending is the TZ's "убрать billingLedger из памяти как
-полное зеркало БД": today `billingLedger = {}` in server.js loads the
-entire history on startup and grows unbounded with each credit/debit.
+Stage 4a (commit `079633c`) and 4b (`dc12b9d`) closed this entirely.
 
-Why it's deferred:
-  - 8 callsites read `billingLedger[clientId]` directly in routes
-    (clients.js, tochka.js, ops.js, client-portal.js, ops-ext.js) and
-    iterate JS objects with already-typed fields (delta_gb, delta_bytes
-    in JSON, etc.)
-  - The DB row stores the same data but with different column layout +
-    the optional fields live in a `details` JSON column.
-  - Naive swap to `ledgerDb.listByClient(id)` is correct in shape but
-    changes the per-entry object identity in a few places that compare
-    by reference. TZ explicitly flags this as the "самый рискованный
-    пункт" — strongly suggests doing it as a focused, scoped commit
-    with all billing tests re-run between every callsite swap.
+What changed:
+  - `src/db/ledger.js#listByClient(clientId)` reads + rehydrates the
+    historical JS shape on every call (charges store `cost`, others
+    `amount`; `delta_gb` not `gb_used`; camelCase `paymentId`; `details`
+    JSON merged onto the entry).
+  - All 8 former callsites (`clients.js`, `tochka.js`, `client-portal.js`,
+    `billing-ext.js`, `ops-ext.js`, `server.js` autoActs/autoBills/recon)
+    now call `ledgerDb.listByClient(id)` or a hoisted SQL aggregate.
+  - `src/billing/atomic.js` no longer writes to any in-memory ledger
+    array — `_ledgerInsert.run()` inside the same transaction is the
+    canonical write. Dropped the `getBillingLedger` dep entirely.
+  - `let billingLedger = {}` + its startup loader were deleted from
+    server.js. The legacy `billing_ledger.json` JSON file (pre-SQLite
+    fallback) is one-shot imported into the table if rows == 0 AND the
+    file exists; otherwise the path is dead.
+  - `/metrics` (proxy_dashboard_ledger_entries_total) and `/api/admin/health`
+    (database.ledger_entries) read `SELECT COUNT(*) FROM billing_ledger`
+    instead of walking the in-memory object.
+  - Startup integrity: `tests/billing-ledger-integrity.test.js` confirms
+    the row count returned by `ledgerDb.rowCount()` matches the rows
+    listed by `listByClient` summed across all clients (no silent drift).
 
-Plan when this is picked up:
-  1. Add `listByClient(clientId)` in src/db/ledger.js that returns DB
-     rows mapped to the in-memory shape (parse `details` JSON, fold
-     into top-level fields).
-  2. One callsite at a time: replace `billingLedger[id]` with the
-     repo call. Run tests after each. 5 commits, 5 reviews.
-  3. Drop the in-memory write from atomic.js (now redundant).
-  4. Drop `let billingLedger` + the startup load from server.js.
-  5. Add a startup integrity test: count of DB rows = sum of historical
-     entries to catch any drift.
-
-Until then: in-memory mirror is small (a few MB) and not a hot-path
-performance issue. The HTTP-balance-mismatch bug that motivated Stage 4
-is already fixed via the atomic.js getter — leftover memory growth is
-the only outstanding concern, and it's bounded by client count × entries
-which is manageable for the current scale.
+The only `billingLedger` references left in the repo are commented-out
+historical notes (e.g. "moved in Stage 4"). Verified via:
+`grep -rnE 'billingLedger' server.js src/` — only comments match.
 
 ## TZ status snapshot (post-Stage 4 finish)
 
