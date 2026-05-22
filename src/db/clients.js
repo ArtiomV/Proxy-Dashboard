@@ -42,6 +42,9 @@ function init(db) {
 
   S.deleteById = db.prepare('DELETE FROM clients WHERE id = ?');
   S.allIds = db.prepare('SELECT id FROM clients');
+  // Stage 8: full-rows load used at boot to rebuild the in-memory clients
+  // array. Previously inlined in server.js's loadClients().
+  S.allRows = db.prepare('SELECT * FROM clients');
   S.getBalance = db.prepare('SELECT balance FROM clients WHERE id = ?');
   S.updateBalance = db.prepare(
     "UPDATE clients SET balance = ?, updated_at = datetime('now') WHERE id = ?"
@@ -72,6 +75,7 @@ function upsertRow(c) {
 
 function deleteById(id) { return S.deleteById.run(id); }
 function allIds() { return S.allIds.all(); }
+function allRows() { return S.allRows.all(); }
 
 // These three are passed to billing.init() so atomicCredit/atomicDebit
 // can read/write balance atomically. Exposed as the raw prepared
@@ -83,6 +87,6 @@ function updateBalanceStmt() { return S.updateBalance; }
 function updateReferralBalanceStmt() { return S.updateReferralBalance; }
 
 module.exports = {
-  init, upsertRow, deleteById, allIds,
+  init, upsertRow, deleteById, allIds, allRows,
   getBalanceStmt, updateBalanceStmt, updateReferralBalanceStmt,
 };

@@ -54,6 +54,62 @@ function init(db) {
     (client_id, client_name, api_key_prefix, endpoint, method, status_code,
      response_time_ms, user_agent, ip, error)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+  // Stage 8: scattered queries previously inlined in server.js.
+  // 90-day retention purge + load (called once at startup in server.js).
+  S.dailyPurge90d = db.prepare("DELETE FROM daily_traffic WHERE date < date('now', '-90 days')");
+  S.dailyLast90d  = db.prepare("SELECT port_name, date, bytes_in, bytes_out FROM daily_traffic WHERE date >= date('now', '-90 days')");
+  // Hourly aggregation cross-day reconcile: sum traffic for a client_name
+  // within a given Moscow date. Hour rows are UTC; +3 hours converts to MSK
+  // before slicing the YYYY-MM-DD.
+  S.hourlyByClientDate = db.prepare(`
+    SELECT COALESCE(SUM(bytes_in + bytes_out), 0) AS bytes
+      FROM traffic_hourly
+     WHERE client_name = ?
+       AND substr(datetime(hour_start, '+3 hours'), 1, 10) = ?
+  `);
+  // Auto-smooth uncertain flag for rows that ended up tiny (<150 MB) — the
+  // uncertainty flag was set during aggregation but the value is too small
+  // to materially change billing, so we clear it after the fact.
+  S.hourlyAutoSmoothUncertain = db.prepare(
+    'UPDATE traffic_hourly SET uncertain = 0 ' +
+    'WHERE uncertain > 0 AND (bytes_in + bytes_out) < ' + (150 * 1e6)
+  );
+  // Check whether a specific hour_start was recorded (idempotency in the
+  // backfill job — skips hours already aggregated).
+  S.hourlyExistsForHour = db.prepare(
+    'SELECT COUNT(*) AS cnt FROM traffic_hourly WHERE hour_start = ?'
+  );
+}
+
+// Retention on traffic_hourly takes the day-count as a query parameter so
+// we don't have to re-prepare on every call. Cached on first use.
+let _hourlyPurgeStmt = null;
+function hourlyPurgeOlderThan(db, days) {
+  if (!_hourlyPurgeStmt) {
+    _hourlyPurgeStmt = db.prepare(
+      "DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-' || ? || ' days')"
+    );
+  }
+  return _hourlyPurgeStmt.run(String(days));
+}
+
+// daily_traffic IN(port_name_list) sum for a date — IN-list size varies,
+// so we prepare per cardinality and cache.
+const _dailySumByDateAndPortsCache = new Map();
+function dailySumByDateAndPorts(db, date, portIds) {
+  if (!portIds || portIds.length === 0) return 0;
+  let stmt = _dailySumByDateAndPortsCache.get(portIds.length);
+  if (!stmt) {
+    const placeholders = portIds.map(() => '?').join(',');
+    stmt = db.prepare(
+      `SELECT COALESCE(SUM(bytes_in + bytes_out), 0) AS bytes
+         FROM daily_traffic
+        WHERE date = ? AND port_name IN (${placeholders})`
+    );
+    _dailySumByDateAndPortsCache.set(portIds.length, stmt);
+  }
+  return stmt.get(date, ...portIds).bytes || 0;
 }
 
 module.exports = {
@@ -64,4 +120,12 @@ module.exports = {
   snapshotGetStmt:    () => S.snapshotGet,
   snapshotGetAllStmt: () => S.snapshotGetAll,
   apiUsageInsertStmt: () => S.apiUsageInsert,
+  // Stage 8 additions
+  dailyPurge90dStmt:           () => S.dailyPurge90d,
+  dailyLast90dStmt:            () => S.dailyLast90d,
+  hourlyByClientDateStmt:      () => S.hourlyByClientDate,
+  hourlyAutoSmoothUncertainStmt: () => S.hourlyAutoSmoothUncertain,
+  hourlyExistsForHourStmt:     () => S.hourlyExistsForHour,
+  hourlyPurgeOlderThan,
+  dailySumByDateAndPorts,
 };

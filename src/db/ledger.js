@@ -19,6 +19,17 @@ function init(db) {
     balance_before, balance_after, gb_used, modem_count, days_in_month,
     note, source, payment_id, details
     FROM billing_ledger WHERE client_id = ? ORDER BY id`);
+  // Stage 8: duplicate-detection helpers used by the daily-billing
+  // skip-guard. existsChargeOnDate trips when any client was already billed
+  // on the given date; chargedClientIdsForDate returns the set of client IDs
+  // that DID get billed (for retry-mode filtering).
+  S.existsChargeOnDate = db.prepare(
+    "SELECT id FROM billing_ledger WHERE date = ? AND type = 'charge' LIMIT 1"
+  );
+  S.chargedClientIdsForDate = db.prepare(
+    "SELECT DISTINCT client_id FROM billing_ledger WHERE date = ? AND type = 'charge'"
+  );
+  S.count = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger');
 }
 
 // listByClient — reads billing_ledger rows and rehydrates them into the
@@ -57,4 +68,14 @@ function deleteById(id) { return S.deleteById.run(id); }
 // the same prepared statement.
 function insertStmt() { return S.insert; }
 
-module.exports = { init, deleteByClient, deleteById, insertStmt, listByClient };
+// Stage 8 — daily-billing skip-guard helpers.
+function existsChargeOnDate(date) { return S.existsChargeOnDate.get(date); }
+function chargedClientIdsForDate(date) {
+  return S.chargedClientIdsForDate.all(date).map(r => r.client_id);
+}
+function rowCount() { return S.count.get().n; }
+
+module.exports = {
+  init, deleteByClient, deleteById, insertStmt, listByClient,
+  existsChargeOnDate, chargedClientIdsForDate, rowCount,
+};

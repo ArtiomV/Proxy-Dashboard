@@ -324,7 +324,7 @@ for (const name of _envServerKeys) {
 // and overwrite the DB's metadata — silent data loss on every pm2 restart.
 // Merge logic lives in src/utils/kv-guard.js and has dedicated tests.
 try {
-  const _dbRow = db.prepare("SELECT value FROM kv_store WHERE key = 'api_servers'").get();
+  const _dbRow = _kvGet.get('api_servers');
   if (_dbRow) {
     const dbServers = JSON.parse(_dbRow.value);
     mergeDbMetadataIntoEnvServers(apiServers, dbServers);
@@ -486,7 +486,7 @@ function clientFromRow(r) {
 }
 
 function loadClients() {
-  const rows = db.prepare('SELECT * FROM clients').all();
+  const rows = clientsDb.allRows();
   if (rows.length === 0) {
     // JSON fallback for first-time migration
     try {
@@ -569,7 +569,7 @@ const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json'); // lega
 // One-shot migration: if billing_ledger table is empty AND the legacy JSON
 // file from pre-SQLite days exists, import its contents into the table.
 {
-  const _blCount = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger').get().n;
+  const _blCount = ledgerDb.rowCount();
   if (_blCount === 0 && fs.existsSync(BILLING_LEDGER_FILE)) {
     try {
       const legacy = JSON.parse(fs.readFileSync(BILLING_LEDGER_FILE, 'utf8'));
@@ -830,8 +830,8 @@ function getAllBankPayments() {
 // Extracted to src/tochka/jwt.js — decodeJwtPayload, decodeJwtHeader, fetchTochkaJwks, jwkToPem, verifyJwtSignature
 
 // Track last act/bill generation month to avoid duplicates
-let lastActGenerationMonth = (db.prepare("SELECT value FROM kv_store WHERE key = 'last_act_generation_month'").get() || {}).value || '';
-let lastBillGenerationMonth = (db.prepare("SELECT value FROM kv_store WHERE key = 'last_bill_generation_month'").get() || {}).value || '';
+let lastActGenerationMonth  = (_kvGet.get('last_act_generation_month')  || {}).value || '';
+let lastBillGenerationMonth = (_kvGet.get('last_bill_generation_month') || {}).value || '';
 
 // Extracted to src/tochka/documents.js — buildTochkaActBody, buildActItemsFromLedger, buildTochkaBillBody, calculateMonthlyBillAmount, MONTH_NAMES_RU
 function buildActItemsFromLedger(client, period) {
@@ -909,8 +909,8 @@ function _getClientTrend() {
 // Load from SQLite
 try {
   // Load only last 90 days to limit memory usage
-  db.prepare("DELETE FROM daily_traffic WHERE date < date('now', '-90 days')").run();
-  const rows = db.prepare("SELECT port_name, date, bytes_in, bytes_out FROM daily_traffic WHERE date >= date('now', '-90 days')").all();
+  trafficDb.dailyPurge90dStmt().run();
+  const rows = trafficDb.dailyLast90dStmt().all();
   for (const r of rows) {
     if (!dailyTraffic[r.port_name]) dailyTraffic[r.port_name] = {};
     dailyTraffic[r.port_name][r.date] = { in: r.bytes_in, out: r.bytes_out };
@@ -957,7 +957,7 @@ function cleanupStalePortMappings() { return _initCleanupJobs().cleanupStalePort
 const _htCleanup = () => {
   const days = Number.isInteger(appSettings.retention_traffic_hourly) && appSettings.retention_traffic_hourly >= 7
     ? appSettings.retention_traffic_hourly : 90;
-  return db.prepare(`DELETE FROM traffic_hourly WHERE hour_start < datetime('now', '-${days} days')`).run();
+  return trafficDb.hourlyPurgeOlderThan(db, days);
 };
 
 // Save yesterday's traffic from live ProxySmart data — called every 5 min
@@ -1046,7 +1046,7 @@ function refreshPortKeyMapping(allServerResults) {
 
 // Last billing run metadata (for /health and retry logic)
 let lastBillingRunSummary = null;
-let lastReconciliationMonth = (db.prepare("SELECT value FROM kv_store WHERE key = 'last_reconciliation_month'").get() || {}).value || '';
+let lastReconciliationMonth = (_kvGet.get('last_reconciliation_month') || {}).value || '';
 
 const KNOWN_MODEMS_FILE = path.join(__dirname, 'known_modems.json');
 let knownModems = {}; // { serverName: { portId: { portName, imei, nick, model, portInfo, lastSeen } } }
@@ -1519,26 +1519,14 @@ function computeClientYesterdayBytes(allServerResults, portName) {
 // Returns total bytes (in + out).
 function getClientBytesForMskDate(portName, date) {
   if (!portName || !date) return 0;
-  const r1 = db.prepare(`
-    SELECT COALESCE(SUM(bytes_in + bytes_out), 0) as bytes
-    FROM traffic_hourly
-    WHERE client_name = ?
-      AND substr(datetime(hour_start, '+3 hours'), 1, 10) = ?
-  `).get(portName, date);
+  const r1 = trafficDb.hourlyByClientDateStmt().get(portName, date);
   if (r1.bytes > 0) return r1.bytes;
   // Fallback — daily_traffic stores by port_id; resolve via in-memory map
   const portIds = [];
   for (const [k, v] of Object.entries(portKeyToPortName)) {
     if (v === portName) portIds.push(k);
   }
-  if (portIds.length === 0) return 0;
-  const placeholders = portIds.map(() => '?').join(',');
-  const r2 = db.prepare(`
-    SELECT COALESCE(SUM(bytes_in + bytes_out), 0) as bytes
-    FROM daily_traffic
-    WHERE date = ? AND port_name IN (${placeholders})
-  `).get(date, ...portIds);
-  return r2.bytes || 0;
+  return trafficDb.dailySumByDateAndPorts(db, date, portIds);
 }
 
 // Sum stored daily_traffic bytes for a client over a month (e.g. "2026-03")
@@ -2062,7 +2050,7 @@ const MAX_IP_HISTORY = 100;
 // Load IP tracking from SQLite
 let ipTracking = {};
 try {
-  const rows = db.prepare('SELECT key, ip, updated_at FROM ip_tracking').all();
+  const rows = trackingDb.ipAllStmt().all();
   for (const r of rows) ipTracking[r.key] = { ip: r.ip, since: r.updated_at };
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} IP tracking entries`);
 } catch (e) { logger.error('Failed to load ip_tracking from SQLite:', e.message); }
@@ -2074,7 +2062,7 @@ const autoRecovery = {};
 // Load uptime tracking from SQLite
 let uptimeTracking = {};
 try {
-  const rows = db.prepare('SELECT key, data FROM uptime_tracking').all();
+  const rows = trackingDb.utAllStmt().all();
   for (const r of rows) { try { uptimeTracking[r.key] = JSON.parse(r.data); } catch (_) { /* best-effort: error intentionally swallowed */ } }
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} uptime tracking entries`);
 } catch (e) { logger.error('Failed to load uptime_tracking from SQLite:', e.message); }
@@ -2082,7 +2070,7 @@ try {
 // Load IP history from SQLite (with db_id for incremental updates)
 let ipHistory = {};
 try {
-  const rows = db.prepare('SELECT id, key, ip, started_at, ended_at FROM ip_history ORDER BY id ASC').all();
+  const rows = trackingDb.ihAllOrderStmt().all();
   for (const r of rows) {
     if (!ipHistory[r.key]) ipHistory[r.key] = [];
     ipHistory[r.key].push({ db_id: r.id, ip: r.ip, from: r.started_at, to: r.ended_at || null });
@@ -2185,7 +2173,7 @@ hourlyTraffic.init({
 
 // One-time cleanup: clear false positive uncertain flags from old 50MB threshold era
 try {
-  const cleaned = db.prepare(`UPDATE traffic_hourly SET uncertain = 0 WHERE uncertain > 0 AND (bytes_in + bytes_out) < ${150 * 1e6}`).run();
+  const cleaned = trafficDb.hourlyAutoSmoothUncertainStmt().run();
   if (cleaned.changes > 0) logger.info(`[HourlyAgg] Cleared ${cleaned.changes} false positive uncertain flags (old 50MB threshold)`);
 } catch (e) { /* ignore */ }
 
@@ -2977,13 +2965,7 @@ app.use(require('./src/routes/proxy-checks')({
 function computeClientSlaMetrics(client) {
   if (!client.portName) return null;
   // Latency + error rate (24 h)
-  const checks = db.prepare(`
-    SELECT AVG(total_ms) FILTER (WHERE error IS NULL) as avg_ms,
-           COUNT(*) as total,
-           SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as errors
-    FROM proxy_checks
-    WHERE client_name = ? AND checked_at >= datetime('now', '-1 day')
-  `).get(client.portName);
+  const checks = trackingDb.slaClientChecks24hStmt().get(client.portName);
 
   // Uptime over 30 days — polling-based, aggregated across the client's modems.
   // Uses the same uptimeTracking source as the per-modem health score so all
@@ -2995,12 +2977,7 @@ function computeClientSlaMetrics(client) {
 
   // Find this client's modems (any that produced proxy_check rows in the window).
   // Includes the IMEI for the uptimeTracking lookup.
-  const clientModems = db.prepare(`
-    SELECT DISTINCT pc.server_name, pc.nick, COALESCE(mm.imei, '') as imei
-    FROM proxy_checks pc
-    LEFT JOIN modem_meta mm ON mm.server_name = pc.server_name AND mm.nick = pc.nick
-    WHERE pc.client_name = ? AND pc.checked_at >= datetime('now', ?)
-  `).all(client.portName, `-${UPTIME_DAYS} days`);
+  const clientModems = trackingDb.slaClientModemsStmt().all(client.portName, `-${UPTIME_DAYS} days`);
 
   let upOnline = 0, upTotal = 0;
   for (const mm of clientModems) {
@@ -3034,10 +3011,8 @@ async function runSlaCheck() {
   try {
     const today = getMoscowToday();
     let violationsCount = 0, creditsCount = 0;
-    const insertViolation = db.prepare(`INSERT INTO sla_violations
-      (client_id, date, metric, expected, actual, credited_amount)
-      VALUES (?, ?, ?, ?, ?, ?)`);
-    const existsStmt = db.prepare(`SELECT id FROM sla_violations WHERE client_id = ? AND date = ? AND metric = ?`);
+    const insertViolation = trackingDb.slaInsertViolationStmt();
+    const existsStmt = trackingDb.slaExistsViolationStmt();
 
     for (const client of clients) {
       if (!client.portName || !client.price) continue;
@@ -3470,10 +3445,10 @@ async function _runDailyBillingImpl(retryClientIds) {
   const yesterdayCheck = getMoscowYesterday();
   const skipResult = db.transaction(() => {
     if (!isRetry) {
-      const existingCharge = db.prepare("SELECT id FROM billing_ledger WHERE date = ? AND type = 'charge' LIMIT 1").get(yesterdayCheck);
+      const existingCharge = ledgerDb.existsChargeOnDate(yesterdayCheck);
       if (existingCharge) return { skip: true, reason: `Already billed for ${yesterdayCheck}` };
     } else {
-      const chargedIds = db.prepare("SELECT DISTINCT client_id FROM billing_ledger WHERE date = ? AND type = 'charge'").all(yesterdayCheck).map(r => r.client_id);
+      const chargedIds = ledgerDb.chargedClientIdsForDate(yesterdayCheck);
       if (chargedIds.length > 0) {
         retryClientIds = retryClientIds.filter(id => !chargedIds.includes(id));
         if (retryClientIds.length === 0) return { skip: true, reason: 'Retry: all clients already billed' };
@@ -3705,7 +3680,7 @@ async function runMonthlyReconciliation() {
   // CRITICAL: persist the marker BEFORE any debits, so a crash mid-loop won't
   // cause a re-run on next start (which would double-bill corrections).
   // We accept the small risk of "marked-but-skipped" in exchange for no double-billing.
-  db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_reconciliation_month', ?)").run(prevMonthStr);
+  _kvSet.run('last_reconciliation_month', prevMonthStr);
   lastReconciliationMonth = prevMonthStr;
 
   // Refresh port mapping (don't swallow — log the failure)
@@ -4434,7 +4409,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
             // Success = no exception, even if cnt=0 (all modems offline)
             _hourlyLastRecordedHour = targetHourStr;
             try { _kvSet.run('hourly_last_recorded', targetHourStr); } catch (_) { /* best-effort: error intentionally swallowed */ }
-            const check = db.prepare('SELECT COUNT(*) as cnt FROM traffic_hourly WHERE hour_start = ?').get(targetHourStr);
+            const check = trafficDb.hourlyExistsForHourStmt().get(targetHourStr);
             logger.info(`[HourlyAgg] SUCCESS on attempt ${attemptIdx + 1}/5 for ${targetHourStr} (${(check && check.cnt) || 0} rows)`);
             logActivity('traffic', 'info', 'hourly_agg', null, `Hourly traffic aggregated for ${targetHourStr}: ${(check && check.cnt) || 0} rows (attempt ${attemptIdx + 1})`, { hour: targetHourStr, rows: (check && check.cnt) || 0, attempt: attemptIdx + 1 });
           } catch (e) {
