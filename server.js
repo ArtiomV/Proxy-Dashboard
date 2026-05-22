@@ -3873,92 +3873,36 @@ async function runMonthlyReconciliation() {
   logActivity('billing', 'info', 'reconciliation_complete', null, `Monthly reconciliation for ${prevMonthStr}: ${corrections} correction(s)`, { period: prevMonthStr, corrections });
 }
 
-async function autoCreateMissingClients() {
-  try {
-    const results = await fetchAllServersDataCached();
-    const existingPortNames = new Set(clients.map(c => c.portName));
-    const allPortNames = new Set();
-
-    for (const data of results) {
-      if (typeof data.bw === 'object') {
-        for (const [portId, b] of Object.entries(data.bw)) {
-          if (b.portName) {
-            allPortNames.add(b.portName);
-          }
-        }
-      }
-    }
-
-    // Count ports per portName for pricing
-    const portCountMap = {};
-    for (const data of results) {
-      if (typeof data.bw === 'object') {
-        for (const [portId, b] of Object.entries(data.bw)) {
-          if (b.portName) {
-            portCountMap[b.portName] = (portCountMap[b.portName] || 0) + 1;
-          }
-        }
-      }
-    }
-
-    const IGNORED_PORTNAMES = new Set(['Test', 'test', 'TEST', 'Не назначен', '', 'debug', 'Demo', 'demo']);
-    let created = 0;
-    for (const pn of allPortNames) {
-      if (existingPortNames.has(pn)) continue;
-      if (IGNORED_PORTNAMES.has(pn)) continue;
-      const login = pn.toLowerCase().replace(/[^a-z0-9_]/g, '_');
-      if (users[login]) continue;
-
-      const proxyCount = portCountMap[pn] || 1;
-      const autoPrice = getPriceForProxyCount(proxyCount);
-      const password = crypto.randomBytes(8).toString('hex');
-      const passwordHash = bcrypt.hashSync(password, 10);
-      const client = {
-        id: generateId(),
-        name: pn,
-        portName: pn,
-        login: login,
-        password: null,
-        passwordHash: passwordHash,
-        contact: '',
-        notes: 'Auto-created from portName',
-        billingType: 'per_gb',
-        price: autoPrice,
-        currency: 'RUB',
-        payments: [],
-        documents: [],
-        closingDocuments: [],
-        bills: [],
-        apiKey: 'prx_' + crypto.randomBytes(24).toString('hex'),
-        referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
-        referred_by: null,
-        referral_balance: 0,
-        resetToken: crypto.randomBytes(16).toString('hex'),
-        balance: 0,
-        last_traffic_snapshot: { timestamp: null, month_bytes: 0 },
-        inn: '', kpp: '', legalName: '', contractInfo: '', address: '',
-        autoActs: true, autoBills: true, billingPaused: false,
-        clientType: 'legal',
-        createdAt: new Date().toISOString()
-      };
-      clients.push(client);
-      users[login] = { passwordHash, portNameFilter: pn, source: 'client', clientId: client.id };
-      created++;
-      logger.info(`  Auto-created client: login=${login}, portName=${pn}`);
-      logActivity('system', 'info', 'client_auto_created', pn, `Auto-created client: login=${login}, portName=${pn}`, { login, portName: pn, price: autoPrice, proxy_count: proxyCount });
-    }
-
-    if (created > 0) {
-      saveClients(clients);
-      rebuildClientMaps();
-      logger.info(`[AutoCreate] Created ${created} new client(s)`);
-      logActivity('system', 'info', 'auto_create_complete', null, `Auto-created ${created} new client(s)`, { created });
-    }
-  } catch (e) {
-    logger.error('[AutoCreate] Error:', e.message);
-    logActivity('system', 'error', 'auto_create_error', null, `Auto-create clients error: ${e.message}`);
-  }
+// Stage 4 finish: autoCreateMissingClients + autoGenerateMonthly{Acts,Bills}
+// moved to src/jobs/tochka-cron.js. Lazy initialization for the same TDZ
+// reason as the cleanup module (getMoscowNow / tochkaConfig / clients /
+// getTochkaConfig / etc. are declared later in this file).
+let _tochkaCronJobs = null;
+function _initTochkaCronJobs() {
+  if (_tochkaCronJobs) return _tochkaCronJobs;
+  _tochkaCronJobs = require('./src/jobs/tochka-cron').create({
+    db, logger,
+    fetchAllServersDataCached, fetchAllServersData,
+    clients, users,
+    saveClients, rebuildClientMaps,
+    logActivity, generateId,
+    getPriceForProxyCount,
+    ledgerDb,
+    getMoscowNow,
+    getTochkaConfig: () => tochkaConfig,
+    tochkaRequest,
+    buildActItemsFromLedger, buildTochkaActBody,
+    buildTochkaBillBody, calculateMonthlyBillAmount,
+    getLastActGenerationMonth:  () => lastActGenerationMonth,
+    setLastActGenerationMonth:  (v) => { lastActGenerationMonth = v; },
+    getLastBillGenerationMonth: () => lastBillGenerationMonth,
+    setLastBillGenerationMonth: (v) => { lastBillGenerationMonth = v; },
+  });
+  return _tochkaCronJobs;
 }
+async function autoCreateMissingClients()  { return _initTochkaCronJobs().autoCreateMissingClients(); }
+async function autoGenerateMonthlyActs()   { return _initTochkaCronJobs().autoGenerateMonthlyActs(); }
+async function autoGenerateMonthlyBills()  { return _initTochkaCronJobs().autoGenerateMonthlyBills(); }
 
 // /admin + /api/docs + /api/admin/{cache/invalidate, vpn_profile, shop_report}
 // moved into src/routes/misc.js (Stage 3) — mount is above near cache/invalidate.
@@ -4178,166 +4122,6 @@ function buildDocHtml(type, doc, client, billAmount) {
 
 // Client-side: download bill PDF
 
-async function autoGenerateMonthlyActs() {
-  const moscowDate = getMoscowNow();
-  const day = moscowDate.getDate();
-  const hour = moscowDate.getHours();
-
-  // Only run on 1st of month, after 8:00 Moscow time
-  if (day !== 1 || hour < 8) return;
-
-  // Previous month
-  const prevMonth = new Date(moscowDate);
-  prevMonth.setMonth(prevMonth.getMonth() - 1);
-  const period = prevMonth.toISOString().slice(0, 7); // YYYY-MM
-
-  // Prevent duplicate generation
-  if (lastActGenerationMonth === period) return;
-
-  logger.info(`[Tochka AutoActs] Generating acts for period ${period}...`);
-  let generated = 0;
-
-  for (const client of clients) {
-    // Skip clients with autoActs disabled
-    if (client.autoActs === false) continue;
-
-    // Skip clients without charges
-    const ledgerEntries = ledgerDb.listByClient(client.id);
-    const monthCharges = ledgerEntries.filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(period));
-    if (monthCharges.length === 0) continue;
-
-    // Skip if act already exists for this period
-    if ((client.closingDocuments || []).some(d => d.period === period)) continue;
-
-    try {
-      
-      const { actItems, totalCost } = buildActItemsFromLedger(client, period);
-
-      // Try Tochka API
-      let tochkaDocumentId = null;
-      const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
-      if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
-        try {
-          const actData = buildTochkaActBody(client, period, actItems, actNumber);
-          const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/closing-documents', actData);
-          if (result.status === 200 && result.data?.Data?.documentId) {
-            tochkaDocumentId = result.data.Data.documentId;
-          }
-        } catch (e) { logger.error(`[Tochka AutoActs] API error for ${client.name}:`, e.message); }
-      }
-
-      const docId = crypto.randomBytes(8).toString('hex');
-      if (!client.closingDocuments) client.closingDocuments = [];
-      client.closingDocuments.push({
-        id: docId,
-        tochkaDocumentId,
-        period,
-        createdAt: new Date().toISOString(),
-        status: 'unsigned',
-        totalAmount: totalCost,
-        items: actItems,
-        actNumber,
-        contractInfo: client.contractInfo || ''
-      });
-      generated++;
-      logger.info(`[Tochka AutoActs] Created act for ${client.name}: ${totalCost} RUB`);
-      logActivity('billing', 'info', 'act_created', client.name, `Act created: ${totalCost} RUB for ${period}`, { client_id: client.id, amount: totalCost, period, act_number: actNumber });
-    } catch (e) {
-      logger.error(`[Tochka AutoActs] Error for ${client.name}:`, e.message);
-      logActivity('billing', 'error', 'act_error', client.name, `Act generation error: ${e.message}`, { client_id: client.id, period });
-    }
-  }
-
-  if (generated > 0) {
-    saveClients(clients);
-    logger.info(`[Tochka AutoActs] Generated ${generated} acts for ${period}`);
-  }
-  logActivity('billing', 'info', 'acts_complete', null, `Monthly acts generation: ${generated} created for ${period}`, { generated, period });
-  lastActGenerationMonth = period;
-  db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_act_generation_month', ?)").run(period);
-}
-
-async function autoGenerateMonthlyBills() {
-  const moscowDate = getMoscowNow();
-  const day = moscowDate.getDate();
-  const hour = moscowDate.getHours();
-
-  // Only run on 1st of month, after 8:00 Moscow time
-  if (day !== 1 || hour < 8) return;
-
-  // Current month (bills are for the current month, unlike acts which are for previous)
-  const currentPeriod = `${moscowDate.getFullYear()}-${String(moscowDate.getMonth() + 1).padStart(2, '0')}`;
-
-  // Prevent duplicate generation
-  if (lastBillGenerationMonth === currentPeriod) return;
-
-  logger.info(`[Tochka AutoBills] Generating bills for period ${currentPeriod}...`);
-  let generated = 0;
-  let serverData = [];
-  try { serverData = await fetchAllServersData(); } catch (e) { logger.error('[AutoBills] fetchAllServersData error:', e.message); }
-
-  for (const client of clients) {
-    // Skip clients with autoBills disabled
-    if (client.autoBills === false) continue;
-
-    // Skip clients without INN
-    if (!client.inn) continue;
-
-    // Skip if bill already exists for this period
-    if ((client.bills || []).some(b => b.period === currentPeriod)) continue;
-
-    try {
-      const amount = calculateMonthlyBillAmount(client, serverData);
-      if (amount <= 0) {
-        logger.info(`[Tochka AutoBills] Skipping ${client.name}: amount is 0`);
-        continue;
-      }
-
-      const billNumber = `СЧЁТ-${currentPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
-      const billDate = `${currentPeriod}-01`;
-
-      let tochkaBillId = null;
-      if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId) {
-        try {
-          const billData = buildTochkaBillBody(client, amount, billNumber, billDate);
-          const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
-          if (result.status === 200 && result.data?.Data?.documentId) {
-            tochkaBillId = result.data.Data.documentId;
-          }
-        } catch (e) {
-          logger.error(`[Tochka AutoBills] API error for ${client.name}:`, e.message);
-        }
-      }
-
-      const billId = crypto.randomBytes(8).toString('hex');
-      if (!client.bills) client.bills = [];
-      client.bills.push({
-        id: billId,
-        tochkaBillId,
-        period: currentPeriod,
-        createdAt: new Date().toISOString(),
-        amount,
-        status: 'unpaid',
-        billNumber,
-        billDate
-      });
-      generated++;
-      logger.info(`[Tochka AutoBills] Created bill for ${client.name}: ${amount} RUB`);
-      logActivity('billing', 'info', 'bill_created', client.name, `Bill created: ${amount} RUB for ${currentPeriod}`, { client_id: client.id, amount, period: currentPeriod, bill_number: billNumber });
-    } catch (e) {
-      logger.error(`[Tochka AutoBills] Error for ${client.name}:`, e.message);
-      logActivity('billing', 'error', 'bill_error', client.name, `Bill generation error: ${e.message}`, { client_id: client.id, period: currentPeriod });
-    }
-  }
-
-  if (generated > 0) {
-    saveClients(clients);
-    logger.info(`[Tochka AutoBills] Generated ${generated} bills for ${currentPeriod}`);
-  }
-  logActivity('billing', 'info', 'bills_complete', null, `Monthly bills generation: ${generated} created for ${currentPeriod}`, { generated, period: currentPeriod });
-  lastBillGenerationMonth = currentPeriod;
-  db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_bill_generation_month', ?)").run(currentPeriod);
-}
 
 // System activity log viewer
 
