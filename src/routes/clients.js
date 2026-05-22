@@ -22,7 +22,7 @@ module.exports = function createClientsRouter(deps) {
     clients,
     clientById, clientByLogin, clientByApiKey, clientByInn, clientByResetToken,
     users,
-    billingLedger, _ledgerInsert, _ledgerEntryParams, ledgerDb,
+    _ledgerInsert, _ledgerEntryParams, ledgerDb,
     appSettings,
   } = deps;
   const r = express.Router();
@@ -333,7 +333,7 @@ r.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlewar
 r.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
-  const allEntries = billingLedger[client.id] || [];
+  const allEntries = ledgerDb.listByClient(client.id);
   // BUG-11: Pagination support
   const limit = Math.min(parseInt(req.query.limit) || 100, 500);
   const offset = Math.max(parseInt(req.query.offset) || 0, 0);
@@ -352,7 +352,7 @@ r.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, re
 r.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
-  const entries = billingLedger[client.id] || [];
+  const entries = ledgerDb.listByClient(client.id);
   const idx = parseInt(req.params.entryIndex, 10);
   if (isNaN(idx) || idx < 0 || idx >= entries.length) return res.status(400).json({ error: 'Invalid entry index' });
 
@@ -376,11 +376,11 @@ r.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMiddl
     logger.error('[Ledger] Delete transaction failed: ' + e.message);
     return res.status(500).json({ error: 'Delete failed', details: e.message });
   }
-  entries.splice(idx, 1);
-  billingLedger[client.id] = entries;
   client.balance = newBalance;
 
-  // saveBillingLedger() removed (КРИТ-3): _ledgerDeleteById already deleted atomically, full rewrite invalidates db_id
+  // Stage 4: billingLedger in-memory mirror removed. listByClient() always
+  // reads fresh from billing_ledger so no client-side cache update needed
+  // after ledgerDb.deleteById() already mutated the DB inside the txn above.
   logger.info(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, recalculated balance: ${client.balance}`);
   auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, clientName: client.name, entryType: entry.type, amount: entry.amount || entry.cost, ip: getClientIp(req) });
   res.json({ ok: true, newBalance: client.balance });

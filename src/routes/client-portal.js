@@ -26,7 +26,7 @@ module.exports = function createClientPortalRouter(deps) {
     syncRotationLog, _rlSelect,
     apiServers,
     clients, clientById, clientByLogin, clientByApiKey, clientByResetToken,
-    dailyTraffic, billingLedger, ipTracking, uptimeTracking, ipHistory,
+    dailyTraffic, ledgerDb, ipTracking, uptimeTracking, ipHistory,
     getSpeedtestLatest,
     auditLog, logActivity, getClientIp,
     saveClients,
@@ -41,7 +41,7 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
     if (clientInfo) {
       const totalPayments = (clientInfo.payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
       // Current month expense from billing ledger
-      const ledgerEntries = billingLedger[clientInfo.id] || [];
+      const ledgerEntries = ledgerDb.listByClient(clientInfo.id);
       const currentMonthPrefix = getMoscowToday().slice(0, 7);
       const monthExpense = ledgerEntries
         .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(currentMonthPrefix))
@@ -145,7 +145,7 @@ r.get('/api/billing_history', authMiddleware, (req, res) => {
   const clientInfo = clientByLogin.get(req.user.login);
   if (!clientInfo) return res.status(404).json({ error: 'Client not found' });
 
-  const entries = billingLedger[clientInfo.id] || [];
+  const entries = ledgerDb.listByClient(clientInfo.id);
 
   // Optional filters
   const { month, limit: limitStr } = req.query;

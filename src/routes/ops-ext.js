@@ -16,17 +16,27 @@ module.exports = function createOpsExtRouter(deps) {
     fs, dbStmts, dbAudit,
     appSettings,
     getAllBankPayments,
-    getSessionCount, getBillingLedger, getClients,
+    getSessionCount, getClients,
     getApiServers, getServerCountries,
     getRunningJobs,
     getLastBillingRunSummary, getLastReconciliationMonth, getIntervals,
     getFetchAllServersDataCached, getMergeServerData,
+    ledgerExpense, parseBwToBytes, trafficBytesToGb,
   } = deps;
   const r = express.Router();
+  // Stage 4: billing_ledger reads come from DB. Two cheap aggregate queries
+  // replace what used to walk the in-memory `billingLedger` object.
+  const _ledgerCountStmt = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger');
+  const _ledgerMonthAggStmt = db.prepare(`
+    SELECT client_id, type, amount, balance_before, balance_after, gb_used
+      FROM billing_ledger
+     WHERE (type = 'charge' OR type = 'correction')
+       AND date LIKE ?
+  `);
 
 r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
   const mem = process.memoryUsage();
-  const ledgerEntryCount = Object.values(getBillingLedger()).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
+  const ledgerEntryCount = _ledgerCountStmt.get().n;
   const dbSize = fs.existsSync(DB_PATH) ? Math.round(fs.statSync(DB_PATH).size / 1024) : 0;
   res.json({
     status: 'ok',
@@ -194,21 +204,22 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       return safe;
     });
     // BUG-11: billingLedger removed from bulk response — use /api/admin/clients/:id/ledger instead
-    
+    // Stage 4: SQL aggregate replaces in-memory walk of `billingLedger`.
     const clientMonthCharges = {};
     const clientMonthGb = {};
     const curMonthPfx = new Date().toISOString().slice(0, 7);
-    for (const [clientId, entries] of Object.entries(billingLedger)) {
-      let cost = 0, gb = 0;
-      for (const e of entries) {
-        if ((e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(curMonthPfx)) {
-          cost += ledgerExpense(e);
-          gb += (e.delta_gb || 0);
-        }
-      }
-      if (cost !== 0) clientMonthCharges[clientId] = Math.round(cost * 100) / 100;
-      if (gb !== 0) clientMonthGb[clientId] = Math.round(gb * 1000) / 1000;
+    const monthRows = _ledgerMonthAggStmt.all(`${curMonthPfx}%`);
+    for (const r of monthRows) {
+      // Rehydrate the minimal shape ledgerExpense() expects (cost vs amount).
+      const entry = r.type === 'charge'
+        ? { type: r.type, cost: r.amount, balance_before: r.balance_before, balance_after: r.balance_after }
+        : { type: r.type, amount: r.amount, balance_before: r.balance_before, balance_after: r.balance_after };
+      const exp = ledgerExpense(entry);
+      if (exp !== 0) clientMonthCharges[r.client_id] = (clientMonthCharges[r.client_id] || 0) + exp;
+      if (r.gb_used != null) clientMonthGb[r.client_id] = (clientMonthGb[r.client_id] || 0) + r.gb_used;
     }
+    for (const k of Object.keys(clientMonthCharges)) clientMonthCharges[k] = Math.round(clientMonthCharges[k] * 100) / 100;
+    for (const k of Object.keys(clientMonthGb)) clientMonthGb[k] = Math.round(clientMonthGb[k] * 1000) / 1000;
 
     // TRAFFIC-FIX: Compute live month traffic per client from ProxySmart real-time data
     // This fixes discrepancy between admin client list (was showing billed delta only)

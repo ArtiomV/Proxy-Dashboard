@@ -32,8 +32,15 @@ const { safeWriteFile: _safeWriteFile, _fileLocks } = require('./src/utils/files
 const { verifyJwtSignature } = require('./src/tochka/jwt');
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
 const billing = require('./src/billing/atomic');
-// MONTH_NAMES_RU / buildTochkaActBody / etc. moved into src/routes/tochka.js's
-// own imports. server.js no longer references them directly.
+// MONTH_NAMES_RU / buildTochkaActBody / etc. moved into src/tochka/documents.js;
+// server.js still needs the underscored exports for its nightly autoActs +
+// autoBills crons (lines below). The router does its own require.
+const {
+  buildActItemsFromLedger: _buildActItemsFromLedger,
+  buildTochkaActBody: _buildTochkaActBody,
+  buildTochkaBillBody: _buildTochkaBillBody,
+  calculateMonthlyBillAmount: _calculateMonthlyBillAmount,
+} = require('./src/tochka/documents');
 const tgBot = require('./src/telegram/bot');
 const tgSummary = require('./src/telegram/daily_summary');
 const aiInsights = require('./src/telegram/ai_insights');
@@ -553,42 +560,33 @@ function saveClients(clientsList) {
   }
 }
 
-const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json'); // JSON fallback
+const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json'); // legacy JSON fallback
 // _ledgerDeleteByClient / _ledgerInsert moved into src/db/ledger.js.
 // _ledgerInsert alias is already created near the init block at the top.
 
-let billingLedger = {};
+// Stage 4: in-memory `billingLedger` mirror REMOVED. Every reader now calls
+// `ledgerDb.listByClient(clientId)` which reads fresh DB rows on each call.
+// One-shot migration: if billing_ledger table is empty AND the legacy JSON
+// file from pre-SQLite days exists, import its contents into the table.
 {
-  const _blRows = db.prepare('SELECT * FROM billing_ledger ORDER BY id').all();
-  if (_blRows.length > 0) {
-    for (const r of _blRows) {
-      if (!billingLedger[r.client_id]) billingLedger[r.client_id] = [];
-      const entry = { type: r.type, date: r.date, timestamp: r.timestamp || '' };
-      if (r.type === 'charge') { entry.cost = r.amount; } else { entry.amount = r.amount; }
-      entry.currency = r.currency || 'RUB';
-      if (r.balance_before != null) entry.balance_before = r.balance_before;
-      if (r.balance_after != null) entry.balance_after = r.balance_after;
-      if (r.gb_used != null) entry.delta_gb = r.gb_used;
-      if (r.modem_count != null) entry.modem_count = r.modem_count;
-      if (r.days_in_month != null) entry.days_in_month = r.days_in_month;
-      if (r.note) entry.note = r.note;
-      if (r.source) entry.source = r.source;
-      if (r.payment_id) entry.paymentId = r.payment_id;
-      if (r.details && r.details !== '{}') {
-        try { Object.assign(entry, JSON.parse(r.details)); } catch (_) { /* best-effort: error intentionally swallowed */ }
-      }
-      entry.db_id = r.id; 
-      billingLedger[r.client_id].push(entry);
-    }
-    logger.info(`[SQLite] Loaded ${_blRows.length} billing ledger entries`);
-  } else {
+  const _blCount = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger').get().n;
+  if (_blCount === 0 && fs.existsSync(BILLING_LEDGER_FILE)) {
     try {
-      if (fs.existsSync(BILLING_LEDGER_FILE)) {
-        billingLedger = JSON.parse(fs.readFileSync(BILLING_LEDGER_FILE, 'utf8'));
-        const total = Object.values(billingLedger).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
-        if (total > 0) logger.info(`[SQLite] Loaded ${total} billing ledger entries from JSON fallback`);
-      }
-    } catch (e) { logger.error('[SQLite] Failed to load billing_ledger from JSON:', e.message); }
+      const legacy = JSON.parse(fs.readFileSync(BILLING_LEDGER_FILE, 'utf8'));
+      let migrated = 0;
+      db.transaction(() => {
+        for (const [clientId, entries] of Object.entries(legacy || {})) {
+          if (!Array.isArray(entries)) continue;
+          for (const e of entries) {
+            _ledgerInsert.run(..._ledgerEntryParams(clientId, e));
+            migrated++;
+          }
+        }
+      })();
+      if (migrated > 0) logger.info(`[SQLite] Migrated ${migrated} billing ledger entries from legacy JSON → DB`);
+    } catch (e) { logger.error('[SQLite] Failed to migrate billing_ledger from JSON:', e.message); }
+  } else if (_blCount > 0) {
+    logger.info(`[SQLite] billing_ledger has ${_blCount} rows (loaded on-demand via ledgerDb)`);
   }
 }
 
@@ -837,7 +835,7 @@ let lastBillGenerationMonth = (db.prepare("SELECT value FROM kv_store WHERE key 
 
 // Extracted to src/tochka/documents.js — buildTochkaActBody, buildActItemsFromLedger, buildTochkaBillBody, calculateMonthlyBillAmount, MONTH_NAMES_RU
 function buildActItemsFromLedger(client, period) {
-  return _buildActItemsFromLedger(client, period, billingLedger);
+  return _buildActItemsFromLedger(client, period, (id) => ledgerDb.listByClient(id));
 }
 function buildTochkaActBody(client, period, actItems, actNumber) {
   return _buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber);
@@ -846,7 +844,7 @@ function buildTochkaBillBody(client, amount, billNumber, billDate) {
   return _buildTochkaBillBody(tochkaConfig, client, amount, billNumber, billDate);
 }
 function calculateMonthlyBillAmount(client, cachedResults) {
-  return _calculateMonthlyBillAmount(client, cachedResults, billingLedger);
+  return _calculateMonthlyBillAmount(client, cachedResults, (id) => ledgerDb.listByClient(id));
 }
 
 let dailyTraffic = {}; // { portKey: { "2026-03-01": { in: bytes, out: bytes, portName }, ... } }
@@ -1468,14 +1466,15 @@ for (const c of clients) {
 }
 if (clientsMigrated) saveClients(clients);
 rebuildClientMaps(); // Build maps before auto-migration check
-// Stage 4: pass getters instead of the maps directly. server.js rebinds
-// `clientById = new Map(...)` and `billingLedger = {...}` during state
-// rebuilds; getters re-read the current value on every credit/debit so
-// the in-memory mirror stays in sync (previously the captured Map went
+// Stage 4: pass a getClientById getter instead of the Map directly.
+// server.js rebinds `clientById = new Map(...)` during state rebuilds;
+// the getter re-reads the current binding on every credit/debit so the
+// in-memory mirror stays in sync (previously the captured Map went
 // stale → HTTP responses showed `balance: 0` after any client create).
+// Stage 4 finish: the in-memory `billingLedger` mirror is gone — atomic.js
+// no longer maintains a JS-side ledger copy.
 billing.init({
   db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams,
-  getBillingLedger: () => billingLedger,
   getClientById: (id) => clientById.get(id),
 });
 
@@ -1940,9 +1939,9 @@ function adminMiddleware(req, res, next) {
 app.use(require('./src/routes/ops')({
   db, logger, DB_PATH,
   getSessionCount: () => getSessionCount(),
-  // Getter forms so the router sees the current `billingLedger` and `clients`
-  // bindings — they're `let`s that get rebound on reload.
-  getBillingLedger: () => billingLedger,
+  // Getter form so the router sees the current `clients` binding (let-rebound
+  // on reload). Stage 4 removed the in-memory ledger mirror — ops.js reads
+  // billing_ledger row count via its own DB statement.
   getClients: () => clients,
 }));
 
@@ -2843,7 +2842,7 @@ app.use(require('./src/routes/client-portal')({
   clientByLogin:     { get: (k) => clientByLogin.get(k) },
   clientByApiKey:    { get: (k) => clientByApiKey.get(k) },
   clientByResetToken:{ get: (k) => clientByResetToken.get(k) },
-  dailyTraffic, billingLedger, ipTracking, uptimeTracking, ipHistory,
+  dailyTraffic, ledgerDb, ipTracking, uptimeTracking, ipHistory,
   getSpeedtestLatest,
   auditLog, logActivity, getClientIp,
   saveClients,
@@ -3358,7 +3357,7 @@ app.use(require('./src/routes/clients')({
   clientByInn:       { get: (k) => clientByInn.get(k) },
   clientByResetToken:{ get: (k) => clientByResetToken.get(k) },
   users,
-  billingLedger, _ledgerInsert, _ledgerEntryParams, ledgerDb,
+  _ledgerInsert, _ledgerEntryParams, ledgerDb,
   appSettings,
 }));
 
@@ -4022,7 +4021,7 @@ async function runMonthlyReconciliation() {
     const storedBytes = getClientStoredMonthBytes(client.portName, prevMonthStr);
     const storedGb = trafficBytesToGb(storedBytes);
 
-    const entries = billingLedger[client.id] || [];
+    const entries = ledgerDb.listByClient(client.id);
     const monthCharges = entries.filter(e =>
       (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(prevMonthStr) &&
       (!e.traffic_source || e.traffic_source !== 'monthly_reconciliation')
@@ -4180,6 +4179,10 @@ app.use(require('./src/routes/tochka')({
   apiServers, SERVER_COUNTRIES,
   fetchAllServersDataCached,
   getMoscowToday,
+  ledgerDb, clientsDb,
+  // runTochkaSync is defined later in this file — pass a lazy wrapper that
+  // resolves at call time so the mount doesn't TDZ.
+  runTochkaSync: (...args) => runTochkaSync(...args),
 }));
 
 // Save Tochka config from admin UI
@@ -4396,7 +4399,7 @@ async function autoGenerateMonthlyActs() {
     if (client.autoActs === false) continue;
 
     // Skip clients without charges
-    const ledgerEntries = billingLedger[client.id] || [];
+    const ledgerEntries = ledgerDb.listByClient(client.id);
     const monthCharges = ledgerEntries.filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(period));
     if (monthCharges.length === 0) continue;
 
@@ -4551,7 +4554,6 @@ app.use(require('./src/routes/ops-ext')({
   appSettings,
   getAllBankPayments,
   getSessionCount: () => getSessionCount(),
-  getBillingLedger: () => billingLedger,
   getClients: () => clients,
   getApiServers: () => apiServers,
   getServerCountries: () => SERVER_COUNTRIES,
@@ -4561,6 +4563,7 @@ app.use(require('./src/routes/ops-ext')({
   getIntervals: () => _intervals,
   getFetchAllServersDataCached: () => fetchAllServersDataCached,
   getMergeServerData: () => mergeServerData,
+  ledgerExpense, parseBwToBytes, trafficBytesToGb,
 }));
 
 app.use(require('./src/routes/billing-ext')({
@@ -4570,7 +4573,7 @@ app.use(require('./src/routes/billing-ext')({
   getMergeServerData: () => mergeServerData,
   getPortKeyToPortName: () => portKeyToPortName,
   getDailyTraffic: () => dailyTraffic,
-  getBillingLedger: () => billingLedger,
+  ledgerDb,
   getMoscowToday, trafficBytesToGb, parseBwToBytes, ledgerExpense,
   appSettings,
   auditLog, logActivity,

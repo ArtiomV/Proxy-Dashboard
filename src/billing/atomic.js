@@ -1,5 +1,5 @@
 'use strict';
-// Stage 4 fix: the previous init() captured the `clientById` Map by value.
+// Stage 4 fix #1: the previous init() captured the `clientById` Map by value.
 // server.js then ran `rebuildClientMaps()` which reassigns the *binding*
 // `clientById = new Map(...)`, so this module's reference pointed at the
 // stale (now-empty) Map. The `if (client) client.balance = balanceAfter`
@@ -11,12 +11,16 @@
 // FOLLOWUP.md → "billing/atomic.js stale clientById reference".
 //
 // Fix: take a `getClientById` getter (read on every call) instead of the
-// Map directly. Same approach for `billingLedger` — it's a let-rebound
-// object in server.js. Backwards-compatible: callers can still pass
+// Map directly. Backwards-compatible: callers can still pass
 // `clientById: someMap` and we'll wrap it in a getter.
+//
+// Stage 4 finish: the in-memory `billingLedger` mirror is gone — every
+// reader now calls `ledgerDb.listByClient()` which reads fresh DB rows.
+// We dropped the `getBillingLedger` dep entirely; `_ledgerInsert.run()`
+// inside the same txn is still the canonical write.
 
 let db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams;
-let getBillingLedger, getClientById;
+let getClientById;
 
 function init(deps) {
   db = deps.db;
@@ -26,12 +30,6 @@ function init(deps) {
   _ledgerEntryParams = deps._ledgerEntryParams;
 
   // Accept either a getter (preferred) or the raw object/map (legacy).
-  if (typeof deps.getBillingLedger === 'function') {
-    getBillingLedger = deps.getBillingLedger;
-  } else if (deps.billingLedger) {
-    const ledger = deps.billingLedger;
-    getBillingLedger = () => ledger;
-  }
   if (typeof deps.getClientById === 'function') {
     getClientById = deps.getClientById;
   } else if (deps.clientById) {
@@ -63,13 +61,7 @@ function atomicCredit(clientId, amount, ledgerEntry) {
     if (ledgerEntry) {
       const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
       const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-      entry.db_id = result.lastInsertRowid;
-      ledgerDbId = entry.db_id;
-      const ledger = getBillingLedger && getBillingLedger();
-      if (ledger) {
-        if (!ledger[clientId]) ledger[clientId] = [];
-        ledger[clientId].push(entry);
-      }
+      ledgerDbId = result.lastInsertRowid;
     }
   })();
   const client = getClientById && getClientById(clientId);
@@ -111,13 +103,7 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
       if (ledgerEntry) {
         const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
         const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-        entry.db_id = result.lastInsertRowid;
-        ledgerDbId = entry.db_id;
-        const ledger = getBillingLedger && getBillingLedger();
-        if (ledger) {
-          if (!ledger[clientId]) ledger[clientId] = [];
-          ledger[clientId].push(entry);
-        }
+        ledgerDbId = result.lastInsertRowid;
       }
     })();
   } catch (e) {

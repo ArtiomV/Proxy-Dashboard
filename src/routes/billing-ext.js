@@ -12,7 +12,7 @@ module.exports = function createBillingExtRouter(deps) {
     db, logger, authMiddleware, adminMiddleware,
     getClients,
     getFetchAllServersDataCached, getMergeServerData,
-    getPortKeyToPortName, getDailyTraffic, getBillingLedger,
+    getPortKeyToPortName, getDailyTraffic, ledgerDb,
     getMoscowToday, trafficBytesToGb, parseBwToBytes, ledgerExpense,
     appSettings,
     auditLog, logActivity,
@@ -409,7 +409,7 @@ r.get('/api/admin/billing/reconciliation', authMiddleware, adminMiddleware, asyn
     const storedGb = trafficBytesToGb(storedBytes);
 
     // Sum ledger charges for this month
-    const entries = getBillingLedger()[client.id] || [];
+    const entries = ledgerDb.listByClient(client.id);
     const monthCharges = entries.filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(period));
     const billedGb = Math.round(monthCharges.reduce((s, e) => s + (e.delta_gb || 0), 0) * 1000) / 1000;
     const billedCost = Math.round(monthCharges.reduce((s, e) => s + ledgerExpense(e), 0) * 100) / 100;

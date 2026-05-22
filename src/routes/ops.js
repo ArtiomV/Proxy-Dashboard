@@ -4,8 +4,8 @@
 //
 // Factory pattern: takes a `deps` object and returns an express.Router.
 // Routes inside refer to deps directly to avoid stale closures over the
-// mutable globals that server.js still owns (billingLedger, clients, etc.)
-// — getters are used for those.
+// mutable globals that server.js still owns (clients, etc.) — getters are
+// used for those.
 //
 // This is the FIRST Stage 3 router. Start narrow with the smallest, most
 // isolated endpoints to validate the factory + mounting pattern before
@@ -15,17 +15,18 @@ const express = require('express');
 const fs = require('fs');
 
 module.exports = function createOpsRouter(deps) {
-  const { db, logger, DB_PATH, getSessionCount, getBillingLedger, getClients } = deps;
+  const { db, logger, DB_PATH, getSessionCount, getClients } = deps;
   const r = express.Router();
+  // Stage 4: billing_ledger row count is read from DB on every scrape.
+  const _ledgerCountStmt = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger');
 
   // Minimal Prometheus-compatible /metrics — text format. Lets ops scrape this
   // from Grafana/Prometheus without installing prom-client (zero deps).
   r.get('/metrics', (req, res) => {
     try {
       const mem = process.memoryUsage();
-      const billingLedger = getBillingLedger();
       const clients = getClients();
-      const ledgerCount = Object.values(billingLedger).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
+      const ledgerCount = _ledgerCountStmt.get().n;
       const dbSize = fs.existsSync(DB_PATH) ? fs.statSync(DB_PATH).size : 0;
       const lines = [
         '# HELP proxy_dashboard_uptime_seconds Process uptime in seconds',
@@ -43,7 +44,7 @@ module.exports = function createOpsRouter(deps) {
         '# HELP proxy_dashboard_clients_total Number of clients',
         '# TYPE proxy_dashboard_clients_total gauge',
         `proxy_dashboard_clients_total ${clients.length}`,
-        '# HELP proxy_dashboard_ledger_entries_total In-memory ledger entries',
+        '# HELP proxy_dashboard_ledger_entries_total billing_ledger row count',
         '# TYPE proxy_dashboard_ledger_entries_total gauge',
         `proxy_dashboard_ledger_entries_total ${ledgerCount}`,
         '# HELP proxy_dashboard_db_size_bytes SQLite file size',

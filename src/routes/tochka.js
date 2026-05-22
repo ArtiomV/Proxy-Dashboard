@@ -8,6 +8,18 @@
 
 const express = require('express');
 const crypto = require('crypto');
+// Stage 3 finish: helpers from src/tochka/documents.js. Until Stage 4 these
+// were called bare and would have ReferenceError'd if a generate_act request
+// ever fired through the router; the cron path in server.js worked only
+// because server.js has its own wrapper.
+const {
+  buildActItemsFromLedger,
+  buildTochkaActBody,
+  buildTochkaBillBody,
+  calculateMonthlyBillAmount,
+} = require('../tochka/documents');
+const { tochkaRequest } = require('../tochka/api');
+const { buildDocHtml: _buildDocHtml } = require('../documents/generator');
 
 module.exports = function createTochkaRouter(deps) {
   const {
@@ -24,8 +36,21 @@ module.exports = function createTochkaRouter(deps) {
     apiServers, SERVER_COUNTRIES,
     fetchAllServersDataCached,
     getMoscowToday,
+    ledgerDb, clientsDb,
+    runTochkaSync,
   } = deps;
   const r = express.Router();
+  // Helpers in src/tochka/documents.js need `tochkaConfig` and a getLedger
+  // getter; wrap them once so the call sites below stay readable.
+  const _buildAct = (client, period) => buildActItemsFromLedger(client, period, (id) => ledgerDb.listByClient(id));
+  const _calcBill = (client, cachedResults) => calculateMonthlyBillAmount(client, cachedResults, (id) => ledgerDb.listByClient(id));
+  const _buildActBody = (client, period, actItems, actNumber) => buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber);
+  const _buildBillBody = (client, amount, billNumber, billDate) => buildTochkaBillBody(tochkaConfig, client, amount, billNumber, billDate);
+  // Stage 3 finish: these were bare-referenced in tochka.js without deps,
+  // so any /generate_act / /sync / /closing_documents/:id/pdf request was a
+  // latent ReferenceError. Stage 4 wires them properly.
+  const buildDocHtml = (type, doc, client, billAmount) => _buildDocHtml(type, doc, client, billAmount, tochkaConfig);
+  const _clientUpdateReferralBalance = clientsDb.updateReferralBalanceStmt();
 
 r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async (req, res) => {
   logger.info('[Tochka Webhook] Received webhook');
@@ -366,7 +391,7 @@ r.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (r
   
   let actItems = items;
   if (!actItems || actItems.length === 0) {
-    ({ actItems } = buildActItemsFromLedger(client, period));
+    ({ actItems } = _buildAct(client, period));
   }
 
   const totalAmount = actItems.reduce((s, i) => s + (i.amount || 0), 0);
@@ -376,7 +401,7 @@ r.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (r
   const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
   if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
     try {
-      const actData = buildTochkaActBody(client, period, actItems, actNumber);
+      const actData = _buildActBody(client, period, actItems, actNumber);
       const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/closing-documents', actData);
       if (result.status === 200 && result.data?.Data?.documentId) {
         tochkaDocumentId = result.data.Data.documentId;
@@ -509,7 +534,7 @@ r.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, async
   const results = [];
 
   for (const client of clients) {
-    const ledgerEntries = billingLedger[client.id] || [];
+    const ledgerEntries = ledgerDb.listByClient(client.id);
     const monthCharges = ledgerEntries.filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(period));
     if (monthCharges.length === 0) { skipped++; continue; }
 
@@ -522,7 +547,7 @@ r.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, async
 
     try {
       
-      const { actItems, totalCost } = buildActItemsFromLedger(client, period);
+      const { actItems, totalCost } = _buildAct(client, period);
       if (totalCost <= 0) { skipped++; continue; }
 
       // Try Tochka API
@@ -530,7 +555,7 @@ r.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, async
       const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
       if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
         try {
-          const actData = buildTochkaActBody(client, period, actItems, actNumber);
+          const actData = _buildActBody(client, period, actItems, actNumber);
           const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/closing-documents', actData);
           if (result.status === 200 && result.data?.Data?.documentId) {
             tochkaDocumentId = result.data.Data.documentId;
@@ -579,7 +604,7 @@ r.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (
   if (!manualAmount) {
     try { serverData = await fetchAllServersDataCached(); } catch (e) { logger.error('[Bills] fetchAllServersData error:', e.message); }
   }
-  let amount = manualAmount || calculateMonthlyBillAmount(client, serverData);
+  let amount = manualAmount || _calcBill(client, serverData);
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Cannot calculate bill amount (no charges found)' });
 
   const billNumber = `СЧЁТ-${billPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
@@ -588,7 +613,7 @@ r.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (
   let tochkaBillId = null;
   if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
     try {
-      const billData = buildTochkaBillBody(client, amount, billNumber, billDate);
+      const billData = _buildBillBody(client, amount, billNumber, billDate);
       const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
       if (result.status === 200 && result.data?.Data?.documentId) {
         tochkaBillId = result.data.Data.documentId;
@@ -634,7 +659,7 @@ r.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, asyn
     if (!client.inn) { skipped++; continue; }
     if ((client.bills || []).some(b => b.period === billPeriod)) { skipped++; continue; }
 
-    const amount = calculateMonthlyBillAmount(client, serverData);
+    const amount = _calcBill(client, serverData);
     if (!amount || amount <= 0) { skipped++; continue; }
 
     const billNumber = `СЧЁТ-${billPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
@@ -642,7 +667,7 @@ r.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, asyn
 
     if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId) {
       try {
-        const billData = buildTochkaBillBody(client, amount, billNumber, billDate);
+        const billData = _buildBillBody(client, amount, billNumber, billDate);
         const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
         if (result.status === 200 && result.data?.Data?.documentId) {
           tochkaBillId = result.data.Data.documentId;
