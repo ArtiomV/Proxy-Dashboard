@@ -1882,7 +1882,28 @@ if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true
 
 const app = express();
 app.set('trust proxy', 1); // trust first proxy (nginx) — req.ip uses x-forwarded-for
-app.use(helmet({ contentSecurityPolicy: false, crossOriginEmbedderPolicy: false }));
+// CSP restored after Stage 5 (inline <script> blocks extracted into
+// public/js/admin.js + client.js). Inline `onclick="…"` attributes in
+// generated HTML are allowed via script-src-attr 'unsafe-inline' — the
+// pragmatic compromise; migrating to event delegation is FOLLOWUP work.
+// Chart.js CDN whitelisted by hash via the existing <script integrity>
+// attribute; 'self' covers the extracted local JS.
+app.use(helmet({
+  contentSecurityPolicy: {
+    useDefaults: true,
+    directives: {
+      'default-src': ["'self'"],
+      'script-src':  ["'self'", 'https://cdn.jsdelivr.net'],
+      'script-src-attr': ["'unsafe-inline'"],   // inline onclick="…" in admin.js-rendered HTML
+      'style-src':   ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
+      'font-src':    ["'self'", 'https://fonts.gstatic.com', 'data:'],
+      'img-src':     ["'self'", 'data:', 'https:'],
+      'connect-src': ["'self'"],
+      'frame-ancestors': ["'none'"],
+    },
+  },
+  crossOriginEmbedderPolicy: false,
+}));
 // Per-request correlation ID — propagated through logs so we can grep a
 // single request's lifecycle across multiple subsystems. Honour caller's
 // X-Request-Id if they supplied one (lets nginx/edge inject a trace ID),
