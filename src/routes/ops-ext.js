@@ -1,0 +1,469 @@
+'use strict';
+//
+// src/routes/ops-ext.js — remaining ops endpoints (Stage 3 finish).
+//
+// 11 admin-only routes left in server.js after the first ops.js extraction.
+// Late-mounted in server.js so all helpers (fetchAllServersDataCached etc.)
+// are already defined. Globals accessed via getter functions to avoid TDZ
+// during mount-time evaluation.
+
+const express = require('express');
+
+module.exports = function createOpsExtRouter(deps) {
+  const {
+    db, logger, DB_PATH,
+    authMiddleware, adminMiddleware, dashboardLimiter,
+    fs, dbStmts, dbAudit,
+    appSettings,
+    getSessionCount, getBillingLedger, getClients,
+    getApiServers, getServerCountries,
+    getRunningJobs,
+    getLastBillingRunSummary, getLastReconciliationMonth, getIntervals,
+    getFetchAllServersDataCached, getMergeServerData,
+  } = deps;
+  const r = express.Router();
+
+r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
+  const mem = process.memoryUsage();
+  const ledgerEntryCount = Object.values(getBillingLedger()).reduce((s, a) => s + (Array.isArray(a) ? a.length : 0), 0);
+  const dbSize = fs.existsSync(DB_PATH) ? Math.round(fs.statSync(DB_PATH).size / 1024) : 0;
+  res.json({
+    status: 'ok',
+    uptime_seconds: Math.round(process.uptime()),
+    clients: getClients().length,
+    sessions: getSessionCount(),
+    servers: getApiServers().length,
+    memory: {
+      rss_mb: Math.round(mem.rss / 1024 / 1024),
+      heap_used_mb: Math.round(mem.heapUsed / 1024 / 1024),
+      heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024)
+    },
+    database: { size_kb: dbSize, ledger_entries: ledgerEntryCount, wal_mode: true },
+    billing: getLastBillingRunSummary() || { last_run: null },
+    reconciliation: { last_month: getLastReconciliationMonth() || null },
+    intervals: getIntervals().length,
+    timestamp: new Date().toISOString()
+  });
+});
+
+r.get('/api/admin/jobs/:id', authMiddleware, adminMiddleware, (req, res) => {
+  const job = getRunningJobs().get(req.params.id);
+  if (!job) return res.status(404).json({ ok: false, error: 'Job not found' });
+  res.json({ ok: true, job });
+});
+
+r.get('/api/admin/auto_reboot_log', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 1000);
+    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 90);
+    const rows = db.prepare(`
+      SELECT id, server_name, nick, imei, rebooted_at, reason, status, error
+        FROM auto_reboot_log
+       WHERE rebooted_at >= datetime('now', '-${days} days')
+       ORDER BY id DESC
+       LIMIT ?
+    `).all(limit);
+    res.json({ count: rows.length, days, rows });
+  } catch (e) {
+    logger.error('[auto_reboot_log]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+r.get('/api/admin/db_audit', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const { table, operation, row_id, actor, source, since, until } = req.query;
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 200, 1), 5000);
+    let rows;
+    if (row_id && table) {
+      rows = dbAudit.getRowHistory(table, row_id, limit);
+    } else {
+      rows = dbAudit.search({ table, operation, actor, source, since, until, limit });
+    }
+    res.json({ count: rows.length, rows });
+  } catch (e) {
+    logger.error('[db_audit]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+r.get('/api/admin/api_usage', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const clientId = String(req.query.client_id || '').trim();
+    if (!clientId) return res.status(400).json({ error: 'client_id required' });
+    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+    const limit = Math.min(Math.max(parseInt(req.query.limit) || 100, 1), 500);
+
+    const sinceExpr = `datetime('now', '-${days} days')`;
+
+    // Aggregate
+    const totals = db.prepare(`
+      SELECT COUNT(*) as total,
+             SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errors,
+             AVG(response_time_ms) as avg_ms,
+             MIN(timestamp) as first_ts,
+             MAX(timestamp) as last_ts
+      FROM api_usage
+      WHERE client_id = ? AND timestamp >= ${sinceExpr}
+    `).get(clientId);
+
+    // Per-day buckets (for chart)
+    const perDay = db.prepare(`
+      SELECT substr(timestamp, 1, 10) as date,
+             COUNT(*) as count,
+             SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errors,
+             AVG(response_time_ms) as avg_ms
+      FROM api_usage
+      WHERE client_id = ? AND timestamp >= ${sinceExpr}
+      GROUP BY date
+      ORDER BY date
+    `).all(clientId);
+
+    // Per-endpoint breakdown
+    const perEndpoint = db.prepare(`
+      SELECT endpoint, method,
+             COUNT(*) as count,
+             SUM(CASE WHEN status_code >= 400 THEN 1 ELSE 0 END) as errors,
+             AVG(response_time_ms) as avg_ms
+      FROM api_usage
+      WHERE client_id = ? AND timestamp >= ${sinceExpr}
+      GROUP BY endpoint, method
+      ORDER BY count DESC
+    `).all(clientId);
+
+    // Latest requests
+    const recent = db.prepare(`
+      SELECT endpoint, method, status_code, response_time_ms, user_agent, ip, timestamp, error
+      FROM api_usage
+      WHERE client_id = ?
+      ORDER BY id DESC
+      LIMIT ?
+    `).all(clientId, limit);
+
+    // Active flag: any request in last 24h
+    const recent24h = db.prepare(`
+      SELECT COUNT(*) as c FROM api_usage
+      WHERE client_id = ? AND timestamp >= datetime('now', '-1 day')
+    `).get(clientId).c;
+
+    const total = totals.total || 0;
+    const errors = totals.errors || 0;
+    res.json({
+      client_id: clientId,
+      days,
+      active_24h: recent24h > 0,
+      requests_24h: recent24h,
+      summary: {
+        total,
+        errors,
+        error_rate_pct: total > 0 ? Math.round((errors / total) * 1000) / 10 : 0,
+        avg_response_ms: totals.avg_ms ? Math.round(totals.avg_ms) : null,
+        first_request: totals.first_ts,
+        last_request: totals.last_ts,
+      },
+      per_day: perDay,
+      per_endpoint: perEndpoint,
+      recent,
+    });
+  } catch (e) {
+    logger.error('[api_usage]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const results = await getFetchAllServersDataCached()();
+    const merged = getMergeServerData()(results, '*');
+    const servers = getApiServers().map(s => {
+      const sc = getServerCountries()[s.name] || {};
+      return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz, address: s.address || '' };
+    });
+    // TASK-01 (SEC): serverAuth removed — credentials must never reach the frontend
+    
+    // Count modems per client from live bandwidth data
+    const _clientModemCounts = {};
+    for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+      const pn = bwData.portName;
+      if (pn) _clientModemCounts[pn] = (_clientModemCounts[pn] || 0) + 1;
+    }
+    const sanitizedClients = clients.map(c => {
+      const { password, passwordHash, ...safe } = c;
+      safe.modemCount = _clientModemCounts[c.portName] || 0;
+      return safe;
+    });
+    // BUG-11: billingLedger removed from bulk response — use /api/admin/clients/:id/ledger instead
+    
+    const clientMonthCharges = {};
+    const clientMonthGb = {};
+    const curMonthPfx = new Date().toISOString().slice(0, 7);
+    for (const [clientId, entries] of Object.entries(billingLedger)) {
+      let cost = 0, gb = 0;
+      for (const e of entries) {
+        if ((e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(curMonthPfx)) {
+          cost += ledgerExpense(e);
+          gb += (e.delta_gb || 0);
+        }
+      }
+      if (cost !== 0) clientMonthCharges[clientId] = Math.round(cost * 100) / 100;
+      if (gb !== 0) clientMonthGb[clientId] = Math.round(gb * 1000) / 1000;
+    }
+
+    // TRAFFIC-FIX: Compute live month traffic per client from ProxySmart real-time data
+    // This fixes discrepancy between admin client list (was showing billed delta only)
+    // and admin analytics / client portal (showing live counters)
+    const clientLiveMonthGb = {};
+    const portNameToClientId = {};
+    for (const c of getClients()) {
+      if (c.portName) portNameToClientId[c.portName] = c.id;
+    }
+    // Sum bandwidth_bytes_month_in + _out for each portName from live data
+    const portNameBytes = {};
+    for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+      const pn = bwData.portName;
+      if (!pn || !portNameToClientId[pn]) continue;
+      if (!portNameBytes[pn]) portNameBytes[pn] = 0;
+      portNameBytes[pn] += parseBwToBytes(bwData.bandwidth_bytes_month_in);
+      portNameBytes[pn] += parseBwToBytes(bwData.bandwidth_bytes_month_out);
+    }
+    for (const [pn, bytes] of Object.entries(portNameBytes)) {
+      const cid = portNameToClientId[pn];
+      if (cid && bytes > 0) {
+        clientLiveMonthGb[cid] = trafficBytesToGb(bytes);
+      }
+    }
+
+    // Per-client last completed hour traffic from traffic_hourly
+    const clientLastHourGb = {};
+    const clientTodayGb = {};
+    {
+      // Last completed hour
+      // N+1 fix: use single bulk query with scalar subquery so "max hour" is
+      // computed once; O(1) client lookup via portNameToClientId map.
+      const rows = db.prepare(`
+        SELECT client_name, SUM(bytes_in + bytes_out) as total
+        FROM traffic_hourly
+        WHERE client_name != ''
+          AND hour_start = (SELECT MAX(hour_start) FROM traffic_hourly WHERE client_name != '')
+        GROUP BY client_name
+      `).all();
+      for (const r of rows) {
+        const cid = portNameToClientId[r.client_name];
+        if (cid) clientLastHourGb[cid] = trafficBytesToGb(r.total);
+      }
+      // Today per client from live data
+      for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+        const pn = bwData.portName;
+        if (!pn || !portNameToClientId[pn]) continue;
+        const cid = portNameToClientId[pn];
+        if (!clientTodayGb[cid]) clientTodayGb[cid] = 0;
+        clientTodayGb[cid] += trafficBytesToGb(parseBwToBytes(bwData.bandwidth_bytes_day_in) + parseBwToBytes(bwData.bandwidth_bytes_day_out));
+      }
+    }
+
+    // Override yesterday bandwidth with recorded daily_traffic (stable, not degraded by modem restarts)
+    const _yesterdayStr = getMoscowYesterday();
+    for (const [portId, bwData] of Object.entries(merged.bandwidth || {})) {
+      const dt = getDailyTraffic()[portId]?.[_yesterdayStr];
+      if (dt) {
+        bwData.bandwidth_bytes_yesterday_in = dt.in || 0;
+        bwData.bandwidth_bytes_yesterday_out = dt.out || 0;
+      }
+    }
+
+    // Modem trend: compare first N days of current month vs first N days of previous month.
+    // This was a hot O(ports × days) loop on every /api/admin/data hit (~50 admin
+    // page-views/day each iterating ~11k port/date pairs). Cached for 60s.
+    const modemTrend = _getModemTrend();
+
+    // Client trend: aggregate modem trend by portName (client)
+    const clientTrend = _getClientTrend();
+    // Skip the inline computation below — handled by _getClientTrend cache.
+    if (false) {
+      const mskNow2 = getMoscowNow();
+      const cd2 = Math.max(mskNow2.getDate() - 1, 0);
+      if (cd2 > 0) {
+        const cy = mskNow2.getFullYear(), cm = mskNow2.getMonth();
+        const cp = `${cy}-${String(cm + 1).padStart(2, '0')}`;
+        const pd = new Date(cy, cm - 1, 1);
+        const pp = `${pd.getFullYear()}-${String(pd.getMonth() + 1).padStart(2, '0')}`;
+        const cc = `${cp}-${String(cd2).padStart(2, '0')}`;
+        const pc = `${pp}-${String(cd2).padStart(2, '0')}`;
+        const byClient = {}; // portName -> { cur, prev }
+        for (const [portKey, days] of Object.entries(getDailyTraffic())) {
+          const pn = getPortKeyToPortName()[portKey] || (Object.values(days)[0] && Object.values(days)[0].portName) || '';
+          if (!pn) continue;
+          if (!byClient[pn]) byClient[pn] = { cur: 0, prev: 0 };
+          for (const [date, entry] of Object.entries(days)) {
+            if (date.startsWith(cp) && date <= cc) byClient[pn].cur += (entry.in || 0) + (entry.out || 0);
+            else if (date.startsWith(pp) && date <= pc) byClient[pn].prev += (entry.in || 0) + (entry.out || 0);
+          }
+        }
+        for (const [pn, d] of Object.entries(byClient)) {
+          if (d.prev > 0) clientTrend[pn] = Math.round((d.cur - d.prev) / d.prev * 100);
+          else if (d.cur > 0) clientTrend[pn] = null;
+        }
+      }
+    }
+
+    res.json({
+      clientMonthCharges,
+      clientMonthGb,
+      clientLiveMonthGb,
+      clientLastHourGb,
+      clientTodayGb,
+      modemTrend,
+      clientTrend,
+      ...merged,
+      servers,
+      clients: sanitizedClients,
+      ipTracking,
+      uptimeTracking,
+      speedtestLatest: getSpeedtestLatest(),
+      ipHistory,
+      settings: appSettings,
+      bankPayments: getAllBankPayments(),
+      tochkaConfigured: !!tochkaConfig.jwt,
+      tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp, companyAddress: tochkaConfig.companyAddress, bankAccount: tochkaConfig.bankAccount, bankName: tochkaConfig.bankName, bankBic: tochkaConfig.bankBic, bankCorrAccount: tochkaConfig.bankCorrAccount },
+      proxyCheckSummary: getProxyCheckSummary(),
+      proxyIssues: computeProxyIssues(),
+    });
+  } catch (err) {
+    res.status(502).json({ error: 'API request failed', details: err.message });
+  }
+});
+
+r.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    // Billing success 24h
+    const billing24 = db.prepare(`
+      SELECT level, COUNT(*) as c FROM system_log
+      WHERE category = 'billing' AND timestamp >= datetime('now', '-1 day')
+      GROUP BY level
+    `).all();
+    const billingByLevel = {};
+    for (const r of billing24) billingByLevel[r.level] = r.c;
+
+    // API error rate
+    const apiErrors24 = db.prepare(`
+      SELECT COUNT(*) as c FROM system_log
+      WHERE category = 'api' AND level = 'error' AND timestamp >= datetime('now', '-1 day')
+    `).get().c;
+
+    // Per-day system_log errors for trend
+    const errorsByDay = db.prepare(`
+      SELECT substr(timestamp, 1, 10) as date,
+             SUM(CASE WHEN level = 'error' THEN 1 ELSE 0 END) as errors,
+             SUM(CASE WHEN level = 'warn'  THEN 1 ELSE 0 END) as warns
+      FROM system_log
+      WHERE timestamp >= datetime('now', '-7 days')
+      GROUP BY date
+      ORDER BY date
+    `).all();
+
+    // DB size
+    let dbSizeBytes = 0;
+    try {
+      const dbPath = path.join(__dirname, 'dashboard.db');
+      if (fs.existsSync(dbPath)) dbSizeBytes = fs.statSync(dbPath).size;
+    } catch (_) { /* best-effort: error intentionally swallowed */ }
+
+    // Sessions
+    const sessionCount = db.prepare("SELECT COUNT(*) as c FROM sessions WHERE expires_at > datetime('now')").get().c;
+
+    // Memory
+    const memUsage = process.memoryUsage();
+
+    // Recent critical events
+    const recentCritical = db.prepare(`
+      SELECT id, timestamp, level, category, action, target, message, details
+      FROM system_log
+      WHERE level IN ('error', 'warn')
+      ORDER BY id DESC
+      LIMIT 50
+    `).all();
+
+    // Per-server uptime (from uptime_tracking via live data)
+    const serverStatus = getApiServers().map(s => {
+      const sc = getServerCountries()[s.name] || {};
+      return {
+        name: s.name,
+        country: sc.name || '',
+        publicIp: s.publicIp || ''
+      };
+    });
+
+    res.json({
+      timestamp: new Date().toISOString(),
+      billing_24h: billingByLevel,
+      api_errors_24h: apiErrors24,
+      errors_by_day: errorsByDay,
+      db: {
+        size_bytes: dbSizeBytes,
+        size_mb: Math.round(dbSizeBytes / 1048576 * 10) / 10
+      },
+      sessions: sessionCount,
+      memory: {
+        rss_mb: Math.round(memUsage.rss / 1048576),
+        heap_mb: Math.round(memUsage.heapUsed / 1048576),
+        heap_total_mb: Math.round(memUsage.heapTotal / 1048576)
+      },
+      uptime_sec: Math.round(process.uptime()),
+      recent_critical: recentCritical,
+      servers: serverStatus
+    });
+  } catch (e) {
+    logger.error('[system_health]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+r.get('/api/admin/audit_log', authMiddleware, adminMiddleware, (req, res) => {
+  const limit = Math.min(parseInt(req.query.limit) || 100, 1000);
+  const offset = parseInt(req.query.offset) || 0;
+  const total = dbStmts.countAuditLog.get().cnt;
+  const rows = dbStmts.getAuditLog.all(limit, offset);
+  // Parse details JSON back to object for frontend
+  const entries = rows.map(r => {
+    let details = {};
+    try { details = JSON.parse(r.details || '{}'); } catch (_) { /* best-effort: error intentionally swallowed */ }
+    return { timestamp: r.timestamp, admin: r.admin, action: r.action, ...details };
+  });
+  res.json({ total, offset, limit, entries });
+});
+
+r.post('/api/admin/restart_dashboard', authMiddleware, adminMiddleware, (req, res) => {
+  logger.info(`[Admin] Dashboard restart requested by ${req.user.login}`);
+  logActivity('admin', 'warn', 'dashboard_restart', null, `Dashboard restart requested by ${req.user.login}`);
+  res.json({ ok: true, message: 'Restarting...' });
+  setTimeout(() => process.exit(0), 500);
+});
+
+r.get('/api/admin/backup', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { serverName } = req.query;
+    if (!serverName) return res.status(400).json({ error: 'serverName required' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+    const result = await fetchApi(server, '/crud/backup_export');
+    res.json(result);
+  } catch (err) { res.status(502).json({ error: 'Backup failed', details: err.message }); }
+});
+
+r.get('/api/admin/system_log', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const limit = Math.min(parseInt(req.query.limit) || 200, 1000);
+    const category = req.query.category || null;
+    const level = req.query.level || null;
+    const from = req.query.from || new Date(Date.now() - 7 * 86400000).toISOString();
+
+    const rows = dbStmts.systemLogQueryFiltered.all(from, category, category, level, level, limit);
+    res.json({ success: true, entries: rows, total: rows.length });
+  } catch (e) {
+    logger.error('[SystemLog API] Error:', e.message);
+    res.status(500).json({ success: false, error: e.message });
+  }
+});
+
+  return r;
+};
