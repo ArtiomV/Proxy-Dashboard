@@ -8,27 +8,32 @@ const http = require('http');
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
-const net = require('net');
 const bcrypt = require('bcrypt');
 const helmet = require('helmet');
 const rateLimit = require('express-rate-limit');
 const Database = require('better-sqlite3');
 const { v4: uuidv4 } = require('uuid');
-const fsPromises = fs.promises;
 const logger = require('./src/logger');
 const { validate } = require('./src/middleware/validate');
-const { LoginSchema, ClientCreateSchema, ClientUpdateSchema, PaymentSchema, BalanceAdjustSchema } = require('./src/schemas');
+// ClientUpdateSchema is consumed inside src/routes/clients.js (which imports
+// from src/schemas directly). server.js only needs the schemas used in PUT
+// routes that haven't been extracted, plus the create/payment/balance ones
+// passed via deps.
+const { LoginSchema, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema } = require('./src/schemas');
 const { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday } = require('./src/utils/time');
 const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator } = require('./src/utils/traffic');
 const proxySmart = require('./src/api/proxy-smart');
 const hourlyTraffic = require('./src/traffic/hourly');
-const { escHtml } = require('./src/utils/html');
 const { buildDocHtml: _buildDocHtml } = require('./src/documents/generator');
 const { safeWriteFile: _safeWriteFile, _fileLocks } = require('./src/utils/files');
-const { decodeJwtPayload, decodeJwtHeader, fetchTochkaJwks, jwkToPem, verifyJwtSignature } = require('./src/tochka/jwt');
+// JWT helpers now imported inside src/routes/tochka.js (via deps). server.js
+// only keeps verifyJwtSignature because dbAudit's webhook signature check
+// uses it on initial setup before the router mounts.
+const { verifyJwtSignature } = require('./src/tochka/jwt');
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
 const billing = require('./src/billing/atomic');
-const { MONTH_NAMES_RU, buildActItemsFromLedger: _buildActItemsFromLedger, buildTochkaActBody: _buildTochkaActBody, buildTochkaBillBody: _buildTochkaBillBody, calculateMonthlyBillAmount: _calculateMonthlyBillAmount } = require('./src/tochka/documents');
+// MONTH_NAMES_RU / buildTochkaActBody / etc. moved into src/routes/tochka.js's
+// own imports. server.js no longer references them directly.
 const tgBot = require('./src/telegram/bot');
 const tgSummary = require('./src/telegram/daily_summary');
 const aiInsights = require('./src/telegram/ai_insights');
@@ -219,14 +224,6 @@ function kvSetCritical(key, value, opts) {
     logger.error(`[kvGuard] write to '${key}' failed: ${e.message}`);
     return { ok: false, error: e.message };
   }
-}
-
-function kvCurrentShape(key) {
-  const fn = KV_CRITICAL_SHAPES[key];
-  if (!fn) return null;
-  const row = _kvGet.get(key);
-  if (!row) return null;
-  return fn(row.value);
 }
 // ───────────────────────────────────────────────────────────────────────────────
 
@@ -605,48 +602,6 @@ function _ledgerEntryParams(clientId, e) {
   ];
 }
 
-/**
- * TASK-04+BUG-05: Incremental appendLedgerEntry — inserts single entry to SQLite + in-memory
- * Saves db_id (lastInsertRowid) back to entry for point deletion
- * NOTE: For balance-changing operations, prefer atomicCredit/atomicDebit with ledgerEntry param
- */
-function appendLedgerEntry(clientId, entry) {
-  if (!billingLedger[clientId]) billingLedger[clientId] = [];
-  try {
-    const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-    entry.db_id = result.lastInsertRowid; 
-    billingLedger[clientId].push(entry); 
-  } catch (e) {
-    logger.error('[SQLite] Error appending ledger entry:', e.message);
-    // NOT adding to in-memory — keeps state consistent with DB
-  }
-}
-
-// _ledgerDeleteById moved into src/db/ledger.js (Stage 2).
-
-function saveBillingLedger() {
-  try {
-    const validIds = new Set(clientsDb.allIds().map(r => r.id));
-    db.transaction(() => {
-      for (const clientId in billingLedger) {
-        if (!validIds.has(clientId)) continue;
-        let entries = billingLedger[clientId];
-        if (!Array.isArray(entries)) continue;
-        if (entries.length > MAX_LEDGER_ENTRIES) {
-          entries = entries.slice(-MAX_LEDGER_ENTRIES);
-          billingLedger[clientId] = entries;
-        }
-        ledgerDb.deleteByClient(clientId);
-        for (const e of entries) {
-          _ledgerInsert.run(..._ledgerEntryParams(clientId, e));
-        }
-      }
-    })();
-  } catch (e) {
-    logger.error('[SQLite] Error saving billing ledger:', e.message);
-  }
-}
-
 function auditLog(adminLogin, action, details = {}) {
   try {
     const ts = new Date().toISOString();
@@ -656,28 +611,10 @@ function auditLog(adminLogin, action, details = {}) {
   }
 }
 
-// Response envelope helpers — preferred shape for NEW endpoints:
-//   apiOk(res, data?)     →  { ok: true, ...data }
-//   apiErr(res, code, msg) →  { ok: false, error: msg, code }
-// (Existing endpoints keep their idiosyncratic shapes for back-compat.
-//  Migrate to apiOk/apiErr gradually when touching each route.)
-function apiOk(res, data) { return res.json(Object.assign({ ok: true }, data || {})); }
-function apiErr(res, statusCode, code, msg) {
-  return res.status(statusCode).json({ ok: false, error: msg || code, code });
-}
-
 // Pagination helper — same shape across endpoints. Caps limit at `hardMax`
 // (route-defined) and `MAX_PAGE_LIMIT` (global). Returns { limit, offset }.
 // Usage: const { limit, offset } = parsePage(req, { defaultLimit: 50, hardMax: 200 });
 const MAX_PAGE_LIMIT = 1000;
-function parsePage(req, opts) {
-  const o = opts || {};
-  const cap = Math.min(o.hardMax || MAX_PAGE_LIMIT, MAX_PAGE_LIMIT);
-  const def = Math.min(o.defaultLimit || 50, cap);
-  const limit = Math.max(1, Math.min(parseInt(req.query.limit) || def, cap));
-  const offset = Math.max(0, parseInt(req.query.offset) || 0);
-  return { limit, offset };
-}
 
 function logActivity(category, level, action, target, message, details = null) {
   try {
@@ -1828,21 +1765,6 @@ function getClientBytesForMskDate(portName, date) {
     WHERE date = ? AND port_name IN (${placeholders})
   `).get(date, ...portIds);
   return r2.bytes || 0;
-}
-
-function computeClientPrevMonthBytes(allServerResults, portName) {
-  let totalBytes = 0;
-  for (const data of allServerResults) {
-    if (typeof data.bw === 'object') {
-      for (const [portId, b] of Object.entries(data.bw)) {
-        if (b.portName === portName) {
-          totalBytes += parseBwToBytes(b.bandwidth_bytes_prevmonth_in);
-          totalBytes += parseBwToBytes(b.bandwidth_bytes_prevmonth_out);
-        }
-      }
-    }
-  }
-  return totalBytes;
 }
 
 // Sum stored daily_traffic bytes for a client over a month (e.g. "2026-03")
@@ -4261,7 +4183,7 @@ async function autoCreateMissingClients() {
 app.use(require('./src/routes/tochka')({
   db, logger, authMiddleware, adminMiddleware,
   verifyJwtSignature, _pickField, insertBankPaymentToDb,
-  dbAudit, dbStmts, bankPaymentFromRow,
+  dbAudit, dbStmts, bankPaymentFromRow, getAllBankPayments,
   tochkaConfig, saveTochkaConfig,
   atomicCredit,
   saveClients, rebuildClientMaps,
@@ -4643,6 +4565,7 @@ app.use(require('./src/routes/ops-ext')({
   authMiddleware, adminMiddleware, dashboardLimiter,
   fs, dbStmts, dbAudit,
   appSettings,
+  getAllBankPayments,
   getSessionCount: () => getSessionCount(),
   getBillingLedger: () => billingLedger,
   getClients: () => clients,

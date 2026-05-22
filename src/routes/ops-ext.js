@@ -15,6 +15,7 @@ module.exports = function createOpsExtRouter(deps) {
     authMiddleware, adminMiddleware, dashboardLimiter,
     fs, dbStmts, dbAudit,
     appSettings,
+    getAllBankPayments,
     getSessionCount, getBillingLedger, getClients,
     getApiServers, getServerCountries,
     getRunningJobs,

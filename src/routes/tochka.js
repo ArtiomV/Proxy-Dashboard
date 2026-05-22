@@ -13,7 +13,7 @@ module.exports = function createTochkaRouter(deps) {
   const {
     db, logger, authMiddleware, adminMiddleware,
     verifyJwtSignature, _pickField, insertBankPaymentToDb,
-    dbAudit, dbStmts, bankPaymentFromRow,
+    dbAudit, dbStmts, bankPaymentFromRow, getAllBankPayments,
     tochkaConfig, saveTochkaConfig,
     atomicCredit,
     saveClients, rebuildClientMaps,
