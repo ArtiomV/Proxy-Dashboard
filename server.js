@@ -1396,21 +1396,22 @@ function injectOfflineModems(data) {
   }
 }
 
-// Load clients into users map on startup
-let clients = loadClients();
-
-let clientById = new Map();
-let clientByLogin = new Map();
-let clientByApiKey = new Map();
-let clientByInn = new Map();
-let clientByResetToken = new Map();
+// Stage 4 finish: clients[] + 5 derived maps moved to src/state/index.js.
+// We hold const aliases to the state-module objects — they're now stable
+// identities for the process lifetime, mutated in place by setClients() +
+// rebuildMaps(). Route mounts no longer need shim objects with .get()
+// wrappers.
+const stateMod = require('./src/state');
+stateMod.setClients(loadClients());
+const clients = stateMod.state.clients;
+const clientById         = stateMod.state.clientById;
+const clientByLogin      = stateMod.state.clientByLogin;
+const clientByApiKey     = stateMod.state.clientByApiKey;
+const clientByInn        = stateMod.state.clientByInn;
+const clientByResetToken = stateMod.state.clientByResetToken;
 
 function rebuildClientMaps() {
-  clientById = new Map(clients.map(c => [c.id, c]));
-  clientByLogin = new Map(clients.map(c => [c.login, c]));
-  clientByApiKey = new Map(clients.filter(c => c.apiKey).map(c => [c.apiKey, c]));
-  clientByInn = new Map(clients.filter(c => c.inn).map(c => [c.inn, c]));
-  clientByResetToken = new Map(clients.filter(c => c.resetToken).map(c => [c.resetToken, c]));
+  stateMod.rebuildMaps();
 }
 
 // Async mutex for runDailyBilling vs saveClients. Both mutate ledger/balance
@@ -2838,10 +2839,8 @@ app.use(require('./src/routes/client-portal')({
   _rlSelect: { all: (...args) => _rlSelect.all(...args) },
   apiServers,
   clients,
-  clientById:        { get: (k) => clientById.get(k) },
-  clientByLogin:     { get: (k) => clientByLogin.get(k) },
-  clientByApiKey:    { get: (k) => clientByApiKey.get(k) },
-  clientByResetToken:{ get: (k) => clientByResetToken.get(k) },
+  // Stage 4 finish: maps are stable references via src/state — no more shims.
+  clientById, clientByLogin, clientByApiKey, clientByResetToken,
   dailyTraffic, ledgerDb, ipTracking, uptimeTracking, ipHistory,
   getSpeedtestLatest,
   auditLog, logActivity, getClientIp,
@@ -3351,11 +3350,8 @@ app.use(require('./src/routes/clients')({
   auditLog, logActivity, getClientIp,
   generateId,
   clients,
-  clientById:        { get: (k) => clientById.get(k) },
-  clientByLogin:     { get: (k) => clientByLogin.get(k) },
-  clientByApiKey:    { get: (k) => clientByApiKey.get(k) },
-  clientByInn:       { get: (k) => clientByInn.get(k) },
-  clientByResetToken:{ get: (k) => clientByResetToken.get(k) },
+  // Stage 4 finish: maps are stable references via src/state — no more shims.
+  clientById, clientByLogin, clientByApiKey, clientByInn, clientByResetToken,
   users,
   _ledgerInsert, _ledgerEntryParams, ledgerDb,
   appSettings,
@@ -4173,9 +4169,8 @@ app.use(require('./src/routes/tochka')({
   auditLog, logActivity, getClientIp,
   appSettings,
   clients,
-  clientById:   { get: (k) => clientById.get(k) },
-  clientByLogin:{ get: (k) => clientByLogin.get(k) },
-  clientByInn:  { get: (k) => clientByInn.get(k) },
+  // Stage 4 finish: maps are stable references via src/state — no more shims.
+  clientById, clientByLogin, clientByInn,
   apiServers, SERVER_COUNTRIES,
   fetchAllServersDataCached,
   getMoscowToday,
