@@ -211,8 +211,18 @@ and should follow the same pattern in a future pass:
 
 - **admin.js + client.js could share a small "common" module** for
   things like `apiFetch`, `authToken` handling, theme persistence. Today
-  there's some duplication. Not urgent — utils.js dedup already covered
-  the hottest helpers (esc, parseTraffic, fmtGb).
+  there's some duplication.
+
+  Stage 7 closed the byte-unit slice of this: `utils.js` is now the
+  single source for `esc`, `parseTraffic`, `bytesToGb`, `fmtGb`,
+  `fmtGbShort`, `pct`, `formatBytes`, `getModemStatus`, `formatUptime`,
+  `formatTraffic`, `renderSignalBars`, `renderNetBadge`, `fmtDateRu`,
+  `showToast`, `getChartColors` — loaded by BOTH `admin.html` and
+  `index.html`. Tests in `tests/frontend-utils.test.js` lock the
+  decimal-SI semantics and the frontend↔backend invariant. What still
+  isn't shared: HTTP plumbing (`apiFetch`), auth token handling, theme
+  persistence; those duplicates remain and a `common.js` module would
+  collapse them.
 
 ## Behavior questions to confirm before changing
 

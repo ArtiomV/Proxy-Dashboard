@@ -1,18 +1,11 @@
 // public/js/client.js — extracted from public/index.html (Stage 5).
 // Client portal SPA: traffic dashboard, billing, modem list, IP reset, docs.
-// Loads utils.js (esc, parseTraffic, fmtGb) before this file so duplicate
-// helpers inside this file are dead code (TODO: dedup).
-
-// esc, parseTraffic, fmtGb — moved to public/js/utils.js (loaded first).
-// utils.js fmtGb has wider range (KB..TB) than the simple MB/GB version
-// that was duplicated here; switch to the richer one for parity with admin.
-function formatBytes(b){if(!b||b===0)return'0 B';var units=['B','KB','MB','GB','TB'];var i=0;while(b>=1024&&i<units.length-1){b/=1024;i++}return b.toFixed(1)+' '+units[i]}
-function showToast(m,t){var c=document.getElementById('toastContainer');if(!c)return;var e=document.createElement('div');e.className='toast toast-'+(t||'info');e.textContent=m;c.appendChild(e);setTimeout(function(){e.remove()},4000)}
-function getModemStatus(m){if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';return'offline'}
-function bytesToGb(b){return b/1073741824}
-function pct(v,max){return max?Math.round(v/max*100):0}
-function formatUptime(s){if(!s||s<=0)return'-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),mm=Math.floor(s%3600/60);if(d>0)return d+'д '+h+'ч';if(h>0)return h+'ч '+mm+'м';return mm+'м'}
-function getChartColors(){var d=document.documentElement.dataset.theme==='dark';return{grid:d?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)',text:d?'#8892a6':'#6b7280',bg:d?'#131720':'#ffffff'}}
+// Loads utils.js BEFORE this file. Stage 7: removed duplicated helpers
+// (formatBytes, showToast, getModemStatus, bytesToGb, pct, formatUptime,
+// getChartColors) — their copies here used binary units (1024) while
+// utils.js uses decimal SI (matches backend). Removing the dupes makes
+// the client portal show the same byte values as the admin dashboard
+// and as the billing ledger.
 // --- Theme ---
 function getTheme(){return localStorage.getItem('pr_theme')||'dark'}
 

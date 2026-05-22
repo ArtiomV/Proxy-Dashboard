@@ -5,8 +5,13 @@
 // because every function references several others and bundling would
 // just rename them.
 
-// Utility functions (inline)
-function esc(s){return s?s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'):''}
+// Utility functions (esc, parseTraffic, fmtGb, bytesToGb, fmtGbShort, pct,
+// getModemStatus, formatUptime, formatTraffic, renderSignalBars,
+// renderNetBadge, fmtDateRu, showToast, getChartColors) moved to
+// public/js/utils.js — single shared source for admin + client portal so
+// the same byte value renders identically on both pages. Stage 7 unified
+// the unit semantics (decimal SI everywhere; matches backend).
+
 // Debounce: collapse rapid keystrokes / events into one trailing call.
 // Used for search input, filter changes, anything that rebuilds the
 // modem table — without this, 500+ modem rows re-render on every keypress.
@@ -28,19 +33,6 @@ function newChartSafe(canvasEl, cfg) {
   var ctx = canvasEl.getContext ? canvasEl.getContext('2d') : canvasEl;
   return new Chart(ctx, cfg);
 }
-function parseTraffic(v){if(!v||v===0)return 0;if(typeof v==='number')return v;var s=String(v).slice(0,30),m=s.match(/^(\d+(?:\.\d+)?)\s*(KB|MB|GB|TB)$/i);if(!m)return parseFloat(s)||0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1e3:u==='MB'?1e6:u==='GB'?1e9:u==='TB'?1e12:1)}
-function bytesToGb(b){return b/1e9}
-function fmtGb(b){if(!b||b===0||isNaN(b))return'0 B';if(b<1e6)return(b/1e3).toFixed(1)+' KB';if(b<1e9)return(b/1e6).toFixed(1)+' MB';var gb=b/1e9;if(gb>=1000)return(gb/1000).toFixed(1)+' TB';if(gb>=100)return Math.round(gb)+' GB';return gb.toFixed(1)+' GB'}
-function fmtGbShort(b){if(!b||isNaN(b)||b<1e9)return((b||0)/1e6).toFixed(0)+' MB';return(b/1e9).toFixed(1)+' GB'}
-function pct(v,max){return max?Math.round(v/max*100):0}
-function getModemStatus(m){if(m._cached||m._serverDown)return'offline';if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';if(m.connectionStatus&&m.connectionStatus.includes('connected'))return'online';if(m.state==='added'&&m.extIp&&m.extIp!=='IP_RESET')return'online';return'offline'}
-function formatUptime(s){if(!s||s<=0)return'-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),mm=Math.floor(s%3600/60);if(d>0)return d+'д '+h+'ч';if(h>0)return h+'ч '+mm+'м';return mm+'м'}
-function formatTraffic(v){if(!v||v===0||v==='0')return'-';return String(v)}
-function renderSignalBars(s){var h='<div class="signal-bars">';for(var i=1;i<=5;i++){h+='<div class="signal-bar'+(i<=s?' active':'')+'" style="height:'+(2+i*2)+'px"></div>'}return h+'</div>'}
-function renderNetBadge(t){if(!t)return'<span class="net-badge net-unknown">?</span>';var c='net-unknown',l=t;if(/lte|4g/i.test(t)){c='net-lte';l='LTE'}else if(/3g|hspa|umts/i.test(t)){c='net-3g';l='3G'}else if(/2g|edge|gprs/i.test(t)){c='net-2g';l='2G'}return'<span class="net-badge '+c+'">'+l+'</span>'}
-function fmtDateRu(d){if(!d)return'';var p=d.split('-');return p.length===3?(p[2]+'.'+p[1]+'.'+p[0]):d}
-function showToast(m,t,dur){var c=document.getElementById('toastContainer');if(!c)return;var tp=t||'info';var icons={success:'✓',error:'✕',warning:'!',info:'i'};var ms=dur||(tp==='error'?6000:4000);var e=document.createElement('div');e.className='toast toast-'+tp;e.innerHTML='<span class="toast-icon">'+icons[tp]+'</span><span class="toast-text">'+m+'</span><button class="toast-close" onclick="this.parentElement.remove()">✕</button>';c.appendChild(e);setTimeout(function(){if(e.parentNode)e.remove();},ms)}
-function getChartColors(){var d=document.documentElement.dataset.theme==='dark';return{grid:d?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)',text:d?'#8892a6':'#6b7280',bg:d?'#131720':'#ffffff'}}
 var API='',authToken=localStorage.getItem('pr_admin_token')||'',currentData=null;
 var sortCol='nick',sortDir='asc',activeServerFilter=localStorage.getItem('admin_srv_filter')||'all',activeStatusFilter='all',activeClientFilter='';
 var autoRefreshTimer=null,charts={};
