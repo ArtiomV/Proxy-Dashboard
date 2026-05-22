@@ -126,14 +126,80 @@ is already fixed via the atomic.js getter — leftover memory growth is
 the only outstanding concern, and it's bounded by client count × entries
 which is manageable for the current scale.
 
+## TZ status snapshot (post-Stage 4 finish)
+
+| TZ item                               | Status        | Notes                                                                        |
+|---------------------------------------|---------------|------------------------------------------------------------------------------|
+| Stage 1: tests + route snapshot       | ✅ Done       | 11 files, 72 tests, 168-route snapshot locked                                |
+| Stage 2: SQL → src/db/*               | ✅ Done       | 8 repos (clients, ledger, kv, traffic, tracking, payments, documents, sim)   |
+| Stage 3: routers → src/routes/*       | ✅ Done       | 18 routers; latent dep-injection gaps closed (commit 9834016)                |
+| Stage 4a: billingLedger removed       | ✅ Done       | Commit 079633c — DB reads via ledgerDb.listByClient on every call            |
+| Stage 4b: src/state/index.js          | ✅ Done       | Commit dc12b9d — clients + 5 maps centralized; shim objects gone             |
+| Stage 5: inline JS extracted          | ✅ Done       | admin.js, client.js, client-portal.css separated                             |
+| Stage 5 phase 2: onclick → delegation | ⏳ Deferred   | CSP allowlist active; migration backlog below                                |
+| Stage 6: lint + dead code + docs      | ✅ Done       | 0 lint errors across server.js + src/ (DoD #3)                               |
+| DoD #1: server.js < 250 lines         | ⏳ Partial    | Currently ~5,160. See "Backlog: src/jobs extraction" below                   |
+| DoD #2: > 70 tests                    | ✅ Done       | 72 tests across 11 files                                                     |
+| DoD #3: 0 ESLint errors               | ✅ Done       | server.js + src/ both zero-error                                             |
+| DoD #7: route snapshot matches        | ✅ Done       | Locked at 168 routes; trips on any new/dropped route                         |
+
+## Backlog: src/jobs extraction (DoD #1 path)
+
+server.js is still ~5,160 lines vs. the TZ's <250 aspirational target. The
+gap is in long-running jobs and cron handlers that live as top-level
+functions. Pre-identified extraction targets (by line count, biggest wins
+first):
+
+| Target function                  | Lines | Extract to                  |
+|----------------------------------|------:|-----------------------------|
+| `_runDailyBillingImpl`           |   215 | `src/jobs/daily-billing.js` |
+| `trackModems`                    |   162 | `src/jobs/modem-monitor.js` |
+| `cleanupStalePortMappings`       |   147 | `src/jobs/cleanup.js`       |
+| `aggregateTopHosts`              |   113 | `src/analytics/top-hosts.js`|
+| `runMonthlyReconciliation`       |    95 | `src/jobs/daily-billing.js` |
+| `autoCreateMissingClients`       |    86 | `src/jobs/tochka-cron.js`   |
+| `checkProxyLatency`              |    82 | `src/jobs/modem-monitor.js` |
+| `autoGenerateMonthlyBills`       |    81 | `src/jobs/tochka-cron.js`   |
+| `autoGenerateMonthlyActs`        |    78 | `src/jobs/tochka-cron.js`   |
+| `runRetentionCleanup`            |    77 | `src/jobs/cleanup.js`       |
+| `runNightlySpeedtests`           |    78 | `src/jobs/speedtest.js`     |
+
+Extracting all of the above ≈ −1,200 lines (server.js → ~3,950). To reach
+<250 would also need to lift: state declarations (dailyTraffic / ipTracking
+/ uptimeTracking / etc., still mutable globals — see "src/state/index.js
+deferred state" below), the cron schedule (4–5 `setInterval` calls),
+helpers (mergeServerData / fetchApi / saveApiServersToDb), and the
+migration runner (~100 lines). That's another ~1,800–2,000 lines moved
+out, putting the boot script in the ~1,500-line range. Hitting <250
+needs aggressive splitting of the migration runner itself + boot
+sequencing.
+
+**Why deferred:** each extraction is risky (the cron jobs touch ~15
+globals each); doing them under the "one stage = one commit, tests as
+gates" discipline of the TZ is multi-day work and the user explicitly
+chose to prioritize behavior-preserving completion of Stages 1–4 first.
+
+## src/state/index.js deferred state
+
+Stage 4b moved `clients` + 5 client maps into `src/state/index.js`. The
+following module-level state still lives in server.js as `let` bindings
+and should follow the same pattern in a future pass:
+
+- `dailyTraffic`, `ipTracking`, `uptimeTracking`, `ipHistory` — mutated
+  via property writes (no rebind) so safe to migrate as `const` views.
+- `apiServers`, `appSettings`, `tochkaConfig` — get REBOUND via
+  saveTochkaConfig / hot-reload. Migrate with explicit mutators
+  (`setTochkaConfig()`, etc.) on the state module.
+- `portKeyToPortName`, `knownModems`, `users` — same as the first group.
+
 ## Stage 5 — phase 2 (not yet done)
 
-- **CSP not restored.** server.js still has `helmet({ contentSecurityPolicy:
-  false })`. After JS extraction (✅ done) the next blocker is the dozens
-  of inline `onclick="…"` attributes in dynamically-generated HTML inside
-  admin.js. To turn CSP on without breaking them: either (a) replace all
-  with event delegation, (b) allow them via `script-src-attr 'unsafe-inline'`
-  in the policy. Pragmatic: ship (b) now, migrate to (a) progressively.
+- **CSP partially restored.** server.js has `script-src 'self'` after
+  Stage 5 phase 1 (✅), with `script-src-attr 'unsafe-inline'` carved out
+  to keep the dozens of inline `onclick="…"` attributes in admin.html /
+  dynamically-generated admin.js markup working. Phase 2 is the
+  progressive migration to event delegation + dropping the
+  `script-src-attr` carve-out.
 
 - **client-portal.css :root may diverge from admin's variables.css.**
   index.html's CSS was lifted into a new client-portal.css with its own
