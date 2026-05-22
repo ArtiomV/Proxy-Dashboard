@@ -31,8 +31,14 @@ module.exports = function createAnalyticsRouter(deps) {
     dailyTraffic, ipTracking, uptimeTracking, knownModems,
     portKeyToPortName,
     appSettings,
+    apiServers,
+    getTzOffset, getMoscowNow,
   } = deps;
   const r = express.Router();
+  // Stage 4 finish: heatmap response cache is local to the router. Period →
+  // {data, ts}; TTL keeps the dashboard cheap to refresh.
+  const _heatmapCache = new Map();
+  const HEATMAP_TTL_MS = 5 * 60 * 1000;
 
 r.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req, res) => {
   const months = Math.min(parseInt(req.query.months) || 6, 12);

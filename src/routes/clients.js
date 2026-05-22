@@ -8,6 +8,9 @@
 const express = require('express');
 const bcrypt = require('bcrypt');
 const crypto = require('crypto');
+const fs = require('fs');
+const fsPromises = require('fs/promises');
+const path = require('path');
 
 module.exports = function createClientsRouter(deps) {
   const {
@@ -22,10 +25,16 @@ module.exports = function createClientsRouter(deps) {
     clients,
     clientById, clientByLogin, clientByApiKey, clientByInn, clientByResetToken,
     users,
-    _ledgerInsert, _ledgerEntryParams, ledgerDb,
+    _ledgerInsert, _ledgerEntryParams, ledgerDb, clientsDb,
+    DOCUMENTS_DIR,
+    validateClientInput,
     appSettings,
   } = deps;
   const r = express.Router();
+  // Prepared statements pulled from clientsDb where possible. The router
+  // used to bare-reference these — Stage 4 wires them properly.
+  const _clientUpdateBalance         = clientsDb.updateBalanceStmt();
+  const _clientUpdateReferralBalance = clientsDb.updateReferralBalanceStmt();
 
 r.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);

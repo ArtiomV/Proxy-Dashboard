@@ -11,7 +11,8 @@ const bcrypt = require('bcrypt');
 module.exports = function createProxiesRouter(deps) {
   const {
     db, logger, authMiddleware, adminMiddleware,
-    fetchApi, postApi, findServer,
+    fetchApi, fetchApiRaw, postApi, postFormApi, findServer,
+    parseHtmlInputFields,
     apiServers, SERVER_COUNTRIES,
     users,
     auditLog, logActivity, getClientIp,
@@ -19,10 +20,13 @@ module.exports = function createProxiesRouter(deps) {
     saveKnownModems,
     knownModems,
     saveSpeedtestHistory, speedtestHistory,
+    pushSpeedtestEntry,
     ipHistory,
     saveIpHistory,
     modemRotationCache, saveRotationCache,
     saveModemMeta,
+    fetchAllServersDataCached,
+    syncRotationLog, _rlSelect,
     rebuildPortIdToPortName,
   } = deps;
 

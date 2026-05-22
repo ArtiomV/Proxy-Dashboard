@@ -13,7 +13,7 @@ module.exports = function createOpsExtRouter(deps) {
   const {
     db, logger, DB_PATH,
     authMiddleware, adminMiddleware, dashboardLimiter,
-    fs, dbStmts, dbAudit,
+    fs, path, dbStmts, dbAudit,
     appSettings,
     getAllBankPayments,
     getSessionCount, getClients,
@@ -21,6 +21,13 @@ module.exports = function createOpsExtRouter(deps) {
     getRunningJobs,
     getLastBillingRunSummary, getLastReconciliationMonth, getIntervals,
     getFetchAllServersDataCached, getMergeServerData,
+    getIpTracking, getUptimeTracking, getIpHistory,
+    getDailyTraffic, getPortKeyToPortName,
+    getTochkaConfig, getProxyCheckSummary,
+    computeProxyIssues, fetchApi, findServer,
+    getSpeedtestLatest, _getClientTrend, _getModemTrend,
+    logActivity,
+    getMoscowNow, getMoscowYesterday,
     ledgerExpense, parseBwToBytes, trafficBytesToGb,
   } = deps;
   const r = express.Router();
@@ -198,7 +205,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       const pn = bwData.portName;
       if (pn) _clientModemCounts[pn] = (_clientModemCounts[pn] || 0) + 1;
     }
-    const sanitizedClients = clients.map(c => {
+    const sanitizedClients = getClients().map(c => {
       const { password, passwordHash, ...safe } = c;
       safe.modemCount = _clientModemCounts[c.portName] || 0;
       return safe;
@@ -329,14 +336,14 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       ...merged,
       servers,
       clients: sanitizedClients,
-      ipTracking,
-      uptimeTracking,
+      ipTracking: getIpTracking(),
+      uptimeTracking: getUptimeTracking(),
       speedtestLatest: getSpeedtestLatest(),
-      ipHistory,
+      ipHistory: getIpHistory(),
       settings: appSettings,
       bankPayments: getAllBankPayments(),
-      tochkaConfigured: !!tochkaConfig.jwt,
-      tochkaConfig: { jwt: tochkaConfig.jwt ? '****' + tochkaConfig.jwt.slice(-8) : '', clientId: tochkaConfig.clientId, customerCode: tochkaConfig.customerCode, accountId: tochkaConfig.accountId, companyName: tochkaConfig.companyName, companyInn: tochkaConfig.companyInn, companyKpp: tochkaConfig.companyKpp, companyAddress: tochkaConfig.companyAddress, bankAccount: tochkaConfig.bankAccount, bankName: tochkaConfig.bankName, bankBic: tochkaConfig.bankBic, bankCorrAccount: tochkaConfig.bankCorrAccount },
+      tochkaConfigured: !!getTochkaConfig().jwt,
+      tochkaConfig: (() => { const tc = getTochkaConfig(); return { jwt: tc.jwt ? '****' + tc.jwt.slice(-8) : '', clientId: tc.clientId, customerCode: tc.customerCode, accountId: tc.accountId, companyName: tc.companyName, companyInn: tc.companyInn, companyKpp: tc.companyKpp, companyAddress: tc.companyAddress, bankAccount: tc.bankAccount, bankName: tc.bankName, bankBic: tc.bankBic, bankCorrAccount: tc.bankCorrAccount }; })(),
       proxyCheckSummary: getProxyCheckSummary(),
       proxyIssues: computeProxyIssues(),
     });

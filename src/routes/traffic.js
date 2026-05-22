@@ -18,9 +18,14 @@ module.exports = function createTrafficRouter(deps) {
     db, logger, authMiddleware, adminMiddleware,
     fetchAllServersDataCached, mergeServerData,
     fetchApi, postApi, findServer,
-    getMoscowToday, trafficBytesToGb, parseBwToBytes,
+    getMoscowToday, trafficBytesToGb, parseBwToBytes, parseTrafficValue,
+    normalizeOperator,
     clients, clientByLogin, clientById,
     dailyTraffic, portKeyToPortName,
+    knownModems, SERVER_COUNTRIES,
+    _dtUpsert,
+    refreshPortKeyMapping,
+    logActivity,
   } = deps;
   const r = express.Router();
 

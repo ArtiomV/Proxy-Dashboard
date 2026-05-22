@@ -10,14 +10,27 @@ const express = require('express');
 module.exports = function createBillingExtRouter(deps) {
   const {
     db, logger, authMiddleware, adminMiddleware,
-    getClients,
+    getClients, clientById,
     getFetchAllServersDataCached, getMergeServerData,
     getPortKeyToPortName, getDailyTraffic, ledgerDb,
     getMoscowToday, trafficBytesToGb, parseBwToBytes, ledgerExpense,
+    COST_CATEGORIES,
+    getClientStoredMonthBytes,
+    refreshPortKeyMapping,
+    getApiServers, getServerCountries,
+    normalizeOperator,
     appSettings,
     auditLog, logActivity,
   } = deps;
   const r = express.Router();
+
+  // Stage 4 finish: finance_dashboard response cache moved into the router.
+  // server.js no longer needs to own this — only billing-ext.js reads/writes.
+  // Cache key is the period (YYYY-MM); TTL keeps the dashboard cheap to refresh.
+  let _financeCache = null;
+  let _financeCacheTs = 0;
+  let _financeCacheKey = '';
+  const FINANCE_CACHE_TTL_MS = 60 * 1000;
 
 r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) => {
   try {
@@ -126,12 +139,12 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const arr = Math.round(totalMrr * 12);
 
     // -- Active / new / churned --
-    const activeClients = clients.filter(c => !c.billingPaused && (mrrByClient[c.id] || 0) > 0);
+    const activeClients = getClients().filter(c => !c.billingPaused && (mrrByClient[c.id] || 0) > 0);
     const periodFirstDay = period + '-01';
-    const newClients = clients.filter(c => (c.createdAt || '').slice(0, 10) >= periodFirstDay
+    const newClients = getClients().filter(c => (c.createdAt || '').slice(0, 10) >= periodFirstDay
                                           && (c.createdAt || '').slice(0, 7) === period);
     // Churned: had revenue in [60..30d ago], no revenue in last 30d, and (paused OR balance < 0)
-    const churnedClients = clients.filter(c => {
+    const churnedClients = getClients().filter(c => {
       const had = (prevMrrByClient[c.id] || 0) > 0;
       const has = (mrrByClient[c.id] || 0) > 0;
       return had && !has;
@@ -164,7 +177,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const nrrPct = cohortRevenueThen > 0 ? Math.round((cohortRevenueNow / cohortRevenueThen) * 1000) / 10 : null;
 
     // -- Churn rate --
-    const startOfPeriodActive = clients.filter(c => (prevMrrByClient[c.id] || 0) > 0).length;
+    const startOfPeriodActive = getClients().filter(c => (prevMrrByClient[c.id] || 0) > 0).length;
     const churnRatePct = startOfPeriodActive > 0
       ? Math.round((churnedClients.length / startOfPeriodActive) * 1000) / 10
       : 0;
@@ -277,7 +290,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     }));
 
     // -- Per-client breakdown --
-    const perClient = clients
+    const perClient = getClients()
       .map(c => {
         const cMrr  = mrrByClient[c.id]     || 0;
         const cPrev = prevMrrByClient[c.id] || 0;
@@ -299,8 +312,8 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
       .sort((a, b) => b.mrr - a.mrr);
 
     // -- Pricing variance --
-    const perGbPrices = clients.filter(c => c.billingType === 'per_gb' && c.price > 0).map(c => c.price);
-    const perModemPrices = clients.filter(c => c.billingType === 'per_modem' && c.price > 0).map(c => c.price);
+    const perGbPrices = getClients().filter(c => c.billingType === 'per_gb' && c.price > 0).map(c => c.price);
+    const perModemPrices = getClients().filter(c => c.billingType === 'per_modem' && c.price > 0).map(c => c.price);
     function stats(arr) {
       if (arr.length === 0) return null;
       const min = Math.min(...arr), max = Math.max(...arr);

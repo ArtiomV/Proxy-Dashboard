@@ -14,6 +14,10 @@
 // of session) and is also exposed as GET for convenience.
 
 const express = require('express');
+const fs = require('fs');
+const path = require('path');
+const net = require('net');
+const { tochkaRequest } = require('../tochka/api');
 
 module.exports = function createClientPortalRouter(deps) {
   const {
@@ -30,8 +34,13 @@ module.exports = function createClientPortalRouter(deps) {
     getSpeedtestLatest,
     auditLog, logActivity, getClientIp,
     saveClients,
+    DOCUMENTS_DIR,
+    getTochkaConfig,
   } = deps;
   const r = express.Router();
+  // Closing-documents/bills routes need the live tochkaConfig — call the
+  // getter on every request since saveTochkaConfig() rebinds the global.
+  const tochkaConfig = new Proxy({}, { get: (_t, k) => getTochkaConfig()[k] });
 
 r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) => {
   try {

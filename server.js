@@ -2842,6 +2842,8 @@ app.use(require('./src/routes/client-portal')({
   // Stage 4 finish: maps are stable references via src/state — no more shims.
   clientById, clientByLogin, clientByApiKey, clientByResetToken,
   dailyTraffic, ledgerDb, ipTracking, uptimeTracking, ipHistory,
+  DOCUMENTS_DIR,
+  getTochkaConfig: () => tochkaConfig,
   getSpeedtestLatest,
   auditLog, logActivity, getClientIp,
   saveClients,
@@ -2852,9 +2854,14 @@ app.use(require('./src/routes/traffic')({
   db, logger, authMiddleware, adminMiddleware,
   fetchAllServersDataCached, mergeServerData,
   fetchApi, postApi, findServer,
-  getMoscowToday, trafficBytesToGb, parseBwToBytes,
+  getMoscowToday, trafficBytesToGb, parseBwToBytes, parseTrafficValue,
+  normalizeOperator,
   clients, clientByLogin, clientById,
   dailyTraffic, portKeyToPortName,
+  knownModems, SERVER_COUNTRIES,
+  _dtUpsert,
+  refreshPortKeyMapping,
+  logActivity,
 }));
 
 
@@ -2971,7 +2978,7 @@ app.use(require('./src/routes/misc')({
 app.use(require('./src/routes/analytics')({
   db, logger, authMiddleware, adminMiddleware,
   fetchAllServersDataCached, mergeServerData,
-  getMoscowToday,
+  getMoscowToday, getMoscowNow, getTzOffset,
   trafficBytesToGb, parseTrafficValue, parseBwToBytes,
   normalizeOperator,
   SERVER_COUNTRIES,
@@ -2980,6 +2987,7 @@ app.use(require('./src/routes/analytics')({
   dailyTraffic, ipTracking, uptimeTracking, knownModems,
   portKeyToPortName,
   appSettings,
+  apiServers,
 }));
 
 // Heatmap response cache: key=view|id|days, TTL 5 min.
@@ -3353,7 +3361,9 @@ app.use(require('./src/routes/clients')({
   // Stage 4 finish: maps are stable references via src/state — no more shims.
   clientById, clientByLogin, clientByApiKey, clientByInn, clientByResetToken,
   users,
-  _ledgerInsert, _ledgerEntryParams, ledgerDb,
+  _ledgerInsert, _ledgerEntryParams, ledgerDb, clientsDb,
+  DOCUMENTS_DIR,
+  validateClientInput,
   appSettings,
 }));
 
@@ -3403,7 +3413,8 @@ app.use(require('./src/routes/telegram-crm')({
 // Modem + port control routes moved to src/routes/proxies.js (Stage 3).
 app.use(require('./src/routes/proxies')({
   db, logger, authMiddleware, adminMiddleware,
-  fetchApi, postApi, findServer,
+  fetchApi, fetchApiRaw, postApi, postFormApi, findServer,
+  parseHtmlInputFields,
   apiServers, SERVER_COUNTRIES,
   users,
   auditLog, logActivity, getClientIp,
@@ -3411,8 +3422,12 @@ app.use(require('./src/routes/proxies')({
   saveKnownModems,
   knownModems,
   saveSpeedtestHistory, speedtestHistory,
+  pushSpeedtestEntry,
   ipHistory, saveIpHistory,
   modemRotationCache,
+  fetchAllServersDataCached,
+  syncRotationLog: (...args) => syncRotationLog(...args),
+  _rlSelect: { all: (...args) => _rlSelect.all(...args) },
 }));
 
 
@@ -4545,7 +4560,7 @@ app.use(require('./src/routes/simulator')({
 app.use(require('./src/routes/ops-ext')({
   db, logger, DB_PATH,
   authMiddleware, adminMiddleware, dashboardLimiter,
-  fs, dbStmts, dbAudit,
+  fs, path, dbStmts, dbAudit,
   appSettings,
   getAllBankPayments,
   getSessionCount: () => getSessionCount(),
@@ -4558,17 +4573,39 @@ app.use(require('./src/routes/ops-ext')({
   getIntervals: () => _intervals,
   getFetchAllServersDataCached: () => fetchAllServersDataCached,
   getMergeServerData: () => mergeServerData,
+  getIpTracking: () => ipTracking,
+  getUptimeTracking: () => uptimeTracking,
+  getIpHistory: () => ipHistory,
+  getDailyTraffic: () => dailyTraffic,
+  getPortKeyToPortName: () => portKeyToPortName,
+  getTochkaConfig: () => tochkaConfig,
+  getProxyCheckSummary: () => getProxyCheckSummary(),
+  computeProxyIssues: (...args) => computeProxyIssues(...args),
+  fetchApi: (...args) => fetchApi(...args),
+  findServer: (...args) => findServer(...args),
+  getSpeedtestLatest: () => getSpeedtestLatest(),
+  _getClientTrend: () => _getClientTrend(),
+  _getModemTrend: () => _getModemTrend(),
+  logActivity,
+  getMoscowNow, getMoscowYesterday,
   ledgerExpense, parseBwToBytes, trafficBytesToGb,
 }));
 
 app.use(require('./src/routes/billing-ext')({
   db, logger, authMiddleware, adminMiddleware,
   getClients: () => clients,
+  clientById,
   getFetchAllServersDataCached: () => fetchAllServersDataCached,
   getMergeServerData: () => mergeServerData,
   getPortKeyToPortName: () => portKeyToPortName,
   getDailyTraffic: () => dailyTraffic,
   ledgerDb,
+  COST_CATEGORIES,
+  getClientStoredMonthBytes,
+  refreshPortKeyMapping,
+  getApiServers: () => apiServers,
+  getServerCountries: () => SERVER_COUNTRIES,
+  normalizeOperator,
   getMoscowToday, trafficBytesToGb, parseBwToBytes, ledgerExpense,
   appSettings,
   auditLog, logActivity,
