@@ -176,7 +176,7 @@ Stage 3 нарезки немедленно ломает тест.
 - **Stage 2** ✅ 60% — 5 of 8 domain repos (billing-critical extracted; remaining tracking/traffic/kv inline in routers)
 - **Stage 3** ✅ **100%** — 168 routes / 18 router files in src/routes/
 - **Stage 4** ✅ Bug fixed — billing/atomic stale `clientById` → getter pattern. billingLedger off-memory pending
-- **Stage 5** ⏸ — Frontend inline JS extraction + CSP
+- **Stage 5** ✅ 80% — Inline JS extracted (admin.html 7317→1070, index.html 3401→654). Inline CSS extracted to css/client-portal.css. CSP not yet restored (FOLLOWUP.md)
 - **Stage 6** ✅ 95% — ESLint 0-errors, requires hoisted, silent catches 44→0, README updated, cache-invalidation bug fixed
 
 ### Принцип работы

@@ -89,6 +89,28 @@ Domains still to extract (will happen alongside Stage 3 commits):
   - `tracking` (~7 stmts: ip_tracking, uptime_tracking, ip_history,
     modem_meta, rotation_log, proxy_checks, api_usage)
 
+## Stage 5 — phase 2 (not yet done)
+
+- **CSP not restored.** server.js still has `helmet({ contentSecurityPolicy:
+  false })`. After JS extraction (✅ done) the next blocker is the dozens
+  of inline `onclick="…"` attributes in dynamically-generated HTML inside
+  admin.js. To turn CSP on without breaking them: either (a) replace all
+  with event delegation, (b) allow them via `script-src-attr 'unsafe-inline'`
+  in the policy. Pragmatic: ship (b) now, migrate to (a) progressively.
+
+- **client-portal.css :root may diverge from admin's variables.css.**
+  index.html's CSS was lifted into a new client-portal.css with its own
+  `:root { --bg-0, --accent, … }` block. variables.css has the admin
+  versions of the same tokens. If a theme color changes in one file but
+  not the other, the two SPAs drift visually. Future tidy: merge the
+  shared subset into variables.css, keep client-only tokens in
+  client-portal.css.
+
+- **admin.js + client.js could share a small "common" module** for
+  things like `apiFetch`, `authToken` handling, theme persistence. Today
+  there's some duplication. Not urgent — utils.js dedup already covered
+  the hottest helpers (esc, parseTraffic, fmtGb).
+
 ## Behavior questions to confirm before changing
 
 - The `BENIGN_MIGRATION_ERRORS` regex set includes `/no such column/i` with a
