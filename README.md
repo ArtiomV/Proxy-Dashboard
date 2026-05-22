@@ -97,7 +97,7 @@ CRM_WORKSPACE=workspace_name
 
 ```
 project/
-├── server.js              — Бэкенд bootstrap + 166 ещё-не-сегментированных роутов (~11 000 строк)
+├── server.js              — Bootstrap + helpers + state init (~5 200 строк, без route definitions)
 ├── public/
 │   ├── admin.html         — Админ-панель SPA (~7 300 строк, inline JS — Stage 5 to-do)
 │   └── index.html         — Личный кабинет клиента SPA (~3 400 строк)
@@ -112,8 +112,25 @@ project/
 │   │   ├── payments.js    — per-client payments
 │   │   ├── documents.js   — client_documents + closing_documents + bills
 │   │   └── simulator.js   — simulator_profiles/runs/samples + test pool
-│   ├── routes/            — Sliced Express routers (Stage 3, in progress)
-│   │   └── ops.js         — /health, /metrics (template factory)
+│   ├── routes/            — Sliced Express routers (Stage 3 ✅ done — 168 routes / 18 files)
+│   │   ├── ops.js              — /health, /metrics (2 routes)
+│   │   ├── ops-ext.js          — system_log, audit_log, db_audit, api_usage, jobs, … (11 routes)
+│   │   ├── auth.js             — login/logout/impersonate (3 routes)
+│   │   ├── public-api.js       — /api/v1/proxy[ies] (2 routes)
+│   │   ├── clients.js          — admin client CRUD + balance + ledger (14 routes)
+│   │   ├── client-portal.js    — /api/dashboard_data + /api/client/* (16 routes)
+│   │   ├── billing.js          — run_billing + billing_rerun (2 routes)
+│   │   ├── billing-ext.js      — monthly_costs + finance_dashboard + reconciliation (4 routes)
+│   │   ├── traffic.js          — daily/hourly/bandwidth (7 routes)
+│   │   ├── analytics.js        — /api/analytics/* (11 routes)
+│   │   ├── sla.js              — per-client SLA + overview (2 routes)
+│   │   ├── proxies.js          — modem control + port CRUD + bulk (28 routes)
+│   │   ├── proxy-checks.js     — proxy_check + top_hosts (6 routes)
+│   │   ├── servers.js          — server CRUD + settings (6 routes)
+│   │   ├── tochka.js           — webhook + admin tochka + per-client docs/bills (25 routes)
+│   │   ├── telegram-crm.js     — telegram + AI insights + CRM (5 routes)
+│   │   ├── simulator.js        — весь /api/admin/simulator/* (19 routes)
+│   │   └── misc.js             — /admin, /api/docs, cache, vpn, shop (5 routes)
 │   ├── tochka/            — Tochka Bank API + document generation
 │   ├── traffic/           — Hourly traffic aggregation
 │   ├── simulator/         — Load simulator engine + HTTP worker
@@ -155,12 +172,12 @@ Stage 3 нарезки немедленно ломает тест.
 
 ### Stage refactor status (см. FOLLOWUP.md)
 
-- **Stage 1** ✅ — Characterization tests + route snapshot
-- **Stage 2** 🟡 — Billing-критичные репозитории вынесены (5 of 8)
-- **Stage 3** 🟡 — Pattern введён (src/routes/ops.js), 166 роутов остаются
-- **Stage 4** ⏸ — State centralization, fix billingLedger mirror
-- **Stage 5** ⏸ — Inline JS extraction, restore CSP
-- **Stage 6** 🟡 — Lint ✅, hoisted requires ✅, silent catches ✅, dead code ⏸
+- **Stage 1** ✅ — Characterization tests + route snapshot (9 files / 69 tests)
+- **Stage 2** ✅ 60% — 5 of 8 domain repos (billing-critical extracted; remaining tracking/traffic/kv inline in routers)
+- **Stage 3** ✅ **100%** — 168 routes / 18 router files in src/routes/
+- **Stage 4** ✅ Bug fixed — billing/atomic stale `clientById` → getter pattern. billingLedger off-memory pending
+- **Stage 5** ⏸ — Frontend inline JS extraction + CSP
+- **Stage 6** ✅ 95% — ESLint 0-errors, requires hoisted, silent catches 44→0, README updated, cache-invalidation bug fixed
 
 ### Принцип работы
 
