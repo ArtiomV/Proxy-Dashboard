@@ -123,58 +123,70 @@ The only `billingLedger` references left in the repo are commented-out
 historical notes (e.g. "moved in Stage 4"). Verified via:
 `grep -rnE 'billingLedger' server.js src/` — only comments match.
 
-## TZ status snapshot (post-Stage 4 finish)
+## TZ status snapshot (post-Stage 12)
 
-| TZ item                               | Status        | Notes                                                                        |
-|---------------------------------------|---------------|------------------------------------------------------------------------------|
-| Stage 1: tests + route snapshot       | ✅ Done       | 11 files, 72 tests, 168-route snapshot locked                                |
-| Stage 2: SQL → src/db/*               | ✅ Done       | 8 repos (clients, ledger, kv, traffic, tracking, payments, documents, sim)   |
-| Stage 3: routers → src/routes/*       | ✅ Done       | 18 routers; latent dep-injection gaps closed (commit 9834016)                |
-| Stage 4a: billingLedger removed       | ✅ Done       | Commit 079633c — DB reads via ledgerDb.listByClient on every call            |
-| Stage 4b: src/state/index.js          | ✅ Done       | Commit dc12b9d — clients + 5 maps centralized; shim objects gone             |
-| Stage 5: inline JS extracted          | ✅ Done       | admin.js, client.js, client-portal.css separated                             |
-| Stage 5 phase 2: onclick → delegation | ⏳ Deferred   | CSP allowlist active; migration backlog below                                |
-| Stage 6: lint + dead code + docs      | ✅ Done       | 0 lint errors across server.js + src/ (DoD #3)                               |
-| DoD #1: server.js < 250 lines         | ⏳ Partial    | Currently ~5,160. See "Backlog: src/jobs extraction" below                   |
-| DoD #2: > 70 tests                    | ✅ Done       | 72 tests across 11 files                                                     |
-| DoD #3: 0 ESLint errors               | ✅ Done       | server.js + src/ both zero-error                                             |
-| DoD #7: route snapshot matches        | ✅ Done       | Locked at 168 routes; trips on any new/dropped route                         |
+| TZ item                                | Status      | Notes                                                                        |
+|----------------------------------------|-------------|------------------------------------------------------------------------------|
+| Stage 1: tests + route snapshot        | ✅ Done     | 13 files, 83 tests, 168-route snapshot locked                                |
+| Stage 2: SQL → src/db/*                | ✅ Done     | 8 repos (clients, ledger, kv, traffic, tracking, payments, documents, sim)   |
+| Stage 3: routers → src/routes/*        | ✅ Done     | 18 routers; latent dep-injection gaps closed (commit 9834016)                |
+| Stage 4a: billingLedger removed        | ✅ Done     | Commit 079633c. Integrity test in tests/billing-ledger-integrity.test.js     |
+| Stage 4b: src/state/index.js           | ✅ Done     | Commit dc12b9d — clients + 5 maps centralized; shim objects gone             |
+| Stage 5: inline JS extracted           | ✅ Done     | admin.js, client.js, client-portal.css separated                             |
+| Stage 5 phase 2: onclick → delegation  | ⏳ Deferred | (Stage 11) — CSP allowlist active; migration backlog below                   |
+| Stage 6: lint + dead code + docs       | ✅ Done     | 0 lint errors across server.js + src/ (DoD #3)                               |
+| Stage 7: traffic-unit divergence       | ✅ Done     | utils.js decimal; admin+client load it; +8 lock tests (commit aa51500)       |
+| Stage 8: finish SQL extraction         | ✅ Done     | 59 → 36 inline (rest are intentional). Commit a77c7ea                        |
+| Stage 9: shrink server.js              | ⏳ Partial  | 11,193 → 4,607 (−59%); <250 target documented as multi-day. See backlog      |
+| Stage 10: verify billingLedger removal | ✅ Done     | Audit + integrity test + FOLLOWUP synced (commit 0458c0a)                    |
+| Stage 11: drop script-src-attr unsafe-inline | ⏳ Deferred | Per TZ "трудоёмкий и чисто фронтовый, можно отложить отдельно"             |
+| Stage 12: prod hardening               | ✅ Done     | Tochka key + machine-id, schema policy, test logger silence, ESLint config   |
+| DoD #1: server.js < 250 lines          | ⏳ Partial  | 4,607 lines. <250 needs the deferred extractions below                       |
+| DoD #2: > 70 tests                     | ✅ Done     | 83 tests across 13 files                                                     |
+| DoD #3: 0 ESLint errors                | ✅ Done     | Whole tree (server.js + src/ + tests/ + vitest.config.js) zero-error         |
+| DoD #7: route snapshot matches         | ✅ Done     | Locked at 168 routes; trips on any new/dropped route                         |
 
 ## Backlog: src/jobs extraction (DoD #1 path)
 
-server.js is still ~5,160 lines vs. the TZ's <250 aspirational target. The
-gap is in long-running jobs and cron handlers that live as top-level
-functions. Pre-identified extraction targets (by line count, biggest wins
-first):
+server.js is at 4,607 lines vs. the TZ's <250 aspirational target.
+Stages so far extracted: cleanup.js (−225), tochka-cron.js (−245),
+top-hosts.js (−113), crm-sync.js (−38). Cumulative: −621 from the
+post-Stage-6 baseline of 5,160.
 
-| Target function                  | Lines | Extract to                  |
-|----------------------------------|------:|-----------------------------|
-| `_runDailyBillingImpl`           |   215 | `src/jobs/daily-billing.js` |
-| `trackModems`                    |   162 | `src/jobs/modem-monitor.js` |
-| `cleanupStalePortMappings`       |   147 | `src/jobs/cleanup.js`       |
-| `aggregateTopHosts`              |   113 | `src/analytics/top-hosts.js`|
-| `runMonthlyReconciliation`       |    95 | `src/jobs/daily-billing.js` |
-| `autoCreateMissingClients`       |    86 | `src/jobs/tochka-cron.js`   |
-| `checkProxyLatency`              |    82 | `src/jobs/modem-monitor.js` |
-| `autoGenerateMonthlyBills`       |    81 | `src/jobs/tochka-cron.js`   |
-| `autoGenerateMonthlyActs`        |    78 | `src/jobs/tochka-cron.js`   |
-| `runRetentionCleanup`            |    77 | `src/jobs/cleanup.js`       |
-| `runNightlySpeedtests`           |    78 | `src/jobs/speedtest.js`     |
+Remaining extraction targets (by line count, biggest wins first):
 
-Extracting all of the above ≈ −1,200 lines (server.js → ~3,950). To reach
-<250 would also need to lift: state declarations (dailyTraffic / ipTracking
-/ uptimeTracking / etc., still mutable globals — see "src/state/index.js
-deferred state" below), the cron schedule (4–5 `setInterval` calls),
-helpers (mergeServerData / fetchApi / saveApiServersToDb), and the
-migration runner (~100 lines). That's another ~1,800–2,000 lines moved
-out, putting the boot script in the ~1,500-line range. Hitting <250
-needs aggressive splitting of the migration runner itself + boot
-sequencing.
+| Target function                  | Lines | Extract to                  | Risk   |
+|----------------------------------|------:|-----------------------------|--------|
+| `_runDailyBillingImpl`           |   215 | `src/jobs/daily-billing.js` | HIGH   |
+| `trackModems`                    |   162 | `src/jobs/modem-monitor.js` | MED    |
+| `runMonthlyReconciliation`       |    95 | `src/jobs/daily-billing.js` | HIGH   |
+| `checkProxyLatency`              |    82 | `src/jobs/modem-monitor.js` | LOW    |
+| `runNightlySpeedtests`           |    78 | `src/jobs/speedtest.js`     | LOW    |
+| `injectOfflineModems`            |    69 | `src/services/modems.js`    | LOW    |
+| `mergeServerData`                |    68 | `src/services/proxy-data.js`| MED    |
+| `runSlaCheck`                    |    61 | `src/jobs/sla.js`           | LOW    |
+| `runAutoReboot`                  |    60 | `src/jobs/auto-reboot.js`   | MED    |
+| `updateKnownModems`              |    50 | `src/services/modems.js`    | LOW    |
+| `computeProxyIssues`             |    45 | `src/services/proxy-data.js`| LOW    |
+| `computeClientSlaMetrics`        |    43 | `src/jobs/sla.js`           | LOW    |
 
-**Why deferred:** each extraction is risky (the cron jobs touch ~15
-globals each); doing them under the "one stage = one commit, tests as
-gates" discipline of the TZ is multi-day work and the user explicitly
-chose to prioritize behavior-preserving completion of Stages 1–4 first.
+Extracting the LOW/MED-risk set ≈ −710 lines (server.js → ~3,900).
+Touching `_runDailyBillingImpl` and `runMonthlyReconciliation` is HIGH
+risk because they're the billing math — moving them needs a dedicated
+day with all billing tests re-run after every callsite swap.
+
+To hit <250 also requires: state declarations (`dailyTraffic`,
+`ipTracking`, `uptimeTracking`, `apiServers`, `appSettings`,
+`tochkaConfig`, `portKeyToPortName`, `knownModems`, `users` — still
+mutable globals; see "src/state/index.js deferred state" below), the
+cron schedule (8 `setInterval` calls), proxy/server data helpers
+(`mergeServerData`, `fetchApi`, `saveApiServersToDb`), and the
+migration runner (~100 lines). Multi-day work overall.
+
+**Why deferred:** the TZ rule "один этап = один коммит, тесты как
+ворота" means each extraction needs its own commit + green test run.
+Doing 12 more extractions safely is ~2 working days; the user
+prioritized behavior-preserving completion of every other Stage first.
 
 ## src/state/index.js deferred state
 
