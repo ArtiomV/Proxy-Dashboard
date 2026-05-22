@@ -2,8 +2,32 @@
 
 ## Architecture
 - Single Node.js process under pm2 (`dashboard` app).
-- Single SQLite database at `/root/Proxy-Dashboard/dashboard.db`.
+- Single SQLite database at `/root/Proxy-Dashboard/dashboard.db` (path overridable via `DASHBOARD_DB_PATH` for tests).
 - **Single-process only** — in-memory caches (`clientById`, `dailyTraffic`, `billingLedger`, `snapCache`) are per-process. **Do not enable pm2 cluster mode** (`instances > 1`) without first migrating those caches to SQLite reads or shared cache.
+
+### Source layout (after 2026-05 refactor)
+- `server.js` — bootstrap + state init + shared helpers + cron scheduler (~5 100 lines, no route definitions).
+- `src/routes/*.js` — 18 Express `Router` factories, all 168 HTTP endpoints live here. Mounted by `server.js` via `app.use(require('./src/routes/X')(deps))`.
+- `src/db/*.js` — per-domain prepared-statement repositories (`clients`, `ledger`, `payments`, `documents`, `simulator`). Bulk reads/writes go through these; misc. ad-hoc queries still live inline in helpers in `server.js`.
+- `src/billing/atomic.js` — `atomicCredit` / `atomicDebit` (balance + ledger row in one transaction). Stage-4 patch: receives `getClientById` + `getBillingLedger` getters (not the maps directly) so it follows rebinds across `rebuildClientMaps()`.
+- `src/api/proxy-smart.js` — ProxySmart polling, `serverCache.json` cache, `invalidateCache()`.
+- `src/tochka/*` — bank-webhook JWT verify + document/bill generators.
+- `src/utils/*` — pure helpers (time, traffic parsing, file write, kv-guard).
+- `public/js/admin.js` + `public/js/client.js` — extracted SPAs (admin.html and index.html now only contain markup + `<link>`/`<script src>`).
+- `tests/` — Vitest + supertest. **71 tests**: route snapshot of 168 endpoints + billing/auth/clients/portal/tochka characterization + security headers + utils.
+
+## Test + lint discipline
+```bash
+npm test         # vitest run — must be green before any deploy
+npm run lint     # ESLint — 0 errors policy (warnings OK; silent catches are errors)
+```
+Route snapshot (`tests/api/__snapshots__/routes.json`) freezes the (method, path) pair list at 168 entries. Refresh intentionally with `UPDATE_SNAPSHOT=1 npm test` — never accept drift without a sign-off.
+
+## Clean DB / migrations
+- `schema.sql` is the **initial baseline** (treated as migration 000). Subsequent changes go in `migrations/NNN_*.sql`.
+- Runner at startup applies any unapplied file in `migrations/` (atomic per file, tolerates "already exists" benign errors for idempotent re-runs).
+- Bringing up a fresh DB: `node server.js` is enough — schema.sql + migrations run in order.
+- Schema drift caught once (`external_proxies` missing from schema.sql) — fixed via `CREATE TABLE IF NOT EXISTS` in baseline. See FOLLOWUP.md if you spot another mismatch.
 
 ## Deployment
 Current flow (production):
@@ -64,5 +88,26 @@ Optional:
 - All billing keys on Moscow time (UTC+3 fixed; no DST). `getMoscowToday()` etc helpers.
 - ProxySmart servers in MD/RO must remain in UTC+3. If they drift, billing-day boundary shifts.
 
-## Frontend asset organization (current state)
-- `public/admin.html` — single ~6500-line file with inline JS. **Future improvement** — split into modules under `public/js/`. Not blocking but improves first-paint and maintainability.
+## Frontend asset organization (after Stage 5)
+- `public/admin.html` — 1 070 lines, only markup + CSS+JS `<link>`/`<script src>` references.
+- `public/js/admin.js` — extracted SPA, served as static asset.
+- `public/index.html` — 654 lines, ditto for the client portal.
+- `public/js/client.js` + `public/js/utils.js` — client portal logic + shared utilities (`esc`, `parseTraffic`, `fmtGb`).
+- `public/css/client-portal.css` — extracted theme/layout for the client portal (was 546 lines inline in index.html). `:root` defines its own tokens — see FOLLOWUP for the planned convergence with `css/variables.css`.
+
+## CSP
+- Restored after Stage 5 — `helmet({ contentSecurityPolicy: {...} })`.
+- `script-src 'self' cdn.jsdelivr.net` (for Chart.js) — **no `unsafe-inline` on `script-src`**.
+- `script-src-attr 'unsafe-inline'` — required because admin.js still emits dynamic HTML with `onclick="..."` attributes. Migrating those to event delegation is FOLLOWUP work.
+- `frame-ancestors 'none'` — anti-clickjacking.
+- `tests/api/security-headers.test.js` locks the policy shape (reverting to `contentSecurityPolicy: false` trips the test).
+
+## Production bugs surfaced by the refactor (all fixed)
+1. `external_proxies` missing from `schema.sql` — fresh DBs couldn't bootstrap.
+2. ProxySmart cache invalidation was a **silent no-op** in 12 spots (`_psCache = null` referenced an identifier that didn't exist in scope). Replaced with `proxySmart.invalidateCache()`.
+3. `billing/atomic.js` was holding a stale `clientById` Map reference after `rebuildClientMaps()` — `HTTP /api/admin/clients/:id/payment` returned `balance: 0` even when DB had the new value. Fixed by passing `getClientById` as a getter.
+4. `tochka_config.json` decryption fragile when host hostname changes (derived key drift). Recovered with one-shot script + now use explicit `$TOCHKA_CONFIG_KEY` in .env.
+5. `clientByLogin` had the same stale-rebind issue inside the client portal — fixed with the same shim pattern.
+6. `getAllBankPayments` was called from tochka.js + ops-ext.js but never wired through deps — would have thrown `ReferenceError` on first hit. Caught by lint after Stage 3 extraction.
+
+Each is documented in `FOLLOWUP.md` (✅ marker for the fixed ones).

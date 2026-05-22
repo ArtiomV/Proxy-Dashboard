@@ -1,0 +1,764 @@
+[
+  {
+    "type": "index",
+    "name": "idx_api_usage_client",
+    "tbl_name": "api_usage",
+    "sql": "CREATE INDEX idx_api_usage_client ON api_usage(client_id, timestamp)"
+  },
+  {
+    "type": "index",
+    "name": "idx_api_usage_ts",
+    "tbl_name": "api_usage",
+    "sql": "CREATE INDEX idx_api_usage_ts ON api_usage(timestamp)"
+  },
+  {
+    "type": "index",
+    "name": "idx_arl_modem",
+    "tbl_name": "auto_reboot_log",
+    "sql": "CREATE INDEX idx_arl_modem ON auto_reboot_log(server_name, nick, rebooted_at)"
+  },
+  {
+    "type": "index",
+    "name": "idx_arl_recent",
+    "tbl_name": "auto_reboot_log",
+    "sql": "CREATE INDEX idx_arl_recent ON auto_reboot_log(rebooted_at)"
+  },
+  {
+    "type": "index",
+    "name": "idx_audit_action",
+    "tbl_name": "audit_log",
+    "sql": "CREATE INDEX idx_audit_action ON audit_log(action)"
+  },
+  {
+    "type": "index",
+    "name": "idx_audit_admin",
+    "tbl_name": "audit_log",
+    "sql": "CREATE INDEX idx_audit_admin ON audit_log(admin)"
+  },
+  {
+    "type": "index",
+    "name": "idx_audit_timestamp",
+    "tbl_name": "audit_log",
+    "sql": "CREATE INDEX idx_audit_timestamp ON audit_log(timestamp)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bank_matched",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE INDEX idx_bank_matched ON bank_payments(matched_client_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bank_payments_client_id",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE INDEX idx_bank_payments_client_id ON bank_payments(matched_client_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bank_payments_date",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE INDEX idx_bank_payments_date ON bank_payments(date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bank_payments_payment_id",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE INDEX idx_bank_payments_payment_id ON bank_payments(payment_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bank_payments_pid_unique",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE UNIQUE INDEX idx_bank_payments_pid_unique ON bank_payments(payment_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bank_payments_tochka_id",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE INDEX idx_bank_payments_tochka_id ON bank_payments(tochka_payment_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bank_payments_tpid_unique",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE UNIQUE INDEX idx_bank_payments_tpid_unique ON bank_payments(tochka_payment_id) WHERE tochka_payment_id IS NOT NULL AND tochka_payment_id != ''"
+  },
+  {
+    "type": "index",
+    "name": "idx_bills_client",
+    "tbl_name": "bills",
+    "sql": "CREATE INDEX idx_bills_client ON bills(client_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bills_period",
+    "tbl_name": "bills",
+    "sql": "CREATE INDEX idx_bills_period ON bills(period)"
+  },
+  {
+    "type": "index",
+    "name": "idx_clients_api_key",
+    "tbl_name": "clients",
+    "sql": "CREATE INDEX idx_clients_api_key ON clients(api_key)"
+  },
+  {
+    "type": "index",
+    "name": "idx_clients_inn",
+    "tbl_name": "clients",
+    "sql": "CREATE INDEX idx_clients_inn ON clients(inn)"
+  },
+  {
+    "type": "index",
+    "name": "idx_clients_login",
+    "tbl_name": "clients",
+    "sql": "CREATE INDEX idx_clients_login ON clients(login)"
+  },
+  {
+    "type": "index",
+    "name": "idx_clients_port_name",
+    "tbl_name": "clients",
+    "sql": "CREATE INDEX idx_clients_port_name ON clients(port_name)"
+  },
+  {
+    "type": "index",
+    "name": "idx_closing_docs_client",
+    "tbl_name": "closing_documents",
+    "sql": "CREATE INDEX idx_closing_docs_client ON closing_documents(client_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_closing_docs_period",
+    "tbl_name": "closing_documents",
+    "sql": "CREATE INDEX idx_closing_docs_period ON closing_documents(period)"
+  },
+  {
+    "type": "index",
+    "name": "idx_daily_traffic_port_date",
+    "tbl_name": "daily_traffic",
+    "sql": "CREATE INDEX idx_daily_traffic_port_date ON daily_traffic(port_name, date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_dba_ctx",
+    "tbl_name": "db_audit",
+    "sql": "CREATE INDEX idx_dba_ctx ON db_audit(context_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_dba_ctx_actor",
+    "tbl_name": "db_audit_context",
+    "sql": "CREATE INDEX idx_dba_ctx_actor ON db_audit_context(actor)"
+  },
+  {
+    "type": "index",
+    "name": "idx_dba_ctx_source",
+    "tbl_name": "db_audit_context",
+    "sql": "CREATE INDEX idx_dba_ctx_source ON db_audit_context(source, ts)"
+  },
+  {
+    "type": "index",
+    "name": "idx_dba_ctx_ts",
+    "tbl_name": "db_audit_context",
+    "sql": "CREATE INDEX idx_dba_ctx_ts ON db_audit_context(ts)"
+  },
+  {
+    "type": "index",
+    "name": "idx_dba_row",
+    "tbl_name": "db_audit",
+    "sql": "CREATE INDEX idx_dba_row ON db_audit(table_name, row_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_dba_table",
+    "tbl_name": "db_audit",
+    "sql": "CREATE INDEX idx_dba_table ON db_audit(table_name, ts)"
+  },
+  {
+    "type": "index",
+    "name": "idx_dba_table_row_ts",
+    "tbl_name": "db_audit",
+    "sql": "CREATE INDEX idx_dba_table_row_ts ON db_audit(table_name, row_id, ts)"
+  },
+  {
+    "type": "index",
+    "name": "idx_dba_ts",
+    "tbl_name": "db_audit",
+    "sql": "CREATE INDEX idx_dba_ts ON db_audit(ts)"
+  },
+  {
+    "type": "index",
+    "name": "idx_docs_client_id",
+    "tbl_name": "client_documents",
+    "sql": "CREATE INDEX idx_docs_client_id ON client_documents(client_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_ip_history_key",
+    "tbl_name": "ip_history",
+    "sql": "CREATE INDEX idx_ip_history_key ON ip_history(key)"
+  },
+  {
+    "type": "index",
+    "name": "idx_kv_history_key",
+    "tbl_name": "kv_store_history",
+    "sql": "CREATE INDEX idx_kv_history_key ON kv_store_history(key, written_at DESC)"
+  },
+  {
+    "type": "index",
+    "name": "idx_ledger_client_date",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE INDEX idx_ledger_client_date ON billing_ledger(client_id, date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_ledger_client_id",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE INDEX idx_ledger_client_id ON billing_ledger(client_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_ledger_client_type",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE INDEX idx_ledger_client_type ON billing_ledger(client_id, type)"
+  },
+  {
+    "type": "index",
+    "name": "idx_ledger_date",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE INDEX idx_ledger_date ON billing_ledger(date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_ledger_type",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE INDEX idx_ledger_type ON billing_ledger(type)"
+  },
+  {
+    "type": "index",
+    "name": "idx_ledger_type_date",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE INDEX idx_ledger_type_date ON billing_ledger(type, date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_ledger_unique_chargelike",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE UNIQUE INDEX idx_ledger_unique_chargelike ON billing_ledger(client_id, date, type) WHERE type IN ('charge', 'correction', 'manual_charge')"
+  },
+  {
+    "type": "index",
+    "name": "idx_mc_cat",
+    "tbl_name": "monthly_costs",
+    "sql": "CREATE INDEX idx_mc_cat ON monthly_costs(category, period)"
+  },
+  {
+    "type": "index",
+    "name": "idx_mc_period",
+    "tbl_name": "monthly_costs",
+    "sql": "CREATE INDEX idx_mc_period ON monthly_costs(period)"
+  },
+  {
+    "type": "index",
+    "name": "idx_modem_meta_nick",
+    "tbl_name": "modem_meta",
+    "sql": "CREATE INDEX idx_modem_meta_nick ON modem_meta(nick)"
+  },
+  {
+    "type": "index",
+    "name": "idx_modem_meta_test_pool",
+    "tbl_name": "modem_meta",
+    "sql": "CREATE INDEX idx_modem_meta_test_pool ON modem_meta(is_test_pool) WHERE is_test_pool = 1"
+  },
+  {
+    "type": "index",
+    "name": "idx_payments_client_id",
+    "tbl_name": "payments",
+    "sql": "CREATE INDEX idx_payments_client_id ON payments(client_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_payments_date",
+    "tbl_name": "payments",
+    "sql": "CREATE INDEX idx_payments_date ON payments(date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_pc_checked",
+    "tbl_name": "proxy_checks",
+    "sql": "CREATE INDEX idx_pc_checked ON proxy_checks(checked_at)"
+  },
+  {
+    "type": "index",
+    "name": "idx_pc_checked_desc",
+    "tbl_name": "proxy_checks",
+    "sql": "CREATE INDEX idx_pc_checked_desc ON proxy_checks(checked_at DESC)"
+  },
+  {
+    "type": "index",
+    "name": "idx_pc_nick",
+    "tbl_name": "proxy_checks",
+    "sql": "CREATE INDEX idx_pc_nick ON proxy_checks(nick)"
+  },
+  {
+    "type": "index",
+    "name": "idx_pc_operator",
+    "tbl_name": "proxy_checks",
+    "sql": "CREATE INDEX idx_pc_operator ON proxy_checks(operator)"
+  },
+  {
+    "type": "index",
+    "name": "idx_rotation_log_nick",
+    "tbl_name": "rotation_log",
+    "sql": "CREATE INDEX idx_rotation_log_nick ON rotation_log(server_name, nick)"
+  },
+  {
+    "type": "index",
+    "name": "idx_rotation_log_uniq",
+    "tbl_name": "rotation_log",
+    "sql": "CREATE UNIQUE INDEX idx_rotation_log_uniq ON rotation_log(server_name, nick, started_at)"
+  },
+  {
+    "type": "index",
+    "name": "idx_rotlog_modem_started",
+    "tbl_name": "rotation_log",
+    "sql": "CREATE INDEX idx_rotlog_modem_started ON rotation_log(server_name, nick, started_at)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sessions_expires",
+    "tbl_name": "sessions",
+    "sql": "CREATE INDEX idx_sessions_expires ON sessions(expires_at)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sessions_login",
+    "tbl_name": "sessions",
+    "sql": "CREATE INDEX idx_sessions_login ON sessions(login)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sim_runs_started",
+    "tbl_name": "simulator_runs",
+    "sql": "CREATE INDEX idx_sim_runs_started ON simulator_runs(started_at DESC)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sim_runs_status",
+    "tbl_name": "simulator_runs",
+    "sql": "CREATE INDEX idx_sim_runs_status ON simulator_runs(status)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sim_samples_run_modem",
+    "tbl_name": "simulator_samples",
+    "sql": "CREATE INDEX idx_sim_samples_run_modem ON simulator_samples(run_id, modem_nick)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sim_samples_run_ts",
+    "tbl_name": "simulator_samples",
+    "sql": "CREATE INDEX idx_sim_samples_run_ts ON simulator_samples(run_id, ts_ms)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sla_violations_client",
+    "tbl_name": "sla_violations",
+    "sql": "CREATE INDEX idx_sla_violations_client ON sla_violations(client_id, date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sla_violations_date",
+    "tbl_name": "sla_violations",
+    "sql": "CREATE INDEX idx_sla_violations_date ON sla_violations(date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_syslog_cat",
+    "tbl_name": "system_log",
+    "sql": "CREATE INDEX idx_syslog_cat ON system_log(category, timestamp)"
+  },
+  {
+    "type": "index",
+    "name": "idx_syslog_level",
+    "tbl_name": "system_log",
+    "sql": "CREATE INDEX idx_syslog_level ON system_log(level, timestamp)"
+  },
+  {
+    "type": "index",
+    "name": "idx_syslog_ts",
+    "tbl_name": "system_log",
+    "sql": "CREATE INDEX idx_syslog_ts ON system_log(timestamp)"
+  },
+  {
+    "type": "index",
+    "name": "idx_thd_client",
+    "tbl_name": "top_hosts_detail",
+    "sql": "CREATE INDEX idx_thd_client ON top_hosts_detail(client_name)"
+  },
+  {
+    "type": "index",
+    "name": "idx_thd_host",
+    "tbl_name": "top_hosts_detail",
+    "sql": "CREATE INDEX idx_thd_host ON top_hosts_detail(host)"
+  },
+  {
+    "type": "index",
+    "name": "idx_thd_nick",
+    "tbl_name": "top_hosts_detail",
+    "sql": "CREATE INDEX idx_thd_nick ON top_hosts_detail(server_name, nick)"
+  },
+  {
+    "type": "index",
+    "name": "idx_thd_op",
+    "tbl_name": "top_hosts_detail",
+    "sql": "CREATE INDEX idx_thd_op ON top_hosts_detail(operator)"
+  },
+  {
+    "type": "index",
+    "name": "idx_thd_snap",
+    "tbl_name": "top_hosts_detail",
+    "sql": "CREATE INDEX idx_thd_snap ON top_hosts_detail(snapshot_at)"
+  },
+  {
+    "type": "index",
+    "name": "idx_thd_srv",
+    "tbl_name": "top_hosts_detail",
+    "sql": "CREATE INDEX idx_thd_srv ON top_hosts_detail(server_name)"
+  },
+  {
+    "type": "index",
+    "name": "idx_traffic_hourly_client",
+    "tbl_name": "traffic_hourly",
+    "sql": "CREATE INDEX idx_traffic_hourly_client ON traffic_hourly(client_name, hour_start)"
+  },
+  {
+    "type": "index",
+    "name": "idx_traffic_hourly_client_hour",
+    "tbl_name": "traffic_hourly",
+    "sql": "CREATE INDEX idx_traffic_hourly_client_hour ON traffic_hourly(client_name, hour_start)"
+  },
+  {
+    "type": "index",
+    "name": "idx_traffic_hourly_hour",
+    "tbl_name": "traffic_hourly",
+    "sql": "CREATE INDEX idx_traffic_hourly_hour ON traffic_hourly(hour_start)"
+  },
+  {
+    "type": "index",
+    "name": "idx_traffic_hourly_nick2",
+    "tbl_name": "traffic_hourly",
+    "sql": "CREATE INDEX idx_traffic_hourly_nick2 ON traffic_hourly(nick, hour_start)"
+  },
+  {
+    "type": "index",
+    "name": "idx_traffic_hourly_operator",
+    "tbl_name": "traffic_hourly",
+    "sql": "CREATE INDEX idx_traffic_hourly_operator ON traffic_hourly(operator, hour_start)"
+  },
+  {
+    "type": "index",
+    "name": "idx_traffic_hourly_port_hour",
+    "tbl_name": "traffic_hourly",
+    "sql": "CREATE UNIQUE INDEX idx_traffic_hourly_port_hour ON traffic_hourly(port_id, hour_start)"
+  },
+  {
+    "type": "index",
+    "name": "idx_traffic_hourly_srv",
+    "tbl_name": "traffic_hourly",
+    "sql": "CREATE INDEX idx_traffic_hourly_srv ON traffic_hourly(server_name, hour_start)"
+  },
+  {
+    "type": "table",
+    "name": "_audit_active_context",
+    "tbl_name": "_audit_active_context",
+    "sql": "CREATE TABLE _audit_active_context ( id INTEGER PRIMARY KEY CHECK (id = 1), context_id INTEGER )"
+  },
+  {
+    "type": "table",
+    "name": "_migrations",
+    "tbl_name": "_migrations",
+    "sql": "CREATE TABLE _migrations ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE NOT NULL, applied_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "api_usage",
+    "tbl_name": "api_usage",
+    "sql": "CREATE TABLE api_usage ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT, client_name TEXT, api_key_prefix TEXT, endpoint TEXT, method TEXT, status_code INTEGER, response_time_ms INTEGER, user_agent TEXT, ip TEXT, timestamp TEXT DEFAULT CURRENT_TIMESTAMP, error TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "audit_log",
+    "tbl_name": "audit_log",
+    "sql": "CREATE TABLE audit_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL DEFAULT (datetime('now')), admin TEXT NOT NULL, action TEXT NOT NULL, entity_type TEXT, entity_id TEXT, details TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "auto_reboot_log",
+    "tbl_name": "auto_reboot_log",
+    "sql": "CREATE TABLE auto_reboot_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, nick TEXT NOT NULL, imei TEXT, rebooted_at TEXT NOT NULL DEFAULT (datetime('now')), reason TEXT, status TEXT, -- 'success' | 'failed' error TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "bank_payments",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE TABLE bank_payments ( id TEXT PRIMARY KEY, webhook_type TEXT, payer_inn TEXT, payer_name TEXT, amount REAL NOT NULL, purpose TEXT, payment_id TEXT, date TEXT NOT NULL, customer_code TEXT, matched INTEGER DEFAULT 0, matched_client_id TEXT, matched_client_name TEXT, auto_credit INTEGER DEFAULT 0, dismissed INTEGER DEFAULT 0, source TEXT DEFAULT '', tochka_payment_id TEXT, received_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "billing_ledger",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE TABLE billing_ledger ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, type TEXT NOT NULL, date TEXT NOT NULL, timestamp TEXT, amount REAL NOT NULL, currency TEXT DEFAULT 'RUB', balance_before REAL, balance_after REAL, gb_used REAL, modem_count INTEGER, days_in_month INTEGER, note TEXT DEFAULT '', source TEXT, payment_id TEXT, details TEXT, created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "bills",
+    "tbl_name": "bills",
+    "sql": "CREATE TABLE bills ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, tochka_bill_id TEXT, period TEXT NOT NULL, bill_number TEXT, amount REAL NOT NULL, status TEXT DEFAULT 'unpaid', created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "client_documents",
+    "tbl_name": "client_documents",
+    "sql": "CREATE TABLE client_documents ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, name TEXT NOT NULL, file_name TEXT NOT NULL, mime_type TEXT DEFAULT '', date TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "clients",
+    "tbl_name": "clients",
+    "sql": "CREATE TABLE clients ( id TEXT PRIMARY KEY, login TEXT UNIQUE NOT NULL, password TEXT, password_hash TEXT, port_name TEXT, name TEXT NOT NULL, contact TEXT DEFAULT '', notes TEXT DEFAULT '', billing_type TEXT DEFAULT 'per_gb', price REAL DEFAULT 0, currency TEXT DEFAULT 'RUB', balance REAL DEFAULT 0, api_key TEXT UNIQUE, referral_code TEXT UNIQUE, referred_by TEXT, referral_balance REAL DEFAULT 0, reset_token TEXT, inn TEXT DEFAULT '', kpp TEXT DEFAULT '', legal_name TEXT DEFAULT '', contract_info TEXT DEFAULT '', address TEXT DEFAULT '', auto_acts INTEGER DEFAULT 1, auto_bills INTEGER DEFAULT 1, allow_debt INTEGER DEFAULT 0, max_debt REAL, sla_uptime_pct REAL DEFAULT 99.0, sla_max_latency_ms INTEGER DEFAULT 1000, sla_max_error_pct REAL DEFAULT 5.0, sla_auto_credit INTEGER DEFAULT 0, last_traffic_snapshot TEXT DEFAULT '{}', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')) , client_type TEXT DEFAULT 'legal', billing_paused INTEGER DEFAULT 0)"
+  },
+  {
+    "type": "table",
+    "name": "closing_documents",
+    "tbl_name": "closing_documents",
+    "sql": "CREATE TABLE closing_documents ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, tochka_doc_id TEXT, period TEXT NOT NULL, type TEXT DEFAULT 'act', act_number TEXT, items TEXT DEFAULT '[]', total_amount REAL DEFAULT 0, status TEXT DEFAULT 'unsigned', contract_info TEXT, signed_at TEXT, created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "daily_traffic",
+    "tbl_name": "daily_traffic",
+    "sql": "CREATE TABLE daily_traffic ( id INTEGER PRIMARY KEY AUTOINCREMENT, port_name TEXT NOT NULL, date TEXT NOT NULL, bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0, UNIQUE(port_name, date) )"
+  },
+  {
+    "type": "table",
+    "name": "db_audit",
+    "tbl_name": "db_audit",
+    "sql": "CREATE TABLE db_audit ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')), table_name TEXT NOT NULL, operation TEXT NOT NULL, -- INSERT | UPDATE | DELETE row_id TEXT, old_values TEXT, new_values TEXT, context_id INTEGER REFERENCES db_audit_context(id) ON DELETE SET NULL )"
+  },
+  {
+    "type": "table",
+    "name": "db_audit_context",
+    "tbl_name": "db_audit_context",
+    "sql": "CREATE TABLE db_audit_context ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')), source TEXT NOT NULL DEFAULT 'unknown', -- http | scheduler | webhook | startup | manual actor TEXT, -- admin login or 'system' ip TEXT, request_id TEXT, http_method TEXT, http_path TEXT, reason TEXT, -- short description of what we expected to do stack TEXT -- abbreviated stack (top 8 frames) )"
+  },
+  {
+    "type": "table",
+    "name": "external_proxies",
+    "tbl_name": "external_proxies",
+    "sql": "CREATE TABLE external_proxies ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL, label TEXT DEFAULT '', protocol TEXT DEFAULT 'HTTP', host TEXT NOT NULL, port INTEGER NOT NULL, login TEXT DEFAULT '', password TEXT DEFAULT '', note TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')), change_ip_url TEXT DEFAULT '', valid_until TEXT, billing_type TEXT DEFAULT 'monthly', price REAL DEFAULT 0, traffic_used_gb REAL DEFAULT 0, FOREIGN KEY (client_id) REFERENCES clients(id) )"
+  },
+  {
+    "type": "table",
+    "name": "hourly_snapshots",
+    "tbl_name": "hourly_snapshots",
+    "sql": "CREATE TABLE hourly_snapshots ( port_id TEXT PRIMARY KEY, day_in INTEGER NOT NULL DEFAULT 0, day_out INTEGER NOT NULL DEFAULT 0, month_in INTEGER NOT NULL DEFAULT 0, month_out INTEGER NOT NULL DEFAULT 0, yesterday_in INTEGER NOT NULL DEFAULT 0, yesterday_out INTEGER NOT NULL DEFAULT 0, prev_month_in INTEGER NOT NULL DEFAULT 0, prev_month_out INTEGER NOT NULL DEFAULT 0, day_at_last_hour_start_in INTEGER NOT NULL DEFAULT 0, day_at_last_hour_start_out INTEGER NOT NULL DEFAULT 0, mon_at_last_hour_start_in INTEGER NOT NULL DEFAULT 0, mon_at_last_hour_start_out INTEGER NOT NULL DEFAULT 0, pending INTEGER NOT NULL DEFAULT 0, captured_at TEXT NOT NULL DEFAULT (datetime('now')), last_updated_at TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "ip_history",
+    "tbl_name": "ip_history",
+    "sql": "CREATE TABLE ip_history ( id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, ip TEXT NOT NULL, started_at TEXT, ended_at TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "ip_tracking",
+    "tbl_name": "ip_tracking",
+    "sql": "CREATE TABLE ip_tracking ( key TEXT PRIMARY KEY, ip TEXT, updated_at TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "kv_store",
+    "tbl_name": "kv_store",
+    "sql": "CREATE TABLE kv_store ( key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "kv_store_history",
+    "tbl_name": "kv_store_history",
+    "sql": "CREATE TABLE kv_store_history ( id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, old_value TEXT, -- previous value (NULL if first write) new_value TEXT NOT NULL, written_at TEXT DEFAULT (datetime('now')), source TEXT, -- code path that triggered the write (for forensics) shape_signature TEXT, -- compact JSON summary of the new value's shape regressed INTEGER DEFAULT 0 -- 1 if write was flagged as shape regression but allowed )"
+  },
+  {
+    "type": "table",
+    "name": "modem_meta",
+    "tbl_name": "modem_meta",
+    "sql": "CREATE TABLE modem_meta ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), is_test_pool INTEGER NOT NULL DEFAULT 0, UNIQUE(server_name, imei) )"
+  },
+  {
+    "type": "table",
+    "name": "monthly_costs",
+    "tbl_name": "monthly_costs",
+    "sql": "CREATE TABLE monthly_costs ( id INTEGER PRIMARY KEY AUTOINCREMENT, period TEXT NOT NULL, category TEXT NOT NULL, subkey TEXT, amount REAL NOT NULL DEFAULT 0, notes TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), UNIQUE(period, category, subkey) )"
+  },
+  {
+    "type": "table",
+    "name": "payments",
+    "tbl_name": "payments",
+    "sql": "CREATE TABLE payments ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, amount REAL NOT NULL, date TEXT NOT NULL, note TEXT DEFAULT '', source TEXT DEFAULT 'manual', payment_id TEXT, created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "proxy_checks",
+    "tbl_name": "proxy_checks",
+    "sql": "CREATE TABLE proxy_checks ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, nick TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', checked_at TEXT NOT NULL, connect_ms INTEGER, total_ms INTEGER, status_code INTEGER, error TEXT, created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "rotation_log",
+    "tbl_name": "rotation_log",
+    "sql": "CREATE TABLE rotation_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, nick TEXT NOT NULL, old_ip TEXT, new_ip TEXT, started_at TEXT NOT NULL, ended_at TEXT, took_sec REAL, attempt INTEGER DEFAULT 1 )"
+  },
+  {
+    "type": "table",
+    "name": "sessions",
+    "tbl_name": "sessions",
+    "sql": "CREATE TABLE sessions ( token TEXT PRIMARY KEY, login TEXT NOT NULL, port_name_filter TEXT, is_admin INTEGER DEFAULT 0, expires_at INTEGER NOT NULL, created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "simulator_profiles",
+    "tbl_name": "simulator_profiles",
+    "sql": "CREATE TABLE simulator_profiles ( id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL UNIQUE, description TEXT, config_json TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), created_by TEXT, updated_at TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "simulator_runs",
+    "tbl_name": "simulator_runs",
+    "sql": "CREATE TABLE simulator_runs ( id INTEGER PRIMARY KEY AUTOINCREMENT, profile_id INTEGER REFERENCES simulator_profiles(id) ON DELETE SET NULL, profile_name TEXT, started_at TEXT NOT NULL DEFAULT (datetime('now')), ended_at TEXT, status TEXT NOT NULL DEFAULT 'running', -- running | completed | aborted | error config_json TEXT NOT NULL, summary_json TEXT, started_by TEXT, error_msg TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "simulator_samples",
+    "tbl_name": "simulator_samples",
+    "sql": "CREATE TABLE simulator_samples ( id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL REFERENCES simulator_runs(id) ON DELETE CASCADE, ts_ms INTEGER NOT NULL, -- ms since run start (small int, fits 31 bits up to ~24 days) worker_id INTEGER NOT NULL, modem_nick TEXT NOT NULL, server_name TEXT NOT NULL, status TEXT NOT NULL, -- success | timeout | http_error | conn_error http_status INTEGER, total_ms INTEGER NOT NULL, connect_ms INTEGER, ttfb_ms INTEGER, -- time-to-first-byte (useful for diagnosing slow-body issue) bytes INTEGER NOT NULL DEFAULT 0, url TEXT, error_msg TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "sla_violations",
+    "tbl_name": "sla_violations",
+    "sql": "CREATE TABLE sla_violations ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT, date TEXT, metric TEXT, expected REAL, actual REAL, credited_amount REAL DEFAULT 0, created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "system_log",
+    "tbl_name": "system_log",
+    "sql": "CREATE TABLE system_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL DEFAULT (datetime('now')), category TEXT NOT NULL, level TEXT NOT NULL DEFAULT 'info', action TEXT NOT NULL, target TEXT, message TEXT NOT NULL, details TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "top_hosts_detail",
+    "tbl_name": "top_hosts_detail",
+    "sql": "CREATE TABLE top_hosts_detail ( id INTEGER PRIMARY KEY AUTOINCREMENT, snapshot_at TEXT NOT NULL, server_name TEXT NOT NULL, port_id TEXT NOT NULL, nick TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT '', host TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0 )"
+  },
+  {
+    "type": "table",
+    "name": "traffic_hourly",
+    "tbl_name": "traffic_hourly",
+    "sql": "CREATE TABLE traffic_hourly ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL DEFAULT '', port_id TEXT NOT NULL DEFAULT '', nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', client_name TEXT NOT NULL DEFAULT '', hour_start TEXT NOT NULL, -- '2026-03-29 14:00' bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0, uncertain INTEGER NOT NULL DEFAULT 0, corrected INTEGER DEFAULT 0, UNIQUE(port_id, hour_start) )"
+  },
+  {
+    "type": "table",
+    "name": "uptime_tracking",
+    "tbl_name": "uptime_tracking",
+    "sql": "CREATE TABLE uptime_tracking ( key TEXT PRIMARY KEY, data TEXT DEFAULT '{}' )"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_bank_payments_ad",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE TRIGGER trg_bank_payments_ad AFTER DELETE ON bank_payments BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('bank_payments', 'DELETE', OLD.id, json_object('id', OLD.id, 'payment_id', OLD.payment_id, 'tochka_payment_id', OLD.tochka_payment_id, 'date', OLD.date, 'amount', OLD.amount, 'payer_inn', OLD.payer_inn, 'payer_name', OLD.payer_name, 'matched_client_id', OLD.matched_client_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_bank_payments_ai",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE TRIGGER trg_bank_payments_ai AFTER INSERT ON bank_payments BEGIN INSERT INTO db_audit (table_name, operation, row_id, new_values, context_id) VALUES ('bank_payments', 'INSERT', NEW.id, json_object('id', NEW.id, 'payment_id', NEW.payment_id, 'tochka_payment_id', NEW.tochka_payment_id, 'date', NEW.date, 'amount', NEW.amount, 'payer_inn', NEW.payer_inn, 'payer_name', NEW.payer_name, 'matched', NEW.matched, 'matched_client_id', NEW.matched_client_id, 'source', NEW.source), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_bank_payments_au",
+    "tbl_name": "bank_payments",
+    "sql": "CREATE TRIGGER trg_bank_payments_au AFTER UPDATE ON bank_payments BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, new_values, context_id) VALUES ('bank_payments', 'UPDATE', NEW.id, json_object('matched', OLD.matched, 'matched_client_id', OLD.matched_client_id, 'dismissed', OLD.dismissed, 'auto_credit', OLD.auto_credit), json_object('matched', NEW.matched, 'matched_client_id', NEW.matched_client_id, 'dismissed', NEW.dismissed, 'auto_credit', NEW.auto_credit), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_billing_ledger_ad",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE TRIGGER trg_billing_ledger_ad AFTER DELETE ON billing_ledger BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('billing_ledger', 'DELETE', CAST(OLD.id AS TEXT), json_object('id', OLD.id, 'client_id', OLD.client_id, 'type', OLD.type, 'date', OLD.date, 'timestamp', OLD.timestamp, 'amount', OLD.amount, 'balance_before', OLD.balance_before, 'balance_after', OLD.balance_after, 'gb_used', OLD.gb_used, 'modem_count', OLD.modem_count, 'note', OLD.note, 'source', OLD.source, 'payment_id', OLD.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_billing_ledger_ai",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE TRIGGER trg_billing_ledger_ai AFTER INSERT ON billing_ledger BEGIN INSERT INTO db_audit (table_name, operation, row_id, new_values, context_id) VALUES ('billing_ledger', 'INSERT', CAST(NEW.id AS TEXT), json_object('id', NEW.id, 'client_id', NEW.client_id, 'type', NEW.type, 'date', NEW.date, 'timestamp', NEW.timestamp, 'amount', NEW.amount, 'balance_before', NEW.balance_before, 'balance_after', NEW.balance_after, 'gb_used', NEW.gb_used, 'modem_count', NEW.modem_count, 'note', NEW.note, 'source', NEW.source, 'payment_id', NEW.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_billing_ledger_au",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE TRIGGER trg_billing_ledger_au AFTER UPDATE ON billing_ledger BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, new_values, context_id) VALUES ('billing_ledger', 'UPDATE', CAST(OLD.id AS TEXT), json_object('id', OLD.id, 'client_id', OLD.client_id, 'type', OLD.type, 'date', OLD.date, 'timestamp', OLD.timestamp, 'amount', OLD.amount, 'balance_before', OLD.balance_before, 'balance_after', OLD.balance_after, 'gb_used', OLD.gb_used, 'modem_count', OLD.modem_count, 'note', OLD.note, 'source', OLD.source, 'payment_id', OLD.payment_id), json_object('id', NEW.id, 'client_id', NEW.client_id, 'type', NEW.type, 'date', NEW.date, 'timestamp', NEW.timestamp, 'amount', NEW.amount, 'balance_before', NEW.balance_before, 'balance_after', NEW.balance_after, 'gb_used', NEW.gb_used, 'modem_count', NEW.modem_count, 'note', NEW.note, 'source', NEW.source, 'payment_id', NEW.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_bills_ad",
+    "tbl_name": "bills",
+    "sql": "CREATE TRIGGER trg_bills_ad AFTER DELETE ON bills BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('bills', 'DELETE', OLD.id, json_object('id', OLD.id, 'client_id', OLD.client_id, 'period', OLD.period, 'bill_number', OLD.bill_number, 'amount', OLD.amount, 'status', OLD.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_bills_ai",
+    "tbl_name": "bills",
+    "sql": "CREATE TRIGGER trg_bills_ai AFTER INSERT ON bills BEGIN INSERT INTO db_audit (table_name, operation, row_id, new_values, context_id) VALUES ('bills', 'INSERT', NEW.id, json_object('id', NEW.id, 'client_id', NEW.client_id, 'period', NEW.period, 'bill_number', NEW.bill_number, 'amount', NEW.amount, 'status', NEW.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_clients_ad",
+    "tbl_name": "clients",
+    "sql": "CREATE TRIGGER trg_clients_ad AFTER DELETE ON clients BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('clients', 'DELETE', OLD.id, json_object('id', OLD.id, 'login', OLD.login, 'name', OLD.name, 'balance', OLD.balance, 'billing_type', OLD.billing_type, 'price', OLD.price), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_clients_balance_au",
+    "tbl_name": "clients",
+    "sql": "CREATE TRIGGER trg_clients_balance_au AFTER UPDATE OF balance ON clients WHEN COALESCE(OLD.balance, 0) != COALESCE(NEW.balance, 0) BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, new_values, context_id) VALUES ('clients.balance', 'UPDATE', NEW.id, json_object('balance', OLD.balance), json_object('balance', NEW.balance, 'name', NEW.name), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_closing_docs_ad",
+    "tbl_name": "closing_documents",
+    "sql": "CREATE TRIGGER trg_closing_docs_ad AFTER DELETE ON closing_documents BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('closing_documents', 'DELETE', OLD.id, json_object('id', OLD.id, 'client_id', OLD.client_id, 'period', OLD.period, 'act_number', OLD.act_number, 'total_amount', OLD.total_amount, 'tochka_doc_id', OLD.tochka_doc_id, 'status', OLD.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_closing_docs_ai",
+    "tbl_name": "closing_documents",
+    "sql": "CREATE TRIGGER trg_closing_docs_ai AFTER INSERT ON closing_documents BEGIN INSERT INTO db_audit (table_name, operation, row_id, new_values, context_id) VALUES ('closing_documents', 'INSERT', NEW.id, json_object('id', NEW.id, 'client_id', NEW.client_id, 'period', NEW.period, 'act_number', NEW.act_number, 'total_amount', NEW.total_amount, 'tochka_doc_id', NEW.tochka_doc_id, 'status', NEW.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_closing_docs_au",
+    "tbl_name": "closing_documents",
+    "sql": "CREATE TRIGGER trg_closing_docs_au AFTER UPDATE ON closing_documents BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, new_values, context_id) VALUES ('closing_documents', 'UPDATE', NEW.id, json_object('total_amount', OLD.total_amount, 'tochka_doc_id', OLD.tochka_doc_id, 'status', OLD.status), json_object('total_amount', NEW.total_amount, 'tochka_doc_id', NEW.tochka_doc_id, 'status', NEW.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_payments_ad",
+    "tbl_name": "payments",
+    "sql": "CREATE TRIGGER trg_payments_ad AFTER DELETE ON payments BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('payments', 'DELETE', CAST(OLD.id AS TEXT), json_object('id', OLD.id, 'client_id', OLD.client_id, 'amount', OLD.amount, 'date', OLD.date, 'note', OLD.note, 'source', OLD.source, 'payment_id', OLD.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_payments_ai",
+    "tbl_name": "payments",
+    "sql": "CREATE TRIGGER trg_payments_ai AFTER INSERT ON payments BEGIN INSERT INTO db_audit (table_name, operation, row_id, new_values, context_id) VALUES ('payments', 'INSERT', CAST(NEW.id AS TEXT), json_object('id', NEW.id, 'client_id', NEW.client_id, 'amount', NEW.amount, 'date', NEW.date, 'note', NEW.note, 'source', NEW.source, 'payment_id', NEW.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  }
+]

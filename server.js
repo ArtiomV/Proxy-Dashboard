@@ -43,6 +43,9 @@ const paymentsDb = require('./src/db/payments');
 const documentsDb = require('./src/db/documents');
 const clientsDb = require('./src/db/clients');
 const ledgerDb = require('./src/db/ledger');
+const kvDb = require('./src/db/kv');
+const trafficDb = require('./src/db/traffic');
+const trackingDb = require('./src/db/tracking');
 const { execFile } = require('child_process');
 const os = require('os');
 
@@ -164,6 +167,9 @@ paymentsDb.init(db);
 documentsDb.init(db);
 clientsDb.init(db);
 ledgerDb.init(db);
+kvDb.init(db);
+trafficDb.init(db);
+trackingDb.init(db);
 // Aliases for legacy callsites that still hold raw prepared-statement refs.
 // These are passed to billing.init() and used by atomicCredit/atomicDebit
 // on the hot path — wrapping in a function would add a per-credit call.
@@ -183,10 +189,12 @@ const _ledgerInsert = ledgerDb.insertStmt();
 //
 // Defined here (right after migrations) so it's available during the
 // env↔DB merge at startup, NOT later in the file where most other helpers live.
-const _kvGet = db.prepare('SELECT value FROM kv_store WHERE key = ?');
-const _kvSet = db.prepare("INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime('now'))");
-const _kvHistoryInsert = db.prepare(`INSERT INTO kv_store_history (key, old_value, new_value, source, shape_signature, regressed) VALUES (?,?,?,?,?,?)`);
-const _kvHistoryPrune = db.prepare(`DELETE FROM kv_store_history WHERE key = ? AND id NOT IN (SELECT id FROM kv_store_history WHERE key = ? ORDER BY id DESC LIMIT 50)`);
+// kv_store prepared statements moved into src/db/kv.js (Stage 2 finish).
+// Aliased here so the kv-guard layer below keeps its existing call sites.
+const _kvGet = kvDb.getStmt();
+const _kvSet = kvDb.setStmt();
+const _kvHistoryInsert = kvDb.historyInsertStmt();
+const _kvHistoryPrune = kvDb.historyPruneStmt();
 
 const { KV_CRITICAL_SHAPES, shapeRegressions: _shapeRegressions, mergeDbMetadataIntoEnvServers, DB_META_FIELDS: _DB_META_FIELDS } = require('./src/utils/kv-guard');
 
@@ -912,41 +920,14 @@ try {
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} daily traffic entries`);
 } catch (e) { logger.error('Failed to load daily_traffic from SQLite:', e.message); }
 
-const _dtUpsert = db.prepare(`INSERT INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)
-  ON CONFLICT(port_name, date) DO UPDATE SET
-  bytes_in = MAX(bytes_in, excluded.bytes_in),
-  bytes_out = MAX(bytes_out, excluded.bytes_out)`);
-// daily_traffic never cleaned — needed for long-term trend charts
-// If hour already recorded for this port — skip (don't overwrite or accumulate)
-const _htUpsert = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-  ON CONFLICT(port_id, hour_start) DO UPDATE SET
-  bytes_in  = CASE WHEN bytes_in  = 0 THEN excluded.bytes_in  ELSE bytes_in  END,
-  bytes_out = CASE WHEN bytes_out = 0 THEN excluded.bytes_out ELSE bytes_out END,
-  uncertain = CASE WHEN excluded.uncertain > uncertain THEN excluded.uncertain ELSE uncertain END`);
-const _snapUpsert = db.prepare(`INSERT INTO hourly_snapshots
-  (port_id, day_in, day_out, month_in, month_out, yesterday_in, yesterday_out,
-   prev_month_in, prev_month_out, day_at_last_hour_start_in, day_at_last_hour_start_out,
-   mon_at_last_hour_start_in, mon_at_last_hour_start_out, pending, captured_at, last_updated_at)
-  VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
-  ON CONFLICT(port_id) DO UPDATE SET
-  day_in=excluded.day_in, day_out=excluded.day_out,
-  month_in=excluded.month_in, month_out=excluded.month_out,
-  yesterday_in=excluded.yesterday_in, yesterday_out=excluded.yesterday_out,
-  prev_month_in=excluded.prev_month_in, prev_month_out=excluded.prev_month_out,
-  day_at_last_hour_start_in=excluded.day_at_last_hour_start_in,
-  day_at_last_hour_start_out=excluded.day_at_last_hour_start_out,
-  mon_at_last_hour_start_in=excluded.mon_at_last_hour_start_in,
-  mon_at_last_hour_start_out=excluded.mon_at_last_hour_start_out,
-  pending=excluded.pending, captured_at=excluded.captured_at,
-  last_updated_at=datetime('now')`);
-const _snapGet = db.prepare('SELECT * FROM hourly_snapshots WHERE port_id = ?');
-const _snapGetAll = db.prepare('SELECT * FROM hourly_snapshots');
-// API usage tracking (Phase 2)
-const _apiUsageInsert = db.prepare(`INSERT INTO api_usage
-  (client_id, client_name, api_key_prefix, endpoint, method, status_code,
-   response_time_ms, user_agent, ip, error)
-  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+// daily_traffic / traffic_hourly / hourly_snapshots / api_usage prepared
+// statements moved into src/db/traffic.js (Stage 2 finish).
+const _dtUpsert = trafficDb.dailyUpsertStmt();
+const _htUpsert = trafficDb.hourlyUpsertStmt();
+const _snapUpsert = trafficDb.snapshotUpsertStmt();
+const _snapGet = trafficDb.snapshotGetStmt();
+const _snapGetAll = trafficDb.snapshotGetAllStmt();
+const _apiUsageInsert = trafficDb.apiUsageInsertStmt();
 // Retention cleanup — dynamic SQL using appSettings retention values
 function runRetentionCleanup() {
   const retentions = {
@@ -2316,11 +2297,12 @@ try {
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} IP history entries`);
 } catch (e) { logger.error('Failed to load ip_history from SQLite:', e.message); }
 
-const _ipUpsert = db.prepare('INSERT OR REPLACE INTO ip_tracking (key, ip, updated_at) VALUES (?, ?, ?)');
-const _utUpsert = db.prepare('INSERT OR REPLACE INTO uptime_tracking (key, data) VALUES (?, ?)');
-const _ihInsert = db.prepare('INSERT INTO ip_history (key, ip, started_at, ended_at) VALUES (?, ?, ?, ?)');
-const _ihUpdateEnd = db.prepare('UPDATE ip_history SET ended_at = ? WHERE id = ?');
-const _ihDeleteById = db.prepare('DELETE FROM ip_history WHERE id = ?');
+// ip_tracking / uptime_tracking / ip_history statements → src/db/tracking.js
+const _ipUpsert = trackingDb.ipUpsertStmt();
+const _utUpsert = trackingDb.utUpsertStmt();
+const _ihInsert = trackingDb.ihInsertStmt();
+const _ihUpdateEnd = trackingDb.ihUpdateEndStmt();
+const _ihDeleteById = trackingDb.ihDeleteByIdStmt();
 
 function saveIpTracking() {
   try {
@@ -2388,8 +2370,9 @@ function recordIpChange(key, oldIp, newIp, timestamp) {
 
 // Combined tracking: IP changes + uptime percentage (runs every 5 min)
 // Uptime fix: skip rotating/rebooting modems, skip unreachable servers
-const _modemMetaUpsert = db.prepare(`INSERT OR REPLACE INTO modem_meta (server_name, imei, nick, operator, model, phone, updated_at) VALUES (?, ?, ?, ?, ?, ?, datetime('now'))`);
-const _metaOpGet = db.prepare('SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1');
+// modem_meta statements → src/db/tracking.js
+const _modemMetaUpsert = trackingDb.modemMetaUpsertStmt();
+const _metaOpGet = trackingDb.metaOperatorGetStmt();
 
 // Initialize hourly traffic module now that all dependencies are ready
 hourlyTraffic.init({
@@ -3527,8 +3510,9 @@ function parseHtmlInputFields(html) {
 
 
 // Rotation log: fetch from ProxySmart, sync to SQLite, return from DB
-const _rlUpsert = db.prepare(`INSERT OR IGNORE INTO rotation_log (server_name, nick, old_ip, new_ip, started_at, ended_at, took_sec, attempt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
-const _rlSelect = db.prepare(`SELECT * FROM rotation_log WHERE server_name = ? AND nick = ? ORDER BY started_at DESC LIMIT 200`);
+// rotation_log statements → src/db/tracking.js
+const _rlUpsert = trackingDb.rotationUpsertStmt();
+const _rlSelect = trackingDb.rotationSelectStmt();
 
 function syncRotationLog(serverName, nick, entries) {
   if (!Array.isArray(entries) || !entries.length) return;
