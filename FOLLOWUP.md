@@ -13,21 +13,21 @@ they go here instead of into the working commits.
   in Stage 1 (idempotent on prod). The broader cleanup — "schema.sql is
   migration 000, source of truth lives in `migrations/`" — is Stage 2 work.
 
-- **Decide policy:** keep `schema.sql` as the bootstrap snapshot AND keep
-  per-table migrations? Or fold `schema.sql` into `migrations/000_baseline.sql`
-  and delete the standalone file? Either is defensible — picking one removes
-  the drift class.
-
-- **No automated schema-equivalence check.** A fresh DB built from
-  `schema.sql + migrations/` should be structurally identical to the prod DB.
-  Today this is checked by eye. Add a test in Stage 2 that diffs `.schema`
-  output of a fresh DB against a committed reference.
+- **Schema policy: DECIDED (Stage 12).** `schema.sql` is the bootstrap
+  snapshot (treated as logical migration 000); the source of truth for
+  per-table changes is `migrations/NNN_*.sql`. Documented in
+  OPERATIONS.md → "Clean DB / migrations". A fresh DB built from
+  `schema.sql + migrations/*` is verified structurally identical to prod
+  by `tests/schema-equivalence.test.js` (snapshots `sqlite_master`
+  output, trips on any drift). The earlier "either is defensible" entry
+  here is now closed.
 
 ## Test harness
 
-- **`logs/dashboard.log` is appended to from tests** because `src/logger.js`
-  always opens a write stream regardless of `NODE_ENV`. Low priority — log
-  noise, not correctness. Could be guarded by `NODE_ENV !== 'test'`.
+- **`logs/dashboard.log` test noise: FIXED (Stage 12).** `src/logger.js`
+  no longer opens the file write stream when `NODE_ENV === 'test'`; tests
+  still see logs on stdout (where vitest's `--silent` flag mutes them by
+  default in CI). The historical noise is gone.
 
 - **Single shared DB across test files in one process.** With `fileParallelism:
   false` all suites in a vitest run share one temp DB. Tests must clean up
@@ -37,12 +37,16 @@ they go here instead of into the working commits.
 
 ## Production gotchas observed
 
-- **Tochka config decryption is fragile when `$TOCHKA_CONFIG_KEY` is unset:**
-  derived fallback uses `hostname + platform`, so a hostname change locks the
-  user out of the config (already happened once, recovered with old-hostname
-  derivation). Stage 4 candidate: switch fallback to `/etc/machine-id` (stable
-  across hostname changes), or require explicit `$TOCHKA_CONFIG_KEY` and refuse
-  to derive silently.
+- **Tochka config key fragility: FIXED (Stage 12).** Key derivation now
+  follows a preference chain: (1) `$TOCHKA_CONFIG_KEY` env, (2)
+  `/etc/machine-id` SHA-256 (stable across `hostnamectl set-hostname`),
+  (3) the legacy `hostname + platform` hash. Decryption tries all three
+  in turn; whichever authenticates wins. On a successful non-preferred
+  decrypt we WARN-log and the next `saveTochkaConfig()` re-encrypts with
+  the preferred key, completing the migration silently. So a hostname
+  change can no longer lock the operator out, and existing files
+  encrypted with the legacy hash still open without any manual
+  intervention.
 
 ## Production bugs surfaced by lint / Stage 6
 

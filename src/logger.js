@@ -3,14 +3,22 @@ const path = require('path');
 const fs = require('fs');
 
 const LOG_DIR = path.join(__dirname, '..', 'logs');
-if (!fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
+const IS_TEST = process.env.NODE_ENV === 'test';
+
+// Stage 12: under NODE_ENV=test we deliberately do NOT open the
+// logs/dashboard.log write stream. Tests boot the same server.js so
+// every suite would otherwise spam that file with billing/route/health
+// chatter — pure noise, never inspected. Tests still see logs via the
+// stdout stream below (when not muted by vitest's --silent mode).
+if (!IS_TEST && !fs.existsSync(LOG_DIR)) fs.mkdirSync(LOG_DIR, { recursive: true });
 
 const logFile = path.join(LOG_DIR, 'dashboard.log');
 
-// Always log to file (append mode) + pretty console in dev
-const streams = [
-  { stream: fs.createWriteStream(logFile, { flags: 'a' }) },
-];
+const streams = [];
+if (!IS_TEST) {
+  // Always log to file (append mode) in non-test runs.
+  streams.push({ stream: fs.createWriteStream(logFile, { flags: 'a' }) });
+}
 if (process.env.NODE_ENV !== 'production') {
   streams.push({ stream: process.stdout });
 }

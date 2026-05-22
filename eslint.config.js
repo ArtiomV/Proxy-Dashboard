@@ -48,11 +48,17 @@ module.exports = [
     languageOptions: {
       sourceType: 'module',
       globals: {
-        describe: 'readonly', it: 'readonly', expect: 'readonly',
+        describe: 'readonly', it: 'readonly', test: 'readonly', expect: 'readonly',
         beforeAll: 'readonly', afterAll: 'readonly',
         beforeEach: 'readonly', afterEach: 'readonly',
         vi: 'readonly',
       },
     },
+  },
+  {
+    // ESM config files (vitest.config.js etc.) use import/export at top level.
+    // Treat them as modules so ESLint doesn't trip on the syntax.
+    files: ['vitest.config.js', 'tests/**/*.config.js'],
+    languageOptions: { sourceType: 'module' },
   },
 ];

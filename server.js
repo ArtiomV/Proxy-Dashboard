@@ -698,18 +698,49 @@ function getClientIp(req) {
 const TOCHKA_CONFIG_FILE = path.join(__dirname, 'tochka_config.json');
 let tochkaConfig = { jwt: '', clientId: '', customerCode: '', accountId: '', companyName: '', companyInn: '', companyKpp: '', companyAddress: '', bankAccount: '', bankName: '', bankBic: '', bankCorrAccount: '' };
 
-// AES-256-GCM at-rest encryption for tochka_config.json. Key comes from
-// $TOCHKA_CONFIG_KEY (32 random bytes hex). If absent we fall back to a
-// derived key based on hostname + process.platform — enough to make the
-// file non-trivially readable to anyone who only got the file (not root),
-// but the production deployment SHOULD set $TOCHKA_CONFIG_KEY explicitly.
-function _tochkaCryptKey() {
+// AES-256-GCM at-rest encryption for tochka_config.json.
+//
+// Stage 12: redesigned the key derivation so a hostname change can no
+// longer lock the operator out of the config (that already happened
+// once — see FOLLOWUP "Tochka config decryption is fragile").
+//
+// Key sources, in PREFERENCE order (used to encrypt new writes):
+//   1. $TOCHKA_CONFIG_KEY env var (64 hex chars). EXPLICIT, PREFERRED.
+//   2. /etc/machine-id (Linux/systemd; survives `hostnamectl set-hostname`).
+//   3. Legacy hostname+platform hash. Kept only so existing files
+//      encrypted before Stage 12 can still be decrypted.
+//
+// Decryption tries ALL three keys in turn — whichever works wins.
+// On success with a NON-preferred key, the next saveTochkaConfig() will
+// re-encrypt with the highest-priority available key, completing the
+// migration silently. We log a WARN whenever we fall through past (1).
+function _tochkaCryptKey_env() {
   const env = process.env.TOCHKA_CONFIG_KEY;
-  if (env && /^[0-9a-f]{64}$/i.test(env)) return Buffer.from(env, 'hex');
-  // Derived fallback (deterministic per host so saves stay readable on restart).
+  return (env && /^[0-9a-f]{64}$/i.test(env)) ? Buffer.from(env, 'hex') : null;
+}
+function _tochkaCryptKey_machineId() {
+  try {
+    const id = fs.readFileSync('/etc/machine-id', 'utf8').trim();
+    if (!id) return null;
+    return crypto.createHash('sha256').update('tochka-config-v1|machine-id|' + id).digest();
+  } catch (_) { return null; }
+}
+function _tochkaCryptKey_legacy() {
   return crypto.createHash('sha256')
     .update('tochka-config-v1|' + os.hostname() + '|' + process.platform)
     .digest();
+}
+// Preferred key for NEW encryption (used by saveTochkaConfig).
+function _tochkaCryptKey() {
+  return _tochkaCryptKey_env() || _tochkaCryptKey_machineId() || _tochkaCryptKey_legacy();
+}
+// All candidate keys for DECRYPTION, ordered by preference.
+function _tochkaCryptKeyCandidates() {
+  const out = [];
+  const env = _tochkaCryptKey_env(); if (env) out.push({ key: env, name: 'env' });
+  const mid = _tochkaCryptKey_machineId(); if (mid) out.push({ key: mid, name: 'machine-id' });
+  out.push({ key: _tochkaCryptKey_legacy(), name: 'legacy-hostname' });
+  return out;
 }
 function _encryptJson(obj) {
   const key = _tochkaCryptKey();
@@ -722,11 +753,23 @@ function _encryptJson(obj) {
 function _decryptJson(payload) {
   const wrap = JSON.parse(payload);
   if (!wrap || wrap.v !== 1) throw new Error('not an encrypted v1 payload');
-  const key = _tochkaCryptKey();
-  const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(wrap.iv, 'base64'));
-  decipher.setAuthTag(Buffer.from(wrap.tag, 'base64'));
-  const buf = Buffer.concat([decipher.update(Buffer.from(wrap.ct, 'base64')), decipher.final()]);
-  return JSON.parse(buf.toString('utf8'));
+  // Stage 12: try every candidate key in preference order. The first one
+  // that authenticates wins — GCM tag verification means a wrong key
+  // throws synchronously, no risk of silent garbage output.
+  const candidates = _tochkaCryptKeyCandidates();
+  let lastErr = null;
+  for (const { key, name } of candidates) {
+    try {
+      const decipher = crypto.createDecipheriv('aes-256-gcm', key, Buffer.from(wrap.iv, 'base64'));
+      decipher.setAuthTag(Buffer.from(wrap.tag, 'base64'));
+      const buf = Buffer.concat([decipher.update(Buffer.from(wrap.ct, 'base64')), decipher.final()]);
+      if (name !== 'env') {
+        logger.warn(`[Tochka] config decrypted with fallback key '${name}'. Set $TOCHKA_CONFIG_KEY to lock the key explicitly — next saveTochkaConfig() will re-encrypt with the preferred key.`);
+      }
+      return JSON.parse(buf.toString('utf8'));
+    } catch (e) { lastErr = e; /* try next */ }
+  }
+  throw lastErr || new Error('tochka config decrypt failed: no candidate key worked');
 }
 
 try {
