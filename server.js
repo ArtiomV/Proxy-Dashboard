@@ -4513,58 +4513,20 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
 const CRM_DB_URL = process.env.CRM_DB_URL || '';
 const CRM_WS = process.env.CRM_WORKSPACE || 'workspace_1wekp8bkkvyv4c57kfv5uljgp';
 
+// Stage 9: checkCrmPaymentConfirmations (53 lines) moved to
+// src/jobs/crm-sync.js. Lazy init for same TDZ reason as the other jobs.
+let _crmSyncJob = null;
+function _initCrmSyncJob() {
+  if (_crmSyncJob) return _crmSyncJob;
+  _crmSyncJob = require('./src/jobs/crm-sync').create({
+    logger, logActivity,
+    CRM_DB_URL, CRM_WS,
+    getAppSettings: () => appSettings,
+  });
+  return _crmSyncJob;
+}
 async function checkCrmPaymentConfirmations() {
-  let pgClient;
-  try {
-    const { Client } = require('pg');
-    pgClient = new Client({ connectionString: CRM_DB_URL });
-    await pgClient.connect();
-
-    // Find deals where paymentConfirmed = true
-    const confirmed = await pgClient.query(
-      `SELECT id, name, "nextPaymentDate", "companyId" FROM "${CRM_WS}".opportunity WHERE "paymentConfirmed" = true AND "deletedAt" IS NULL`
-    );
-
-    for (const deal of confirmed.rows) {
-      const now = new Date();
-      const nextPayment = new Date(now);
-      nextPayment.setMonth(nextPayment.getMonth() + 1); // same date next month (JS handles overflow: Jan 31 → Feb 28)
-      await pgClient.query(
-        `UPDATE "${CRM_WS}".opportunity SET "lastPaymentDate" = $1, "nextPaymentDate" = $2, "paymentConfirmed" = false, "updatedAt" = $1 WHERE id = $3`,
-        [now.toISOString(), nextPayment.toISOString(), deal.id]
-      );
-      logger.info(`[CRM] Payment confirmed for deal "${deal.name}": next payment ${nextPayment.toISOString().slice(0, 10)}`);
-      logActivity('system', 'info', 'crm_payment_confirmed', deal.name, `Payment confirmed, next: ${nextPayment.toISOString().slice(0, 10)}`);
-    }
-
-    // Find deals with nextPaymentDate within 3 days — log reminder
-    const _crmDays = appSettings.crm_reminder_days || 3;
-    const reminderDate = new Date(Date.now() + _crmDays * 86400000);
-    const upcoming = await pgClient.query(
-      `SELECT o.id, o.name, o."nextPaymentDate", o.amount, c.name as company_name
-       FROM "${CRM_WS}".opportunity o
-       LEFT JOIN "${CRM_WS}".company c ON o."companyId" = c.id
-       WHERE o."nextPaymentDate" IS NOT NULL AND o."nextPaymentDate" <= $1 AND o."nextPaymentDate" >= NOW()
-       AND o.stage = 'AKTIVNYY_KLIENT' AND o."deletedAt" IS NULL`,
-      [reminderDate.toISOString()]
-    );
-
-    if (upcoming.rows.length > 0) {
-      logger.info(`[CRM] Payment reminders (due within ${_crmDays} days):`);
-      for (const deal of upcoming.rows) {
-        const dueDate = new Date(deal.nextPaymentDate).toISOString().slice(0, 10);
-        logger.info(`  - ${deal.company_name || deal.name}: ${deal.amount || '?'} RUB, due ${dueDate}`);
-      }
-    }
-
-    await pgClient.end();
-  } catch (e) {
-    if (pgClient) try { await pgClient.end(); } catch (_) { /* best-effort: error intentionally swallowed */ }
-    // pg module might not be installed — skip silently
-    if (e.code !== 'MODULE_NOT_FOUND') {
-      logger.error('[CRM] Payment check error:', e.message);
-    }
-  }
+  return _initCrmSyncJob().checkCrmPaymentConfirmations();
 }
 
 // Run CRM payment check periodically
