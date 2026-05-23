@@ -500,6 +500,10 @@ function loadClients() {
   const clientsList = rows.map(clientFromRow);
   for (const client of clientsList) {
     client.payments = paymentsDb.listByClient(client.id).map(r => ({
+      // Stage 13.2: stamp db_id so saveClients() can skip rows that
+      // already exist in the DB. Without this every save call would
+      // re-insert the entire history.
+      db_id: r.id,
       amount: r.amount, date: r.date, note: r.note || '', source: r.source || 'manual',
       paymentId: r.payment_id || undefined, createdAt: r.created_at || ''
     }));
@@ -528,31 +532,39 @@ function saveClients(clientsList) {
   }
   try {
     db.transaction(() => {
-      // Remove deleted clients (ON DELETE CASCADE cleans sub-tables)
+      // Remove deleted clients (ON DELETE CASCADE cleans sub-tables).
       const liveIds = new Set(clientsList.map(c => c.id));
       for (const r of clientsDb.allIds()) {
         if (!liveIds.has(r.id)) clientsDb.deleteById(r.id);
       }
-      // Upsert clients + sync sub-arrays
+      // Upsert clients + ADDITIVELY sync sub-arrays.
+      //
+      // Stage 13.2: this used to wipe each sub-table per client and reinsert
+      // from the in-memory copy — a partial in-memory array would silently
+      // erase real rows in the DB. The new contract is additive:
+      //   - payments: rows without an `db_id` are NEW pushes → INSERT and
+      //     stamp the returned rowid back on the entry so the next save
+      //     call skips it.
+      //   - documents / closing / bills: their `id` is a hex token assigned
+      //     at push time; INSERT OR IGNORE means existing rows survive, new
+      //     ones get appended.
+      //   - Deletes of individual sub-entries are NOT handled here — the
+      //     route that removes the in-memory entry MUST also call the
+      //     corresponding xxxDb.deleteByXxx(id). saveClients no longer
+      //     interprets "missing from memory" as "delete from DB".
       for (const c of clientsList) {
         clientsDb.upsertRow(c);
-        // Sync payments
-        paymentsDb.deleteByClient(c.id);
         for (const p of (c.payments || [])) {
-          paymentsDb.insert({
+          if (p.db_id) continue; // already in DB
+          const res = paymentsDb.insert({
             clientId: c.id, amount: p.amount, date: p.date, note: p.note,
             source: p.source, paymentId: p.paymentId, createdAt: p.createdAt,
           });
+          p.db_id = res.lastInsertRowid;
         }
-        // Sync documents
-        documentsDb.deleteDocsByClient(c.id);
-        for (const d of (c.documents || [])) documentsDb.insertDoc(d, c.id);
-        // Sync closing documents
-        documentsDb.deleteClosingByClient(c.id);
+        for (const d of (c.documents || []))        documentsDb.insertDoc(d, c.id);
         for (const d of (c.closingDocuments || [])) documentsDb.insertClosing(d, c.id);
-        // Sync bills
-        documentsDb.deleteBillsByClient(c.id);
-        for (const b of (c.bills || [])) documentsDb.insertBill(b, c.id);
+        for (const b of (c.bills || []))            documentsDb.insertBill(b, c.id);
       }
     })();
   } catch (e) {
@@ -3176,7 +3188,7 @@ app.use(require('./src/routes/clients')({
   // Stage 4 finish: maps are stable references via src/state — no more shims.
   clientById, clientByLogin, clientByApiKey, clientByInn, clientByResetToken,
   users,
-  _ledgerInsert, _ledgerEntryParams, ledgerDb, clientsDb,
+  _ledgerInsert, _ledgerEntryParams, ledgerDb, clientsDb, paymentsDb, documentsDb,
   DOCUMENTS_DIR,
   validateClientInput,
   appSettings,
@@ -3852,7 +3864,7 @@ app.use(require('./src/routes/tochka')({
   apiServers, SERVER_COUNTRIES,
   fetchAllServersDataCached,
   getMoscowToday,
-  ledgerDb, clientsDb,
+  ledgerDb, clientsDb, documentsDb,
   // runTochkaSync is defined later in this file — pass a lazy wrapper that
   // resolves at call time so the mount doesn't TDZ.
   runTochkaSync: (...args) => runTochkaSync(...args),
@@ -4608,4 +4620,4 @@ process.on('uncaughtException', (err) => {
 // Expose internals for the supertest harness (NODE_ENV=test). Production
 // code paths don't reach for this — the start-via-`node server.js` flow
 // runs to completion above and never `require()`s its own exports.
-module.exports = { app, db };
+module.exports = { app, db, saveClients };

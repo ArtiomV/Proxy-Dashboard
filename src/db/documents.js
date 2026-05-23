@@ -7,15 +7,21 @@ let S = {};
 
 function init(db) {
   S.docDeleteByClient = db.prepare('DELETE FROM client_documents WHERE client_id = ?');
+  S.docDeleteById     = db.prepare('DELETE FROM client_documents WHERE id = ?');
+  // Stage 13.2: INSERT OR IGNORE (id is PRIMARY KEY) makes saveClients()
+  // idempotent — re-running it after a partial failure can't double-insert,
+  // and additive sync stops the DELETE-then-INSERT wipe that could lose
+  // rows present in the DB but missing from the in-memory client object.
   S.docInsert = db.prepare(
-    'INSERT INTO client_documents (id, client_id, name, file_name, mime_type, date) ' +
+    'INSERT OR IGNORE INTO client_documents (id, client_id, name, file_name, mime_type, date) ' +
     'VALUES (?, ?, ?, ?, ?, ?)'
   );
   S.docsByClient = db.prepare('SELECT * FROM client_documents WHERE client_id = ? ORDER BY date');
 
   S.closingDeleteByClient = db.prepare('DELETE FROM closing_documents WHERE client_id = ?');
+  S.closingDeleteById     = db.prepare('DELETE FROM closing_documents WHERE id = ?');
   S.closingInsert = db.prepare(
-    'INSERT INTO closing_documents (id, client_id, tochka_doc_id, period, type, act_number, ' +
+    'INSERT OR IGNORE INTO closing_documents (id, client_id, tochka_doc_id, period, type, act_number, ' +
     'items, total_amount, status, contract_info, signed_at, created_at) ' +
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
   );
@@ -24,8 +30,9 @@ function init(db) {
   );
 
   S.billDeleteByClient = db.prepare('DELETE FROM bills WHERE client_id = ?');
+  S.billDeleteById     = db.prepare('DELETE FROM bills WHERE id = ?');
   S.billInsert = db.prepare(
-    'INSERT INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at) ' +
+    'INSERT OR IGNORE INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at) ' +
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   );
   S.billsByClient = db.prepare('SELECT * FROM bills WHERE client_id = ? ORDER BY created_at');
@@ -33,6 +40,7 @@ function init(db) {
 
 // ─── Client documents ─────────────────────────────────────────────────────
 function deleteDocsByClient(clientId) { return S.docDeleteByClient.run(clientId); }
+function deleteDoc(id) { return S.docDeleteById.run(id); }
 function insertDoc(d, clientId) {
   return S.docInsert.run(d.id, clientId, d.name || '', d.fileName || '', d.mimeType || '', d.date || '');
 }
@@ -40,6 +48,7 @@ function listDocs(clientId) { return S.docsByClient.all(clientId); }
 
 // ─── Closing documents (acts) ─────────────────────────────────────────────
 function deleteClosingByClient(clientId) { return S.closingDeleteByClient.run(clientId); }
+function deleteClosing(id) { return S.closingDeleteById.run(id); }
 function insertClosing(d, clientId) {
   return S.closingInsert.run(
     d.id, clientId, d.tochkaDocumentId || '', d.period || '', d.type || 'act',
@@ -52,6 +61,7 @@ function listClosing(clientId) { return S.closingByClient.all(clientId); }
 
 // ─── Bills ────────────────────────────────────────────────────────────────
 function deleteBillsByClient(clientId) { return S.billDeleteByClient.run(clientId); }
+function deleteBill(id) { return S.billDeleteById.run(id); }
 function insertBill(b, clientId) {
   return S.billInsert.run(
     b.id, clientId, b.tochkaBillId || '', b.period || '',
@@ -63,7 +73,7 @@ function listBills(clientId) { return S.billsByClient.all(clientId); }
 
 module.exports = {
   init,
-  deleteDocsByClient, insertDoc, listDocs,
-  deleteClosingByClient, insertClosing, listClosing,
-  deleteBillsByClient, insertBill, listBills,
+  deleteDocsByClient, deleteDoc, insertDoc, listDocs,
+  deleteClosingByClient, deleteClosing, insertClosing, listClosing,
+  deleteBillsByClient, deleteBill, insertBill, listBills,
 };

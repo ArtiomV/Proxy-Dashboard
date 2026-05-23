@@ -25,7 +25,7 @@ module.exports = function createClientsRouter(deps) {
     clients,
     clientById, clientByLogin, clientByApiKey, clientByInn, clientByResetToken,
     users,
-    _ledgerInsert, _ledgerEntryParams, ledgerDb, clientsDb,
+    _ledgerInsert, _ledgerEntryParams, ledgerDb, clientsDb, paymentsDb, documentsDb,
     DOCUMENTS_DIR,
     validateClientInput,
     appSettings,
@@ -322,7 +322,14 @@ r.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlewar
   if (isNaN(expectedAmount) || Math.abs(Math.round(expectedAmount * 100) - Math.round(deletedAmount * 100)) > 0) {
     return res.status(409).json({ error: 'Payment amount mismatch — list may have changed, please refresh' });
   }
+  // Stage 13.2: explicit single-row delete so the additive saveClients
+  // sync doesn't have to delete-by-client anymore. If the in-memory entry
+  // has a db_id (loaded from DB or stamped by an earlier saveClients), use
+  // it. Older entries that pre-date 13.2 won't have one — fall through and
+  // saveClients won't re-insert because we splice from the array.
+  const deletedDbId = deletedPayment.db_id;
   client.payments.splice(payIdx, 1);
+  if (deletedDbId) paymentsDb.deleteById(deletedDbId);
 
   // Stage 13.1: referral reversal lives in the same atomicDebit txn as
   // the balance reversal — same atomicity guarantee as the credit path.
@@ -497,6 +504,8 @@ r.delete('/api/admin/clients/:id/document/:docId', authMiddleware, adminMiddlewa
   const delPath = path.join(DOCUMENTS_DIR, path.basename(doc.fileName));
   if (delPath.startsWith(DOCUMENTS_DIR)) { try { fs.unlinkSync(delPath); } catch (_) { /* best-effort: error intentionally swallowed */ } }
   client.documents.splice(docIdx, 1);
+  // Stage 13.2: explicit delete — saveClients no longer wipes the table.
+  documentsDb.deleteDoc(doc.id);
   saveClients(clients);
   res.json({ ok: true });
 });

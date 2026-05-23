@@ -36,7 +36,7 @@ module.exports = function createTochkaRouter(deps) {
     apiServers, SERVER_COUNTRIES,
     fetchAllServersDataCached,
     getMoscowToday,
-    ledgerDb, clientsDb,
+    ledgerDb, clientsDb, documentsDb,
     runTochkaSync,
   } = deps;
   const r = express.Router();
@@ -507,6 +507,8 @@ r.delete('/api/admin/clients/:id/closing_document/:docId', authMiddleware, admin
   }
 
   client.closingDocuments.splice(docIdx, 1);
+  // Stage 13.2: explicit row delete (saveClients no longer wipes the table).
+  documentsDb.deleteClosing(doc.id);
   saveClients(clients);
   res.json({ ok: true });
 });
@@ -778,6 +780,8 @@ r.delete('/api/admin/clients/:id/bill/:billId', authMiddleware, adminMiddleware,
     } catch (e) { logger.error('[Tochka] Delete bill error:', e.message); }
   }
   client.bills.splice(idx, 1);
+  // Stage 13.2: explicit row delete (saveClients no longer wipes the table).
+  documentsDb.deleteBill(bill.id);
   saveClients(clients);
   res.json({ ok: true });
 });
