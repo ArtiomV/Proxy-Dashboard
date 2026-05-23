@@ -23,7 +23,6 @@ function bootApp() {
   if (process.env.NODE_ENV !== 'test' || !process.env.DASHBOARD_DB_PATH) {
     throw new Error('[test/app] setup-env.js did not run — NODE_ENV or DASHBOARD_DB_PATH unset');
   }
-  // eslint-disable-next-line global-require
   const mod = require(path.join(__dirname, '..', '..', 'server.js'));
   _bootCache = mod;
   return mod;

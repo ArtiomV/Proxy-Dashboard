@@ -55,6 +55,52 @@ ssh $SERVER "sleep 5 && curl -sf http://localhost:3000/health || (pm2 restart da
 - Restore: stop dashboard → copy backup over `dashboard.db` → start.
 - **TODO** — sync backups offsite (S3 / external rsync target). Single-host backups don't protect against host loss.
 
+### Full state inventory (what a complete backup must include)
+A `dashboard.db` snapshot does NOT cover all process state — some
+artifacts still live on disk as JSON files. A complete backup needs:
+
+  1. **`dashboard.db`** — primary store: clients, billing_ledger,
+     payments (read-only post-Stage-13.3), bank_payments, sessions,
+     audit_log, system_log, modem_meta, rotation_log, proxy_checks,
+     traffic_hourly, daily_traffic, hourly_snapshots, ip_history,
+     api_usage, simulator_runs/samples, monthly_costs, sla_violations,
+     auto_reboot_log, top_hosts_detail, ip_tracking, uptime_tracking,
+     client_documents, closing_documents, bills, kv_store(+_history),
+     external_proxies, _migrations.
+
+  2. **`known_modems.json`** — server_name → port_id → modem metadata
+     (IMEI, nick, model, last-seen). Mutated by every modem-polling
+     cycle; restored at boot. Stale-port-cleanup runs against it.
+
+  3. **`tochka_config.json`** — AES-256-GCM encrypted Tochka Bank API
+     credentials (JWT, clientId, customerCode, accountId, company
+     details, bank account). Key derivation: $TOCHKA_CONFIG_KEY env
+     > /etc/machine-id > legacy hostname hash (Stage 12). Without the
+     key the backup file is unreadable on a different host.
+
+  4. **`speedtest_history.json`** — rolling per-modem speedtest entries
+     (timestamp, download/upload Mbps, ping). Bounded by
+     appSettings.speedtest_max_history.
+
+  5. **`server_cache.json`** — per-ProxySmart-server cached bandwidth +
+     status + ports response. Non-critical — rebuilt from API polling
+     on next cycle. Useful for cold-start without waiting for first poll.
+
+  6. **`.env`** — `$TOCHKA_CONFIG_KEY` (mandatory for tochka_config
+     decryption on a new host), `$ANTHROPIC_API_KEY`, `$CRM_DB_URL`,
+     other secrets.
+
+  7. **`logs/dashboard.log`** — optional, log rotation handles size.
+
+  8. **Migration history** — `_migrations` table (inside `dashboard.db`)
+     records which migrations have run. Don't drop it on restore.
+
+### Why files outside the DB?
+Historical: tochka_config.json + known_modems.json + speedtest predate
+the SQLite migration. **FOLLOWUP candidate** (deferred per TZ): fold
+the JSON state into `kv_store` so a single `dashboard.db` snapshot
+captures everything except `.env` secrets.
+
 ## Log rotation
 - `pm2-logrotate` module: 50 MB max, 14 retained, gzip compressed, daily.
 - Config: `pm2 conf pm2-logrotate`.

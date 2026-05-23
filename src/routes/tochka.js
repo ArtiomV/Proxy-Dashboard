@@ -207,7 +207,7 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
   }
 });
 
-r.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res) => {
+r.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, async (req, res) => {
   const { jwt, clientId, customerCode, accountId, companyName, companyInn, companyKpp, companyAddress, bankAccount, bankName, bankBic, bankCorrAccount } = req.body;
   if (jwt !== undefined) tochkaConfig.jwt = jwt.trim();
   if (clientId !== undefined) tochkaConfig.clientId = clientId.trim();
@@ -221,7 +221,11 @@ r.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, (req, res) =
   if (bankName !== undefined) tochkaConfig.bankName = bankName.trim();
   if (bankBic !== undefined) tochkaConfig.bankBic = bankBic.trim();
   if (bankCorrAccount !== undefined) tochkaConfig.bankCorrAccount = bankCorrAccount.trim();
-  saveTochkaConfig();
+  // Stage 15.1: await the disk write before responding. Payment credentials
+  // are sensitive enough that "200 OK saved" must mean "on disk", not
+  // "in memory only" — a kill -9 between the response and the write
+  // would otherwise lose the change silently.
+  await saveTochkaConfig();
   logger.info('[Tochka] Config updated from admin UI, jwt=' + (tochkaConfig.jwt ? 'set' : 'empty') + ', clientId=' + tochkaConfig.clientId);
   res.json({ ok: true, configured: !!tochkaConfig.jwt });
 });

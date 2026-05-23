@@ -38,7 +38,6 @@ describe('SQLite schema (from schema.sql + migrations)', () => {
 
     if (process.env.UPDATE_SNAPSHOT === '1' || !fs.existsSync(SNAPSHOT_PATH)) {
       fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(normalised, null, 2) + '\n');
-      // eslint-disable-next-line no-console
       console.log(`[schema-equivalence] wrote ${normalised.length} sqlite_master rows`);
       return;
     }

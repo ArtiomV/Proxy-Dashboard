@@ -832,7 +832,16 @@ if (process.env.TOCHKA_BANK_ACCOUNT) tochkaConfig.bankAccount = process.env.TOCH
 if (process.env.TOCHKA_BANK_NAME) tochkaConfig.bankName = process.env.TOCHKA_BANK_NAME;
 if (process.env.TOCHKA_BANK_BIC) tochkaConfig.bankBic = process.env.TOCHKA_BANK_BIC;
 if (process.env.TOCHKA_BANK_CORR_ACCOUNT) tochkaConfig.bankCorrAccount = process.env.TOCHKA_BANK_CORR_ACCOUNT;
-function saveTochkaConfig() { safeWriteFile(TOCHKA_CONFIG_FILE, _encryptJson(tochkaConfig)); }
+// Stage 15.1: returns the promise so admin routes can `await` it before
+// responding (so the UI never sees "saved" without an on-disk write).
+// safeWriteFile's internal .catch() already swallows rejections (the
+// returned promise resolves either way) — we add an explicit .catch
+// hook here so caller-side rejections still surface in our logs even if
+// the internal one is bypassed in the future.
+function saveTochkaConfig() {
+  return safeWriteFile(TOCHKA_CONFIG_FILE, _encryptJson(tochkaConfig))
+    .catch(e => { logger.error('[Tochka] saveTochkaConfig failed:', e.message); });
+}
 
 // Tochka response field lookup that tolerates case variation. Tries the
 // provided keys in order, returns the first non-undefined value.
@@ -1126,7 +1135,11 @@ try {
 } catch (e) { logger.error('Failed to load known_modems:', e.message); }
 
 function saveKnownModems() {
-  safeWriteFile(KNOWN_MODEMS_FILE, JSON.stringify(knownModems, null, 2));
+  // Stage 15.1: explicit .catch so a write failure is surfaced even if a
+  // future safeWriteFile internal change stops swallowing rejections.
+  // Returning the promise lets future callers `await` if needed.
+  return safeWriteFile(KNOWN_MODEMS_FILE, JSON.stringify(knownModems, null, 2))
+    .catch(e => { logger.error('[saveKnownModems] write failed:', e.message); });
 }
 
 /**
@@ -2580,7 +2593,9 @@ try {
 } catch (e) { logger.error('Failed to load speedtest_history:', e.message); }
 
 function saveSpeedtestHistory() {
-  safeWriteFile(SPEEDTEST_HISTORY_FILE, JSON.stringify(speedtestHistory, null, 2));
+  // Stage 15.1: explicit .catch — see saveKnownModems for rationale.
+  return safeWriteFile(SPEEDTEST_HISTORY_FILE, JSON.stringify(speedtestHistory, null, 2))
+    .catch(e => { logger.error('[saveSpeedtestHistory] write failed:', e.message); });
 }
 
 let speedtestRunning = false;

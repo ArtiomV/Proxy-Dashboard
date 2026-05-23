@@ -249,7 +249,11 @@ function postApi(server, apiPath, body, timeout = 10000) {
 // ---------------------------------------------------------------------------
 
 function saveServerCache() {
-  safeWriteFile(SERVER_CACHE_FILE, JSON.stringify(serverCache));
+  // Stage 15.1: explicit .catch — fire-and-forget callsites would
+  // otherwise swallow the failure silently. The cache is non-critical
+  // (rebuilt on next poll), so we log + continue.
+  return safeWriteFile(SERVER_CACHE_FILE, JSON.stringify(serverCache))
+    .catch(e => { if (logger) logger.error('[saveServerCache] write failed:', e.message); });
 }
 
 function cacheServerData(data) {

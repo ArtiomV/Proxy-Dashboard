@@ -57,7 +57,6 @@ describe('routes snapshot', () => {
     if (process.env.UPDATE_SNAPSHOT === '1' || !fs.existsSync(SNAPSHOT_PATH)) {
       fs.writeFileSync(SNAPSHOT_PATH, JSON.stringify(routes, null, 2) + '\n');
       // First run / explicit refresh — accept and report.
-      // eslint-disable-next-line no-console
       console.log(`[routes-snapshot] wrote ${routes.length} routes to ${SNAPSHOT_PATH}`);
       return;
     }

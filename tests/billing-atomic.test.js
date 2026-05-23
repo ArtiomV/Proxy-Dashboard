@@ -39,7 +39,6 @@ function makeClient({ balance = 0, login = null } = {}) {
     .run(id, realLogin, 'Test ' + realLogin, balance);
   // Mirror into the in-memory clientById map that atomic.js synchronises.
   // The map is owned by server.js — we re-require to get the same reference.
-  // eslint-disable-next-line global-require
   const serverCtx = require('../server.js');
   if (!serverCtx.clientById) {
     // Older code path: clientById isn't exported. atomic.js no-ops when

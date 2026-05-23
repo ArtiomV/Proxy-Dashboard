@@ -91,6 +91,11 @@ function atomicCredit(clientId, amount, ledgerEntry, opts) {
   opts = opts || {};
   amount = Math.round(parseFloat(amount) * 100) / 100;
   if (isNaN(amount)) throw new Error('atomicCredit: invalid amount');
+  // Stage 16: intentional early-return — amount=0 is a no-op (no balance
+  // change, no ledger entry). Some refresh paths call with 0 just to
+  // re-read the current balance. If a future caller needs amount=0
+  // WITH an audit trail, add an explicit `opts.forceLog` flag rather
+  // than removing this short-circuit.
   if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
   let balanceBefore, balanceAfter, ledgerDbId;
   let referralResult = null;
@@ -133,6 +138,9 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
   opts = opts || {};
   amount = Math.round(parseFloat(amount) * 100) / 100;
   if (isNaN(amount)) throw new Error('atomicDebit: invalid amount');
+  // Stage 16: same intentional no-op as atomicCredit — amount=0 returns
+  // current balance without writing a ledger entry. See atomicCredit
+  // comment above for the design rationale.
   if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
   let balanceBefore, balanceAfter, ledgerDbId, duplicate = false;
   let referralResult = null;
