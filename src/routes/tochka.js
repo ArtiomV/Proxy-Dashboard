@@ -50,7 +50,9 @@ module.exports = function createTochkaRouter(deps) {
   // so any /generate_act / /sync / /closing_documents/:id/pdf request was a
   // latent ReferenceError. Stage 4 wires them properly.
   const buildDocHtml = (type, doc, client, billAmount) => _buildDocHtml(type, doc, client, billAmount, tochkaConfig);
-  const _clientUpdateReferralBalance = clientsDb.updateReferralBalanceStmt();
+  // Stage 13.1: referral_balance update moved into atomicCredit's txn.
+  // No more router-side _clientUpdateReferralBalance.run() — kept here as
+  // a hint to anyone wondering where the old call went.
 
 r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async (req, res) => {
   logger.info('[Tochka Webhook] Received webhook');
@@ -144,6 +146,20 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
       const matchedClient = payerInn ? clientByInn.get(payerInn) : null;
       if (matchedClient) {
         try {
+          // Stage 13.1: balance + ledger + referral all run in atomicCredit's
+          // single txn (was previously two adjacent db.transaction() calls,
+          // i.e. two commits — a crash between them left the bank_payment
+          // unmatched but the balance credited).
+          let referralOpts = null;
+          if (matchedClient.referred_by) {
+            const referrer = clientById.get(matchedClient.referred_by);
+            if (referrer) {
+              referralOpts = {
+                referrerId: referrer.id,
+                delta: Math.round(amount * 0.15 * 100) / 100,
+              };
+            }
+          }
           atomicCredit(matchedClient.id, amount, {
             type: 'bank_payment',
             date: paymentDate,
@@ -152,23 +168,14 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
             note: `Банк Точка (ИНН: ${payerInn}): ${purpose}`.slice(0, 300),
             source: 'tochka_webhook',
             paymentId
-          });
-          // Match-mark + payment-record + referral commission in ONE transaction.
-          // Previously each was a separate statement, so a partial failure
-          // (e.g. crash between match-mark and referral credit) could leave
-          // referral_balance double-credited on webhook retry.
-          db.transaction(() => {
-            dbStmts.updateBankPaymentMatch.run(1, matchedClient.id, matchedClient.name, 1, paymentId);
-            if (matchedClient.referred_by) {
-              const referrer = clientById.get(matchedClient.referred_by);
-              if (referrer) {
-                const commission = Math.round(amount * 0.15 * 100) / 100;
-                const newRefBal = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
-                _clientUpdateReferralBalance.run(newRefBal, referrer.id);
-                referrer.referral_balance = newRefBal;  // sync in-memory only after DB succeeded
-              }
-            }
-          })();
+          }, referralOpts ? { referral: referralOpts } : undefined);
+          // Match-mark stays in its own txn since it touches a DIFFERENT
+          // table (bank_payments) — the credit + referral already committed
+          // by atomicCredit, so the worst case here is a stuck "unmatched"
+          // bank_payment row that admin can reconcile manually. The reverse
+          // ordering (match-mark first, then credit) would risk double-credit
+          // on retry, which is the worse failure.
+          dbStmts.updateBankPaymentMatch.run(1, matchedClient.id, matchedClient.name, 1, paymentId);
           if (!matchedClient.payments) matchedClient.payments = [];
           matchedClient.payments.push({
             amount, date: paymentDate,

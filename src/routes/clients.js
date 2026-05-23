@@ -31,10 +31,11 @@ module.exports = function createClientsRouter(deps) {
     appSettings,
   } = deps;
   const r = express.Router();
-  // Prepared statements pulled from clientsDb where possible. The router
-  // used to bare-reference these — Stage 4 wires them properly.
-  const _clientUpdateBalance         = clientsDb.updateBalanceStmt();
-  const _clientUpdateReferralBalance = clientsDb.updateReferralBalanceStmt();
+  // Prepared statement pulled from clientsDb. Stage 13.1: the
+  // referral_balance update used to live here too, but it's now owned
+  // by atomic.js so referral commission lands in the same txn as the
+  // payment that triggered it.
+  const _clientUpdateBalance = clientsDb.updateBalanceStmt();
 
 r.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
@@ -238,26 +239,36 @@ r.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, valida
   }
   if (!client.payments) client.payments = [];
 
-  const { balanceBefore, balanceAfter } = atomicCredit(client.id, parsedAmount, {
+  // Stage 13.1: referral commission is computed up-front and applied INSIDE
+  // the same atomicCredit transaction. Before this fix a crash between the
+  // balance update and the referral .run() left the two out of sync (the
+  // payment was credited, the commission wasn't).
+  let referralOpts = null;
+  if (client.referred_by) {
+    const referrer = clientById.get(client.referred_by);
+    if (referrer) {
+      referralOpts = {
+        referrerId: referrer.id,
+        delta: Math.round(parsedAmount * 0.15 * 100) / 100,
+      };
+    }
+  }
+
+  const { balanceBefore, balanceAfter, referral } = atomicCredit(client.id, parsedAmount, {
     type: 'payment',
     date: date,
     timestamp: new Date().toISOString(),
     amount: parsedAmount,
     currency: client.currency || 'RUB',
     note: note || 'Пополнение баланса'
-  });
+  }, referralOpts ? { referral: referralOpts } : undefined);
 
   // Push payment AFTER atomicCredit succeeds (МЕД-3)
   client.payments.push({ amount: parsedAmount, date, note: note || '', createdAt: new Date().toISOString() });
 
-  if (client.referred_by) {
-    const referrer = clientById.get(client.referred_by);
-    if (referrer) {
-      const commission = Math.round(parsedAmount * 0.15 * 100) / 100;
-      referrer.referral_balance = Math.round(((referrer.referral_balance || 0) + commission) * 100) / 100;
-      _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
-      logger.info(`[Referral] Credited ${commission.toFixed(2)} to ${referrer.name} (15% of ${parsedAmount})`);
-    }
+  if (referral) {
+    const referrer = clientById.get(referral.referrerId);
+    if (referrer) logger.info(`[Referral] Credited ${referralOpts.delta.toFixed(2)} to ${referrer.name} (15% of ${parsedAmount}) — atomic with payment`);
   }
 
   saveClients(clients);
@@ -313,26 +324,31 @@ r.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlewar
   }
   client.payments.splice(payIdx, 1);
 
-  
-  
-  const { balanceBefore, balanceAfter } = atomicDebit(client.id, deletedAmount, {
+  // Stage 13.1: referral reversal lives in the same atomicDebit txn as
+  // the balance reversal — same atomicity guarantee as the credit path.
+  let referralOpts = null;
+  if (client.referred_by) {
+    const referrer = clientById.get(client.referred_by);
+    if (referrer) {
+      referralOpts = {
+        referrerId: referrer.id,
+        delta: -Math.round(deletedAmount * 0.15 * 100) / 100,
+      };
+    }
+  }
+
+  const { balanceBefore, balanceAfter, referral } = atomicDebit(client.id, deletedAmount, {
     type: 'payment_reversal',
     date: new Date().toISOString().slice(0, 10),
     timestamp: new Date().toISOString(),
     amount: deletedAmount,
     currency: client.currency || 'RUB',
     note: 'Отмена оплаты администратором'
-  });
+  }, referralOpts ? { referral: referralOpts } : undefined);
 
-  // Reverse referral commission (МЕД-4)
-  if (client.referred_by) {
-    const referrer = clientById.get(client.referred_by);
-    if (referrer) {
-      const commission = Math.round(deletedAmount * 0.15 * 100) / 100;
-      referrer.referral_balance = Math.round(((referrer.referral_balance || 0) - commission) * 100) / 100;
-      _clientUpdateReferralBalance.run(referrer.referral_balance, referrer.id);
-      logger.info(`[Referral] Reversed ${commission.toFixed(2)} from ${referrer.name} (payment deletion)`);
-    }
+  if (referral) {
+    const referrer = clientById.get(referral.referrerId);
+    if (referrer) logger.info(`[Referral] Reversed ${Math.abs(referralOpts.delta).toFixed(2)} from ${referrer.name} (payment deletion) — atomic with reversal`);
   }
 
   saveClients(clients);

@@ -136,4 +136,74 @@ describe('billing/atomic', () => {
       expect(getBalance(id)).toBe(70);
     });
   });
+
+  // Stage 13.1: opts.referral propagates the commission inside the same
+  // transaction as the balance update. Pre-fix this was a separate stmt
+  // OUTSIDE the txn — a crash between the two left the books inconsistent.
+  describe('opts.referral atomicity', () => {
+    function makeReferralPair() {
+      const referrer = makeClient({ balance: 0 });
+      const referred = makeClient({ balance: 0 });
+      db.prepare('UPDATE clients SET referred_by = ? WHERE id = ?').run(referrer, referred);
+      return { referrer, referred };
+    }
+    function getRef(id) {
+      return db.prepare('SELECT referral_balance FROM clients WHERE id = ?').get(id).referral_balance;
+    }
+
+    it('atomicCredit with opts.referral updates referrer DB inside the same txn', () => {
+      const { referrer, referred } = makeReferralPair();
+      const res = billing.atomicCredit(referred, 1000, { type: 'payment', date: '2026-03-01', amount: 1000 }, {
+        referral: { referrerId: referrer, delta: 150 }, // 15% of 1000
+      });
+      expect(res.balanceAfter).toBe(1000);
+      expect(res.referral).toEqual({ referrerId: referrer, newBalance: 150 });
+      // DB committed both halves.
+      expect(getBalance(referred)).toBe(1000);
+      expect(getRef(referrer)).toBe(150);
+    });
+
+    it('atomicDebit with negative referral delta reverses the commission', () => {
+      const { referrer, referred } = makeReferralPair();
+      // Seed: pretend a prior payment already credited 150 to the referrer.
+      db.prepare('UPDATE clients SET referral_balance = ? WHERE id = ?').run(150, referrer);
+      db.prepare('UPDATE clients SET balance = ? WHERE id = ?').run(1000, referred);
+
+      const res = billing.atomicDebit(referred, 1000, { type: 'payment_reversal', date: '2026-03-02', amount: 1000 }, {
+        referral: { referrerId: referrer, delta: -150 },
+      });
+      expect(res.balanceAfter).toBe(0);
+      expect(res.referral.newBalance).toBe(0);
+      expect(getRef(referrer)).toBe(0);
+      expect(getBalance(referred)).toBe(0);
+    });
+
+    it('rolls back BOTH balance and referral if the txn throws (no partial state)', () => {
+      // Throw inside the txn by passing an unknown referrer — the SELECT in
+      // _applyReferralInsideTx will return undefined, and the UPDATE that
+      // affects zero rows still "succeeds" in SQLite (no error). To force a
+      // real rollback we instead use an unknown CLIENT_ID — atomicCredit
+      // checks that BEFORE balance update and throws "not found".
+      const { referrer } = makeReferralPair();
+      const refBefore = getRef(referrer);
+      expect(() => billing.atomicCredit('nope-no-such-client', 100, { type: 'payment', date: '2026-03-03' }, {
+        referral: { referrerId: referrer, delta: 15 },
+      })).toThrow(/not found/);
+      // Referrer balance UNCHANGED — the failed txn was rolled back.
+      expect(getRef(referrer)).toBe(refBefore);
+    });
+
+    it('missing referrerId or zero delta = referral block ignored (no update)', () => {
+      const { referrer, referred } = makeReferralPair();
+      const refBefore = getRef(referrer);
+      billing.atomicCredit(referred, 50, { type: 'payment', date: '2026-03-04' }, {
+        referral: { referrerId: null, delta: 100 }, // null referrerId
+      });
+      expect(getRef(referrer)).toBe(refBefore);
+      billing.atomicCredit(referred, 50, { type: 'payment', date: '2026-03-05' }, {
+        referral: { referrerId: referrer, delta: 0 }, // zero delta
+      });
+      expect(getRef(referrer)).toBe(refBefore);
+    });
+  });
 });

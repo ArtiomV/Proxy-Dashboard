@@ -1312,6 +1312,10 @@ rebuildClientMaps(); // Build maps before auto-migration check
 // no longer maintains a JS-side ledger copy.
 billing.init({
   db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams,
+  // Stage 13.1: atomic.js now owns the referral credit/debit so a route
+  // can no longer leave the txn open between balance update and referral
+  // bump. Pass the prepared stmt; atomic.js runs it INSIDE the same txn.
+  _clientUpdateReferralBalance,
   getClientById: (id) => clientById.get(id),
 });
 

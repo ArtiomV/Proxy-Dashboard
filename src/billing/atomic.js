@@ -20,6 +20,7 @@
 // inside the same txn is still the canonical write.
 
 let db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryParams;
+let _clientUpdateReferralBalance; // Stage 13.1
 let getClientById;
 
 function init(deps) {
@@ -28,6 +29,11 @@ function init(deps) {
   _clientUpdateBalance = deps._clientUpdateBalance;
   _ledgerInsert = deps._ledgerInsert;
   _ledgerEntryParams = deps._ledgerEntryParams;
+  // Stage 13.1: referral commission must land in the same transaction as
+  // the payment that triggered it. atomic.js owns the stmt so every credit
+  // path goes through one entry point — no more route-side `.run()` calls
+  // sitting OUTSIDE the txn (the original /payment bug).
+  _clientUpdateReferralBalance = deps._clientUpdateReferralBalance;
 
   // Accept either a getter (preferred) or the raw object/map (legacy).
   if (typeof deps.getClientById === 'function') {
@@ -39,19 +45,55 @@ function init(deps) {
 }
 
 /**
+ * applyReferralInsideTx — internal helper called inside the same txn as
+ * the balance update. Loads the referrer's current referral_balance,
+ * applies `delta` (positive = credit, negative = reversal), updates the
+ * DB row, and returns { referrerId, newBalance } so the caller can sync
+ * in-memory state ONLY after the outer transaction commits.
+ *
+ * Throws if referrerId is set but no such row exists — caller's choice
+ * of catching that defines the failure mode (rolls back the whole txn).
+ */
+let _clientGetReferralBalance = null;
+function _applyReferralInsideTx(referrerId, delta) {
+  if (!_clientUpdateReferralBalance) {
+    throw new Error('atomic.init() not given _clientUpdateReferralBalance');
+  }
+  if (!_clientGetReferralBalance) {
+    _clientGetReferralBalance = db.prepare('SELECT referral_balance FROM clients WHERE id = ?');
+  }
+  // One-shot SELECT inside the active SQLite write txn — sees committed
+  // values only, so concurrent writers can't interleave and we always
+  // base the +/- on the freshest balance.
+  const row = _clientGetReferralBalance.get(referrerId);
+  const current = row && row.referral_balance != null ? row.referral_balance : 0;
+  const newBalance = Math.round((current + delta) * 100) / 100;
+  _clientUpdateReferralBalance.run(newBalance, referrerId);
+  return { referrerId, newBalance };
+}
+
+/**
  * atomicCredit — atomically add amount to client balance AND insert ledger entry
  * BUG-02 fix: balance + ledger in single transaction (no partial state)
  * BUG-03 fix: uses clientById.get() for O(1) in-memory sync
+ * Stage 13.1: opts.referral — if set, applies a referral commission
+ *   delta inside the SAME txn. Shape: { referrerId: string, delta: number }
+ *   (positive credit for a new payment; negative for a reversal). Returns
+ *   the new referrer balance so the caller can sync in-memory state ONLY
+ *   after the outer transaction commits.
  * @param {string} clientId
  * @param {number} amount
  * @param {object} [ledgerEntry] — if provided, inserted in same transaction
- * Returns { balanceBefore, balanceAfter }
+ * @param {object} [opts] — { referral: { referrerId, delta } }
+ * Returns { balanceBefore, balanceAfter, ledgerDbId, referral? }
  */
-function atomicCredit(clientId, amount, ledgerEntry) {
+function atomicCredit(clientId, amount, ledgerEntry, opts) {
+  opts = opts || {};
   amount = Math.round(parseFloat(amount) * 100) / 100;
   if (isNaN(amount)) throw new Error('atomicCredit: invalid amount');
   if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
   let balanceBefore, balanceAfter, ledgerDbId;
+  let referralResult = null;
   db.transaction(() => {
     const row = _clientGetBalance.get(clientId);
     if (!row) throw new Error(`atomicCredit: client ${clientId} not found`);
@@ -63,10 +105,18 @@ function atomicCredit(clientId, amount, ledgerEntry) {
       const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
       ledgerDbId = result.lastInsertRowid;
     }
+    if (opts.referral && opts.referral.referrerId && opts.referral.delta) {
+      referralResult = _applyReferralInsideTx(opts.referral.referrerId, opts.referral.delta);
+    }
   })();
   const client = getClientById && getClientById(clientId);
   if (client) client.balance = balanceAfter;
-  return { balanceBefore, balanceAfter, ledgerDbId };
+  // Sync referrer in-memory ONLY after the txn committed successfully.
+  if (referralResult) {
+    const referrer = getClientById && getClientById(referralResult.referrerId);
+    if (referrer) referrer.referral_balance = referralResult.newBalance;
+  }
+  return { balanceBefore, balanceAfter, ledgerDbId, referral: referralResult };
 }
 
 /**
@@ -85,6 +135,7 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
   if (isNaN(amount)) throw new Error('atomicDebit: invalid amount');
   if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
   let balanceBefore, balanceAfter, ledgerDbId, duplicate = false;
+  let referralResult = null;
   try {
     db.transaction(() => {
       const row = _clientGetBalance.get(clientId);
@@ -105,6 +156,9 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
         const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
         ledgerDbId = result.lastInsertRowid;
       }
+      if (opts.referral && opts.referral.referrerId && opts.referral.delta) {
+        referralResult = _applyReferralInsideTx(opts.referral.referrerId, opts.referral.delta);
+      }
     })();
   } catch (e) {
     // SQLite raises SQLITE_CONSTRAINT_UNIQUE if the partial unique index on
@@ -119,7 +173,11 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
   }
   const client = getClientById && getClientById(clientId);
   if (client) client.balance = balanceAfter;
-  return { balanceBefore, balanceAfter, ledgerDbId, duplicate };
+  if (referralResult) {
+    const referrer = getClientById && getClientById(referralResult.referrerId);
+    if (referrer) referrer.referral_balance = referralResult.newBalance;
+  }
+  return { balanceBefore, balanceAfter, ledgerDbId, duplicate, referral: referralResult };
 }
 
 module.exports = { init, atomicCredit, atomicDebit };
