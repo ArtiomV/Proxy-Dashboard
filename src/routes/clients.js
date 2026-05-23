@@ -300,10 +300,31 @@ r.post('/api/admin/clients/:id/charge', authMiddleware, adminMiddleware, (req, r
   res.json({ ok: true, balance: client.balance, balanceBefore, balanceAfter });
 });
 
+// Stage 13.3: source of truth for payment history is billing_ledger
+// (it's atomic, idempotent, and survives stale-memory bugs). Map the
+// ledger row shape to the historical payment shape so the UI response
+// stays identical.
+function _mapLedgerToPayment(entry) {
+  return {
+    amount: entry.amount,
+    date: entry.date,
+    note: entry.note || '',
+    source: entry.source || 'manual',
+    paymentId: entry.paymentId || undefined,
+    // ledger entries store the ISO timestamp; payments table called it
+    // createdAt. Preserve the old field name in the response.
+    createdAt: entry.timestamp || '',
+  };
+}
 r.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
-  res.json(client.payments || []);
+  // Pull from ledger, filter to payment-shaped types, newest first.
+  const payments = ledgerDb.listByClient(client.id)
+    .filter(e => e.type === 'payment' || e.type === 'bank_payment')
+    .map(_mapLedgerToPayment)
+    .reverse(); // listByClient is ORDER BY id ASC; UI expects newest-first
+  res.json(payments);
 });
 
 r.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddleware, (req, res) => {
@@ -327,9 +348,12 @@ r.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlewar
   // has a db_id (loaded from DB or stamped by an earlier saveClients), use
   // it. Older entries that pre-date 13.2 won't have one — fall through and
   // saveClients won't re-insert because we splice from the array.
-  const deletedDbId = deletedPayment.db_id;
   client.payments.splice(payIdx, 1);
-  if (deletedDbId) paymentsDb.deleteById(deletedDbId);
+  // Stage 13.3: ledger reversal (the `payment_reversal` entry added
+  // below by atomicDebit) is the recorded fact. The legacy `payments`
+  // table isn't written from saveClients anymore, so no per-row cleanup
+  // here — historic rows that pre-date Stage 13.3 just stay (read-only,
+  // ignored by the new GET /:id/payments path which reads from ledger).
 
   // Stage 13.1: referral reversal lives in the same atomicDebit txn as
   // the balance reversal — same atomicity guarantee as the credit path.

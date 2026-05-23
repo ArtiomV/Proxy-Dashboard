@@ -554,14 +554,11 @@ function saveClients(clientsList) {
       //     interprets "missing from memory" as "delete from DB".
       for (const c of clientsList) {
         clientsDb.upsertRow(c);
-        for (const p of (c.payments || [])) {
-          if (p.db_id) continue; // already in DB
-          const res = paymentsDb.insert({
-            clientId: c.id, amount: p.amount, date: p.date, note: p.note,
-            source: p.source, paymentId: p.paymentId, createdAt: p.createdAt,
-          });
-          p.db_id = res.lastInsertRowid;
-        }
+        // Stage 13.3: payments are no longer written from saveClients.
+        // billing_ledger is the source of truth — atomicCredit already
+        // wrote the row inside its txn when the payment was processed.
+        // The legacy `payments` table is read-only now (kept so existing
+        // rows stay visible; new ones won't appear).
         for (const d of (c.documents || []))        documentsDb.insertDoc(d, c.id);
         for (const d of (c.closingDocuments || [])) documentsDb.insertClosing(d, c.id);
         for (const b of (c.bills || []))            documentsDb.insertBill(b, c.id);

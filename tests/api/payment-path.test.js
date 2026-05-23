@@ -109,12 +109,11 @@ describe('Stage 13.0: characterization — POST /api/admin/clients/:id/payment',
     expect(last.amount).toBe(250);
     expect(last.date).toBe('2026-05-23');
 
-    // 3. payments table gained exactly one row.
-    // CURRENT BEHAVIOR (locked here): saveClients() reinserts payments
-    // from the in-memory array, so the row IS present after the POST.
+    // 3. Stage 13.3: payments table is NO LONGER written from saveClients.
+    // The recorded fact lives in billing_ledger (asserted above). Legacy
+    // rows pre-dating 13.3 stay readable; new payments don't add rows.
     const paymentsAfter = paymentsRows(c.id);
-    expect(paymentsAfter.length).toBe(paymentsBefore + 1);
-    expect(paymentsAfter[paymentsAfter.length - 1].amount).toBe(250);
+    expect(paymentsAfter.length).toBe(paymentsBefore);
   });
 
   it('credits referrer with 15% commission (DB + in-memory)', async () => {
@@ -189,14 +188,14 @@ describe('Stage 13.0: characterization — DELETE /api/admin/clients/:id/payment
     const { state } = require('../../src/state/index.js');
     expect(state.clientById.get(referrer.id).referral_balance).toBe(0);
 
-    // payments table — current behavior: saveClients() re-syncs from
-    // in-memory after the splice, so the row is gone.
+    // Stage 13.3: payments table no longer written from saveClients; the
+    // payment reversal is recorded in billing_ledger only.
     expect(paymentsRows(referred.id).length).toBe(0);
   });
 });
 
-describe('Stage 13.0: characterization — GET /api/admin/clients/:id/payments', () => {
-  it('returns the in-memory client.payments array (NOT the payments table)', async () => {
+describe('Stage 13.3: GET /api/admin/clients/:id/payments reads from billing_ledger', () => {
+  it('returns ledger-derived payment list (preserves response shape)', async () => {
     const c = await createClient();
     await request(app).post(`/api/admin/clients/${c.id}/payment`).set('X-Auth-Token', adminToken)
       .send({ amount: 33, date: '2026-05-23', note: 'visible' });
@@ -207,8 +206,23 @@ describe('Stage 13.0: characterization — GET /api/admin/clients/:id/payments',
     expect(res.body.length).toBeGreaterThanOrEqual(1);
     const found = res.body.find(p => p.amount === 33 && p.note === 'visible');
     expect(found).toBeTruthy();
-    // CURRENT shape: { amount, date, note, createdAt } (in-memory format).
+    // Response shape preserved: { amount, date, note, source, paymentId, createdAt }
     expect(typeof found.createdAt).toBe('string');
+    expect(found.source).toBe('manual');
+  });
+
+  it('does NOT include charge / correction / payment_reversal entries', async () => {
+    const c = await createClient();
+    // Payment + charge + reversal → only the payment should show up.
+    await request(app).post(`/api/admin/clients/${c.id}/payment`).set('X-Auth-Token', adminToken)
+      .send({ amount: 100, date: '2026-05-23', note: 'p1' });
+    await request(app).post(`/api/admin/clients/${c.id}/charge`).set('X-Auth-Token', adminToken)
+      .send({ amount: 30, date: '2026-05-23', note: 'c1' });
+
+    const res = await request(app).get(`/api/admin/clients/${c.id}/payments`).set('X-Auth-Token', adminToken);
+    expect(res.body.length).toBe(1);
+    expect(res.body[0].amount).toBe(100);
+    expect(res.body[0].note).toBe('p1');
   });
 });
 

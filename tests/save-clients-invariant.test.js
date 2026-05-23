@@ -82,36 +82,20 @@ describe('Stage 13.2: saveClients is additive — DB rows survive stale in-memor
     expect(documentsDb.listBills(cid).length).toBe(1);
   });
 
-  it('a new in-memory payment without db_id is INSERTED and stamped with db_id', () => {
+  it('Stage 13.3: saveClients DOES NOT write to payments table anymore', () => {
+    // billing_ledger is the source of truth for payment history; the
+    // payments table is read-only (kept for legacy rows). saveClients
+    // intentionally skips it.
     const cid = makeClientRow();
     const stale = {
       id: cid, login: 'inv_' + cid, name: 'Inv', balance: 0,
       payments: [{ amount: 42, date: '2026-05-23', note: 'fresh', createdAt: '2026-05-23T11:00:00Z' }],
     };
-    expect(stale.payments[0].db_id).toBeUndefined();
-
-    server.saveClients([stale]);
-
-    // Row inserted AND the in-memory entry now carries its rowid back.
-    const rows = paymentsDb.listByClient(cid);
-    expect(rows.length).toBe(1);
-    expect(rows[0].amount).toBe(42);
-    expect(typeof stale.payments[0].db_id).toBe('number');
-  });
-
-  it('saveClients called twice does NOT double-insert (db_id stamping prevents it)', () => {
-    const cid = makeClientRow();
-    const stale = {
-      id: cid, login: 'inv_' + cid, name: 'Inv', balance: 0,
-      payments: [{ amount: 7, date: '2026-05-23', note: 'once', createdAt: '2026-05-23T12:00:00Z' }],
-    };
 
     server.saveClients([stale]);
     server.saveClients([stale]);
-    server.saveClients([stale]);
 
-    // Still exactly one row — the db_id stamped on the first save tells
-    // subsequent calls "this row is already in the DB, skip".
-    expect(paymentsDb.listByClient(cid).length).toBe(1);
+    // No rows written, no matter how many times saveClients is called.
+    expect(paymentsDb.listByClient(cid).length).toBe(0);
   });
 });
