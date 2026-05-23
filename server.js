@@ -49,6 +49,9 @@ const simulatorDb = require('./src/db/simulator');
 const paymentsDb = require('./src/db/payments');
 const documentsDb = require('./src/db/documents');
 const clientsDb = require('./src/db/clients');
+// Stage 14.1: state module hoisted near other requires so early
+// initializers (tochkaConfig defaults, see below) can use it without TDZ.
+const stateMod = require('./src/state');
 const ledgerDb = require('./src/db/ledger');
 const kvDb = require('./src/db/kv');
 const trafficDb = require('./src/db/traffic');
@@ -705,7 +708,12 @@ function getClientIp(req) {
 }
 
 const TOCHKA_CONFIG_FILE = path.join(__dirname, 'tochka_config.json');
-let tochkaConfig = { jwt: '', clientId: '', customerCode: '', accountId: '', companyName: '', companyInn: '', companyKpp: '', companyAddress: '', bankAccount: '', bankName: '', bankBic: '', bankCorrAccount: '' };
+// Stage 14.1: tochkaConfig moved into src/state/index.js. Const alias to
+// the SAME object reference for the process lifetime — saveTochkaConfig
+// rebinds in place via setTochkaConfig() so routers holding the
+// reference always see fresh fields.
+stateMod.setTochkaConfig({ jwt: '', clientId: '', customerCode: '', accountId: '', companyName: '', companyInn: '', companyKpp: '', companyAddress: '', bankAccount: '', bankName: '', bankBic: '', bankCorrAccount: '' });
+const tochkaConfig = stateMod.state.tochkaConfig;
 
 // AES-256-GCM at-rest encryption for tochka_config.json.
 //
@@ -899,7 +907,11 @@ function calculateMonthlyBillAmount(client, cachedResults) {
   return _calculateMonthlyBillAmount(client, cachedResults, (id) => ledgerDb.listByClient(id));
 }
 
-let dailyTraffic = {}; // { portKey: { "2026-03-01": { in: bytes, out: bytes, portName }, ... } }
+// Stage 14.1: dailyTraffic moved to state.dailyTraffic (stable ref). No
+// rebinds in this file — all mutations are property assignments, so a
+// const alias is enough. Routers receive `dailyTraffic` via deps and see
+// the same object reference for the process lifetime.
+const dailyTraffic = stateMod.state.dailyTraffic; // { portKey: { "2026-03-01": { in: bytes, out: bytes, portName }, ... } }
 
 // Cached trend computations — invalidated whenever dailyTraffic is mutated
 // (syncYesterdayTraffic, runDailyBilling, retention cleanup). TTL backstop 60s.
@@ -1082,7 +1094,11 @@ async function aggregateHourlyTraffic() { return hourlyTraffic.aggregateHourlyTr
 // parseTrafficValue, getMoscow*, trafficBytesToGb extracted to src/utils/
 
 // Global portKey→portName mapping: "S1_port123" → "Brandanalytics"
-let portKeyToPortName = {};
+// Stage 14.1: stable reference via state. refreshPortKeyMapping used to
+// rebind the binding (`portKeyToPortName = map`) — routers that already
+// destructured the old reference would see stale data. Now we replace
+// CONTENTS in place via setPortKeyToPortName().
+const portKeyToPortName = stateMod.state.portKeyToPortName;
 function refreshPortKeyMapping(allServerResults) {
   const map = {};
   for (const data of allServerResults) {
@@ -1093,7 +1109,7 @@ function refreshPortKeyMapping(allServerResults) {
       }
     }
   }
-  portKeyToPortName = map;
+  stateMod.setPortKeyToPortName(map);
 }
 
 // Last billing run metadata (for /health and retry logic)
@@ -1101,10 +1117,11 @@ let lastBillingRunSummary = null;
 let lastReconciliationMonth = (_kvGet.get('last_reconciliation_month') || {}).value || '';
 
 const KNOWN_MODEMS_FILE = path.join(__dirname, 'known_modems.json');
-let knownModems = {}; // { serverName: { portId: { portName, imei, nick, model, portInfo, lastSeen } } }
+// Stage 14.1: stable reference via state. Load mutates in place.
+const knownModems = stateMod.state.knownModems; // { serverName: { portId: { portName, imei, nick, model, portInfo, lastSeen } } }
 try {
   if (fs.existsSync(KNOWN_MODEMS_FILE)) {
-    knownModems = JSON.parse(fs.readFileSync(KNOWN_MODEMS_FILE, 'utf8'));
+    stateMod.setKnownModems(JSON.parse(fs.readFileSync(KNOWN_MODEMS_FILE, 'utf8')));
   }
 } catch (e) { logger.error('Failed to load known_modems:', e.message); }
 
@@ -1245,8 +1262,8 @@ function injectOfflineModems(data) {
 // We hold const aliases to the state-module objects — they're now stable
 // identities for the process lifetime, mutated in place by setClients() +
 // rebuildMaps(). Route mounts no longer need shim objects with .get()
-// wrappers.
-const stateMod = require('./src/state');
+// wrappers. (Stage 14.1 hoisted the `require('./src/state')` to the top
+// of the file so tochkaConfig defaults can use it earlier.)
 stateMod.setClients(loadClients());
 const clients = stateMod.state.clients;
 const clientById         = stateMod.state.clientById;
@@ -1489,17 +1506,22 @@ const SETTINGS_DEFAULTS = {
   tochka_strict_webhook: false
 };
 
-let appSettings = { ...SETTINGS_DEFAULTS };
-// Load from SQLite, fallback to settings.json for migration
+// Stage 14.1: appSettings lives in state with stable identity. Rebinds
+// (was `appSettings = {...}` on reload) were the most dangerous variant
+// of this bug — settings are read on every request by virtually every
+// route. setAppSettings() replaces CONTENTS in place; routers that took
+// the reference at mount time always see fresh fields.
+stateMod.setAppSettings({ ...SETTINGS_DEFAULTS });
+const appSettings = stateMod.state.appSettings;
 try {
   const row = _kvGet.get('app_settings');
   if (row) {
-    appSettings = { ...SETTINGS_DEFAULTS, ...JSON.parse(row.value) };
+    stateMod.setAppSettings({ ...SETTINGS_DEFAULTS, ...JSON.parse(row.value) });
   } else {
     // One-time migration from settings.json
     const SETTINGS_FILE = path.join(__dirname, 'settings.json');
     if (fs.existsSync(SETTINGS_FILE)) {
-      appSettings = JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8'));
+      stateMod.setAppSettings(JSON.parse(fs.readFileSync(SETTINGS_FILE, 'utf8')));
       _kvSet.run('app_settings', JSON.stringify(appSettings));
       logger.info('[Settings] Migrated from settings.json to SQLite');
     } else {
@@ -2104,7 +2126,7 @@ function mergeServerData(allData, portNameFilter) {
 const MAX_IP_HISTORY = 100;
 
 // Load IP tracking from SQLite
-let ipTracking = {};
+const ipTracking = stateMod.state.ipTracking; // Stage 14.1
 try {
   const rows = trackingDb.ipAllStmt().all();
   for (const r of rows) ipTracking[r.key] = { ip: r.ip, since: r.updated_at };
@@ -2116,7 +2138,7 @@ try {
 const autoRecovery = {};
 
 // Load uptime tracking from SQLite
-let uptimeTracking = {};
+const uptimeTracking = stateMod.state.uptimeTracking; // Stage 14.1
 try {
   const rows = trackingDb.utAllStmt().all();
   for (const r of rows) { try { uptimeTracking[r.key] = JSON.parse(r.data); } catch (_) { /* best-effort: error intentionally swallowed */ } }
@@ -2124,7 +2146,7 @@ try {
 } catch (e) { logger.error('Failed to load uptime_tracking from SQLite:', e.message); }
 
 // Load IP history from SQLite (with db_id for incremental updates)
-let ipHistory = {};
+const ipHistory = stateMod.state.ipHistory; // Stage 14.1
 try {
   const rows = trackingDb.ihAllOrderStmt().all();
   for (const r of rows) {
