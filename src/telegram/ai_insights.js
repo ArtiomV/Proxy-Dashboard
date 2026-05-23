@@ -251,7 +251,7 @@ const SYSTEM_PROMPT = `Ты — старший аналитик инфрастр
 async function generateInsights(date) {
   const client = _getClient();
   if (!client) {
-    logger.info('[AIInsights] Skipped: no ANTHROPIC_API_KEY configured');
+    logger.info('[AIInsights] Skipped: no ANTHROPIC_API_KEY configured (env or setting "anthropic_api_key")');
     return null;
   }
   const ctx = buildDayContext(date);
@@ -264,29 +264,60 @@ async function generateInsights(date) {
   try {
     let text = '';
     // Stream so adaptive thinking + analysis don't trip the non-stream SDK timeout.
+    //
+    // max_tokens budget: adaptive thinking + effort=high can spend
+    // 10–25K tokens on internal reasoning before producing any text. The
+    // old 4000 cap meant the model exhausted its budget mid-thought and
+    // returned an empty content[] — daily summaries silently dropped the
+    // ИИ-анализ block. 32K leaves comfortable room for adaptive thinking
+    // PLUS the ~1000 output tokens the final HTML snippet needs.
     const stream = await client.messages.stream({
       model: 'claude-opus-4-7',
-      max_tokens: 4000,
+      max_tokens: 32000,
       thinking: { type: 'adaptive' },
       output_config: { effort: 'high' },
       system: SYSTEM_PROMPT,
       messages: [{ role: 'user', content: userPrompt }],
     });
     const final = await stream.finalMessage();
+    let thinkingChars = 0;
     for (const block of final.content) {
       if (block.type === 'text') text += block.text;
+      else if (block.type === 'thinking') thinkingChars += (block.thinking || '').length;
     }
     text = text.trim();
+    const usage = final.usage || {};
     if (!text) {
-      logger.warn('[AIInsights] Empty response from Claude');
+      // Empty text after adaptive thinking almost always means the model
+      // hit max_tokens during reasoning — log enough context to confirm.
+      logger.warn(
+        `[AIInsights] Empty response for ${date}: ` +
+        `stop_reason=${final.stop_reason} ` +
+        `in=${usage.input_tokens} out=${usage.output_tokens} ` +
+        `thinking_chars=${thinkingChars}. ` +
+        `If stop_reason="max_tokens", raise max_tokens above ${32000}.`
+      );
       return null;
     }
     // Hard cap so combined message fits Telegram's 4096 limit
     if (text.length > 3700) text = text.slice(0, 3650) + '\n…(обрезано)';
-    logger.info(`[AIInsights] Generated ${text.length} chars for ${date} (tokens in=${final.usage?.input_tokens}, out=${final.usage?.output_tokens})`);
+    logger.info(
+      `[AIInsights] Generated ${text.length} chars for ${date} ` +
+      `(stop=${final.stop_reason}, in=${usage.input_tokens}, out=${usage.output_tokens}, ` +
+      `thinking_chars=${thinkingChars})`
+    );
     return text;
   } catch (e) {
-    logger.error('[AIInsights] Claude API error: ' + (e.message || e));
+    // Most common failure modes: 401 (bad key), 429 (rate limit), 529 (overloaded).
+    // Log status when available so admin can diagnose without scrolling pino noise.
+    const status = e && (e.status || e.statusCode);
+    const type = e && e.type;
+    logger.error(
+      `[AIInsights] Claude API error for ${date}: ` +
+      (status ? `[${status}] ` : '') +
+      (type ? `(${type}) ` : '') +
+      (e.message || e)
+    );
     return null;
   }
 }
