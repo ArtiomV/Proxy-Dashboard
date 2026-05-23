@@ -18,7 +18,9 @@ module.exports = function createServersRouter(deps) {
     apiServers, SERVER_COUNTRIES, appSettings,
     fetchApi, saveApiServersToDb, proxySmart,
     auditLog, getClientIp,
-    saveSettings, rescheduleSpeedtests, rescheduleProxyCheck,
+    // Stage 14.2: setSettings() batches the validated patch + saves once;
+    // no more direct `appSettings.x = ...` mutations in this router.
+    setSettings, rescheduleSpeedtests, rescheduleProxyCheck,
   } = deps;
   const r = express.Router();
 
@@ -105,33 +107,40 @@ r.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
+  // Stage 14.2: accumulate validated changes into one batch, then commit
+  // via setSettings({...}). Previously each line did `appSettings.x = ...`
+  // directly with one saveSettings() at the end — internally consistent
+  // but the only place in the codebase that mutated appSettings without
+  // going through the canonical setSetting/setSettings helper. Now all
+  // appSettings writes funnel through the same path.
   const { speedtest_times, pricing_tiers, min_speed_threshold, proxy_check_target, proxy_check_warn_ms, proxy_check_bad_ms } = req.body;
+  const patch = {};
   if (speedtest_times && Array.isArray(speedtest_times)) {
-    appSettings.speedtest_times = speedtest_times.filter(t => /^\d{2}:\d{2}$/.test(t));
+    patch.speedtest_times = speedtest_times.filter(t => /^\d{2}:\d{2}$/.test(t));
   }
   if (min_speed_threshold != null) {
-    appSettings.min_speed_threshold = parseFloat(min_speed_threshold) || 2;
+    patch.min_speed_threshold = parseFloat(min_speed_threshold) || 2;
   }
   if (req.body.error_rate_threshold != null) {
-    appSettings.error_rate_threshold = Math.max(1, Math.min(100, parseInt(req.body.error_rate_threshold) || 15));
+    patch.error_rate_threshold = Math.max(1, Math.min(100, parseInt(req.body.error_rate_threshold) || 15));
   }
   if (req.body.proxy_alert_latency_ms != null) {
-    appSettings.proxy_alert_latency_ms = Math.max(100, Math.min(60000, parseInt(req.body.proxy_alert_latency_ms) || 1500));
+    patch.proxy_alert_latency_ms = Math.max(100, Math.min(60000, parseInt(req.body.proxy_alert_latency_ms) || 1500));
   }
   if (req.body.proxy_alert_error_pct != null) {
-    appSettings.proxy_alert_error_pct = Math.max(0, Math.min(100, parseFloat(req.body.proxy_alert_error_pct) || 5));
+    patch.proxy_alert_error_pct = Math.max(0, Math.min(100, parseFloat(req.body.proxy_alert_error_pct) || 5));
   }
   if (req.body.proxy_alert_window_min != null) {
-    appSettings.proxy_alert_window_min = Math.max(5, Math.min(720, parseInt(req.body.proxy_alert_window_min) || 60));
+    patch.proxy_alert_window_min = Math.max(5, Math.min(720, parseInt(req.body.proxy_alert_window_min) || 60));
   }
   if (req.body.auto_reboot_enabled != null) {
-    appSettings.auto_reboot_enabled = !!req.body.auto_reboot_enabled;
+    patch.auto_reboot_enabled = !!req.body.auto_reboot_enabled;
   }
   if (req.body.auto_reboot_min_interval_min != null) {
-    appSettings.auto_reboot_min_interval_min = Math.max(15, Math.min(720, parseInt(req.body.auto_reboot_min_interval_min) || 60));
+    patch.auto_reboot_min_interval_min = Math.max(15, Math.min(720, parseInt(req.body.auto_reboot_min_interval_min) || 60));
   }
   if (pricing_tiers && Array.isArray(pricing_tiers)) {
-    appSettings.pricing_tiers = pricing_tiers.map(t => ({
+    patch.pricing_tiers = pricing_tiers.map(t => ({
       min_proxies: parseInt(t.min_proxies) || 1,
       price: parseFloat(t.price) || 0,
       label: t.label || ''
@@ -151,61 +160,63 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
         if (!bad.test(host) && !/^\d+$/.test(host) && host !== '0.0.0.0') ok = true;
       } catch (_) { ok = false; }
     }
-    if (ok) appSettings.proxy_check_target = url;
+    if (ok) patch.proxy_check_target = url;
     else return res.status(400).json({ error: 'proxy_check_target rejected (internal/loopback/metadata host)' });
   }
   if (proxy_check_warn_ms != null) {
-    appSettings.proxy_check_warn_ms = Math.max(50, parseInt(proxy_check_warn_ms) || 500);
+    patch.proxy_check_warn_ms = Math.max(50, parseInt(proxy_check_warn_ms) || 500);
   }
   if (proxy_check_bad_ms != null) {
-    appSettings.proxy_check_bad_ms = Math.max(100, parseInt(proxy_check_bad_ms) || 2000);
+    patch.proxy_check_bad_ms = Math.max(100, parseInt(proxy_check_bad_ms) || 2000);
   }
+  let needsProxyReschedule = false;
   if (req.body.proxy_check_interval_min != null) {
-    appSettings.proxy_check_interval_min = Math.max(5, Math.min(1440, parseInt(req.body.proxy_check_interval_min) || 60));
-    rescheduleProxyCheck();
+    patch.proxy_check_interval_min = Math.max(5, Math.min(1440, parseInt(req.body.proxy_check_interval_min) || 60));
+    needsProxyReschedule = true;
   }
   // Auto-recovery
-  if (req.body.recovery_offline_sec != null) appSettings.recovery_offline_sec = Math.max(10, Math.min(600, parseInt(req.body.recovery_offline_sec) || 60));
-  if (req.body.recovery_max_attempts != null) appSettings.recovery_max_attempts = Math.max(1, Math.min(10, parseInt(req.body.recovery_max_attempts) || 3));
-  if (req.body.recovery_retry_min != null) appSettings.recovery_retry_min = Math.max(1, Math.min(60, parseInt(req.body.recovery_retry_min) || 3));
+  if (req.body.recovery_offline_sec != null)   patch.recovery_offline_sec   = Math.max(10, Math.min(600, parseInt(req.body.recovery_offline_sec) || 60));
+  if (req.body.recovery_max_attempts != null)  patch.recovery_max_attempts  = Math.max(1, Math.min(10, parseInt(req.body.recovery_max_attempts) || 3));
+  if (req.body.recovery_retry_min != null)     patch.recovery_retry_min     = Math.max(1, Math.min(60, parseInt(req.body.recovery_retry_min) || 3));
   // Modem tracking & rotation
-  if (req.body.tracking_interval_min != null) appSettings.tracking_interval_min = Math.max(1, Math.min(30, parseInt(req.body.tracking_interval_min) || 3));
-  if (req.body.rotation_cache_ttl_min != null) appSettings.rotation_cache_ttl_min = Math.max(5, Math.min(240, parseInt(req.body.rotation_cache_ttl_min) || 30));
-  if (req.body.rotation_sync_interval_min != null) appSettings.rotation_sync_interval_min = Math.max(5, Math.min(240, parseInt(req.body.rotation_sync_interval_min) || 30));
+  if (req.body.tracking_interval_min != null)      patch.tracking_interval_min      = Math.max(1, Math.min(30, parseInt(req.body.tracking_interval_min) || 3));
+  if (req.body.rotation_cache_ttl_min != null)     patch.rotation_cache_ttl_min     = Math.max(5, Math.min(240, parseInt(req.body.rotation_cache_ttl_min) || 30));
+  if (req.body.rotation_sync_interval_min != null) patch.rotation_sync_interval_min = Math.max(5, Math.min(240, parseInt(req.body.rotation_sync_interval_min) || 30));
   // Proxy check (additional)
-  if (req.body.proxy_check_timeout_sec != null) appSettings.proxy_check_timeout_sec = Math.max(5, Math.min(120, parseInt(req.body.proxy_check_timeout_sec) || 15));
-  if (req.body.proxy_check_concurrency != null) appSettings.proxy_check_concurrency = Math.max(1, Math.min(50, parseInt(req.body.proxy_check_concurrency) || 10));
+  if (req.body.proxy_check_timeout_sec != null) patch.proxy_check_timeout_sec = Math.max(5, Math.min(120, parseInt(req.body.proxy_check_timeout_sec) || 15));
+  if (req.body.proxy_check_concurrency != null) patch.proxy_check_concurrency = Math.max(1, Math.min(50, parseInt(req.body.proxy_check_concurrency) || 10));
   // Speedtest (additional)
-  if (req.body.speedtest_low_threshold != null) appSettings.speedtest_low_threshold = Math.max(0.1, Math.min(50, parseFloat(req.body.speedtest_low_threshold) || 1));
-  if (req.body.speedtest_retest_delay_min != null) appSettings.speedtest_retest_delay_min = Math.max(1, Math.min(120, parseInt(req.body.speedtest_retest_delay_min) || 10));
-  if (req.body.speedtest_max_history != null) appSettings.speedtest_max_history = Math.max(5, Math.min(200, parseInt(req.body.speedtest_max_history) || 30));
+  if (req.body.speedtest_low_threshold != null)    patch.speedtest_low_threshold    = Math.max(0.1, Math.min(50, parseFloat(req.body.speedtest_low_threshold) || 1));
+  if (req.body.speedtest_retest_delay_min != null) patch.speedtest_retest_delay_min = Math.max(1, Math.min(120, parseInt(req.body.speedtest_retest_delay_min) || 10));
+  if (req.body.speedtest_max_history != null)      patch.speedtest_max_history      = Math.max(5, Math.min(200, parseInt(req.body.speedtest_max_history) || 30));
   // Data retention (days)
-  if (req.body.retention_traffic_hourly != null) appSettings.retention_traffic_hourly = Math.max(7, Math.min(365, parseInt(req.body.retention_traffic_hourly) || 90));
-  if (req.body.retention_daily_traffic != null) appSettings.retention_daily_traffic = Math.max(7, Math.min(365, parseInt(req.body.retention_daily_traffic) || 90));
-  if (req.body.retention_api_usage != null) appSettings.retention_api_usage = Math.max(7, Math.min(365, parseInt(req.body.retention_api_usage) || 30));
-  if (req.body.retention_audit_log != null) appSettings.retention_audit_log = Math.max(7, Math.min(365, parseInt(req.body.retention_audit_log) || 90));
-  if (req.body.retention_system_log != null) appSettings.retention_system_log = Math.max(7, Math.min(365, parseInt(req.body.retention_system_log) || 30));
-  if (req.body.retention_rotation_log != null) appSettings.retention_rotation_log = Math.max(7, Math.min(365, parseInt(req.body.retention_rotation_log) || 90));
-  if (req.body.retention_proxy_checks != null) appSettings.retention_proxy_checks = Math.max(7, Math.min(365, parseInt(req.body.retention_proxy_checks) || 30));
-  if (req.body.retention_modem_meta != null) appSettings.retention_modem_meta = Math.max(7, Math.min(365, parseInt(req.body.retention_modem_meta) || 30));
+  if (req.body.retention_traffic_hourly != null) patch.retention_traffic_hourly = Math.max(7, Math.min(365, parseInt(req.body.retention_traffic_hourly) || 90));
+  if (req.body.retention_daily_traffic != null)  patch.retention_daily_traffic  = Math.max(7, Math.min(365, parseInt(req.body.retention_daily_traffic) || 90));
+  if (req.body.retention_api_usage != null)      patch.retention_api_usage      = Math.max(7, Math.min(365, parseInt(req.body.retention_api_usage) || 30));
+  if (req.body.retention_audit_log != null)      patch.retention_audit_log      = Math.max(7, Math.min(365, parseInt(req.body.retention_audit_log) || 90));
+  if (req.body.retention_system_log != null)     patch.retention_system_log     = Math.max(7, Math.min(365, parseInt(req.body.retention_system_log) || 30));
+  if (req.body.retention_rotation_log != null)   patch.retention_rotation_log   = Math.max(7, Math.min(365, parseInt(req.body.retention_rotation_log) || 90));
+  if (req.body.retention_proxy_checks != null)   patch.retention_proxy_checks   = Math.max(7, Math.min(365, parseInt(req.body.retention_proxy_checks) || 30));
+  if (req.body.retention_modem_meta != null)     patch.retention_modem_meta     = Math.max(7, Math.min(365, parseInt(req.body.retention_modem_meta) || 30));
   // Session & billing
-  if (req.body.session_ttl_days != null) appSettings.session_ttl_days = Math.max(1, Math.min(365, parseInt(req.body.session_ttl_days) || 30));
-  if (req.body.billing_retry_delay_hours != null) appSettings.billing_retry_delay_hours = Math.max(0.5, Math.min(24, parseFloat(req.body.billing_retry_delay_hours) || 1));
-  if (req.body.reconciliation_tolerance_gb != null) appSettings.reconciliation_tolerance_gb = Math.max(0.001, Math.min(1, parseFloat(req.body.reconciliation_tolerance_gb) || 0.01));
+  if (req.body.session_ttl_days != null)            patch.session_ttl_days            = Math.max(1, Math.min(365, parseInt(req.body.session_ttl_days) || 30));
+  if (req.body.billing_retry_delay_hours != null)   patch.billing_retry_delay_hours   = Math.max(0.5, Math.min(24, parseFloat(req.body.billing_retry_delay_hours) || 1));
+  if (req.body.reconciliation_tolerance_gb != null) patch.reconciliation_tolerance_gb = Math.max(0.001, Math.min(1, parseFloat(req.body.reconciliation_tolerance_gb) || 0.01));
   // CRM & auto-create
-  if (req.body.auto_create_interval_min != null) appSettings.auto_create_interval_min = Math.max(1, Math.min(60, parseInt(req.body.auto_create_interval_min) || 10));
-  if (req.body.crm_check_interval_min != null) appSettings.crm_check_interval_min = Math.max(5, Math.min(120, parseInt(req.body.crm_check_interval_min) || 10));
-  if (req.body.crm_reminder_days != null) appSettings.crm_reminder_days = Math.max(1, Math.min(30, parseInt(req.body.crm_reminder_days) || 3));
+  if (req.body.auto_create_interval_min != null) patch.auto_create_interval_min = Math.max(1, Math.min(60, parseInt(req.body.auto_create_interval_min) || 10));
+  if (req.body.crm_check_interval_min != null)   patch.crm_check_interval_min   = Math.max(5, Math.min(120, parseInt(req.body.crm_check_interval_min) || 10));
+  if (req.body.crm_reminder_days != null)        patch.crm_reminder_days        = Math.max(1, Math.min(30, parseInt(req.body.crm_reminder_days) || 3));
   // Telegram daily summary
-  if (req.body.telegram_bot_token != null) appSettings.telegram_bot_token = String(req.body.telegram_bot_token).trim();
-  if (req.body.telegram_chat_id != null) appSettings.telegram_chat_id = String(req.body.telegram_chat_id).trim();
-  if (req.body.telegram_summary_enabled != null) appSettings.telegram_summary_enabled = !!req.body.telegram_summary_enabled;
+  if (req.body.telegram_bot_token != null)       patch.telegram_bot_token       = String(req.body.telegram_bot_token).trim();
+  if (req.body.telegram_chat_id != null)         patch.telegram_chat_id         = String(req.body.telegram_chat_id).trim();
+  if (req.body.telegram_summary_enabled != null) patch.telegram_summary_enabled = !!req.body.telegram_summary_enabled;
   if (req.body.telegram_summary_time != null) {
     const t = String(req.body.telegram_summary_time);
-    if (/^\d{2}:\d{2}$/.test(t)) appSettings.telegram_summary_time = t;
+    if (/^\d{2}:\d{2}$/.test(t)) patch.telegram_summary_time = t;
   }
 
-  saveSettings();
+  setSettings(patch);
+  if (needsProxyReschedule) rescheduleProxyCheck();
   rescheduleSpeedtests();
   res.json({ ok: true, settings: appSettings });
 });

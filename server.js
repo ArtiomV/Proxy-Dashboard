@@ -1534,6 +1534,27 @@ function saveSettings() {
   _kvSet.run('app_settings', JSON.stringify(appSettings));
 }
 
+// Stage 14.2: single contract for appSettings access. Every caller (routes,
+// jobs, telegram bot, simulator) goes through getSetting / setSetting now.
+// Direct mutation (`appSettings.x = ...`) is the path of the historical
+// inconsistency where servers.js skipped the disk save — easy to forget.
+//
+// getSetting(key, def) — reads from state.appSettings; falls back to `def`.
+// setSetting(key, val) — mutates state.appSettings in place AND persists.
+//   Use setSettings({a:1, b:2}) for batch updates that save only once.
+function getSetting(key, def) {
+  return appSettings[key] !== undefined ? appSettings[key] : def;
+}
+function setSetting(key, val) {
+  appSettings[key] = val;
+  saveSettings();
+}
+function setSettings(partial) {
+  if (!partial || typeof partial !== 'object') return;
+  Object.assign(appSettings, partial);
+  saveSettings();
+}
+
 function getPriceForProxyCount(count) {
   const tiers = appSettings.pricing_tiers || [];
   // Sort descending by min_proxies to find the right tier
@@ -3239,7 +3260,7 @@ app.use(require('./src/routes/servers')({
   apiServers, SERVER_COUNTRIES, appSettings,
   fetchApi, saveApiServersToDb, proxySmart,
   auditLog, getClientIp,
-  saveSettings, rescheduleSpeedtests, rescheduleProxyCheck,
+  setSettings, rescheduleSpeedtests, rescheduleProxyCheck,
 }));
 
 
@@ -4375,7 +4396,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   // ---------------------------------------------------------------------------
   aiInsights.init({
     db, logger,
-    getSetting: (key, def) => (appSettings[key] !== undefined ? appSettings[key] : def),
+    getSetting,
   });
   // Load-simulator engine. Only init here — proxy-URL resolution happens in
   // the per-request endpoint (Day 2), which calls fetchAllServersDataCached()
@@ -4383,18 +4404,18 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   // them to simulator.start().
   simulator.init({
     db, logger,
-    getSetting: (key, def) => (appSettings[key] !== undefined ? appSettings[key] : def),
+    getSetting,
   });
   tgSummary.init({
     db, logger,
     clientById,
-    getSetting: (key, def) => (appSettings[key] !== undefined ? appSettings[key] : def),
+    getSetting,
     aiInsights,
   });
   tgBot.init({
     logger,
-    getSetting: (key, def) => (appSettings[key] !== undefined ? appSettings[key] : def),
-    setSetting: (key, val) => { appSettings[key] = val; saveSettings(); },
+    getSetting,
+    setSetting,
     buildDailySummary: tgSummary.buildDailySummary,
   });
   // Start the long-poll loop (handles /start, /today, /yesterday, /status)
