@@ -125,31 +125,31 @@
     .login-error{color:#FF383C;font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
 
     /* Header — unified with admin */
+    /* Header — single row with embedded nav */
     .header{
-      background:var(--bg-1);
-      border-bottom:1px solid var(--border);
-      padding:0 24px;height:52px;
-      display:flex;align-items:center;justify-content:space-between;
+      background:var(--bg-1);border-bottom:1px solid var(--border);
+      padding:0 20px;height:52px;display:flex;align-items:center;gap:16px;
+      position:sticky;top:0;z-index:100;
     }
-    .header-left{display:flex;align-items:center;gap:12px}
+    .header-left{display:flex;align-items:center;gap:10px;flex-shrink:0}
     .header-logo{display:flex;align-items:center;gap:8px;text-decoration:none}
     .header-logo img{height:22px;width:auto}
-    .header h1{
-      font-size:16px;font-weight:700;letter-spacing:-0.3px;
-      background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
-    }
-    .header-controls{display:flex;align-items:center;gap:8px}
-    .user-info{font-size:12px;color:var(--text-2)}
+    .header h1{display:none}
+    .header-client-info{font-size:11px;color:var(--text-2);display:flex;align-items:center;gap:4px}
+    .header-right{display:flex;align-items:center;gap:8px;flex-shrink:0}
+    .user-info{font-size:11px;color:var(--text-2)}
     .user-info strong{color:var(--text-0)}
+    .btn-logout{width:32px;height:32px;display:flex;align-items:center;justify-content:center;background:none;border:none;border-radius:6px;cursor:pointer;color:var(--text-3);flex-shrink:0;transition:color .2s,background .15s}
+    .btn-logout:hover{color:var(--danger);background:var(--bg-3)}
 
     /* Theme toggle */
     .theme-toggle{
-      width:36px;height:36px;border-radius:8px;
-      border:1px solid var(--border);background:var(--bg-2);
-      cursor:pointer;display:flex;align-items:center;justify-content:center;
-      font-size:18px;transition:all .2s;user-select:none;
+      width:36px;height:20px;border-radius:10px;
+      border:1px solid var(--border);background:var(--bg-3);
+      cursor:pointer;position:relative;transition:all .3s;
     }
-    .theme-toggle:hover{background:var(--bg-3);border-color:var(--border-hover)}
+    .theme-toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--accent);transition:transform .3s}
+    [data-theme="light"] .theme-toggle::after{transform:translateX(16px)}
 
     /* Buttons */
     .btn{
@@ -168,30 +168,17 @@
     .btn-danger:hover{background:var(--red-bg)}
     .btn-sm{padding:5px 10px;font-size:12px}
 
-    /* Status bar */
-    .status-bar{
-      padding:8px 24px;background:var(--bg-1);
-      border-bottom:1px solid var(--border);
-      font-size:12px;color:var(--text-2);
-      display:flex;align-items:center;gap:16px;flex-wrap:wrap;
-    }
+    /* Status indicator */
     .status-indicator{width:8px;height:8px;border-radius:50%;display:inline-block}
     .status-ok{background:var(--success)}
     .status-error{background:var(--danger)}
     .status-loading{background:var(--warning);animation:pulse 1s infinite}
 
-    /* Tabs */
-    .nav-tabs{
-      background:var(--bg-1);border-bottom:1px solid var(--border);
-      padding:0 24px;display:flex;gap:0;overflow-x:auto;
-    }
-    .nav-tab{
-      padding:11px 18px;cursor:pointer;font-size:13px;
-      color:var(--text-2);border-bottom:2px solid transparent;
-      transition:all .2s;font-weight:500;white-space:nowrap;
-    }
-    .nav-tab:hover{color:var(--text-1)}
-    .nav-tab.active{background:var(--accent-gradient);-webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;border-bottom-color:var(--accent)}
+    /* Nav tabs — embedded in header */
+    .nav-tabs{display:flex;align-items:center;gap:2px;flex:1;height:100%;overflow:visible;background:none;border:none;padding:0}
+    .nav-tab{padding:5px 11px;cursor:pointer;font-size:13px;font-weight:500;color:var(--text-2);border-radius:6px;border-bottom:none;transition:background .15s,color .15s;white-space:nowrap;display:flex;align-items:center;height:auto}
+    .nav-tab:hover{background:var(--bg-2);color:var(--text-1)}
+    .nav-tab.active{background:rgba(99,102,241,0.12);color:var(--accent);-webkit-text-fill-color:unset;background-clip:unset;-webkit-background-clip:unset;border-bottom:none}
     .tab-pane{display:none}
     .tab-pane.active{display:block;animation:fadeIn .3s ease}
 
@@ -544,15 +531,14 @@
     }
     @media(max-width:768px){
       .container{padding:12px}
-      .header{padding:12px 16px;height:auto;flex-wrap:wrap;gap:8px}
-      .header h1{font-size:16px}
-      .header-controls{width:100%;justify-content:flex-end}
+      .header{flex-wrap:wrap;height:auto;padding:8px 12px;gap:8px}
+      .header-client-info{display:none}
+      .nav-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex:none!important;width:100%;order:3}
+      .nav-tab{padding:6px 12px;font-size:12px;white-space:nowrap;flex-shrink:0}
       table{font-size:12px}
       thead th,tbody td{padding:8px 10px}
       .summary-cards{grid-template-columns:repeat(2,1fr);overflow-x:auto;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch}
       .card{scroll-snap-align:start;min-width:140px}
-      .nav-tabs{padding:0 12px;overflow-x:auto;-webkit-overflow-scrolling:touch}
-      .nav-tab{padding:10px 12px;font-size:12px;white-space:nowrap}
       .table-wrapper{overflow-x:auto;-webkit-overflow-scrolling:touch}
       .referral-hero{padding:16px !important}
       .referral-hero h2{font-size:18px !important}
@@ -568,11 +554,10 @@
     }
     @media(max-width:480px){
       .summary-cards{grid-template-columns:1fr}
-      .nav-tab{padding:8px 10px;font-size:11px}
+      .nav-tab{padding:6px 10px;font-size:11px}
       .card{padding:14px}
       .btn{padding:6px 10px;font-size:12px}
-      .header h1{font-size:14px}
-      .header-controls .btn{padding:5px 8px;font-size:11px}
+      .user-info{display:none}
     }
   </style>
 <!-- Yandex.Metrika counter -->
@@ -605,32 +590,25 @@
     <div class="header">
       <div class="header-left">
         <a class="header-logo" href="/"><img src="https://proxies.rent/img/logo.webp" alt=""></a>
-        <h1>Proxies.rent <span style="font-size:11px;font-weight:400;-webkit-text-fill-color:var(--text-2);background:none">— личный кабинет партнёра</span></h1>
+        <span class="header-client-info"><span class="status-indicator" id="statusDot"></span> <span id="statusText">OK</span> <span id="lastUpdate" style="color:var(--text-3);font-size:10px;margin-left:4px"></span></span>
       </div>
-      <div class="header-controls">
-        <span class="user-info">Клиент: <strong id="currentUser"></strong></span>
+
+      <nav class="nav-tabs">
+        <div class="nav-tab active" onclick="switchTab('traffic',this)">Панель управления</div>
+        <div class="nav-tab" onclick="switchTab('analytics',this)">Аналитика</div>
+        <div class="nav-tab" onclick="switchTab('billing',this)">История баланса</div>
+        <div class="nav-tab" onclick="switchTab('documents',this)">Документы</div>
+        <div class="nav-tab" onclick="switchTab('api',this)">API</div>
+        <div class="nav-tab" onclick="switchTab('referral',this)">Партнёрская программа</div>
+      </nav>
+
+      <div class="header-right">
+        <span class="user-info" style="font-size:11px;color:var(--text-2)">Клиент: <strong id="currentUser" style="color:var(--text-0)"></strong></span>
         <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Переключить тему"></div>
-        <button class="btn btn-accent" id="btnRefresh" onclick="loadData()">Обновить</button>
-        <button class="btn btn-danger" onclick="doLogout()">Выйти</button>
+        <button class="btn-logout" onclick="doLogout()" title="Выйти">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
       </div>
-    </div>
-
-    <div class="status-bar">
-      <span>
-        <span class="status-indicator" id="statusDot"></span>
-        <span id="statusText">Готово</span>
-      </span>
-      <span id="lastUpdate"></span>
-    </div>
-
-    <!-- Tabs: NO Прокси tab -->
-    <div class="nav-tabs">
-      <div class="nav-tab active" onclick="switchTab('traffic',this)">Панель управления</div>
-      <div class="nav-tab" onclick="switchTab('analytics',this)">Аналитика</div>
-      <div class="nav-tab" onclick="switchTab('billing',this)">История баланса</div>
-      <div class="nav-tab" onclick="switchTab('documents',this)">Документы</div>
-      <div class="nav-tab" onclick="switchTab('api',this)">API</div>
-      <div class="nav-tab" onclick="switchTab('referral',this)">Партнёрская программа</div>
     </div>
 
     <!-- TAB: Traffic (now includes proxy credentials, export, API info below the traffic table) -->
@@ -707,9 +685,6 @@
           </table>
         </div>
         <div class="modem-cards" id="mobileModemCards"></div>
-
-        <!-- External proxies section -->
-        <div id="extProxiesSection" style="display:none"></div>
 
         <!-- Export buttons (below the table) -->
         <div id="proxyExportButtons" style="display:none;margin-top:16px;gap:8px;flex-wrap:wrap">
@@ -1236,8 +1211,7 @@ function getTheme(){return localStorage.getItem('pr_theme')||'dark'}
 
 function applyTheme(theme){
   document.documentElement.setAttribute('data-theme',theme);
-  var btn=document.getElementById('themeToggle');
-  if(btn) btn.textContent=theme==='dark'?'\u2600\uFE0F':'\uD83C\uDF19';
+  // Theme toggle is CSS-only (::after pseudo-element)
 }
 
 function toggleTheme(){
@@ -1263,7 +1237,7 @@ var currentSort={key:'modemNick',dir:'asc'};
 // --- Country config ---
 var countryNames={'MD':'\ud83c\uddf2\ud83c\udde9 Молдова','RO':'\ud83c\uddf7\ud83c\uddf4 Румыния','??':'\ud83c\udf10 Другое'};
 var countryOrder=['MD','RO','??'];
-var COUNTRIES={S1:{serverIp:'89.149.100.92'},S2:{serverIp:'31.5.194.89'}};
+var COUNTRIES={}; // populated from server data in loadData
 
 // --- Tabs ---
 function switchTab(name,el){
@@ -1743,28 +1717,34 @@ function loadDailyTrafficChart(textColor,gridColor){
     renderModemBar();
 
     // Country cards from filtered data
-    var countryMeta={S1:{name:'Молдова',flag:'🇲🇩',color:'rgba(25,96,201,0.8)',bg:'rgba(25,96,201,0.08)'},S2:{name:'Румыния',flag:'🇷🇴',color:'rgba(52,199,89,0.8)',bg:'rgba(52,199,89,0.08)'}};
-    var cnByServer={};
+    var _cFlags={'MD':'🇲🇩','RO':'🇷🇴'};
+    var _cColors={'MD':{color:'rgba(25,96,201,0.8)',bg:'rgba(25,96,201,0.08)'},'RO':{color:'rgba(52,199,89,0.8)',bg:'rgba(52,199,89,0.08)'}};
+    // Group by country instead of server
+    var cnByCountry={};
     modemList.forEach(function(m){
       var sn=m.serverName||'??';
-      if(!cnByServer[sn])cnByServer[sn]={in:0,out:0,count:0};
-      cnByServer[sn].in+=m.in;cnByServer[sn].out+=m.out;cnByServer[sn].count++;
+      var ci=COUNTRIES[sn]||{};
+      var cc=ci.country||'??';
+      if(!cnByCountry[cc])cnByCountry[cc]={in:0,out:0,count:0,name:ci.name||sn};
+      cnByCountry[cc].in+=m.in;cnByCountry[cc].out+=m.out;cnByCountry[cc].count++;
     });
     var totalGB=periodTotal/1073741824;
     var ccHtml='';
-    Object.keys(cnByServer).sort().forEach(function(sn){
-      var m=countryMeta[sn]||{name:sn,flag:'🌍',color:'var(--text-2)',bg:'var(--bg-2)'};
-      var gb=(cnByServer[sn].in+cnByServer[sn].out)/1073741824;
+    Object.keys(cnByCountry).sort().forEach(function(cc){
+      var cData=cnByCountry[cc];
+      var flag=_cFlags[cc]||'🌍';
+      var clr=_cColors[cc]||{color:'var(--text-2)',bg:'var(--bg-2)'};
+      var gb=(cData.in+cData.out)/1073741824;
       var pct=totalGB>0?Math.round(gb/totalGB*100):0;
-      var inGb=(cnByServer[sn].in/1073741824).toFixed(1);
-      var outGb=(cnByServer[sn].out/1073741824).toFixed(1);
+      var inGb=(cData.in/1073741824).toFixed(1);
+      var outGb=(cData.out/1073741824).toFixed(1);
       ccHtml+='<div style="margin-bottom:14px">';
       ccHtml+='<div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:5px">';
-      ccHtml+='<span style="font-size:13px;font-weight:600;color:var(--text-0)">'+m.flag+' '+m.name+'</span>';
+      ccHtml+='<span style="font-size:13px;font-weight:600;color:var(--text-0)">'+flag+' '+cData.name+'</span>';
       ccHtml+='<span style="font-size:12px;color:var(--text-1);font-weight:700">'+gb.toFixed(1)+' GB</span>';
       ccHtml+='</div>';
-      ccHtml+='<div style="background:var(--bg-2);border-radius:4px;height:7px;overflow:hidden;margin-bottom:4px"><div style="background:'+m.color+';height:100%;width:'+pct+'%;border-radius:4px;transition:width .4s"></div></div>';
-      ccHtml+='<div style="font-size:11px;color:var(--text-3)">↓ '+inGb+' GB &nbsp;↑ '+outGb+' GB &nbsp;·&nbsp; '+cnByServer[sn].count+' мод. &nbsp;·&nbsp; '+pct+'%</div>';
+      ccHtml+='<div style="background:var(--bg-2);border-radius:4px;height:7px;overflow:hidden;margin-bottom:4px"><div style="background:'+clr.color+';height:100%;width:'+pct+'%;border-radius:4px;transition:width .4s"></div></div>';
+      ccHtml+='<div style="font-size:11px;color:var(--text-3)">↓ '+inGb+' GB &nbsp;↑ '+outGb+' GB &nbsp;·&nbsp; '+cData.count+' мод. &nbsp;·&nbsp; '+pct+'%</div>';
       ccHtml+='</div>';
     });
     var ccEl=document.getElementById('analyticsCountryCards');
@@ -1824,10 +1804,21 @@ function loadDailyTrafficChart(textColor,gridColor){
           locTotals[sn2][todayDate]=(locTotals[sn2][todayDate]||0)+gb2;
         }
       }
-      var locMeta={S1:{name:'Молдова 🇲🇩',color:'rgba(25,96,201,0.85)',bg:'rgba(25,96,201,0.08)'},S2:{name:'Румыния 🇷🇴',color:'rgba(52,199,89,0.85)',bg:'rgba(52,199,89,0.08)'}};
-      Object.keys(locTotals).sort().forEach(function(sn){
-        var m=locMeta[sn]||{name:sn,color:'rgba(255,204,0,0.85)',bg:'rgba(255,204,0,0.08)'};
-        var d2=dates.map(function(d){return+(locTotals[sn][d]||0).toFixed(3)});
+      var _locFlags={'MD':'🇲🇩','RO':'🇷🇴'};
+      var _locClr={'MD':{color:'rgba(25,96,201,0.85)',bg:'rgba(25,96,201,0.08)'},'RO':{color:'rgba(52,199,89,0.85)',bg:'rgba(52,199,89,0.08)'}};
+      // Aggregate locTotals by country
+      var locByCountry={};
+      Object.keys(locTotals).forEach(function(sn){
+        var ci=COUNTRIES[sn]||{};var cc=ci.country||sn;
+        if(!locByCountry[cc])locByCountry[cc]={dates:{},name:ci.name||sn};
+        for(var d in locTotals[sn])locByCountry[cc].dates[d]=(locByCountry[cc].dates[d]||0)+locTotals[sn][d];
+      });
+      Object.keys(locByCountry).sort().forEach(function(cc){
+        var lc=locByCountry[cc];
+        var clr=_locClr[cc]||{color:'rgba(255,204,0,0.85)',bg:'rgba(255,204,0,0.08)'};
+        var flag=_locFlags[cc]||'🌍';
+        var m={name:lc.name+' '+flag,color:clr.color,bg:clr.bg};
+        var d2=dates.map(function(d){return+(lc.dates[d]||0).toFixed(3)});
         datasets.push({label:m.name,data:d2,borderColor:m.color,backgroundColor:m.bg,borderWidth:2,pointRadius:3,tension:0.35,fill:true});
       });
       // ИТОГО dashed
@@ -1880,7 +1871,7 @@ function loadBillingHistory(){
   .then(function(r){return r.json()})
   .then(function(data){
     if(data.error){
-      document.getElementById('billingAccordion').innerHTML='<div style="text-align:center;padding:40px;color:var(--text-3)">'+data.error+'</div>';
+      document.getElementById('billingAccordion').innerHTML='<div style="text-align:center;padding:40px;color:var(--text-3)">'+esc(data.error)+'</div>';
       return;
     }
 
@@ -2021,7 +2012,7 @@ function loadBillingHistory(){
     document.getElementById('billingAccordion').innerHTML=html;
   })
   .catch(function(err){
-    document.getElementById('billingAccordion').innerHTML='<div style="text-align:center;padding:40px;color:var(--red)">Ошибка загрузки: '+err.message+'</div>';
+    document.getElementById('billingAccordion').innerHTML='<div style="text-align:center;padding:40px;color:var(--red)">Ошибка загрузки: '+esc(err.message)+'</div>';
   });
 }
 
@@ -2184,13 +2175,18 @@ function copyText(t,b){
 // --- Load Data ---
 async function loadData(){
   var btn=document.getElementById('btnRefresh');
-  btn.disabled=true;
+  if(btn)btn.disabled=true;
   setStatus('loading','Загрузка...');
   document.getElementById('errorContainer').innerHTML='';
 
   try{
     var data=await fetchJSON('/api/dashboard_data');
     rawData=data;
+    // Populate COUNTRIES from server data
+    if(data.servers&&data.servers.length){
+      COUNTRIES={};
+      data.servers.forEach(function(s){COUNTRIES[s.name]={serverIp:s.publicIp||'',country:s.country||'',name:s.countryName||s.name}});
+    }
     var bwData=data.bandwidth;
     var statusData=data.status;
     var portsData=data.ports;
@@ -2239,8 +2235,8 @@ async function loadData(){
         var modem=modemMap[imei]||{nick:imei||'?',model:'',online:'?',extIp:'',operator:'',networkType:'',server:''};
 
         var country=modem.nick.startsWith('MD')?'MD':modem.nick.startsWith('RO')?'RO':'??';
-        var serverName=modem.server||(imei.startsWith('S1_')?'S1':imei.startsWith('S2_')?'S2':'');
-        var rawImei=imei.replace(/^S[12]_/,'');
+        var serverName=modem.server||bw._server||(imei.match(/^(S\d+)_/)?imei.match(/^(S\d+)_/)[1]:'')||(portId.match(/^(S\d+)_/)?portId.match(/^(S\d+)_/)[1]:'');
+        var rawImei=imei.replace(/^S\d+_/,'');
 
         // IP tracking info
         var ipInfo=ipTracking[imei]||null;
@@ -2321,11 +2317,10 @@ async function loadData(){
         '\u26A0\uFE0F Сервер недоступен: '+escapeHtml(cacheWarnings)+'. Трафик и доступы отображаются из кеша. Модемы помечены как offline.</div>';
     }
 
-    renderTable();
-    renderProxyTable();
-    updateSummary();
-    loadExternalProxies();
-    initOnboarding();
+    try{renderTable()}catch(e){console.error('[loadData] renderTable:',e)}
+    try{renderProxyTable()}catch(e){console.error('[loadData] renderProxyTable:',e)}
+    try{updateSummary()}catch(e){console.error('[loadData] updateSummary:',e)}
+    try{initOnboarding()}catch(e){console.error('[loadData] initOnboarding:',e)}
 
     // Restore saved tab
     var _savedTab=localStorage.getItem('pr_active_tab');
@@ -2341,7 +2336,7 @@ async function loadData(){
     document.getElementById('errorContainer').innerHTML=
       '<div class="error-msg">Не удалось загрузить данные: '+escapeHtml(err.message)+'</div>';
   }finally{
-    btn.disabled=false;
+    if(btn)btn.disabled=false;
   }
 }
 
@@ -2431,9 +2426,9 @@ function renderTable(){
         changeIpHtml+='<a href="'+escapeHtml(row.resetSecureLink)+'" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12px" title="Сброс IP">\ud83d\udd04 Сброс</a> ';
         changeIpHtml+='<button class="copy-btn" onclick="copyText(\''+escapeHtml(row.resetSecureLink).replace(/'/g,"\\'")+'\',this)" title="Копировать ссылку">\ud83d\udccb</button> ';
       }else{
-        changeIpHtml+='<button class="action-btn-sm" onclick="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+row.serverName+'\',this)" title="Сброс IP">\ud83d\udd04</button> ';
+        changeIpHtml+='<button class="action-btn-sm" onclick="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+escapeHtml(row.serverName)+'\',this)" title="Сброс IP">\ud83d\udd04</button> ';
       }
-      changeIpHtml+='<button class="action-btn-sm" onclick="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+row.serverName+'\',\''+escapeHtml(row.imei)+'\')" title="IP история" style="font-size:12px">\ud83d\udcc3</button>';
+      changeIpHtml+='<button class="action-btn-sm" onclick="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',\''+escapeHtml(row.imei)+'\')" title="IP история" style="font-size:12px">\ud83d\udcc3</button>';
 
       var rowStyle=row._cached?'opacity:0.6':(row._offline?'opacity:0.45':'');
       html+='<tr style="'+rowStyle+'">'+
@@ -2536,101 +2531,22 @@ function toggleMc(id){
   if(el) el.classList.toggle('open');
 }
 
-// ==================== EXTERNAL PROXIES ====================
-function loadExternalProxies() {
-  fetch('/api/client/external_proxies', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
-    .then(function(proxies) {
-      var section = document.getElementById('extProxiesSection');
-      if (!proxies || !proxies.length) { section.style.display = 'none'; return; }
-      section.style.display = 'block';
-
-      // Build rows in same format as main modem table
-      var h = '<tr class="country-header"><td colspan="8">' +
-        '\ud83c\udf10 Партнёрские прокси' +
-        '<span class="country-count">' + proxies.length + ' шт.</span></td></tr>';
-
-      proxies.forEach(function(p) {
-        // Column 1: Label + protocol (like modem nick + operator)
-        var col1 = '<td><div style="display:flex;align-items:center;gap:10px">' +
-          '<span class="status-dot online"></span>' +
-          '<div style="display:flex;flex-direction:column;gap:2px">' +
-          '<span class="modem-nick">' + escapeHtml(p.label || p.host) + '</span>' +
-          '<span style="font-size:11px;color:var(--text-3)">' + escapeHtml(p.protocol) + '</span>' +
-          '</div></div></td>';
-
-        // Column 2: Реквизиты (host:port like HTTP/SOCKS)
-        var col2 = '<td>' +
-          '<div><span style="color:var(--text-2);font-size:11px">' + escapeHtml(p.protocol) + ':</span> ' +
-          '<span class="mono">' + escapeHtml(p.host) + ':' + p.port + '</span> ' +
-          '<button class="copy-btn" onclick="copyText(\'' + escapeHtml(p.host) + ':' + p.port + '\',this)">\ud83d\udccb</button></div></td>';
-
-        // Column 3: Логин:Пароль
-        var col3 = '<td>';
-        if (p.login) {
-          col3 += '<span class="mono">' + escapeHtml(p.login) + ':' + escapeHtml(p.password) + '</span> ' +
-            '<button class="copy-btn" onclick="copyText(\'' + escapeHtml(p.login) + ':' + escapeHtml(p.password) + '\',this)">\ud83d\udccb</button>';
-        } else { col3 += '-'; }
-        col3 += '</td>';
-
-        // Column 4: Смена IP
-        var col4 = '<td style="text-align:center;white-space:nowrap">';
-        if (p.change_ip_url) {
-          col4 += '<a href="' + escapeHtml(p.change_ip_url) + '" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12px">\ud83d\udd04 Сброс</a> ' +
-            '<button class="copy-btn" onclick="copyText(\'' + escapeHtml(p.change_ip_url) + '\',this)">\ud83d\udccb</button>';
-        } else { col4 += '<span style="color:var(--text-3)">—</span>'; }
-        col4 += '</td>';
-
-        // Column 5: пустая (вместо Ротация) для выравнивания с основной таблицей
-        var col5 = '<td></td>';
-
-        // Column 6: Трафик (вместо Сегодня)
-        var col6 = '<td style="text-align:center;white-space:nowrap">';
-        var tgb = p.traffic_used_gb || 0;
-        col6 += '<span class="mono">' + tgb.toFixed(2) + ' ГБ</span>';
-        col6 += '</td>';
-
-        // Column 7: Цена (вместо Вчера)
-        var col7 = '<td style="text-align:center;white-space:nowrap">';
-        if (p.price) {
-          col7 += '<span class="mono">' + p.price + ' \u20bd</span>';
-          col7 += '<br><span style="font-size:10px;color:var(--text-3)">' + (p.billing_type === 'per_gb' ? 'за ГБ' : 'в мес.') + '</span>';
-        } else { col7 += '<span style="color:var(--text-3)">—</span>'; }
-        col7 += '</td>';
-
-        // Column 8: Стоимость (вместо Месяц) — если per_gb, считаем трафик*цена
-        var col8 = '<td style="text-align:center;white-space:nowrap">';
-        if (p.price && p.billing_type === 'per_gb' && tgb > 0) {
-          var cost = (tgb * p.price).toFixed(0);
-          col8 += '<span class="mono" style="font-weight:600">' + cost + ' \u20bd</span>';
-        } else if (p.price && p.billing_type === 'monthly') {
-          col8 += '<span class="mono" style="font-weight:600">' + p.price + ' \u20bd</span>';
-        } else { col8 += '<span style="color:var(--text-3)">—</span>'; }
-        col8 += '</td>';
-
-        h += '<tr>' + col1 + col2 + col3 + col4 + col5 + col6 + col7 + col8 + '</tr>';
-      });
-
-      // Insert into the main table body after modem rows
-      var tbody = document.getElementById('tableBody');
-      if (tbody) tbody.insertAdjacentHTML('beforeend', h);
-    })
-    .catch(function() {});
-}
-
 function updateSummary(){
   // --- Ports card: active / total, split by country ---
   var total=tableData.length;
-  var countryCounts={};
-  var countryNames={S1:'Молдова',S2:'Румыния'};
-  var countryFlags={S1:'🇲🇩',S2:'🇷🇴'};
+  // Group by country (not server) using COUNTRIES data
+  var byCountry={};
   tableData.forEach(function(r){
     var sn=r.serverName||'??';
-    countryCounts[sn]=(countryCounts[sn]||0)+1;
+    var ci=COUNTRIES[sn]||{};
+    var cc=ci.country||'??';
+    if(!byCountry[cc])byCountry[cc]={count:0,name:ci.name||sn};
+    byCountry[cc].count++;
   });
+  var countryFlags={'MD':'🇲🇩','RO':'🇷🇴'};
   document.getElementById('totalPorts').textContent=total+' / '+total;
-  var splitParts=Object.keys(countryCounts).sort().map(function(sn){
-    return (countryFlags[sn]||'🌍')+' '+(countryNames[sn]||sn)+': '+countryCounts[sn];
+  var splitParts=Object.keys(byCountry).sort().map(function(cc){
+    return (countryFlags[cc]||'🌍')+' '+byCountry[cc].name+': '+byCountry[cc].count;
   });
   document.getElementById('portsCountrySplit').textContent=splitParts.join(' · ');
 
@@ -2715,7 +2631,7 @@ function buildRotationCell(row){
     for(var i=1;i<opts.length;i++){if(opts[i].v>=leftMin){cur=opts[i].v;break}}
     if(cur===0)cur=1440;
   }
-  var h='<select class="rotation-select" onchange="setRotation(\''+escapeHtml(row.modemNick)+'\',\''+row.serverName+'\',this.value,this)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);cursor:pointer">';
+  var h='<select class="rotation-select" onchange="setRotation(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',this.value,this)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);cursor:pointer">';
   var matched=false;
   for(var i=0;i<opts.length;i++){
     var sel=opts[i].v===cur?' selected':'';
@@ -3119,7 +3035,7 @@ var exportFormat='txt_login_at';
 var exportProto='http';
 var exportRotation=true;
 var exportTxtOrder='login_at'; // 'login_at' | 'host_colon'
-var exportLocFilter=[];   // [] = все, ['S1'] = Молдова, ['S2'] = Румыния
+var exportLocFilter=[];   // [] = все, ['MD'] = Молдова, ['RO'] = Румыния
 var exportModemFilter=[]; // [] = все, [...nicks]
 
 var EXPORT_FORMATS={
@@ -3219,8 +3135,7 @@ function buildExportModal(){
     '<div><div style="font-size:10px;color:var(--text-3);margin-bottom:4px">Локация</div>'+
     '<div style="display:flex;gap:4px">'+
     '<button onclick="toggleExportLoc(\'\')" id="eloc-all" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff">Все</button>'+
-    '<button onclick="toggleExportLoc(\'S1\')" id="eloc-S1" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">🇲🇩 Молдова</button>'+
-    '<button onclick="toggleExportLoc(\'S2\')" id="eloc-S2" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">🇷🇴 Румыния</button>'+
+    (function(){var _cf={'MD':'🇲🇩','RO':'🇷🇴'};var btns='';var seen={};Object.keys(COUNTRIES).forEach(function(sn){var ci=COUNTRIES[sn];var cc=ci.country||sn;if(seen[cc])return;seen[cc]=true;var flag=_cf[cc]||'🌍';btns+='<button onclick="toggleExportLoc(\''+cc+'\')" id="eloc-'+cc+'" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">'+flag+' '+ci.name+'</button>'});return btns})()+
     '</div></div>'+
     '</div></div>'+
     '<div style="padding:8px 24px 4px;flex-shrink:0;display:flex;justify-content:space-between;align-items:center">'+
@@ -3254,14 +3169,15 @@ function _renderExportModemButtons(){
   wrap.innerHTML=html;
 }
 
-function toggleExportLoc(srv){
-  if(srv===''){exportLocFilter=[];}
-  else{var i=exportLocFilter.indexOf(srv);if(i===-1)exportLocFilter.push(srv);else exportLocFilter.splice(i,1);}
+function toggleExportLoc(cc){
+  if(cc===''){exportLocFilter=[];}
+  else{var i=exportLocFilter.indexOf(cc);if(i===-1)exportLocFilter.push(cc);else exportLocFilter.splice(i,1);}
   var none=exportLocFilter.length===0;
-  [{k:'all',active:none},{k:'S1',active:exportLocFilter.indexOf('S1')!==-1},{k:'S2',active:exportLocFilter.indexOf('S2')!==-1}].forEach(function(o){
-    var btn=document.getElementById('eloc-'+o.k);if(!btn)return;
-    btn.style.background=o.active?'var(--accent)':'var(--bg-2)';btn.style.color=o.active?'#fff':'var(--text-1)';btn.style.border='1px solid '+(o.active?'var(--accent)':'var(--border)');
-  });
+  // Update all location buttons
+  var allBtn=document.getElementById('eloc-all');
+  if(allBtn){allBtn.style.background=none?'var(--accent)':'var(--bg-2)';allBtn.style.color=none?'#fff':'var(--text-1)';allBtn.style.border='1px solid '+(none?'var(--accent)':'var(--border)');}
+  var seen={};
+  Object.keys(COUNTRIES).forEach(function(sn){var c=COUNTRIES[sn].country||sn;if(seen[c])return;seen[c]=true;var btn=document.getElementById('eloc-'+c);if(!btn)return;var active=exportLocFilter.indexOf(c)!==-1;btn.style.background=active?'var(--accent)':'var(--bg-2)';btn.style.color=active?'#fff':'var(--text-1)';btn.style.border='1px solid '+(active?'var(--accent)':'var(--border)');});
   refreshExportPreview();
 }
 function toggleExportModem(nick){
@@ -3349,7 +3265,7 @@ function setCustomTpl(tpl){
 function getExportProxies(){
   var proto=exportProto;
   var rows=tableData.filter(function(r){return r.proxyLogin;});
-  if(exportLocFilter.length>0) rows=rows.filter(function(r){return exportLocFilter.indexOf(r.serverName)!==-1;});
+  if(exportLocFilter.length>0) rows=rows.filter(function(r){var ci=COUNTRIES[r.serverName]||{};return exportLocFilter.indexOf(ci.country||r.serverName)!==-1;});
   if(exportModemFilter.length>0) rows=rows.filter(function(r){return exportModemFilter.indexOf(r.modemNick)!==-1;});
   var mapped=rows.map(function(r){
     var ci=COUNTRIES[r.serverName]||{};
@@ -3357,10 +3273,10 @@ function getExportProxies(){
     var port=proto==='http'?(r.httpPort||''):(r.socksPort||'');
     return {host:host,port:port,login:r.proxyLogin,pass:r.proxyPassword,proto:proto,changeip:r.resetSecureLink||'',nick:r.modemNick||''};
   }).filter(function(p){return p.port;});
-  // Deduplicate by host:port
+  // Deduplicate by login:pass@host:port (not just host:port — same IP may serve different modems)
   var seen={};
   var deduped=mapped.filter(function(p){
-    var key=p.host+':'+p.port;
+    var key=p.login+':'+p.pass+'@'+p.host+':'+p.port;
     if(seen[key])return false;
     seen[key]=true;return true;
   });

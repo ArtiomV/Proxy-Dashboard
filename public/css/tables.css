@@ -1,14 +1,14 @@
 /* Main table */
-.table-wrap{padding:0 24px 24px;overflow-x:auto}
-.country-group{margin-top:14px}
+.table-wrap{padding:0 24px 24px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.country-group{margin-top:14px;overflow-x:auto;-webkit-overflow-scrolling:touch}
 .country-header{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg-2);border-radius:8px 8px 0 0;border:1px solid var(--border);border-bottom:none}
 .country-flag{font-size:20px}
 .country-name{font-size:13px;font-weight:600;color:var(--text-0)}
 .country-stats{font-size:11px;color:var(--text-2);margin-left:auto;display:flex;gap:12px}
-table{width:100%;border-collapse:collapse;background:var(--bg-1);border:1px solid var(--border);border-top:none;table-layout:fixed}
-th{position:sticky;top:0;background:var(--bg-2);padding:8px 14px;text-align:center;font-size:10px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
+table{width:100%;border-collapse:collapse;background:var(--bg-1);border:1px solid var(--border);border-top:none;table-layout:auto}
+th{position:sticky;top:0;background:var(--bg-2);padding:6px 8px;text-align:center;font-size:10px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:.5px;white-space:nowrap;border-bottom:1px solid var(--border);cursor:pointer;user-select:none}
 th:hover{color:var(--text-1)}
-td{padding:6px 10px;font-size:12px;border-bottom:1px solid var(--bg-3);white-space:nowrap;text-align:center}
+td{padding:5px 6px;font-size:11px;border-bottom:1px solid var(--bg-3);white-space:nowrap;text-align:center}
 tr:hover td{background:var(--row-hover)}
 tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 
@@ -51,3 +51,17 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 /* Badges */
 .badge-pos{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;background:var(--green-bg);color:var(--green)}
 .badge-neg{display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:500;background:var(--red-bg);color:var(--red)}
+
+/* Proxy latency monitoring */
+.pc-lat,.pc-err{font-size:11px;font-weight:600;padding:2px 8px;border-radius:4px;display:inline-block}
+.pc-good{color:var(--green);background:var(--green-bg);border:1px solid rgba(52,199,89,.35)}
+.pc-warn{color:var(--orange);background:rgba(255,193,7,.18);border:1px solid rgba(255,193,7,.35)}
+.pc-bad{color:var(--red);background:var(--red-bg);border:1px solid rgba(255,56,60,.35)}
+.pc-detail-row td{background:var(--bg-2)!important;box-shadow:none!important}
+.pc-log-wrap{padding:6px 12px;max-height:220px;overflow-y:auto}
+.pc-log-table{width:100%;border-collapse:collapse;font-size:11px}
+.pc-log-table th{padding:4px 10px;text-align:left;font-size:10px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:.3px;border-bottom:1px solid var(--border)}
+.pc-log-table td{padding:4px 10px;color:var(--text-1);border-bottom:1px solid var(--bg-3)}
+.pc-row-err td{background:rgba(255,56,60,.05)!important}
+.pc-st-ok{color:var(--success);font-weight:600;font-size:10px}
+.pc-st-warn{color:var(--orange);font-size:10px}

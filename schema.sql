@@ -28,6 +28,12 @@ CREATE TABLE IF NOT EXISTS clients (
   address         TEXT DEFAULT '',
   auto_acts       INTEGER DEFAULT 1,
   auto_bills      INTEGER DEFAULT 1,
+  allow_debt      INTEGER DEFAULT 0,
+  max_debt        REAL,
+  sla_uptime_pct  REAL DEFAULT 99.0,
+  sla_max_latency_ms INTEGER DEFAULT 1000,
+  sla_max_error_pct REAL DEFAULT 5.0,
+  sla_auto_credit INTEGER DEFAULT 0,
   last_traffic_snapshot TEXT DEFAULT '{}',
   created_at      TEXT DEFAULT (datetime('now')),
   updated_at      TEXT DEFAULT (datetime('now'))
@@ -111,6 +117,13 @@ CREATE INDEX IF NOT EXISTS idx_bank_payments_payment_id ON bank_payments(payment
 CREATE INDEX IF NOT EXISTS idx_bank_payments_client_id ON bank_payments(matched_client_id);
 CREATE INDEX IF NOT EXISTS idx_bank_payments_date ON bank_payments(date);
 CREATE INDEX IF NOT EXISTS idx_bank_payments_tochka_id ON bank_payments(tochka_payment_id);
+-- Hard idempotency for webhook + sync (prevents double-credit race)
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_payments_pid_unique
+  ON bank_payments(payment_id)
+  WHERE payment_id != '';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_payments_tpid_unique
+  ON bank_payments(tochka_payment_id)
+  WHERE tochka_payment_id IS NOT NULL AND tochka_payment_id != '';
 
 -- Client documents (replaces client.documents[] array)
 CREATE TABLE IF NOT EXISTS client_documents (
@@ -168,6 +181,21 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_audit_admin ON audit_log(admin);
 CREATE INDEX IF NOT EXISTS idx_audit_action ON audit_log(action);
 CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_log(timestamp);
+
+-- System activity log (automated processes: speedtest, billing, recovery, etc.)
+CREATE TABLE IF NOT EXISTS system_log (
+  id          INTEGER PRIMARY KEY AUTOINCREMENT,
+  timestamp   TEXT NOT NULL DEFAULT (datetime('now')),
+  category    TEXT NOT NULL,
+  level       TEXT NOT NULL DEFAULT 'info',
+  action      TEXT NOT NULL,
+  target      TEXT,
+  message     TEXT NOT NULL,
+  details     TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_syslog_ts ON system_log(timestamp);
+CREATE INDEX IF NOT EXISTS idx_syslog_cat ON system_log(category, timestamp);
+CREATE INDEX IF NOT EXISTS idx_syslog_level ON system_log(level, timestamp);
 
 -- IP tracking (replaces ip_tracking.json)
 CREATE TABLE IF NOT EXISTS ip_tracking (
@@ -240,6 +268,8 @@ CREATE TABLE IF NOT EXISTS traffic_hourly (
   hour_start  TEXT NOT NULL,     -- '2026-03-29 14:00'
   bytes_in    INTEGER DEFAULT 0,
   bytes_out   INTEGER DEFAULT 0,
+  uncertain   INTEGER NOT NULL DEFAULT 0,
+  corrected   INTEGER DEFAULT 0,
   UNIQUE(port_id, hour_start)
 );
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_hour ON traffic_hourly(hour_start);
@@ -261,9 +291,103 @@ CREATE INDEX IF NOT EXISTS idx_daily_traffic_port_date ON daily_traffic(port_nam
 -- Performance indexes
 CREATE INDEX IF NOT EXISTS idx_ledger_client_type ON billing_ledger(client_id, type);
 CREATE INDEX IF NOT EXISTS idx_ledger_client_date ON billing_ledger(client_id, date);
+-- Idempotency for daily charges: prevents duplicate rows if runDailyBilling retries
+CREATE UNIQUE INDEX IF NOT EXISTS idx_ledger_unique_charge
+  ON billing_ledger(client_id, date, type)
+  WHERE type = 'charge';
 CREATE INDEX IF NOT EXISTS idx_bank_matched ON bank_payments(matched_client_id);
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_operator ON traffic_hourly(operator, hour_start);
 CREATE INDEX IF NOT EXISTS idx_traffic_hourly_client ON traffic_hourly(client_name, hour_start);
+
+-- Hourly snapshots (bandwidth counter baselines for delta calculation)
+CREATE TABLE IF NOT EXISTS hourly_snapshots (
+  port_id                    TEXT PRIMARY KEY,
+  day_in                     INTEGER NOT NULL DEFAULT 0,
+  day_out                    INTEGER NOT NULL DEFAULT 0,
+  month_in                   INTEGER NOT NULL DEFAULT 0,
+  month_out                  INTEGER NOT NULL DEFAULT 0,
+  yesterday_in               INTEGER NOT NULL DEFAULT 0,
+  yesterday_out              INTEGER NOT NULL DEFAULT 0,
+  prev_month_in              INTEGER NOT NULL DEFAULT 0,
+  prev_month_out             INTEGER NOT NULL DEFAULT 0,
+  day_at_last_hour_start_in  INTEGER NOT NULL DEFAULT 0,
+  day_at_last_hour_start_out INTEGER NOT NULL DEFAULT 0,
+  mon_at_last_hour_start_in  INTEGER NOT NULL DEFAULT 0,
+  mon_at_last_hour_start_out INTEGER NOT NULL DEFAULT 0,
+  pending                    INTEGER NOT NULL DEFAULT 0,
+  captured_at                TEXT NOT NULL DEFAULT (datetime('now')),
+  last_updated_at            TEXT
+);
+
+-- SLA violations (Phase 4) — per-client breaches of uptime/latency/errors SLA
+CREATE TABLE IF NOT EXISTS sla_violations (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id        TEXT,
+  date             TEXT,
+  metric           TEXT,
+  expected         REAL,
+  actual           REAL,
+  credited_amount  REAL DEFAULT 0,
+  created_at       TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_sla_violations_client ON sla_violations(client_id, date);
+CREATE INDEX IF NOT EXISTS idx_sla_violations_date ON sla_violations(date);
+
+-- API usage tracking (Phase 2) — per-client log of /api/v1/* requests
+CREATE TABLE IF NOT EXISTS api_usage (
+  id               INTEGER PRIMARY KEY AUTOINCREMENT,
+  client_id        TEXT,
+  client_name      TEXT,
+  api_key_prefix   TEXT,
+  endpoint         TEXT,
+  method           TEXT,
+  status_code      INTEGER,
+  response_time_ms INTEGER,
+  user_agent       TEXT,
+  ip               TEXT,
+  timestamp        TEXT DEFAULT CURRENT_TIMESTAMP,
+  error            TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_api_usage_client ON api_usage(client_id, timestamp);
+CREATE INDEX IF NOT EXISTS idx_api_usage_ts ON api_usage(timestamp);
+
+-- Raw per-modem domain hit counts (Phase 5 logs explorer)
+CREATE TABLE IF NOT EXISTS top_hosts_detail (
+  id           INTEGER PRIMARY KEY AUTOINCREMENT,
+  snapshot_at  TEXT NOT NULL,
+  server_name  TEXT NOT NULL,
+  port_id      TEXT NOT NULL,
+  nick         TEXT NOT NULL,
+  client_name  TEXT NOT NULL DEFAULT '',
+  operator     TEXT NOT NULL DEFAULT '',
+  country      TEXT NOT NULL DEFAULT '',
+  host         TEXT NOT NULL,
+  count        INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_thd_host   ON top_hosts_detail(host);
+CREATE INDEX IF NOT EXISTS idx_thd_client ON top_hosts_detail(client_name);
+CREATE INDEX IF NOT EXISTS idx_thd_op     ON top_hosts_detail(operator);
+CREATE INDEX IF NOT EXISTS idx_thd_srv    ON top_hosts_detail(server_name);
+CREATE INDEX IF NOT EXISTS idx_thd_nick   ON top_hosts_detail(server_name, nick);
+CREATE INDEX IF NOT EXISTS idx_thd_snap   ON top_hosts_detail(snapshot_at);
+
+-- Proxy latency checks
+CREATE TABLE IF NOT EXISTS proxy_checks (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  server_name TEXT NOT NULL,
+  nick TEXT NOT NULL,
+  client_name TEXT NOT NULL DEFAULT '',
+  operator TEXT NOT NULL DEFAULT '',
+  checked_at TEXT NOT NULL,
+  connect_ms INTEGER,
+  total_ms INTEGER,
+  status_code INTEGER,
+  error TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE INDEX IF NOT EXISTS idx_pc_nick ON proxy_checks(nick);
+CREATE INDEX IF NOT EXISTS idx_pc_checked ON proxy_checks(checked_at);
+CREATE INDEX IF NOT EXISTS idx_pc_operator ON proxy_checks(operator);
 
 -- Migrations tracking
 CREATE TABLE IF NOT EXISTS _migrations (

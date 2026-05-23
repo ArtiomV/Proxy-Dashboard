@@ -10,3 +10,22 @@ known_modems.json
 top_hosts_cache.json
 /documents/
 logs/
+
+# Stage SNAPSHOT 2026-05-23: state files that were leaking to git on prod
+bank_payments.json
+billing_ledger.json
+ip_history.json
+ip_tracking.json
+sessions.json
+speedtest_history.json
+telegram_proxies.json
+telegram_users.json
+tochka_config.json
+uptime_tracking.json
+clients.json
+settings.json
+*.bak
+*.bak.*
+backup.log
+.claude/
+telegram_feedback.json
