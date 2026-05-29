@@ -5522,10 +5522,28 @@ process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 // nothing slips through, then continue. uncaughtException is the only one
 // we treat as fatal (per Node best practice the V8 state may be unsafe).
 // ---------------------------------------------------------------------------
+// P2-5: we log-and-continue rather than crash — a single forgotten .catch() in a
+// setInterval shouldn't take the dashboard down (every hot async interval already
+// wraps its body in try/catch). Trade-off: a rejection may leave a local op
+// half-done, so a SPIKE of rejections (a real bug, not a one-off) is escalated to
+// a critical alert (logActivity 'critical' → Telegram).
+// TODO(node-upgrade): recent Node majors abort on unhandledRejection by default.
+// Before bumping Node, decide explicitly — keep --unhandled-rejections=warn, or
+// switch to crash-and-let-pm2-restart — and revisit this handler.
+let _urCount = 0, _urWindowStart = Date.now(), _urLastAlert = 0;
+const UR_WINDOW_MS = 5 * 60 * 1000, UR_SPIKE = 10, UR_ALERT_COOLDOWN_MS = 30 * 60 * 1000;
 process.on('unhandledRejection', (reason, promise) => {
   const msg = (reason && reason.stack) || (reason && reason.message) || String(reason);
   try { logger.error('[UnhandledRejection] ' + msg); } catch (_) { console.error('[UnhandledRejection]', msg); }
   try { logActivity('system', 'error', 'unhandled_rejection', null, 'Unhandled promise rejection', { reason: String(msg).slice(0, 1000) }); } catch (_) { /* best-effort: error intentionally swallowed */ }
+  // Spike detection — a flurry within the window means something is genuinely broken.
+  const now = Date.now();
+  if (now - _urWindowStart > UR_WINDOW_MS) { _urWindowStart = now; _urCount = 0; }
+  _urCount++;
+  if (_urCount >= UR_SPIKE && now - _urLastAlert > UR_ALERT_COOLDOWN_MS) {
+    _urLastAlert = now;
+    try { logActivity('system', 'critical', 'unhandled_rejection_spike', null, `Всплеск необработанных reject: ${_urCount} за ${Math.round(UR_WINDOW_MS / 60000)} мин`, { count: _urCount }); } catch (_) { /* best-effort */ }
+  }
 });
 
 process.on('uncaughtException', (err) => {
