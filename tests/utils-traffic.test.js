@@ -50,4 +50,9 @@ describe('normalizeOperator', () => {
   it('handles empty input', () => {
     expect(normalizeOperator('', false)).toBe('');
   });
+  it('collapses the "unknown" placeholder to empty (not a real operator)', () => {
+    expect(normalizeOperator('unknown', false)).toBe('');
+    expect(normalizeOperator('Unknown', true)).toBe('');
+    expect(normalizeOperator('  UNKNOWN  ', false)).toBe('');
+  });
 });

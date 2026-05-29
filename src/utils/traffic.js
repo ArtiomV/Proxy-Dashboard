@@ -32,6 +32,12 @@ function trafficBytesToGb(bytes) {
  */
 function normalizeOperator(rawOp, isRO) {
   const clean = (rawOp || '').replace(/\s+/g, ' ').trim().toLowerCase();
+  // ProxySmart reports the literal placeholder "unknown" when a SIM hasn't
+  // resolved its carrier name yet (common right after a rotation/reconnect).
+  // It is NOT a real operator — collapse it to '' so it's never displayed as
+  // one and so write-paths can fall back to a persisted source (modem_meta /
+  // proxy_checks). Empty/placeholder rows are hidden from operator breakdowns.
+  if (!clean || clean === 'unknown') return '';
   const map = {
     'unite': 'Moldtelecom',
     'moldtelecom': 'Moldtelecom',

@@ -256,14 +256,28 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     const clientLastHourGb = {};
     const clientTodayGb = {};
     {
-      // Last completed hour
-      // N+1 fix: use single bulk query with scalar subquery so "max hour" is
+      // Stage 18.2 fix: "Last completed hour" must mean LAST FULLY COMPLETED
+      // hour — not just MAX(hour_start). The aggregator starts writing a row
+      // for the CURRENT hour as soon as it begins; MAX(hour_start) was
+      // returning that partial bucket and the client card showed a wildly
+      // smaller number than the heatmap-cell next to it (e.g. ПОСЛ.ЧАС=14 GB
+      // vs heatmap-tooltip=23 GB for what was supposed to be "the same" hour).
+      //
+      // Filter: hour_start < current_hour_floor (UTC), so we never read the
+      // in-progress bucket. The aggregator stores hour_start as UTC text in
+      // the form 'YYYY-MM-DD HH:00'.
+      //
+      // N+1 fix: single bulk query with scalar subquery so "max hour" is
       // computed once; O(1) client lookup via portNameToClientId map.
       const rows = db.prepare(`
         SELECT client_name, SUM(bytes_in + bytes_out) as total
         FROM traffic_hourly
         WHERE client_name != ''
-          AND hour_start = (SELECT MAX(hour_start) FROM traffic_hourly WHERE client_name != '')
+          AND hour_start = (
+            SELECT MAX(hour_start) FROM traffic_hourly
+            WHERE client_name != ''
+              AND hour_start < strftime('%Y-%m-%d %H:00', 'now')
+          )
         GROUP BY client_name
       `).all();
       for (const r of rows) {

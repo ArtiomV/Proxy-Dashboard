@@ -3,6 +3,24 @@
 .analytics-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;padding:14px;margin-bottom:10px;box-shadow:var(--card-shadow);display:flex;flex-direction:column}
 .analytics-card h3{font-size:14px;color:var(--text-0);margin-bottom:10px;font-weight:600}
 
+/* Stage 18.23 — collapsible card for the unified «⚡ NEW» analytics view.
+   Same visual chrome as .analytics-card so the page reads as a single
+   stream. Native <details>; the marker is replaced with a chevron that
+   rotates on toggle. */
+.acc-expand{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;margin-bottom:10px;overflow:hidden;box-shadow:var(--card-shadow)}
+.acc-expand > summary{padding:14px 18px;cursor:pointer;font-size:14px;font-weight:600;color:var(--text-0);list-style:none;display:flex;align-items:center;gap:8px;user-select:none;transition:background .12s}
+.acc-expand > summary::-webkit-details-marker{display:none}
+.acc-expand > summary::after{content:'▸';color:var(--text-3);margin-left:auto;transition:transform .15s;display:inline-block;font-size:12px}
+.acc-expand[open] > summary::after{transform:rotate(90deg)}
+.acc-expand > summary:hover{background:var(--bg-2)}
+.acc-expand-icon{font-size:16px}
+.acc-expand-body{padding:0 18px 18px}
+
+/* «⚡ NEW» heatmap view tab pills */
+.new-hm-btn{background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s}
+.new-hm-btn.active{border-bottom-color:var(--accent);color:var(--accent);font-weight:600}
+.new-hm-btn:hover:not(.active){color:var(--text-1)}
+
 /* Finance cards */
 .fin-card{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-radius:12px;padding:14px;border:1px solid var(--card-border);box-shadow:var(--card-shadow)}
 .fin-card--alert{border-color:rgba(255,56,60,.2);background:var(--red-bg)}

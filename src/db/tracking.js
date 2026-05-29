@@ -18,6 +18,30 @@ function init(db) {
   S.metaOperatorGet = db.prepare(
     'SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1'
   );
+  // Stage 17: lookup by IMEI for the empty-operator guard in the tracking
+  // loop — the upsert key is (server_name, imei), so we need to read by the
+  // same key to know what's currently persisted.
+  S.metaOperatorGetByImei = db.prepare(
+    'SELECT operator FROM modem_meta WHERE server_name = ? AND imei = ? LIMIT 1'
+  );
+  // Stage 18: list all modems known to the server within the retention window
+  // — used by injectOfflineModems() as a fallback source so a modem that's
+  // missing from known_modems (any reason) is still visible in the admin.
+  // The bind is days-string concatenated since better-sqlite3 doesn't accept
+  // interval params; we hand-build it from a single numeric input that's
+  // clamped before prepare. NOT a SQL-injection vector — the caller is
+  // server.js which controls the value (an appSettings int).
+  S.metaListRecentForServer = db.prepare(
+    "SELECT server_name, nick, imei, operator, model, phone, updated_at " +
+    "FROM modem_meta WHERE server_name = ? AND imei IS NOT NULL AND TRIM(imei) != '' " +
+    "AND updated_at >= datetime('now', ?) "
+  );
+  // Stage 18: explicit delete by (server, imei) — used by the DELETE-modem
+  // endpoint to purge a modem from BOTH known_modems and modem_meta atomically
+  // (otherwise it'd reappear via the meta fallback on the next render).
+  S.metaDeleteByImei = db.prepare(
+    'DELETE FROM modem_meta WHERE server_name = ? AND imei = ?'
+  );
   S.rotationUpsert = db.prepare(
     'INSERT OR IGNORE INTO rotation_log ' +
     '(server_name, nick, old_ip, new_ip, started_at, ended_at, took_sec, attempt) ' +
@@ -69,6 +93,9 @@ module.exports = {
   ihDeleteByIdStmt:    () => S.ihDeleteById,
   modemMetaUpsertStmt: () => S.modemMetaUpsert,
   metaOperatorGetStmt: () => S.metaOperatorGet,
+  metaOperatorGetByImeiStmt: () => S.metaOperatorGetByImei,
+  metaListRecentForServerStmt: () => S.metaListRecentForServer,    // Stage 18
+  metaDeleteByImeiStmt:        () => S.metaDeleteByImei,            // Stage 18
   rotationUpsertStmt:  () => S.rotationUpsert,
   rotationSelectStmt:  () => S.rotationSelect,
   ipAllStmt:           () => S.ipAll,

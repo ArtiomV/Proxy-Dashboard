@@ -226,6 +226,86 @@ describe('Stage 13.3: GET /api/admin/clients/:id/payments reads from billing_led
   });
 });
 
+describe('P0-2: DELETE /api/admin/clients/:id/payment/by-ledger/:ledgerDbId', () => {
+  it('reverses balance + referral by stable ledger id, hides the payment, and is idempotent', async () => {
+    const { referrer, referred } = await createReferralPair();
+    await request(app).post(`/api/admin/clients/${referred.id}/payment`)
+      .set('X-Auth-Token', adminToken)
+      .send({ amount: 200, date: '2026-05-23', note: 'byledger' });
+    expect(dbBalance(referred.id)).toBe(200);
+    expect(dbReferralBalance(referrer.id)).toBe(30);   // 15% of 200
+
+    // Get the stable ledger id the UI deletes by.
+    const list = await request(app).get(`/api/admin/clients/${referred.id}/payments`).set('X-Auth-Token', adminToken);
+    const pay = list.body.find(p => p.amount === 200);
+    expect(pay).toBeTruthy();
+    expect(typeof pay.ledgerDbId).toBe('number');
+
+    // Delete it.
+    const del = await request(app)
+      .delete(`/api/admin/clients/${referred.id}/payment/by-ledger/${pay.ledgerDbId}`)
+      .set('X-Auth-Token', adminToken);
+    expect(del.status).toBe(200);
+    expect(del.body.ok).toBe(true);
+
+    // Balance + referral reversed; a payment_reversal entry exists.
+    expect(dbBalance(referred.id)).toBe(0);
+    expect(dbReferralBalance(referrer.id)).toBe(0);
+    const ledger = ledgerEntries(referred.id);
+    const reversal = ledger.filter(e => e.type === 'payment_reversal');
+    expect(reversal.length).toBe(1);
+    expect(reversal[0].amount).toBe(200);
+
+    // The reversed payment is hidden from the list.
+    const after = await request(app).get(`/api/admin/clients/${referred.id}/payments`).set('X-Auth-Token', adminToken);
+    expect(after.body.find(p => p.ledgerDbId === pay.ledgerDbId)).toBeFalsy();
+
+    // Idempotent: a repeat delete does NOT reverse again.
+    const del2 = await request(app)
+      .delete(`/api/admin/clients/${referred.id}/payment/by-ledger/${pay.ledgerDbId}`)
+      .set('X-Auth-Token', adminToken);
+    expect(del2.status).toBe(200);
+    expect(del2.body.already).toBe(true);
+    expect(dbBalance(referred.id)).toBe(0);                       // unchanged
+    expect(dbReferralBalance(referrer.id)).toBe(0);              // unchanged
+    expect(ledgerEntries(referred.id).filter(e => e.type === 'payment_reversal').length).toBe(1); // no 2nd reversal
+  });
+
+  it('404s for a non-existent / non-payment ledger id', async () => {
+    const c = await createClient();
+    const res = await request(app)
+      .delete(`/api/admin/clients/${c.id}/payment/by-ledger/99999999`)
+      .set('X-Auth-Token', adminToken);
+    expect(res.status).toBe(404);
+  });
+});
+
+describe('P1-1: recalcFromLedger preserves a pre-ledger opening balance', () => {
+  it('keeps the opening remainder when a ledger entry is deleted (anchors on first balance_before)', async () => {
+    const c = await createClient();
+    // Simulate a balance set OUTSIDE the ledger (import / pre-ledger era).
+    db.prepare('UPDATE clients SET balance = 500 WHERE id = ?').run(c.id);
+    const { state } = require('../../src/state/index.js');
+    const live = state.clientById.get(c.id);
+    if (live) live.balance = 500;
+
+    // Two payments on top → ledger snapshots start from 500.
+    await request(app).post(`/api/admin/clients/${c.id}/payment`).set('X-Auth-Token', adminToken)
+      .send({ amount: 100, date: '2026-05-23' });
+    await request(app).post(`/api/admin/clients/${c.id}/payment`).set('X-Auth-Token', adminToken)
+      .send({ amount: 50, date: '2026-05-23' });
+    expect(dbBalance(c.id)).toBe(650);
+
+    // Delete the 2nd ledger entry (index 1, id ASC). Correct balance = 600,
+    // NOT 100 (which the old start-from-zero recompute would have produced).
+    const del = await request(app)
+      .delete(`/api/admin/clients/${c.id}/ledger/1`)
+      .set('X-Auth-Token', adminToken);
+    expect(del.status).toBe(200);
+    expect(dbBalance(c.id)).toBe(600);
+  });
+});
+
 describe('Stage 13.0: characterization — Tochka webhook auto-credit (matched client)', () => {
   // Build a webhook payload that the receiver will treat as unverified
   // (no JWT signature), so we exercise the "save unverified" path. The

@@ -127,7 +127,7 @@ function fetchApi(server, apiPath, timeout = 10000) {
         if (aborted) return;
         if (proxyRes.statusCode >= 400) {
           if (proxyRes.statusCode === 401) {
-            logger.error(`[ProxySmart AUTH] ${server.name} returned 401 Unauthorized — credentials may need rotation`);
+            logger.error(`[ApiAuth] ${server.name} returned 401 Unauthorized — credentials may need rotation`);
           }
           reject(new Error(`${server.name} HTTP ${proxyRes.statusCode}: ${data.slice(0, 200)}`));
           return;

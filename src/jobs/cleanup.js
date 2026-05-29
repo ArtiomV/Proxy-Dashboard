@@ -132,19 +132,18 @@ function create(deps) {
           kmRemoved++; kmChanged = true;
         }
       }
-      // Pass B: stale lastSeen — original retention (modem disconnected long ago).
-      for (const srvName of Object.keys(knownModems || {})) {
-        if (skippedSrv.includes(srvName)) continue;
-        const km = knownModems[srvName];
-        for (const pid of Object.keys(km)) {
-          const fullId = srvName + '_' + pid;
-          if (liveIds.has(fullId)) continue;
-          const lastSeen = km[pid].lastSeen || 0;
-          if (lastSeen > cutoffMs) continue;
-          delete km[pid];
-          kmRemoved++; kmChanged = true;
-        }
-      }
+      // Pass B was removed in Stage 17 by user policy:
+      // "Если однажды модем попал в базу — он должен там быть, пока я его
+      //  вручную не удалю. Удалить можно только отключенный модем."
+      // The old logic auto-evicted modems whose lastSeen was older than
+      // retention_stale_ports_days (default 3). That hid disconnected
+      // modems without operator awareness — replaced by:
+      //   - UI badge «потерян N мин назад» in the modem row
+      //   - explicit DELETE /api/admin/modems/:server/:port_id endpoint
+      //     (server-side guard ensures only offline modems are deletable)
+      // `cutoffMs`/`cutoffDate` are still computed above because they're
+      // used by daily_traffic retention (Pass A/C use their own predicates).
+      void cutoffMs;
       // Pass C: port deleted but IMEI still online (modem moved to a different port,
       // typically an auto-generated "randomport*" default after we removed the named
       // port). The stale km entry would otherwise misattribute the modem to a former

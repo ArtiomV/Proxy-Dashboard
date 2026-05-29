@@ -107,6 +107,11 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
 
     
     // Build the bank-payment record up front
+    // Stage 18.6: natural_key — see runTochkaSync. Webhook now populates the
+    // same field so the very-next sync immediately recognises this transaction
+    // and skips, without ever calling atomicCredit (the WildBox double-credit
+    // path before this stage).
+    const naturalKey = (payerInn || '') + '|' + amount + '|' + (paymentDate || '') + '|' + (purpose || '').slice(0, 100);
     const bankPayment = {
       id: crypto.randomBytes(8).toString('hex'),
       webhookType,
@@ -117,12 +122,29 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
       paymentId,
       date: paymentDate,
       customerCode,
+      naturalKey,
       receivedAt: new Date().toISOString(),
       matched: false,
       matchedClientId: null,
       matchedClientName: null,
       autoCredit: false
     };
+
+    // Stage 18.6: natural-key idempotency gate. Before this, we relied on
+    // UNIQUE(payment_id), but Tochka's webhook+sync return different ids for
+    // the same real transaction, so that constraint was insufficient.
+    // Now: if a row already exists with the same natural_key (payer+amount
+    // +date+purpose-prefix), the credit has already happened — bail out.
+    if (dbStmts.findBankPaymentByNaturalKey && dbStmts.findBankPaymentByNaturalKey.get(naturalKey)) {
+      logger.info(`[Tochka Webhook] Duplicate natural_key (already processed) — payer=${payerInn} amount=${amount} date=${paymentDate}`);
+      // Stage 18.13: дубль-кредит заблокирован — это хорошо, но стоит знать (редкое событие)
+      try {
+        require('../telegram/alerts').trigger('duplicate_credit_blocked', {
+          client: payerName || ('ИНН ' + payerInn), amount, natural_key: naturalKey,
+        });
+      } catch (_) {}
+      return res.status(200).json({ ok: true, processed: false, reason: 'duplicate_natural_key' });
+    }
 
     // Atomic insert — UNIQUE(payment_id) on bank_payments enforces idempotency
     // even under concurrent webhook delivery. Two parallel webhook requests
@@ -189,6 +211,15 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
           bankPayment.matchedClientId = matchedClient.id;
           bankPayment.autoCredit = true;
           logger.info(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
+          // Stage 18.13: «новый платёж» — любой платёж от webhook.
+          try {
+            require('../telegram/alerts').trigger('payment_received', {
+              client: matchedClient.name, client_id: matchedClient.id,
+              amount, inn: payerInn, source: 'Точка (webhook)',
+              natural_key: naturalKey, date: paymentDate,
+              balanceAfter: matchedClient.balance,
+            });
+          } catch (_) {}
         } catch (e) {
           logger.error(`[Tochka Webhook] credit failed for ${matchedClient.name}:`, e.message);
           // Row stays unmatched — admin can attribute manually.

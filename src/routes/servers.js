@@ -139,6 +139,12 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.auto_reboot_min_interval_min != null) {
     patch.auto_reboot_min_interval_min = Math.max(15, Math.min(720, parseInt(req.body.auto_reboot_min_interval_min) || 60));
   }
+  // Stage 18.8: hours-threshold for "stale modem" exclusion from agg endpoints.
+  // Bounded 1..168 (1h .. 7d) — wider would defeat the purpose; tighter would
+  // exclude modems that just blipped during a tracking-poll gap.
+  if (req.body.stale_modem_hours != null) {
+    patch.stale_modem_hours = Math.max(1, Math.min(168, parseInt(req.body.stale_modem_hours) || 12));
+  }
   if (pricing_tiers && Array.isArray(pricing_tiers)) {
     patch.pricing_tiers = pricing_tiers.map(t => ({
       min_proxies: parseInt(t.min_proxies) || 1,
@@ -178,6 +184,13 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.recovery_offline_sec != null)   patch.recovery_offline_sec   = Math.max(10, Math.min(600, parseInt(req.body.recovery_offline_sec) || 60));
   if (req.body.recovery_max_attempts != null)  patch.recovery_max_attempts  = Math.max(1, Math.min(10, parseInt(req.body.recovery_max_attempts) || 3));
   if (req.body.recovery_retry_min != null)     patch.recovery_retry_min     = Math.max(1, Math.min(60, parseInt(req.body.recovery_retry_min) || 3));
+  // Stage 19 — failover
+  if (req.body.failover_enabled != null)          patch.failover_enabled          = !!req.body.failover_enabled;
+  if (req.body.failover_dry_run != null)          patch.failover_dry_run          = !!req.body.failover_dry_run;
+  if (req.body.failover_offline_min != null)      patch.failover_offline_min      = Math.max(5, Math.min(240, parseInt(req.body.failover_offline_min) || 15));
+  if (req.body.failover_glitch_fails != null)     patch.failover_glitch_fails     = Math.max(2, Math.min(20, parseInt(req.body.failover_glitch_fails) || 3));
+  if (req.body.failover_cooldown_h != null)       patch.failover_cooldown_h       = Math.max(1, Math.min(72, parseInt(req.body.failover_cooldown_h) || 6));
+  if (req.body.failover_max_per_hour != null)     patch.failover_max_per_hour     = Math.max(1, Math.min(50, parseInt(req.body.failover_max_per_hour) || 5));
   // Modem tracking & rotation
   if (req.body.tracking_interval_min != null)      patch.tracking_interval_min      = Math.max(1, Math.min(30, parseInt(req.body.tracking_interval_min) || 3));
   if (req.body.rotation_cache_ttl_min != null)     patch.rotation_cache_ttl_min     = Math.max(5, Math.min(240, parseInt(req.body.rotation_cache_ttl_min) || 30));

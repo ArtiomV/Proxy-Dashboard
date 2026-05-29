@@ -1,0 +1,274 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>История изменений — Proxies.rent</title>
+<link rel="icon" type="image/png" href="https://proxies.rent/favicon-96x96.png" sizes="96x96">
+<link rel="icon" type="image/svg+xml" href="https://proxies.rent/favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/variables.css">
+<link rel="stylesheet" href="css/base.css">
+<style>
+  body{padding:0;background:var(--bg-0);min-height:100vh}
+  .changelog-header{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 24px;height:56px;display:flex;align-items:center;gap:14px;position:sticky;top:0;z-index:100;backdrop-filter:blur(8px)}
+  .changelog-header a.back{display:inline-flex;align-items:center;gap:6px;color:var(--text-2);font-size:13px;text-decoration:none;padding:6px 10px;border-radius:6px;transition:all .15s}
+  .changelog-header a.back:hover{background:var(--bg-3);color:var(--text-0)}
+  .changelog-header .title{font-size:15px;font-weight:600;color:var(--text-0);letter-spacing:-0.2px}
+  .changelog-header .spacer{flex:1}
+  .changelog-header .theme-toggle{width:36px;height:20px;border-radius:10px;border:1px solid var(--border);background:var(--bg-3);cursor:pointer;position:relative;transition:all .3s}
+  .changelog-header .theme-toggle::after{content:'';position:absolute;top:2px;left:2px;width:14px;height:14px;border-radius:50%;background:var(--accent);transition:transform .3s}
+  [data-theme="light"] .changelog-header .theme-toggle::after{transform:translateX(16px)}
+  .changelog-wrap{max-width:920px;margin:0 auto;padding:40px 24px 80px}
+  .changelog-intro{margin-bottom:48px}
+  .changelog-intro h1{font-size:32px;font-weight:700;color:var(--text-0);margin-bottom:8px;letter-spacing:-0.6px}
+  .changelog-intro p{color:var(--text-2);font-size:15px;line-height:1.6;max-width:680px}
+  .release{margin-bottom:48px;padding-bottom:40px;border-bottom:1px dashed var(--border)}
+  .release:last-child{border-bottom:none}
+  .release-header{display:flex;align-items:baseline;gap:14px;margin-bottom:6px;flex-wrap:wrap}
+  .release-version{font-size:22px;font-weight:700;color:var(--text-0);letter-spacing:-0.4px;font-family:'JetBrains Mono','SF Mono',monospace}
+  .release-version .v-prefix{color:var(--accent);opacity:.6;font-weight:500}
+  .release-date{font-size:13px;color:var(--text-3);font-weight:500}
+  .release-tag{font-size:10px;font-weight:600;letter-spacing:.05em;padding:3px 8px;border-radius:4px;text-transform:uppercase}
+  .tag-major{background:rgba(99,102,241,0.12);color:var(--accent)}
+  .tag-feature{background:rgba(52,199,89,0.12);color:#34c759}
+  .tag-fix{background:rgba(239,159,39,0.14);color:#ef9f27}
+  .release-tagline{color:var(--text-2);font-size:15px;line-height:1.5;margin-bottom:24px;font-weight:400}
+  .section{margin-bottom:22px}
+  .section h3{font-size:14px;font-weight:600;color:var(--text-0);margin-bottom:10px;display:flex;align-items:center;gap:8px;letter-spacing:-0.1px}
+  .section h3 .ico{font-size:16px}
+  .section ul{list-style:none;padding:0;margin:0}
+  .section li{font-size:13.5px;line-height:1.65;color:var(--text-1);padding:7px 0 7px 18px;position:relative;border-bottom:1px solid transparent}
+  .section li::before{content:'';position:absolute;left:0;top:14px;width:6px;height:6px;border-radius:50%;background:var(--accent);opacity:.55}
+  .section li strong{color:var(--text-0);font-weight:600}
+  .section li code{font-family:'JetBrains Mono',monospace;font-size:12px;background:var(--bg-2);padding:1px 6px;border-radius:4px;color:var(--text-0);border:1px solid var(--border)}
+  .why-box{background:var(--bg-2);border:1px solid var(--border);border-radius:10px;padding:14px 18px;margin-top:14px;font-size:13px;color:var(--text-2);line-height:1.6}
+  .why-box strong{color:var(--text-1);font-weight:600}
+  .footer-note{margin-top:60px;text-align:center;font-size:12px;color:var(--text-3)}
+  .footer-note a{color:var(--accent);text-decoration:none}
+  .footer-note a:hover{text-decoration:underline}
+  @media (max-width:640px){
+    .changelog-wrap{padding:24px 16px 60px}
+    .changelog-intro h1{font-size:24px}
+    .release-version{font-size:18px}
+  }
+</style>
+</head>
+<body>
+<div class="changelog-header">
+  <a class="back" href="/admin">
+    <svg width="14" height="14" viewBox="0 0 16 16" fill="none"><path d="M10 12L6 8l4-4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+    Назад
+  </a>
+  <span class="title">История изменений</span>
+  <span class="spacer"></span>
+  <div class="theme-toggle" title="Переключить тему"></div>
+</div>
+
+<div class="changelog-wrap">
+  <div class="changelog-intro">
+    <h1>Что изменилось</h1>
+    <p>Список доработок дашборда — на человеческом языке. Каждый блок отвечает на вопрос «что это даёт вам как пользователю / администратору».</p>
+  </div>
+
+  <!-- v1.0.0 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>1.0.0</span>
+      <span class="release-date">23 мая 2026</span>
+      <span class="release-tag tag-major">Большой рефакторинг</span>
+    </div>
+    <p class="release-tagline">Полная переработка денежного потока, архитектуры и тестового покрытия. Внешне ничего не поменялось — внутри дашборд стал в разы надёжнее.</p>
+
+    <div class="section">
+      <h3><span class="ico">💰</span> Деньги</h3>
+      <ul>
+        <li><strong>Платежи и реферальные комиссии теперь атомарны.</strong> Когда клиент оплачивает счёт, его баланс, журнал движений и комиссия реферера обновляются в одной транзакции БД. Если что-то прервётся посередине (сетевой сбой, рестарт процесса) — ничего не сохранится частично. Раньше реферальная комиссия писалась отдельным запросом за пределами транзакции — при крайне редком, но возможном падении между ними бухгалтерия расходилась.</li>
+        <li><strong>Журнал движений (<code>billing_ledger</code>) стал единственным источником истины.</strong> Старая таблица <code>payments</code> переведена в режим «только чтение» — все новые платежи попадают через журнал, дубликатов больше нет.</li>
+        <li><strong>Защита от стирания свежих клиентских записей.</strong> Раньше сохранение списка клиентов работало по принципу «снести всё и записать заново» — в редкой ситуации могла затереться только что записанная строка устаревшим in-memory снапшотом. Теперь сохранение идёт аддитивно — только новые/изменённые поля.</li>
+        <li><strong>Дубликаты ежедневных списаний защищены индексом.</strong> Уникальный индекс на <code>(client_id, date, type='charge')</code> — повторное списание за тот же день возвращает <code>{duplicate: true}</code> вместо двойного снятия.</li>
+      </ul>
+      <div class="why-box">
+        <strong>Зачем это:</strong> деньги — это то, где ошибиться нельзя. Раньше при определённых стечениях обстоятельств можно было получить расхождение между балансом клиента, журналом и комиссией партнёра. Теперь это невозможно — либо все три записи прошли, либо ни одна.
+      </div>
+    </div>
+
+    <div class="section">
+      <h3><span class="ico">🤖</span> ИИ-сводка в Telegram</h3>
+      <ul>
+        <li><strong>Ежедневный анализ от Claude Opus 4.7.</strong> Каждое утро в 08:00 МСК после обычной сводки прилетает блок «🔍 ИИ-анализ за день» — с интерпретацией ключевых метрик, конкретными проблемами и рекомендациями.</li>
+        <li><strong>Защита от пустых сводок.</strong> Бюджет токенов поднят с 4К до 32К — adaptive thinking успевает рассуждать. Раньше при сложных днях модель тратила весь бюджет на размышления и возвращала пустой ответ.</li>
+        <li><strong>Диагностика причин ошибок.</strong> Если ИИ вернул пустой ответ — в логи теперь пишется ровно почему (упёрся в лимит, ошибка авторизации, перегрузка API).</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3><span class="ico">🏗</span> Архитектура</h3>
+      <ul>
+        <li><strong>Единый файл <code>server.js</code> (11 тыс. строк) разбит на 18 модулей-роутеров.</strong> Раньше всё лежало в одном месте, любая правка задевала случайные участки. Теперь auth / clients / billing / tochka / traffic / analytics / sla / proxies / simulator живут отдельно — править проще и риск зацепить чужое ушёл.</li>
+        <li><strong>SQL-запросы вынесены в 5 репозиториев <code>src/db/*</code>.</strong> Все обращения к БД проходят через осмысленные функции вместо инлайн-SQL по всему коду.</li>
+        <li><strong>Состояние централизовано в <code>src/state/index.js</code>.</strong> Раньше клиенты лежали в одной переменной, реферальные карты в другой, in-memory mirror журнала — в третьей. Любое расхождение давало баги вида «в БД одно, в ответе API другое».</li>
+        <li><strong>168 HTTP-эндпоинтов зафиксированы snapshot-тестом.</strong> Случайно удалить или переименовать ручку теперь не выйдет — тест падает.</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3><span class="ico">🔒</span> Безопасность и качество</h3>
+      <ul>
+        <li><strong>Восстановлен Content Security Policy.</strong> Браузер разрешает выполнять только наши скрипты + Chart.js, всё остальное блокируется на уровне политики — защита от XSS.</li>
+        <li><strong>Ключ шифрования Tochka теперь обязателен.</strong> Раньше при отсутствии переменной <code>$TOCHKA_CONFIG_KEY</code> сервер делал производный ключ из имени хоста — при переезде на новый хост шифрование могло порваться. Теперь сервер просто откажется стартовать без явного ключа.</li>
+        <li><strong>Все 44 «глухих» <code>catch</code> получили реакцию.</strong> Раньше ошибки могли молча проглатываться, теперь либо обрабатываются, либо пишутся в лог с уровнем <code>warn/error</code>.</li>
+        <li><strong>ESLint 9 в строгом режиме, 0 ошибок.</strong> Кодовая база автоматически проверяется на типичные опасные паттерны.</li>
+        <li><strong>102 регрессионных теста.</strong> Покрывают денежный поток, аутентификацию, клиентский портал, веб-хуки Точки, миграции схемы.</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3><span class="ico">⚙️</span> Эксплуатация</h3>
+      <ul>
+        <li><strong>Безопасная запись файлов.</strong> Утечек состояния через unhandled promise rejection больше нет — все записи проходят через <code>safeWriteFile</code>.</li>
+        <li><strong>Документация эксплуатации.</strong> Добавлен <code>OPERATIONS.md</code> с полной картой состояния: что в SQLite, что в JSON-файлах, как делать бэкап, что нельзя коммитить в git.</li>
+        <li><strong>Совместимость с Node 20.</strong> Зависимости перепинованы под прод-окружение (Node 20.20), <code>engine-strict</code> в <code>.npmrc</code> блокирует установку несовместимых пакетов.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- v0.9 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>0.9.0</span>
+      <span class="release-date">3 мая 2026</span>
+      <span class="release-tag tag-feature">Платформа</span>
+    </div>
+    <p class="release-tagline">Симулятор нагрузки, ИИ-инсайты, перестройка вкладки аналитики, защита от потери данных.</p>
+
+    <div class="section">
+      <h3><span class="ico">🧪</span> Симулятор нагрузки</h3>
+      <ul>
+        <li>Имитация наплыва трафика на выбранные модемы: режимы <strong>ramp</strong> (плавный рост), <strong>burst</strong> (резкий всплеск), <strong>breaking-point</strong> (поиск предельной нагрузки).</li>
+        <li>Сравнение прогонов между собой, экспорт результатов, разбивка по каждому модему.</li>
+        <li>История запусков сохраняется — можно посмотреть как менялась устойчивость инфраструктуры со временем.</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3><span class="ico">📊</span> Перестройка вкладки «Аналитика»</h3>
+      <ul>
+        <li>5 подвкладок: <strong>Трафик</strong>, <strong>Инфраструктура</strong> (ротации + ёмкость + IP в одном месте), <strong>Доходность</strong> и др.</li>
+        <li>Удалены лишние блоки: «Планирование», «Логи доменов», «Последние неудачи в ротации».</li>
+        <li>Системный лог переехал в «Настройки» → «Состояние сервера».</li>
+        <li>Единая таблица модемов с разделителями по серверам + bulk-выбор по серверу через одну галочку.</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3><span class="ico">❤️</span> Здоровье модемов</h3>
+      <ul>
+        <li>Новый health-score с порогом 5% ошибок, ступенчатой шкалой латентности, учётом длительности ротации.</li>
+        <li>Колонка «Здоровье» в общей таблице модемов + детальный разбор в модалке модема.</li>
+        <li>Аптайм считается по поллингу tracking'а (а не по UDEV драйверов ядра) — точнее.</li>
+        <li>Сглаживание неоднозначных часовых записей (uncertain=2) в часовом агрегаторе.</li>
+        <li>Сброс счётчиков в 03:00 МСК больше не даёт ложных нулей.</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3><span class="ico">🛡</span> Защита от потери данных серверов</h3>
+      <ul>
+        <li>Метаданные серверов (S1, S2 и др.) теперь имеют версионную историю в <code>kv_store_history</code>.</li>
+        <li>Помощник <code>kvSetCritical</code> блокирует случайное уменьшение списка серверов (защита от ситуации «случайно стерли S2»).</li>
+        <li>Стартовая проверка целостности с baseline-сравнением — если в БД пропали критичные ключи, сервер сообщит.</li>
+      </ul>
+    </div>
+
+    <div class="section">
+      <h3><span class="ico">💸</span> Биллинг + SLA</h3>
+      <ul>
+        <li>Исправлено race condition в начислении дневных списаний.</li>
+        <li>Добавлен SLA-tracking — учёт нарушений по доступности.</li>
+        <li>Аудит-лог использования API + системная вкладка с обзором процессов.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- v0.8 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>0.8.0</span>
+      <span class="release-date">11 апреля 2026</span>
+      <span class="release-tag tag-feature">Мониторинг</span>
+    </div>
+    <p class="release-tagline">Расширенный мониторинг прокси, авто-восстановление модемов, развёрнутая документация.</p>
+    <div class="section">
+      <h3><span class="ico">📡</span> Мониторинг</h3>
+      <ul>
+        <li><strong>Замер задержки прокси.</strong> Через каждый порт регулярно прогоняется проверка — фиксируется connect-time и общее время ответа.</li>
+        <li>Аналитика по латентности: P75, P99, распределение, percentile cards в детальной модалке модема.</li>
+        <li>Bulk-операции: массовый сброс IP, ребут, OS Spoofing, ротация, экспорт — для выбранных модемов сразу.</li>
+      </ul>
+    </div>
+    <div class="section">
+      <h3><span class="ico">🔧</span> Авто-восстановление</h3>
+      <ul>
+        <li>Авто-USB-reset для модемов, ушедших в оффлайн (вместо ручного дёрганья портов).</li>
+        <li>9 точечных багфиксов: ротация, парсинг трафика, IP-история.</li>
+      </ul>
+    </div>
+    <div class="section">
+      <h3><span class="ico">📝</span> Логирование</h3>
+      <ul>
+        <li>Полное логирование всех автоматических процессов (cron, билинг, ротация, ребуты) — теперь видно когда и почему сработал каждый автомат.</li>
+        <li>Развёрнутый README с описанием всех функций дашборда.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- v0.7 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>0.7.0</span>
+      <span class="release-date">6 апреля 2026</span>
+      <span class="release-tag tag-feature">Серверы из БД</span>
+    </div>
+    <p class="release-tagline">Конфигурация серверов переехала из <code>.env</code> в базу — управление через UI без перезапусков.</p>
+    <div class="section">
+      <h3><span class="ico">🗄</span> Изменения</h3>
+      <ul>
+        <li>Список серверов и стран хранится в SQLite (<code>kv_store</code>) — добавлять/убирать серверы можно из настроек без правки <code>.env</code> и рестарта.</li>
+        <li>Часовой агрегатор трафика версии 2 — корректнее работает с пропусками и поздними записями.</li>
+        <li>Поддержка серверов S3 и S4 в клиентском портале (прокси-креды, IP-адреса, фильтры).</li>
+        <li>Динамические COUNTRIES — флаги стран и группировки автоматически подтягиваются из объектов сервера.</li>
+      </ul>
+    </div>
+  </div>
+
+  <!-- v0.6 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>0.6.0</span>
+      <span class="release-date">5 апреля 2026</span>
+      <span class="release-tag tag-feature">Управление серверами</span>
+    </div>
+    <p class="release-tagline">UI для управления серверами + поддержка переименования портов на разных моделях.</p>
+    <div class="section">
+      <h3><span class="ico">🛠</span> Изменения</h3>
+      <ul>
+        <li>Раздел «Серверы» в настройках — добавление/редактирование/удаление прямо из UI.</li>
+        <li>Переменная <code>PORTNAME_OVERRIDE</code> для серверов без поддержки переименования портов.</li>
+        <li>Слияние конфигурации порта при <code>store_port</code> — не теряет ранее заданные поля.</li>
+        <li>Корректная инвалидация кэша после изменения конфигурации модема.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="footer-note">
+    <p>Это не полный список — мелкие правки и улучшения интерфейса в журнал не попадают.</p>
+    <p style="margin-top:6px">Технические детали и pull request'ы — в <a href="https://github.com/ArtiomV/Proxy-Dashboard" target="_blank" rel="noopener">репозитории на GitHub</a>.</p>
+  </div>
+</div>
+
+<script src="js/changelog.js"></script>
+</body>
+</html>

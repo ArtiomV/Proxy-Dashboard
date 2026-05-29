@@ -100,7 +100,7 @@ r.post('/api/admin/proxy_check', authMiddleware, adminMiddleware, async (req, re
         checks.push({
           nick: proxy.nick, server: proxy.server, client: '',
           operator: proxy.operator, status_code: null, total_ms: null, connect_ms: null,
-          error: 'Прокси не в аренде — присвойте portName клиенту, чтобы порт стал активным в ProxySmart'
+          error: 'Прокси не в аренде — присвойте portName клиенту, чтобы порт стал активным'
         });
         continue;
       }

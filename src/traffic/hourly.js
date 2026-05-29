@@ -3,8 +3,9 @@
 const { parseBwToBytes, normalizeOperator } = require('../utils/traffic');
 
 let db, logger, fetchAllServersDataCached, refreshPortKeyMapping, portKeyToPortNameRef;
-let _htUpsert, _htCleanup, _metaOpGet, _snapUpsert, _snapGet, _snapGetAll;
+let _htUpsert, _htCleanup, _metaOpGet, _pcOpGet, _snapUpsert, _snapGet, _snapGetAll;
 let SERVER_COUNTRIES = {};
+let logActivity = () => {};   // Stage 18.3: optional dep — writes spike-protection events to system_log
 
 // In-memory cache of hourly_snapshots table (port_id → row)
 const snapCache = new Map();
@@ -18,10 +19,12 @@ function init(deps) {
   _htUpsert = deps._htUpsert;
   _htCleanup = deps._htCleanup;
   _metaOpGet = deps._metaOpGet;
+  _pcOpGet = deps._pcOpGet;   // proxy_checks latest-operator fallback (optional dep)
   _snapUpsert = deps._snapUpsert;
   _snapGet = deps._snapGet;
   _snapGetAll = deps._snapGetAll;
   SERVER_COUNTRIES = deps.SERVER_COUNTRIES || {};
+  if (typeof deps.logActivity === 'function') logActivity = deps.logActivity;   // Stage 18.3
 
   // Migrate old kv_store snapshots → hourly_snapshots table (one-time)
   migrateSnapshotsToTable();
@@ -230,9 +233,23 @@ async function aggregateHourlyTraffic() {
           const info = portIdInfo[portId] || {};
           const nick = info.nick || pnMap[srv + '_' + portId] || portId;
           let rawOp = (info.operator || '').toLowerCase().trim();
+          // "unknown" is ProxySmart's placeholder for an unresolved carrier name,
+          // not a real operator — treat it as missing so we fall back to a
+          // persisted source rather than freezing "Unknown" into the row.
+          if (rawOp === 'unknown') rawOp = '';
           if (!rawOp && nick) {
+            // 1) authoritative per-modem operator (modem_meta)
             const meta = _metaOpGet.get(srv, nick);
-            if (meta && meta.operator) rawOp = meta.operator.toLowerCase().trim();
+            if (meta && meta.operator && meta.operator.toLowerCase().trim() !== 'unknown') {
+              rawOp = meta.operator.toLowerCase().trim();
+            }
+            // 2) last-known operator observed by the proxy-check job. Covers
+            //    modems that never landed a modem_meta row (e.g. RO2_3) but
+            //    whose carrier was seen during latency checks.
+            if (!rawOp && _pcOpGet) {
+              const pc = _pcOpGet.get(srv, nick);
+              if (pc && pc.operator) rawOp = pc.operator.toLowerCase().trim();
+            }
           }
           const operator = normalizeOperator(rawOp, isRO);
           const clientName = info.clientName || b.portName || '';
@@ -327,11 +344,29 @@ async function aggregateHourlyTraffic() {
             if (portAvg > SPIKE_FLOOR && incTotal > portAvg * SPIKE_TRIGGER_MULT) {
               const cap = portAvg * SPIKE_CLAMP_MULT;
               const ratio = cap / incTotal;
+              const rawIn = incIn, rawOut = incOut;
               incIn  = Math.floor(incIn  * ratio);
               incOut = Math.floor(incOut * ratio);
               resetUnc = 2;
               clampedSpikes++;
               logger.warn(`[HourlyAgg] reset spike clamped: ${nick} ${(incTotal/1e9).toFixed(2)}GB→${(cap/1e9).toFixed(2)}GB (avg=${(portAvg/1e9).toFixed(2)}GB)`);
+              // Stage 18.3: persist to system_log so the admin can audit later.
+              // We record BOTH the raw (suspected wrong) inc and the corrected
+              // (clamped) inc so a human can decide whether the clamp was
+              // justified — and adjust SPIKE_TRIGGER_MULT / SPIKE_CLAMP_MULT
+              // if pattern emerges.
+              try {
+                logActivity('billing', 'warn', 'traffic_spike_clamp', nick,
+                  `${nick} (${clientName||'no-client'}): raw=${(incTotal/1e9).toFixed(2)}GB → clamp=${(cap/1e9).toFixed(2)}GB (24h avg ${(portAvg/1e9).toFixed(2)}GB)`,
+                  {
+                    nick, server: srv, port_id: fullPortId, client: clientName, operator,
+                    hour_start: hourStart,
+                    raw_bytes_in: rawIn, raw_bytes_out: rawOut, raw_total_gb: +(incTotal/1e9).toFixed(3),
+                    corrected_bytes_in: incIn, corrected_bytes_out: incOut, corrected_total_gb: +((incIn+incOut)/1e9).toFixed(3),
+                    port_avg_gb: +(portAvg/1e9).toFixed(3),
+                    reason: 'day_reset_spike',
+                  });
+              } catch (_) { /* logActivity must never throw — best-effort */ }
             }
             if (incIn + incOut > 0 && incIn + incOut < MAX_HOURLY_BYTES) {
               _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut, resetUnc);
@@ -403,12 +438,36 @@ async function aggregateHourlyTraffic() {
               uncertain = 2;
               uncertainCount++;
               logger.warn(`[HourlyAgg] uncertain: nick=${nick} day_delta=${(deltaDay/1e6).toFixed(1)}MB month_delta=${(deltaMon/1e6).toFixed(1)}MB diff=${(absDiff/1e6).toFixed(1)}MB tolerance=${(tolerance/1e6).toFixed(1)}MB`);
+              try {
+                logActivity('billing', 'warn', 'traffic_counter_disagree', nick,
+                  `${nick} (${clientName||'no-client'}): day=${(deltaDay/1e6).toFixed(1)}MB vs month=${(deltaMon/1e6).toFixed(1)}MB, diff=${(absDiff/1e6).toFixed(1)}MB > tol=${(tolerance/1e6).toFixed(1)}MB`,
+                  {
+                    nick, server: srv, port_id: fullPortId, client: clientName, operator,
+                    hour_start: hourStart,
+                    day_delta_mb: +(deltaDay/1e6).toFixed(1),
+                    month_delta_mb: +(deltaMon/1e6).toFixed(1),
+                    abs_diff_mb: +(absDiff/1e6).toFixed(1),
+                    tolerance_mb: +(tolerance/1e6).toFixed(1),
+                    reason: 'day_month_counter_disagree',
+                  });
+              } catch (_) { /* best-effort */ }
             }
           } else if (deltaMon > UNCERTAIN_THRESHOLD && deltaDay === 0) {
             // Month counter grew significantly but day counter shows zero — counter anomaly
             uncertain = 2;
             uncertainCount++;
             logger.warn(`[HourlyAgg] uncertain (month>0, day=0): nick=${nick} day_delta=${(deltaDay/1e6).toFixed(1)}MB month_delta=${(deltaMon/1e6).toFixed(1)}MB`);
+            try {
+              logActivity('billing', 'warn', 'traffic_counter_disagree', nick,
+                `${nick} (${clientName||'no-client'}): day=0 but month=${(deltaMon/1e6).toFixed(1)}MB`,
+                {
+                  nick, server: srv, port_id: fullPortId, client: clientName, operator,
+                  hour_start: hourStart,
+                  day_delta_mb: 0,
+                  month_delta_mb: +(deltaMon/1e6).toFixed(1),
+                  reason: 'month_grew_day_zero',
+                });
+            } catch (_) { /* best-effort */ }
           }
           // NOTE: deltaDay > 0 && deltaMon === 0 is NORMAL — month counter has 0.1GB quantization
           // and won't increment for small traffic bursts. Don't flag this as uncertain.
@@ -466,14 +525,38 @@ async function aggregateHourlyTraffic() {
                 if (neigh.length >= SMOOTH_MIN_NEIGHBOURS) {
                   const newIn  = _median(neigh.map(n => n.bytes_in  || 0));
                   const newOut = _median(neigh.map(n => n.bytes_out || 0));
+                  const rawIn = finalIncIn, rawOut = finalIncOut;
                   logger.info(`[HourlyAgg] smoothed uncertain=2: nick=${nick} client=${clientName} ${(finalIncIn/1e6).toFixed(0)}+${(finalIncOut/1e6).toFixed(0)}MB → ${(newIn/1e6).toFixed(0)}+${(newOut/1e6).toFixed(0)}MB (median of ${neigh.length})`);
                   finalIncIn = newIn;
                   finalIncOut = newOut;
                   uncertain = 3;  // mark as auto-corrected (heatmap still shows the stripe)
                   smoothedCount++;
+                  try {
+                    logActivity('billing', 'info', 'traffic_smoothed', nick,
+                      `${nick} (${clientName||'no-client'}): raw=${((rawIn+rawOut)/1e6).toFixed(1)}MB → median=${((newIn+newOut)/1e6).toFixed(1)}MB (${neigh.length} neighbours)`,
+                      {
+                        nick, server: srv, port_id: fullPortId, client: clientName, operator,
+                        hour_start: hourStart,
+                        raw_bytes_in: rawIn, raw_bytes_out: rawOut, raw_total_mb: +((rawIn+rawOut)/1e6).toFixed(1),
+                        corrected_bytes_in: newIn, corrected_bytes_out: newOut, corrected_total_mb: +((newIn+newOut)/1e6).toFixed(1),
+                        neighbours_used: neigh.length,
+                        reason: 'median_smoothing',
+                      });
+                  } catch (_) { /* best-effort */ }
                 } else {
                   unsmoothableCount++;
                   logger.warn(`[HourlyAgg] uncertain=2 kept (no clean neighbours): nick=${nick} client=${clientName} bytes=${((finalIncIn+finalIncOut)/1e6).toFixed(0)}MB`);
+                  try {
+                    logActivity('billing', 'warn', 'traffic_uncertain_kept', nick,
+                      `${nick} (${clientName||'no-client'}): uncertain=2 kept, raw=${((finalIncIn+finalIncOut)/1e6).toFixed(1)}MB, no clean neighbours`,
+                      {
+                        nick, server: srv, port_id: fullPortId, client: clientName, operator,
+                        hour_start: hourStart,
+                        raw_bytes_in: finalIncIn, raw_bytes_out: finalIncOut, raw_total_mb: +((finalIncIn+finalIncOut)/1e6).toFixed(1),
+                        neighbours_found: neigh.length,
+                        reason: 'insufficient_neighbours_for_smoothing',
+                      });
+                  } catch (_) { /* best-effort */ }
                 }
               }
               _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, finalIncIn, finalIncOut, uncertain);
@@ -514,6 +597,11 @@ async function aggregateHourlyTraffic() {
     const extra3 = smoothedCount > 0 ? `, ${smoothedCount} auto-smoothed` : '';
     const extra4 = unsmoothableCount > 0 ? `, ${unsmoothableCount} uncertain-kept` : '';
     logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} port entries, ${snapCache.size} tracked${extra1}${extra2}${extra3}${extra4}`);
+    // Stage 18.13 — too many spike-clamps in one hour is suspicious
+    // (could mean genuine traffic surge, OR aggregator-corruption pattern).
+    if (clampedSpikes >= 5) {
+      try { require('../telegram/alerts').trigger('traffic_spike_burst', { count: clampedSpikes }); } catch (_) {}
+    }
   } catch (e) {
     logger.error('[HourlyAgg] Error: ' + (e.stack || e.message));
   }

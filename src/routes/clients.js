@@ -37,6 +37,34 @@ module.exports = function createClientsRouter(deps) {
   // payment that triggered it.
   const _clientUpdateBalance = clientsDb.updateBalanceStmt();
 
+  // Full-ledger balance recompute (Stage 18.8) — shared by the ledger-entry
+  // delete and the payment delete (P0-2). Walks every entry by id ASC, summing
+  // the authoritative (balance_after − balance_before) snapshot deltas, falling
+  // back to type-based signs for legacy rows without snapshots.
+  const DEBIT_TYPES = new Set(['charge', 'debit', 'traffic_charge', 'daily_charge', 'expense']);
+  function recalcFromLedger(clientId) {
+    const rows = db.prepare(`
+      SELECT type, amount, balance_before, balance_after
+      FROM billing_ledger WHERE client_id = ? ORDER BY id ASC
+    `).all(clientId);
+    if (!rows.length) return 0;
+    // P1-1: anchor on the FIRST entry's balance_before instead of assuming 0.
+    // If a client had an opening balance set outside the ledger (import, manual
+    // SQL, pre-ledger era), starting from 0 would silently wipe that remainder.
+    // balance_before of the earliest row captures it; we then apply every delta
+    // (including the first row's) on top.
+    let bal = (rows[0].balance_before != null) ? rows[0].balance_before : 0;
+    for (const r of rows) {
+      if (r.balance_before != null && r.balance_after != null) {
+        bal += (r.balance_after - r.balance_before);   // authoritative snapshot delta
+      } else {
+        const a = r.amount || 0;
+        if (DEBIT_TYPES.has(r.type)) bal -= a; else bal += a;
+      }
+    }
+    return Math.round(bal * 100) / 100;
+  }
+
 r.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
   const offset = Math.max(parseInt(req.query.offset) || 0, 0);
@@ -314,14 +342,23 @@ function _mapLedgerToPayment(entry) {
     // ledger entries store the ISO timestamp; payments table called it
     // createdAt. Preserve the old field name in the response.
     createdAt: entry.timestamp || '',
+    // P0-2: stable ledger row id the UI deletes by (no fragile array index).
+    ledgerDbId: entry.db_id,
   };
 }
 r.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
-  // Pull from ledger, filter to payment-shaped types, newest first.
-  const payments = ledgerDb.listByClient(client.id)
-    .filter(e => e.type === 'payment' || e.type === 'bank_payment')
+  const all = ledgerDb.listByClient(client.id);
+  // P0-2: deleting a payment records a payment_reversal pointing back at it
+  // (reversedLedgerId). Hide the reversed original from the list so it
+  // disappears, while the reversal stays in the full ledger as an audit fact.
+  const reversed = new Set(
+    all.filter(e => e.type === 'payment_reversal' && e.reversedLedgerId != null)
+       .map(e => e.reversedLedgerId)
+  );
+  const payments = all
+    .filter(e => (e.type === 'payment' || e.type === 'bank_payment') && !reversed.has(e.db_id))
     .map(_mapLedgerToPayment)
     .reverse(); // listByClient is ORDER BY id ASC; UI expects newest-first
   res.json(payments);
@@ -386,6 +423,69 @@ r.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddlewar
   res.json({ ok: true, payments: client.payments, balance: client.balance });
 });
 
+// P0-2 (Path A): delete a payment by its stable ledger db_id (not array index,
+// which was a different source AND order than the GET list — the old route was
+// dead code that always 409'd). Records a referral-aware payment_reversal in the
+// SAME transaction as the balance reversal (atomicDebit), so balance and
+// referral_balance stay in sync. Idempotent: re-deleting an already-reversed
+// payment is a no-op (no double reversal).
+r.delete('/api/admin/clients/:id/payment/by-ledger/:ledgerDbId', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const ledgerDbId = parseInt(req.params.ledgerDbId, 10);
+  if (!Number.isInteger(ledgerDbId)) return res.status(400).json({ error: 'Invalid ledger id' });
+
+  const entries = ledgerDb.listByClient(client.id);
+  const target = entries.find(e => e.db_id === ledgerDbId && (e.type === 'payment' || e.type === 'bank_payment'));
+  if (!target) return res.status(404).json({ error: 'Payment not found' });
+
+  // Idempotency: a reversal already pointing at this payment → no-op.
+  const already = entries.some(e => e.type === 'payment_reversal' && e.reversedLedgerId === ledgerDbId);
+  if (already) return res.json({ ok: true, already: true, balance: client.balance });
+
+  const paidAmount = parseFloat(target.amount) || 0;
+
+  // Referral claw-back in the same atomicDebit txn, mirroring the credit path.
+  let referralOpts = null;
+  if (client.referred_by) {
+    const referrer = clientById.get(client.referred_by);
+    if (referrer) referralOpts = { referrerId: referrer.id, delta: -(Math.round(paidAmount * 0.15 * 100) / 100) };
+  }
+
+  let result;
+  try {
+    result = atomicDebit(client.id, paidAmount, {
+      type: 'payment_reversal',
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      amount: paidAmount,
+      currency: client.currency || 'RUB',
+      note: 'Удаление оплаты администратором',
+      reversedLedgerId: ledgerDbId,
+    }, referralOpts ? { referral: referralOpts } : undefined);
+  } catch (e) {
+    logger.error('[Payment] delete-by-ledger failed: ' + e.message);
+    return res.status(500).json({ error: 'Reversal failed', details: e.message });
+  }
+
+  if (result && result.referral) {
+    const referrer = clientById.get(result.referral.referrerId);
+    if (referrer) logger.info(`[Referral] Reversed ${Math.abs(referralOpts.delta).toFixed(2)} from ${referrer.name} (payment ${ledgerDbId} deleted) — atomic with reversal`);
+  }
+
+  // Best-effort: keep the legacy in-memory client.payments array consistent.
+  // The ledger is authoritative; this just avoids a stale count if anything
+  // still reads the array.
+  if (Array.isArray(client.payments)) {
+    const i = client.payments.findIndex(p => Math.round((parseFloat(p.amount) || 0) * 100) === Math.round(paidAmount * 100));
+    if (i >= 0) client.payments.splice(i, 1);
+  }
+
+  saveClients(clients);
+  auditLog(req.user.login, 'delete_payment', { clientId: client.id, clientName: client.name, amount: paidAmount, ledgerDbId, ip: getClientIp(req) });
+  res.json({ ok: true, balance: client.balance });
+});
+
 r.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -414,18 +514,15 @@ r.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMiddl
 
   const entry = entries[idx];
 
-  // Reverse the deleted entry's effect on balance using stored snapshot.
-  const entryImpact = (entry.balance_after != null && entry.balance_before != null)
-    ? entry.balance_after - entry.balance_before
-    : ((['payment', 'bank_payment', 'credit'].includes(entry.type)) ? (entry.amount || 0) : -(entry.amount || entry.cost || 0));
-  const newBalance = Math.round((client.balance - entryImpact) * 100) / 100;
-
-  // SQLite transaction — DELETE and UPDATE happen as one unit. Previously
-  // these were two separate statements and a crash between them left
-  // balance and ledger out of sync.
+  // Stage 18.8: FULL RECALCULATION after delete (shared recalcFromLedger,
+  // hoisted to factory scope; P1-1 anchors on the first balance_before so a
+  // pre-ledger opening remainder isn't wiped). Subtracting just this entry's
+  // delta would perpetuate any pre-existing drift.
+  let newBalance;
   try {
     db.transaction(() => {
       if (entry.db_id) ledgerDb.deleteById(entry.db_id);
+      newBalance = recalcFromLedger(client.id);
       _clientUpdateBalance.run(newBalance, client.id);
     })();
   } catch (e) {

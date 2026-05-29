@@ -142,7 +142,7 @@ module.exports = function createMiscRouter(deps) {
 
   r.post('/api/admin/cache/invalidate', authMiddleware, adminMiddleware, (req, res) => {
     proxySmart.invalidateCache();
-    logger.info('[Cache] ProxySmart cache invalidated by admin');
+    logger.info('[Cache] API server cache invalidated by admin');
     res.json({ ok: true, message: 'Cache invalidated' });
   });
 

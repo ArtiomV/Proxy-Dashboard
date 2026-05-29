@@ -117,7 +117,7 @@ r.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, re
     for (const k of Object.keys(merged)) {
       if (merged[k] === '' && currentFields[k]) merged[k] = currentFields[k];
     }
-    logger.info({ merged, rawImei, serverName }, '[StoreModem] Sending to ProxySmart');
+    logger.info({ merged, rawImei, serverName }, '[StoreModem] Sending to API server');
     const result = await postFormApi(server, `/conf/edit/${rawImei}`, merged);
     logger.info({ status: result.status }, '[StoreModem] Response');
     auditLog(req.user.login, 'store_modem', { serverName, IMEI: rawImei, ip: getClientIp(req) });
@@ -237,7 +237,7 @@ r.get('/api/admin/rotation_log', authMiddleware, adminMiddleware, async (req, re
       const entries = Array.isArray(result) ? result : (result?.log || result?.logs || result?.data || []);
       syncRotationLog(serverName, nick, entries);
     } catch (fetchErr) {
-      logger.info(`[RotationLog] ProxySmart fetch failed for ${nick}@${serverName}: ${fetchErr.message}, serving from DB`);
+      logger.info(`[RotationLog] API fetch failed for ${nick}@${serverName}: ${fetchErr.message}, serving from DB`);
     }
     // Always return from DB (has synced data + any previous data)
     const rows = _rlSelect.all(serverName, nick);
@@ -338,7 +338,7 @@ r.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res
 
     // Sanity check — without portID and http_port the form will fail server-side
     if (!prefilled.portID) {
-      return res.status(502).json({ error: 'ProxySmart add_port form returned no portID', html_snippet: html.slice(0, 300) });
+      return res.status(502).json({ error: 'add_port form returned no portID', html_snippet: html.slice(0, 300) });
     }
 
     // Merge: user values override pre-filled, but only for fields the form supports.
@@ -606,7 +606,7 @@ r.post('/api/admin/purge_port', authMiddleware, adminMiddleware, async (req, res
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const result = await fetchApi(server, `/conf/delete_port/${encodeURIComponent(portId)}`);
-    logger.info(`[Admin] Deleted port ${portId} from ${serverName} via ProxySmart`);
+    logger.info(`[Admin] Deleted port ${portId} from ${serverName}`);
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Delete port failed', details: err.message }); }
 });

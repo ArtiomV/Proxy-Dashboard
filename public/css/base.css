@@ -27,7 +27,18 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);tra
 .header{background:var(--bg-1);border-bottom:1px solid var(--border);padding:0 20px;height:52px;display:flex;align-items:center;gap:16px;position:sticky;top:0;z-index:100}
 .header-left{display:flex;align-items:center;gap:10px;flex-shrink:0}
 .header h1{display:none}
-.header-admin-badge{font-size:10px;font-weight:600;letter-spacing:.05em;background:rgba(99,102,241,0.1);color:var(--accent);padding:2px 7px;border-radius:4px}
+/* Stage 18.20 — header decluttered. The ADMIN tag, version badge, and
+   logout icon are hidden in the top bar (they sit in `.nav-tabs-footer`
+   inside the burger overlay for mobile users; desktop users can reach
+   the same actions via Настройки → Состояние сервера / changelog /
+   logout). Kept here as fallback styles in case other code still
+   references them. */
+.header-admin-badge,
+.header-left .header-version-badge,
+.header-right .btn-logout{display:none}
+.header-admin-badge--legacy{font-size:10px;font-weight:600;letter-spacing:.05em;background:rgba(99,102,241,0.1);color:var(--accent);padding:2px 7px;border-radius:4px}
+.header-version-badge{font-size:10px;font-weight:600;letter-spacing:.02em;background:var(--bg-2);color:var(--text-2);padding:2px 7px;border-radius:4px;border:1px solid var(--border);text-decoration:none;font-family:'JetBrains Mono','SF Mono',monospace;transition:all .15s ease;cursor:pointer}
+.header-version-badge:hover{background:var(--bg-3);color:var(--text-0);border-color:var(--border-hover)}
 .header-stats{display:flex;gap:10px}
 .stat-badge{background:var(--bg-2);padding:4px 10px;border-radius:4px;font-size:11px;color:var(--text-2);border:1px solid var(--border)}
 .stat-badge span{color:var(--text-0);font-weight:600}
@@ -73,6 +84,25 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);tra
 
 /* Col selector */
 .col-selector{position:relative}
+/* Stage 18.20 — compact ⚙ button anchored over the table's thead row.
+   Sits as a sibling of #tableWrap inside #tab-modems (which has
+   position:relative). Stays at the top-right corner of the table card —
+   thead is sticky, so they remain visually aligned during table scroll.
+   table-wrap padding-right is 24px; offsetting the anchor by ~8px lets
+   the button land just inside the card edge. */
+.btn-filter-anchor{position:absolute;top:5px;right:32px;z-index:11}
+.btn-filter-mini{
+  width:28px;height:28px;border-radius:6px;
+  background:var(--bg-1);
+  border:1px solid var(--border);
+  color:var(--text-1);
+  font-size:14px;line-height:1;
+  cursor:pointer;
+  display:inline-flex;align-items:center;justify-content:center;
+  padding:0;
+  transition:background .12s,border-color .12s,color .12s;
+}
+.btn-filter-mini:hover{background:var(--bg-3);border-color:var(--accent);color:var(--accent)}
 .col-dropdown{position:absolute;top:100%;right:0;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:6px;z-index:100;min-width:180px;display:none;box-shadow:0 8px 24px rgba(0,0,0,.3)}
 .col-dropdown.show{display:block}
 .col-dropdown label{display:flex;align-items:center;gap:6px;padding:4px 8px;cursor:pointer;font-size:11px;border-radius:4px;white-space:nowrap}
@@ -84,6 +114,16 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);tra
 .status-dot.rotating{background:var(--warning);animation:pulse 1.5s infinite}
 .status-dot.offline{background:var(--danger)}
 .status-dot.rebooting{background:var(--purple);animation:pulse 1s infinite}
+
+/* Stage 17.3 — status pill: replaces the easy-to-miss 8-px dot in the
+   modems table with a high-contrast colored chip. Visible at a glance,
+   readable in both themes, animates for transient states. */
+.status-pill{display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;letter-spacing:.04em;padding:3px 8px;border-radius:5px;color:#fff;line-height:1;text-transform:uppercase;min-width:42px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.15);user-select:none}
+.status-pill.online{background:linear-gradient(135deg,#28b94e,#1d9e3d);box-shadow:0 0 0 1px rgba(40,185,78,.35),0 1px 3px rgba(40,185,78,.25)}
+.status-pill.offline{background:linear-gradient(135deg,#e84141,#c92929);box-shadow:0 0 0 1px rgba(232,65,65,.35),0 1px 3px rgba(232,65,65,.25)}
+.status-pill.rotating{background:linear-gradient(135deg,#ef9f27,#d18910);box-shadow:0 0 0 1px rgba(239,159,39,.35),0 1px 3px rgba(239,159,39,.25);animation:status-pulse 1.5s infinite ease-in-out}
+.status-pill.rebooting{background:linear-gradient(135deg,#9560d8,#7a3fc4);box-shadow:0 0 0 1px rgba(149,96,216,.35),0 1px 3px rgba(149,96,216,.25);animation:status-pulse 1s infinite ease-in-out}
+@keyframes status-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.7;transform:scale(.94)}}
 @keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
 
 /* Signal bars */
@@ -174,19 +214,43 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .header-notif-btn{position:relative;width:30px;height:30px;display:flex;align-items:center;justify-content:center;border-radius:6px;cursor:pointer;color:var(--text-2);background:none;border:none;padding:0;flex-shrink:0}
 .header-notif-btn:hover{background:var(--bg-3)}
 .notif-badge{position:absolute;top:3px;right:3px;min-width:14px;height:14px;border-radius:7px;background:var(--danger);color:#fff;font-size:9px;font-weight:700;display:flex;align-items:center;justify-content:center;padding:0 3px;pointer-events:none}
-.notif-panel{position:fixed;top:52px;right:12px;width:320px;background:var(--bg-1);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.2);z-index:800;overflow:hidden}
-.notif-panel-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text-0)}
+.notif-panel{position:fixed;top:52px;right:12px;width:380px;max-width:calc(100vw - 24px);background:var(--bg-1);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 32px rgba(0,0,0,.2);z-index:800;overflow:hidden;display:flex;flex-direction:column;max-height:80vh}
+.notif-panel-hdr{display:flex;align-items:center;justify-content:space-between;padding:10px 14px;border-bottom:1px solid var(--border);font-size:12px;font-weight:600;color:var(--text-0);flex-shrink:0}
 .notif-panel-hdr button{background:none;border:none;font-size:11px;color:var(--accent);cursor:pointer;padding:0}
-.notif-list{max-height:340px;overflow-y:auto}
-.notif-item{display:flex;gap:10px;padding:10px 14px;border-bottom:0.5px solid var(--border);cursor:pointer;transition:background .1s}
+/* Stage 18.15 — filter tabs row */
+.notif-filters{display:flex;gap:4px;padding:8px 12px;border-bottom:0.5px solid var(--border);flex-shrink:0}
+.notif-filter{flex:1;background:var(--bg-3);color:var(--text-2);border:none;padding:5px 8px;border-radius:6px;font-size:10px;font-weight:500;cursor:pointer;transition:all .12s;display:flex;align-items:center;justify-content:center;gap:4px}
+.notif-filter:hover{background:var(--bg-2);color:var(--text-1)}
+.notif-filter.active{background:var(--accent);color:#fff}
+.notif-filter-count{font-size:9px;opacity:.85;font-weight:700}
+.notif-list{flex:1;overflow-y:auto;min-height:120px}
+.notif-item{display:flex;gap:10px;padding:10px 14px;border-bottom:0.5px solid var(--border);cursor:pointer;transition:background .1s;position:relative}
 .notif-item:hover{background:var(--bg-2)}
-.notif-item.unread{background:var(--bg-2)}
+.notif-item.read{opacity:.62}
+.notif-item.read .notif-text{font-weight:400}
+.notif-item-strip{position:absolute;left:0;top:0;bottom:0;width:3px;background:var(--text-3)}
+.notif-item-strip--critical{background:#e84141}
+.notif-item-strip--important{background:#EF9F27}
+.notif-item-strip--early{background:#3b82f6}
+.notif-item-strip--info{background:#9ca3af}
 .notif-icon{width:28px;height:28px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:13px;flex-shrink:0}
-.notif-icon--danger{background:#FCEBEB}.notif-icon--warning{background:#FAEEDA}.notif-icon--success{background:#EAF3DE}.notif-icon--info{background:#E6F1FB}
+.notif-icon--critical{background:#FCEBEB}.notif-icon--important{background:#FAEEDA}.notif-icon--early{background:#E6F1FB}.notif-icon--info{background:#F0F0F0}
+/* Legacy class names kept so old DOM (if cached) doesn't break before refresh */
+.notif-icon--danger{background:#FCEBEB}.notif-icon--warning{background:#FAEEDA}.notif-icon--success{background:#EAF3DE}
 .notif-body{flex:1;min-width:0}
-.notif-text{font-size:11px;color:var(--text-0);line-height:1.4;margin-bottom:2px}
+.notif-title{font-size:11px;color:var(--text-0);line-height:1.4;font-weight:600;margin-bottom:2px}
+.notif-text{font-size:11px;color:var(--text-1);line-height:1.4;margin-bottom:3px;word-break:break-word}
+.notif-text b{font-weight:600;color:var(--text-0)}
+.notif-text code{font-family:var(--font-mono);font-size:10px;background:var(--bg-3);padding:1px 4px;border-radius:3px}
 .notif-time{font-size:10px;color:var(--text-3)}
-.notif-empty{padding:24px;text-align:center;font-size:12px;color:var(--text-3)}
+.notif-dismiss{position:absolute;top:6px;right:6px;width:20px;height:20px;border-radius:50%;background:transparent;border:none;color:var(--text-3);cursor:pointer;font-size:14px;line-height:1;opacity:0;transition:opacity .1s,background .1s;display:flex;align-items:center;justify-content:center;padding:0}
+.notif-item:hover .notif-dismiss{opacity:1}
+.notif-dismiss:hover{background:var(--bg-3);color:var(--text-0)}
+.notif-empty{padding:32px 24px;text-align:center;font-size:12px;color:var(--text-3)}
+.notif-panel-ftr{display:flex;justify-content:space-between;gap:8px;padding:8px 14px;border-top:1px solid var(--border);flex-shrink:0;background:var(--bg-2)}
+.notif-panel-ftr button{background:none;border:none;font-size:10px;color:var(--text-2);cursor:pointer;padding:0}
+.notif-panel-ftr button:hover{color:var(--accent)}
+.notif-badge.is-critical{background:#e84141;box-shadow:0 0 0 2px rgba(232,65,65,0.35)}
 
 /* Stuck IP highlight */
 .ip-stuck{background:rgba(255,56,60,.12);border-radius:3px;padding:1px 4px}
