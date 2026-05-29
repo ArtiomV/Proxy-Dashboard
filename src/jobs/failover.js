@@ -163,23 +163,23 @@ async function findSpare(serverName, excludeImeis) {
 // 33–50% and tripped the old threshold. Backtesting the real log: 5 of 6 glitch
 // moves (83%) were false positives. Instead we require the last N checks to ALL
 // be failures (a sustained outage, not noise) and the most recent to be fresh.
-// `total_ms > badMs` (unusably slow) counts as a failure too — a modem that
-// answers but takes >badMs is effectively dead for the client. Returns
-// { fails, latencyOnly } or null.
-function _consecutiveFailGlitch(serverName, nick, needFails, badMs) {
+// ERRORS ONLY: latency is deliberately ignored — a slow-but-alive modem should
+// not be torn off its client. Only N hard failures in a row count. Returns
+// { fails } or null.
+function _consecutiveFailGlitch(serverName, nick, needFails) {
   try {
     const n = Math.max(2, parseInt(needFails, 10) || 3);
     const rows = deps.db.prepare(
-      `SELECT error, total_ms, checked_at FROM proxy_checks
+      `SELECT error, checked_at FROM proxy_checks
        WHERE server_name = ? AND nick = ? ORDER BY checked_at DESC LIMIT ?`
     ).all(serverName, nick, n);
     if (rows.length < n) return null;                       // not enough samples yet
     const latestMs = Date.parse(rows[0].checked_at);
     if (isNaN(latestMs) || Date.now() - latestMs > 90 * 60 * 1000) return null;  // stale → ignore
-    const isBad = r => (r.error != null) || (badMs > 0 && r.total_ms != null && r.total_ms > badMs);
-    if (!rows.every(isBad)) return null;
-    const hardErrors = rows.every(r => r.error != null);
-    return { fails: n, latencyOnly: !hardErrors };
+    // ERRORS ONLY — latency is deliberately ignored. A chronically-slow-but-alive
+    // modem (e.g. RO_5) must NOT trigger failover; only N hard failures in a row do.
+    if (!rows.every(r => r.error != null)) return null;
+    return { fails: n };
   } catch (_) { return null; }
 }
 
@@ -327,7 +327,6 @@ async function scanAndFailover() {
     const now = Date.now();
     const offlineMs   = _num('failover_offline_min', 15) * 60 * 1000;
     const glitchFails = _num('failover_glitch_fails', 3);
-    const badMs       = _num('failover_glitch_slow_ms', 4000);  // glitch "bad" = error OR slower than this
     const stale     = (typeof deps.getStaleNicks === 'function') ? deps.getStaleNicks() : new Set();
     const allData   = await _getMerged();   // one live snapshot for the whole pass
     // ONE shared used-spares set for the whole pass — the cached snapshot won't
@@ -346,9 +345,9 @@ async function scanAndFailover() {
           await failoverModem({ server: server.name, imei: m.imei, nick: m.nick }, 'hard_offline', { allData, usedSpares });
           continue;
         }
-        // Trigger 2 — glitch: N consecutive failed/too-slow checks (online).
+        // Trigger 2 — glitch: N consecutive errored checks (online). Latency ignored.
         if (m.online) {
-          const g = _consecutiveFailGlitch(server.name, m.nick, glitchFails, badMs);
+          const g = _consecutiveFailGlitch(server.name, m.nick, glitchFails);
           if (g) {
             await failoverModem({ server: server.name, imei: m.imei, nick: m.nick }, 'glitch_errors', { allData, usedSpares });
           }
@@ -374,7 +373,6 @@ async function previewCandidates() {
   const now = Date.now();
   const offlineMs   = _num('failover_offline_min', 15) * 60 * 1000;
   const glitchFails = _num('failover_glitch_fails', 3);
-  const badMs       = _num('failover_glitch_slow_ms', 4000);  // glitch "bad" = error OR slower than this
   const stale     = (typeof deps.getStaleNicks === 'function') ? deps.getStaleNicks() : new Set();
   const allData   = await _getMerged();
   // Simulate the real scan: spares are consumed one-by-one, so a spare assigned
@@ -389,8 +387,8 @@ async function previewCandidates() {
       if (!m.online && m.lastOnlineMs > 0 && downMs >= offlineMs && !stale.has(m.nick)) {
         reason = 'hard_offline'; detail = Math.round(downMs / 60000) + ' мин offline';
       } else if (m.online) {
-        const g = _consecutiveFailGlitch(server.name, m.nick, glitchFails, badMs);
-        if (g) { reason = 'glitch_errors'; detail = g.fails + (g.latencyOnly ? ' медленных проверок подряд' : ' ошибок подряд'); }
+        const g = _consecutiveFailGlitch(server.name, m.nick, glitchFails);
+        if (g) { reason = 'glitch_errors'; detail = g.fails + ' ошибок подряд'; }
       }
       if (!reason) continue;
       const spare = findSpareFrom(server.name, allData, new Set([m.imei, ...usedSpares]));

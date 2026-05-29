@@ -824,14 +824,9 @@
               <input class="form-input" id="failoverOfflineMinInput" type="number" min="5" max="240">
             </div>
             <div class="setting-field">
-              <label>Неудачных проверок подряд для «глючит»</label>
-              <div class="sf-desc">Модем online, но последние N проверок прокси подряд провалились (ошибка или слишком медленно) → failover. Не процент за окно — только устойчивый сбой, чтобы не реагировать на разовые всплески.</div>
+              <label>Проверок с ошибкой подряд для «глючит»</label>
+              <div class="sf-desc">Модем online, но последние N проверок прокси подряд завершились ОШИБКОЙ → failover. Задержки (медленные ответы) не учитываются — только устойчивые отказы, чтобы не реагировать на всплески.</div>
               <input class="form-input" id="failoverGlitchFailsInput" type="number" min="2" max="20">
-            </div>
-            <div class="setting-field">
-              <label>Порог «медленно» для «глючит» (мс)</label>
-              <div class="sf-desc">Проверка считается «плохой», если она упала с ошибкой ИЛИ Total больше этого значения. По умолчанию 4000 мс — обычные всплески 3–4с не считаются сбоем.</div>
-              <input class="form-input" id="failoverGlitchSlowMsInput" type="number" min="1000" max="60000" step="500">
             </div>
             <div class="setting-field">
               <label>Мин. uptime спейра (%)</label>

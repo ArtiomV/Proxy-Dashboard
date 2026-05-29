@@ -209,26 +209,25 @@ describe('failover engine', () => {
       seq.forEach((bad, i) => ins.run('S2', nick, bad ? 'boom' : null, bad ? null : 800, new Date(now - i * 60 * 1000).toISOString()));
     };
 
-    it('fires when the last 3 checks all failed', () => {
+    it('fires when the last 3 checks all errored', () => {
       const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
       insChecks(deps.db, 'RO_X', [true, true, true, false, false]);  // XXXoo (newest-first)
-      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3, 3000)).toBeTruthy();
+      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3)).toBeTruthy();
     });
 
     it('does NOT fire on a single recent blip (the 83%-false-positive case)', () => {
       const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
       insChecks(deps.db, 'RO_X', [true, false, true, true, true]);  // XoXXX — newest ok breaks the streak
-      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3, 3000)).toBeNull();
+      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3)).toBeNull();
     });
 
-    it('counts an unusably-slow check (> badMs) as a failure', () => {
+    it('does NOT fire on slow-but-successful checks (latency is ignored)', () => {
       const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
       const ins = deps.db.prepare('INSERT INTO proxy_checks (server_name, nick, error, total_ms, checked_at) VALUES (?,?,?,?,?)');
       const now = Date.now();
+      // 3 consecutive unusably-slow (9s) but ERROR-FREE checks → must NOT trigger.
       [9000, 9000, 9000].forEach((ms, i) => ins.run('S2', 'RO_X', null, ms, new Date(now - i * 60000).toISOString()));
-      const g = eng._consecutiveFailGlitch('S2', 'RO_X', 3, 3000);
-      expect(g).toBeTruthy();
-      expect(g.latencyOnly).toBe(true);
+      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3)).toBeNull();
     });
 
     it('ignores stale data (most recent check older than 90 min)', () => {
@@ -236,7 +235,7 @@ describe('failover engine', () => {
       const ins = deps.db.prepare('INSERT INTO proxy_checks (server_name, nick, error, total_ms, checked_at) VALUES (?,?,?,?,?)');
       const old = Date.now() - 3 * 3600 * 1000;
       for (let i = 0; i < 3; i++) ins.run('S2', 'RO_X', 'boom', null, new Date(old - i * 60000).toISOString());
-      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3, 3000)).toBeNull();
+      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3)).toBeNull();
     });
 
     it('previewCandidates never offers one spare to two modems', async () => {

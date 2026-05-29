@@ -189,7 +189,6 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.failover_dry_run != null)          patch.failover_dry_run          = !!req.body.failover_dry_run;
   if (req.body.failover_offline_min != null)      patch.failover_offline_min      = Math.max(5, Math.min(240, parseInt(req.body.failover_offline_min) || 15));
   if (req.body.failover_glitch_fails != null)     patch.failover_glitch_fails     = Math.max(2, Math.min(20, parseInt(req.body.failover_glitch_fails) || 3));
-  if (req.body.failover_glitch_slow_ms != null)   patch.failover_glitch_slow_ms   = Math.max(1000, Math.min(60000, parseInt(req.body.failover_glitch_slow_ms) || 4000));
   if (req.body.failover_spare_min_uptime_pct != null) patch.failover_spare_min_uptime_pct = Math.max(0, Math.min(100, parseInt(req.body.failover_spare_min_uptime_pct) || 90));
   if (req.body.failover_cooldown_h != null)       patch.failover_cooldown_h       = Math.max(1, Math.min(72, parseInt(req.body.failover_cooldown_h) || 6));
   if (req.body.failover_max_per_hour != null)     patch.failover_max_per_hour     = Math.max(1, Math.min(50, parseInt(req.body.failover_max_per_hour) || 5));
