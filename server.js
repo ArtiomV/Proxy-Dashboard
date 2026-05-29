@@ -110,9 +110,13 @@ autoMigrateIfNeeded();
 // re-applied ALTER TABLE ADD COLUMN, re-applied CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS,
 // and similar "already applied" cases. Anything else aborts the migration (fail-fast).
 const BENIGN_MIGRATION_ERRORS = [
-  /duplicate column name/i,
-  /already exists/i,
-  /no such column/i,      // safe for UPDATE re-runs that reference a column that was dropped earlier in same file
+  /duplicate column name/i,   // re-applied ALTER TABLE ADD COLUMN
+  /already exists/i,          // re-applied CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS
+  // P1-3: `no such column` is NOT benign. A migration only runs while it's not in
+  // _migrations (every run here is a first apply), so this error means the
+  // migration's own SQL is buggy — swallowing it would silently skip the intended
+  // change AND mark the file applied, so it never re-runs. Fail fast instead. (No
+  // migration uses DROP/RENAME COLUMN, so nothing legitimately hits this on re-run.)
 ];
 function isBenignMigrationError(err) {
   const msg = (err && err.message) || String(err);
