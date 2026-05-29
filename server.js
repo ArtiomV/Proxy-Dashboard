@@ -1644,6 +1644,7 @@ const SETTINGS_DEFAULTS = {
   failover_offline_min: 15,            // client modem offline ≥N min → failover (covers recovery-exhausted)
   failover_glitch_fails: 3,            // online but last N proxy checks ALL failed/too-slow → glitch failover
   failover_glitch_slow_ms: 4000,       // a check counts as "bad" for glitch if it errored OR Total > this (ms)
+  failover_spare_min_uptime_pct: 90,   // don't pick a spare whose own uptime is below this (avoid flappy targets)
   failover_cooldown_h: 6,              // don't re-failover the same modem within N hours
   failover_max_per_hour: 5,            // server-wide brake — more than N/h looks like a server fault, not modems
   // Modem tracking & rotation

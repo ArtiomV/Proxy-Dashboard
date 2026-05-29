@@ -125,6 +125,25 @@ describe('failover engine', () => {
     expect(await eng.findSpare('S2', new Set(['IMEI_DEAD']))).toBeNull();
   });
 
+  it('excludes an unstable modem from spares (uptime below threshold)', async () => {
+    const eng = freshEngine();
+    const deps = makeDeps();
+    // SPARE is the only candidate — make it flappy (50% uptime, enough samples).
+    deps.uptimeTracking['S2_IMEI_SPARE'] = { total_checks: 100, online_checks: 50, last_online_check: new Date().toISOString() };
+    eng.init(deps);
+    expect(await eng.findSpare('S2', new Set(['IMEI_DEAD']))).toBeNull();  // flappy spare not offered
+  });
+
+  it('still offers a spare with too few samples to judge (benefit of the doubt)', async () => {
+    const eng = freshEngine();
+    const deps = makeDeps();
+    // Low ratio BUT only 4 checks → not enough to condemn it → still eligible.
+    deps.uptimeTracking['S2_IMEI_SPARE'] = { total_checks: 4, online_checks: 1, last_online_check: new Date().toISOString() };
+    eng.init(deps);
+    const spare = await eng.findSpare('S2', new Set(['IMEI_DEAD']));
+    expect(spare && spare.imei).toBe('IMEI_SPARE');
+  });
+
   it('manualFailover executes move_port: edit_port IMEI swap + apply_port + logs ok', async () => {
     const eng = freshEngine();
     const deps = makeDeps();

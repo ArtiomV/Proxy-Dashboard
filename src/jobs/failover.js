@@ -137,7 +137,13 @@ function _sparesFromData(serverName, merged, excludeImeis) {
     const nick = (s.modem_details.NICK || '').trim() || rawImei;
     if (stale.has(nick)) continue;
     const ut = deps.uptimeTracking[prefix + rawImei] || {};
-    out.push({ imei: rawImei, nick, uptimeRatio: ut.total_checks ? (ut.online_checks || 0) / ut.total_checks : 1 });
+    const ratio = ut.total_checks ? (ut.online_checks || 0) / ut.total_checks : 1;
+    // Skip UNSTABLE spares — a modem that itself flaps would just trigger another
+    // failover (RO2_31 did exactly this). Only judge modems with enough samples;
+    // give brand-new ones the benefit of the doubt. minUptimePct is a setting.
+    const minUptime = _num('failover_spare_min_uptime_pct', 90) / 100;
+    if (ut.total_checks >= 10 && ratio < minUptime) continue;
+    out.push({ imei: rawImei, nick, uptimeRatio: ratio });
   }
   out.sort((a, b) => b.uptimeRatio - a.uptimeRatio);  // most-stable first
   return out;

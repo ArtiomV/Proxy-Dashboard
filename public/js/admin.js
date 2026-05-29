@@ -7457,6 +7457,7 @@ function loadFailoverSettings(){
       set('failoverOfflineMinInput', s.failover_offline_min!=null?s.failover_offline_min:15);
       set('failoverGlitchFailsInput', s.failover_glitch_fails!=null?s.failover_glitch_fails:3);
       set('failoverGlitchSlowMsInput', s.failover_glitch_slow_ms!=null?s.failover_glitch_slow_ms:4000);
+      set('failoverSpareMinUptimeInput', s.failover_spare_min_uptime_pct!=null?s.failover_spare_min_uptime_pct:90);
       set('failoverCooldownHInput', s.failover_cooldown_h!=null?s.failover_cooldown_h:6);
       set('failoverMaxPerHourInput', s.failover_max_per_hour!=null?s.failover_max_per_hour:5);
     })
@@ -7469,6 +7470,7 @@ function saveFailoverSettings(){
     failover_offline_min: parseInt(document.getElementById('failoverOfflineMinInput').value)||15,
     failover_glitch_fails: parseInt(document.getElementById('failoverGlitchFailsInput').value)||3,
     failover_glitch_slow_ms: parseInt(document.getElementById('failoverGlitchSlowMsInput').value)||4000,
+    failover_spare_min_uptime_pct: (function(){var v=parseInt(document.getElementById('failoverSpareMinUptimeInput').value);return isNaN(v)?90:v;})(),
     failover_cooldown_h: parseInt(document.getElementById('failoverCooldownHInput').value)||6,
     failover_max_per_hour: parseInt(document.getElementById('failoverMaxPerHourInput').value)||5
   };
