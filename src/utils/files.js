@@ -14,8 +14,15 @@ const _fileLocks = new Map();
 let _lastEnospcLog = 0;
 
 function safeWriteFile(filePath, data, logger) {
+  // Wait for the previous write to this path to SETTLE (success or failure) but
+  // don't inherit its rejection — one failed write must not poison the next.
   const prev = _fileLocks.get(filePath) || Promise.resolve();
-  const next = prev.then(async () => {
+  // `work` is the real write. It REJECTS on failure so an `await safeWriteFile(…)`
+  // caller can actually react (P1-2: the old code applied .catch BEFORE returning,
+  // so the returned promise never rejected and "Re-throw so callers can react"
+  // was a lie). Fire-and-forget callers must attach their own .catch — every
+  // current caller (saveKnownModems/saveServerCache/…) already does.
+  const work = prev.catch(() => {}).then(async () => {
     const tmp = filePath + '.tmp';
     try {
       await fsPromises.writeFile(tmp, data, 'utf8');
@@ -35,14 +42,17 @@ function safeWriteFile(filePath, data, logger) {
       } else if (logger) {
         logger.error(`[safeWriteFile] Error writing ${path.basename(filePath)}: ${e.message}`);
       }
-      // Re-throw so callers can react (e.g. avoid showing stale data as "saved").
-      throw e;
+      throw e;  // propagates to the returned promise (and the caller's .catch)
     }
-  }).catch(() => { /* swallow re-throw for fire-and-forget callers */ }).finally(() => {
-    if (_fileLocks.get(filePath) === next) _fileLocks.delete(filePath);
   });
-  _fileLocks.set(filePath, next);
-  return next;
+  // The lock-chain link is a SWALLOWING view of `work`, so the next queued write
+  // (which awaits this via `prev`) isn't blocked by a rejection, and the lock
+  // entry is cleaned up once this is the latest write. NOT returned to the caller.
+  const lockEntry = work.catch(() => {}).finally(() => {
+    if (_fileLocks.get(filePath) === lockEntry) _fileLocks.delete(filePath);
+  });
+  _fileLocks.set(filePath, lockEntry);
+  return work;  // caller gets the REAL, rejecting promise
 }
 
 module.exports = { safeWriteFile, _fileLocks };
