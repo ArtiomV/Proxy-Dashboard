@@ -142,7 +142,12 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
         require('../telegram/alerts').trigger('duplicate_credit_blocked', {
           client: payerName || ('ИНН ' + payerInn), amount, natural_key: naturalKey,
         });
-      } catch (_) {}
+      } catch (e) {
+        // P2-1: alert is best-effort — the accounting decision (dup blocked, NOT
+        // re-credited) already happened and was logged above; a failed Telegram
+        // send must not change the 200 response. Log at debug for traceability.
+        logger.debug(`[Tochka] duplicate_credit_blocked alert failed: ${e.message}`);
+      }
       return res.status(200).json({ ok: true, processed: false, reason: 'duplicate_natural_key' });
     }
 
@@ -219,7 +224,11 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
               natural_key: naturalKey, date: paymentDate,
               balanceAfter: matchedClient.balance,
             });
-          } catch (_) {}
+          } catch (e) {
+            // P2-1: best-effort notification — the credit itself already committed
+            // (atomicCredit in the same handler); a failed alert must not undo it.
+            logger.debug(`[Tochka] payment_received alert failed: ${e.message}`);
+          }
         } catch (e) {
           logger.error(`[Tochka Webhook] credit failed for ${matchedClient.name}:`, e.message);
           // Row stays unmatched — admin can attribute manually.
