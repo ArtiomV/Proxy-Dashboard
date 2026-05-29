@@ -181,9 +181,11 @@ async function passCrmReminders() {
 // ── Pass 4: purge old rows (TTL) ────────────────────────────────
 function passCleanup() {
   const { db } = deps;
-  const cutoff = `datetime('now','-${NOTIF_TTL_DAYS} days')`;
-  // CASCADE on notification_read_state takes care of read markers.
-  db.prepare(`DELETE FROM notifications WHERE created_at < ${cutoff}`).run();
+  // P2-4: NOTIF_TTL_DAYS is a module constant, but pass it as a bound int rather
+  // than interpolating it into the SQL string — keeps this safe if the TTL ever
+  // becomes a setting. CASCADE on notification_read_state handles read markers.
+  const ttl = Math.max(1, Number(NOTIF_TTL_DAYS) | 0);
+  db.prepare("DELETE FROM notifications WHERE created_at < datetime('now', '-' || ? || ' days')").run(ttl);
 }
 
 module.exports = { init, runOnce };

@@ -199,7 +199,15 @@ function create(deps) {
     for (const [table, { col, key, def }] of Object.entries(retentions)) {
       const raw = appSettings[key];
       const days = Number.isInteger(raw) && raw >= 7 ? raw : def;
-      results[table] = db.prepare(`DELETE FROM ${table} WHERE ${col} < datetime('now', '-${days} days')`).run();
+      // P2-4: `table` and `col` come ONLY from the hardcoded `retentions` map
+      // above — never from user input — so identifier interpolation is safe
+      // (SQLite can't bind identifiers). `days` is coerced to a positive int and
+      // passed as a bound parameter (not interpolated) as defence-in-depth, so
+      // this pattern stays safe if it's ever copied somewhere with a dynamic value.
+      const safeDays = Math.max(1, Number(days) | 0);
+      results[table] = db.prepare(
+        `DELETE FROM ${table} WHERE ${col} < datetime('now', '-' || ? || ' days')`
+      ).run(safeDays);
     }
     // In-memory dailyTraffic cleanup (mirrors daily_traffic table retention)
     try {
