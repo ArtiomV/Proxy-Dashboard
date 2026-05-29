@@ -6,6 +6,7 @@
 // in server.js, getter pattern for forward-referenced helpers.
 
 const express = require('express');
+const { COST_CATEGORIES } = require('../billing/cost-categories');  // P2-2: was a server.js dep
 
 module.exports = function createBillingExtRouter(deps) {
   const {
@@ -14,7 +15,6 @@ module.exports = function createBillingExtRouter(deps) {
     getFetchAllServersDataCached, getMergeServerData,
     getPortKeyToPortName, getDailyTraffic, ledgerDb,
     getMoscowToday, trafficBytesToGb, parseBwToBytes, ledgerExpense,
-    COST_CATEGORIES,
     getClientStoredMonthBytes,
     refreshPortKeyMapping,
     getApiServers, getServerCountries,

@@ -2034,34 +2034,10 @@ const getHttpLib = proxySmart.getHttpLib;
 // Manual billing trigger
 // =========== Финансовая аналитика ===========
 
-// Категории затрат и их subkey-структура
-const COST_CATEGORIES = {
-  server:      { label: 'Аренда серверов', perItem: true,  itemType: 'server' },   // subkey = S1/S2/...
-  sim:         { label: 'SIM-карты',       perItem: true,  itemType: 'operator' }, // subkey = Orange MD / Moldtelecom / ...
-  electricity: { label: 'Электричество',   perItem: false },
-  hosting:     { label: 'Хостинг/связь',   perItem: false },
-  salary:      { label: 'Зарплата',        perItem: false },
-  other:       { label: 'Прочее',          perItem: false }
-};
-
-// GET /api/admin/monthly_costs?period=YYYY-MM
-// Возвращает все строки затрат за период + meta (категории, операторы, серверы для UI).
-
-// POST /api/admin/monthly_costs
-// Body: { period: 'YYYY-MM', items: [{category, subkey, amount, notes}, ...] }
-// Перезаписывает строки за период (атомарно).
-
-// GET /api/admin/finance_dashboard
-// Считает все метрики для финансового дашборда.
-// MRR — trailing 30d revenue per client. NRR — 3-month cohort.
-// Cached for 60s — recomputation is heavy (~200ms with 30+ aggregations).
-let _financeCache = null;
-let _financeCacheTs = 0;
-let _financeCacheKey = '';
-const FINANCE_CACHE_TTL_MS = 60 * 1000;
-
-// Invalidator — called whenever ledger or settings change that affect finance metrics.
-function invalidateFinanceCache() { _financeCache = null; _financeCacheTs = 0; }
+// P2-2: COST_CATEGORIES moved to src/billing/cost-categories.js, and the finance
+// routes (monthly_costs / finance_dashboard) + their 60s cache live entirely in
+// src/routes/billing-ext.js. The cache vars + invalidateFinanceCache() that used
+// to sit here were dead (never read/called) — removed.
 
 // Background job registry extracted to src/jobs/registry.js (P2-2). Launch
 // billing etc. in the background, poll /api/admin/jobs/:id for completion.
@@ -4847,7 +4823,6 @@ app.use(require('./src/routes/billing-ext')({
   getPortKeyToPortName: () => portKeyToPortName,
   getDailyTraffic: () => dailyTraffic,
   ledgerDb,
-  COST_CATEGORIES,
   getClientStoredMonthBytes,
   refreshPortKeyMapping,
   getApiServers: () => apiServers,
