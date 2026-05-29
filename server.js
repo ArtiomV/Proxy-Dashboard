@@ -21,6 +21,7 @@ const { validate } = require('./src/middleware/validate');
 const { LoginSchema, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema } = require('./src/schemas');
 const { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday } = require('./src/utils/time');
 const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator } = require('./src/utils/traffic');
+const { parseHtmlInputFields } = require('./src/utils/html-forms');  // P2-2: extracted from server.js
 const proxySmart = require('./src/api/proxy-smart');
 const hourlyTraffic = require('./src/traffic/hourly');
 const { buildDocHtml: _buildDocHtml } = require('./src/documents/generator');
@@ -4010,45 +4011,7 @@ function postFormApi(server, apiPath, formData, timeout = 15000) {
   });
 }
 
-// Tolerant <input name="..." value="..."> parser — handles either attribute
-// order, multi-line tags, single/double quotes, and self-closing slashes.
-// Returns plain object { name: value, ... }.
-function parseHtmlInputFields(html) {
-  const fields = {};
-  if (!html) return fields;
-  const inputRe = /<input\b[^>]*?>/gi;
-  let m;
-  while ((m = inputRe.exec(html)) !== null) {
-    const tag = m[0];
-    const nameMatch  = tag.match(/\bname\s*=\s*["']([^"']+)["']/i);
-    const valueMatch = tag.match(/\bvalue\s*=\s*["']([^"']*)["']/i);
-    if (nameMatch && valueMatch !== null) {
-      fields[nameMatch[1]] = valueMatch ? valueMatch[1] : '';
-    }
-  }
-  // <select> with selected <option> — keep selected value
-  const selectRe = /<select\b[^>]*?\bname\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/select>/gi;
-  while ((m = selectRe.exec(html)) !== null) {
-    const name = m[1], body = m[2];
-    const selOpt = body.match(/<option\b[^>]*\bselected\b[^>]*\bvalue\s*=\s*["']([^"']*)["']/i)
-                || body.match(/<option\b[^>]*\bvalue\s*=\s*["']([^"']*)["'][^>]*\bselected\b/i);
-    if (selOpt) {
-      fields[name] = selOpt[1];
-    } else {
-      const first = body.match(/<option\b[^>]*\bvalue\s*=\s*["']([^"']*)["']/i);
-      if (first) fields[name] = first[1];
-    }
-  }
-  // <textarea name="...">body</textarea>
-  const textareaRe = /<textarea\b[^>]*?\bname\s*=\s*["']([^"']+)["'][^>]*>([\s\S]*?)<\/textarea>/gi;
-  while ((m = textareaRe.exec(html)) !== null) {
-    fields[m[1]] = m[2].trim();
-  }
-  return fields;
-}
-
-
-
+// parseHtmlInputFields extracted to src/utils/html-forms.js (P2-2).
 
 // Rotation log: fetch from ProxySmart, sync to SQLite, return from DB
 // rotation_log statements → src/db/tracking.js
