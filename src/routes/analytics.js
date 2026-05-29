@@ -13,6 +13,7 @@
 // pulls every helper they need from server.js.
 
 const express = require('express');
+const { tzModifier } = require('../utils/time');  // P2-3: shared "+N hours" builder
 
 module.exports = function createAnalyticsRouter(deps) {
   // Bare-name destructure: these live as let/const bindings in server.js
@@ -142,8 +143,7 @@ r.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res
     const matrix = dateList.map(() => new Array(24).fill(0));
 
     // Build SQL filter based on view type — all filtering is on per-modem columns
-    const tzHours = Math.round(Math.max(-12, Math.min(14, mskOffset)));
-    const tzStr = (tzHours >= 0 ? '+' : '') + tzHours + ' hours';
+    const tzStr = tzModifier(mskOffset);
     let sql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes, MAX(uncertain) as corrected FROM traffic_hourly WHERE hour_start >= ?`;
     const params = [utcFetchStartShifted];
 
@@ -266,8 +266,7 @@ r.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (re
     const clientRow = db.prepare("SELECT client_name FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? LIMIT 1").get(nick, serverName, utcStart);
     const clientLabel = (clientRow && clientRow.client_name) || nick;
     const matrix = dateList.map(() => new Array(24).fill(0));
-    const tzH2 = Math.round(Math.max(-12, Math.min(14, mskOffset2)));
-    const tzStr2 = (tzH2 >= 0 ? '+' : '') + tzH2 + ' hours';
+    const tzStr2 = tzModifier(mskOffset2);
     const rows = db.prepare(`SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr2}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr2}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? GROUP BY day, hour`).all(nick, serverName, utcStart);
     for (const r of rows) {
       const di = dateIdx2.get(r.day);
@@ -295,8 +294,7 @@ r.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, res
     const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
 
     const mskOffset = getTzOffset('Europe/Moscow');
-    const tzHours2 = Math.round(Math.max(-12, Math.min(14, mskOffset)));
-    const tzStr = (tzHours2 >= 0 ? '+' : '') + tzHours2 + ' hours';
+    const tzStr = tzModifier(mskOffset);
     const now2 = new Date();
     const since = new Date(now2.getTime() - days * 86400000).toISOString();
     // Prior period: equal-length window immediately preceding `since`.

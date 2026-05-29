@@ -19,6 +19,21 @@ function getTzOffset(tzName) {
   return 3; // fallback to UTC+3 (MSK)
 }
 
+/**
+ * Build a SQLite datetime() modifier string from an hour offset, e.g. 3 → "+3 hours".
+ * Clamps to SQLite's valid [-12, 14] range. The value is numeric (never user input),
+ * so it's safe to interpolate into SQL. (P2-3 — was copy-pasted ≥6× in analytics.js.)
+ */
+function tzModifier(offsetHours) {
+  const h = Math.round(Math.max(-12, Math.min(14, Number(offsetHours) || 0)));
+  return (h >= 0 ? '+' : '') + h + ' hours';
+}
+
+/** Convenience: the current MSK offset as a SQLite modifier (e.g. "+3 hours"). */
+function sqliteMskTzModifier() {
+  return tzModifier(getTzOffset('Europe/Moscow'));
+}
+
 function getMoscowNow() {
   return new Date(new Date().toLocaleString('en-US', { timeZone: 'Europe/Moscow' }));
 }
@@ -33,4 +48,4 @@ function getMoscowYesterday() {
   return d.toLocaleDateString('en-CA');
 }
 
-module.exports = { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday };
+module.exports = { getTzOffset, tzModifier, sqliteMskTzModifier, getMoscowNow, getMoscowToday, getMoscowYesterday };
