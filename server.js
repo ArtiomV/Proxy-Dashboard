@@ -2063,26 +2063,9 @@ const FINANCE_CACHE_TTL_MS = 60 * 1000;
 // Invalidator — called whenever ledger or settings change that affect finance metrics.
 function invalidateFinanceCache() { _financeCache = null; _financeCacheTs = 0; }
 
-// Async-fire-and-track pattern: launch billing in background, return a job ID.
-// Caller polls /api/admin/jobs/:id for completion. Avoids HTTP timeouts
-// when billing takes >30s.
-const _jobs = new Map(); // jobId → { status, startedAt, finishedAt, error, result }
-function _startJob(name, fn) {
-  const jobId = crypto.randomBytes(8).toString('hex');
-  const job = { id: jobId, name, status: 'running', startedAt: new Date().toISOString() };
-  _jobs.set(jobId, job);
-  // Trim job map at 200 entries
-  if (_jobs.size > 200) {
-    const oldest = Array.from(_jobs.keys()).slice(0, _jobs.size - 200);
-    for (const k of oldest) _jobs.delete(k);
-  }
-  Promise.resolve().then(() => fn()).then(result => {
-    job.status = 'done'; job.finishedAt = new Date().toISOString(); job.result = result;
-  }).catch(e => {
-    job.status = 'failed'; job.finishedAt = new Date().toISOString(); job.error = e.message;
-  });
-  return jobId;
-}
+// Background job registry extracted to src/jobs/registry.js (P2-2). Launch
+// billing etc. in the background, poll /api/admin/jobs/:id for completion.
+const { jobs: _jobs, startJob: _startJob } = require('./src/jobs/registry');
 
 // /api/admin/run_billing + /api/admin/billing_rerun moved into src/routes/billing.js (Stage 3).
 app.use(require('./src/routes/billing')({
