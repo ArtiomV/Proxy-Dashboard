@@ -4360,21 +4360,10 @@ function unassignModem(nick, clientPortName) {
     }).catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
 }
 
-function addPayment(clientId){
-  var amount=document.getElementById('payAmount_'+clientId).value;
-  var date=document.getElementById('payDate_'+clientId).value;
-  var note=document.getElementById('payNote_'+clientId).value;
-  if(!amount||!date)return showToast('Заполните сумму и дату','error');
-  fetch(API+'/api/admin/clients/'+clientId+'/payment',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({amount:amount,date:date,note:note})}).then(function(r){return r.json()}).then(function(d){if(d.ok){showToast('Платёж добавлен','success');loadData()}else showToast(d.error,'error')}).catch(function(e){showToast(e.message,'error')});
-}
-// P0-2 (Path A): delete a payment by its STABLE ledger id (ledgerDbId from
-// GET /payments), not the array index — the old index path hit a different
-// source/order and the route always 409'd. The backend records a referral-aware
-// payment_reversal and is idempotent.
-function deletePayment(clientId,ledgerDbId){
-  if(!confirm('Удалить платёж? Баланс и реферальная комиссия будут пересчитаны.'))return;
-  fetch(API+'/api/admin/clients/'+clientId+'/payment/by-ledger/'+ledgerDbId,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){if(d.ok){showToast('Платёж удалён','success');loadData()}else showToast(d.error||'Ошибка','error')}).catch(function(e){showToast(e.message||'Ошибка сети','error')});
-}
+// P0-2: addPayment/deletePayment removed — the per-client manual-payment UI was
+// retired in favour of the Tochka bank flow + balance_adjust, so both were dead
+// code (no callers). The backend delete-by-ledger-id route remains for API/future
+// use (src/routes/clients.js: DELETE /clients/:id/payment/by-ledger/:ledgerDbId).
 
 // ========== ANALYTICS ==========
 function initAnalyticsSelectors(){var sv=currentData?currentData.servers||[]:[];['uniqueIpsServer','bwPeriodServer','backupServer'].forEach(function(id){var sel=document.getElementById(id);if(!sel)return;var v=sel.value;sel.innerHTML='<option value="">Сервер</option>';sv.forEach(function(s){var c=COUNTRIES[s.name]||{};sel.innerHTML+='<option value="'+s.name+'">'+(c.flag||'')+' '+(c.name||s.name)+'</option>'});if(v)sel.value=v})}
