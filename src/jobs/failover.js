@@ -321,7 +321,7 @@ async function scanAndFailover() {
     const now = Date.now();
     const offlineMs   = _num('failover_offline_min', 15) * 60 * 1000;
     const glitchFails = _num('failover_glitch_fails', 3);
-    const badMs       = _num('proxy_check_bad_ms', 3000);
+    const badMs       = _num('failover_glitch_slow_ms', 4000);  // glitch "bad" = error OR slower than this
     const stale     = (typeof deps.getStaleNicks === 'function') ? deps.getStaleNicks() : new Set();
     const allData   = await _getMerged();   // one live snapshot for the whole pass
     // ONE shared used-spares set for the whole pass — the cached snapshot won't
@@ -368,7 +368,7 @@ async function previewCandidates() {
   const now = Date.now();
   const offlineMs   = _num('failover_offline_min', 15) * 60 * 1000;
   const glitchFails = _num('failover_glitch_fails', 3);
-  const badMs       = _num('proxy_check_bad_ms', 3000);
+  const badMs       = _num('failover_glitch_slow_ms', 4000);  // glitch "bad" = error OR slower than this
   const stale     = (typeof deps.getStaleNicks === 'function') ? deps.getStaleNicks() : new Set();
   const allData   = await _getMerged();
   // Simulate the real scan: spares are consumed one-by-one, so a spare assigned

@@ -829,6 +829,11 @@
               <input class="form-input" id="failoverGlitchFailsInput" type="number" min="2" max="20">
             </div>
             <div class="setting-field">
+              <label>Порог «медленно» для «глючит» (мс)</label>
+              <div class="sf-desc">Проверка считается «плохой», если она упала с ошибкой ИЛИ Total больше этого значения. По умолчанию 4000 мс — обычные всплески 3–4с не считаются сбоем.</div>
+              <input class="form-input" id="failoverGlitchSlowMsInput" type="number" min="1000" max="60000" step="500">
+            </div>
+            <div class="setting-field">
               <label>Cooldown на модем (ч)</label>
               <div class="sf-desc">Не переносить тот же модем повторно в течение этого времени</div>
               <input class="form-input" id="failoverCooldownHInput" type="number" min="1" max="72">
