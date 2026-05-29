@@ -3101,14 +3101,22 @@ function getProxyCheckConcurrency() { return appSettings.proxy_check_concurrency
 
 function curlCheckProxy(proxyUrl, targetUrl) {
   const target = targetUrl || appSettings.proxy_check_target || 'https://www.instagram.com/';
+  // P1-5: block curl flag/option injection. execFile uses no shell, but a value
+  // beginning with '-' could be misread by curl as an option. Require an explicit
+  // allowed scheme on BOTH operands, and pass the target after '--' (end of
+  // options) so it can never be interpreted as a flag (e.g. '-K/etc/passwd').
+  const SCHEME = /^(https?|socks5h?):\/\//i;
+  if (!SCHEME.test(String(proxyUrl)) || !SCHEME.test(String(target))) {
+    return Promise.resolve({ connect_ms: null, total_ms: null, status_code: null, error: 'INVALID_URL' });
+  }
   return new Promise((resolve) => {
     const args = [
-      '-x', proxyUrl,
+      '--proxy', proxyUrl,
       '-w', '%{time_connect}|||%{time_total}|||%{http_code}',
       '-o', '/dev/null', '-s',
       '--max-time', String(getProxyCheckTimeout()),
       '-L', // follow redirects
-      target
+      '--', target
     ];
     execFile('curl', args, { timeout: (getProxyCheckTimeout() + 5) * 1000 }, (err, stdout) => {
       if (err) {
@@ -4968,9 +4976,11 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
       if (pct >= 90)      alerts.trigger('heap_high', { pct, usedMB, totalMB });
       else if (pct >= 85) alerts.trigger('heap_warn', { pct, usedMB, totalMB });
 
-      // Disk check — statfs of /root/Proxy-Dashboard partition.
+      // Disk check — statfs of the app's own partition (P1-6: was hardcoded to
+      // /root/Proxy-Dashboard, which silently no-op'd the disk alert on any other
+      // host/path; __dirname follows the app wherever it's deployed).
       try {
-        const stat = fs.statfsSync('/root/Proxy-Dashboard');
+        const stat = fs.statfsSync(__dirname);
         const freeB  = stat.bavail * stat.bsize;
         const totalB = stat.blocks * stat.bsize;
         const freeGB = Math.round(freeB / 1e9 * 10) / 10;
