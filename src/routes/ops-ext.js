@@ -394,12 +394,25 @@ r.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) =>
       ORDER BY date
     `).all();
 
-    // DB size
+    // DB size — use the actual open DB file path (better-sqlite3 .name), not
+    // path.join(__dirname,…) which resolved to src/routes/dashboard.db (does not
+    // exist) and made the UI show 0 MB.
     let dbSizeBytes = 0;
+    try { if (db.name) dbSizeBytes = fs.statSync(db.name).size; } catch (_) { /* best-effort */ }
+
+    // Disk usage of the app's partition (the UI had no free-space indicator).
+    let disk = null;
     try {
-      const dbPath = path.join(__dirname, 'dashboard.db');
-      if (fs.existsSync(dbPath)) dbSizeBytes = fs.statSync(dbPath).size;
-    } catch (_) { /* best-effort: error intentionally swallowed */ }
+      if (typeof fs.statfsSync === 'function') {
+        const st = fs.statfsSync(path.join(__dirname, '..', '..'));  // app root from src/routes/
+        const totalB = st.blocks * st.bsize, freeB = st.bavail * st.bsize;
+        if (totalB > 0) disk = {
+          total_gb: Math.round(totalB / 1e9 * 10) / 10,
+          free_gb:  Math.round(freeB  / 1e9 * 10) / 10,
+          used_pct: Math.round((totalB - freeB) / totalB * 100),
+        };
+      }
+    } catch (_) { /* statfs unsupported on this FS — leave null */ }
 
     // Sessions
     const sessionCount = db.prepare("SELECT COUNT(*) as c FROM sessions WHERE expires_at > datetime('now')").get().c;
@@ -435,6 +448,7 @@ r.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) =>
         size_bytes: dbSizeBytes,
         size_mb: Math.round(dbSizeBytes / 1048576 * 10) / 10
       },
+      disk,
       sessions: sessionCount,
       memory: {
         rss_mb: Math.round(memUsage.rss / 1048576),

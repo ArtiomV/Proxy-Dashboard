@@ -432,6 +432,7 @@ function renderSysDashboard(targetId){
       h += '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">';
       h += _sysKpi('Uptime', Math.floor((d.uptime_sec||0)/3600)+'ч '+Math.floor(((d.uptime_sec||0)%3600)/60)+'мин');
       h += _sysKpi('DB', (d.db&&d.db.size_mb||0)+' MB');
+      if(d.disk)h += _sysKpi('Диск', d.disk.free_gb+' ГБ своб.', d.disk.used_pct+'% занято из '+d.disk.total_gb+' ГБ', d.disk.used_pct>=85?'var(--danger)':(d.disk.used_pct>=75?'#D4880F':null));
       h += _sysKpi('Sessions', d.sessions || 0);
       h += _sysKpi('Memory RSS', (d.memory&&d.memory.rss_mb||0)+' MB', 'heap '+((d.memory&&d.memory.heap_mb)||0)+' MB');
       h += _sysKpi('API errors 24h', d.api_errors_24h || 0, null, d.api_errors_24h > 0 ? 'var(--danger)' : 'var(--success)');

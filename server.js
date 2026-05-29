@@ -5115,14 +5115,20 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
       const ok = bdb.prepare("SELECT count(*) c FROM sqlite_master WHERE name='clients'").get();
       bdb.close();
       if (!ok || !ok.c) throw new Error('backup verification: clients table missing');
-      // Prune backups older than 14 days
+      // Prune backups older than 7 days. Each is a full copy of the (growing)
+      // DB — 14×~280 MB was ~4 GB on a 24 GB disk; 7 days is a comfortable window.
+      // Also remove the SQLite sidecars (-shm/-wal) that matched a pruned .db
+      // (the old regex left them behind to accumulate).
       const files = fs.readdirSync(backupDir).filter(f => /^dashboard-\d{4}-\d{2}-\d{2}\.db$/.test(f));
-      const cutoff = new Date(Date.now() - 14 * 86400000).toISOString().slice(0, 10);
+      const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
       let pruned = 0;
       for (const f of files) {
         const fileDate = f.slice(10, 20);
         if (fileDate < cutoff) {
-          try { fs.unlinkSync(path.join(backupDir, f)); pruned++; } catch (_) { /* best-effort: error intentionally swallowed */ }
+          for (const ext of ['', '-shm', '-wal']) {
+            try { fs.unlinkSync(path.join(backupDir, f + ext)); } catch (_) { /* sidecar may not exist */ }
+          }
+          pruned++;
         }
       }
       const sizeMb = Math.round(fs.statSync(dest).size / 1024 / 1024 * 10) / 10;
