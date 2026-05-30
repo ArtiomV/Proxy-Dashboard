@@ -1647,7 +1647,10 @@ const SETTINGS_DEFAULTS = {
   failover_enabled: false,             // master switch — auto-failover off until validated
   failover_dry_run: true,              // when enabled: log «would move» without touching prod
   failover_offline_min: 15,            // client modem offline ≥N min → failover (covers recovery-exhausted)
-  failover_glitch_fails: 3,            // online but last N proxy checks ALL errored → glitch failover (latency ignored)
+  failover_glitch_fails: 3,            // online but last N proxy checks ALL errored → enter the slow glitch path
+  failover_proxy_dead_min: 45,         // slow path: error streak must last ≥N min (carrier blips clear faster)
+  failover_proxy_dead_hard_min: 90,    // hard cap: proxy dead ≥N min → failover regardless of modem uptime
+  failover_uptime_floor_pct: 90,       // slow path fires only if the modem's own uptime is below this (lie-detector)
   failover_spare_min_uptime_pct: 90,   // don't pick a spare whose own uptime is below this (avoid flappy targets)
   failover_cooldown_h: 6,              // don't re-failover the same modem within N hours
   failover_max_per_hour: 5,            // server-wide brake — more than N/h looks like a server fault, not modems

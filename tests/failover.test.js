@@ -201,48 +201,66 @@ describe('failover engine', () => {
     expect(deps._calls.editPort.length).toBe(after1); // no additional move
   });
 
-  describe('glitch detection: N consecutive failures (not error% over a window)', () => {
-    const insChecks = (db, nick, seq) => {
-      // seq newest-first: true = error, false = ok. Spaced 1 min apart, most recent now.
+  describe('glitch detection: two-speed, uptime-gated', () => {
+    // Insert error checks at the given "minutes ago" offsets (newest = smallest).
+    const insErr = (db, nick, minsAgo) => {
       const ins = db.prepare('INSERT INTO proxy_checks (server_name, nick, error, total_ms, checked_at) VALUES (?,?,?,?,?)');
-      const now = Date.now();
-      seq.forEach((bad, i) => ins.run('S2', nick, bad ? 'boom' : null, bad ? null : 800, new Date(now - i * 60 * 1000).toISOString()));
+      minsAgo.forEach(m => ins.run('S2', nick, 'boom', null, new Date(Date.now() - m * 60000).toISOString()));
+    };
+    const setUptime = (deps, imei, pct) => {
+      deps.uptimeTracking['S2_' + imei] = { total_checks: 100, online_checks: pct, last_online_check: new Date().toISOString() };
     };
 
-    it('fires when the last 3 checks all errored', () => {
+    it('HARD CAP: proxy dead ≥ hard-min fires even on a pristine modem', () => {
       const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
-      insChecks(deps.db, 'RO_X', [true, true, true, false, false]);  // XXXoo (newest-first)
-      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3)).toBeTruthy();
+      setUptime(deps, 'IMEI_X', 100);                  // rock-solid uptime
+      insErr(deps.db, 'RO_X', [0, 30, 60, 95]);        // streak spans 95 min ≥ 90 hard cap
+      expect(eng._glitchDecision('S2', 'RO_X', 'IMEI_X').fire).toBe(true);
     });
 
-    it('does NOT fire on a single recent blip (the 83%-false-positive case)', () => {
+    it('SLOW PATH: sustained errors + LOW modem uptime fires', () => {
       const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
-      insChecks(deps.db, 'RO_X', [true, false, true, true, true]);  // XoXXX — newest ok breaks the streak
-      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3)).toBeNull();
+      setUptime(deps, 'IMEI_X', 80);                   // degrading modem
+      insErr(deps.db, 'RO_X', [0, 25, 50]);            // 50 min ≥ 45 slow, uptime 80 < 90
+      expect(eng._glitchDecision('S2', 'RO_X', 'IMEI_X').fire).toBe(true);
     });
 
-    it('does NOT fire on slow-but-successful checks (latency is ignored)', () => {
+    it('SLOW PATH does NOT fire on a healthy modem (MD3_126 self-healing case)', () => {
       const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
+      setUptime(deps, 'IMEI_X', 99);                   // device rock-solid online → likely a carrier blip
+      insErr(deps.db, 'RO_X', [0, 25, 50]);            // 50 min ≥ 45 but < 90 cap, uptime 99 ≥ 90 → WAIT
+      expect(eng._glitchDecision('S2', 'RO_X', 'IMEI_X').fire).toBe(false);
+    });
+
+    it('does NOT fire with too few consecutive errors', () => {
+      const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
+      setUptime(deps, 'IMEI_X', 50);
+      insErr(deps.db, 'RO_X', [0, 50]);                // only 2 errors (< 3 needed)
+      expect(eng._glitchDecision('S2', 'RO_X', 'IMEI_X').fire).toBe(false);
+    });
+
+    it('does NOT fire on stale data (latest check > 90 min old)', () => {
+      const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
+      setUptime(deps, 'IMEI_X', 50);
+      insErr(deps.db, 'RO_X', [100, 130, 160]);        // latest is 100 min ago → not fresh
+      expect(eng._glitchDecision('S2', 'RO_X', 'IMEI_X').fire).toBe(false);
+    });
+
+    it('does NOT fire on slow-but-successful checks (latency ignored)', () => {
+      const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
+      setUptime(deps, 'IMEI_X', 50);
       const ins = deps.db.prepare('INSERT INTO proxy_checks (server_name, nick, error, total_ms, checked_at) VALUES (?,?,?,?,?)');
-      const now = Date.now();
-      // 3 consecutive unusably-slow (9s) but ERROR-FREE checks → must NOT trigger.
-      [9000, 9000, 9000].forEach((ms, i) => ins.run('S2', 'RO_X', null, ms, new Date(now - i * 60000).toISOString()));
-      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3)).toBeNull();
-    });
-
-    it('ignores stale data (most recent check older than 90 min)', () => {
-      const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
-      const ins = deps.db.prepare('INSERT INTO proxy_checks (server_name, nick, error, total_ms, checked_at) VALUES (?,?,?,?,?)');
-      const old = Date.now() - 3 * 3600 * 1000;
-      for (let i = 0; i < 3; i++) ins.run('S2', 'RO_X', 'boom', null, new Date(old - i * 60000).toISOString());
-      expect(eng._consecutiveFailGlitch('S2', 'RO_X', 3)).toBeNull();
+      [0, 25, 50].forEach(m => ins.run('S2', 'RO_X', null, 9000, new Date(Date.now() - m * 60000).toISOString()));  // 9s but no error
+      expect(eng._glitchDecision('S2', 'RO_X', 'IMEI_X').fire).toBe(false);
     });
 
     it('previewCandidates never offers one spare to two modems', async () => {
       const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
-      // BUSY is online+bound → make it glitchy (3 consecutive errors). DEAD is
-      // offline 60 min → hard_offline. Only ONE spare (SPARE) exists.
-      insChecks(deps.db, 'RO_BUSY', [true, true, true]);
+      // BUSY is online+bound → make it a glitch candidate via HARD CAP (≥90 min of
+      // errors; its mocked uptime 99% wouldn't trip the slow path). DEAD is offline
+      // 60 min → hard_offline. Only ONE spare (SPARE) exists.
+      const ins = deps.db.prepare('INSERT INTO proxy_checks (server_name, nick, error, total_ms, checked_at) VALUES (?,?,?,?,?)');
+      [0, 45, 95].forEach(m => ins.run('S2', 'RO_BUSY', 'boom', null, new Date(Date.now() - m * 60000).toISOString()));
       const cand = await eng.previewCandidates();
       const dead = cand.find(c => c.nick === 'RO_DEAD');
       const busy = cand.find(c => c.nick === 'RO_BUSY');

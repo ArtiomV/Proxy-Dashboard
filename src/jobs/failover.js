@@ -157,30 +157,71 @@ async function findSpare(serverName, excludeImeis) {
   return findSpareFrom(serverName, await _getMerged(), excludeImeis);
 }
 
-// ── glitch detection: N CONSECUTIVE failed checks ───────────────
-// Why not error% over a time window? Proxy checks run only ~every 20 min, so any
-// windowed percentage is a 2–4 sample reading — a single transient blip reads as
-// 33–50% and tripped the old threshold. Backtesting the real log: 5 of 6 glitch
-// moves (83%) were false positives. Instead we require the last N checks to ALL
-// be failures (a sustained outage, not noise) and the most recent to be fresh.
-// ERRORS ONLY: latency is deliberately ignored — a slow-but-alive modem should
-// not be torn off its client. Only N hard failures in a row count. Returns
-// { fails } or null.
-function _consecutiveFailGlitch(serverName, nick, needFails) {
+// ── glitch detection: two-speed, uptime-gated ──────────────────────
+// The false positives we saw (RO_5, MD3_126) were all "device ONLINE but the
+// data path blipped": a carrier drops the data session for ~40–50 min while the
+// modem stays registered (uptime ~99%), then self-recovers. Errors alone can't
+// tell a blip from a death, so we add the modem's OWN uptime as a lie-detector.
+//
+// _glitchState walks the trailing run of errored proxy checks (errors only —
+// latency is ignored): how many in a row, and for how long. Returns
+// { errStreak, streakMin, fresh }. `fresh` = the latest check is recent (else
+// the modem isn't being checked → don't act).
+function _glitchState(serverName, nick) {
   try {
-    const n = Math.max(2, parseInt(needFails, 10) || 3);
     const rows = deps.db.prepare(
       `SELECT error, checked_at FROM proxy_checks
-       WHERE server_name = ? AND nick = ? ORDER BY checked_at DESC LIMIT ?`
-    ).all(serverName, nick, n);
-    if (rows.length < n) return null;                       // not enough samples yet
+       WHERE server_name = ? AND nick = ? ORDER BY checked_at DESC LIMIT 40`
+    ).all(serverName, nick);
+    if (!rows.length) return { errStreak: 0, streakMin: 0, fresh: false };
     const latestMs = Date.parse(rows[0].checked_at);
-    if (isNaN(latestMs) || Date.now() - latestMs > 90 * 60 * 1000) return null;  // stale → ignore
-    // ERRORS ONLY — latency is deliberately ignored. A chronically-slow-but-alive
-    // modem (e.g. RO_5) must NOT trigger failover; only N hard failures in a row do.
-    if (!rows.every(r => r.error != null)) return null;
-    return { fails: n };
-  } catch (_) { return null; }
+    const fresh = !isNaN(latestMs) && (Date.now() - latestMs) <= 90 * 60 * 1000;
+    let errStreak = 0, oldestErrMs = Date.now();
+    for (const r of rows) {
+      if (r.error == null) break;          // a success breaks the streak
+      errStreak++;
+      const t = Date.parse(r.checked_at);
+      if (!isNaN(t)) oldestErrMs = t;
+    }
+    const streakMin = errStreak > 0 ? Math.round((Date.now() - oldestErrMs) / 60000) : 0;
+    return { errStreak, streakMin, fresh };
+  } catch (_) { return { errStreak: 0, streakMin: 0, fresh: false }; }
+}
+
+// The modem's own uptime % — today's device-online ratio (from the uptime poll),
+// falling back to lifetime. Unknown / too-few-samples → 100 (treat as healthy;
+// never fire on no data). This is the lie-detector for the slow path.
+function _modemUptimePct(serverName, imei) {
+  try {
+    const ut = deps.uptimeTracking[serverName + '_' + imei];
+    if (!ut) return 100;
+    const today = new Date().toISOString().slice(0, 10);
+    const d = ut.daily && ut.daily[today];
+    if (d && d.total >= 5) return Math.round((d.online || 0) / d.total * 100);
+    if (ut.total_checks >= 5) return Math.round((ut.online_checks || 0) / ut.total_checks * 100);
+    return 100;
+  } catch (_) { return 100; }
+}
+
+// Slow-path decision for an ONLINE modem whose proxy is erroring. Fire only if
+// the outage is SUSTAINED (≥ proxy_dead_min) AND the device is itself unhealthy
+// (today-uptime < uptime_floor), OR the outage is very long (≥ proxy_dead_hard_min)
+// regardless of uptime. Returns { fire, detail }.
+function _glitchDecision(serverName, nick, imei) {
+  const needFails   = _num('failover_glitch_fails', 3);
+  const slowMin     = _num('failover_proxy_dead_min', 45);
+  const hardMin     = _num('failover_proxy_dead_hard_min', 90);
+  const uptimeFloor = _num('failover_uptime_floor_pct', 90);
+  const g = _glitchState(serverName, nick);
+  if (g.errStreak < needFails || !g.fresh) return { fire: false };
+  const uptime = _modemUptimePct(serverName, imei);
+  if (g.streakMin >= hardMin) {
+    return { fire: true, detail: `прокси мёртв ${g.streakMin} мин (жёсткий предел ${hardMin})` };
+  }
+  if (g.streakMin >= slowMin && uptime < uptimeFloor) {
+    return { fire: true, detail: `прокси мёртв ${g.streakMin} мин + uptime модема ${uptime}% (<${uptimeFloor})` };
+  }
+  return { fire: false, detail: `прокси ошибки ${g.streakMin} мин, uptime ${uptime}% — ждём (вероятно моргание оператора)` };
 }
 
 // ── the actual port teleport (mirrors /api/admin/move_port) ─────
@@ -326,7 +367,6 @@ async function scanAndFailover() {
   try {
     const now = Date.now();
     const offlineMs   = _num('failover_offline_min', 15) * 60 * 1000;
-    const glitchFails = _num('failover_glitch_fails', 3);
     const stale     = (typeof deps.getStaleNicks === 'function') ? deps.getStaleNicks() : new Set();
     const allData   = await _getMerged();   // one live snapshot for the whole pass
     // ONE shared used-spares set for the whole pass — the cached snapshot won't
@@ -345,10 +385,12 @@ async function scanAndFailover() {
           await failoverModem({ server: server.name, imei: m.imei, nick: m.nick }, 'hard_offline', { allData, usedSpares });
           continue;
         }
-        // Trigger 2 — glitch: N consecutive errored checks (online). Latency ignored.
+        // Trigger 2 — glitch: device online but proxy dead. Two-speed + uptime
+        // gate (see _glitchDecision) so a self-healing carrier blip doesn't move
+        // a client off an otherwise-healthy modem.
         if (m.online) {
-          const g = _consecutiveFailGlitch(server.name, m.nick, glitchFails);
-          if (g) {
+          const g = _glitchDecision(server.name, m.nick, m.imei);
+          if (g.fire) {
             await failoverModem({ server: server.name, imei: m.imei, nick: m.nick }, 'glitch_errors', { allData, usedSpares });
           }
         }
@@ -372,7 +414,6 @@ async function previewCandidates() {
   const out = [];
   const now = Date.now();
   const offlineMs   = _num('failover_offline_min', 15) * 60 * 1000;
-  const glitchFails = _num('failover_glitch_fails', 3);
   const stale     = (typeof deps.getStaleNicks === 'function') ? deps.getStaleNicks() : new Set();
   const allData   = await _getMerged();
   // Simulate the real scan: spares are consumed one-by-one, so a spare assigned
@@ -387,8 +428,8 @@ async function previewCandidates() {
       if (!m.online && m.lastOnlineMs > 0 && downMs >= offlineMs && !stale.has(m.nick)) {
         reason = 'hard_offline'; detail = Math.round(downMs / 60000) + ' мин offline';
       } else if (m.online) {
-        const g = _consecutiveFailGlitch(server.name, m.nick, glitchFails);
-        if (g) { reason = 'glitch_errors'; detail = g.fails + ' ошибок подряд'; }
+        const g = _glitchDecision(server.name, m.nick, m.imei);
+        if (g.fire) { reason = 'glitch_errors'; detail = g.detail; }
       }
       if (!reason) continue;
       const spare = findSpareFrom(server.name, allData, new Set([m.imei, ...usedSpares]));
@@ -411,4 +452,4 @@ async function listSpares(serverName) {
     .map(m => ({ imei: m.imei, nick: m.nick, uptimePct: Math.round(m.uptimeRatio * 100) }));
 }
 
-module.exports = { init, scanAndFailover, failoverModem, manualFailover, findSpare, listSpares, previewCandidates, _consecutiveFailGlitch };
+module.exports = { init, scanAndFailover, failoverModem, manualFailover, findSpare, listSpares, previewCandidates, _glitchState, _modemUptimePct, _glitchDecision };
