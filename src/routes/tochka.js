@@ -521,8 +521,14 @@ r.get('/api/admin/clients/:id/closing_documents/:docId/pdf', authMiddleware, adm
   try {
     const result = await tochkaRequest('GET', `/uapi/invoice/v1.0/closing-documents/${tochkaConfig.customerCode}/${doc.tochkaDocumentId}/file`);
     if (result.buffer) {
+      // The act number is Cyrillic ("АКТ-..."), which Node forbids in a raw
+      // header value — setHeader would throw "Invalid character in header
+      // content" and the download 502'd. Use RFC 5987 (filename*) with an
+      // ASCII fallback, same as the bill route below.
+      const fname = `${doc.actNumber || 'act'}.pdf`;
+      const asciiName = fname.replace(/[^\x20-\x7E]/g, '_');
       res.setHeader('Content-Type', 'application/pdf');
-      res.setHeader('Content-Disposition', `attachment; filename="${doc.actNumber || 'act'}.pdf"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${asciiName}"; filename*=UTF-8''${encodeURIComponent(fname)}`);
       res.send(result.buffer);
     } else {
       res.status(502).json({ error: 'Failed to get PDF from Tochka' });
