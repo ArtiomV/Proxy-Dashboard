@@ -2661,9 +2661,17 @@ async function trackModems() {
       // Otherwise sub-10-min blips spawned recovery noise (asymmetric to the
       // 10-min grace on unreachable).
       if (_serverDownSince[server.name]) {
-        if (_serverUnreachableAlertSent[server.name]) {
-          const downSec = Math.round((Date.now() - _serverDownSince[server.name]) / 1000);
-          alerts.trigger('server_recovered', { server: server.name, downSec });
+        const downStart = _serverDownSince[server.name];
+        const downSec = Math.round((Date.now() - downStart) / 1000);
+        const alerted = _serverUnreachableAlertSent[server.name] ? 1 : 0;
+        if (alerted) alerts.trigger('server_recovered', { server: server.name, downSec });
+        // Persist the outage episode (skip sub-2-min single-poll blips). (mig 035)
+        if (downSec >= 120) {
+          try {
+            db.prepare('INSERT INTO server_downtime (server_name, down_from, down_to, duration_sec, alerted) VALUES (?,?,?,?,?)')
+              .run(server.name, new Date(downStart).toISOString(), new Date().toISOString(), downSec, alerted);
+            logActivity('modem', 'info', 'server_downtime_recorded', server.name, `S ${server.name} был недоступен ${Math.round(downSec / 60)} мин`, { downSec, alerted });
+          } catch (e) { logger.warn('[Downtime] record failed: ' + e.message); }
         }
         delete _serverDownSince[server.name];
         delete _serverUnreachableAlertSent[server.name];

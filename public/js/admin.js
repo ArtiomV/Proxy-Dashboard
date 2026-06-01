@@ -456,6 +456,18 @@ function renderSysDashboard(targetId){
         h += '</tbody></table>';
       }
       h += '</div>';
+      // Server downtime history (mig 035)
+      if (d.server_downtime && d.server_downtime.length) {
+        h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:14px">';
+        h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">⚠ Недоступность серверов (история)</div>';
+        h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:left">С</th><th style="padding:4px 8px;text-align:left">По</th><th style="padding:4px 8px;text-align:right">Длительность</th></tr></thead><tbody>';
+        d.server_downtime.forEach(function(r){
+          var mins = Math.round((r.duration_sec||0)/60);
+          var dur = mins >= 60 ? (Math.floor(mins/60)+'ч '+(mins%60)+'м') : (mins+' мин');
+          h += '<tr style="border-top:1px solid var(--border)"><td style="padding:4px 8px;font-weight:600">'+esc(r.server_name)+'</td><td style="padding:4px 8px">'+esc((r.down_from||"").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px">'+esc((r.down_to||"").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px;text-align:right;color:var(--danger);font-weight:600">'+dur+'</td></tr>';
+        });
+        h += '</tbody></table></div>';
+      }
       c.innerHTML = h;
       setTimeout(function(){
         var cv = document.getElementById('sysErrChart');

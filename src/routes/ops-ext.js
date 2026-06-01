@@ -414,6 +414,14 @@ r.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) =>
       }
     } catch (_) { /* statfs unsupported on this FS — leave null */ }
 
+    // Server downtime history (mig 035) — recent unreachable episodes per server.
+    let serverDowntime = [];
+    try {
+      serverDowntime = db.prepare(
+        'SELECT server_name, down_from, down_to, duration_sec, alerted FROM server_downtime ORDER BY id DESC LIMIT 20'
+      ).all();
+    } catch (_) { /* table may not exist on a very old DB */ }
+
     // Sessions
     const sessionCount = db.prepare("SELECT COUNT(*) as c FROM sessions WHERE expires_at > datetime('now')").get().c;
 
@@ -449,6 +457,7 @@ r.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) =>
         size_mb: Math.round(dbSizeBytes / 1048576 * 10) / 10
       },
       disk,
+      server_downtime: serverDowntime,
       sessions: sessionCount,
       memory: {
         rss_mb: Math.round(memUsage.rss / 1048576),
