@@ -9,6 +9,16 @@ const MONTH_NAMES_ACC = ['январь','февраль','март','апрел�
 
 const _round2 = v => Math.round((v || 0) * 100) / 100;
 
+// Russian plural: pluralRu(22, ['модем','модема','модемов']) -> 'модема'
+const MODEM_FORMS = ['модем', 'модема', 'модемов'];
+const DAY_FORMS = ['день', 'дня', 'дней'];
+function pluralRu(n, forms) {
+  const n10 = Math.abs(n) % 10, n100 = Math.abs(n) % 100;
+  if (n10 === 1 && n100 !== 11) return forms[0];
+  if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) return forms[1];
+  return forms[2];
+}
+
 // Tochka rejects any document position with price < 0 or totalAmount < 0
 // (HTTP 400 "Input should be greater than or equal to 0"). Our local acts can
 // legitimately carry a negative line — a rounding correction (qty×price
@@ -95,50 +105,73 @@ function buildActItemsFromLedger(client, period, getLedger) {
     });
   }
 
-  // ---- Per-modem tariff: одна строка ----
+  // ---- Per-modem tariff ----
   if (modemCharges.length > 0) {
     const totalCost = round2(modemCharges.reduce((s, e) => s + (e.cost || 0), 0));
 
-    // Находим средневзвешенное кол-во модемов за биллинговые дни.
-    // Для каждого charge: mc = cost × daysInMonth / price (если в ledger не сохранено).
-    let totalModemDays = 0;
-    let billedDays = 0;
-    const ppmSamples = [];
-    const dimSamples = [];
+    // Group the billed days by their modem count so the act reflects the real
+    // composition — e.g. "аренда 22 модемов × 30 дн" + "аренда 23 модемов × 1 дн"
+    // — instead of a single averaged line with a fractional quantity and a
+    // reverse-derived price. Each group's amount is the exact sum of its daily
+    // charges, so the lines add up to exactly what was billed.
+    const groups = new Map(); // modemCount -> { days, cost }
+    let countsKnown = true;
     for (const e of modemCharges) {
-      const ppm = e.price_per_unit || client.price || 0;
-      const dim = e.days_in_month  || 30;
       let mc = e.modem_count;
-      if (mc == null && ppm > 0 && dim > 0) mc = (e.cost || 0) * dim / ppm;
-      totalModemDays += mc || 0;
-      billedDays++;
-      if (ppm > 0) ppmSamples.push(ppm);
-      if (dim > 0) dimSamples.push(dim);
+      if (mc == null) {
+        // Legacy rows didn't store the count — back-derive it.
+        const ppm = e.price_per_unit || client.price || 0;
+        const dim = e.days_in_month || 30;
+        mc = (ppm > 0 && dim > 0) ? Math.round((e.cost || 0) * dim / ppm) : null;
+      }
+      if (mc == null || mc <= 0) { countsKnown = false; break; }
+      const g = groups.get(mc) || { days: 0, cost: 0 };
+      g.days += 1;
+      g.cost = round2(g.cost + (e.cost || 0));
+      groups.set(mc, g);
     }
-    const avgModems = billedDays > 0 ? totalModemDays / billedDays : 0;
-    // qty = округлённое среднее число модемов
-    // price = totalCost / qty — реальная "стоимость за модем за период биллинга"
-    // (учитывает что биллинг шёл не весь месяц).
-    // Guard against div-by-zero: if we have charges but somehow avgModems
-    // rounds to 0 (e.g. legacy data with all modem_count=null and bad ppm),
-    // fall back to qty=1 + full cost as price so the act still validates.
-    let qty = round2(avgModems);
-    if (!qty || qty <= 0) qty = 1;
-    // amount = exact billed total (single line, like the per-GB branch above).
-    // We deliberately do NOT reconcile amount to qty×price and do NOT emit a
-    // separate «Корректировка округления» line: when qty×price overshoots the
-    // billed total the drift is negative, and Tochka rejects a negative
-    // position outright (HTTP 400). The kopeck-level qty×price vs amount gap
-    // that remains is within Tochka's tolerance (per-GB acts ship this way
-    // already and file fine).
-    const price = qty > 0 ? round2(totalCost / qty) : 0;
-    actItems.push({
-      name: `Услуги мобильных прокси (аренда модемов за ${periodLabel})`,
-      quantity: qty,
-      unit: 'шт',
-      price,
-      amount: totalCost
-    });
+
+    if (countsKnown && groups.size >= 1 && groups.size <= 6) {
+      // One line per distinct count, longest period first.
+      const counts = [...groups.keys()].sort((a, b) => groups.get(b).days - groups.get(a).days || b - a);
+      for (const count of counts) {
+        const g = groups.get(count);
+        const amount = round2(g.cost);
+        // Per-modem cost for this group's days (price × qty ≈ amount within
+        // Tochka's tolerance; amount itself is exact so the lines sum true).
+        const price = count > 0 ? round2(amount / count) : amount;
+        actItems.push({
+          name: `Услуги мобильных прокси (аренда ${count} ${pluralRu(count, MODEM_FORMS)} × ${g.days} ${pluralRu(g.days, DAY_FORMS)} за ${periodLabel})`,
+          quantity: count,
+          unit: 'шт',
+          price,
+          amount
+        });
+      }
+    } else {
+      // Fallback: count unknown (legacy data) or too many distinct counts to
+      // list — collapse to one averaged line. amount = exact billed total
+      // (like the per-GB branch); no negative rounding-correction line.
+      let totalModemDays = 0, billedDays = 0;
+      for (const e of modemCharges) {
+        const ppm = e.price_per_unit || client.price || 0;
+        const dim = e.days_in_month || 30;
+        let mc = e.modem_count;
+        if (mc == null && ppm > 0 && dim > 0) mc = (e.cost || 0) * dim / ppm;
+        totalModemDays += mc || 0;
+        billedDays++;
+      }
+      let qty = round2(billedDays > 0 ? totalModemDays / billedDays : 0);
+      if (!qty || qty <= 0) qty = 1;
+      const price = qty > 0 ? round2(totalCost / qty) : 0;
+      actItems.push({
+        name: `Услуги мобильных прокси (аренда модемов за ${periodLabel})`,
+        quantity: qty,
+        unit: 'шт',
+        price,
+        amount: totalCost
+      });
+    }
   }
 
   // Corrections — show as separate line, signed
