@@ -5143,7 +5143,7 @@ function renderOpsDocuments(clientId) {
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\u2715</button></td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="\u041f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u0438\u0442\u044c: \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0438 \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0438\u043c \u0434\u0430\u043d\u043d\u044b\u043c" onclick="reissueAct(\'' + clientId + '\',\'' + d.id + '\',\'' + esc(d.period) + '\')">\u21bb</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\u2715</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table>';
@@ -5299,6 +5299,24 @@ function toggleActStatus(clientId, docId, status) {
 
 function downloadActPdf(clientId, docId) {
   window.open(API + '/api/admin/clients/' + clientId + '/closing_documents/' + docId + '/pdf?token=' + authToken, '_blank');
+}
+
+// Re-issue an act when something is wrong: delete the old one, then regenerate it
+// for the same period from the current ledger data (and re-push to Tochka). Reuses
+// the existing DELETE + create_act routes — no new backend surface.
+function reissueAct(clientId, docId, period) {
+  if (!confirm('Перевыставить акт за ' + period + '?\nСтарый будет удалён и создан заново по текущим данным.')) return;
+  fetch(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.ok) throw new Error(d.error || 'Не удалось удалить старый акт');
+      return fetch(API + '/api/admin/tochka/create_act', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ clientId: clientId, period: period }) }).then(function(r) { return r.json(); });
+    })
+    .then(function(d) {
+      if (d.ok) { showToast('Акт перевыставлен', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
+      else showToast(d.error || 'Старый удалён, но новый не создался — нажмите «Создать акт»', 'error');
+    })
+    .catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
 }
 
 function deleteAct(clientId, docId) {
