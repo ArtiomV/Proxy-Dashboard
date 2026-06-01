@@ -51,6 +51,22 @@ async function createClient(overrides = {}) {
   return res.body.client;
 }
 
+describe('#4 settlement date — contractDate persists through the positional upsert', () => {
+  it('round-trips contractDate on create + update', async () => {
+    const c = await createClient({ contractDate: '2026-03-17' });
+    expect(c.contractDate).toBe('2026-03-17');
+    // Re-read from the list (i.e. straight from the DB upsert).
+    const list = await request(app).get('/api/admin/clients?limit=500').set('X-Auth-Token', adminToken);
+    const fromDb = list.body.clients.find(x => x.id === c.id);
+    expect(fromDb.contractDate).toBe('2026-03-17');
+    // Update changes it.
+    const upd = await request(app).put('/api/admin/clients/' + c.id).set('X-Auth-Token', adminToken).send({ contractDate: '2026-04-02' });
+    expect(upd.status).toBe(200);
+    const list2 = await request(app).get('/api/admin/clients?limit=500').set('X-Auth-Token', adminToken);
+    expect(list2.body.clients.find(x => x.id === c.id).contractDate).toBe('2026-04-02');
+  });
+});
+
 describe('GET /api/admin/clients', () => {
   it('returns paginated list with total + safe shape (no passwordHash)', async () => {
     const created = await createClient();

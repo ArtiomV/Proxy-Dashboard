@@ -42,6 +42,19 @@ function create(deps) {
     getLastBillGenerationMonth, setLastBillGenerationMonth,
   } = deps;
 
+  // #4 «дата взаиморасчётов»: the day-of-month a client is billed on. Derived
+  // from contract_date (clamped to 1..28 so it exists in every month — a day-30
+  // contract bills on the 28th). Empty / unparseable → 1 (billed on the 1st, the
+  // pre-#4 behaviour, so existing clients are unaffected).
+  function _settlementDay(client) {
+    const cd = client && client.contractDate;
+    if (cd) {
+      const d = new Date(cd).getDate();
+      if (Number.isInteger(d) && d >= 1) return Math.min(d, 28);
+    }
+    return 1;
+  }
+
   async function autoCreateMissingClients() {
     try {
       const results = await fetchAllServersDataCached();
@@ -131,27 +144,29 @@ function create(deps) {
 
   async function autoGenerateMonthlyActs() {
     const moscowDate = getMoscowNow();
-    const day = moscowDate.getDate();
+    const today = moscowDate.getDate();
     const hour = moscowDate.getHours();
 
-    // Only run on 1st of month, after 8:00 Moscow time
-    if (day !== 1 || hour < 8) return;
+    // Morning batch only. #4: each client is billed on its OWN settlement day
+    // (from contract_date; empty → 1st), so we run daily and act on the clients
+    // whose settlement day is today — not just everyone on the 1st.
+    if (hour < 8) return;
 
-    // Previous month
+    // Previous calendar month (interpretation А — calendar periods, just issued
+    // on the client's day). Per-client de-dup is the "act already exists" check.
     const prevMonth = new Date(moscowDate);
     prevMonth.setMonth(prevMonth.getMonth() - 1);
     const period = prevMonth.toISOString().slice(0, 7); // YYYY-MM
 
-    // Prevent duplicate generation
-    if (getLastActGenerationMonth() === period) return;
-
-    logger.info(`[Tochka AutoActs] Generating acts for period ${period}...`);
+    logger.info(`[Tochka AutoActs] Period ${period}, settlement day=${today}...`);
     let generated = 0;
 
     const tochkaConfig = getTochkaConfig();
     for (const client of clients) {
       // Физ. лицо не нуждается в актах — пропускаем (юр.лица оформляем как обычно).
       if (client.clientType === 'individual') continue;
+      // #4: only on THIS client's settlement day-of-month.
+      if (today !== _settlementDay(client)) continue;
       // Skip clients with autoActs disabled
       if (client.autoActs === false) continue;
 
@@ -205,26 +220,23 @@ function create(deps) {
       saveClients(clients);
       logger.info(`[Tochka AutoActs] Generated ${generated} acts for ${period}`);
     }
-    logActivity('billing', 'info', 'acts_complete', null, `Monthly acts generation: ${generated} created for ${period}`, { generated, period });
-    setLastActGenerationMonth(period);
-    db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_act_generation_month', ?)").run(period);
+    if (generated > 0) logActivity('billing', 'info', 'acts_complete', null, `Акты: ${generated} за ${period} (день взаиморасчётов ${today})`, { generated, period, day: today });
+    // #4: no global per-month guard — de-dup is the per-client "act exists" check,
+    // since different clients generate on different days now.
   }
 
   async function autoGenerateMonthlyBills() {
     const moscowDate = getMoscowNow();
-    const day = moscowDate.getDate();
+    const today = moscowDate.getDate();
     const hour = moscowDate.getHours();
 
-    // Only run on 1st of month, after 8:00 Moscow time
-    if (day !== 1 || hour < 8) return;
+    // Morning batch only; #4: fire per client on its settlement day (run daily).
+    if (hour < 8) return;
 
-    // Current month (bills are for the current month, unlike acts which are for previous)
+    // Current calendar month (interpretation А). Per-client de-dup = "bill exists".
     const currentPeriod = `${moscowDate.getFullYear()}-${String(moscowDate.getMonth() + 1).padStart(2, '0')}`;
 
-    // Prevent duplicate generation
-    if (getLastBillGenerationMonth() === currentPeriod) return;
-
-    logger.info(`[Tochka AutoBills] Generating bills for period ${currentPeriod}...`);
+    logger.info(`[Tochka AutoBills] Period ${currentPeriod}, settlement day=${today}...`);
     let generated = 0;
     let serverData = [];
     try { serverData = await fetchAllServersData(); } catch (e) { logger.error('[AutoBills] fetchAllServersData error:', e.message); }
@@ -233,6 +245,8 @@ function create(deps) {
     for (const client of clients) {
       // Физ. лицо не нуждается в счетах — пропускаем.
       if (client.clientType === 'individual') continue;
+      // #4: only on THIS client's settlement day-of-month.
+      if (today !== _settlementDay(client)) continue;
       // Skip clients with autoBills disabled
       if (client.autoBills === false) continue;
 
@@ -290,9 +304,8 @@ function create(deps) {
       saveClients(clients);
       logger.info(`[Tochka AutoBills] Generated ${generated} bills for ${currentPeriod}`);
     }
-    logActivity('billing', 'info', 'bills_complete', null, `Monthly bills generation: ${generated} created for ${currentPeriod}`, { generated, period: currentPeriod });
-    setLastBillGenerationMonth(currentPeriod);
-    db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('last_bill_generation_month', ?)").run(currentPeriod);
+    if (generated > 0) logActivity('billing', 'info', 'bills_complete', null, `Счета: ${generated} за ${currentPeriod} (день взаиморасчётов ${today})`, { generated, period: currentPeriod, day: today });
+    // #4: no global per-month guard — de-dup is the per-client "bill exists" check.
   }
 
   return { autoCreateMissingClients, autoGenerateMonthlyActs, autoGenerateMonthlyBills };

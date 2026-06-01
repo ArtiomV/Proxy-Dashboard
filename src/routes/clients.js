@@ -86,7 +86,7 @@ r.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCreateSchema), async (req, res) => {
-  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, address, clientType, allowDebt, maxDebt, slaUptimePct, slaMaxLatencyMs, slaMaxErrorPct, slaAutoCredit } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, contractDate, address, clientType, allowDebt, maxDebt, slaUptimePct, slaMaxLatencyMs, slaMaxErrorPct, slaAutoCredit } = req.body;
   if (!name || !portName || !login || !password) {
     return res.status(400).json({ error: 'name, portName, login, password required' });
   }
@@ -118,6 +118,7 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
     kpp: kpp || '',
     legalName: legalName || '',
     contractInfo: contractInfo || '',
+    contractDate: contractDate || '',
     address: address || '',
     closingDocuments: [],
     bills: [],
@@ -169,7 +170,7 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
   // BUG-12: Validate input
   const valErr = validateClientInput(req.body, false);
   if (valErr) return res.status(400).json({ error: valErr });
-  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, address, autoActs, autoBills, billingPaused, clientType, allowDebt, maxDebt, slaUptimePct, slaMaxLatencyMs, slaMaxErrorPct, slaAutoCredit } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, contractDate, address, autoActs, autoBills, billingPaused, clientType, allowDebt, maxDebt, slaUptimePct, slaMaxLatencyMs, slaMaxErrorPct, slaAutoCredit } = req.body;
   if (login && login !== old.login) {
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
     delete users[old.login];
@@ -197,6 +198,7 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
     kpp: kpp !== undefined ? kpp : (old.kpp || ''),
     legalName: legalName !== undefined ? legalName : (old.legalName || ''),
     contractInfo: contractInfo !== undefined ? contractInfo : (old.contractInfo || ''),
+    contractDate: contractDate !== undefined ? contractDate : (old.contractDate || ''),
     address: address !== undefined ? address : (old.address || ''),
     autoActs: autoActs !== undefined ? autoActs : (old.autoActs !== undefined ? old.autoActs : true),
     autoBills: autoBills !== undefined ? autoBills : (old.autoBills !== undefined ? old.autoBills : true),

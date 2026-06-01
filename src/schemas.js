@@ -14,6 +14,7 @@ const ClientCreateSchema = z.object({
   kpp: z.string().max(9).default(''),
   legalName: z.string().max(300).default(''),
   contractInfo: z.string().max(500).default(''),
+  contractDate: z.string().max(40).default(''),   // #4 settlement date (YYYY-MM-DD)
   address: z.string().max(500).default(''),
   clientType: z.enum(['legal', 'individual']).default('legal'),
   autoActs: z.boolean().default(true),

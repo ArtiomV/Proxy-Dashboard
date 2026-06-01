@@ -482,7 +482,7 @@ function clientFromRow(r) {
     balance: r.balance || 0, apiKey: r.api_key || '', referral_code: r.referral_code || '',
     referred_by: r.referred_by || null, referral_balance: r.referral_balance || 0,
     resetToken: r.reset_token || '', inn: r.inn || '', kpp: r.kpp || '',
-    legalName: r.legal_name || '', contractInfo: r.contract_info || '',
+    legalName: r.legal_name || '', contractInfo: r.contract_info || '', contractDate: r.contract_date || '',
     address: r.address || '', autoActs: r.auto_acts !== 0, autoBills: r.auto_bills !== 0,
     billingPaused: r.billing_paused === 1, clientType: r.client_type || 'legal',
     allowDebt: r.allow_debt === 1,
