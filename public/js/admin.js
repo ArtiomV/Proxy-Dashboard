@@ -5325,7 +5325,7 @@ function reissueAct(clientId, docId, period) {
       return fetch(API + '/api/admin/tochka/create_act', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ clientId: clientId, period: period }) }).then(function(r) { return r.json(); });
     })
     .then(function(d) {
-      if (d.ok) { showToast('Акт перевыставлен', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
+      if (d.ok) { showToast('Акт перевыставлен', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); if (typeof renderBankDocuments === 'function') renderBankDocuments(); }, 1500); }
       else showToast(d.error || 'Старый удалён, но новый не создался — нажмите «Создать акт»', 'error');
     })
     .catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
@@ -5600,7 +5600,7 @@ function loadAllActs() {
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' ₽</td>';
           h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
-          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">✕</button></td>';
+          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Перевыставить: удалить и создать заново" onclick="reissueAct(\'' + d.clientId + '\',\'' + d.id + '\',\'' + esc(d.period || '') + '\')">↻</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">✕</button></td>';
           h += '</tr>';
         });
         h += '</tbody></table></div></div>';
