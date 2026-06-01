@@ -5155,7 +5155,7 @@ function renderOpsDocuments(clientId) {
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="\u041f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u0438\u0442\u044c: \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0438 \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0438\u043c \u0434\u0430\u043d\u043d\u044b\u043c" onclick="reissueAct(\'' + clientId + '\',\'' + d.id + '\',\'' + esc(d.period) + '\')">\u21bb</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\u2715</button></td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="\u041f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u0438\u0442\u044c: \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0438 \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0438\u043c \u0434\u0430\u043d\u043d\u044b\u043c" onclick="reissueAct(\'' + clientId + '\',\'' + d.id + '\',\'' + esc(d.period) + '\')">\u21bb</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0430\u043a\u0442" onclick="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\ud83d\uddd1</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table>';
@@ -5190,7 +5190,7 @@ function renderOpsDocuments(clientId) {
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\u2715</button></td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u0447\u0451\u0442" onclick="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\ud83d\uddd1</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table>';
@@ -5600,7 +5600,7 @@ function loadAllActs() {
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' ₽</td>';
           h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
-          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Перевыставить: удалить и создать заново" onclick="reissueAct(\'' + d.clientId + '\',\'' + d.id + '\',\'' + esc(d.period || '') + '\')">↻</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">✕</button></td>';
+          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Перевыставить: удалить и создать заново" onclick="reissueAct(\'' + d.clientId + '\',\'' + d.id + '\',\'' + esc(d.period || '') + '\')">↻</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить акт" onclick="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">🗑</button></td>';
           h += '</tr>';
         });
         h += '</tbody></table></div></div>';
@@ -5743,7 +5743,7 @@ function loadAllBills() {
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
           h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
-          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteBillFromBank(\'' + b.clientId + '\',\'' + b.id + '\')">✕</button></td>';
+          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить счёт" onclick="deleteBillFromBank(\'' + b.clientId + '\',\'' + b.id + '\')">🗑</button></td>';
           h += '</tr>';
         });
         h += '</tbody></table></div></div>';
