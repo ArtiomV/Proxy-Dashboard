@@ -7,6 +7,45 @@ const MONTH_NAMES_RU = ['январе','феврале','марте','апрел
 // Accusative case for "за январь"
 const MONTH_NAMES_ACC = ['январь','февраль','март','апрель','май','июнь','июль','август','сентябрь','октябрь','ноябрь','декабрь'];
 
+const _round2 = v => Math.round((v || 0) * 100) / 100;
+
+// Tochka rejects any document position with price < 0 or totalAmount < 0
+// (HTTP 400 "Input should be greater than or equal to 0"). Our local acts can
+// legitimately carry a negative line — a rounding correction (qty×price
+// overshot the billed total by a kopeck) or a refund «Корректировка (возврат)».
+// Those render fine in our own PDF, but must never reach the bank as a negative
+// position. Fold every negative line into the largest positive line so the act
+// still sums to exactly what was billed and every submitted position is ≥ 0.
+//
+// This is the single chokepoint for ALL act submissions (manual create, bulk
+// generate, re-issue of a stored act) — whatever produced the items, the bank
+// only ever sees non-negative positions.
+function sanitizeActPositionsForTochka(items) {
+  const list = (items || []).map(it => ({ ...it }));
+  const negatives = list.filter(it => (it.amount || 0) < 0 || (it.price || 0) < 0);
+  if (negatives.length === 0) return list;
+
+  const positives = list.filter(it => (it.amount || 0) >= 0 && (it.price || 0) >= 0);
+  const negSum = _round2(negatives.reduce((s, it) => s + (it.amount || 0), 0)); // ≤ 0
+
+  if (positives.length === 0) {
+    // Degenerate: nothing positive to absorb the credit (a pure-refund act).
+    // We can't express that as a positive position — ship a single zero line
+    // and let the operator issue a proper credit note. Better than a 400.
+    logger.warn('[Act] all positions non-positive — cannot build a valid Tochka act, shipping zero line');
+    return [{ name: (list[0] && list[0].name) || 'Услуги мобильных прокси', quantity: 1, unit: 'услуга', price: 0, amount: 0 }];
+  }
+
+  // Apply the (negative) sum to the biggest positive line.
+  let target = positives[0];
+  for (const it of positives) if ((it.amount || 0) > (target.amount || 0)) target = it;
+  const newAmount = Math.max(0, _round2((target.amount || 0) + negSum));
+  target.amount = newAmount;
+  const q = target.quantity || 1;
+  target.price = q > 0 ? _round2(newAmount / q) : newAmount;
+  return positives;
+}
+
 // Helper: build act line items from billing ledger entries.
 // Invariants enforced for every line item:
 //   amount === round(quantity × price, 2)
@@ -85,31 +124,21 @@ function buildActItemsFromLedger(client, period, getLedger) {
     // fall back to qty=1 + full cost as price so the act still validates.
     let qty = round2(avgModems);
     if (!qty || qty <= 0) qty = 1;
-    // Round directly to 2 decimals (Tochka enforces ≤2 anyway). Reconcile
-    // amount to qty × price so the invariant qty×price ≈ amount holds within
-    // the 0.05 tolerance Tochka tolerates — previously round4(price) then
-    // round2 in post-processing could drift up to 0.5 RUB on the act.
+    // amount = exact billed total (single line, like the per-GB branch above).
+    // We deliberately do NOT reconcile amount to qty×price and do NOT emit a
+    // separate «Корректировка округления» line: when qty×price overshoots the
+    // billed total the drift is negative, and Tochka rejects a negative
+    // position outright (HTTP 400). The kopeck-level qty×price vs amount gap
+    // that remains is within Tochka's tolerance (per-GB acts ship this way
+    // already and file fine).
     const price = qty > 0 ? round2(totalCost / qty) : 0;
-    const amount = round2(qty * price);
     actItems.push({
       name: `Услуги мобильных прокси (аренда модемов за ${periodLabel})`,
       quantity: qty,
       unit: 'шт',
       price,
-      amount
+      amount: totalCost
     });
-    // If rounding lost a kopeck or two from totalCost, surface it as a
-    // correction line so the act sums exactly to what was billed.
-    const drift = round2(totalCost - amount);
-    if (Math.abs(drift) >= 0.01) {
-      actItems.push({
-        name: 'Корректировка округления',
-        quantity: 1,
-        unit: 'услуга',
-        price: drift,
-        amount: drift
-      });
-    }
   }
 
   // Corrections — show as separate line, signed
@@ -157,8 +186,12 @@ function buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber) {
   const lastDay = new Date(year, month, 0).getDate();
   const monthNameRu = MONTH_NAMES_RU[month - 1] || '';
   const serviceName = `Услуги по обеспечению подключения к прокси-серверу в ${monthNameRu} ${year}г`;
-  const totalAmount = actItems.reduce((s, i) => s + (i.amount || 0), 0);
   const isIP = client.inn && client.inn.length === 12;
+
+  // Fold any negative line (rounding correction / refund) into a positive
+  // position — Tochka rejects positions with price/totalAmount < 0.
+  const positions = sanitizeActPositionsForTochka(actItems);
+  const totalAmount = positions.reduce((s, i) => s + (i.amount || 0), 0);
 
   // Build full counterparty name with address (ИНН/КПП добавляется Точкой автоматически)
   let secondSideName = client.legalName || client.name;
@@ -169,7 +202,7 @@ function buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber) {
   // Build Act object
   // NB: поле "Основание" не поддерживается API Точки для закрывающих документов — заполняется вручную
   const act = {
-    Positions: actItems.map((item, idx) => ({
+    Positions: positions.map((item, idx) => ({
       positionName: serviceName,
       quantity: item.quantity || 1,
       unitCode: item.unit === 'ГБ' ? 'усл.ед.' : (item.unit === 'шт' ? 'шт.' : 'услуга.'),
@@ -299,5 +332,6 @@ module.exports = {
   buildActItemsFromLedger,
   buildTochkaActBody,
   buildTochkaBillBody,
-  calculateMonthlyBillAmount
+  calculateMonthlyBillAmount,
+  sanitizeActPositionsForTochka
 };
