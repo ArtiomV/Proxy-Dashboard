@@ -10,6 +10,8 @@
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import request from 'supertest';
 import crypto from 'crypto';
+import https from 'https';
+import { EventEmitter } from 'events';
 import { bootApp, asAdmin } from '../_helpers/app.js';
 
 let app, db, adminToken;
@@ -152,5 +154,72 @@ describe('POST /api/admin/tochka/match_payment', () => {
       .set('X-Auth-Token', adminToken)
       .send({ paymentId: 'does-not-exist', clientId: 'whatever' });
     expect(res.status).toBe(404);
+  });
+});
+
+// Regression guard for the signature bug that stopped acts from ever reaching
+// Tochka. src/tochka/api.js exports tochkaRequest(tochkaConfig, method, path, body)
+// but the router calls it (method, path, body). When it was imported raw, the
+// body object slid into the `path` slot and api.js threw "Invalid Tochka API
+// path" BEFORE any HTTPS call — so the act saved locally with tochka_doc_id NULL
+// and silently never filed. This test configures Tochka, intercepts the HTTPS
+// layer (no network), and asserts a real string path reaches it + the route
+// reports the verified outcome (tochkaPushed) the operator now relies on.
+describe('POST /api/admin/tochka/create_act — act actually reaches Tochka', () => {
+  it('passes a string API path to the HTTPS layer and reports tochkaPushed=true', async () => {
+    // 1) Configure Tochka so create_act attempts a push (needs jwt+customerCode+accountId).
+    await request(app).post('/api/admin/tochka/config').set('X-Auth-Token', adminToken)
+      .send({ jwt: 'test.jwt.token', clientId: 'tcl', customerCode: '300000001', accountId: 'acc-001' });
+
+    // 2) A client WITH an INN — create_act skips Tochka entirely without one.
+    const tag = crypto.randomBytes(3).toString('hex');
+    const create = await request(app).post('/api/admin/clients').set('X-Auth-Token', adminToken)
+      .send({ name: 'Act Co ' + tag, login: 'act_' + tag, password: 'longpass', portName: 'actp_' + tag, inn: '9704223433', price: 100 });
+    expect(create.status).toBe(200);
+    const clientId = create.body.client.id;
+
+    // 3) Intercept the Tochka HTTPS call without hitting the network. api.js calls
+    //    https.request at call-time, so swapping the method is enough.
+    const realRequest = https.request;
+    let capturedPath = null, capturedMethod = null;
+    https.request = (opts, cb) => {
+      capturedPath = opts.path;
+      capturedMethod = opts.method;
+      const res = new EventEmitter();
+      res.statusCode = 200;
+      res.headers = { 'content-type': 'application/json' };
+      const fakeReq = new EventEmitter();
+      fakeReq.write = () => {};
+      fakeReq.destroy = () => {};
+      fakeReq.end = () => {
+        cb(res);
+        process.nextTick(() => {
+          res.emit('data', Buffer.from(JSON.stringify({ Data: { documentId: 'DOC-REG-1' } })));
+          res.emit('end');
+        });
+      };
+      return fakeReq;
+    };
+
+    let body;
+    try {
+      const res = await request(app).post('/api/admin/tochka/create_act').set('X-Auth-Token', adminToken)
+        .send({ clientId, period: '2026-05', items: [{ description: 'Proxy', amount: 100 }] });
+      body = res.body;
+    } finally {
+      https.request = realRequest;
+      // Leave Tochka unconfigured for the rest of the suite.
+      await request(app).post('/api/admin/tochka/config').set('X-Auth-Token', adminToken)
+        .send({ jwt: '', clientId: '', customerCode: '', accountId: '' });
+    }
+
+    // With the old bug capturedPath would be null (threw before https.request)
+    // and tochkaPushed false. The fix makes the real path reach the HTTPS layer.
+    expect(capturedMethod).toBe('POST');
+    expect(typeof capturedPath).toBe('string');
+    expect(capturedPath).toBe('/uapi/invoice/v1.0/closing-documents');
+    expect(body.ok).toBe(true);
+    expect(body.tochkaPushed).toBe(true);
+    expect(body.document.tochkaDocumentId).toBe('DOC-REG-1');
   });
 });

@@ -18,7 +18,7 @@ const {
   buildTochkaBillBody,
   calculateMonthlyBillAmount,
 } = require('../tochka/documents');
-const { tochkaRequest } = require('../tochka/api');
+const { tochkaRequest: _rawTochkaRequest } = require('../tochka/api');
 const { buildDocHtml: _buildDocHtml } = require('../documents/generator');
 
 module.exports = function createTochkaRouter(deps) {
@@ -44,6 +44,13 @@ module.exports = function createTochkaRouter(deps) {
   // getter; wrap them once so the call sites below stay readable.
   const _buildAct = (client, period) => buildActItemsFromLedger(client, period, (id) => ledgerDb.listByClient(id));
   const _calcBill = (client, cachedResults) => calculateMonthlyBillAmount(client, cachedResults, (id) => ledgerDb.listByClient(id));
+  // BUGFIX: src/tochka/api.js exports tochkaRequest(tochkaConfig, method, path, body)
+  // but every call site here passes only (method, path, body). The missing config
+  // arg shifted everything → the body object landed in `apiPath`, which then failed
+  // the string check with "Invalid Tochka API path" — so NO Tochka API call from
+  // this router ever executed (acts/bills never reached Tochka). Wrap once to inject
+  // the live config so the call sites stay 3-arg.
+  const tochkaRequest = (method, apiPath, body) => _rawTochkaRequest(tochkaConfig, method, apiPath, body);
   const _buildActBody = (client, period, actItems, actNumber) => buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber);
   const _buildBillBody = (client, amount, billNumber, billDate) => buildTochkaBillBody(tochkaConfig, client, amount, billNumber, billDate);
   // Stage 3 finish: these were bare-referenced in tochka.js without deps,
@@ -447,20 +454,35 @@ r.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (r
 
   const totalAmount = actItems.reduce((s, i) => s + (i.amount || 0), 0);
 
-  // Try to create via Tochka API if configured
+  // Try to create via Tochka API if configured.
+  // We do NOT trust "no exception" as success — we inspect the response and
+  // record exactly why a push failed so the operator is told, instead of the
+  // act silently living only in our DB (tochka_doc_id NULL).
   let tochkaDocumentId = null;
+  let tochkaPushed = false;
+  let tochkaStatus = '';   // human-readable outcome surfaced to the operator
   const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
-  if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
+  if (!tochkaConfig.jwt || !tochkaConfig.customerCode || !tochkaConfig.accountId) {
+    tochkaStatus = 'Точка не настроена (нет JWT / customerCode / accountId)';
+  } else if (!client.inn) {
+    tochkaStatus = 'У клиента не указан ИНН — Точка не примет акт';
+  } else {
     try {
       const actData = _buildActBody(client, period, actItems, actNumber);
       const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/closing-documents', actData);
       if (result.status === 200 && result.data?.Data?.documentId) {
         tochkaDocumentId = result.data.Data.documentId;
+        tochkaPushed = true;
+        tochkaStatus = 'Отправлен в Точку';
         logger.info(`[Tochka] Created act ${tochkaDocumentId} for ${client.name}, period ${period}`);
       } else {
+        const errDetail = result.data?.Errors ? JSON.stringify(result.data.Errors).slice(0, 300)
+          : (result.data?.message || JSON.stringify(result.data || {}).slice(0, 300));
+        tochkaStatus = `Точка вернула статус ${result.status}: ${errDetail}`;
         logger.error({ tochkaResponse: result.data, status: result.status }, '[Tochka] Create act unexpected response');
       }
     } catch (err) {
+      tochkaStatus = `Ошибка запроса в Точку: ${err.message}`;
       logger.error('[Tochka] Create act error:', err.message);
     }
   }
@@ -483,7 +505,7 @@ r.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (r
   client.closingDocuments.push(closingDoc);
   saveClients(clients);
 
-  res.json({ ok: true, document: closingDoc });
+  res.json({ ok: true, document: closingDoc, tochkaPushed, tochkaStatus });
 });
 
 r.get('/api/admin/clients/:id/closing_documents/:docId/pdf', authMiddleware, adminMiddleware, async (req, res) => {

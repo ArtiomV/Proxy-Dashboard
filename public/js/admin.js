@@ -5295,7 +5295,11 @@ function createAct(clientId) {
   fetch(API + '/api/admin/tochka/create_act', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ clientId: clientId, period: period }) })
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (d.ok) { showToast('Акт создан', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
+      if (d.ok) {
+        if (d.tochkaPushed) showToast('Акт создан и отправлен в Точку', 'success');
+        else showToast('Акт сохранён локально, но НЕ ушёл в Точку: ' + (d.tochkaStatus || 'причина неизвестна'), 'error', 12000);
+        loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500);
+      }
       else showToast(d.error || 'Ошибка', 'error');
     }).catch(function(e) { showToast(e.message, 'error'); });
 }
@@ -5325,7 +5329,11 @@ function reissueAct(clientId, docId, period) {
       return fetch(API + '/api/admin/tochka/create_act', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ clientId: clientId, period: period }) }).then(function(r) { return r.json(); });
     })
     .then(function(d) {
-      if (d.ok) { showToast('Акт перевыставлен', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); if (typeof renderBankDocuments === 'function') renderBankDocuments(); }, 1500); }
+      if (d.ok) {
+        if (d.tochkaPushed) showToast('Акт перевыставлен и отправлен в Точку', 'success');
+        else showToast('Акт пересоздан локально, но НЕ ушёл в Точку: ' + (d.tochkaStatus || 'причина неизвестна'), 'error', 12000);
+        loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); if (typeof renderBankDocuments === 'function') renderBankDocuments(); }, 1500);
+      }
       else showToast(d.error || 'Старый удалён, но новый не создался — нажмите «Создать акт»', 'error');
     })
     .catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
