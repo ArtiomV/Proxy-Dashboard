@@ -587,6 +587,7 @@ r.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, async
   const results = [];
 
   for (const client of clients) {
+    if (client.clientType === 'individual') { skipped++; continue; }  // физ. лицо — акты не нужны
     const ledgerEntries = ledgerDb.listByClient(client.id);
     const monthCharges = ledgerEntries.filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(period));
     if (monthCharges.length === 0) { skipped++; continue; }
@@ -709,6 +710,7 @@ r.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, asyn
   try { serverData = await fetchAllServersDataCached(); } catch (e) { logger.error('[Bills] fetchAllServersData error:', e.message); }
 
   for (const client of clients) {
+    if (client.clientType === 'individual') { skipped++; continue; }  // физ. лицо — счета не нужны
     if (!client.inn) { skipped++; continue; }
     if ((client.bills || []).some(b => b.period === billPeriod)) { skipped++; continue; }
 

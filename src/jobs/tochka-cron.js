@@ -150,6 +150,8 @@ function create(deps) {
 
     const tochkaConfig = getTochkaConfig();
     for (const client of clients) {
+      // Физ. лицо не нуждается в актах — пропускаем (юр.лица оформляем как обычно).
+      if (client.clientType === 'individual') continue;
       // Skip clients with autoActs disabled
       if (client.autoActs === false) continue;
 
@@ -229,6 +231,8 @@ function create(deps) {
 
     const tochkaConfig = getTochkaConfig();
     for (const client of clients) {
+      // Физ. лицо не нуждается в счетах — пропускаем.
+      if (client.clientType === 'individual') continue;
       // Skip clients with autoBills disabled
       if (client.autoBills === false) continue;
 
