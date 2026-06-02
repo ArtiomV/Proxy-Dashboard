@@ -53,6 +53,32 @@ r.post('/api/admin/reboot', authMiddleware, adminMiddleware, (req, res) =>
 r.post('/api/admin/usb_reset', authMiddleware, adminMiddleware, (req, res) =>
   _modemAction(req, res, 'nick', v => `/apix/usb_reset_modem_json?arg=${encodeURIComponent(v)}`, 'USB reset'));
 
+// Re-Add modem: re-register the USB device in ProxySmart (the "Re-Add Modem"
+// action from the ProxySmart UI). /modem/add_dev needs the device path (DEV),
+// which we resolve from the live single-modem status by nick. We then verify
+// ProxySmart actually executed the request by reading its {result, message}.
+r.post('/api/admin/readd_modem', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { nick, serverName } = req.body;
+    if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+    // Resolve DEV (device path, e.g. "modem4397") for this modem.
+    const status = await fetchApi(server, `/apix/show_single_status_json?arg=${encodeURIComponent(nick)}`);
+    const m = Array.isArray(status) ? status[0] : status;
+    const dev = m && m.net_details && m.net_details.DEV;
+    if (!dev) return res.status(404).json({ error: `Не удалось определить устройство (DEV) модема ${nick}` });
+    const apiRes = await postFormApi(server, '/modem/add_dev', { DEV: dev });
+    // Verify execution: ProxySmart replies JSON {result, message, EVENT_ID}.
+    let psResult = '', psMessage = '';
+    try { const j = JSON.parse(apiRes.raw || '{}'); psResult = j.result || ''; psMessage = j.message || ''; } catch (_) { /* non-JSON body */ }
+    logger.info(`[ReAdd] ${nick}@${serverName} DEV=${dev} -> result="${psResult}" msg="${psMessage}"`);
+    auditLog(req.user.login, 'readd_modem', { serverName, nick, dev, result: psResult, ip: getClientIp(req) });
+    proxySmart.invalidateCache();
+    res.json({ ok: true, dev, result: psResult, message: psMessage });
+  } catch (err) { return res.status(502).json({ error: 'Re-add failed', details: err.message }); }
+});
+
 r.post('/api/admin/reboot_server', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { serverName, password } = req.body;

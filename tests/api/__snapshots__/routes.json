@@ -144,6 +144,7 @@
   "POST /api/admin/proxy_check",
   "POST /api/admin/purge_port",
   "POST /api/admin/purge_sms",
+  "POST /api/admin/readd_modem",
   "POST /api/admin/reboot",
   "POST /api/admin/reboot_server",
   "POST /api/admin/reset_bandwidth",
