@@ -49,6 +49,17 @@ function _isSpareGuarded(rawImei) {
   return true;
 }
 
+// ProxySmart auto-names unconfigured / not-yet-set-up USB devices "randomNNNN"
+// (no SIM, unknown operator/ICCID). They must never be a spare TARGET —
+// teleporting a client port onto one kills the client's service (no working SIM
+// behind it). We deliberately do NOT exclude them as a SOURCE: a normal random
+// modem is unbound (never a source anyway), and the only way a CLIENT port ends
+// up on a random modem is this very bug — so we must keep failing those over to
+// recover the stranded client onto a real spare.
+function _isRandomNick(nick) {
+  return /^random/i.test(String(nick || '').trim());
+}
+
 function init(d) {
   deps = d;
   // First scan 90s after boot (let live state settle), then every 3 min.
@@ -135,6 +146,7 @@ function _sparesFromData(serverName, merged, excludeImeis) {
     const isOnline = s.net_details && s.net_details.IS_ONLINE === 'yes';
     if (!isOnline) continue;
     const nick = (s.modem_details.NICK || '').trim() || rawImei;
+    if (_isRandomNick(nick)) continue;   // unconfigured "randomNNNN" placeholder — never a failover target
     if (stale.has(nick)) continue;
     const ut = deps.uptimeTracking[prefix + rawImei] || {};
     const ratio = ut.total_checks ? (ut.online_checks || 0) / ut.total_checks : 1;
@@ -375,7 +387,7 @@ async function scanAndFailover() {
     const usedSpares = new Set();
 
     for (const server of (deps.apiServers || [])) {
-      const mods = _enumerate(server.name).filter(m => m.bound);   // only client modems
+      const mods = _enumerate(server.name).filter(m => m.bound);   // only client modems (incl. ones wrongly parked on a random* modem → recover them)
       for (const m of mods) {
         // Trigger 1 — hard offline (and not yet stale-removed; stale = already
         // long-dead, operator-deletion territory, leave it).
@@ -452,4 +464,4 @@ async function listSpares(serverName) {
     .map(m => ({ imei: m.imei, nick: m.nick, uptimePct: Math.round(m.uptimeRatio * 100) }));
 }
 
-module.exports = { init, scanAndFailover, failoverModem, manualFailover, findSpare, listSpares, previewCandidates, _glitchState, _modemUptimePct, _glitchDecision };
+module.exports = { init, scanAndFailover, failoverModem, manualFailover, findSpare, listSpares, previewCandidates, _glitchState, _modemUptimePct, _glitchDecision, _isRandomNick };

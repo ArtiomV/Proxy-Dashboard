@@ -345,4 +345,62 @@ describe('failover engine', () => {
     const row = deps.db.prepare("SELECT * FROM failover_log WHERE result='skipped_no_spare'").get();
     expect(row).toBeTruthy();
   });
+
+  // ProxySmart auto-names unconfigured USB devices "randomNNNN" (no SIM). They
+  // must never take part in failover — see _isRandomNick.
+  describe('"random" placeholder modems are excluded from failover', () => {
+    it('_isRandomNick flags ProxySmart placeholder names only', () => {
+      const eng = freshEngine();
+      expect(eng._isRandomNick('random4488')).toBe(true);
+      expect(eng._isRandomNick('Random123')).toBe(true);
+      expect(eng._isRandomNick('  random5 ')).toBe(true);
+      expect(eng._isRandomNick('RO2_30')).toBe(false);
+      expect(eng._isRandomNick('speech2text')).toBe(false);
+      expect(eng._isRandomNick('')).toBe(false);
+    });
+
+    it('never offers a "random" placeholder as a spare TARGET', async () => {
+      const eng = freshEngine();
+      const deps = makeDeps();
+      // The only online+unbound modem is a placeholder → no valid spare.
+      deps.fetchAllServersDataCached = async () => ([{
+        serverName: 'S2',
+        status: [
+          { modem_details: { IMEI: 'IMEI_SPARE', NICK: 'random4488' }, net_details: { IS_ONLINE: 'yes' } },
+          { modem_details: { IMEI: 'IMEI_DEAD',  NICK: 'RO_DEAD'     }, net_details: { IS_ONLINE: 'no'  } },
+        ],
+        ports: { 'IMEI_DEAD': [{ portID: 'portDEAD', portName: 'WildBox' }] },
+      }]);
+      eng.init(deps);
+      expect(await eng.findSpare('S2', new Set(['IMEI_DEAD']))).toBeNull();
+    });
+
+    it('RECOVERS a client wrongly parked on a "random" modem (random is NOT excluded as source)', async () => {
+      const eng = freshEngine();
+      const deps = makeDeps();
+      // A client port (WildBox) is currently stranded on a dead random* modem
+      // (the bug). A healthy real spare exists. Failover must move it OFF.
+      deps.knownModems = { S2: {
+        'portRND':   { imei: 'IMEI_RND',   nick: 'random777', portName: 'WildBox' },
+        'portSPARE': { imei: 'IMEI_SPARE', nick: 'RO_SPARE',  portName: '' },
+      }};
+      deps.uptimeTracking = {
+        'S2_IMEI_RND':   { total_checks: 100, online_checks: 90, last_online_check: new Date(Date.now() - 60*60*1000).toISOString() }, // offline 60 min
+        'S2_IMEI_SPARE': { total_checks: 100, online_checks: 99, last_online_check: new Date().toISOString() },
+      };
+      deps.fetchAllServersDataCached = async () => ([{
+        serverName: 'S2',
+        status: [
+          { modem_details: { IMEI: 'IMEI_SPARE', NICK: 'RO_SPARE'  }, net_details: { IS_ONLINE: 'yes' } },
+          { modem_details: { IMEI: 'IMEI_RND',   NICK: 'random777' }, net_details: { IS_ONLINE: 'no'  } },
+        ],
+        ports: { 'IMEI_RND': [{ portID: 'portRND', portName: 'WildBox' }] },
+      }]);
+      eng.init(deps);
+      await eng.scanAndFailover();
+      expect(deps._calls.editPort.length).toBe(1);            // recovered
+      expect(deps._calls.editPort[0].IMEI).toBe('IMEI_SPARE'); // onto the REAL spare, not another random
+      expect(deps.db.prepare("SELECT COUNT(*) c FROM failover_log WHERE result='ok'").get().c).toBe(1);
+    });
+  });
 });
