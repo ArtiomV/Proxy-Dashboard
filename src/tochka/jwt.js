@@ -35,9 +35,14 @@ function decodeJwtHeader(token) {
 }
 
 // Fetch JWKS from Tochka Bank
-function fetchTochkaJwks() {
+function fetchTochkaJwks(apiToken) {
   return new Promise((resolve, reject) => {
-    https.get('https://enter.tochka.com/uapi/open-banking/.well-known/jwks.json', { timeout: 10000 }, (res) => {
+    // Tochka's JWKS lives UNDER the authed /uapi/open-banking namespace and
+    // returns {"message":"The access token is missing"} without a Bearer token
+    // — so without it the keyset is empty and EVERY webhook fails as
+    // reason=key_not_found (auto-credit never fires). Send the API JWT.
+    const headers = apiToken ? { Authorization: 'Bearer ' + apiToken } : {};
+    https.get('https://enter.tochka.com/uapi/open-banking/.well-known/jwks.json', { timeout: 10000, headers }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -80,7 +85,7 @@ function jwkToPem(jwk) {
 }
 
 // Verify JWT signature using cached JWKS
-async function verifyJwtSignature(token) {
+async function verifyJwtSignature(token, apiToken) {
   const header = decodeJwtHeader(token);
   const payload = decodeJwtPayload(token);
   if (!header || !payload) return { verified: false, payload: null, reason: 'invalid_jwt_format' };
@@ -89,7 +94,7 @@ async function verifyJwtSignature(token) {
   const now = Date.now();
   if (!tochkaJwksCache.keys || (now - tochkaJwksCache.fetchedAt) > JWKS_CACHE_TTL) {
     try {
-      const jwks = await fetchTochkaJwks();
+      const jwks = await fetchTochkaJwks(apiToken);
       tochkaJwksCache = { keys: jwks.keys || [], fetchedAt: now };
       logger.info(`[Tochka JWKS] Fetched ${tochkaJwksCache.keys.length} key(s)`);
     } catch (e) {
@@ -115,7 +120,7 @@ async function verifyJwtSignature(token) {
   if (!matchingKey) {
     logger.warn(`[Tochka JWT] kid="${kid}" not in cache — force-refreshing JWKS`);
     try {
-      const jwks = await fetchTochkaJwks();
+      const jwks = await fetchTochkaJwks(apiToken);
       tochkaJwksCache = { keys: jwks.keys || [], fetchedAt: Date.now() };
       logger.info(`[Tochka JWKS] Force-refreshed: ${tochkaJwksCache.keys.length} key(s)`);
       matchingKey = kid ? tochkaJwksCache.keys.find(k => k.kid === kid) : tochkaJwksCache.keys[0];

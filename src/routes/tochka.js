@@ -20,6 +20,7 @@ const {
 } = require('../tochka/documents');
 const { tochkaRequest: _rawTochkaRequest } = require('../tochka/api');
 const { buildDocHtml: _buildDocHtml } = require('../documents/generator');
+const { findClientByPayer } = require('../billing/payer-match');
 
 module.exports = function createTochkaRouter(deps) {
   const {
@@ -70,7 +71,7 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
     const jwtToken = typeof req.body === 'string' ? req.body.trim() : JSON.stringify(req.body);
 
     
-    const { verified, payload, reason } = await verifyJwtSignature(jwtToken);
+    const { verified, payload, reason } = await verifyJwtSignature(jwtToken, tochkaConfig.jwt);
     if (!payload) {
       logger.error('[Tochka Webhook] Failed to decode JWT payload');
       return res.status(200).json({ ok: true, processed: false, reason: 'invalid_jwt' });
@@ -177,7 +178,9 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
     // and (c) we just won the race to insert the row. The DB-level UNIQUE
     // guarantees no concurrent webhook can also reach this branch for the same paymentId.
     if (verified && webhookType === 'incomingPayment') {
-      const matchedClient = payerInn ? clientByInn.get(payerInn) : null;
+      // Match by INN (primary) or unambiguous company name (fallback).
+      const _payerMatch = findClientByPayer(payerInn, payerName, clientByInn, clients);
+      const matchedClient = _payerMatch && _payerMatch.client;
       if (matchedClient) {
         try {
           // Stage 13.1: balance + ledger + referral all run in atomicCredit's

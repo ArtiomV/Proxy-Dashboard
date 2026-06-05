@@ -5038,6 +5038,11 @@ function renderOpsApi(clientId) {
     .catch(function(e) { body.innerHTML = '<div style="color:var(--danger);padding:20px">' + esc(e.message) + '</div>'; });
 }
 
+// Месяцы / Кварталы toggle for the operations history segmentation.
+function setOpsSegMode(mode, clientId) {
+  window._opsSegMode = (mode === 'quarter') ? 'quarter' : 'month';
+  renderOpsHistory(clientId);
+}
 function renderOpsHistory(clientId) {
   var body = document.getElementById('clientOpsBody');
   body.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:40px;text-align:center">Загрузка операций...</div>';
@@ -5070,6 +5075,10 @@ function renderOpsHistory(clientId) {
       var isPerModem = (clientObj && clientObj.billingType === 'per_modem')
         || entries.some(function(e){return e.billing_type === 'per_modem';});
       var qtyHeader = isPerModem ? 'Модемов' : 'ГБ';
+      // Месяцы / Кварталы toggle for the period segmentation below.
+      var _segModeNow = (window._opsSegMode === 'quarter') ? 'quarter' : 'month';
+      var _segBtn = function(mode, label){ return '<button class="btn btn-sm" style="font-size:11px;padding:2px 10px;'+(_segModeNow===mode?'background:var(--accent);color:#fff':'')+'" onclick="setOpsSegMode(\''+mode+'\',\''+clientId+'\')">'+label+'</button>'; };
+      h += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:11px;color:var(--text-3);margin-right:2px">Группировка:</span>' + _segBtn('month','Месяцы') + _segBtn('quarter','Кварталы') + '</div>';
       h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)">'
         + '<th style="padding:8px 10px;text-align:left;color:var(--text-2)">Дата</th>'
         + '<th style="padding:8px 10px;text-align:center;color:var(--text-2)">Тип</th>'
@@ -5080,25 +5089,31 @@ function renderOpsHistory(clientId) {
         + '<th style="padding:8px 10px;text-align:left;color:var(--text-2)">Примечание</th>'
         + '<th style="padding:8px 10px;text-align:center;color:var(--text-2);width:30px"></th>'
         + '</tr></thead><tbody>';
-      // Monthly segmentation: per-month totals come from the backend (`monthly`,
-      // computed over the FULL ledger so they're complete even though the page
-      // shows only the newest 100 rows). Insert a divider row whenever the month
-      // changes (entries are newest-first).
+      // Period segmentation (Месяцы / Кварталы toggle — window._opsSegMode).
+      // Totals come from the backend (`monthly`, computed over the FULL ledger
+      // so they're complete even though the page shows only the newest 100
+      // rows); quarters are derived from months. A divider row is inserted
+      // whenever the period changes (entries are newest-first).
+      var _segMode = (window._opsSegMode === 'quarter') ? 'quarter' : 'month';
       var _RU_MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+      var _RU_ROMAN = ['I','II','III','IV'];
       var _monthly = data.monthly || {};
-      var _curMonth = null;
+      var _quarterly = {};
+      Object.keys(_monthly).forEach(function(mk){ var p=mk.split('-'); var q=p[0]+'-Q'+Math.ceil(parseInt(p[1],10)/3); if(!_quarterly[q])_quarterly[q]={spent:0,topup:0,count:0}; _quarterly[q].spent+=_monthly[mk].spent||0; _quarterly[q].topup+=_monthly[mk].topup||0; _quarterly[q].count+=_monthly[mk].count||0; });
+      var _curSeg = null;
       var _fmtRub = function(x){ return Math.round(x||0).toLocaleString('ru-RU') + ' ₽'; };
-      var _monthOf = function(e){ var ds = (e.date || e.timestamp || ''); return /^\d{4}-\d{2}/.test(ds) ? ds.slice(0,7) : ''; };
+      var _segOf = function(e){ var ds=(e.date||e.timestamp||''); if(!/^\d{4}-\d{2}/.test(ds))return ''; var mk=ds.slice(0,7); if(_segMode==='quarter'){var p=mk.split('-');return p[0]+'-Q'+Math.ceil(parseInt(p[1],10)/3);} return mk; };
+      var _segLabel = function(key){ if(_segMode==='quarter'){var p=key.split('-Q');return (_RU_ROMAN[parseInt(p[1],10)-1]||'')+' кв. '+p[0];} var p=key.split('-');return (_RU_MONTHS[parseInt(p[1],10)-1]||'')+' '+p[0]; };
+      var _segAgg = function(key){ return (_segMode==='quarter'?_quarterly:_monthly)[key] || {spent:0,topup:0,count:0}; };
       entries.forEach(function(e, eIdx) {
-        var _mk = _monthOf(e);
-        if (_mk && _mk !== _curMonth) {
-          _curMonth = _mk;
-          var _mp = _mk.split('-'); var _ml = (_RU_MONTHS[parseInt(_mp[1],10)-1] || '') + ' ' + _mp[0];
-          var _agg = _monthly[_mk] || { spent:0, topup:0, count:0 };
+        var _sk = _segOf(e);
+        if (_sk && _sk !== _curSeg) {
+          _curSeg = _sk;
+          var _agg = _segAgg(_sk);
           var _net = (_agg.topup || 0) - (_agg.spent || 0);
-          h += '<tr class="month-seg"><td colspan="8" style="padding:7px 12px;background:var(--bg-2);border-top:2px solid var(--border);border-bottom:1px solid var(--border)">'
+          h += '<tr class="seg-divider"><td colspan="8" style="padding:7px 12px;background:var(--bg-2);border-top:2px solid var(--border);border-bottom:1px solid var(--border)">'
             + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
-            + '<span style="font-weight:700;font-size:12px;color:var(--text-1)">' + _ml + '</span>'
+            + '<span style="font-weight:700;font-size:12px;color:var(--text-1)">' + _segLabel(_sk) + '</span>'
             + '<span style="font-size:11px;color:var(--text-3)">'
             + 'Списано <span style="color:var(--danger);font-weight:600">' + _fmtRub(_agg.spent) + '</span>'
             + ' · Пополнено <span style="color:var(--success);font-weight:600">' + _fmtRub(_agg.topup) + '</span>'

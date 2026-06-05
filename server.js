@@ -30,6 +30,7 @@ const { safeWriteFile: _safeWriteFile, _fileLocks } = require('./src/utils/files
 // only keeps verifyJwtSignature because dbAudit's webhook signature check
 // uses it on initial setup before the router mounts.
 const { verifyJwtSignature } = require('./src/tochka/jwt');
+const { findClientByPayer } = require('./src/billing/payer-match');
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
 const billing = require('./src/billing/atomic');
 // MONTH_NAMES_RU / buildTochkaActBody / etc. moved into src/tochka/documents.js;
@@ -4648,23 +4649,25 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
       // bank_payment (legacy rows without a natural_key + crash recovery between
       // atomicCredit and the match-mark) → idempotent even across a crash.
       let reconciled = false;
-      if (!existingRow.matched && !existingRow.dismissed && payerInn) {
-        const client = clientByInn.get(payerInn);
+      if (!existingRow.matched && !existingRow.dismissed) {
+        const _m = findClientByPayer(payerInn, payerName, clientByInn, clients);
+        const client = _m && _m.client;
         if (client) {
+          const _byLabel = _m.by === 'name' ? ('названию «' + (payerName || '').slice(0, 40) + '»') : ('ИНН ' + payerInn);
           const alreadyInLedger = dbStmts.ledgerHasBankPaymentOn.get(client.id, amount, dateStr);
           if (!alreadyInLedger) {
             try {
               atomicCredit(client.id, amount, {
                 type: 'bank_payment', amount, date: dateStr,
                 timestamp: new Date().toISOString(),
-                note: ('Авто-зачисление (синк, ИНН ' + payerInn + '): ' + (purpose || '')).slice(0, 300),
+                note: ('Авто-зачисление (синк, ' + _byLabel + '): ' + (purpose || '')).slice(0, 300),
                 source: 'tochka_sync', tochkaPaymentId: paymentId
               });
               dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 1, existingRow.id);
               matched++; reconciled = true;
               saveClients(clients);
-              logger.info(`[Tochka Sync:${source}] reconciled uncredited payment → +${amount} to ${client.name} (INN ${payerInn})`);
-              try { alerts.trigger('payment_received', { client: client.name, client_id: client.id, amount, inn: payerInn, source: 'Точка (sync)', natural_key: naturalKey, date: dateStr, balanceAfter: client.balance }); } catch (_) {}
+              logger.info(`[Tochka Sync:${source}] reconciled uncredited payment → +${amount} to ${client.name} (${_byLabel})`);
+              try { alerts.trigger('payment_received', { client: client.name, client_id: client.id, amount, inn: payerInn, source: 'Точка (sync, по ' + (_m.by === 'name' ? 'названию' : 'ИНН') + ')', natural_key: naturalKey, date: dateStr, balanceAfter: client.balance }); } catch (_) {}
             } catch (e) { logger.error(`[Tochka Sync:${source}] reconcile credit failed for ${client.name}: ${e.message}`); }
           } else {
             // Already credited via another row — just clear the "unmatched"
@@ -4694,9 +4697,12 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
       receivedAt: new Date().toISOString()
     };
 
-    if (payerInn) {
-      const client = clientByInn.get(payerInn);
+    {
+      // Match by INN (primary) or unambiguous company name (fallback).
+      const _m = findClientByPayer(payerInn, payerName, clientByInn, clients);
+      const client = _m && _m.client;
       if (client) {
+        const _byLabel = _m.by === 'name' ? ('названию «' + (payerName || '').slice(0, 40) + '»') : ('ИНН ' + payerInn);
         bankPayment.matched = true;
         bankPayment.matchedClientId = client.id;
         bankPayment.matchedClientName = client.name;
@@ -4706,7 +4712,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
             type: 'bank_payment',
             amount, date: bankPayment.date,
             timestamp: new Date().toISOString(),
-            note: 'Синхронизация из Точки: ' + (purpose || '').slice(0, 100),
+            note: ('Синхронизация из Точки (' + _byLabel + '): ' + (purpose || '')).slice(0, 200),
             source: 'tochka_sync',
             tochkaPaymentId: paymentId
           });
@@ -4715,7 +4721,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
           try {
             alerts.trigger('payment_received', {
               client: client.name, client_id: client.id,
-              amount, inn: payerInn, source: 'Точка (sync)',
+              amount, inn: payerInn, source: 'Точка (sync, по ' + (_m.by === 'name' ? 'названию' : 'ИНН') + ')',
               natural_key: naturalKey, date: bankPayment.date,
               balanceAfter: client.balance,
             });
