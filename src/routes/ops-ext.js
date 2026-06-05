@@ -356,15 +356,38 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       }
     }
 
-    // Stable "configured fleet" per server (see _fleetStmt). Counts the whole
-    // configured park — including spares — that was seen within the last 2h, so
-    // the «active modems» denominator stays steady through server flakes and
-    // only «online» moves.
-    const fleet = { total: 0, byServer: {} };
+    // Modem fleet KPI — BOTH online and total are computed here so they're
+    // always CONSISTENT (online can never exceed total). The old bug: the
+    // frontend counted "online" from the live snapshot while the denominator
+    // came from modem_meta — two different sources, so a flaky server could show
+    // a nonsense ratio like 85/82. Now:
+    //   online = currently-online non-random modems (live, deduped by imei);
+    //   total  = max(modem_meta-2h count, online) per server — the modem_meta
+    //            floor keeps the denominator steady through a flake, and the max
+    //            guarantees online ≤ total even if a server's modem_meta rows
+    //            have gone stale (>2h) while its modems are still reporting.
+    const fleet = { total: 0, online: 0, byServer: {} };
     try {
-      for (const row of _fleetStmt.all()) {
-        fleet.byServer[row.srv] = row.n;
-        fleet.total += row.n;
+      const metaFloor = {};
+      for (const row of _fleetStmt.all()) metaFloor[row.srv] = row.n;
+      const liveOnline = {}; const seen = new Set();
+      for (const m of (merged.status || [])) {
+        if (m._cached) continue;
+        const md = m.modem_details || {}, nd = m.net_details || {};
+        const nick = (md.NICK || '').trim();
+        if (!nick || /^random/i.test(nick)) continue;
+        if (nd.IS_ONLINE !== 'yes') continue;
+        const srv = m._server || '';
+        const key = srv + '|' + (md.IMEI || '');
+        if (seen.has(key)) continue;
+        seen.add(key);
+        liveOnline[srv] = (liveOnline[srv] || 0) + 1;
+      }
+      for (const srv of new Set([...Object.keys(metaFloor), ...Object.keys(liveOnline)])) {
+        const online = liveOnline[srv] || 0;
+        const total = Math.max(metaFloor[srv] || 0, online);
+        fleet.byServer[srv] = { total, online };
+        fleet.total += total; fleet.online += online;
       }
     } catch (e) { logger.warn('[fleet] count failed: ' + e.message); }
 

@@ -769,7 +769,7 @@ function renderTable(){
     html+='<span style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--accent)">'+esc(srv)+'</span>';
     if(ci.name)html+='<span style="font-size:11px;color:var(--text-2)">'+esc(ci.name)+'</span>';
     if(ci.address)html+='<span style="font-size:11px;color:var(--text-2)">\u{1F4CD} '+esc(ci.address)+'</span>';
-    html+=(function(){var fleetN=(currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[srv])||modems.length;return'<span style="font-size:11px;font-weight:600;color:'+(online>=fleetN?'var(--success)':'var(--warning)')+'" title="онлайн сейчас / активных модемов в парке">'+online+'/'+fleetN+' online</span>';})();
+    html+=(function(){var fb=(currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[srv])||null;var fOn=fb?fb.online:online;var fN=fb?fb.total:modems.length;if(fN<fOn)fN=fOn;return'<span style="font-size:11px;font-weight:600;color:'+(fOn>=fN?'var(--success)':'var(--warning)')+'" title="онлайн сейчас / активных модемов в парке">'+fOn+'/'+fN+' online</span>';})();
     html+='<div style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" style="font-size:10px;padding:3px 8px" onclick="resetCompleteServer(\''+srv+'\')">Reset</button><button class="btn btn-sm btn-warning" style="font-size:10px;padding:3px 8px" onclick="rebootServer(\''+srv+'\')">Reboot</button></div>';
     html+='</div></td></tr>';
     // Stage 18.7: within each server group, sort by ONLINE→OFFLINE,
@@ -4461,12 +4461,16 @@ function updateHeaderStats(){
   // Stage 18.20 — «Клиентов: N» moved out of the header into the Клиенты
   // tab toolbar (renderClients already populates #clientSummary). Top bar
   // shows just the Online ratio now.
-  // Denominator = stable configured fleet (from the durable known_modems
-  // registry, immune to a ProxySmart box flaking out or modems churning through
-  // "adding"); numerator = live online. So only «online» jumps, the «/N» стоит.
-  var fleetTotal=(currentData.fleet&&currentData.fleet.total)||total;
-  var title='Активных модемов в парке: '+fleetTotal+' · онлайн сейчас: '+online+(stale>0?' · '+stale+' офлайн >12ч':'');
-  document.getElementById('headerStats').innerHTML='<div class="stat-badge" title="'+title+'">Online: <span style="color:var(--success)">'+online+'</span>/<span>'+fleetTotal+'</span></div>';
+  // BOTH numbers come from the backend `fleet` (computed from one source) so the
+  // ratio is always consistent — online ≤ total. Fall back to the local live
+  // counts only if `fleet` is missing, and clamp so we never show online>total.
+  var _fl=currentData.fleet||{};
+  var _flOnline=(_fl.online!=null)?_fl.online:online;
+  var _flTotal=(_fl.total!=null)?_fl.total:total;
+  if(_flTotal<_flOnline)_flTotal=_flOnline;
+  var _flOff=Math.max(0,_flTotal-_flOnline);
+  var title='Активных модемов: '+_flTotal+' · онлайн: '+_flOnline+' · офлайн: '+_flOff;
+  document.getElementById('headerStats').innerHTML='<div class="stat-badge" title="'+title+'">Online: <span style="color:var(--success)">'+_flOnline+'</span>/<span>'+_flTotal+'</span></div>';
 }
 function startAutoRefresh(){if(autoRefreshTimer)clearInterval(autoRefreshTimer);autoRefreshTimer=setInterval(loadData,60000)}
 
@@ -4509,10 +4513,12 @@ function loadServersList(){
       var cName=cn.name||cc;
       // Count modems on this server. «Модемов» = стабильный размер парка
       // (known_modems), не прыгает при флапе ProxySmart; «онлайн» = live.
-      var onlineCount=0;var liveCount=0;
-      for(var imei in mm){var m=mm[imei];if(m.server===s.name){liveCount++;if(m.isOnline)onlineCount++}}
-      var _fleetN=currentData&&currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[s.name];
-      var modemCount=(_fleetN!=null?_fleetN:liveCount);
+      var _liveOnline=0,_liveCount=0;
+      for(var imei in mm){var m=mm[imei];if(m.server===s.name){_liveCount++;if(m.isOnline)_liveOnline++}}
+      var _fb=currentData&&currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[s.name];
+      var onlineCount=_fb?_fb.online:_liveOnline;
+      var modemCount=_fb?_fb.total:_liveCount;
+      if(modemCount<onlineCount)modemCount=onlineCount;
       var isOnline=onlineCount>0;
       var sn=esc(s.name);
 
