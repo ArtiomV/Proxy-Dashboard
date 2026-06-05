@@ -504,10 +504,32 @@ r.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, re
   // route (/ledger/:entryIndex) still targets the right row.
   const newestFirst = allEntries.map((e, i) => ({ ...e, _idx: i })).reverse();
   const entries = newestFirst.slice(offset, offset + limit);
+  // Per-month segmentation (computed over the FULL ledger so totals are complete
+  // regardless of the 100-row page). spent = debits (charges/manual/correction),
+  // topup = credits (payments/bank/positive adjustments). Keyed by 'YYYY-MM'.
+  const monthly = {};
+  for (const e of allEntries) {
+    const ds = e.date || e.timestamp || '';
+    const mk = /^\d{4}-\d{2}/.test(ds) ? ds.slice(0, 7) : '';
+    if (!mk) continue;
+    if (!monthly[mk]) monthly[mk] = { spent: 0, topup: 0, count: 0 };
+    let s = 0;
+    if (e.type === 'charge') s = -(e.cost || 0);
+    else if (e.type === 'manual_charge' || e.type === 'correction') s = -(e.amount || 0);
+    else if (e.type === 'payment' || e.type === 'bank_payment') s = (e.amount || 0);
+    else if (e.type === 'adjustment' || e.type === 'payment_reversal') s = (e.amount || 0);
+    if (s >= 0) monthly[mk].topup += s; else monthly[mk].spent += -s;
+    monthly[mk].count++;
+  }
+  for (const k of Object.keys(monthly)) {
+    monthly[k].spent = Math.round(monthly[k].spent * 100) / 100;
+    monthly[k].topup = Math.round(monthly[k].topup * 100) / 100;
+  }
   res.json({
     balance: client.balance,
     last_snapshot: client.last_traffic_snapshot,
     entries: entries.map(({ db_id, ...e }) => e),   // keep _idx, drop internal db_id
+    monthly,
     total: allEntries.length,
     limit,
     offset

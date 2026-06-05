@@ -5080,7 +5080,32 @@ function renderOpsHistory(clientId) {
         + '<th style="padding:8px 10px;text-align:left;color:var(--text-2)">Примечание</th>'
         + '<th style="padding:8px 10px;text-align:center;color:var(--text-2);width:30px"></th>'
         + '</tr></thead><tbody>';
+      // Monthly segmentation: per-month totals come from the backend (`monthly`,
+      // computed over the FULL ledger so they're complete even though the page
+      // shows only the newest 100 rows). Insert a divider row whenever the month
+      // changes (entries are newest-first).
+      var _RU_MONTHS = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+      var _monthly = data.monthly || {};
+      var _curMonth = null;
+      var _fmtRub = function(x){ return Math.round(x||0).toLocaleString('ru-RU') + ' ₽'; };
+      var _monthOf = function(e){ var ds = (e.date || e.timestamp || ''); return /^\d{4}-\d{2}/.test(ds) ? ds.slice(0,7) : ''; };
       entries.forEach(function(e, eIdx) {
+        var _mk = _monthOf(e);
+        if (_mk && _mk !== _curMonth) {
+          _curMonth = _mk;
+          var _mp = _mk.split('-'); var _ml = (_RU_MONTHS[parseInt(_mp[1],10)-1] || '') + ' ' + _mp[0];
+          var _agg = _monthly[_mk] || { spent:0, topup:0, count:0 };
+          var _net = (_agg.topup || 0) - (_agg.spent || 0);
+          h += '<tr class="month-seg"><td colspan="8" style="padding:7px 12px;background:var(--bg-2);border-top:2px solid var(--border);border-bottom:1px solid var(--border)">'
+            + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
+            + '<span style="font-weight:700;font-size:12px;color:var(--text-1)">' + _ml + '</span>'
+            + '<span style="font-size:11px;color:var(--text-3)">'
+            + 'Списано <span style="color:var(--danger);font-weight:600">' + _fmtRub(_agg.spent) + '</span>'
+            + ' · Пополнено <span style="color:var(--success);font-weight:600">' + _fmtRub(_agg.topup) + '</span>'
+            + ' · Итог <span style="color:' + (_net >= 0 ? 'var(--success)' : 'var(--danger)') + ';font-weight:600">' + (_net >= 0 ? '+' : '') + _fmtRub(_net) + '</span>'
+            + ' · ' + (_agg.count || 0) + ' оп.'
+            + '</span></div></td></tr>';
+        }
         var typeLabel = '', typeColor = '', amountStr = '', amountColor = '';
         var entryIsPerModem = e.billing_type === 'per_modem';
         if (e.type === 'charge') { typeLabel = 'Списание'; typeColor = 'color:var(--danger)'; amountStr = '-' + ((e.cost || 0).toFixed(2)) + ' \u20BD'; amountColor = 'color:var(--danger)'; }
