@@ -21,7 +21,7 @@ module.exports = function createOpsExtRouter(deps) {
     getRunningJobs,
     getLastBillingRunSummary, getLastReconciliationMonth, getIntervals,
     getFetchAllServersDataCached, getMergeServerData,
-    getIpTracking, getUptimeTracking, getKnownModems, getIpHistory,
+    getIpTracking, getUptimeTracking, getIpHistory,
     getDailyTraffic, getPortKeyToPortName,
     getTochkaConfig, getProxyCheckSummary,
     computeProxyIssues, fetchApi, findServer,
@@ -39,6 +39,23 @@ module.exports = function createOpsExtRouter(deps) {
       FROM billing_ledger
      WHERE (type = 'charge' OR type = 'correction')
        AND date LIKE ?
+  `);
+  // Stable "configured fleet" per server: distinct non-random modems the
+  // dashboard has SEEN RECENTLY (modem_meta, refreshed every poll incl. cached
+  // data). The 2h window keeps it steady through a momentary ProxySmart flake
+  // yet drops genuinely-decommissioned modems (whose updated_at goes stale) —
+  // so the «active modems» denominator stays put while only «online» moves.
+  // Includes spares (a modem gets a modem_meta row even without a client port),
+  // unlike known_modems which only tracks ported modems.
+  const _fleetStmt = db.prepare(`
+    SELECT server_name AS srv, COUNT(DISTINCT imei) AS n
+      FROM modem_meta
+     WHERE imei IS NOT NULL AND TRIM(imei) != ''
+       AND nick IS NOT NULL AND TRIM(nick) != ''
+       AND lower(nick) NOT LIKE 'random%'
+       AND (is_test_pool IS NULL OR is_test_pool = 0)
+       AND updated_at >= datetime('now', '-2 hours')
+     GROUP BY server_name
   `);
 
 r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
@@ -339,25 +356,17 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       }
     }
 
-    // Stable "configured fleet" count from the DURABLE known_modems registry —
-    // distinct non-random modems per server. The live snapshot (...merged.status)
-    // collapses when a ProxySmart box flakes out or modems churn through the
-    // "adding" state, which is why the online ratio jumped. The fleet count
-    // stays steady, so the UI shows a constant "active modems" denominator and
-    // only the live "online" numerator moves.
-    const _km = getKnownModems() || {};
+    // Stable "configured fleet" per server (see _fleetStmt). Counts the whole
+    // configured park — including spares — that was seen within the last 2h, so
+    // the «active modems» denominator stays steady through server flakes and
+    // only «online» moves.
     const fleet = { total: 0, byServer: {} };
-    for (const [srv, ports] of Object.entries(_km)) {
-      const imeis = new Set();
-      for (const info of Object.values(ports || {})) {
-        if (!info || !info.imei) continue;
-        const nick = (info.nick || '').trim();
-        if (!nick || /^random/i.test(nick)) continue;   // skip unconfigured "randomNNNN" placeholders
-        imeis.add(info.imei);
+    try {
+      for (const row of _fleetStmt.all()) {
+        fleet.byServer[row.srv] = row.n;
+        fleet.total += row.n;
       }
-      fleet.byServer[srv] = imeis.size;
-      fleet.total += imeis.size;
-    }
+    } catch (e) { logger.warn('[fleet] count failed: ' + e.message); }
 
     res.json({
       clientMonthCharges,
