@@ -97,6 +97,7 @@ async function verifyJwtSignature(token, apiToken) {
       const jwks = await fetchTochkaJwks(apiToken);
       tochkaJwksCache = { keys: jwks.keys || [], fetchedAt: now };
       logger.info(`[Tochka JWKS] Fetched ${tochkaJwksCache.keys.length} key(s)`);
+      if (!tochkaJwksCache.keys.length) logger.warn('[Tochka JWKS] response had no keys: ' + (jwks.message || jwks.error || JSON.stringify(jwks).slice(0, 160)));
     } catch (e) {
       logger.error('[Tochka JWKS] Failed to fetch keys:', e.message);
       // If we have cached keys, use them even if expired

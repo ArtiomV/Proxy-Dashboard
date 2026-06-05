@@ -5111,7 +5111,11 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   }
   // Initial run 90s after start (after DB warm-up + cache populate)
   setTimeout(() => _scheduledTochkaSync('startup'), 90 * 1000);
-  _intervals.push(setInterval(() => _scheduledTochkaSync('periodic'), 4 * 60 * 60 * 1000));
+  // Every 30 min (was 4 h). The scheduled sync only pulls a 14-day window and
+  // is the auto-credit path (the webhook can't verify Tochka's signature), so a
+  // tighter cadence means a payment is auto-credited within ≤30 min instead of
+  // up to 4 h. Cheap: a 14-day statement + INN/name match, idempotent on re-run.
+  _intervals.push(setInterval(() => _scheduledTochkaSync('periodic'), 30 * 60 * 1000));
 
   // Nightly DB cleanup at 00:30 UTC — remove old data using dynamic retention settings
   scheduleRepeating(0, 30, 'DbCleanup', () => {
