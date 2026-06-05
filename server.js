@@ -273,6 +273,12 @@ const dbStmts = {
      dismissed, source, tochka_payment_id, received_at, natural_key)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
   findBankPaymentByNaturalKey: db.prepare('SELECT id FROM bank_payments WHERE natural_key = ? LIMIT 1'),  // Stage 18.6
+  // Sync-reconcile (auto-credit by INN): need matched/dismissed state of an
+  // existing row, plus a ledger-dup guard so we never credit a transaction the
+  // ledger already has (covers legacy rows that predate natural_key + crash
+  // recovery between atomicCredit and the match-mark).
+  findBankPaymentRowByNaturalKey: db.prepare('SELECT id, matched, dismissed FROM bank_payments WHERE natural_key = ? LIMIT 1'),
+  ledgerHasBankPaymentOn: db.prepare("SELECT 1 FROM billing_ledger WHERE client_id = ? AND type = 'bank_payment' AND ABS(amount - ?) < 0.01 AND date = ? LIMIT 1"),
   findBankPaymentByPaymentId: db.prepare('SELECT * FROM bank_payments WHERE payment_id = ? AND auto_credit = 1 LIMIT 1'),
   findBankPaymentByPaymentIdAny: db.prepare('SELECT id FROM bank_payments WHERE payment_id = ? LIMIT 1'),
   findBankPaymentByTochkaId: db.prepare('SELECT id FROM bank_payments WHERE tochka_payment_id = ? LIMIT 1'),
@@ -4629,12 +4635,46 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
     // kept as a fast-path optimisation: if we recognise the exact id, skip
     // immediately without computing the natural key.
     const naturalKey = (payerInn || '') + '|' + amount + '|' + (dateStr || '') + '|' + (purpose || '').slice(0, 100);
-    if (dbStmts.findBankPaymentByNaturalKey.get(naturalKey)) {
-      // Не алертим как dup — это нормальная работа sync: вторая (и далее)
-      // итерация для уже учтённого webhook'а. Алерт только если sync ВСТАВКА
-      // упадёт на UNIQUE — это значит реальная попытка дубля прорвалась
-      // мимо natural_key.
-      skipped++; continue;
+    const existingRow = dbStmts.findBankPaymentRowByNaturalKey.get(naturalKey);
+    if (existingRow) {
+      // The transaction is already recorded. Normally we skip (a webhook or an
+      // earlier sync already handled it). BUT a row can sit UNCREDITED — the
+      // real-time webhook can't verify Tochka's JWT signature (reason=
+      // key_not_found) so it persists the payment "for manual review" without
+      // crediting. The statement sync IS trusted (we pulled it via our own
+      // authenticated API call), so here it acts as the reconciler: if the row
+      // is uncredited + not dismissed and the payer INN maps to a client, we
+      // auto-credit it now. Guard: never credit if the ledger already has this
+      // bank_payment (legacy rows without a natural_key + crash recovery between
+      // atomicCredit and the match-mark) → idempotent even across a crash.
+      let reconciled = false;
+      if (!existingRow.matched && !existingRow.dismissed && payerInn) {
+        const client = clientByInn.get(payerInn);
+        if (client) {
+          const alreadyInLedger = dbStmts.ledgerHasBankPaymentOn.get(client.id, amount, dateStr);
+          if (!alreadyInLedger) {
+            try {
+              atomicCredit(client.id, amount, {
+                type: 'bank_payment', amount, date: dateStr,
+                timestamp: new Date().toISOString(),
+                note: ('Авто-зачисление (синк, ИНН ' + payerInn + '): ' + (purpose || '')).slice(0, 300),
+                source: 'tochka_sync', tochkaPaymentId: paymentId
+              });
+              dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 1, existingRow.id);
+              matched++; reconciled = true;
+              saveClients(clients);
+              logger.info(`[Tochka Sync:${source}] reconciled uncredited payment → +${amount} to ${client.name} (INN ${payerInn})`);
+              try { alerts.trigger('payment_received', { client: client.name, client_id: client.id, amount, inn: payerInn, source: 'Точка (sync)', natural_key: naturalKey, date: dateStr, balanceAfter: client.balance }); } catch (_) {}
+            } catch (e) { logger.error(`[Tochka Sync:${source}] reconcile credit failed for ${client.name}: ${e.message}`); }
+          } else {
+            // Already credited via another row — just clear the "unmatched"
+            // flag, do NOT credit again.
+            dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 0, existingRow.id);
+          }
+        }
+      }
+      if (!reconciled) skipped++;
+      continue;
     }
 
     // Fast-path id lookups — still useful when Tochka returns a non-empty
@@ -4660,6 +4700,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
         bankPayment.matched = true;
         bankPayment.matchedClientId = client.id;
         bankPayment.matchedClientName = client.name;
+        bankPayment.autoCredit = true;   // flag so the UI shows it auto-credited
         try {
           atomicCredit(client.id, amount, {
             type: 'bank_payment',
