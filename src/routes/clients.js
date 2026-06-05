@@ -491,16 +491,23 @@ r.delete('/api/admin/clients/:id/payment/by-ledger/:ledgerDbId', authMiddleware,
 r.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
-  const allEntries = ledgerDb.listByClient(client.id);
-  // BUG-11: Pagination support
+  const allEntries = ledgerDb.listByClient(client.id);   // id ASC (oldest-first)
+  // BUG-11: Pagination support.
   const limit = Math.min(parseInt(req.query.limit) || 100, 500);
   const offset = Math.max(parseInt(req.query.offset) || 0, 0);
-  const entries = allEntries.slice(offset, offset + limit);
+  // NEWEST-first: the default page must show RECENT activity. Previously this
+  // returned the OLDEST `limit` entries (slice(0,100) of an id-ASC list), so a
+  // client with >100 entries (e.g. one charged daily for months) had its recent
+  // charges fall onto an unloaded page 2 — the history view then showed a stale
+  // "last charge" (looked like billing had stopped). Tag each row with its
+  // absolute index in the ASC list BEFORE reversing, so the index-based delete
+  // route (/ledger/:entryIndex) still targets the right row.
+  const newestFirst = allEntries.map((e, i) => ({ ...e, _idx: i })).reverse();
+  const entries = newestFirst.slice(offset, offset + limit);
   res.json({
     balance: client.balance,
     last_snapshot: client.last_traffic_snapshot,
-    
-    entries: entries.map(({ db_id, ...e }) => e),
+    entries: entries.map(({ db_id, ...e }) => e),   // keep _idx, drop internal db_id
     total: allEntries.length,
     limit,
     offset

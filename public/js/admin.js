@@ -5045,7 +5045,9 @@ function renderOpsHistory(clientId) {
     .then(function(r) { return r.json(); })
     .then(function(data) {
       var entries = data.entries || [];
-      entries.forEach(function(e, i) { e._origIndex = i; });
+      // Backend returns newest-first; each entry carries _idx = its absolute
+      // position in the full ledger (the delete route indexes into that ASC
+      // list). Re-sort defensively in case of a backdated manual entry.
       entries.sort(function(a, b) { return (b.timestamp || b.date || '').localeCompare(a.timestamp || a.date || ''); });
       var client = (currentData.clients || []).find(function(x) { return x.id === clientId; });
       var bal = client ? (client.balance !== undefined ? client.balance : 0) : 0;
@@ -5122,7 +5124,7 @@ function renderOpsHistory(clientId) {
         h += '<td style="padding:6px 10px;text-align:center;' + amountColor + ';font-weight:600">' + amountStr + '</td>';
         h += '<td style="padding:6px 10px;text-align:center">' + balAfter + '</td>';
         h += '<td style="padding:6px 10px;color:var(--text-3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(note) + '">' + esc(note) + '</td>';
-        h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:transparent;color:var(--danger);border:1px solid var(--danger)" onclick="deleteLedgerEntry(\'' + clientId + '\',' + e._origIndex + ')" title="\u0423\u0434\u0430\u043B\u0438\u0442\u044C">\u2716</button></td>';
+        h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:transparent;color:var(--danger);border:1px solid var(--danger)" onclick="deleteLedgerEntry(\'' + clientId + '\',' + e._idx + ')" title="\u0423\u0434\u0430\u043B\u0438\u0442\u044C">\u2716</button></td>';
         h += '</tr>';
       });
       h += '</tbody></table>';
