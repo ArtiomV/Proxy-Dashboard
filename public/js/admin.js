@@ -769,7 +769,7 @@ function renderTable(){
     html+='<span style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--accent)">'+esc(srv)+'</span>';
     if(ci.name)html+='<span style="font-size:11px;color:var(--text-2)">'+esc(ci.name)+'</span>';
     if(ci.address)html+='<span style="font-size:11px;color:var(--text-2)">\u{1F4CD} '+esc(ci.address)+'</span>';
-    html+='<span style="font-size:11px;font-weight:600;color:'+(online===modems.length?'var(--success)':'var(--warning)')+'">'+online+'/'+modems.length+' online</span>';
+    html+=(function(){var fleetN=(currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[srv])||modems.length;return'<span style="font-size:11px;font-weight:600;color:'+(online>=fleetN?'var(--success)':'var(--warning)')+'" title="онлайн сейчас / активных модемов в парке">'+online+'/'+fleetN+' online</span>';})();
     html+='<div style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" style="font-size:10px;padding:3px 8px" onclick="resetCompleteServer(\''+srv+'\')">Reset</button><button class="btn btn-sm btn-warning" style="font-size:10px;padding:3px 8px" onclick="rebootServer(\''+srv+'\')">Reboot</button></div>';
     html+='</div></td></tr>';
     // Stage 18.7: within each server group, sort by ONLINE→OFFLINE,
@@ -4461,8 +4461,12 @@ function updateHeaderStats(){
   // Stage 18.20 — «Клиентов: N» moved out of the header into the Клиенты
   // tab toolbar (renderClients already populates #clientSummary). Top bar
   // shows just the Online ratio now.
-  var title = stale>0 ? '+'+stale+' исключено (offline >12 ч)' : '';
-  document.getElementById('headerStats').innerHTML='<div class="stat-badge"'+(title?' title="'+title+'"':'')+'>Online: <span style="color:var(--success)">'+online+'</span>/<span>'+total+'</span>'+(stale>0?' <span style="color:var(--text-3);font-size:9px;margin-left:2px">(+'+stale+')</span>':'')+'</div>';
+  // Denominator = stable configured fleet (from the durable known_modems
+  // registry, immune to a ProxySmart box flaking out or modems churning through
+  // "adding"); numerator = live online. So only «online» jumps, the «/N» стоит.
+  var fleetTotal=(currentData.fleet&&currentData.fleet.total)||total;
+  var title='Активных модемов в парке: '+fleetTotal+' · онлайн сейчас: '+online+(stale>0?' · '+stale+' офлайн >12ч':'');
+  document.getElementById('headerStats').innerHTML='<div class="stat-badge" title="'+title+'">Online: <span style="color:var(--success)">'+online+'</span>/<span>'+fleetTotal+'</span></div>';
 }
 function startAutoRefresh(){if(autoRefreshTimer)clearInterval(autoRefreshTimer);autoRefreshTimer=setInterval(loadData,60000)}
 
@@ -4503,10 +4507,13 @@ function loadServersList(){
       var cc=cn.country||'';
       var flag=cc==='MD'?'🇲🇩':cc==='RO'?'🇷🇴':'🌍';
       var cName=cn.name||cc;
-      // Count modems on this server
-      var modemCount=0;var onlineCount=0;
-      for(var imei in mm){var m=mm[imei];if(m.server===s.name){modemCount++;if(m.isOnline)onlineCount++}}
-      var isOnline=modemCount>0&&onlineCount>0;
+      // Count modems on this server. «Модемов» = стабильный размер парка
+      // (known_modems), не прыгает при флапе ProxySmart; «онлайн» = live.
+      var onlineCount=0;var liveCount=0;
+      for(var imei in mm){var m=mm[imei];if(m.server===s.name){liveCount++;if(m.isOnline)onlineCount++}}
+      var _fleetN=currentData&&currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[s.name];
+      var modemCount=(_fleetN!=null?_fleetN:liveCount);
+      var isOnline=onlineCount>0;
       var sn=esc(s.name);
 
       h+='<div class="server-card" id="srv_'+sn+'">';

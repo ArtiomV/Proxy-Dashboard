@@ -21,7 +21,7 @@ module.exports = function createOpsExtRouter(deps) {
     getRunningJobs,
     getLastBillingRunSummary, getLastReconciliationMonth, getIntervals,
     getFetchAllServersDataCached, getMergeServerData,
-    getIpTracking, getUptimeTracking, getIpHistory,
+    getIpTracking, getUptimeTracking, getKnownModems, getIpHistory,
     getDailyTraffic, getPortKeyToPortName,
     getTochkaConfig, getProxyCheckSummary,
     computeProxyIssues, fetchApi, findServer,
@@ -339,6 +339,26 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       }
     }
 
+    // Stable "configured fleet" count from the DURABLE known_modems registry —
+    // distinct non-random modems per server. The live snapshot (...merged.status)
+    // collapses when a ProxySmart box flakes out or modems churn through the
+    // "adding" state, which is why the online ratio jumped. The fleet count
+    // stays steady, so the UI shows a constant "active modems" denominator and
+    // only the live "online" numerator moves.
+    const _km = getKnownModems() || {};
+    const fleet = { total: 0, byServer: {} };
+    for (const [srv, ports] of Object.entries(_km)) {
+      const imeis = new Set();
+      for (const info of Object.values(ports || {})) {
+        if (!info || !info.imei) continue;
+        const nick = (info.nick || '').trim();
+        if (!nick || /^random/i.test(nick)) continue;   // skip unconfigured "randomNNNN" placeholders
+        imeis.add(info.imei);
+      }
+      fleet.byServer[srv] = imeis.size;
+      fleet.total += imeis.size;
+    }
+
     res.json({
       clientMonthCharges,
       clientMonthGb,
@@ -347,6 +367,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       clientTodayGb,
       modemTrend,
       clientTrend,
+      fleet,
       ...merged,
       servers,
       clients: sanitizedClients,

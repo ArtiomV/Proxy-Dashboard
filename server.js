@@ -4809,6 +4809,7 @@ app.use(require('./src/routes/ops-ext')({
   getMergeServerData: () => mergeServerData,
   getIpTracking: () => ipTracking,
   getUptimeTracking: () => uptimeTracking,
+  getKnownModems: () => knownModems,
   getIpHistory: () => ipHistory,
   getDailyTraffic: () => dailyTraffic,
   getPortKeyToPortName: () => portKeyToPortName,
