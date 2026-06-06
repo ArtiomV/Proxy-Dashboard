@@ -8,6 +8,7 @@
 // during mount-time evaluation.
 
 const express = require('express');
+const { computeFleet } = require('../modems/fleet');
 
 module.exports = function createOpsExtRouter(deps) {
   const {
@@ -40,22 +41,16 @@ module.exports = function createOpsExtRouter(deps) {
      WHERE (type = 'charge' OR type = 'correction')
        AND date LIKE ?
   `);
-  // Stable "configured fleet" per server: distinct non-random modems the
-  // dashboard has SEEN RECENTLY (modem_meta, refreshed every poll incl. cached
-  // data). The 2h window keeps it steady through a momentary ProxySmart flake
-  // yet drops genuinely-decommissioned modems (whose updated_at goes stale) —
-  // so the «active modems» denominator stays put while only «online» moves.
-  // Includes spares (a modem gets a modem_meta row even without a client port),
-  // unlike known_modems which only tracks ported modems.
-  const _fleetStmt = db.prepare(`
-    SELECT server_name AS srv, COUNT(DISTINCT imei) AS n
+  // Modem registry rows (non-random, non-test) — the candidate set for the
+  // fleet count. Recency/online state comes from uptime_tracking + the live
+  // snapshot in computeFleet (src/modems/fleet.js), not from a SQL time filter.
+  const _fleetMetaStmt = db.prepare(`
+    SELECT server_name AS srv, imei, nick
       FROM modem_meta
      WHERE imei IS NOT NULL AND TRIM(imei) != ''
        AND nick IS NOT NULL AND TRIM(nick) != ''
        AND lower(nick) NOT LIKE 'random%'
        AND (is_test_pool IS NULL OR is_test_pool = 0)
-       AND updated_at >= datetime('now', '-2 hours')
-     GROUP BY server_name
   `);
 
 r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
@@ -356,39 +351,15 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       }
     }
 
-    // Modem fleet KPI — BOTH online and total are computed here so they're
-    // always CONSISTENT (online can never exceed total). The old bug: the
-    // frontend counted "online" from the live snapshot while the denominator
-    // came from modem_meta — two different sources, so a flaky server could show
-    // a nonsense ratio like 85/82. Now:
-    //   online = currently-online non-random modems (live, deduped by imei);
-    //   total  = max(modem_meta-2h count, online) per server — the modem_meta
-    //            floor keeps the denominator steady through a flake, and the max
-    //            guarantees online ≤ total even if a server's modem_meta rows
-    //            have gone stale (>2h) while its modems are still reporting.
-    const fleet = { total: 0, online: 0, byServer: {} };
+    // Modem fleet KPI — one coherent count (src/modems/fleet.js):
+    //   total   = modems online within 48h (uptime history) ∪ online right now;
+    //   online  = currently IS_ONLINE in the live snapshot;
+    //   offline = total − online.
+    // Always consistent (online ≤ total), stable through a server flake (uptime
+    // history holds the denominator), excludes never-online re-add phantoms.
+    let fleet = { total: 0, online: 0, offline: 0, byServer: {} };
     try {
-      const metaFloor = {};
-      for (const row of _fleetStmt.all()) metaFloor[row.srv] = row.n;
-      const liveOnline = {}; const seen = new Set();
-      for (const m of (merged.status || [])) {
-        if (m._cached) continue;
-        const md = m.modem_details || {}, nd = m.net_details || {};
-        const nick = (md.NICK || '').trim();
-        if (!nick || /^random/i.test(nick)) continue;
-        if (nd.IS_ONLINE !== 'yes') continue;
-        const srv = m._server || '';
-        const key = srv + '|' + (md.IMEI || '');
-        if (seen.has(key)) continue;
-        seen.add(key);
-        liveOnline[srv] = (liveOnline[srv] || 0) + 1;
-      }
-      for (const srv of new Set([...Object.keys(metaFloor), ...Object.keys(liveOnline)])) {
-        const online = liveOnline[srv] || 0;
-        const total = Math.max(metaFloor[srv] || 0, online);
-        fleet.byServer[srv] = { total, online };
-        fleet.total += total; fleet.online += online;
-      }
+      fleet = computeFleet(_fleetMetaStmt.all(), getUptimeTracking(), merged.status || []);
     } catch (e) { logger.warn('[fleet] count failed: ' + e.message); }
 
     res.json({
