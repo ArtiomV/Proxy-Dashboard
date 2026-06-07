@@ -1595,8 +1595,12 @@ function renderAccSubTab(name){
       // (consistent with the «X/Y» header): a modem online within 48h but not
       // online now. This replaces the old live-_modemMap list that hid modems
       // offline >12h, which caused «84 online / 0 offline» to disagree.
-      if (currentData.fleet && Array.isArray(currentData.fleet.offlineList)) {
-        rtOffline = currentData.fleet.offlineList.map(function(o){
+      // «Модем отключен» = модемы, которые молчат уже >10 мин (disconnectedList).
+      // Кратковременный мигающий офлайн (один пропущенный опрос) сюда не попадает —
+      // это тот же порог, на котором уходит уведомление в телегу/колокольчик.
+      var _offSrc = (currentData.fleet && (currentData.fleet.disconnectedList || currentData.fleet.offlineList)) || null;
+      if (Array.isArray(_offSrc)) {
+        rtOffline = _offSrc.map(function(o){
           var age=o.lastOnline?_ageLabel(o.lastOnline):'';
           return {nick:o.nick,server:o.server,detail:age?('Отключён '+age):'offline',lastSeenMs:o.lastOnline||0};
         });

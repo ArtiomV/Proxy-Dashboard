@@ -73,4 +73,34 @@ describe('computeFleet', () => {
     expect(f.total).toBe(3);                 // but fleet held by uptime history
     expect(f.offline).toBe(3);
   });
+
+  it('disconnectedList = offline ≥10 min; a brief <10 min blip stays out', () => {
+    // Two offline modems: one dark 3 min (blip), one dark 30 min (real outage).
+    const meta2 = [
+      { srv: 'S1', imei: 'X', nick: 'MD_X' },
+      { srv: 'S1', imei: 'Y', nick: 'MD_Y' },
+    ];
+    const uptime2 = {
+      'S1_X': { last_online_check: ago(3 * 60 * 1000) },    // dark 3 min → blip
+      'S1_Y': { last_online_check: ago(30 * 60 * 1000) },   // dark 30 min → отключён
+    };
+    const live2 = [
+      { _server: 'S1', modem_details: { IMEI: 'S1_X', NICK: 'MD_X' }, net_details: { IS_ONLINE: 'no' } },
+      { _server: 'S1', modem_details: { IMEI: 'S1_Y', NICK: 'MD_Y' }, net_details: { IS_ONLINE: 'no' } },
+    ];
+    const f = computeFleet(meta2, uptime2, live2, { now: NOW });
+    expect(f.offline).toBe(2);                                      // both offline now
+    expect(f.offlineList.map(o => o.nick).sort()).toEqual(['MD_X', 'MD_Y']);
+    expect(f.disconnected).toBe(1);                                 // only the 30-min one crossed 10 min
+    expect(f.disconnectedList.map(o => o.nick)).toEqual(['MD_Y']);
+  });
+
+  it('disconnectedMs is configurable', () => {
+    const meta2 = [{ srv: 'S1', imei: 'Y', nick: 'MD_Y' }];
+    const uptime2 = { 'S1_Y': { last_online_check: ago(3 * 60 * 1000) } };
+    const loose = computeFleet(meta2, uptime2, [], { now: NOW, disconnectedMs: 2 * 60 * 1000 });
+    expect(loose.disconnected).toBe(1);      // 3 min ≥ 2 min threshold → in
+    const strict = computeFleet(meta2, uptime2, [], { now: NOW, disconnectedMs: 10 * 60 * 1000 });
+    expect(strict.disconnected).toBe(0);     // 3 min < 10 min → out
+  });
 });

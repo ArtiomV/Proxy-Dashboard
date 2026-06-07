@@ -2987,13 +2987,15 @@ async function trackModems() {
         logger.debug(`[Tracking] ${server.name}: ${offlineImeis.size} offline modems also ticked (downtime)`);
       }
 
-      // ── Stage 18.10: Telegram alert «модем оффлайн >20 минут» ──
+      // ── Stage 18.10: Telegram alert «модем оффлайн >10 минут» ──
       // Single shot per offline streak. Boot grace window (6 min) avoids a
       // flood after restart for modems that were already offline. Modems past
       // the stale threshold (default 12h) are NOT alerted — they're already
-      // "long-dead" by policy and would just spam.
+      // "long-dead" by policy and would just spam. Threshold matches the
+      // «Модем отключен» card (computeFleet disconnectedMs) — a modem lands in
+      // the card and the alert fires at the same 10-minute mark.
       if (Date.now() >= _alertEnabledAt) {
-        const ALERT_MIN = 20;
+        const ALERT_MIN = 10;
         const ALERT_MS  = ALERT_MIN * 60 * 1000;
         const STALE_MS  = (Number(appSettings.stale_modem_hours) || 12) * 3600 * 1000;
         const km = knownModems[server.name] || {};

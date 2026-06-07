@@ -149,7 +149,7 @@ const RULES = {
 
   // ── 🟡 IMPORTANT ────────────────────────────────────────────
   modem_offline_20m: {
-    title: 'Модем оффлайн >20 минут',
+    title: 'Модем оффлайн >10 минут',
     priority: 'important',
     defaultOn: true,
     cooldownSec: 86400,   // один alert на streak — реально сбрасывается из tracking при online

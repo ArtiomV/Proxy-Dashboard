@@ -14,15 +14,24 @@
 //   online (онлайн)   — fleet modems reported IS_ONLINE=yes in the live snapshot.
 //   offline (отключено) — total − online.
 //
+// On top of the instantaneous offline set we expose a debounced one:
+//   disconnected (отключён) — offline modems that have been unreachable for at
+//                       least `disconnectedMs` (default 10 min). A brief blip
+//                       (a single missed poll) is NOT "отключён" — only a modem
+//                       that has stayed dark past the threshold lands in the
+//                       «Модем отключен» card, which is also the moment the
+//                       Telegram/bell alert fires. `disconnectedList` ⊆ `offlineList`.
+//
 // Inputs:
 //   metaRows   [{ srv, imei, nick }]  — modem_meta rows (non-random, non-test).
 //   uptime     { 'srv_imei': { last_online_check } }  — in-memory uptime_tracking.
 //   liveStatus  merged.status array — live snapshot (IMEIs prefixed 'S<n>_…').
-//   opts.now / opts.retentionMs
+//   opts.now / opts.retentionMs / opts.disconnectedMs
 function computeFleet(metaRows, uptime, liveStatus, opts) {
   opts = opts || {};
   const now = opts.now || Date.now();
   const retentionMs = opts.retentionMs || 48 * 3600 * 1000;   // 48h: online within 2 days = active fleet
+  const disconnectedMs = opts.disconnectedMs != null ? opts.disconnectedMs : 10 * 60 * 1000;   // «отключён» only after 10 min dark
   const fleet = new Map();   // 'srv|imei' -> { srv, online }
 
   // 1) Durable membership: modems online within the retention window.
@@ -63,6 +72,11 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
     }
   }
   out.offlineList.sort((a, b) => (b.lastOnline || 0) - (a.lastOnline || 0));   // most recently offline first
+  // «Модем отключен»: only modems that have been dark ≥ disconnectedMs. This is
+  // the list the dashboard card renders and the threshold the offline alert
+  // fires at — a transient one-poll blip stays out of both.
+  out.disconnectedList = out.offlineList.filter(o => o.lastOnline && (now - o.lastOnline) >= disconnectedMs);
+  out.disconnected = out.disconnectedList.length;
   return out;
 }
 

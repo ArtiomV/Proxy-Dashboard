@@ -22,7 +22,7 @@
  */
 
 const NOTIF_TTL_DAYS = 30;
-const OFFLINE_MIN_MS = 20 * 60 * 1000;   // mirror modem_offline_20m rule
+const OFFLINE_MIN_MS = 10 * 60 * 1000;   // «Модем отключен» = dark >10 min (matches computeFleet disconnectedMs + the TG offline alert)
 const CLIENT_DEBT_THRESHOLD = -10;       // ₽
 
 let deps = null;
