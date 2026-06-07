@@ -57,4 +57,18 @@ function findClientByPayer(payerInn, payerName, clientByInn, clients) {
   return null;   // 0 or ambiguous → manual review
 }
 
-module.exports = { normCompanyName, findClientByPayer };
+// Canonical natural key for a bank transaction — the data the real-world payment
+// uniquely owns: payer INN | amount | date(YYYY-MM-DD) | purpose-prefix. It MUST
+// be byte-identical whether built from a webhook payload or from a statement
+// sync, otherwise the same payment is recorded twice and the sync can't
+// reconcile (and credit) the webhook's uncredited row — exactly the «265000.0»
+// vs «265000» drift seen in production. `String(Number(amount))` collapses a
+// stray 265000.0 → "265000" while keeping 4250.44 → "4250.44"; the date is
+// always sliced to YYYY-MM-DD so a webhook timestamp and a sync date agree.
+function buildNaturalKey(payerInn, amount, date, purpose) {
+  const n = Number(amount);
+  const amt = Number.isFinite(n) ? String(n) : String(amount == null ? '' : amount);
+  return (payerInn || '') + '|' + amt + '|' + String(date || '').slice(0, 10) + '|' + String(purpose || '').slice(0, 100);
+}
+
+module.exports = { normCompanyName, findClientByPayer, buildNaturalKey };

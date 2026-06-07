@@ -30,7 +30,7 @@ const { safeWriteFile: _safeWriteFile, _fileLocks } = require('./src/utils/files
 // only keeps verifyJwtSignature because dbAudit's webhook signature check
 // uses it on initial setup before the router mounts.
 const { verifyJwtSignature } = require('./src/tochka/jwt');
-const { findClientByPayer } = require('./src/billing/payer-match');
+const { findClientByPayer, buildNaturalKey } = require('./src/billing/payer-match');
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
 const billing = require('./src/billing/atomic');
 // MONTH_NAMES_RU / buildTochkaActBody / etc. moved into src/tochka/documents.js;
@@ -4637,7 +4637,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
     // This single gate replaces the brittle pid/tpid lookups above. They're
     // kept as a fast-path optimisation: if we recognise the exact id, skip
     // immediately without computing the natural key.
-    const naturalKey = (payerInn || '') + '|' + amount + '|' + (dateStr || '') + '|' + (purpose || '').slice(0, 100);
+    const naturalKey = buildNaturalKey(payerInn, amount, dateStr, purpose);
     const existingRow = dbStmts.findBankPaymentRowByNaturalKey.get(naturalKey);
     if (existingRow) {
       // The transaction is already recorded. Normally we skip (a webhook or an

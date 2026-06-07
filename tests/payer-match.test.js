@@ -5,7 +5,27 @@
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'module';
 const require = createRequire(import.meta.url);
-const { normCompanyName, findClientByPayer } = require('../src/billing/payer-match.js');
+const { normCompanyName, findClientByPayer, buildNaturalKey } = require('../src/billing/payer-match.js');
+
+describe('buildNaturalKey', () => {
+  it('webhook and sync produce the SAME key for one payment (the 265000.0 vs 265000 bug)', () => {
+    // Webhook delivered amount as a float 265000.0; sync as int 265000. Before the
+    // shared builder these produced different natural keys → duplicate rows + the
+    // sync could not reconcile/credit the webhook row.
+    const webhook = buildNaturalKey('1683018490', 265000.0, '2026-05-21', 'Оплата за прокси');
+    const sync    = buildNaturalKey('1683018490', 265000,   '2026-05-21', 'Оплата за прокси');
+    expect(webhook).toBe(sync);
+    expect(webhook).toContain('|265000|');     // no stray ".0"
+  });
+  it('preserves real decimals and slices date + purpose', () => {
+    expect(buildNaturalKey('77', 4250.44, '2026-03-22T10:00:00', 'x'.repeat(150)))
+      .toBe('77|4250.44|2026-03-22|' + 'x'.repeat(100));
+  });
+  it('tolerates string amounts and missing fields', () => {
+    expect(buildNaturalKey('77', '265000.00', '2026-05-21', 'p')).toBe('77|265000|2026-05-21|p');
+    expect(buildNaturalKey('', null, '', '')).toBe('|0||');  // Number(null)=0; empty inn/date/purpose
+  });
+});
 
 describe('normCompanyName', () => {
   it('strips legal form, quotes, case → comparable core name', () => {

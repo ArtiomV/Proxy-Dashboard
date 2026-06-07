@@ -20,7 +20,7 @@ const {
 } = require('../tochka/documents');
 const { tochkaRequest: _rawTochkaRequest } = require('../tochka/api');
 const { buildDocHtml: _buildDocHtml } = require('../documents/generator');
-const { findClientByPayer } = require('../billing/payer-match');
+const { findClientByPayer, buildNaturalKey } = require('../billing/payer-match');
 
 module.exports = function createTochkaRouter(deps) {
   const {
@@ -41,6 +41,26 @@ module.exports = function createTochkaRouter(deps) {
     runTochkaSync,
   } = deps;
   const r = express.Router();
+
+  // A) Real-time auto-credit WITHOUT trusting the webhook. Tochka's JWT often
+  // can't be verified (JWKS endpoint errors), so the webhook itself can't credit
+  // — it lands the payment as «unmatched». Instead we treat the webhook as a
+  // "ping": schedule a statement sync a few seconds later. The sync pulls the
+  // statement via our OWN authenticated API call and credits by INN, so the money
+  // decision is never based on unverified webhook content. Debounced/coalesced so
+  // a burst of webhooks fires at most one sync; unref'd so it never blocks exit.
+  let _webhookSyncTimer = null;
+  function scheduleWebhookSync() {
+    if (_webhookSyncTimer || typeof runTochkaSync !== 'function') return;
+    _webhookSyncTimer = setTimeout(() => {
+      _webhookSyncTimer = null;
+      Promise.resolve()
+        .then(() => runTochkaSync({ source: 'webhook' }))
+        .then(res => { if (res && (res.matched || res.imported)) logger.info(`[Tochka] webhook-triggered sync: imported=${res.imported} matched=${res.matched}`); })
+        .catch(e => logger.warn('[Tochka] webhook-triggered sync failed: ' + (e && e.message)));
+    }, 8000);
+    if (_webhookSyncTimer && _webhookSyncTimer.unref) _webhookSyncTimer.unref();
+  }
   // Helpers in src/tochka/documents.js need `tochkaConfig` and a getLedger
   // getter; wrap them once so the call sites below stay readable.
   const _buildAct = (client, period) => buildActItemsFromLedger(client, period, (id) => ledgerDb.listByClient(id));
@@ -119,7 +139,7 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
     // same field so the very-next sync immediately recognises this transaction
     // and skips, without ever calling atomicCredit (the WildBox double-credit
     // path before this stage).
-    const naturalKey = (payerInn || '') + '|' + amount + '|' + (paymentDate || '') + '|' + (purpose || '').slice(0, 100);
+    const naturalKey = buildNaturalKey(payerInn, amount, paymentDate, purpose);
     const bankPayment = {
       id: crypto.randomBytes(8).toString('hex'),
       webhookType,
@@ -246,6 +266,13 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
       } else {
         logger.info(`[Tochka Webhook] Unmatched: INN=${payerInn}, amount=${amount}, purpose=${purpose}`);
       }
+    }
+
+    // A) If this incoming payment wasn't auto-credited right here (e.g. JWT
+    // unverified, or no client matched yet), ping a statement sync — the trusted
+    // path reconciles + credits it by INN within seconds instead of ≤30 min.
+    if (webhookType === 'incomingPayment' && !bankPayment.matched) {
+      try { scheduleWebhookSync(); } catch (_) { /* best-effort */ }
     }
 
     res.status(200).json({ ok: true, processed: true, inserted, matched: bankPayment.matched, verified });
