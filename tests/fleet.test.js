@@ -44,6 +44,9 @@ describe('computeFleet', () => {
     expect(f.online + f.offline).toBe(f.total);
     expect(f.byServer.S1).toEqual({ total: 2, online: 1, offline: 1 });
     expect(f.byServer.S2).toEqual({ total: 1, online: 1, offline: 0 });
+    // offlineList lists exactly the offline fleet modems (for the «Модем отключен» card).
+    expect(f.offlineList.map(o => o.nick)).toEqual(['MD_B']);
+    expect(f.offlineList[0].server).toBe('S1');
   });
 
   it('online is ALWAYS ≤ total even if a server is unreachable (online union)', () => {

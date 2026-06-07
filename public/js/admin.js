@@ -1591,6 +1591,16 @@ function renderAccSubTab(name){
         if(m.lowSpeed)rtLowSpeed.push({nick:m.nick,server:m.server,detail:'↓'+Number(m.lastSpeedDl||0).toFixed(1)+' / ↑'+Number(m.lastSpeedUl||0).toFixed(1)+' Mbps'});
         if(m.ipStuck)rtStuckIp.push({nick:m.nick,server:m.server,detail:'IP не менялся '+m.ipSinceHours+'ч · '+esc(m.extIp||'')});
       });
+      // The «Модем отключен» count/list now come from the coherent fleet model
+      // (consistent with the «X/Y» header): a modem online within 48h but not
+      // online now. This replaces the old live-_modemMap list that hid modems
+      // offline >12h, which caused «84 online / 0 offline» to disagree.
+      if (currentData.fleet && Array.isArray(currentData.fleet.offlineList)) {
+        rtOffline = currentData.fleet.offlineList.map(function(o){
+          var age=o.lastOnline?_ageLabel(o.lastOnline):'';
+          return {nick:o.nick,server:o.server,detail:age?('Отключён '+age):'offline',lastSeenMs:o.lastOnline||0};
+        });
+      }
       // Sort offline list: most recently disconnected first.
       rtOffline.sort(function(a,b){return (Number(b.lastSeenMs)||0) - (Number(a.lastSeenMs)||0);});
 
@@ -7196,7 +7206,7 @@ function renderNewKpi(d){
       '</div>';
   }
   el.innerHTML =
-    kpi('Online', d.totalOnline+'/'+d.totalModems, 'модемов', d.totalOnline===d.totalModems?'var(--success)':'var(--warning)') +
+    (function(){var _f=currentData.fleet||{};var _o=(_f.online!=null)?_f.online:d.totalOnline;var _t=(_f.total!=null)?_f.total:d.totalModems;if(_t<_o)_t=_o;return kpi('Online', _o+'/'+_t, 'модемов', _o>=_t?'var(--success)':'var(--warning)');})() +
     kpi('Сегодня', fmtGbShort(todayBytes), 'трафик') +
     kpi('Месяц', fmtGbShort(monBytes), 'трафик') +
     kpi('Выручка MTD', Math.round(revenue).toLocaleString('ru-RU')+' ₽', null, 'var(--accent)') +

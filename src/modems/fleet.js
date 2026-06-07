@@ -32,7 +32,7 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
     if (!nick || /^random/i.test(nick)) continue;   // defensive (the SQL already excludes these)
     const ut = uptime ? uptime[r.srv + '_' + r.imei] : null;
     const lo = (ut && ut.last_online_check) ? Date.parse(ut.last_online_check) : 0;
-    if (lo && (now - lo) <= retentionMs) fleet.set(r.srv + '|' + r.imei, { srv: r.srv, online: false });
+    if (lo && (now - lo) <= retentionMs) fleet.set(r.srv + '|' + r.imei, { srv: r.srv, nick, online: false, lastOnline: lo });
   }
 
   // 2) Current online from the live snapshot — and union in any online modem not
@@ -49,15 +49,20 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
     if (!raw) continue;
     const key = srv + '|' + raw;
     if (fleet.has(key)) fleet.get(key).online = true;
-    else fleet.set(key, { srv, online: true });
+    else fleet.set(key, { srv, nick, online: true });
   }
 
-  const out = { total: 0, online: 0, offline: 0, byServer: {} };
+  const out = { total: 0, online: 0, offline: 0, byServer: {}, offlineList: [] };
   for (const v of fleet.values()) {
     const b = out.byServer[v.srv] || (out.byServer[v.srv] = { total: 0, online: 0, offline: 0 });
     b.total++; out.total++;
-    if (v.online) { b.online++; out.online++; } else { b.offline++; out.offline++; }
+    if (v.online) { b.online++; out.online++; }
+    else {
+      b.offline++; out.offline++;
+      out.offlineList.push({ server: v.srv, nick: v.nick || '', lastOnline: v.lastOnline || 0 });
+    }
   }
+  out.offlineList.sort((a, b) => (b.lastOnline || 0) - (a.lastOnline || 0));   // most recently offline first
   return out;
 }
 
