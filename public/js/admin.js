@@ -7159,13 +7159,22 @@ var _newLatencyData=null;
 var _newDailyChart=null;
 var _newLatencyChart=null;
 
+// ⚡ «Командный центр» — decision-first unified analytics view.
+// Order = urgency: Пульс → Требует внимания → Финансы → Парк → Трафик.
+// Always-visible: pulse, action-center, finance summary+flow, fleet servers+health,
+// heatmap, daily, traffic-clients. Lazy (<details>): per-client P&L, reconciliation,
+// infra (rotations/IP/capacity), latency dist, top hosts, traffic matrix.
 function renderAccNew(){
   if(!currentData){return;}
   var d = collectTrafficData();
   if(!d){return;}
-  renderNewKpi(d);
-  renderNewClientTable(d);
-  renderNewFinPanel(d);
+  window._newReconLoaded = false;          // re-arm reconciliation chip on each (re)render
+  renderNewActionCenter(d);                // instant — currentData
+  renderNewFleetServers();                 // instant — currentData.fleet
+  renderNewClientTable(d);                 // traffic table (Трафик section)
+  loadNewFinance();                        // → pulse + finance quality/flow/trend
+  loadNewFleetHealth();                    // → health distribution + worst modems
+  loadNewReconciliation();                 // → action-center chip + recon body
   loadNewHeatmap();
   loadNewDailyChart();
   // Wire collapsibles' lazy-load (once per session)
@@ -7181,41 +7190,295 @@ function onNewSectionToggle(ev){
   var el = ev.target;
   if(!el.open) return;
   var section = el.dataset.section;
-  if(el.dataset.loaded === '1' && section !== 'infra') return;   // infra re-renders on period change
+  // infra + finclients re-render cheaply on each open; others load once
+  if(el.dataset.loaded === '1' && section !== 'infra' && section !== 'finclients') return;
   if(section === 'latency'){ loadNewLatency(); }
   else if(section === 'infra'){ reloadNewInfra(); }
   else if(section === 'matrix'){ renderNewMatrix(); }
+  else if(section === 'finclients'){ renderNewFinClients(); }
+  else if(section === 'recon'){ loadNewReconciliation(); }
   // 'resources' is loaded on button click only
   el.dataset.loaded = '1';
 }
 
-// ── KPI row ────────────────────────────────────────────────────────
-function renderNewKpi(d){
-  var el = document.getElementById('newKpiRow');
-  if(!el) return;
-  var todayBytes = 0, monBytes = 0;
-  d.modemTraffic.forEach(function(m){
-    todayBytes += (m.dayIn||0) + (m.dayOut||0);
-    monBytes   += (m.monIn||0) + (m.monOut||0);
-  });
-  var revenue = 0;
-  if(currentData.clientMonthCharges){
-    for(var id in currentData.clientMonthCharges) revenue += currentData.clientMonthCharges[id] || 0;
-  }
-  var debtors = (currentData.clients||[]).filter(function(c){return (c.balance||0) < -10}).length;
-  function kpi(label, value, sub, color){
-    return '<div style="text-align:center">' +
-      '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;font-weight:500">'+esc(label)+'</div>' +
-      '<div style="font-size:22px;font-weight:700;color:'+(color||'var(--text-0)')+';line-height:1.2">'+value+'</div>' +
-      (sub?'<div style="font-size:10px;color:var(--text-3);margin-top:3px">'+sub+'</div>':'') +
-      '</div>';
-  }
+// ── 1. Пульс бизнеса (hero KPI) ────────────────────────────────────
+function _ncPulseCard(label, value, sub, color){
+  return '<div style="text-align:center">' +
+    '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;font-weight:500">'+esc(label)+'</div>' +
+    '<div style="font-size:22px;font-weight:700;color:'+(color||'var(--text-0)')+';line-height:1.2">'+value+'</div>' +
+    (sub?'<div style="font-size:10px;margin-top:3px">'+sub+'</div>':'') +
+    '</div>';
+}
+function renderNewPulse(fin){
+  var el = document.getElementById('newPulseRow'); if(!el) return;
+  var s = (fin && fin.summary) || {};
+  var fleet = currentData.fleet || {};
+  var working = (fleet.working!=null)?fleet.working:((fleet.online!=null)?fleet.online:0);
+  var total = fleet.total||0; if(total<working) total=working;
+  var disc = fleet.disconnected||0;
+  var clients = currentData.clients || [];
+  var cashFloat = clients.reduce(function(a,c){var b=c.balance||0;return a+(b>0?b:0);},0);
+  var profit = (s.total_cost>0 && s.mrr!=null) ? (s.mrr - s.total_cost) : null;
+  var marginPct = (profit!=null && s.mrr>0) ? Math.round(profit/s.mrr*100) : null;
+  var gc = s.mrr_growth_pct;
+  var growthSub = (gc==null) ? '<span style="color:var(--text-3)">нет данных M/M</span>'
+    : '<span style="color:'+(gc>=0?'var(--success)':'var(--danger)')+'">'+(gc>=0?'▲ +':'▼ ')+gc+'% M/M</span>';
+  var profitSub = (profit==null) ? '<span style="color:var(--text-3)">введите затраты ⚙</span>'
+    : '<span style="color:'+(marginPct>=0?'var(--success)':'var(--danger)')+'">'+marginPct+'% маржа</span>';
+  var nrrColor = (s.nrr_pct==null)?'var(--text-0)':(s.nrr_pct>=100?'var(--success)':s.nrr_pct>=90?'var(--warning)':'var(--danger)');
+  var fleetColor = disc>0 ? 'var(--warning)' : 'var(--success)';
+  var fleetSub = disc>0 ? '<span style="color:var(--danger)">⚠ '+disc+' отключено</span>' : '<span style="color:var(--success)">все на связи</span>';
   el.innerHTML =
-    (function(){var _f=currentData.fleet||{};var _o=(_f.working!=null)?_f.working:((_f.online!=null)?_f.online:d.totalOnline);var _t=(_f.total!=null)?_f.total:d.totalModems;if(_t<_o)_t=_o;return kpi('Online', _o+'/'+_t, 'модемов', _o>=_t?'var(--success)':'var(--warning)');})() +
-    kpi('Сегодня', fmtGbShort(todayBytes), 'трафик') +
-    kpi('Месяц', fmtGbShort(monBytes), 'трафик') +
-    kpi('Выручка MTD', Math.round(revenue).toLocaleString('ru-RU')+' ₽', null, 'var(--accent)') +
-    kpi('Долги', debtors||0, debtors?'клиент'+(debtors===1?'':'ов'):'клиентов в плюсе', debtors>0?'var(--danger)':'var(--success)');
+    _ncPulseCard('MRR', _fmtRub(s.mrr), growthSub, 'var(--text-0)') +
+    _ncPulseCard('Прибыль / мес', profit==null?'—':_fmtRub(profit), profitSub, profit==null?'var(--text-2)':(profit>=0?'var(--success)':'var(--danger)')) +
+    _ncPulseCard('NRR', s.nrr_pct==null?'—':(s.nrr_pct+'%'), '<span style="color:var(--text-3)">качество выручки</span>', nrrColor) +
+    _ncPulseCard('Парк', working+'/'+total, fleetSub, fleetColor) +
+    _ncPulseCard('На балансах', _fmtRub(cashFloat), '<span style="color:var(--text-3)">предоплата клиентов</span>', 'var(--accent)') +
+    _ncPulseCard('Прогноз EOM', _fmtRub(s.forecast_eom), '<span style="color:var(--text-3)">к концу месяца</span>', 'var(--text-0)');
+}
+
+// ── 2. Требует внимания (action center) ────────────────────────────
+function _ncChip(icon, label, count, sub, color){
+  return '<div style="flex:1;min-width:155px;background:var(--bg-1);border:1px solid var(--border);border-left:3px solid '+color+';border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px">' +
+    '<span style="font-size:22px;line-height:1">'+icon+'</span>' +
+    '<div><div style="font-size:22px;font-weight:700;color:'+color+';line-height:1">'+count+'</div>' +
+    '<div style="font-size:10px;color:var(--text-2);margin-top:2px">'+esc(label)+(sub?' · '+sub:'')+'</div></div></div>';
+}
+function renderNewActionCenter(d){
+  var el = document.getElementById('newActionRow'); if(!el) return;
+  var fleet = currentData.fleet || {};
+  var clients = currentData.clients || [];
+  var items = [];
+  var disc = fleet.disconnected || 0;
+  if(disc>0) items.push(_ncChip('📴','Модемов отключено', disc, 'более 10 мин', 'var(--danger)'));
+  var issues = (currentData.proxyIssues || []).length;
+  if(issues>0) items.push(_ncChip('🐌','Сбоят прокси', issues, 'задержки/ошибки', 'var(--warning)'));
+  var debtors = clients.filter(function(c){return (c.balance||0) < -10});
+  if(debtors.length>0){
+    var debtSum = debtors.reduce(function(a,c){return a+(c.balance||0);},0);
+    items.push(_ncChip('💸','Клиентов в долгу', debtors.length, _fmtRub(debtSum), 'var(--danger)'));
+  }
+  var paused = clients.filter(function(c){return c.paused;}).length;
+  if(paused>0) items.push(_ncChip('⏸','На паузе', paused, null, 'var(--text-2)'));
+  var h = '<div style="display:flex;gap:10px;flex-wrap:wrap">';
+  if(!items.length){
+    h += '<div style="flex:1;background:var(--bg-1);border:1px solid var(--border);border-left:3px solid var(--success);border-radius:8px;padding:12px 16px;display:flex;align-items:center;gap:10px"><span style="font-size:20px">✅</span><span style="color:var(--success);font-weight:600;font-size:13px">Всё спокойно — событий, требующих внимания, нет</span></div>';
+  } else {
+    h += items.join('');
+  }
+  h += '<span id="newReconChip"></span>';   // filled async by loadNewReconciliation
+  h += '</div>';
+  el.innerHTML = h;
+}
+
+// ── 4a. Парк по серверам ───────────────────────────────────────────
+function _ncServerCard(name, working, total, disc, primary){
+  working = working||0; total = total||0; disc = disc||0;
+  if(total<working) total=working;
+  var col = disc===0 ? 'var(--success)' : 'var(--warning)';
+  return '<div style="background:'+(primary?'var(--bg-2)':'var(--bg-1)')+';border:1px solid var(--border);border-radius:8px;padding:12px 14px">' +
+    '<div style="font-size:11px;color:var(--text-2);font-weight:600;margin-bottom:4px">'+esc(name)+'</div>' +
+    '<div style="font-size:20px;font-weight:700;color:'+col+'">'+working+'<span style="font-size:13px;color:var(--text-3)">/'+total+'</span></div>' +
+    '<div style="font-size:10px;margin-top:3px;color:'+(disc>0?'var(--danger)':'var(--text-3)')+'">'+(disc>0?('⚠ '+disc+' отключено'):'все на связи')+'</div>' +
+    '</div>';
+}
+function renderNewFleetServers(){
+  var el = document.getElementById('newFleetServers'); if(!el) return;
+  var fleet = currentData.fleet || {};
+  var bs = fleet.byServer || {};
+  var names = Object.keys(bs).sort();
+  if(!names.length){ el.innerHTML = '<div style="color:var(--text-3);font-size:12px">Нет данных о парке</div>'; return; }
+  var h = _ncServerCard('Весь парк', fleet.working, fleet.total, fleet.disconnected, true);
+  names.forEach(function(n){ var b=bs[n]||{}; h += _ncServerCard(n, b.working, b.total, b.disconnected, false); });
+  el.innerHTML = h;
+}
+
+// ── 3. Финансы (pulse + quality + flow + trend) ────────────────────
+function loadNewFinance(){
+  fetch(API + '/api/admin/finance_dashboard', {headers:{'X-Auth-Token':authToken}})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      if(d.error){ var q=document.getElementById('newFinQuality'); if(q) q.innerHTML='<div style="color:var(--danger);font-size:12px">'+esc(d.error)+'</div>'; return; }
+      window._newFinData = d;
+      renderNewPulse(d);
+      renderNewFinance(d);
+    })
+    .catch(function(e){ var q=document.getElementById('newFinQuality'); if(q) q.innerHTML='<div style="color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>'; });
+}
+function _ncListRow(name, val, valColor){
+  return '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:12px">' +
+    '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">'+name+'</span>' +
+    '<span style="font-family:var(--font-mono);font-size:11px;color:'+valColor+';font-weight:600;white-space:nowrap">'+val+'</span></div>';
+}
+function renderNewFinance(d){
+  var s = d.summary||{}, con = d.concentration||{};
+  // Quality panel
+  var q = document.getElementById('newFinQuality');
+  if(q){
+    var nrrColor = s.nrr_pct==null?'var(--text-0)':(s.nrr_pct>=100?'var(--success)':s.nrr_pct>=90?'var(--warning)':'var(--danger)');
+    var churnColor = s.churn_rate_pct>=5?'var(--danger)':'var(--text-0)';
+    function qrow(l,v,c){ return '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px"><span style="color:var(--text-2)">'+l+'</span><span style="font-weight:600;'+(c?'color:'+c:'')+'">'+v+'</span></div>'; }
+    function cbar(l,pct,col){ pct=pct||0; return '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:11px"><span>'+l+'</span><span style="font-weight:600">'+pct+'%</span></div><div style="height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden;margin-top:2px"><div style="height:100%;background:'+col+';width:'+Math.min(pct,100)+'%"></div></div></div>'; }
+    var hq = '<h3 style="margin:0 0 10px;font-size:14px">Качество выручки</h3>';
+    hq += qrow('NRR (3 мес.)', s.nrr_pct==null?'—':s.nrr_pct+'%', nrrColor);
+    hq += qrow('Churn (мес.)', s.churn_rate_pct==null?'—':s.churn_rate_pct+'%', churnColor);
+    hq += qrow('ARPU', _fmtRub(s.arpu), null);
+    hq += qrow('Активных клиентов', String(s.active_clients||0), null);
+    hq += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">';
+    hq += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Концентрация выручки</div>';
+    hq += cbar('Top-1'+(con.top1_name?(' ('+esc(con.top1_name)+')'):''), con.top1_pct, con.top1_pct>=50?'#E04141':con.top1_pct>=35?'#F0A533':'#3B9DD8');
+    hq += cbar('Top-3', con.top3_pct, '#3B9DD8');
+    hq += cbar('Top-5', con.top5_pct, '#1D9E75');
+    hq += '</div>';
+    q.innerHTML = hq;
+  }
+  // Flow: new / churned / debtors
+  var flow = document.getElementById('newFinFlow');
+  if(flow){
+    var clients = currentData.clients||[];
+    var debtors = clients.filter(function(c){return (c.balance||0)<-10;}).sort(function(a,b){return (a.balance||0)-(b.balance||0);}).slice(0,6);
+    function panel(title, color, countLabel, rowsHtml, empty){
+      return '<div class="analytics-card" style="margin:0">' +
+        '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px">'+title+'</div>' +
+        '<div style="font-size:24px;font-weight:700;color:'+color+';margin-bottom:10px">'+countLabel+'</div>' +
+        (rowsHtml || ('<div style="font-size:11px;color:var(--text-3)">'+empty+'</div>')) + '</div>';
+    }
+    var nw = (d.new||[]);
+    var nwRows = nw.slice(0,6).map(function(x){ return _ncListRow(esc(x.name), _fmtRub(x.mrr), 'var(--success)'); }).join('');
+    var ch = (d.churned||[]);
+    var chRows = ch.slice(0,6).map(function(x){ return _ncListRow(esc(x.name), _fmtRub(x.last_mrr), 'var(--text-2)'); }).join('');
+    var dbRows = debtors.map(function(c){ return _ncListRow(esc(c.name), _fmtRub(c.balance), 'var(--danger)'); }).join('');
+    flow.innerHTML =
+      panel('➕ Новые клиенты', 'var(--success)', '+'+nw.length, nwRows, 'нет новых в этом месяце') +
+      panel('➖ Ушли (churned)', ch.length?'var(--danger)':'var(--success)', String(ch.length), chRows, '✓ никто не ушёл') +
+      panel('💸 Должники', debtors.length?'var(--danger)':'var(--success)', String(debtors.length), dbRows, '✓ все в плюсе');
+  }
+  // Trend chart
+  setTimeout(function(){
+    var cv = document.getElementById('newFinTrendCanvas');
+    if(!cv || !window.Chart) return;
+    if(window._newFinTrendChart){ try{window._newFinTrendChart.destroy();}catch(_){} window._newFinTrendChart=null; }
+    var cc = getChartColors();
+    window._newFinTrendChart = newChartSafe(cv, {
+      type:'bar',
+      data:{ labels:(d.trend||[]).map(function(t){return t.month;}),
+        datasets:[
+          {label:'per_gb', data:(d.trend||[]).map(function(t){return t.per_gb||0;}), backgroundColor:'#3B9DD8', stack:'a'},
+          {label:'per_modem', data:(d.trend||[]).map(function(t){return t.per_modem||0;}), backgroundColor:'#1D9E75', stack:'a'}
+        ]},
+      options:{responsive:true,maintainAspectRatio:false,
+        plugins:{legend:{position:'top',labels:{color:cc.text,font:{size:10}}},
+          tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.parsed.y||0).toLocaleString('ru-RU')+' ₽';}}}},
+        scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9}},grid:{display:false}},
+          y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid}}}}
+    });
+  }, 30);
+}
+function renderNewFinClients(){
+  var el = document.getElementById('newFinClients'); if(!el) return;
+  var d = window._newFinData;
+  if(!d){ el.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:8px">Финансовые данные ещё загружаются…</div>'; return; }
+  var rows = (d.per_client||[]).filter(function(p){return !(p.mrr===0 && p.mrr_prev===0 && !p.balance);});
+  if(!rows.length){ el.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:8px">Нет данных</div>'; return; }
+  var h = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text-2)"><th style="padding:6px 8px;text-align:left">Клиент</th><th style="padding:6px 8px;text-align:left">Тариф</th><th style="padding:6px 8px;text-align:right">MRR</th><th style="padding:6px 8px;text-align:right">Δ M/M</th><th style="padding:6px 8px;text-align:right">% MRR</th><th style="padding:6px 8px;text-align:right">Баланс</th></tr></thead><tbody>';
+  rows.forEach(function(p){
+    var pausedTag = p.paused?' <span style="font-size:9px;background:var(--warning);color:#fff;padding:1px 5px;border-radius:8px">пауза</span>':'';
+    var deltaCol = p.mrr_delta_pct==null?'var(--text-3)':p.mrr_delta_pct>=0?'var(--success)':'var(--danger)';
+    var deltaStr = p.mrr_delta_pct==null?'—':((p.mrr_delta_pct>0?'+':'')+p.mrr_delta_pct+'%');
+    var tariffStr = p.billingType==='per_modem'?(p.price+'₽/мес·мод'):(p.price+'₽/ГБ');
+    var balCol = p.balance<0?'var(--danger)':'var(--text-1)';
+    h += '<tr style="border-top:1px solid var(--border)">' +
+      '<td style="padding:5px 8px;font-weight:500">'+esc(p.name)+pausedTag+'</td>' +
+      '<td style="padding:5px 8px;color:var(--text-2)">'+tariffStr+'</td>' +
+      '<td style="padding:5px 8px;text-align:right;font-weight:600">'+_fmtRub(p.mrr)+'</td>' +
+      '<td style="padding:5px 8px;text-align:right;color:'+deltaCol+'">'+deltaStr+'</td>' +
+      '<td style="padding:5px 8px;text-align:right">'+(p.share_pct!=null?p.share_pct+'%':'—')+'</td>' +
+      '<td style="padding:5px 8px;text-align:right;color:'+balCol+'">'+_fmtRub(p.balance)+'</td></tr>';
+  });
+  h += '</tbody></table>';
+  el.innerHTML = h;
+}
+
+// ── 4b. Здоровье парка (modem_health) ──────────────────────────────
+function loadNewFleetHealth(){
+  fetch(API + '/api/analytics/modem_health?days=7', {headers:{'X-Auth-Token':authToken}})
+    .then(function(r){return r.json();})
+    .then(function(d){ if(d.error){ var el=document.getElementById('newFleetHealth'); if(el) el.innerHTML='<div style="color:var(--danger);font-size:12px">'+esc(d.error)+'</div>'; return; } renderNewFleetHealth(d); })
+    .catch(function(e){ var el=document.getElementById('newFleetHealth'); if(el) el.innerHTML='<div style="color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>'; });
+}
+function _ncHealthReason(m){
+  if(m.error_pct!=null && m.error_pct>10) return 'много ошибок ('+m.error_pct+'%)';
+  if(m.uptime_pct!=null && m.uptime_pct<90) return 'низкий аптайм ('+m.uptime_pct+'%)';
+  if(m.latency_ms!=null && m.latency_ms>2000) return 'медленный ('+fmtMs(m.latency_ms)+')';
+  if(m.error_pct!=null && m.error_pct>3) return 'ошибки ('+m.error_pct+'%)';
+  return 'низкий скоринг';
+}
+function renderNewFleetHealth(d){
+  var el = document.getElementById('newFleetHealth'); if(!el) return;
+  var s = d.summary||{};
+  var total = s.total||0, good=s.good||0, warn=s.warn||0, bad=s.bad||0;
+  var denom = total||1;
+  var h = '<div style="display:flex;gap:14px;margin-bottom:10px">' +
+    '<span style="font-size:12px"><b style="color:var(--success);font-size:16px">'+good+'</b> здоровых</span>' +
+    '<span style="font-size:12px"><b style="color:var(--warning);font-size:16px">'+warn+'</b> внимание</span>' +
+    '<span style="font-size:12px"><b style="color:var(--danger);font-size:16px">'+bad+'</b> проблемных</span></div>';
+  h += '<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin-bottom:14px;background:var(--bg-3)">';
+  if(good) h += '<div style="width:'+(good/denom*100)+'%;background:var(--success)"></div>';
+  if(warn) h += '<div style="width:'+(warn/denom*100)+'%;background:var(--warning)"></div>';
+  if(bad) h += '<div style="width:'+(bad/denom*100)+'%;background:var(--danger)"></div>';
+  h += '</div>';
+  var worst = (d.modems||[]).slice().filter(function(m){return m.status!=='good';}).sort(function(a,b){return a.health_score-b.health_score;}).slice(0,6);
+  if(worst.length){
+    h += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Худшие модемы — что чинить</div>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>';
+    worst.forEach(function(m){
+      var col = m.status==='warn'?'var(--warning)':'var(--danger)';
+      h += '<tr style="border-top:1px solid var(--border)">' +
+        '<td style="padding:5px 6px;font-weight:600">'+esc(m.nick)+'</td>' +
+        '<td style="padding:5px 6px;color:var(--text-2)">'+esc(m.server_name||'')+'</td>' +
+        '<td style="padding:5px 6px;color:var(--text-2)">'+esc(_ncHealthReason(m))+'</td>' +
+        '<td style="padding:5px 6px;text-align:right">'+(m.uptime_pct!=null?m.uptime_pct+'%':'—')+'</td>' +
+        '<td style="padding:5px 6px;text-align:right">'+fmtMs(m.latency_ms)+'</td>' +
+        '<td style="padding:5px 6px;text-align:center"><span style="display:inline-block;padding:2px 9px;border-radius:10px;background:'+col+';color:#fff;font-weight:700">'+m.health_score+'</span></td>' +
+        '</tr>';
+    });
+    h += '</tbody></table>';
+  } else {
+    h += '<div style="color:var(--success);font-size:12px;padding:6px">✓ Все модемы здоровы</div>';
+  }
+  el.innerHTML = h;
+}
+
+// ── 3c. Сверка биллинга (reconciliation) ───────────────────────────
+function loadNewReconciliation(){
+  if(window._newReconLoaded) return;     // once per render (eager + lazy share this)
+  window._newReconLoaded = true;
+  var el = document.getElementById('newReconBody');
+  fetch(API + '/api/admin/billing/reconciliation', {headers:{'X-Auth-Token':authToken}})
+    .then(function(r){return r.json();})
+    .then(function(d){
+      var clients = d.clients||[];
+      var probs = clients.filter(function(c){return c.status && c.status!=='ok';});
+      var chip = document.getElementById('newReconChip');
+      if(chip && probs.length){
+        chip.innerHTML = '<div style="flex:1;min-width:155px;background:var(--bg-1);border:1px solid var(--border);border-left:3px solid var(--warning);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px"><span style="font-size:22px">🧾</span><div><div style="font-size:22px;font-weight:700;color:var(--warning);line-height:1">'+probs.length+'</div><div style="font-size:10px;color:var(--text-2);margin-top:2px">расхождений биллинга</div></div></div>';
+      }
+      if(!el) return;
+      if(!probs.length){ el.innerHTML='<div style="color:var(--success);font-size:12px;padding:8px">✓ Расхождений нет — весь отданный трафик выставлен в счёт ('+clients.length+' клиентов проверено)</div>'; return; }
+      var label = {mismatch:'расхождение по ГБ', missing_billing:'не выставлен счёт', missing_traffic:'счёт без трафика'};
+      var hh = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text-2)"><th style="padding:6px 8px;text-align:left">Клиент</th><th style="padding:6px 8px;text-align:left">Тариф</th><th style="padding:6px 8px;text-align:left">Проблема</th><th style="padding:6px 8px;text-align:right">Дней без счёта</th></tr></thead><tbody>';
+      probs.forEach(function(c){
+        var col = c.status==='missing_billing'?'var(--danger)':'var(--warning)';
+        hh += '<tr style="border-top:1px solid var(--border)">' +
+          '<td style="padding:5px 8px;font-weight:600">'+esc(c.client_name)+'</td>' +
+          '<td style="padding:5px 8px;color:var(--text-2)">'+esc(c.billing_type||'')+'</td>' +
+          '<td style="padding:5px 8px;color:'+col+'">'+esc(label[c.status]||c.status)+'</td>' +
+          '<td style="padding:5px 8px;text-align:right">'+((c.missing_days&&c.missing_days.length)||0)+'</td></tr>';
+      });
+      hh += '</tbody></table>';
+      el.innerHTML = hh;
+    })
+    .catch(function(e){ window._newReconLoaded=false; if(el) el.innerHTML='<div style="color:var(--danger);font-size:12px;padding:8px">Ошибка: '+esc(e.message)+'</div>'; });
 }
 
 // ── Clients table (with revenue + balance columns merged) ─────────
@@ -7261,59 +7524,9 @@ function renderNewClientTable(d){
   el.innerHTML = h;
 }
 
-// ── Финансы mini (top debtors + revenue trend) ───────────────────
-function renderNewFinPanel(d){
-  var el = document.getElementById('newFinPanel');
-  if(!el) return;
-  var charges = currentData.clientMonthCharges || {};
-  var totalRev = 0;
-  for(var id in charges) totalRev += charges[id] || 0;
-  // Top 3 debtors
-  var debtors = (currentData.clients||[]).filter(function(c){return (c.balance||0) < -10})
-    .sort(function(a, b){return (a.balance||0) - (b.balance||0)}).slice(0, 5);
-  // Top 5 by revenue
-  var byRevenue = (currentData.clients||[])
-    .map(function(c){return {c:c, rev: charges[c.id]||0}})
-    .filter(function(x){return x.rev > 0})
-    .sort(function(a, b){return b.rev - a.rev}).slice(0, 5);
-
-  var h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:16px">';
-
-  // Left: revenue summary + top earners
-  h += '<div>';
-  h += '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px">Выручка MTD</div>';
-  h += '<div style="font-size:26px;font-weight:700;color:var(--accent);margin-bottom:14px">'+Math.round(totalRev).toLocaleString('ru-RU')+' ₽</div>';
-  h += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px">Топ-5 по выручке</div>';
-  byRevenue.forEach(function(x){
-    var pct = totalRev > 0 ? (x.rev / totalRev * 100) : 0;
-    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:12px">' +
-      '<div style="flex:1;display:flex;align-items:center;gap:6px;min-width:0">' +
-      '<div style="flex:1;height:6px;background:var(--bg-3);border-radius:3px;position:relative;overflow:hidden;min-width:60px"><div style="position:absolute;left:0;top:0;height:100%;width:'+pct.toFixed(0)+'%;background:var(--accent);border-radius:3px"></div></div>' +
-      '<span style="white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex-shrink:0;max-width:140px">'+esc(x.c.name)+'</span>' +
-      '</div>' +
-      '<span style="font-family:var(--font-mono);font-size:11px;color:var(--text-2);white-space:nowrap">'+Math.round(x.rev).toLocaleString('ru-RU')+' ₽</span>' +
-      '</div>';
-  });
-  if(!byRevenue.length) h += '<div style="font-size:11px;color:var(--text-3)">Нет данных</div>';
-  h += '</div>';
-
-  // Right: debtors
-  h += '<div>';
-  h += '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px">Должники</div>';
-  h += '<div style="font-size:26px;font-weight:700;color:'+(debtors.length?'var(--danger)':'var(--success)')+';margin-bottom:14px">'+debtors.length+' клиент'+(debtors.length===1?'':'ов')+'</div>';
-  h += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px">С наибольшим долгом</div>';
-  debtors.forEach(function(c){
-    h += '<div style="display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:12px">' +
-      '<span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">'+esc(c.name)+'</span>' +
-      '<span style="font-family:var(--font-mono);font-size:11px;color:var(--danger);font-weight:600;white-space:nowrap">'+Math.round(c.balance).toLocaleString('ru-RU')+' ₽</span>' +
-      '</div>';
-  });
-  if(!debtors.length) h += '<div style="font-size:11px;color:var(--success)">✓ Все клиенты в плюсе</div>';
-  h += '</div>';
-
-  h += '</div>';
-  el.innerHTML = h;
-}
+// (renderNewFinPanel removed — superseded by renderNewFinance / renderNewFinClients,
+//  which use the full /api/admin/finance_dashboard payload instead of the
+//  in-memory clientMonthCharges snapshot.)
 
 // ── Heatmap (parallel to loadHeatmapData, writes to new IDs) ────
 function setNewHmView(view){

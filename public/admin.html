@@ -334,60 +334,66 @@
        top hosts · matrix. Lazy-loaded on first expand. Element IDs are
        suffixed «New» so the old tabs' renderers don't collide. -->
   <div class="acc-sub-content" id="acc-new" style="padding:14px 20px">
-    <!-- 1. KPI summary row -->
-    <div class="analytics-card" style="margin-bottom:14px;padding:16px 20px">
-      <div id="newKpiRow" style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px">
-        <div style="text-align:center;color:var(--text-3);font-size:11px">Загрузка...</div>
+    <!-- Header -->
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+      <div>
+        <h2 style="margin:0;font-size:19px">⚡ Командный центр</h2>
+        <div style="font-size:11px;color:var(--text-3);margin-top:2px">Бизнес · парк · трафик — один экран для решений</div>
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <button class="btn btn-sm" onclick="openFinanceCostsModal()" style="font-size:11px">⚙ Затраты</button>
+        <button class="btn btn-sm" onclick="renderAccNew()" style="font-size:11px">⟳ Обновить</button>
       </div>
     </div>
 
-    <!-- 2. Hourly heatmap -->
-    <div class="analytics-card" style="margin-bottom:14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
-        <h3 style="margin:0">Почасовой трафик <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">GMT+3 (МСК)</span></h3>
-        <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
-          <button onclick="setNewHmView('country')"  id="newHmTabCountry"  class="new-hm-btn active">По странам</button>
-          <button onclick="setNewHmView('operator')" id="newHmTabOperator" class="new-hm-btn">По операторам</button>
-          <button onclick="setNewHmView('client')"   id="newHmTabClient"   class="new-hm-btn">По клиентам</button>
-        </div>
-      </div>
-      <div id="newHmSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
-      <div id="newHmGrid" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>
+    <!-- 1. ПУЛЬС БИЗНЕСА -->
+    <div class="analytics-card" style="margin-bottom:12px;padding:16px 20px">
+      <div id="newPulseRow" style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px">
+        <div style="grid-column:1/-1;text-align:center;color:var(--text-3);font-size:11px">Загрузка пульса бизнеса…</div>
       </div>
     </div>
 
-    <!-- 3. Clients (with revenue + balance) -->
-    <div class="analytics-card" style="margin-bottom:14px">
-      <h3 style="margin:0 0 10px">Клиенты</h3>
-      <div id="newClientTable"></div>
-    </div>
+    <!-- 2. ТРЕБУЕТ ВНИМАНИЯ -->
+    <div id="newActionRow" style="margin-bottom:18px"></div>
 
-    <!-- 4. Daily consumption chart -->
-    <div class="analytics-card" style="margin-bottom:14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
-        <h3 style="margin:0">Потребление по дням</h3>
-        <div style="font-size:11px;color:var(--text-3)" id="newDailyMonthLabel">текущий месяц</div>
+    <!-- ───── ФИНАНСЫ ───── -->
+    <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px"><span style="font-size:12px;font-weight:700;color:#3B9DD8;text-transform:uppercase;letter-spacing:.05em">💰 Финансы</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+
+    <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px" id="newFinTopGrid">
+      <div class="analytics-card" style="margin:0">
+        <h3 style="margin:0 0 10px;font-size:14px">MRR — последние 12 месяцев</h3>
+        <div style="height:230px"><canvas id="newFinTrendCanvas"></canvas></div>
       </div>
-      <div style="height:280px"><canvas id="newDailyCanvas"></canvas></div>
-    </div>
-
-    <!-- 5. Финансы mini -->
-    <div class="analytics-card" style="margin-bottom:18px">
-      <h3 style="margin:0 0 10px">Финансы (mini)</h3>
-      <div id="newFinPanel"></div>
-    </div>
-
-    <!-- Collapsibles: lazy-loaded on first toggle -->
-    <details class="acc-expand" data-section="latency">
-      <summary><span class="acc-expand-icon">📊</span>Распределение задержек</summary>
-      <div class="acc-expand-body">
-        <div style="height:300px;padding:0 4px"><canvas id="newLatencyCanvas"></canvas></div>
+      <div class="analytics-card" style="margin:0" id="newFinQuality">
+        <div style="color:var(--text-3);font-size:11px">Загрузка…</div>
       </div>
+    </div>
+
+    <div id="newFinFlow" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px"></div>
+
+    <details class="acc-expand" data-section="finclients">
+      <summary><span class="acc-expand-icon">👥</span>Клиенты по доходности</summary>
+      <div class="acc-expand-body"><div id="newFinClients"><div style="color:var(--text-3);font-size:12px;padding:8px">Разверните…</div></div></div>
+    </details>
+    <details class="acc-expand" data-section="recon">
+      <summary><span class="acc-expand-icon">🧾</span>Сверка биллинга <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">(отдали ГБ vs выставили счёт)</span></summary>
+      <div class="acc-expand-body"><div id="newReconBody"><div style="color:var(--text-3);font-size:12px;padding:8px">Разверните для проверки…</div></div></div>
     </details>
 
+    <!-- ───── ПАРК ───── -->
+    <div style="display:flex;align-items:center;gap:10px;margin:20px 0 12px"><span style="font-size:12px;font-weight:700;color:#1D9E75;text-transform:uppercase;letter-spacing:.05em">🛰 Парк и инфраструктура</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+
+    <div class="analytics-card" style="margin-bottom:14px">
+      <div id="newFleetServers" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px"><div style="color:var(--text-3);font-size:12px">Загрузка…</div></div>
+    </div>
+
+    <div class="analytics-card" style="margin-bottom:14px">
+      <h3 style="margin:0 0 10px;font-size:14px">Здоровье парка <span style="font-size:10px;font-weight:400;color:var(--text-3)">за 7 дней</span></h3>
+      <div id="newFleetHealth"><div style="color:var(--text-3);font-size:12px">Загрузка…</div></div>
+    </div>
+
     <details class="acc-expand" data-section="infra">
-      <summary><span class="acc-expand-icon">🔧</span>Инфраструктура (ротации · IP · ёмкость)</summary>
+      <summary><span class="acc-expand-icon">🔧</span>Ротации · IP · ёмкость</summary>
       <div class="acc-expand-body">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
           <span style="font-size:11px;color:var(--text-2)">Период:</span>
@@ -403,6 +409,43 @@
         <div id="newInfraCapacity"></div>
       </div>
     </details>
+    <details class="acc-expand" data-section="latency">
+      <summary><span class="acc-expand-icon">📊</span>Распределение задержек</summary>
+      <div class="acc-expand-body">
+        <div style="height:300px;padding:0 4px"><canvas id="newLatencyCanvas"></canvas></div>
+      </div>
+    </details>
+
+    <!-- ───── ТРАФИК ───── -->
+    <div style="display:flex;align-items:center;gap:10px;margin:20px 0 12px"><span style="font-size:12px;font-weight:700;color:#965AC8;text-transform:uppercase;letter-spacing:.05em">📊 Трафик</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+
+    <div class="analytics-card" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">Почасовой трафик <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">GMT+3 (МСК)</span></h3>
+        <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
+          <button onclick="setNewHmView('country')"  id="newHmTabCountry"  class="new-hm-btn active">По странам</button>
+          <button onclick="setNewHmView('operator')" id="newHmTabOperator" class="new-hm-btn">По операторам</button>
+          <button onclick="setNewHmView('client')"   id="newHmTabClient"   class="new-hm-btn">По клиентам</button>
+        </div>
+      </div>
+      <div id="newHmSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+      <div id="newHmGrid" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
+        <div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>
+      </div>
+    </div>
+
+    <div class="analytics-card" style="margin-bottom:14px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">Потребление по дням</h3>
+        <div style="font-size:11px;color:var(--text-3)" id="newDailyMonthLabel">последние 30 дней</div>
+      </div>
+      <div style="height:280px"><canvas id="newDailyCanvas"></canvas></div>
+    </div>
+
+    <div class="analytics-card" style="margin-bottom:14px">
+      <h3 style="margin:0 0 10px">Клиенты — трафик</h3>
+      <div id="newClientTable"></div>
+    </div>
 
     <details class="acc-expand" data-section="resources">
       <summary><span class="acc-expand-icon">📈</span>Топ ресурсов <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">(домены)</span></summary>
@@ -414,7 +457,6 @@
         <div id="newTopHostsList"></div>
       </div>
     </details>
-
     <details class="acc-expand" data-section="matrix">
       <summary><span class="acc-expand-icon">🗂</span>Матрица трафика <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">(модем × клиент)</span></summary>
       <div class="acc-expand-body">
