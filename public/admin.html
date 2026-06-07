@@ -347,17 +347,15 @@
     </div>
 
     <!-- 1. ПУЛЬС БИЗНЕСА -->
-    <div class="analytics-card" style="margin-bottom:12px;padding:16px 20px">
-      <div id="newPulseRow" style="display:grid;grid-template-columns:repeat(6,1fr);gap:14px">
-        <div style="grid-column:1/-1;text-align:center;color:var(--text-3);font-size:11px">Загрузка пульса бизнеса…</div>
-      </div>
+    <div class="widget-grid" id="newPulseRow" style="grid-template-columns:repeat(6,1fr);padding:0;margin-bottom:12px">
+      <div style="grid-column:1/-1;text-align:center;color:var(--text-3);font-size:11px;padding:14px">Загрузка пульса бизнеса…</div>
     </div>
 
     <!-- 2. ТРЕБУЕТ ВНИМАНИЯ -->
     <div id="newActionRow" style="margin-bottom:18px"></div>
 
     <!-- ───── ФИНАНСЫ ───── -->
-    <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px"><span style="font-size:12px;font-weight:700;color:#3B9DD8;text-transform:uppercase;letter-spacing:.05em">💰 Финансы</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+    <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px"><span style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">💰 Финансы</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
 
     <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px" id="newFinTopGrid">
       <div class="analytics-card" style="margin:0">
@@ -381,11 +379,9 @@
     </details>
 
     <!-- ───── ПАРК ───── -->
-    <div style="display:flex;align-items:center;gap:10px;margin:20px 0 12px"><span style="font-size:12px;font-weight:700;color:#1D9E75;text-transform:uppercase;letter-spacing:.05em">🛰 Парк и инфраструктура</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+    <div style="display:flex;align-items:center;gap:10px;margin:20px 0 12px"><span style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">🛰 Парк и инфраструктура</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
 
-    <div class="analytics-card" style="margin-bottom:14px">
-      <div id="newFleetServers" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px"><div style="color:var(--text-3);font-size:12px">Загрузка…</div></div>
-    </div>
+    <div id="newFleetServers" class="widget-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));padding:0;margin-bottom:14px"><div style="grid-column:1/-1;color:var(--text-3);font-size:12px;padding:6px">Загрузка…</div></div>
 
     <div class="analytics-card" style="margin-bottom:14px">
       <h3 style="margin:0 0 10px;font-size:14px">Здоровье парка <span style="font-size:10px;font-weight:400;color:var(--text-3)">за 7 дней</span></h3>
@@ -417,7 +413,7 @@
     </details>
 
     <!-- ───── ТРАФИК ───── -->
-    <div style="display:flex;align-items:center;gap:10px;margin:20px 0 12px"><span style="font-size:12px;font-weight:700;color:#965AC8;text-transform:uppercase;letter-spacing:.05em">📊 Трафик</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+    <div style="display:flex;align-items:center;gap:10px;margin:20px 0 12px"><span style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">📊 Трафик</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
 
     <div class="analytics-card" style="margin-bottom:14px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">

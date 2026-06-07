@@ -7201,12 +7201,13 @@ function onNewSectionToggle(ev){
   el.dataset.loaded = '1';
 }
 
-// ── 1. Пульс бизнеса (hero KPI) ────────────────────────────────────
+// ── 1. Пульс бизнеса (hero KPI) — Трафик «.widget» style ───────────
 function _ncPulseCard(label, value, sub, color){
-  return '<div style="text-align:center">' +
-    '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px;font-weight:500">'+esc(label)+'</div>' +
-    '<div style="font-size:22px;font-weight:700;color:'+(color||'var(--text-0)')+';line-height:1.2">'+value+'</div>' +
-    (sub?'<div style="font-size:10px;margin-top:3px">'+sub+'</div>':'') +
+  var vc = (color && color !== 'var(--text-0)') ? ' style="color:'+color+'"' : '';
+  return '<div class="widget">' +
+    '<div class="widget-label">'+esc(label)+'</div>' +
+    '<div class="widget-value"'+vc+'>'+value+'</div>' +
+    (sub?'<div class="widget-sub">'+sub+'</div>':'') +
     '</div>';
 }
 function renderNewPulse(fin){
@@ -7237,49 +7238,50 @@ function renderNewPulse(fin){
     _ncPulseCard('Прогноз EOM', _fmtRub(s.forecast_eom), '<span style="color:var(--text-3)">к концу месяца</span>', 'var(--text-0)');
 }
 
-// ── 2. Требует внимания (action center) ────────────────────────────
-function _ncChip(icon, label, count, sub, color){
-  return '<div style="flex:1;min-width:155px;background:var(--bg-1);border:1px solid var(--border);border-left:3px solid '+color+';border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px">' +
-    '<span style="font-size:22px;line-height:1">'+icon+'</span>' +
-    '<div><div style="font-size:22px;font-weight:700;color:'+color+';line-height:1">'+count+'</div>' +
-    '<div style="font-size:10px;color:var(--text-2);margin-top:2px">'+esc(label)+(sub?' · '+sub:'')+'</div></div></div>';
+// ── 2. Требует внимания (action center) — Трафик «probItem» style ──
+// Tinted pill rows like the «🔧 Проблемы инфраструктуры» card: colored dot +
+// label + count, green-bg when 0, red/orange-bg when there's something to act on.
+function _ncStatRow(label, count, sub, severity){
+  var n = count || 0;
+  var bg = n===0 ? 'var(--green-bg)' : severity==='danger' ? 'var(--red-bg)' : 'var(--orange-bg)';
+  var col = n===0 ? 'var(--success)' : severity==='danger' ? 'var(--danger)' : 'var(--warning)';
+  return '<div style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:6px;background:'+bg+';font-size:11px">' +
+    '<span style="width:8px;height:8px;border-radius:50%;flex-shrink:0;background:'+col+'"></span>' +
+    '<span style="flex:1;color:var(--text-2)">'+label+(sub?' <span style="color:var(--text-3)">· '+sub+'</span>':'')+'</span>' +
+    '<span style="font-weight:700;color:'+col+';font-size:13px">'+n+'</span></div>';
 }
 function renderNewActionCenter(d){
   var el = document.getElementById('newActionRow'); if(!el) return;
   var fleet = currentData.fleet || {};
   var clients = currentData.clients || [];
-  var items = [];
   var disc = fleet.disconnected || 0;
-  if(disc>0) items.push(_ncChip('📴','Модемов отключено', disc, 'более 10 мин', 'var(--danger)'));
   var issues = (currentData.proxyIssues || []).length;
-  if(issues>0) items.push(_ncChip('🐌','Сбоят прокси', issues, 'задержки/ошибки', 'var(--warning)'));
-  var debtors = clients.filter(function(c){return (c.balance||0) < -10});
-  if(debtors.length>0){
-    var debtSum = debtors.reduce(function(a,c){return a+(c.balance||0);},0);
-    items.push(_ncChip('💸','Клиентов в долгу', debtors.length, _fmtRub(debtSum), 'var(--danger)'));
-  }
+  var debtors = clients.filter(function(c){return (c.balance||0) < -10;});
+  var debtSum = debtors.reduce(function(a,c){return a+(c.balance||0);},0);
   var paused = clients.filter(function(c){return c.paused;}).length;
-  if(paused>0) items.push(_ncChip('⏸','На паузе', paused, null, 'var(--text-2)'));
-  var h = '<div style="display:flex;gap:10px;flex-wrap:wrap">';
-  if(!items.length){
-    h += '<div style="flex:1;background:var(--bg-1);border:1px solid var(--border);border-left:3px solid var(--success);border-radius:8px;padding:12px 16px;display:flex;align-items:center;gap:10px"><span style="font-size:20px">✅</span><span style="color:var(--success);font-weight:600;font-size:13px">Всё спокойно — событий, требующих внимания, нет</span></div>';
-  } else {
-    h += items.join('');
-  }
-  h += '<span id="newReconChip"></span>';   // filled async by loadNewReconciliation
-  h += '</div>';
+  var allOk = !disc && !issues && !debtors.length && !paused;
+  var h = '<div class="analytics-card" style="margin-bottom:18px">';
+  h += '<div style="font-size:12px;font-weight:600;color:var(--text-0);margin-bottom:8px">⚠ Требует внимания'+(allOk?' <span style="color:var(--success);font-weight:500;font-size:11px">· всё спокойно</span>':'')+'</div>';
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px">';
+  h += _ncStatRow('📴 Модемов отключено >10м', disc, null, 'danger');
+  h += _ncStatRow('🐌 Сбоят прокси', issues, null, 'warn');
+  h += _ncStatRow('💸 Клиентов в долгу', debtors.length, debtors.length?_fmtRub(debtSum):null, 'danger');
+  h += _ncStatRow('⏸ На паузе', paused, null, 'warn');
+  h += '<div id="newReconChip"></div>';   // filled async by loadNewReconciliation
+  h += '</div></div>';
   el.innerHTML = h;
 }
 
-// ── 4a. Парк по серверам ───────────────────────────────────────────
+// ── 4a. Парк по серверам — Трафик «.widget» style ──────────────────
 function _ncServerCard(name, working, total, disc, primary){
   working = working||0; total = total||0; disc = disc||0;
   if(total<working) total=working;
   var col = disc===0 ? 'var(--success)' : 'var(--warning)';
-  return '<div style="background:'+(primary?'var(--bg-2)':'var(--bg-1)')+';border:1px solid var(--border);border-radius:8px;padding:12px 14px">' +
-    '<div style="font-size:11px;color:var(--text-2);font-weight:600;margin-bottom:4px">'+esc(name)+'</div>' +
-    '<div style="font-size:20px;font-weight:700;color:'+col+'">'+working+'<span style="font-size:13px;color:var(--text-3)">/'+total+'</span></div>' +
-    '<div style="font-size:10px;margin-top:3px;color:'+(disc>0?'var(--danger)':'var(--text-3)')+'">'+(disc>0?('⚠ '+disc+' отключено'):'все на связи')+'</div>' +
+  var sub = disc>0 ? '<span style="color:var(--danger)">⚠ '+disc+' отключено</span>' : 'все на связи';
+  return '<div class="widget">' +
+    '<div class="widget-label">'+esc(name)+'</div>' +
+    '<div class="widget-value" style="color:'+col+'">'+working+'<span style="font-size:13px;color:var(--text-3)">/'+total+'</span></div>' +
+    '<div class="widget-sub">'+sub+'</div>' +
     '</div>';
 }
 function renderNewFleetServers(){
@@ -7339,7 +7341,7 @@ function renderNewFinance(d){
     var debtors = clients.filter(function(c){return (c.balance||0)<-10;}).sort(function(a,b){return (a.balance||0)-(b.balance||0);}).slice(0,6);
     function panel(title, color, countLabel, rowsHtml, empty){
       return '<div class="analytics-card" style="margin:0">' +
-        '<div style="font-size:11px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;font-weight:600;margin-bottom:6px">'+title+'</div>' +
+        '<div style="font-size:12px;font-weight:600;color:var(--text-0);margin-bottom:8px">'+title+'</div>' +
         '<div style="font-size:24px;font-weight:700;color:'+color+';margin-bottom:10px">'+countLabel+'</div>' +
         (rowsHtml || ('<div style="font-size:11px;color:var(--text-3)">'+empty+'</div>')) + '</div>';
     }
@@ -7460,9 +7462,7 @@ function loadNewReconciliation(){
       var clients = d.clients||[];
       var probs = clients.filter(function(c){return c.status && c.status!=='ok';});
       var chip = document.getElementById('newReconChip');
-      if(chip && probs.length){
-        chip.innerHTML = '<div style="flex:1;min-width:155px;background:var(--bg-1);border:1px solid var(--border);border-left:3px solid var(--warning);border-radius:8px;padding:10px 14px;display:flex;align-items:center;gap:12px"><span style="font-size:22px">🧾</span><div><div style="font-size:22px;font-weight:700;color:var(--warning);line-height:1">'+probs.length+'</div><div style="font-size:10px;color:var(--text-2);margin-top:2px">расхождений биллинга</div></div></div>';
-      }
+      if(chip) chip.innerHTML = _ncStatRow('🧾 Расхождений биллинга', probs.length, null, 'warn');
       if(!el) return;
       if(!probs.length){ el.innerHTML='<div style="color:var(--success);font-size:12px;padding:8px">✓ Расхождений нет — весь отданный трафик выставлен в счёт ('+clients.length+' клиентов проверено)</div>'; return; }
       var label = {mismatch:'расхождение по ГБ', missing_billing:'не выставлен счёт', missing_traffic:'счёт без трафика'};
