@@ -42,8 +42,11 @@ describe('computeFleet', () => {
     expect(f.online).toBe(2);     // A + C are IS_ONLINE=yes
     expect(f.offline).toBe(1);    // B (in fleet via uptime, offline now)
     expect(f.online + f.offline).toBe(f.total);
-    expect(f.byServer.S1).toEqual({ total: 2, online: 1, offline: 1 });
-    expect(f.byServer.S2).toEqual({ total: 1, online: 1, offline: 0 });
+    // MD_B is offline 20h → disconnected (>10 min); working = total − disconnected.
+    expect(f.disconnected).toBe(1);
+    expect(f.working).toBe(2);
+    expect(f.byServer.S1).toEqual({ total: 2, online: 1, offline: 1, disconnected: 1, working: 1 });
+    expect(f.byServer.S2).toEqual({ total: 1, online: 1, offline: 0, disconnected: 0, working: 1 });
     // offlineList lists exactly the offline fleet modems (for the «Модем отключен» card).
     expect(f.offlineList.map(o => o.nick)).toEqual(['MD_B']);
     expect(f.offlineList[0].server).toBe('S1');
@@ -53,7 +56,7 @@ describe('computeFleet', () => {
     // A modem online in the live snapshot but with NO uptime row yet (brand-new).
     const live2 = live.concat([{ _server: 'S3', modem_details: { IMEI: 'S3_NEW', NICK: 'NEW1' }, net_details: { IS_ONLINE: 'yes' } }]);
     const f = computeFleet(meta, uptime, live2, { now: NOW });
-    expect(f.byServer.S3).toEqual({ total: 1, online: 1, offline: 0 });   // unioned into fleet
+    expect(f.byServer.S3).toEqual({ total: 1, online: 1, offline: 0, disconnected: 0, working: 1 });   // unioned into fleet
     expect(f.online).toBeLessThanOrEqual(f.total);
   });
 
@@ -62,7 +65,8 @@ describe('computeFleet', () => {
     const liveFlake = live.filter(m => m._server !== 'S2');
     const f = computeFleet(meta, uptime, liveFlake, { now: NOW });
     expect(f.total).toBe(3);                 // A, B, C still counted (uptime history)
-    expect(f.byServer.S2).toEqual({ total: 1, online: 0, offline: 1 });   // C now offline, not dropped
+    // C went offline only 5 min ago (server flake) → still «working», NOT disconnected.
+    expect(f.byServer.S2).toEqual({ total: 1, online: 0, offline: 1, disconnected: 0, working: 1 });
     expect(f.online).toBeLessThanOrEqual(f.total);
   });
 
@@ -93,6 +97,9 @@ describe('computeFleet', () => {
     expect(f.offlineList.map(o => o.nick).sort()).toEqual(['MD_X', 'MD_Y']);
     expect(f.disconnected).toBe(1);                                 // only the 30-min one crossed 10 min
     expect(f.disconnectedList.map(o => o.nick)).toEqual(['MD_Y']);
+    // working = total − disconnected: MD_X (3-min blip) still counts as working.
+    expect(f.working).toBe(1);
+    expect(f.byServer.S1).toEqual({ total: 2, online: 0, offline: 2, disconnected: 1, working: 1 });
   });
 
   it('disconnectedMs is configurable', () => {

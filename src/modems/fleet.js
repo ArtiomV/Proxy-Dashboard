@@ -77,6 +77,22 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
   // fires at — a transient one-poll blip stays out of both.
   out.disconnectedList = out.offlineList.filter(o => o.lastOnline && (now - o.lastOnline) >= disconnectedMs);
   out.disconnected = out.disconnectedList.length;
+
+  // `working` is the headline «Online: X/Y» count: modems that are up OR in a
+  // brief (<disconnectedMs) blip. It stays at `total` while the fleet is healthy
+  // and only drops when a modem is genuinely dark >10 min — i.e. it moves in
+  // lockstep with the «Модем отключен» card instead of flickering on every
+  // rotation/missed-poll. `working = total − disconnected` (≥ online).
+  for (const srv of Object.keys(out.byServer)) out.byServer[srv].disconnected = 0;
+  for (const o of out.disconnectedList) {
+    const b = out.byServer[o.server];
+    if (b) b.disconnected++;
+  }
+  for (const srv of Object.keys(out.byServer)) {
+    const b = out.byServer[srv];
+    b.working = b.total - b.disconnected;
+  }
+  out.working = out.total - out.disconnected;
   return out;
 }
 

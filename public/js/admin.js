@@ -769,7 +769,7 @@ function renderTable(){
     html+='<span style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--accent)">'+esc(srv)+'</span>';
     if(ci.name)html+='<span style="font-size:11px;color:var(--text-2)">'+esc(ci.name)+'</span>';
     if(ci.address)html+='<span style="font-size:11px;color:var(--text-2)">\u{1F4CD} '+esc(ci.address)+'</span>';
-    html+=(function(){var fb=(currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[srv])||null;var fOn=fb?fb.online:online;var fN=fb?fb.total:modems.length;if(fN<fOn)fN=fOn;return'<span style="font-size:11px;font-weight:600;color:'+(fOn>=fN?'var(--success)':'var(--warning)')+'" title="онлайн сейчас / активных модемов в парке">'+fOn+'/'+fN+' online</span>';})();
+    html+=(function(){var fb=(currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[srv])||null;var fOn=fb?((fb.working!=null)?fb.working:fb.online):online;var fN=fb?fb.total:modems.length;if(fN<fOn)fN=fOn;return'<span style="font-size:11px;font-weight:600;color:'+(fOn>=fN?'var(--success)':'var(--warning)')+'" title="рабочих (онлайн + блип <10 мин) / активных в парке. Падает только при реальном отключении >10 мин">'+fOn+'/'+fN+' online</span>';})();
     html+='<div style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" style="font-size:10px;padding:3px 8px" onclick="resetCompleteServer(\''+srv+'\')">Reset</button><button class="btn btn-sm btn-warning" style="font-size:10px;padding:3px 8px" onclick="rebootServer(\''+srv+'\')">Reboot</button></div>';
     html+='</div></td></tr>';
     // Stage 18.7: within each server group, sort by ONLINE→OFFLINE,
@@ -4479,12 +4479,17 @@ function updateHeaderStats(){
   // ratio is always consistent — online ≤ total. Fall back to the local live
   // counts only if `fleet` is missing, and clamp so we never show online>total.
   var _fl=currentData.fleet||{};
-  var _flOnline=(_fl.online!=null)?_fl.online:online;
+  // Headline counts «рабочих»: онлайн сейчас + короткие блипы (<10 мин). Число
+  // держится на parke и падает только при реальном отключении >10 мин, поэтому
+  // не моргает на каждой ротации. Мгновенный live-онлайн остаётся в подсказке.
+  var _flLive=(_fl.online!=null)?_fl.online:online;
+  var _flWorking=(_fl.working!=null)?_fl.working:_flLive;
   var _flTotal=(_fl.total!=null)?_fl.total:total;
-  if(_flTotal<_flOnline)_flTotal=_flOnline;
-  var _flOff=Math.max(0,_flTotal-_flOnline);
-  var title='Активных модемов: '+_flTotal+' · онлайн: '+_flOnline+' · офлайн: '+_flOff;
-  document.getElementById('headerStats').innerHTML='<div class="stat-badge" title="'+title+'">Online: <span style="color:var(--success)">'+_flOnline+'</span>/<span>'+_flTotal+'</span></div>';
+  if(_flTotal<_flWorking)_flTotal=_flWorking;
+  var _flDown=Math.max(0,_flTotal-_flWorking);          // отключено >10 мин
+  var _flBlip=Math.max(0,_flWorking-_flLive);           // молчат <10 мин (блип)
+  var title='В парке: '+_flTotal+' · рабочих: '+_flWorking+' (онлайн сейчас '+_flLive+', блипов '+_flBlip+') · отключено >10м: '+_flDown;
+  document.getElementById('headerStats').innerHTML='<div class="stat-badge" title="'+title+'">Online: <span style="color:var(--success)">'+_flWorking+'</span>/<span>'+_flTotal+'</span></div>';
 }
 function startAutoRefresh(){if(autoRefreshTimer)clearInterval(autoRefreshTimer);autoRefreshTimer=setInterval(loadData,60000)}
 
@@ -4530,7 +4535,7 @@ function loadServersList(){
       var _liveOnline=0,_liveCount=0;
       for(var imei in mm){var m=mm[imei];if(m.server===s.name){_liveCount++;if(m.isOnline)_liveOnline++}}
       var _fb=currentData&&currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[s.name];
-      var onlineCount=_fb?_fb.online:_liveOnline;
+      var onlineCount=_fb?((_fb.working!=null)?_fb.working:_fb.online):_liveOnline;
       var modemCount=_fb?_fb.total:_liveCount;
       if(modemCount<onlineCount)modemCount=onlineCount;
       var isOnline=onlineCount>0;
@@ -7206,7 +7211,7 @@ function renderNewKpi(d){
       '</div>';
   }
   el.innerHTML =
-    (function(){var _f=currentData.fleet||{};var _o=(_f.online!=null)?_f.online:d.totalOnline;var _t=(_f.total!=null)?_f.total:d.totalModems;if(_t<_o)_t=_o;return kpi('Online', _o+'/'+_t, 'модемов', _o>=_t?'var(--success)':'var(--warning)');})() +
+    (function(){var _f=currentData.fleet||{};var _o=(_f.working!=null)?_f.working:((_f.online!=null)?_f.online:d.totalOnline);var _t=(_f.total!=null)?_f.total:d.totalModems;if(_t<_o)_t=_o;return kpi('Online', _o+'/'+_t, 'модемов', _o>=_t?'var(--success)':'var(--warning)');})() +
     kpi('Сегодня', fmtGbShort(todayBytes), 'трафик') +
     kpi('Месяц', fmtGbShort(monBytes), 'трафик') +
     kpi('Выручка MTD', Math.round(revenue).toLocaleString('ru-RU')+' ₽', null, 'var(--accent)') +
