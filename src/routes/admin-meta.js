@@ -65,39 +65,11 @@ module.exports = function createAdminMetaRouter(deps) {
         return res.status(404).json({ error: 'Modem not found in known_modems', server_name: serverName, port_id: portId });
       }
 
-      // Safety gate: refuse to delete a modem that ProxySmart is currently
-      // reporting as alive on its server. The whole point of this endpoint
-      // is to remove ghosts — never a working modem.
-      let isLive = false;
-      try {
-        const allData = await fetchAllServersDataCached();
-        const srvData = (allData || []).find(d => d.serverName === serverName);
-        if (srvData) {
-          const liveBwIds = new Set(Object.keys(srvData.bw || {}));
-          if (liveBwIds.has(portId)) isLive = true;
-          // Also check IMEI: maybe the port_id changed but the IMEI is still live.
-          if (!isLive && imei && Array.isArray(srvData.status)) {
-            for (const m of srvData.status) {
-              if (m.modem_details && m.modem_details.IMEI === imei) {
-                const online = m.net_details && m.net_details.IS_ONLINE === 'yes';
-                if (online) { isLive = true; break; }
-              }
-            }
-          }
-        }
-      } catch (e) {
-        logger.warn('[admin-meta] delete: could not verify liveness — ' + e.message);
-        // Fail closed: if we can't confirm offline, refuse rather than risk
-        // removing a working modem.
-        return res.status(503).json({ error: 'Could not verify modem status; try again', details: e.message });
-      }
-      if (isLive) {
-        return res.status(409).json({
-          error: 'modem_is_live',
-          message: 'Этот модем сейчас на связи — удалить можно только отключенный.',
-          server_name: serverName, port_id: portId, imei,
-        });
-      }
+      // NOTE: the old "refuse if the modem is currently live" gate was removed at
+      // the operator's request — delete is now allowed regardless of online
+      // status. (A still-physically-present modem will simply re-appear on the
+      // next ProxySmart poll; deleting a truly-offline/ghost modem makes it leave
+      // the fleet immediately since the fleet count is built from modem_meta.)
 
       // Stage 18: delete from BOTH known_modems AND modem_meta atomically.
       // Skipping modem_meta would let the Pass-2 fallback in injectOfflineModems

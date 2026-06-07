@@ -812,7 +812,7 @@ if(status==='offline'){var _pid='';if(modem.ports&&modem.ports[0]&&modem.ports[0
 // the delete button still shows. Server-side recognizes the prefix and routes
 // to the IMEI-based delete path.
 if(!_pid&&modem.rawImei){_pid='meta_'+modem.rawImei;}
-if(_pid){h+='<button class="btn-delete-modem" title="Удалить отключённый модем" onclick="deleteModem(\''+modem.server+'\',\''+_pid+'\',\''+esc(modem.nick)+'\')" style="background:rgba(232,65,65,.1);border:1px solid rgba(232,65,65,.3);color:#e84141;cursor:pointer;border-radius:5px;padding:3px 7px;font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:all .15s" onmouseover="this.style.background=\'#e84141\';this.style.color=\'#fff\'" onmouseout="this.style.background=\'rgba(232,65,65,.1)\';this.style.color=\'#e84141\'">🗑</button>';}}
+if(_pid){h+='<button class="btn-delete-modem" title="Удалить модем из дашборда" onclick="deleteModem(\''+modem.server+'\',\''+_pid+'\',\''+esc(modem.nick)+'\')" style="background:rgba(232,65,65,.1);border:1px solid rgba(232,65,65,.3);color:#e84141;cursor:pointer;border-radius:5px;padding:3px 7px;font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:all .15s" onmouseover="this.style.background=\'#e84141\';this.style.color=\'#fff\'" onmouseout="this.style.background=\'rgba(232,65,65,.1)\';this.style.color=\'#e84141\'">🗑</button>';}}
 h+='</div>';break;}}h+='</td>'});html+=h+'</tr>'});
   });
   html+='</tbody></table>';
@@ -6816,7 +6816,7 @@ function _statusPill(status, modem) {
 
 // ── 2) Manual modem deletion (server enforces "must be offline" rule) ──
 function deleteModem(server, portId, nick) {
-  if (!confirm('Удалить модем «'+nick+'» ('+server+'/'+portId+') навсегда?\n\nЭто действие нельзя отменить. Удалить можно только отключенный модем — сервер проверит.\n\nНажмите OK для удаления.')) return;
+  if (!confirm('Удалить модем «'+nick+'» ('+server+'/'+portId+') из дашборда?\n\nЕсли модем физически на связи — он вернётся при следующем опросе ProxySmart. Офлайн/призрачный модем исчезнет навсегда.\n\nНажмите OK для удаления.')) return;
   fetch(API+'/api/admin/modems/'+encodeURIComponent(server)+'/'+encodeURIComponent(portId), {
     method: 'DELETE',
     headers: { 'X-Auth-Token': authToken },
@@ -6824,11 +6824,7 @@ function deleteModem(server, portId, nick) {
     .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, status: r.status, body: j }; }); })
     .then(function(r){
       if (!r.ok) {
-        if (r.status === 409) {
-          alert('❌ Этот модем сейчас на связи.\nУдалить можно только когда он офлайн.');
-        } else {
-          alert('Ошибка: ' + (r.body && (r.body.message || r.body.error) || 'unknown'));
-        }
+        alert('Ошибка: ' + (r.body && (r.body.message || r.body.error) || 'unknown'));
         return;
       }
       alert('✅ Модем удалён.');
