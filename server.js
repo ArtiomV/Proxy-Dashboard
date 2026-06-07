@@ -1877,6 +1877,13 @@ app.set('trust proxy', 1); // trust first proxy (nginx) — req.ip uses x-forwar
 // pragmatic compromise; migrating to event delegation is FOLLOWUP work.
 // Chart.js CDN whitelisted by hash via the existing <script integrity>
 // attribute; 'self' covers the extracted local JS.
+// The CRM tab embeds Twenty CRM (CRM_URL) in an <iframe>. Without an explicit
+// frame-src the directive falls back to default-src 'self', so the cross-origin
+// CRM frame is blocked by CSP. Allow exactly the configured CRM origin.
+const _crmFrameOrigin = (() => {
+  try { return process.env.CRM_URL ? new URL(process.env.CRM_URL).origin : null; }
+  catch (_) { return null; }
+})();
 app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: true,
@@ -1888,6 +1895,7 @@ app.use(helmet({
       'font-src':    ["'self'", 'https://fonts.gstatic.com', 'data:'],
       'img-src':     ["'self'", 'data:', 'https:'],
       'connect-src': ["'self'"],
+      'frame-src':   ["'self'", ...(_crmFrameOrigin ? [_crmFrameOrigin] : [])],
       'frame-ancestors': ["'none'"],
     },
   },
