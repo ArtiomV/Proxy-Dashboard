@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # Deploy proxy-dashboard to production.
-# Usage:  SERVER=root@5.35.87.236 ./scripts/deploy.sh
+# Usage:  SERVER=root@159.194.228.17 ./scripts/deploy.sh
 # Requires: sshpass + $SSHPASS env (or ssh keys), rsync.
 set -euo pipefail
 
-SERVER="${SERVER:-root@5.35.87.236}"
+SERVER="${SERVER:-root@159.194.228.17}"
 REMOTE_DIR="${REMOTE_DIR:-/root/Proxy-Dashboard}"
 HEALTH_URL="${HEALTH_URL:-http://localhost:3000/health}"
 

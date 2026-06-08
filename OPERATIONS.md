@@ -32,8 +32,8 @@ Route snapshot (`tests/api/__snapshots__/routes.json`) freezes the (method, path
 ## Deployment
 Current flow (production):
 ```
-scp server.js root@5.35.87.236:/root/Proxy-Dashboard/server.js
-ssh root@5.35.87.236 'pm2 restart dashboard'
+scp server.js root@159.194.228.17:/root/Proxy-Dashboard/server.js
+ssh root@159.194.228.17 'pm2 restart dashboard'
 ```
 No staging env. **Future improvement** — add `staging.proxies.rent` with a separate DB and run integration tests there before prod cuts.
 
@@ -41,7 +41,7 @@ Recommended deploy script (todo):
 ```bash
 #!/bin/bash
 set -euo pipefail
-SERVER=root@5.35.87.236
+SERVER=root@159.194.228.17
 DIR=/root/Proxy-Dashboard
 rsync -av --exclude='*.db' --exclude='node_modules' --exclude='logs' \
   ./ $SERVER:$DIR/
