@@ -132,7 +132,7 @@ function switchSettingsSection(name){
   if(name==='alerts')loadAlertRules();
   if(name==='failover'){loadFailoverSettings();loadFailoverCandidates();loadFailoverLog();}
 }
-function switchMainTab(name,el){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'audit';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){switchBankNav(_activeBankTab||'acts');}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}}
+function switchMainTab(name,el){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'audit';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){switchBankNav(_activeBankTab||'acts');}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}if(name==='ai_sales'){loadAiSales()}}
 
 // ========== PHASE 3: SYSTEM TAB ==========
 var _sysCharts = {};
@@ -1451,6 +1451,16 @@ function collectTrafficData(){
     }
   }
   modemTraffic.sort(function(a,b){return(b.tIn+b.tOut)-(a.tIn+a.tOut)});
+  // Stable per-client modem TOTAL: override the volatile live count (which drops
+  // when a modem briefly goes offline) with the backend's 24h-roster count
+  // (client.modemCount). Online count stays live. So a client shows e.g. 12/15
+  // instead of flickering 12/13. Rows are created for clients whose modems are
+  // all offline right now so their total doesn't collapse to 0.
+  (currentData.clients||[]).forEach(function(c){
+    if(!c.portName || typeof c.modemCount!=='number' || c.modemCount<=0) return;
+    if(!clientTraffic[c.portName]) clientTraffic[c.portName]={tIn:0,tOut:0,modems:0,online:0};
+    clientTraffic[c.portName].modems = c.modemCount;
+  });
   return{totalModems:totalModems,totalOnline:totalOnline,totalIn:totalIn,totalOut:totalOut,modemTraffic:modemTraffic,clientTraffic:clientTraffic,serverTraffic:serverTraffic,serverIn:serverIn,serverOut:serverOut,serverOpTraffic:serverOpTraffic,label:fields.label};
 }
 
@@ -7878,5 +7888,85 @@ function loadFailoverLog(){
       box.innerHTML=h;
     })
     .catch(function(e){if(box)box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:12px">Ошибка: '+esc(e.message)+'</div>';});
+}
+
+// ── AI sales bots panel ──────────────────────────────────────────────────────
+function aisVal(id){var e=document.getElementById(id);return e?String(e.value||'').trim():'';}
+function loadAiSales(){aisStatus();aisLoadKeys();aisLoadQueue();}
+function aisStatus(){
+  fetch(API+'/api/admin/ai_sales/status',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+    var el=document.getElementById('ais_status');if(!el)return;
+    var k=d.keys||{},c=d.counts||{};
+    el.innerHTML='Anthropic '+(k.anthropic?'✅':'❌')+' · Tavily '+(k.tavily?'✅':'❌')+' · CRM '+(d.crm&&d.crm.configured?'⚙️':'❌')
+      +'  ·  ниш '+(c.niches||0)+' · компаний '+(c.companies||0)+' · контактов '+(c.contacts||0)+' (в Twenty '+(c.pushed||0)+')'
+      +(d.running?'  ·  <span style="color:var(--warning)">▶ задача выполняется</span>':'');
+    if(d.last_job&&d.last_job.status==='running')aisPollJob(d.last_job.id);
+  }).catch(function(){});
+}
+function aisLoadKeys(){
+  fetch(API+'/api/admin/settings',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(s){
+    var a=document.getElementById('ais_anthropic'),t=document.getElementById('ais_tavily'),u=document.getElementById('ais_crmurl');
+    if(a&&!a.value)a.value=s.anthropic_api_key||'';
+    if(t&&!t.value)t.value=s.tavily_api_key||'';
+    if(u&&!u.value)u.value=s.crm_db_url||'';
+  }).catch(function(){});
+}
+function aisSaveKeys(){
+  var body={anthropic_api_key:aisVal('ais_anthropic'),tavily_api_key:aisVal('ais_tavily'),crm_db_url:aisVal('ais_crmurl')};
+  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(d){
+    showToast(d.ok?'Ключи сохранены':'Ошибка','success');aisStatus();
+  }).catch(function(){showToast('Ошибка сети','error')});
+}
+function aisCrmPing(){
+  var el=document.getElementById('ais_crmping');if(el)el.textContent='проверяю…';
+  fetch(API+'/api/admin/ai_sales/crm_ping',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+    if(!el)return;el.textContent=d.ok?('OK · компаний в CRM: '+d.companies):('Ошибка: '+(d.error||''));el.style.color=d.ok?'#2e9e5b':'var(--danger)';
+  }).catch(function(){if(el)el.textContent='Ошибка сети'});
+}
+function aisRun(bot){
+  var body={bot:bot};
+  if(bot==='lookalikes'){body.seed=aisVal('ais_seed');body.count=parseInt(aisVal('ais_count')||'5',10);if(!body.seed){showToast('Укажите seed-компанию','error');return}}
+  if(bot==='contacts'){body.count=20}
+  if(bot==='push'&&!confirm('Залить найденные компании и контакты в Twenty CRM?'))return;
+  fetch(API+'/api/admin/ai_sales/run',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(d){
+    if(d.error){showToast(d.error,'error');return}
+    showToast('Запущено (#'+d.jobId+')','success');aisPollJob(d.jobId);
+  }).catch(function(){showToast('Ошибка сети','error')});
+}
+function aisPollJob(id){
+  var box=document.getElementById('ais_job');if(!box)return;box.style.display='';
+  (function tick(){
+    fetch(API+'/api/admin/ai_sales/job/'+id,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(j){
+      if(!j||j.error){box.innerHTML='—';return}
+      var pct=j.total?Math.round((j.done/(j.total||1))*100):(j.status==='done'?100:8);
+      box.innerHTML='<b>Задача #'+j.id+' ('+esc(j.bot)+')</b> — '+esc(j.progress||'')
+        +'<div class="hbar-bar-wrap" style="height:8px;margin-top:6px;background:var(--bg-3);border-radius:4px"><div class="count-bar" style="width:'+pct+'%;height:8px;border-radius:4px"></div></div>'
+        +(j.status==='error'?'<div style="color:var(--danger);margin-top:6px">Ошибка: '+esc(j.error||'')+'</div>':'')
+        +(j.status==='done'?'<div style="color:#2e9e5b;margin-top:6px">✅ Готово: '+esc(j.result||'')+'</div>':'');
+      if(j.status==='running'){setTimeout(tick,2500)}else{aisStatus();aisLoadQueue()}
+    }).catch(function(){});
+  })();
+}
+function aisLoadQueue(){
+  fetch(API+'/api/admin/ai_sales/queue',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+    var el=document.getElementById('ais_queue');if(!el)return;
+    var comps=d.companies||[];
+    if(!comps.length){el.innerHTML='<div style="color:var(--text-3)">Пусто — запусти бота «Похожие + ЛПР».</div>';return}
+    var h='';
+    comps.forEach(function(c){
+      h+='<div style="border-bottom:1px solid var(--border);padding:7px 0">'
+        +'<b style="color:var(--text-0)">'+esc(c.company)+'</b>'
+        +(c.website?' · <a href="'+esc(c.website)+'" target="_blank" style="color:var(--accent);text-decoration:none">'+esc((c.website||'').replace(/^https?:\/\//,''))+'</a>':'')
+        +(c.is_seed?' <span style="font-size:10px;color:var(--text-3)">SEED</span>':'')
+        +(c.status==='pushed'?' <span style="font-size:10px;color:#2e9e5b">→ Twenty</span>':'');
+      (c.contacts||[]).forEach(function(k){
+        h+='<div style="margin-left:16px;color:var(--text-1);padding-top:2px">👤 '+esc(k.name)+' — '+esc(k.role)
+          +(k.linkedin?' · <a href="'+esc(k.linkedin)+'" target="_blank" style="color:var(--accent)">LinkedIn</a>':'')
+          +(k.contact?' · <span style="color:var(--text-3)">'+esc(k.contact)+'</span>':'')+'</div>';
+      });
+      h+='</div>';
+    });
+    el.innerHTML=h;
+  }).catch(function(){});
 }
 

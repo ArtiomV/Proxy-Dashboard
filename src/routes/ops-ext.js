@@ -22,7 +22,7 @@ module.exports = function createOpsExtRouter(deps) {
     getRunningJobs,
     getLastBillingRunSummary, getLastReconciliationMonth, getIntervals,
     getFetchAllServersDataCached, getMergeServerData,
-    getIpTracking, getUptimeTracking, getIpHistory,
+    getIpTracking, getUptimeTracking, getIpHistory, getKnownModems,
     getDailyTraffic, getPortKeyToPortName,
     getTochkaConfig, getProxyCheckSummary,
     computeProxyIssues, fetchApi, findServer,
@@ -211,12 +211,28 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     });
     // TASK-01 (SEC): serverAuth removed — credentials must never reach the frontend
     
-    // Count modems per client from live bandwidth data
-    const _clientModemCounts = {};
-    for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
-      const pn = bwData.portName;
-      if (pn) _clientModemCounts[pn] = (_clientModemCounts[pn] || 0) + 1;
+    // STABLE per-client modem count. Previously counted live bandwidth entries,
+    // so a modem that briefly dropped offline vanished from the client's total
+    // (БрендАналитика flipping 15→13→15). Now counted from the persisted
+    // known_modems roster (port→client binding + lastSeen), with a 24h retention
+    // window: a modem keeps counting for 24h after it was last seen, then ages
+    // out. Deduped by server|imei so a re-add (new portId, same physical modem)
+    // is not double-counted. randomport* placeholders are excluded.
+    const _ROSTER_RETAIN_MS = 24 * 3600 * 1000;
+    const _rosterNow = Date.now();
+    const _clientModemSets = {};   // portName -> Set('server|imei')
+    for (const [srvName, ports] of Object.entries(getKnownModems() || {})) {
+      for (const info of Object.values(ports || {})) {
+        if (!info || !info.portName || /^random/i.test(info.portName)) continue;
+        const id = info.imei || info.nick;
+        if (!id) continue;
+        const ls = typeof info.lastSeen === 'number' ? info.lastSeen : Date.parse(info.lastSeen || 0);
+        if (!ls || (_rosterNow - ls) > _ROSTER_RETAIN_MS) continue;
+        (_clientModemSets[info.portName] || (_clientModemSets[info.portName] = new Set())).add(srvName + '|' + id);
+      }
     }
+    const _clientModemCounts = {};
+    for (const pn in _clientModemSets) _clientModemCounts[pn] = _clientModemSets[pn].size;
     const sanitizedClients = getClients().map(c => {
       const { password, passwordHash, ...safe } = c;
       safe.modemCount = _clientModemCounts[c.portName] || 0;
