@@ -51,6 +51,7 @@ const simulator = require('./src/simulator/engine');
 const simulatorDb = require('./src/db/simulator');
 const paymentsDb = require('./src/db/payments');
 const documentsDb = require('./src/db/documents');
+const { settleBillsOnPayment } = require('./src/billing/bill-settle');
 const clientsDb = require('./src/db/clients');
 // Stage 14.1: state module hoisted near other requires so early
 // initializers (tochkaConfig defaults, see below) can use it without TDZ.
@@ -1039,6 +1040,12 @@ const _snapUpsert = trafficDb.snapshotUpsertStmt();
 const _snapGet = trafficDb.snapshotGetStmt();
 const _snapGetAll = trafficDb.snapshotGetAllStmt();
 const _apiUsageInsert = trafficDb.apiUsageInsertStmt();
+// Inbound API access log (migration 042) — written by the global /api
+// middleware below; surfaced on the Dashboard «Обращения к API» card.
+const _apiAccessInsert = db.prepare(`INSERT INTO api_access_log
+  (caller_type, client_id, client_name, identity, method, path, purpose,
+   status, duration_ms, ip, user_agent)
+  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 // Stage 4 finish: runRetentionCleanup + cleanupStalePortMappings moved to
 // src/jobs/cleanup.js (~225 lines). server.js keeps thin wrappers; the
 // underlying factory is created lazily on first call because several
@@ -1083,13 +1090,12 @@ async function syncYesterdayTraffic() {
       for (const data of results) {
         if (data._cached || typeof data.bw !== 'object') continue;
         const prefix = data.serverName + '_';
-        // Each server has its own timezone — "yesterday" depends on local midnight
-        const srvTz = (SERVER_COUNTRIES[data.serverName] || {}).tz || 'Europe/Moscow';
-        const tzOffset = getTzOffset(srvTz);
-        const localNow = new Date(now.getTime() + tzOffset * 3600 * 1000);
-        const localYesterday = new Date(localNow);
-        localYesterday.setUTCDate(localYesterday.getUTCDate() - 1);
-        const yesterdayStr = localYesterday.toISOString().slice(0, 10);
+        // Single canonical day (MSK) for ALL servers. MUST match how daily_traffic is READ
+        // (ops-ext yesterday-override + billing durable fallback both key by getMoscowYesterday()).
+        // Per-server local-midnight keys wrote non-MSK servers' rows under a date the readers
+        // never query → client panel under-counted (562 vs 603.7 ProxySmart). Billing is
+        // unaffected: it takes MAX(durable, live), and this only fixes the durable lookup.
+        const yesterdayStr = getMoscowYesterday();
         for (const [portId, b] of Object.entries(data.bw)) {
           if (!b.portName) continue;
           const key = prefix + portId;
@@ -1182,6 +1188,86 @@ function saveKnownModems() {
     .catch(e => { logger.error('[saveKnownModems] write failed:', e.message); });
 }
 
+// 041: soft-deleted modems — in-memory mirror of modem_meta.deleted=1 for fast
+// checks in the hot poll loop. Loaded at boot; kept in sync by markModemDeleted
+// (DELETE route) and the auto-restore in updateKnownModems.
+const _deletedModemSet = new Set();
+try {
+  for (const r of trackingDb.metaListDeletedStmt().all()) {
+    if (r.imei) _deletedModemSet.add(r.server_name + '|' + r.imei);
+  }
+  logger.info('[soft-delete] loaded ' + _deletedModemSet.size + ' deleted modem(s)');
+} catch (e) { logger.warn('[soft-delete] load failed: ' + e.message); }
+
+// Flag a modem as deleted (soft): persist modem_meta.deleted=1 + remember
+// in-memory so the poll loop can skip it without a per-modem DB query. Returns
+// the number of rows flagged. Called by the DELETE-modem route.
+// Delete a modem from the dashboard's OWN database — a clean, single-path purge
+// across every layer that can re-surface a modem. The old code only flagged
+// modem_meta + evicted known_modems entries whose `imei` field matched; but a
+// recovered/renamed modem leaves a `recovered_<imei>` known_modems entry with a
+// BLANK imei field, so the eviction missed it and injectOfflineModems re-added
+// the modem forever ("delete → flaps back"). This now purges by imei, by nick,
+// AND by the synthetic meta_/recovered_ port-ids (which encode the imei even when
+// the entry's own imei is blank), then drops the 10s snapshot cache so the very
+// next /api/admin/data reflects the delete instantly.
+function markModemDeleted(serverName, imei, nick) {
+  imei = imei || '';
+  // Resolve the canonical nick from modem_meta when the caller didn't pass one
+  // (needed to catch blank-imei known_modems entries by nick).
+  if (!nick && imei) {
+    try { const r = trackingDb.metaNickByImeiStmt().get(serverName, imei); if (r && r.nick) nick = r.nick; } catch (_) { /* best-effort */ }
+  }
+  nick = nick || '';
+  if (!imei && !nick) return 0;
+  let changes = 0;
+  // 1) Persist the soft-delete flag — match imei OR nick so it sticks regardless
+  //    of which identifier the modem_meta row carries.
+  try { changes = trackingDb.metaSoftDeleteWideStmt().run(serverName, imei, nick).changes; }
+  catch (e) { logger.warn('[soft-delete] flag failed: ' + e.message); }
+  // 2) In-memory set so the hot poll loop skips it without a DB hit.
+  if (imei) _deletedModemSet.add(serverName + '|' + imei);
+  // 3) Purge EVERY known_modems entry for this modem (the actual flap source).
+  const km = knownModems[serverName];
+  if (km) {
+    const metaId = imei ? ('meta_' + imei) : '';
+    const recId  = imei ? ('recovered_' + imei) : '';
+    let removed = 0;
+    for (const pid of Object.keys(km)) {
+      const info = km[pid] || {};
+      if ((imei && info.imei === imei) ||
+          (nick && info.nick === nick) ||
+          (metaId && pid === metaId) ||
+          (recId && pid === recId)) { delete km[pid]; removed++; }
+    }
+    if (removed) saveKnownModems();
+  }
+  // 4) Drop the 10s SWR snapshot — otherwise the modem reappears for up to
+  //    PS_CACHE_TTL because the cached payload was built before the delete.
+  try { proxySmart.invalidateCache(); } catch (_) { /* best-effort */ }
+  return changes;
+}
+
+// Un-delete a modem: clear modem_meta.deleted AND drop it from the in-memory
+// set (BOTH required — the poll loop checks the set, so clearing only the DB
+// flag wouldn't surface the modem until a restart). Since delete is now
+// permanent (no auto-restore), this is the ONLY way back. Called by the
+// admin restore route.
+function markModemRestored(serverName, imei, nick) {
+  imei = imei || '';
+  if (!nick && imei) {
+    try { const r = trackingDb.metaNickByImeiStmt().get(serverName, imei); if (r && r.nick) nick = r.nick; } catch (_) { /* best-effort */ }
+  }
+  nick = nick || '';
+  if (!imei && !nick) return 0;
+  let changes = 0;
+  try { changes = trackingDb.metaUndeleteWideStmt().run(serverName, imei, nick).changes; }
+  catch (e) { logger.warn('[soft-delete] undelete failed: ' + e.message); }
+  if (imei) _deletedModemSet.delete(serverName + '|' + imei);
+  try { proxySmart.invalidateCache(); } catch (_) { /* best-effort */ }
+  return changes;
+}
+
 /**
  * Update known modems from fresh (non-cached) server data.
  * Remembers each modem ever seen so we can inject them as offline later.
@@ -1219,17 +1305,40 @@ function updateKnownModems(data) {
         portInfo = arr.find(p => p.portID === portId) || null;
       }
 
-      // Ignore ProxySmart's auto-generated "randomport*" placeholders — these
-      // are not real client bindings, and remembering them would re-create
-      // ghosts on disconnect.
-      const cleanPortName = /^randomport\d+$/i.test(bw.portName || '') ? '' : (bw.portName || '');
+      // ProxySmart auto-renames a port to "randomport*" when its modem falls off /
+      // the port is reset. That is NOT a real client binding — but we must NOT wipe
+      // the previous client either: otherwise a client's modem silently vanishes from
+      // its count the moment it disconnects (instead of staying counted as offline).
+      // So: keep the LAST real client portName, and track `lastClientSeen` which only
+      // advances on a real (non-random) name. The roster (src/routes/ops-ext.js) ages
+      // the binding out after its retention window, so a permanently-reset modem
+      // eventually drops while a brief disconnect stays counted as the client's.
+      const rawPortName = bw.portName || '';
+      const isRealClient = rawPortName && !/^randomport\d+$/i.test(rawPortName);
+      const prevKm = km[portId] || {};
+      const keptPortName = isRealClient ? rawPortName : (prevKm.portName || '');
+      const lastClientSeen = isRealClient
+        ? now
+        : (prevKm.lastClientSeen || (prevKm.portName ? (prevKm.lastSeen || now) : 0));
+      // 041: PERMANENT soft-delete. A soft-deleted modem stays hidden FOREVER,
+      // regardless of online status. The previous auto-restore (un-delete on a
+      // poll where the modem reported IS_ONLINE='yes' with a real client port)
+      // is removed entirely: an intermittently-online box4/S4 modem would blip
+      // online for a SINGLE poll, clear the deleted flag, and re-appear — then
+      // drop offline again, so a delete never "stuck" (gone → back → gone). Now a
+      // deleted modem is always skipped here; the only way back is an explicit
+      // admin un-delete (POST .../restore → metaUndelete + drop from the set).
+      if (imei && _deletedModemSet.has(srvName + '|' + imei)) {
+        continue;
+      }
       km[portId] = {
-        portName: cleanPortName,
+        portName: keptPortName,
         imei,
-        nick: (modemStatus && modemStatus.modem_details && modemStatus.modem_details.NICK) || (km[portId] && km[portId].nick) || '',
-        model: (modemStatus && modemStatus.modem_details && (modemStatus.modem_details.MODEL_SHOWN || modemStatus.modem_details.MODEL)) || (km[portId] && km[portId].model) || '',
-        portInfo: portInfo ? (typeof structuredClone === 'function' ? structuredClone(portInfo) : JSON.parse(JSON.stringify(portInfo))) : (km[portId] && km[portId].portInfo ? km[portId].portInfo : null),
-        lastSeen: now
+        nick: (modemStatus && modemStatus.modem_details && modemStatus.modem_details.NICK) || prevKm.nick || '',
+        model: (modemStatus && modemStatus.modem_details && (modemStatus.modem_details.MODEL_SHOWN || modemStatus.modem_details.MODEL)) || prevKm.model || '',
+        portInfo: portInfo ? (typeof structuredClone === 'function' ? structuredClone(portInfo) : JSON.parse(JSON.stringify(portInfo))) : (prevKm.portInfo ? prevKm.portInfo : null),
+        lastSeen: now,
+        lastClientSeen
       };
     }
   }
@@ -1369,7 +1478,9 @@ function injectOfflineModems(data) {
   // the start of this call", not on whatever we've pushed mid-loop.
   const imeisToInject = new Set();
   for (const info of Object.values(km)) {
-    if (info.imei && !seenImeis.has(info.imei)) imeisToInject.add(info.imei);
+    // 041b: never re-inject a soft-deleted modem (markModemDeleted purges the
+    // known_modems entry too, but this guarantees consistency even if one lingers).
+    if (info.imei && !seenImeis.has(info.imei) && !_deletedModemSet.has(srvName + '|' + info.imei)) imeisToInject.add(info.imei);
   }
 
   // Pass 1a — one status row per to-inject imei.
@@ -1644,10 +1755,21 @@ const SETTINGS_DEFAULTS = {
   proxy_check_warn_ms: 500,
   proxy_check_bad_ms: 2000,
   proxy_check_interval_min: 60,
-  // Auto-recovery
-  recovery_offline_sec: 60,
-  recovery_max_attempts: 3,
-  recovery_retry_min: 3,
+  // Auto-recovery — REWORKED 2026-06-26 for the unified fleet. New MF289D modems
+  // have NO USB reset, only reboot + Re-Add → action is now REBOOT (×N), then one
+  // Re-Add, then give up. Gated so it never storms futile resets (dead SIM,
+  // phantom) the way the old USB-reset loop did (208 resets/day, MD_9 ×136).
+  recovery_enabled: true,
+  recovery_offline_sec: 300,        // act after N seconds continuously offline
+  recovery_max_attempts: 3,         // reboots before escalating to Re-Add
+  recovery_retry_min: 5,            // minutes between reboots (let the modem boot)
+  recovery_readd_after: true,       // after the reboots fail → one Re-Add, then give up
+  recovery_daily_cap: 6,            // max recovery actions per modem / 24h (MSK) — anti-storm
+  recovery_skip_dead_sim: true,     // skip modems with dead/undetected SIM (reboot can't fix)
+  recovery_skip_unsold: false,      // false = also recover free/unsold modems
+  // Наша себестоимость трафика: ₽ за ГБ по операторам (map operator -> руб/ГБ).
+  // Пусто по умолчанию; задаётся в Настройках, считается трафик×₽/ГБ.
+  operator_gb_costs: {},
   // Stage 19 — modem failover (re-point a dead/glitchy client modem's port
   // to a healthy spare on the same server). OFF + dry-run by default: the
   // operator validates move_port on one port manually, then flips these.
@@ -1690,6 +1812,7 @@ const SETTINGS_DEFAULTS = {
   retention_proxy_checks: 30,
   retention_modem_meta: 30,
   retention_api_usage: 30,
+  retention_api_access_log: 30,
   retention_db_audit: 365,
   retention_simulator_runs: 30,
   // Session & billing
@@ -1709,7 +1832,9 @@ const SETTINGS_DEFAULTS = {
   // Strict mode for Tochka webhook signatures: when true, unverified webhooks
   // are rejected outright instead of being saved for manual review. Default
   // false — lossy mode preferred during JWKS rotation flakes.
-  tochka_strict_webhook: false
+  tochka_strict_webhook: false,
+  // ── ProxySmart SIM/health signals (Batch 1) ──────────────────────
+  reboot_score_alert_threshold: 70         // reboot_score ≥ this → «нужен ребут» alert
 };
 
 // Stage 14.1: appSettings lives in state with stable identity. Rebinds
@@ -1919,7 +2044,11 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, filePath) => {
-    if (filePath.endsWith('.html')) {
+    // App code (html/js/css) changes on every deploy — never cache it, or the
+    // browser AND Cloudflare serve a stale build for hours (was the cause of
+    // «не обновляется» + the phantom delete-button HTML error). Fonts/images
+    // keep the default long cache (they're effectively immutable).
+    if (/\.(html|js|css)$/i.test(filePath)) {
       res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
     }
   }
@@ -2022,6 +2151,87 @@ function adminMiddleware(req, res, next) {
   }
   next();
 }
+
+// ── Inbound API access log ───────────────────────────────────────────────
+// One row per CLIENT/EXTERNAL-facing API request so the admin can see WHO hit
+// the API, WHEN, and FOR WHAT PURPOSE (Dashboard «Обращения к API» card).
+// Covered: public API (X-API-Key), client portal sessions, reset-by-link IP
+// rotation, the Tochka payment webhook, and login attempts. Admin self-traffic
+// (dashboard polling) and anonymous noise are skipped — admin actions are
+// already audited in audit_log. Identity is resolved at res.on('finish') time,
+// by which point per-route authMiddleware has populated req.user.
+function _classifyApiAccess(req) {
+  // MUST use originalUrl: this middleware is mounted at app.use('/api', …), so
+  // Express strips '/api' from req.path/req.url inside the stack (and it stays
+  // stripped at res.on('finish') time). originalUrl is always the full path.
+  const path = (req.originalUrl || req.url || '').split('?')[0];
+  const u = req.user;
+  // Payment webhook (public; JWT verified inside the handler)
+  if (path.startsWith('/api/tochka/webhook')) {
+    return { type: 'webhook', clientName: 'Точка (банк)', identity: 'tochka', purpose: 'Вебхук оплаты' };
+  }
+  // Self-service IP rotation by link (reset token in query)
+  if (path.startsWith('/api/client/reset_ip_by_token')) {
+    const tok = req.query && req.query.token;
+    const c = tok ? clientByResetToken.get(String(tok)) : null;
+    return { type: 'reset_link', clientId: c && c.id,
+             clientName: (c && (c.portName || c.name)) || '(неизв. токен)',
+             identity: tok ? ('…' + String(tok).slice(-4)) : '', purpose: 'Ротация IP по ссылке' };
+  }
+  // Public programmatic API (X-API-Key header, or deprecated ?apiKey)
+  if (path.startsWith('/api/v1/')) {
+    const key = String((req.headers && req.headers['x-api-key']) ||
+                       (req.query && (req.query.apikey || req.query.apiKey)) || '');
+    const c = key ? clientByApiKey.get(key) : null;
+    let purpose = 'API: ' + path.replace('/api/v1/', '');
+    if (path.startsWith('/api/v1/proxies')) purpose = 'Список прокси (API)';
+    else if (path.startsWith('/api/v1/proxy')) purpose = 'Получить прокси (API)';
+    const clientName = (c && (c.name || c.portName)) ||
+                       (key ? ('(неизв. ключ ' + key.slice(0, 6) + '…)') : '(без ключа)');
+    return { type: 'api_key', clientId: c && c.id, clientName, identity: key.slice(0, 8), purpose };
+  }
+  // Login attempts — who is signing in (no password stored, only the login)
+  if (path === '/api/login') {
+    const login = (req.body && req.body.login) || '';
+    return { type: 'auth', clientName: login || '—', identity: login, purpose: 'Вход в систему' };
+  }
+  // Client portal — authenticated NON-admin sessions only
+  if (u && !u.isAdmin) {
+    const c = clientByLogin.get(u.login);
+    let purpose = 'Портал: ' + path.replace('/api/', '');
+    if (path.startsWith('/api/dashboard_data')) purpose = 'Портал: дашборд';
+    else if (/reset|rotate/.test(path)) purpose = 'Ротация IP (портал)';
+    else if (/traffic/.test(path)) purpose = 'Портал: трафик';
+    return { type: 'portal', clientId: c && c.id,
+             clientName: (c && (c.portName || c.name)) || u.login, identity: u.login, purpose };
+  }
+  // Admin self-traffic + anonymous noise → not logged
+  return null;
+}
+app.use('/api', (req, res, next) => {
+  if (req.method === 'OPTIONS') return next();
+  const start = Date.now();
+  res.on('finish', () => {
+    try {
+      const info = _classifyApiAccess(req);
+      if (!info) return;
+      _apiAccessInsert.run(
+        info.type,
+        info.clientId || null,
+        info.clientName || null,
+        info.identity || null,
+        req.method,
+        (req.originalUrl || req.path || '').split('?')[0].slice(0, 200),
+        info.purpose || null,
+        res.statusCode,
+        Date.now() - start,
+        getClientIp(req) || '',
+        ((req.headers && req.headers['user-agent']) || '').slice(0, 300)
+      );
+    } catch (_e) { /* never break a request on logging failure */ }
+  });
+  next();
+});
 
 // /metrics + /health moved into src/routes/ops.js (Stage 3). Mounted below.
 app.use(require('./src/routes/ops')({
@@ -2792,7 +3002,27 @@ async function trackModems() {
             }
           }
 
-          _modemMetaUpsert.run(server.name, imei, md.NICK || '', normOp, md.MODEL || '', md.PHONE_NUMBER || '');
+          // ProxySmart signal fields we already receive but never used (Batch 1):
+          // SIM status, reboot-need score, operator HTTP-redirect (captive ==
+          // SIM out of money / blocked), LTE band, modem-locked flag. Normalized
+          // here so the persisted snapshot, alerts, health and failover all agree.
+          const _simStatus = String(nd.SimStatus || '').toUpperCase().trim();
+          const _bandRaw = String(nd.BAND || '').trim();
+          const _band = (_bandRaw && _bandRaw !== '?') ? _bandRaw : '';
+          const _redRaw = String(nd.HTTP_REDIRECT_IMPOSED == null ? '' : nd.HTTP_REDIRECT_IMPOSED).toLowerCase().trim();
+          const _httpRedirect = (_redRaw && !['no', 'null', '0', 'false', 'none'].includes(_redRaw)) ? 1 : 0;
+          const _rsNum = Number(md.REBOOT_SCORE);
+          const _rebootScore = (md.REBOOT_SCORE != null && md.REBOOT_SCORE !== '' && Number.isFinite(_rsNum)) ? Math.round(_rsNum) : null;
+          const _isLocked = (m.IS_LOCKED === true || m.IS_LOCKED === 'true') ? 1 : 0;
+
+          // Only persist REAL modems. A glitched/random port reports a USB-path
+          // pseudo-IMEI (e.g. "1-4.3.1.1") + a random nick — persisting it created
+          // junk modem_meta rows. Real IMEIs are 14–16 digits.
+          if (/^\d{14,16}$/.test(imei) && !/^random/i.test(md.NICK || '')
+              && !_deletedModemSet.has(server.name + '|' + imei)) {   // 041: don't resurrect a soft-deleted modem
+            _modemMetaUpsert.run(server.name, imei, md.NICK || '', normOp, md.MODEL || '', md.PHONE_NUMBER || '',
+              _simStatus, _rebootScore, _httpRedirect, _band, _isLocked);
+          }
 
           // Stage 17 auto-mapping (#1): persist operator → server's country
           // in operator_country_map. Manual overrides are protected — the
@@ -2861,17 +3091,19 @@ async function trackModems() {
         //      offline-alert won't refire during boot grace; recovery alert
         //      then misses too.
         //
-        // New gate: derive downtime from last_online_check itself. ≥20 min
-        // (the same threshold the offline-alert uses) means it was
-        // meaningfully offline, fire recovery. Cooldown 60s on the rule
-        // still prevents flap-storms.
+        // New gate: derive downtime from last_online_check itself. ≥10 min
+        // (the SAME threshold the offline-alert uses — they MUST match, otherwise
+        // an offline alert fires with no matching «вернулся». This was 20 min
+        // while the offline alert is 10 min, so every 10–20 min outage — the
+        // common modem flap — alerted offline but never recovered.) Cooldown 60s
+        // on the rule still prevents flap-storms.
         const prevIso = uptimeTracking[key].last_online_check;
         let downSec = 0;
         if (prevIso) {
           const prevMs = Date.parse(prevIso);
           if (!isNaN(prevMs)) downSec = Math.max(0, Math.round((now - prevMs) / 1000));
         }
-        if (downSec >= 20 * 60) {
+        if (downSec >= 10 * 60) {
           // Resolve a friendly nick — prefer knownModems, fall back to modem_meta.
           let nickToShow = nick && nick !== imei ? nick : '';
           if (!nickToShow) {
@@ -2918,26 +3150,49 @@ async function trackModems() {
         alerts.clearCooldown('recovery_exhausted', { server: server.name, nick });
       } else {
         if (!autoRecovery[recoveryKey]) {
-          autoRecovery[recoveryKey] = { offlineSince: now, attempts: 0, lastAttempt: 0 };
+          autoRecovery[recoveryKey] = { offlineSince: now, attempts: 0, lastAttempt: 0, readdDone: false, cyclesToday: 0, dayStamp: 0 };
         }
         const rec = autoRecovery[recoveryKey];
         const offlineSec = (now - rec.offlineSince) / 1000;
-        const _recOffSec = appSettings.recovery_offline_sec || 60;
+        const _recOffSec = appSettings.recovery_offline_sec || 300;
         const _recMaxAtt = appSettings.recovery_max_attempts || 3;
-        const _recRetryMs = (appSettings.recovery_retry_min || 3) * 60000;
-        if (offlineSec >= _recOffSec && rec.attempts < _recMaxAtt && (now - rec.lastAttempt) >= _recRetryMs) {
-          rec.attempts++;
-          rec.lastAttempt = now;
-          logger.warn(`[AutoRecovery] USB reset #${rec.attempts}/${_recMaxAtt} for ${nick} (${server.name}), offline ${Math.round(offlineSec)}s`);
-          logActivity('recovery', 'warn', 'usb_reset', nick, `USB reset #${rec.attempts}/${_recMaxAtt} (offline ${Math.round(offlineSec)}s)`, { server: server.name, attempt: rec.attempts, offline_sec: Math.round(offlineSec) });
-          fetchApi(server, `/apix/usb_reset_modem_json?arg=${encodeURIComponent(nick)}`)
-            .catch(e => {
-              logger.error(`[AutoRecovery] USB reset failed for ${nick}: ${e.message}`);
-              logActivity('recovery', 'error', 'usb_reset_failed', nick, `USB reset failed: ${e.message}`, { server: server.name });
-            });
-          if (rec.attempts >= _recMaxAtt) {
-            logger.warn(`[AutoRecovery] ${nick} exhausted ${_recMaxAtt} attempts, giving up`);
-            logActivity('recovery', 'warn', 'recovery_exhausted', nick, `Exhausted ${_recMaxAtt} USB reset attempts, giving up`, { server: server.name });
+        const _recRetryMs = (appSettings.recovery_retry_min || 5) * 60000;
+        const _recCap = appSettings.recovery_daily_cap || 6;
+        // Daily-cap rollover (MSK day) — caps recovery actions per modem per day
+        // so a flapping modem can't re-storm reboots across many short outages.
+        const _dayKey = Math.floor((now + 3 * 3600000) / 86400000);
+        if (rec.dayStamp !== _dayKey) { rec.dayStamp = _dayKey; rec.cyclesToday = 0; }
+        // Gating — skip modems where a reboot is futile or unwanted.
+        const _simS = String((m.net_details && m.net_details.SimStatus) || '').toUpperCase();
+        const _deadSim = /UNDETECT|ABSENT|NOT.?INSERT|FAIL|ERROR|NO ?SIM/.test(_simS);
+        let _skip = false;
+        if (/^random/i.test(nick)) _skip = true;                                              // phantom port
+        else if (appSettings.recovery_skip_dead_sim !== false && _deadSim) _skip = true;       // dead SIM — reboot can't fix
+        else if (appSettings.recovery_skip_unsold === true) {                                  // optional: skip free/unsold
+          const _km = (knownModems[server.name] || {})[imei];
+          const _pn = (_km && _km.portName) ? String(_km.portName) : '';
+          if (!_pn || /^random/i.test(_pn)) _skip = true;
+        }
+        if (appSettings.recovery_enabled && !_skip && offlineSec >= _recOffSec && (now - rec.lastAttempt) >= _recRetryMs && rec.cyclesToday < _recCap) {
+          if (rec.attempts < _recMaxAtt) {
+            // Step 1..N: soft REBOOT (unified action — works on E3372 and MF289D alike).
+            rec.attempts++; rec.cyclesToday++; rec.lastAttempt = now;
+            logger.warn(`[AutoRecovery] reboot #${rec.attempts}/${_recMaxAtt} for ${nick} (${server.name}), offline ${Math.round(offlineSec)}s`);
+            logActivity('recovery', 'warn', 'reboot', nick, `Перезагрузка #${rec.attempts}/${_recMaxAtt} (офлайн ${Math.round(offlineSec)}с)`, { server: server.name, attempt: rec.attempts, offline_sec: Math.round(offlineSec) });
+            fetchApi(server, `/apix/reboot_modem_by_imei?IMEI=${encodeURIComponent(imei)}`)
+              .catch(e => {
+                logger.error(`[AutoRecovery] reboot failed for ${nick}: ${e.message}`);
+                logActivity('recovery', 'error', 'reboot_failed', nick, `Перезагрузка не удалась: ${e.message}`, { server: server.name });
+              });
+          } else if (appSettings.recovery_readd_after !== false && !rec.readdDone) {
+            // Final escalation: Re-Add (re-register the USB device), then give up.
+            rec.readdDone = true; rec.cyclesToday++; rec.lastAttempt = now;
+            const _dev = m.net_details && m.net_details.DEV;
+            logger.warn(`[AutoRecovery] Re-Add for ${nick} (${server.name}) after ${_recMaxAtt} reboots, DEV=${_dev || '?'}`);
+            logActivity('recovery', 'warn', 'readd', nick, `Re-Add после ${_recMaxAtt} перезагрузок`, { server: server.name, dev: _dev || null });
+            if (_dev) postFormApi(server, '/modem/add_dev', { DEV: _dev }).catch(e => logger.error(`[AutoRecovery] Re-Add failed for ${nick}: ${e.message}`));
+            logger.warn(`[AutoRecovery] ${nick} exhausted (${_recMaxAtt} reboots + Re-Add), giving up`);
+            logActivity('recovery', 'warn', 'recovery_exhausted', nick, `Исчерпано: ${_recMaxAtt} перезагрузок + Re-Add, сдаюсь`, { server: server.name });
             alerts.trigger('recovery_exhausted', { server: server.name, nick, attempts: _recMaxAtt });
           }
         }
@@ -2961,9 +3216,25 @@ async function trackModems() {
     //    bind the same modem; we want one tick per IMEI per cycle).
     try {
       const processedImeis = new Set();
+      // Modems present in the status feed but reporting offline NOW (not online,
+      // not rotating/rebooting/resetting). The Telegram offline alert below used
+      // to fire only for modems that VANISHED from the feed (offlineImeis); a
+      // modem that stays enumerated but goes IS_ONLINE=no — the common case
+      // (data channel dropped, USB still plugged) — never alerted on Telegram,
+      // only in the bell. Collect them so the alert covers both. Their downtime
+      // tick already happened in the main status loop above, so they are NOT
+      // re-ticked in the offlineImeis downtime pass below.
+      const offlineNowImeis = new Set();
       for (const m of statusArr) {
         const imei = m.modem_details && m.modem_details.IMEI;
-        if (imei) processedImeis.add(imei);
+        if (!imei) continue;
+        processedImeis.add(imei);
+        const nd = m.net_details || {};
+        const up = nd.IS_ONLINE === 'yes'
+          || m.IS_ROTATED === 'true' || m.IS_ROTATED === true
+          || m.IS_REBOOTING === 'true' || m.IS_REBOOTING === true
+          || nd.EXT_IP === 'IP_RESET';
+        if (!up) offlineNowImeis.add(imei);
       }
       const km = knownModems[server.name] || {};
       const offlineImeis = new Set();
@@ -3007,7 +3278,9 @@ async function trackModems() {
         const ALERT_MS  = ALERT_MIN * 60 * 1000;
         const STALE_MS  = (Number(appSettings.stale_modem_hours) || 12) * 3600 * 1000;
         const km = knownModems[server.name] || {};
-        for (const imei of offlineImeis) {
+        // Alert for modems that vanished from the feed (offlineImeis) AND those
+        // still enumerated but offline now (offlineNowImeis) — both are "dark".
+        for (const imei of new Set([...offlineImeis, ...offlineNowImeis])) {
           const key = prefix + imei;
           if (offlineAlertSent[key]) continue;
           const ut = uptimeTracking[key];
@@ -3168,10 +3441,13 @@ async function checkProxyLatency() {
         if (!info.isOnline && !info.isRotating) continue;
         for (const p of portList) {
           if (!p.HTTP_PORT || !p.LOGIN || !p.PASSWORD) continue;
-          // Skip unassigned proxies (no client renting this port).
-          // ProxySmart blocks traffic on unbound ports → would always error
-          // and inflate error_rate, falsely flagging modems as flaky.
+          // Skip ports that are NOT actively serving a paying client — probing them
+          // just generates false errors that wrongly flag a working modem as down:
+          //  • unassigned (no portName), • ProxySmart "randomport*" phantoms,
+          //  • expired rentals (PROXY_VALID_BEFORE in the past → port blocked by us).
           if (!p.portName || !p.portName.trim()) continue;
+          if (_isAutoRandomPort(p.portName)) continue;
+          if (p.PROXY_VALID_BEFORE) { const _vb = Date.parse(p.PROXY_VALID_BEFORE); if (!isNaN(_vb) && _vb < Date.now()) continue; }
           proxies.push({
             server: srv,
             nick: info.nick,
@@ -3666,8 +3942,32 @@ function getProxyCheckSummary() {
     const since7d = new Date(Date.now() - 7 * 86400000).toISOString();
     const summary = dbStmts.proxyCheckSummary.all(since7d);
     const last = dbStmts.proxyCheckLast.all();
-    return { summary, last };
-  } catch (e) { return { summary: [], last: [] }; }
+    // Per-modem count of CONSECUTIVE trailing failed checks (most recent ones,
+    // until the latest success) over the last 2h. The UI flags «прокси не
+    // отвечает» only at ≥3 in a row, so a single flaky timeout never trips it.
+    let consec = [];
+    try {
+      if (!getProxyCheckSummary._consec) getProxyCheckSummary._consec = db.prepare(
+        "WITH recent AS (SELECT server_name, nick, error, ROW_NUMBER() OVER (PARTITION BY server_name, nick ORDER BY checked_at DESC) rn FROM proxy_checks WHERE checked_at >= datetime('now','-2 hours')), " +
+        "firstok AS (SELECT server_name, nick, MIN(rn) ok_rn FROM recent WHERE error IS NULL GROUP BY server_name, nick), " +
+        "tot AS (SELECT server_name, nick, MAX(rn) mx FROM recent GROUP BY server_name, nick) " +
+        "SELECT t.server_name, t.nick, CASE WHEN f.ok_rn IS NULL THEN t.mx ELSE f.ok_rn-1 END consec FROM tot t LEFT JOIN firstok f ON f.server_name=t.server_name AND f.nick=t.nick");
+      consec = getProxyCheckSummary._consec.all();
+    } catch (_) { /* window-fn unsupported / no rows */ }
+    // Per-modem error stats for TODAY (since MSK midnight). The fleet cards show
+    // today's reality, not the 7-day window — a modem can have a noisy week but
+    // be fine today, and the operator wants to see "сколько ошибок сегодня".
+    let today = [];
+    try {
+      const mskMidnight = Math.floor((Date.now() + 3 * 3600000) / 86400000) * 86400000 - 3 * 3600000;
+      const sinceToday = new Date(mskMidnight).toISOString();
+      if (!getProxyCheckSummary._today) getProxyCheckSummary._today = db.prepare(
+        "SELECT server_name, nick, COUNT(*) total_checks, SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) error_count " +
+        "FROM proxy_checks WHERE checked_at >= ? GROUP BY server_name, nick");
+      today = getProxyCheckSummary._today.all(sinceToday);
+    } catch (_) { /* no rows */ }
+    return { summary, last, consec, today };
+  } catch (e) { return { summary: [], last: [], consec: [], today: [] }; }
 }
 
 // Detailed proxy check history API
@@ -4674,6 +4974,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
                 source: 'tochka_sync', tochkaPaymentId: paymentId
               });
               dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 1, existingRow.id);
+              try { settleBillsOnPayment(client, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
               matched++; reconciled = true;
               saveClients(clients);
               logger.info(`[Tochka Sync:${source}] reconciled uncredited payment → +${amount} to ${client.name} (${_byLabel})`);
@@ -4726,6 +5027,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
             source: 'tochka_sync',
             tochkaPaymentId: paymentId
           });
+          try { settleBillsOnPayment(client, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
           matched++;
           // Stage 18.13: «новый платёж» — любой платёж от sync.
           try {
@@ -4836,6 +5138,11 @@ app.use(require('./src/routes/notifications')({
   logger, db, authMiddleware, adminMiddleware,
 }));
 
+// Dashboard «Обращения к API» — read-only view of the api_access_log table.
+app.use(require('./src/routes/api-access-log')({
+  logger, db, authMiddleware, adminMiddleware,
+}));
+
 // Stage 19 — failover admin endpoints (log/spares/candidates/execute).
 app.use(require('./src/routes/failover')({
   db, logger, authMiddleware, adminMiddleware,
@@ -4845,7 +5152,7 @@ app.use(require('./src/routes/failover')({
 app.use(require('./src/routes/admin-meta')({
   db, logger, authMiddleware, adminMiddleware,
   operatorsDb, trackingDb, knownModems, saveKnownModems,
-  logActivity, fetchAllServersDataCached,
+  logActivity, fetchAllServersDataCached, markModemDeleted, markModemRestored,
 }));
 
 app.use(require('./src/routes/ops-ext')({
@@ -4900,6 +5207,12 @@ app.use(require('./src/routes/billing-ext')({
   getMoscowToday, trafficBytesToGb, parseBwToBytes, ledgerExpense,
   appSettings,
   auditLog, logActivity,
+}));
+
+// AI sales bots panel (lead-gen agents: look-alike research, contact finding,
+// push to Twenty). See src/routes/ai-sales.js + src/agents/*.
+app.use(require('./src/routes/ai-sales')({
+  db, logger, authMiddleware, adminMiddleware, getSetting, logActivity,
 }));
 
 app.use('/api', (req, res) => {
@@ -5134,6 +5447,11 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
       const total = Object.values(res).reduce((s, r) => s + r.changes, 0);
       if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${res.traffic_hourly.changes} meta:${res.modem_meta.changes} rot:${res.rotation_log.changes} proxy:${res.proxy_checks.changes} audit:${res.audit_log.changes} syslog:${res.system_log.changes})`);
       logActivity('system', 'info', 'db_cleanup', null, `DB cleanup: ${total} rows removed`, { hourly: res.traffic_hourly.changes, meta: res.modem_meta.changes, rotation: res.rotation_log.changes, proxy_checks: res.proxy_checks.changes, audit: res.audit_log.changes, system_log: res.system_log.changes });
+      // Refresh query-planner statistics after pruning so the covering indexes
+      // stay chosen (the proxy_checks summary on /api/admin/data degrades to a
+      // 4s full scan if stats go stale). PRAGMA optimize only re-analyzes tables
+      // that changed materially, so it's cheap.
+      try { db.pragma('optimize'); logger.info('[DbCleanup] PRAGMA optimize done'); } catch (_) { /* best-effort */ }
     } catch (e) {
       logger.error('[DbCleanup] Error:', e.message);
       logActivity('system', 'error', 'db_cleanup_error', null, `DB cleanup error: ${e.message}`);
@@ -5213,6 +5531,41 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     }
   });
 
+  // Nightly history pruning at 02:30 UTC (05:30 MSK), right after the backup so
+  // the snapshot still holds the full history we're about to trim from live.
+  // These three append-only tables grow forever and were the bulk of the live
+  // DB (and thus every daily backup): rotation_log, system_log, proxy_checks.
+  // Keeping HISTORY_RETENTION_DAYS makes the DB plateau instead of growing
+  // unbounded — we don't VACUUM (freed pages get reused by new inserts at
+  // steady state). All three timestamp columns share a leading YYYY-MM-DD, so a
+  // bare-date cutoff ("<col> < '2026-04-17'") is both index-friendly (hits the
+  // existing idx on each time column) and format-agnostic across the three
+  // different stored formats (`@`, space, and `T…Z` separators).
+  const HISTORY_RETENTION_DAYS = 60;
+  scheduleRepeating(2, 30, 'HistoryPrune', () => {
+    try {
+      const cutoff = new Date(Date.now() - HISTORY_RETENTION_DAYS * 86400000).toISOString().slice(0, 10);
+      const targets = [
+        ['rotation_log', 'started_at'],
+        ['system_log',   'timestamp'],
+        ['proxy_checks', 'checked_at'],
+      ];
+      let total = 0;
+      const parts = [];
+      for (const [table, col] of targets) {
+        const r = db.prepare(`DELETE FROM ${table} WHERE ${col} < ?`).run(cutoff);
+        total += r.changes;
+        parts.push(`${table}=${r.changes}`);
+      }
+      logger.info(`[HistoryPrune] cutoff<${cutoff} (${HISTORY_RETENTION_DAYS}d), deleted ${total} rows (${parts.join(', ')})`);
+      if (total > 0) {
+        logActivity('system', 'info', 'history_prune', null, `Pruned ${total} rows older than ${HISTORY_RETENTION_DAYS}d`, { total, cutoff, parts });
+      }
+    } catch (e) {
+      logger.error('[HistoryPrune] ' + (e.stack || e.message));
+    }
+  });
+
   // Hourly: just the stale-port mapping cleanup (cheap, keeps the "modem
   // disconnected ≥ N days → vanish" window precise to the hour instead of
   // ±1 day from the nightly run).
@@ -5272,7 +5625,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   // Stage 18.15: notification collector — periodic scan that pushes
   // offline-modem / client-debt / CRM-reminder events into the same bell.
   require('./src/jobs/notify-collect').init({
-    logger, db, alerts, uptimeTracking, knownModems, clients, getStaleNicks,
+    logger, db, alerts, uptimeTracking, knownModems, clients, getStaleNicks, getSetting,
   });
   // Stage 19: failover engine — periodic scan that re-points dead/glitchy
   // client modems to healthy spares (OFF + dry-run by default; see settings).

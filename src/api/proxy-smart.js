@@ -28,6 +28,11 @@ let _psCache = null;
 let _psCacheTs = 0;
 let _psFetchPromise = null;
 const PS_CACHE_TTL = 10 * 1000;
+// A live multi-server fetch takes 4–6s (ProxySmart's bandwidth_report_all is slow).
+// Serve a cache up to MAX_STALE old INSTANTLY while refreshing in the background, so
+// the dashboard never blocks on it. Only a truly cold start (no cache / older than
+// this) waits. Tracking runs every 3 min, so ≤MAX_STALE staleness is harmless.
+const PS_CACHE_MAX_STALE = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // init() — call once after apiServers are defined
@@ -267,13 +272,27 @@ function cacheServerData(data) {
   saveServerCache();
 }
 
-// When server is down, mark all modems as offline but keep bandwidth + ports
+// Grace before a failed server-fetch is treated as a real outage. Box4/S4
+// (Moldova) — and occasionally RO — have frequent SUB-10-min connectivity blips
+// (confirmed in server_downtime: S4 goes unreachable ~3 min, many times a day).
+// The old code forced EVERY modem to IS_ONLINE='no' on the FIRST failed fetch,
+// so the whole fleet flapped offline→online on each blip — "модемы пропадают и
+// тут же возвращаются". Aligned with the fleet model's «блип <10 мин = в работе».
+const BLIP_GRACE_MS = 10 * 60 * 1000;
+
+// When a server's fetch fails, fall back to the last good snapshot. While that
+// snapshot is still FRESH (< grace) we serve it as last-known-good — status
+// untouched and NOT flagged `_cached` — so a brief blip is invisible (no card
+// flapping, no «сервер недоступен» banner, no downSet). Only a SUSTAINED outage
+// (≥ grace) marks all modems offline and flags the server cached.
 function getCachedDataAsOffline(serverName) {
   const cached = serverCache[serverName];
   if (!cached) return null;
 
-  const ageMinutes = Math.round((Date.now() - cached.cachedAt) / 60000);
-  logger.info(`[Cache] Using cached data for ${serverName} (${ageMinutes} min old)`);
+  const ageMs = Date.now() - cached.cachedAt;
+  const ageMinutes = Math.round(ageMs / 60000);
+  const sustained = ageMs >= BLIP_GRACE_MS;   // true outage vs transient blip
+  if (sustained) logger.info(`[Cache] ${serverName} unreachable ${ageMinutes} min — marking modems offline`);
 
   // Use structuredClone (Node 17+) — 5-10x faster than JSON.parse(JSON.stringify(...)).
   // Plus it preserves Dates and doesn't choke on undefined.
@@ -281,12 +300,13 @@ function getCachedDataAsOffline(serverName) {
     ? (v) => structuredClone(v)
     : (v) => JSON.parse(JSON.stringify(v));
 
-  let offlineStatus = [];
+  let outStatus = [];
   if (Array.isArray(cached.status)) {
-    offlineStatus = cached.status.map(m => {
+    outStatus = cached.status.map(m => {
       const copy = deepClone(m);
-      if (copy.net_details) copy.net_details.IS_ONLINE = 'no';
-      copy._cached = true;
+      // Brief blip → keep last-known IS_ONLINE so the card doesn't flap.
+      if (sustained && copy.net_details) copy.net_details.IS_ONLINE = 'no';
+      copy._cached = sustained;          // only flag stale once it's a real outage
       copy._cachedAt = cached.cachedAt;
       return copy;
     });
@@ -294,10 +314,10 @@ function getCachedDataAsOffline(serverName) {
 
   return {
     bw: deepClone(cached.bw || {}),
-    status: offlineStatus,
+    status: outStatus,
     ports: deepClone(cached.ports || {}),
     serverName: serverName,
-    _cached: true,
+    _cached: sustained,
     _cachedAt: cached.cachedAt
   };
 }
@@ -350,16 +370,26 @@ async function fetchAllServersDataCached() {
   // Atomic check-or-start: previously between the cache check and the
   // _psFetchPromise check there was a window where two concurrent callers
   // both started fresh fetches. Snapshot now-state once and decide.
-  const cacheFresh = _psCache && (Date.now() - _psCacheTs) < PS_CACHE_TTL;
-  if (cacheFresh) return _psCache;
-  if (_psFetchPromise) return _psFetchPromise;
-  // Set promise FIRST so a concurrent caller hitting line 348 sees it.
-  let resolveOuter, rejectOuter;
-  _psFetchPromise = new Promise((resolve, reject) => { resolveOuter = resolve; rejectOuter = reject; });
-  fetchAllServersData()
-    .then(r => { _psCache = r; _psCacheTs = Date.now(); _psFetchPromise = null; resolveOuter(r); })
-    .catch(e => { _psFetchPromise = null; rejectOuter(e); });
-  return _psFetchPromise;
+  const age = _psCache ? (Date.now() - _psCacheTs) : Infinity;
+  if (_psCache && age < PS_CACHE_TTL) return _psCache;   // fresh — serve as-is
+  // Start (or join) a background refresh. Set the promise FIRST so concurrent
+  // callers dedupe onto it instead of each starting their own fetch.
+  const startRefresh = () => {
+    if (_psFetchPromise) return _psFetchPromise;
+    let resolveOuter, rejectOuter;
+    _psFetchPromise = new Promise((resolve, reject) => { resolveOuter = resolve; rejectOuter = reject; });
+    fetchAllServersData()
+      .then(r => { _psCache = r; _psCacheTs = Date.now(); _psFetchPromise = null; resolveOuter(r); })
+      .catch(e => { _psFetchPromise = null; rejectOuter(e); });
+    return _psFetchPromise;
+  };
+  // Stale-while-revalidate: serve the slightly-stale cache INSTANTLY and refresh in
+  // the background — the dashboard never waits the 4–6s for ProxySmart.
+  if (_psCache && age < PS_CACHE_MAX_STALE) {
+    startRefresh().catch(() => {});   // refresh in background, swallow errors
+    return _psCache;
+  }
+  return startRefresh();              // cold start (or >MAX_STALE) — must wait
 }
 
 // ---------------------------------------------------------------------------

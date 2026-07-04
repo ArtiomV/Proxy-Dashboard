@@ -249,7 +249,7 @@ async function buildDailySummary(date) {
   }
 
   // ----- 6) Footer -----
-  const dashUrl = getSetting('public_url', '') || 'https://dashboard.proxies.rent';
+  const dashUrl = getSetting('public_url', '') || 'https://app.arendaproxy.ru';
   lines.push('');
   lines.push(`<a href="${dashUrl}/admin">Открыть дашборд →</a>`);
 

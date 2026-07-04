@@ -28,6 +28,12 @@ function init(db) {
   S.closingByClient = db.prepare(
     'SELECT * FROM closing_documents WHERE client_id = ? ORDER BY created_at'
   );
+  // closingInsert is INSERT OR IGNORE (idempotent) → it can't persist a status
+  // change to an existing row. A dedicated UPDATE is needed so «подписан» sticks
+  // across reloads (otherwise server.js reloads status from this table = unsigned).
+  S.closingUpdateStatus = db.prepare(
+    'UPDATE closing_documents SET status = ?, signed_at = ? WHERE id = ?'
+  );
 
   S.billDeleteByClient = db.prepare('DELETE FROM bills WHERE client_id = ?');
   S.billDeleteById     = db.prepare('DELETE FROM bills WHERE id = ?');
@@ -36,6 +42,11 @@ function init(db) {
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
   );
   S.billsByClient = db.prepare('SELECT * FROM bills WHERE client_id = ? ORDER BY created_at');
+  // billInsert is INSERT OR IGNORE (idempotent) → it can't persist a status
+  // change (paid/unpaid) to an existing row. A dedicated UPDATE is needed so
+  // «оплачен» sticks across reloads (otherwise server.js rebuilds client.bills
+  // from this table = unpaid). Same pattern as closingUpdateStatus for acts.
+  S.billUpdateStatus = db.prepare('UPDATE bills SET status = ? WHERE id = ?');
 }
 
 // ─── Client documents ─────────────────────────────────────────────────────
@@ -58,6 +69,7 @@ function insertClosing(d, clientId) {
   );
 }
 function listClosing(clientId) { return S.closingByClient.all(clientId); }
+function updateClosingStatus(id, status, signedAt) { return S.closingUpdateStatus.run(status, signedAt || null, id); }
 
 // ─── Bills ────────────────────────────────────────────────────────────────
 function deleteBillsByClient(clientId) { return S.billDeleteByClient.run(clientId); }
@@ -70,10 +82,11 @@ function insertBill(b, clientId) {
   );
 }
 function listBills(clientId) { return S.billsByClient.all(clientId); }
+function updateBillStatus(id, status) { return S.billUpdateStatus.run(status, id); }
 
 module.exports = {
   init,
   deleteDocsByClient, deleteDoc, insertDoc, listDocs,
-  deleteClosingByClient, deleteClosing, insertClosing, listClosing,
-  deleteBillsByClient, deleteBill, insertBill, listBills,
+  deleteClosingByClient, deleteClosing, insertClosing, listClosing, updateClosingStatus,
+  deleteBillsByClient, deleteBill, insertBill, listBills, updateBillStatus,
 };

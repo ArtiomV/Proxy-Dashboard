@@ -1,5 +1,6 @@
 /* ==================== THEME VARIABLES ==================== */
 :root,[data-theme="dark"]{
+  --zebra:rgba(255,255,255,.03);
   --bg-0:#0D0D0E;--bg-1:#121724;--bg-2:#1B2237;--bg-3:#1c2432;--bg-4:#243044;
   --border:rgba(255,255,255,0.06);--border-hover:rgba(255,255,255,0.12);
   --text-0:#f0f6fc;--text-1:#c9d1d9;--text-2:#7d8590;--text-3:#484f58;
@@ -21,6 +22,7 @@
   --country-bg:rgba(25,96,201,0.04);
 }
 [data-theme="light"]{
+  --zebra:rgba(17,24,39,.03);
   --bg-0:#f5f6f8;--bg-1:#ffffff;--bg-2:#f0f1f3;--bg-3:#e8eaed;--bg-4:#d8dce2;
   --border:rgba(0,0,0,0.08);--border-hover:rgba(0,0,0,0.15);
   --text-0:#0f1419;--text-1:#24292f;--text-2:#656d76;--text-3:#8b949e;

@@ -35,8 +35,19 @@ function newChartSafe(canvasEl, cfg) {
 }
 var API='',authToken=localStorage.getItem('pr_admin_token')||'',currentData=null;
 var sortCol='nick',sortDir='asc',activeServerFilter=localStorage.getItem('admin_srv_filter')||'all',activeStatusFilter='all',activeClientFilter='';
-var autoRefreshTimer=null,charts={};
+var autoRefreshTimer=null,charts={},REFRESH_MS=10000;
 var _crmLoaded=false;
+
+// ── Resilience: never surface a raw JSON-parse/HTML error to the user. During a
+// backend restart/deploy nginx briefly returns a 502 HTML page ("<!DOCTYPE…"),
+// so the 10s poller's r.json() throws SyntaxError "Unexpected token '<'". These
+// are transient — swallow them (the next refresh recovers) and show a friendly
+// "reconnecting" toast instead of the raw parse error.
+function _isServerDownErr(e){return !!e&&(e._serverDown===true||e.name==='SyntaxError'||/Unexpected token|<!DOCTYPE|is not valid JSON|server_unavailable/i.test((e&&e.message)||''));}
+function _okJson(r){var ct=(r&&r.headers&&r.headers.get&&r.headers.get('content-type'))||'';if(!r.ok||(ct&&ct.indexOf('json')<0)){var err=new Error('server_unavailable');err._serverDown=true;throw err;}return r.json();}
+// Catch-all: even if some other of the ~150 call sites lets a raw parse error
+// reach a toast, replace it with the friendly message (never show "<!DOCTYPE…").
+(function(){var _orig=(typeof window!=='undefined'&&window.showToast)?window.showToast:(typeof showToast==='function'?showToast:null);if(!_orig)return;var _wrap=function(m,t,d){if(typeof m==='string'&&/Unexpected token|<!DOCTYPE|is not valid JSON|server_unavailable/i.test(m)){return _orig('Сервер перезапускается, переподключаюсь…','warning',4000);}return _orig(m,t,d);};try{window.showToast=_wrap;}catch(_){}try{showToast=_wrap;}catch(_){}})();
 
 function crmAutoLogin(){
   var frame=document.getElementById('crmFrame');
@@ -59,28 +70,26 @@ function crmAutoLogin(){
   });
 }
 
-var COLUMNS=[
+var COLUMNS=[{id:'rail',label:'',visible:true,sortable:false,width:'6px'},
   {id:'bulk',label:'<input type="checkbox" id="bulkSelectAll" onclick="bulkToggleAll(this)" style="cursor:pointer;margin:0">',visible:true,sortable:false,width:'28px'},
   {id:'status',label:'',visible:true,sortable:false,width:'24px'},
   {id:'nick',label:'Модем',visible:true,sortable:true},
   {id:'server',label:'Сервер',visible:false,sortable:true},
   {id:'portName',label:'Клиент',visible:true,sortable:true},
-  {id:'creds',label:'Реквизиты',visible:true,sortable:false},
-  {id:'loginpass',label:'Логин:Пароль',visible:true,sortable:false},
+  {id:'creds',label:'Доступ',visible:true,sortable:false},
   {id:'extIp',label:'Внеш.IP',visible:false,sortable:false},
   {id:'netType',label:'Сеть',visible:true,sortable:true},
-  {id:'signal',label:'Сигнал',visible:true,sortable:true},
-  {id:'operator',label:'Оператор',visible:true,sortable:true},
-  {id:'phone',label:'Телефон',visible:true,sortable:false},
+  {id:'phone',label:'Телефон',visible:false,sortable:false},
   {id:'trafficDay',label:'Сегодня',visible:true,sortable:true},
-  {id:'trafficMon',label:'Месяц',visible:true,sortable:true},
-  {id:'speed',label:'Скорость <span class="th-hint" title="Download ↓ / Upload ↑ в Mbps&#10;Зелёный: > 30 Mbps&#10;Синий: 10–30 Mbps&#10;Оранжевый: < 10 Mbps&#10;⚠ — значение аномально низкое">ⓘ</span>',visible:true,sortable:true},
-  {id:'uptime',label:'Аптайм',visible:true,sortable:true},
+  {id:'trafficMon',label:'Месяц',visible:false,sortable:true},
+  {id:'speed',label:'Скорость <span class="th-hint" title="Download ↓ / Upload ↑ в Mbps&#10;Зелёный: > 30 Mbps&#10;Синий: 10–30 Mbps&#10;Оранжевый: < 10 Mbps&#10;⚠ — значение аномально низкое">ⓘ</span>',visible:false,sortable:true},
+  {id:'uptime',label:'Аптайм',visible:false,sortable:true},
   {id:'latency',label:'Латентность',visible:true,sortable:true},
-  {id:'errors',label:'Ошибки',visible:true,sortable:true},
+  {id:'errors',label:'Ошибки',visible:false,sortable:true},
   {id:'health',label:'Здоровье',visible:true,sortable:true,width:'70px'},
-  {id:'rotation',label:'Ротация',visible:true,sortable:true},
-  {id:'actions',label:'',visible:true,sortable:false,width:'60px'}
+  {id:'rotation',label:'Ротация',visible:false,sortable:true},
+  {id:'band',label:'Band',visible:false,sortable:true},
+  {id:'actions',label:'',visible:true,sortable:false,width:'118px'}
 ];
 var _countryFlags={'MD':'\u{1F1F2}\u{1F1E9}','RO':'\u{1F1F7}\u{1F1F4}','US':'\u{1F1FA}\u{1F1F8}','DE':'\u{1F1E9}\u{1F1EA}'};
 var _countryNamesRu={'Moldova':'\u041c\u043e\u043b\u0434\u043e\u0432\u0430','Romania':'\u0420\u0443\u043c\u044b\u043d\u0438\u044f'};
@@ -99,26 +108,45 @@ function doLogin(){window.location.href='/'}
 function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_admin_token');localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
-var _activeBankTab='acts';
+var _activeBankTab='overview';
+var _bankEverRendered=false;
 function switchBankNav(name){
-  ['acts','bills','payments'].forEach(function(t){
+  ['overview','acts','bills','payments'].forEach(function(t){
     var nav=document.getElementById('bnav_'+t);
-    var secMap={acts:'bankDocumentsSection',bills:'bankBillsSection',payments:'bankPaymentsSection'};
+    var secMap={overview:'bankOverviewSection',acts:'bankDocumentsSection',bills:'bankBillsSection',payments:'bankPaymentsSection'};
     var sec=document.getElementById(secMap[t]);
     if(nav)nav.classList.toggle('active',t===name);
     if(sec)sec.style.display=t===name?'':'none';
   });
   _activeBankTab=name;
-  if(name==='acts'&&currentData)renderBankDocuments();
+  if(name==='overview'&&currentData)renderFinancesTabNew();
+  else if(name==='acts'&&currentData)renderBankDocuments();
   else if(name==='bills'&&currentData)renderBankBills();
   else if(name==='payments'&&currentData)renderBankPayments();
 }
 var _activeSettingsSection='audit';
 function switchSettingsSection(name){
-  ['bank','data','audit','servers','syslog','serverHealth','simulator','operators','alerts','failover'].forEach(function(s){
+  try{if(window.matchMedia('(max-width:480px)').matches){var _c=document.querySelector('.tab-sidebar-layout>div:last-child');if(_c)setTimeout(function(){_c.scrollIntoView({behavior:'smooth',block:'start'});},60);}}catch(_){}
+  // recovery / proxycheck / data are three VIEWS of the shared settingsSection_data:
+  // show that section and filter its cards by [data-subsec]. Cards without a
+  // data-subsec belong to the «Данные и хранение» (data) view.
+  var DATA_VIEWS={recovery:1,proxycheck:1,data:1};
+  ['bank','audit','servers','syslog','serverHealth','simulator','operators','alerts','failover'].forEach(function(s){
     var sec=document.getElementById('settingsSection_'+s);
-    var nav=document.getElementById('snav_'+s);
     if(sec)sec.style.display=s===name?'':'none';
+  });
+  var dataSec=document.getElementById('settingsSection_data');
+  if(dataSec){
+    dataSec.style.display=DATA_VIEWS[name]?'':'none';
+    if(DATA_VIEWS[name]){
+      dataSec.querySelectorAll('.analytics-card').forEach(function(c){
+        var sub=c.getAttribute('data-subsec')||'data';
+        c.style.display=sub===name?'':'none';
+      });
+    }
+  }
+  ['bank','data','audit','servers','syslog','serverHealth','simulator','operators','alerts','failover','recovery','proxycheck'].forEach(function(s){
+    var nav=document.getElementById('snav_'+s);
     if(nav){nav.classList.toggle('active',s===name);}
   });
   _activeSettingsSection=name;
@@ -132,7 +160,7 @@ function switchSettingsSection(name){
   if(name==='alerts')loadAlertRules();
   if(name==='failover'){loadFailoverSettings();loadFailoverCandidates();loadFailoverLog();}
 }
-function switchMainTab(name,el){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'audit';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){switchBankNav(_activeBankTab||'acts');}if(name==='traffic'){renderTrafficTab();var activeAccSub=document.querySelector('.acc-sub-tab.active');if(!activeAccSub){var first=document.querySelector('.acc-sub-tab');if(first){first.classList.add('active');document.getElementById('acc-overview').classList.add('active')}}}if(name==='crm'){crmAutoLogin()}if(name==='ai_sales'){loadAiSales()}}
+function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'overview');}}if(name==='crm'){crmAutoLogin()}}
 
 // ========== PHASE 3: SYSTEM TAB ==========
 var _sysCharts = {};
@@ -154,7 +182,7 @@ function _sysKpi(label, value, sub, color, accent){
     ? 'background:linear-gradient(135deg,'+_kpiTint(accent,0.10)+','+_kpiTint(accent,0.02)+');'
     : 'background:var(--bg-1);';
   return '<div style="position:relative;padding:14px 18px;'+bg+'border:1px solid var(--border);border-left:4px solid '+stripe+';border-radius:8px;flex:1;min-width:140px;box-shadow:0 1px 2px rgba(0,0,0,0.03)">'
-    + '<div style="font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em;font-weight:600">'+label+'</div>'
+    + '<div style="font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;font-weight:600">'+label+'</div>'
     + '<div style="font-size:24px;font-weight:700;margin-top:6px;line-height:1.15;'+(color?'color:'+color:'color:var(--text-0)')+'">'+value+'</div>'
     + (sub ? '<div style="font-size:11px;color:var(--text-3);margin-top:4px">'+sub+'</div>' : '')
     + '</div>';
@@ -220,7 +248,7 @@ function renderSysHealth(targetId, daysId){
       var sorted = (d.modems||[]).slice().sort(function(a,b){return a.health_score - b.health_score});
       sorted.forEach(function(m){
         var col = m.status === 'good' ? 'var(--success)' : m.status === 'warn' ? 'var(--warning)' : 'var(--danger)';
-        h += '<tr style="border-top:1px solid var(--border)">';
+        h += '<tr>';
         h += '<td style="padding:6px 10px;font-weight:600">'+esc(m.nick)+'</td>';
         h += '<td style="padding:6px 10px;color:var(--text-2)">'+esc(m.server_name)+'</td>';
         h += '<td style="padding:6px 10px;color:var(--text-2)">'+esc(m.operator||'—')+'</td>';
@@ -230,7 +258,7 @@ function renderSysHealth(targetId, daysId){
         h += '<td style="padding:6px 10px;text-align:right">'+(m.rotations||0)+'</td>';
         h += '<td style="padding:6px 10px;text-align:right">'+(m.traffic_gb||0)+' GB</td>';
         h += '<td style="padding:6px 10px;text-align:center">'
-          +'<span style="display:inline-block;padding:2px 10px;border-radius:10px;background:'+col+';color:#fff;font-weight:700">'+m.health_score+'</span></td>';
+          +'<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:'+col+';color:#fff;font-weight:700">'+m.health_score+'</span></td>';
         h += '</tr>';
       });
       h += '</tbody></table>';
@@ -264,7 +292,7 @@ function renderSysRotations(targetId, daysId){
       h += '<div style="height:220px"><canvas id="sysRotChart"></canvas></div>';
       h += '</div>';
       // Servers + Operators
-      h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px">';
+      h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">';
       h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px">';
       h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">По серверам</div>';
       if (!d.per_server || !d.per_server.length) {
@@ -272,7 +300,7 @@ function renderSysRotations(targetId, daysId){
       } else {
         h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px;text-align:left">Сервер</th><th style="padding:4px;text-align:right">Всего</th><th style="padding:4px;text-align:right">Failed</th><th style="padding:4px;text-align:right">Avg с</th><th style="padding:4px;text-align:right">Max с</th></tr></thead><tbody>';
         d.per_server.forEach(function(srv){
-          h += '<tr style="border-top:1px solid var(--border)"><td style="padding:4px;font-weight:600">'+esc(srv.server_name||'—')+'</td><td style="padding:4px;text-align:right">'+srv.total+'</td><td style="padding:4px;text-align:right;'+(srv.failed>0?'color:var(--danger)':'')+'">'+srv.failed+'</td><td style="padding:4px;text-align:right;font-weight:600">'+(srv.avg_sec!=null?Math.round(srv.avg_sec*10)/10:'—')+'</td><td style="padding:4px;text-align:right;color:var(--text-2)">'+(srv.max_sec!=null?Math.round(srv.max_sec*10)/10:'—')+'</td></tr>';
+          h += '<tr><td style="padding:4px;font-weight:600">'+esc(srv.server_name||'—')+'</td><td style="padding:4px;text-align:right">'+srv.total+'</td><td style="padding:4px;text-align:right;'+(srv.failed>0?'color:var(--danger)':'')+'">'+srv.failed+'</td><td style="padding:4px;text-align:right;font-weight:600">'+(srv.avg_sec!=null?Math.round(srv.avg_sec*10)/10:'—')+'</td><td style="padding:4px;text-align:right;color:var(--text-2)">'+(srv.max_sec!=null?Math.round(srv.max_sec*10)/10:'—')+'</td></tr>';
         });
         h += '</tbody></table>';
       }
@@ -286,7 +314,7 @@ function renderSysRotations(targetId, daysId){
         var op = String(o.operator || '').trim().toLowerCase();
         return op && op !== '—' && op !== 'unknown' && op !== '?';
       }).forEach(function(o){
-        h += '<tr style="border-top:1px solid var(--border)"><td style="padding:4px">'+esc(o.operator)+'</td><td style="padding:4px;text-align:right">'+o.total+'</td><td style="padding:4px;text-align:right;'+(o.failed>0?'color:var(--danger)':'')+'">'+o.failed+'</td><td style="padding:4px;text-align:right">'+(o.avg_sec!=null?Math.round(o.avg_sec*10)/10:'—')+'</td></tr>';
+        h += '<tr><td style="padding:4px">'+esc(o.operator)+'</td><td style="padding:4px;text-align:right">'+o.total+'</td><td style="padding:4px;text-align:right;'+(o.failed>0?'color:var(--danger)':'')+'">'+o.failed+'</td><td style="padding:4px;text-align:right">'+(o.avg_sec!=null?Math.round(o.avg_sec*10)/10:'—')+'</td></tr>';
       });
       h += '</tbody></table></div></div>';
       // Per-modem (full width — "Последние неудачи" block removed)
@@ -298,7 +326,7 @@ function renderSysRotations(targetId, daysId){
         var sortedPm = d.per_modem.slice().filter(function(m){return m.avg_sec!=null}).sort(function(a,b){return b.avg_sec - a.avg_sec}).slice(0,20);
         h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px;text-align:left">Модем</th><th style="padding:4px;text-align:left">Сервер</th><th style="padding:4px;text-align:right">Всего</th><th style="padding:4px;text-align:right">Avg с</th><th style="padding:4px;text-align:right">Max с</th></tr></thead><tbody>';
         sortedPm.forEach(function(m){
-          h += '<tr style="border-top:1px solid var(--border)"><td style="padding:4px;font-weight:600">'+esc(m.nick)+'</td><td style="padding:4px;color:var(--text-2)">'+esc(m.server_name||'—')+'</td><td style="padding:4px;text-align:right">'+m.total+'</td><td style="padding:4px;text-align:right;font-weight:600">'+Math.round(m.avg_sec*10)/10+'</td><td style="padding:4px;text-align:right;color:var(--text-2)">'+(m.max_sec!=null?Math.round(m.max_sec*10)/10:'—')+'</td></tr>';
+          h += '<tr><td style="padding:4px;font-weight:600">'+esc(m.nick)+'</td><td style="padding:4px;color:var(--text-2)">'+esc(m.server_name||'—')+'</td><td style="padding:4px;text-align:right">'+m.total+'</td><td style="padding:4px;text-align:right;font-weight:600">'+Math.round(m.avg_sec*10)/10+'</td><td style="padding:4px;text-align:right;color:var(--text-2)">'+(m.max_sec!=null?Math.round(m.max_sec*10)/10:'—')+'</td></tr>';
         });
         h += '</tbody></table>';
       }
@@ -308,7 +336,7 @@ function renderSysRotations(targetId, daysId){
       setTimeout(function(){
         var cv = document.getElementById('sysRotChart');
         if(!cv || !window.Chart) return;
-        var cc = getChartColors();
+        var cc = getChartColorsLight();
         var pd = d.per_day || [];
         _sysCharts.rot = newChartSafe(cv, {
           type: 'bar',
@@ -345,15 +373,17 @@ function renderSysIp(targetId, daysId){
       h += _sysKpi('Reuse ratio', s.reuse_ratio || 0, 'assign/IP', null, ACC);
       h += _sysKpi('Средний lifetime', s.avg_lifetime_sec ? Math.round(s.avg_lifetime_sec/60)+' мин' : '—', null, null, ACC);
       h += _sysKpi('IP с повторами', s.reused_count || 0, null, null, ACC);
+      h += _sysKpi('Подсетей/модем', (d.subnet_summary && d.subnet_summary.avg) || 0, 'макс '+((d.subnet_summary && d.subnet_summary.max) || 0)+' · /24', null, ACC);
       h += '</div>';
       // Pools
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">';
+      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">';
       h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">Пулы IP по серверам</div>';
       h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:right">Уникальных IP</th><th style="padding:4px 8px;text-align:right">Назначений</th><th style="padding:4px 8px;text-align:right">Avg lifetime</th></tr></thead><tbody>';
       (d.pools||[]).forEach(function(p){
-        h += '<tr style="border-top:1px solid var(--border)"><td style="padding:4px 8px;font-weight:600">'+esc(p.server)+'</td><td style="padding:4px 8px;text-align:right">'+p.ip_count+'</td><td style="padding:4px 8px;text-align:right">'+p.total_assignments+'</td><td style="padding:4px 8px;text-align:right">'+(p.avg_lifetime_sec ? Math.round(p.avg_lifetime_sec/60)+' мин' : '—')+'</td></tr>';
+        h += '<tr><td style="padding:4px 8px;font-weight:600">'+esc(p.server)+'</td><td style="padding:4px 8px;text-align:right">'+p.ip_count+'</td><td style="padding:4px 8px;text-align:right">'+p.total_assignments+'</td><td style="padding:4px 8px;text-align:right">'+(p.avg_lifetime_sec ? Math.round(p.avg_lifetime_sec/60)+' мин' : '—')+'</td></tr>';
       });
       h += '</tbody></table></div>';
+      if(_totalRows>rows.length) h += '<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:8px 4px 0" onclick="zMore(\'api\')">+ ещё '+(_totalRows-rows.length)+' за период</div>';
       // Reused
       h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px">';
       h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">IP с повторным использованием</div>';
@@ -362,7 +392,21 @@ function renderSysIp(targetId, daysId){
       } else {
         h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">IP</th><th style="padding:4px 8px;text-align:right">Использований</th><th style="padding:4px 8px;text-align:right">Модемов</th><th style="padding:4px 8px;text-align:left">Первое</th><th style="padding:4px 8px;text-align:left">Последнее</th></tr></thead><tbody>';
         d.reused.slice(0, 50).forEach(function(r){
-          h += '<tr style="border-top:1px solid var(--border)"><td style="padding:4px 8px;font-family:var(--font-mono)">'+esc(r.ip)+'</td><td style="padding:4px 8px;text-align:right">'+r.uses+'</td><td style="padding:4px 8px;text-align:right">'+r.modems+'</td><td style="padding:4px 8px">'+esc((r.first||'').slice(5,16))+'</td><td style="padding:4px 8px">'+esc((r.last||'').slice(5,16))+'</td></tr>';
+          h += '<tr><td style="padding:4px 8px;font-family:var(--font-mono)">'+esc(r.ip)+'</td><td style="padding:4px 8px;text-align:right">'+r.uses+'</td><td style="padding:4px 8px;text-align:right">'+r.modems+'</td><td style="padding:4px 8px">'+esc((r.first||'').slice(5,16))+'</td><td style="padding:4px 8px">'+esc((r.last||'').slice(5,16))+'</td></tr>';
+        });
+        h += '</tbody></table>';
+      }
+      h += '</div>';
+      // Подсети на модем — сколько разных /24 прокручивает каждый модем (диверсификация IP)
+      var _sn = d.subnets || [];
+      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:14px">';
+      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">Подсети на модем <span style="color:var(--text-3);text-transform:none">(/24 — чем больше, тем разнообразнее IP)</span></div>';
+      if(!_sn.length){
+        h += '<div style="color:var(--text-3);padding:10px">Нет данных</div>';
+      } else {
+        h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Модем</th><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:right">Подсетей /24</th><th style="padding:4px 8px;text-align:right">Уникальных IP</th></tr></thead><tbody>';
+        _sn.forEach(function(x){
+          h += '<tr><td style="padding:4px 8px;font-weight:600">'+esc(x.nick)+'</td><td style="padding:4px 8px;color:var(--text-2)">'+esc(x.server)+'</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:'+ACC+'">'+x.subnets+'</td><td style="padding:4px 8px;text-align:right">'+x.ips+'</td></tr>';
         });
         h += '</tbody></table>';
       }
@@ -392,11 +436,11 @@ function renderSysCapacity(targetId, daysId){
       h += _sysKpi('Трафик (всего)', (s.total_gb||0) + ' GB', 'за ' + d.days + 'д', null, ACC);
       h += _sysKpi('Avg/модем', (s.avg_gb_per_modem||0) + ' GB', null, null, ACC);
       h += '</div>';
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">';
+      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">';
       h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">Серверы</div>';
       h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:6px;text-align:left">Сервер</th><th style="padding:6px;text-align:right">Модемов</th><th style="padding:6px;text-align:right">Всего GB</th><th style="padding:6px;text-align:right">Avg/час</th><th style="padding:6px;text-align:right">Max/час</th><th style="padding:6px;text-align:right">Active дн.</th></tr></thead><tbody>';
       (d.servers||[]).forEach(function(srv){
-        h += '<tr style="border-top:1px solid var(--border)"><td style="padding:6px;font-weight:600">'+esc(srv.server_name)+'</td><td style="padding:6px;text-align:right">'+srv.modems+'</td><td style="padding:6px;text-align:right">'+srv.total_gb+'</td><td style="padding:6px;text-align:right">'+srv.avg_hour_mb+' MB</td><td style="padding:6px;text-align:right">'+srv.max_hour_mb+' MB</td><td style="padding:6px;text-align:right">'+srv.active_days+'</td></tr>';
+        h += '<tr><td style="padding:6px;font-weight:600">'+esc(srv.server_name)+'</td><td style="padding:6px;text-align:right">'+srv.modems+'</td><td style="padding:6px;text-align:right">'+srv.total_gb+'</td><td style="padding:6px;text-align:right">'+srv.avg_hour_mb+' MB</td><td style="padding:6px;text-align:right">'+srv.max_hour_mb+' MB</td><td style="padding:6px;text-align:right">'+srv.active_days+'</td></tr>';
       });
       h += '</tbody></table></div>';
       // Growth
@@ -408,7 +452,7 @@ function renderSysCapacity(targetId, daysId){
       setTimeout(function(){
         var cv = document.getElementById('sysCapChart');
         if(!cv || !window.Chart) return;
-        var cc = getChartColors();
+        var cc = getChartColorsLight();
         var g = d.modem_growth || [];
         _sysCharts.cap = newChartSafe(cv, {
           type: 'line',
@@ -438,7 +482,7 @@ function renderSysDashboard(targetId){
       h += _sysKpi('API errors 24h', d.api_errors_24h || 0, null, d.api_errors_24h > 0 ? 'var(--danger)' : 'var(--success)');
       h += '</div>';
       // Errors chart
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px">';
+      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">';
       h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">Ошибки/предупреждения за 7 дней</div>';
       h += '<div style="height:180px"><canvas id="sysErrChart"></canvas></div>';
       h += '</div>';
@@ -448,31 +492,31 @@ function renderSysDashboard(targetId){
       if (!d.recent_critical || !d.recent_critical.length) {
         h += '<div style="color:var(--text-3);padding:10px">Нет</div>';
       } else {
-        h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Время</th><th style="padding:4px 8px;text-align:left">Уровень</th><th style="padding:4px 8px;text-align:left">Категория</th><th style="padding:4px 8px;text-align:left">Цель</th><th style="padding:4px 8px;text-align:left">Сообщение</th></tr></thead><tbody>';
+        h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="width:100%;min-width:520px;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Время</th><th style="padding:4px 8px;text-align:left">Уровень</th><th style="padding:4px 8px;text-align:left">Категория</th><th style="padding:4px 8px;text-align:left">Цель</th><th style="padding:4px 8px;text-align:left">Сообщение</th></tr></thead><tbody>';
         d.recent_critical.forEach(function(r){
           var col = r.level === 'error' ? 'color:var(--danger);font-weight:600' : 'color:var(--warning)';
-          h += '<tr style="border-top:1px solid var(--border)"><td style="padding:4px 8px">'+esc((r.timestamp||'').slice(5,16))+'</td><td style="padding:4px 8px;'+col+'">'+esc(r.level)+'</td><td style="padding:4px 8px">'+esc(r.category||'')+'</td><td style="padding:4px 8px">'+esc(r.target||'')+'</td><td style="padding:4px 8px;color:var(--text-2);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.message)+'">'+esc(r.message||'')+'</td></tr>';
+          h += '<tr><td style="padding:4px 8px">'+esc((r.timestamp||'').slice(5,16))+'</td><td style="padding:4px 8px;'+col+'">'+esc(r.level)+'</td><td style="padding:4px 8px">'+esc(r.category||'')+'</td><td style="padding:4px 8px">'+esc(r.target||'')+'</td><td style="padding:4px 8px;color:var(--text-2);max-width:400px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="'+esc(r.message)+'">'+esc(r.message||'')+'</td></tr>';
         });
-        h += '</tbody></table>';
+        h += '</tbody></table></div>';
       }
       h += '</div>';
       // Server downtime history (mig 035)
       if (d.server_downtime && d.server_downtime.length) {
         h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:14px">';
         h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">⚠ Недоступность серверов (история)</div>';
-        h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:left">С</th><th style="padding:4px 8px;text-align:left">По</th><th style="padding:4px 8px;text-align:right">Длительность</th></tr></thead><tbody>';
+        h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="width:100%;min-width:520px;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:left">С</th><th style="padding:4px 8px;text-align:left">По</th><th style="padding:4px 8px;text-align:right">Длительность</th></tr></thead><tbody>';
         d.server_downtime.forEach(function(r){
           var mins = Math.round((r.duration_sec||0)/60);
           var dur = mins >= 60 ? (Math.floor(mins/60)+'ч '+(mins%60)+'м') : (mins+' мин');
-          h += '<tr style="border-top:1px solid var(--border)"><td style="padding:4px 8px;font-weight:600">'+esc(r.server_name)+'</td><td style="padding:4px 8px">'+esc((r.down_from||"").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px">'+esc((r.down_to||"").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px;text-align:right;color:var(--danger);font-weight:600">'+dur+'</td></tr>';
+          h += '<tr><td style="padding:4px 8px;font-weight:600">'+esc(r.server_name)+'</td><td style="padding:4px 8px">'+esc((r.down_from||"").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px">'+esc((r.down_to||"").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px;text-align:right;color:var(--danger);font-weight:600">'+dur+'</td></tr>';
         });
-        h += '</tbody></table></div>';
+        h += '</tbody></table></div></div>';
       }
       c.innerHTML = h;
       setTimeout(function(){
         var cv = document.getElementById('sysErrChart');
         if(!cv || !window.Chart) return;
-        var cc = getChartColors();
+        var cc = getChartColorsLight();
         var e7 = d.errors_by_day || [];
         _sysCharts.err = newChartSafe(cv, {
           type: 'bar',
@@ -510,26 +554,39 @@ function updateServerDownBanner(cachedServers){
 // requests when one fetch is slow. Each call aborts the previous and
 // also pauses while the tab is hidden (visibilitychange handler).
 var _loadDataAbort=null;
+// Transient network drop (RU↔Cloudflare leg occasionally swallows a response).
+// Not a real outage — retry a couple times before surfacing it; the next
+// auto-refresh recovers anyway, so we never toast a bare "Failed to fetch".
+function _isNetErr(e){return !!e&&(e.name==='TypeError'||/Failed to fetch|NetworkError|Load failed|network/i.test(e.message||''));}
+function _fetchRetry(url,opts,tries){
+  tries=tries||3;
+  return fetch(url,opts).catch(function(e){
+    var aborted=opts&&opts.signal&&opts.signal.aborted;
+    if(tries>1&&_isNetErr(e)&&!aborted){
+      return new Promise(function(res){setTimeout(res,700);}).then(function(){return _fetchRetry(url,opts,tries-1);});
+    }
+    throw e;
+  });
+}
 function loadData(){
   if(!authToken)return;
   if(document.hidden)return; // pause when tab not visible
   if(_loadDataAbort){try{_loadDataAbort.abort()}catch(_){}}
   _loadDataAbort=new AbortController();
-  var bar=document.getElementById('refreshBar');bar.style.width='30%';
-  fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken},signal:_loadDataAbort.signal})
-    .then(function(r){bar.style.width='80%';if(r.status===401){doLogout();throw new Error('x')}return r.json()})
+  _armRefreshBar(); // restart the 10s countdown bar on every refresh (auto or manual)
+  _fetchRetry(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken},signal:_loadDataAbort.signal},3)
+    .then(function(r){if(r.status===401){doLogout();throw new Error('x')}return _okJson(r)})
     .then(function(data){
-      bar.style.width='100%';setTimeout(function(){bar.style.width='0'},300);
       currentData=data;
       updateServerDownBanner(data.cachedServers);
       processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
-      var _st=localStorage.getItem('admin_active_tab');
-      if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}
+      var _st=localStorage.getItem('admin_active_tab')||'dashboard';
+      var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te,true);
     })
     .catch(function(e){
-      bar.style.width='0';
       if(e.name==='AbortError')return; // superseded by newer fetch
+      if(_isNetErr(e)||_isServerDownErr(e))return; // transient blip / backend restarting — next refresh recovers, don't nag
       if(e.message!=='x')showToast('Ошибка: '+e.message,'error');
     });
 }
@@ -546,14 +603,14 @@ document.addEventListener('keydown',function(e){
   // Cmd+K: focus search-box in current tab
   if(meta&&(e.key==='k'||e.key==='K')){
     e.preventDefault();
-    var sb=document.getElementById('searchBox')||document.getElementById('clientSearch');
+    var sb=document.getElementById('modemSearch')||document.getElementById('searchBox')||document.getElementById('clientSearch');
     if(sb){sb.focus();sb.select()}
     return;
   }
   // / : focus search (only when not typing)
   if(!inField&&e.key==='/'){
     e.preventDefault();
-    var sb2=document.getElementById('searchBox')||document.getElementById('clientSearch');
+    var sb2=document.getElementById('modemSearch')||document.getElementById('searchBox')||document.getElementById('clientSearch');
     if(sb2){sb2.focus()}
     return;
   }
@@ -569,7 +626,7 @@ document.addEventListener('keydown',function(e){
   }
 });
 
-function processData(){if(!currentData)return;_initServers(currentData.servers);var downSet={};(currentData.cachedServers||[]).forEach(function(s){downSet[s.name]=true;});var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,_cached:!!m._cached,_serverDown:!!downSet[m._server],nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S\d+_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:!m._cached&&!downSet[m._server]&&(m.net_details?m.net_details.IS_ONLINE==='yes':false),isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',ports:[]}}
+function processData(){if(!currentData)return;_initServers(currentData.servers);var downSet={};(currentData.cachedServers||[]).forEach(function(s){downSet[s.name]=true;});var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,_cached:!!m._cached,_serverDown:!!downSet[m._server],nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S\d+_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:!m._cached&&!downSet[m._server]&&(m.net_details?m.net_details.IS_ONLINE==='yes':false),isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',band:(function(){var b=(m.net_details?String(m.net_details.BAND||''):'').trim();return(b&&b!=='?')?b:''})(),simStatus:(m.net_details?String(m.net_details.SimStatus||'').toUpperCase().trim():''),httpRedirect:(function(){var r=m.net_details?m.net_details.HTTP_REDIRECT_IMPOSED:null;if(r==null)return false;var s=String(r).toLowerCase().trim();return!!s&&['no','null','0','false','none'].indexOf(s)<0})(),rebootScore:(function(){var r=m.modem_details?m.modem_details.REBOOT_SCORE:null;return(r!=null&&r!==''&&isFinite(+r))?Math.round(+r):null})(),isLocked:(m.IS_LOCKED===true||m.IS_LOCKED==='true'),msg:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join('; '):(b||'');return [m.MSG||'',b].filter(Boolean).join('; ').trim()})(),webappDown:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join(' '):(b||'');return /web ?app|not available|restart the modem/i.test(String(m.MSG||'')+' '+b)})(),pktLoss:(function(){var p=(m.net_details?m.net_details.ping_stats:'')||'';var mm=/(\d+)\s*%\s*loss/i.exec(p);return mm?parseInt(mm[1],10):null})(),connDead:(function(){var c=String((m.net_details?m.net_details.ConnectionStatus:'')||'').toLowerCase();return /disconnect|ppp_disc|no carrier|down/.test(c)})(),ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
   var bw=currentData.bandwidth||{};for(var mi in mm){var mod=mm[mi];for(var p=0;p<mod.ports.length;p++){var pt=mod.ports[p];if(bw[pt.portID])pt._bw=bw[pt.portID]}}
   // IP tracking & uptime tracking
@@ -628,14 +685,21 @@ function processData(){if(!currentData)return;_initServers(currentData.servers);
   for(var pi=0;pi<pcSummary.length;pi++){var p=pcSummary[pi];pcSumMap[p.server_name+'_'+p.nick]={total:p.total_checks||0,avgMs:Math.round(p.avg_ms)||0,errors:p.error_count||0}}
   var pcLastMap={};
   for(var li=0;li<pcLast.length;li++){var l=pcLast[li];pcLastMap[l.server_name+'_'+l.nick]={connectMs:l.connect_ms,totalMs:l.total_ms,status:l.status_code,error:l.error,checkedAt:l.checked_at}}
+  var pcConsecMap={},pcConsec=pcs.consec||[];for(var ci=0;ci<pcConsec.length;ci++){pcConsecMap[pcConsec[ci].server_name+'_'+pcConsec[ci].nick]=pcConsec[ci].consec||0}
+  var pcTodayMap={},pcToday=pcs.today||[];for(var ti=0;ti<pcToday.length;ti++){var pt=pcToday[ti];pcTodayMap[pt.server_name+'_'+pt.nick]={total:pt.total_checks||0,errors:pt.error_count||0}}
   for(var imei in mm){
     var m=mm[imei],pKey=m.server+'_'+m.nick;
     var sm=pcSumMap[pKey];
     var lt=pcLastMap[pKey];
     m.pcAvgMs=sm?sm.avgMs:null;
     m.pcErrorPct=sm&&sm.total>0?Math.round((sm.errors||0)/sm.total*100):null;
+    var td=pcTodayMap[pKey];
+    m.pcChecksToday=td?td.total:0;
+    m.pcErrToday=td?td.errors:0;
+    m.pcErrorPctToday=td&&td.total>0?Math.round((td.errors||0)/td.total*100):null;
     m.pcLastMs=lt?lt.totalMs:null;
     m.pcLastError=lt?lt.error:null;
+    m.pcConsecFails=pcConsecMap[pKey]||0;
     m.pcLastStatus=lt?lt.status:null;
     m.pcCheckedAt=lt?lt.checkedAt:null;
   }
@@ -716,7 +780,7 @@ function _excludeChip(modem){
   if(!r) return '';
   var bg = r.type==='stale' ? 'rgba(155,155,152,0.18)' : 'rgba(232,159,39,0.18)';
   var fg = r.type==='stale' ? 'var(--text-3)' : '#a86b00';
-  return ' <span class="excl-chip" title="'+esc(r.tooltip)+'" style="display:inline-block;background:'+bg+';color:'+fg+';padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.03em;cursor:help;vertical-align:middle;margin-left:5px">'+esc(r.label)+'</span>';
+  return ' <span class="excl-chip" title="'+esc(r.tooltip)+'" style="display:inline-block;background:'+bg+';color:'+fg+';padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;cursor:help;vertical-align:middle;margin-left:5px">'+esc(r.label)+'</span>';
 }
 
 // ========== MODEM TABLE ==========
@@ -726,29 +790,143 @@ function renderServerFilter(){var sv=currentData.servers||[];var ls='font-size:1
   Object.keys(seen).forEach(function(cc){var g=seen[cc];var ccActive=g.servers.indexOf(activeServerFilter)!==-1;
     h+='<label style="'+ls+';font-weight:600;font-size:10px;padding-top:6px"><input type="radio" name="srvF" '+(activeServerFilter==='country:'+cc?'checked':'')+' onchange="setServerFilter(\'country:'+cc+'\')"> '+g.flag+' '+g.name+' <span style="color:var(--text-3);font-weight:400">(все)</span></label>';
     g.servers.sort().forEach(function(sn){h+='<label style="'+ls+';padding-left:20px"><input type="radio" name="srvF" '+(activeServerFilter===sn?'checked':'')+' onchange="setServerFilter(\''+sn+'\')"> '+sn+'</label>'})});
-  document.getElementById('serverFilterDD').innerHTML=h;
-  // Status filter
-  var sh='';['all','online','offline'].forEach(function(v){var lbl=v==='all'?'Все статусы':v==='online'?'Online':'Offline';sh+='<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;font-size:11px;border-radius:3px"><input type="radio" name="stF" '+(activeStatusFilter===v?'checked':'')+' onchange="setStatusFilter(\''+v+'\')"> '+lbl+'</label>'});document.getElementById('statusFilterDD').innerHTML=sh}
+  var _sfd=document.getElementById('serverFilterDD');if(_sfd)_sfd.innerHTML=h; // server/client/status moved inline; ⚙ keeps only columns
+  // Status filter (legacy ⚙ slot — only render if present)
+  var sh='';['all','online','offline'].forEach(function(v){var lbl=v==='all'?'Все статусы':v==='online'?'Online':'Offline';sh+='<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;font-size:11px;border-radius:3px"><input type="radio" name="stF" '+(activeStatusFilter===v?'checked':'')+' onchange="setStatusFilter(\''+v+'\')"> '+lbl+'</label>'});var _stfd=document.getElementById('statusFilterDD');if(_stfd)_stfd.innerHTML=sh}
 function setServerFilter(v){activeServerFilter=v;localStorage.setItem('admin_srv_filter',v);renderTable()}
 function setStatusFilter(v){activeStatusFilter=v;renderTable()}
 function setClientFilter(v){activeClientFilter=v;renderTable()}
 function renderClientFilterDD(){var el=document.getElementById('clientFilterDD');if(!el||!currentData)return;var cls=currentData.clients||[];var h='<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;font-size:11px;border-radius:3px"><input type="radio" name="clF" '+(activeClientFilter===''?'checked':'')+' onchange="setClientFilter(\'\')"> Все клиенты</label>';cls.forEach(function(c){h+='<label style="display:flex;align-items:center;gap:6px;padding:3px 8px;cursor:pointer;font-size:11px;border-radius:3px"><input type="radio" name="clF" '+(activeClientFilter===c.portName?'checked':'')+' onchange="setClientFilter(\''+esc(c.portName)+'\')"> '+esc(c.name)+'</label>'});el.innerHTML=h}
 function toggleFilterDropdown(){document.getElementById('filterDropdown').classList.toggle('show')}
 document.addEventListener('click',function(e){if(!e.target.closest('.col-selector'))document.querySelectorAll('.col-dropdown').forEach(function(d){d.classList.remove('show')})})
-function renderColSelector(){var h='';for(var i=0;i<COLUMNS.length;i++){var c=COLUMNS[i];if(c.id==='status'||c.id==='actions'||c.id==='bulk')continue;h+='<label><input type="checkbox" '+(c.visible?'checked':'')+' onchange="toggleCol(\''+c.id+'\',this.checked)">'+c.label+'</label>'}document.getElementById('colDropdown').innerHTML=h}
-function toggleCol(id,v){for(var i=0;i<COLUMNS.length;i++){if(COLUMNS[i].id===id){COLUMNS[i].visible=v;break}}var s={};COLUMNS.forEach(function(c){s[c.id]=c.visible});localStorage.setItem('admin_col_state',JSON.stringify(s));renderTable()}
+function renderColSelector(){var h='';for(var i=0;i<COLUMNS.length;i++){var c=COLUMNS[i];if(c.id==='status'||c.id==='actions'||c.id==='bulk'||c.id==='rail')continue;h+='<label><input type="checkbox" '+(c.visible?'checked':'')+' onchange="toggleCol(\''+c.id+'\',this.checked)">'+c.label+'</label>'}document.getElementById('colDropdown').innerHTML=h}
+function toggleCol(id,v){for(var i=0;i<COLUMNS.length;i++){if(COLUMNS[i].id===id){COLUMNS[i].visible=v;break}}var s={};COLUMNS.forEach(function(c){s[c.id]=c.visible});localStorage.setItem('admin_col_state_v2',JSON.stringify(s));renderTable()}
 // getModemStatus, formatUptime, formatTraffic, renderSignalBars, renderNetBadge,
 // esc, fmtDateRu, parseTraffic, bytesToGb moved to /js/utils.js
 
+// ===== Redesign Phase 1: fleet summary chips + quick filters + needs-attention band =====
+var activeQuickFilter='all';
+function _fmtDur(ms){var s=Math.max(0,Math.floor(ms/1000));var h=Math.floor(s/3600),m=Math.floor((s%3600)/60);if(h>0)return h+' ч '+m+' м';if(m>0)return m+' м';return s+' с';}
+function _modemTrafGb(modem){var b=0;(modem.ports||[]).forEach(function(p){var w=p._bw||{};b+=parseTraffic(w.bandwidth_bytes_day_in)+parseTraffic(w.bandwidth_bytes_day_out)});return b/1e9;}
+// Client/rental state. randomport* phantoms are already cleaned to '' upstream,
+// so a non-empty portName = a real client. PROXY_VALID_BEFORE in the past = срок аренды истёк.
+function _portExpired(p){var vb=p&&p.PROXY_VALID_BEFORE;if(!vb)return false;var t=Date.parse(vb);return !isNaN(t)&&t<Date.now();}
+function _modemClients(m){var out=[];(m.ports||[]).forEach(function(p){var n=(p.portName||'').trim();if(n&&out.indexOf(n)===-1)out.push(n);});return out;}
+function _hasActiveClient(m){return (m.ports||[]).some(function(p){return (p.portName||'').trim()&&!_portExpired(p);});}
+function _allClientsExpired(m){var cp=(m.ports||[]).filter(function(p){return (p.portName||'').trim();});return cp.length>0&&cp.every(_portExpired);}
+// A QUALITY problem on a present modem (independent of offline). Returns {reason,sev,kind} or null.
+function _modemIssue(modem){
+  if(modem.webappDown)return{reason:'WebApp недоступен — нужен рестарт',sev:5,kind:'webapp'};
+  var ss=(modem.simStatus||'').toUpperCase();
+  if(ss&&ss!=='UNKNOWN'&&!/\bOK\b|READY/.test(ss))return{reason:'SIM: '+(ss==='MODEM_SIM_UNDETECTED'?'не определена':ss.toLowerCase()),sev:5,kind:'sim'};
+  if(modem.httpRedirect)return{reason:'редирект оператора · SIM без денег/блок',sev:5,kind:'sim'};
+  var hm=_getHealth(modem);
+  // «не отвечает» — только при УСТОЙЧИВОМ провале (≥50% чеков в окне), а не по
+  // одному флапнувшему чеку: мобильный прокси изредка ловит таймаут (curl 15с),
+  // но работает (трафик идёт). Латентность — по стабильному P50, не по последнему.
+  // Proxy/error signals matter only for an ACTIVELY rented modem. A free or
+  // expired port is blocked by us / is a phantom → its failures are not a fault.
+  // Связь модема (по net_details, не зависит от клиента). ProxySmart считает
+  // «Online» строго — модем с IS_ONLINE=yes, но разрывом / большими потерями он
+  // НЕ считает работающим. Дублируем эту строгость, иначе деградировавшие модемы
+  // молча числятся «в работе».
+  if(modem.connDead||modem.pktLoss===100)return{reason:'нет связи · '+(modem.connDead?'разрыв соединения':'100% потерь'),sev:4,kind:'loss'};
+  if(modem.pktLoss!=null&&modem.pktLoss>=40)return{reason:'плохая связь · потери '+modem.pktLoss+'%',sev:4,kind:'loss'};
+  var _act=_hasActiveClient(modem);
+  if(_act&&(modem.pcConsecFails||0)>=3)return{reason:'прокси не отвечает ('+modem.pcConsecFails+' подряд)',sev:4,kind:'proxy'};
+  if(hm&&hm.latency_ms!=null&&hm.latency_ms>_pcBadMs)return{reason:'латентность '+fmtMs(hm.latency_ms),sev:3,kind:'lat'};
+  if(modem.pktLoss!=null&&modem.pktLoss>=15)return{reason:'потери пакетов '+modem.pktLoss+'%',sev:3,kind:'loss'};
+  if(_act&&modem.pcErrorPct!=null&&modem.pcErrorPct>=_errorRateThreshold)return{reason:'ошибки '+modem.pcErrorPct+'%',sev:3,kind:'err'};
+  if(hm&&hm.health_score!=null&&hm.status==='bad')return{reason:'здоровье '+hm.health_score,sev:2,kind:'health'};
+  if(modem.rebootScore!=null&&modem.rebootScore>=70)return{reason:'нужен ребут · score '+modem.rebootScore,sev:2,kind:'reboot'};
+  return null;
+}
+// Inline status flags shown next to the modem nick — only when the condition
+// is actually active (redirect / SIM problem / reboot-needed / locked). Sparse
+// states get a symbol in-place instead of a mostly-empty dedicated column.
+// ProxySmart MSG во время ротации/операции = служебный шум («IP rotated at the
+// moment; Locked with other operation (IP rotation)») — он дублирует значок 🔒 и
+// статус «Смена IP», показывать его флагом ⚠ не нужно. Реальные предупреждения
+// (WebApp not available и т.п.) сюда не попадают и остаются видимыми.
+function _msgIsNoise(s){s=String(s||'').toLowerCase();if(!s.trim())return true;
+  var t=s.replace(/ip rotated at the moment/g,'').replace(/locked with other operation\s*\([^)]*\)/g,'').replace(/locked with other operation/g,'').replace(/ip rotation/g,'').replace(/rotation in progress/g,'').replace(/in progress/g,'').replace(/at the moment/g,'').replace(/\brotated\b/g,'').replace(/\brotation\b/g,'').replace(/\blocked\b/g,'');
+  return t.replace(/[^a-zа-я0-9]+/gi,'').length===0;}
+// Сервер «отключён» = отдаёт устаревший кеш (попал в currentData.cachedServers).
+function _serverDownInfo(srv){var cs=(currentData&&currentData.cachedServers)||[];for(var i=0;i<cs.length;i++){if(cs[i].name===srv){var ca=cs[i].cachedAt||0;return{down:true,ageMin:ca?Math.round((Date.now()-ca)/60000):0}}}return{down:false,ageMin:0}}
+function _serverDownBadge(srv){var d=_serverDownInfo(srv);if(!d.down)return'';return'<span class="srv-down-badge" title="Сервер не отвечает — показаны последние данные из кеша">⚠ Сервер недоступен'+(d.ageMin?' · '+d.ageMin+' мин назад':'')+'</span>';}
+function _modemFlags(m){var f='';
+  if(m.httpRedirect)f+='<span class="mflag" style="color:var(--danger)" title="Оператор навязал редирект — SIM без денег / блок">⛔</span>';
+  var ss=(m.simStatus||'').toUpperCase();if(ss&&ss!=='UNKNOWN'&&!/\bOK\b|READY/.test(ss))f+='<span class="mflag" style="color:var(--danger)" title="SIM: '+esc(ss)+'">\u{1F4F5}</span>';
+  if(m.rebootScore!=null&&Number(m.rebootScore)>=70)f+='<span class="mflag" style="color:var(--warning)" title="Нужен ребут (score '+m.rebootScore+')">♻</span>';
+  if(m.isLocked)f+='<span class="mflag" style="color:var(--text-2)" title="Модем занят операцией / ротацией">\u{1F512}</span>';
+  if(m.webappDown)f+='<span class="mflag" style="color:var(--danger)" title="ProxySmart: '+esc(m.msg||'WebApp недоступен — перезагрузите модем')+'">\u{1F310}</span>';
+  else if(m.msg&&!_msgIsNoise(m.msg))f+='<span class="mflag" style="color:var(--warning)" title="ProxySmart: '+esc(m.msg)+'">⚠</span>';
+  return f;}
+// «Давно офлайн» (снят с учёта): офлайн ≥ _staleModemHours (по умолч. 12ч) или
+// никогда не был онлайн. Такие скрыты по умолчанию, показываются фильтром.
+function _isStaleModem(m){if(m.webappDown)return false;if(getModemStatus(m)!=='offline')return false;var ms=Number(m.lastSeenMs)||0;if(!ms)return true;return ms<(Date.now()-(Number(window._staleModemHours)||12)*3600000);}
+function _offlineReason(modem){if(getModemStatus(modem)!=='offline')return null;var ms=Number(modem.lastSeenMs)||0;var st=(window._staleModemHours?(Date.now()-ms>(Number(window._staleModemHours)||12)*3600000):false);return{reason:'оффлайн '+(ms?_fmtDur(Date.now()-ms):'давно'),sev:4,kind:'offline',ms:ms,stale:(ms?st:true)};}
+function _attnReason(modem){var off=_offlineReason(modem);return off?off:_modemIssue(modem);}
+function setQuickFilter(v){activeQuickFilter=(activeQuickFilter===v?'all':v);renderTable();}
+function setModemsView(v){window._modemsView=v;try{localStorage.setItem('admin_modems_view',v)}catch(e){}renderTable();}
+function tmClose(){var m=document.getElementById('tileMenu');if(m)m.style.display='none';}
+function tileMenu(e,tile){e.stopPropagation();var n=tile.dataset.nick,s=tile.dataset.server,i=tile.dataset.imei||'',mdl=tile.dataset.model||'';var d='data-imei="'+i+'" data-server="'+s+'" data-nick="'+esc(n)+'"';var m=document.getElementById('tileMenu');if(!m){m=document.createElement('div');m.id='tileMenu';m.className='tile-menu';document.body.appendChild(m);}
+  m.innerHTML='<div class="tm-h">'+esc(n)+' <span style="color:var(--text-3);font-weight:400">'+esc(s)+'</span></div>'
+    +'<button class="tm-item" '+d+' onclick="rebootModem(this);tmClose()">⏻ Ребут</button>'
+    +(/MF289/i.test(mdl)?'':'<button class="tm-item" '+d+' onclick="usbReset(this);tmClose()">⊘ USB-ресет</button>')
+    +'<button class="tm-item" '+d+' onclick="readdModem(this);tmClose()">⟳ Re-Add (переподключить)</button>'
+    +'<div style="height:1px;background:var(--border);margin:4px 0"></div>'
+    +'<button class="tm-item" onclick="tmClose();openDetailAtTab(\''+esc(n).replace(/\x27/g,"\\\x27")+'\',\''+s+'\',\'info\')">ⓘ Подробнее</button>'+((i&&tile.dataset.stale==='1')?'<div style="height:1px;background:var(--border);margin:4px 0"></div><button class="tm-item" style="color:var(--danger)" onclick="tmClose();deleteModem(\''+s+'\',\'meta_'+i+'\',\''+esc(n).replace(/\x27/g,"\\\x27")+'\')">🗑 Удалить</button>':'');
+  m.style.display='block';var r=tile.getBoundingClientRect(),mw=180,mh=m.offsetHeight||210;var left=r.left;if(left+mw>window.innerWidth-8)left=window.innerWidth-mw-8;var top=r.bottom+4;if(top+mh>window.innerHeight-8)top=Math.max(8,r.top-mh-4);m.style.left=left+'px';m.style.top=top+'px';}
+document.addEventListener('click',function(e){if(!e.target.closest('#tileMenu')&&!e.target.closest('.modem-tile'))tmClose();});
+function _tileRank(m){var st=getModemStatus(m);if(st==='offline')return 4;var iss=_modemIssue(m);if(iss)return iss.sev>=4?0:1;return 2;}
+function _tileColor(m){var st=getModemStatus(m);if(st==='offline')return{b:'var(--text-3)',bg:'var(--bg-2)'};var iss=_modemIssue(m);if(iss)return iss.sev>=4?{b:'var(--danger)',bg:'rgba(255,56,60,.08)'}:{b:'var(--warning)',bg:'rgba(255,204,0,.10)'};return{b:'var(--success)',bg:''};}
+function renderModemGrid(groups){var out='';COUNTRY_ORDER.forEach(function(srv){var modems=groups[srv];if(!modems||!modems.length)return;var ci=COUNTRIES[srv]||{};var online=0;modems.forEach(function(m){var s=getModemStatus(m);if(s==='online'||s==='rotating')online++});var fb=(currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[srv])||null;var fOn=fb?((fb.working!=null)?fb.working:fb.online):online;var fN=fb?fb.total:modems.length;if(fN<fOn)fN=fOn;out+='<div style="font-size:12px;color:var(--text-2);margin:12px 24px 8px;display:flex;align-items:center;gap:8px;flex-wrap:wrap"><span style="font-family:var(--font-mono);font-weight:700;color:var(--accent)">'+esc(srv)+'</span>'+(ci.name?'<span>· '+esc(ci.name)+'</span>':'')+'<span style="color:'+(fOn>=fN?'var(--success)':'var(--warning)')+';font-weight:600">'+fOn+'/'+fN+' в работе</span>'+_serverDownBadge(srv)+'<span style="margin-left:auto;display:inline-flex;gap:6px"><button class="srv-act" onclick="reconnectAll(\''+srv+'\')" title="Re-Add всех офлайн-модемов сервера">↻ Переподключить модемы</button><button class="srv-act srv-act-danger" onclick="rebootServer(\''+srv+'\')" title="Перезагрузить весь сервер (нужен пароль)">⏻ Ребут сервера</button></span></div><div class="mtile-grid" style="padding:0 24px 4px">';var sorted=modems.slice().sort(function(a,b){return String(a.nick).localeCompare(String(b.nick),undefined,{numeric:true,sensitivity:'base'})});sorted.forEach(function(m){var c=_tileColor(m);var st=getModemStatus(m);var sub;var iss;if(m.webappDown){sub='<span style="color:var(--danger)">WebApp недоступен</span>';}else if(st==='rotating'){sub='<span style="color:var(--accent)">Смена IP…</span>';}else if(st==='rebooting'){sub='<span style="color:var(--accent)">Перезагрузка…</span>';}else if(st==='offline'){var off=_offlineReason(m);sub='<span style="color:var(--text-3)">'+(off?esc(off.reason):'офлайн')+'</span>';}else if(!_hasActiveClient(m)){sub='<span style="color:var(--text-3)">'+(_allClientsExpired(m)?'Оплата истекла':'Свободен')+'</span>';}else{iss=_modemIssue(m);if(iss&&iss.kind==='err')iss=null;var _pt=m.pcErrorPctToday;var _tBad=(m.pcErrToday>0&&_pt!=null&&_pt>=_errorRateThreshold);var _tWarn=(m.pcErrToday>0&&_pt!=null&&_pt>=5);if(iss&&iss.sev>=4){sub='<span style="color:var(--danger)">'+esc(iss.reason)+'</span>';}else if(_tBad||_tWarn){sub='<span style="color:'+(_tBad?'var(--danger)':'var(--warning)')+'">Ошибки: '+_pt+'%</span>';}else if(iss){sub='<span style="color:var(--warning)">'+esc(iss.reason)+'</span>';}else if(m.pcErrToday>0){sub='<span style="color:var(--text-3)">Ошибки: '+(_pt>=1?_pt+'%':'<1%')+'</span>';}else{sub='<span style="color:var(--text-3)">'+(m.pcChecksToday>0?'Без ошибок':'Ок')+'</span>';}}var _cls=_modemClients(m);var _clf=esc(_cls.join(', '));var _hm=_getHealth(m);var _hs='';if(_hm&&_hm.health_score!=null&&!(iss&&iss.kind==='health')){var _hc=_hm.status==='good'?'var(--success)':_hm.status==='warn'?'var(--warning)':_hm.status==='bad'?'var(--danger)':'var(--text-3)';_hs='<div class="mt-health"><span style="color:'+_hc+'" title="Health-score (7 дн): латентность + ошибки + аптайм">Здоровье: '+_hm.health_score+'</span></div>';}out+='<div class="modem-tile" data-nick="'+esc(m.nick)+'" data-server="'+m.server+'" data-imei="'+(m.rawImei||'')+'" data-model="'+esc(m.model||'')+'" data-stale="'+(_isStaleModem(m)?'1':'')+'" onclick="tileMenu(event,this)" style="border-left-color:'+c.b+';'+(c.bg?'background:'+c.bg+';':'')+'"><div class="mt-nick">'+esc(m.nick)+_modemFlags(m)+'</div><div class="mt-client" title="'+_clf+'">'+(_cls.length?_clf:'<span style="color:var(--text-3)">—</span>')+'</div>'+(m.operator?'<div class="mt-op" title="Оператор"><i></i>'+esc(m.operator)+'</div>':'')+'<div class="mt-sub">'+sub+'</div>'+_hs+'</div>';});out+='</div>';});return out||'<div style="padding:40px;text-align:center;color:var(--text-3)">Нет модемов по фильтру</div>';}
+var _mkColor={webapp:'var(--danger)',sim:'var(--danger)',proxy:'var(--danger)',offline:'var(--danger)',loss:'var(--danger)',lat:'var(--warning)',err:'var(--warning)',health:'var(--warning)',reboot:'var(--warning)'};
+function renderModemsTopBar(){
+  var map=(currentData&&currentData._modemMap)||{};
+  var total=0,online=0,offline=0,problem=0,free=0,stale=0,sim=0;
+  for(var k in map){var m=map[k];
+    if(_isStaleModem(m)){stale++;continue;}
+    total++;var st=getModemStatus(m);
+    if(st==='online'||st==='rotating')online++;else if(st==='offline')offline++;
+    var _mi=_modemIssue(m);if(_mi)problem++;if(_mi&&_mi.kind==='sim')sim++;
+    if(!_hasActiveClient(m))free++;
+  }
+  function chip(id,label,count,clr){var on=activeQuickFilter===id;return '<button class="qf-chip'+(on?' active':'')+'" data-f="'+id+'" onclick="setQuickFilter(\''+id+'\')">'+label+'<span class="qf-count"'+(clr&&!on?' style="color:'+clr+'"':'')+'>'+count+'</span></button>';}
+  var chips='<div class="qf-chips">'
+    +chip('all','Все',total,'')
+    +chip('online','Онлайн',online,'var(--success)')
+    +chip('problem','Проблемы',problem,'var(--warning)')
+    +chip('sim','SIM',sim,'var(--danger)')
+    +chip('offline','Офлайн',offline,'var(--text-2)')
+    +chip('free','Свободные',free,'var(--accent)')
+    +chip('stale','Оффлайн >12ч',stale,'var(--text-3)')
+    +'</div>';
+  // Сервер (сгруппирован по стране) + Клиент — инлайн-селекты
+  var sv=(currentData&&currentData.servers)||[];var seen={};sv.forEach(function(s){var c=COUNTRIES[s.name]||{};var cc=c.country||s.name;if(!seen[cc])seen[cc]={flag:c.flag||'',name:c.name||cc,servers:[]};seen[cc].servers.push(s.name);});
+  var srvSel='<select class="flt-select" onchange="setServerFilter(this.value)"><option value="all"'+(activeServerFilter==='all'?' selected':'')+'>Все серверы</option>';
+  Object.keys(seen).forEach(function(cc){var g=seen[cc];srvSel+='<optgroup label="'+esc(g.name)+'"><option value="country:'+cc+'"'+(activeServerFilter==='country:'+cc?' selected':'')+'>'+esc(g.name)+' — все</option>';g.servers.sort().forEach(function(sn){srvSel+='<option value="'+esc(sn)+'"'+(activeServerFilter===sn?' selected':'')+'>'+esc(sn)+'</option>';});srvSel+='</optgroup>';});
+  srvSel+='</select>';
+  var cls=(currentData&&currentData.clients)||[];
+  var clSel='<select class="flt-select" onchange="setClientFilter(this.value)"><option value=""'+(activeClientFilter===''?' selected':'')+'>Все клиенты</option>';
+  cls.forEach(function(c){clSel+='<option value="'+esc(c.portName)+'"'+(activeClientFilter===c.portName?' selected':'')+'>'+esc(c.name)+'</option>';});
+  clSel+='</select>';
+  var toggle='<div class="acc-period-group" style="display:inline-flex"><button class="acc-period-btn'+(window._modemsView==='grid'?'':' active')+'" onclick="setModemsView(\'table\')">Таблица</button><button class="acc-period-btn'+(window._modemsView==='grid'?' active':'')+'" onclick="setModemsView(\'grid\')">Сетка</button></div>';
+  var bar='<div style="display:flex;align-items:center;justify-content:space-between;padding:10px 24px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:10px">'+chips+'<div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">'+srvSel+clSel+toggle+'</div></div>';
+  var tb=document.getElementById('modemsTopBar');if(tb)tb.innerHTML=bar;
+  var na=document.getElementById('needsAttention');if(na)na.innerHTML='';
+}
+
 function renderTable(){
-  if(!currentData||!currentData._modemMap)return;var map=currentData._modemMap,search=(document.getElementById('searchBox').value||'').toLowerCase(),cols=COLUMNS.filter(function(c){return c.visible}),wrap=document.getElementById('tableWrap');
+  if(!currentData||!currentData._modemMap)return;try{renderModemsTopBar()}catch(_e){}var map=currentData._modemMap,search=(((document.getElementById('modemSearch')||document.getElementById('searchBox')||{}).value)||'').toLowerCase(),cols=COLUMNS.filter(function(c){return c.visible}),wrap=document.getElementById('tableWrap');
   var groups={};COUNTRY_ORDER.forEach(function(s){groups[s]=[]});
   var totalFiltered=0;
-  for(var imei in map){var modem=map[imei],srv=modem.server;if(activeServerFilter!=='all'){if(activeServerFilter.indexOf('country:')===0){var _fc=activeServerFilter.slice(8);var _sc=(COUNTRIES[srv]||{}).country||'';if(_sc!==_fc)continue}else if(srv!==activeServerFilter)continue}var status=getModemStatus(modem);if(activeStatusFilter==='online'&&status!=='online'&&status!=='rotating')continue;if(activeStatusFilter==='offline'&&status!=='offline')continue;if(activeClientFilter){var pns=modem.ports.map(function(p){return p.portName||''});if(pns.indexOf(activeClientFilter)===-1)continue}if(search){var ss=[modem.nick,modem.extIp,modem.operator,modem.phone].join(' ').toLowerCase();modem.ports.forEach(function(p){ss+=' '+(p.portName||'')+' '+(p.LOGIN||'')});if(ss.indexOf(search)===-1)continue}if(!groups[srv])groups[srv]=[];groups[srv].push(modem);totalFiltered++}
+  for(var imei in map){var modem=map[imei],srv=modem.server;if(_isStaleModem(modem)&&activeQuickFilter!=='stale'&&activeStatusFilter!=='offline')continue;if(activeQuickFilter!=='all'){var _qst=getModemStatus(modem);if(activeQuickFilter==='online'){if(_qst!=='online'&&_qst!=='rotating')continue}else if(activeQuickFilter==='offline'){if(_qst!=='offline')continue}else if(activeQuickFilter==='stale'){if(!_isStaleModem(modem))continue}else if(activeQuickFilter==='problem'){if(!_modemIssue(modem)&&!_offlineReason(modem))continue}else if(activeQuickFilter==='sim'){var _qi=_modemIssue(modem);if(!_qi||_qi.kind!=='sim')continue}else if(activeQuickFilter==='idle'){if(_qst==='offline'||_modemTrafGb(modem)>0.05)continue}else if(activeQuickFilter==='free'){if(_hasActiveClient(modem))continue}}if(activeServerFilter!=='all'){if(activeServerFilter.indexOf('country:')===0){var _fc=activeServerFilter.slice(8);var _sc=(COUNTRIES[srv]||{}).country||'';if(_sc!==_fc)continue}else if(srv!==activeServerFilter)continue}var status=getModemStatus(modem);if(activeStatusFilter==='online'&&status!=='online'&&status!=='rotating')continue;if(activeStatusFilter==='offline'&&status!=='offline')continue;if(activeClientFilter){var pns=modem.ports.map(function(p){return p.portName||''});if(pns.indexOf(activeClientFilter)===-1)continue}if(search){var ss=[modem.nick,modem.extIp,modem.operator,modem.phone].join(' ').toLowerCase();modem.ports.forEach(function(p){ss+=' '+(p.portName||'')+' '+(p.LOGIN||'')});if(ss.indexOf(search)===-1)continue}if(!groups[srv])groups[srv]=[];groups[srv].push(modem);totalFiltered++}
   var totalAll=Object.keys(map).length;
   var ctr=document.getElementById('searchCounter');
   if(ctr){var hasFilter=search||activeClientFilter||activeServerFilter!=='all'||activeStatusFilter!=='all';ctr.style.display=hasFilter?'':'none';if(hasFilter)ctr.textContent='Найдено: '+totalFiltered+' из '+totalAll}
-  var sortFn=function(a,b){var va=getSortValue(a,sortCol),vb=getSortValue(b,sortCol);if(va==null)va='';if(vb==null)vb='';var cmp=typeof va==='number'&&typeof vb==='number'?va-vb:String(va).localeCompare(String(vb));return sortDir==='asc'?cmp:-cmp};for(var g in groups)groups[g].sort(sortFn);
+  var sortFn=function(a,b){var va=getSortValue(a,sortCol),vb=getSortValue(b,sortCol);if(va==null)va='';if(vb==null)vb='';var cmp=typeof va==='number'&&typeof vb==='number'?va-vb:String(va).localeCompare(String(vb));return sortDir==='asc'?cmp:-cmp};for(var g in groups)groups[g].sort(sortFn);if(window._modemsView==='grid'){wrap.innerHTML=renderModemGrid(groups);return;}
   // ── Single combined table — one <thead> at the top, server divider rows
   // (with colspan) replace the old per-server header bar + repeated thead.
   // Saves one row per server group versus the old multi-table layout.
@@ -769,8 +947,9 @@ function renderTable(){
     html+='<span style="font-family:var(--font-mono);font-size:12px;font-weight:700;color:var(--accent)">'+esc(srv)+'</span>';
     if(ci.name)html+='<span style="font-size:11px;color:var(--text-2)">'+esc(ci.name)+'</span>';
     if(ci.address)html+='<span style="font-size:11px;color:var(--text-2)">\u{1F4CD} '+esc(ci.address)+'</span>';
-    html+=(function(){var fb=(currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[srv])||null;var fOn=fb?((fb.working!=null)?fb.working:fb.online):online;var fN=fb?fb.total:modems.length;if(fN<fOn)fN=fOn;return'<span style="font-size:11px;font-weight:600;color:'+(fOn>=fN?'var(--success)':'var(--warning)')+'" title="рабочих (онлайн + блип <10 мин) / активных в парке. Падает только при реальном отключении >10 мин">'+fOn+'/'+fN+' online</span>';})();
-    html+='<div style="margin-left:auto;display:flex;gap:6px"><button class="btn btn-sm" style="font-size:10px;padding:3px 8px" onclick="resetCompleteServer(\''+srv+'\')">Reset</button><button class="btn btn-sm btn-warning" style="font-size:10px;padding:3px 8px" onclick="rebootServer(\''+srv+'\')">Reboot</button></div>';
+    html+=(function(){var fb=(currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[srv])||null;var fOn=fb?((fb.working!=null)?fb.working:fb.online):online;var fN=fb?fb.total:modems.length;if(fN<fOn)fN=fOn;return'<span style="font-size:11px;font-weight:600;color:'+(fOn>=fN?'var(--success)':'var(--warning)')+'" title="рабочих (онлайн + блип <10 мин) / активных в парке. Падает только при реальном отключении >10 мин">'+fOn+'/'+fN+' в работе</span>';})();
+    html+=_serverDownBadge(srv);
+    html+='<div style="margin-left:auto;display:flex;gap:6px"><button class="srv-act" onclick="resetCompleteServer(\''+srv+'\')">↻ Сброс IP</button><button class="srv-act srv-act-danger" onclick="rebootServer(\''+srv+'\')">⏻ Ребут</button></div>';
     html+='</div></td></tr>';
     // Stage 18.7: within each server group, sort by ONLINE→OFFLINE,
     // Stage 18.19: only LONG-offline modems sink to the bottom. A modem that
@@ -802,24 +981,24 @@ function renderTable(){
       }
       return 0;                                                  // live + recent-offline → preserve sortFn order
     });
-    modems.forEach(function(modem){var status=getModemStatus(modem),port=modem.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[modem.server]||{};var isSel=!!(window._bulkSel&&window._bulkSel[modem.rawImei]);var h='<tr>';cols.forEach(function(col){h+='<td>';switch(col.id){case'bulk':h+='<input type="checkbox" class="bulk-chk" data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'" '+(isSel?'checked':'')+' onchange="updateBulkPanel()" style="cursor:pointer;margin:0">';break;case'status':h+=_statusPill(status,modem);break;case'nick':h+='<strong>'+esc(modem.nick)+'</strong>'+_excludeChip(modem);break;case'server':h+='<span style="font-size:10px">'+(ci.flag||'')+' '+modem.server+'</span>';break;case'portName':{var un=modem.ports.map(function(p){return p.portName}).filter(function(v,i,a){return v&&a.indexOf(v)===i});var _on='openDetailAtTab(\''+esc(modem.nick)+'\',\''+modem.server+'\',\'settings\')';if(!un.length){h+='<button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="'+_on+'">+ Порт</button>'}else{h+=un.slice(0,2).map(function(n){return'<span class="port-badge" style="background:var(--bg-3);color:var(--accent);padding:1px 8px;border-radius:20px;font-size:10px;border:1px solid var(--border);cursor:pointer" onclick="'+_on+'" title="Настройки порта">'+esc(n)+'</span>'}).join(' ');if(un.length>2)h+=' <span class="port-badge" title="'+esc(un.slice(2).join(', '))+'" style="background:var(--accent-dim);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:10px;cursor:pointer" onclick="'+_on+'">+'+(un.length-2)+'</span>';h+=' <button class="btn btn-sm" style="font-size:10px;padding:1px 5px;opacity:0.5" onclick="'+_on+'" title="Добавить порт">+</button>'}break;}case'creds':{var sip=ci.serverIp||'';var _hasPort=false;modem.ports.forEach(function(p){if(!p.HTTP_PORT&&!p.SOCKS_PORT)return;_hasPort=true;if(modem.ports.length>1&&(p.portName||p.portID))h+='<div style="font-size:9px;color:var(--accent);font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.portName||p.portID||'')+'</div>';if(p.HTTP_PORT)h+='<div><span style="color:var(--text-2);font-size:10px">HTTP:</span> <span class="mono">'+sip+':'+p.HTTP_PORT+'</span> <button class="copy-btn" onclick="copyText(\''+sip+':'+p.HTTP_PORT+'\',this)">\u{1F4CB}</button></div>';if(p.SOCKS_PORT)h+='<div><span style="color:var(--text-2);font-size:10px">SOCKS5:</span> <span class="mono">'+sip+':'+p.SOCKS_PORT+'</span> <button class="copy-btn" onclick="copyText(\''+sip+':'+p.SOCKS_PORT+'\',this)">\u{1F4CB}</button></div>'});if(!_hasPort)h+='-';break;}case'loginpass':{var _hasLogin=false;modem.ports.forEach(function(p){if(!p.LOGIN)return;_hasLogin=true;if(modem.ports.length>1&&(p.portName||p.portID))h+='<div style="font-size:9px;color:var(--accent);font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.portName||p.portID||'')+'</div>';h+='<div><span class="mono">'+esc(p.LOGIN)+':••••</span> <button class="copy-btn" onclick="copyText(\''+esc(p.LOGIN)+':'+esc(p.PASSWORD||'')+'\',this)">\u{1F4CB}</button></div>'});if(!_hasLogin)h+='-';break;}case'extIp':if(modem.extIp==='IP_RESET'||modem.isRotating){h+='<span class="mono" style="color:var(--warning)">Ротация</span>'}else if(modem.extIp){h+='<span class="mono'+(modem.ipStuck?' ip-stuck':'')+'">'+modem.extIp+(modem.ipStuck?'<span class="ip-stuck-badge" title="IP не менялся '+modem.ipSinceHours+'ч"> '+modem.ipSinceHours+'ч</span>':'')+'</span>'}else{h+='-'}break;case'netType':h+=renderNetBadge(modem.netType);break;case'signal':h+=renderSignalBars(modem.signal);break;case'operator':h+=esc(modem.operator)||'-';break;case'phone':h+=modem.phone?'<span class="mono">'+esc(modem.phone)+'</span>':'-';break;case'trafficDay':{var _dinSum=0,_doutSum=0;modem.ports.forEach(function(p){var _pb=p._bw||{};_dinSum+=parseTraffic(_pb.bandwidth_bytes_day_in);_doutSum+=parseTraffic(_pb.bandwidth_bytes_day_out)});h+='<span class="mono">'+fmtGb(_dinSum+_doutSum)+'</span>';break;}case'trafficMon':{var _minSum=0,_moutSum=0;modem.ports.forEach(function(p){var _pb=p._bw||{};_minSum+=parseTraffic(_pb.bandwidth_bytes_month_in);_moutSum+=parseTraffic(_pb.bandwidth_bytes_month_out)});h+='<span class="mono">'+fmtGb(_minSum+_moutSum)+'</span>';break;}case'speed':{var _dl=Number(modem.lastSpeedDl||0),_ul=Number(modem.lastSpeedUl||0);if(_dl||_ul){var _isLow=_dl<_minSpeedThreshold||_ul<_minSpeedThreshold;var _spDateMs=modem.lastSpeedDate?Date.parse(modem.lastSpeedDate):0;var _ageH=_spDateMs?Math.floor((Date.now()-_spDateMs)/3600000):null;var _STALE_H=48;if(_ageH!==null&&_ageH>_STALE_H){var _ageLbl=_ageH<48?_ageH+'\u0447 \u043D\u0430\u0437\u0430\u0434':Math.floor(_ageH/24)+'\u0434 \u043D\u0430\u0437\u0430\u0434';h+='<span class="speed-cell" title="\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0437\u0430\u043C\u0435\u0440: '+(_ageLbl)+' \u00B7 '+esc(modem.lastSpeedDate||'')+'\\n\u2193'+_dl.toFixed(1)+' / \u2191'+_ul.toFixed(1)+' Mbps" style="color:var(--text-3);font-size:11px;cursor:help">\u2014 <span style="font-size:9px">('+_ageLbl+')</span></span>'}else{h+='<span class="speed-cell" title="\u0417\u0430\u043C\u0435\u0440: '+esc(modem.lastSpeedDate||'')+'" style="'+(_isLow?'background:rgba(255,56,60,.15);border-radius:4px;padding:2px 4px':'')+'"><span class="speed-dl">\u2193'+_dl.toFixed(1)+'</span> / <span class="speed-ul">\u2191'+_ul.toFixed(1)+'</span>'+(_isLow?' \u26A0':'')+'</span>'}}else{h+='-'}break;}case'uptime':if(modem.uptimePct!==undefined){var upCls=parseFloat(modem.uptimePct)>=99?'good':parseFloat(modem.uptimePct)>=95?'warn':'bad';h+='<span class="uptime-pct '+upCls+'">'+modem.uptimePct+'%</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">\u2014</span>'}break;case'latency':{var lms=modem.pcLastMs;if(lms!==null&&lms!==undefined&&!modem.pcLastError){var lCls=lms>_pcBadMs?'pc-bad':lms>_pcWarnMs?'pc-warn':'pc-good';h+='<span class="pc-lat '+lCls+'" title="Connect: '+(modem.pcLastMs!=null?fmtMs(modem.pcLastMs):'?')+'">'+fmtMs(lms)+'</span>'}else if(modem.pcLastError){h+='<span class="pc-lat pc-bad" title="'+esc(modem.pcLastError)+'">err</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">\u2014</span>'}break;}case'errors':{var ep=modem.pcErrorPct;if(ep!==null&&ep!==undefined){var eCls=ep>=_errorRateThreshold?'pc-bad':ep>0?'pc-warn':'pc-good';h+='<span class="pc-err '+eCls+'">'+ep+'%</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">\u2014</span>'}break;}case'health':{var _hm=_getHealth(modem);if(_hm&&_hm.health_score!=null){var _hs=_hm.health_score;var _hCls=_hm.status==='good'?'pc-good':_hm.status==='warn'?'pc-warn':'pc-bad';h+='<span class="pc-err '+_hCls+'" title="P50 latency: '+(_hm.latency_ms||'?')+' мс, ошибки: '+(_hm.error_pct||0)+'%, аптайм: '+(_hm.uptime_pct||0)+'% · нажмите «Инфо» для подробностей" style="cursor:help;font-weight:600">'+_hs+'</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">\u2014</span>'}break;}case'rotation':{var rotMin=parseInt(modem.autoRotation)||0;if(rotMin>0){var rotStr=rotMin>=60?(rotMin/60).toFixed(0)+'ч':rotMin+'м';h+='<span class="mono" style="font-size:11px">'+rotStr+'</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">Выкл</span>'}break;}case'actions':{var d='data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'"';h+='<div class="actions-cell" style="display:flex;gap:4px;align-items:center"><button class="btn-details" '+d+' onclick="showDetails(this)"><svg width="12" height="12" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.1"/><line x1="4" y1="4.5" x2="9" y2="4.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="4" y1="6.5" x2="9" y2="6.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="4" y1="8.5" x2="7" y2="8.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>Инфо</button>';
+    modems.forEach(function(modem){var status=getModemStatus(modem),port=modem.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[modem.server]||{};var isSel=!!(window._bulkSel&&window._bulkSel[modem.rawImei]);var h='<tr class="modem-row" data-nick="'+esc(modem.nick)+'" data-server="'+modem.server+'" onclick="rowOpen(event,this)" style="cursor:pointer">';cols.forEach(function(col){var _dl=(col.label||'').replace(/<[^>]*>/g,'').replace(/"/g,'').trim();h+='<td class="cell-'+col.id+'" data-label="'+_dl+'"'+(col.id==='rail'?' style="padding:0;text-align:center"':'')+'>';switch(col.id){case'rail':{var _ar=_attnReason(modem);var _rc=_ar?((_ar.kind==='offline'&&_ar.stale)?'var(--text-3)':(_mkColor[_ar.kind]||'var(--warning)')):null;h+=_rc?'<span class="mk-row-rail" style="background:'+_rc+'"></span>':'';break;}case'bulk':h+='<input type="checkbox" class="bulk-chk" data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'" '+(isSel?'checked':'')+' onchange="updateBulkPanel()" style="cursor:pointer;margin:0">';break;case'status':h+=_statusPill(status,modem);break;case'nick':h+='<strong>'+esc(modem.nick)+'</strong>'+_excludeChip(modem)+_modemFlags(modem);break;case'server':h+='<span style="font-size:10px">'+(ci.flag||'')+' '+modem.server+'</span>';break;case'portName':{var un=modem.ports.map(function(p){return p.portName}).filter(function(v,i,a){return v&&a.indexOf(v)===i});var _on='openDetailAtTab(\''+esc(modem.nick)+'\',\''+modem.server+'\',\'settings\')';if(!un.length){h+='<button class="btn btn-sm" style="font-size:10px;padding:2px 7px" onclick="'+_on+'">+ Порт</button>'}else{h+=un.slice(0,2).map(function(n){return'<span class="port-badge" style="background:var(--bg-3);color:var(--accent);padding:1px 8px;border-radius:20px;font-size:10px;border:1px solid var(--border);cursor:pointer" onclick="'+_on+'" title="Настройки порта">'+esc(n)+'</span>'}).join(' ');if(un.length>2)h+=' <span class="port-badge" title="'+esc(un.slice(2).join(', '))+'" style="background:var(--accent-dim);color:var(--accent);padding:1px 6px;border-radius:20px;font-size:10px;cursor:pointer" onclick="'+_on+'">+'+(un.length-2)+'</span>';h+=' <button class="btn btn-sm" style="font-size:10px;padding:2px 7px;opacity:0.5" onclick="'+_on+'" title="Добавить порт">+</button>'}break;}case'creds':{var sip=ci.serverIp||'';var _hasPort=false;modem.ports.forEach(function(p){if(!p.HTTP_PORT&&!p.SOCKS_PORT)return;_hasPort=true;var _pport=p.HTTP_PORT||p.SOCKS_PORT;var _auth=p.LOGIN?':'+esc(p.LOGIN)+':'+esc(p.PASSWORD||''):'';if(modem.ports.length>1&&(p.portName||p.portID))h+='<div style="font-size:9px;color:var(--accent);font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.portName||p.portID||'')+'</div>';h+='<div style="display:flex;align-items:center;gap:4px"><span class="mono" style="font-size:10px">'+sip+':'+_pport+'</span><button class="copy-btn" title="Копировать ip:port:login:pass" onclick="copyText(\''+sip+':'+_pport+_auth+'\',this)">\u{1F4CB}</button></div>'});if(!_hasPort)h+='-';break;}case'loginpass':{var _hasLogin=false;modem.ports.forEach(function(p){if(!p.LOGIN)return;_hasLogin=true;if(modem.ports.length>1&&(p.portName||p.portID))h+='<div style="font-size:9px;color:var(--accent);font-weight:600;margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.portName||p.portID||'')+'</div>';h+='<div><span class="mono">'+esc(p.LOGIN)+':••••</span> <button class="copy-btn" onclick="copyText(\''+esc(p.LOGIN)+':'+esc(p.PASSWORD||'')+'\',this)">\u{1F4CB}</button></div>'});if(!_hasLogin)h+='-';break;}case'extIp':if(modem.extIp==='IP_RESET'||modem.isRotating){h+='<span class="mono" style="color:var(--warning)">Ротация</span>'}else if(modem.extIp){h+='<span class="mono'+(modem.ipStuck?' ip-stuck':'')+'">'+modem.extIp+(modem.ipStuck?'<span class="ip-stuck-badge" title="IP не менялся '+modem.ipSinceHours+'ч"> '+modem.ipSinceHours+'ч</span>':'')+'</span>'}else{h+='-'}break;case'netType':{var _op=modem.operator?esc(modem.operator):'<span style="color:var(--text-3)">—</span>';var _nt=(modem.netType||'').toString().toUpperCase();var _ntc=/3G|HSPA|UMTS/.test(_nt)?'var(--warning)':(/2G|GPRS|EDGE/.test(_nt)?'var(--danger)':'var(--text-3)');var _nth=_nt?'<span style="font-size:9px;font-weight:600;color:'+_ntc+'">'+esc(_nt)+'</span>':'';h+='<div style="display:flex;align-items:center;gap:7px"><span style="font-size:12px;color:var(--text-1)">'+_op+'</span>'+_nth+renderSignalBars(modem.signal)+'</div>';break;}case'signal':h+=renderSignalBars(modem.signal);break;case'operator':h+=esc(modem.operator)||'-';break;case'phone':h+=modem.phone?'<span class="mono">'+esc(modem.phone)+'</span>':'-';break;case'trafficDay':{var _dinSum=0,_doutSum=0;modem.ports.forEach(function(p){var _pb=p._bw||{};_dinSum+=parseTraffic(_pb.bandwidth_bytes_day_in);_doutSum+=parseTraffic(_pb.bandwidth_bytes_day_out)});h+='<span class="mono">'+fmtGb(_dinSum+_doutSum)+'</span>';break;}case'trafficMon':{var _minSum=0,_moutSum=0;modem.ports.forEach(function(p){var _pb=p._bw||{};_minSum+=parseTraffic(_pb.bandwidth_bytes_month_in);_moutSum+=parseTraffic(_pb.bandwidth_bytes_month_out)});h+='<span class="mono">'+fmtGb(_minSum+_moutSum)+'</span>';break;}case'speed':{var _dl=Number(modem.lastSpeedDl||0),_ul=Number(modem.lastSpeedUl||0);if(_dl||_ul){var _isLow=_dl<_minSpeedThreshold||_ul<_minSpeedThreshold;var _spDateMs=modem.lastSpeedDate?Date.parse(modem.lastSpeedDate):0;var _ageH=_spDateMs?Math.floor((Date.now()-_spDateMs)/3600000):null;var _STALE_H=48;if(_ageH!==null&&_ageH>_STALE_H){var _ageLbl=_ageH<48?_ageH+'\u0447 \u043D\u0430\u0437\u0430\u0434':Math.floor(_ageH/24)+'\u0434 \u043D\u0430\u0437\u0430\u0434';h+='<span class="speed-cell" title="\u041F\u043E\u0441\u043B\u0435\u0434\u043D\u0438\u0439 \u0437\u0430\u043C\u0435\u0440: '+(_ageLbl)+' \u00B7 '+esc(modem.lastSpeedDate||'')+'\\n\u2193'+_dl.toFixed(1)+' / \u2191'+_ul.toFixed(1)+' Mbps" style="color:var(--text-3);font-size:11px;cursor:help">\u2014 <span style="font-size:9px">('+_ageLbl+')</span></span>'}else{h+='<span class="speed-cell" title="\u0417\u0430\u043C\u0435\u0440: '+esc(modem.lastSpeedDate||'')+'" style="'+(_isLow?'background:rgba(255,56,60,.15);border-radius:4px;padding:2px 4px':'')+'"><span class="speed-dl">\u2193'+_dl.toFixed(1)+'</span> / <span class="speed-ul">\u2191'+_ul.toFixed(1)+'</span>'+(_isLow?' \u26A0':'')+'</span>'}}else{h+='-'}break;}case'uptime':if(modem.uptimePct!==undefined){var upCls=parseFloat(modem.uptimePct)>=99?'good':parseFloat(modem.uptimePct)>=95?'warn':'bad';h+='<span class="uptime-pct '+upCls+'">'+modem.uptimePct+'%</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">\u2014</span>'}break;case'latency':{var lms=modem.pcLastMs;if(lms!==null&&lms!==undefined&&!modem.pcLastError){var lCls=lms>_pcBadMs?'pc-bad':lms>_pcWarnMs?'pc-warn':'pc-good';h+='<span class="pc-lat '+lCls+'" title="Connect: '+(modem.pcLastMs!=null?fmtMs(modem.pcLastMs):'?')+'">'+fmtMs(lms)+'</span>'}else if(modem.pcLastError){h+='<span class="pc-lat pc-bad" title="'+esc(modem.pcLastError)+'">err</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">\u2014</span>'}break;}case'errors':{var ep=modem.pcErrorPct;if(ep!==null&&ep!==undefined){var eCls=ep>=_errorRateThreshold?'pc-bad':ep>0?'pc-warn':'pc-good';h+='<span class="pc-err '+eCls+'">'+ep+'%</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">\u2014</span>'}break;}case'health':{var _hm=_getHealth(modem);if(_hm&&_hm.health_score!=null){var _hs=_hm.health_score;var _hCls=_hm.status==='good'?'pc-good':_hm.status==='warn'?'pc-warn':'pc-bad';h+='<span class="pc-err '+_hCls+'" title="P50 latency: '+(_hm.latency_ms||'?')+' мс, ошибки: '+(_hm.error_pct||0)+'%, аптайм: '+(_hm.uptime_pct||0)+'% · нажмите «Инфо» для подробностей" style="cursor:help;font-weight:600">'+_hs+'</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">\u2014</span>'}break;}case'rotation':{var rotMin=parseInt(modem.autoRotation)||0;if(rotMin>0){var rotStr=rotMin>=60?(rotMin/60).toFixed(0)+'ч':rotMin+'м';h+='<span class="mono" style="font-size:11px">'+rotStr+'</span>'}else{h+='<span style="color:var(--text-3);font-size:10px">Выкл</span>'}break;}case'band':h+=modem.band?'<span class="mono" style="font-size:11px">'+esc(modem.band)+'</span>':'<span style="color:var(--text-3);font-size:10px">—</span>';break;case'simStatus':{var _ss=(modem.simStatus||'');if(!_ss||_ss==='UNKNOWN'){h+='<span style="color:var(--text-3);font-size:10px">—</span>'}else{var _ok=/\bOK\b|READY/.test(_ss);h+='<span class="pc-err '+(_ok?'pc-good':'pc-bad')+'" style="font-size:10px" title="'+esc(_ss)+'">'+esc(_ss)+'</span>'}break;}case'rebootScore':{var _rs=modem.rebootScore;if(_rs==null){h+='<span style="color:var(--text-3);font-size:10px">—</span>'}else{var _rc=_rs>=70?'pc-bad':_rs>=50?'pc-warn':'pc-good';h+='<span class="pc-err '+_rc+'" style="font-size:10px">'+_rs+'</span>'}break;}case'httpRedirect':h+=modem.httpRedirect?'<span class="pc-err pc-bad" style="font-size:10px" title="Оператор навязал редирект — SIM без денег/блок">редирект</span>':'<span style="color:var(--text-3);font-size:10px">—</span>';break;case'isLocked':h+=modem.isLocked?'<span title="Модем занят операцией/ротацией">🔒</span>':'<span style="color:var(--text-3);font-size:10px">—</span>';break;case'actions':{var d='data-imei="'+modem.rawImei+'" data-server="'+modem.server+'" data-nick="'+esc(modem.nick)+'"';h+='<div class="actions-cell" style="display:flex;gap:4px;align-items:center;justify-content:flex-end">'+(status!=='offline'?'<button class="row-act" '+d+' title="Сбросить IP" onclick="resetIp(this)">↻</button><button class="row-act" '+d+' title="Ребут модема" onclick="rebootModem(this)">⏻</button>':'')+'<button class="btn-details" '+d+' onclick="showDetails(this)"><svg width="12" height="12" viewBox="0 0 13 13" fill="none"><rect x="1" y="1" width="11" height="11" rx="2" stroke="currentColor" stroke-width="1.1"/><line x1="4" y1="4.5" x2="9" y2="4.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="4" y1="6.5" x2="9" y2="6.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/><line x1="4" y1="8.5" x2="7" y2="8.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>Инфо</button>';
 // Stage 18.1: inline delete button for offline modems — was previously
 // hidden inside the Info-tab modal and easy to miss. Only renders for
 // status==='offline' so live modems can't be killed accidentally.
-if(status==='offline'){var _pid='';if(modem.ports&&modem.ports[0]&&modem.ports[0].portID){_pid=modem.ports[0].portID.replace(/^S\d+_/,'');}
+if(_isStaleModem(modem)){var _pid='';if(modem.ports&&modem.ports[0]&&modem.ports[0].portID){_pid=modem.ports[0].portID.replace(/^S\d+_/,'');}
 // Stage 18.1 fix: modems restored via Stage 18 (fallback from modem_meta) have
 // no client-binding port — only a synthetic id. Fall back to "meta_<imei>" so
 // the delete button still shows. Server-side recognizes the prefix and routes
 // to the IMEI-based delete path.
 if(!_pid&&modem.rawImei){_pid='meta_'+modem.rawImei;}
-if(_pid){h+='<button class="btn-delete-modem" title="Удалить модем из дашборда" onclick="deleteModem(\''+modem.server+'\',\''+_pid+'\',\''+esc(modem.nick)+'\')" style="background:rgba(232,65,65,.1);border:1px solid rgba(232,65,65,.3);color:#e84141;cursor:pointer;border-radius:5px;padding:3px 7px;font-size:11px;line-height:1;display:inline-flex;align-items:center;justify-content:center;transition:all .15s" onmouseover="this.style.background=\'#e84141\';this.style.color=\'#fff\'" onmouseout="this.style.background=\'rgba(232,65,65,.1)\';this.style.color=\'#e84141\'">🗑</button>';}}
+if(_pid){h+='<button class="btn-delete-modem" title="Удалить модем из дашборда" onclick="deleteModem(\''+modem.server+'\',\''+_pid+'\',\''+esc(modem.nick)+'\')">🗑</button>';}}
 h+='</div>';break;}}h+='</td>'});html+=h+'</tr>'});
   });
   html+='</tbody></table>';
   wrap.innerHTML=html;
 }
 function setSort(c){if(sortCol===c)sortDir=sortDir==='asc'?'desc':'asc';else{sortCol=c;sortDir='asc'}renderTable()}
-function getSortValue(m,col){var p=m.ports[0]||{},bw=p._bw||{};switch(col){case'nick':return m.nick;case'server':return m.server;case'portName':return m.ports.map(function(p){return p.portName||''}).join(',');case'creds':return parseInt(p.HTTP_PORT)||0;case'loginpass':return(p.LOGIN||'');case'netType':return m.netType;case'signal':return m.signal;case'operator':return m.operator;case'trafficDay':return m.ports.reduce(function(s,p){var _pb=p._bw||{};return s+parseTraffic(_pb.bandwidth_bytes_day_in)+parseTraffic(_pb.bandwidth_bytes_day_out)},0);case'trafficMon':return m.ports.reduce(function(s,p){var _pb=p._bw||{};return s+parseTraffic(_pb.bandwidth_bytes_month_in)+parseTraffic(_pb.bandwidth_bytes_month_out)},0);case'speed':return(m.lastSpeedDl||0)+(m.lastSpeedUl||0);case'uptime':return parseFloat(m.uptimePct)||m.uptime||0;case'latency':return m.pcLastMs||99999;case'errors':return m.pcErrorPct||0;case'health':{var _hm=_getHealth(m);return _hm&&_hm.health_score!=null?_hm.health_score:-1;}case'rotation':return parseInt(m.autoRotation)||0;default:return''}}
+function getSortValue(m,col){var p=m.ports[0]||{},bw=p._bw||{};switch(col){case'nick':return m.nick;case'server':return m.server;case'portName':return m.ports.map(function(p){return p.portName||''}).join(',');case'creds':return parseInt(p.HTTP_PORT)||0;case'loginpass':return(p.LOGIN||'');case'netType':return m.operator||'';case'signal':return m.signal;case'operator':return m.operator;case'trafficDay':return m.ports.reduce(function(s,p){var _pb=p._bw||{};return s+parseTraffic(_pb.bandwidth_bytes_day_in)+parseTraffic(_pb.bandwidth_bytes_day_out)},0);case'trafficMon':return m.ports.reduce(function(s,p){var _pb=p._bw||{};return s+parseTraffic(_pb.bandwidth_bytes_month_in)+parseTraffic(_pb.bandwidth_bytes_month_out)},0);case'speed':return(m.lastSpeedDl||0)+(m.lastSpeedUl||0);case'uptime':return parseFloat(m.uptimePct)||m.uptime||0;case'latency':return m.pcLastMs||99999;case'errors':return m.pcErrorPct||0;case'health':{var _hm=_getHealth(m);return _hm&&_hm.health_score!=null?_hm.health_score:-1;}case'rotation':return parseInt(m.autoRotation)||0;case'band':return m.band||'';case'simStatus':return m.simStatus||'';case'rebootScore':return m.rebootScore==null?-1:m.rebootScore;default:return''}}
 
 // ========== PROXY CHECK LOG ==========
 var _proxyLogCache={};
@@ -934,17 +1113,26 @@ function loadInfoProxyData(nick,server){
 
 // ========== ACTIONS ==========
 function modemAction(btn,url,body,msg,delay){btn.classList.add('loading');btn.disabled=true;fetch(API+url,{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(d){btn.classList.remove('loading');btn.disabled=false;if(d.ok)showToast(msg,'success');else showToast(d.error||'Ошибка','error');setTimeout(loadData,delay||3000)}).catch(function(){btn.classList.remove('loading');btn.disabled=false;showToast('Ошибка сети','error')})}
-function rebootServer(srv){var pwd=prompt('Перезагрузить сервер '+srv+'?\nВсе модемы будут недоступны на время перезагрузки.\n\nВведите пароль для подтверждения:');if(!pwd)return;fetch(API+'/api/admin/reboot_server',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,password:pwd})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сервер '+srv+' перезагружается','success'):showToast(r.error||'Ошибка','error')}).catch(function(){showToast('Ошибка сети','error')})}
-function resetCompleteServer(srv){var pwd=prompt('Сбросить IP на ВСЕХ модемах сервера '+srv+'?\n\nВведите пароль для подтверждения:');if(!pwd)return;showToast('Сброс IP всех модемов '+srv+'...','info');fetch(API+'/api/admin/reset_complete',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,password:pwd})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сброшено '+r.reset+'/'+r.total+' модемов','success'):showToast(r.error||'Ошибка','error');setTimeout(loadData,5000)}).catch(function(){showToast('Ошибка сети','error')})}
-function resetIp(b){if(!confirm('Сбросить IP '+b.dataset.nick+'?'))return;modemAction(b,'/api/admin/reset_ip',{imei:b.dataset.imei,serverName:b.dataset.server},'IP сброшен',3000)}
-function rebootModem(b){if(!confirm('Ребут '+b.dataset.nick+'?'))return;modemAction(b,'/api/admin/reboot',{imei:b.dataset.imei,serverName:b.dataset.server},'Ребут запущен',5000)}
-function usbReset(b){if(!confirm('USB ресет '+b.dataset.nick+'?'))return;modemAction(b,'/api/admin/usb_reset',{nick:b.dataset.nick,serverName:b.dataset.server},'USB ресет',10000)}
-function readdModem(b){if(!confirm('Re-Add (переподключить) модем '+b.dataset.nick+'?'))return;b.classList.add('loading');b.disabled=true;fetch(API+'/api/admin/readd_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({nick:b.dataset.nick,serverName:b.dataset.server})}).then(function(r){return r.json()}).then(function(d){b.classList.remove('loading');b.disabled=false;if(d.ok){showToast('Re-Add '+b.dataset.nick+': '+(d.message||d.result||'OK'),'success',7000);setTimeout(loadData,8000)}else showToast(d.error||'Ошибка','error')}).catch(function(){b.classList.remove('loading');b.disabled=false;showToast('Ошибка сети','error')})}
+// In-page confirm/prompt. Native confirm()/prompt() get permanently muted once
+// the user ticks «не показывать диалоги» → they silently return null/false and
+// every action (incl. the reboot password) breaks. These custom modals aren't
+// subject to that browser suppression.
+function uiDialog(o){return new Promise(function(resolve){var prev=document.getElementById('uiDlg');if(prev)prev.remove();var ov=document.createElement('div');ov.id='uiDlg';ov.className='ui-dlg-ov';ov.tabIndex=-1;var inp=o.input?'<input id="uiDlgInput" class="ui-dlg-input" type="'+(o.password?'password':'text')+'" autocomplete="off"'+(o.placeholder?' placeholder="'+esc(o.placeholder)+'"':'')+'>':'';ov.innerHTML='<div class="ui-dlg">'+(o.title?'<div class="ui-dlg-title">'+esc(o.title)+'</div>':'')+'<div class="ui-dlg-msg">'+String(o.message||'').split('\n').map(esc).join('<br>')+'</div>'+inp+'<div class="ui-dlg-btns"><button type="button" class="ui-dlg-btn" id="uiDlgC">Отмена</button><button type="button" class="ui-dlg-btn '+(o.danger?'ui-dlg-danger':'ui-dlg-ok')+'" id="uiDlgK">'+esc(o.okText||'OK')+'</button></div></div>';document.body.appendChild(ov);var f=document.getElementById('uiDlgInput');setTimeout(function(){(f||ov).focus()},30);var settled=false;function done(v){if(settled)return;settled=true;ov.remove();resolve(v)}document.getElementById('uiDlgC').onclick=function(){done(o.input?null:false)};document.getElementById('uiDlgK').onclick=function(){done(o.input?(f?f.value:''):true)};ov.addEventListener('mousedown',function(e){if(e.target===ov)done(o.input?null:false)});ov.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();done(o.input?(f?f.value:''):true)}else if(e.key==='Escape'){e.preventDefault();done(o.input?null:false)}})})}
+function uiConfirm(msg,o){o=o||{};return uiDialog({title:o.title||'Подтверждение',message:msg,okText:o.okText||'Да',danger:o.danger})}
+function uiPrompt(msg,o){o=o||{};return uiDialog({title:o.title||'',message:msg,input:true,password:o.password,placeholder:o.placeholder,okText:o.okText||'OK',danger:o.danger})}
+function rebootServer(srv){uiPrompt('Перезагрузить сервер '+srv+'?\nВсе модемы будут недоступны на время перезагрузки.\n\nВведите пароль для подтверждения:',{title:'Ребут сервера '+srv,password:true,okText:'Перезагрузить',danger:true}).then(function(pwd){if(!pwd)return;showToast('Перезагрузка сервера '+srv+'…','info');fetch(API+'/api/admin/reboot_server',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,password:pwd})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сервер '+srv+' перезагружается','success'):showToast(r.error||'Ошибка','error')}).catch(function(){showToast('Ошибка сети','error')})})}
+function resetCompleteServer(srv){uiPrompt('Сбросить IP на ВСЕХ модемах сервера '+srv+'?\n\nВведите пароль для подтверждения:',{title:'Сброс IP · '+srv,password:true,okText:'Сбросить',danger:true}).then(function(pwd){if(!pwd)return;showToast('Сброс IP всех модемов '+srv+'...','info');fetch(API+'/api/admin/reset_complete',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,password:pwd})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сброшено '+r.reset+'/'+r.total+' модемов','success'):showToast(r.error||'Ошибка','error');setTimeout(loadData,5000)}).catch(function(){showToast('Ошибка сети','error')})})}
+function resetIp(b){uiConfirm('Сбросить IP '+b.dataset.nick+'?').then(function(ok){if(ok)modemAction(b,'/api/admin/reset_ip',{imei:b.dataset.imei,serverName:b.dataset.server},'IP сброшен',3000)})}
+function rebootModem(b){uiConfirm('Ребут '+b.dataset.nick+'?',{okText:'Ребут'}).then(function(ok){if(ok)modemAction(b,'/api/admin/reboot',{imei:b.dataset.imei,serverName:b.dataset.server},'Ребут запущен',5000)})}
+function usbReset(b){uiConfirm('USB-ресет '+b.dataset.nick+'?',{okText:'USB-ресет'}).then(function(ok){if(ok)modemAction(b,'/api/admin/usb_reset',{nick:b.dataset.nick,serverName:b.dataset.server},'USB ресет',10000)})}
+function reconnectAll(srv){uiConfirm('Переподключить отвалившиеся модемы на '+srv+'?\n\nRe-Add всех офлайн-модемов сервера. Рабочие модемы не трогаются.',{title:'Переподключить модемы · '+srv,okText:'Переподключить'}).then(function(ok){if(!ok)return;showToast('Переподключение модемов '+srv+'…','info');fetch(API+'/api/admin/reconnect_all',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Переподключено '+r.reconnected+'/'+r.total+' офлайн-модемов на '+srv,'success',7000):showToast(r.error||'Ошибка','error');setTimeout(loadData,8000)}).catch(function(){showToast('Ошибка сети','error')})})}
+function readdModem(b){uiConfirm('Re-Add (переподключить) модем '+b.dataset.nick+'?',{okText:'Re-Add'}).then(function(ok){if(!ok)return;b.classList.add('loading');b.disabled=true;fetch(API+'/api/admin/readd_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({nick:b.dataset.nick,serverName:b.dataset.server})}).then(function(r){return r.json()}).then(function(d){b.classList.remove('loading');b.disabled=false;if(d.ok){showToast('Re-Add '+b.dataset.nick+': '+(d.message||d.result||'OK'),'success',7000);setTimeout(loadData,8000)}else showToast(d.error||'Ошибка','error')}).catch(function(){b.classList.remove('loading');b.disabled=false;showToast('Ошибка сети','error')})})}
 
 // ========== DETAIL MODAL ==========
 var currentDetailModem=null;
 function showDetails(btn){var nick=btn.dataset.nick,server=btn.dataset.server,map=currentData&&currentData._modemMap;if(!map)return;for(var imei in map){var m=map[imei];if(m.nick===nick&&m.server===server){currentDetailModem=m;break}}if(!currentDetailModem)return;document.getElementById('modalTitle').textContent=nick+' ('+server+')';switchTab('info',document.querySelector('.modal-tab[data-tab="info"]'));document.getElementById('detailModal').classList.add('show')}
 function openDetailAtTab(nick,srv,tab){var map=currentData&&currentData._modemMap;if(!map)return;currentDetailModem=null;for(var imei in map){var m=map[imei];if(m.nick===nick&&m.server===srv){currentDetailModem=m;break}}if(!currentDetailModem)return;document.getElementById('modalTitle').textContent=nick+' ('+srv+')';var tabEl=document.querySelector('.modal-tab[data-tab="'+tab+'"]');switchTab(tab,tabEl);document.getElementById('detailModal').classList.add('show')}
+function rowOpen(e,tr){if(e.target.closest('button,input,a,select,.copy-btn,.port-badge,.bulk-chk,.actions-cell'))return;openDetailAtTab(tr.dataset.nick,tr.dataset.server,'info')}
 function closeModal(){document.getElementById('detailModal').classList.remove('show');currentDetailModem=null}
 document.getElementById('detailModal').addEventListener('click',function(e){if(e.target===this)closeModal()});
 document.addEventListener('keydown',function(e){if(e.key==='Escape'){closeModal();closeClientModal()}});
@@ -985,7 +1173,7 @@ function renderHealthTab(body, m){
       html += '<div id="healthDailyTimeline" style="margin-bottom:18px"></div>';
 
       // Breakdown rows
-      html += '<div style="font-size:12px;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:10px;font-weight:600">Разложение скора</div>';
+      html += '<div style="font-size:12px;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;font-weight:600">Разложение скора</div>';
       var rows = entry.breakdown || [];
       rows.forEach(function(f){
         var col = statusColors[f.status] || statusColors.unknown;
@@ -1024,109 +1212,225 @@ function renderHealthTab(body, m){
 }
 function dr(l,v){return'<div class="detail-row"><span class="detail-label">'+l+'</span><span class="detail-value">'+esc(String(v||'-'))+'</span></div>'}
 
-function renderTabContent(tab){var body=document.getElementById('modalBody'),m=currentDetailModem;if(!m)return;
-  if(tab==='health'){renderHealthTab(body, m);return}
-  if(tab==='info'){var port=m.ports[0]||{},bw=port._bw||{},ci=COUNTRIES[m.server]||{};body.innerHTML='<div class="detail-grid"><div class="detail-card"><h4>Модем</h4>'+dr('Ник',m.nick)+dr('IMEI',m.rawImei)+dr('Модель',m.model)+dr('Телефон',m.phone)+dr('Заметки',m.notes)+'</div><div class="detail-card"><h4>Сеть</h4>'+dr('IP',m.extIp)+dr('Тип',m.netType)+dr('Оператор',m.operator)+dr('Сигнал',m.signal+'/5')+dr('APN',m.apn)+dr('Пинг',m.ping)+dr('До ротации',m.timeToRotation)+'</div><div class="detail-card"><h4>Порт</h4>'+dr('ID',port.portID)+dr('Имя',port.portName)+dr('HTTP',(ci.serverIp||'')+':'+(port.HTTP_PORT||''))+dr('SOCKS',(ci.serverIp||'')+':'+(port.SOCKS_PORT||''))+dr('Логин',port.LOGIN)+'<div class="detail-row"><span class="detail-label">Пароль</span><span class="detail-value" id="infoPwdVal" style="font-family:monospace">'+(port.LOGIN?'\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022':'-')+'</span>'+(port.LOGIN?'<button class="btn btn-sm" style="padding:2px 7px;font-size:11px;margin-left:4px" onclick="(function(){var v=document.getElementById(\'infoPwdVal\');v.textContent=v.textContent===\'\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\'?\''+esc(port.PASSWORD||'')+'\':v.textContent=\'\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022\'})()" title="\u041f\u043e\u043a\u0430\u0437\u0430\u0442\u044c/\u0441\u043a\u0440\u044b\u0442\u044c">\ud83d\udc41</button><button class="copy-btn" onclick="copyText(\''+esc(port.PASSWORD||'')+'\',this)" title="\u041a\u043e\u043f\u0438\u0440\u043e\u0432\u0430\u0442\u044c \u043f\u0430\u0440\u043e\u043b\u044c">\ud83d\udccb</button>':'')+'</div>'+'</div><div class="detail-card"><h4>\u0422\u0440\u0430\u0444\u0438\u043a</h4>'+dr('\u0421\u0435\u0433\u043e\u0434\u043d\u044f \u0432\u0445',formatTraffic(bw.bandwidth_bytes_day_in))+dr('\u041c\u0435\u0441\u044f\u0446 \u0432\u0445',formatTraffic(bw.bandwidth_bytes_month_in))+dr('\u041c\u0435\u0441\u044f\u0446 \u0438\u0441\u0445',formatTraffic(bw.bandwidth_bytes_month_out))+dr('\u041f\u0440\u0435\u0434.\u043c\u0435\u0441\u044f\u0446',formatTraffic(bw.bandwidth_bytes_prevmonth_in))+dr('\u0412\u0441\u0435\u0433\u043e',formatTraffic(bw.bandwidth_bytes_lifetime_in))+'</div></div>'
-    +'<div id="testPoolToggleRow" style="margin-top:14px;padding:10px 14px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:12px">'
-    +'<label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:12px"><input type="checkbox" id="testPoolToggleChk" onchange="toggleTestPool(\''+m.server+'\',\''+esc(m.nick)+'\',this.checked)"><span><strong>Тестовый пул</strong> — разрешить симулятору гнать через этот модем синтетическую нагрузку</span></label>'
-    +'<span id="testPoolToggleStatus" style="font-size:10px;color:var(--text-3);margin-left:auto"></span></div>';
-    // Stage 17.1: «Задержка прокси» moved to its own tab (data-tab="proxylat")
-    // — see the renderTabContent block below. Keeping just a hint here so the
-    // operator knows where the chart went.
-    body.innerHTML += '<div style="margin-top:14px;padding:10px 14px;background:var(--bg-2);border:1px dashed var(--border);border-radius:10px;font-size:11px;color:var(--text-3);display:flex;align-items:center;gap:8px"><span>📊</span><span>График задержки прокси и история замеров — на отдельной вкладке <a href="javascript:void(0)" onclick="document.querySelector(\'.modal-tab[data-tab=&quot;proxylat&quot;]\').click()" style="color:var(--accent);text-decoration:none">«Задержка прокси»</a> сверху.</span></div>';
-    loadTestPoolState(m.server, m.nick);}
-  else if(tab==='proxylat'){
-    // Stage 17.1: dedicated «Задержка прокси» tab — moved out of «Инфо»
-    // because it ate the whole tab below the fold and was missed by users.
-    body.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;padding:0 2px">'
-      + '<div><h4 style="margin:0;font-size:14px;color:var(--text-0)">Задержка прокси для '+esc(m.nick)+'</h4>'
-      + '<div style="font-size:11px;color:var(--text-3);margin-top:3px">Connect (TCP-handshake до модема) + Total (полный запрос через прокси). Замер вручную или по расписанию.</div></div>'
-      + '<button class="btn btn-sm btn-primary" id="infoProxyCheckBtn" onclick="runManualProxyCheck(\''+esc(m.nick)+'\',\''+m.server+'\')" style="font-size:11px;padding:5px 14px;white-space:nowrap">▶ Запустить замер</button>'
-      + '</div>'
-      + '<div id="proxyCheckResult" style="margin-bottom:12px"></div>'
-      + '<div id="proxyLatencyChart" style="margin-bottom:16px"></div>'
-      + '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;font-weight:600">История проверок</div>'
-      + '<div id="proxyCheckHistory"><div style="color:var(--text-3);font-size:11px;padding:8px">Загрузка…</div></div>';
-    loadInfoProxyData(m.nick, m.server);
-  }
-  else if(tab==='speed'){var sh='<div style="margin-bottom:10px;text-align:center"><button class="btn btn-primary" onclick="runSpeedtest(\''+esc(m.nick)+'\',\''+m.server+'\',\''+m.rawImei+'\')">Запустить Speedtest (~1.5 мин)</button></div>';
-    sh+='<div id="speedHistoryArea"><div style="color:var(--text-3);padding:8px">Загрузка истории...</div></div>';
-    body.innerHTML=sh;
-    loadSpeedHistory(m.server+'_'+m.rawImei)}
-  else if(tab==='hosts'){var port=m.ports[0];if(!port){body.innerHTML='-';return}body.innerHTML='<div style="color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/top_hosts?portId='+encodeURIComponent((port.portID||'').replace(/^S[12]_/,''))+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=[];if(Array.isArray(data))entries=data;else{for(var k in data){if(typeof data[k]!=='object')entries.push({host:k,count:data[k]})}}entries.sort(function(a,b){return(b.count||0)-(a.count||0)});if(!entries.length){body.innerHTML='Нет данных';return}var maxCnt=entries[0]?(entries[0].count||1):1;var h='<table class="res-table"><thead><tr><th style="width:24px">#</th><th>Домен</th><th style="width:60px">Кат.</th><th style="width:150px">Запросов</th><th style="width:55px">Кол-во</th></tr></thead><tbody>';entries.forEach(function(e,i){var cat=categorize(e.host||'');var pw=pct(e.count||0,maxCnt);h+='<tr><td style="color:var(--text-3);font-size:10px">'+(i+1)+'</td><td class="domain" title="'+esc(e.host||'')+'">'+esc(e.host||'')+'</td><td style="font-size:9px;color:var(--text-3)">'+cat.substring(0,6)+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="count-bar" style="width:'+pw+'%"></div></div></td><td style="font-family:monospace;font-size:10px;color:var(--text-0)">'+(e.count||'-')+'</td></tr>'});body.innerHTML=h+'</tbody></table>'}).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'})}
-  else if(tab==='traffic'){
-    body.innerHTML='<div style="color:var(--text-3);text-align:center;padding:20px">Загрузка тепловой карты...</div>';
-    fetch(API+'/api/analytics/modem_heatmap?nick='+encodeURIComponent(m.nick)+'&serverName='+encodeURIComponent(m.server)+'&days=7',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
-    .then(function(data){
-      if(!data.ports||!Object.keys(data.ports).length){body.innerHTML='<div style="color:var(--text-3);text-align:center;padding:20px">Нет данных за 7 дней</div>';return;}
-      var days=data.days||[],dm=data.day_meta||[];
-      var DAYS_RU=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
-      var h='';
-      for(var portLabel in data.ports){
-        var portData=data.ports[portLabel];
-        var mat=portData.matrix;
-        var maxV=0;mat.forEach(function(row){row.forEach(function(v){if(v>maxV)maxV=v})});
-        h+='<div style="margin-bottom:20px">';
-        h+='<div style="font-size:13px;font-weight:600;color:var(--text-0);margin-bottom:8px">'+esc(portLabel)+'</div>';
-        h+='<div style="overflow-x:auto;min-width:400px">';
-        // Hour labels
-        h+='<div style="display:flex;margin-left:50px;margin-bottom:3px">';
-        for(var hi=0;hi<24;hi+=2)h+='<div style="flex:1;text-align:center;font-size:8px;color:#9b9b98">'+String(hi).padStart(2,'0')+'</div><div style="flex:1"></div>';
-        h+='</div>';
-        // Rows
-        mat.forEach(function(row,di){
-          var ds=days[di]||'';var d=new Date(ds+'T00:00:00');
-          var dn=DAYS_RU[d.getDay()]||(dm[di]&&dm[di].label)||'';
-          h+='<div style="display:flex;align-items:center;margin-bottom:2px">';
-          h+='<div style="width:50px;font-size:9px;color:#6b6b68;flex-shrink:0;text-align:right;padding-right:6px">'+dn+' '+ds.slice(8)+'.'+ds.slice(5,7)+'</div>';
-          h+='<div style="display:flex;flex:1;gap:1px">';
-          row.forEach(function(val){
-            var col=val>0?heatColor(val,maxV,'#185FA5'):'var(--bg-3)';
-            h+='<div style="flex:1;height:20px;border-radius:2px;background:'+col+'" title="'+trendFmt(val)+'"></div>';
-          });
-          h+='</div></div>';
+// ===== Modem detail modal — redesigned «Обзор» + consolidated tabs (5) =====
+function _ovKpiCard(label,val,sub,col){return '<div style="position:relative;background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:11px;overflow:hidden"><div style="position:absolute;top:0;left:0;right:0;height:3px;background:'+(col||'var(--accent)')+'"></div><div style="font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;margin-bottom:4px">'+label+'</div><div style="font-size:21px;font-weight:700;color:var(--text-0);line-height:1.1">'+val+'</div><div style="font-size:10px;color:var(--text-2);margin-top:2px">'+(sub||'')+'</div></div>';}
+function _ovRow(l,v){return '<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0;gap:8px"><span style="font-size:11px;color:var(--text-2);white-space:nowrap">'+l+'</span><span style="font-size:10px;color:var(--text-0);font-family:var(--font-mono);text-align:right;overflow:hidden;text-overflow:ellipsis">'+v+'</span></div>';}
+function _ovChip(txt,col,bg){return '<span style="font-size:11px;color:'+(col||'var(--text-1)')+';background:'+(bg||'var(--bg-2)')+';border:1px solid var(--border);padding:3px 9px;border-radius:20px;white-space:nowrap">'+txt+'</span>';}
+function _ovActBtn(inner,attrs,onclick){return '<button '+(attrs||'')+' onclick="'+onclick+'" style="flex:1 1 110px;display:inline-flex;align-items:center;justify-content:center;gap:5px;padding:8px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-size:12px;cursor:pointer">'+inner+'</button>';}
+function _ovCredStr(m,ci){var sip=ci.serverIp||'';var p=(m.ports||[])[0];if(!p)return '';var pp=p.HTTP_PORT||p.SOCKS_PORT;if(!pp)return '';return sip+':'+pp+(p.LOGIN?':'+p.LOGIN+':'+(p.PASSWORD||''):'');}
+
+function _renderOverview(body,m){
+  var ci=COUNTRIES[m.server]||{};
+  var st=(typeof getModemStatus==='function')?getModemStatus(m):'';
+  var att=(typeof _attnReason==='function')?_attnReason(m):null;
+  var bBg,bBd,bCol,bIcon,bTxt;
+  if(att){var _d=(att.sev||3)>=4;bCol=_d?'var(--danger)':'var(--warning)';bBg=_d?'rgba(255,56,60,0.08)':'rgba(255,204,0,0.10)';bBd=_d?'rgba(255,56,60,0.25)':'rgba(255,204,0,0.28)';bIcon=_d?'⛔':'⚠';bTxt=att.reason;}
+  else if(st==='rotating'){bCol='var(--accent)';bBg='var(--accent-dim)';bBd='var(--border)';bIcon='↻';bTxt='Смена IP…';}
+  else if(st==='rebooting'){bCol='var(--accent)';bBg='var(--accent-dim)';bBd='var(--border)';bIcon='⏻';bTxt='Перезагрузка…';}
+  else {bCol='var(--success)';bBg='rgba(52,199,89,0.09)';bBd='rgba(52,199,89,0.25)';bIcon='✓';bTxt='Онлайн — активных проблем нет';}
+  var banner='<div style="display:flex;align-items:center;gap:8px;padding:10px 12px;background:'+bBg+';border:1px solid '+bBd+';border-radius:10px;margin-bottom:12px"><span style="font-size:15px;color:'+bCol+'">'+bIcon+'</span><span style="font-size:13px;color:'+bCol+';font-weight:500">'+esc(bTxt)+'</span></div>';
+
+  var clients=(typeof _modemClients==='function')?_modemClients(m):[];
+  var rentTxt,rentCol='var(--text-2)';
+  if(typeof _hasActiveClient==='function'&&!_hasActiveClient(m)){rentTxt=(typeof _allClientsExpired==='function'&&_allClientsExpired(m))?'Оплата истекла':'Свободен';rentCol='var(--text-3)';}
+  else {rentTxt='В работе';var _near=null;(m.ports||[]).forEach(function(p){var vb=p.PROXY_VALID_BEFORE;if(!vb)return;var t=Date.parse(String(vb).replace(' ','T'));if(!isNaN(t)&&(_near===null||t<_near))_near=t;});if(_near){var _dl=Math.ceil((_near-Date.now())/86400000);if(_dl<0){rentTxt='Аренда истекла';rentCol='var(--danger)';}else{rentTxt='В работе · истекает через '+_dl+' дн';if(_dl<=3)rentCol='var(--warning)';}}}
+
+  var chips='';
+  if(m.operator)chips+=_ovChip(esc(m.operator));
+  var _nt=(m.netType||'').toUpperCase();var _ntc=/3G|HSPA|UMTS/.test(_nt)?'var(--warning)':(/2G|GPRS|EDGE/.test(_nt)?'var(--danger)':'var(--success)');
+  if(_nt)chips+=_ovChip(esc(_nt)+(m.band?' · '+esc(m.band):''),_ntc,'transparent');
+  if(m.model)chips+=_ovChip(esc(m.model));
+  chips+=_ovChip('IMEI …'+String(m.rawImei||'').slice(-6),'var(--text-2)');
+  clients.forEach(function(c){chips+=_ovChip('👤 '+esc(c),'var(--accent)','var(--accent-dim)');});
+  chips+=_ovChip(rentTxt,rentCol);
+  var chipsWrap='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:13px">'+chips+'</div>';
+
+  var d='data-imei="'+m.rawImei+'" data-server="'+m.server+'" data-nick="'+esc(m.nick)+'"';
+  var _cred=_ovCredStr(m,ci);
+  var acts='<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">';
+  if(st!=='offline'){acts+=_ovActBtn('<span style="color:var(--accent)">↻</span> Сбросить IP',d,'resetIp(this)');acts+=_ovActBtn('<span style="color:var(--warning)">⏻</span> Ребут',d,'rebootModem(this)');}
+  acts+=_ovActBtn('<span style="color:var(--text-2)">⟳</span> Re-Add',d,'readdModem(this)');
+  if(_cred)acts+=_ovActBtn('<span style="color:var(--text-2)">📋</span> Доступ','',"copyText('"+_cred+"',this)");
+  acts+=_ovActBtn('<span style="color:var(--text-2)">⚙</span> Настройки','',"document.querySelector('.modal-tab[data-tab=&quot;settings&quot;]').click()");
+  acts+='</div>';
+
+  var hm=(typeof _getHealth==='function')?_getHealth(m):null;
+  var _kc=function(s){return s==='good'?'var(--success)':s==='warn'?'var(--warning)':s==='bad'?'var(--danger)':'var(--text-3)';};
+  var kHealth=_ovKpiCard('Здоровье',(hm&&hm.health_score!=null)?String(hm.health_score):'—',hm?(hm.status==='good'?'хорошо':hm.status==='warn'?'внимание':'проблемы'):'нет данных',hm?_kc(hm.status):'var(--text-3)');
+  var _up=m.uptimePct;var kUp=_ovKpiCard('Аптайм 7д',_up!=null?_up+'%':'—',(hm&&hm.uptime_online_checks!=null)?(hm.uptime_online_checks+'/'+hm.uptime_total_checks):'пинги',_up!=null?(parseFloat(_up)>=99?'var(--success)':parseFloat(_up)>=95?'var(--warning)':'var(--danger)'):'var(--text-3)');
+  var kLat,_lms=m.pcLastMs;
+  if(m.pcLastError){kLat=_ovKpiCard('Латентность','ошибка',esc(String(m.pcLastError).slice(0,18)),'var(--danger)');}
+  else if(_lms!=null){kLat=_ovKpiCard('Латентность',fmtMs(_lms),m.pcAvgMs!=null?('ср. '+fmtMs(m.pcAvgMs)):'',_lms>_pcBadMs?'var(--danger)':_lms>_pcWarnMs?'var(--warning)':'var(--success)');}
+  else {kLat=_ovKpiCard('Латентность','—','нет замеров','var(--text-3)');}
+  var _ep=m.pcErrorPctToday;var kErr=_ovKpiCard('Ошибки сег.',_ep!=null?_ep+'%':'—',(m.pcChecksToday!=null)?((m.pcErrToday||0)+' / '+m.pcChecksToday):'нет проверок',_ep!=null?(_ep>=_errorRateThreshold?'var(--danger)':_ep>0?'var(--warning)':'var(--success)'):'var(--text-3)');
+  var kpis='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:10px;margin-bottom:12px">'+kHealth+kUp+kLat+kErr+'</div>';
+
+  var _simOk=/\bOK\b|READY/.test(m.simStatus||'');
+  var _rs=m.rebootScore;var _rsc=_rs==null?'var(--text-0)':(_rs>=70?'var(--danger)':_rs>=50?'var(--warning)':'var(--text-0)');
+  var net='<div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:14px">';
+  net+='<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;font-weight:600;margin-bottom:9px">Сеть и сигнал</div>';
+  net+='<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0"><span style="font-size:11px;color:var(--text-2)">Сигнал</span>'+((typeof renderSignalBars==='function')?renderSignalBars(m.signal):'<span style="font-family:var(--font-mono);font-size:10px;color:var(--text-0)">'+(m.signal||0)+'/5</span>')+'</div>';
+  net+=_ovRow('IP',m.extIp?('<span style="cursor:pointer" onclick="copyText(\''+esc(m.extIp)+'\',this)">'+esc(m.extIp)+' 📋</span>'+(m.ipStuck?' <span style="color:var(--warning)" title="IP не менялся '+m.ipSinceHours+'ч">⚠</span>':'')):'—');
+  net+=_ovRow('Пинг / потери',(m.ping?esc(String(m.ping)):'—')+(m.pktLoss!=null?(' · '+m.pktLoss+'%'):''));
+  net+=_ovRow('SIM','<span style="color:'+(_simOk?'var(--success)':'var(--danger)')+'">'+esc(m.simStatus||'—')+'</span>');
+  net+=_ovRow('Reboot score','<span style="color:'+_rsc+'">'+(_rs!=null?_rs:'—')+'</span>');
+  net+=_ovRow('Ротация',m.timeToRotation?esc(m.timeToRotation):(parseInt(m.autoRotation)>0?('каждые '+m.autoRotation+'м'):'выкл'));
+  net+=_ovRow('APN',m.apn?esc(m.apn):'—');
+  net+='</div>';
+
+  var _ports=(m.ports&&m.ports.length)?m.ports:[];
+  var conn='<div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:14px">';
+  conn+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px"><span style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Подключение</span>'+(_cred?'<span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="copyText(\''+_cred+'\',this)">📋 строка</span>':'')+'</div>';
+  if(!_ports.length){conn+='<div style="font-size:11px;color:var(--text-3);padding:6px 0">Нет портов — модем свободен</div>';}
+  _ports.forEach(function(port,pi){
+    if(pi>0)conn+='<div style="height:1px;background:var(--border);margin:8px 0"></div>';
+    var sip=ci.serverIp||'';
+    if(_ports.length>1||port.portName)conn+='<div style="font-size:10px;font-weight:600;color:var(--accent);margin:2px 0 4px">'+esc(port.portName||('Порт '+(pi+1)))+'</div>';
+    conn+=_ovRow('HTTP',port.HTTP_PORT?(sip+':'+port.HTTP_PORT):'—');
+    conn+=_ovRow('SOCKS5',port.SOCKS_PORT?(sip+':'+port.SOCKS_PORT):'—');
+    conn+=_ovRow('Логин',port.LOGIN?esc(port.LOGIN):'—');
+    var _pid='ovPwd'+pi;
+    conn+='<div style="display:flex;justify-content:space-between;align-items:center;padding:3px 0"><span style="font-size:11px;color:var(--text-2)">Пароль</span><span style="font-size:10px;color:var(--text-0);font-family:var(--font-mono)"><span id="'+_pid+'">'+(port.LOGIN?'••••••••':'—')+'</span>'+(port.LOGIN?' <span style="cursor:pointer;color:var(--text-2)" onclick="(function(){var v=document.getElementById(\''+_pid+'\');v.textContent=v.textContent===\'••••••••\'?\''+esc(port.PASSWORD||'')+'\':\'••••••••\'})()">👁</span> <span style="cursor:pointer;color:var(--text-2)" onclick="copyText(\''+esc(port.PASSWORD||'')+'\',this)">📋</span>':'')+'</span></div>';
+    if(port.PROXY_VALID_BEFORE){var _t=Date.parse(String(port.PROXY_VALID_BEFORE).replace(' ','T'));var _exp=!isNaN(_t)&&_t<Date.now();conn+=_ovRow('Аренда до','<span style="color:'+(_exp?'var(--danger)':'var(--text-0)')+'">'+esc(String(port.PROXY_VALID_BEFORE).slice(0,10))+'</span>');}
+  });
+  conn+='</div>';
+  var cards='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(260px,100%),1fr));gap:10px;margin-bottom:10px">'+net+conn+'</div>';
+
+  var _tdi=0,_tdo=0,_yi=0,_yo=0,_mi=0,_mo=0,_lf=0;
+  (m.ports||[]).forEach(function(p){var b=p._bw||{};_tdi+=parseTraffic(b.bandwidth_bytes_day_in);_tdo+=parseTraffic(b.bandwidth_bytes_day_out);_yi+=parseTraffic(b.bandwidth_bytes_yesterday_in);_yo+=parseTraffic(b.bandwidth_bytes_yesterday_out);_mi+=parseTraffic(b.bandwidth_bytes_month_in);_mo+=parseTraffic(b.bandwidth_bytes_month_out);_lf+=parseTraffic(b.bandwidth_bytes_lifetime_in)+parseTraffic(b.bandwidth_bytes_lifetime_out);});
+  var traf='<div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:14px">';
+  traf+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px"><span style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Трафик</span><span style="font-size:10px;color:var(--accent);cursor:pointer" onclick="document.querySelector(\'.modal-tab[data-tab=&quot;traffic&quot;]\').click()">тепловая карта →</span></div>';
+  traf+='<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(130px,100%),1fr));gap:10px;text-align:center">';
+  traf+='<div><div style="font-size:16px;font-weight:700;color:var(--text-0);font-family:var(--font-mono)">'+fmtGb(_tdi+_tdo)+'</div><div style="font-size:10px;color:var(--text-2);margin-top:2px">Сегодня</div></div>';
+  traf+='<div><div style="font-size:16px;font-weight:700;color:var(--text-0);font-family:var(--font-mono)">'+fmtGb(_yi+_yo)+'</div><div style="font-size:10px;color:var(--text-2);margin-top:2px">Вчера</div></div>';
+  traf+='<div><div style="font-size:16px;font-weight:700;color:var(--text-0);font-family:var(--font-mono)">'+fmtGb(_mi+_mo)+'</div><div style="font-size:10px;color:var(--text-2);margin-top:2px">Месяц</div></div>';
+  traf+='<div><div style="font-size:16px;font-weight:700;color:var(--text-0);font-family:var(--font-mono)">'+fmtGb(_lf)+'</div><div style="font-size:10px;color:var(--text-2);margin-top:2px">Всего</div></div>';
+  traf+='</div></div>';
+
+  var testPool='<div id="testPoolToggleRow" style="margin-top:12px;padding:9px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;display:flex;align-items:center;gap:10px"><label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:11px"><input type="checkbox" id="testPoolToggleChk" onchange="toggleTestPool(\''+m.server+'\',\''+esc(m.nick)+'\',this.checked)"><span><strong>Тестовый пул</strong> — пускать через модем синтетическую нагрузку симулятора</span></label><span id="testPoolToggleStatus" style="font-size:10px;color:var(--text-3);margin-left:auto"></span></div>';
+
+  body.innerHTML=banner+chipsWrap+acts+kpis+cards+traf+testPool;
+  if(typeof loadTestPoolState==='function')loadTestPoolState(m.server,m.nick);
+}
+
+function _renderProxyLat(el,m){
+  el.innerHTML = '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:12px;padding:0 2px">'
+    + '<div><h4 style="margin:0;font-size:14px;color:var(--text-0)">Задержка прокси для '+esc(m.nick)+'</h4>'
+    + '<div style="font-size:11px;color:var(--text-3);margin-top:3px">Connect (TCP-handshake до модема) + Total (полный запрос через прокси). Замер вручную или по расписанию.</div></div>'
+    + '<button class="btn btn-sm btn-primary" id="infoProxyCheckBtn" onclick="runManualProxyCheck(\''+esc(m.nick)+'\',\''+m.server+'\')" style="font-size:11px;padding:5px 14px;white-space:nowrap">▶ Запустить замер</button>'
+    + '</div>'
+    + '<div id="proxyCheckResult" style="margin-bottom:12px"></div>'
+    + '<div id="proxyLatencyChart" style="margin-bottom:16px"></div>'
+    + '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;font-weight:600">История проверок</div>'
+    + '<div id="proxyCheckHistory"><div style="color:var(--text-3);font-size:11px;padding:8px">Загрузка…</div></div>';
+  loadInfoProxyData(m.nick, m.server);
+}
+
+function _renderSpeed(el,m){var sh='<div style="margin-bottom:10px;text-align:center"><button class="btn btn-primary" onclick="runSpeedtest(\''+esc(m.nick)+'\',\''+m.server+'\',\''+m.rawImei+'\')">Запустить Speedtest (~1.5 мин)</button></div>';
+  sh+='<div id="speedHistoryArea"><div style="color:var(--text-3);padding:8px">Загрузка истории...</div></div>';
+  el.innerHTML=sh;
+  loadSpeedHistory(m.server+'_'+m.rawImei)}
+
+function _renderHosts(el,m){var port=m.ports[0];if(!port){el.innerHTML='<div style="color:var(--text-3);padding:12px">Нет порта</div>';return}el.innerHTML='<div style="color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/top_hosts?portId='+encodeURIComponent((port.portID||'').replace(/^S[12]_/,''))+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=[];if(Array.isArray(data))entries=data;else{for(var k in data){if(typeof data[k]!=='object')entries.push({host:k,count:data[k]})}}entries.sort(function(a,b){return(b.count||0)-(a.count||0)});if(!entries.length){el.innerHTML='<div style="color:var(--text-3);padding:12px">Нет данных</div>';return}var maxCnt=entries[0]?(entries[0].count||1):1;var h='<table class="res-table"><thead><tr><th style="width:24px">#</th><th>Домен</th><th style="width:60px">Кат.</th><th style="width:150px">Запросов</th><th style="width:55px">Кол-во</th></tr></thead><tbody>';entries.forEach(function(e,i){var cat=categorize(e.host||'');var pw=pct(e.count||0,maxCnt);h+='<tr><td style="color:var(--text-3);font-size:10px">'+(i+1)+'</td><td class="domain" title="'+esc(e.host||'')+'">'+esc(e.host||'')+'</td><td style="font-size:9px;color:var(--text-3)">'+cat.substring(0,6)+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="count-bar" style="width:'+pw+'%"></div></div></td><td style="font-family:monospace;font-size:10px;color:var(--text-0)">'+(e.count||'-')+'</td></tr>'});el.innerHTML=h+'</tbody></table>'}).catch(function(e){el.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'})}
+
+function _renderTrafficHeatmap(el,m){
+  el.innerHTML='<div style="color:var(--text-3);text-align:center;padding:20px">Загрузка тепловой карты...</div>';
+  fetch(API+'/api/analytics/modem_heatmap?nick='+encodeURIComponent(m.nick)+'&serverName='+encodeURIComponent(m.server)+'&days=7',{headers:{'X-Auth-Token':authToken}})
+  .then(function(r){return r.json()})
+  .then(function(data){
+    if(!data.ports||!Object.keys(data.ports).length){el.innerHTML='<div style="color:var(--text-3);text-align:center;padding:20px">Нет данных за 7 дней</div>';return;}
+    var days=data.days||[],dm=data.day_meta||[];
+    var DAYS_RU=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    var h='';
+    for(var portLabel in data.ports){
+      var portData=data.ports[portLabel];
+      var mat=portData.matrix;
+      var maxV=0;mat.forEach(function(row){row.forEach(function(v){if(v>maxV)maxV=v})});
+      h+='<div style="margin-bottom:20px">';
+      h+='<div style="font-size:13px;font-weight:600;color:var(--text-0);margin-bottom:8px">'+esc(portLabel)+'</div>';
+      h+='<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><div style="min-width:400px">';
+      h+='<div style="display:flex;margin-left:50px;margin-bottom:3px">';
+      for(var hi=0;hi<24;hi+=2)h+='<div style="flex:1;text-align:center;font-size:8px;color:#9b9b98">'+String(hi).padStart(2,'0')+'</div><div style="flex:1"></div>';
+      h+='</div>';
+      mat.forEach(function(row,di){
+        var ds=days[di]||'';var d=new Date(ds+'T00:00:00');
+        var dn=DAYS_RU[d.getDay()]||(dm[di]&&dm[di].label)||'';
+        h+='<div style="display:flex;align-items:center;margin-bottom:2px">';
+        h+='<div style="width:50px;font-size:9px;color:#6b6b68;flex-shrink:0;text-align:right;padding-right:6px">'+dn+' '+ds.slice(8)+'.'+ds.slice(5,7)+'</div>';
+        h+='<div style="display:flex;flex:1;gap:1px">';
+        row.forEach(function(val){
+          var col=val>0?heatColor(val,maxV,'#185FA5'):'var(--bg-3)';
+          h+='<div style="flex:1;height:20px;border-radius:2px;background:'+col+'" title="'+trendFmt(val)+'"></div>';
         });
-        // Legend
-        h+='<div style="display:flex;align-items:center;gap:4px;margin-top:6px;font-size:9px;color:#9b9b98">';
-        h+='<span>0</span><div style="display:flex;gap:1px">';
-        for(var li=0;li<=6;li++)h+='<div style="width:12px;height:8px;border-radius:1px;background:'+heatColor(li/6*maxV,maxV,'#185FA5')+'"></div>';
-        h+='</div><span>'+trendFmt(maxV)+'</span></div>';
         h+='</div></div>';
-      }
-      body.innerHTML=h;
-    })
-    .catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+esc(e.message)+'</div>'});
-  }
-  // Stage 17.1: SMS & USSD tab removed per user request. The send_ussd /
-  // sms / purge_sms endpoints are still mounted server-side (other tooling
-  // may rely on them) — only the UI is gone.
-  else if(tab==='iphistory'){
-    body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка лога ротации...</div>';
-    fetch(API+'/api/admin/rotation_log?nick='+encodeURIComponent(m.nick)+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
-      var entries=Array.isArray(data)?data:(data.log||data.logs||data.data||[]);
-      if(!entries.length){body.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории ротации</div>';return}
-      function _fmtRot(v){if(!v||v==='—')return'—';var s=String(v).replace('@',' ').replace('T',' ');var d=new Date(s);if(isNaN(d.getTime())){var p=s.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):?(\d{2})?/);if(p)return p[3]+'.'+p[2]+'.'+p[1]+' '+p[4]+':'+p[5]+(p[6]?':'+p[6]:'');return s}return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
-      var h='<table class="log-table"><thead><tr><th>Начало</th><th>Конец</th><th>Сек</th><th>Попытка</th><th>Старый IP</th><th>Новый IP</th></tr></thead><tbody>';
-      entries.forEach(function(e){
-        var start=e.started_at||e.start_time||e.Start||e.start||'—';
-        var end=e.ended_at||e.end_time||e.End||e.end||'—';
-        var took=e.took_sec||e.total_time||e.Took||e.took||'—';
-        var attempt=e.attempt||e.Attempt||1;
-        var oldIp=e.old_ip||e.OldIPv4||'—';
-        var newIp=e.new_ip||e.NewIPv4||'—';
-        h+='<tr>';
-        h+='<td style="white-space:nowrap">'+_fmtRot(start)+'</td>';
-        h+='<td style="white-space:nowrap">'+_fmtRot(end)+'</td>';
-        h+='<td>'+(took!=='—'?parseFloat(took).toFixed(1):'—')+'</td>';
-        h+='<td>'+esc(String(attempt))+'</td>';
-        h+='<td style="font-family:var(--font-mono);color:var(--text-2)">'+esc(String(oldIp))+'</td>';
-        h+='<td style="font-family:var(--font-mono);color:var(--accent)">'+esc(String(newIp))+'</td>';
-        h+='</tr>';
       });
-      body.innerHTML=h+'</tbody></table>';
-    }).catch(function(e){body.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'});
-  }
+      h+='<div style="display:flex;align-items:center;gap:4px;margin-top:6px;font-size:9px;color:#9b9b98">';
+      h+='<span>0</span><div style="display:flex;gap:1px">';
+      for(var li=0;li<=6;li++)h+='<div style="width:12px;height:8px;border-radius:1px;background:'+heatColor(li/6*maxV,maxV,'#185FA5')+'"></div>';
+      h+='</div><span>'+trendFmt(maxV)+'</span></div>';
+      h+='</div></div></div></div>';
+    }
+    el.innerHTML=h;
+  })
+  .catch(function(e){el.innerHTML='<div style="color:var(--danger)">'+esc(e.message)+'</div>'});
+}
+
+function _renderRotationLog(el,m){
+  el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка лога ротации...</div>';
+  fetch(API+'/api/admin/rotation_log?nick='+encodeURIComponent(m.nick)+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+    var entries=Array.isArray(data)?data:(data.log||data.logs||data.data||[]);
+    if(!entries.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории ротации</div>';return}
+    function _fmtRot(v){if(!v||v==='—')return'—';var s=String(v).replace('@',' ').replace('T',' ');var d=new Date(s);if(isNaN(d.getTime())){var p=s.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):?(\d{2})?/);if(p)return p[3]+'.'+p[2]+'.'+p[1]+' '+p[4]+':'+p[5]+(p[6]?':'+p[6]:'');return s}return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+    var h='<table class="log-table"><thead><tr><th>Начало</th><th>Конец</th><th>Сек</th><th>Попытка</th><th>Старый IP</th><th>Новый IP</th></tr></thead><tbody>';
+    entries.forEach(function(e){
+      var start=e.started_at||e.start_time||e.Start||e.start||'—';
+      var end=e.ended_at||e.end_time||e.End||e.end||'—';
+      var took=e.took_sec||e.total_time||e.Took||e.took||'—';
+      var attempt=e.attempt||e.Attempt||1;
+      var oldIp=e.old_ip||e.OldIPv4||'—';
+      var newIp=e.new_ip||e.NewIPv4||'—';
+      h+='<tr>';
+      h+='<td style="white-space:nowrap">'+_fmtRot(start)+'</td>';
+      h+='<td style="white-space:nowrap">'+_fmtRot(end)+'</td>';
+      h+='<td>'+(took!=='—'?parseFloat(took).toFixed(1):'—')+'</td>';
+      h+='<td>'+esc(String(attempt))+'</td>';
+      h+='<td style="font-family:var(--font-mono);color:var(--text-2)">'+esc(String(oldIp))+'</td>';
+      h+='<td style="font-family:var(--font-mono);color:var(--accent)">'+esc(String(newIp))+'</td>';
+      h+='</tr>';
+    });
+    el.innerHTML=h+'</tbody></table>';
+  }).catch(function(e){el.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'});
+}
+
+function _ovSecLabel(t){return '<div style="font-size:12px;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:10px;font-weight:600">'+t+'</div>';}
+function _ovDivider(){return '<div style="height:1px;background:var(--border);margin:22px 0 16px"></div>';}
+
+function _renderHealthTab2(body,m){
+  body.innerHTML='<div id="ovSecHealth"></div>'+_ovDivider()+_ovSecLabel('Задержка прокси')+'<div id="ovSecLat"></div>';
+  renderHealthTab(document.getElementById('ovSecHealth'),m);
+  _renderProxyLat(document.getElementById('ovSecLat'),m);
+}
+function _renderTrafficTab(body,m){
+  body.innerHTML=_ovSecLabel('Тепловая карта трафика (7 дней)')+'<div id="ovSecHeat"></div>'+_ovDivider()+_ovSecLabel('Топ доменов')+'<div id="ovSecHosts"></div>';
+  _renderTrafficHeatmap(document.getElementById('ovSecHeat'),m);
+  _renderHosts(document.getElementById('ovSecHosts'),m);
+}
+function _renderHistoryTab(body,m){
+  body.innerHTML=_ovSecLabel('Ротации IP')+'<div id="ovSecRot"></div>'+_ovDivider()+_ovSecLabel('История скорости')+'<div id="ovSecSpeed"></div>';
+  _renderRotationLog(document.getElementById('ovSecRot'),m);
+  _renderSpeed(document.getElementById('ovSecSpeed'),m);
+}
+
+function renderTabContent(tab){var body=document.getElementById('modalBody'),m=currentDetailModem;if(!m)return;
+  if(tab==='info'){_renderOverview(body,m);return}
+  if(tab==='health'){_renderHealthTab2(body,m);return}
+  if(tab==='traffic'){_renderTrafficTab(body,m);return}
+  if(tab==='history'){_renderHistoryTab(body,m);return}
+  if(tab==='proxylat'){_renderProxyLat(body,m);return}
+  if(tab==='iphistory'){_renderRotationLog(body,m);return}
+  if(tab==='speed'){_renderSpeed(body,m);return}
+  if(tab==='hosts'){_renderHosts(body,m);return}
+  if(false){}
   else if(tab==='settings'){
     var actH='';
     var ROT_OPTS=[{v:0,l:'Выкл.'},{v:5,l:'5 мин'},{v:10,l:'10 мин'},{v:15,l:'15 мин'},{v:30,l:'30 мин'},{v:60,l:'1 час'},{v:120,l:'2 часа'},{v:240,l:'4 часа'},{v:480,l:'8 часов'},{v:720,l:'12 часов'},{v:1440,l:'24 часа'}];
@@ -1138,7 +1442,7 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
       +'<button class="btn btn-primary btn-sm" onclick="showNewPortForm(\''+m.rawImei+'\',\''+m.server+'\')">+ Добавить</button>'
       +'</div>';
     if(!m.ports.length){portsH+='<div style="color:var(--text-3);font-size:12px">Нет портов</div>'}
-    else{m.ports.forEach(function(p){var pid=(p.portID||'').replace(/^S\d+_/,'');var osTag=p.OS?'<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:600;background:rgba(25,96,201,.1);color:var(--accent);margin-left:6px">🛡 '+esc(p.OS)+'</span>':'';
+    else{m.ports.forEach(function(p){var pid=(p.portID||'').replace(/^S\d+_/,'');var osTag=p.OS?'<span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;background:rgba(25,96,201,.1);color:var(--accent);margin-left:6px">🛡 '+esc(p.OS)+'</span>':'';
       // Stage 18.12: surface ProxySmart's per-port metadata that was previously
       // hidden — PROXY_VALID_BEFORE (expiry), CREATED_AT, and the IS_EXPIRED /
       // IS_OVER_QUOTA flags. Showing them inline so the operator doesn't have to
@@ -1152,8 +1456,8 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
       var expSoonTag='';
       if(expiry&&!expired){var ms=Date.parse(expiry);if(!isNaN(ms)){var days=Math.floor((ms-Date.now())/86400000);if(days<7&&days>=0)expSoonTag=' <span style="color:var(--warning);font-size:9px;font-weight:600">истекает через '+days+'д</span>';}}
       var statusTags='';
-      if(expired)statusTags+='<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:600;background:rgba(232,65,65,.15);color:var(--danger);margin-left:6px">⏰ ИСТЁК</span>';
-      if(overQuota)statusTags+='<span style="display:inline-block;padding:1px 6px;border-radius:4px;font-size:9px;font-weight:600;background:rgba(239,159,39,.15);color:var(--warning);margin-left:6px">📦 ЛИМИТ</span>';
+      if(expired)statusTags+='<span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;background:rgba(232,65,65,.15);color:var(--danger);margin-left:6px">⏰ ИСТЁК</span>';
+      if(overQuota)statusTags+='<span style="display:inline-block;padding:1px 6px;border-radius:8px;font-size:9px;font-weight:600;background:rgba(239,159,39,.15);color:var(--warning);margin-left:6px">📦 ЛИМИТ</span>';
       portsH+='<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 10px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border);margin-bottom:6px">'
       +'<div><div style="font-size:12px;font-weight:600;color:var(--text-0)">'+esc(p.portName||pid)+osTag+statusTags+'</div>'
       +'<div style="font-size:11px;color:var(--text-2);margin-top:2px">HTTP: '+(ci.serverIp||'')+':'+esc(p.HTTP_PORT||'—')+' · SOCKS5: '+(ci.serverIp||'')+':'+esc(p.SOCKS_PORT||'—')+'</div>'
@@ -1170,7 +1474,7 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
       +actH
       // Section 1: Идентификация
       +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'
-      +'<div style="padding:7px 14px;background:var(--bg-2);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em">Идентификация</div>'
+      +'<div style="padding:7px 14px;background:var(--bg-2);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Идентификация</div>'
       +'<div style="padding:14px;display:flex;flex-direction:column;gap:12px">'
       +'<div style="display:grid;grid-template-columns:110px 1fr;align-items:center;gap:10px"><label style="font-size:12px;color:var(--text-2)">Ник модема</label><input class="form-input" id="msNick" value="'+esc(m.nick)+'"></div>'
       +'<div style="display:grid;grid-template-columns:110px 1fr;align-items:center;gap:10px"><label style="font-size:12px;color:var(--text-2)">Телефон SIM</label><input class="form-input" id="msPhone" value="'+esc(m.phone)+'"></div>'
@@ -1178,20 +1482,20 @@ function renderTabContent(tab){var body=document.getElementById('modalBody'),m=c
       +'</div></div>'
       // Section 2: Сеть и ротация
       +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'
-      +'<div style="padding:7px 14px;background:var(--bg-2);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em">Сеть и ротация</div>'
+      +'<div style="padding:7px 14px;background:var(--bg-2);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Сеть и ротация</div>'
       +'<div style="padding:14px;display:flex;flex-direction:column;gap:14px">'
       +'<div style="display:grid;grid-template-columns:110px 1fr;align-items:center;gap:10px"><label style="font-size:12px;color:var(--text-2)">Режим сети</label>'
       +'<select class="form-input" id="msMode" style="max-width:160px"><option value="auto"'+(m.targetMode==='auto'?' selected':'')+'>Авто</option><option value="4g"'+(m.targetMode==='4g'?' selected':'')+'>4G / LTE</option><option value="3g"'+(m.targetMode==='3g'?' selected':'')+'>3G</option></select></div>'
       +'<div style="display:grid;grid-template-columns:110px 1fr;align-items:center;gap:10px"><label style="font-size:12px;color:var(--text-2)">Авторотация</label>'
       +'<select class="form-input" id="msAutoRot" style="max-width:180px">'+ROT_OPTS.map(function(o){return'<option value="'+o.v+'"'+(curRot===o.v?' selected':'')+'>'+o.l+'</option>'}).join('')+'</select></div>'
       +'<div style="display:flex;gap:8px;flex-wrap:wrap"><button class="btn btn-sm btn-warning" onclick="(function(){var b=document.querySelector(\'[data-imei=\\\"'+m.rawImei+'\\\"]\');if(b){resetIp(b)}else{fetch(API+\'/api/admin/reset_ip\',{method:\'POST\',headers:{\'Content-Type\':\'application/json\',\'X-Auth-Token\':authToken},body:JSON.stringify({imei:\''+m.rawImei+'\',serverName:\''+m.server+'\'})}).then(function(r){return r.json()}).then(function(d){showToast(d.ok?\'IP сброшен\':d.error,d.ok?\'success\':\'error\')}).catch(function(){showToast(\'Ошибка сети\',\'error\')})}})()" style="font-size:11px">🔄 Сбросить IP сейчас</button>'
-      +'<button class="btn btn-sm" data-nick="'+esc(m.nick)+'" data-server="'+m.server+'" onclick="usbReset(this)" style="font-size:11px" title="Перезапустить USB-порт модема (usb reset)">🔌 USB Reset</button>'
+      +(/MF289/i.test(m.model||'')?'':'<button class="btn btn-sm" data-nick="'+esc(m.nick)+'" data-server="'+m.server+'" onclick="usbReset(this)" style="font-size:11px" title="Перезапустить USB-порт модема (usb reset)">🔌 USB Reset</button>')
       +'<button class="btn btn-sm" data-nick="'+esc(m.nick)+'" data-server="'+m.server+'" onclick="readdModem(this)" style="font-size:11px" title="Переподключить модем в системе ProxySmart (Re-Add device)">➕ Re-Add</button>'
       +'</div>'
       +'</div></div>'
       // Section 3: Порты
       +'<div style="border:1px solid var(--border);border-radius:10px;overflow:hidden">'
-      +'<div style="padding:7px 14px;background:var(--bg-2);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.06em">Порты</div>'
+      +'<div style="padding:7px 14px;background:var(--bg-2);font-size:10px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">Порты</div>'
       +'<div style="padding:14px">'+portsH+'</div>'
       +'</div>'
       // Save buttons
@@ -1277,7 +1581,7 @@ function movePortPrompt(pid,srv,label){
   var overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
-  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:400px;max-width:90vw;box-shadow:0 10px 40px rgba(0,0,0,.3)" onclick="event.stopPropagation()">'
+  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:400px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" onclick="event.stopPropagation()">'
     +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">Перекинуть порт '+esc(label)+'</h3>'
     +'<p style="font-size:12px;color:var(--text-2);margin-bottom:12px">Выберите модем, на который нужно перекинуть порт:</p>'
     +'<select id="movePortTarget" class="form-input" style="width:100%;margin-bottom:12px">'+opts+'</select>'
@@ -1312,7 +1616,7 @@ function loadSpeedHistory(key){
     // After speedtest result: replace modal body with history view + back button
     var mb=document.getElementById('modalBody');if(!mb)return;
     var m=currentDetailModem;
-    var backFn=m?'switchTab(\'speed\',document.querySelector(\'.modal-tab[data-tab="speed"]\'))':'';
+    var backFn=m?'switchTab(\'history\',document.querySelector(\'.modal-tab[data-tab="history"]\'))':'';
     mb.innerHTML='<div style="padding:12px"><div style="margin-bottom:10px;display:flex;gap:6px;align-items:center">'
       +'<button class="btn btn-sm" onclick="'+backFn+'">← Назад</button>'
       +'<span style="font-size:11px;color:var(--text-2)">История скорости</span></div>'
@@ -1713,7 +2017,7 @@ function renderAccSubTab(name){
     var totalAllOv=d.totalIn+d.totalOut||1;
     var daysEl=getDaysElapsed();
     // Header row — flex proportional columns filling full width
-    var hc='<div class="ct-header" style="display:flex;align-items:center;padding:4px 0;border-bottom:2px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.4px">';
+    var hc='<div class="ct-header" style="display:flex;align-items:center;padding:4px 0;border-bottom:2px solid var(--border);font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px">';
     hc+='<div style="width:4px;flex-shrink:0"></div>';
     hc+='<div style="flex:2.2;padding:0 10px;min-width:0">Клиент</div>';
     hc+='<div style="flex:0.7;text-align:center">Live</div>';
@@ -1843,14 +2147,15 @@ function renderAccSubTab(name){
 
 // ==================== RESOURCES BY CATEGORY CARD ====================
 var _topHostsCacheGlobal=null;
-function loadAnalyticsCategoryCard(){
-  var el=document.getElementById('analyticsCatBars');
+function loadAnalyticsCategoryCard(elId){
+  elId=elId||'analyticsCatBars';
+  var el=document.getElementById(elId);
   if(!el)return;
   if(_topHostsCacheGlobal){renderAnalyticsCategoryCard(_topHostsCacheGlobal,el);return;}
   fetch(API+'/api/admin/top_hosts_aggregated',{headers:{'X-Auth-Token':authToken}})
     .then(function(r){return r.json()})
     .then(function(d){_topHostsCacheGlobal=d.data||{};renderAnalyticsCategoryCard(_topHostsCacheGlobal,el);})
-    .catch(function(){var el2=document.getElementById('analyticsCatBars');if(el2)el2.innerHTML='<div style="color:var(--text-3);font-size:11px">Нет данных</div>';});
+    .catch(function(){var el2=document.getElementById(elId);if(el2)el2.innerHTML='<div style="color:var(--text-3);font-size:11px">Нет данных</div>';});
 }
 var _catIcons={'Социальные сети':'👥','Поисковики':'🔍','Видео':'🎬','Мессенджеры':'💬','CDN/Облако':'☁️','Реклама':'📢','Почта':'📧','Прочее':'📦','Маркетплейсы':'🛒','Новости':'📰','Игры':'🎮'};
 function renderAnalyticsCategoryCard(data,el){
@@ -1878,11 +2183,11 @@ function renderAnalyticsCategoryCard(data,el){
 
 // ==================== TREND CARD ====================
 var _trendData=null;
-function loadTrendData(){
-  if(_trendData){renderTrendCard(_trendData);return;}
+function loadTrendData(sfx){
+  if(_trendData){renderTrendCard(_trendData,sfx);return;}
   fetch(API+'/api/analytics/monthly_traffic?months=12',{headers:{'X-Auth-Token':authToken}})
     .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
-    .then(function(data){_trendData=data;renderTrendCard(data);})
+    .then(function(data){_trendData=data;renderTrendCard(data,sfx);})
     .catch(function(){});
 }
 function trendFmt(gb){if(!gb&&gb!==0)return'0 МБ';if(gb>=1000)return(gb/1000).toFixed(1)+' ТБ';if(gb>=1)return gb.toFixed(1)+' ГБ';return Math.round(gb*1024)+' МБ';}
@@ -1892,9 +2197,9 @@ function pluralModem(n){var a=Math.abs(n)%100,b=a%10;if(a>10&&a<20)return n+' м
 function pluralPort(n){var a=Math.abs(n)%100,b=a%10;if(a>10&&a<20)return n+' портов';if(b>1&&b<5)return n+' порта';if(b===1)return n+' порт';return n+' портов';}
 var _MSK_OFFSET=3;
 function fmtHourMsk(hr){return String((hr+_MSK_OFFSET)%24).padStart(2,'0')+':00';}
-function renderTrendCard(months){
-  var wrap=document.getElementById('trendBarsWrap');
-  var labWrap=document.getElementById('trendLabelsWrap');
+function renderTrendCard(months,sfx){sfx=sfx||'';
+  var wrap=document.getElementById('trendBarsWrap'+sfx);
+  var labWrap=document.getElementById('trendLabelsWrap'+sfx);
   if(!wrap||!labWrap||!months||!months.length)return;
   var maxVal=Math.max.apply(null,months.map(function(m){return m.forecast_gb||m.total_gb}));
   if(!maxVal)maxVal=1;
@@ -1914,11 +2219,20 @@ function renderTrendCard(months){
   wrap.innerHTML=bH;
   var lH='';
   months.forEach(function(m){
-    lH+='<div style="flex:1;text-align:center;font-size:8px;color:'+(m.is_current?'#185FA5':'#9b9b98')+';font-weight:'+(m.is_current?'600':'400')+'">'+m.label+'</div>';
+    lH+='<div style="flex:1;text-align:center;font-size:8px;color:'+(m.is_current?'#185FA5':'#9b9b98')+';font-weight:'+(m.is_current?'600':'400')+'">'+(/^\d{4}-\d{2}/.test(m.label||'')?_ymRu(m.label,true):(m.label||''))+'</div>';
   });
   labWrap.innerHTML=lH;
   wrap.style.gap='2px';
   window._trendMonths=months;
+  var sumEl=document.getElementById('trendSum'+sfx);
+  if(sumEl){
+    var tot=months.reduce(function(a,m){return a+(m.total_gb||0);},0);
+    var cur=months[months.length-1]||{}, prev=months[months.length-2]||{};
+    var cv=(cur.is_current&&cur.forecast_gb)?cur.forecast_gb:(cur.total_gb||0);
+    var pv=prev.total_gb||0;
+    var dl=pv>0?Math.round((cv-pv)/pv*100):null;
+    sumEl.innerHTML='<span>Σ '+trendFmt(tot)+'</span>'+(dl==null?'':'<span style="color:'+(dl>=0?'var(--success)':'var(--danger)')+'">'+(dl>=0?'↑ +':'↓ −')+Math.abs(dl)+'% к пред. мес</span>');
+  }
 }
 function onTrendHover(idx,event){
   var months=window._trendMonths;if(!months)return;
@@ -1963,6 +2277,12 @@ function showOpTT(op,total,perDay,perModem,cnt,event){
 
 // ==================== HEATMAP ====================
 var _heatmapView='country',_heatmapId='all',_heatmapCache={};
+var _newHmCache={};
+// Контексты тепловой карты: «Трафик» (по умолчанию) и NEW. Обе вкладки рендерятся
+// ОДНИМ кодом (renderHeatmap/renderHeatmapSubTabs/...); ctx подменяет только
+// состояние (view/id/cache) и DOM-id — поэтому NEW = 1:1 со страницей «Трафик».
+var _hmTraffic={get view(){return _heatmapView;},set view(v){_heatmapView=v;},get id(){return _heatmapId;},set id(v){_heatmapId=v;},cache:_heatmapCache,grid:'heatmapGrid',summary:'heatmapSummary',subtabs:'heatmapSubTabs',tabPrefix:'hmTab',tabClass:false,ttId:'heatTT',dataKey:'_heatmapData',self:''};
+var _hmNew={get view(){return _newHmView;},set view(v){_newHmView=v;},get id(){return _newHmId;},set id(v){_newHmId=v;},cache:_newHmCache,grid:'newHmGrid',summary:'newHmSummary',subtabs:'newHmSubTabs',tabPrefix:'newHmTab',tabClass:true,ttId:'newHeatTT',dataKey:'_newHeatmapData',self:'_hmNew'};
 // Stage 17 — `operator` list is now built DYNAMICALLY from
 // /api/admin/operators (see refreshOperatorList() at end of file). Hardcoded
 // fallback below is used only during first paint, before the API answers,
@@ -1980,40 +2300,46 @@ function hmAccent(view,id){
   var i=cls.findIndex(function(c){return c.portName===id});
   return CHART_COLORS.clients[Math.max(i,0)%CHART_COLORS.clients.length]||'#185FA5';
 }
-function setHeatmapView(view){
-  _heatmapView=view;
+function setHeatmapView(view,ctx){
+  ctx=ctx||_hmTraffic;
+  ctx.view=view;
   if(view==='client'){_heatmapConfig.client=(currentData&&currentData.clients||[]).filter(function(c){return c.modemCount>0}).map(function(c){return{id:c.portName,label:c.name,modems:c.modemCount||1}});}
   var cfg=_heatmapConfig[view]||[];
-  if(cfg.length)_heatmapId=cfg[0].id;
+  if(cfg.length)ctx.id=cfg[0].id;
   ['country','operator','client'].forEach(function(v){
-    var btn=document.getElementById('hmTab'+v.charAt(0).toUpperCase()+v.slice(1));
+    var btn=document.getElementById(ctx.tabPrefix+v.charAt(0).toUpperCase()+v.slice(1));
     if(!btn)return;var active=v===view;
-    btn.style.borderBottomColor=active?'var(--accent)':'transparent';
-    btn.style.color=active?'var(--accent)':'var(--text-2)';btn.style.fontWeight=active?'600':'500';
+    if(ctx.tabClass){ btn.classList.toggle('active',active); }
+    else{ btn.style.borderBottomColor=active?'var(--accent)':'transparent';
+      btn.style.color=active?'var(--accent)':'var(--text-2)';btn.style.fontWeight=active?'600':'500'; }
   });
-  renderHeatmapSubTabs();loadHeatmapData();
+  renderHeatmapSubTabs(ctx);loadHeatmapData(ctx);
 }
-function renderHeatmapSubTabs(){
-  var c=document.getElementById('heatmapSubTabs');if(!c)return;
-  var view=_heatmapView;
+function renderHeatmapSubTabs(ctx){
+  ctx=ctx||_hmTraffic;
+  var c=document.getElementById(ctx.subtabs);if(!c)return;
+  var view=ctx.view;
   var cfg=view==='client'?(currentData&&currentData.clients||[]).filter(function(x){return x.modemCount>0}).map(function(x){return{id:x.portName,label:x.name,modems:x.modemCount||1};}):(_heatmapConfig[view]||[]);
   var h='';
   cfg.forEach(function(item){
-    var active=item.id===_heatmapId;var col=hmAccent(view,item.id);
-    h+='<button onclick="selectHeatId(\''+esc(item.id)+'\')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:14px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(item.label)+'</button>';
+    var active=item.id===ctx.id;var col=hmAccent(view,item.id);
+    // По макету чипы — чистый текст, без флагов/глобуса из конфига
+    var lbl=String(item.label||'').replace(/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}☀-➿]/gu,'').trim();
+    h+='<button onclick="selectHeatId(\''+esc(item.id)+'\''+(ctx.self?','+ctx.self:'')+')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:999px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(lbl)+'</button>';
   });
   c.innerHTML=h;
 }
-function selectHeatId(id){_heatmapId=id;renderHeatmapSubTabs();loadHeatmapData();}
-function loadHeatmapData(){
-  var key=_heatmapView+'|'+_heatmapId;
-  if(_heatmapCache[key]){renderHeatmap(_heatmapCache[key]);return;}
-  var g=document.getElementById('heatmapGrid');
+function selectHeatId(id,ctx){ctx=ctx||_hmTraffic;ctx.id=id;renderHeatmapSubTabs(ctx);loadHeatmapData(ctx);}
+function loadHeatmapData(ctx){
+  ctx=ctx||_hmTraffic;
+  var key=ctx.view+'|'+ctx.id;
+  if(ctx.cache[key]){renderHeatmap(ctx.cache[key],ctx);return;}
+  var g=document.getElementById(ctx.grid);
   if(g)g.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>';
-  fetch(API+'/api/analytics/heatmap?view='+_heatmapView+'&id='+encodeURIComponent(_heatmapId)+'&days=7',{headers:{'X-Auth-Token':authToken}})
+  fetch(API+'/api/analytics/heatmap?view='+ctx.view+'&id='+encodeURIComponent(ctx.id)+'&days=7',{headers:{'X-Auth-Token':authToken}})
     .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
-    .then(function(data){_heatmapCache[key]=data;renderHeatmap(data);})
-    .catch(function(e){var g=document.getElementById('heatmapGrid');if(g)g.innerHTML='<div style="padding:20px;color:var(--danger);font-size:12px">Ошибка: '+(esc(e.message))+'</div>';});
+    .then(function(data){ctx.cache[key]=data;renderHeatmap(data,ctx);})
+    .catch(function(e){var g=document.getElementById(ctx.grid);if(g)g.innerHTML='<div style="padding:20px;color:var(--danger);font-size:12px">Ошибка: '+(esc(e.message))+'</div>';});
 }
 function lerpCol(a,b,t){
   var ah=parseInt(a.slice(1),16),bh=parseInt(b.slice(1),16);
@@ -2033,12 +2359,13 @@ function heatColor(val,maxV,accent){
   if(t<0.8)return lerpCol('#85B7EB',accent,(t-0.4)/0.4);
   return lerpCol(accent,darkenCol(accent,0.35),(t-0.8)/0.2);
 }
-function renderHeatmap(data){
-  var g=document.getElementById('heatmapGrid'),sum=document.getElementById('heatmapSummary');
+function renderHeatmap(data,ctx){
+  ctx=ctx||_hmTraffic;
+  var g=document.getElementById(ctx.grid),sum=document.getElementById(ctx.summary);
   if(!g||!data||!data.matrix)return;
   var mat=data.matrix,days=data.meta&&data.meta.days||[],dm=data.meta&&data.meta.day_meta||[];
-  var mCnt=getHeatmapModems(),mDiv=mCnt||1;
-  var accent=hmAccent(_heatmapView,_heatmapId);
+  var mCnt=getHeatmapModems(ctx),mDiv=mCnt||1;
+  var accent=hmAccent(ctx.view,ctx.id);
   // Build per-modem matrix for coloring and display
   var perModem=mat.map(function(row){return row.map(function(v){return v/mDiv;})});
   var maxV=0;perModem.forEach(function(row){row.forEach(function(v){if(v>maxV)maxV=v;})});
@@ -2070,7 +2397,7 @@ function renderHeatmap(data){
         ? col+';background-image:repeating-linear-gradient(45deg, rgba(255,255,255,0.45) 0 3px, transparent 3px 6px)'
         : col;
       h+='<div style="flex:1;height:28px;border-radius:3px;background:'+bg+';cursor:pointer;transition:opacity .1s;position:relative"';
-      h+=' onmouseenter="showHeatTT('+di+','+hr+',event,this)" onmouseleave="hideFloatTooltip(\'heatTT\')">';
+      h+=' onmouseenter="showHeatTT('+di+','+hr+',event,this'+(ctx.self?','+ctx.self:'')+')" onmouseleave="hideFloatTooltip(\''+ctx.ttId+'\')">';
       if(isCorrected)h+='<span style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;color:rgba(0,0,0,0.55);font-weight:600" title="Час содержит данные восстановленные после сбоя счётчика — значение приблизительное">⚠</span>';
       h+='</div>';
     });
@@ -2084,7 +2411,7 @@ function renderHeatmap(data){
   h+='</div>';
   g.innerHTML=h;
   // Summary metrics
-  var mCnt=getHeatmapModems(),mDiv=mCnt||1;
+  var mCnt=getHeatmapModems(ctx),mDiv=mCnt||1;
   var flat=[];mat.forEach(function(r){r.forEach(function(v){flat.push(v);})});
   var total=flat.reduce(function(a,b){return a+b},0);
   var n=mat.length||7;
@@ -2107,11 +2434,11 @@ function renderHeatmap(data){
       +hmSumItem('Пиковый день',(dm[peakD]?dm[peakD].label+', '+fmtDateRuLong(days[peakD]||''):fmtDateRuLong(days[peakD]||'')),mDiv?trendFmt(dTotals[peakD]/mDiv)+'/мод':'—',true)
       +hmSumItem('Ночной трафик',nightPct+'%','00:00–06:00',false);
   }
-  window._heatmapData=data;
+  window[ctx.dataKey]=data;
 }
 function hmSumItem(label,val,sub,isPeak){
   return'<div style="flex:1;display:flex;flex-direction:column;gap:3px;padding:0 20px;border-right:0.5px solid rgba(0,0,0,0.08)">'
-    +'<div style="font-size:10px;color:#9b9b98;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">'+label+'</div>'
+    +'<div style="font-size:10px;color:#9b9b98;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">'+label+'</div>'
     +'<div style="font-size:15px;font-weight:500;line-height:1.2;white-space:nowrap;'+(isPeak?'color:#185FA5':'color:var(--text-0)')+'">'+val+'</div>'
     +(sub?'<div style="font-size:10px;color:#9b9b98;white-space:nowrap">'+sub+'</div>':'')
     +'</div>';
@@ -2119,8 +2446,9 @@ function hmSumItem(label,val,sub,isPeak){
 // (removed _getOpModemsForView — the heatmap tooltip now derives per-operator
 //  modem counts from the same historical breakdown as the bytes, so live counts
 //  no longer mismatch the hour's traffic.)
-function getHeatmapModems(){
-  var view=_heatmapView,id=_heatmapId;
+function getHeatmapModems(ctx){
+  ctx=ctx||_hmTraffic;
+  var view=ctx.view,id=ctx.id;
   // Count unique modems (IMEIs) from status — not ports from bandwidth
   if(currentData&&currentData.status){
     var status=currentData.status||[];
@@ -2169,10 +2497,11 @@ function getHeatmapModems(){
   }
   return 0;
 }
-function showHeatTT(di,hr,event,cell){
-  var data=window._heatmapData;if(!data||!data.matrix||!data.matrix[di])return;
+function showHeatTT(di,hr,event,cell,ctx){
+  ctx=ctx||_hmTraffic;
+  var data=window[ctx.dataKey];if(!data||!data.matrix||!data.matrix[di])return;
   var mat=data.matrix;var days=data.meta&&data.meta.days||[];var dm=data.meta&&data.meta.day_meta||[];
-  var mCnt=getHeatmapModems(),mDiv=mCnt||1;
+  var mCnt=getHeatmapModems(ctx),mDiv=mCnt||1;
   var val=mat[di][hr]||0;
   var DAYS_RU=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   var ds=days[di]||'';var d=new Date(ds+'T00:00:00');
@@ -2180,8 +2509,8 @@ function showHeatTT(di,hr,event,cell){
   var dShort=fmtDateRuLong(ds);
   var hrEnd=String((hr+1)%24).padStart(2,'0');
 
-  var tt=document.getElementById('heatTT');
-  if(!tt){tt=document.createElement('div');tt.id='heatTT';tt.style.cssText='position:fixed;z-index:9999;pointer-events:none;background:#fff;border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:170px;box-shadow:0 4px 20px rgba(0,0,0,0.09)';document.body.appendChild(tt);}
+  var tt=document.getElementById(ctx.ttId);
+  if(!tt){tt=document.createElement('div');tt.id=ctx.ttId;tt.style.cssText='position:fixed;z-index:9999;pointer-events:none;background:#fff;border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:170px;box-shadow:0 4px 20px rgba(0,0,0,0.09)';document.body.appendChild(tt);}
 
   if(val<0.01){
     tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2,'0')+':00–'+hrEnd+':00</div>'
@@ -2250,7 +2579,7 @@ function renderLatencySubTabs(){
   var h='';
   cfg.forEach(function(item){
     var active=item.id===_latencyId;var col=hmAccent(view,item.id);
-    h+='<button onclick="selectLatId(\''+esc(item.id)+'\')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:14px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(item.label)+'</button>';
+    h+='<button onclick="selectLatId(\''+esc(item.id)+'\')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:999px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(item.label)+'</button>';
   });
   c.innerHTML=h;
 }
@@ -2399,7 +2728,7 @@ function latPctileCard(label,cur,prev,baseStyle){
     deltaHtml='<div style="font-size:10px;color:var(--text-3);line-height:1.1;white-space:nowrap;margin-top:2px">нет пред. данных</div>';
   }
   return'<div style="flex:1;min-width:90px;display:flex;flex-direction:column;gap:3px;padding:0 16px;border-right:0.5px solid rgba(0,0,0,0.08)">'
-    +'<div style="font-size:10px;color:#9b9b98;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">'+label+'</div>'
+    +'<div style="font-size:10px;color:#9b9b98;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">'+label+'</div>'
     +'<div style="font-size:18px;font-weight:600;line-height:1.2;white-space:nowrap;'+(baseStyle||'color:var(--text-0)')+'">'+fmtMs(cur)+'</div>'
     +deltaHtml
     +'</div>';
@@ -2419,12 +2748,11 @@ function renderLatencySummary(data){
   var bk=data.buckets||{};
   var th=data.thresholds||{warn_ms:_pcWarnMs,bad_ms:_pcBadMs,very_slow_ms:_pcBadMs*2};
   var okN=ov.ok_checks||0;
-  var errPct=ov.error_pct;
   var html='';
 
-  // ── Row 1: percentile chips (compact) + errors + checks ──
-  html+='<div style="display:flex;flex-wrap:wrap;align-items:center;gap:14px 18px;padding:0 4px">';
-  function pct(label,cur,prev,thresholdBad,thresholdWarn){
+  // ── Row 1: KPI-плитки перцентилей (по макету: P50 медиана / P75 / P99 + Ошибки) ──
+  html+='<div class="kpi-row">';
+  function pct(label,sub,cur,prev,thresholdBad,thresholdWarn){
     var col='var(--text-0)';
     if(cur!=null){
       if(thresholdBad&&cur>thresholdBad)col='var(--red)';
@@ -2439,15 +2767,11 @@ function renderLatencySummary(data){
         delta=' <span style="font-size:10px;color:'+dCol+';font-weight:500">'+(diff<0?'▼':'▲')+Math.abs(dpct)+'%</span>';
       }
     }
-    return'<span style="display:inline-flex;align-items:baseline;gap:5px"><span style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.03em;font-weight:500">'+label+'</span><span style="font-size:15px;font-weight:700;color:'+col+'">'+fmtMs(cur)+'</span>'+delta+'</span>';
+    return'<div class="kpi-tile"><div class="l">'+label+(sub?' <span style="text-transform:none;letter-spacing:0">'+sub+'</span>':'')+'</div><div class="v" style="color:'+col+'">'+fmtMs(cur)+delta+'</div></div>';
   }
-  html+=pct('P50',ov.p50,pr.p50,_pcBadMs,_pcWarnMs);
-  html+=pct('P75',ov.p75,pr.p75,_pcBadMs,_pcWarnMs);
-  html+=pct('P95',ov.p95,pr.p95,_pcBadMs,_pcWarnMs);
-  html+=pct('P99',ov.p99,pr.p99,_pcBadMs,_pcWarnMs);
-  var eCls=errPct==null?'var(--text-3)':errPct>15?'var(--red)':errPct>0?'var(--orange)':'var(--green)';
-  html+='<span style="display:inline-flex;align-items:baseline;gap:5px;padding-left:8px;border-left:1px solid var(--border)"><span style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.03em;font-weight:500">Ошибки</span><span style="font-size:15px;font-weight:700;color:'+eCls+'">'+(errPct!=null?errPct+'%':'—')+'</span></span>';
-  html+='<span style="display:inline-flex;align-items:baseline;gap:5px"><span style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.03em;font-weight:500">Проверок</span><span style="font-size:13px;font-weight:600;color:var(--text-2)">'+(ov.total_checks||0)+'</span></span>';
+  html+=pct('P50 медиана',null,ov.p50,pr.p50,_pcBadMs,_pcWarnMs);
+  html+=pct('P75',null,ov.p75,pr.p75,_pcBadMs,_pcWarnMs);
+  html+=pct('P99',null,ov.p99,pr.p99,_pcBadMs,_pcWarnMs);
   html+='</div>';
 
   // ── Row 2: compact distribution bar with inline thresholds ──
@@ -2458,27 +2782,19 @@ function renderLatencySummary(data){
       if(pct<=0)return'';
       return'<div title="'+esc(label)+': '+cnt+' ('+pct.toFixed(1)+'%)" style="flex:'+pct+';background:'+col+';display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:600;min-width:0;overflow:hidden;white-space:nowrap">'+(pct>=10?pct.toFixed(0)+'%':'')+'</div>';
     }
-    html+='<div style="margin-top:10px;padding:0 4px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">';
-    html+='<span style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.03em;font-weight:500;white-space:nowrap">Распределение</span>';
-    html+='<div style="flex:1;min-width:200px;display:flex;height:14px;border-radius:3px;overflow:hidden;background:var(--bg-3)">';
+    html+='<div style="margin-top:4px;padding:0 4px">';
+    html+='<div style="display:flex;height:14px;border-radius:4px;overflow:hidden;background:var(--bg-3)">';
     html+=seg(pf,'rgb(52,199,89)','< '+fmtMsShort(th.warn_ms),f);
     html+=seg(po,'rgb(255,159,10)',fmtMsShort(th.warn_ms)+'–'+fmtMsShort(th.bad_ms),o);
     html+=seg(ps,'rgb(255,99,71)',fmtMsShort(th.bad_ms)+'–'+fmtMsShort(th.very_slow_ms),s);
     html+=seg(pvs,'rgb(165,40,40)','≥ '+fmtMsShort(th.very_slow_ms),vs);
     html+='</div>';
-    html+='<span style="font-size:10px;color:var(--text-3);white-space:nowrap" title="< '+th.warn_ms+' мс — быстро; '+th.warn_ms+'–'+th.bad_ms+' — норма; '+th.bad_ms+'–'+th.very_slow_ms+' — медленно; ≥ '+th.very_slow_ms+' — очень медленно">'+okN+' OK · '+(ov.errors||0)+' ошибок</span>';
-    html+='</div>';
-  }
-
-  // ── Optional: TCP-handshake details (hidden by default; expand on click) ──
-  if(ov.connect_p50!=null){
-    html+='<details style="margin-top:8px;padding:0 4px"><summary style="cursor:pointer;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.03em;font-weight:500;user-select:none">Подключение к модему (TCP-handshake)</summary>';
-    html+='<div style="display:flex;gap:14px;flex-wrap:wrap;margin-top:6px;padding:8px 4px;background:var(--bg-3);border-radius:6px">';
-    html+=latConnectChip('P50',ov.connect_p50,pr.connect_p50);
-    html+=latConnectChip('P75',ov.connect_p75,pr.connect_p75);
-    html+=latConnectChip('P95',ov.connect_p95,pr.connect_p95);
-    html+=latConnectChip('P99',ov.connect_p99,pr.connect_p99);
-    html+='</div></details>';
+    // Словесная легенда (по макету): Быстрые · ОК · Медленные · Оч. медл.
+    html+='<div style="display:flex;gap:12px 16px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-2)" title="< '+th.warn_ms+' мс — быстро; '+th.warn_ms+'–'+th.bad_ms+' — норма; '+th.bad_ms+'–'+th.very_slow_ms+' — медленно; ≥ '+th.very_slow_ms+' — очень медленно">';
+    [['rgb(52,199,89)','Быстрые',pf],['rgb(255,159,10)','ОК',po],['rgb(255,99,71)','Медленные',ps],['rgb(165,40,40)','Оч. медл.',pvs]].forEach(function(x){
+      html+='<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:'+x[0]+'"></span>'+x[1]+' <b>'+Math.round(x[2])+'%</b></span>';
+    });
+    html+='</div></div>';
   }
 
   sum.innerHTML=html;
@@ -2494,7 +2810,7 @@ function latConnectChip(label,cur,prev){
     var col=Math.abs(pct)<5?'var(--text-2)':diff<0?'var(--green)':'var(--red)';
     deltaHtml='<span style="font-size:10px;color:'+col+';margin-left:4px">'+arrow+(pct>0?'+':'')+pct+'%</span>';
   }
-  return'<span style="display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap"><span style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em">'+label+'</span><span style="font-size:14px;font-weight:600;color:var(--text-0)">'+fmtMs(cur)+'</span>'+deltaHtml+'</span>';
+  return'<span style="display:inline-flex;align-items:baseline;gap:6px;white-space:nowrap"><span style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em">'+label+'</span><span style="font-size:14px;font-weight:600;color:var(--text-0)">'+fmtMs(cur)+'</span>'+deltaHtml+'</span>';
 }
 
 // ========== LATENCY DAY SCATTER ==========
@@ -2654,12 +2970,15 @@ function renderLatencyScatter(data){
 
 function latSumItem(label,val,style){
   return'<div style="flex:1;display:flex;flex-direction:column;gap:3px;padding:0 20px;border-right:0.5px solid rgba(0,0,0,0.08)">'
-    +'<div style="font-size:10px;color:#9b9b98;text-transform:uppercase;letter-spacing:.04em;white-space:nowrap">'+label+'</div>'
+    +'<div style="font-size:10px;color:#9b9b98;text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">'+label+'</div>'
     +'<div style="font-size:18px;font-weight:600;line-height:1.2;white-space:nowrap;'+(style||'color:var(--text-0)')+'">'+val+'</div></div>';
 }
 
 var _dailyMonthOffset=0; // 0=current, -1=prev, etc
 var _MONTHS_RU_NOM=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+var _MONTHS_RU_SHORT=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
+// «2026-03» → «Март» (или «Мар» при short). Возвращает исходную строку, если формат иной.
+function _ymRu(ym,short){ if(ym==null)return ''; var s=String(ym); var m=/^(\d{4})-(\d{2})/.exec(s); if(!m)return s; var mi=parseInt(m[2],10)-1; return (short?_MONTHS_RU_SHORT:_MONTHS_RU_NOM)[mi]||s; }
 function shiftDailyMonth(dir){
   _dailyMonthOffset+=dir;
   if(_dailyMonthOffset>0)_dailyMonthOffset=0;
@@ -3094,7 +3413,7 @@ function _renderFinancesTabOld(d){
   out+='</div>';
 
   // Block C: Widget grid (6)
-  out+='<div class="widget-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:14px;padding:0">';
+  out+='<div class="widget-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:12px;padding:0">';
   out+='<div class="widget"><div class="widget-label">Трафик за период</div><div class="widget-value" style="font-size:16px">'+fmtGb(totalTrafficBytes)+'</div></div>';
   out+='<div class="widget"><div class="widget-label">Доход / модем</div><div class="widget-value" style="font-size:16px">'+avgRevenuePerModem.toLocaleString('ru-RU')+' ₽</div></div>';
   out+='<div class="widget"><div class="widget-label">Доход / сутки</div><div class="widget-value" style="font-size:16px">'+revenuePerDay.toLocaleString('ru-RU')+' ₽</div></div>';
@@ -3104,7 +3423,7 @@ function _renderFinancesTabOld(d){
   out+='</div>';
 
   // Block D: Revenue chart placeholder
-  out+='<div class="analytics-card" style="margin-bottom:14px"><h3>Выручка по дням</h3><div id="finRevenueChartWrap" style="max-height:200px"><canvas id="finRevenueChart"></canvas></div></div>';
+  out+='<div class="analytics-card" style="margin-bottom:12px"><h3>Выручка по дням</h3><div id="finRevenueChartWrap" style="max-height:200px"><canvas id="finRevenueChart"></canvas></div></div>';
 
   // Block E: Client table
   out+='<div class="fin-table-wrap"><div class="fin-table-header"><div class="fin-table-title">Финансы по клиентам</div><div class="fin-table-badge">'+clientStats.length+' клиентов</div></div>';
@@ -3206,7 +3525,7 @@ var _finCharts = {};
 var _finCurrentPeriod = new Date().toISOString().slice(0, 7);
 
 function renderFinancesTabNew() {
-  var c = document.getElementById('acc-finances');
+  var c = document.getElementById('bankOverviewSection') || document.getElementById('acc-finances');
   if (!c) return;
   c.innerHTML = '<div style="padding:40px;text-align:center;color:var(--text-3)">Загрузка финансовых данных…</div>';
   // Destroy old charts
@@ -3233,253 +3552,139 @@ function _fmtPct(v, signed) {
   return s + '%';
 }
 function _kpiBig(label, value, sub, color) {
-  return '<div style="padding:14px 16px;background:var(--bg-1);border:1px solid var(--border);border-radius:10px;flex:1;min-width:170px">'
-    + '<div style="font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em">' + esc(label) + '</div>'
-    + '<div style="font-size:22px;font-weight:700;margin-top:4px;' + (color ? 'color:' + color : 'color:var(--text-0)') + '">' + value + '</div>'
+  var _grn = color && String(color).indexOf('success') >= 0;
+  return '<div class="cd-kpi' + (_grn ? ' is-green' : '') + '" style="flex:1;min-width:170px;padding:12px 14px">'
+    + '<div class="cd-kpi-l">' + esc(label) + '</div>'
+    + '<div class="cd-kpi-v" style="font-size:22px;margin-top:4px;' + (color ? 'color:' + color : '') + '">' + value + '</div>'
     + (sub ? '<div style="font-size:11px;color:var(--text-3);margin-top:2px">' + sub + '</div>' : '')
     + '</div>';
 }
 
+function _injectFinxStyle() { /* finance styles now live in css/finance.css */ }
+
 function _renderFinanceDashboard(c, d) {
   var s = d.summary || {};
-  var con = d.concentration || {};
-  var pricing = d.pricing || {};
-  var perTariff = d.per_tariff_revenue || {};
   var costByCat = d.cost_by_category || {};
+  _injectFinxStyle();
 
-  // Period selector
   var periods = [];
-  for (var i = 0; i < 12; i++) {
-    var dt = new Date();
-    dt.setMonth(dt.getMonth() - i);
-    periods.push(dt.toISOString().slice(0, 7));
-  }
+  for (var i = 0; i < 12; i++) { var dt = new Date(); dt.setMonth(dt.getMonth() - i); periods.push(dt.toISOString().slice(0, 7)); }
 
-  var h = '<div style="padding:14px 24px">';
+  function money(v) { return (v == null || isNaN(v)) ? '—' : Math.round(v).toLocaleString('ru-RU') + ' ₽'; }
 
-  // ----- Header -----
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;flex-wrap:wrap;gap:8px">';
-  h += '<div><h2 style="margin:0;font-size:18px">📊 Доходность</h2>';
-  h += '<div style="font-size:11px;color:var(--text-3);margin-top:2px">MRR за trailing-30 дней · NRR за 3 месяца · все суммы в ₽</div></div>';
-  h += '<div style="display:flex;gap:6px;align-items:center">';
-  h += '<button class="btn btn-sm" onclick="openFinanceCostsModal()" style="font-size:11px">⚙ Затраты</button>';
-  h += '<select id="finPeriodSelect" class="form-input" onchange="_finCurrentPeriod=this.value;renderFinancesTabNew()" style="font-size:11px;padding:3px 8px">';
-  periods.forEach(function(p){ h += '<option value="'+p+'"' + (p===d.period?' selected':'') + '>'+p+'</option>'; });
+  // Revenue is taken for the SELECTED period (from the monthly trend), so the
+  // date picker actually drives the headline P&L. Current month → revenue so far.
+  var curMonth = new Date().toISOString().slice(0, 7);
+  var isCur = d.period === curMonth;
+  var trendArr = d.trend || [];
+  var pIdx = trendArr.map(function(t) { return t.month; }).indexOf(d.period);
+  var revenue = pIdx >= 0 ? (trendArr[pIdx].total || 0) : (isCur ? (s.forecast_so_far || 0) : 0);
+  var cost = s.total_cost || 0;
+  var profit = revenue - cost;
+  var costPct = revenue > 0 ? Math.round(cost / revenue * 100) : 0;
+  var marginPct = (revenue > 0 && cost > 0) ? Math.round(profit / revenue * 100) : null;
+  var profitForecast = (s.forecast_eom || 0) - cost;
+  var posBal = (d.per_client || []).reduce(function(a, p) { return a + (p.balance > 0 ? p.balance : 0); }, 0);
+
+  // M/M growth = selected period vs the previous month in the trend
+  var prevRev = pIdx > 0 ? (trendArr[pIdx - 1].total || 0) : 0;
+  var g = prevRev > 0 ? Math.round((revenue - prevRev) / prevRev * 1000) / 10 : null;
+  var growthSub = (g == null)
+    ? '<span style="color:var(--t3)">нет данных м/м</span>'
+    : '<span style="color:' + (g >= 0 ? 'var(--gr)' : 'var(--rd)') + '">' + (g >= 0 ? '▲ +' : '▼ ') + Math.abs(g) + '%</span> м/м';
+
+  var h = '<div class="fxw">';
+
+  h += '<div class="fx-hd"><h2 class="fx-h">Финансы</h2><div class="fx-act">';
+  h += '<button class="fx-btn" onclick="generateBulkActs()">📃 Сформировать акты</button>';
+  h += '<button class="fx-btn" onclick="openFinanceCostsModal()">⚙ Затраты</button>';
+  h += '<select id="finPeriodSelect" class="fx-sel" onchange="_finCurrentPeriod=this.value;renderFinancesTabNew()">';
+  periods.forEach(function(p) { h += '<option value="' + p + '"' + (p === d.period ? ' selected' : '') + '>' + p + '</option>'; });
   h += '</select></div></div>';
 
-  // ----- Top KPI cards (8 main metrics) -----
-  h += '<div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">';
-  var growthColor = s.mrr_growth_pct == null ? null : s.mrr_growth_pct >= 0 ? 'var(--success)' : 'var(--danger)';
-  h += _kpiBig('MRR', _fmtRub(s.mrr), 'Trailing 30 дн');
-  h += _kpiBig('Рост MRR (M/M)', s.mrr_growth_pct == null ? '—' : _fmtPct(s.mrr_growth_pct, true),
-               'vs предыдущие 30 дн', growthColor);
-  h += _kpiBig('ARR', _fmtRub(s.arr), 'MRR × 12');
-  h += _kpiBig('Активные клиенты', String(s.active_clients || 0),
-               '+' + (s.new_clients||0) + ' новых · −' + (s.churned_clients||0) + ' churned');
+  h += '<div class="fx-kpis">';
+  h += '<div class="fx-kpi"><div class="fx-kl">Выручка</div><div class="fx-kv">' + money(revenue) + '</div><div class="fx-ks">' + growthSub + '</div></div>';
+  var costSub = cost > 0
+    ? (s.cost_carried_from ? '<span style="color:var(--am)">типовые из ' + esc(s.cost_carried_from) + '</span> · ' + costPct + '%' : (costPct + '% от выручки'))
+    : '<span style="color:var(--am)">не введены</span>';
+  h += '<div class="fx-kpi a"><div class="fx-kl">Затраты</div><div class="fx-kv">' + (cost > 0 ? money(cost) : '—') + '</div><div class="fx-ks">' + costSub + '</div></div>';
+  h += '<div class="fx-kpi g"><div class="fx-kl">Прибыль</div><div class="fx-kv" style="color:var(--gr)">' + money(profit) + '</div><div class="fx-ks">' + (isCur ? 'прогноз ' + shortCurrency(profitForecast) : 'за месяц') + '</div></div>';
+  h += '<div class="fx-kpi g"><div class="fx-kl">Маржа</div><div class="fx-kv" style="color:var(--gr)">' + (marginPct == null ? '—' : marginPct + '%') + '</div><div class="fx-ks">' + (s.margin_per_modem != null ? Math.round(s.margin_per_modem).toLocaleString('ru-RU') + ' ₽/модем' : '') + '</div></div>';
   h += '</div>';
 
-  h += '<div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">';
-  h += _kpiBig('ARPU', _fmtRub(s.arpu), 'Средний доход на клиента');
-  var top1Color = con.top1_pct >= 50 ? 'var(--danger)' : con.top1_pct >= 35 ? 'var(--warning)' : 'var(--success)';
-  h += _kpiBig('Top-1 концентрация', _fmtPct(con.top1_pct), esc(con.top1_name || '—'), top1Color);
-  h += _kpiBig('Утилизация модемов', _fmtPct(s.utilization_pct), s.rented_modems + ' / ' + s.total_modems);
-  h += _kpiBig('Revenue / модем', _fmtRub(s.rpm), 'RPM с арендованного');
+  h += '<div class="fx-wgs">';
+  h += '<div class="fx-wg"><div class="fx-wl">Активных клиентов</div><div class="fx-wv">' + (s.active_clients || 0) + '</div></div>';
+  h += '<div class="fx-wg"><div class="fx-wl">NRR</div><div class="fx-wv"' + (s.nrr_pct >= 100 ? ' style="color:var(--gr)"' : '') + '>' + (s.nrr_pct == null ? '—' : s.nrr_pct + '%') + '</div></div>';
+  h += '<div class="fx-wg"><div class="fx-wl">На балансах</div><div class="fx-wv">' + shortCurrency(posBal) + '</div></div>';
+  h += '<div class="fx-wg"><div class="fx-wl">ARPU</div><div class="fx-wv">' + money(s.arpu) + '</div></div>';
   h += '</div>';
 
-  // Second row — unit economics + forecast
-  h += '<div style="display:flex;gap:10px;margin-bottom:18px;flex-wrap:wrap">';
-  h += _kpiBig('Cost / модем', _fmtRub(s.cpm), 'CPM по всему парку');
-  var marginColor = s.margin_per_modem >= 0 ? 'var(--success)' : 'var(--danger)';
-  h += _kpiBig('Маржа / модем', _fmtRub(s.margin_per_modem), 'RPM − CPM', marginColor);
-  h += _kpiBig('NRR (3 мес.)', s.nrr_pct == null ? '—' : _fmtPct(s.nrr_pct),
-               'Когорта ' + (s.nrr_cohort_size || 0) + ' клиентов',
-               s.nrr_pct == null ? null : (s.nrr_pct >= 100 ? 'var(--success)' : s.nrr_pct >= 90 ? 'var(--warning)' : 'var(--danger)'));
-  h += _kpiBig('Прогноз EOM', _fmtRub(s.forecast_eom),
-               'Уже: ' + _fmtRub(s.forecast_so_far));
-  h += '</div>';
+  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Выручка по дням</span><span class="fx-cs">последние 30 дней · ₽</span></div>';
+  h += '<div style="height:130px"><canvas id="fxDailyChart"></canvas></div></div>';
 
-  // ----- Block A: MRR trend + tariff split -----
-  h += '<div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:18px">';
-  h += '<div class="analytics-card" style="margin:0">';
-  h += '<h3 style="margin:0 0 10px;font-size:14px">A. MRR — последние 12 месяцев</h3>';
-  h += '<div style="height:240px"><canvas id="finTrendChart"></canvas></div>';
-  h += '</div>';
-  h += '<div class="analytics-card" style="margin:0">';
-  h += '<h3 style="margin:0 0 10px;font-size:14px">Разбивка по тарифу</h3>';
-  var pgPct = s.mrr > 0 ? Math.round((perTariff.per_gb || 0) / s.mrr * 100) : 0;
-  var pmPct = s.mrr > 0 ? Math.round((perTariff.per_modem || 0) / s.mrr * 100) : 0;
-  h += '<div style="display:flex;flex-direction:column;gap:8px;padding-top:8px">';
-  h += '<div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>per_gb</span><span style="font-weight:600">'+_fmtRub(perTariff.per_gb||0)+' · '+pgPct+'%</span></div>';
-  h += '<div style="height:8px;background:var(--bg-3);border-radius:4px;overflow:hidden"><div style="height:100%;background:#3B9DD8;width:'+pgPct+'%"></div></div></div>';
-  h += '<div><div style="display:flex;justify-content:space-between;font-size:12px;margin-bottom:4px"><span>per_modem</span><span style="font-weight:600">'+_fmtRub(perTariff.per_modem||0)+' · '+pmPct+'%</span></div>';
-  h += '<div style="height:8px;background:var(--bg-3);border-radius:4px;overflow:hidden"><div style="height:100%;background:#1D9E75;width:'+pmPct+'%"></div></div></div>';
-  h += '</div></div>';
-  h += '</div>';
-
-  // ----- Block: Per-client table -----
-  h += '<div class="analytics-card" style="margin:0 0 18px">';
-  h += '<h3 style="margin:0 0 10px;font-size:14px">Клиенты по доходности</h3>';
-  h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text-2)"><th style="padding:6px 8px;text-align:left">Клиент</th><th style="padding:6px 8px;text-align:left">Тариф</th><th style="padding:6px 8px;text-align:right">MRR</th><th style="padding:6px 8px;text-align:right">Δ M/M</th><th style="padding:6px 8px;text-align:right">% от MRR</th><th style="padding:6px 8px;text-align:right">Баланс</th></tr></thead><tbody>';
-  (d.per_client || []).forEach(function(p) {
-    if (p.mrr === 0 && p.mrr_prev === 0 && !p.balance) return; // skip totally empty
-    var pausedTag = p.paused ? ' <span style="font-size:9px;background:var(--warning);color:#fff;padding:1px 5px;border-radius:8px;vertical-align:middle">paused</span>' : '';
-    var deltaCol = p.mrr_delta_pct == null ? 'var(--text-3)' : p.mrr_delta_pct >= 0 ? 'var(--success)' : 'var(--danger)';
-    var deltaStr = p.mrr_delta_pct == null ? '—' : _fmtPct(p.mrr_delta_pct, true);
-    var tariffStr = p.billingType === 'per_modem' ? p.price + '₽/мес·мод' : p.price + '₽/ГБ';
-    var balCol = p.balance < 0 ? 'var(--danger)' : 'var(--text-1)';
-    h += '<tr style="border-top:1px solid var(--border)">';
-    h += '<td style="padding:5px 8px;font-weight:500">' + esc(p.name) + pausedTag + '</td>';
-    h += '<td style="padding:5px 8px;color:var(--text-2)">' + tariffStr + '</td>';
-    h += '<td style="padding:5px 8px;text-align:right;font-weight:600">' + _fmtRub(p.mrr) + '</td>';
-    h += '<td style="padding:5px 8px;text-align:right;color:' + deltaCol + '">' + deltaStr + '</td>';
-    h += '<td style="padding:5px 8px;text-align:right">' + _fmtPct(p.share_pct) + '</td>';
-    h += '<td style="padding:5px 8px;text-align:right;color:' + balCol + '">' + _fmtRub(p.balance) + '</td>';
-    h += '</tr>';
+  h += '<div class="fx-row2">';
+  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Затраты по категориям</span><span class="fx-lk" onclick="openFinanceCostsModal()">✎ править</span></div>';
+  var catLabels = { server: 'Аренда серверов', sim: 'SIM-карты', electricity: 'Электричество', hosting: 'Хостинг', salary: 'Зарплата', other: 'Прочее' };
+  var anyCost = false;
+  Object.keys(catLabels).forEach(function(k) {
+    var v = costByCat[k] || 0;
+    if (v > 0) { anyCost = true; h += '<div class="fx-lr"><span class="fx-nm">' + catLabels[k] + '</span><span class="fx-vv">' + Math.round(v).toLocaleString('ru-RU') + '</span></div>'; }
   });
-  h += '</tbody></table></div>';
-
-  // ----- Block B: Risk -----
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px">';
-
-  h += '<div class="analytics-card" style="margin:0">';
-  h += '<h3 style="margin:0 0 10px;font-size:14px">B. Концентрация выручки</h3>';
-  h += '<div style="font-size:11px;color:var(--text-3);margin-bottom:10px">Чем выше Top-1 — тем выше риск зависимости от одного клиента</div>';
-  function bar(label, pct, color) {
-    return '<div style="margin-bottom:6px"><div style="display:flex;justify-content:space-between;font-size:11px"><span>'+label+'</span><span style="font-weight:600">'+_fmtPct(pct)+'</span></div>'
-      +'<div style="height:8px;background:var(--bg-3);border-radius:4px;overflow:hidden;margin-top:2px"><div style="height:100%;background:'+color+';width:'+Math.min(pct||0,100)+'%"></div></div></div>';
+  if (anyCost) {
+    if (s.cost_carried_from) h += '<div style="font-size:10px;color:var(--am);margin:2px 0 4px">⚠ Типовые значения из ' + esc(s.cost_carried_from) + ' — подтвердите через «править»</div>';
+    h += '<div class="fx-tot"><span>Итого</span><span class="fx-vv" style="color:var(--am)">' + money(cost) + '</span></div>';
   }
-  h += bar('Top-1 (' + esc(con.top1_name || '—') + ')', con.top1_pct || 0, con.top1_pct >= 50 ? '#E04141' : con.top1_pct >= 35 ? '#F0A533' : '#3B9DD8');
-  h += bar('Top-3', con.top3_pct || 0, con.top3_pct >= 80 ? '#F0A533' : '#3B9DD8');
-  h += bar('Top-5', con.top5_pct || 0, '#1D9E75');
+  else h += '<div class="fx-empty">Затраты за ' + esc(d.period) + ' не введены — нажмите «править».</div>';
   h += '</div>';
 
-  h += '<div class="analytics-card" style="margin:0">';
-  h += '<h3 style="margin:0 0 10px;font-size:14px">Качество выручки</h3>';
-  h += '<table style="width:100%;font-size:12px;border-collapse:collapse"><tr><td style="padding:4px 0;color:var(--text-2)">NRR (3 мес.)</td><td style="padding:4px 0;text-align:right;font-weight:600">'
-       + (s.nrr_pct == null ? '—' : _fmtPct(s.nrr_pct)) + '</td></tr>';
-  h += '<tr><td style="padding:4px 0;color:var(--text-2)">Когорта (клиентов было)</td><td style="padding:4px 0;text-align:right">' + (s.nrr_cohort_size || 0) + '</td></tr>';
-  h += '<tr><td style="padding:4px 0;color:var(--text-2)">Churn rate (M)</td><td style="padding:4px 0;text-align:right;color:' + (s.churn_rate_pct >= 5 ? 'var(--danger)' : 'var(--text-1)') + '">' + _fmtPct(s.churn_rate_pct) + '</td></tr>';
-  h += '<tr><td style="padding:4px 0;color:var(--text-2)">Churned клиентов</td><td style="padding:4px 0;text-align:right">' + (s.churned_clients || 0) + '</td></tr>';
-  h += '<tr><td style="padding:4px 0;color:var(--text-2)">Новых клиентов в этом мес.</td><td style="padding:4px 0;text-align:right;color:var(--success)">+' + (s.new_clients || 0) + '</td></tr>';
-  h += '</table>';
-  if ((d.churned || []).length > 0) {
-    h += '<div style="margin-top:8px;padding-top:8px;border-top:1px solid var(--border);font-size:11px"><div style="color:var(--text-2);margin-bottom:4px">Ушли:</div>';
-    d.churned.forEach(function(x){ h += '<div>· '+esc(x.name)+' (' + _fmtRub(x.last_mrr) + ')</div>'; });
-    h += '</div>';
-  }
+  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Последние платежи</span><span class="fx-lk" onclick="switchBankNav(\'payments\')">все →</span></div>';
+  var rp = d.recent_payments || [];
+  if (rp.length === 0) h += '<div class="fx-empty">Платежей пока нет.</div>';
+  else rp.forEach(function(p) {
+    var pos = p.amount >= 0;
+    h += '<div class="fx-lr"><div><div class="fx-nm">' + esc(p.client) + '</div><div class="fx-sub">' + esc((p.date || '').slice(5)) + ' · ' + esc(p.source) + '</div></div>'
+      + '<span class="fx-vv ' + (pos ? 'pos' : 'neg') + '">' + (pos ? '+' : '−') + Math.abs(Math.round(p.amount)).toLocaleString('ru-RU') + '</span></div>';
+  });
   h += '</div></div>';
 
-  // ----- Block C: Unit economics -----
-  h += '<div class="analytics-card" style="margin:0 0 18px">';
-  h += '<h3 style="margin:0 0 10px;font-size:14px">C. Юнит-экономика</h3>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px">';
-
-  // Per-server table
-  h += '<div><div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">По серверам</div>';
-  h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px;text-align:left">Сервер</th><th style="padding:4px;text-align:right">Модемов</th><th style="padding:4px;text-align:right">Аренд.</th><th style="padding:4px;text-align:right">Util %</th><th style="padding:4px;text-align:right">Доход</th><th style="padding:4px;text-align:right">RPM</th></tr></thead><tbody>';
-  (d.per_server || []).forEach(function(srv){
-    h += '<tr style="border-top:1px solid var(--border)">';
-    h += '<td style="padding:4px;font-weight:600">'+esc(srv.server)+'</td>';
-    h += '<td style="padding:4px;text-align:right">'+srv.total+'</td>';
-    h += '<td style="padding:4px;text-align:right">'+srv.rented+'</td>';
-    h += '<td style="padding:4px;text-align:right">'+srv.utilization_pct+'%</td>';
-    h += '<td style="padding:4px;text-align:right">'+_fmtRub(srv.revenue)+'</td>';
-    h += '<td style="padding:4px;text-align:right">'+_fmtRub(srv.revenue_per_modem)+'</td>';
-    h += '</tr>';
+  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Доходность по клиентам</span><span class="fx-cs">по MRR</span></div>';
+  h += '<div style="overflow-x:auto"><table class="fx-tbl"><thead><tr><th>Клиент</th><th>Тариф</th><th>Выручка</th><th>Δ M/M</th><th>% MRR</th><th>Баланс</th></tr></thead><tbody>';
+  var rows = (d.per_client || []).filter(function(p) { return !(p.mrr === 0 && p.mrr_prev === 0 && !p.balance); });
+  rows.forEach(function(p, i) {
+    var col = CHART_COLORS.clients[i % CHART_COLORS.clients.length];
+    var pausedTag = p.paused ? ' <span class="fx-pause">пауза</span>' : '';
+    var dc = p.mrr_delta_pct == null ? 'var(--t3)' : p.mrr_delta_pct >= 0 ? 'var(--gr)' : 'var(--rd)';
+    var ds = p.mrr_delta_pct == null ? '—' : (p.mrr_delta_pct >= 0 ? '+' : '') + p.mrr_delta_pct + '%';
+    var pill = p.billingType === 'per_modem' ? '<span class="fx-pill pm">per_modem</span>' : '<span class="fx-pill pg">per_gb</span>';
+    var balCol = p.balance < 0 ? 'var(--rd)' : 'var(--t1)';
+    h += '<tr><td><span class="fx-cn"><span class="fx-dot" style="background:' + col + '"></span>' + esc(p.name) + pausedTag + '</span></td>'
+      + '<td>' + pill + '</td><td>' + money(p.mrr) + '</td>'
+      + '<td style="color:' + dc + '">' + ds + '</td><td>' + (p.share_pct || 0) + '%</td>'
+      + '<td style="color:' + balCol + '">' + money(p.balance) + '</td></tr>';
   });
-  h += '</tbody></table></div>';
+  h += '</tbody></table></div></div>';
 
-  // Per-operator table
-  h += '<div><div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">По операторам</div>';
-  h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px;text-align:left">Оператор</th><th style="padding:4px;text-align:right">Модемов</th><th style="padding:4px;text-align:right">Аренд.</th><th style="padding:4px;text-align:right">Util %</th></tr></thead><tbody>';
-  (d.per_operator || []).forEach(function(op){
-    h += '<tr style="border-top:1px solid var(--border)">';
-    h += '<td style="padding:4px;font-weight:600">'+esc(op.operator)+'</td>';
-    h += '<td style="padding:4px;text-align:right">'+op.total+'</td>';
-    h += '<td style="padding:4px;text-align:right">'+op.rented+'</td>';
-    h += '<td style="padding:4px;text-align:right">'+op.utilization_pct+'%</td>';
-    h += '</tr>';
-  });
-  h += '</tbody></table></div>';
-  h += '</div>'; // end grid
-
-  // Cost breakdown + margin
-  if (s.total_cost > 0) {
-    h += '<div style="margin-top:14px;padding-top:14px;border-top:1px solid var(--border);font-size:12px">';
-    h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">Структура затрат · '+esc(d.period)+'</div>';
-    h += '<div style="display:flex;flex-wrap:wrap;gap:10px">';
-    var labels = { server:'Серверы', sim:'SIM', electricity:'Электричество', hosting:'Хостинг', salary:'Зарплата', other:'Прочее' };
-    Object.keys(labels).forEach(function(k){
-      var v = costByCat[k] || 0;
-      if (v > 0) h += '<span style="background:var(--bg-3);padding:4px 10px;border-radius:14px;font-size:11px"><span style="color:var(--text-2)">'+labels[k]+':</span> <b>'+_fmtRub(v)+'</b></span>';
-    });
-    h += '<span style="background:var(--bg-2);padding:4px 10px;border-radius:14px;font-size:11px;font-weight:600">Итого: '+_fmtRub(s.total_cost)+'</span>';
-    h += '</div></div>';
-  } else {
-    h += '<div style="margin-top:14px;padding:12px;background:var(--bg-2);border-radius:6px;font-size:11px;color:var(--text-3);text-align:center">Затраты на '+esc(d.period)+' не введены — нажмите "⚙ Затраты" сверху чтобы посчитать CPM и Маржу</div>';
-  }
-  h += '</div>'; // end card C
-
-  // ----- Block: Pricing variance -----
-  h += '<div class="analytics-card" style="margin:0 0 18px">';
-  h += '<h3 style="margin:0 0 10px;font-size:14px">Разброс тарифов (pricing variance)</h3>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;font-size:12px">';
-  function pricingBlock(title, p, unit) {
-    if (!p) return '<div style="color:var(--text-3)">Нет клиентов на тарифе ' + title + '</div>';
-    return '<div><div style="font-weight:600;margin-bottom:6px">' + title + '</div>'
-      + '<div style="color:var(--text-2)">Клиентов: <b>'+p.count+'</b> · Min: <b>'+p.min+unit+'</b> · Avg: <b>'+p.avg+unit+'</b> · Max: <b>'+p.max+unit+'</b></div></div>';
-  }
-  h += pricingBlock('per_gb', pricing.per_gb, '₽/ГБ');
-  h += pricingBlock('per_modem', pricing.per_modem, '₽/мес');
-  h += '</div></div>';
-
-  // ----- Block D: Forecast (daily) -----
-  h += '<div class="analytics-card" style="margin:0 0 18px">';
-  h += '<h3 style="margin:0 0 10px;font-size:14px">D. Прогноз и динамика выручки</h3>';
-  h += '<div style="height:200px"><canvas id="finDailyChart"></canvas></div>';
-  h += '<div style="margin-top:8px;font-size:11px;color:var(--text-3)">Голубой — фактическая дневная выручка за последние 30 дней. Прогноз EOM = текущая выручка месяца + средняя дневная × оставшиеся дни.</div>';
   h += '</div>';
-
-  h += '</div>'; // padding wrapper
   c.innerHTML = h;
 
-  // Render charts
-  setTimeout(function(){
-    var cc = getChartColors();
-    // Trend
-    var tcv = document.getElementById('finTrendChart');
-    if (tcv && window.Chart) {
-      _finCharts.trend = newChartSafe(tcv, {
-        type: 'bar',
-        data: {
-          labels: (d.trend || []).map(function(t){return t.month}),
-          datasets: [
-            { label: 'per_gb', data: (d.trend || []).map(function(t){return t.per_gb||0}), backgroundColor: '#3B9DD8', stack:'a' },
-            { label: 'per_modem', data: (d.trend || []).map(function(t){return t.per_modem||0}), backgroundColor: '#1D9E75', stack:'a' }
-          ]
-        },
-        options: { responsive:true, maintainAspectRatio:false,
-          plugins:{ legend:{position:'top',labels:{color:cc.text,font:{size:10}}},
-                    tooltip:{ callbacks:{ label:function(ctx){return ctx.dataset.label+': '+(ctx.parsed.y||0).toLocaleString('ru-RU')+' ₽'}}}},
-          scales:{ x:{stacked:true,ticks:{color:cc.text,font:{size:9}},grid:{display:false}},
-                   y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v}},grid:{color:cc.grid}}}}
-      });
-    }
-    // Daily revenue
-    var dcv = document.getElementById('finDailyChart');
+  setTimeout(function() {
+    var dcv = document.getElementById('fxDailyChart');
     if (dcv && window.Chart) {
-      var dailyData = (d.daily_revenue || []).map(function(r){return {x:r.date, y:r.revenue}});
+      var dr = d.daily_revenue || [];
+      var vals = dr.map(function(r) { return r.revenue; });
+      var maxv = Math.max.apply(null, vals.concat([1]));
+      var cols = vals.map(function(v) { return v >= maxv * 0.85 ? '#16a34a' : '#2f6fe0'; });
       _finCharts.daily = newChartSafe(dcv, {
-        type: 'line',
-        data: {
-          labels: dailyData.map(function(p){return p.x.slice(5)}),
-          datasets: [{ label:'Выручка', data: dailyData.map(function(p){return p.y}), borderColor:'#3B9DD8', backgroundColor:'rgba(59,157,216,0.15)', fill:true, tension:.3, pointRadius:2 }]
-        },
-        options: { responsive:true, maintainAspectRatio:false,
-          plugins:{ legend:{display:false},
-                    tooltip:{ callbacks:{ label:function(ctx){return (ctx.parsed.y||0).toLocaleString('ru-RU')+' ₽'}}}},
-          scales:{ x:{ticks:{color:cc.text,font:{size:9}},grid:{display:false}},
-                   y:{beginAtZero:true,ticks:{color:cc.text,callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v}},grid:{color:cc.grid}}}}
+        type: 'bar',
+        data: { labels: dr.map(function(r) { return (r.date || '').slice(5); }), datasets: [{ data: vals, backgroundColor: cols, borderRadius: 2, barPercentage: 0.72, categoryPercentage: 0.86 }] },
+        options: {
+          responsive: true, maintainAspectRatio: false,
+          plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(ctx) { return (ctx.parsed.y || 0).toLocaleString('ru-RU') + ' ₽'; } } } },
+          scales: {
+            x: { ticks: { color: '#8b949e', font: { size: 9 }, maxRotation: 0, autoSkip: true, maxTicksLimit: 10 }, grid: { display: false } },
+            y: { beginAtZero: true, ticks: { color: '#8b949e', font: { size: 9 }, callback: function(v) { return v >= 1000 ? (v / 1000).toFixed(0) + 'k' : v; } }, grid: { color: 'rgba(0,0,0,.07)' } }
+          }
+        }
       });
     }
   }, 30);
@@ -3502,46 +3707,51 @@ function _renderCostsModal(d) {
   var byCat = {};
   rows.forEach(function(r){ (byCat[r.category]=byCat[r.category]||[]).push(r); });
 
-  var inputs = '';
   var cats = d.categories || {};
+  // One labelled cost row in the Settings idiom (left title, right input + ₽ unit).
+  // data-cat / data-key on the <input> are READ BY saveCostsModal — must be preserved.
+  function _costRow(label, cls, cat, key, step, val){
+    return '<div class="set-row"><div class="set-row-t">'+label+'</div>'
+      + '<span class="set-inp"><input class="'+cls+'" data-cat="'+cat+'"'+(key!=null?' data-key="'+esc(key)+'"':'')
+      + ' type="number" min="0" step="'+step+'" value="'+(val!=null?val:'')+'" placeholder="0" style="width:108px;text-align:right"><span>₽</span></span></div>';
+  }
+  var inputs = '';
   // Server costs
   var srvList = (d.meta && d.meta.servers) || ['S1','S2','S3','S4'];
-  inputs += '<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:600;margin-bottom:6px">'+(cats.server?cats.server.label:'Аренда серверов')+'</div>';
-  inputs += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:6px">';
+  inputs += '<div class="set-grp-label">'+(cats.server?cats.server.label:'Аренда серверов')+'</div><div class="set-card">';
   srvList.forEach(function(s){
     var existing = (byCat.server||[]).find(function(r){return r.subkey===s});
-    inputs += '<div><label style="font-size:10px;color:var(--text-2)">'+s+'</label><input class="form-input fc-server" data-cat="server" data-key="'+esc(s)+'" type="number" min="0" step="100" value="'+(existing?existing.amount:'')+'" placeholder="0" style="font-size:12px"></div>';
+    inputs += _costRow(esc(s), 'form-input fc-server', 'server', s, 100, existing?existing.amount:null);
   });
-  inputs += '</div></div>';
+  inputs += '</div>';
   // SIM (per operator)
   var ops = (d.meta && d.meta.operators) || [];
-  inputs += '<div style="margin-bottom:14px"><div style="font-size:12px;font-weight:600;margin-bottom:6px">'+(cats.sim?cats.sim.label:'SIM-карты')+' (за SIM в месяц)</div>';
-  inputs += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:6px">';
+  inputs += '<div class="set-grp-label">'+(cats.sim?cats.sim.label:'SIM-карты')+' (₽/SIM в месяц)</div><div class="set-card">';
   if (ops.length === 0) {
-    inputs += '<div style="font-size:11px;color:var(--text-3)">Операторы не определены — пропустите или укажите общую сумму через "Прочее"</div>';
+    inputs += '<div class="set-row"><div class="set-row-d" style="max-width:none">Операторы не определены — укажите общую сумму через «Прочее»</div></div>';
   } else {
     ops.forEach(function(op){
       var existing = (byCat.sim||[]).find(function(r){return r.subkey===op});
-      inputs += '<div><label style="font-size:10px;color:var(--text-2)">'+esc(op)+' (₽/SIM)</label><input class="form-input fc-sim" data-cat="sim" data-key="'+esc(op)+'" type="number" min="0" step="10" value="'+(existing?existing.amount:'')+'" placeholder="0" style="font-size:12px"></div>';
+      inputs += _costRow(esc(op), 'form-input fc-sim', 'sim', op, 10, existing?existing.amount:null);
     });
   }
-  inputs += '</div></div>';
-  // Other (single value)
+  inputs += '</div>';
+  // Other (single value, no subkey)
+  inputs += '<div class="set-grp-label">Прочие затраты</div><div class="set-card">';
   ['electricity','hosting','salary','other'].forEach(function(k){
     var existing = (byCat[k]||[])[0];
-    inputs += '<div style="margin-bottom:10px;display:flex;gap:8px;align-items:flex-end">';
-    inputs += '<div style="flex:1"><label style="font-size:10px;color:var(--text-2)">'+(cats[k]?cats[k].label:k)+'</label><input class="form-input fc-other" data-cat="'+k+'" type="number" min="0" step="100" value="'+(existing?existing.amount:'')+'" placeholder="0" style="font-size:12px;width:100%"></div>';
-    inputs += '</div>';
+    inputs += _costRow((cats[k]?cats[k].label:k), 'form-input fc-other', k, null, 100, existing?existing.amount:null);
   });
+  inputs += '</div>';
 
-  ov.innerHTML = '<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:680px;max-height:85vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.4)">'
-    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">'
-    + '<h3 style="margin:0;font-size:16px">⚙ Затраты — ' + esc(d.period) + '</h3>'
+  ov.innerHTML = '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;width:560px;max-width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)">'
+    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
+    + '<h3 style="margin:0;font-size:14px">⚙ Затраты — ' + esc(d.period) + '</h3>'
     + '<button onclick="document.getElementById(\'_finCostsOverlay\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-2)">&times;</button>'
     + '</div>'
-    + (rows.length === 0 && (d.template || []).length > 0 ? '<div style="font-size:11px;color:var(--accent);margin-bottom:10px">⚠ Подставлены значения из предыдущего месяца — отредактируйте и сохраните для этого месяца</div>' : '')
-    + '<div>' + inputs + '</div>'
-    + '<div style="margin-top:14px;display:flex;gap:6px;justify-content:flex-end">'
+    + (rows.length === 0 && (d.template || []).length > 0 ? '<div style="font-size:11px;color:var(--accent);margin-bottom:6px">⚠ Подставлены значения из предыдущего месяца — отредактируйте и сохраните</div>' : '')
+    + inputs
+    + '<div class="set-save-bar" style="justify-content:flex-end">'
     + '<button class="btn" onclick="document.getElementById(\'_finCostsOverlay\').remove()">Отмена</button>'
     + '<button class="btn btn-primary" onclick="saveCostsModal()">💾 Сохранить</button>'
     + '</div></div>';
@@ -3738,6 +3948,23 @@ function bulkReboot(){
   },'Перезагрузить','Массовый ребут',true);
 }
 
+function bulkDelete(){
+  var items=Object.keys(window._bulkSel);if(!items.length)return;
+  confirmDialog('Удалить '+items.length+' модем(ов) из дашборда?\n\nОфлайн/призрачные исчезнут навсегда. Физически живые вернутся при следующем опросе ProxySmart.',function(){
+    // Удаляем по IMEI через синтетический port_id meta_<imei>. Параллельно —
+    // Node однопоточный, мутации known_modems сериализуются, запись файла отражает
+    // финальное состояние; так удаление пачки не тянется по одному запросу.
+    var ok=0,fail=0;
+    Promise.all(items.map(function(imei){var s=window._bulkSel[imei];
+      return fetch(API+'/api/admin/modems/'+encodeURIComponent(s.server)+'/'+encodeURIComponent('meta_'+imei)+'?nick='+encodeURIComponent(s.nick||''),{method:'DELETE',headers:{'X-Auth-Token':authToken}})
+        .then(function(r){if(r.ok)ok++;else fail++;}).catch(function(){fail++;});
+    })).then(function(){
+      showToast('Удалено модемов: '+ok+(fail?(' · ошибок: '+fail):''),fail&&!ok?'error':'success');
+      clearBulkSel();setTimeout(loadData,300);
+    });
+  },'Удалить','Массовое удаление',true);
+}
+
 function bulkOsSpoof(){
   var items=Object.keys(window._bulkSel);if(!items.length)return;
   // Collect all ports from selected modems
@@ -3755,7 +3982,7 @@ function bulkOsSpoof(){
   var overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
-  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 10px 40px rgba(0,0,0,.3)" onclick="event.stopPropagation()">'
+  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" onclick="event.stopPropagation()">'
     +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">🛡 OS Spoofing — '+portsList.length+' портов</h3>'
     +'<select id="bulkOsSelect" class="form-input" style="width:100%;margin-bottom:12px">'
     +'<option value="">--Выкл--</option>'
@@ -3795,7 +4022,7 @@ function bulkRotation(){
   var overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
-  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 10px 40px rgba(0,0,0,.3)" onclick="event.stopPropagation()">'
+  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" onclick="event.stopPropagation()">'
     +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">⏱ Авторотация — '+modems.length+' модемов</h3>'
     +'<select id="bulkRotSelect" class="form-input" style="width:100%;margin-bottom:12px">'
     +'<option value="0">Выкл.</option>'
@@ -3876,7 +4103,7 @@ function bulkExport(){
   function renderExport(){
     var lines=proxies.map(function(p){var port=proto==='http'?p.http:p.socks;return p.login+':'+p.pass+'@'+p.host+':'+port});
     var txt=lines.join('\n');
-    var content='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:16px;width:min(640px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,.3)" onclick="event.stopPropagation()">'
+    var content='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;width:min(640px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)" onclick="event.stopPropagation()">'
       +'<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
       +'<div><span style="font-size:16px">📤</span> <strong style="font-size:14px">Экспорт прокси</strong> <span style="color:var(--text-2);font-size:12px">'+proxies.length+' шт.</span></div>'
       +'<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center">✕</button>'
@@ -4208,7 +4435,7 @@ function toggleSyslogAutoRefresh(){
 toggleSyslogAutoRefresh();
 
 // ========== CLIENTS TAB ==========
-var _filterProblematic=false;
+var _filterProblematic=false;var _clientFilter='all';
 function toggleProblematicFilter(){
   _filterProblematic=!_filterProblematic;
   var btn=document.getElementById('btnFilterProblematic');
@@ -4235,40 +4462,47 @@ function renderClients(){
     var bCost=charges[b.id]||0;
     return bCost-aCost;
   });
+  var _cnt={all:0,active:0,debtors:0,expiring:0},_mrr=0;cl.forEach(function(c){var b=c.balance!==undefined?c.balance:0;var ch=((currentData.clientMonthCharges||{})[c.id]||0);var md=(pnm[c.portName]||[]).length;_cnt.all++;_mrr+=ch;if(b<0){_cnt.debtors++;}else{if(md>0)_cnt.active++;if(ch>0&&b/(ch/30)<5)_cnt.expiring++;}});
   var h='';var count=0;var colors=CHART_COLORS.clients;
   cl.forEach(function(c,i){
     var modems=pnm[c.portName]||[];
     if(search&&(c.name+' '+c.portName+' '+c.login+' '+(c.contact||'')+' '+(c.legalName||'')).toLowerCase().indexOf(search)===-1)return;
     var balance=c.balance!==undefined?c.balance:0;
-    if(_filterProblematic&&balance>=0)return;
+    var _ch0=((currentData.clientMonthCharges||{})[c.id]||0);if(_clientFilter==='active'&&!(balance>=0&&modems.length>0))return;if(_clientFilter==='debtors'&&balance>=0)return;if(_clientFilter==='expiring'&&!(balance>=0&&_ch0>0&&balance/(_ch0/30)<5))return;
     count++;var bt=c.billingType||'per_gb';var price=c.price||0;
     var cost=Math.round(((currentData.clientMonthCharges||{})[c.id]||0)*100)/100;
     var monthGbLive=Math.round(((currentData.clientLiveMonthGb||{})[c.id]||0)*10)/10;
     var tariffLabel=price+(bt==='per_modem'?'\u20BD/мод':'\u20BD/\u0413\u0411');
     var ctLabel=(c.clientType||'legal')==='individual'?'Физ. лицо':'Юр. лицо';
-    var balWarn=balance<0?'\u26A0':'';
+    var balWarn='';
     var color=colors[(count-1)%colors.length];
     var isInactive=!modems.length;
-    h+='<div class="client-card'+(isInactive?' client-card--inactive':'')+'" style="border-left:4px solid '+color+';background:var(--bg-1);border-radius:8px;margin-bottom:12px;overflow:hidden;box-shadow:0 1px 3px rgba(0,0,0,.06)">';
-    // Header
-    h+='<div style="display:flex;align-items:center;justify-content:space-between;padding:14px 16px 10px">';
-    h+='<div style="display:flex;align-items:center;gap:10px"><span style="width:10px;height:10px;border-radius:50%;background:'+color+';display:inline-block;flex-shrink:0"></span>';
-    h+='<span style="font-weight:700;font-size:15px;color:var(--text-0)">'+esc(c.name)+'</span>'+(isInactive?'<span class="inactive-badge">нет модемов</span>':'')+'</div>';
-    h+='<div style="display:flex;gap:6px">';
-    h+='<button class="btn btn-sm" onclick="editClient(\''+c.id+'\')" style="font-size:11px">\u270F Ред.</button>';
-    h+='<button class="btn btn-sm" onclick="openClientOpsModal(\''+c.id+'\',\'history\')" style="font-size:11px">\uD83D\uDCB0 Баланс</button>';
-    h+='<button class="btn btn-sm" onclick="impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" style="font-size:11px">\uD83D\uDC64</button>';
-    h+='<button class="btn btn-sm" onclick="deleteClient(\''+c.id+'\',\''+esc(c.name)+'\')" style="font-size:11px;color:var(--danger)">\u2715</button>';
-    h+='</div></div>';
-    // Subtitle
-    h+='<div style="padding:0 16px 10px;font-size:12px;color:var(--text-2)">';
-    h+=ctLabel+' \u00B7 <span style="font-family:monospace;color:var(--text-1)">'+esc(c.login)+'</span>';
-    if(c.portName)h+=' / <span style="font-family:monospace;font-size:11px;color:var(--text-3)">'+esc(c.portName)+'</span>';
+    var _stp=balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?['ПАУЗА','var(--warning)','#000']:(isInactive?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff']));
+    var stPill='<span style="font-size:9px;font-weight:600;color:'+_stp[2]+';background:'+_stp[1]+';padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap">'+_stp[0]+'</span>';
+    h+='<div class="client-card'+(isInactive?' client-card--inactive':'')+'">';
+    // Header / balance / 2x2 stats / actions — mockup card layout
+    var _nm=(c.name||'').replace(/^(ООО|ИП|ЗАО|АО|ПАО)\s*/i,'').replace(/["«»]/g,'').trim();
+    var _ws=_nm.split(/\s+/).filter(Boolean);
+    var _ini=((_ws.length>=2?(_ws[0].charAt(0)+_ws[1].charAt(0)):_nm.slice(0,2)).toUpperCase())||'?';
+    var balColor=balance<0?'var(--danger)':(balance>0?'var(--success)':'var(--text-2)');
+    var _balStr=Math.round(balance).toLocaleString('ru-RU')+' ₽'+balWarn;
+    var _pm=modems.length;var _plw=(_pm%100>=11&&_pm%100<=14)?'модемов':(_pm%10===1?'модем':(_pm%10>=2&&_pm%10<=4?'модема':'модемов'));
+    h+='<div style="padding:18px 18px">';
+    h+='<div style="display:flex;align-items:center;gap:11px;margin-bottom:12px">';
+    h+='<div style="width:36px;height:36px;border-radius:50%;background:var(--accent-dim);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">'+esc(_ini)+'</div>';
+    h+='<div style="flex:1;min-width:0"><div style="font-weight:600;font-size:14px;color:var(--text-0);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(c.name)+'</div><div style="font-size:10px;color:var(--text-2);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+ctLabel+' · '+esc(c.login)+' · '+_pm+' '+_plw+'</div></div>';
+    h+=stPill;
     h+='</div>';
-    // Metrics
-    h+='<div style="display:grid;grid-template-columns:repeat(5,1fr);border-top:1px solid var(--border);border-bottom:1px solid var(--border)">';
-    var mets=[['МОДЕМОВ',''+modems.length,'var(--text-0)'],['ТАРИФ',tariffLabel,'var(--text-0)'],['БАЛАНС',Math.round(balance)+'\u20BD'+balWarn,balance>=0?'var(--text-0)':'var(--danger)'],['РАСХОД/МЕС',Math.round(cost)+'\u20BD','var(--accent)'],['ТРАФИК/МЕС',monthGbLive.toFixed(1)+' GB','var(--text-0)']];
-    mets.forEach(function(met,mi){h+='<div style="padding:10px 8px;text-align:center'+(mi<4?';border-right:1px solid var(--border)':'')+'">'+'<div style="font-size:9px;font-weight:600;color:var(--text-3);letter-spacing:.5px;margin-bottom:4px">'+met[0]+'</div>'+'<div style="font-size:13px;font-weight:700;color:'+met[2]+'">'+met[1]+'</div></div>';});
+    h+='<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)"><span style="font-size:11px;color:var(--text-2)">Баланс</span><span style="font-size:20px;font-weight:700;color:'+balColor+';font-family:var(--font-mono)">'+_balStr+'</span></div>';
+    h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin-bottom:15px">';
+    var ms=[['Тариф',tariffLabel,'var(--text-1)'],['Расход/мес',Math.round(cost).toLocaleString('ru-RU')+' ₽','var(--accent)'],['Трафик/мес',monthGbLive.toFixed(1)+' GB','var(--text-1)'],['Модемов',''+_pm,isInactive?'var(--text-3)':'var(--text-1)']];
+    ms.forEach(function(m){h+='<div><div style="font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">'+m[0]+'</div><div style="font-size:13px;font-weight:600;color:'+m[2]+';font-family:var(--font-mono)">'+m[1]+'</div></div>';});
+    h+='</div>';
+    h+='<div style="display:flex;gap:6px">';
+    h+='<button class="btn btn-sm btn-primary" onclick="renderClientDetail(\''+c.id+'\',\'payments\')" style="flex:1;font-size:11px;justify-content:center">Платежи</button>';
+    h+='<button class="btn btn-sm" onclick="renderClientDetail(\''+c.id+'\')" style="flex:1;font-size:11px;justify-content:center" title="Детали и настройки">Детали</button>';
+    h+='<button class="btn btn-sm" onclick="impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" style="font-size:11px" title="Войти как клиент">👤</button>';
+    h+='</div>';
     h+='</div>';
     // Expandable modems
     h+='<div id="clientCard_'+c.id+'" style="display:none;padding:0 16px 14px;border-top:1px solid var(--border)">';
@@ -4285,6 +4519,7 @@ function renderClients(){
   if(!count)h='<div style="text-align:center;padding:60px;color:var(--text-3);font-size:14px">Нет клиентов</div>';
   var summary=document.getElementById('clientSummary');
   if(summary)summary.textContent=count+' клиент'+(count===1?'':'ов');
+  var _st=function(id,v){var e=document.getElementById(id);if(e)e.textContent=v;};_st('clCntAll',_cnt.all);_st('clCntActive',_cnt.active);_st('clCntDebt',_cnt.debtors);_st('clCntExp',_cnt.expiring);var _me=document.getElementById('clMrrTotal');if(_me)_me.textContent=Math.round(_mrr).toLocaleString('ru-RU')+' ₽';
   container.innerHTML=h;
   // Update debt count badge on "Проблемные" button
   var debtCount=(currentData.clients||[]).filter(function(c){return(c.balance!==undefined?c.balance:0)<0}).length;
@@ -4293,7 +4528,7 @@ function renderClients(){
 }
 function toggleBankFields(){var el=document.getElementById('bankFieldsSection');if(el)el.style.display=(document.getElementById('cfClientType').value==='legal')?'':'none'}
 function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?'':rnd(12);document.getElementById('cfPassword').placeholder=data?'Без изменений':'';document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_gb'):'per_gb';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfClientType').value=data?(data.clientType||'legal'):'legal';toggleBankFields();document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';document.getElementById('cfContractDate').value=data?((data.contractDate||'').slice(0,10)):'';document.getElementById('cfAutoActs').checked=data?(data.autoActs!==false):true;document.getElementById('cfAutoBills').checked=data?(data.autoBills!==false):true;document.getElementById('cfBillingPaused').checked=data?!!data.billingPaused:false;document.getElementById('cfAllowDebt').checked=data?!!data.allowDebt:false;document.getElementById('cfMaxDebt').value=data&&typeof data.maxDebt==='number'?data.maxDebt:'';document.getElementById('cfSlaUptime').value=data&&typeof data.slaUptimePct==='number'?data.slaUptimePct:99;document.getElementById('cfSlaLatency').value=data&&typeof data.slaMaxLatencyMs==='number'?data.slaMaxLatencyMs:1000;document.getElementById('cfSlaErrPct').value=data&&typeof data.slaMaxErrorPct==='number'?data.slaMaxErrorPct:5;document.getElementById('cfSlaAutoCredit').checked=data?!!data.slaAutoCredit:false;var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
-function closeClientModal(){document.getElementById('clientModal').classList.remove('show')}
+function closeClientModal(){document.getElementById('clientModal').classList.remove('show');currentOpsClientId=null;}
 document.getElementById('clientModal').addEventListener('click',function(e){if(e.target===this)closeClientModal()});
 function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
 function saveClient(){var id=document.getElementById('clientFormId').value;var maxDebtRaw=document.getElementById('cfMaxDebt').value;var slaUpRaw=document.getElementById('cfSlaUptime').value,slaLatRaw=document.getElementById('cfSlaLatency').value,slaErrRaw=document.getElementById('cfSlaErrPct').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,contractDate:document.getElementById('cfContractDate').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked,billingPaused:document.getElementById('cfBillingPaused').checked,allowDebt:document.getElementById('cfAllowDebt').checked,maxDebt:maxDebtRaw!==''?parseFloat(maxDebtRaw):undefined,slaUptimePct:slaUpRaw!==''?parseFloat(slaUpRaw):undefined,slaMaxLatencyMs:slaLatRaw!==''?parseInt(slaLatRaw):undefined,slaMaxErrorPct:slaErrRaw!==''?parseFloat(slaErrRaw):undefined,slaAutoCredit:document.getElementById('cfSlaAutoCredit').checked};if(!d.name||!d.portName||!d.login||(!id&&!d.password))return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
@@ -4315,8 +4550,8 @@ function openAssignModemModal(clientId, clientPortName) {
   var overlay = document.createElement('div');
   overlay.id = 'assignModemOverlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
-  overlay.innerHTML = '<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:500px;max-height:80vh;overflow-y:auto;box-shadow:0 10px 40px rgba(0,0,0,.3)">' +
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0;font-size:16px">Добавить модем клиенту</h3><button onclick="document.getElementById(\'assignModemOverlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-2)">&times;</button></div>' +
+  overlay.innerHTML = '<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:500px;max-height:80vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)">' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0;font-size:14px">Добавить модем клиенту</h3><button onclick="document.getElementById(\'assignModemOverlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-2)">&times;</button></div>' +
     '<div style="font-size:11px;color:var(--text-2);margin-bottom:8px">portName: <b>' + esc(clientPortName) + '</b></div>' +
     '<input id="assignModemSearch" class="form-input" placeholder="Поиск по нику модема..." style="width:100%;margin-bottom:8px;font-size:12px" oninput="filterAssignModemList()">' +
     '<div id="assignModemList" style="font-size:12px">Загрузка...</div></div>';
@@ -4357,7 +4592,7 @@ function renderAssignModemList() {
   modems.forEach(function(m) {
     var assigned = m.portName || 'Свободен';
     var clr = m.portName ? 'var(--warning)' : 'var(--success)';
-    h += '<tr style="border-bottom:1px solid var(--border)">';
+    h += '<tr>';
     h += '<td style="padding:6px 8px;font-weight:500">' + esc(m.nick) + '</td>';
     h += '<td style="padding:6px 8px;font-size:10px;color:var(--text-2)">' + esc(m.server) + '</td>';
     h += '<td style="padding:6px 8px;font-size:10px;color:' + clr + '">' + esc(assigned) + '</td>';
@@ -4407,10 +4642,7 @@ function unassignModem(nick, clientPortName) {
 // use (src/routes/clients.js: DELETE /clients/:id/payment/by-ledger/:ledgerDbId).
 
 // ========== ANALYTICS ==========
-function initAnalyticsSelectors(){var sv=currentData?currentData.servers||[]:[];['uniqueIpsServer','bwPeriodServer','backupServer'].forEach(function(id){var sel=document.getElementById(id);if(!sel)return;var v=sel.value;sel.innerHTML='<option value="">Сервер</option>';sv.forEach(function(s){var c=COUNTRIES[s.name]||{};sel.innerHTML+='<option value="'+s.name+'">'+(c.flag||'')+' '+(c.name||s.name)+'</option>'});if(v)sel.value=v})}
-function loadUniqueIps(){var srv=document.getElementById('uniqueIpsServer').value;if(!srv)return showToast('Выберите сервер','error');var res=document.getElementById('uniqueIpsResult');res.innerHTML='Загрузка...';fetch(API+'/api/admin/unique_ips?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var h='<div class="detail-card"><h4>Результат</h4>';for(var k in d)h+=dr(k,typeof d[k]==='object'?JSON.stringify(d[k]):d[k]);res.innerHTML=h+'</div>'}).catch(function(e){res.innerHTML=esc(e.message)})}
-function loadBwPeriod(){var srv=document.getElementById('bwPeriodServer').value,pid=document.getElementById('bwPeriodPort').value,s=document.getElementById('bwPeriodStart').value,e=document.getElementById('bwPeriodEnd').value;if(!srv||!pid||!s||!e)return showToast('Заполните все поля','error');var res=document.getElementById('bwPeriodResult');res.innerHTML='Загрузка...';fetch(API+'/api/admin/bandwidth_period?portId='+encodeURIComponent(pid)+'&serverName='+srv+'&start='+encodeURIComponent(s+' 00:00')+'&end='+encodeURIComponent(e+' 23:59:59'),{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var h='<div class="detail-card">';for(var k in d)h+=dr(k,typeof d[k]==='object'?JSON.stringify(d[k]):d[k]);res.innerHTML=h+'</div>'}).catch(function(er){res.innerHTML=er.message})}
-function downloadBackup(){var srv=document.getElementById('backupServer').value;if(!srv)return showToast('Выберите сервер','error');fetch(API+'/api/admin/backup?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){var blob=new Blob([JSON.stringify(d,null,2)],{type:'application/json'});var a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='backup_'+srv+'_'+new Date().toISOString().slice(0,10)+'.json';a.click();showToast('Скачан','success')}).catch(function(e){showToast(e.message||'Ошибка сети','error')})}
+function initAnalyticsSelectors(){}
 
 // ========== UTILS ==========
 function copyText(t,b){
@@ -4425,8 +4657,8 @@ function showProblemPopup(label,key){
   var items=(window._problemData&&window._problemData[key])||[];
   if(!items.length)return;
   var h='<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1500;display:flex;align-items:center;justify-content:center" onclick="this.remove()">';
-  h+='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;min-width:340px;max-width:520px;max-height:70vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,.4)" onclick="event.stopPropagation()">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px"><span style="font-size:14px;font-weight:600;color:var(--text-0)">'+esc(label)+' <span style="color:var(--text-3);font-weight:400">('+items.length+')</span></span><button style="background:none;border:none;font-size:18px;color:var(--text-2);cursor:pointer;padding:0 4px" onclick="this.closest(\'div[style*=fixed]\').remove()">&times;</button></div>';
+  h+='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;min-width:340px;max-width:520px;max-height:70vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)" onclick="event.stopPropagation()">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-size:14px;font-weight:600;color:var(--text-0)">'+esc(label)+' <span style="color:var(--text-3);font-weight:400">('+items.length+')</span></span><button style="background:none;border:none;font-size:18px;color:var(--text-2);cursor:pointer;padding:0 4px" onclick="this.closest(\'div[style*=fixed]\').remove()">&times;</button></div>';
   h+='<div style="display:flex;flex-direction:column;gap:6px">';
   items.forEach(function(item){
     var n=item.nick||item;
@@ -4499,9 +4731,14 @@ function updateHeaderStats(){
   var _flDown=Math.max(0,_flTotal-_flWorking);          // отключено >10 мин
   var _flBlip=Math.max(0,_flWorking-_flLive);           // молчат <10 мин (блип)
   var title='В парке: '+_flTotal+' · рабочих: '+_flWorking+' (онлайн сейчас '+_flLive+', блипов '+_flBlip+') · отключено >10м: '+_flDown;
-  document.getElementById('headerStats').innerHTML='<div class="stat-badge" title="'+title+'">Online: <span style="color:var(--success)">'+_flWorking+'</span>/<span>'+_flTotal+'</span></div>';
+  document.getElementById('headerStats').innerHTML='<div class="stat-badge" title="'+title+'">В работе: <span style="color:var(--success)">'+_flWorking+'</span>/<span>'+_flTotal+'</span></div>';
 }
-function startAutoRefresh(){if(autoRefreshTimer)clearInterval(autoRefreshTimer);autoRefreshTimer=setInterval(loadData,60000)}
+// Top progress bar = countdown to next auto-refresh. Pure CSS transition: snap to
+// 0 (no transition), force reflow, then animate to 100% over REFRESH_MS linearly.
+// Re-armed at the start of every loadData (auto or manual), so it always reflects
+// the time left until the next refresh.
+function _armRefreshBar(){var bar=document.getElementById('refreshBar');if(!bar)return;bar.style.transition='none';bar.style.width='0%';void bar.offsetWidth;bar.style.transition='width '+REFRESH_MS+'ms linear';bar.style.width='100%';}
+function startAutoRefresh(){if(autoRefreshTimer)clearInterval(autoRefreshTimer);_armRefreshBar();autoRefreshTimer=setInterval(loadData,REFRESH_MS)}
 
 // ========== PRICING TIERS ==========
 function renderPricingTiers() {
@@ -4556,9 +4793,9 @@ function loadServersList(){
       h+='<div class="server-header"><div class="server-header-left">';
       h+='<span class="server-id">'+sn+'</span>';
       h+='<div class="server-country">'+flag+' '+esc(cName)+'</div>';
-      h+='<div class="server-meta"><span class="meta-sep"></span>'+modemCount+' модемов<span class="meta-sep"></span>'+onlineCount+' онлайн</div>';
+      h+='<div class="server-meta"><span class="meta-sep"></span>'+modemCount+' модемов<span class="meta-sep"></span>'+onlineCount+' в работе</div>';
       h+='</div>';
-      h+='<div class="server-status"><span class="status-dot '+(isOnline?'online':'offline')+'"></span><span style="color:'+(isOnline?'var(--success)':'var(--danger)')+'">'+(isOnline?'Online':'Offline')+'</span></div>';
+      h+='<span class="status-pill '+(isOnline?'online':'offline')+'">'+(isOnline?'ONLINE':'OFFLINE')+'</span>';
       h+='</div>';
       // Body (view mode)
       h+='<div class="server-body" id="srvBody_'+sn+'">';
@@ -4683,9 +4920,14 @@ function loadSettings(){
     var strEl=document.getElementById('speedtestRetestDelayInput');if(strEl)strEl.value=s.speedtest_retest_delay_min||10;
     var stmEl=document.getElementById('speedtestMaxHistoryInput');if(stmEl)stmEl.value=s.speedtest_max_history||30;
     // Recovery
-    var roEl=document.getElementById('recoveryOfflineSecInput');if(roEl)roEl.value=s.recovery_offline_sec||60;
+    var reEl=document.getElementById('recoveryEnabledInput');if(reEl)reEl.checked=(s.recovery_enabled!==false);
+    var roEl=document.getElementById('recoveryOfflineSecInput');if(roEl)roEl.value=s.recovery_offline_sec||300;
     var rmEl=document.getElementById('recoveryMaxAttemptsInput');if(rmEl)rmEl.value=s.recovery_max_attempts||3;
-    var rrEl=document.getElementById('recoveryRetryMinInput');if(rrEl)rrEl.value=s.recovery_retry_min||3;
+    var rrEl=document.getElementById('recoveryRetryMinInput');if(rrEl)rrEl.value=s.recovery_retry_min||5;
+    var rdcEl=document.getElementById('recoveryDailyCapInput');if(rdcEl)rdcEl.value=s.recovery_daily_cap||6;
+    var rraEl=document.getElementById('recoveryReaddAfterInput');if(rraEl)rraEl.checked=(s.recovery_readd_after!==false);
+    var rsdEl=document.getElementById('recoverySkipDeadSimInput');if(rsdEl)rsdEl.checked=(s.recovery_skip_dead_sim!==false);
+    var rsuEl=document.getElementById('recoverySkipUnsoldInput');if(rsuEl)rsuEl.checked=(s.recovery_skip_unsold===true);
     // Tracking & rotation
     var tiEl=document.getElementById('trackingIntervalMinInput');if(tiEl)tiEl.value=s.tracking_interval_min||3;
     var rcEl=document.getElementById('rotationCacheTtlInput');if(rcEl)rcEl.value=s.rotation_cache_ttl_min||30;
@@ -4812,12 +5054,17 @@ function restartDashboard(){
   }).catch(function(){showToast('Дашборд перезапускается...','warning');setTimeout(function(){location.reload()},4000)});
 }
 function saveRecoverySettings(){
-  var offline=parseInt(document.getElementById('recoveryOfflineSecInput').value)||60;
+  var offline=parseInt(document.getElementById('recoveryOfflineSecInput').value)||300;
   var maxAtt=parseInt(document.getElementById('recoveryMaxAttemptsInput').value)||3;
-  var retryMin=parseInt(document.getElementById('recoveryRetryMinInput').value)||3;
+  var retryMin=parseInt(document.getElementById('recoveryRetryMinInput').value)||5;
+  var dailyCap=parseInt(document.getElementById('recoveryDailyCapInput').value)||6;
+  var enabled=document.getElementById('recoveryEnabledInput').checked;
+  var readdAfter=document.getElementById('recoveryReaddAfterInput').checked;
+  var skipDeadSim=document.getElementById('recoverySkipDeadSimInput').checked;
+  var skipUnsold=document.getElementById('recoverySkipUnsoldInput').checked;
   var st=document.getElementById('recoverySettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin})}).then(function(r){return r.json()}).then(function(d){
+  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold})}).then(function(r){return r.json()}).then(function(d){
     if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -4926,10 +5173,10 @@ function renderOpsSla(clientId) {
       var t = d.thresholds || {};
       var statusColor = d.status === 'breach' ? 'var(--danger)' : d.status === 'ok' ? 'var(--success)' : 'var(--text-3)';
       var statusLbl = d.status === 'breach' ? '⚠ Нарушение SLA' : d.status === 'ok' ? '✓ В норме' : '— Нет данных';
-      var h = '<div style="padding:12px 16px;background:var(--bg-3);border-radius:8px;margin-bottom:14px;text-align:center">';
+      var h = '<div style="padding:12px 16px;background:var(--bg-3);border-radius:8px;margin-bottom:12px;text-align:center">';
       h += '<div style="font-size:14px;font-weight:700;color:' + statusColor + '">' + statusLbl + '</div>';
       h += '</div>';
-      h += '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:16px">';
+      h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px;margin-bottom:16px">';
       function slaTile(label, actual, expected, isOk) {
         var col = actual == null ? 'var(--text-3)' : isOk ? 'var(--success)' : 'var(--danger)';
         return '<div style="padding:12px;background:var(--bg-3);border-radius:8px">'
@@ -4943,16 +5190,16 @@ function renderOpsSla(clientId) {
       h += slaTile('Ошибки', m.error_pct != null ? m.error_pct + '%' : null, '≤ ' + t.max_error_pct + '%', m.error_pct != null && m.error_pct <= t.max_error_pct);
       h += '</div>';
       h += '<div style="font-size:10px;color:var(--text-3);margin-bottom:10px;text-align:center">Uptime рассчитан за последние ' + (m.uptime_window_days || 30) + ' дней · задержка и ошибки за 24 часа</div>';
-      h += '<div style="padding:10px 14px;background:var(--bg-2);border-radius:6px;margin-bottom:14px;font-size:11px;color:var(--text-2)">Авто-кредит: ' + (t.auto_credit ? '<span style="color:var(--success);font-weight:600">включён</span>' : '<span style="color:var(--text-3)">выключен</span>') + '</div>';
-      h += '<div style="font-size:11px;color:var(--text-2);margin:0 0 6px 4px;text-transform:uppercase;letter-spacing:.04em">История нарушений</div>';
+      h += '<div style="padding:10px 14px;background:var(--bg-2);border-radius:6px;margin-bottom:12px;font-size:11px;color:var(--text-2)">Авто-кредит: ' + (t.auto_credit ? '<span style="color:var(--success);font-weight:600">включён</span>' : '<span style="color:var(--text-3)">выключен</span>') + '</div>';
+      h += '<div style="font-size:11px;color:var(--text-2);margin:0 0 6px 4px;text-transform:uppercase;letter-spacing:.05em">История нарушений</div>';
       if (!d.violations || !d.violations.length) {
         h += '<div style="color:var(--text-3);padding:20px;text-align:center">Нет нарушений</div>';
       } else {
-        h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Метрика</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Факт</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Норма</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Кредит</th></tr></thead><tbody>';
+        h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Метрика</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Факт</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Норма</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Кредит</th></tr></thead><tbody>';
         d.violations.forEach(function(v) {
-          h += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 10px">' + esc(v.date) + '</td><td style="padding:5px 10px;font-weight:600;color:var(--warning)">' + esc(v.metric) + '</td><td style="padding:5px 10px;text-align:right;color:var(--danger)">' + v.actual + '</td><td style="padding:5px 10px;text-align:right;color:var(--text-3)">' + v.expected + '</td><td style="padding:5px 10px;text-align:right;' + (v.credited_amount > 0 ? 'color:var(--success);font-weight:600' : '') + '">' + (v.credited_amount > 0 ? '+' + v.credited_amount : '—') + '</td></tr>';
+          h += '<tr><td style="padding:5px 10px">' + esc(v.date) + '</td><td style="padding:5px 10px;font-weight:600;color:var(--warning)">' + esc(v.metric) + '</td><td style="padding:5px 10px;text-align:right;color:var(--danger)">' + v.actual + '</td><td style="padding:5px 10px;text-align:right;color:var(--text-3)">' + v.expected + '</td><td style="padding:5px 10px;text-align:right;' + (v.credited_amount > 0 ? 'color:var(--success);font-weight:600' : '') + '">' + (v.credited_amount > 0 ? '+' + v.credited_amount : '—') + '</td></tr>';
         });
-        h += '</tbody></table>';
+        h += '</tbody></table></div>';
       }
       body.innerHTML = h;
     })
@@ -4984,10 +5231,10 @@ function renderOpsApi(clientId) {
       h += '</div>';
 
       // KPIs
-      h += '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:14px">';
+      h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(140px,100%),1fr));gap:10px;margin-bottom:12px">';
       var kpi = function(label, val, sub) {
         return '<div style="padding:10px;background:var(--bg-3);border-radius:8px">'
-          + '<div style="font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em">' + label + '</div>'
+          + '<div style="font-size:10px;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">' + label + '</div>'
           + '<div style="font-size:18px;font-weight:700;color:var(--text-0);margin-top:4px">' + val + '</div>'
           + (sub ? '<div style="font-size:10px;color:var(--text-3);margin-top:2px">' + sub + '</div>' : '')
           + '</div>';
@@ -5003,43 +5250,43 @@ function renderOpsApi(clientId) {
       h += '</div>';
 
       // Chart (per-day request count)
-      h += '<div style="background:var(--bg-3);border-radius:8px;padding:10px;margin-bottom:14px">';
+      h += '<div style="background:var(--bg-3);border-radius:8px;padding:10px;margin-bottom:12px">';
       h += '<div style="font-size:11px;color:var(--text-2);margin-bottom:6px">Запросы по дням</div>';
       h += '<div style="height:120px"><canvas id="opsApiChart"></canvas></div>';
       h += '</div>';
 
       // Per-endpoint
       if (d.per_endpoint && d.per_endpoint.length) {
-        h += '<div style="font-size:11px;color:var(--text-2);margin:0 0 6px 4px;text-transform:uppercase;letter-spacing:.04em">Endpoint\'ы</div>';
-        h += '<table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:14px">';
+        h += '<div style="font-size:11px;color:var(--text-2);margin:0 0 6px 4px;text-transform:uppercase;letter-spacing:.05em">Endpoint\'ы</div>';
+        h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="width:100%;border-collapse:collapse;font-size:11px;margin-bottom:12px">';
         h += '<thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Endpoint</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Method</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Запросов</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Ошибок</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Avg ms</th></tr></thead><tbody>';
         d.per_endpoint.forEach(function(r) {
-          h += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:5px 10px;font-family:var(--font-mono);color:var(--accent)">' + esc(r.endpoint) + '</td>';
+          h += '<tr><td style="padding:5px 10px;font-family:var(--font-mono);color:var(--accent)">' + esc(r.endpoint) + '</td>';
           h += '<td style="padding:5px 10px;text-align:center">' + esc(r.method) + '</td>';
           h += '<td style="padding:5px 10px;text-align:right">' + r.count + '</td>';
           h += '<td style="padding:5px 10px;text-align:right;' + (r.errors > 0 ? 'color:var(--danger);font-weight:600' : '') + '">' + (r.errors || 0) + '</td>';
           h += '<td style="padding:5px 10px;text-align:right">' + (r.avg_ms != null ? Math.round(r.avg_ms) : '—') + '</td></tr>';
         });
-        h += '</tbody></table>';
+        h += '</tbody></table></div>';
       }
 
       // Recent requests
-      h += '<div style="font-size:11px;color:var(--text-2);margin:0 0 6px 4px;text-transform:uppercase;letter-spacing:.04em">Последние запросы</div>';
+      h += '<div style="font-size:11px;color:var(--text-2);margin:0 0 6px 4px;text-transform:uppercase;letter-spacing:.05em">Последние запросы</div>';
       if (!d.recent || !d.recent.length) {
         h += '<div style="color:var(--text-3);padding:20px;text-align:center">Нет записей</div>';
       } else {
-        h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Время</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Endpoint</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">ms</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">IP</th></tr></thead><tbody>';
+        h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Время</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Endpoint</th><th style="padding:6px 10px;text-align:center;color:var(--text-2)">Статус</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">ms</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">IP</th></tr></thead><tbody>';
         d.recent.forEach(function(r) {
           var tsStr = r.timestamp;
           try { tsStr = new Date(r.timestamp.replace(' ','T')+'Z').toLocaleString('ru-RU', {timeZone:'Europe/Moscow'}); } catch(e) {}
           var stCol = r.status_code >= 400 ? 'color:var(--danger);font-weight:600' : 'color:var(--success)';
-          h += '<tr style="border-bottom:1px solid var(--border)"><td style="padding:4px 10px;white-space:nowrap;color:var(--text-3)">' + esc(tsStr) + '</td>';
+          h += '<tr><td style="padding:4px 10px;white-space:nowrap;color:var(--text-3)">' + esc(tsStr) + '</td>';
           h += '<td style="padding:4px 10px;font-family:var(--font-mono);color:var(--accent)">' + esc(r.method) + ' ' + esc(r.endpoint) + '</td>';
           h += '<td style="padding:4px 10px;text-align:center;' + stCol + '">' + r.status_code + '</td>';
           h += '<td style="padding:4px 10px;text-align:right">' + (r.response_time_ms != null ? r.response_time_ms : '—') + '</td>';
           h += '<td style="padding:4px 10px;font-family:var(--font-mono);color:var(--text-3)">' + esc(r.ip || '') + '</td></tr>';
         });
-        h += '</tbody></table>';
+        h += '</tbody></table></div>';
       }
       body.innerHTML = h;
 
@@ -5092,15 +5339,15 @@ function renderOpsHistory(clientId) {
       var client = (currentData.clients || []).find(function(x) { return x.id === clientId; });
       var bal = client ? (client.balance !== undefined ? client.balance : 0) : 0;
       var balColor = bal >= 0 ? 'var(--success)' : 'var(--danger)';
-      var h = '<div style="display:flex;gap:12px;align-items:stretch;margin-bottom:12px">';
-      h += '<div style="flex:1;padding:10px 12px;background:var(--bg-3);border-radius:8px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">';
+      var h = '<div style="display:flex;gap:12px;align-items:stretch;margin-bottom:12px;flex-wrap:wrap">';
+      h += '<div style="flex:1 1 260px;min-width:0;padding:12px 14px;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">';
       h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Сумма</label><input class="form-input" type="number" id="opsPayAmount" placeholder="5000" style="width:100px;font-size:12px;padding:4px 8px"></div>';
       h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Дата</label><input class="form-input" type="date" id="opsPayDate" value="' + new Date().toISOString().slice(0, 10) + '" style="width:130px;font-size:12px;padding:4px 8px"></div>';
       h += '<div style="flex:1;min-width:100px"><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Комментарий</label><input class="form-input" id="opsPayNote" placeholder="Пополнение" style="width:100%;font-size:12px;padding:4px 8px"></div>';
       h += '<button class="btn btn-success btn-sm" onclick="addPaymentFromModal(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px">+ Пополнить</button>';
       h += '<button class="btn btn-sm" onclick="manualChargeFromModal(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px;background:var(--danger);color:#fff">− Списать</button>';
       h += '</div>';
-      h += '<div style="padding:10px 16px;background:var(--bg-3);border-radius:8px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:100px"><div style="font-size:10px;color:var(--text-2)">Баланс</div><div style="font-size:20px;font-weight:700;color:' + balColor + '">' + Math.round(bal) + ' \u20BD</div></div>';
+      h += '<div style="padding:12px 18px;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:110px"><div style="font-size:10px;color:var(--text-2)">Баланс</div><div style="font-size:20px;font-weight:700;color:' + balColor + '">' + Math.round(bal) + ' \u20BD</div></div>';
       h += '</div>';
       if (!entries.length) {
         h += '<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Нет операций</div>';
@@ -5114,15 +5361,15 @@ function renderOpsHistory(clientId) {
       var _segModeNow = (window._opsSegMode === 'quarter') ? 'quarter' : 'month';
       var _segBtn = function(mode, label){ return '<button class="btn btn-sm" style="font-size:11px;padding:2px 10px;'+(_segModeNow===mode?'background:var(--accent);color:#fff':'')+'" onclick="setOpsSegMode(\''+mode+'\',\''+clientId+'\')">'+label+'</button>'; };
       h += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:11px;color:var(--text-3);margin-right:2px">Группировка:</span>' + _segBtn('month','Месяцы') + _segBtn('quarter','Кварталы') + '</div>';
-      h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)">'
-        + '<th style="padding:8px 10px;text-align:left;color:var(--text-2)">Дата</th>'
-        + '<th style="padding:8px 10px;text-align:center;color:var(--text-2)">Тип</th>'
-        + '<th style="padding:8px 10px;text-align:center;color:var(--text-2)">'+qtyHeader+'</th>'
-        + '<th style="padding:8px 10px;text-align:center;color:var(--text-2)">Ставка</th>'
-        + '<th style="padding:8px 10px;text-align:center;color:var(--text-2)">Сумма</th>'
-        + '<th style="padding:8px 10px;text-align:center;color:var(--text-2)">Баланс</th>'
-        + '<th style="padding:8px 10px;text-align:left;color:var(--text-2)">Примечание</th>'
-        + '<th style="padding:8px 10px;text-align:center;color:var(--text-2);width:30px"></th>'
+      var _ths='padding:8px 10px;text-transform:uppercase;font-size:10px;letter-spacing:.5px;color:var(--text-3);font-weight:600';
+      h += '<div style="overflow-x:auto;margin:0 -2px"><table class="ops-ledger" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
+        + '<th style="text-align:left;'+_ths+'">Дата</th>'
+        + '<th style="text-align:center;'+_ths+'">'+qtyHeader+'</th>'
+        + '<th style="text-align:center;'+_ths+'">Ставка</th>'
+        + '<th style="text-align:center;'+_ths+'">Сумма</th>'
+        + '<th style="text-align:center;'+_ths+'">Баланс</th>'
+        + '<th style="text-align:left;'+_ths+'">Примечание</th>'
+        + '<th style="text-align:center;width:30px;'+_ths+'"></th>'
         + '</tr></thead><tbody>';
       // Period segmentation (Месяцы / Кварталы toggle — window._opsSegMode).
       // Totals come from the backend (`monthly`, computed over the FULL ledger
@@ -5146,7 +5393,7 @@ function renderOpsHistory(clientId) {
           _curSeg = _sk;
           var _agg = _segAgg(_sk);
           var _net = (_agg.topup || 0) - (_agg.spent || 0);
-          h += '<tr class="seg-divider"><td colspan="8" style="padding:7px 12px;background:var(--bg-2);border-top:2px solid var(--border);border-bottom:1px solid var(--border)">'
+          h += '<tr class="seg-divider"><td colspan="7" style="padding:7px 12px;background:var(--bg-2);border-top:2px solid var(--border);border-bottom:1px solid var(--border)">'
             + '<div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">'
             + '<span style="font-weight:700;font-size:12px;color:var(--text-1)">' + _segLabel(_sk) + '</span>'
             + '<span style="font-size:11px;color:var(--text-3)">'
@@ -5191,18 +5438,17 @@ function renderOpsHistory(clientId) {
         }
         var balAfter = e.balance_after !== undefined ? e.balance_after.toFixed(2) + ' \u20BD' : '\u2014';
         var note = e.note || '';
-        h += '<tr style="border-bottom:1px solid var(--border)">';
+        h += '<tr>';
         h += '<td style="padding:6px 10px;white-space:nowrap">' + dateStr + '</td>';
-        h += '<td style="padding:6px 10px;text-align:center;' + typeColor + ';font-weight:500">' + typeLabel + '</td>';
         h += '<td style="padding:6px 10px;text-align:center">' + qtyStr + '</td>';
         h += '<td style="padding:6px 10px;text-align:center;color:var(--text-2);white-space:nowrap">' + rateStr + '</td>';
-        h += '<td style="padding:6px 10px;text-align:center;' + amountColor + ';font-weight:600">' + amountStr + '</td>';
-        h += '<td style="padding:6px 10px;text-align:center">' + balAfter + '</td>';
+        h += '<td style="padding:6px 10px;text-align:center;font-family:var(--font-mono);' + amountColor + ';font-weight:600">' + amountStr + '</td>';
+        h += '<td style="padding:6px 10px;text-align:center;font-family:var(--font-mono);color:var(--text-2)">' + balAfter + '</td>';
         h += '<td style="padding:6px 10px;color:var(--text-3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(note) + '">' + esc(note) + '</td>';
         h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:transparent;color:var(--danger);border:1px solid var(--danger)" onclick="deleteLedgerEntry(\'' + clientId + '\',' + e._idx + ')" title="\u0423\u0434\u0430\u043B\u0438\u0442\u044C">\u2716</button></td>';
         h += '</tr>';
       });
-      h += '</tbody></table>';
+      h += '</tbody></table></div>';
       }
       body.innerHTML = h;
     })
@@ -5226,7 +5472,7 @@ function renderOpsDocuments(clientId) {
   h += '<button class="btn btn-primary btn-sm" onclick="createAct(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">➕ Создать акт</button>';
   h += '</div>';
   if (actDocs.length) {
-    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Действия</th></tr></thead><tbody>';
     actDocs.forEach(function(d) {
       var isSigned = d.status === 'signed';
       var statusHtml = isSigned
@@ -5238,7 +5484,7 @@ function renderOpsDocuments(clientId) {
       var pdfBtn = (d.tochkaDocumentId
         ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadActPdf(\'' + clientId + '\',\'' + d.id + '\')">📥 PDF</button> '
         : '') + '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="window.open(API+\'/api/admin/clients/'+clientId+'/closing_documents/'+d.id+'/print?token=\'+authToken,\'_blank\')">🖨</button>';
-      h += '<tr style="border-bottom:1px solid var(--border);' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
+      h += '<tr style="' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
       h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(d.period) + '</td>';
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
@@ -5261,7 +5507,7 @@ function renderOpsDocuments(clientId) {
   h += '<button class="btn btn-primary btn-sm" onclick="createBill(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">➕ Выставить счёт</button>';
   h += '</div>';
   if (bills.length) {
-    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Действия</th></tr></thead><tbody>';
     bills.forEach(function(b) {
       var isPaid = b.status === 'paid';
       var statusHtml = isPaid
@@ -5273,7 +5519,7 @@ function renderOpsDocuments(clientId) {
       var pdfBtn = (b.tochkaBillId
         ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadBillPdf(\'' + clientId + '\',\'' + b.id + '\')">📥 PDF</button> '
         : '') + '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="window.open(API+\'/api/admin/clients/'+clientId+'/bills/'+b.id+'/print?token=\'+authToken,\'_blank\')">🖨</button>';
-      h += '<tr style="border-bottom:1px solid var(--border);' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
+      h += '<tr style="' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
       h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(b.period) + '</td>';
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
@@ -5291,9 +5537,9 @@ function renderOpsDocuments(clientId) {
   h += '<div>';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">📎 Загруженные документы</h4></div>';
   if (fileDocs.length) {
-    h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Документ</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Дата</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+    h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Документ</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Дата</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Действия</th></tr></thead><tbody>';
     fileDocs.forEach(function(d) {
-      h += '<tr style="border-bottom:1px solid var(--border)">';
+      h += '<tr>';
       h += '<td style="padding:5px 10px;font-size:12px">' + esc(d.name) + '</td>';
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + new Date(d.date).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' }) + '</td>';
       h += '<td style="padding:5px 10px;text-align:center"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" onclick="deleteDocumentModal(\'' + clientId + '\',\'' + d.id + '\')">Удалить</button></td>';
@@ -5490,7 +5736,7 @@ function renderBankConfig() {
     h += '<span class="badge" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px;border-radius:8px">\u274C API \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D</span>';
   }
   h += '</div>';
-  h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-bottom:12px">';
+  h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:10px;margin-bottom:12px">';
   h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px;font-weight:600">JWT \u0422\u043E\u043A\u0435\u043D *</label><input class="form-input" id="bankJwt" placeholder="\u0412\u0441\u0442\u0430\u0432\u044C\u0442\u0435 JWT \u0442\u043E\u043A\u0435\u043D" style="font-size:12px" value="' + esc(tc.jwt || '') + '"></div>';
   h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px;font-weight:600">Client ID *</label><input class="form-input" id="bankClientId" placeholder="client_id" style="font-size:12px" value="' + esc(tc.clientId || '') + '"></div>';
   h += '<div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:3px">Customer Code</label><input class="form-input" id="bankCustomerCode" placeholder="customer_code" style="font-size:12px" value="' + esc(tc.customerCode || '') + '"></div>';
@@ -5532,20 +5778,19 @@ function renderBankConfig() {
 }
 
 function saveBankConfig() {
+  var _jwt = (document.getElementById('bankJwt') || {}).value || '';
   var data = {
-    jwt: document.getElementById('bankJwt').value,
     clientId: document.getElementById('bankClientId').value,
     customerCode: document.getElementById('bankCustomerCode').value,
     accountId: document.getElementById('bankAccountId').value,
     companyName: document.getElementById('bankCompanyName').value,
     companyInn: document.getElementById('bankCompanyInn').value,
     companyKpp: document.getElementById('bankCompanyKpp').value,
-    companyAddress: document.getElementById('bankCompanyAddress').value,
-    bankAccount: document.getElementById('bankAccount').value,
-    bankName: document.getElementById('bankNameField').value,
-    bankBic: document.getElementById('bankBic').value,
-    bankCorrAccount: document.getElementById('bankCorrAccount').value
+    companyAddress: document.getElementById('bankCompanyAddress').value
+    // bank details inputs removed from UI; omit them so the backend keeps stored values
   };
+  // jwt шлём только если введён новый (не пустой и не маска «****…» из GET) — иначе бэкенд хранит старый
+  if (_jwt && _jwt.indexOf('****') !== 0) data.jwt = _jwt;
   fetch(API + '/api/admin/tochka/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) })
     .then(function(r) { return r.json(); })
     .then(function(d) {
@@ -5672,13 +5917,13 @@ function loadAllActs() {
         h += '<span style="font-weight:600;font-size:14px">' + esc(monthLabel) + '</span>';
         h += '<span style="font-size:11px;color:var(--text-3)">' + pdocs.length + ' акт' + (pdocs.length > 1 ? (pdocs.length < 5 ? 'а' : 'ов') : '') + '</span>';
         h += '</div>';
-        h += '<div style="display:flex;align-items:center;gap:12px">';
+        h += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
         h += '<span style="font-weight:600;font-size:13px">' + totalSum.toLocaleString('ru-RU') + ' ₽</span>';
         if (unsigned > 0) h += '<span style="background:var(--danger);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + unsigned + ' не подписан</span>';
         if (signed > 0) h += '<span style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + signed + ' подписан</span>';
         h += '</div></div>';
-        h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0">';
-        h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border)"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+        h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch">';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Действия</th></tr></thead><tbody>';
         pdocs.forEach(function(d) {
           var isSigned = d.status === 'signed';
           var statusHtml = isSigned
@@ -5690,7 +5935,7 @@ function loadAllActs() {
           var pdfBtn = d.tochkaDocumentId
             ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadActPdf(\'' + d.clientId + '\',\'' + d.id + '\')">📥</button>'
             : '';
-          h += '<tr style="border-bottom:1px solid var(--border);' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
+          h += '<tr style="' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
           h += '<td style="padding:6px 10px;font-weight:500">' + esc(d.clientName || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.clientInn || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
@@ -5815,13 +6060,13 @@ function loadAllBills() {
         h += '<span style="font-weight:600;font-size:14px">' + esc(monthLabel) + '</span>';
         h += '<span style="font-size:11px;color:var(--text-3)">' + pbills.length + ' счёт' + (pbills.length > 1 ? (pbills.length < 5 ? 'а' : 'ов') : '') + '</span>';
         h += '</div>';
-        h += '<div style="display:flex;align-items:center;gap:12px">';
+        h += '<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
         h += '<span style="font-weight:600;font-size:13px">' + totalSum.toLocaleString('ru-RU') + ' \u20BD</span>';
         if (unpaid > 0) h += '<span style="background:var(--danger);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + unpaid + ' не оплачен</span>';
         if (paid > 0) h += '<span style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:10px">' + paid + ' оплачен</span>';
         h += '</div></div>';
-        h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0">';
-        h += '<table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border)"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:500;font-size:11px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:500;font-size:11px">Действия</th></tr></thead><tbody>';
+        h += '<div style="display:' + (isOpen ? 'block' : 'none') + ';padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch">';
+        h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-2)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Клиент</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">ИНН</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Действия</th></tr></thead><tbody>';
         pbills.forEach(function(b) {
           var isPaid = b.status === 'paid';
           var statusHtml = isPaid
@@ -5833,7 +6078,7 @@ function loadAllBills() {
           var pdfBtn = b.tochkaBillId
             ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" onclick="downloadBillPdf(\'' + b.clientId + '\',\'' + b.id + '\')">📥</button>'
             : '';
-          h += '<tr style="border-bottom:1px solid var(--border);' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
+          h += '<tr style="' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
           h += '<td style="padding:6px 10px;font-weight:500">' + esc(b.clientName || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.clientInn || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
@@ -5930,9 +6175,10 @@ function renderBankPayments() {
     h += '<span style="font-weight:600;color:var(--danger)">\u26A0\uFE0F \u041D\u0435\u043E\u043F\u043E\u0437\u043D\u0430\u043D\u043D\u044B\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438: ' + unmatched.length + '</span>';
     h += '<button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg-3)" onclick="dismissAllUnmatched()">\u2716 \u0423\u0431\u0440\u0430\u0442\u044C \u0432\u0441\u0435</button>';
     h += '</div>';
+    h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">';
     h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:left">\u0418\u041D\u041D</th><th style="padding:4px 6px;text-align:center">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435</th><th style="padding:4px 6px">\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F</th></tr></thead><tbody>';
     unmatched.forEach(function(p) {
-      h += '<tr style="border-bottom:1px solid var(--border)">';
+      h += '<tr>';
       h += '<td style="padding:4px 6px">' + fmtDateRu(p.date) + '</td>';
       h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
       h += '<td style="padding:4px 6px">' + esc(p.payerInn) + '</td>';
@@ -5955,14 +6201,14 @@ function renderBankPayments() {
     h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:center">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041A\u043B\u0438\u0435\u043D\u0442</th></tr></thead><tbody>';
     matched.forEach(function(p) {
       var isUnmatched=!p.client_id&&!p.matchedClientName;
-      h += '<tr style="border-bottom:1px solid var(--border)'+(isUnmatched?';background:rgba(220,38,38,0.06)':'')+'">';
+      h += '<tr style="'+(isUnmatched?'background:rgba(220,38,38,0.06)':'')+'">';
       h += '<td style="padding:4px 6px">' + fmtDateRu(p.date) + '</td>';
       h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
       h += '<td style="padding:4px 6px;text-align:center;font-weight:500'+(isUnmatched?';color:var(--danger)':'')+'">' + p.amount + ' \u20BD</td>';
       h += '<td style="padding:4px 6px;color:var(--success);font-weight:500">'+(isUnmatched?'<span style="color:var(--danger)">⚠ Не привязан</span>':'\u2705 ' + esc(p.matchedClientName || ''))+'</td>';
       h += '</tr>';
     });
-    h += '</tbody></table>';
+    h += '</tbody></table>' + '</div>';
   } else if (tochkaOk) {
     h += '<div style="color:var(--text-3);font-size:12px;padding:20px;text-align:center">\u041F\u043B\u0430\u0442\u0435\u0436\u0435\u0439 \u043F\u043E\u043A\u0430 \u043D\u0435\u0442</div>';
   }
@@ -6019,21 +6265,21 @@ function editPortFull(imei,server,portId){
   .then(function(cfg){
     function sel(id,val,opts){var h='<select class="form-input" id="'+id+'">';opts.forEach(function(o){h+='<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>'});return h+'</select>'}
     var h='<div class="detail-card" style="margin-top:8px"><h4 style="margin-bottom:12px">⚙️ Настройки порта: '+esc(portId)+'</h4>';
-    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:6px">Доступы</div>';
+    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Доступы</div>';
     h+='<div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="epLogin" value="'+esc(cfg.proxy_login||'')+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="epPass" value="'+esc(cfg.proxy_password||'')+'"></div></div>';
-    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Порты</div>';
+    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px">Порты</div>';
     h+='<div class="form-row"><div class="form-group"><label>HTTP порт</label><input class="form-input" id="epHttp" value="'+esc(cfg.http_port||'')+'"></div><div class="form-group"><label>SOCKS5 порт</label><input class="form-input" id="epSocks" value="'+esc(cfg.socks_port||'')+'"></div></div>';
-    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Лимиты подключений</div>';
+    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px">Лимиты подключений</div>';
     h+='<div class="form-row"><div class="form-group"><label>Max Conn</label><input class="form-input" id="epMaxconn" value="'+esc(cfg.MAXCONN||'')+'" placeholder="0 = без лимита"></div><div class="form-group"><label>Conn Limit</label><input class="form-input" id="epConnlim" value="'+esc(cfg.CONNLIM||'')+'" placeholder="0 = без лимита"></div></div>';
-    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Ограничение скорости (Kbps)</div>';
+    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px">Ограничение скорости (Kbps)</div>';
     h+='<div class="form-row"><div class="form-group"><label>↓ Вх. (BANDLIMIN)</label><input class="form-input" id="epBwIn" value="'+esc(cfg.bandlimin||'')+'" placeholder="0 = без лимита"></div><div class="form-group"><label>↑ Исх. (BANDLIMOUT)</label><input class="form-input" id="epBwOut" value="'+esc(cfg.bandlimout||'')+'" placeholder="0 = без лимита"></div></div>';
-    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.06em;margin:10px 0 6px">Дополнительно</div>';
+    h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px">Дополнительно</div>';
     h+='<div class="form-row">';
     h+='<div class="form-group"><label>IP версия</label>'+sel('epIpVersion',cfg.IP_MODE||'',[[' ','Авто'],['4','IPv4'],['6','IPv6'],['46','IPv4→IPv6'],['64','IPv6→IPv4']])+'</div>';
     h+='<div class="form-group"><label>OS Spoofing</label>'+sel('epOsSpoof',cfg.OS||'',[['','--Выкл--'],['android:1','android:1 (p0f)'],['android:3','android:3 (real, ~Linux)'],['android:4','android:4 (Android 14)'],['macosx:3','macOS:3'],['macosx:4','macOS:4 (12.6/iPhone 13)'],['macosx:5','macOS:5 (Ventura)'],['ios:1','iOS:1 (p0f)'],['ios:2','iOS:2 (real iPhone)'],['ios:3','iOS:3 (iPhone 12 Pro Max)'],['windows:1','Win:1 (Win10 Server)'],['windows:4','Win:4 (Win10/11 Desktop)']])+'</div>';
     h+='</div>';
-    h+='<div class="form-row"><div class="form-group"><label>Квота трафика (МБ)</label><input class="form-input" id="epBwQuota" value="'+esc(cfg.bw_quota||'')+'" placeholder="0 = без лимита"></div>';
-    h+='<div class="form-group"><label>Действителен до</label><input class="form-input" type="date" id="epValidBefore" value="'+esc(cfg.PROXY_VALID_BEFORE||'')+'"></div></div>';
+    h+='<div class="form-row"><div class="form-group"><label>Квота трафика (МБ)</label><input class="form-input" id="epBwQuota" value="'+esc(cfg.bw_quota||'')+'" placeholder="0 = без лимита"></div><div class="form-group"><label>Период квоты</label>'+sel('epQuotaType',cfg.QUOTA_TYPE||'',[['','Выкл'],['daily','Сутки'],['monthly','Месяц'],['lifetime','Всё время']])+'</div></div>';
+    h+='<div class="form-row"><div class="form-group"><label>Действителен до</label><input class="form-input" type="date" id="epValidBefore" value="'+esc(cfg.PROXY_VALID_BEFORE||'')+'"></div></div>';
     h+='<div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-primary btn-sm" onclick="savePortFull(\''+esc(imei)+'\',\''+esc(server)+'\',\''+esc(portId)+'\')">Сохранить</button><button class="btn btn-sm" onclick="document.getElementById(\'editPortForm\').innerHTML=\'\'">Отмена</button></div>';
     h+='</div>';
     area.innerHTML=h;
@@ -6051,6 +6297,7 @@ function savePortFull(imei,server,portId){
     bandlimin:document.getElementById('epBwIn').value,
     bandlimout:document.getElementById('epBwOut').value,
     bw_quota:document.getElementById('epBwQuota').value,
+    QUOTA_TYPE:document.getElementById('epQuotaType').value,
     PROXY_VALID_BEFORE:document.getElementById('epValidBefore').value,
     IP_VERSION:(document.getElementById('epIpVersion').value||'').trim(),
     OS_SPOOF:(document.getElementById('epOsSpoof').value||'').trim()
@@ -6081,14 +6328,18 @@ function regenerateApiKeyInForm(){
 
 // ========== INIT ==========
 (function(){
-  try{var s=JSON.parse(localStorage.getItem('admin_col_state'));if(s)COLUMNS.forEach(function(c){if(s.hasOwnProperty(c.id))c.visible=s[c.id]})}catch(e){}
+  try{var s=JSON.parse(localStorage.getItem('admin_col_state_v2'));if(s)COLUMNS.forEach(function(c){if(s.hasOwnProperty(c.id))c.visible=s[c.id]})}catch(e){}
+  try{window._modemsView=localStorage.getItem('admin_modems_view')||'table'}catch(e){window._modemsView='table'}
   renderColSelector();
   if(!authToken){window.location.href='/';return}
-  // Validate admin token
-  fetch(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}})
+  // Validate admin token. Use retry so a transient RU↔CF network blip on first
+  // load doesn't bounce the admin to the login screen (login can't reach the
+  // server either — just wait and retry).
+  function _bootAdmin(){
+  _fetchRetry(API+'/api/admin/data',{headers:{'X-Auth-Token':authToken}},4)
     .then(function(r){
       if(r.status===401||r.status===403){localStorage.removeItem('pr_admin_token');localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/';return null}
-      return r.json()
+      return _okJson(r)
     })
     .then(function(data){
       if(!data)return;
@@ -6098,10 +6349,15 @@ function regenerateApiKeyInForm(){
       // Load CRM reminders then generate notifications
       fetch(API+'/api/admin/crm_reminders',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){window._crmReminders=d.reminders||[];}).catch(function(){window._crmReminders=[];}).finally(function(){generateNotifications()});
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
-      var _st=localStorage.getItem('admin_active_tab');if(_st){var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te)}
+      var _st=localStorage.getItem('admin_active_tab')||'dashboard';var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te);
       startAutoRefresh()
     })
-    .catch(function(){window.location.href='/'})
+    .catch(function(e){
+      if(_isNetErr(e)||_isServerDownErr(e)){document.body.style.visibility='visible';showToast('Переподключение к серверу…','warning');setTimeout(_bootAdmin,3000);return;}
+      window.location.href='/';
+    });
+  }
+  _bootAdmin();
 })();
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -6523,9 +6779,9 @@ function simRenderByModemTable(box, items){
       '<td>'+m.avg_connect_ms+'</td>'+
       '<td>'+m.avg_ttfb_ms+'</td></tr>';
   }).join('');
-  box.innerHTML = '<table class="sim-table"><thead><tr>'+
+  box.innerHTML = '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table class="sim-table"><thead><tr>'+
     '<th>Модем</th><th>Req</th><th>OK</th><th>TO</th><th>Err</th>'+
-    '<th>P50</th><th>P95</th><th>Connect</th><th>TTFB</th></tr></thead><tbody>'+rows+'</tbody></table>';
+    '<th>P50</th><th>P95</th><th>Connect</th><th>TTFB</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
 }
 
 function simRenderLiveSummary(s){
@@ -6631,14 +6887,14 @@ function simOpenRunDetail(id){
     } else if(bp.applicable){
       bpHtml = '<div style="padding:10px 14px;border-radius:8px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);margin-bottom:12px;font-size:12px">✓ Breaking-point не найден — модемы выдержали полную ramp-нагрузку.</div>';
     }
-    var kpiHtml = '<div class="sim-grid-kpi" style="margin-bottom:14px">'+
+    var kpiHtml = '<div class="sim-grid-kpi" style="margin-bottom:12px">'+
       '<div class="sim-kpi accent-blue"><div class="l">Запросов</div><div class="v">'+(s.total_requests||0)+'</div></div>'+
       '<div class="sim-kpi accent-green"><div class="l">Успех</div><div class="v">'+(s.success_pct||0)+'%</div></div>'+
       '<div class="sim-kpi accent-red"><div class="l">Таймаут</div><div class="v">'+(s.timeout_pct||0)+'%</div></div>'+
       '<div class="sim-kpi accent-amber"><div class="l">P50 / P95 / P99</div><div class="v" style="font-size:14px">'+(s.p50_ms||0)+' / '+(s.p95_ms||0)+' / '+(s.p99_ms||0)+'</div></div>'+
       '<div class="sim-kpi accent-purple"><div class="l">Throughput</div><div class="v" style="font-size:16px">'+(s.avg_throughput_mbps||0)+' Mbps</div></div>'+
     '</div>';
-    var metaHtml = '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:14px;font-size:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">'+
+    var metaHtml = '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px;font-size:12px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px">'+
       '<div><strong>Профиль:</strong> '+esc(run.profile_name||'ad-hoc')+'</div>'+
       '<div><strong>Запущен:</strong> '+when+'</div>'+
       '<div><strong>Длительность:</strong> '+dur+'</div>'+
@@ -6649,7 +6905,7 @@ function simOpenRunDetail(id){
       '<div><strong>Статус:</strong> <span class="sim-status-'+run.status+'">'+run.status+'</span></div>'+
       (run.error_msg ? '<div style="grid-column:1/-1;color:#EF4444"><strong>Ошибка:</strong> '+esc(run.error_msg)+'</div>' : '')+
     '</div>';
-    var chartHtml = '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:14px"><div style="font-size:11px;color:var(--text-2);font-weight:600;margin-bottom:6px">RPS / P95 / Таймаут %</div><div style="position:relative;height:220px"><canvas id="simDetailChart"></canvas></div></div>';
+    var chartHtml = '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px;margin-bottom:12px"><div style="font-size:11px;color:var(--text-2);font-weight:600;margin-bottom:6px">RPS / P95 / Таймаут %</div><div style="position:relative;height:220px"><canvas id="simDetailChart"></canvas></div></div>';
     var byMHtml = '<div style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px"><div style="font-size:11px;color:var(--text-2);font-weight:600;margin-bottom:6px">Разбивка по модемам ('+byM.length+')</div><div id="simDetailByModem"></div></div>';
     document.getElementById('simDetailBody').innerHTML = bpHtml + kpiHtml + metaHtml + chartHtml + byMHtml;
     simDrawTimeSeriesChart('simDetailChart', ser);
@@ -6835,24 +7091,25 @@ function _statusPill(status, modem) {
 
 // ── 2) Manual modem deletion (server enforces "must be offline" rule) ──
 function deleteModem(server, portId, nick) {
-  if (!confirm('Удалить модем «'+nick+'» ('+server+'/'+portId+') из дашборда?\n\nЕсли модем физически на связи — он вернётся при следующем опросе ProxySmart. Офлайн/призрачный модем исчезнет навсегда.\n\nНажмите OK для удаления.')) return;
-  fetch(API+'/api/admin/modems/'+encodeURIComponent(server)+'/'+encodeURIComponent(portId), {
-    method: 'DELETE',
-    headers: { 'X-Auth-Token': authToken },
-  })
-    .then(function(r){ return r.json().then(function(j){ return { ok: r.ok, status: r.status, body: j }; }); })
-    .then(function(r){
-      if (!r.ok) {
-        alert('Ошибка: ' + (r.body && (r.body.message || r.body.error) || 'unknown'));
-        return;
-      }
-      alert('✅ Модем удалён.');
-      closeModal();
-      // Refresh data so the removed modem disappears from the table.
-      if (typeof loadData === 'function') loadData();
-      else location.reload();
+  // Через кастомный диалог (native confirm() глушится настройкой «не показывать
+  // диалоги» — из-за этого офлайн-модемы «не удалялись»).
+  confirmDialog('Удалить модем «'+nick+'» из дашборда?\n\nОфлайн/призрачный модем исчезнет навсегда. Если модем физически на связи — он вернётся при следующем опросе ProxySmart.', function(){
+    fetch(API+'/api/admin/modems/'+encodeURIComponent(server)+'/'+encodeURIComponent(portId)+'?nick='+encodeURIComponent(nick||''), {
+      method: 'DELETE',
+      headers: { 'X-Auth-Token': authToken },
     })
-    .catch(function(e){ alert('Сеть: ' + e.message); });
+      .then(function(r){ return r.text().then(function(txt){ var j; try{ j=JSON.parse(txt); }catch(_){ j={ error:'HTTP '+r.status+' (не-JSON). Обнови страницу и попробуй снова.' }; } return { ok: r.ok, status: r.status, body: j }; }); })
+      .then(function(r){
+        if (!r.ok) { showToast('Ошибка удаления: ' + (r.body && (r.body.message || r.body.error) || ('HTTP '+r.status)), 'error'); return; }
+        showToast('Модем «'+nick+'» удалён', 'success');
+        // Оптимистично убираем строку/плитку сразу — иначе модем «висит» до конца
+        // медленного loadData() и удаление кажется долгим.
+        try{ document.querySelectorAll('tr.modem-row, .modem-tile').forEach(function(elm){ if(elm.dataset && elm.dataset.nick===nick && elm.dataset.server===server) elm.remove(); }); }catch(_){}
+        if (typeof closeModal === 'function') closeModal();
+        if (typeof loadData === 'function') setTimeout(loadData, 50); else location.reload();   // сверка фоном
+      })
+      .catch(function(e){ showToast('Сеть: ' + e.message, 'error'); });
+  }, 'Удалить', 'Удаление модема', true);
 }
 
 // ── 3) Daily health timeline (30 cells) in the «Здоровье» tab ──
@@ -6897,7 +7154,7 @@ function renderHealthDailyTimeline(m) {
         var weekStart = d2.getDay() === 1; // Monday — mark with subtle border
         cells += '<div title="'+title+'" style="flex:1;min-width:0;height:32px;background:'+bg+';border-radius:3px;display:flex;align-items:flex-end;justify-content:center;padding-bottom:2px;font-size:8px;color:rgba(255,255,255,.7);font-weight:600;'+(weekStart?'box-shadow:inset 2px 0 0 rgba(255,255,255,.15)':'')+'">'+(i%5===0?dayLabel:'')+'</div>';
       }
-      var html = '<div style="font-size:12px;color:var(--text-2);text-transform:uppercase;letter-spacing:.04em;margin-bottom:8px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline">';
+      var html = '<div style="font-size:12px;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em;margin-bottom:8px;font-weight:600;display:flex;justify-content:space-between;align-items:baseline">';
       html += '<span>Здоровье по дням (30 дн.)</span>';
       html += '<span style="font-size:10px;color:var(--text-3);text-transform:none;letter-spacing:0">наведите на ячейку для деталей</span>';
       html += '</div>';
@@ -6949,7 +7206,7 @@ function loadOperatorsMapping() {
       var ops = (d && d.operators) || [];
       if (!ops.length) { box.innerHTML = '<div style="color:var(--text-3);font-size:12px;padding:12px">Операторов пока не определено.</div>'; return; }
       var h = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-      h += '<thead><tr style="border-bottom:1px solid var(--border);color:var(--text-3);font-size:10px;text-transform:uppercase;letter-spacing:.04em"><th style="text-align:left;padding:8px 6px">Оператор</th><th style="text-align:left;padding:8px 6px">Страна</th><th style="text-align:left;padding:8px 6px">Источник</th><th style="text-align:right;padding:8px 6px">Модемов</th><th style="padding:8px 6px"></th></tr></thead><tbody>';
+      h += '<thead><tr style="color:var(--text-3);font-size:10px;text-transform:uppercase;letter-spacing:.05em"><th style="text-align:left;padding:8px 6px">Оператор</th><th style="text-align:left;padding:8px 6px">Страна</th><th style="text-align:left;padding:8px 6px">Источник</th><th style="text-align:right;padding:8px 6px">Модемов</th><th style="padding:8px 6px"></th></tr></thead><tbody>';
       ops.forEach(function(o){
         var srcBadge = o.source === 'manual'
           ? '<span style="background:rgba(99,102,241,.15);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600">вручную</span>'
@@ -6959,7 +7216,7 @@ function loadOperatorsMapping() {
         var FLAGS = { RO: '🇷🇴', MD: '🇲🇩', RU: '🇷🇺', UA: '🇺🇦' };
         var country = o.country || '';
         var flag = FLAGS[country] || '';
-        h += '<tr style="border-bottom:1px solid var(--border)">';
+        h += '<tr>';
         h += '<td style="padding:8px 6px;color:var(--text-0)"><strong>'+esc(o.operator)+'</strong><div style="font-size:10px;color:var(--text-3);margin-top:2px">'+(o.servers || []).join(', ')+'</div></td>';
         h += '<td style="padding:8px 6px">';
         h += '<select onchange="setOperatorCountry(\''+encodeURIComponent(o.operator_normalized)+'\', this.value)" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-1);padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer">';
@@ -6972,7 +7229,7 @@ function loadOperatorsMapping() {
         h += '<td style="text-align:right;padding:8px 6px;color:var(--text-0);font-weight:600">'+o.modem_count+'</td>';
         h += '<td style="text-align:right;padding:8px 6px">';
         if (o.source === 'manual') {
-          h += '<button onclick="dropOperatorMapping(\''+encodeURIComponent(o.operator_normalized)+'\')" title="Снять ручной маппинг — следующий опрос восстановит \'auto\'" style="background:none;border:1px solid var(--border);color:var(--text-3);padding:4px 8px;border-radius:5px;font-size:11px;cursor:pointer">↺ авто</button>';
+          h += '<button onclick="dropOperatorMapping(\''+encodeURIComponent(o.operator_normalized)+'\')" title="Снять ручной маппинг — следующий опрос восстановит \'auto\'" style="background:none;border:1px solid var(--border);color:var(--text-3);padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer">↺ авто</button>';
         }
         h += '</td></tr>';
       });
@@ -7016,7 +7273,7 @@ function dropOperatorMapping(opEnc) {
     var m = window.currentDetailModem;
     if (!m) return;
     var status = getModemStatus(m);
-    if (status !== 'offline') return;
+    if (!_isStaleModem(m)) return;   // только давно офлайн (как и кнопка 🗑 в таблице/плитке)
     // Find the port_id for this modem. We need ONE port_id to identify the
     // known_modems entry. Pick the first port (any will resolve to same imei
     // server-side).
@@ -7103,26 +7360,26 @@ function loadAlertRules(){
       ['critical','important','early'].forEach(function(p){
         if(!groups[p].length) return;
         var t = titles[p];
-        h += '<div style="margin-bottom:20px">';
-        h += '<div style="font-size:13px;font-weight:600;color:var(--text-0);margin-bottom:4px">'+t.label+'</div>';
-        h += '<div style="font-size:11px;color:var(--text-3);margin-bottom:10px">'+t.desc+'</div>';
-        h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:10px;overflow:hidden">';
+        h += '<div style="margin-bottom:18px">';
+        h += '<div style="font-size:13px;font-weight:600;color:var(--text-0);margin-bottom:3px">'+t.label+'</div>';
+        h += '<div style="font-size:11px;color:var(--text-3);margin-bottom:9px">'+t.desc+'</div>';
+        h += '<div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;overflow:hidden">';
         groups[p].forEach(function(r, i){
           var sep = i > 0 ? 'border-top:1px solid var(--border);' : '';
-          h += '<div style="display:flex;align-items:center;gap:12px;padding:10px 14px;'+sep+'">';
-          h += '<label style="display:flex;align-items:center;gap:8px;cursor:pointer;flex:1">';
-          h += '<input type="checkbox" '+(r.enabled?'checked':'')+' onchange="toggleAlertRule(\''+esc(r.id)+'\', this.checked)" style="cursor:pointer">';
-          h += '<div style="min-width:0;flex:1"><div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:13px;font-weight:500;color:var(--text-0)">'+esc(r.title)+'</span>';
           // Stage 18.15 — channel badge (TG+Bell vs Bell only).
           var isBell = r.channel === 'bell';
           var chColor = isBell ? 'var(--text-2)' : 'var(--accent)';
           var chBg    = isBell ? 'var(--bg-3)'  : 'rgba(0,122,255,0.12)';
           var chLabel = isBell ? '🔔 только в админке' : 'TG + 🔔';
-          h += '<span style="background:'+chBg+';color:'+chColor+';padding:1px 7px;border-radius:8px;font-size:9.5px;font-weight:600;white-space:nowrap">'+chLabel+'</span></div>';
-          h += '<div style="font-size:10px;color:var(--text-3);margin-top:2px;font-family:monospace">'+esc(r.id)+' · повтор не чаще '+_cdLabel(r.cooldownSec)+'</div></div>';
-          h += '</label>';
           var testTitle = isBell ? 'Создать тестовую запись в колокольчике' : 'Отправить пример в Telegram';
-          h += '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px" onclick="testAlertRule(\''+esc(r.id)+'\')" title="'+testTitle+'">📤 Тест</button>';
+          h += '<div style="display:flex;align-items:center;gap:12px;padding:11px 14px;'+sep+'">';
+          h += '<div style="flex:1;min-width:0">';
+          h += '<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap"><span style="font-size:13px;font-weight:500;color:var(--text-0)">'+esc(r.title)+'</span>';
+          h += '<span style="background:'+chBg+';color:'+chColor+';padding:1px 7px;border-radius:8px;font-size:10px;font-weight:600;white-space:nowrap">'+chLabel+'</span></div>';
+          h += '<div style="font-size:10px;color:var(--text-3);margin-top:2px;font-family:var(--font-mono)">'+esc(r.id)+' · повтор не чаще '+_cdLabel(r.cooldownSec)+'</div>';
+          h += '</div>';
+          h += '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;flex-shrink:0" onclick="testAlertRule(\''+esc(r.id)+'\')" title="'+testTitle+'">📤 Тест</button>';
+          h += '<label class="tgl"><input type="checkbox" '+(r.enabled?'checked':'')+' onchange="toggleAlertRule(\''+esc(r.id)+'\', this.checked)"><span></span></label>';
           h += '</div>';
         });
         h += '</div></div>';
@@ -7179,73 +7436,166 @@ function renderAccNew(){
   var d = collectTrafficData();
   if(!d){return;}
   window._newReconLoaded = false;          // re-arm reconciliation chip on each (re)render
-  renderNewActionCenter(d);                // instant — currentData
-  renderNewFleetServers();                 // instant — currentData.fleet
+  var _ua = document.getElementById('dashUpdatedAt');
+  if(_ua){ var _n=new Date(); _ua.textContent='обновлено '+String(_n.getHours()).padStart(2,'0')+':'+String(_n.getMinutes()).padStart(2,'0'); }
+  try{ renderNewExtWidgets(); }catch(e){}  // плитки «Требует внимания»
+  renderNewFleetServers();                 // instant — детальные карточки серверов
+  try{ renderNewTopProblems(); }catch(e){} // топ проблемных модемов
   renderNewClientTable(d);                 // traffic table (Трафик section)
-  loadNewFinance();                        // → pulse + finance quality/flow/trend
-  loadNewFleetHealth();                    // → health distribution + worst modems
-  loadNewReconciliation();                 // → action-center chip + recon body
+  loadNewFinance();                        // → pulse + finance quality/trend + финсводка
   loadNewHeatmap();
-  loadNewDailyChart();
+  loadNewDailyChart();                      // потребление по дням (60д, по клиентам/странам)
   // Wire collapsibles' lazy-load (once per session)
   if(!window._newDetailsWired){
-    document.querySelectorAll('#acc-new details.acc-expand').forEach(function(el){
+    document.querySelectorAll('#tab-dashboard details.acc-expand').forEach(function(el){
       el.addEventListener('toggle', onNewSectionToggle);
     });
     window._newDetailsWired = true;
   }
+  // Секции, раскрытые по умолчанию (open в разметке), не получают событие toggle —
+  // подгружаем их содержимое один раз здесь.
+  document.querySelectorAll('#tab-dashboard details.acc-expand[open]').forEach(function(el){
+    if(el.dataset.loaded === '1') return;
+    el.dataset.loaded = '1';
+    var s = el.dataset.section;
+    if(s === 'latency'){ loadNewLatency(); }
+    else if(s === 'infra'){ reloadNewInfra(); }
+    else if(s === 'apiaccess'){ loadNewApiAccess(); }
+  });
+  // «Топ ресурсов» закрыт по умолчанию, но грузим заранее — при раскрытии данные уже на месте.
+  var resEl = document.querySelector('#tab-dashboard details.acc-expand[data-section="resources"]');
+  if(resEl && resEl.dataset.loaded !== '1'){ resEl.dataset.loaded = '1'; loadNewTopHosts(); }
 }
 
 function onNewSectionToggle(ev){
   var el = ev.target;
   if(!el.open) return;
   var section = el.dataset.section;
-  // infra + finclients re-render cheaply on each open; others load once
-  if(el.dataset.loaded === '1' && section !== 'infra' && section !== 'finclients') return;
+  // infra + finclients + apiaccess re-render cheaply on each open; others load once
+  if(el.dataset.loaded === '1' && section !== 'infra' && section !== 'finclients' && section !== 'apiaccess') return;
   if(section === 'latency'){ loadNewLatency(); }
   else if(section === 'infra'){ reloadNewInfra(); }
   else if(section === 'matrix'){ renderNewMatrix(); }
   else if(section === 'finclients'){ renderNewFinClients(); }
   else if(section === 'recon'){ loadNewReconciliation(); }
-  // 'resources' is loaded on button click only
+  else if(section === 'apiaccess'){ loadNewApiAccess(); }
+  else if(section === 'resources'){ loadNewTopHosts(); }
   el.dataset.loaded = '1';
 }
 
+// ── «Обращения к API» — журнал входящих обращений (кто · когда · зачем) ──────
+var _apiAccessState = { hours: 24, type: '' };
+function _apiTypeLabel(t){ return ({api_key:'API-ключ',portal:'Портал',reset_link:'Ротация по ссылке',webhook:'Вебхук',auth:'Вход'})[t] || t; }
+function _apiTypeColor(t){ return ({api_key:'var(--accent)',portal:'var(--blue)',reset_link:'var(--success)',webhook:'var(--purple)',auth:'var(--text-2)'})[t] || 'var(--text-2)'; }
+function _fmtApiTs(ts){
+  if(!ts) return '';
+  try{
+    var d = new Date(String(ts).replace(' ','T')+'Z');
+    var now = new Date();
+    var t = d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+    return (d.toDateString()===now.toDateString()) ? t
+      : d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})+' '+t;
+  }catch(_){ return ts; }
+}
+function setApiAccessType(t){ _apiAccessState.type = (_apiAccessState.type===t ? '' : t); loadNewApiAccess(); }
+function setApiAccessHours(h){ _apiAccessState.hours = h; loadNewApiAccess(); }
+function loadNewApiAccess(){
+  var bar = document.getElementById('newApiAccessBar');
+  var box = document.getElementById('newApiAccess');
+  if(!box) return;
+  var st = _apiAccessState;
+  var url = API + '/api/admin/api_access_log?hours=' + st.hours + '&limit=150' + (st.type ? '&type=' + encodeURIComponent(st.type) : '');
+  fetch(url, { headers: { 'X-Auth-Token': authToken } })
+    .then(function(r){ return r.json(); })
+    .then(function(d){
+      if(!d || d.error){ box.innerHTML = '<div style="color:var(--danger);font-size:12px;padding:8px">'+esc((d&&d.error)||'Ошибка')+'</div>'; return; }
+      var typeCounts = {}; (d.by_type||[]).forEach(function(x){ typeCounts[x.caller_type] = x.c; });
+      var chips = '';
+      ['api_key','portal','reset_link','webhook'].forEach(function(t){
+        var on = st.type===t;
+        chips += '<button class="qf-chip'+(on?' active':'')+'" onclick="setApiAccessType(\''+t+'\')">'+_apiTypeLabel(t)+'</button>';
+      });
+      var opts = [[1,'1 час'],[24,'24 часа'],[168,'7 дней'],[720,'30 дней']];
+      var hoursSel = '<select class="form-input" style="font-size:11px;padding:4px 8px;width:auto" onchange="setApiAccessHours(parseInt(this.value))">'
+        + opts.map(function(o){ return '<option value="'+o[0]+'"'+(st.hours===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('') + '</select>';
+      var s = d.summary || {};
+      var n = s.total||0, _a=n%100, _b=n%10;
+      var reqWord = (_a>10&&_a<20)?'запросов':(_b>1&&_b<5)?'запроса':(_b===1)?'запрос':'запросов';
+      if(bar){
+        bar.innerHTML = '<div class="qf-chips" style="display:flex;gap:6px;flex-wrap:wrap">'+chips+'</div>'
+          + '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:12px;color:var(--text-2)">'+hoursSel
+          + '<span>· <strong style="color:var(--text-0)">'+n+'</strong> '+reqWord+'</span></div>';
+      }
+      var rows = d.recent || [];
+      if(!rows.length){ box.innerHTML = '<div style="color:var(--text-3);font-size:12px;padding:14px;text-align:center">Нет обращений за выбранный период</div>'; return; }
+      var _totalRows = rows.length; rows = rows.slice(0,_zxLim('api',12));
+      var h = '<div style="overflow-x:auto"><table class="ztbl" style="width:100%"><thead><tr>'
+        + '<th>Время</th><th style="text-align:left">Кто</th><th style="text-align:left">Тип</th><th style="text-align:left">Цель</th><th style="text-align:left">Запрос</th><th>Статус</th><th>мс</th><th>IP</th></tr></thead><tbody>';
+      rows.forEach(function(r){
+        var code = r.status||0;
+        var stColor = code>=500 ? 'var(--danger)' : code>=400 ? 'var(--warning)' : 'var(--success)';
+        h += '<tr>'
+          + '<td style="white-space:nowrap;color:var(--text-2)">'+_fmtApiTs(r.ts)+'</td>'
+          + '<td style="text-align:left"><strong>'+esc(r.client_name||'—')+'</strong>'+(r.identity?'<span style="color:var(--text-3);margin-left:5px;font-family:var(--font-mono);font-size:10px">'+esc(r.identity)+'</span>':'')+'</td>'
+          + '<td style="text-align:left"><span style="color:'+_apiTypeColor(r.caller_type)+';font-weight:600">'+_apiTypeLabel(r.caller_type)+'</span></td>'
+          + '<td style="text-align:left">'+esc(r.purpose||'—')+'</td>'
+          + '<td style="text-align:left;color:var(--text-3);font-family:var(--font-mono);font-size:10px">'+esc((r.method||'')+' '+(r.path||''))+'</td>'
+          + '<td style="color:'+stColor+';font-weight:600">'+code+'</td>'
+          + '<td style="color:var(--text-3)">'+(r.duration_ms!=null?r.duration_ms:'')+'</td>'
+          + '<td style="color:var(--text-3);font-family:var(--font-mono);font-size:10px">'+esc(r.ip||'')+'</td>'
+          + '</tr>';
+      });
+      h += '</tbody></table></div>';
+      box.innerHTML = h;
+    })
+    .catch(function(){ box.innerHTML = '<div style="color:var(--danger);font-size:12px;padding:8px">Ошибка загрузки</div>'; });
+}
+
 // ── 1. Пульс бизнеса (hero KPI) — Трафик «.widget» style ───────────
-function _ncPulseCard(label, value, sub, color){
-  var vc = (color && color !== 'var(--text-0)') ? ' style="color:'+color+'"' : '';
-  return '<div class="widget">' +
-    '<div class="widget-label">'+esc(label)+'</div>' +
-    '<div class="widget-value"'+vc+'>'+value+'</div>' +
-    (sub?'<div class="widget-sub">'+sub+'</div>':'') +
+function _ncPulseCard(label, value, sub, accent){
+  var cls = (accent && accent !== 'var(--text-0)') ? ' '+accent : '';
+  return '<div class="pulse-card'+cls+'">' +
+    '<div class="pulse-label">'+esc(label)+'</div>' +
+    '<div class="pulse-value">'+value+'</div>' +
+    (sub?'<div class="pulse-sub">'+sub+'</div>':'') +
     '</div>';
 }
+// Наша себестоимость трафика по операторам (₽/ГБ из настроек × месячный трафик).
+function _opGbCosts(){ return (currentData&&currentData.settings&&currentData.settings.operator_gb_costs)||{}; }
+function _operatorMonthGb(){ var d=collectTrafficData(); var byOp={}; if(d&&d.modemTraffic){d.modemTraffic.forEach(function(m){var op=m.operator||'Неизвестный';byOp[op]=(byOp[op]||0)+((m.monIn||0)+(m.monOut||0))/1e9;});} return byOp; }
+function _operatorTrafficCost(){ var costs=_opGbCosts(),gb=_operatorMonthGb(),total=0; Object.keys(gb).forEach(function(op){total+=gb[op]*(costs[op]||0);}); return total; }
 function renderNewPulse(fin){
-  var el = document.getElementById('newPulseRow'); if(!el) return;
   var s = (fin && fin.summary) || {};
-  var fleet = currentData.fleet || {};
-  var working = (fleet.working!=null)?fleet.working:((fleet.online!=null)?fleet.online:0);
-  var total = fleet.total||0; if(total<working) total=working;
-  var disc = fleet.disconnected||0;
   var clients = currentData.clients || [];
   var cashFloat = clients.reduce(function(a,c){var b=c.balance||0;return a+(b>0?b:0);},0);
-  var profit = (s.total_cost>0 && s.mrr!=null) ? (s.mrr - s.total_cost) : null;
-  var marginPct = (profit!=null && s.mrr>0) ? Math.round(profit/s.mrr*100) : null;
   var gc = s.mrr_growth_pct;
-  var growthSub = (gc==null) ? '<span style="color:var(--text-3)">нет данных M/M</span>'
-    : '<span style="color:'+(gc>=0?'var(--success)':'var(--danger)')+'">'+(gc>=0?'▲ +':'▼ ')+gc+'% M/M</span>';
-  var profitSub = (profit==null) ? '<span style="color:var(--text-3)">введите затраты ⚙</span>'
-    : '<span style="color:'+(marginPct>=0?'var(--success)':'var(--danger)')+'">'+marginPct+'% маржа</span>';
-  var nrrColor = (s.nrr_pct==null)?'var(--text-0)':(s.nrr_pct>=100?'var(--success)':s.nrr_pct>=90?'var(--warning)':'var(--danger)');
-  var fleetColor = disc>0 ? 'var(--warning)' : 'var(--success)';
-  var fleetSub = disc>0 ? '<span style="color:var(--danger)">⚠ '+disc+' отключено</span>' : '<span style="color:var(--success)">все на связи</span>';
-  el.innerHTML =
-    _ncPulseCard('MRR', _fmtRub(s.mrr), growthSub, 'var(--text-0)') +
-    _ncPulseCard('Прибыль / мес', profit==null?'—':_fmtRub(profit), profitSub, profit==null?'var(--text-2)':(profit>=0?'var(--success)':'var(--danger)')) +
-    _ncPulseCard('NRR', s.nrr_pct==null?'—':(s.nrr_pct+'%'), '<span style="color:var(--text-3)">качество выручки</span>', nrrColor) +
-    _ncPulseCard('Парк', working+'/'+total, fleetSub, fleetColor) +
-    _ncPulseCard('На балансах', _fmtRub(cashFloat), '<span style="color:var(--text-3)">предоплата клиентов</span>', 'var(--accent)') +
-    _ncPulseCard('Прогноз EOM', _fmtRub(s.forecast_eom), '<span style="color:var(--text-3)">к концу месяца</span>', 'var(--text-0)');
+  var nrrColor = (s.nrr_pct==null)?'var(--text-3)':(s.nrr_pct>=100?'var(--success)':s.nrr_pct>=90?'var(--warning)':'var(--danger)');
+  // Бывший ряд «Пульс» удалён — заполняем его только если элемент ещё на странице.
+  var el = document.getElementById('newPulseRow');
+  if(el){
+    var _td=collectTrafficData(), _today=0;
+    if(_td&&_td.modemTraffic){_td.modemTraffic.forEach(function(m){_today+=(m.dayIn||0)+(m.dayOut||0);});}
+    var _fl=(currentData.fleet&&currentData.fleet.byServer)||null, _fw=0, _ft=0;
+    if(_fl){Object.keys(_fl).forEach(function(k){var b=_fl[k]||{};_fw+=(b.working!=null?b.working:(b.online||0));_ft+=(b.total||0);});}
+    if(_ft<_fw)_ft=_fw;
+    var growthSub = (gc==null) ? '<span style="color:var(--text-3)">нет данных М/М</span>'
+      : '<span style="color:'+(gc>=0?'var(--success)':'var(--danger)')+'">'+(gc>=0?'▲ +':'▼ ')+gc+'% М/М</span>';
+    el.innerHTML =
+      _ncPulseCard('Трафик сегодня', fmtGb(_today), '<span style="color:var(--text-3)">по всему парку</span>', 'accent') +
+      _ncPulseCard('Активные модемы', _fw+'/'+_ft, '<span style="color:var(--text-3)">в работе</span>', (_fw>=_ft?'success':'warn')) +
+      _ncPulseCard('Выручка (MRR)', _fmtRub(s.mrr), growthSub, 'accent') +
+      _ncPulseCard('На балансах', _fmtRub(cashFloat), '<span style="color:var(--text-3)">предоплата клиентов</span>', 'success');
+  }
+  // Финсводка-виджет (верхний ряд, бывший слот «Ресурсы») — MRR / NRR / прирост M/M / на балансах
+  var fsEl=document.getElementById('newFinSummaryBody');
+  if(fsEl){
+    function _fsRow(l,v,c,last){return '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px'+(last?'':';border-bottom:1px solid var(--border)')+'"><span style="color:var(--text-2)">'+l+'</span><span style="font-weight:600'+(c?';color:'+c:'')+'">'+v+'</span></div>';}
+    fsEl.innerHTML =
+      _fsRow('MRR', _fmtRub(s.mrr), 'var(--text-0)') +
+      _fsRow('NRR', s.nrr_pct==null?'—':(s.nrr_pct+'%'), nrrColor) +
+      _fsRow('Прирост M/M', gc==null?'—':((gc>=0?'+':'')+gc+'%'), gc==null?'var(--text-3)':(gc>=0?'var(--success)':'var(--danger)')) +
+      _fsRow('На балансах', _fmtRub(cashFloat), 'var(--accent)', true);
+  }
 }
 
 // ── 2. Требует внимания (action center) — Трафик «probItem» style ──
@@ -7300,20 +7650,145 @@ function renderNewFleetServers(){
   var bs = fleet.byServer || {};
   var names = Object.keys(bs).sort();
   if(!names.length){ el.innerHTML = '<div style="color:var(--text-3);font-size:12px">Нет данных о парке</div>'; return; }
-  var h = _ncServerCard('Весь парк', fleet.working, fleet.total, fleet.disconnected, true);
-  names.forEach(function(n){ var b=bs[n]||{}; h += _ncServerCard(n, b.working, b.total, b.disconnected, false); });
-  el.innerHTML = h;
+  var mm = currentData._modemMap || {};
+  var agg = {};
+  Object.keys(mm).forEach(function(k){ var m=mm[k]; var srv=m.server; if(!agg[srv]) agg[srv]={sig:0,sigN:0,prob:0,off:0,today:0,mon:0};
+    var st=getModemStatus(m);
+    if(st==='offline') agg[srv].off++;
+    if(typeof _modemIssue==='function' && _modemIssue(m)) agg[srv].prob++;
+    var sig=Number(m.signal)||0; if(sig>0){ agg[srv].sig+=sig; agg[srv].sigN++; }
+    (m.ports||[]).forEach(function(p){ var w=p._bw||{}; agg[srv].today+=parseTraffic(w.bandwidth_bytes_day_in)+parseTraffic(w.bandwidth_bytes_day_out); agg[srv].mon+=parseTraffic(w.bandwidth_bytes_month_in)+parseTraffic(w.bandwidth_bytes_month_out); });
+  });
+  function fcard(srv, primary){
+    var b = primary ? {working:fleet.working,total:fleet.total,disconnected:fleet.disconnected} : (bs[srv]||{});
+    var working=b.working||0, total=b.total||0, disc=b.disconnected||0; if(total<working) total=working;
+    var onlPct = total ? Math.round(working/total*100) : 0;
+    var ci = primary ? {} : (COUNTRIES[srv]||{});
+    var name = primary ? _dwIcon('sat')+'Весь парк' : ((ci.flag||'')+' '+esc(srv)+(ci.name?' · '+esc(ci.name):''));
+    var col = disc===0 ? 'var(--success)' : 'var(--warning)';
+    var today=0,mon=0,prob=0,sigAvg=0;
+    if(primary){ Object.keys(agg).forEach(function(s){ today+=agg[s].today; mon+=agg[s].mon; prob+=agg[s].prob; }); }
+    else { var a=agg[srv]||{sig:0,sigN:0,prob:0,today:0,mon:0}; today=a.today; mon=a.mon; prob=a.prob; sigAvg=a.sigN?Math.round(a.sig/a.sigN):0; }
+    var h='<div class="analytics-card" style="margin:0;padding:14px">';
+    h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px"><span style="font-weight:700;font-size:13px;font-family:var(--font-mono)">'+name+'</span><span style="font-size:12px;font-weight:700;color:'+col+'">'+working+'/'+total+'</span></div>';
+    h+='<div style="font-size:10px;color:var(--text-3);margin-bottom:6px">'+(disc>0?'<span style="color:var(--danger)">'+disc+' отключено</span>':'&nbsp;')+'</div>';
+    h+='<div style="height:5px;background:var(--bg-3);border-radius:3px;overflow:hidden;margin-bottom:11px" title="'+onlPct+'% в работе"><div style="height:100%;width:'+onlPct+'%;background:'+col+';border-radius:3px"></div></div>';
+    h+='<div style="display:flex;flex-direction:column;gap:4px;font-size:11px">';
+    h+='<div style="display:flex;justify-content:space-between"><span style="color:var(--text-2)">Трафик сегодня</span><span style="font-family:var(--font-mono)">'+fmtGb(today)+'</span></div>';
+    if(primary) h+='<div style="display:flex;justify-content:space-between"><span style="color:var(--text-2)">Трафик месяц</span><span style="font-family:var(--font-mono);font-weight:600">'+fmtGb(mon)+'</span></div>';
+    if(!primary) h+='<div style="display:flex;justify-content:space-between;align-items:center"><span style="color:var(--text-2)">Сред. сигнал</span><span>'+(sigAvg?renderSignalBars(sigAvg):'<span style="color:var(--text-3)">—</span>')+'</span></div>';
+    h+='<div style="display:flex;justify-content:space-between"><span style="color:var(--text-2)">Проблемных</span><span style="color:'+(prob>0?'var(--warning)':'var(--text-3)')+';font-weight:600">'+prob+'</span></div>';
+    h+='</div></div>';
+    return h;
+  }
+  var html = fcard(null, true);
+  names.forEach(function(n){ html += fcard(n, false); });
+  el.innerHTML = html;
+}
+function _zxLim(key,cap){return (window._zxOpen&&window._zxOpen[key])?Infinity:cap;}
+function zMore(key){(window._zxOpen=window._zxOpen||{})[key]=1;
+  if(key==='tp')renderNewTopProblems();
+  else if(key==='sn')reloadNewInfra();
+  else if(key==='mx')renderNewMatrix();
+  else if(key==='api')loadNewApiAccess();
+  else if(key==='hosts')loadNewTopHosts();}
+function renderNewTopProblems(){
+  var el=document.getElementById('newTopProblems'); if(!el) return;
+  var mm=currentData._modemMap||{}, probs=[];
+  Object.keys(mm).forEach(function(k){ var m=mm[k];
+    var iss=(typeof _modemIssue==='function')?_modemIssue(m):null;
+    var off=(typeof _offlineReason==='function')?_offlineReason(m):null;
+    if(off&&off.stale) return;   // давно офлайн (> порога, деф. 12ч) — не «проблема», в топ не включаем
+    var r=off||iss; if(r) probs.push({m:m,reason:r.reason,sev:r.sev||3,kind:r.kind});
+  });
+  probs.sort(function(a,b){return (b.sev||0)-(a.sev||0);});
+  if(!probs.length){ el.innerHTML='<div style="color:var(--success);font-size:12px;padding:6px">✓ Проблемных модемов нет</div>'; return; }
+  var show=probs.slice(0,_zxLim('tp',8));
+  var h='<table class="ztbl"><thead><tr><th style="text-align:left">Модем</th><th style="text-align:left">Причина</th><th>Действия</th></tr></thead><tbody>';
+  show.forEach(function(p){ var m=p.m; var col=(typeof _mkColor!=='undefined'&&_mkColor[p.kind])||'var(--warning)'; var ci=COUNTRIES[m.server]||{}; var d='data-imei="'+(m.rawImei||'')+'" data-server="'+m.server+'" data-nick="'+esc(m.nick)+'"';
+    var open='if(event.target.closest(\'button\'))return;openDetailAtTab(\''+esc(m.nick).replace(/'/g,"\\'")+'\',\''+m.server+'\',\'health\')';
+    h+='<tr onclick="'+open+'" style="cursor:pointer" title="Открыть детали модема — где именно проблема"><td style="text-align:left"><span style="width:3px;height:18px;background:'+col+';border-radius:2px;display:inline-block;vertical-align:middle;margin-right:8px"></span><strong>'+esc(m.nick)+'</strong> <span style="font-size:10px;color:var(--text-3)">'+(ci.flag||'')+' '+m.server+(ci.name?' · '+esc(ci.name):'')+'</span></td><td style="text-align:left;color:'+col+'">'+esc(p.reason)+'</td><td style="text-align:right"><button class="row-act" '+d+' title="Перезагрузка" onclick="rebootModem(this)">⏻</button> <button class="row-act" '+d+' title="Re-Add" onclick="readdModem(this)">⟳</button></td></tr>';
+  });
+  h+='</tbody></table>';
+  if(probs.length>show.length) h+='<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:8px 14px" onclick="zMore(\'tp\')">+ ещё '+(probs.length-show.length)+'</div>';
+  el.innerHTML=h;
 }
 
+// «Требует внимания» — одна карточка с плитками алертов (по макету):
+// 4 инфра-плитки (кликабельные, открывают попап со списком) + 2 бизнес-плитки
+// (долги с суммой, паузы). Тренд/Операторы живут в раскрывашке «Тренд и операторы».
+function _dwIcon(n){var P={gear:'<circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/>',line:'<path d="M4 17l5-5 4 3 7-8"/>',ant:'<circle cx="12" cy="13" r="1"/><path d="M12 14v6"/><path d="M8.5 9.5a5 5 0 0 1 7 0"/><path d="M6 6.5a8.5 8.5 0 0 1 12 0"/>',sat:'<rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/>'};return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="flex-shrink:0;vertical-align:-3px;color:var(--accent);margin-right:6px">'+(P[n]||'')+'</svg>';}
+function _dwT(t,ic){return '<div style="font-size:13px;font-weight:700;color:var(--text-0);margin-bottom:10px">'+_dwIcon(ic)+t+'</div>';}
+function renderNewExtWidgets(){
+  var el=document.getElementById('newExtWidgets'); if(!el) return;
+  var d=collectTrafficData(); if(!d){ el.innerHTML=''; return; }
+  var mm=currentData._modemMap||{};
+  function _age(ms){if(!ms)return'';var a=Date.now()-ms;if(a<60000)return'только что';var m=Math.floor(a/60000);if(m<60)return m+' мин назад';if(m<1440)return Math.floor(m/60)+' ч назад';return Math.floor(m/1440)+' д назад';}
+  var STALE_MS=((window._staleModemHours||12))*3600*1000;
+  var rtOffline=[],rtLowSpeed=[],rtStuckIp=[];
+  Object.values(mm).forEach(function(m){
+    var st=getModemStatus(m);
+    if(st==='offline'){var stale=!m.lastSeenMs||(Date.now()-m.lastSeenMs>STALE_MS);if(!stale){var ag=_age(m.lastSeenMs);rtOffline.push({nick:m.nick,server:m.server,detail:ag?'Отключён '+ag:'offline',lastSeenMs:m.lastSeenMs||0});}}
+    if(m.lowSpeed)rtLowSpeed.push({nick:m.nick,server:m.server,detail:'↓'+Number(m.lastSpeedDl||0).toFixed(1)+' / ↑'+Number(m.lastSpeedUl||0).toFixed(1)+' Mbps'});
+    if(m.ipStuck)rtStuckIp.push({nick:m.nick,server:m.server,detail:'IP не менялся '+m.ipSinceHours+'ч · '+esc(m.extIp||'')});
+  });
+  var _offSrc=(currentData.fleet&&(currentData.fleet.disconnectedList||currentData.fleet.offlineList))||null;
+  if(Array.isArray(_offSrc)){rtOffline=_offSrc.map(function(o){var ag=o.lastOnline?_age(o.lastOnline):'';return{nick:o.nick,server:o.server,detail:ag?('Отключён '+ag):'offline',lastSeenMs:o.lastOnline||0};});}
+  rtOffline.sort(function(a,b){return (Number(b.lastSeenMs)||0)-(Number(a.lastSeenMs)||0);});
+  var flakyItems=(currentData.proxyIssues||[]).map(function(it){return{nick:it.nick,server:it.server,detail:it.detail,_meta:it};});
+  window._problemData={offline:rtOffline,speed:rtLowSpeed,ipstuck:rtStuckIp,flaky:flakyItems};
+  function attTile(label,key,n,extra,dot){
+    var bg=n===0?'var(--green-bg)':dot==='var(--danger)'?'var(--red-bg)':'var(--orange-bg)';
+    var vc=n===0?'var(--success)':dot==='var(--danger)'?'var(--danger)':'var(--warning)';
+    var click=(key&&n>0)?' onclick="showProblemPopup(\''+esc(label)+'\',\''+key+'\')"':'';
+    return '<div class="att-tile" style="background:'+bg+(key&&n>0?';cursor:pointer':'')+'"'+click+'>'+
+      '<span class="att-dot" style="background:'+(n===0?'var(--success)':dot)+'"></span>'+
+      '<span class="att-label">'+label+(extra?'<span class="att-extra">'+extra+'</span>':'')+'</span>'+
+      '<span class="att-count" style="color:'+vc+'">'+n+'</span></div>';
+  }
+  var probCard='<div class="analytics-card" style="margin:0">'+_dwT('Проблемы инфраструктуры','gear')+'<div class="att-grid">'+
+    attTile('Модем отключен','offline',rtOffline.length,null,'var(--danger)')+
+    attTile('Низкая скорость','speed',rtLowSpeed.length,null,'var(--warning)')+
+    attTile('Завис IP','ipstuck',rtStuckIp.length,null,'var(--warning)')+
+    attTile('Сбоит прокси','flaky',flakyItems.length,null,'var(--danger)')+
+    '</div></div>';
+  var trendCard='<div class="analytics-card" style="margin:0;display:flex;flex-direction:column">'+_dwT('Тренд','line')+'<div id="trendBarsWrapNew" style="display:flex;align-items:flex-end;gap:4px;flex:1;min-height:64px;margin-bottom:4px"><div style="flex:1;display:flex;align-items:center;justify-content:center;color:var(--text-3);font-size:9px">...</div></div><div id="trendLabelsWrapNew" style="display:flex;gap:2px;margin-bottom:4px"></div><div id="trendSumNew" style="display:flex;justify-content:space-between;font-size:10px;color:var(--text-3);margin-top:2px"></div></div>';
+  var allOps={};Object.keys(d.serverOpTraffic).forEach(function(s){Object.keys(d.serverOpTraffic[s]).forEach(function(op){if(!op)return;if(!allOps[op])allOps[op]={t:0,cnt:0};var v=d.serverOpTraffic[s][op];allOps[op].t+=v.tIn+v.tOut;allOps[op].cnt+=v.count;});});
+  var opDays=getDaysElapsed();var opList=Object.keys(allOps).filter(function(op){var l=String(op).toLowerCase();return op&&l!=='неизвестный'&&l!=='unknown';}).sort(function(a,b){return allOps[b].t-allOps[a].t});var opMax=opList.length?(allOps[opList[0]].t/opDays)||1:1;
+  var opCard='<div class="analytics-card" style="margin:0">'+_dwT('Операторы','ant');
+  var _opCosts=_opGbCosts();
+  opList.forEach(function(op,oi){var v=allOps[op];var avgpmd=fmtGb(v.cnt&&opDays?v.t/v.cnt/opDays:0);var tpd=v.t/opDays;var w=Math.max(tpd/opMax*100,2);var col=CHART_COLORS.operators[oi%CHART_COLORS.operators.length];var _cst=_opCosts[op]?'<span style="color:var(--accent);font-weight:600"> · '+_opCosts[op]+'₽/ГБ</span>':'';opCard+='<div style="margin-bottom:8px"><div style="display:flex;align-items:baseline;font-size:10px;margin-bottom:2px;gap:4px"><span style="flex:1;color:var(--text-1);font-weight:500">'+esc(op)+'</span><span style="color:var(--text-2)">'+avgpmd+'/мод/сут</span><span style="color:var(--text-3)">· '+v.cnt+' мод.</span>'+_cst+'</div><div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+col+';width:'+w+'%"></div></div></div>';});
+  opCard+='</div>';
+  el.innerHTML=probCard+trendCard+opCard;
+  loadTrendData('New');
+}
+
+// «Тренд и операторы» — раскрывашка в Инфраструктуре (по макету).
+// Рендерит только когда секция открыта; вызывается из renderAccNew (каждые 10с)
+// и из onNewSectionToggle при открытии.
+
 // ── 3. Финансы (pulse + quality + flow + trend) ────────────────────
-function loadNewFinance(){
+var _newFinAt=0;
+function loadNewFinance(force){
+  // Финансы меняются медленно, а дашборд перерисовывается каждые 10с. Без троттла
+  // блок финансов и график MRR пересоздавались (и перемигивали) каждые 10с —
+  // обновляем максимум раз в ~60с, иначе оставляем как есть.
+  if(!force && window._newFinData && (Date.now()-_newFinAt)<55000){
+    // Свежо: НЕ фетчим и НЕ пересоздаём график MRR (он-то и мигал). Но финсводку
+    // (#newFinSummaryBody) renderNewExtWidgets пересобирает каждые 10с — поэтому её
+    // дешёвую перерисовку из кэша оставляем, иначе она пустеет между обновлениями.
+    try{ renderNewPulse(window._newFinData); }catch(_){}
+    return;
+  }
   fetch(API + '/api/admin/finance_dashboard', {headers:{'X-Auth-Token':authToken}})
     .then(function(r){return r.json();})
     .then(function(d){
       if(d.error){ var q=document.getElementById('newFinQuality'); if(q) q.innerHTML='<div style="color:var(--danger);font-size:12px">'+esc(d.error)+'</div>'; return; }
       window._newFinData = d;
+      _newFinAt = Date.now();
       renderNewPulse(d);
       renderNewFinance(d);
+      try{ var _td = collectTrafficData(); if(_td) renderNewClientTable(_td); }catch(_){}  // объединённая таблица клиентов: подтянуть доходность сразу
     })
     .catch(function(e){ var q=document.getElementById('newFinQuality'); if(q) q.innerHTML='<div style="color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>'; });
 }
@@ -7327,21 +7802,25 @@ function renderNewFinance(d){
   // Quality panel
   var q = document.getElementById('newFinQuality');
   if(q){
-    var nrrColor = s.nrr_pct==null?'var(--text-0)':(s.nrr_pct>=100?'var(--success)':s.nrr_pct>=90?'var(--warning)':'var(--danger)');
-    var churnColor = s.churn_rate_pct>=5?'var(--danger)':'var(--text-0)';
-    function qrow(l,v,c){ return '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px"><span style="color:var(--text-2)">'+l+'</span><span style="font-weight:600;'+(c?'color:'+c:'')+'">'+v+'</span></div>'; }
-    function cbar(l,pct,col){ pct=pct||0; return '<div style="margin-bottom:5px"><div style="display:flex;justify-content:space-between;font-size:11px"><span>'+l+'</span><span style="font-weight:600">'+pct+'%</span></div><div style="height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden;margin-top:2px"><div style="height:100%;background:'+col+';width:'+Math.min(pct,100)+'%"></div></div></div>'; }
-    var hq = '<h3 style="margin:0 0 10px;font-size:14px">Качество выручки</h3>';
-    hq += qrow('NRR (3 мес.)', s.nrr_pct==null?'—':s.nrr_pct+'%', nrrColor);
-    hq += qrow('Churn (мес.)', s.churn_rate_pct==null?'—':s.churn_rate_pct+'%', churnColor);
-    hq += qrow('ARPU', _fmtRub(s.arpu), null);
-    hq += qrow('Активных клиентов', String(s.active_clients||0), null);
-    hq += '<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">';
-    hq += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Концентрация выручки</div>';
-    hq += cbar('Top-1'+(con.top1_name?(' ('+esc(con.top1_name)+')'):''), con.top1_pct, con.top1_pct>=50?'#E04141':con.top1_pct>=35?'#F0A533':'#3B9DD8');
-    hq += cbar('Top-3', con.top3_pct, '#3B9DD8');
-    hq += cbar('Top-5', con.top5_pct, '#1D9E75');
+    var nrrColor = s.nrr_pct==null?null:(s.nrr_pct>=100?'var(--success)':s.nrr_pct>=90?'var(--warning)':'var(--danger)');
+    var churnColor = s.churn_rate_pct>=5?'var(--danger)':'var(--success)';
+    function qtile(l,v,c){ return '<div class="kpi-tile"><div class="l">'+l+'</div><div class="v" style="font-size:16px'+(c?';color:'+c:'')+'">'+v+'</div></div>'; }
+    function cbar(l,sub,pct,col){ pct=pct||0; return '<div style="margin-bottom:9px">'+
+      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;margin-bottom:3px">'+
+        '<span style="color:var(--text-1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">'+l+(sub?' <span style="font-weight:400;color:var(--text-3)">'+sub+'</span>':'')+'</span>'+
+        '<span style="font-family:var(--font-mono);font-weight:600;color:var(--text-0)">'+pct+'%</span></div>'+
+      '<div style="height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+Math.min(pct,100)+'%;background:'+col+';border-radius:3px"></div></div></div>'; }
+    var hq = '<h3 style="margin:0 0 10px;font-size:14px;font-weight:700;color:var(--text-0)">Качество выручки</h3>';
+    hq += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">';
+    hq += qtile('NRR · 3 мес', s.nrr_pct==null?'—':s.nrr_pct+'%', nrrColor);
+    hq += qtile('Churn · мес', s.churn_rate_pct==null?'—':s.churn_rate_pct+'%', churnColor);
+    hq += qtile('ARPU', _fmtRub(s.arpu), null);
+    hq += qtile('Активных клиентов', String(s.active_clients||0), null);
     hq += '</div>';
+    hq += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:8px">Концентрация выручки</div>';
+    hq += cbar('Top-1', con.top1_name?esc(con.top1_name):'', con.top1_pct, con.top1_pct>=50?'#ef4444':con.top1_pct>=35?'#f0a533':'var(--accent)');
+    hq += cbar('Top-3', '', con.top3_pct, 'var(--accent)');
+    hq += cbar('Top-5', '', con.top5_pct, '#10b981');
     q.innerHTML = hq;
   }
   // Flow: new / churned / debtors
@@ -7366,23 +7845,31 @@ function renderNewFinance(d){
       panel('💸 Должники', debtors.length?'var(--danger)':'var(--success)', String(debtors.length), dbRows, '✓ все в плюсе');
   }
   // Trend chart
+  var lg = document.getElementById('mrrLegend');
+  if(lg) lg.innerHTML = [['За ГБ','#2f6fe0'],['За модем','#10b981']].map(function(x){
+    return '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:'+x[1]+'"></span>'+x[0]+'</span>';
+  }).join('');
   setTimeout(function(){
     var cv = document.getElementById('newFinTrendCanvas');
     if(!cv || !window.Chart) return;
     if(window._newFinTrendChart){ try{window._newFinTrendChart.destroy();}catch(_){} window._newFinTrendChart=null; }
-    var cc = getChartColors();
+    var cc = getChartColorsLight();
+    var barOpts = {stack:'a', borderRadius:5, borderSkipped:false, maxBarThickness:42, barPercentage:0.6, categoryPercentage:0.8};
     window._newFinTrendChart = newChartSafe(cv, {
       type:'bar',
-      data:{ labels:(d.trend||[]).map(function(t){return t.month;}),
+      data:{ labels:(d.trend||[]).map(function(t){return _ymRu(t.month);}),
         datasets:[
-          {label:'per_gb', data:(d.trend||[]).map(function(t){return t.per_gb||0;}), backgroundColor:'#3B9DD8', stack:'a'},
-          {label:'per_modem', data:(d.trend||[]).map(function(t){return t.per_modem||0;}), backgroundColor:'#1D9E75', stack:'a'}
+          Object.assign({label:'За ГБ', data:(d.trend||[]).map(function(t){return t.per_gb||0;}), backgroundColor:'#2f6fe0'}, barOpts),
+          Object.assign({label:'За модем', data:(d.trend||[]).map(function(t){return t.per_modem||0;}), backgroundColor:'#10b981'}, barOpts)
         ]},
-      options:{responsive:true,maintainAspectRatio:false,
-        plugins:{legend:{position:'top',labels:{color:cc.text,font:{size:10}}},
-          tooltip:{callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.parsed.y||0).toLocaleString('ru-RU')+' ₽';}}}},
-        scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9}},grid:{display:false}},
-          y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid}}}}
+      options:{responsive:true,maintainAspectRatio:false,animation:false,
+        interaction:{mode:'index',intersect:false},
+        plugins:{legend:{display:false},
+          tooltip:{mode:'index',intersect:false,
+            callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.parsed.y||0).toLocaleString('ru-RU')+' ₽';},
+              footer:function(items){var t=0;items.forEach(function(i){t+=i.parsed.y||0;});return 'Итого: '+t.toLocaleString('ru-RU')+' ₽';}}}},
+        scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:10}},grid:{display:false},border:{display:false}},
+          y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:10},callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid,drawTicks:false},border:{display:false}}}}
     });
   }, 30);
 }
@@ -7392,20 +7879,20 @@ function renderNewFinClients(){
   if(!d){ el.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:8px">Финансовые данные ещё загружаются…</div>'; return; }
   var rows = (d.per_client||[]).filter(function(p){return !(p.mrr===0 && p.mrr_prev===0 && !p.balance);});
   if(!rows.length){ el.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:8px">Нет данных</div>'; return; }
-  var h = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text-2)"><th style="padding:6px 8px;text-align:left">Клиент</th><th style="padding:6px 8px;text-align:left">Тариф</th><th style="padding:6px 8px;text-align:right">MRR</th><th style="padding:6px 8px;text-align:right">Δ M/M</th><th style="padding:6px 8px;text-align:right">% MRR</th><th style="padding:6px 8px;text-align:right">Баланс</th></tr></thead><tbody>';
+  var h = '<table class="ztbl"><thead><tr><th>Клиент</th><th style="text-align:left">Тариф</th><th>MRR</th><th>Δ M/M</th><th>% MRR</th><th>Баланс</th></tr></thead><tbody>';
   rows.forEach(function(p){
     var pausedTag = p.paused?' <span style="font-size:9px;background:var(--warning);color:#fff;padding:1px 5px;border-radius:8px">пауза</span>':'';
     var deltaCol = p.mrr_delta_pct==null?'var(--text-3)':p.mrr_delta_pct>=0?'var(--success)':'var(--danger)';
     var deltaStr = p.mrr_delta_pct==null?'—':((p.mrr_delta_pct>0?'+':'')+p.mrr_delta_pct+'%');
     var tariffStr = p.billingType==='per_modem'?(p.price+'₽/мес·мод'):(p.price+'₽/ГБ');
     var balCol = p.balance<0?'var(--danger)':'var(--text-1)';
-    h += '<tr style="border-top:1px solid var(--border)">' +
-      '<td style="padding:5px 8px;font-weight:500">'+esc(p.name)+pausedTag+'</td>' +
-      '<td style="padding:5px 8px;color:var(--text-2)">'+tariffStr+'</td>' +
-      '<td style="padding:5px 8px;text-align:right;font-weight:600">'+_fmtRub(p.mrr)+'</td>' +
-      '<td style="padding:5px 8px;text-align:right;color:'+deltaCol+'">'+deltaStr+'</td>' +
-      '<td style="padding:5px 8px;text-align:right">'+(p.share_pct!=null?p.share_pct+'%':'—')+'</td>' +
-      '<td style="padding:5px 8px;text-align:right;color:'+balCol+'">'+_fmtRub(p.balance)+'</td></tr>';
+    h += '<tr>' +
+      '<td style="font-weight:500;color:var(--text-1)">'+esc(p.name)+pausedTag+'</td>' +
+      '<td style="text-align:left;color:var(--text-2)">'+tariffStr+'</td>' +
+      '<td style="font-weight:600;color:var(--text-1)">'+_fmtRub(p.mrr)+'</td>' +
+      '<td style="color:'+deltaCol+'">'+deltaStr+'</td>' +
+      '<td style="color:var(--text-1)">'+(p.share_pct!=null?p.share_pct+'%':'—')+'</td>' +
+      '<td style="color:'+balCol+'">'+_fmtRub(p.balance)+'</td></tr>';
   });
   h += '</tbody></table>';
   el.innerHTML = h;
@@ -7434,24 +7921,24 @@ function renderNewFleetHealth(d){
     '<span style="font-size:12px"><b style="color:var(--success);font-size:16px">'+good+'</b> здоровых</span>' +
     '<span style="font-size:12px"><b style="color:var(--warning);font-size:16px">'+warn+'</b> внимание</span>' +
     '<span style="font-size:12px"><b style="color:var(--danger);font-size:16px">'+bad+'</b> проблемных</span></div>';
-  h += '<div style="display:flex;height:10px;border-radius:5px;overflow:hidden;margin-bottom:14px;background:var(--bg-3)">';
+  h += '<div style="display:flex;height:10px;border-radius:999px;overflow:hidden;margin-bottom:12px;background:var(--bg-3)">';
   if(good) h += '<div style="width:'+(good/denom*100)+'%;background:var(--success)"></div>';
   if(warn) h += '<div style="width:'+(warn/denom*100)+'%;background:var(--warning)"></div>';
   if(bad) h += '<div style="width:'+(bad/denom*100)+'%;background:var(--danger)"></div>';
   h += '</div>';
   var worst = (d.modems||[]).slice().filter(function(m){return m.status!=='good';}).sort(function(a,b){return a.health_score-b.health_score;}).slice(0,6);
   if(worst.length){
-    h += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.04em;margin-bottom:6px">Худшие модемы — что чинить</div>';
-    h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><tbody>';
+    h += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Худшие модемы — что чинить</div>';
+    h += '<table class="ztbl"><tbody>';
     worst.forEach(function(m){
       var col = m.status==='warn'?'var(--warning)':'var(--danger)';
-      h += '<tr style="border-top:1px solid var(--border)">' +
-        '<td style="padding:5px 6px;font-weight:600">'+esc(m.nick)+'</td>' +
-        '<td style="padding:5px 6px;color:var(--text-2)">'+esc(m.server_name||'')+'</td>' +
-        '<td style="padding:5px 6px;color:var(--text-2)">'+esc(_ncHealthReason(m))+'</td>' +
-        '<td style="padding:5px 6px;text-align:right">'+(m.uptime_pct!=null?m.uptime_pct+'%':'—')+'</td>' +
-        '<td style="padding:5px 6px;text-align:right">'+fmtMs(m.latency_ms)+'</td>' +
-        '<td style="padding:5px 6px;text-align:center"><span style="display:inline-block;padding:2px 9px;border-radius:10px;background:'+col+';color:#fff;font-weight:700">'+m.health_score+'</span></td>' +
+      h += '<tr>' +
+        '<td style="text-align:left;font-weight:600">'+esc(m.nick)+'</td>' +
+        '<td style="text-align:left;color:var(--text-2)">'+esc(m.server_name||'')+'</td>' +
+        '<td style="text-align:left;color:var(--text-2)">'+esc(_ncHealthReason(m))+'</td>' +
+        '<td>'+(m.uptime_pct!=null?m.uptime_pct+'%':'—')+'</td>' +
+        '<td>'+fmtMs(m.latency_ms)+'</td>' +
+        '<td style="text-align:center"><span style="display:inline-block;padding:2px 8px;border-radius:10px;background:'+col+';color:#fff;font-weight:700">'+m.health_score+'</span></td>' +
         '</tr>';
     });
     h += '</tbody></table>';
@@ -7476,14 +7963,14 @@ function loadNewReconciliation(){
       if(!el) return;
       if(!probs.length){ el.innerHTML='<div style="color:var(--success);font-size:12px;padding:8px">✓ Расхождений нет — весь отданный трафик выставлен в счёт ('+clients.length+' клиентов проверено)</div>'; return; }
       var label = {mismatch:'расхождение по ГБ', missing_billing:'не выставлен счёт', missing_traffic:'счёт без трафика'};
-      var hh = '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="color:var(--text-2)"><th style="padding:6px 8px;text-align:left">Клиент</th><th style="padding:6px 8px;text-align:left">Тариф</th><th style="padding:6px 8px;text-align:left">Проблема</th><th style="padding:6px 8px;text-align:right">Дней без счёта</th></tr></thead><tbody>';
+      var hh = '<table class="ztbl"><thead><tr><th style="text-align:left">Клиент</th><th style="text-align:left">Тариф</th><th style="text-align:left">Проблема</th><th style="padding:6px 8px;text-align:right">Дней без счёта</th></tr></thead><tbody>';
       probs.forEach(function(c){
         var col = c.status==='missing_billing'?'var(--danger)':'var(--warning)';
-        hh += '<tr style="border-top:1px solid var(--border)">' +
-          '<td style="padding:5px 8px;font-weight:600">'+esc(c.client_name)+'</td>' +
-          '<td style="padding:5px 8px;color:var(--text-2)">'+esc(c.billing_type||'')+'</td>' +
-          '<td style="padding:5px 8px;color:'+col+'">'+esc(label[c.status]||c.status)+'</td>' +
-          '<td style="padding:5px 8px;text-align:right">'+((c.missing_days&&c.missing_days.length)||0)+'</td></tr>';
+        hh += '<tr>' +
+          '<td style="text-align:left;font-weight:600">'+esc(c.client_name)+'</td>' +
+          '<td style="text-align:left;color:var(--text-2)">'+esc(c.billing_type||'')+'</td>' +
+          '<td style="text-align:left;color:'+col+'">'+esc(label[c.status]||c.status)+'</td>' +
+          '<td style="text-align:left;text-align:right">'+((c.missing_days&&c.missing_days.length)||0)+'</td></tr>';
       });
       hh += '</tbody></table>';
       el.innerHTML = hh;
@@ -7492,42 +7979,49 @@ function loadNewReconciliation(){
 }
 
 // ── Clients table (with revenue + balance columns merged) ─────────
+// Объединённая таблица: «Клиенты-трафик» + «Клиенты по доходности» в одну.
+// Сегодня/Вчера по трафику + Тариф/MRR/Δ/доля/Баланс. Всё центрировано, равные отступы.
 function renderNewClientTable(d){
   var el = document.getElementById('newClientTable');
   if(!el) return;
-  var names = Object.keys(d.clientTraffic).filter(function(n){return d.clientTraffic[n].modems > 0})
-    .sort(function(a, b){ return (d.clientTraffic[b].tIn+d.clientTraffic[b].tOut) - (d.clientTraffic[a].tIn+d.clientTraffic[a].tOut); });
-  if(!names.length){
-    el.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-3);font-size:12px">Нет данных</div>';
-    return;
-  }
-  var charges = currentData.clientMonthCharges || {};
-  var h = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-  h += '<thead><tr style="border-bottom:2px solid var(--border)">';
-  h += '<th style="text-align:left;padding:8px 10px;font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Клиент</th>';
-  h += '<th style="text-align:center;padding:8px;font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Live</th>';
-  h += '<th style="text-align:right;padding:8px;font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Сегодня</th>';
-  h += '<th style="text-align:right;padding:8px;font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Месяц</th>';
-  h += '<th style="text-align:right;padding:8px;font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Выручка MTD</th>';
-  h += '<th style="text-align:right;padding:8px;font-size:10px;color:var(--text-3);font-weight:600;text-transform:uppercase;letter-spacing:.04em">Баланс</th>';
-  h += '</tr></thead><tbody>';
-  names.forEach(function(n, i){
-    var c = d.clientTraffic[n];
-    var clientObj = (currentData.clients||[]).find(function(cl){return cl.portName === n});
-    var revenue = clientObj ? (charges[clientObj.id] || 0) : 0;
-    var balance = clientObj ? (clientObj.balance || 0) : 0;
-    var clientColor = CHART_COLORS.clients[i % CHART_COLORS.clients.length];
-    var clientModems = d.modemTraffic.filter(function(m){return m.pn === n});
-    var todayB = clientModems.reduce(function(s, m){return s + (m.dayIn||0) + (m.dayOut||0)}, 0);
-    var monB   = clientModems.reduce(function(s, m){return s + (m.monIn||0) + (m.monOut||0)}, 0);
-    var liveColor = c.online === c.modems ? 'var(--success)' : (c.online > 0 ? 'var(--warning)' : 'var(--danger)');
-    h += '<tr style="border-bottom:0.5px solid var(--border)" class="new-clt-row" onmouseenter="this.style.background=\'var(--bg-2)\'" onmouseleave="this.style.background=\'\'">';
-    h += '<td style="padding:8px 10px"><div style="display:flex;align-items:center;gap:8px"><span style="width:3px;height:22px;background:'+clientColor+';border-radius:2px;flex-shrink:0"></span><strong>'+esc(n)+'</strong></div></td>';
-    h += '<td style="text-align:center;padding:8px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</td>';
-    h += '<td style="text-align:right;padding:8px;font-family:var(--font-mono);color:var(--text-1)">'+fmtGb(todayB)+'</td>';
-    h += '<td style="text-align:right;padding:8px;font-family:var(--font-mono);font-weight:600">'+fmtGb(monB)+'</td>';
-    h += '<td style="text-align:right;padding:8px;font-family:var(--font-mono);color:'+(revenue>0?'var(--accent)':'var(--text-3)')+'">'+Math.round(revenue).toLocaleString('ru-RU')+' ₽</td>';
-    h += '<td style="text-align:right;padding:8px;font-family:var(--font-mono);font-weight:'+(balance<0?'600':'400')+';color:'+(balance<0?'var(--danger)':(balance>0?'var(--text-0)':'var(--text-3)'))+'">'+Math.round(balance).toLocaleString('ru-RU')+' ₽</td>';
+  var clients = currentData.clients || [];
+  var nameByPort = {}; clients.forEach(function(c){ if(c.portName) nameByPort[c.portName] = c.name; });
+  var finList = (window._newFinData && window._newFinData.per_client) || [];
+  var finByName = {}; finList.forEach(function(p){ finByName[p.name] = p; });
+  var byName = {};
+  function ensure(nm){ if(!byName[nm]) byName[nm] = {name:nm, today:0, yest:0, online:0, modems:0}; return byName[nm]; }
+  (d.modemTraffic||[]).forEach(function(m){ var nm = nameByPort[m.pn] || m.pn; if(!nm) return; var r = ensure(nm); r.today += (m.dayIn||0)+(m.dayOut||0); r.yest += (m.yestIn||0)+(m.yestOut||0); });
+  Object.keys(d.clientTraffic||{}).forEach(function(pn){ var ct = d.clientTraffic[pn]; if(!(ct.modems>0)) return; var nm = nameByPort[pn] || pn; var r = ensure(nm); r.online += ct.online||0; r.modems += ct.modems||0; });
+  finList.forEach(function(p){ ensure(p.name); });
+  var rows = Object.keys(byName).map(function(nm){
+    var r = byName[nm], fin = finByName[nm] || {}, cl = clients.find(function(c){return c.name===nm;}) || {};
+    return { name:nm, today:r.today, yest:r.yest, online:r.online, modems:r.modems,
+      billingType:fin.billingType, price:fin.price, mrr:fin.mrr, delta:fin.mrr_delta_pct, share:fin.share_pct,
+      balance: fin.balance!=null?fin.balance:(cl.balance||0), paused:fin.paused };
+  }).filter(function(r){ return r.modems>0; });   // только активные (с модемами); неактивных на дашборде не показываем
+  if(!rows.length){ el.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-3);font-size:12px">Нет данных</div>'; return; }
+  rows.sort(function(a,b){ return (b.mrr||0)-(a.mrr||0) || (b.today-a.today); });
+  var th = function(t,left){ return '<th'+(left?' style="text-align:left"':'')+'>'+t+'</th>'; };
+  var h = '<table class="ztbl">';
+  h += '<thead><tr>'+th('Клиент',1)+th('Live')+th('Сегодня')+th('Тариф')+th('MRR')+th('Δ M/M')+th('% MRR')+th('Баланс')+'</tr></thead><tbody>';
+  rows.forEach(function(r,i){
+    var col = CHART_COLORS.clients[i % CHART_COLORS.clients.length];
+    var liveColor = r.modems===0 ? 'var(--text-3)' : (r.online===r.modems ? 'var(--success)' : (r.online>0 ? 'var(--warning)' : 'var(--danger)'));
+    var tariff = r.billingType==='per_modem' ? (r.price+'₽/мод') : (r.price!=null ? r.price+'₽/ГБ' : '—');
+    var deltaCol = r.delta==null ? 'var(--text-3)' : (r.delta>=0 ? 'var(--success)' : 'var(--danger)');
+    var deltaStr = r.delta==null ? '—' : ((r.delta>0?'+':'')+r.delta+'%');
+    var balCol = r.balance<0 ? 'var(--danger)' : (r.balance>0 ? 'var(--text-0)' : 'var(--text-3)');
+    var paused = r.paused ? ' <span style="font-size:9px;background:var(--warning);color:#fff;padding:1px 5px;border-radius:8px">пауза</span>' : '';
+    var td = function(content,left){ return '<td'+(left?' style="text-align:left"':'')+'>'+content+'</td>'; };
+    h += '<tr>';
+    h += td('<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:3px;height:16px;background:'+col+';border-radius:2px"></span><strong style="color:var(--text-0)">'+esc(r.name)+'</strong>'+paused+'</span>',1);
+    h += td('<span style="font-weight:600;color:'+liveColor+'">'+r.online+'/'+r.modems+'</span>');
+    h += td('<span style="font-family:var(--font-mono)">'+fmtGb(r.today)+'</span>');
+    h += td('<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;'+(r.billingType==='per_gb'?'background:var(--accent-dim);color:var(--accent)':'background:var(--bg-2);color:var(--text-2)')+'">'+tariff+'</span>');
+    h += td('<span style="font-family:var(--font-mono);font-weight:600">'+(r.mrr!=null?_fmtRub(r.mrr):'—')+'</span>');
+    h += td('<span style="color:'+deltaCol+'">'+deltaStr+'</span>');
+    h += td(r.share!=null ? r.share+'%' : '—');
+    h += td('<span style="font-family:var(--font-mono);font-weight:'+(r.balance<0?'600':'400')+';color:'+balCol+'">'+_fmtRub(r.balance)+'</span>');
     h += '</tr>';
   });
   h += '</tbody></table>';
@@ -7539,87 +8033,25 @@ function renderNewClientTable(d){
 //  in-memory clientMonthCharges snapshot.)
 
 // ── Heatmap (parallel to loadHeatmapData, writes to new IDs) ────
-function setNewHmView(view){
-  _newHmView = view;
-  var cfg;
-  if(view === 'client'){
-    cfg = (currentData && currentData.clients || []).filter(function(c){return c.modemCount > 0})
-      .map(function(c){return {id: c.portName, label: c.name}});
-  } else {
-    cfg = _heatmapConfig[view] || [];
-  }
-  if(cfg.length) _newHmId = cfg[0].id;
-  ['country','operator','client'].forEach(function(v){
-    var btn = document.getElementById('newHmTab'+v.charAt(0).toUpperCase()+v.slice(1));
-    if(btn) btn.classList.toggle('active', v === view);
-  });
-  renderNewHmSubTabs();
-  loadNewHeatmap();
+// NEW «Командный центр» — почасовой трафик переиспользует движок «Трафика»
+// через контекст _hmNew (тот же renderHeatmap/субтабы/тултип) → 1:1 со страницей.
+function setNewHmView(view){ setHeatmapView(view, _hmNew); }
+function renderNewHmSubTabs(){ renderHeatmapSubTabs(_hmNew); }
+function selectNewHmId(id){ selectHeatId(id, _hmNew); }
+var _newHmAt = 0;
+function loadNewHeatmap(force){
+  // Дашборд перерисовывается каждые 10с, а почасовая карта меняется максимум раз
+  // в 5 мин (TTL эндпоинта). Без троттла перерисовка каждые 10с = мигание.
+  // Освежаем текущий срез максимум раз в ~55с. Смена вида/под-вкладки идёт по
+  // СВОЕМУ ключу кэша (его ещё нет) — поэтому срабатывает сразу, без задержки.
+  var k = (_hmNew.view||'') + '|' + (_hmNew.id||'');
+  if(!force && _newHmCache[k] && (Date.now()-_newHmAt) < 55000) return;
+  try{ delete _newHmCache[k]; }catch(_){}
+  _newHmAt = Date.now();
+  renderHeatmapSubTabs(_hmNew);
+  loadHeatmapData(_hmNew);
 }
-function renderNewHmSubTabs(){
-  var c = document.getElementById('newHmSubTabs'); if(!c) return;
-  var view = _newHmView;
-  var cfg = view === 'client'
-    ? (currentData && currentData.clients || []).filter(function(x){return x.modemCount > 0}).map(function(x){return {id: x.portName, label: x.name}})
-    : (_heatmapConfig[view] || []);
-  var h = '';
-  cfg.forEach(function(item){
-    var active = item.id === _newHmId;
-    var col = hmAccent(view, item.id);
-    h += '<button onclick="selectNewHmId(\''+esc(item.id)+'\')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:14px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(item.label)+'</button>';
-  });
-  c.innerHTML = h;
-}
-function selectNewHmId(id){ _newHmId = id; renderNewHmSubTabs(); loadNewHeatmap(); }
-function loadNewHeatmap(){
-  if(!_heatmapConfig.country || !_heatmapConfig.country.length){
-    _heatmapConfig.country = (currentData && currentData.servers || []).map(function(s){
-      var c = COUNTRIES[s.name] || {};
-      return {id: c.country || s.name, label: (c.flag || '') + ' ' + (c.name || s.name)};
-    });
-    _heatmapConfig.operator = (currentData && currentData._operatorList || []).map(function(o){return {id: o, label: o}});
-  }
-  renderNewHmSubTabs();
-  var url = API + '/api/analytics/heatmap?view=' + _newHmView + '&id=' + encodeURIComponent(_newHmId) + '&days=7';
-  fetch(url, {headers: {'X-Auth-Token': authToken}})
-    .then(function(r){if(!r.ok) throw new Error('HTTP '+r.status); return r.json();})
-    .then(function(d){ _newHmData = d; renderNewHeatmap(d); })
-    .catch(function(e){
-      var el = document.getElementById('newHmGrid');
-      if(el) el.innerHTML = '<div style="padding:20px;text-align:center;color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>';
-    });
-}
-function renderNewHeatmap(data){
-  var el = document.getElementById('newHmGrid'); if(!el) return;
-  if(!data || !data.matrix || !data.matrix.length){
-    el.innerHTML = '<div style="padding:30px;text-align:center;color:var(--text-3);font-size:12px">Нет данных за выбранный период</div>';
-    return;
-  }
-  // Find max for color scaling
-  var max = 0;
-  data.matrix.forEach(function(row){ row.forEach(function(v){ if(v > max) max = v; }); });
-  if(max === 0) max = 1;
-  var accent = hmAccent(_newHmView, _newHmId);
-  // Build grid
-  var h = '<div style="display:grid;grid-template-columns:60px repeat(24,minmax(22px,1fr));gap:2px;font-size:10px">';
-  h += '<div></div>';
-  for(var hr = 0; hr < 24; hr++){
-    h += '<div style="text-align:center;color:var(--text-3);padding:2px 0">'+(hr%2===0?String(hr).padStart(2,'0'):'')+'</div>';
-  }
-  data.days.forEach(function(day, di){
-    var dt = new Date(day + 'T00:00:00Z');
-    var dayName = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'][dt.getUTCDay()];
-    h += '<div style="font-size:9px;color:var(--text-3);padding:2px 4px;text-align:right;white-space:nowrap">'+dayName+' '+(dt.getUTCDate())+'</div>';
-    for(var hr2 = 0; hr2 < 24; hr2++){
-      var v = data.matrix[di][hr2] || 0;
-      var intensity = v / max;
-      var bg = v > 0 ? accent + Math.round(0.15 + intensity * 0.7 * 255).toString(16).padStart(2,'0') : 'var(--bg-3)';
-      h += '<div title="'+day+' '+String(hr2).padStart(2,'0')+':00 — '+v.toFixed(2)+' GB" style="height:22px;background:'+bg+';border-radius:2px;cursor:pointer"></div>';
-    }
-  });
-  h += '</div>';
-  el.innerHTML = h;
-}
+function renderNewHeatmap(data){ renderHeatmap(data, _hmNew); }
 
 // ── Daily chart ────────────────────────────────────────────────────
 function loadNewDailyChart(){
@@ -7632,57 +8064,94 @@ function loadNewDailyChart(){
       if(canvas) canvas.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>';
     });
 }
+var _newDailyMode='clients';
+function setNewDailyMode(m){
+  _newDailyMode=m;
+  ['clients','countries'].forEach(function(x){var b=document.getElementById('newDailyMode_'+x);if(b)b.classList.toggle('active',x===m);});
+  if(window._dailyTrafficCache) renderNewDailyChart(window._dailyTrafficCache);
+}
 function renderNewDailyChart(data){
   var canvas = document.getElementById('newDailyCanvas');
-  if(!canvas) return;
+  if(!canvas || !data) return;
   var ctx = canvas.getContext('2d');
   if(_newDailyChart){ _newDailyChart.destroy(); _newDailyChart = null; }
-  var cc = getChartColors();
-  // Group by day — sum of all clients
-  var byDay = {};
+  var cc = getChartColorsLight();
+  // 60-day window
+  var now = new Date(), dates = [];
+  for(var i = 59; i >= 0; i--){ var dd = new Date(now.getTime() - i*86400000); dates.push(dd.getFullYear()+'-'+String(dd.getMonth()+1).padStart(2,'0')+'-'+String(dd.getDate()).padStart(2,'0')); }
+  var labels = dates.map(function(d){ return d.slice(8,10)+'.'+d.slice(5,7); });
+  // map client(portName) → dominant country (for «По странам»)
+  var clientCountry = {};
+  if(_newDailyMode === 'countries'){
+    var cnt = {}, mm = currentData._modemMap || {};
+    Object.keys(mm).forEach(function(k){ var m=mm[k]; var ci=COUNTRIES[m.server]||{}; var country=ci.name||m.server; (m.ports||[]).forEach(function(p){ var pn=p.portName; if(!pn)return; if(!cnt[pn])cnt[pn]={}; cnt[pn][country]=(cnt[pn][country]||0)+1; }); });
+    Object.keys(cnt).forEach(function(pn){ var best='',bc=-1; Object.keys(cnt[pn]).forEach(function(c){ if(cnt[pn][c]>bc){bc=cnt[pn][c];best=c;} }); clientCountry[pn]=best; });
+  }
+  // groupKey → {date: bytes}
+  var groups = {};
   Object.keys(data).forEach(function(client){
     if(typeof data[client] !== 'object') return;
-    Object.keys(data[client]).forEach(function(date){
-      var e = data[client][date];
-      if(!byDay[date]) byDay[date] = 0;
-      byDay[date] += (e.in || 0) + (e.out || 0);
-    });
+    if(client === 'Не назначен') return;   // трафик незакреплённых за клиентом модемов — не показываем
+    if(_newDailyMode === 'countries'){
+      // АВТОРИТЕТНАЯ разбивка: каждый день несёт data[client][date].servers — берём
+      // трафик по странам прямо оттуда. Раньше бралась «доминантная страна на клиента»,
+      // из-за чего румынский трафик уезжал в Молдову, а несопоставленное — в «Прочее».
+      Object.keys(data[client]).forEach(function(date){
+        var e = data[client][date]; if(!e) return;
+        var srvs = e.servers;
+        if(srvs && Object.keys(srvs).length){
+          Object.keys(srvs).forEach(function(srv){
+            var ci = COUNTRIES[srv] || {}; var country = ci.name || srv;
+            if(!groups[country]) groups[country] = {};
+            groups[country][date] = (groups[country][date]||0) + (srvs[srv].in||0) + (srvs[srv].out||0);
+          });
+        } else {
+          var fb = clientCountry[client];   // запасной вариант, если у дня нет разбивки
+          if(fb){ if(!groups[fb]) groups[fb]={}; groups[fb][date]=(groups[fb][date]||0)+((e.in||0)+(e.out||0)); }
+        }
+      });
+    } else {
+      if(!groups[client]) groups[client] = {};
+      Object.keys(data[client]).forEach(function(date){ var e=data[client][date]; groups[client][date]=(groups[client][date]||0)+((e.in||0)+(e.out||0)); });
+    }
   });
-  var now = new Date();
-  var dates = [];
-  for(var i = 29; i >= 0; i--){
-    var d = new Date(now.getTime() - i * 86400000);
-    var ds = d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
-    dates.push(ds);
-  }
-  var labels = dates.map(function(d){ return d.slice(8,10) + '.' + d.slice(5,7); });
-  var values = dates.map(function(d){ return ((byDay[d]||0) / 1e9); });
+  var keys = Object.keys(groups).sort(function(a,b){ var sa=dates.reduce(function(s,d){return s+(groups[a][d]||0)},0), sb=dates.reduce(function(s,d){return s+(groups[b][d]||0)},0); return sb-sa; });
+  var MAXG = _newDailyMode==='countries' ? 8 : 12;
+  var top = keys.slice(0,MAXG), rest = keys.slice(MAXG);
+  var palette = getChartPaletteLight();
+  var datasets = top.map(function(key,i){ return { label:key, data:dates.map(function(d){ return (groups[key][d]||0)/1e9; }), backgroundColor:palette[i%palette.length], stack:'s', borderWidth:0, borderRadius:2, borderSkipped:false }; });
+  if(rest.length){ datasets.push({ label:'Прочие', data:dates.map(function(d){ return rest.reduce(function(s,k){return s+(groups[k][d]||0)},0)/1e9; }), backgroundColor:'#cbd5e1', stack:'s', borderWidth:0, borderRadius:2, borderSkipped:false }); }
   _newDailyChart = newChartSafe(ctx, {
     type: 'bar',
-    data: {
-      labels: labels,
-      datasets: [{ label: 'GB', data: values, backgroundColor: 'rgba(59,130,246,0.6)', borderColor: 'rgba(59,130,246,1)', borderWidth: 1 }]
-    },
+    data: { labels: labels, datasets: datasets },
     options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(ctx){ return ctx.parsed.y.toFixed(2) + ' GB'; } } } },
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: {
+        legend: { display: true, position: 'bottom', labels: { color: cc.text, font: { size: 10.5 }, usePointStyle: true, pointStyle: 'circle', boxWidth: 6, boxHeight: 6, padding: 12 } },
+        tooltip: { mode: 'index', intersect: false, itemSort: function(a,b){ return b.parsed.y - a.parsed.y; },
+          callbacks: {
+            label: function(c){ return c.dataset.label+': '+c.parsed.y.toFixed(2)+' ГБ'; },
+            footer: function(items){ var t=0; items.forEach(function(i){ t+=i.parsed.y; }); return 'Итого: '+t.toFixed(2)+' ГБ'; }
+          } }
+      },
       scales: {
-        x: { ticks: { font: { size: 10 }, color: '#9b9b98', maxRotation: 0, autoSkip: true }, grid: { display: false } },
-        y: { beginAtZero: true, ticks: { font: { size: 10 }, color: '#6b6b68', callback: function(v){ return v + ' GB'; } }, grid: { color: cc.gridLine, drawTicks: false }, border: { display: false } }
+        x: { stacked: true, ticks: { font: { size: 9 }, color: cc.text, maxRotation: 0, autoSkip: true, maxTicksLimit: 20 }, grid: { display: false }, border: { display: false } },
+        y: { stacked: true, beginAtZero: true, ticks: { font: { size: 10 }, color: cc.text, callback: function(v){ return v+' ГБ'; } }, grid: { color: cc.grid, drawTicks: false }, border: { display: false } }
       }
     }
   });
 }
 
-// ── Latency chart (collapsible) ────────────────────────────────────
+// ── Latency (collapsible) — по макету: без чипов стран, всегда весь парк ──
 function loadNewLatency(){
   var url = API + '/api/analytics/latency_stats?view=country&id=all&days=30';
   fetch(url, {headers: {'X-Auth-Token': authToken}})
     .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
-    .then(function(d){ _newLatencyData = d; renderNewLatencyChart(d); })
+    .then(function(d){ _newLatencyData = d; renderLatencySummary(d); })
     .catch(function(e){
-      var c = document.getElementById('newLatencyCanvas');
-      if(c) c.parentElement.innerHTML = '<div style="padding:30px;color:var(--danger);font-size:12px;text-align:center">Ошибка: '+esc(e.message)+'</div>';
+      var c = document.getElementById('latencySummary');
+      if(c) c.innerHTML = '<div style="padding:30px;color:var(--danger);font-size:12px;text-align:center">Ошибка: '+esc(e.message)+'</div>';
     });
 }
 function renderNewLatencyChart(data){
@@ -7701,8 +8170,9 @@ function renderNewLatencyChart(data){
       { label: 'P95 connect', data: data.connect_p95_ms||[], borderColor: '#7c3aed', fill: false, tension: 0.3, pointRadius: 2, borderWidth: 2, borderDash: [2,3] }
     ]},
     options: {
-      responsive: true, maintainAspectRatio: false,
-      plugins: { legend: { display: false }, tooltip: { callbacks: { label: function(ctx){ return ctx.dataset.label + ': ' + fmtMs(ctx.parsed.y); } } } },
+      responsive: true, maintainAspectRatio: false, animation: false,
+      interaction: { mode: 'index', intersect: false },
+      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: function(ctx){ return ctx.dataset.label + ': ' + fmtMs(ctx.parsed.y); } } } },
       scales: {
         x: { ticks: { font: { size: 10 }, color: '#9b9b98', maxRotation: 0, autoSkip: true }, grid: { color: cc.gridLine, drawTicks: false }, border: { display: false } },
         y: { beginAtZero: true, ticks: { font: { size: 10 }, color: '#6b6b68', callback: function(v){ return (v/1000).toFixed(v<1000?2:1) + ' с'; } }, grid: { color: cc.gridLine, drawTicks: false }, border: { display: false } }
@@ -7711,45 +8181,112 @@ function renderNewLatencyChart(data){
   });
 }
 
-// ── Infra (rotations + IP + capacity) — reuse existing renderers ─
+// ── «Ротации · IP · ёмкость» (по макету): hero-KPI ряд + 4 таблицы ──
+// (по серверам · по операторам · топ-модемы · подсети на модем), период 7д.
+// Один Promise.all на оба эндпоинта — KPI и таблицы из одного ответа.
+var _NEW_INFRA_DAYS = 7;
+function setNewInfraDays(d,el){_NEW_INFRA_DAYS=d;if(el&&el.parentNode){Array.prototype.forEach.call(el.parentNode.children,function(c){if(c.classList)c.classList.remove('on')});el.classList.add('on');}reloadNewInfra();}
 function reloadNewInfra(){
-  var daysEl = document.getElementById('newInfraDays');
-  if(daysEl){
-    if(typeof renderSysRotations === 'function')  renderSysRotations('newInfraRotations', 'newInfraDays');
-    if(typeof renderSysIp === 'function')          renderSysIp('newInfraIp', 'newInfraDays');
-    if(typeof renderSysCapacity === 'function')    renderSysCapacity('newInfraCapacity', 'newInfraDays');
-  }
+  var kpiEl = document.getElementById('newInfraKpis');
+  var tblEl = document.getElementById('newInfraTables');
+  if(!kpiEl && !tblEl) return;
+  var days = _NEW_INFRA_DAYS;
+  Promise.all([
+    fetch(API+'/api/analytics/rotations?days='+days, {headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json();}).catch(function(){return {};}),
+    fetch(API+'/api/analytics/ip_stats?days='+days, {headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json();}).catch(function(){return {};}),
+    fetch(API+'/api/analytics/capacity?days='+days, {headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json();}).catch(function(){return {};})
+  ]).then(function(res){
+    var rot=res[0]||{}, ip=res[1]||{}, cap=(res[2]||{}).summary||{};
+    var rs=rot.summary||{}, ips=ip.summary||{}, sn=ip.subnet_summary||{};
+    if(kpiEl){
+      var okCol = rs.success_pct==null?null : rs.success_pct>=95?'var(--success)' : rs.success_pct>=80?'var(--warning)' : 'var(--danger)';
+      var kt=function(l,v,s,c){ return '<div class="kpi-tile"><div class="l">'+l+'</div><div class="v"'+(c?' style="color:'+c+'"':'')+'>'+v+'</div>'+(s?'<div class="s">'+s+'</div>':'')+'</div>'; };
+      kpiEl.innerHTML = '<div class="kpi-row">'
+        + kt('Ротаций ('+days+'д)', (rs.total||0).toLocaleString('ru-RU'), null, null)
+        + kt('Успешность', rs.success_pct!=null?rs.success_pct+'%':'—', null, okCol)
+        + kt('Уникальных IP', (ips.unique_ips||0).toLocaleString('ru-RU'), null, null)
+        + kt('Подсетей/модем', (sn.avg!=null?sn.avg:'—'), '/24 · макс '+(sn.max||0), 'var(--accent)')
+        + '</div>';
+    }
+    if(!tblEl) return;
+    function h4(t,col){ return '<div style="font-size:11px;font-weight:700;color:'+col+';margin:14px 0 6px">'+t+'</div>'; }
+    function tbl(head, rows){
+      if(!rows) return '<div style="color:var(--text-3);font-size:11px;padding:6px">Нет данных</div>';
+      return '<div style="overflow-x:auto"><table class="ztbl"><thead><tr>'+head+'</tr></thead><tbody>'+rows+'</tbody></table></div>';
+    }
+    function th(t,left){ return '<th'+(left?' style="text-align:left"':'')+'>'+t+'</th>'; }
+    function td(v,left,style){ var st=(left?'text-align:left;':'')+(style||''); return '<td'+(st?' style="'+st+'"':'')+'>'+v+'</td>'; }
+    function _more(n,cap,key){ return n>cap?'<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:6px 2px 0" onclick="zMore(\''+key+'\')">+ ещё '+(n-cap)+'</div>':''; }
+    var srvRows=(rot.per_server||[]).map(function(sv){ var fc=!sv.failed?'color:var(--text-3)':(sv.failed>25?'color:var(--danger)':'color:var(--warning)'); return '<tr>'+td('<b>'+esc(sv.server_name||'—')+'</b>',1)+td((sv.total||0).toLocaleString('ru-RU'))+td(sv.failed||0,0,fc)+td(sv.avg_sec!=null?Math.round(sv.avg_sec*10)/10:'—',0,'font-weight:600')+'</tr>'; }).join('');
+    var srvT=h4('Ротации по серверам','#3b9dd8')+tbl(th('Сервер',1)+th('Всего')+th('Failed')+th('Avg с'), srvRows);
+    var snAll=(ip.subnets||[]);
+    var snLim=_zxLim('sn',8);var snRows=snAll.slice(0,snLim).map(function(x){ return '<tr>'+td('<b>'+esc(x.nick)+'</b>',1)+td(esc(x.server),1,'color:var(--text-2)')+td('<b style="color:var(--accent)">'+x.subnets+'</b>')+td(x.ips)+'</tr>'; }).join('');
+    var snT=h4('Подсети на модем (/24)','#965ac8')+tbl(th('Модем',1)+th('Сервер',1)+th('Подсетей')+th('Уник. IP'), snRows)+_more(snAll.length,snLim,'sn');
+    var ktc=function(l,v){ return '<div class="kpi-tile" style="text-align:center"><div class="l">'+l+'</div><div class="v">'+v+'</div></div>'; };
+    var capH=h4('Ёмкость','#ef9f27')
+      +'<div class="kpi-row" style="margin-bottom:0">'
+      + ktc('Модемов', cap.total_modems!=null?cap.total_modems:'—')
+      + ktc('Серверов', cap.total_servers!=null?cap.total_servers:'—')
+      + ktc('Трафик ('+days+'д)', cap.total_gb!=null?fmtGb(cap.total_gb*1e9):'—')
+      + ktc('Avg/модем', cap.avg_gb_per_modem!=null?fmtGb(cap.avg_gb_per_modem*1e9):'—')
+      +'</div>';
+    tblEl.innerHTML=srvT+snT+capH;
+  });
 }
 
-// ── Top hosts (collapsible, button-loaded) ─────────────────────────
+// ── Top hosts (collapsible, предзагружается при рендере дашборда) ──
+var _hostsClient = '';        // '' = все клиенты
+var _hostsClientList = null;  // кэш списка клиентов для чипов (по хитам, из нефильтрованного ответа)
+function setHostsClient(c){
+  _hostsClient = (_hostsClient === c ? '' : c);
+  if(window._zxOpen) delete window._zxOpen.hosts;
+  loadNewTopHosts();
+}
+function _renderHostChips(){
+  var el = document.getElementById('newResChips');
+  if(!el || !_hostsClientList) return;
+  var h = '<button class="dchip'+(!_hostsClient?' on':'')+'" onclick="setHostsClient(\'\')">Все клиенты</button>';
+  _hostsClientList.forEach(function(c){
+    h += '<button class="dchip'+(_hostsClient===c?' on':'')+'" data-c="'+esc(c)+'" onclick="setHostsClient(this.dataset.c)">'+esc(c)+'</button>';
+  });
+  el.innerHTML = h;
+}
 function loadNewTopHosts(){
   var statusEl = document.getElementById('newResStatus');
   var listEl = document.getElementById('newTopHostsList');
   if(statusEl) statusEl.textContent = 'Загрузка...';
-  fetch(API+'/api/admin/top_hosts_aggregated', {headers: {'X-Auth-Token': authToken}})
+  var url = API+'/api/analytics/logs_domains_full?limit=1'+(_hostsClient ? '&client='+encodeURIComponent(_hostsClient) : '');
+  fetch(url, {headers: {'X-Auth-Token': authToken}})
     .then(function(r){ return r.json(); })
     .then(function(d){
-      var data = d.data || {};
-      var sorted = Object.keys(data).sort(function(a, b){ return data[b] - data[a]; }).slice(0, 50);
-      if(!sorted.length){
+      if(!_hostsClient && d.by_client){
+        _hostsClientList = d.by_client.filter(function(c){ return c.client_name; }).map(function(c){ return c.client_name; });
+      } else if(!_hostsClientList && d.facets && d.facets.clients){
+        _hostsClientList = d.facets.clients;
+      }
+      _renderHostChips();
+      var hosts = (d.top_hosts || []).slice(0, 50);
+      if(!hosts.length){
         if(listEl) listEl.innerHTML = '<div style="text-align:center;padding:20px;color:var(--text-3);font-size:11px">Нет данных</div>';
         if(statusEl) statusEl.textContent = '0 хостов';
         return;
       }
-      var maxHits = data[sorted[0]] || 1;
+      var maxHits = hosts[0].hits || 1;
+      function shortN(n){ return n>=1e6 ? (n/1e6).toFixed(1).replace(/\.0$/,'')+'M' : n>=1e3 ? (n/1e3).toFixed(1).replace(/\.0$/,'')+'k' : String(n); }
+      var top = hosts.slice(0, _zxLim('hosts',10));
       var h = '<div style="display:grid;gap:4px;font-size:11px">';
-      sorted.forEach(function(host){
-        var hits = data[host];
-        var pct = hits / maxHits * 100;
+      top.forEach(function(row){
+        var pct = row.hits / maxHits * 100;
         h += '<div style="display:flex;align-items:center;gap:10px">';
-        h += '<span style="flex:0 0 220px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(host)+'</span>';
+        h += '<span style="flex:0 1 220px;min-width:96px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(row.host)+'</span>';
         h += '<div style="flex:1;height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+pct.toFixed(0)+'%;background:var(--accent);border-radius:3px"></div></div>';
-        h += '<span style="flex:0 0 70px;text-align:right;font-family:var(--font-mono);color:var(--text-2)">'+hits.toLocaleString('ru-RU')+'</span>';
+        h += '<span style="flex:0 0 56px;text-align:right;font-family:var(--font-mono);color:var(--text-2)">'+shortN(row.hits)+'</span>';
         h += '</div>';
       });
+      if(hosts.length > top.length) h += '<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:4px 0 0" onclick="zMore(\'hosts\')">+ ещё '+(hosts.length-top.length)+'</div>';
       h += '</div>';
       if(listEl) listEl.innerHTML = h;
-      if(statusEl) statusEl.textContent = sorted.length + ' хостов';
+      if(statusEl) statusEl.textContent = hosts.length + ' хостов' + (_hostsClient ? ' · ' + _hostsClient : '');
     })
     .catch(function(e){
       if(statusEl) statusEl.textContent = 'Ошибка: '+e.message;
@@ -7762,10 +8299,35 @@ function renderNewMatrix(){
   if(!el) return;
   var d = collectTrafficData();
   if(!d){ el.innerHTML = '<tr><td style="padding:20px;text-align:center;color:var(--text-3)">Нет данных</td></tr>'; return; }
-  var rows = d.modemTraffic.slice(0, 100).map(function(m){
-    return '<tr><td>'+esc(m.nick)+'</td><td>'+esc(m.pn)+'</td><td>'+esc(m.operator)+'</td><td style="text-align:right;font-family:var(--font-mono)">'+fmtGb((m.dayIn||0)+(m.dayOut||0))+'</td><td style="text-align:right;font-family:var(--font-mono)">'+fmtGb((m.monIn||0)+(m.monOut||0))+'</td></tr>';
+  var fEl = document.getElementById('newMatrixFilter');
+  var q = ((fEl && fEl.value) || '').trim().toLowerCase();
+  var list = d.modemTraffic.filter(function(m){
+    if(!q) return true;
+    return (String(m.nick||'')+' '+String(m.pn||'')+' '+String(m.operator||'')+' '+String(m.server||'')).toLowerCase().indexOf(q) > -1;
+  });
+  list = list.slice().sort(function(a,b){ return ((b.monIn||0)+(b.monOut||0)) - ((a.monIn||0)+(a.monOut||0)); });
+  var shown = list.slice(0, _zxLim('mx',10));
+  var rows = shown.map(function(m){
+    var tot = (m.monIn||0)+(m.monOut||0);
+    var mt = (currentData.modemTrend||{})[m.server+'_'+m.portId];
+    var tr = (mt!==undefined&&mt!==null)
+      ? '<span style="font-size:10px;font-weight:600;color:'+(mt>=0?'var(--success)':'var(--danger)')+'">'+(mt>999?'+999%+':(mt<-99?'<−99%':((mt>=0?'+':'')+mt+'%')))+'</span>'
+      : '<span style="font-size:10px;color:var(--text-3)">—</span>';
+    return '<tr>'
+      + '<td style="font-weight:600;color:var(--text-0)">'+esc(m.nick)+'</td>'
+      + '<td style="color:var(--text-2)">'+esc(m.operator||'—')+'</td>'
+      + '<td style="color:var(--text-2)">'+esc(m.server)+'</td>'
+      + '<td>'+esc(m.pn||'—')+'</td>'
+      + '<td style="text-align:right;font-family:var(--font-mono)">'+fmtGb(m.monIn||0)+'</td>'
+      + '<td style="text-align:right;font-family:var(--font-mono)">'+fmtGb(m.monOut||0)+'</td>'
+      + '<td style="text-align:right;font-family:var(--font-mono);font-weight:600;color:var(--text-0)">'+fmtGb(tot)+'</td>'
+      + '<td style="text-align:right">'+tr+'</td></tr>';
   }).join('');
-  el.innerHTML = '<thead><tr><th style="text-align:left">Модем</th><th style="text-align:left">Клиент</th><th style="text-align:left">Оператор</th><th style="text-align:right">Сегодня</th><th style="text-align:right">Месяц</th></tr></thead><tbody>'+rows+'</tbody>';
+  if(!rows) rows = '<tr><td colspan="8" style="padding:16px;text-align:center;color:var(--text-3)">Ничего не найдено</td></tr>';
+  else if(list.length > shown.length) rows += '<tr><td colspan="8" style="padding:8px 10px;color:var(--accent);font-size:10.5px;cursor:pointer;text-align:left" onclick="zMore(\'mx\')">+ ещё '+(list.length-shown.length)+' · сортировка по Σ месяца</td></tr>';
+  var cEl = document.getElementById('newMatrixCount');
+  if(cEl) cEl.textContent = q ? (list.length + ' из ' + d.modemTraffic.length) : (d.modemTraffic.length + ' модемов');
+  el.innerHTML = '<thead><tr><th style="text-align:left">Модем</th><th style="text-align:left">Оператор</th><th style="text-align:left">Сервер</th><th style="text-align:left">Клиент</th><th style="text-align:right">↓ Вход</th><th style="text-align:right">↑ Выход</th><th style="text-align:right">Σ Всего</th><th style="text-align:right">Тренд</th></tr></thead><tbody>'+rows+'</tbody>';
 }
 
 // ========================================================================
@@ -7823,11 +8385,11 @@ function loadFailoverCandidates(){
     .then(function(d){
       var cands=(d&&d.candidates)||[];
       if(!cands.length){box.innerHTML='<div style="color:var(--success);font-size:12px;padding:12px">✓ Нет модемов, требующих failover прямо сейчас</div>';return;}
-      var h='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="border-bottom:2px solid var(--border)">';
-      h+='<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Сервер</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Модем</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Клиенты</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Причина</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Спейр</th><th style="padding:6px 8px"></th></tr></thead><tbody>';
+      var h='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>';
+      h+='<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Сервер</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Модем</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Клиенты</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Причина</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Спейр</th><th style="padding:6px 8px"></th></tr></thead><tbody>';
       cands.forEach(function(c){
         var spareTxt=c.spare?('<span style="color:var(--success)">'+esc(c.spare)+'</span>'):'<span style="color:var(--danger)">нет спейра</span>';
-        h+='<tr style="border-bottom:0.5px solid var(--border)">';
+        h+='<tr>';
         h+='<td style="padding:6px 8px">'+esc(c.server)+'</td>';
         h+='<td style="padding:6px 8px"><strong>'+esc(c.nick)+'</strong></td>';
         h+='<td style="padding:6px 8px;font-size:11px;color:var(--text-2)">'+esc((c.clients||[]).join(', '))+'</td>';
@@ -7870,18 +8432,18 @@ function loadFailoverLog(){
         var m=map[r]||['#9b9b98',r];
         return '<span style="background:'+m[0]+'22;color:'+m[0]+';padding:1px 7px;border-radius:8px;font-size:10px;font-weight:600">'+m[1]+'</span>';
       };
-      var h='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="border-bottom:2px solid var(--border)">';
-      h+='<th style="text-align:left;padding:5px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Когда</th><th style="text-align:left;padding:5px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Сервер</th><th style="text-align:left;padding:5px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Клиент</th><th style="text-align:left;padding:5px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Перенос</th><th style="text-align:left;padding:5px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Причина</th><th style="text-align:left;padding:5px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase">Итог</th></tr></thead><tbody>';
+      var h='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>';
+      h+='<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Когда</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Сервер</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Клиент</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Перенос</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Причина</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Итог</th></tr></thead><tbody>';
       rows.forEach(function(r){
         var when=r.ts?new Date(r.ts.replace(' ','T')+'Z').toLocaleString('ru-RU',{timeZone:'Europe/Moscow'}):'';
         var move=(r.dead_nick||'?')+' → '+(r.spare_nick||'?');
-        h+='<tr style="border-bottom:0.5px solid var(--border)">';
-        h+='<td style="padding:5px 8px;color:var(--text-3);white-space:nowrap">'+esc(when)+'</td>';
-        h+='<td style="padding:5px 8px">'+esc(r.server_name||'')+'</td>';
-        h+='<td style="padding:5px 8px">'+esc(r.client_port_name||'')+'</td>';
-        h+='<td style="padding:5px 8px;font-family:var(--font-mono)">'+esc(move)+'</td>';
-        h+='<td style="padding:5px 8px;color:var(--text-2)">'+esc(r.trigger_reason||'')+'</td>';
-        h+='<td style="padding:5px 8px">'+resultBadge(r.result,r.dry_run)+(r.error?'<div style="font-size:9px;color:var(--danger);margin-top:2px">'+esc(r.error)+'</div>':'')+'</td>';
+        h+='<tr>';
+        h+='<td style="padding:6px 8px;color:var(--text-3);white-space:nowrap">'+esc(when)+'</td>';
+        h+='<td style="padding:6px 8px">'+esc(r.server_name||'')+'</td>';
+        h+='<td style="padding:6px 8px">'+esc(r.client_port_name||'')+'</td>';
+        h+='<td style="padding:6px 8px;font-family:var(--font-mono)">'+esc(move)+'</td>';
+        h+='<td style="padding:6px 8px;color:var(--text-2)">'+esc(r.trigger_reason||'')+'</td>';
+        h+='<td style="padding:6px 8px">'+resultBadge(r.result,r.dry_run)+(r.error?'<div style="font-size:9px;color:var(--danger);margin-top:2px">'+esc(r.error)+'</div>':'')+'</td>';
         h+='</tr>';
       });
       h+='</tbody></table>';
@@ -7970,3 +8532,64 @@ function aisLoadQueue(){
   }).catch(function(){});
 }
 
+
+
+// ===== Unified client detail modal (tabbed «Детали») =====
+function switchDetailTab(tab){
+  ['overview','billing','modems','payments'].forEach(function(t){
+    var b=document.getElementById('cdTab_'+t),p=document.getElementById('cdPane_'+t);
+    if(b)b.classList.toggle('active',t===tab);
+    if(p)p.style.display=(t===tab)?'block':'none';
+  });
+  if(tab==='payments'){
+    if(currentOpsClientId){ renderOpsHistory(currentOpsClientId); }
+    else { var ob=document.getElementById('clientOpsBody'); if(ob)ob.innerHTML='<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Сначала сохраните клиента</div>'; }
+  }
+}
+function _cdModemsFor(c){
+  var map=currentData._modemMap||{},out=[];
+  Object.keys(map).forEach(function(k){var m=map[k];if((m.ports||[]).some(function(p){return p.portName===c.portName;}))out.push(m);});
+  return out;
+}
+function renderClientDetail(id, tab){
+  var c=(currentData.clients||[]).find(function(x){return x.id===id;});
+  if(!c)return;
+  currentOpsClientId=id;
+  showClientForm(c);
+  var balance=c.balance!==undefined?c.balance:0;
+  var mds=_cdModemsFor(c),mc=mds.length;
+  var nm=(c.name||'').replace(/^(ООО|ИП|ЗАО|АО|ПАО)\s*/i,'').replace(/["«»]/g,'').trim();
+  var ws=nm.split(/\s+/).filter(Boolean);
+  var ini=((ws.length>=2?(ws[0].charAt(0)+ws[1].charAt(0)):nm.slice(0,2)).toUpperCase())||'?';
+  document.getElementById('cdAvatar').textContent=ini;
+  document.getElementById('cdName').textContent=c.name||'';
+  var st=balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?['ПАУЗА','var(--warning)','#000']:(mc===0?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff']));
+  var pl=document.getElementById('cdPill');pl.textContent=st[0];pl.style.background=st[1];pl.style.color=st[2];
+  var charge=Math.round(((currentData.clientMonthCharges||{})[id]||0));
+  var gb=Math.round(((currentData.clientLiveMonthGb||{})[id]||0)*10)/10;
+  var be=document.getElementById('cdKpiBal');be.textContent=Math.round(balance).toLocaleString('ru-RU');be.style.color=balance<0?'var(--danger)':(balance>0?'var(--success)':'var(--text-0)');
+  document.getElementById('cdKpiBalWrap').classList.toggle('is-green',balance>=0);
+  document.getElementById('cdKpiCharge').textContent=charge.toLocaleString('ru-RU');
+  document.getElementById('cdKpiModems').textContent=mc;
+  document.getElementById('cdKpiTraffic').innerHTML=gb.toFixed(1)+'<span style="font-size:12px"> ГБ</span>';
+  var ml=document.getElementById('cdModemsList');
+  var mh='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin:6px 0 10px">Привязанные модемы ('+mc+')</div>';
+  if(mc){mh+='<div style="display:flex;flex-wrap:wrap;gap:5px">'+mds.map(function(m){return '<span class="client-modem-tag">'+esc(m.nick)+' <span style="color:var(--text-3)">('+esc(m.server)+')</span></span>';}).join('')+'</div>';}
+  else{mh+='<div style="font-size:12px;color:var(--text-3);padding:8px 0">Нет привязанных модемов. Привязка — на странице «Модемы».</div>';}
+  ml.innerHTML=mh;
+  document.getElementById('cdDeleteBtn').style.display='';
+  switchDetailTab(tab||'overview');
+}
+function newClientForm(){
+  currentOpsClientId=null;
+  showClientForm(null);
+  document.getElementById('cdAvatar').textContent='+';
+  document.getElementById('cdName').textContent='Новый клиент';
+  var pl=document.getElementById('cdPill');pl.textContent='';pl.style.background='transparent';
+  ['cdKpiBal','cdKpiCharge','cdKpiModems','cdKpiTraffic'].forEach(function(k){var e=document.getElementById(k);if(e)e.textContent='—';});
+  document.getElementById('cdModemsList').innerHTML='<div style="font-size:12px;color:var(--text-3);padding:8px 0">Сначала сохраните клиента</div>';
+  document.getElementById('cdDeleteBtn').style.display='none';
+  switchDetailTab('overview');
+}
+
+function setClientFilter2(f){_clientFilter=f;document.querySelectorAll('.cl-chip').forEach(function(ch){ch.classList.toggle('active',ch.getAttribute('data-f')===f);});renderClients();}

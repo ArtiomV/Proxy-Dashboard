@@ -199,6 +199,35 @@ const RULES = {
     dedupeKey: p => 'ffail_' + (p.server || '') + '_' + (p.client || ''),
     render: p => `🔴 <b>Failover не удался</b>\n\nКлиент <b>${esc(p.client || '?')}</b> (${esc(p.server || '?')}): ${esc(p.error || 'неизвестная ошибка')}.\nНужно вмешаться вручную.`,
   },
+  // ── ProxySmart SIM / health signals (Batch 1) ────────────────
+  // Fed by the notify-collect pass from the persisted modem_meta signal
+  // columns. tg+bell (not bell-only) — these are actionable, the operator
+  // wants a Telegram ping too. cooldownSec suppresses re-fire across scans.
+  sim_redirect_imposed: {
+    title: 'SIM: оператор навязал редирект (нет денег / блок)',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'simred_' + (p.server || '') + '_' + (p.imei || ''),
+    render: p => `⚠️ <b>Проблема с SIM</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — оператор навязал HTTP-редирект.\nОбычно это значит: на SIM кончились деньги или она заблокирована.`,
+  },
+  sim_status_bad: {
+    title: 'SIM: статус не OK',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'simstat_' + (p.server || '') + '_' + (p.imei || ''),
+    render: p => `📵 <b>Проблема с SIM</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — статус SIM: <b>${esc(p.simStatus || '?')}</b> (ожидается OK).`,
+  },
+  reboot_score_high: {
+    title: 'Модему может потребоваться ребут (reboot score)',
+    priority: 'early',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'reboot_' + (p.server || '') + '_' + (p.imei || ''),
+    render: p => `♻️ <b>Модему может потребоваться ребут</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — reboot score <b>${p.score}</b>. Возможно нужен USB-reset.`,
+  },
+
   payment_received: {
     title: 'Новый платёж от клиента',
     priority: 'important',
@@ -322,6 +351,9 @@ const _entityFor = {
   payment_received:          p => ({ kind: 'payment', id: p.natural_key || null }),
   client_balance_negative:   p => ({ kind: 'client',  id: p.client_id || null }),
   proxy_expiring_3d:         p => ({ kind: 'modem',   id: p.nick || p.portName || null }),
+  sim_redirect_imposed:      p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
+  sim_status_bad:            p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
+  reboot_score_high:         p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   traffic_spike_burst:       () => ({ kind: 'system', id: 'traffic' }),
   dashboard_restarted:       () => ({ kind: 'system', id: 'pm2' }),
   heap_warn:                 () => ({ kind: 'system', id: 'heap' }),

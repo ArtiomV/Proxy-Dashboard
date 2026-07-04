@@ -148,25 +148,34 @@ r.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req, r
       WHERE hour_start >= datetime('now', '-31 days') AND client_name != ''
       GROUP BY pn, srv, date
     `).all();
+    // Aggregate traffic_hourly separately, then keep whichever source is LARGER per
+    // (client,date). daily_traffic = ProxySmart's own yesterday counter (authoritative full
+    // day incl. hour 0); traffic_hourly = our reconstruction (can miss the reset hour OR be
+    // shifted). MAX avoids BOTH the daily_traffic midnight-zero AND the traffic_hourly
+    // under-count, so the chart agrees with what billing charges (also MAX(durable,live)).
+    const thAgg = {};
     for (const r of hourlyRows) {
       if (r.date === todayStr) continue; // today comes from live counter below
-      if (!byClient[r.pn]) byClient[r.pn] = {};
-      // Authoritative override: traffic_hourly is the source of truth for past days
-      if (!byClient[r.pn][r.date]) byClient[r.pn][r.date] = { in: 0, out: 0, servers: {} };
-      // First time we see this (pn,date) combo: reset before summing servers
-      if (byClient[r.pn][r.date]._th_seen !== true) {
-        byClient[r.pn][r.date] = { in: 0, out: 0, servers: {}, _th_seen: true };
-      }
-      byClient[r.pn][r.date].in += r.bin;
-      byClient[r.pn][r.date].out += r.bout;
+      if (!thAgg[r.pn]) thAgg[r.pn] = {};
+      if (!thAgg[r.pn][r.date]) thAgg[r.pn][r.date] = { in: 0, out: 0, servers: {} };
+      thAgg[r.pn][r.date].in += r.bin;
+      thAgg[r.pn][r.date].out += r.bout;
       if (r.srv) {
-        if (!byClient[r.pn][r.date].servers[r.srv]) byClient[r.pn][r.date].servers[r.srv] = { in: 0, out: 0 };
-        byClient[r.pn][r.date].servers[r.srv].in = (byClient[r.pn][r.date].servers[r.srv].in || 0) + r.bin;
-        byClient[r.pn][r.date].servers[r.srv].out = (byClient[r.pn][r.date].servers[r.srv].out || 0) + r.bout;
+        if (!thAgg[r.pn][r.date].servers[r.srv]) thAgg[r.pn][r.date].servers[r.srv] = { in: 0, out: 0 };
+        thAgg[r.pn][r.date].servers[r.srv].in += r.bin;
+        thAgg[r.pn][r.date].servers[r.srv].out += r.bout;
       }
     }
-    // Strip helper flag before sending response
-    for (const pn in byClient) for (const dt in byClient[pn]) delete byClient[pn][dt]._th_seen;
+    for (const pn in thAgg) {
+      if (!byClient[pn]) byClient[pn] = {};
+      for (const dt in thAgg[pn]) {
+        const th = thAgg[pn][dt];
+        const cur = byClient[pn][dt];
+        const thTot = (th.in || 0) + (th.out || 0);
+        const curTot = cur ? (cur.in || 0) + (cur.out || 0) : 0;
+        if (!cur || thTot > curTot) byClient[pn][dt] = th; // larger source wins
+      }
+    }
   } catch (e) {
     logger.warn('[daily_traffic] traffic_hourly override failed: ' + e.message);
   }

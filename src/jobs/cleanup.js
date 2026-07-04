@@ -187,6 +187,7 @@ function create(deps) {
       audit_log:      { col: 'timestamp',  key: 'retention_audit_log', def: 90 },
       system_log:     { col: 'timestamp',  key: 'retention_system_log', def: 30 },
       api_usage:      { col: 'timestamp',  key: 'retention_api_usage', def: 30 },
+      api_access_log: { col: 'ts',         key: 'retention_api_access_log', def: 30 },
       // DB-level audit (triggers): keep 365 days by default — financial forensics
       db_audit:         { col: 'ts', key: 'retention_db_audit', def: 365 },
       db_audit_context: { col: 'ts', key: 'retention_db_audit', def: 365 },

@@ -1,0 +1,426 @@
+<title>Дашборд «Командный центр» — дизайн-спека v2</title>
+<style>
+:root{
+  --bg0:#f4f6f9; --bg1:#ffffff; --bg2:#eef1f5; --bg3:#f1f4f8;
+  --bd:rgba(17,24,39,.09); --bd-strong:rgba(17,24,39,.16);
+  --t0:#10151f; --t1:#39424f; --t2:#697587; --t3:#9aa4b3;
+  --ac:#2f6fe0; --ac-dim:rgba(47,111,224,.10);
+  --ok:#16a34a; --warn:#b5740a; --bad:#dc3a34;
+  --sh:0 1px 2px rgba(16,24,40,.05),0 0 0 1px rgba(17,24,39,.04);
+  --mono:ui-monospace,'JetBrains Mono','SF Mono',Menlo,monospace;
+}
+body{background:var(--bg0)}
+.wrap{max-width:920px;margin:0 auto;padding:40px 24px 80px;color:var(--t1);font-size:15px;line-height:1.65}
+.wrap h1{font-size:26px;font-weight:650;color:var(--t0);letter-spacing:-.4px;margin:0 0 6px;text-wrap:balance}
+.wrap .lead{color:var(--t2);margin:0 0 8px;max-width:64ch}
+.meta{display:flex;gap:18px;flex-wrap:wrap;font-size:12.5px;color:var(--t3);margin:14px 0 34px;padding:12px 16px;background:var(--bg1);border:1px solid var(--bd);border-radius:10px}
+.meta b{color:var(--t1);font-weight:600}
+.wrap h2{font-size:19px;font-weight:650;color:var(--t0);letter-spacing:-.2px;margin:52px 0 6px;padding-top:18px;border-top:1px solid var(--bd);text-wrap:balance}
+.wrap h2 .no{display:inline-block;min-width:30px;color:var(--ac);font-variant-numeric:tabular-nums}
+.wrap h3{font-size:15px;font-weight:650;color:var(--t0);margin:26px 0 4px}
+.wrap p{margin:8px 0;max-width:72ch}
+.wrap ul{margin:8px 0;padding-left:22px;max-width:72ch}
+.wrap li{margin:3px 0}
+code{font-family:var(--mono);font-size:.85em;background:var(--bg2);border:1px solid var(--bd);border-radius:5px;padding:1px 6px;color:var(--t0);white-space:nowrap}
+pre{background:#10151f;color:#d7dee9;border-radius:10px;padding:14px 16px;font-family:var(--mono);font-size:12px;line-height:1.6;overflow-x:auto;margin:12px 0}
+pre code{background:none;border:none;padding:0;color:inherit;white-space:pre}
+table.spec{width:100%;border-collapse:collapse;font-size:13px;margin:12px 0;background:var(--bg1);border:1px solid var(--bd);border-radius:10px;overflow:hidden}
+table.spec th{text-align:left;font-size:10.5px;font-weight:650;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);padding:9px 12px;border-bottom:1px solid var(--bd);background:var(--bg3)}
+table.spec td{padding:8px 12px;border-top:1px solid var(--bd);vertical-align:top;font-variant-numeric:tabular-nums}
+table.spec td:first-child{white-space:nowrap;color:var(--t0);font-weight:600}
+table.spec td code{white-space:normal}
+.tblwrap{overflow-x:auto}
+.demo{background:var(--bg0);border:1px dashed var(--bd-strong);border-radius:12px;padding:18px;margin:14px 0}
+.demo .cap{font-size:10.5px;text-transform:uppercase;letter-spacing:.5px;color:var(--t3);margin:-4px 0 12px}
+.swgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin:12px 0}
+.sw{background:var(--bg1);border:1px solid var(--bd);border-radius:10px;overflow:hidden;font-size:11.5px}
+.sw .c{height:44px}
+.sw .i{padding:7px 10px}
+.sw .i b{display:block;color:var(--t0);font-weight:600}
+.sw .i span{font-family:var(--mono);color:var(--t3);font-size:10.5px}
+.toc{background:var(--bg1);border:1px solid var(--bd);border-radius:12px;padding:16px 20px;font-size:13.5px;columns:2;column-gap:32px}
+.toc a{color:var(--ac);text-decoration:none;display:block;padding:2.5px 0}
+.toc a:hover{text-decoration:underline}
+.note{background:var(--ac-dim);border:1px solid rgba(47,111,224,.25);border-radius:10px;padding:10px 14px;font-size:13px;margin:12px 0;max-width:none}
+.note.warn{background:rgba(181,116,10,.09);border-color:rgba(181,116,10,.3)}
+/* ── живые образцы компонентов (копия боевых стилей) ── */
+.x-seclabel{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;color:var(--t3);text-transform:uppercase;letter-spacing:.7px}
+.x-seclabel::after{content:'';flex:1;height:1px;background:var(--bd)}
+.x-card{background:var(--bg1);border:1px solid var(--bd);border-radius:12px;box-shadow:var(--sh);padding:14px 16px}
+.x-ct{font-size:12.5px;font-weight:700;color:var(--t0);margin-bottom:10px;display:flex;align-items:center;gap:6px}
+.x-ct svg{color:var(--ac)}
+.x-pulse{border-top:2.5px solid var(--ac);border-radius:12px;background:var(--bg1);border-left:1px solid var(--bd);border-right:1px solid var(--bd);border-bottom:1px solid var(--bd);box-shadow:var(--sh);padding:13px 15px;min-width:170px}
+.x-pl{font-size:11px;color:var(--t2);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.x-pv{font-size:23px;font-weight:700;color:var(--t0);margin:5px 0 2px;font-variant-numeric:tabular-nums;white-space:nowrap}
+.x-ps{font-size:11px;color:var(--t3)}
+.x-tile{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:10px;font-size:12px;min-height:44px;min-width:190px}
+.x-tile .d{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.x-tile .l{flex:1;color:var(--t1);font-weight:500;line-height:1.3}
+.x-tile .e{display:block;font-size:10.5px;font-weight:400;color:var(--t3)}
+.x-tile .n{font-size:16px;font-weight:700;font-variant-numeric:tabular-nums}
+.x-chip{font-size:10.5px;font-weight:600;padding:4px 12px;border-radius:13px;background:var(--bg2);color:var(--t2);border:none;cursor:pointer;font-family:inherit}
+.x-chip.on{background:var(--ac-dim);color:var(--ac)}
+.x-kpi{background:var(--bg2);border-radius:9px;padding:10px 12px;min-width:130px}
+.x-kpi .l{font-size:10px;color:var(--t2);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.x-kpi .v{font-size:16px;font-weight:700;color:var(--t0);margin-top:3px}
+.x-act{width:26px;height:26px;display:inline-flex;align-items:center;justify-content:center;border:1px solid var(--bd);border-radius:7px;background:var(--bg1);color:var(--t2);cursor:pointer;font-size:12px}
+.x-bar{height:5px;background:#e2e7ee;border-radius:3px;overflow:hidden}
+.x-bar i{display:block;height:100%;border-radius:3px}
+.x-pill{font-size:9.5px;font-weight:600;padding:2px 8px;border-radius:9px}
+details.x-acc{background:var(--bg1);border:1px solid var(--bd);border-radius:12px;box-shadow:var(--sh);overflow:hidden;margin:8px 0}
+details.x-acc summary{padding:13px 16px;cursor:pointer;font-size:13px;font-weight:600;color:var(--t0);list-style:none;display:flex;align-items:center;gap:9px;user-select:none}
+details.x-acc summary::-webkit-details-marker{display:none}
+details.x-acc summary svg{color:var(--ac)}
+details.x-acc summary::after{content:'▾';color:var(--t3);margin-left:auto;font-size:12px}
+details.x-acc[open] summary::after{content:'▴'}
+details.x-acc summary:hover{background:var(--bg2)}
+details.x-acc .b{padding:2px 16px 15px;font-size:12.5px;color:var(--t2)}
+@media(max-width:640px){.toc{columns:1}}
+</style>
+
+<div class="wrap">
+<h1>Дашборд «Командный центр» — дизайн-спека v2</h1>
+<p class="lead">Полное описание утверждённого макета для реализации: токены, анатомия каждого блока, данные, поведение и адаптив. Эталон — виджет-макет v2 от 02.07.2026; референс работающей реализации живёт в <code>public/admin.html</code> + <code>public/js/admin.js</code> + <code>public/css/finance.css</code>.</p>
+<div class="meta">
+  <span><b>Страница:</b> вкладка «Дашборд» (<code>#tab-dashboard</code>)</span>
+  <span><b>Тема:</b> светлая, scoped (остальной шелл тёмный)</span>
+  <span><b>Язык:</b> русский, единицы Б/КБ/МБ/ГБ/ТБ, деньги «616 012 ₽»</span>
+  <span><b>Обновление:</b> автоцикл каждые 10 с</span>
+</div>
+
+<div class="toc">
+  <a href="#s1">1. Дизайн-токены</a>
+  <a href="#s2">2. Каркас: шапка, секции, карточки, раскрывашки, иконки</a>
+  <a href="#s3">3. Блок «Пульс бизнеса»</a>
+  <a href="#s4">4. Блок «Требует внимания» (3 карточки)</a>
+  <a href="#s5">5. Блок «Парк по серверам»</a>
+  <a href="#s6">6. Блок «Финансы»</a>
+  <a href="#s7">7. Таблица «Клиенты»</a>
+  <a href="#s8">8. Секция «Инфраструктура» (раскрывашки)</a>
+  <a href="#s9">9. Секция «Трафик»</a>
+  <a href="#s10">10. Поведение и обновление данных</a>
+  <a href="#s11">11. Адаптив</a>
+  <a href="#s12">12. Эндпоинты и карта кода</a>
+</div>
+
+<h2 id="s1"><span class="no">1.</span>Дизайн-токены</h2>
+<p>Вся палитра задаётся CSS-переменными на контейнере <code>#tab-bank, #tab-dashboard</code> — это переопределяет тёмные глобальные переменные только внутри этих вкладок. Компоненты пишутся через <code>var(--*)</code> и автоматически получают светлую тему.</p>
+
+<div class="swgrid">
+  <div class="sw"><div class="c" style="background:#f4f6f9;border-bottom:1px solid var(--bd)"></div><div class="i"><b>--bg-0 фон страницы</b><span>#f4f6f9</span></div></div>
+  <div class="sw"><div class="c" style="background:#ffffff;border-bottom:1px solid var(--bd)"></div><div class="i"><b>--bg-1 карточка</b><span>#ffffff</span></div></div>
+  <div class="sw"><div class="c" style="background:#eef1f5"></div><div class="i"><b>--bg-2 вложенная плитка</b><span>#eef1f5</span></div></div>
+  <div class="sw"><div class="c" style="background:#f1f4f8"></div><div class="i"><b>--bg-3 треки полос</b><span>#f1f4f8</span></div></div>
+  <div class="sw"><div class="c" style="background:#10151f"></div><div class="i"><b>--text-0 заголовки/значения</b><span>#10151f</span></div></div>
+  <div class="sw"><div class="c" style="background:#39424f"></div><div class="i"><b>--text-1 основной текст</b><span>#39424f</span></div></div>
+  <div class="sw"><div class="c" style="background:#697587"></div><div class="i"><b>--text-2 подписи</b><span>#697587</span></div></div>
+  <div class="sw"><div class="c" style="background:#9aa4b3"></div><div class="i"><b>--text-3 приглушённый</b><span>#9aa4b3</span></div></div>
+  <div class="sw"><div class="c" style="background:#2f6fe0"></div><div class="i"><b>--accent</b><span>#2f6fe0 · dim rgba(47,111,224,.10)</span></div></div>
+  <div class="sw"><div class="c" style="background:#16a34a"></div><div class="i"><b>--success</b><span>#16a34a</span></div></div>
+  <div class="sw"><div class="c" style="background:#b5740a"></div><div class="i"><b>--warning</b><span>#b5740a</span></div></div>
+  <div class="sw"><div class="c" style="background:#dc3a34"></div><div class="i"><b>--danger</b><span>#dc3a34</span></div></div>
+</div>
+
+<div class="tblwrap"><table class="spec">
+<tr><th>Токен</th><th>Значение</th><th>Применение</th></tr>
+<tr><td>border</td><td><code>1px solid rgba(17,24,39,.09)</code></td><td>все карточки, разделители строк; hover-вариант <code>rgba(17,24,39,.16)</code></td></tr>
+<tr><td>Тень карточки</td><td><code>0 1px 2px rgba(16,24,40,.05), 0 0 0 1px rgba(17,24,39,.04)</code></td><td>только карточки верхнего уровня; вложенные плитки без тени</td></tr>
+<tr><td>Радиусы</td><td>12 / 9–10 / 13 / 7</td><td>карточки и раскрывашки — 12; вложенные плитки (KPI, att-tile, боксы таблиц) — 9–10; чипы — 13 (пилюля); мелкие кнопки — 7</td></tr>
+<tr><td>Шрифт UI</td><td>системный стек (<code>-apple-system, Inter, sans-serif</code>)</td><td>наследуется от приложения, отдельно не подключается</td></tr>
+<tr><td>Шрифт цифр/кода</td><td><code>'JetBrains Mono','SF Mono', monospace</code></td><td>значения трафика, деньги в таблицах, ники модемов, IP, пути запросов</td></tr>
+<tr><td>Цифры</td><td><code>font-variant-numeric / font-feature-settings:"tnum"</code></td><td>во всех KPI и колонках чисел — чтобы не прыгали при автообновлении</td></tr>
+<tr><td>Единицы</td><td>Б, КБ, МБ, ГБ, ТБ</td><td>глобальные хелперы <code>fmtGb()/fmtGbShort()</code> в <code>utils.js</code> (русские суффиксы — вся админка)</td></tr>
+<tr><td>Деньги</td><td>«616 012 ₽»</td><td><code>toLocaleString('ru-RU')</code>, пробел-разделитель, знак после суммы</td></tr>
+<tr><td>Проценты/дельты</td><td>«▲ +20.2% М/М», «−0.5%»</td><td>рост — success, падение — danger, нет данных — «—» text-3; «М/М» кириллицей</td></tr>
+<tr><td>Отступ страницы</td><td><code>18px 26px 44px</code></td><td>внутренний паддинг <code>#tab-dashboard</code></td></tr>
+</table></div>
+
+<div class="note warn"><b>Важно про графики.</b> Chart.js на этой странице обязан использовать светлую палитру независимо от глобальной темы приложения: сетка <code>rgba(0,0,0,.07)</code>, подписи осей <code>#6b7280</code>, фон <code>#ffffff</code>. В коде — хелпер <code>getChartColorsLight()</code> (utils.js); глобальный <code>getChartColors()</code> здесь использовать нельзя — он вернёт цвета тёмной темы и сетка исчезнет на белом.</div>
+
+<h2 id="s2"><span class="no">2.</span>Каркас: шапка, секции, карточки, раскрывашки, иконки</h2>
+
+<h3>Шапка страницы</h3>
+<ul>
+<li>Заголовок: <b>«Командный центр»</b> — 19px / 700, цвет text-0, letter-spacing −0.3px; слева SVG-молния 17–18px цветом accent (flex, gap 8–9).</li>
+<li>Справа в той же строке: «обновлено HH:MM» — 11px, text-3; время проставляется при каждом рендере.</li>
+<li>Никаких кнопок в шапке (кнопки «Затраты»/«Обновить» удалены намеренно).</li>
+</ul>
+
+<h3>Заголовок секции (.dash-sec-label)</h3>
+<div class="demo"><div class="cap">Живой образец</div>
+<div class="x-seclabel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14"><path d="M3 12h4l2 5 4-10 2 5h6"/></svg>Пульс бизнеса</div>
+</div>
+<ul>
+<li>11px / 700, UPPERCASE, letter-spacing 0.7px, цвет text-3; отступы <code>22px 2px 11px</code>.</li>
+<li>Слева серая SVG-иконка 14px (наследует цвет текста), справа от текста — линия-волосок 1px до края (flex + <code>::after{flex:1}</code>).</li>
+<li>Порядок секций фиксирован: Пульс бизнеса → Требует внимания → Парк по серверам → Финансы → (Клиенты — карточка без секц. заголовка) → Инфраструктура → Трафик.</li>
+</ul>
+
+<h3>Карточка (.analytics-card) и её заголовок</h3>
+<ul>
+<li>Фон bg-1, бордер, радиус 12, тень, паддинг 14–16px.</li>
+<li>Заголовок карточки: 12.5px / 700, text-0, слева <b>синяя</b> (accent) SVG-иконка 15px, margin-bottom 10px.</li>
+<li>Заголовок H3-карточек с контентом покрупнее (MRR, Клиенты, Почасовой трафик): 14px / 700 + допуск-сабтайтл 9.5–10px text-3 в той же строке.</li>
+</ul>
+
+<h3>Раскрывашка (details.acc-expand)</h3>
+<div class="demo"><div class="cap">Живой образец — кликается</div>
+<details class="x-acc"><summary><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg>Ротации · IP · ёмкость</summary><div class="b">…тело раскрывашки…</div></details>
+</div>
+<ul>
+<li>Нативный <code>&lt;details&gt;</code>. Контейнер = карточка (радиус 12, тень), margin-bottom 9–10px.</li>
+<li>Слева accent-SVG 16px — <b>чистый глиф без подложки-чипа</b>; справа шеврон <code>›</code> (rotate 90° закрыто → −90° открыто, transition .15s), 15px, цвет text-3, прижат вправо (<code>margin-left:auto</code>); hover фона — bg-2. Summary: 13px / 600, паддинг <code>13px 16px</code>, gap 9.</li>
+<li>Тело: паддинг <code>2px 16px 15px</code>.</li>
+<li>Открыты по умолчанию (атрибут <code>open</code>): «Ротации · IP · ёмкость», «Распределение задержек», «Обращения к API». Остальные закрыты.</li>
+</ul>
+
+<h3>Набор SVG-иконок</h3>
+<p>Все иконки — инлайновые SVG: viewBox 24×24, <code>fill="none" stroke="currentColor" stroke-width="1.8"</code>, круглые концы/стыки. Эмодзи на странице не используются нигде (исключение — флаги стран 🇲🇩/🇷🇴 в карточках серверов и списках модемов).</p>
+<pre><code>&lt;svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"
+     stroke-linecap="round" stroke-linejoin="round" width="14" height="14"&gt;…&lt;/svg&gt;
+
+bolt (шапка):   &lt;path d="M13 3 4 14h6l-1 7 9-11h-6l1-7z"/&gt;
+pulse:          &lt;path d="M3 12h4l2 5 4-10 2 5h6"/&gt;
+alert-triangle: &lt;path d="M12 4 2.5 20h19L12 4z"/&gt;&lt;line x1="12" y1="10" x2="12" y2="14"/&gt;
+                &lt;line x1="12" y1="16.8" x2="12.01" y2="16.8"/&gt;
+server:         &lt;rect x="3" y="4" width="18" height="7" rx="1.6"/&gt;
+                &lt;rect x="3" y="13" width="18" height="7" rx="1.6"/&gt;
+                &lt;circle cx="6.5" cy="7.5" r=".4"/&gt;&lt;circle cx="6.5" cy="16.5" r=".4"/&gt;
+wallet:         &lt;rect x="3" y="6" width="18" height="13" rx="2.2"/&gt;&lt;path d="M3 10.5h18"/&gt;
+                &lt;circle cx="16.5" cy="14.5" r="1"/&gt;
+gear:           (стандартная шестерёнка из наб. навигации — см. nav «Настройки»)
+chart-bars:     &lt;rect x="4" y="12" width="4" height="8" rx="1"/&gt;&lt;rect x="10" y="8" width="4"
+                height="12" rx="1"/&gt;&lt;rect x="16" y="4" width="4" height="16" rx="1"/&gt;
+chart-line:     &lt;path d="M4 17l5-5 4 3 7-8"/&gt;
+antenna:        &lt;circle cx="12" cy="13" r="1"/&gt;&lt;path d="M12 14v6"/&gt;
+                &lt;path d="M8.5 9.5a5 5 0 0 1 7 0"/&gt;&lt;path d="M6 6.5a8.5 8.5 0 0 1 12 0"/&gt;
+trend-up:       &lt;path d="M3 17l6-6 4 4 7-7"/&gt;&lt;path d="M14 8h6v6"/&gt;
+table:          &lt;rect x="3" y="4" width="18" height="16" rx="2"/&gt;&lt;path d="M3 10h18M9 4v16"/&gt;
+code (API):     &lt;path d="M8 8l-4 4 4 4"/&gt;&lt;path d="M16 8l4 4-4 4"/&gt;</code></pre>
+<p>Раскладка иконок: секции — серые (в цвет label); заголовки карточек и summary раскрывашек — accent. В JS иконки отдают хелперы <code>_dwIcon(name)</code> и <code>_dwT(title, icon)</code>.</p>
+
+<h2 id="s3"><span class="no">3.</span>Блок «Пульс бизнеса»</h2>
+<div class="demo"><div class="cap">Живой образец карточки</div>
+<div style="display:flex;gap:12px;flex-wrap:wrap">
+<div class="x-pulse"><div class="x-pl">Трафик сегодня</div><div class="x-pv">535 ГБ</div><div class="x-ps">по всему парку</div></div>
+<div class="x-pulse" style="border-top-color:var(--ok)"><div class="x-pl">Активные модемы</div><div class="x-pv">86/86</div><div class="x-ps">в работе</div></div>
+<div class="x-pulse"><div class="x-pl">Выручка (MRR)</div><div class="x-pv">635 077 ₽</div><div class="x-ps" style="color:var(--ok)">▲ +20.2% М/М</div></div>
+</div></div>
+<div class="tblwrap"><table class="spec">
+<tr><th>Свойство</th><th>Значение</th><th>Примечание</th></tr>
+<tr><td>Сетка</td><td><code>grid: repeat(4,1fr); gap:12px</code></td><td>контейнер <code>#newPulseRow.pulse-grid</code>; ≤768px — 2×2; ≤480px — 2×2</td></tr>
+<tr><td>Карточка</td><td>bg-1, бордер, радиус 12, тень, паддинг <code>13px 15px</code></td><td>+ <b>цветная верхняя полоса 2.5px</b>: accent / success / warning / danger</td></tr>
+<tr><td>Label</td><td>11px / 600, UPPERCASE, ls 0.3, text-2</td><td></td></tr>
+<tr><td>Value</td><td>23px / 700, text-0, nowrap, tnum</td><td>margin <code>5px 0 2px</code></td></tr>
+<tr><td>Sub</td><td>11px, text-3 (или семантический цвет)</td><td></td></tr>
+</table></div>
+<p>Ровно 4 карточки, слева направо:</p>
+<ul>
+<li><b>Трафик сегодня</b> (полоса accent) — Σ дневного in+out по всем модемам (<code>modemTraffic.dayIn+dayOut</code>); sub «по всему парку».</li>
+<li><b>Активные модемы</b> — «N/M»; полоса success если N=M, иначе warning; данные Σ <code>fleet.byServer[*].working/total</code>; sub «в работе».</li>
+<li><b>Выручка (MRR)</b> (accent) — <code>finance.summary.mrr</code>; sub — дельта «▲ +X% М/М» (success) / «▼ −X% М/М» (danger) / «нет данных М/М» (text-3).</li>
+<li><b>На балансах</b> (success) — Σ только положительных балансов клиентов; sub «предоплата клиентов».</li>
+</ul>
+
+<h2 id="s4"><span class="no">4.</span>Блок «Требует внимания» — ряд из трёх карточек</h2>
+<p>Контейнер <code>#newExtWidgets</code>: <code>grid-template-columns: 1.15fr 1fr 1.15fr; gap:12px; align-items:stretch</code>. На ≤768px — одна колонка. Рендерит одна функция <code>renderNewExtWidgets()</code>.</p>
+
+<h3>4.1 Карточка «Проблемы инфраструктуры»</h3>
+<div class="demo"><div class="cap">Живой образец плиток (3 состояния)</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:8px;max-width:660px">
+<div class="x-tile" style="background:rgba(22,163,74,.08)"><span class="d" style="background:var(--ok)"></span><span class="l">Модем отключен</span><span class="n" style="color:var(--ok)">0</span></div>
+<div class="x-tile" style="background:rgba(220,58,52,.07);cursor:pointer"><span class="d" style="background:var(--bad)"></span><span class="l">Сбоит прокси</span><span class="n" style="color:var(--bad)">21</span></div>
+<div class="x-tile" style="background:rgba(220,58,52,.07)"><span class="d" style="background:var(--bad)"></span><span class="l">Клиентов в долгу<span class="e">−14 136 ₽</span></span><span class="n" style="color:var(--bad)">3</span></div>
+</div></div>
+<div class="tblwrap"><table class="spec">
+<tr><th>Элемент</th><th>Спека</th><th>Примечание</th></tr>
+<tr><td>Сетка плиток</td><td><code>.att-grid</code>: 2 колонки, gap 8</td><td>итого 2×2; ≤640px тоже 2 колонки</td></tr>
+<tr><td>Плитка .att-tile</td><td>flex, gap 9, паддинг <code>10px 12px</code>, радиус 10, min-height 44</td><td>фон-тинт: 0 → <code>rgba(22,163,74,.08)</code>; danger → <code>rgba(220,58,52,.07)</code>; warning → <code>rgba(181,116,10,.09)</code></td></tr>
+<tr><td>Точка</td><td>круг 8px</td><td>цвет = цвет счётчика</td></tr>
+<tr><td>Label</td><td>12px / 500, text-1</td><td>доп. строка <code>.att-extra</code> 10.5px text-3 (напр. сумма долга)</td></tr>
+<tr><td>Счётчик</td><td>16px / 700, tnum</td><td>success при 0, иначе danger/warning</td></tr>
+<tr><td>Интерактив</td><td>4 инфраструктурные плитки при N&gt;0 кликабельны</td><td><code>cursor:pointer</code>, hover <code>filter:brightness(.97)</code> → попап списка модемов <code>showProblemPopup(label,key)</code></td></tr>
+</table></div>
+<p>Четыре плитки в фиксированном порядке: <b>Модем отключен</b> (danger; fleet.disconnectedList, «блипы» &lt;10 мин не считаются), <b>Низкая скорость</b> (warning; флаг lowSpeed), <b>Завис IP</b> (warning; ipStuck), <b>Сбоит прокси</b> (danger; proxyIssues). Бизнес-плиток («Клиентов в долгу», «На паузе») в блоке НЕТ — убраны по решению 02.07.</p>
+
+<h3>4.2 Карточка «Тренд»</h3>
+<ul>
+<li>Карточка — flex-column; заголовок стандартный (иконка chart-line).</li>
+<li>Столбики: контейнер <code>display:flex; align-items:flex-end; gap:4px; flex:1; min-height:64px</code> — бары прижаты к низу и растягивают карточку по высоте соседей.</li>
+<li>12 месяцев; прошедшие — синие (accent, opacity ≈ .45–.7 по возрастанию), текущий — success. Подписи месяцев 9px text-3 под барами (контейнеры <code>#trendBarsWrapNew</code>/<code>#trendLabelsWrapNew</code>, заполняет <code>loadTrendData('New')</code>).</li>
+<li>Нижняя строка 10px: слева «Σ 18.4 ТБ» (text-3), справа «↑ +11% к пред. мес» (success) / «↓ −X%» (danger).</li>
+</ul>
+
+<h3>4.3 Карточка «Операторы»</h3>
+<ul>
+<li>Строка на оператора (margin-bottom 8): верх — flex baseline 10px: имя (flex:1, text-1, 500), «X ГБ/мод/сут» (text-2), «· N мод.» (text-3), опционально «· Y₽/ГБ» (accent, 600 — себестоимость из настроек операторов).</li>
+<li>Низ — полоса-трек 4px (bg-3, радиус 2) с заполнением цветом оператора из палитры <code>CHART_COLORS.operators</code>; ширина = доля от максимального «ГБ/мод/сут», минимум 2%.</li>
+<li>Операторы «Unknown / Неизвестный / пусто» скрываются. Сортировка по убыванию трафика.</li>
+</ul>
+
+<h2 id="s5"><span class="no">5.</span>Блок «Парк по серверам»</h2>
+<div class="demo"><div class="cap">Живой образец</div>
+<div style="max-width:300px" class="x-card"><div style="display:flex;justify-content:space-between;align-items:center"><span style="font-family:var(--mono);font-weight:700;font-size:12.5px;color:var(--t0)">🇲🇩 S1 · Молдова</span><span style="font-size:12px;font-weight:700;color:var(--ok)">23/23</span></div><div style="font-size:10px;color:var(--t3);min-height:14px;margin:2px 0 5px">&nbsp;</div><div class="x-bar" style="margin-bottom:9px"><i style="width:100%;background:var(--ok)"></i></div><div style="display:flex;justify-content:space-between;font-size:10.5px;padding:2px 0"><span style="color:var(--t2)">Трафик сегодня</span><b style="font-family:var(--mono);color:var(--t1)">2.1 ГБ</b></div><div style="display:flex;justify-content:space-between;font-size:10.5px;padding:2px 0"><span style="color:var(--t2)">Проблемных</span><b style="color:var(--t3)">1</b></div></div>
+</div>
+<div class="tblwrap"><table class="spec">
+<tr><th>Свойство</th><th>Значение</th><th>Примечание</th></tr>
+<tr><td>Сетка</td><td><code>.fleet-grid</code>: 3 колонки, gap 12</td><td>≤900px — 2; ≤560px — 1. Карточек 5: «Весь парк» + S1…S4 (3+2)</td></tr>
+<tr><td>Заголовок</td><td>имя 12.5–13px / 700, моно</td><td>сводная — accent-иконка server + «Весь парк»; серверные — флаг страны + «S1 · Молдова»</td></tr>
+<tr><td>Счётчик справа</td><td>«N/M» 12px / 700</td><td>success если отключённых 0, иначе warning</td></tr>
+<tr><td>Строка статуса</td><td>10px, min-height 14px</td><td>«K отключено» danger — или пустая строка (высота сохраняется, карточки не прыгают)</td></tr>
+<tr><td>Прогресс-бар</td><td>5px, трек bg-4, радиус 3</td><td>заполнение = working/total %, цвет success/warning; margin-bottom 9</td></tr>
+<tr><td>Строки данных</td><td>10.5–11px, label text-2 / значение mono 600</td><td>«Весь парк»: Трафик сегодня, Трафик месяц, Проблемных; S-карточки: Трафик сегодня, Сред. сигнал (бар-индикатор <code>renderSignalBars</code>), Проблемных (warning если &gt;0)</td></tr>
+</table></div>
+
+<h2 id="s6"><span class="no">6.</span>Блок «Финансы»</h2>
+<p>Сетка <code>1.7fr 1fr, gap 12</code>; ≤768px — одна колонка.</p>
+<h3>6.1 MRR (график) — редизайн 03.07</h3>
+<ul>
+<li>Шапка-строка: «MRR» 14px/700 + сабтайтл «12 месяцев» (10px text-3) слева, справа — HTML-легенда <code>#mrrLegend</code>: точки 8px + подписи «За ГБ» / «За модем» (10.5px/600 text-2). Chart.js-легенда выключена.</li>
+<li>Chart.js, stacked bar, высота 230px, <b>тонкие скруглённые бары</b>: borderRadius 5, borderSkipped:false, maxBarThickness 42, barPercentage .6, categoryPercentage .8. Низ — per_gb <code>#2f6fe0</code> (accent), верх — per_modem <code>#10b981</code>.</li>
+<li>Ось Y: тики «100k…700k» 10px, цвет <code>#6b7280</code>; сетка <code>rgba(0,0,0,.07)</code> без drawTicks; обе оси без border. Ось X — месяцы 10px, без сетки. Всё из <code>getChartColorsLight()</code>.</li>
+<li>График пересоздаётся только при новых данных (см. §10) — иначе мигает каждые 10 с.</li>
+</ul>
+<h3>6.2 Качество выручки — редизайн 03.07</h3>
+<ul>
+<li>Вверху сетка 2×2 из <code>.kpi-tile</code> (bg-2, r10, 11px 12px, центр): <b>NRR · 3 мес</b> (значение 16px/700; цвет ≥100% success / ≥90% warning / иначе danger), <b>Churn · мес</b> (≥5% danger, иначе success), <b>ARPU</b>, <b>Активных клиентов</b>.</li>
+<li>Ниже лейбл «КОНЦЕНТРАЦИЯ ВЫРУЧКИ» (10px/600 UPPERCASE text-3) и три бара в стиле «Топ ресурсов»: строка «Top-N <span text-3>имя</span> … NN%» (11px, % — mono/600) + трек 6px bg-3 r3 со скруглённым филлом. Top-1 — <code>#ef4444</code> если ≥50%, <code>#f0a533</code> ≥35%, иначе accent; Top-3 — accent; Top-5 — <code>#10b981</code>.</li>
+<li>Источник: <code>/api/admin/finance_dashboard</code> (throttle 55 с).</li>
+</ul>
+
+<h2 id="s7"><span class="no">7.</span>Таблица «Клиенты»</h2>
+<div class="demo"><div class="cap">Живой образец строки</div>
+<table style="width:100%;border-collapse:collapse;font-size:11.5px;background:var(--bg1);border:1px solid var(--bd);border-radius:10px">
+<tr><td style="padding:8px 10px;text-align:left;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:7px"><span style="width:3px;height:16px;background:#2f6fe0;border-radius:2px"></span><strong style="color:var(--t0)">ООО «ВАЙЛДБОКС»</strong></span></td>
+<td style="padding:8px 10px;text-align:right;color:var(--warn);font-weight:600">75/77</td>
+<td style="padding:8px 10px;text-align:right;font-family:var(--mono)">16.8 МБ</td>
+<td style="padding:8px 10px;text-align:right"><span class="x-pill" style="background:var(--bg2);color:var(--t2)">3397₽/мод</span></td>
+<td style="padding:8px 10px;text-align:right"><span class="x-pill" style="background:var(--ac-dim);color:var(--ac)">23₽/ГБ</span></td>
+<td style="padding:8px 10px;text-align:right;font-family:var(--mono);font-weight:600">261 514 ₽</td>
+<td style="padding:8px 10px;text-align:right;color:var(--ok)">+6%</td>
+<td style="padding:8px 10px;text-align:right;font-family:var(--mono);color:var(--bad);font-weight:700">−8 097 ₽</td></tr>
+</table></div>
+<div class="tblwrap"><table class="spec">
+<tr><th>Свойство</th><th>Значение</th><th>Примечание</th></tr>
+<tr><td>Обёртка</td><td>карточка, заголовок «Клиенты» h3</td><td></td></tr>
+<tr><td>Шрифт таблицы</td><td>11.5px</td><td></td></tr>
+<tr><td>th</td><td>9.5px / 600, UPPERCASE, ls 0.4, text-3; паддинг <code>8px 10px</code>; фон-полоса bg-3 со скруглением 8px у первой/последней ячейки</td><td>первая колонка слева, остальные справа; без нижней линии</td></tr>
+<tr><td>td</td><td>паддинг <code>9px 10px</code>, <b>без разделителей</b>, nowrap</td><td><b>зебра</b>: чётные строки <code>var(--zebra)</code> (светлые страницы — <code>#f8fafc</code>, тёмные — <code>rgba(255,255,255,.03)</code>); hover — bg-2. Стиль ГЛОБАЛЬНЫЙ для всего кабинета: базовые <code>table/th/td</code> и <code>.log-table/.pc-log-table/.res-table</code> переведены на зебру в tables.css (без линий-разделителей), light-скоуп добавляет <code>--zebra:#f8fafc</code>. Класс <code>table.ztbl</code> — для таблиц дашборда</td></tr>
+<tr><td>Колонки</td><td>Клиент · Live · Сегодня · Тариф · MRR · Δ М/М · % MRR · Баланс</td><td>колонки «Вчера» нет; сортировка по MRR по убыванию</td></tr>
+<tr><td>Клиент</td><td>цветовой маркер 3×16px (радиус 2) + имя 700 text-0</td><td>цвет из клиентской палитры <code>CHART_COLORS.clients</code>; при paused — бейдж «пауза» (9px, warning-фон)</td></tr>
+<tr><td>Live</td><td>«N/M», 600</td><td>success все онлайн / warning часть / danger 0 / text-3 нет модемов</td></tr>
+<tr><td>Тариф</td><td>пилюля 9.5px/600, паддинг 2 8, радиус 9</td><td>per_gb — accent-dim/accent («23₽/ГБ»); per_modem — bg-2/text-2 («3397₽/мод»)</td></tr>
+<tr><td>Δ М/М</td><td>«+45.3%» success / «−0.5%» danger / «—» text-3</td><td></td></tr>
+<tr><td>Баланс</td><td>mono; отрицательный — danger, 600–700</td><td></td></tr>
+</table></div>
+
+<h2 id="s8"><span class="no">8.</span>Секция «Инфраструктура» — раскрывашки</h2>
+<p>Порядок: <b>Топ проблемных модемов</b> (закрыта) → <b>Ротации · IP · ёмкость</b> (открыта) → <b>Распределение задержек</b> (открыта).</p>
+
+<h3>8.1 Топ проблемных модемов</h3>
+<ul>
+<li>Таблица 12px <b>с шапкой</b> (Модем · Причина · Действия — th 9.5px UPPERCASE text-3, выравнивание как у колонок). Строка: цветной rail 3×18px + <b>ник</b> + сервер (флаг + «S2 · Румыния», 10px text-3) · причина текстом цвета категории (offline — danger, IP/скорость — warning), всё слева · справа две кнопки-действия.</li>
+<li>Кнопки <code>.row-act</code>: 26×26, радиус 7, бордер-волосок, bg-1, hover bg-2 — «⏻» (ребут) и «⟳» (Re-Add).</li>
+<li>До <b>8 строк</b> + кликабельная строка «+ ещё N» (10.5px, accent, cursor:pointer) — клик раскрывает полный список (<code>zMore(key)</code> + флаг <code>window._zxOpen</code>, переживает автообновление). Тот же паттерн у Подсетей, Матрицы, API и Топ ресурсов. Сортировка по убыванию severity.</li>
+</ul>
+
+<h3>8.2 Ротации · IP · ёмкость</h3>
+<div class="demo"><div class="cap">Живой образец: чипы периода и KPI-плитка</div>
+<div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><span style="font-size:11px;color:var(--t2)">Период:</span><button class="x-chip">1 день</button><button class="x-chip">3 дня</button><button class="x-chip on">7 дней</button><button class="x-chip">14 дней</button><button class="x-chip">30 дней</button></div>
+<div style="display:flex;gap:8px;flex-wrap:wrap">
+<div class="x-kpi"><div class="l">Ротаций (7д)</div><div class="v">114 852</div></div>
+<div class="x-kpi"><div class="l">Успешность</div><div class="v" style="color:var(--ok)">98.4%</div></div>
+<div class="x-kpi"><div class="l">Подсетей/модем</div><div class="v" style="color:var(--ac)">41 <span style="font-size:10px;color:var(--t3)">/24</span></div></div>
+</div></div>
+<ul>
+<li><b>Чипы периода</b> <code>.dchip</code>: 10.5px/600, паддинг 4 12, радиус 13, bg-2/text-2; активный — accent-dim/accent; hover — bg-3. Значения 1/3/7/14/30 дней; клик пишет глобаль <code>_NEW_INFRA_DAYS</code> и перезагружает блок (<code>setNewInfraDays(d, el)</code>).</li>
+<li><b>KPI-ряд</b> — 4 плитки <code>.kpi-tile</code> (bg-2, радиус 9–10, паддинг 10–12, <b>text-align:center</b>; label 10px/600 UPPERCASE text-2; value 16–18px/700): «Ротаций (Nд)», «Успешность» (≥95 success / ≥80 warning / иначе danger), «Уникальных IP», «Подсетей/модем» (accent, суффикс «/24 · макс N»).</li>
+<li><b>Секции — стекнуты в одну колонку прямо на карточке</b> (без серых боксов), у каждой цветной подзаголовок 11px/700 обычным регистром: «Ротации по серверам» — синий <code>#3b9dd8</code>, «Подсети на модем (/24)» — фиолетовый <code>#965ac8</code>, «Ёмкость» — оранжевый <code>#ef9f27</code>. Таблицы: th 9.5px UPPERCASE text-3 (первая колонка слева, числа справа), td 12px с волосяным разделителем. «Ротации по серверам»: Сервер · Всего · Failed (0 — text-3, ≤25 — warning, &gt;25 — danger) · Avg с. «Подсети»: Модем · Сервер · Подсетей (accent 700) · Уник. IP — 8 строк + «+ ещё N». Таблиц «По операторам»/«Топ-модемы» в этом блоке нет.</li>
+<li><b>Ограничение строк:</b> топ-модемы и подсети — максимум 8 строк + футер «+ ещё N». Числовые колонки — справа, td паддинг 4 8.</li>
+<li><b>Ёмкость</b> — последняя секция: ряд из 4 центрированных KPI-плиток: Модемов · Серверов · Трафик (Nд) · Avg/модем (значения из <code>/api/analytics/capacity?days=D</code>).</li>
+<li>Данные: <code>/api/analytics/rotations?days=D</code>, <code>/api/analytics/ip_stats?days=D</code> (поля <code>subnet_summary</code>, <code>subnets</code>) и <code>/api/analytics/capacity?days=D</code> — один Promise.all.</li>
+</ul>
+
+<h3>8.3 Распределение задержек</h3>
+<ul>
+<li>Три KPI-плитки: «P50 МЕДИАНА» (напр. «0.76 с»), «P75» («0.93 с ▲7%»), «P99» («8.57 с ▲56%»). Дельта против прошлого периода — мелкий суффикс: рост danger, снижение success. P99 при больших значениях — danger.</li>
+<li>Полоса распределения: высота ~14px, радиус, сегменты слева направо: Быстрые (success) → ОК (success 50% прозрачности) → Медленные (warning) → Оч. медленные (тёмно-красный); в самом широком сегменте — его % белым 10px.</li>
+<li>Легенда под полосой (11px): точки-маркеры + «Быстрые 84% · ОК 5% · Медленные 8% · Оч. медл. 3%». Чипов стран нет — сводка всегда по всем.</li>
+<li>Данные: <code>/api/analytics/latency_stats</code> (buckets + P50/P75/P99 + prior для дельт).</li>
+</ul>
+
+<h2 id="s9"><span class="no">9.</span>Секция «Трафик»</h2>
+<h3>9.1 Почасовой трафик (открытая карточка)</h3>
+<ul>
+<li>Header: «Почасовой трафик» 14px/700 + «GMT+3 (МСК)» 9.5px text-3; справа переключатель видов — три таба «По странам / По операторам / По клиентам»: 11px/600 text-2, активный — accent с подчёркиванием 2px (нижняя граница контейнера bg-3, active border-bottom accent).</li>
+<li>Ряд чипов сущностей выбранного вида («Все страны», «Молдова», «Румыния» / операторы / клиенты) — стиль .dchip, активный accent-dim; текст без флагов и эмодзи.</li>
+<li>Сетка: строка = день (метка слева, ширина ~44px, две строки: «Пт» + «26 июня», 9.5px text-3) × 24 часовых ячейки; ячейка высота 13–15px, радиус 2, gap 2. Интенсивность — синий <code>rgba(24,95,165,α)</code>, α = .12 + v<sup>0.55</sup>·.88 от максимума; пустая — <code>#e9edf3</code>; неуверенные часы (corrected/uncertain) — диагональная штриховка поверх.</li>
+<li>Легенда градиента: «0 [8 ступеней] 495 МБ/мод».</li>
+<li>Сводка — 6 колонок под волосяной линией: label 9px UPPERCASE text-3, value 13px/700 (пиковый час и день — accent), sub 9.5px text-3: Всего за 7 дней · Ср. на модем/сут · Пиковый час · Тихий час («лучшее время для тех. работ») · Пиковый день · Ночной трафик (00:00–06:00).</li>
+<li>Данные: <code>/api/analytics/heatmap?view&amp;id&amp;days=7</code>. Выбранный вид/чип живут в JS-глобалях и переживают автообновление.</li>
+</ul>
+<h3>9.2 Потребление по дням (открытая карточка)</h3>
+<ul>
+<li>Header + переключатель «По клиентам / По странам» (тот же таб-стиль). Chart.js stacked bar, 60 дней, высота 300px; палитра — <code>getChartPaletteLight()</code> (12 цветов, utils.js; «Прочие» — <code>#cbd5e1</code>); бары с borderRadius 2; ось Y в ГБ (русские единицы), сетка/тики из getChartColorsLight, оси без border; легенда снизу кружками (usePointStyle, 6px, 10.5px).</li>
+</ul>
+<h3>9.3 Топ ресурсов (закрыта, но предзагружена)</h3>
+<ul><li>Без кнопки: <code>loadNewTopHosts()</code> вызывается при рендере дашборда — при раскрытии данные уже на месте. Бар сверху: чипы-фильтры клиентов (<code>.dchip</code>: «Все клиенты» + клиенты по убыванию хитов; активный — accent-dim; повторный клик = сброс), справа статус «50 хостов[ · Клиент]». Строки — домен (220px, ellipsis, mono) + полоса 6px accent по доле + число запросов mono справа <b>в коротком формате</b> («2.9M», «108.1k»). Показывается <b>топ-10</b> + футер «+ ещё N» (смена фильтра сворачивает раскрытие).</li></ul>
+<h3>9.4 Матрица трафика (закрыта)</h3>
+<ul><li>Инпут-фильтр (модем/клиент/оператор/сервер) + счётчик «N модемов» (при фильтре — «X из Y»). Колонки: <b>Модем · Оператор · Сервер · Клиент · ↓ Вход · ↑ Выход · Σ Всего · Тренд</b> (вход/выход/Σ — за месяц, mono; Тренд — ±% месяц-к-месяцу из <code>currentData.modemTrend</code>, success/danger). Сортировка по Σ месяца, показывается <b>топ-10</b> + футер «+ ещё N · сортировка по Σ месяца». Обёртка с <code>overflow-x:auto</code>.</li></ul>
+<h3>9.5 Обращения к API (открыта)</h3>
+<ul>
+<li>Бар: слева 4 чипа-фильтра типов — «API-ключ · Портал · Ротация по ссылке · Вебхук» (toggle, активный accent-dim); справа — селект периода (1 ч / 24 часа / 7 дней) + «· N запросов» со склонением (запрос/запроса/запросов).</li>
+<li>Таблица 11px: <b>Время</b> (HH:MM, text-2) · <b>Кто</b> (700 + identity mono 10px text-3) · <b>Тип</b> (цвет по типу: api_key — accent, portal — синий #378add, reset_link — success, webhook — фиолетовый #965ac8) · <b>Цель</b> · <b>Запрос</b> («GET /path» mono 10px text-3) · <b>Статус</b> (700: 2xx success / 4xx warning / 5xx danger) · <b>мс</b> (text-3) · <b>IP</b> (mono 10px text-3).</li>
+<li><b>Максимум 12 строк</b> + футер «+ ещё N за период». Данные: журнал <code>api_access_log</code> через <code>/api/admin/api_access?hours&amp;type</code>.</li>
+</ul>
+
+<h2 id="s10"><span class="no">10.</span>Поведение и обновление данных</h2>
+<ul>
+<li><b>Оркестратор</b> — <code>renderAccNew()</code>: вызывается при входе на вкладку и каждые 10 с из общего цикла <code>loadData()</code>.</li>
+<li><b>Троттлинг финансов:</b> <code>/api/admin/finance_dashboard</code> и график MRR обновляются не чаще раза в ~55 с; между тиками пересобирается только дешёвый DOM. Chart.js-инстансы не destroy/create на каждый тик — иначе видимое мигание.</li>
+<li><b>Раскрывашки:</b> открытые по умолчанию секции наполняет сам renderAccNew (guard <code>dataset.loaded</code>); закрытые грузятся при первом открытии (<code>toggle</code>-обработчик), «Ротации·IP·ёмкость» и «Обращения к API» перезагружаются при каждом открытии.</li>
+<li><b>Состояние переживает автообновление:</b> открытость details, выбранный период инфраструктуры (<code>_NEW_INFRA_DAYS</code>), фильтры API (<code>_apiAccessState</code>), вид/чип хитмапа — всё в JS-глобалях; рендер не должен их сбрасывать.</li>
+<li><b>Клики:</b> плитки внимания → попап списка модемов; ⏻/⟳ в «Топ проблемных» → экшены с тостами; строки клиентов некликабельны (просмотр).</li>
+<li><b>Пустые состояния:</b> каждая карточка обязана иметь текст-заглушку («Нет данных», «Загрузка…») 11–12px text-3 — контейнеры не схлопывать.</li>
+</ul>
+
+<h2 id="s11"><span class="no">11.</span>Адаптив</h2>
+<div class="tblwrap"><table class="spec">
+<tr><th>Брейкпоинт</th><th>Правила</th></tr>
+<tr><td>≤900px</td><td>Парк — 2 колонки</td></tr>
+<tr><td>≤820px</td><td>инфра-таблицы — 1 колонка</td></tr>
+<tr><td>≤768px</td><td>Пульс — 2×2; «Требует внимания» — 1 колонка; Финансы — 1 колонка; таблицы — <code>overflow-x:auto</code></td></tr>
+<tr><td>≤640px</td><td>att-grid — 2 колонки (сохраняется)</td></tr>
+<tr><td>≤560px</td><td>Парк — 1 колонка</td></tr>
+<tr><td>≤480px</td><td>мобильный режим приложения: нижний таб-бар, всё в 1 колонку, Пульс 2×2 (см. отдельную мобильную спеку в layout.css)</td></tr>
+</table></div>
+
+<h2 id="s12t"><span class="no">12а.</span>Канон токенов (унификация 03.07, весь кабинет)</h2>
+<ul>
+<li>Карточка: r12 / p14 (светлые hero — 13px 15px) / margin-bottom 12 / var(--card-shadow); суб-карточка в модалке: r8/p12; KPI-плитка: r10 / 11px 12px, лейбл 10px/600 UPPERCASE.</li>
+<li>Модалка: r12, тень 0 24px 64px rgba(0,0,0,.5), заголовок 14px; h3 карточек 14px/700 везде.</li>
+<li>Чип/пилюля — r999 (fs 10–10.5); микро-бейдж статуса — r8/fs9; сегмент-контрол: контейнер r8+pad2, кнопка r6/4px 12px/fs11; кнопки r8, селекты r8.</li>
+<li>letter-spacing лейблов: .5px/.05em (микро) и .7px (секционные 11px/700); кегли целые, допуски: 10.5 (чипы/футеры «+ ещё»), 11.5 (тело светлых таблиц).</li>
+<li>Таблицы: шапка-полоса bg-2/bg-3 r8 по краям, 10px/600/UPPERCASE/.5px; зебра var(--zebra) у всех стилей; без линий и рамок. Плотность модемной таблицы — намеренное исключение.</li>
+<li>Ритм: gap сеток карточек 12, KPI-сеток 10, icon-row 8; margin-bottom карточек/блоков 12.</li>
+</ul>
+<h2 id="s12"><span class="no">12.</span>Эндпоинты и карта кода</h2>
+<div class="tblwrap"><table class="spec">
+<tr><th>Блок</th><th>Данные</th><th>Рендер (admin.js)</th></tr>
+<tr><td>База (10 с)</td><td><code>GET /api/admin/data</code> → currentData (модемы, fleet, клиенты, proxyIssues)</td><td><code>renderAccNew()</code></td></tr>
+<tr><td>Пульс</td><td>currentData + finance summary</td><td><code>renderNewPulse()</code> → <code>#newPulseRow</code></td></tr>
+<tr><td>Требует внимания</td><td>currentData (+ clients)</td><td><code>renderNewExtWidgets()</code> → <code>#newExtWidgets</code> (3 карточки) + <code>loadTrendData('New')</code></td></tr>
+<tr><td>Парк</td><td>fleet.byServer + _modemMap</td><td><code>renderNewFleetServers()</code> → <code>#newFleetServers</code></td></tr>
+<tr><td>Финансы</td><td><code>GET /api/admin/finance_dashboard</code> (throttle 55 c)</td><td><code>loadNewFinance()</code> → график + «Качество выручки»</td></tr>
+<tr><td>Клиенты</td><td>clients + finance.per_client + трафик портов</td><td><code>renderNewClientTable()</code> → <code>#newClientTable</code></td></tr>
+<tr><td>Топ проблемных</td><td>_modemMap + правила issues</td><td><code>renderNewTopProblems()</code></td></tr>
+<tr><td>Ротации·IP</td><td><code>GET /api/analytics/rotations?days</code> + <code>ip_stats?days</code></td><td><code>reloadNewInfra()</code> (+ <code>setNewInfraDays</code>)</td></tr>
+<tr><td>Задержки</td><td><code>GET /api/analytics/latency_stats</code></td><td><code>renderLatencySummary()</code> → <code>#latencySummary</code></td></tr>
+<tr><td>Хитмап</td><td><code>GET /api/analytics/heatmap?view&amp;id&amp;days=7</code></td><td><code>loadNewHeatmap()</code></td></tr>
+<tr><td>Дни (60)</td><td><code>GET /api/admin/daily_traffic</code></td><td><code>loadNewDailyChart()</code></td></tr>
+<tr><td>Топ ресурсов</td><td><code>GET /api/analytics/logs_domains_full?limit=1[&amp;client=X]</code></td><td><code>loadNewTopHosts()</code> (предзагрузка + чипы клиентов)</td></tr>
+<tr><td>Матрица</td><td>collectTrafficData()</td><td><code>renderNewMatrix()</code></td></tr>
+<tr><td>API-журнал</td><td><code>GET /api/admin/api_access?hours&amp;type</code></td><td><code>loadNewApiAccess()</code> (cap 12)</td></tr>
+</table></div>
+<p>CSS: светлый scope и все компоненты дашборда — <code>public/css/finance.css</code> (секция <code>#tab-dashboard</code>); базовые раскрывашки/лейблы — <code>public/css/cards.css</code>; адаптив ≤768/≤480 — <code>public/css/layout.css</code>. Хелперы единиц и светлой палитры графиков — <code>public/js/utils.js</code> (<code>fmtGb</code>, <code>getChartColorsLight</code>).</p>
+</div>

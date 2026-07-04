@@ -223,3 +223,23 @@ describe('POST /api/admin/tochka/create_act — act actually reaches Tochka', ()
     expect(body.document.tochkaDocumentId).toBe('DOC-REG-1');
   });
 });
+
+describe('tochka config: masked jwt does not clobber the stored token', () => {
+  it('keeps stored jwt when the form echoes back the ****-mask', async () => {
+    await request(app).post('/api/admin/tochka/config').set('X-Auth-Token', adminToken)
+      .send({ jwt: 'real-jwt-token-abcdef12', companyInn: '1234567890' }).expect(200);
+    const g1 = await request(app).get('/api/admin/tochka/config').set('X-Auth-Token', adminToken).expect(200);
+    expect(g1.body.jwt).toMatch(/^\*\*\*\*/);
+    // форма сохраняется с маской (как делает UI при «Сохранить» без смены токена)
+    await request(app).post('/api/admin/tochka/config').set('X-Auth-Token', adminToken)
+      .send({ jwt: g1.body.jwt, companyInn: '9999999999' }).expect(200);
+    const g2 = await request(app).get('/api/admin/tochka/config').set('X-Auth-Token', adminToken).expect(200);
+    expect(g2.body.jwt).toBe('****' + 'real-jwt-token-abcdef12'.slice(-8));  // токен не затёрт маской
+    expect(g2.body.companyInn).toBe('9999999999');                            // остальные поля обновились
+  });
+
+  it('does not 500 on non-string fields', async () => {
+    await request(app).post('/api/admin/tochka/config').set('X-Auth-Token', adminToken)
+      .send({ clientId: null, companyKpp: 123 }).expect(200);
+  });
+});

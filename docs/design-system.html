@@ -1,0 +1,412 @@
+<title>Дизайн-система Arendaproxy — переносимая спецификация</title>
+<style>
+/* ═══ Документ свёрстан в самой описываемой системе ═══ */
+:root{
+  --bg-0:#f4f6f9; --bg-1:#ffffff; --bg-2:#f0f2f5; --bg-3:#e8eaef; --bg-4:#d8dce2;
+  --border:rgba(17,24,39,.09); --text-0:#10151f; --text-1:#39424f; --text-2:#697587; --text-3:#9aa4b3;
+  --accent:#2f6fe0; --accent-dim:rgba(47,111,224,.10);
+  --success:#16a34a; --warning:#b5740a; --danger:#dc3a34;
+  --green-bg:rgba(22,163,74,.10); --orange-bg:rgba(181,116,10,.12); --red-bg:rgba(220,58,52,.10);
+  --zebra:#f8fafc;
+  --card-shadow:0 1px 2px rgba(16,24,40,.05);
+  --font-sans:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+body{background:var(--bg-0);color:var(--text-1);font-family:var(--font-sans);font-size:13px;line-height:1.55;margin:0;padding:28px 20px 80px}
+.wrap{max-width:1080px;margin:0 auto}
+h1{font-size:22px;font-weight:700;color:var(--text-0);letter-spacing:-.3px;margin:0 0 6px;text-wrap:balance}
+.sub{color:var(--text-2);font-size:13px;max-width:70ch;margin:0 0 8px}
+.sec{display:flex;align-items:center;gap:8px;margin:34px 2px 12px;font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px}
+.sec::after{content:'';flex:1;height:1px;background:var(--border)}
+.card{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:14px 16px;box-shadow:var(--card-shadow);margin-bottom:12px}
+.card h3{font-size:14px;font-weight:700;color:var(--text-0);margin:0 0 10px}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(340px,100%),1fr));gap:12px;margin-bottom:12px}
+.grid3{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(230px,100%),1fr));gap:12px;margin-bottom:12px}
+p{margin:0 0 8px;max-width:78ch}
+code,.mono{font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+code{font-size:11.5px;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;padding:1px 5px;color:var(--text-0)}
+pre{background:#10151f;color:#d5dbe5;border-radius:10px;padding:14px 16px;font-family:var(--font-mono);font-size:11px;line-height:1.6;overflow-x:auto;margin:10px 0 2px}
+pre .c{color:#5f6b7d} pre .v{color:#8ab4ff} pre .s{color:#7fd0a0}
+details.code{border:1px solid var(--border);border-radius:10px;background:var(--bg-1);margin-top:10px;overflow:hidden}
+details.code>summary{cursor:pointer;padding:9px 14px;font-size:11px;font-weight:600;color:var(--accent);list-style:none;user-select:none}
+details.code>summary::-webkit-details-marker{display:none}
+details.code>summary::before{content:'‹›  ';font-family:var(--font-mono)}
+details.code>div{padding:0 14px 12px}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th{font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;text-align:left;padding:8px 10px;background:var(--bg-3)}
+th:first-child{border-radius:8px 0 0 8px} th:last-child{border-radius:0 8px 8px 0}
+td{padding:9px 10px;vertical-align:top}
+tbody tr:nth-child(even){background:var(--zebra)}
+.tr{text-align:right} th.tr{text-align:right}
+.sw{display:inline-block;width:14px;height:14px;border-radius:4px;border:1px solid rgba(0,0,0,.12);vertical-align:-2px;margin-right:7px}
+.tag{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--accent-dim);color:var(--accent)}
+.note{background:var(--orange-bg);border-radius:10px;padding:10px 14px;font-size:12px;color:#7a5410;margin:10px 0}
+/* ── живые образцы компонентов (克 системные классы) ── */
+.pulse-card{background:var(--bg-1);border:1px solid var(--border);border-top:2.5px solid var(--accent);border-radius:12px;padding:13px 15px;box-shadow:var(--card-shadow)}
+.pulse-card.ok{border-top-color:var(--success)}
+.pulse-label{font-size:11px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.pulse-value{font-size:23px;font-weight:700;color:var(--text-0);margin:5px 0 2px;font-feature-settings:"tnum";white-space:nowrap}
+.pulse-sub{font-size:11px;color:var(--text-3)}
+.kpi-tile{background:var(--bg-2);border-radius:10px;padding:11px 12px;min-width:0;text-align:center}
+.kpi-tile .l{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.kpi-tile .v{font-size:18px;font-weight:700;color:var(--text-0);line-height:1.15;font-feature-settings:"tnum";white-space:nowrap}
+.att-tile{display:flex;align-items:center;gap:9px;padding:10px 12px;border-radius:10px;font-size:12px;min-height:44px}
+.att-dot{width:8px;height:8px;border-radius:50%;flex-shrink:0}
+.att-label{flex:1;color:var(--text-1);font-weight:500;min-width:0}
+.att-count{font-size:16px;font-weight:700;font-feature-settings:"tnum"}
+.dchip{font-size:10.5px;font-weight:600;padding:4px 12px;border-radius:999px;background:var(--bg-2);color:var(--text-2);border:none;cursor:pointer;font-family:inherit}
+.dchip.on{background:var(--accent-dim);color:var(--accent)}
+.pill{display:inline-block;font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px}
+.microbadge{display:inline-block;font-size:9px;font-weight:600;padding:1px 6px;border-radius:8px;text-transform:uppercase;letter-spacing:.05em}
+.statuspill{display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;letter-spacing:.05em;padding:3px 8px;border-radius:8px;color:#fff;line-height:1;text-transform:uppercase;min-width:42px}
+.btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:500;display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);color:var(--text-1);font-family:inherit}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-sm{padding:5px 10px;font-size:11px}
+.seg{display:inline-flex;gap:2px;background:var(--bg-2);border-radius:8px;padding:2px}
+.seg button{padding:4px 12px;border:none;background:none;border-radius:6px;font-size:11px;color:var(--text-2);cursor:pointer;font-family:inherit;font-weight:500}
+.seg button.on{background:var(--accent);color:#fff;font-weight:600}
+.utab{background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;font-family:inherit}
+.utab.on{border-bottom-color:var(--accent);color:var(--accent);font-weight:600}
+.inp{padding:8px 12px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:inherit;outline:none}
+.tgl{position:relative;display:inline-block;width:38px;height:22px;cursor:pointer;vertical-align:middle}
+.tgl input{opacity:0;width:0;height:0;position:absolute}
+.tgl span{position:absolute;inset:0;background:var(--bg-4);border-radius:999px;transition:.15s}
+.tgl span::before{content:'';position:absolute;left:2px;top:2px;width:18px;height:18px;background:#fff;border-radius:50%;transition:.15s}
+.tgl input:checked+span{background:var(--accent)}
+.tgl input:checked+span::before{transform:translateX(16px)}
+.bar{height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden}
+.bar>i{display:block;height:100%;border-radius:3px}
+.acc{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;box-shadow:var(--card-shadow);margin-bottom:12px;overflow:hidden}
+.acc>summary{padding:13px 16px;cursor:pointer;font-size:13px;font-weight:600;color:var(--text-0);list-style:none;display:flex;align-items:center;gap:8px;user-select:none}
+.acc>summary::-webkit-details-marker{display:none}
+.acc>summary::after{content:'›';color:var(--text-3);margin-left:auto;font-size:15px;transform:rotate(90deg);transition:transform .15s}
+.acc[open]>summary::after{transform:rotate(-90deg)}
+.acc>div{padding:0 16px 16px}
+.darkpanel{background:#0D0D0E;border-radius:12px;padding:16px;color:#c9d1d9}
+.darkpanel .dcard{background:rgba(18,23,36,.9);border:1px solid rgba(255,255,255,.06);border-radius:12px;padding:12px 14px;box-shadow:0 4px 24px rgba(0,0,0,.3)}
+@media(max-width:480px){body{padding:16px 10px 60px}}
+</style>
+
+<div class="wrap">
+<h1>Дизайн-система Arendaproxy v2</h1>
+<p class="sub">Переносимая спецификация: токены, типографика, компоненты и правила вёрстки, достаточные для воспроизведения дизайна в другом проекте с нуля. Эта страница сама свёрстана по описываемой системе — каждый образец «живой», рядом — CSS для копирования.</p>
+<span class="tag">версия 2.0 · 3 июля 2026</span>
+
+<div class="sec">0 · Философия</div>
+<div class="card">
+<p><strong>Это плотный операционный UI</strong>, который сканируют, а не читают. Пять принципов, из которых выводится всё остальное:</p>
+<p>1 · <strong>Две темы по назначению.</strong> Операционные страницы (парк устройств, настройки) — тёмные; денежные и обзорные (дашборд, финансы) — светлые. Метрики (радиусы, отступы, шрифты) общие, различаются только цвета.</p>
+<p>2 · <strong>Белые карточки на сером поле.</strong> Вся информация живёт в карточках r12 с волосяной границей и еле заметной тенью. Фон страницы никогда не белый.</p>
+<p>3 · <strong>Таблицы без линий.</strong> Ни рамок, ни разделителей строк — только «зебра» чётных строк и шапка-полоса со скруглёнными краями.</p>
+<p>4 · <strong>Семантический цвет ≠ акцент.</strong> Синий акцент — для навигации и действий. Состояния — всегда зелёный/янтарный/красный, и почти всегда на тонированной подложке (10–12% прозрачности), а не сплошной заливкой.</p>
+<p>5 · <strong>Цифры — моноширинные.</strong> Всё числовое — <span class="mono">JetBrains Mono</span> или <code>font-feature-settings:"tnum"</code>, чтобы колонки цифр стояли ровно.</p>
+</div>
+
+<div class="sec">1 · Цветовые токены</div>
+<div class="grid2">
+<div class="card"><h3>Светлая тема (дашборд, финансы)</h3>
+<table><thead><tr><th>Токен</th><th>Значение</th><th>Роль</th></tr></thead><tbody>
+<tr><td><code>--bg-0</code></td><td class="mono"><span class="sw" style="background:#f4f6f9"></span>#f4f6f9</td><td>фон страницы</td></tr>
+<tr><td><code>--bg-1</code></td><td class="mono"><span class="sw" style="background:#fff"></span>#ffffff</td><td>карточки</td></tr>
+<tr><td><code>--bg-2</code></td><td class="mono"><span class="sw" style="background:#f0f2f5"></span>#f0f2f5</td><td>плитки, чипы, инпуты</td></tr>
+<tr><td><code>--bg-3</code></td><td class="mono"><span class="sw" style="background:#e8eaef"></span>#e8eaef</td><td>шапки таблиц, треки баров</td></tr>
+<tr><td><code>--border</code></td><td class="mono">rgba(17,24,39,.09)</td><td>все границы</td></tr>
+<tr><td><code>--text-0…3</code></td><td class="mono">#10151f · #39424f · #697587 · #9aa4b3</td><td>заголовки · текст · вторичный · подписи</td></tr>
+<tr><td><code>--accent</code></td><td class="mono"><span class="sw" style="background:#2f6fe0"></span>#2f6fe0</td><td>акцент (+ dim rgba(47,111,224,.10))</td></tr>
+<tr><td><code>--success</code></td><td class="mono"><span class="sw" style="background:#16a34a"></span>#16a34a</td><td>хорошо</td></tr>
+<tr><td><code>--warning</code></td><td class="mono"><span class="sw" style="background:#b5740a"></span>#b5740a</td><td>внимание (текстовый амбер)</td></tr>
+<tr><td><code>--danger</code></td><td class="mono"><span class="sw" style="background:#dc3a34"></span>#dc3a34</td><td>плохо</td></tr>
+<tr><td><code>--zebra</code></td><td class="mono"><span class="sw" style="background:#f8fafc"></span>#f8fafc</td><td>чётные строки таблиц</td></tr>
+</tbody></table>
+<p style="margin-top:8px;font-size:11.5px;color:var(--text-2)">Для заливок баров/бейджей warning берётся ярче текстового: <code>#f0a533</code>; danger-заливка <code>#ef4444</code>, success-заливка <code>#10b981</code>.</p>
+</div>
+<div class="card"><h3>Тёмная тема (операционные страницы)</h3>
+<table><thead><tr><th>Токен</th><th>Значение</th><th>Роль</th></tr></thead><tbody>
+<tr><td><code>--bg-0</code></td><td class="mono"><span class="sw" style="background:#0D0D0E"></span>#0D0D0E</td><td>фон страницы</td></tr>
+<tr><td><code>--bg-1</code></td><td class="mono"><span class="sw" style="background:#121724"></span>#121724</td><td>карточки (как rgba(18,23,36,.7)+blur)</td></tr>
+<tr><td><code>--bg-2 / 3 / 4</code></td><td class="mono">#1B2237 · #1c2432 · #243044</td><td>плитки · шапки · треки</td></tr>
+<tr><td><code>--border</code></td><td class="mono">rgba(255,255,255,.06)</td><td>границы (hover .12)</td></tr>
+<tr><td><code>--text-0…3</code></td><td class="mono">#f0f6fc · #c9d1d9 · #7d8590 · #484f58</td><td>4 ступени</td></tr>
+<tr><td><code>--accent</code></td><td class="mono"><span class="sw" style="background:#1960C9"></span>#1960C9</td><td>акцент (dim rgba(25,96,201,.12))</td></tr>
+<tr><td><code>--success/warning/danger</code></td><td class="mono">#34C759 · #FFCC00 · #FF383C</td><td>состояния</td></tr>
+<tr><td><code>--zebra</code></td><td class="mono">rgba(255,255,255,.03)</td><td>чётные строки</td></tr>
+<tr><td><code>--card-shadow</code></td><td class="mono" style="font-size:10px">0 4px 24px rgba(0,0,0,.3), 0 0 0 1px rgba(255,255,255,.03)</td><td>тень карточек</td></tr>
+</tbody></table>
+<p style="margin-top:8px;font-size:11.5px;color:var(--text-2)">Тёмные карточки — «стекло»: <code>background:rgba(18,23,36,.7); backdrop-filter:blur(12px)</code>. Светлые — сплошной белый, тень <code>0 1px 2px rgba(16,24,40,.05)</code>.</p>
+</div>
+</div>
+<div class="card"><h3>Категориальная палитра графиков (светлая тема)</h3>
+<p class="mono" style="font-size:11px">#2f6fe0 · #10b981 · #f59e0b · #8b5cf6 · #ec4899 · #14b8a6 · #f97316 · #6366f1 · #84cc16 · #0ea5e9 · #e11d48 · #a855f7 &nbsp;&nbsp;(«Прочие» — #cbd5e1)</p>
+<div style="display:flex;gap:4px;margin-top:6px">
+<span class="sw" style="background:#2f6fe0"></span><span class="sw" style="background:#10b981"></span><span class="sw" style="background:#f59e0b"></span><span class="sw" style="background:#8b5cf6"></span><span class="sw" style="background:#ec4899"></span><span class="sw" style="background:#14b8a6"></span><span class="sw" style="background:#f97316"></span><span class="sw" style="background:#6366f1"></span><span class="sw" style="background:#84cc16"></span><span class="sw" style="background:#0ea5e9"></span><span class="sw" style="background:#e11d48"></span><span class="sw" style="background:#a855f7"></span><span class="sw" style="background:#cbd5e1"></span>
+</div>
+</div>
+
+<div class="sec">2 · Типографика</div>
+<div class="card">
+<table><thead><tr><th>Роль</th><th>Начертание</th><th>Пример</th></tr></thead><tbody>
+<tr><td>Шрифты</td><td class="mono" style="font-size:10.5px">'Inter', -apple-system, sans-serif · числа/код: 'JetBrains Mono','SF Mono', monospace</td><td>—</td></tr>
+<tr><td>H2 страницы</td><td class="mono">18px / 700 / −.3px</td><td style="font-size:18px;font-weight:700;color:var(--text-0);letter-spacing:-.3px">Командный центр</td></tr>
+<tr><td>H3 карточки</td><td class="mono">14px / 700</td><td style="font-size:14px;font-weight:700;color:var(--text-0)">Качество выручки</td></tr>
+<tr><td>Секционный лейбл</td><td class="mono">11px / 700 / UPPERCASE / .7px + линия</td><td><span style="font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px">Пульс бизнеса</span></td></tr>
+<tr><td>Микролейбл (KPI, th)</td><td class="mono">10px / 600 / UPPERCASE / .5px</td><td><span style="font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px">Активных клиентов</span></td></tr>
+<tr><td>Тело интерфейса</td><td class="mono">12–13px / 400–500</td><td>Обычный текст и подписи</td></tr>
+<tr><td>Тело таблиц</td><td class="mono">11px тёмные · 11.5px светлые</td><td style="font-size:11.5px">строка таблицы</td></tr>
+<tr><td>Большое число KPI</td><td class="mono">18–23px / 700 / tnum</td><td class="mono" style="font-size:20px;font-weight:700;color:var(--text-0)">646 819 ₽</td></tr>
+</tbody></table>
+<p style="margin-top:8px;font-size:11.5px;color:var(--text-2)">Кегельная шкала — целые значения 9/10/11/12/13/14/18; допущены два дробных токена: <code>10.5px</code> (чипы-фильтры и футеры «+ ещё N») и <code>11.5px</code> (тело светлых таблиц). Letter-spacing только два: <code>.5px/.05em</code> для микролейблов, <code>.7px</code> для секционных.</p>
+</div>
+
+<div class="sec">3 · Геометрия: радиусы, отступы, ритм</div>
+<div class="card">
+<table><thead><tr><th>Элемент</th><th class="tr">Радиус</th><th>Паддинг</th><th>Прочее</th></tr></thead><tbody>
+<tr><td>Карточка</td><td class="mono tr">12px</td><td class="mono">14px 16px (hero — 13px 15px)</td><td class="mono">margin-bottom 12px; border 1px; card-shadow</td></tr>
+<tr><td>KPI-плитка внутри карточки</td><td class="mono tr">10px</td><td class="mono">11px 12px</td><td>фон bg-2, без границы и тени</td></tr>
+<tr><td>Суб-карточка в модалке</td><td class="mono tr">8px</td><td class="mono">12px</td><td>вложенные — плоские (без тени)</td></tr>
+<tr><td>Модальное окно</td><td class="mono tr">12px</td><td class="mono">header/body 14px 24px</td><td class="mono">тень 0 24px 64px rgba(0,0,0,.5)</td></tr>
+<tr><td>Кнопка / инпут / селект</td><td class="mono tr">8px</td><td class="mono">8px 14px (sm: 5px 10px)</td><td>граница 1px всегда</td></tr>
+<tr><td>Малая кнопка-иконка</td><td class="mono tr">6px</td><td class="mono">2px 7px</td><td>26×26 в строках таблиц</td></tr>
+<tr><td>Чип / пилюля</td><td class="mono tr">999px</td><td class="mono">4px 12px (теги: 2px 8px)</td><td>фильтры, теги, статусы-подписи</td></tr>
+<tr><td>Микро-бейдж состояния</td><td class="mono tr">8px</td><td class="mono">1px 6px / 3px 8px</td><td>9px UPPERCASE</td></tr>
+<tr><td>Прогресс-бар</td><td class="mono tr">3px (999 у толстых)</td><td>высота 6px</td><td>трек bg-3</td></tr>
+</tbody></table>
+<p style="margin-top:8px"><strong>Ритм:</strong> вертикальный отступ между карточками и блоками — <code>12px</code> везде. Гэпы сеток: карточные — <code>12px</code>, KPI-плитки — <code>10px</code>, иконка+текст — <code>8px</code>. Схлопывающиеся сетки — через <code>repeat(auto-fit, minmax(min(240px,100%),1fr))</code>, а не медиазапросы.</p>
+</div>
+
+<div class="sec">4 · Компоненты (живые образцы)</div>
+
+<div class="card"><h3>Hero-KPI «пульс» — карточка с цветным верхом</h3>
+<div class="grid3">
+  <div class="pulse-card"><div class="pulse-label">Трафик сегодня</div><div class="pulse-value">406 ГБ</div><div class="pulse-sub">по всему парку</div></div>
+  <div class="pulse-card ok"><div class="pulse-label">Активные модемы</div><div class="pulse-value">86/86</div><div class="pulse-sub">в работе</div></div>
+  <div class="pulse-card"><div class="pulse-label">Выручка (MRR)</div><div class="pulse-value">646 819 ₽</div><div class="pulse-sub" style="color:var(--success)">▲ +22.1% М/М</div></div>
+</div>
+<details class="code"><summary>CSS</summary><div><pre>.pulse-card{background:var(--bg-1);border:1px solid var(--border);
+  <span class="v">border-top:2.5px solid var(--accent)</span>;border-radius:12px;
+  padding:13px 15px;box-shadow:var(--card-shadow)}
+<span class="c">/* модификаторы: border-top-color: var(--success|--warning|--danger) */</span>
+.pulse-label{font-size:11px;color:var(--text-2);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
+.pulse-value{font-size:23px;font-weight:700;color:var(--text-0);margin:5px 0 2px;font-feature-settings:"tnum"}
+.pulse-sub{font-size:11px;color:var(--text-3)}</pre></div></details>
+</div>
+
+<div class="grid2">
+<div class="card"><h3>KPI-плитка (внутри карточек)</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+  <div class="kpi-tile"><div class="l">NRR · 3 мес</div><div class="v" style="color:var(--success)">173.7%</div></div>
+  <div class="kpi-tile"><div class="l">ARPU</div><div class="v">71 869 ₽</div></div>
+</div>
+<details class="code"><summary>CSS</summary><div><pre>.kpi-tile{background:var(--bg-2);border-radius:10px;padding:11px 12px;text-align:center}
+.kpi-tile .l{font-size:10px;color:var(--text-3);text-transform:uppercase;
+  letter-spacing:.05em;font-weight:600;margin-bottom:4px}
+.kpi-tile .v{font-size:18px;font-weight:700;color:var(--text-0);font-feature-settings:"tnum"}</pre></div></details>
+</div>
+<div class="card"><h3>Плитка-алерт (тонированная, кликабельная)</h3>
+<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px">
+  <div class="att-tile" style="background:var(--green-bg)"><span class="att-dot" style="background:var(--success)"></span><span class="att-label">Модем отключен</span><span class="att-count" style="color:var(--success)">0</span></div>
+  <div class="att-tile" style="background:var(--red-bg);cursor:pointer"><span class="att-dot" style="background:var(--danger)"></span><span class="att-label">Сбоит прокси</span><span class="att-count" style="color:var(--danger)">29</span></div>
+</div>
+<details class="code"><summary>CSS</summary><div><pre>.att-tile{display:flex;align-items:center;gap:9px;padding:10px 12px;
+  border-radius:10px;font-size:12px;min-height:44px}
+<span class="c">/* фон: green-bg если 0, red/orange-bg если &gt;0; счётчик тем же цветом */</span>
+.att-dot{width:8px;height:8px;border-radius:50%}
+.att-count{font-size:16px;font-weight:700}</pre></div></details>
+</div>
+</div>
+
+<div class="card"><h3>Чипы, пилюли, бейджи — четыре роли</h3>
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+  <button class="dchip on">Все клиенты</button><button class="dchip">Brandanalytics</button>
+  <span class="pill" style="background:var(--accent-dim);color:var(--accent)">23₽/ГБ</span>
+  <span class="pill" style="background:var(--bg-2);color:var(--text-2)">3397₽/мод</span>
+  <span class="microbadge" style="background:var(--orange-bg);color:#9a6309">пауза</span>
+  <span class="microbadge" style="background:var(--accent-dim);color:var(--accent)">OS</span>
+  <span class="statuspill" style="background:linear-gradient(135deg,#28b94e,#1d9e3d)">Online</span>
+  <span class="statuspill" style="background:linear-gradient(135deg,#e84141,#c92929)">Offline</span>
+</div>
+<table><thead><tr><th>Роль</th><th>Метрики</th><th>Когда</th></tr></thead><tbody>
+<tr><td>Чип-фильтр <code>.dchip</code></td><td class="mono">r999 · 4px 12px · 10.5px/600</td><td>переключаемые фильтры; активный — accent-dim фон + accent текст</td></tr>
+<tr><td>Пилюля-тег</td><td class="mono">r999 · 2px 8px · 10px/600</td><td>тарифы, имена портов; смысловой цвет на dim-подложке</td></tr>
+<tr><td>Микро-бейдж</td><td class="mono">r8 · 1px 6px · 9px/600 CAPS</td><td>короткие состояния в строках (пауза, лимит)</td></tr>
+<tr><td>Статус-пилюля</td><td class="mono">r8 · 3px 8px · 9px/700 CAPS, белый на градиенте</td><td>главный статус сущности (online/offline)</td></tr>
+</tbody></table>
+</div>
+
+<div class="grid2">
+<div class="card"><h3>Кнопки и переключатели</h3>
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+  <button class="btn btn-primary">+ Клиент</button>
+  <button class="btn">Детали</button>
+  <button class="btn btn-sm">↻ Обновить</button>
+  <span class="seg"><button class="on">Таблица</button><button>Сетка</button></span>
+  <span style="border-bottom:2px solid var(--bg-3);display:inline-flex"><button class="utab on">По странам</button><button class="utab">По клиентам</button></span>
+  <label class="tgl"><input type="checkbox" checked><span></span></label>
+</div>
+<details class="code"><summary>CSS</summary><div><pre>.btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);
+  font-size:12px;font-weight:500;background:var(--bg-2);color:var(--text-1)}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.btn-sm{padding:5px 10px;font-size:11px}
+<span class="c">/* сегмент: контейнер r8 + pad 2px; кнопка r6, 4px 12px, активная = accent */</span>
+<span class="c">/* underline-таб: border-bottom 2px transparent → accent (для видов графика) */</span>
+<span class="c">/* тумблер: 38×22, трек r999 bg-4→accent, кругляш 18px */</span></pre></div></details>
+</div>
+<div class="card"><h3>Инпуты и поиск</h3>
+<div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+  <input class="inp" placeholder="Сумма">
+  <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="#9aa4b3" stroke-width="1.4"/><path d="M11 11l3 3" stroke="#9aa4b3" stroke-width="1.4" stroke-linecap="round"/></svg><input style="border:none;background:none;outline:none;font-size:12px;color:var(--text-0);font-family:inherit;width:130px" placeholder="Поиск клиента…"></span>
+</div>
+<details class="code"><summary>CSS</summary><div><pre>.form-input{padding:8px 12px;background:var(--bg-2);border:1px solid var(--border);
+  border-radius:8px;font-size:12px;color:var(--text-0)}
+<span class="c">/* поиск = пилюля r999 (span-обёртка) + безрамочный input внутри */</span></pre></div></details>
+</div>
+</div>
+
+<div class="card"><h3>Таблица-«зебра» — единственный стиль таблиц</h3>
+<table style="margin-bottom:4px"><thead><tr><th>Клиент</th><th class="tr">Live</th><th class="tr">Сегодня</th><th class="tr">Тариф</th><th class="tr">MRR</th><th class="tr">Δ М/М</th></tr></thead><tbody>
+<tr><td><span style="display:inline-block;width:3px;height:16px;background:#2f6fe0;border-radius:2px;vertical-align:-3px;margin-right:7px"></span><strong style="color:var(--text-0)">ООО «ВАЙЛДБОКС»</strong></td><td class="mono tr" style="color:var(--success);font-weight:600">75/77</td><td class="mono tr">3.3 ГБ</td><td class="tr"><span class="pill" style="background:var(--bg-2);color:var(--text-2)">3397₽/мод</span></td><td class="mono tr" style="font-weight:600">261 233 ₽</td><td class="tr" style="color:var(--success)">+2.4%</td></tr>
+<tr><td><span style="display:inline-block;width:3px;height:16px;background:#10b981;border-radius:2px;vertical-align:-3px;margin-right:7px"></span><strong style="color:var(--text-0)">ООО «ПАЛИТРУМЛАБ»</strong></td><td class="mono tr" style="color:var(--success);font-weight:600">25/25</td><td class="mono tr">200 ГБ</td><td class="tr"><span class="pill" style="background:var(--accent-dim);color:var(--accent)">23₽/ГБ</span></td><td class="mono tr" style="font-weight:600">249 819 ₽</td><td class="tr" style="color:var(--success)">+62.9%</td></tr>
+<tr><td><span style="display:inline-block;width:3px;height:16px;background:#f59e0b;border-radius:2px;vertical-align:-3px;margin-right:7px"></span><strong style="color:var(--text-0)">trofimovs</strong></td><td class="mono tr" style="color:var(--warning);font-weight:600">7/8</td><td class="mono tr">9.0 МБ</td><td class="tr"><span class="pill" style="background:var(--bg-2);color:var(--text-2)">2350₽/мод</span></td><td class="mono tr" style="font-weight:600">16 175 ₽</td><td class="tr" style="color:var(--success)">+41.9%</td></tr>
+</tbody></table>
+<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:6px 0 0">+ ещё 4</div>
+<details class="code"><summary>CSS</summary><div><pre>table{width:100%;border-collapse:collapse;font-size:11.5px}  <span class="c">/* 11px в тёмной теме */</span>
+th{font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;
+  letter-spacing:.5px;padding:8px 10px;<span class="v">background:var(--bg-3)</span>;text-align:right}
+th:first-child{<span class="v">border-radius:8px 0 0 8px</span>;text-align:left}
+th:last-child{border-radius:0 8px 8px 0}
+td{padding:9px 10px;text-align:right;border:none;white-space:nowrap}
+td:first-child{text-align:left}
+<span class="v">tbody tr:nth-child(even){background:var(--zebra)}</span>
+tbody tr:hover{background:var(--bg-2)}
+<span class="c">/* НИКАКИХ границ ячеек и внешних рамок. Правила:
+   текстовые колонки — влево, числовые — вправо; числа — mono;
+   первая колонка — цветной риска 3×16 r2 + имя 600;
+   длинные списки: показать 8–12 строк + кликабельный футер «+ ещё N»
+   (10.5px, accent), клик раскрывает всё;
+   широкая таблица всегда в обёртке &lt;div style="overflow-x:auto"&gt; */</span></pre></div></details>
+</div>
+
+<div class="grid2">
+<div class="card"><h3>Прогресс-бары и распределения</h3>
+<div style="display:grid;gap:9px;margin-bottom:10px">
+  <div><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span style="font-weight:600">Top-1 <span style="color:var(--text-3)">ООО «ВАЙЛДБОКС»</span></span><span class="mono" style="font-weight:600;color:var(--text-0)">40.4%</span></div><div class="bar"><i style="width:40%;background:#f0a533"></i></div></div>
+  <div><div style="display:flex;justify-content:space-between;font-size:11px;margin-bottom:3px"><span style="font-weight:600">Top-3</span><span class="mono" style="font-weight:600;color:var(--text-0)">93.2%</span></div><div class="bar"><i style="width:93%;background:var(--accent)"></i></div></div>
+  <div style="display:flex;align-items:center;gap:10px;font-size:11px"><span style="flex:0 1 160px;min-width:90px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">www.facebook.com</span><div class="bar" style="flex:1"><i style="width:100%;background:var(--accent)"></i></div><span class="mono" style="flex:0 0 46px;text-align:right;color:var(--text-2)">1.5M</span></div>
+</div>
+<details class="code"><summary>CSS</summary><div><pre><span class="c">/* трек 6px bg-3 r3; филл r3 смысловым цветом;
+   подпись 11px + значение mono/600 в строке над баром;
+   рейтинги: имя (сжимаемое) + бар flex:1 + число справа */</span></pre></div></details>
+</div>
+<div class="card"><h3>Раскрывашка-секция (details/summary)</h3>
+<details class="acc" open><summary><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#2f6fe0" stroke-width="1.8" stroke-linecap="round"><path d="M12 4 2.5 20h19L12 4z"/><line x1="12" y1="10" x2="12" y2="14"/></svg>Топ проблемных модемов</summary><div><p style="font-size:12px;color:var(--text-2);margin:0">Контент секции — таблица или сетка. Открытые по умолчанию получают атрибут <code>open</code>, содержимое ленивых грузится по первому раскрытию.</p></div></details>
+<details class="code"><summary>CSS</summary><div><pre>details.acc{background:var(--bg-1);border:1px solid var(--border);
+  border-radius:12px;box-shadow:var(--card-shadow);overflow:hidden}
+summary{padding:13px 16px;font-size:13px;font-weight:600;color:var(--text-0);
+  display:flex;align-items:center;gap:8px;list-style:none;cursor:pointer}
+summary::after{content:'›';margin-left:auto;color:var(--text-3);font-size:15px;
+  transform:rotate(90deg);transition:transform .15s}
+details[open] summary::after{transform:rotate(-90deg)}
+<span class="c">/* слева в summary — inline-SVG иконка цветом accent, 15–16px, stroke 1.8 */</span></pre></div></details>
+</div>
+</div>
+
+<div class="card"><h3>Секционные лейблы и иконки</h3>
+<div class="sec" style="margin:6px 0 12px">Пульс бизнеса</div>
+<p style="font-size:12px">Страница дашборда делится не заголовками, а <strong>лейблами-линейками</strong>: серый uppercase-текст 11px/700/.7px + серая SVG-иконка 14px, справа линия 1px до края. <strong>Иконки</strong> — только инлайн-SVG (никаких эмодзи и icon-фонтов): viewBox 24×24, <code>fill:none; stroke:currentColor; stroke-width:1.8; stroke-linecap/join:round</code>; в навигации 18px, в заголовках 14–16px. Цвет наследуется от текста; акцентные — <code>color:var(--accent)</code>.</p>
+</div>
+
+<div class="card"><h3>Графики (Chart.js)</h3>
+<p style="font-size:12px">Единый вид: <strong>сетка</strong> только горизонтальная <code>rgba(0,0,0,.07)</code> (тёмная тема: rgba(255,255,255,.06)), без осевых линий (<code>border.display:false</code>) и без тиков; <strong>подписи осей</strong> #6b7280, 10px. <strong>Бары</strong>: <code>borderRadius:5, borderSkipped:false, maxBarThickness:42, barPercentage:.6</code> (у плотных 60-дневных — borderRadius:2). <strong>Легенда</strong>: либо HTML-точки 8px в шапке карточки, либо Chart.js снизу c <code>usePointStyle:'circle', boxWidth:6</code>. <strong>Тултип</strong>: белый, r6, с итоговой строкой «Итого». Высоты: главный график 230px, дневной 300px (мобайл 220px).</p>
+</div>
+
+<div class="sec">5 · Каркас приложения</div>
+<div class="grid2">
+<div class="card"><h3>Левый сайдбар (десктоп ≥769px)</h3>
+<p style="font-size:12px">Фикс-панель <strong>208px</strong>, фон bg-1, правая граница 1px. Три яруса, разделённые линиями:</p>
+<p style="font-size:12px">1 · <strong>Бренд</strong>: лого 24px + название 14px/700/−.2px.<br>
+2 · <strong>Навигация</strong> (flex:1): пункты — строка «иконка 18px + текст 13px», r8, паддинг 9px 12px, gap 2px между пунктами; hover bg-2; активный — accent-dim фон, accent текст/иконка, вес 600 и полоска 2.5px слева.<br>
+3 · <strong>Футер</strong>: версия (10px mono, text-3) слева · тема · уведомления · выход. Без часов и статистики.</p>
+</div>
+<div class="card"><h3>Страницы и шапки</h3>
+<p style="font-size:12px"><strong>Контент</strong>: паддинг 18px 26px, одна колонка карточек. <strong>Двухъярусная шапка страницы</strong>: ряд 1 — заголовок 16px/600 слева, поиск-пилюля + первичная кнопка справа, разделитель снизу; ряд 2 — чипы-фильтры со счётчиками слева, селекты/тогл вида справа. <strong>Суб-навигация внутри страницы</strong> (Финансы, Настройки) — свой мини-сайдбар ~200px с группами (лейбл 11px caps) и пунктами как в главном сайдбаре.</p>
+<p style="font-size:12px"><strong>Модалки</strong>: r12, тень 0 24px 64px rgba(0,0,0,.5), шапка 14px 24px с заголовком 14px/600 и ×, вкладки — underline-табы; ширина 660–740px, max-width 95vw.</p>
+</div>
+</div>
+
+<div class="sec">6 · Мобильная адаптация</div>
+<div class="card">
+<p style="font-size:12px"><strong>Правило №1: контент идентичен десктопу</strong> — ничего не скрывается, всё адаптируется. Два брейкпоинта: <code>≤768px</code> (уходит сайдбар) и <code>≤480px</code> (телефон).</p>
+<table><thead><tr><th>Паттерн</th><th>Как</th></tr></thead><tbody>
+<tr><td>Навигация</td><td>сайдбар → верхний бар; на ≤480 — <strong>нижний таб-бар</strong> (fixed, 6 пунктов «иконка над подписью», body padding-bottom 58px)</td></tr>
+<tr><td>Широкие таблицы</td><td>никогда не резать: обёртка <code>overflow-x:auto; -webkit-overflow-scrolling:touch</code> у карточки/тела секции</td></tr>
+<tr><td>Реестры-таблицы (парк устройств)</td><td>на ≤480 CSS-карточкизация: thead скрыт, <code>tr</code> → карточка flex-column, каждый <code>td</code> → строка «лейбл: значение» через <code>td::before{content:attr(data-label)}</code>; статус-пилюля и заголовок наверх через <code>order</code>; индикатор проблемы — цветная левая кромка 4px</td></tr>
+<tr><td>Сетки</td><td><code>minmax(min(Npx,100%),1fr)</code> — схлопываются сами; KPI-ряды 4→2 колонки; hero 4→2×2</td></tr>
+<tr><td>Шапки страниц</td><td><code>flex-wrap</code>: поиск на всю ширину второй строкой, инпутам <code>width:100%!important</code></td></tr>
+<tr><td>Модалки</td><td><code>width:95vw!important; max-height:90vh</code>; полоса вкладок — в overflow-x:auto</td></tr>
+<tr><td>Плотность</td><td>паддинги страниц 24px→12px; кегль таблиц −1px; графики −30% высоты</td></tr>
+</tbody></table>
+</div>
+
+<div class="sec">7 · Стартовый CSS — скопируй и начни</div>
+<div class="card">
+<details class="code" open><summary>tokens.css (обе темы)</summary><div><pre><span class="c">/* Тёмная — по умолчанию; светлая — [data-theme="light"] либо скоупом на страницу */</span>
+:root,[data-theme="dark"]{
+  --bg-0:#0D0D0E;--bg-1:#121724;--bg-2:#1B2237;--bg-3:#1c2432;--bg-4:#243044;
+  --border:rgba(255,255,255,.06);--border-hover:rgba(255,255,255,.12);
+  --text-0:#f0f6fc;--text-1:#c9d1d9;--text-2:#7d8590;--text-3:#484f58;
+  --accent:#1960C9;--accent-dim:rgba(25,96,201,.12);
+  --success:#34C759;--warning:#FFCC00;--danger:#FF383C;
+  --green-bg:rgba(52,199,89,.15);--red-bg:rgba(255,56,60,.15);--orange-bg:rgba(230,126,34,.15);
+  --zebra:rgba(255,255,255,.03);--row-hover:rgba(255,255,255,.03);
+  --card-bg:rgba(18,23,36,.7);--card-border:rgba(255,255,255,.06);
+  --card-shadow:0 4px 24px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.03);
+  --font-sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'JetBrains Mono','SF Mono',Monaco,monospace;
+}
+<span class="c">/* Светлый скоуп денежных/обзорных страниц */</span>
+.light-scope{
+  --bg-0:#f4f6f9;--bg-1:#ffffff;--bg-2:#f0f2f5;--bg-3:#e8eaef;--bg-4:#d8dce2;
+  --border:rgba(17,24,39,.09);
+  --text-0:#10151f;--text-1:#39424f;--text-2:#697587;--text-3:#9aa4b3;
+  --accent:#2f6fe0;--accent-dim:rgba(47,111,224,.10);
+  --success:#16a34a;--warning:#b5740a;--danger:#dc3a34;
+  --green-bg:rgba(22,163,74,.10);--red-bg:rgba(220,58,52,.10);--orange-bg:rgba(181,116,10,.12);
+  --zebra:#f8fafc;--row-hover:rgba(0,0,0,.02);
+  --card-bg:#ffffff;--card-border:var(--border);
+  --card-shadow:0 1px 2px rgba(16,24,40,.05);
+  background:var(--bg-0);color:var(--text-1);
+}
+<span class="c">/* заливки для баров/бейджей поверх светлой темы */</span>
+.light-scope{--fill-success:#10b981;--fill-warning:#f0a533;--fill-danger:#ef4444}</pre></div></details>
+<details class="code"><summary>base.css (карточка, таблица, чипы, кнопки — минимум)</summary><div><pre>body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);font-size:13px}
+.card{background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;
+  padding:14px 16px;margin-bottom:12px;box-shadow:var(--card-shadow)}
+.card h3{font-size:14px;font-weight:700;color:var(--text-0);margin:0 0 10px}
+.sec-label{display:flex;align-items:center;gap:8px;margin:22px 2px 11px;font-size:11px;
+  font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px}
+.sec-label::after{content:'';flex:1;height:1px;background:var(--border)}
+table{width:100%;border-collapse:collapse;font-size:11.5px}
+th{font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;
+  letter-spacing:.5px;padding:8px 10px;background:var(--bg-3);text-align:right}
+th:first-child{border-radius:8px 0 0 8px;text-align:left}
+th:last-child{border-radius:0 8px 8px 0}
+td{padding:9px 10px;text-align:right;white-space:nowrap}
+td:first-child{text-align:left}
+tbody tr:nth-child(even){background:var(--zebra)}
+tbody tr:hover{background:var(--bg-2)}
+.btn{padding:8px 14px;border-radius:8px;border:1px solid var(--border);font-size:12px;
+  font-weight:500;background:var(--bg-2);color:var(--text-1);cursor:pointer}
+.btn-primary{background:var(--accent);color:#fff;border-color:var(--accent)}
+.chip{font-size:10.5px;font-weight:600;padding:4px 12px;border-radius:999px;
+  background:var(--bg-2);color:var(--text-2);border:none;cursor:pointer}
+.chip.on{background:var(--accent-dim);color:var(--accent)}
+.num{font-family:var(--font-mono);font-variant-numeric:tabular-nums}</pre></div></details>
+</div>
+
+<div class="sec">8 · Чек-лист переноса</div>
+<div class="card">
+<p style="font-size:12px">□ Подключить Inter (400/500/600/700) и JetBrains Mono (400/600) · □ Скопировать tokens.css, выбрать дефолтную тему и скоуп светлых страниц · □ Фон страницы ≠ фону карточек · □ Все контейнеры r12/14px/mb12 с card-shadow · □ Таблицы: зебра + шапка-полоса, нулевые границы, обёртки overflow-x:auto · □ Числа mono/tnum, текст влево — числа вправо · □ Семантика только на dim-подложках · □ Иконки — stroke-SVG 1.8 · □ Секции — лейблы-линейки, а не h2 · □ Списки капятся с «+ ещё N» · □ Сетки через minmax(min(…,100%),1fr) · □ На мобиле контент 1:1: нижний таб-бар, карточкизация реестров, скролл-обёртки.</p>
+</div>
+
+<p style="color:var(--text-3);font-size:11px;margin-top:26px">Источник: Arendaproxy.ru admin v2.0 · полная реализация — public/css/{variables, base, cards, tables, layout, shell, finance}.css · детальная спека дашборда — docs/dashboard-design-spec-v2.html</p>
+</div>

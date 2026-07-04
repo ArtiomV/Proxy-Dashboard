@@ -7,6 +7,7 @@
 // to src/tochka/* helpers + bank_payments table.
 
 const express = require('express');
+const { settleBillsOnPayment } = require('../billing/bill-settle');
 const crypto = require('crypto');
 // Stage 3 finish: helpers from src/tochka/documents.js. Until Stage 4 these
 // were called bare and would have ReferenceError'd if a generate_act request
@@ -233,6 +234,7 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
           // ordering (match-mark first, then credit) would risk double-credit
           // on retry, which is the worse failure.
           dbStmts.updateBankPaymentMatch.run(1, matchedClient.id, matchedClient.name, 1, paymentId);
+          try { settleBillsOnPayment(matchedClient, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
           if (!matchedClient.payments) matchedClient.payments = [];
           matchedClient.payments.push({
             amount, date: paymentDate,
@@ -286,18 +288,20 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
 
 r.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, async (req, res) => {
   const { jwt, clientId, customerCode, accountId, companyName, companyInn, companyKpp, companyAddress, bankAccount, bankName, bankBic, bankCorrAccount } = req.body;
-  if (jwt !== undefined) tochkaConfig.jwt = jwt.trim();
-  if (clientId !== undefined) tochkaConfig.clientId = clientId.trim();
-  if (customerCode !== undefined) tochkaConfig.customerCode = customerCode.trim();
-  if (accountId !== undefined) tochkaConfig.accountId = accountId.trim();
-  if (companyName !== undefined) tochkaConfig.companyName = companyName.trim();
-  if (companyInn !== undefined) tochkaConfig.companyInn = companyInn.trim();
-  if (companyKpp !== undefined) tochkaConfig.companyKpp = companyKpp.trim();
-  if (companyAddress !== undefined) tochkaConfig.companyAddress = companyAddress.trim();
-  if (bankAccount !== undefined) tochkaConfig.bankAccount = bankAccount.trim();
-  if (bankName !== undefined) tochkaConfig.bankName = bankName.trim();
-  if (bankBic !== undefined) tochkaConfig.bankBic = bankBic.trim();
-  if (bankCorrAccount !== undefined) tochkaConfig.bankCorrAccount = bankCorrAccount.trim();
+  // GET отдаёт jwt маской «****XXXXXXXX» — если форма прислала её обратно,
+  // хранимый токен НЕ трогаем (иначе любое «Сохранить» убивает интеграцию).
+  if (typeof jwt === 'string' && !jwt.startsWith('****')) tochkaConfig.jwt = jwt.trim();
+  if (typeof clientId === 'string') tochkaConfig.clientId = clientId.trim();
+  if (typeof customerCode === 'string') tochkaConfig.customerCode = customerCode.trim();
+  if (typeof accountId === 'string') tochkaConfig.accountId = accountId.trim();
+  if (typeof companyName === 'string') tochkaConfig.companyName = companyName.trim();
+  if (typeof companyInn === 'string') tochkaConfig.companyInn = companyInn.trim();
+  if (typeof companyKpp === 'string') tochkaConfig.companyKpp = companyKpp.trim();
+  if (typeof companyAddress === 'string') tochkaConfig.companyAddress = companyAddress.trim();
+  if (typeof bankAccount === 'string') tochkaConfig.bankAccount = bankAccount.trim();
+  if (typeof bankName === 'string') tochkaConfig.bankName = bankName.trim();
+  if (typeof bankBic === 'string') tochkaConfig.bankBic = bankBic.trim();
+  if (typeof bankCorrAccount === 'string') tochkaConfig.bankCorrAccount = bankCorrAccount.trim();
   // Stage 15.1: await the disk write before responding. Payment credentials
   // are sensitive enough that "200 OK saved" must mean "on disk", not
   // "in memory only" — a kill -9 between the response and the write
@@ -464,6 +468,7 @@ r.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (req,
 
   // Update bank payment in SQLite
   dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 0, paymentId);
+  try { settleBillsOnPayment(client, amount, bp.purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
 
   saveClients(clients);
   res.json({ ok: true, balance: client.balance });
@@ -589,7 +594,11 @@ r.post('/api/admin/clients/:id/closing_document_status', authMiddleware, adminMi
   const doc = (client.closingDocuments || []).find(d => d.id === docId);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
   doc.status = status;
-  if (status === 'signed') doc.signedAt = new Date().toISOString();
+  doc.signedAt = (status === 'signed') ? new Date().toISOString() : undefined;
+  // Persist DIRECTLY to the DB. saveClients() uses INSERT OR IGNORE for closing
+  // docs, so a status change on an existing row would otherwise be dropped and
+  // server.js would reload the old «unsigned» status on the next data refresh.
+  try { documentsDb.updateClosingStatus(doc.id, status, doc.signedAt || null); } catch (_) {}
   saveClients(clients);
   res.json({ ok: true, document: doc });
 });
@@ -867,6 +876,10 @@ r.post('/api/admin/clients/:id/bill_status', authMiddleware, adminMiddleware, (r
   const bill = (client.bills || []).find(b => b.id === billId);
   if (!bill) return res.status(404).json({ error: 'Bill not found' });
   bill.status = status === 'paid' ? 'paid' : 'unpaid';
+  // Persist DIRECTLY to the bills table. saveClients() uses INSERT OR IGNORE for
+  // bills, so a status change on an existing row would otherwise be dropped and
+  // server.js would rebuild client.bills as «unpaid» on the next reload.
+  try { documentsDb.updateBillStatus(bill.id, bill.status); } catch (_) {}
   saveClients(clients);
   res.json({ ok: true, bill });
 });

@@ -260,19 +260,23 @@ r.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (re
     const startDate = dateList[0];
     const utcStart = new Date(new Date(startDate + 'T00:00:00Z').getTime() - mskOffset2 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
-    // Get combined traffic for this modem (aggregated across all ports)
+    // Per-CLIENT heatmap: a modem can serve several clients on separate ports.
+    // Group by client_name so each client gets its own matrix (was: one combined
+    // matrix labelled with the first client_name → only one client shown).
     const result = {};
     const dateIdx2 = new Map(dateList.map((d, i) => [d, i]));
-    const clientRow = db.prepare("SELECT client_name FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? LIMIT 1").get(nick, serverName, utcStart);
-    const clientLabel = (clientRow && clientRow.client_name) || nick;
-    const matrix = dateList.map(() => new Array(24).fill(0));
     const tzStr2 = tzModifier(mskOffset2);
-    const rows = db.prepare(`SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr2}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr2}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? GROUP BY day, hour`).all(nick, serverName, utcStart);
+    const rows = db.prepare(`SELECT CASE WHEN client_name IS NULL OR TRIM(client_name) = '' THEN '' ELSE client_name END as cn, strftime('%Y-%m-%d', datetime(hour_start, '${tzStr2}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr2}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? GROUP BY cn, day, hour`).all(nick, serverName, utcStart);
+    const byClient = {};
     for (const r of rows) {
+      const label = r.cn || nick;
+      if (!byClient[label]) byClient[label] = dateList.map(() => new Array(24).fill(0));
       const di = dateIdx2.get(r.day);
-      if (di !== undefined && r.hour >= 0 && r.hour < 24) matrix[di][r.hour] = r.bytes / 1e9;
+      if (di !== undefined && r.hour >= 0 && r.hour < 24) byClient[label][di][r.hour] = r.bytes / 1e9;
     }
-    result[clientLabel] = { portId: nick, clientName: clientLabel, matrix };
+    for (const label of Object.keys(byClient)) {
+      result[label] = { portId: nick, clientName: label, matrix: byClient[label] };
+    }
 
     const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
     const dayMeta = dateList.map(date => {
@@ -651,11 +655,12 @@ r.get('/api/analytics/modem_health', authMiddleware, adminMiddleware, (req, res)
         WHERE hour_start >= ${sinceExpr}${UNBOUND_FILTER}
       ),
       meta_latest AS (
-        SELECT server_name, nick, imei, operator,
+        SELECT server_name, nick, imei, operator, sim_status, reboot_score,
                ROW_NUMBER() OVER (PARTITION BY server_name, nick ORDER BY updated_at DESC) as rn
         FROM modem_meta
       )
-      SELECT a.server_name, a.nick, COALESCE(m.imei, '') as imei, COALESCE(m.operator, '') as operator
+      SELECT a.server_name, a.nick, COALESCE(m.imei, '') as imei, COALESCE(m.operator, '') as operator,
+             COALESCE(m.sim_status, '') as sim_status, m.reboot_score as reboot_score
       FROM active a
       LEFT JOIN meta_latest m
         ON m.server_name = a.server_name AND m.nick = a.nick AND m.rn = 1
@@ -872,6 +877,38 @@ r.get('/api/analytics/modem_health', authMiddleware, adminMiddleware, (req, res)
           : uptimeRatio >= 1 ? 'в норме, штрафа нет'
           : `× ${Math.round(uptimeRatio*100)/100} (${upOnline} из ${upTotal} проверок онлайн, каждые 5 мин) → −${Math.round(uptimeCost*10)/10} баллов`,
         status: !up ? 'unknown' : uptimePct >= 99 ? 'good' : uptimePct >= 95 ? 'warn' : 'bad',
+      });
+
+      // Factor 5: Device/SIM health — current ProxySmart signals (Batch 1).
+      // These are the LATEST poll values (not windowed): a live device fault
+      // should pull the score down now. SIM not healthy (e.g.
+      // MODEM_SIM_UNDETECTED) → ×0.7 (proxy effectively dead); reboot_score ≥ 70
+      // → ×0.9 (modem wants a USB reset). "UNKNOWN"/"" SIM = no data, no penalty.
+      const REBOOT_BAD = 70;
+      const _simRaw = String(m.sim_status || '').toUpperCase();
+      const _simBad = !!_simRaw && _simRaw !== 'UNKNOWN' && !/\bOK\b|READY/.test(_simRaw);
+      const _rebootHigh = m.reboot_score != null && Number(m.reboot_score) >= REBOOT_BAD;
+      const beforeDev = score;
+      let devMult = 1, devTier = 'good';
+      if (_simBad)     { devMult *= 0.7; devTier = 'bad'; }
+      if (_rebootHigh) { devMult *= 0.9; if (devTier !== 'bad') devTier = 'warn'; }
+      score *= devMult;
+      const devCost = beforeDev - score;
+      const _devParts = [];
+      if (_simBad)     _devParts.push('SIM «' + _simRaw + '» (×0.7)');
+      if (_rebootHigh) _devParts.push('reboot ' + m.reboot_score + ' (×0.9)');
+      breakdown.push({
+        factor: 'device_health',
+        label: 'SIM / ребут',
+        value: _simBad ? _simRaw : (_rebootHigh ? 'reboot ' + m.reboot_score : (_simRaw || '—')),
+        unit: '',
+        norm: 'SIM OK, reboot < ' + REBOOT_BAD,
+        warn_at: 'reboot ≥ ' + REBOOT_BAD,
+        bad_at: 'SIM не OK',
+        impact: -Math.round(devCost * 10) / 10,
+        impact_explain: (!_simBad && !_rebootHigh) ? 'в норме, штрафа нет'
+          : _devParts.join(' + ') + ` → −${Math.round(devCost * 10) / 10} баллов`,
+        status: devTier,
       });
 
       // Informational only (do NOT affect score, but useful in the detail view).
@@ -1128,6 +1165,39 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
       ORDER BY ip_count DESC
     `).all(...staleArgs);
 
+    // Per-modem subnet diversity: how many distinct /24 subnets each modem has
+    // cycled through. /24 = ip without its last octet — rtrim the trailing
+    // digits, then the trailing dot ("203.0.113.78" → "203.0.113").
+    const subRows = db.prepare(`
+      SELECT key,
+             COUNT(DISTINCT rtrim(rtrim(ip,'0123456789'),'.')) as subnets,
+             COUNT(DISTINCT ip) as ips
+        FROM ip_history
+       WHERE started_at >= ${sinceExpr}${staleFilter}
+       GROUP BY key
+       ORDER BY subnets DESC
+    `).all(...staleArgs);
+    const _nickByKey = {};
+    try {
+      for (const m of db.prepare('SELECT server_name, imei, nick FROM modem_meta').all()) {
+        _nickByKey[m.server_name + '_' + m.imei] = m.nick;
+      }
+    } catch (_) { /* modem_meta optional */ }
+    const subnets = subRows.map(r => {
+      const us = r.key.indexOf('_');
+      return {
+        server: us > 0 ? r.key.slice(0, us) : '',
+        nick: _nickByKey[r.key] || (us > 0 ? r.key.slice(us + 1) : r.key),
+        subnets: r.subnets,
+        ips: r.ips
+      };
+    });
+    const subnetSummary = {
+      modems: subnets.length,
+      avg: subnets.length ? Math.round(subnets.reduce((a, x) => a + x.subnets, 0) / subnets.length * 10) / 10 : 0,
+      max: subnets.length ? subnets[0].subnets : 0
+    };
+
     res.json({
       days,
       summary: {
@@ -1138,7 +1208,9 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
         reused_count: reused.length
       },
       reused,
-      pools: poolsRows
+      pools: poolsRows,
+      subnets: subnets.slice(0, 50),
+      subnet_summary: subnetSummary
     });
   } catch (e) {
     logger.error('[ip_stats]', e.message);

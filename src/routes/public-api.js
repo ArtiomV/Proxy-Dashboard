@@ -99,8 +99,12 @@ module.exports = function createPublicApiRouter(deps) {
   });
 
   r.get('/api/v1/proxies', async (req, res) => {
-    const { apiKey, format } = req.query;
-    if (!apiKey) return res.status(400).json({ error: 'apiKey required' });
+    // Accept the key from the X-API-Key header OR ?apiKey= query (via _readApiKey),
+    // same as /api/v1/proxy. Previously this endpoint read req.query.apiKey ONLY,
+    // so callers sending the canonical X-API-Key header got a confusing 400.
+    const apiKey = _readApiKey(req, res);
+    const { format } = req.query;
+    if (!apiKey) return res.status(400).json({ error: 'apiKey required. Pass via X-API-Key header.' });
 
     const client = getClientByApiKey(apiKey);
     if (!client) return res.status(401).json({ error: 'Invalid API key' });

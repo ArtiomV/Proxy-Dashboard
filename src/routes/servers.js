@@ -184,6 +184,19 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.recovery_offline_sec != null)   patch.recovery_offline_sec   = Math.max(10, Math.min(600, parseInt(req.body.recovery_offline_sec) || 60));
   if (req.body.recovery_max_attempts != null)  patch.recovery_max_attempts  = Math.max(1, Math.min(10, parseInt(req.body.recovery_max_attempts) || 3));
   if (req.body.recovery_retry_min != null)     patch.recovery_retry_min     = Math.max(1, Math.min(60, parseInt(req.body.recovery_retry_min) || 3));
+  if (req.body.recovery_enabled != null)       patch.recovery_enabled       = !!req.body.recovery_enabled;
+  if (req.body.recovery_readd_after != null)   patch.recovery_readd_after   = !!req.body.recovery_readd_after;
+  if (req.body.recovery_skip_dead_sim != null) patch.recovery_skip_dead_sim = !!req.body.recovery_skip_dead_sim;
+  if (req.body.recovery_skip_unsold != null)   patch.recovery_skip_unsold   = !!req.body.recovery_skip_unsold;
+  if (req.body.recovery_daily_cap != null)     patch.recovery_daily_cap     = Math.max(1, Math.min(50, parseInt(req.body.recovery_daily_cap) || 6));
+  if (req.body.operator_gb_costs && typeof req.body.operator_gb_costs === 'object') {
+    const oc = {};
+    Object.keys(req.body.operator_gb_costs).forEach(k => {
+      const v = parseFloat(req.body.operator_gb_costs[k]);
+      if (!isNaN(v) && v >= 0 && v < 100000) oc[String(k).slice(0, 60)] = v;
+    });
+    patch.operator_gb_costs = oc;
+  }
   // Stage 19 — failover
   if (req.body.failover_enabled != null)          patch.failover_enabled          = !!req.body.failover_enabled;
   if (req.body.failover_dry_run != null)          patch.failover_dry_run          = !!req.body.failover_dry_run;
@@ -227,6 +240,10 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.telegram_bot_token != null)       patch.telegram_bot_token       = String(req.body.telegram_bot_token).trim();
   if (req.body.telegram_chat_id != null)         patch.telegram_chat_id         = String(req.body.telegram_chat_id).trim();
   if (req.body.telegram_summary_enabled != null) patch.telegram_summary_enabled = !!req.body.telegram_summary_enabled;
+  // AI sales bots keys / CRM connection
+  if (req.body.tavily_api_key != null)           patch.tavily_api_key           = String(req.body.tavily_api_key).trim();
+  if (req.body.anthropic_api_key != null)        patch.anthropic_api_key        = String(req.body.anthropic_api_key).trim();
+  if (req.body.crm_db_url != null)               patch.crm_db_url               = String(req.body.crm_db_url).trim();
   if (req.body.telegram_summary_time != null) {
     const t = String(req.body.telegram_summary_time);
     if (/^\d{2}:\d{2}$/.test(t)) patch.telegram_summary_time = t;

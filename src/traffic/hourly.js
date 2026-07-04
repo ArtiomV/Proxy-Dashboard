@@ -315,9 +315,19 @@ async function aggregateHourlyTraffic() {
           const dayDropped = snapRecent
                           && snap.day_at_last_hour_start_in > 0
                           && dayIn < snap.day_at_last_hour_start_in * 0.5;
+          // Same >50% day-counter drop but WITHOUT the snapRecent guard. Catches
+          // ports whose snapshot went stale (briefly unpolled) across the reset
+          // hour: those previously matched neither dayDropped (snap not recent)
+          // nor yesterdayChanged, fell through to "Normal hour" where
+          // delta=max(0, small−huge)=0, and so the 00:00 MSK hour was dropped
+          // ENTIRELY (both the pre-reset tail AND the post-reset accumulation).
+          // A >50% drop is unambiguously the midnight rollover — counters only
+          // fall at reset — so detecting it here is safe; the spike-clamp below
+          // still guards the tail increment against stale-baseline blowups.
+          const dayCounterDropped = snap.day_in > 0 && dayIn < snap.day_in * 0.5;
           const yesterdayChanged = yesIn > snap.day_in
                                 && yesIn !== snap.yesterday_in;
-          const dayReset = dayDropped || yesterdayChanged;
+          const dayReset = dayDropped || yesterdayChanged || dayCounterDropped;
 
           if (dayReset) {
             // Last hour of the day delta. Prefer the yesterday counter when
@@ -368,19 +378,38 @@ async function aggregateHourlyTraffic() {
                   });
               } catch (_) { /* logActivity must never throw — best-effort */ }
             }
-            if (incIn + incOut > 0 && incIn + incOut < MAX_HOURLY_BYTES) {
-              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut, resetUnc);
+            // When the DAY counter actually reset (dayDropped — not just the
+            // yesterday counter flipping early), the current dayIn is the
+            // post-reset accumulation: traffic that already happened in THIS hour
+            // since local midnight. The old code parked it via baseline=0, so it
+            // landed in the NEXT bucket and left the 00:00–01:00 hour empty for
+            // every modem whose reset was detected one poll late (~2/3 of the
+            // fleet — hour 0 showed ~32/100 modems). Fold it into this hour and
+            // carry it as the new baseline: total conserved, no double-count.
+            let storeIn = incIn, storeOut = incOut, baseIn = 0, baseOut = 0;
+            if (dayDropped || dayCounterDropped) {
+              // Fold the post-reset accumulation (current dayIn) into THIS hour
+              // and carry it forward as the new baseline. Safe whenever the day
+              // counter actually fell: the "Normal hour" path would have written
+              // max(0, dayIn − snap.day_in) = 0 for this port, so there is nothing
+              // to double-count, and baseIn=dayIn makes the next hour subtract it.
+              // (Pure yesterdayChanged — counter still rising — keeps baseIn=0 so
+              // the still-growing dayIn lands in the next bucket as before.)
+              storeIn  = incIn  + Math.max(0, dayIn);
+              storeOut = incOut + Math.max(0, dayOut);
+              baseIn   = Math.max(0, dayIn);
+              baseOut  = Math.max(0, dayOut);
+            }
+            if (storeIn + storeOut > 0 && storeIn + storeOut < MAX_HOURLY_BYTES) {
+              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, storeIn, storeOut, resetUnc);
               count++;
             }
-            // BUG-FIX: set day baseline to 0 so next aggregation captures ALL
-            // post-midnight traffic via delta (dayIn - 0 = dayIn).
-            // Previously day_in was set to dayIn, making that traffic invisible.
             upsertSnap(fullPortId, {
-              day_in: 0, day_out: 0,
+              day_in: baseIn, day_out: baseOut,
               month_in: monIn, month_out: monOut,
               yesterday_in: yesIn, yesterday_out: yesOut,
               prev_month_in: pmIn, prev_month_out: pmOut,
-              day_at_last_hour_start_in: 0, day_at_last_hour_start_out: 0,
+              day_at_last_hour_start_in: baseIn, day_at_last_hour_start_out: baseOut,
               mon_at_last_hour_start_in: monIn, mon_at_last_hour_start_out: monOut,
               pending: 0,
             });

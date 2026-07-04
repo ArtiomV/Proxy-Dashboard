@@ -73,7 +73,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);tra
 .btn-filter--alert:hover{background:#FCEBEB!important}
 .btn-filter--alert.active{background:#FCEBEB!important;border-color:#E24B4A!important}
 /* Task 2 – Инфо button */
-.btn-details{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:0.5px solid var(--border);background:var(--bg-1);font-size:11px;font-weight:500;color:var(--text-2);cursor:pointer;font-family:inherit;white-space:nowrap;transition:background .12s,color .12s}
+.btn-details{display:inline-flex;align-items:center;gap:5px;padding:4px 10px;border-radius:6px;border:1px solid var(--border);background:var(--bg-1);font-size:11px;font-weight:500;color:var(--text-2);cursor:pointer;font-family:inherit;white-space:nowrap;transition:background .12s,color .12s}
 .btn-details:hover{background:var(--bg-3);color:var(--text-0)}
 
 /* Toolbar */
@@ -118,7 +118,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);tra
 /* Stage 17.3 — status pill: replaces the easy-to-miss 8-px dot in the
    modems table with a high-contrast colored chip. Visible at a glance,
    readable in both themes, animates for transient states. */
-.status-pill{display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;letter-spacing:.04em;padding:3px 8px;border-radius:5px;color:#fff;line-height:1;text-transform:uppercase;min-width:42px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.15);user-select:none}
+.status-pill{display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;letter-spacing:.05em;padding:3px 8px;border-radius:8px;color:#fff;line-height:1;text-transform:uppercase;min-width:42px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.15);user-select:none}
 .status-pill.online{background:linear-gradient(135deg,#28b94e,#1d9e3d);box-shadow:0 0 0 1px rgba(40,185,78,.35),0 1px 3px rgba(40,185,78,.25)}
 .status-pill.offline{background:linear-gradient(135deg,#e84141,#c92929);box-shadow:0 0 0 1px rgba(232,65,65,.35),0 1px 3px rgba(232,65,65,.25)}
 .status-pill.rotating{background:linear-gradient(135deg,#ef9f27,#d18910);box-shadow:0 0 0 1px rgba(239,159,39,.35),0 1px 3px rgba(239,159,39,.25);animation:status-pulse 1.5s infinite ease-in-out}
@@ -289,8 +289,6 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .billing-per-gb{background:var(--blue-bg);color:var(--accent)}
 
 /* Finance metric cards */
-.fin-card{background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:12px 14px}
-.fc-label{font-size:11px;color:var(--text-3);font-weight:500;text-transform:uppercase;letter-spacing:.04em;margin-bottom:4px}
 .fc-value{font-size:22px;font-weight:600;color:var(--text-0);line-height:1.2}
 .fc-sub{font-size:11px;color:var(--text-3);margin-top:3px}
 

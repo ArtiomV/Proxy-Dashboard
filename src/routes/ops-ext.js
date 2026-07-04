@@ -205,6 +205,22 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
   try {
     const results = await getFetchAllServersDataCached()();
     const merged = getMergeServerData()(results, '*');
+    // Offline modems report an empty live PHONE_NUMBER — fill it from the
+    // persisted modem_meta so the phone still shows for disconnected modems.
+    try {
+      const _phoneMap = {};
+      for (const r of db.prepare("SELECT server_name, imei, phone FROM modem_meta WHERE phone <> ''").all()) {
+        _phoneMap[r.server_name + '|' + r.imei] = r.phone;
+      }
+      for (const m of (merged.status || [])) {
+        const md = m && m.modem_details;
+        if (!md || (md.PHONE_NUMBER && String(md.PHONE_NUMBER).trim())) continue;
+        const srv = m._server || '';
+        const raw = String(md.IMEI || '').indexOf(srv + '_') === 0 ? String(md.IMEI).slice(srv.length + 1) : String(md.IMEI || '');
+        const ph = _phoneMap[srv + '|' + raw];
+        if (ph) md.PHONE_NUMBER = ph;
+      }
+    } catch (e) { logger.warn('[data] phone enrich: ' + e.message); }
     const servers = getApiServers().map(s => {
       const sc = getServerCountries()[s.name] || {};
       return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz, address: s.address || '' };
@@ -214,10 +230,17 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     // STABLE per-client modem count. Previously counted live bandwidth entries,
     // so a modem that briefly dropped offline vanished from the client's total
     // (БрендАналитика flipping 15→13→15). Now counted from the persisted
-    // known_modems roster (port→client binding + lastSeen), with a 24h retention
-    // window: a modem keeps counting for 24h after it was last seen, then ages
-    // out. Deduped by server|imei so a re-add (new portId, same physical modem)
-    // is not double-counted. randomport* placeholders are excluded.
+    // known_modems roster (port→client binding + lastClientSeen), with a 24h
+    // retention window: a modem keeps counting for 24h after it was last bound to
+    // a real client, then ages out. This is what keeps an offline modem in its
+    // client's count: when a modem falls off, ProxySmart resets its port to a
+    // "randomport*" placeholder, but updateKnownModems preserves the last real
+    // portName and freezes `lastClientSeen` — so the modem stays counted (as the
+    // client's, offline) for 24h instead of vanishing the instant it disconnects.
+    // Deduped by server|imei so a re-add (new portId, same modem) isn't
+    // double-counted. We key retention on lastClientSeen (falling back to lastSeen
+    // for legacy entries) so a modem that has been a random placeholder for >24h
+    // finally drops.
     const _ROSTER_RETAIN_MS = 24 * 3600 * 1000;
     const _rosterNow = Date.now();
     const _clientModemSets = {};   // portName -> Set('server|imei')
@@ -226,7 +249,8 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
         if (!info || !info.portName || /^random/i.test(info.portName)) continue;
         const id = info.imei || info.nick;
         if (!id) continue;
-        const ls = typeof info.lastSeen === 'number' ? info.lastSeen : Date.parse(info.lastSeen || 0);
+        const _lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
+        const ls = typeof _lcs === 'number' ? _lcs : Date.parse(_lcs || 0);
         if (!ls || (_rosterNow - ls) > _ROSTER_RETAIN_MS) continue;
         (_clientModemSets[info.portName] || (_clientModemSets[info.portName] = new Set())).add(srvName + '|' + id);
       }

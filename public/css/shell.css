@@ -1,0 +1,59 @@
+/* ============================================================
+   shell.css — left-sidebar app shell (redesign).
+   Converts the top `.header` into a fixed LEFT sidebar using
+   CSS only (no DOM node moves). Loaded AFTER layout.css so
+   these rules win. Everything is wrapped in `min-width:769px`
+   so phones/tablets keep the original top-bar + burger menu
+   untouched — zero risk to the mobile layout.
+   ============================================================ */
+
+/* nav icon sizing — harmless on mobile (small icon beside label) */
+.nav-tab .nav-ic{display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;flex-shrink:0}
+.nav-tab .nav-ic svg{width:18px;height:18px;display:block}
+
+/* brand row: logo mark + name (name — только в сайдбаре; на мобиле топ-бар как был) */
+.sb-brand{display:flex;align-items:center;gap:8px;min-width:0}
+.header-brand-name{display:none}
+.sb-version{display:none}
+
+@media (min-width:769px){
+  :root{--sb-w:208px}
+
+  /* push all in-flow page content to the right of the fixed sidebar */
+  body{padding-left:var(--sb-w)}
+
+  /* .header → vertical sidebar pinned to the left edge */
+  .header{
+    position:fixed;left:0;top:0;bottom:0;width:var(--sb-w);height:100vh;
+    flex-direction:column;align-items:stretch;gap:0;padding:16px 0 10px;
+    border-bottom:none;border-right:1px solid var(--border);
+    background:var(--bg-1);overflow-y:auto;overflow-x:hidden;z-index:200
+  }
+
+  /* шапка: логотип + название + ADMIN-чип, тонкий разделитель снизу */
+  .header-left{flex-direction:column;align-items:stretch;gap:0;padding:0 14px 14px;margin:0 0 4px;border-bottom:1px solid var(--border);flex-shrink:0}
+  .header-brand-name{display:inline;font-size:14px;font-weight:700;color:var(--text-0);letter-spacing:-.2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .sb-brand .header-logo img{height:24px}
+  .header-left > .header-version-badge{display:none}   /* версия уехала в футер */
+  .header-stats{display:none}                          /* «В работе: N/N» убран */
+
+  /* nav fills the middle, vertical full-width rows */
+  .nav-tabs{flex-direction:column;align-items:stretch;flex:1 1 auto;gap:2px;width:100%;height:auto;padding:8px 10px;overflow:visible}
+  .nav-tab{width:100%;justify-content:flex-start;gap:11px;padding:9px 12px;font-size:13px;border-radius:8px;color:var(--text-2);position:relative}
+  .nav-tab .nav-ic{color:var(--text-3)}
+  .nav-tab:hover{background:var(--bg-2);color:var(--text-1)}
+  .nav-tab:hover .nav-ic{color:var(--text-2)}
+  .nav-tab.active{background:var(--accent-dim);color:var(--accent);font-weight:600}
+  .nav-tab.active .nav-ic{color:var(--accent)}
+  .nav-tab.active::before{content:'';position:absolute;left:0;top:7px;bottom:7px;width:2.5px;border-radius:2px;background:var(--accent)}
+
+  /* панель уведомлений: колокольчик теперь в футере сайдбара — панель открывается рядом, снизу-слева */
+  .notif-panel{top:auto;bottom:14px;left:calc(var(--sb-w) + 10px);right:auto}
+
+  /* футер: колокольчик · тема · выход — слева, версия — справа; без часов */
+  .header-right{flex-direction:row;flex-wrap:nowrap;align-items:center;gap:8px;padding:12px 14px 4px;border-top:1px solid var(--border);margin-top:auto;flex-shrink:0}
+  .header-right .last-update{display:none}       /* часы убраны из футера */
+  .header-right .btn-logout{display:flex}        /* re-show logout in the sidebar footer */
+  .header-right .sb-version{display:inline-block;margin-left:auto;background:none;border:none;padding:2px 0;color:var(--text-3)}
+  .header-right .sb-version:hover{color:var(--text-1);background:none}
+}

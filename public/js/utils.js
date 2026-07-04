@@ -23,8 +23,8 @@ function fmtDateRu(d){if(!d)return'';var p=d.split('-');return p.length===3?(p[2
 // Traffic parsing/formatting — DECIMAL (matches src/utils/traffic.js).
 function parseTraffic(v){if(!v||v===0)return 0;if(typeof v==='number')return v;var s=String(v).slice(0,30),m=s.match(/^(\d+(?:\.\d+)?)\s*(KB|MB|GB|TB)$/i);if(!m)return parseFloat(s)||0;var n=parseFloat(m[1]),u=m[2].toUpperCase();return n*(u==='KB'?1e3:u==='MB'?1e6:u==='GB'?1e9:u==='TB'?1e12:1)}
 function bytesToGb(b){return b/1e9}
-function fmtGb(b){if(!b||b===0||isNaN(b))return'0 B';if(b<1e6)return(b/1e3).toFixed(1)+' KB';if(b<1e9)return(b/1e6).toFixed(1)+' MB';var gb=b/1e9;if(gb>=1000)return(gb/1000).toFixed(1)+' TB';if(gb>=100)return Math.round(gb)+' GB';return gb.toFixed(1)+' GB'}
-function fmtGbShort(b){if(!b||isNaN(b)||b<1e9)return((b||0)/1e6).toFixed(0)+' MB';return(b/1e9).toFixed(1)+' GB'}
+function fmtGb(b){if(!b||b===0||isNaN(b))return'0 Б';if(b<1e6)return(b/1e3).toFixed(1)+' КБ';if(b<1e9)return(b/1e6).toFixed(1)+' МБ';var gb=b/1e9;if(gb>=1000)return(gb/1000).toFixed(1)+' ТБ';if(gb>=100)return Math.round(gb)+' ГБ';return gb.toFixed(1)+' ГБ'}
+function fmtGbShort(b){if(!b||isNaN(b)||b<1e9)return((b||0)/1e6).toFixed(0)+' МБ';return(b/1e9).toFixed(1)+' ГБ'}
 function pct(v,max){return max?Math.round(v/max*100):0}
 
 // Format bytes with auto-unit (used by client portal) — decimal.
@@ -34,7 +34,7 @@ function formatBytes(b){if(!b||b===0)return'0 B';if(b<1e3)return b+' B';if(b<1e6
 // _cached / _serverDown flags are admin-side annotations injected on stale
 // data — checking them here is a no-op on client.js modems (fields absent
 // in the client API response) and keeps admin behavior intact.
-function getModemStatus(m){if(m._cached||m._serverDown)return'offline';if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';if(m.connectionStatus&&m.connectionStatus.includes('connected'))return'online';if(m.state==='added'&&m.extIp&&m.extIp!=='IP_RESET')return'online';return'offline'}
+function getModemStatus(m){if(m._cached||m._serverDown)return'offline';if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';if(m.connectionStatus&&m.connectionStatus.includes('connected'))return'online';if(m.state==='added'&&m.extIp&&m.extIp!=='IP_RESET')return'online';if(m.extIp==='IP_RESET')return'rotating';return'offline'}
 function formatUptime(s){if(!s||s<=0)return'-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),mm=Math.floor(s%3600/60);if(d>0)return d+'д '+h+'ч';if(h>0)return h+'ч '+mm+'м';return mm+'м'}
 function formatTraffic(v){if(!v||v===0||v==='0')return'-';return String(v)}
 function renderSignalBars(s){var h='<div class="signal-bars">';for(var i=1;i<=5;i++){h+='<div class="signal-bar'+(i<=s?' active':'')+'" style="height:'+(2+i*2)+'px"></div>'}return h+'</div>'}
@@ -42,6 +42,9 @@ function renderNetBadge(t){if(!t)return'<span class="net-badge net-unknown">?</s
 
 // Chart colors helper
 function getChartColors(){var d=document.documentElement.dataset.theme==='dark';return{grid:d?'rgba(255,255,255,.06)':'rgba(0,0,0,.06)',text:d?'#8892a6':'#6b7280',bg:d?'#131720':'#ffffff'}}
+function getChartColorsLight(){return{grid:'rgba(0,0,0,.07)',text:'#6b7280',bg:'#ffffff'}}
+// Категориальная палитра для графиков на светлых страницах (Дашборд/Финансы)
+function getChartPaletteLight(){return['#2f6fe0','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316','#6366f1','#84cc16','#0ea5e9','#e11d48','#a855f7']}
 
 // Toast notification — escapes the message body to avoid XSS via
 // admin-injected text. (The admin.js copy of this function did NOT

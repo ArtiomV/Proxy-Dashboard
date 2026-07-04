@@ -34,7 +34,7 @@ module.exports = function createAdminMetaRouter(deps) {
   const {
     db, logger, authMiddleware, adminMiddleware,
     operatorsDb, trackingDb, knownModems, saveKnownModems,
-    logActivity, fetchAllServersDataCached,
+    logActivity, fetchAllServersDataCached, markModemDeleted, markModemRestored,
   } = deps;
 
   const r = express.Router();
@@ -44,69 +44,60 @@ module.exports = function createAdminMetaRouter(deps) {
     const serverName = req.params.server_name;
     const portId = req.params.port_id;
     try {
+      // Resolve the modem's identity from any available source:
+      //   - a live known_modems entry (real port_id), OR
+      //   - the synthetic meta_/recovered_<imei> port_id used for offline modems
+      //     (the imei is encoded in the id even when no live binding exists), OR
+      //   - the nick passed by the UI (?nick=...) — the robust fallback that lets
+      //     us purge blank-imei `recovered_*` entries.
+      // markModemDeleted() performs the FULL cross-layer purge (modem_meta flag +
+      // in-memory set + known_modems eviction by imei/nick/synthetic-id + 10s
+      // cache invalidation), so there is nothing left here that could re-surface
+      // the modem on the next /api/admin/data.
       const km = knownModems[serverName] || {};
-      let entry = km[portId];
+      const entry = km[portId] || null;
       let imei = entry ? (entry.imei || '') : '';
-
-      // Stage 18.1: synthetic port_id (`meta_<imei>` / `recovered_<imei>`) means
-      // the modem only lives in modem_meta — there's no real port-binding to look
-      // up in known_modems. Extract the IMEI directly so we can purge modem_meta
-      // and any stale known_modems entries for the same IMEI.
-      if (!entry) {
+      if (!imei) {
         const m = portId.match(/^(?:meta_|recovered_)(.+)$/);
-        if (m) {
-          imei = m[1];
-          // Synthesize a minimal entry so the rest of the flow works.
-          entry = { imei, nick: '' };
-        }
+        if (m) imei = m[1];
+      }
+      const nick = (req.query && req.query.nick) ? String(req.query.nick) : (entry ? (entry.nick || '') : '');
+      if (!imei && !nick) {
+        return res.status(404).json({ error: 'Cannot identify modem (no imei/nick)', server_name: serverName, port_id: portId });
       }
 
-      if (!entry) {
-        return res.status(404).json({ error: 'Modem not found in known_modems', server_name: serverName, port_id: portId });
-      }
-
-      // NOTE: the old "refuse if the modem is currently live" gate was removed at
-      // the operator's request — delete is now allowed regardless of online
-      // status. (A still-physically-present modem will simply re-appear on the
-      // next ProxySmart poll; deleting a truly-offline/ghost modem makes it leave
-      // the fleet immediately since the fleet count is built from modem_meta.)
-
-      // Stage 18: delete from BOTH known_modems AND modem_meta atomically.
-      // Skipping modem_meta would let the Pass-2 fallback in injectOfflineModems
-      // resurrect the modem on the very next render — defeating the whole UX
-      // of the delete button.
       let metaDeleted = 0;
       try {
-        const tx = db.transaction(() => {
-          if (imei) {
-            const r = trackingDb.metaDeleteByImeiStmt().run(serverName, imei);
-            metaDeleted = r.changes;
-          }
-        });
-        tx();
+        if (typeof markModemDeleted === 'function') metaDeleted = markModemDeleted(serverName, imei, nick);
       } catch (e) {
-        logger.warn('[admin-meta] modem_meta purge failed: ' + e.message);
+        logger.warn('[admin-meta] modem purge failed: ' + e.message);
       }
-      // Delete only if the port_id really exists in known_modems (synthetic
-      // ids like `meta_<imei>` won't be there — that's expected).
-      if (km[portId]) delete km[portId];
-      // Also evict every other portId in known_modems that points to the same
-      // IMEI (defensive: if multiple bindings exist for one modem, removing
-      // just one would let injectOfflineModems re-create the modem under the
-      // other port_id on the next render).
-      if (imei) {
-        for (const [pid, info] of Object.entries(km)) {
-          if (info && info.imei === imei) delete km[pid];
-        }
-      }
-      saveKnownModems();
 
       logActivity('admin', 'info', 'modem_deleted', `${serverName}/${portId}`,
-        `Modem manually deleted by ${req.user && req.user.login}`,
-        { server_name: serverName, port_id: portId, imei, meta_deleted: metaDeleted });
-      res.json({ ok: true, server_name: serverName, port_id: portId, imei, meta_deleted: metaDeleted });
+        `Modem deleted by ${req.user && req.user.login}`,
+        { server_name: serverName, port_id: portId, imei, nick, meta_deleted: metaDeleted });
+      res.json({ ok: true, server_name: serverName, port_id: portId, imei, nick, meta_deleted: metaDeleted });
     } catch (e) {
       logger.error('[admin-meta] delete modem error: ' + e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── 1b) Restore a soft-deleted modem ─────────────────────────────────────
+  // Delete is now PERMANENT (no auto-restore on poll), so this is the only way
+  // to bring a mistakenly-deleted modem back without a DB edit + restart. Clears
+  // modem_meta.deleted AND drops the IMEI from the in-memory _deletedModemSet
+  // (via markModemRestored), so the very next poll re-surfaces it.
+  r.post('/api/admin/modems/:server_name/:imei/restore', authMiddleware, adminMiddleware, (req, res) => {
+    const serverName = req.params.server_name;
+    const imei = req.params.imei;
+    try {
+      const changes = (typeof markModemRestored === 'function') ? markModemRestored(serverName, imei, req.query && req.query.nick) : 0;
+      logActivity('admin', 'info', 'modem_restored', `${serverName}/${imei}`,
+        `Modem un-deleted by ${req.user && req.user.login}`, { server_name: serverName, imei, changes });
+      res.json({ ok: true, server_name: serverName, imei, restored: changes });
+    } catch (e) {
+      logger.error('[admin-meta] restore modem error: ' + e.message);
       res.status(500).json({ error: e.message });
     }
   });

@@ -290,24 +290,33 @@ r.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
     const mins = parseInt(minutes);
     if (isNaN(mins) || mins < 0 || mins > 1440) return res.status(400).json({ error: 'minutes must be 0-1440' });
 
-    // Verify modem belongs to this client
+    // Verify the modem belongs to this client. Ownership = the nick's modem has
+    // a port named after the client (live assignment is the source of truth),
+    // with a fallback to historical traffic attribution so offline / freshly
+    // assigned modems still pass — the same check /api/client/rotation_log uses.
+    //
+    // The previous check compared p.portID (after stripping a stale "S1_/S2_"
+    // prefix) against `nick`. But mergeServerData prefixes portID with the
+    // server name (e.g. "MD2_…"), and portID is NOT the modem nick anyway, so
+    // it denied EVERY real modem → "Modem not assigned to your account".
     const portNameFilter = req.user.portNameFilter;
-    if (portNameFilter === '*') { /* admin — allow */ }
-    else {
-      const results = await fetchAllServersDataCached();
-      const merged = mergeServerData(results, '*');
-      if (!merged) return res.status(503).json({ error: 'Data not loaded yet' });
-      const allPorts = merged.ports || {};
+    if (portNameFilter !== '*') {
       let owned = false;
-      for (const srv in allPorts) {
-        const ports = allPorts[srv] || [];
-        for (const p of ports) {
-          if (p.portName === portNameFilter) {
-            const pNick = (p.portID || '').replace(/^S[12]_/, '');
-            if (pNick === nick) { owned = true; break; }
-          }
+      try {
+        const results = await fetchAllServersDataCached();
+        const merged = mergeServerData(results, '*');
+        const entry = ((merged && merged.status) || []).find(
+          m => m.modem_details && m.modem_details.NICK === nick);
+        if (entry) {
+          const ports = ((merged && merged.ports) || {})[entry.modem_details.IMEI] || [];
+          owned = ports.some(p => p.portName === portNameFilter);
         }
-        if (owned) break;
+      } catch (_) { /* fall through to the historical check */ }
+      if (!owned) {
+        const row = db.prepare(
+          'SELECT 1 FROM traffic_hourly WHERE nick = ? AND client_name = ? LIMIT 1'
+        ).get(nick, portNameFilter);
+        owned = !!row;
       }
       if (!owned) return res.status(403).json({ error: 'Modem not assigned to your account' });
     }

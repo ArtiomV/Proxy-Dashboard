@@ -16,8 +16,8 @@
 
 /* ACC Traffic Dashboard */
 .acc-toolbar{display:flex;align-items:center;gap:8px;padding:10px 24px;background:var(--bg-1);border-bottom:1px solid var(--border)}
-.acc-period-group{display:flex;gap:0;border:1px solid var(--border);border-radius:4px;overflow:hidden}
-.acc-period-btn{padding:5px 14px;font-size:11px;cursor:pointer;background:transparent;border:none;color:var(--text-2);transition:all .15s;font-weight:500}
+.acc-period-group{display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden}
+.acc-period-btn{padding:4px 12px;font-size:11px;cursor:pointer;background:transparent;border:none;color:var(--text-2);transition:all .15s;font-weight:500}
 .acc-period-btn:hover{background:var(--bg-3);color:var(--text-1)}
 .acc-period-btn.active{background:var(--accent);color:#fff}
 .acc-sub-tabs{display:flex;gap:0;padding:0 24px;background:var(--bg-2);border-bottom:1px solid var(--border);height:34px}
@@ -28,10 +28,10 @@
 .acc-sub-content{display:none}.acc-sub-content.active{display:block}
 
 /* Filter & period buttons */
-.filter-btn{padding:4px 10px;border-radius:4px;border:1px solid var(--border);background:transparent;color:var(--text-2);cursor:pointer;font-size:11px;transition:all .15s}
+.filter-btn{padding:4px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;color:var(--text-2);cursor:pointer;font-size:11px;transition:all .15s}
 .filter-btn:hover{background:var(--bg-3);color:var(--text-1)}
 .filter-btn.active{background:var(--accent-dim);color:var(--accent);border-color:var(--accent)}
-.period-btn{padding:4px 10px;border-radius:14px;border:1px solid var(--border);background:transparent;font-size:11px;cursor:pointer;color:var(--text-2);font-family:inherit;font-weight:500;transition:all .12s}
+.period-btn{padding:4px 10px;border-radius:8px;border:1px solid var(--border);background:transparent;font-size:11px;cursor:pointer;color:var(--text-2);font-family:inherit;font-weight:500;transition:all .12s}
 .period-btn.active{background:var(--accent);border-color:var(--accent);color:#fff;font-weight:600}
 .period-btn:hover:not(.active){background:var(--bg-3)}
 
@@ -62,6 +62,10 @@
   /* Navigation — horizontal scroll */
   .nav-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch;flex:none!important;width:100%;order:3}
   .nav-tab{padding:6px 12px;font-size:12px;white-space:nowrap;flex-shrink:0}
+  /* Dashboard rows on tablet: attention row stacks, pulse 2×2 */
+  #tab-dashboard #newExtWidgets{grid-template-columns:1fr!important}
+  #tab-dashboard .pulse-grid{grid-template-columns:1fr 1fr}
+  #tab-dashboard #newFinTopGrid{grid-template-columns:1fr!important}
   /* Finance cards responsive */
   .fin-cards-grid{grid-template-columns:repeat(2,1fr)!important}
   .fin-summary{grid-template-columns:repeat(2,1fr)!important}
@@ -75,8 +79,16 @@
   .search-box{width:100%!important}
   /* Tables — ensure all scrollable */
   .table-wrap{padding:0;overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .tab-content .analytics-card,.tab-content .chart-card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .log-table{overflow-x:auto;display:block;-webkit-overflow-scrolling:touch}
+  #tab-dashboard .acc-expand-body{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .detail-card{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  #opMapList{overflow-x:auto!important}
+  #heatmapSummary,#newHmSummary{flex-wrap:wrap!important;gap:12px}
+  #heatmapSummary>div,#newHmSummary>div{min-width:calc(50% - 12px);border-right:none!important;padding:0!important}
   .country-group{margin-top:8px}
-  table{font-size:10px;min-width:800px}
+  table{font-size:10px}
+  .table-wrap table{min-width:800px}
   th{padding:4px 5px;font-size:9px}
   td{padding:3px 5px;font-size:10px}
   .actions-cell{flex-wrap:wrap}
@@ -97,7 +109,7 @@
   .fin-bottom{grid-template-columns:1fr}
   .fin-summary{grid-template-columns:repeat(2,1fr)!important}
   /* Modals */
-  .modal{width:95vw;max-height:90vh}
+  .modal{width:95vw!important;max-width:95vw!important;max-height:90vh}
   .modal-body{padding:10px 12px}
   .detail-grid{grid-template-columns:1fr}
   .modal-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}
@@ -124,7 +136,7 @@
     -webkit-overflow-scrolling:touch;
     gap:4px;
   }
-  .tab-sidebar>div:first-child{display:none}
+  .tab-sidebar>div:first-of-type{display:none}
   .tab-sidebar .settings-nav-item{
     white-space:nowrap;
     border-left:none!important;
@@ -165,60 +177,48 @@
   .header-right .last-update,
   .header-right .theme-toggle{display:none!important}
   .header-right{margin-left:auto}
-  /* Navigation — burger menu overlay */
+  /* Navigation — fixed BOTTOM TAB BAR (mobile).
+     All 6 items shown at once; if they don't fit the screen width the bar
+     scrolls horizontally instead of clipping (flex-shrink:0 + overflow-x).
+     Replaces the old burger overlay — nav is now always one tap away. */
   .nav-tabs{
-    display:none!important;
-    position:fixed;top:0;left:0;right:0;bottom:0;
+    display:flex!important;
+    position:fixed;left:0;right:0;bottom:0;top:auto;
     z-index:950;
     background:var(--bg-1);
-    flex-direction:column;
-    padding:60px 20px 20px;
-    gap:0;
-    height:auto;
-    overflow-y:auto;
-    width:100%;
+    border-top:1px solid var(--border);
+    flex-direction:row;align-items:stretch;
+    gap:0;padding:0;
+    height:58px;width:100%;
+    overflow-x:auto;overflow-y:hidden;
+    -webkit-overflow-scrolling:touch;
   }
+  .nav-tabs::-webkit-scrollbar{display:none}
   .nav-tabs.burger-open{display:flex!important}
   .nav-tab{
-    padding:14px 16px;
-    font-size:15px;
-    height:auto;
-    min-height:48px;
-    border-bottom:1px solid var(--border);
-    border-left:3px solid transparent;
-    border-radius:0;
-    white-space:nowrap;
+    flex:1 0 auto;min-width:60px;
+    flex-direction:column;align-items:center;justify-content:center;
+    gap:3px;padding:7px 6px 8px;
+    font-size:11px;font-weight:600;
+    height:auto;min-height:0;
+    border:none;border-radius:0;
+    color:var(--text-3);white-space:nowrap;
   }
+  .nav-tab .nav-ic{width:22px;height:22px}
+  .nav-tab .nav-ic svg{width:22px;height:22px}
   .nav-tab.active{
-    border-bottom-color:var(--border);
-    border-left-color:var(--accent);
     background:none!important;
     color:var(--accent)!important;
     -webkit-text-fill-color:var(--accent)!important;
   }
-  /* Burger overlay footer — pushed to bottom via margin-top:auto. */
-  .nav-tabs-footer{
-    display:flex;
-    align-items:center;
-    gap:14px;
-    margin-top:auto;
-    padding:16px 4px 4px;
-    border-top:1px solid var(--border);
-  }
-  .nav-tabs-footer .header-version-badge{display:inline-block;font-size:11px}
-  .nav-tabs-footer .theme-toggle{flex-shrink:0}
-  .btn-logout-mobile{
-    margin-left:auto;
-    display:inline-flex;align-items:center;
-    background:none;border:1px solid var(--border);border-radius:8px;
-    padding:8px 14px;
-    font-size:13px;font-weight:500;color:var(--text-1);
-    cursor:pointer;
-  }
-  .btn-logout-mobile:hover{background:var(--bg-3);color:var(--danger);border-color:var(--danger)}
-  #modemSearchArea{display:none!important}
-  /* Burger button */
-  .burger-btn{display:flex!important}
+  .nav-tab.active .nav-ic{color:var(--accent)}
+  /* burger UI retired on mobile — keep theme + logout in the top bar instead */
+  .nav-tabs-footer{display:none!important}
+  .burger-btn{display:none!important}
+  .header-right .theme-toggle{display:flex!important}
+  .header-right .btn-logout{display:inline-flex!important}
+  /* reserve space so page content never hides behind the fixed bottom bar */
+  body{padding-bottom:calc(58px + env(safe-area-inset-bottom,0))}
   /* Finance cards mobile */
   .fin-cards-grid{grid-template-columns:1fr!important}
   /* Widgets */
@@ -250,15 +250,15 @@
   .acc-period-group{flex-wrap:wrap}
   /* Analytics cards */
   .analytics-section{padding:6px 8px!important}
-  .analytics-card{padding:10px;border-radius:8px}
+  .analytics-card{padding:10px;border-radius:12px}
   /* Toasts above bottom nav */
   .toast-container{bottom:72px!important}
   /* Bulk panel above bottom nav */
   .bulk-panel{bottom:68px;max-width:calc(100vw - 24px);flex-wrap:wrap;justify-content:center;font-size:11px;padding:8px 12px}
   /* Notification panel */
   .notif-panel{width:calc(100vw - 16px)!important;right:8px!important;left:8px}
-  /* CRM iframe */
-  #crmFrame{height:calc(100vh - 140px)!important}
+  /* CRM iframe — leave room for top bar + bottom tab bar */
+  #crmFrame{height:calc(100vh - 196px)!important}
   /* Confirm dialog */
   .confirm-box{width:calc(100vw - 32px);padding:20px 16px}
   .confirm-actions{flex-direction:column}
@@ -296,10 +296,10 @@
   .ct-header{display:none!important}
   .ct-row{
     flex-wrap:wrap!important;gap:0!important;padding:12px!important;
-    border:1px solid var(--border)!important;border-radius:10px!important;
+    border:1px solid var(--border)!important;border-radius:12px!important;
     margin-bottom:8px!important;position:relative;
   }
-  .ct-row .ct-color{position:absolute;left:0;top:0;bottom:0;width:4px!important;height:auto!important;border-radius:10px 0 0 10px!important}
+  .ct-row .ct-color{position:absolute;left:0;top:0;bottom:0;width:4px!important;height:auto!important;border-radius:12px 0 0 12px!important}
   .ct-row .ct-name{flex:none!important;width:100%!important;font-size:13px!important;font-weight:600!important;padding:0 0 8px 8px!important;border-bottom:1px solid var(--border)}
   .ct-row .ct-live{position:absolute;top:12px;right:12px;flex:none!important}
   .ct-row .ct-metrics{
@@ -333,4 +333,112 @@
   }
   .analytics-card .daily-chart-legend>div{font-size:10px!important}
   .analytics-card .chart-wrap-daily{height:220px!important}
+}
+
+/* ============================================================
+   MOBILE (≤480) — page CONTENT laid out as cards / single column
+   so each page matches the mobile mockup, not just the nav bar.
+   ============================================================ */
+@media(max-width:480px){
+  /* модалки: строки настроек и вкладки */
+  .modal .set-row{flex-wrap:wrap}
+  .modal .set-row .form-input,.modal .set-row select{flex-basis:100%;width:100%!important}
+  .cd-kpi-grid{grid-template-columns:1fr 1fr!important}
+  .cd-tabs{overflow-x:auto;-webkit-overflow-scrolling:touch}
+  .cd-tab{white-space:nowrap;flex-shrink:0}
+  #tab-dashboard .pulse-value{font-size:18px}
+}
+@media(max-width:480px){
+  /* двухъярусные шапки страниц (Клиенты/Модемы): переносим поиск+кнопки на новую строку */
+  .page-hdr{flex-wrap:wrap;padding:12px!important}
+  .page-hdr>div{flex:1 1 100%;min-width:0;justify-content:flex-start}
+  .page-hdr>div>span{flex:1;min-width:0}
+  .page-hdr input{width:100%!important;min-width:0}
+}
+@media(max-width:480px){
+
+  /* Модемы — keep the FULL desktop table (all visible columns = 1-to-1 with
+     desktop) but transform each <tr> into a card and each <td> into a
+     label/value row (responsive-table pattern). Nothing is dropped. */
+  #tab-modems #tableWrap{padding:0!important;overflow:visible!important}
+  #tableWrap table{display:block;min-width:0!important;border:none!important;background:none!important}
+  #tableWrap thead{display:none!important}
+  #tableWrap tbody{display:block}
+  #tableWrap tr{display:block}
+  /* card = flex column so cell `order` can lift the title/status/actions */
+  #tableWrap tr.modem-row{
+    display:flex!important;flex-direction:column;
+    background:var(--bg-1)!important;border:1px solid var(--border)!important;border-radius:12px;
+    margin:0 12px 9px!important;padding:10px 12px 11px!important;box-shadow:var(--card-shadow,0 1px 2px rgba(16,24,40,.05));
+  }
+  #tableWrap tr.modem-row td{
+    display:flex!important;align-items:center;justify-content:space-between;gap:12px;
+    padding:6px 0!important;border:none!important;border-bottom:1px solid var(--border)!important;
+    font-size:12px!important;text-align:right;white-space:normal;width:auto;min-width:0;
+  }
+  #tableWrap tr.modem-row td:last-child{border-bottom:none!important}
+  #tableWrap tr.modem-row td::before{
+    content:attr(data-label);color:var(--text-2);font-weight:600;font-size:11px;
+    text-align:left;flex-shrink:0;white-space:nowrap;
+  }
+  /* rail = цветная левая кромка карточки (вид проблемы), bulk-чекбокс = правый верхний угол */
+  #tableWrap tr.modem-row td.cell-rail{display:block!important;position:absolute;left:0;top:0;bottom:0;width:4px;padding:0!important;border:none!important;overflow:hidden}
+  #tableWrap tr.modem-row td.cell-rail::before{display:none}
+  #tableWrap tr.modem-row td.cell-rail .mk-row-rail{width:4px;height:100%;border-radius:0}
+  #tableWrap tr.modem-row td.cell-bulk{display:flex!important;position:absolute;top:12px;right:12px;padding:0!important;border:none!important;width:auto}
+  #tableWrap tr.modem-row td.cell-bulk::before{display:none}
+  /* nick = card title at the top */
+  #tableWrap tr.modem-row td.cell-nick{order:-2;justify-content:flex-start!important;font-size:15px!important;font-weight:700;color:var(--text-0);padding:0 0 6px!important;border-bottom:none!important}
+  #tableWrap tr.modem-row td.cell-nick::before{display:none}
+  #tableWrap tr.modem-row td.cell-nick strong{font-size:15px}
+  /* status pill just under the title */
+  #tableWrap tr.modem-row td.cell-status{order:-1;justify-content:flex-start!important;padding:0 0 9px!important;margin-bottom:3px}
+  #tableWrap tr.modem-row td.cell-status::before{display:none}
+  /* actions = button row at the bottom */
+  #tableWrap tr.modem-row td.cell-actions{order:9;justify-content:flex-end!important;padding-top:10px!important;border-bottom:none!important}
+  #tableWrap tr.modem-row td.cell-actions::before{display:none}
+  #tableWrap tr.modem-row td.cell-actions .actions-cell{flex-wrap:wrap;justify-content:flex-end}
+  /* server section divider → standalone section header */
+  #tableWrap tr.server-divider{display:block;margin:14px 4px 8px!important}
+  #tableWrap tr.server-divider td{display:block;border-radius:8px}
+  /* (optional grid/tile view if user toggles it) */
+  .mtile-grid{grid-template-columns:1fr!important;padding:0 12px 8px!important;gap:9px!important}
+  .modem-tile{border-radius:12px;padding:13px 15px;border-left-width:4px}
+  .srv-act{font-size:11px!important;padding:6px 10px!important}
+
+  /* Клиенты — full-width cards, rows label-left / value-right (like mockup) */
+  .client-grid{grid-template-columns:1fr!important;padding:12px!important;gap:10px!important}
+  .client-card{border-radius:12px}
+  .client-card-body .row{flex-direction:row!important;justify-content:space-between!important;align-items:center!important;gap:10px!important}
+  .client-card-body .row>*:last-child{text-align:right;font-weight:600;color:var(--text-0)}
+
+  /* Финансы — Обзор widgets to 2-up / single column.
+     Sub-nav (Обзор/Акты/Счета/Платежи) stays horizontal pills = mockup tabs. */
+  #tab-bank .fxw .fx-kpis,
+  #tab-bank .fxw .fx-wgs{grid-template-columns:1fr 1fr!important}
+  #tab-bank .fxw .fx-row2{grid-template-columns:1fr!important}
+  #tab-bank .detail-card{border-radius:12px}
+
+  /* Настройки — section nav as a VERTICAL list with icons + chevron (mockup),
+     not horizontal pills. Scoped to #tab-analytics so Финансы pills are intact. */
+  #tab-analytics .tab-sidebar{
+    flex-direction:column!important;overflow-x:visible!important;
+    gap:7px!important;padding:12px!important;border-bottom:1px solid var(--border);
+  }
+  #tab-analytics .tab-sidebar .settings-nav-item{
+    width:100%;white-space:normal!important;position:relative;
+    justify-content:flex-start;gap:11px;
+    padding:13px 34px 13px 14px!important;border-radius:12px!important;
+    background:var(--bg-1)!important;border:1px solid var(--border)!important;
+    font-size:13px!important;color:var(--text-1);
+  }
+  #tab-analytics .tab-sidebar .settings-nav-item.active{
+    background:var(--accent-dim)!important;border-color:transparent!important;color:var(--accent)!important;
+  }
+  #tab-analytics .tab-sidebar .settings-nav-item svg{width:18px;height:18px;flex-shrink:0}
+  #tab-analytics .tab-sidebar .settings-nav-item::after{
+    content:'';position:absolute;right:15px;top:calc(50% - 4px);width:7px;height:7px;
+    border-right:1.6px solid var(--text-3);border-bottom:1.6px solid var(--text-3);
+    transform:rotate(-45deg);
+  }
 }

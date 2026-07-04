@@ -58,62 +58,85 @@ transition:background .3s,color .3s;
 @keyframes shimmer{0%{background-position:-200% 0}100%{background-position:200% 0}}
 @keyframes glowPulse{0%,100%{box-shadow:0 0 20px var(--accent-glow)}50%{box-shadow:0 0 40px var(--accent-glow)}}
 
-/* Login — proxies.rent style */
+/* Login — Arendaproxy brand style (one unified canvas, centered two-column) */
+@font-face{
+  font-family:'Fixel Text';
+  src:url('/fonts/FixelText-Regular.woff') format('woff');
+  font-weight:400 600;font-style:normal;font-display:swap;
+}
+/* ONE background across the whole screen — no left/right seam */
 .login-overlay{
-position:fixed;inset:0;
-background:#0D0D0E;
+position:fixed;inset:0;z-index:1000;
 display:flex;align-items:center;justify-content:center;
-z-index:1000;
+padding:32px;overflow:hidden;
+background:
+  radial-gradient(48% 36% at 50% -2%,rgba(25,96,201,0.20) 0%,transparent 55%),
+  radial-gradient(60% 55% at 90% 104%,rgba(74,28,134,0.30) 0%,transparent 55%),
+  radial-gradient(140% 115% at 60% 45%,#0B0430 0%,#070713 52%,#040406 100%);
+animation:loginIn .5s ease;
 }
-.login-overlay::before{
-content:'';position:absolute;inset:0;
-background:radial-gradient(ellipse at 50% 0%,rgba(25,96,201,0.15) 0%,transparent 60%);
-pointer-events:none;
+@keyframes loginIn{from{opacity:0}to{opacity:1}}
+/* both columns sit in one centered composition, vertically aligned */
+.login-wrap{
+display:flex;align-items:center;gap:clamp(36px,5vw,72px);
+width:100%;max-width:1040px;
+animation:lrIn .6s cubic-bezier(.16,1,.3,1);
 }
-.login-overlay::after{
-content:'';position:absolute;inset:0;
-background:radial-gradient(ellipse at 80% 80%,rgba(52,199,89,0.06) 0%,transparent 50%);
-pointer-events:none;
-}
-.login-box{
-background:#1B2237;
-border:1px solid rgba(255,255,255,0.08);
-border-radius:20px;
-padding:48px 40px;
-width:420px;max-width:90vw;
-box-shadow:0 24px 64px rgba(0,0,0,.5),0 0 0 1px rgba(255,255,255,.04);
-animation:fadeIn .5s ease;
-position:relative;z-index:1;
-}
-.login-logo{
-display:flex;align-items:center;justify-content:center;gap:10px;
-margin-bottom:8px;
-}
-.login-logo img{height:32px;width:auto}
-.login-logo span{font-size:22px;font-weight:600;color:#fff;letter-spacing:-0.3px}
-.login-box .login-sub{
-text-align:center;color:#B3B3B3;font-size:14px;margin-bottom:32px;font-weight:400;
-}
+@keyframes lrIn{from{opacity:0;transform:translateY(12px)}to{opacity:1;transform:none}}
+
+/* ── LEFT: the form ── */
+.login-left{flex:0 0 auto;width:344px;max-width:100%}
+.login-box{width:100%}
+.login-logo{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:6px}
+.login-logo img{height:44px;width:auto;filter:drop-shadow(0 4px 16px rgba(25,96,201,.35))}
+.login-logo span{font-family:'Fixel Text',Inter,-apple-system,system-ui,sans-serif;font-size:28px;font-weight:500;color:#fff;letter-spacing:-0.5px}
+.login-box .login-sub{text-align:center;color:#B3B3B3;font-size:14px;margin-bottom:30px;font-weight:400}
 .login-box input{
-width:100%;padding:14px 16px;margin-bottom:14px;
-background:rgba(13,13,14,0.6);border:1px solid #5C5967;border-radius:4px;
-color:#EDEDED;font-size:15px;font-family:var(--font-sans);
-transition:border-color .3s,box-shadow .3s;
+width:100%;padding:15px 16px;margin-bottom:14px;
+background:rgba(13,13,14,0.55);border:1px solid rgba(255,255,255,0.12);border-radius:12px;
+color:#EDEDED;font-size:15px;font-family:var(--font-sans,Inter,-apple-system,system-ui,sans-serif);
+transition:border-color .25s,box-shadow .25s,background .25s;
 }
-.login-box input:focus{outline:none;border-color:#1960C9;box-shadow:0 0 0 3px rgba(25,96,201,0.2)}
+.login-box input:focus{outline:none;border-color:#1960C9;background:rgba(13,13,14,0.82);box-shadow:0 0 0 4px rgba(25,96,201,0.18)}
 .login-box input::placeholder{color:#5C5967}
 .login-box .btn-login{
-width:100%;padding:14px;margin-top:6px;
-background:#1960C9;
-border:1px solid #1960C9;border-radius:8px;
-color:#fff;font-size:16px;font-weight:600;
-cursor:pointer;transition:all .3s ease;
-font-family:var(--font-sans);
+width:100%;height:52px;padding:0;margin-top:8px;
+background:#1960C9;border:1px solid #1960C9;border-radius:100px;
+color:#fff;font-size:16px;font-weight:500;cursor:pointer;
+font-family:var(--font-sans,Inter,-apple-system,system-ui,sans-serif);
+transition:color .3s ease,background .3s ease,border-color .3s ease,transform .1s ease;
 }
 .login-box .btn-login:hover{background:#fff;color:#1960C9;border-color:#fff}
-.login-box .btn-login:active{transform:scale(.98)}
+.login-box .btn-login:active{transform:scale(.985)}
 .login-box .btn-login:disabled{opacity:.5;cursor:not-allowed}
 .login-error{color:#FF383C;font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
+
+/* ── RIGHT: brand info (same canvas, only a hairline divider) ── */
+.login-right{
+flex:1 1 0;min-width:0;
+border-left:1px solid rgba(255,255,255,0.09);
+padding-left:clamp(36px,5vw,72px);
+}
+.login-right-inner{max-width:560px}
+.lr-title{font-family:'Fixel Text',Inter,-apple-system,system-ui,sans-serif;font-weight:500;font-size:clamp(28px,2.9vw,42px);line-height:1.1;color:#fff;letter-spacing:-1px;margin:0 0 18px}
+.lr-title span{color:#34C759}
+.lr-sub{color:#B3B3B3;font-size:clamp(15px,1.15vw,17px);line-height:1.5;margin:0 0 32px;max-width:480px}
+.lr-features{list-style:none;padding:0;margin:0 0 36px;display:flex;flex-direction:column;gap:15px}
+.lr-features li{display:flex;align-items:center;gap:13px;color:#EDEDED;font-size:clamp(14px,1.1vw,16px)}
+.lr-features li svg{flex:0 0 auto;width:23px;height:23px}
+.lr-clients{margin-bottom:28px}
+.lr-clients-label{display:block;color:#8A8794;font-size:11px;text-transform:uppercase;letter-spacing:1.6px;margin-bottom:18px}
+.lr-logos{display:flex;flex-wrap:wrap;align-items:center;gap:22px 38px;opacity:.95}
+.lr-logos img{height:29px;width:auto}
+.lr-legal{color:#7A7785;font-size:13px;margin:0;letter-spacing:.2px}
+.lr-legal b{color:#D5D3DA;font-weight:500}
+
+/* ── responsive: stack to just the form ── */
+@media (max-width:980px){
+  .login-right{display:none}
+  .login-wrap{max-width:380px;justify-content:center}
+  .login-left{width:100%}
+}
 
 /* Header — unified with admin */
 /* Header — single row with embedded nav */

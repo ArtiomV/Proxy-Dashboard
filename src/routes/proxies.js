@@ -38,7 +38,20 @@ async function _modemAction(req, res, paramName, apiPathFn, errorLabel) {
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const result = await fetchApi(server, apiPathFn(paramVal));
-    return res.json({ ok: true, result });
+    // ProxySmart apix actions reply { result, message } (or a string). A reboot
+    // can SILENTLY fail when the modem's WebApp is down ("restart the modem"),
+    // yet still return HTTP 200 — so inspect the body instead of always
+    // reporting success, otherwise the UI says «выполнено» but nothing happens.
+    let psMessage = '';
+    if (result && typeof result === 'object') psMessage = result.message || result.MSG || '';
+    const blob = (typeof result === 'string') ? result : JSON.stringify(result || '');
+    const failed = /not available|restart the modem|web ?app|cannot|unable|is busy|no such|not found/i.test(blob)
+      || /"result"\s*:\s*"?(error|fail)/i.test(blob);
+    if (failed) {
+      logger.warn(`[${errorLabel}] ProxySmart refused ${paramVal}@${serverName}: ${psMessage || blob.slice(0, 160)}`);
+      return res.json({ ok: false, result, message: psMessage, error: psMessage || `${errorLabel}: ProxySmart не выполнил операцию (модем не отвечает — попробуйте USB-ресет)` });
+    }
+    return res.json({ ok: true, result, message: psMessage });
   } catch (err) { return res.status(502).json({ error: `${errorLabel} failed`, details: err.message }); }
 }
 
@@ -120,6 +133,36 @@ r.post('/api/admin/reset_complete', authMiddleware, adminMiddleware, async (req,
     logger.info(`[Admin] Reset complete on ${serverName}: ${resetCount}/${modems.length} modems`);
     res.json({ ok: true, total: modems.length, reset: resetCount });
   } catch (err) { res.status(502).json({ error: 'Reset complete failed', details: err.message }); }
+});
+
+// Reconnect all modems on a server: Re-Add (re-register USB) every modem that is
+// NOT currently online — brings the disconnected/fallen-off ones back without
+// touching working modems (so live client sessions aren't disrupted).
+r.post('/api/admin/reconnect_all', authMiddleware, adminMiddleware, async (req, res) => {
+  try {
+    const { serverName } = req.body;
+    if (!serverName) return res.status(400).json({ error: 'serverName required' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+    const statusData = await fetchApi(server, '/apix/show_status_json');
+    const modems = Array.isArray(statusData) ? statusData : [];
+    let total = 0, done = 0, failed = 0;
+    for (const m of modems) {
+      const nd = m.net_details || {}, md = m.modem_details || {};
+      const dev = nd.DEV;
+      const nick = (md.NICK || '').trim();
+      if (!dev) continue;                       // can't re-add without a device path
+      if (/^random/i.test(nick)) continue;      // phantom port — skip
+      if (nd.IS_ONLINE === 'yes') continue;     // already working — don't disrupt
+      total++;
+      try { await postFormApi(server, '/modem/add_dev', { DEV: dev }); done++; }
+      catch (_) { failed++; }
+    }
+    logger.info(`[Admin] Reconnect-all ${serverName}: re-added ${done}/${total} offline modems (${failed} failed)`);
+    auditLog(req.user.login, 'reconnect_all', { serverName, total, done, failed, ip: getClientIp(req) });
+    proxySmart.invalidateCache();
+    res.json({ ok: true, total, reconnected: done, failed });
+  } catch (err) { res.status(502).json({ error: 'Reconnect-all failed', details: err.message }); }
 });
 
 r.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, res) => {
@@ -357,6 +400,30 @@ r.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const rawImei = portData.IMEI.replace(/^S\d+_/, '');
     if (portData.portName && portData.portName.length < 4) return res.status(400).json({ error: 'portName must be at least 4 characters' });
+    // ProxySmart silently rejects port names with characters outside a conservative
+    // set — notably '@' (Telegram handles like @yakovlevArtm): the add_port POST
+    // 302-redirects back to the form, the port is never written, yet the redirect
+    // looks identical to success. Reject upfront with a clear message instead of
+    // letting it fail invisibly.
+    if (portData.portName && !/^[A-Za-z0-9._-]+$/.test(portData.portName)) {
+      return res.status(400).json({ error: 'Имя порта: только латиница, цифры, точка, _ и - (без @, пробелов и спецсимволов — ProxySmart их не принимает).' });
+    }
+    // Reject an accidental duplicate: the SAME portName already on THIS modem. A
+    // modem may legitimately host several ports with DIFFERENT names (e.g. WildBox
+    // + yakovlevArtm), and the same client name may live on different modems — so
+    // only an exact portName+IMEI match is a dup. That is precisely what a
+    // lost-response retry produces (the operator re-submits, thinking it failed).
+    if (portData.portName) {
+      try {
+        const existing = await fetchApi(server, '/apix/list_ports_json');
+        const onModem = (existing && existing[rawImei]) || [];
+        if (Array.isArray(onModem) && onModem.some(p => p && p.portName === portData.portName)) {
+          return res.status(409).json({ error: `Порт «${portData.portName}» уже существует на этом модеме — дубль не создан.` });
+        }
+      } catch (e) {
+        logger.warn(`[store_port] dup-check failed for ${rawImei}: ${e.message}`);   // best-effort, don't block a real create
+      }
+    }
     // GET pre-filled form values from ProxySmart (portID, http_port, login, password)
     const formHtml = await fetchApiRaw(server, `/conf/add_port?imei=${rawImei}`);
     const html = formHtml.buffer ? formHtml.buffer.toString('utf8') : String(formHtml);
@@ -400,6 +467,23 @@ r.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res
     }
 
     proxySmart.invalidateCache();
+    // ProxySmart returns a 302 on BOTH a successful add AND a silent validation
+    // reject (see the portName note above), and postFormApi can't tell them apart.
+    // Confirm the port actually landed in the live port list before reporting
+    // success — otherwise we'd log a phantom "port_created" and the operator would
+    // retry, stacking duplicates (which then collide on the same port-pair).
+    let persisted = true;
+    try {
+      const listRaw = await fetchApi(server, '/apix/list_ports_json');
+      persisted = JSON.stringify(listRaw || '').includes(actualPortId);
+    } catch (e) {
+      logger.warn(`[store_port] persistence check failed for ${actualPortId}: ${e.message}`);
+    }
+    if (!persisted) {
+      logger.warn(`[store_port] port ${actualPortId} did NOT persist — ProxySmart rejected the add (portName=${JSON.stringify(portData.portName)})`);
+      return res.status(422).json({ ok: false, error: 'ProxySmart не сохранил порт (отклонён). Частая причина — недопустимое имя порта. Порт НЕ создан, повтор не нужен.' });
+    }
+
     auditLog(req.user.login, 'store_port', { serverName, IMEI: rawImei, portName: portData.portName, portId: actualPortId, applied, ip: getClientIp(req) });
     logActivity('modem', 'info', 'port_created', portData.portName || actualPortId, `Port created on ${serverName}/${rawImei} (id=${actualPortId})`, { applied });
     res.json({ ok: true, portId: actualPortId, applied,
@@ -498,6 +582,8 @@ r.get('/api/admin/get_port_config', authMiddleware, adminMiddleware, async (req,
       bandlimin: extract('bandlimin'),
       bandlimout: extract('bandlimout'),
       bw_quota: extract('bw_quota'),
+      QUOTA_TYPE: extractSelected('QUOTA_TYPE'),
+      QUOTA_DIRECTION: extractSelected('QUOTA_DIRECTION'),
       PROXY_VALID_BEFORE: extract('PROXY_VALID_BEFORE'),
       CREATED_AT: extract('CREATED_AT'),
       OS: extractSelected('OS'),
@@ -515,6 +601,20 @@ r.post('/api/admin/save_port_config', authMiddleware, adminMiddleware, async (re
     if (!serverName || !portId) return res.status(400).json({ error: 'serverName and portId required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
+    // Batch 2: validate numeric limit fields BEFORE they reach ProxySmart.
+    // ProxySmart silently rejects malformed input (302-redirects back to the
+    // form, change lost, no error) — same trap as the portName gotcha. Catch
+    // it here with a clear 400 instead of a phantom "сохранено".
+    const _numLimitFields = ['MAXCONN', 'CONNLIM', 'bandlimin', 'bandlimout', 'bw_quota'];
+    for (const f of _numLimitFields) {
+      const v = fields[f];
+      if (v === undefined || v === null || String(v).trim() === '') continue;
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 0) {
+        return res.status(400).json({ error: `Поле ${f}: ожидается целое число ≥ 0 (0 = без лимита).` });
+      }
+      fields[f] = String(n);
+    }
     // Read full current form to preserve ALL required fields
     const raw = await fetchApiRaw(server, `/conf/edit_port/${portId}`);
     const html = raw?.buffer ? raw.buffer.toString('utf8') : '';

@@ -17,3 +17,6 @@ tochka_config.json.bak*
 _recover_*.js
 # OS / editor
 .DS_Store
+# Локальные бэкапы перед правками
+*.bak
+*.bak-*

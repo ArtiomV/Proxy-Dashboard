@@ -21,7 +21,7 @@
 .detail-value{color:var(--text-0);font-family:var(--font-mono);font-size:10px;max-width:240px;overflow:hidden;text-overflow:ellipsis}
 
 /* SMS */
-.sms-item{background:var(--card-bg);border-radius:8px;padding:8px;margin-bottom:5px;border:1px solid var(--card-border)}
+.sms-item{background:var(--card-bg);border-radius:8px;padding:10px 12px;margin-bottom:5px;border:1px solid var(--card-border)}
 .sms-from{font-size:11px;color:var(--accent);font-weight:500}
 .sms-date{font-size:10px;color:var(--text-3);float:right}
 .sms-text{font-size:11px;color:var(--text-1);margin-top:3px;word-break:break-word}

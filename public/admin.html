@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Proxies.rent — личный кабинет администратора</title>
+<title>Arendaproxy.ru — личный кабинет администратора</title>
 <link rel="icon" type="image/png" href="https://proxies.rent/favicon-96x96.png" sizes="96x96">
 <link rel="icon" type="image/svg+xml" href="https://proxies.rent/favicon.svg">
 <link rel="shortcut icon" href="https://proxies.rent/favicon.ico">
@@ -12,12 +12,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
-<link rel="stylesheet" href="css/variables.css">
-<link rel="stylesheet" href="css/base.css">
-<link rel="stylesheet" href="css/tables.css">
-<link rel="stylesheet" href="css/cards.css">
-<link rel="stylesheet" href="css/modal.css">
-<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/variables.css?v=0630d">
+<link rel="stylesheet" href="css/base.css?v=0630d">
+<link rel="stylesheet" href="css/tables.css?v=0630d">
+<link rel="stylesheet" href="css/cards.css?v=0630d">
+<link rel="stylesheet" href="css/modal.css?v=0630d">
+<link rel="stylesheet" href="css/layout.css?v=0630d">
+<link rel="stylesheet" href="css/shell.css?v=0630d">
+<link rel="stylesheet" href="css/finance.css?v=0630d">
 <!-- Yandex.Metrika counter -->
 <script type="text/javascript">
     (function(m,e,t,r,i,k,a){
@@ -57,6 +59,7 @@
   <button class="btn btn-sm" onclick="bulkRotation()" title="Установить авторотацию на выбранных модемах">⏱ Ротация</button>
   <button class="btn btn-sm" onclick="bulkExport()" title="Экспорт прокси выбранных модемов">📤 Экспорт</button>
   <button class="btn btn-sm" onclick="bulkProxyCheck()" title="Замерить задержку через прокси выбранных модемов">📡 Замер задержки</button>
+  <button class="btn btn-sm" onclick="bulkDelete()" title="Удалить выбранные модемы из дашборда" style="color:var(--danger)">🗑 Удалить</button>
   <button class="btn btn-sm bulk-cancel" onclick="clearBulkSel()" style="color:var(--danger)">✕ Отмена</button>
 </div>
 
@@ -83,26 +86,29 @@
 
 <div class="header">
   <div class="header-left">
-    <a class="header-logo" href="/admin"><img src="https://proxies.rent/img/logo.webp" alt=""></a>
-    <span class="header-admin-badge">ADMIN</span>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v1.0.0</a>
+    <div class="sb-brand">
+      <a class="header-logo" href="/admin"><img src="https://proxies.rent/img/logo.webp" alt=""></a>
+      <span class="header-brand-name">Arendaproxy.ru</span>
+      <span class="header-admin-badge">ADMIN</span>
+    </div>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.0.0</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
   <nav class="nav-tabs">
-    <div class="nav-tab active" onclick="switchMainTab('modems',this)">Модемы</div>
-    <div class="nav-tab" onclick="switchMainTab('clients',this)">Клиенты</div>
-    <div class="nav-tab" onclick="switchMainTab('traffic',this)">Аналитика</div>
-    <div class="nav-tab" onclick="switchMainTab('bank',this)">Финансы</div>
-    <div class="nav-tab" onclick="switchMainTab('crm',this)">CRM</div>
-    <div class="nav-tab" onclick="switchMainTab('analytics',this)">Настройки</div>
+    <div class="nav-tab active" onclick="switchMainTab('dashboard',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></svg></span>Дашборд</div>
+    <div class="nav-tab" onclick="switchMainTab('modems',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 17h.01"/><line x1="11" y1="17" x2="17" y2="17"/><path d="M9.5 9.5a5 5 0 0 1 5 0M7 7a8 8 0 0 1 10 0"/></svg></span>Модемы</div>
+    <div class="nav-tab" onclick="switchMainTab('clients',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Клиенты</div>
+    <div class="nav-tab" onclick="switchMainTab('bank',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>Финансы</div>
+    <div class="nav-tab" onclick="switchMainTab('crm',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16c0-1.8 1.6-2.8 3.5-2.8s3.5 1 3.5 2.8"/><line x1="3" y1="7.5" x2="5" y2="7.5"/><line x1="3" y1="12" x2="5" y2="12"/><line x1="3" y1="16.5" x2="5" y2="16.5"/></svg></span>CRM</div>
+    <div class="nav-tab" onclick="switchMainTab('analytics',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></span>Настройки</div>
     <!-- Stage 18.18 — mobile-only footer inside the burger overlay. Hidden on
          desktop by `.nav-tabs-footer{display:none}` in layout.css and shown
          only inside the mobile burger flyout. Lets us strip noise from the
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v1.0.0</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.0.0</a>
       <div class="theme-toggle" onclick="toggleTheme()" title="Тема"></div>
       <button class="btn-logout-mobile" onclick="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -112,6 +118,7 @@
   </nav>
 
   <div class="header-right">
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.0.0</a>
     <span class="last-update" id="lastUpdate"></span>
     <div class="theme-toggle" onclick="toggleTheme()" title="Переключить тему"></div>
     <button class="header-notif-btn" id="notifBtn" onclick="toggleNotifPanel()" title="Уведомления">
@@ -137,25 +144,24 @@
 <span id="searchCounter" style="display:none"></span>
 
 <!-- TAB: MODEMS -->
-<div class="tab-content active" id="tab-modems" style="position:relative">
-  <!-- Stage 18.20 — compact ⚙ button anchored over the right edge of the
-       table's thead row. tableWrap is the scroll container with a sticky
-       thead, the col-selector lives as a sibling so it stays pinned to
-       tab-modems' top-right while the table content scrolls. Visually the
-       button reads as part of the thead row. -->
-  <div class="col-selector btn-filter-anchor">
-    <button class="btn-filter-mini" onclick="toggleFilterDropdown()" title="Фильтры">⚙</button>
-    <div class="col-dropdown" id="filterDropdown" style="right:0;min-width:240px">
-      <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600">Сервер</div>
-      <div id="serverFilterDD"></div>
-      <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600;border-top:1px solid var(--border);margin-top:4px">Статус</div>
-      <div id="statusFilterDD"></div>
-      <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600;border-top:1px solid var(--border);margin-top:4px">Клиент</div>
-      <div id="clientFilterDD"></div>
-      <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600;border-top:1px solid var(--border);margin-top:4px">Столбцы</div>
-      <div id="colDropdown"></div>
+<div class="tab-content" id="tab-modems" style="position:relative">
+  <!-- Two-tier header (matches Клиенты): row1 = title | search + ⚙;
+       row2 = status chips | server/client selects + view toggle. -->
+  <div class="page-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:13px 24px;border-bottom:1px solid var(--border);gap:12px">
+    <span style="font-size:16px;font-weight:600;color:var(--text-0)">Модемы</span>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="11" y1="11" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg><input id="modemSearch" type="text" placeholder="Поиск: ник, IP, клиент…" oninput="renderTable()" autocomplete="off" style="border:none;background:none;outline:none;font-size:12px;color:var(--text-1);width:190px"></span>
+      <div class="col-selector" style="flex:0 0 auto">
+        <button class="btn-filter-mini" onclick="toggleFilterDropdown()" title="Столбцы (для таблицы)">⚙</button>
+        <div class="col-dropdown" id="filterDropdown" style="right:0;min-width:200px">
+          <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600">Столбцы</div>
+          <div id="colDropdown"></div>
+        </div>
+      </div>
     </div>
   </div>
+  <div id="modemsTopBar" style="padding:0"></div>
+  <div id="needsAttention" style="display:none"></div>
   <div class="table-wrap" id="tableWrap"></div>
 </div>
 
@@ -166,9 +172,6 @@
     <div class="acc-sub-tab active" onclick="switchAccTab('overview',this)">Трафик</div>
     <div class="acc-sub-tab" onclick="switchAccTab('infra',this)">Инфраструктура</div>
     <div class="acc-sub-tab" onclick="switchAccTab('finances',this)">Доходность</div>
-    <!-- Stage 18.23 — experimental unified analytics view. Lives parallel
-         to the existing 3 tabs. After validation it'll replace them. -->
-    <div class="acc-sub-tab" onclick="switchAccTab('new',this)" style="color:#3b82f6;font-weight:700" title="Экспериментальный единый вид">⚡ NEW</div>
   </div>
   <!-- hidden period/client controls (used by Resources tab) -->
   <div style="display:none">
@@ -190,8 +193,8 @@
     <!-- Клиенты — перенесено из отдельной вкладки -->
     <div style="padding:0 24px 14px">
       <!-- Тепловая карта почасового трафика -->
-      <div class="analytics-card" id="heatmapBlock" style="margin-bottom:14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px">
+      <div class="analytics-card" id="heatmapBlock" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <h3 style="margin:0">Почасовой трафик <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">GMT+3 (МСК)</span></h3>
           <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
             <button onclick="setHeatmapView('country')" id="hmTabCountry" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По странам</button>
@@ -199,15 +202,15 @@
             <button onclick="setHeatmapView('client')" id="hmTabClient" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
           </div>
         </div>
-        <div id="heatmapSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div id="heatmapSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
         <div id="heatmapGrid" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
           <div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>
         </div>
         <div id="heatmapSummary" style="display:none;margin-top:16px;padding-top:16px;border-top:0.5px solid rgba(0,0,0,0.08)"></div>
       </div>
 
-      <div class="analytics-card" style="margin-bottom:14px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div class="analytics-card" style="margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
           <h3 style="margin:0">Распределение задержек</h3>
           <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
             <button onclick="setLatencyView('country')" id="latTabCountry" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По странам</button>
@@ -221,11 +224,11 @@
              - No summary panel below (the chart itself is the summary)
              - Lines: P50 (median), P95 (worst), P95-connect (TCP-handshake),
                and Errors-count on a secondary Y-axis. -->
-        <div id="latencySubTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div id="latencySubTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"></div>
         <div style="height:300px;padding:0 4px"><canvas id="latencyChartCanvas"></canvas></div>
       </div>
 
-      <div class="analytics-card" style="margin-bottom:14px">
+      <div class="analytics-card" style="margin-bottom:12px">
         <h3 style="margin:0 0 10px">Клиенты</h3>
         <div id="clientTrafficTable"></div>
       </div>
@@ -272,7 +275,7 @@
     <!-- TOP RESOURCES (domains) — folded in from former "Ресурсы" sub-tab.
          Lazy-loaded: data fetched only when the user clicks ⟳ Обновить. -->
     <div class="analytics-card" style="margin:0 0 14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Топ ресурсов <span class="tab-count" id="resCount" style="display:none"></span></h3>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <select id="resClientFilter" onchange="renderTopResources()" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-0)">
@@ -303,7 +306,7 @@
         <option value="1">1 день</option><option value="3">3 дня</option><option value="7" selected>7 дней</option><option value="14">14 дней</option><option value="30">30 дней</option>
       </select>
     </div>
-    <div style="display:grid;gap:22px">
+    <div style="display:grid;gap:16px">
       <section>
         <div class="infra-section-title" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 14px;background:linear-gradient(90deg,rgba(59,157,216,0.16),rgba(59,157,216,0.03));border-left:4px solid #3B9DD8;border-radius:6px">
           <span style="font-size:18px">🔄</span>
@@ -328,38 +331,42 @@
     </div>
   </div>
 
-  <!-- ⚡ NEW (Stage 18.23) — unified analytics view, single scroll.
-       Always-visible: KPI row · heatmap · clients · daily chart · mini finances.
-       Collapsibles (<details>): latency · infra (rotations+IP+capacity) ·
-       top hosts · matrix. Lazy-loaded on first expand. Element IDs are
-       suffixed «New» so the old tabs' renderers don't collide. -->
-  <div class="acc-sub-content" id="acc-new" style="padding:14px 20px">
+  <!-- /конец под-вкладок «Аналитики» -->
+</div>
+
+<!-- TAB: DASHBOARD (бывший ⚡ NEW) — основной экран, единый вид.
+     Always-visible: KPI row · heatmap · clients · daily chart · mini finances.
+     Collapsibles (<details>): latency · infra · top hosts · matrix. -->
+<div class="tab-content active" id="tab-dashboard" style="padding:14px 24px">
     <!-- Header -->
-    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;gap:10px">
       <div>
-        <h2 style="margin:0;font-size:19px">⚡ Командный центр</h2>
-        <div style="font-size:11px;color:var(--text-3);margin-top:2px">Бизнес · парк · трафик — один экран для решений</div>
+        <h2 style="margin:0;font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px"><span style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="18" height="18" style="flex-shrink:0"><path d="M13 3 4 14h6l-1 7 9-11h-6l1-7z"/></svg></span>Командный центр</h2>
       </div>
-      <div style="display:flex;gap:6px;align-items:center">
-        <button class="btn btn-sm" onclick="openFinanceCostsModal()" style="font-size:11px">⚙ Затраты</button>
-        <button class="btn btn-sm" onclick="renderAccNew()" style="font-size:11px">⟳ Обновить</button>
-      </div>
+      <span id="dashUpdatedAt" style="font-size:11px;color:var(--text-3)"></span>
     </div>
 
-    <!-- 1. ПУЛЬС БИЗНЕСА -->
-    <div class="widget-grid" id="newPulseRow" style="grid-template-columns:repeat(6,1fr);padding:0;margin-bottom:12px">
-      <div style="grid-column:1/-1;text-align:center;color:var(--text-3);font-size:11px;padding:14px">Загрузка пульса бизнеса…</div>
-    </div>
+    <!-- ───── ПУЛЬС БИЗНЕСА (hero KPI — как в макете) ───── -->
+    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><path d="M3 12h4l2 5 4-10 2 5h6"/></svg>Пульс бизнеса</div>
+    <div id="newPulseRow" class="pulse-grid"></div>
 
-    <!-- 2. ТРЕБУЕТ ВНИМАНИЯ -->
-    <div id="newActionRow" style="margin-bottom:18px"></div>
+    <!-- ───── ТРЕБУЕТ ВНИМАНИЯ: одна карточка с плитками алертов (по макету) ───── -->
+    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><path d="M12 4 2.5 20h19L12 4z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="16.8" x2="12.01" y2="16.8"/></svg>Требует внимания</div>
+    <div id="newExtWidgets" style="display:grid;grid-template-columns:1.15fr 1fr 1.15fr;gap:12px;margin-bottom:12px;align-items:stretch"></div>
+
+    <!-- ───── ПАРК ПО СЕРВЕРАМ (как в макете — наверх) ───── -->
+    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/></svg>Парк по серверам</div>
+    <div id="newFleetServers" class="fleet-grid"><div style="grid-column:1/-1;color:var(--text-3);font-size:12px;padding:6px">Загрузка…</div></div>
 
     <!-- ───── ФИНАНСЫ ───── -->
-    <div style="display:flex;align-items:center;gap:10px;margin:0 0 12px"><span style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">💰 Финансы</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg>Финансы</div>
 
-    <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-bottom:14px" id="newFinTopGrid">
+    <div style="display:grid;grid-template-columns:1.7fr 1fr;gap:12px;margin-bottom:12px" id="newFinTopGrid">
       <div class="analytics-card" style="margin:0">
-        <h3 style="margin:0 0 10px;font-size:14px">MRR — последние 12 месяцев</h3>
+        <div style="display:flex;align-items:baseline;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:10px">
+          <h3 style="margin:0;font-size:14px">MRR <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">12 месяцев</span></h3>
+          <div id="mrrLegend" style="display:flex;gap:14px;font-size:10.5px;font-weight:600;color:var(--text-2)"></div>
+        </div>
         <div style="height:230px"><canvas id="newFinTrendCanvas"></canvas></div>
       </div>
       <div class="analytics-card" style="margin:0" id="newFinQuality">
@@ -367,56 +374,39 @@
       </div>
     </div>
 
-    <div id="newFinFlow" style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px"></div>
-
-    <details class="acc-expand" data-section="finclients">
-      <summary><span class="acc-expand-icon">👥</span>Клиенты по доходности</summary>
-      <div class="acc-expand-body"><div id="newFinClients"><div style="color:var(--text-3);font-size:12px;padding:8px">Разверните…</div></div></div>
-    </details>
-    <details class="acc-expand" data-section="recon">
-      <summary><span class="acc-expand-icon">🧾</span>Сверка биллинга <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">(отдали ГБ vs выставили счёт)</span></summary>
-      <div class="acc-expand-body"><div id="newReconBody"><div style="color:var(--text-3);font-size:12px;padding:8px">Разверните для проверки…</div></div></div>
-    </details>
-
-    <!-- ───── ПАРК ───── -->
-    <div style="display:flex;align-items:center;gap:10px;margin:20px 0 12px"><span style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">🛰 Парк и инфраструктура</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
-
-    <div id="newFleetServers" class="widget-grid" style="grid-template-columns:repeat(auto-fit,minmax(150px,1fr));padding:0;margin-bottom:14px"><div style="grid-column:1/-1;color:var(--text-3);font-size:12px;padding:6px">Загрузка…</div></div>
-
-    <div class="analytics-card" style="margin-bottom:14px">
-      <h3 style="margin:0 0 10px;font-size:14px">Здоровье парка <span style="font-size:10px;font-weight:400;color:var(--text-3)">за 7 дней</span></h3>
-      <div id="newFleetHealth"><div style="color:var(--text-3);font-size:12px">Загрузка…</div></div>
+    <div class="analytics-card" style="margin-bottom:12px">
+      <h3 style="margin:0 0 10px">Клиенты</h3>
+      <div id="newClientTable"></div>
     </div>
 
-    <details class="acc-expand" data-section="infra">
-      <summary><span class="acc-expand-icon">🔧</span>Ротации · IP · ёмкость</summary>
+    <!-- ───── ИНФРАСТРУКТУРА (детально, раскрывашки) ───── -->
+    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg>Инфраструктура</div>
+
+    <details class="acc-expand" data-section="topproblems">
+      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><path d="M12 4 2.5 20h19L12 4z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="16.8" x2="12.01" y2="16.8"/></svg></span>Топ проблемных модемов</summary>
+      <div class="acc-expand-body"><div id="newTopProblems"><div style="color:var(--text-3);font-size:12px;padding:8px">Загрузка…</div></div></div>
+    </details>
+
+    <details class="acc-expand" data-section="infra" open>
+      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></span>Ротации · IP · ёмкость</summary>
       <div class="acc-expand-body">
-        <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-          <span style="font-size:11px;color:var(--text-2)">Период:</span>
-          <select id="newInfraDays" onchange="reloadNewInfra()" style="padding:4px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-0)">
-            <option value="1">1 день</option><option value="3">3 дня</option><option value="7" selected>7 дней</option><option value="14">14 дней</option><option value="30">30 дней</option>
-          </select>
-        </div>
-        <h4 style="margin:14px 0 6px;color:#3B9DD8;font-size:13px">🔄 Ротации</h4>
-        <div id="newInfraRotations"></div>
-        <h4 style="margin:18px 0 6px;color:#965AC8;font-size:13px">🌐 IP-аналитика</h4>
-        <div id="newInfraIp"></div>
-        <h4 style="margin:18px 0 6px;color:#EF9F27;font-size:13px">📊 Ёмкость серверов</h4>
-        <div id="newInfraCapacity"></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-2)">Период:</span><button class="dchip" onclick="setNewInfraDays(1,this)">1 день</button><button class="dchip" onclick="setNewInfraDays(3,this)">3 дня</button><button class="dchip on" onclick="setNewInfraDays(7,this)">7 дней</button><button class="dchip" onclick="setNewInfraDays(14,this)">14 дней</button><button class="dchip" onclick="setNewInfraDays(30,this)">30 дней</button></div>
+        <div id="newInfraKpis"></div>
+        <div id="newInfraTables"><div style="color:var(--text-3);font-size:12px;padding:8px">Загрузка…</div></div>
       </div>
     </details>
-    <details class="acc-expand" data-section="latency">
-      <summary><span class="acc-expand-icon">📊</span>Распределение задержек</summary>
+    <details class="acc-expand" data-section="latency" open>
+      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><rect x="4" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16" y="4" width="4" height="16" rx="1"/></svg></span>Распределение задержек</summary>
       <div class="acc-expand-body">
-        <div style="height:300px;padding:0 4px"><canvas id="newLatencyCanvas"></canvas></div>
+        <div id="latencySummary" style="padding:4px 2px"></div>
       </div>
     </details>
 
     <!-- ───── ТРАФИК ───── -->
-    <div style="display:flex;align-items:center;gap:10px;margin:20px 0 12px"><span style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;letter-spacing:.05em">📊 Трафик</span><div style="flex:1;height:1px;background:var(--border)"></div></div>
+    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="4" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16" y="4" width="4" height="16" rx="1"/></svg>Трафик</div>
 
-    <div class="analytics-card" style="margin-bottom:14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:14px;flex-wrap:wrap;gap:8px">
+    <div class="analytics-card" style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Почасовой трафик <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">GMT+3 (МСК)</span></h3>
         <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
           <button onclick="setNewHmView('country')"  id="newHmTabCountry"  class="new-hm-btn active">По странам</button>
@@ -424,72 +414,90 @@
           <button onclick="setNewHmView('client')"   id="newHmTabClient"   class="new-hm-btn">По клиентам</button>
         </div>
       </div>
-      <div id="newHmSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+      <div id="newHmSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
       <div id="newHmGrid" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
         <div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>
       </div>
+      <div id="newHmSummary" style="display:none;margin-top:16px;padding-top:16px;border-top:0.5px solid rgba(0,0,0,0.08)"></div>
     </div>
 
-    <div class="analytics-card" style="margin-bottom:14px">
+    <div class="analytics-card" style="margin-bottom:12px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
-        <h3 style="margin:0">Потребление по дням</h3>
-        <div style="font-size:11px;color:var(--text-3)" id="newDailyMonthLabel">последние 30 дней</div>
+        <h3 style="margin:0">Потребление по дням <span style="font-size:10px;font-weight:400;color:var(--text-3)">60 дней</span></h3>
+        <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
+          <button id="newDailyMode_clients" class="new-hm-btn active" onclick="setNewDailyMode('clients')">По клиентам</button>
+          <button id="newDailyMode_countries" class="new-hm-btn" onclick="setNewDailyMode('countries')">По странам</button>
+        </div>
       </div>
-      <div style="height:280px"><canvas id="newDailyCanvas"></canvas></div>
-    </div>
-
-    <div class="analytics-card" style="margin-bottom:14px">
-      <h3 style="margin:0 0 10px">Клиенты — трафик</h3>
-      <div id="newClientTable"></div>
+      <div class="chart-wrap-daily" style="height:300px"><canvas id="newDailyCanvas"></canvas></div>
     </div>
 
     <details class="acc-expand" data-section="resources">
-      <summary><span class="acc-expand-icon">📈</span>Топ ресурсов <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">(домены)</span></summary>
+      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><path d="M3 17l6-6 4 4 7-7"/><path d="M14 8h6v6"/></svg></span>Топ ресурсов <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">(домены)</span></summary>
       <div class="acc-expand-body">
-        <div style="margin-bottom:10px">
-          <button class="btn btn-sm" onclick="loadNewTopHosts()">⟳ Загрузить</button>
-          <span style="font-size:10px;color:var(--text-3);margin-left:8px" id="newResStatus">Нажмите «Загрузить» чтобы получить данные</span>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          <div id="newResChips" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+          <span style="font-size:10px;color:var(--text-3);margin-left:auto" id="newResStatus"></span>
         </div>
         <div id="newTopHostsList"></div>
       </div>
     </details>
     <details class="acc-expand" data-section="matrix">
-      <summary><span class="acc-expand-icon">🗂</span>Матрица трафика <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">(модем × клиент)</span></summary>
+      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/></svg></span>Матрица трафика <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">(модем × клиент)</span></summary>
       <div class="acc-expand-body">
-        <div style="overflow-x:auto"><table class="log-table" id="newMatrixTable"></table></div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
+          <input id="newMatrixFilter" class="form-input" placeholder="Фильтр: модем / клиент / оператор / сервер" oninput="renderNewMatrix()" style="flex:1;min-width:220px;max-width:360px;font-size:12px;padding:5px 10px">
+          <span id="newMatrixCount" style="font-size:11px;color:var(--text-3)"></span>
+        </div>
+        <div style="overflow-x:auto"><table class="ztbl" id="newMatrixTable"></table></div>
       </div>
     </details>
-  </div>
 
-
-</div>
+    <details class="acc-expand" data-section="apiaccess" open>
+      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><path d="M8 8l-4 4 4 4"/><path d="M16 8l4 4-4 4"/></svg></span>Обращения к API <span style="font-size:10px;color:var(--text-3);font-weight:400;margin-left:6px">(кто · когда · зачем)</span></summary>
+      <div class="acc-expand-body">
+        <div id="newApiAccessBar" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap"></div>
+        <div id="newApiAccess"><div style="color:var(--text-3);font-size:12px;padding:8px">Загрузка…</div></div>
+      </div>
+    </details>
+  </div><!-- /tab-dashboard -->
 
 <!-- TAB: CLIENTS -->
 <div class="tab-content" id="tab-clients">
-  <div class="toolbar" style="justify-content:space-between">
-    <div style="display:flex;align-items:center;gap:8px">
-      <button class="btn btn-primary" onclick="showClientForm()">+ Новый клиент</button>
-      <input type="text" class="search-box" id="clientSearch" placeholder="Поиск клиентов..." oninput="debouncedRenderClients()" style="width:200px">
-      <button class="btn btn-sm btn-filter--alert" id="btnFilterProblematic" onclick="toggleProblematicFilter()" style="font-size:11px;display:inline-flex;align-items:center;gap:5px"><svg width="13" height="13" viewBox="0 0 14 14" fill="none" style="flex-shrink:0"><circle cx="7" cy="7" r="6" stroke="currentColor" stroke-width="1.2"/><line x1="7" y1="4" x2="7" y2="8" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/><circle cx="7" cy="10.2" r="0.8" fill="currentColor"/></svg>Проблемные<span id="debtCountBadge" class="debt-count" style="display:none"></span></button>
+  <div class="page-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:13px 24px;border-bottom:1px solid var(--border);gap:12px">
+    <span style="font-size:16px;font-weight:600;color:var(--text-0)">Клиенты</span>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="11" y1="11" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg><input type="text" id="clientSearch" placeholder="Поиск клиента…" oninput="debouncedRenderClients()" style="border:none;background:none;outline:none;font-size:12px;color:var(--text-1);width:160px"></span>
+      <button class="btn btn-primary btn-sm" onclick="newClientForm()" style="font-size:12px">+ Клиент</button>
     </div>
-    <div id="clientSummary" style="font-size:11px;color:var(--text-2)"></div>
   </div>
-  <div style="padding:0 24px 24px" id="clientCardList"></div>
+  <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 24px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px">
+    <div style="display:flex;gap:8px;flex-wrap:wrap">
+      <span class="cl-chip active" data-f="all" onclick="setClientFilter2('all')">Все · <b id="clCntAll">0</b></span>
+      <span class="cl-chip" data-f="active" onclick="setClientFilter2('active')">Активные · <b id="clCntActive">0</b></span>
+      <span class="cl-chip" data-f="debtors" onclick="setClientFilter2('debtors')">Должники · <b id="clCntDebt">0</b></span>
+      <span class="cl-chip" data-f="expiring" onclick="setClientFilter2('expiring')">Истекают · <b id="clCntExp">0</b></span>
+    </div>
+    <div style="font-size:12px;color:var(--text-2);white-space:nowrap">MRR <b id="clMrrTotal" style="color:var(--text-0);font-family:var(--font-mono);font-weight:700;margin-left:4px">—</b></div>
+  </div>
+  <div class="client-grid" style="padding:14px 24px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(420px,100%),1fr));gap:12px;align-items:start" id="clientCardList"></div>
 </div>
 
 <!-- TAB: BANK (Документооборот и операции) -->
-<div class="tab-content tab-flex" id="tab-bank" style="height:calc(100vh - 50px)">
+<div class="tab-content tab-flex" id="tab-bank" style="height:100vh">
   <div class="tab-sidebar-layout" style="display:flex;flex:1;min-height:0">
     <!-- Sidebar -->
     <div class="tab-sidebar" style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
-      <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">ДОКУМЕНТЫ</div>
-      <div class="settings-nav-item active" id="bnav_acts" onclick="switchBankNav('acts')">📃 Акты</div>
-      <div class="settings-nav-item" id="bnav_bills" onclick="switchBankNav('bills')">💳 Счета</div>
-      <div class="settings-nav-item" id="bnav_payments" onclick="switchBankNav('payments')">💰 Платежи</div>
+      <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">ФИНАНСЫ</div>
+      <div class="settings-nav-item active" id="bnav_overview" onclick="switchBankNav('overview')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>Обзор</div>
+      <div class="settings-nav-item" id="bnav_acts" onclick="switchBankNav('acts')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Акты</div>
+      <div class="settings-nav-item" id="bnav_bills" onclick="switchBankNav('bills')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5z"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/></svg>Счета</div>
+      <div class="settings-nav-item" id="bnav_payments" onclick="switchBankNav('payments')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9"/><path d="M8.5 13l3.5 3.5 3.5-3.5"/></svg>Платежи</div>
     </div>
     <!-- Content -->
     <div style="flex:1;overflow-y:auto;padding:24px">
-      <div id="bankDocumentsSection" class="bank-sub-section"></div>
+      <div id="bankOverviewSection" class="bank-sub-section"></div>
+      <div id="bankDocumentsSection" class="bank-sub-section" style="display:none"></div>
       <div id="bankBillsSection" class="bank-sub-section" style="display:none"></div>
       <div id="bankPaymentsSection" class="bank-sub-section" style="display:none"></div>
     </div>
@@ -498,21 +506,37 @@
 
 
 <!-- TAB: ANALYTICS (Настройки) -->
-<div class="tab-content tab-flex" id="tab-analytics" style="height:calc(100vh - 50px)">
+<div class="tab-content tab-flex" id="tab-analytics" style="height:100vh">
   <div class="tab-sidebar-layout" style="display:flex;flex:1;min-height:0">
     <!-- Sidebar -->
-    <div class="tab-sidebar" style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
-      <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">НАСТРОЙКИ</div>
-      <div class="settings-nav-item active" id="snav_audit" onclick="switchSettingsSection('audit')">📋 Логи</div>
-      <div class="settings-nav-item" id="snav_syslog" onclick="switchSettingsSection('syslog')">🔧 Системный лог</div>
-      <div class="settings-nav-item" id="snav_serverHealth" onclick="switchSettingsSection('serverHealth')">🩺 Состояние сервера</div>
-      <div class="settings-nav-item" id="snav_servers" onclick="switchSettingsSection('servers')">🖥 Серверы</div>
-      <div class="settings-nav-item" id="snav_bank" onclick="switchSettingsSection('bank')">🏦 Банк</div>
-      <div class="settings-nav-item" id="snav_simulator" onclick="switchSettingsSection('simulator')">🚀 Симулятор</div>
-      <div class="settings-nav-item" id="snav_operators" onclick="switchSettingsSection('operators')">🌐 Операторы и страны</div>
-      <div class="settings-nav-item" id="snav_alerts" onclick="switchSettingsSection('alerts')">🔔 Уведомления</div>
-      <div class="settings-nav-item" id="snav_failover" onclick="switchSettingsSection('failover')">🔀 Failover</div>
-      <div class="settings-nav-item" id="snav_data" onclick="switchSettingsSection('data')">📦 Прочее</div>
+    <div class="tab-sidebar" style="width:204px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:14px 0">
+      <style>
+        .snav-grp{padding:13px 16px 5px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px}
+        .snav-grp:first-of-type{padding-top:4px}
+        .settings-nav-item svg{flex-shrink:0;opacity:.85}
+        .settings-nav-item.active svg{opacity:1}
+      </style>
+      <div style="padding:0 16px 6px;font-size:14px;font-weight:500;color:var(--text-0)">Настройки</div>
+
+      <div class="snav-grp">МОНИТОРИНГ</div>
+      <div class="settings-nav-item active" id="snav_serverHealth" onclick="switchSettingsSection('serverHealth')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h3l1.5 4 2-8 1.5 4h4"/></svg>Состояние сервера</div>
+      <div class="settings-nav-item" id="snav_syslog" onclick="switchSettingsSection('syslog')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6l2.3 2L4 10"/><line x1="8" y1="10.3" x2="11.5" y2="10.3"/></svg>Системный лог</div>
+      <div class="settings-nav-item" id="snav_audit" onclick="switchSettingsSection('audit')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h6"/><circle cx="2.6" cy="4" r=".7"/><circle cx="2.6" cy="8" r=".7"/><circle cx="2.6" cy="12" r=".7"/></svg>Журнал действий</div>
+
+      <div class="snav-grp">ИНФРАСТРУКТУРА</div>
+      <div class="settings-nav-item" id="snav_servers" onclick="switchSettingsSection('servers')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4.6" rx="1.2"/><rect x="2" y="8.9" width="12" height="4.6" rx="1.2"/><circle cx="4.6" cy="4.8" r=".5"/><circle cx="4.6" cy="11.2" r=".5"/></svg>Серверы</div>
+      <div class="settings-nav-item" id="snav_operators" onclick="switchSettingsSection('operators')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c2.2 2 2.2 10 0 12M8 2c-2.2 2-2.2 10 0 12"/></svg>Операторы и страны</div>
+
+      <div class="snav-grp">АВТОМАТИКА</div>
+      <div class="settings-nav-item" id="snav_alerts" onclick="switchSettingsSection('alerts')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5a3.5 3.5 0 017 0c0 3 1.5 4.5 1.5 4.5H3s1.5-1.5 1.5-4.5z"/><path d="M6.5 13.4a1.6 1.6 0 003 0"/></svg>Уведомления</div>
+      <div class="settings-nav-item" id="snav_failover" onclick="switchSettingsSection('failover')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h8.5M9 3.5l2 2-2 2"/><path d="M13.5 10.5H5M7 8.5l-2 2 2 2"/></svg>Failover</div>
+      <div class="settings-nav-item" id="snav_recovery" onclick="switchSettingsSection('recovery')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 8a5.4 5.4 0 11-1.6-3.8"/><path d="M13.6 2.6v3.1h-3.1"/></svg>Восстановление</div>
+      <div class="settings-nav-item" id="snav_proxycheck" onclick="switchSettingsSection('proxycheck')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="6" height="5" rx="1"/><path d="M5.6 5V2.4M8.4 5V2.4M7 10v3.6"/></svg>Проверка прокси</div>
+
+      <div class="snav-grp">ИНСТРУМЕНТЫ</div>
+      <div class="settings-nav-item" id="snav_bank" onclick="switchSettingsSection('bank')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l6-3.5L14 6M3 6.5v5.5M13 6.5v5.5M5.6 6.5v5.5M8 6.5v5.5M10.4 6.5v5.5M2.5 13.5h11"/></svg>Банк</div>
+      <div class="settings-nav-item" id="snav_simulator" onclick="switchSettingsSection('simulator')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5c2.4 1.6 3.4 4 3.4 6.5L9.5 11h-3L4.6 8C4.6 5.5 5.6 3.1 8 1.5z"/><circle cx="8" cy="6" r="1"/><path d="M6.4 11l-1.4 2.5M9.6 11l1.4 2.5"/></svg>Симулятор</div>
+      <div class="settings-nav-item" id="snav_data" onclick="switchSettingsSection('data')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4.5" x2="14" y2="4.5"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="11.5" x2="14" y2="11.5"/><circle cx="6" cy="4.5" r="1.6" fill="var(--bg-1)"/><circle cx="10.5" cy="8" r="1.6" fill="var(--bg-1)"/><circle cx="5" cy="11.5" r="1.6" fill="var(--bg-1)"/></svg>Данные и хранение</div>
     </div>
     <!-- Content -->
     <div style="flex:1;overflow-y:auto;padding:24px">
@@ -587,7 +611,7 @@
       <!-- Серверы -->
       <div id="settingsSection_servers" class="settings-section" style="display:none">
         <div style="padding:14px 24px">
-          <h2 style="font-size:18px;font-weight:700;margin-bottom:4px">API серверы</h2>
+          <h3 style="font-size:15px;font-weight:500;margin-bottom:4px">API серверы</h3>
           <div style="font-size:12px;color:var(--text-2);margin-bottom:20px">Управление серверами, на которых работают прокси-модемы</div>
           <div id="serversList"></div>
           <div class="add-card">
@@ -619,7 +643,7 @@
       <!-- Симулятор нагрузки -->
       <div id="settingsSection_simulator" class="settings-section" style="display:none">
         <style>
-          .sim-card{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:14px}
+          .sim-card{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px}
           .sim-card h3{margin:0 0 10px;font-size:14px;font-weight:700}
           .sim-grid-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px}
           .sim-kpi{padding:12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--border)}
@@ -632,7 +656,7 @@
           .sim-kpi.accent-purple{border-left:3px solid #965AC8;background:linear-gradient(135deg,rgba(150,90,200,.06),var(--bg-2))}
           .sim-row{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:8px}
           .sim-row label{font-size:11px;color:var(--text-2);min-width:120px}
-          .sim-row input,.sim-row select{padding:5px 9px;border-radius:7px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px;min-width:160px}
+          .sim-row input,.sim-row select{padding:5px 9px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px;min-width:160px}
           .sim-urls{margin-top:8px}
           .sim-url-row{display:flex;gap:6px;align-items:center;margin-bottom:5px}
           .sim-url-row input{flex:1}
@@ -644,7 +668,7 @@
           .sim-tp-row .meta{font-size:10px;color:var(--text-3);margin-left:auto}
           .sim-tp-row .online{color:#10B981}
           .sim-tp-row .offline{color:#EF4444}
-          .sim-banner{padding:10px 14px;border-radius:8px;background:rgba(239,159,39,.1);border:1px solid rgba(239,159,39,.3);color:var(--text-1);font-size:12px;margin-bottom:14px}
+          .sim-banner{padding:10px 14px;border-radius:8px;background:rgba(239,159,39,.1);border:1px solid rgba(239,159,39,.3);color:var(--text-1);font-size:12px;margin-bottom:12px}
           .sim-banner.danger{background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.3)}
           .sim-table{width:100%;border-collapse:collapse;font-size:11px}
           .sim-table th{text-align:left;padding:6px 8px;font-size:10px;text-transform:uppercase;letter-spacing:.5px;color:var(--text-3);border-bottom:1px solid var(--border)}
@@ -714,9 +738,9 @@
           <div id="simAllModemsList" style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
             <div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">Загрузка…</div>
           </div>
-          <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-3)">
+          <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-3)">
             <span id="simModemCount">—</span>
-            <div style="display:flex;gap:8px">
+            <div style="display:flex;gap:8px;flex-wrap:wrap">
               <button class="btn btn-sm" onclick="simBulkPool(true)">✓ В пул отфильтрованные</button>
               <button class="btn btn-sm" onclick="simBulkPool(false)">✕ Убрать из пула</button>
               <button class="btn btn-sm" onclick="simSelectAllInProfile(true)">+ Все в профиль</button>
@@ -751,7 +775,7 @@
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px">
             <div>
               <label style="font-size:11px;color:var(--text-2)">Режим concurrency</label>
-              <select id="simConcMode" onchange="simRenderConcParams()" style="width:100%;margin-top:3px;padding:5px 9px;border-radius:7px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px">
+              <select id="simConcMode" onchange="simRenderConcParams()" style="width:100%;margin-top:3px;padding:5px 9px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px">
                 <option value="constant">Постоянная нагрузка (N воркеров)</option>
                 <option value="ramp">Рамп (от N1 до N2)</option>
                 <option value="burst">Берсты (вкл/выкл периодически)</option>
@@ -760,11 +784,11 @@
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-2)">Длительность, сек</label>
-              <input type="number" id="simDuration" value="60" min="5" max="3600" style="width:100%;margin-top:3px;padding:5px 9px;border-radius:7px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px">
+              <input type="number" id="simDuration" value="60" min="5" max="3600" style="width:100%;margin-top:3px;padding:5px 9px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px">
             </div>
             <div>
               <label style="font-size:11px;color:var(--text-2)">Таймаут, мс</label>
-              <input type="number" id="simTimeout" value="15000" min="500" max="120000" step="500" style="width:100%;margin-top:3px;padding:5px 9px;border-radius:7px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px">
+              <input type="number" id="simTimeout" value="15000" min="500" max="120000" step="500" style="width:100%;margin-top:3px;padding:5px 9px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px">
               <div style="font-size:9px;color:var(--text-3);margin-top:2px">Клиент жалуется на 15000 мс — поставьте это значение для воспроизведения.</div>
             </div>
           </div>
@@ -791,8 +815,8 @@
 
       <!-- Run detail / comparison modal -->
       <div id="simDetailModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto" onclick="if(event.target===this)simCloseDetail()">
-        <div style="background:var(--bg-0);border:1px solid var(--border);border-radius:14px;max-width:1100px;width:100%;padding:22px;box-shadow:0 20px 60px rgba(0,0,0,.4)">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px">
+        <div style="background:var(--bg-0);border:1px solid var(--border);border-radius:12px;max-width:1100px;width:100%;padding:20px;box-shadow:0 24px 64px rgba(0,0,0,.5)">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <h3 id="simDetailTitle" style="margin:0;font-size:16px;font-weight:700">Детали запуска</h3>
             <div style="display:flex;gap:8px;align-items:center">
               <button class="btn btn-sm" id="simDetailExportCsv" onclick="simExport('csv')">⬇ CSV</button>
@@ -812,7 +836,7 @@
             <h3 style="margin:0">Уведомления</h3>
             <button class="btn btn-sm" onclick="loadAlertRules()">Обновить</button>
           </div>
-          <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:14px;max-width:760px">
+          <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:760px">
             Все источники уведомлений. <span style="color:var(--accent);font-weight:500">TG+🔔</span> — в Telegram-чат и в колокольчик. <span style="color:var(--text-2);font-weight:500">🔔</span> — только в колокольчик в админке. У каждого свой cooldown, чтобы не было спама. Кнопка «Тест» отправляет пример — посмотрите как карточка выглядит в боте или в колокольчике.
           </div>
           <div id="alertsList">Загрузка…</div>
@@ -825,7 +849,7 @@
             <h3 style="margin:0">Операторы и страны</h3>
             <button class="btn btn-sm" onclick="loadOperatorsMapping()">Обновить</button>
           </div>
-          <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:14px;max-width:760px">
+          <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:760px">
             Привязка операторов к странам нужна для аналитики (флаги в таблицах, группировки в распределении задержек, фильтры в графиках). Новые операторы появляются автоматически: каждый раз когда модем-поллинг впервые видит оператора на сервере, страна берётся из настроек сервера (RO/MD/RU). Если автоматическая привязка ошиблась — поменяйте вручную в таблице ниже; ручной выбор не перезатирается следующим опросом.
           </div>
           <div id="opMapList" style="background:var(--bg-1);border:1px solid var(--border);border-radius:10px;overflow:hidden">
@@ -836,12 +860,12 @@
 
       <!-- Stage 19 — Failover settings + manual controls + audit log -->
       <div id="settingsSection_failover" class="settings-section" style="display:none">
-        <div class="analytics-card" style="margin-bottom:16px">
+        <div class="analytics-card" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
           <div class="settings-card-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <h3 style="margin:0">Авто-failover модемов</h3>
             <span class="settings-card-badge badge-restart">Требуется перезапуск</span>
           </div>
-          <div style="font-size:12px;color:var(--text-2);line-height:1.55;margin-bottom:14px;max-width:820px">
+          <div style="font-size:12px;color:var(--text-2);line-height:1.55;margin-bottom:12px;max-width:820px">
             Когда модем клиента реально умирает, система переносит его порт на здоровый свободный модем <b>того же сервера</b> — сменой IMEI на порте (portID, TCP-порт, логин, пароль сохраняются), так что <b>строка подключения клиента продолжает работать</b>; меняется только внешний IP (другой модем/SIM).<br><br>
             <b style="color:var(--text-1)">Как принимается решение (защита от ложных переносов).</b> Главный источник ложных срабатываний — «железо онлайн, но дата-канал оператора моргнул на 40–50 мин и сам поднялся». Поэтому решение <b>двухскоростное</b> и подключает <b>аптайм самого модема</b> как детектор лжи:
             <ul style="margin:7px 0 0 18px;padding:0;line-height:1.7">
@@ -852,60 +876,32 @@
             <div style="margin-top:7px">Спейр выбирается только из модемов с хорошим собственным uptime (см. «Мин. uptime спейра»), плюс кулдаун на модем и лимит переносов в час — чтобы не было «качелей».</div><br>
             <b style="color:var(--warning)">⚠️ Сначала проверьте механику вручную:</b> ниже выберите живой модем, нажмите «Найти спейр и перенести», убедитесь что прокси поднялся на новом модеме и строка клиента работает. Только потом включайте «Dry-run = выкл» для автоматики. По умолчанию авто-режим выключен, а dry-run включён (логирует «перенёс бы», но ничего не трогает).
           </div>
-          <div class="settings-grid">
-            <div class="setting-field">
-              <label>Авто-failover включён</label>
-              <div class="sf-desc">Главный выключатель. Пока выкл — система только показывает кандидатов, ничего не переносит</div>
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px"><input type="checkbox" id="failoverEnabledInput" style="cursor:pointer"> <span style="font-size:12px">Включить автоматику</span></label>
+          <div class="set-card">
+            <div class="set-row">
+              <div><div class="set-row-t">Авто-failover включён</div><div class="set-row-d">Главный выключатель. Пока выкл — система только показывает кандидатов, ничего не переносит</div></div>
+              <label class="tgl"><input type="checkbox" id="failoverEnabledInput"><span></span></label>
             </div>
-            <div class="setting-field">
-              <label>Dry-run (тест-режим)</label>
-              <div class="sf-desc">Когда вкл — система логирует «сделала бы перенос», но не выполняет его. Снимите галку для реальных переносов</div>
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin-top:4px"><input type="checkbox" id="failoverDryRunInput" style="cursor:pointer" checked> <span style="font-size:12px">Только логировать (безопасно)</span></label>
-            </div>
-            <div class="setting-field">
-              <label>Offline до failover (мин)</label>
-              <div class="sf-desc">Сколько модем должен быть offline, прежде чем переносим клиента</div>
-              <input class="form-input" id="failoverOfflineMinInput" type="number" min="5" max="240">
-            </div>
-            <div class="setting-field">
-              <label>Ошибок прокси подряд (вход в медленный путь)</label>
-              <div class="sf-desc">Сколько проверок прокси подряд должны упасть с ОШИБКОЙ, чтобы запустить «медленный путь» (см. описание выше). Задержки не учитываются — только ошибки.</div>
-              <input class="form-input" id="failoverGlitchFailsInput" type="number" min="2" max="20">
-            </div>
-            <div class="setting-field">
-              <label>Прокси мёртв — медленно (мин)</label>
-              <div class="sf-desc">Медленный путь: непрерывные ошибки прокси должны длиться ≥ этого, чтобы перенести модем с плохим uptime. Меньше = переносим раньше, но больше ложных. По умолчанию 45.</div>
-              <input class="form-input" id="failoverProxyDeadMinInput" type="number" min="15" max="180" step="5">
-            </div>
-            <div class="setting-field">
-              <label>Прокси мёртв — жёстко (мин)</label>
-              <div class="sf-desc">Жёсткий предел: если прокси мёртв дольше этого — переносим в любом случае, даже при идеальном uptime модема. По умолчанию 90.</div>
-              <input class="form-input" id="failoverProxyDeadHardMinInput" type="number" min="30" max="360" step="5">
-            </div>
-            <div class="setting-field">
-              <label>Мин. uptime модема для переноса (%)</label>
-              <div class="sf-desc">Детектор лжи: медленный путь срабатывает, только если аптайм самого модема за сегодня ниже этого. Высокий uptime = вероятно моргание оператора → ждём. По умолчанию 90.</div>
-              <input class="form-input" id="failoverUptimeFloorInput" type="number" min="50" max="100">
-            </div>
-            <div class="setting-field">
-              <label>Мин. uptime спейра (%)</label>
-              <div class="sf-desc">Не выбирать в спейры модем, чей собственный uptime ниже этого (по ≥10 проверкам). Защита от переноса клиента на сам нестабильный модем. 0 — выключить фильтр.</div>
-              <input class="form-input" id="failoverSpareMinUptimeInput" type="number" min="0" max="100">
-            </div>
-            <div class="setting-field">
-              <label>Cooldown на модем (ч)</label>
-              <div class="sf-desc">Не переносить тот же модем повторно в течение этого времени</div>
-              <input class="form-input" id="failoverCooldownHInput" type="number" min="1" max="72">
-            </div>
-            <div class="setting-field">
-              <label>Лимит переносов в час</label>
-              <div class="sf-desc">Тормоз: если переносов больше — стоп + алерт (вероятно проблема в сервере, а не модемах)</div>
-              <input class="form-input" id="failoverMaxPerHourInput" type="number" min="1" max="50">
+            <div class="set-row">
+              <div><div class="set-row-t">Dry-run (тест-режим)</div><div class="set-row-d">Когда вкл — логирует «сделала бы перенос», но не выполняет. Снимите для реальных переносов</div></div>
+              <label class="tgl"><input type="checkbox" id="failoverDryRunInput" checked><span></span></label>
             </div>
           </div>
-          <div id="failoverSettingsStatus" style="font-size:11px;color:var(--text-2)"></div>
-          <div class="settings-card-footer">
+
+          <div class="set-grp-label">ПОРОГИ И ЗАЩИТА ОТ ЛОЖНЫХ ПЕРЕНОСОВ</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Offline до failover</div><div class="set-row-d">Сколько модем должен быть offline, прежде чем переносим клиента (быстрый путь)</div></div><div class="set-inp"><input id="failoverOfflineMinInput" type="number" min="5" max="240"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Ошибок прокси подряд</div><div class="set-row-d">Сколько проверок подряд должны упасть с ошибкой, чтобы запустить «медленный путь». Задержки не учитываются</div></div><div class="set-inp"><input id="failoverGlitchFailsInput" type="number" min="2" max="20"></div></div>
+            <div class="set-row"><div><div class="set-row-t">Прокси мёртв — медленно</div><div class="set-row-d">Непрерывные ошибки ≥ этого → переносим модем с плохим uptime. Меньше = раньше, но больше ложных. По умолчанию 45</div></div><div class="set-inp"><input id="failoverProxyDeadMinInput" type="number" min="15" max="180" step="5"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Прокси мёртв — жёстко</div><div class="set-row-d">Дольше этого — переносим в любом случае, даже при идеальном uptime. По умолчанию 90</div></div><div class="set-inp"><input id="failoverProxyDeadHardMinInput" type="number" min="30" max="360" step="5"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Мин. uptime модема для переноса</div><div class="set-row-d">Медленный путь срабатывает, только если аптайм модема за сегодня ниже. Высокий = моргание оператора → ждём. По умолчанию 90</div></div><div class="set-inp"><input id="failoverUptimeFloorInput" type="number" min="50" max="100"><span>%</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Мин. uptime спейра</div><div class="set-row-d">Не выбирать в спейры модем с uptime ниже этого (по ≥10 проверкам). 0 — выключить фильтр</div></div><div class="set-inp"><input id="failoverSpareMinUptimeInput" type="number" min="0" max="100"><span>%</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Cooldown на модем</div><div class="set-row-d">Не переносить тот же модем повторно в течение этого времени</div></div><div class="set-inp"><input id="failoverCooldownHInput" type="number" min="1" max="72"><span>ч</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Лимит переносов в час</div><div class="set-row-d">Тормоз: если переносов больше — стоп + алерт (вероятно проблема в сервере, а не модемах)</div></div><div class="set-inp"><input id="failoverMaxPerHourInput" type="number" min="1" max="50"></div></div>
+          </div>
+
+          <div class="set-save-bar">
+            <span id="failoverSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
             <button class="btn btn-primary" onclick="saveFailoverSettings()">Сохранить</button>
           </div>
         </div>
@@ -936,16 +932,33 @@
           .setting-field label{font-size:12px;font-weight:600;color:var(--text-1)}
           .setting-field .sf-desc{font-size:10px;color:var(--text-2);line-height:1.3;margin-bottom:2px}
           .setting-field input,.setting-field select{width:100%;max-width:160px}
-          .settings-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px;margin-bottom:14px}
+          .settings-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:12px}
           .settings-card-header{display:flex;align-items:center;gap:8px;margin-bottom:4px}
           .settings-card-header h3{margin-bottom:0}
           .settings-card-badge{font-size:9px;padding:2px 7px;border-radius:8px;font-weight:500;white-space:nowrap}
           .badge-restart{background:rgba(245,158,11,.12);color:var(--warning)}
-          .settings-card-desc{font-size:11px;color:var(--text-2);margin-bottom:14px;line-height:1.4}
+          .settings-card-desc{font-size:11px;color:var(--text-2);margin-bottom:12px;line-height:1.4}
           .settings-card-footer{display:flex;align-items:center;gap:12px;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)}
           .restart-banner{display:none;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;background:rgba(245,158,11,.08);border:1px solid rgba(245,158,11,.25);margin-bottom:16px;font-size:12px;color:var(--text-1)}
           .restart-banner.visible{display:flex}
           .restart-banner .btn{white-space:nowrap;flex-shrink:0}
+          /* Consistent polish for all settings cards (scoped to the Настройки tab) */
+          #tab-analytics .setting-field input:not([type=checkbox]),#tab-analytics .setting-field select{height:34px;padding:0 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:13px;font-family:var(--font-mono);transition:border-color .15s,box-shadow .15s}
+          #tab-analytics .setting-field input:not([type=checkbox]):focus,#tab-analytics .setting-field select:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-dim)}
+          #tab-analytics .setting-field label{font-size:12px;font-weight:500;color:var(--text-1)}
+          #tab-analytics .setting-field .sf-desc{font-size:10.5px;color:var(--text-3);line-height:1.35}
+          #tab-analytics .settings-grid{gap:16px}
+          #tab-analytics .settings-card-header h3{font-size:15px;font-weight:500}
+          #tab-analytics .settings-card-footer{justify-content:flex-end;margin-top:16px}
+          #tab-analytics .form-group input:not([type=checkbox]),#tab-analytics .form-group select{height:34px;padding:0 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:13px;font-family:var(--font-mono);transition:border-color .15s,box-shadow .15s}
+          #tab-analytics .form-group input:not([type=checkbox]):focus,#tab-analytics .form-group select:focus{border-color:var(--accent);outline:none;box-shadow:0 0 0 3px var(--accent-dim)}
+          #tab-analytics .add-form .form-label{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px}
+          /* Операторы — таблица привязок в едином стиле */
+          #opMapList{background:var(--card-bg)!important;border:1px solid var(--card-border)!important;border-radius:12px!important}
+          #opMapList table td,#opMapList table th{padding:11px 12px!important}
+          #opMapList tbody tr:hover{background:var(--row-hover,rgba(255,255,255,.03))}
+          #opMapList tbody tr:last-child{border-bottom:none}
+          #opMapList select{height:32px;border-radius:8px!important}
         </style>
 
         <div class="restart-banner" id="restartBanner">
@@ -954,307 +967,214 @@
         </div>
 
         <!-- Telegram-уведомления -->
-        <div class="analytics-card" style="margin-bottom:16px">
-          <div class="settings-card-header"><h3>Telegram-уведомления</h3></div>
-          <div class="settings-card-desc">Ежедневная сводка по дашборду в Telegram. Отправляется в назначенный чат в указанное время МСК. Сводка содержит финансы, трафик, состояние инфраструктуры и ротации за прошедшие сутки.</div>
-          <div class="settings-grid">
-            <div class="setting-field">
-              <label>Bot Token</label>
-              <div class="sf-desc">Токен бота от @BotFather</div>
-              <input class="form-input" id="tgBotToken" placeholder="123456:ABC..." autocomplete="off">
-            </div>
-            <div class="setting-field">
-              <label>Chat ID</label>
-              <div class="sf-desc">Личный chat_id (или групповой). Если пусто — отправь /start боту, заполнится автоматически.</div>
-              <input class="form-input" id="tgChatId" placeholder="614664598">
-            </div>
-            <div class="setting-field">
-              <label>Время отправки (МСК)</label>
-              <div class="sf-desc">Когда отправлять сводку за вчерашний день. Формат ЧЧ:ММ</div>
-              <input class="form-input" id="tgSummaryTime" placeholder="08:00" pattern="\d{2}:\d{2}">
-            </div>
-            <div class="setting-field">
-              <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
-                <input type="checkbox" id="tgSummaryEnabled" style="cursor:pointer"> Включить ежедневную сводку
-              </label>
-              <div class="sf-desc">Если выключено, сводка не отправляется автоматически</div>
-            </div>
+        <div class="analytics-card" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Telegram-уведомления</h3></div>
+          <div class="settings-card-desc">Ежедневная сводка по дашборду в Telegram — финансы, трафик, инфраструктура и ротации за сутки. Отправляется в назначенный чат в указанное время МСК.</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Bot Token</div><div class="set-row-d">Токен бота от @BotFather</div></div><input id="tgBotToken" placeholder="123456:ABC..." autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Chat ID</div><div class="set-row-d">Личный или групповой chat_id. Если пусто — отправь /start боту, заполнится сам</div></div><input id="tgChatId" placeholder="614664598" style="width:140px;text-align:center;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Время отправки (МСК)</div><div class="set-row-d">Когда отправлять сводку за вчерашний день, формат ЧЧ:ММ</div></div><input id="tgSummaryTime" placeholder="08:00" pattern="\d{2}:\d{2}" style="width:84px;text-align:center;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Ежедневная сводка</div><div class="set-row-d">Если выключено, сводка не отправляется автоматически</div></div><label class="tgl"><input type="checkbox" id="tgSummaryEnabled"><span></span></label></div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+          <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
             <button class="btn btn-sm" onclick="tgPreview()">Превью текста</button>
             <button class="btn btn-sm btn-primary" onclick="tgSendTest()">Отправить тестовую сводку</button>
-            <span id="tgStatus" style="font-size:11px;color:var(--text-3);align-self:center"></span>
+            <span id="tgStatus" style="font-size:11px;color:var(--text-3)"></span>
           </div>
-          <pre id="tgPreviewArea" style="display:none;background:var(--bg-1);border:1px solid var(--border);border-radius:6px;padding:10px;font-size:11px;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word;margin-top:8px;max-height:300px;overflow:auto"></pre>
+          <pre id="tgPreviewArea" style="display:none;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word;margin-top:8px;max-height:300px;overflow:auto"></pre>
         </div>
 
-        <!-- Спидтесты -->
-        <div class="analytics-card" style="margin-bottom:16px">
-          <div class="settings-card-header"><h3>Спидтесты</h3></div>
-          <div class="settings-card-desc">Автоматическое измерение скорости каждого модема. Результаты отображаются в таблице и истории модема.</div>
-          <div class="settings-grid">
-            <div class="setting-field">
-              <label>Расписание (UTC)</label>
-              <div class="sf-desc">Время запуска тестов, через запятую. Формат ЧЧ:ММ</div>
-              <input class="form-input" id="speedtestTimesInput" placeholder="02:00, 14:00">
-            </div>
-            <div class="setting-field">
-              <label>Мин. скорость (Mbps)</label>
-              <div class="sf-desc">Ниже этого значения скорость подсвечивается красным в таблице</div>
-              <input class="form-input" id="minSpeedInput" type="number" step="0.5" min="0" value="2">
-            </div>
-            <div class="setting-field">
-              <label>Порог ошибок прокси (%)</label>
-              <div class="sf-desc">При доле ошибок выше этого значения ячейка подсвечивается красным (данные за 7 дней)</div>
-              <input class="form-input" id="errorRateThresholdInput" type="number" step="1" min="1" max="100" value="15">
-            </div>
-            <div class="setting-field">
-              <label>Порог «оффлайн модем» (ч)</label>
-              <div class="sf-desc">Модемы, которые не отвечают дольше этого времени, исключаются из агрегаций (счётчик Online, графики, ёмкость, ротации, IP). На heatmap трафика и таблицу модемов не влияет. Меняется без перезапуска.</div>
-              <input class="form-input" id="staleModemHoursInput" type="number" step="1" min="1" max="168" value="12">
-            </div>
-            <div class="setting-field">
-              <label>«Сбоит прокси»: задержка (мс)</label>
-              <div class="sf-desc">Модем попадает в проблемные если средняя задержка выше</div>
-              <input class="form-input" id="proxyAlertLatencyInput" type="number" step="50" min="100" max="60000" value="1500">
-            </div>
-            <div class="setting-field">
-              <label>«Сбоит прокси»: ошибок (%)</label>
-              <div class="sf-desc">Модем попадает в проблемные если % ошибок выше</div>
-              <input class="form-input" id="proxyAlertErrorPctInput" type="number" step="0.5" min="0" max="100" value="5">
-            </div>
-            <div class="setting-field">
-              <label>«Сбоит прокси»: окно (мин)</label>
-              <div class="sf-desc">За какой период оцениваем задержку и ошибки (мин 5, макс 720)</div>
-              <input class="form-input" id="proxyAlertWindowInput" type="number" step="5" min="5" max="720" value="60">
-            </div>
-            <div class="setting-field" style="border-left:3px solid var(--warning);padding-left:10px">
-              <label><input type="checkbox" id="autoRebootEnabledInput" style="margin-right:6px;vertical-align:middle"> Авто-перезагрузка проблемных модемов</label>
-              <div class="sf-desc">⚠ Влияет на работоспособность парка. Включает фоновую задачу: модемы из карточки "Сбоит прокси" (превышение задержки/ошибок) перезагружаются по интервалу ниже. Не триггерится "ротация без смены IP". Выключено по умолчанию.</div>
-            </div>
-            <div class="setting-field">
-              <label>Интервал авто-ребута (мин)</label>
-              <div class="sf-desc">Не чаще одного перезапуска в указанный интервал на один модем (защита от петли)</div>
-              <input class="form-input" id="autoRebootIntervalInput" type="number" step="5" min="15" max="720" value="60">
-            </div>
-            <div class="setting-field">
-              <label>Порог медленного (Mbps)</label>
-              <div class="sf-desc">Если download или upload ниже — модем помечается для повторного теста</div>
-              <input class="form-input" id="speedtestLowThresholdInput" type="number" step="0.1" min="0.1" max="50">
-            </div>
-            <div class="setting-field">
-              <label>Задержка ре-теста (мин)</label>
-              <div class="sf-desc">Через сколько минут перетестировать медленный модем</div>
-              <input class="form-input" id="speedtestRetestDelayInput" type="number" min="1" max="120">
-            </div>
-            <div class="setting-field">
-              <label>Макс. записей истории</label>
-              <div class="sf-desc">Сколько последних результатов хранить для каждого модема</div>
-              <input class="form-input" id="speedtestMaxHistoryInput" type="number" min="5" max="200">
-            </div>
+        <!-- Спидтесты + пороги «проблемных» + авто-ребут — 3 группы, одно сохранение -->
+        <div class="analytics-card" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Спидтесты и пороги качества</h3></div>
+          <div class="settings-card-desc">Измерение скорости модемов, пороги «проблемных» (по ним модем попадает в карточку «Сбоит прокси») и авто-перезагрузка. Сохраняются вместе.</div>
+
+          <div class="set-grp-label">СПИДТЕСТЫ</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Расписание (UTC)</div><div class="set-row-d">Время запуска тестов через запятую, формат ЧЧ:ММ</div></div><input id="speedtestTimesInput" placeholder="02:00, 14:00" style="width:140px;text-align:center;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Мин. скорость</div><div class="set-row-d">Ниже — скорость подсвечивается красным в таблице</div></div><div class="set-inp"><input id="minSpeedInput" type="number" step="0.5" min="0"><span>Mbps</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Порог медленного</div><div class="set-row-d">Если download/upload ниже — модем помечается для повторного теста</div></div><div class="set-inp"><input id="speedtestLowThresholdInput" type="number" step="0.1" min="0.1" max="50"><span>Mbps</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Задержка ре-теста</div><div class="set-row-d">Через сколько минут перетестировать медленный модем</div></div><div class="set-inp"><input id="speedtestRetestDelayInput" type="number" min="1" max="120"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Макс. записей истории</div><div class="set-row-d">Сколько последних результатов хранить на модем</div></div><div class="set-inp"><input id="speedtestMaxHistoryInput" type="number" min="5" max="200"></div></div>
           </div>
-          <div id="settingsStatus" style="font-size:11px;color:var(--text-2)"></div>
-          <div class="settings-card-footer">
+
+          <div class="set-grp-label">ПОРОГИ «ПРОБЛЕМНЫХ» МОДЕМОВ</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Подсветка ошибок в таблице</div><div class="set-row-d">Только красная ячейка (7 дней). На авто-действия НЕ влияет — для них «Сбоит прокси» ниже</div></div><div class="set-inp"><input id="errorRateThresholdInput" type="number" step="1" min="1" max="100"><span>%</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Порог «оффлайн модем»</div><div class="set-row-d">Дольше — модем исключается из агрегаций (Online, графики, ёмкость, ротации, IP). Без перезапуска</div></div><div class="set-inp"><input id="staleModemHoursInput" type="number" step="1" min="1" max="168"><span>ч</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: задержка</div><div class="set-row-d">Модем проблемный, если средняя задержка выше</div></div><div class="set-inp"><input id="proxyAlertLatencyInput" type="number" step="50" min="100" max="60000"><span>мс</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: ошибок</div><div class="set-row-d">Боевой порог: помечает модем проблемным → авто-ребут / failover</div></div><div class="set-inp"><input id="proxyAlertErrorPctInput" type="number" step="0.5" min="0" max="100"><span>%</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: окно</div><div class="set-row-d">За какой период оцениваем задержку и ошибки (5–720)</div></div><div class="set-inp"><input id="proxyAlertWindowInput" type="number" step="5" min="5" max="720"><span>мин</span></div></div>
+          </div>
+
+          <div class="set-grp-label">АВТО-РЕБУТ ПРОБЛЕМНЫХ</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Авто-перезагрузка проблемных</div><div class="set-row-d">⚠ Влияет на парк. Модемы из «Сбоит прокси» перезагружаются по интервалу ниже. Не триггерится «ротация без смены IP». По умолчанию выкл</div></div><label class="tgl"><input type="checkbox" id="autoRebootEnabledInput"><span></span></label></div>
+            <div class="set-row"><div><div class="set-row-t">Интервал авто-ребута</div><div class="set-row-d">Не чаще одного перезапуска в интервал на модем (защита от петли)</div></div><div class="set-inp"><input id="autoRebootIntervalInput" type="number" step="5" min="15" max="720"><span>мин</span></div></div>
+          </div>
+
+          <div class="set-save-bar">
+            <span id="settingsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
             <button class="btn btn-primary" onclick="saveSettings()">Сохранить</button>
           </div>
         </div>
 
-        <!-- Замер задержки (Proxy Check) -->
-        <div class="analytics-card" style="margin-bottom:16px">
-          <div class="settings-card-header"><h3>Замер задержки прокси</h3></div>
-          <div class="settings-card-desc">Периодическая проверка отклика каждого прокси через HTTP-запрос к целевому сайту. Цветовая индикация в таблице: зелёный/жёлтый/красный.</div>
-          <div class="settings-grid">
-            <div class="setting-field" style="grid-column:1/-1;max-width:400px">
-              <label>Целевой сайт</label>
-              <div class="sf-desc">URL, на который отправляется тестовый запрос через каждый прокси</div>
-              <input class="form-input" id="proxyCheckTargetInput" placeholder="https://www.instagram.com/" style="max-width:100%">
+        <!-- Замер задержки (Proxy Check) — redesigned -->
+        <div class="analytics-card" data-subsec="proxycheck" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Проверка прокси</h3></div>
+          <div class="settings-card-desc">Периодическая проверка отклика каждого прокси через HTTP-запрос к целевому сайту. Цветовая индикация в таблице: зелёный / жёлтый / красный.</div>
+
+          <div class="set-card">
+            <div class="set-row">
+              <div><div class="set-row-t">Целевой сайт</div><div class="set-row-d">URL, на который шлём тестовый запрос через каждый прокси</div></div>
+              <input id="proxyCheckTargetInput" placeholder="https://www.instagram.com/" style="width:230px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)">
             </div>
-            <div class="setting-field">
-              <label>Интервал проверок (мин)</label>
-              <div class="sf-desc">Как часто запускать цикл проверки всех прокси</div>
-              <input class="form-input" id="proxyCheckIntervalInput" type="number" min="5" max="1440" step="5">
+            <div class="set-row">
+              <div><div class="set-row-t">Интервал проверок</div><div class="set-row-d">Как часто запускать цикл проверки всех прокси</div></div>
+              <div class="set-inp"><input id="proxyCheckIntervalInput" type="number" min="5" max="1440" step="5"><span>мин</span></div>
             </div>
-            <div class="setting-field">
-              <label>Таймаут запроса (сек)</label>
-              <div class="sf-desc">Максимальное время ожидания ответа от прокси</div>
-              <input class="form-input" id="proxyCheckTimeoutInput" type="number" min="5" max="120">
+            <div class="set-row">
+              <div><div class="set-row-t">Таймаут запроса</div><div class="set-row-d">Максимальное время ожидания ответа от прокси</div></div>
+              <div class="set-inp"><input id="proxyCheckTimeoutInput" type="number" min="5" max="120"><span>сек</span></div>
             </div>
-            <div class="setting-field">
-              <label>Параллельных проверок</label>
-              <div class="sf-desc">Сколько прокси проверять одновременно (больше = быстрее, но выше нагрузка)</div>
-              <input class="form-input" id="proxyCheckConcurrencyInput" type="number" min="1" max="50">
+            <div class="set-row">
+              <div><div class="set-row-t">Параллельных проверок</div><div class="set-row-d">Сколько прокси проверять одновременно (больше = быстрее, выше нагрузка)</div></div>
+              <div class="set-inp"><input id="proxyCheckConcurrencyInput" type="number" min="1" max="50"></div>
             </div>
           </div>
-          <div style="border-top:1px solid var(--border);margin-top:10px;padding-top:10px">
-            <div style="font-size:11px;color:var(--text-2);margin-bottom:8px">Пороги цветовой индикации задержки (мс):</div>
-            <div class="form-row">
-              <div class="form-group"><label><span class="pc-lat pc-good" style="font-size:10px">Зелёный</span> до</label><input class="form-input" id="proxyCheckWarnInput" type="number" min="50" step="50" style="width:90px"> мс</div>
-              <div class="form-group"><label><span class="pc-lat pc-warn" style="font-size:10px">Жёлтый</span> до</label><input class="form-input" id="proxyCheckBadInput" type="number" min="100" step="100" style="width:90px"> мс</div>
-              <div class="form-group" style="align-self:flex-end"><span class="pc-lat pc-bad" style="font-size:10px">Красный</span> выше</div>
+
+          <div class="set-grp-label">ПОРОГИ ЗАДЕРЖКИ (МС)</div>
+          <div class="set-card">
+            <div class="set-row">
+              <div class="set-row-t"><span class="pc-lat pc-good" style="font-size:10px">Зелёный</span> &nbsp;до</div>
+              <div class="set-inp"><input id="proxyCheckWarnInput" type="number" min="50" step="50"><span>мс</span></div>
+            </div>
+            <div class="set-row">
+              <div class="set-row-t"><span class="pc-lat pc-warn" style="font-size:10px">Жёлтый</span> &nbsp;до</div>
+              <div class="set-inp"><input id="proxyCheckBadInput" type="number" min="100" step="100"><span>мс</span></div>
+            </div>
+            <div class="set-row">
+              <div class="set-row-t"><span class="pc-lat pc-bad" style="font-size:10px">Красный</span> &nbsp;всё, что выше жёлтого</div>
             </div>
           </div>
-          <div id="proxyCheckSettingsStatus" style="font-size:11px;color:var(--text-2);margin-top:4px"></div>
-          <div class="settings-card-footer">
+
+          <div class="set-save-bar">
+            <span id="proxyCheckSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
             <button class="btn btn-primary" onclick="saveProxyCheckSettings()">Сохранить</button>
           </div>
         </div>
 
-        <!-- Авто-восстановление модемов -->
-        <div class="analytics-card" style="margin-bottom:16px">
-          <div class="settings-card-header">
-            <h3>Авто-восстановление модемов</h3>
-            <span class="settings-card-badge badge-restart">Требуется перезапуск</span>
+        <!-- Авто-восстановление модемов (redesigned) -->
+        <div class="analytics-card" data-subsec="recovery" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px">
+            <h3 style="margin:0">Восстановление</h3>
+            <span class="settings-card-badge badge-restart">после перезапуска</span>
           </div>
-          <div class="settings-card-desc">Автоматический USB-ресет модемов, которые находятся в оффлайне дольше указанного времени. Система отслеживает попытки и не превышает лимит.</div>
-          <div class="settings-grid">
-            <div class="setting-field">
-              <label>Оффлайн до ресета (сек)</label>
-              <div class="sf-desc">Сколько секунд модем должен быть оффлайн, прежде чем запустится USB-ресет</div>
-              <input class="form-input" id="recoveryOfflineSecInput" type="number" min="10" max="600">
+          <div class="settings-card-desc">Когда модем уходит в оффлайн дольше заданного времени — система сама <b>перезагружает</b> его несколько раз (у MF289D ресета нет, только перезагрузка), и при неудаче делает <b>Re-Add</b>. Фильтры не дают «штормить» бесполезными перезагрузками.</div>
+
+          <div class="set-card">
+            <div class="set-row">
+              <div><div class="set-row-t">Авто-восстановление</div><div class="set-row-d">Главный выключатель всей логики восстановления</div></div>
+              <label class="tgl"><input type="checkbox" id="recoveryEnabledInput"><span></span></label>
             </div>
-            <div class="setting-field">
-              <label>Макс. попыток ресета</label>
-              <div class="sf-desc">Сколько раз подряд перезагружать модем, если он не возвращается в онлайн</div>
-              <input class="form-input" id="recoveryMaxAttemptsInput" type="number" min="1" max="10">
+            <div class="set-row">
+              <div><div class="set-row-t">Оффлайн до действия</div><div class="set-row-d">Сколько секунд модем должен молчать, прежде чем начнём перезагружать</div></div>
+              <div class="set-inp"><input id="recoveryOfflineSecInput" type="number" min="10" max="600"><span>сек</span></div>
             </div>
-            <div class="setting-field">
-              <label>Между попытками (мин)</label>
-              <div class="sf-desc">Минимальное время ожидания между повторными попытками ресета</div>
-              <input class="form-input" id="recoveryRetryMinInput" type="number" min="1" max="60">
+            <div class="set-row">
+              <div><div class="set-row-t">Макс. перезагрузок</div><div class="set-row-d">Сколько раз перезагрузить, прежде чем перейти к Re-Add</div></div>
+              <div class="set-inp"><input id="recoveryMaxAttemptsInput" type="number" min="1" max="10"><span>раз</span></div>
+            </div>
+            <div class="set-row">
+              <div><div class="set-row-t">Между попытками</div><div class="set-row-d">Пауза между перезагрузками — чтобы модем успел подняться</div></div>
+              <div class="set-inp"><input id="recoveryRetryMinInput" type="number" min="1" max="60"><span>мин</span></div>
+            </div>
+            <div class="set-row">
+              <div><div class="set-row-t">Лимит действий в сутки</div><div class="set-row-d">Максимум перезагрузок/Re-Add на один модем за 24ч (анти-шторм)</div></div>
+              <div class="set-inp"><input id="recoveryDailyCapInput" type="number" min="1" max="50"><span>/сут</span></div>
             </div>
           </div>
-          <div id="recoverySettingsStatus" style="font-size:11px;color:var(--text-2)"></div>
-          <div class="settings-card-footer">
+
+          <div class="set-grp-label">ФИЛЬТРЫ — КОГО НЕ ТРОГАТЬ</div>
+          <div class="set-card">
+            <div class="set-row">
+              <div class="set-row-t">Re-Add после неудачных перезагрузок</div>
+              <label class="tgl"><input type="checkbox" id="recoveryReaddAfterInput"><span></span></label>
+            </div>
+            <div class="set-row">
+              <div class="set-row-t">Пропускать модемы с мёртвой SIM</div>
+              <label class="tgl"><input type="checkbox" id="recoverySkipDeadSimInput"><span></span></label>
+            </div>
+            <div class="set-row">
+              <div class="set-row-t">Пропускать свободные / непроданные</div>
+              <label class="tgl"><input type="checkbox" id="recoverySkipUnsoldInput"><span></span></label>
+            </div>
+          </div>
+
+          <div class="set-save-bar">
+            <span id="recoverySettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
             <button class="btn btn-primary" onclick="saveRecoverySettings()">Сохранить</button>
           </div>
         </div>
 
+
         <!-- Трекинг и ротация -->
-        <div class="analytics-card" style="margin-bottom:16px">
-          <div class="settings-card-header">
-            <h3>Трекинг и ротация</h3>
-            <span class="settings-card-badge badge-restart">Требуется перезапуск</span>
-          </div>
+        <div class="analytics-card" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Трекинг и ротация</h3><span class="settings-card-badge badge-restart">после перезапуска</span></div>
           <div class="settings-card-desc">Мониторинг внешних IP-адресов модемов и синхронизация логов ротации с серверов.</div>
-          <div class="settings-grid">
-            <div class="setting-field">
-              <label>Интервал трекинга (мин)</label>
-              <div class="sf-desc">Как часто проверять текущий IP каждого модема и обновлять аптайм</div>
-              <input class="form-input" id="trackingIntervalMinInput" type="number" min="1" max="30">
-            </div>
-            <div class="setting-field">
-              <label>Кеш ротации (мин)</label>
-              <div class="sf-desc">Время хранения кеша данных о ротации. После истечения — повторный запрос к серверу</div>
-              <input class="form-input" id="rotationCacheTtlInput" type="number" min="5" max="240">
-            </div>
-            <div class="setting-field">
-              <label>Синхронизация ротации (мин)</label>
-              <div class="sf-desc">Как часто подтягивать новые записи логов ротации с серверов</div>
-              <input class="form-input" id="rotationSyncIntervalInput" type="number" min="5" max="240">
-            </div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Интервал трекинга</div><div class="set-row-d">Как часто проверять текущий IP каждого модема и обновлять аптайм</div></div><div class="set-inp"><input id="trackingIntervalMinInput" type="number" min="1" max="30"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Кеш ротации</div><div class="set-row-d">Время хранения кеша данных о ротации. После истечения — повторный запрос к серверу</div></div><div class="set-inp"><input id="rotationCacheTtlInput" type="number" min="5" max="240"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Синхронизация ротации</div><div class="set-row-d">Как часто подтягивать новые записи логов ротации с серверов</div></div><div class="set-inp"><input id="rotationSyncIntervalInput" type="number" min="5" max="240"><span>мин</span></div></div>
           </div>
-          <div id="trackingSettingsStatus" style="font-size:11px;color:var(--text-2)"></div>
-          <div class="settings-card-footer">
+          <div class="set-save-bar">
+            <span id="trackingSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
             <button class="btn btn-primary" onclick="saveTrackingSettings()">Сохранить</button>
           </div>
         </div>
 
         <!-- Хранение данных -->
-        <div class="analytics-card" style="margin-bottom:16px">
-          <div class="settings-card-header"><h3>Хранение данных</h3></div>
-          <div class="settings-card-desc">Через сколько дней автоматически удалять старые записи из базы данных. Очистка происходит ежедневно в 00:30 UTC. Минимум 7 дней.</div>
-          <div class="settings-grid">
-            <div class="setting-field">
-              <label>Часовой трафик (дни)</label>
-              <div class="sf-desc">Почасовая статистика трафика по портам. Используется для графиков и хитмапа</div>
-              <input class="form-input" id="retTrafficHourlyInput" type="number" min="7" max="365">
-            </div>
-            <div class="setting-field">
-              <label>Аудит-лог (дни)</label>
-              <div class="sf-desc">Записи действий администраторов: изменения клиентов, оплат, настроек</div>
-              <input class="form-input" id="retAuditLogInput" type="number" min="7" max="365">
-            </div>
-            <div class="setting-field">
-              <label>Системный лог (дни)</label>
-              <div class="sf-desc">Логи автоматических процессов: биллинг, спидтесты, очистка, синхронизация</div>
-              <input class="form-input" id="retSystemLogInput" type="number" min="7" max="365">
-            </div>
-            <div class="setting-field">
-              <label>Лог ротаций (дни)</label>
-              <div class="sf-desc">История смены IP-адресов модемов</div>
-              <input class="form-input" id="retRotationLogInput" type="number" min="7" max="365">
-            </div>
-            <div class="setting-field">
-              <label>Замеры прокси (дни)</label>
-              <div class="sf-desc">Результаты проверки задержки (ping) прокси к целевому сайту</div>
-              <input class="form-input" id="retProxyChecksInput" type="number" min="7" max="365">
-            </div>
-            <div class="setting-field">
-              <label>Метаданные модемов (дни)</label>
-              <div class="sf-desc">Кеш информации о модемах (IMEI, оператор, модель). Обновляется периодически</div>
-              <input class="form-input" id="retModemMetaInput" type="number" min="7" max="365">
-            </div>
+        <div class="analytics-card" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Хранение данных</h3></div>
+          <div class="settings-card-desc">Через сколько дней автоматически удалять старые записи из базы. Очистка ежедневно в 00:30 UTC. Минимум 7 дней.</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Часовой трафик</div><div class="set-row-d">Почасовая статистика трафика по портам (графики, хитмап)</div></div><div class="set-inp"><input id="retTrafficHourlyInput" type="number" min="7" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Аудит-лог</div><div class="set-row-d">Действия администраторов: клиенты, оплаты, настройки</div></div><div class="set-inp"><input id="retAuditLogInput" type="number" min="7" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Системный лог</div><div class="set-row-d">Логи автопроцессов: биллинг, спидтесты, очистка, синхронизация</div></div><div class="set-inp"><input id="retSystemLogInput" type="number" min="7" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Лог ротаций</div><div class="set-row-d">История смены IP-адресов модемов</div></div><div class="set-inp"><input id="retRotationLogInput" type="number" min="7" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Замеры прокси</div><div class="set-row-d">Результаты проверки задержки прокси к целевому сайту</div></div><div class="set-inp"><input id="retProxyChecksInput" type="number" min="7" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Метаданные модемов</div><div class="set-row-d">Кеш инфо о модемах (IMEI, оператор, модель)</div></div><div class="set-inp"><input id="retModemMetaInput" type="number" min="7" max="365"><span>дн</span></div></div>
           </div>
-          <div id="retentionSettingsStatus" style="font-size:11px;color:var(--text-2)"></div>
-          <div class="settings-card-footer">
+          <div class="set-save-bar">
+            <span id="retentionSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
             <button class="btn btn-primary" onclick="saveRetentionSettings()">Сохранить</button>
           </div>
         </div>
 
         <!-- Сессии, биллинг, CRM -->
-        <div class="analytics-card" style="margin-bottom:16px">
-          <div class="settings-card-header">
-            <h3>Сессии, биллинг и CRM</h3>
-            <span class="settings-card-badge badge-restart">Требуется перезапуск</span>
-          </div>
+        <div class="analytics-card" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Сессии, биллинг и CRM</h3><span class="settings-card-badge badge-restart">после перезапуска</span></div>
           <div class="settings-card-desc">Параметры авторизации, автоматического биллинга и интеграции с CRM-системой.</div>
-          <div class="settings-grid">
-            <div class="setting-field">
-              <label>Время жизни сессии (дни)</label>
-              <div class="sf-desc">Через сколько дней сесс��я администратора или клиента истекает и требуется повторный вход</div>
-              <input class="form-input" id="sessionTtlDaysInput" type="number" min="1" max="365">
-            </div>
-            <div class="setting-field">
-              <label>Повтор биллинга (час)</label>
-              <div class="sf-desc">Если ежедневный биллинг не выполнился — через сколько часов повторить попытку</div>
-              <input class="form-input" id="billingRetryHoursInput" type="number" step="0.5" min="0.5" max="24">
-            </div>
-            <div class="setting-field">
-              <label>Порог коррекции (ГБ)</label>
-              <div class="sf-desc">Минимальное расхождение трафика для запуска коррекции при ежемесячной сверке</div>
-              <input class="form-input" id="reconciliationToleranceInput" type="number" step="0.001" min="0.001" max="1">
-            </div>
-            <div class="setting-field">
-              <label>Авто-создание клиентов (мин)</label>
-              <div class="sf-desc">Интервал проверки новых модемов без привязки к клиенту и автоматического создания записей</div>
-              <input class="form-input" id="autoCreateIntervalInput" type="number" min="1" max="60">
-            </div>
-            <div class="setting-field">
-              <label>Проверка CRM (мин)</label>
-              <div class="sf-desc">Как часто проверять статус оплат клиентов и отправлять напоминания в CRM</div>
-              <input class="form-input" id="crmCheckIntervalInput" type="number" min="5" max="120">
-            </div>
-            <div class="setting-field">
-              <label>Напоминание об оплате (дни)</label>
-              <div class="sf-desc">За сколько дней до исчерпания баланса отправить напоминание клиенту</div>
-              <input class="form-input" id="crmReminderDaysInput" type="number" min="1" max="30">
-            </div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Время жизни сессии</div><div class="set-row-d">Через сколько дней сессия админа/клиента истекает и нужен повторный вход</div></div><div class="set-inp"><input id="sessionTtlDaysInput" type="number" min="1" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Повтор биллинга</div><div class="set-row-d">Если ежедневный биллинг не выполнился — через сколько часов повторить</div></div><div class="set-inp"><input id="billingRetryHoursInput" type="number" step="0.5" min="0.5" max="24"><span>ч</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Порог коррекции</div><div class="set-row-d">Минимальное расхождение трафика для коррекции при месячной сверке</div></div><div class="set-inp"><input id="reconciliationToleranceInput" type="number" step="0.001" min="0.001" max="1"><span>ГБ</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Авто-создание клиентов</div><div class="set-row-d">Интервал проверки новых модемов без клиента и создания записей</div></div><div class="set-inp"><input id="autoCreateIntervalInput" type="number" min="1" max="60"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Проверка CRM</div><div class="set-row-d">Как часто проверять статус оплат и слать напоминания в CRM</div></div><div class="set-inp"><input id="crmCheckIntervalInput" type="number" min="5" max="120"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Напоминание об оплате</div><div class="set-row-d">За сколько дней до исчерпания баланса напомнить клиенту</div></div><div class="set-inp"><input id="crmReminderDaysInput" type="number" min="1" max="30"><span>дн</span></div></div>
           </div>
-          <div id="sessionBillingSettingsStatus" style="font-size:11px;color:var(--text-2)"></div>
-          <div class="settings-card-footer">
+          <div class="set-save-bar">
+            <span id="sessionBillingSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
             <button class="btn btn-primary" onclick="saveSessionBillingSettings()">Сохранить</button>
           </div>
         </div>
 
-        <!-- Утилиты -->
-        <div class="analytics-card" style="margin-bottom:16px">
-          <h3>Уникальность IP (14 дней)</h3>
-          <div class="form-row" style="margin-bottom:10px;align-items:flex-end">
-            <div class="form-group"><label>Сервер</label><select class="form-input" id="uniqueIpsServer"><option value="">Сервер</option></select></div>
-            <div class="form-group"><button class="btn btn-primary" onclick="loadUniqueIps()">Загрузить</button></div>
-          </div>
-          <div id="uniqueIpsResult"></div>
-        </div>
       </div>
     </div>
   </div>
@@ -1265,13 +1185,10 @@
   <div class="modal">
     <div class="modal-header"><h3 id="modalTitle">Детали</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
     <div class="modal-tabs" id="modalTabs">
-      <div class="modal-tab active" data-tab="info" onclick="switchTab('info',this)">Инфо</div>
+      <div class="modal-tab active" data-tab="info" onclick="switchTab('info',this)">Обзор</div>
       <div class="modal-tab" data-tab="health" onclick="switchTab('health',this)">Здоровье</div>
-      <div class="modal-tab" data-tab="proxylat" onclick="switchTab('proxylat',this)">Задержка прокси</div>
-      <div class="modal-tab" data-tab="iphistory" onclick="switchTab('iphistory',this)">История IP</div>
-      <div class="modal-tab" data-tab="speed" onclick="switchTab('speed',this)">История скорости</div>
-      <div class="modal-tab" data-tab="hosts" onclick="switchTab('hosts',this)">Домены</div>
       <div class="modal-tab" data-tab="traffic" onclick="switchTab('traffic',this)">Трафик</div>
+      <div class="modal-tab" data-tab="history" onclick="switchTab('history',this)">История</div>
       <div class="modal-tab" data-tab="settings" onclick="switchTab('settings',this)">Настройки</div>
     </div>
     <div class="modal-body" id="modalBody"></div>
@@ -1280,60 +1197,122 @@
 
 <!-- CLIENT FORM MODAL -->
 <div class="modal-overlay" id="clientModal">
-  <div class="modal" style="width:520px">
-    <div class="modal-header"><h3 id="clientModalTitle">Новый клиент</h3><button class="modal-close" onclick="closeClientModal()">&times;</button></div>
-    <div class="modal-body">
+  <div class="modal" style="width:660px;max-height:90vh;display:flex;flex-direction:column">
+    <div class="modal-header" style="align-items:center">
+      <div style="display:flex;align-items:center;gap:12px;min-width:0">
+        <div id="cdAvatar" style="width:34px;height:34px;border-radius:50%;background:rgba(25,96,201,.16);color:var(--accent);display:flex;align-items:center;justify-content:center;font-size:13px;font-weight:700;flex-shrink:0">—</div>
+        <h3 id="cdName" style="margin:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">Новый клиент</h3>
+        <span id="cdPill" style="font-size:9px;font-weight:600;color:#fff;background:var(--text-3);padding:3px 9px;border-radius:999px;white-space:nowrap"></span>
+        <span id="clientModalTitle" style="display:none"></span>
+      </div>
+      <button class="modal-close" onclick="closeClientModal()">&times;</button>
+    </div>
+
+    <div class="cd-tabs" style="display:flex;gap:2px;padding:0 18px;border-bottom:1px solid var(--border);flex-shrink:0">
+      <div class="cd-tab active" id="cdTab_overview" onclick="switchDetailTab('overview')">Обзор</div>
+      <div class="cd-tab" id="cdTab_billing" onclick="switchDetailTab('billing')">Тариф и баланс</div>
+      <div class="cd-tab" id="cdTab_modems" onclick="switchDetailTab('modems')">Модемы</div>
+      <div class="cd-tab" id="cdTab_payments" onclick="switchDetailTab('payments')">Платежи</div>
+    </div>
+
+    <div class="modal-body" style="overflow-y:auto;flex:1">
       <input type="hidden" id="clientFormId">
-      <div class="form-row"><div class="form-group"><label>Имя *</label><input class="form-input" id="cfName"></div><div class="form-group"><label>portName *</label><input class="form-input" id="cfPortName"></div></div>
-      <div class="form-row"><div class="form-group"><label>Логин *</label><input class="form-input" id="cfLogin"></div><div class="form-group"><label>Пароль *</label><input class="form-input" id="cfPassword"></div></div>
-      <div class="form-group"><label>Контакт</label><input class="form-input" id="cfContact"></div>
-      <div class="form-row">
-        <div class="form-group"><label>Тарификация</label><select class="form-input" id="cfBillingType"><option value="per_gb">За ГБ</option><option value="per_modem">За модем</option></select></div>
-        <div class="form-group"><label>Цена (руб)</label><input class="form-input" type="number" id="cfPrice" value="0"></div>
-      </div>
-      <div class="form-group"><label>Заметки</label><textarea class="form-input" id="cfNotes"></textarea></div>
-      <div class="form-row"><div class="form-group"><label>Тип клиента</label><select class="form-input" id="cfClientType" onchange="toggleBankFields()"><option value="legal">Юр. лицо</option><option value="individual">Физ. лицо</option></select></div></div>
-      <div id="bankFieldsSection" style="border-top:1px solid var(--border);padding-top:10px;margin-top:10px">
-        <label style="font-size:11px;color:var(--text-2);margin-bottom:6px;display:block;font-weight:600">Реквизиты (для банка)</label>
-        <div class="form-row"><div class="form-group"><label>ИНН</label><input class="form-input" id="cfInn" placeholder="1234567890"></div><div class="form-group"><label>КПП</label><input class="form-input" id="cfKpp" placeholder="123456789"></div></div>
-        <div class="form-group"><label>Юр. название</label><input class="form-input" id="cfLegalName" placeholder='ООО "Компания"'></div>
-        <div class="form-group"><label>Адрес (юридический)</label><textarea class="form-input" id="cfAddress" rows="2" placeholder='119334, Г.МОСКВА, УЛ КОСЫГИНА, Д. 13' style="resize:vertical"></textarea></div>
-        <div class="form-row"><div class="form-group"><label>Основание (договор)</label><input class="form-input" id="cfContractInfo" placeholder='Договор №123 от 01.01.2026'></div><div class="form-group"><label>Дата подписания договора</label><input class="form-input" id="cfContractDate" type="date"><div style="font-size:10px;color:var(--text-3);margin-top:3px">День взаиморасчётов: акты/счета выставляются в этот день месяца. Пусто → 1-е число.</div></div></div>
-        <div style="display:flex;gap:16px;margin-top:8px">
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-1);cursor:pointer"><input type="checkbox" id="cfAutoActs" checked style="cursor:pointer"> Авто-акты</label>
-          <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-1);cursor:pointer"><input type="checkbox" id="cfAutoBills" checked style="cursor:pointer"> Авто-счета</label>
+
+      <!-- ===== ОБЗОР ===== -->
+      <div id="cdPane_overview">
+        <div class="cd-kpi-grid" style="display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:16px">
+          <div class="cd-kpi" id="cdKpiBalWrap"><div class="cd-kpi-l">Баланс</div><div class="cd-kpi-v" id="cdKpiBal">—</div></div>
+          <div class="cd-kpi"><div class="cd-kpi-l">Расход/мес</div><div class="cd-kpi-v" id="cdKpiCharge">—</div></div>
+          <div class="cd-kpi"><div class="cd-kpi-l">Модемов</div><div class="cd-kpi-v" id="cdKpiModems">—</div></div>
+          <div class="cd-kpi"><div class="cd-kpi-l">Трафик/мес</div><div class="cd-kpi-v" id="cdKpiTraffic">—</div></div>
+        </div>
+
+        <div class="set-grp-label">Идентификация</div>
+        <div class="set-card">
+          <div class="set-row"><div><div class="set-row-t">Имя *</div><div class="set-row-d">Отображается в списках и счетах</div></div><input class="form-input" id="cfName" style="width:210px"></div>
+          <div class="set-row"><div><div class="set-row-t">Telegram / контакт</div><div class="set-row-d">Для уведомлений и напоминаний об оплате</div></div><input class="form-input" id="cfContact" style="width:210px"></div>
+          <div class="set-row"><div><div class="set-row-t">Заметки</div><div class="set-row-d">Внутренние, клиент не видит</div></div><input class="form-input" id="cfNotes" style="width:210px"></div>
+        </div>
+
+        <div class="set-grp-label">Тариф</div>
+        <div class="set-card">
+          <div class="set-row"><div><div class="set-row-t">Тип тарифа</div><div class="set-row-d">За трафик (₽/ГБ) или за модем (₽/мод)</div></div><select class="form-input" id="cfBillingType" style="width:140px"><option value="per_gb">За ГБ</option><option value="per_modem">За модем</option></select></div>
+          <div class="set-row"><div><div class="set-row-t">Цена</div><div class="set-row-d">Сколько клиент платит</div></div><span class="set-inp"><input type="number" id="cfPrice" value="0" style="width:90px;text-align:center"><span>₽</span></span></div>
+          <div class="set-row"><div><div class="set-row-t">Списание</div><div class="set-row-d">Ежедневно по факту трафика за сутки</div></div><span style="font-size:13px;color:var(--text-1);font-family:var(--font-mono)">ежедневно</span></div>
+        </div>
+
+        <div class="set-grp-label">Баланс</div>
+        <div class="set-card">
+          <div class="set-row"><div><div class="set-row-t">Пополнить баланс</div><div class="set-row-d">Зачисление и история операций — во вкладке «Платежи»</div></div><button class="btn btn-primary btn-sm" onclick="switchDetailTab('payments')" style="font-size:12px">Платежи</button></div>
         </div>
       </div>
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--warning);cursor:pointer"><input type="checkbox" id="cfBillingPaused" style="cursor:pointer"> Приостановить учет баланса</label>
-        <div style="font-size:10px;color:var(--text-3);margin-top:4px;margin-left:22px">Биллинг не будет списывать средства с этого клиента</div>
-      </div>
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-1);cursor:pointer"><input type="checkbox" id="cfAllowDebt" style="cursor:pointer"> Разрешить уход в минус</label>
-        <div style="font-size:10px;color:var(--text-3);margin-top:4px;margin-left:22px">По умолчанию баланс не может опуститься ниже ~5 дней долга</div>
-        <div class="form-group" style="margin-top:6px;margin-left:22px" id="cfMaxDebtWrap">
-          <label style="font-size:11px">Макс. долг (в валюте клиента, 0 = без лимита)</label>
-          <input class="form-input" id="cfMaxDebt" type="number" min="0" step="0.01" placeholder="0">
+
+      <!-- ===== ТАРИФ И БАЛАНС (доступ, реквизиты, биллинг, SLA, API) ===== -->
+      <div id="cdPane_billing" style="display:none">
+        <div class="set-grp-label">Доступ</div>
+        <div class="set-card" style="padding:14px 16px">
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:12px">
+            <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">portName *</label><input class="form-input" id="cfPortName"></div>
+            <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Логин *</label><input class="form-input" id="cfLogin"></div>
+            <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Пароль *</label><input class="form-input" id="cfPassword"></div>
+            <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Тип клиента</label><select class="form-input" id="cfClientType" onchange="toggleBankFields()"><option value="legal">Юр. лицо</option><option value="individual">Физ. лицо</option></select></div>
+          </div>
+        </div>
+
+        <div id="bankFieldsSection">
+          <div class="set-grp-label">Реквизиты (для банка)</div>
+          <div class="set-card" style="padding:14px 16px">
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:12px">
+              <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">ИНН</label><input class="form-input" id="cfInn" placeholder="1234567890"></div>
+              <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">КПП</label><input class="form-input" id="cfKpp" placeholder="123456789"></div>
+              <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Юр. название</label><input class="form-input" id="cfLegalName" placeholder='ООО "Компания"'></div>
+              <div style="grid-column:1/-1"><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Адрес (юридический)</label><textarea class="form-input" id="cfAddress" rows="2" style="resize:vertical" placeholder="119334, Г.МОСКВА, УЛ КОСЫГИНА, Д. 13"></textarea></div>
+              <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Основание (договор)</label><input class="form-input" id="cfContractInfo" placeholder="Договор №123 от 01.01.2026"></div>
+              <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Дата подписания</label><input class="form-input" id="cfContractDate" type="date"></div>
+            </div>
+            <div style="font-size:10px;color:var(--text-3);margin-top:7px">День взаиморасчётов: акты/счета выставляются в этот день месяца. Пусто → 1-е число.</div>
+            <div class="set-row" style="border-top:1px solid var(--border);margin-top:11px;padding-top:13px"><div><div class="set-row-t">Авто-акты</div><div class="set-row-d">Формировать закрывающие акты автоматически</div></div><label class="tgl"><input type="checkbox" id="cfAutoActs" checked><span></span></label></div>
+            <div class="set-row"><div><div class="set-row-t">Авто-счета</div><div class="set-row-d">Выставлять счета на оплату автоматически</div></div><label class="tgl"><input type="checkbox" id="cfAutoBills" checked><span></span></label></div>
+          </div>
+        </div>
+
+        <div class="set-grp-label">Биллинг</div>
+        <div class="set-card">
+          <div class="set-row"><div><div class="set-row-t" style="color:var(--warning)">Приостановить учёт баланса</div><div class="set-row-d">Биллинг не будет списывать средства с этого клиента</div></div><label class="tgl"><input type="checkbox" id="cfBillingPaused"><span></span></label></div>
+          <div class="set-row"><div><div class="set-row-t">Разрешить уход в минус</div><div class="set-row-d">По умолчанию баланс не может опуститься ниже ~5 дней долга</div></div><label class="tgl"><input type="checkbox" id="cfAllowDebt"><span></span></label></div>
+          <div class="set-row" id="cfMaxDebtWrap"><div><div class="set-row-t">Макс. долг</div><div class="set-row-d">В валюте клиента, 0 = без лимита</div></div><span class="set-inp"><input id="cfMaxDebt" type="number" min="0" step="0.01" placeholder="0" style="width:96px;text-align:right"><span>₽</span></span></div>
+        </div>
+
+        <div class="set-grp-label">SLA</div>
+        <div class="set-card">
+          <div class="set-row"><div class="set-row-t">Uptime</div><span class="set-inp"><input id="cfSlaUptime" type="number" min="0" max="100" step="0.1" placeholder="99" style="width:80px;text-align:center"><span>%</span></span></div>
+          <div class="set-row"><div class="set-row-t">Макс. задержка</div><span class="set-inp"><input id="cfSlaLatency" type="number" min="1" max="60000" placeholder="1000" style="width:80px;text-align:center"><span>мс</span></span></div>
+          <div class="set-row"><div class="set-row-t">Макс. ошибок</div><span class="set-inp"><input id="cfSlaErrPct" type="number" min="0" max="100" step="0.1" placeholder="5" style="width:80px;text-align:center"><span>%</span></span></div>
+          <div class="set-row"><div><div class="set-row-t">Авто-кредит при нарушении SLA</div><div class="set-row-d">Автоматически начислять компенсацию</div></div><label class="tgl"><input type="checkbox" id="cfSlaAutoCredit"><span></span></label></div>
+        </div>
+
+        <div id="cfApiKeySection" style="display:none">
+          <div class="set-grp-label">API Key</div>
+          <div class="set-card" style="padding:12px 16px"><div style="display:flex;align-items:center;gap:6px"><input class="form-input" id="cfApiKey" readonly style="font-size:10px;font-family:var(--font-mono);flex:1"><button class="btn btn-sm" onclick="copyText(document.getElementById('cfApiKey').value,this)" title="Копировать">📋</button><button class="btn btn-warning btn-sm" onclick="regenerateApiKeyInForm()" title="Перегенерировать">🔄</button></div></div>
         </div>
       </div>
-      <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--border)">
-        <div style="font-size:11px;font-weight:600;color:var(--text-0);margin-bottom:6px">SLA</div>
-        <div class="form-row">
-          <div class="form-group"><label style="font-size:11px">Uptime, %</label><input class="form-input" id="cfSlaUptime" type="number" min="0" max="100" step="0.1" placeholder="99"></div>
-          <div class="form-group"><label style="font-size:11px">Макс. задержка, мс</label><input class="form-input" id="cfSlaLatency" type="number" min="1" max="60000" placeholder="1000"></div>
-          <div class="form-group"><label style="font-size:11px">Макс. ошибок, %</label><input class="form-input" id="cfSlaErrPct" type="number" min="0" max="100" step="0.1" placeholder="5"></div>
-        </div>
-        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-1);cursor:pointer;margin-top:4px"><input type="checkbox" id="cfSlaAutoCredit" style="cursor:pointer"> Автоматически кредитовать при нарушении SLA</label>
+
+      <!-- ===== МОДЕМЫ ===== -->
+      <div id="cdPane_modems" style="display:none">
+        <div id="cdModemsList" style="padding:4px 0"></div>
       </div>
-      <div id="cfApiKeySection" style="display:none;margin-top:12px;padding:10px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border)">
-        <label style="font-size:11px;color:var(--text-2);margin-bottom:4px;display:block">API Key</label>
-        <div style="display:flex;align-items:center;gap:6px">
-          <input class="form-input" id="cfApiKey" readonly style="font-size:10px;font-family:'JetBrains Mono',monospace;flex:1">
-          <button class="btn btn-sm" onclick="copyText(document.getElementById('cfApiKey').value,this)" title="Копировать">📋</button>
-          <button class="btn btn-warning btn-sm" onclick="regenerateApiKeyInForm()" title="Перегенерировать">🔄</button>
-        </div>
+
+      <!-- ===== ПЛАТЕЖИ (reuses renderOpsHistory) ===== -->
+      <div id="cdPane_payments" style="display:none">
+        <div id="clientOpsBody"></div>
       </div>
-      <div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-primary" onclick="saveClient()">Сохранить</button><button class="btn" onclick="closeClientModal()">Отмена</button></div>
+    </div>
+
+    <div style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-top:1px solid var(--border);flex-shrink:0">
+      <button class="btn btn-sm" id="cdDeleteBtn" onclick="deleteClient(document.getElementById('clientFormId').value, document.getElementById('cfName').value)" style="color:var(--danger);border-color:transparent;background:none;font-size:12px">Удалить клиента</button>
+      <span style="flex:1"></span>
+      <button class="btn btn-sm" onclick="closeClientModal()" style="font-size:12px">Отмена</button>
+      <button class="btn btn-primary btn-sm" onclick="saveClient()" style="font-size:12px;padding:7px 18px">Сохранить</button>
     </div>
   </div>
 </div>
@@ -1351,7 +1330,7 @@
       <div class="modal-tab" id="opsTab_api" onclick="switchOpsTab('api')" style="cursor:pointer">🔌 API</div>
       <div class="modal-tab" id="opsTab_sla" onclick="switchOpsTab('sla')" style="cursor:pointer">📊 SLA</div>
     </div>
-    <div class="modal-body" id="clientOpsBody" style="max-height:calc(85vh - 120px);overflow-y:auto">
+    <div class="modal-body" id="clientOpsBody_legacy" style="max-height:calc(85vh - 120px);overflow-y:auto">
     </div>
   </div>
 </div>
@@ -1364,12 +1343,49 @@
   <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--bg-2);border-bottom:1px solid var(--border)">
     <span style="font-size:13px;font-weight:600;color:var(--text-0)">Twenty CRM</span>
     <span id="crmStatus" style="font-size:11px;color:var(--text-3)"></span>
-    <a href="https://crm.proxies.rent" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;margin-left:auto" title="Открыть в новом окне">↗ Открыть отдельно</a>
+    <a href="https://crm.arendaproxy.ru" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;margin-left:auto" title="Открыть в новом окне">↗ Открыть отдельно</a>
   </div>
   <iframe id="crmFrame" title="CRM" src="" style="width:100%;height:calc(100vh - 100px);border:none;display:block" allow="clipboard-write"></iframe>
 </div>
 
-<script src="/js/utils.js"></script>
-<script src="/js/admin.js"></script>
+<div class="tab-content" id="tab-ai_sales">
+  <div style="max-width:1100px;margin:0 auto;padding:10px">
+    <div id="ais_status" class="analytics-card" style="margin-bottom:12px;font-size:13px;color:var(--text-1)">Загрузка…</div>
+
+    <div class="analytics-card" style="margin-bottom:12px">
+      <h3 style="margin:0 0 10px">Ключи и CRM</h3>
+      <div class="settings-grid">
+        <div class="setting-field"><label>Anthropic API Key</label><input class="form-input" id="ais_anthropic" type="password" autocomplete="off" placeholder="sk-ant-..."></div>
+        <div class="setting-field"><label>Tavily API Key</label><input class="form-input" id="ais_tavily" type="password" autocomplete="off" placeholder="tvly-..."></div>
+        <div class="setting-field"><label>CRM DB URL (override)</label><input class="form-input" id="ais_crmurl" autocomplete="off" placeholder="postgresql://twenty:...@172.18.0.3:5432/default"></div>
+      </div>
+      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
+        <button class="btn btn-sm btn-primary" onclick="aisSaveKeys()">Сохранить</button>
+        <button class="btn btn-sm" onclick="aisCrmPing()">Проверить CRM</button>
+        <span id="ais_crmping" style="font-size:12px;color:var(--text-3)"></span>
+      </div>
+    </div>
+
+    <div class="analytics-card" style="margin-bottom:12px">
+      <h3 style="margin:0 0 10px">Запуск ботов</h3>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
+        <div class="setting-field" style="min-width:260px;flex:1"><label>Seed-компания (искать похожие)</label><input class="form-input" id="ais_seed" placeholder="напр. Prisync или клиент из CRM"></div>
+        <div class="setting-field" style="max-width:90px"><label>Кол-во</label><input class="form-input" id="ais_count" type="number" value="5" min="1" max="20"></div>
+        <button class="btn btn-sm btn-primary" onclick="aisRun('lookalikes')">🔎 Похожие + ЛПР</button>
+        <button class="btn btn-sm" onclick="aisRun('contacts')">🤝 Добрать ЛПР</button>
+        <button class="btn btn-sm" onclick="aisRun('push')">⬆ Залить в Twenty</button>
+      </div>
+      <div id="ais_job" style="margin-top:12px;display:none;font-size:12px"></div>
+    </div>
+
+    <div class="analytics-card">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Очередь (стейджинг)</h3><button class="btn btn-sm" onclick="aisLoadQueue()">↻ Обновить</button></div>
+      <div id="ais_queue" style="font-size:13px">—</div>
+    </div>
+  </div>
+</div>
+
+<script src="/js/utils.js?v=0630d"></script>
+<script src="/js/admin.js?v=0630d"></script>
 </body>
 </html>

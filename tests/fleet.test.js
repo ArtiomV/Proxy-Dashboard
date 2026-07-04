@@ -111,3 +111,68 @@ describe('computeFleet', () => {
     expect(strict.disconnected).toBe(0);     // 3 min < 10 min → out
   });
 });
+
+describe('computeFleet — glitched-to-random credit', () => {
+  // When ProxySmart can't read a modem's IMEI it re-enumerates it as a
+  // "random####" port (IMEI = USB path, IS_ONLINE=yes — physically UP), while the
+  // real identity lingers offline with an EMPTY USB slot. That twin must NOT drag
+  // the count down («82/83, хотя модемы стали рэндомпортами») — but a GENUINE
+  // outage must still be counted. These guard both halves.
+  const mins = (m) => m * 60 * 1000;
+  const okMeta = { srv: 'S4', imei: 'OK', nick: 'MD_OK' };
+  const okUp = { 'S4_OK': { last_online_check: ago(mins(1)) } };
+  const okLive = { _server: 'S4', modem_details: { IMEI: 'S4_OK', NICK: 'MD_OK', USB_ID: '1-1.1' }, net_details: { IS_ONLINE: 'yes' } };
+  const offl = (imei, nick, usb) => ({ _server: 'S4', modem_details: { IMEI: 'S4_' + imei, NICK: nick, USB_ID: usb }, net_details: { IS_ONLINE: 'no' } });
+  const rnd = (path) => ({ _server: 'S4', modem_details: { IMEI: 'S4_' + path, NICK: 'random' + path.replace(/\D/g, ''), USB_ID: path }, net_details: { IS_ONLINE: 'yes' } });
+
+  it('credits a glitched-to-random modem (usb-less disconnected twin + up-random)', () => {
+    const meta2 = [okMeta, { srv: 'S4', imei: 'G', nick: 'MD_G' }];
+    const uptime2 = { ...okUp, 'S4_G': { last_online_check: ago(mins(450)) } };   // dark 7.5h
+    const f = computeFleet(meta2, uptime2, [okLive, offl('G', 'MD_G', ''), rnd('1-4.3.1.1')], { now: NOW });
+    expect(f.total).toBe(2);
+    expect(f.disconnected).toBe(0);    // glitched twin credited
+    expect(f.working).toBe(2);         // count does NOT drop
+    expect(f.online + f.offline).toBe(f.total);
+  });
+
+  it('does NOT hide a genuinely-dead modem that vanished from the feed (USB undefined)', () => {
+    const meta2 = [okMeta, { srv: 'S4', imei: 'DEAD', nick: 'MD_DEAD' }];
+    const uptime2 = { ...okUp, 'S4_DEAD': { last_online_check: ago(mins(40)) } };
+    // MD_DEAD dropped out of the live feed entirely (dongle died); a random is up.
+    const f = computeFleet(meta2, uptime2, [okLive, rnd('1-4.3.1.1')], { now: NOW });
+    expect(f.disconnected).toBe(1);    // dead modem stays counted as down
+    expect(f.disconnectedList.map(o => o.nick)).toEqual(['MD_DEAD']);
+    expect(f.working).toBe(1);
+  });
+
+  it('does NOT spill credit onto a dead modem when randoms are explained by <10min blips', () => {
+    const meta2 = [okMeta,
+      { srv: 'S4', imei: 'B1', nick: 'MD_B1' }, { srv: 'S4', imei: 'B2', nick: 'MD_B2' },
+      { srv: 'S4', imei: 'DEAD', nick: 'MD_DEAD' }];
+    const uptime2 = { ...okUp,
+      'S4_B1': { last_online_check: ago(mins(3)) }, 'S4_B2': { last_online_check: ago(mins(5)) },  // blips
+      'S4_DEAD': { last_online_check: ago(mins(120)) } };                                          // genuinely dead
+    const live2 = [okLive, offl('B1', 'MD_B1', ''), offl('B2', 'MD_B2', ''), offl('DEAD', 'MD_DEAD', ''),
+      rnd('1-4.3.1.1'), rnd('1-4.3.3.2')];   // upRandom=2, but both explained by the 2 blips
+    const f = computeFleet(meta2, uptime2, live2, { now: NOW });
+    expect(f.disconnected).toBe(1);                        // effective = 2 − 2 = 0 → DEAD not credited
+    expect(f.disconnectedList.map(o => o.nick)).toEqual(['MD_DEAD']);
+    expect(f.working).toBe(3);                             // 4 total − 1 dead
+  });
+
+  it('does NOT credit an offline modem that keeps its own USB slot', () => {
+    const meta2 = [okMeta, { srv: 'S4', imei: 'P', nick: 'MD_P' }];
+    const uptime2 = { ...okUp, 'S4_P': { last_online_check: ago(mins(30)) } };
+    const f = computeFleet(meta2, uptime2, [okLive, offl('P', 'MD_P', '1-4.3.2.3'), rnd('1-4.3.1.1')], { now: NOW });
+    expect(f.disconnected).toBe(1);    // holds its USB slot → genuine outage, not a glitch
+    expect(f.disconnectedList.map(o => o.nick)).toEqual(['MD_P']);
+  });
+
+  it('per-server gate: a server with no up-randoms is never credited', () => {
+    const meta2 = [okMeta, { srv: 'S4', imei: 'G', nick: 'MD_G' }];
+    const uptime2 = { ...okUp, 'S4_G': { last_online_check: ago(mins(450)) } };
+    const f = computeFleet(meta2, uptime2, [okLive, offl('G', 'MD_G', '')], { now: NOW });   // no random on S4
+    expect(f.disconnected).toBe(1);    // usb-less but no random ⇒ no credit ⇒ stays down
+    expect(f.working).toBe(1);
+  });
+});

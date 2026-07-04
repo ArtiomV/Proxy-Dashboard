@@ -80,6 +80,7 @@ r.post('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) =
       }
     })();
     auditLog(req.user.login, 'monthly_costs_save', { period, count: items.length });
+    _financeCacheKey = '';   // сброс кэша finance_dashboard — иначе Обзор до 60с показывает старые затраты
     res.json({ ok: true, period, saved: items.length });
   } catch (e) {
     logger.error('[monthly_costs/post]', e.message);
@@ -235,7 +236,17 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const utilPct = totalModems > 0 ? Math.round((rentedModems / totalModems) * 1000) / 10 : 0;
 
     // -- Costs (current period) --
-    const costRows = db.prepare(`SELECT category, subkey, amount FROM monthly_costs WHERE period = ?`).all(period);
+    // Затраты фиксированные помесячные: если месяц ещё не заполнен, подтягиваем
+    // последний заполненный как типовые (cost_carried_from сообщает фронту источник).
+    let costRows = db.prepare(`SELECT category, subkey, amount FROM monthly_costs WHERE period = ?`).all(period);
+    let costCarriedFrom = null;
+    if (!costRows.length) {
+      const prev = db.prepare(`SELECT MAX(period) AS p FROM monthly_costs WHERE period < ?`).get(period).p;
+      if (prev) {
+        costRows = db.prepare(`SELECT category, subkey, amount FROM monthly_costs WHERE period = ?`).all(prev);
+        costCarriedFrom = prev;
+      }
+    }
     const totalCost = costRows.reduce((s, r) => s + (r.amount || 0), 0);
     const costByCategory = {};
     costRows.forEach(r => {
@@ -353,6 +364,18 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const dailyRows = db.prepare(`SELECT date, SUM(amount) as rev FROM billing_ledger
       WHERE type='charge' AND date >= ? GROUP BY date ORDER BY date`).all(since30);
 
+    // -- Recent payments / balance movements (everything except the daily auto-charge) --
+    const recentPayments = db.prepare(`
+      SELECT l.client_id, l.type, l.date, l.amount, l.source, c.name AS client_name
+        FROM billing_ledger l LEFT JOIN clients c ON c.id = l.client_id
+       WHERE l.type IN ('payment','bank_payment','adjustment','correction','manual_charge')
+       ORDER BY l.date DESC, l.id DESC LIMIT 6`).all().map(r => ({
+      client: r.client_name || r.client_id,
+      date: r.date,
+      amount: Math.round(r.amount),
+      source: (r.source && String(r.source).indexOf('tochka') === 0) ? 'Точка' : 'вручную'
+    }));
+
     const payload = {
       period,
       now: now.toISOString(),
@@ -375,6 +398,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
         cpm: costPerModem,
         margin_per_modem: marginPerModem,
         total_cost: Math.round(totalCost),
+        cost_carried_from: costCarriedFrom,
         forecast_eom: forecastEOM,
         forecast_so_far: Math.round(monthRevenueSoFar)
       },
@@ -391,7 +415,8 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
       trend,
       churned: churnedClients.map(c => ({ id: c.id, name: c.name, last_mrr: prevMrrByClient[c.id] || 0 })),
       new: newClients.map(c => ({ id: c.id, name: c.name, created: c.createdAt, mrr: mrrByClient[c.id] || 0 })),
-      daily_revenue: dailyRows.map(r => ({ date: r.date, revenue: Math.round(r.rev) }))
+      daily_revenue: dailyRows.map(r => ({ date: r.date, revenue: Math.round(r.rev) })),
+      recent_payments: recentPayments
     };
     _financeCache = payload; _financeCacheKey = cacheKey; _financeCacheTs = Date.now();
     res.json(payload);

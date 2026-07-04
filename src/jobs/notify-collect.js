@@ -57,6 +57,9 @@ async function runOnce() {
   if (!enabled || enabled('modem_offline')) {
     try { passOfflineModems(); }   catch (e) { deps.logger.warn('[NotifyCollect] offline: ' + e.message); }
   }
+  if (!enabled || enabled('sim_redirect_imposed') || enabled('sim_status_bad') || enabled('reboot_score_high')) {
+    try { passSimSignals(); }      catch (e) { deps.logger.warn('[NotifyCollect] sim: ' + e.message); }
+  }
   if (!enabled || enabled('client_debt')) {
     try { passClientDebts(); }     catch (e) { deps.logger.warn('[NotifyCollect] debts: ' + e.message); }
   }
@@ -116,6 +119,40 @@ function passOfflineModems() {
       message: `📴 <b>${esc(nick)}</b> (${esc(server)}) — не отвечает ${mins} мин.\nПоследний онлайн: ${esc(lastOnlineLocal)} МСК`,
       payload: { server, imei, nick, mins, lastOnline: lastOnlineLocal },
     });
+  }
+}
+
+// ── Pass 1c: ProxySmart SIM / health signals (Batch 1) ──────────
+// Reads the live signal columns persisted on modem_meta and raises the
+// matching alert via alerts.trigger (tg+bell, cooldown-suppressed across
+// scans). Freshness-gated on signals_updated_at so a modem that has since
+// gone offline (signals frozen) stops firing — offline has its own alert.
+function passSimSignals() {
+  const { alerts, db, getSetting } = deps;
+  const threshold = Number((getSetting && getSetting('reboot_score_alert_threshold', 70)) || 70);
+  let rows = [];
+  try {
+    rows = db.prepare(
+      "SELECT server_name, imei, nick, sim_status, reboot_score, http_redirect " +
+      "FROM modem_meta WHERE signals_updated_at >= datetime('now','-15 minutes')"
+    ).all();
+  } catch (_) { return; }   // signal columns missing pre-migration → skip
+  for (const r of rows) {
+    const nick = r.nick || r.imei;
+    if (/^random/i.test(nick)) continue;
+    const base = { server: r.server_name, imei: r.imei, nick };
+    // (a) operator captive redirect == SIM out of money / blocked
+    if (r.http_redirect) alerts.trigger('sim_redirect_imposed', base);
+    // (b) SIM status not healthy. ProxySmart reports several GOOD forms:
+    // "OK", "SIM OK", "+CPIN: READY". "UNKNOWN"/"" = no data (modem offline /
+    // signal loss) — NOT a confirmed fault, so don't alert. Anything else
+    // (e.g. MODEM_SIM_UNDETECTED) is a real problem.
+    const ss = String(r.sim_status || '').toUpperCase();
+    if (ss && ss !== 'UNKNOWN' && !/\bOK\b|READY/.test(ss)) alerts.trigger('sim_status_bad', { ...base, simStatus: ss });
+    // (c) high reboot score
+    if (r.reboot_score != null && Number(r.reboot_score) >= threshold) {
+      alerts.trigger('reboot_score_high', { ...base, score: r.reboot_score });
+    }
   }
 }
 
