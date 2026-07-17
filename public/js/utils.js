@@ -3,10 +3,10 @@
  * Loaded BEFORE inline / page-specific scripts via <script src="/js/utils.js">.
  *
  * UNIT SEMANTICS — DECIMAL (SI), matches backend src/utils/traffic.js:
- *   1 KB = 1e3 bytes
- *   1 MB = 1e6 bytes
- *   1 GB = 1e9 bytes
- *   1 TB = 1e12 bytes
+ *   1 КБ = 1e3 bytes, 1 МБ = 1e6, 1 ГБ = 1e9, 1 ТБ = 1e12.
+ * All formatters render RU units (КБ/МБ/ГБ/ТБ) — the UI language is Russian.
+ * parseTraffic still ACCEPTS EN units (KB/MB/GB/TB) because it parses
+ * ProxySmart API bandwidth strings, not user-facing text.
  * The backend uses these decimal multipliers for billing math
  * (trafficBytesToGb(1e9) === 1, locked by tests/billing-atomic.test.js).
  * The admin SPA already used decimal here, the client SPA used to use
@@ -27,8 +27,9 @@ function fmtGb(b){if(!b||b===0||isNaN(b))return'0 Б';if(b<1e6)return(b/1e3).toF
 function fmtGbShort(b){if(!b||isNaN(b)||b<1e9)return((b||0)/1e6).toFixed(0)+' МБ';return(b/1e9).toFixed(1)+' ГБ'}
 function pct(v,max){return max?Math.round(v/max*100):0}
 
-// Format bytes with auto-unit (used by client portal) — decimal.
-function formatBytes(b){if(!b||b===0)return'0 B';if(b<1e3)return b+' B';if(b<1e6)return(b/1e3).toFixed(1)+' KB';if(b<1e9)return(b/1e6).toFixed(1)+' MB';var gb=b/1e9;if(gb>=1000)return(gb/1000).toFixed(2)+' TB';return gb.toFixed(1)+' GB'}
+// Format bytes with auto-unit (used by client portal) — decimal, RU units
+// (same locale as fmtGb/fmtGbShort: one UI language everywhere).
+function formatBytes(b){if(!b||b===0)return'0 Б';if(b<1e3)return b+' Б';if(b<1e6)return(b/1e3).toFixed(1)+' КБ';if(b<1e9)return(b/1e6).toFixed(1)+' МБ';var gb=b/1e9;if(gb>=1000)return(gb/1000).toFixed(2)+' ТБ';return gb.toFixed(1)+' ГБ'}
 
 // Modem helpers.
 // _cached / _serverDown flags are admin-side annotations injected on stale

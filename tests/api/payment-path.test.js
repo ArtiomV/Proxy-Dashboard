@@ -24,9 +24,10 @@
 //   GET    /api/admin/clients/:id/payments
 //     • returns from in-memory client.payments (current source)
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import crypto from 'crypto';
+import https from 'https';
 import { bootApp, asAdmin } from '../_helpers/app.js';
 
 let app, db, adminToken;
@@ -307,6 +308,26 @@ describe('P1-1: recalcFromLedger preserves a pre-ledger opening balance', () => 
 });
 
 describe('Stage 13.0: characterization — Tochka webhook auto-credit (matched client)', () => {
+  // The webhook handler verifies JWTs against Tochka's JWKS over the network.
+  // With no/slow network each fetch burns the full 10s https timeout, and the
+  // cache stays empty after a failure — so two posts below cost 20s+ and trip
+  // the vitest timeout. Stub https.get to fail fast (same pattern as
+  // tests/api/tochka.test.js swapping https.request): the handler then takes
+  // the documented 'jwks_unavailable' graceful path — the payment is still
+  // recorded as unverified, which is exactly what this test characterizes.
+  let realHttpsGet;
+  beforeAll(() => {
+    realHttpsGet = https.get;
+    https.get = () => {
+      const fakeReq = { on(ev, fn) {
+        if (ev === 'error') process.nextTick(() => fn(new Error('network disabled in tests')));
+        return fakeReq;
+      } };
+      return fakeReq;
+    };
+  });
+  afterAll(() => { https.get = realHttpsGet; });
+
   // Build a webhook payload that the receiver will treat as unverified
   // (no JWT signature), so we exercise the "save unverified" path. The
   // verified auto-credit path requires a JWT cosigned by Tochka — we

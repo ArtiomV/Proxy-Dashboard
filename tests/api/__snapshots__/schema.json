@@ -1,6 +1,24 @@
 [
   {
     "type": "index",
+    "name": "idx_aal_client",
+    "tbl_name": "api_access_log",
+    "sql": "CREATE INDEX idx_aal_client ON api_access_log(client_name, ts DESC)"
+  },
+  {
+    "type": "index",
+    "name": "idx_aal_ts",
+    "tbl_name": "api_access_log",
+    "sql": "CREATE INDEX idx_aal_ts ON api_access_log(ts DESC)"
+  },
+  {
+    "type": "index",
+    "name": "idx_aal_type",
+    "tbl_name": "api_access_log",
+    "sql": "CREATE INDEX idx_aal_type ON api_access_log(caller_type, ts DESC)"
+  },
+  {
+    "type": "index",
     "name": "idx_api_usage_client",
     "tbl_name": "api_usage",
     "sql": "CREATE INDEX idx_api_usage_client ON api_usage(client_id, timestamp)"
@@ -295,6 +313,12 @@
   },
   {
     "type": "index",
+    "name": "idx_modem_meta_deleted",
+    "tbl_name": "modem_meta",
+    "sql": "CREATE INDEX idx_modem_meta_deleted ON modem_meta(deleted) WHERE deleted = 1"
+  },
+  {
+    "type": "index",
     "name": "idx_modem_meta_nick",
     "tbl_name": "modem_meta",
     "sql": "CREATE INDEX idx_modem_meta_nick ON modem_meta(nick)"
@@ -373,6 +397,18 @@
   },
   {
     "type": "index",
+    "name": "idx_pc_nick_srv_checked",
+    "tbl_name": "proxy_checks",
+    "sql": "CREATE INDEX idx_pc_nick_srv_checked ON proxy_checks(nick, server_name, checked_at, total_ms, error)"
+  },
+  {
+    "type": "index",
+    "name": "idx_pc_nick_srv_id",
+    "tbl_name": "proxy_checks",
+    "sql": "CREATE INDEX idx_pc_nick_srv_id ON proxy_checks(nick, server_name, id)"
+  },
+  {
+    "type": "index",
     "name": "idx_pc_operator",
     "tbl_name": "proxy_checks",
     "sql": "CREATE INDEX idx_pc_operator ON proxy_checks(operator)"
@@ -394,6 +430,48 @@
     "name": "idx_rotlog_modem_started",
     "tbl_name": "rotation_log",
     "sql": "CREATE INDEX idx_rotlog_modem_started ON rotation_log(server_name, nick, started_at)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sales_companies_domain",
+    "tbl_name": "sales_companies",
+    "sql": "CREATE INDEX idx_sales_companies_domain ON sales_companies(domain)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sales_companies_niche",
+    "tbl_name": "sales_companies",
+    "sql": "CREATE INDEX idx_sales_companies_niche ON sales_companies(niche_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sales_companies_status",
+    "tbl_name": "sales_companies",
+    "sql": "CREATE INDEX idx_sales_companies_status ON sales_companies(status)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sales_contacts_company",
+    "tbl_name": "sales_contacts",
+    "sql": "CREATE INDEX idx_sales_contacts_company ON sales_contacts(company_id)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sales_contacts_status",
+    "tbl_name": "sales_contacts",
+    "sql": "CREATE INDEX idx_sales_contacts_status ON sales_contacts(status)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sales_jobs_status",
+    "tbl_name": "sales_jobs",
+    "sql": "CREATE INDEX idx_sales_jobs_status ON sales_jobs(status)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sales_niches_name",
+    "tbl_name": "sales_niches",
+    "sql": "CREATE INDEX idx_sales_niches_name ON sales_niches(name)"
   },
   {
     "type": "index",
@@ -559,6 +637,12 @@
   },
   {
     "type": "table",
+    "name": "api_access_log",
+    "tbl_name": "api_access_log",
+    "sql": "CREATE TABLE api_access_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')), -- UTC caller_type TEXT NOT NULL, -- api_key | portal | reset_link | webhook | auth client_id INTEGER, client_name TEXT, identity TEXT, -- api-key prefix / login / token tail / 'tochka' method TEXT, path TEXT, purpose TEXT, -- human category (RU) status INTEGER, duration_ms INTEGER, ip TEXT, user_agent TEXT )"
+  },
+  {
+    "type": "table",
     "name": "api_usage",
     "tbl_name": "api_usage",
     "sql": "CREATE TABLE api_usage ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT, client_name TEXT, api_key_prefix TEXT, endpoint TEXT, method TEXT, status_code INTEGER, response_time_ms INTEGER, user_agent TEXT, ip TEXT, timestamp TEXT DEFAULT CURRENT_TIMESTAMP, error TEXT )"
@@ -681,7 +765,7 @@
     "type": "table",
     "name": "modem_meta",
     "tbl_name": "modem_meta",
-    "sql": "CREATE TABLE modem_meta ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), is_test_pool INTEGER NOT NULL DEFAULT 0, UNIQUE(server_name, imei) )"
+    "sql": "CREATE TABLE modem_meta ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), is_test_pool INTEGER NOT NULL DEFAULT 0, sim_status TEXT DEFAULT '', reboot_score INTEGER DEFAULT NULL, http_redirect INTEGER NOT NULL DEFAULT 0, band TEXT DEFAULT '', is_locked INTEGER NOT NULL DEFAULT 0, signals_updated_at TEXT DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, UNIQUE(server_name, imei) )"
   },
   {
     "type": "table",
@@ -724,6 +808,30 @@
     "name": "rotation_log",
     "tbl_name": "rotation_log",
     "sql": "CREATE TABLE rotation_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, nick TEXT NOT NULL, old_ip TEXT, new_ip TEXT, started_at TEXT NOT NULL, ended_at TEXT, took_sec REAL, attempt INTEGER DEFAULT 1 )"
+  },
+  {
+    "type": "table",
+    "name": "sales_companies",
+    "tbl_name": "sales_companies",
+    "sql": "CREATE TABLE sales_companies ( id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')), niche_id INTEGER, -- FK sales_niches.id niche_name TEXT NOT NULL DEFAULT '', -- denormalized for convenience company TEXT NOT NULL DEFAULT '', website TEXT NOT NULL DEFAULT '', domain TEXT NOT NULL DEFAULT '', -- normalized host, for dedup country TEXT NOT NULL DEFAULT '', why_fit TEXT NOT NULL DEFAULT '', -- why they likely need proxies fit_score INTEGER NOT NULL DEFAULT 0, -- 0..100 source_url TEXT NOT NULL DEFAULT '', is_seed INTEGER NOT NULL DEFAULT 0, -- 1 = manually added seed status TEXT NOT NULL DEFAULT 'draft', -- draft|approved|rejected|pushed crm_company_id TEXT NOT NULL DEFAULT '', -- Twenty company id after push run_id TEXT NOT NULL DEFAULT '' )"
+  },
+  {
+    "type": "table",
+    "name": "sales_contacts",
+    "tbl_name": "sales_contacts",
+    "sql": "CREATE TABLE sales_contacts ( id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')), company_id INTEGER, -- FK sales_companies.id company TEXT NOT NULL DEFAULT '', -- denormalized name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', -- CEO / Founder / CMO / Head of Growth ... linkedin TEXT NOT NULL DEFAULT '', contact TEXT NOT NULL DEFAULT '', -- general email / form / tg if found source_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft', -- draft|approved|rejected|pushed crm_person_id TEXT NOT NULL DEFAULT '', -- Twenty person id after push run_id TEXT NOT NULL DEFAULT '' )"
+  },
+  {
+    "type": "table",
+    "name": "sales_jobs",
+    "tbl_name": "sales_jobs",
+    "sql": "CREATE TABLE sales_jobs ( id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')), bot TEXT NOT NULL DEFAULT '', -- lookalikes | contacts | push params TEXT NOT NULL DEFAULT '', -- JSON of run params status TEXT NOT NULL DEFAULT 'running', -- running | done | error progress TEXT NOT NULL DEFAULT '', -- human-readable last progress line done INTEGER NOT NULL DEFAULT 0, -- items processed total INTEGER NOT NULL DEFAULT 0, -- items planned result TEXT NOT NULL DEFAULT '', -- JSON summary error TEXT NOT NULL DEFAULT '', started_by TEXT NOT NULL DEFAULT '', -- admin login finished_at TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "sales_niches",
+    "tbl_name": "sales_niches",
+    "sql": "CREATE TABLE sales_niches ( id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')), name TEXT NOT NULL DEFAULT '', -- inferred segment, e.g. \"e-comm price monitoring\" description TEXT NOT NULL DEFAULT '', -- what such companies do why_proxies TEXT NOT NULL DEFAULT '', -- why this niche needs proxies seed_company TEXT NOT NULL DEFAULT '', -- the company that revealed this niche last_scanned_at TEXT, -- last look-alike scan status TEXT NOT NULL DEFAULT 'active' -- active|paused )"
   },
   {
     "type": "table",

@@ -42,32 +42,35 @@ describe('utils.js — decimal SI units (Stage 7 lock)', () => {
     expect(utils.bytesToGb(1e9)).not.toBeCloseTo(0.9313, 3);
   });
 
-  test('fmtGb crosses thresholds at 1e6 and 1e9', () => {
-    expect(utils.fmtGb(0)).toBe('0 B');
-    // KB band: <1e6
-    expect(utils.fmtGb(500000)).toBe('500.0 KB');
-    // MB band: <1e9
-    expect(utils.fmtGb(500e6)).toBe('500.0 MB');
-    // GB band
-    expect(utils.fmtGb(1e9)).toBe('1.0 GB');
-    expect(utils.fmtGb(2.5e9)).toBe('2.5 GB');
-    // Rounded for >=100 GB
-    expect(utils.fmtGb(150e9)).toBe('150 GB');
-    // TB band: >=1000 GB
-    expect(utils.fmtGb(1.5e12)).toBe('1.5 TB');
+  // All formatters render RU units — the UI language is Russian. This lock
+  // trips if anyone reintroduces EN units (that regression shipped in v2.1.0
+  // and left this test red until the test was aligned with the RU UI).
+  test('fmtGb crosses thresholds at 1e6 and 1e9 (RU units)', () => {
+    expect(utils.fmtGb(0)).toBe('0 Б');
+    // КБ band: <1e6
+    expect(utils.fmtGb(500000)).toBe('500.0 КБ');
+    // МБ band: <1e9
+    expect(utils.fmtGb(500e6)).toBe('500.0 МБ');
+    // ГБ band
+    expect(utils.fmtGb(1e9)).toBe('1.0 ГБ');
+    expect(utils.fmtGb(2.5e9)).toBe('2.5 ГБ');
+    // Rounded for >=100 ГБ
+    expect(utils.fmtGb(150e9)).toBe('150 ГБ');
+    // ТБ band: >=1000 ГБ
+    expect(utils.fmtGb(1.5e12)).toBe('1.5 ТБ');
   });
 
-  test('fmtGbShort flips MB→GB at 1e9', () => {
-    expect(utils.fmtGbShort(500e6)).toBe('500 MB');
-    expect(utils.fmtGbShort(1e9)).toBe('1.0 GB');
+  test('fmtGbShort flips МБ→ГБ at 1e9 (RU units)', () => {
+    expect(utils.fmtGbShort(500e6)).toBe('500 МБ');
+    expect(utils.fmtGbShort(1e9)).toBe('1.0 ГБ');
   });
 
-  test('formatBytes auto-unit uses decimal thresholds', () => {
-    expect(utils.formatBytes(0)).toBe('0 B');
-    expect(utils.formatBytes(500)).toBe('500 B');
-    expect(utils.formatBytes(500e3)).toBe('500.0 KB');
-    expect(utils.formatBytes(500e6)).toBe('500.0 MB');
-    expect(utils.formatBytes(2e9)).toBe('2.0 GB');
+  test('formatBytes auto-unit uses decimal thresholds (RU units)', () => {
+    expect(utils.formatBytes(0)).toBe('0 Б');
+    expect(utils.formatBytes(500)).toBe('500 Б');
+    expect(utils.formatBytes(500e3)).toBe('500.0 КБ');
+    expect(utils.formatBytes(500e6)).toBe('500.0 МБ');
+    expect(utils.formatBytes(2e9)).toBe('2.0 ГБ');
   });
 
   test('roundtrip — parseTraffic ↔ bytesToGb agree', () => {
