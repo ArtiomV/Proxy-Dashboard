@@ -51,6 +51,8 @@ function _okJson(r){var ct=(r&&r.headers&&r.headers.get&&r.headers.get('content-
 
 function crmExport(object){
   showToast('Готовлю экспорт CRM…','info');
+  // NB: stays on raw fetch — this endpoint returns a CSV blob and the code
+  // needs Response headers (Content-Disposition), which api() doesn't expose.
   fetch(API+'/api/admin/crm/export?object='+encodeURIComponent(object),{headers:{'X-Auth-Token':authToken}})
     .then(function(r){
       if(!r.ok) return r.json().then(function(d){throw new Error(d.error||('HTTP '+r.status))});
@@ -69,8 +71,7 @@ function crmAutoLogin(){
   var status=document.getElementById('crmStatus');
   if(_crmLoaded&&frame.src.indexOf('crm.')!==-1){return}
   status.textContent='Подключение...';status.style.color='var(--warning)';
-  fetch(API+'/api/admin/crm_token',{headers:{'X-Auth-Token':authToken}})
-  .then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/crm_token').then(function(d){
     if(d.token&&d.url){
       frame.src=d.url+'/verify?loginToken='+d.token;
       _crmLoaded=true;
@@ -124,7 +125,7 @@ function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'li
 
 // ========== AUTH ==========
 function doLogin(){window.location.href='/'}
-function doLogout(){fetch(API+'/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}});authToken='';localStorage.removeItem('pr_admin_token');localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
+function doLogout(){api(API+'/api/logout',{method:'POST'});authToken='';localStorage.removeItem('pr_admin_token');localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
 var _activeBankTab='overview';
@@ -239,8 +240,7 @@ function renderSysHealth(targetId, daysId){
   var c = document.getElementById(targetId || 'sys-content');
   c.innerHTML = _sysLoader();
   var days = _sysDays(daysId);
-  fetch(API + '/api/analytics/modem_health?days='+days, {headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API + '/api/analytics/modem_health?days='+days)
     .then(function(d){
       if(d.error){c.innerHTML=_sysError(d.error);return}
       var s = d.summary || {};
@@ -291,8 +291,7 @@ function renderSysRotations(targetId, daysId){
   var c = document.getElementById(targetId || 'sys-content');
   c.innerHTML = _sysLoader();
   var days = _sysDays(daysId);
-  fetch(API + '/api/analytics/rotations?days='+days, {headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API + '/api/analytics/rotations?days='+days)
     .then(function(d){
       if(d.error){c.innerHTML=_sysError(d.error);return}
       var s = d.summary || {};
@@ -379,8 +378,7 @@ function renderSysIp(targetId, daysId){
   var c = document.getElementById(targetId || 'sys-content');
   c.innerHTML = _sysLoader();
   var days = _sysDays(daysId);
-  fetch(API + '/api/analytics/ip_stats?days='+Math.max(days,7), {headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API + '/api/analytics/ip_stats?days='+Math.max(days,7))
     .then(function(d){
       if(d.error){c.innerHTML=_sysError(d.error);return}
       var s = d.summary || {};
@@ -442,8 +440,7 @@ function renderSysCapacity(targetId, daysId){
   var c = document.getElementById(targetId || 'sys-content');
   c.innerHTML = _sysLoader();
   var days = _sysDays(daysId);
-  fetch(API + '/api/analytics/capacity?days='+Math.max(days,7), {headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API + '/api/analytics/capacity?days='+Math.max(days,7))
     .then(function(d){
       if(d.error){c.innerHTML=_sysError(d.error);return}
       var s = d.summary || {};
@@ -487,8 +484,7 @@ function renderSysCapacity(targetId, daysId){
 function renderSysDashboard(targetId){
   var c = document.getElementById(targetId || 'sys-content');
   c.innerHTML = _sysLoader();
-  fetch(API + '/api/admin/system_health', {headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API + '/api/admin/system_health')
     .then(function(d){
       if(d.error){c.innerHTML=_sysError(d.error);return}
       var h = '';
@@ -734,8 +730,7 @@ function processData(){if(!currentData)return;_initServers(currentData.servers);
 // Fetch /api/analytics/modem_health and index by server|nick for fast lookup
 // from the table cell renderer and the «Здоровье» tab in the detail modal.
 function loadHealthMap(){
-  fetch(API+'/api/analytics/modem_health?days=7',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/analytics/modem_health?days=7')
     .then(function(d){
       if (!d || !d.modems) return;
       var map = {};
@@ -1063,7 +1058,7 @@ function toggleProxyLog(nick,server,el){
   if(_proxyLogCache[cKey]&&Date.now()-_proxyLogCache[cKey].ts<60000){
     renderProxyLog(detailTr,_proxyLogCache[cKey].data);return;
   }
-  fetch(API+'/api/admin/proxy_checks?nick='+encodeURIComponent(nick)+'&days=7',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+  api(API+'/api/admin/proxy_checks?nick='+encodeURIComponent(nick)+'&days=7').then(function(data){
     _proxyLogCache[cKey]={data:data,ts:Date.now()};
     renderProxyLog(detailTr,data);
   }).catch(function(){detailTr.querySelector('.pc-log-wrap').innerHTML='<div style="color:var(--danger);padding:8px 12px;font-size:11px">Ошибка загрузки</div>'});
@@ -1096,8 +1091,7 @@ function runManualProxyCheck(nick,server){
   if(!btn||!resEl)return;
   btn.disabled=true;btn.textContent='Замер...';
   resEl.innerHTML='<div style="text-align:center;padding:12px"><div class="spinner" style="display:inline-block;width:20px;height:20px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite"></div><span style="color:var(--text-2);font-size:11px;margin-left:8px">Проверка прокси...</span></div>';
-  fetch(API+'/api/admin/proxy_check',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({nick:nick,server:server})})
-  .then(function(r){return r.json()})
+  api(API+'/api/admin/proxy_check',{method:'POST',json:{nick:nick,server:server}})
   .then(function(d){
     btn.disabled=false;btn.textContent='Запустить замер';
     if(!d.ok||!d.checks||!d.checks.length){resEl.innerHTML='<div style="color:var(--danger);font-size:11px;padding:4px">'+esc(d.error||'Ошибка')+'</div>';return}
@@ -1118,8 +1112,7 @@ function runManualProxyCheck(nick,server){
 }
 
 function loadInfoProxyData(nick,server){
-  fetch(API+'/api/admin/proxy_checks?nick='+encodeURIComponent(nick)+'&days=7',{headers:{'X-Auth-Token':authToken}})
-  .then(function(r){return r.json()})
+  api(API+'/api/admin/proxy_checks?nick='+encodeURIComponent(nick)+'&days=7')
   .then(function(data){
     var checks=data.checks||[];
     // Render chart
@@ -1160,7 +1153,7 @@ function loadInfoProxyData(nick,server){
 }
 
 // ========== ACTIONS ==========
-function modemAction(btn,url,body,msg,delay){btn.classList.add('loading');btn.disabled=true;fetch(API+url,{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(d){btn.classList.remove('loading');btn.disabled=false;if(d.ok)showToast(msg,'success');else showToast(d.error||'Ошибка','error');setTimeout(loadData,delay||3000)}).catch(function(){btn.classList.remove('loading');btn.disabled=false;showToast('Ошибка сети','error')})}
+function modemAction(btn,url,body,msg,delay){btn.classList.add('loading');btn.disabled=true;api(API+url,{method:'POST',json:body}).then(function(d){btn.classList.remove('loading');btn.disabled=false;if(d.ok)showToast(msg,'success');else showToast(d.error||'Ошибка','error');setTimeout(loadData,delay||3000)}).catch(function(){btn.classList.remove('loading');btn.disabled=false;showToast('Ошибка сети','error')})}
 // In-page confirm/prompt. Native confirm()/prompt() get permanently muted once
 // the user ticks «не показывать диалоги» → they silently return null/false and
 // every action (incl. the reboot password) breaks. These custom modals aren't
@@ -1168,13 +1161,13 @@ function modemAction(btn,url,body,msg,delay){btn.classList.add('loading');btn.di
 function uiDialog(o){return new Promise(function(resolve){var prev=document.getElementById('uiDlg');if(prev)prev.remove();var ov=document.createElement('div');ov.id='uiDlg';ov.className='ui-dlg-ov';ov.tabIndex=-1;var inp=o.input?'<input id="uiDlgInput" class="ui-dlg-input" type="'+(o.password?'password':'text')+'" autocomplete="off"'+(o.placeholder?' placeholder="'+esc(o.placeholder)+'"':'')+'>':'';ov.innerHTML='<div class="ui-dlg">'+(o.title?'<div class="ui-dlg-title">'+esc(o.title)+'</div>':'')+'<div class="ui-dlg-msg">'+String(o.message||'').split('\n').map(esc).join('<br>')+'</div>'+inp+'<div class="ui-dlg-btns"><button type="button" class="ui-dlg-btn" id="uiDlgC">Отмена</button><button type="button" class="ui-dlg-btn '+(o.danger?'ui-dlg-danger':'ui-dlg-ok')+'" id="uiDlgK">'+esc(o.okText||'OK')+'</button></div></div>';document.body.appendChild(ov);var f=document.getElementById('uiDlgInput');setTimeout(function(){(f||ov).focus()},30);var settled=false;function done(v){if(settled)return;settled=true;ov.remove();resolve(v)}document.getElementById('uiDlgC').onclick=function(){done(o.input?null:false)};document.getElementById('uiDlgK').onclick=function(){done(o.input?(f?f.value:''):true)};ov.addEventListener('mousedown',function(e){if(e.target===ov)done(o.input?null:false)});ov.addEventListener('keydown',function(e){if(e.key==='Enter'){e.preventDefault();done(o.input?(f?f.value:''):true)}else if(e.key==='Escape'){e.preventDefault();done(o.input?null:false)}})})}
 function uiConfirm(msg,o){o=o||{};return uiDialog({title:o.title||'Подтверждение',message:msg,okText:o.okText||'Да',danger:o.danger})}
 function uiPrompt(msg,o){o=o||{};return uiDialog({title:o.title||'',message:msg,input:true,password:o.password,placeholder:o.placeholder,okText:o.okText||'OK',danger:o.danger})}
-function rebootServer(srv){uiPrompt('Перезагрузить сервер '+srv+'?\nВсе модемы будут недоступны на время перезагрузки.\n\nВведите пароль для подтверждения:',{title:'Ребут сервера '+srv,password:true,okText:'Перезагрузить',danger:true}).then(function(pwd){if(!pwd)return;showToast('Перезагрузка сервера '+srv+'…','info');fetch(API+'/api/admin/reboot_server',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,password:pwd})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сервер '+srv+' перезагружается','success'):showToast(r.error||'Ошибка','error')}).catch(function(){showToast('Ошибка сети','error')})})}
-function resetCompleteServer(srv){uiPrompt('Сбросить IP на ВСЕХ модемах сервера '+srv+'?\n\nВведите пароль для подтверждения:',{title:'Сброс IP · '+srv,password:true,okText:'Сбросить',danger:true}).then(function(pwd){if(!pwd)return;showToast('Сброс IP всех модемов '+srv+'...','info');fetch(API+'/api/admin/reset_complete',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,password:pwd})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Сброшено '+r.reset+'/'+r.total+' модемов','success'):showToast(r.error||'Ошибка','error');setTimeout(loadData,5000)}).catch(function(){showToast('Ошибка сети','error')})})}
+function rebootServer(srv){uiPrompt('Перезагрузить сервер '+srv+'?\nВсе модемы будут недоступны на время перезагрузки.\n\nВведите пароль для подтверждения:',{title:'Ребут сервера '+srv,password:true,okText:'Перезагрузить',danger:true}).then(function(pwd){if(!pwd)return;showToast('Перезагрузка сервера '+srv+'…','info');api(API+'/api/admin/reboot_server',{method:'POST',json:{serverName:srv,password:pwd}}).then(function(r){r.ok?showToast('Сервер '+srv+' перезагружается','success'):showToast(r.error||'Ошибка','error')}).catch(function(){showToast('Ошибка сети','error')})})}
+function resetCompleteServer(srv){uiPrompt('Сбросить IP на ВСЕХ модемах сервера '+srv+'?\n\nВведите пароль для подтверждения:',{title:'Сброс IP · '+srv,password:true,okText:'Сбросить',danger:true}).then(function(pwd){if(!pwd)return;showToast('Сброс IP всех модемов '+srv+'...','info');api(API+'/api/admin/reset_complete',{method:'POST',json:{serverName:srv,password:pwd}}).then(function(r){r.ok?showToast('Сброшено '+r.reset+'/'+r.total+' модемов','success'):showToast(r.error||'Ошибка','error');setTimeout(loadData,5000)}).catch(function(){showToast('Ошибка сети','error')})})}
 function resetIp(b){uiConfirm('Сбросить IP '+b.dataset.nick+'?').then(function(ok){if(ok)modemAction(b,'/api/admin/reset_ip',{imei:b.dataset.imei,serverName:b.dataset.server},'IP сброшен',3000)})}
 function rebootModem(b){uiConfirm('Ребут '+b.dataset.nick+'?',{okText:'Ребут'}).then(function(ok){if(ok)modemAction(b,'/api/admin/reboot',{imei:b.dataset.imei,serverName:b.dataset.server},'Ребут запущен',5000)})}
 function usbReset(b){uiConfirm('USB-ресет '+b.dataset.nick+'?',{okText:'USB-ресет'}).then(function(ok){if(ok)modemAction(b,'/api/admin/usb_reset',{nick:b.dataset.nick,serverName:b.dataset.server},'USB ресет',10000)})}
-function reconnectAll(srv){uiConfirm('Переподключить отвалившиеся модемы на '+srv+'?\n\nRe-Add всех офлайн-модемов сервера. Рабочие модемы не трогаются.',{title:'Переподключить модемы · '+srv,okText:'Переподключить'}).then(function(ok){if(!ok)return;showToast('Переподключение модемов '+srv+'…','info');fetch(API+'/api/admin/reconnect_all',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Переподключено '+r.reconnected+'/'+r.total+' офлайн-модемов на '+srv,'success',7000):showToast(r.error||'Ошибка','error');setTimeout(loadData,8000)}).catch(function(){showToast('Ошибка сети','error')})})}
-function readdModem(b){uiConfirm('Re-Add (переподключить) модем '+b.dataset.nick+'?',{okText:'Re-Add'}).then(function(ok){if(!ok)return;b.classList.add('loading');b.disabled=true;fetch(API+'/api/admin/readd_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({nick:b.dataset.nick,serverName:b.dataset.server})}).then(function(r){return r.json()}).then(function(d){b.classList.remove('loading');b.disabled=false;if(d.ok){showToast('Re-Add '+b.dataset.nick+': '+(d.message||d.result||'OK'),'success',7000);setTimeout(loadData,8000)}else showToast(d.error||'Ошибка','error')}).catch(function(){b.classList.remove('loading');b.disabled=false;showToast('Ошибка сети','error')})})}
+function reconnectAll(srv){uiConfirm('Переподключить отвалившиеся модемы на '+srv+'?\n\nRe-Add всех офлайн-модемов сервера. Рабочие модемы не трогаются.',{title:'Переподключить модемы · '+srv,okText:'Переподключить'}).then(function(ok){if(!ok)return;showToast('Переподключение модемов '+srv+'…','info');api(API+'/api/admin/reconnect_all',{method:'POST',json:{serverName:srv}}).then(function(r){r.ok?showToast('Переподключено '+r.reconnected+'/'+r.total+' офлайн-модемов на '+srv,'success',7000):showToast(r.error||'Ошибка','error');setTimeout(loadData,8000)}).catch(function(){showToast('Ошибка сети','error')})})}
+function readdModem(b){uiConfirm('Re-Add (переподключить) модем '+b.dataset.nick+'?',{okText:'Re-Add'}).then(function(ok){if(!ok)return;b.classList.add('loading');b.disabled=true;api(API+'/api/admin/readd_modem',{method:'POST',json:{nick:b.dataset.nick,serverName:b.dataset.server}}).then(function(d){b.classList.remove('loading');b.disabled=false;if(d.ok){showToast('Re-Add '+b.dataset.nick+': '+(d.message||d.result||'OK'),'success',7000);setTimeout(loadData,8000)}else showToast(d.error||'Ошибка','error')}).catch(function(){b.classList.remove('loading');b.disabled=false;showToast('Ошибка сети','error')})})}
 
 // ========== DETAIL MODAL ==========
 var currentDetailModem=null;
@@ -1191,8 +1184,7 @@ function switchTab(tab,el){document.querySelectorAll('#modalTabs .modal-tab').fo
 // (cache may be up to 5min old).
 function renderHealthTab(body, m){
   body.innerHTML = '<div style="color:var(--text-3);padding:24px;text-align:center">Загрузка данных о здоровье…</div>';
-  fetch(API + '/api/analytics/modem_health?days=7', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r){ return r.json() })
+  api(API + '/api/analytics/modem_health?days=7')
     .then(function(d){
       if (!d || !d.modems) { body.innerHTML = '<div style="color:var(--danger);padding:24px">Не удалось загрузить данные.</div>'; return }
       var entry = d.modems.find(function(x){ return x.server_name === m.server && x.nick === m.nick });
@@ -1380,12 +1372,11 @@ function _renderSpeed(el,m){var sh='<div style="margin-bottom:10px;text-align:ce
   el.innerHTML=sh;
   loadSpeedHistory(m.server+'_'+m.rawImei)}
 
-function _renderHosts(el,m){var port=m.ports[0];if(!port){el.innerHTML='<div style="color:var(--text-3);padding:12px">Нет порта</div>';return}el.innerHTML='<div style="color:var(--text-3)">Загрузка...</div>';fetch(API+'/api/admin/top_hosts?portId='+encodeURIComponent((port.portID||'').replace(/^S[12]_/,''))+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var entries=[];if(Array.isArray(data))entries=data;else{for(var k in data){if(typeof data[k]!=='object')entries.push({host:k,count:data[k]})}}entries.sort(function(a,b){return(b.count||0)-(a.count||0)});if(!entries.length){el.innerHTML='<div style="color:var(--text-3);padding:12px">Нет данных</div>';return}var maxCnt=entries[0]?(entries[0].count||1):1;var h='<table class="res-table"><thead><tr><th style="width:24px">#</th><th>Домен</th><th style="width:60px">Кат.</th><th style="width:150px">Запросов</th><th style="width:55px">Кол-во</th></tr></thead><tbody>';entries.forEach(function(e,i){var cat=categorize(e.host||'');var pw=pct(e.count||0,maxCnt);h+='<tr><td style="color:var(--text-3);font-size:10px">'+(i+1)+'</td><td class="domain" title="'+esc(e.host||'')+'">'+esc(e.host||'')+'</td><td style="font-size:9px;color:var(--text-3)">'+cat.substring(0,6)+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="count-bar" style="width:'+pw+'%"></div></div></td><td style="font-family:monospace;font-size:10px;color:var(--text-0)">'+(e.count||'-')+'</td></tr>'});el.innerHTML=h+'</tbody></table>'}).catch(function(e){el.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'})}
+function _renderHosts(el,m){var port=m.ports[0];if(!port){el.innerHTML='<div style="color:var(--text-3);padding:12px">Нет порта</div>';return}el.innerHTML='<div style="color:var(--text-3)">Загрузка...</div>';api(API+'/api/admin/top_hosts?portId='+encodeURIComponent((port.portID||'').replace(/^S[12]_/,''))+'&serverName='+m.server).then(function(data){var entries=[];if(Array.isArray(data))entries=data;else{for(var k in data){if(typeof data[k]!=='object')entries.push({host:k,count:data[k]})}}entries.sort(function(a,b){return(b.count||0)-(a.count||0)});if(!entries.length){el.innerHTML='<div style="color:var(--text-3);padding:12px">Нет данных</div>';return}var maxCnt=entries[0]?(entries[0].count||1):1;var h='<table class="res-table"><thead><tr><th style="width:24px">#</th><th>Домен</th><th style="width:60px">Кат.</th><th style="width:150px">Запросов</th><th style="width:55px">Кол-во</th></tr></thead><tbody>';entries.forEach(function(e,i){var cat=categorize(e.host||'');var pw=pct(e.count||0,maxCnt);h+='<tr><td style="color:var(--text-3);font-size:10px">'+(i+1)+'</td><td class="domain" title="'+esc(e.host||'')+'">'+esc(e.host||'')+'</td><td style="font-size:9px;color:var(--text-3)">'+cat.substring(0,6)+'</td><td><div class="hbar-bar-wrap" style="height:10px"><div class="count-bar" style="width:'+pw+'%"></div></div></td><td style="font-family:monospace;font-size:10px;color:var(--text-0)">'+(e.count||'-')+'</td></tr>'});el.innerHTML=h+'</tbody></table>'}).catch(function(e){el.innerHTML='<div style="color:var(--danger)">'+(esc(e.message))+'</div>'})}
 
 function _renderTrafficHeatmap(el,m){
   el.innerHTML='<div style="color:var(--text-3);text-align:center;padding:20px">Загрузка тепловой карты...</div>';
-  fetch(API+'/api/analytics/modem_heatmap?nick='+encodeURIComponent(m.nick)+'&serverName='+encodeURIComponent(m.server)+'&days=7',{headers:{'X-Auth-Token':authToken}})
-  .then(function(r){return r.json()})
+  api(API+'/api/analytics/modem_heatmap?nick='+encodeURIComponent(m.nick)+'&serverName='+encodeURIComponent(m.server)+'&days=7')
   .then(function(data){
     if(!data.ports||!Object.keys(data.ports).length){el.innerHTML='<div style="color:var(--text-3);text-align:center;padding:20px">Нет данных за 7 дней</div>';return;}
     var days=data.days||[],dm=data.day_meta||[];
@@ -1426,7 +1417,7 @@ function _renderTrafficHeatmap(el,m){
 
 function _renderRotationLog(el,m){
   el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Загрузка лога ротации...</div>';
-  fetch(API+'/api/admin/rotation_log?nick='+encodeURIComponent(m.nick)+'&serverName='+m.server,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+  api(API+'/api/admin/rotation_log?nick='+encodeURIComponent(m.nick)+'&serverName='+m.server).then(function(data){
     var entries=Array.isArray(data)?data:(data.log||data.logs||data.data||[]);
     if(!entries.length){el.innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории ротации</div>';return}
     function _fmtRot(v){if(!v||v==='—')return'—';var s=String(v).replace('@',' ').replace('T',' ');var d=new Date(s);if(isNaN(d.getTime())){var p=s.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):?(\d{2})?/);if(p)return p[3]+'.'+p[2]+'.'+p[1]+' '+p[4]+':'+p[5]+(p[6]?':'+p[6]:'');return s}return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
@@ -1571,18 +1562,14 @@ function runSpeedtest(nick,srv,imei){
   _stTick=setInterval(_stElapsed,1000);
   function _stStop(){ if(_stTick){clearInterval(_stTick);_stTick=null;} }
   function _stFinish(d){ _stStop(); _stRender(d); }
-  fetch(API+'/api/admin/speedtest/start',{method:'POST',
-      headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-      body:JSON.stringify({nick:nick,serverName:srv,imei:imei||''})})
-    .then(function(r){ return r.json().catch(function(){ throw new Error('Сервер вернул не JSON (HTTP '+r.status+')') }) })
+  api(API+'/api/admin/speedtest/start',{method:'POST',json:{nick:nick,serverName:srv,imei:imei||''}})
     .then(function(j){
       if(j.error) throw new Error(j.error);
       var deadline=Date.now()+200000;   // 200 с — потолок самого замера
       (function poll(){
         if(Date.now()>deadline){ _stFinish({error:'Замер не завершился за 200 с'}); return; }
         setTimeout(function(){
-          fetch(API+'/api/admin/speedtest/status?jobId='+encodeURIComponent(j.jobId),{headers:{'X-Auth-Token':authToken}})
-            .then(function(r){ return r.json().catch(function(){ throw new Error('Сервер вернул не JSON (HTTP '+r.status+')') }) })
+          api(API+'/api/admin/speedtest/status?jobId='+encodeURIComponent(j.jobId))
             .then(function(st){
               if(st.status==='running'){ poll(); return; }
               if(st.status==='done'){ _stFinish(st.result||{}); return; }
@@ -1619,10 +1606,10 @@ function runSpeedtest(nick,srv,imei){
       body.innerHTML=h;
   }
 }
-function sendSms(imei,srv){var ph=document.getElementById('smsPhone').value,tx=document.getElementById('smsText').value;if(!ph||!tx)return showToast('Заполните поля','error');fetch(API+'/api/admin/send_sms',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,phone:ph,sms:tx})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Отправлено','success'):showToast(d.error,'error')}).catch(function(){showToast('Ошибка','error')})}
-function purgeSms(nick,srv){confirmDialog('Удалить все SMS для модема «'+nick+'»? Это действие нельзя отменить.',function(){fetch(API+'/api/admin/purge_sms',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({nick:nick,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалено','success'):showToast(d.error,'error')}).catch(function(){showToast('Ошибка','error')});},'Удалить','Удалить SMS')}
-function sendUssd(imei,srv){var code=document.getElementById('ussdCode').value;if(!code)return;document.getElementById('ussdResult').innerHTML='<span style="color:var(--text-3)">Отправка...</span>';fetch(API+'/api/admin/send_ussd',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv,ussd:code})}).then(function(r){return r.json()}).then(function(d){var r=d.result||d;document.getElementById('ussdResult').innerHTML='<div class="detail-card"><pre style="font-size:11px;color:var(--text-1);white-space:pre-wrap">'+esc(typeof r==='object'?JSON.stringify(r,null,2):String(r))+'</pre></div>'}).catch(function(e){document.getElementById('ussdResult').innerHTML='<span style="color:var(--danger)">'+(esc(e.message))+'</span>'})}
-function showNewPortForm(imei,srv){fetch(API+'/api/admin/free_ports?serverName='+srv,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){var fp=Array.isArray(data)?data:data.free_tcp_ports||[];var h='<div class="detail-card" style="margin-top:8px"><h4>Новый порт</h4><div class="form-row"><div class="form-group"><label>Port ID</label><input class="form-input" id="npPid" value="port'+rnd(8)+'"></div><div class="form-group"><label>Имя</label><input class="form-input" id="npName"></div></div><div class="form-group"><label>HTTP / SOCKS порты</label><input class="form-input" id="npHttp" value="авто" readonly style="opacity:.6;cursor:not-allowed"><input type="hidden" id="npSocks" value="auto"><div style="font-size:11px;color:var(--text-3);margin-top:4px">Сервер назначит корректную пару портов автоматически</div></div><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="npLogin" value="'+rnd(8)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="npPass" value="'+rnd(8)+'"></div></div><button class="btn btn-primary" onclick="createPort(\''+imei+'\',\''+srv+'\')">Создать</button></div>';document.getElementById('newPortForm').innerHTML=h}).catch(function(e){showToast('Ошибка загрузки портов: '+esc(e.message),'error')})}
+function sendSms(imei,srv){var ph=document.getElementById('smsPhone').value,tx=document.getElementById('smsText').value;if(!ph||!tx)return showToast('Заполните поля','error');api(API+'/api/admin/send_sms',{method:'POST',json:{imei:imei,serverName:srv,phone:ph,sms:tx}}).then(function(d){d.ok?showToast('Отправлено','success'):showToast(d.error,'error')}).catch(function(){showToast('Ошибка','error')})}
+function purgeSms(nick,srv){confirmDialog('Удалить все SMS для модема «'+nick+'»? Это действие нельзя отменить.',function(){api(API+'/api/admin/purge_sms',{method:'POST',json:{nick:nick,serverName:srv}}).then(function(d){d.ok?showToast('Удалено','success'):showToast(d.error,'error')}).catch(function(){showToast('Ошибка','error')});},'Удалить','Удалить SMS')}
+function sendUssd(imei,srv){var code=document.getElementById('ussdCode').value;if(!code)return;document.getElementById('ussdResult').innerHTML='<span style="color:var(--text-3)">Отправка...</span>';api(API+'/api/admin/send_ussd',{method:'POST',json:{imei:imei,serverName:srv,ussd:code}}).then(function(d){var r=d.result||d;document.getElementById('ussdResult').innerHTML='<div class="detail-card"><pre style="font-size:11px;color:var(--text-1);white-space:pre-wrap">'+esc(typeof r==='object'?JSON.stringify(r,null,2):String(r))+'</pre></div>'}).catch(function(e){document.getElementById('ussdResult').innerHTML='<span style="color:var(--danger)">'+(esc(e.message))+'</span>'})}
+function showNewPortForm(imei,srv){api(API+'/api/admin/free_ports?serverName='+srv).then(function(data){var fp=Array.isArray(data)?data:data.free_tcp_ports||[];var h='<div class="detail-card" style="margin-top:8px"><h4>Новый порт</h4><div class="form-row"><div class="form-group"><label>Port ID</label><input class="form-input" id="npPid" value="port'+rnd(8)+'"></div><div class="form-group"><label>Имя</label><input class="form-input" id="npName"></div></div><div class="form-group"><label>HTTP / SOCKS порты</label><input class="form-input" id="npHttp" value="авто" readonly style="opacity:.6;cursor:not-allowed"><input type="hidden" id="npSocks" value="auto"><div style="font-size:11px;color:var(--text-3);margin-top:4px">Сервер назначит корректную пару портов автоматически</div></div><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="npLogin" value="'+rnd(8)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="npPass" value="'+rnd(8)+'"></div></div><button class="btn btn-primary" onclick="createPort(\''+imei+'\',\''+srv+'\')">Создать</button></div>';document.getElementById('newPortForm').innerHTML=h}).catch(function(e){showToast('Ошибка загрузки портов: '+esc(e.message),'error')})}
 function createPort(imei,srv){
   var pn=document.getElementById('npName').value;
   if(pn.length<4){showToast('Имя порта должно быть не менее 4 символов','error');return}
@@ -1633,15 +1620,14 @@ function createPort(imei,srv){
     socks_port:document.getElementById('npSocks').value,
     proxy_login:document.getElementById('npLogin').value,
     proxy_password:document.getElementById('npPass').value};
-  fetch(API+'/api/admin/store_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/store_port',{method:'POST',json:d})
     .then(function(r){
       if(!r.ok){showToast(r.error||'Ошибка','error');return}
       if(r.applied){
         showToast('Порт создан: HTTP '+(r.http_port||'?')+' · SOCKS '+(r.socks_port||'?')+' · логин '+(r.proxy_login||'?')+' (id '+r.portId+')','success');
       } else {
         // Fallback: try apply once more with the real portID returned from server
-        fetch(API+'/api/admin/apply_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:r.portId,serverName:srv})})
+        api(API+'/api/admin/apply_port',{method:'POST',json:{portId:r.portId,serverName:srv}})
           .then(function(){showToast('Порт создан и применён (id: '+r.portId+')','success')})
           .catch(function(e){showToast('Порт сохранён, но не применён: '+esc(e.message),'warning')});
       }
@@ -1677,18 +1663,17 @@ function doMovePort(pid,srv,btn){
   var newIMEI=document.getElementById('movePortTarget').value;
   if(!newIMEI)return showToast('Выберите модем','error');
   btn.disabled=true;btn.textContent='Перекидываю...';
-  fetch(API+'/api/admin/move_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,portID:pid,newIMEI:newIMEI})})
-  .then(function(r){return r.json()})
+  api(API+'/api/admin/move_port',{method:'POST',json:{serverName:srv,portID:pid,newIMEI:newIMEI}})
   .then(function(d){
     if(d.ok){showToast('Порт перекинут','success');btn.closest('div[style*=fixed]').remove();setTimeout(loadData,3000);}
     else showToast(d.error||'Ошибка','error');
     btn.disabled=false;btn.textContent='Перекинуть';
   }).catch(function(e){showToast(esc(e.message),'error');btn.disabled=false;btn.textContent='Перекинуть';});
 }
-function purgePort(pid,srv){confirmDialog('Удалить порт «'+pid+'»? Это действие нельзя отменить.',function(){fetch(API+'/api/admin/purge_port',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({portId:pid,serverName:srv})}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');setTimeout(loadData,2000)}).catch(function(e){showToast(esc(e.message),'error')});},'Удалить','Удалить порт')}
+function purgePort(pid,srv){confirmDialog('Удалить порт «'+pid+'»? Это действие нельзя отменить.',function(){api(API+'/api/admin/purge_port',{method:'POST',json:{portId:pid,serverName:srv}}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');setTimeout(loadData,2000)}).catch(function(e){showToast(esc(e.message),'error')});},'Удалить','Удалить порт')}
 function switchSimTab(t){['sms','ussd'].forEach(function(n){var tab=document.getElementById('simTab_'+n);var cnt=document.getElementById('simContent_'+n);if(tab){tab.style.borderBottomColor=n===t?'var(--accent)':'transparent';tab.style.color=n===t?'var(--accent)':'var(--text-2)'}if(cnt)cnt.style.display=n===t?'':'none'})}
-function saveModemSettingsNew(imei,srv){var rotSel=document.getElementById('msAutoRot');var rotVal=rotSel?parseInt(rotSel.value)||0:0;fetch(API+'/api/admin/store_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:srv,IMEI:imei,name:document.getElementById('msNick').value,PHONE_NUMBER:document.getElementById('msPhone').value,AUTO_IP_ROTATION:String(rotVal),TARGET_MODE:document.getElementById('msMode').value,NOTES:document.getElementById('msNotes').value})}).then(function(r){return r.json()}).then(function(r){if(r.ok){showToast('Сохранено, применяю...','success');fetch(API+'/api/admin/apply_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv})}).then(function(r2){return r2.json()}).then(function(r2){r2.ok?showToast('Применено ✓','success'):showToast('Сохранено, но не применено: '+(r2.error||''),'warning');setTimeout(loadData,3000)}).catch(function(e){showToast('Сохранено, но не применено: '+esc(e.message),'warning');setTimeout(loadData,3000)})}else{showToast(r.error||'Ошибка','error')}}).catch(function(e){showToast('Ошибка: '+esc(e.message),'error')})}
-function applyModemSettings(imei,srv){fetch(API+'/api/admin/apply_modem',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:srv})}).then(function(r){return r.json()}).then(function(r){r.ok?showToast('Применено','success'):showToast(r.error||'Ошибка','error');setTimeout(loadData,3000)}).catch(function(e){showToast(esc(e.message),'error')})}
+function saveModemSettingsNew(imei,srv){var rotSel=document.getElementById('msAutoRot');var rotVal=rotSel?parseInt(rotSel.value)||0:0;api(API+'/api/admin/store_modem',{method:'POST',json:{serverName:srv,IMEI:imei,name:document.getElementById('msNick').value,PHONE_NUMBER:document.getElementById('msPhone').value,AUTO_IP_ROTATION:String(rotVal),TARGET_MODE:document.getElementById('msMode').value,NOTES:document.getElementById('msNotes').value}}).then(function(r){if(r.ok){showToast('Сохранено, применяю...','success');api(API+'/api/admin/apply_modem',{method:'POST',json:{imei:imei,serverName:srv}}).then(function(r2){r2.ok?showToast('Применено ✓','success'):showToast('Сохранено, но не применено: '+(r2.error||''),'warning');setTimeout(loadData,3000)}).catch(function(e){showToast('Сохранено, но не применено: '+esc(e.message),'warning');setTimeout(loadData,3000)})}else{showToast(r.error||'Ошибка','error')}}).catch(function(e){showToast('Ошибка: '+esc(e.message),'error')})}
+function applyModemSettings(imei,srv){api(API+'/api/admin/apply_modem',{method:'POST',json:{imei:imei,serverName:srv}}).then(function(r){r.ok?showToast('Применено','success'):showToast(r.error||'Ошибка','error');setTimeout(loadData,3000)}).catch(function(e){showToast(esc(e.message),'error')})}
 function downloadVpn(pid,srv){window.open(API+'/api/admin/vpn_profile?portId='+encodeURIComponent(pid)+'&serverName='+srv+'&token='+authToken)}
 function rnd(n){var c='abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789',r='';for(var i=0;i<n;i++)r+=c[Math.floor(Math.random()*c.length)];return r}
 
@@ -1707,7 +1692,7 @@ function loadSpeedHistory(key){
   }
   if(!area)return;
   area.innerHTML='<div style="color:var(--text-3);padding:8px">Загрузка...</div>';
-  fetch(API+'/api/admin/speedtest_history',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+  api(API+'/api/admin/speedtest_history').then(function(data){
     var entries=data[key]||[];
     if(!entries.length){area.innerHTML='<div style="color:var(--text-3);padding:8px">Нет истории для ключа «'+esc(key)+'»</div>';return}
     var h='<table class="log-table"><thead><tr><th>Дата</th><th>Download</th><th>Upload</th><th>Ping</th></tr></thead><tbody>';
@@ -2236,8 +2221,8 @@ function renderAccSubTab(name){
     if(!chartEl)return;
     if(!window._dailyTrafficCache){
       chartEl.parentElement.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--text-3);font-size:12px">Загрузка графика...</div>';
-      fetch(API+'/api/admin/daily_traffic',{headers:{'X-Auth-Token':authToken}})
-        .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+      api(API+'/api/admin/daily_traffic')
+        .then(function(d){if(d&&d.__status>=400)throw new Error('HTTP '+d.__status);return d})
         .then(function(data){
           window._dailyTrafficCache=data;
           // restore canvas
@@ -2285,8 +2270,7 @@ function loadAnalyticsCategoryCard(elId){
   var el=document.getElementById(elId);
   if(!el)return;
   if(_topHostsCacheGlobal){renderAnalyticsCategoryCard(_topHostsCacheGlobal,el);return;}
-  fetch(API+'/api/admin/top_hosts_aggregated',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/top_hosts_aggregated')
     .then(function(d){_topHostsCacheGlobal=d.data||{};renderAnalyticsCategoryCard(_topHostsCacheGlobal,el);})
     .catch(function(){var el2=document.getElementById(elId);if(el2)el2.innerHTML='<div style="color:var(--text-3);font-size:11px">Нет данных</div>';});
 }
@@ -2318,8 +2302,8 @@ function renderAnalyticsCategoryCard(data,el){
 var _trendData=null;
 function loadTrendData(sfx){
   if(_trendData){renderTrendCard(_trendData,sfx);return;}
-  fetch(API+'/api/analytics/monthly_traffic?months=6',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+  api(API+'/api/analytics/monthly_traffic?months=6')
+    .then(function(d){if(d&&d.__status>=400)throw new Error('HTTP '+d.__status);return d})
     .then(function(data){_trendData=data;renderTrendCard(data,sfx);})
     .catch(function(){});
 }
@@ -2512,8 +2496,8 @@ function loadHeatmapData(ctx){
   if(ctx.cache[key]){renderHeatmap(ctx.cache[key],ctx);return;}
   var g=document.getElementById(ctx.grid);
   if(g)g.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>';
-  fetch(API+'/api/analytics/heatmap?view='+ctx.view+'&id='+encodeURIComponent(ctx.id)+'&days=7',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+  api(API+'/api/analytics/heatmap?view='+ctx.view+'&id='+encodeURIComponent(ctx.id)+'&days=7')
+    .then(function(d){if(d&&d.__status>=400)throw new Error('HTTP '+d.__status);return d})
     .then(function(data){ctx.cache[key]=data;renderHeatmap(data,ctx);})
     .catch(function(e){var g=document.getElementById(ctx.grid);if(g)g.innerHTML='<div style="padding:20px;color:var(--danger);font-size:12px">Ошибка: '+(esc(e.message))+'</div>';});
 }
@@ -2773,8 +2757,8 @@ function setLatencyDays(){ /* deprecated — fixed 30-day window */ }
 function loadLatencyStats(){
   var key=_latencyView+'|'+_latencyId+'|'+_latencyDays;
   if(_latencyCache[key]){renderLatencyChart(_latencyCache[key]);return;}
-  fetch(API+'/api/analytics/latency_stats?view='+_latencyView+'&id='+encodeURIComponent(_latencyId)+'&days='+_latencyDays,{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+  api(API+'/api/analytics/latency_stats?view='+_latencyView+'&id='+encodeURIComponent(_latencyId)+'&days='+_latencyDays)
+    .then(function(d){if(d&&d.__status>=400)throw new Error('HTTP '+d.__status);return d})
     .then(function(data){_latencyCache[key]=data;renderLatencyChart(data);})
     .catch(function(e){var el=document.getElementById('latencySummary');if(el)el.innerHTML='<div style="color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>';});
 }
@@ -3087,8 +3071,8 @@ function shiftLatencyDate(dir){
 function loadLatencyDay(){
   var key=_latencyView+'|'+_latencyId+'|'+_latencyDate;
   if(_latencyDayCache[key]){renderLatencyScatter(_latencyDayCache[key]);return;}
-  fetch(API+'/api/analytics/latency_day?view='+_latencyView+'&id='+encodeURIComponent(_latencyId)+'&date='+_latencyDate,{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+  api(API+'/api/analytics/latency_day?view='+_latencyView+'&id='+encodeURIComponent(_latencyId)+'&date='+_latencyDate)
+    .then(function(d){if(d&&d.__status>=400)throw new Error('HTTP '+d.__status);return d})
     .then(function(data){_latencyDayCache[key]=data;renderLatencyScatter(data);})
     .catch(function(e){var el=document.getElementById('latencySummary');if(el)el.innerHTML='<div style="color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>';});
 }
@@ -3357,8 +3341,7 @@ function onDailyModeChange(){
   }
   if(mode==='modems'&&!window._modemTrafficCache&&!window._modemFetchInProgress){
     window._modemFetchInProgress=true;
-    fetch(API+'/api/admin/daily_traffic?detail=modems',{headers:{'X-Auth-Token':authToken}})
-      .then(function(r){return r.json()})
+    api(API+'/api/admin/daily_traffic?detail=modems')
       .then(function(d){
         window._dailyTrafficCache=d.clients;
         window._modemTrafficCache=d.modems;
@@ -3713,9 +3696,7 @@ function renderFinancesTabNew() {
   for (var k in _finCharts) { try { _finCharts[k].destroy(); } catch (_) {} }
   _finCharts = {};
 
-  fetch(API + '/api/admin/finance_dashboard?period=' + encodeURIComponent(_finCurrentPeriod),
-    { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/finance_dashboard?period=' + encodeURIComponent(_finCurrentPeriod))
     .then(function(d) {
       if (d.error) { c.innerHTML = '<div style="color:var(--danger);padding:20px">' + esc(d.error) + '</div>'; return; }
       _renderFinanceDashboard(c, d);
@@ -3875,9 +3856,7 @@ function _renderFinanceDashboard(c, d) {
 
 // ===== Costs modal =====
 function openFinanceCostsModal() {
-  fetch(API + '/api/admin/monthly_costs?period=' + encodeURIComponent(_finCurrentPeriod),
-    { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r){return r.json()})
+  api(API + '/api/admin/monthly_costs?period=' + encodeURIComponent(_finCurrentPeriod))
     .then(function(d){ _renderCostsModal(d); })
     .catch(function(e){ showToast(e.message, 'error') });
 }
@@ -3947,12 +3926,7 @@ function saveCostsModal() {
     if (!isFinite(v) || v <= 0) return;
     items.push({ category: inp.dataset.cat, subkey: inp.dataset.key || null, amount: v });
   });
-  fetch(API + '/api/admin/monthly_costs', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-    body: JSON.stringify({ period: _finCurrentPeriod, items: items })
-  })
-    .then(function(r){return r.json()})
+  api(API + '/api/admin/monthly_costs',{method:'POST',json:{ period: _finCurrentPeriod, items: items }})
     .then(function(d){
       if (d.ok) {
         showToast('Затраты сохранены: ' + d.saved + ' позиций', 'success');
@@ -3973,7 +3947,7 @@ function loadTopHosts(forceRefresh){
   var opts=forceRefresh?{method:'POST',headers:{'X-Auth-Token':authToken}}:{headers:{'X-Auth-Token':authToken}};
   fetch(url,opts).then(function(r){return r.json()}).then(function(result){
     if(forceRefresh){
-      return fetch(API+'/api/admin/top_hosts_aggregated',{headers:{'X-Auth-Token':authToken}}).then(function(r2){return r2.json()}).catch(function(){return {data:{}};});
+      return api(API+'/api/admin/top_hosts_aggregated').catch(function(){return {data:{}};});
     }
     return result;
   }).then(function(cache){
@@ -4119,14 +4093,14 @@ function clearBulkSel(){
 function bulkResetIp(){
   var items=Object.keys(window._bulkSel);if(!items.length)return;
   confirmDialog('Сбросить IP для '+items.length+' модемов?',function(){
-    var promises=items.map(function(imei){var s=window._bulkSel[imei];return fetch(API+'/api/admin/reset_ip',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:s.server})}).then(function(r){return r.json()})});
+    var promises=items.map(function(imei){var s=window._bulkSel[imei];return api(API+'/api/admin/reset_ip',{method:'POST',json:{imei:imei,serverName:s.server}})});
     Promise.all(promises).then(function(){showToast('Сброс IP отправлен для '+items.length+' модемов','success');clearBulkSel();setTimeout(loadData,3000)}).catch(function(e){showToast('Ошибка: '+esc(e.message),'error')});
   },'Сбросить','Массовый сброс IP');
 }
 function bulkReboot(){
   var items=Object.keys(window._bulkSel);if(!items.length)return;
   confirmDialog('Перезагрузить '+items.length+' модемов?',function(){
-    var promises=items.map(function(imei){var s=window._bulkSel[imei];return fetch(API+'/api/admin/reboot',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({imei:imei,serverName:s.server})}).then(function(r){return r.json()})});
+    var promises=items.map(function(imei){var s=window._bulkSel[imei];return api(API+'/api/admin/reboot',{method:'POST',json:{imei:imei,serverName:s.server}})});
     Promise.all(promises).then(function(){showToast('Ребут отправлен для '+items.length+' модемов','success');clearBulkSel();setTimeout(loadData,5000)}).catch(function(e){showToast('Ошибка: '+esc(e.message),'error')});
   },'Перезагрузить','Массовый ребут',true);
 }
@@ -4139,7 +4113,7 @@ function bulkDelete(){
     // финальное состояние; так удаление пачки не тянется по одному запросу.
     var ok=0,fail=0;
     Promise.all(items.map(function(imei){var s=window._bulkSel[imei];
-      return fetch(API+'/api/admin/modems/'+encodeURIComponent(s.server)+'/'+encodeURIComponent('meta_'+imei)+'?nick='+encodeURIComponent(s.nick||''),{method:'DELETE',headers:{'X-Auth-Token':authToken}})
+      return api(API+'/api/admin/modems/'+encodeURIComponent(s.server)+'/'+encodeURIComponent('meta_'+imei)+'?nick='+encodeURIComponent(s.nick||''),{method:'DELETE'})
         .then(function(r){if(r.ok)ok++;else fail++;}).catch(function(){fail++;});
     })).then(function(){
       showToast('Удалено модемов: '+ok+(fail?(' · ошибок: '+fail):''),fail&&!ok?'error':'success');
@@ -4189,8 +4163,7 @@ function bulkOsSpoof(){
   document.getElementById('bulkOsBtn').onclick=function(){
     var os=document.getElementById('bulkOsSelect').value;
     var btn=this;btn.disabled=true;btn.textContent='Применяю...';
-    fetch(API+'/api/admin/bulk_os_spoof',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({ports:portsList,os:os})})
-    .then(function(r){return r.json()})
+    api(API+'/api/admin/bulk_os_spoof',{method:'POST',json:{ports:portsList,os:os}})
     .then(function(d){
       if(d.ok){showToast('OS Spoof установлен: '+d.updated+' портов'+(d.failed?' ('+d.failed+' ошибок)':''),'success');overlay.remove();clearBulkSel();setTimeout(loadData,3000)}
       else{showToast(d.error||'Ошибка','error');btn.disabled=false;btn.textContent='Применить'}
@@ -4228,8 +4201,7 @@ function bulkRotation(){
   document.getElementById('bulkRotBtn').onclick=function(){
     var rot=document.getElementById('bulkRotSelect').value;
     var btn=this;btn.disabled=true;btn.textContent='Применяю...';
-    fetch(API+'/api/admin/bulk_rotation',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({modems:modems,rotation:parseInt(rot)})})
-    .then(function(r){return r.json()})
+    api(API+'/api/admin/bulk_rotation',{method:'POST',json:{modems:modems,rotation:parseInt(rot)}})
     .then(function(d){
       if(d.ok){showToast('Ротация установлена: '+d.updated+' модемов'+(d.failed?' ('+d.failed+' ошибок)':''),'success');overlay.remove();clearBulkSel();setTimeout(loadData,3000)}
       else{showToast(d.error||'Ошибка','error');btn.disabled=false;btn.textContent='Применить'}
@@ -4248,8 +4220,7 @@ function bulkProxyCheck(){
   if(!modems.length){showToast('Нет модемов для проверки','error');return}
   confirmDialog('Замерить задержку для '+modems.length+' модемов?\nМожет занять до '+Math.ceil(modems.length/10*15)+' сек.',function(){
     showToast('Замер задержки для '+modems.length+' модемов...','info');
-    fetch(API+'/api/admin/proxy_check',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({modems:modems})})
-    .then(function(r){return r.json()})
+    api(API+'/api/admin/proxy_check',{method:'POST',json:{modems:modems}})
     .then(function(d){
       if(!d.ok){showToast(d.error||'Ошибка','error');return}
       var checks=d.checks||[];var ok=0,err=0;
@@ -4335,8 +4306,8 @@ function timeAgo(ts){
 }
 // Light poll: just the count, no payloads. Updates the header badge.
 function refreshNotifBadge(){
-  fetch(API+'/api/admin/notifications/badge',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.ok?r.json():null})
+  api(API+'/api/admin/notifications/badge')
+    .then(function(d){return (d&&d.__status>=400)?null:d})
     .then(function(d){
       if(!d)return;
       var unread=Number(d.unread)||0,crit=Number(d.unread_critical)||0;
@@ -4351,8 +4322,8 @@ function refreshNotifBadge(){
 // Full fetch, called when the panel opens or after a mutation.
 function refreshNotifPanel(){
   var url=API+'/api/admin/notifications?filter='+encodeURIComponent(window._notifFilter)+'&limit=200';
-  fetch(url,{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json()})
+  api(url)
+    .then(function(d){if(d&&d.__status>=400)throw new Error('HTTP '+d.__status);return d})
     .then(function(d){
       window._notifs=Array.isArray(d.notifications)?d.notifications:[];
       window._notifLastFetchAt=Date.now();
@@ -4411,7 +4382,7 @@ function onNotifClick(ev, id){
   // Mark read (optimistic) + persist
   if(!n.read_at){
     n.read_at=new Date().toISOString();
-    fetch(API+'/api/admin/notifications/'+id+'/read',{method:'POST',headers:{'X-Auth-Token':authToken}}).catch(function(){});
+    api(API+'/api/admin/notifications/'+id+'/read',{method:'POST'}).catch(function(){});
   }
   // Navigate to source. Close panel first so the UI shift is visible.
   var p=document.getElementById('notifPanel');if(p)p.style.display='none';
@@ -4451,7 +4422,7 @@ function dismissNotif(id){
   // Optimistic remove
   window._notifs=(window._notifs||[]).filter(function(n){return n.id!==id});
   renderNotifPanel();
-  fetch(API+'/api/admin/notifications/'+id+'/dismiss',{method:'POST',headers:{'X-Auth-Token':authToken}})
+  api(API+'/api/admin/notifications/'+id+'/dismiss',{method:'POST'})
     .finally(refreshNotifBadge);
 }
 function toggleNotifPanel(){
@@ -4461,12 +4432,12 @@ function toggleNotifPanel(){
   if(!open)refreshNotifPanel();
 }
 function markAllNotifRead(){
-  fetch(API+'/api/admin/notifications/read-all',{method:'POST',headers:{'X-Auth-Token':authToken}})
+  api(API+'/api/admin/notifications/read-all',{method:'POST'})
     .then(function(){ refreshNotifPanel(); refreshNotifBadge(); })
     .catch(function(){});
 }
 function dismissReadOlderNotif(){
-  fetch(API+'/api/admin/notifications/dismiss-read-older',{method:'POST',headers:{'X-Auth-Token':authToken}})
+  api(API+'/api/admin/notifications/dismiss-read-older',{method:'POST'})
     .then(function(){ refreshNotifPanel(); refreshNotifBadge(); })
     .catch(function(){});
 }
@@ -4489,8 +4460,8 @@ if(typeof window!=='undefined'){
 // startup so colors are stable from the first render.
 function _loadProxyCheckThresholds(){
   if(!authToken)return;
-  fetch(API+'/api/admin/settings',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.ok?r.json():null})
+  api(API+'/api/admin/settings')
+    .then(function(d){return (d&&d.__status>=400)?null:d})
     .then(function(s){
       if(!s)return;
       var warn=Number(s.proxy_check_warn_ms);
@@ -4519,8 +4490,7 @@ var _auditFilter='all';
 function loadAuditLog(){
   var el=document.getElementById('auditLogTable');if(!el)return;
   el.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div>';
-  fetch(API+'/api/admin/audit_log?limit=500',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/audit_log?limit=500')
     .then(function(d){_auditAllEntries=d.entries||[];renderAuditLog()})
     .catch(function(e){var el2=document.getElementById('auditLogTable');if(el2)el2.innerHTML='<div style="color:var(--danger);padding:12px;font-size:12px">Ошибка: '+esc(e.message)+'</div>'});
 }
@@ -4581,8 +4551,7 @@ function loadSystemLog(){
   var url=API+'/api/admin/system_log?limit=500&from='+encodeURIComponent(from);
   if(cat)url+='&category='+encodeURIComponent(cat);
   if(lvl)url+='&level='+encodeURIComponent(lvl);
-  fetch(url,{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(url)
     .then(function(d){_syslogEntries=d.entries||[];renderSystemLog()})
     .catch(function(e){el.innerHTML='<div style="color:var(--danger);padding:12px;font-size:12px">Ошибка: '+esc(e.message)+'</div>'});
 }
@@ -4714,11 +4683,11 @@ function showClientForm(data){document.getElementById('clientFormId').value=data
 function closeClientModal(){document.getElementById('clientModal').classList.remove('show');currentOpsClientId=null;}
 document.getElementById('clientModal').addEventListener('click',function(e){if(e.target===this)closeClientModal()});
 function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
-function saveClient(){var id=document.getElementById('clientFormId').value;var maxDebtRaw=document.getElementById('cfMaxDebt').value;var slaUpRaw=document.getElementById('cfSlaUptime').value,slaLatRaw=document.getElementById('cfSlaLatency').value,slaErrRaw=document.getElementById('cfSlaErrPct').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,contractDate:document.getElementById('cfContractDate').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked,billingPaused:document.getElementById('cfBillingPaused').checked,allowDebt:document.getElementById('cfAllowDebt').checked,maxDebt:maxDebtRaw!==''?parseFloat(maxDebtRaw):undefined,slaUptimePct:slaUpRaw!==''?parseFloat(slaUpRaw):undefined,slaMaxLatencyMs:slaLatRaw!==''?parseInt(slaLatRaw):undefined,slaMaxErrorPct:slaErrRaw!==''?parseFloat(slaErrRaw):undefined,slaAutoCredit:document.getElementById('cfSlaAutoCredit').checked};if(!d.name||!d.portName||!d.login||(!id&&!d.password))return showToast('Заполните обязательные поля','error');fetch(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)}).then(function(r){return r.json()}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
-function deleteClient(id,name){confirmDialog('Удалить клиента «'+name+'»? Это действие нельзя отменить.',function(){fetch(API+'/api/admin/clients/'+id,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()}).catch(function(e){showToast(esc(e.message),'error')});},'Удалить','Удалить клиента')}
+function saveClient(){var id=document.getElementById('clientFormId').value;var maxDebtRaw=document.getElementById('cfMaxDebt').value;var slaUpRaw=document.getElementById('cfSlaUptime').value,slaLatRaw=document.getElementById('cfSlaLatency').value,slaErrRaw=document.getElementById('cfSlaErrPct').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,contractDate:document.getElementById('cfContractDate').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked,billingPaused:document.getElementById('cfBillingPaused').checked,allowDebt:document.getElementById('cfAllowDebt').checked,maxDebt:maxDebtRaw!==''?parseFloat(maxDebtRaw):undefined,slaUptimePct:slaUpRaw!==''?parseFloat(slaUpRaw):undefined,slaMaxLatencyMs:slaLatRaw!==''?parseInt(slaLatRaw):undefined,slaMaxErrorPct:slaErrRaw!==''?parseFloat(slaErrRaw):undefined,slaAutoCredit:document.getElementById('cfSlaAutoCredit').checked};if(!d.name||!d.portName||!d.login||(!id&&!d.password))return showToast('Заполните обязательные поля','error');api(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',json:d}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
+function deleteClient(id,name){confirmDialog('Удалить клиента «'+name+'»? Это действие нельзя отменить.',function(){api(API+'/api/admin/clients/'+id,{method:'DELETE'}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()}).catch(function(e){showToast(esc(e.message),'error')});},'Удалить','Удалить клиента')}
 
 function impersonateClient(id,name){
-  fetch(API+'/api/admin/impersonate/'+id,{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/impersonate/'+id,{method:'POST'}).then(function(d){
     if(d.ok&&d.token){
       var url=window.location.origin+'/?impersonate='+encodeURIComponent(d.token);
       window.open(url,'_blank');
@@ -4746,8 +4715,7 @@ function openAssignModemModal(clientId, clientPortName) {
   overlay.addEventListener('click', function(e) { if (e.target === overlay) overlay.remove(); });
 
   // Fetch available modems
-  fetch(API + '/api/admin/available_modems', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/available_modems')
     .then(function(data) {
       window._assignModemData = { modems: data.modems || [], clientPortName: clientPortName };
       renderAssignModemList();
@@ -4790,8 +4758,7 @@ function filterAssignModemList() { renderAssignModemList(); }
 
 function assignModem(serverName, portID, newPortName, nick) {
   if (!confirm('Назначить ' + nick + ' клиенту ' + newPortName + '?')) return;
-  fetch(API + '/api/admin/assign_modem', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ serverName: serverName, portID: portID, newPortName: newPortName }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/assign_modem',{method:'POST',json:{ serverName: serverName, portID: portID, newPortName: newPortName }})
     .then(function(d) {
       if (d.ok) {
         showToast(nick + ' назначен', 'success');
@@ -4805,13 +4772,11 @@ function assignModem(serverName, portID, newPortName, nick) {
 function unassignModem(nick, clientPortName) {
   if (!confirm('Отвязать ' + nick + ' от клиента?')) return;
   // Find modem portID by nick
-  fetch(API + '/api/admin/available_modems', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/available_modems')
     .then(function(data) {
       var modem = (data.modems || []).find(function(m) { return m.nick === nick && m.portName === clientPortName; });
       if (!modem) return showToast('Модем не найден', 'error');
-      fetch(API + '/api/admin/assign_modem', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ serverName: modem.server, portID: modem.portID, newPortName: '' }) })
-        .then(function(r) { return r.json(); })
+      api(API + '/api/admin/assign_modem',{method:'POST',json:{ serverName: modem.server, portID: modem.portID, newPortName: '' }})
         .then(function(d) {
           if (d.ok) { showToast(nick + ' отвязан', 'success'); loadData(); }
           else showToast(d.error || 'Ошибка', 'error');
@@ -4942,7 +4907,7 @@ function savePricingTiers() {
     if (!minEl) break;
     tiers.push({min_proxies: parseInt(minEl.value)||1, price: parseFloat(priceEl.value)||0, label: labelEl.value||''});
   }
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({pricing_tiers:tiers})}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{pricing_tiers:tiers}}).then(function(d){
     if(d.ok) showToast('Тарифы сохранены','success');
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -4950,7 +4915,7 @@ function savePricingTiers() {
 
 // ========== SERVERS ==========
 function loadServersList(){
-  fetch(API+'/api/admin/servers',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/servers').then(function(d){
     var el=document.getElementById('serversList');if(!el)return;
     if(!d.servers||!d.servers.length){el.innerHTML='<div style="color:var(--text-3);font-size:12px">Нет серверов</div>';return}
     var mm=currentData&&currentData._modemMap||{};
@@ -5036,8 +5001,7 @@ function saveServerMeta(name){
   var addr=(document.getElementById('addr_'+name)||{}).value||'';
   var st=document.getElementById('srvSaveStatus_'+name);
   st.textContent='Сохраняю и проверяю Панель...';st.style.color='var(--warning)';
-  fetch(API+'/api/admin/servers/'+name,{method:'PATCH',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({osLogin:osLogin,osPassword:osPass,panelUser:panelUser,panelPassword:panelPass,hardware:hw,address:addr})})
-  .then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/servers/'+name,{method:'PATCH',json:{osLogin:osLogin,osPassword:osPass,panelUser:panelUser,panelPassword:panelPass,hardware:hw,address:addr}}).then(function(d){
     if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)';setTimeout(function(){loadServersList()},1000)}
     else{st.textContent=(d.error||'Ошибка')+(d.details?' ('+esc(d.details)+')':'');st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'})
@@ -5054,8 +5018,7 @@ function addServer(){
   var status=document.getElementById('addSrvStatus');
   if(!name||!url||!pass){status.textContent='Заполните имя, URL и пароль';status.style.color='var(--danger)';return}
   status.textContent='Проверяю подключение...';status.style.color='var(--warning)';
-  fetch(API+'/api/admin/servers',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({name:name,url:url,user:user,pass:pass,publicIp:publicIp,country:country,countryName:countryName,tz:tz})})
-  .then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/servers',{method:'POST',json:{name:name,url:url,user:user,pass:pass,publicIp:publicIp,country:country,countryName:countryName,tz:tz}}).then(function(d){
     if(d.ok){status.textContent='Добавлен! '+d.modemCount+' модемов';status.style.color='var(--success)';loadServersList();setTimeout(loadData,2000)}
     else{status.textContent=d.error||'Ошибка';status.style.color='var(--danger)'}
   }).catch(function(e){status.textContent=e.message;status.style.color='var(--danger)'})
@@ -5063,7 +5026,7 @@ function addServer(){
 
 function deleteServer(name){
   if(!confirm('Удалить сервер '+name+'?'))return;
-  fetch(API+'/api/admin/servers/'+name,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/servers/'+name,{method:'DELETE'}).then(function(d){
     if(d.ok){showToast('Сервер '+name+' удалён','success');loadServersList();setTimeout(loadData,2000)}
     else showToast(d.error||'Ошибка','error')
   }).catch(function(e){showToast(e.message||'Ошибка сети','error')})
@@ -5073,7 +5036,7 @@ function deleteServer(name){
 var _minSpeedThreshold=2;
 var _errorRateThreshold=15;
 function loadSettings(){
-  fetch(API+'/api/admin/settings',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(s){
+  api(API+'/api/admin/settings').then(function(s){
     var times=s.speedtest_times||['02:00','14:00'];
     document.getElementById('speedtestTimesInput').value=times.join(', ');
     document.getElementById('settingsStatus').textContent='Текущее расписание: '+times.join(', ')+' UTC';
@@ -5146,12 +5109,12 @@ function tgSaveSettings(){
     telegram_summary_time:(document.getElementById('tgSummaryTime').value||'').trim(),
     telegram_summary_enabled:!!document.getElementById('tgSummaryEnabled').checked
   };
-  return fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(data)}).then(function(r){return r.json()});
+  return api(API+'/api/admin/settings',{method:'PUT',json:data});
 }
 function tgPreview(){
   var st=document.getElementById('tgStatus');
   st.textContent='Готовим превью...';st.style.color='var(--warning)';
-  fetch(API+'/api/admin/telegram/preview',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/telegram/preview').then(function(d){
     if(d.ok){
       var pa=document.getElementById('tgPreviewArea');
       pa.style.display='block';
@@ -5185,7 +5148,7 @@ function saveProxyCheckSettings(){
   if(warn>=bad){showToast('Порог жёлтого должен быть меньше красного','error');return}
   if(interval<5||interval>1440){showToast('Интервал: от 5 до 1440 мин','error');return}
   _pcWarnMs=warn;_pcBadMs=bad;
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({proxy_check_target:target,proxy_check_warn_ms:warn,proxy_check_bad_ms:bad,proxy_check_interval_min:interval,proxy_check_timeout_sec:timeout,proxy_check_concurrency:concurrency})}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{proxy_check_target:target,proxy_check_warn_ms:warn,proxy_check_bad_ms:bad,proxy_check_interval_min:interval,proxy_check_timeout_sec:timeout,proxy_check_concurrency:concurrency}}).then(function(d){
     if(d.ok){showToast('Настройки замера сохранены','success');document.getElementById('proxyCheckSettingsStatus').textContent='Сохранено: '+target+' | каждые '+interval+' мин | зелёный <'+warn+'мс | жёлтый <'+bad+'мс | красный >'+bad+'мс';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -5207,7 +5170,7 @@ function saveSettings(){
   _minSpeedThreshold=minSpeed;
   _errorRateThreshold=errThresh;
   var staleH=parseInt(document.getElementById('staleModemHoursInput').value)||12;
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({speedtest_times:times,min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_low_threshold:lowThresh,speedtest_retest_delay_min:retestDelay,speedtest_max_history:maxHist,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,stale_modem_hours:staleH})}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_times:times,min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_low_threshold:lowThresh,speedtest_retest_delay_min:retestDelay,speedtest_max_history:maxHist,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,stale_modem_hours:staleH}}).then(function(d){
     if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Расписание обновлено: '+times.join(', ')+' UTC';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -5231,7 +5194,7 @@ function restartDashboard(){
   var btns=[document.getElementById('restartDashboardBtn'),document.getElementById('globalRestartBtn')];
   btns.forEach(function(btn){if(btn){btn.disabled=true;btn.textContent='Перезапуск...'}});
   try{localStorage.removeItem('pr_restart_needed');}catch(_){}
-  fetch(API+'/api/admin/restart_dashboard',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/restart_dashboard',{method:'POST'}).then(function(d){
     if(d.ok){showToast('Дашборд перезапускается...','warning');setTimeout(function(){location.reload()},4000)}
     else{showToast(d.error||'Ошибка','error');btns.forEach(function(btn){if(btn){btn.disabled=false;btn.textContent='Перезапустить сейчас'}});}
   }).catch(function(){showToast('Дашборд перезапускается...','warning');setTimeout(function(){location.reload()},4000)});
@@ -5247,7 +5210,7 @@ function saveRecoverySettings(){
   var skipUnsold=document.getElementById('recoverySkipUnsoldInput').checked;
   var st=document.getElementById('recoverySettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold})}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold}}).then(function(d){
     if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -5258,7 +5221,7 @@ function saveTrackingSettings(){
   var syncInt=parseInt(document.getElementById('rotationSyncIntervalInput').value)||30;
   var st=document.getElementById('trackingSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({tracking_interval_min:tracking,rotation_cache_ttl_min:cacheTtl,rotation_sync_interval_min:syncInt})}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{tracking_interval_min:tracking,rotation_cache_ttl_min:cacheTtl,rotation_sync_interval_min:syncInt}}).then(function(d){
     if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -5274,7 +5237,7 @@ function saveRetentionSettings(){
   };
   var st=document.getElementById('retentionSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(data)}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
     if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)'}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -5290,7 +5253,7 @@ function saveSessionBillingSettings(){
   };
   var st=document.getElementById('sessionBillingSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(data)}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
     if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -5304,7 +5267,7 @@ function uploadDocument(clientId){
   var reader=new FileReader();
   reader.onload=function(e){
     var base64=e.target.result.split(',')[1];
-    fetch(API+'/api/admin/clients/'+clientId+'/document',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({name:file.name,fileBase64:base64,mimeType:file.type})}).then(function(r){return r.json()}).then(function(d){
+    api(API+'/api/admin/clients/'+clientId+'/document',{method:'POST',json:{name:file.name,fileBase64:base64,mimeType:file.type}}).then(function(d){
       if(d.ok){showToast('Документ загружен','success');loadData()}else showToast(d.error||'Ошибка','error');
     }).catch(function(e){showToast(e.message,'error')});
   };
@@ -5312,7 +5275,7 @@ function uploadDocument(clientId){
 }
 function deleteDocument(clientId,docId){
   if(!confirm('Удалить документ?'))return;
-  fetch(API+'/api/admin/clients/'+clientId+'/document/'+docId,{method:'DELETE',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/clients/'+clientId+'/document/'+docId,{method:'DELETE'}).then(function(d){
     if(d.ok){showToast('Удалён','success');loadData()}else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message||'Ошибка сети','error')});
 }
@@ -5348,8 +5311,7 @@ function switchOpsTab(tab) {
 function renderOpsSla(clientId) {
   var body = document.getElementById('clientOpsBody');
   body.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:40px;text-align:center">Загрузка...</div>';
-  fetch(API + '/api/admin/clients/' + clientId + '/sla', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/sla')
     .then(function(d) {
       if (d.error) { body.innerHTML = '<div style="color:var(--danger);padding:20px">' + esc(d.error) + '</div>'; return; }
       var m = d.metrics || {};
@@ -5393,9 +5355,7 @@ function renderOpsApi(clientId) {
   var body = document.getElementById('clientOpsBody');
   body.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:40px;text-align:center">Загрузка...</div>';
   var days = window._opsApiDays || 7;
-  fetch(API + '/api/admin/api_usage?client_id=' + encodeURIComponent(clientId) + '&days=' + days + '&limit=50',
-    { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/api_usage?client_id=' + encodeURIComponent(clientId) + '&days=' + days + '&limit=50')
     .then(function(d) {
       if (d.error) { body.innerHTML = '<div style="color:var(--danger);padding:20px">' + esc(d.error) + '</div>'; return; }
       var s = d.summary || {};
@@ -5511,8 +5471,7 @@ function setOpsSegMode(mode, clientId) {
 function renderOpsHistory(clientId) {
   var body = document.getElementById('clientOpsBody');
   body.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:40px;text-align:center">Загрузка операций...</div>';
-  fetch(API + '/api/admin/clients/' + clientId + '/ledger', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/ledger')
     .then(function(data) {
       var entries = data.entries || [];
       // Backend returns newest-first; each entry carries _idx = its absolute
@@ -5748,8 +5707,7 @@ function uploadDocumentModal(clientId) {
   var reader = new FileReader();
   reader.onload = function(e) {
     var base64 = e.target.result.split(',')[1];
-    fetch(API + '/api/admin/clients/' + clientId + '/document', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ name: file.name, fileBase64: base64, mimeType: file.type }) })
-      .then(function(r) { return r.json(); })
+    api(API + '/api/admin/clients/' + clientId + '/document',{method:'POST',json:{ name: file.name, fileBase64: base64, mimeType: file.type }})
       .then(function(d) {
         if (d.ok) { showToast('Документ загружен', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
         else showToast(d.error || 'Ошибка', 'error');
@@ -5760,8 +5718,7 @@ function uploadDocumentModal(clientId) {
 
 function deleteLedgerEntry(clientId, entryIndex) {
   if (!confirm('\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u044D\u0442\u0443 \u043E\u043F\u0435\u0440\u0430\u0446\u0438\u044E? \u0411\u0430\u043B\u0430\u043D\u0441 \u0431\u0443\u0434\u0435\u0442 \u043F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u0430\u043D.')) return;
-  fetch(API + '/api/admin/clients/' + clientId + '/ledger/' + entryIndex, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/ledger/' + entryIndex,{method:'DELETE'})
     .then(function(d) {
       if (d.ok) { showToast('\u041E\u043F\u0435\u0440\u0430\u0446\u0438\u044F \u0443\u0434\u0430\u043B\u0435\u043D\u0430', 'success'); renderOpsHistory(clientId); loadData(); }
       else showToast(d.error || '\u041E\u0448\u0438\u0431\u043A\u0430', 'error');
@@ -5773,8 +5730,7 @@ function addPaymentFromModal(clientId) {
   var date = document.getElementById('opsPayDate').value;
   var note = document.getElementById('opsPayNote').value;
   if (!amount || !date) return showToast('Заполните сумму и дату', 'error');
-  fetch(API + '/api/admin/clients/' + clientId + '/payment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ amount: amount, date: date, note: note }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/payment',{method:'POST',json:{ amount: amount, date: date, note: note }})
     .then(function(d) {
       if (d.ok) { showToast('Платёж добавлен', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsHistory(clientId); }, 1500); }
       else showToast(d.error, 'error');
@@ -5787,8 +5743,7 @@ function manualChargeFromModal(clientId) {
   var note = document.getElementById('opsPayNote').value;
   if (!amount || !date) return showToast('Заполните сумму и дату', 'error');
   if (!confirm('Списать ' + amount + ' ₽ с баланса клиента?')) return;
-  fetch(API + '/api/admin/clients/' + clientId + '/charge', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ amount: amount, date: date, note: note || 'Ручное списание' }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/charge',{method:'POST',json:{ amount: amount, date: date, note: note || 'Ручное списание' }})
     .then(function(d) {
       if (d.ok) { showToast('Списание выполнено', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsHistory(clientId); }, 1500); }
       else showToast(d.error, 'error');
@@ -5797,8 +5752,7 @@ function manualChargeFromModal(clientId) {
 
 function deleteDocumentModal(clientId, docId) {
   if (!confirm('Удалить документ?')) return;
-  fetch(API + '/api/admin/clients/' + clientId + '/document/' + docId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/document/' + docId,{method:'DELETE'})
     .then(function(d) {
       if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
@@ -5809,8 +5763,7 @@ function deleteDocumentModal(clientId, docId) {
 function createAct(clientId) {
   var period = document.getElementById('actPeriod').value;
   if (!period) return showToast('Выберите период', 'error');
-  fetch(API + '/api/admin/tochka/create_act', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ clientId: clientId, period: period }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/create_act',{method:'POST',json:{ clientId: clientId, period: period }})
     .then(function(d) {
       if (d.ok) {
         if (d.tochkaPushed) showToast('Акт создан и отправлен в Точку', 'success');
@@ -5822,8 +5775,7 @@ function createAct(clientId) {
 }
 
 function toggleActStatus(clientId, docId, status) {
-  fetch(API + '/api/admin/clients/' + clientId + '/closing_document_status', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ docId: docId, status: status }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/closing_document_status',{method:'POST',json:{ docId: docId, status: status }})
     .then(function(d) {
       if (d.ok) { showToast(status === 'signed' ? 'Отмечен как подписанный' : 'Подпись снята', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
@@ -5839,11 +5791,10 @@ function downloadActPdf(clientId, docId) {
 // the existing DELETE + create_act routes — no new backend surface.
 function reissueAct(clientId, docId, period) {
   if (!confirm('Перевыставить акт за ' + period + '?\nСтарый будет удалён и создан заново по текущим данным.')) return;
-  fetch(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId,{method:'DELETE'})
     .then(function(d) {
       if (!d.ok) throw new Error(d.error || 'Не удалось удалить старый акт');
-      return fetch(API + '/api/admin/tochka/create_act', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ clientId: clientId, period: period }) }).then(function(r) { return r.json(); });
+      return api(API + '/api/admin/tochka/create_act',{method:'POST',json:{ clientId: clientId, period: period }});
     })
     .then(function(d) {
       if (d.ok) {
@@ -5858,8 +5809,7 @@ function reissueAct(clientId, docId, period) {
 
 function deleteAct(clientId, docId) {
   if (!confirm('Удалить закрывающий документ?')) return;
-  fetch(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId,{method:'DELETE'})
     .then(function(d) {
       if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
@@ -5873,8 +5823,7 @@ function createBill(clientId) {
   var amountVal = document.getElementById('billAmount').value;
   var payload = { clientId: clientId, period: period };
   if (amountVal && parseFloat(amountVal) > 0) payload.amount = parseFloat(amountVal);
-  fetch(API + '/api/admin/tochka/create_bill', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(payload) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/create_bill',{method:'POST',json:payload})
     .then(function(d) {
       if (d.ok) { showToast('Счёт выставлен: ' + (d.amount || 0).toLocaleString('ru-RU') + ' \u20BD', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
@@ -5882,8 +5831,7 @@ function createBill(clientId) {
 }
 
 function toggleBillStatus(clientId, billId, status) {
-  fetch(API + '/api/admin/clients/' + clientId + '/bill_status', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ billId: billId, status: status }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/bill_status',{method:'POST',json:{ billId: billId, status: status }})
     .then(function(d) {
       if (d.ok) { showToast(status === 'paid' ? 'Отмечен как оплаченный' : 'Отмечен как неоплаченный', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
@@ -5896,8 +5844,7 @@ function downloadBillPdf(clientId, billId) {
 
 function deleteBill(clientId, billId) {
   if (!confirm('Удалить счёт?')) return;
-  fetch(API + '/api/admin/clients/' + clientId + '/bill/' + billId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/bill/' + billId,{method:'DELETE'})
     .then(function(d) {
       if (d.ok) { showToast('Счёт удалён', 'success'); loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
@@ -5948,8 +5895,7 @@ function renderBankConfig() {
   h += '</div>';
   container.innerHTML = h;
   // Load full config (with unmasked jwt) for editing
-  fetch(API + '/api/admin/tochka/config', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/config')
     .then(function(cfg) {
       if (cfg.jwt) document.getElementById('bankJwt').value = cfg.jwt;
       if (cfg.clientId) document.getElementById('bankClientId').value = cfg.clientId;
@@ -5974,8 +5920,7 @@ function saveBankConfig() {
   };
   // jwt шлём только если введён новый (не пустой и не маска «****…» из GET) — иначе бэкенд хранит старый
   if (_jwt && _jwt.indexOf('****') !== 0) data.jwt = _jwt;
-  fetch(API + '/api/admin/tochka/config', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify(data) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/config',{method:'POST',json:data})
     .then(function(d) {
       if (d.ok) { showToast('\u041A\u043E\u043D\u0444\u0438\u0433 \u0441\u043E\u0445\u0440\u0430\u043D\u0451\u043D. \u041F\u0435\u0440\u0435\u0437\u0430\u043F\u0443\u0441\u0442\u0438\u0442\u0435 \u0441\u0435\u0440\u0432\u0435\u0440 \u0434\u043B\u044F \u043F\u0440\u0438\u043C\u0435\u043D\u0435\u043D\u0438\u044F', 'success'); loadData(); }
       else showToast(d.error || '\u041E\u0448\u0438\u0431\u043A\u0430', 'error');
@@ -5984,8 +5929,7 @@ function saveBankConfig() {
 
 function autodetectBank() {
   showToast('\u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u044E \u0434\u0430\u043D\u043D\u044B\u0435 \u0438\u0437 \u0422\u043E\u0447\u043A\u0438...', 'info');
-  fetch(API + '/api/admin/tochka/autodetect', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/autodetect',{method:'POST'})
     .then(function(d) {
       if (d.ok && d.detected) {
         var det = d.detected;
@@ -6007,8 +5951,7 @@ function autodetectBank() {
 function registerWebhook() {
   var url = window.location.origin + '/api/tochka/webhook';
   if (!confirm('\u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C webhook?\n\nURL: ' + url)) return;
-  fetch(API + '/api/admin/tochka/register_webhook', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ webhookUrl: url }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/register_webhook',{method:'POST',json:{ webhookUrl: url }})
     .then(function(d) {
       if (d.ok) showToast('Webhook \u0437\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043E\u0432\u0430\u043D!', 'success');
       else showToast(d.error || '\u041E\u0448\u0438\u0431\u043A\u0430', 'error');
@@ -6020,8 +5963,7 @@ function syncPayments() {
   var dateTo = document.getElementById('syncDateTo') ? document.getElementById('syncDateTo').value : new Date().toISOString().slice(0, 10);
   var statusEl = document.getElementById('syncStatus');
   if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">\u23F3 \u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u044E \u0432\u044B\u043F\u0438\u0441\u043A\u0443... (\u0434\u043E 30 \u0441\u0435\u043A)</span>';
-  fetch(API + '/api/admin/tochka/sync', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ dateFrom: dateFrom, dateTo: dateTo }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/sync',{method:'POST',json:{ dateFrom: dateFrom, dateTo: dateTo }})
     .then(function(d) {
       if (d.ok) {
         var msg = '\u2705 \u0413\u043E\u0442\u043E\u0432\u043E! \u0412\u0441\u0435\u0433\u043E: ' + d.total + ', \u0438\u043C\u043F\u043E\u0440\u0442: ' + d.imported + ', \u043F\u0440\u0438\u0432\u044F\u0437\u0430\u043D\u043E: ' + d.matched + ', \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E: ' + d.skipped;
@@ -6065,8 +6007,7 @@ function renderBankDocuments() {
 }
 
 function loadAllActs() {
-  fetch(API + '/api/admin/tochka/all_acts', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/all_acts')
     .then(function(data) {
       var docs = data.documents || [];
       var el = document.getElementById('allActsList');
@@ -6153,8 +6094,7 @@ function generateBulkActs() {
   if (!period) return showToast('Выберите период', 'error');
   var statusEl = document.getElementById('bulkActStatus');
   if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">⏳ Генерирую акты...</span>';
-  fetch(API + '/api/admin/tochka/generate_acts', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ period: period }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/generate_acts',{method:'POST',json:{ period: period }})
     .then(function(d) {
       if (d.ok) {
         var msg = '✅ Создано: ' + d.generated + ', пропущено: ' + d.skipped;
@@ -6175,8 +6115,7 @@ function generateBulkActs() {
 
 function deleteActFromBank(clientId, docId) {
   if (!confirm('Удалить закрывающий документ?')) return;
-  fetch(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId,{method:'DELETE'})
     .then(function(d) {
       if (d.ok) { showToast('Удалён', 'success'); loadData(); setTimeout(function() { loadAllActs(); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
@@ -6208,8 +6147,7 @@ function renderBankBills() {
 }
 
 function loadAllBills() {
-  fetch(API + '/api/admin/tochka/all_bills', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/all_bills')
     .then(function(data) {
       var bills = data.bills || [];
       var el = document.getElementById('allBillsList');
@@ -6296,8 +6234,7 @@ function generateBulkBills() {
   if (!period) return showToast('Выберите период', 'error');
   var statusEl = document.getElementById('bulkBillStatus');
   if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">⏳ Генерирую счета...</span>';
-  fetch(API + '/api/admin/tochka/generate_bills', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ period: period }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/generate_bills',{method:'POST',json:{ period: period }})
     .then(function(d) {
       if (d.ok) {
         var msg = '✅ Создано: ' + d.generated + ', пропущено: ' + d.skipped;
@@ -6318,8 +6255,7 @@ function generateBulkBills() {
 
 function deleteBillFromBank(clientId, billId) {
   if (!confirm('Удалить счёт?')) return;
-  fetch(API + '/api/admin/clients/' + clientId + '/bill/' + billId, { method: 'DELETE', headers: { 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/clients/' + clientId + '/bill/' + billId,{method:'DELETE'})
     .then(function(d) {
       if (d.ok) { showToast('Счёт удалён', 'success'); loadData(); setTimeout(function() { loadAllBills(); }, 1500); }
       else showToast(d.error || 'Ошибка', 'error');
@@ -6402,8 +6338,7 @@ function renderBankPayments() {
 function matchPayment(paymentId) {
   var sel = document.getElementById('matchClient_' + paymentId);
   if (!sel || !sel.value) return showToast('Выберите клиента', 'error');
-  fetch(API + '/api/admin/tochka/match_payment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ paymentId: paymentId, clientId: sel.value }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/match_payment',{method:'POST',json:{ paymentId: paymentId, clientId: sel.value }})
     .then(function(d) {
       if (d.ok) { showToast('Платёж привязан', 'success'); loadData(); }
       else showToast(d.error || 'Ошибка', 'error');
@@ -6411,15 +6346,13 @@ function matchPayment(paymentId) {
 }
 
 function dismissPayment(paymentId) {
-  fetch(API + '/api/admin/tochka/dismiss_payment', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken }, body: JSON.stringify({ paymentId: paymentId }) })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/dismiss_payment',{method:'POST',json:{ paymentId: paymentId }})
     .then(function(d) { if (d.ok) { loadData(); } }).catch(function(){});
 }
 
 function dismissAllUnmatched() {
   if (!confirm('\u0423\u0431\u0440\u0430\u0442\u044C \u0432\u0441\u0435 \u043D\u0435\u043E\u043F\u043E\u0437\u043D\u0430\u043D\u043D\u044B\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438?')) return;
-  fetch(API + '/api/admin/tochka/dismiss_unmatched', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken } })
-    .then(function(r) { return r.json(); })
+  api(API + '/api/admin/tochka/dismiss_unmatched',{method:'POST'})
     .then(function(d) { if (d.ok) { showToast('\u0423\u0431\u0440\u0430\u043D\u043E: ' + d.dismissed, 'success'); loadData(); } }).catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
 }
 
@@ -6433,7 +6366,7 @@ function savePortCreds(imei,server,portId){
   var newLogin=document.getElementById('editPortLogin').value;
   var newPass=document.getElementById('editPortPass').value;
   if(!newLogin&&!newPass){showToast('Введите логин или пароль','error');return}
-  fetch(API+'/api/admin/update_port_creds',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({serverName:server,IMEI:imei,portID:portId,proxy_login:newLogin,proxy_password:newPass})}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/update_port_creds',{method:'POST',json:{serverName:server,IMEI:imei,portID:portId,proxy_login:newLogin,proxy_password:newPass}}).then(function(d){
     if(d.ok){showToast('Доступы обновлены','success');document.getElementById('editPortForm').innerHTML='';setTimeout(loadData,2000)}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -6443,8 +6376,7 @@ function savePortCreds(imei,server,portId){
 function editPortFull(imei,server,portId){
   var area=document.getElementById('editPortForm');if(!area)return;
   area.innerHTML='<div style="padding:12px;color:var(--text-3);font-size:12px;text-align:center">Загрузка настроек...</div>';
-  fetch(API+'/api/admin/get_port_config?serverName='+encodeURIComponent(server)+'&portId='+encodeURIComponent(portId),{headers:{'X-Auth-Token':authToken}})
-  .then(function(r){return r.json()})
+  api(API+'/api/admin/get_port_config?serverName='+encodeURIComponent(server)+'&portId='+encodeURIComponent(portId))
   .then(function(cfg){
     function sel(id,val,opts){var h='<select class="form-input" id="'+id+'">';opts.forEach(function(o){h+='<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>'});return h+'</select>'}
     var h='<div class="detail-card" style="margin-top:8px"><h4 style="margin-bottom:12px">⚙️ Настройки порта: '+esc(portId)+'</h4>';
@@ -6485,8 +6417,7 @@ function savePortFull(imei,server,portId){
     IP_VERSION:(document.getElementById('epIpVersion').value||'').trim(),
     OS_SPOOF:(document.getElementById('epOsSpoof').value||'').trim()
   };
-  fetch(API+'/api/admin/save_port_config',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(d)})
-  .then(function(r){return r.json()})
+  api(API+'/api/admin/save_port_config',{method:'POST',json:d})
   .then(function(r){
     if(r.ok){showToast('Настройки порта сохранены ✓','success');document.getElementById('editPortForm').innerHTML='';setTimeout(loadData,2000)}
     else showToast(r.error||'Ошибка сохранения','error');
@@ -6496,7 +6427,7 @@ function savePortFull(imei,server,portId){
 // ========== REGENERATE API KEY ==========
 function regenerateApiKey(clientId){
   if(!confirm('Перегенерировать API ключ?'))return;
-  fetch(API+'/api/admin/clients/'+clientId+'/regenerate_key',{method:'POST',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/clients/'+clientId+'/regenerate_key',{method:'POST'}).then(function(d){
     if(d.ok){showToast('Новый ключ: '+d.apiKey,'success');loadData()}else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message||'Ошибка сети','error')});
 }
@@ -6504,7 +6435,7 @@ function regenerateApiKeyInForm(){
   var clientId=document.getElementById('clientFormId').value;
   if(!clientId){showToast('Сначала сохраните клиента','error');return}
   if(!confirm('Перегенерировать API ключ?'))return;
-  fetch(API+'/api/admin/clients/'+clientId+'/regenerate_key',{method:'POST',headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/clients/'+clientId+'/regenerate_key',{method:'POST'}).then(function(d){
     if(d.ok){document.getElementById('cfApiKey').value=d.apiKey;showToast('Ключ обновлён','success');loadData()}else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message||'Ошибка сети','error')});
 }
@@ -6530,7 +6461,7 @@ function regenerateApiKeyInForm(){
       currentData=data;processData();renderServerFilter();renderClientFilterDD();renderTable();updateHeaderStats();populateAccClientFilter();
       if(window._heatmapInitialized){var _hmKey=_heatmapView+'|'+_heatmapId;if(_heatmapCache[_hmKey])renderHeatmap(_heatmapCache[_hmKey]);}
       // Load CRM reminders then generate notifications
-      fetch(API+'/api/admin/crm_reminders',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){window._crmReminders=d.reminders||[];}).catch(function(){window._crmReminders=[];}).finally(function(){generateNotifications()});
+      api(API+'/api/admin/crm_reminders').then(function(d){window._crmReminders=d.reminders||[];}).catch(function(){window._crmReminders=[];}).finally(function(){generateNotifications()});
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
       var _st=localStorage.getItem('admin_active_tab')||'dashboard';var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te);
       startAutoRefresh()
@@ -6573,8 +6504,7 @@ function initSimulator(){
 // Loads ALL live modems + their is_test_pool flag, so the pool can be managed
 // inline (no jumping to the modem detail modal).
 function simLoadAllModems(){
-  fetch(API+'/api/admin/simulator/all-modems',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/simulator/all-modems')
     .then(function(d){
       _simState.allModems = d.items || [];
       simRenderAllModems();
@@ -6652,10 +6582,7 @@ function simRenderAllModems(){
 function simTogglePool(server, nick, checkboxEl){
   var enabled = checkboxEl.checked;
   checkboxEl.disabled = true;
-  fetch(API+'/api/admin/modem/test-pool',{
-    method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-    body: JSON.stringify({ server: server, nick: nick, enabled: enabled })
-  }).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/modem/test-pool',{method:'POST',json:{ server: server, nick: nick, enabled: enabled }}).then(function(d){
     checkboxEl.disabled = false;
     if(!d.ok){ checkboxEl.checked = !enabled; alert(d.error||'Ошибка'); return; }
     // Mirror locally
@@ -6689,10 +6616,7 @@ function simBulkPool(enable){
   if(!rows.length) return;
   if(!confirm((enable?'Добавить в пул':'Убрать из пула')+' '+rows.length+' модемов?')) return;
   Promise.all(rows.map(function(m){
-    return fetch(API+'/api/admin/modem/test-pool',{
-      method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-      body: JSON.stringify({ server: m.server, nick: m.nick, enabled: enable })
-    }).then(function(r){return r.json()}).then(function(){
+    return api(API+'/api/admin/modem/test-pool',{method:'POST',json:{ server: m.server, nick: m.nick, enabled: enable }}).then(function(){
       m.in_pool = enable;
       if(!enable) delete _simState.selectedModems[m.server+'|'+m.nick];
     });
@@ -6792,11 +6716,7 @@ function simStart(){
   if(!p.targets.length) return alert('Добавьте хотя бы один URL');
   document.getElementById('simStartStatus').textContent = 'Старт…';
   document.getElementById('simStartBtn').disabled = true;
-  fetch(API+'/api/admin/simulator/run',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-    body: JSON.stringify({ profile: p })
-  }).then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d}})})
+  api(API+'/api/admin/simulator/run',{method:'POST',json:{ profile: p }}).then(function(d){return {ok:!(d&&d.__status>=400),d:d}})
     .then(function(o){
       document.getElementById('simStartBtn').disabled = false;
       if(!o.ok){
@@ -6812,14 +6732,11 @@ function simStart(){
 function simAbort(){
   if(!_simState.activeRun) return;
   if(!confirm('Остановить запуск?')) return;
-  fetch(API+'/api/admin/simulator/run/'+_simState.activeRun+'/abort',{
-    method:'POST', headers:{'X-Auth-Token':authToken}
-  }).then(function(r){return r.json()});
+  api(API+'/api/admin/simulator/run/'+_simState.activeRun+'/abort',{method:'POST'});
 }
 
 function simRefreshActive(){
-  fetch(API+'/api/admin/simulator/active',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/simulator/active')
     .then(function(d){
       if(d.active && d.active.id){ simAttachToRun(d.active.id, d.active); }
       else simShowIdle();
@@ -6862,13 +6779,11 @@ function simRenderLiveSnapshot(snap){
 // Aggregating server-side is cheaper than pulling raw samples.
 function simFetchLiveAgg(runId){
   // KPI strip — use cheap /samples count + first-page status mix
-  fetch(API+'/api/admin/simulator/run/'+runId+'/samples?limit=1',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/simulator/run/'+runId+'/samples?limit=1').then(function(d){
       document.getElementById('simLiveReqs').textContent = d.total || 0;
     });
   // Series + by-modem
-  fetch(API+'/api/admin/simulator/run/'+runId+'/series?bucket=2',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/simulator/run/'+runId+'/series?bucket=2').then(function(d){
       simDrawTimeSeriesChart('simLiveChart', d.series || []);
       // Roll up KPI from series last 30s for "running" feel
       var s = d.series || [];
@@ -6886,13 +6801,11 @@ function simFetchLiveAgg(runId){
         document.getElementById('simLiveP95').textContent = (lats[Math.floor(lats.length*0.95)]||0) + ' мс';
       }
     });
-  fetch(API+'/api/admin/simulator/run/'+runId+'/by-modem',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/simulator/run/'+runId+'/by-modem').then(function(d){
       simRenderByModemTable(document.getElementById('simLiveByModem'), d.items || []);
     });
   // Breaking-point detection (cheap; updates the banner if ramp run)
-  fetch(API+'/api/admin/simulator/run/'+runId+'/breaking-point',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/simulator/run/'+runId+'/breaking-point').then(function(d){
       var bp = document.getElementById('simBreakingPoint');
       if(d.applicable && d.breaking_point){
         bp.style.display = '';
@@ -6984,8 +6897,7 @@ function simShowIdle(){
 var _simHistSel = {};  // run_id → true (for comparison selection)
 
 function simLoadHistory(){
-  fetch(API+'/api/admin/simulator/runs?limit=50',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/simulator/runs?limit=50')
     .then(function(d){
       var items = d.items || [];
       var box = document.getElementById('simHistoryTable');
@@ -7034,8 +6946,8 @@ function simCloseDetail(){
 }
 function simExport(format){
   if(!_simCurrentDetailRunId) return;
-  // Token comes via header; do a fetch+blob so the header is included.
-  fetch(API+'/api/admin/simulator/run/'+_simCurrentDetailRunId+'/export?format='+format, {headers:{'X-Auth-Token':authToken}})
+  // NB: stays on raw fetch — binary/blob download, api() returns parsed data.
+  fetch(API+'/api/admin/simulator/run/'+_simCurrentDetailRunId+'/export?format='+format,{headers:{'X-Auth-Token':authToken}})
     .then(function(r){return r.blob().then(function(b){return {blob:b,name:'simulator-run-'+_simCurrentDetailRunId+'.'+format}})})
     .then(function(o){
       var url = URL.createObjectURL(o.blob);
@@ -7049,10 +6961,10 @@ function simOpenRunDetail(id){
   document.getElementById('simDetailBody').innerHTML = '<div style="text-align:center;padding:40px;color:var(--text-3)">Загрузка…</div>';
   document.getElementById('simDetailModal').style.display = 'flex';
   Promise.all([
-    fetch(API+'/api/admin/simulator/run/'+id,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}),
-    fetch(API+'/api/admin/simulator/run/'+id+'/series?bucket=2',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}),
-    fetch(API+'/api/admin/simulator/run/'+id+'/by-modem',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}),
-    fetch(API+'/api/admin/simulator/run/'+id+'/breaking-point',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}),
+    api(API+'/api/admin/simulator/run/'+id),
+    api(API+'/api/admin/simulator/run/'+id+'/series?bucket=2'),
+    api(API+'/api/admin/simulator/run/'+id+'/by-modem'),
+    api(API+'/api/admin/simulator/run/'+id+'/breaking-point'),
   ]).then(function(arr){
     var run = arr[0].run, ser = arr[1].series||[], byM = arr[2].items||[], bp = arr[3];
     var s = run.summary || {};
@@ -7105,8 +7017,7 @@ function simOpenCompare(){
   document.getElementById('simDetailExportCsv').style.display='none';
   document.getElementById('simDetailExportJson').style.display='none';
   document.getElementById('simDetailModal').style.display = 'flex';
-  fetch(API+'/api/admin/simulator/compare?run_ids='+ids.join(','),{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/simulator/compare?run_ids='+ids.join(',')).then(function(d){
       var items = d.items || [];
       // Determine best/worst per metric for highlighting
       var winners = {};
@@ -7164,8 +7075,7 @@ simOpenRunDetail = function(id){
 };
 
 function simLoadProfilesList(){
-  fetch(API+'/api/admin/simulator/profiles',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/simulator/profiles')
     .then(function(d){
       _simState.profiles = d.items || [];
       var sel = document.getElementById('simProfileSelect');
@@ -7212,10 +7122,7 @@ function simSaveCurrentAsProfile(){
   if(!name || !name.trim()) return;
   var p = simBuildProfile();
   p.name = name.trim();
-  fetch(API+'/api/admin/simulator/profiles',{
-    method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-    body: JSON.stringify({ name: name.trim(), description: '', config: p })
-  }).then(function(r){return r.json().then(function(d){return {ok:r.ok,d:d}})}).then(function(o){
+  api(API+'/api/admin/simulator/profiles',{method:'POST',json:{ name: name.trim(), description: '', config: p }}).then(function(d){return {ok:!(d&&d.__status>=400),d:d}}).then(function(o){
     if(!o.ok) return alert(o.d.error || 'Ошибка сохранения');
     simLoadProfilesList();
   });
@@ -7223,8 +7130,7 @@ function simSaveCurrentAsProfile(){
 // Reads is_test_pool state from modem_meta via the test-pool list endpoint.
 // (No dedicated single-modem endpoint — the list is small enough to scan.)
 function loadTestPoolState(server, nick){
-  fetch(API+'/api/admin/simulator/test-pool',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/simulator/test-pool').then(function(d){
       var inPool = (d.items||[]).some(function(m){ return m.server===server && m.nick===nick; });
       var chk = document.getElementById('testPoolToggleChk');
       if(chk){ chk.checked = inPool; document.getElementById('testPoolToggleStatus').textContent = inPool ? 'В пуле' : ''; }
@@ -7277,11 +7183,8 @@ function deleteModem(server, portId, nick) {
   // Через кастомный диалог (native confirm() глушится настройкой «не показывать
   // диалоги» — из-за этого офлайн-модемы «не удалялись»).
   confirmDialog('Удалить модем «'+nick+'» из дашборда?\n\nОфлайн/призрачный модем исчезнет навсегда. Если модем физически на связи — он вернётся при следующем опросе ProxySmart.', function(){
-    fetch(API+'/api/admin/modems/'+encodeURIComponent(server)+'/'+encodeURIComponent(portId)+'?nick='+encodeURIComponent(nick||''), {
-      method: 'DELETE',
-      headers: { 'X-Auth-Token': authToken },
-    })
-      .then(function(r){ return r.text().then(function(txt){ var j; try{ j=JSON.parse(txt); }catch(_){ j={ error:'HTTP '+r.status+' (не-JSON). Обнови страницу и попробуй снова.' }; } return { ok: r.ok, status: r.status, body: j }; }); })
+    api(API+'/api/admin/modems/'+encodeURIComponent(server)+'/'+encodeURIComponent(portId)+'?nick='+encodeURIComponent(nick||''),{method:'DELETE'})
+      .then(function(j){ var st=(j&&typeof j==='object')?(j.__status||200):500; return { ok: st<400, status: st, body: (j&&typeof j==='object')?j:{error:'HTTP '+st+' (не-JSON). Обнови страницу и попробуй снова.'} }; })
       .then(function(r){
         if (!r.ok) { showToast('Ошибка удаления: ' + (r.body && (r.body.message || r.body.error) || ('HTTP '+r.status)), 'error'); return; }
         showToast('Модем «'+nick+'» удалён', 'success');
@@ -7301,10 +7204,7 @@ function renderHealthDailyTimeline(m) {
   if (!box) return;
   if (!m.rawImei) { box.innerHTML = ''; return; }
   box.innerHTML = '<div style="color:var(--text-3);font-size:11px;padding:8px 0">Загрузка истории за 30 дней…</div>';
-  fetch(API+'/api/analytics/modem_health_history?server='+encodeURIComponent(m.server)+'&imei='+encodeURIComponent(m.rawImei)+'&days=30', {
-    headers: { 'X-Auth-Token': authToken }
-  })
-    .then(function(r){ return r.json(); })
+  api(API+'/api/analytics/modem_health_history?server='+encodeURIComponent(m.server)+'&imei='+encodeURIComponent(m.rawImei)+'&days=30')
     .then(function(d){
       var rows = (d && d.rows) || [];
       // Build a map date → row, then iterate the last 30 days so missing days
@@ -7357,8 +7257,7 @@ function renderHealthDailyTimeline(m) {
 // Called once at boot from the existing init flow (see admin.html); also
 // re-callable whenever the operators settings card mutates the mapping.
 function refreshOperatorList() {
-  return fetch(API+'/api/admin/operators', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r){ return r.json(); })
+  return api(API+'/api/admin/operators')
     .then(function(d){
       var ops = (d && d.operators) || [];
       // Keep only operators with at least 1 modem currently using them, sort
@@ -7383,8 +7282,7 @@ function loadOperatorsMapping() {
   var box = document.getElementById('opMapList');
   if (!box) return;
   box.innerHTML = '<div style="color:var(--text-3);font-size:12px;padding:12px">Загрузка…</div>';
-  fetch(API+'/api/admin/operators', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r){ return r.json(); })
+  api(API+'/api/admin/operators')
     .then(function(d){
       var ops = (d && d.operators) || [];
       if (!ops.length) { box.innerHTML = '<div style="color:var(--text-3);font-size:12px;padding:12px">Операторов пока не определено.</div>'; return; }
@@ -7423,22 +7321,13 @@ function loadOperatorsMapping() {
 }
 function setOperatorCountry(opEnc, country) {
   if (!country) return; // ignore the "не задана" choice for now
-  fetch(API+'/api/admin/operators/'+opEnc+'/country', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-    body: JSON.stringify({ country: country })
-  })
-    .then(function(r){ return r.json(); })
+  api(API+'/api/admin/operators/'+opEnc+'/country',{method:'PUT',json:{ country: country }})
     .then(function(){ loadOperatorsMapping(); refreshOperatorList(); })
     .catch(function(e){ alert('Ошибка: ' + e.message); });
 }
 function dropOperatorMapping(opEnc) {
   if (!confirm('Снять ручной маппинг? Следующий опрос восстановит автоматическую привязку по стране сервера.')) return;
-  fetch(API+'/api/admin/operators/'+opEnc, {
-    method: 'DELETE',
-    headers: { 'X-Auth-Token': authToken }
-  })
-    .then(function(r){ return r.json(); })
+  api(API+'/api/admin/operators/'+opEnc,{method:'DELETE'})
     .then(function(){ loadOperatorsMapping(); refreshOperatorList(); })
     .catch(function(e){ alert('Ошибка: ' + e.message); });
 }
@@ -7494,10 +7383,7 @@ function dropOperatorMapping(opEnc) {
 
 function toggleTestPool(server, nick, enabled){
   document.getElementById('testPoolToggleStatus').textContent = '…';
-  fetch(API+'/api/admin/modem/test-pool',{
-    method:'POST', headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-    body: JSON.stringify({ server: server, nick: nick, enabled: enabled })
-  }).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/modem/test-pool',{method:'POST',json:{ server: server, nick: nick, enabled: enabled }}).then(function(d){
     if(d.ok){ document.getElementById('testPoolToggleStatus').textContent = enabled ? '✓ Добавлен' : '✓ Удалён'; }
     else { document.getElementById('testPoolToggleStatus').textContent = '❌ '+(d.error||''); }
   });
@@ -7506,9 +7392,7 @@ function toggleTestPool(server, nick, enabled){
 function simDeleteProfile(){
   if(!_simState.currentProfileId) return;
   if(!confirm('Удалить профиль?')) return;
-  fetch(API+'/api/admin/simulator/profiles/'+_simState.currentProfileId,{
-    method:'DELETE', headers:{'X-Auth-Token':authToken}
-  }).then(function(r){return r.json()}).then(function(){
+  api(API+'/api/admin/simulator/profiles/'+_simState.currentProfileId,{method:'DELETE'}).then(function(){
     _simState.currentProfileId = null;
     document.getElementById('simProfileSelect').value = '';
     document.getElementById('simDelProfBtn').style.display='none';
@@ -7520,8 +7404,7 @@ function simDeleteProfile(){
 function saveModemsDownThreshold(){
   var v=parseInt(document.getElementById('setModemsDownThreshold').value,10);
   if(isNaN(v)||v<0||v>100){showToast('Введите число 0–100','error');return}
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({modems_down_threshold:v})})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/settings',{method:'PUT',json:{modems_down_threshold:v}})
     .then(function(d){
       if(d.error){showToast(d.error,'error');return}
       var h=document.getElementById('mdtSaveHint');if(h){h.textContent='Сохранено';setTimeout(function(){h.textContent=''},2500)}
@@ -7533,8 +7416,7 @@ function loadAlertRules(){
   var box = document.getElementById('alertsList');
   if(!box) return;
   box.innerHTML = '<div style="color:var(--text-3);font-size:12px;padding:12px">Загрузка…</div>';
-  fetch(API+'/api/admin/alerts', { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r){ return r.json(); })
+  api(API+'/api/admin/alerts')
     .then(function(d){
       var rules = (d && d.rules) || [];
       var groups = { critical: [], important: [], early: [] };
@@ -7584,12 +7466,7 @@ function loadAlertRules(){
     .catch(function(e){ box.innerHTML = '<div style="color:var(--danger);font-size:12px;padding:12px">Ошибка: '+esc(e.message)+'</div>'; });
 }
 function toggleAlertRule(id, enabled){
-  fetch(API+'/api/admin/alerts/'+encodeURIComponent(id), {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json', 'X-Auth-Token': authToken },
-    body: JSON.stringify({ enabled: !!enabled })
-  })
-    .then(function(r){ return r.json(); })
+  api(API+'/api/admin/alerts/'+encodeURIComponent(id),{method:'PUT',json:{ enabled: !!enabled }})
     .then(function(d){
       if(d && d.ok) showToast((enabled?'включено':'выключено')+': '+id, 'success');
       else showToast('Не сохранилось: '+(d && d.error || ''), 'error');
@@ -7597,10 +7474,7 @@ function toggleAlertRule(id, enabled){
     .catch(function(e){ showToast('Сеть: '+e.message, 'error'); });
 }
 function testAlertRule(id){
-  fetch(API+'/api/admin/alerts/'+encodeURIComponent(id)+'/test', {
-    method: 'POST', headers: { 'X-Auth-Token': authToken }
-  })
-    .then(function(r){ return r.json(); })
+  api(API+'/api/admin/alerts/'+encodeURIComponent(id)+'/test',{method:'POST'})
     .then(function(d){
       showToast(d && d.ok ? 'Тест отправлен в Telegram' : (d && d.note || 'Не отправлено'), d && d.ok ? 'success' : 'warning');
     })
@@ -7720,8 +7594,7 @@ function loadNewApiAccess(){
   if(!box) return;
   var st = _apiAccessState;
   var url = API + '/api/admin/api_access_log?hours=' + st.hours + '&limit=150' + (st.type ? '&type=' + encodeURIComponent(st.type) : '');
-  fetch(url, { headers: { 'X-Auth-Token': authToken } })
-    .then(function(r){ return r.json(); })
+  api(url)
     .then(function(d){
       if(!d || d.error){ box.innerHTML = '<div style="color:var(--danger);font-size:12px;padding:8px">'+esc((d&&d.error)||'Ошибка')+'</div>'; return; }
       var typeCounts = {}; (d.by_type||[]).forEach(function(x){ typeCounts[x.caller_type] = x.c; });
@@ -8014,8 +7887,7 @@ function loadNewFinance(force){
     try{ renderNewPulse(window._newFinData); }catch(_){}
     return;
   }
-  fetch(API + '/api/admin/finance_dashboard', {headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json();})
+  api(API + '/api/admin/finance_dashboard')
     .then(function(d){
       if(d.error){ var q=document.getElementById('newFinQuality'); if(q) q.innerHTML='<div style="color:var(--danger);font-size:12px">'+esc(d.error)+'</div>'; return; }
       window._newFinData = d;
@@ -8189,8 +8061,7 @@ function renderNewFinClients(){
 
 // ── 4b. Здоровье парка (modem_health) ──────────────────────────────
 function loadNewFleetHealth(){
-  fetch(API + '/api/analytics/modem_health?days=7', {headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json();})
+  api(API + '/api/analytics/modem_health?days=7')
     .then(function(d){ if(d.error){ var el=document.getElementById('newFleetHealth'); if(el) el.innerHTML='<div style="color:var(--danger);font-size:12px">'+esc(d.error)+'</div>'; return; } renderNewFleetHealth(d); })
     .catch(function(e){ var el=document.getElementById('newFleetHealth'); if(el) el.innerHTML='<div style="color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>'; });
 }
@@ -8242,8 +8113,7 @@ function loadNewReconciliation(){
   if(window._newReconLoaded) return;     // once per render (eager + lazy share this)
   window._newReconLoaded = true;
   var el = document.getElementById('newReconBody');
-  fetch(API + '/api/admin/billing/reconciliation', {headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json();})
+  api(API + '/api/admin/billing/reconciliation')
     .then(function(d){
       var clients = d.clients||[];
       var probs = clients.filter(function(c){return c.status && c.status!=='ok';});
@@ -8345,8 +8215,8 @@ function renderNewHeatmap(data){ renderHeatmap(data, _hmNew); }
 // ── Daily chart ────────────────────────────────────────────────────
 function loadNewDailyChart(){
   if(window._dailyTrafficCache){ renderNewDailyChart(window._dailyTrafficCache); return; }
-  fetch(API+'/api/admin/daily_traffic', {headers: {'X-Auth-Token': authToken}})
-    .then(function(r){if(!r.ok) throw new Error('HTTP '+r.status); return r.json();})
+  api(API+'/api/admin/daily_traffic')
+    .then(function(d){if(d&&d.__status>=400) throw new Error('HTTP '+d.__status); return d;})
     .then(function(d){ window._dailyTrafficCache = d; renderNewDailyChart(d); })
     .catch(function(e){
       var canvas = document.getElementById('newDailyCanvas');
@@ -8457,8 +8327,8 @@ function renderNewDailyChart(data){
 // ── Latency (collapsible) — по макету: без чипов стран, всегда весь парк ──
 function loadNewLatency(){
   var url = API + '/api/analytics/latency_stats?view=country&id=all&days=30';
-  fetch(url, {headers: {'X-Auth-Token': authToken}})
-    .then(function(r){ if(!r.ok) throw new Error('HTTP '+r.status); return r.json(); })
+  api(url)
+    .then(function(d){ if(d&&d.__status>=400) throw new Error('HTTP '+d.__status); return d; })
     .then(function(d){ _newLatencyData = d; renderLatencySummary(d); })
     .catch(function(e){
       var c = document.getElementById('latencySummary');
@@ -8503,9 +8373,9 @@ function reloadNewInfra(){
   if(!kpiEl && !tblEl) return;
   var days = _NEW_INFRA_DAYS;
   Promise.all([
-    fetch(API+'/api/analytics/rotations?days='+days, {headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json();}).catch(function(){return {};}),
-    fetch(API+'/api/analytics/ip_stats?days='+days, {headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json();}).catch(function(){return {};}),
-    fetch(API+'/api/analytics/capacity?days='+days, {headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json();}).catch(function(){return {};})
+    api(API+'/api/analytics/rotations?days='+days).catch(function(){return {};}),
+    api(API+'/api/analytics/ip_stats?days='+days).catch(function(){return {};}),
+    api(API+'/api/analytics/capacity?days='+days).catch(function(){return {};})
   ]).then(function(res){
     var rot=res[0]||{}, ip=res[1]||{}, cap=(res[2]||{}).summary||{};
     var rs=rot.summary||{}, ips=ip.summary||{}, sn=ip.subnet_summary||{};
@@ -8568,8 +8438,7 @@ function loadNewTopHosts(){
   var listEl = document.getElementById('newTopHostsList');
   if(statusEl) statusEl.textContent = 'Загрузка...';
   var url = API+'/api/analytics/logs_domains_full?limit=1'+(_hostsClient ? '&client='+encodeURIComponent(_hostsClient) : '');
-  fetch(url, {headers: {'X-Auth-Token': authToken}})
-    .then(function(r){ return r.json(); })
+  api(url)
     .then(function(d){
       if(!_hostsClient && d.by_client){
         _hostsClientList = d.by_client.filter(function(c){ return c.client_name; }).map(function(c){ return c.client_name; });
@@ -8647,8 +8516,7 @@ function renderNewMatrix(){
 // Stage 19 — Failover settings + manual controls + audit log
 // ========================================================================
 function loadFailoverSettings(){
-  fetch(API+'/api/admin/settings',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/settings')
     .then(function(s){
       var set=function(id,v){var el=document.getElementById(id);if(el){if(el.type==='checkbox')el.checked=!!v;else el.value=v;}};
       set('failoverEnabledInput', s.failover_enabled===true||s.failover_enabled===1);
@@ -8679,8 +8547,7 @@ function saveFailoverSettings(){
     failover_max_per_hour: parseInt(document.getElementById('failoverMaxPerHourInput').value)||5
   };
   var st=document.getElementById('failoverSettingsStatus');
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(body)})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/settings',{method:'PUT',json:body})
     .then(function(d){
       if(d&&!d.error){
         if(st)st.textContent='Сохранено · '+(body.failover_enabled?(body.failover_dry_run?'авто ВКЛ, но dry-run (тест) — реальных переносов нет':'⚠️ авто ВКЛ, реальные переносы активны'):'авто выкл')+'. Требуется перезапуск процесса.';
@@ -8693,8 +8560,7 @@ function saveFailoverSettings(){
 function loadFailoverCandidates(){
   var box=document.getElementById('failoverCandidates');
   if(box)box.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:12px">Загрузка…</div>';
-  fetch(API+'/api/admin/failover/candidates',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/failover/candidates')
     .then(function(d){
       var cands=(d&&d.candidates)||[];
       if(!cands.length){box.innerHTML='<div style="color:var(--success);font-size:12px;padding:12px">✓ Нет модемов, требующих failover прямо сейчас</div>';return;}
@@ -8719,8 +8585,7 @@ function loadFailoverCandidates(){
 function execFailover(server,imei,nick){
   confirmDialog('Перенести клиента(ов) модема «'+nick+'» ('+server+') на здоровый спейр сейчас? Строка подключения клиента сохранится, внешний IP сменится.',function(){
     showToast('Выполняю перенос…','info');
-    fetch(API+'/api/admin/failover/execute',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify({server:server,imei:imei,nick:nick})})
-      .then(function(r){return r.json()})
+    api(API+'/api/admin/failover/execute',{method:'POST',json:{server:server,imei:imei,nick:nick}})
       .then(function(d){
         if(d&&d.ok){
           var oks=(d.results||[]).filter(function(x){return x.result==='ok'}).length;
@@ -8735,8 +8600,7 @@ function execFailover(server,imei,nick){
 function loadFailoverLog(){
   var box=document.getElementById('failoverLog');
   if(box)box.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:12px">Загрузка…</div>';
-  fetch(API+'/api/admin/failover/log?limit=100',{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){return r.json()})
+  api(API+'/api/admin/failover/log?limit=100')
     .then(function(d){
       var rows=(d&&d.log)||[];
       if(!rows.length){box.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:12px">История пуста</div>';return;}
@@ -8769,7 +8633,7 @@ function loadFailoverLog(){
 function aisVal(id){var e=document.getElementById(id);return e?String(e.value||'').trim():'';}
 function loadAiSales(){aisStatus();aisLoadKeys();aisLoadQueue();}
 function aisStatus(){
-  fetch(API+'/api/admin/ai_sales/status',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/ai_sales/status').then(function(d){
     var el=document.getElementById('ais_status');if(!el)return;
     var k=d.keys||{},c=d.counts||{};
     el.innerHTML='Anthropic '+(k.anthropic?'✅':'❌')+' · Tavily '+(k.tavily?'✅':'❌')+' · CRM '+(d.crm&&d.crm.configured?'⚙️':'❌')
@@ -8779,7 +8643,7 @@ function aisStatus(){
   }).catch(function(){});
 }
 function aisLoadKeys(){
-  fetch(API+'/api/admin/settings',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(s){
+  api(API+'/api/admin/settings').then(function(s){
     var a=document.getElementById('ais_anthropic'),t=document.getElementById('ais_tavily'),u=document.getElementById('ais_crmurl');
     if(a&&!a.value)a.value=s.anthropic_api_key||'';
     if(t&&!t.value)t.value=s.tavily_api_key||'';
@@ -8788,13 +8652,13 @@ function aisLoadKeys(){
 }
 function aisSaveKeys(){
   var body={anthropic_api_key:aisVal('ais_anthropic'),tavily_api_key:aisVal('ais_tavily'),crm_db_url:aisVal('ais_crmurl')};
-  fetch(API+'/api/admin/settings',{method:'PUT',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:body}).then(function(d){
     showToast(d.ok?'Ключи сохранены':'Ошибка','success');aisStatus();
   }).catch(function(){showToast('Ошибка сети','error')});
 }
 function aisCrmPing(){
   var el=document.getElementById('ais_crmping');if(el)el.textContent='проверяю…';
-  fetch(API+'/api/admin/ai_sales/crm_ping',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/ai_sales/crm_ping').then(function(d){
     if(!el)return;el.textContent=d.ok?('OK · компаний в CRM: '+d.companies):('Ошибка: '+(d.error||''));el.style.color=d.ok?'#2e9e5b':'var(--danger)';
   }).catch(function(){if(el)el.textContent='Ошибка сети'});
 }
@@ -8803,7 +8667,7 @@ function aisRun(bot){
   if(bot==='lookalikes'){body.seed=aisVal('ais_seed');body.count=parseInt(aisVal('ais_count')||'5',10);if(!body.seed){showToast('Укажите seed-компанию','error');return}}
   if(bot==='contacts'){body.count=20}
   if(bot==='push'&&!confirm('Залить найденные компании и контакты в Twenty CRM?'))return;
-  fetch(API+'/api/admin/ai_sales/run',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:JSON.stringify(body)}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/ai_sales/run',{method:'POST',json:body}).then(function(d){
     if(d.error){showToast(d.error,'error');return}
     showToast('Запущено (#'+d.jobId+')','success');aisPollJob(d.jobId);
   }).catch(function(){showToast('Ошибка сети','error')});
@@ -8811,7 +8675,7 @@ function aisRun(bot){
 function aisPollJob(id){
   var box=document.getElementById('ais_job');if(!box)return;box.style.display='';
   (function tick(){
-    fetch(API+'/api/admin/ai_sales/job/'+id,{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(j){
+    api(API+'/api/admin/ai_sales/job/'+id).then(function(j){
       if(!j||j.error){box.innerHTML='—';return}
       var pct=j.total?Math.round((j.done/(j.total||1))*100):(j.status==='done'?100:8);
       box.innerHTML='<b>Задача #'+j.id+' ('+esc(j.bot)+')</b> — '+esc(j.progress||'')
@@ -8823,7 +8687,7 @@ function aisPollJob(id){
   })();
 }
 function aisLoadQueue(){
-  fetch(API+'/api/admin/ai_sales/queue',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(d){
+  api(API+'/api/admin/ai_sales/queue').then(function(d){
     var el=document.getElementById('ais_queue');if(!el)return;
     var comps=d.companies||[];
     if(!comps.length){el.innerHTML='<div style="color:var(--text-3)">Пусто — запусти бота «Похожие + ЛПР».</div>';return}

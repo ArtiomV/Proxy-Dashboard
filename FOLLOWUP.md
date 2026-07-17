@@ -239,3 +239,17 @@ and should follow the same pattern in a future pass:
   hand-wavey comment about "safe for UPDATE re-runs". Verify on a specific
   failing migration before relying on this — currently the runner will pass
   over a real schema bug if it manifests as `no such column`.
+
+## Frontend
+
+- **`api()` wrapper (2026-07): done.** All 187 open-coded
+  `fetch(URL, {headers:{'X-Auth-Token':authToken}})` calls in admin.js/client.js
+  now go through `api()` in public/js/utils.js (unit-tested in
+  tests/frontend-utils.test.js). Remaining raw `fetch` sites are intentional:
+  blob/CSV downloads (crmExport, simExport), FormData uploads, `_fetchRetry`
+  (AbortController + retry), and `/api/login` (pre-auth). New code should use
+  `api()`; non-JSON responses return text, HTTP status is on non-enumerable
+  `__status`.
+- **admin.js (8.9k lines) still needs page-level splitting** — api() was the
+  prerequisite; carve-out by tab (analytics/finance/modems/settings) is the
+  next step.

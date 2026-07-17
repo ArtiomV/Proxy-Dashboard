@@ -349,8 +349,7 @@ function loadDailyTrafficChart(textColor,gridColor){
   if(fromDate) url+='from='+fromDate+'&';
   if(toDate) url+='to='+toDate+'&';
   if(includeToday) url+='include_today=1&';
-  fetch(url,{headers:{'X-Auth-Token':authToken}})
-  .then(function(r){return r.json()})
+  api(url)
   .then(function(data){
     if(loading)loading.style.display='none';
 
@@ -667,8 +666,7 @@ function loadDailyTrafficChart(textColor,gridColor){
 
 // --- Billing History (Accordion by Month) ---
 function loadBillingHistory(){
-  fetch('/api/billing_history',{headers:{'X-Auth-Token':authToken}})
-  .then(function(r){return r.json()})
+  api('/api/billing_history')
   .then(function(data){
     if(data.error){
       document.getElementById('billingAccordion').innerHTML='<div style="text-align:center;padding:40px;color:var(--text-3)">'+esc(data.error)+'</div>';
@@ -929,7 +927,7 @@ async function doLogin(){
 }
 
 function doLogout(){
-  fetch('/api/logout',{method:'POST',headers:{'X-Auth-Token':authToken}}).catch(function(){});
+  api('/api/logout',{method:'POST'}).catch(function(){});
   authToken='';authLogin='';
   localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');
   tableData=[];billingData=null;rawData=null;
@@ -950,10 +948,10 @@ function formatCurrencyLabel(currency){
 }
 
 async function fetchJSON(url){
-  var resp=await fetch(url,{headers:{'X-Auth-Token':authToken}});
-  if(resp.status===401){doLogout();throw new Error('Сессия истекла')}
-  if(!resp.ok) throw new Error('HTTP '+resp.status+': '+resp.statusText);
-  return resp.json();
+  var d=await api(url);
+  if(d&&d.__status===401){doLogout();throw new Error('Сессия истекла')}
+  if(d&&d.__status>=400) throw new Error('HTTP '+d.__status);
+  return d;
 }
 
 function setStatus(state,text){
@@ -1446,11 +1444,7 @@ function buildRotationCell(row){
 
 function setRotation(nick,serverName,minutes,sel){
   sel.disabled=true;
-  fetch('/api/client/set_rotation',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-    body:JSON.stringify({nick:nick,serverName:serverName,minutes:parseInt(minutes)})
-  }).then(function(r){return r.json()}).then(function(d){
+  api('/api/client/set_rotation',{method:'POST',json:{nick:nick,serverName:serverName,minutes:parseInt(minutes)}}).then(function(d){
     sel.disabled=false;
     if(d.ok){showToast('Ротация: '+(parseInt(minutes)===0?'выключена':minutes+' мин'),'success')}
     else showToast(d.error||'Ошибка','error');
@@ -1461,11 +1455,7 @@ function setRotation(nick,serverName,minutes,sel){
 function resetIp(imei,serverName,btn){
   if(!confirm('Сбросить IP?')) return;
   btn.disabled=true;
-  fetch('/api/client/reset_ip',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-    body:JSON.stringify({imei:imei,serverName:serverName})
-  }).then(function(r){return r.json()}).then(function(d){
+  api('/api/client/reset_ip',{method:'POST',json:{imei:imei,serverName:serverName}}).then(function(d){
     btn.disabled=false;
     if(d.ok){showToast('IP сброшен','success');setTimeout(loadData,3000)}
     else showToast(d.error||'Ошибка','error');
@@ -1483,8 +1473,7 @@ function showIpHistory(nick,serverName,imei){
     return;
   }
 
-  fetch('/api/client/rotation_log?nick='+encodeURIComponent(nick)+'&serverName='+encodeURIComponent(serverName),{headers:{'X-Auth-Token':authToken}})
-  .then(function(r){return r.json()}).then(function(data){
+  api('/api/client/rotation_log?nick='+encodeURIComponent(nick)+'&serverName='+encodeURIComponent(serverName)).then(function(data){
     var entries=Array.isArray(data)?data:(data.log||data.logs||data.data||[]);
     if(!entries.length){
       document.getElementById('ipModalBody').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории ротации</div>';
@@ -1598,11 +1587,7 @@ function checkProxies(){
     return {ip:p[0],port:parseInt(p[1])||0,login:p[2]||'',password:p[3]||''};
   });
 
-  fetch('/api/tools/check_proxy',{
-    method:'POST',
-    headers:{'Content-Type':'application/json','X-Auth-Token':authToken},
-    body:JSON.stringify({proxies:proxies})
-  }).then(function(r){return r.json()}).then(function(results){
+  api('/api/tools/check_proxy',{method:'POST',json:{proxies:proxies}}).then(function(results){
     btn.disabled=false;btn.textContent='Проверить';
     var arr=Array.isArray(results)?results:results.results||[];
     if(!arr.length){document.getElementById('checkProxyResults').innerHTML='<p style="color:var(--text-2)">Нет результатов</p>';return}
@@ -1675,7 +1660,7 @@ function convertFormat(){
 function loadDocuments(){
   loadClosingDocs();
   loadBills();
-  fetch('/api/client/documents',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(docs){
+  api('/api/client/documents').then(function(docs){
     var el=document.getElementById('documentsList');
     if(!docs.length){el.innerHTML='<p style="color:var(--text-2);text-align:center;padding:40px">Документов пока нет</p>';return}
     var h='<table class="data-table"><thead><tr><th>Документ</th><th>Дата</th><th></th></tr></thead><tbody>';
@@ -1690,7 +1675,7 @@ function loadDocuments(){
 
 // --- Closing Documents (Acts) ---
 function loadClosingDocs(){
-  fetch('/api/client/closing_documents',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+  api('/api/client/closing_documents').then(function(data){
     var docs=data.documents||[];
     var el=document.getElementById('closingDocsList');
     var badge=document.getElementById('unsignedBadge');
@@ -1736,7 +1721,7 @@ function downloadClosingPdf(docId){
 
 // --- Bills (Счета на оплату) ---
 function loadBills(){
-  fetch('/api/client/bills',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+  api('/api/client/bills').then(function(data){
     var bills=data.bills||[];
     var el=document.getElementById('billsList');
     var badge=document.getElementById('unpaidBadge');
@@ -1815,7 +1800,7 @@ function copyCodeBlock(btn){
 
 // Change #3: Referral simplification - only show stats, no referral code/link
 function loadReferral(){
-  fetch('/api/client/referral',{headers:{'X-Auth-Token':authToken}}).then(function(r){return r.json()}).then(function(data){
+  api('/api/client/referral').then(function(data){
     document.getElementById('referralContent').innerHTML=
       '<div class="referral-info">'+
       '<div class="referral-hero"><h3>Партнёрская программа</h3><p>Рекомендуйте нас и получайте <strong>10%</strong> от каждого платежа на баланс или личную карту. За дополнительной информацией обращайтесь к менеджеру.</p></div>'+

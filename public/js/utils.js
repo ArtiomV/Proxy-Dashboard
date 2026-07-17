@@ -82,6 +82,51 @@ function showToast(m,t,dur){
   setTimeout(function(){if(e.parentNode)e.remove();},ms);
 }
 
+// api(path, opts) — ONE fetch wrapper for both SPAs (admin.js + client.js).
+//
+// Replaces ~180 open-coded copies of
+//   fetch(URL, {headers:{'X-Auth-Token':authToken}}).then(r => r.json())
+// and the JSON-write variant with Content-Type boilerplate.
+//
+// opts:
+//   method          — HTTP method (default 'GET', or 'POST' when body/json given)
+//   json            — value to send as JSON body (Content-Type set automatically)
+//   body / headers  — raw passthrough for non-JSON cases (e.g. FormData)
+//   noAuthRedirect  — do NOT redirect to / on 401 (use for /api/login itself)
+//
+// Behavior is deliberately identical to the open-coded pattern:
+//   - resolves with the parsed JSON body for ANY HTTP status (handlers keep
+//     checking d.ok / d.error themselves, exactly like after r.json());
+//   - rejects only on network failure (exactly like fetch);
+//   - X-Auth-Token is added from the page-global `authToken` when present.
+// The one deliberate upgrade: a 401 means the session is dead → stale tokens
+// are cleared and the page returns to the login screen (previously every
+// 401 surfaced as a bare "Unauthorized" toast and a broken UI).
+async function api(path, opts){
+  opts = opts || {};
+  var headers = {};
+  for (var h in (opts.headers || {})) headers[h] = opts.headers[h];
+  if (typeof authToken !== 'undefined' && authToken) headers['X-Auth-Token'] = authToken;
+  var body = opts.body;
+  if (opts.json !== undefined) { headers['Content-Type'] = 'application/json'; body = JSON.stringify(opts.json); }
+  var method = opts.method || (body ? 'POST' : 'GET');
+  var res = await fetch(path, { method: method, headers: headers, body: body });
+  if (res.status === 401 && !opts.noAuthRedirect) {
+    try { localStorage.removeItem('pr_admin_token'); localStorage.removeItem('pr_token'); localStorage.removeItem('pr_login'); } catch(_) {}
+    if (typeof showToast === 'function' && typeof document !== 'undefined') showToast('Сессия истекла — войдите снова', 'error');
+    if (typeof location !== 'undefined') setTimeout(function(){ location.href = '/'; }, 900);
+  }
+  var text = await res.text();
+  var data = null;
+  if (text) { try { data = JSON.parse(text); } catch(_) { data = text; } }
+  // Non-enumerable HTTP status for the few legacy call sites that used r.ok /
+  // r.status (blob downloads aside). Invisible to JSON.stringify and for-in.
+  if (data && typeof data === 'object') {
+    try { Object.defineProperty(data, '__status', { value: res.status, enumerable: false, configurable: true }); } catch(_) {}
+  }
+  return data;
+}
+
 // CommonJS export so the same source can be unit-tested in Node without a DOM.
 // Browsers see the `if (typeof module !== 'undefined')` guard as false and
 // continue with the bare function declarations above.
@@ -89,6 +134,6 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     esc, fmtDateRu, parseTraffic, bytesToGb, fmtGb, fmtGbShort, pct,
     formatBytes, getModemStatus, formatUptime, formatTraffic,
-    renderSignalBars, renderNetBadge,
+    renderSignalBars, renderNetBadge, api,
   };
 }

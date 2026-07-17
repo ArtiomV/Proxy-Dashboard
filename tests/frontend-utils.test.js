@@ -10,7 +10,7 @@
 // numbers on /admin vs /client. This test trips if anyone reintroduces
 // the divergence by switching a multiplier back to binary.
 
-import { test, expect, describe } from 'vitest';
+import { test, expect, describe, afterEach } from 'vitest';
 import { createRequire } from 'module';
 
 // utils.js exports via CommonJS when `module` is defined (server side).
@@ -90,5 +90,60 @@ describe('utils.js — decimal SI units (Stage 7 lock)', () => {
     expect(utils.esc('a & b')).toBe('a &amp; b');
     expect(utils.esc('')).toBe('');
     expect(utils.esc(null)).toBe('');
+  });
+});
+
+describe('api() — unified fetch wrapper', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => {
+    globalThis.fetch = realFetch;
+    delete globalThis.authToken;
+  });
+  function stubFetch(impl) {
+    const calls = [];
+    globalThis.fetch = async (...a) => { calls.push(a); return impl; };
+    return calls;
+  }
+  const jsonRes = (status, body) => ({
+    status,
+    text: async () => JSON.stringify(body),
+  });
+
+  test('adds X-Auth-Token from global authToken; parses JSON for any status', async () => {
+    const calls = stubFetch(jsonRes(200, { ok: true }));
+    globalThis.authToken = 'tok123';
+    const d = await utils.api('/api/x');
+    expect(calls[0][1].headers['X-Auth-Token']).toBe('tok123');
+    expect(calls[0][1].method).toBe('GET');
+    expect(d.ok).toBe(true);
+    expect(d.__status).toBe(200);
+    // __status is non-enumerable — invisible to JSON/serialization
+    expect(JSON.stringify(d)).toBe('{"ok":true}');
+  });
+
+  test('returns parsed body even for HTTP 500 (legacy r.json() semantics)', async () => {
+    stubFetch(jsonRes(500, { error: 'boom' }));
+    const d = await utils.api('/api/x');
+    expect(d.error).toBe('boom');
+    expect(d.__status).toBe(500);
+  });
+
+  test('opts.json serializes body, sets Content-Type, defaults to POST', async () => {
+    const calls = stubFetch(jsonRes(200, { ok: true }));
+    await utils.api('/api/x', { json: { a: 1 } });
+    expect(calls[0][1].method).toBe('POST');
+    expect(calls[0][1].headers['Content-Type']).toBe('application/json');
+    expect(calls[0][1].body).toBe('{"a":1}');
+  });
+
+  test('rejects on network failure (exactly like fetch)', async () => {
+    globalThis.fetch = async () => { throw new Error('network down'); };
+    await expect(utils.api('/api/x')).rejects.toThrow('network down');
+  });
+
+  test('returns text for non-JSON responses', async () => {
+    stubFetch({ status: 502, text: async () => '<html>Bad Gateway</html>' });
+    const d = await utils.api('/api/x');
+    expect(typeof d).toBe('string');
   });
 });
