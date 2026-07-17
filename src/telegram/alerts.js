@@ -147,6 +147,31 @@ const RULES = {
     render: p => `🔴 <b>Списание не прошло</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: попытка списать ${p.amount} ₽, баланс был ${p.balance_before} ₽.\nСервис под угрозой отключения.`,
   },
 
+  // Сводка массового падения: в потоке одиночных «модем оффлайн» масштаб
+  // аварии не читается. Одно сообщение = сколько модемов лежит и где.
+  modems_down_bulk: {
+    title: 'Массовое падение модемов',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 1800,   // 30 мин — авария развивается, но спамить не надо
+    dedupeKey: () => 'mdb',
+    render: p => {
+      // Печатаем ВЕСЬ список. Единственная обрезка — жёсткий лимит Telegram
+      // (4096 символов на сообщение): режем по строкам с запасом на шапку.
+      const MAX_LIST = 3500;
+      const lines = String(p.list || '').split('\n').filter(Boolean);
+      let more = Number(p.more) || 0;
+      const kept = [];
+      let len = 0;
+      for (const l of lines) {
+        if (len + l.length + 1 > MAX_LIST) { more += lines.length - kept.length; break; }
+        kept.push(l); len += l.length + 1;
+      }
+      return `🚨 <b>Не работает модемов: ${p.count}</b>\n\nПо серверам: ${esc(p.servers || '—')}\n\n${esc(kept.join('\n'))}`
+        + (more > 0 ? `\n…и ещё ${more}` : '');
+    },
+  },
+
   // ── 🟡 IMPORTANT ────────────────────────────────────────────
   modem_offline_20m: {
     title: 'Модем оффлайн >10 минут',
@@ -343,6 +368,7 @@ const _entityFor = {
   disk_low_critical:         () => ({ kind: 'system', id: 'disk' }),
   client_charge_failed:      p => ({ kind: 'client',  id: p.client_id || null }),
   modem_offline_20m:         p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
+  modems_down_bulk:          () => ({ kind: 'fleet',   id: null }),
   modem_recovered:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   recovery_exhausted:        p => ({ kind: 'modem',   id: p.nick || null }),
   failover_done:             p => ({ kind: 'modem',   id: p.spareNick || p.deadNick || null }),

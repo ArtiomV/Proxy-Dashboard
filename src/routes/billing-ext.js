@@ -363,18 +363,41 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     // -- Daily revenue last 30 days for sparkline --
     const dailyRows = db.prepare(`SELECT date, SUM(amount) as rev FROM billing_ledger
       WHERE type='charge' AND date >= ? GROUP BY date ORDER BY date`).all(since30);
+    // -- Same, но с разбивкой по клиентам (для стека «Выручка по дням» по клиентам) --
+    const dailyByClientRows = db.prepare(`SELECT date, client_id, SUM(amount) as rev FROM billing_ledger
+      WHERE type='charge' AND date >= ? GROUP BY date, client_id`).all(since30);
+    const _clientNameById = {};
+    for (const c of getClients()) _clientNameById[c.id] = c.name;
+    const dailyRevByClient = {};
+    for (const r of dailyByClientRows) {
+      const nm = _clientNameById[r.client_id] || r.client_id || 'Прочие';
+      if (!dailyRevByClient[nm]) dailyRevByClient[nm] = {};
+      dailyRevByClient[nm][r.date] = Math.round(r.rev);
+    }
 
     // -- Recent payments / balance movements (everything except the daily auto-charge) --
+    // `amount` is stored unsigned (corrections/adjustments use Math.abs and put
+    // the direction into the balance delta), so the sign must come from the
+    // balance movement — otherwise a manual debit renders as an incoming payment.
     const recentPayments = db.prepare(`
-      SELECT l.client_id, l.type, l.date, l.amount, l.source, c.name AS client_name
+      SELECT l.client_id, l.type, l.date, l.amount, l.source, l.note,
+             l.balance_before, l.balance_after, c.name AS client_name
         FROM billing_ledger l LEFT JOIN clients c ON c.id = l.client_id
        WHERE l.type IN ('payment','bank_payment','adjustment','correction','manual_charge')
-       ORDER BY l.date DESC, l.id DESC LIMIT 6`).all().map(r => ({
-      client: r.client_name || r.client_id,
-      date: r.date,
-      amount: Math.round(r.amount),
-      source: (r.source && String(r.source).indexOf('tochka') === 0) ? 'Точка' : 'вручную'
-    }));
+       ORDER BY l.date DESC, l.id DESC LIMIT 6`).all().map(r => {
+      const hasBal = r.balance_before != null && r.balance_after != null;
+      const signed = hasBal
+        ? r.balance_after - r.balance_before
+        : (r.type === 'correction' || r.type === 'manual_charge' ? -Math.abs(r.amount) : r.amount);
+      return {
+        client: r.client_name || r.client_id,
+        date: r.date,
+        amount: Math.round(signed),
+        note: r.note || '',
+        kind: signed < 0 ? 'списание' : 'платёж',
+        source: (r.source && String(r.source).indexOf('tochka') === 0) ? 'Точка' : 'вручную'
+      };
+    });
 
     const payload = {
       period,
@@ -416,6 +439,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
       churned: churnedClients.map(c => ({ id: c.id, name: c.name, last_mrr: prevMrrByClient[c.id] || 0 })),
       new: newClients.map(c => ({ id: c.id, name: c.name, created: c.createdAt, mrr: mrrByClient[c.id] || 0 })),
       daily_revenue: dailyRows.map(r => ({ date: r.date, revenue: Math.round(r.rev) })),
+      daily_revenue_by_client: dailyRevByClient,
       recent_payments: recentPayments
     };
     _financeCache = payload; _financeCacheKey = cacheKey; _financeCacheTs = Date.now();

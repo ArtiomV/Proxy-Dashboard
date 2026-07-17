@@ -62,6 +62,20 @@ function init(db) {
     "AND deleted = 0 " +   // 041: soft-deleted modems are hidden from the offline fallback
     "AND updated_at >= datetime('now', ?) "
   );
+  // Roster feeding computeFleet (the «В работе X/Y» headline + per-server cards +
+  // «Модем отключен» card + offline alert). MUST exclude soft-deleted modems, or a
+  // deleted modem keeps inflating total and lingers in offlineList (the RO2_35
+  // «91/92» bug). Centralized here so the deleted-filter can't be forgotten by a
+  // future rewrite — guarded by tests/fleet-roster.test.js.
+  S.metaFleetRoster = db.prepare(
+    "SELECT server_name AS srv, imei, nick " +
+    "FROM modem_meta " +
+    "WHERE imei IS NOT NULL AND TRIM(imei) != '' " +
+    "  AND nick IS NOT NULL AND TRIM(nick) != '' " +
+    "  AND lower(nick) NOT LIKE 'random%' " +
+    "  AND (is_test_pool IS NULL OR is_test_pool = 0) " +
+    "  AND (deleted IS NULL OR deleted = 0)"
+  );
   // Stage 18: explicit delete by (server, imei) — used by the DELETE-modem
   // endpoint to purge a modem from BOTH known_modems and modem_meta atomically
   // (otherwise it'd reappear via the meta fallback on the next render).
@@ -146,6 +160,7 @@ module.exports = {
   metaOperatorGetStmt: () => S.metaOperatorGet,
   metaOperatorGetByImeiStmt: () => S.metaOperatorGetByImei,
   metaListRecentForServerStmt: () => S.metaListRecentForServer,    // Stage 18
+  metaFleetRosterStmt:         () => S.metaFleetRoster,            // fleet count (deleted-excluded)
   metaDeleteByImeiStmt:        () => S.metaDeleteByImei,            // Stage 18
   metaSoftDeleteStmt:          () => S.metaSoftDelete,              // 041
   metaUndeleteStmt:            () => S.metaUndelete,                // 041

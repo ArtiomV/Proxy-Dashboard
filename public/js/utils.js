@@ -46,6 +46,28 @@ function getChartColorsLight(){return{grid:'rgba(0,0,0,.07)',text:'#6b7280',bg:'
 // Категориальная палитра для графиков на светлых страницах (Дашборд/Финансы)
 function getChartPaletteLight(){return['#2f6fe0','#10b981','#f59e0b','#8b5cf6','#ec4899','#14b8a6','#f97316','#6366f1','#84cc16','#0ea5e9','#e11d48','#a855f7']}
 
+// ЕДИНЫЙ стиль всех столбчатых графиков — берётся из ОДНОГО места, чтобы MRR,
+// «Потребление по дням» (по клиентам и по странам) и «Выручка по дням» выглядели
+// одинаково. Геометрия столбца:
+var CHART_BAR_STACK = { borderSkipped:false, borderWidth:0, maxBarThickness:42, barPercentage:0.6, categoryPercentage:0.8 };
+// Столбец ПЛОСКИЙ снизу и СКРУГЛЁННЫЙ сверху: скругляем только верх самого
+// верхнего непустого сегмента стека, всё остальное (включая низ) — плоское.
+// Универсально для любого числа датасетов, учитывает скрытые ряды. ds[0] = низ стека.
+function chartStackRadius(r){
+  r = r || 4;
+  return function(ctx){
+    var i = ctx.dataIndex, ch = ctx.chart, ds = ch.data.datasets, di = ctx.datasetIndex;
+    var last = -1;
+    for (var k = 0; k < ds.length; k++){
+      if (typeof ch.isDatasetVisible === 'function' && !ch.isDatasetVisible(k)) continue;
+      var v = Number((ds[k].data || [])[i]) || 0;
+      if (v) last = k;   // самый верхний непустой сегмент
+    }
+    if (di !== last) return 0;   // не верхушка стека — плоский
+    return { topLeft: r, topRight: r, bottomLeft: 0, bottomRight: 0 };   // верх скруглён, низ плоский
+  };
+}
+
 // Toast notification — escapes the message body to avoid XSS via
 // admin-injected text. (The admin.js copy of this function did NOT
 // escape — that was a latent XSS path closed by the dedup.)

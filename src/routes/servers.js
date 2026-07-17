@@ -136,6 +136,10 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.auto_reboot_enabled != null) {
     patch.auto_reboot_enabled = !!req.body.auto_reboot_enabled;
   }
+  // Порог сводного алерта «N модемов не работает» (0 = выключить сводку)
+  if (req.body.modems_down_threshold != null) {
+    patch.modems_down_threshold = Math.max(0, Math.min(100, parseInt(req.body.modems_down_threshold) || 0));
+  }
   if (req.body.auto_reboot_min_interval_min != null) {
     patch.auto_reboot_min_interval_min = Math.max(15, Math.min(720, parseInt(req.body.auto_reboot_min_interval_min) || 60));
   }

@@ -13,6 +13,7 @@ const { computeFleet } = require('../modems/fleet');
 module.exports = function createOpsExtRouter(deps) {
   const {
     db, logger, DB_PATH,
+    trackingDb,
     authMiddleware, adminMiddleware, dashboardLimiter,
     fs, path, dbStmts, dbAudit,
     appSettings,
@@ -44,14 +45,11 @@ module.exports = function createOpsExtRouter(deps) {
   // Modem registry rows (non-random, non-test) — the candidate set for the
   // fleet count. Recency/online state comes from uptime_tracking + the live
   // snapshot in computeFleet (src/modems/fleet.js), not from a SQL time filter.
-  const _fleetMetaStmt = db.prepare(`
-    SELECT server_name AS srv, imei, nick
-      FROM modem_meta
-     WHERE imei IS NOT NULL AND TRIM(imei) != ''
-       AND nick IS NOT NULL AND TRIM(nick) != ''
-       AND lower(nick) NOT LIKE 'random%'
-       AND (is_test_pool IS NULL OR is_test_pool = 0)
-  `);
+  // Fleet roster query lives in src/db/tracking.js (metaFleetRosterStmt) as the
+  // SINGLE source of truth — it bakes in the deleted/random/test exclusions and is
+  // regression-guarded by tests/fleet-roster.test.js, so the RO2_35 «deleted modem
+  // still counted» bug can't silently return via a rewrite here.
+  const _fleetMetaStmt = trackingDb.metaFleetRosterStmt();
 
 r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
   const mem = process.memoryUsage();
@@ -403,6 +401,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     } catch (e) { logger.warn('[fleet] count failed: ' + e.message); }
 
     res.json({
+      connsHistory: (deps.getConnsHistory ? deps.getConnsHistory() : {}),
       clientMonthCharges,
       clientMonthGb,
       clientLiveMonthGb,

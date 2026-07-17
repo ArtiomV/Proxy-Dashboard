@@ -1770,6 +1770,7 @@ const SETTINGS_DEFAULTS = {
   // Наша себестоимость трафика: ₽ за ГБ по операторам (map operator -> руб/ГБ).
   // Пусто по умолчанию; задаётся в Настройках, считается трафик×₽/ГБ.
   operator_gb_costs: {},
+  modems_down_threshold: 5,   // порог сводного алерта «N модемов не работает» (0 = выкл)
   // Stage 19 — modem failover (re-point a dead/glitchy client modem's port
   // to a healthy spare on the same server). OFF + dry-run by default: the
   // operator validates move_port on one port manually, then flips these.
@@ -2578,6 +2579,10 @@ const _serverUnreachableAlertSent = {};
 // back online (or when it crosses the stale_modem_hours threshold and stops
 // being interesting). One alert per disconnect, no spam.
 const offlineAlertSent = {};
+// 2026-07-16: карта «модем сейчас в отправленном оффлайне» (key → lastOnlineMs)
+// для сводного алерта modems_down_bulk. In-memory: сводка про «сейчас», а не
+// про историю, поэтому терять её при рестарте не страшно.
+const _downSince = {};
 // Boot grace: skip alerts for the first N minutes after process start to
 // avoid a flood of «X offline >20m» for modems that were already offline
 // before we started. Tracking polls every 3 min, so 6 min = ~2 cycles to
@@ -3103,7 +3108,13 @@ async function trackModems() {
           const prevMs = Date.parse(prevIso);
           if (!isNaN(prevMs)) downSec = Math.max(0, Math.round((now - prevMs) / 1000));
         }
-        if (downSec >= 10 * 60) {
+        // ПАРНОСТЬ (2026-07-16): «вернулся в строй» шлём ТОЛЬКО если по этому
+        // модему реально ушёл «оффлайн» (флаг offline_alerted живёт в
+        // uptimeTracking → переживает рестарт). Раньше гейтом был просто
+        // downSec ≥ 10 мин, а offline-алерт при этом мог не уйти (модем лежал
+        // >12ч = stale, или флаг потерялся при рестарте) — отсюда «рандом»:
+        // приходило только «включился» без парного «отключился».
+        if (uptimeTracking[key].offline_alerted) {
           // Resolve a friendly nick — prefer knownModems, fall back to modem_meta.
           let nickToShow = nick && nick !== imei ? nick : '';
           if (!nickToShow) {
@@ -3115,6 +3126,8 @@ async function trackModems() {
             try { const row = db.prepare('SELECT nick FROM modem_meta WHERE server_name=? AND imei=? LIMIT 1').get(server.name, imei); if (row) nickToShow = row.nick || ''; } catch (_) {}
           }
           try { alerts.trigger('modem_recovered', { server: server.name, imei, nick: nickToShow, downSec }); } catch (_) {}
+          uptimeTracking[key].offline_alerted = false;   // пара закрыта
+          delete _downSince[key];
         }
         // Stage 18.9: separate timestamp for "last time we SAW this modem alive".
         // last_check is bumped every tick (even for offline modems via the
@@ -3299,26 +3312,24 @@ async function trackModems() {
             try { const r = db.prepare('SELECT nick FROM modem_meta WHERE server_name=? AND imei=? LIMIT 1').get(server.name, imei); if (r) nickToShow = r.nick || ''; } catch (_) {}
           }
           const minsOff = Math.floor(offlineMs / 60000);
-          const tgToken = appSettings.telegram_bot_token;
-          const tgChatId = appSettings.telegram_chat_id;
-          if (tgToken && tgChatId) {
-            const text = `🔴 <b>Модем оффлайн</b>\n\n` +
-                         `<b>${nickToShow || imei}</b> (${server.name}) — не отвечает <b>${minsOff} мин</b>.\n` +
-                         `Последний раз был онлайн: ${new Date(lastOnlineMs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })} МСК`;
-            try {
-              const tgBot = require('./src/telegram/bot');
-              tgBot.sendMessage(tgToken, tgChatId, text).catch(e => logger.warn('[OfflineAlert] tg send: ' + e.message));
-              offlineAlertSent[key] = true;
-              logActivity('modem', 'warn', 'modem_offline_alert', nickToShow || imei,
-                `Offline ${minsOff} min — Telegram alert sent`,
-                { server: server.name, imei, mins_offline: minsOff });
-            } catch (e) { logger.warn('[OfflineAlert] dispatch failed: ' + e.message); }
-          } else {
-            // Don't infinite-retry if TG isn't configured — mark as "sent" so we
-            // don't spam logs every 3 minutes.
+          // 2026-07-16: раньше слали напрямую tgBot.sendMessage, минуя alerts —
+          // алерт не попадал в колокольчик, не уважал вкл/выкл правила и не
+          // логировался как остальные. Теперь — через общий alerts.trigger,
+          // как парный ему modem_recovered.
+          try {
+            alerts.trigger('modem_offline_20m', {
+              server: server.name, imei, nick: nickToShow, mins: minsOff,
+              lastOnline: new Date(lastOnlineMs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }),
+            });
             offlineAlertSent[key] = true;
-            logger.debug('[OfflineAlert] TG not configured — would alert ' + (nickToShow || imei));
-          }
+            // Флаг парности в персистентном uptimeTracking: «вернулся» уйдёт
+            // только если этот «оффлайн» реально был отправлен.
+            if (uptimeTracking[key]) uptimeTracking[key].offline_alerted = true;
+            _downSince[key] = lastOnlineMs;   // для сводки «N модемов не работает»
+            logActivity('modem', 'warn', 'modem_offline_alert', nickToShow || imei,
+              `Offline ${minsOff} min — alert sent`,
+              { server: server.name, imei, mins_offline: minsOff });
+          } catch (e) { logger.warn('[OfflineAlert] dispatch failed: ' + e.message); }
         }
       }
     } catch (e) {
@@ -3344,6 +3355,39 @@ async function trackModems() {
   }
 
   saveIpTracking();
+  // ── Сводка «N модемов не работает» (2026-07-16) ────────────────────────
+  // В потоке одиночных сообщений масштаб аварии теряется. Считаем модемы,
+  // по которым СЕЙЧАС открыт отправленный «оффлайн», и при достижении порога
+  // шлём одно агрегированное сообщение (порог + вкл/выкл — в Настройках).
+  try {
+    const _thr = Number(appSettings.modems_down_threshold) || 5;
+    const _downKeys = Object.keys(_downSince);
+    if (_thr > 0 && _downKeys.length >= _thr) {
+      const _now = Date.now();
+      const _items = _downKeys.map(k => {
+        const _srv = k.slice(0, k.indexOf('_'));
+        const _im = k.slice(k.indexOf('_') + 1);
+        let _nk = '';
+        for (const info of Object.values(knownModems[_srv] || {})) {
+          if (info && info.imei === _im) { _nk = info.nick || ''; break; }
+        }
+        if (!_nk) { try { const r = db.prepare('SELECT nick FROM modem_meta WHERE server_name=? AND imei=? LIMIT 1').get(_srv, _im); if (r) _nk = r.nick || ''; } catch (_) { /* best-effort */ } }
+        return { nick: _nk || _im, server: _srv, mins: Math.floor((_now - _downSince[k]) / 60000) };
+      }).sort((a, b) => b.mins - a.mins);
+      const _byServer = {};
+      for (const it of _items) _byServer[it.server] = (_byServer[it.server] || 0) + 1;
+      try {
+        alerts.trigger('modems_down_bulk', {
+          count: _items.length,
+          servers: Object.keys(_byServer).map(s => s + ': ' + _byServer[s]).join(', '),
+          // Весь список: оператору нужны все лежащие модемы, а не top-N.
+          // Обрезка (если упрётся в лимит Telegram) — в render правила.
+          list: _items.map(i => i.nick + ' (' + i.server + ', ' + i.mins + ' мин)').join('\n'),
+        });
+      } catch (_) { /* alert best-effort */ }
+    }
+  } catch (e) { logger.warn('[ModemsDownBulk] ' + e.message); }
+
   saveUptimeTracking();
   // BUG-02: saveIpHistory() removed — recordIpChange() now does direct DB writes
   logger.info(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);
@@ -4811,6 +4855,21 @@ async function autoCreateMissingClients()  { return _initTochkaCronJobs().autoCr
 async function autoGenerateMonthlyActs()   { return _initTochkaCronJobs().autoGenerateMonthlyActs(); }
 async function autoGenerateMonthlyBills()  { return _initTochkaCronJobs().autoGenerateMonthlyBills(); }
 
+// Сверка статуса счетов с Точкой — второй, независимый от матчинга платежей
+// источник факта оплаты. Лениво, по той же причине TDZ, что и tochka-cron.
+let _billStatusSyncJob = null;
+function _initBillStatusSync() {
+  if (_billStatusSyncJob) return _billStatusSyncJob;
+  _billStatusSyncJob = require('./src/jobs/bill-status-sync').create({
+    logger, clients, saveClients, logActivity,
+    documentsDb,
+    getTochkaConfig: () => tochkaConfig,
+    tochkaRequest,
+  });
+  return _billStatusSyncJob;
+}
+async function syncBillStatuses() { return _initBillStatusSync().syncBillStatuses(); }
+
 // /admin + /api/docs + /api/admin/{cache/invalidate, vpn_profile, shop_report}
 // moved into src/routes/misc.js (Stage 3) — mount is above near cache/invalidate.
 
@@ -5133,6 +5192,11 @@ app.use(require('./src/routes/alerts')({
   logger, authMiddleware, adminMiddleware, appSettings, kvSetCritical, setSettings,
 }));
 
+// Экспорт Twenty CRM в Excel-совместимый CSV (BOM + «;»); см. src/routes/crm-export.js
+app.use(require('./src/routes/crm-export')({
+  logger, authMiddleware, adminMiddleware, appSettings, setSettings,
+}));
+
 // Stage 18.15 — bell endpoints (list/badge/read/dismiss). See module header.
 app.use(require('./src/routes/notifications')({
   logger, db, authMiddleware, adminMiddleware,
@@ -5155,8 +5219,15 @@ app.use(require('./src/routes/admin-meta')({
   logActivity, fetchAllServersDataCached, markModemDeleted, markModemRestored,
 }));
 
+const connsHistory = require('./src/jobs/conns-history').create({
+  getFetchAllServersDataCached: () => fetchAllServersDataCached, logger,
+});
+connsHistory.start();
+
 app.use(require('./src/routes/ops-ext')({
   db, logger, DB_PATH,
+  trackingDb,
+  getConnsHistory: () => connsHistory.get(),
   authMiddleware, adminMiddleware, dashboardLimiter,
   fs, path, dbStmts, dbAudit,
   appSettings,
@@ -5592,6 +5663,11 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
 
   // Auto-generate bills on 1st of each month at 08:10 Moscow (05:10 UTC)
   scheduleRepeating(5, 10, 'MonthlyBills', autoGenerateMonthlyBills);
+
+  // Сверка статуса счетов с Точкой — ежедневно в 08:20 МСК (05:20 UTC), после
+  // выставления счетов. Ловит оплаты, которые матчинг платежей не связал со счётом.
+  scheduleRepeating(5, 20, 'BillStatusSync', () =>
+    dbAudit.runJobAsync('BillStatusSync', null, () => syncBillStatuses()));
 
   // ---------------------------------------------------------------------------
   // Telegram bot — daily summary + /start auto-registration

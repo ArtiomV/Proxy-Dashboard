@@ -128,18 +128,34 @@ function passOfflineModems() {
 // scans). Freshness-gated on signals_updated_at so a modem that has since
 // gone offline (signals frozen) stops firing — offline has its own alert.
 function passSimSignals() {
-  const { alerts, db, getSetting } = deps;
+  const { alerts, db, getSetting, knownModems } = deps;
   const threshold = Number((getSetting && getSetting('reboot_score_alert_threshold', 70)) || 70);
+  // Alert ONLY for modems that are actually on the Модемы page = have a live port
+  // binding in known_modems. A modem physically present in the feed but with NO port
+  // (dead SIM can't register → no proxy port, so it's invisible in the UI) must not
+  // spam SIM/redirect/reboot alerts the operator can't even see or act on (RO2_44).
+  const activeKeys = new Set();
+  if (knownModems) {
+    for (const srv of Object.keys(knownModems)) {
+      const ports = knownModems[srv] || {};
+      for (const pid of Object.keys(ports)) {
+        const info = ports[pid];
+        if (info && info.imei) activeKeys.add(srv + '|' + info.imei);
+      }
+    }
+  }
   let rows = [];
   try {
     rows = db.prepare(
       "SELECT server_name, imei, nick, sim_status, reboot_score, http_redirect " +
-      "FROM modem_meta WHERE signals_updated_at >= datetime('now','-15 minutes')"
+      "FROM modem_meta WHERE signals_updated_at >= datetime('now','-15 minutes') " +
+      "  AND (deleted IS NULL OR deleted = 0)"   // soft-deleted → never alert (RO2_35 class)
     ).all();
   } catch (_) { return; }   // signal columns missing pre-migration → skip
   for (const r of rows) {
     const nick = r.nick || r.imei;
     if (/^random/i.test(nick)) continue;
+    if (!activeKeys.has(r.server_name + '|' + r.imei)) continue;   // not on the modems page → skip
     const base = { server: r.server_name, imei: r.imei, nick };
     // (a) operator captive redirect == SIM out of money / blocked
     if (r.http_redirect) alerts.trigger('sim_redirect_imposed', base);

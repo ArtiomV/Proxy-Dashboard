@@ -54,6 +54,7 @@ module.exports = function (deps) {
       disk_low_critical:          { freeGB: 4.2, pct: 8 },
       client_charge_failed:       { client: 'Тестовый клиент', amount: 5000, balance_before: 1200 },
       modem_offline_20m:          { nick: 'TEST_MODEM', imei: '123', server: 'TEST', mins: 25, lastOnline: '24.05.2026, 20:00' },
+      modems_down_bulk:           { count: 7, servers: 'S4: 5, S2: 2', list: ['MD_6 (S4, 42 мин)', 'RO_1 (S2, 31 мин)', 'MD_9 (S4, 18 мин)', 'MD_11 (S4, 15 мин)', 'RO2_30 (S2, 14 мин)', 'MD_17 (S4, 12 мин)', 'MD4_EP06-1 (S4, 11 мин)'].join('\n') },
       modem_recovered:            { nick: 'TEST_MODEM', imei: '123', server: 'TEST', downSec: 1830 },
       recovery_exhausted:         { nick: 'TEST_MODEM', server: 'TEST', attempts: 3 },
       failover_done:              { server: 'TEST', client: 'Тестовый клиент', deadNick: 'DEAD_MODEM', spareNick: 'SPARE_MODEM', reason: 'hard_offline' },
