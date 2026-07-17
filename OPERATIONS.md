@@ -29,6 +29,22 @@ Route snapshot (`tests/api/__snapshots__/routes.json`) freezes the (method, path
 - Bringing up a fresh DB: `node server.js` is enough — schema.sql + migrations run in order.
 - Schema drift caught once (`external_proxies` missing from schema.sql) — fixed via `CREATE TABLE IF NOT EXISTS` in baseline. See FOLLOWUP.md if you spot another mismatch.
 
+### Migration numbering quirks (documented, do not "fix")
+- **040 is intentionally absent** — numbering jumps 039 → 041. The runner
+  sorts filenames, so the gap is harmless; reusing 040 later would only
+  confuse archaeology. Leave it.
+- **007_add_performance_indexes vs 026_perf_indexes** — overlapping by
+  design: 026 is the later, wider index set (perf work revisited). Both are
+  `CREATE INDEX IF NOT EXISTS`, so application order doesn't matter.
+- **015_ledger_unique vs 025_ledger_unique_all** — 025 supersedes 015
+  (extends the uniqueness guarantee to all ledger rows, not just the subset
+  015 covered). Keep both: 015's constraints are a subset and harmless.
+- **043_api_key_hash** calls `sha256hex()`, a JS function registered by
+  server.js before the runner executes — it cannot be applied with the
+  sqlite3 CLI. Keep comments in migration files free of `;` — the runner's
+  per-statement fallback splits files naively (a `;` inside a comment once
+  aborted startup).
+
 ## Deployment
 Current flow (production):
 ```
@@ -113,6 +129,22 @@ captures everything except `.env` secrets.
 ## Alerting
 - Daily summary: Telegram, 08:00 MSK (configurable).
 - Urgent alerts: errors/critical events in `system_log` that match `URGENT_ACTIONS` set in `server.js` (server_unreachable, billing_failed, db_backup_failed, etc.) forward immediately to Telegram with 15-min cooldown per action.
+
+## Network security: ProxySmart API transport (OPEN ITEM)
+- Today the dashboard talks to ProxySmart servers over **plain HTTP with
+  Basic-auth** (`API_S*_URL=http://...` in .env). Credentials and modem
+  commands cross the wire unencrypted — anyone on the path (hoster, ISP,
+  compromised middlebox) can read or replay them, including USB-reset actions.
+- This is NOT fixable from this repo — it needs infrastructure work on the
+  ProxySmart hosts. Options, cheapest first:
+  1. **WireGuard/Tailscale tunnel** between the dashboard host and each
+     ProxySmart server; point `API_S*_URL` at tunnel IPs. No certs, no public
+     exposure — recommended.
+  2. **HTTPS reverse proxy** (nginx + Let's Encrypt) in front of each
+     ProxySmart API; switch URLs to https:// and verify certs.
+  3. **stunnel/socat TLS wrapper** per server if nginx is too heavy.
+- Until then: treat ProxySmart credentials as exposed, rotate them
+  periodically, and never reuse them anywhere else.
 
 ## Environment variables
 Required:

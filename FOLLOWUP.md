@@ -263,3 +263,20 @@ and should follow the same pattern in a future pass:
   DB the single source of truth for clients with a thin read-through cache —
   eliminates the whole stale-reference bug class documented in
   src/state/index.js. Sized at 1–2 weeks, needs its own iteration.
+
+## Service boundary: src/agents (AI lead-gen)
+
+- **Assessment for extracting the AI sales dept into its own service
+  (2026-07).** Coupling points are few and clean:
+  - Entry: `src/routes/ai-sales.js` (admin-only triggers, background jobs) +
+    manual `src/agents/run-leadgen.js`.
+  - Data: `sales_*` tables (migrations 037/038) in dashboard.db — the agents'
+    ONLY touch of billing data; CRM access is a separate Postgres
+    (`CRM_DB_URL`, read-only via src/agents/twenty.js).
+  - Secrets: `ANTHROPIC_API_KEY` / `TAVILY_API_KEY` (env or app_settings).
+  - No shared in-memory state with billing; agents never touch clients[].
+  Extraction shape: move `src/agents/*` + `ai-sales.js` + sales_* migrations
+  to a new repo with its own SQLite (or the CRM Postgres), expose the same
+  triggers as HTTP endpoints, and have the dashboard call them like it calls
+  ProxySmart. Effort ~1 week; benefit — a leadgen crash can no longer take
+  down billing, and the experimental code gets its own release cycle.
