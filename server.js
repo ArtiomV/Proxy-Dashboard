@@ -1018,18 +1018,18 @@ function _computeTrends() {
   }
   return { modem, client };
 }
-function _getModemTrend() {
-  if (_modemTrendCache && (Date.now() - _trendCacheTs) < TREND_CACHE_TTL_MS) return _modemTrendCache;
-  const t = _computeTrends();
-  _modemTrendCache = t.modem; _clientTrendCache = t.client; _trendCacheTs = Date.now();
-  return _modemTrendCache;
+// Single cache-fill path for both trend maps (was: two getters duplicating
+// the same TTL logic — the second caller recomputed when only one cache was
+// warm).
+function _getTrendsCached() {
+  if ((Date.now() - _trendCacheTs) >= TREND_CACHE_TTL_MS || (!_modemTrendCache && !_clientTrendCache)) {
+    const t = _computeTrends();
+    _modemTrendCache = t.modem; _clientTrendCache = t.client; _trendCacheTs = Date.now();
+  }
+  return { modem: _modemTrendCache, client: _clientTrendCache };
 }
-function _getClientTrend() {
-  if (_clientTrendCache && (Date.now() - _trendCacheTs) < TREND_CACHE_TTL_MS) return _clientTrendCache;
-  const t = _computeTrends();
-  _modemTrendCache = t.modem; _clientTrendCache = t.client; _trendCacheTs = Date.now();
-  return _clientTrendCache;
-}
+function _getModemTrend() { return _getTrendsCached().modem; }
+function _getClientTrend() { return _getTrendsCached().client; }
 // Load from SQLite
 try {
   // Load only last 90 days to limit memory usage
@@ -2830,21 +2830,8 @@ function saveUptimeTracking() {
   } catch (e) { logger.error('[saveUptimeTracking] SQLite error:', e.message); }
 }
 
-// BUG-02: Incremental saveIpHistory — only save entries without db_id (fallback/edge case)
-function saveIpHistory() {
-  try {
-    db.transaction(() => {
-      for (const [key, entries] of Object.entries(ipHistory)) {
-        for (const e of entries) {
-          if (!e.db_id) {
-            const result = _ihInsert.run(key, e.ip || '', e.from || '', e.to || '');
-            e.db_id = result.lastInsertRowid;
-          }
-        }
-      }
-    })();
-  } catch (e) { logger.error('[saveIpHistory] SQLite error:', e.message); }
-}
+// (saveIpHistory removed 2026-07 — dead code: recordIpChange does direct
+// incremental DB writes, so no full-rewrite fallback is ever needed.)
 
 // BUG-02: recordIpChange — direct incremental DB writes (no full rewrite)
 function recordIpChange(key, oldIp, newIp, timestamp) {
@@ -3820,7 +3807,7 @@ app.use(require('./src/routes/proxies')({
   knownModems,
   saveSpeedtestHistory, speedtestHistory,
   pushSpeedtestEntry,
-  ipHistory, saveIpHistory,
+  ipHistory,
   modemRotationCache,
   fetchAllServersDataCached,
   syncRotationLog: (...args) => syncRotationLog(...args),

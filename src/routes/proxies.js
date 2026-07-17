@@ -23,7 +23,6 @@ module.exports = function createProxiesRouter(deps) {
     saveSpeedtestHistory, speedtestHistory,
     pushSpeedtestEntry,
     ipHistory,
-    saveIpHistory,
     modemRotationCache, saveRotationCache,
     saveModemMeta,
     fetchAllServersDataCached,
@@ -99,7 +98,10 @@ r.post('/api/admin/reboot_server', authMiddleware, adminMiddleware, async (req, 
     if (!serverName) return res.status(400).json({ error: 'serverName required' });
     const adminUser = users[req.user.login];
     if (!adminUser) return res.status(403).json({ error: 'Пользователь не найден' });
-    const pwdValid = adminUser.passwordHash ? await bcrypt.compare(password || '', adminUser.passwordHash) : (adminUser.password === password);
+    // Hash-only comparison. The old plaintext fallback compared against the
+    // "admin reference" password copy — a downgrade path around bcrypt.
+    if (!adminUser.passwordHash) return res.status(403).json({ error: 'Неверный пароль' });
+    const pwdValid = await bcrypt.compare(password || '', adminUser.passwordHash);
     if (!pwdValid) return res.status(403).json({ error: 'Неверный пароль' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
@@ -115,7 +117,9 @@ r.post('/api/admin/reset_complete', authMiddleware, adminMiddleware, async (req,
     if (!serverName) return res.status(400).json({ error: 'serverName required' });
     const adminUser = users[req.user.login];
     if (!adminUser) return res.status(403).json({ error: 'Пользователь не найден' });
-    const pwdValid = adminUser.passwordHash ? await bcrypt.compare(password || '', adminUser.passwordHash) : (adminUser.password === password);
+    // Hash-only comparison (see reboot_server above).
+    if (!adminUser.passwordHash) return res.status(403).json({ error: 'Неверный пароль' });
+    const pwdValid = await bcrypt.compare(password || '', adminUser.passwordHash);
     if (!pwdValid) return res.status(403).json({ error: 'Неверный пароль' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });

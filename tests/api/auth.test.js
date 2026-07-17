@@ -147,3 +147,50 @@ describe('auth middleware', () => {
     expect(res.status).toBe(200);
   });
 });
+
+describe('POST /api/admin/impersonate/:id', () => {
+  it('mints a working client session with SHORT ttl and writes an audit row', async () => {
+    const client = db.prepare('SELECT id FROM clients WHERE login = ?').get(testClientLogin);
+    expect(client).toBeTruthy();
+
+    const before = Date.now();
+    const res = await request(app)
+      .post(`/api/admin/impersonate/${client.id}`)
+      .set('X-Auth-Token', adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const token = res.body.token;
+    expect(typeof token).toBe('string');
+
+    // The impersonated session works on the client portal…
+    const probe = await request(app).get('/api/dashboard_data').set('X-Auth-Token', token);
+    expect(probe.status).not.toBe(401);
+
+    // …but expires in ~2h, not the normal 30 days.
+    const row = db.prepare(
+      'SELECT expires_at FROM sessions WHERE login = ? ORDER BY rowid DESC LIMIT 1'
+    ).get(testClientLogin);
+    expect(row).toBeTruthy();
+    const ttlMs = Number(row.expires_at) - before;
+    expect(ttlMs).toBeGreaterThan(1.8 * 3600 * 1000);
+    expect(ttlMs).toBeLessThan(2.2 * 3600 * 1000);
+
+    // …and the action is audited (who impersonated whom).
+    const audit = db.prepare(
+      "SELECT admin, details FROM audit_log WHERE action = 'impersonate' ORDER BY id DESC LIMIT 1"
+    ).get();
+    expect(audit).toBeTruthy();
+    expect(audit.details).toContain(testClientLogin);
+  });
+
+  it('returns 403 for a non-admin session', async () => {
+    const login = await request(app).post('/api/login').send({
+      login: testClientLogin, password: TEST_PASSWORD,
+    });
+    const client = db.prepare('SELECT id FROM clients WHERE login = ?').get(testClientLogin);
+    const res = await request(app)
+      .post(`/api/admin/impersonate/${client.id}`)
+      .set('X-Auth-Token', login.body.token);
+    expect(res.status).toBe(403);
+  });
+});

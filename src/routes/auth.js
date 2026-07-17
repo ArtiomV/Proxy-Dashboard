@@ -70,7 +70,13 @@ module.exports = function createAuthRouter(deps) {
     const user = users[client.login];
     if (!user) return res.status(400).json({ error: 'Client user not found' });
     const token = generateToken();
-    createSession(token, client.login, user.portNameFilter, false, Date.now() + getSessionTTL());
+    // Short TTL: the token travels via URL (?impersonate=…) into the client
+    // portal, so it can land in nginx access logs / browser history. A 2-hour
+    // window bounds that exposure (a normal session is 30 days).
+    const IMPERSONATE_TTL_MS = 2 * 3600 * 1000;
+    createSession(token, client.login, user.portNameFilter, false, Date.now() + IMPERSONATE_TTL_MS);
+    // Security-sensitive action — always audit who viewed whom.
+    auditLog(req.user.login, 'impersonate', { client_id: client.id, client_login: client.login, ip: getClientIp(req) });
     res.json({ ok: true, token, login: client.login });
   });
 
