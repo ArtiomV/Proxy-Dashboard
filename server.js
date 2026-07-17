@@ -575,9 +575,11 @@ function saveClients(clientsList) {
       //   - payments: rows without an `db_id` are NEW pushes → INSERT and
       //     stamp the returned rowid back on the entry so the next save
       //     call skips it.
-      //   - documents / closing / bills: their `id` is a hex token assigned
+      //   - documents / closing: their `id` is a hex token assigned
       //     at push time; INSERT OR IGNORE means existing rows survive, new
       //     ones get appended.
+      //   - bills: same, except insertBill upserts the one mutable column
+      //     (`status`) on conflict — in-memory status changes persist.
       //   - Deletes of individual sub-entries are NOT handled here — the
       //     route that removes the in-memory entry MUST also call the
       //     corresponding xxxDb.deleteByXxx(id). saveClients no longer

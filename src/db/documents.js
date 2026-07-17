@@ -37,15 +37,22 @@ function init(db) {
 
   S.billDeleteByClient = db.prepare('DELETE FROM bills WHERE client_id = ?');
   S.billDeleteById     = db.prepare('DELETE FROM bills WHERE id = ?');
+  // UPSERT, not INSERT OR IGNORE: status is the one mutable field, and every
+  // status writer (bill-settle, bill-status-sync, bill_status route) mutates
+  // the in-memory bill BEFORE persisting — so saveClients upserting status
+  // can never revert the DB to a stale value, it can only write the same or
+  // a newer one. This closes the foot-gun where a future code path mutates
+  // bill.status in memory, calls plain saveClients(), and silently loses the
+  // change on reload. amount/period/etc. stay insert-once (same philosophy
+  // as clients.balance, which is excluded from the clients upsert).
   S.billInsert = db.prepare(
-    'INSERT OR IGNORE INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'ON CONFLICT(id) DO UPDATE SET status=excluded.status'
   );
   S.billsByClient = db.prepare('SELECT * FROM bills WHERE client_id = ? ORDER BY created_at');
-  // billInsert is INSERT OR IGNORE (idempotent) → it can't persist a status
-  // change (paid/unpaid) to an existing row. A dedicated UPDATE is needed so
-  // «оплачен» sticks across reloads (otherwise server.js rebuilds client.bills
-  // from this table = unpaid). Same pattern as closingUpdateStatus for acts.
+  // Direct status UPDATE — still the primary persistence path (bill-settle
+  // and bill-status-sync persist immediately, without a saveClients round).
   S.billUpdateStatus = db.prepare('UPDATE bills SET status = ? WHERE id = ?');
 }
 

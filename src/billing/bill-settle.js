@@ -11,8 +11,9 @@
 //      хватает на ПОЛНУЮ сумму счёта (частичная оплата счёт не закрывает).
 //
 // Статус пишется и в client.bills (память), и напрямую в таблицу bills через
-// documentsDb.updateBillStatus — saveClients() использует INSERT OR IGNORE и
-// смену статуса существующей строки сам не персистит.
+// documentsDb.updateBillStatus (нужна немедленная персистентность без раунда
+// saveClients). saveClients() тоже подстраховывает: insertBill — UPSERT по
+// status, поэтому память и таблица расхождения не дают.
 
 function _norm(s) { return String(s || '').toLowerCase().replace(/ё/g, 'е'); }
 

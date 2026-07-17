@@ -876,9 +876,8 @@ r.post('/api/admin/clients/:id/bill_status', authMiddleware, adminMiddleware, (r
   const bill = (client.bills || []).find(b => b.id === billId);
   if (!bill) return res.status(404).json({ error: 'Bill not found' });
   bill.status = status === 'paid' ? 'paid' : 'unpaid';
-  // Persist DIRECTLY to the bills table. saveClients() uses INSERT OR IGNORE for
-  // bills, so a status change on an existing row would otherwise be dropped and
-  // server.js would rebuild client.bills as «unpaid» on the next reload.
+  // Persist DIRECTLY to the bills table for immediacy; saveClients() below is
+  // a belt-and-braces second write (insertBill upserts status on conflict).
   try { documentsDb.updateBillStatus(bill.id, bill.status); } catch (_) {}
   saveClients(clients);
   res.json({ ok: true, bill });

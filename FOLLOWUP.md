@@ -253,3 +253,13 @@ and should follow the same pattern in a future pass:
 - **admin.js (8.9k lines) still needs page-level splitting** — api() was the
   prerequisite; carve-out by tab (analytics/finance/modems/settings) is the
   next step.
+
+## State architecture
+
+- **Dual client state (memory + SQLite) — partial fix landed 2026-07.**
+  `insertBill` now upserts the mutable `status` column, closing the
+  "bill status silently lost by saveClients" foot-gun (all status writers
+  mutate memory first, so no revert risk). The BIG remaining item: make the
+  DB the single source of truth for clients with a thin read-through cache —
+  eliminates the whole stale-reference bug class documented in
+  src/state/index.js. Sized at 1–2 weeks, needs its own iteration.

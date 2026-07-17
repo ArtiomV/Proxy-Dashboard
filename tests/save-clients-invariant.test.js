@@ -98,4 +98,27 @@ describe('Stage 13.2: saveClients is additive — DB rows survive stale in-memor
     // No rows written, no matter how many times saveClients is called.
     expect(paymentsDb.listByClient(cid).length).toBe(0);
   });
+
+  it('bill status changed in memory IS persisted by saveClients (upsert on status)', () => {
+    // Contract: insertBill upserts ONLY the mutable `status` column on
+    // conflict — a future code path that mutates bill.status in memory and
+    // calls plain saveClients() must not silently lose the change.
+    const cid = makeClientRow();
+    const billId = 'b-' + crypto.randomBytes(4).toString('hex');
+    const c = {
+      id: cid, login: 'inv_' + cid, name: 'Inv', balance: 0,
+      bills: [{ id: billId, period: '2026-05', billNumber: 'B-UP', amount: 300, status: 'unpaid' }],
+    };
+    server.saveClients([c]);
+    expect(documentsDb.listBills(cid)[0].status).toBe('unpaid');
+
+    // Mutate ONLY the in-memory copy, no direct updateBillStatus call.
+    c.bills[0].status = 'paid';
+    server.saveClients([c]);
+
+    const row = documentsDb.listBills(cid)[0];
+    expect(row.status).toBe('paid');   // upsert persisted it
+    expect(row.amount).toBe(300);      // immutable fields untouched
+    expect(row.bill_number).toBe('B-UP');
+  });
 });

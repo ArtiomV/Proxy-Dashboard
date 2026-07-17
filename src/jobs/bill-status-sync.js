@@ -52,8 +52,8 @@ function create(deps) {
         const status = res.data?.Data?.paymentStatus;
         if (status === PAID_STATUS) {
           bill.status = 'paid';
-          // saveClients() делает INSERT OR IGNORE и смену статуса не персистит —
-          // пишем в таблицу напрямую (та же грабля, что в bill-settle.js).
+          // Пишем в таблицу напрямую — нужна немедленная персистентность
+          // (saveClients тоже не потеряет: insertBill — UPSERT по status).
           documentsDb.updateBillStatus(bill.id, 'paid');
           paid++;
           logger.info(`[BillStatusSync] ${client.name}: счёт ${bill.billNumber || bill.id} (${bill.amount}₽) оплачен по данным Точки`);
