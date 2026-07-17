@@ -2389,8 +2389,9 @@ function renderTrendChartNew(months){
   if(window._newTrendChart){ try{window._newTrendChart.destroy();}catch(_){} window._newTrendChart=null; }
   var cc=getChartColorsLight();
   var barOpts=Object.assign({stack:'t', borderRadius:chartStackRadius()}, CHART_BAR_STACK, {maxBarThickness:22});
-  // Полные названия месяцев из month (YYYY-MM) — ровно как в MRR (_ymRu(t.month)).
-  var labels=months.map(function(m){ return m.month ? _ymRu(m.month) : (m.label||''); });
+  // Короткие названия месяцев (Фев/Мар) — влезают горизонтально, без поворота,
+  // поэтому карточка ниже. Как в MRR.
+  var labels=months.map(function(m){ return m.month ? _ymRu(m.month,true) : (m.label||''); });
   var fact=months.map(function(m){ return m.total_gb||0; });
   var fcast=months.map(function(m){ return (m.is_current && m.forecast_gb>m.total_gb) ? (m.forecast_gb-m.total_gb) : 0; });
   window._newTrendChart=newChartSafe(cv,{
@@ -2405,7 +2406,7 @@ function renderTrendChartNew(months){
         tooltip:{mode:'index',intersect:false,
           callbacks:{label:function(ctx){return ctx.dataset.label+': '+trendFmt(ctx.parsed.y||0);},
             footer:function(items){var t=0;items.forEach(function(i){t+=i.parsed.y||0;});return 'Итого: '+trendFmt(t);}}}},
-      scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9}},grid:{display:false},border:{display:false}},
+      scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9},maxRotation:0,minRotation:0,autoSkip:false},grid:{display:false},border:{display:false}},
         y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:9},callback:function(v){return v===0?'0':(v>=1000?(v/1000)+' ТБ':v+' ГБ');}},grid:{color:cc.grid,drawTicks:false},border:{display:false}}}}
   });
 }
@@ -8100,7 +8101,7 @@ function renderMrrChart(d){
   var barOpts = Object.assign({stack:'a', borderRadius:chartStackRadius()}, CHART_BAR_STACK, {maxBarThickness:22});
   window._newFinTrendChart = newChartSafe(cv, {
     type:'bar',
-    data:{ labels:(d.trend||[]).map(function(t){return _ymRu(t.month);}),
+    data:{ labels:(d.trend||[]).map(function(t){return _ymRu(t.month,true);}),
       datasets:[
         Object.assign({label:'За ГБ', data:(d.trend||[]).map(function(t){return t.per_gb||0;}), backgroundColor:'#2f6fe0'}, barOpts),
         Object.assign({label:'За модем', data:(d.trend||[]).map(function(t){return t.per_modem||0;}), backgroundColor:'#10b981'}, barOpts)
@@ -8111,7 +8112,7 @@ function renderMrrChart(d){
         tooltip:{mode:'index',intersect:false,
           callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.parsed.y||0).toLocaleString('ru-RU')+' ₽';},
             footer:function(items){var t=0;items.forEach(function(i){t+=i.parsed.y||0;});return 'Итого: '+t.toLocaleString('ru-RU')+' ₽';}}}},
-      scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9}},grid:{display:false},border:{display:false}},
+      scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9},maxRotation:0,minRotation:0,autoSkip:false},grid:{display:false},border:{display:false}},
         y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:9},callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid,drawTicks:false},border:{display:false}}}}
   });
 }

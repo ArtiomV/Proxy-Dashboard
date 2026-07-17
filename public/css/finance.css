@@ -116,7 +116,7 @@
 #tab-dashboard .row-act:hover{background:var(--bg-2);color:var(--text-0)}
 
 /* ── «Требует внимания» — 4 карточки одинаковой ширины/высоты/стиля ── */
-#tab-dashboard #newExtWidgets>.analytics-card{height:234px;padding:14px;display:flex;flex-direction:column;overflow:hidden}
+#tab-dashboard #newExtWidgets>.analytics-card{height:206px;padding:14px;display:flex;flex-direction:column;overflow:hidden}
 /* тело каждой карточки (после заголовка) растягивается на всю высоту → графики
    и списки занимают одинаковую площадь, ряд смотрится гармонично */
 #tab-dashboard #newExtWidgets>.analytics-card>.att-grid,
