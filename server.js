@@ -22,6 +22,7 @@ const { LoginSchema, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema } = 
 const { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday } = require('./src/utils/time');
 const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator } = require('./src/utils/traffic');
 const { parseHtmlInputFields } = require('./src/utils/html-forms');  // P2-2: extracted from server.js
+const { sha256hex } = require('./src/utils/secrets');
 const proxySmart = require('./src/api/proxy-smart');
 const hourlyTraffic = require('./src/traffic/hourly');
 const { buildDocHtml: _buildDocHtml } = require('./src/documents/generator');
@@ -170,6 +171,9 @@ function runMigrations() {
   }
 }
 try {
+  // sha256hex() must exist before migration 043 runs — it hashes existing
+  // api_key rows in pure SQL. Deterministic → safe inside WHERE clauses.
+  db.function('sha256hex', { deterministic: true }, sha256hex);
   runMigrations();
 } catch (e) {
   // Migrations failed — abort startup so pm2 records the failure and ops
@@ -263,6 +267,10 @@ const dbStmts = {
   getSession: db.prepare('SELECT token, login, port_name_filter AS portNameFilter, is_admin AS isAdmin, expires_at AS expiresAt FROM sessions WHERE token = ? AND expires_at > ?'),
   insertSession: db.prepare('INSERT OR REPLACE INTO sessions (token, login, port_name_filter, is_admin, expires_at) VALUES (?, ?, ?, ?, ?)'),
   deleteSession: db.prepare('DELETE FROM sessions WHERE token = ?'),
+  // One-time upgrade path for sessions written before tokens were hashed at
+  // rest: rewrites the plaintext token PK to its SHA-256 on first successful
+  // legacy lookup, so active users are not logged out by the deploy.
+  upgradeSessionToken: db.prepare('UPDATE sessions SET token = ? WHERE token = ?'),
   deleteSessionsByLogin: db.prepare('DELETE FROM sessions WHERE login = ?'),
   cleanExpiredSessions: db.prepare('DELETE FROM sessions WHERE expires_at < ?'),
   countSessions: db.prepare('SELECT COUNT(*) as cnt FROM sessions WHERE expires_at > ?'),
@@ -487,7 +495,7 @@ function clientFromRow(r) {
     id: r.id, login: r.login, password: r.password || '', passwordHash: r.password_hash || '',
     portName: r.port_name || '', name: r.name, contact: r.contact || '', notes: r.notes || '',
     billingType: r.billing_type || 'per_gb', price: r.price || 0, currency: r.currency || 'RUB',
-    balance: r.balance || 0, apiKey: r.api_key || '', referral_code: r.referral_code || '',
+    balance: r.balance || 0, apiKey: r.api_key || '', apiKeyPrefix: r.api_key_prefix || '', referral_code: r.referral_code || '',
     referred_by: r.referred_by || null, referral_balance: r.referral_balance || 0,
     resetToken: r.reset_token || '', inn: r.inn || '', kpp: r.kpp || '',
     legalName: r.legal_name || '', contractInfo: r.contract_info || '', contractDate: r.contract_date || '',
@@ -1594,7 +1602,14 @@ function withClientsLock(fn) {
 let clientsMigrated = false;
 for (const c of clients) {
   if (!c.payments) { c.payments = []; clientsMigrated = true; }
-  if (!c.apiKey) { c.apiKey = 'prx_' + crypto.randomBytes(24).toString('hex'); clientsMigrated = true; }
+  if (!c.apiKey) {
+    // Backfill for legacy rows: only the hash is stored; the plaintext is
+    // unrecoverable by design — use "regenerate key" to issue a new one.
+    const plain = 'prx_' + crypto.randomBytes(24).toString('hex');
+    c.apiKey = sha256hex(plain);
+    c.apiKeyPrefix = plain.slice(0, 8);
+    clientsMigrated = true;
+  }
   if (!c.referral_code) { c.referral_code = 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(); clientsMigrated = true; }
   if (c.referral_balance === undefined) { c.referral_balance = 0; clientsMigrated = true; }
   if (!c.resetToken) { c.resetToken = crypto.randomBytes(16).toString('hex'); clientsMigrated = true; }
@@ -1671,7 +1686,10 @@ for (const [login, u] of Object.entries(users)) {
         price: 23,
         currency: 'RUB',
         payments: [],
-        apiKey: 'prx_' + crypto.randomBytes(24).toString('hex'),
+        // Random key, hash-only at rest: the plaintext is never persisted;
+        // admin issues a working key via "regenerate" when the client needs it.
+        apiKey: sha256hex('prx_' + crypto.randomBytes(24).toString('hex')),
+        apiKeyPrefix: '',
         referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
         referred_by: null,
         referral_balance: 0,
@@ -1705,17 +1723,32 @@ rebuildClientMaps();
 
 function getSessionTTL() { return (appSettings.session_ttl_days || 30) * 86400000; }
 
+// Sessions are hashed at rest (SHA-256): a leaked dashboard.db no longer
+// hands out live session tokens. The plaintext token exists only in the
+// client's cookie / X-Auth-Token header.
 function getSession(token) {
   if (!token) return null;
-  return dbStmts.getSession.get(token, Date.now()) || null;
+  const now = Date.now();
+  const hashed = sha256hex(token);
+  let row = dbStmts.getSession.get(hashed, now);
+  if (!row) {
+    // Legacy plaintext row (pre-hash deploy) → upgrade in place, no logout.
+    row = dbStmts.getSession.get(token, now);
+    if (row) {
+      try { dbStmts.upgradeSessionToken.run(hashed, token); } catch (_) { /* best-effort */ }
+    }
+  }
+  return row || null;
 }
 
 function createSession(token, login, portNameFilter, isAdmin, expiresAt) {
-  dbStmts.insertSession.run(token, login, portNameFilter || '', isAdmin ? 1 : 0, expiresAt);
+  dbStmts.insertSession.run(sha256hex(token), login, portNameFilter || '', isAdmin ? 1 : 0, expiresAt);
 }
 
 function deleteSession(token) {
-  if (token) dbStmts.deleteSession.run(token);
+  if (!token) return;
+  dbStmts.deleteSession.run(sha256hex(token));
+  dbStmts.deleteSession.run(token); // legacy plaintext form, if still present
 }
 
 function deleteSessionsByLogin(login) {
@@ -2183,7 +2216,7 @@ function _classifyApiAccess(req) {
   if (path.startsWith('/api/v1/')) {
     const key = String((req.headers && req.headers['x-api-key']) ||
                        (req.query && (req.query.apikey || req.query.apiKey)) || '');
-    const c = key ? clientByApiKey.get(key) : null;
+    const c = findClientByApiKey(key);
     let purpose = 'API: ' + path.replace('/api/v1/', '');
     if (path.startsWith('/api/v1/proxies')) purpose = 'Список прокси (API)';
     else if (path.startsWith('/api/v1/proxy')) purpose = 'Получить прокси (API)';
@@ -3754,13 +3787,19 @@ function _readApiKey(req, res) {
   return '';
 }
 
+// API keys are hashed at rest (migration 043): the clientByApiKey map is
+// keyed by SHA-256 of the key, so lookups hash the presented key first.
+function findClientByApiKey(key) {
+  return key ? (clientByApiKey.get(sha256hex(key)) || null) : null;
+}
+
 app.use('/api/v1', apiV1Limiter, (req, res, next) => {
   if (req.method === 'OPTIONS') return next();
   const start = Date.now();
   const apiKey = _readApiKey(req, res);
   res.on('finish', () => {
     try {
-      const client = apiKey ? clientByApiKey.get(apiKey) : null;
+      const client = findClientByApiKey(apiKey);
       // Only log requests that presented an API key. Anonymous 401s are noise.
       if (!client) return;
       const errMsg = (res.statusCode >= 400 && res.locals && res.locals.apiError) || null;
@@ -3787,7 +3826,7 @@ app.use(require('./src/routes/public-api')({
   fetchAllServersDataCached, mergeServerData,
   extractServerName, SERVER_COUNTRIES,
   parseBwToBytes, trafficBytesToGb,
-  getClientByApiKey: (k) => clientByApiKey.get(k),
+  getClientByApiKey: findClientByApiKey,
   getClientByLogin: (l) => clientByLogin.get(l),
 }));
 

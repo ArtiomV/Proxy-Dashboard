@@ -15,17 +15,18 @@ function init(db) {
   // bug once (ВАЙЛДБОКС: -8766.45 silently → 0 when saveClients raced billing).
   // Keep this in lockstep with the original SQL or that race comes back.
   S.upsert = db.prepare(`INSERT INTO clients (id, login, password, password_hash, port_name, name, contact, notes,
-    billing_type, price, currency, balance, api_key, referral_code, referred_by, referral_balance,
+    billing_type, price, currency, balance, api_key, api_key_prefix, referral_code, referred_by, referral_balance,
     reset_token, inn, kpp, legal_name, contract_info, address, auto_acts, auto_bills,
     last_traffic_snapshot, created_at, client_type, billing_paused, allow_debt, max_debt,
     sla_uptime_pct, sla_max_latency_ms, sla_max_error_pct, sla_auto_credit, contract_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       login=excluded.login, password=excluded.password, password_hash=excluded.password_hash,
       port_name=excluded.port_name, name=excluded.name, contact=excluded.contact,
       notes=excluded.notes, billing_type=excluded.billing_type, price=excluded.price,
       currency=excluded.currency,
       api_key=excluded.api_key,
+      api_key_prefix=excluded.api_key_prefix,
       referral_code=excluded.referral_code, referred_by=excluded.referred_by,
       referral_balance=excluded.referral_balance, reset_token=excluded.reset_token,
       inn=excluded.inn, kpp=excluded.kpp, legal_name=excluded.legal_name,
@@ -59,7 +60,7 @@ function upsertRow(c) {
   return S.upsert.run(
     c.id, c.login, null, c.passwordHash || '', c.portName || '', c.name || '',
     c.contact || '', c.notes || '', c.billingType || 'per_gb', c.price || 0,
-    c.currency || 'RUB', c.balance || 0, c.apiKey || '', c.referral_code || '',
+    c.currency || 'RUB', c.balance || 0, c.apiKey || '', c.apiKeyPrefix || '', c.referral_code || '',
     c.referred_by || null, c.referral_balance || 0, c.resetToken || '',
     c.inn || '', c.kpp || '', c.legalName || '', c.contractInfo || '',
     c.address || '', c.autoActs !== false ? 1 : 0, c.autoBills !== false ? 1 : 0,

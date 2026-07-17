@@ -27,9 +27,10 @@ beforeAll(async () => {
     portName, billingType: 'per_gb', price: 10, currency: 'RUB',
   });
   if (create.status !== 200) throw new Error('seed failed: ' + create.status + ' ' + JSON.stringify(create.body));
-  const row = db.prepare('SELECT api_key FROM clients WHERE login = ?').get(clientLogin);
-  apiKey = row && row.api_key;
-  if (!apiKey) throw new Error('seeded client has no api_key');
+  // Keys are hashed at rest (migration 043) — the DB column no longer holds a
+  // usable key; the plaintext is returned once in the create response.
+  apiKey = create.body && create.body.client && create.body.client.apiKey;
+  if (!apiKey) throw new Error('seeded client has no api_key in create response');
 });
 
 afterAll(() => {

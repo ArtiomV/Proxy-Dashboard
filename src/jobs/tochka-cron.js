@@ -21,6 +21,7 @@
 
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
+const { sha256hex } = require('../utils/secrets');
 
 function create(deps) {
   const {
@@ -111,7 +112,10 @@ function create(deps) {
           documents: [],
           closingDocuments: [],
           bills: [],
-          apiKey: 'prx_' + crypto.randomBytes(24).toString('hex'),
+          // Hash-only at rest (migration 043); no one sees this plaintext —
+          // admin issues a working key via regenerate when the client asks.
+          apiKey: sha256hex('prx_' + crypto.randomBytes(24).toString('hex')),
+          apiKeyPrefix: '',
           referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
           referred_by: null,
           referral_balance: 0,

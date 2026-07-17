@@ -11,6 +11,7 @@ const crypto = require('crypto');
 const fs = require('fs');
 const fsPromises = require('fs/promises');
 const path = require('path');
+const { sha256hex } = require('../utils/secrets');
 
 module.exports = function createClientsRouter(deps) {
   const {
@@ -81,7 +82,12 @@ r.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
   }
   const total = filtered.length;
   const page = filtered.slice(offset, offset + limit);
-  const safe = page.map(c => { const { password, passwordHash, ...rest } = c; return rest; });
+  // Mask the stored apiKey hash with the display prefix — the hash must never
+  // leave the server; the full key is only shown once at (re)generation.
+  const safe = page.map(c => {
+    const { password, passwordHash, ...rest } = c;
+    return { ...rest, apiKey: rest.apiKeyPrefix ? rest.apiKeyPrefix + '••••••••' : '' };
+  });
   res.json({ clients: safe, total, limit, offset });
 });
 
@@ -95,6 +101,9 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
     return res.status(400).json({ error: 'Login already exists: ' + login });
   }
   const passwordHash = await bcrypt.hash(password, 10);
+  // Only the SHA-256 hash is kept (migration 043); the plaintext key is
+  // returned ONCE in the create response and is unrecoverable afterwards.
+  const plainApiKey = 'prx_' + crypto.randomBytes(24).toString('hex');
   const client = {
     id: generateId(),
     name, portName, login,
@@ -106,7 +115,8 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
     price: parseFloat(price) || 0,
     currency: currency || 'RUB',
     payments: [],
-    apiKey: 'prx_' + crypto.randomBytes(24).toString('hex'),
+    apiKey: sha256hex(plainApiKey),
+    apiKeyPrefix: plainApiKey.slice(0, 8),
     referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
     referred_by: null,
     referral_balance: 0,
@@ -159,7 +169,9 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
   users[login] = { passwordHash, portNameFilter: portName, source: 'client', clientId: client.id };
 
   const { password: _p, passwordHash: _ph, ...safeClient } = client;
-  res.json({ ok: true, client: safeClient });
+  // One-time plaintext reveal: safeClient.apiKey is the stored SHA-256 hash;
+  // the response swaps in the real key so the admin can hand it to the client.
+  res.json({ ok: true, client: { ...safeClient, apiKey: plainApiKey } });
 });
 
 r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res) => {
@@ -666,9 +678,12 @@ r.post('/api/admin/clients/:id/regenerate_key', authMiddleware, adminMiddleware,
   
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
-  client.apiKey = 'prx_' + crypto.randomBytes(24).toString('hex');
+  // Hash-only at rest; the new plaintext is returned once, then unrecoverable.
+  const plainApiKey = 'prx_' + crypto.randomBytes(24).toString('hex');
+  client.apiKey = sha256hex(plainApiKey);
+  client.apiKeyPrefix = plainApiKey.slice(0, 8);
   saveClients(clients);
-  res.json({ ok: true, apiKey: client.apiKey });
+  res.json({ ok: true, apiKey: plainApiKey });
 });
 
   return r;

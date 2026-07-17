@@ -17,6 +17,7 @@ CREATE TABLE IF NOT EXISTS clients (
   currency        TEXT DEFAULT 'RUB',
   balance         REAL DEFAULT 0,
   api_key         TEXT UNIQUE,
+  api_key_prefix  TEXT, -- display prefix for masked UI; api_key itself is a SHA-256 hash (migration 043)
   referral_code   TEXT UNIQUE,
   referred_by     TEXT,
   referral_balance REAL DEFAULT 0,

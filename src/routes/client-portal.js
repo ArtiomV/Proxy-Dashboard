@@ -92,7 +92,9 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         liveMonthGb,
         billedMonthGb: Math.round(billedMonthGb * 1000) / 1000,
         lastHourGb,
-        apiKey: clientInfo.apiKey || ''
+        // Masked: only the prefix is shown (keys are hashed at rest since
+        // migration 043). A lost key is re-issued by admin via regenerate.
+        apiKey: clientInfo.apiKeyPrefix ? clientInfo.apiKeyPrefix + '••••••••' : ''
       };
     }
 
