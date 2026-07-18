@@ -221,168 +221,177 @@ r.get('/api/admin/api_usage', authMiddleware, adminMiddleware, (req, res) => {
 // failing section degrades to empty values instead of 502ing the whole panel.
 // Each builder returns ONLY its payload slice; the handler merges them.
 
+// Section: meta (test-pool flags, phone enrich, server list)
+function _metaSection(merged) {
+  // Flag test-pool modems so the frontend can keep headline counters
+  // consistent with the fleet roster (which excludes them) and badge the
+  // tiles. modem_meta is the source of truth for is_test_pool.
+  try { annotateTestPool(merged.status, simulatorDb.testPoolKeySet()); }
+  catch (e) { logger.warn('[data] test-pool annotate: ' + e.message); }
+  // Offline modems report an empty live PHONE_NUMBER — fill it from the
+  // persisted modem_meta so the phone still shows for disconnected modems.
+  try {
+    const _phoneMap = {};
+    for (const r of db.prepare("SELECT server_name, imei, phone FROM modem_meta WHERE phone <> ''").all()) {
+      _phoneMap[r.server_name + '|' + r.imei] = r.phone;
+    }
+    for (const m of (merged.status || [])) {
+      const md = m && m.modem_details;
+      if (!md || (md.PHONE_NUMBER && String(md.PHONE_NUMBER).trim())) continue;
+      const srv = m._server || '';
+      const raw = String(md.IMEI || '').indexOf(srv + '_') === 0 ? String(md.IMEI).slice(srv.length + 1) : String(md.IMEI || '');
+      const ph = _phoneMap[srv + '|' + raw];
+      if (ph) md.PHONE_NUMBER = ph;
+    }
+  } catch (e) { logger.warn('[data] phone enrich: ' + e.message); }
+  const servers = getApiServers().map(s => {
+    const sc = getServerCountries()[s.name] || {};
+    return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz, address: s.address || '' };
+  });
+  return { servers };
+}
+
+// Section: clients (roster modem counts + sanitized client list)
+function _clientsSection() {
+  // STABLE per-client modem count from the known_modems roster (24h
+  // retention on lastClientSeen) — see the long comment history in git;
+  // an offline modem keeps counting for 24h instead of vanishing.
+  const _ROSTER_RETAIN_MS = 24 * 3600 * 1000;
+  const _rosterNow = Date.now();
+  const _clientModemSets = {};   // portName -> Set('server|imei')
+  for (const [srvName, ports] of Object.entries(getKnownModems() || {})) {
+    for (const info of Object.values(ports || {})) {
+      if (!info || !info.portName || /^random/i.test(info.portName)) continue;
+      const id = info.imei || info.nick;
+      if (!id) continue;
+      const _lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
+      const ls = typeof _lcs === 'number' ? _lcs : Date.parse(_lcs || 0);
+      if (!ls || (_rosterNow - ls) > _ROSTER_RETAIN_MS) continue;
+      (_clientModemSets[info.portName] || (_clientModemSets[info.portName] = new Set())).add(srvName + '|' + id);
+    }
+  }
+  const _clientModemCounts = {};
+  for (const pn in _clientModemSets) _clientModemCounts[pn] = _clientModemSets[pn].size;
+  const sanitizedClients = getClients().map(c => {
+    const { password, passwordHash, ...safe } = c;
+    safe.modemCount = _clientModemCounts[c.portName] || 0;
+    return safe;
+  });
+  return { sanitizedClients };
+}
+
+function _clientsFallback() {
+  return { sanitizedClients: getClients().map(c => { const { password, passwordHash, ...safe } = c; return safe; }) };
+}
+
+// Section: billing (month aggregates + canonical revenue_30d)
+function _billingSection() {
+  // Stage 4: SQL aggregate replaces in-memory walk of `billingLedger`.
+  const clientMonthCharges = {};
+  const clientMonthGb = {};
+  // WP8 UTC→MSK fix: month prefix is a Moscow date, always.
+  const curMonthPfx = getMoscowToday().slice(0, 7);
+  const monthRows = _ledgerMonthAggStmt.all(`${curMonthPfx}%`);
+  for (const r of monthRows) {
+    const entry = r.type === 'charge'
+      ? { type: r.type, cost: r.amount, balance_before: r.balance_before, balance_after: r.balance_after }
+      : { type: r.type, amount: r.amount, balance_before: r.balance_before, balance_after: r.balance_after };
+    const exp = ledgerExpense(entry);
+    if (exp !== 0) clientMonthCharges[r.client_id] = (clientMonthCharges[r.client_id] || 0) + exp;
+    if (r.gb_used != null) clientMonthGb[r.client_id] = (clientMonthGb[r.client_id] || 0) + r.gb_used;
+  }
+  for (const k of Object.keys(clientMonthCharges)) clientMonthCharges[k] = Math.round(clientMonthCharges[k] * 100) / 100;
+  for (const k of Object.keys(clientMonthGb)) clientMonthGb[k] = Math.round(clientMonthGb[k] * 1000) / 1000;
+  // Canonical revenue (WP8): rolling 30 MSK days, charge + correction via
+  // ledgerExpense — the SAME number as /api/admin/finance_dashboard shows.
+  const revenue30d = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30 });
+  return { clientMonthCharges, clientMonthGb, revenue30d };
+}
+
+// Section: traffic (live month, last hour, today, yesterday override, trends)
+function _trafficSection(merged) {
+  const portNameToClientId = {};
+  for (const c of getClients()) {
+    if (c.portName) portNameToClientId[c.portName] = c.id;
+  }
+  // Live month traffic per client from ProxySmart real-time counters.
+  const clientLiveMonthGb = {};
+  const portNameBytes = {};
+  for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+    const pn = bwData.portName;
+    if (!pn || !portNameToClientId[pn]) continue;
+    if (!portNameBytes[pn]) portNameBytes[pn] = 0;
+    portNameBytes[pn] += parseBwToBytes(bwData.bandwidth_bytes_month_in);
+    portNameBytes[pn] += parseBwToBytes(bwData.bandwidth_bytes_month_out);
+  }
+  for (const [pn, bytes] of Object.entries(portNameBytes)) {
+    const cid = portNameToClientId[pn];
+    if (cid && bytes > 0) clientLiveMonthGb[cid] = trafficBytesToGb(bytes);
+  }
+  // Last FULLY COMPLETED hour per client (never the in-progress bucket).
+  const clientLastHourGb = {};
+  const rows = db.prepare(`
+    SELECT client_name, SUM(bytes_in + bytes_out) as total
+    FROM traffic_hourly
+    WHERE client_name != ''
+      AND hour_start = (
+        SELECT MAX(hour_start) FROM traffic_hourly
+        WHERE client_name != ''
+          AND hour_start < strftime('%Y-%m-%d %H:00', 'now')
+      )
+    GROUP BY client_name
+  `).all();
+  for (const r of rows) {
+    const cid = portNameToClientId[r.client_name];
+    if (cid) clientLastHourGb[cid] = trafficBytesToGb(r.total);
+  }
+  // Today per client from live data.
+  const clientTodayGb = {};
+  for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+    const pn = bwData.portName;
+    if (!pn || !portNameToClientId[pn]) continue;
+    const cid = portNameToClientId[pn];
+    if (!clientTodayGb[cid]) clientTodayGb[cid] = 0;
+    clientTodayGb[cid] += trafficBytesToGb(parseBwToBytes(bwData.bandwidth_bytes_day_in) + parseBwToBytes(bwData.bandwidth_bytes_day_out));
+  }
+  // Override yesterday bandwidth with recorded daily_traffic (stable, not degraded by modem restarts)
+  const _yesterdayStr = getMoscowYesterday();
+  for (const [portId, bwData] of Object.entries(merged.bandwidth || {})) {
+    const dt = getDailyTraffic()[portId]?.[_yesterdayStr];
+    if (dt) {
+      bwData.bandwidth_bytes_yesterday_in = dt.in || 0;
+      bwData.bandwidth_bytes_yesterday_out = dt.out || 0;
+    }
+  }
+  // Trends (cached 60s by the _getXxxTrend helpers).
+  const modemTrend = _getModemTrend();
+  const clientTrend = _getClientTrend();
+  return { clientLiveMonthGb, clientLastHourGb, clientTodayGb, modemTrend, clientTrend };
+}
+
+// Section: fleet (roster count + per-client «в работе»)
+function _fleetSection(merged, sanitizedClients) {
+  // Modem fleet KPI — one coherent count (src/modems/fleet.js):
+  //   total  = STABLE roster; active = online ≤48h ∪ online now;
+  //   working = active − disconnected.
+  const fleet = computeFleet(_fleetMetaStmt.all(), getUptimeTracking(), merged.status || []);
+  // Per-client «в работе» with fleet semantics (active ∩ not-dark-≥10min).
+  const _clientWorking = computeClientWorking(getKnownModems(), fleet);
+  for (const c of sanitizedClients) {
+    c.modemWorking = c.portName ? (_clientWorking[c.portName] || 0) : 0;
+  }
+  return { fleet };
+}
+
 r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const results = await getFetchAllServersDataCached()();
     const merged = getMergeServerData()(results, '*');
-
-    // ── Section: meta (test-pool flags, phone enrich, server list) ──
-    const meta = _runSection(logger, 'meta', () => {
-      // Flag test-pool modems so the frontend can keep headline counters
-      // consistent with the fleet roster (which excludes them) and badge the
-      // tiles. modem_meta is the source of truth for is_test_pool.
-      try { annotateTestPool(merged.status, simulatorDb.testPoolKeySet()); }
-      catch (e) { logger.warn('[data] test-pool annotate: ' + e.message); }
-      // Offline modems report an empty live PHONE_NUMBER — fill it from the
-      // persisted modem_meta so the phone still shows for disconnected modems.
-      try {
-        const _phoneMap = {};
-        for (const r of db.prepare("SELECT server_name, imei, phone FROM modem_meta WHERE phone <> ''").all()) {
-          _phoneMap[r.server_name + '|' + r.imei] = r.phone;
-        }
-        for (const m of (merged.status || [])) {
-          const md = m && m.modem_details;
-          if (!md || (md.PHONE_NUMBER && String(md.PHONE_NUMBER).trim())) continue;
-          const srv = m._server || '';
-          const raw = String(md.IMEI || '').indexOf(srv + '_') === 0 ? String(md.IMEI).slice(srv.length + 1) : String(md.IMEI || '');
-          const ph = _phoneMap[srv + '|' + raw];
-          if (ph) md.PHONE_NUMBER = ph;
-        }
-      } catch (e) { logger.warn('[data] phone enrich: ' + e.message); }
-      const servers = getApiServers().map(s => {
-        const sc = getServerCountries()[s.name] || {};
-        return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz, address: s.address || '' };
-      });
-      return { servers };
-    }, { servers: [] });
-
-    // ── Section: clients (roster modem counts + sanitized client list) ──
-    const clientsSec = _runSection(logger, 'clients', () => {
-      // STABLE per-client modem count from the known_modems roster (24h
-      // retention on lastClientSeen) — see the long comment history in git;
-      // an offline modem keeps counting for 24h instead of vanishing.
-      const _ROSTER_RETAIN_MS = 24 * 3600 * 1000;
-      const _rosterNow = Date.now();
-      const _clientModemSets = {};   // portName -> Set('server|imei')
-      for (const [srvName, ports] of Object.entries(getKnownModems() || {})) {
-        for (const info of Object.values(ports || {})) {
-          if (!info || !info.portName || /^random/i.test(info.portName)) continue;
-          const id = info.imei || info.nick;
-          if (!id) continue;
-          const _lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
-          const ls = typeof _lcs === 'number' ? _lcs : Date.parse(_lcs || 0);
-          if (!ls || (_rosterNow - ls) > _ROSTER_RETAIN_MS) continue;
-          (_clientModemSets[info.portName] || (_clientModemSets[info.portName] = new Set())).add(srvName + '|' + id);
-        }
-      }
-      const _clientModemCounts = {};
-      for (const pn in _clientModemSets) _clientModemCounts[pn] = _clientModemSets[pn].size;
-      const sanitizedClients = getClients().map(c => {
-        const { password, passwordHash, ...safe } = c;
-        safe.modemCount = _clientModemCounts[c.portName] || 0;
-        return safe;
-      });
-      return { sanitizedClients };
-    }, { sanitizedClients: getClients().map(c => { const { password, passwordHash, ...safe } = c; return safe; }) });
-
-    // ── Section: billing (month aggregates + canonical revenue_30d) ──
-    const billingSec = _runSection(logger, 'billing', () => {
-      // Stage 4: SQL aggregate replaces in-memory walk of `billingLedger`.
-      const clientMonthCharges = {};
-      const clientMonthGb = {};
-      // WP8 UTC→MSK fix: month prefix is a Moscow date, always.
-      const curMonthPfx = getMoscowToday().slice(0, 7);
-      const monthRows = _ledgerMonthAggStmt.all(`${curMonthPfx}%`);
-      for (const r of monthRows) {
-        const entry = r.type === 'charge'
-          ? { type: r.type, cost: r.amount, balance_before: r.balance_before, balance_after: r.balance_after }
-          : { type: r.type, amount: r.amount, balance_before: r.balance_before, balance_after: r.balance_after };
-        const exp = ledgerExpense(entry);
-        if (exp !== 0) clientMonthCharges[r.client_id] = (clientMonthCharges[r.client_id] || 0) + exp;
-        if (r.gb_used != null) clientMonthGb[r.client_id] = (clientMonthGb[r.client_id] || 0) + r.gb_used;
-      }
-      for (const k of Object.keys(clientMonthCharges)) clientMonthCharges[k] = Math.round(clientMonthCharges[k] * 100) / 100;
-      for (const k of Object.keys(clientMonthGb)) clientMonthGb[k] = Math.round(clientMonthGb[k] * 1000) / 1000;
-      // Canonical revenue (WP8): rolling 30 MSK days, charge + correction via
-      // ledgerExpense — the SAME number as /api/admin/finance_dashboard shows.
-      const revenue30d = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30 });
-      return { clientMonthCharges, clientMonthGb, revenue30d };
-    }, { clientMonthCharges: {}, clientMonthGb: {}, revenue30d: { byClient: {}, total: 0, windowDays: 30, asOf: getMoscowToday() } });
-
-    // ── Section: traffic (live month, last hour, today, yesterday, trends) ──
-    const trafficSec = _runSection(logger, 'traffic', () => {
-      const portNameToClientId = {};
-      for (const c of getClients()) {
-        if (c.portName) portNameToClientId[c.portName] = c.id;
-      }
-      // Live month traffic per client from ProxySmart real-time counters.
-      const clientLiveMonthGb = {};
-      const portNameBytes = {};
-      for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
-        const pn = bwData.portName;
-        if (!pn || !portNameToClientId[pn]) continue;
-        if (!portNameBytes[pn]) portNameBytes[pn] = 0;
-        portNameBytes[pn] += parseBwToBytes(bwData.bandwidth_bytes_month_in);
-        portNameBytes[pn] += parseBwToBytes(bwData.bandwidth_bytes_month_out);
-      }
-      for (const [pn, bytes] of Object.entries(portNameBytes)) {
-        const cid = portNameToClientId[pn];
-        if (cid && bytes > 0) clientLiveMonthGb[cid] = trafficBytesToGb(bytes);
-      }
-      // Last FULLY COMPLETED hour per client (never the in-progress bucket).
-      const clientLastHourGb = {};
-      const rows = db.prepare(`
-        SELECT client_name, SUM(bytes_in + bytes_out) as total
-        FROM traffic_hourly
-        WHERE client_name != ''
-          AND hour_start = (
-            SELECT MAX(hour_start) FROM traffic_hourly
-            WHERE client_name != ''
-              AND hour_start < strftime('%Y-%m-%d %H:00', 'now')
-          )
-        GROUP BY client_name
-      `).all();
-      for (const r of rows) {
-        const cid = portNameToClientId[r.client_name];
-        if (cid) clientLastHourGb[cid] = trafficBytesToGb(r.total);
-      }
-      // Today per client from live data.
-      const clientTodayGb = {};
-      for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
-        const pn = bwData.portName;
-        if (!pn || !portNameToClientId[pn]) continue;
-        const cid = portNameToClientId[pn];
-        if (!clientTodayGb[cid]) clientTodayGb[cid] = 0;
-        clientTodayGb[cid] += trafficBytesToGb(parseBwToBytes(bwData.bandwidth_bytes_day_in) + parseBwToBytes(bwData.bandwidth_bytes_day_out));
-      }
-      // Override yesterday bandwidth with recorded daily_traffic (stable, not degraded by modem restarts)
-      const _yesterdayStr = getMoscowYesterday();
-      for (const [portId, bwData] of Object.entries(merged.bandwidth || {})) {
-        const dt = getDailyTraffic()[portId]?.[_yesterdayStr];
-        if (dt) {
-          bwData.bandwidth_bytes_yesterday_in = dt.in || 0;
-          bwData.bandwidth_bytes_yesterday_out = dt.out || 0;
-        }
-      }
-      // Trends (cached 60s by the _getXxxTrend helpers).
-      const modemTrend = _getModemTrend();
-      const clientTrend = _getClientTrend();
-      return { clientLiveMonthGb, clientLastHourGb, clientTodayGb, modemTrend, clientTrend };
-    }, { clientLiveMonthGb: {}, clientLastHourGb: {}, clientTodayGb: {}, modemTrend: {}, clientTrend: {} });
-
-    // ── Section: fleet (roster count + per-client «в работе») ──
-    const fleetSec = _runSection(logger, 'fleet', () => {
-      // Modem fleet KPI — one coherent count (src/modems/fleet.js):
-      //   total  = STABLE roster; active = online ≤48h ∪ online now;
-      //   working = active − disconnected.
-      const fleet = computeFleet(_fleetMetaStmt.all(), getUptimeTracking(), merged.status || []);
-      // Per-client «в работе» with fleet semantics (active ∩ not-dark-≥10min).
-      const _clientWorking = computeClientWorking(getKnownModems(), fleet);
-      for (const c of clientsSec.sanitizedClients) {
-        c.modemWorking = c.portName ? (_clientWorking[c.portName] || 0) : 0;
-      }
-      return { fleet };
-    }, { fleet: { total: 0, online: 0, offline: 0, byServer: {} } });
+    const meta = _runSection(logger, 'meta', () => _metaSection(merged), { servers: [] });
+    const clientsSec = _runSection(logger, 'clients', _clientsSection, _clientsFallback());
+    const billingSec = _runSection(logger, 'billing', _billingSection, { clientMonthCharges: {}, clientMonthGb: {}, revenue30d: { byClient: {}, total: 0, windowDays: 30, asOf: getMoscowToday() } });
+    const trafficSec = _runSection(logger, 'traffic', () => _trafficSection(merged), { clientLiveMonthGb: {}, clientLastHourGb: {}, clientTodayGb: {}, modemTrend: {}, clientTrend: {} });
+    const fleetSec = _runSection(logger, 'fleet', () => _fleetSection(merged, clientsSec.sanitizedClients), { fleet: { total: 0, online: 0, offline: 0, byServer: {} } });
 
     res.json({
       connsHistory: (deps.getConnsHistory ? deps.getConnsHistory() : {}),

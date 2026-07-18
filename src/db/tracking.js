@@ -6,7 +6,13 @@ let S = {};
 
 function init(db) {
   S.ipUpsert    = db.prepare('INSERT OR REPLACE INTO ip_tracking (key, ip, updated_at) VALUES (?, ?, ?)');
-  S.utUpsert    = db.prepare('INSERT OR REPLACE INTO uptime_tracking (key, data) VALUES (?, ?)');
+  // WP7.1: uptime_tracking is normalized (migration 047) — scalar columns +
+  // uptime_daily for per-day buckets, no more JSON blob.
+  S.utUpsert    = db.prepare(`INSERT OR REPLACE INTO uptime_tracking
+    (key, total_checks, online_checks, first_check, last_check, last_online_check, offline_alerted)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`);
+  S.utDailyUpsert = db.prepare(`INSERT INTO uptime_daily (key, date, online, total) VALUES (?, ?, ?, ?)
+    ON CONFLICT(key, date) DO UPDATE SET online=excluded.online, total=excluded.total`);
   S.ihInsert    = db.prepare('INSERT INTO ip_history (key, ip, started_at, ended_at) VALUES (?, ?, ?, ?)');
   S.ihUpdateEnd = db.prepare('UPDATE ip_history SET ended_at = ? WHERE id = ?');
   S.ihDeleteById = db.prepare('DELETE FROM ip_history WHERE id = ?');
@@ -119,7 +125,9 @@ function init(db) {
 
   // Stage 8: startup-load queries previously inlined in server.js.
   S.ipAll      = db.prepare('SELECT key, ip, updated_at FROM ip_tracking');
-  S.utAll      = db.prepare('SELECT key, data FROM uptime_tracking');
+  // WP7.1: normalized read (migration 047) — columns, not a JSON blob.
+  S.utAll      = db.prepare('SELECT key, total_checks, online_checks, first_check, last_check, last_online_check, offline_alerted FROM uptime_tracking');
+  S.utDailyAll = db.prepare('SELECT key, date, online, total FROM uptime_daily');
   S.ihAllOrder = db.prepare('SELECT id, key, ip, started_at, ended_at FROM ip_history ORDER BY id ASC');
 
   // Stage 8: proxy_checks SLA aggregation — used by computeClientSlaMetrics
@@ -153,6 +161,7 @@ module.exports = {
   init,
   ipUpsertStmt:        () => S.ipUpsert,
   utUpsertStmt:        () => S.utUpsert,
+  utDailyUpsertStmt:   () => S.utDailyUpsert,
   ihInsertStmt:        () => S.ihInsert,
   ihUpdateEndStmt:     () => S.ihUpdateEnd,
   ihDeleteByIdStmt:    () => S.ihDeleteById,
@@ -172,6 +181,7 @@ module.exports = {
   rotationSelectStmt:  () => S.rotationSelect,
   ipAllStmt:           () => S.ipAll,
   utAllStmt:           () => S.utAll,
+  utDailyAllStmt:      () => S.utDailyAll,
   ihAllOrderStmt:      () => S.ihAllOrder,
   slaClientChecks24hStmt: () => S.slaClientChecks24h,
   slaClientModemsStmt:    () => S.slaClientModems,

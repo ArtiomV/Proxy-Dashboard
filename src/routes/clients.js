@@ -12,6 +12,10 @@ const fs = require('fs');
 const fsPromises = require('fs/promises');
 const path = require('path');
 const { sha256hex } = require('../utils/secrets');
+const financeEvents = require('../billing/events');   // WP7.2: cache invalidation on client mutations
+function _emitFinanceWrite() {
+  try { financeEvents.emit('finance-write'); } catch (_) { /* best-effort */ }
+}
 
 module.exports = function createClientsRouter(deps) {
   const {
@@ -148,6 +152,7 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
   }
   rebuildClientMaps();
   users[login] = { passwordHash, portNameFilter: portName, source: 'client', clientId: client.id };
+  _emitFinanceWrite();
 
   const { password: _p, passwordHash: _ph, ...safeClient } = client;
   // One-time plaintext reveal: safeClient.apiKey / resetToken are the stored
@@ -209,6 +214,7 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
   saveClients(clients);
   rebuildClientMaps();
   users[updated.login] = { passwordHash: updated.passwordHash, portNameFilter: updated.portName, source: 'client', clientId: updated.id };
+  _emitFinanceWrite();
   
   const { password: _p, passwordHash: _ph, ...safeClient } = updated;
   res.json({ ok: true, client: safeClient });
@@ -247,6 +253,7 @@ r.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, 
   rebuildClientMaps();
   delete users[removed.login];
   deleteSessionsByLogin(removed.login);
+  _emitFinanceWrite();
   auditLog(req.user.login, 'delete_client', { clientId: removed.id, clientName: removed.name, ip: getClientIp(req) });
   res.json({ ok: true });
 });

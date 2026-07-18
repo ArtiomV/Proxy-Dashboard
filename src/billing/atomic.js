@@ -23,6 +23,13 @@ let db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryPara
 let _clientUpdateReferralBalance; // Stage 13.1
 let getClientById;
 
+// WP7.2: every successful ledger write emits 'finance-write' so caches
+// (finance dashboard) invalidate through ONE hook, not per-endpoint resets.
+const financeEvents = require('./events');
+function _emitFinanceWrite() {
+  try { financeEvents.emit('finance-write'); } catch (_) { /* best-effort */ }
+}
+
 function init(deps) {
   db = deps.db;
   _clientGetBalance = deps._clientGetBalance;
@@ -121,6 +128,7 @@ function atomicCredit(clientId, amount, ledgerEntry, opts) {
     const referrer = getClientById && getClientById(referralResult.referrerId);
     if (referrer) referrer.referral_balance = referralResult.newBalance;
   }
+  _emitFinanceWrite();
   return { balanceBefore, balanceAfter, ledgerDbId, referral: referralResult };
 }
 
@@ -185,6 +193,7 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
     const referrer = getClientById && getClientById(referralResult.referrerId);
     if (referrer) referrer.referral_balance = referralResult.newBalance;
   }
+  _emitFinanceWrite();
   return { balanceBefore, balanceAfter, ledgerDbId, duplicate, referral: referralResult };
 }
 

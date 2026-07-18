@@ -206,9 +206,27 @@ CREATE TABLE IF NOT EXISTS ip_tracking (
 );
 
 -- Uptime tracking (replaces uptime_tracking.json)
+-- Normalized in migration 047 (WP7.1): scalar fields are real columns,
+-- per-day buckets live in uptime_daily. `data` is a legacy UNUSED blob
+-- column kept only so the 047 migration's json_extract backfill can read it.
 CREATE TABLE IF NOT EXISTS uptime_tracking (
   key         TEXT PRIMARY KEY,
-  data        TEXT DEFAULT '{}'
+  total_checks      INTEGER NOT NULL DEFAULT 0,
+  online_checks     INTEGER NOT NULL DEFAULT 0,
+  first_check       TEXT,
+  last_check        TEXT,
+  last_online_check TEXT,
+  offline_alerted   INTEGER NOT NULL DEFAULT 0,
+  data        TEXT DEFAULT '{}'   -- legacy, unused since migration 047
+);
+
+-- Per-day uptime buckets (normalized out of the old JSON blob's `daily` map).
+CREATE TABLE IF NOT EXISTS uptime_daily (
+  key     TEXT NOT NULL,
+  date    TEXT NOT NULL,
+  online  INTEGER NOT NULL DEFAULT 0,
+  total   INTEGER NOT NULL DEFAULT 0,
+  PRIMARY KEY (key, date)
 );
 
 -- IP history (replaces ip_history.json)

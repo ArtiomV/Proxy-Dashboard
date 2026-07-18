@@ -32,6 +32,13 @@ module.exports = function createBillingExtRouter(deps) {
   let _financeCacheTs = 0;
   let _financeCacheKey = '';
   const FINANCE_CACHE_TTL_MS = 60 * 1000;
+  // WP7.2: ONE invalidation hook for every finance-affecting write in the
+  // codebase (ledger entries, cost saves, client changes). atomic.js emits
+  // 'finance-write' on every committed ledger write; clients.js on client
+  // mutations; the cost endpoints below. Before this only the cost endpoint
+  // reset the cache manually — everything else served up to 60s of stale.
+  const financeEvents = require('../billing/events');
+  financeEvents.on('finance-write', () => { _financeCacheKey = ''; });
 
 r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) => {
   try {
@@ -81,7 +88,8 @@ r.post('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) =
       }
     })();
     auditLog(req.user.login, 'monthly_costs_save', { period, count: items.length });
-    _financeCacheKey = '';   // сброс кэша finance_dashboard — иначе Обзор до 60с показывает старые затраты
+    // Cache drop goes through the shared event bus (WP7.2).
+    try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
     res.json({ ok: true, period, saved: items.length });
   } catch (e) {
     logger.error('[monthly_costs/post]', e.message);

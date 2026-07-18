@@ -2817,8 +2817,24 @@ function getStaleKeys(hours) {
   return keys;
 }
 try {
+  // WP7.1: normalized load — scalar columns + uptime_daily buckets (was: a
+  // JSON blob per key). In-memory shape is unchanged for every reader.
   const rows = trackingDb.utAllStmt().all();
-  for (const r of rows) { try { uptimeTracking[r.key] = JSON.parse(r.data); } catch (_) { /* best-effort: error intentionally swallowed */ } }
+  for (const r of rows) {
+    uptimeTracking[r.key] = {
+      total_checks: r.total_checks || 0,
+      online_checks: r.online_checks || 0,
+      first_check: r.first_check,
+      last_check: r.last_check,
+      last_online_check: r.last_online_check,
+      offline_alerted: !!r.offline_alerted,
+      daily: {},
+    };
+  }
+  for (const d of trackingDb.utDailyAllStmt().all()) {
+    const ut = uptimeTracking[d.key];
+    if (ut) ut.daily[d.date] = { online: d.online || 0, total: d.total || 0 };
+  }
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} uptime tracking entries`);
 
   // Stage 18.9 backfill: for entries that don't yet have last_online_check
@@ -2890,6 +2906,7 @@ try {
 // ip_tracking / uptime_tracking / ip_history statements → src/db/tracking.js
 const _ipUpsert = trackingDb.ipUpsertStmt();
 const _utUpsert = trackingDb.utUpsertStmt();
+const _utDailyUpsert = trackingDb.utDailyUpsertStmt();
 const _ihInsert = trackingDb.ihInsertStmt();
 const _ihUpdateEnd = trackingDb.ihUpdateEndStmt();
 const _ihDeleteById = trackingDb.ihDeleteByIdStmt();
@@ -2909,7 +2926,19 @@ function saveUptimeTracking() {
   try {
     const batch = db.transaction(() => {
       for (const [key, data] of Object.entries(uptimeTracking)) {
-        _utUpsert.run(key, JSON.stringify(data));
+        // WP7.1: normalized write — scalar columns + per-day rows, no blob.
+        _utUpsert.run(
+          key,
+          data.total_checks || 0,
+          data.online_checks || 0,
+          data.first_check || null,
+          data.last_check || null,
+          data.last_online_check || null,
+          data.offline_alerted ? 1 : 0
+        );
+        for (const [date, d] of Object.entries(data.daily || {})) {
+          _utDailyUpsert.run(key, date, d.online || 0, d.total || 0);
+        }
       }
     });
     batch();
