@@ -81,6 +81,8 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
   // Only the SHA-256 hash is kept (migration 043); the plaintext key is
   // returned ONCE in the create response and is unrecoverable afterwards.
   const plainApiKey = 'prx_' + crypto.randomBytes(24).toString('hex');
+  // Same for the self-service reset token (migration 045).
+  const plainResetToken = crypto.randomBytes(16).toString('hex');
   const client = {
     id: generateId(),
     name, portName, login,
@@ -97,7 +99,9 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
     referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
     referred_by: null,
     referral_balance: 0,
-    resetToken: crypto.randomBytes(16).toString('hex'),
+    // Hash-only at rest (migration 045); plaintext returned once in the
+    // create response, then unrecoverable — client rotates via the portal.
+    resetToken: sha256hex(plainResetToken),
     documents: [],
     balance: 0,
     last_traffic_snapshot: { timestamp: null, month_bytes: 0 },
@@ -146,9 +150,10 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
   users[login] = { passwordHash, portNameFilter: portName, source: 'client', clientId: client.id };
 
   const { password: _p, passwordHash: _ph, ...safeClient } = client;
-  // One-time plaintext reveal: safeClient.apiKey is the stored SHA-256 hash;
-  // the response swaps in the real key so the admin can hand it to the client.
-  res.json({ ok: true, client: { ...safeClient, apiKey: plainApiKey } });
+  // One-time plaintext reveal: safeClient.apiKey / resetToken are the stored
+  // SHA-256 hashes; the response swaps in the real secrets so the admin can
+  // hand them to the client.
+  res.json({ ok: true, client: { ...safeClient, apiKey: plainApiKey, resetToken: plainResetToken } });
 });
 
 r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res) => {

@@ -1614,7 +1614,12 @@ for (const c of clients) {
   }
   if (!c.referral_code) { c.referral_code = 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(); clientsMigrated = true; }
   if (c.referral_balance === undefined) { c.referral_balance = 0; clientsMigrated = true; }
-  if (!c.resetToken) { c.resetToken = crypto.randomBytes(16).toString('hex'); clientsMigrated = true; }
+  if (!c.resetToken) {
+    // Hash-only at rest (migration 045); the plaintext of a backfilled token
+    // is never persisted — client rotates a fresh link via the portal.
+    c.resetToken = sha256hex(crypto.randomBytes(16).toString('hex'));
+    clientsMigrated = true;
+  }
   if (!c.documents) { c.documents = []; clientsMigrated = true; }
   // Billing persistence: initialize balance from total payments
   if (c.balance === undefined) {
@@ -1695,7 +1700,7 @@ for (const [login, u] of Object.entries(users)) {
         referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
         referred_by: null,
         referral_balance: 0,
-        resetToken: crypto.randomBytes(16).toString('hex'),
+        resetToken: sha256hex(crypto.randomBytes(16).toString('hex')),   // hash-only (045)
         documents: [],
         balance: 0,
         last_traffic_snapshot: { timestamp: null, month_bytes: 0 },
@@ -2250,7 +2255,8 @@ function _classifyApiAccess(req) {
   // Self-service IP rotation by link (reset token in query)
   if (path.startsWith('/api/client/reset_ip_by_token')) {
     const tok = req.query && req.query.token;
-    const c = tok ? clientByResetToken.get(String(tok)) : null;
+    // Tokens are hashed at rest (migration 045) — the map is keyed by hash.
+    const c = tok ? clientByResetToken.get(sha256hex(String(tok))) : null;
     return { type: 'reset_link', clientId: c && c.id,
              clientName: (c && (c.portName || c.name)) || '(неизв. токен)',
              identity: tok ? ('…' + String(tok).slice(-4)) : '', purpose: 'Ротация IP по ссылке' };

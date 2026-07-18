@@ -16,7 +16,7 @@ import { bootApp, asAdmin } from '../_helpers/app.js';
 import { createRequire } from 'module';
 const cjs = createRequire(import.meta.url);
 
-let app, db, adminToken, resetToken, portName, clientLogin;
+let app, db, adminToken, resetToken, portName, clientLogin, clientPassword;
 const ROSTER_NICK = 'OWN_roster_' + crypto.randomBytes(2).toString('hex');
 const HISTORY_NICK = 'OWN_hist_' + crypto.randomBytes(2).toString('hex');
 const OTHER_NICK = 'OWN_other_' + crypto.randomBytes(2).toString('hex');
@@ -29,13 +29,16 @@ beforeAll(async () => {
   adminToken = asAdmin();
   clientLogin = 'own_' + crypto.randomBytes(3).toString('hex');
   portName = 'own_p_' + crypto.randomBytes(2).toString('hex');
+  clientPassword = 'pw_' + crypto.randomBytes(4).toString('hex');
   const create = await request(app).post('/api/admin/clients').set('X-Auth-Token', adminToken).send({
-    name: 'Ownership Test', login: clientLogin, password: 'pw_' + crypto.randomBytes(4).toString('hex'),
+    name: 'Ownership Test', login: clientLogin, password: clientPassword,
     portName, billingType: 'per_gb', price: 10, currency: 'RUB',
   });
   if (create.status !== 200) throw new Error('seed failed: ' + JSON.stringify(create.body));
-  resetToken = db.prepare('SELECT reset_token FROM clients WHERE login = ?').get(clientLogin).reset_token;
-  if (!resetToken) throw new Error('no reset_token on seeded client');
+  // Tokens are hashed at rest (migration 045) — the DB column no longer holds
+  // a usable token; the plaintext is returned once in the create response.
+  resetToken = create.body && create.body.client && create.body.client.resetToken;
+  if (!resetToken) throw new Error('no reset_token in create response');
 
   // HISTORY_NICK attributed via traffic history only (no roster binding).
   db.prepare(`INSERT INTO traffic_hourly
@@ -95,5 +98,38 @@ describe('WP2: reset_ip_by_token — unified ownership chain', () => {
       .get('/api/client/reset_ip_by_token')
       .query({ nick: ROSTER_NICK, token: 'deadbeef'.repeat(4) });
     expect(res.status).toBe(401);
+  });
+});
+
+describe('WP7.4: reset_link/rotate — the only way to a working link', () => {
+  it('rotate issues a new working link and kills the old one', async () => {
+    const login = await request(app).post('/api/login').send({ login: clientLogin, password: clientPassword });
+    expect(login.status).toBe(200);
+    const session = login.body.token;
+
+    const rot = await request(app).post('/api/client/reset_link/rotate').set('X-Auth-Token', session);
+    expect(rot.status).toBe(200);
+    expect(rot.body.ok).toBe(true);
+    const newToken = rot.body.token;
+    expect(typeof newToken).toBe('string');
+    expect(newToken.length).toBe(32);
+
+    // The NEW token passes the gate (404 = no servers in test env, NOT 401/403).
+    const ok = await request(app).get('/api/client/reset_ip_by_token')
+      .query({ nick: ROSTER_NICK, token: newToken });
+    expect(ok.status).toBe(404);
+
+    // The OLD token (from the create response) is dead.
+    const dead = await request(app).get('/api/client/reset_ip_by_token')
+      .query({ nick: ROSTER_NICK, token: resetToken });
+    expect(dead.status).toBe(401);
+    resetToken = newToken; // keep the suite consistent
+  });
+
+  it('credentials export no longer leaks a usable resetToken', async () => {
+    const login = await request(app).post('/api/login').send({ login: clientLogin, password: clientPassword });
+    const exp = await request(app).get('/api/client/credentials_export').set('X-Auth-Token', login.body.token);
+    expect(exp.status).toBe(200);
+    expect(exp.body.resetToken).toBe('');
   });
 });

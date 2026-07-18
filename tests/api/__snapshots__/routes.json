@@ -189,6 +189,7 @@
   "POST /api/admin/usb_reset",
   "POST /api/client/reset_ip",
   "POST /api/client/reset_ip_by_token",
+  "POST /api/client/reset_link/rotate",
   "POST /api/client/set_rotation",
   "POST /api/login",
   "POST /api/logout",

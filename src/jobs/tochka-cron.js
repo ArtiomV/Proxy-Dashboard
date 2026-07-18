@@ -119,7 +119,7 @@ function create(deps) {
           referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
           referred_by: null,
           referral_balance: 0,
-          resetToken: crypto.randomBytes(16).toString('hex'),
+          resetToken: sha256hex(crypto.randomBytes(16).toString('hex')),   // hash-only (045)
           balance: 0,
           last_traffic_snapshot: { timestamp: null, month_bytes: 0 },
           inn: '', kpp: '', legalName: '', contractInfo: '', address: '',

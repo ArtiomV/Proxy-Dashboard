@@ -17,8 +17,10 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
+const crypto = require('crypto');
 const { tochkaRequest } = require('../tochka/api');
 const { isModemOwned } = require('../modems/ownership');
+const { sha256hex } = require('../utils/secrets');
 
 module.exports = function createClientPortalRouter(deps) {
   const {
@@ -252,7 +254,8 @@ r.get('/api/client/reset_ip_by_token', resetTokenLimiter, _resetIpHandler);
 async function _resetIpImpl(req, res) {
   const { nick, token } = req.query;
   if (!nick || !token) return res.status(400).json({ error: 'nick and token required' });
-  const client = clientByResetToken.get(token);
+  // Tokens are hashed at rest (migration 045) — the map is keyed by hash.
+  const client = clientByResetToken.get(sha256hex(String(token)));
   if (!client) return res.status(401).json({ error: 'Invalid token' });
   // Verify nick belongs to this client (WP2: live → roster → history; a new
   // client without traffic history passes via the live/roster steps).
@@ -392,9 +395,30 @@ r.get('/api/client/credentials_export', authMiddleware, async (req, res) => {
       credentials,
       clientName: req.user.login,
       exportDate: new Date().toISOString(),
-      resetToken: clientInfo ? clientInfo.resetToken : ''
+      // Migration 045: tokens are hashed at rest — the export can no longer
+      // carry the usable token. Get a fresh link via reset_link/rotate.
+      resetToken: ''
     });
   } catch (err) { res.status(502).json({ error: 'Export failed', details: err.message }); }
+});
+
+// Issue a NEW self-service reset link (WP7.4). Generates a fresh token,
+// stores only its SHA-256 hash, and returns the plaintext + URL ONCE —
+// the previous link dies immediately (rotation, not duplication).
+r.post('/api/client/reset_link/rotate', authMiddleware, (req, res) => {
+  const client = clientByLogin.get(req.user.login);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const plain = crypto.randomBytes(16).toString('hex');
+  // Keep the lookup map in sync surgically (a full rebuildClientMaps() would
+  // re-key every map for one token change; the client object identity is
+  // stable, so re-keying just this entry is safe).
+  if (client.resetToken) clientByResetToken.delete(client.resetToken);
+  client.resetToken = sha256hex(plain);
+  clientByResetToken.set(client.resetToken, client);
+  saveClients(clients);
+  try { auditLog(req.user.login, 'client_reset_link_rotate', { ip: getClientIp(req) }); } catch (_) { /* best-effort */ }
+  const base = req.protocol + '://' + (req.get('host') || '');
+  res.json({ ok: true, token: plain, url: `${base}/api/client/reset_ip_by_token?token=${plain}&nick=` });
 });
 
 r.get('/api/client/referral', authMiddleware, (req, res) => {
