@@ -745,6 +745,12 @@
   },
   {
     "type": "table",
+    "name": "known_modems",
+    "tbl_name": "known_modems",
+    "sql": "CREATE TABLE known_modems ( server_name TEXT NOT NULL, port_key TEXT NOT NULL, data TEXT NOT NULL DEFAULT '{}', updated_at TEXT DEFAULT (datetime('now')), PRIMARY KEY (server_name, port_key) )"
+  },
+  {
+    "type": "table",
     "name": "kv_store",
     "tbl_name": "kv_store",
     "sql": "CREATE TABLE kv_store ( key TEXT PRIMARY KEY, value TEXT NOT NULL DEFAULT '{}', updated_at TEXT NOT NULL DEFAULT (datetime('now')) )"

@@ -1181,21 +1181,47 @@ function refreshPortKeyMapping(allServerResults) {
 let lastBillingRunSummary = null;
 let lastReconciliationMonth = (_kvGet.get('last_reconciliation_month') || {}).value || '';
 
-const KNOWN_MODEMS_FILE = path.join(__dirname, 'known_modems.json');
+const KNOWN_MODEMS_FILE = path.join(__dirname, 'known_modems.json');   // legacy, read-only import source
 // Stage 14.1: stable reference via state. Load mutates in place.
 const knownModems = stateMod.state.knownModems; // { serverName: { portId: { portName, imei, nick, model, portInfo, lastSeen } } }
 try {
-  if (fs.existsSync(KNOWN_MODEMS_FILE)) {
+  // WP4: the roster lives in the known_modems table (backup-complete). The
+  // JSON file is imported one-shot when the table is still empty, then
+  // ignored forever.
+  const kmRows = db.prepare('SELECT server_name, port_key, data FROM known_modems').all();
+  if (kmRows.length) {
+    const km = {};
+    for (const r of kmRows) {
+      try {
+        (km[r.server_name] || (km[r.server_name] = {}))[r.port_key] = JSON.parse(r.data || '{}');
+      } catch (_) { /* skip a broken row, keep the rest */ }
+    }
+    stateMod.setKnownModems(km);
+    logger.info(`[SQLite] Loaded known_modems roster (${kmRows.length} entries)`);
+  } else if (fs.existsSync(KNOWN_MODEMS_FILE)) {
     stateMod.setKnownModems(JSON.parse(fs.readFileSync(KNOWN_MODEMS_FILE, 'utf8')));
+    logger.info('[SQLite] known_modems table empty — imported legacy known_modems.json (will persist to DB on first save)');
   }
 } catch (e) { logger.error('Failed to load known_modems:', e.message); }
 
 function saveKnownModems() {
-  // Stage 15.1: explicit .catch so a write failure is surfaced even if a
-  // future safeWriteFile internal change stops swallowing rejections.
-  // Returning the promise lets future callers `await` if needed.
-  return safeWriteFile(KNOWN_MODEMS_FILE, JSON.stringify(knownModems, null, 2))
-    .catch(e => { logger.error('[saveKnownModems] write failed:', e.message); });
+  // WP4: persist to SQLite instead of the JSON file (the roster is now part
+  // of every dashboard.db backup). Full wipe+rewrite in one transaction —
+  // same semantics the file write had: entries gone from memory are gone
+  // from storage.
+  try {
+    db.transaction(() => {
+      db.prepare('DELETE FROM known_modems').run();
+      const upsert = db.prepare(
+        "INSERT OR REPLACE INTO known_modems (server_name, port_key, data, updated_at) VALUES (?, ?, ?, datetime('now'))");
+      for (const [srv, ports] of Object.entries(knownModems)) {
+        for (const [pk, info] of Object.entries(ports || {})) {
+          upsert.run(srv, pk, JSON.stringify(info || {}));
+        }
+      }
+    })();
+  } catch (e) { logger.error('[saveKnownModems] write failed:', e.message); }
+  return Promise.resolve();
 }
 
 // 041: soft-deleted modems — in-memory mirror of modem_meta.deleted=1 for fast
@@ -5370,4 +5396,4 @@ process.on('uncaughtException', (err) => {
 // Expose internals for the supertest harness (NODE_ENV=test). Production
 // code paths don't reach for this — the start-via-`node server.js` flow
 // runs to completion above and never `require()`s its own exports.
-module.exports = { app, db, saveClients, injectOfflineModems, knownModems };
+module.exports = { app, db, saveClients, injectOfflineModems, knownModems, saveKnownModems };

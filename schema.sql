@@ -244,6 +244,16 @@ CREATE TABLE IF NOT EXISTS kv_store (
   updated_at TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
+-- Port→client binding roster (WP4 — was known_modems.json, which lived
+-- outside every backup). One row per (server_name, port_key), payload JSON.
+CREATE TABLE IF NOT EXISTS known_modems (
+  server_name TEXT NOT NULL,
+  port_key    TEXT NOT NULL,
+  data        TEXT NOT NULL DEFAULT '{}',
+  updated_at  TEXT DEFAULT (datetime('now')),
+  PRIMARY KEY (server_name, port_key)
+);
+
 -- Modem metadata cache (static data from ProxySmart, updated periodically)
 CREATE TABLE IF NOT EXISTS modem_meta (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
