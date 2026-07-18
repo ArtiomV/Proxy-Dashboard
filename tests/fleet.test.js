@@ -176,3 +176,24 @@ describe('computeFleet — glitched-to-random credit', () => {
     expect(f.working).toBe(1);
   });
 });
+
+describe('annotateTestPool', () => {
+  const { annotateTestPool } = require('../src/modems/fleet.js');
+  it('flags live entries whose (server, nick) is in the pool set', () => {
+    const status = [
+      { _server: 'S1', modem_details: { NICK: 'MD_A' }, net_details: {} },
+      { _server: 'S1', modem_details: { NICK: 'MD_TEST' }, net_details: {} },
+      { _server: 'S2', modem_details: { NICK: 'MD_TEST' }, net_details: {} }, // same nick, other server
+    ];
+    annotateTestPool(status, new Set(['S1|MD_TEST']));
+    expect(status[0].isTestPool).toBeUndefined();
+    expect(status[1].isTestPool).toBe(true);
+    expect(status[2].isTestPool).toBeUndefined();
+  });
+  it('tolerates empty pool / null input without touching entries', () => {
+    const status = [{ _server: 'S1', modem_details: { NICK: 'MD_A' } }];
+    annotateTestPool(status, new Set());
+    expect(status[0].isTestPool).toBeUndefined();
+    expect(annotateTestPool(null, new Set(['S1|MD_A']))).toBe(null);
+  });
+});

@@ -8,7 +8,8 @@
 // during mount-time evaluation.
 
 const express = require('express');
-const { computeFleet } = require('../modems/fleet');
+const { computeFleet, annotateTestPool } = require('../modems/fleet');
+const simulatorDb = require('../db/simulator');
 
 module.exports = function createOpsExtRouter(deps) {
   const {
@@ -203,6 +204,11 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
   try {
     const results = await getFetchAllServersDataCached()();
     const merged = getMergeServerData()(results, '*');
+    // Flag test-pool modems so the frontend can keep headline counters
+    // consistent with the fleet roster (which excludes them) and badge the
+    // tiles. modem_meta is the source of truth for is_test_pool.
+    try { annotateTestPool(merged.status, simulatorDb.testPoolKeySet()); }
+    catch (e) { logger.warn('[data] test-pool annotate: ' + e.message); }
     // Offline modems report an empty live PHONE_NUMBER — fill it from the
     // persisted modem_meta so the phone still shows for disconnected modems.
     try {

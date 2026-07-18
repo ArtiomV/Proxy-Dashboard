@@ -159,4 +159,22 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
   return out;
 }
 
-module.exports = { computeFleet };
+// annotateTestPool(statusArr, poolKeySet) — flags live modem entries whose
+// (server, nick) belongs to the simulator test pool (`is_test_pool=1` in
+// modem_meta). computeFleet's roster excludes test modems from fleet totals,
+// and the admin UI needs the same knowledge to (a) keep headline counters
+// fleet-consistent and (b) badge test tiles so operators see WHY a tile
+// isn't counted. Pure: mutates the passed entries, returns the array.
+// Keys are 'server|nick' — same shape as simulatorDb.testPoolKeySet().
+function annotateTestPool(statusArr, poolKeySet) {
+  if (!Array.isArray(statusArr) || !poolKeySet || !poolKeySet.size) return statusArr;
+  for (const m of statusArr) {
+    if (!m) continue;
+    const srv = m._server || '';
+    const nick = ((m.modem_details && m.modem_details.NICK) || m.nick || '').trim();
+    if (nick && poolKeySet.has(srv + '|' + nick)) m.isTestPool = true;
+  }
+  return statusArr;
+}
+
+module.exports = { computeFleet, annotateTestPool };

@@ -641,7 +641,7 @@ document.addEventListener('keydown',function(e){
   }
 });
 
-function processData(){if(!currentData)return;_initServers(currentData.servers);var downSet={};(currentData.cachedServers||[]).forEach(function(s){downSet[s.name]=true;});var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,_cached:!!m._cached,_serverDown:!!downSet[m._server],nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S\d+_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isOnline:!m._cached&&!downSet[m._server]&&(m.net_details?m.net_details.IS_ONLINE==='yes':false),isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',band:(function(){var b=(m.net_details?String(m.net_details.BAND||''):'').trim();return(b&&b!=='?')?b:''})(),simStatus:(m.net_details?String(m.net_details.SimStatus||'').toUpperCase().trim():''),httpRedirect:(function(){var r=m.net_details?m.net_details.HTTP_REDIRECT_IMPOSED:null;if(r==null)return false;var s=String(r).toLowerCase().trim();return!!s&&['no','null','0','false','none'].indexOf(s)<0})(),rebootScore:(function(){var r=m.modem_details?m.modem_details.REBOOT_SCORE:null;return(r!=null&&r!==''&&isFinite(+r))?Math.round(+r):null})(),isLocked:(m.IS_LOCKED===true||m.IS_LOCKED==='true'),msg:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join('; '):(b||'');return [m.MSG||'',b].filter(Boolean).join('; ').trim()})(),webappDown:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join(' '):(b||'');return /web ?app|not available|restart the modem/i.test(String(m.MSG||'')+' '+b)})(),pktLoss:(function(){var p=(m.net_details?m.net_details.ping_stats:'')||'';var mm=/(\d+)\s*%\s*loss/i.exec(p);return mm?parseInt(mm[1],10):null})(),connDead:(function(){var c=String((m.net_details?m.net_details.ConnectionStatus:'')||'').toLowerCase();return /disconnect|ppp_disc|no carrier|down/.test(c)})(),ports:[]}}
+function processData(){if(!currentData)return;_initServers(currentData.servers);var downSet={};(currentData.cachedServers||[]).forEach(function(s){downSet[s.name]=true;});var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,_cached:!!m._cached,_serverDown:!!downSet[m._server],nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S\d+_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isTestPool:!!m.isTestPool,isOnline:!m._cached&&!downSet[m._server]&&(m.net_details?m.net_details.IS_ONLINE==='yes':false),isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',band:(function(){var b=(m.net_details?String(m.net_details.BAND||''):'').trim();return(b&&b!=='?')?b:''})(),simStatus:(m.net_details?String(m.net_details.SimStatus||'').toUpperCase().trim():''),httpRedirect:(function(){var r=m.net_details?m.net_details.HTTP_REDIRECT_IMPOSED:null;if(r==null)return false;var s=String(r).toLowerCase().trim();return!!s&&['no','null','0','false','none'].indexOf(s)<0})(),rebootScore:(function(){var r=m.modem_details?m.modem_details.REBOOT_SCORE:null;return(r!=null&&r!==''&&isFinite(+r))?Math.round(+r):null})(),isLocked:(m.IS_LOCKED===true||m.IS_LOCKED==='true'),msg:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join('; '):(b||'');return [m.MSG||'',b].filter(Boolean).join('; ').trim()})(),webappDown:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join(' '):(b||'');return /web ?app|not available|restart the modem/i.test(String(m.MSG||'')+' '+b)})(),pktLoss:(function(){var p=(m.net_details?m.net_details.ping_stats:'')||'';var mm=/(\d+)\s*%\s*loss/i.exec(p);return mm?parseInt(mm[1],10):null})(),connDead:(function(){var c=String((m.net_details?m.net_details.ConnectionStatus:'')||'').toLowerCase();return /disconnect|ppp_disc|no carrier|down/.test(c)})(),ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
   var bw=currentData.bandwidth||{};for(var mi in mm){var mod=mm[mi];for(var p=0;p<mod.ports.length;p++){var pt=mod.ports[p];if(bw[pt.portID])pt._bw=bw[pt.portID]}}
   // IP tracking & uptime tracking
@@ -869,6 +869,7 @@ function _msgIsNoise(s){s=String(s||'').toLowerCase();if(!s.trim())return true;
 function _serverDownInfo(srv){var cs=(currentData&&currentData.cachedServers)||[];for(var i=0;i<cs.length;i++){if(cs[i].name===srv){var ca=cs[i].cachedAt||0;return{down:true,ageMin:ca?Math.round((Date.now()-ca)/60000):0}}}return{down:false,ageMin:0}}
 function _serverDownBadge(srv){var d=_serverDownInfo(srv);if(!d.down)return'';return'<span class="srv-down-badge" title="Сервер не отвечает — показаны последние данные из кеша">⚠ Сервер недоступен'+(d.ageMin?' · '+d.ageMin+' мин назад':'')+'</span>';}
 function _modemFlags(m){var f='';
+  if(m.isTestPool)f+='<span class="mflag" style="color:var(--text-2)" title="Тестовый пул симулятора — в счётчики парка не входит">🧪</span>';
   if(m.httpRedirect)f+='<span class="mflag" style="color:var(--danger)" title="Оператор навязал редирект — SIM без денег / блок">⛔</span>';
   var ss=(m.simStatus||'').toUpperCase();if(ss&&ss!=='UNKNOWN'&&!/\bOK\b|READY/.test(ss))f+='<span class="mflag" style="color:var(--danger)" title="SIM: '+esc(ss)+'">\u{1F4F5}</span>';
   if(m.rebootScore!=null&&Number(m.rebootScore)>=70)f+='<span class="mflag" style="color:var(--warning)" title="Нужен ребут (score '+m.rebootScore+')">♻</span>';
@@ -924,16 +925,29 @@ out+='<div class="modem-tile" data-nick="'+esc(m.nick)+'" data-server="'+m.serve
 var _mkColor={webapp:'var(--danger)',sim:'var(--danger)',proxy:'var(--danger)',offline:'var(--danger)',loss:'var(--danger)',lat:'var(--warning)',err:'var(--warning)',health:'var(--warning)',reboot:'var(--warning)'};
 function renderModemsTopBar(){
   var map=(currentData&&currentData._modemMap)||{};
-  var total=0,online=0,offline=0,problem=0,free=0,stale=0,sim=0;
-  for(var k in map){var m=map[k];
+  // «Все»/«Онлайн» — ТЕ ЖЕ числа, что на карточке дашборда и в заголовках
+  // серверов: ростер fleet (без тест-пула 🧪, soft-deleted и random),
+  // «Онлайн» = working (онлайн + блип <10 мин). Раньше тут был живой подсчёт
+  // по _modemMap — отсюда и расхождения вида «91/90» против «89/90».
+  var _fl=(currentData&&currentData.fleet)||null;
+  var total,online;
+  if(_fl&&typeof _fl.total==='number'){
+    total=_fl.total;
+    online=(_fl.working!=null)?_fl.working:_fl.online;
+  }else{
+    total=0;online=0;
+    for(var k0 in map){var m0=map[k0];if(m0.isTestPool)continue;if(_isStaleModem(m0))continue;total++;var s0=getModemStatus(m0);if(s0==='online'||s0==='rotating')online++;}
+  }
+  // Остальные чипы — по живой карте, но тоже без тест-пула (это не парк).
+  var offline=0,problem=0,free=0,stale=0,sim=0;
+  for(var k in map){var m=map[k];if(m.isTestPool)continue;
     if(_isStaleModem(m)){stale++;continue;}
-    total++;var st=getModemStatus(m);
-    if(st==='online'||st==='rotating')online++;else if(st==='offline')offline++;
+    var st=getModemStatus(m);if(st==='offline')offline++;
     var _mi=_modemIssue(m);if(_mi)problem++;if(_mi&&_mi.kind==='sim')sim++;
     if(!_hasActiveClient(m))free++;
   }
   function chip(id,label,count,clr){var on=activeQuickFilter===id;return '<button class="qf-chip'+(on?' active':'')+'" data-f="'+id+'" onclick="setQuickFilter(\''+id+'\')">'+label+'<span class="qf-count"'+(clr&&!on?' style="color:'+clr+'"':'')+'>'+count+'</span></button>';}
-  var chips='<div class="qf-chips">'
+  var chips='<div class="qf-chips" title="Все/Онлайн — по парку (fleet): активные / в работе (онлайн + блип &lt;10 мин), как на дашборде. Тест-пул (🧪) в счётчики не входит">'
     +chip('all','Все',total,'')
     +chip('online','Онлайн',online,'var(--success)')
     +chip('problem','Проблемы',problem,'var(--warning)')
