@@ -195,6 +195,7 @@ kvDb.init(db);
 trafficDb.init(db);
 trackingDb.init(db);
 healthDb.init(db);          // Stage 17
+require('./src/db/analytics').init(db);   // WP6.1: analytics query layer
 operatorsDb.init(db);       // Stage 17
 // Aliases for legacy callsites that still hold raw prepared-statement refs.
 // These are passed to billing.init() and used by atomicCredit/atomicDebit
@@ -3451,6 +3452,29 @@ app.use(require('./src/routes/analytics')({
   getStaleKeys,   // Stage 18.8 — same, but raw 'S1_<imei>' keys for ip_history joins
   getStaleImeis,  // Stage 18.8 — raw IMEIs for modem_meta filters
   getUnboundNicks, // Stage 18.16 — exclude currently-unbound (no portName) modems
+}));
+
+// WP6.1: analytics carve-outs (same endpoint paths, query layer src/db/analytics.js)
+app.use(require('./src/routes/analytics-health')({
+  db, logger, authMiddleware, adminMiddleware,
+  appSettings,
+  getStaleNicks, getUnboundNicks,
+  uptimeTracking,
+}));
+app.use(require('./src/routes/analytics-capacity')({
+  logger, authMiddleware, adminMiddleware,
+  getStaleNicks, getStaleImeis,
+}));
+app.use(require('./src/routes/analytics-latency')({
+  db, logger, authMiddleware, adminMiddleware,
+  appSettings,
+  apiServers,
+  SERVER_COUNTRIES,
+  getStaleNicks, getUnboundNicks,
+  getTzOffset,
+}));
+app.use(require('./src/routes/analytics-domains')({
+  logger, authMiddleware, adminMiddleware,
 }));
 
 // Heatmap response cache: key=view|id|days, TTL 5 min.

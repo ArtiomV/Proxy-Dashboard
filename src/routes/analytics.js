@@ -1,55 +1,46 @@
 'use strict';
 //
-// src/routes/analytics.js — read-only analytics endpoints (Stage 3).
+// src/routes/analytics.js — read-only analytics endpoints.
 //
-// 11 admin-only routes powering the Analytics tab in admin.html:
-//   monthly_traffic, heatmap, modem_heatmap, latency_stats, latency_day,
-//   modem_health, rotations, ip_stats, traffic_forecast, capacity,
-//   logs_domains_full
-//
-// Each route is a SELECT-heavy read of traffic_hourly / proxy_checks /
-// rotation_log / etc. No mutations, no shared state besides the live
-// ProxySmart cache. Dependencies are dense but well-defined — factory
-// pulls every helper they need from server.js.
+// WP6.1: modem_health*/capacity/latency/logs_domains_full carved out to
+// analytics-health.js / analytics-capacity.js / analytics-latency.js /
+// analytics-domains.js. ALL SQL lives in src/db/analytics.js — routes here
+// only shape parameters and responses.
 
 const express = require('express');
+const analyticsDb = require('../db/analytics');
 const { tzModifier } = require('../utils/time');  // P2-3: shared "+N hours" builder
 
 module.exports = function createAnalyticsRouter(deps) {
-  // Bare-name destructure: these live as let/const bindings in server.js
-  // but are never REASSIGNED (only mutated), so a direct ref is safe.
-  // For ones that DO get rebound (none currently in analytics scope),
-  // pass a getter instead.
   const {
     db, logger, authMiddleware, adminMiddleware,
-    fetchAllServersDataCached, mergeServerData,
-    getMoscowToday,
-    trafficBytesToGb, parseTrafficValue, parseBwToBytes,
-    normalizeOperator,
-    SERVER_COUNTRIES,
-    computeClientSlaMetrics,
-    clients, clientById, clientByLogin,
-    dailyTraffic, ipTracking, uptimeTracking, knownModems,
-    portKeyToPortName,
-    appSettings,
+    getMoscowToday, getMoscowNow,
+    clients,
+    dailyTraffic,
     apiServers,
-    getStaleNicks,   // Stage 18.7
-    getStaleKeys,    // Stage 18.8
-    getStaleImeis,   // Stage 18.8
-    getUnboundNicks, // Stage 18.16 — currently-unbound modems (no portName)
-    getTzOffset, getMoscowNow,
+    SERVER_COUNTRIES,
+    portKeyToPortName,
+    getStaleNicks, getStaleKeys,
+    getTzOffset,
   } = deps;
   const r = express.Router();
   // Stage 4 finish: heatmap response cache is local to the router. Period →
   // {data, ts}; TTL keeps the dashboard cheap to refresh.
   const _heatmapCache = new Map();
   const HEATMAP_TTL_MS = 5 * 60 * 1000;
-  // Stage 18.16: exclude rows where the modem wasn't bound to any client at
-  // the time of the measurement. Both proxy_checks and traffic_hourly carry
-  // client_name set at write time, so filtering on it gives the "production
-  // traffic from real clients" view the operator asked for. Modems sitting
-  // idle without a port-binding pollute averages otherwise.
-  const UNBOUND_FILTER = " AND client_name != '' AND client_name IS NOT NULL";
+
+  function _serversForCountry(idKey) {
+    const serverCountryMap = {};
+    for (const s of apiServers) {
+      const cn = ((SERVER_COUNTRIES[s.name] || {}).name || '').toLowerCase();
+      if (cn) serverCountryMap[s.name] = cn;
+    }
+    const servers = [];
+    for (const [srv, cn] of Object.entries(serverCountryMap)) {
+      if (cn.includes(idKey) || idKey.includes(cn)) servers.push(srv);
+    }
+    return servers;
+  }
 
 r.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req, res) => {
   const months = Math.min(parseInt(req.query.months) || 6, 12);
@@ -57,12 +48,9 @@ r.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req, r
   const startDate = new Date(now.getFullYear(), now.getMonth() - (months - 1), 1)
     .toISOString().slice(0, 10);
   try {
-    const rows = db.prepare(
-      'SELECT substr(date,1,7) as month, SUM(bytes_in+bytes_out) as total_bytes ' +
-      'FROM daily_traffic WHERE date >= ? GROUP BY month ORDER BY month'
-    ).all(startDate);
+    const rows = analyticsDb.monthlyTraffic(startDate);
     const byMonth = {};
-    for (const r of rows) byMonth[r.month] = r.total_bytes || 0;
+    for (const row of rows) byMonth[row.month] = row.total_bytes || 0;
     // Add today's bytes from in-memory store (saved nightly, so today may be partial)
     const todayStr = now.toISOString().slice(0, 10);
     const curMonth = todayStr.slice(0, 7);
@@ -91,17 +79,15 @@ r.get('/api/analytics/monthly_traffic', authMiddleware, adminMiddleware, (req, r
           const prevGb = Math.round((byMonth[prevMStr] || 0) / 1e9 * 10) / 10;
           if (prevGb > 0) entry.forecast_gb = prevGb;
         }
-      }
-      // Include today's live bandwidth for current month (from ProxySmart API cache)
-      if (i === 0 && totalGb === 0) {
-        // Try to get current month data from daily_traffic in-memory
-        let todayTotal = 0;
-        const todayStr2 = now.toISOString().slice(0, 10);
-        for (const days of Object.values(dailyTraffic)) {
-          const t = days[todayStr2];
-          if (t) todayTotal += (t.in || 0) + (t.out || 0);
+        // Include today's live bytes for current month when nothing recorded yet
+        if (totalGb === 0) {
+          let todayTotal = 0;
+          for (const days of Object.values(dailyTraffic)) {
+            const t = days[todayStr];
+            if (t) todayTotal += (t.in || 0) + (t.out || 0);
+          }
+          if (todayTotal > 0) entry.total_gb = Math.round(todayTotal / 1e9 * 10) / 10;
         }
-        if (todayTotal > 0) entry.total_gb = Math.round(todayTotal / 1e9 * 10) / 10;
       }
       result.push(entry);
     }
@@ -122,12 +108,6 @@ r.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res
       return res.json(cached.data);
     }
     const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
-    // Build server→country mapping
-    const serverCountryMap = {};
-    for (const s of apiServers) {
-      const cn = ((SERVER_COUNTRIES[s.name] || {}).name || '').toLowerCase();
-      if (cn) serverCountryMap[s.name] = cn;
-    }
     // Date list in Moscow time (dynamic offset via getTzOffset)
     const now2 = new Date();
     const mskOffset = getTzOffset('Europe/Moscow');
@@ -138,47 +118,23 @@ r.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res
       dateList.push(d.toISOString().slice(0, 10));
     }
     const startDate = dateList[0];
-    const utcFetchStart = startDate + 'T00:00:00Z';
-    const utcFetchStartShifted = new Date(new Date(utcFetchStart).getTime() - mskOffset * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+    const utcFetchStartShifted = new Date(new Date(startDate + 'T00:00:00Z').getTime() - mskOffset * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
     const matrix = dateList.map(() => new Array(24).fill(0));
-
-    // Build SQL filter based on view type — all filtering is on per-modem columns
     const tzStr = tzModifier(mskOffset);
-    let sql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes, MAX(uncertain) as corrected FROM traffic_hourly WHERE hour_start >= ?`;
-    const params = [utcFetchStartShifted];
 
-    if (idKey !== 'all') {
-      if (view === 'country') {
-        // Find server names for this country
-        const servers = [];
-        for (const [srv, cn] of Object.entries(serverCountryMap)) {
-          if (cn.includes(idKey) || idKey.includes(cn)) servers.push(srv);
-        }
-        if (servers.length > 0) {
-          sql += ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
-          params.push(...servers);
-        }
-      } else if (view === 'operator') {
-        // Filter by operator column (case-insensitive LIKE)
-        sql += " AND LOWER(REPLACE(operator, ' ', '_')) LIKE ?";
-        params.push('%' + idKey + '%');
-      } else if (view === 'client') {
-        // Filter by client_name column (exact match)
-        sql += " AND client_name = ?";
-        params.push(id);
-      }
-    }
-
-    sql += UNBOUND_FILTER + ' GROUP BY day, hour ORDER BY day, hour';
+    const { sql, params } = analyticsDb.heatmapSql({
+      tzStr, start: utcFetchStartShifted, view, idKey, id,
+      servers: view === 'country' && idKey !== 'all' ? _serversForCountry(idKey) : [],
+    });
     const rows = db.prepare(sql).all(...params);
     let hasData = false;
     const correctedCells = dateList.map(() => new Array(24).fill(false));
     const dateIdx = new Map(dateList.map((d, i) => [d, i]));
-    for (const r of rows) {
-      const di = dateIdx.get(r.day);
-      if (di !== undefined && r.hour >= 0 && r.hour < 24) {
-        matrix[di][r.hour] = r.bytes / 1e9;
-        if (r.corrected) correctedCells[di][r.hour] = true;
+    for (const row of rows) {
+      const di = dateIdx.get(row.day);
+      if (di !== undefined && row.hour >= 0 && row.hour < 24) {
+        matrix[di][row.hour] = row.bytes / 1e9;
+        if (row.corrected) correctedCells[di][row.hour] = true;
         hasData = true;
       }
     }
@@ -187,31 +143,15 @@ r.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res
     let operator_breakdown;
     if (view === 'country' || view === 'client') {
       operator_breakdown = dateList.map(() => Array.from({ length: 24 }, () => ({})));
-      // Both the per-operator bytes AND the modem count come from this same
-      // historical query so the tooltip is internally consistent (counts sum to
-      // the active-modem total, bytes sum to the cell total). Modems whose carrier
-      // wasn't resolved are bucketed under "Неизвестный" — never dropped.
-      let opSql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, CASE WHEN operator IS NULL OR TRIM(operator) = '' THEN 'Неизвестный' ELSE operator END as op, SUM(bytes_in+bytes_out) as bytes, COUNT(DISTINCT nick) as modems FROM traffic_hourly WHERE hour_start >= ?`;
-      const opParams = [utcFetchStartShifted];
-      if (view === 'client') {
-        opSql += ' AND client_name = ?';
-        opParams.push(id);
-      } else if (view === 'country') {
-        const servers = [];
-        for (const [srv, cn] of Object.entries(serverCountryMap)) {
-          if (cn.includes(idKey) || idKey.includes(cn)) servers.push(srv);
-        }
-        if (servers.length > 0) {
-          opSql += ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
-          opParams.push(...servers);
-        }
-      }
-      opSql += UNBOUND_FILTER + ' GROUP BY day, hour, op ORDER BY day, hour, op';
+      const { sql: opSql, params: opParams } = analyticsDb.heatmapOperatorSql({
+        tzStr, start: utcFetchStartShifted, view, id,
+        servers: view === 'country' && idKey !== 'all' ? _serversForCountry(idKey) : [],
+      });
       const opRows = db.prepare(opSql).all(...opParams);
-      for (const r of opRows) {
-        const di = dateIdx.get(r.day);
-        if (di !== undefined && r.hour >= 0 && r.hour < 24 && r.op) {
-          operator_breakdown[di][r.hour][r.op] = { gb: r.bytes / 1e9, modems: r.modems };
+      for (const row of opRows) {
+        const di = dateIdx.get(row.day);
+        if (di !== undefined && row.hour >= 0 && row.hour < 24 && row.op) {
+          operator_breakdown[di][row.hour][row.op] = { gb: row.bytes / 1e9, modems: row.modems };
         }
       }
     }
@@ -227,7 +167,6 @@ r.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res
     };
     if (operator_breakdown) resp.operator_breakdown = operator_breakdown;
     _heatmapCache.set(cacheKey, { ts: Date.now(), data: resp });
-    // Bound cache size — evict oldest when > 200 entries (very defensive)
     if (_heatmapCache.size > 200) {
       const oldestKey = _heatmapCache.keys().next().value;
       _heatmapCache.delete(oldestKey);
@@ -261,18 +200,16 @@ r.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (re
     const utcStart = new Date(new Date(startDate + 'T00:00:00Z').getTime() - mskOffset2 * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
 
     // Per-CLIENT heatmap: a modem can serve several clients on separate ports.
-    // Group by client_name so each client gets its own matrix (was: one combined
-    // matrix labelled with the first client_name → only one client shown).
     const result = {};
     const dateIdx2 = new Map(dateList.map((d, i) => [d, i]));
     const tzStr2 = tzModifier(mskOffset2);
-    const rows = db.prepare(`SELECT CASE WHEN client_name IS NULL OR TRIM(client_name) = '' THEN '' ELSE client_name END as cn, strftime('%Y-%m-%d', datetime(hour_start, '${tzStr2}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr2}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? GROUP BY cn, day, hour`).all(nick, serverName, utcStart);
+    const rows = analyticsDb.modemHeatmap(tzStr2, nick, serverName, utcStart);
     const byClient = {};
-    for (const r of rows) {
-      const label = r.cn || nick;
+    for (const row of rows) {
+      const label = row.cn || nick;
       if (!byClient[label]) byClient[label] = dateList.map(() => new Array(24).fill(0));
-      const di = dateIdx2.get(r.day);
-      if (di !== undefined && r.hour >= 0 && r.hour < 24) byClient[label][di][r.hour] = r.bytes / 1e9;
+      const di = dateIdx2.get(row.day);
+      if (di !== undefined && row.hour >= 0 && row.hour < 24) byClient[label][di][row.hour] = row.bytes / 1e9;
     }
     for (const label of Object.keys(byClient)) {
       result[label] = { portId: nick, clientName: label, matrix: byClient[label] };
@@ -291,800 +228,21 @@ r.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (re
   }
 });
 
-r.get('/api/analytics/latency_stats', authMiddleware, adminMiddleware, (req, res) => {
-  try {
-    const { view = 'country', id = 'all' } = req.query;
-    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
-    const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
-
-    const mskOffset = getTzOffset('Europe/Moscow');
-    const tzStr = tzModifier(mskOffset);
-    const now2 = new Date();
-    const since = new Date(now2.getTime() - days * 86400000).toISOString();
-    // Prior period: equal-length window immediately preceding `since`.
-    const priorSince = new Date(now2.getTime() - days * 2 * 86400000).toISOString();
-    const priorUntil = since;
-
-    // Build server→country mapping
-    const serverCountryMap = {};
-    for (const s of apiServers) {
-      const cn = ((SERVER_COUNTRIES[s.name] || {}).name || '').toLowerCase();
-      if (cn) serverCountryMap[s.name] = cn;
-    }
-
-    let filter = '';
-    const filterParams = [];
-    if (idKey !== 'all') {
-      if (view === 'country') {
-        const servers = [];
-        for (const [srv, cn] of Object.entries(serverCountryMap)) {
-          if (cn.includes(idKey) || idKey.includes(cn)) servers.push(srv);
-        }
-        if (servers.length > 0) {
-          filter = ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
-          filterParams.push(...servers);
-        }
-      } else if (view === 'operator') {
-        filter = " AND LOWER(REPLACE(operator, ' ', '_')) LIKE ?";
-        filterParams.push('%' + idKey + '%');
-      } else if (view === 'client') {
-        filter = " AND client_name = ?";
-        filterParams.push(id);
-      }
-    }
-
-    // Stage 18.7: exclude modems that have been offline >12h from the
-    // overall stats. Per user: «отключённые модемы не должны влиять на
-    // статистики». Applied here for latency_stats — extend to other
-    // aggregations as needed.
-    if (typeof getStaleNicks === 'function') {
-      const stale = getStaleNicks(12);
-      if (stale.size > 0) {
-        const arr = Array.from(stale);
-        filter += ' AND nick NOT IN (' + arr.map(() => '?').join(',') + ')';
-        filterParams.push(...arr);
-      }
-    }
-    // Stage 18.16 — same shape as stale filter, but for currently-unbound modems.
-    if (typeof getUnboundNicks === 'function') {
-      const unbound = getUnboundNicks();
-      if (unbound.size > 0) {
-        const arr = Array.from(unbound);
-        filter += ' AND nick NOT IN (' + arr.map(() => '?').join(',') + ')';
-        filterParams.push(...arr);
-      }
-    }
-
-    // Current window: per-day values + counts. total_ms = full request (modem→site),
-    // connect_ms = TCP handshake to modem only. Both reported separately so the
-    // operator can tell whether slow checks are modem-side or upstream.
-    // Stage 18.7: order by day THEN connect_ms separately so we can also
-    // compute per-day connect_p95 (P95 of TCP-handshake). Was previously
-    // ordered only by total_ms which gave wrong percentile for connect_ms.
-    const dayValsSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, total_ms, connect_ms FROM proxy_checks WHERE checked_at >= ? AND total_ms IS NOT NULL AND error IS NULL${filter}${UNBOUND_FILTER} ORDER BY day, total_ms`;
-    const errSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND error IS NOT NULL${filter}${UNBOUND_FILTER} GROUP BY day`;
-    const totalSql = `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ?${filter}${UNBOUND_FILTER} GROUP BY day`;
-    const rows = db.prepare(dayValsSql).all(since, ...filterParams);
-    const errRows = db.prepare(errSql).all(since, ...filterParams);
-    const totalRows = db.prepare(totalSql).all(since, ...filterParams);
-
-    const byDay = {};
-    const byDayConnect = {};  // Stage 18.7: per-day connect_ms for connect_p95
-    const allVals = [];
-    const allConnectVals = [];
-    for (const r of rows) {
-      if (!byDay[r.day]) byDay[r.day] = [];
-      byDay[r.day].push(r.total_ms);
-      allVals.push(r.total_ms);
-      if (r.connect_ms != null) {
-        if (!byDayConnect[r.day]) byDayConnect[r.day] = [];
-        byDayConnect[r.day].push(r.connect_ms);
-        allConnectVals.push(r.connect_ms);
-      }
-    }
-    const errMap = {};
-    let totalErrs = 0;
-    for (const r of errRows) { errMap[r.day] = r.cnt; totalErrs += r.cnt; }
-    const totalMap = {};
-    let totalChecks = 0;
-    for (const r of totalRows) { totalMap[r.day] = r.cnt; totalChecks += r.cnt; }
-
-    // Percentile helper — input must already be sorted ascending.
-    const pctile = (sorted, p) => {
-      if (!sorted.length) return null;
-      const idx = Math.min(Math.ceil(sorted.length * p) - 1, sorted.length - 1);
-      return sorted[Math.max(0, idx)];
-    };
-
-    // Date list in Moscow time (consistent with heatmap)
-    const mskNow = new Date(now2.getTime() + mskOffset * 3600 * 1000);
-    const dateList = [];
-    for (let i = days - 1; i >= 0; i--) {
-      const d = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate() - i));
-      dateList.push(d.toISOString().slice(0, 10));
-    }
-
-    const result = {
-      days: dateList,
-      median_ms: [], avg_ms: [], p75_ms: [], p95_ms: [], p99_ms: [],
-      connect_p95_ms: [],     // Stage 18.7: per-day P95 of TCP-handshake
-      error_pct: [], error_count: [], total_checks: []   // Stage 18.7: + per-day error_count
-    };
-    for (const day of dateList) {
-      const vals = byDay[day] || [];
-      const cvals = byDayConnect[day] || [];
-      const total = totalMap[day] || 0;
-      const errs = errMap[day] || 0;
-      if (vals.length === 0) {
-        result.median_ms.push(null);
-        result.avg_ms.push(null);
-        result.p75_ms.push(null);
-        result.p95_ms.push(null);
-        result.p99_ms.push(null);
-      } else {
-        // vals already sorted ascending (SQL ORDER BY day, total_ms)
-        result.median_ms.push(pctile(vals, 0.5));
-        result.p75_ms.push(pctile(vals, 0.75));
-        result.p95_ms.push(pctile(vals, 0.95));
-        result.p99_ms.push(pctile(vals, 0.99));
-        result.avg_ms.push(Math.round(vals.reduce((a, b) => a + b, 0) / vals.length));
-      }
-      // connect_p95 needs its own sort — byDayConnect was filled in arrival order
-      if (cvals.length === 0) {
-        result.connect_p95_ms.push(null);
-      } else {
-        const cSorted = cvals.slice().sort((a, b) => a - b);
-        result.connect_p95_ms.push(pctile(cSorted, 0.95));
-      }
-      result.error_pct.push(total > 0 ? Math.round(errs / total * 100) : null);
-      result.error_count.push(errs);
-      result.total_checks.push(total);
-    }
-
-    // Overall percentiles across the whole window
-    const allSorted = allVals.slice().sort((a, b) => a - b);
-    const connectSorted = allConnectVals.slice().sort((a, b) => a - b);
-    const overall = {
-      total_checks: totalChecks,
-      ok_checks: allVals.length,
-      errors: totalErrs,
-      error_pct: totalChecks > 0 ? Math.round(totalErrs / totalChecks * 1000) / 10 : null,
-      p50: pctile(allSorted, 0.5),
-      p75: pctile(allSorted, 0.75),
-      p95: pctile(allSorted, 0.95),
-      p99: pctile(allSorted, 0.99),
-      // Connect-only percentiles (TCP handshake to modem, excludes upstream request)
-      connect_p50: pctile(connectSorted, 0.5),
-      connect_p75: pctile(connectSorted, 0.75),
-      connect_p95: pctile(connectSorted, 0.95),
-      connect_p99: pctile(connectSorted, 0.99),
-    };
-
-    // Distribution buckets — uses configured warn/bad thresholds.
-    // very_slow boundary is 2× bad: visibly catastrophic checks.
-    const warnMs = Number(appSettings.proxy_check_warn_ms) || 500;
-    const badMs = Number(appSettings.proxy_check_bad_ms) || 2000;
-    const verySlowMs = badMs * 2;
-    const buckets = { fast: 0, ok: 0, slow: 0, very_slow: 0 };
-    for (const v of allVals) {
-      if (v < warnMs) buckets.fast++;
-      else if (v < badMs) buckets.ok++;
-      else if (v < verySlowMs) buckets.slow++;
-      else buckets.very_slow++;
-    }
-
-    // Prior period (same filter, equal-length window immediately before `since`)
-    const priorValsSql = `SELECT total_ms, connect_ms FROM proxy_checks WHERE checked_at >= ? AND checked_at < ? AND total_ms IS NOT NULL AND error IS NULL${filter}${UNBOUND_FILTER}`;
-    const priorTotalSql = `SELECT COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND checked_at < ?${filter}${UNBOUND_FILTER}`;
-    const priorErrSql = `SELECT COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND checked_at < ? AND error IS NOT NULL${filter}${UNBOUND_FILTER}`;
-    const priorRows = db.prepare(priorValsSql).all(priorSince, priorUntil, ...filterParams);
-    const priorTotal = db.prepare(priorTotalSql).get(priorSince, priorUntil, ...filterParams).cnt || 0;
-    const priorErrs = db.prepare(priorErrSql).get(priorSince, priorUntil, ...filterParams).cnt || 0;
-    const priorSorted = priorRows.map(r => r.total_ms).sort((a, b) => a - b);
-    const priorConnectSorted = priorRows.map(r => r.connect_ms).filter(v => v != null).sort((a, b) => a - b);
-    const prior = {
-      total_checks: priorTotal,
-      errors: priorErrs,
-      error_pct: priorTotal > 0 ? Math.round(priorErrs / priorTotal * 1000) / 10 : null,
-      p50: pctile(priorSorted, 0.5),
-      p75: pctile(priorSorted, 0.75),
-      p95: pctile(priorSorted, 0.95),
-      p99: pctile(priorSorted, 0.99),
-      connect_p50: pctile(priorConnectSorted, 0.5),
-      connect_p75: pctile(priorConnectSorted, 0.75),
-      connect_p95: pctile(priorConnectSorted, 0.95),
-      connect_p99: pctile(priorConnectSorted, 0.99),
-    };
-
-    res.json({
-      ...result,
-      overall,
-      buckets,
-      prior,
-      thresholds: { warn_ms: warnMs, bad_ms: badMs, very_slow_ms: verySlowMs }
-    });
-  } catch (e) {
-    logger.error('[latency_stats]', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-r.get('/api/analytics/latency_day', authMiddleware, adminMiddleware, (req, res) => {
-  try {
-    const { view = 'country', id = 'all', date } = req.query;
-    const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
-
-    // Determine MSK date
-    const mskOffset = getTzOffset('Europe/Moscow');
-    let mskDate;
-    if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-      mskDate = date;
-    } else {
-      const now = new Date();
-      const mskNow = new Date(now.getTime() + mskOffset * 3600 * 1000);
-      mskDate = mskNow.toISOString().slice(0, 10);
-    }
-
-    // Convert MSK day boundaries to UTC
-    const dayStartMsk = new Date(mskDate + 'T00:00:00Z');
-    const dayStartUtc = new Date(dayStartMsk.getTime() - mskOffset * 3600 * 1000);
-    const dayEndUtc = new Date(dayStartUtc.getTime() + 86400000);
-    const utcFrom = dayStartUtc.toISOString();
-    const utcTo = dayEndUtc.toISOString();
-
-    // Build filter (same logic as latency_stats)
-    const serverCountryMap = {};
-    for (const s of apiServers) {
-      const cn = ((SERVER_COUNTRIES[s.name] || {}).name || '').toLowerCase();
-      if (cn) serverCountryMap[s.name] = cn;
-    }
-
-    let filter = '';
-    const params = [utcFrom, utcTo];
-    if (idKey !== 'all') {
-      if (view === 'country') {
-        const servers = [];
-        for (const [srv, cn] of Object.entries(serverCountryMap)) {
-          if (cn.includes(idKey) || idKey.includes(cn)) servers.push(srv);
-        }
-        if (servers.length > 0) {
-          filter = ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
-          params.push(...servers);
-        }
-      } else if (view === 'operator') {
-        filter = " AND LOWER(REPLACE(operator, ' ', '_')) LIKE ?";
-        params.push('%' + idKey + '%');
-      } else if (view === 'client') {
-        filter = " AND client_name = ?";
-        params.push(id);
-      }
-    }
-    // Stage 18.16 — exclude currently-unbound modems (same as latency_stats).
-    if (typeof getUnboundNicks === 'function') {
-      const unbound = getUnboundNicks();
-      if (unbound.size > 0) {
-        const arr = Array.from(unbound);
-        filter += ' AND nick NOT IN (' + arr.map(() => '?').join(',') + ')';
-        params.push(...arr);
-      }
-    }
-
-    const sql = `SELECT nick, server_name, operator, client_name, checked_at,
-      connect_ms, total_ms, status_code, error
-      FROM proxy_checks
-      WHERE checked_at >= ? AND checked_at < ?${filter}${UNBOUND_FILTER}
-      ORDER BY checked_at ASC`;
-
-    const rows = db.prepare(sql).all(...params);
-
-    // Build points with MSK time
-    const points = [];
-    let okCount = 0, errCount = 0, totalMsArr = [];
-    for (const r of rows) {
-      const utcMs = new Date(r.checked_at).getTime();
-      const mskMs = utcMs + mskOffset * 3600 * 1000;
-      const mskD = new Date(mskMs);
-      const h = mskD.getUTCHours();
-      const m = mskD.getUTCMinutes();
-      const minutes = h * 60 + m;
-      const timeStr = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-
-      points.push({
-        t: timeStr,
-        min: minutes,
-        nick: r.nick,
-        op: r.operator || '',
-        client: r.client_name || '',
-        connect: r.connect_ms,
-        total: r.total_ms,
-        status: r.status_code,
-        error: r.error || null
-      });
-
-      if (r.error) {
-        errCount++;
-      } else {
-        okCount++;
-        if (r.total_ms != null) totalMsArr.push(r.total_ms);
-      }
-    }
-
-    // Summary
-    const sorted = totalMsArr.slice().sort((a, b) => a - b);
-    const summary = {
-      total: points.length,
-      ok: okCount,
-      errors: errCount,
-      median_ms: null,
-      p95_ms: null,
-      avg_ms: null
-    };
-    if (sorted.length > 0) {
-      const mid = Math.floor(sorted.length / 2);
-      summary.median_ms = sorted.length % 2 === 0 ? Math.round((sorted[mid - 1] + sorted[mid]) / 2) : sorted[mid];
-      summary.avg_ms = Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length);
-      summary.p95_ms = sorted[Math.min(Math.ceil(sorted.length * 0.95) - 1, sorted.length - 1)];
-    }
-
-    res.json({ date: mskDate, points, summary });
-  } catch (e) {
-    logger.error('[latency_day]', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-r.get('/api/analytics/modem_health', authMiddleware, adminMiddleware, (req, res) => {
-  try {
-    const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
-    const sinceExpr = `datetime('now', '-${days} days')`;
-    const badMs = Number(appSettings.proxy_check_bad_ms) || 1500;
-    const errThreshold = Number(appSettings.error_rate_threshold) || 15;
-
-    // Base set: modems active in the period (have proxy_checks OR traffic_hourly).
-    // Deduplicates historical/moved modem_meta entries (e.g. modems migrated
-    // between servers — multiple rows with same nick). Picks the most recently
-    // updated modem_meta row per (server, nick) as authoritative source of operator.
-    // Stage 18.16 — UNBOUND_FILTER ensures "active" means active under a
-    // real client binding, not just a heartbeat-only test modem.
-    const modems = db.prepare(`
-      WITH active AS (
-        SELECT DISTINCT server_name, nick FROM proxy_checks
-        WHERE checked_at >= ${sinceExpr}${UNBOUND_FILTER}
-        UNION
-        SELECT DISTINCT server_name, nick FROM traffic_hourly
-        WHERE hour_start >= ${sinceExpr}${UNBOUND_FILTER}
-      ),
-      meta_latest AS (
-        SELECT server_name, nick, imei, operator, sim_status, reboot_score,
-               ROW_NUMBER() OVER (PARTITION BY server_name, nick ORDER BY updated_at DESC) as rn
-        FROM modem_meta
-      )
-      SELECT a.server_name, a.nick, COALESCE(m.imei, '') as imei, COALESCE(m.operator, '') as operator,
-             COALESCE(m.sim_status, '') as sim_status, m.reboot_score as reboot_score
-      FROM active a
-      LEFT JOIN meta_latest m
-        ON m.server_name = a.server_name AND m.nick = a.nick AND m.rn = 1
-      ORDER BY a.server_name, a.nick
-    `).all();
-    // Stage 18.8: stale modems (offline > stale_modem_hours, default 12) drag
-    // down summary KPI counts (good/warn/bad) forever as ghost-bad scores
-    // until manually deleted.
-    // Stage 18.14: but we still need them in the per-modem list — the modem
-    // table's «Здоровье» column was going blank for every modem that wasn't
-    // online RIGHT NOW (covered ~half the fleet, including all of S3). Now
-    // we tag rows with `stale: true` and only exclude those from the summary.
-    const staleNicks = (typeof getStaleNicks === 'function') ? getStaleNicks() : new Set();
-    // Stage 18.16: drop modems that are currently unbound (no portName). They
-    // may still have historic rows in proxy_checks/traffic_hourly from when
-    // they were attached to a client, but those shouldn't drag the «здоровье»
-    // table forever — the modem is no longer serving anyone.
-    const unboundNicks = (typeof getUnboundNicks === 'function') ? getUnboundNicks() : new Set();
-    if (unboundNicks.size > 0) {
-      const before = modems.length;
-      for (let i = modems.length - 1; i >= 0; i--) {
-        if (unboundNicks.has(modems[i].nick)) modems.splice(i, 1);
-      }
-      if (modems.length !== before) logger.debug(`[modem_health] dropped ${before - modems.length} unbound modems`);
-    }
-    if (modems.length === 0) return res.json({ modems: [], summary: { total: 0 } });
-
-    // Batch per-modem queries grouped to avoid N+1. One pass per metric.
-    const checksRows = db.prepare(`
-      SELECT server_name, nick,
-             AVG(total_ms) FILTER (WHERE error IS NULL) as avg_latency,
-             COUNT(*) as total_checks,
-             SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as err_checks
-      FROM proxy_checks
-      WHERE checked_at >= ${sinceExpr}${UNBOUND_FILTER}
-      GROUP BY server_name, nick
-    `).all();
-    const checksMap = {};
-    for (const r of checksRows) checksMap[r.server_name + '|' + r.nick] = r;
-
-    const rotRows = db.prepare(`
-      SELECT server_name, nick,
-             COUNT(*) as total,
-             SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
-             AVG(took_sec) as avg_sec
-      FROM rotation_log
-      WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL
-      GROUP BY server_name, nick
-    `).all();
-    const rotMap = {};
-    for (const r of rotRows) rotMap[r.server_name + '|' + r.nick] = r;
-
-    // Traffic totals (for the traffic_gb display only — NOT for uptime).
-    // Uptime is computed from polling data (uptimeTracking) so it reflects
-    // "modem reachable" not "client sent traffic". See uptime computation below.
-    const trafRows = db.prepare(`
-      SELECT server_name, nick, SUM(bytes_in + bytes_out) as bytes
-      FROM traffic_hourly
-      WHERE hour_start >= ${sinceExpr}${UNBOUND_FILTER}
-      GROUP BY server_name, nick
-    `).all();
-    const trafMap = {};
-    for (const r of trafRows) trafMap[r.server_name + '|' + r.nick] = r;
-
-    // Uptime — polling-based: 5-min ping checks against ProxySmart aggregated
-    // into per-day buckets in uptimeTracking[server+'_'+imei].daily[YYYY-MM-DD].
-    // online/total over the last N days = ratio. Reflects "modem available"
-    // independent of client traffic activity. (Traffic-based active_hours was
-    // misleading: a modem with no client traffic looked offline.)
-    const utCutoffDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-    function pollingUptime(server, imei) {
-      if (!imei) return null;
-      const ut = uptimeTracking[server + '_' + imei];
-      if (!ut || !ut.daily) return null;
-      let online = 0, total = 0;
-      for (const d in ut.daily) {
-        if (d >= utCutoffDate) {
-          online += ut.daily[d].online || 0;
-          total  += ut.daily[d].total  || 0;
-        }
-      }
-      if (total === 0) return null;
-      return { online, total, ratio: online / total };
-    }
-
-    const out = modems.map(m => {
-      const key = m.server_name + '|' + m.nick;
-      const ch = checksMap[key] || {};
-      const rot = rotMap[key] || {};
-      const tr = trafMap[key] || {};
-      const errPct = ch.total_checks > 0 ? (ch.err_checks / ch.total_checks) * 100 : null;
-      const latency = ch.avg_latency != null ? Math.round(ch.avg_latency) : null;
-
-      // Replaces the old traffic-based activeHours/expectedHours formula.
-      const up = pollingUptime(m.server_name, m.imei);
-      const uptimeRatio = up ? up.ratio : 0;
-      const uptimePct   = up ? Math.round(uptimeRatio * 1000) / 10 : 0;
-      const upOnline    = up ? up.online : 0;
-      const upTotal     = up ? up.total  : 0;
-
-      // Health score 0-100 — computed alongside a per-factor `breakdown` so
-      // the UI can show *why* a modem scored low (used by the «Здоровье» tab
-      // in the modem detail modal). Each breakdown entry records value+norm+
-      // impact (points subtracted from the initial 100).
-      let score = 100;
-      const breakdown = [];
-
-      // Thresholds for the health score. Calibrated to the actual modem fleet
-      // (typical baseline: ~1.8s latency, ~12s rotation). Deliberately
-      // decoupled from `proxy_check_bad_ms` — that setting controls the table
-      // cell coloring and is tuned for a different purpose.
-      const ERROR_NORMAL_PCT = 5;           // ≤ 5% is normal — no penalty
-      const LAT_WARN_MS = 2000;             // ≤ 2000ms is normal
-      const LAT_BAD_MS  = 4000;             // > 4000ms is severe
-      const ROT_NORMAL_SEC = 15;            // ≤ 15s is normal
-      const ROT_BAD_SEC    = 30;            // > 30s is severe
-
-      // Factor 1: Error rate. Norm is 0-5% (real-world traffic always has some
-      // noise from upstream / target sites). Penalty applies only above 5%:
-      // (errPct - 5) × 2 points, capped at 50.
-      const errCost = errPct != null && errPct > ERROR_NORMAL_PCT
-        ? Math.min((errPct - ERROR_NORMAL_PCT) * 2, 50)
-        : 0;
-      score -= errCost;
-      breakdown.push({
-        factor: 'error_pct',
-        label: 'Ошибки',
-        value: errPct != null ? Math.round(errPct * 10) / 10 : null,
-        unit: '%',
-        norm: '≤ ' + ERROR_NORMAL_PCT + '%',
-        warn_at: '> ' + ERROR_NORMAL_PCT + '%',
-        bad_at: '≥ ' + errThreshold + '%',
-        impact: -Math.round(errCost * 10) / 10,
-        impact_explain: errPct == null ? 'нет данных'
-          : errPct <= ERROR_NORMAL_PCT ? 'в норме (до 5%), штрафа нет'
-          : `−${Math.round(errCost*10)/10} баллов ((${Math.round(errPct*10)/10}% − ${ERROR_NORMAL_PCT}%) × 2, max −50)`,
-        status: errPct == null ? 'unknown'
-          : errPct >= errThreshold ? 'bad'
-          : errPct > ERROR_NORMAL_PCT ? 'warn'
-          : 'good',
-      });
-
-      // Factor 2: Latency — stepped multiplier so there's no harsh cliff.
-      // ≤ warn (1500ms): no penalty. warn-bad (1500-3000ms): ×0.9 (−10%).
-      // > bad (3000ms): ×0.75 (−25%).
-      const beforeLatency = score;
-      let latencyMult = 1, latencyTier = 'good';
-      if (latency != null) {
-        if (latency > LAT_BAD_MS)       { latencyMult = 0.75; latencyTier = 'bad';  }
-        else if (latency > LAT_WARN_MS) { latencyMult = 0.9;  latencyTier = 'warn'; }
-      } else {
-        latencyTier = 'unknown';
-      }
-      score *= latencyMult;
-      const latencyCost = beforeLatency - score;
-      breakdown.push({
-        factor: 'latency_ms',
-        label: 'Задержка',
-        value: latency,
-        unit: 'мс',
-        norm: '≤ ' + LAT_WARN_MS + ' мс',
-        warn_at: '> ' + LAT_WARN_MS + ' мс',
-        bad_at: '> ' + LAT_BAD_MS + ' мс',
-        impact: -Math.round(latencyCost * 10) / 10,
-        impact_explain: latency == null ? 'нет данных'
-          : latencyMult === 1 ? 'в норме, штрафа нет'
-          : `× ${latencyMult} (${latencyTier === 'bad' ? '−25%' : '−10%'}) → −${Math.round(latencyCost*10)/10} баллов`,
-        status: latencyTier,
-      });
-
-      // Factor 3: Rotation duration — new. If IP rotation takes too long the
-      // proxy effectively pauses. ≤5s normal, 5-15s ×0.95, >15s ×0.85.
-      const beforeRot = score;
-      const rotAvg = rot.avg_sec != null ? rot.avg_sec : null;
-      let rotMult = 1, rotTier = 'good';
-      if (rotAvg != null) {
-        if (rotAvg > ROT_BAD_SEC)         { rotMult = 0.85; rotTier = 'bad';  }
-        else if (rotAvg > ROT_NORMAL_SEC) { rotMult = 0.95; rotTier = 'warn'; }
-      } else if (rot.total === 0) {
-        rotTier = 'unknown';
-      }
-      score *= rotMult;
-      const rotCost = beforeRot - score;
-      breakdown.push({
-        factor: 'rotation_avg_sec',
-        label: 'Длительность ротации',
-        value: rotAvg != null ? Math.round(rotAvg * 10) / 10 : null,
-        unit: 'с',
-        norm: '≤ ' + ROT_NORMAL_SEC + ' с',
-        warn_at: '> ' + ROT_NORMAL_SEC + ' с',
-        bad_at: '> ' + ROT_BAD_SEC + ' с',
-        impact: -Math.round(rotCost * 10) / 10,
-        impact_explain: rotAvg == null ? (rot.total === 0 ? 'нет ротаций за период' : 'нет данных')
-          : rotMult === 1 ? 'в норме, штрафа нет'
-          : `× ${rotMult} (${rotTier === 'bad' ? '−15%' : '−5%'}) → −${Math.round(rotCost*10)/10} баллов`,
-        status: rotTier,
-      });
-
-      // Factor 4: Uptime — polling-based. Multiplies score by ratio of
-      // successful pings to total pings over the period.
-      const beforeUptime = score;
-      if (up) score *= uptimeRatio;
-      const uptimeCost = beforeUptime - score;
-      breakdown.push({
-        factor: 'uptime_pct',
-        label: 'Аптайм',
-        value: uptimePct,
-        unit: '%',
-        norm: '100%',
-        warn_at: '< 99%',
-        bad_at: '< 95%',
-        impact: -Math.round(uptimeCost * 10) / 10,
-        impact_explain: !up ? 'нет данных пингов'
-          : uptimeRatio >= 1 ? 'в норме, штрафа нет'
-          : `× ${Math.round(uptimeRatio*100)/100} (${upOnline} из ${upTotal} проверок онлайн, каждые 5 мин) → −${Math.round(uptimeCost*10)/10} баллов`,
-        status: !up ? 'unknown' : uptimePct >= 99 ? 'good' : uptimePct >= 95 ? 'warn' : 'bad',
-      });
-
-      // Factor 5: Device/SIM health — current ProxySmart signals (Batch 1).
-      // These are the LATEST poll values (not windowed): a live device fault
-      // should pull the score down now. SIM not healthy (e.g.
-      // MODEM_SIM_UNDETECTED) → ×0.7 (proxy effectively dead); reboot_score ≥ 70
-      // → ×0.9 (modem wants a USB reset). "UNKNOWN"/"" SIM = no data, no penalty.
-      const REBOOT_BAD = 70;
-      const _simRaw = String(m.sim_status || '').toUpperCase();
-      const _simBad = !!_simRaw && _simRaw !== 'UNKNOWN' && !/\bOK\b|READY/.test(_simRaw);
-      const _rebootHigh = m.reboot_score != null && Number(m.reboot_score) >= REBOOT_BAD;
-      const beforeDev = score;
-      let devMult = 1, devTier = 'good';
-      if (_simBad)     { devMult *= 0.7; devTier = 'bad'; }
-      if (_rebootHigh) { devMult *= 0.9; if (devTier !== 'bad') devTier = 'warn'; }
-      score *= devMult;
-      const devCost = beforeDev - score;
-      const _devParts = [];
-      if (_simBad)     _devParts.push('SIM «' + _simRaw + '» (×0.7)');
-      if (_rebootHigh) _devParts.push('reboot ' + m.reboot_score + ' (×0.9)');
-      breakdown.push({
-        factor: 'device_health',
-        label: 'SIM / ребут',
-        value: _simBad ? _simRaw : (_rebootHigh ? 'reboot ' + m.reboot_score : (_simRaw || '—')),
-        unit: '',
-        norm: 'SIM OK, reboot < ' + REBOOT_BAD,
-        warn_at: 'reboot ≥ ' + REBOOT_BAD,
-        bad_at: 'SIM не OK',
-        impact: -Math.round(devCost * 10) / 10,
-        impact_explain: (!_simBad && !_rebootHigh) ? 'в норме, штрафа нет'
-          : _devParts.join(' + ') + ` → −${Math.round(devCost * 10) / 10} баллов`,
-        status: devTier,
-      });
-
-      // Informational only (do NOT affect score, but useful in the detail view).
-      const rotFailedPct = rot.total > 0 ? (rot.failed / rot.total) * 100 : 0;
-      breakdown.push({
-        factor: 'rotations_failed_pct',
-        label: 'Неуспешные ротации',
-        value: Math.round(rotFailedPct * 10) / 10,
-        unit: '%',
-        norm: '< 5%',
-        warn_at: '> 5%',
-        bad_at: '> 15%',
-        impact: 0,
-        impact_explain: rot.total === 0 ? 'нет ротаций за период' : 'информационно, на скор не влияет',
-        status: rot.total === 0 ? 'unknown' : rotFailedPct >= 15 ? 'bad' : rotFailedPct >= 5 ? 'warn' : 'good',
-      });
-      breakdown.push({
-        factor: 'total_checks',
-        label: 'Всего проверок',
-        value: ch.total_checks || 0,
-        unit: '',
-        norm: '> 100 / день',
-        warn_at: '< 50 / день',
-        bad_at: '< 10 / день',
-        impact: 0,
-        impact_explain: 'информационно, контекст для других метрик',
-        status: 'unknown',
-      });
-
-      score = Math.max(0, Math.min(100, Math.round(score)));
-
-      return {
-        nick: m.nick,
-        server_name: m.server_name,
-        operator: m.operator || '',
-        latency_ms: latency,
-        error_pct: errPct != null ? Math.round(errPct * 10) / 10 : null,
-        total_checks: ch.total_checks || 0,
-        rotations: rot.total || 0,
-        rotations_failed_pct: Math.round(rotFailedPct * 10) / 10,
-        avg_rotation_sec: rot.avg_sec != null ? Math.round(rot.avg_sec * 10) / 10 : null,
-        traffic_gb: tr.bytes ? Math.round(tr.bytes / 1e9 * 100) / 100 : 0,
-        uptime_online_checks: upOnline,
-        uptime_total_checks: upTotal,
-        uptime_pct: uptimePct,
-        health_score: score,
-        status: score >= 80 ? 'good' : score >= 50 ? 'warn' : 'bad',
-        // Stage 18.14: flag, not exclusion. Frontend keeps the row visible so
-        // the table «Здоровье» column populates; summary KPIs below ignore it.
-        stale: staleNicks.has(m.nick),
-        breakdown,
-      };
-    });
-
-    // Summary KPIs exclude stale rows so long-dead modems can't drag good/warn/
-    // bad counters down forever (the original Stage 18.8 motivation).
-    const active = out.filter(x => !x.stale);
-    const summary = {
-      total: active.length,
-      good: active.filter(x => x.status === 'good').length,
-      warn: active.filter(x => x.status === 'warn').length,
-      bad: active.filter(x => x.status === 'bad').length,
-      excluded_stale: out.length - active.length,
-      err_threshold_pct: errThreshold
-    };
-    res.json({ modems: out, summary, days });
-  } catch (e) {
-    logger.error('[modem_health]', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// Stage 17: per-modem daily health timeline.
-// Returns up to N rows (one per day) so the FE can render a 30-cell heatmap
-// strip under the «Здоровье» tab. Source: modem_health_daily table populated
-// by src/jobs/health-snapshot.js. Missing days appear as score=null (rendered
-// as a grey cell).
-r.get('/api/analytics/modem_health_history', authMiddleware, adminMiddleware, (req, res) => {
-  try {
-    const server = String(req.query.server || '').trim();
-    const imei   = String(req.query.imei   || '').trim();
-    const days   = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 60);
-    if (!server || !imei) return res.status(400).json({ error: 'server and imei required' });
-    const sinceDate = new Date(Date.now() - days * 86400000).toISOString().slice(0, 10);
-    const healthDb = require('../db/health');
-    const rows = healthDb.historyByModem(server, imei, sinceDate);
-    res.json({ server, imei, days, rows });
-  } catch (e) {
-    logger.error('[modem_health_history]', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
 r.get('/api/analytics/rotations', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
     const sinceExpr = `datetime('now', '-${days} days')`;
 
-    // Stage 18.8: exclude rotations of modems that have been offline
-    // > stale_modem_hours (default 12). Otherwise long-dead modems keep
-    // dragging the failure-rate and avg duration in the wrong direction.
+    // Stage 18.8: exclude rotations of stale modems (offline > stale_modem_hours).
     const staleNicks = (typeof getStaleNicks === 'function') ? getStaleNicks() : new Set();
-    let staleFilter = '';
-    const staleArgs = [];
-    if (staleNicks.size > 0) {
-      staleFilter = ' AND nick NOT IN (' + Array.from(staleNicks).map(() => '?').join(',') + ')';
-      staleArgs.push(...Array.from(staleNicks));
-    }
+    const { clause: staleFilter, params: staleArgs } = analyticsDb.notInClause('nick', staleNicks);
 
-    const totals = db.prepare(`
-      SELECT COUNT(*) as total,
-             SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
-             AVG(took_sec) as avg_sec,
-             MAX(took_sec) as max_sec,
-             MIN(took_sec) as min_sec
-      FROM rotation_log
-      WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL${staleFilter}
-    `).get(...staleArgs);
-
-    const perDay = db.prepare(`
-      SELECT substr(started_at, 1, 10) as date,
-             COUNT(*) as total,
-             SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
-             AVG(took_sec) as avg_sec
-      FROM rotation_log
-      WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL${staleFilter}
-      GROUP BY date
-      ORDER BY date
-    `).all(...staleArgs);
-
-    const perModem = db.prepare(`
-      SELECT r.server_name, r.nick, m.operator,
-             COUNT(*) as total,
-             SUM(CASE WHEN r.old_ip = r.new_ip THEN 1 ELSE 0 END) as failed,
-             AVG(r.took_sec) as avg_sec,
-             MAX(r.took_sec) as max_sec
-      FROM rotation_log r
-      LEFT JOIN modem_meta m ON m.nick = r.nick AND m.server_name = r.server_name
-      WHERE r.started_at >= ${sinceExpr} AND r.ended_at IS NOT NULL${staleFilter.replace(/\bnick\b/g, 'r.nick')}
-      GROUP BY r.server_name, r.nick
-      ORDER BY total DESC
-      LIMIT 200
-    `).all(...staleArgs);
-
-    const perOperator = db.prepare(`
-      SELECT COALESCE(m.operator, 'unknown') as operator,
-             COUNT(*) as total,
-             SUM(CASE WHEN r.old_ip = r.new_ip THEN 1 ELSE 0 END) as failed,
-             AVG(r.took_sec) as avg_sec
-      FROM rotation_log r
-      LEFT JOIN modem_meta m ON m.nick = r.nick AND m.server_name = r.server_name
-      WHERE r.started_at >= ${sinceExpr} AND r.ended_at IS NOT NULL${staleFilter.replace(/\bnick\b/g, 'r.nick')}
-      GROUP BY operator
-      ORDER BY total DESC
-    `).all(...staleArgs);
-
-    const perServer = db.prepare(`
-      SELECT server_name,
-             COUNT(*) as total,
-             SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
-             AVG(took_sec) as avg_sec,
-             MAX(took_sec) as max_sec
-      FROM rotation_log
-      WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL${staleFilter}
-      GROUP BY server_name
-      ORDER BY total DESC
-    `).all(...staleArgs);
-
-    const recentFailed = db.prepare(`
-      SELECT server_name, nick, old_ip, new_ip, started_at, took_sec
-      FROM rotation_log
-      WHERE old_ip IS NOT NULL AND new_ip IS NOT NULL AND old_ip = new_ip
-        AND started_at >= ${sinceExpr}${staleFilter}
-      ORDER BY started_at DESC
-      LIMIT 50
-    `).all(...staleArgs);
+    const totals = analyticsDb.rotationsTotals(sinceExpr, staleArgs, staleFilter);
+    const perDay = analyticsDb.rotationsPerDay(sinceExpr, staleArgs, staleFilter);
+    const perModem = analyticsDb.rotationsPerModem(sinceExpr, staleArgs, staleFilter.replace(/\bnick\b/g, 'r.nick'));
+    const perOperator = analyticsDb.rotationsPerOperator(sinceExpr, staleArgs, staleFilter.replace(/\bnick\b/g, 'r.nick'));
+    const perServer = analyticsDb.rotationsPerServer(sinceExpr, staleArgs, staleFilter);
+    const recentFailed = analyticsDb.rotationsRecentFailed(sinceExpr, staleArgs, staleFilter);
 
     const success = totals.total > 0 ? ((totals.total - totals.failed) / totals.total) * 100 : 0;
     res.json({
@@ -1114,82 +272,32 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
     const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 90);
     const sinceExpr = `datetime('now', '-${days} days')`;
 
-    // Stage 18.8: exclude IP history for stale modems (offline > N hours).
-    // ip_history uses key='S1_<imei>', so we use getStaleKeys() which keeps
-    // that format.
+    // Stage 18.8: exclude IP history for stale modems. ip_history uses
+    // key='S1_<imei>', so we use getStaleKeys() which keeps that format.
     const staleKeys = (typeof getStaleKeys === 'function') ? getStaleKeys() : new Set();
-    let staleFilter = '';
-    const staleArgs = [];
-    if (staleKeys.size > 0) {
-      staleFilter = ' AND key NOT IN (' + Array.from(staleKeys).map(() => '?').join(',') + ')';
-      staleArgs.push(...Array.from(staleKeys));
-    }
+    const { clause: staleFilter, params: staleArgs } = analyticsDb.notInClause('key', staleKeys);
 
-    const uniqueIps = db.prepare(`
-      SELECT COUNT(DISTINCT ip) as c FROM ip_history
-      WHERE started_at >= ${sinceExpr}${staleFilter}
-    `).get(...staleArgs).c;
+    const uniqueIps = analyticsDb.ipUnique(sinceExpr, staleArgs, staleFilter).c;
+    const totalAssignments = analyticsDb.ipAssignments(sinceExpr, staleArgs, staleFilter).c;
+    const reused = analyticsDb.ipReused(sinceExpr, staleArgs, staleFilter);
+    const lifetimeAll = analyticsDb.ipLifetime(sinceExpr, staleArgs, staleFilter).avg_sec;
+    const poolsRows = analyticsDb.ipPools(sinceExpr, staleArgs, staleFilter);
 
-    const totalAssignments = db.prepare(`
-      SELECT COUNT(*) as c FROM ip_history WHERE started_at >= ${sinceExpr}${staleFilter}
-    `).get(...staleArgs).c;
-
-    // Reused IPs: more than 1 distinct key uses it
-    const reused = db.prepare(`
-      SELECT ip, COUNT(*) as uses, COUNT(DISTINCT key) as modems,
-             MIN(started_at) as first, MAX(started_at) as last
-      FROM ip_history
-      WHERE started_at >= ${sinceExpr}${staleFilter}
-      GROUP BY ip
-      HAVING modems > 1
-      ORDER BY uses DESC
-      LIMIT 100
-    `).all(...staleArgs);
-
-    // Average lifetime: only rows with ended_at
-    const lifetimeAll = db.prepare(`
-      SELECT AVG((julianday(ended_at) - julianday(started_at)) * 86400) as avg_sec
-      FROM ip_history
-      WHERE ended_at IS NOT NULL AND started_at >= ${sinceExpr}${staleFilter}
-    `).get(...staleArgs).avg_sec;
-
-    // Pool size per server (distinct IPs per server prefix in key, e.g. "S1_port123")
-    const poolsRows = db.prepare(`
-      SELECT substr(key, 1, instr(key, '_') - 1) as server,
-             COUNT(DISTINCT ip) as ip_count,
-             COUNT(*) as total_assignments,
-             AVG(CASE WHEN ended_at IS NOT NULL THEN (julianday(ended_at) - julianday(started_at)) * 86400 END) as avg_lifetime_sec
-      FROM ip_history
-      WHERE started_at >= ${sinceExpr} AND instr(key, '_') > 0${staleFilter}
-      GROUP BY server
-      ORDER BY ip_count DESC
-    `).all(...staleArgs);
-
-    // Per-modem subnet diversity: how many distinct /24 subnets each modem has
-    // cycled through. /24 = ip without its last octet — rtrim the trailing
-    // digits, then the trailing dot ("203.0.113.78" → "203.0.113").
-    const subRows = db.prepare(`
-      SELECT key,
-             COUNT(DISTINCT rtrim(rtrim(ip,'0123456789'),'.')) as subnets,
-             COUNT(DISTINCT ip) as ips
-        FROM ip_history
-       WHERE started_at >= ${sinceExpr}${staleFilter}
-       GROUP BY key
-       ORDER BY subnets DESC
-    `).all(...staleArgs);
+    // Per-modem /24 subnet diversity
+    const subRows = analyticsDb.ipSubnets(sinceExpr, staleArgs, staleFilter);
     const _nickByKey = {};
     try {
-      for (const m of db.prepare('SELECT server_name, imei, nick FROM modem_meta').all()) {
+      for (const m of analyticsDb.modemNickByKey()) {
         _nickByKey[m.server_name + '_' + m.imei] = m.nick;
       }
     } catch (_) { /* modem_meta optional */ }
-    const subnets = subRows.map(r => {
-      const us = r.key.indexOf('_');
+    const subnets = subRows.map(row => {
+      const us = row.key.indexOf('_');
       return {
-        server: us > 0 ? r.key.slice(0, us) : '',
-        nick: _nickByKey[r.key] || (us > 0 ? r.key.slice(us + 1) : r.key),
-        subnets: r.subnets,
-        ips: r.ips
+        server: us > 0 ? row.key.slice(0, us) : '',
+        nick: _nickByKey[row.key] || (us > 0 ? row.key.slice(us + 1) : row.key),
+        subnets: row.subnets,
+        ips: row.ips
       };
     });
     const subnetSummary = {
@@ -1221,7 +329,6 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
 r.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const days = Math.min(Math.max(parseInt(req.query.days) || 30, 7), 60);
-    const sinceExpr = `datetime('now', '-${days} days')`;
     const mskToday = getMoscowToday();
     const mskNow = getMoscowNow();
     const daysInMonth = new Date(mskNow.getFullYear(), mskNow.getMonth() + 1, 0).getDate();
@@ -1229,29 +336,22 @@ r.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req, 
     const daysLeftInMonth = daysInMonth - dayOfMonth;
 
     // Per-client per-day gb totals from daily_traffic
-    const rows = db.prepare(`
-      SELECT port_name, date, SUM(bytes_in + bytes_out) as bytes
-      FROM daily_traffic
-      WHERE date >= substr(${sinceExpr}, 1, 10)
-      GROUP BY port_name, date
-    `).all();
+    const rows = analyticsDb.forecastDailyTraffic(-days);
 
     // Build client → port_names
     const portToClient = {};
     for (const c of clients) if (c.portName) portToClient[c.portName] = c;
-    const portIdToClient = {}; // Fallback: port_id like "S1_portXXX" → client via modem_meta
 
-    // Per-client aggregation
+    // Per-client aggregation (port_name in daily_traffic is the full port_id
+    // like "S1_portXXX" — matched via the live portKey mapping).
     const perClient = {};
-    for (const r of rows) {
-      // port_name in daily_traffic is the full port_id (S1_portXXX), not client portName.
-      // Match via live portKey mapping.
-      const pnCandidate = portKeyToPortName[r.port_name] || r.port_name;
+    for (const row of rows) {
+      const pnCandidate = portKeyToPortName[row.port_name] || row.port_name;
       const client = portToClient[pnCandidate];
       if (!client) continue;
       if (!perClient[client.id]) perClient[client.id] = { id: client.id, name: client.name, portName: client.portName, price: client.price || 0, currency: client.currency || 'RUB', balance: client.balance || 0, billingType: client.billingType || 'per_gb', days: {} };
-      if (!perClient[client.id].days[r.date]) perClient[client.id].days[r.date] = 0;
-      perClient[client.id].days[r.date] += r.bytes || 0;
+      if (!perClient[client.id].days[row.date]) perClient[client.id].days[row.date] = 0;
+      perClient[client.id].days[row.date] += row.bytes || 0;
     }
 
     const forecasts = Object.values(perClient).map(c => {
@@ -1274,7 +374,6 @@ r.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req, 
       }
 
       const avgDailyGb = mean;
-      // Forecast end of month: current month accumulated so far + avgDaily * days_left
       const thisMonthRows = arr.filter(a => a[0].startsWith(mskToday.slice(0, 7)));
       const monthGbSoFar = thisMonthRows.reduce((s, a) => s + a[1] / 1e9, 0);
       const forecastMonthGb = monthGbSoFar + avgDailyGb * daysLeftInMonth;
@@ -1284,7 +383,6 @@ r.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req, 
       if (c.billingType === 'per_gb' && c.price > 0 && avgDailyGb > 0) {
         runwayDays = Math.max(0, Math.floor(c.balance / (avgDailyGb * c.price)));
       } else if (c.billingType === 'per_modem' && c.price > 0) {
-        // rough approx — divide balance by (price per modem / days in month) × modem count
         runwayDays = Math.floor(c.balance / (c.price / daysInMonth));
       }
 
@@ -1310,201 +408,6 @@ r.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req, 
     });
   } catch (e) {
     logger.error('[traffic_forecast]', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-r.get('/api/analytics/capacity', authMiddleware, adminMiddleware, (req, res) => {
-  try {
-    const days = Math.min(Math.max(parseInt(req.query.days) || 30, 7), 180);
-    const sinceExpr = `datetime('now', '-${days} days')`;
-
-    // Stage 18.8: exclude stale (offline > N hours) modems from capacity
-    // counts. Total bytes stays accurate because stale modems have no recent
-    // traffic anyway; "modem_count" + "total_modems" now reflect live fleet.
-    const staleNicks = (typeof getStaleNicks === 'function') ? getStaleNicks() : new Set();
-    let staleFilter = '';
-    const staleArgs = [];
-    if (staleNicks.size > 0) {
-      staleFilter = ' AND nick NOT IN (' + Array.from(staleNicks).map(() => '?').join(',') + ')';
-      staleArgs.push(...Array.from(staleNicks));
-    }
-
-    // Per-server utilization
-    const servers = db.prepare(`
-      SELECT server_name,
-             COUNT(DISTINCT nick) as modem_count,
-             SUM(bytes_in + bytes_out) as total_bytes,
-             AVG(bytes_in + bytes_out) as avg_hour_bytes,
-             MAX(bytes_in + bytes_out) as max_hour_bytes,
-             COUNT(DISTINCT substr(hour_start, 1, 10)) as active_days
-      FROM traffic_hourly
-      WHERE hour_start >= ${sinceExpr}${staleFilter}
-      GROUP BY server_name
-      ORDER BY total_bytes DESC
-    `).all(...staleArgs);
-
-    // Modem count growth by month — excluded-stale is handled at SELECT
-    // level via NOT IN with stale IMEIs; nicks would be wrong key here.
-    const staleImeisSet = (typeof getStaleImeis === 'function') ? getStaleImeis() : new Set();
-    let imeiFilter = '';
-    const imeiArgs = [];
-    if (staleImeisSet.size > 0) {
-      imeiFilter = ' WHERE imei NOT IN (' + Array.from(staleImeisSet).map(() => '?').join(',') + ')';
-      imeiArgs.push(...Array.from(staleImeisSet));
-    }
-    const modemGrowth = db.prepare(`
-      SELECT substr(updated_at, 1, 7) as month,
-             COUNT(DISTINCT imei) as modems
-      FROM modem_meta${imeiFilter}
-      GROUP BY month
-      ORDER BY month
-    `).all(...imeiArgs);
-
-    // Overall totals
-    const totals = db.prepare(`
-      SELECT SUM(bytes_in + bytes_out) as total_bytes,
-             COUNT(DISTINCT nick) as total_modems,
-             COUNT(DISTINCT server_name) as total_servers
-      FROM traffic_hourly
-      WHERE hour_start >= ${sinceExpr}${staleFilter}
-    `).get(...staleArgs);
-
-    const totalGb = totals.total_bytes ? totals.total_bytes / 1e9 : 0;
-    const avgPerModem = totals.total_modems > 0 ? totalGb / totals.total_modems : 0;
-
-    res.json({
-      days,
-      summary: {
-        total_gb: Math.round(totalGb * 10) / 10,
-        total_modems: totals.total_modems || 0,
-        total_servers: totals.total_servers || 0,
-        avg_gb_per_modem: Math.round(avgPerModem * 100) / 100,
-      },
-      servers: servers.map(s => ({
-        server_name: s.server_name,
-        modems: s.modem_count,
-        total_gb: Math.round(s.total_bytes / 1e9 * 10) / 10,
-        avg_hour_mb: Math.round(s.avg_hour_bytes / 1048576 * 10) / 10,
-        max_hour_mb: Math.round(s.max_hour_bytes / 1048576 * 10) / 10,
-        active_days: s.active_days,
-        utilization_pct: s.max_hour_bytes > 0
-          ? Math.round(s.avg_hour_bytes / s.max_hour_bytes * 100)
-          : 0
-      })),
-      modem_growth: modemGrowth
-    });
-  } catch (e) {
-    logger.error('[capacity]', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
-
-r.get('/api/analytics/logs_domains_full', authMiddleware, adminMiddleware, (req, res) => {
-  try {
-    const { host = '', client = '', operator = '', server = '', nick = '' } = req.query;
-    const limit = Math.min(Math.max(parseInt(req.query.limit) || 2000, 1), 20000);
-    const minCount = Math.max(parseInt(req.query.min_count) || 1, 1);
-
-    const where = ['count >= ?'];
-    const params = [minCount];
-    if (host)     { where.push('LOWER(host) LIKE ?');   params.push('%' + String(host).toLowerCase() + '%'); }
-    if (client)   { where.push('client_name = ?');      params.push(client); }
-    if (operator) { where.push('operator = ?');         params.push(operator); }
-    if (server)   { where.push('server_name = ?');      params.push(server); }
-    if (nick)     { where.push('nick = ?');             params.push(nick); }
-    const whereSql = where.length ? 'WHERE ' + where.join(' AND ') : '';
-
-    // Snapshot meta
-    const snap = db.prepare('SELECT MIN(snapshot_at) as ts, COUNT(*) as total_rows FROM top_hosts_detail').get();
-
-    // Filtered raw rows (capped)
-    const rows = db.prepare(`
-      SELECT server_name, port_id, nick, client_name, operator, country, host, count
-      FROM top_hosts_detail
-      ${whereSql}
-      ORDER BY count DESC
-      LIMIT ${limit}
-    `).all(...params);
-
-    // Summary of the filtered set
-    const totals = db.prepare(`
-      SELECT COUNT(*) as rows,
-             SUM(count) as hits,
-             COUNT(DISTINCT host) as unique_hosts,
-             COUNT(DISTINCT client_name) as clients,
-             COUNT(DISTINCT operator) as operators,
-             COUNT(DISTINCT server_name) as servers,
-             COUNT(DISTINCT nick) as modems
-      FROM top_hosts_detail
-      ${whereSql}
-    `).get(...params);
-
-    // Each aggregation runs independently — no O(rows²) client-side work needed
-    const agg = sql => db.prepare(sql).all(...params);
-    const topHosts = agg(`
-      SELECT host, SUM(count) as hits, COUNT(DISTINCT nick) as modems, COUNT(DISTINCT client_name) as clients
-      FROM top_hosts_detail ${whereSql}
-      GROUP BY host ORDER BY hits DESC LIMIT 100`);
-    const byClient = agg(`
-      SELECT client_name, SUM(count) as hits, COUNT(DISTINCT host) as unique_hosts
-      FROM top_hosts_detail ${whereSql}
-      GROUP BY client_name ORDER BY hits DESC`);
-    const byOperator = agg(`
-      SELECT operator, SUM(count) as hits, COUNT(DISTINCT host) as unique_hosts
-      FROM top_hosts_detail ${whereSql}
-      GROUP BY operator ORDER BY hits DESC`);
-    const byServer = agg(`
-      SELECT server_name, country, SUM(count) as hits, COUNT(DISTINCT host) as unique_hosts, COUNT(DISTINCT nick) as modems
-      FROM top_hosts_detail ${whereSql}
-      GROUP BY server_name ORDER BY hits DESC`);
-    const byModem = agg(`
-      SELECT server_name, nick, operator, SUM(count) as hits, COUNT(DISTINCT host) as unique_hosts
-      FROM top_hosts_detail ${whereSql}
-      GROUP BY server_name, nick ORDER BY hits DESC LIMIT 100`);
-
-    // TLD / IP split — computed in JS because SQLite lacks rinstr/reverse.
-    const tldRows = db.prepare(`
-      SELECT host, SUM(count) as hits, COUNT(DISTINCT nick) as mods
-      FROM top_hosts_detail ${whereSql}
-      GROUP BY host
-    `).all(...params);
-    const tldMap = {};
-    const IP_RE = /^\d+\.\d+\.\d+\.\d+$/;
-    for (const r of tldRows) {
-      let tld;
-      if (IP_RE.test(r.host)) tld = '(IP)';
-      else {
-        const dot = r.host.lastIndexOf('.');
-        tld = dot === -1 ? '(none)' : r.host.slice(dot + 1).toLowerCase();
-      }
-      if (!tldMap[tld]) tldMap[tld] = { tld, hits: 0, unique_hosts: 0 };
-      tldMap[tld].hits += r.hits;
-      tldMap[tld].unique_hosts += 1;
-    }
-    const byTld = Object.values(tldMap).sort((a, b) => b.hits - a.hits).slice(0, 50);
-
-    // Facet lists (unfiltered — for populating filter dropdowns)
-    const facetClients = db.prepare('SELECT DISTINCT client_name FROM top_hosts_detail WHERE client_name != \'\' ORDER BY client_name').all().map(r => r.client_name);
-    const facetOperators = db.prepare('SELECT DISTINCT operator FROM top_hosts_detail WHERE operator != \'\' ORDER BY operator').all().map(r => r.operator);
-    const facetServers = db.prepare('SELECT DISTINCT server_name FROM top_hosts_detail ORDER BY server_name').all().map(r => r.server_name);
-
-    res.json({
-      snapshot_at: snap.ts,
-      total_rows_in_snapshot: snap.total_rows,
-      filters: { host, client, operator, server, nick, limit, min_count: minCount },
-      summary: totals,
-      top_hosts: topHosts,
-      by_client: byClient,
-      by_operator: byOperator,
-      by_server: byServer,
-      by_modem: byModem,
-      by_tld: byTld,
-      rows,
-      facets: { clients: facetClients, operators: facetOperators, servers: facetServers }
-    });
-  } catch (e) {
-    logger.error('[logs_domains_full]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
