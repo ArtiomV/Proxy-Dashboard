@@ -1380,10 +1380,17 @@ function updateKnownModems(data) {
       if (imei && _deletedModemSet.has(srvName + '|' + imei)) {
         continue;
       }
+      const nick = (modemStatus && modemStatus.modem_details && modemStatus.modem_details.NICK) || prevKm.nick || '';
+      // Phantom-port guard: a port with NO identity at all (no IMEI in the
+      // port map, no NICK in the live status, none in the previous roster
+      // entry) is a ProxySmart glitch, not a modem. Persisting it inflates
+      // every consumer of this roster (БА «31/30» case — one ∅-nick, ∅-imei
+      // entry counted as the client's modem).
+      if (!imei && !nick) continue;
       km[portId] = {
         portName: keptPortName,
         imei,
-        nick: (modemStatus && modemStatus.modem_details && modemStatus.modem_details.NICK) || prevKm.nick || '',
+        nick,
         model: (modemStatus && modemStatus.modem_details && (modemStatus.modem_details.MODEL_SHOWN || modemStatus.modem_details.MODEL)) || prevKm.model || '',
         portInfo: portInfo ? (typeof structuredClone === 'function' ? structuredClone(portInfo) : JSON.parse(JSON.stringify(portInfo))) : (prevKm.portInfo ? prevKm.portInfo : null),
         lastSeen: now,
@@ -1391,6 +1398,15 @@ function updateKnownModems(data) {
       };
     }
   }
+
+  // Sweep pre-existing identity-less entries (written before the guard above)
+  // so the junk ages out on the next poll instead of lingering forever.
+  let swept = 0;
+  for (const pid of Object.keys(km)) {
+    const i = km[pid];
+    if (!i || (!i.imei && !i.nick)) { delete km[pid]; swept++; }
+  }
+  if (swept) logger.info(`[KnownModems] swept ${swept} identity-less phantom entrie(s) on ${srvName}`);
 
   saveKnownModems();
 }
@@ -5464,4 +5480,4 @@ process.on('uncaughtException', (err) => {
 // Expose internals for the supertest harness (NODE_ENV=test). Production
 // code paths don't reach for this — the start-via-`node server.js` flow
 // runs to completion above and never `require()`s its own exports.
-module.exports = { app, db, saveClients, injectOfflineModems, knownModems, saveKnownModems, apiServers, SERVER_COUNTRIES, rebuildServerCountries };
+module.exports = { app, db, saveClients, injectOfflineModems, knownModems, saveKnownModems, apiServers, SERVER_COUNTRIES, rebuildServerCountries, updateKnownModems };
