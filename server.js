@@ -4546,6 +4546,12 @@ const connsHistory = require('./src/jobs/conns-history').create({
 });
 connsHistory.start();
 
+// WP5: daily balance-vs-ledger reconciliation job instance (scheduled below).
+// Declared BEFORE the ops-ext mount — /api/admin/health reads getLastResult().
+const balanceReconcile = require('./src/jobs/balance-reconcile').create({
+  db, clients, logActivity, logger, alerts,
+});
+
 app.use(require('./src/routes/ops-ext')({
   db, logger, DB_PATH,
   trackingDb,
@@ -4562,8 +4568,7 @@ app.use(require('./src/routes/ops-ext')({
   getLastBillingRunSummary: () => lastBillingRunSummary,
   getLastReconciliationMonth: () => lastReconciliationMonth,
   getIntervals: () => _intervals,
-  getFetchAllServersDataCached: () => fetchAllServersDataCached,
-  getMergeServerData: () => mergeServerData,
+  getFetchAllServersDataCached: () => fetchAllServersDataCached,  getMergeServerData: () => mergeServerData,
   getIpTracking: () => ipTracking,
   getUptimeTracking: () => uptimeTracking,
   getKnownModems: () => knownModems,
@@ -4645,9 +4650,6 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
 
   // WP5: daily balance-vs-ledger reconciliation at 04:00 UTC (after billing
   // settles). Observation only — drift logs critical + TG alert, no auto-fix.
-  const balanceReconcile = require('./src/jobs/balance-reconcile').create({
-    db, clients, logActivity, logger, alerts,
-  });
   scheduleRepeating(4, 0, 'BalanceReconcile', () => balanceReconcile.runOnce());
 
   // Stage 17: nightly modem-health snapshot at 23:55 MSK (20:55 UTC) — captures
