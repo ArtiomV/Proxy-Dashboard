@@ -1878,6 +1878,11 @@ const SETTINGS_DEFAULTS = {
 // of this bug — settings are read on every request by virtually every
 // route. setAppSettings() replaces CONTENTS in place; routers that took
 // the reference at mount time always see fresh fields.
+//
+// WP7.5: keys whose VALUES are encrypted at rest in kv_store (see
+// _encryptSettingVal below). Declared before the settings load because the
+// migration right after the load needs it.
+const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'tavily_api_key']);
 stateMod.setAppSettings({ ...SETTINGS_DEFAULTS });
 const appSettings = stateMod.state.appSettings;
 try {
@@ -1897,8 +1902,38 @@ try {
   }
 } catch (e) { logger.error('Failed to load settings:', e.message); }
 
+// WP7.5 one-time migration: encrypt any plaintext sensitive settings at rest
+// (Anthropic/Tavily API keys) — after this, the kv blob never holds them raw.
+try {
+  let migratedSecrets = 0;
+  for (const k of SENSITIVE_SETTINGS) {
+    const v = appSettings[k];
+    if (typeof v === 'string' && v && !v.startsWith('enc1:')) {
+      appSettings[k] = _encryptSettingVal(v);
+      migratedSecrets++;
+    }
+  }
+  if (migratedSecrets > 0) { saveSettings(); logger.info(`[Settings] Encrypted ${migratedSecrets} sensitive setting(s) at rest`); }
+} catch (e) { logger.error('[Settings] sensitive-settings encryption failed: ' + e.message); }
+
 function saveSettings() {
   _kvSet.run('app_settings', JSON.stringify(appSettings));
+}
+
+// WP7.5: API secrets (Anthropic/Tavily) are encrypted at rest in kv_store —
+// AES-256-GCM, same key scheme as tochka_config. In kv_store they live as
+// 'enc1:' + payload; getSetting() decrypts transparently so readers need no
+// changes. GET /api/admin/settings masks them; PUT re-encrypts on write.
+// (SENSITIVE_SETTINGS itself is declared above the settings load.)
+function _encryptSettingVal(val) { return 'enc1:' + _encryptJson({ v: String(val) }); }
+function _decryptSettingVal(val) {
+  try {
+    const obj = _decryptJson(String(val).slice(5));
+    return obj && typeof obj.v === 'string' ? obj.v : '';
+  } catch (e) {
+    logger.error('[Settings] cannot decrypt sensitive setting — return empty (re-enter the key in Settings): ' + e.message);
+    return '';
+  }
 }
 
 // Stage 14.2: single contract for appSettings access. Every caller (routes,
@@ -1910,15 +1945,21 @@ function saveSettings() {
 // setSetting(key, val) — mutates state.appSettings in place AND persists.
 //   Use setSettings({a:1, b:2}) for batch updates that save only once.
 function getSetting(key, def) {
-  return appSettings[key] !== undefined ? appSettings[key] : def;
+  let v = appSettings[key] !== undefined ? appSettings[key] : def;
+  if (SENSITIVE_SETTINGS.has(key) && typeof v === 'string' && v.startsWith('enc1:')) v = _decryptSettingVal(v);
+  return v;
 }
 function setSetting(key, val) {
-  appSettings[key] = val;
+  appSettings[key] = (SENSITIVE_SETTINGS.has(key) && typeof val === 'string' && val && !val.startsWith('enc1:'))
+    ? _encryptSettingVal(val) : val;
   saveSettings();
 }
 function setSettings(partial) {
   if (!partial || typeof partial !== 'object') return;
-  Object.assign(appSettings, partial);
+  for (const [k, v] of Object.entries(partial)) {
+    appSettings[k] = (SENSITIVE_SETTINGS.has(k) && typeof v === 'string' && v && !v.startsWith('enc1:'))
+      ? _encryptSettingVal(v) : v;
+  }
   saveSettings();
 }
 
