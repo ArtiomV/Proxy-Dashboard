@@ -18,6 +18,7 @@ const fs = require('fs');
 const path = require('path');
 const net = require('net');
 const { tochkaRequest } = require('../tochka/api');
+const { isModemOwned } = require('../modems/ownership');
 
 module.exports = function createClientPortalRouter(deps) {
   const {
@@ -31,6 +32,7 @@ module.exports = function createClientPortalRouter(deps) {
     apiServers,
     clients, clientById, clientByLogin, clientByApiKey, clientByResetToken,
     dailyTraffic, ledgerDb, ipTracking, uptimeTracking, ipHistory,
+    knownModems,
     getSpeedtestLatest,
     auditLog, logActivity, getClientIp,
     saveClients,
@@ -38,6 +40,9 @@ module.exports = function createClientPortalRouter(deps) {
     getTochkaConfig,
   } = deps;
   const r = express.Router();
+  // Single ownership-check deps (WP2) — every "client owns modem" gate below
+  // goes through src/modems/ownership.js with one priority chain.
+  const _ownershipDeps = { fetchAllServersDataCached, mergeServerData, knownModems, db };
   // Closing-documents/bills routes need the live tochkaConfig — call the
   // getter on every request since saveTochkaConfig() rebinds the global.
   const tochkaConfig = new Proxy({}, { get: (_t, k) => getTochkaConfig()[k] });
@@ -249,9 +254,10 @@ async function _resetIpImpl(req, res) {
   if (!nick || !token) return res.status(400).json({ error: 'nick and token required' });
   const client = clientByResetToken.get(token);
   if (!client) return res.status(401).json({ error: 'Invalid token' });
-  // Verify nick belongs to this client's portName
-  const allowed = db.prepare("SELECT 1 FROM traffic_hourly WHERE nick = ? AND client_name = ? LIMIT 1").get(nick, client.portName);
-  if (!allowed) return res.status(403).json({ error: 'Modem not assigned to this client' });
+  // Verify nick belongs to this client (WP2: live → roster → history; a new
+  // client without traffic history passes via the live/roster steps).
+  const owned = await isModemOwned({ nick, portNameFilter: client.portName, deps: _ownershipDeps });
+  if (!owned) return res.status(403).json({ error: 'Modem not assigned to this client' });
   // Try all servers
   for (const server of apiServers) {
     try {
@@ -266,11 +272,11 @@ r.get('/api/client/rotation_log', authMiddleware, async (req, res) => {
   try {
     const { nick, serverName } = req.query;
     if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
-    // Verify client owns this modem
+    // Verify client owns this modem (WP2: live → roster → history)
     const pnf = req.user.portNameFilter;
     if (pnf !== '*') {
-      const allowed = db.prepare("SELECT 1 FROM traffic_hourly WHERE nick = ? AND client_name = ? LIMIT 1").get(nick, pnf);
-      if (!allowed) return res.status(403).json({ error: 'Modem not assigned to this client' });
+      const owned = await isModemOwned({ nick, portNameFilter: pnf, deps: _ownershipDeps });
+      if (!owned) return res.status(403).json({ error: 'Modem not assigned to this client' });
     }
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
@@ -292,34 +298,17 @@ r.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
     const mins = parseInt(minutes);
     if (isNaN(mins) || mins < 0 || mins > 1440) return res.status(400).json({ error: 'minutes must be 0-1440' });
 
-    // Verify the modem belongs to this client. Ownership = the nick's modem has
-    // a port named after the client (live assignment is the source of truth),
-    // with a fallback to historical traffic attribution so offline / freshly
-    // assigned modems still pass — the same check /api/client/rotation_log uses.
+    // Verify the modem belongs to this client (WP2: single priority chain in
+    // src/modems/ownership.js — live binding → roster (24h) → traffic_hourly).
     //
-    // The previous check compared p.portID (after stripping a stale "S1_/S2_"
-    // prefix) against `nick`. But mergeServerData prefixes portID with the
-    // server name (e.g. "MD2_…"), and portID is NOT the modem nick anyway, so
-    // it denied EVERY real modem → "Modem not assigned to your account".
+    // Historical note: an even older check compared p.portID (after stripping
+    // a stale "S1_/S2_" prefix) against `nick`. mergeServerData prefixes portID
+    // with the server name (e.g. "MD2_…"), and portID is NOT the modem nick
+    // anyway, so it denied EVERY real modem → "Modem not assigned to your
+    // account". Do not reintroduce portID-based matching here.
     const portNameFilter = req.user.portNameFilter;
     if (portNameFilter !== '*') {
-      let owned = false;
-      try {
-        const results = await fetchAllServersDataCached();
-        const merged = mergeServerData(results, '*');
-        const entry = ((merged && merged.status) || []).find(
-          m => m.modem_details && m.modem_details.NICK === nick);
-        if (entry) {
-          const ports = ((merged && merged.ports) || {})[entry.modem_details.IMEI] || [];
-          owned = ports.some(p => p.portName === portNameFilter);
-        }
-      } catch (_) { /* fall through to the historical check */ }
-      if (!owned) {
-        const row = db.prepare(
-          'SELECT 1 FROM traffic_hourly WHERE nick = ? AND client_name = ? LIMIT 1'
-        ).get(nick, portNameFilter);
-        owned = !!row;
-      }
+      const owned = await isModemOwned({ nick, portNameFilter, deps: _ownershipDeps });
       if (!owned) return res.status(403).json({ error: 'Modem not assigned to your account' });
     }
 

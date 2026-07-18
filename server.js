@@ -3205,6 +3205,7 @@ app.use(require('./src/routes/client-portal')({
   // Stage 4 finish: maps are stable references via src/state — no more shims.
   clientById, clientByLogin, clientByApiKey, clientByResetToken,
   dailyTraffic, ledgerDb, ipTracking, uptimeTracking, ipHistory,
+  knownModems,
   DOCUMENTS_DIR,
   getTochkaConfig: () => tochkaConfig,
   getSpeedtestLatest,

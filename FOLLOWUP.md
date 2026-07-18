@@ -294,3 +294,11 @@ and should follow the same pattern in a future pass:
 - **saveDailyTraffic() after billing** — reviewed: redundant with the
   incremental _dtUpsert in the loop, kept intentionally as a once-a-day
   reconcile backstop. Do not "optimize" without a reconciliation plan.
+
+## WP2 done (2026-07) — unified modem ownership
+
+- `src/modems/ownership.js` — single chain live → roster(24h) → traffic_hourly;
+  hard-deny when live shows the modem bound to another client. Used by
+  reset_ip_by_token, rotation_log, set_rotation. ip_history keeps its
+  live-only check (out of WP2 scope — offline-modem history view 403s;
+  revisit if clients complain).
