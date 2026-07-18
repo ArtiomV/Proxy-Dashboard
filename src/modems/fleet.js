@@ -4,23 +4,29 @@
 // (online) came from the inflated live `_modemMap` while the denominator
 // (active) came from modem_meta — two sources that could disagree (e.g. 85/82).
 //
-// Three numbers that ALWAYS satisfy  online + offline = total  and  online ≤ total:
-//   total (активные)  — distinct non-random modems seen ONLINE within
-//                       `retentionMs` (durable uptime history), PLUS any modem
-//                       online in the live snapshot right now. A server being
-//                       unreachable *now* does not drop its modems (they were
-//                       online recently), so the denominator stays steady; a
-//                       re-add phantom that was never really online is excluded.
-//   online (онлайн)   — fleet modems reported IS_ONLINE=yes in the live snapshot.
-//   offline (отключено) — total − online.
+// TWO denominators, on purpose (2026-07 — after «91/90 vs 89/90»):
+//   total (всего)     — STABLE roster: every real modem in modem_meta
+//                       (non-random, non-test, not soft-deleted). Changes only
+//                       when hardware is added or soft-deleted — NOT when a
+//                       modem/server goes dark, NOT when the 48h window slides
+//                       past, NOT on a glitched-to-random re-enumeration.
+//                       «Сколько модемов у нас есть» — the static denominator.
+//   active (активные) — roster modems seen ONLINE within `retentionMs` (48h),
+//                       ∪ online right now. The operational set behind
+//                       online/offline/working and the «Модем отключен» card —
+//                       long-dead roster members stay in `total` but don't
+//                       spam the operational numbers.
 //
-// On top of the instantaneous offline set we expose a debounced one:
-//   disconnected (отключён) — offline modems that have been unreachable for at
-//                       least `disconnectedMs` (default 10 min). A brief blip
-//                       (a single missed poll) is NOT "отключён" — only a modem
-//                       that has stayed dark past the threshold lands in the
-//                       «Модем отключен» card, which is also the moment the
-//                       Telegram/bell alert fires. `disconnectedList` ⊆ `offlineList`.
+//   online (онлайн)   — roster modems reported IS_ONLINE=yes in the live snapshot.
+//   offline (офлайн)  — active − online (recently alive, dark right now).
+//   disconnected      — offline dark ≥ disconnectedMs (default 10 min) → the
+//                       «Модем отключен» card and the offline alert threshold;
+//                       a transient one-poll blip stays out.
+//   working (в работе)— active − disconnected (online + brief blips). The
+//                       headline numerator: jumps when modems actually flap.
+//
+// Invariants: online ≤ active ≤ total; offline = active − online;
+//             working = active − disconnected; online ≤ working.
 //
 // Inputs:
 //   metaRows   [{ srv, imei, nick }]  — modem_meta rows (non-random, non-test).
@@ -30,18 +36,23 @@
 function computeFleet(metaRows, uptime, liveStatus, opts) {
   opts = opts || {};
   const now = opts.now || Date.now();
-  const retentionMs = opts.retentionMs || 48 * 3600 * 1000;   // 48h: online within 2 days = active fleet
-  const disconnectedMs = opts.disconnectedMs != null ? opts.disconnectedMs : 10 * 60 * 1000;   // «отключён» only after 10 min dark
-  const fleet = new Map();   // 'srv|imei' -> { srv, online }
+  const retentionMs = opts.retentionMs || 48 * 3600 * 1000;   // 48h: online within 2 days = active
+  const disconnectedMs = opts.disconnectedMs != null ? opts.disconnectedMs : 10 * 60 * 1000;
+  const fleet = new Map();   // 'srv|imei' -> { srv, nick, online, lastOnline, active }
 
-  // 1) Durable membership: modems online within the retention window.
+  // 1) Roster membership (STABLE total): every real modem meta row — including
+  //    long-dead ones; they leave the total only via soft-delete. `active`
+  //    separately marks the 48h operational set.
   for (const r of (metaRows || [])) {
     if (!r || !r.imei || !r.srv) continue;
     const nick = String(r.nick || '').trim();
     if (!nick || /^random/i.test(nick)) continue;   // defensive (the SQL already excludes these)
     const ut = uptime ? uptime[r.srv + '_' + r.imei] : null;
     const lo = (ut && ut.last_online_check) ? Date.parse(ut.last_online_check) : 0;
-    if (lo && (now - lo) <= retentionMs) fleet.set(r.srv + '|' + r.imei, { srv: r.srv, nick, online: false, lastOnline: lo });
+    fleet.set(r.srv + '|' + r.imei, {
+      srv: r.srv, nick, online: false, lastOnline: lo,
+      active: !!(lo && (now - lo) <= retentionMs),
+    });
   }
 
   // 2) Current online from the live snapshot — and union in any online modem not
@@ -57,8 +68,8 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
     const raw = pim.indexOf(srv + '_') === 0 ? pim.slice(srv.length + 1) : pim;
     if (!raw) continue;
     const key = srv + '|' + raw;
-    if (fleet.has(key)) fleet.get(key).online = true;
-    else fleet.set(key, { srv, nick, online: true });
+    if (fleet.has(key)) { const e = fleet.get(key); e.online = true; e.active = true; }
+    else fleet.set(key, { srv, nick, online: true, active: true, lastOnline: now });
   }
 
   // 2.5) Gather the two signals the glitched-to-random credit needs — WITHOUT
@@ -86,12 +97,15 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
     if (raw) liveUsbByKey[srv + '|' + raw] = usb;
   }
 
-  const out = { total: 0, online: 0, offline: 0, byServer: {}, offlineList: [] };
+  const out = { total: 0, active: 0, online: 0, offline: 0, byServer: {}, offlineList: [] };
   for (const [key, v] of fleet) {
-    const b = out.byServer[v.srv] || (out.byServer[v.srv] = { total: 0, online: 0, offline: 0 });
+    const b = out.byServer[v.srv] || (out.byServer[v.srv] = { total: 0, active: 0, online: 0, offline: 0 });
     b.total++; out.total++;
+    if (v.active) { b.active++; out.active++; }
     if (v.online) { b.online++; out.online++; }
-    else {
+    else if (v.active) {
+      // Offline counts/list cover the ACTIVE set only: a modem dead for weeks
+      // inflates neither the card nor the alerts — but it stays in `total`.
       b.offline++; out.offline++;
       out.offlineList.push({ server: v.srv, key, nick: v.nick || '', lastOnline: v.lastOnline || 0 });
     }
@@ -107,9 +121,8 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
   // (IMEI = USB path, IS_ONLINE=yes, physically UP), while its real identity
   // lingers offline with an EMPTY USB slot. That twin is not a real outage and
   // must not drop the headline count («82/83, хотя модемы стали рэндомпортами»).
-  // We credit it back ONLY at the disconnected layer — total/online/offline are
-  // never touched, so online+offline=total holds by construction. Three guards
-  // keep a GENUINE outage from being hidden:
+  // We credit it back ONLY at the disconnected layer — total/active/online are
+  // never touched. Three guards keep a GENUINE outage from being hidden:
   //   • candidate = offline twin PRESENT in the live feed with EMPTY USB ('').
   //     A fully-dead dongle that dropped from the feed (USB undefined) is NOT a
   //     candidate → it stays counted as down and keeps alerting.
@@ -141,11 +154,12 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
   if (credited.size) out.disconnectedList = out.disconnectedList.filter(o => !credited.has(o));
   out.disconnected = out.disconnectedList.length;
 
-  // `working` is the headline «Online: X/Y» count: modems that are up OR in a
-  // brief (<disconnectedMs) blip. It stays at `total` while the fleet is healthy
-  // and only drops when a modem is genuinely dark >10 min — i.e. it moves in
-  // lockstep with the «Модем отключен» card instead of flickering on every
-  // rotation/missed-poll. `working = total − disconnected` (≥ online).
+  // `working` is the headline «в работе X/Y» numerator: modems that are up OR
+  // in a brief (<disconnectedMs) blip, computed on the ACTIVE set. It stays at
+  // `active` while the fleet is healthy and only drops when a modem is
+  // genuinely dark >10 min — i.e. it moves in lockstep with the «Модем
+  // отключен» card instead of flickering on every rotation/missed-poll.
+  // The denominator `total` is the stable roster — it does NOT chase `working`.
   for (const srv of Object.keys(out.byServer)) out.byServer[srv].disconnected = 0;
   for (const o of out.disconnectedList) {
     const b = out.byServer[o.server];
@@ -153,9 +167,9 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
   }
   for (const srv of Object.keys(out.byServer)) {
     const b = out.byServer[srv];
-    b.working = b.total - b.disconnected;
+    b.working = b.active - b.disconnected;
   }
-  out.working = out.total - out.disconnected;
+  out.working = out.active - out.disconnected;
   return out;
 }
 

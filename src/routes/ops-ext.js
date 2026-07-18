@@ -396,11 +396,10 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     }
 
     // Modem fleet KPI — one coherent count (src/modems/fleet.js):
-    //   total   = modems online within 48h (uptime history) ∪ online right now;
-    //   online  = currently IS_ONLINE in the live snapshot;
-    //   offline = total − online.
-    // Always consistent (online ≤ total), stable through a server flake (uptime
-    // history holds the denominator), excludes never-online re-add phantoms.
+    //   total  = STABLE roster (all real modems, changes only on add/soft-delete);
+    //   active = online within 48h ∪ online right now;
+    //   working = active − disconnected (online + brief blips) — the live numerator.
+    // Denominator no longer decays with offline time («91→90→89» complaint).
     let fleet = { total: 0, online: 0, offline: 0, byServer: {} };
     try {
       fleet = computeFleet(_fleetMetaStmt.all(), getUptimeTracking(), merged.status || []);

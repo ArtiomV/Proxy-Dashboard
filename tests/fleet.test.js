@@ -37,16 +37,18 @@ describe('computeFleet', () => {
   it('total = online-within-48h ∪ online-now; online from live; offline = total-online', () => {
     const f = computeFleet(meta, uptime, live, { now: NOW });
     // Fleet: A (online 2m), B (online 20h ago → still fleet), C (online 5m). D is a
-    // 10-day phantom → excluded. random E → excluded.
-    expect(f.total).toBe(3);
+    // Fleet roster: A, B, C AND the 10-day phantom D (total is STABLE — dead
+    // hardware stays «у нас» until soft-delete). Active (48h): A, B, C only.
+    expect(f.total).toBe(4);
+    expect(f.active).toBe(3);
     expect(f.online).toBe(2);     // A + C are IS_ONLINE=yes
-    expect(f.offline).toBe(1);    // B (in fleet via uptime, offline now)
-    expect(f.online + f.offline).toBe(f.total);
-    // MD_B is offline 20h → disconnected (>10 min); working = total − disconnected.
+    expect(f.offline).toBe(1);    // B (in the active set via uptime, offline now)
+    expect(f.online + f.offline).toBe(f.active);
+    // MD_B is offline 20h → disconnected (>10 min); working = active − disconnected.
     expect(f.disconnected).toBe(1);
     expect(f.working).toBe(2);
-    expect(f.byServer.S1).toEqual({ total: 2, online: 1, offline: 1, disconnected: 1, working: 1 });
-    expect(f.byServer.S2).toEqual({ total: 1, online: 1, offline: 0, disconnected: 0, working: 1 });
+    expect(f.byServer.S1).toEqual({ total: 2, active: 2, online: 1, offline: 1, disconnected: 1, working: 1 });
+    expect(f.byServer.S2).toEqual({ total: 2, active: 1, online: 1, offline: 0, disconnected: 0, working: 1 });
     // offlineList lists exactly the offline fleet modems (for the «Модем отключен» card).
     expect(f.offlineList.map(o => o.nick)).toEqual(['MD_B']);
     expect(f.offlineList[0].server).toBe('S1');
@@ -56,7 +58,7 @@ describe('computeFleet', () => {
     // A modem online in the live snapshot but with NO uptime row yet (brand-new).
     const live2 = live.concat([{ _server: 'S3', modem_details: { IMEI: 'S3_NEW', NICK: 'NEW1' }, net_details: { IS_ONLINE: 'yes' } }]);
     const f = computeFleet(meta, uptime, live2, { now: NOW });
-    expect(f.byServer.S3).toEqual({ total: 1, online: 1, offline: 0, disconnected: 0, working: 1 });   // unioned into fleet
+    expect(f.byServer.S3).toEqual({ total: 1, active: 1, online: 1, offline: 0, disconnected: 0, working: 1 });   // unioned into fleet
     expect(f.online).toBeLessThanOrEqual(f.total);
   });
 
@@ -64,9 +66,9 @@ describe('computeFleet', () => {
     // S2 returns nothing (unreachable); C should stay in the fleet (online 5m ago) but count offline.
     const liveFlake = live.filter(m => m._server !== 'S2');
     const f = computeFleet(meta, uptime, liveFlake, { now: NOW });
-    expect(f.total).toBe(3);                 // A, B, C still counted (uptime history)
+    expect(f.total).toBe(4);                 // A, B, C + phantom D (stable roster)
     // C went offline only 5 min ago (server flake) → still «working», NOT disconnected.
-    expect(f.byServer.S2).toEqual({ total: 1, online: 0, offline: 1, disconnected: 0, working: 1 });
+    expect(f.byServer.S2).toEqual({ total: 2, active: 1, online: 0, offline: 1, disconnected: 0, working: 1 });
     expect(f.online).toBeLessThanOrEqual(f.total);
   });
 
@@ -74,8 +76,8 @@ describe('computeFleet', () => {
     const liveCached = live.map(m => ({ ...m, _cached: true }));
     const f = computeFleet(meta, uptime, liveCached, { now: NOW });
     expect(f.online).toBe(0);                // nothing live-online
-    expect(f.total).toBe(3);                 // but fleet held by uptime history
-    expect(f.offline).toBe(3);
+    expect(f.total).toBe(4);                 // roster held regardless (stable)
+    expect(f.offline).toBe(3);               // A, B, C — active but not online
   });
 
   it('disconnectedList = offline ≥10 min; a brief <10 min blip stays out', () => {
@@ -97,9 +99,9 @@ describe('computeFleet', () => {
     expect(f.offlineList.map(o => o.nick).sort()).toEqual(['MD_X', 'MD_Y']);
     expect(f.disconnected).toBe(1);                                 // only the 30-min one crossed 10 min
     expect(f.disconnectedList.map(o => o.nick)).toEqual(['MD_Y']);
-    // working = total − disconnected: MD_X (3-min blip) still counts as working.
+    // working = active − disconnected: MD_X (3-min blip) still counts as working.
     expect(f.working).toBe(1);
-    expect(f.byServer.S1).toEqual({ total: 2, online: 0, offline: 2, disconnected: 1, working: 1 });
+    expect(f.byServer.S1).toEqual({ total: 2, active: 2, online: 0, offline: 2, disconnected: 1, working: 1 });
   });
 
   it('disconnectedMs is configurable', () => {
@@ -132,7 +134,7 @@ describe('computeFleet — glitched-to-random credit', () => {
     expect(f.total).toBe(2);
     expect(f.disconnected).toBe(0);    // glitched twin credited
     expect(f.working).toBe(2);         // count does NOT drop
-    expect(f.online + f.offline).toBe(f.total);
+    expect(f.online + f.offline).toBe(f.active);
   });
 
   it('does NOT hide a genuinely-dead modem that vanished from the feed (USB undefined)', () => {
@@ -174,6 +176,21 @@ describe('computeFleet — glitched-to-random credit', () => {
     const f = computeFleet(meta2, uptime2, [okLive, offl('G', 'MD_G', '')], { now: NOW });   // no random on S4
     expect(f.disconnected).toBe(1);    // usb-less but no random ⇒ no credit ⇒ stays down
     expect(f.working).toBe(1);
+  });
+
+  it('total (roster) is STABLE: >48h-dead modems stay in total but out of active/working/offline', () => {
+    // The «вторая цифра» the operator asked about: fleet size must not decay as
+    // offline time passes — only soft-delete shrinks it.
+    const meta2 = [okMeta, { srv: 'S4', imei: 'OLD', nick: 'MD_OLD' }];
+    const uptime2 = { ...okUp, 'S4_OLD': { last_online_check: ago(10 * 24 * H) } };
+    const f = computeFleet(meta2, uptime2, [okLive], { now: NOW });
+    expect(f.total).toBe(2);      // OLD still «у нас есть»
+    expect(f.active).toBe(1);     // but not in the operational set
+    expect(f.working).toBe(1);
+    expect(f.offline).toBe(0);    // offline covers the active set only
+    expect(f.disconnected).toBe(0);
+    expect(f.byServer.S4.total).toBe(2);
+    expect(f.byServer.S4.working).toBe(1);
   });
 });
 
