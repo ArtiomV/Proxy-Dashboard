@@ -22,8 +22,7 @@
  */
 
 const NOTIF_TTL_DAYS = 30;
-const { DISCONNECTED_MS } = require('../modems/fleet');
-const OFFLINE_MIN_MS = DISCONNECTED_MS;   // «Модем отключен» — единый порог из fleet.js (WP1)
+const { computeFleet } = require('../modems/fleet');   // WP4.2: bell set == card set
 const CLIENT_DEBT_THRESHOLD = -10;       // ₽
 
 let deps = null;
@@ -56,7 +55,7 @@ async function runOnce() {
   // Per-rule toggle gates whole passes — if the admin turned the rule off in
   // Settings → Уведомления, we skip the scan entirely. Saves an SQLite walk.
   if (!enabled || enabled('modem_offline')) {
-    try { passOfflineModems(); }   catch (e) { deps.logger.warn('[NotifyCollect] offline: ' + e.message); }
+    try { await passOfflineModems(); } catch (e) { deps.logger.warn('[NotifyCollect] offline: ' + e.message); }
   }
   if (!enabled || enabled('sim_redirect_imposed') || enabled('sim_status_bad') || enabled('reboot_score_high')) {
     try { passSimSignals(); }      catch (e) { deps.logger.warn('[NotifyCollect] sim: ' + e.message); }
@@ -71,45 +70,25 @@ async function runOnce() {
 }
 
 // ── Pass 1: offline modems ──────────────────────────────────────
-// Walks uptimeTracking + knownModems. A modem is reported when:
-//   - it has been online at some point (we have last_online_check)
-//   - it has been offline >= 20 min since then
-//   - it is NOT in the "stale" set (already offline > stale_modem_hours)
-function passOfflineModems() {
-  const { alerts, uptimeTracking, knownModems, getStaleNicks } = deps;
-  const now = Date.now();
+// WP4.2: the bell fires on EXACTLY the set the «Модем отключен» card shows —
+// fleet.disconnectedList, computed here with the same inputs /api/admin/data
+// uses. Two historic divergences die with this:
+//   - glitched-to-random twins used to bell while the card credited them away
+//     («алерт есть, в карточке пусто») — the fleet layer credits them;
+//   - the >12h stale suppression meant «в карточке есть, в колокольчике
+//     тишина» — removed; day-level dedup below keeps it from flooding.
+async function passOfflineModems() {
+  const { alerts, uptimeTracking, trackingDb, fetchAllServersDataCached, mergeServerData } = deps;
+  if (!trackingDb || !fetchAllServersDataCached || !mergeServerData) return;
   const day = todayBucket();
-  const staleNicks = (typeof getStaleNicks === 'function') ? getStaleNicks() : new Set();
-
-  // Build (server,imei → nick) map from knownModems for friendly names.
-  const nickByKey = {};
-  for (const [srvName, ports] of Object.entries(knownModems || {})) {
-    for (const p of Object.values(ports || {})) {
-      if (p && p.imei) nickByKey[srvName + '_' + p.imei] = p.nick || p.imei;
-    }
-  }
-
-  for (const [key, ut] of Object.entries(uptimeTracking || {})) {
-    if (!ut || !ut.last_online_check) continue;
-    const lastMs = Date.parse(ut.last_online_check);
-    if (isNaN(lastMs)) continue;
-    const offlineMs = now - lastMs;
-    if (offlineMs < OFFLINE_MIN_MS) continue;
-    // key format: <serverName>_<imei>
-    const m = key.match(/^(\w+)_(\d{10,20})$/);
-    if (!m) continue;
-    const server = m[1], imei = m[2];
-    const nick = nickByKey[key];
-    // No nick → uptimeTracking has history for an IMEI that's no longer
-    // registered in ProxySmart (modem swapped, removed, etc.). Don't alert
-    // on these — they'd flood the bell with raw IMEIs the operator can't
-    // act on. Same idea as staleNicks below, just covers the "removed
-    // from API entirely" gap.
-    if (!nick) continue;
-    if (staleNicks.has(nick)) continue;  // long-dead — bell would spam
-
-    const mins = Math.floor(offlineMs / 60000);
-    const lastOnlineLocal = new Date(lastMs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' });
+  const results = await fetchAllServersDataCached();
+  const merged = mergeServerData(results, '*');
+  const fleet = computeFleet(trackingDb.metaFleetRoster.all(), uptimeTracking, merged.status || []);
+  for (const o of fleet.disconnectedList) {
+    const lastMs = o.lastOnline || 0;
+    const mins = lastMs ? Math.floor((Date.now() - lastMs) / 60000) : 0;
+    const lastOnlineLocal = lastMs ? new Date(lastMs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) : '—';
+    const nick = o.nick || o.key;
     alerts.recordBellEvent({
       dedup_key: 'modem_offline_' + nick + '_' + day,
       rule_id: 'modem_offline',
@@ -117,8 +96,8 @@ function passOfflineModems() {
       entity_kind: 'modem',
       entity_id: nick,
       title: 'Модем оффлайн',
-      message: `📴 <b>${esc(nick)}</b> (${esc(server)}) — не отвечает ${mins} мин.\nПоследний онлайн: ${esc(lastOnlineLocal)} МСК`,
-      payload: { server, imei, nick, mins, lastOnline: lastOnlineLocal },
+      message: `📴 <b>${esc(nick)}</b> (${esc(o.server)}) — не отвечает ${mins} мин.\nПоследний онлайн: ${esc(lastOnlineLocal)} МСК`,
+      payload: { server: o.server, imei: String(o.key).split('|')[1] || '', nick, mins, lastOnline: lastOnlineLocal },
     });
   }
 }

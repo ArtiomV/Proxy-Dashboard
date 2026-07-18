@@ -78,9 +78,9 @@ r.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) =
     const testServer = { name, url, user, pass, publicIp: publicIp || new URL(url).hostname, country: country || '', countryName: countryName || name, tz: tz || 'Europe/Moscow' };
     const status = await fetchApi(testServer, '/apix/show_status_json', 10000);
     const modemCount = Array.isArray(status) ? status.length : 0;
-    // Add to runtime
+    // Add to runtime. SERVER_COUNTRIES is rebuilt inside saveApiServersToDb
+    // (single path for every mutation — no per-route patching, WP4.3).
     apiServers.push(testServer);
-    SERVER_COUNTRIES[name] = { country: testServer.country, name: testServer.countryName, tz: testServer.tz, serverIp: testServer.publicIp };
     // Save to DB (not .env)
     saveApiServersToDb();
     auditLog(req.user.login, 'add_server', { name, url, modemCount, ip: getClientIp(req) });
@@ -95,7 +95,7 @@ r.delete('/api/admin/servers/:name', authMiddleware, adminMiddleware, (req, res)
   const idx = apiServers.findIndex(s => s.name === req.params.name);
   if (idx === -1) return res.status(404).json({ error: 'Server not found' });
   apiServers.splice(idx, 1);
-  delete SERVER_COUNTRIES[req.params.name];
+  // SERVER_COUNTRIES rebuilt inside saveApiServersToDb (WP4.3).
   saveApiServersToDb();
   proxySmart.invalidateCache();
   auditLog(req.user.login, 'delete_server', { name: req.params.name, ip: getClientIp(req) });

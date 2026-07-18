@@ -360,6 +360,24 @@ try {
     mergeDbMetadataIntoEnvServers(apiServers, dbServers);
   }
 } catch (_) { /* best-effort: error intentionally swallowed */ }
+// Server country config — derived from apiServers (country, countryName, tz).
+// Declared BEFORE saveApiServersToDb's first call: the save path rebuilds it.
+const SERVER_COUNTRIES = {};
+// Rebuild the derived map. Called at boot AND inside saveApiServersToDb() so
+// EVERY mutation path (add/delete/edit/boot-merge) keeps it fresh — the edit
+// route used to leave it stale, so top-hosts/hourly silently got '' for a
+// server whose country changed at runtime (WP4.3).
+function rebuildServerCountries() {
+  for (const k of Object.keys(SERVER_COUNTRIES)) delete SERVER_COUNTRIES[k];
+  for (const s of apiServers) {
+    SERVER_COUNTRIES[s.name] = {
+      serverIp: s.publicIp,
+      country: s.country || '',
+      name: s.countryName || s.name,
+      tz: s.tz || 'Europe/Moscow'
+    };
+  }
+}
 function saveApiServersToDb(source) {
   // Routes through kvSetCritical so the write is history-logged AND refused if
   // it would silently shrink any tracked metadata count (address/ssh/etc).
@@ -368,21 +386,15 @@ function saveApiServersToDb(source) {
   if (!r.ok) {
     logger.error(`[saveApiServersToDb] refused: ${r.error}; regressions=${JSON.stringify(r.regressions || [])}`);
   }
+  // WP4.3: keep the derived country map fresh on every mutation path.
+  if (typeof rebuildServerCountries === 'function') rebuildServerCountries();
 }
 // Auto-migrate: save env servers to DB on first run
 if (apiServers.length > 0) saveApiServersToDb();
 
-// Server country config — loaded from DB server objects (country, countryName, tz fields)
+// Server country config is declared right before saveApiServersToDb above.
 // getTzOffset extracted to src/utils/time.js
-const SERVER_COUNTRIES = {};
-for (const s of apiServers) {
-  SERVER_COUNTRIES[s.name] = {
-    serverIp: s.publicIp,
-    country: s.country || '',
-    name: s.countryName || s.name,
-    tz: s.tz || 'Europe/Moscow'
-  };
-}
+rebuildServerCountries();
 logger.info(`Loaded ${apiServers.length} API server(s): ${apiServers.map(s => s.name + ' (' + s.url + ')').join(', ')}`);
 
 // ─── Startup integrity check ───────────────────────────────────────────────────
@@ -5111,6 +5123,9 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   // offline-modem / client-debt / CRM-reminder events into the same bell.
   require('./src/jobs/notify-collect').init({
     logger, db, alerts, uptimeTracking, knownModems, clients, getStaleNicks, getSetting,
+    // WP4.2: the bell's offline set must equal the card's disconnectedList —
+    // give the job the same inputs computeFleet uses on /api/admin/data.
+    trackingDb, fetchAllServersDataCached, mergeServerData,
   });
   // Stage 19: failover engine — periodic scan that re-points dead/glitchy
   // client modems to healthy spares (OFF + dry-run by default; see settings).
@@ -5396,4 +5411,4 @@ process.on('uncaughtException', (err) => {
 // Expose internals for the supertest harness (NODE_ENV=test). Production
 // code paths don't reach for this — the start-via-`node server.js` flow
 // runs to completion above and never `require()`s its own exports.
-module.exports = { app, db, saveClients, injectOfflineModems, knownModems, saveKnownModems };
+module.exports = { app, db, saveClients, injectOfflineModems, knownModems, saveKnownModems, apiServers, SERVER_COUNTRIES, rebuildServerCountries };
