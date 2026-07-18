@@ -97,11 +97,11 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
     if (raw) liveUsbByKey[srv + '|' + raw] = usb;
   }
 
-  const out = { total: 0, active: 0, online: 0, offline: 0, byServer: {}, offlineList: [] };
+  const out = { total: 0, active: 0, online: 0, offline: 0, byServer: {}, offlineList: [], activeKeys: [] };
   for (const [key, v] of fleet) {
     const b = out.byServer[v.srv] || (out.byServer[v.srv] = { total: 0, active: 0, online: 0, offline: 0 });
     b.total++; out.total++;
-    if (v.active) { b.active++; out.active++; }
+    if (v.active) { b.active++; out.active++; out.activeKeys.push(key); }
     if (v.online) { b.online++; out.online++; }
     else if (v.active) {
       // Offline counts/list cover the ACTIVE set only: a modem dead for weeks
@@ -191,4 +191,43 @@ function annotateTestPool(statusArr, poolKeySet) {
   return statusArr;
 }
 
-module.exports = { computeFleet, annotateTestPool };
+// computeClientWorking(knownModems, fleet, opts) — per-client «в работе»
+// count with the SAME semantics as the fleet headline: a roster-bound modem
+// counts as working when it is in the fleet's ACTIVE set (online within 48h)
+// and NOT in disconnectedList (dark ≥10 min). A modem dead for weeks is
+// neither active nor working — it shrinks the numerator only, never spams
+// the «Модем отключен» card.
+//
+// Why this exists: the per-client counter used to take live getModemStatus(),
+// which is MORE optimistic than the fleet layer (a modem dark for fleet —
+// IS_ONLINE=no ≥10 min — could still read 'online' via the state==='added'
+// or connectionStatus branches) → «31/31» while the headline showed «90/91».
+//
+// knownModems: { server: { portKey: { imei, nick, portName, lastClientSeen, lastSeen } } }
+// fleet: the computeFleet() result (uses .activeKeys + .disconnectedList).
+// Returns: { portName -> workingCount }.
+function computeClientWorking(knownModems, fleet, opts) {
+  opts = opts || {};
+  const now = opts.now || Date.now();
+  const retainMs = opts.retainMs || 24 * 3600 * 1000;   // same 24h roster retention as /api/admin/data
+  const active = new Set((fleet && fleet.activeKeys) || []);
+  const dark = new Set(((fleet && fleet.disconnectedList) || []).map(o => o.key));
+  const out = {};
+  for (const [srvName, ports] of Object.entries(knownModems || {})) {
+    for (const info of Object.values(ports || {})) {
+      if (!info || !info.portName || /^random/i.test(info.portName)) continue;
+      const id = info.imei || info.nick;
+      if (!id) continue;
+      const lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
+      const ls = typeof lcs === 'number' ? lcs : Date.parse(lcs || 0);
+      if (!ls || (now - ls) > retainMs) continue;   // aged out of the roster — not counted either way
+      const key = srvName + '|' + id;
+      if (!active.has(key)) continue;               // not online within 48h → not working
+      if (dark.has(key)) continue;                  // dark ≥10 min → not working
+      out[info.portName] = (out[info.portName] || 0) + 1;
+    }
+  }
+  return out;
+}
+
+module.exports = { computeFleet, annotateTestPool, computeClientWorking };

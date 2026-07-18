@@ -214,3 +214,31 @@ describe('annotateTestPool', () => {
     expect(annotateTestPool(null, new Set(['S1|MD_A']))).toBe(null);
   });
 });
+
+describe('computeClientWorking', () => {
+  const { computeClientWorking, computeFleet } = require('../src/modems/fleet.js');
+  it('per-client working = roster-bound ∩ active ∩ not-dark-≥10min', () => {
+    const meta = [
+      { srv: 'S1', imei: 'A', nick: 'MD_A' },
+      { srv: 'S1', imei: 'B', nick: 'MD_B' },
+      { srv: 'S1', imei: 'C', nick: 'MD_C' },
+    ];
+    const uptime = {
+      'S1_A': { last_online_check: ago(1 * 60 * 1000) },      // online
+      'S1_B': { last_online_check: ago(30 * 60 * 1000) },     // dark 30 min → disconnected
+      'S1_C': { last_online_check: ago(10 * 24 * H) },        // dead 10d → not active
+    };
+    const live = [{ _server: 'S1', modem_details: { IMEI: 'S1_A', NICK: 'MD_A' }, net_details: { IS_ONLINE: 'yes' } }];
+    const fleet = computeFleet(meta, uptime, live, { now: NOW });
+    const known = { S1: {
+      p1: { imei: 'A', nick: 'MD_A', portName: 'CLIENT', lastClientSeen: NOW },
+      p2: { imei: 'B', nick: 'MD_B', portName: 'CLIENT', lastClientSeen: NOW },
+      p3: { imei: 'C', nick: 'MD_C', portName: 'CLIENT', lastClientSeen: NOW },
+      p4: { imei: 'X', nick: 'MD_X', portName: 'CLIENT', lastClientSeen: NOW - 25 * 3600 * 1000 }, // aged out of roster
+      p5: { imei: 'T', nick: 'MD_T', portName: 'random77', lastClientSeen: NOW },                 // placeholder → skip
+    }};
+    const w = computeClientWorking(known, fleet, { now: NOW });
+    expect(w.CLIENT).toBe(1);   // only A: B dark ≥10min, C inactive >48h, X aged out, random skipped
+    expect(w.random77).toBeUndefined();
+  });
+});

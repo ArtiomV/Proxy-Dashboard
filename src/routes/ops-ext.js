@@ -8,7 +8,7 @@
 // during mount-time evaluation.
 
 const express = require('express');
-const { computeFleet, annotateTestPool } = require('../modems/fleet');
+const { computeFleet, annotateTestPool, computeClientWorking } = require('../modems/fleet');
 const simulatorDb = require('../db/simulator');
 
 module.exports = function createOpsExtRouter(deps) {
@@ -404,6 +404,17 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     try {
       fleet = computeFleet(_fleetMetaStmt.all(), getUptimeTracking(), merged.status || []);
     } catch (e) { logger.warn('[fleet] count failed: ' + e.message); }
+
+    // Per-client «в работе» with fleet semantics (active ∩ not-dark-≥10min).
+    // Feeds the dashboard client table's online/total — it used to be counted
+    // from the more-optimistic live getModemStatus and disagreed with the
+    // fleet headline («31/31» при «90/91» наверху).
+    try {
+      const _clientWorking = computeClientWorking(getKnownModems(), fleet);
+      for (const c of sanitizedClients) {
+        c.modemWorking = c.portName ? (_clientWorking[c.portName] || 0) : 0;
+      }
+    } catch (e) { logger.warn('[fleet] client working failed: ' + e.message); }
 
     res.json({
       connsHistory: (deps.getConnsHistory ? deps.getConnsHistory() : {}),

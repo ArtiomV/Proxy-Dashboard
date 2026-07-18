@@ -1892,6 +1892,10 @@ function collectTrafficData(){
   (currentData.clients||[]).forEach(function(c){
     if(!c.portName || typeof c.modemCount!=='number' || c.modemCount<=0) return;
     if(!clientTraffic[c.portName]) clientTraffic[c.portName]={tIn:0,tOut:0,modems:0,online:0};
+    // «в работе» по клиенту — fleet-семантика из backend (modemWorking), а не
+    // живой getModemStatus: иначе числитель расходился с шапкой («31/31» при
+    // «90/91» наверху — модем, тёмный для fleet, ещё считался онлайн тут).
+    if(typeof c.modemWorking==='number') clientTraffic[c.portName].online=c.modemWorking;
     // Показываем 24ч-ростер (стабильнее живого счётчика), НО итог не может быть
     // меньше числа онлайн-модемов прямо сейчас — иначе выходит «32/30» (ростер
     // отстаёт от только что добавленных модемов). max() держит инвариант online≤total.
