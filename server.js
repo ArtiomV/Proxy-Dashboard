@@ -4579,7 +4579,7 @@ app.use(require('./src/routes/ops-ext')({
   _getClientTrend: () => _getClientTrend(),
   _getModemTrend: () => _getModemTrend(),
   logActivity,
-  getMoscowNow, getMoscowYesterday,
+  getMoscowNow, getMoscowToday, getMoscowYesterday,
   ledgerExpense, parseBwToBytes, trafficBytesToGb,
 }));
 

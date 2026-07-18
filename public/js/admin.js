@@ -4595,13 +4595,16 @@ function renderClients(){
     var bCost=charges[b.id]||0;
     return bCost-aCost;
   });
-  var _cnt={all:0,active:0,debtors:0,expiring:0},_mrr=0;cl.forEach(function(c){var b=c.balance!==undefined?c.balance:0;var ch=((currentData.clientMonthCharges||{})[c.id]||0);var md=(pnm[c.portName]||[]).length;_cnt.all++;_mrr+=ch;if(b<0){_cnt.debtors++;}else{if(md>0)_cnt.active++;if(ch>0&&b/(ch/30)<5)_cnt.expiring++;}});
+  // WP8: _mrr и эвристика expiring — из canonical clientRevenue30d (скользящие
+  // 30 дней), а не месяц-ту-дейт: дневная норма расхода ch/30 теперь верна и
+  // 1-го числа (месяц-ту-дейт давал пустой список expiring в начале месяца).
+  var _cnt={all:0,active:0,debtors:0,expiring:0},_mrr=0;cl.forEach(function(c){var b=c.balance!==undefined?c.balance:0;var ch=((currentData.clientRevenue30d||{})[c.id]||0);var md=(pnm[c.portName]||[]).length;_cnt.all++;_mrr+=ch;if(b<0){_cnt.debtors++;}else{if(md>0)_cnt.active++;if(ch>0&&b/(ch/30)<5)_cnt.expiring++;}});
   var h='';var count=0;var colors=CHART_COLORS.clients;
   cl.forEach(function(c,i){
     var modems=pnm[c.portName]||[];
     if(search&&(c.name+' '+c.portName+' '+c.login+' '+(c.contact||'')+' '+(c.legalName||'')).toLowerCase().indexOf(search)===-1)return;
     var balance=c.balance!==undefined?c.balance:0;
-    var _ch0=((currentData.clientMonthCharges||{})[c.id]||0);if(_clientFilter==='active'&&!(balance>=0&&modems.length>0))return;if(_clientFilter==='debtors'&&balance>=0)return;if(_clientFilter==='expiring'&&!(balance>=0&&_ch0>0&&balance/(_ch0/30)<5))return;
+    var _ch0=((currentData.clientRevenue30d||{})[c.id]||0);if(_clientFilter==='active'&&!(balance>=0&&modems.length>0))return;if(_clientFilter==='debtors'&&balance>=0)return;if(_clientFilter==='expiring'&&!(balance>=0&&_ch0>0&&balance/(_ch0/30)<5))return;
     count++;var bt=c.billingType||'per_gb';var price=c.price||0;
     var cost=Math.round(((currentData.clientMonthCharges||{})[c.id]||0)*100)/100;
     var monthGbLive=Math.round(((currentData.clientLiveMonthGb||{})[c.id]||0)*10)/10;
@@ -7649,7 +7652,8 @@ function renderNewPulse(fin){
     el.innerHTML =
       _ncPulseCard('Трафик сегодня', fmtGb(_today), '<span style="color:var(--text-3)">по всему парку</span>', 'accent') +
       _ncPulseCard('Активные модемы', _fw+'/'+_ft, '<span style="color:var(--text-3)">в работе</span>', (_fw>=_ft?'success':'warn')) +
-      _ncPulseCard('Выручка (MRR)', _fmtRub(s.mrr), growthSub, 'accent') +
+      // WP8: canonical revenue_30d (одно число со страницей клиентов); s.mrr — fallback для старых payload'ов.
+      _ncPulseCard('Выручка за 30 дней', _fmtRub((s.metrics&&s.metrics.revenue_30d!=null)?s.metrics.revenue_30d:s.mrr), growthSub, 'accent') +
       _ncPulseCard('На балансах', _fmtRub(cashFloat), '<span style="color:var(--text-3)">предоплата клиентов</span>', 'success');
   }
   // Финсводка-виджет (верхний ряд, бывший слот «Ресурсы») — MRR / NRR / прирост M/M / на балансах
@@ -7657,7 +7661,7 @@ function renderNewPulse(fin){
   if(fsEl){
     function _fsRow(l,v,c,last){return '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px'+(last?'':';border-bottom:1px solid var(--border)')+'"><span style="color:var(--text-2)">'+l+'</span><span style="font-weight:600'+(c?';color:'+c:'')+'">'+v+'</span></div>';}
     fsEl.innerHTML =
-      _fsRow('MRR', _fmtRub(s.mrr), 'var(--text-0)') +
+      _fsRow('Выручка 30д', _fmtRub((s.metrics&&s.metrics.revenue_30d!=null)?s.metrics.revenue_30d:s.mrr), 'var(--text-0)') +
       _fsRow('NRR', s.nrr_pct==null?'—':(s.nrr_pct+'%'), nrrColor) +
       _fsRow('Прирост M/M', gc==null?'—':((gc>=0?'+':'')+gc+'%'), gc==null?'var(--text-3)':(gc>=0?'var(--success)':'var(--danger)')) +
       _fsRow('На балансах', _fmtRub(cashFloat), 'var(--accent)', true);

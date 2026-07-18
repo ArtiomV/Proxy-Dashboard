@@ -314,3 +314,15 @@ and should follow the same pattern in a future pass:
   (BLIP_GRACE_MS fetch grace, speedtest job TTL).
 - /api/admin/data documents the per-client roster window: rosterWindowHours=24
   (deliberately narrower than fleet 48h — reassigned modems age out sooner).
+
+## WP8 done (2026-07) — canonical revenue metric
+
+- src/billing/revenue.js: computeRevenueWindow — charge+correction via
+  ledgerExpense, rolling N-MSK-day windows. Used by /api/admin/data
+  (metrics.revenue_30d + clientRevenue30d) and /api/admin/finance_dashboard
+  (mrr* fields + metrics.revenue_30d).
+- UTC→MSK month fix in ops-ext (clientMonthCharges prefix).
+- Frontend labels: «Выручка за 30 дней» / «Выручка 30д»; «MRR» больше не
+  используется для месяц-ту-дейт. Expiring: дневная норма = revenue_30d/30.
+- Осталось за кадром: per-tariff split и NRR-baseline в finance_dashboard
+  считаются charge-only SQL — осознанно, не канон-метрики.

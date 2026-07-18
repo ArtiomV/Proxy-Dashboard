@@ -10,6 +10,7 @@
 const express = require('express');
 const { computeFleet, annotateTestPool, computeClientWorking } = require('../modems/fleet');
 const simulatorDb = require('../db/simulator');
+const { computeRevenueWindow } = require('../billing/revenue');   // WP8: canonical revenue
 
 module.exports = function createOpsExtRouter(deps) {
   const {
@@ -30,7 +31,7 @@ module.exports = function createOpsExtRouter(deps) {
     computeProxyIssues, fetchApi, findServer,
     getSpeedtestLatest, _getClientTrend, _getModemTrend,
     logActivity,
-    getMoscowNow, getMoscowYesterday,
+    getMoscowNow, getMoscowToday, getMoscowYesterday,
     ledgerExpense, parseBwToBytes, trafficBytesToGb,
   } = deps;
   const r = express.Router();
@@ -270,7 +271,10 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     // Stage 4: SQL aggregate replaces in-memory walk of `billingLedger`.
     const clientMonthCharges = {};
     const clientMonthGb = {};
-    const curMonthPfx = new Date().toISOString().slice(0, 7);
+    // WP8 UTC→MSK fix: the month prefix came from toISOString (UTC), but
+    // ledger dates are MSK — between 00:00–03:00 MSK on the 1st the clients
+    // page aggregated the PREVIOUS month. Moscow date, always.
+    const curMonthPfx = getMoscowToday().slice(0, 7);
     const monthRows = _ledgerMonthAggStmt.all(`${curMonthPfx}%`);
     for (const r of monthRows) {
       // Rehydrate the minimal shape ledgerExpense() expects (cost vs amount).
@@ -416,6 +420,15 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       }
     } catch (e) { logger.warn('[fleet] client working failed: ' + e.message); }
 
+    // Canonical revenue (WP8): rolling 30 MSK days, charge + correction via
+    // ledgerExpense — the SAME number as /api/admin/finance_dashboard shows.
+    // clientRevenue30d feeds the clients-page MRR total and the expiring
+    // heuristic (daily burn = revenue_30d / 30, not month-to-date).
+    let revenue30d = { byClient: {}, total: 0, windowDays: 30, asOf: getMoscowToday() };
+    try {
+      revenue30d = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30 });
+    } catch (e) { logger.warn('[revenue] compute failed: ' + e.message); }
+
     res.json({
       connsHistory: (deps.getConnsHistory ? deps.getConnsHistory() : {}),
       clientMonthCharges,
@@ -426,6 +439,9 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       modemTrend,
       clientTrend,
       fleet,
+      // Canonical revenue metric (WP8) — same source as finance_dashboard.
+      metrics: { revenue_30d: revenue30d.total, window_days: 30, as_of: revenue30d.asOf },
+      clientRevenue30d: revenue30d.byClient,
       // Per-client counters (modemCount/modemWorking) use the known_modems
       // roster with a 24h lastClientSeen retention — deliberately NARROWER
       // than the fleet 48h window so a reassigned modem stops counting for

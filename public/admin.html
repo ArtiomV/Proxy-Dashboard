@@ -472,7 +472,7 @@
       <span class="cl-chip" data-f="debtors" onclick="setClientFilter2('debtors')">Должники · <b id="clCntDebt">0</b></span>
       <span class="cl-chip" data-f="expiring" onclick="setClientFilter2('expiring')">Истекают · <b id="clCntExp">0</b></span>
     </div>
-    <div style="font-size:12px;color:var(--text-2);white-space:nowrap">MRR <b id="clMrrTotal" style="color:var(--text-0);font-family:var(--font-mono);font-weight:700;margin-left:4px">—</b></div>
+    <div style="font-size:12px;color:var(--text-2);white-space:nowrap" title="Сумма по charge+correction за скользящие 30 дней (каноническая метрика)">Выручка 30д <b id="clMrrTotal" style="color:var(--text-0);font-family:var(--font-mono);font-weight:700;margin-left:4px">—</b></div>
   </div>
   <div class="client-grid" style="padding:14px 24px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(420px,100%),1fr));gap:12px;align-items:start" id="clientCardList"></div>
 </div>
@@ -1399,6 +1399,6 @@
 </div>
 
 <script src="/js/utils.js?v=0718c"></script>
-<script src="/js/admin.js?v=0718c"></script>
+<script src="/js/admin.js?v=0718d"></script>
 </body>
 </html>

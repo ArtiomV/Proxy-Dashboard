@@ -7,6 +7,7 @@
 
 const express = require('express');
 const { COST_CATEGORIES } = require('../billing/cost-categories');  // P2-2: was a server.js dep
+const { computeRevenueWindow } = require('../billing/revenue');     // WP8: canonical revenue
 
 module.exports = function createBillingExtRouter(deps) {
   const {
@@ -109,14 +110,15 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const since365 = isoDay(new Date(now.getTime() - 365 * dayMs));
 
     // -- per-client MRR (trailing 30d revenue) --
-    const mrrRows = db.prepare(`SELECT client_id, SUM(amount) as mrr
-      FROM billing_ledger WHERE type='charge' AND date >= ? GROUP BY client_id`).all(since30);
-    const mrrByClient = Object.fromEntries(mrrRows.map(r => [r.client_id, Math.round(r.mrr * 100) / 100]));
+    // WP8: canonical metric from src/billing/revenue — charge + correction via
+    // ledgerExpense (corrections/refunds REDUCE revenue; they were silently
+    // dropped before), window edges in MSK (getMoscowToday), not UTC.
+    const rev30 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30 });
+    const mrrByClient = rev30.byClient;
 
     // -- per-client previous 30d (60..30 days ago) --
-    const prevMrrRows = db.prepare(`SELECT client_id, SUM(amount) as mrr
-      FROM billing_ledger WHERE type='charge' AND date >= ? AND date < ? GROUP BY client_id`).all(since60, since30);
-    const prevMrrByClient = Object.fromEntries(prevMrrRows.map(r => [r.client_id, Math.round(r.mrr * 100) / 100]));
+    const revPrev30 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30, fromDays: 60 });
+    const prevMrrByClient = revPrev30.byClient;
 
     // -- 3 months ago window (120..90 days ago) for NRR baseline --
     const baseRows = db.prepare(`SELECT client_id, SUM(amount) as rev
@@ -402,6 +404,9 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const payload = {
       period,
       now: now.toISOString(),
+      // Canonical revenue metric (WP8) — every screen must read THIS number
+      // (rolling 30 MSK days, charge + correction via ledgerExpense).
+      metrics: { revenue_30d: rev30.total, window_days: 30, as_of: rev30.asOf },
       summary: {
         mrr: Math.round(totalMrr),
         mrr_prev: Math.round(prevTotalMrr),
