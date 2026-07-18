@@ -1941,47 +1941,10 @@ function populateAccClientFilter(){
 
 function renderTrafficTab(){
   var d=collectTrafficData();if(!d)return;
-  // Summary widgets
-  var daysElapsed=1;
-  if(accPeriod==='month'){daysElapsed=new Date().getDate()||1}
-  else if(accPeriod==='yesterday'){daysElapsed=1}
-  else if(accPeriod==='prevmonth'){var prev=new Date();prev.setDate(0);daysElapsed=prev.getDate()||30}
-  else if(accPeriod==='lifetime'){daysElapsed=30}
-  var avgPerModem=d.totalModems?(d.totalIn+d.totalOut)/d.totalModems/daysElapsed:0;
-  var inOutRatio=d.totalOut?d.totalIn/d.totalOut:0;
-  var total=d.totalIn+d.totalOut;
-  var inPct=total?Math.round(d.totalIn/total*100):0;
-  var outPct=total?Math.round(d.totalOut/total*100):0;
-  // Forecast (only for current month)
-  var forecastH='';
-  if(accPeriod==='month'){
-    var daysInMonth=new Date(new Date().getFullYear(),new Date().getMonth()+1,0).getDate();
-    var daysLeft=daysInMonth-daysElapsed;
-    var forecast=daysElapsed?total/daysElapsed*daysInMonth:0;
-    forecastH='<div class="widget-sub">ещё '+daysLeft+' дн. в месяце</div>';
-    var forecastVal=fmtGb(forecast);
-  } else {forecastVal=fmtGb(total);forecastH='<div class="widget-sub">за период</div>';}
-  // Top client
-  var clientNames=Object.keys(d.clientTraffic).sort(function(a,b){return(d.clientTraffic[b].tIn+d.clientTraffic[b].tOut)-(d.clientTraffic[a].tIn+d.clientTraffic[a].tOut)});
-  var topClientName=clientNames[0]||'—';
-  var topClientTotal=clientNames[0]?d.clientTraffic[clientNames[0]].tIn+d.clientTraffic[clientNames[0]].tOut:0;
-  var topClientPct=total?Math.round(topClientTotal/total*100):0;
-  // Online modems
-  var mapAll=currentData._modemMap;var totalModemsAll=0,onlineModemsAll=0;
-  for(var _i in mapAll){totalModemsAll++;var _s=getModemStatus(mapAll[_i]);if(_s==='online'||_s==='rotating')onlineModemsAll++}
-  var onlineColor=onlineModemsAll===totalModemsAll?'var(--success)':'var(--warning)';
-
-  function mkWidget(label,val,sub,valColor){return'<div class="widget"><div class="widget-label">'+label+'</div><div class="widget-value"'+(valColor?' style="color:'+valColor+'"':'')+'>'+val+'</div>'+(sub?'<div class="widget-sub">'+sub+'</div>':'')+'</div>';}
-
-  // Revenue: sum of all clientMonthCharges
-  var monthCharges=currentData.clientMonthCharges||{};
-  var totalRevenue=0;Object.keys(monthCharges).forEach(function(id){totalRevenue+=monthCharges[id]||0;});
-  var revIsApprox=accPeriod==='month';// ~ if current month not yet complete
-  var revLabel=Math.round(totalRevenue).toLocaleString('ru-RU')+' ₽';
-  var revPrefix=revIsApprox?'~ ':'';
-  var totalClients=(currentData.clients||[]).length;
-
-  // Top metric widgets removed (Task 1) — keep div empty
+  // Top metric widgets removed (Task 1) — keep div empty. (WP1: the dead
+  // summary computations that used to live here — avg/forecast/top-client/
+  // online/revenue — were deleted with the div; the modem counters on this
+  // page come from currentData.fleet, like everywhere else.)
   var twEl=document.getElementById('trafficWidgets');if(twEl)twEl.innerHTML='';
 
   // Render active sub-tab
@@ -4936,20 +4899,17 @@ function loadServersList(){
   api(API+'/api/admin/servers').then(function(d){
     var el=document.getElementById('serversList');if(!el)return;
     if(!d.servers||!d.servers.length){el.innerHTML='<div style="color:var(--text-3);font-size:12px">Нет серверов</div>';return}
-    var mm=currentData&&currentData._modemMap||{};
     var h='';
     d.servers.forEach(function(s){
       var cn=s.country||{};
       var cc=cn.country||'';
       var flag=cc==='MD'?'🇲🇩':cc==='RO'?'🇷🇴':'🌍';
       var cName=cn.name||cc;
-      // Count modems on this server. «Модемов» = стабильный размер парка
-      // (known_modems), не прыгает при флапе ProxySmart; «онлайн» = live.
-      var _liveOnline=0,_liveCount=0;
-      for(var imei in mm){var m=mm[imei];if(m.server===s.name){_liveCount++;if(m.isOnline)_liveOnline++}}
+      // «Модемов» и «в работе» — строго fleet (WP1: единый источник на все
+      // страницы). Живой fallback-подсчёт удалён: он и давал расхождения.
       var _fb=currentData&&currentData.fleet&&currentData.fleet.byServer&&currentData.fleet.byServer[s.name];
-      var onlineCount=_fb?((_fb.working!=null)?_fb.working:_fb.online):_liveOnline;
-      var modemCount=_fb?_fb.total:_liveCount;
+      var onlineCount=_fb?((_fb.working!=null)?_fb.working:_fb.online):0;
+      var modemCount=_fb?_fb.total:0;
       if(modemCount<onlineCount)modemCount=onlineCount;
       var isOnline=onlineCount>0;
       var sn=esc(s.name);

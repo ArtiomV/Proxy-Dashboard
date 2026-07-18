@@ -7,6 +7,8 @@
 // metadata persistence. Every dependency arrives via the deps object;
 // nothing global is captured.
 //
+const { DISCONNECTED_MS } = require('../modems/fleet');
+
 function create(deps) {
   const {
     apiServers, fetchServerData, db, logger, logActivity, alerts,
@@ -57,7 +59,7 @@ async function trackModems() {
       // transient ECONNRESET that recovers within minutes; firing per blip
       // was just noise. Cooldown (1h) still prevents repeat spam after that.
       const downMs = Date.now() - _serverDownSince[server.name];
-      if (downMs >= 10 * 60 * 1000) {
+      if (downMs >= DISCONNECTED_MS) {   // тот же 10-мин порог, что у модемов (WP1)
         if (alerts.trigger('server_unreachable', { server: server.name, error: e.message })) {
           _serverUnreachableAlertSent[server.name] = true;
         }
@@ -429,8 +431,7 @@ async function trackModems() {
       // «Модем отключен» card (computeFleet disconnectedMs) — a modem lands in
       // the card and the alert fires at the same 10-minute mark.
       if (Date.now() >= _alertEnabledAt) {
-        const ALERT_MIN = 10;
-        const ALERT_MS  = ALERT_MIN * 60 * 1000;
+        const ALERT_MS  = DISCONNECTED_MS;   // единый порог «10 мин тишины» (WP1)
         const STALE_MS  = (Number(appSettings.stale_modem_hours) || 12) * 3600 * 1000;
         const km = knownModems[server.name] || {};
         // Alert for modems that vanished from the feed (offlineImeis) AND those

@@ -91,6 +91,19 @@ describe('utils.js — decimal SI units (Stage 7 lock)', () => {
     expect(utils.esc('')).toBe('');
     expect(utils.esc(null)).toBe('');
   });
+
+  test('getModemStatus — strict fleet semantics (WP1): no optimistic branches', () => {
+    // IS_ONLINE-derived isOnline is the ONLY "online" source; connectionStatus
+    // and state==='added'+extIp must NOT turn a dark modem green.
+    expect(utils.getModemStatus({ isOnline: true })).toBe('online');
+    expect(utils.getModemStatus({ isOnline: false })).toBe('offline');
+    expect(utils.getModemStatus({ isOnline: false, connectionStatus: 'GSM connected' })).toBe('offline');
+    expect(utils.getModemStatus({ isOnline: false, state: 'added', extIp: '10.0.0.1' })).toBe('offline');
+    expect(utils.getModemStatus({ isOnline: false, isRotating: true })).toBe('rotating');
+    expect(utils.getModemStatus({ isOnline: false, isRebooting: true })).toBe('rebooting');
+    expect(utils.getModemStatus({ isOnline: false, extIp: 'IP_RESET' })).toBe('rotating');
+    expect(utils.getModemStatus({ isOnline: true, _cached: true })).toBe('offline');
+  });
 });
 
 describe('api() — unified fetch wrapper', () => {

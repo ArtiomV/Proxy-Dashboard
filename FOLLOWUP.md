@@ -302,3 +302,15 @@ and should follow the same pattern in a future pass:
   reset_ip_by_token, rotation_log, set_rotation. ip_history keeps its
   live-only check (out of WP2 scope — offline-modem history view 403s;
   revisit if clients complain).
+
+## WP1 done (2026-07) — single fleet source for modem counters
+
+- getModemStatus: strict fleet semantics (IS_ONLINE only; connectionStatus /
+  state==='added'+extIp optimism removed — locked by unit test).
+- Traffic page: dead summary-widget computations removed (the div is emptied
+  since Task 1); servers list uses fleet only (live fallback removed).
+- DISCONNECTED_MS (10 min) exported from src/modems/fleet.js; notify-collect
+  and modem-tracking import it. Remaining 10-min constants are unrelated
+  (BLIP_GRACE_MS fetch grace, speedtest job TTL).
+- /api/admin/data documents the per-client roster window: rosterWindowHours=24
+  (deliberately narrower than fleet 48h — reassigned modems age out sooner).

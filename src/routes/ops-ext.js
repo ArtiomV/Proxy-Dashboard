@@ -426,6 +426,11 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       modemTrend,
       clientTrend,
       fleet,
+      // Per-client counters (modemCount/modemWorking) use the known_modems
+      // roster with a 24h lastClientSeen retention — deliberately NARROWER
+      // than the fleet 48h window so a reassigned modem stops counting for
+      // the old client sooner. Documented per WP1.4.
+      rosterWindowHours: 24,
       ...merged,
       servers,
       clients: sanitizedClients,

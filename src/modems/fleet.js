@@ -33,11 +33,17 @@
 //   uptime     { 'srv_imei': { last_online_check } }  — in-memory uptime_tracking.
 //   liveStatus  merged.status array — live snapshot (IMEIs prefixed 'S<n>_…').
 //   opts.now / opts.retentionMs / opts.disconnectedMs
+// The single «модем отключён» threshold (WP1): 10 minutes of darkness before
+// a modem lands in the disconnected card, the offline alert, and working
+// counts. notify-collect.js and modem-tracking.js import it from here —
+// do not re-declare locally.
+const DISCONNECTED_MS = 10 * 60 * 1000;
+
 function computeFleet(metaRows, uptime, liveStatus, opts) {
   opts = opts || {};
   const now = opts.now || Date.now();
   const retentionMs = opts.retentionMs || 48 * 3600 * 1000;   // 48h: online within 2 days = active
-  const disconnectedMs = opts.disconnectedMs != null ? opts.disconnectedMs : 10 * 60 * 1000;
+  const disconnectedMs = opts.disconnectedMs != null ? opts.disconnectedMs : DISCONNECTED_MS;
   const fleet = new Map();   // 'srv|imei' -> { srv, nick, online, lastOnline, active }
 
   // 1) Roster membership (STABLE total): every real modem meta row — including
@@ -230,4 +236,4 @@ function computeClientWorking(knownModems, fleet, opts) {
   return out;
 }
 
-module.exports = { computeFleet, annotateTestPool, computeClientWorking };
+module.exports = { computeFleet, annotateTestPool, computeClientWorking, DISCONNECTED_MS };

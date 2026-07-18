@@ -22,7 +22,8 @@
  */
 
 const NOTIF_TTL_DAYS = 30;
-const OFFLINE_MIN_MS = 10 * 60 * 1000;   // «Модем отключен» = dark >10 min (matches computeFleet disconnectedMs + the TG offline alert)
+const { DISCONNECTED_MS } = require('../modems/fleet');
+const OFFLINE_MIN_MS = DISCONNECTED_MS;   // «Модем отключен» — единый порог из fleet.js (WP1)
 const CLIENT_DEBT_THRESHOLD = -10;       // ₽
 
 let deps = null;

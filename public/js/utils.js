@@ -35,7 +35,13 @@ function formatBytes(b){if(!b||b===0)return'0 Б';if(b<1e3)return b+' Б';if(b<1
 // _cached / _serverDown flags are admin-side annotations injected on stale
 // data — checking them here is a no-op on client.js modems (fields absent
 // in the client API response) and keeps admin behavior intact.
-function getModemStatus(m){if(m._cached||m._serverDown)return'offline';if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';if(m.connectionStatus&&m.connectionStatus.includes('connected'))return'online';if(m.state==='added'&&m.extIp&&m.extIp!=='IP_RESET')return'online';if(m.extIp==='IP_RESET')return'rotating';return'offline'}
+// Modem status — STRICT fleet semantics (WP1): 'online' only when the live
+// snapshot says IS_ONLINE=yes (mapped to m.isOnline in processData). The old
+// optimistic branches (connectionStatus~'connected', state==='added'+extIp)
+// made a modem that the fleet counter already counted dark still render
+// green — «плитка зелёная, счётчик не считает». Rotating/rebooting keep
+// priority (transitional, still billable states).
+function getModemStatus(m){if(m._cached||m._serverDown)return'offline';if(m.isRebooting)return'rebooting';if(m.isRotating)return'rotating';if(m.isOnline)return'online';if(m.extIp==='IP_RESET')return'rotating';return'offline'}
 function formatUptime(s){if(!s||s<=0)return'-';var d=Math.floor(s/86400),h=Math.floor(s%86400/3600),mm=Math.floor(s%3600/60);if(d>0)return d+'д '+h+'ч';if(h>0)return h+'ч '+mm+'м';return mm+'м'}
 function formatTraffic(v){if(!v||v===0||v==='0')return'-';return String(v)}
 function renderSignalBars(s){var h='<div class="signal-bars">';for(var i=1;i<=5;i++){h+='<div class="signal-bar'+(i<=s?' active':'')+'" style="height:'+(2+i*2)+'px"></div>'}return h+'</div>'}
