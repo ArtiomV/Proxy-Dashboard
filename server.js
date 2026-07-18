@@ -4581,6 +4581,7 @@ app.use(require('./src/routes/ops-ext')({
   logActivity,
   getMoscowNow, getMoscowToday, getMoscowYesterday,
   ledgerExpense, parseBwToBytes, trafficBytesToGb,
+  getBalanceReconcile: () => balanceReconcile,
 }));
 
 app.use(require('./src/routes/billing-ext')({
@@ -4641,6 +4642,13 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
 
   // Schedule nightly TopHosts at 03:00
   scheduleRepeating(3, 0, 'TopHosts', aggregateTopHosts);
+
+  // WP5: daily balance-vs-ledger reconciliation at 04:00 UTC (after billing
+  // settles). Observation only — drift logs critical + TG alert, no auto-fix.
+  const balanceReconcile = require('./src/jobs/balance-reconcile').create({
+    db, clients, logActivity, logger, alerts,
+  });
+  scheduleRepeating(4, 0, 'BalanceReconcile', () => balanceReconcile.runOnce());
 
   // Stage 17: nightly modem-health snapshot at 23:55 MSK (20:55 UTC) — captures
   // the score for the day that's about to end. Also runs a one-shot 30-day

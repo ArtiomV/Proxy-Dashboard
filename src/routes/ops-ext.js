@@ -70,6 +70,8 @@ r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
     },
     database: { size_kb: dbSize, ledger_entries: ledgerEntryCount, wal_mode: true },
     billing: getLastBillingRunSummary() || { last_run: null },
+    // WP5: balance-vs-ledger drift surfaced by the daily reconcile job.
+    balance: (() => { const r = (deps.getBalanceReconcile ? deps.getBalanceReconcile().getLastResult() : {}); return { divergent_clients: r.divergent || 0, checked_at: r.checkedAt || null, total_clients: r.total || 0 }; })(),
     reconciliation: { last_month: getLastReconciliationMonth() || null },
     intervals: getIntervals().length,
     timestamp: new Date().toISOString()

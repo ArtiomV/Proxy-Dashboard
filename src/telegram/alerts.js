@@ -114,6 +114,14 @@ const RULES = {
     dedupeKey: () => 'global',
     render: p => `🔴 <b>Backup БД упал</b>\n\nПричина: <code>${esc(p.error || 'unknown')}</code>\nНужно срочно проверить — без бэкапа БД уязвима.`,
   },
+  balance_drift: {
+    title: 'Баланс клиента не сходится с ledger',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 86400,   // джоба суточная — одного сообщения в день достаточно
+    dedupeKey: () => 'global',
+    render: p => `🔴 <b>Реконсиляция: баланс ≠ ledger у ${p.count} клиент(ов)</b>\n\n${esc(p.offenders || '')}\n\nБаланс ведётся инкрементально — дрейф означает пропущенную или лишнюю запись. Автоправки НЕТ: разобрать вручную (см. system_log → balance_drift).`,
+  },
   duplicate_credit_blocked: {
     title: 'Защита: дубль-кредит заблокирован',
     priority: 'critical',
