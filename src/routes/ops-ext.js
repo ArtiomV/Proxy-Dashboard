@@ -260,10 +260,11 @@ function _clientsSection() {
   const _rosterNow = Date.now();
   const _clientModemSets = {};   // portName -> Set('server|imei')
   for (const [srvName, ports] of Object.entries(getKnownModems() || {})) {
-    for (const info of Object.values(ports || {})) {
+    for (const [pid, info] of Object.entries(ports || {})) {
       if (!info || !info.portName || /^random/i.test(info.portName)) continue;
-      const id = info.imei || info.nick;
-      if (!id) continue;
+      // Identity may be absent for a bound-but-unreadable port — count it by
+      // portId then (it bills traffic; БА «30 vs 32» case).
+      const id = info.imei || info.nick || pid;
       const _lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
       const ls = typeof _lcs === 'number' ? _lcs : Date.parse(_lcs || 0);
       if (!ls || (_rosterNow - ls) > _ROSTER_RETAIN_MS) continue;

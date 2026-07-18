@@ -1381,12 +1381,12 @@ function updateKnownModems(data) {
         continue;
       }
       const nick = (modemStatus && modemStatus.modem_details && modemStatus.modem_details.NICK) || prevKm.nick || '';
-      // Phantom-port guard: a port with NO identity at all (no IMEI in the
-      // port map, no NICK in the live status, none in the previous roster
-      // entry) is a ProxySmart glitch, not a modem. Persisting it inflates
-      // every consumer of this roster (БА «31/30» case — one ∅-nick, ∅-imei
-      // entry counted as the client's modem).
-      if (!imei && !nick) continue;
+      // A port with no identity (no IMEI in the port map, no NICK in the live
+      // status) is kept ONLY while it has a real client binding right now —
+      // then it's billing traffic and must count as the client's modem (БА
+      // «30 vs 32» case). An identity-less placeholder with NO real binding
+      // (random/empty portName) is a ProxySmart glitch — skipped.
+      if (!imei && !nick && !isRealClient) continue;
       km[portId] = {
         portName: keptPortName,
         imei,
@@ -1398,15 +1398,6 @@ function updateKnownModems(data) {
       };
     }
   }
-
-  // Sweep pre-existing identity-less entries (written before the guard above)
-  // so the junk ages out on the next poll instead of lingering forever.
-  let swept = 0;
-  for (const pid of Object.keys(km)) {
-    const i = km[pid];
-    if (!i || (!i.imei && !i.nick)) { delete km[pid]; swept++; }
-  }
-  if (swept) logger.info(`[KnownModems] swept ${swept} identity-less phantom entrie(s) on ${srvName}`);
 
   saveKnownModems();
 }

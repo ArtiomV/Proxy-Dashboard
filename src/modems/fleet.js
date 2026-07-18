@@ -220,13 +220,19 @@ function computeClientWorking(knownModems, fleet, opts) {
   const dark = new Set(((fleet && fleet.disconnectedList) || []).map(o => o.key));
   const out = {};
   for (const [srvName, ports] of Object.entries(knownModems || {})) {
-    for (const info of Object.values(ports || {})) {
+    for (const [pid, info] of Object.entries(ports || {})) {
       if (!info || !info.portName || /^random/i.test(info.portName)) continue;
-      const id = info.imei || info.nick;
-      if (!id) continue;
       const lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
       const ls = typeof lcs === 'number' ? lcs : Date.parse(lcs || 0);
       if (!ls || (now - ls) > retainMs) continue;   // aged out of the roster — not counted either way
+      const id = info.imei || info.nick;
+      if (!id) {
+        // Bound-but-unreadable port (ProxySmart can't read the modem): no
+        // fleet key exists for it, but it bills real traffic → it counts as
+        // working from the client's perspective (БА «30 vs 32» case).
+        out[info.portName] = (out[info.portName] || 0) + 1;
+        continue;
+      }
       const key = srvName + '|' + id;
       if (!active.has(key)) continue;               // not online within 48h → not working
       if (dark.has(key)) continue;                  // dark ≥10 min → not working

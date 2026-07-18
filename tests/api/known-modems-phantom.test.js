@@ -1,71 +1,61 @@
-// Phantom-port guard in updateKnownModems: ports with NO identity (no IMEI,
-// no NICK, nothing in the previous roster entry) must not enter or stay in
-// the roster — they inflated per-client counts (the БА 31/30 case).
+// Identity-less roster entries (no IMEI, no NICK): kept ONLY when the port
+// has a real client binding right now (it bills traffic → counts as the
+// client's modem). Identity-less placeholders without a real binding are
+// dropped as glitches.
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import { createRequire } from 'module';
 import { bootApp } from '../_helpers/app.js';
 
 const require = createRequire(import.meta.url);
-let server, stateMod;
+let server, stateMod, fleetMod;
 
 beforeAll(() => {
   bootApp();
   server = require('../../server.js');
   stateMod = require('../../src/state/index.js');
+  fleetMod = require('../../src/modems/fleet.js');
 });
 
-describe('updateKnownModems — phantom-port guard', () => {
-  it('does not roster identity-less ports and sweeps existing junk', () => {
+describe('updateKnownModems — identity-less entries', () => {
+  it('keeps a bound-but-unreadable port (billing traffic), drops unbound phantoms', () => {
     const { state, setKnownModems } = stateMod;
     const backup = JSON.parse(JSON.stringify(state.knownModems));
     try {
-      setKnownModems({
-        TSTS: {
-          portJunk: { portName: 'clientX', imei: '', nick: '', model: '', lastSeen: 1, lastClientSeen: 1 },
-          portReal: { portName: 'clientX', imei: 'I1', nick: 'MD_1', model: '', lastSeen: 1, lastClientSeen: 1 },
-        },
-      });
-      // A poll where the junk port still reports traffic with a real portName,
-      // but the port map has no IMEI for it and live status lacks it entirely.
+      setKnownModems({ TSTS: {} });
       server.updateKnownModems({
         serverName: 'TSTS',
-        bw: { portJunk: { portName: 'clientX' } },
+        bw: {
+          portBound: { portName: 'clientX' },        // bound, billing → KEEP (no imei/nick available)
+          portGhost: { portName: 'randomport12' },   // identity-less placeholder → SKIP
+        },
         ports: {},
         status: [],
       });
       const km = state.knownModems.TSTS;
-      expect(km.portJunk).toBeUndefined();     // swept
-      expect(km.portReal).toBeTruthy();        // real entry preserved
-      expect(km.portReal.imei).toBe('I1');
+      expect(km.portBound).toBeTruthy();
+      expect(km.portBound.portName).toBe('clientX');
+      expect(km.portGhost).toBeUndefined();
     } finally {
       setKnownModems(backup);
       server.saveKnownModems();
     }
   });
+});
 
-  it('keeps an entry whose nick comes from the previous roster (temporary identity gap)', () => {
-    const { state, setKnownModems } = stateMod;
-    const backup = JSON.parse(JSON.stringify(state.knownModems));
-    try {
-      setKnownModems({
-        TSTS: {
-          portGap: { portName: 'clientX', imei: '', nick: 'MD_KNOWN', model: '', lastSeen: 1, lastClientSeen: 1 },
-        },
-      });
-      // Port map lost the IMEI this poll and live status misses the modem —
-      // but the previous roster entry has a nick → NOT a phantom, keep it.
-      server.updateKnownModems({
-        serverName: 'TSTS',
-        bw: { portGap: { portName: 'clientX' } },
-        ports: {},
-        status: [],
-      });
-      expect(state.knownModems.TSTS.portGap).toBeTruthy();
-      expect(state.knownModems.TSTS.portGap.nick).toBe('MD_KNOWN');
-    } finally {
-      setKnownModems(backup);
-      server.saveKnownModems();
-    }
+describe('computeClientWorking — identity-less bound entries', () => {
+  it('counts a bound-but-unreadable port as working (it bills)', () => {
+    const { computeClientWorking } = fleetMod;
+    const known = {
+      S1: {
+        portBound: { portName: 'clientX', imei: '', nick: '', lastClientSeen: Date.now() },
+        portReal:  { portName: 'clientX', imei: 'I1', nick: 'MD_1', lastClientSeen: Date.now() },
+      },
+    };
+    // fleet with no active keys at all: the real one is NOT working, the
+    // identity-less bound one IS (bills traffic).
+    const fleet = { activeKeys: [], disconnectedList: [] };
+    const w = computeClientWorking(known, fleet);
+    expect(w.clientX).toBe(1);
   });
 });
