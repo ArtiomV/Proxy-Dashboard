@@ -326,3 +326,26 @@ and should follow the same pattern in a future pass:
   используется для месяц-ту-дейт. Expiring: дневная норма = revenue_30d/30.
 - Осталось за кадром: per-tariff split и NRR-baseline в finance_dashboard
   считаются charge-only SQL — осознанно, не канон-метрики.
+
+## ТЗ 2026-07-18 (дубли данных + монолиты) — статус программы
+
+Выполнено и задеплоено:
+- **WP1** единые счётчики fleet (getModemStatus строгий, DISCONNECTED_MS,
+  фолбэки удалены, rosterWindowHours=24)
+- **WP2** единый ACL src/modems/ownership.js (+10 тестов)
+- **WP4** known_modems → SQLite (046), bell = fleet.disconnectedList,
+  SERVER_COUNTRIES пересборка при каждой мутации
+- **WP5** ежесуточная balance-reconcile (наблюдение + health)
+- **WP7** key_via + sunset-метрика; reset_token хэш (045) + rotate-эндпоинт;
+  Anthropic/Tavily ключи зашифрованы в kv_store
+- **WP8** каноническая revenue_30d + фикс UTC/MSK-месяца
+- **WP3.1** ADR docs/adr-traffic-sources.md
+- **WP6.2** /api/admin/data — 5 деградирующих секций
+
+Отложено по требованию самого ТЗ:
+- **WP3 (ядро, деньги)** — единый писатель recordDailyTraffic, client_name в
+  daily_traffic, биллинг целиком на daily_traffic. Ждём неделю метрик
+  balance-reconcile на проде (дрейф до/после), старт не раньше 2026-07-25.
+- **WP6.1/6.3/6.4/6.5** — analytics split, admin.js по вкладкам, server.js
+  (billing/backup/scheduler), tochka/proxies группировка. По одному файлу
+  за итерацию, каждый с characterization-тестами.
