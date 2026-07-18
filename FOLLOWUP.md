@@ -280,3 +280,17 @@ and should follow the same pattern in a future pass:
   triggers as HTTP endpoints, and have the dashboard call them like it calls
   ProxySmart. Effort ~1 week; benefit — a leadgen crash can no longer take
   down billing, and the experimental code gets its own release cycle.
+
+## From the 2026-07 three-pass review (TZ executed in bfd6e06)
+
+- **analytics.js (1513 lines)** — split the query layer out of the route
+  handlers (same treatment admin.js needs). modem_health (353 lines) and
+  capacity are the carve-out candidates.
+- **Client self-service password change** — no endpoint exists; clients ask
+  the admin. Product gap, needs: zod schema, bcrypt, users{} sync,
+  deleteSessionsByLogin on change.
+- **Sliding session renewal** — sessions expire at fixed TTL from login;
+  renew expires_at on activity (e.g. when <50% TTL remains).
+- **saveDailyTraffic() after billing** — reviewed: redundant with the
+  incremental _dtUpsert in the loop, kept intentionally as a once-a-day
+  reconcile backstop. Do not "optimize" without a reconciliation plan.
