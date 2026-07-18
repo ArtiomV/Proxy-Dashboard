@@ -347,7 +347,8 @@ CREATE TABLE IF NOT EXISTS api_usage (
   user_agent       TEXT,
   ip               TEXT,
   timestamp        TEXT DEFAULT CURRENT_TIMESTAMP,
-  error            TEXT
+  error            TEXT,
+  key_via          TEXT -- 'header' | 'query' (deprecated ?apiKey= fallback, migration 044)
 );
 CREATE INDEX IF NOT EXISTS idx_api_usage_client ON api_usage(client_id, timestamp);
 CREATE INDEX IF NOT EXISTS idx_api_usage_ts ON api_usage(timestamp);

@@ -49,11 +49,12 @@ function init(db) {
   S.snapshotGet = db.prepare('SELECT * FROM hourly_snapshots WHERE port_id = ?');
   S.snapshotGetAll = db.prepare('SELECT * FROM hourly_snapshots');
 
-  // api_usage: every /api/v1/* hit gets one row (rate + error tracking)
+  // api_usage: every /api/v1/* hit gets one row (rate + error tracking).
+  // key_via ('header'|'query') — migration 044, feeds the ?apiKey= sunset.
   S.apiUsageInsert = db.prepare(`INSERT INTO api_usage
     (client_id, client_name, api_key_prefix, endpoint, method, status_code,
-     response_time_ms, user_agent, ip, error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     response_time_ms, user_agent, ip, error, key_via)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
 
   // Stage 8: scattered queries previously inlined in server.js.
   // 90-day retention purge + load (called once at startup in server.js).

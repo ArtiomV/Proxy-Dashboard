@@ -72,6 +72,12 @@ r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
     billing: getLastBillingRunSummary() || { last_run: null },
     // WP5: balance-vs-ledger drift surfaced by the daily reconcile job.
     balance: (() => { const r = (deps.getBalanceReconcile ? deps.getBalanceReconcile().getLastResult() : {}); return { divergent_clients: r.divergent || 0, checked_at: r.checkedAt || null, total_clients: r.total || 0 }; })(),
+    // WP7.3: ?apiKey= query-param usage over the last 7 days — the metric that
+    // gates the sunset of the deprecated fallback (target: 0 before removal).
+    apikey_query_uses_7d: (() => {
+      try { return db.prepare("SELECT COUNT(*) AS n FROM api_usage WHERE key_via = 'query' AND timestamp >= datetime('now', '-7 days')").get().n; }
+      catch (_) { return null; }
+    })(),
     reconciliation: { last_month: getLastReconciliationMonth() || null },
     intervals: getIntervals().length,
     timestamp: new Date().toISOString()

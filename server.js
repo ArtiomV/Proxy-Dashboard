@@ -3327,6 +3327,9 @@ app.use('/api/v1', apiV1Limiter, (req, res, next) => {
       // Only log requests that presented an API key. Anonymous 401s are noise.
       if (!client) return;
       const errMsg = (res.statusCode >= 400 && res.locals && res.locals.apiError) || null;
+      // WP7.3: record how the key was presented — the ?apiKey= sunset
+      // decision is driven by whether 'query' rows trend to zero.
+      const keyVia = (req.query && (req.query.apikey || req.query.apiKey)) ? 'query' : 'header';
       _apiUsageInsert.run(
         client.id || null,
         client.name || null,
@@ -3337,7 +3340,8 @@ app.use('/api/v1', apiV1Limiter, (req, res, next) => {
         Date.now() - start,
         (req.headers['user-agent'] || '').slice(0, 300),
         getClientIp(req) || '',
-        errMsg
+        errMsg,
+        keyVia
       );
     } catch (_e) { /* never break the request on logging failure */ }
   });

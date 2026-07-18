@@ -63,6 +63,17 @@ describe('GET /api/v1/proxy', () => {
     const res = await request(app).get('/api/v1/proxy').query({ apiKey });
     expect(res.status).toBe(200);
     expect(res.headers.deprecation).toBe('true');
+    // WP7.3: the query-fallback usage is recorded as key_via='query' so the
+    // sunset decision is data-driven.
+    const row = db.prepare("SELECT key_via FROM api_usage WHERE api_key_prefix = ? ORDER BY id DESC LIMIT 1").get(apiKey.slice(0, 8));
+    expect(row).toBeTruthy();
+    expect(row.key_via).toBe('query');
+  });
+  it('header-presented keys are recorded as key_via=header', async () => {
+    await request(app).get('/api/v1/proxy').set('X-API-Key', apiKey);
+    const row = db.prepare("SELECT key_via FROM api_usage WHERE api_key_prefix = ? ORDER BY id DESC LIMIT 1").get(apiKey.slice(0, 8));
+    expect(row).toBeTruthy();
+    expect(row.key_via).toBe('header');
   });
   it('404 for a non-GET method', async () => {
     const res = await request(app).post('/api/v1/proxy').set('X-API-Key', apiKey);
