@@ -34,15 +34,8 @@ const { verifyJwtSignature } = require('./src/tochka/jwt');
 const { findClientByPayer, buildNaturalKey } = require('./src/billing/payer-match');
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
 const billing = require('./src/billing/atomic');
-// MONTH_NAMES_RU / buildTochkaActBody / etc. moved into src/tochka/documents.js;
-// server.js still needs the underscored exports for its nightly autoActs +
-// autoBills crons (lines below). The router does its own require.
-const {
-  buildActItemsFromLedger: _buildActItemsFromLedger,
-  buildTochkaActBody: _buildTochkaActBody,
-  buildTochkaBillBody: _buildTochkaBillBody,
-  calculateMonthlyBillAmount: _calculateMonthlyBillAmount,
-} = require('./src/tochka/documents');
+// MONTH_NAMES_RU / buildTochkaActBody / etc. live in src/tochka/documents.js —
+// tochka-cron and the tochka router require them directly (WP6.5).
 const tgBot = require('./src/telegram/bot');
 const alerts = require('./src/telegram/alerts');     // Stage 18.13 alert framework
 const failoverEngine = require('./src/jobs/failover'); // Stage 19 — modem failover engine
@@ -966,19 +959,9 @@ function getAllBankPayments() {
 let lastActGenerationMonth  = (_kvGet.get('last_act_generation_month')  || {}).value || '';
 let lastBillGenerationMonth = (_kvGet.get('last_bill_generation_month') || {}).value || '';
 
-// Extracted to src/tochka/documents.js — buildTochkaActBody, buildActItemsFromLedger, buildTochkaBillBody, calculateMonthlyBillAmount, MONTH_NAMES_RU
-function buildActItemsFromLedger(client, period) {
-  return _buildActItemsFromLedger(client, period, (id) => ledgerDb.listByClient(id));
-}
-function buildTochkaActBody(client, period, actItems, actNumber) {
-  return _buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber);
-}
-function buildTochkaBillBody(client, amount, billNumber, billDate) {
-  return _buildTochkaBillBody(tochkaConfig, client, amount, billNumber, billDate);
-}
-function calculateMonthlyBillAmount(client, cachedResults) {
-  return _calculateMonthlyBillAmount(client, cachedResults, (id) => ledgerDb.listByClient(id));
-}
+// buildActItemsFromLedger / buildTochkaActBody / buildTochkaBillBody /
+// calculateMonthlyBillAmount live in src/tochka/documents.js (WP6.5 —
+// tochka-cron requires them directly now).
 
 // Stage 14.1: dailyTraffic moved to state.dailyTraffic (stable ref). No
 // rebinds in this file — all mutations are property assignments, so a
@@ -3966,6 +3949,31 @@ app.use(require('./src/routes/proxies')({
   _rlSelect: { all: (...args) => _rlSelect.all(...args) },
 }));
 
+// WP6.5: proxies domain carve-outs (same endpoint paths; each takes only the
+// deps it uses from the same object).
+const _proxiesDeps = {
+  db, logger, authMiddleware, adminMiddleware,
+  fetchApi, fetchApiRaw, postApi, postFormApi, findServer,
+  parseHtmlInputFields,
+  apiServers, SERVER_COUNTRIES,
+  users,
+  auditLog, logActivity, getClientIp,
+  proxySmart,
+  saveKnownModems,
+  knownModems,
+  saveSpeedtestHistory, speedtestHistory,
+  pushSpeedtestEntry,
+  ipHistory,
+  modemRotationCache,
+  fetchAllServersDataCached,
+  syncRotationLog: (...args) => syncRotationLog(...args),
+  _rlSelect: { all: (...args) => _rlSelect.all(...args) },
+};
+app.use(require('./src/routes/proxies-actions')(_proxiesDeps));
+app.use(require('./src/routes/proxies-speedtest')(_proxiesDeps));
+app.use(require('./src/routes/proxies-sms')(_proxiesDeps));
+app.use(require('./src/routes/proxies-ports')(_proxiesDeps));
+
 
 
 
@@ -4310,8 +4318,6 @@ function _initTochkaCronJobs() {
     getMoscowNow,
     getTochkaConfig: () => tochkaConfig,
     tochkaRequest,
-    buildActItemsFromLedger, buildTochkaActBody,
-    buildTochkaBillBody, calculateMonthlyBillAmount,
     getLastActGenerationMonth:  () => lastActGenerationMonth,
     setLastActGenerationMonth:  (v) => { lastActGenerationMonth = v; },
     getLastBillGenerationMonth: () => lastBillGenerationMonth,

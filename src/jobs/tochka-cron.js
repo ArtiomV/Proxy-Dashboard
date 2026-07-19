@@ -22,6 +22,7 @@
 const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { sha256hex } = require('../utils/secrets');
+const tochkaDocs = require('../tochka/documents');
 
 function create(deps) {
   const {
@@ -36,8 +37,6 @@ function create(deps) {
     getMoscowNow,
     getTochkaConfig,
     tochkaRequest,
-    buildActItemsFromLedger, buildTochkaActBody,
-    buildTochkaBillBody, calculateMonthlyBillAmount,
     // last*GenerationMonth are let-rebound in server.js; we accept getter+setter
     getLastActGenerationMonth, setLastActGenerationMonth,
     getLastBillGenerationMonth, setLastBillGenerationMonth,
@@ -183,14 +182,14 @@ function create(deps) {
       if ((client.closingDocuments || []).some(d => d.period === period)) continue;
 
       try {
-        const { actItems, totalCost } = buildActItemsFromLedger(client, period);
+        const { actItems, totalCost } = tochkaDocs.buildActItemsFromLedger(client, period, (id) => ledgerDb.listByClient(id));
 
         // Try Tochka API
         let tochkaDocumentId = null;
         const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
         if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
           try {
-            const actData = buildTochkaActBody(client, period, actItems, actNumber);
+            const actData = tochkaDocs.buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber);
             const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/closing-documents', actData);
             if (result.status === 200 && result.data?.Data?.documentId) {
               tochkaDocumentId = result.data.Data.documentId;
@@ -261,7 +260,7 @@ function create(deps) {
       if ((client.bills || []).some(b => b.period === currentPeriod)) continue;
 
       try {
-        const amount = calculateMonthlyBillAmount(client, serverData);
+        const amount = tochkaDocs.calculateMonthlyBillAmount(client, serverData, (id) => ledgerDb.listByClient(id));
         if (amount <= 0) {
           logger.info(`[Tochka AutoBills] Skipping ${client.name}: amount is 0`);
           continue;
@@ -273,7 +272,7 @@ function create(deps) {
         let tochkaBillId = null;
         if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId) {
           try {
-            const billData = buildTochkaBillBody(client, amount, billNumber, billDate);
+            const billData = tochkaDocs.buildTochkaBillBody(tochkaConfig, client, amount, billNumber, billDate);
             const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
             if (result.status === 200 && result.data?.Data?.documentId) {
               tochkaBillId = result.data.Data.documentId;
