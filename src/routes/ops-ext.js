@@ -11,6 +11,7 @@ const express = require('express');
 const { computeFleet, annotateTestPool, computeClientWorking } = require('../modems/fleet');
 const simulatorDb = require('../db/simulator');
 const { computeRevenueWindow } = require('../billing/revenue');   // WP8: canonical revenue
+const scheduler = require('../jobs/scheduler');                  // WP6.4: job registry for /api/admin/health
 
 // ── /api/admin/data section degradation wrapper (WP6.2) ──────────────────
 // One failing section degrades to its fallback instead of 502ing the panel.
@@ -87,6 +88,9 @@ r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
     })(),
     reconciliation: { last_month: getLastReconciliationMonth() || null },
     intervals: getIntervals().length,
+    // WP6.4: unified scheduler registry — every recurring job with its
+    // schedule, run count, last run, and last error.
+    jobs: scheduler.getJobs(),
     timestamp: new Date().toISOString()
   });
 });

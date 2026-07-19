@@ -2403,7 +2403,9 @@ const { jobs: _jobs, startJob: _startJob } = require('./src/jobs/registry');
 // /api/admin/run_billing + /api/admin/billing_rerun moved into src/routes/billing.js (Stage 3).
 app.use(require('./src/routes/billing')({
   db, logger, authMiddleware, adminMiddleware,
-  runDailyBilling, _startJob,
+  // Lazy: runDailyBilling is a const created further down (WP6.4 extraction);
+  // the wrapper resolves it at call time instead of mount time.
+  runDailyBilling: (...args) => runDailyBilling(...args), _startJob,
   getMoscowToday, getClientBytesForMskDate, trafficBytesToGb,
   atomicDebit, saveClients, modemPlural, logActivity, auditLog,
   getClients: () => clients,
@@ -4144,6 +4146,9 @@ function rescheduleSpeedtests() {
 }
 
 const _cronTimers = []; // Non-speedtest cron timers (billing, reconciliation, etc.)
+// WP6.4: unified scheduler registry (src/jobs/scheduler.js) — every recurring
+// job is registered with name/schedule/runs/last-error for /api/admin/health.
+const scheduler = require('./src/jobs/scheduler');
 function scheduleRepeating(hour, minute, label, fn, isSpeedtest) {
   const now = new Date();
   const next = new Date();
@@ -4152,7 +4157,11 @@ function scheduleRepeating(hour, minute, label, fn, isSpeedtest) {
   const msUntil = next - now;
   logger.info(`[${label}] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
   const entry = {};
-  const safeFn = () => { try { const r = fn(); if (r && r.catch) r.catch(e => logger.error(`[${label}] Error:`, e.message)); } catch (e) { logger.error(`[${label}] Error:`, e.message); } };
+  // WP6.4: every recurring job registers in the unified scheduler registry
+  // (name/schedule/runs/last-error → /api/admin/health).
+  const { safeFn, job } = scheduler.wrapJob(label,
+    `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} UTC`, fn, logger);
+  job.nextRunAt = next.toISOString();
   entry.timeout = setTimeout(() => {
     safeFn();
     entry.interval = setInterval(safeFn, 24 * 60 * 60 * 1000);
@@ -4162,241 +4171,29 @@ function scheduleRepeating(hour, minute, label, fn, isSpeedtest) {
 }
 
 // Single flow: fetch → save daily_traffic → charge → retry on failure
-async function runDailyBilling(retryClientIds) {
-  // Mutex: serialize billing vs saveClients to avoid reading stale client snapshots.
-  return withClientsLock(() => _runDailyBillingImpl(retryClientIds));
-}
-
-async function _runDailyBillingImpl(retryClientIds) {
-  const isRetry = Array.isArray(retryClientIds) && retryClientIds.length > 0;
-  // Guard: prevent double billing for same date (atomic check)
-  const yesterdayCheck = getMoscowYesterday();
-  const skipResult = db.transaction(() => {
-    if (!isRetry) {
-      const existingCharge = ledgerDb.existsChargeOnDate(yesterdayCheck);
-      if (existingCharge) return { skip: true, reason: `Already billed for ${yesterdayCheck}` };
-    } else {
-      const chargedIds = ledgerDb.chargedClientIdsForDate(yesterdayCheck);
-      if (chargedIds.length > 0) {
-        retryClientIds = retryClientIds.filter(id => !chargedIds.includes(id));
-        if (retryClientIds.length === 0) return { skip: true, reason: 'Retry: all clients already billed' };
-      }
-    }
-    return { skip: false };
-  })();
-  if (skipResult.skip) {
-    logger.warn(`[Billing] ${skipResult.reason}, skipping`);
-    logActivity('billing', 'info', 'billing_skip', null, skipResult.reason);
-    return;
-  }
-  logger.info(`[Billing] Starting ${isRetry ? 'RETRY' : 'daily'} billing run...`);
-  logActivity('billing', 'info', 'billing_start', null, `Starting ${isRetry ? 'RETRY' : 'daily'} billing run`);
-
-  let results;
-  try {
-    results = await fetchAllServersData();
-  } catch (e) {
-    logger.error('[Billing] Failed to fetch server data:', e.message);
-    lastBillingRunSummary = { error: e.message, timestamp: new Date().toISOString() };
-    return;
-  }
-
-  // Refresh global portKey mapping for reconciliation/analytics
-  refreshPortKeyMapping(results);
-
-  const yesterdayStr = getMoscowYesterday();
-  const moscowYesterday = getMoscowNow();
-  moscowYesterday.setDate(moscowYesterday.getDate() - 1);
-  const yesterdayLabel = moscowYesterday.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
-
-  let charged = 0, skipped = 0;
-  const skippedClients = []; // for retry
-
-  // 1. Save ALL ports' yesterday traffic to dailyTraffic (single source of truth)
-  for (const data of results) {
-    if (data._cached || typeof data.bw !== 'object') continue;
-    const prefix = data.serverName + '_';
-    for (const [portId, b] of Object.entries(data.bw)) {
-      if (!b.portName) continue;
-      const key = prefix + portId;
-      if (!dailyTraffic[key]) dailyTraffic[key] = {};
-      const yIn = parseBwToBytes(b.bandwidth_bytes_yesterday_in);
-      const yOut = parseBwToBytes(b.bandwidth_bytes_yesterday_out);
-      if (yIn > 0 || yOut > 0) {
-        const existing = dailyTraffic[key][yesterdayStr];
-        const newIn = Math.max(existing?.in || 0, yIn);
-        const newOut = Math.max(existing?.out || 0, yOut);
-        _dtUpsert.run(key, yesterdayStr, newIn, newOut);
-        dailyTraffic[key][yesterdayStr] = { in: newIn, out: newOut, portName: b.portName };
-      }
-    }
-  }
-
-  // 2. Bill each client
-  const clientsToBill = isRetry
-    ? clients.filter(c => retryClientIds.includes(c.id))
-    : clients;
-
-  for (const client of clientsToBill) {
-    if (!client.portName || !client.price || client.price <= 0 || client.billingPaused) {
-      if (client.billingPaused) logger.info(`[Billing] Skipping ${client.name} — billing paused`);
-      skipped++;
-      continue;
-    }
-
-    // Check server availability for this client's ports
-    const cachedServers = getClientCachedServers(results, client.portName);
-    if (cachedServers.length > 0 || results.length < apiServers.length) {
-      const reason = cachedServers.length > 0
-        ? `cached data on [${cachedServers.join(', ')}]`
-        : `only ${results.length}/${apiServers.length} servers`;
-      logger.info(`[Billing] Skipping ${client.name}: ${reason}`);
-      skippedClients.push(client.id);
-      skipped++;
-      continue;
-    }
-
-    try {
-      // Primary source: durable traffic_hourly / daily_traffic. Survives ProxySmart restarts
-      // that zero the bandwidth_bytes_yesterday_* counters (which has caused missed bills
-      // when a server reboots across midnight).
-      const deltaBytesDurable = getClientBytesForMskDate(client.portName, yesterdayStr);
-      const deltaBytesLive = computeClientYesterdayBytes(results, client.portName);
-      const deltaBytes = Math.max(deltaBytesDurable, deltaBytesLive);
-      const deltaGb = trafficBytesToGb(deltaBytes);
-
-      if (deltaBytesDurable > deltaBytesLive * 1.1 && deltaBytesLive > 0) {
-        logger.warn(`[Billing] ${client.name}: durable source wins (${trafficBytesToGb(deltaBytesDurable)} GB) over live yesterday counter (${trafficBytesToGb(deltaBytesLive)} GB) — server likely restarted`);
-      }
-
-      // Update snapshot for diagnostics
-      client.last_traffic_snapshot = {
-        timestamp: new Date().toISOString(),
-        month_bytes: computeClientMonthBytes(results, client.portName)
-      };
-
-      if (deltaBytes <= 0) {
-        skipped++;
-        continue;
-      }
-
-      // Compute cost
-      let cost = 0;
-      let modemCount = 0;
-      const mn = getMoscowNow();
-      // yesterdayStr is yesterday's MSK date — use that month for daysInMonth
-      const _ystY = parseInt(yesterdayStr.slice(0,4));
-      const _ystM = parseInt(yesterdayStr.slice(5,7));
-      const daysInMonth = new Date(_ystY, _ystM, 0).getDate();
-      if (client.billingType === 'per_modem') {
-        for (const data of results) {
-          if (typeof data.bw === 'object') {
-            for (const [portId, b] of Object.entries(data.bw)) {
-              if (b.portName === client.portName) modemCount++;
-            }
-          }
-        }
-        cost = (client.price * modemCount) / daysInMonth;
-      } else {
-        cost = client.price * deltaGb;
-      }
-      cost = Math.round(cost * 100) / 100;
-      if (cost <= 0) { skipped++; continue; }
-
-      // Debt policy: by default charges ALWAYS go through, even if balance
-      // goes far negative — clients accumulate debt and admin reconciles
-      // via top-up. Hard floor only applies if admin sets client.maxDebt
-      // explicitly (e.g. to refuse charges past -100k).
-      let minBalance = null;
-      if (typeof client.maxDebt === 'number' && client.maxDebt > 0) {
-        minBalance = -Math.abs(client.maxDebt);
-      }
-
-      let debitRes;
-      try {
-        debitRes = atomicDebit(client.id, cost, {
-          type: 'charge',
-          date: yesterdayStr,
-          timestamp: new Date().toISOString(),
-          delta_bytes: Math.round(deltaBytes),
-          delta_gb: deltaGb,
-          price_per_unit: client.price,
-          billing_type: client.billingType || 'per_gb',
-          modem_count: modemCount || null,
-          days_in_month: daysInMonth,
-          cost,
-          currency: client.currency || 'RUB',
-          note: client.billingType === 'per_modem'
-            ? `Списание за аренду ${modemCount} ${modemPlural(modemCount)} (${yesterdayLabel})`
-            : `Списание за трафик (${yesterdayLabel})`,
-          traffic_source: 'daily_billing'
-        }, { minBalance });
-      } catch (e) {
-        if (e && e.code === 'INSUFFICIENT_BALANCE') {
-          logger.warn(`[Billing] ${client.name}: insufficient balance (${e.balanceBefore} → ${e.balanceAfter}, min=${e.minBalance}), charge blocked`);
-          logActivity('billing', 'warn', 'insufficient_balance', client.name,
-            `Insufficient balance: would go from ${e.balanceBefore} to ${e.balanceAfter} (limit ${e.minBalance})`,
-            { client_id: client.id, cost, balance: e.balanceBefore, minBalance: e.minBalance });
-          // Stage 18.13 — критическое: списание не прошло, клиент под угрозой отключения.
-          try {
-            alerts.trigger('client_charge_failed', {
-              client: client.name, client_id: client.id,
-              amount: cost, balance_before: e.balanceBefore,
-            });
-          } catch (_) {}
-          skipped++;
-          continue;
-        }
-        throw e;
-      }
-      // Stage 18.13 — клиент ушёл в минус впервые этим списанием
-      if (debitRes && debitRes.balanceBefore >= 0 && debitRes.balanceAfter < 0) {
-        try {
-          alerts.trigger('client_balance_negative', {
-            client: client.name, client_id: client.id, balance: debitRes.balanceAfter,
-          });
-        } catch (_) {}
-      }
-
-      if (debitRes && debitRes.duplicate) {
-        logger.info(`[Billing] ${client.name}: charge for ${yesterdayStr} already posted (duplicate), skipping`);
-        skipped++;
-        continue;
-      }
-
-      charged++;
-      logger.info(`[Billing] ${client.name}: ${deltaGb}GB, ${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
-      logActivity('billing', 'info', 'daily_charge', client.name, `Charged ${cost} ${client.currency || 'RUB'} for ${deltaGb}GB`, { client_id: client.id, gb: deltaGb, cost, balance: client.balance });
-    } catch (e) {
-      logger.error(`[Billing] Error billing ${client.name}:`, e.message);
-      logActivity('billing', 'error', 'billing_error', client.name, `Billing error: ${e.message}`, { client_id: client.id });
-    }
-  }
-
-  saveClients(clients);
-  saveDailyTraffic();
-
-  lastBillingRunSummary = {
-    timestamp: new Date().toISOString(),
-    billed_date: yesterdayStr,
-    charged,
-    skipped,
-    skipped_clients: skippedClients,
-    is_retry: isRetry
-  };
-
-  logger.info(`[Billing] Complete: ${charged} charged, ${skipped} skipped`);
-  logActivity('billing', charged > 0 ? 'info' : 'warn', 'billing_complete', null, `Billing complete: ${charged} charged, ${skipped} skipped`, { charged, skipped, date: yesterdayStr, is_retry: isRetry });
-
-  // 3. Schedule retry if clients were skipped due to server issues (max 1 retry, not on retry runs)
-  if (!isRetry && skippedClients.length > 0) {
-    const _retryHours = appSettings.billing_retry_delay_hours || 1;
-    logger.info(`[Billing] Scheduling retry in ${_retryHours}h for ${skippedClients.length} skipped client(s)...`);
-    setTimeout(() => {
-      runDailyBilling(skippedClients).catch(e => logger.error('[Billing] Retry error:', e.message));
-    }, _retryHours * 3600000);
-  }
-}
+// runDailyBilling extracted to src/jobs/billing.js (WP6.4) — verbatim move.
+// withClientsLock is passed in so the billing↔saveClients mutex is preserved;
+// lastBillingRunSummary is synced back after each run for /api/admin/health.
+const { runDailyBilling } = require('./src/jobs/billing').create({
+  db, logger, logActivity,
+  fetchAllServersData,
+  refreshPortKeyMapping,
+  getMoscowYesterday, getMoscowNow,
+  ledgerDb,
+  clients,
+  dailyTraffic, _dtUpsert,
+  parseBwToBytes, trafficBytesToGb,
+  getClientCachedServers,
+  apiServers,
+  getClientBytesForMskDate, computeClientYesterdayBytes, computeClientMonthBytes,
+  atomicDebit,
+  modemPlural,
+  appSettings,
+  alerts,
+  saveClients, saveDailyTraffic,
+  withClientsLock,
+  setLastBillingRunSummary: (s) => { lastBillingRunSummary = s; },
+});
 
 // Runs on 1st of each month at 03:00 UTC (06:00 MSK), before acts generation
 async function runMonthlyReconciliation() {
@@ -5040,83 +4837,11 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
       }
     } catch (_) { /* best-effort: error intentionally swallowed */ }
   }, 5 * 60 * 1000));
-
-  // Nightly DB backup at 02:00 UTC (05:00 MSK) — uses SQLite Online Backup
-  // API (db.backup) so it's safe to run while the dashboard is live.
-  // Keeps last 14 snapshots; oldest pruned automatically.
-  scheduleRepeating(2, 0, 'DbBackup', async () => {
-    try {
-      const backupDir = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
-      try { fs.mkdirSync(backupDir, { recursive: true }); } catch (_) { /* best-effort: error intentionally swallowed */ }
-      const ts = new Date().toISOString().slice(0, 10);
-      const dest = path.join(backupDir, `dashboard-${ts}.db`);
-      // better-sqlite3 .backup() is a promise that streams pages to disk.
-      await db.backup(dest);
-      // Verify the backup opens & has clients table.
-      const Database = require('better-sqlite3');
-      const bdb = new Database(dest, { readonly: true });
-      const ok = bdb.prepare("SELECT count(*) c FROM sqlite_master WHERE name='clients'").get();
-      bdb.close();
-      if (!ok || !ok.c) throw new Error('backup verification: clients table missing');
-      // Prune backups older than 7 days. Each is a full copy of the (growing)
-      // DB — 14×~280 MB was ~4 GB on a 24 GB disk; 7 days is a comfortable window.
-      // Also remove the SQLite sidecars (-shm/-wal) that matched a pruned .db
-      // (the old regex left them behind to accumulate).
-      const files = fs.readdirSync(backupDir).filter(f => /^dashboard-\d{4}-\d{2}-\d{2}\.db$/.test(f));
-      const cutoff = new Date(Date.now() - 7 * 86400000).toISOString().slice(0, 10);
-      let pruned = 0;
-      for (const f of files) {
-        const fileDate = f.slice(10, 20);
-        if (fileDate < cutoff) {
-          for (const ext of ['', '-shm', '-wal']) {
-            try { fs.unlinkSync(path.join(backupDir, f + ext)); } catch (_) { /* sidecar may not exist */ }
-          }
-          pruned++;
-        }
-      }
-      const sizeMb = Math.round(fs.statSync(dest).size / 1024 / 1024 * 10) / 10;
-      logger.info(`[DbBackup] ${dest} (${sizeMb} MB), pruned ${pruned} old backups`);
-      logActivity('system', 'info', 'db_backup_complete', null, `Backed up ${sizeMb} MB to ${dest}`, { sizeMb, pruned });
-    } catch (e) {
-      logger.error('[DbBackup] FAILED: ' + (e.stack || e.message));
-      logActivity('system', 'critical', 'db_backup_failed', null, 'DB backup failed', { error: e.message });
-    }
-  });
-
-  // Nightly history pruning at 02:30 UTC (05:30 MSK), right after the backup so
-  // the snapshot still holds the full history we're about to trim from live.
-  // These three append-only tables grow forever and were the bulk of the live
-  // DB (and thus every daily backup): rotation_log, system_log, proxy_checks.
-  // Keeping HISTORY_RETENTION_DAYS makes the DB plateau instead of growing
-  // unbounded — we don't VACUUM (freed pages get reused by new inserts at
-  // steady state). All three timestamp columns share a leading YYYY-MM-DD, so a
-  // bare-date cutoff ("<col> < '2026-04-17'") is both index-friendly (hits the
-  // existing idx on each time column) and format-agnostic across the three
-  // different stored formats (`@`, space, and `T…Z` separators).
-  const HISTORY_RETENTION_DAYS = 60;
-  scheduleRepeating(2, 30, 'HistoryPrune', () => {
-    try {
-      const cutoff = new Date(Date.now() - HISTORY_RETENTION_DAYS * 86400000).toISOString().slice(0, 10);
-      const targets = [
-        ['rotation_log', 'started_at'],
-        ['system_log',   'timestamp'],
-        ['proxy_checks', 'checked_at'],
-      ];
-      let total = 0;
-      const parts = [];
-      for (const [table, col] of targets) {
-        const r = db.prepare(`DELETE FROM ${table} WHERE ${col} < ?`).run(cutoff);
-        total += r.changes;
-        parts.push(`${table}=${r.changes}`);
-      }
-      logger.info(`[HistoryPrune] cutoff<${cutoff} (${HISTORY_RETENTION_DAYS}d), deleted ${total} rows (${parts.join(', ')})`);
-      if (total > 0) {
-        logActivity('system', 'info', 'history_prune', null, `Pruned ${total} rows older than ${HISTORY_RETENTION_DAYS}d`, { total, cutoff, parts });
-      }
-    } catch (e) {
-      logger.error('[HistoryPrune] ' + (e.stack || e.message));
-    }
-  });
+  // Nightly DB backup (02:00) + history pruning (02:30) — extracted to
+  // src/jobs/backup.js (WP6.4). Scheduled here via the unified registry.
+  const backupJobs = require('./src/jobs/backup').create({ db, logger, logActivity, fs, path });
+  scheduleRepeating(2, 0, 'DbBackup', backupJobs.runDbBackup);
+  scheduleRepeating(2, 30, 'HistoryPrune', backupJobs.runHistoryPrune);
 
   // Hourly: just the stale-port mapping cleanup (cheap, keeps the "modem
   // disconnected ≥ N days → vanish" window precise to the hour instead of
