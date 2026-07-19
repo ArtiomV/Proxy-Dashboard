@@ -42,10 +42,9 @@ module.exports = function createClientsRouter(deps) {
   // payment that triggered it.
   const _clientUpdateBalance = clientsDb.updateBalanceStmt();
 
-  // Full-ledger balance recompute (Stage 18.8) — moved to src/billing/recalc.js
-  // (WP5) so the reconcile job and these routes share ONE formula.
-  const { recalcFromLedger: _recalcFromLedger } = require('../billing/recalc');
-  const recalcFromLedger = (clientId) => _recalcFromLedger(db, clientId);
+  // 19.07: recalcFromLedger здесь больше не используется — delete-роут перешёл
+  // на локальную дельту (см. комментарий в роуте). Реплей остался в
+  // src/billing/recalc.js как диагностика; enforcement — ledgerFinalBalance.
 
 r.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
   const limit = Math.min(parseInt(req.query.limit) || 50, 200);
@@ -546,15 +545,38 @@ r.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMiddl
 
   const entry = entries[idx];
 
-  // Stage 18.8: FULL RECALCULATION after delete (shared recalcFromLedger,
-  // hoisted to factory scope; P1-1 anchors on the first balance_before so a
-  // pre-ledger opening remainder isn't wiped). Subtracting just this entry's
-  // delta would perpetuate any pre-existing drift.
+  // 19.07 (fix P1 реконсиляции): пересчёт после удаления — ЛОКАЛЬНАЯ дельта,
+  // а не полный реплей recalcFromLedger. Реплей Σ(after−before) игнорирует
+  // исторические разрывы цепочки (ретро-вставки, майские adjustments) и на
+  // клиенте с разрывами ПЕРЕЗАПИСЫВАЛ баланс мусором (ВАЙЛДБОКС: −138k → +3.3M).
+  // Правильно: balance −= дельта удаляемой записи, а снапшоты всех последующих
+  // строк сдвигаются на −дельту — цепочка в точке удаления смыкается, и
+  // последний balance_after снова равен client.balance (контракт реконсиляции).
+  let delta;
+  if (entry.balance_before != null && entry.balance_after != null) {
+    delta = Math.round((entry.balance_after - entry.balance_before) * 100) / 100;
+  } else if (['correction', 'manual_charge', 'adjustment'].includes(entry.type)) {
+    // Без снапшотов знак таких записей неопределим (amount хранится без знака) —
+    // слепое удаление сломало бы баланс. Единичные легаси-строки — только вручную.
+    return res.status(409).json({ error: 'Запись без снапшотов баланса: направление операции неизвестно, автоудаление запрещено. Удалите вручную с ручной корректировкой баланса.' });
+  } else {
+    const a = entry.amount != null ? entry.amount : (entry.cost || 0);
+    delta = entry.type === 'charge' ? -a : a;   // типизированный знак для легаси-строк
+  }
+
   let newBalance;
   try {
     db.transaction(() => {
-      if (entry.db_id) ledgerDb.deleteById(entry.db_id);
-      newBalance = recalcFromLedger(client.id);
+      if (entry.db_id) {
+        ledgerDb.deleteById(entry.db_id);
+        db.prepare(`
+          UPDATE billing_ledger
+             SET balance_before = CASE WHEN balance_before IS NULL THEN NULL ELSE ROUND(balance_before - ?, 2) END,
+                 balance_after  = CASE WHEN balance_after  IS NULL THEN NULL ELSE ROUND(balance_after  - ?, 2) END
+           WHERE client_id = ? AND id > ?
+        `).run(delta, delta, client.id, entry.db_id);
+      }
+      newBalance = Math.round(((typeof client.balance === 'number' ? client.balance : 0) - delta) * 100) / 100;
       _clientUpdateBalance.run(newBalance, client.id);
     })();
   } catch (e) {
