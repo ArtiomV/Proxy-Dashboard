@@ -2437,21 +2437,28 @@ async function refreshRotationCache() {
       }
       const modems = Array.isArray(statusData) ? statusData : [];
       if (modems.length === 0) { logger.info(`[Rotation] ${server.name}: 0 modems, skipping`); continue; }
-      let fetched = 0;
+      let fetched = 0, unknown = 0;
       // Fetch sequentially to avoid hammering the server
       for (const m of modems) {
         const imei = m.modem_details?.IMEI;
         if (!imei) continue;
         try {
-          const raw = await fetchApiRaw(server, `/conf/edit/${imei}`);
-          const html = raw.buffer ? raw.buffer.toString('utf8') : String(raw);
-          const match = html.match(/AUTO_IP_ROTATION[^>]*value="(\d*)"/);
-          const mins = match && match[1] ? parseInt(match[1]) : 0;
+          // proxyConf обходит логин-стену /conf/* (S2). «Не прочитали» ≠ «Выкл»:
+          // при неудаче значение НЕ кэшируется — раньше страница логина парсилась
+          // как 0 и весь S2 светил «Выкл» при включённой ротации.
+          const form = await proxyConf.getConfForm(server, `/conf/edit/${imei}`);
+          if (!form.ok) {
+            unknown++;
+            if (form.reason === 'AUTH_WALLED') logger.warn(`[Rotation] ${server.name} ${imei}: /conf/edit за логин-стеной, ротация неизвестна`);
+            continue;
+          }
+          const mins = proxyConf.parseRotation(form.html);
+          if (mins == null) { unknown++; continue; }
           modemRotationCache[server.name + ':' + imei] = mins;
           fetched++;
         } catch (e) { /* skip */ }
       }
-      logger.info(`[Rotation] ${server.name}: fetched ${fetched}/${modems.length} modems`);
+      logger.info(`[Rotation] ${server.name}: fetched ${fetched}/${modems.length}` + (unknown ? `, unknown ${unknown}` : ''));
     } catch (e) { logger.info(`[Rotation] Failed for ${server.name}: ${e.message}`); }
   }
   rotationCacheUpdatedAt = Date.now();
@@ -2476,6 +2483,10 @@ function injectRotationData(result) {
 
 // fetchServerData -> moved to src/api/proxy-smart.js
 const fetchServerData = proxySmart.fetchServerData;
+
+// /conf/* клиент с обходом логин-стены (S2): логин + cookie + честный AUTH_WALLED
+const proxyConf = require('./src/api/proxysmart-conf');
+proxyConf.init({ logger });
 
 // Initialize proxySmart module now that all deps are available
 proxySmart.init({
@@ -3938,6 +3949,7 @@ app.use(require('./src/routes/proxies')({
   users,
   auditLog, logActivity, getClientIp,
   proxySmart,
+  proxyConf,
   saveKnownModems,
   knownModems,
   saveSpeedtestHistory, speedtestHistory,
@@ -3959,6 +3971,7 @@ const _proxiesDeps = {
   users,
   auditLog, logActivity, getClientIp,
   proxySmart,
+  proxyConf,
   saveKnownModems,
   knownModems,
   saveSpeedtestHistory, speedtestHistory,

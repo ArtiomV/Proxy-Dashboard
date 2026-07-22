@@ -11,6 +11,7 @@ module.exports = function createRouter(deps) {
     parseHtmlInputFields,
     auditLog, logActivity, getClientIp,
     proxySmart,
+    proxyConf,
     modemRotationCache, saveRotationCache,
   } = deps;
   const r = express.Router();
@@ -322,23 +323,41 @@ r.post('/api/admin/bulk_rotation', authMiddleware, adminMiddleware, async (req, 
     const { modems, rotation } = req.body;
     if (!Array.isArray(modems) || !modems.length) return res.status(400).json({ error: 'modems array required' });
     const rotVal = String(rotation != null ? rotation : 10);
+    const wantRot = parseInt(rotVal) || 0;
     let ok = 0, failed = 0;
+    const failures = [];
     for (const m of modems) {
+      const rawImei = String(m.imei || '').replace(/^S\d+_/, '');
       try {
         const server = findServer(m.serverName);
-        if (!server) { failed++; continue; }
-        const raw = await fetchApiRaw(server, `/conf/edit/${m.imei}`);
-        const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
-        const fields = parseHtmlInputFields(html);
-        fields.AUTO_IP_ROTATION = rotVal;
-        await postFormApi(server, `/conf/edit/${m.imei}`, fields);
-        modemRotationCache[m.serverName + ':' + m.imei] = parseInt(rotVal) || 0;
+        if (!server) { failed++; failures.push({ imei: rawImei, reason: 'server not found' }); continue; }
+        // proxyConf обходит логин-стену /conf/* (S2) — раньше POST уходил в
+        // /modem/login, а модем считался ok: «выключил, но ротируется».
+        const form = await proxyConf.getConfForm(server, `/conf/edit/${rawImei}`);
+        if (!form.ok) { failed++; failures.push({ imei: rawImei, reason: 'form: ' + form.reason }); continue; }
+        form.fields.AUTO_IP_ROTATION = rotVal;
+        const posted = await proxyConf.postConfForm(server, `/conf/edit/${rawImei}`, form.fields);
+        if (!posted.ok) { failed++; failures.push({ imei: rawImei, reason: 'post: ' + posted.reason }); continue; }
+        // Verify-after-write: считаем ok только подтверждённое значение.
+        const back = await proxyConf.getConfForm(server, `/conf/edit/${rawImei}`);
+        const got = back.ok ? proxyConf.parseRotation(back.html) : null;
+        if (got !== wantRot) {
+          failed++; failures.push({ imei: rawImei, reason: `verify: в форме ${got == null ? 'нет данных' : got}` });
+          continue;
+        }
+        modemRotationCache[m.serverName + ':' + rawImei] = wantRot;
         ok++;
-      } catch (e) { failed++; }
+      } catch (e) { failed++; failures.push({ imei: rawImei, reason: String(e.message || e).slice(0, 80) }); }
     }
     proxySmart.invalidateCache();
     auditLog(req.user.login, 'bulk_rotation', { rotation: rotVal, count: modems.length, ok, failed, ip: getClientIp(req) });
-    res.json({ ok: true, updated: ok, failed });
+    res.json({
+      ok: failed === 0,
+      updated: ok,
+      failed,
+      failures: failures.slice(0, 20),
+      error: failed ? `Не применено для ${failed} из ${modems.length}: ` + failures.slice(0, 3).map(f => `${f.imei} (${f.reason})`).join(', ') : undefined,
+    });
   } catch (err) { res.status(500).json({ error: err.message }); }
 });
 

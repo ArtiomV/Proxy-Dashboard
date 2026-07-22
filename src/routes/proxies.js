@@ -15,6 +15,7 @@ module.exports = function createProxiesRouter(deps) {
     parseHtmlInputFields,
     auditLog, getClientIp,
     proxySmart,
+    proxyConf,
     modemRotationCache,
     fetchAllServersDataCached,
     syncRotationLog, _rlSelect,
@@ -34,27 +35,43 @@ r.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, re
     // Strip server prefix from IMEI (e.g. "S2_012345" → "012345")
     const rawImei = modemData.IMEI.replace(/^S\d+_/, '');
     modemData.IMEI = rawImei;
-    // First GET current config to preserve existing fields
-    const confHtml = await fetchApiRaw(server, `/conf/edit/${rawImei}`);
-    const html = confHtml.buffer ? confHtml.buffer.toString('utf8') : String(confHtml);
-    const currentFields = {};
-    const fieldMatches = html.matchAll(/name="([^"]+)"[^>]*value="([^"]*)"/g);
-    for (const fm of fieldMatches) currentFields[fm[1]] = fm[2];
+    // First GET current config to preserve existing fields. proxyConf обходит
+    // логин-стену /conf/* (S2): раньше POST улетал в /modem/login, а фронт
+    // получал ok:true — «сохранено», хотя ProxySmart ничего не менял.
+    const form = await proxyConf.getConfForm(server, `/conf/edit/${rawImei}`);
+    if (!form.ok) {
+      logger.warn({ serverName, rawImei, reason: form.reason }, '[StoreModem] /conf/edit недоступен — настройки НЕ сохранены');
+      return res.status(502).json({ error: `ProxySmart не отдал форму модема (${form.reason}) — настройки НЕ сохранены` });
+    }
+    const currentFields = form.fields;
     // Merge: user changes override current values, keep rest
     const merged = { ...currentFields, ...modemData };
     // Remove empty values that were not in original
     for (const k of Object.keys(merged)) {
       if (merged[k] === '' && currentFields[k]) merged[k] = currentFields[k];
     }
-    logger.info({ merged, rawImei, serverName }, '[StoreModem] Sending to API server');
-    const result = await postFormApi(server, `/conf/edit/${rawImei}`, merged);
-    logger.info({ status: result.status }, '[StoreModem] Response');
+    const posted = await proxyConf.postConfForm(server, `/conf/edit/${rawImei}`, merged);
+    if (!posted.ok) {
+      logger.warn({ serverName, rawImei, reason: posted.reason }, '[StoreModem] POST не прошёл');
+      return res.status(502).json({ error: `ProxySmart не сохранил настройки (${posted.reason})` });
+    }
+    // Verify-after-write: перечитываем форму и сверяем ротацию, если её меняли.
+    // Кэш UI обновляем ТОЛЬКО подтверждённым значением (и только если поле
+    // вообще прислали — раньше любой save без ротации затирал кэш нулём).
+    const wantRot = modemData.AUTO_IP_ROTATION != null ? (parseInt(modemData.AUTO_IP_ROTATION) || 0) : null;
+    if (wantRot != null) {
+      const back = await proxyConf.getConfForm(server, `/conf/edit/${rawImei}`);
+      const gotRot = back.ok ? proxyConf.parseRotation(back.html) : null;
+      if (gotRot !== wantRot) {
+        logger.warn({ serverName, rawImei, wantRot, gotRot, backReason: back.ok ? null : back.reason }, '[StoreModem] verify-after-write FAILED');
+        return res.status(502).json({ error: `ProxySmart не применил AUTO_IP_ROTATION: запрошено ${wantRot}, в форме ${gotRot == null ? 'нет данных' : gotRot}` });
+      }
+      modemRotationCache[serverName + ':' + rawImei] = wantRot;
+    }
+    logger.info({ rawImei, serverName, verified: wantRot != null }, '[StoreModem] saved');
     auditLog(req.user.login, 'store_modem', { serverName, IMEI: rawImei, ip: getClientIp(req) });
-    // Update rotation cache immediately so dashboard reflects the change
-    const newRot = parseInt(modemData.AUTO_IP_ROTATION) || 0;
-    modemRotationCache[serverName + ':' + rawImei] = newRot;
     proxySmart.invalidateCache(); // invalidate data cache
-    res.json({ ok: true, result });
+    res.json({ ok: true, verified: wantRot != null });
   } catch (err) { res.status(502).json({ error: 'Store modem failed', details: err.message }); }
 });
 
