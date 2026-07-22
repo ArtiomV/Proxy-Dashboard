@@ -262,6 +262,7 @@ function _clientsSection() {
   // an offline modem keeps counting for 24h instead of vanishing.
   const _ROSTER_RETAIN_MS = 24 * 3600 * 1000;
   const _rosterNow = Date.now();
+  const _uptime = getUptimeTracking() || {};
   const _clientModemSets = {};   // portName -> Set('server|imei')
   for (const [srvName, ports] of Object.entries(getKnownModems() || {})) {
     for (const [pid, info] of Object.entries(ports || {})) {
@@ -272,6 +273,17 @@ function _clientsSection() {
       const _lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
       const ls = typeof _lcs === 'number' ? _lcs : Date.parse(_lcs || 0);
       if (!ls || (_rosterNow - ls) > _ROSTER_RETAIN_MS) continue;
+      // «Автовключение неработающих» убрано (2026-07-22): у мёртвого, но всё ещё
+      // привязанного модема ProxySmart держит binding порта, поэтому lastClientSeen
+      // обновляется каждым опросом и ретенция выше никогда не срабатывает — труп
+      // вечно сидел в modemCount. Гейт на АКТИВНОСТЬ: если по IMEI есть запись
+      // uptime_tracking и last_online_check старше 24ч — модем не считается.
+      // Fail-open: нет IMEI или нет uptime-записи → считаем как раньше.
+      if (info.imei) {
+        const _ut = _uptime[srvName + '_' + info.imei];
+        const _lo = _ut && _ut.last_online_check ? Date.parse(_ut.last_online_check) : 0;
+        if (_lo && (_rosterNow - _lo) > _ROSTER_RETAIN_MS) continue;
+      }
       (_clientModemSets[info.portName] || (_clientModemSets[info.portName] = new Set())).add(srvName + '|' + id);
     }
   }
