@@ -95,10 +95,10 @@ r.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req, r
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
 
-    // Read full current form to preserve ALL required fields
-    const editPageRaw = await fetchApiRaw(server, `/conf/edit_port/${portID}`);
-    const editHtml = editPageRaw?.buffer ? editPageRaw.buffer.toString('utf8') : '';
-    const formData = parseHtmlInputFields(editHtml);
+    // Read full current form to preserve ALL required fields (через proxyConf — обход логин-стены S2)
+    const asForm = await proxyConf.getConfForm(server, `/conf/edit_port/${portID}`);
+    if (!asForm.ok) return res.status(502).json({ error: `ProxySmart не отдал форму порта (${asForm.reason})` });
+    const formData = parseHtmlInputFields(asForm.html);
     // Get proxy_password from port API data (not in HTML form)
     if (!formData.proxy_password) {
       try {
@@ -114,7 +114,8 @@ r.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req, r
     // Apply the rename
     formData.portName = newPortName;
 
-    const result = await postFormApi(server, `/conf/edit_port/${portID}`, formData);
+    const asPosted = await proxyConf.postConfForm(server, `/conf/edit_port/${portID}`, formData);
+    if (!asPosted.ok) return res.status(502).json({ error: `ProxySmart не сохранил привязку (${asPosted.reason})` });
     logger.info(`[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`);
     // Invalidate cache so changes appear immediately
     proxySmart.invalidateCache();

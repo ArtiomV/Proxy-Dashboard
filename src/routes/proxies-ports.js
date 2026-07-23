@@ -48,8 +48,12 @@ r.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res
       }
     }
     // GET pre-filled form values from ProxySmart (portID, http_port, login, password)
-    const formHtml = await fetchApiRaw(server, `/conf/add_port?imei=${rawImei}`);
-    const html = formHtml.buffer ? formHtml.buffer.toString('utf8') : String(formHtml);
+    // — через proxyConf (обход логин-стены /conf/* на S2).
+    const addForm = await proxyConf.getConfForm(server, `/conf/add_port?imei=${rawImei}`);
+    if (!addForm.ok) {
+      return res.status(502).json({ error: `ProxySmart не отдал форму add_port (${addForm.reason})` });
+    }
+    const html = addForm.html;
     const prefilled = parseHtmlInputFields(html);
 
     // Sanity check — without portID and http_port the form will fail server-side
@@ -73,9 +77,11 @@ r.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res
 
     const actualPortId = formData.portID;
 
-    // Submit the form. postFormApi now rejects on HTTP 4xx/5xx (was silently
-    // swallowing failures before).
-    await postFormApi(server, `/conf/add_port?imei=${rawImei}`, formData);
+    // Submit the form (через proxyConf — обход логин-стены S2).
+    const addPosted = await proxyConf.postConfForm(server, `/conf/add_port?imei=${rawImei}`, formData);
+    if (!addPosted.ok) {
+      return res.status(502).json({ error: `ProxySmart не сохранил порт (${addPosted.reason})` });
+    }
 
     // Auto-apply the new port. Previously the frontend had to make a second
     // request, but it was passing the client-side generated portID instead of
@@ -123,10 +129,10 @@ r.post('/api/admin/move_port', authMiddleware, adminMiddleware, async (req, res)
     if (!serverName || !portID || !newIMEI) return res.status(400).json({ error: 'serverName, portID, newIMEI required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    // Read full current port form
-    const raw = await fetchApiRaw(server, `/conf/edit_port/${portID}`);
-    const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
-    const formData = parseHtmlInputFields(html);
+    // Read full current port form (через proxyConf — обход логин-стены S2)
+    const mvForm = await proxyConf.getConfForm(server, `/conf/edit_port/${portID}`);
+    if (!mvForm.ok) return res.status(502).json({ error: `ProxySmart не отдал форму порта (${mvForm.reason})` });
+    const formData = parseHtmlInputFields(mvForm.html);
     // Get proxy_password from port API
     if (!formData.proxy_password) {
       try {
@@ -141,7 +147,8 @@ r.post('/api/admin/move_port', authMiddleware, adminMiddleware, async (req, res)
     }
     // Change IMEI to move port to new modem
     formData.IMEI = newIMEI;
-    await postFormApi(server, `/conf/edit_port/${portID}`, formData);
+    const mvPosted = await proxyConf.postConfForm(server, `/conf/edit_port/${portID}`, formData);
+    if (!mvPosted.ok) return res.status(502).json({ error: `ProxySmart не сохранил перенос (${mvPosted.reason})` });
     // Re-apply so ProxySmart picks up the new IMEI binding
     try { await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portID)}`); }
     catch (e) { logger.warn(`[move_port] apply_port failed for ${portID}: ${e.message}`); }
@@ -175,8 +182,9 @@ r.get('/api/admin/get_port_config', authMiddleware, adminMiddleware, async (req,
     if (!serverName || !portId) return res.status(400).json({ error: 'serverName and portId required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const raw = await fetchApiRaw(server, `/conf/edit_port/${portId}`);
-    const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
+    const cfgForm = await proxyConf.getConfForm(server, `/conf/edit_port/${portId}`);
+    if (!cfgForm.ok) return res.status(502).json({ error: `ProxySmart не отдал форму порта (${cfgForm.reason})` });
+    const html = cfgForm.html;
     const extract = (name) => {
       const m = html.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`));
       if (m) return m[1];
@@ -238,10 +246,10 @@ r.post('/api/admin/save_port_config', authMiddleware, adminMiddleware, async (re
       }
       fields[f] = String(n);
     }
-    // Read full current form to preserve ALL required fields
-    const raw = await fetchApiRaw(server, `/conf/edit_port/${portId}`);
-    const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
-    const formData = parseHtmlInputFields(html);
+    // Read full current form to preserve ALL required fields (через proxyConf — обход логин-стены S2)
+    const spForm = await proxyConf.getConfForm(server, `/conf/edit_port/${portId}`);
+    if (!spForm.ok) return res.status(502).json({ error: `ProxySmart не отдал форму порта (${spForm.reason})` });
+    const formData = parseHtmlInputFields(spForm.html);
     // Get proxy_password from port API data (not in HTML form)
     if (!formData.proxy_password) {
       try {
@@ -262,13 +270,13 @@ r.post('/api/admin/save_port_config', authMiddleware, adminMiddleware, async (re
     }
     // Remove internal fields not needed by ProxySmart form
     delete formData.serverName; delete formData.OS_SPOOF; delete formData.IP_VERSION;
-    const result = await postFormApi(server, `/conf/edit_port/${portId}`, formData);
+    const result = await proxyConf.postConfForm(server, `/conf/edit_port/${portId}`, formData);
+    if (!result.ok) return res.status(502).json({ error: `ProxySmart не сохранил настройки порта (${result.reason})` });
     // Apply the port changes
     await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`);
     proxySmart.invalidateCache();
     auditLog(req.user.login, 'save_port_config', { serverName, portId, fields: Object.keys(fields), ip: getClientIp(req) });
-    const success = result.status === 302 || result.status === 200;
-    res.json({ ok: success, status: result.status });
+    res.json({ ok: true, status: result.status });
   } catch (err) {
     logger.error('[SavePortConfig]', err.message);
     res.status(502).json({ error: 'Save port config failed', details: err.message });
@@ -300,15 +308,16 @@ r.post('/api/admin/bulk_os_spoof', authMiddleware, adminMiddleware, async (req, 
       try {
         const server = findServer(p.serverName);
         if (!server) { failed++; continue; }
-        const raw = await fetchApiRaw(server, `/conf/edit_port/${p.portId}`);
-        const html = raw?.buffer ? raw.buffer.toString('utf8') : '';
-        const fields = parseHtmlInputFields(html);
+        // GET/POST формы порта через proxyConf (обход логин-стены S2)
+        const osForm = await proxyConf.getConfForm(server, `/conf/edit_port/${p.portId}`);
+        if (!osForm.ok) { failed++; continue; }
+        const fields = parseHtmlInputFields(osForm.html);
         // Password from pre-fetched cache
         const pw = (pwCache[p.serverName] || {})[p.portId];
         if (pw) fields.proxy_password = pw;
         fields.OS = os || '';
-        const result = await postFormApi(server, `/conf/edit_port/${p.portId}`, fields);
-        if (result.status === 302 || result.status === 200) ok++;
+        const result = await proxyConf.postConfForm(server, `/conf/edit_port/${p.portId}`, fields);
+        if (result.ok) ok++;
         else failed++;
       } catch (e) { failed++; }
     }
@@ -378,9 +387,18 @@ r.post('/api/admin/purge_port', authMiddleware, adminMiddleware, async (req, res
     if (!portId || !serverName) return res.status(400).json({ error: 'portId and serverName required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, `/conf/delete_port/${encodeURIComponent(portId)}`);
+    // /conf/delete_port — GET-действие через proxyConf (обход логин-стены S2).
+    // Раньше шло через fetchApi: на S2 302-страница логина отклонялась как
+    // «HTML вместо JSON» → 502 «Delete port failed».
+    const del = await proxyConf.getConfAction(server, `/conf/delete_port/${encodeURIComponent(portId)}`);
+    if (!del.ok) {
+      logger.warn(`[Admin] Delete port ${portId} on ${serverName} failed: ${del.reason}`);
+      return res.status(502).json({ error: `Delete port failed: ${del.reason}` });
+    }
     logger.info(`[Admin] Deleted port ${portId} from ${serverName}`);
-    res.json({ ok: true, result });
+    auditLog(req.user.login, 'purge_port', { serverName, portId, ip: getClientIp(req) });
+    proxySmart.invalidateCache();
+    res.json({ ok: true, status: del.status });
   } catch (err) { res.status(502).json({ error: 'Delete port failed', details: err.message }); }
 });
 

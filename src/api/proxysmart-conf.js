@@ -134,6 +134,28 @@ async function postConfForm(server, path, fields) {
   return { ok: true, status: res.status, location: res.location };
 }
 
+// GET-действие /conf/... (delete_port и подобные): тот же обход стены,
+// но без парсинга формы. Успех = НЕ логин-стена и HTTP < 400
+// (302 → /conf у ProxySmart = действие выполнено).
+async function getConfAction(server, path) {
+  let res = await _raw(server, { method: 'GET', path });
+  for (let attempt = 0; attempt < 2 && _looksLikeLogin(res); attempt++) {
+    let cookie;
+    try { cookie = await _session(server, attempt > 0); }
+    catch (e) {
+      _logger.warn(`[ProxyConf] ${server.name}: login failed: ${e.message}`);
+      return { ok: false, reason: 'AUTH_WALLED', status: res.status };
+    }
+    res = await _raw(server, { method: 'GET', path, cookie });
+  }
+  if (_looksLikeLogin(res)) {
+    _dropSession(server);
+    return { ok: false, reason: 'AUTH_WALLED', status: 302 };
+  }
+  if (res.status >= 400) return { ok: false, reason: 'HTTP_' + res.status, status: res.status };
+  return { ok: true, status: res.status, location: res.location, body: res.body };
+}
+
 // AUTO_IP_ROTATION из HTML формы: число минут; ПУСТОЕ value → 0 (выкл);
 // поле отсутствует → null (НЕИЗВЕСТНО — никогда не подменять нулём).
 function parseRotation(html) {
@@ -142,4 +164,4 @@ function parseRotation(html) {
   return m[1] === '' ? 0 : parseInt(m[1], 10);
 }
 
-module.exports = { init, getConfForm, postConfForm, parseRotation, _dropSession, _sessions };
+module.exports = { init, getConfForm, postConfForm, getConfAction, parseRotation, _dropSession, _sessions };

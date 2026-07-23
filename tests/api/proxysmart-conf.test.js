@@ -34,6 +34,15 @@ beforeAll(async () => {
       res.writeHead(302, { Location: '/', 'Set-Cookie': ['allowCGP=yes', 'session=abc123'] });
       res.end(); return;
     }
+    if (u.pathname.startsWith('/conf/delete_port/')) {
+      const walledOut = mode !== 'open' && !hasSession;
+      if (walledOut) {
+        res.writeHead(302, { Location: '/modem/login?next=' + encodeURIComponent(u.pathname) });
+        res.end('<a href="/modem/login">login</a>'); return;
+      }
+      res.writeHead(302, { Location: '/conf' });   // ProxySmart: 302 → /conf = действие выполнено
+      res.end(); return;
+    }
     if (u.pathname.startsWith('/conf/edit/')) {
       const walledOut = mode !== 'open' && !hasSession;
       if (walledOut) {
@@ -104,5 +113,31 @@ describe('proxysmart-conf: обход логин-стены /conf/*', () => {
     expect(proxyConf.parseRotation(FORM('1440'))).toBe(1440);
     expect(proxyConf.parseRotation('<html><body>no form</body></html>')).toBe(null);
     expect(proxyConf.parseRotation('<a href="/modem/login">login</a>')).toBe(null);
+  });
+
+  it('getConfAction: open-сервер — GET-действие проходит напрямую', async () => {
+    mode = 'open';
+    const r = await proxyConf.getConfAction(server('T_act_open'), '/conf/delete_port/portXYZ');
+    expect(r.ok).toBe(true);
+  });
+
+  it('getConfAction: walled-сервер — логин + ретрай, успех', async () => {
+    mode = 'walled';
+    const r = await proxyConf.getConfAction(server('T_act_walled'), '/conf/delete_port/portXYZ');
+    expect(r.ok).toBe(true);
+  });
+
+  it('getConfAction: стена не пробивается → AUTH_WALLED', async () => {
+    mode = 'wall-forever';
+    const r = await proxyConf.getConfAction(server('T_act_wallf'), '/conf/delete_port/portXYZ');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('AUTH_WALLED');
+  });
+
+  it('getConfAction: 404 от ProxySmart → HTTP_404, не «успех»', async () => {
+    mode = 'open';
+    const r = await proxyConf.getConfAction(server('T_act_404'), '/conf/nowhere');
+    expect(r.ok).toBe(false);
+    expect(r.reason).toBe('HTTP_404');
   });
 });

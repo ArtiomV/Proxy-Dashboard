@@ -93,6 +93,11 @@ function makeDeps(overrides) {
       return {};
     },
     postFormApi: async (server, path, formData) => { calls.editPort.push({ path, IMEI: formData.IMEI }); return {}; },
+    // proxyConf-стаб (2026-07-23: failover ходит в /conf/* через proxyConf — S2 wall)
+    proxyConf: {
+      getConfForm: async () => ({ ok: true, status: 200, html: '<input name="portName" value="WildBox"><input name="http_port" value="8001">', fields: { portName: 'WildBox', http_port: '8001' } }),
+      postConfForm: async (server, path, formData) => { calls.editPort.push({ path, IMEI: formData.IMEI }); return { ok: true, status: 302 }; },
+    },
     proxySmart: { invalidateCache(){} },
     logActivity: () => {},
     alerts: { trigger: () => true },
@@ -312,10 +317,10 @@ describe('failover engine', () => {
     const deps = makeDeps();
     let release;
     const gate = new Promise(r => { release = r; });
-    deps.postFormApi = async (server, path, formData) => {
+    deps.proxyConf.postConfForm = async (server, path, formData) => {
       deps._calls.editPort.push({ path, IMEI: formData.IMEI });
       await gate;                                   // hold the move open
-      return {};
+      return { ok: true, status: 302 };
     };
     eng.init(deps);
     const p1 = eng.manualFailover('S2', 'IMEI_DEAD', 'RO_DEAD');  // takes the lock

@@ -27,6 +27,7 @@
  */
 
 let deps = null;
+const proxyConf = require('../api/proxysmart-conf');   // обход логин-стены /conf/* (S2)
 const _lastFailoverByImei = {};   // imei → ts of last real failover off this modem
 const _rateWindow = [];           // sliding window of recent real-move timestamps (per all servers)
 let _interval = null;
@@ -238,9 +239,12 @@ function _glitchDecision(serverName, nick, imei) {
 
 // ── the actual port teleport (mirrors /api/admin/move_port) ─────
 async function _movePort(server, portId, newImei) {
-  const raw = await deps.fetchApiRaw(server, `/conf/edit_port/${portId}`);
-  const html = raw && raw.buffer ? raw.buffer.toString('utf8') : '';
-  const formData = deps.parseHtmlInputFields(html);
+  // Через proxyConf: на S2 /conf/* за логин-стеной — иначе авто-failover
+  // молча падал бы на GET (HTML логина парсился бы как пустая форма).
+  const conf = deps.proxyConf || proxyConf;   // deps-override для тестов
+  const form = await conf.getConfForm(server, `/conf/edit_port/${portId}`);
+  if (!form.ok) throw new Error(`edit_port form: ${form.reason}`);
+  const formData = deps.parseHtmlInputFields(form.html);
   if (!formData.proxy_password) {
     try {
       const portsData = await deps.fetchApi(server, '/apix/list_ports_json');
@@ -253,7 +257,8 @@ async function _movePort(server, portId, newImei) {
     } catch (_) { /* best-effort */ }
   }
   formData.IMEI = newImei;                       // ← the teleport
-  await deps.postFormApi(server, `/conf/edit_port/${portId}`, formData);
+  const posted = await conf.postConfForm(server, `/conf/edit_port/${portId}`, formData);
+  if (!posted.ok) throw new Error(`edit_port post: ${posted.reason}`);
   try { await deps.fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`); }
   catch (e) { deps.logger.warn(`[Failover] apply_port ${portId}: ${e.message}`); }
 }
