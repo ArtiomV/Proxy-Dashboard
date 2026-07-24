@@ -88,44 +88,84 @@ module.exports = function createCrmExportRouter(deps) {
     return isNaN(d) ? '' : d.toISOString().slice(0, 16).replace('T', ' ');
   }
 
+  // Enum-ключи источника → лейблы как в CRM (core.fieldMetadata: leadSource
+  // «Источник лида» и istochnikSdelki «Источник сделки»). Неизвестный ключ
+  // отдаём как есть — лучше сырой ключ, чем пусто.
+  const _SRC_LABELS = {
+    COLD_OUTREACH: 'Холодный аутрич',
+    HOLODNYY_AUTRICH: 'Холодный аутрич',
+    INBOUND: 'Входящий',
+    VHODYASHCHIY: 'Входящий',
+    REFERRAL: 'Реферал',
+    PROXY_MARKET: 'Proxy.Market',
+    FRIGATE: 'Frigate',
+    RODION: 'Родион',
+  };
+  function _srcLabel(v) {
+    if (v == null || v === '') return '';
+    return _SRC_LABELS[v] || v;
+  }
+
   const OBJECTS = {
     people: {
       file: 'crm-people',
       headers: ['Имя', 'Фамилия', 'Компания', 'Email', 'Телефон', 'Telegram', 'Должность',
         'Город', 'LinkedIn', 'Источник', 'Кем создан', 'Создано', 'Обновлено'],
+      // «Источник» живёт НЕ на person: createdBySource — это лишь способ создания
+      // записи (IMPORT/MANUAL). Реальный источник лида заполняют на сделке
+      // (opportunity.leadSource, запасной — «Источник сделки» istochnikSdelki) —
+      // берём его из последней сделки компании человека.
       query: (ws) => `
         SELECT p."nameFirstName" f, p."nameLastName" l, COALESCE(c."name",'') co,
                COALESCE(p."emailsPrimaryEmail",'') em,
                TRIM(COALESCE(p."phonesPrimaryPhoneCallingCode",'') || ' ' || COALESCE(p."phonesPrimaryPhoneNumber",'')) ph,
                COALESCE(p."telegram",'') tg, COALESCE(p."jobTitle",'') jt, COALESCE(p."city",'') ci,
                COALESCE(p."linkedinLinkPrimaryLinkUrl",'') li,
-               COALESCE(p."createdBySource"::text,'') src, COALESCE(p."createdByName",'') cb,
+               COALESCE(opp.ls, opp.ist) src, COALESCE(p."createdByName",'') cb,
                p."createdAt" ca, p."updatedAt" ua
-        FROM ${ws}.person p LEFT JOIN ${ws}.company c ON c.id = p."companyId" AND c."deletedAt" IS NULL
+        FROM ${ws}.person p
+        LEFT JOIN ${ws}.company c ON c.id = p."companyId" AND c."deletedAt" IS NULL
+        LEFT JOIN LATERAL (
+          SELECT o."leadSource"::text ls, o."istochnikSdelki"::text ist
+            FROM ${ws}.opportunity o
+           WHERE o."companyId" = p."companyId" AND o."deletedAt" IS NULL
+             AND (o."leadSource" IS NOT NULL OR o."istochnikSdelki" IS NOT NULL)
+           ORDER BY o."updatedAt" DESC LIMIT 1
+        ) opp ON true
         WHERE p."deletedAt" IS NULL
         ORDER BY co, l, f`,
-      row: (x, dt) => [x.f, x.l, x.co, x.em, x.ph, x.tg, x.jt, x.ci, x.li, x.src, x.cb, dt(x.ca), dt(x.ua)],
+      row: (x, dt) => [x.f, x.l, x.co, x.em, x.ph, x.tg, x.jt, x.ci, x.li, _srcLabel(x.src), x.cb, dt(x.ca), dt(x.ua)],
     },
     companies: {
       file: 'crm-companies',
       headers: ['Название', 'Домен', 'ИНН', 'Email', 'Сектор', 'Тип прокси', 'Кейс',
         'Страны прокси', 'Ожид. объём', 'Источник лида', 'Статус клиента', 'Сотрудников',
         'Город', 'Страна', 'LinkedIn', 'ICP', 'Кем создано', 'Создано', 'Обновлено'],
+      // company.leadSource существует, но всегда NULL — источник заполняют на
+      // сделке компании. Приоритет: своё поле → opportunity.leadSource →
+      // opportunity.istochnikSdelki (значения мапим в русские лейблы CRM).
       query: (ws) => `
         SELECT "name" nm, COALESCE("domainNamePrimaryLinkUrl",'') dom, COALESCE("inn",'') inn,
                COALESCE("companyEmail",'') em, COALESCE("businessSector"::text,'') bs,
                COALESCE("proxyType"::text,'') pt, COALESCE("useCase"::text,'') uc,
                COALESCE("proxyCountries"::text,'') pc, COALESCE("prospectiveVolume"::text,'') pv,
-               COALESCE("leadSource"::text,'') ls, COALESCE("clientStatus"::text,'') cs,
+               COALESCE(c."leadSource"::text, opp.ls, opp.ist) ls, COALESCE("clientStatus"::text,'') cs,
                COALESCE("employees"::text,'') emp,
                COALESCE("addressAddressCity",'') ci, COALESCE("addressAddressCountry",'') ctr,
                COALESCE("linkedinLinkPrimaryLinkUrl",'') li,
                CASE WHEN "idealCustomerProfile" THEN 'да' ELSE '' END icp,
                COALESCE("createdByName",'') cb, "createdAt" ca, "updatedAt" ua
-        FROM ${ws}.company
-        WHERE "deletedAt" IS NULL
+        FROM ${ws}.company c
+        LEFT JOIN LATERAL (
+          SELECT o."leadSource"::text ls, o."istochnikSdelki"::text ist
+            FROM ${ws}.opportunity o
+           WHERE o."companyId" = c.id AND o."deletedAt" IS NULL
+             AND (o."leadSource" IS NOT NULL OR o."istochnikSdelki" IS NOT NULL)
+           ORDER BY o."updatedAt" DESC LIMIT 1
+        ) opp ON true
+        WHERE c."deletedAt" IS NULL
         ORDER BY nm`,
-      row: (x, dt) => [x.nm, x.dom, x.inn, x.em, x.bs, x.pt, x.uc, x.pc, x.pv, x.ls, x.cs,
+      row: (x, dt) => [x.nm, x.dom, x.inn, x.em, x.bs, x.pt, x.uc, x.pc, x.pv, _srcLabel(x.ls), x.cs,
         x.emp, x.ci, x.ctr, x.li, x.icp, x.cb, dt(x.ca), dt(x.ua)],
     },
   };
