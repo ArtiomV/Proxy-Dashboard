@@ -168,11 +168,38 @@ module.exports = function createCrmExportRouter(deps) {
       row: (x, dt) => [x.nm, x.dom, x.inn, x.em, x.bs, x.pt, x.uc, x.pc, x.pv, _srcLabel(x.ls), x.cs,
         x.emp, x.ci, x.ctr, x.li, x.icp, x.cb, dt(x.ca), dt(x.ua)],
     },
+    opportunities: {
+      file: 'crm-opportunities',
+      headers: ['Название', 'Компания', 'Дата напоминания', 'MRR', 'Сайт (URL)', 'Сайт (Label)',
+        'Сайт (доп.)', 'Вид прокси', 'Страны', 'Следующая оплата', 'Оплата подтверждена',
+        'Telegram', 'Комментарий', 'Стадия', 'Источник лида', 'Источник сделки', 'Создано'],
+      // Родной экспорт Twenty отдаёт сделки UTF-8 без BOM с запятыми (кракозябры
+      // в русском Excel) — выгружаем сами в нашем формате. Источники — как в
+      // companies: enum-ключи мапятся в русские лейблы.
+      query: (ws) => `
+        SELECT o."name" nm, COALESCE(c."name",'') co,
+               o."reminderDate" rd, o."amount" mrr,
+               COALESCE(o."websitePrimaryLinkUrl",'') wu, COALESCE(o."websitePrimaryLinkLabel",'') wl,
+               COALESCE(o."websiteSecondaryLinks"::text,'') wsl,
+               COALESCE(o."proxyType"::text,'') pt, COALESCE(o."proxyCountries"::text,'') pc,
+               o."nextPaymentDate" npd,
+               CASE WHEN o."paymentConfirmed" THEN 'да' ELSE '' END pcf,
+               COALESCE(o."telegram",'') tg, COALESCE(o."comment",'') cm,
+               COALESCE(o."stage"::text,'') st,
+               COALESCE(o."leadSource"::text,'') ls, COALESCE(o."istochnikSdelki"::text,'') ist,
+               o."createdAt" ca
+        FROM ${ws}.opportunity o
+        LEFT JOIN ${ws}.company c ON c.id = o."companyId" AND c."deletedAt" IS NULL
+        WHERE o."deletedAt" IS NULL
+        ORDER BY co, nm`,
+      row: (x, dt) => [x.nm, x.co, dt(x.rd), x.mrr, x.wu, x.wl, x.wsl, x.pt, x.pc, dt(x.npd), x.pcf,
+        x.tg, x.cm, x.st, _srcLabel(x.ls), _srcLabel(x.ist), dt(x.ca)],
+    },
   };
 
   r.get('/api/admin/crm/export', authMiddleware, adminMiddleware, async (req, res) => {
     const obj = OBJECTS[String(req.query.object || 'people')];
-    if (!obj) return res.status(400).json({ error: 'object должен быть people или companies' });
+    if (!obj) return res.status(400).json({ error: 'object должен быть people, companies или opportunities' });
     let conn;
     try {
       conn = await _connect();
