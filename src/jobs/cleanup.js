@@ -234,6 +234,22 @@ function create(deps) {
     // Prune in-memory tracking maps so they don't grow forever as modems churn.
     // ipTracking/uptimeTracking/modemRotationCache key on serverName+IMEI; entries
     // for IMEIs not seen in live data for >30 days are dead weight.
+    // ВАЖНО: порог 30 дней ОБЯЗАТЕЛЕН и раньше тут отсутствовал — запись сносилась
+    // уже при первом выпадении модема из фида. Для uptimeTracking это стирало
+    // «последний раз онлайн» (last_online_check), и computeFleet начинал считать
+    // модем «никогда не виденным»: он пропадал из offline/disconnected, оставаясь
+    // в total — шапка показывала «89/91», а карточка «отключён» — 1 (RO2_34,
+    // 2026-07-26). Возраст меряем по last_check (двигается каждый тик), с фолбэком
+    // на last_online_check / since; записей без времени это тоже касается — они
+    // мусорные и уходят сразу.
+    const TRACKING_PRUNE_MS = 30 * 86400 * 1000;
+    const _now = Date.now();
+    const _stale = (e) => {
+      if (!e || typeof e !== 'object') return true;   // записи без структуры — мусор
+      const t = e.last_check || e.last_online_check || e.since || null;
+      const ms = t ? Date.parse(t) : 0;
+      return !ms || (_now - ms) > TRACKING_PRUNE_MS;
+    };
     try {
       const liveImeis = new Set();
       try {
@@ -248,8 +264,8 @@ function create(deps) {
       } catch (_) { /* best-effort: error intentionally swallowed */ }
       let ipPruned = 0, upPruned = 0, rotPruned = 0;
       if (liveImeis.size > 0) {
-        for (const k of Object.keys(ipTracking)) if (!liveImeis.has(k)) { delete ipTracking[k]; ipPruned++; }
-        for (const k of Object.keys(uptimeTracking)) if (!liveImeis.has(k)) { delete uptimeTracking[k]; upPruned++; }
+        for (const k of Object.keys(ipTracking)) if (!liveImeis.has(k) && _stale(ipTracking[k])) { delete ipTracking[k]; ipPruned++; }
+        for (const k of Object.keys(uptimeTracking)) if (!liveImeis.has(k) && _stale(uptimeTracking[k])) { delete uptimeTracking[k]; upPruned++; }
         for (const k of Object.keys(modemRotationCache)) {
           // modemRotationCache keys are `serverName:imei` — different prefix style
           const [srv, imei] = k.split(':');
