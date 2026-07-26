@@ -140,7 +140,7 @@ function runMigrations() {
       db.transaction(() => {
         try {
           db.exec(sql);
-        } catch (e) {
+        } catch (_) {
           // Fall back to per-statement execution only to tolerate benign
           // "already applied" errors (so re-runs work). Anything else re-throws.
           for (const stmt of sql.split(';').map(s => s.trim()).filter(Boolean)) {
@@ -637,8 +637,6 @@ const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json'); // lega
   }
 }
 
-const MAX_LEDGER_ENTRIES = 1000; // per client
-
 function _ledgerEntryParams(clientId, e) {
   const amount = e.type === 'charge' ? (e.cost || 0) : (e.amount || 0);
   const details = {};
@@ -666,11 +664,6 @@ function auditLog(adminLogin, action, details = {}) {
     logger.error('[AuditLog] Write failed:', e.message);
   }
 }
-
-// Pagination helper — same shape across endpoints. Caps limit at `hardMax`
-// (route-defined) and `MAX_PAGE_LIMIT` (global). Returns { limit, offset }.
-// Usage: const { limit, offset } = parsePage(req, { defaultLimit: 50, hardMax: 200 });
-const MAX_PAGE_LIMIT = 1000;
 
 function logActivity(category, level, action, target, message, details = null) {
   try {

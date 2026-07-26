@@ -11,6 +11,11 @@ function mkDb() {
   db.exec(`CREATE TABLE billing_ledger (
     id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT, type TEXT,
     amount REAL, date TEXT, balance_before REAL, balance_after REAL)`);
+  // baseline известных разрывов живёт в kv_store (src/jobs/balance-reconcile.js)
+  db.exec(`CREATE TABLE kv_store (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL DEFAULT '{}',
+    updated_at TEXT NOT NULL DEFAULT (datetime('now')))`);
   return db;
 }
 const silentLogger = { info() {}, warn() {}, error() {} };
