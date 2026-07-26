@@ -5,7 +5,7 @@ const ClientCreateSchema = z.object({
   login: z.string().min(3).max(50).regex(/^[a-zA-Z0-9_]+$/),
   password: z.string().min(6).max(100),
   portName: z.string().max(100).default(''),
-  billingType: z.enum(['per_gb', 'per_modem', 'flat']).default('per_gb'),
+  billingType: z.enum(['per_gb', 'per_modem', 'flat']).default('per_modem'),
   price: z.coerce.number().min(0).max(100000).default(0),
   currency: z.enum(['RUB', 'USD', 'EUR']).default('RUB'),
   contact: z.string().max(500).default(''),

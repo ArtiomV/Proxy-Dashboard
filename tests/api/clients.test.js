@@ -203,3 +203,24 @@ describe('POST /api/admin/clients/:id/balance_adjust', () => {
     expect(dbBalance(c.id)).toBe(-30);
   });
 });
+
+describe('дефолт тарифа нового клиента (2026-07-26)', () => {
+  it('без явного billingType → per_modem («За модем»), не per_gb', async () => {
+    const tag = crypto.randomBytes(3).toString('hex');
+    const res = await request(app)
+      .post('/api/admin/clients')
+      .set('X-Auth-Token', adminToken)
+      .send({ name: 'DefTariff ' + tag, login: 'deft_' + tag, password: 'pw_' + tag, portName: 'defp_' + tag, price: 100 });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.client.billingType).toBe('per_modem');
+    // и из БД читается тем же типом
+    const list = await request(app).get('/api/admin/clients?limit=500').set('X-Auth-Token', adminToken);
+    expect(list.body.clients.find(x => x.id === res.body.client.id).billingType).toBe('per_modem');
+  });
+
+  it('явный per_gb по-прежнему можно выбрать', async () => {
+    const c = await createClient({ billingType: 'per_gb' });
+    expect(c.billingType).toBe('per_gb');
+  });
+});
