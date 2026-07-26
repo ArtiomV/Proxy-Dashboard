@@ -699,7 +699,7 @@
     "type": "table",
     "name": "daily_traffic",
     "tbl_name": "daily_traffic",
-    "sql": "CREATE TABLE daily_traffic ( id INTEGER PRIMARY KEY AUTOINCREMENT, port_name TEXT NOT NULL, date TEXT NOT NULL, bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0, UNIQUE(port_name, date) )"
+    "sql": "CREATE TABLE daily_traffic ( id INTEGER PRIMARY KEY AUTOINCREMENT, port_name TEXT NOT NULL, date TEXT NOT NULL, bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0, client_name TEXT NOT NULL DEFAULT '', UNIQUE(port_name, date) )"
   },
   {
     "type": "table",

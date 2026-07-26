@@ -23,7 +23,7 @@ module.exports = function createTrafficRouter(deps) {
     clients, clientByLogin, clientById,
     dailyTraffic, portKeyToPortName,
     knownModems, SERVER_COUNTRIES,
-    _dtUpsert,
+    recordDailyTraffic,
     refreshPortKeyMapping,
     logActivity,
   } = deps;
@@ -333,12 +333,7 @@ r.post('/api/admin/backfill_daily_traffic', authMiddleware, adminMiddleware, (re
           }
         }
 
-        _dtUpsert.run(r.port_id, date, bIn, bOut);
-        // Sync in-memory so the daily chart reflects the backfill immediately
-        if (!dailyTraffic[r.port_id]) dailyTraffic[r.port_id] = {};
-        dailyTraffic[r.port_id][date] = {
-          in: bIn, out: bOut, portName: r.client_name || ''
-        };
+        recordDailyTraffic(r.port_id, date, bIn, bOut, r.client_name || '');
         written++;
         totalBytes += bIn + bOut;
       }

@@ -11,11 +11,14 @@ let S = {};
 
 function init(db) {
   // daily_traffic: keyed by (port_name, date). MAX() merge so old
-  // counters don't overwrite new ones if two pollers race.
-  S.dailyUpsert = db.prepare(`INSERT INTO daily_traffic (port_name, date, bytes_in, bytes_out) VALUES (?, ?, ?, ?)
+  // counters don't overwrite new ones if two pollers race. client_name
+  // (миграция 052, WP3) — атрибуция в момент записи: ставится, когда
+  // передан непустой, иначе сохраняется прежний.
+  S.dailyUpsert = db.prepare(`INSERT INTO daily_traffic (port_name, date, bytes_in, bytes_out, client_name) VALUES (?, ?, ?, ?, ?)
     ON CONFLICT(port_name, date) DO UPDATE SET
     bytes_in = MAX(bytes_in, excluded.bytes_in),
-    bytes_out = MAX(bytes_out, excluded.bytes_out)`);
+    bytes_out = MAX(bytes_out, excluded.bytes_out),
+    client_name = CASE WHEN excluded.client_name != '' THEN excluded.client_name ELSE client_name END`);
 
   // traffic_hourly: keyed by (port_id, hour_start). "If hour already
   // recorded, don't overwrite" — protects against double-counting if

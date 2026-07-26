@@ -12,7 +12,7 @@ ProxySmart. Чтения шли из разных мест с расхожден
 | `traffic_hourly` | Детальный почасовой ряд. Heatmaps, почасовая аналитика, ACL-история атрибуции (`client_name`) | `src/routes/analytics.js`, `src/modems/ownership.js`, портал (почасовые графики) |
 | `daily_traffic` | **Канон дневных сумм и биллинга.** MAX-семантика при записи (значение не может уменьшиться) | `runDailyBilling` (durable-путь), `syncYesterdayTraffic`, портал (дни) |
 | Live-счётчики ProxySmart | Только «сегодня, прямо сейчас». Биллинг берёт MAX(durable, live) только в день начисления — на случай рестарта ProxySmart, обнулившего вчерашние счётчики | `computeClientYesterdayBytes`, виджеты |
-| `dailyTraffic` (память) | **Read-through кэш** таблицы `daily_traffic`, а не независимый источник. Любая запись идёт через `_dtUpsert` + обновление кэша в той же точке | быстрые читатели без SQL |
+| `dailyTraffic` (память) | **Read-through кэш** таблицы `daily_traffic`, а не независимый источник. Любая запись идёт через `recordDailyTraffic()` (src/traffic/daily.js, WP3) — SQL + обновление кэша в той же точке | быстрые читатели без SQL |
 | `hourly_snapshots` | Технические снапшоты (trend/агрегация), не биллинг | фоновые джобы |
 
 ## Правила записи

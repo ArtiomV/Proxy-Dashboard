@@ -1034,6 +1034,11 @@ try {
 // daily_traffic / traffic_hourly / hourly_snapshots / api_usage prepared
 // statements moved into src/db/traffic.js (Stage 2 finish).
 const _dtUpsert = trafficDb.dailyUpsertStmt();
+// WP3: единый писатель daily_traffic (SQL + кэш в одной точке, client_name
+// в момент записи). Все писатели идут через recordDailyTraffic.
+const _dailyTrafficWriter = require('./src/traffic/daily');
+_dailyTrafficWriter.init({ dailyUpsertStmt: _dtUpsert, dailyTraffic });
+const { recordDailyTraffic } = _dailyTrafficWriter;
 const _htUpsert = trafficDb.hourlyUpsertStmt();
 const _snapUpsert = trafficDb.snapshotUpsertStmt();
 const _snapGet = trafficDb.snapshotGetStmt();
@@ -1104,9 +1109,7 @@ async function syncYesterdayTraffic() {
             // Skip if yesterday data already exists and today's data is identical (ProxySmart hasn't reset yet)
             const existingYesterday = dailyTraffic[key] && dailyTraffic[key][yesterdayStr];
             if (existingYesterday && existingYesterday.in === yIn && existingYesterday.out === yOut) continue;
-            _dtUpsert.run(key, yesterdayStr, yIn, yOut);
-            if (!dailyTraffic[key]) dailyTraffic[key] = {};
-            dailyTraffic[key][yesterdayStr] = { in: yIn, out: yOut, portName: b.portName };
+            recordDailyTraffic(key, yesterdayStr, yIn, yOut, b.portName);
             count++;
           }
         }
@@ -1133,7 +1136,7 @@ function saveDailyTraffic() {
         for (const [date, data] of Object.entries(days)) {
           const bIn = typeof data === 'object' ? (data.in || 0) : 0;
           const bOut = typeof data === 'object' ? (data.out || 0) : 0;
-          _dtUpsert.run(portName, date, bIn, bOut);
+          recordDailyTraffic(portName, date, bIn, bOut, (typeof data === 'object' && data.portName) || '');
         }
       }
     });
@@ -3334,7 +3337,7 @@ app.use(require('./src/routes/traffic')({
   clients, clientByLogin, clientById,
   dailyTraffic, portKeyToPortName,
   knownModems, SERVER_COUNTRIES,
-  _dtUpsert,
+  recordDailyTraffic,
   refreshPortKeyMapping,
   logActivity,
 }));
@@ -4195,7 +4198,7 @@ const { runDailyBilling } = require('./src/jobs/billing').create({
   getMoscowYesterday, getMoscowNow,
   ledgerDb,
   clients,
-  dailyTraffic, _dtUpsert,
+  dailyTraffic, recordDailyTraffic,
   parseBwToBytes, trafficBytesToGb,
   getClientCachedServers,
   apiServers,

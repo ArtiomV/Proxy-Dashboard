@@ -17,7 +17,7 @@ function create(deps) {
     getMoscowYesterday, getMoscowNow,
     ledgerDb,
     clients,
-    dailyTraffic, _dtUpsert,
+    dailyTraffic, recordDailyTraffic,
     parseBwToBytes, trafficBytesToGb,
     getClientCachedServers,
     apiServers,
@@ -98,8 +98,7 @@ async function _runDailyBillingImpl(retryClientIds) {
         const existing = dailyTraffic[key][yesterdayStr];
         const newIn = Math.max(existing?.in || 0, yIn);
         const newOut = Math.max(existing?.out || 0, yOut);
-        _dtUpsert.run(key, yesterdayStr, newIn, newOut);
-        dailyTraffic[key][yesterdayStr] = { in: newIn, out: newOut, portName: b.portName };
+        recordDailyTraffic(key, yesterdayStr, newIn, newOut, b.portName);
       }
     }
   }
