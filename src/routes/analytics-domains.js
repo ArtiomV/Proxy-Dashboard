@@ -8,8 +8,29 @@ const express = require('express');
 const analyticsDb = require('../db/analytics');
 
 module.exports = function createAnalyticsDomainsRouter(deps) {
-  const { logger, authMiddleware, adminMiddleware } = deps;
+  const { logger, authMiddleware, adminMiddleware, db, runDomainGuard, logActivity } = deps;
   const r = express.Router();
+
+  // WP2: журнал доменного контроля (совпадения top_hosts с бан-листом на
+  // bypass-боксах). Пишет src/jobs/domain-guard.js.
+  r.get('/api/admin/domain_guard', authMiddleware, adminMiddleware, (req, res) => {
+    try {
+      const days = Math.min(90, Math.max(1, parseInt(req.query.days) || 30));
+      const rows = db.prepare(`SELECT date, server_name, client_name, nick, host,
+          matched_domain, hits_delta, total
+        FROM domain_guard_hits WHERE date >= date('now', ?)
+        ORDER BY date DESC, hits_delta DESC LIMIT 500`).all(`-${days} days`);
+      res.json({ rows });
+    } catch (err) { res.status(500).json({ error: 'Failed', details: err.message }); }
+  });
+
+  // Ручной запуск контроля (первый прогон / отладка).
+  r.post('/api/admin/domain_guard/run', authMiddleware, adminMiddleware, (req, res) => {
+    if (typeof runDomainGuard !== 'function') return res.status(501).json({ error: 'not wired' });
+    runDomainGuard().catch(e => logger.error('[DomainGuard] manual run failed:', e.message));
+    if (logActivity) logActivity('system', 'info', 'domain_guard_manual', req.user && req.user.login, 'Ручной запуск доменного контроля');
+    res.json({ ok: true, started: true });
+  });
 
   r.get('/api/analytics/logs_domains_full', authMiddleware, adminMiddleware, (req, res) => {
     try {

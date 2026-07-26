@@ -211,6 +211,12 @@
   },
   {
     "type": "index",
+    "name": "idx_dgh_date",
+    "tbl_name": "domain_guard_hits",
+    "sql": "CREATE INDEX idx_dgh_date ON domain_guard_hits(date)"
+  },
+  {
+    "type": "index",
     "name": "idx_docs_client_id",
     "tbl_name": "client_documents",
     "sql": "CREATE INDEX idx_docs_client_id ON client_documents(client_id)"
@@ -553,6 +559,18 @@
   },
   {
     "type": "index",
+    "name": "idx_thd_daily_date",
+    "tbl_name": "top_hosts_daily",
+    "sql": "CREATE INDEX idx_thd_daily_date ON top_hosts_daily(date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_thd_daily_port",
+    "tbl_name": "top_hosts_daily",
+    "sql": "CREATE INDEX idx_thd_daily_port ON top_hosts_daily(server_name, port_id, host, date)"
+  },
+  {
+    "type": "index",
     "name": "idx_thd_host",
     "tbl_name": "top_hosts_detail",
     "sql": "CREATE INDEX idx_thd_host ON top_hosts_detail(host)"
@@ -622,6 +640,18 @@
     "name": "idx_traffic_hourly_srv",
     "tbl_name": "traffic_hourly",
     "sql": "CREATE INDEX idx_traffic_hourly_srv ON traffic_hourly(server_name, hour_start)"
+  },
+  {
+    "type": "index",
+    "name": "idx_traffic_recon_date",
+    "tbl_name": "traffic_recon",
+    "sql": "CREATE INDEX idx_traffic_recon_date ON traffic_recon(date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_traffic_recon_server",
+    "tbl_name": "traffic_recon",
+    "sql": "CREATE INDEX idx_traffic_recon_server ON traffic_recon(server_name, date)"
   },
   {
     "type": "table",
@@ -715,6 +745,12 @@
   },
   {
     "type": "table",
+    "name": "domain_guard_hits",
+    "tbl_name": "domain_guard_hits",
+    "sql": "CREATE TABLE domain_guard_hits ( id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, server_name TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', nick TEXT NOT NULL DEFAULT '', host TEXT NOT NULL, matched_domain TEXT NOT NULL, hits_delta INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, created_at TEXT DEFAULT (datetime('now')), UNIQUE(date, server_name, client_name, host) )"
+  },
+  {
+    "type": "table",
     "name": "external_proxies",
     "tbl_name": "external_proxies",
     "sql": "CREATE TABLE external_proxies ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL, label TEXT DEFAULT '', protocol TEXT DEFAULT 'HTTP', host TEXT NOT NULL, port INTEGER NOT NULL, login TEXT DEFAULT '', password TEXT DEFAULT '', note TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')), change_ip_url TEXT DEFAULT '', valid_until TEXT, billing_type TEXT DEFAULT 'monthly', price REAL DEFAULT 0, traffic_used_gb REAL DEFAULT 0, FOREIGN KEY (client_id) REFERENCES clients(id) )"
@@ -771,7 +807,7 @@
     "type": "table",
     "name": "modem_meta",
     "tbl_name": "modem_meta",
-    "sql": "CREATE TABLE modem_meta ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), is_test_pool INTEGER NOT NULL DEFAULT 0, sim_status TEXT DEFAULT '', reboot_score INTEGER DEFAULT NULL, http_redirect INTEGER NOT NULL DEFAULT 0, band TEXT DEFAULT '', is_locked INTEGER NOT NULL DEFAULT 0, signals_updated_at TEXT DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, UNIQUE(server_name, imei) )"
+    "sql": "CREATE TABLE modem_meta ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), is_test_pool INTEGER NOT NULL DEFAULT 0, sim_status TEXT DEFAULT '', reboot_score INTEGER DEFAULT NULL, http_redirect INTEGER NOT NULL DEFAULT 0, band TEXT DEFAULT '', is_locked INTEGER NOT NULL DEFAULT 0, signals_updated_at TEXT DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, signal_strength TEXT DEFAULT '', iccid TEXT DEFAULT '', cell_op TEXT DEFAULT '', net_type TEXT DEFAULT '', modem_uptime TEXT DEFAULT '', UNIQUE(server_name, imei) )"
   },
   {
     "type": "table",
@@ -813,7 +849,7 @@
     "type": "table",
     "name": "rotation_log",
     "tbl_name": "rotation_log",
-    "sql": "CREATE TABLE rotation_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, nick TEXT NOT NULL, old_ip TEXT, new_ip TEXT, started_at TEXT NOT NULL, ended_at TEXT, took_sec REAL, attempt INTEGER DEFAULT 1 )"
+    "sql": "CREATE TABLE rotation_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, nick TEXT NOT NULL, old_ip TEXT, new_ip TEXT, started_at TEXT NOT NULL, ended_at TEXT, took_sec REAL, attempt INTEGER DEFAULT 1 , caller TEXT, target_mode TEXT)"
   },
   {
     "type": "table",
@@ -883,6 +919,12 @@
   },
   {
     "type": "table",
+    "name": "top_hosts_daily",
+    "tbl_name": "top_hosts_daily",
+    "sql": "CREATE TABLE top_hosts_daily ( id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, server_name TEXT NOT NULL, port_id TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', client_name TEXT NOT NULL DEFAULT '', host TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0, UNIQUE(date, server_name, port_id, host) )"
+  },
+  {
+    "type": "table",
     "name": "top_hosts_detail",
     "tbl_name": "top_hosts_detail",
     "sql": "CREATE TABLE top_hosts_detail ( id INTEGER PRIMARY KEY AUTOINCREMENT, snapshot_at TEXT NOT NULL, server_name TEXT NOT NULL, port_id TEXT NOT NULL, nick TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', country TEXT NOT NULL DEFAULT '', host TEXT NOT NULL, count INTEGER NOT NULL DEFAULT 0 )"
@@ -892,6 +934,12 @@
     "name": "traffic_hourly",
     "tbl_name": "traffic_hourly",
     "sql": "CREATE TABLE traffic_hourly ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL DEFAULT '', port_id TEXT NOT NULL DEFAULT '', nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', client_name TEXT NOT NULL DEFAULT '', hour_start TEXT NOT NULL, -- '2026-03-29 14:00' bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0, uncertain INTEGER NOT NULL DEFAULT 0, corrected INTEGER DEFAULT 0, UNIQUE(port_id, hour_start) )"
+  },
+  {
+    "type": "table",
+    "name": "traffic_recon",
+    "tbl_name": "traffic_recon",
+    "sql": "CREATE TABLE traffic_recon ( id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, server_name TEXT NOT NULL, port_key TEXT NOT NULL, client_name TEXT DEFAULT '', ps_in INTEGER DEFAULT 0, ps_out INTEGER DEFAULT 0, our_in INTEGER DEFAULT 0, our_out INTEGER DEFAULT 0, diff_pct REAL DEFAULT 0, created_at TEXT DEFAULT (datetime('now')), UNIQUE(port_key, date) )"
   },
   {
     "type": "table",

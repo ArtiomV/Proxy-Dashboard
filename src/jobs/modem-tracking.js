@@ -17,6 +17,7 @@ function create(deps) {
     _serverDownSince, _serverUnreachableAlertSent, uptimeTracking, ipTracking,
     offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
     _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
+    _metaIccidGetByImei,
   } = deps;
 
 async function trackModems() {
@@ -164,13 +165,38 @@ async function trackModems() {
           const _rebootScore = (md.REBOOT_SCORE != null && md.REBOOT_SCORE !== '' && Number.isFinite(_rsNum)) ? Math.round(_rsNum) : null;
           const _isLocked = (m.IS_LOCKED === true || m.IS_LOCKED === 'true') ? 1 : 0;
 
+          // WP4: доп-сигналы show_status_json. Пустые/«unknown» → '' (preserve-on-empty
+          // в upsert сохранит последнее валидное значение офлайн-модема).
+          const _blank = (v) => { const s = String(v == null ? '' : v).trim(); return (!s || s.toLowerCase() === 'unknown') ? '' : s; };
+          const _signal = _blank(nd.SIGNAL_STRENGTH);
+          const _iccid = _blank(nd.ICCID);
+          const _cellOp = _blank(nd.CELLOP);
+          const _netType = _blank(nd.CurrentNetworkType);
+          const _uptime = _blank(md.UPTIME);
+
           // Only persist REAL modems. A glitched/random port reports a USB-path
           // pseudo-IMEI (e.g. "1-4.3.1.1") + a random nick — persisting it created
           // junk modem_meta rows. Real IMEIs are 14–16 digits.
           if (/^\d{14,16}$/.test(imei) && !/^random/i.test(md.NICK || '')
               && !_deletedModemSet.has(server.name + '|' + imei)) {   // 041: don't resurrect a soft-deleted modem
+            // ICCID-change = замена SIM. Алертим только при РЕАЛЬНОЙ смене: было
+            // непустое → стало другое непустое (первая запись ICCID — не смена).
+            if (_iccid) {
+              try {
+                const prev = _metaIccidGetByImei.get(server.name, imei);
+                if (prev && prev.iccid && prev.iccid !== _iccid) {
+                  alerts.trigger('sim_iccid_changed', {
+                    nick: md.NICK || imei, imei, server: server.name,
+                    old_iccid: prev.iccid, new_iccid: _iccid,
+                  });
+                  logActivity('modem', 'warning', 'sim_iccid_changed', md.NICK || imei,
+                    `ICCID сменился: ${prev.iccid} → ${_iccid}`, { server: server.name, imei, old_iccid: prev.iccid, new_iccid: _iccid });
+                }
+              } catch (_) { /* best-effort */ }
+            }
             _modemMetaUpsert.run(server.name, imei, md.NICK || '', normOp, md.MODEL || '', md.PHONE_NUMBER || '',
-              _simStatus, _rebootScore, _httpRedirect, _band, _isLocked);
+              _simStatus, _rebootScore, _httpRedirect, _band, _isLocked,
+              _signal, _iccid, _cellOp, _netType, _uptime);
           }
 
           // Stage 17 auto-mapping (#1): persist operator → server's country

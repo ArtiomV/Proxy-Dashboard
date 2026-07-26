@@ -31,8 +31,9 @@ function init(db) {
     'INSERT INTO modem_meta ' +
     '(server_name, imei, nick, operator, model, phone, ' +
     ' sim_status, reboot_score, http_redirect, band, is_locked, ' +
+    ' signal_strength, iccid, cell_op, net_type, modem_uptime, ' +
     ' signals_updated_at, updated_at) ' +
-    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')) " +
+    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')) " +
     'ON CONFLICT(server_name, imei) DO UPDATE SET ' +
     "  nick     = CASE WHEN excluded.nick     <> '' THEN excluded.nick     ELSE nick     END, " +
     "  operator = CASE WHEN excluded.operator <> '' THEN excluded.operator ELSE operator END, " +
@@ -43,8 +44,17 @@ function init(db) {
     "  reboot_score = CASE WHEN excluded.reboot_score IS NOT NULL THEN excluded.reboot_score ELSE reboot_score END, " +
     "  http_redirect = excluded.http_redirect, " +
     "  is_locked     = excluded.is_locked, " +
+    "  signal_strength = CASE WHEN excluded.signal_strength <> '' THEN excluded.signal_strength ELSE signal_strength END, " +
+    "  iccid        = CASE WHEN excluded.iccid <> '' THEN excluded.iccid ELSE iccid END, " +
+    "  cell_op      = CASE WHEN excluded.cell_op <> '' THEN excluded.cell_op ELSE cell_op END, " +
+    "  net_type     = CASE WHEN excluded.net_type <> '' THEN excluded.net_type ELSE net_type END, " +
+    "  modem_uptime = CASE WHEN excluded.modem_uptime <> '' THEN excluded.modem_uptime ELSE modem_uptime END, " +
     "  signals_updated_at = datetime('now'), " +
     "  updated_at = datetime('now')"
+  );
+  // WP4: read current ICCID by (server, imei) для детекта замены SIM.
+  S.metaIccidGetByImei = db.prepare(
+    'SELECT iccid FROM modem_meta WHERE server_name = ? AND imei = ? LIMIT 1'
   );
   S.metaOperatorGet = db.prepare(
     'SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1'
@@ -113,10 +123,18 @@ function init(db) {
   S.metaNickByImei = db.prepare(
     "SELECT nick FROM modem_meta WHERE server_name = ? AND imei = ? AND nick IS NOT NULL AND nick <> '' LIMIT 1"
   );
+  // ON CONFLICT DO UPDATE (не OR IGNORE): при повторной выборке бэкфиллит
+  // caller/target_mode в строки, синканные до миграции 050. Ключ уникальности
+  // — (server_name, nick, started_at).
   S.rotationUpsert = db.prepare(
-    'INSERT OR IGNORE INTO rotation_log ' +
-    '(server_name, nick, old_ip, new_ip, started_at, ended_at, took_sec, attempt) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
+    'INSERT INTO rotation_log ' +
+    '(server_name, nick, old_ip, new_ip, started_at, ended_at, took_sec, attempt, caller, target_mode) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'ON CONFLICT(server_name, nick, started_at) DO UPDATE SET ' +
+    'ended_at=excluded.ended_at, took_sec=excluded.took_sec, attempt=excluded.attempt, ' +
+    'old_ip=excluded.old_ip, new_ip=excluded.new_ip, ' +
+    'caller=COALESCE(excluded.caller, rotation_log.caller), ' +
+    'target_mode=COALESCE(excluded.target_mode, rotation_log.target_mode)'
   );
   S.rotationSelect = db.prepare(
     'SELECT * FROM rotation_log WHERE server_name = ? AND nick = ? ' +
@@ -166,6 +184,7 @@ module.exports = {
   ihUpdateEndStmt:     () => S.ihUpdateEnd,
   ihDeleteByIdStmt:    () => S.ihDeleteById,
   modemMetaUpsertStmt: () => S.modemMetaUpsert,
+  metaIccidGetByImeiStmt: () => S.metaIccidGetByImei,
   metaOperatorGetStmt: () => S.metaOperatorGet,
   metaOperatorGetByImeiStmt: () => S.metaOperatorGetByImei,
   metaListRecentForServerStmt: () => S.metaListRecentForServer,    // Stage 18

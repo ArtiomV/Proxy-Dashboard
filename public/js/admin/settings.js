@@ -50,7 +50,7 @@ function loadServersList(){
       h+='<div class="server-header"><div class="server-header-left">';
       h+='<span class="server-id">'+sn+'</span>';
       h+='<div class="server-country">'+flag+' '+esc(cName)+'</div>';
-      h+='<div class="server-meta"><span class="meta-sep"></span>'+modemCount+' модемов<span class="meta-sep"></span>'+onlineCount+' в работе</div>';
+      h+='<div class="server-meta"><span class="meta-sep"></span>'+modemCount+' модемов<span class="meta-sep"></span>'+onlineCount+' в работе<span id="srvStats_'+sn+'"></span></div>';
       h+='</div>';
       h+='<span class="status-pill '+(isOnline?'online':'offline')+'">'+(isOnline?'ONLINE':'OFFLINE')+'</span>';
       h+='</div>';
@@ -84,7 +84,23 @@ function loadServersList(){
       h+='</div>';
     });
     el.innerHTML=h;
+    _loadServerStats();
   }).catch(function(e){var el=document.getElementById('serversList');if(el)el.innerHTML='<div style="color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>'})
+}
+// WP5+WP6: живые плашки RPS + уникальность IP на карточках серверов.
+// Отдельный запрос после отрисовки — unique_ips это 14-дн скан (бэкенд кэширует 10 мин).
+function _loadServerStats(){
+  api(API+'/api/admin/server_stats').then(function(d){
+    var st=(d&&d.stats)||{};
+    Object.keys(st).forEach(function(name){
+      var el=document.getElementById('srvStats_'+name);if(!el)return;
+      var s=st[name];if(!s){el.innerHTML='';return}
+      var bits='';
+      if(s.rps!=null)bits+='<span class="meta-sep"></span><span title="Запросов в секунду по всему боксу (сейчас)">⚡ '+s.rps+' rps</span>';
+      if(s.uniqueIpPct!=null)bits+='<span class="meta-sep"></span><span title="Доля уникальных IP среди ротаций за '+(s.uniqDays||14)+' дн ('+(s.rotations||0).toLocaleString('ru-RU')+' ротаций)" style="color:'+(s.uniqueIpPct>=90?'var(--success)':s.uniqueIpPct>=75?'var(--warning)':'var(--danger)')+'">'+s.uniqueIpPct+'% уник. IP</span>';
+      el.innerHTML=bits;
+    });
+  }).catch(function(){/* плашки необязательны */});
 }
 function toggleServerEdit(name,cancel){
   var body=document.getElementById('srvBody_'+name);

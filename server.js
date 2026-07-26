@@ -1900,7 +1900,13 @@ const SETTINGS_DEFAULTS = {
   // false — lossy mode preferred during JWKS rotation flakes.
   tochka_strict_webhook: false,
   // ── ProxySmart SIM/health signals (Batch 1) ──────────────────────
-  reboot_score_alert_threshold: 70         // reboot_score ≥ this → «нужен ребут» alert
+  reboot_score_alert_threshold: 70,        // reboot_score ≥ this → «нужен ребут» alert
+  // ── Traffic reconciliation (WP1 ProxySmart data integration) ─────
+  traffic_recon_alert_pct: 10,             // расхождение ≥ этого % → алерт
+  traffic_recon_min_gb: 0.5,               // порты тише этого объёма не алертим (шум)
+  // ── Domain guard (WP2): контроль доменов на bypass-боксах ────────
+  domain_guard_servers: 'S2,S4',           // боксы со снятой hfilter-фильтрацией
+  retention_top_hosts_daily: 90            // дней истории top_hosts_daily / domain_guard_hits
 };
 
 // Stage 14.1: appSettings lives in state with stable identity. Rebinds
@@ -2979,6 +2985,7 @@ function recordIpChange(key, oldIp, newIp, timestamp) {
 const _modemMetaUpsert = trackingDb.modemMetaUpsertStmt();
 const _metaOpGet = trackingDb.metaOperatorGetStmt();
 const _metaOpGetByImei = trackingDb.metaOperatorGetByImeiStmt(); // Stage 17 guard
+const _metaIccidGetByImei = trackingDb.metaIccidGetByImeiStmt(); // WP4: SIM-swap detect
 // Latest real operator observed by the proxy-check job — secondary fallback for
 // the hourly aggregator when modem_meta has no usable row (e.g. RO2_3).
 const _pcOpGet = db.prepare(
@@ -3021,6 +3028,7 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   _serverDownSince, _serverUnreachableAlertSent, uptimeTracking, ipTracking,
   offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
   _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
+  _metaIccidGetByImei,
 });
 
 // ========== PROXY LATENCY MONITORING ==========
@@ -3340,6 +3348,8 @@ app.use(require('./src/routes/traffic')({
   recordDailyTraffic,
   refreshPortKeyMapping,
   logActivity,
+  kvGet: _kvGet,
+  runTrafficRecon,
 }));
 
 
@@ -3503,6 +3513,7 @@ app.use(require('./src/routes/analytics-latency')({
 }));
 app.use(require('./src/routes/analytics-domains')({
   logger, authMiddleware, adminMiddleware,
+  db, runDomainGuard, logActivity,
 }));
 
 // Heatmap response cache: key=view|id|days, TTL 5 min.
@@ -4050,8 +4061,10 @@ function syncRotationLog(serverName, nick, entries) {
       const attempt = parseInt(e.attempt || e.Attempt || 1);
       const oldIp = e.old_ip || e['Old IPv4'] || e.OldIPv4 || e.oldIp || '';
       const newIp = e.new_ip || e['New IPv4'] || e.NewIPv4 || e.newIp || '';
+      const caller = e.CALLER || e.caller || e.Caller || null;
+      const targetMode = e.target_mode || e.TargetMode || e.mode || null;
       if (!start) continue;
-      try { _rlUpsert.run(serverName, nick, oldIp, newIp, start, end, took, attempt); inserted++; } catch(dupErr) { if (!dupErr.message.includes('UNIQUE')) logger.error('[SyncRotationLog] Insert error:', dupErr.message); }
+      try { _rlUpsert.run(serverName, nick, oldIp, newIp, start, end, took, attempt, caller, targetMode); inserted++; } catch(dupErr) { if (!dupErr.message.includes('UNIQUE')) logger.error('[SyncRotationLog] Insert error:', dupErr.message); }
     }
   });
   insert(entries);
@@ -4128,6 +4141,39 @@ function _initTopHostsJob() {
   return _topHostsJob;
 }
 async function aggregateTopHosts() { return _initTopHostsJob().aggregateTopHosts(); }
+
+// WP1 (ProxySmart data integration): nightly traffic reconciliation —
+// daily_traffic vs the box's pmacct counters. Lazy init, same shape as
+// the top-hosts job above.
+let _trafficReconJob = null;
+function _initTrafficReconJob() {
+  if (_trafficReconJob) return _trafficReconJob;
+  _trafficReconJob = require('./src/jobs/traffic-recon').create({
+    db, logger,
+    get apiServers() { return apiServers; },
+    SERVER_COUNTRIES,
+    fetchApi,
+    getMoscowYesterday,
+    getSetting,
+    alerts,
+    logActivity,
+    kvSet: _kvSet, kvGet: _kvGet,
+  });
+  return _trafficReconJob;
+}
+async function runTrafficRecon() { return _initTrafficReconJob().runTrafficRecon(); }
+
+// WP2: доменный контроль bypass-боксов — матчит суточный top_hosts-снапшот
+// против бан-листа hfilter (config/blocked-domains.json).
+let _domainGuardJob = null;
+function _initDomainGuardJob() {
+  if (_domainGuardJob) return _domainGuardJob;
+  _domainGuardJob = require('./src/jobs/domain-guard').create({
+    db, logger, getSetting, alerts, logActivity, getMoscowToday,
+  });
+  return _domainGuardJob;
+}
+async function runDomainGuard() { return _initDomainGuardJob().runDomainGuard(); }
 
 // Phase 5: comprehensive domain-log explorer.
 // Returns everything useful from the top_hosts_detail snapshot plus pre-computed
@@ -4608,6 +4654,16 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
 
   // Schedule nightly TopHosts at 03:00
   scheduleRepeating(3, 0, 'TopHosts', aggregateTopHosts);
+
+  // WP1: nightly traffic reconciliation at 03:40 UTC (06:40 MSK) — after the
+  // 00:45 DailySync has persisted yesterday's counters. Ретраи внутри джобы
+  // (3 попытки × 3 мин) держат её до ~10 минут в худшем случае — на ночном
+  // расписании это безопасно.
+  scheduleRepeating(3, 40, 'TrafficRecon', runTrafficRecon);
+
+  // WP2: доменный контроль в 03:25 UTC — после TopHosts (03:00); если тот ещё
+  // работает, джоба сама подождёт свежий снапшот (ретраи по свежести).
+  scheduleRepeating(3, 25, 'DomainGuard', runDomainGuard);
 
   // WP5: daily balance-vs-ledger reconciliation at 04:00 UTC (after billing
   // settles). Observation only — drift logs critical + TG alert, no auto-fix.

@@ -24,6 +24,44 @@ module.exports = function createServersRouter(deps) {
   } = deps;
   const r = express.Router();
 
+// WP5+WP6: живая статистика сервера — системный RPS + активные коннекты +
+// уникальность IP-пула. Источники: /modem/common_status (rps, count_connections,
+// devices) и /apix/unique_ips_json (UNIQUE_IPS_PERCENT за 14 дней). unique_ips
+// — это 14-дневный скан, поэтому кэшируем per-server на 10 мин; common_status
+// дешёвый, но кэшируем вместе одним TTL для простоты. Per-server graceful:
+// упавший бокс → null (карточка просто не покажет плашки).
+const _srvStatsCache = new Map();   // name → { at, data }
+const SRV_STATS_TTL_MS = 10 * 60 * 1000;
+
+r.get('/api/admin/server_stats', authMiddleware, adminMiddleware, async (req, res) => {
+  const out = {};
+  await Promise.all(apiServers.map(async (s) => {
+    const cached = _srvStatsCache.get(s.name);
+    if (cached && (Date.now() - cached.at) < SRV_STATS_TTL_MS) { out[s.name] = cached.data; return; }
+    try {
+      const [common, uniq] = await Promise.all([
+        fetchApi(s, '/modem/common_status', 8000).catch(() => null),
+        fetchApi(s, '/apix/unique_ips_json', 12000).catch(() => null),
+      ]);
+      if (!common && !uniq) { out[s.name] = null; return; }
+      const data = {
+        rps: common && Number.isFinite(+common.rps) ? Math.round(+common.rps) : null,
+        conns: common && Number.isFinite(+common.count_connections) ? +common.count_connections : null,
+        devices: common && Number.isFinite(+common.devices) ? +common.devices : null,
+        uniqueIpPct: uniq && Number.isFinite(+uniq.UNIQUE_IPS_PERCENT) ? +uniq.UNIQUE_IPS_PERCENT : null,
+        rotations: uniq && Number.isFinite(+uniq.TOTAL_ROTATIONS) ? +uniq.TOTAL_ROTATIONS : null,
+        uniqDays: uniq && Number.isFinite(+uniq.DAYS) ? +uniq.DAYS : null,
+      };
+      _srvStatsCache.set(s.name, { at: Date.now(), data });
+      out[s.name] = data;
+    } catch (e) {
+      logger.info(`[ServerStats] ${s.name}: ${e.message}`);
+      out[s.name] = null;
+    }
+  }));
+  res.json({ stats: out });
+});
+
 r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
   res.json({ servers: apiServers.map(s => ({
     name: s.name, url: s.url, publicIp: s.publicIp,

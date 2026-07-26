@@ -337,8 +337,13 @@ function _renderFinanceDashboard(c, d) {
   });
   h += '</tbody></table></div></div>';
 
+  // WP1: сверка трафика (наш daily_traffic vs pmacct боксов) — контейнер,
+  // данные подтягиваются отдельным запросом после отрисовки дашборда.
+  h += '<div id="fxTrafficRecon" style="margin-top:14px"></div>';
+
   h += '</div>';
   c.innerHTML = h;
+  _loadTrafficRecon();
 
   setTimeout(function() {
     var dcv = document.getElementById('fxDailyChart');
@@ -1286,4 +1291,71 @@ function renderFinRevenue(d){
           y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:9},callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid,drawTicks:false},border:{display:false}}}}
     });
   }, 30);
+}
+
+// ========== WP1: Сверка трафика (daily_traffic vs pmacct боксов) ==========
+// Пороги дублируют серверные дефолты traffic_recon_alert_pct / _min_gb —
+// это только фильтр отображения, алерты считает сервер.
+function _loadTrafficRecon() {
+  var el = document.getElementById('fxTrafficRecon');
+  if (!el) return;
+  api(API + '/api/admin/traffic_recon?days=30')
+    .then(function(d) {
+      if (!d || d.error) { el.innerHTML = ''; return; }
+      el.innerHTML = _renderTrafficRecon(d);
+    })
+    .catch(function() { el.innerHTML = ''; });
+}
+
+function _renderTrafficRecon(d) {
+  var GB = 1e9, PCT = 10, MIN = 0.5 * GB;
+  var rows = d.rows || [];
+  var status = (d.status && d.status.servers) || {};
+  var lastDate = rows.length ? rows[0].date : (d.status && d.status.date) || null;
+
+  var badges = '';
+  Object.keys(status).forEach(function(srv) {
+    var s = status[srv] || {};
+    badges += s.ok
+      ? '<span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--bg-3);color:var(--gr);margin-left:6px">' + esc(srv) + ' ✓ ' + (s.rows || 0) + '</span>'
+      : '<span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--bg-3);color:var(--am)" title="' + esc(s.error || '') + '">' + esc(srv) + ' ⚠ нет данных</span>';
+  });
+
+  var bad = rows.filter(function(r) {
+    var base = Math.max(r.ps_in + r.ps_out, r.our_in + r.our_out);
+    return r.diff_pct >= PCT && base >= MIN;
+  }).slice(0, 15);
+
+  var h = '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Сверка трафика</span>'
+    + '<span class="fx-cs">наш учёт vs счётчики боксов (pmacct)' + (lastDate ? ' · до ' + esc(lastDate) : '') + badges + '</span></div>';
+
+  if (!rows.length) {
+    h += '<div style="padding:14px;color:var(--t3);font-size:12px">Данных пока нет — первая сверка пройдёт ночью (06:40 МСК).</div></div>';
+    return h;
+  }
+
+  var latest = rows.filter(function(r) { return r.date === lastDate; });
+  var latestBad = latest.filter(function(r) {
+    var base = Math.max(r.ps_in + r.ps_out, r.our_in + r.our_out);
+    return r.diff_pct >= PCT && base >= MIN;
+  });
+  h += '<div style="padding:4px 2px 10px;font-size:12px;color:' + (latestBad.length ? 'var(--am)' : 'var(--gr)') + '">'
+    + (latestBad.length
+      ? '⚖️ За ' + esc(lastDate) + ': расхождение ≥' + PCT + '% у ' + latestBad.length + ' из ' + latest.length + ' портов'
+      : '✓ За ' + esc(lastDate) + ': все ' + latest.length + ' портов сходятся (порог ' + PCT + '%)')
+    + '</div>';
+
+  if (bad.length) {
+    h += '<table class="fx-tbl"><thead><tr><th>Дата</th><th>Клиент</th><th>Сервер</th><th>Наш учёт</th><th>pmacct</th><th>Δ%</th></tr></thead><tbody>';
+    bad.forEach(function(r) {
+      var our = ((r.our_in + r.our_out) / GB).toFixed(1);
+      var ps = ((r.ps_in + r.ps_out) / GB).toFixed(1);
+      h += '<tr><td>' + esc(r.date) + '</td><td>' + esc(r.client_name || r.port_key) + '</td><td>' + esc(r.server_name) + '</td>'
+        + '<td>' + our + ' ГБ</td><td>' + ps + ' ГБ</td>'
+        + '<td style="color:var(--am);font-weight:600">' + r.diff_pct + '%</td></tr>';
+    });
+    h += '</tbody></table>';
+  }
+  h += '</div>';
+  return h;
 }

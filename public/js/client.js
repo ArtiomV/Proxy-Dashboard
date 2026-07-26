@@ -1478,7 +1478,8 @@ function showIpHistory(nick,serverName,imei){
       return;
     }
     function _fmtRot(v){if(!v||v==='\u2014')return'\u2014';var s=String(v).replace('@',' ').replace('T',' ');var d=new Date(s);if(isNaN(d.getTime())){var p=s.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):?(\d{2})?/);if(p)return p[3]+'.'+p[2]+'.'+p[1]+' '+p[4]+':'+p[5]+(p[6]?':'+p[6]:'');return s}return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
-    var h='<table class="log-table"><thead><tr><th>Начало</th><th>Конец</th><th>Сек</th><th>Попытка</th><th>Старый IP</th><th>Новый IP</th></tr></thead><tbody>';
+    function _rotCaller(caller,mode){var map={schedule:'По расписанию',link:'По ссылке',api:'Через API',manual:'Вручную',webapp:'Из панели'};var c=caller?String(caller):'';var label=map[c.toLowerCase()]||(c?escapeHtml(c):'—');var m=mode&&String(mode)!=='auto'?' <span style="font-size:10px;color:var(--text-3)">'+escapeHtml(String(mode))+'</span>':'';return label+m;}
+    var h='<table class="log-table"><thead><tr><th>Начало</th><th>Инициатор</th><th>Сек</th><th>Старый IP</th><th>Новый IP</th></tr></thead><tbody>';
     entries.forEach(function(e){
       var start=e.started_at||e.start_time||e.Start||e.start||'\u2014';
       var end=e.ended_at||e.end_time||e.End||e.end||'\u2014';
@@ -1487,12 +1488,12 @@ function showIpHistory(nick,serverName,imei){
       var oldIp=e.old_ip||e.OldIPv4||'\u2014';
       var newIp=e.new_ip||e.NewIPv4||'\u2014';
       h+='<tr>';
+      var unchanged=(oldIp!=='\u2014'&&newIp!=='\u2014'&&String(oldIp)===String(newIp));
       h+='<td style="white-space:nowrap">'+_fmtRot(start)+'</td>';
-      h+='<td style="white-space:nowrap">'+_fmtRot(end)+'</td>';
+      h+='<td style="white-space:nowrap">'+_rotCaller(e.caller,e.target_mode)+'</td>';
       h+='<td>'+(took!=='\u2014'?parseFloat(took).toFixed(1):'\u2014')+'</td>';
-      h+='<td>'+escapeHtml(String(attempt))+'</td>';
       h+='<td class="mono" style="color:var(--text-2)">'+escapeHtml(String(oldIp))+'</td>';
-      h+='<td class="mono" style="color:var(--accent)">'+escapeHtml(String(newIp))+'</td>';
+      h+='<td class="mono" style="color:'+(unchanged?'var(--warning,#c60)':'var(--accent)')+'">'+escapeHtml(String(newIp))+(unchanged?' <span style="font-size:10px;color:var(--warning,#c60)">\u26a0 \u043d\u0435 \u0441\u043c\u0435\u043d\u0438\u043b\u0441\u044f</span>':'')+'</td>';
       h+='</tr>';
     });
     document.getElementById('ipModalBody').innerHTML=h+'</tbody></table>';

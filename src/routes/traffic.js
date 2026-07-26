@@ -26,6 +26,8 @@ module.exports = function createTrafficRouter(deps) {
     recordDailyTraffic,
     refreshPortKeyMapping,
     logActivity,
+    kvGet,
+    runTrafficRecon,
   } = deps;
   const r = express.Router();
 
@@ -400,6 +402,44 @@ r.get('/api/admin/unique_ips', authMiddleware, adminMiddleware, async (req, res)
     const result = await fetchApi(server, '/apix/unique_ips_json');
     res.json(result);
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
+});
+
+// WP1: traffic reconciliation readout — rows written by src/jobs/traffic-recon.js.
+// Returns per-day summary + worst offenders + per-server job status (the UI
+// hides a server's card when its last run failed after retries).
+r.get('/api/admin/traffic_recon', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const days = Math.min(90, Math.max(1, parseInt(req.query.days) || 30));
+    const rows = db.prepare(`SELECT date, server_name, port_key, client_name,
+        ps_in, ps_out, our_in, our_out, diff_pct
+      FROM traffic_recon
+      WHERE date >= date('now', ?)
+      ORDER BY date DESC, diff_pct DESC`).all(`-${days} days`);
+    const byDate = {};
+    for (const row of rows) {
+      const d = byDate[row.date] || (byDate[row.date] = { ports: 0, mismatched: 0, ps_total: 0, our_total: 0 });
+      d.ports++;
+      d.ps_total += (row.ps_in + row.ps_out);
+      d.our_total += (row.our_in + row.our_out);
+      if (row.diff_pct >= 10) d.mismatched++;
+    }
+    let status = null;
+    try {
+      const kvRow = kvGet.get('traffic_recon_status');
+      if (kvRow && kvRow.value) status = JSON.parse(kvRow.value);
+    } catch (_) { /* best-effort */ }
+    res.json({ rows, byDate, status });
+  } catch (err) { res.status(500).json({ error: 'Failed', details: err.message }); }
+});
+
+// Manual trigger for the reconciliation (первый прогон / отладка). The job
+// takes minutes when boxes are slow (retry passes) — respond immediately and
+// let it run in the background; результат виден в GET-роуте выше и в логах.
+r.post('/api/admin/traffic_recon/run', authMiddleware, adminMiddleware, (req, res) => {
+  if (typeof runTrafficRecon !== 'function') return res.status(501).json({ error: 'not wired' });
+  runTrafficRecon().catch(e => logger.error('[TrafficRecon] manual run failed:', e.message));
+  logActivity('traffic', 'info', 'traffic_recon_manual', req.user && req.user.login, 'Ручной запуск сверки трафика');
+  res.json({ ok: true, started: true });
 });
 
   return r;

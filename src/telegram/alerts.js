@@ -244,6 +244,14 @@ const RULES = {
     dedupeKey: p => 'simred_' + (p.server || '') + '_' + (p.imei || ''),
     render: p => `⚠️ <b>Проблема с SIM</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — оператор навязал HTTP-редирект.\nОбычно это значит: на SIM кончились деньги или она заблокирована.`,
   },
+  sim_iccid_changed: {
+    title: 'SIM заменена (ICCID сменился)',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'iccid_' + (p.server || '') + '_' + (p.imei || ''),
+    render: p => `🔄 <b>SIM заменена</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — ICCID изменился при том же модеме.\nБыл: <code>${esc(p.old_iccid || '')}</code>\nСтал: <code>${esc(p.new_iccid || '')}</code>\nЕсли SIM никто не менял — разберись, откуда новая карта.`,
+  },
   sim_status_bad: {
     title: 'SIM: статус не OK',
     priority: 'important',
@@ -284,6 +292,50 @@ const RULES = {
     cooldownSec: 86400,
     dedupeKey: p => 'expire_' + (p.server + '_' + (p.portId || '')),
     render: p => `⏰ <b>Прокси истекает через ${p.daysLeft} д.</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>, порт: <code>${esc(p.portName || p.portId)}</code>\nДата истечения: ${p.validBefore}`,
+  },
+  domain_guard_hit: {
+    title: 'Доменный контроль: обращения к банкам/платёжкам',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 72000,   // суточная джоба; 20ч, чтобы не заглушить следующий прогон
+    dedupeKey: () => 'global',
+    render: p => {
+      const lines = (p.top || []).map(h =>
+        `• <b>${esc(h.client)}</b> (${esc(h.server)}): <code>${esc(h.host)}</code> +${h.delta} (всего ${h.total})`);
+      return `🚨 <b>Доменный контроль за ${p.date}: ${p.count} совпадений с бан-листом</b>\n\n${lines.join('\n')}`
+        + (p.count > lines.length ? `\n…и ещё ${p.count - lines.length}` : '')
+        + `\n\nНа этих боксах фильтрация банков СНЯТА (hfilter-bypass) — это единственный контроль. Свяжись с клиентом.`;
+    },
+  },
+  domain_guard_failed: {
+    title: 'Доменный контроль не отработал',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 43200,
+    dedupeKey: () => 'global',
+    render: p => `🚨 <b>Доменный контроль не отработал</b>\n\nЗа ${p.date || '?'}: ${esc(p.error || 'unknown')}\nПовторы не помогли. На bypass-боксах сейчас НЕТ контроля обращений к банкам — разберись срочно.`,
+  },
+  traffic_recon_mismatch: {
+    title: 'Сверка трафика: расхождение с ProxySmart',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 86400,   // джоба суточная — одного сообщения в день достаточно
+    dedupeKey: () => 'global',
+    render: p => {
+      const lines = (p.top || []).map(o =>
+        `• <b>${esc(o.client)}</b> (${esc(o.server)}): у нас ${o.ourGb} ГБ, pmacct ${o.psGb} ГБ (${o.diffPct}%)`);
+      return `⚖️ <b>Сверка трафика за ${p.date}: расхождение у ${p.count} порт(ов)</b>\n\n${lines.join('\n')}`
+        + (p.count > lines.length ? `\n…и ещё ${p.count - lines.length} (см. Финансы → Сверка)` : '')
+        + `\n\nБиллинг идёт по нашему числу — если pmacct стабильно выше, мы недосчитываем клиенту.`;
+    },
+  },
+  traffic_recon_failed: {
+    title: 'Сверка трафика не отработала',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 43200,   // раз в 12ч на сервер, чтобы ретраи ночью не спамили
+    dedupeKey: p => 'recon_' + (p.server || 'global'),
+    render: p => `⚖️ <b>Сверка трафика: ${esc(p.server || '?')} без данных</b>\n\nЗа ${p.date || '?'}: ${esc(p.error || 'unknown')}\nПовторы (3 попытки с охлаждением) не помогли — карточка сверки по этому серверу скрыта до следующего успешного прогона.`,
   },
   traffic_spike_burst: {
     title: 'Spike-protection сработал слишком часто',
@@ -387,8 +439,13 @@ const _entityFor = {
   proxy_expiring_3d:         p => ({ kind: 'modem',   id: p.nick || p.portName || null }),
   sim_redirect_imposed:      p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   sim_status_bad:            p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
+  sim_iccid_changed:         p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   reboot_score_high:         p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   traffic_spike_burst:       () => ({ kind: 'system', id: 'traffic' }),
+  traffic_recon_mismatch:    () => ({ kind: 'system', id: 'traffic_recon' }),
+  domain_guard_hit:          () => ({ kind: 'system', id: 'domain_guard' }),
+  domain_guard_failed:       () => ({ kind: 'system', id: 'domain_guard' }),
+  traffic_recon_failed:      p => ({ kind: 'system', id: 'traffic_recon:' + (p.server || '') }),
   dashboard_restarted:       () => ({ kind: 'system', id: 'pm2' }),
   heap_warn:                 () => ({ kind: 'system', id: 'heap' }),
   disk_low_warn:             () => ({ kind: 'system', id: 'disk' }),
