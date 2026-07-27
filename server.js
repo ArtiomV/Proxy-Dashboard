@@ -3086,91 +3086,8 @@ function curlCheckProxy(proxyUrl, targetUrl) {
   });
 }
 
-async function checkProxyLatency() {
-  try {
-    const results = await fetchAllServersDataCached();
-    const nowIso = new Date().toISOString();
-
-    // Build list of proxies to check
-    const proxies = [];
-    for (const data of results) {
-      const srv = data.serverName || '';
-      const sc = SERVER_COUNTRIES[srv] || {};
-      const serverIp = sc.serverIp || '';
-      if (!serverIp) continue;
-      const statusArr = Array.isArray(data.status) ? data.status : [];
-      const portsMap = data.ports || {};
-
-      // Map IMEI → modem info
-      const modemInfo = {};
-      for (const m of statusArr) {
-        const md = m.modem_details || {};
-        const imei = md.IMEI;
-        if (!imei) continue;
-        modemInfo[imei] = {
-          nick: md.NICK || imei,
-          isOnline: m.net_details?.IS_ONLINE === 'yes',
-          isRotating: m.IS_ROTATED === 'true' || m.IS_ROTATED === true,
-          operator: normalizeOperator(m.net_details?.CELLOP, srv === 'S2' || srv.startsWith('S2')),
-        };
-      }
-
-      for (const [imei, portList] of Object.entries(portsMap)) {
-        const info = modemInfo[imei];
-        if (!info) continue;
-        // Skip offline modems (not rotating)
-        if (!info.isOnline && !info.isRotating) continue;
-        for (const p of portList) {
-          if (!p.HTTP_PORT || !p.LOGIN || !p.PASSWORD) continue;
-          // Skip ports that are NOT actively serving a paying client — probing them
-          // just generates false errors that wrongly flag a working modem as down:
-          //  • unassigned (no portName), • ProxySmart "randomport*" phantoms,
-          //  • expired rentals (PROXY_VALID_BEFORE in the past → port blocked by us).
-          if (!p.portName || !p.portName.trim()) continue;
-          if (_isAutoRandomPort(p.portName)) continue;
-          if (p.PROXY_VALID_BEFORE) { const _vb = Date.parse(p.PROXY_VALID_BEFORE); if (!isNaN(_vb) && _vb < Date.now()) continue; }
-          proxies.push({
-            server: srv,
-            nick: info.nick,
-            client: p.portName,
-            operator: info.operator || '',
-            proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
-          });
-          break; // one check per modem is enough
-        }
-      }
-    }
-
-    // Run checks with concurrency limit
-    let ok = 0, errors = 0;
-    const batch = db.transaction((entries) => {
-      for (const e of entries) {
-        dbStmts.proxyCheckInsert.run(e.server, e.nick, e.client, e.operator || '', nowIso, e.connect_ms, e.total_ms, e.status_code, e.error);
-      }
-    });
-
-    const entries = [];
-    for (let i = 0; i < proxies.length; i += getProxyCheckConcurrency()) {
-      const chunk = proxies.slice(i, i + getProxyCheckConcurrency());
-      const results = await Promise.all(chunk.map(async (p) => {
-        const r = await curlCheckProxy(p.proxyUrl);
-        return { server: p.server, nick: p.nick, client: p.client, operator: p.operator, ...r };
-      }));
-      for (const r of results) {
-        entries.push(r);
-        if (r.error) errors++;
-        else ok++;
-      }
-    }
-
-    batch(entries);
-    logger.info(`[ProxyCheck] Checked ${entries.length} proxies: ${ok} ok, ${errors} errors`);
-    logActivity('proxy_check', errors > 0 ? 'warn' : 'info', 'check_complete', null, `Checked ${entries.length} proxies: ${ok} ok, ${errors} errors`, { total: entries.length, ok, errors });
-  } catch (e) {
-    logger.error('[ProxyCheck] Error:', e.message);
-    logActivity('proxy_check', 'error', 'check_error', null, `Proxy latency check failed: ${e.message}`);
-  }
-}
+// checkProxyLatency / runNightlySpeedtests / parseSpeedtestResult moved to
+// src/jobs/proxy-checks.js (Stage 9); делегаты созданы выше (_proxyCheckJobs).
 
 const SPEEDTEST_HISTORY_FILE = path.join(__dirname, 'speedtest_history.json');
 function getMaxSpeedtestEntries() { return appSettings.speedtest_max_history || 30; }
@@ -3188,26 +3105,7 @@ function saveSpeedtestHistory() {
     .catch(e => { logger.error('[saveSpeedtestHistory] write failed:', e.message); });
 }
 
-let speedtestRunning = false;
-
-// BUG-03: Extract speedtest result parsing (was duplicated in test + retry)
-function parseSpeedtestResult(result) {
-  let dl = 0, ul = 0, ping = 0;
-  if (result && typeof result === 'object') {
-    dl = parseFloat(result.download || result.Download || result.dl || 0);
-    ul = parseFloat(result.upload || result.Upload || result.ul || 0);
-    ping = parseFloat(result.ping || result.Ping || result.latency || 0);
-    if (result.raw && typeof result.raw === 'string') {
-      const dlMatch = result.raw.match(/download[:\s]*([\d.]+)/i);
-      const ulMatch = result.raw.match(/upload[:\s]*([\d.]+)/i);
-      const pingMatch = result.raw.match(/ping[:\s]*([\d.]+)/i);
-      if (dlMatch) dl = parseFloat(dlMatch[1]);
-      if (ulMatch) ul = parseFloat(ulMatch[1]);
-      if (pingMatch) ping = parseFloat(pingMatch[1]);
-    }
-  }
-  return { dl, ul, ping };
-}
+// speedtestRunning flag moved into src/jobs/proxy-checks.js (re-entrancy guard).
 
 function pushSpeedtestEntry(key, entry) {
   if (!speedtestHistory[key]) speedtestHistory[key] = [];
@@ -3218,84 +3116,24 @@ function pushSpeedtestEntry(key, entry) {
   saveSpeedtestHistory();
 }
 
-async function runNightlySpeedtests() {
-  if (speedtestRunning) {
-    logger.info('[Speedtest] Already running, skipping...');
-    return;
-  }
-  speedtestRunning = true;
-  logger.info('[Speedtest] Starting speedtest run...');
-  let testedCount = 0, errorCount = 0;
+// Stage 9: проверки качества прокси и SLA вынесены в джобы-модули.
+// Экземпляры создаются здесь — все их зависимости уже определены,
+// а callsites ниже по файлу (load-time и runtime) получают делегаты.
+const _proxyCheckJobs = require('./src/jobs/proxy-checks').create({
+  db, dbStmts, logger, logActivity,
+  fetchAllServersDataCached, SERVER_COUNTRIES, normalizeOperator, isAutoRandomPort: _isAutoRandomPort,
+  getProxyCheckConcurrency, curlCheckProxy,
+  apiServers, fetchApi, appSettings, pushSpeedtestEntry,
+});
+const checkProxyLatency = _proxyCheckJobs.checkProxyLatency;
+const runNightlySpeedtests = _proxyCheckJobs.runNightlySpeedtests;
 
-  try {
-    for (const server of apiServers) {
-      try {
-        const statusData = await fetchApi(server, '/apix/show_status_json');
-        const modems = Array.isArray(statusData) ? statusData : [];
-        logger.info(`[Speedtest] ${server.name}: ${modems.length} modems to test`);
-
-        for (const m of modems) {
-          const nick = m.modem_details?.NICK;
-          const imei = m.modem_details?.IMEI;
-          const isOnline = m.net_details?.IS_ONLINE === 'yes';
-          if (!nick || !imei || !isOnline) continue;
-
-          const key = server.name + '_' + imei;
-          try {
-            logger.info(`[Speedtest] Testing ${nick} (${server.name})...`);
-            const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
-            const { dl, ul, ping } = parseSpeedtestResult(result);
-
-            const entry = { date: new Date().toISOString(), download: dl, upload: ul, ping, raw: result };
-
-            // Re-test if DL or UL is below threshold
-            const _stLowThresh = appSettings.speedtest_low_threshold || 1;
-            const _stRetestMs = (appSettings.speedtest_retest_delay_min || 10) * 60000;
-            if (dl < _stLowThresh || ul < _stLowThresh) {
-              logger.info(`[Speedtest] ${nick}: DL=${dl} UL=${ul} — below ${_stLowThresh} Mbps, re-testing in ${appSettings.speedtest_retest_delay_min || 10} min...`);
-              setTimeout(async () => {
-                try {
-                  logger.info(`[Speedtest] Re-testing ${nick} (${server.name})...`);
-                  const retryResult = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
-                  const r = parseSpeedtestResult(retryResult);
-                  if (r.dl + r.ul > dl + ul) {
-                    pushSpeedtestEntry(key, { date: new Date().toISOString(), download: r.dl, upload: r.ul, ping: r.ping, raw: retryResult, retry: true, ...(r.dl < _stLowThresh || r.ul < _stLowThresh ? { _lowSpeed: true } : {}) });
-                    logger.info(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (improved)`);
-                  } else {
-                    logger.info(`[Speedtest] Re-test ${nick}: DL=${r.dl} UL=${r.ul} (not improved)`);
-                  }
-                } catch (e) { logger.error(`[Speedtest] Re-test ${nick} error:`, e.message); }
-              }, _stRetestMs);
-            }
-
-            pushSpeedtestEntry(key, entry);
-            testedCount++;
-            logger.info(`[Speedtest] ${nick}: DL=${dl} UL=${ul} Ping=${ping}`);
-            if (dl < _stLowThresh || ul < _stLowThresh) {
-              logActivity('speedtest', 'warn', 'low_speed', nick, `Low speed: DL=${dl} UL=${ul} Ping=${ping}`, { server: server.name, dl, ul, ping });
-            } else {
-              logActivity('speedtest', 'info', 'test_result', nick, `DL=${dl} UL=${ul} Ping=${ping}`, { server: server.name, dl, ul, ping });
-            }
-          } catch (e) {
-            logger.error(`[Speedtest] Error testing ${nick}:`, e.message);
-            logActivity('speedtest', 'error', 'test_error', nick, `Speedtest failed: ${e.message}`, { server: server.name });
-            errorCount++;
-          }
-
-          await new Promise(r => setTimeout(r, 2000));
-        }
-      } catch (e) {
-        logger.error(`[Speedtest] Error on server ${server.name}:`, e.message);
-        errorCount++;
-      }
-    }
-  } finally {
-    speedtestRunning = false;
-  }
-
-  logger.info(`[Speedtest] Complete: ${testedCount} tested, ${errorCount} errors`);
-  logActivity('speedtest', errorCount > 0 ? 'warn' : 'info', 'run_complete', null, `Speedtest complete: ${testedCount} tested, ${errorCount} errors`, { tested: testedCount, errors: errorCount });
-}
+const _slaJobs = require('./src/jobs/sla').create({
+  trackingDb, uptimeTracking, getClients: () => clients, getMoscowToday,
+  atomicCredit, logger, logActivity,
+});
+const computeClientSlaMetrics = _slaJobs.computeClientSlaMetrics;
+const runSlaCheck = _slaJobs.runSlaCheck;
 
 function getSpeedtestLatest() {
   const latest = {};
@@ -3534,51 +3372,8 @@ const HEATMAP_TTL_MS = 5 * 60 * 1000;
 // которая опирается на ip_tracking (живые проверки IP), а не на rotation_log
 // (который часто содержит исторические/auto-rotation записи без реального
 // смысла "проблемы").
-function computeProxyIssues() {
-  try {
-    const winMin   = Math.max(5, Math.min(720, appSettings.proxy_alert_window_min || 60));
-    const latLimit = Math.max(100, Math.min(60000, appSettings.proxy_alert_latency_ms || 1500));
-    const errLimit = Math.max(0, Math.min(100, appSettings.proxy_alert_error_pct || 5));
-    const sinceExpr = `datetime('now', '-${winMin} minutes')`;
-
-    const checkRows = db.prepare(`
-      SELECT server_name, nick,
-             AVG(total_ms) FILTER (WHERE error IS NULL) AS avg_ms,
-             COUNT(*)                                  AS total,
-             SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors,
-             MAX(client_name)                          AS client_name,
-             MAX(operator)                             AS operator
-        FROM proxy_checks
-       WHERE checked_at >= ${sinceExpr}
-       GROUP BY server_name, nick
-    `).all();
-
-    const issues = [];
-    for (const c of checkRows) {
-      const errPct  = c.total > 0 ? Math.round(c.errors / c.total * 1000) / 10 : 0;
-      const latency = c.avg_ms != null ? Math.round(c.avg_ms) : null;
-      const reasons = [];
-      if (latency != null && latency > latLimit) reasons.push(`задержка ${latency}мс`);
-      if (errPct > errLimit) reasons.push(`ошибки ${errPct}%`);
-      if (reasons.length === 0) continue;
-      issues.push({
-        nick: c.nick,
-        server: c.server_name,
-        operator: c.operator || '',
-        client: c.client_name || '',
-        latency,
-        errorPct: errPct,
-        reasons,
-        detail: reasons.join(' · ')
-      });
-    }
-    issues.sort((a, b) => b.reasons.length - a.reasons.length || (b.errorPct - a.errorPct));
-    return issues;
-  } catch (e) {
-    logger.error('[proxyIssues]', e.message);
-    return [];
-  }
-}
+// computeProxyIssues moved to src/services/proxy-issues.js (Stage 9).
+const { computeProxyIssues } = require('./src/services/proxy-issues').create({ db, appSettings, logger });
 
 // Auto-reboot of flaky modems.
 // Triggers when a modem appears in proxyIssues with reasons OTHER than just
@@ -3728,115 +3523,8 @@ app.use(require('./src/routes/proxy-checks')({
 // ============================================================================
 
 // Compute SLA metrics for a single client.
-// Uptime is measured over 30 days (contractual SLA horizon).
-// Latency and error_pct use last 24 h (current service quality).
-// Returns { uptime_pct, avg_latency_ms, error_pct, total_checks } or null if no data.
-function computeClientSlaMetrics(client) {
-  if (!client.portName) return null;
-  // Latency + error rate (24 h)
-  const checks = trackingDb.slaClientChecks24hStmt().get(client.portName);
-
-  // Uptime over 30 days — polling-based, aggregated across the client's modems.
-  // Uses the same uptimeTracking source as the per-modem health score so all
-  // dashboard uptime numbers are computed from one canonical signal (5-min
-  // ping checks against ProxySmart). Replaces the old traffic-based formula
-  // which inflated downtime whenever clients didn't transmit traffic.
-  const UPTIME_DAYS = 30;
-  const utCutoffDate = new Date(Date.now() - UPTIME_DAYS * 86400000).toISOString().slice(0, 10);
-
-  // Find this client's modems (any that produced proxy_check rows in the window).
-  // Includes the IMEI for the uptimeTracking lookup.
-  const clientModems = trackingDb.slaClientModemsStmt().all(client.portName, `-${UPTIME_DAYS} days`);
-
-  let upOnline = 0, upTotal = 0;
-  for (const mm of clientModems) {
-    if (!mm.imei) continue;
-    const ut = uptimeTracking[mm.server_name + '_' + mm.imei];
-    if (!ut || !ut.daily) continue;
-    for (const d in ut.daily) {
-      if (d >= utCutoffDate) {
-        upOnline += ut.daily[d].online || 0;
-        upTotal  += ut.daily[d].total  || 0;
-      }
-    }
-  }
-
-  if (checks.total === 0 && upTotal === 0) return null;
-  const uptimePct = upTotal > 0 ? Math.round(upOnline / upTotal * 1000) / 10 : null;
-  const errorPct = checks.total > 0 ? Math.round(checks.errors / checks.total * 1000) / 10 : 0;
-  return {
-    uptime_pct: uptimePct,
-    uptime_window_days: UPTIME_DAYS,
-    uptime_online_checks: upOnline,
-    uptime_total_checks: upTotal,
-    avg_latency_ms: checks.avg_ms != null ? Math.round(checks.avg_ms) : null,
-    error_pct: errorPct,
-    total_checks: checks.total
-  };
-}
-
-// Evaluate SLA, write violations to DB. Optionally auto-credit.
-async function runSlaCheck() {
-  try {
-    const today = getMoscowToday();
-    let violationsCount = 0, creditsCount = 0;
-    const insertViolation = trackingDb.slaInsertViolationStmt();
-    const existsStmt = trackingDb.slaExistsViolationStmt();
-
-    for (const client of clients) {
-      if (!client.portName || !client.price) continue;
-      const m = computeClientSlaMetrics(client);
-      if (!m) continue;
-      const breaches = [];
-      if (m.uptime_pct != null && client.slaUptimePct != null && m.uptime_pct < client.slaUptimePct) {
-        breaches.push({ metric: 'uptime', expected: client.slaUptimePct, actual: m.uptime_pct });
-      }
-      if (m.avg_latency_ms != null && client.slaMaxLatencyMs != null && m.avg_latency_ms > client.slaMaxLatencyMs) {
-        breaches.push({ metric: 'latency', expected: client.slaMaxLatencyMs, actual: m.avg_latency_ms });
-      }
-      if (m.error_pct != null && client.slaMaxErrorPct != null && m.error_pct > client.slaMaxErrorPct) {
-        breaches.push({ metric: 'errors', expected: client.slaMaxErrorPct, actual: m.error_pct });
-      }
-      for (const b of breaches) {
-        // Skip if already logged today
-        if (existsStmt.get(client.id, today, b.metric)) continue;
-        // Auto-credit: 1% of daily rate per breach (per_gb only, cap at 10%)
-        let credit = 0;
-        if (client.slaAutoCredit && client.price > 0 && client.billingType === 'per_gb') {
-          credit = Math.min(client.price * 0.01, client.price * 0.1);
-          credit = Math.round(credit * 100) / 100;
-          if (credit > 0) {
-            try {
-              atomicCredit(client.id, credit, {
-                type: 'adjustment',
-                date: today,
-                timestamp: new Date().toISOString(),
-                amount: credit,
-                currency: client.currency || 'RUB',
-                note: `SLA кредит: ${b.metric} ${b.actual} (норма ${b.expected})`,
-                traffic_source: 'sla_auto'
-              });
-              creditsCount++;
-            } catch (e) {
-              logger.error(`[SLA] credit error for ${client.name}:`, e.message);
-              credit = 0;
-            }
-          }
-        }
-        insertViolation.run(client.id, today, b.metric, b.expected, b.actual, credit);
-        violationsCount++;
-        logger.warn(`[SLA] ${client.name} breach: ${b.metric} actual=${b.actual} expected=${b.expected} credit=${credit}`);
-      }
-    }
-    if (violationsCount > 0 || creditsCount > 0) {
-      logActivity('system', 'warn', 'sla_check', null,
-        `SLA check: ${violationsCount} breaches, ${creditsCount} credits applied`,
-        { violations: violationsCount, credits: creditsCount, date: today });
-    }
-  } catch (e) {
-    logger.error('[SLA]', e.message);
-  }
-}
+// computeClientSlaMetrics + runSlaCheck moved to src/jobs/sla.js (Stage 9);
+// делегаты созданы выше (_slaJobs).
 
 // Endpoint: per-client SLA status
 // SLA routes moved into src/routes/sla.js (Stage 3).
