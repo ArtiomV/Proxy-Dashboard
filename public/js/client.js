@@ -720,7 +720,7 @@ function loadBillingHistory(){
 
       // Month header
       html+='<div style="border:1px solid var(--border);border-radius:10px;margin-bottom:8px;overflow:hidden">';
-      html+='<div onclick="toggleBillingMonth(this)" style="cursor:pointer;padding:14px 18px;background:var(--bg-2);display:flex;align-items:center;justify-content:space-between;gap:12px;user-select:none">';
+      html+='<div data-on-click="toggleBillingMonth(this)" style="cursor:pointer;padding:14px 18px;background:var(--bg-2);display:flex;align-items:center;justify-content:space-between;gap:12px;user-select:none">';
       html+='<div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">';
       html+='<span style="font-size:15px;font-weight:700;color:var(--text-1)">'+monthLabel+'</span>';
       if(isCurrent) html+='<span style="background:var(--green);color:#fff;font-size:10px;padding:2px 8px;border-radius:8px;font-weight:600">Текущий</span>';
@@ -753,7 +753,7 @@ function loadBillingHistory(){
       [['all','Все'],['charge','Списания'],['payment','Пополнения'],['correction','Корректировки']].forEach(function(f){
         var isActive=f[0]==='all';
         var cnt=typeCounts[f[0]]||0;
-        html+='<button onclick="filterBillingMonth(this,\''+monthKey+'\',\''+f[0]+'\')" data-ftype="'+f[0]+'" style="padding:4px 10px;border-radius:6px;border:'+(isActive?'1px solid var(--accent)':'1px solid var(--border)')+';background:'+(isActive?'var(--accent)':'var(--bg-2)')+';color:'+(isActive?'#fff':'var(--text-2)')+';font-size:11px;cursor:pointer;display:flex;align-items:center;gap:5px;font-weight:'+(isActive?'600':'400')+'">'+f[1]+'<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:rgba(0,0,0,0.1);color:inherit">'+cnt+'</span></button>';
+        html+='<button data-on-click="filterBillingMonth(this,\''+monthKey+'\',\''+f[0]+'\')" data-ftype="'+f[0]+'" style="padding:4px 10px;border-radius:6px;border:'+(isActive?'1px solid var(--accent)':'1px solid var(--border)')+';background:'+(isActive?'var(--accent)':'var(--bg-2)')+';color:'+(isActive?'#fff':'var(--text-2)')+';font-size:11px;cursor:pointer;display:flex;align-items:center;gap:5px;font-weight:'+(isActive?'600':'400')+'">'+f[1]+'<span style="font-size:10px;padding:1px 5px;border-radius:8px;background:rgba(0,0,0,0.1);color:inherit">'+cnt+'</span></button>';
       });
       html+='</div>';
       html+='<table data-month="'+monthKey+'" style="width:100%;border-collapse:collapse;font-size:13px">';
@@ -1202,10 +1202,10 @@ function renderTable(){
       if(row.httpPort||row.socksPort){
         reqHtml='';
         if(row.httpPort){
-          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">HTTP:</span> <span class="mono">'+serverIp+':'+row.httpPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.httpPort+'\',this)">\ud83d\udccb</button></div>';
+          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">HTTP:</span> <span class="mono">'+serverIp+':'+row.httpPort+'</span> <button class="copy-btn" data-on-click="copyText(\''+serverIp+':'+row.httpPort+'\',this)">\ud83d\udccb</button></div>';
         }
         if(row.socksPort){
-          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">SOCKS5:</span> <span class="mono">'+serverIp+':'+row.socksPort+'</span> <button class="copy-btn" onclick="copyText(\''+serverIp+':'+row.socksPort+'\',this)">\ud83d\udccb</button></div>';
+          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">SOCKS5:</span> <span class="mono">'+serverIp+':'+row.socksPort+'</span> <button class="copy-btn" data-on-click="copyText(\''+serverIp+':'+row.socksPort+'\',this)">\ud83d\udccb</button></div>';
         }
       }
 
@@ -1213,18 +1213,18 @@ function renderTable(){
       var loginPassHtml='-';
       if(row.proxyLogin||row.proxyPassword){
         var loginPassStr=escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword);
-        loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" onclick="copyText(\''+escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword)+'\',this)">\ud83d\udccb</button>';
+        loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword)+'\',this)">\ud83d\udccb</button>';
       }
 
       // Смена IP cell: reset link + copy button + IP history button
       var changeIpHtml='';
       if(row.resetSecureLink){
         changeIpHtml+='<a href="'+escapeHtml(row.resetSecureLink)+'" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12px" title="Сброс IP">\ud83d\udd04 Сброс</a> ';
-        changeIpHtml+='<button class="copy-btn" onclick="copyText(\''+escapeHtml(row.resetSecureLink).replace(/'/g,"\\'")+'\',this)" title="Копировать ссылку">\ud83d\udccb</button> ';
+        changeIpHtml+='<button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.resetSecureLink).replace(/'/g,"\\'")+'\',this)" title="Копировать ссылку">\ud83d\udccb</button> ';
       }else{
-        changeIpHtml+='<button class="action-btn-sm" onclick="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+escapeHtml(row.serverName)+'\',this)" title="Сброс IP">\ud83d\udd04</button> ';
+        changeIpHtml+='<button class="action-btn-sm" data-on-click="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+escapeHtml(row.serverName)+'\',this)" title="Сброс IP">\ud83d\udd04</button> ';
       }
-      changeIpHtml+='<button class="action-btn-sm" onclick="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',\''+escapeHtml(row.imei)+'\')" title="IP история" style="font-size:12px">\ud83d\udcc3</button>';
+      changeIpHtml+='<button class="action-btn-sm" data-on-click="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',\''+escapeHtml(row.imei)+'\')" title="IP история" style="font-size:12px">\ud83d\udcc3</button>';
 
       var rowStyle=row._cached?'opacity:0.6':(row._offline?'opacity:0.45':'');
       html+='<tr style="'+rowStyle+'">'+
@@ -1279,7 +1279,7 @@ function renderTable(){
       var mMonthVal=formatBytes((mrow.monthIn||0)+(mrow.monthOut||0));
       var mUid='mc_'+mci+'_'+mk;
       mobileHtml+='<div class="mc" id="'+mUid+'">';
-      mobileHtml+='<div class="mc-top" onclick="toggleMc(\''+mUid+'\')">';
+      mobileHtml+='<div class="mc-top" data-on-click="toggleMc(\''+mUid+'\')">';
       mobileHtml+='<div class="mc-left">';
       mobileHtml+='<span class="status-dot '+mStatusCls+'"></span>';
       mobileHtml+='<div><div class="mc-name">'+escapeHtml(mrow.modemNick)+'</div><div class="mc-operator">'+escapeHtml(mrow.operator||'')+'</div></div>';
@@ -1293,21 +1293,21 @@ function renderTable(){
       mobileHtml+='</div>';
       mobileHtml+='<div class="mc-expanded">';
       if(mServerIp&&mrow.httpPort){
-        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">HTTP</span><span class="mc-req-val">'+mServerIp+':'+mrow.httpPort+'</span><button class="mc-copy" onclick="copyText(\''+mServerIp+':'+mrow.httpPort+'\',this)">\ud83d\udccb</button></div>';
+        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">HTTP</span><span class="mc-req-val">'+mServerIp+':'+mrow.httpPort+'</span><button class="mc-copy" data-on-click="copyText(\''+mServerIp+':'+mrow.httpPort+'\',this)">\ud83d\udccb</button></div>';
       }
       if(mServerIp&&mrow.socksPort){
-        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">SOCKS5</span><span class="mc-req-val">'+mServerIp+':'+mrow.socksPort+'</span><button class="mc-copy" onclick="copyText(\''+mServerIp+':'+mrow.socksPort+'\',this)">\ud83d\udccb</button></div>';
+        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">SOCKS5</span><span class="mc-req-val">'+mServerIp+':'+mrow.socksPort+'</span><button class="mc-copy" data-on-click="copyText(\''+mServerIp+':'+mrow.socksPort+'\',this)">\ud83d\udccb</button></div>';
       }
       if(mrow.proxyLogin){
-        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041b\u043e\u0433\u0438\u043d</span><span class="mc-req-val">'+escapeHtml(mrow.proxyLogin)+'</span><button class="mc-copy" onclick="copyText(\''+escapeHtml(mrow.proxyLogin)+'\',this)">\ud83d\udccb</button></div>';
+        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041b\u043e\u0433\u0438\u043d</span><span class="mc-req-val">'+escapeHtml(mrow.proxyLogin)+'</span><button class="mc-copy" data-on-click="copyText(\''+escapeHtml(mrow.proxyLogin)+'\',this)">\ud83d\udccb</button></div>';
       }
       if(mrow.proxyPassword){
-        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041f\u0430\u0440\u043e\u043b\u044c</span><span class="mc-req-val">'+escapeHtml(mrow.proxyPassword)+'</span><button class="mc-copy" onclick="copyText(\''+escapeHtml(mrow.proxyPassword)+'\',this)">\ud83d\udccb</button></div>';
+        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041f\u0430\u0440\u043e\u043b\u044c</span><span class="mc-req-val">'+escapeHtml(mrow.proxyPassword)+'</span><button class="mc-copy" data-on-click="copyText(\''+escapeHtml(mrow.proxyPassword)+'\',this)">\ud83d\udccb</button></div>';
       }
       if(mrow.resetSecureLink){
         mobileHtml+='<a href="'+escapeHtml(mrow.resetSecureLink)+'" target="_blank" class="mc-reset-btn" style="display:block;text-align:center;text-decoration:none">\ud83d\udd04 \u0421\u0431\u0440\u043e\u0441\u0438\u0442\u044c IP</a>';
       }else if(mrow.rawImei){
-        mobileHtml+='<button class="mc-reset-btn" onclick="resetIp(\''+escapeHtml(mrow.rawImei)+'\',\''+mrow.serverName+'\',this)">\ud83d\udd04 \u0421\u0431\u0440\u043e\u0441\u0438\u0442\u044c IP</button>';
+        mobileHtml+='<button class="mc-reset-btn" data-on-click="resetIp(\''+escapeHtml(mrow.rawImei)+'\',\''+mrow.serverName+'\',this)">\ud83d\udd04 \u0421\u0431\u0440\u043e\u0441\u0438\u0442\u044c IP</button>';
       }
       mobileHtml+='</div>';
       mobileHtml+='</div>';
@@ -1427,7 +1427,7 @@ function buildRotationCell(row){
     for(var i=1;i<opts.length;i++){if(opts[i].v>=leftMin){cur=opts[i].v;break}}
     if(cur===0)cur=1440;
   }
-  var h='<select class="rotation-select" onchange="setRotation(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',this.value,this)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);cursor:pointer">';
+  var h='<select class="rotation-select" data-on-change="setRotation(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',this.value,this)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);cursor:pointer">';
   var matched=false;
   for(var i=0;i<opts.length;i++){
     var sel=opts[i].v===cur?' selected':'';
@@ -1704,7 +1704,7 @@ function loadClosingDocs(){
       h+='<td style="padding:10px 12px;color:var(--text-3)">'+(d.actNumber||'\u2014')+'</td>';
       h+='<td style="padding:10px 12px;text-align:right;font-weight:600">'+formatNumber(d.totalAmount||0)+' \u20BD</td>';
       h+='<td style="padding:10px 12px;text-align:center">'+statusHtml+'</td>';
-      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" onclick="downloadClosingPdf(\''+d.id+'\')" style="font-size:12px;padding:4px 10px">\u{1F4E5} PDF</button></td>';
+      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" data-on-click="downloadClosingPdf(\''+d.id+'\')" style="font-size:12px;padding:4px 10px">\u{1F4E5} PDF</button></td>';
       h+='</tr>';
     });
     h+='</tbody></table>';
@@ -1750,7 +1750,7 @@ function loadBills(){
       h+='<td style="padding:10px 12px;color:var(--text-3)">'+(b.billNumber||'—')+'</td>';
       h+='<td style="padding:10px 12px;text-align:right;font-weight:600">'+formatNumber(b.amount||0)+' ₽</td>';
       h+='<td style="padding:10px 12px;text-align:center">'+statusHtml+'</td>';
-      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" onclick="downloadBillPdf(\''+b.id+'\')" style="font-size:12px;padding:4px 10px">📥 PDF</button></td>';
+      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" data-on-click="downloadBillPdf(\''+b.id+'\')" style="font-size:12px;padding:4px 10px">📥 PDF</button></td>';
       h+='</tr>';
     });
     h+='</tbody></table>';
@@ -1884,24 +1884,24 @@ function buildExportModal(){
     '<div style="padding:18px 24px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;flex-shrink:0">'+
     '<div><div style="display:flex;align-items:center;gap:8px;margin-bottom:3px"><span style="font-size:18px">📤</span><h2 style="font-size:15px;font-weight:700;color:var(--text-0);margin:0">Экспорт прокси</h2></div>'+
     '</div>'+
-    '<button onclick="closeExportModal()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✕</button>'+
+    '<button data-on-click="closeExportModal()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✕</button>'+
     '</div>'+
     '<div style="padding:0 24px;border-bottom:1px solid var(--border);display:flex;gap:0;flex-shrink:0;overflow-x:auto" id="exportTabBar">'+
-    '<button onclick="switchExportTab(\'basic\')" id="etab-basic" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">📄 Базовые</button>'+
-    '<button onclick="switchExportTab(\'devtools\')" id="etab-devtools" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">💻 Для разработчиков</button>'+
-    '<button onclick="switchExportTab(\'system\')" id="etab-system" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">⚙️ Системные</button>'+
-    '<button onclick="switchExportTab(\'custom\')" id="etab-custom" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">⌨️ Свой шаблон</button>'+
+    '<button data-on-click="switchExportTab(\'basic\')" id="etab-basic" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">📄 Базовые</button>'+
+    '<button data-on-click="switchExportTab(\'devtools\')" id="etab-devtools" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">💻 Для разработчиков</button>'+
+    '<button data-on-click="switchExportTab(\'system\')" id="etab-system" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">⚙️ Системные</button>'+
+    '<button data-on-click="switchExportTab(\'custom\')" id="etab-custom" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">⌨️ Свой шаблон</button>'+
     '</div>'+
     '<div id="exportFormatGrid" style="padding:12px 24px;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;min-height:104px"></div>'+
     '<div id="exportCustomTemplateRow" style="display:none;padding:0 24px 10px;border-bottom:1px solid var(--border);flex-shrink:0">'+
     '<div style="font-size:11px;color:var(--text-2);margin-bottom:6px">Шаблон строки:</div>'+
     '<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px">'+
-    '<button onclick="setCustomTpl(\'{{LOGIN}}:{{PASS}}@{{HOST}}:{{PORT}}\')" style="padding:4px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;color:var(--text-0)">LOGIN:PASS@ADDRESS:PORT</button>'+
-    '<button onclick="setCustomTpl(\'{{LOGIN}}:{{PASS}}:{{HOST}}:{{PORT}}\')" style="padding:4px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;color:var(--text-0)">LOGIN:PASS:ADDRESS:PORT</button>'+
-    '<button onclick="setCustomTpl(\'{{HOST}}:{{PORT}}@{{LOGIN}}:{{PASS}}\')" style="padding:4px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;color:var(--text-0)">ADDRESS:PORT@LOGIN:PASS</button>'+
-    '<button onclick="setCustomTpl(\'{{HOST}}:{{PORT}}:{{LOGIN}}:{{PASS}}\')" style="padding:4px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;color:var(--text-0)">ADDRESS:PORT:LOGIN:PASS</button>'+
+    '<button data-on-click="setCustomTpl(\'{{LOGIN}}:{{PASS}}@{{HOST}}:{{PORT}}\')" style="padding:4px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;color:var(--text-0)">LOGIN:PASS@ADDRESS:PORT</button>'+
+    '<button data-on-click="setCustomTpl(\'{{LOGIN}}:{{PASS}}:{{HOST}}:{{PORT}}\')" style="padding:4px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;color:var(--text-0)">LOGIN:PASS:ADDRESS:PORT</button>'+
+    '<button data-on-click="setCustomTpl(\'{{HOST}}:{{PORT}}@{{LOGIN}}:{{PASS}}\')" style="padding:4px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;color:var(--text-0)">ADDRESS:PORT@LOGIN:PASS</button>'+
+    '<button data-on-click="setCustomTpl(\'{{HOST}}:{{PORT}}:{{LOGIN}}:{{PASS}}\')" style="padding:4px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;font-size:11px;cursor:pointer;color:var(--text-0)">ADDRESS:PORT:LOGIN:PASS</button>'+
     '</div>'+
-    '<input id="exportCustomTpl" type="text" value="{{LOGIN}}:{{PASS}}@{{HOST}}:{{PORT}}" oninput="refreshExportPreview()" style="width:100%;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:12px;padding:6px 10px;font-family:monospace;box-sizing:border-box">'+
+    '<input id="exportCustomTpl" type="text" value="{{LOGIN}}:{{PASS}}@{{HOST}}:{{PORT}}" data-on-input="refreshExportPreview()" style="width:100%;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:12px;padding:6px 10px;font-family:monospace;box-sizing:border-box">'+
     '<div style="font-size:10px;color:var(--text-3);margin-top:4px">Переменные: {{LOGIN}} {{PASS}} {{HOST}} {{PORT}} {{PROTO}} {{CHANGEIP}}</div>'+
     '</div>'+
     '<div style="padding:10px 24px;border-bottom:1px solid var(--border);flex-shrink:0">'+
@@ -1909,17 +1909,17 @@ function buildExportModal(){
     '<div style="display:flex;gap:20px;align-items:flex-start;flex-wrap:wrap">'+
     '<div><div style="font-size:10px;color:var(--text-3);margin-bottom:4px">Протокол</div>'+
     '<div style="display:flex">'+
-    '<button id="eproto-http" onclick="setExportProto(\'http\')" style="padding:4px 12px;background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:6px 0 0 6px;font-size:11px;cursor:pointer;font-weight:500">HTTP</button>'+
-    '<button id="eproto-socks5" onclick="setExportProto(\'socks5\')" style="padding:4px 12px;background:var(--bg-2);color:var(--text-1);border:1px solid var(--border);border-left:none;border-radius:0 6px 6px 0;font-size:11px;cursor:pointer">SOCKS5</button>'+
+    '<button id="eproto-http" data-on-click="setExportProto(\'http\')" style="padding:4px 12px;background:var(--accent);color:#fff;border:1px solid var(--accent);border-radius:6px 0 0 6px;font-size:11px;cursor:pointer;font-weight:500">HTTP</button>'+
+    '<button id="eproto-socks5" data-on-click="setExportProto(\'socks5\')" style="padding:4px 12px;background:var(--bg-2);color:var(--text-1);border:1px solid var(--border);border-left:none;border-radius:0 6px 6px 0;font-size:11px;cursor:pointer">SOCKS5</button>'+
     '</div></div>'+
     '<div><div style="font-size:10px;color:var(--text-3);margin-bottom:4px">Ссылка смены IP</div>'+
     '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:var(--text-1);height:27px">'+
-    '<input type="checkbox" id="exportRotationCheck" checked onchange="exportRotation=this.checked;refreshExportPreview()"> Включить</label>'+
+    '<input type="checkbox" id="exportRotationCheck" checked data-on-change="exportRotation=this.checked;refreshExportPreview()"> Включить</label>'+
     '</div>'+
     '<div><div style="font-size:10px;color:var(--text-3);margin-bottom:4px">Локация</div>'+
     '<div style="display:flex;gap:4px">'+
-    '<button onclick="toggleExportLoc(\'\')" id="eloc-all" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff">Все</button>'+
-    (function(){var _cf={'MD':'🇲🇩','RO':'🇷🇴'};var btns='';var seen={};Object.keys(COUNTRIES).forEach(function(sn){var ci=COUNTRIES[sn];var cc=ci.country||sn;if(seen[cc])return;seen[cc]=true;var flag=_cf[cc]||'🌍';btns+='<button onclick="toggleExportLoc(\''+cc+'\')" id="eloc-'+cc+'" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">'+flag+' '+ci.name+'</button>'});return btns})()+
+    '<button data-on-click="toggleExportLoc(\'\')" id="eloc-all" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff">Все</button>'+
+    (function(){var _cf={'MD':'🇲🇩','RO':'🇷🇴'};var btns='';var seen={};Object.keys(COUNTRIES).forEach(function(sn){var ci=COUNTRIES[sn];var cc=ci.country||sn;if(seen[cc])return;seen[cc]=true;var flag=_cf[cc]||'🌍';btns+='<button data-on-click="toggleExportLoc(\''+cc+'\')" id="eloc-'+cc+'" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">'+flag+' '+ci.name+'</button>'});return btns})()+
     '</div></div>'+
     '</div></div>'+
     '<div style="padding:8px 24px 4px;flex-shrink:0;display:flex;justify-content:space-between;align-items:center">'+
@@ -1929,8 +1929,8 @@ function buildExportModal(){
     '<pre id="exportPreviewArea" style="margin:0;height:100%;min-height:180px;max-height:200px;overflow:auto;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-size:11px;font-family:monospace;padding:10px 12px;line-height:1.6;white-space:pre"></pre>'+
     '</div>'+
     '<div style="padding:12px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0">'+
-    '<button id="exportCopyBtn" onclick="copyExportData()" style="padding:7px 18px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">📋 Скопировать</button>'+
-    '<button onclick="downloadExportData()" style="padding:7px 18px;background:var(--accent);border:none;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px">📥 Скачать файл</button>'+
+    '<button id="exportCopyBtn" data-on-click="copyExportData()" style="padding:7px 18px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">📋 Скопировать</button>'+
+    '<button data-on-click="downloadExportData()" style="padding:7px 18px;background:var(--accent);border:none;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px">📥 Скачать файл</button>'+
     '</div>'+
     '</div>';
   document.body.appendChild(div);
@@ -1945,10 +1945,10 @@ function _renderExportModemButtons(){
   if(!wrap)return;
   var seen={};
   var modems=tableData.filter(function(r){return r.proxyLogin;}).map(function(r){return r.modemNick;}).filter(function(n){if(seen[n])return false;seen[n]=true;return true;});
-  var html='<button onclick="clearExportModemFilter()" id="emod-all" style="padding:3px 9px;font-size:10px;cursor:pointer;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff;white-space:nowrap">Все</button>';
+  var html='<button data-on-click="clearExportModemFilter()" id="emod-all" style="padding:3px 9px;font-size:10px;cursor:pointer;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff;white-space:nowrap">Все</button>';
   modems.forEach(function(nick){
     var eid='emod-'+nick.replace(/[^a-z0-9]/gi,'_');
-    html+='<button onclick="toggleExportModem(\''+nick.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')" id="'+eid+'" style="padding:3px 9px;font-size:10px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);white-space:nowrap">'+nick+'</button>';
+    html+='<button data-on-click="toggleExportModem(\''+nick.replace(/\\/g,'\\\\').replace(/'/g,"\\'")+'\')" id="'+eid+'" style="padding:3px 9px;font-size:10px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);white-space:nowrap">'+nick+'</button>';
   });
   wrap.innerHTML=html;
 }
@@ -1992,7 +1992,7 @@ function renderExportGrid(){
   var html='<div style="display:flex;gap:8px;flex-wrap:wrap;align-items:stretch">';
   fmts.forEach(function(f){
     var active=f.id===exportFormat;
-    html+='<div onclick="selectExportFormat(\''+f.id+'\')" style="cursor:pointer;padding:10px 14px;border-radius:10px;border:2px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'rgba(25,96,201,0.08)':'var(--bg-2)')+';width:130px;height:96px;position:relative;transition:border-color .15s,background .15s;user-select:none;display:flex;flex-direction:column;flex-shrink:0">';
+    html+='<div data-on-click="selectExportFormat(\''+f.id+'\')" style="cursor:pointer;padding:10px 14px;border-radius:10px;border:2px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'rgba(25,96,201,0.08)':'var(--bg-2)')+';width:130px;height:96px;position:relative;transition:border-color .15s,background .15s;user-select:none;display:flex;flex-direction:column;flex-shrink:0">';
     html+='<div style="font-size:15px;margin-bottom:4px;font-family:monospace;font-weight:700;color:var(--text-0)">'+f.icon+'</div>';
     html+='<div style="font-size:12px;font-weight:600;color:var(--text-0)">'+f.label+'</div>';
     html+='<div style="font-size:10px;color:var(--text-3);margin-top:2px;line-height:1.3;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+f.sub+'</div>';

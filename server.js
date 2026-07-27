@@ -1756,9 +1756,11 @@ if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true
 const app = express();
 app.set('trust proxy', 1); // trust first proxy (nginx) — req.ip uses x-forwarded-for
 // CSP restored after Stage 5 (inline <script> blocks extracted into
-// public/js/admin.js + client.js). Inline `onclick="…"` attributes in
-// generated HTML are allowed via script-src-attr 'unsafe-inline' — the
-// pragmatic compromise; migrating to event delegation is FOLLOWUP work.
+// public/js/admin.js + client.js). Stage 5 ph.2 / Stage 11: инлайн-обработчики
+// событий переведены на data-on-* + глобальную делегацию
+// (public/js/delegation.js) — script-src-attr зажат до 'none', 'unsafe-inline'
+// больше не нужен. Покрытие всех data-on-* локирует
+// tests/frontend-delegation.test.js.
 // Chart.js CDN whitelisted by hash via the existing <script integrity>
 // attribute; 'self' covers the extracted local JS.
 // The CRM tab embeds Twenty CRM (CRM_URL) in an <iframe>. Without an explicit
@@ -1774,7 +1776,7 @@ app.use(helmet({
     directives: {
       'default-src': ["'self'"],
       'script-src':  ["'self'", 'https://cdn.jsdelivr.net'],
-      'script-src-attr': ["'unsafe-inline'"],   // inline onclick="…" in admin.js-rendered HTML
+      'script-src-attr': ["'none'"],   // Stage 11: инлайн-обработчиков больше нет (data-on-* + delegation)
       'style-src':   ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       'font-src':    ["'self'", 'https://fonts.gstatic.com', 'data:'],
       'img-src':     ["'self'", 'data:', 'https:'],

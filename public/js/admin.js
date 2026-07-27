@@ -87,7 +87,7 @@ function crmAutoLogin(){
 }
 
 var COLUMNS=[{id:'rail',label:'',visible:true,sortable:false,width:'6px'},
-  {id:'bulk',label:'<input type="checkbox" id="bulkSelectAll" onclick="bulkToggleAll(this)" style="cursor:pointer;margin:0">',visible:true,sortable:false,width:'28px'},
+  {id:'bulk',label:'<input type="checkbox" id="bulkSelectAll" data-on-click="bulkToggleAll(this)" style="cursor:pointer;margin:0">',visible:true,sortable:false,width:'28px'},
   {id:'status',label:'',visible:true,sortable:false,width:'24px'},
   {id:'nick',label:'Модем',visible:true,sortable:true},
   {id:'server',label:'Сервер',visible:false,sortable:true},
@@ -400,7 +400,7 @@ function renderSysIp(targetId, daysId){
         h += '<tr><td style="padding:4px 8px;font-weight:600">'+esc(p.server)+'</td><td style="padding:4px 8px;text-align:right">'+p.ip_count+'</td><td style="padding:4px 8px;text-align:right">'+p.total_assignments+'</td><td style="padding:4px 8px;text-align:right">'+(p.avg_lifetime_sec ? Math.round(p.avg_lifetime_sec/60)+' мин' : '—')+'</td></tr>';
       });
       h += '</tbody></table></div>';
-      if(_totalRows>rows.length) h += '<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:8px 4px 0" onclick="zMore(\'api\')">+ ещё '+(_totalRows-rows.length)+' за период</div>';
+      if(_totalRows>rows.length) h += '<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:8px 4px 0" data-on-click="zMore(\'api\')">+ ещё '+(_totalRows-rows.length)+' за период</div>';
       // Reused
       h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px">';
       h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">IP с повторным использованием</div>';
@@ -597,7 +597,7 @@ function loadData(){
       processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
       var _st=localStorage.getItem('admin_active_tab')||'dashboard';
-      var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te,true);
+      var _te=document.querySelector('.nav-tab[data-on-click*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te,true);
     })
     .catch(function(e){
       if(e.name==='AbortError')return; // superseded by newer fetch
@@ -744,7 +744,7 @@ function loadSpeedHistory(key){
     var m=currentDetailModem;
     var backFn=m?'switchTab(\'history\',document.querySelector(\'.modal-tab[data-tab="history"]\'))':'';
     mb.innerHTML='<div style="padding:12px"><div style="margin-bottom:10px;display:flex;gap:6px;align-items:center">'
-      +'<button class="btn btn-sm" onclick="'+backFn+'">← Назад</button>'
+      +'<button class="btn btn-sm" data-on-click="'+backFn+'">← Назад</button>'
       +'<span style="font-size:11px;color:var(--text-2)">История скорости</span></div>'
       +'<div id="speedHistoryArea"></div></div>';
     area=document.getElementById('speedHistoryArea');
@@ -873,7 +873,7 @@ function bulkOsSpoof(){
   var overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
-  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" onclick="event.stopPropagation()">'
+  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
     +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">🛡 OS Spoofing — '+portsList.length+' портов</h3>'
     +'<select id="bulkOsSelect" class="form-input" style="width:100%;margin-bottom:12px">'
     +'<option value="">--Выкл--</option>'
@@ -890,7 +890,7 @@ function bulkOsSpoof(){
     +'<option value="windows:4">Win:4 (Win10/11 Desktop)</option>'
     +'</select>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end">'
-    +'<button class="btn btn-sm" onclick="this.closest(\'div[style*=fixed]\').remove()">Отмена</button>'
+    +'<button class="btn btn-sm" data-on-click="this.closest(\'div[style*=fixed]\').remove()">Отмена</button>'
     +'<button class="btn btn-primary btn-sm" id="bulkOsBtn">Применить</button>'
     +'</div></div>';
   document.body.appendChild(overlay);
@@ -912,7 +912,7 @@ function bulkRotation(){
   var overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
-  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" onclick="event.stopPropagation()">'
+  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
     +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">⏱ Авторотация — '+modems.length+' модемов</h3>'
     +'<select id="bulkRotSelect" class="form-input" style="width:100%;margin-bottom:12px">'
     +'<option value="0">Выкл.</option>'
@@ -928,7 +928,7 @@ function bulkRotation(){
     +'<option value="1440">24 часа</option>'
     +'</select>'
     +'<div style="display:flex;gap:8px;justify-content:flex-end">'
-    +'<button class="btn btn-sm" onclick="this.closest(\'div[style*=fixed]\').remove()">Отмена</button>'
+    +'<button class="btn btn-sm" data-on-click="this.closest(\'div[style*=fixed]\').remove()">Отмена</button>'
     +'<button class="btn btn-primary btn-sm" id="bulkRotBtn">Применить</button>'
     +'</div></div>';
   document.body.appendChild(overlay);
@@ -991,22 +991,22 @@ function bulkExport(){
   function renderExport(){
     var lines=proxies.map(function(p){var port=proto==='http'?p.http:p.socks;return p.login+':'+p.pass+'@'+p.host+':'+port});
     var txt=lines.join('\n');
-    var content='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;width:min(640px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)" onclick="event.stopPropagation()">'
+    var content='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;width:min(640px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
       +'<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
       +'<div><span style="font-size:16px">📤</span> <strong style="font-size:14px">Экспорт прокси</strong> <span style="color:var(--text-2);font-size:12px">'+proxies.length+' шт.</span></div>'
-      +'<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center">✕</button>'
+      +'<button data-on-click="this.closest(\'div[style*=fixed]\').remove()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center">✕</button>'
       +'</div>'
       +'<div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
       +'<div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden">'
-      +'<button id="aeHttp" style="padding:4px 12px;font-size:11px;cursor:pointer;border:none;background:'+(proto==='http'?'var(--accent)':'var(--bg-2)')+';color:'+(proto==='http'?'#fff':'var(--text-1)')+'" onclick="proto=\'http\';renderExport()">HTTP</button>'
-      +'<button id="aeSocks" style="padding:4px 12px;font-size:11px;cursor:pointer;border:none;border-left:1px solid var(--border);background:'+(proto==='socks5'?'var(--accent)':'var(--bg-2)')+';color:'+(proto==='socks5'?'#fff':'var(--text-1)')+'" onclick="proto=\'socks5\';renderExport()">SOCKS5</button>'
+      +'<button id="aeHttp" style="padding:4px 12px;font-size:11px;cursor:pointer;border:none;background:'+(proto==='http'?'var(--accent)':'var(--bg-2)')+';color:'+(proto==='http'?'#fff':'var(--text-1)')+'" data-on-click="proto=\'http\';renderExport()">HTTP</button>'
+      +'<button id="aeSocks" style="padding:4px 12px;font-size:11px;cursor:pointer;border:none;border-left:1px solid var(--border);background:'+(proto==='socks5'?'var(--accent)':'var(--bg-2)')+';color:'+(proto==='socks5'?'#fff':'var(--text-1)')+'" data-on-click="proto=\'socks5\';renderExport()">SOCKS5</button>'
       +'</div>'
       +'<span style="font-size:11px;color:var(--text-2)">Формат: login:pass@host:port</span>'
       +'</div>'
       +'<div style="padding:12px 20px;flex:1;overflow:auto"><textarea id="aeText" style="width:100%;height:300px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--font-mono);font-size:11px;color:var(--text-0);resize:vertical" readonly>'+esc(txt)+'</textarea></div>'
       +'<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">'
-      +'<button class="btn btn-sm" onclick="copyText(document.getElementById(\'aeText\').value,this)">📋 Скопировать</button>'
-      +'<button class="btn btn-primary btn-sm" onclick="var b=new Blob([document.getElementById(\'aeText\').value],{type:\'text/plain\'});var a=document.createElement(\'a\');a.href=URL.createObjectURL(b);a.download=\'proxies_\'+proto+\'.txt\';a.click()">💾 Скачать .txt</button>'
+      +'<button class="btn btn-sm" data-on-click="copyText(document.getElementById(\'aeText\').value,this)">📋 Скопировать</button>'
+      +'<button class="btn btn-primary btn-sm" data-on-click="aeDownload()">💾 Скачать .txt</button>'
       +'</div></div>';
     overlay.innerHTML=content;
   }
@@ -1097,7 +1097,7 @@ function renderNotifPanel(){
     var icon=iconForPrio[prio]||'•';
     // First line of message: keep the original emoji (if any) by stripping
     // none; the rendered message already starts with one in most rules.
-    h+='<div class="notif-item '+(read?'read':'unread')+'" data-id="'+n.id+'" onclick="onNotifClick(event,'+n.id+')">';
+    h+='<div class="notif-item '+(read?'read':'unread')+'" data-id="'+n.id+'" data-on-click="onNotifClick(event,'+n.id+')">';
     h+='<span class="notif-item-strip notif-item-strip--'+prio+'"></span>';
     h+='<div class="notif-icon notif-icon--'+prio+'">'+icon+'</div>';
     h+='<div class="notif-body">';
@@ -1105,7 +1105,7 @@ function renderNotifPanel(){
     h+='<div class="notif-text">'+(n.message||'').replace(/\n/g,'<br>')+'</div>';
     h+='<div class="notif-time">'+timeAgo(n.created_at)+'</div>';
     h+='</div>';
-    h+='<button class="notif-dismiss" title="Скрыть" onclick="event.stopPropagation();dismissNotif('+n.id+')">×</button>';
+    h+='<button class="notif-dismiss" title="Скрыть" data-on-click="event.stopPropagation();dismissNotif('+n.id+')">×</button>';
     h+='</div>';
   });
   list.innerHTML=h;
@@ -1388,18 +1388,18 @@ function renderClients(){
     ms.forEach(function(m){h+='<div><div style="font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">'+m[0]+'</div><div style="font-size:13px;font-weight:600;color:'+m[2]+';font-family:var(--font-mono)">'+m[1]+'</div></div>';});
     h+='</div>';
     h+='<div style="display:flex;gap:6px">';
-    h+='<button class="btn btn-sm btn-primary" onclick="renderClientDetail(\''+c.id+'\',\'payments\')" style="flex:1;font-size:11px;justify-content:center">Платежи</button>';
-    h+='<button class="btn btn-sm" onclick="renderClientDetail(\''+c.id+'\')" style="flex:1;font-size:11px;justify-content:center" title="Детали и настройки">Детали</button>';
-    h+='<button class="btn btn-sm" onclick="impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" style="font-size:11px" title="Войти как клиент">👤</button>';
+    h+='<button class="btn btn-sm btn-primary" data-on-click="renderClientDetail(\''+c.id+'\',\'payments\')" style="flex:1;font-size:11px;justify-content:center">Платежи</button>';
+    h+='<button class="btn btn-sm" data-on-click="renderClientDetail(\''+c.id+'\')" style="flex:1;font-size:11px;justify-content:center" title="Детали и настройки">Детали</button>';
+    h+='<button class="btn btn-sm" data-on-click="impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" style="font-size:11px" title="Войти как клиент">👤</button>';
     h+='</div>';
     h+='</div>';
     // Expandable modems
     h+='<div id="clientCard_'+c.id+'" style="display:none;padding:0 16px 14px;border-top:1px solid var(--border)">';
     h+='<div style="display:flex;align-items:center;gap:8px;margin:10px 0 8px">';
     h+='<span style="font-size:11px;font-weight:600;color:var(--text-0)">Модемы ('+modems.length+')</span>';
-    h+='<button class="btn btn-sm" onclick="openAssignModemModal(\''+c.id+'\',\''+esc(c.portName)+'\')" style="font-size:9px;padding:1px 6px;background:var(--accent);color:#fff">+ Модем</button>';
+    h+='<button class="btn btn-sm" data-on-click="openAssignModemModal(\''+c.id+'\',\''+esc(c.portName)+'\')" style="font-size:9px;padding:1px 6px;background:var(--accent);color:#fff">+ Модем</button>';
     h+='</div>';
-    if(modems.length){h+='<div style="display:flex;flex-wrap:wrap;gap:4px">';modems.forEach(function(md){var mn=md.nick+' ('+md.server+')';h+='<span class="client-modem-tag" style="display:inline-flex;align-items:center;gap:4px">'+esc(mn)+' <span onclick="unassignModem(\''+esc(mn)+'\',\''+esc(c.portName)+'\')" style="cursor:pointer;color:var(--danger);font-size:12px;line-height:1" title="Отвязать">&times;</span></span>';});h+='</div>';}
+    if(modems.length){h+='<div style="display:flex;flex-wrap:wrap;gap:4px">';modems.forEach(function(md){var mn=md.nick+' ('+md.server+')';h+='<span class="client-modem-tag" style="display:inline-flex;align-items:center;gap:4px">'+esc(mn)+' <span data-on-click="unassignModem(\''+esc(mn)+'\',\''+esc(c.portName)+'\')" style="cursor:pointer;color:var(--danger);font-size:12px;line-height:1" title="Отвязать">&times;</span></span>';});h+='</div>';}
     else{h+='<div style="font-size:11px;color:var(--text-3)">Нет подключённых модемов</div>';}
     h+='<div id="paymentArea_'+c.id+'" style="margin-top:8px"></div>';
     h+='</div>';
@@ -1440,9 +1440,9 @@ function openAssignModemModal(clientId, clientPortName) {
   overlay.id = 'assignModemOverlay';
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9999;display:flex;align-items:center;justify-content:center';
   overlay.innerHTML = '<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:500px;max-height:80vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)">' +
-    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0;font-size:14px">Добавить модем клиенту</h3><button onclick="document.getElementById(\'assignModemOverlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-2)">&times;</button></div>' +
+    '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><h3 style="margin:0;font-size:14px">Добавить модем клиенту</h3><button data-on-click="document.getElementById(\'assignModemOverlay\').remove()" style="background:none;border:none;font-size:20px;cursor:pointer;color:var(--text-2)">&times;</button></div>' +
     '<div style="font-size:11px;color:var(--text-2);margin-bottom:8px">portName: <b>' + esc(clientPortName) + '</b></div>' +
-    '<input id="assignModemSearch" class="form-input" placeholder="Поиск по нику модема..." style="width:100%;margin-bottom:8px;font-size:12px" oninput="filterAssignModemList()">' +
+    '<input id="assignModemSearch" class="form-input" placeholder="Поиск по нику модема..." style="width:100%;margin-bottom:8px;font-size:12px" data-on-input="filterAssignModemList()">' +
     '<div id="assignModemList" style="font-size:12px">Загрузка...</div></div>';
   // Defensive cleanup: remove any leftover assign-modem overlay from a prior
   // open() that was never closed (was leaking DOM nodes + listeners over time).
@@ -1484,7 +1484,7 @@ function renderAssignModemList() {
     h += '<td style="padding:6px 8px;font-weight:500">' + esc(m.nick) + '</td>';
     h += '<td style="padding:6px 8px;font-size:10px;color:var(--text-2)">' + esc(m.server) + '</td>';
     h += '<td style="padding:6px 8px;font-size:10px;color:' + clr + '">' + esc(assigned) + '</td>';
-    h += '<td style="padding:6px 8px;text-align:center"><button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--accent);color:#fff" onclick="assignModem(\'' + esc(m.server) + '\',\'' + esc(m.portID) + '\',\'' + esc(data.clientPortName) + '\',\'' + esc(m.nick) + '\')">Назначить</button></td>';
+    h += '<td style="padding:6px 8px;text-align:center"><button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--accent);color:#fff" data-on-click="assignModem(\'' + esc(m.server) + '\',\'' + esc(m.portID) + '\',\'' + esc(data.clientPortName) + '\',\'' + esc(m.nick) + '\')">Назначить</button></td>';
     h += '</tr>';
   });
   h += '</tbody></table>';
@@ -1541,14 +1541,14 @@ var _confirmCb=null;
 function showProblemPopup(label,key){
   var items=(window._problemData&&window._problemData[key])||[];
   if(!items.length)return;
-  var h='<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1500;display:flex;align-items:center;justify-content:center" onclick="this.remove()">';
-  h+='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;min-width:340px;max-width:520px;max-height:70vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)" onclick="event.stopPropagation()">';
-  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-size:14px;font-weight:600;color:var(--text-0)">'+esc(label)+' <span style="color:var(--text-3);font-weight:400">('+items.length+')</span></span><button style="background:none;border:none;font-size:18px;color:var(--text-2);cursor:pointer;padding:0 4px" onclick="this.closest(\'div[style*=fixed]\').remove()">&times;</button></div>';
+  var h='<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1500;display:flex;align-items:center;justify-content:center" data-on-click="this.remove()">';
+  h+='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;min-width:340px;max-width:520px;max-height:70vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">';
+  h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-size:14px;font-weight:600;color:var(--text-0)">'+esc(label)+' <span style="color:var(--text-3);font-weight:400">('+items.length+')</span></span><button style="background:none;border:none;font-size:18px;color:var(--text-2);cursor:pointer;padding:0 4px" data-on-click="this.closest(\'div[style*=fixed]\').remove()">&times;</button></div>';
   h+='<div style="display:flex;flex-direction:column;gap:6px">';
   items.forEach(function(item){
     var n=item.nick||item;
     var detail=item.detail||'';
-    h+='<div style="padding:8px 12px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border);cursor:pointer" onclick="(function(){document.querySelector(\'div[style*=fixed]\').remove();var map=currentData&&currentData._modemMap;if(!map)return;for(var imei in map){var m=map[imei];if(m.nick===\''+esc(n)+'\'){currentDetailModem=m;document.getElementById(\'modalTitle\').textContent=m.nick+\' (\'+m.server+\')\';switchTab(\'info\',document.querySelector(\'.modal-tab[data-tab=info]\'));document.getElementById(\'detailModal\').classList.add(\'show\');break}}})()">';
+    h+='<div style="padding:8px 12px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border);cursor:pointer" data-on-click="openModemDetailByNick(\''+esc(n).replace(/\x27/g,"\\\x27")+'\')">';
     h+='<div style="font-size:12px;font-weight:500;color:var(--text-0);margin-bottom:2px">'+esc(n)+'</div>';
     if(detail)h+='<div style="font-size:11px;color:var(--text-2)">'+detail+'</div>';
     h+='</div>';
@@ -1731,7 +1731,7 @@ function renderOpsApi(clientId) {
       h += '<div style="display:flex;gap:4px">';
       [1,7,30].forEach(function(n){
         var active = n === days;
-        h += '<button class="btn btn-sm" onclick="_opsApiDays=' + n + ';renderOpsApi(\'' + clientId + '\')" style="padding:3px 10px;font-size:11px;' + (active ? 'background:var(--accent);color:#fff' : 'background:var(--bg-3);color:var(--text-1)') + '">' + n + 'д</button>';
+        h += '<button class="btn btn-sm" data-on-click="_opsApiDays=' + n + ';renderOpsApi(\'' + clientId + '\')" style="padding:3px 10px;font-size:11px;' + (active ? 'background:var(--accent);color:#fff' : 'background:var(--bg-3);color:var(--text-1)') + '">' + n + 'д</button>';
       });
       h += '</div>';
       var statusCol = d.active_24h ? 'var(--success)' : 'var(--text-3)';
@@ -1852,8 +1852,8 @@ function renderOpsHistory(clientId) {
       h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Сумма</label><input class="form-input" type="number" id="opsPayAmount" placeholder="5000" style="width:100px;font-size:12px;padding:4px 8px"></div>';
       h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Дата</label><input class="form-input" type="date" id="opsPayDate" value="' + new Date().toISOString().slice(0, 10) + '" style="width:130px;font-size:12px;padding:4px 8px"></div>';
       h += '<div style="flex:1;min-width:100px"><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Комментарий</label><input class="form-input" id="opsPayNote" placeholder="Пополнение" style="width:100%;font-size:12px;padding:4px 8px"></div>';
-      h += '<button class="btn btn-success btn-sm" onclick="addPaymentFromModal(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px">+ Пополнить</button>';
-      h += '<button class="btn btn-sm" onclick="manualChargeFromModal(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px;background:var(--danger);color:#fff">− Списать</button>';
+      h += '<button class="btn btn-success btn-sm" data-on-click="addPaymentFromModal(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px">+ Пополнить</button>';
+      h += '<button class="btn btn-sm" data-on-click="manualChargeFromModal(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px;background:var(--danger);color:#fff">− Списать</button>';
       h += '</div>';
       h += '<div style="padding:12px 18px;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:110px"><div style="font-size:10px;color:var(--text-2)">Баланс</div><div style="font-size:20px;font-weight:700;color:' + balColor + '">' + Math.round(bal) + ' \u20BD</div></div>';
       h += '</div>';
@@ -1867,7 +1867,7 @@ function renderOpsHistory(clientId) {
       var qtyHeader = isPerModem ? 'Модемов' : 'ГБ';
       // Месяцы / Кварталы toggle for the period segmentation below.
       var _segModeNow = (window._opsSegMode === 'quarter') ? 'quarter' : 'month';
-      var _segBtn = function(mode, label){ return '<button class="btn btn-sm" style="font-size:11px;padding:2px 10px;'+(_segModeNow===mode?'background:var(--accent);color:#fff':'')+'" onclick="setOpsSegMode(\''+mode+'\',\''+clientId+'\')">'+label+'</button>'; };
+      var _segBtn = function(mode, label){ return '<button class="btn btn-sm" style="font-size:11px;padding:2px 10px;'+(_segModeNow===mode?'background:var(--accent);color:#fff':'')+'" data-on-click="setOpsSegMode(\''+mode+'\',\''+clientId+'\')">'+label+'</button>'; };
       h += '<div style="display:flex;justify-content:flex-end;align-items:center;gap:6px;margin-bottom:8px"><span style="font-size:11px;color:var(--text-3);margin-right:2px">Группировка:</span>' + _segBtn('month','Месяцы') + _segBtn('quarter','Кварталы') + '</div>';
       var _ths='padding:8px 10px;text-transform:uppercase;font-size:10px;letter-spacing:.5px;color:var(--text-3);font-weight:600';
       h += '<div style="overflow-x:auto;margin:0 -2px"><table class="ops-ledger" style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'
@@ -1953,7 +1953,7 @@ function renderOpsHistory(clientId) {
         h += '<td style="padding:6px 10px;text-align:center;font-family:var(--font-mono);' + amountColor + ';font-weight:600">' + amountStr + '</td>';
         h += '<td style="padding:6px 10px;text-align:center;font-family:var(--font-mono);color:var(--text-2)">' + balAfter + '</td>';
         h += '<td style="padding:6px 10px;color:var(--text-3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(note) + '">' + esc(note) + '</td>';
-        h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:transparent;color:var(--danger);border:1px solid var(--danger)" onclick="deleteLedgerEntry(\'' + clientId + '\',' + e._idx + ')" title="\u0423\u0434\u0430\u043B\u0438\u0442\u044C">\u2716</button></td>';
+        h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:transparent;color:var(--danger);border:1px solid var(--danger)" data-on-click="deleteLedgerEntry(\'' + clientId + '\',' + e._idx + ')" title="\u0423\u0434\u0430\u043B\u0438\u0442\u044C">\u2716</button></td>';
         h += '</tr>';
       });
       h += '</tbody></table></div>';
@@ -1966,7 +1966,7 @@ function renderOpsHistory(clientId) {
 function editPortCreds(imei,server,portId,currentLogin,currentPass){
   var area=document.getElementById('editPortForm');
   if(!area)return;
-  area.innerHTML='<div class="detail-card" style="margin-top:8px"><h4>Изменить доступы порта: '+esc(portId)+'</h4><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="editPortLogin" value="'+esc(currentLogin)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="editPortPass" value="'+esc(currentPass)+'"></div></div><div style="display:flex;gap:4px;margin-top:6px"><button class="btn btn-primary btn-sm" onclick="savePortCreds(\''+imei+'\',\''+server+'\',\''+portId+'\')">Сохранить</button><button class="btn btn-sm" onclick="document.getElementById(\'editPortForm\').innerHTML=\'\'">Отмена</button></div></div>';
+  area.innerHTML='<div class="detail-card" style="margin-top:8px"><h4>Изменить доступы порта: '+esc(portId)+'</h4><div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="editPortLogin" value="'+esc(currentLogin)+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="editPortPass" value="'+esc(currentPass)+'"></div></div><div style="display:flex;gap:4px;margin-top:6px"><button class="btn btn-primary btn-sm" data-on-click="savePortCreds(\''+imei+'\',\''+server+'\',\''+portId+'\')">Сохранить</button><button class="btn btn-sm" data-on-click="document.getElementById(\'editPortForm\').innerHTML=\'\'">Отмена</button></div></div>';
 }
 function savePortCreds(imei,server,portId){
   var newLogin=document.getElementById('editPortLogin').value;
@@ -2001,7 +2001,7 @@ function editPortFull(imei,server,portId){
     h+='</div>';
     h+='<div class="form-row"><div class="form-group"><label>Квота трафика (МБ)</label><input class="form-input" id="epBwQuota" value="'+esc(cfg.bw_quota||'')+'" placeholder="0 = без лимита"></div><div class="form-group"><label>Период квоты</label>'+sel('epQuotaType',cfg.QUOTA_TYPE||'',[['','Выкл'],['daily','Сутки'],['monthly','Месяц'],['lifetime','Всё время']])+'</div></div>';
     h+='<div class="form-row"><div class="form-group"><label>Действителен до</label><input class="form-input" type="date" id="epValidBefore" value="'+esc(cfg.PROXY_VALID_BEFORE||'')+'"></div></div>';
-    h+='<div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-primary btn-sm" onclick="savePortFull(\''+esc(imei)+'\',\''+esc(server)+'\',\''+esc(portId)+'\')">Сохранить</button><button class="btn btn-sm" onclick="document.getElementById(\'editPortForm\').innerHTML=\'\'">Отмена</button></div>';
+    h+='<div style="display:flex;gap:6px;margin-top:12px"><button class="btn btn-primary btn-sm" data-on-click="savePortFull(\''+esc(imei)+'\',\''+esc(server)+'\',\''+esc(portId)+'\')">Сохранить</button><button class="btn btn-sm" data-on-click="document.getElementById(\'editPortForm\').innerHTML=\'\'">Отмена</button></div>';
     h+='</div>';
     area.innerHTML=h;
     area.scrollIntoView({behavior:'smooth',block:'nearest'});
@@ -2164,8 +2164,8 @@ function simRenderAllModems(){
       var disProfile = m.in_pool ? '' : 'disabled';
       var ghostStyle = m._ghost ? 'opacity:.55' : '';
       html += '<tr style="'+ghostStyle+'">'+
-        '<td style="text-align:center"><input type="checkbox" '+(m.in_pool?'checked':'')+' onchange="simTogglePool(\''+esc(m.server)+'\',\''+esc(m.nick)+'\',this)"></td>'+
-        '<td style="text-align:center"><input type="checkbox" '+(inProfile?'checked':'')+' '+disProfile+' onchange="simToggleSelect(\''+esc(m.server)+'\',\''+esc(m.nick)+'\',this.checked)" title="'+(m.in_pool?'':'Сначала добавьте в пул')+'"></td>'+
+        '<td style="text-align:center"><input type="checkbox" '+(m.in_pool?'checked':'')+' data-on-change="simTogglePool(\''+esc(m.server)+'\',\''+esc(m.nick)+'\',this)"></td>'+
+        '<td style="text-align:center"><input type="checkbox" '+(inProfile?'checked':'')+' '+disProfile+' data-on-change="simToggleSelect(\''+esc(m.server)+'\',\''+esc(m.nick)+'\',this.checked)" title="'+(m.in_pool?'':'Сначала добавьте в пул')+'"></td>'+
         '<td><strong>'+esc(m.nick)+'</strong>'+(m._ghost?' <span style="font-size:9px;color:var(--text-3)">(ghost)</span>':'')+'</td>'+
         '<td><span style="font-size:10px;color:var(--text-2)">'+esc(m.server)+'</span></td>'+
         '<td>'+esc(m.operator||'')+'</td>'+
@@ -2252,12 +2252,12 @@ function simRenderUrlList(){
   var box = document.getElementById('simUrlList');
   box.innerHTML = _simState.urls.map(function(u,i){
     return '<div class="sim-url-row">'+
-      '<select onchange="_simState.urls['+i+'].method=this.value" style="padding:4px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px">'+
+      '<select data-on-change="_simState.urls['+i+'].method=this.value" style="padding:4px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px">'+
         ['GET','POST','HEAD'].map(function(m){return '<option value="'+m+'"'+(u.method===m?' selected':'')+'>'+m+'</option>'}).join('')+
       '</select>'+
-      '<input type="text" placeholder="https://..." value="'+esc(u.url||'')+'" oninput="_simState.urls['+i+'].url=this.value" style="padding:4px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px">'+
-      '<input type="number" class="w" min="1" max="100" value="'+(u.weight||1)+'" oninput="_simState.urls['+i+'].weight=parseInt(this.value)||1" title="Вес" style="padding:4px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px">'+
-      (_simState.urls.length>1?'<button class="btn btn-sm" onclick="simRemoveUrlRow('+i+')" style="font-size:10px;padding:2px 6px">✕</button>':'')+
+      '<input type="text" placeholder="https://..." value="'+esc(u.url||'')+'" data-on-input="_simState.urls['+i+'].url=this.value" style="padding:4px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px">'+
+      '<input type="number" class="w" min="1" max="100" value="'+(u.weight||1)+'" data-on-input="_simState.urls['+i+'].weight=parseInt(this.value)||1" title="Вес" style="padding:4px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px">'+
+      (_simState.urls.length>1?'<button class="btn btn-sm" data-on-click="simRemoveUrlRow('+i+')" style="font-size:10px;padding:2px 6px">✕</button>':'')+
     '</div>';
   }).join('');
 }
@@ -2514,8 +2514,8 @@ function simLoadHistory(){
         var stCls = 'sim-status-'+st;
         var when = new Date(r.started_at+'Z').toLocaleString('ru-RU');
         var checked = _simHistSel[r.id] ? 'checked' : '';
-        return '<tr style="cursor:pointer" onclick="if(event.target.tagName!==\'INPUT\')simOpenRunDetail('+r.id+')">'+
-          '<td onclick="event.stopPropagation()"><input type="checkbox" '+checked+' onchange="simToggleHistSel('+r.id+',this.checked)"></td>'+
+        return '<tr style="cursor:pointer" data-on-click="if(event.target.tagName!==\'INPUT\')simOpenRunDetail('+r.id+')">'+
+          '<td data-on-click="event.stopPropagation()"><input type="checkbox" '+checked+' data-on-change="simToggleHistSel('+r.id+',this.checked)"></td>'+
           '<td><span class="'+stCls+'">'+st+'</span></td>'+
           '<td>#'+r.id+'</td><td>'+esc(r.profile_name||'—')+'</td>'+
           '<td>'+when+'</td>'+
@@ -2906,7 +2906,7 @@ function loadOperatorsMapping() {
         h += '<tr>';
         h += '<td style="padding:8px 6px;color:var(--text-0)"><strong>'+esc(o.operator)+'</strong><div style="font-size:10px;color:var(--text-3);margin-top:2px">'+(o.servers || []).join(', ')+'</div></td>';
         h += '<td style="padding:8px 6px">';
-        h += '<select onchange="setOperatorCountry(\''+encodeURIComponent(o.operator_normalized)+'\', this.value)" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-1);padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer">';
+        h += '<select data-on-change="setOperatorCountry(\''+encodeURIComponent(o.operator_normalized)+'\', this.value)" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-1);padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer">';
         h += '<option value="" '+(!country?'selected':'')+'>— не задана —</option>';
         ['RO','MD','RU','UA'].forEach(function(c){ h += '<option value="'+c+'" '+(country===c?'selected':'')+'>'+(FLAGS[c]||'')+' '+c+'</option>'; });
         h += '</select>';
@@ -2916,7 +2916,7 @@ function loadOperatorsMapping() {
         h += '<td style="text-align:right;padding:8px 6px;color:var(--text-0);font-weight:600">'+o.modem_count+'</td>';
         h += '<td style="text-align:right;padding:8px 6px">';
         if (o.source === 'manual') {
-          h += '<button onclick="dropOperatorMapping(\''+encodeURIComponent(o.operator_normalized)+'\')" title="Снять ручной маппинг — следующий опрос восстановит \'auto\'" style="background:none;border:1px solid var(--border);color:var(--text-3);padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer">↺ авто</button>';
+          h += '<button data-on-click="dropOperatorMapping(\''+encodeURIComponent(o.operator_normalized)+'\')" title="Снять ручной маппинг — следующий опрос восстановит \'auto\'" style="background:none;border:1px solid var(--border);color:var(--text-3);padding:4px 8px;border-radius:6px;font-size:11px;cursor:pointer">↺ авто</button>';
         }
         h += '</td></tr>';
       });
@@ -2967,7 +2967,7 @@ function dropOperatorMapping(opEnc) {
     row.id = 'stage17DeleteRow';
     row.style.cssText = 'margin-top:14px;padding:12px 14px;background:rgba(239,80,80,.06);border:1px solid rgba(239,80,80,.25);border-radius:10px;display:flex;align-items:center;gap:12px';
     row.innerHTML = '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--text-0)">Модем отключён</div><div style="font-size:11px;color:var(--text-2);margin-top:2px">Можно удалить из дашборда. Действие нельзя отменить.</div></div>'
-      + '<button onclick="deleteModem(\''+m.server+'\',\''+portIdRaw+'\',\''+esc(m.nick)+'\')" style="background:var(--danger);border:none;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🗑 Удалить навсегда</button>';
+      + '<button data-on-click="deleteModem(\''+m.server+'\',\''+portIdRaw+'\',\''+esc(m.nick)+'\')" style="background:var(--danger);border:none;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🗑 Удалить навсегда</button>';
     body.appendChild(row);
   };
 })();
@@ -3061,8 +3061,8 @@ function loadAlertRules(){
           h += '<span style="background:'+chBg+';color:'+chColor+';padding:1px 7px;border-radius:8px;font-size:10px;font-weight:600;white-space:nowrap">'+chLabel+'</span></div>';
           h += '<div style="font-size:10px;color:var(--text-3);margin-top:2px;font-family:var(--font-mono)">'+esc(r.id)+' · повтор не чаще '+_cdLabel(r.cooldownSec)+'</div>';
           h += '</div>';
-          h += '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;flex-shrink:0" onclick="testAlertRule(\''+esc(r.id)+'\')" title="'+testTitle+'">📤 Тест</button>';
-          h += '<label class="tgl"><input type="checkbox" '+(r.enabled?'checked':'')+' onchange="toggleAlertRule(\''+esc(r.id)+'\', this.checked)"><span></span></label>';
+          h += '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;flex-shrink:0" data-on-click="testAlertRule(\''+esc(r.id)+'\')" title="'+testTitle+'">📤 Тест</button>';
+          h += '<label class="tgl"><input type="checkbox" '+(r.enabled?'checked':'')+' data-on-change="toggleAlertRule(\''+esc(r.id)+'\', this.checked)"><span></span></label>';
           h += '</div>';
         });
         h += '</div></div>';
@@ -3207,10 +3207,10 @@ function loadNewApiAccess(){
       var chips = '';
       ['api_key','portal','reset_link','webhook'].forEach(function(t){
         var on = st.type===t;
-        chips += '<button class="qf-chip'+(on?' active':'')+'" onclick="setApiAccessType(\''+t+'\')">'+_apiTypeLabel(t)+'</button>';
+        chips += '<button class="qf-chip'+(on?' active':'')+'" data-on-click="setApiAccessType(\''+t+'\')">'+_apiTypeLabel(t)+'</button>';
       });
       var opts = [[1,'1 час'],[24,'24 часа'],[168,'7 дней'],[720,'30 дней']];
-      var hoursSel = '<select class="form-input" style="font-size:11px;padding:4px 8px;width:auto" onchange="setApiAccessHours(parseInt(this.value))">'
+      var hoursSel = '<select class="form-input" style="font-size:11px;padding:4px 8px;width:auto" data-on-change="setApiAccessHours(parseInt(this.value))">'
         + opts.map(function(o){ return '<option value="'+o[0]+'"'+(st.hours===o[0]?' selected':'')+'>'+o[1]+'</option>'; }).join('') + '</select>';
       var s = d.summary || {};
       var n = s.total||0, _a=n%100, _b=n%10;
@@ -3394,10 +3394,10 @@ function renderNewTopProblems(){
   var h='<table class="ztbl"><thead><tr><th style="text-align:left">Модем</th><th style="text-align:left">Причина</th><th>Действия</th></tr></thead><tbody>';
   show.forEach(function(p){ var m=p.m; var col=(typeof _mkColor!=='undefined'&&_mkColor[p.kind])||'var(--warning)'; var ci=COUNTRIES[m.server]||{}; var d='data-imei="'+(m.rawImei||'')+'" data-server="'+m.server+'" data-nick="'+esc(m.nick)+'"';
     var open='if(event.target.closest(\'button\'))return;openDetailAtTab(\''+esc(m.nick).replace(/'/g,"\\'")+'\',\''+m.server+'\',\'health\')';
-    h+='<tr onclick="'+open+'" style="cursor:pointer" title="Открыть детали модема — где именно проблема"><td style="text-align:left"><span style="width:3px;height:18px;background:'+col+';border-radius:2px;display:inline-block;vertical-align:middle;margin-right:8px"></span><strong>'+esc(m.nick)+'</strong> <span style="font-size:10px;color:var(--text-3)">'+(ci.flag||'')+' '+m.server+(ci.name?' · '+esc(ci.name):'')+'</span></td><td style="text-align:left;color:'+col+'">'+esc(p.reason)+'</td><td style="text-align:right"><button class="row-act" '+d+' title="Перезагрузка" onclick="rebootModem(this)">⏻</button> <button class="row-act" '+d+' title="Re-Add" onclick="readdModem(this)">⟳</button></td></tr>';
+    h+='<tr data-on-click="'+open+'" style="cursor:pointer" title="Открыть детали модема — где именно проблема"><td style="text-align:left"><span style="width:3px;height:18px;background:'+col+';border-radius:2px;display:inline-block;vertical-align:middle;margin-right:8px"></span><strong>'+esc(m.nick)+'</strong> <span style="font-size:10px;color:var(--text-3)">'+(ci.flag||'')+' '+m.server+(ci.name?' · '+esc(ci.name):'')+'</span></td><td style="text-align:left;color:'+col+'">'+esc(p.reason)+'</td><td style="text-align:right"><button class="row-act" '+d+' title="Перезагрузка" data-on-click="rebootModem(this)">⏻</button> <button class="row-act" '+d+' title="Re-Add" data-on-click="readdModem(this)">⟳</button></td></tr>';
   });
   h+='</tbody></table>';
-  if(probs.length>show.length) h+='<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:8px 14px" onclick="zMore(\'tp\')">+ ещё '+(probs.length-show.length)+'</div>';
+  if(probs.length>show.length) h+='<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:8px 14px" data-on-click="zMore(\'tp\')">+ ещё '+(probs.length-show.length)+'</div>';
   el.innerHTML=h;
 }
 
@@ -3427,7 +3427,7 @@ function renderNewExtWidgets(){
   function attTile(label,key,n,extra,dot){
     var bg=n===0?'var(--green-bg)':dot==='var(--danger)'?'var(--red-bg)':'var(--orange-bg)';
     var vc=n===0?'var(--success)':dot==='var(--danger)'?'var(--danger)':'var(--warning)';
-    var click=(key&&n>0)?' onclick="showProblemPopup(\''+esc(label)+'\',\''+key+'\')"':'';
+    var click=(key&&n>0)?' data-on-click="showProblemPopup(\''+esc(label)+'\',\''+key+'\')"':'';
     return '<div class="att-tile" style="background:'+bg+(key&&n>0?';cursor:pointer':'')+'"'+click+'>'+
       '<span class="att-dot" style="background:'+(n===0?'var(--success)':dot)+'"></span>'+
       '<span class="att-label">'+label+(extra?'<span class="att-extra">'+extra+'</span>':'')+'</span>'+
@@ -3915,7 +3915,7 @@ function reloadNewInfra(){
     }
     function th(t,left){ return '<th'+(left?' style="text-align:left"':'')+'>'+t+'</th>'; }
     function td(v,left,style){ var st=(left?'text-align:left;':'')+(style||''); return '<td'+(st?' style="'+st+'"':'')+'>'+v+'</td>'; }
-    function _more(n,cap,key){ return n>cap?'<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:6px 2px 0" onclick="zMore(\''+key+'\')">+ ещё '+(n-cap)+'</div>':''; }
+    function _more(n,cap,key){ return n>cap?'<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:6px 2px 0" data-on-click="zMore(\''+key+'\')">+ ещё '+(n-cap)+'</div>':''; }
     var srvRows=(rot.per_server||[]).map(function(sv){ var fc=!sv.failed?'color:var(--text-3)':(sv.failed>25?'color:var(--danger)':'color:var(--warning)'); return '<tr>'+td('<b>'+esc(sv.server_name||'—')+'</b>',1)+td((sv.total||0).toLocaleString('ru-RU'))+td(sv.failed||0,0,fc)+td(sv.avg_sec!=null?Math.round(sv.avg_sec*10)/10:'—',0,'font-weight:600')+'</tr>'; }).join('');
     var srvT=h4('Ротации по серверам','#3b9dd8')+tbl(th('Сервер',1)+th('Всего')+th('Failed')+th('Avg с'), srvRows);
     var snAll=(ip.subnets||[]);
@@ -3945,9 +3945,9 @@ function setHostsClient(c){
 function _renderHostChips(){
   var el = document.getElementById('newResChips');
   if(!el || !_hostsClientList) return;
-  var h = '<button class="dchip'+(!_hostsClient?' on':'')+'" onclick="setHostsClient(\'\')">Все клиенты</button>';
+  var h = '<button class="dchip'+(!_hostsClient?' on':'')+'" data-on-click="setHostsClient(\'\')">Все клиенты</button>';
   _hostsClientList.forEach(function(c){
-    h += '<button class="dchip'+(_hostsClient===c?' on':'')+'" data-c="'+esc(c)+'" onclick="setHostsClient(this.dataset.c)">'+esc(c)+'</button>';
+    h += '<button class="dchip'+(_hostsClient===c?' on':'')+'" data-c="'+esc(c)+'" data-on-click="setHostsClient(this.dataset.c)">'+esc(c)+'</button>';
   });
   el.innerHTML = h;
 }
@@ -3982,7 +3982,7 @@ function loadNewTopHosts(){
         h += '<span style="flex:0 0 56px;text-align:right;font-family:var(--font-mono);color:var(--text-2)">'+shortN(row.hits)+'</span>';
         h += '</div>';
       });
-      if(hosts.length > top.length) h += '<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:4px 0 0" onclick="zMore(\'hosts\')">+ ещё '+(hosts.length-top.length)+'</div>';
+      if(hosts.length > top.length) h += '<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:4px 0 0" data-on-click="zMore(\'hosts\')">+ ещё '+(hosts.length-top.length)+'</div>';
       h += '</div>';
       if(listEl) listEl.innerHTML = h;
       if(statusEl) statusEl.textContent = hosts.length + ' хостов' + (_hostsClient ? ' · ' + _hostsClient : '');
@@ -4024,7 +4024,7 @@ function renderNewMatrix(){
       + '<td style="text-align:right">'+tr+'</td></tr>';
   }).join('');
   if(!rows) rows = '<tr><td colspan="9" style="padding:16px;text-align:center;color:var(--text-3)">Ничего не найдено</td></tr>';
-  else if(list.length > shown.length) rows += '<tr><td colspan="9" style="padding:8px 10px;color:var(--accent);font-size:10.5px;cursor:pointer;text-align:left" onclick="zMore(\'mx\')">+ ещё '+(list.length-shown.length)+' · сортировка по Σ месяца</td></tr>';
+  else if(list.length > shown.length) rows += '<tr><td colspan="9" style="padding:8px 10px;color:var(--accent);font-size:10.5px;cursor:pointer;text-align:left" data-on-click="zMore(\'mx\')">+ ещё '+(list.length-shown.length)+' · сортировка по Σ месяца</td></tr>';
   var cEl = document.getElementById('newMatrixCount');
   if(cEl) cEl.textContent = q ? (list.length + ' из ' + d.modemTraffic.length) : (d.modemTraffic.length + ' модемов');
   el.innerHTML = '<thead><tr><th style="text-align:left">Модем</th><th style="text-align:left">Оператор</th><th style="text-align:left">Сервер</th><th style="text-align:left">Клиент</th><th style="text-align:right">Сегодня</th><th style="text-align:right">↓ Вход</th><th style="text-align:right">↑ Выход</th><th style="text-align:right">Σ Всего</th><th style="text-align:right">Тренд</th></tr></thead><tbody>'+rows+'</tbody>';
@@ -4092,7 +4092,7 @@ function loadFailoverCandidates(){
         h+='<td style="padding:6px 8px;font-size:11px;color:var(--text-2)">'+esc((c.clients||[]).join(', '))+'</td>';
         h+='<td style="padding:6px 8px;font-size:11px">'+esc(c.reason)+' · '+esc(c.detail||'')+'</td>';
         h+='<td style="padding:6px 8px">'+spareTxt+'</td>';
-        h+='<td style="padding:6px 8px;text-align:right">'+(c.spare?'<button class="btn btn-sm" style="font-size:11px" onclick="execFailover(\''+esc(c.server)+'\',\''+esc(c.imei)+'\',\''+esc(c.nick)+'\')">Перенести</button>':'—')+'</td>';
+        h+='<td style="padding:6px 8px;text-align:right">'+(c.spare?'<button class="btn btn-sm" style="font-size:11px" data-on-click="execFailover(\''+esc(c.server)+'\',\''+esc(c.imei)+'\',\''+esc(c.nick)+'\')">Перенести</button>':'—')+'</td>';
         h+='</tr>';
       });
       h+='</tbody></table>';

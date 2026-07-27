@@ -39,13 +39,13 @@
 <div class="refresh-bar" id="refreshBar" style="width:0"></div>
 <div class="toast-container" id="toastContainer"></div>
 
-<div class="confirm-overlay" id="confirmOverlay" style="display:none" onclick="if(event.target===this)_confirmCancel()">
+<div class="confirm-overlay" id="confirmOverlay" style="display:none" data-on-click="if(event.target===this)_confirmCancel()">
   <div class="confirm-box">
     <h4 id="confirmTitle">Подтверждение</h4>
     <p id="confirmMsg"></p>
     <div class="confirm-actions">
-      <button class="btn btn-sm btn-secondary" onclick="_confirmCancel()">Отмена</button>
-      <button class="btn btn-sm btn-danger" id="confirmOkBtn" onclick="_confirmOk()">Удалить</button>
+      <button class="btn btn-sm btn-secondary" data-on-click="_confirmCancel()">Отмена</button>
+      <button class="btn btn-sm btn-danger" id="confirmOkBtn" data-on-click="_confirmOk()">Удалить</button>
     </div>
   </div>
 </div>
@@ -53,14 +53,14 @@
 <!-- Task 13: Bulk actions panel -->
 <div id="bulkPanel" class="bulk-panel" style="display:none">
   <span><span id="bulkCountLabel" class="bulk-count">0</span> выбрано</span>
-  <button class="btn btn-sm" onclick="bulkResetIp()" title="Сбросить IP на выбранных модемах">🔄 Сброс IP</button>
-  <button class="btn btn-sm" onclick="bulkReboot()" title="Перезагрузить выбранные модемы">⚡ Ребут</button>
-  <button class="btn btn-sm" onclick="bulkOsSpoof()" title="Установить OS Spoofing на портах выбранных модемов">🛡 OS Spoof</button>
-  <button class="btn btn-sm" onclick="bulkRotation()" title="Установить авторотацию на выбранных модемах">⏱ Ротация</button>
-  <button class="btn btn-sm" onclick="bulkExport()" title="Экспорт прокси выбранных модемов">📤 Экспорт</button>
-  <button class="btn btn-sm" onclick="bulkProxyCheck()" title="Замерить задержку через прокси выбранных модемов">📡 Замер задержки</button>
-  <button class="btn btn-sm" onclick="bulkDelete()" title="Удалить выбранные модемы из дашборда" style="color:var(--danger)">🗑 Удалить</button>
-  <button class="btn btn-sm bulk-cancel" onclick="clearBulkSel()" style="color:var(--danger)">✕ Отмена</button>
+  <button class="btn btn-sm" data-on-click="bulkResetIp()" title="Сбросить IP на выбранных модемах">🔄 Сброс IP</button>
+  <button class="btn btn-sm" data-on-click="bulkReboot()" title="Перезагрузить выбранные модемы">⚡ Ребут</button>
+  <button class="btn btn-sm" data-on-click="bulkOsSpoof()" title="Установить OS Spoofing на портах выбранных модемов">🛡 OS Spoof</button>
+  <button class="btn btn-sm" data-on-click="bulkRotation()" title="Установить авторотацию на выбранных модемах">⏱ Ротация</button>
+  <button class="btn btn-sm" data-on-click="bulkExport()" title="Экспорт прокси выбранных модемов">📤 Экспорт</button>
+  <button class="btn btn-sm" data-on-click="bulkProxyCheck()" title="Замерить задержку через прокси выбранных модемов">📡 Замер задержки</button>
+  <button class="btn btn-sm" data-on-click="bulkDelete()" title="Удалить выбранные модемы из дашборда" style="color:var(--danger)">🗑 Удалить</button>
+  <button class="btn btn-sm bulk-cancel" data-on-click="clearBulkSel()" style="color:var(--danger)">✕ Отмена</button>
 </div>
 
 <!-- Notification panel — Stage 18.15 rewrite: backed by /api/admin/notifications.
@@ -68,19 +68,19 @@
 <div id="notifPanel" class="notif-panel" style="display:none">
   <div class="notif-panel-hdr">
     <span>Уведомления</span>
-    <button onclick="markAllNotifRead()">Прочитать все</button>
+    <button data-on-click="markAllNotifRead()">Прочитать все</button>
   </div>
   <div class="notif-filters" id="notifFilters">
-    <button class="notif-filter active" data-filter="all"      onclick="setNotifFilter('all')">Все</button>
-    <button class="notif-filter"        data-filter="unread"   onclick="setNotifFilter('unread')">Непрочитанные <span class="notif-filter-count" id="notifFilterUnreadCount"></span></button>
-    <button class="notif-filter"        data-filter="critical" onclick="setNotifFilter('critical')">Критичные <span class="notif-filter-count" id="notifFilterCritCount"></span></button>
+    <button class="notif-filter active" data-filter="all"      data-on-click="setNotifFilter('all')">Все</button>
+    <button class="notif-filter"        data-filter="unread"   data-on-click="setNotifFilter('unread')">Непрочитанные <span class="notif-filter-count" id="notifFilterUnreadCount"></span></button>
+    <button class="notif-filter"        data-filter="critical" data-on-click="setNotifFilter('critical')">Критичные <span class="notif-filter-count" id="notifFilterCritCount"></span></button>
   </div>
   <div class="notif-list" id="notifList">
     <div class="notif-empty">Загрузка...</div>
   </div>
   <div class="notif-panel-ftr">
-    <button onclick="dismissReadOlderNotif()" title="Уберёт из списка прочитанные карточки старше 7 дней (только у вас)">Скрыть прочитанные &gt;7 дн</button>
-    <button onclick="refreshNotifPanel()">Обновить</button>
+    <button data-on-click="dismissReadOlderNotif()" title="Уберёт из списка прочитанные карточки старше 7 дней (только у вас)">Скрыть прочитанные &gt;7 дн</button>
+    <button data-on-click="refreshNotifPanel()">Обновить</button>
   </div>
 </div>
 
@@ -96,12 +96,12 @@
   </div>
 
   <nav class="nav-tabs">
-    <div class="nav-tab active" onclick="switchMainTab('dashboard',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></svg></span>Дашборд</div>
-    <div class="nav-tab" onclick="switchMainTab('modems',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 17h.01"/><line x1="11" y1="17" x2="17" y2="17"/><path d="M9.5 9.5a5 5 0 0 1 5 0M7 7a8 8 0 0 1 10 0"/></svg></span>Модемы</div>
-    <div class="nav-tab" onclick="switchMainTab('clients',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Клиенты</div>
-    <div class="nav-tab" onclick="switchMainTab('bank',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>Финансы</div>
-    <div class="nav-tab" onclick="switchMainTab('crm',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16c0-1.8 1.6-2.8 3.5-2.8s3.5 1 3.5 2.8"/><line x1="3" y1="7.5" x2="5" y2="7.5"/><line x1="3" y1="12" x2="5" y2="12"/><line x1="3" y1="16.5" x2="5" y2="16.5"/></svg></span>CRM</div>
-    <div class="nav-tab" onclick="switchMainTab('analytics',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></span>Настройки</div>
+    <div class="nav-tab active" data-on-click="switchMainTab('dashboard',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></svg></span>Дашборд</div>
+    <div class="nav-tab" data-on-click="switchMainTab('modems',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 17h.01"/><line x1="11" y1="17" x2="17" y2="17"/><path d="M9.5 9.5a5 5 0 0 1 5 0M7 7a8 8 0 0 1 10 0"/></svg></span>Модемы</div>
+    <div class="nav-tab" data-on-click="switchMainTab('clients',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Клиенты</div>
+    <div class="nav-tab" data-on-click="switchMainTab('bank',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>Финансы</div>
+    <div class="nav-tab" data-on-click="switchMainTab('crm',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16c0-1.8 1.6-2.8 3.5-2.8s3.5 1 3.5 2.8"/><line x1="3" y1="7.5" x2="5" y2="7.5"/><line x1="3" y1="12" x2="5" y2="12"/><line x1="3" y1="16.5" x2="5" y2="16.5"/></svg></span>CRM</div>
+    <div class="nav-tab" data-on-click="switchMainTab('analytics',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></span>Настройки</div>
     <!-- Stage 18.18 — mobile-only footer inside the burger overlay. Hidden on
          desktop by `.nav-tabs-footer{display:none}` in layout.css and shown
          only inside the mobile burger flyout. Lets us strip noise from the
@@ -109,7 +109,7 @@
          away in the menu. -->
     <div class="nav-tabs-footer">
       <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.1.0</a>
-      <button class="btn-logout-mobile" onclick="doLogout()">
+      <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
       </button>
@@ -119,12 +119,12 @@
   <div class="header-right">
     <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.1.0</a>
     <span class="last-update" id="lastUpdate"></span>
-    <button class="header-notif-btn" id="notifBtn" onclick="toggleNotifPanel()" title="Уведомления">
+    <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
       <span class="notif-badge" id="notifBadge" style="display:none">0</span>
     </button>
-    <button class="burger-btn" onclick="document.querySelector('.nav-tabs').classList.toggle('burger-open')" style="display:none;align-items:center;justify-content:center;width:44px;height:44px;background:none;border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--text-1);flex-shrink:0"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><line x1="3" y1="5" x2="17" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="3" y1="15" x2="17" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
-    <button class="btn-logout" onclick="doLogout()" title="Выйти">
+    <button class="burger-btn" data-on-click="document.querySelector('.nav-tabs').classList.toggle('burger-open')" style="display:none;align-items:center;justify-content:center;width:44px;height:44px;background:none;border:1px solid var(--border);border-radius:8px;cursor:pointer;color:var(--text-1);flex-shrink:0"><svg width="20" height="20" viewBox="0 0 20 20" fill="none"><line x1="3" y1="5" x2="17" y2="5" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="3" y1="10" x2="17" y2="10" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/><line x1="3" y1="15" x2="17" y2="15" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg></button>
+    <button class="btn-logout" data-on-click="doLogout()" title="Выйти">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
     </button>
   </div>
@@ -148,9 +148,9 @@
   <div class="page-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:13px 24px;border-bottom:1px solid var(--border);gap:12px">
     <span style="font-size:16px;font-weight:600;color:var(--text-0)">Модемы</span>
     <div style="display:flex;align-items:center;gap:10px">
-      <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="11" y1="11" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg><input id="modemSearch" type="text" placeholder="Поиск: ник, IP, клиент…" oninput="renderTable()" autocomplete="off" style="border:none;background:none;outline:none;font-size:12px;color:var(--text-1);width:190px"></span>
+      <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="11" y1="11" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg><input id="modemSearch" type="text" placeholder="Поиск: ник, IP, клиент…" data-on-input="renderTable()" autocomplete="off" style="border:none;background:none;outline:none;font-size:12px;color:var(--text-1);width:190px"></span>
       <div class="col-selector" style="flex:0 0 auto">
-        <button class="btn-filter-mini" onclick="toggleFilterDropdown()" title="Столбцы (для таблицы)">⚙</button>
+        <button class="btn-filter-mini" data-on-click="toggleFilterDropdown()" title="Столбцы (для таблицы)">⚙</button>
         <div class="col-dropdown" id="filterDropdown" style="right:0;min-width:200px">
           <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600">Столбцы</div>
           <div id="colDropdown"></div>
@@ -167,21 +167,21 @@
 <div class="tab-content" id="tab-traffic">
   <!-- ACC Sub-navigation -->
   <div class="acc-sub-tabs">
-    <div class="acc-sub-tab active" onclick="switchAccTab('overview',this)">Трафик</div>
-    <div class="acc-sub-tab" onclick="switchAccTab('infra',this)">Инфраструктура</div>
-    <div class="acc-sub-tab" onclick="switchAccTab('finances',this)">Доходность</div>
+    <div class="acc-sub-tab active" data-on-click="switchAccTab('overview',this)">Трафик</div>
+    <div class="acc-sub-tab" data-on-click="switchAccTab('infra',this)">Инфраструктура</div>
+    <div class="acc-sub-tab" data-on-click="switchAccTab('finances',this)">Доходность</div>
   </div>
   <!-- hidden period/client controls (used by Resources tab) -->
   <div style="display:none">
     <div class="acc-period-group">
-      <button class="acc-period-btn" onclick="setAccPeriod('day',this)">Сегодня</button>
-      <button class="acc-period-btn" onclick="setAccPeriod('yesterday',this)">Вчера</button>
-      <button class="acc-period-btn active" onclick="setAccPeriod('month',this)">Месяц</button>
-      <button class="acc-period-btn" onclick="setAccPeriod('prevmonth',this)">Пред. мес</button>
-      <button class="acc-period-btn" onclick="setAccPeriod('lifetime',this)">Всё время</button>
+      <button class="acc-period-btn" data-on-click="setAccPeriod('day',this)">Сегодня</button>
+      <button class="acc-period-btn" data-on-click="setAccPeriod('yesterday',this)">Вчера</button>
+      <button class="acc-period-btn active" data-on-click="setAccPeriod('month',this)">Месяц</button>
+      <button class="acc-period-btn" data-on-click="setAccPeriod('prevmonth',this)">Пред. мес</button>
+      <button class="acc-period-btn" data-on-click="setAccPeriod('lifetime',this)">Всё время</button>
     </div>
-    <select id="accClientFilter" onchange="renderTrafficTab()"></select>
-    <button id="btnLoadRes" onclick="loadTopHosts(true)">⟳ Обновить ресурсы</button>
+    <select id="accClientFilter" data-on-change="renderTrafficTab()"></select>
+    <button id="btnLoadRes" data-on-click="loadTopHosts(true)">⟳ Обновить ресурсы</button>
   </div>
 
   <!-- OVERVIEW -->
@@ -195,9 +195,9 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <h3 style="margin:0">Почасовой трафик <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">GMT+3 (МСК)</span></h3>
           <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
-            <button onclick="setHeatmapView('country')" id="hmTabCountry" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По странам</button>
-            <button onclick="setHeatmapView('operator')" id="hmTabOperator" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По операторам</button>
-            <button onclick="setHeatmapView('client')" id="hmTabClient" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
+            <button data-on-click="setHeatmapView('country')" id="hmTabCountry" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По странам</button>
+            <button data-on-click="setHeatmapView('operator')" id="hmTabOperator" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По операторам</button>
+            <button data-on-click="setHeatmapView('client')" id="hmTabClient" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
           </div>
         </div>
         <div id="heatmapSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
@@ -211,9 +211,9 @@
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
           <h3 style="margin:0">Распределение задержек</h3>
           <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
-            <button onclick="setLatencyView('country')" id="latTabCountry" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По странам</button>
-            <button onclick="setLatencyView('operator')" id="latTabOperator" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По операторам</button>
-            <button onclick="setLatencyView('client')" id="latTabClient" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
+            <button data-on-click="setLatencyView('country')" id="latTabCountry" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По странам</button>
+            <button data-on-click="setLatencyView('operator')" id="latTabOperator" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По операторам</button>
+            <button data-on-click="setLatencyView('client')" id="latTabClient" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
           </div>
         </div>
         <!-- Stage 18.7: redesign to match the «Почасовой трафик» card style.
@@ -234,21 +234,21 @@
       <div class="analytics-card">
         <div class="daily-chart-controls" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
           <div class="daily-chart-nav" style="display:flex;align-items:center;gap:8px">
-            <button onclick="shiftDailyMonth(-1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">←</button>
+            <button data-on-click="shiftDailyMonth(-1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">←</button>
             <h3 style="margin:0;min-width:140px;text-align:center" id="dailyMonthLabel">Потребление по дням</h3>
-            <button onclick="shiftDailyMonth(1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">→</button>
+            <button data-on-click="shiftDailyMonth(1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">→</button>
           </div>
           <div class="daily-chart-legend" id="dailyClientLegend" style="display:flex;flex-wrap:wrap;gap:10px"></div>
           <div class="daily-chart-filters" style="display:flex;align-items:center;gap:8px">
-            <select id="dailyServerFilter" onchange="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
+            <select id="dailyServerFilter" data-on-change="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
               <option value="all">Все страны</option>
             </select>
-            <select id="dailyModeFilter" onchange="onDailyModeChange()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
+            <select id="dailyModeFilter" data-on-change="onDailyModeChange()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
               <option value="countries">По странам</option>
               <option value="clients">По клиентам</option>
               <option value="modems">По модемам</option>
             </select>
-            <select id="dailyClientFilter" onchange="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px;display:none">
+            <select id="dailyClientFilter" data-on-change="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px;display:none">
               <option value="all">Все клиенты</option>
             </select>
           </div>
@@ -260,13 +260,13 @@
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
         <h3 style="margin:0">Матрица трафика</h3>
         <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
-          <button id="matrixViewModem" onclick="setMatrixView('modem')" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По модемам</button>
-          <button id="matrixViewClient" onclick="setMatrixView('client')" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
+          <button id="matrixViewModem" data-on-click="setMatrixView('modem')" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По модемам</button>
+          <button id="matrixViewClient" data-on-click="setMatrixView('client')" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
         </div>
       </div>
       <div style="overflow-x:auto"><table class="log-table" id="trafficMatrix"></table></div>
       <div id="trafficMatrixShowMore" style="text-align:center;padding:8px 0;display:none">
-        <button class="btn btn-sm" onclick="showAllMatrixRows()" style="font-size:11px">Показать все модемы ↓</button>
+        <button class="btn btn-sm" data-on-click="showAllMatrixRows()" style="font-size:11px">Показать все модемы ↓</button>
       </div>
     </div>
 
@@ -276,10 +276,10 @@
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Топ доменов <span class="tab-count" id="resCount" style="display:none"></span></h3>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <select id="resClientFilter" onchange="renderTopResources()" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-0)">
+          <select id="resClientFilter" data-on-change="renderTopResources()" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-0)">
             <option value="">Все клиенты</option>
           </select>
-          <button class="btn btn-sm" onclick="loadTopHosts(true)" style="font-size:11px">⟳ Обновить</button>
+          <button class="btn btn-sm" data-on-click="loadTopHosts(true)" style="font-size:11px">⟳ Обновить</button>
           <span style="font-size:10px;color:var(--text-3)" id="resLastLoad">Нажмите «Обновить» для загрузки</span>
         </div>
       </div>
@@ -300,7 +300,7 @@
   <div class="acc-sub-content" id="acc-infra" style="padding:14px 20px">
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
       <span style="font-size:11px;color:var(--text-2)">Период:</span>
-      <select id="sysInfraDays" onchange="renderAccSubTab('infra')" style="padding:4px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-0)">
+      <select id="sysInfraDays" data-on-change="renderAccSubTab('infra')" style="padding:4px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-0)">
         <option value="1">1 день</option><option value="3">3 дня</option><option value="7" selected>7 дней</option><option value="14">14 дней</option><option value="30">30 дней</option>
       </select>
     </div>
@@ -384,7 +384,7 @@
     <details class="acc-expand" data-section="infra" open>
       <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></span>Ротации · IP · ёмкость</summary>
       <div class="acc-expand-body">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-2)">Период:</span><button class="dchip" onclick="setNewInfraDays(1,this)">1 день</button><button class="dchip" onclick="setNewInfraDays(3,this)">3 дня</button><button class="dchip on" onclick="setNewInfraDays(7,this)">7 дней</button><button class="dchip" onclick="setNewInfraDays(14,this)">14 дней</button><button class="dchip" onclick="setNewInfraDays(30,this)">30 дней</button></div>
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-2)">Период:</span><button class="dchip" data-on-click="setNewInfraDays(1,this)">1 день</button><button class="dchip" data-on-click="setNewInfraDays(3,this)">3 дня</button><button class="dchip on" data-on-click="setNewInfraDays(7,this)">7 дней</button><button class="dchip" data-on-click="setNewInfraDays(14,this)">14 дней</button><button class="dchip" data-on-click="setNewInfraDays(30,this)">30 дней</button></div>
         <div id="newInfraKpis"></div>
         <div id="newInfraTables"><div style="color:var(--text-3);font-size:12px;padding:8px">Загрузка…</div></div>
       </div>
@@ -403,9 +403,9 @@
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Почасовой трафик <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">GMT+3 (МСК)</span></h3>
         <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
-          <button onclick="setNewHmView('country')"  id="newHmTabCountry"  class="new-hm-btn active">По странам</button>
-          <button onclick="setNewHmView('operator')" id="newHmTabOperator" class="new-hm-btn">По операторам</button>
-          <button onclick="setNewHmView('client')"   id="newHmTabClient"   class="new-hm-btn">По клиентам</button>
+          <button data-on-click="setNewHmView('country')"  id="newHmTabCountry"  class="new-hm-btn active">По странам</button>
+          <button data-on-click="setNewHmView('operator')" id="newHmTabOperator" class="new-hm-btn">По операторам</button>
+          <button data-on-click="setNewHmView('client')"   id="newHmTabClient"   class="new-hm-btn">По клиентам</button>
         </div>
       </div>
       <div id="newHmSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
@@ -419,8 +419,8 @@
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Потребление трафика <span style="font-size:10px;font-weight:400;color:var(--text-3)">за 60 дней</span></h3>
         <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
-          <button id="newDailyMode_clients" class="new-hm-btn active" onclick="setNewDailyMode('clients')">По клиентам</button>
-          <button id="newDailyMode_countries" class="new-hm-btn" onclick="setNewDailyMode('countries')">По странам</button>
+          <button id="newDailyMode_clients" class="new-hm-btn active" data-on-click="setNewDailyMode('clients')">По клиентам</button>
+          <button id="newDailyMode_countries" class="new-hm-btn" data-on-click="setNewDailyMode('countries')">По странам</button>
         </div>
       </div>
       <div class="chart-wrap-daily" style="height:300px"><canvas id="newDailyCanvas"></canvas></div>
@@ -440,7 +440,7 @@
       <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18M9 4v16"/></svg></span>Матрица трафика</summary>
       <div class="acc-expand-body">
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;flex-wrap:wrap">
-          <input id="newMatrixFilter" class="form-input" placeholder="Фильтр: модем / клиент / оператор / сервер" oninput="renderNewMatrix()" style="flex:1;min-width:220px;max-width:360px;font-size:12px;padding:5px 10px">
+          <input id="newMatrixFilter" class="form-input" placeholder="Фильтр: модем / клиент / оператор / сервер" data-on-input="renderNewMatrix()" style="flex:1;min-width:220px;max-width:360px;font-size:12px;padding:5px 10px">
           <span id="newMatrixCount" style="font-size:11px;color:var(--text-3)"></span>
         </div>
         <div style="overflow-x:auto"><table class="ztbl" id="newMatrixTable"></table></div>
@@ -461,16 +461,16 @@
   <div class="page-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:13px 24px;border-bottom:1px solid var(--border);gap:12px">
     <span style="font-size:16px;font-weight:600;color:var(--text-0)">Клиенты</span>
     <div style="display:flex;align-items:center;gap:10px">
-      <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="11" y1="11" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg><input type="text" id="clientSearch" placeholder="Поиск клиента…" oninput="debouncedRenderClients()" style="border:none;background:none;outline:none;font-size:12px;color:var(--text-1);width:160px"></span>
-      <button class="btn btn-primary btn-sm" onclick="newClientForm()" style="font-size:12px">+ Клиент</button>
+      <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="11" y1="11" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg><input type="text" id="clientSearch" placeholder="Поиск клиента…" data-on-input="debouncedRenderClients()" style="border:none;background:none;outline:none;font-size:12px;color:var(--text-1);width:160px"></span>
+      <button class="btn btn-primary btn-sm" data-on-click="newClientForm()" style="font-size:12px">+ Клиент</button>
     </div>
   </div>
   <div style="display:flex;align-items:center;justify-content:space-between;padding:10px 24px;border-bottom:1px solid var(--border);flex-wrap:wrap;gap:8px">
     <div style="display:flex;gap:8px;flex-wrap:wrap">
-      <span class="cl-chip active" data-f="all" onclick="setClientFilter2('all')">Все · <b id="clCntAll">0</b></span>
-      <span class="cl-chip" data-f="active" onclick="setClientFilter2('active')">Активные · <b id="clCntActive">0</b></span>
-      <span class="cl-chip" data-f="debtors" onclick="setClientFilter2('debtors')">Должники · <b id="clCntDebt">0</b></span>
-      <span class="cl-chip" data-f="expiring" onclick="setClientFilter2('expiring')">Истекают · <b id="clCntExp">0</b></span>
+      <span class="cl-chip active" data-f="all" data-on-click="setClientFilter2('all')">Все · <b id="clCntAll">0</b></span>
+      <span class="cl-chip" data-f="active" data-on-click="setClientFilter2('active')">Активные · <b id="clCntActive">0</b></span>
+      <span class="cl-chip" data-f="debtors" data-on-click="setClientFilter2('debtors')">Должники · <b id="clCntDebt">0</b></span>
+      <span class="cl-chip" data-f="expiring" data-on-click="setClientFilter2('expiring')">Истекают · <b id="clCntExp">0</b></span>
     </div>
     <div style="font-size:12px;color:var(--text-2);white-space:nowrap" title="Сумма по charge+correction за скользящие 30 дней (каноническая метрика)">Выручка 30д <b id="clMrrTotal" style="color:var(--text-0);font-family:var(--font-mono);font-weight:700;margin-left:4px">—</b></div>
   </div>
@@ -483,10 +483,10 @@
     <!-- Sidebar -->
     <div class="tab-sidebar" style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
       <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">ФИНАНСЫ</div>
-      <div class="settings-nav-item active" id="bnav_overview" onclick="switchBankNav('overview')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>Обзор</div>
-      <div class="settings-nav-item" id="bnav_acts" onclick="switchBankNav('acts')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Акты</div>
-      <div class="settings-nav-item" id="bnav_bills" onclick="switchBankNav('bills')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5z"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/></svg>Счета</div>
-      <div class="settings-nav-item" id="bnav_payments" onclick="switchBankNav('payments')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9"/><path d="M8.5 13l3.5 3.5 3.5-3.5"/></svg>Платежи</div>
+      <div class="settings-nav-item active" id="bnav_overview" data-on-click="switchBankNav('overview')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><rect x="3" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="3" width="7.5" height="7.5" rx="1.5"/><rect x="3" y="13.5" width="7.5" height="7.5" rx="1.5"/><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="1.5"/></svg>Обзор</div>
+      <div class="settings-nav-item" id="bnav_acts" data-on-click="switchBankNav('acts')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Акты</div>
+      <div class="settings-nav-item" id="bnav_bills" data-on-click="switchBankNav('bills')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5z"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/></svg>Счета</div>
+      <div class="settings-nav-item" id="bnav_payments" data-on-click="switchBankNav('payments')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9"/><path d="M8.5 13l3.5 3.5 3.5-3.5"/></svg>Платежи</div>
     </div>
     <!-- Content -->
     <div style="flex:1;overflow-y:auto;padding:24px">
@@ -513,24 +513,24 @@
       <div style="padding:0 16px 6px;font-size:14px;font-weight:500;color:var(--text-0)">Настройки</div>
 
       <div class="snav-grp">МОНИТОРИНГ</div>
-      <div class="settings-nav-item active" id="snav_serverHealth" onclick="switchSettingsSection('serverHealth')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h3l1.5 4 2-8 1.5 4h4"/></svg>Состояние сервера</div>
-      <div class="settings-nav-item" id="snav_syslog" onclick="switchSettingsSection('syslog')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6l2.3 2L4 10"/><line x1="8" y1="10.3" x2="11.5" y2="10.3"/></svg>Системный лог</div>
-      <div class="settings-nav-item" id="snav_audit" onclick="switchSettingsSection('audit')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h6"/><circle cx="2.6" cy="4" r=".7"/><circle cx="2.6" cy="8" r=".7"/><circle cx="2.6" cy="12" r=".7"/></svg>Журнал действий</div>
+      <div class="settings-nav-item active" id="snav_serverHealth" data-on-click="switchSettingsSection('serverHealth')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h3l1.5 4 2-8 1.5 4h4"/></svg>Состояние сервера</div>
+      <div class="settings-nav-item" id="snav_syslog" data-on-click="switchSettingsSection('syslog')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6l2.3 2L4 10"/><line x1="8" y1="10.3" x2="11.5" y2="10.3"/></svg>Системный лог</div>
+      <div class="settings-nav-item" id="snav_audit" data-on-click="switchSettingsSection('audit')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h6"/><circle cx="2.6" cy="4" r=".7"/><circle cx="2.6" cy="8" r=".7"/><circle cx="2.6" cy="12" r=".7"/></svg>Журнал действий</div>
 
       <div class="snav-grp">ИНФРАСТРУКТУРА</div>
-      <div class="settings-nav-item" id="snav_servers" onclick="switchSettingsSection('servers')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4.6" rx="1.2"/><rect x="2" y="8.9" width="12" height="4.6" rx="1.2"/><circle cx="4.6" cy="4.8" r=".5"/><circle cx="4.6" cy="11.2" r=".5"/></svg>Серверы</div>
-      <div class="settings-nav-item" id="snav_operators" onclick="switchSettingsSection('operators')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c2.2 2 2.2 10 0 12M8 2c-2.2 2-2.2 10 0 12"/></svg>Операторы и страны</div>
+      <div class="settings-nav-item" id="snav_servers" data-on-click="switchSettingsSection('servers')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4.6" rx="1.2"/><rect x="2" y="8.9" width="12" height="4.6" rx="1.2"/><circle cx="4.6" cy="4.8" r=".5"/><circle cx="4.6" cy="11.2" r=".5"/></svg>Серверы</div>
+      <div class="settings-nav-item" id="snav_operators" data-on-click="switchSettingsSection('operators')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c2.2 2 2.2 10 0 12M8 2c-2.2 2-2.2 10 0 12"/></svg>Операторы и страны</div>
 
       <div class="snav-grp">АВТОМАТИКА</div>
-      <div class="settings-nav-item" id="snav_alerts" onclick="switchSettingsSection('alerts')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5a3.5 3.5 0 017 0c0 3 1.5 4.5 1.5 4.5H3s1.5-1.5 1.5-4.5z"/><path d="M6.5 13.4a1.6 1.6 0 003 0"/></svg>Уведомления</div>
-      <div class="settings-nav-item" id="snav_failover" onclick="switchSettingsSection('failover')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h8.5M9 3.5l2 2-2 2"/><path d="M13.5 10.5H5M7 8.5l-2 2 2 2"/></svg>Failover</div>
-      <div class="settings-nav-item" id="snav_recovery" onclick="switchSettingsSection('recovery')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 8a5.4 5.4 0 11-1.6-3.8"/><path d="M13.6 2.6v3.1h-3.1"/></svg>Восстановление</div>
-      <div class="settings-nav-item" id="snav_proxycheck" onclick="switchSettingsSection('proxycheck')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="6" height="5" rx="1"/><path d="M5.6 5V2.4M8.4 5V2.4M7 10v3.6"/></svg>Проверка прокси</div>
+      <div class="settings-nav-item" id="snav_alerts" data-on-click="switchSettingsSection('alerts')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5a3.5 3.5 0 017 0c0 3 1.5 4.5 1.5 4.5H3s1.5-1.5 1.5-4.5z"/><path d="M6.5 13.4a1.6 1.6 0 003 0"/></svg>Уведомления</div>
+      <div class="settings-nav-item" id="snav_failover" data-on-click="switchSettingsSection('failover')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h8.5M9 3.5l2 2-2 2"/><path d="M13.5 10.5H5M7 8.5l-2 2 2 2"/></svg>Failover</div>
+      <div class="settings-nav-item" id="snav_recovery" data-on-click="switchSettingsSection('recovery')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 8a5.4 5.4 0 11-1.6-3.8"/><path d="M13.6 2.6v3.1h-3.1"/></svg>Восстановление</div>
+      <div class="settings-nav-item" id="snav_proxycheck" data-on-click="switchSettingsSection('proxycheck')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="6" height="5" rx="1"/><path d="M5.6 5V2.4M8.4 5V2.4M7 10v3.6"/></svg>Проверка прокси</div>
 
       <div class="snav-grp">ИНСТРУМЕНТЫ</div>
-      <div class="settings-nav-item" id="snav_bank" onclick="switchSettingsSection('bank')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l6-3.5L14 6M3 6.5v5.5M13 6.5v5.5M5.6 6.5v5.5M8 6.5v5.5M10.4 6.5v5.5M2.5 13.5h11"/></svg>Банк</div>
-      <div class="settings-nav-item" id="snav_simulator" onclick="switchSettingsSection('simulator')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5c2.4 1.6 3.4 4 3.4 6.5L9.5 11h-3L4.6 8C4.6 5.5 5.6 3.1 8 1.5z"/><circle cx="8" cy="6" r="1"/><path d="M6.4 11l-1.4 2.5M9.6 11l1.4 2.5"/></svg>Симулятор</div>
-      <div class="settings-nav-item" id="snav_data" onclick="switchSettingsSection('data')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4.5" x2="14" y2="4.5"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="11.5" x2="14" y2="11.5"/><circle cx="6" cy="4.5" r="1.6" fill="var(--bg-1)"/><circle cx="10.5" cy="8" r="1.6" fill="var(--bg-1)"/><circle cx="5" cy="11.5" r="1.6" fill="var(--bg-1)"/></svg>Данные и хранение</div>
+      <div class="settings-nav-item" id="snav_bank" data-on-click="switchSettingsSection('bank')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l6-3.5L14 6M3 6.5v5.5M13 6.5v5.5M5.6 6.5v5.5M8 6.5v5.5M10.4 6.5v5.5M2.5 13.5h11"/></svg>Банк</div>
+      <div class="settings-nav-item" id="snav_simulator" data-on-click="switchSettingsSection('simulator')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5c2.4 1.6 3.4 4 3.4 6.5L9.5 11h-3L4.6 8C4.6 5.5 5.6 3.1 8 1.5z"/><circle cx="8" cy="6" r="1"/><path d="M6.4 11l-1.4 2.5M9.6 11l1.4 2.5"/></svg>Симулятор</div>
+      <div class="settings-nav-item" id="snav_data" data-on-click="switchSettingsSection('data')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4.5" x2="14" y2="4.5"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="11.5" x2="14" y2="11.5"/><circle cx="6" cy="4.5" r="1.6" fill="var(--bg-1)"/><circle cx="10.5" cy="8" r="1.6" fill="var(--bg-1)"/><circle cx="5" cy="11.5" r="1.6" fill="var(--bg-1)"/></svg>Данные и хранение</div>
     </div>
     <!-- Content -->
     <div style="flex:1;overflow-y:auto;padding:24px">
@@ -542,19 +542,19 @@
       <div id="globalRestartBanner" style="display:none;position:sticky;top:-24px;z-index:50;align-items:center;gap:12px;padding:12px 16px;border-radius:10px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.4);margin:-24px -24px 16px;font-size:13px;color:var(--text-0)">
         <span style="font-size:18px">⚠️</span>
         <span style="flex:1">Часть настроек применится только после перезапуска дашборда.</span>
-        <button class="btn btn-primary" onclick="restartDashboard()" id="globalRestartBtn" style="white-space:nowrap;flex-shrink:0">Перезапустить сейчас</button>
+        <button class="btn btn-primary" data-on-click="restartDashboard()" id="globalRestartBtn" style="white-space:nowrap;flex-shrink:0">Перезапустить сейчас</button>
       </div>
       <!-- Логи (первый по умолчанию) -->
       <div id="settingsSection_audit" class="settings-section">
         <div class="analytics-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <h3 style="margin:0">Логи</h3>
-            <button class="btn btn-sm" onclick="loadAuditLog()">Обновить</button>
+            <button class="btn btn-sm" data-on-click="loadAuditLog()">Обновить</button>
           </div>
           <div style="display:flex;gap:6px;margin-bottom:12px">
-            <button class="btn btn-sm audit-filter-btn active" data-f="all" onclick="setAuditFilter('all')" style="font-size:11px">Все</button>
-            <button class="btn btn-sm audit-filter-btn" data-f="admin" onclick="setAuditFilter('admin')" style="font-size:11px">👨‍💼 Админ</button>
-            <button class="btn btn-sm audit-filter-btn" data-f="client" onclick="setAuditFilter('client')" style="font-size:11px">👤 Клиенты</button>
+            <button class="btn btn-sm audit-filter-btn active" data-f="all" data-on-click="setAuditFilter('all')" style="font-size:11px">Все</button>
+            <button class="btn btn-sm audit-filter-btn" data-f="admin" data-on-click="setAuditFilter('admin')" style="font-size:11px">👨‍💼 Админ</button>
+            <button class="btn btn-sm audit-filter-btn" data-f="client" data-on-click="setAuditFilter('client')" style="font-size:11px">👤 Клиенты</button>
           </div>
           <div id="auditLogTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Нажмите «Обновить» для загрузки</div></div>
         </div>
@@ -565,12 +565,12 @@
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <h3 style="margin:0">Системный лог</h3>
             <div style="display:flex;gap:6px;align-items:center">
-              <label style="font-size:11px;color:var(--text-2)"><input type="checkbox" id="syslogAutoRefresh" checked onchange="toggleSyslogAutoRefresh()"> Авто</label>
-              <button class="btn btn-sm" onclick="loadSystemLog()">Обновить</button>
+              <label style="font-size:11px;color:var(--text-2)"><input type="checkbox" id="syslogAutoRefresh" checked data-on-change="toggleSyslogAutoRefresh()"> Авто</label>
+              <button class="btn btn-sm" data-on-click="loadSystemLog()">Обновить</button>
             </div>
           </div>
           <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
-            <select id="syslogCategory" onchange="loadSystemLog()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2)">
+            <select id="syslogCategory" data-on-change="loadSystemLog()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2)">
               <option value="">Все категории</option>
               <option value="modem">Модемы</option>
               <option value="recovery">Восстановление</option>
@@ -581,13 +581,13 @@
               <option value="traffic">Трафик</option>
               <option value="system">Система</option>
             </select>
-            <select id="syslogLevel" onchange="loadSystemLog()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2)">
+            <select id="syslogLevel" data-on-change="loadSystemLog()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2)">
               <option value="">Все уровни</option>
               <option value="info">info</option>
               <option value="warn">warn</option>
               <option value="error">error</option>
             </select>
-            <select id="syslogPeriod" onchange="loadSystemLog()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2)">
+            <select id="syslogPeriod" data-on-change="loadSystemLog()" style="font-size:11px;padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2)">
               <option value="1">1 день</option>
               <option value="3">3 дня</option>
               <option value="7" selected>7 дней</option>
@@ -624,7 +624,7 @@
               </div>
             </div>
             <div style="margin-top:12px">
-              <button class="btn btn-primary" onclick="addServer()">Добавить и проверить</button>
+              <button class="btn btn-primary" data-on-click="addServer()">Добавить и проверить</button>
               <span id="addSrvStatus" style="font-size:11px;margin-left:8px"></span>
             </div>
           </div>
@@ -690,7 +690,7 @@
               <h3 style="margin:0">🔴 Активный запуск: <span id="simLiveProfileName">—</span></h3>
               <div style="font-size:11px;color:var(--text-3)">Run #<span id="simLiveRunId">—</span> · прошло <span id="simLiveElapsed">0</span>с</div>
             </div>
-            <button class="btn btn-sm" id="simAbortBtn" onclick="simAbort()" style="background:#EF4444;color:white;font-weight:600">⏹ Остановить</button>
+            <button class="btn btn-sm" id="simAbortBtn" data-on-click="simAbort()" style="background:#EF4444;color:white;font-weight:600">⏹ Остановить</button>
           </div>
           <div class="sim-grid-kpi">
             <div class="sim-kpi accent-blue"><div class="l">Воркеры</div><div class="v"><span id="simLiveWorkers">0</span>/<span id="simLiveTarget">0</span></div></div>
@@ -720,10 +720,10 @@
               <div style="font-size:11px;color:var(--text-3);margin-top:2px">Колонка «В пуле» включает is_test_pool. Колонка «В профиле» добавляет модем в текущий запуск. Можно сразу со страницы.</div>
             </div>
             <div style="display:flex;gap:6px;align-items:center;font-size:11px">
-              <input type="text" id="simModemFilter" placeholder="🔍 ник / оператор" oninput="simRenderAllModems()" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px;width:160px">
-              <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="simPoolOnlyFilter" onchange="simRenderAllModems()"> только пул</label>
-              <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="simOnlineOnlyFilter" onchange="simRenderAllModems()" checked> только online</label>
-              <button class="btn btn-sm" onclick="simLoadAllModems()">↻</button>
+              <input type="text" id="simModemFilter" placeholder="🔍 ник / оператор" data-on-input="simRenderAllModems()" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px;width:160px">
+              <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="simPoolOnlyFilter" data-on-change="simRenderAllModems()"> только пул</label>
+              <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="simOnlineOnlyFilter" data-on-change="simRenderAllModems()" checked> только online</label>
+              <button class="btn btn-sm" data-on-click="simLoadAllModems()">↻</button>
             </div>
           </div>
           <div class="sim-banner" style="background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.3)">
@@ -735,10 +735,10 @@
           <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-3)">
             <span id="simModemCount">—</span>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn btn-sm" onclick="simBulkPool(true)">✓ В пул отфильтрованные</button>
-              <button class="btn btn-sm" onclick="simBulkPool(false)">✕ Убрать из пула</button>
-              <button class="btn btn-sm" onclick="simSelectAllInProfile(true)">+ Все в профиль</button>
-              <button class="btn btn-sm" onclick="simSelectAllInProfile(false)">– Очистить профиль</button>
+              <button class="btn btn-sm" data-on-click="simBulkPool(true)">✓ В пул отфильтрованные</button>
+              <button class="btn btn-sm" data-on-click="simBulkPool(false)">✕ Убрать из пула</button>
+              <button class="btn btn-sm" data-on-click="simSelectAllInProfile(true)">+ Все в профиль</button>
+              <button class="btn btn-sm" data-on-click="simSelectAllInProfile(false)">– Очистить профиль</button>
             </div>
           </div>
         </div>
@@ -748,11 +748,11 @@
           <h3>2. Профиль нагрузки</h3>
           <div class="sim-row">
             <label>Сохранённый профиль</label>
-            <select id="simProfileSelect" onchange="simLoadProfile(this.value)" style="min-width:220px">
+            <select id="simProfileSelect" data-on-change="simLoadProfile(this.value)" style="min-width:220px">
               <option value="">— Ad-hoc (без сохранения) —</option>
             </select>
-            <button class="btn btn-sm" onclick="simSaveCurrentAsProfile()">💾 Сохранить как…</button>
-            <button class="btn btn-sm" onclick="simDeleteProfile()" id="simDelProfBtn" style="display:none">🗑 Удалить</button>
+            <button class="btn btn-sm" data-on-click="simSaveCurrentAsProfile()">💾 Сохранить как…</button>
+            <button class="btn btn-sm" data-on-click="simDeleteProfile()" id="simDelProfBtn" style="display:none">🗑 Удалить</button>
           </div>
 
           <div class="sim-row" style="margin-top:12px">
@@ -763,13 +763,13 @@
           <div class="sim-urls">
             <label style="font-size:11px;color:var(--text-2);font-weight:600">URL'ы и вес</label>
             <div id="simUrlList"></div>
-            <button class="btn btn-sm" onclick="simAddUrlRow()" style="margin-top:4px">+ URL</button>
+            <button class="btn btn-sm" data-on-click="simAddUrlRow()" style="margin-top:4px">+ URL</button>
           </div>
 
           <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:14px">
             <div>
               <label style="font-size:11px;color:var(--text-2)">Режим concurrency</label>
-              <select id="simConcMode" onchange="simRenderConcParams()" style="width:100%;margin-top:3px;padding:5px 9px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px">
+              <select id="simConcMode" data-on-change="simRenderConcParams()" style="width:100%;margin-top:3px;padding:5px 9px;border-radius:8px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:12px">
                 <option value="constant">Постоянная нагрузка (N воркеров)</option>
                 <option value="ramp">Рамп (от N1 до N2)</option>
                 <option value="burst">Берсты (вкл/выкл периодически)</option>
@@ -788,7 +788,7 @@
           </div>
 
           <div style="margin-top:16px;display:flex;gap:10px;align-items:center">
-            <button class="btn btn-primary" id="simStartBtn" onclick="simStart()" style="font-size:13px;padding:8px 18px;font-weight:600">▶ Запустить симуляцию</button>
+            <button class="btn btn-primary" id="simStartBtn" data-on-click="simStart()" style="font-size:13px;padding:8px 18px;font-weight:600">▶ Запустить симуляцию</button>
             <span id="simStartStatus" style="font-size:11px;color:var(--text-3)"></span>
           </div>
         </div>
@@ -799,8 +799,8 @@
             <h3 style="margin:0">3. История запусков</h3>
             <div style="display:flex;gap:6px;align-items:center">
               <span id="simHistSelInfo" style="font-size:11px;color:var(--text-3)">Отметьте 2-5 чекбоксов для сравнения</span>
-              <button class="btn btn-sm" id="simCompareBtn" onclick="simOpenCompare()" disabled>Сравнить</button>
-              <button class="btn btn-sm" onclick="simLoadHistory()">Обновить</button>
+              <button class="btn btn-sm" id="simCompareBtn" data-on-click="simOpenCompare()" disabled>Сравнить</button>
+              <button class="btn btn-sm" data-on-click="simLoadHistory()">Обновить</button>
             </div>
           </div>
           <div id="simHistoryTable"><div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">Загрузка…</div></div>
@@ -808,14 +808,14 @@
       </div>
 
       <!-- Run detail / comparison modal -->
-      <div id="simDetailModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto" onclick="if(event.target===this)simCloseDetail()">
+      <div id="simDetailModal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:200;align-items:flex-start;justify-content:center;padding:40px 20px;overflow-y:auto" data-on-click="if(event.target===this)simCloseDetail()">
         <div style="background:var(--bg-0);border:1px solid var(--border);border-radius:12px;max-width:1100px;width:100%;padding:20px;box-shadow:0 24px 64px rgba(0,0,0,.5)">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <h3 id="simDetailTitle" style="margin:0;font-size:16px;font-weight:700">Детали запуска</h3>
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-sm" id="simDetailExportCsv" onclick="simExport('csv')">⬇ CSV</button>
-              <button class="btn btn-sm" id="simDetailExportJson" onclick="simExport('json')">⬇ JSON</button>
-              <button class="btn btn-sm" onclick="simCloseDetail()">✕</button>
+              <button class="btn btn-sm" id="simDetailExportCsv" data-on-click="simExport('csv')">⬇ CSV</button>
+              <button class="btn btn-sm" id="simDetailExportJson" data-on-click="simExport('json')">⬇ JSON</button>
+              <button class="btn btn-sm" data-on-click="simCloseDetail()">✕</button>
             </div>
           </div>
           <div id="simDetailBody"></div>
@@ -828,7 +828,7 @@
         <div class="analytics-card">
           <div class="settings-card-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <h3 style="margin:0">Уведомления</h3>
-            <button class="btn btn-sm" onclick="loadAlertRules()">Обновить</button>
+            <button class="btn btn-sm" data-on-click="loadAlertRules()">Обновить</button>
           </div>
           <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:760px">
             Все источники уведомлений. <span style="color:var(--accent);font-weight:500">TG+🔔</span> — в Telegram-чат и в колокольчик. <span style="color:var(--text-2);font-weight:500">🔔</span> — только в колокольчик в админке. У каждого свой cooldown, чтобы не было спама. Кнопка «Тест» отправляет пример — посмотрите как карточка выглядит в боте или в колокольчике.
@@ -848,7 +848,7 @@
             </div>
           </div>
           <div class="set-save-bar">
-            <button class="btn btn-primary btn-sm" onclick="saveModemsDownThreshold()">Сохранить</button>
+            <button class="btn btn-primary btn-sm" data-on-click="saveModemsDownThreshold()">Сохранить</button>
             <span id="mdtSaveHint" style="font-size:11px;color:var(--text-3)"></span>
           </div>
         </div>
@@ -858,7 +858,7 @@
         <div class="analytics-card">
           <div class="settings-card-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <h3 style="margin:0">Операторы и страны</h3>
-            <button class="btn btn-sm" onclick="loadOperatorsMapping()">Обновить</button>
+            <button class="btn btn-sm" data-on-click="loadOperatorsMapping()">Обновить</button>
           </div>
           <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:760px">
             Привязка операторов к странам нужна для аналитики (флаги в таблицах, группировки в распределении задержек, фильтры в графиках). Новые операторы появляются автоматически: каждый раз когда модем-поллинг впервые видит оператора на сервере, страна берётся из настроек сервера (RO/MD/RU). Если автоматическая привязка ошиблась — поменяйте вручную в таблице ниже; ручной выбор не перезатирается следующим опросом.
@@ -913,7 +913,7 @@
           <div class="set-save-bar">
             <span id="failoverSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>
-            <button class="btn btn-primary" onclick="saveFailoverSettings()">Сохранить</button>
+            <button class="btn btn-primary" data-on-click="saveFailoverSettings()">Сохранить</button>
           </div>
         </div>
 
@@ -921,7 +921,7 @@
         <div class="analytics-card" style="margin-bottom:16px">
           <div class="settings-card-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <h3 style="margin:0">Кандидаты на failover (сейчас)</h3>
-            <button class="btn btn-sm" onclick="loadFailoverCandidates()">Обновить</button>
+            <button class="btn btn-sm" data-on-click="loadFailoverCandidates()">Обновить</button>
           </div>
           <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">Клиентские модемы, которые автоматика перенесла бы прямо сейчас (по текущим порогам), и есть ли для каждого свободный спейр.</div>
           <div id="failoverCandidates"><div style="color:var(--text-3);font-size:12px;padding:12px">Нажмите «Обновить»</div></div>
@@ -931,7 +931,7 @@
         <div class="analytics-card">
           <div class="settings-card-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <h3 style="margin:0">История failover</h3>
-            <button class="btn btn-sm" onclick="loadFailoverLog()">Обновить</button>
+            <button class="btn btn-sm" data-on-click="loadFailoverLog()">Обновить</button>
           </div>
           <div id="failoverLog"><div style="color:var(--text-3);font-size:12px;padding:12px">Загрузка…</div></div>
         </div>
@@ -974,7 +974,7 @@
 
         <div class="restart-banner" id="restartBanner">
           <span style="flex:1">Некоторые настройки вступят в силу только после перезапуска сервера.</span>
-          <button class="btn btn-primary" onclick="restartDashboard()" id="restartDashboardBtn">Перезапустить сервер</button>
+          <button class="btn btn-primary" data-on-click="restartDashboard()" id="restartDashboardBtn">Перезапустить сервер</button>
         </div>
 
         <!-- Telegram-уведомления -->
@@ -988,8 +988,8 @@
             <div class="set-row"><div><div class="set-row-t">Ежедневная сводка</div><div class="set-row-d">Если выключено, сводка не отправляется автоматически</div></div><label class="tgl"><input type="checkbox" id="tgSummaryEnabled"><span></span></label></div>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
-            <button class="btn btn-sm" onclick="tgPreview()">Превью текста</button>
-            <button class="btn btn-sm btn-primary" onclick="tgSendTest()">Отправить тестовую сводку</button>
+            <button class="btn btn-sm" data-on-click="tgPreview()">Превью текста</button>
+            <button class="btn btn-sm btn-primary" data-on-click="tgSendTest()">Отправить тестовую сводку</button>
             <span id="tgStatus" style="font-size:11px;color:var(--text-3)"></span>
           </div>
           <pre id="tgPreviewArea" style="display:none;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word;margin-top:8px;max-height:300px;overflow:auto"></pre>
@@ -1027,7 +1027,7 @@
           <div class="set-save-bar">
             <span id="settingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>
-            <button class="btn btn-primary" onclick="saveSettings()">Сохранить</button>
+            <button class="btn btn-primary" data-on-click="saveSettings()">Сохранить</button>
           </div>
         </div>
 
@@ -1073,7 +1073,7 @@
           <div class="set-save-bar">
             <span id="proxyCheckSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>
-            <button class="btn btn-primary" onclick="saveProxyCheckSettings()">Сохранить</button>
+            <button class="btn btn-primary" data-on-click="saveProxyCheckSettings()">Сохранить</button>
           </div>
         </div>
 
@@ -1127,7 +1127,7 @@
           <div class="set-save-bar">
             <span id="recoverySettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>
-            <button class="btn btn-primary" onclick="saveRecoverySettings()">Сохранить</button>
+            <button class="btn btn-primary" data-on-click="saveRecoverySettings()">Сохранить</button>
           </div>
         </div>
 
@@ -1144,7 +1144,7 @@
           <div class="set-save-bar">
             <span id="trackingSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>
-            <button class="btn btn-primary" onclick="saveTrackingSettings()">Сохранить</button>
+            <button class="btn btn-primary" data-on-click="saveTrackingSettings()">Сохранить</button>
           </div>
         </div>
 
@@ -1163,7 +1163,7 @@
           <div class="set-save-bar">
             <span id="retentionSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>
-            <button class="btn btn-primary" onclick="saveRetentionSettings()">Сохранить</button>
+            <button class="btn btn-primary" data-on-click="saveRetentionSettings()">Сохранить</button>
           </div>
         </div>
 
@@ -1182,7 +1182,7 @@
           <div class="set-save-bar">
             <span id="sessionBillingSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>
-            <button class="btn btn-primary" onclick="saveSessionBillingSettings()">Сохранить</button>
+            <button class="btn btn-primary" data-on-click="saveSessionBillingSettings()">Сохранить</button>
           </div>
         </div>
 
@@ -1194,13 +1194,13 @@
 <!-- DETAIL MODAL -->
 <div class="modal-overlay" id="detailModal">
   <div class="modal">
-    <div class="modal-header"><h3 id="modalTitle">Детали</h3><button class="modal-close" onclick="closeModal()">&times;</button></div>
+    <div class="modal-header"><h3 id="modalTitle">Детали</h3><button class="modal-close" data-on-click="closeModal()">&times;</button></div>
     <div class="modal-tabs" id="modalTabs">
-      <div class="modal-tab active" data-tab="info" onclick="switchTab('info',this)">Обзор</div>
-      <div class="modal-tab" data-tab="health" onclick="switchTab('health',this)">Здоровье</div>
-      <div class="modal-tab" data-tab="traffic" onclick="switchTab('traffic',this)">Трафик</div>
-      <div class="modal-tab" data-tab="history" onclick="switchTab('history',this)">История</div>
-      <div class="modal-tab" data-tab="settings" onclick="switchTab('settings',this)">Настройки</div>
+      <div class="modal-tab active" data-tab="info" data-on-click="switchTab('info',this)">Обзор</div>
+      <div class="modal-tab" data-tab="health" data-on-click="switchTab('health',this)">Здоровье</div>
+      <div class="modal-tab" data-tab="traffic" data-on-click="switchTab('traffic',this)">Трафик</div>
+      <div class="modal-tab" data-tab="history" data-on-click="switchTab('history',this)">История</div>
+      <div class="modal-tab" data-tab="settings" data-on-click="switchTab('settings',this)">Настройки</div>
     </div>
     <div class="modal-body" id="modalBody"></div>
   </div>
@@ -1216,14 +1216,14 @@
         <span id="cdPill" style="font-size:9px;font-weight:600;color:#fff;background:var(--text-3);padding:3px 9px;border-radius:999px;white-space:nowrap"></span>
         <span id="clientModalTitle" style="display:none"></span>
       </div>
-      <button class="modal-close" onclick="closeClientModal()">&times;</button>
+      <button class="modal-close" data-on-click="closeClientModal()">&times;</button>
     </div>
 
     <div class="cd-tabs" style="display:flex;gap:2px;padding:0 18px;border-bottom:1px solid var(--border);flex-shrink:0">
-      <div class="cd-tab active" id="cdTab_overview" onclick="switchDetailTab('overview')">Обзор</div>
-      <div class="cd-tab" id="cdTab_billing" onclick="switchDetailTab('billing')">Тариф и баланс</div>
-      <div class="cd-tab" id="cdTab_modems" onclick="switchDetailTab('modems')">Модемы</div>
-      <div class="cd-tab" id="cdTab_payments" onclick="switchDetailTab('payments')">Платежи</div>
+      <div class="cd-tab active" id="cdTab_overview" data-on-click="switchDetailTab('overview')">Обзор</div>
+      <div class="cd-tab" id="cdTab_billing" data-on-click="switchDetailTab('billing')">Тариф и баланс</div>
+      <div class="cd-tab" id="cdTab_modems" data-on-click="switchDetailTab('modems')">Модемы</div>
+      <div class="cd-tab" id="cdTab_payments" data-on-click="switchDetailTab('payments')">Платежи</div>
     </div>
 
     <div class="modal-body" style="overflow-y:auto;flex:1">
@@ -1254,7 +1254,7 @@
 
         <div class="set-grp-label">Баланс</div>
         <div class="set-card">
-          <div class="set-row"><div><div class="set-row-t">Пополнить баланс</div><div class="set-row-d">Зачисление и история операций — во вкладке «Платежи»</div></div><button class="btn btn-primary btn-sm" onclick="switchDetailTab('payments')" style="font-size:12px">Платежи</button></div>
+          <div class="set-row"><div><div class="set-row-t">Пополнить баланс</div><div class="set-row-d">Зачисление и история операций — во вкладке «Платежи»</div></div><button class="btn btn-primary btn-sm" data-on-click="switchDetailTab('payments')" style="font-size:12px">Платежи</button></div>
         </div>
       </div>
 
@@ -1266,7 +1266,7 @@
             <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">portName *</label><input class="form-input" id="cfPortName"></div>
             <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Логин *</label><input class="form-input" id="cfLogin"></div>
             <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Пароль *</label><input class="form-input" id="cfPassword"></div>
-            <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Тип клиента</label><select class="form-input" id="cfClientType" onchange="toggleBankFields()"><option value="legal">Юр. лицо</option><option value="individual">Физ. лицо</option></select></div>
+            <div><label style="font-size:11px;color:var(--text-2);display:block;margin-bottom:4px">Тип клиента</label><select class="form-input" id="cfClientType" data-on-change="toggleBankFields()"><option value="legal">Юр. лицо</option><option value="individual">Физ. лицо</option></select></div>
           </div>
         </div>
 
@@ -1304,7 +1304,7 @@
 
         <div id="cfApiKeySection" style="display:none">
           <div class="set-grp-label">API Key</div>
-          <div class="set-card" style="padding:12px 16px"><div style="display:flex;align-items:center;gap:6px"><input class="form-input" id="cfApiKey" readonly style="font-size:10px;font-family:var(--font-mono);flex:1"><button class="btn btn-sm" onclick="copyText(document.getElementById('cfApiKey').value,this)" title="Копировать">📋</button><button class="btn btn-warning btn-sm" onclick="regenerateApiKeyInForm()" title="Перегенерировать">🔄</button></div></div>
+          <div class="set-card" style="padding:12px 16px"><div style="display:flex;align-items:center;gap:6px"><input class="form-input" id="cfApiKey" readonly style="font-size:10px;font-family:var(--font-mono);flex:1"><button class="btn btn-sm" data-on-click="copyText(document.getElementById('cfApiKey').value,this)" title="Копировать">📋</button><button class="btn btn-warning btn-sm" data-on-click="regenerateApiKeyInForm()" title="Перегенерировать">🔄</button></div></div>
         </div>
       </div>
 
@@ -1320,10 +1320,10 @@
     </div>
 
     <div style="display:flex;align-items:center;gap:12px;padding:13px 18px;border-top:1px solid var(--border);flex-shrink:0">
-      <button class="btn btn-sm" id="cdDeleteBtn" onclick="deleteClient(document.getElementById('clientFormId').value, document.getElementById('cfName').value)" style="color:var(--danger);border-color:transparent;background:none;font-size:12px">Удалить клиента</button>
+      <button class="btn btn-sm" id="cdDeleteBtn" data-on-click="deleteClient(document.getElementById('clientFormId').value, document.getElementById('cfName').value)" style="color:var(--danger);border-color:transparent;background:none;font-size:12px">Удалить клиента</button>
       <span style="flex:1"></span>
-      <button class="btn btn-sm" onclick="closeClientModal()" style="font-size:12px">Отмена</button>
-      <button class="btn btn-primary btn-sm" onclick="saveClient()" style="font-size:12px;padding:7px 18px">Сохранить</button>
+      <button class="btn btn-sm" data-on-click="closeClientModal()" style="font-size:12px">Отмена</button>
+      <button class="btn btn-primary btn-sm" data-on-click="saveClient()" style="font-size:12px;padding:7px 18px">Сохранить</button>
     </div>
   </div>
 </div>
@@ -1333,13 +1333,13 @@
   <div class="modal" style="width:760px;max-height:85vh">
     <div class="modal-header">
       <h3 id="clientOpsTitle">Операции клиента</h3>
-      <button class="modal-close" onclick="closeClientOpsModal()">&times;</button>
+      <button class="modal-close" data-on-click="closeClientOpsModal()">&times;</button>
     </div>
     <div style="display:flex;gap:0;border-bottom:1px solid var(--border);padding:0 4px">
-      <div class="modal-tab active" id="opsTab_history" onclick="switchOpsTab('history')" style="cursor:pointer">💰 Операции</div>
-      <div class="modal-tab" id="opsTab_documents" onclick="switchOpsTab('documents')" style="cursor:pointer">📄 Документы</div>
-      <div class="modal-tab" id="opsTab_api" onclick="switchOpsTab('api')" style="cursor:pointer">🔌 API</div>
-      <div class="modal-tab" id="opsTab_sla" onclick="switchOpsTab('sla')" style="cursor:pointer">📊 SLA</div>
+      <div class="modal-tab active" id="opsTab_history" data-on-click="switchOpsTab('history')" style="cursor:pointer">💰 Операции</div>
+      <div class="modal-tab" id="opsTab_documents" data-on-click="switchOpsTab('documents')" style="cursor:pointer">📄 Документы</div>
+      <div class="modal-tab" id="opsTab_api" data-on-click="switchOpsTab('api')" style="cursor:pointer">🔌 API</div>
+      <div class="modal-tab" id="opsTab_sla" data-on-click="switchOpsTab('sla')" style="cursor:pointer">📊 SLA</div>
     </div>
     <div class="modal-body" id="clientOpsBody_legacy" style="max-height:calc(85vh - 120px);overflow-y:auto">
     </div>
@@ -1354,9 +1354,9 @@
   <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--bg-2);border-bottom:1px solid var(--border)">
     <span style="font-size:13px;font-weight:600;color:var(--text-0)">Twenty CRM</span>
     <span id="crmStatus" style="font-size:11px;color:var(--text-3)"></span>
-    <button class="btn btn-sm" onclick="crmExport('people')" title="Скачать людей CSV (Excel-совместимый: кириллица + таблица)">⬇ Люди</button>
-    <button class="btn btn-sm" onclick="crmExport('companies')" title="Скачать компании CSV (Excel-совместимый)">⬇ Компании</button>
-    <button class="btn btn-sm" onclick="crmExport('opportunities')" title="Скачать сделки CSV (Excel-совместимый)">⬇ Сделки</button>
+    <button class="btn btn-sm" data-on-click="crmExport('people')" title="Скачать людей CSV (Excel-совместимый: кириллица + таблица)">⬇ Люди</button>
+    <button class="btn btn-sm" data-on-click="crmExport('companies')" title="Скачать компании CSV (Excel-совместимый)">⬇ Компании</button>
+    <button class="btn btn-sm" data-on-click="crmExport('opportunities')" title="Скачать сделки CSV (Excel-совместимый)">⬇ Сделки</button>
     <a href="https://crm.arendaproxy.ru" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;margin-left:auto" title="Открыть в новом окне">↗ Открыть отдельно</a>
   </div>
   <iframe id="crmFrame" title="CRM" src="" style="width:100%;height:calc(100vh - 100px);border:none;display:block" allow="clipboard-write"></iframe>
@@ -1374,8 +1374,8 @@
         <div class="setting-field"><label>CRM DB URL (override)</label><input class="form-input" id="ais_crmurl" autocomplete="off" placeholder="postgresql://twenty:...@172.18.0.3:5432/default"></div>
       </div>
       <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-sm btn-primary" onclick="aisSaveKeys()">Сохранить</button>
-        <button class="btn btn-sm" onclick="aisCrmPing()">Проверить CRM</button>
+        <button class="btn btn-sm btn-primary" data-on-click="aisSaveKeys()">Сохранить</button>
+        <button class="btn btn-sm" data-on-click="aisCrmPing()">Проверить CRM</button>
         <span id="ais_crmping" style="font-size:12px;color:var(--text-3)"></span>
       </div>
     </div>
@@ -1385,26 +1385,28 @@
       <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
         <div class="setting-field" style="min-width:260px;flex:1"><label>Seed-компания (искать похожие)</label><input class="form-input" id="ais_seed" placeholder="напр. Prisync или клиент из CRM"></div>
         <div class="setting-field" style="max-width:90px"><label>Кол-во</label><input class="form-input" id="ais_count" type="number" value="5" min="1" max="20"></div>
-        <button class="btn btn-sm btn-primary" onclick="aisRun('lookalikes')">🔎 Похожие + ЛПР</button>
-        <button class="btn btn-sm" onclick="aisRun('contacts')">🤝 Добрать ЛПР</button>
-        <button class="btn btn-sm" onclick="aisRun('push')">⬆ Залить в Twenty</button>
+        <button class="btn btn-sm btn-primary" data-on-click="aisRun('lookalikes')">🔎 Похожие + ЛПР</button>
+        <button class="btn btn-sm" data-on-click="aisRun('contacts')">🤝 Добрать ЛПР</button>
+        <button class="btn btn-sm" data-on-click="aisRun('push')">⬆ Залить в Twenty</button>
       </div>
       <div id="ais_job" style="margin-top:12px;display:none;font-size:12px"></div>
     </div>
 
     <div class="analytics-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Очередь (стейджинг)</h3><button class="btn btn-sm" onclick="aisLoadQueue()">↻ Обновить</button></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Очередь (стейджинг)</h3><button class="btn btn-sm" data-on-click="aisLoadQueue()">↻ Обновить</button></div>
       <div id="ais_queue" style="font-size:13px">—</div>
     </div>
   </div>
 </div>
 
 <script src="/js/utils.js?v=0718c"></script>
+<script src="/js/delegation.js?v=0727a"></script>
+<script src="/js/admin/delegated-helpers.js?v=0727a"></script>
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
 <script src="/js/admin/analytics.js?v=0719a"></script>
-<script src="/js/admin/finance.js?v=0722a"></script>
-<script src="/js/admin/modems.js?v=0722b"></script>
-<script src="/js/admin/settings.js?v=0722a"></script>
-<script src="/js/admin.js?v=0722a"></script>
+<script src="/js/admin/finance.js?v=0722b"></script>
+<script src="/js/admin/modems.js?v=0722c"></script>
+<script src="/js/admin/settings.js?v=0722b"></script>
+<script src="/js/admin.js?v=0722b"></script>
 </body>
 </html>

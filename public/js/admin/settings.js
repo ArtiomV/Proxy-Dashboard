@@ -56,10 +56,10 @@ function loadServersList(){
       h+='</div>';
       // Body (view mode)
       h+='<div class="server-body" id="srvBody_'+sn+'">';
-      h+='<div class="server-field"><div class="server-field-label">API Endpoint</div><div class="server-field-value"><span>'+esc(s.url)+'</span><button class="copy-btn" onclick="copyText(\''+esc(s.url).replace(/'/g,"\\'")+'\',this)">📋</button></div></div>';
-      h+='<div class="server-field"><div class="server-field-label">Public IP</div><div class="server-field-value"><span>'+esc(s.publicIp||'—')+'</span>'+(s.publicIp?'<button class="copy-btn" onclick="copyText(\''+esc(s.publicIp)+'\',this)">📋</button>':'')+'</div></div>';
-      h+='<div class="server-field"><div class="server-field-label">Панель (API)</div><div class="server-field-value"><span>'+esc(s.panelUser||'—')+'</span> / <span id="panelPwdView_'+sn+'">'+(s.panelPassword?'••••••••':'—')+'</span>'+(s.panelPassword?'<button class="toggle-btn" onclick="var sp=document.getElementById(\'panelPwdView_'+sn+'\');if(sp.dataset.shown){sp.textContent=\'••••••••\';sp.dataset.shown=\'\';this.textContent=\'👁\'}else{sp.textContent=\''+esc(s.panelPassword).replace(/'/g,"\\'")+'\';sp.dataset.shown=\'1\';this.textContent=\'🔒\'}">👁</button>':'')+'</div></div>';
-      h+='<div class="server-field"><div class="server-field-label">SSH Доступ</div><div class="server-field-value"><span>'+esc(s.osLogin||'—')+'</span> / <span id="sshPwdView_'+sn+'">'+(s.osPassword?'••••••••':'—')+'</span>'+(s.osPassword?'<button class="toggle-btn" onclick="var sp=document.getElementById(\'sshPwdView_'+sn+'\');if(sp.dataset.shown){sp.textContent=\'••••••••\';sp.dataset.shown=\'\';this.textContent=\'👁\'}else{sp.textContent=\''+esc(s.osPassword).replace(/'/g,"\\'")+'\';sp.dataset.shown=\'1\';this.textContent=\'🔒\'}">👁</button>':'')+'</div></div>';
+      h+='<div class="server-field"><div class="server-field-label">API Endpoint</div><div class="server-field-value"><span>'+esc(s.url)+'</span><button class="copy-btn" data-on-click="copyText(this.dataset.text,this)" data-text="'+esc(s.url)+'">📋</button></div></div>';
+      h+='<div class="server-field"><div class="server-field-label">Public IP</div><div class="server-field-value"><span>'+esc(s.publicIp||'—')+'</span>'+(s.publicIp?'<button class="copy-btn" data-on-click="copyText(\''+esc(s.publicIp)+'\',this)">📋</button>':'')+'</div></div>';
+      h+='<div class="server-field"><div class="server-field-label">Панель (API)</div><div class="server-field-value"><span>'+esc(s.panelUser||'—')+'</span> / <span id="panelPwdView_'+sn+'">'+(s.panelPassword?'••••••••':'—')+'</span>'+(s.panelPassword?'<button class="toggle-btn" data-on-click="togglePwdView(this,\'panelPwdView_\''+sn+'\',\''+esc(s.panelPassword).replace(/'/g,"\\'")+'\')">👁</button>':'')+'</div></div>';
+      h+='<div class="server-field"><div class="server-field-label">SSH Доступ</div><div class="server-field-value"><span>'+esc(s.osLogin||'—')+'</span> / <span id="sshPwdView_'+sn+'">'+(s.osPassword?'••••••••':'—')+'</span>'+(s.osPassword?'<button class="toggle-btn" data-on-click="togglePwdView(this,\'sshPwdView_\''+sn+'\',\''+esc(s.osPassword).replace(/'/g,"\\'")+'\')">👁</button>':'')+'</div></div>';
       h+='<div class="server-field"><div class="server-field-label">Оборудование</div><div class="server-field-value" style="font-family:inherit"><span style="color:'+(s.hardware?'var(--text-1)':'var(--text-3)')+'">'+esc(s.hardware||'— не указаны —')+'</span></div></div>';
       h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">📍 Адрес локации</div><div class="server-field-value" style="font-family:inherit"><span style="color:'+(s.address?'var(--text-1)':'var(--text-3)')+'">'+esc(s.address||'— не указан —')+'</span></div></div>';
       h+='</div>';
@@ -74,12 +74,12 @@ function loadServersList(){
       h+='</div>';
       // Footer
       h+='<div class="server-footer"><div class="server-actions">';
-      h+='<button class="btn btn-sm" id="srvEditBtn_'+sn+'" onclick="toggleServerEdit(\''+sn+'\')" style="font-size:11px">✏️ Редактировать</button>';
-      h+='<button class="btn btn-sm" id="srvSaveBtn_'+sn+'" onclick="saveServerMeta(\''+sn+'\')" style="font-size:11px;display:none">💾 Сохранить</button>';
-      h+='<button class="btn btn-sm" id="srvCancelBtn_'+sn+'" onclick="toggleServerEdit(\''+sn+'\',true)" style="font-size:11px;display:none">Отмена</button>';
+      h+='<button class="btn btn-sm" id="srvEditBtn_'+sn+'" data-on-click="toggleServerEdit(\''+sn+'\')" style="font-size:11px">✏️ Редактировать</button>';
+      h+='<button class="btn btn-sm" id="srvSaveBtn_'+sn+'" data-on-click="saveServerMeta(\''+sn+'\')" style="font-size:11px;display:none">💾 Сохранить</button>';
+      h+='<button class="btn btn-sm" id="srvCancelBtn_'+sn+'" data-on-click="toggleServerEdit(\''+sn+'\',true)" style="font-size:11px;display:none">Отмена</button>';
       h+='<span id="srvSaveStatus_'+sn+'" style="font-size:11px;margin-left:6px"></span>';
       h+='</div>';
-      h+='<button class="btn btn-sm" style="color:var(--danger);font-size:10px" onclick="deleteServer(\''+sn+'\')">✕ Удалить</button>';
+      h+='<button class="btn btn-sm" style="color:var(--danger);font-size:10px" data-on-click="deleteServer(\''+sn+'\')">✕ Удалить</button>';
       h+='</div>';
       h+='</div>';
     });

@@ -35,7 +35,7 @@
         <div class="login-error" id="loginError"></div>
         <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
         <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="current-password">
-        <button class="btn-login" id="btnLogin" onclick="doLogin()">Войти</button>
+        <button class="btn-login" id="btnLogin" data-on-click="doLogin()">Войти</button>
       </div>
     </div>
     <aside class="login-right">
@@ -74,18 +74,18 @@
       </div>
 
       <nav class="nav-tabs">
-        <div class="nav-tab active" onclick="switchTab('traffic',this)">Панель управления</div>
-        <div class="nav-tab" onclick="switchTab('analytics',this)">Аналитика</div>
-        <div class="nav-tab" onclick="switchTab('billing',this)">История баланса</div>
-        <div class="nav-tab" onclick="switchTab('documents',this)">Документы</div>
-        <div class="nav-tab" onclick="switchTab('api',this)">API</div>
-        <div class="nav-tab" onclick="switchTab('referral',this)">Партнёрская программа</div>
+        <div class="nav-tab active" data-on-click="switchTab('traffic',this)">Панель управления</div>
+        <div class="nav-tab" data-on-click="switchTab('analytics',this)">Аналитика</div>
+        <div class="nav-tab" data-on-click="switchTab('billing',this)">История баланса</div>
+        <div class="nav-tab" data-on-click="switchTab('documents',this)">Документы</div>
+        <div class="nav-tab" data-on-click="switchTab('api',this)">API</div>
+        <div class="nav-tab" data-on-click="switchTab('referral',this)">Партнёрская программа</div>
       </nav>
 
       <div class="header-right">
         <span class="user-info" style="font-size:11px;color:var(--text-2)">Клиент: <strong id="currentUser" style="color:var(--text-0)"></strong></span>
-        <div class="theme-toggle" id="themeToggle" onclick="toggleTheme()" title="Переключить тему"></div>
-        <button class="btn-logout" onclick="doLogout()" title="Выйти">
+        <div class="theme-toggle" id="themeToggle" data-on-click="toggleTheme()" title="Переключить тему"></div>
+        <button class="btn-logout" data-on-click="doLogout()" title="Выйти">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
       </div>
@@ -96,7 +96,7 @@
       <div class="container">
         <!-- Onboarding banner -->
         <div id="onboardingBanner" style="display:none;border:1.5px solid #185FA5;border-radius:12px;padding:20px 48px 20px 24px;background:rgba(24,95,165,0.06);margin-bottom:18px;position:relative">
-          <button onclick="dismissOnboarding()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:16px;color:#185FA5;cursor:pointer;line-height:1;padding:4px">✕</button>
+          <button data-on-click="dismissOnboarding()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:16px;color:#185FA5;cursor:pointer;line-height:1;padding:4px">✕</button>
           <div style="font-size:14px;font-weight:600;color:#0C447C;margin-bottom:4px">Добро пожаловать в Proxies.rent</div>
           <div id="onboardingDesc" style="font-size:13px;color:#185FA5;line-height:1.6;margin-bottom:12px"></div>
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
@@ -107,8 +107,8 @@
           </div>
           <div id="onboardingPills" style="display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:14px;scrollbar-width:none"></div>
           <div style="display:flex;align-items:center;gap:14px">
-            <button id="onboardingNextBtn" onclick="onboardingNext()" style="padding:7px 18px;background:#185FA5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer"></button>
-            <button onclick="dismissOnboarding()" style="background:none;border:none;font-size:13px;color:#185FA5;cursor:pointer;text-decoration:underline;text-decoration-style:dashed;text-underline-offset:3px">Пропустить тур</button>
+            <button id="onboardingNextBtn" data-on-click="onboardingNext()" style="padding:7px 18px;background:#185FA5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer"></button>
+            <button data-on-click="dismissOnboarding()" style="background:none;border:none;font-size:13px;color:#185FA5;cursor:pointer;text-decoration:underline;text-decoration-style:dashed;text-underline-offset:3px">Пропустить тур</button>
           </div>
         </div>
         <div class="summary-cards" id="summaryCards" style="display:none">
@@ -151,14 +151,14 @@
           <table id="dataTable" style="display:none">
             <thead>
               <tr>
-                <th onclick="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
+                <th data-on-click="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
                 <th>Реквизиты</th>
                 <th>Логин:Пароль</th>
                 <th>Смена IP</th>
                 <th>Ротация</th>
-                <th onclick="sortTable('dayIn')">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
-                <th onclick="sortTable('yesterdayIn')">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
-                <th onclick="sortTable('monthIn')">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
+                <th data-on-click="sortTable('dayIn')">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
+                <th data-on-click="sortTable('yesterdayIn')">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
+                <th data-on-click="sortTable('monthIn')">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
               </tr>
             </thead>
             <tbody id="tableBody"></tbody>
@@ -168,7 +168,7 @@
 
         <!-- Export buttons (below the table) -->
         <div id="proxyExportButtons" style="display:none;margin-top:16px;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-accent" onclick="openExportModal()" style="display:flex;align-items:center;gap:6px"><span>📤</span> Экспорт прокси</button>
+          <button class="btn btn-accent" data-on-click="openExportModal()" style="display:flex;align-items:center;gap:6px"><span>📤</span> Экспорт прокси</button>
         </div>
       </div>
     </div>
@@ -213,23 +213,23 @@
             <div style="display:flex;align-items:center;gap:8px">
               <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Потребление трафика:</h3>
               <div style="display:flex;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;overflow:hidden">
-                <button onclick="setChartView('location')" id="cvbtn-location" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:var(--accent);color:#fff;font-weight:600">по локациям</button>
-                <button onclick="setChartView('all')" id="cvbtn-all" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:transparent;color:var(--text-2)">по модемам</button>
+                <button data-on-click="setChartView('location')" id="cvbtn-location" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:var(--accent);color:#fff;font-weight:600">по локациям</button>
+                <button data-on-click="setChartView('all')" id="cvbtn-all" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:transparent;color:var(--text-2)">по модемам</button>
               </div>
             </div>
             <div style="display:flex;align-items:center;gap:4px">
-              <button onclick="navigateDailyPeriod(-1)" id="dailyNavLeft" title="Предыдущий период" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);width:28px;height:28px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0">◀</button>
+              <button data-on-click="navigateDailyPeriod(-1)" id="dailyNavLeft" title="Предыдущий период" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);width:28px;height:28px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0">◀</button>
               <div style="position:relative">
-                <button onclick="toggleDailyDropdown()" id="dailyPeriodBtn" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--accent);padding:0 12px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;height:28px;white-space:nowrap;min-width:110px;justify-content:center">
+                <button data-on-click="toggleDailyDropdown()" id="dailyPeriodBtn" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--accent);padding:0 12px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;height:28px;white-space:nowrap;min-width:110px;justify-content:center">
                   <span id="dailyPeriodLabel">Март 2026</span>
                   <span style="font-size:10px;opacity:0.6">▾</span>
                 </button>
                 <div id="dailyPeriodDropdown" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--bg-1);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.2);z-index:200;min-width:210px;overflow:hidden">
-                  <div onclick="setDailyPeriod('week')" id="dpopt-week" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''"><span>Эта неделя</span><span style="font-size:10px;color:var(--text-3)">пн–вс</span></div>
-                  <div onclick="setDailyPeriod('month')" id="dpopt-month" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''"><span>Этот месяц</span><span style="font-size:10px;color:var(--text-3)">1–31</span></div>
-                  <div onclick="setDailyPeriod('quarter')" id="dpopt-quarter" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''"><span>Этот квартал</span><span style="font-size:10px;color:var(--text-3)">Q1–Q4</span></div>
-                  <div onclick="setDailyPeriod('year')" id="dpopt-year" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''"><span>Этот год</span><span style="font-size:10px;color:var(--text-3)">янв–дек</span></div>
-                  <div onclick="setDailyPeriod('all')" id="dpopt-all" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0)" onmouseover="this.style.background='var(--bg-2)'" onmouseout="this.style.background=''">За все время</div>
+                  <div data-on-click="setDailyPeriod('week')" id="dpopt-week" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''"><span>Эта неделя</span><span style="font-size:10px;color:var(--text-3)">пн–вс</span></div>
+                  <div data-on-click="setDailyPeriod('month')" id="dpopt-month" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''"><span>Этот месяц</span><span style="font-size:10px;color:var(--text-3)">1–31</span></div>
+                  <div data-on-click="setDailyPeriod('quarter')" id="dpopt-quarter" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''"><span>Этот квартал</span><span style="font-size:10px;color:var(--text-3)">Q1–Q4</span></div>
+                  <div data-on-click="setDailyPeriod('year')" id="dpopt-year" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''"><span>Этот год</span><span style="font-size:10px;color:var(--text-3)">янв–дек</span></div>
+                  <div data-on-click="setDailyPeriod('all')" id="dpopt-all" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0)" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''">За все время</div>
                   <div style="border-top:1px solid var(--border);padding:10px 14px">
                     <div style="font-size:11px;color:var(--text-2);font-weight:500;margin-bottom:8px">Произвольный период</div>
                     <div style="display:flex;flex-direction:column;gap:5px">
@@ -238,12 +238,12 @@
                         <span style="font-size:11px;color:var(--text-3)">—</span>
                         <input type="date" id="dailyCustomTo" style="flex:1;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 6px">
                       </div>
-                      <button onclick="applyDailyCustomRange()" style="margin-top:2px;width:100%;padding:6px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600">Применить</button>
+                      <button data-on-click="applyDailyCustomRange()" style="margin-top:2px;width:100%;padding:6px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600">Применить</button>
                     </div>
                   </div>
                 </div>
               </div>
-              <button onclick="navigateDailyPeriod(1)" id="dailyNavRight" title="Следующий период" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);width:28px;height:28px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0">▶</button>
+              <button data-on-click="navigateDailyPeriod(1)" id="dailyNavRight" title="Следующий период" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);width:28px;height:28px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0">▶</button>
             </div>
           </div>
           <div id="dailyChartLoading" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px">Загрузка данных...</div>
@@ -259,8 +259,8 @@
               <div style="font-size:11px;color:var(--text-3);margin-top:2px">с начала текущего месяца</div>
             </div>
             <div style="display:flex;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;overflow:hidden">
-              <button onclick="setModemBarLimit(10)" id="mbtn-top10" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:var(--accent);color:#fff;font-weight:600">ТОП-10</button>
-              <button onclick="setModemBarLimit(0)" id="mbtn-all" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:transparent;color:var(--text-2)">Все</button>
+              <button data-on-click="setModemBarLimit(10)" id="mbtn-top10" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:var(--accent);color:#fff;font-weight:600">ТОП-10</button>
+              <button data-on-click="setModemBarLimit(0)" id="mbtn-all" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:transparent;color:var(--text-2)">Все</button>
             </div>
           </div>
           <div id="analyticsModemWrap"><canvas id="analyticsModemChart"></canvas></div>
@@ -290,7 +290,7 @@
             <label>Список прокси (по одному на строку, формат: ip:port или ip:port:login:password)</label>
             <textarea class="form-input mono" id="checkProxyInput" rows="6" placeholder="1.2.3.4:8080&#10;5.6.7.8:1080:user:pass"></textarea>
           </div>
-          <button class="btn btn-accent" id="btnCheckProxy" onclick="checkProxies()">Проверить</button>
+          <button class="btn btn-accent" id="btnCheckProxy" data-on-click="checkProxies()">Проверить</button>
           <div id="checkProxyResults" style="margin-top:14px"></div>
         </div>
 
@@ -326,8 +326,8 @@
             </div>
           </div>
           <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn btn-accent" onclick="convertFormat()">Конвертировать</button>
-            <button class="btn" onclick="copyText(document.getElementById('convertOutput').value,this)">Копировать результат</button>
+            <button class="btn btn-accent" data-on-click="convertFormat()">Конвертировать</button>
+            <button class="btn" data-on-click="copyText(document.getElementById('convertOutput').value,this)">Копировать результат</button>
           </div>
         </div>
       </div>
@@ -367,23 +367,23 @@
           <p>API-ключ используется для аутентификации. Передавайте его через заголовок <code>X-API-Key</code> или как параметр <code>?apikey=</code> в URL.</p>
           <div class="api-key-box">
             <code id="apiDocKey">—</code>
-            <button onclick="copyText(document.getElementById('apiDocKey').textContent,this)">Копировать</button>
+            <button data-on-click="copyText(document.getElementById('apiDocKey').textContent,this)">Копировать</button>
           </div>
           <div class="api-note" style="margin-top:14px;margin-bottom:0">Никому не сообщайте ваш API-ключ. Если он скомпрометирован — обратитесь к администратору для перевыпуска.</div>
         </div>
 
         <!-- TOC -->
         <div class="api-toc">
-          <a href="javascript:void(0)" onclick="document.getElementById('api-s-proxy').scrollIntoView({behavior:'smooth',block:'start'})">
+          <a href="javascript:void(0)" data-on-click="document.getElementById('api-s-proxy').scrollIntoView({behavior:'smooth',block:'start'})">
             <span class="toc-method get">GET</span> Получить прокси
           </a>
-          <a href="javascript:void(0)" onclick="document.getElementById('api-s-change-ip').scrollIntoView({behavior:'smooth',block:'start'})">
+          <a href="javascript:void(0)" data-on-click="document.getElementById('api-s-change-ip').scrollIntoView({behavior:'smooth',block:'start'})">
             <span class="toc-method get">GET</span> Сменить IP
           </a>
-          <a href="javascript:void(0)" onclick="document.getElementById('api-s-examples').scrollIntoView({behavior:'smooth',block:'start'})">
+          <a href="javascript:void(0)" data-on-click="document.getElementById('api-s-examples').scrollIntoView({behavior:'smooth',block:'start'})">
             <span class="toc-method" style="background:rgba(124,58,237,.15);color:#7c3aed">CODE</span> Примеры кода
           </a>
-          <a href="javascript:void(0)" onclick="document.getElementById('api-s-errors').scrollIntoView({behavior:'smooth',block:'start'})">
+          <a href="javascript:void(0)" data-on-click="document.getElementById('api-s-errors').scrollIntoView({behavior:'smooth',block:'start'})">
             <span class="toc-method" style="background:rgba(255,56,60,.12);color:var(--danger)">REF</span> Ошибки
           </a>
         </div>
@@ -391,7 +391,7 @@
         <!-- ==================== 1. GET PROXY DATA ==================== -->
         <div class="api-section" id="api-s-proxy">
           <h3><span class="method get">GET</span> Получить данные прокси</h3>
-          <div class="api-path"><span>/api/v1/proxy</span><button class="copy-btn" onclick="copyText(apiBase+'/api/v1/proxy',this)">Копировать URL</button></div>
+          <div class="api-path"><span>/api/v1/proxy</span><button class="copy-btn" data-on-click="copyText(apiBase+'/api/v1/proxy',this)">Копировать URL</button></div>
           <p class="api-desc">Основной метод API. Возвращает все ваши прокси с реквизитами, ссылками на смену IP и информацию о балансе — одним запросом.</p>
 
           <div class="resp-label">Аутентификация</div>
@@ -406,12 +406,12 @@
 
           <div class="resp-label">Пример запроса</div>
           <div class="lang-tabs">
-            <div class="lang-tab active" onclick="switchLang(this,'curl','proxy')">cURL</div>
-            <div class="lang-tab" onclick="switchLang(this,'python','proxy')">Python</div>
-            <div class="lang-tab" onclick="switchLang(this,'js','proxy')">JavaScript</div>
+            <div class="lang-tab active" data-on-click="switchLang(this,'curl','proxy')">cURL</div>
+            <div class="lang-tab" data-on-click="switchLang(this,'python','proxy')">Python</div>
+            <div class="lang-tab" data-on-click="switchLang(this,'js','proxy')">JavaScript</div>
           </div>
-          <div class="lang-code active" data-group="proxy" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>curl -H "X-API-Key: YOUR_API_KEY" https://app.arendaproxy.ru/api/v1/proxy</div></div>
-          <div class="lang-code" data-group="proxy" data-lang="python"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
+          <div class="lang-code active" data-group="proxy" data-lang="curl"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>curl -H "X-API-Key: YOUR_API_KEY" https://app.arendaproxy.ru/api/v1/proxy</div></div>
+          <div class="lang-code" data-group="proxy" data-lang="python"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>import requests
 
 r = requests.get("https://app.arendaproxy.ru/api/v1/proxy",
     headers={"X-API-Key": "YOUR_API_KEY"})
@@ -419,7 +419,7 @@ data = r.json()
 
 for proxy in data["proxies"]:
     print(f"{proxy['host']}:{proxy['ports']['http']}:{proxy['username']}:{proxy['password']}")</div></div>
-          <div class="lang-code" data-group="proxy" data-lang="js"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>const res = await fetch("https://app.arendaproxy.ru/api/v1/proxy", {
+          <div class="lang-code" data-group="proxy" data-lang="js"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>const res = await fetch("https://app.arendaproxy.ru/api/v1/proxy", {
   headers: { "X-API-Key": "YOUR_API_KEY" }
 });
 const data = await res.json();
@@ -429,7 +429,7 @@ data.proxies.forEach(p =&gt; {
 });</div></div>
 
           <div class="resp-label">Ответ</div>
-          <div class="code-block" style="font-size:12px"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>{
+          <div class="code-block" style="font-size:12px"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>{
   "success": true,
   "client": "ClientName",
   "billing": {
@@ -505,10 +505,10 @@ data.proxies.forEach(p =&gt; {
 
           <div class="resp-label">Пример</div>
           <div class="lang-tabs">
-            <div class="lang-tab active" onclick="switchLang(this,'curl','changeip')">cURL</div>
-            <div class="lang-tab" onclick="switchLang(this,'python','changeip')">Python</div>
+            <div class="lang-tab active" data-on-click="switchLang(this,'curl','changeip')">cURL</div>
+            <div class="lang-tab" data-on-click="switchLang(this,'python','changeip')">Python</div>
           </div>
-          <div class="lang-code active" data-group="changeip" data-lang="curl"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button># 1. Получаем прокси
+          <div class="lang-code active" data-group="changeip" data-lang="curl"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button># 1. Получаем прокси
 DATA=$(curl -s -H "X-API-Key: YOUR_API_KEY" https://app.arendaproxy.ru/api/v1/proxy)
 
 # 2. Достаём change_ip_url первого прокси
@@ -516,7 +516,7 @@ URL=$(echo $DATA | python3 -c "import sys,json; print(json.load(sys.stdin)['prox
 
 # 3. Меняем IP
 curl "$URL"</div></div>
-          <div class="lang-code" data-group="changeip" data-lang="python"><div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
+          <div class="lang-code" data-group="changeip" data-lang="python"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>import requests
 
 # 1. Получаем прокси
 data = requests.get("https://app.arendaproxy.ru/api/v1/proxy",
@@ -538,7 +538,7 @@ for proxy in data["proxies"]:
           <p class="api-desc">Готовые примеры для популярных языков и сценариев.</p>
 
           <div class="resp-label">Python — получить все прокси и использовать для запросов</div>
-          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>import requests
+          <div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>import requests
 
 API_KEY = "YOUR_API_KEY"
 
@@ -567,7 +567,7 @@ requests.get(p["change_ip_url"])
 print(f"IP на {p['id']} сменён")</div>
 
           <div class="resp-label">JavaScript / Node.js</div>
-          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button>const API_KEY = "YOUR_API_KEY";
+          <div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>const API_KEY = "YOUR_API_KEY";
 
 const res = await fetch("https://app.arendaproxy.ru/api/v1/proxy", {
   headers: { "X-API-Key": API_KEY }
@@ -587,7 +587,7 @@ await fetch(data.proxies[0].change_ip_url);
 console.log("IP сменён");</div>
 
           <div class="resp-label">Bash — экспорт в файл</div>
-          <div class="code-block"><button class="cb-copy" onclick="copyCodeBlock(this)">Копировать</button># Сохранить все прокси в файл proxies.txt (формат IP:PORT:LOGIN:PASS)
+          <div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button># Сохранить все прокси в файл proxies.txt (формат IP:PORT:LOGIN:PASS)
 curl -s -H "X-API-Key: YOUR_API_KEY" https://app.arendaproxy.ru/api/v1/proxy \
   | python3 -c "
 import sys, json
@@ -667,7 +667,7 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
   <!-- IP History Modal -->
   <div class="modal-overlay" id="ipModal">
     <div class="modal">
-      <div class="modal-header"><h3 id="ipModalTitle">История IP</h3><button class="modal-close" onclick="closeIpModal()">&times;</button></div>
+      <div class="modal-header"><h3 id="ipModalTitle">История IP</h3><button class="modal-close" data-on-click="closeIpModal()">&times;</button></div>
       <div class="modal-body" id="ipModalBody"></div>
     </div>
   </div>
@@ -675,7 +675,8 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
   <div class="toast-container" id="toastContainer"></div>
 
 <script src="/js/utils.js?v=0717a"></script>
-<script src="/js/client.js?v=0722a"></script>
+<script src="/js/delegation.js?v=0727a"></script>
+<script src="/js/client.js?v=0722b"></script>
 
 </body>
 </html>

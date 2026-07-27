@@ -299,7 +299,7 @@ function renderAccSubTab(name){
       function probItem(label,key,items,dotColor){
         var n=items.length;var bg=n===0?'var(--green-bg)':dotColor==='var(--danger)'?'var(--red-bg)':'var(--orange-bg)';
         var valColor=n===0?'var(--success)':dotColor==='var(--danger)'?'var(--danger)':'var(--warning)';
-        var r='<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;background:'+bg+';font-size:11px'+(n>0?';cursor:pointer':'')+'"'+(n>0?' onclick="showProblemPopup(\''+esc(label)+'\',\''+key+'\')"':'')+' >';
+        var r='<div style="display:flex;align-items:center;gap:6px;padding:5px 8px;border-radius:6px;background:'+bg+';font-size:11px'+(n>0?';cursor:pointer':'')+'"'+(n>0?' data-on-click="showProblemPopup(\''+esc(label)+'\',\''+key+'\')"':'')+' >';
         r+='<span style="width:7px;height:7px;border-radius:50%;flex-shrink:0;background:'+(n===0?'var(--success)':dotColor)+'"></span>';
         r+='<span style="flex:1;color:var(--text-2)">'+label+'</span>';
         r+='<span style="font-weight:600;color:'+valColor+'">'+n+'</span>';
@@ -437,7 +437,7 @@ function renderAccSubTab(name){
         sparkH+=' onmouseenter="showSpkTT(\''+spkClientKey+'\','+si+',event)" onmouseleave="hideFloatTooltip(\'spkTT\')"></div>';
       }
       sparkH+='</div>';
-      hc+='<div class="ct-row" data-client="'+esc(n)+'" onclick="selectClient(\''+esc(n)+'\')">';
+      hc+='<div class="ct-row" data-client="'+esc(n)+'" data-on-click="selectClient(\''+esc(n)+'\')">';
       hc+='<div class="ct-color" style="width:4px;height:36px;background:'+clientColor+';flex-shrink:0;border-radius:2px 0 0 2px"></div>';
       hc+='<div class="ct-name" style="flex:2.2;padding:0 10px;font-size:12px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0">'+esc(n)+'</div>';
       hc+='<div class="ct-live" style="flex:0.7;text-align:center;font-size:11px;font-weight:600;color:'+liveColor+'">'+c.online+'/'+c.modems+'</div>';
@@ -730,7 +730,7 @@ function renderHeatmapSubTabs(ctx){
     var active=item.id===ctx.id;var col=hmAccent(view,item.id);
     // По макету чипы — чистый текст, без флагов/глобуса из конфига
     var lbl=String(item.label||'').replace(/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}☀-➿]/gu,'').trim();
-    h+='<button onclick="selectHeatId(\''+esc(item.id)+'\''+(ctx.self?','+ctx.self:'')+')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:999px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(lbl)+'</button>';
+    h+='<button data-on-click="selectHeatId(\''+esc(item.id)+'\''+(ctx.self?','+ctx.self:'')+')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:999px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(lbl)+'</button>';
   });
   c.innerHTML=h;
 }
@@ -989,7 +989,7 @@ function renderLatencySubTabs(){
   var h='';
   cfg.forEach(function(item){
     var active=item.id===_latencyId;var col=hmAccent(view,item.id);
-    h+='<button onclick="selectLatId(\''+esc(item.id)+'\')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:999px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(item.label)+'</button>';
+    h+='<button data-on-click="selectLatId(\''+esc(item.id)+'\')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:999px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(item.label)+'</button>';
   });
   c.innerHTML=h;
 }
@@ -1665,7 +1665,7 @@ function renderTrafficMatrix(d){
     return _matrixSortDir*(av-bv);
   });
   var sortArrow=function(k){return _matrixSortKey===k?(_matrixSortDir>0?' ↑':' ↓'):''};
-  var thead='<thead><tr><th style="cursor:pointer;width:3px;padding:0"></th><th style="cursor:pointer" onclick="matrixSort(\'nick\')">Модем'+sortArrow('nick')+'</th><th>Оператор</th><th>Сервер</th><th>Клиент</th><th style="cursor:pointer" onclick="matrixSort(\'tIn\')">↓ Вход'+sortArrow('tIn')+'</th><th style="cursor:pointer" onclick="matrixSort(\'tOut\')">↑ Выход'+sortArrow('tOut')+'</th><th style="cursor:pointer" onclick="matrixSort(\'total\')">Σ Всего'+sortArrow('total')+'</th><th>Сегодня</th><th>Месяц</th><th style="width:90px">Тренд мес.</th></tr></thead>';
+  var thead='<thead><tr><th style="cursor:pointer;width:3px;padding:0"></th><th style="cursor:pointer" data-on-click="matrixSort(\'nick\')">Модем'+sortArrow('nick')+'</th><th>Оператор</th><th>Сервер</th><th>Клиент</th><th style="cursor:pointer" data-on-click="matrixSort(\'tIn\')">↓ Вход'+sortArrow('tIn')+'</th><th style="cursor:pointer" data-on-click="matrixSort(\'tOut\')">↑ Выход'+sortArrow('tOut')+'</th><th style="cursor:pointer" data-on-click="matrixSort(\'total\')">Σ Всего'+sortArrow('total')+'</th><th>Сегодня</th><th>Месяц</th><th style="width:90px">Тренд мес.</th></tr></thead>';
   var h=thead+'<tbody>';
   if(_matrixView==='client'){
     // Group by client with colored header rows
