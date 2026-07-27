@@ -2593,11 +2593,11 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
 });
 
 // ========== PROXY LATENCY MONITORING ==========
-let _proxyCheckInterval = null;
+const _proxyCheckRef = { iv: null };   // shared с src/boot/startup.js
 function rescheduleProxyCheck() {
-  if (_proxyCheckInterval) clearInterval(_proxyCheckInterval);
+  if (_proxyCheckRef.iv) clearInterval(_proxyCheckRef.iv);
   const min = appSettings.proxy_check_interval_min || 60;
-  _proxyCheckInterval = setInterval(() => {
+  _proxyCheckRef.iv = setInterval(() => {
     checkProxyLatency().catch(e => logger.error('[ProxyCheck] Error:', e.message));
   }, min * 60 * 1000);
   logger.info(`[ProxyCheck] Rescheduled: every ${min} min`);
@@ -3720,339 +3720,28 @@ app.use((err, req, res, next) => {
 const IS_TEST = process.env.NODE_ENV === 'test';
 const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   logger.info(`Proxies.Rent Dashboard running at http://localhost:${PORT}`);
-
-  // Schedule speedtests (configurable times, default 02:00 + 14:00)
-  rescheduleSpeedtests();
-
-  // Schedule nightly TopHosts at 03:00
-  scheduleRepeating(3, 0, 'TopHosts', aggregateTopHosts);
-
-  // WP1: nightly traffic reconciliation at 03:40 UTC (06:40 MSK) — after the
-  // 00:45 DailySync has persisted yesterday's counters. Ретраи внутри джобы
-  // (3 попытки × 3 мин) держат её до ~10 минут в худшем случае — на ночном
-  // расписании это безопасно.
-  scheduleRepeating(3, 40, 'TrafficRecon', runTrafficRecon);
-
-  // WP2: доменный контроль в 03:25 UTC — после TopHosts (03:00); если тот ещё
-  // работает, джоба сама подождёт свежий снапшот (ретраи по свежести).
-  scheduleRepeating(3, 25, 'DomainGuard', runDomainGuard);
-
-  // WP5: daily balance-vs-ledger reconciliation at 04:00 UTC (after billing
-  // settles). Observation only — drift logs critical + TG alert, no auto-fix.
-  scheduleRepeating(4, 0, 'BalanceReconcile', () => balanceReconcile.runOnce());
-
-  // Stage 17: nightly modem-health snapshot at 23:55 MSK (20:55 UTC) — captures
-  // the score for the day that's about to end. Also runs a one-shot 30-day
-  // backfill at boot so the «Здоровье» tab has historical data immediately
-  // on first deploy (not only after 30 cron firings).
-  const _healthSnap = require('./src/jobs/health-snapshot').create({
-    db, logger, healthDb, uptimeTracking, getSetting,
-  });
-  try {
-    const r = _healthSnap.backfillIfEmpty(30);
-    if (r && r.filled) logger.info(`[HealthSnapshot] Backfill done: ${r.filled} rows`);
-  } catch (e) { logger.warn('[HealthSnapshot] Backfill error: ' + e.message); }
-  scheduleRepeating(20, 55, 'HealthSnapshot', () => _healthSnap.runDailySnapshot());
-
-  // Stage 18.13: hourly health / capacity check — fires alerts for heap,
-  // disk, and stuck cron jobs. Hourly because these change slowly; firing
-  // more often just wastes resources without giving more warning value.
-  // Watchdogs (heap/disk/cron-health) вынесены в src/jobs/watchdogs.js (Stage 9, boot-хвост).
-  const _watchdogs = require('./src/jobs/watchdogs').create({ db, logger, alerts, logActivity, fs });
-  _intervals.push(setInterval(_watchdogs.hourlyHealthCheck, 60 * 60 * 1000));
-
-  // Stage 18.13: daily proxy-expiry check at 09:30 МСК (06:30 UTC) — alert
-  // for ports expiring within 3 days. Runs once per day; per-port cooldown
-  // is 24h inside the alert rule.
-  scheduleRepeating(6, 30, 'ProxyExpiryCheck', async () => {
-    try {
-      const allData = await fetchAllServersDataCached();
-      const SOON_MS = 3 * 86400 * 1000;
-      for (const data of allData) {
-        const ports = data.ports || {};
-        for (const [imei, list] of Object.entries(ports)) {
-          for (const p of list) {
-            const vb = p && p.PROXY_VALID_BEFORE;
-            if (!vb) continue;
-            const expMs = Date.parse(vb);
-            if (isNaN(expMs)) continue;
-            const left = expMs - Date.now();
-            if (left > 0 && left < SOON_MS) {
-              alerts.trigger('proxy_expiring_3d', {
-                server: data.serverName, portId: p.portID, portName: p.portName || '',
-                client: p.portName || '?',
-                daysLeft: Math.ceil(left / 86400000),
-                validBefore: vb.slice(0, 10),
-              });
-            }
-          }
-        }
-      }
-    } catch (e) { logger.warn('[ProxyExpiry] check failed: ' + e.message); }
+  // Вся стартовая последовательность (расписания, периодика, инициализации)
+  // вынесена в src/boot/startup.js (Stage 9, финал boot-хвоста).
+  require('./src/boot/startup').runStartup({
+    logger, db, fs, path,
+    rescheduleSpeedtests, scheduleRepeating,
+    aggregateTopHosts, runTrafficRecon, runDomainGuard, balanceReconcile,
+    healthDb, uptimeTracking, getSetting, setSetting,
+    alerts, logActivity, fetchAllServersDataCached, appSettings,
+    trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
+    autoCreateMissingClients, checkProxyLatency, proxyCheckRef: _proxyCheckRef,
+    runSlaCheck, runAutoReboot, dbAudit, tochkaConfig, runTochkaSync,
+    runRetentionCleanup, cleanupStalePortMappings,
+    runDailyBilling, runMonthlyReconciliation,
+    autoGenerateMonthlyActs, autoGenerateMonthlyBills, syncBillStatuses,
+    aiInsights, simulator, tgSummary, tgBot, clientById,
+    kvSetCritical, kvGet: _kvGet, kvSet: _kvSet, knownModems, clients, getStaleNicks,
+    failoverEngine, fetchApi, fetchApiRaw, postFormApi, parseHtmlInputFields,
+    proxySmart, apiServers, findServer, saveSettings,
+    trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
+    setHourlyAggSched: (s) => { _hourlyAggSched = s; },
   });
 
-  // Start modem tracking (IP + uptime) — every 5 min
-  const TRACKING_INTERVAL_MS = (appSettings.tracking_interval_min || 3) * 60000;
-  logger.info(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
-  trackModems().catch(e => logger.error('[Tracking] Initial error:', e.message));
-  _intervals.push(setInterval(() => {
-    trackModems().catch(e => logger.error('[Tracking] Error:', e.message));
-  }, TRACKING_INTERVAL_MS));
-
-  // Sync yesterday traffic — once at startup, then daily at 00:45 UTC (03:45 MSK)
-  syncYesterdayTraffic().catch(e => logger.error('[DailySync] Initial error:', e.message));
-  scheduleRepeating(0, 45, 'DailySync', syncYesterdayTraffic);
-  scheduleRepeating(7, 0, 'DailySync-07:00', syncYesterdayTraffic);
-  scheduleRepeating(15, 0, 'DailySync-15:00', syncYesterdayTraffic);
-
-  // Pre-reset snapshots removed — day-counter based detection handles resets automatically
-
-  // If no cached top_hosts data, do initial aggregation
-  if (!topHostsCache.updatedAt) {
-    logger.info('[TopHosts] No cached data, running initial aggregation...');
-    aggregateTopHosts().catch(e => logger.error('[TopHosts] Initial error:', e.message));
-  }
-
-  // Auto-create client accounts for all portNames that don't have one
-  autoCreateMissingClients().catch(e => logger.error('[AutoCreate] Error:', e.message));
-  // Re-check periodically so new portNames get accounts without restart
-  _intervals.push(setInterval(() => {
-    autoCreateMissingClients().catch(e => logger.error('[AutoCreate] Error:', e.message));
-  }, (appSettings.auto_create_interval_min || 10) * 60000));
-
-  // Proxy latency monitoring
-  const pcMin = appSettings.proxy_check_interval_min || 60;
-  logger.info(`[ProxyCheck] Starting proxy latency monitoring (every ${pcMin} min)...`);
-  setTimeout(() => {
-    checkProxyLatency().catch(e => logger.error('[ProxyCheck] Initial error:', e.message));
-  }, 30 * 1000);
-  _proxyCheckInterval = setInterval(() => {
-    checkProxyLatency().catch(e => logger.error('[ProxyCheck] Error:', e.message));
-  }, pcMin * 60 * 1000);
-
-  // Phase 4: SLA check every 6 hours. First run 5 min after start.
-  setTimeout(() => {
-    dbAudit.runJobAsync('SlaCheck', 'initial', () => runSlaCheck())
-      .catch(e => logger.error('[SLA] Initial error:', e.message));
-  }, 5 * 60 * 1000);
-  _intervals.push(setInterval(() => {
-    dbAudit.runJobAsync('SlaCheck', 'periodic', () => runSlaCheck())
-      .catch(e => logger.error('[SLA] Periodic error:', e.message));
-  }, 6 * 60 * 60 * 1000));
-
-  // Auto-reboot flaky modems every 15 min.
-  // The throttle inside (auto_reboot_min_interval_min, default 60) ensures the
-  // same modem isn't rebooted more than once per hour even if checked every 15.
-  // Disabled by default — admin enables in Settings.
-  setTimeout(() => {
-    dbAudit.runJobAsync('AutoReboot', 'initial', () => runAutoReboot())
-      .catch(e => logger.error('[AutoReboot] Initial error:', e.message));
-  }, 10 * 60 * 1000);
-  _intervals.push(setInterval(() => {
-    dbAudit.runJobAsync('AutoReboot', 'periodic', () => runAutoReboot())
-      .catch(e => logger.error('[AutoReboot] Periodic error:', e.message));
-  }, 15 * 60 * 1000));
-
-  // Phase 6: Tochka bank statement sync every 4 hours.
-  // Acts as a reliable backup to webhook delivery — webhooks can be lost during
-  // Tochka key rotation, network blips, or our process restarts. Polling guarantees
-  // payments eventually land in bank_payments and auto-credit by INN.
-  // Skips silently if tochkaConfig is incomplete.
-  // Window: last 14 days (idempotent — duplicates skipped via tochka_payment_id).
-  function _scheduledTochkaSync(reason) {
-    if (!tochkaConfig.jwt || !tochkaConfig.accountId) {
-      logger.debug('[Tochka Sync:scheduled] skipped — config incomplete');
-      return;
-    }
-    const today = new Date();
-    const dateTo   = today.toISOString().slice(0, 10);
-    const dateFrom = new Date(today.getTime() - 14 * 86400000).toISOString().slice(0, 10);
-    dbAudit.runJobAsync('TochkaSync', reason, () =>
-      runTochkaSync({ dateFrom, dateTo, source: reason })
-    )
-      .then(r => {
-        if (!r.ok) logger.warn(`[Tochka Sync:${reason}] failed:`, r.error, r.details || '');
-      })
-      .catch(e => logger.error(`[Tochka Sync:${reason}] exception:`, e.message));
-  }
-  // Initial run 90s after start (after DB warm-up + cache populate)
-  setTimeout(() => _scheduledTochkaSync('startup'), 90 * 1000);
-  // Every 30 min (was 4 h). The scheduled sync only pulls a 14-day window and
-  // is the auto-credit path (the webhook can't verify Tochka's signature), so a
-  // tighter cadence means a payment is auto-credited within ≤30 min instead of
-  // up to 4 h. Cheap: a 14-day statement + INN/name match, idempotent on re-run.
-  _intervals.push(setInterval(() => _scheduledTochkaSync('periodic'), 30 * 60 * 1000));
-
-  // Nightly DB cleanup at 00:30 UTC — remove old data using dynamic retention settings
-  scheduleRepeating(0, 30, 'DbCleanup', () => {
-    try {
-      const res = runRetentionCleanup();
-      const total = Object.values(res).reduce((s, r) => s + r.changes, 0);
-      if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${res.traffic_hourly.changes} meta:${res.modem_meta.changes} rot:${res.rotation_log.changes} proxy:${res.proxy_checks.changes} audit:${res.audit_log.changes} syslog:${res.system_log.changes})`);
-      logActivity('system', 'info', 'db_cleanup', null, `DB cleanup: ${total} rows removed`, { hourly: res.traffic_hourly.changes, meta: res.modem_meta.changes, rotation: res.rotation_log.changes, proxy_checks: res.proxy_checks.changes, audit: res.audit_log.changes, system_log: res.system_log.changes });
-      // Refresh query-planner statistics after pruning so the covering indexes
-      // stay chosen (the proxy_checks summary on /api/admin/data degrades to a
-      // 4s full scan if stats go stale). PRAGMA optimize only re-analyzes tables
-      // that changed materially, so it's cheap.
-      try { db.pragma('optimize'); logger.info('[DbCleanup] PRAGMA optimize done'); } catch (_) { /* best-effort */ }
-    } catch (e) {
-      logger.error('[DbCleanup] Error:', e.message);
-      logActivity('system', 'error', 'db_cleanup_error', null, `DB cleanup error: ${e.message}`);
-    }
-  });
-
-  // Heap & disk watchdog — fires every 5 min, alerts on threshold crossings.
-  // Heap > 85% of total → log + system_log (telegram alert via logActivity).
-  // Disk free < 500 MB on backup volume → same.
-  _intervals.push(setInterval(_watchdogs.heapDiskWatchdog, 5 * 60 * 1000));
-  // Nightly DB backup (02:00) + history pruning (02:30) — extracted to
-  // src/jobs/backup.js (WP6.4). Scheduled here via the unified registry.
-  const backupJobs = require('./src/jobs/backup').create({ db, logger, logActivity, fs, path });
-  scheduleRepeating(2, 0, 'DbBackup', backupJobs.runDbBackup);
-  scheduleRepeating(2, 30, 'HistoryPrune', backupJobs.runHistoryPrune);
-
-  // Hourly: just the stale-port mapping cleanup (cheap, keeps the "modem
-  // disconnected ≥ N days → vanish" window precise to the hour instead of
-  // ±1 day from the nightly run).
-  _intervals.push(setInterval(() => {
-    try {
-      const res = cleanupStalePortMappings();
-      if (res && (res.dtDeleted || res.dtMemKeys || res.kmRemoved)) {
-        logger.info(`[StalePortsHourly] dt=${res.dtDeleted} mem=${res.dtMemKeys} km=${res.kmRemoved}`);
-      }
-    } catch (e) { logger.error('[StalePortsHourly] ' + e.message); }
-  }, 60 * 60 * 1000));
-
-  // Schedule daily billing at 01:00 UTC (04:00 MSK, 4h after ProxySmart midnight reset)
-  scheduleRepeating(1, 0, 'DailyBilling', () =>
-    dbAudit.runJobAsync('DailyBilling', null, () => runDailyBilling()));
-
-  // Post-correct hourly data at 01:30 UTC (04:30 MSK) — after daily sync + billing
-  // Monthly reconciliation at 03:30 UTC (06:30 MSK) on 1st of month — after TopHosts, before acts
-  scheduleRepeating(3, 30, 'MonthlyReconciliation', () =>
-    dbAudit.runJobAsync('MonthlyReconciliation', null, () => runMonthlyReconciliation()));
-
-  // Auto-generate closing documents (acts) on 1st of each month at 08:05 Moscow (05:05 UTC)
-  scheduleRepeating(5, 5, 'MonthlyActs', autoGenerateMonthlyActs);
-
-  // Auto-generate bills on 1st of each month at 08:10 Moscow (05:10 UTC)
-  scheduleRepeating(5, 10, 'MonthlyBills', autoGenerateMonthlyBills);
-
-  // Сверка статуса счетов с Точкой — ежедневно в 08:20 МСК (05:20 UTC), после
-  // выставления счетов. Ловит оплаты, которые матчинг платежей не связал со счётом.
-  scheduleRepeating(5, 20, 'BillStatusSync', () =>
-    dbAudit.runJobAsync('BillStatusSync', null, () => syncBillStatuses()));
-
-  // ---------------------------------------------------------------------------
-  // Telegram bot — daily summary + /start auto-registration
-  // ---------------------------------------------------------------------------
-  aiInsights.init({
-    db, logger,
-    getSetting,
-  });
-  // Load-simulator engine. Only init here — proxy-URL resolution happens in
-  // the per-request endpoint (Day 2), which calls fetchAllServersDataCached()
-  // and builds full proxyUrls for the chosen target modems before passing
-  // them to simulator.start().
-  simulator.init({
-    db, logger,
-    getSetting,
-  });
-  tgSummary.init({
-    db, logger,
-    clientById,
-    getSetting,
-    aiInsights,
-  });
-  tgBot.init({
-    logger,
-    getSetting,
-    setSetting,
-    buildDailySummary: tgSummary.buildDailySummary,
-  });
-  // Stage 18.13: alerts framework wires into the same bot/chat.
-  alerts.init({ logger, getSetting, appSettings, kvSetCritical, kvGet: _kvGet, db, tgBot });
-  // Stage 18.15: notification collector — periodic scan that pushes
-  // offline-modem / client-debt / CRM-reminder events into the same bell.
-  require('./src/jobs/notify-collect').init({
-    logger, db, alerts, uptimeTracking, knownModems, clients, getStaleNicks, getSetting,
-    // WP4.2: the bell's offline set must equal the card's disconnectedList —
-    // give the job the same inputs computeFleet uses on /api/admin/data.
-    trackingDb, fetchAllServersDataCached, mergeServerData,
-  });
-  // Stage 19: failover engine — periodic scan that re-points dead/glitchy
-  // client modems to healthy spares (OFF + dry-run by default; see settings).
-  failoverEngine.init({
-    logger, db, appSettings, alerts, logActivity,
-    apiServers, findServer, knownModems, uptimeTracking, getStaleNicks,
-    fetchApi, fetchApiRaw, postFormApi, parseHtmlInputFields, proxySmart,
-    fetchAllServersDataCached, mergeServerData,   // Stage 19.1 — spares from MERGED live data (same as Модемы table)
-  });
-  // Start the long-poll loop (handles /start, /today, /yesterday, /status)
-  tgBot.start();
-
-  // Stage 18.13: "dashboard restarted" alert — fires once 30s after boot so
-  // we don't spam if pm2 is bouncing the process. Boot-grace inside alerts.js
-  // (5min) would block this; we explicitly trigger AFTER grace would expire,
-  // BUT we want it sooner — so we set a one-shot timer that calls the rule's
-  // sendMessage directly via tgBot, bypassing alerts.trigger().
-  setTimeout(() => {
-    try {
-      const token = appSettings.telegram_bot_token;
-      const chatId = appSettings.telegram_chat_id;
-      if (!token || !chatId) return;
-      if (appSettings.alert_dashboard_restarted_enabled === false) return;
-      const txt = '🔄 <b>Дашборд стартовал</b>\n\nПроцесс перезапущен. Если это не плановый деплой — стоит посмотреть, не упал ли он.';
-      tgBot.sendMessage(token, chatId, txt).catch(e => logger.warn('[Alerts] boot msg: ' + e.message));
-    } catch (e) { logger.warn('[Alerts] boot trigger: ' + e.message); }
-  }, 30000);
-
-  // Daily summary scheduler — checks every 60s if MSK time has reached
-  // appSettings.telegram_summary_time and we haven't already sent today.
-  // Note: time check is `>= target` (not `===`), so a missed minute due to
-  // event-loop lag still delivers the message later in the day.
-  // Daily summary loop вынесен в src/telegram/summary-loop.js (Stage 9, boot-хвост).
-  const _summaryLoop = require('./src/telegram/summary-loop').create({
-    appSettings, tgSummary, tgBot, saveSettings, logger, logActivity,
-  });
-  _intervals.push(setInterval(_summaryLoop.tick, 60 * 1000));
-
-  // Resilient hourly traffic aggregation вынесена в src/jobs/hourly-agg-schedule.js.
-  _hourlyAggSched = require('./src/jobs/hourly-agg-schedule').create({
-    kvGet: _kvGet, kvSet: _kvSet, logger, logActivity, trafficDb, aggregateHourlyTraffic,
-  });
-  _hourlyAggSched.start();
-  // Mid-hour snapshot removed (FIX-13): 5 retry attempts at :00-:04 are sufficient.
-
-  // Startup: refresh snapshots only (NO DB writes) — prevents restart-induced data loss
-  const snapshotCount = hourlyTraffic.getSnapshotCount();
-  logger.info(`[HourlyAgg] ${snapshotCount} snapshots loaded, refreshing in 15s (no DB write)`);
-  setTimeout(() => hourlyTraffic.refreshSnapshotsOnly().catch(e => logger.error('[HourlyAgg:startup]', e.message)), 15000);
-
-  // Billing catch-up: if last snapshot is older than 26 hours, run now
-  (async () => {
-    try {
-      const now = Date.now();
-      let needsCatchup = false;
-      for (const c of clients) {
-        if (c.billingPaused) continue;
-        if (c.last_traffic_snapshot && c.last_traffic_snapshot.timestamp) {
-          const lastRun = new Date(c.last_traffic_snapshot.timestamp).getTime();
-          if (now - lastRun > 26 * 60 * 60 * 1000) {
-            needsCatchup = true;
-            break;
-          }
-        }
-      }
-      if (needsCatchup) {
-        logger.info('[Billing] Catch-up: missed billing detected, running now...');
-        logActivity('billing', 'warn', 'billing_catchup', null, 'Missed billing detected, running catch-up');
-        await runDailyBilling();
-      }
-    } catch (e) {
-      logger.error('[Billing] Catch-up error:', e.message);
-    }
-  })();
 });
 
 const CRM_DB_URL = process.env.CRM_DB_URL || '';
@@ -4087,7 +3776,7 @@ function gracefulShutdown(signal) {
   logger.info(`\n[Shutdown] Received ${signal}, shutting down gracefully...`);
 
   if (_hourlyAggSched) _hourlyAggSched.stop();
-  if (_proxyCheckInterval) clearInterval(_proxyCheckInterval);
+  if (_proxyCheckRef.iv) clearInterval(_proxyCheckRef.iv);
   for (const iv of _intervals) clearInterval(iv);
   _intervals.length = 0;
   for (const t of _dailySched.speedtestTimers.concat(_dailySched.cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }
