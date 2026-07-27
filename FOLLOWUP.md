@@ -148,39 +148,38 @@ historical notes (e.g. "moved in Stage 4"). Verified via:
 
 ## Backlog: src/jobs extraction (DoD #1 path)
 
-server.js is at 4,607 lines vs. the TZ's <250 aspirational target.
-Stages so far extracted: cleanup.js (−225), tochka-cron.js (−245),
-top-hosts.js (−113), crm-sync.js (−38). Cumulative: −621 from the
-post-Stage-6 baseline of 5,160.
+server.js is at **4,428** lines vs. the TZ's <250 aspirational target.
+Extracted so far: cleanup.js (−225), tochka-cron.js (−245),
+top-hosts.js (−113), crm-sync.js (−38), billing.js, modem-tracking.js,
+sla.js, proxy-checks.js, auto-reboot.js, monthly-reconciliation.js,
+services/modems.js, services/proxy-data.js, services/proxy-issues.js.
 
-Remaining extraction targets (by line count, biggest wins first):
+**Таблица целей ниже — ЗАКРЫТА полностью (2026-07-27).** Все 12 функций
+из неё вынесены (последние три — 7219664 с characterization-тестами
+месячной сверки, HIGH-путь; `trackModems`/`_runDailyBillingImpl` ушли
+раньше как modem-tracking.js/billing.js).
 
 | Target function                  | Lines | Extract to                  | Risk   |
 |----------------------------------|------:|-----------------------------|--------|
-| `_runDailyBillingImpl`           |   215 | `src/jobs/daily-billing.js` | HIGH   |
-| `trackModems`                    |   162 | `src/jobs/modem-monitor.js` | MED    |
-| `runMonthlyReconciliation`       |    95 | `src/jobs/daily-billing.js` | HIGH   |
-| `checkProxyLatency`              |    82 | `src/jobs/modem-monitor.js` | LOW    |
-| `runNightlySpeedtests`           |    78 | `src/jobs/speedtest.js`     | LOW    |
-| `injectOfflineModems`            |    69 | `src/services/modems.js`    | LOW    |
-| `mergeServerData`                |    68 | `src/services/proxy-data.js`| MED    |
-| `runSlaCheck`                    |    61 | `src/jobs/sla.js`           | LOW    |
-| `runAutoReboot`                  |    60 | `src/jobs/auto-reboot.js`   | MED    |
-| `updateKnownModems`              |    50 | `src/services/modems.js`    | LOW    |
-| `computeProxyIssues`             |    45 | `src/services/proxy-data.js`| LOW    |
-| `computeClientSlaMetrics`        |    43 | `src/jobs/sla.js`           | LOW    |
-
-Extracting the LOW/MED-risk set ≈ −710 lines (server.js → ~3,900).
-Touching `_runDailyBillingImpl` and `runMonthlyReconciliation` is HIGH
-risk because they're the billing math — moving them needs a dedicated
-day with all billing tests re-run after every callsite swap.
+| ~~`_runDailyBillingImpl`~~       |   215 | `src/jobs/billing.js`       | HIGH   |
+| ~~`trackModems`~~                |   162 | `src/jobs/modem-tracking.js`| MED    |
+| ~~`runMonthlyReconciliation`~~   |    95 | `src/jobs/monthly-reconciliation.js` | HIGH |
+| ~~`checkProxyLatency`~~          |    82 | `src/jobs/proxy-checks.js`  | LOW    |
+| ~~`runNightlySpeedtests`~~       |    78 | `src/jobs/proxy-checks.js`  | LOW    |
+| ~~`injectOfflineModems`~~        |    69 | `src/services/modems.js`    | LOW    |
+| ~~`mergeServerData`~~            |    68 | `src/services/proxy-data.js`| MED    |
+| ~~`runSlaCheck`~~                |    61 | `src/jobs/sla.js`           | LOW    |
+| ~~`runAutoReboot`~~              |    60 | `src/jobs/auto-reboot.js`   | MED    |
+| ~~`updateKnownModems`~~          |    50 | `src/services/modems.js`    | LOW    |
+| ~~`computeProxyIssues`~~         |    45 | `src/services/proxy-issues.js` | LOW |
+| ~~`computeClientSlaMetrics`~~    |    43 | `src/jobs/sla.js`           | LOW    |
 
 To hit <250 also requires: state declarations (`dailyTraffic`,
 `ipTracking`, `uptimeTracking`, `apiServers`, `appSettings`,
 `tochkaConfig`, `portKeyToPortName`, `knownModems`, `users` — still
 mutable globals; see "src/state/index.js deferred state" below), the
 cron schedule (8 `setInterval` calls), proxy/server data helpers
-(`mergeServerData`, `fetchApi`, `saveApiServersToDb`), and the
+(`fetchApi`, `saveApiServersToDb`), and the
 migration runner (~100 lines). Multi-day work overall.
 
 **Why deferred:** the TZ rule "один этап = один коммит, тесты как
