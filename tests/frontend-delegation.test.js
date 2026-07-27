@@ -77,13 +77,13 @@ describe('delegation.js — парсер (юнит)', () => {
   });
   it('присваивания: window/this.style/obj[key].prop', () => {
     D.execAssign("proto='http'", EL, EV);
-    expect(window.proto).toBe('http');
+    expect(global.window.proto).toBe('http');
     D.execAssign("this.style.background='var(--bg-2)'", EL, EV);
     expect(EL.style.background).toBe('var(--bg-2)');
     D.execAssign("obj.arr[0].v='x'", EL, EV);
-    expect(window.obj.arr[0].v).toBe('x');
+    expect(global.window.obj.arr[0].v).toBe('x');
     D.execAssign("_simState.urls[0].method=this.value", EL, EV);
-    expect(window._simState.urls[0].method).toBeUndefined();
+    expect(global.window._simState.urls[0].method).toBeUndefined();
   });
   it('if-гварды по event.target', () => {
     expect(D.execStatement('if(event.target===this)return false', EL, { target: EL })).toBe(false);
