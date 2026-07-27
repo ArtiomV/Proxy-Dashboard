@@ -102,72 +102,15 @@ function autoMigrateIfNeeded() {
 }
 autoMigrateIfNeeded();
 
-// Run SQL migrations from migrations/ directory
-// Benign SQLite errors we can safely ignore when re-running migrations:
-// re-applied ALTER TABLE ADD COLUMN, re-applied CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS,
-// and similar "already applied" cases. Anything else aborts the migration (fail-fast).
-const BENIGN_MIGRATION_ERRORS = [
-  /duplicate column name/i,   // re-applied ALTER TABLE ADD COLUMN
-  /already exists/i,          // re-applied CREATE TABLE/INDEX/TRIGGER IF NOT EXISTS
-  // P1-3: `no such column` is NOT benign. A migration only runs while it's not in
-  // _migrations (every run here is a first apply), so this error means the
-  // migration's own SQL is buggy — swallowing it would silently skip the intended
-  // change AND mark the file applied, so it never re-runs. Fail fast instead. (No
-  // migration uses DROP/RENAME COLUMN, so nothing legitimately hits this on re-run.)
-];
-function isBenignMigrationError(err) {
-  const msg = (err && err.message) || String(err);
-  return BENIGN_MIGRATION_ERRORS.some(rx => rx.test(msg));
-}
-
-function runMigrations() {
-  db.exec(`CREATE TABLE IF NOT EXISTS _migrations (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    name TEXT UNIQUE NOT NULL,
-    applied_at TEXT DEFAULT (datetime('now'))
-  )`);
-  const migrationsDir = path.join(__dirname, 'migrations');
-  if (!fs.existsSync(migrationsDir)) return;
-  const applied = new Set(db.prepare('SELECT name FROM _migrations').all().map(r => r.name));
-  const files = fs.readdirSync(migrationsDir).filter(f => f.endsWith('.sql')).sort();
-  for (const file of files) {
-    if (applied.has(file)) continue;
-    const sql = fs.readFileSync(path.join(migrationsDir, file), 'utf8');
-    try {
-      // Run the whole migration in a single atomic transaction.
-      // Pre-scan: if the whole file runs as one exec and fails with a non-benign
-      // error, roll back AND don't mark as applied.
-      db.transaction(() => {
-        try {
-          db.exec(sql);
-        } catch (_) {
-          // Fall back to per-statement execution only to tolerate benign
-          // "already applied" errors (so re-runs work). Anything else re-throws.
-          for (const stmt of sql.split(';').map(s => s.trim()).filter(Boolean)) {
-            try { db.exec(stmt); }
-            catch (stmtErr) {
-              if (!isBenignMigrationError(stmtErr)) {
-                throw new Error(`statement failed: ${stmtErr.message}\n  SQL: ${stmt.slice(0, 200)}`);
-              }
-            }
-          }
-        }
-        db.prepare('INSERT INTO _migrations (name) VALUES (?)').run(file);
-      })();
-      logger.info(`[Migration] Applied: ${file}`);
-    } catch (e) {
-      // Hard fail: migration left DB unchanged; surface the actual error.
-      logger.error(`[Migration] FAILED ${file}:`, e.message);
-      // Don't silently continue — abort startup so deploy is visibly broken.
-      throw new Error(`Migration ${file} failed — aborting startup. ${e.message}`);
-    }
-  }
-}
+// Run SQL migrations from migrations/ directory — раннер вынесен в src/db/migrations.js
+// (Stage 9, хвост DoD #1). Контракт прежний: один прогон на файл, транзакция,
+// fail-fast на небезопасной ошибке (старт абортируется ниже).
+const { runMigrations } = require('./src/db/migrations');
 try {
   // sha256hex() must exist before migration 043 runs — it hashes existing
   // api_key rows in pure SQL. Deterministic → safe inside WHERE clauses.
   db.function('sha256hex', { deterministic: true }, sha256hex);
-  runMigrations();
+  runMigrations(db, { migrationsDir: path.join(__dirname, 'migrations'), logger });
 } catch (e) {
   // Migrations failed — abort startup so pm2 records the failure and ops
   // notices the bad deploy. Continuing with mismatched schema risks data

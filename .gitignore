@@ -22,3 +22,4 @@ _recover_*.js
 *.bak-*
 tochka_config.json.tmp
 *.json.tmp
+tochka_config*.json
