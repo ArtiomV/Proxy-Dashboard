@@ -343,9 +343,13 @@ and should follow the same pattern in a future pass:
 - **WP6.2** /api/admin/data — 5 деградирующих секций
 
 Отложено по требованию самого ТЗ:
-- **WP3 (ядро, деньги)** — единый писатель recordDailyTraffic, client_name в
-  daily_traffic, биллинг целиком на daily_traffic. Ждём неделю метрик
-  balance-reconcile на проде (дрейф до/после), старт не раньше 2026-07-25.
+- ~~**WP3 (ядро, деньги)**~~ — **ЗАКРЫТ (2026-07-27).** Писатели приняты:
+  единый `recordDailyTraffic` + `client_name` в daily_traffic (миграция 052,
+  коммит 77e4b09). Флип durable-чтения биллинга на daily_traffic —
+  **ОТКЛОНЁН измерениями** (трёхсторонняя сверка за 2026-07-26: у Brandanalytics
+  hourly-first точнее pmacct −1.2% против −5.0% у daily; daily теряет
+  до-сбросный трафик на флапающих модемах). Чтение остаётся hourly-first.
+  Подробности в docs/adr-traffic-sources.md.
 - **WP6.1/6.3/6.4/6.5** — analytics split, admin.js по вкладкам, server.js
   (billing/backup/scheduler), tochka/proxies группировка. По одному файлу
   за итерацию, каждый с characterization-тестами.
