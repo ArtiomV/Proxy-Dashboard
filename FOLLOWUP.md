@@ -148,11 +148,13 @@ historical notes (e.g. "moved in Stage 4"). Verified via:
 
 ## Backlog: src/jobs extraction (DoD #1 path)
 
-server.js is at **4,428** lines vs. the TZ's <250 aspirational target.
-Extracted so far: cleanup.js (−225), tochka-cron.js (−245),
-top-hosts.js (−113), crm-sync.js (−38), billing.js, modem-tracking.js,
-sla.js, proxy-checks.js, auto-reboot.js, monthly-reconciliation.js,
-services/modems.js, services/proxy-data.js, services/proxy-issues.js.
+server.js is at **3,858** lines vs. the TZ's <250 aspirational target.
+Extracted so far: cleanup.js, tochka-cron.js, top-hosts.js, crm-sync.js,
+billing.js, modem-tracking.js, sla.js, proxy-checks.js, auto-reboot.js,
+monthly-reconciliation.js, services/modems.js, services/proxy-data.js,
+services/proxy-issues.js, db/migrations.js, daily-schedule.js,
+watchdogs.js, telegram/summary-loop.js, hourly-agg-schedule.js,
+**boot/startup.js** (вся стартовая последовательность app.listen — 2026-07-27).
 
 **Таблица целей ниже — ЗАКРЫТА полностью (2026-07-27).** Все 12 функций
 из неё вынесены (последние три — 7219664 с characterization-тестами
