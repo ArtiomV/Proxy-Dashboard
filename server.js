@@ -3111,6 +3111,17 @@ app.use(require('./src/routes/clients')({
 
 // API Servers management
 // Servers + settings routes moved to src/routes/servers.js (Stage 3).
+// Dynamic speedtest scheduler + суточное расписание вынесены в
+// src/jobs/daily-schedule.js (Stage 9, boot-хвост). speedtestTimers/cronTimers
+// — те же объекты по ссылке для gracefulShutdown. runNightlySpeedtests
+// объявлен ниже по файлу — ленивая обёртка (тот же паттерн, что syncRotationLog).
+const _dailySched = require('./src/jobs/daily-schedule').create({
+  logger, scheduler: require('./src/jobs/scheduler'),
+  getAppSettings: () => appSettings, getTzOffset,
+  runNightlySpeedtests: (...args) => runNightlySpeedtests(...args),
+});
+const scheduleRepeating = _dailySched.scheduleRepeating;
+const rescheduleSpeedtests = _dailySched.rescheduleSpeedtests;
 app.use(require('./src/routes/servers')({
   logger, authMiddleware, adminMiddleware,
   apiServers, SERVER_COUNTRIES, appSettings,
@@ -3376,48 +3387,8 @@ async function runDomainGuard() { return _initDomainGuardJob().runDomainGuard();
 //   min_count  — drop rows with count < N (default 1)
 
 
-// Dynamic speedtest scheduler (supports multiple times per day)
-let speedtestTimers = [];
-
-function rescheduleSpeedtests() {
-  // Clear existing timers
-  speedtestTimers.forEach(t => { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); });
-  speedtestTimers = [];
-
-  const times = appSettings.speedtest_times || ['02:00', '14:00'];
-  const mskOff = getTzOffset('Europe/Moscow');
-  for (const timeStr of times) {
-    const parts = timeStr.split(':').map(Number);
-    if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) continue;
-    const utcHour = (parts[0] - mskOff + 24) % 24;
-    scheduleRepeating(utcHour, parts[1], 'Speedtest-' + timeStr + ' MSK', runNightlySpeedtests, true);
-  }
-}
-
-const _cronTimers = []; // Non-speedtest cron timers (billing, reconciliation, etc.)
-// WP6.4: unified scheduler registry (src/jobs/scheduler.js) — every recurring
-// job is registered with name/schedule/runs/last-error for /api/admin/health.
-const scheduler = require('./src/jobs/scheduler');
-function scheduleRepeating(hour, minute, label, fn, isSpeedtest) {
-  const now = new Date();
-  const next = new Date();
-  next.setUTCHours(hour, minute, 0, 0);
-  if (next <= now) next.setDate(next.getDate() + 1);
-  const msUntil = next - now;
-  logger.info(`[${label}] Next run at ${next.toISOString()} (in ${Math.round(msUntil / 60000)} min)`);
-  const entry = {};
-  // WP6.4: every recurring job registers in the unified scheduler registry
-  // (name/schedule/runs/last-error → /api/admin/health).
-  const { safeFn, job } = scheduler.wrapJob(label,
-    `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')} UTC`, fn, logger);
-  job.nextRunAt = next.toISOString();
-  entry.timeout = setTimeout(() => {
-    safeFn();
-    entry.interval = setInterval(safeFn, 24 * 60 * 60 * 1000);
-  }, msUntil);
-  if (isSpeedtest) speedtestTimers.push(entry);
-  else _cronTimers.push(entry);
-}
+// _dailySched создан выше (перед роутером servers — там первое load-time
+// использование rescheduleSpeedtests).
 
 // Single flow: fetch → save daily_traffic → charge → retry on failure
 // runDailyBilling extracted to src/jobs/billing.js (WP6.4) — verbatim move.
@@ -3786,58 +3757,9 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   // Stage 18.13: hourly health / capacity check — fires alerts for heap,
   // disk, and stuck cron jobs. Hourly because these change slowly; firing
   // more often just wastes resources without giving more warning value.
-  _intervals.push(setInterval(() => {
-    try {
-      // Memory check — compare heapUsed against V8's `heap_size_limit`
-      // (the actual OOM ceiling, ~4 GB by default on x64), NOT `heapTotal`.
-      // Stage 18.14: was using heapTotal which is just the *currently
-      // allocated* chunk; V8 grows it on demand so heapUsed/heapTotal sits
-      // near 100% during normal GC cycles. We were alerting at 36 MB / 38 MB
-      // = 95% even though there were gigabytes of headroom. pm2 only kills
-      // on `max_memory_restart` (rss-based), not on this ratio.
-      const mu = process.memoryUsage();
-      const v8stats = require('v8').getHeapStatistics();
-      const usedMB = Math.round(mu.heapUsed / 1024 / 1024);
-      const totalMB = Math.round(v8stats.heap_size_limit / 1024 / 1024);
-      const pct = totalMB > 0 ? Math.round(usedMB / totalMB * 100) : 0;
-      if (pct >= 90)      alerts.trigger('heap_high', { pct, usedMB, totalMB });
-      else if (pct >= 85) alerts.trigger('heap_warn', { pct, usedMB, totalMB });
-
-      // Disk check — statfs of the app's own partition (P1-6: was hardcoded to
-      // /root/Proxy-Dashboard, which silently no-op'd the disk alert on any other
-      // host/path; __dirname follows the app wherever it's deployed).
-      try {
-        const stat = fs.statfsSync(__dirname);
-        const freeB  = stat.bavail * stat.bsize;
-        const totalB = stat.blocks * stat.bsize;
-        const freeGB = Math.round(freeB / 1e9 * 10) / 10;
-        const freePct = totalB > 0 ? Math.round(freeB / totalB * 100) : 100;
-        if (freePct < 10)      alerts.trigger('disk_low_critical', { freeGB, pct: freePct });
-        else if (freePct < 20) alerts.trigger('disk_low_warn',     { freeGB, pct: freePct });
-      } catch (e) { /* statfs may not work on some FS — best-effort */ }
-
-      // Cron-health check — for crons we know the expected interval, did we
-      // run within 2x? Tracking via system_log entries.
-      const cronChecks = [
-        { job: 'DailyBilling', action: 'billing_start', maxAgeH: 26 },
-        { job: 'HourlyAgg',    action: 'tracking_complete', maxAgeH: 1 },  // tracking ~5min
-        { job: 'TopHosts',     action: 'top_hosts_complete', maxAgeH: 26 },
-      ];
-      for (const ck of cronChecks) {
-        try {
-          const row = db.prepare("SELECT MAX(timestamp) AS last FROM system_log WHERE action = ?").get(ck.action);
-          if (!row || !row.last) continue;
-          const ageH = (Date.now() - Date.parse(row.last + 'Z')) / 3600000;
-          if (ageH > ck.maxAgeH * 2) {
-            alerts.trigger('cron_stuck', {
-              job: ck.job, lastRunAgo: Math.round(ageH) + ' ч',
-              intervalLabel: ck.maxAgeH + ' ч',
-            });
-          }
-        } catch (_) { /* best-effort */ }
-      }
-    } catch (e) { logger.warn('[Alerts] hourly check: ' + e.message); }
-  }, 60 * 60 * 1000));
+  // Watchdogs (heap/disk/cron-health) вынесены в src/jobs/watchdogs.js (Stage 9, boot-хвост).
+  const _watchdogs = require('./src/jobs/watchdogs').create({ db, logger, alerts, logActivity, fs });
+  _intervals.push(setInterval(_watchdogs.hourlyHealthCheck, 60 * 60 * 1000));
 
   // Stage 18.13: daily proxy-expiry check at 09:30 МСК (06:30 UTC) — alert
   // for ports expiring within 3 days. Runs once per day; per-port cooldown
@@ -3982,33 +3904,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   // Heap & disk watchdog — fires every 5 min, alerts on threshold crossings.
   // Heap > 85% of total → log + system_log (telegram alert via logActivity).
   // Disk free < 500 MB on backup volume → same.
-  _intervals.push(setInterval(() => {
-    try {
-      // Stage 18.14: see comment in the hourly heap check above — using
-      // heapTotal as the denominator is wrong (it's the *current allocation*,
-      // not the limit). Compare against V8 heap_size_limit instead.
-      const mem = process.memoryUsage();
-      const limit = require('v8').getHeapStatistics().heap_size_limit;
-      const pct = limit > 0 ? Math.round((mem.heapUsed / limit) * 100) : 0;
-      if (pct > 85) {
-        logActivity('system', 'warn', 'heap_high', null, `Heap ${pct}% (${Math.round(mem.heapUsed/1e6)}MB / ${Math.round(limit/1e6)}MB)`, { pct, heapUsed: mem.heapUsed, heapLimit: limit });
-      }
-    } catch (_) { /* best-effort: error intentionally swallowed */ }
-    try {
-      // Disk free via statfs (Node 18.15+)
-      const target = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
-      if (fs.statfs) {
-        fs.statfs(fs.existsSync(target) ? target : '/', (err, st) => {
-          if (err) return;
-          const freeBytes = st.bavail * st.bsize;
-          const freeMb = Math.round(freeBytes / 1e6);
-          if (freeMb < 500) {
-            logActivity('system', 'critical', 'disk_low', null, `Free disk ${freeMb} MB on ${target}`, { freeMb });
-          }
-        });
-      }
-    } catch (_) { /* best-effort: error intentionally swallowed */ }
-  }, 5 * 60 * 1000));
+  _intervals.push(setInterval(_watchdogs.heapDiskWatchdog, 5 * 60 * 1000));
   // Nightly DB backup (02:00) + history pruning (02:30) — extracted to
   // src/jobs/backup.js (WP6.4). Scheduled here via the unified registry.
   const backupJobs = require('./src/jobs/backup').create({ db, logger, logActivity, fs, path });
@@ -4292,7 +4188,7 @@ function gracefulShutdown(signal) {
   if (_proxyCheckInterval) clearInterval(_proxyCheckInterval);
   for (const iv of _intervals) clearInterval(iv);
   _intervals.length = 0;
-  for (const t of speedtestTimers.concat(_cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }
+  for (const t of _dailySched.speedtestTimers.concat(_dailySched.cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }
   // Stop the telegram poll loop (avoid hanging in long-poll for 25s after SIGTERM)
   try { if (tgBot && tgBot.stop) tgBot.stop(); } catch (_) { /* best-effort: error intentionally swallowed */ }
 
