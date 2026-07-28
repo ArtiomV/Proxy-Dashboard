@@ -1511,6 +1511,7 @@ const SETTINGS_DEFAULTS = {
   auto_reboot_enabled:         false, // disabled by default — admin enables in Settings
   auto_reboot_min_interval_min: 60,   // throttle: don't reboot same modem more often than this
   stale_modem_hours: 12,              // Stage 18.8 — exclude modems offline >Nh from agg endpoints
+  modem_offline_threshold_min: 10,    // 2026-07-28 — минут тишины, после которых модем «отключен» (карточка + TG-алерт)
   // Speedtest (additional)
   speedtest_low_threshold: 1,
   speedtest_retest_delay_min: 10,

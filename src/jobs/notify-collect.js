@@ -80,12 +80,14 @@ async function runOnce() {
 //   - the >12h stale suppression meant «в карточке есть, в колокольчике
 //     тишина» — removed; day-level dedup below keeps it from flooding.
 async function passOfflineModems() {
-  const { alerts, uptimeTracking, trackingDb, fetchAllServersDataCached, mergeServerData } = deps;
+  const { alerts, uptimeTracking, trackingDb, fetchAllServersDataCached, mergeServerData, getSetting } = deps;
   if (!trackingDb || !fetchAllServersDataCached || !mergeServerData) return;
   const day = todayBucket();
   const results = await fetchAllServersDataCached();
   const merged = mergeServerData(results, '*');
-  const fleet = computeFleet(trackingDb.metaFleetRoster.all(), uptimeTracking, merged.status || []);
+  // Same disconnected threshold as the card (modem_offline_threshold_min, default 10).
+  const discMs = (Number(getSetting && getSetting('modem_offline_threshold_min', 10)) || 10) * 60000;
+  const fleet = computeFleet(trackingDb.metaFleetRoster.all(), uptimeTracking, merged.status || [], { disconnectedMs: discMs });
   for (const o of fleet.disconnectedList) {
     const lastMs = o.lastOnline || 0;
     const mins = lastMs ? Math.floor((Date.now() - lastMs) / 60000) : 0;

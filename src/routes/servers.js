@@ -195,6 +195,12 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.stale_modem_hours != null) {
     patch.stale_modem_hours = Math.max(1, Math.min(168, parseInt(req.body.stale_modem_hours) || 12));
   }
+  // 2026-07-28: minutes of darkness before a modem counts as «отключен»
+  // (fleet disconnectedMs → card + working counts + TG alert). Bounded
+  // 1..120 min — below the tracking poll it would flap on every rotation.
+  if (req.body.modem_offline_threshold_min != null) {
+    patch.modem_offline_threshold_min = Math.max(1, Math.min(120, parseInt(req.body.modem_offline_threshold_min) || 10));
+  }
   if (pricing_tiers && Array.isArray(pricing_tiers)) {
     patch.pricing_tiers = pricing_tiers.map(t => ({
       min_proxies: parseInt(t.min_proxies) || 1,

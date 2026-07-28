@@ -390,8 +390,10 @@ function _trafficSection(merged) {
 function _fleetSection(merged, sanitizedClients) {
   // Modem fleet KPI — one coherent count (src/modems/fleet.js):
   //   total = active = STABLE roster (no 48h cut-off since 2026-07-28);
-  //   working = active − disconnected.
-  const fleet = computeFleet(_fleetMetaStmt.all(), getUptimeTracking(), merged.status || []);
+  //   working = active − disconnected. The disconnected threshold is the
+  //   modem_offline_threshold_min setting (default 10 min).
+  const _discMs = (Number(appSettings.modem_offline_threshold_min) || 10) * 60000;
+  const fleet = computeFleet(_fleetMetaStmt.all(), getUptimeTracking(), merged.status || [], { disconnectedMs: _discMs });
   // Per-client «в работе» with fleet semantics (active ∩ not-dark-≥10min).
   const _clientWorking = computeClientWorking(getKnownModems(), fleet);
   for (const c of sanitizedClients) {

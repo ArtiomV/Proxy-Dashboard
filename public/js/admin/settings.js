@@ -172,6 +172,9 @@ function loadSettings(){
     // Stage 18.8: stale_modem_hours — threshold for "offline modem" exclusion from aggregations.
     var _smhEl=document.getElementById('staleModemHoursInput');if(_smhEl)_smhEl.value=s.stale_modem_hours!=null?s.stale_modem_hours:12;
     window._staleModemHours = s.stale_modem_hours != null ? s.stale_modem_hours : 12;
+    // 2026-07-28: modem_offline_threshold_min — минут тишины до статуса «отключен».
+    window._offlineThresholdMin = s.modem_offline_threshold_min != null ? s.modem_offline_threshold_min : 10;
+    var _motEl=document.getElementById('modemOfflineThresholdInput');if(_motEl)_motEl.value=window._offlineThresholdMin;
     var _palEl=document.getElementById('proxyAlertLatencyInput');if(_palEl)_palEl.value=s.proxy_alert_latency_ms!=null?s.proxy_alert_latency_ms:1500;
     var _paeEl=document.getElementById('proxyAlertErrorPctInput');if(_paeEl)_paeEl.value=s.proxy_alert_error_pct!=null?s.proxy_alert_error_pct:5;
     var _pawEl=document.getElementById('proxyAlertWindowInput');if(_pawEl)_pawEl.value=s.proxy_alert_window_min!=null?s.proxy_alert_window_min:60;
@@ -295,7 +298,9 @@ function saveSettings(){
   _minSpeedThreshold=minSpeed;
   _errorRateThreshold=errThresh;
   var staleH=parseInt(document.getElementById('staleModemHoursInput').value)||12;
-  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_times:times,min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_low_threshold:lowThresh,speedtest_retest_delay_min:retestDelay,speedtest_max_history:maxHist,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,stale_modem_hours:staleH}}).then(function(d){
+  var offThMin=parseInt((document.getElementById('modemOfflineThresholdInput')||{}).value)||10;
+  window._offlineThresholdMin=offThMin;
+  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_times:times,min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_low_threshold:lowThresh,speedtest_retest_delay_min:retestDelay,speedtest_max_history:maxHist,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
     if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Расписание обновлено: '+times.join(', ')+' UTC';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});

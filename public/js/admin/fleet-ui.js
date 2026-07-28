@@ -43,7 +43,7 @@ function renderModemsTopBar(){
     if(!_hasActiveClient(m))free++;
   }
   function chip(id,label,count,clr){var on=activeQuickFilter===id;return '<button class="qf-chip'+(on?' active':'')+'" data-f="'+id+'" data-on-click="setQuickFilter(\''+id+'\')">'+label+'<span class="qf-count"'+(clr&&!on?' style="color:'+clr+'"':'')+'>'+count+'</span></button>';}
-  var chips='<div class="qf-chips" title="Все/Онлайн — по парку (fleet): активные / в работе (онлайн + блип &lt;10 мин), как на дашборде. Тест-пул (🧪) в счётчики не входит">'
+  var chips='<div class="qf-chips" title="Все/Онлайн — по парку (fleet): активные / в работе (онлайн + блип &lt;'+(window._offlineThresholdMin||10)+' мин), как на дашборде. Тест-пул (🧪) в счётчики не входит">'
     +chip('all','Все',total,'')
     +chip('online','Онлайн',online,'var(--success)')
     +chip('problem','Проблемы',problem,'var(--warning)')

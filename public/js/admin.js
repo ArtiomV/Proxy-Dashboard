@@ -1210,6 +1210,10 @@ function _loadProxyCheckThresholds(){
       // «Не в стат.» chip uses it to decide who's excluded from analytics.
       var smh=Number(s.stale_modem_hours);
       if(smh>0&&window._staleModemHours!==smh){window._staleModemHours=smh;changed=true;}
+      // 2026-07-28: same bootstrap for modem_offline_threshold_min — the
+      // «отключено >N мин» labels and the блип tooltip read it.
+      var mot=Number(s.modem_offline_threshold_min);
+      if(mot>0&&window._offlineThresholdMin!==mot){window._offlineThresholdMin=mot;changed=true;}
       if(changed&&currentData&&typeof renderTable==='function'){try{renderTable();}catch(_){}}
     })
     .catch(function(){});
@@ -1613,9 +1617,10 @@ function updateHeaderStats(){
   var _flWorking=(_fl.working!=null)?_fl.working:_flLive;
   var _flTotal=(_fl.total!=null)?_fl.total:total;
   if(_flTotal<_flWorking)_flTotal=_flWorking;
-  var _flDown=Math.max(0,_flTotal-_flWorking);          // отключено >10 мин
-  var _flBlip=Math.max(0,_flWorking-_flLive);           // молчат <10 мин (блип)
-  var title='В парке: '+_flTotal+' · рабочих: '+_flWorking+' (онлайн сейчас '+_flLive+', блипов '+_flBlip+') · отключено >10м: '+_flDown;
+  var _flDown=Math.max(0,_flTotal-_flWorking);          // отключено >N мин (порог)
+  var _flBlip=Math.max(0,_flWorking-_flLive);           // молчат <N мин (блип)
+  var _offMin=window._offlineThresholdMin||10;
+  var title='В парке: '+_flTotal+' · рабочих: '+_flWorking+' (онлайн сейчас '+_flLive+', блипов '+_flBlip+') · отключено >'+_offMin+'м: '+_flDown;
   document.getElementById('headerStats').innerHTML='<div class="stat-badge" title="'+title+'">В работе: <span style="color:var(--success)">'+_flWorking+'</span>/<span>'+_flTotal+'</span></div>';
 }
 // Top progress bar = countdown to next auto-refresh. Pure CSS transition: snap to
@@ -3310,7 +3315,7 @@ function renderNewActionCenter(d){
   var h = '<div class="analytics-card" style="margin-bottom:18px">';
   h += '<div style="font-size:12px;font-weight:600;color:var(--text-0);margin-bottom:8px">⚠ Требует внимания'+(allOk?' <span style="color:var(--success);font-weight:500;font-size:11px">· всё спокойно</span>':'')+'</div>';
   h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px">';
-  h += _ncStatRow('📴 Модемов отключено >10м', disc, null, 'danger');
+  h += _ncStatRow('📴 Модемов отключено >'+(window._offlineThresholdMin||10)+'м', disc, null, 'danger');
   h += _ncStatRow('🐌 Сбоят прокси', issues, null, 'warn');
   h += _ncStatRow('💸 Клиентов в долгу', debtors.length, debtors.length?_fmtRub(debtSum):null, 'danger');
   h += _ncStatRow('⏸ На паузе', paused, null, 'warn');
