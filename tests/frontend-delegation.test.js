@@ -96,7 +96,7 @@ describe('delegation — покрытие data-on-* (Stage 11 lock)', () => {
   beforeEach(() => {
     global.window = { _simState: { urls: { X: {}, 0: {} } }, API: '', authToken: '', X: 0, open: () => {} };
   });
-  const ATTR = /data-on-(click|change|input|submit|keydown|keyup|focus|blur|mouseover|mouseout)="((?:[^"\\]|\\.)*)"/g;
+  const ATTR = /data-on-(click|change|input|submit|keydown|keyup|focus|blur|mouseover|mouseout|mouseenter|mouseleave)="((?:[^"\\]|\\.)*)"/g;
   it('все data-on-* парсятся грамматой', () => {
     let total = 0;
     const fails = [];
@@ -114,7 +114,7 @@ describe('delegation — покрытие data-on-* (Stage 11 lock)', () => {
     expect(total).toBeGreaterThan(400);
   });
   it('инлайн-атрибутов on* в разметке не осталось', () => {
-    const INLINE = /\son(click|change|input|submit)="/;
+    const INLINE = /\son(click|change|input|submit|mouseenter|mouseleave)="/;
     for (const f of FILES) {
       const src = fs.readFileSync(path.join(__dirname, '..', f), 'utf8');
       expect(INLINE.test(src), f).toBe(false);

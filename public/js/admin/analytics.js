@@ -353,7 +353,7 @@ function renderAccSubTab(name){
         var opTotalGb=fmtGb(v.t);
         var opTotalDay=fmtGb(total_per_day);
         var opEsc=op.replace(/'/g,"\\'").replace(/"/g,'&quot;');
-        opH+='<div style="margin-bottom:8px;cursor:pointer" onmouseenter="showOpTT(\''+opEsc+'\',\''+opTotalGb+'\',\''+opTotalDay+'\',\''+avg_per_modem_day+'\','+v.cnt+',event)" onmouseleave="hideFloatTooltip(\'opTT\')">';
+        opH+='<div style="margin-bottom:8px;cursor:pointer" data-on-mouseenter="showOpTT(\''+opEsc+'\',\''+opTotalGb+'\',\''+opTotalDay+'\',\''+avg_per_modem_day+'\','+v.cnt+',event)" data-on-mouseleave="hideFloatTooltip(\'opTT\')">';
         opH+='<div style="display:flex;align-items:baseline;font-size:10px;margin-bottom:2px;gap:4px">';
         opH+='<span style="flex:1;color:var(--text-1);font-weight:500">'+flag+esc(op)+'</span>';
         opH+='<span style="color:var(--text-2)">'+avg_per_modem_day+'/мод/сут</span>';
@@ -434,7 +434,7 @@ function renderAccSubTab(name){
         var hPx=spkPts[si]>0?Math.max(Math.round(spkPts[si]/spkMax*14),2):1;
         var isToday=si===spkDays-1;
         sparkH+='<div style="width:'+spkBarW+'px;height:'+hPx+'px;background:'+clientColor+';border-radius:1px 1px 0 0;opacity:'+(isToday?'1':'0.5')+';cursor:pointer"';
-        sparkH+=' onmouseenter="showSpkTT(\''+spkClientKey+'\','+si+',event)" onmouseleave="hideFloatTooltip(\'spkTT\')"></div>';
+        sparkH+=' data-on-mouseenter="showSpkTT(\''+spkClientKey+'\','+si+',event)" data-on-mouseleave="hideFloatTooltip(\'spkTT\')"></div>';
       }
       sparkH+='</div>';
       hc+='<div class="ct-row" data-client="'+esc(n)+'" data-on-click="selectClient(\''+esc(n)+'\')">';
@@ -578,7 +578,7 @@ function renderTrendCard(months,sfx){sfx=sfx||'';
     // Ширина/зазор столбца — как в MRR: столбец занимает ~48% слота по центру
     // (barPercentage 0.6 × categoryPercentage 0.8), потолок = maxBarThickness 22.
     bH+='<div style="flex:1;display:flex;flex-direction:column;align-items:center;cursor:pointer"';
-    bH+=' onmouseenter="onTrendHover('+i+',event)" onmouseleave="onTrendLeave()">';
+    bH+=' data-on-mouseenter="onTrendHover('+i+',event)" data-on-mouseleave="onTrendLeave()">';
     if(fcPx>0)bH+='<div style="width:48%;max-width:22px;height:'+fcPx+'px;background:#85B7EB;border-radius:3px 3px 0 0;opacity:.7"></div>';
     bH+='<div style="width:48%;max-width:22px;height:'+factPx+'px;background:'+bg+';border-radius:'+(fcPx>0?'0':'3px 3px')+' 0 0;transition:opacity .12s"></div>';
     bH+='</div>';
@@ -802,7 +802,7 @@ function renderHeatmap(data,ctx){
         ? col+';background-image:repeating-linear-gradient(45deg, rgba(255,255,255,0.45) 0 3px, transparent 3px 6px)'
         : col;
       h+='<div style="flex:1;height:28px;border-radius:3px;background:'+bg+';cursor:pointer;transition:opacity .1s;position:relative"';
-      h+=' onmouseenter="showHeatTT('+di+','+hr+',event,this'+(ctx.self?','+ctx.self:'')+')" onmouseleave="hideFloatTooltip(\''+ctx.ttId+'\')">';
+      h+=' data-on-mouseenter="showHeatTT('+di+','+hr+',event,this'+(ctx.self?','+ctx.self:'')+')" data-on-mouseleave="hideFloatTooltip(\''+ctx.ttId+'\')">';
       if(isCorrected)h+='<span style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;color:rgba(0,0,0,0.55);font-weight:600" title="Час содержит данные восстановленные после сбоя счётчика — значение приблизительное">⚠</span>';
       h+='</div>';
     });

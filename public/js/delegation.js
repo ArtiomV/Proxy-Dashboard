@@ -313,7 +313,7 @@
     }
   }
 
-  const TYPES = ['click', 'change', 'input', 'submit', 'keydown', 'keyup', 'focus', 'blur', 'mouseover', 'mouseout'];
+  const TYPES = ['click', 'change', 'input', 'submit', 'keydown', 'keyup', 'focus', 'blur', 'mouseover', 'mouseout', 'mouseenter', 'mouseleave'];
   for (const t of TYPES) {
     document.addEventListener(t, (ev) => dispatch(ev, t), true);
   }
