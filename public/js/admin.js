@@ -2069,7 +2069,7 @@ function regenerateApiKeyInForm(){
       // Load CRM reminders then generate notifications
       api(API+'/api/admin/crm_reminders').then(function(d){window._crmReminders=d.reminders||[];}).catch(function(){window._crmReminders=[];}).finally(function(){generateNotifications()});
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
-      var _st=localStorage.getItem('admin_active_tab')||'dashboard';var _te=document.querySelector('.nav-tab[onclick*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te);
+      var _st=localStorage.getItem('admin_active_tab')||'dashboard';var _te=document.querySelector('.nav-tab[data-on-click*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te);
       startAutoRefresh()
     })
     .catch(function(e){
@@ -3140,7 +3140,7 @@ function renderAccNew(){
     });
     ['country','operator','client'].forEach(function(v){var b=document.getElementById('newHmTab'+v.charAt(0).toUpperCase()+v.slice(1));if(b)b.classList.toggle('active',v===_newHmView);});
     ['clients','countries'].forEach(function(x){var b=document.getElementById('newDailyMode_'+x);if(b)b.classList.toggle('active',x===_newDailyMode);});
-    document.querySelectorAll('#tab-dashboard [onclick^="setNewInfraDays("]').forEach(function(c){c.classList.toggle('on',c.getAttribute('onclick').indexOf('setNewInfraDays('+_NEW_INFRA_DAYS+',')===0);});
+    document.querySelectorAll('#tab-dashboard [data-on-click^="setNewInfraDays("]').forEach(function(c){c.classList.toggle('on',c.getAttribute('data-on-click').indexOf('setNewInfraDays('+_NEW_INFRA_DAYS+',')===0);});
   }
   // Секции, раскрытые по умолчанию (open в разметке), не получают событие toggle —
   // подгружаем их содержимое один раз здесь.

@@ -1213,7 +1213,7 @@ function renderTable(){
       var loginPassHtml='-';
       if(row.proxyLogin||row.proxyPassword){
         var loginPassStr=escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword);
-        loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword)+'\',this)">\ud83d\udccb</button>';
+        loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.proxyLogin).replace(/'/g,"\\'")+':'+escapeHtml(row.proxyPassword).replace(/'/g,"\\'")+'\',this)">\ud83d\udccb</button>';
       }
 
       // Смена IP cell: reset link + copy button + IP history button

@@ -1805,12 +1805,15 @@ app.use((req, res, next) => {
 app.use(express.json({ limit: '100kb' }));
 app.use(express.static(path.join(__dirname, 'public'), {
   setHeaders: (res, filePath) => {
-    // App code (html/js/css) changes on every deploy — never cache it, or the
-    // browser AND Cloudflare serve a stale build for hours (was the cause of
-    // «не обновляется» + the phantom delete-button HTML error). Fonts/images
-    // keep the default long cache (they're effectively immutable).
+    // App code (html/js/css) changes on every deploy — force revalidation on
+    // every load so neither the browser NOR Cloudflare serves a stale build
+    // (was the cause of «не обновляется» + the phantom delete-button HTML
+    // error). `no-cache` (not `no-store`): unchanged files get a cheap 304
+    // instead of a full re-download — on the throttled RU↔CF leg `no-store`
+    // cost ~1MB of re-downloads on every page load. Fonts/images keep the
+    // default long cache (they're effectively immutable).
     if (/\.(html|js|css)$/i.test(filePath)) {
-      res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+      res.setHeader('Cache-Control', 'no-cache');
     }
   }
 }));
