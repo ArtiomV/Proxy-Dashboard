@@ -268,13 +268,12 @@ function renderAccSubTab(name){
         if(m.lowSpeed)rtLowSpeed.push({nick:m.nick,server:m.server,detail:'↓'+Number(m.lastSpeedDl||0).toFixed(1)+' / ↑'+Number(m.lastSpeedUl||0).toFixed(1)+' Mbps'});
         if(m.ipStuck)rtStuckIp.push({nick:m.nick,server:m.server,detail:'IP не менялся '+m.ipSinceHours+'ч · '+esc(m.extIp||'')});
       });
-      // The «Модем отключен» count/list now come from the coherent fleet model
-      // (consistent with the «X/Y» header): a modem online within 48h but not
-      // online now. This replaces the old live-_modemMap list that hid modems
-      // offline >12h, which caused «84 online / 0 offline» to disagree.
-      // «Модем отключен» = модемы, которые молчат уже >10 мин (disconnectedList).
-      // Кратковременный мигающий офлайн (один пропущенный опрос) сюда не попадает —
-      // это тот же порог, на котором уходит уведомление в телегу/колокольчик.
+      // The «Модем отключен» count/list come from the coherent fleet model
+      // (consistent with the «X/Y» header): roster modems that are dark ≥10 мин
+      // (disconnectedList) — including long-dead ones (no 48h cut-off since
+      // 2026-07-28). Кратковременный мигающий офлайн (один пропущенный опрос)
+      // сюда не попадает — это тот же порог, на котором уходит уведомление в
+      // телегу/колокольчик.
       var _offSrc = (currentData.fleet && (currentData.fleet.disconnectedList || currentData.fleet.offlineList)) || null;
       if (Array.isArray(_offSrc)) {
         rtOffline = _offSrc.map(function(o){

@@ -8,31 +8,30 @@
 //   total (всего)     — STABLE roster: every real modem in modem_meta
 //                       (non-random, non-test, not soft-deleted). Changes only
 //                       when hardware is added or soft-deleted — NOT when a
-//                       modem/server goes dark, NOT when the 48h window slides
-//                       past, NOT on a glitched-to-random re-enumeration.
-//                       «Сколько модемов у нас есть» — the static denominator.
-//   active (активные) — roster modems seen ONLINE within `retentionMs` (48h),
-//                       ∪ online right now. The operational set behind
-//                       online/offline/working and the «Модем отключен» card —
-//                       long-dead roster members stay in `total` but don't
-//                       spam the operational numbers.
+//                       modem/server goes dark, NOT on a glitched-to-random
+//                       re-enumeration. «Сколько модемов у нас есть».
+//   active (активные) — the whole roster (2026-07-28: the 48h retention rule
+//                       was REMOVED — a long-dead modem no longer drops out of
+//                       the operational set; it stays visible as offline and
+//                       in the «Модем отключен» card instead of silently
+//                       vanishing into the denominator).
 //
 //   online (онлайн)   — roster modems reported IS_ONLINE=yes in the live snapshot.
-//   offline (офлайн)  — active − online (recently alive, dark right now).
+//   offline (офлайн)  — active − online (not up right now, however long).
 //   disconnected      — offline dark ≥ disconnectedMs (default 10 min) → the
 //                       «Модем отключен» card and the offline alert threshold;
 //                       a transient one-poll blip stays out.
 //   working (в работе)— active − disconnected (online + brief blips). The
 //                       headline numerator: jumps when modems actually flap.
 //
-// Invariants: online ≤ active ≤ total; offline = active − online;
+// Invariants: online ≤ active = total; offline = active − online;
 //             working = active − disconnected; online ≤ working.
 //
 // Inputs:
 //   metaRows   [{ srv, imei, nick }]  — modem_meta rows (non-random, non-test).
 //   uptime     { 'srv_imei': { last_online_check } }  — in-memory uptime_tracking.
 //   liveStatus  merged.status array — live snapshot (IMEIs prefixed 'S<n>_…').
-//   opts.now / opts.retentionMs / opts.disconnectedMs
+//   opts.now / opts.disconnectedMs
 // The single «модем отключён» threshold (WP1): 10 minutes of darkness before
 // a modem lands in the disconnected card, the offline alert, and working
 // counts. notify-collect.js and modem-tracking.js import it from here —
@@ -42,13 +41,13 @@ const DISCONNECTED_MS = 10 * 60 * 1000;
 function computeFleet(metaRows, uptime, liveStatus, opts) {
   opts = opts || {};
   const now = opts.now || Date.now();
-  const retentionMs = opts.retentionMs || 48 * 3600 * 1000;   // 48h: online within 2 days = active
   const disconnectedMs = opts.disconnectedMs != null ? opts.disconnectedMs : DISCONNECTED_MS;
   const fleet = new Map();   // 'srv|imei' -> { srv, nick, online, lastOnline, active }
 
-  // 1) Roster membership (STABLE total): every real modem meta row — including
-  //    long-dead ones; they leave the total only via soft-delete. `active`
-  //    separately marks the 48h operational set.
+  // 1) Roster membership (STABLE total == active): every real modem meta row —
+  //    including long-dead ones; they leave only via soft-delete. Since
+  //    2026-07-28 there is NO 48h window: a roster modem is always in the
+  //    operational set, so a dead one stays counted offline/disconnected.
   for (const r of (metaRows || [])) {
     if (!r || !r.imei || !r.srv) continue;
     const nick = String(r.nick || '').trim();
@@ -57,7 +56,7 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
     const lo = (ut && ut.last_online_check) ? Date.parse(ut.last_online_check) : 0;
     fleet.set(r.srv + '|' + r.imei, {
       srv: r.srv, nick, online: false, lastOnline: lo,
-      active: !!(lo && (now - lo) <= retentionMs),
+      active: true,
     });
   }
 
@@ -110,8 +109,8 @@ function computeFleet(metaRows, uptime, liveStatus, opts) {
     if (v.active) { b.active++; out.active++; out.activeKeys.push(key); }
     if (v.online) { b.online++; out.online++; }
     else if (v.active) {
-      // Offline counts/list cover the ACTIVE set only: a modem dead for weeks
-      // inflates neither the card nor the alerts — but it stays in `total`.
+      // Offline covers the whole roster (no 48h cut-off since 2026-07-28): a
+      // modem dead for weeks is still offline and still lands in the card.
       b.offline++; out.offline++;
       out.offlineList.push({ server: v.srv, key, nick: v.nick || '', lastOnline: v.lastOnline || 0 });
     }
@@ -199,10 +198,9 @@ function annotateTestPool(statusArr, poolKeySet) {
 
 // computeClientWorking(knownModems, fleet, opts) — per-client «в работе»
 // count with the SAME semantics as the fleet headline: a roster-bound modem
-// counts as working when it is in the fleet's ACTIVE set (online within 48h)
-// and NOT in disconnectedList (dark ≥10 min). A modem dead for weeks is
-// neither active nor working — it shrinks the numerator only, never spams
-// the «Модем отключен» card.
+// counts as working when it is in the fleet's ACTIVE set (the whole roster
+// since 2026-07-28 — no 48h cut-off) and NOT in disconnectedList (dark
+// ≥10 min). A modem dead for weeks is in the roster but dark → not working.
 //
 // Why this exists: the per-client counter used to take live getModemStatus(),
 // which is MORE optimistic than the fleet layer (a modem dark for fleet —
@@ -234,7 +232,7 @@ function computeClientWorking(knownModems, fleet, opts) {
         continue;
       }
       const key = srvName + '|' + id;
-      if (!active.has(key)) continue;               // not online within 48h → not working
+      if (!active.has(key)) continue;               // not in the roster → not working
       if (dark.has(key)) continue;                  // dark ≥10 min → not working
       out[info.portName] = (out[info.portName] || 0) + 1;
     }

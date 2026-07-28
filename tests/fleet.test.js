@@ -34,23 +34,23 @@ const live = [
 ];
 
 describe('computeFleet', () => {
-  it('total = online-within-48h ∪ online-now; online from live; offline = total-online', () => {
+  it('total = whole roster; online from live; offline = active − online (no 48h cut-off)', () => {
     const f = computeFleet(meta, uptime, live, { now: NOW });
-    // Fleet: A (online 2m), B (online 20h ago → still fleet), C (online 5m). D is a
-    // Fleet roster: A, B, C AND the 10-day phantom D (total is STABLE — dead
-    // hardware stays «у нас» until soft-delete). Active (48h): A, B, C only.
+    // Fleet roster: A, B, C AND the 10-day-dead D — since 2026-07-28 there is
+    // no 48h window: a long-dead modem stays in the operational set, counted
+    // offline + disconnected instead of vanishing from the card.
     expect(f.total).toBe(4);
-    expect(f.active).toBe(3);
+    expect(f.active).toBe(4);
     expect(f.online).toBe(2);     // A + C are IS_ONLINE=yes
-    expect(f.offline).toBe(1);    // B (in the active set via uptime, offline now)
+    expect(f.offline).toBe(2);    // B (20h dark) + D (10d dark)
     expect(f.online + f.offline).toBe(f.active);
-    // MD_B is offline 20h → disconnected (>10 min); working = active − disconnected.
-    expect(f.disconnected).toBe(1);
+    // Both B and D are dark ≥10 min → disconnected; working = active − disconnected.
+    expect(f.disconnected).toBe(2);
     expect(f.working).toBe(2);
     expect(f.byServer.S1).toEqual({ total: 2, active: 2, online: 1, offline: 1, disconnected: 1, working: 1 });
-    expect(f.byServer.S2).toEqual({ total: 2, active: 1, online: 1, offline: 0, disconnected: 0, working: 1 });
-    // offlineList lists exactly the offline fleet modems (for the «Модем отключен» card).
-    expect(f.offlineList.map(o => o.nick)).toEqual(['MD_B']);
+    expect(f.byServer.S2).toEqual({ total: 2, active: 2, online: 1, offline: 1, disconnected: 1, working: 1 });
+    // offlineList lists exactly the offline fleet modems (most recently offline first).
+    expect(f.offlineList.map(o => o.nick)).toEqual(['MD_B', 'RO_D']);
     expect(f.offlineList[0].server).toBe('S1');
   });
 
@@ -66,9 +66,10 @@ describe('computeFleet', () => {
     // S2 returns nothing (unreachable); C should stay in the fleet (online 5m ago) but count offline.
     const liveFlake = live.filter(m => m._server !== 'S2');
     const f = computeFleet(meta, uptime, liveFlake, { now: NOW });
-    expect(f.total).toBe(4);                 // A, B, C + phantom D (stable roster)
-    // C went offline only 5 min ago (server flake) → still «working», NOT disconnected.
-    expect(f.byServer.S2).toEqual({ total: 2, active: 1, online: 0, offline: 1, disconnected: 0, working: 1 });
+    expect(f.total).toBe(4);                 // A, B, C + long-dead D (stable roster)
+    // C went offline only 5 min ago (server flake) → blip, NOT disconnected;
+    // D is dark 10d → offline + disconnected.
+    expect(f.byServer.S2).toEqual({ total: 2, active: 2, online: 0, offline: 2, disconnected: 1, working: 1 });
     expect(f.online).toBeLessThanOrEqual(f.total);
   });
 
@@ -77,7 +78,7 @@ describe('computeFleet', () => {
     const f = computeFleet(meta, uptime, liveCached, { now: NOW });
     expect(f.online).toBe(0);                // nothing live-online
     expect(f.total).toBe(4);                 // roster held regardless (stable)
-    expect(f.offline).toBe(3);               // A, B, C — active but not online
+    expect(f.offline).toBe(4);               // A, B, C, D — whole roster dark
   });
 
   it('disconnectedList = offline ≥10 min; a brief <10 min blip stays out', () => {
@@ -178,17 +179,19 @@ describe('computeFleet — glitched-to-random credit', () => {
     expect(f.working).toBe(1);
   });
 
-  it('total (roster) is STABLE: >48h-dead modems stay in total but out of active/working/offline', () => {
-    // The «вторая цифра» the operator asked about: fleet size must not decay as
-    // offline time passes — only soft-delete shrinks it.
+  it('total (roster) is STABLE and long-dead modems STAY in active/offline/disconnected', () => {
+    // 2026-07-28: the 48h retention rule was removed — a modem dead for weeks
+    // no longer drops out of the operational set; it keeps showing as offline
+    // and lands in the «Модем отключен» card (dark ≥10 min).
     const meta2 = [okMeta, { srv: 'S4', imei: 'OLD', nick: 'MD_OLD' }];
     const uptime2 = { ...okUp, 'S4_OLD': { last_online_check: ago(10 * 24 * H) } };
     const f = computeFleet(meta2, uptime2, [okLive], { now: NOW });
-    expect(f.total).toBe(2);      // OLD still «у нас есть»
-    expect(f.active).toBe(1);     // but not in the operational set
+    expect(f.total).toBe(2);
+    expect(f.active).toBe(2);     // no 48h cut-off — the whole roster is operational
     expect(f.working).toBe(1);
-    expect(f.offline).toBe(0);    // offline covers the active set only
-    expect(f.disconnected).toBe(0);
+    expect(f.offline).toBe(1);    // OLD counted offline
+    expect(f.disconnected).toBe(1);
+    expect(f.disconnectedList.map(o => o.nick)).toEqual(['MD_OLD']);
     expect(f.byServer.S4.total).toBe(2);
     expect(f.byServer.S4.working).toBe(1);
   });
@@ -226,7 +229,7 @@ describe('computeClientWorking', () => {
     const uptime = {
       'S1_A': { last_online_check: ago(1 * 60 * 1000) },      // online
       'S1_B': { last_online_check: ago(30 * 60 * 1000) },     // dark 30 min → disconnected
-      'S1_C': { last_online_check: ago(10 * 24 * H) },        // dead 10d → not active
+      'S1_C': { last_online_check: ago(10 * 24 * H) },        // dead 10d → active, but dark ≥10min
     };
     const live = [{ _server: 'S1', modem_details: { IMEI: 'S1_A', NICK: 'MD_A' }, net_details: { IS_ONLINE: 'yes' } }];
     const fleet = computeFleet(meta, uptime, live, { now: NOW });
@@ -238,7 +241,7 @@ describe('computeClientWorking', () => {
       p5: { imei: 'T', nick: 'MD_T', portName: 'random77', lastClientSeen: NOW },                 // placeholder → skip
     }};
     const w = computeClientWorking(known, fleet, { now: NOW });
-    expect(w.CLIENT).toBe(1);   // only A: B dark ≥10min, C inactive >48h, X aged out, random skipped
+    expect(w.CLIENT).toBe(1);   // only A: B dark ≥10min, C dark 10d (≥10min), X aged out, random skipped
     expect(w.random77).toBeUndefined();
   });
 });

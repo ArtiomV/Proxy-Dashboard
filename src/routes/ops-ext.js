@@ -389,7 +389,7 @@ function _trafficSection(merged) {
 // Section: fleet (roster count + per-client «в работе»)
 function _fleetSection(merged, sanitizedClients) {
   // Modem fleet KPI — one coherent count (src/modems/fleet.js):
-  //   total  = STABLE roster; active = online ≤48h ∪ online now;
+  //   total = active = STABLE roster (no 48h cut-off since 2026-07-28);
   //   working = active − disconnected.
   const fleet = computeFleet(_fleetMetaStmt.all(), getUptimeTracking(), merged.status || []);
   // Per-client «в работе» with fleet semantics (active ∩ not-dark-≥10min).
@@ -424,7 +424,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       metrics: { revenue_30d: billingSec.revenue30d.total, window_days: 30, as_of: billingSec.revenue30d.asOf },
       clientRevenue30d: billingSec.revenue30d.byClient,
       // Per-client counters use the known_modems roster with 24h retention —
-      // deliberately NARROWER than fleet 48h (WP1.4).
+      // deliberately NARROWER than the fleet roster (WP1.4).
       rosterWindowHours: 24,
       ...merged,
       servers: meta.servers,

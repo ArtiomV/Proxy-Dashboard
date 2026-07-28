@@ -15,8 +15,10 @@
  *
  * Design choices:
  *   - one job, runs every 2 minutes, sequential passes
- *   - offline-modem pass reuses getStaleNicks() so we don't alert on
- *     long-dead modems (those have their own «удалить» flow elsewhere)
+ *   - offline-modem pass fires on exactly fleet.disconnectedList (WP4.2) —
+ *     since 2026-07-28 that includes long-dead modems too (no 48h cut-off);
+ *     the per-day dedup_key below keeps a week-dead modem from flooding
+ *     the bell (one entry per day)
  *   - CRM pass is best-effort: external Postgres failures are swallowed
  *     so a CRM outage doesn't block offline/debt collection
  */
