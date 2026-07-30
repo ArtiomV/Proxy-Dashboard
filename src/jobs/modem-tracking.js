@@ -465,6 +465,7 @@ async function trackModems() {
         // still enumerated but offline now (offlineNowImeis) — both are "dark".
         for (const imei of new Set([...offlineImeis, ...offlineNowImeis])) {
           const key = prefix + imei;
+          if (_deletedModemSet.has(server.name + '|' + imei)) continue;   // soft-deleted → never alert
           if (offlineAlertSent[key]) continue;
           const ut = uptimeTracking[key];
           if (!ut || !ut.last_online_check) continue;          // never seen alive → skip (Stage 18.9)
@@ -531,6 +532,13 @@ async function trackModems() {
   // шлём одно агрегированное сообщение (порог + вкл/выкл — в Настройках).
   try {
     const _thr = Number(appSettings.modems_down_threshold) || 5;
+    // Janitor (2026-07-29): soft-deleted modems can never «recover», so their
+    // _downSince entries would otherwise live — and alert in the bulk summary —
+    // forever. Evict them on every tick (key 'SRV_imei' → set key 'SRV|imei').
+    for (const k of Object.keys(_downSince)) {
+      const _us = k.indexOf('_');
+      if (_deletedModemSet.has(k.slice(0, _us) + '|' + k.slice(_us + 1))) delete _downSince[k];
+    }
     const _downKeys = Object.keys(_downSince);
     if (_thr > 0 && _downKeys.length >= _thr) {
       const _now = Date.now();
