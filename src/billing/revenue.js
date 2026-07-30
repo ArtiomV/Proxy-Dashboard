@@ -16,14 +16,16 @@ function _mskDayShift(today, daysBack) {
   return d.toISOString().slice(0, 10);
 }
 
-// computeRevenueWindow({ db, ledgerExpense, today, days, fromDays })
+// computeRevenueWindow({ db, ledgerExpense, today, days, fromDays, excludeIds })
 //   today    — 'YYYY-MM-DD' (MSK), the reference date.
 //   days     — window length in days (default 30): rows with date >= today−days.
 //   fromDays — when set, computes the PREVIOUS window instead:
 //              rows with today−fromDays <= date < today−days
 //              (e.g. days=30, fromDays=60 → the 30 days before the current 30).
+//   excludeIds — optional Set of client_id to skip entirely (2026-07-30: paused
+//              clients are excluded from all current financial statistics).
 // Returns { byClient, total, windowDays, asOf }.
-function computeRevenueWindow({ db, ledgerExpense, today, days = 30, fromDays = null }) {
+function computeRevenueWindow({ db, ledgerExpense, today, days = 30, fromDays = null, excludeIds = null }) {
   if (!today) throw new Error('computeRevenueWindow: today (MSK) required');
   const since = _mskDayShift(today, fromDays != null ? fromDays : days);
   const until = fromDays != null ? _mskDayShift(today, days) : null;
@@ -32,6 +34,7 @@ function computeRevenueWindow({ db, ledgerExpense, today, days = 30, fromDays = 
   const rows = until ? db.prepare(sql).all(since, until) : db.prepare(sql).all(since);
   const byClient = {};
   for (const r of rows) {
+    if (excludeIds && excludeIds.has(r.client_id)) continue;
     // Rehydrate the minimal shape ledgerExpense() expects (cost vs amount):
     // charge → cost = amount; correction → sign from balance delta (refund < 0).
     const entry = r.type === 'charge'

@@ -69,8 +69,10 @@ describe('2026-07-30: paused client must not count in MRR', () => {
       expect(row.paused).toBe(true);
       expect(row.mrr).toBe(0);            // paused → 0 in current MRR
       // In the test DB this client is the ONLY revenue source: if the pause
-      // were ignored, headline MRR would be 3000.
+      // were ignored, headline MRR and revenue_30d would be 3000.
       expect(res.body.summary.mrr).toBe(0);
+      expect(res.body.metrics.revenue_30d).toBe(0);
+      expect(res.body.summary.forecast_so_far).toBe(0);
     } finally {
       db.prepare('DELETE FROM billing_ledger WHERE client_id = ?').run(cid);
       db.prepare('DELETE FROM clients WHERE id = ?').run(cid);

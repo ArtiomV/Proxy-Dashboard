@@ -121,13 +121,15 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     // WP8: canonical metric from src/billing/revenue — charge + correction via
     // ledgerExpense (corrections/refunds REDUCE revenue; they were silently
     // dropped before), window edges in MSK (getMoscowToday), not UTC.
-    const rev30 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30 });
+    // 2026-07-30: paused clients (billingPaused) are excluded from ALL current
+    // financial statistics (operator decision) — MRR, revenue_30d, per-tariff,
+    // daily revenue, forecast. Previous/history windows stay factual, so M/M
+    // deltas and churn detection keep working (paused + had revenue → churned).
+    const pausedIds = new Set(getClients().filter(c => c.billingPaused).map(c => c.id));
+    const _pausedArr = [...pausedIds];
+    const _notPaused = _pausedArr.length ? ` AND client_id NOT IN (${_pausedArr.map(() => '?').join(',')})` : '';
+    const rev30 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30, excludeIds: pausedIds });
     const mrrByClient = rev30.byClient;
-    // 2026-07-30: a paused client (billingPaused) contributes 0 to CURRENT MRR —
-    // suspended service is not recurring revenue (operator report: «на паузе,
-    // а в MRR считается»). The PREVIOUS window stays factual, so M/M deltas and
-    // churn detection keep working (paused + had revenue → churned below).
-    for (const c of getClients()) { if (c.billingPaused && mrrByClient[c.id]) mrrByClient[c.id] = 0; }
 
     // -- per-client previous 30d (60..30 days ago) --
     const revPrev30 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30, fromDays: 60 });
@@ -147,7 +149,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const perTariffRows = db.prepare(`SELECT
       COALESCE(json_extract(details, '$.billing_type'), 'per_gb') as bt,
       SUM(amount) as rev
-      FROM billing_ledger WHERE type='charge' AND date >= ? GROUP BY bt`).all(since30);
+      FROM billing_ledger WHERE type='charge' AND date >= ?${_notPaused} GROUP BY bt`).all(since30, ..._pausedArr);
     const perTariff = {};
     perTariffRows.forEach(r => { perTariff[r.bt || 'per_gb'] = Math.round(r.rev * 100) / 100; });
 
@@ -370,17 +372,17 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const dayOfMonth = now.getDate();
     const daysLeft = daysInMonth - dayOfMonth;
     const monthRevenueSoFar = db.prepare(`SELECT SUM(amount) s FROM billing_ledger
-      WHERE type='charge' AND date >= ? AND date <= ?`).get(monthStart, todayStr).s || 0;
+      WHERE type='charge' AND date >= ? AND date <= ?${_notPaused}`).get(monthStart, todayStr, ..._pausedArr).s || 0;
     // Per-day average rate from current month so far
     const dailyRateSoFar = dayOfMonth > 0 ? monthRevenueSoFar / dayOfMonth : 0;
     const forecastEOM = Math.round(monthRevenueSoFar + dailyRateSoFar * daysLeft);
 
     // -- Daily revenue last 30 days for sparkline --
     const dailyRows = db.prepare(`SELECT date, SUM(amount) as rev FROM billing_ledger
-      WHERE type='charge' AND date >= ? GROUP BY date ORDER BY date`).all(since30);
+      WHERE type='charge' AND date >= ?${_notPaused} GROUP BY date ORDER BY date`).all(since30, ..._pausedArr);
     // -- Same, но с разбивкой по клиентам (для стека «Выручка по дням» по клиентам) --
     const dailyByClientRows = db.prepare(`SELECT date, client_id, SUM(amount) as rev FROM billing_ledger
-      WHERE type='charge' AND date >= ? GROUP BY date, client_id`).all(since30);
+      WHERE type='charge' AND date >= ?${_notPaused} GROUP BY date, client_id`).all(since30, ..._pausedArr);
     const _clientNameById = {};
     for (const c of getClients()) _clientNameById[c.id] = c.name;
     const dailyRevByClient = {};

@@ -321,7 +321,9 @@ function _billingSection() {
   for (const k of Object.keys(clientMonthGb)) clientMonthGb[k] = Math.round(clientMonthGb[k] * 1000) / 1000;
   // Canonical revenue (WP8): rolling 30 MSK days, charge + correction via
   // ledgerExpense — the SAME number as /api/admin/finance_dashboard shows.
-  const revenue30d = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30 });
+  // 2026-07-30: paused clients are excluded from all current financial stats.
+  const pausedIds = new Set(getClients().filter(c => c.billingPaused).map(c => c.id));
+  const revenue30d = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30, excludeIds: pausedIds });
   return { clientMonthCharges, clientMonthGb, revenue30d };
 }
 
