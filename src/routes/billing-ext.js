@@ -123,6 +123,11 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     // dropped before), window edges in MSK (getMoscowToday), not UTC.
     const rev30 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30 });
     const mrrByClient = rev30.byClient;
+    // 2026-07-30: a paused client (billingPaused) contributes 0 to CURRENT MRR —
+    // suspended service is not recurring revenue (operator report: «на паузе,
+    // а в MRR считается»). The PREVIOUS window stays factual, so M/M deltas and
+    // churn detection keep working (paused + had revenue → churned below).
+    for (const c of getClients()) { if (c.billingPaused && mrrByClient[c.id]) mrrByClient[c.id] = 0; }
 
     // -- per-client previous 30d (60..30 days ago) --
     const revPrev30 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30, fromDays: 60 });
