@@ -88,7 +88,10 @@ r.post('/api/admin/reboot_server', authMiddleware, adminMiddleware, async (req, 
     if (!pwdValid) return res.status(403).json({ error: 'Неверный пароль' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, '/apix/reboot_server', 30000);
+    // 2026-08-01: /apix/reboot_server sits behind the PANEL session auth, not
+    // /apix basic auth — a plain fetchApi gets a 302 → login wall («Reboot
+    // server failed» toast). fetchApiPanel logs into the panel first.
+    const result = await proxySmart.fetchApiPanel(server, '/apix/reboot_server', 30000);
     logger.info(`[Admin] Server ${serverName} reboot requested`);
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Reboot server failed', details: err.message }); }

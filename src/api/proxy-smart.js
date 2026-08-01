@@ -393,6 +393,88 @@ async function fetchAllServersDataCached() {
 }
 
 // ---------------------------------------------------------------------------
+// Panel-session calls (2026-08-01)
+// ---------------------------------------------------------------------------
+// /apix/reboot_server sits behind the WEB PANEL's session auth, NOT the /apix
+// basic auth used by every read endpoint: without a Flask `session` cookie it
+// 302-redirects to /modem/login, and fetchApi then dies on the HTML auth-wall
+// (operator saw «Reboot server failed»). The panel accepts the SAME
+// username/password as the API. Flow: POST /modem/login, cache the cookie
+// (~10 min per server), then call the endpoint with it; on a mid-session 302
+// relogin once and retry.
+const _panelSessions = {};   // serverName -> { cookie, at }
+const PANEL_SESSION_TTL_MS = 10 * 60 * 1000;
+
+function _panelLogin(server, timeout) {
+  return new Promise((resolve, reject) => {
+    const url = new URL('/modem/login?next=%2F', server.url);
+    const postData = new URLSearchParams({ username: server.user, password: server.pass }).toString();
+    const req = getHttpLib(url).request({
+      hostname: url.hostname, port: url.port,
+      path: url.pathname + url.search, method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData) },
+      timeout
+    }, (res) => {
+      let data = '';
+      res.on('data', c => { if (data.length < 4096) data += c; });
+      res.on('end', () => {
+        const setC = res.headers['set-cookie'] || [];
+        let sess = null;
+        for (const h of setC) {
+          const m = /(?:^|[,;]\s*)(session=[^;]+)/i.exec(h);
+          if (m) { sess = m[1]; break; }
+        }
+        if (!sess) return reject(new Error(`${server.name}: panel login failed (no session cookie, HTTP ${res.statusCode})`));
+        _panelSessions[server.name] = { cookie: sess, at: Date.now() };
+        resolve(sess);
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout from ' + server.name)); });
+    req.write(postData);
+    req.end();
+  });
+}
+
+function _panelGet(server, apiPath, cookie, timeout) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(apiPath, server.url);
+    const auth = Buffer.from(`${server.user}:${server.pass}`).toString('base64');
+    const req = getHttpLib(url).request({
+      hostname: url.hostname, port: url.port,
+      path: url.pathname + url.search, method: 'GET',
+      headers: { 'Authorization': `Basic ${auth}`, 'Cookie': cookie, 'Accept': 'application/json' },
+      timeout
+    }, (res) => {
+      let data = '';
+      res.on('data', c => { if (data.length < 1024 * 1024) data += c; });
+      res.on('end', () => resolve({ status: res.statusCode, body: data }));
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('Timeout from ' + server.name)); });
+    req.end();
+  });
+}
+
+async function fetchApiPanel(server, apiPath, timeout = 15000) {
+  _validateApiPath(apiPath);
+  const sess = _panelSessions[server.name];
+  if (!sess || (Date.now() - sess.at) > PANEL_SESSION_TTL_MS) await _panelLogin(server, timeout);
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await _panelGet(server, apiPath, _panelSessions[server.name].cookie, timeout);
+    if (res.status === 301 || res.status === 302 || res.status === 303) {
+      // Session died (panel restart / expiry) — drop it, relogin, retry once.
+      delete _panelSessions[server.name];
+      await _panelLogin(server, timeout);
+      continue;
+    }
+    if (res.status >= 400) throw new Error(`${server.name} HTTP ${res.status}: ${res.body.slice(0, 200)}`);
+    try { return JSON.parse(res.body); } catch (_) { return { raw: res.body }; }
+  }
+  throw new Error(`${server.name}: panel session rejected after relogin`);
+}
+
+// ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
@@ -403,6 +485,7 @@ module.exports = {
   findServer,
   fetchApi,
   fetchApiRaw,
+  fetchApiPanel,
   postApi,
   saveServerCache,
   cacheServerData,
