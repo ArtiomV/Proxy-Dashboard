@@ -408,8 +408,16 @@ function formatBillFormula(f) {
     return `${f.modem_count} мод. × ${rub(f.price)}${f.debt ? ' + долг ' + rub(f.debt) : ''}`;
   }
   const mm = f.prev_period ? Number(f.prev_period.slice(5, 7)) : 0;
-  const monthName = MONTH_NAMES_RU[mm - 1] || 'прошлый мес.';
-  return `MAX (${rub(f.prev_amount)} за ${monthName} или ${f.avg_daily_gb} ГБ/день × ${f.days_in_month} дн. × ${f.price} ₽ = ${rub(f.forecast_amount)})`
+  const monthName = MONTH_NAMES_ACC[mm - 1] || 'прошлый мес.';
+  let fc;
+  if (f.avg_daily_gb != null) {
+    // Текущая формула (2026-08-02): среднесуточное за последние 7 дней.
+    fc = `${f.avg_daily_gb} ГБ/день × ${f.days_in_month} дн. × ${f.price} ₽`;
+  } else {
+    // Легаси-формула (run-rate месяц-к-дате × 1.1) — счета, выставленные раньше.
+    fc = `${f.run_rate_gb} ГБ ÷ ${f.days_elapsed} дн. × ${f.days_in_month} дн. × ${f.price} ₽` + (f.margin && f.margin !== 1 ? ` × ${f.margin}` : '');
+  }
+  return `MAX (${rub(f.prev_amount)} за ${monthName} или ${fc} = ${rub(f.forecast_amount)})`
     + (f.debt ? ` + долг ${rub(f.debt)}` : '')
     + (f.rounded_to ? ` → ↑${(f.rounded_to / 1000)}k` : '');
 }
