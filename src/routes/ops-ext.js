@@ -257,34 +257,17 @@ function _metaSection(merged) {
 
 // Section: clients (roster modem counts + sanitized client list)
 function _clientsSection() {
-  // STABLE per-client modem count from the known_modems roster (24h
-  // retention on lastClientSeen) — see the long comment history in git;
-  // an offline modem keeps counting for 24h instead of vanishing.
-  const _ROSTER_RETAIN_MS = 24 * 3600 * 1000;
-  const _rosterNow = Date.now();
-  const _uptime = getUptimeTracking() || {};
-  const _clientModemSets = {};   // portName -> Set('server|imei')
+  // STABLE per-client modem count from the known_modems roster. 2026-08-02
+  // (БА «31 вместо 32»): the TOTAL must NOT drop when a modem dies — the box
+  // binding list is authoritative and updateKnownModems now keeps dark-modem
+  // ports in the roster (and drops only box-unbound ports). So count every
+  // roster entry with a real client portName — no 24h retention, no uptime
+  // gate. Liveness is the modemWorking number's job, not the total's.
+  const _clientModemSets = {};   // portName -> Set('server|portId')
   for (const [srvName, ports] of Object.entries(getKnownModems() || {})) {
     for (const [pid, info] of Object.entries(ports || {})) {
       if (!info || !info.portName || /^random/i.test(info.portName)) continue;
-      // Identity may be absent for a bound-but-unreadable port — count it by
-      // portId then (it bills traffic; БА «30 vs 32» case).
-      const id = info.imei || info.nick || pid;
-      const _lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
-      const ls = typeof _lcs === 'number' ? _lcs : Date.parse(_lcs || 0);
-      if (!ls || (_rosterNow - ls) > _ROSTER_RETAIN_MS) continue;
-      // «Автовключение неработающих» убрано (2026-07-22): у мёртвого, но всё ещё
-      // привязанного модема ProxySmart держит binding порта, поэтому lastClientSeen
-      // обновляется каждым опросом и ретенция выше никогда не срабатывает — труп
-      // вечно сидел в modemCount. Гейт на АКТИВНОСТЬ: если по IMEI есть запись
-      // uptime_tracking и last_online_check старше 24ч — модем не считается.
-      // Fail-open: нет IMEI или нет uptime-записи → считаем как раньше.
-      if (info.imei) {
-        const _ut = _uptime[srvName + '_' + info.imei];
-        const _lo = _ut && _ut.last_online_check ? Date.parse(_ut.last_online_check) : 0;
-        if (_lo && (_rosterNow - _lo) > _ROSTER_RETAIN_MS) continue;
-      }
-      (_clientModemSets[info.portName] || (_clientModemSets[info.portName] = new Set())).add(srvName + '|' + id);
+      (_clientModemSets[info.portName] || (_clientModemSets[info.portName] = new Set())).add(srvName + '|' + pid);
     }
   }
   const _clientModemCounts = {};
@@ -427,8 +410,8 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       // Canonical revenue metric (WP8) — same source as finance_dashboard.
       metrics: { revenue_30d: billingSec.revenue30d.total, window_days: 30, as_of: billingSec.revenue30d.asOf },
       clientRevenue30d: billingSec.revenue30d.byClient,
-      // Per-client counters use the known_modems roster with 24h retention —
-      // deliberately NARROWER than the fleet roster (WP1.4).
+      // Per-client counters use the known_modems roster — total is STABLE
+      // (box-authoritative bindings, 2026-08-02); liveness is modemWorking.
       rosterWindowHours: 24,
       ...merged,
       servers: meta.servers,

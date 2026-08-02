@@ -1388,7 +1388,7 @@ function renderClients(){
     h+='</div>';
     h+='<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:12px;padding-bottom:12px;border-bottom:1px solid var(--border)"><span style="font-size:11px;color:var(--text-2)">Баланс</span><span style="font-size:20px;font-weight:700;color:'+balColor+';font-family:var(--font-mono)">'+_balStr+'</span></div>';
     h+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin-bottom:15px">';
-    var ms=[['Тариф',tariffLabel,'var(--text-1)'],['Расход/мес',Math.round(cost).toLocaleString('ru-RU')+' ₽','var(--accent)'],['Трафик/мес',monthGbLive.toFixed(1)+' GB','var(--text-1)'],['Модемов',''+_pm,isInactive?'var(--text-3)':'var(--text-1)']];
+    var ms=[['Тариф',tariffLabel,'var(--text-1)'],['Расход/мес',Math.round(cost).toLocaleString('ru-RU')+' ₽','var(--accent)'],['Трафик/мес',monthGbLive.toFixed(1)+' GB','var(--text-1)'],['Модемов',(typeof c.modemWorking==='number'&&typeof c.modemCount==='number')?(c.modemWorking+'/'+c.modemCount):(''+_pm),isInactive?'var(--text-3)':'var(--text-1)']];
     ms.forEach(function(m){h+='<div><div style="font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:2px">'+m[0]+'</div><div style="font-size:13px;font-weight:600;color:'+m[2]+';font-family:var(--font-mono)">'+m[1]+'</div></div>';});
     h+='</div>';
     h+='<div style="display:flex;gap:6px">';
@@ -4270,7 +4270,7 @@ function renderClientDetail(id, tab){
   var be=document.getElementById('cdKpiBal');be.textContent=Math.round(balance).toLocaleString('ru-RU');be.style.color=balance<0?'var(--danger)':(balance>0?'var(--success)':'var(--text-0)');
   document.getElementById('cdKpiBalWrap').classList.toggle('is-green',balance>=0);
   document.getElementById('cdKpiCharge').textContent=charge.toLocaleString('ru-RU');
-  document.getElementById('cdKpiModems').textContent=mc;
+  document.getElementById('cdKpiModems').textContent=(typeof c.modemWorking==='number'&&typeof c.modemCount==='number')?(c.modemWorking+'/'+c.modemCount):mc;
   document.getElementById('cdKpiTraffic').innerHTML=gb.toFixed(1)+'<span style="font-size:12px"> ГБ</span>';
   var ml=document.getElementById('cdModemsList');
   var mh='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin:6px 0 10px">Привязанные модемы ('+mc+')</div>';

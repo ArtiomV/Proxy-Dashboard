@@ -47,7 +47,6 @@ function create(deps) {
           const arr = Array.isArray(data.ports[imei]) ? data.ports[imei] : [];
           portInfo = arr.find(p => p.portID === portId) || null;
         }
-
         // ProxySmart auto-renames a port to "randomport*" when its modem falls off /
         // the port is reset. That is NOT a real client binding — but we must NOT wipe
         // the previous client either: otherwise a client's modem silently vanishes from
@@ -90,6 +89,47 @@ function create(deps) {
           lastSeen: now,
           lastClientSeen
         };
+      }
+    }
+
+    // 2026-08-02 (БА «31 вместо 32»): ingest bound ports that are missing from
+    // the bw feed. ProxySmart keeps a port's binding in list_ports_json even
+    // when its modem is dark (no traffic counters → no bw row → the roster
+    // used to LOSE the port and the client's total dropped). The binding list
+    // is authoritative: a port present there with a real portName belongs to
+    // that client whether or not its modem is alive right now.
+    const _seenPortIds = new Set(Object.keys(data.bw || {}));
+    const _portsLoaded = data.ports && typeof data.ports === 'object' && Object.keys(data.ports).length > 0;
+    if (_portsLoaded) {
+      for (const [imei, portList] of Object.entries(data.ports)) {
+        if (!Array.isArray(portList)) continue;
+        for (const p of portList) {
+          if (!p || !p.portID || _seenPortIds.has(p.portID)) continue;
+          const rawPortName = p.portName || '';
+          const isRealClient = rawPortName && !/^randomport\d+$/i.test(rawPortName);
+          const prevKm = km[p.portID] || {};
+          const keptPortName = isRealClient ? rawPortName : (prevKm.portName || '');
+          if (!keptPortName) continue;                       // никогда не был за клиентом
+          if (imei && deletedModemSet.has(srvName + '|' + imei)) continue;   // 041: soft-delete вечный
+          km[p.portID] = {
+            portName: keptPortName,
+            imei: imei || prevKm.imei || '',
+            nick: prevKm.nick || '',
+            model: prevKm.model || '',
+            portInfo: (typeof structuredClone === 'function' ? structuredClone(p) : JSON.parse(JSON.stringify(p))),
+            lastSeen: now,
+            lastClientSeen: isRealClient ? now : (prevKm.lastClientSeen || now),
+          };
+          _seenPortIds.add(p.portID);
+        }
+      }
+      // Legit shrink: a port absent from BOTH the binding list and the bw feed
+      // was unbound box-side (deleted binding) — drop it from the roster. A
+      // dark modem's port stays in list_ports_json, so it is NOT hit by this.
+      // Fail-open: with the ports endpoint flaky/empty we delete nothing.
+      for (const pid of Object.keys(km)) {
+        if (_seenPortIds.has(pid)) continue;
+        delete km[pid];
       }
     }
 

@@ -1,8 +1,8 @@
-// 2026-07-22: «убрать автовключение неработающих» — bound-but-dead modem must
-// drop out of the client's modemCount once uptime_tracking proves it has not
-// been ONLINE for >24h. Before the fix, ProxySmart kept the port binding, so
-// lastClientSeen refreshed on every poll and the corpse counted forever.
-// Fail-open cases (no IMEI / no uptime record) must keep counting.
+// 2026-08-02 (БА «31 вместо 32»): клиентский TOTAL стабилен — биндинг бокса
+// авторитетен. Мёртвый, но привязанный модем НЕ выпадает из modemCount
+// (живость отслеживает modemWorking, а не total). Ранняя версия этого теста
+// (2026-07-22 «убрать автовключение неработающих») требовала обратное — то
+// правило заменено по решению оператора.
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import request from 'supertest';
@@ -81,13 +81,13 @@ beforeAll(() => {
   app.use(router);
 });
 
-describe('/api/admin/data — клиентский ростер: гейт активности >24ч', () => {
-  it('мёртвый >24ч (по uptime) исключён из modemCount; fail-open случаи остаются', async () => {
+describe('/api/admin/data — клиентский ростер: стабильный total', () => {
+  it('мёртвый, но привязанный модем остаётся в modemCount (живость — у modemWorking)', async () => {
     const res = await request(app).get('/api/admin/data');
     expect(res.status).toBe(200);
     const c = (res.body.clients || []).find(x => x.portName === 'CLIENT');
     expect(c).toBeTruthy();
-    // 3 из 4: живой + identity-less + без uptime-записи. Мёртвый DEAD1 — нет.
-    expect(c.modemCount).toBe(3);
+    // Все 4 привязанных: живой + мёртвый DEAD1 + identity-less + без uptime-записи.
+    expect(c.modemCount).toBe(4);
   });
 });
