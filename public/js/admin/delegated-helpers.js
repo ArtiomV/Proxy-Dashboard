@@ -100,3 +100,12 @@ function finNavBank() {
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = { aeDownload, openModemDetailByNick, peekField, togglePwdView, resetIpByImei, finSetPeriod, finJumpToModem, finNavBank };
 }
+
+// Переключить поповер «Формула» в карточке MRR (клик вместо hover —
+// hover на динамически перерисовываемых карточках ненадёжен).
+function toggleMrrFormula(el) {
+  var wrap = el && el.parentElement;
+  var pop = wrap && wrap.querySelector('.mrr-fp');
+  if (!pop) return;
+  pop.style.display = (pop.style.display === 'block') ? 'none' : 'block';
+}

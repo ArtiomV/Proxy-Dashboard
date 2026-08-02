@@ -1261,7 +1261,7 @@ function renderMrrChart(d){
   }
   if(lg) lg.innerHTML = [['За ГБ','#2f6fe0'],['За модем','#10b981']].map(function(x){
     return '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:'+x[1]+'"></span>'+x[0]+'</span>';
-  }).join('') + (fcOn ? '<span style="display:inline-flex;align-items:center;gap:5px" title="Прогноз текущего месяца: '+Math.round(fc).toLocaleString('ru-RU')+' ₽"><span style="width:8px;height:8px;border-radius:50%;background:rgba(47,111,224,.35);border:1px dashed #2f6fe0"></span>прогноз '+Math.round(fc).toLocaleString('ru-RU')+' ₽</span>' : '');
+  }).join('') + (fcOn ? '<span style="display:inline-flex;align-items:center;gap:5px" title="Прогноз текущего месяца"><span style="width:8px;height:8px;border-radius:50%;background:rgba(47,111,224,.35);border:1px dashed #2f6fe0"></span>прогноз</span>' : '');
   var cv = document.getElementById('newFinTrendCanvas');
   if(!cv || !window.Chart) return;
   if(window._newFinTrendChart){ try{window._newFinTrendChart.destroy();}catch(_){} window._newFinTrendChart=null; }
