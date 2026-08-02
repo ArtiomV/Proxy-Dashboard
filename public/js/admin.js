@@ -3464,11 +3464,10 @@ function renderNewExtWidgets(){
   var _opCosts=_opGbCosts();
   opList.forEach(function(op,oi){var v=allOps[op];var avgpmd=fmtGb(v.cnt&&opDays?v.t/v.cnt/opDays:0);var tpd=v.t/opDays;var w=Math.max(tpd/opMax*100,2);var col=CHART_COLORS.operators[oi%CHART_COLORS.operators.length];var _cst=_opCosts[op]?'<span style="color:var(--accent);font-weight:600"> · '+_opCosts[op]+'₽/ГБ</span>':'';opCard+='<div style="margin-bottom:0"><div style="display:flex;align-items:baseline;font-size:10px;margin-bottom:2px;gap:4px"><span style="flex:1;color:var(--text-1);font-weight:500">'+esc(op)+'</span><span style="color:var(--text-2)">'+avgpmd+'/мод/сут</span><span style="color:var(--text-3)">· '+v.cnt+' мод.</span>'+_cst+'</div><div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+col+';width:'+w+'%"></div></div></div>';});
   opCard+='</div></div>';
-  // MRR (тренд + прогноз по финансам) — между «Потреблением трафика» и «Операторами».
-  var _fd=window._newFinData, _fc=(_fd&&_fd.summary)?_fd.summary.forecast_eom:null;
+  // MRR (тренд + прогноз столбцом в графике) — между «Потреблением трафика» и «Операторами».
   var mrrCard='<div class="analytics-card" style="margin:0;display:flex;flex-direction:column">'
     +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:8px">'
-    +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">📈 MRR'+(_fc!=null?' <span style="font-size:9px;font-weight:400;color:var(--text-3)">прогноз '+_fmtRub(_fc)+'</span>':'')+'</span>'
+    +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">📈 MRR</span>'
     +'<span id="mrrLegend" style="display:flex;gap:8px;font-size:9px;font-weight:600;color:var(--text-2)"></span></div>'
     +'<div style="flex:1;min-height:120px;position:relative"><canvas id="newFinTrendCanvas"></canvas></div></div>';
   el.innerHTML=probCard+trendCard+mrrCard+opCard;

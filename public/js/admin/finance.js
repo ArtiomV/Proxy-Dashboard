@@ -1219,28 +1219,48 @@ function dismissAllUnmatched() {
 function renderMrrChart(d){
   d = d || window._newFinData; if(!d) return;
   var lg = document.getElementById('mrrLegend');
+  var cc = getChartColorsLight();
+  // Тренд + ПРОГНОЗ текущего месяца столбцом (2026-08-02): последний бар
+  // показывает forecast_eom целиком (полупрозрачный), а не «сгоревшую»
+  // месяц-к-дате сумму — визуально видно, чем закончится месяц.
+  var trend = (d.trend || []).map(function(t){ return { month: t.month, per_gb: t.per_gb || 0, per_modem: t.per_modem || 0 }; });
+  var fc = (d.summary && typeof d.summary.forecast_eom === 'number') ? d.summary.forecast_eom : 0;
+  var fcOn = false;
+  if (fc > 0 && trend.length) {
+    var last = trend[trend.length - 1];
+    var lastTotal = last.per_gb + last.per_modem;
+    if (fc > lastTotal) {
+      var ratio = lastTotal > 0 ? (last.per_gb / lastTotal) : 1;
+      last.per_gb = Math.round(fc * ratio);
+      last.per_modem = fc - last.per_gb;
+      fcOn = true;
+    }
+  }
   if(lg) lg.innerHTML = [['За ГБ','#2f6fe0'],['За модем','#10b981']].map(function(x){
     return '<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:'+x[1]+'"></span>'+x[0]+'</span>';
-  }).join('');
+  }).join('') + (fcOn ? '<span style="display:inline-flex;align-items:center;gap:5px" title="Прогноз текущего месяца: '+Math.round(fc).toLocaleString('ru-RU')+' ₽"><span style="width:8px;height:8px;border-radius:50%;background:rgba(47,111,224,.35);border:1px dashed #2f6fe0"></span>прогноз '+Math.round(fc).toLocaleString('ru-RU')+' ₽</span>' : '');
   var cv = document.getElementById('newFinTrendCanvas');
   if(!cv || !window.Chart) return;
   if(window._newFinTrendChart){ try{window._newFinTrendChart.destroy();}catch(_){} window._newFinTrendChart=null; }
-  var cc = getChartColorsLight();
   // Тонкие столбцы под узкую карточку ряда «Требует внимания» (маленький maxBarThickness),
   // остальная геометрия — из общего CHART_BAR_STACK. Скругление: плоский низ, круглый верх.
   var barOpts = Object.assign({stack:'a', borderRadius:chartStackRadius()}, CHART_BAR_STACK, {maxBarThickness:22});
+  var n = trend.length;
+  var bgGb = trend.map(function(_,i){ return (fcOn && i === n - 1) ? 'rgba(47,111,224,.35)' : '#2f6fe0'; });
+  var bgPm = trend.map(function(_,i){ return (fcOn && i === n - 1) ? 'rgba(16,185,129,.35)' : '#10b981'; });
   window._newFinTrendChart = newChartSafe(cv, {
     type:'bar',
-    data:{ labels:(d.trend||[]).map(function(t){return _ymRu(t.month,true);}),
+    data:{ labels:trend.map(function(t){return _ymRu(t.month,true);}),
       datasets:[
-        Object.assign({label:'За ГБ', data:(d.trend||[]).map(function(t){return t.per_gb||0;}), backgroundColor:'#2f6fe0'}, barOpts),
-        Object.assign({label:'За модем', data:(d.trend||[]).map(function(t){return t.per_modem||0;}), backgroundColor:'#10b981'}, barOpts)
+        Object.assign({label:'За ГБ', data:trend.map(function(t){return t.per_gb;}), backgroundColor:bgGb}, barOpts),
+        Object.assign({label:'За модем', data:trend.map(function(t){return t.per_modem;}), backgroundColor:bgPm}, barOpts)
       ]},
     options:{responsive:true,maintainAspectRatio:false,animation:false,
       interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},
         tooltip:{mode:'index',intersect:false,
           callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.parsed.y||0).toLocaleString('ru-RU')+' ₽';},
+            title:function(items){var base=items&&items.length?items[0].label:'';return (fcOn&&items.length&&items[0].dataIndex===n-1)?base+' (прогноз)':base;},
             footer:function(items){var t=0;items.forEach(function(i){t+=i.parsed.y||0;});return 'Итого: '+t.toLocaleString('ru-RU')+' ₽';}}}},
       scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9},maxRotation:0,minRotation:0,autoSkip:false},grid:{display:false},border:{display:false}},
         y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:9},callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid,drawTicks:false},border:{display:false}}}}
