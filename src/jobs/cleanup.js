@@ -144,25 +144,12 @@ function create(deps) {
       // `cutoffMs`/`cutoffDate` are still computed above because they're
       // used by daily_traffic retention (Pass A/C use their own predicates).
       void cutoffMs;
-      // Pass C: port deleted but IMEI still online (modem moved to a different port,
-      // typically an auto-generated "randomport*" default after we removed the named
-      // port). The stale km entry would otherwise misattribute the modem to a former
-      // client. Detect by: port not in live bw AND IMEI is currently online on the
-      // same server — the bind is no longer authoritative.
-      for (const srvName of Object.keys(knownModems || {})) {
-        if (skippedSrv.includes(srvName)) continue;
-        const liveImeis = liveImeisByServer[srvName] || new Set();
-        const km = knownModems[srvName];
-        for (const pid of Object.keys(km)) {
-          if (liveIds.has(srvName + '_' + pid)) continue;        // port still live
-          const imei = km[pid].imei;
-          if (!imei) continue;
-          if (!liveImeis.has(imei)) continue;                    // modem also offline → keep (will be injected as ghost)
-          // Modem is online but on a different port → old assignment is stale
-          delete km[pid];
-          kmRemoved++; kmChanged = true;
-        }
-      }
+      // Pass C REMOVED (2026-08-02, реша оператора «не прыгает без изменений»).
+      // Раньше: модем онлайн на ДРУГОМ порту → старая привязка удалялась. На
+      // флапающем железе (ro2, error -71) модем живёт на random-порту часами —
+      // и cleanup сносил клиентский биндинг (БА 32→31). Теперь ростер липкий:
+      // если модем вернётся с тем же portName под новым portID — его заменит
+      // move-dedupe в updateKnownModems; если с randomport — биндинг остаётся.
       if (kmChanged) saveKnownModems();
 
       if (dtDeleted || dtMemKeys || kmRemoved) {
