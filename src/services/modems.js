@@ -127,9 +127,17 @@ function create(deps) {
       // was unbound box-side (deleted binding) — drop it from the roster. A
       // dark modem's port stays in list_ports_json, so it is NOT hit by this.
       // Fail-open: with the ports endpoint flaky/empty we delete nothing.
+      // Grace (2026-08-02): ProxySmart sometimes loses a binding for minutes
+      // (re-enumeration glitch — the БА «32↔31» flap), so the actual delete
+      // fires only after 24h of continuous absence; a reappearing port just
+      // clears its _missingSince mark.
       for (const pid of Object.keys(km)) {
-        if (_seenPortIds.has(pid)) continue;
-        delete km[pid];
+        if (_seenPortIds.has(pid)) {
+          if (km[pid] && km[pid]._missingSince) delete km[pid]._missingSince;
+          continue;
+        }
+        if (!km[pid]._missingSince) { km[pid]._missingSince = now; continue; }
+        if (now - km[pid]._missingSince > 24 * 3600 * 1000) delete km[pid];
       }
     }
 

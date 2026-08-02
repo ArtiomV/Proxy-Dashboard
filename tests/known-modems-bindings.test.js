@@ -43,7 +43,7 @@ describe('updateKnownModems: стабильный total по биндингам 
     expect(km.portB.imei).toBe('IMEI1');
   });
 
-  it('порт, удалённый на боксе (нет ни в ports, ни в bw), выбывает из ростера', () => {
+  it('порт, удалённый на боксе, выбывает после 24ч грейса (флап не удаляет)', () => {
     const deps = mkDeps();
     const svc = create(deps);
     const feed = {
@@ -54,13 +54,23 @@ describe('updateKnownModems: стабильный total по биндингам 
     };
     svc.updateKnownModems(feed);
     expect(Object.keys(deps.knownModems.S2).sort()).toEqual(['portA', 'portB']);
-    // Бокс убрал portB (отвязали) — он исчез и из ports, и из bw.
-    svc.updateKnownModems({
+    // Бокс потерял portB (флап пере-энумерации) — грейс: сразу НЕ удаляем.
+    const feedNoB = {
       serverName: 'S2',
       bw: { portA: bwRow('Brandanalytics') },
       ports: { IMEI1: [{ portID: 'portA', portName: 'Brandanalytics' }] },
       status: [],
-    });
+    };
+    svc.updateKnownModems(feedNoB);
+    expect(Object.keys(deps.knownModems.S2).sort()).toEqual(['portA', 'portB']);
+    expect(deps.knownModems.S2.portB._missingSince).toBeTruthy();
+    // Порт вернулся — метка грейса снимается.
+    svc.updateKnownModems(feed);
+    expect(deps.knownModems.S2.portB._missingSince).toBeUndefined();
+    // А если отсутствует дольше 24ч — удаляем (отвязка на боксе).
+    svc.updateKnownModems(feedNoB);
+    deps.knownModems.S2.portB._missingSince = Date.now() - 25 * 3600 * 1000;
+    svc.updateKnownModems(feedNoB);
     expect(Object.keys(deps.knownModems.S2)).toEqual(['portA']);
   });
 
