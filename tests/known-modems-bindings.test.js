@@ -33,28 +33,32 @@ describe('updateKnownModems: стабильный total по биндингам 
       serverName: 'S2',
       bw: { portA: bwRow('Brandanalytics') },
       ports: {
-        IMEI1: [{ portID: 'portA', portName: 'Brandanalytics' }, { portID: 'portB', portName: 'Brandanalytics' }],
+        IMEI1: [{ portID: 'portA', portName: 'Brandanalytics' }],
+        IMEI2: [{ portID: 'portB', portName: 'Brandanalytics' }],
       },
       status: [],
     });
     const km = deps.knownModems.S2;
     expect(Object.keys(km).sort()).toEqual(['portA', 'portB']);
     expect(km.portB.portName).toBe('Brandanalytics');
-    expect(km.portB.imei).toBe('IMEI1');
+    expect(km.portB.imei).toBe('IMEI2');
   });
 
-  it('порт, удалённый на боксе, выбывает после 24ч грейса (флап не удаляет)', () => {
+  it('ростер липкий: порт, пропавший с бокса, НЕ выбывает (не прыгает без изменений)', () => {
     const deps = mkDeps();
     const svc = create(deps);
     const feed = {
       serverName: 'S2',
       bw: { portA: bwRow('Brandanalytics') },
-      ports: { IMEI1: [{ portID: 'portA', portName: 'Brandanalytics' }, { portID: 'portB', portName: 'Brandanalytics' }] },
+      ports: {
+        IMEI1: [{ portID: 'portA', portName: 'Brandanalytics' }],
+        IMEI2: [{ portID: 'portB', portName: 'Brandanalytics' }],
+      },
       status: [],
     };
     svc.updateKnownModems(feed);
     expect(Object.keys(deps.knownModems.S2).sort()).toEqual(['portA', 'portB']);
-    // Бокс потерял portB (флап пере-энумерации) — грейс: сразу НЕ удаляем.
+    // Бокс потерял portB (флап) — липкий ростер держит его сколько угодно долго.
     const feedNoB = {
       serverName: 'S2',
       bw: { portA: bwRow('Brandanalytics') },
@@ -62,16 +66,35 @@ describe('updateKnownModems: стабильный total по биндингам 
       status: [],
     };
     svc.updateKnownModems(feedNoB);
+    svc.updateKnownModems(feedNoB);
     expect(Object.keys(deps.knownModems.S2).sort()).toEqual(['portA', 'portB']);
-    expect(deps.knownModems.S2.portB._missingSince).toBeTruthy();
-    // Порт вернулся — метка грейса снимается.
-    svc.updateKnownModems(feed);
-    expect(deps.knownModems.S2.portB._missingSince).toBeUndefined();
-    // А если отсутствует дольше 24ч — удаляем (отвязка на боксе).
-    svc.updateKnownModems(feedNoB);
-    deps.knownModems.S2.portB._missingSince = Date.now() - 25 * 3600 * 1000;
-    svc.updateKnownModems(feedNoB);
-    expect(Object.keys(deps.knownModems.S2)).toEqual(['portA']);
+  });
+
+  it('move-dedupe: тот же модем с новым portID вытесняет старый у того же клиента', () => {
+    const deps = mkDeps();
+    const svc = create(deps);
+    svc.updateKnownModems({
+      serverName: 'S2',
+      bw: { portA: bwRow('Brandanalytics') },
+      ports: { IMEI1: [{ portID: 'portA', portName: 'Brandanalytics' }] },
+      status: [],
+    });
+    // Модем пере-энумерился с новым portID — старый дубль вытеснен.
+    svc.updateKnownModems({
+      serverName: 'S2',
+      bw: { portA2: bwRow('Brandanalytics') },
+      ports: { IMEI1: [{ portID: 'portA2', portName: 'Brandanalytics' }] },
+      status: [],
+    });
+    expect(Object.keys(deps.knownModems.S2)).toEqual(['portA2']);
+    // …а порт, переехавший к ДРУГОМУ клиенту, перезаписывается на него.
+    svc.updateKnownModems({
+      serverName: 'S2',
+      bw: { portA2: bwRow('WildBox') },
+      ports: { IMEI1: [{ portID: 'portA2', portName: 'WildBox' }] },
+      status: [],
+    });
+    expect(deps.knownModems.S2.portA2.portName).toBe('WildBox');
   });
 
   it('порт soft-deleted модема не ингестится', () => {

@@ -15,6 +15,20 @@ function create(deps) {
    * Update known modems from fresh (non-cached) server data.
    * Remembers each modem ever seen so we can inject them as offline later.
    */
+  // Move-dedupe: тот же модем (imei) под тем же клиентом держит ОДИН порт в
+  // ростере — при пере-энумерации с новым portID старый дубль вытесняется,
+  // иначе total клиента раздувается (2026-08-02). В реальной раскладке у
+  // клиентов один порт на модем (проверено по биндингам БА: 31 порт ↔ 31 imei),
+  // поэтому совпадение imei+client = пере-энумерация, а не второй тариф.
+  function _dedupeSameModemClient(km, imei, portName, keepPid, feedIds) {
+    if (!imei || !portName) return;
+    for (const pid of Object.keys(km)) {
+      if (pid === keepPid) continue;
+      const info = km[pid];
+      if (info && info.imei === imei && info.portName === portName) delete km[pid];
+    }
+  }
+
   function updateKnownModems(data) {
     if (data._cached) return;
     const srvName = data.serverName;
@@ -33,6 +47,10 @@ function create(deps) {
         }
       }
     }
+    // Полный сет portId текущего фида (bw + binding list) — нужен дедупу,
+    // чтобы не трогать вторые ЖИВЫЕ порты того же модема.
+    const _feedPortIds = new Set(Object.keys(data.bw || {}));
+    for (const pid of Object.keys(portIdToImei)) _feedPortIds.add(pid);
 
     // Update known modems with currently present data
     if (data.bw && typeof data.bw === 'object') {
@@ -89,6 +107,7 @@ function create(deps) {
           lastSeen: now,
           lastClientSeen
         };
+        _dedupeSameModemClient(km, imei, keptPortName, portId, _feedPortIds);
       }
     }
 
@@ -121,23 +140,8 @@ function create(deps) {
             lastClientSeen: isRealClient ? now : (prevKm.lastClientSeen || now),
           };
           _seenPortIds.add(p.portID);
+          _dedupeSameModemClient(km, imei, keptPortName, p.portID, _feedPortIds);
         }
-      }
-      // Legit shrink: a port absent from BOTH the binding list and the bw feed
-      // was unbound box-side (deleted binding) — drop it from the roster. A
-      // dark modem's port stays in list_ports_json, so it is NOT hit by this.
-      // Fail-open: with the ports endpoint flaky/empty we delete nothing.
-      // Grace (2026-08-02): ProxySmart sometimes loses a binding for minutes
-      // (re-enumeration glitch — the БА «32↔31» flap), so the actual delete
-      // fires only after 24h of continuous absence; a reappearing port just
-      // clears its _missingSince mark.
-      for (const pid of Object.keys(km)) {
-        if (_seenPortIds.has(pid)) {
-          if (km[pid] && km[pid]._missingSince) delete km[pid]._missingSince;
-          continue;
-        }
-        if (!km[pid]._missingSince) { km[pid]._missingSince = now; continue; }
-        if (now - km[pid]._missingSince > 24 * 3600 * 1000) delete km[pid];
       }
     }
 
