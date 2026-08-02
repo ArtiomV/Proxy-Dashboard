@@ -374,27 +374,15 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const monthRevenueSoFar = db.prepare(`SELECT SUM(amount) s FROM billing_ledger
       WHERE type='charge' AND date >= ? AND date <= ?${_notPaused}`).get(monthStart, todayStr, ..._pausedArr).s || 0;
 
-    // 2026-08-02: aggressive forecast — per client take max(billed so far,
-    // live ProxySmart month counters × price) and project the run-rate to EOM
-    // (same formula as the monthly bill). The old flat extrapolation of billed
-    // so-far under-read the first days of the month (billing lags a day,
-    // live counters catch the surge). per_modem clients are fixed-cost:
-    // their EOM = price × live modem count. Paused excluded (financial stats).
-    const liveBytesByPn = {};
-    for (const data of liveResults) {
-      if (typeof data.bw !== 'object') continue;
-      for (const b of Object.values(data.bw)) {
-        if (b && b.portName) {
-          liveBytesByPn[b.portName] = (liveBytesByPn[b.portName] || 0)
-            + parseBwToBytes(b.bandwidth_bytes_month_in) + parseBwToBytes(b.bandwidth_bytes_month_out);
-        }
-      }
-    }
-    const soFarByClient = {};
+    // 2026-08-02 (формула оператора, как в счетах): прогноз per_gb-клиента =
+    // среднесуточное потребление за последние 7 дней × дней в месяце × тариф.
+    // per_modem — фикс: цена × живые модемы. Paused excluded (финстатистика).
+    const dayAgo7 = isoDay(new Date(now.getTime() - 7 * dayMs));
+    const avg7ByClient = {};
     try {
-      for (const row of db.prepare(`SELECT client_id, SUM(amount) AS s FROM billing_ledger
-        WHERE type='charge' AND date >= ? AND date <= ?${_notPaused} GROUP BY client_id`).all(monthStart, todayStr, ..._pausedArr)) {
-        soFarByClient[row.client_id] = row.s || 0;
+      for (const row of db.prepare(`SELECT client_id, SUM(gb_used) AS gb FROM billing_ledger
+        WHERE type='charge' AND date >= ? AND date <= ?${_notPaused} GROUP BY client_id`).all(dayAgo7, todayStr, ..._pausedArr)) {
+        avg7ByClient[row.client_id] = (row.gb || 0) / 7;
       }
     } catch (_) { /* best-effort: error intentionally swallowed */ }
     let forecastEOMRaw = 0;
@@ -404,9 +392,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
         const mc = (modemsByPortName[c.portName] || {}).count || 0;
         forecastEOMRaw += (c.price || 0) * mc;
       } else {
-        const liveEst = trafficBytesToGb(liveBytesByPn[c.portName] || 0) * (c.price || 0);
-        const runRate = Math.max(soFarByClient[c.id] || 0, liveEst);
-        forecastEOMRaw += dayOfMonth > 0 ? (runRate / dayOfMonth) * daysInMonth : runRate;
+        forecastEOMRaw += (avg7ByClient[c.id] || 0) * daysInMonth * (c.price || 0);
       }
     }
     const forecastEOM = Math.round(forecastEOMRaw);

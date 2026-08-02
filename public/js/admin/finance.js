@@ -1057,10 +1057,31 @@ function loadAllBills() {
           var pdfBtn = b.tochkaBillId
             ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadBillPdf(\'' + b.clientId + '\',\'' + b.id + '\')">📥</button>'
             : '';
+          var _fHtml = '';
+          if (b.billingType === 'per_gb' && b.formula && b.formula.kind === 'per_gb') {
+            var _f = b.formula;
+            var _mmNames = ['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
+            var _mm = _f.prev_period ? parseInt(_f.prev_period.slice(5, 7), 10) : 0;
+            var _mn = _mmNames[_mm - 1] || 'прошлый мес.';
+            var _rub = function(v) { return Math.round(v).toLocaleString('ru-RU') + ' ₽'; };
+            _fHtml = '<div style="font-weight:400;font-size:9.5px;color:var(--text-3);margin-top:2px;line-height:1.35" title="Как посчитана сумма счёта">'
+              + 'MAX (' + esc(_rub(_f.prev_amount)) + ' за ' + esc(_mn) + ' или ';
+            if (_f.avg_daily_gb != null) {
+              // Текущая формула (2026-08-02): среднесуточное за 7 дней.
+              _fHtml += '<span style="text-decoration:underline dotted;cursor:help" title="Среднесуточное потребление за последние 7 дней по биллингу: ' + esc(String(_f.run_rate_gb)) + ' ГБ за 7 дн. ÷ 7">' + esc(String(_f.avg_daily_gb)) + ' ГБ</span>'
+                + ' × ' + esc(String(_f.days_in_month)) + ' дн. × ' + esc(String(_f.price)) + ' ₽';
+            } else {
+              // Легаси-формула (run-rate месяц-к-дате × 1.1) — старые счета.
+              _fHtml += esc(String(_f.run_rate_gb)) + ' ГБ ÷ ' + esc(String(_f.days_elapsed)) + ' дн. × ' + esc(String(_f.days_in_month)) + ' дн. × ' + esc(String(_f.price)) + ' ₽' + (_f.margin && _f.margin !== 1 ? ' × ' + esc(String(_f.margin)) : '');
+            }
+            _fHtml += ' = ' + esc(_rub(_f.forecast_amount)) + ')'
+              + (_f.debt ? ' + долг ' + esc(_rub(_f.debt)) : '')
+              + (_f.rounded_to ? ' → ↑' + (_f.rounded_to / 1000) + 'k' : '') + '</div>';
+          } else if (b.billingType === 'per_gb' && b.formulaText) {
+            _fHtml = '<div style="font-weight:400;font-size:9.5px;color:var(--text-3);margin-top:2px;line-height:1.35">Σ: ' + esc(b.formulaText) + '</div>';
+          }
           h += '<tr style="' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
-          h += '<td style="padding:6px 10px;font-weight:500">' + esc(b.clientName || '')
-            + ((b.billingType === 'per_gb' && b.formulaText) ? '<div style="font-weight:400;font-size:9.5px;color:var(--text-3);margin-top:2px;line-height:1.35" title="Как посчитана сумма счёта">Σ: ' + esc(b.formulaText) + '</div>' : '')
-            + '</td>';
+          h += '<td style="padding:6px 10px;font-weight:500">' + esc(b.clientName || '') + _fHtml + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.clientInn || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';

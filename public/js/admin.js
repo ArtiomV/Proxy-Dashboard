@@ -3466,10 +3466,16 @@ function renderNewExtWidgets(){
   opCard+='</div></div>';
   // MRR (тренд + прогноз столбцом в графике) — между «Потреблением трафика» и «Операторами».
   var mrrCard='<div class="analytics-card" style="margin:0;display:flex;flex-direction:column">'
-    +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:4px">'
+    +'<style>.mrr-fb:hover .mrr-fp{display:block}</style>'
+    +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:8px">'
     +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">📈 MRR</span>'
-    +'<span id="mrrLegend" style="display:flex;gap:8px;font-size:9px;font-weight:600;color:var(--text-2)"></span></div>'
-    +'<div style="font-size:8.5px;color:var(--text-3);margin-bottom:6px;line-height:1.35">MRR = выручка за 30 дн. (списания + корректировки, без пауз) · Прогноз = Σ max(биллинг, live-счётчики × тариф) ÷ день × дней в мес.</div>'
+    +'<span style="display:flex;gap:8px;font-size:9px;font-weight:600;color:var(--text-2);align-items:center"><span id="mrrLegend" style="display:flex;gap:8px"></span>'
+    +'<span class="mrr-fb" style="position:relative;display:inline-flex">'
+    +'<span style="cursor:help;border:1px solid var(--border);border-radius:8px;padding:0 7px;font-size:9px;color:var(--text-2);font-weight:500">Формула</span>'
+    +'<span class="mrr-fp" style="display:none;position:absolute;top:18px;right:0;z-index:60;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:9px 11px;width:290px;font-size:10px;font-weight:400;color:var(--text-1);box-shadow:var(--card-shadow);line-height:1.55">'
+    +'<b>MRR</b> = выручка за скользящие 30 дн. (списания + корректировки, без клиентов на паузе).<br>'
+    +'<b>Прогноз месяца</b> = Σ по клиентам: среднесуточное потребление за последние 7 дней × дней в месяце × тариф (per-GB); per-modem — цена × живые модемы.'
+    +'</span></span></span></div>'
     +'<div style="flex:1;min-height:120px;position:relative"><canvas id="newFinTrendCanvas"></canvas></div></div>';
   el.innerHTML=probCard+trendCard+mrrCard+opCard;
   loadTrendData('New');

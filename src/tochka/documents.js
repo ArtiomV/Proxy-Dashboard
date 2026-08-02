@@ -1,7 +1,6 @@
 'use strict';
 
 const logger = require('../logger');
-const { parseBwToBytes, trafficBytesToGb } = require('../utils/traffic');
 
 // Russian month names (prepositional case for "в январе")
 const MONTH_NAMES_RU = ['январе','феврале','марте','апреле','мае','июне','июле','августе','сентябре','октябре','ноябре','декабре'];
@@ -345,39 +344,25 @@ function calculateMonthlyBillDetails(client, cachedResults, getLedger) {
     const prevMonth = new Date(now);
     prevMonth.setMonth(prevMonth.getMonth() - 1);
     const prevPeriod = prevMonth.toISOString().slice(0, 7); // YYYY-MM
-    const curPeriod = now.toISOString().slice(0, 7);
 
     const ledgerEntries = getLedger(client.id) || [];
     const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(prevPeriod));
     const prevAmount = monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0);
 
-    // Run-rate forecast: billed GB so far this month ÷ days elapsed × days in
-    // month × price. ×1.1 margin so the amount covers in-month growth with
-    // запасом (bill is issued on the 1st, consumption keeps climbing). The
-    // forecast takes the LARGER of two sources: billed ledger (durable, but
-    // lags a day) and live ProxySmart month counters (fresh, but zero on box
-    // restarts) — one covers the other's blind spot.
-    const curCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(curPeriod));
-    const mtdGb = curCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
-    let liveMonthBytes = 0;
-    if (cachedResults && cachedResults.length > 0) {
-      for (const data of cachedResults) {
-        if (typeof data.bw === 'object') {
-          for (const b of Object.values(data.bw)) {
-            if (b && b.portName === client.portName) {
-              liveMonthBytes += parseBwToBytes(b.bandwidth_bytes_month_in) + parseBwToBytes(b.bandwidth_bytes_month_out);
-            }
-          }
-        }
-      }
-    }
-    const liveGb = trafficBytesToGb(liveMonthBytes);
-    const daysElapsed = Math.max(1, now.getUTCDate());
+    // Run-rate forecast (2026-08-02, по уточнённой формуле оператора):
+    // среднесуточное потребление за ПОСЛЕДНИЕ 7 дней (по биллингу) × дней в
+    // месяце × тариф. Без коэффициента-маржи — окно в 7 дней само по себе
+    // сглаживает дневной шум, а среднее за месяц-к-дате занижало рост.
+    const days7 = [];
+    for (let i = 1; i <= 7; i++) days7.push(new Date(now.getTime() - i * 86400000).toISOString().slice(0, 10));
+    const last7Gb = ledgerEntries
+      .filter(e => e.type === 'charge' && e.date && days7.includes(e.date))
+      .reduce((sum, e) => sum + (e.delta_gb || 0), 0);
+    const avgDailyGb = last7Gb / 7;
     const daysInMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getDate();
     const price = client.price || 0;
-    const runRateGb = Math.max(mtdGb, liveGb);
-    const forecastAmount = (runRateGb > 0 && price > 0)
-      ? (runRateGb / daysElapsed) * daysInMonth * price * 1.1 : 0;
+    const forecastAmount = (avgDailyGb > 0 && price > 0)
+      ? avgDailyGb * daysInMonth * price : 0;
 
     baseAmount = Math.max(prevAmount, forecastAmount);
 
@@ -386,12 +371,10 @@ function calculateMonthlyBillDetails(client, cachedResults, getLedger) {
       kind: 'per_gb',
       prev_period: prevPeriod,
       prev_amount: Math.round(prevAmount * 100) / 100,
-      run_rate_gb: Math.round(runRateGb * 1000) / 1000,
-      run_rate_source: liveGb > mtdGb ? 'live' : 'ledger',
-      days_elapsed: daysElapsed,
+      avg_daily_gb: Math.round(avgDailyGb * 1000) / 1000,   // среднесуточное за 7 дней
+      run_rate_gb: Math.round(last7Gb * 1000) / 1000,       // всего за 7 дней (для тултипа)
       days_in_month: daysInMonth,
       price,
-      margin: 1.1,
       forecast_amount: Math.round(forecastAmount * 100) / 100,
       rounded_to: 10000,
     };
@@ -416,6 +399,7 @@ function calculateMonthlyBillAmount(client, cachedResults, getLedger) {
 }
 
 // Человекочитаемая строка формулы для страницы счетов (2026-08-02).
+// Краткий формат: MAX (сумма за прошлый месяц или ср.за 7 дн. × дней × тариф).
 function formatBillFormula(f) {
   if (!f) return '';
   if (f.kind === 'manual') return 'Сумма задана вручную';
@@ -423,9 +407,9 @@ function formatBillFormula(f) {
   if (f.kind === 'per_modem') {
     return `${f.modem_count} мод. × ${rub(f.price)}${f.debt ? ' + долг ' + rub(f.debt) : ''}`;
   }
-  const src = f.run_rate_source === 'live' ? 'live-счётчики' : 'биллинг';
-  return `max(${rub(f.prev_amount)} за ${f.prev_period || 'прошлый мес.'}, `
-    + `прогноз ${f.run_rate_gb} ГБ ÷ ${f.days_elapsed} дн. × ${f.days_in_month} дн. × ${f.price} ₽ × ${f.margin} (${src}) = ${rub(f.forecast_amount)})`
+  const mm = f.prev_period ? Number(f.prev_period.slice(5, 7)) : 0;
+  const monthName = MONTH_NAMES_RU[mm - 1] || 'прошлый мес.';
+  return `MAX (${rub(f.prev_amount)} за ${monthName} или ${f.avg_daily_gb} ГБ/день × ${f.days_in_month} дн. × ${f.price} ₽ = ${rub(f.forecast_amount)})`
     + (f.debt ? ` + долг ${rub(f.debt)}` : '')
     + (f.rounded_to ? ` → ↑${(f.rounded_to / 1000)}k` : '');
 }
