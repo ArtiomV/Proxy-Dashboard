@@ -332,15 +332,32 @@ function calculateMonthlyBillAmount(client, cachedResults, getLedger) {
     }
     baseAmount = client.price * modemCount;
   } else {
-    // per_gb: sum charges from previous month
+    // per_gb: base = max(previous month's charges, current-month run-rate
+    // forecast). 2026-08-02: the old prev-month-only rule under-billed
+    // fast-growing clients (БА: счёт 380k по июлю, а август шёл к ~620k —
+    // клиент уходил в минус в середине месяца).
     const now = new Date();
     const prevMonth = new Date(now);
     prevMonth.setMonth(prevMonth.getMonth() - 1);
     const prevPeriod = prevMonth.toISOString().slice(0, 7); // YYYY-MM
+    const curPeriod = now.toISOString().slice(0, 7);
 
     const ledgerEntries = getLedger(client.id) || [];
     const monthCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(prevPeriod));
-    baseAmount = monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0);
+    const prevAmount = monthCharges.reduce((sum, e) => sum + (e.cost || 0), 0);
+
+    // Run-rate forecast: billed GB so far this month ÷ days elapsed × days in
+    // month × price. ×1.1 margin so the amount covers in-month growth with
+    // запасом (bill is issued on the 1st, consumption keeps climbing).
+    const curCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(curPeriod));
+    const mtdGb = curCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
+    const daysElapsed = Math.max(1, now.getUTCDate());
+    const daysInMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getDate();
+    const price = client.price || 0;
+    const forecastAmount = (mtdGb > 0 && price > 0)
+      ? (mtdGb / daysElapsed) * daysInMonth * price * 1.1 : 0;
+
+    baseAmount = Math.max(prevAmount, forecastAmount);
 
     if (baseAmount <= 0) return 0; // no charges last month — skip
   }
