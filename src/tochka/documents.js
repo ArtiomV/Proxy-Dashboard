@@ -1,6 +1,7 @@
 'use strict';
 
 const logger = require('../logger');
+const { parseBwToBytes, trafficBytesToGb } = require('../utils/traffic');
 
 // Russian month names (prepositional case for "в январе")
 const MONTH_NAMES_RU = ['январе','феврале','марте','апреле','мае','июне','июле','августе','сентябре','октябре','ноябре','декабре'];
@@ -348,14 +349,31 @@ function calculateMonthlyBillAmount(client, cachedResults, getLedger) {
 
     // Run-rate forecast: billed GB so far this month ÷ days elapsed × days in
     // month × price. ×1.1 margin so the amount covers in-month growth with
-    // запасом (bill is issued on the 1st, consumption keeps climbing).
+    // запасом (bill is issued on the 1st, consumption keeps climbing). The
+    // forecast takes the LARGER of two sources: billed ledger (durable, but
+    // lags a day) and live ProxySmart month counters (fresh, but zero on box
+    // restarts) — one covers the other's blind spot.
     const curCharges = ledgerEntries.filter(e => e.type === 'charge' && e.date && e.date.startsWith(curPeriod));
     const mtdGb = curCharges.reduce((sum, e) => sum + (e.delta_gb || 0), 0);
+    let liveMonthBytes = 0;
+    if (cachedResults && cachedResults.length > 0) {
+      for (const data of cachedResults) {
+        if (typeof data.bw === 'object') {
+          for (const b of Object.values(data.bw)) {
+            if (b && b.portName === client.portName) {
+              liveMonthBytes += parseBwToBytes(b.bandwidth_bytes_month_in) + parseBwToBytes(b.bandwidth_bytes_month_out);
+            }
+          }
+        }
+      }
+    }
+    const liveGb = trafficBytesToGb(liveMonthBytes);
     const daysElapsed = Math.max(1, now.getUTCDate());
     const daysInMonth = new Date(now.getUTCFullYear(), now.getUTCMonth() + 1, 0).getDate();
     const price = client.price || 0;
-    const forecastAmount = (mtdGb > 0 && price > 0)
-      ? (mtdGb / daysElapsed) * daysInMonth * price * 1.1 : 0;
+    const runRateGb = Math.max(mtdGb, liveGb);
+    const forecastAmount = (runRateGb > 0 && price > 0)
+      ? (runRateGb / daysElapsed) * daysInMonth * price * 1.1 : 0;
 
     baseAmount = Math.max(prevAmount, forecastAmount);
 

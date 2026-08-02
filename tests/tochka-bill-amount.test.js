@@ -52,4 +52,16 @@ describe('calculateMonthlyBillAmount (per_gb, прогноз)', () => {
     ];
     expect(calculateMonthlyBillAmount(client, [], ledgerOf(entries))).toBe(500000);
   });
+
+  it('живой счётчик свежий → прогноз берёт max(ledger, live)', () => {
+    // В ledger августа почти нет (списание за вчера), а живой месячный счётчик
+    // уже большой — прогноз должен пойти по live (кейс БА 2026-08-02).
+    const entries = [{ type: 'charge', date: PREV + '-15', cost: 373526.04, delta_gb: 16240 }];
+    const liveGb = 26000; // 26 ТБ run-rate, как у БА
+    const liveBytes = liveGb * 1e9;
+    const cached = [{ bw: { p1: { portName: 'X', bandwidth_bytes_month_in: String(liveBytes / 2), bandwidth_bytes_month_out: String(liveBytes / 2) } } }];
+    const forecast = (liveGb / DAYS_ELAPSED) * DAYS_IN_MONTH * 23 * 1.1;
+    const expected = round10k(Math.max(373526.04, forecast));
+    expect(calculateMonthlyBillAmount(client, cached, ledgerOf(entries))).toBe(expected);
+  });
 });
