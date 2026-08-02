@@ -1356,7 +1356,10 @@ function updateSummary(){
   }
   document.getElementById('totalDayTotal').innerHTML=formatBytes(totalDayIn+totalDayOut);
   document.getElementById('totalDaySplit').innerHTML='\u2193 '+formatBytes(totalDayIn)+' / \u2191 '+formatBytes(totalDayOut);
-  document.getElementById('totalMonthTotal').innerHTML=formatBytes(totalMonthIn+totalMonthOut);
+  // Заголовок — БИЛЛИНГОВЫЙ объём из ledger (совпадает с будущим актом);
+  // живые счётчики ProxySmart теряют трафик при рестартах боксов (2026-08-02).
+  var billedBytes=(billingData&&billingData.billedMonthGb)?billingData.billedMonthGb*1e9:(totalMonthIn+totalMonthOut);
+  document.getElementById('totalMonthTotal').innerHTML=formatBytes(billedBytes);
   document.getElementById('totalMonthSplit').innerHTML='\u2193 '+formatBytes(totalMonthIn)+' / \u2191 '+formatBytes(totalMonthOut);
 
   // --- Balance card ---

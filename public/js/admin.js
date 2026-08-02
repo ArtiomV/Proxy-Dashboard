@@ -1364,7 +1364,9 @@ function renderClients(){
     var _ch0=((currentData.clientRevenue30d||{})[c.id]||0);if(_clientFilter==='active'&&!(balance>=0&&modems.length>0))return;if(_clientFilter==='debtors'&&balance>=0)return;if(_clientFilter==='expiring'&&!(balance>=0&&_ch0>0&&balance/(_ch0/30)<5))return;
     count++;var bt=c.billingType||'per_gb';var price=c.price||0;
     var cost=Math.round(((currentData.clientMonthCharges||{})[c.id]||0)*100)/100;
-    var monthGbLive=Math.round(((currentData.clientLiveMonthGb||{})[c.id]||0)*10)/10;
+    // «Трафик/мес» — биллинговый объём из ledger (clientMonthGb), совпадает с
+    // актом. Живые счётчики (clientLiveMonthGb) теряют трафик при рестартах.
+    var monthGbLive=Math.round(((currentData.clientMonthGb||{})[c.id]||0)*10)/10;
     var tariffLabel=price+(bt==='per_modem'?'\u20BD/мод':'\u20BD/\u0413\u0411');
     var ctLabel=(c.clientType||'legal')==='individual'?'Физ. лицо':'Юр. лицо';
     var balWarn='';
@@ -4266,7 +4268,7 @@ function renderClientDetail(id, tab){
   var st=balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?['ПАУЗА','var(--warning)','#000']:(mc===0?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff']));
   var pl=document.getElementById('cdPill');pl.textContent=st[0];pl.style.background=st[1];pl.style.color=st[2];
   var charge=Math.round(((currentData.clientMonthCharges||{})[id]||0));
-  var gb=Math.round(((currentData.clientLiveMonthGb||{})[id]||0)*10)/10;
+  var gb=Math.round(((currentData.clientMonthGb||{})[id]||0)*10)/10;
   var be=document.getElementById('cdKpiBal');be.textContent=Math.round(balance).toLocaleString('ru-RU');be.style.color=balance<0?'var(--danger)':(balance>0?'var(--success)':'var(--text-0)');
   document.getElementById('cdKpiBalWrap').classList.toggle('is-green',balance>=0);
   document.getElementById('cdKpiCharge').textContent=charge.toLocaleString('ru-RU');
