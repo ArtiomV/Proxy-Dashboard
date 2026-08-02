@@ -260,7 +260,8 @@ function create(deps) {
       if ((client.bills || []).some(b => b.period === currentPeriod)) continue;
 
       try {
-        const amount = tochkaDocs.calculateMonthlyBillAmount(client, serverData, (id) => ledgerDb.listByClient(id));
+        const calc = tochkaDocs.calculateMonthlyBillDetails(client, serverData, (id) => ledgerDb.listByClient(id));
+        const amount = calc.amount;
         if (amount <= 0) {
           logger.info(`[Tochka AutoBills] Skipping ${client.name}: amount is 0`);
           continue;
@@ -292,7 +293,8 @@ function create(deps) {
           amount,
           status: 'unpaid',
           billNumber,
-          billDate
+          billDate,
+          formula: calc.formula || null   // 2026-08-02: разбор расчёта для страницы актов
         });
         generated++;
         logger.info(`[Tochka AutoBills] Created bill for ${client.name}: ${amount} RUB`);

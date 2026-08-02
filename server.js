@@ -498,7 +498,8 @@ function loadClients() {
     client.bills = documentsDb.listBills(client.id).map(r => ({
       id: r.id, tochkaBillId: r.tochka_bill_id || '', period: r.period,
       billNumber: r.bill_number || '', amount: r.amount || 0,
-      status: r.status || 'unpaid', createdAt: r.created_at || ''
+      status: r.status || 'unpaid', createdAt: r.created_at || '',
+      formula: r.formula ? (() => { try { return JSON.parse(r.formula); } catch (_) { return null; } })() : null
     }));
   }
   return clientsList;

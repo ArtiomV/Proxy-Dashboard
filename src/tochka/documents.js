@@ -311,9 +311,12 @@ function buildTochkaBillBody(tochkaConfig, client, amount, billNumber, billDate)
   };
 }
 
-// Helper: calculate monthly bill amount for a client
-function calculateMonthlyBillAmount(client, cachedResults, getLedger) {
+// Helper: calculate monthly bill amount for a client (+ формула расчёта для UI).
+// calculateMonthlyBillDetails → { amount, formula } — formula хранится в счёте
+// и показывается на странице актов (2026-08-02: «из чего исходил алгоритм»).
+function calculateMonthlyBillDetails(client, cachedResults, getLedger) {
   let baseAmount = 0;
+  let formula = null;
 
   if (client.billingType === 'per_modem') {
     // Fixed: price * modem count
@@ -329,9 +332,10 @@ function calculateMonthlyBillAmount(client, cachedResults, getLedger) {
     }
     if (modemCount === 0) {
       logger.warn(`[Bill] Cannot determine modemCount for ${client.name}, skipping`);
-      return 0;
+      return { amount: 0, formula: null };
     }
     baseAmount = client.price * modemCount;
+    formula = { kind: 'per_modem', modem_count: modemCount, price: client.price || 0 };
   } else {
     // per_gb: base = max(previous month's charges, current-month run-rate
     // forecast). 2026-08-02: the old prev-month-only rule under-billed
@@ -377,21 +381,53 @@ function calculateMonthlyBillAmount(client, cachedResults, getLedger) {
 
     baseAmount = Math.max(prevAmount, forecastAmount);
 
-    if (baseAmount <= 0) return 0; // no charges last month — skip
+    if (baseAmount <= 0) return { amount: 0, formula: null }; // no charges last month — skip
+    formula = {
+      kind: 'per_gb',
+      prev_period: prevPeriod,
+      prev_amount: Math.round(prevAmount * 100) / 100,
+      run_rate_gb: Math.round(runRateGb * 1000) / 1000,
+      run_rate_source: liveGb > mtdGb ? 'live' : 'ledger',
+      days_elapsed: daysElapsed,
+      days_in_month: daysInMonth,
+      price,
+      margin: 1.1,
+      forecast_amount: Math.round(forecastAmount * 100) / 100,
+      rounded_to: 10000,
+    };
   }
 
   // Add negative balance (debt) to the amount
   let totalAmount = baseAmount;
-  if ((client.balance || 0) < 0) {
-    totalAmount += Math.abs(client.balance);
-  }
+  const debt = (client.balance || 0) < 0 ? Math.abs(client.balance) : 0;
+  totalAmount += debt;
+  if (formula) formula.debt = Math.round(debt * 100) / 100;
 
   // For per_gb: round up to nearest 10,000₽
   if (client.billingType !== 'per_modem') {
     totalAmount = Math.ceil(totalAmount / 10000) * 10000;
   }
 
-  return Math.round(totalAmount * 100) / 100;
+  return { amount: Math.round(totalAmount * 100) / 100, formula };
+}
+
+function calculateMonthlyBillAmount(client, cachedResults, getLedger) {
+  return calculateMonthlyBillDetails(client, cachedResults, getLedger).amount;
+}
+
+// Человекочитаемая строка формулы для страницы счетов (2026-08-02).
+function formatBillFormula(f) {
+  if (!f) return '';
+  if (f.kind === 'manual') return 'Сумма задана вручную';
+  const rub = v => Math.round(v).toLocaleString('ru-RU') + ' ₽';
+  if (f.kind === 'per_modem') {
+    return `${f.modem_count} мод. × ${rub(f.price)}${f.debt ? ' + долг ' + rub(f.debt) : ''}`;
+  }
+  const src = f.run_rate_source === 'live' ? 'live-счётчики' : 'биллинг';
+  return `max(${rub(f.prev_amount)} за ${f.prev_period || 'прошлый мес.'}, `
+    + `прогноз ${f.run_rate_gb} ГБ ÷ ${f.days_elapsed} дн. × ${f.days_in_month} дн. × ${f.price} ₽ × ${f.margin} (${src}) = ${rub(f.forecast_amount)})`
+    + (f.debt ? ` + долг ${rub(f.debt)}` : '')
+    + (f.rounded_to ? ` → ↑${(f.rounded_to / 1000)}k` : '');
 }
 
 module.exports = {
@@ -401,5 +437,7 @@ module.exports = {
   buildTochkaActBody,
   buildTochkaBillBody,
   calculateMonthlyBillAmount,
+  calculateMonthlyBillDetails,
+  formatBillFormula,
   sanitizeActPositionsForTochka
 };

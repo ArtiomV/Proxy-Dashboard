@@ -65,3 +65,31 @@ describe('calculateMonthlyBillAmount (per_gb, прогноз)', () => {
     expect(calculateMonthlyBillAmount(client, cached, ledgerOf(entries))).toBe(expected);
   });
 });
+
+describe('calculateMonthlyBillDetails + formatBillFormula', () => {
+  const client = { id: 'C1', portName: 'X', billingType: 'per_gb', price: 23, balance: 0 };
+
+  it('формула хранит разбор: прошлый месяц, run-rate, маржа, источник', () => {
+    const entries = [
+      { type: 'charge', date: PREV + '-15', cost: 373526.04, delta_gb: 16240 },
+      { type: 'charge', date: CUR + '-01', cost: 21515, delta_gb: 935 },
+    ];
+    const liveBytes = 1500 * 1e9;
+    const cached = [{ bw: { p1: { portName: 'X', bandwidth_bytes_month_in: String(liveBytes / 2), bandwidth_bytes_month_out: String(liveBytes / 2) } } }];
+    const d = documents.calculateMonthlyBillDetails(client, cached, ledgerOf(entries));
+    expect(d.formula.kind).toBe('per_gb');
+    expect(d.formula.prev_amount).toBe(373526.04);
+    expect(d.formula.run_rate_gb).toBe(1500);
+    expect(d.formula.run_rate_source).toBe('live');
+    expect(d.formula.margin).toBe(1.1);
+    const txt = documents.formatBillFormula(d.formula);
+    expect(txt.replace(/[\s\u00A0\u202F]/g,' ')).toContain('373 526');
+    expect(txt).toContain('прогноз');
+    expect(txt).toContain('23 ₽ × 1.1');
+  });
+
+  it('ручная сумма → «вручную», per_modem → «N мод. × price»', () => {
+    expect(documents.formatBillFormula({ kind: 'manual' })).toBe('Сумма задана вручную');
+    expect(documents.formatBillFormula({ kind: 'per_modem', modem_count: 12, price: 4250, debt: 0 }).replace(/[\s\u00A0\u202F]/g,' ')).toBe('12 мод. × 4 250 ₽');
+  });
+});

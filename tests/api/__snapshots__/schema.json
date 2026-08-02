@@ -705,7 +705,7 @@
     "type": "table",
     "name": "bills",
     "tbl_name": "bills",
-    "sql": "CREATE TABLE bills ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, tochka_bill_id TEXT, period TEXT NOT NULL, bill_number TEXT, amount REAL NOT NULL, status TEXT DEFAULT 'unpaid', created_at TEXT DEFAULT (datetime('now')) )"
+    "sql": "CREATE TABLE bills ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, tochka_bill_id TEXT, period TEXT NOT NULL, bill_number TEXT, amount REAL NOT NULL, status TEXT DEFAULT 'unpaid', created_at TEXT DEFAULT (datetime('now')) , formula TEXT NOT NULL DEFAULT '')"
   },
   {
     "type": "table",

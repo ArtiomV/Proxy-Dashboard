@@ -475,7 +475,7 @@ function loadDailyTrafficChart(textColor,gridColor){
       var daysLeft=daysInMonth-daysElapsed;
       var forecast=periodTotal/daysElapsed*daysInMonth;
       fcEl.textContent=formatBytes(forecast);
-      fcSub.textContent='ещё '+daysLeft+' дн. в месяце';
+      fcSub.textContent='ещё '+daysLeft+' дн. в месяце · = объём ÷ '+daysElapsed+' дн. × '+daysInMonth+' дн.';
     } else {
       fcEl.textContent='—';
       fcSub.textContent='не текущий месяц';

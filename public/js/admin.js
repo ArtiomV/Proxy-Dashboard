@@ -3466,9 +3466,10 @@ function renderNewExtWidgets(){
   opCard+='</div></div>';
   // MRR (тренд + прогноз столбцом в графике) — между «Потреблением трафика» и «Операторами».
   var mrrCard='<div class="analytics-card" style="margin:0;display:flex;flex-direction:column">'
-    +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:8px">'
+    +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:4px">'
     +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">📈 MRR</span>'
     +'<span id="mrrLegend" style="display:flex;gap:8px;font-size:9px;font-weight:600;color:var(--text-2)"></span></div>'
+    +'<div style="font-size:8.5px;color:var(--text-3);margin-bottom:6px;line-height:1.35">MRR = выручка за 30 дн. (списания + корректировки, без пауз) · Прогноз = Σ max(биллинг, live-счётчики × тариф) ÷ день × дней в мес.</div>'
     +'<div style="flex:1;min-height:120px;position:relative"><canvas id="newFinTrendCanvas"></canvas></div></div>';
   el.innerHTML=probCard+trendCard+mrrCard+opCard;
   loadTrendData('New');

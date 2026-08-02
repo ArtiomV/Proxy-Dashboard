@@ -18,6 +18,8 @@ const {
   buildTochkaActBody,
   buildTochkaBillBody,
   calculateMonthlyBillAmount,
+  calculateMonthlyBillDetails,
+  formatBillFormula,
 } = require('../tochka/documents');
 const { tochkaRequest: _rawTochkaRequest } = require('../tochka/api');
 const { buildDocHtml: _buildDocHtml } = require('../documents/generator');
@@ -725,7 +727,9 @@ r.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (
   if (!manualAmount) {
     try { serverData = await fetchAllServersDataCached(); } catch (e) { logger.error('[Bills] fetchAllServersData error:', e.message); }
   }
-  let amount = manualAmount || _calcBill(client, serverData);
+  // 2026-08-02: разбор расчёта (формула) сохраняется в счёте для страницы актов.
+  const _calc = manualAmount ? null : calculateMonthlyBillDetails(client, serverData, (id) => ledgerDb.listByClient(id));
+  let amount = manualAmount || (_calc ? _calc.amount : 0);
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Cannot calculate bill amount (no charges found)' });
 
   const billNumber = `СЧЁТ-${billPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
@@ -755,7 +759,8 @@ r.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (
     createdAt: new Date().toISOString(),
     amount: Math.round(amount * 100) / 100,
     status: 'unpaid',
-    billNumber
+    billNumber,
+    formula: manualAmount ? { kind: 'manual' } : (_calc ? _calc.formula : null)
   };
 
   if (!client.bills) client.bills = [];
@@ -830,7 +835,10 @@ r.get('/api/admin/tochka/all_bills', authMiddleware, adminMiddleware, (req, res)
         ...b,
         clientId: client.id,
         clientName: client.name,
-        clientInn: client.inn || ''
+        clientInn: client.inn || '',
+        billingType: client.billingType || 'per_gb',
+        // 2026-08-02: разбор расчёта суммы счёта для страницы актов.
+        formulaText: b.formula && b.formula.kind === 'manual' ? 'Сумма задана вручную' : formatBillFormula(b.formula)
       });
     }
   }

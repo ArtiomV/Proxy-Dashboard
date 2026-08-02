@@ -46,8 +46,8 @@ function init(db) {
   // change on reload. amount/period/etc. stay insert-once (same philosophy
   // as clients.balance, which is excluded from the clients upsert).
   S.billInsert = db.prepare(
-    'INSERT INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at) ' +
-    'VALUES (?, ?, ?, ?, ?, ?, ?, ?) ' +
+    'INSERT INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at, formula) ' +
+    'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
     'ON CONFLICT(id) DO UPDATE SET status=excluded.status'
   );
   S.billsByClient = db.prepare('SELECT * FROM bills WHERE client_id = ? ORDER BY created_at');
@@ -85,7 +85,8 @@ function insertBill(b, clientId) {
   return S.billInsert.run(
     b.id, clientId, b.tochkaBillId || '', b.period || '',
     b.billNumber || '', b.amount || 0, b.status || 'unsigned',
-    b.createdAt || new Date().toISOString()
+    b.createdAt || new Date().toISOString(),
+    b.formula ? JSON.stringify(b.formula) : ''
   );
 }
 function listBills(clientId) { return S.billsByClient.all(clientId); }

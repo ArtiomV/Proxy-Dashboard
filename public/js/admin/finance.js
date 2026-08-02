@@ -1058,7 +1058,9 @@ function loadAllBills() {
             ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadBillPdf(\'' + b.clientId + '\',\'' + b.id + '\')">📥</button>'
             : '';
           h += '<tr style="' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
-          h += '<td style="padding:6px 10px;font-weight:500">' + esc(b.clientName || '') + '</td>';
+          h += '<td style="padding:6px 10px;font-weight:500">' + esc(b.clientName || '')
+            + ((b.billingType === 'per_gb' && b.formulaText) ? '<div style="font-weight:400;font-size:9.5px;color:var(--text-3);margin-top:2px;line-height:1.35" title="Как посчитана сумма счёта">Σ: ' + esc(b.formulaText) + '</div>' : '')
+            + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.clientInn || '') + '</td>';
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
