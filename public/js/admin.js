@@ -659,7 +659,12 @@ function processData(){if(!currentData)return;_initServers(currentData.servers);
     var _sinceMs=null;
     var _ent=iph[imei];
     if(_ent&&_ent.length){var _lf=Number(_ent[_ent.length-1].from)||0;if(_lf)_sinceMs=now-_lf;}
-    if(ipt[imei]){var _sm=now-ipt[imei].since;if(_sinceMs==null||_sm>_sinceMs)_sinceMs=_sm;}
+    if(ipt[imei]){
+      // since бывает epoch-числом ИЛИ ISO-строкой (modem-tracking пишет ISO) —
+      // Number(ISO)=NaN, поэтому оба формата парсим.
+      var _sv=ipt[imei].since,_sn=Number(_sv),_sm=isNaN(_sn)?(isNaN(Date.parse(_sv))?null:now-Date.parse(_sv)):now-_sn;
+      if(_sm!=null&&(_sinceMs==null||_sm>_sinceMs))_sinceMs=_sm;
+    }
     if(_sinceMs!=null){
       m.ipStuck=_sinceMs>24*60*60*1000;
       m.ipSinceHours=Math.floor(_sinceMs/3600000);
