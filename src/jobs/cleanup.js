@@ -93,20 +93,25 @@ function create(deps) {
 
       // 3. known_modems.json: remove entries with stale lastSeen, only on
       //    servers that ARE fresh (skipped servers untouched).
-      //    Also handle "IMEI reassigned": if the same IMEI has multiple km
-      //    entries (modem was moved between clients/ports), keep only the
-      //    newest by lastSeen and remove older ones that are not in live bw.
+      //    Also handle "IMEI reassigned" on the SAME server: if the same IMEI
+      //    has multiple km entries on one server (modem re-enumerated to a
+      //    different port), keep only the newest by lastSeen and remove older
+      //    ones that are not in live bw. 2026-08-03: scope narrowed from GLOBAL
+      //    to same-server — у E3372 бывают КЛОНИРОВАННЫЕ IMEI на разных стиках
+      //    (доказано: порт UDBqldZf на ro2 давал 78k хитов/день, пока клон с тем
+      //    же IMEI работал на S3 — глобальный дедуп снёс живой биндинг БА 32→31).
       let kmRemoved = 0, kmChanged = false;
 
-      // Build per-IMEI index globally across all (fresh) servers.
-      const byImei = {};   // imei -> [{srv, pid, lastSeen}]
+      // Build per-(server,imei) index.
+      const byImei = {};   // 'srv|imei' -> [{srv, pid, lastSeen}]
       for (const srvName of Object.keys(knownModems || {})) {
         if (skippedSrv.includes(srvName)) continue;
         const km = knownModems[srvName];
         for (const [pid, info] of Object.entries(km)) {
           if (!info.imei) continue;
-          if (!byImei[info.imei]) byImei[info.imei] = [];
-          byImei[info.imei].push({ srv: srvName, pid, lastSeen: info.lastSeen || 0 });
+          const k = srvName + '|' + info.imei;
+          if (!byImei[k]) byImei[k] = [];
+          byImei[k].push({ srv: srvName, pid, lastSeen: info.lastSeen || 0 });
         }
       }
       // Build live-IMEI set per server (modem currently visible in ProxySmart status,
