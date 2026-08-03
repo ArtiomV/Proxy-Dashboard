@@ -646,16 +646,23 @@ function processData(){if(!currentData)return;_initServers(currentData.servers);
   var bw=currentData.bandwidth||{};for(var mi in mm){var mod=mm[mi];for(var p=0;p<mod.ports.length;p++){var pt=mod.ports[p];if(bw[pt.portID])pt._bw=bw[pt.portID]}}
   // IP tracking & uptime tracking
   var ipt=currentData.ipTracking||{};
+  var iph=currentData.ipHistory||{};
   var upt=currentData.uptimeTracking||{};
   var spt=currentData.speedtestLatest||{};
   var now=Date.now();
   for(var imei in mm){
     var m=mm[imei];
-    // Stuck IP detection
-    if(ipt[imei]){
-      var sinceMs=now-ipt[imei].since;
-      m.ipStuck=sinceMs>24*60*60*1000;
-      m.ipSinceHours=Math.floor(sinceMs/3600000);
+    // Stuck IP detection. Источник — ip_history (долговечная): cleanup периодически
+    // прунит ipTracking у долго-офлайн модемов, и по возвращении модем получает
+    // СВЕЖИЙ since — застой прячется от правила 24ч на сутки (2026-08-02).
+    // ip_history переживает прунинг, поэтому берём max возраста из обоих источников.
+    var _sinceMs=null;
+    var _ent=iph[imei];
+    if(_ent&&_ent.length){var _lf=Number(_ent[_ent.length-1].from)||0;if(_lf)_sinceMs=now-_lf;}
+    if(ipt[imei]){var _sm=now-ipt[imei].since;if(_sinceMs==null||_sm>_sinceMs)_sinceMs=_sm;}
+    if(_sinceMs!=null){
+      m.ipStuck=_sinceMs>24*60*60*1000;
+      m.ipSinceHours=Math.floor(_sinceMs/3600000);
     }
     // Uptime percentage
     if(upt[imei]&&upt[imei].total_checks>0){

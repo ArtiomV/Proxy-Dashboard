@@ -562,7 +562,13 @@ function _renderOverview(body,m){
   _ports.forEach(function(port,pi){
     if(pi>0)conn+='<div style="height:1px;background:var(--border);margin:8px 0"></div>';
     var sip=ci.serverIp||'';
-    if(_ports.length>1||port.portName)conn+='<div style="font-size:10px;font-weight:600;color:var(--accent);margin:2px 0 4px">'+esc(port.portName||('Порт '+(pi+1)))+'</div>';
+    if(_ports.length>1||port.portName){
+      var _pp1=port.HTTP_PORT||port.SOCKS_PORT;
+      var _pcred=_pp1?(sip+':'+_pp1+(port.LOGIN?':'+port.LOGIN+':'+(port.PASSWORD||''):'')):'';
+      conn+='<div style="font-size:10px;font-weight:600;color:var(--accent);margin:2px 0 4px">'+esc(port.portName||('Порт '+(pi+1)))
+        +(_pcred?' <span style="font-weight:400;cursor:pointer" title="Скопировать реквизиты этого порта" data-on-click="copyText(\''+_pcred.replace(/'/g,"\\'")+'\',this)">📋 строка</span>':'')
+        +'</div>';
+    }
     conn+=_ovRow('HTTP',port.HTTP_PORT?(sip+':'+port.HTTP_PORT):'—');
     conn+=_ovRow('SOCKS5',port.SOCKS_PORT?(sip+':'+port.SOCKS_PORT):'—');
     if(port.conns_stats){var _pcs=port.conns_stats;var _pct=Number(_pcs.total)||0;conn+=_ovRow('TCP-коннекты','<span style="font-family:var(--font-mono);font-weight:600;color:'+(_pct>0?_connColor(_pct):'var(--text-0)')+'">'+_pct+'</span> <span style="font-size:9px;color:var(--text-3)">http '+(Number(_pcs.http)||0)+' · socks '+(Number(_pcs.socks5)||0)+'</span>');}

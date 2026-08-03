@@ -121,3 +121,31 @@ describe('delegation — покрытие data-on-* (Stage 11 lock)', () => {
     }
   });
 });
+
+describe('delegation: селектор в closest/getElementById/querySelector передаётся контентом, а не кавычкой', () => {
+  // Регрессия 2026-08-02: parseString("'"+m[1]+"'") отдавал символ кавычки
+  // вместо текста селектора — крестики попапов (closest('...').remove()) и
+  // все getElementById('...').click() ветки молча умирали в try/catch.
+  it("this.closest('div[style*=fixed]').remove() — селектор доходит до closest", () => {
+    const seen = [];
+    const el = { closest: (sel) => { seen.push(sel); return { remove() {} }; } };
+    D.execStatement("this.closest('div[style*=fixed]').remove()", el, {});
+    expect(seen).toEqual(['div[style*=fixed]']);
+  });
+  it("document.getElementById('confirmOverlay').click() — id доходит", () => {
+    const seen = [];
+    const orig = global.document.getElementById;
+    global.document.getElementById = (id) => { seen.push(id); return { click() {} }; };
+    D.execStatement("document.getElementById('confirmOverlay').click()", EL, EV);
+    global.document.getElementById = orig;
+    expect(seen).toEqual(['confirmOverlay']);
+  });
+  it("document.querySelector('.modal-close').click() — селектор доходит", () => {
+    const seen = [];
+    const orig = global.document.querySelector;
+    global.document.querySelector = (s) => { seen.push(s); return { click() {} }; };
+    D.execStatement("document.querySelector('.modal-close').click()", EL, EV);
+    global.document.querySelector = orig;
+    expect(seen).toEqual(['.modal-close']);
+  });
+});

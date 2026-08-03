@@ -154,7 +154,7 @@
     if (expr === 'event.target') return event.target;
     // document.getElementById('lit').(value|textContent)
     m = expr.match(/^document\.getElementById\((['"])((?:[^'\\]|\\.)*)\1\)\.(value|textContent)$/);
-    if (m) { const node = document.getElementById(parseString("'" + m[1] + "'")); return node ? node[m[3]] : undefined; }
+    if (m) { const node = document.getElementById(parseString("'" + m[2] + "'")); return node ? node[m[3]] : undefined; }
     // parseInt/parseFloat/encodeURIComponent обёртки
     m = expr.match(/^(parseInt|parseFloat|encodeURIComponent)\((.*)\)$/);
     if (m) {
@@ -210,7 +210,7 @@
     let m;
     // this.closest('sel').remove()
     if ((m = expr.match(/^this\.closest\((['"])((?:[^'\\]|\\.)*)\1\)\.remove\(\)$/))) {
-      const sel = parseString("'" + m[1] + "'");
+      const sel = parseString("'" + m[2] + "'");
       const anc = el.closest(sel);
       if (anc) anc.remove();
       return;
@@ -226,18 +226,18 @@
     if (expr === 'event.preventDefault()') { event.preventDefault(); return; }
     // document.getElementById('lit').METHOD(args)
     if ((m = expr.match(/^document\.getElementById\((['"])((?:[^'\\]|\\.)*)\1\)\.(remove|click|focus|scrollIntoView)\((.*)\)$/))) {
-      const node = document.getElementById(parseString("'" + m[1] + "'"));
+      const node = document.getElementById(parseString("'" + m[2] + "'"));
       if (node) node[m[3]](...evalArgs(m[4], el, event));
       return;
     }
     // document.querySelector('lit').click() / .classList.toggle('lit')
     if ((m = expr.match(/^document\.querySelector\((['"])((?:[^'\\]|\\.)*)\1\)\.click\(\)$/))) {
-      const node = document.querySelector(parseString("'" + m[1] + "'"));
+      const node = document.querySelector(parseString("'" + m[2] + "'"));
       if (node) node.click();
       return;
     }
     if ((m = expr.match(/^document\.querySelector\((['"])((?:[^'\\]|\\.)*)\1\)\.classList\.toggle\((['"])((?:[^'\\]|\\.)*)\3\)$/))) {
-      const node = document.querySelector(parseString("'" + m[1] + "'"));
+      const node = document.querySelector(parseString("'" + m[2] + "'"));
       if (node) node.classList.toggle(parseString("'" + m[2] + "'"));
       return;
     }
@@ -267,7 +267,7 @@
     let m;
     if ((m = lhs.match(/^this\.style\.([A-Za-z]+)$/))) { el.style[m[1]] = rhs; return; }
     if ((m = lhs.match(/^document\.getElementById\((['"])((?:[^'\\]|\\.)*)\1\)\.(value|textContent|innerHTML)$/))) {
-      const node = document.getElementById(parseString("'" + m[1] + "'"));
+      const node = document.getElementById(parseString("'" + m[2] + "'"));
       if (node) node[m[3]] = rhs;
       return;
     }
