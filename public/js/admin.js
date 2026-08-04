@@ -3292,15 +3292,33 @@ function renderNewPulse(fin){
       _ncPulseCard('Выручка за 30 дней', _fmtRub((s.metrics&&s.metrics.revenue_30d!=null)?s.metrics.revenue_30d:s.mrr), growthSub, 'accent') +
       _ncPulseCard('На балансах', _fmtRub(cashFloat), '<span style="color:var(--text-3)">предоплата клиентов</span>', 'success');
   }
-  // Финсводка-виджет (верхний ряд, бывший слот «Ресурсы») — MRR / NRR / прирост M/M / на балансах
+  // Финсводка-виджет (верхний ряд, бывший слот «Ресурсы») — выручка / затраты /
+  // прибыль / маржа / ARPU / клиенты / NRR / прирост M/M / на балансах (2026-08-04:
+  // дополнено экономикой со страницы «Финансы» — чтобы дашборд закрывал всё).
   var fsEl=document.getElementById('newFinSummaryBody');
   if(fsEl){
     function _fsRow(l,v,c,last){return '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px'+(last?'':';border-bottom:1px solid var(--border)')+'"><span style="color:var(--text-2)">'+l+'</span><span style="font-weight:600'+(c?';color:'+c:'')+'">'+v+'</span></div>';}
+    var _cost=s.total_cost||0;
+    var _rev30=(s.mrr!=null)?s.mrr:0;
+    var _profit=_rev30-_cost;
+    var _marginPct=_rev30>0?Math.round(_profit/_rev30*1000)/10:null;
     fsEl.innerHTML =
       _fsRow('Выручка 30д', _fmtRub((s.metrics&&s.metrics.revenue_30d!=null)?s.metrics.revenue_30d:s.mrr), 'var(--text-0)') +
+      _fsRow('Затраты (мес.)', _cost>0?_fmtRub(_cost):'—', 'var(--text-0)') +
+      _fsRow('Прибыль 30д', _cost>0?_fmtRub(_profit):'—', _cost>0?(_profit>=0?'var(--success)':'var(--danger)'):'var(--text-3)') +
+      _fsRow('Маржа', (_marginPct==null||!_cost)?'—':(_marginPct+'% · '+Math.round(s.margin_per_modem||0).toLocaleString('ru-RU')+' ₽/мод'), (_marginPct!=null&&_cost)?(_marginPct>=50?'var(--success)':_marginPct>=25?'var(--warning)':'var(--danger)'):'var(--text-3)') +
+      _fsRow('ARPU', _fmtRub(s.arpu), 'var(--text-0)') +
+      _fsRow('Активных клиентов', String(s.active_clients||0), 'var(--text-0)') +
       _fsRow('NRR', s.nrr_pct==null?'—':(s.nrr_pct+'%'), nrrColor) +
       _fsRow('Прирост M/M', gc==null?'—':((gc>=0?'+':'')+gc+'%'), gc==null?'var(--text-3)':(gc>=0?'var(--success)':'var(--danger)')) +
       _fsRow('На балансах', _fmtRub(cashFloat), 'var(--accent)', true);
+    // Мини-список последних платежей (топ-3) — со страницы «Финансы».
+    var _rp=(fin&&fin.recent_payments||[]).filter(function(p){return (p.amount||0)>=0;}).slice(0,3);
+    if(_rp.length){
+      fsEl.innerHTML += '<div style="margin-top:6px;padding-top:6px;border-top:1px solid var(--border)"><div style="font-size:9px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;margin-bottom:3px">Последние платежи</div>'
+        + _rp.map(function(p){return '<div style="display:flex;justify-content:space-between;gap:8px;font-size:11px;padding:2px 0"><span style="color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0" title="'+esc(p.client||'')+' · '+esc(p.date||'')+'">'+esc(p.client||'')+'</span><span style="font-weight:600;color:var(--success);font-family:var(--font-mono);white-space:nowrap">+'+Math.round(p.amount).toLocaleString('ru-RU')+'</span></div>';}).join('')
+        + '<div style="text-align:right;margin-top:3px"><span style="font-size:10px;color:var(--accent);cursor:pointer" data-on-click="document.querySelector(\'.nav-tab[data-on-click*=bank]\').click()">все →</span></div></div>';
+    }
   }
 }
 
