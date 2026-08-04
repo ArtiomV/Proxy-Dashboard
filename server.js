@@ -1199,7 +1199,13 @@ function markModemDeleted(serverName, imei, nick) {
   catch (e) { logger.warn('[soft-delete] flag failed: ' + e.message); }
   // 2) In-memory set so the hot poll loop skips it without a DB hit.
   if (imei) _deletedModemSet.add(serverName + '|' + imei);
-  // 3) Purge EVERY known_modems entry for this modem (the actual flap source).
+  // 3) Purge known_modems entries for this modem — КРОМЕ записей с реальной
+  //    клиентской привязкой (2026-08-04, реша оператора): реквизит живёт и
+  //    трафиком даже когда модем мёртв/скрыт (UDBqldZf давал 78k hits/день
+  //    после soft-delete модема). Soft-delete прячет МОДЕМ со страницы модемов
+  //    (injectOfflineModems сам уважает deletedModemSet), а клиентский
+  //    credential остаётся в total. Сносим только пустые ghost-плейсхолдеры
+  //    (meta_/recovered_ и безымянные дубли) — источник флапа в списке.
   const km = knownModems[serverName];
   if (km) {
     const metaId = imei ? ('meta_' + imei) : '';
@@ -1207,6 +1213,7 @@ function markModemDeleted(serverName, imei, nick) {
     let removed = 0;
     for (const pid of Object.keys(km)) {
       const info = km[pid] || {};
+      if (info.portName && !/^random/i.test(info.portName)) continue;   // реквизит клиента — не трогаем
       if ((imei && info.imei === imei) ||
           (nick && info.nick === nick) ||
           (metaId && pid === metaId) ||
