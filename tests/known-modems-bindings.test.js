@@ -117,3 +117,34 @@ describe('updateKnownModems: стабильный total по биндингам 
     expect(Object.keys(deps.knownModems.S2)).toEqual(['portA']);
   });
 });
+
+describe('реконсиляция с боксом (7 дней)', () => {
+  it('реквизит, отсутствующий >7 дней, выбывает; <7 дней — держится', () => {
+    const deps = mkDeps();
+    const svc = create(deps);
+    const feed = {
+      serverName: 'S2',
+      bw: { portA: bwRow('Brandanalytics') },
+      ports: {
+        IMEI1: [{ portID: 'portA', portName: 'Brandanalytics' }],
+        IMEI2: [{ portID: 'portB', portName: 'Brandanalytics' }],
+      },
+      status: [],
+    };
+    svc.updateKnownModems(feed);
+    expect(Object.keys(deps.knownModems.S2).sort()).toEqual(['portA', 'portB']);
+    const feedNoB = {
+      serverName: 'S2',
+      bw: { portA: bwRow('Brandanalytics') },
+      ports: { IMEI1: [{ portID: 'portA', portName: 'Brandanalytics' }] },
+      status: [],
+    };
+    // Пропал вчера — держим.
+    svc.updateKnownModems(feedNoB);
+    expect(deps.knownModems.S2.portB).toBeTruthy();
+    // Пропал 8 дней — выбывает.
+    deps.knownModems.S2.portB._missingSince = Date.now() - 8 * 24 * 3600 * 1000;
+    svc.updateKnownModems(feedNoB);
+    expect(deps.knownModems.S2.portB).toBeUndefined();
+  });
+});

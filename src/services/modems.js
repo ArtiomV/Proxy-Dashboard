@@ -143,6 +143,20 @@ function create(deps) {
           _dedupeSameModemClient(km, imei, keptPortName, p.portID, _feedPortIds);
         }
       }
+      // Реконсиляция с боксом (2026-08-04): липкий ростер ≠ вечный. Реквизит,
+      // которого нет в list_ports_json и bw НЕПРЕРЫВНО дольше RECONCILE_MS
+      // (7 дней), считается удалённым на боксе и выбывает — так админка
+      // сходится с фактом, а короткие флапы (ребут, хаб, API) не влияют.
+      // Метка ставится только по СВЕЖИМ данным бокса (не кэш).
+      const RECONCILE_MS = 7 * 24 * 3600 * 1000;
+      for (const pid of Object.keys(km)) {
+        if (_seenPortIds.has(pid)) {
+          if (km[pid] && km[pid]._missingSince) delete km[pid]._missingSince;
+          continue;
+        }
+        if (!km[pid]._missingSince) { km[pid]._missingSince = now; continue; }
+        if (now - km[pid]._missingSince > RECONCILE_MS) delete km[pid];
+      }
     }
 
     saveKnownModems();
