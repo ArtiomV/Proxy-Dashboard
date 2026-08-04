@@ -127,7 +127,7 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
     slaMaxLatencyMs: typeof slaMaxLatencyMs === 'number' ? slaMaxLatencyMs : 1000,
     slaMaxErrorPct:  typeof slaMaxErrorPct  === 'number' ? slaMaxErrorPct  : 5,
     slaAutoCredit:   !!slaAutoCredit,
-    clientType: clientType || 'legal',
+    clientType: clientType || 'individual',   // 2026-08-04: базово физ. лицо (реша оператора)
     createdAt: new Date().toISOString()
   };
 
