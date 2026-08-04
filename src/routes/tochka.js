@@ -632,6 +632,57 @@ r.get('/api/admin/clients/:id/closing_documents', authMiddleware, adminMiddlewar
   res.json(client.closingDocuments || []);
 });
 
+// 2026-08-04: построчное редактирование акта в админке — раньше правили в
+// интернет-банке, и наша история расходилась с банком. Позиции пересчитываются
+// (amount = qty × price, total = Σ), документ в Точке при этом не меняется
+// (для замены документа в банке есть «перевыставить»).
+r.put('/api/admin/clients/:id/closing_documents/:docId', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const doc = (client.closingDocuments || []).find(d => d.id === req.params.docId);
+  if (!doc) return res.status(404).json({ error: 'Document not found' });
+  const rawItems = Array.isArray(req.body && req.body.items) ? req.body.items : null;
+  if (!rawItems || !rawItems.length) return res.status(400).json({ error: 'items[] required (min 1)' });
+  const round2 = v => Math.round(v * 100) / 100;
+  const items = [];
+  for (let i = 0; i < rawItems.length; i++) {
+    const it = rawItems[i] || {};
+    const name = String(it.name || '').trim();
+    const quantity = Number(it.quantity);
+    const price = Number(it.price);
+    const unit = String(it.unit || 'шт').trim() || 'шт';
+    if (!name) return res.status(400).json({ error: `Позиция ${i + 1}: пустое название` });
+    if (!(quantity > 0)) return res.status(400).json({ error: `Позиция ${i + 1} «${name}»: количество должно быть > 0` });
+    if (!(price >= 0)) return res.status(400).json({ error: `Позиция ${i + 1} «${name}»: цена должна быть ≥ 0` });
+    items.push({ name, quantity, unit, price: round2(price), amount: round2(quantity * price) });
+  }
+  const totalAmount = round2(items.reduce((s, it) => s + it.amount, 0));
+  documentsDb.updateClosingItems(doc.id, items, totalAmount);
+  doc.items = items;
+  doc.totalAmount = totalAmount;
+  auditLog(req.user.login, 'edit_act_items', { clientId: client.id, docId: doc.id, period: doc.period, totalAmount, ip: getClientIp(req) });
+  res.json({ ok: true, document: doc });
+});
+
+// Редактирование суммы счёта. Исходная сумма один раз сохраняется в
+// formula.edited_from — история изменений не теряется.
+r.put('/api/admin/clients/:id/bills/:billId', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const bill = (client.bills || []).find(b => b.id === req.params.billId);
+  if (!bill) return res.status(404).json({ error: 'Bill not found' });
+  const amount = Number(req.body && req.body.amount);
+  if (!(amount > 0)) return res.status(400).json({ error: 'amount must be > 0' });
+  if (!bill.formula || bill.formula.edited_from == null) {
+    bill.formula = Object.assign({}, bill.formula || {}, { edited_from: bill.amount });
+  }
+  bill.amount = Math.round(amount * 100) / 100;
+  documentsDb.updateBillAmount(bill.id, bill.amount);
+  documentsDb.insertBill(bill, client.id);   // upsert: status + formula
+  auditLog(req.user.login, 'edit_bill_amount', { clientId: client.id, billId: bill.id, period: bill.period, amount: bill.amount, was: bill.formula.edited_from, ip: getClientIp(req) });
+  res.json({ ok: true, bill });
+});
+
 r.get('/api/admin/tochka/all_acts', authMiddleware, adminMiddleware, (req, res) => {
   const allDocs = [];
   for (const client of clients) {

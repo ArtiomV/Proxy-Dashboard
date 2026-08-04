@@ -34,6 +34,12 @@ function init(db) {
   S.closingUpdateStatus = db.prepare(
     'UPDATE closing_documents SET status = ?, signed_at = ? WHERE id = ?'
   );
+  // 2026-08-04: построчное редактирование акта в админке (было только в банке).
+  S.closingUpdateItems = db.prepare(
+    'UPDATE closing_documents SET items = ?, total_amount = ? WHERE id = ?'
+  );
+  // ...и суммы счёта.
+  S.billUpdateAmount = db.prepare('UPDATE bills SET amount = ? WHERE id = ?');
 
   S.billDeleteByClient = db.prepare('DELETE FROM bills WHERE client_id = ?');
   S.billDeleteById     = db.prepare('DELETE FROM bills WHERE id = ?');
@@ -48,7 +54,7 @@ function init(db) {
   S.billInsert = db.prepare(
     'INSERT INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at, formula) ' +
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ' +
-    'ON CONFLICT(id) DO UPDATE SET status=excluded.status'
+    'ON CONFLICT(id) DO UPDATE SET status=excluded.status, formula=excluded.formula'
   );
   S.billsByClient = db.prepare('SELECT * FROM bills WHERE client_id = ? ORDER BY created_at');
   // Direct status UPDATE — still the primary persistence path (bill-settle
@@ -77,6 +83,8 @@ function insertClosing(d, clientId) {
 }
 function listClosing(clientId) { return S.closingByClient.all(clientId); }
 function updateClosingStatus(id, status, signedAt) { return S.closingUpdateStatus.run(status, signedAt || null, id); }
+function updateClosingItems(id, items, totalAmount) { return S.closingUpdateItems.run(JSON.stringify(items || []), totalAmount || 0, id); }
+function updateBillAmount(id, amount) { return S.billUpdateAmount.run(amount || 0, id); }
 
 // ─── Bills ────────────────────────────────────────────────────────────────
 function deleteBillsByClient(clientId) { return S.billDeleteByClient.run(clientId); }
@@ -95,6 +103,6 @@ function updateBillStatus(id, status) { return S.billUpdateStatus.run(status, id
 module.exports = {
   init,
   deleteDocsByClient, deleteDoc, insertDoc, listDocs,
-  deleteClosingByClient, deleteClosing, insertClosing, listClosing, updateClosingStatus,
-  deleteBillsByClient, deleteBill, insertBill, listBills, updateBillStatus,
+  deleteClosingByClient, deleteClosing, insertClosing, listClosing, updateClosingStatus, updateClosingItems,
+  deleteBillsByClient, deleteBill, insertBill, listBills, updateBillStatus, updateBillAmount,
 };

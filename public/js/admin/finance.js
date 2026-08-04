@@ -455,6 +455,99 @@ function saveCostsModal() {
 
 // Top Resources — uses server-side aggregated cache (auto-refreshes nightly at 03:00)
 
+// ─── Построчное редактирование акта / суммы счёта (2026-08-04) ────────────
+function openActEditor(clientId, docId) {
+  var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
+  var doc = client && (client.closingDocuments || []).find(function(d) { return d.id === docId; });
+  if (!doc) return;
+  var rows = (doc.items || []).map(function(it) {
+    return { name: it.name || '', quantity: it.quantity || 1, unit: it.unit || 'шт', price: it.price || 0 };
+  });
+  var h = '<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1600;display:flex;align-items:center;justify-content:center" id="actEditorOverlay">';
+  h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:18px;width:640px;max-width:94vw;max-height:84vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)">';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span style="font-size:14px;font-weight:600;color:var(--text-0)">✏️ Акт ' + esc(doc.actNumber || '') + ' · ' + esc(doc.period || '') + '</span><button style="background:none;border:none;font-size:18px;color:var(--text-2);cursor:pointer;padding:0 4px" data-on-click="document.getElementById(\'actEditorOverlay\').remove()">&times;</button></div>';
+  h += '<div style="font-size:10px;color:var(--text-3);margin-bottom:10px">Изменения сохраняются в нашей базе (история в админке). Документ в интернет-банке не меняется — для замены есть «перевыставить».</div>';
+  h += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px"><thead><tr style="background:var(--bg-3)"><th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text-2)">Название</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:80px">Кол-во</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:70px">Ед.</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:100px">Цена</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:90px">Сумма</th><th style="width:30px"></th></tr></thead><tbody id="actEditRows"></tbody></table>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><button class="btn btn-sm" data-on-click="actEditorAddRow()" style="font-size:11px">➕ Позиция</button><span style="font-size:13px;font-weight:600">Итого: <span id="actEditTotal">0</span> ₽</span></div>';
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" data-on-click="document.getElementById(\'actEditorOverlay\').remove()">Отмена</button><button class="btn btn-primary btn-sm" data-on-click="actEditorSave(\'' + clientId + '\',\'' + docId + '\')">💾 Сохранить</button></div>';
+  h += '</div></div>';
+  document.body.insertAdjacentHTML('beforeend', h);
+  window._actEditRows = rows;
+  actEditorRenderRows();
+}
+
+function actEditorRenderRows() {
+  var tb = document.getElementById('actEditRows');
+  if (!tb) return;
+  var h = '', total = 0;
+  window._actEditRows.forEach(function(r, i) {
+    var amount = Math.round((Number(r.quantity) || 0) * (Number(r.price) || 0) * 100) / 100;
+    total += amount;
+    h += '<tr>' +
+      '<td style="padding:4px 6px"><input class="form-input" data-idx="' + i + '" data-f="name" value="' + esc(r.name).replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;padding:4px 6px" data-on-change="actEditorField(this)"></td>' +
+      '<td style="padding:4px 6px"><input class="form-input" type="number" step="any" data-idx="' + i + '" data-f="quantity" value="' + r.quantity + '" style="width:100%;font-size:11px;padding:4px 6px" data-on-change="actEditorField(this)"></td>' +
+      '<td style="padding:4px 6px"><input class="form-input" data-idx="' + i + '" data-f="unit" value="' + esc(r.unit).replace(/"/g, '&quot;') + '" style="width:100%;font-size:11px;padding:4px 6px" data-on-change="actEditorField(this)"></td>' +
+      '<td style="padding:4px 6px"><input class="form-input" type="number" step="any" data-idx="' + i + '" data-f="price" value="' + r.price + '" style="width:100%;font-size:11px;padding:4px 6px" data-on-change="actEditorField(this)"></td>' +
+      '<td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);font-size:11px" id="actEditAmt' + i + '">' + amount.toLocaleString('ru-RU') + '</td>' +
+      '<td style="padding:4px 2px;text-align:center"><button class="btn btn-sm" style="font-size:10px;padding:1px 5px;color:var(--danger)" data-on-click="actEditorDelRow(' + i + ')">✕</button></td></tr>';
+  });
+  tb.innerHTML = h;
+  document.getElementById('actEditTotal').textContent = (Math.round(total * 100) / 100).toLocaleString('ru-RU');
+}
+
+function actEditorField(inp) {
+  var i = Number(inp.dataset.idx), f = inp.dataset.f;
+  var r = window._actEditRows[i];
+  if (!r) return;
+  r[f] = (f === 'quantity' || f === 'price') ? (parseFloat(inp.value) || 0) : inp.value;
+  var amount = Math.round((Number(r.quantity) || 0) * (Number(r.price) || 0) * 100) / 100;
+  var amtEl = document.getElementById('actEditAmt' + i);
+  if (amtEl) amtEl.textContent = amount.toLocaleString('ru-RU');
+  var total = window._actEditRows.reduce(function(s, x) { return s + (Number(x.quantity) || 0) * (Number(x.price) || 0); }, 0);
+  document.getElementById('actEditTotal').textContent = (Math.round(total * 100) / 100).toLocaleString('ru-RU');
+}
+
+function actEditorAddRow() {
+  window._actEditRows.push({ name: '', quantity: 1, unit: 'шт', price: 0 });
+  actEditorRenderRows();
+}
+
+function actEditorDelRow(i) {
+  window._actEditRows.splice(i, 1);
+  actEditorRenderRows();
+}
+
+function actEditorSave(clientId, docId) {
+  var items = window._actEditRows.map(function(r) {
+    return { name: String(r.name || '').trim(), quantity: Number(r.quantity) || 0, unit: r.unit || 'шт', price: Number(r.price) || 0 };
+  });
+  api(API + '/api/admin/clients/' + clientId + '/closing_documents/' + docId, { method: 'PUT', json: { items: items } })
+    .then(function(d) {
+      if (d.ok) {
+        showToast('Акт обновлён: ' + d.document.totalAmount.toLocaleString('ru-RU') + ' ₽', 'success');
+        var ov = document.getElementById('actEditorOverlay'); if (ov) ov.remove();
+        loadData();
+      } else showToast(d.error || 'Ошибка', 'error');
+    })
+    .catch(function(e) { showToast(e.message, 'error'); });
+}
+
+function editBillAmount(clientId, billId) {
+  var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
+  var bill = client && (client.bills || []).find(function(b) { return b.id === billId; });
+  if (!bill) return;
+  uiPrompt('Новая сумма счёта ' + (bill.billNumber || '') + ' (сейчас ' + (bill.amount || 0).toLocaleString('ru-RU') + ' ₽):', { title: 'Изменить сумму счёта', okText: 'Сохранить', placeholder: String(bill.amount || '') }).then(function(v) {
+    var amount = parseFloat(String(v || '').replace(/\s/g, '').replace(',', '.'));
+    if (!v || !(amount > 0)) return;
+    api(API + '/api/admin/clients/' + clientId + '/bills/' + billId, { method: 'PUT', json: { amount: amount } })
+      .then(function(d) {
+        if (d.ok) { showToast('Сумма счёта обновлена', 'success'); loadData(); }
+        else showToast(d.error || 'Ошибка', 'error');
+      })
+      .catch(function(e) { showToast(e.message, 'error'); });
+  });
+}
+
 function renderOpsDocuments(clientId) {
   var body = document.getElementById('clientOpsBody');
   var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
@@ -489,7 +582,7 @@ function renderOpsDocuments(clientId) {
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="\u041f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u0438\u0442\u044c: \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0438 \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0438\u043c \u0434\u0430\u043d\u043d\u044b\u043c" data-on-click="reissueAct(\'' + clientId + '\',\'' + d.id + '\',\'' + esc(d.period) + '\')">\u21bb</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0430\u043a\u0442" data-on-click="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\ud83d\uddd1</button></td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Редактировать позиции акта" data-on-click="openActEditor(\'' + clientId + '\',\'' + d.id + '\')">✏️</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="\u041f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u0438\u0442\u044c: \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0438 \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0438\u043c \u0434\u0430\u043d\u043d\u044b\u043c" data-on-click="reissueAct(\'' + clientId + '\',\'' + d.id + '\',\'' + esc(d.period) + '\')">\u21bb</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0430\u043a\u0442" data-on-click="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\ud83d\uddd1</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table>';
@@ -524,7 +617,7 @@ function renderOpsDocuments(clientId) {
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u0447\u0451\u0442" data-on-click="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\ud83d\uddd1</button></td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Изменить сумму счёта" data-on-click="editBillAmount(\'' + clientId + '\',\'' + b.id + '\')">✏️</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u0447\u0451\u0442" data-on-click="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\ud83d\uddd1</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table>';

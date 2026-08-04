@@ -202,6 +202,8 @@
   "POST /api/tools/check_proxy",
   "PUT /api/admin/alerts/:id",
   "PUT /api/admin/clients/:id",
+  "PUT /api/admin/clients/:id/bills/:billId",
+  "PUT /api/admin/clients/:id/closing_documents/:docId",
   "PUT /api/admin/operators/:operator/country",
   "PUT /api/admin/settings"
 ]
