@@ -647,7 +647,7 @@ function renderOpsDocuments(clientId) {
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Изменить сумму счёта" data-on-click="editBillAmount(\'' + clientId + '\',\'' + b.id + '\')">✏️</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u0447\u0451\u0442" data-on-click="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\ud83d\uddd1</button></td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Изменить сумму счёта" data-on-click="editBillAmount(\'' + clientId + '\',\'' + b.id + '\')">✏️</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--warning)" title="Перевыставить с новой суммой" data-on-click="reissueBillEdited(\'' + clientId + '\',\'' + b.id + '\')">↻</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u0447\u0451\u0442" data-on-click="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\ud83d\uddd1</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table>';
@@ -1046,7 +1046,7 @@ function loadAllActs() {
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' ₽</td>';
           h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
-          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Перевыставить: удалить и создать заново" data-on-click="reissueAct(\'' + d.clientId + '\',\'' + d.id + '\',\'' + esc(d.period || '') + '\')">↻</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить акт" data-on-click="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">🗑</button></td>';
+          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Редактировать позиции акта" data-on-click="openActEditor(\'' + d.clientId + '\',\'' + d.id + '\')">✏️</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Перевыставить: удалить и создать заново" data-on-click="reissueAct(\'' + d.clientId + '\',\'' + d.id + '\',\'' + esc(d.period || '') + '\')">↻</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить акт" data-on-click="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">🗑</button></td>';
           h += '</tr>';
         });
         h += '</tbody></table></div></div>';
@@ -1209,7 +1209,7 @@ function loadAllBills() {
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
           h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
-          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap">' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить счёт" data-on-click="deleteBillFromBank(\'' + b.clientId + '\',\'' + b.id + '\')">🗑</button></td>';
+          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Изменить сумму счёта" data-on-click="editBillAmount(\'' + b.clientId + '\',\'' + b.id + '\')">✏️</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--warning)" title="Перевыставить с новой суммой: удалить старый в банке и создать заново" data-on-click="reissueBillEdited(\'' + b.clientId + '\',\'' + b.id + '\')">↻</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить счёт" data-on-click="deleteBillFromBank(\'' + b.clientId + '\',\'' + b.id + '\')">🗑</button></td>';
           h += '</tr>';
         });
         h += '</tbody></table></div></div>';
@@ -1255,6 +1255,30 @@ function generateBulkBills() {
       if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + esc(e.message) + '</span>';
       showToast(e.message, 'error');
     });
+}
+
+function reissueBillEdited(clientId, billId) {
+  // «В Точку с правками» для счёта: API Точки не редактирует счета — удаляем
+  // старый в банке и выставляем новый с изменённой суммой.
+  var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
+  var bill = client && (client.bills || []).find(function(b) { return b.id === billId; });
+  if (!bill) return;
+  uiPrompt('Сумма НОВОГО счёта (старый ' + (bill.amount || 0).toLocaleString('ru-RU') + ' ₽ будет удалён в банке):', { title: 'Перевыставить счёт', okText: 'Перевыставить', danger: true, placeholder: String(bill.amount || '') }).then(function(v) {
+    var amount = parseFloat(String(v || '').replace(/\s/g, '').replace(',', '.'));
+    if (!v || !(amount > 0)) return;
+    api(API + '/api/admin/clients/' + clientId + '/bill/' + billId, { method: 'DELETE' })
+      .then(function(d) {
+        if (!d.ok) throw new Error(d.error || 'Не удалось удалить старый счёт');
+        return api(API + '/api/admin/tochka/create_bill', { method: 'POST', json: { clientId: clientId, period: bill.period, amount: amount } });
+      })
+      .then(function(d) {
+        if (d.ok) {
+          showToast('Счёт перевыставлен: ' + amount.toLocaleString('ru-RU') + ' ₽', 'success');
+          loadData(); setTimeout(function() { loadAllBills(); if (currentOpsClientId === clientId) renderOpsDocuments(clientId); }, 1500);
+        } else showToast(d.error || 'Старый удалён, но новый не создался', 'error');
+      })
+      .catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
+  });
 }
 
 function deleteBillFromBank(clientId, billId) {
