@@ -469,7 +469,7 @@ function openActEditor(clientId, docId) {
   h += '<div style="font-size:10px;color:var(--text-3);margin-bottom:10px">Изменения сохраняются в нашей базе (история в админке). Документ в интернет-банке не меняется — для замены есть «перевыставить».</div>';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px"><thead><tr style="background:var(--bg-3)"><th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text-2)">Название</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:80px">Кол-во</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:70px">Ед.</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:100px">Цена</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:90px">Сумма</th><th style="width:30px"></th></tr></thead><tbody id="actEditRows"></tbody></table>';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><button class="btn btn-sm" data-on-click="actEditorAddRow()" style="font-size:11px">➕ Позиция</button><span style="font-size:13px;font-weight:600">Итого: <span id="actEditTotal">0</span> ₽</span></div>';
-  h += '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" data-on-click="document.getElementById(\'actEditorOverlay\').remove()">Отмена</button><button class="btn btn-primary btn-sm" data-on-click="actEditorSave(\'' + clientId + '\',\'' + docId + '\')">💾 Сохранить</button></div>';
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" data-on-click="document.getElementById(\'actEditorOverlay\').remove()">Отмена</button><button class="btn btn-sm" title="Удалить документ в банке и создать заново с отредактированными позициями" data-on-click="actEditorReissue(\'' + clientId + '\',\'' + docId + '\',\'' + esc(doc.period || '') + '\')" style="color:var(--warning)">↻ В Точку с правками</button><button class="btn btn-primary btn-sm" data-on-click="actEditorSave(\'' + clientId + '\',\'' + docId + '\')">💾 Сохранить</button></div>';
   h += '</div></div>';
   document.body.insertAdjacentHTML('beforeend', h);
   window._actEditRows = rows;
@@ -530,6 +530,36 @@ function actEditorSave(clientId, docId) {
       } else showToast(d.error || 'Ошибка', 'error');
     })
     .catch(function(e) { showToast(e.message, 'error'); });
+}
+
+function actEditorReissue(clientId, docId, period) {
+  // Перевыставить с ОТРЕДАКТИРОВАННЫМИ позициями: Точка API не умеет
+  // редактировать закрывающий документ (только create/delete/get/send),
+  // поэтому единственный путь — удалить старый в банке и создать заново
+  // уже с правками. Позиции берём прямо из редактора (сохранять не обязательно).
+  var items = window._actEditRows.map(function(r) {
+    return { name: String(r.name || '').trim(), quantity: Number(r.quantity) || 0, unit: r.unit || 'шт', price: Number(r.price) || 0 };
+  }).filter(function(it) { return it.name; });
+  if (!items.length) return showToast('Нет позиций для акта', 'error');
+  for (var i = 0; i < items.length; i++) {
+    if (!(items[i].quantity > 0) || !(items[i].price >= 0)) return showToast('Позиция ' + (i + 1) + ': проверьте количество и цену', 'error');
+  }
+  if (!confirm('Перевыставить акт ' + period + ' в Точке с отредактированными позициями?\nСтарый документ в банке будет УДАЛЁН, новый создан с этими позициями.')) return;
+  api(API + '/api/admin/clients/' + clientId + '/closing_document/' + docId, { method: 'DELETE' })
+    .then(function(d) {
+      if (!d.ok) throw new Error(d.error || 'Не удалось удалить старый акт');
+      return api(API + '/api/admin/tochka/create_act', { method: 'POST', json: { clientId: clientId, period: period, items: items } });
+    })
+    .then(function(d) {
+      if (d.ok) {
+        if (d.tochkaPushed) showToast('Акт перевыставлен в Точке с отредактированными позициями', 'success');
+        else showToast('Акт пересоздан локально, но НЕ ушёл в Точку: ' + (d.tochkaStatus || 'причина неизвестна'), 'error', 12000);
+        var ov = document.getElementById('actEditorOverlay'); if (ov) ov.remove();
+        loadData(); setTimeout(function() { if (currentOpsClientId === clientId) renderOpsDocuments(clientId); if (typeof renderBankDocuments === 'function') renderBankDocuments(); }, 1500);
+      }
+      else showToast(d.error || 'Старый удалён, но новый не создался — создайте акт заново', 'error');
+    })
+    .catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
 }
 
 function editBillAmount(clientId, billId) {
