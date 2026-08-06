@@ -5,13 +5,118 @@
 // Stage 11). Всё — обычные глобальные функции; вызываются через
 // data-on-click="helperName(arg1, this)".
 
-// 💾 Скачать textarea #aeText как proxies_<proto>.txt (глобальная proto).
+// 💾 Скачать выгрузку прокси из окна экспорта (состояние — window._aeState).
 function aeDownload() {
-  var b = new Blob([document.getElementById('aeText').value], { type: 'text/plain' });
+  var st = window._aeState || {};
+  var r = aeBuildExport(st.proxies || [], st);
+  var b = new Blob([r.lines.join('\n') + (r.lines.length ? '\n' : '')], { type: 'text/plain' });
   var a = document.createElement('a');
   a.href = URL.createObjectURL(b);
-  a.download = 'proxies_' + (window.proto || 'http') + '.txt';
+  a.download = 'proxies' + (r.selected !== '*' ? '_' + r.selected : '') + '_' + r.proto + '.txt';
   a.click();
+}
+
+// ─── Окно экспорта прокси из админки (bulkExport) ────────────────────────────
+// Окно живёт через delegation.js (только глобальные функции), поэтому вся
+// логика — здесь. Состояние окна: window._aeState = {proxies, proto, client}.
+//
+// Чистая часть (покрыта node-тестами): группировка портов по клиентам
+// (клиент = portName порта; безымянные — группа '') и сборка строк выгрузки
+// с учётом выбранного клиента и протокола.
+function aeBuildExport(proxies, state) {
+  state = state || {};
+  var groups = {}, order = [];
+  proxies.forEach(function (p) {
+    var c = p.portName || '';
+    if (!groups[c]) { groups[c] = 0; order.push(c); }
+    groups[c]++;
+  });
+  order.sort(function (a, b) {
+    if (groups[b] !== groups[a]) return groups[b] - groups[a];   // по убыванию числа портов
+    if (!a !== !b) return !a ? 1 : -1;                           // «без клиента» — последней
+    return a < b ? -1 : 1;
+  });
+  var clients = order.map(function (c) { return { name: c, count: groups[c] }; });
+  var sel = (state.client === undefined || state.client === null) ? '*' : state.client;
+  if (sel !== '*' && !groups[sel]) sel = '*';          // выбранный клиент исчез — назад к «все»
+  var proto = state.proto === 'socks5' ? 'socks5' : 'http';
+  var lines = [];
+  proxies.forEach(function (p) {
+    if (sel !== '*' && (p.portName || '') !== sel) return;
+    var port = proto === 'http' ? p.http : p.socks;
+    if (!port) return;                                  // у части портов нет socks-пары
+    lines.push(p.login + ':' + p.pass + '@' + p.host + ':' + port);
+  });
+  return { clients: clients, selected: sel, proto: proto, lines: lines };
+}
+
+function aeOpen(proxies) {
+  window._aeState = { proxies: proxies, proto: 'http', client: '*' };
+  var old = document.getElementById('aeOverlay');
+  if (old) old.remove();
+  var overlay = document.createElement('div');
+  overlay.id = 'aeOverlay';
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
+  overlay.onclick = function (e) { if (e.target === overlay) overlay.remove(); };
+  document.body.appendChild(overlay);
+  aeRender();
+}
+
+function _aeBtn(action, arg, label, active) {
+  return '<button style="padding:4px 12px;font-size:11px;cursor:pointer;border:none;'
+    + (active ? 'background:var(--accent);color:#fff' : 'background:var(--bg-2);color:var(--text-1)')
+    + '" data-on-click="' + action + '(\'' + String(arg).replace(/'/g, "\\'") + '\')">' + esc(label) + '</button>';
+}
+
+function aeRender() {
+  var st = window._aeState;
+  var overlay = document.getElementById('aeOverlay');
+  if (!st || !overlay) return;
+  var r = aeBuildExport(st.proxies, st);
+  // Переключатель клиентов — только когда среди выгружаемых портов их ≥2
+  // (модем может нести порты разных клиентов, раньше выгружались все скопом).
+  var clientRow = '';
+  if (r.clients.length > 1) {
+    clientRow = '<div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;flex-wrap:wrap">'
+      + _aeBtn('aeSetClient', '*', 'Все (' + st.proxies.length + ')', r.selected === '*')
+      + r.clients.map(function (c) {
+          return _aeBtn('aeSetClient', c.name, (c.name || '(без клиента)') + ' (' + c.count + ')', r.selected === c.name);
+        }).join('')
+      + '</div>';
+  }
+  var content = '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;width:min(640px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
+    + '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
+    + '<div><span style="font-size:16px">📤</span> <strong style="font-size:14px">Экспорт прокси</strong> <span style="color:var(--text-2);font-size:12px">' + r.lines.length + ' шт.</span></div>'
+    + '<button data-on-click="this.closest(\'#aeOverlay\').remove()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center">✕</button>'
+    + '</div>'
+    + '<div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
+    + '<div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden">'
+    + _aeBtn('aeSetProto', 'http', 'HTTP', r.proto === 'http')
+    + _aeBtn('aeSetProto', 'socks5', 'SOCKS5', r.proto === 'socks5')
+    + '</div>'
+    + clientRow
+    + '<span style="font-size:11px;color:var(--text-2)">Формат: login:pass@host:port</span>'
+    + '</div>'
+    + '<div style="padding:12px 20px;flex:1;overflow:auto"><textarea id="aeText" style="width:100%;height:300px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--font-mono);font-size:11px;color:var(--text-0);resize:vertical" readonly>' + esc(r.lines.join('\n')) + '</textarea></div>'
+    + '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">'
+    + '<button class="btn btn-sm" data-on-click="copyText(document.getElementById(\'aeText\').value,this)">📋 Скопировать</button>'
+    + '<button class="btn btn-primary btn-sm" data-on-click="aeDownload()">💾 Скачать .txt</button>'
+    + '</div></div>';
+  overlay.innerHTML = content;
+}
+
+function aeSetClient(c) {
+  var st = window._aeState;
+  if (!st) return;
+  st.client = (c === undefined || c === null) ? '*' : c;
+  aeRender();
+}
+
+function aeSetProto(p) {
+  var st = window._aeState;
+  if (!st) return;
+  st.proto = p === 'socks5' ? 'socks5' : 'http';
+  aeRender();
 }
 
 // Открыть модем по нику из карты currentData._modemMap в модалке деталей
@@ -98,7 +203,7 @@ function finNavBank() {
 }
 
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { aeDownload, openModemDetailByNick, peekField, togglePwdView, resetIpByImei, finSetPeriod, finJumpToModem, finNavBank };
+  module.exports = { aeDownload, aeBuildExport, aeOpen, aeRender, aeSetClient, aeSetProto, openModemDetailByNick, peekField, togglePwdView, resetIpByImei, finSetPeriod, finJumpToModem, finNavBank };
 }
 
 // Переключить поповер «Формула» в карточке MRR (клик вместо hover —
