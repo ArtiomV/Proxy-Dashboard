@@ -23,3 +23,7 @@ _recover_*.js
 tochka_config.json.tmp
 *.json.tmp
 tochka_config*.json
+
+# runtime artifacts (local state, не в git)
+server_cache*.json
+speedtest_history.json
