@@ -557,7 +557,7 @@ function _renderOverview(body,m){
 
   var _ports=(m.ports&&m.ports.length)?m.ports:[];
   var conn='<div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:14px">';
-  conn+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px"><span style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Подключение</span>'+(_cred?'<span style="font-size:10px;color:var(--accent);cursor:pointer" data-on-click="copyText(\''+_cred+'\',this)">📋 строка</span>':'')+'</div>';
+  conn+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:9px"><span style="font-size:11px;color:var(--text-2);text-transform:uppercase;letter-spacing:.5px;font-weight:600">Подключение</span></div>';
   if(!_ports.length){conn+='<div style="font-size:11px;color:var(--text-3);padding:6px 0">Нет портов — модем свободен</div>';}
   _ports.forEach(function(port,pi){
     if(pi>0)conn+='<div style="height:1px;background:var(--border);margin:8px 0"></div>';
