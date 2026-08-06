@@ -84,10 +84,11 @@ module.exports = function createAdminMetaRouter(deps) {
   });
 
   // ── 1b) Restore a soft-deleted modem ─────────────────────────────────────
-  // Delete is now PERMANENT (no auto-restore on poll), so this is the only way
-  // to bring a mistakenly-deleted modem back without a DB edit + restart. Clears
-  // modem_meta.deleted AND drops the IMEI from the in-memory _deletedModemSet
-  // (via markModemRestored), so the very next poll re-surfaces it.
+  // Manual INSTANT restore. Deleted modems also auto-restore after
+  // modem_restore_online_polls consecutive online polls (_autoRestoreIfStable
+  // in src/services/modems.js) — this route is for bringing one back without
+  // waiting. Clears modem_meta.deleted AND drops the IMEI from the in-memory
+  // _deletedModemSet (via markModemRestored), so the very next poll re-surfaces it.
   r.post('/api/admin/modems/:server_name/:imei/restore', authMiddleware, adminMiddleware, (req, res) => {
     const serverName = req.params.server_name;
     const imei = req.params.imei;

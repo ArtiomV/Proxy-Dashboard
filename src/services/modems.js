@@ -29,6 +29,33 @@ function create(deps) {
     }
   }
 
+  // Auto-restore soft-deleted modems (2026-08-04, замена «вечного» удаления 041).
+  // Сценарий владельца: модем отключили → удалили из админки → ПОДКЛЮЧИЛИ обратно
+  // → он должен сам вернуться в раздел модемов и в счётчик клиента. Но одиночный
+  // блип флапающего модема (онлайн на 1 опрос, как MD_02) флаг сбрасывать не должен —
+  // иначе удаление снова перестанет «липнуть» (проблема, из-за которой 041 убрал
+  // авто-restore полностью). Поэтому: восстанавливаем только после
+  // modem_restore_online_polls (дефолт 3) ПОДРЯД онлайн-опросов (~90 с при 30-с
+  // опросе). Любой офлайн-опрос сбрасывает серию. Ручной restore через
+  // POST /api/admin/modems/:srv/:imei/restore остаётся (мгновенный путь).
+  const _deletedOnlineStreak = new Map();   // 'srv|imei' -> consecutive online polls
+  function _autoRestoreIfStable(srvName, imei, isOnline) {
+    const key = srvName + '|' + imei;
+    if (!isOnline) { _deletedOnlineStreak.delete(key); return false; }
+    const need = Math.max(1, Number(appSettings.modem_restore_online_polls) || 3);
+    const n = (_deletedOnlineStreak.get(key) || 0) + 1;
+    if (n < need) { _deletedOnlineStreak.set(key, n); return false; }
+    _deletedOnlineStreak.delete(key);
+    deletedModemSet.delete(key);
+    try {
+      let nick = '';
+      try { const r = trackingDb.metaNickByImeiStmt().get(srvName, imei); if (r && r.nick) nick = r.nick; } catch (_) { /* best-effort */ }
+      trackingDb.metaUndeleteWideStmt().run(srvName, imei, nick);
+    } catch (e) { logger.warn('[roster] auto-restore db write failed: ' + e.message); }
+    logger.info('[roster] auto-restored ' + key + ' after ' + n + ' consecutive online polls');
+    return true;
+  }
+
   function updateKnownModems(data) {
     if (data._cached) return;
     const srvName = data.serverName;
@@ -80,16 +107,14 @@ function create(deps) {
         const lastClientSeen = isRealClient
           ? now
           : (prevKm.lastClientSeen || (prevKm.portName ? (prevKm.lastSeen || now) : 0));
-        // 041: PERMANENT soft-delete. A soft-deleted modem stays hidden FOREVER,
-        // regardless of online status. The previous auto-restore (un-delete on a
-        // poll where the modem reported IS_ONLINE='yes' with a real client port)
-        // is removed entirely: an intermittently-online box4/S4 modem would blip
-        // online for a SINGLE poll, clear the deleted flag, and re-appear — then
-        // drop offline again, so a delete never "stuck" (gone → back → gone). Now a
-        // deleted modem is always skipped here; the only way back is an explicit
-        // admin un-delete (POST .../restore → metaUndelete + drop from the set).
+        // Soft-delete с гистерезисом: удалённый модем пропускаем, ПОКА он не
+        // доказал устойчивый возврат — N подряд онлайн-опросов (_autoRestoreIfStable).
+        // Одиночный блип не воскрешает; реально подключённый обратно модем
+        // воскресает сам через ~90 с. См. комментарий у _autoRestoreIfStable.
         if (imei && deletedModemSet.has(srvName + '|' + imei)) {
-          continue;
+          const _on = !!(modemStatus && modemStatus.net_details && modemStatus.net_details.IS_ONLINE === 'yes');
+          if (!_autoRestoreIfStable(srvName, imei, _on)) continue;
+          // восстановлен — инжестим как обычный модем
         }
         const nick = (modemStatus && modemStatus.modem_details && modemStatus.modem_details.NICK) || prevKm.nick || '';
         // A port with no identity (no IMEI in the port map, no NICK in the live
@@ -129,7 +154,7 @@ function create(deps) {
           const prevKm = km[p.portID] || {};
           const keptPortName = isRealClient ? rawPortName : (prevKm.portName || '');
           if (!keptPortName) continue;                       // никогда не был за клиентом
-          if (imei && deletedModemSet.has(srvName + '|' + imei)) continue;   // 041: soft-delete вечный
+          if (imei && deletedModemSet.has(srvName + '|' + imei)) continue;   // тёмный порт не доказывает онлайн; воскрешение — через bw-путь (_autoRestoreIfStable)
           km[p.portID] = {
             portName: keptPortName,
             imei: imei || prevKm.imei || '',

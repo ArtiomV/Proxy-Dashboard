@@ -101,7 +101,8 @@ function init(db) {
   // 041: soft-delete (poll-resistant). The DELETE endpoint flags the row instead
   // of removing it, so the next ProxySmart poll's upsert (which never touches
   // `deleted`) can't resurrect the modem. Auto-cleared by updateKnownModems when
-  // the modem returns with a REAL client port.
+  // the modem proves a SUSTAINED return: N consecutive online polls
+  // (_autoRestoreIfStable, default 3) — a one-poll blip never clears the flag.
   S.metaSoftDelete = db.prepare(
     'UPDATE modem_meta SET deleted = 1 WHERE server_name = ? AND imei = ?'
   );
