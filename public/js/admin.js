@@ -128,19 +128,20 @@ function doLogin(){window.location.href='/'}
 function doLogout(){api(API+'/api/logout',{method:'POST'});authToken='';localStorage.removeItem('pr_admin_token');localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
-var _activeBankTab='overview';
+var _activeBankTab='acts';
 var _bankEverRendered=false;
 function switchBankNav(name){
-  ['overview','acts','bills','payments'].forEach(function(t){
+  // Вкладка «Обзор» со страницы финансов убрана (2026-08-04): сводка живёт на
+  // дашборде (ряд «Требует внимания» + финсводка), здесь только документы/деньги.
+  ['acts','bills','payments'].forEach(function(t){
     var nav=document.getElementById('bnav_'+t);
-    var secMap={overview:'bankOverviewSection',acts:'bankDocumentsSection',bills:'bankBillsSection',payments:'bankPaymentsSection'};
+    var secMap={acts:'bankDocumentsSection',bills:'bankBillsSection',payments:'bankPaymentsSection'};
     var sec=document.getElementById(secMap[t]);
     if(nav)nav.classList.toggle('active',t===name);
     if(sec)sec.style.display=t===name?'':'none';
   });
   _activeBankTab=name;
-  if(name==='overview'&&currentData)renderFinancesTabNew();
-  else if(name==='acts'&&currentData)renderBankDocuments();
+  if(name==='acts'&&currentData)renderBankDocuments();
   else if(name==='bills'&&currentData)renderBankBills();
   else if(name==='payments'&&currentData)renderBankPayments();
 }
@@ -180,7 +181,7 @@ function switchSettingsSection(name){
   if(name==='alerts')loadAlertRules();
   if(name==='failover'){loadFailoverSettings();loadFailoverCandidates();loadFailoverLog();}
 }
-function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'overview');}}if(name==='crm'){crmAutoLogin()}}
+function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}if(name==='crm'){crmAutoLogin()}}
 
 // ========== PHASE 3: SYSTEM TAB ==========
 var _sysCharts = {};
@@ -995,35 +996,9 @@ function bulkExport(){
     }}
   });
   if(!proxies.length){showToast('Нет прокси для экспорта','error');return}
-  // Modal
-  var overlay=document.createElement('div');
-  overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:10000;display:flex;align-items:center;justify-content:center;padding:16px';
-  overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
-  var proto='http';
-  function renderExport(){
-    var lines=proxies.map(function(p){var port=proto==='http'?p.http:p.socks;return p.login+':'+p.pass+'@'+p.host+':'+port});
-    var txt=lines.join('\n');
-    var content='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;width:min(640px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
-      +'<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
-      +'<div><span style="font-size:16px">📤</span> <strong style="font-size:14px">Экспорт прокси</strong> <span style="color:var(--text-2);font-size:12px">'+proxies.length+' шт.</span></div>'
-      +'<button data-on-click="this.closest(\'div[style*=fixed]\').remove()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center">✕</button>'
-      +'</div>'
-      +'<div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
-      +'<div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden">'
-      +'<button id="aeHttp" style="padding:4px 12px;font-size:11px;cursor:pointer;border:none;background:'+(proto==='http'?'var(--accent)':'var(--bg-2)')+';color:'+(proto==='http'?'#fff':'var(--text-1)')+'" data-on-click="proto=\'http\';renderExport()">HTTP</button>'
-      +'<button id="aeSocks" style="padding:4px 12px;font-size:11px;cursor:pointer;border:none;border-left:1px solid var(--border);background:'+(proto==='socks5'?'var(--accent)':'var(--bg-2)')+';color:'+(proto==='socks5'?'#fff':'var(--text-1)')+'" data-on-click="proto=\'socks5\';renderExport()">SOCKS5</button>'
-      +'</div>'
-      +'<span style="font-size:11px;color:var(--text-2)">Формат: login:pass@host:port</span>'
-      +'</div>'
-      +'<div style="padding:12px 20px;flex:1;overflow:auto"><textarea id="aeText" style="width:100%;height:300px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--font-mono);font-size:11px;color:var(--text-0);resize:vertical" readonly>'+esc(txt)+'</textarea></div>'
-      +'<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">'
-      +'<button class="btn btn-sm" data-on-click="copyText(document.getElementById(\'aeText\').value,this)">📋 Скопировать</button>'
-      +'<button class="btn btn-primary btn-sm" data-on-click="aeDownload()">💾 Скачать .txt</button>'
-      +'</div></div>';
-    overlay.innerHTML=content;
-  }
-  renderExport();
-  document.body.appendChild(overlay);
+  // Окно (переключатели клиента/протокола, список, копирование) — глобальные
+  // хелперы в admin/delegated-helpers.js: delegation работает только с globals.
+  aeOpen(proxies);
 }
 
 // ========== NOTIFICATION BELL (Stage 18.15 rewrite) ==========
@@ -3530,8 +3505,8 @@ function renderNewFinance(d){
   if(q){
     var nrrColor = s.nrr_pct==null?null:(s.nrr_pct>=100?'var(--success)':s.nrr_pct>=90?'var(--warning)':'var(--danger)');
     var churnColor = s.churn_rate_pct>=5?'var(--danger)':'var(--success)';
-    // 2026-08-04: + затраты/прибыль/маржа — единственные финансовые метрики,
-    // которых на дашборде не было (были только на странице «Финансы»).
+    // 2026-08-04: порядок по решению оператора — Выручка, Расходы, Прибыль,
+    // Маржинальность, дальше остальное; кнопка ввода затрат прямо в карточке.
     var _cost = s.total_cost||0, _rev30 = s.mrr||0, _profit = _rev30-_cost;
     var _marginPct = _rev30>0 ? Math.round(_profit/_rev30*1000)/10 : null;
     function qtile(l,v,c){ return '<div class="kpi-tile"><div class="l">'+l+'</div><div class="v" style="font-size:16px'+(c?';color:'+c:'')+'">'+v+'</div></div>'; }
@@ -3540,11 +3515,13 @@ function renderNewFinance(d){
         '<span style="color:var(--text-1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">'+l+(sub?' <span style="font-weight:400;color:var(--text-3)">'+sub+'</span>':'')+'</span>'+
         '<span style="font-family:var(--font-mono);font-weight:600;color:var(--text-0)">'+pct+'%</span></div>'+
       '<div style="height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+Math.min(pct,100)+'%;background:'+col+';border-radius:3px"></div></div></div>'; }
-    var hq = '<h3 style="margin:0 0 10px;font-size:14px;font-weight:700;color:var(--text-0)">Качество выручки</h3>';
+    var hq = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h3 style="margin:0;font-size:14px;font-weight:700;color:var(--text-0)">Качество выручки</h3>'
+      + '<button class="btn btn-sm" style="font-size:10px;padding:3px 9px" title="Ввести затраты месяца (себестоимость)" data-on-click="openFinanceCostsModal()">⚙ Затраты</button></div>';
     hq += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">';
+    hq += qtile('Выручка 30д', _fmtRub(_rev30), null);
+    hq += qtile('Расходы (мес.)', _cost>0?_fmtRub(_cost):'—', null);
     hq += qtile('Прибыль 30д', _cost>0?_fmtRub(_profit):'—', _cost>0?(_profit>=0?'var(--success)':'var(--danger)'):null);
-    hq += qtile('Маржа', (_marginPct==null||!_cost)?'—':_marginPct+'%', (_marginPct!=null&&_cost)?(_marginPct>=50?'var(--success)':_marginPct>=25?'var(--warning)':'var(--danger)'):null);
-    hq += qtile('Затраты (мес.)', _cost>0?_fmtRub(_cost):'—', null);
+    hq += qtile('Маржинальность', (_marginPct==null||!_cost)?'—':_marginPct+'%', (_marginPct!=null&&_cost)?(_marginPct>=50?'var(--success)':_marginPct>=25?'var(--warning)':'var(--danger)'):null);
     hq += qtile('NRR · 3 мес', s.nrr_pct==null?'—':s.nrr_pct+'%', nrrColor);
     hq += qtile('Churn · мес', s.churn_rate_pct==null?'—':s.churn_rate_pct+'%', churnColor);
     hq += qtile('ARPU', _fmtRub(s.arpu), null);

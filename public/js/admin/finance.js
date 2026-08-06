@@ -1390,19 +1390,22 @@ function renderMrrChart(d){
   d = d || window._newFinData; if(!d) return;
   var lg = document.getElementById('mrrLegend');
   var cc = getChartColorsLight();
-  // Тренд + ПРОГНОЗ текущего месяца столбцом (2026-08-02): последний бар
-  // показывает forecast_eom целиком (полупрозрачный), а не «сгоревшую»
-  // месяц-к-дате сумму — визуально видно, чем закончится месяц.
+  // Текущий месяц — стек «Факт к дате» + «остаток прогноза» (2026-08-04),
+  // как в карточке трафика: сплошная часть растёт каждый день, сверху
+  // полупрозрачный остаток до forecast_eom, общая высота = прогноз месяца.
+  // Раньше факт ЗАМЕНЯЛСЯ прогнозом целиком — месяц визуально не «заполнялся».
   var trend = (d.trend || []).map(function(t){ return { month: t.month, per_gb: t.per_gb || 0, per_modem: t.per_modem || 0 }; });
   var fc = (d.summary && typeof d.summary.forecast_eom === 'number') ? d.summary.forecast_eom : 0;
-  var fcOn = false;
+  var fcOn = false, fcRestGb = 0, fcRestPm = 0;
   if (fc > 0 && trend.length) {
     var last = trend[trend.length - 1];
     var lastTotal = last.per_gb + last.per_modem;
     if (fc > lastTotal) {
       var ratio = lastTotal > 0 ? (last.per_gb / lastTotal) : 1;
-      last.per_gb = Math.round(fc * ratio);
-      last.per_modem = fc - last.per_gb;
+      var fcGb = Math.round(fc * ratio);
+      var fcPm = fc - fcGb;
+      fcRestGb = Math.max(0, fcGb - last.per_gb);
+      fcRestPm = Math.max(0, fcPm - last.per_modem);
       fcOn = true;
     }
   }
@@ -1416,21 +1419,23 @@ function renderMrrChart(d){
   // остальная геометрия — из общего CHART_BAR_STACK. Скругление: плоский низ, круглый верх.
   var barOpts = Object.assign({stack:'a', borderRadius:chartStackRadius()}, CHART_BAR_STACK, {maxBarThickness:22});
   var n = trend.length;
-  var bgGb = trend.map(function(_,i){ return (fcOn && i === n - 1) ? 'rgba(47,111,224,.35)' : '#2f6fe0'; });
-  var bgPm = trend.map(function(_,i){ return (fcOn && i === n - 1) ? 'rgba(16,185,129,.35)' : '#10b981'; });
+  var fcGbSeries = trend.map(function(_,i){ return (fcOn && i === n - 1) ? fcRestGb : 0; });
+  var fcPmSeries = trend.map(function(_,i){ return (fcOn && i === n - 1) ? fcRestPm : 0; });
   window._newFinTrendChart = newChartSafe(cv, {
     type:'bar',
     data:{ labels:trend.map(function(t){return _ymRu(t.month,true);}),
       datasets:[
-        Object.assign({label:'За ГБ', data:trend.map(function(t){return t.per_gb;}), backgroundColor:bgGb}, barOpts),
-        Object.assign({label:'За модем', data:trend.map(function(t){return t.per_modem;}), backgroundColor:bgPm}, barOpts)
+        Object.assign({label:'За ГБ', data:trend.map(function(t){return t.per_gb;}), backgroundColor:'#2f6fe0'}, barOpts),
+        Object.assign({label:'За модем', data:trend.map(function(t){return t.per_modem;}), backgroundColor:'#10b981'}, barOpts),
+        Object.assign({label:'Прогноз ГБ', data:fcGbSeries, backgroundColor:'rgba(47,111,224,.35)'}, barOpts),
+        Object.assign({label:'Прогноз модем', data:fcPmSeries, backgroundColor:'rgba(16,185,129,.35)'}, barOpts)
       ]},
     options:{responsive:true,maintainAspectRatio:false,animation:false,
       interaction:{mode:'index',intersect:false},
       plugins:{legend:{display:false},
         tooltip:{mode:'index',intersect:false,
           callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.parsed.y||0).toLocaleString('ru-RU')+' ₽';},
-            title:function(items){var base=items&&items.length?items[0].label:'';return (fcOn&&items.length&&items[0].dataIndex===n-1)?base+' (прогноз)':base;},
+            title:function(items){var base=items&&items.length?items[0].label:'';return (fcOn&&items.length&&items[0].dataIndex===n-1)?base+' (факт + прогноз)':base;},
             footer:function(items){var t=0;items.forEach(function(i){t+=i.parsed.y||0;});return 'Итого: '+t.toLocaleString('ru-RU')+' ₽';}}}},
       scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9},maxRotation:0,minRotation:0,autoSkip:false},grid:{display:false},border:{display:false}},
         y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:9},callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid,drawTicks:false},border:{display:false}}}}
@@ -1440,16 +1445,16 @@ function renderMrrChart(d){
 function renderFinRevenue(d){
   var el = document.getElementById('newFinRevenue'); if(!el) return;
   var h = '<h3 style="margin:0 0 8px;font-size:14px;font-weight:700;color:var(--text-0)">Выручка по дням <span style="font-size:10px;font-weight:400;color:var(--text-3)">30 дней · по клиентам · ₽</span></h3>';
-  h += '<div style="height:118px;position:relative"><canvas id="newFinRevCanvas"></canvas></div>';
+  h += '<div style="height:210px;position:relative"><canvas id="newFinRevCanvas"></canvas></div>';
   h += '<div style="height:0.5px;background:var(--border);margin:11px 0 9px"></div>';
   h += '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px"><span style="font-size:13px;font-weight:700;color:var(--text-0)">Последние пополнения</span><span style="font-size:11px;color:var(--accent);cursor:pointer" data-on-click="finNavBank()">все →</span></div>';
-  // Только ПОПОЛНЕНИЯ (положительные), последние 3.
-  var rp = (d.recent_payments || []).filter(function(p){return p.amount >= 0;}).slice(0, 3);
+  // Только ПОПОЛНЕНИЯ (положительные), последние 5 — как на странице «Финансы».
+  var rp = (d.recent_payments || []).filter(function(p){return p.amount >= 0;}).slice(0, 5);
   if(!rp.length) h += '<div style="color:var(--text-3);font-size:12px">Пополнений пока нет.</div>';
-  else rp.forEach(function(p){
+  else rp.forEach(function(p, ri){
     var sub = esc((p.date||'').slice(5)) + ' · ' + esc(p.source||'');
-    h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:3px 0"><div style="min-width:0"><div style="font-size:12px;color:var(--text-1);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.client)+'</div><div style="font-size:10px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div></div>'
-      + '<span style="font-family:var(--font-mono);font-size:12px;font-weight:600;white-space:nowrap;color:var(--success)">+'+Math.abs(Math.round(p.amount)).toLocaleString('ru-RU')+'</span></div>';
+    h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 2px;'+(ri>0?'border-top:1px solid var(--border);':'')+'"><div style="min-width:0"><div style="font-size:12px;color:var(--text-1);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.client)+'</div><div style="font-size:10px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div></div>'
+      + '<span style="font-family:var(--font-mono);font-size:12px;font-weight:600;white-space:nowrap;color:var(--success)">+'+Math.abs(Math.round(p.amount)).toLocaleString('ru-RU')+' ₽</span></div>';
   });
   el.innerHTML = h;
   setTimeout(function(){
