@@ -565,8 +565,12 @@ function _renderOverview(body,m){
     if(_ports.length>1||port.portName){
       var _pp1=port.HTTP_PORT||port.SOCKS_PORT;
       var _pcred=_pp1?(sip+':'+_pp1+(port.LOGIN?':'+port.LOGIN+':'+(port.PASSWORD||''):'')):'';
+      // Ссылка ротации IP (из RESET_SECURE_LINK порта) — добавляется второй строкой.
+      var _rurl=(port.RESET_SECURE_LINK&&port.RESET_SECURE_LINK.URL)?String(port.RESET_SECURE_LINK.URL):'';
+      var _pcredLink=(_pcred&&_rurl)?(_pcred+'\\nСмена IP: '+_rurl):'';
       conn+='<div style="font-size:10px;font-weight:600;color:var(--accent);margin:2px 0 4px">'+esc(port.portName||('Порт '+(pi+1)))
-        +(_pcred?' <span style="font-weight:400;cursor:pointer" title="Скопировать реквизиты этого порта" data-on-click="copyText(\''+_pcred.replace(/'/g,"\\'")+'\',this)">📋 строка</span>':'')
+        +(_pcred?' <span style="font-weight:400;cursor:pointer" title="ip:port:login:pass" data-on-click="copyText(\''+_pcred.replace(/'/g,"\\'")+'\',this)">📋 Реквизиты</span>':'')
+        +(_pcredLink?' <span style="font-weight:400;cursor:pointer" title="Реквизиты + ссылка для смены IP" data-on-click="copyText(\''+_pcredLink.replace(/'/g,"\\'")+'\',this)">📋 Реквизиты+ссылка</span>':'')
         +'</div>';
     }
     conn+=_ovRow('HTTP',port.HTTP_PORT?(sip+':'+port.HTTP_PORT):'—');
