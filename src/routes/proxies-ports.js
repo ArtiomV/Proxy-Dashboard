@@ -351,6 +351,10 @@ r.post('/api/admin/bulk_rotation', authMiddleware, adminMiddleware, async (req, 
         const back = await proxyConf.getConfForm(server, `/conf/edit/${rawImei}`);
         const got = back.ok ? proxyConf.parseRotation(back.html) : null;
         if (got !== wantRot) {
+          // Verify не прошёл — НЕ оставляем в кэше старое значение: до 30 минут
+          // UI бы показывал его как актуальное («выключил, а показывает 10м»).
+          // Без записи фронт покажет «нет данных» до ближайшего честного рефреша.
+          delete modemRotationCache[m.serverName + ':' + rawImei];
           failed++; failures.push({ imei: rawImei, reason: `verify: в форме ${got == null ? 'нет данных' : got}` });
           continue;
         }
