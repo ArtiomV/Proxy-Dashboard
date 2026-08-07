@@ -521,12 +521,11 @@ function _renderOverview(body,m){
   var chipsWrap='<div style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:13px">'+chips+'</div>';
 
   var d='data-imei="'+m.rawImei+'" data-server="'+m.server+'" data-nick="'+esc(m.nick)+'"';
-  var _cred=_ovCredStr(m,ci);
   var acts='<div style="display:flex;gap:6px;margin-bottom:12px;flex-wrap:wrap">';
   if(st!=='offline'){acts+=_ovActBtn('<span style="color:var(--accent)">↻</span> Сбросить IP',d,'resetIp(this)');acts+=_ovActBtn('<span style="color:var(--warning)">⏻</span> Ребут',d,'rebootModem(this)');}
   acts+=_ovActBtn('<span style="color:var(--text-2)">⟳</span> Re-Add',d,'readdModem(this)');
-  if(_cred)acts+=_ovActBtn('<span style="color:var(--text-2)">📋</span> Доступ','',"copyText('"+_cred+"',this)");
-  acts+=_ovActBtn('<span style="color:var(--text-2)">⚙</span> Настройки','',"document.querySelector('.modal-tab[data-tab=&quot;settings&quot;]').click()");
+  // «Доступ» и «Настройки» из быстрых команд убраны (2026-08-05): креды — по
+  // кнопкам «📋 Реквизиты» у каждого порта, настройки — вкладкой модалки.
   acts+='</div>';
 
   var hm=(typeof _getHealth==='function')?_getHealth(m):null;
