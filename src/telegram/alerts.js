@@ -332,28 +332,6 @@ const RULES = {
     dedupeKey: () => 'global',
     render: p => `🚨 <b>Доменный контроль не отработал</b>\n\nЗа ${p.date || '?'}: ${esc(p.error || 'unknown')}\nПовторы не помогли. На bypass-боксах сейчас НЕТ контроля обращений к банкам — разберись срочно.`,
   },
-  traffic_recon_mismatch: {
-    title: 'Сверка трафика: расхождение с ProxySmart',
-    priority: 'important',
-    defaultOn: true,
-    cooldownSec: 86400,   // джоба суточная — одного сообщения в день достаточно
-    dedupeKey: () => 'global',
-    render: p => {
-      const lines = (p.top || []).map(o =>
-        `• <b>${esc(o.client)}</b> (${esc(o.server)}): у нас ${o.ourGb} ГБ, pmacct ${o.psGb} ГБ (${o.diffPct}%)`);
-      return `⚖️ <b>Сверка трафика за ${p.date}: расхождение у ${p.count} порт(ов)</b>\n\n${lines.join('\n')}`
-        + (p.count > lines.length ? `\n…и ещё ${p.count - lines.length} (см. Финансы → Сверка)` : '')
-        + `\n\nБиллинг идёт по нашему числу — если pmacct стабильно выше, мы недосчитываем клиенту.`;
-    },
-  },
-  traffic_recon_failed: {
-    title: 'Сверка трафика не отработала',
-    priority: 'important',
-    defaultOn: true,
-    cooldownSec: 43200,   // раз в 12ч на сервер, чтобы ретраи ночью не спамили
-    dedupeKey: p => 'recon_' + (p.server || 'global'),
-    render: p => `⚖️ <b>Сверка трафика: ${esc(p.server || '?')} без данных</b>\n\nЗа ${p.date || '?'}: ${esc(p.error || 'unknown')}\nПовторы (3 попытки с охлаждением) не помогли — карточка сверки по этому серверу скрыта до следующего успешного прогона.`,
-  },
   traffic_spike_burst: {
     title: 'Spike-protection сработал слишком часто',
     priority: 'important',
@@ -459,10 +437,8 @@ const _entityFor = {
   sim_iccid_changed:         p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   reboot_score_high:         p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   traffic_spike_burst:       () => ({ kind: 'system', id: 'traffic' }),
-  traffic_recon_mismatch:    () => ({ kind: 'system', id: 'traffic_recon' }),
   domain_guard_hit:          () => ({ kind: 'system', id: 'domain_guard' }),
   domain_guard_failed:       () => ({ kind: 'system', id: 'domain_guard' }),
-  traffic_recon_failed:      p => ({ kind: 'system', id: 'traffic_recon:' + (p.server || '') }),
   dashboard_restarted:       () => ({ kind: 'system', id: 'pm2' }),
   heap_warn:                 () => ({ kind: 'system', id: 'heap' }),
   disk_low_warn:             () => ({ kind: 'system', id: 'disk' }),

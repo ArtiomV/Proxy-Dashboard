@@ -10,7 +10,7 @@ function runStartup(d) {
   const {
     logger, db, fs, path,
     rescheduleSpeedtests, scheduleRepeating,
-    aggregateTopHosts, runTrafficRecon, runDomainGuard, balanceReconcile,
+    aggregateTopHosts, runDomainGuard, balanceReconcile,
     healthDb, uptimeTracking, getSetting, setSetting,
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
@@ -32,12 +32,6 @@ function runStartup(d) {
 
   // Schedule nightly TopHosts at 03:00
   scheduleRepeating(3, 0, 'TopHosts', aggregateTopHosts);
-
-  // WP1: nightly traffic reconciliation at 03:40 UTC (06:40 MSK) — after the
-  // 00:45 DailySync has persisted yesterday's counters. Ретраи внутри джобы
-  // (3 попытки × 3 мин) держат её до ~10 минут в худшем случае — на ночном
-  // расписании это безопасно.
-  scheduleRepeating(3, 40, 'TrafficRecon', runTrafficRecon);
 
   // WP2: доменный контроль в 03:25 UTC — после TopHosts (03:00); если тот ещё
   // работает, джоба сама подождёт свежий снапшот (ретраи по свежести).

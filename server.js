@@ -2762,7 +2762,6 @@ app.use(require('./src/routes/traffic')({
   refreshPortKeyMapping,
   logActivity,
   kvGet: _kvGet,
-  runTrafficRecon,
 }));
 
 
@@ -3353,27 +3352,6 @@ function _initTopHostsJob() {
 }
 async function aggregateTopHosts() { return _initTopHostsJob().aggregateTopHosts(); }
 
-// WP1 (ProxySmart data integration): nightly traffic reconciliation —
-// daily_traffic vs the box's pmacct counters. Lazy init, same shape as
-// the top-hosts job above.
-let _trafficReconJob = null;
-function _initTrafficReconJob() {
-  if (_trafficReconJob) return _trafficReconJob;
-  _trafficReconJob = require('./src/jobs/traffic-recon').create({
-    db, logger,
-    get apiServers() { return apiServers; },
-    SERVER_COUNTRIES,
-    fetchApi,
-    getMoscowYesterday,
-    getSetting,
-    alerts,
-    logActivity,
-    kvSet: _kvSet, kvGet: _kvGet,
-  });
-  return _trafficReconJob;
-}
-async function runTrafficRecon() { return _initTrafficReconJob().runTrafficRecon(); }
-
 // WP2: доменный контроль bypass-боксов — матчит суточный top_hosts-снапшот
 // против бан-листа hfilter (config/blocked-domains.json).
 let _domainGuardJob = null;
@@ -3739,7 +3717,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   require('./src/boot/startup').runStartup({
     logger, db, fs, path,
     rescheduleSpeedtests, scheduleRepeating,
-    aggregateTopHosts, runTrafficRecon, runDomainGuard, balanceReconcile,
+    aggregateTopHosts, runDomainGuard, balanceReconcile,
     healthDb, uptimeTracking, getSetting, setSetting,
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,

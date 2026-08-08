@@ -339,11 +339,9 @@ function _renderFinanceDashboard(c, d) {
 
   // WP1: сверка трафика (наш daily_traffic vs pmacct боксов) — контейнер,
   // данные подтягиваются отдельным запросом после отрисовки дашборда.
-  h += '<div id="fxTrafficRecon" style="margin-top:14px"></div>';
 
   h += '</div>';
   c.innerHTML = h;
-  _loadTrafficRecon();
 
   setTimeout(function() {
     var dcv = document.getElementById('fxDailyChart');
@@ -1488,19 +1486,6 @@ function renderFinRevenue(d){
   }, 30);
 }
 
-// ========== WP1: Сверка трафика (daily_traffic vs pmacct боксов) ==========
-// Пороги дублируют серверные дефолты traffic_recon_alert_pct / _min_gb —
-// это только фильтр отображения, алерты считает сервер.
-function _loadTrafficRecon() {
-  var el = document.getElementById('fxTrafficRecon');
-  if (!el) return;
-  api(API + '/api/admin/traffic_recon?days=30')
-    .then(function(d) {
-      if (!d || d.error) { el.innerHTML = ''; return; }
-      el.innerHTML = _renderTrafficRecon(d);
-    })
-    .catch(function() { el.innerHTML = ''; });
-}
 
 function _renderTrafficRecon(d) {
   var GB = 1e9, PCT = 10, MIN = 0.5 * GB;
