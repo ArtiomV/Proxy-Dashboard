@@ -53,7 +53,7 @@
 - **traffic_hourly** — почасовой durable-учёт: UNIQUE(port_id, hour_start), bytes_in/out, uncertain (0=ок, 1=gap-fill, 2=расхождение счётчиков, 3=сглажено медианой), client_name/operator/nick заморожены при записи. Основа биллинга.
 - **hourly_snapshots** — базлайны счётчиков для дельт (внутреннее).
 - **daily_traffic** — суточный канон: UNIQUE(port_name, date), MAX-семантика (байты не убывают), client_name при записи.
-- **traffic_recon** — сверка с pmacct (ps_* vs our_*, diff_pct; UNIQUE port_key+date). Систематика +5–7% у pmacct (сетевой уровень vs прокси-payload).
+- **traffic_recon** — (историческая) сверка с pmacct. 2026-08-07: сверка и её алерты УБРАНЫ решением оператора — остаёмся на модели учёта по прокси-payload (pmacct = сетевой уровень, +5–7% к нашему числу; биллинг всегда по нашему).
 - **top_hosts_detail / top_hosts_daily / domain_guard_hits** — доменный контроль.
 
 ### 1.4. Состояние/журналы
@@ -161,12 +161,11 @@ trackModems → uptime_tracking.last_online_check ─► computeFleet.disconnect
                                         (порог = modem_offline_threshold_min, единый везде)
 known_modems (ростер реквизитов) ─► computeClientWorking (working клиента) + injectOfflineModems (плейсхолдеры)
 TopHosts (03:00) → top_hosts_detail → DomainGuard (03:25, guard-servers S2/S4) → domain_guard_hits → алерты
-TrafficRecon (03:40) → traffic_recon (наш учёт vs pmacct) → расхождения ≥10% → алерт + страница сверки
 cleanup (00:30 + hourly): retention; Pass A — dedupe per (server,imei); мёртвые модемы НЕ вытесняются
 ```
 
 ### 3.4. kv_store — ключи и владельцы
-`app_settings` (все настройки; секреты enc1:), `api_servers` (боксы+метаданные; boot-мерж с env), `top_hosts_cache`, `rotation_cache`, `hourly_last_recorded`, `last_reconciliation_month`, `reconcile_known_breaks`, `traffic_recon_status`, `telegram_alert_cooldowns`, `telegram_last_sent_date`, `integrity_baseline_*`.
+`app_settings` (все настройки; секреты enc1:), `api_servers` (боксы+метаданные; boot-мерж с env), `top_hosts_cache`, `rotation_cache`, `hourly_last_recorded`, `last_reconciliation_month`, `reconcile_known_breaks`, `telegram_alert_cooldowns`, `telegram_last_sent_date`, `integrity_baseline_*`.
 
 ### 3.5. In-memory состояние (src/state + server.js)
 Стабильные ссылки (mutate-in-place): clients[]+мапы (ById/ByLogin/ByApiKey/ByInn/ByResetToken), dailyTraffic, ipTracking, uptimeTracking, ipHistory, appSettings, knownModems, tochkaConfig, portKeyToPortName. Прочее: apiServers, users, modemRotationCache, autoRecovery, _serverDownSince, offlineAlertSent, _downSince, _deletedModemSet (+_deletedOnlineStreak), _panelSessions, snapCache (hourly), connsHistory (65 мин, 1-мин сэмплы), _psCache. Мьютекс withClientsLock сериализует billing против saveClients.
@@ -270,7 +269,7 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 Конфиг: `POST/GET /api/admin/tochka/config`, `/autodetect`, `/register_webhook`, `/sync` (ручная сверка выписки), `GET /payments`, `/match_payment`, `/dismiss_payment`, `/dismiss_unmatched`. Акты: `POST /create_act`, `GET /all_acts`, `POST /generate_acts`, per-client `GET/PUT /closing_documents/:docId` (PUT — правка позиций), `GET pdf|print`, `POST closing_document_status`, `DELETE closing_document/:docId` (удаляет и в банке). Счета: `POST /create_bill`, `/generate_bills`, `GET /all_bills` (с formulaText), `GET pdf|print`, `POST bill_status`, `DELETE /bill/:billId`.
 
 ### 6.6. Аналитика (admin)
-`/api/analytics/monthly_traffic`, `/heatmap`, `/modem_heatmap`, `/rotations`, `/ip_stats`, `/traffic_forecast`, `/capacity`, `/latency_stats`, `/latency_day`, `/logs_domains_full`, `/modem_health`, `/modem_health_history`; `/api/admin/daily_traffic`, `/backfill_daily_traffic`, `/bandwidth_single|period`, `/reset_bandwidth`, `/unique_ips`, `/traffic_recon` (+`/run`), `/proxy_checks`, `POST /proxy_check`, `/top_hosts(_aggregated|_refresh)`, `/domain_guard` (+`/run`).
+`/api/analytics/monthly_traffic`, `/heatmap`, `/modem_heatmap`, `/rotations`, `/ip_stats`, `/traffic_forecast`, `/capacity`, `/latency_stats`, `/latency_day`, `/logs_domains_full`, `/modem_health`, `/modem_health_history`; `/api/admin/daily_traffic`, `/backfill_daily_traffic`, `/bandwidth_single|period`, `/reset_bandwidth`, `/unique_ips`, `/proxy_checks`, `POST /proxy_check`, `/top_hosts(_aggregated|_refresh)`, `/domain_guard` (+`/run`).
 
 ### 6.7. Система/настройки (admin)
 `GET /api/admin/data` (главный агрегат: fleet+clients+traffic+finance, посекционная деградация), `/health` (+реестр джобов), `/jobs/:id`, `/system_health`, `/system_log`, `/audit_log`, `/db_audit`, `/api_usage`, `/api_access_log`, `/auto_reboot_log`, `/backup`, `POST /restart_dashboard`, `/cache/invalidate`. Серверы: `GET/POST/PATCH/DELETE /api/admin/servers[/:name]`, `/server_stats`. Настройки: `GET/PUT /api/admin/settings` (маскировка секретов; тумблеры alert_*). Алерты: `GET /api/admin/alerts`, `PUT /alerts/:id`, `POST /alerts/:id/test`. Уведомления: `GET /api/admin/notifications`, `/badge`, `/:id/read`, `/dismiss`, `/read-all`, `/dismiss-read-older`. Failover: `/failover/log|spares|candidates`, `POST /execute`. CRM/TG: `/crm/export`, `/crm_token`, `/crm_reminders`, `/telegram/preview`, `/telegram/send_test`. Симулятор: `simulator/*` (pool, profiles, run/abort, runs, compare, stream…). AI-продажи: `/ai_sales/*`.
@@ -297,7 +296,6 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 | 03:00 | TopHosts | сбор top_hosts по всем портам → top_hosts_detail |
 | 03:25 | DomainGuard | контроль бан-листа доменов (config/blocked-domains.json) по дельтам |
 | 03:30 | MonthlyReconciliation | 1-го числа: stored vs billed, добивка корректировкой |
-| 03:40 | TrafficRecon | pmacct vs daily_traffic за вчера, алерты ≥10% |
 | 04:00 | BalanceReconcile | баланс vs ledger, новые разрывы → critical+TG |
 | 05:05 | MonthlyActs | авто-акты в день взаиморасчётов клиента |
 | 05:10 | MonthlyBills | авто-счета (формула §2.4) |
@@ -328,7 +326,7 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 Каждое правило: вкл/выкл (`alert_<id>_enabled`), канал TG+колокольчик или только колокольчик, кулдаун per dedupeKey (персист в kv, TTL 7д), boot-grace 5 мин, каждый триггер пишется в notifications.
 
 **🔴 critical:** server_unreachable (≥10 мин), modems_down_bulk (≥порога), tochka_webhook_failed, db_backup_failed, balance_drift, duplicate_credit_blocked, client_charge_failed (maxDebt), failover_no_spare, failover_failed, domain_guard_hit, domain_guard_failed, heap_high, disk_low_critical.
-**🟡 important:** modem_offline_20m (порог настраиваемый, парность), modem_recovered, recovery_exhausted, failover_done, sim_redirect_imposed, sim_iccid_changed, sim_status_bad, reboot_score_high (≥70), payment_received, client_balance_negative, proxy_expiring_3d, traffic_recon_mismatch, traffic_recon_failed, traffic_spike_burst, dashboard_restarted.
+**🟡 important:** modem_offline_20m (порог настраиваемый, парность), modem_recovered, recovery_exhausted, failover_done, sim_redirect_imposed, sim_iccid_changed, sim_status_bad, reboot_score_high (≥70), payment_received, client_balance_negative, proxy_expiring_3d, traffic_spike_burst, dashboard_restarted.
 **🔵 early:** heap_warn, disk_low_warn, cron_stuck.
 **🔔 bell-only:** modem_offline, client_debt, crm_reminder.
 
