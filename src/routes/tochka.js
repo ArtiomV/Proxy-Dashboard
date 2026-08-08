@@ -542,6 +542,7 @@ r.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (r
   client.closingDocuments.push(closingDoc);
   saveClients(clients);
 
+  try { require('../telegram/alerts').trigger('act_issued', { client_id: client.id, client: client.name, period, amount: closingDoc.totalAmount, actNumber, tochkaPushed }); } catch (_) { /* alert best-effort */ }
   res.json({ ok: true, document: closingDoc, tochkaPushed, tochkaStatus });
 });
 
@@ -818,6 +819,7 @@ r.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (
   client.bills.push(bill);
   saveClients(clients);
 
+  try { require('../telegram/alerts').trigger('bill_issued', { client_id: client.id, client: client.name, period: billPeriod, amount: bill.amount, billNumber, tochkaPushed: !!tochkaBillId }); } catch (_) { /* alert best-effort */ }
   res.json({ ok: true, bill });
 });
 

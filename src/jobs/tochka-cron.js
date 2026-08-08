@@ -23,6 +23,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcrypt');
 const { sha256hex } = require('../utils/secrets');
 const tochkaDocs = require('../tochka/documents');
+const alerts = require('../telegram/alerts');   // 2026-08-07: act/bill issued notifications
 
 function create(deps) {
   const {
@@ -213,6 +214,7 @@ function create(deps) {
         generated++;
         logger.info(`[Tochka AutoActs] Created act for ${client.name}: ${totalCost} RUB`);
         logActivity('billing', 'info', 'act_created', client.name, `Act created: ${totalCost} RUB for ${period}`, { client_id: client.id, amount: totalCost, period, act_number: actNumber });
+        try { alerts.trigger('act_issued', { client_id: client.id, client: client.name, period, amount: totalCost, actNumber, tochkaPushed: !!tochkaDocumentId }); } catch (_) { /* alert best-effort */ }
       } catch (e) {
         logger.error(`[Tochka AutoActs] Error for ${client.name}:`, e.message);
         logActivity('billing', 'error', 'act_error', client.name, `Act generation error: ${e.message}`, { client_id: client.id, period });
@@ -299,6 +301,7 @@ function create(deps) {
         generated++;
         logger.info(`[Tochka AutoBills] Created bill for ${client.name}: ${amount} RUB`);
         logActivity('billing', 'info', 'bill_created', client.name, `Bill created: ${amount} RUB for ${currentPeriod}`, { client_id: client.id, amount, period: currentPeriod, bill_number: billNumber });
+        try { alerts.trigger('bill_issued', { client_id: client.id, client: client.name, period: currentPeriod, amount, billNumber, tochkaPushed: !!tochkaBillId }); } catch (_) { /* alert best-effort */ }
       } catch (e) {
         logger.error(`[Tochka AutoBills] Error for ${client.name}:`, e.message);
         logActivity('billing', 'error', 'bill_error', client.name, `Bill generation error: ${e.message}`, { client_id: client.id, period: currentPeriod });

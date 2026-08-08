@@ -277,6 +277,23 @@ const RULES = {
     dedupeKey: p => 'pay_' + (p.natural_key || (p.client_id + '_' + p.amount + '_' + p.date)),
     render: p => `💰 <b>Платёж: ${formatRub(p.amount)}</b>\n\nКлиент: <b>${esc(p.client || '? (ИНН ' + (p.inn || '?') + ')')}</b>\nИсточник: ${p.source || 'банк'}\n${p.balanceAfter != null ? '\nБаланс клиента теперь: <b>' + formatRub(p.balanceAfter) + '</b>' : ''}`,
   },
+  // 2026-08-07: уведомление при выставлении актов/счетов (авто и вручную).
+  act_issued: {
+    title: 'Выставлен акт',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 5,
+    dedupeKey: p => 'act_' + (p.client_id || '') + '_' + (p.period || '') + '_' + (p.amount || 0),
+    render: p => `📃 <b>Выставлен акт: ${formatRub(p.amount)}</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>\nПериод: ${esc(p.period || '?')}\nНомер: ${esc(p.actNumber || '—')}\nВ банке: ${p.tochkaPushed ? 'создан в Точке' : 'только локально'}`,
+  },
+  bill_issued: {
+    title: 'Выставлен счёт',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 5,
+    dedupeKey: p => 'bill_' + (p.client_id || '') + '_' + (p.period || '') + '_' + (p.amount || 0),
+    render: p => `💳 <b>Выставлен счёт: ${formatRub(p.amount)}</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>\nПериод: ${esc(p.period || '?')}\nНомер: ${esc(p.billNumber || '—')}\nВ банке: ${p.tochkaPushed ? 'создан в Точке' : 'только локально'}`,
+  },
   client_balance_negative: {
     title: 'Клиент ушёл в минус',
     priority: 'important',
