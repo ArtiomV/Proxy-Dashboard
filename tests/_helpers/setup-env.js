@@ -29,7 +29,6 @@ for (const k of Object.keys(process.env)) {
   if (/^API_.+_(URL|USER|PASS|PUBLIC_IP)$/.test(k)) delete process.env[k];
   if (/^TOCHKA_/.test(k)) delete process.env[k];
   if (/^MODEM_LOGIN_/.test(k)) delete process.env[k];
-  if (/^CRM_/.test(k)) delete process.env[k];
 }
 
 // Silent logging during tests (pino respects this via its env hook).

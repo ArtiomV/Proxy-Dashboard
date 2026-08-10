@@ -403,11 +403,5 @@ r.get('/api/admin/unique_ips', authMiddleware, adminMiddleware, async (req, res)
   } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
 });
 
-// WP1: traffic reconciliation readout — rows written by src/jobs/traffic-recon.js.
-// Returns per-day summary + worst offenders + per-server job status (the UI
-// hides a server's card when its last run failed after retries).
-// Manual trigger for the reconciliation (первый прогон / отладка). The job
-// takes minutes when boxes are slow (retry passes) — respond immediately and
-// let it run in the background; результат виден в GET-роуте выше и в логах.
   return r;
 };

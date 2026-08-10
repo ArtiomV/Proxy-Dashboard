@@ -1,14 +1,14 @@
 'use strict';
 //
-// src/routes/proxy-checks.js — proxy health-check + top-hosts (Stage 3).
+// src/routes/proxy-checks.js — proxy health-check (Stage 3).
 //
-// 6 routes:
+// 4 routes:
 //   GET  /api/admin/proxy_checks            — latency history per modem
 //   POST /api/admin/proxy_check             — manual single/bulk latency probe
 //   GET  /api/admin/top_hosts               — live top domains snapshot
-//   GET  /api/admin/top_hosts_aggregated    — cached aggregate
-//   POST /api/admin/top_hosts_refresh       — force re-aggregation
 //   POST /api/tools/check_proxy             — client-tool: test arbitrary proxy list
+// (top_hosts_aggregated/top_hosts_refresh were removed with #tab-traffic, C4 —
+//  the nightly TopHosts job keeps the aggregate cache for itself.)
 
 const express = require('express');
 const http = require('http');
@@ -23,7 +23,6 @@ module.exports = function createProxyChecksRouter(deps) {
     curlCheckProxy, normalizeOperator,
     dbStmts,
     appSettings,
-    getTopHostsCache, aggregateTopHosts,
   } = deps;
   const r = express.Router();
 
@@ -202,17 +201,6 @@ r.post('/api/tools/check_proxy', checkProxyLimiter, authMiddleware, async (req, 
   }
 
   res.json({ results });
-});
-
-r.get('/api/admin/top_hosts_aggregated', authMiddleware, adminMiddleware, (req, res) => {
-  res.json(getTopHostsCache());
-});
-
-r.post('/api/admin/top_hosts_refresh', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const result = await aggregateTopHosts();
-    res.json({ ok: true, stats: result.stats, updatedAt: result.updatedAt });
-  } catch (err) { res.status(500).json({ error: err.message }); }
 });
 
   return r;

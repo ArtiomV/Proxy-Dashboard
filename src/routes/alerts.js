@@ -71,7 +71,6 @@ module.exports = function (deps) {
       // Stage 18.15 — bell-only rules
       modem_offline:              { nick: 'TEST_MODEM', imei: '123', server: 'TEST', mins: 25 },
       client_debt:                { client_id: 'test', client: 'Тестовый клиент', balance: -500 },
-      crm_reminder:               { id: 'test', name: 'Тестовая сделка', reminderDate: new Date().toISOString() },
     };
     // Bypass cooldown for tests by clearing first.
     try { alerts.clearCooldown(id, samples[id] || {}); } catch (_) {}

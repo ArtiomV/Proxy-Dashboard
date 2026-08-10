@@ -29,7 +29,7 @@ function _getHealth(modem){
 
 // Stage 18.16 — mirrors the backend's getStaleNicks + getUnboundNicks filters
 // (server.js). Returns the reason a modem is excluded from analytics
-// (latency_stats, modem_health, latency_day, heatmap), or null if included.
+// (latency_stats, modem_health, heatmap), or null if included.
 // Stale takes precedence — "long-dead" is the more actionable signal.
 function _excludeReason(modem){
   if(!modem) return null;

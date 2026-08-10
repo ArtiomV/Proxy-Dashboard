@@ -1,7 +1,8 @@
 'use strict';
 //
-// src/routes/analytics-latency.js — proxy latency endpoints (WP6.1 carve-out
-// from analytics.js): latency_stats + latency_day.
+// src/routes/analytics-latency.js — proxy latency endpoint (WP6.1 carve-out
+// from analytics.js): latency_stats. (latency_day was removed with the hidden
+// #tab-traffic view, C4.)
 // Query strings come from src/db/analytics.js; the view/stale/unbound filter
 // fragment is shared through analyticsDb.proxyChecksFilter.
 
@@ -193,94 +194,5 @@ module.exports = function createAnalyticsLatencyRouter(deps) {
       res.status(500).json({ error: e.message });
     }
   });
-
-  r.get('/api/analytics/latency_day', authMiddleware, adminMiddleware, (req, res) => {
-    try {
-      const { view = 'country', id = 'all', date } = req.query;
-      const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
-
-      // Determine MSK date
-      const mskOffset = getTzOffset('Europe/Moscow');
-      let mskDate;
-      if (date && /^\d{4}-\d{2}-\d{2}$/.test(date)) {
-        mskDate = date;
-      } else {
-        const now = new Date();
-        const mskNow = new Date(now.getTime() + mskOffset * 3600 * 1000);
-        mskDate = mskNow.toISOString().slice(0, 10);
-      }
-
-      // Convert MSK day boundaries to UTC
-      const dayStartMsk = new Date(mskDate + 'T00:00:00Z');
-      const dayStartUtc = new Date(dayStartMsk.getTime() - mskOffset * 3600 * 1000);
-      const dayEndUtc = new Date(dayStartUtc.getTime() + 86400000);
-      const utcFrom = dayStartUtc.toISOString();
-      const utcTo = dayEndUtc.toISOString();
-
-      // Stage 18.16 — exclude currently-unbound modems (same as latency_stats).
-      const unboundNicks = (typeof getUnboundNicks === 'function') ? getUnboundNicks() : new Set();
-      const { clause: filterNoTime, params: filterOnlyParams } = analyticsDb.proxyChecksFilter({
-        view, idKey, id,
-        servers: view === 'country' && idKey !== 'all' ? _serversForCountry(idKey) : [],
-        unboundNicks,
-      });
-      const rows = analyticsDb.latencyDayRows(filterNoTime, [utcFrom, utcTo, ...filterOnlyParams]);
-
-      // Build points with MSK time
-      const points = [];
-      let okCount = 0, errCount = 0, totalMsArr = [];
-      for (const row of rows) {
-        const utcMs = new Date(row.checked_at).getTime();
-        const mskMs = utcMs + mskOffset * 3600 * 1000;
-        const mskD = new Date(mskMs);
-        const h = mskD.getUTCHours();
-        const m = mskD.getUTCMinutes();
-        const minutes = h * 60 + m;
-        const timeStr = String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
-
-        points.push({
-          t: timeStr,
-          min: minutes,
-          nick: row.nick,
-          op: row.operator || '',
-          client: row.client_name || '',
-          connect: row.connect_ms,
-          total: row.total_ms,
-          status: row.status_code,
-          error: row.error || null
-        });
-
-        if (row.error) {
-          errCount++;
-        } else {
-          okCount++;
-          if (row.total_ms != null) totalMsArr.push(row.total_ms);
-        }
-      }
-
-      // Summary
-      const sorted = totalMsArr.slice().sort((a, b) => a - b);
-      const summary = {
-        total: points.length,
-        ok: okCount,
-        errors: errCount,
-        median_ms: null,
-        p95_ms: null,
-        avg_ms: null
-      };
-      if (sorted.length > 0) {
-        const mid = Math.floor(sorted.length / 2);
-        summary.median_ms = sorted.length % 2 === 0 ? Math.round((sorted[mid - 1] + sorted[mid]) / 2) : sorted[mid];
-        summary.avg_ms = Math.round(sorted.reduce((a, b) => a + b, 0) / sorted.length);
-        summary.p95_ms = sorted[Math.min(Math.ceil(sorted.length * 0.95) - 1, sorted.length - 1)];
-      }
-
-      res.json({ date: mskDate, points, summary });
-    } catch (e) {
-      logger.error('[latency_day]', e.message);
-      res.status(500).json({ error: e.message });
-    }
-  });
-
   return r;
 };

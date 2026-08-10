@@ -145,7 +145,7 @@ r.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   // plaintext) to the UI. A mask communicates "configured" without exposure;
   // the value is only ever written (PUT), never read back.
   const masked = { ...appSettings };
-  for (const k of ['anthropic_api_key', 'tavily_api_key']) {
+  for (const k of ['anthropic_api_key']) {
     const v = masked[k];
     masked[k] = (typeof v === 'string' && v) ? '••••••••' : '';
   }
@@ -288,20 +288,16 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.session_ttl_days != null)            patch.session_ttl_days            = Math.max(1, Math.min(365, parseInt(req.body.session_ttl_days) || 30));
   if (req.body.billing_retry_delay_hours != null)   patch.billing_retry_delay_hours   = Math.max(0.5, Math.min(24, parseFloat(req.body.billing_retry_delay_hours) || 1));
   if (req.body.reconciliation_tolerance_gb != null) patch.reconciliation_tolerance_gb = Math.max(0.001, Math.min(1, parseFloat(req.body.reconciliation_tolerance_gb) || 0.01));
-  // CRM & auto-create
+  // Auto-create
   if (req.body.auto_create_interval_min != null) patch.auto_create_interval_min = Math.max(1, Math.min(60, parseInt(req.body.auto_create_interval_min) || 10));
-  if (req.body.crm_check_interval_min != null)   patch.crm_check_interval_min   = Math.max(5, Math.min(120, parseInt(req.body.crm_check_interval_min) || 10));
-  if (req.body.crm_reminder_days != null)        patch.crm_reminder_days        = Math.max(1, Math.min(30, parseInt(req.body.crm_reminder_days) || 3));
   // Telegram daily summary
   if (req.body.telegram_bot_token != null)       patch.telegram_bot_token       = String(req.body.telegram_bot_token).trim();
   if (req.body.telegram_chat_id != null)         patch.telegram_chat_id         = String(req.body.telegram_chat_id).trim();
   if (req.body.telegram_summary_enabled != null) patch.telegram_summary_enabled = !!req.body.telegram_summary_enabled;
-  // AI sales bots keys / CRM connection. The '••••••••' mask shown by the GET
+  // AI-insights key (Telegram daily summary). The '••••••••' mask shown by the GET
   // endpoint is NOT a value — ignore it so a save of an untouched form can't
   // clobber the real key with the mask itself.
-  if (req.body.tavily_api_key != null && req.body.tavily_api_key !== '••••••••')           patch.tavily_api_key           = String(req.body.tavily_api_key).trim();
   if (req.body.anthropic_api_key != null && req.body.anthropic_api_key !== '••••••••')        patch.anthropic_api_key        = String(req.body.anthropic_api_key).trim();
-  if (req.body.crm_db_url != null)               patch.crm_db_url               = String(req.body.crm_db_url).trim();
   if (req.body.telegram_summary_time != null) {
     const t = String(req.body.telegram_summary_time);
     if (/^\d{2}:\d{2}$/.test(t)) patch.telegram_summary_time = t;

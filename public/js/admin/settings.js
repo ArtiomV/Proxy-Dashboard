@@ -213,13 +213,11 @@ function loadSettings(){
     var r4=document.getElementById('retRotationLogInput');if(r4)r4.value=s.retention_rotation_log||90;
     var r5=document.getElementById('retProxyChecksInput');if(r5)r5.value=s.retention_proxy_checks||30;
     var r6=document.getElementById('retModemMetaInput');if(r6)r6.value=s.retention_modem_meta||30;
-    // Session, billing, CRM
+    // Session, billing
     var stEl=document.getElementById('sessionTtlDaysInput');if(stEl)stEl.value=s.session_ttl_days||30;
     var brEl=document.getElementById('billingRetryHoursInput');if(brEl)brEl.value=s.billing_retry_delay_hours||1;
     var rtEl=document.getElementById('reconciliationToleranceInput');if(rtEl)rtEl.value=s.reconciliation_tolerance_gb||0.01;
     var acEl=document.getElementById('autoCreateIntervalInput');if(acEl)acEl.value=s.auto_create_interval_min||10;
-    var ccEl=document.getElementById('crmCheckIntervalInput');if(ccEl)ccEl.value=s.crm_check_interval_min||10;
-    var crEl=document.getElementById('crmReminderDaysInput');if(crEl)crEl.value=s.crm_reminder_days||3;
     // Telegram
     var tgT=document.getElementById('tgBotToken');if(tgT)tgT.value=s.telegram_bot_token||'';
     var tgC=document.getElementById('tgChatId');if(tgC)tgC.value=s.telegram_chat_id||'';
@@ -377,9 +375,7 @@ function saveSessionBillingSettings(){
     session_ttl_days:parseInt(document.getElementById('sessionTtlDaysInput').value)||30,
     billing_retry_delay_hours:parseFloat(document.getElementById('billingRetryHoursInput').value)||1,
     reconciliation_tolerance_gb:parseFloat(document.getElementById('reconciliationToleranceInput').value)||0.01,
-    auto_create_interval_min:parseInt(document.getElementById('autoCreateIntervalInput').value)||10,
-    crm_check_interval_min:parseInt(document.getElementById('crmCheckIntervalInput').value)||10,
-    crm_reminder_days:parseInt(document.getElementById('crmReminderDaysInput').value)||3
+    auto_create_interval_min:parseInt(document.getElementById('autoCreateIntervalInput').value)||10
   };
   var st=document.getElementById('sessionBillingSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';

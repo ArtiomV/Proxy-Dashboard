@@ -216,7 +216,7 @@ function init(db) {
     WHERE hour_start >= ${sinceExpr}${staleFilter}
   `);
 
-  // ── latency_stats / latency_day (tz + shared filter clause) ──────────
+  // ── latency_stats (tz + shared filter clause) ────────────────────────
   S.latencyDayVals = (tzStr, filter) => db.prepare(
     `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, total_ms, connect_ms FROM proxy_checks WHERE checked_at >= ? AND total_ms IS NOT NULL AND error IS NULL${filter} ORDER BY day, total_ms`);
   S.latencyErrByDay = (tzStr, filter) => db.prepare(
@@ -229,12 +229,6 @@ function init(db) {
     `SELECT COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND checked_at < ?${filter}`);
   S.latencyPriorErr = (filter) => db.prepare(
     `SELECT COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND checked_at < ? AND error IS NOT NULL${filter}`);
-  S.latencyDayRows = (filter) => db.prepare(
-    `SELECT nick, server_name, operator, client_name, checked_at,
-      connect_ms, total_ms, status_code, error
-      FROM proxy_checks
-      WHERE checked_at >= ? AND checked_at < ?${filter}
-      ORDER BY checked_at ASC`);
 
   // ── logs_domains_full ────────────────────────────────────────────────
   S.topHostsRows = (whereSql, limit) => db.prepare(`
@@ -295,7 +289,7 @@ function notInClause(column, values) {
   return { clause: ` AND ${column} NOT IN (${arr.map(() => '?').join(',')})`, params: arr };
 }
 
-// proxy_checks filter shared by latency_stats / latency_day (view-scoped
+// proxy_checks filter shared by latency_stats (view-scoped
 // + stale + unbound). Returns { clause, params } — appended after the
 // time bounds, so params must be appended after the time params.
 function proxyChecksFilter({ view, idKey, id, servers, staleNicks, unboundNicks, unboundFilter = true }) {
@@ -427,5 +421,4 @@ module.exports = {
   latencyPriorVals:  (filter, since, until, params) => S.latencyPriorVals(filter).all(since, until, ...params),
   latencyPriorTotal: (filter, since, until, params) => S.latencyPriorTotal(filter).get(since, until, ...params),
   latencyPriorErr:   (filter, since, until, params) => S.latencyPriorErr(filter).get(since, until, ...params),
-  latencyDayRows:    (filter, params) => S.latencyDayRows(filter).all(...params),
 };

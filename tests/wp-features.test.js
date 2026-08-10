@@ -33,8 +33,6 @@ function mkRotationDb() {
       signals_updated_at TEXT, updated_at TEXT, is_test_pool INTEGER DEFAULT 0, deleted INTEGER DEFAULT 0,
       UNIQUE(server_name, imei))`,
     'CREATE TABLE proxy_checks (id INTEGER PRIMARY KEY, server_name TEXT, nick TEXT, client_name TEXT, total_ms INTEGER, error TEXT, checked_at TEXT)',
-    'CREATE TABLE sla_checks (id INTEGER PRIMARY KEY, client_id TEXT, checked_at TEXT)',
-    'CREATE TABLE sla_violations (id INTEGER PRIMARY KEY, client_id TEXT, date TEXT, metric TEXT, expected REAL, actual REAL, credited_amount REAL)',
   ]) db.exec(t);
   return db;
 }
