@@ -87,62 +87,105 @@ function buildActItemsFromLedger(client, period, getLedger) {
   const [yyyy, mm] = period.split('-').map(Number);
   const periodLabel = `${MONTH_NAMES_ACC[mm - 1] || ''} ${yyyy}`;
 
-  // ---- Per-GB tariff: одна строка ----
+  // ---- Per-GB tariff ----
   if (gbCharges.length > 0) {
-    const totalCost = round2(gbCharges.reduce((s, e) => s + (e.cost     || 0), 0));
-    const totalGb   = round2(gbCharges.reduce((s, e) => s + (e.delta_gb || 0), 0));
-    // qty = реальные ГБ из ledger; price = ставка такая, чтобы qty × price = amount.
-    // Если по какой-то причине нет delta_gb — back-derive qty из cost.
-    const ppgFromLedger = gbCharges.find(e => e.price_per_unit > 0)?.price_per_unit || client.price || 23;
-    const qty   = totalGb > 0 ? totalGb : round4(totalCost / ppgFromLedger);
-    const price = qty > 0 ? round4(totalCost / qty) : round2(ppgFromLedger);
-    actItems.push({
-      name: `Услуги мобильных прокси (трафик за ${periodLabel})`,
-      quantity: qty,
-      unit: 'ГБ',
-      price,
-      amount: totalCost
-    });
+    // B1 (Р14/Р32): смена цены mid-month разбивает акт на непрерывные периоды
+    // одной цены. Данные — price_per_unit каждого списания в ledger (пишется
+    // DailyBilling); у legacy-строк без неё берём текущий client.price (точная
+    // ретро-разбивка возможна только по строкам с price_per_unit). Одна цена
+    // за весь месяц → одна строка, как раньше.
+    const effPrice = e => (e.price_per_unit > 0 ? e.price_per_unit : (client.price || 0));
+    const sorted = gbCharges.slice().sort((a, b) => (a.date || '').localeCompare(b.date || ''));
+    const segments = [];
+    for (const e of sorted) {
+      const p = effPrice(e);
+      const last = segments[segments.length - 1];
+      if (last && last.price === p) {
+        last.cost = round2(last.cost + (e.cost || 0));
+        last.gb = round2(last.gb + (e.delta_gb || 0));
+        last.end = e.date || last.end;
+      } else {
+        segments.push({ price: p, cost: round2(e.cost || 0), gb: round2(e.delta_gb || 0), start: e.date || '', end: e.date || '' });
+      }
+    }
+
+    if (segments.length === 1) {
+      const totalCost = round2(gbCharges.reduce((s, e) => s + (e.cost     || 0), 0));
+      const totalGb   = round2(gbCharges.reduce((s, e) => s + (e.delta_gb || 0), 0));
+      // qty = реальные ГБ из ledger; price = ставка такая, чтобы qty × price = amount.
+      // Если по какой-то причине нет delta_gb — back-derive qty из cost.
+      const ppgFromLedger = gbCharges.find(e => e.price_per_unit > 0)?.price_per_unit || client.price || 23;
+      const qty   = totalGb > 0 ? totalGb : round4(totalCost / ppgFromLedger);
+      const price = qty > 0 ? round4(totalCost / qty) : round2(ppgFromLedger);
+      actItems.push({
+        name: `Услуги мобильных прокси (трафик за ${periodLabel})`,
+        quantity: qty,
+        unit: 'ГБ',
+        price,
+        amount: totalCost
+      });
+    } else {
+      // Несколько цен: строка на каждый непрерывный период. amount = точная
+      // сумма списаний периода; price — реальная ставка из ledger.
+      const fmtD = d => (d ? `${d.slice(8, 10)}.${d.slice(5, 7)}` : '');
+      for (const seg of segments) {
+        const qty   = seg.gb > 0 ? seg.gb : round4(seg.cost / (seg.price || 1));
+        const price = seg.price > 0 ? round2(seg.price) : (qty > 0 ? round4(seg.cost / qty) : 0);
+        actItems.push({
+          name: `Услуги мобильных прокси (трафик ${fmtD(seg.start)}–${fmtD(seg.end)} по ${price} ₽/ГБ за ${periodLabel})`,
+          quantity: qty,
+          unit: 'ГБ',
+          price,
+          amount: seg.cost
+        });
+      }
+    }
   }
 
   // ---- Per-modem tariff ----
   if (modemCharges.length > 0) {
     const totalCost = round2(modemCharges.reduce((s, e) => s + (e.cost || 0), 0));
 
-    // Group the billed days by their modem count so the act reflects the real
-    // composition — e.g. "аренда 22 модемов × 30 дн" + "аренда 23 модемов × 1 дн"
-    // — instead of a single averaged line with a fractional quantity and a
-    // reverse-derived price. Each group's amount is the exact sum of its daily
-    // charges, so the lines add up to exactly what was billed.
-    const groups = new Map(); // modemCount -> { days, cost }
+    // Group the billed days by their modem count AND price (B1, Р14/Р32: смена
+    // цены mid-month — акт разбивается по ценам, не только по количеству) so
+    // the act reflects the real composition — e.g. "аренда 22 модемов × 30 дн"
+    // + "аренда 23 модемов × 1 дн" — instead of a single averaged line with a
+    // fractional quantity and a reverse-derived price. Each group's amount is
+    // the exact sum of its daily charges, so the lines add up to exactly what
+    // was billed.
+    const groups = new Map(); // `${modemCount}|${pricePerMonth}` -> { count, ppm, days, cost }
     let countsKnown = true;
     for (const e of modemCharges) {
+      const ppm = e.price_per_unit || client.price || 0;
       let mc = e.modem_count;
       if (mc == null) {
         // Legacy rows didn't store the count — back-derive it.
-        const ppm = e.price_per_unit || client.price || 0;
         const dim = e.days_in_month || 30;
         mc = (ppm > 0 && dim > 0) ? Math.round((e.cost || 0) * dim / ppm) : null;
       }
       if (mc == null || mc <= 0) { countsKnown = false; break; }
-      const g = groups.get(mc) || { days: 0, cost: 0 };
+      const key = `${mc}|${ppm}`;
+      const g = groups.get(key) || { count: mc, ppm, days: 0, cost: 0 };
       g.days += 1;
       g.cost = round2(g.cost + (e.cost || 0));
-      groups.set(mc, g);
+      groups.set(key, g);
     }
 
     if (countsKnown && groups.size >= 1 && groups.size <= 6) {
-      // One line per distinct count, longest period first.
-      const counts = [...groups.keys()].sort((a, b) => groups.get(b).days - groups.get(a).days || b - a);
-      for (const count of counts) {
-        const g = groups.get(count);
+      // One line per distinct count+price, longest period first. Цену в
+      // название добавляем только когда их за месяц было несколько — при
+      // одной цене формат строки не меняется.
+      const distinctPrices = new Set([...groups.values()].map(g => g.ppm)).size;
+      const sorted = [...groups.values()].sort((a, b) => b.days - a.days || b.count - a.count || b.ppm - a.ppm);
+      for (const g of sorted) {
         const amount = round2(g.cost);
         // Per-modem cost for this group's days (price × qty ≈ amount within
         // Tochka's tolerance; amount itself is exact so the lines sum true).
-        const price = count > 0 ? round2(amount / count) : amount;
+        const price = g.count > 0 ? round2(amount / g.count) : amount;
+        const priceNote = distinctPrices > 1 ? ` по ${round2(g.ppm)} ₽/мес` : '';
         actItems.push({
-          name: `Услуги мобильных прокси (аренда ${count} ${pluralRu(count, MODEM_FORMS)} × ${g.days} ${pluralRu(g.days, DAY_FORMS)} за ${periodLabel})`,
-          quantity: count,
+          name: `Услуги мобильных прокси (аренда ${g.count} ${pluralRu(g.count, MODEM_FORMS)} × ${g.days} ${pluralRu(g.days, DAY_FORMS)}${priceNote} за ${periodLabel})`,
+          quantity: g.count,
           unit: 'шт',
           price,
           amount

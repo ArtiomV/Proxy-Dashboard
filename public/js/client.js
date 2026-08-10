@@ -108,6 +108,49 @@ function dismissOnboarding(){
   if(b)b.style.display='none';
 }
 
+// --- Debt/block banner (B3, Р13) ---
+// Рендерится вверху вкладки «Трафик» и «История баланса»: факт блокировки,
+// отрицательный баланс до гашения портов, прогноз «за 3 дня» и истекающая
+// «дата до». Данные — billing.debtStatus / billing.expiresAt (dashboard_data,
+// billing_history); юрлица и allow_debt=1 получают null — баннера нет.
+function renderDebtBanner(debtStatus,expiresAt){
+  var banner=document.getElementById('debtBanner');
+  var html='';
+  var bg='';
+  if(debtStatus&&debtStatus.state==='blocked'){
+    bg='var(--red)';
+    html='🔒 <b>Доступ приостановлен за неоплату.</b> Баланс: '+formatNumber(debtStatus.balance)+' ₽. Порты погашены («дата до» истекла). После пополнения доступ восстановится автоматически (до ~30 мин). Для пополнения — свяжитесь с менеджером.';
+  }else if(debtStatus&&debtStatus.state==='debt'){
+    bg='var(--red)';
+    html='⚠️ <b>Отрицательный баланс: '+formatNumber(debtStatus.balance)+' ₽.</b> При следующем списании порты будут заблокированы. Пополните баланс — для этого свяжитесь с менеджером.';
+  }else if(debtStatus&&debtStatus.state==='warning'){
+    bg='var(--yellow,#b8860b)';
+    html='⏳ <b>Баланса хватит примерно на '+debtStatus.daysLeft+' дн.</b> ('+formatNumber(debtStatus.balance)+' ₽). При уходе в ноль порты будут заблокированы автоматически. Рекомендуем пополнить заранее.';
+  }
+  if(!html&&expiresAt){
+    var t=Date.parse(expiresAt);
+    if(!isNaN(t)){
+      var daysLeft=Math.ceil((t-Date.now())/86400000);
+      if(daysLeft>=0&&daysLeft<=3){
+        bg='var(--yellow,#b8860b)';
+        html='⏰ <b>Срок действия прокси истекает '+expiresAt+'</b> (осталось '+daysLeft+' дн.). Продлите аренду через менеджера.';
+      }
+    }
+  }
+  if(!html){
+    if(banner)banner.style.display='none';
+    return;
+  }
+  if(!banner){
+    banner=document.createElement('div');
+    banner.id='debtBanner';
+    var target=document.querySelector('#tab-traffic .container')||document.getElementById('tab-traffic');
+    if(target)target.insertBefore(banner,target.firstChild);
+  }
+  banner.style.cssText='display:block;margin:0 0 14px;padding:12px 16px;border-radius:8px;background:'+bg+';color:#fff;font-size:13px;line-height:1.5';
+  banner.innerHTML=html;
+}
+
 // --- Analytics ---
 var analyticsCharts={};
 var analyticsLoaded=false;
@@ -677,6 +720,8 @@ function loadBillingHistory(){
     var cs=curr==='RUB'?'\u20BD':(curr==='USD'?'$':(curr==='EUR'?'\u20AC':curr));
 
     // Update summary cards
+    // B3 (Р13): баннер блокировки/предупреждения на вкладке «История баланса»
+    renderDebtBanner(data.debtStatus,null);
     document.getElementById('billingBalanceVal').textContent=formatNumber(data.balance)+' '+cs;
     document.getElementById('billingBalanceVal').style.color=data.balance>=0?'var(--green)':'var(--red)';
     document.getElementById('billingMonthCharges').textContent=formatNumber(data.summary.monthCharges)+' '+cs;
@@ -988,6 +1033,7 @@ async function loadData(){
     var portsData=data.ports;
     modemLogins=data.modemLogins||{};
     billingData=data.billing||null;
+    renderDebtBanner(billingData&&billingData.debtStatus,billingData&&billingData.expiresAt);
 
     var ipTracking=data.ipTracking||{};
     var uptimeTracking=data.uptimeTracking||{};

@@ -4,8 +4,10 @@
 // Used by saveClients() sub-array sync + per-route docs endpoints.
 
 let S = {};
+let _db = null;
 
 function init(db) {
+  _db = db;
   S.docDeleteByClient = db.prepare('DELETE FROM client_documents WHERE client_id = ?');
   S.docDeleteById     = db.prepare('DELETE FROM client_documents WHERE id = ?');
   // Stage 13.2: INSERT OR IGNORE (id is PRIMARY KEY) makes saveClients()
@@ -60,6 +62,15 @@ function init(db) {
   // Direct status UPDATE — still the primary persistence path (bill-settle
   // and bill-status-sync persist immediately, without a saveClients round).
   S.billUpdateStatus = db.prepare('UPDATE bills SET status = ? WHERE id = ?');
+  // B2 (Р15): анти-дабл гейт для счетов — один счёт на (клиент, период).
+  // UNIQUE-индекс idx_bills_unique_period (миграция 056) — истина; эта
+  // проверка нужна, т.к. billInsert — UPSERT по PK и конфликт по уникальному
+  // индексу бросил бы исключение внутри saveClients().
+  S.billByClientPeriod = db.prepare('SELECT id FROM bills WHERE client_id = ? AND period = ?');
+
+  // B2 (Р15/Р23): сквозной счётчик «№ N/YYYY» для актов и счетов (единая серия).
+  S.docNumInit = db.prepare('INSERT OR IGNORE INTO doc_numbering (year, next_num) VALUES (?, 1)');
+  S.docNumBump = db.prepare('UPDATE doc_numbering SET next_num = next_num + 1 WHERE year = ? RETURNING next_num');
 }
 
 // ─── Client documents ─────────────────────────────────────────────────────
@@ -90,6 +101,11 @@ function updateBillAmount(id, amount) { return S.billUpdateAmount.run(amount || 
 function deleteBillsByClient(clientId) { return S.billDeleteByClient.run(clientId); }
 function deleteBill(id) { return S.billDeleteById.run(id); }
 function insertBill(b, clientId) {
+  // B2: анти-дабл гейт — второй счёт на тот же (клиент, период) молча
+  // отклоняем (UNIQUE-индекс 056 — backstop; явная проверка нужна, чтобы его
+  // исключение не уронило всю транзакцию saveClients).
+  const existing = S.billByClientPeriod.get(clientId, b.period || '');
+  if (existing && existing.id !== b.id) return { changes: 0 };
   return S.billInsert.run(
     b.id, clientId, b.tochkaBillId || '', b.period || '',
     b.billNumber || '', b.amount || 0, b.status || 'unsigned',
@@ -100,9 +116,28 @@ function insertBill(b, clientId) {
 function listBills(clientId) { return S.billsByClient.all(clientId); }
 function updateBillStatus(id, status) { return S.billUpdateStatus.run(status, id); }
 
+// B2 (Р15/Р23): атомарная выдача следующего сквозного номера «№ N/YYYY».
+// Единый счётчик для актов и счетов вместе (решение: одна серия на систему —
+// по ТЗ «сквозная по системе с годом»). Счётчик стартует с 1 для каждого
+// нового года (новая строка year); номера удалённых документов НЕ
+// переиспользуются (дыры — норма, фиксируются в audit_log при удалении).
+// INSERT OR IGNORE + UPDATE ... RETURNING в одной транзакции — гонка
+// крон+ручная генерация не может выдать один номер дважды.
+// `now` — injectable для тестов (переход через границу года).
+function nextDocNumber(now) {
+  const year = (now ? new Date(now) : new Date()).getFullYear();
+  let num;
+  _db.transaction(() => {
+    S.docNumInit.run(year);
+    num = S.docNumBump.get(year).next_num - 1;
+  })();
+  return { num, year, label: `${num}/${year}` };
+}
+
 module.exports = {
   init,
   deleteDocsByClient, deleteDoc, insertDoc, listDocs,
   deleteClosingByClient, deleteClosing, insertClosing, listClosing, updateClosingStatus, updateClosingItems,
   deleteBillsByClient, deleteBill, insertBill, listBills, updateBillStatus, updateBillAmount,
+  nextDocNumber,
 };

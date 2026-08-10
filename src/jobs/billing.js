@@ -29,17 +29,36 @@ function create(deps) {
     saveClients, saveDailyTraffic,
     withClientsLock,
     setLastBillingRunSummary,
+    debtBlock,   // B3 (Р13): пост-биллинговый автоблок должников-физиков (опционально)
   } = deps;
 
   let lastBillingRunSummary = null;
+  let lastRunResults = null;   // server data последнего реального прогона (для debt-block)
+  let lastRunExecuted = false;
 
   function runDailyBilling(retryClientIds) {
     // Mutex: serialize billing vs saveClients to avoid reading stale client snapshots.
     return withClientsLock(() => _runDailyBillingImpl(retryClientIds))
-      .then(r => { setLastBillingRunSummary(lastBillingRunSummary); return r; });
+      .then(async r => {
+        setLastBillingRunSummary(lastBillingRunSummary);
+        // B3 (Р13): автоблок — ПОСЛЕ освобождения clients-lock (внутри сетевые
+        // вызовы к ProxySmart, держать мьютекс минуты нельзя). Идемпотентно
+        // (флаг debtBlocked + проверка уже истёкшей «дата до»), поэтому
+        // запускается и на retry-прогонах.
+        if (debtBlock && lastRunExecuted && lastRunResults) {
+          try {
+            await debtBlock.runAfterDailyBilling(clients, lastRunResults);
+          } catch (e) {
+            logger.error('[DebtBlock] post-billing pass failed:', e.message);
+          }
+        }
+        return r;
+      });
   }
 
 async function _runDailyBillingImpl(retryClientIds) {
+  lastRunExecuted = false;
+  lastRunResults = null;
   const isRetry = Array.isArray(retryClientIds) && retryClientIds.length > 0;
   // Guard: prevent double billing for same date (atomic check)
   const yesterdayCheck = getMoscowYesterday();
@@ -75,6 +94,8 @@ async function _runDailyBillingImpl(retryClientIds) {
 
   // Refresh global portKey mapping for reconciliation/analytics
   refreshPortKeyMapping(results);
+  lastRunExecuted = true;
+  lastRunResults = results;   // B3: debt-block использует ports из этих же данных
 
   const yesterdayStr = getMoscowYesterday();
   const moscowYesterday = getMoscowNow();

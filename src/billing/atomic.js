@@ -129,6 +129,11 @@ function atomicCredit(clientId, amount, ledgerEntry, opts) {
     if (referrer) referrer.referral_balance = referralResult.newBalance;
   }
   _emitFinanceWrite();
+  // B3 (Р13): восстановление после оплаты — слушатель (debt-block) продлевает
+  // «дата до» портов, если клиент был погашен автоблоком. Эмитим после коммита;
+  // покрывает все пути зачисления разом (ручной платёж, webhook, sync, ручная
+  // привязка) — до ~30 мин задержки для банковского sync (цикл TochkaSync).
+  try { financeEvents.emit('client-credit', { clientId, amount, balanceBefore, balanceAfter }); } catch (_) { /* best-effort */ }
   return { balanceBefore, balanceAfter, ledgerDbId, referral: referralResult };
 }
 

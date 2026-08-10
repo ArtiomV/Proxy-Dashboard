@@ -35,6 +35,7 @@ function create(deps) {
     generateId,
     getPriceForProxyCount,
     ledgerDb,
+    documentsDb,
     getMoscowNow,
     getTochkaConfig,
     tochkaRequest,
@@ -187,7 +188,10 @@ function create(deps) {
 
         // Try Tochka API
         let tochkaDocumentId = null;
-        const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
+        // B2 (Р15/Р23): сквозной номер «№ N/YYYY» из атомарного счётчика
+        // (единая серия актов и счетов). In-memory проверка «акт уже есть»
+        // выше — fast-path; истина — UNIQUE-индекс + INSERT OR IGNORE.
+        const actNumber = documentsDb.nextDocNumber().label;
         if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
           try {
             const actData = tochkaDocs.buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber);
@@ -269,7 +273,8 @@ function create(deps) {
           continue;
         }
 
-        const billNumber = `СЧЁТ-${currentPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
+        // B2 (Р15/Р23): сквозной номер «№ N/YYYY» (единая серия актов и счетов).
+        const billNumber = documentsDb.nextDocNumber().label;
         const billDate = `${currentPeriod}-01`;
 
         let tochkaBillId = null;
