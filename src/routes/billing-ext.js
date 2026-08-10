@@ -161,7 +161,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const periodFirstDay = period + '-01';
     const newClients = getClients().filter(c => (c.createdAt || '').slice(0, 10) >= periodFirstDay
                                           && (c.createdAt || '').slice(0, 7) === period);
-    // Churned: had revenue in [60..30d ago], no revenue in last 30d, and (paused OR balance < 0)
+    // Churned: had revenue in [60..30d ago], no revenue in last 30d.
     const churnedClients = getClients().filter(c => {
       const had = (prevMrrByClient[c.id] || 0) > 0;
       const has = (mrrByClient[c.id] || 0) > 0;
@@ -444,6 +444,11 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
       metrics: { revenue_30d: rev30.total, window_days: 30, as_of: rev30.asOf },
       summary: {
         mrr: Math.round(totalMrr),
+        // A9: явные имена «факт vs ожидание». mrr — легаси-имя факта
+        // (совпадает с metrics.revenue_30d), forecast_eom — легаси-имя
+        // run-rate прогноза. Старые поля не трогаем (обратная совместимость).
+        revenue_30d_fact: Math.round(totalMrr),
+        run_rate_eom: forecastEOM,
         mrr_prev: Math.round(prevTotalMrr),
         mrr_growth_pct: mrrGrowthPct,
         arr,

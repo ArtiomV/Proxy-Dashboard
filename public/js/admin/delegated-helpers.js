@@ -206,7 +206,7 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = { aeDownload, aeBuildExport, aeOpen, aeRender, aeSetClient, aeSetProto, openModemDetailByNick, peekField, togglePwdView, resetIpByImei, finSetPeriod, finJumpToModem, finNavBank };
 }
 
-// Переключить поповер «Формула» в карточке MRR (клик вместо hover —
+// Переключить поповер «Формула» в карточке выручки (клик вместо hover —
 // hover на динамически перерисовываемых карточках ненадёжен).
 function toggleMrrFormula(el) {
   var wrap = el && el.parentElement;

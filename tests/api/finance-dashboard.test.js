@@ -35,6 +35,9 @@ describe('P2-2: finance routes contract', () => {
     expect(res.body).toHaveProperty('period');
     expect(res.body).toHaveProperty('summary');
     expect(typeof res.body.summary).toBe('object');
+    // A9: явные алиасы «факт vs ожидание» — обратимо-совместимые дубли legacy-полей.
+    expect(res.body.summary.revenue_30d_fact).toBe(res.body.summary.mrr);
+    expect(res.body.summary.run_rate_eom).toBe(res.body.summary.forecast_eom);
   });
 });
 
