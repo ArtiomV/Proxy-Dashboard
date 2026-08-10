@@ -72,6 +72,18 @@ function init(db) {
      WHERE client_name = ?
        AND substr(datetime(hour_start, '+3 hours'), 1, 10) = ?
   `);
+  // Shadow billing (Фаза 0): расширенная статистика по клиенту за МСК-дату —
+  // durable-байты, объём uncertain-строк и число почасовых записей. Тот же
+  // сдвиг +3 hours, что у hourlyByClientDate выше.
+  S.hourlyShadowByClientDate = db.prepare(`
+    SELECT COALESCE(SUM(bytes_in + bytes_out), 0)                          AS durable_bytes,
+           COALESCE(SUM(CASE WHEN uncertain <> 0
+                             THEN bytes_in + bytes_out ELSE 0 END), 0)     AS uncertain_bytes,
+           COUNT(*)                                                        AS hours_present
+      FROM traffic_hourly
+     WHERE client_name = ?
+       AND substr(datetime(hour_start, '+3 hours'), 1, 10) = ?
+  `);
   // Auto-smooth uncertain flag for rows that ended up tiny (<150 MB) — the
   // uncertainty flag was set during aggregation but the value is too small
   // to materially change billing, so we clear it after the fact.
@@ -128,6 +140,7 @@ module.exports = {
   dailyPurge90dStmt:           () => S.dailyPurge90d,
   dailyLast90dStmt:            () => S.dailyLast90d,
   hourlyByClientDateStmt:      () => S.hourlyByClientDate,
+  hourlyShadowByClientDateStmt: () => S.hourlyShadowByClientDate,
   hourlyAutoSmoothUncertainStmt: () => S.hourlyAutoSmoothUncertain,
   hourlyExistsForHourStmt:     () => S.hourlyExistsForHour,
   hourlyPurgeOlderThan,
