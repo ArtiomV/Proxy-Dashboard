@@ -15,7 +15,7 @@ const express = require('express');
 module.exports = function createSimulatorRouter(deps) {
   const {
     db, logger, authMiddleware, adminMiddleware,
-    simulator, simulatorDb,
+    simulator, simulatorDb, getSetting,
     fetchAllServersDataCached, SERVER_COUNTRIES,
     auditLog,
   } = deps;
@@ -25,6 +25,13 @@ module.exports = function createSimulatorRouter(deps) {
 //
 // Endpoints for the synthetic-load simulator. All admin-only.
 // The engine is a singleton; only one run can be active at a time.
+//
+// D11: «не запускать в проде без необходимости» — ручной запуск закрыт
+// настройкой simulator_enabled (по умолчанию выключен → 403). Лимиты
+// (duration/workers/SSE) живут в engine (src/simulator/engine.js).
+function _simulatorEnabled() {
+  return !!(getSetting && getSetting('simulator_enabled', false));
+}
 
 // Build {server,nick} → proxyUrl map from the live ProxySmart cache.
 // Reused by /run (to resolve target modems before handing them to engine.start).
@@ -229,6 +236,11 @@ r.delete('/api/admin/simulator/profiles/:id', authMiddleware, adminMiddleware, (
 // ─── Runs ───────────────────────────────────────────────────────────────────
 r.post('/api/admin/simulator/run', authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    // D11: флаг выключения — в проде симулятор не должен стартовать без явной надобности.
+    if (!_simulatorEnabled()) {
+      logger.warn('[Simulator/Run] refused: simulator_enabled=false (user=' + (req.user && req.user.login) + ')');
+      return res.status(403).json({ error: 'Симулятор выключен (настройка simulator_enabled). Включайте только для стенда — не для прода.' });
+    }
     let profile = req.body && req.body.profile;
     const profileId = req.body && req.body.profile_id;
     if (!profile && profileId) {
@@ -271,7 +283,7 @@ r.post('/api/admin/simulator/run/:id/abort', authMiddleware, adminMiddleware, (r
 });
 
 r.get('/api/admin/simulator/active', authMiddleware, adminMiddleware, (req, res) => {
-  res.json({ ok: true, active: simulator.getActive() });
+  res.json({ ok: true, active: simulator.getActive(), enabled: _simulatorEnabled() });
 });
 
 r.get('/api/admin/simulator/runs', authMiddleware, adminMiddleware, (req, res) => {
@@ -528,6 +540,11 @@ r.get('/api/admin/simulator/run/:id/export', authMiddleware, adminMiddleware, (r
 // SSE: live event stream for a specific run.
 r.get('/api/admin/simulator/run/:id/stream', authMiddleware, adminMiddleware, (req, res) => {
   const id = parseInt(req.params.id, 10);
+  // D11: лимит одновременных SSE-стримов (simulator_max_sse) — каждый стрим это
+  // открытый сокет + heartbeat-таймер на процесс.
+  if (simulator.sseFull && simulator.sseFull()) {
+    return res.status(429).json({ error: 'Слишком много SSE-подключений к симулятору (лимит simulator_max_sse)' });
+  }
   res.set({
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
@@ -541,6 +558,11 @@ r.get('/api/admin/simulator/run/:id/stream', authMiddleware, adminMiddleware, (r
   // Heartbeat to detect dead clients (and prevent NGINX idle close).
   const hb = setInterval(() => { try { res.write(': hb\n\n'); } catch (_) { /* best-effort: error intentionally swallowed */ } }, 25000);
   const unsub = simulator.subscribe(id, send);
+  if (!unsub) {   // гонка за последний слот между pre-check и subscribe
+    clearInterval(hb);
+    try { res.end(); } catch (_) { /* best-effort */ }
+    return;
+  }
   req.on('close', () => { clearInterval(hb); unsub(); });
 });
 

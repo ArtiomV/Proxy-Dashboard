@@ -20,6 +20,12 @@
  *                     computes summary, writes simulator_runs.summary_json
  *
  * Only one run can be active at a time (singleton). enforced.
+ *
+ * D11 (2026-08): лимиты ресурсов через appSettings (см. SETTINGS_DEFAULTS):
+ *   simulator_max_duration_min — потолок duration_ms прогона (кламп при start);
+ *   simulator_max_workers      — потолок concurrency-воркеров (кламп в tick);
+ *   simulator_max_sse          — лимит одновременных SSE-подписчиков.
+ * Флаг simulator_enabled проверяется в API-слое (routes/simulator.js → 403).
  */
 
 const { executeRequest } = require('./worker');
@@ -71,12 +77,24 @@ function getActive() {
   };
 }
 
+// D11 helpers: читаем лимиты из настроек (getSetting инжектится в init).
+function _maxDurationMs() { return (Number(getSetting && getSetting('simulator_max_duration_min', 30)) || 30) * 60000; }
+function _maxWorkers()    { return Math.max(1, Number(getSetting && getSetting('simulator_max_workers', 50)) || 50); }
+function _maxSse()        { return Math.max(1, Number(getSetting && getSetting('simulator_max_sse', 10)) || 10); }
+
 // Caller (the /run API endpoint) is responsible for resolving proxy URLs
 // from (server, nick) → full http://user:pass@host:port — passes them in
 // via opts.resolvedModems. Engine just trusts the list.
 function start(profile, opts) {
   if (activeRun) throw new Error('Симулятор уже запущен (run #' + activeRun.id + ')');
   _validateProfile(profile);
+  // D11: таймаут прогона — кламп длительности, чтобы «забытый» run не гонял
+  // нагрузку часами. Копия, чтобы не мутировать объект вызывающего.
+  const maxDur = _maxDurationMs();
+  if (profile.duration_ms > maxDur) {
+    logger.warn(`[Simulator] duration_ms ${profile.duration_ms} clamped to ${maxDur} (simulator_max_duration_min)`);
+    profile = { ...profile, duration_ms: maxDur };
+  }
 
   const resolvedModems = (opts && opts.resolvedModems) || [];
   if (resolvedModems.length === 0) {
@@ -150,8 +168,16 @@ function abort(runId) {
   stop('aborted');
 }
 
+// D11: true, когда достигнут лимит одновременных SSE-стримов (simulator_max_sse).
+function sseFull() { return listeners.length >= _maxSse(); }
+
 // SSE subscription. `send` is a function that takes an event object.
+// D11: возвращает null, если лимит стримов исчерпан (API-слой отвечает 429).
 function subscribe(runId, send) {
+  if (sseFull()) {
+    logger.warn('[Simulator] SSE subscribe refused — simulator_max_sse reached');
+    return null;
+  }
   const listener = { runId, send };
   listeners.push(listener);
   // Immediately push current snapshot
@@ -183,7 +209,8 @@ function _validateProfile(p) {
 function _tick() {
   if (!activeRun) return;
   const elapsedSec = (Date.now() - activeRun.startedAt) / 1000;
-  const target = _computeTargetWorkers(activeRun.profile, elapsedSec);
+  // D11: потолок воркеров поверх профиля — профиль может просить сотни.
+  const target = Math.min(_computeTargetWorkers(activeRun.profile, elapsedSec), _maxWorkers());
   activeRun.targetWorkers = target;
   // Spawn missing workers
   while (activeRun.workers.size < target) {
@@ -329,4 +356,4 @@ function _broadcast(event) {
   }
 }
 
-module.exports = { init, start, stop, abort, getActive, subscribe };
+module.exports = { init, start, stop, abort, getActive, subscribe, sseFull };

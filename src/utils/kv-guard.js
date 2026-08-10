@@ -45,6 +45,17 @@ const KV_CRITICAL_SHAPES = {
     try { obj = JSON.parse(raw); } catch (_) { return { invalid: true, keys: 0 }; }
     return { keys: obj && typeof obj === 'object' ? Object.keys(obj).length : 0 };
   },
+  // D1: tochka_config переехал из tochka_config.json в kv_store (см. server.js
+  // saveTochkaConfig). Формат: JSON-объект, каждое непустое значение —
+  // 'enc1:' + AES-256-GCM (per-field, как SENSITIVE_SETTINGS). Shape считает
+  // только число полей: затирание конфига пустым/усечённым объектом ловится
+  // как регресс, а легальная очистка отдельного поля через админку — нет.
+  tochka_config: (raw) => {
+    let obj;
+    try { obj = JSON.parse(raw); } catch (_) { return { invalid: true, keys: 0 }; }
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return { invalid: true, keys: 0 };
+    return { keys: Object.keys(obj).length };
+  },
 };
 
 // Compare two shape descriptors. Returns array of regressions

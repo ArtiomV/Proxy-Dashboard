@@ -42,6 +42,17 @@ function create(deps) {
       const sizeMb = Math.round(fs.statSync(dest).size / 1024 / 1024 * 10) / 10;
       logger.info(`[DbBackup] ${dest} (${sizeMb} MB), pruned ${pruned} old backups`);
       logActivity('system', 'info', 'db_backup_complete', null, `Backed up ${sizeMb} MB to ${dest}`, { sizeMb, pruned });
+      // D2: monthly-ротация — снапшот, сделанный 1-го числа, копируем в
+      // monthly/ и храним 12 штук (год истории для восстановления «на месяц назад»).
+      try {
+        const m = rotateMonthlyBackup(fs, path, backupDir, dest, ts);
+        if (m) logger.info(`[DbBackup] monthly snapshot ${m.dest} (pruned ${m.pruned})`);
+      } catch (e) {
+        logger.warn('[DbBackup] monthly rotation failed: ' + e.message);
+      }
+      // D2: offsite-выгрузка в облако (rclone, scripts/backup-offsite.sh).
+      // Best-effort: сбой не роняет локальный бэкап, но и не молчит (C7).
+      await runOffsiteUpload(logger, logActivity, backupDir);
     } catch (e) {
       logger.error('[DbBackup] FAILED: ' + (e.stack || e.message));
       logActivity('system', 'critical', 'db_backup_failed', null, 'DB backup failed', { error: e.message });
@@ -79,4 +90,48 @@ function create(deps) {
   return { runDbBackup, runHistoryPrune, HISTORY_RETENTION_DAYS };
 }
 
-module.exports = { create };
+// D2: monthly-ротация. Если бэкап сделан 1-го числа (dateStr 'YYYY-MM-01'),
+// копируем его в <backupDir>/monthly/ и храним последние `keep` (12) штук.
+// Чистая функция поверх fs/path — покрыта unit-тестом.
+function rotateMonthlyBackup(fs, path, backupDir, dest, dateStr, keep = 12) {
+  if (!/^\d{4}-\d{2}-01$/.test(dateStr)) return null;
+  const mDir = path.join(backupDir, 'monthly');
+  fs.mkdirSync(mDir, { recursive: true });
+  const mDest = path.join(mDir, path.basename(dest));
+  fs.copyFileSync(dest, mDest);
+  const files = fs.readdirSync(mDir).filter(f => /^dashboard-\d{4}-\d{2}-\d{2}\.db$/.test(f)).sort();
+  let pruned = 0;
+  while (files.length > keep) {
+    const f = files.shift();
+    for (const ext of ['', '-shm', '-wal']) {
+      try { fs.unlinkSync(path.join(mDir, f + ext)); } catch (_) { /* sidecar may not exist */ }
+    }
+    pruned++;
+  }
+  return { dest: mDest, pruned };
+}
+
+// D2: offsite-выгрузка daily+monthly бэкапов в облако через rclone
+// (scripts/backup-offsite.sh, remote из $RCLONE_REMOTE). Best-effort: сбой —
+// warn в лог + system_log (C7), ночной бэкап не роняем. Если rclone/remote не
+// настроены, скрипт падает с понятной ошибкой — сюда она приходит как warn.
+function runOffsiteUpload(logger, logActivity, backupDir) {
+  const { execFile } = require('child_process');
+  const path = require('path');
+  const script = path.join(__dirname, '..', '..', 'scripts', 'backup-offsite.sh');
+  return new Promise((resolve) => {
+    execFile('bash', [script, backupDir], { timeout: 10 * 60 * 1000 }, (err, stdout, stderr) => {
+      if (err) {
+        const msg = String(stderr || err.message).trim().slice(0, 300);
+        logger.warn('[DbBackup] offsite upload failed: ' + msg);
+        try { logActivity('system', 'warn', 'backup_offsite_failed', null, 'Offsite backup upload failed', { error: msg }); } catch (_) { /* best-effort */ }
+        return resolve(false);
+      }
+      const out = String(stdout).trim();
+      if (out) logger.info('[DbBackup] offsite upload: ' + out.slice(0, 200));
+      resolve(true);
+    });
+  });
+}
+
+module.exports = { create, rotateMonthlyBackup, runOffsiteUpload };

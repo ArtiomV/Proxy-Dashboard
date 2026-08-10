@@ -19,6 +19,10 @@
 let http, https, logger, apiServers, safeWriteFile;
 let SERVER_CACHE_FILE;
 let updateKnownModems, injectOfflineModems, injectRotationData;
+// D7: колбэк shape-валидации ответов (src/api/proxysmart-contract.js) —
+// вызывается при несоответствии контракту; в server.js подключён TG-алерт.
+let onContractMismatch = null;
+const _contract = require('./proxysmart-contract');
 
 // ---------------------------------------------------------------------------
 // Module-level cache state
@@ -47,6 +51,7 @@ function init(deps) {
   updateKnownModems   = deps.updateKnownModems;
   injectOfflineModems = deps.injectOfflineModems;
   injectRotationData  = deps.injectRotationData;
+  onContractMismatch  = deps.onContractMismatch || null;   // D7
 
   // Load persisted server cache from disk
   const fs = require('fs');
@@ -333,6 +338,16 @@ async function fetchServerData(server) {
     fetchApi(server, '/apix/list_ports_json')
   ]);
   const result = { bw, status, ports, serverName: server.name };
+  // D7: лёгкая shape-валидация ответов по контракту (docs/PROXYSMART-CONTRACT.md).
+  // Несоответствие → warn + алерт (cooldown сутки, в вызывающей стороне);
+  // опрос не прерываем — парсинг и так устойчив к пропущенным полям.
+  try {
+    const violations = _contract.validateFetchResult(result);
+    if (violations.length) {
+      logger.warn(`[API] ${server.name}: ответ не по контракту (${violations.length}): ${violations.slice(0, 3).join('; ')}`);
+      if (onContractMismatch) onContractMismatch(server.name, violations);
+    }
+  } catch (e) { logger.warn('[API] contract validation failed: ' + e.message); }
   // Inject rotation data from cache
   injectRotationData(result);
   // Cache successful response

@@ -1,0 +1,74 @@
+// D7 (2026-08): shape-валидация ответов /apix/* по контракту
+// (docs/PROXYSMART-CONTRACT.md). Чистые валидаторы src/api/proxysmart-contract.js
+// + правило алерта (cooldown сутки, «один раз в сутки на бокс»).
+
+import { describe, it, expect } from 'vitest';
+import { createRequire } from 'module';
+
+const require = createRequire(import.meta.url);
+const contract = require('../src/api/proxysmart-contract.js');
+const alerts = require('../src/telegram/alerts.js');
+
+// Формы взяты из реального server_cache.json (снимок прод-ответов).
+const GOOD_BW = {
+  portA: {
+    port: 'portA', portName: 'Client1',
+    bandwidth_bytes_day_in: '21.1 GB', bandwidth_bytes_day_out: '3.4 GB',
+    bandwidth_bytes_month_in: '267.8 GB', bandwidth_bytes_month_out: '39.5 GB',
+  },
+};
+const GOOD_STATUS = [{
+  modem_details: { IMEI: '867389050342533', NICK: 'RO_1', MODEL: 'MF289' },
+  net_details: { IS_ONLINE: 'yes', EXT_IP: '10.0.0.1', ICCID: '8970', SimStatus: 'OK' },
+}];
+const GOOD_PORTS = {
+  '867389050342533': [{ HTTP_PORT: '8031', LOGIN: 'S54KDSog', PASSWORD: 'x', PROXY_VALID_BEFORE: '' }],
+};
+
+describe('D7: proxysmart-contract — валидные ответы проходят', () => {
+  it('реальный снимок прод-ответов → нарушений нет', () => {
+    expect(contract.validateBandwidthReportAll(GOOD_BW)).toEqual([]);
+    expect(contract.validateShowStatusJson(GOOD_STATUS)).toEqual([]);
+    expect(contract.validateListPortsJson(GOOD_PORTS)).toEqual([]);
+    expect(contract.validateFetchResult({ bw: GOOD_BW, status: GOOD_STATUS, ports: GOOD_PORTS })).toEqual([]);
+  });
+
+  it('пустые коллекции — легальное состояние, не нарушение', () => {
+    expect(contract.validateFetchResult({ bw: {}, status: [], ports: {} })).toEqual([]);
+  });
+});
+
+describe('D7: proxysmart-contract — несоответствия ловятся', () => {
+  it('верхнеуровневый тип изменился (HTML-заглушка распарсилась в строку)', () => {
+    expect(contract.validateFetchResult({ bw: 'oops', status: GOOD_STATUS, ports: GOOD_PORTS })[0])
+      .toMatch(/bandwidth_report_all/);
+    expect(contract.validateShowStatusJson({ raw: '<html>auth wall</html>' })[0])
+      .toMatch(/show_status_json/);
+  });
+
+  it('поля сменили тип/пропали — каждое фиксируется', () => {
+    const v = contract.validateBandwidthReportAll({ portA: { port: 'portA', bandwidth_bytes_day_in: 21.1 } });
+    expect(v.some(s => s.includes('portName'))).toBe(true);
+    expect(v.some(s => s.includes('bandwidth_bytes_day_in'))).toBe(true);
+
+    const vs = contract.validateShowStatusJson([{ modem_details: { NICK: 'X' } }]);
+    expect(vs.some(s => s.includes('IMEI'))).toBe(true);
+    expect(vs.some(s => s.includes('net_details'))).toBe(true);
+
+    const vp = contract.validateListPortsJson({ imei1: [{ LOGIN: 'a' }] });
+    expect(vp.some(s => s.includes('HTTP_PORT'))).toBe(true);
+  });
+});
+
+describe('D7: правило алерта «бокс отвечает не по контракту»', () => {
+  it('proxysmart_contract_mismatch: cooldown сутки, dedupe по боксу', () => {
+    const rule = alerts.RULES.proxysmart_contract_mismatch;
+    expect(rule).toBeTruthy();
+    expect(rule.cooldownSec).toBe(86400);
+    expect(rule.dedupeKey({ server: 'S2' })).toBe('pscontract_S2');
+    expect(rule.dedupeKey({ server: 'S2' })).not.toBe(rule.dedupeKey({ server: 'S4' }));
+    const text = rule.render({ server: 'S2', count: 2, sample: 'bw[portA]: нет portName' });
+    expect(text).toContain('S2');
+    expect(text).toContain('не по контракту');
+  });
+});
