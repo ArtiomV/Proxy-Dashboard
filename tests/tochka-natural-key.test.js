@@ -15,7 +15,11 @@
 // which channel saw it first. This test pins the contract.
 
 import { describe, it, expect, beforeAll } from 'vitest';
+import { createRequire } from 'module';
 import { bootApp } from './_helpers/app.js';
+
+const cjsRequire = createRequire(import.meta.url);
+const { resolveNaturalKey } = cjsRequire('../src/billing/payer-match.js');
 
 let db;
 
@@ -93,5 +97,48 @@ describe('bank_payments natural_key idempotency (Stage 18.6)', () => {
     });
     // First 100 chars are identical → keys match.
     expect(k1).toBe(k2);
+  });
+});
+
+describe('A3: resolveNaturalKey — sequence anti-collision', () => {
+  const base = '7707083893|100000|2026-05-22|Оплата по счёту';
+  const row = (payment_id, natural_key, tpid = '') =>
+    ({ id: 'r-' + (payment_id || 'x'), payment_id, tochka_payment_id: tpid, natural_key, matched: 1, dismissed: 0 });
+
+  it('no existing rows → base key, not a duplicate', () => {
+    const r = resolveNaturalKey([], base, 'pay-1');
+    expect(r).toEqual({ key: base, isDuplicate: false, existing: null });
+  });
+
+  it('same paymentId → duplicate (re-delivery must not re-credit)', () => {
+    const existing = [row('pay-1', base)];
+    const r = resolveNaturalKey(existing, base, 'pay-1');
+    expect(r.isDuplicate).toBe(true);
+    expect(r.existing).toBe(existing[0]);
+  });
+
+  it('matches by tochka_payment_id too (sync channel id)', () => {
+    const existing = [row('', base, 'cbs-tb;123;1')];
+    const r = resolveNaturalKey(existing, base, 'cbs-tb;123;1');
+    expect(r.isDuplicate).toBe(true);
+  });
+
+  it('different paymentId → sequence suffix #2, then #3', () => {
+    const r1 = resolveNaturalKey([row('pay-1', base)], base, 'pay-2');
+    expect(r1).toEqual({ key: base + '#2', isDuplicate: false, existing: null });
+    const r2 = resolveNaturalKey([row('pay-1', base), row('pay-2', base + '#2')], base, 'pay-3');
+    expect(r2.key).toBe(base + '#3');
+  });
+
+  it('empty paymentId with existing rows → conservative duplicate (re-pull never re-credits)', () => {
+    const existing = [row('', base)];
+    const r = resolveNaturalKey(existing, base, '');
+    expect(r.isDuplicate).toBe(true);
+    expect(r.existing).toBe(existing[0]);
+  });
+
+  it('empty paymentId with NO existing rows → base key (first sighting)', () => {
+    const r = resolveNaturalKey([], base, '');
+    expect(r).toEqual({ key: base, isDuplicate: false, existing: null });
   });
 });

@@ -5,13 +5,25 @@
 // init/poll, natural-key idempotency, reconcile of uncredited webhook rows,
 // auto-credit + bill settlement + payment alerts. Deps via factory.
 //
+const { referralCommission } = require('../billing/referral');   // A1/Р6+Р22: комиссия 10% и в sync-пути
+
 function create(deps) {
   const {
-    tochkaConfig, logger, tochkaRequest, buildNaturalKey, dbStmts,
+    tochkaConfig, logger, tochkaRequest, buildNaturalKey, resolveNaturalKey, dbStmts,
     findClientByPayer, clientByInn, clients, atomicCredit, settleBillsOnPayment,
     documentsDb, logActivity, saveClients, alerts, insertBankPaymentToDb,
     _resetTochkaFailStreak,
   } = deps;
+
+  // Р22: реферальная комиссия начисляется с любого канала зачисления.
+  // Sync-путь раньше вызывал atomicCredit без referralOpts — реферер терял
+  // комиссию с банковских платежей, пришедших только через выписку.
+  function referralOptsFor(client, amount) {
+    if (!client.referred_by) return undefined;
+    const referrer = (clients || []).find(c => c.id === client.referred_by);
+    if (!referrer) return undefined;
+    return { referral: { referrerId: referrer.id, delta: referralCommission(amount) } };
+  }
 
 async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
   if (!tochkaConfig.jwt || !tochkaConfig.accountId) {
@@ -107,8 +119,18 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
     // This single gate replaces the brittle pid/tpid lookups above. They're
     // kept as a fast-path optimisation: if we recognise the exact id, skip
     // immediately without computing the natural key.
-    const naturalKey = buildNaturalKey(payerInn, amount, dateStr, purpose);
-    const existingRow = dbStmts.findBankPaymentRowByNaturalKey.get(naturalKey);
+    //
+    // A3: два РАЗНЫХ платежа могут коллидировать по natural_key (тот же
+    // плательщик/сумма/дата/назначение). resolveNaturalKey различает
+    // повторную доставку (тот же transactionId → дубль, reconcile/skip) и
+    // новый платёж (другой transactionId → суффикс '#N', зачисляем оба).
+    // Пустой transactionId + существующая строка → консервативно дубль
+    // (репул выписки с пустым id не должен зачислить повторно).
+    const baseKey = buildNaturalKey(payerInn, amount, dateStr, purpose);
+    const nkRows = dbStmts.findBankPaymentsByNaturalKeyBase.all(baseKey, baseKey.length + 1, baseKey + '#');
+    const nkResolved = resolveNaturalKey(nkRows, baseKey, paymentId);
+    const naturalKey = nkResolved.key;
+    const existingRow = nkResolved.isDuplicate ? nkResolved.existing : null;
     if (existingRow) {
       // The transaction is already recorded. Normally we skip (a webhook or an
       // earlier sync already handled it). BUT a row can sit UNCREDITED — the
@@ -134,7 +156,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
                 timestamp: new Date().toISOString(),
                 note: ('Авто-зачисление (синк, ' + _byLabel + '): ' + (purpose || '')).slice(0, 300),
                 source: 'tochka_sync', tochkaPaymentId: paymentId
-              });
+              }, referralOptsFor(client, amount));
               dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 1, existingRow.id);
               try { settleBillsOnPayment(client, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
               matched++; reconciled = true;
@@ -188,7 +210,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
             note: ('Синхронизация из Точки (' + _byLabel + '): ' + (purpose || '')).slice(0, 200),
             source: 'tochka_sync',
             tochkaPaymentId: paymentId
-          });
+          }, referralOptsFor(client, amount));
           try { settleBillsOnPayment(client, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
           matched++;
           // Stage 18.13: «новый платёж» — любой платёж от sync.

@@ -71,4 +71,40 @@ function buildNaturalKey(payerInn, amount, date, purpose) {
   return (payerInn || '') + '|' + amt + '|' + String(date || '').slice(0, 10) + '|' + String(purpose || '').slice(0, 100);
 }
 
-module.exports = { normCompanyName, findClientByPayer, buildNaturalKey };
+// A3 — anti-collision on the natural key. The base key deliberately stays
+// date-only (no time component): the webhook and the statement sync must
+// produce a byte-identical key for the SAME payment, and the sync often has
+// only a date where the webhook has a timestamp (or vice versa) — a time
+// component would split the key and re-open the double-credit hole.
+// Instead, collisions are resolved by sequence suffix:
+//   existingRows — bank_payments rows whose natural_key is the base key or
+//     base + '#N' (queried by prefix, see findBankPaymentsByNaturalKeyBase);
+//   same paymentId (payment_id or tochka_payment_id) → re-delivery of the
+//     SAME transaction: { isDuplicate: true, existing } — caller skips or
+//     reconciles, never credits again;
+//   different non-empty paymentId → a genuinely NEW payment that happens to
+//     share payer/amount/date/purpose: { key: base + '#N' } — recorded and
+//     credited normally instead of being silently swallowed as a "dup";
+//   empty paymentId with existing rows → can't distinguish re-delivery from
+//     a real second payment, so we conservatively treat it as a duplicate
+//     (statement re-pulls with empty transactionId must never re-credit).
+function resolveNaturalKey(existingRows, baseKey, paymentId) {
+  if (!existingRows || existingRows.length === 0) {
+    return { key: baseKey, isDuplicate: false, existing: null };
+  }
+  if (paymentId) {
+    const same = existingRows.find(r =>
+      (r.payment_id && r.payment_id === paymentId) ||
+      (r.tochka_payment_id && r.tochka_payment_id === paymentId));
+    if (same) return { key: same.natural_key, isDuplicate: true, existing: same };
+    let maxSeq = 1;
+    for (const r of existingRows) {
+      const m = /#(\d+)$/.exec(r.natural_key || '');
+      if (m) maxSeq = Math.max(maxSeq, parseInt(m[1], 10));
+    }
+    return { key: baseKey + '#' + (maxSeq + 1), isDuplicate: false, existing: null };
+  }
+  return { key: baseKey, isDuplicate: true, existing: existingRows[0] };
+}
+
+module.exports = { normCompanyName, findClientByPayer, buildNaturalKey, resolveNaturalKey };

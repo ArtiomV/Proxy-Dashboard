@@ -8,21 +8,24 @@
 //   POST   /api/admin/clients/:id/payment
 //     • balance in DB updated
 //     • row appears in billing_ledger
-//     • row appears in payments table
-//     • referrer referral_balance bumped by 15% (DB + in-memory)
+//     • payments table NOT written (Stage 13.3: read-only legacy)
+//     • referrer referral_balance bumped by 10% (DB + in-memory)
 //   POST   /api/admin/clients/:id/charge
 //     • balance debited
 //     • row in billing_ledger with type='correction'
-//   DELETE /api/admin/clients/:id/payment/:index?amount=…
-//     • payments row removed
+//   DELETE /api/admin/clients/:id/payment/by-ledger/:ledgerDbId
 //     • billing_ledger reversal entry written
-//     • referrer commission reversed (DB + in-memory)
+//     • referrer commission reversed (DB + in-memory), idempotent
 //   POST   /api/tochka/webhook (auto-credit + referral)
 //     • bank_payments row inserted
 //     • idempotent on repeat paymentId (UNIQUE)
 //     • client balance credited; referral commission applied
 //   GET    /api/admin/clients/:id/payments
-//     • returns from in-memory client.payments (current source)
+//     • returns ledger-derived list (billing_ledger, Stage 13.3)
+//
+// C5: DELETE /api/admin/clients/:id/payment/:index и его characterization-
+// тест выпилены — роут индексировал in-memory client.payments[] (замороженный
+// boot-снимок, нефункционален для свежих платежей). Сторно — только by-ledger.
 
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
@@ -117,7 +120,7 @@ describe('Stage 13.0: characterization — POST /api/admin/clients/:id/payment',
     expect(paymentsAfter.length).toBe(paymentsBefore);
   });
 
-  it('credits referrer with 15% commission (DB + in-memory)', async () => {
+  it('credits referrer with 10% commission (DB + in-memory)', async () => {
     const { referrer, referred } = await createReferralPair();
     expect(dbReferralBalance(referrer.id)).toBe(0);
 
@@ -127,12 +130,12 @@ describe('Stage 13.0: characterization — POST /api/admin/clients/:id/payment',
       .send({ amount: 1000, date: '2026-05-23', note: 'refpay' });
     expect(res.status).toBe(200);
 
-    // 15% of 1000 = 150. DB updated by _clientUpdateReferralBalance.run.
-    expect(dbReferralBalance(referrer.id)).toBe(150);
+    // A1/Р6: 10% of 1000 = 100 (was 15% before the refactor).
+    expect(dbReferralBalance(referrer.id)).toBe(100);
 
     // In-memory map also updated (same code path: clientById.get(referrer))
     const { state } = require('../../src/state/index.js');
-    expect(state.clientById.get(referrer.id).referral_balance).toBe(150);
+    expect(state.clientById.get(referrer.id).referral_balance).toBe(100);
   });
 });
 
@@ -157,41 +160,6 @@ describe('Stage 13.0: characterization — POST /api/admin/clients/:id/charge', 
     const last = ledger[ledger.length - 1];
     expect(last.type).toBe('correction');
     expect(last.amount).toBe(75);
-  });
-});
-
-describe('Stage 13.0: characterization — DELETE /api/admin/clients/:id/payment/:index', () => {
-  it('removes the payment from in-memory array + writes a payment_reversal ledger entry + reverses referral commission', async () => {
-    const { referrer, referred } = await createReferralPair();
-
-    // Make a payment that bumps referral by 30 (15% of 200).
-    await request(app).post(`/api/admin/clients/${referred.id}/payment`)
-      .set('X-Auth-Token', adminToken)
-      .send({ amount: 200, date: '2026-05-23' });
-    expect(dbReferralBalance(referrer.id)).toBe(30);
-    expect(dbBalance(referred.id)).toBe(200);
-
-    // Delete the payment we just made. Requires the amount confirmation.
-    const delRes = await request(app)
-      .delete(`/api/admin/clients/${referred.id}/payment/0?amount=200`)
-      .set('X-Auth-Token', adminToken);
-    expect(delRes.status).toBe(200);
-
-    // Balance is rolled back via atomicDebit + 'payment_reversal' ledger entry.
-    expect(dbBalance(referred.id)).toBe(0);
-    const ledger = ledgerEntries(referred.id);
-    const reversal = ledger.find(e => e.type === 'payment_reversal');
-    expect(reversal).toBeTruthy();
-    expect(reversal.amount).toBe(200);
-
-    // Referral commission reversed (DB + in-memory).
-    expect(dbReferralBalance(referrer.id)).toBe(0);
-    const { state } = require('../../src/state/index.js');
-    expect(state.clientById.get(referrer.id).referral_balance).toBe(0);
-
-    // Stage 13.3: payments table no longer written from saveClients; the
-    // payment reversal is recorded in billing_ledger only.
-    expect(paymentsRows(referred.id).length).toBe(0);
   });
 });
 
@@ -227,6 +195,21 @@ describe('Stage 13.3: GET /api/admin/clients/:id/payments reads from billing_led
   });
 });
 
+describe('C5: DELETE /api/admin/clients/:id/payment/:index — роут выпилен', () => {
+  it('returns 404 (index-based deletion is gone, use by-ledger)', async () => {
+    const c = await createClient();
+    await request(app).post(`/api/admin/clients/${c.id}/payment`).set('X-Auth-Token', adminToken)
+      .send({ amount: 100, date: '2026-05-23' });
+    const res = await request(app)
+      .delete(`/api/admin/clients/${c.id}/payment/0?amount=100`)
+      .set('X-Auth-Token', adminToken);
+    expect(res.status).toBe(404);
+    // Nothing was reversed.
+    expect(dbBalance(c.id)).toBe(100);
+    expect(ledgerEntries(c.id).filter(e => e.type === 'payment_reversal').length).toBe(0);
+  });
+});
+
 describe('P0-2: DELETE /api/admin/clients/:id/payment/by-ledger/:ledgerDbId', () => {
   it('reverses balance + referral by stable ledger id, hides the payment, and is idempotent', async () => {
     const { referrer, referred } = await createReferralPair();
@@ -234,7 +217,7 @@ describe('P0-2: DELETE /api/admin/clients/:id/payment/by-ledger/:ledgerDbId', ()
       .set('X-Auth-Token', adminToken)
       .send({ amount: 200, date: '2026-05-23', note: 'byledger' });
     expect(dbBalance(referred.id)).toBe(200);
-    expect(dbReferralBalance(referrer.id)).toBe(30);   // 15% of 200
+    expect(dbReferralBalance(referrer.id)).toBe(20);   // 10% of 200
 
     // Get the stable ledger id the UI deletes by.
     const list = await request(app).get(`/api/admin/clients/${referred.id}/payments`).set('X-Auth-Token', adminToken);
@@ -281,29 +264,34 @@ describe('P0-2: DELETE /api/admin/clients/:id/payment/by-ledger/:ledgerDbId', ()
   });
 });
 
-describe('P1-1: recalcFromLedger preserves a pre-ledger opening balance', () => {
-  it('keeps the opening remainder when a ledger entry is deleted (anchors on first balance_before)', async () => {
+describe('A4: DELETE /api/admin/clients/:id/ledger/:entryIndex — запрещён', () => {
+  it('returns 405 and touches neither balance nor ledger rows', async () => {
     const c = await createClient();
-    // Simulate a balance set OUTSIDE the ledger (import / pre-ledger era).
-    db.prepare('UPDATE clients SET balance = 500 WHERE id = ?').run(c.id);
-    const { state } = require('../../src/state/index.js');
-    const live = state.clientById.get(c.id);
-    if (live) live.balance = 500;
-
-    // Two payments on top → ledger snapshots start from 500.
     await request(app).post(`/api/admin/clients/${c.id}/payment`).set('X-Auth-Token', adminToken)
       .send({ amount: 100, date: '2026-05-23' });
-    await request(app).post(`/api/admin/clients/${c.id}/payment`).set('X-Auth-Token', adminToken)
-      .send({ amount: 50, date: '2026-05-23' });
-    expect(dbBalance(c.id)).toBe(650);
+    expect(dbBalance(c.id)).toBe(100);
+    const ledgerBefore = ledgerEntries(c.id).length;
 
-    // Delete the 2nd ledger entry (index 1, id ASC). Correct balance = 600,
-    // NOT 100 (which the old start-from-zero recompute would have produced).
     const del = await request(app)
-      .delete(`/api/admin/clients/${c.id}/ledger/1`)
+      .delete(`/api/admin/clients/${c.id}/ledger/0`)
       .set('X-Auth-Token', adminToken);
-    expect(del.status).toBe(200);
-    expect(dbBalance(c.id)).toBe(600);
+    expect(del.status).toBe(405);
+    expect(del.body.error).toMatch(/сторнирование/);
+
+    // Nothing changed: правки только через payment_reversal (by-ledger роут).
+    expect(dbBalance(c.id)).toBe(100);
+    expect(ledgerEntries(c.id).length).toBe(ledgerBefore);
+  });
+
+  it('GET /ledger exposes ledgerDbId so the UI can reverse by stable id', async () => {
+    const c = await createClient();
+    await request(app).post(`/api/admin/clients/${c.id}/payment`).set('X-Auth-Token', adminToken)
+      .send({ amount: 77, date: '2026-05-23' });
+    const res = await request(app).get(`/api/admin/clients/${c.id}/ledger`).set('X-Auth-Token', adminToken);
+    expect(res.status).toBe(200);
+    const entry = res.body.entries.find(e => e.type === 'payment');
+    expect(entry).toBeTruthy();
+    expect(typeof entry.ledgerDbId).toBe('number');
   });
 });
 
@@ -372,5 +360,40 @@ describe('Stage 13.0: characterization — Tochka webhook auto-credit (matched c
 
     const count = db.prepare('SELECT COUNT(*) AS n FROM bank_payments WHERE payment_id = ?').get(paymentId).n;
     expect(count).toBe(1); // ← the real invariant: no double-insert
+  });
+
+  it('A3: two DIFFERENT payments colliding on natural_key are BOTH recorded; repeat of the same paymentId is deduped', async () => {
+    // Same payer/amount/date/purpose in one day — the old key blocked the
+    // second payment as a dup. Now: new paymentId → sequence suffix '#N'.
+    const base = {
+      webhookType: 'incomingPayment',
+      payerInn: '8888888888', payerName: 'COLLIDE TEST',
+      amount: 5000, purpose: 'Оплата по счёту 42', date: '2026-05-24',
+    };
+    const pid1 = 'coll1-' + crypto.randomBytes(4).toString('hex');
+    const pid2 = 'coll2-' + crypto.randomBytes(4).toString('hex');
+
+    const r1 = await request(app).post('/api/tochka/webhook')
+      .set('Content-Type', 'text/plain').send(fakeJwtPayload({ ...base, paymentId: pid1 }));
+    expect(r1.status).toBe(200);
+
+    const r2 = await request(app).post('/api/tochka/webhook')
+      .set('Content-Type', 'text/plain').send(fakeJwtPayload({ ...base, paymentId: pid2 }));
+    expect(r2.status).toBe(200);
+    // NOT blocked as duplicate_natural_key — the second real payment must land.
+    expect(r2.body.reason).not.toBe('duplicate_natural_key');
+
+    const rows = db.prepare('SELECT natural_key FROM bank_payments WHERE payment_id IN (?, ?)').all(pid1, pid2);
+    expect(rows.length).toBe(2);
+    expect(rows[0].natural_key).not.toBe(rows[1].natural_key);
+    expect(rows.some(r => /#\d+$/.test(r.natural_key))).toBe(true);   // sequence suffix
+
+    // Re-delivery of the FIRST webhook (same paymentId) → dedup, no third row.
+    const r3 = await request(app).post('/api/tochka/webhook')
+      .set('Content-Type', 'text/plain').send(fakeJwtPayload({ ...base, paymentId: pid1 }));
+    expect(r3.status).toBe(200);
+    expect(r3.body.reason).toBe('duplicate_natural_key');
+    const cnt = db.prepare("SELECT COUNT(*) AS n FROM bank_payments WHERE purpose = 'Оплата по счёту 42'").get().n;
+    expect(cnt).toBe(2);
   });
 });
