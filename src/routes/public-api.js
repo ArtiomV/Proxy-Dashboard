@@ -19,6 +19,7 @@ module.exports = function createPublicApiRouter(deps) {
     extractServerName, SERVER_COUNTRIES,
     parseBwToBytes, trafficBytesToGb,
     getClientByApiKey, getClientByLogin,
+    ledgerDb,
   } = deps;
   const r = express.Router();
 
@@ -70,7 +71,9 @@ module.exports = function createPublicApiRouter(deps) {
 
       // Billing
       const clientInfo = getClientByLogin(client.login);
-      const totalPayments = clientInfo ? (clientInfo.payments || []).reduce((s, p) => s + (parseFloat(p.amount) || 0), 0) : 0;
+      // C5: from billing_ledger (payment + bank_payment − payment_reversal),
+      // not the removed in-memory client.payments[] snapshot.
+      const totalPayments = clientInfo ? ledgerDb.paymentsTotalByClient(clientInfo.id) : 0;
 
       // Bandwidth totals (in MB) — use parseBwToBytes → GB → MB
       let monthBytes = 0;

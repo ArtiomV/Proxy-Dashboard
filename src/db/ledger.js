@@ -30,6 +30,13 @@ function init(db) {
     "SELECT DISTINCT client_id FROM billing_ledger WHERE date = ? AND type = 'charge'"
   );
   S.count = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger');
+  // C5: recorded payments minus reversals per client — the ledger-based
+  // replacement for the legacy in-memory client.payments[] sum.
+  S.paymentsTotal = db.prepare(
+    "SELECT COALESCE(SUM(CASE WHEN type IN ('payment','bank_payment') THEN amount " +
+    "WHEN type = 'payment_reversal' THEN -amount ELSE 0 END), 0) AS total " +
+    "FROM billing_ledger WHERE client_id = ?"
+  );
 }
 
 // listByClient — reads billing_ledger rows and rehydrates them into the
@@ -75,7 +82,22 @@ function chargedClientIdsForDate(date) {
 }
 function rowCount() { return S.count.get().n; }
 
+// C5: total recorded payments minus reversals from listByClient-shaped
+// entries (payment + bank_payment − payment_reversal). One-shot SQL variant
+// is paymentsTotalByClient — use it when the full entry list isn't needed.
+function paymentsTotal(entries) {
+  let total = 0;
+  for (const e of entries || []) {
+    const amt = parseFloat(e.amount) || 0;
+    if (e.type === 'payment' || e.type === 'bank_payment') total += amt;
+    else if (e.type === 'payment_reversal') total -= amt;
+  }
+  return Math.round(total * 100) / 100;
+}
+function paymentsTotalByClient(clientId) { return S.paymentsTotal.get(clientId).total; }
+
 module.exports = {
   init, deleteByClient, deleteById, insertStmt, listByClient,
   existsChargeOnDate, chargedClientIdsForDate, rowCount,
+  paymentsTotal, paymentsTotalByClient,
 };

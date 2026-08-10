@@ -28,6 +28,7 @@
 
 let deps = null;
 const proxyConf = require('../api/proxysmart-conf');   // обход логин-стены /conf/* (S2)
+const scheduler = require('./scheduler');              // C8/§10.7: реестр → /api/admin/health.jobs
 const _lastFailoverByImei = {};   // imei → ts of last real failover off this modem
 const _rateWindow = [];           // sliding window of recent real-move timestamps (per all servers)
 let _interval = null;
@@ -63,9 +64,13 @@ function _isRandomNick(nick) {
 
 function init(d) {
   deps = d;
+  // C8/§10.7: register in the unified scheduler registry (last-run/status in
+  // /api/admin/health → jobs). scanAndFailover catches its own errors, so
+  // wrapJob adds bookkeeping only — behaviour/cadence unchanged.
+  const { safeFn } = scheduler.wrapJob('Failover', 'every 3 min', scanAndFailover, deps.logger);
   // First scan 90s after boot (let live state settle), then every 3 min.
-  setTimeout(scanAndFailover, 90 * 1000);
-  _interval = setInterval(scanAndFailover, 3 * 60 * 1000);
+  setTimeout(safeFn, 90 * 1000);
+  _interval = setInterval(safeFn, 3 * 60 * 1000);
   return { stop };
 }
 function stop() { if (_interval) { clearInterval(_interval); _interval = null; } }

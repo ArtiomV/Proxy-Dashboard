@@ -9,6 +9,7 @@
 
 const HIST_MS = 65 * 60 * 1000;   // храним чуть больше часа
 const STEP_MS = 60 * 1000;        // шаг сэмпла — минута
+const scheduler = require('./scheduler');   // C8/§10.7: реестр → /api/admin/health.jobs
 
 function create(deps) {
   const { getFetchAllServersDataCached, logger } = deps;
@@ -42,8 +43,12 @@ function create(deps) {
 
   function start() {
     if (timer) return;
-    sample();
-    timer = setInterval(sample, STEP_MS);
+    // C8/§10.7: register in the unified scheduler registry (last-run/status
+    // in /api/admin/health → jobs). sample() ловит свои ошибки сам — wrapJob
+    // добавляет только учёт запусков, поведение/частота не меняются.
+    const { safeFn } = scheduler.wrapJob('ConnsHist', 'every 1 min', sample, logger);
+    safeFn();
+    timer = setInterval(safeFn, STEP_MS);
     if (timer.unref) timer.unref();
   }
 

@@ -12,6 +12,10 @@
 // document + closing doc + bill DIRECTLY into the DB (bypassing memory),
 // then invokes saveClients with a client whose in-memory arrays do NOT
 // contain those rows. All four must survive.
+//
+// C5: src/db/payments.js удалён вместе с in-memory client.payments[] —
+// платёжные строки тест пишет/читает прямым SQL (таблица payments живёт
+// в режиме read-only до ручного дропа migrations/manual/056_drop_payments.sql).
 
 import { describe, it, expect, beforeAll } from 'vitest';
 import crypto from 'crypto';
@@ -19,13 +23,12 @@ import { createRequire } from 'module';
 import { bootApp } from './_helpers/app.js';
 
 const cjsRequire = createRequire(import.meta.url);
-let db, server, paymentsDb, documentsDb;
+let db, server, documentsDb;
 
 beforeAll(() => {
   const ctx = bootApp();
   db = ctx.db;
   server = cjsRequire('../server.js');
-  paymentsDb = cjsRequire('../src/db/payments.js');
   documentsDb = cjsRequire('../src/db/documents.js');
 });
 
@@ -36,23 +39,25 @@ function makeClientRow() {
   return id;
 }
 
+const paymentsCount = (cid) =>
+  db.prepare('SELECT COUNT(*) AS n FROM payments WHERE client_id = ?').get(cid).n;
+
 describe('Stage 13.2: saveClients is additive — DB rows survive stale in-memory state', () => {
-  it('a payment present in DB but missing from c.payments is NOT deleted', () => {
+  it('a payment present in DB is NOT deleted by saveClients', () => {
     const cid = makeClientRow();
 
     // 1. Insert a payment DIRECTLY (no in-memory presence).
-    paymentsDb.insert({
-      clientId: cid, amount: 999, date: '2026-05-23', note: 'db-only',
-      source: 'manual', paymentId: null, createdAt: '2026-05-23T10:00:00Z',
-    });
-    expect(paymentsDb.listByClient(cid).length).toBe(1);
+    db.prepare(`INSERT INTO payments (client_id, amount, date, note, source, created_at)
+                VALUES (?, ?, ?, ?, 'manual', ?)`)
+      .run(cid, 999, '2026-05-23', 'db-only', '2026-05-23T10:00:00Z');
+    expect(paymentsCount(cid)).toBe(1);
 
-    // 2. saveClients with a client whose in-memory payments array is empty.
-    const stale = { id: cid, login: 'inv_' + cid, name: 'Inv', balance: 0, payments: [] };
+    // 2. saveClients with a client snapshot (no payments concept anymore).
+    const stale = { id: cid, login: 'inv_' + cid, name: 'Inv', balance: 0 };
     server.saveClients([stale]);
 
     // 3. The pre-existing DB row MUST survive. (Pre-fix it was wiped.)
-    const surviving = paymentsDb.listByClient(cid);
+    const surviving = db.prepare('SELECT amount, note FROM payments WHERE client_id = ?').all(cid);
     expect(surviving.length).toBe(1);
     expect(surviving[0].amount).toBe(999);
     expect(surviving[0].note).toBe('db-only');
@@ -87,16 +92,13 @@ describe('Stage 13.2: saveClients is additive — DB rows survive stale in-memor
     // payments table is read-only (kept for legacy rows). saveClients
     // intentionally skips it.
     const cid = makeClientRow();
-    const stale = {
-      id: cid, login: 'inv_' + cid, name: 'Inv', balance: 0,
-      payments: [{ amount: 42, date: '2026-05-23', note: 'fresh', createdAt: '2026-05-23T11:00:00Z' }],
-    };
+    const stale = { id: cid, login: 'inv_' + cid, name: 'Inv', balance: 0 };
 
     server.saveClients([stale]);
     server.saveClients([stale]);
 
     // No rows written, no matter how many times saveClients is called.
-    expect(paymentsDb.listByClient(cid).length).toBe(0);
+    expect(paymentsCount(cid)).toBe(0);
   });
 
   it('bill status changed in memory IS persisted by saveClients (upsert on status)', () => {
