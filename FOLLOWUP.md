@@ -247,7 +247,7 @@ and should follow the same pattern in a future pass:
   `fetch(URL, {headers:{'X-Auth-Token':authToken}})` calls in admin.js/client.js
   now go through `api()` in public/js/utils.js (unit-tested in
   tests/frontend-utils.test.js). Remaining raw `fetch` sites are intentional:
-  blob/CSV downloads (crmExport, simExport), FormData uploads, `_fetchRetry`
+  blob/CSV downloads (simExport и т.п.), FormData uploads, `_fetchRetry`
   (AbortController + retry), and `/api/login` (pre-auth). New code should use
   `api()`; non-JSON responses return text, HTTP status is on non-enumerable
   `__status`.
@@ -268,7 +268,9 @@ and should follow the same pattern in a future pass:
 ## Service boundary: src/agents (AI lead-gen)
 
 - **Assessment for extracting the AI sales dept into its own service
-  (2026-07).** Coupling points are few and clean:
+  (2026-07).** ~~Coupling points are few and clean:~~ **Moot (2026-08): фича
+  выпилена целиком (ТЗ C3) — src/agents/, ai-sales.js и таблицы sales_*
+  удалены, таблицы дропнуты миграцией 055.** Исходная оценка:
   - Entry: `src/routes/ai-sales.js` (admin-only triggers, background jobs) +
     manual `src/agents/run-leadgen.js`.
   - Data: `sales_*` tables (migrations 037/038) in dashboard.db — the agents'

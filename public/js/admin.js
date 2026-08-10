@@ -36,7 +36,6 @@ function newChartSafe(canvasEl, cfg) {
 var API='',authToken=localStorage.getItem('pr_admin_token')||'',currentData=null;
 var sortCol='nick',sortDir='asc',activeServerFilter=localStorage.getItem('admin_srv_filter')||'all',activeStatusFilter='all',activeClientFilter='';
 var autoRefreshTimer=null,charts={},REFRESH_MS=10000;
-var _crmLoaded=false;
 
 // ── Resilience: never surface a raw JSON-parse/HTML error to the user. During a
 // backend restart/deploy nginx briefly returns a 502 HTML page ("<!DOCTYPE…"),
@@ -48,43 +47,6 @@ function _okJson(r){var ct=(r&&r.headers&&r.headers.get&&r.headers.get('content-
 // Catch-all: even if some other of the ~150 call sites lets a raw parse error
 // reach a toast, replace it with the friendly message (never show "<!DOCTYPE…").
 (function(){var _orig=(typeof window!=='undefined'&&window.showToast)?window.showToast:(typeof showToast==='function'?showToast:null);if(!_orig)return;var _wrap=function(m,t,d){if(typeof m==='string'&&/Unexpected token|<!DOCTYPE|is not valid JSON|server_unavailable/i.test(m)){return _orig('Сервер перезапускается, переподключаюсь…','warning',4000);}return _orig(m,t,d);};try{window.showToast=_wrap;}catch(_){}try{showToast=_wrap;}catch(_){}})();
-
-function crmExport(object){
-  showToast('Готовлю экспорт CRM…','info');
-  // NB: stays on raw fetch — this endpoint returns a CSV blob and the code
-  // needs Response headers (Content-Disposition), which api() doesn't expose.
-  fetch(API+'/api/admin/crm/export?object='+encodeURIComponent(object),{headers:{'X-Auth-Token':authToken}})
-    .then(function(r){
-      if(!r.ok) return r.json().then(function(d){throw new Error(d.error||('HTTP '+r.status))});
-      var fname=(r.headers.get('Content-Disposition')||'').match(/filename="([^"]+)"/);
-      return r.blob().then(function(b){return {b:b,fname:fname?fname[1]:('crm-'+object+'.csv')}});
-    })
-    .then(function(x){
-      var u=URL.createObjectURL(x.b);var a=document.createElement('a');a.href=u;a.download=x.fname;
-      document.body.appendChild(a);a.click();a.remove();setTimeout(function(){URL.revokeObjectURL(u)},4000);
-      showToast('Экспорт скачан: '+x.fname,'success');
-    })
-    .catch(function(e){showToast('Экспорт CRM: '+e.message,'error');});
-}
-function crmAutoLogin(){
-  var frame=document.getElementById('crmFrame');
-  var status=document.getElementById('crmStatus');
-  if(_crmLoaded&&frame.src.indexOf('crm.')!==-1){return}
-  status.textContent='Подключение...';status.style.color='var(--warning)';
-  api(API+'/api/admin/crm_token').then(function(d){
-    if(d.token&&d.url){
-      frame.src=d.url+'/verify?loginToken='+d.token;
-      _crmLoaded=true;
-      status.textContent='Подключено';status.style.color='var(--success)';
-      setTimeout(function(){status.textContent=''},3000);
-    }else{
-      status.textContent=d.error||'Ошибка входа';status.style.color='var(--danger)';
-      if(d.url){frame.src=d.url;_crmLoaded=true}
-    }
-  }).catch(function(e){
-    status.textContent='CRM недоступна';status.style.color='var(--danger)';
-  });
-}
 
 var COLUMNS=[{id:'rail',label:'',visible:true,sortable:false,width:'6px'},
   {id:'bulk',label:'<input type="checkbox" id="bulkSelectAll" data-on-click="bulkToggleAll(this)" style="cursor:pointer;margin:0">',visible:true,sortable:false,width:'28px'},
@@ -118,7 +80,7 @@ function _initServers(servers){if(!servers||!servers.length)return;COUNTRIES={};
 // Весь кабинет — СВЕТЛАЯ тема по умолчанию (Дашборд/Финансы и так scoped-light в
 // finance.css; тёмная тема для их контента не реализована, поэтому базовый вид —
 // единый светлый). Тумблер оставлен рабочим и сохраняет выбор, дефолт = light.
-function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=t;try{localStorage.setItem('pr_admin_theme',t)}catch(e){}if(typeof updateChartsTheme==='function')updateChartsTheme();}
+function toggleTheme(){var t=document.documentElement.dataset.theme==='dark'?'light':'dark';document.documentElement.dataset.theme=t;try{localStorage.setItem('pr_admin_theme',t)}catch(e){}}
 (function(){var t='light';try{t=localStorage.getItem('pr_admin_theme')||'light';}catch(e){}document.documentElement.dataset.theme=t;})();
 
 // getChartColors moved to /js/utils.js
@@ -181,20 +143,16 @@ function switchSettingsSection(name){
   if(name==='alerts')loadAlertRules();
   if(name==='failover'){loadFailoverSettings();loadFailoverCandidates();loadFailoverLog();}
 }
-function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}if(name==='crm'){crmAutoLogin()}}
+function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients')renderClients();if(name==='analytics'){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
 
 // ========== PHASE 3: SYSTEM TAB ==========
 var _sysCharts = {};
-// Recommended default period per sub-tab. Health shows 24h uptime (per SLA spec);
-// rotations are short-term signal; forecast/capacity/IP need a long window.
-var _sysDefaults = { health: 1, rotations: 7, ip: 30, forecast: 30, capacity: 30, dashboard: 7, logs: 7 };
 // switchSysTab/refreshSysTab removed — the Система tab no longer exists.
-// Its analytical sub-tabs (health/rotations/ip/forecast/capacity) are now
-// served from Аналитика (see renderAccSubTab); Системный лог lives in
-// Настройки → Состояние сервера; Логи доменов was removed entirely.
-// KPI card. `accent` (optional) drives the left border + soft tinted bg —
-// lets each Аналитика section (rotations / ip / capacity) have a distinct
-// visual identity. Falls back to `color` if no explicit accent is given.
+// Its analytical sub-tabs (health/rotations/ip/capacity) lived in the hidden
+// ACC view and were removed together with #tab-traffic (C4); Системный лог
+// lives in Настройки → Состояние сервера; Логи доменов was removed entirely.
+// KPI card. `accent` (optional) drives the left border + soft tinted bg.
+// Falls back to `color` if no explicit accent is given.
 function _sysKpi(label, value, sub, color, accent){
   var stripe = accent || color || 'var(--accent)';
   // Tint background with the same accent at low opacity for subtle theming.
@@ -221,265 +179,9 @@ function _kpiTint(c, a){
   }
   return c;
 }
-// Reads the active period selector. Falls back across known selector IDs so
-// the renderSys* functions work from the various Аналитика sub-tabs.
-// Callers may pass an explicit id (preferred — avoids the wrong selector
-// winning when multiple are present in DOM at once).
-function _sysDays(explicitId){
-  var ids = explicitId ? [explicitId] : ['sysModemsDays','sysIpcapDays'];
-  for (var i = 0; i < ids.length; i++) {
-    var el = document.getElementById(ids[i]);
-    if (el && el.value) { var v = parseInt(el.value); if (!isNaN(v) && v > 0) return v; }
-  }
-  return 7;
-}
 function _sysLoader(){return '<div style="color:var(--text-3);padding:40px;text-align:center">Загрузка...</div>'}
 function _sysError(msg){return '<div style="color:var(--danger);padding:20px">'+esc(msg)+'</div>'}
 
-// ----- 3.1 Health -----
-function renderSysHealth(targetId, daysId){
-  var c = document.getElementById(targetId || 'sys-content');
-  c.innerHTML = _sysLoader();
-  var days = _sysDays(daysId);
-  api(API + '/api/analytics/modem_health?days='+days)
-    .then(function(d){
-      if(d.error){c.innerHTML=_sysError(d.error);return}
-      var s = d.summary || {};
-      var h = '';
-      h += '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">';
-      h += _sysKpi('Всего модемов', s.total || 0);
-      h += _sysKpi('Здоровые', s.good || 0, '≥80 баллов', 'var(--success)');
-      h += _sysKpi('Предупреждение', s.warn || 0, '50-79 баллов', 'var(--warning)');
-      h += _sysKpi('Проблемные', s.bad || 0, '<50 баллов', 'var(--danger)');
-      h += '</div>';
-      h += '<div style="font-size:10px;color:var(--text-3);margin:0 0 8px 4px">Uptime рассчитан как доля активных часов за последние ' + (days*24) + ' ч (= '+days+' '+(days===1?'день':'д.')+')</div>';
-      h += '<table style="width:100%;border-collapse:collapse;font-size:11px;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;overflow:hidden">';
-      h += '<thead><tr style="background:var(--bg-2);color:var(--text-2)">';
-      h += '<th style="padding:8px 10px;text-align:left">Модем</th>';
-      h += '<th style="padding:8px 10px;text-align:left">Сервер</th>';
-      h += '<th style="padding:8px 10px;text-align:left">Оператор</th>';
-      h += '<th style="padding:8px 10px;text-align:right">Uptime</th>';
-      h += '<th style="padding:8px 10px;text-align:right">Латентность</th>';
-      h += '<th style="padding:8px 10px;text-align:right">Ошибки</th>';
-      h += '<th style="padding:8px 10px;text-align:right">Ротаций</th>';
-      h += '<th style="padding:8px 10px;text-align:right">Трафик</th>';
-      h += '<th style="padding:8px 10px;text-align:center">Здоровье</th>';
-      h += '</tr></thead><tbody>';
-      var sorted = (d.modems||[]).slice().sort(function(a,b){return a.health_score - b.health_score});
-      sorted.forEach(function(m){
-        var col = m.status === 'good' ? 'var(--success)' : m.status === 'warn' ? 'var(--warning)' : 'var(--danger)';
-        h += '<tr>';
-        h += '<td style="padding:6px 10px;font-weight:600">'+esc(m.nick)+'</td>';
-        h += '<td style="padding:6px 10px;color:var(--text-2)">'+esc(m.server_name)+'</td>';
-        h += '<td style="padding:6px 10px;color:var(--text-2)">'+esc(m.operator||'—')+'</td>';
-        h += '<td style="padding:6px 10px;text-align:right">'+(m.uptime_pct||0)+'%</td>';
-        h += '<td style="padding:6px 10px;text-align:right">'+fmtMs(m.latency_ms)+'</td>';
-        h += '<td style="padding:6px 10px;text-align:right;'+(m.error_pct > 10 ? 'color:var(--danger);font-weight:600' : '')+'">'+(m.error_pct != null ? m.error_pct+'%' : '—')+'</td>';
-        h += '<td style="padding:6px 10px;text-align:right">'+(m.rotations||0)+'</td>';
-        h += '<td style="padding:6px 10px;text-align:right">'+(m.traffic_gb||0)+' GB</td>';
-        h += '<td style="padding:6px 10px;text-align:center">'
-          +'<span style="display:inline-block;padding:2px 8px;border-radius:10px;background:'+col+';color:#fff;font-weight:700">'+m.health_score+'</span></td>';
-        h += '</tr>';
-      });
-      h += '</tbody></table>';
-      c.innerHTML = h;
-    })
-    .catch(function(e){c.innerHTML = _sysError(e.message)});
-}
-
-// ----- 3.2 Rotations -----
-function renderSysRotations(targetId, daysId){
-  var c = document.getElementById(targetId || 'sys-content');
-  c.innerHTML = _sysLoader();
-  var days = _sysDays(daysId);
-  api(API + '/api/analytics/rotations?days='+days)
-    .then(function(d){
-      if(d.error){c.innerHTML=_sysError(d.error);return}
-      var s = d.summary || {};
-      var ACC = '#3B9DD8';  // section accent — blue for Ротации
-      var h = '';
-      h += '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">';
-      h += _sysKpi('Всего', s.total || 0, null, null, ACC);
-      h += _sysKpi('Неуспешных', s.failed || 0, (s.total>0?Math.round(s.failed/s.total*100):0)+'% всех', s.failed > 0 ? 'var(--danger)' : null, ACC);
-      h += _sysKpi('Успешность', (s.success_pct||0)+'%', null, s.success_pct>=95?'var(--success)':s.success_pct>=80?'var(--warning)':'var(--danger)', ACC);
-      h += _sysKpi('Avg время', s.avg_sec != null ? s.avg_sec+' с' : '—', null, null, ACC);
-      h += _sysKpi('Max время', s.max_sec != null ? s.max_sec+' с' : '—', null, null, ACC);
-      h += '</div>';
-      // Chart
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:16px">';
-      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">Ротации по дням</div>';
-      h += '<div style="height:220px"><canvas id="sysRotChart"></canvas></div>';
-      h += '</div>';
-      // Servers + Operators
-      h += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:12px">';
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px">';
-      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">По серверам</div>';
-      if (!d.per_server || !d.per_server.length) {
-        h += '<div style="color:var(--text-3);padding:10px;text-align:center">Нет данных</div>';
-      } else {
-        h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px;text-align:left">Сервер</th><th style="padding:4px;text-align:right">Всего</th><th style="padding:4px;text-align:right">Failed</th><th style="padding:4px;text-align:right">Avg с</th><th style="padding:4px;text-align:right">Max с</th></tr></thead><tbody>';
-        d.per_server.forEach(function(srv){
-          h += '<tr><td style="padding:4px;font-weight:600">'+esc(srv.server_name||'—')+'</td><td style="padding:4px;text-align:right">'+srv.total+'</td><td style="padding:4px;text-align:right;'+(srv.failed>0?'color:var(--danger)':'')+'">'+srv.failed+'</td><td style="padding:4px;text-align:right;font-weight:600">'+(srv.avg_sec!=null?Math.round(srv.avg_sec*10)/10:'—')+'</td><td style="padding:4px;text-align:right;color:var(--text-2)">'+(srv.max_sec!=null?Math.round(srv.max_sec*10)/10:'—')+'</td></tr>';
-        });
-        h += '</tbody></table>';
-      }
-      h += '</div>';
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px">';
-      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">По операторам</div>';
-      h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px;text-align:left">Оператор</th><th style="padding:4px;text-align:right">Всего</th><th style="padding:4px;text-align:right">Failed</th><th style="padding:4px;text-align:right">Avg с</th></tr></thead><tbody>';
-      // Filter out unknown/empty operators — they don't tell us anything useful
-      // and tend to dominate the table when there are flaky SIM detections.
-      (d.per_operator||[]).filter(function(o){
-        var op = String(o.operator || '').trim().toLowerCase();
-        return op && op !== '—' && op !== 'unknown' && op !== '?';
-      }).forEach(function(o){
-        h += '<tr><td style="padding:4px">'+esc(o.operator)+'</td><td style="padding:4px;text-align:right">'+o.total+'</td><td style="padding:4px;text-align:right;'+(o.failed>0?'color:var(--danger)':'')+'">'+o.failed+'</td><td style="padding:4px;text-align:right">'+(o.avg_sec!=null?Math.round(o.avg_sec*10)/10:'—')+'</td></tr>';
-      });
-      h += '</tbody></table></div></div>';
-      // Per-modem (full width — "Последние неудачи" block removed)
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px">';
-      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">По модемам (топ-20 по avg)</div>';
-      if (!d.per_modem || !d.per_modem.length) {
-        h += '<div style="color:var(--text-3);padding:10px;text-align:center">Нет</div>';
-      } else {
-        var sortedPm = d.per_modem.slice().filter(function(m){return m.avg_sec!=null}).sort(function(a,b){return b.avg_sec - a.avg_sec}).slice(0,20);
-        h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px;text-align:left">Модем</th><th style="padding:4px;text-align:left">Сервер</th><th style="padding:4px;text-align:right">Всего</th><th style="padding:4px;text-align:right">Avg с</th><th style="padding:4px;text-align:right">Max с</th></tr></thead><tbody>';
-        sortedPm.forEach(function(m){
-          h += '<tr><td style="padding:4px;font-weight:600">'+esc(m.nick)+'</td><td style="padding:4px;color:var(--text-2)">'+esc(m.server_name||'—')+'</td><td style="padding:4px;text-align:right">'+m.total+'</td><td style="padding:4px;text-align:right;font-weight:600">'+Math.round(m.avg_sec*10)/10+'</td><td style="padding:4px;text-align:right;color:var(--text-2)">'+(m.max_sec!=null?Math.round(m.max_sec*10)/10:'—')+'</td></tr>';
-        });
-        h += '</tbody></table>';
-      }
-      h += '</div>';
-      c.innerHTML = h;
-      // Draw chart
-      setTimeout(function(){
-        var cv = document.getElementById('sysRotChart');
-        if(!cv || !window.Chart) return;
-        var cc = getChartColorsLight();
-        var pd = d.per_day || [];
-        _sysCharts.rot = newChartSafe(cv, {
-          type: 'bar',
-          data: {
-            labels: pd.map(function(x){return x.date.slice(5)}),
-            datasets: [
-              {label:'Всего', data: pd.map(function(x){return x.total}), backgroundColor: '#3B9DD8', stack:'a'},
-              {label:'Failed', data: pd.map(function(x){return x.failed}), backgroundColor: '#E04141', stack:'b'},
-            ]
-          },
-          options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{position:'top',labels:{color:cc.text,font:{size:10}}}},
-            scales:{x:{stacked:false,ticks:{color:cc.text,font:{size:9}},grid:{display:false}},y:{beginAtZero:true,ticks:{color:cc.text},grid:{color:cc.grid}}}}
-        });
-      }, 40);
-    })
-    .catch(function(e){c.innerHTML = _sysError(e.message)});
-}
-
-// ----- 3.3 IP analytics -----
-function renderSysIp(targetId, daysId){
-  var c = document.getElementById(targetId || 'sys-content');
-  c.innerHTML = _sysLoader();
-  var days = _sysDays(daysId);
-  api(API + '/api/analytics/ip_stats?days='+Math.max(days,7))
-    .then(function(d){
-      if(d.error){c.innerHTML=_sysError(d.error);return}
-      var s = d.summary || {};
-      var ACC = '#965AC8';  // section accent — purple for IP-аналитика
-      var h = '';
-      h += '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">';
-      h += _sysKpi('Уникальных IP', s.unique_ips || 0, 'за '+d.days+'д', null, ACC);
-      h += _sysKpi('Назначений', s.total_assignments || 0, null, null, ACC);
-      h += _sysKpi('Reuse ratio', s.reuse_ratio || 0, 'assign/IP', null, ACC);
-      h += _sysKpi('Средний lifetime', s.avg_lifetime_sec ? Math.round(s.avg_lifetime_sec/60)+' мин' : '—', null, null, ACC);
-      h += _sysKpi('IP с повторами', s.reused_count || 0, null, null, ACC);
-      h += _sysKpi('Подсетей/модем', (d.subnet_summary && d.subnet_summary.avg) || 0, 'макс '+((d.subnet_summary && d.subnet_summary.max) || 0)+' · /24', null, ACC);
-      h += '</div>';
-      // Pools
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">';
-      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">Пулы IP по серверам</div>';
-      h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:right">Уникальных IP</th><th style="padding:4px 8px;text-align:right">Назначений</th><th style="padding:4px 8px;text-align:right">Avg lifetime</th></tr></thead><tbody>';
-      (d.pools||[]).forEach(function(p){
-        h += '<tr><td style="padding:4px 8px;font-weight:600">'+esc(p.server)+'</td><td style="padding:4px 8px;text-align:right">'+p.ip_count+'</td><td style="padding:4px 8px;text-align:right">'+p.total_assignments+'</td><td style="padding:4px 8px;text-align:right">'+(p.avg_lifetime_sec ? Math.round(p.avg_lifetime_sec/60)+' мин' : '—')+'</td></tr>';
-      });
-      h += '</tbody></table></div>';
-      if(_totalRows>rows.length) h += '<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:8px 4px 0" data-on-click="zMore(\'api\')">+ ещё '+(_totalRows-rows.length)+' за период</div>';
-      // Reused
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px">';
-      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">IP с повторным использованием</div>';
-      if (!d.reused || !d.reused.length) {
-        h += '<div style="color:var(--text-3);padding:10px">Нет повторов</div>';
-      } else {
-        h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">IP</th><th style="padding:4px 8px;text-align:right">Использований</th><th style="padding:4px 8px;text-align:right">Модемов</th><th style="padding:4px 8px;text-align:left">Первое</th><th style="padding:4px 8px;text-align:left">Последнее</th></tr></thead><tbody>';
-        d.reused.slice(0, 50).forEach(function(r){
-          h += '<tr><td style="padding:4px 8px;font-family:var(--font-mono)">'+esc(r.ip)+'</td><td style="padding:4px 8px;text-align:right">'+r.uses+'</td><td style="padding:4px 8px;text-align:right">'+r.modems+'</td><td style="padding:4px 8px">'+esc((r.first||'').slice(5,16))+'</td><td style="padding:4px 8px">'+esc((r.last||'').slice(5,16))+'</td></tr>';
-        });
-        h += '</tbody></table>';
-      }
-      h += '</div>';
-      // Подсети на модем — сколько разных /24 прокручивает каждый модем (диверсификация IP)
-      var _sn = d.subnets || [];
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:14px">';
-      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">Подсети на модем <span style="color:var(--text-3);text-transform:none">(/24 — чем больше, тем разнообразнее IP)</span></div>';
-      if(!_sn.length){
-        h += '<div style="color:var(--text-3);padding:10px">Нет данных</div>';
-      } else {
-        h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Модем</th><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:right">Подсетей /24</th><th style="padding:4px 8px;text-align:right">Уникальных IP</th></tr></thead><tbody>';
-        _sn.forEach(function(x){
-          h += '<tr><td style="padding:4px 8px;font-weight:600">'+esc(x.nick)+'</td><td style="padding:4px 8px;color:var(--text-2)">'+esc(x.server)+'</td><td style="padding:4px 8px;text-align:right;font-weight:600;color:'+ACC+'">'+x.subnets+'</td><td style="padding:4px 8px;text-align:right">'+x.ips+'</td></tr>';
-        });
-        h += '</tbody></table>';
-      }
-      h += '</div>';
-      c.innerHTML = h;
-    })
-    .catch(function(e){c.innerHTML = _sysError(e.message)});
-}
-
-// renderSysForecast removed — was used only by the deleted «Планирование» sub-tab.
-
-// ----- 3.5 Capacity -----
-function renderSysCapacity(targetId, daysId){
-  var c = document.getElementById(targetId || 'sys-content');
-  c.innerHTML = _sysLoader();
-  var days = _sysDays(daysId);
-  api(API + '/api/analytics/capacity?days='+Math.max(days,7))
-    .then(function(d){
-      if(d.error){c.innerHTML=_sysError(d.error);return}
-      var s = d.summary || {};
-      var ACC = '#EF9F27';  // section accent — amber for Ёмкость
-      var h = '';
-      h += '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">';
-      h += _sysKpi('Всего модемов', s.total_modems || 0, null, null, ACC);
-      h += _sysKpi('Серверов', s.total_servers || 0, null, null, ACC);
-      h += _sysKpi('Трафик (всего)', (s.total_gb||0) + ' GB', 'за ' + d.days + 'д', null, ACC);
-      h += _sysKpi('Avg/модем', (s.avg_gb_per_modem||0) + ' GB', null, null, ACC);
-      h += '</div>';
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-bottom:12px">';
-      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:8px">Серверы</div>';
-      h += '<table style="width:100%;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:6px;text-align:left">Сервер</th><th style="padding:6px;text-align:right">Модемов</th><th style="padding:6px;text-align:right">Всего GB</th><th style="padding:6px;text-align:right">Avg/час</th><th style="padding:6px;text-align:right">Max/час</th><th style="padding:6px;text-align:right">Active дн.</th></tr></thead><tbody>';
-      (d.servers||[]).forEach(function(srv){
-        h += '<tr><td style="padding:6px;font-weight:600">'+esc(srv.server_name)+'</td><td style="padding:6px;text-align:right">'+srv.modems+'</td><td style="padding:6px;text-align:right">'+srv.total_gb+'</td><td style="padding:6px;text-align:right">'+srv.avg_hour_mb+' MB</td><td style="padding:6px;text-align:right">'+srv.max_hour_mb+' MB</td><td style="padding:6px;text-align:right">'+srv.active_days+'</td></tr>';
-      });
-      h += '</tbody></table></div>';
-      // Growth
-      h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px">';
-      h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">Рост парка модемов</div>';
-      h += '<div style="height:180px"><canvas id="sysCapChart"></canvas></div>';
-      h += '</div>';
-      c.innerHTML = h;
-      setTimeout(function(){
-        var cv = document.getElementById('sysCapChart');
-        if(!cv || !window.Chart) return;
-        var cc = getChartColorsLight();
-        var g = d.modem_growth || [];
-        _sysCharts.cap = newChartSafe(cv, {
-          type: 'line',
-          data: { labels: g.map(function(x){return x.month}), datasets: [{label:'Модемов', data: g.map(function(x){return x.modems}), borderColor:'#3B9DD8', backgroundColor:'rgba(59,157,216,0.1)', fill:true, tension:.3}] },
-          options:{responsive:true, maintainAspectRatio:false, plugins:{legend:{display:false}}, scales:{x:{ticks:{color:cc.text},grid:{display:false}},y:{beginAtZero:true,ticks:{color:cc.text},grid:{color:cc.grid}}}}
-        });
-      }, 40);
-    })
-    .catch(function(e){c.innerHTML = _sysError(e.message)});
-}
 
 // ----- 3.6 System dashboard -----
 function renderSysDashboard(targetId){
@@ -595,7 +297,7 @@ function loadData(){
     .then(function(data){
       currentData=data;
       updateServerDownBanner(data.cachedServers);
-      processData();renderServerFilter();renderTable();updateHeaderStats();populateAccClientFilter();
+      processData();renderServerFilter();renderTable();updateHeaderStats();
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
       var _st=localStorage.getItem('admin_active_tab')||'dashboard';
       var _te=document.querySelector('.nav-tab[data-on-click*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te,true);
@@ -796,7 +498,6 @@ var CHART_COLORS={
 // слева, значение жирным справа, разделитель перед футером-итогом. Читает
 // стандартную модель tooltip (title/body/footer/labelColors), поэтому работает
 // с любым графиком без переписывания их callbacks.
-function updateChartsTheme(){if(document.getElementById('tab-traffic').classList.contains('active'))renderTrafficTab()}
 
 // ========== TASK 13: BULK MODEM ACTIONS ==========
 window._bulkSel={};
@@ -1143,8 +844,6 @@ function _notifNavigate(n){
     } else if(n.entity_kind==='client'){
       switchMainTab('clients');
       if(n.entity_id&&typeof showClientDetail==='function'){setTimeout(function(){showClientDetail(n.entity_id)},150);}
-    } else if(n.entity_kind==='crm'){
-      switchMainTab('crm');
     } else if(n.entity_kind==='payment'){
       switchMainTab('bank');
     } else {
@@ -1424,11 +1123,11 @@ function renderClients(){
   if(dcBadge){if(debtCount>0){dcBadge.textContent=debtCount;dcBadge.style.display='';}else{dcBadge.style.display='none';}}
 }
 function toggleBankFields(){var el=document.getElementById('bankFieldsSection');if(el)el.style.display=(document.getElementById('cfClientType').value==='legal')?'':'none'}
-function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?'':rnd(12);document.getElementById('cfPassword').placeholder=data?'Без изменений':'';document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_modem'):'per_modem';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfClientType').value=data?(data.clientType||'legal'):'individual';toggleBankFields();document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';document.getElementById('cfContractDate').value=data?((data.contractDate||'').slice(0,10)):'';document.getElementById('cfAutoActs').checked=data?(data.autoActs!==false):true;document.getElementById('cfAutoBills').checked=data?(data.autoBills!==false):true;document.getElementById('cfBillingPaused').checked=data?!!data.billingPaused:false;document.getElementById('cfAllowDebt').checked=data?!!data.allowDebt:false;document.getElementById('cfMaxDebt').value=data&&typeof data.maxDebt==='number'?data.maxDebt:'';document.getElementById('cfSlaUptime').value=data&&typeof data.slaUptimePct==='number'?data.slaUptimePct:99;document.getElementById('cfSlaLatency').value=data&&typeof data.slaMaxLatencyMs==='number'?data.slaMaxLatencyMs:1000;document.getElementById('cfSlaErrPct').value=data&&typeof data.slaMaxErrorPct==='number'?data.slaMaxErrorPct:5;document.getElementById('cfSlaAutoCredit').checked=data?!!data.slaAutoCredit:false;var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
+function showClientForm(data){document.getElementById('clientFormId').value=data?data.id:'';document.getElementById('clientModalTitle').textContent=data?'Редактировать':'Новый клиент';document.getElementById('cfName').value=data?data.name:'';document.getElementById('cfPortName').value=data?data.portName:'';document.getElementById('cfLogin').value=data?data.login:'client_'+rnd(8);document.getElementById('cfPassword').value=data?'':rnd(12);document.getElementById('cfPassword').placeholder=data?'Без изменений':'';document.getElementById('cfContact').value=data?(data.contact||''):'';document.getElementById('cfBillingType').value=data?(data.billingType||'per_modem'):'per_modem';document.getElementById('cfPrice').value=data?(data.price||0):0;document.getElementById('cfNotes').value=data?(data.notes||''):'';document.getElementById('cfClientType').value=data?(data.clientType||'legal'):'individual';toggleBankFields();document.getElementById('cfInn').value=data?(data.inn||''):'';document.getElementById('cfKpp').value=data?(data.kpp||''):'';document.getElementById('cfLegalName').value=data?(data.legalName||''):'';document.getElementById('cfAddress').value=data?(data.address||''):'';document.getElementById('cfContractInfo').value=data?(data.contractInfo||''):'';document.getElementById('cfContractDate').value=data?((data.contractDate||'').slice(0,10)):'';document.getElementById('cfAutoActs').checked=data?(data.autoActs!==false):true;document.getElementById('cfAutoBills').checked=data?(data.autoBills!==false):true;document.getElementById('cfBillingPaused').checked=data?!!data.billingPaused:false;document.getElementById('cfAllowDebt').checked=data?!!data.allowDebt:false;document.getElementById('cfMaxDebt').value=data&&typeof data.maxDebt==='number'?data.maxDebt:'';var apiSec=document.getElementById('cfApiKeySection');if(data&&data.apiKey){apiSec.style.display='block';document.getElementById('cfApiKey').value=data.apiKey}else{apiSec.style.display='none';document.getElementById('cfApiKey').value=''}document.getElementById('clientModal').classList.add('show')}
 function closeClientModal(){document.getElementById('clientModal').classList.remove('show');currentOpsClientId=null;}
 document.getElementById('clientModal').addEventListener('click',function(e){if(e.target===this)closeClientModal()});
 function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
-function saveClient(){var id=document.getElementById('clientFormId').value;var maxDebtRaw=document.getElementById('cfMaxDebt').value;var slaUpRaw=document.getElementById('cfSlaUptime').value,slaLatRaw=document.getElementById('cfSlaLatency').value,slaErrRaw=document.getElementById('cfSlaErrPct').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,contractDate:document.getElementById('cfContractDate').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked,billingPaused:document.getElementById('cfBillingPaused').checked,allowDebt:document.getElementById('cfAllowDebt').checked,maxDebt:maxDebtRaw!==''?parseFloat(maxDebtRaw):undefined,slaUptimePct:slaUpRaw!==''?parseFloat(slaUpRaw):undefined,slaMaxLatencyMs:slaLatRaw!==''?parseInt(slaLatRaw):undefined,slaMaxErrorPct:slaErrRaw!==''?parseFloat(slaErrRaw):undefined,slaAutoCredit:document.getElementById('cfSlaAutoCredit').checked};if(!d.name||!d.portName||!d.login||(!id&&!d.password))return showToast('Заполните обязательные поля','error');api(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',json:d}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
+function saveClient(){var id=document.getElementById('clientFormId').value;var maxDebtRaw=document.getElementById('cfMaxDebt').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,contractDate:document.getElementById('cfContractDate').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked,billingPaused:document.getElementById('cfBillingPaused').checked,allowDebt:document.getElementById('cfAllowDebt').checked,maxDebt:maxDebtRaw!==''?parseFloat(maxDebtRaw):undefined};if(!d.name||!d.portName||!d.login||(!id&&!d.password))return showToast('Заполните обязательные поля','error');api(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',json:d}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
 function deleteClient(id,name){confirmDialog('Удалить клиента «'+name+'»? Это действие нельзя отменить.',function(){api(API+'/api/admin/clients/'+id,{method:'DELETE'}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()}).catch(function(e){showToast(esc(e.message),'error')});},'Удалить','Удалить клиента')}
 
 function impersonateClient(id,name){
@@ -1676,54 +1375,9 @@ function switchOpsTab(tab) {
   document.getElementById('opsTab_history').classList.toggle('active', tab === 'history');
   document.getElementById('opsTab_documents').classList.toggle('active', tab === 'documents');
   document.getElementById('opsTab_api').classList.toggle('active', tab === 'api');
-  document.getElementById('opsTab_sla').classList.toggle('active', tab === 'sla');
   if (tab === 'history') renderOpsHistory(currentOpsClientId);
   else if (tab === 'documents') renderOpsDocuments(currentOpsClientId);
   else if (tab === 'api') renderOpsApi(currentOpsClientId);
-  else if (tab === 'sla') renderOpsSla(currentOpsClientId);
-}
-
-function renderOpsSla(clientId) {
-  var body = document.getElementById('clientOpsBody');
-  body.innerHTML = '<div style="color:var(--text-3);font-size:13px;padding:40px;text-align:center">Загрузка...</div>';
-  api(API + '/api/admin/clients/' + clientId + '/sla')
-    .then(function(d) {
-      if (d.error) { body.innerHTML = '<div style="color:var(--danger);padding:20px">' + esc(d.error) + '</div>'; return; }
-      var m = d.metrics || {};
-      var t = d.thresholds || {};
-      var statusColor = d.status === 'breach' ? 'var(--danger)' : d.status === 'ok' ? 'var(--success)' : 'var(--text-3)';
-      var statusLbl = d.status === 'breach' ? '⚠ Нарушение SLA' : d.status === 'ok' ? '✓ В норме' : '— Нет данных';
-      var h = '<div style="padding:12px 16px;background:var(--bg-3);border-radius:8px;margin-bottom:12px;text-align:center">';
-      h += '<div style="font-size:14px;font-weight:700;color:' + statusColor + '">' + statusLbl + '</div>';
-      h += '</div>';
-      h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(150px,100%),1fr));gap:10px;margin-bottom:16px">';
-      function slaTile(label, actual, expected, isOk) {
-        var col = actual == null ? 'var(--text-3)' : isOk ? 'var(--success)' : 'var(--danger)';
-        return '<div style="padding:12px;background:var(--bg-3);border-radius:8px">'
-          + '<div style="font-size:10px;color:var(--text-2);text-transform:uppercase">' + label + '</div>'
-          + '<div style="font-size:20px;font-weight:700;margin-top:4px;color:' + col + '">' + (actual == null ? '—' : actual) + '</div>'
-          + '<div style="font-size:10px;color:var(--text-3);margin-top:2px">SLA: ' + expected + '</div>'
-          + '</div>';
-      }
-      h += slaTile('Uptime', m.uptime_pct != null ? m.uptime_pct + '%' : null, '≥ ' + t.uptime_pct + '%', m.uptime_pct != null && m.uptime_pct >= t.uptime_pct);
-      h += slaTile('Задержка', fmtMs(m.avg_latency_ms), '≤ ' + fmtMsShort(t.max_latency_ms), m.avg_latency_ms != null && m.avg_latency_ms <= t.max_latency_ms);
-      h += slaTile('Ошибки', m.error_pct != null ? m.error_pct + '%' : null, '≤ ' + t.max_error_pct + '%', m.error_pct != null && m.error_pct <= t.max_error_pct);
-      h += '</div>';
-      h += '<div style="font-size:10px;color:var(--text-3);margin-bottom:10px;text-align:center">Uptime рассчитан за последние ' + (m.uptime_window_days || 30) + ' дней · задержка и ошибки за 24 часа</div>';
-      h += '<div style="padding:10px 14px;background:var(--bg-2);border-radius:6px;margin-bottom:12px;font-size:11px;color:var(--text-2)">Авто-кредит: ' + (t.auto_credit ? '<span style="color:var(--success);font-weight:600">включён</span>' : '<span style="color:var(--text-3)">выключен</span>') + '</div>';
-      h += '<div style="font-size:11px;color:var(--text-2);margin:0 0 6px 4px;text-transform:uppercase;letter-spacing:.05em">История нарушений</div>';
-      if (!d.violations || !d.violations.length) {
-        h += '<div style="color:var(--text-3);padding:20px;text-align:center">Нет нарушений</div>';
-      } else {
-        h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Дата</th><th style="padding:6px 10px;text-align:left;color:var(--text-2)">Метрика</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Факт</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Норма</th><th style="padding:6px 10px;text-align:right;color:var(--text-2)">Кредит</th></tr></thead><tbody>';
-        d.violations.forEach(function(v) {
-          h += '<tr><td style="padding:5px 10px">' + esc(v.date) + '</td><td style="padding:5px 10px;font-weight:600;color:var(--warning)">' + esc(v.metric) + '</td><td style="padding:5px 10px;text-align:right;color:var(--danger)">' + v.actual + '</td><td style="padding:5px 10px;text-align:right;color:var(--text-3)">' + v.expected + '</td><td style="padding:5px 10px;text-align:right;' + (v.credited_amount > 0 ? 'color:var(--success);font-weight:600' : '') + '">' + (v.credited_amount > 0 ? '+' + v.credited_amount : '—') + '</td></tr>';
-        });
-        h += '</tbody></table></div>';
-      }
-      body.innerHTML = h;
-    })
-    .catch(function(e) { body.innerHTML = '<div style="color:var(--danger);padding:20px">' + esc(e.message) + '</div>'; });
 }
 
 function renderOpsApi(clientId) {
@@ -1849,9 +1503,9 @@ function renderOpsHistory(clientId) {
   api(API + '/api/admin/clients/' + clientId + '/ledger')
     .then(function(data) {
       var entries = data.entries || [];
-      // Backend returns newest-first; each entry carries _idx = its absolute
-      // position in the full ledger (the delete route indexes into that ASC
-      // list). Re-sort defensively in case of a backdated manual entry.
+      // Backend returns newest-first; each entry carries ledgerDbId = stable
+      // id строки billing_ledger. A4: физическое удаление запрещено — платежи
+      // сторнируются через DELETE /payment/by-ledger/:ledgerDbId.
       entries.sort(function(a, b) { return (b.timestamp || b.date || '').localeCompare(a.timestamp || a.date || ''); });
       var client = (currentData.clients || []).find(function(x) { return x.id === clientId; });
       var bal = client ? (client.balance !== undefined ? client.balance : 0) : 0;
@@ -1962,7 +1616,15 @@ function renderOpsHistory(clientId) {
         h += '<td style="padding:6px 10px;text-align:center;font-family:var(--font-mono);' + amountColor + ';font-weight:600">' + amountStr + '</td>';
         h += '<td style="padding:6px 10px;text-align:center;font-family:var(--font-mono);color:var(--text-2)">' + balAfter + '</td>';
         h += '<td style="padding:6px 10px;color:var(--text-3);max-width:150px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="' + esc(note) + '">' + esc(note) + '</td>';
-        h += '<td style="padding:6px 10px;text-align:center"><button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:transparent;color:var(--danger);border:1px solid var(--danger)" data-on-click="deleteLedgerEntry(\'' + clientId + '\',' + e._idx + ')" title="\u0423\u0434\u0430\u043B\u0438\u0442\u044C">\u2716</button></td>';
+        // A4: удалять операции нельзя. Сторнировать можно только платежи
+        // (payment/bank_payment) — создаётся payment_reversal с откатом
+        // баланса и реферальной комиссии. Списания/корректировки правятся
+        // новой корректировкой (кнопка «− Списать» / balance_adjust).
+        var _reverseBtn = '';
+        if ((e.type === 'payment' || e.type === 'bank_payment') && e.ledgerDbId) {
+          _reverseBtn = '<button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:transparent;color:var(--warning);border:1px solid var(--warning)" data-on-click="reverseLedgerPayment(\'' + clientId + '\',' + e.ledgerDbId + ')" title="\u0421\u0442\u043E\u0440\u043D\u0438\u0440\u043E\u0432\u0430\u0442\u044C">\u21A9</button>';
+        }
+        h += '<td style="padding:6px 10px;text-align:center">' + _reverseBtn + '</td>';
         h += '</tr>';
       });
       h += '</tbody></table></div>';
@@ -2073,10 +1735,8 @@ function regenerateApiKeyInForm(){
     .then(function(data){
       if(!data)return;
       document.body.style.visibility='visible';
-      currentData=data;processData();renderServerFilter();renderClientFilterDD();renderTable();updateHeaderStats();populateAccClientFilter();
-      if(window._heatmapInitialized){var _hmKey=_heatmapView+'|'+_heatmapId;if(_heatmapCache[_hmKey])renderHeatmap(_heatmapCache[_hmKey]);}
-      // Load CRM reminders then generate notifications
-      api(API+'/api/admin/crm_reminders').then(function(d){window._crmReminders=d.reminders||[];}).catch(function(){window._crmReminders=[];}).finally(function(){generateNotifications()});
+      currentData=data;processData();renderServerFilter();renderClientFilterDD();renderTable();updateHeaderStats();
+      generateNotifications();
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
       var _st=localStorage.getItem('admin_active_tab')||'dashboard';var _te=document.querySelector('.nav-tab[data-on-click*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te);
       startAutoRefresh()
@@ -2353,6 +2013,9 @@ function simAbort(){
 function simRefreshActive(){
   api(API+'/api/admin/simulator/active')
     .then(function(d){
+      // D11: показываем баннер «выключено», когда simulator_enabled=false
+      var banner=document.getElementById('simDisabledBanner');
+      if(banner)banner.style.display=(d&&d.enabled===false)?'':'none';
       if(d.active && d.active.id){ simAttachToRun(d.active.id, d.active); }
       else simShowIdle();
     });
@@ -3278,18 +2941,18 @@ function renderNewPulse(fin){
     el.innerHTML =
       _ncPulseCard('Трафик сегодня', fmtGb(_today), '<span style="color:var(--text-3)">по всему парку</span>', 'accent') +
       _ncPulseCard('Активные модемы', _fw+'/'+_ft, '<span style="color:var(--text-3)">в работе</span>', (_fw>=_ft?'success':'warn')) +
-      // WP8: canonical revenue_30d (одно число со страницей клиентов); s.mrr — fallback для старых payload'ов.
-      _ncPulseCard('Выручка за 30 дней', _fmtRub((s.metrics&&s.metrics.revenue_30d!=null)?s.metrics.revenue_30d:s.mrr), growthSub, 'accent') +
+      // A9: факт за 30д — revenue_30d_fact (канон metrics.revenue_30d); s.mrr — fallback для старых payload'ов.
+      _ncPulseCard('Выручка 30д (факт)', _fmtRub(s.revenue_30d_fact!=null?s.revenue_30d_fact:s.mrr), growthSub, 'accent') +
       _ncPulseCard('На балансах', _fmtRub(cashFloat), '<span style="color:var(--text-3)">предоплата клиентов</span>', 'success');
   }
-  // Финсводка-виджет (верхний ряд, бывший слот «Ресурсы») — MRR / NRR / прирост M/M / на балансах.
+  // Финсводка-виджет (верхний ряд, бывший слот «Ресурсы») — выручка 30д / NRR / прирост M/M / на балансах.
   // NB: #newFinSummaryBody в текущей разметке отсутствует — блок не рендерится;
   // экономика живёт в «Качество выручки» (прибыль/маржа/затраты, 2026-08-04).
   var fsEl=document.getElementById('newFinSummaryBody');
   if(fsEl){
     function _fsRow(l,v,c,last){return '<div style="display:flex;justify-content:space-between;padding:4px 0;font-size:12px'+(last?'':';border-bottom:1px solid var(--border)')+'"><span style="color:var(--text-2)">'+l+'</span><span style="font-weight:600'+(c?';color:'+c:'')+'">'+v+'</span></div>';}
     fsEl.innerHTML =
-      _fsRow('Выручка 30д', _fmtRub((s.metrics&&s.metrics.revenue_30d!=null)?s.metrics.revenue_30d:s.mrr), 'var(--text-0)') +
+      _fsRow('Выручка 30д (факт)', _fmtRub(s.revenue_30d_fact!=null?s.revenue_30d_fact:s.mrr), 'var(--text-0)') +
       _fsRow('NRR', s.nrr_pct==null?'—':(s.nrr_pct+'%'), nrrColor) +
       _fsRow('Прирост M/M', gc==null?'—':((gc>=0?'+':'')+gc+'%'), gc==null?'var(--text-3)':(gc>=0?'var(--success)':'var(--danger)')) +
       _fsRow('На балансах', _fmtRub(cashFloat), 'var(--accent)', true);
@@ -3468,16 +3131,16 @@ function renderNewExtWidgets(){
   var _opCosts=_opGbCosts();
   opList.forEach(function(op,oi){var v=allOps[op];var avgpmd=fmtGb(v.cnt&&opDays?v.t/v.cnt/opDays:0);var tpd=v.t/opDays;var w=Math.max(tpd/opMax*100,2);var col=CHART_COLORS.operators[oi%CHART_COLORS.operators.length];var _cst=_opCosts[op]?'<span style="color:var(--accent);font-weight:600"> · '+_opCosts[op]+'₽/ГБ</span>':'';opCard+='<div style="margin-bottom:0"><div style="display:flex;align-items:baseline;font-size:10px;margin-bottom:2px;gap:4px"><span style="flex:1;color:var(--text-1);font-weight:500">'+esc(op)+'</span><span style="color:var(--text-2)">'+avgpmd+'/мод/сут</span><span style="color:var(--text-3)">· '+v.cnt+' мод.</span>'+_cst+'</div><div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+col+';width:'+w+'%"></div></div></div>';});
   opCard+='</div></div>';
-  // MRR (тренд + прогноз столбцом в графике) — между «Потреблением трафика» и «Операторами».
+  // Выручка по месяцам (тренд-факт + run-rate прогноз столбцом в графике) — между «Потреблением трафика» и «Операторами».
   var mrrCard='<div class="analytics-card" style="margin:0;display:flex;flex-direction:column">'
     +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:8px">'
-    +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">📈 MRR</span>'
+    +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">📈 Выручка: факт и прогноз</span>'
     +'<span style="display:flex;gap:8px;font-size:9px;font-weight:600;color:var(--text-2);align-items:center"><span id="mrrLegend" style="display:flex;gap:8px"></span>'
     +'<span class="mrr-fb" style="position:relative;display:inline-flex">'
     +'<span data-on-click="toggleMrrFormula(this)" style="cursor:pointer;border:1px solid var(--border);border-radius:8px;padding:0 7px;font-size:9px;color:var(--text-2);font-weight:500">Формула</span>'
     +'<span class="mrr-fp" style="display:none;position:absolute;top:18px;right:0;z-index:60;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:9px 11px;width:290px;font-size:10px;font-weight:400;color:var(--text-1);box-shadow:var(--card-shadow);line-height:1.55">'
-    +'<b>MRR</b> = выручка за скользящие 30 дн. (списания + корректировки, без клиентов на паузе).<br>'
-    +'<b>Прогноз месяца</b> = Σ по клиентам: среднесуточное потребление за последние 7 дней × дней в месяце × тариф (per-GB); per-modem — цена × живые модемы.'
+    +'<b>Выручка 30д (факт)</b> = списания + корректировки за скользящие 30 дн., без клиентов на паузе.<br>'
+    +'<b>Run-rate (ожидание)</b> = прогноз месяца, НЕ выручка: Σ по клиентам — среднесуточное потребление за последние 7 дней × дней в месяце × тариф (per-GB); per-modem — цена × живые модемы.'
     +'</span></span></span></div>'
     +'<div style="flex:1;min-height:120px;position:relative"><canvas id="newFinTrendCanvas"></canvas></div></div>';
   el.innerHTML=probCard+trendCard+mrrCard+opCard;
@@ -3522,7 +3185,7 @@ function renderNewFinance(d){
     var churnColor = s.churn_rate_pct>=5?'var(--danger)':'var(--success)';
     // 2026-08-04: порядок по решению оператора — Выручка, Расходы, Прибыль,
     // Маржинальность, дальше остальное; кнопка ввода затрат прямо в карточке.
-    var _cost = s.total_cost||0, _rev30 = s.mrr||0, _profit = _rev30-_cost;
+    var _cost = s.total_cost||0, _rev30 = (s.revenue_30d_fact!=null?s.revenue_30d_fact:s.mrr)||0, _profit = _rev30-_cost;
     var _marginPct = _rev30>0 ? Math.round(_profit/_rev30*1000)/10 : null;
     function qtile(l,v,c){ return '<div class="kpi-tile"><div class="l">'+l+'</div><div class="v" style="font-size:16px'+(c?';color:'+c:'')+'">'+v+'</div></div>'; }
     function cbar(l,sub,pct,col){ pct=pct||0; return '<div style="margin-bottom:9px">'+
@@ -3533,10 +3196,12 @@ function renderNewFinance(d){
     var hq = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h3 style="margin:0;font-size:14px;font-weight:700;color:var(--text-0)">Качество выручки</h3>'
       + '<button class="btn btn-sm" style="font-size:10px;padding:3px 9px" title="Ввести затраты месяца (себестоимость)" data-on-click="openFinanceCostsModal()">⚙ Затраты</button></div>';
     hq += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">';
-    hq += qtile('Выручка 30д', _fmtRub(_rev30), null);
+    hq += qtile('Выручка 30д (факт)', _fmtRub(_rev30), null);
     hq += qtile('Расходы (мес.)', _cost>0?_fmtRub(_cost):'—', null);
     hq += qtile('Прибыль 30д', _cost>0?_fmtRub(_profit):'—', _cost>0?(_profit>=0?'var(--success)':'var(--danger)'):null);
     hq += qtile('Маржинальность', (_marginPct==null||!_cost)?'—':_marginPct+'%', (_marginPct!=null&&_cost)?(_marginPct>=50?'var(--success)':_marginPct>=25?'var(--warning)':'var(--danger)'):null);
+    // A9: run-rate — ожидание при текущем темпе, НЕ выручка; рядом с фактом, но подписан отдельно.
+    hq += qtile('Run-rate (ожидание)', s.run_rate_eom!=null?_fmtRub(s.run_rate_eom):(s.forecast_eom?_fmtRub(s.forecast_eom):'—'), null);
     hq += qtile('NRR · 3 мес', s.nrr_pct==null?'—':s.nrr_pct+'%', nrrColor);
     hq += qtile('Churn · мес', s.churn_rate_pct==null?'—':s.churn_rate_pct+'%', churnColor);
     hq += qtile('ARPU', _fmtRub(s.arpu), null);
@@ -3583,7 +3248,7 @@ function renderNewFinClients(){
   if(!d){ el.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:8px">Финансовые данные ещё загружаются…</div>'; return; }
   var rows = (d.per_client||[]).filter(function(p){return !(p.mrr===0 && p.mrr_prev===0 && !p.balance);});
   if(!rows.length){ el.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:8px">Нет данных</div>'; return; }
-  var h = '<table class="ztbl"><thead><tr><th>Клиент</th><th style="text-align:left">Тариф</th><th>MRR</th><th>Δ M/M</th><th>% MRR</th><th>Баланс</th></tr></thead><tbody>';
+  var h = '<table class="ztbl"><thead><tr><th>Клиент</th><th style="text-align:left">Тариф</th><th>Выручка 30д</th><th>Δ M/M</th><th>% выручки</th><th>Баланс</th></tr></thead><tbody>';
   rows.forEach(function(p){
     var pausedTag = p.paused?' <span style="font-size:9px;background:var(--warning);color:#fff;padding:1px 5px;border-radius:8px">пауза</span>':'';
     var deltaCol = p.mrr_delta_pct==null?'var(--text-3)':p.mrr_delta_pct>=0?'var(--success)':'var(--danger)';
@@ -3682,7 +3347,7 @@ function loadNewReconciliation(){
 
 // ── Clients table (with revenue + balance columns merged) ─────────
 // Объединённая таблица: «Клиенты-трафик» + «Клиенты по доходности» в одну.
-// Сегодня/Вчера по трафику + Тариф/MRR/Δ/доля/Баланс. Всё центрировано, равные отступы.
+// Сегодня/Вчера по трафику + Тариф/Выручка 30д/Δ/доля/Баланс. Всё центрировано, равные отступы.
 function renderNewClientTable(d){
   var el = document.getElementById('newClientTable');
   if(!el) return;
@@ -3705,7 +3370,7 @@ function renderNewClientTable(d){
   rows.sort(function(a,b){ return (b.mrr||0)-(a.mrr||0) || (b.today-a.today); });
   var th = function(t,left){ return '<th'+(left?' style="text-align:left"':'')+'>'+t+'</th>'; };
   var h = '<table class="ztbl">';
-  h += '<thead><tr>'+th('Клиент',1)+th('Live')+th('Сегодня')+th('Тариф')+th('MRR')+th('Δ M/M')+th('% MRR')+th('Баланс')+'</tr></thead><tbody>';
+  h += '<thead><tr>'+th('Клиент',1)+th('Live')+th('Сегодня')+th('Тариф')+th('Выручка 30д')+th('Δ M/M')+th('% выручки')+th('Баланс')+'</tr></thead><tbody>';
   rows.forEach(function(r,i){
     var col = CHART_COLORS.clients[i % CHART_COLORS.clients.length];
     var liveColor = r.modems===0 ? 'var(--text-3)' : (r.online===r.modems ? 'var(--success)' : (r.online>0 ? 'var(--warning)' : 'var(--danger)'));
@@ -4171,87 +3836,6 @@ function loadFailoverLog(){
     })
     .catch(function(e){if(box)box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:12px">Ошибка: '+esc(e.message)+'</div>';});
 }
-
-// ── AI sales bots panel ──────────────────────────────────────────────────────
-function aisVal(id){var e=document.getElementById(id);return e?String(e.value||'').trim():'';}
-function loadAiSales(){aisStatus();aisLoadKeys();aisLoadQueue();}
-function aisStatus(){
-  api(API+'/api/admin/ai_sales/status').then(function(d){
-    var el=document.getElementById('ais_status');if(!el)return;
-    var k=d.keys||{},c=d.counts||{};
-    el.innerHTML='Anthropic '+(k.anthropic?'✅':'❌')+' · Tavily '+(k.tavily?'✅':'❌')+' · CRM '+(d.crm&&d.crm.configured?'⚙️':'❌')
-      +'  ·  ниш '+(c.niches||0)+' · компаний '+(c.companies||0)+' · контактов '+(c.contacts||0)+' (в Twenty '+(c.pushed||0)+')'
-      +(d.running?'  ·  <span style="color:var(--warning)">▶ задача выполняется</span>':'');
-    if(d.last_job&&d.last_job.status==='running')aisPollJob(d.last_job.id);
-  }).catch(function(){});
-}
-function aisLoadKeys(){
-  api(API+'/api/admin/settings').then(function(s){
-    var a=document.getElementById('ais_anthropic'),t=document.getElementById('ais_tavily'),u=document.getElementById('ais_crmurl');
-    if(a&&!a.value)a.value=s.anthropic_api_key||'';
-    if(t&&!t.value)t.value=s.tavily_api_key||'';
-    if(u&&!u.value)u.value=s.crm_db_url||'';
-  }).catch(function(){});
-}
-function aisSaveKeys(){
-  var body={anthropic_api_key:aisVal('ais_anthropic'),tavily_api_key:aisVal('ais_tavily'),crm_db_url:aisVal('ais_crmurl')};
-  api(API+'/api/admin/settings',{method:'PUT',json:body}).then(function(d){
-    showToast(d.ok?'Ключи сохранены':'Ошибка','success');aisStatus();
-  }).catch(function(){showToast('Ошибка сети','error')});
-}
-function aisCrmPing(){
-  var el=document.getElementById('ais_crmping');if(el)el.textContent='проверяю…';
-  api(API+'/api/admin/ai_sales/crm_ping').then(function(d){
-    if(!el)return;el.textContent=d.ok?('OK · компаний в CRM: '+d.companies):('Ошибка: '+(d.error||''));el.style.color=d.ok?'#2e9e5b':'var(--danger)';
-  }).catch(function(){if(el)el.textContent='Ошибка сети'});
-}
-function aisRun(bot){
-  var body={bot:bot};
-  if(bot==='lookalikes'){body.seed=aisVal('ais_seed');body.count=parseInt(aisVal('ais_count')||'5',10);if(!body.seed){showToast('Укажите seed-компанию','error');return}}
-  if(bot==='contacts'){body.count=20}
-  if(bot==='push'&&!confirm('Залить найденные компании и контакты в Twenty CRM?'))return;
-  api(API+'/api/admin/ai_sales/run',{method:'POST',json:body}).then(function(d){
-    if(d.error){showToast(d.error,'error');return}
-    showToast('Запущено (#'+d.jobId+')','success');aisPollJob(d.jobId);
-  }).catch(function(){showToast('Ошибка сети','error')});
-}
-function aisPollJob(id){
-  var box=document.getElementById('ais_job');if(!box)return;box.style.display='';
-  (function tick(){
-    api(API+'/api/admin/ai_sales/job/'+id).then(function(j){
-      if(!j||j.error){box.innerHTML='—';return}
-      var pct=j.total?Math.round((j.done/(j.total||1))*100):(j.status==='done'?100:8);
-      box.innerHTML='<b>Задача #'+j.id+' ('+esc(j.bot)+')</b> — '+esc(j.progress||'')
-        +'<div class="hbar-bar-wrap" style="height:8px;margin-top:6px;background:var(--bg-3);border-radius:4px"><div class="count-bar" style="width:'+pct+'%;height:8px;border-radius:4px"></div></div>'
-        +(j.status==='error'?'<div style="color:var(--danger);margin-top:6px">Ошибка: '+esc(j.error||'')+'</div>':'')
-        +(j.status==='done'?'<div style="color:#2e9e5b;margin-top:6px">✅ Готово: '+esc(j.result||'')+'</div>':'');
-      if(j.status==='running'){setTimeout(tick,2500)}else{aisStatus();aisLoadQueue()}
-    }).catch(function(){});
-  })();
-}
-function aisLoadQueue(){
-  api(API+'/api/admin/ai_sales/queue').then(function(d){
-    var el=document.getElementById('ais_queue');if(!el)return;
-    var comps=d.companies||[];
-    if(!comps.length){el.innerHTML='<div style="color:var(--text-3)">Пусто — запусти бота «Похожие + ЛПР».</div>';return}
-    var h='';
-    comps.forEach(function(c){
-      h+='<div style="border-bottom:1px solid var(--border);padding:7px 0">'
-        +'<b style="color:var(--text-0)">'+esc(c.company)+'</b>'
-        +(c.website?' · <a href="'+esc(c.website)+'" target="_blank" style="color:var(--accent);text-decoration:none">'+esc((c.website||'').replace(/^https?:\/\//,''))+'</a>':'')
-        +(c.is_seed?' <span style="font-size:10px;color:var(--text-3)">SEED</span>':'')
-        +(c.status==='pushed'?' <span style="font-size:10px;color:#2e9e5b">→ Twenty</span>':'');
-      (c.contacts||[]).forEach(function(k){
-        h+='<div style="margin-left:16px;color:var(--text-1);padding-top:2px">👤 '+esc(k.name)+' — '+esc(k.role)
-          +(k.linkedin?' · <a href="'+esc(k.linkedin)+'" target="_blank" style="color:var(--accent)">LinkedIn</a>':'')
-          +(k.contact?' · <span style="color:var(--text-3)">'+esc(k.contact)+'</span>':'')+'</div>';
-      });
-      h+='</div>';
-    });
-    el.innerHTML=h;
-  }).catch(function(){});
-}
-
 
 
 // ===== Unified client detail modal (tabbed «Детали») =====

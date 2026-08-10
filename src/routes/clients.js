@@ -13,13 +13,14 @@ const fsPromises = require('fs/promises');
 const path = require('path');
 const { sha256hex } = require('../utils/secrets');
 const financeEvents = require('../billing/events');   // WP7.2: cache invalidation on client mutations
+const { referralCommission } = require('../billing/referral');   // A1/Р6: комиссия 10%, единая константа
 function _emitFinanceWrite() {
   try { financeEvents.emit('finance-write'); } catch (_) { /* best-effort */ }
 }
 
 module.exports = function createClientsRouter(deps) {
   const {
-    db, logger, authMiddleware, adminMiddleware,
+    logger, authMiddleware, adminMiddleware,
     validate, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema,
     fetchAllServersDataCached, mergeServerData, fetchApi,
     atomicCredit, atomicDebit,
@@ -30,20 +31,14 @@ module.exports = function createClientsRouter(deps) {
     clients,
     clientById, clientByLogin, clientByApiKey, clientByInn, clientByResetToken,
     users,
-    _ledgerInsert, _ledgerEntryParams, ledgerDb, clientsDb, paymentsDb, documentsDb,
+    _ledgerInsert, _ledgerEntryParams, ledgerDb, documentsDb,
     DOCUMENTS_DIR,
     validateClientInput,
     appSettings,
   } = deps;
   const r = express.Router();
-  // Prepared statement pulled from clientsDb. Stage 13.1: the
-  // referral_balance update used to live here too, but it's now owned
-  // by atomic.js so referral commission lands in the same txn as the
-  // payment that triggered it.
-  const _clientUpdateBalance = clientsDb.updateBalanceStmt();
 
-  // 19.07: recalcFromLedger здесь больше не используется — delete-роут перешёл
-  // на локальную дельту (см. комментарий в роуте). Реплей остался в
+  // 19.07: recalcFromLedger здесь больше не используется. Реплей остался в
   // src/billing/recalc.js как диагностика; enforcement — ledgerFinalBalance.
 
 r.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
@@ -72,7 +67,7 @@ r.get('/api/admin/clients', authMiddleware, adminMiddleware, (req, res) => {
 });
 
 r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCreateSchema), async (req, res) => {
-  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, contractDate, address, clientType, allowDebt, maxDebt, slaUptimePct, slaMaxLatencyMs, slaMaxErrorPct, slaAutoCredit } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, referred_by, inn, kpp, legalName, contractInfo, contractDate, address, clientType, allowDebt, maxDebt } = req.body;
   if (!name || !portName || !login || !password) {
     return res.status(400).json({ error: 'name, portName, login, password required' });
   }
@@ -123,10 +118,6 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
     billingPaused: false,
     allowDebt: !!allowDebt,
     maxDebt: typeof maxDebt === 'number' ? maxDebt : null,
-    slaUptimePct:    typeof slaUptimePct    === 'number' ? slaUptimePct    : 99,
-    slaMaxLatencyMs: typeof slaMaxLatencyMs === 'number' ? slaMaxLatencyMs : 1000,
-    slaMaxErrorPct:  typeof slaMaxErrorPct  === 'number' ? slaMaxErrorPct  : 5,
-    slaAutoCredit:   !!slaAutoCredit,
     clientType: clientType || 'individual',   // 2026-08-04: базово физ. лицо (реша оператора)
     createdAt: new Date().toISOString()
   };
@@ -170,7 +161,7 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
   // BUG-12: Validate input
   const valErr = validateClientInput(req.body, false);
   if (valErr) return res.status(400).json({ error: valErr });
-  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, contractDate, address, autoActs, autoBills, billingPaused, clientType, allowDebt, maxDebt, slaUptimePct, slaMaxLatencyMs, slaMaxErrorPct, slaAutoCredit } = req.body;
+  const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, contractDate, address, autoActs, autoBills, billingPaused, clientType, allowDebt, maxDebt } = req.body;
   if (login && login !== old.login) {
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
     delete users[old.login];
@@ -205,10 +196,6 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
     billingPaused: billingPaused !== undefined ? billingPaused : (old.billingPaused || false),
     allowDebt: allowDebt !== undefined ? !!allowDebt : !!old.allowDebt,
     maxDebt: maxDebt !== undefined ? (typeof maxDebt === 'number' ? maxDebt : null) : (old.maxDebt !== undefined ? old.maxDebt : null),
-    slaUptimePct:    slaUptimePct    !== undefined ? Number(slaUptimePct)    : (typeof old.slaUptimePct    === 'number' ? old.slaUptimePct    : 99),
-    slaMaxLatencyMs: slaMaxLatencyMs !== undefined ? Number(slaMaxLatencyMs) : (typeof old.slaMaxLatencyMs === 'number' ? old.slaMaxLatencyMs : 1000),
-    slaMaxErrorPct:  slaMaxErrorPct  !== undefined ? Number(slaMaxErrorPct)  : (typeof old.slaMaxErrorPct  === 'number' ? old.slaMaxErrorPct  : 5),
-    slaAutoCredit:   slaAutoCredit   !== undefined ? !!slaAutoCredit         : !!old.slaAutoCredit,
     clientType: clientType !== undefined ? clientType : (old.clientType || 'legal')
   };
   clients[idx] = updated;
@@ -216,6 +203,16 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
   rebuildClientMaps();
   users[updated.login] = { passwordHash: updated.passwordHash, portNameFilter: updated.portName, source: 'client', clientId: updated.id };
   _emitFinanceWrite();
+
+  // B1 (Р14): журнал смены цены (кто/когда/старая/новая). Акт mid-month
+  // разбивается по price_per_unit из ledger, а эта запись — аудит ручной
+  // операции и источник для per_modem (UPDATE clients.price покрыт и
+  // db_audit-триггером — миграция 056).
+  const oldPrice = old.price || 0;
+  if (price !== undefined && parseFloat(price) !== oldPrice) {
+    auditLog(req.user.login, 'price_change', { clientId: old.id, clientName: old.name, oldPrice, newPrice: parseFloat(price), ip: getClientIp(req) });
+    logActivity('billing', 'info', 'price_change', old.name, `Цена изменена: ${oldPrice} → ${parseFloat(price)} ₽`, { client_id: old.id, old_price: oldPrice, new_price: parseFloat(price) });
+  }
   
   const { password: _p, passwordHash: _ph, ...safeClient } = updated;
   res.json({ ok: true, client: safeClient });
@@ -269,7 +266,6 @@ r.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, valida
   if (isNaN(parsedAmount) || parsedAmount <= 0 || parsedAmount > 100000000) {
     return res.status(400).json({ error: 'Invalid amount: must be positive and reasonable' });
   }
-  if (!client.payments) client.payments = [];
 
   // Stage 13.1: referral commission is computed up-front and applied INSIDE
   // the same atomicCredit transaction. Before this fix a crash between the
@@ -281,7 +277,7 @@ r.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, valida
     if (referrer) {
       referralOpts = {
         referrerId: referrer.id,
-        delta: Math.round(parsedAmount * 0.15 * 100) / 100,
+        delta: referralCommission(parsedAmount),
       };
     }
   }
@@ -295,17 +291,16 @@ r.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, valida
     note: note || 'Пополнение баланса'
   }, referralOpts ? { referral: referralOpts } : undefined);
 
-  // Push payment AFTER atomicCredit succeeds (МЕД-3)
-  client.payments.push({ amount: parsedAmount, date, note: note || '', createdAt: new Date().toISOString() });
-
   if (referral) {
     const referrer = clientById.get(referral.referrerId);
-    if (referrer) logger.info(`[Referral] Credited ${referralOpts.delta.toFixed(2)} to ${referrer.name} (15% of ${parsedAmount}) — atomic with payment`);
+    if (referrer) logger.info(`[Referral] Credited ${referralOpts.delta.toFixed(2)} to ${referrer.name} (10% of ${parsedAmount}) — atomic with payment`);
   }
 
   saveClients(clients);
   auditLog(req.user.login, 'add_payment', { clientId: client.id, clientName: client.name, amount: parsedAmount, note: note || '', ip: getClientIp(req) });
-  res.json({ ok: true, payments: client.payments, balance: client.balance });
+  // C5: payment list is derived from billing_ledger (the in-memory
+  // client.payments[] array is gone).
+  res.json({ ok: true, payments: _listLedgerPayments(client.id), balance: client.balance });
 });
 
 r.post('/api/admin/clients/:id/charge', authMiddleware, adminMiddleware, (req, res) => {
@@ -350,10 +345,8 @@ function _mapLedgerToPayment(entry) {
     ledgerDbId: entry.db_id,
   };
 }
-r.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req, res) => {
-  const client = clientById.get(req.params.id);
-  if (!client) return res.status(404).json({ error: 'Client not found' });
-  const all = ledgerDb.listByClient(client.id);
+function _listLedgerPayments(clientId) {
+  const all = ledgerDb.listByClient(clientId);
   // P0-2: deleting a payment records a payment_reversal pointing back at it
   // (reversedLedgerId). Hide the reversed original from the list so it
   // disappears, while the reversal stays in the full ledger as an audit fact.
@@ -361,71 +354,21 @@ r.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req, 
     all.filter(e => e.type === 'payment_reversal' && e.reversedLedgerId != null)
        .map(e => e.reversedLedgerId)
   );
-  const payments = all
+  return all
     .filter(e => (e.type === 'payment' || e.type === 'bank_payment') && !reversed.has(e.db_id))
     .map(_mapLedgerToPayment)
     .reverse(); // listByClient is ORDER BY id ASC; UI expects newest-first
-  res.json(payments);
-});
-
-r.delete('/api/admin/clients/:id/payment/:index', authMiddleware, adminMiddleware, (req, res) => {
-  
+}
+r.get('/api/admin/clients/:id/payments', authMiddleware, adminMiddleware, (req, res) => {
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
-  const payIdx = parseInt(req.params.index);
-  if (!client.payments || payIdx < 0 || payIdx >= client.payments.length) {
-    return res.status(400).json({ error: 'Invalid payment index' });
-  }
-  const deletedPayment = client.payments[payIdx];
-  const deletedAmount = parseFloat(deletedPayment.amount) || 0;
-
-  // Require amount confirmation to prevent race condition with index shifts
-  const expectedAmount = parseFloat(req.query.amount || req.body?.amount);
-  if (isNaN(expectedAmount) || Math.abs(Math.round(expectedAmount * 100) - Math.round(deletedAmount * 100)) > 0) {
-    return res.status(409).json({ error: 'Payment amount mismatch — list may have changed, please refresh' });
-  }
-  // Stage 13.2: explicit single-row delete so the additive saveClients
-  // sync doesn't have to delete-by-client anymore. If the in-memory entry
-  // has a db_id (loaded from DB or stamped by an earlier saveClients), use
-  // it. Older entries that pre-date 13.2 won't have one — fall through and
-  // saveClients won't re-insert because we splice from the array.
-  client.payments.splice(payIdx, 1);
-  // Stage 13.3: ledger reversal (the `payment_reversal` entry added
-  // below by atomicDebit) is the recorded fact. The legacy `payments`
-  // table isn't written from saveClients anymore, so no per-row cleanup
-  // here — historic rows that pre-date Stage 13.3 just stay (read-only,
-  // ignored by the new GET /:id/payments path which reads from ledger).
-
-  // Stage 13.1: referral reversal lives in the same atomicDebit txn as
-  // the balance reversal — same atomicity guarantee as the credit path.
-  let referralOpts = null;
-  if (client.referred_by) {
-    const referrer = clientById.get(client.referred_by);
-    if (referrer) {
-      referralOpts = {
-        referrerId: referrer.id,
-        delta: -Math.round(deletedAmount * 0.15 * 100) / 100,
-      };
-    }
-  }
-
-  const { balanceBefore, balanceAfter, referral } = atomicDebit(client.id, deletedAmount, {
-    type: 'payment_reversal',
-    date: new Date().toISOString().slice(0, 10),
-    timestamp: new Date().toISOString(),
-    amount: deletedAmount,
-    currency: client.currency || 'RUB',
-    note: 'Отмена оплаты администратором'
-  }, referralOpts ? { referral: referralOpts } : undefined);
-
-  if (referral) {
-    const referrer = clientById.get(referral.referrerId);
-    if (referrer) logger.info(`[Referral] Reversed ${Math.abs(referralOpts.delta).toFixed(2)} from ${referrer.name} (payment deletion) — atomic with reversal`);
-  }
-
-  saveClients(clients);
-  res.json({ ok: true, payments: client.payments, balance: client.balance });
+  res.json(_listLedgerPayments(client.id));
 });
+
+// C5: DELETE /api/admin/clients/:id/payment/:index removed — it indexed the
+// legacy in-memory client.payments[] array (a boot-time snapshot that never
+// saw fresh payments, so the route was non-functional). Reversal goes through
+// the by-ledger route below.
 
 // P0-2 (Path A): delete a payment by its stable ledger db_id (not array index,
 // which was a different source AND order than the GET list — the old route was
@@ -453,7 +396,7 @@ r.delete('/api/admin/clients/:id/payment/by-ledger/:ledgerDbId', authMiddleware,
   let referralOpts = null;
   if (client.referred_by) {
     const referrer = clientById.get(client.referred_by);
-    if (referrer) referralOpts = { referrerId: referrer.id, delta: -(Math.round(paidAmount * 0.15 * 100) / 100) };
+    if (referrer) referralOpts = { referrerId: referrer.id, delta: -referralCommission(paidAmount) };
   }
 
   let result;
@@ -477,14 +420,6 @@ r.delete('/api/admin/clients/:id/payment/by-ledger/:ledgerDbId', authMiddleware,
     if (referrer) logger.info(`[Referral] Reversed ${Math.abs(referralOpts.delta).toFixed(2)} from ${referrer.name} (payment ${ledgerDbId} deleted) — atomic with reversal`);
   }
 
-  // Best-effort: keep the legacy in-memory client.payments array consistent.
-  // The ledger is authoritative; this just avoids a stale count if anything
-  // still reads the array.
-  if (Array.isArray(client.payments)) {
-    const i = client.payments.findIndex(p => Math.round((parseFloat(p.amount) || 0) * 100) === Math.round(paidAmount * 100));
-    if (i >= 0) client.payments.splice(i, 1);
-  }
-
   saveClients(clients);
   auditLog(req.user.login, 'delete_payment', { clientId: client.id, clientName: client.name, amount: paidAmount, ledgerDbId, ip: getClientIp(req) });
   res.json({ ok: true, balance: client.balance });
@@ -501,9 +436,9 @@ r.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, re
   // returned the OLDEST `limit` entries (slice(0,100) of an id-ASC list), so a
   // client with >100 entries (e.g. one charged daily for months) had its recent
   // charges fall onto an unloaded page 2 — the history view then showed a stale
-  // "last charge" (looked like billing had stopped). Tag each row with its
-  // absolute index in the ASC list BEFORE reversing, so the index-based delete
-  // route (/ledger/:entryIndex) still targets the right row.
+  // "last charge" (looked like billing had stopped). Each row also carries its
+  // stable ledgerDbId — the UI reverses payments by it (A4: правки только
+  // через сторнирование, индексное удаление запрещено).
   const newestFirst = allEntries.map((e, i) => ({ ...e, _idx: i })).reverse();
   const entries = newestFirst.slice(offset, offset + limit);
   // Per-month segmentation (computed over the FULL ledger so totals are complete
@@ -530,7 +465,7 @@ r.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, re
   res.json({
     balance: client.balance,
     last_snapshot: client.last_traffic_snapshot,
-    entries: entries.map(({ db_id, ...e }) => e),   // keep _idx, drop internal db_id
+    entries: entries.map(({ db_id, ...e }) => ({ ...e, ledgerDbId: db_id })),   // ledgerDbId — стабильный id строки для сторно-роута
     monthly,
     total: allEntries.length,
     limit,
@@ -538,61 +473,13 @@ r.get('/api/admin/clients/:id/ledger', authMiddleware, adminMiddleware, (req, re
   });
 });
 
+// A4: физическое удаление ledger-записей запрещено. Старый роут удалял строку
+// и сдвигал снапшоты balance_before/after последующих записей, но НЕ сторнировал
+// реферальную комиссию — баланс реферера расходился с ledger. Правки только
+// через сторнирование: DELETE /api/admin/clients/:id/payment/by-ledger/:ledgerDbId
+// (payment_reversal в одной транзакции с откатом баланса и комиссии).
 r.delete('/api/admin/clients/:id/ledger/:entryIndex', authMiddleware, adminMiddleware, (req, res) => {
-  const client = clientById.get(req.params.id);
-  if (!client) return res.status(404).json({ error: 'Client not found' });
-  const entries = ledgerDb.listByClient(client.id);
-  const idx = parseInt(req.params.entryIndex, 10);
-  if (isNaN(idx) || idx < 0 || idx >= entries.length) return res.status(400).json({ error: 'Invalid entry index' });
-
-  const entry = entries[idx];
-
-  // 19.07 (fix P1 реконсиляции): пересчёт после удаления — ЛОКАЛЬНАЯ дельта,
-  // а не полный реплей recalcFromLedger. Реплей Σ(after−before) игнорирует
-  // исторические разрывы цепочки (ретро-вставки, майские adjustments) и на
-  // клиенте с разрывами ПЕРЕЗАПИСЫВАЛ баланс мусором (ВАЙЛДБОКС: −138k → +3.3M).
-  // Правильно: balance −= дельта удаляемой записи, а снапшоты всех последующих
-  // строк сдвигаются на −дельту — цепочка в точке удаления смыкается, и
-  // последний balance_after снова равен client.balance (контракт реконсиляции).
-  let delta;
-  if (entry.balance_before != null && entry.balance_after != null) {
-    delta = Math.round((entry.balance_after - entry.balance_before) * 100) / 100;
-  } else if (['correction', 'manual_charge', 'adjustment'].includes(entry.type)) {
-    // Без снапшотов знак таких записей неопределим (amount хранится без знака) —
-    // слепое удаление сломало бы баланс. Единичные легаси-строки — только вручную.
-    return res.status(409).json({ error: 'Запись без снапшотов баланса: направление операции неизвестно, автоудаление запрещено. Удалите вручную с ручной корректировкой баланса.' });
-  } else {
-    const a = entry.amount != null ? entry.amount : (entry.cost || 0);
-    delta = entry.type === 'charge' ? -a : a;   // типизированный знак для легаси-строк
-  }
-
-  let newBalance;
-  try {
-    db.transaction(() => {
-      if (entry.db_id) {
-        ledgerDb.deleteById(entry.db_id);
-        db.prepare(`
-          UPDATE billing_ledger
-             SET balance_before = CASE WHEN balance_before IS NULL THEN NULL ELSE ROUND(balance_before - ?, 2) END,
-                 balance_after  = CASE WHEN balance_after  IS NULL THEN NULL ELSE ROUND(balance_after  - ?, 2) END
-           WHERE client_id = ? AND id > ?
-        `).run(delta, delta, client.id, entry.db_id);
-      }
-      newBalance = Math.round(((typeof client.balance === 'number' ? client.balance : 0) - delta) * 100) / 100;
-      _clientUpdateBalance.run(newBalance, client.id);
-    })();
-  } catch (e) {
-    logger.error('[Ledger] Delete transaction failed: ' + e.message);
-    return res.status(500).json({ error: 'Delete failed', details: e.message });
-  }
-  client.balance = newBalance;
-
-  // Stage 4: billingLedger in-memory mirror removed. listByClient() always
-  // reads fresh from billing_ledger so no client-side cache update needed
-  // after ledgerDb.deleteById() already mutated the DB inside the txn above.
-  logger.info(`[Ledger] Deleted entry #${idx} (${entry.type}) for client ${client.name}, recalculated balance: ${client.balance}`);
-  auditLog(req.user.login, 'delete_ledger_entry', { clientId: client.id, clientName: client.name, entryType: entry.type, amount: entry.amount || entry.cost, ip: getClientIp(req) });
-  res.json({ ok: true, newBalance: client.balance });
+  return res.status(405).json({ error: 'Удаление операций из ledger запрещено: правки только через сторнирование (DELETE /payment/by-ledger/:ledgerDbId)' });
 });
 
 r.post('/api/admin/clients/:id/balance_adjust', authMiddleware, adminMiddleware, validate(BalanceAdjustSchema), (req, res) => {

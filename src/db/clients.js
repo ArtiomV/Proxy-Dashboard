@@ -18,8 +18,8 @@ function init(db) {
     billing_type, price, currency, balance, api_key, api_key_prefix, referral_code, referred_by, referral_balance,
     reset_token, inn, kpp, legal_name, contract_info, address, auto_acts, auto_bills,
     last_traffic_snapshot, created_at, client_type, billing_paused, allow_debt, max_debt,
-    sla_uptime_pct, sla_max_latency_ms, sla_max_error_pct, sla_auto_credit, contract_date)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    contract_date, debt_blocked)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       login=excluded.login, password=excluded.password, password_hash=excluded.password_hash,
       port_name=excluded.port_name, name=excluded.name, contact=excluded.contact,
@@ -35,11 +35,8 @@ function init(db) {
       last_traffic_snapshot=excluded.last_traffic_snapshot, client_type=excluded.client_type,
       billing_paused=excluded.billing_paused, allow_debt=excluded.allow_debt,
       max_debt=excluded.max_debt,
-      sla_uptime_pct=excluded.sla_uptime_pct,
-      sla_max_latency_ms=excluded.sla_max_latency_ms,
-      sla_max_error_pct=excluded.sla_max_error_pct,
-      sla_auto_credit=excluded.sla_auto_credit,
       contract_date=excluded.contract_date,
+      debt_blocked=excluded.debt_blocked,
       updated_at=datetime('now')`);
 
   S.deleteById = db.prepare('DELETE FROM clients WHERE id = ?');
@@ -68,11 +65,8 @@ function upsertRow(c) {
     c.clientType || 'legal', c.billingPaused ? 1 : 0,
     c.allowDebt ? 1 : 0,
     typeof c.maxDebt === 'number' ? c.maxDebt : null,
-    typeof c.slaUptimePct    === 'number' ? c.slaUptimePct    : 99,
-    typeof c.slaMaxLatencyMs === 'number' ? c.slaMaxLatencyMs : 1000,
-    typeof c.slaMaxErrorPct  === 'number' ? c.slaMaxErrorPct  : 5,
-    c.slaAutoCredit ? 1 : 0,
-    c.contractDate || ''   // #4 settlement date (mig 036)
+    c.contractDate || '',   // #4 settlement date (mig 036)
+    c.debtBlocked ? 1 : 0   // B3 (Р13): автоблок по долгу (миграция 056)
   );
 }
 

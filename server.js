@@ -31,19 +31,19 @@ const { safeWriteFile: _safeWriteFile, _fileLocks } = require('./src/utils/files
 // only keeps verifyJwtSignature because dbAudit's webhook signature check
 // uses it on initial setup before the router mounts.
 const { verifyJwtSignature } = require('./src/tochka/jwt');
-const { findClientByPayer, buildNaturalKey } = require('./src/billing/payer-match');
+const { findClientByPayer, buildNaturalKey, resolveNaturalKey } = require('./src/billing/payer-match');
 const { tochkaRequest: _tochkaRequest } = require('./src/tochka/api');
 const billing = require('./src/billing/atomic');
 // MONTH_NAMES_RU / buildTochkaActBody / etc. live in src/tochka/documents.js —
 // tochka-cron and the tochka router require them directly (WP6.5).
 const tgBot = require('./src/telegram/bot');
 const alerts = require('./src/telegram/alerts');     // Stage 18.13 alert framework
+const financeEvents = require('./src/billing/events');   // B3: client-credit → debt-block restore
 const failoverEngine = require('./src/jobs/failover'); // Stage 19 — modem failover engine
 const tgSummary = require('./src/telegram/daily_summary');
 const aiInsights = require('./src/telegram/ai_insights');
 const simulator = require('./src/simulator/engine');
 const simulatorDb = require('./src/db/simulator');
-const paymentsDb = require('./src/db/payments');
 const documentsDb = require('./src/db/documents');
 const { settleBillsOnPayment } = require('./src/billing/bill-settle');
 const clientsDb = require('./src/db/clients');
@@ -123,7 +123,6 @@ try {
 // a table-group and exposes named functions used by routes. Inited here so
 // statements are prepared exactly once after migrations have run.
 simulatorDb.init(db);
-paymentsDb.init(db);
 documentsDb.init(db);
 clientsDb.init(db);
 ledgerDb.init(db);
@@ -219,12 +218,12 @@ const dbStmts = {
      customer_code, matched, matched_client_id, matched_client_name, auto_credit,
      dismissed, source, tochka_payment_id, received_at, natural_key)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-  findBankPaymentByNaturalKey: db.prepare('SELECT id FROM bank_payments WHERE natural_key = ? LIMIT 1'),  // Stage 18.6
-  // Sync-reconcile (auto-credit by INN): need matched/dismissed state of an
-  // existing row, plus a ledger-dup guard so we never credit a transaction the
-  // ledger already has (covers legacy rows that predate natural_key + crash
-  // recovery between atomicCredit and the match-mark).
-  findBankPaymentRowByNaturalKey: db.prepare('SELECT id, matched, dismissed FROM bank_payments WHERE natural_key = ? LIMIT 1'),
+  // A3: all rows sharing a natural-key base — the plain key itself or a
+  // '#N' sequence sibling (two genuinely different payments can collide on
+  // payer|amount|date|purpose in one day). resolveNaturalKey() picks dup vs
+  // sequence. Replaces the Stage 18.6 single-row natural-key lookups.
+  // Sync-reconcile also needs matched/dismissed state of the existing row.
+  findBankPaymentsByNaturalKeyBase: db.prepare("SELECT id, payment_id, tochka_payment_id, natural_key, matched, dismissed FROM bank_payments WHERE natural_key = ? OR substr(natural_key, 1, ?) = ? ORDER BY id"),
   ledgerHasBankPaymentOn: db.prepare("SELECT 1 FROM billing_ledger WHERE client_id = ? AND type = 'bank_payment' AND ABS(amount - ?) < 0.01 AND date = ? LIMIT 1"),
   findBankPaymentByPaymentId: db.prepare('SELECT * FROM bank_payments WHERE payment_id = ? AND auto_credit = 1 LIMIT 1'),
   findBankPaymentByPaymentIdAny: db.prepare('SELECT id FROM bank_payments WHERE payment_id = ? LIMIT 1'),
@@ -422,9 +421,10 @@ const CLIENTS_FILE = path.join(__dirname, 'clients.json'); // JSON fallback for 
 /** atomicCredit / atomicDebit — delegated to src/billing/atomic.js */
 function atomicCredit(...args) { return billing.atomicCredit(...args); }
 function atomicDebit(...args) { return billing.atomicDebit(...args); }
-// payments + documents + closing + bills prepared statements moved into
-// src/db/payments.js and src/db/documents.js (Stage 2). Callers use the
-// named functions on those modules.
+// documents + closing + bills prepared statements moved into
+// src/db/documents.js (Stage 2). Callers use the named functions on that
+// module. (src/db/payments.js удалён в C5 — таблица payments read-only,
+// читатели переведены на billing_ledger.)
 
 // Get signed expense amount from ledger entry:
 // charges: always positive (cost), corrections: signed based on balance change
@@ -452,15 +452,12 @@ function clientFromRow(r) {
     billingPaused: r.billing_paused === 1, clientType: r.client_type || 'legal',
     allowDebt: r.allow_debt === 1,
     maxDebt: r.max_debt != null ? r.max_debt : null,
-    slaUptimePct:    r.sla_uptime_pct    != null ? r.sla_uptime_pct : 99,
-    slaMaxLatencyMs: r.sla_max_latency_ms != null ? r.sla_max_latency_ms : 1000,
-    slaMaxErrorPct:  r.sla_max_error_pct  != null ? r.sla_max_error_pct : 5,
-    slaAutoCredit:   r.sla_auto_credit === 1,
+    debtBlocked: r.debt_blocked === 1,
     last_traffic_snapshot: r.last_traffic_snapshot
       ? (typeof r.last_traffic_snapshot === 'string' ? JSON.parse(r.last_traffic_snapshot) : r.last_traffic_snapshot)
       : { timestamp: null, month_bytes: 0 },
     createdAt: r.created_at || '',
-    payments: [], documents: [], closingDocuments: [], bills: []
+    documents: [], closingDocuments: [], bills: []
   };
 }
 
@@ -478,14 +475,9 @@ function loadClients() {
   }
   const clientsList = rows.map(clientFromRow);
   for (const client of clientsList) {
-    client.payments = paymentsDb.listByClient(client.id).map(r => ({
-      // Stage 13.2: stamp db_id so saveClients() can skip rows that
-      // already exist in the DB. Without this every save call would
-      // re-insert the entire history.
-      db_id: r.id,
-      amount: r.amount, date: r.date, note: r.note || '', source: r.source || 'manual',
-      paymentId: r.payment_id || undefined, createdAt: r.created_at || ''
-    }));
+    // C5: in-memory client.payments[] removed (boot snapshot of the read-only
+    // `payments` table that never saw fresh payments). All readers use
+    // billing_ledger via ledgerDb now.
     client.documents = documentsDb.listDocs(client.id).map(r => ({
       id: r.id, name: r.name, fileName: r.file_name, mimeType: r.mime_type || '', date: r.date || ''
     }));
@@ -522,9 +514,6 @@ function saveClients(clientsList) {
       // Stage 13.2: this used to wipe each sub-table per client and reinsert
       // from the in-memory copy — a partial in-memory array would silently
       // erase real rows in the DB. The new contract is additive:
-      //   - payments: rows without an `db_id` are NEW pushes → INSERT and
-      //     stamp the returned rowid back on the entry so the next save
-      //     call skips it.
       //   - documents / closing: their `id` is a hex token assigned
       //     at push time; INSERT OR IGNORE means existing rows survive, new
       //     ones get appended.
@@ -617,8 +606,7 @@ function logActivity(category, level, action, target, message, details = null) {
     logger.error(`[SystemLog] Write failed: ${e.message}`);
   }
   // Urgent alert: forward critical/error events to Telegram immediately if
-  // configured. Throttled per (action, target) to avoid alert storms — only
-  // first occurrence per 15 min for the same key.
+  // configured. Throttled per (action, target) to avoid alert storms.
   try {
     if (level === 'critical' || (level === 'error' && _shouldUrgentAlert(action))) {
       _emitUrgentAlert(level, action, target, message);
@@ -640,34 +628,32 @@ const URGENT_ACTIONS = new Set([
 ]);
 function _shouldUrgentAlert(action) { return URGENT_ACTIONS.has(action); }
 
-const _urgentAlertCooldown = new Map();
+// D4 (2026-08): весь контур переведён в rules-движок src/telegram/alerts.js.
+// logActivity больше НЕ шлёт Telegram сам — вызывает alerts.trigger(), где
+// живут кулдауны (900 сек = прежние 15 мин на (action,target), ruleId|dedupe),
+// per-rule вкл/выкл и запись в колокольчик. Немедленность сохранена: trigger()
+// шлёт синхронно в момент события. Гейт telegram_summary_enabled остаётся
+// здесь — framework про него не знает (он гейтит daily summary + этот контур).
 function _emitUrgentAlert(level, action, target, message) {
-  if (typeof tgBot === 'undefined' || typeof tgBot.sendMessage !== 'function') return;
   const token = appSettings.telegram_bot_token;
   const chatId = appSettings.telegram_chat_id;
   if (!token || !chatId || !appSettings.telegram_summary_enabled) return;
-  const key = action + '|' + (target || '');
-  const now = Date.now();
-  const last = _urgentAlertCooldown.get(key) || 0;
-  if (now - last < 15 * 60 * 1000) return; // 15-min cooldown
-  _urgentAlertCooldown.set(key, now);
-  // Trim cooldown map periodically — never grows beyond a few dozen keys.
-  if (_urgentAlertCooldown.size > 200) {
-    for (const [k, t] of _urgentAlertCooldown) if (now - t > 60 * 60 * 1000) _urgentAlertCooldown.delete(k);
-  }
-  const icon = level === 'critical' ? '🚨' : '⚠️';
-  const txt = `${icon} <b>${level.toUpperCase()}</b>\n<code>${String(action).slice(0, 60)}</code>${target ? ' · ' + String(target).slice(0, 60) : ''}\n${String(message).slice(0, 800)}`;
-  tgBot.sendMessage(token, chatId, txt, { parse_mode: 'HTML' }).catch(e => {
-    logger.warn('[UrgentAlert] Telegram send failed: ' + e.message);
-  });
-
-  // Stage 18.13: route specific URGENT_ACTIONS through the new alerts framework
-  // with richer formatting / per-rule cooldown / UI toggle support.
   try {
+    const payload = { level, action, target, message: String(message == null ? '' : message).slice(0, 800) };
+    // События с давними специальными правилами (Stage 18.13) — в них.
     if (action === 'db_backup_failed') {
       alerts.trigger('db_backup_failed', { error: message });
-    } else if (action === 'tochka_unverified_webhook' || action === 'tochka_sync_failed') {
-      // simple per-action streak counter — fires alert on 3rd consecutive failure
+    } else if (action === 'server_unreachable') {
+      alerts.trigger('server_unreachable', { server: target, error: message });
+    } else if (alerts.RULES[action]) {
+      alerts.trigger(action, payload);
+    } else {
+      // critical с произвольным action (integrity_regression, disk_low, …) —
+      // generic-правило: покрытие как у старого контура (любой critical → TG).
+      alerts.trigger('system_critical', payload);
+    }
+    // Stage 18.13: simple per-action streak counter — fires alert on 3rd consecutive failure
+    if (action === 'tochka_unverified_webhook' || action === 'tochka_sync_failed') {
       _tgFailStreak = (_tgFailStreak || 0) + 1;
       if (_tgFailStreak >= 3) {
         alerts.trigger('tochka_webhook_failed', { streak: _tgFailStreak, error: message });
@@ -782,36 +768,77 @@ function _decryptJson(payload) {
   throw lastErr || new Error('tochka config decrypt failed: no candidate key worked');
 }
 
-try {
-  if (fs.existsSync(TOCHKA_CONFIG_FILE)) {
-    const raw = fs.readFileSync(TOCHKA_CONFIG_FILE, 'utf8');
-    let parsed;
-    if (raw.trim().startsWith('{"v":1')) {
-      try { parsed = _decryptJson(raw); }
-      catch (e) {
-        const hasExplicitKey = !!(process.env.TOCHKA_CONFIG_KEY && /^[0-9a-f]{64}$/i.test(process.env.TOCHKA_CONFIG_KEY));
-        const hostNow = os.hostname();
-        // Distinguish "wrong explicit key" from "derived key drift after hostname change" —
-        // both are decrypt failures but they need different fixes from the operator.
-        if (hasExplicitKey) {
-          logger.error(`[Tochka] DECRYPT FAILED with explicit $TOCHKA_CONFIG_KEY. File was encrypted with a different key. ${e.message}`);
-        } else {
-          logger.error(`[Tochka] DECRYPT FAILED with derived key (hostname=${hostNow}). Most likely the hostname changed since the file was last saved. Set TOCHKA_CONFIG_KEY in .env or restore the previous hostname. ${e.message}`);
-        }
-        // Also surface in system_log so it shows up in the admin UI without needing SSH.
-        try { logActivity('system', 'error', 'tochka_decrypt_failed', null,
-          `Не удалось расшифровать tochka_config.json (hostname=${hostNow}). Проверьте \$TOCHKA_CONFIG_KEY или восстановите hostname.`,
-          { hostname: hostNow, hasExplicitKey }); } catch (_) { /* best-effort: error intentionally swallowed */ }
-        parsed = null;
-      }
-    } else {
-      // Plaintext legacy file → load and re-encrypt on first save.
-      parsed = JSON.parse(raw);
-      logger.info('[Tochka] Legacy plaintext config detected — will re-encrypt on next save');
-    }
-    if (parsed) Object.assign(tochkaConfig, parsed);
+// D1 (2026-08): канон хранения — kv_store, ключ 'tochka_config'. Формат:
+// JSON-объект, каждое непустое значение — 'enc1:' + AES-256-GCM (per-field,
+// переиспользует _encryptSettingVal/_decryptSettingVal — function declarations,
+// видны здесь благодаря hoisting). Запись идёт через kvSetCritical (shape-guard
+// 'tochka_config' в src/utils/kv-guard.js). Конфиг теперь живёт в dashboard.db,
+// поэтому автоматически попадает в ежедневный DbBackup.
+//
+// Приоритет источников при старте: .env (ниже) > kv_store > legacy-файл.
+// tochka_config.json — DEPRECATED read-only фолбэк на переходный период:
+// если kv пуст, а файл есть, мигрируем файл → kv (файл не удаляем и больше
+// не перезаписываем).
+function _encryptTochkaConfigKv(cfg) {
+  const out = {};
+  for (const [k, v] of Object.entries(cfg)) out[k] = v ? _encryptSettingVal(v) : '';
+  return JSON.stringify(out);
+}
+function _decryptTochkaConfigKv(raw) {
+  const obj = JSON.parse(raw);
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj)) throw new Error('tochka_config kv: not an object');
+  const out = {};
+  for (const [k, v] of Object.entries(obj)) {
+    out[k] = (typeof v === 'string' && v.startsWith('enc1:')) ? _decryptSettingVal(v) : (v || '');
   }
-} catch (e) { logger.info('[Tochka] Error loading config file: ' + e.message); }
+  return out;
+}
+function _readLegacyTochkaFile() {
+  if (!fs.existsSync(TOCHKA_CONFIG_FILE)) return null;
+  const raw = fs.readFileSync(TOCHKA_CONFIG_FILE, 'utf8');
+  let parsed;
+  if (raw.trim().startsWith('{"v":1')) {
+    try { parsed = _decryptJson(raw); }
+    catch (e) {
+      const hasExplicitKey = !!(process.env.TOCHKA_CONFIG_KEY && /^[0-9a-f]{64}$/i.test(process.env.TOCHKA_CONFIG_KEY));
+      const hostNow = os.hostname();
+      // Distinguish "wrong explicit key" from "derived key drift after hostname change" —
+      // both are decrypt failures but they need different fixes from the operator.
+      if (hasExplicitKey) {
+        logger.error(`[Tochka] DECRYPT FAILED with explicit $TOCHKA_CONFIG_KEY. File was encrypted with a different key. ${e.message}`);
+      } else {
+        logger.error(`[Tochka] DECRYPT FAILED with derived key (hostname=${hostNow}). Most likely the hostname changed since the file was last saved. Set TOCHKA_CONFIG_KEY in .env or restore the previous hostname. ${e.message}`);
+      }
+      // Also surface in system_log so it shows up in the admin UI without needing SSH.
+      try { logActivity('system', 'error', 'tochka_decrypt_failed', null,
+        `Не удалось расшифровать tochka_config.json (hostname=${hostNow}). Проверьте \$TOCHKA_CONFIG_KEY или восстановите hostname.`,
+        { hostname: hostNow, hasExplicitKey }); } catch (_) { /* best-effort: error intentionally swallowed */ }
+      return null;
+    }
+  } else {
+    // Plaintext legacy file → load and re-encrypt on first save.
+    parsed = JSON.parse(raw);
+    logger.info('[Tochka] Legacy plaintext config detected — will re-encrypt on migration to kv_store');
+  }
+  return parsed || null;
+}
+try {
+  let loaded = null;
+  const kvRow = _kvGet.get('tochka_config');
+  if (kvRow && kvRow.value) {
+    try { loaded = _decryptTochkaConfigKv(kvRow.value); }
+    catch (e) { logger.error('[Tochka] kv_store config unreadable (falling back to legacy file): ' + e.message); }
+  }
+  if (!loaded) {
+    loaded = _readLegacyTochkaFile();
+    if (loaded) {
+      const r = kvSetCritical('tochka_config', _encryptTochkaConfigKv(loaded), { source: 'tochka-file-migration' });
+      if (r.ok) logger.info('[Tochka] Migrated tochka_config.json → kv_store (file kept as deprecated read-only fallback)');
+      else logger.warn('[Tochka] kv migration failed: ' + (r.error || 'unknown'));
+    }
+  }
+  if (loaded) Object.assign(tochkaConfig, loaded);
+} catch (e) { logger.info('[Tochka] Error loading config: ' + e.message); }
 // .env overrides file config
 if (process.env.TOCHKA_JWT_TOKEN) tochkaConfig.jwt = process.env.TOCHKA_JWT_TOKEN;
 if (process.env.TOCHKA_CLIENT_ID) tochkaConfig.clientId = process.env.TOCHKA_CLIENT_ID;
@@ -825,15 +852,15 @@ if (process.env.TOCHKA_BANK_ACCOUNT) tochkaConfig.bankAccount = process.env.TOCH
 if (process.env.TOCHKA_BANK_NAME) tochkaConfig.bankName = process.env.TOCHKA_BANK_NAME;
 if (process.env.TOCHKA_BANK_BIC) tochkaConfig.bankBic = process.env.TOCHKA_BANK_BIC;
 if (process.env.TOCHKA_BANK_CORR_ACCOUNT) tochkaConfig.bankCorrAccount = process.env.TOCHKA_BANK_CORR_ACCOUNT;
-// Stage 15.1: returns the promise so admin routes can `await` it before
-// responding (so the UI never sees "saved" without an on-disk write).
-// safeWriteFile's internal .catch() already swallows rejections (the
-// returned promise resolves either way) — we add an explicit .catch
-// hook here so caller-side rejections still surface in our logs even if
-// the internal one is bypassed in the future.
+// Stage 15.1: returns a promise so admin routes can `await` it before
+// responding (so the UI never sees "saved" without a durable write).
+// D1: пишем в kv_store ('tochka_config', per-field enc1:, shape-guard) —
+// конфиг живёт в dashboard.db и попадает в DbBackup. tochka_config.json
+// больше НЕ перезаписываем: это deprecated read-only фолбэк (см. загрузку выше).
 function saveTochkaConfig() {
-  return safeWriteFile(TOCHKA_CONFIG_FILE, _encryptJson(tochkaConfig))
-    .catch(e => { logger.error('[Tochka] saveTochkaConfig failed:', e.message); });
+  const r = kvSetCritical('tochka_config', _encryptTochkaConfigKv(tochkaConfig), { source: 'saveTochkaConfig' });
+  if (!r.ok) logger.error('[Tochka] saveTochkaConfig failed: ' + (r.error || 'unknown'));
+  return Promise.resolve(!!r.ok);
 }
 
 // Tochka response field lookup that tolerates case variation. Tries the
@@ -1282,7 +1309,6 @@ function withClientsLock(fn) {
 // Ensure all clients have required fields (migration)
 let clientsMigrated = false;
 for (const c of clients) {
-  if (!c.payments) { c.payments = []; clientsMigrated = true; }
   if (!c.apiKey) {
     // Backfill for legacy rows: only the hash is stored; the plaintext is
     // unrecoverable by design — use "regenerate key" to issue a new one.
@@ -1300,11 +1326,14 @@ for (const c of clients) {
     clientsMigrated = true;
   }
   if (!c.documents) { c.documents = []; clientsMigrated = true; }
-  // Billing persistence: initialize balance from total payments
+  // Billing persistence: initialize balance from total payments (legacy
+  // JSON-fallback path only — first-time migration from clients.json; the
+  // array is dropped right after, C5: billing_ledger is the source of truth)
   if (c.balance === undefined) {
     c.balance = (c.payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
     clientsMigrated = true;
   }
+  delete c.payments;
   if (!c.last_traffic_snapshot) {
     c.last_traffic_snapshot = { timestamp: null, month_bytes: 0 };
     clientsMigrated = true;
@@ -1540,10 +1569,8 @@ const SETTINGS_DEFAULTS = {
   session_ttl_days: 30,
   billing_retry_delay_hours: 1,
   reconciliation_tolerance_gb: 0.01,
-  // CRM & auto-create
+  // Auto-create
   auto_create_interval_min: 10,
-  crm_check_interval_min: 10,
-  crm_reminder_days: 3,
   // Telegram daily summary
   telegram_bot_token: '',
   telegram_chat_id: '',
@@ -1556,12 +1583,18 @@ const SETTINGS_DEFAULTS = {
   tochka_strict_webhook: false,
   // ── ProxySmart SIM/health signals (Batch 1) ──────────────────────
   reboot_score_alert_threshold: 70,        // reboot_score ≥ this → «нужен ребут» alert
-  // ── Traffic reconciliation (WP1 ProxySmart data integration) ─────
-  traffic_recon_alert_pct: 10,             // расхождение ≥ этого % → алерт
-  traffic_recon_min_gb: 0.5,               // порты тише этого объёма не алертим (шум)
   // ── Domain guard (WP2): контроль доменов на bypass-боксах ────────
   domain_guard_servers: 'S2,S4',           // боксы со снятой hfilter-фильтрацией
-  retention_top_hosts_daily: 90            // дней истории top_hosts_daily / domain_guard_hits
+  retention_top_hosts_daily: 90,           // дней истории top_hosts_daily / domain_guard_hits
+  // ── Simulator (D11): нагрузочный симулятор — инструмент стенда, не прода ──
+  // «Не запускать в проде без необходимости»: по умолчанию ВЫКЛЮЧЕН —
+  // POST /api/admin/simulator/run отвечает 403. Blast radius: прогон гоняет
+  // трафик через тест-пул модемов и пишет сэмплы в БД — лимиты ниже держат
+  // его подальше от биллинга и вебхуков.
+  simulator_enabled: false,
+  simulator_max_duration_min: 30,    // потолок длительности прогона
+  simulator_max_workers: 50,         // потолок concurrency-воркеров
+  simulator_max_sse: 10              // лимит одновременных SSE-стримов
 };
 
 // Stage 14.1: appSettings lives in state with stable identity. Rebinds
@@ -1573,7 +1606,7 @@ const SETTINGS_DEFAULTS = {
 // WP7.5: keys whose VALUES are encrypted at rest in kv_store (see
 // _encryptSettingVal below). Declared before the settings load because the
 // migration right after the load needs it.
-const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'tavily_api_key']);
+const SENSITIVE_SETTINGS = new Set(['anthropic_api_key']);
 stateMod.setAppSettings({ ...SETTINGS_DEFAULTS });
 const appSettings = stateMod.state.appSettings;
 try {
@@ -1594,7 +1627,7 @@ try {
 } catch (e) { logger.error('Failed to load settings:', e.message); }
 
 // WP7.5 one-time migration: encrypt any plaintext sensitive settings at rest
-// (Anthropic/Tavily API keys) — after this, the kv blob never holds them raw.
+// (Anthropic API key) — after this, the kv blob never holds them raw.
 try {
   let migratedSecrets = 0;
   for (const k of SENSITIVE_SETTINGS) {
@@ -1611,7 +1644,7 @@ function saveSettings() {
   _kvSet.run('app_settings', JSON.stringify(appSettings));
 }
 
-// WP7.5: API secrets (Anthropic/Tavily) are encrypted at rest in kv_store —
+// WP7.5: API secrets (Anthropic) are encrypted at rest in kv_store —
 // AES-256-GCM, same key scheme as tochka_config. In kv_store they live as
 // 'enc1:' + payload; getSetting() decrypts transparently so readers need no
 // changes. GET /api/admin/settings masks them; PUT re-encrypts on write.
@@ -1661,7 +1694,18 @@ function getPriceForProxyCount(count) {
   for (const tier of sorted) {
     if (count >= tier.min_proxies) return tier.price;
   }
-  return tiers.length > 0 ? tiers[0].price : 23; // fallback
+  // B5/C7: раньше промах молча деградировал в tiers[0].price или хардкод 23 —
+  // клиент создавался с непредсказуемой ценой. Fallback оставлен (AutoCreate не
+  // должен падать), но теперь это громкое событие: warn в лог/system_log +
+  // TG-алерт оператору (правило pricing_tier_miss, cooldown 6ч — AutoCreate
+  // может создавать несколько клиентов за прогон).
+  const fallback = tiers.length > 0 ? tiers[0].price : 23;
+  logger.warn(`[Pricing] getPriceForProxyCount(${count}): ни один тир pricing_tiers не подошёл — fallback ${fallback} ₽. Проверьте сетку (min_proxies должен начинаться с 1).`);
+  logActivity('system', 'warn', 'pricing_tier_miss', null,
+    `pricing_tiers: промах для ${count} прокси — fallback ${fallback} ₽`,
+    { count, fallback, tiers_count: tiers.length });
+  try { alerts.trigger('pricing_tier_miss', { count, fallback }); } catch (_) { /* alert best-effort */ }
+  return fallback;
 }
 
 // parseBwToBytes, normalizeOperator extracted to src/utils/traffic.js
@@ -1772,13 +1816,6 @@ app.set('trust proxy', 1); // trust first proxy (nginx) — req.ip uses x-forwar
 // tests/frontend-delegation.test.js.
 // Chart.js CDN whitelisted by hash via the existing <script integrity>
 // attribute; 'self' covers the extracted local JS.
-// The CRM tab embeds Twenty CRM (CRM_URL) in an <iframe>. Without an explicit
-// frame-src the directive falls back to default-src 'self', so the cross-origin
-// CRM frame is blocked by CSP. Allow exactly the configured CRM origin.
-const _crmFrameOrigin = (() => {
-  try { return process.env.CRM_URL ? new URL(process.env.CRM_URL).origin : null; }
-  catch (_) { return null; }
-})();
 app.use(helmet({
   contentSecurityPolicy: {
     useDefaults: true,
@@ -1790,7 +1827,7 @@ app.use(helmet({
       'font-src':    ["'self'", 'https://fonts.gstatic.com', 'data:'],
       'img-src':     ["'self'", 'data:', 'https:'],
       'connect-src': ["'self'"],
-      'frame-src':   ["'self'", ...(_crmFrameOrigin ? [_crmFrameOrigin] : [])],
+      'frame-src':   ["'self'"],
       'frame-ancestors': ["'none'"],
     },
   },
@@ -2162,7 +2199,18 @@ const injectOfflineModems = _modemSvc.injectOfflineModems;
 proxySmart.init({
   http, https, logger, apiServers, safeWriteFile,
   SERVER_CACHE_FILE,
-  updateKnownModems, injectOfflineModems, injectRotationData
+  updateKnownModems, injectOfflineModems, injectRotationData,
+  // D7: shape-валидация ответов /apix/* — несоответствие контракту → TG-алерт
+  // (правило proxysmart_contract_mismatch, cooldown сутки на бокс).
+  onContractMismatch: (serverName, violations) => {
+    try {
+      alerts.trigger('proxysmart_contract_mismatch', {
+        server: serverName,
+        count: violations.length,
+        sample: violations.slice(0, 5).join('; '),
+      });
+    } catch (_) { /* alert best-effort */ }
+  },
 });
 
 // Refresh rotation cache on startup and periodically
@@ -2554,7 +2602,8 @@ function recordIpChange(key, oldIp, newIp, timestamp) {
   }
 }
 
-// Combined tracking: IP changes + uptime percentage (runs every 5 min)
+// Combined tracking: IP changes + uptime percentage (runs every
+// tracking_interval_min, default 3 min — см. startup.js)
 // Uptime fix: skip rotating/rebooting modems, skip unreachable servers
 // modem_meta statements → src/db/tracking.js
 const _modemMetaUpsert = trackingDb.modemMetaUpsertStmt();
@@ -2691,7 +2740,7 @@ function pushSpeedtestEntry(key, entry) {
   saveSpeedtestHistory();
 }
 
-// Stage 9: проверки качества прокси и SLA вынесены в джобы-модули.
+// Stage 9: проверки качества прокси вынесены в джобы-модули.
 // Экземпляры создаются здесь — все их зависимости уже определены,
 // а callsites ниже по файлу (load-time и runtime) получают делегаты.
 const _proxyCheckJobs = require('./src/jobs/proxy-checks').create({
@@ -2702,13 +2751,6 @@ const _proxyCheckJobs = require('./src/jobs/proxy-checks').create({
 });
 const checkProxyLatency = _proxyCheckJobs.checkProxyLatency;
 const runNightlySpeedtests = _proxyCheckJobs.runNightlySpeedtests;
-
-const _slaJobs = require('./src/jobs/sla').create({
-  trackingDb, uptimeTracking, getClients: () => clients, getMoscowToday,
-  atomicCredit, logger, logActivity,
-});
-const computeClientSlaMetrics = _slaJobs.computeClientSlaMetrics;
-const runSlaCheck = _slaJobs.runSlaCheck;
 
 function getSpeedtestLatest() {
   const latest = {};
@@ -2851,6 +2893,7 @@ app.use(require('./src/routes/public-api')({
   parseBwToBytes, trafficBytesToGb,
   getClientByApiKey: findClientByApiKey,
   getClientByLogin: (l) => clientByLogin.get(l),
+  ledgerDb,
 }));
 
 // /api/admin/cache/invalidate + /admin + /api/docs + /api/admin/vpn_profile
@@ -2892,7 +2935,6 @@ app.use(require('./src/routes/analytics')({
   trafficBytesToGb, parseTrafficValue, parseBwToBytes,
   normalizeOperator,
   SERVER_COUNTRIES,
-  computeClientSlaMetrics,
   clients, clientById, clientByLogin,
   dailyTraffic, ipTracking, uptimeTracking, knownModems,
   portKeyToPortName,
@@ -3003,15 +3045,10 @@ app.use(require('./src/routes/proxy-checks')({
   curlCheckProxy, normalizeOperator,
   dbStmts,
   appSettings,
-  // topHostsCache + aggregateTopHosts defined later in server.js → lazy refs
-  getTopHostsCache: () => topHostsCache,
-  aggregateTopHosts: (...args) => aggregateTopHosts(...args),
 }));
 
 // Latency analytics — daily percentiles, overall distribution, and prior-period
 // comparison. Used by the "Распределение задержек" card.
-
-// Latency per-day scatter — individual check points for a single day
 
 // ============================================================================
 // PHASE 3 — "Система" tab analytics endpoints
@@ -3028,23 +3065,6 @@ app.use(require('./src/routes/proxy-checks')({
 // 3.5 Capacity planning
 
 // 3.6 System health dashboard
-
-// ============================================================================
-// PHASE 4 — SLA per client
-// ============================================================================
-
-// Compute SLA metrics for a single client.
-// computeClientSlaMetrics + runSlaCheck moved to src/jobs/sla.js (Stage 9);
-// делегаты созданы выше (_slaJobs).
-
-// Endpoint: per-client SLA status
-// SLA routes moved into src/routes/sla.js (Stage 3).
-app.use(require('./src/routes/sla')({
-  db, logger, authMiddleware, adminMiddleware,
-  computeClientSlaMetrics,
-  getClientById: (id) => clientById.get(id),
-  getClients: () => clients,
-}));
 
 // Manual proxy check (single or bulk)
 
@@ -3097,7 +3117,7 @@ app.use(require('./src/routes/clients')({
   // Stage 4 finish: maps are stable references via src/state — no more shims.
   clientById, clientByLogin, clientByApiKey, clientByInn, clientByResetToken,
   users,
-  _ledgerInsert, _ledgerEntryParams, ledgerDb, clientsDb, paymentsDb, documentsDb,
+  _ledgerInsert, _ledgerEntryParams, ledgerDb, clientsDb, documentsDb,
   DOCUMENTS_DIR,
   validateClientInput,
   appSettings,
@@ -3119,8 +3139,6 @@ app.use(require('./src/routes/clients')({
 
 
 
-
-// CRM translate endpoint removed — translations applied directly to DB
 
 // API Servers management
 // Servers + settings routes moved to src/routes/servers.js (Stage 3).
@@ -3149,7 +3167,7 @@ app.use(require('./src/routes/servers')({
 
 
 // Send a test telegram summary for an arbitrary date (default = yesterday MSK).
-// Telegram + AI insights + CRM moved into src/routes/telegram-crm.js (Stage 3).
+// Telegram + AI insights moved into src/routes/telegram-crm.js (Stage 3).
 app.use(require('./src/routes/telegram-crm')({
   logger, authMiddleware, adminMiddleware,
   tgBot, tgSummary, aiInsights,
@@ -3335,7 +3353,7 @@ try {
 
 // Stage 4 finish: aggregateTopHosts (113 lines) moved to
 // src/jobs/top-hosts.js. Lazy init; the setter rebinds the let above so
-// /api/admin/top_hosts_aggregated reads the freshest snapshot.
+// the cache stays visible to server.js (startup uses it for the first-run check).
 let _topHostsJob = null;
 function _initTopHostsJob() {
   if (_topHostsJob) return _topHostsJob;
@@ -3383,6 +3401,22 @@ async function runDomainGuard() { return _initDomainGuardJob().runDomainGuard();
 // использование rescheduleSpeedtests).
 
 // Single flow: fetch → save daily_traffic → charge → retry on failure
+// B3 (Р13): автоблок должников-физиков — пост-биллинговый проход (вызывается
+// из jobs/billing) + восстановление «дата до» после любого зачисления
+// (событие client-credit из billing/atomic — ручной платёж, webhook, sync).
+const _debtBlock = require('./src/jobs/debt-block').create({
+  logger, logActivity, alerts, auditLog,
+  proxyConf, fetchApi, parseHtmlInputFields, findServer, proxySmart,
+  ledgerDb, saveClients, getMoscowNow,
+  fetchAllServersDataCached,
+  clients,
+});
+financeEvents.on('client-credit', ({ clientId }) => {
+  const c = clientById.get(clientId);
+  if (!c) return;
+  _debtBlock.restoreAfterCredit(c).catch(e => logger.error('[DebtBlock] restore error:', e.message));
+});
+
 // runDailyBilling extracted to src/jobs/billing.js (WP6.4) — verbatim move.
 // withClientsLock is passed in so the billing↔saveClients mutex is preserved;
 // lastBillingRunSummary is synced back after each run for /api/admin/health.
@@ -3405,6 +3439,19 @@ const { runDailyBilling } = require('./src/jobs/billing').create({
   saveClients, saveDailyTraffic,
   withClientsLock,
   setLastBillingRunSummary: (s) => { lastBillingRunSummary = s; },
+  debtBlock: _debtBlock,
+});
+
+// Фаза 0 (§2 ТЗ): теневой тест тарификации — ежедневное сравнение V1/V2 в
+// billing_shadow_log БЕЗ списаний + еженедельный отчёт по понедельникам.
+const _shadowBilling = require('./src/jobs/shadow-billing').create({
+  db, logger, logActivity,
+  fetchAllServersData,
+  getMoscowYesterday, getMoscowNow,
+  trafficDb,
+  getClientBytesForMskDate, computeClientYesterdayBytes, trafficBytesToGb,
+  clients,
+  appSettings, tgBot,
 });
 
 // runMonthlyReconciliation moved to src/jobs/monthly-reconciliation.js (Stage 9).
@@ -3434,6 +3481,7 @@ function _initTochkaCronJobs() {
     logActivity, generateId,
     getPriceForProxyCount,
     ledgerDb,
+    documentsDb,
     getMoscowNow,
     getTochkaConfig: () => tochkaConfig,
     tochkaRequest,
@@ -3507,7 +3555,7 @@ app.use(require('./src/routes/tochka')({
 // below passes every dep explicitly; call sites (lazy wrapper at ~4939, the
 // scheduled sync, src/routes/tochka.js via deps) are unchanged.
 const { runTochkaSync } = require('./src/jobs/tochka-sync').create({
-  tochkaConfig, logger, tochkaRequest, buildNaturalKey, dbStmts,
+  tochkaConfig, logger, tochkaRequest, buildNaturalKey, resolveNaturalKey, dbStmts,
   findClientByPayer, clientByInn, clients, atomicCredit, settleBillsOnPayment,
   documentsDb, logActivity, saveClients, alerts, insertBankPaymentToDb,
   _resetTochkaFailStreak,
@@ -3573,7 +3621,7 @@ function buildDocHtml(type, doc, client, billAmount) {
 // Simulator routes moved into src/routes/simulator.js (Stage 3).
 app.use(require('./src/routes/simulator')({
   db, logger, authMiddleware, adminMiddleware,
-  simulator, simulatorDb,
+  simulator, simulatorDb, getSetting,
   fetchAllServersDataCached, SERVER_COUNTRIES,
   auditLog,
 }));
@@ -3583,11 +3631,6 @@ app.use(require('./src/routes/simulator')({
 // Stage 18.13 — alert rules CRUD + test endpoint
 app.use(require('./src/routes/alerts')({
   logger, authMiddleware, adminMiddleware, appSettings, kvSetCritical, setSettings,
-}));
-
-// Экспорт Twenty CRM в Excel-совместимый CSV (BOM + «;»); см. src/routes/crm-export.js
-app.use(require('./src/routes/crm-export')({
-  logger, authMiddleware, adminMiddleware, appSettings, setSettings,
 }));
 
 // Stage 18.15 — bell endpoints (list/badge/read/dismiss). See module header.
@@ -3679,12 +3722,6 @@ app.use(require('./src/routes/billing-ext')({
   auditLog, logActivity,
 }));
 
-// AI sales bots panel (lead-gen agents: look-alike research, contact finding,
-// push to Twenty). See src/routes/ai-sales.js + src/agents/*.
-app.use(require('./src/routes/ai-sales')({
-  db, logger, authMiddleware, adminMiddleware, getSetting, logActivity,
-}));
-
 app.use('/api', (req, res) => {
   res.status(404).json({
     success: false,
@@ -3722,9 +3759,11 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
     autoCreateMissingClients, checkProxyLatency, proxyCheckRef: _proxyCheckRef,
-    runSlaCheck, runAutoReboot, dbAudit, tochkaConfig, runTochkaSync,
+    runAutoReboot, dbAudit, tochkaConfig, runTochkaSync,
     runRetentionCleanup, cleanupStalePortMappings,
     runDailyBilling, runMonthlyReconciliation,
+    runShadowBilling: _shadowBilling.runShadowBilling,
+    runShadowBillingWeekly: _shadowBilling.runShadowBillingWeekly,
     autoGenerateMonthlyActs, autoGenerateMonthlyBills, syncBillStatuses,
     aiInsights, simulator, tgSummary, tgBot, clientById,
     kvSetCritical, kvGet: _kvGet, kvSet: _kvSet, knownModems, clients, getStaleNicks,
@@ -3735,31 +3774,6 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
   });
 
 });
-
-const CRM_DB_URL = process.env.CRM_DB_URL || '';
-const CRM_WS = process.env.CRM_WORKSPACE || 'workspace_1wekp8bkkvyv4c57kfv5uljgp';
-
-// Stage 9: checkCrmPaymentConfirmations (53 lines) moved to
-// src/jobs/crm-sync.js. Lazy init for same TDZ reason as the other jobs.
-let _crmSyncJob = null;
-function _initCrmSyncJob() {
-  if (_crmSyncJob) return _crmSyncJob;
-  _crmSyncJob = require('./src/jobs/crm-sync').create({
-    logger, logActivity,
-    CRM_DB_URL, CRM_WS,
-    getAppSettings: () => appSettings,
-  });
-  return _crmSyncJob;
-}
-async function checkCrmPaymentConfirmations() {
-  return _initCrmSyncJob().checkCrmPaymentConfirmations();
-}
-
-// Run CRM payment check periodically
-checkCrmPaymentConfirmations().catch(e => { if (e.code !== 'MODULE_NOT_FOUND') logger.error('[CRM] Initial check error:', e.message); });
-_intervals.push(setInterval(() => {
-  checkCrmPaymentConfirmations().catch(e => { if (e.code !== 'MODULE_NOT_FOUND') logger.error('[CRM] Interval error:', e.message); });
-}, (appSettings.crm_check_interval_min || 10) * 60000));
 
 let _shutdownInProgress = false;
 function gracefulShutdown(signal) {
@@ -3847,4 +3861,4 @@ process.on('uncaughtException', (err) => {
 // Expose internals for the supertest harness (NODE_ENV=test). Production
 // code paths don't reach for this — the start-via-`node server.js` flow
 // runs to completion above and never `require()`s its own exports.
-module.exports = { app, db, saveClients, injectOfflineModems, knownModems, saveKnownModems, apiServers, SERVER_COUNTRIES, rebuildServerCountries, updateKnownModems };
+module.exports = { app, db, saveClients, injectOfflineModems, knownModems, saveKnownModems, apiServers, SERVER_COUNTRIES, rebuildServerCountries, updateKnownModems, getPriceForProxyCount, ledgerExpense };

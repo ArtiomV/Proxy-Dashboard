@@ -42,6 +42,30 @@ module.exports = function createClientPortalRouter(deps) {
     getTochkaConfig,
   } = deps;
   const r = express.Router();
+
+  // B3 (Р13): портал-баннер блокировки/предупреждения. Критерий «за 3 дня» —
+  // баланс ≤ 3 × среднесуточное списание за 7 дн (тот же, что в джобе
+  // debt-block; юрлица и allow_debt=1 баннера не получают никогда).
+  function _avgDailyCharge7d(entries) {
+    const today = getMoscowToday(); // "YYYY-MM-DD"
+    const d7 = getMoscowNow();
+    d7.setDate(d7.getDate() - 7);
+    const sevenDaysAgoStr = d7.toLocaleDateString('en-CA'); // exclusive lower bound
+    const last7dTotal = (entries || [])
+      .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date > sevenDaysAgoStr && e.date < today)
+      .reduce((sum, e) => sum + ledgerExpense(e), 0);
+    return Math.round((last7dTotal / 7) * 100) / 100;
+  }
+  function _debtStatus(clientInfo, avgDailyCharge7d) {
+    if (!clientInfo || clientInfo.clientType === 'legal' || clientInfo.allowDebt) return null;
+    const balance = clientInfo.balance || 0;
+    if (balance <= 0) return { state: clientInfo.debtBlocked ? 'blocked' : 'debt', balance };
+    if (avgDailyCharge7d > 0 && balance <= 3 * avgDailyCharge7d) {
+      return { state: 'warning', balance, daysLeft: Math.floor(balance / avgDailyCharge7d) };
+    }
+    return null;
+  }
+
   // Single ownership-check deps (WP2) — every "client owns modem" gate below
   // goes through src/modems/ownership.js with one priority chain.
   const _ownershipDeps = { fetchAllServersDataCached, mergeServerData, knownModems, db };
@@ -55,9 +79,13 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
     const merged = mergeServerData(results, req.user.portNameFilter);
     const clientInfo = clientByLogin.get(req.user.login);
     if (clientInfo) {
-      const totalPayments = (clientInfo.payments || []).reduce((sum, p) => sum + (parseFloat(p.amount) || 0), 0);
       // Current month expense from billing ledger
       const ledgerEntries = ledgerDb.listByClient(clientInfo.id);
+      // C5: total payments come from billing_ledger (payment + bank_payment −
+      // payment_reversal). The legacy client.payments[] in-memory snapshot
+      // (boot-loaded from the read-only `payments` table) is gone — it never
+      // saw fresh payments.
+      const totalPayments = ledgerDb.paymentsTotal(ledgerEntries);
       const currentMonthPrefix = getMoscowToday().slice(0, 7);
       const monthExpense = ledgerEntries
         .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date.startsWith(currentMonthPrefix))
@@ -89,6 +117,18 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         if (lhRow && lhRow.total) lastHourGb = trafficBytesToGb(lhRow.total);
       }
 
+      // B3 (Р13): портал-баннер — статус долга/блокировки + ближайшая «дата до»
+      // по портам (истекающая аренда — клиентский контур ProxyExpiryCheck).
+      let earliestExpiry = null;
+      for (const list of Object.values(merged.ports || {})) {
+        for (const p of list || []) {
+          const vb = p && p.PROXY_VALID_BEFORE;
+          if (!vb) continue;
+          const t = Date.parse(vb);
+          if (!isNaN(t) && (earliestExpiry === null || t < earliestExpiry)) earliestExpiry = t;
+        }
+      }
+
       merged.billing = {
         billingType: clientInfo.billingType || 'per_gb',
         price: clientInfo.price || 0,
@@ -99,6 +139,8 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         liveMonthGb,
         billedMonthGb: Math.round(billedMonthGb * 1000) / 1000,
         lastHourGb,
+        debtStatus: _debtStatus(clientInfo, _avgDailyCharge7d(ledgerEntries)),
+        expiresAt: earliestExpiry !== null ? new Date(earliestExpiry).toISOString().slice(0, 10) : null,
         // Masked: only the prefix is shown (keys are hashed at rest since
         // migration 043). A lost key is re-issued by admin via regenerate.
         apiKey: clientInfo.apiKeyPrefix ? clientInfo.apiKeyPrefix + '••••••••' : ''
@@ -193,14 +235,7 @@ r.get('/api/billing_history', authMiddleware, (req, res) => {
     .reduce((sum, e) => sum + ledgerExpense(e), 0);
 
   // Average daily charge over last 7 days: sum charges for days [today-7 .. today-1] / 7
-  const today = getMoscowToday(); // "YYYY-MM-DD"
-  const d7 = getMoscowNow();
-  d7.setDate(d7.getDate() - 7);
-  const sevenDaysAgoStr = d7.toLocaleDateString('en-CA'); // exclusive lower bound
-  const last7dTotal = allEntries
-    .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date > sevenDaysAgoStr && e.date < today)
-    .reduce((sum, e) => sum + ledgerExpense(e), 0);
-  const avgDailyCharge7d = Math.round((last7dTotal / 7) * 100) / 100;
+  const avgDailyCharge7d = _avgDailyCharge7d(allEntries);
 
   res.json({
     balance: clientInfo.balance,
@@ -212,6 +247,8 @@ r.get('/api/billing_history', authMiddleware, (req, res) => {
       avgDailyCharge7d,
       daysUntilZero: avgDailyCharge7d > 0 ? Math.floor(clientInfo.balance / avgDailyCharge7d) : null
     },
+    // B3 (Р13): портал-баннер (blocked/debt/warning) — рендерится на вкладке «История баланса».
+    debtStatus: _debtStatus(clientInfo, avgDailyCharge7d),
     
     entries: filtered.map(({ db_id, ...e }) => e)
   });

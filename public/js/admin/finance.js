@@ -1,198 +1,14 @@
 // public/js/admin/finance.js — finance tabs (WP6.3 carve-out from admin.js,
 // VERBATIM): Финансы tab (dashboard, costs), ops documents/acts/bills,
-// bank config/documents/bills/payments, MRR/revenue charts.
+// bank config/documents/bills/payments, revenue charts.
 
-function setFinPeriod(p,btn){
-  _finPeriod=p;
-  document.querySelectorAll('.fin-period-btn').forEach(function(b){b.classList.remove('active')});
-  if(btn)btn.classList.add('active');
-  var oldPeriod=accPeriod;
-  setAccPeriodSilent(p);
-  renderFinancesTab(collectTrafficData());
-  setAccPeriodSilent(oldPeriod);
-}
-function setAccPeriodSilent(p){
-  accPeriod=p;
-  // update getTrafficFields without re-rendering traffic tab
-}
 function shortCurrency(val){return Math.round(val).toLocaleString('ru-RU')+' ₽'}
-// Replaced by renderFinancesTabNew (calls /api/admin/finance_dashboard).
-// Old per-client traffic table left below for reference / debug, but main entry
-// point now hits the new SaaS-style dashboard.
+// Entry point kept for delegated-helpers finSetPeriod; delegates to
+// renderFinancesTabNew (calls /api/admin/finance_dashboard). The old
+// per-client traffic table was removed with #tab-traffic (C4).
 function renderFinancesTab(d){
   return renderFinancesTabNew();
 }
-function _renderFinancesTabOld(d){
-  if(!d)d=collectTrafficData();if(!d)return;
-  var daysEl=getDaysElapsed();
-  var sortedClients=(currentData.clients||[]).slice().sort(function(a,b){
-    var aKey=a.portName||a.username||'';var bKey=b.portName||b.username||'';
-    var aT=d.modemTraffic.filter(function(m){return m.pn===aKey}).reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
-    var bT=d.modemTraffic.filter(function(m){return m.pn===bKey}).reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
-    return bT-aT;
-  });
-  var clientStats=[];var totalRevenue=0;var totalTrafficBytes=0;var totalPaid=0;var totalCharged=0;
-  sortedClients.forEach(function(cl,i){
-    var ctKey=cl.portName||cl.username||cl.name||'';
-    var clModems=d.modemTraffic.filter(function(m){return m.pn===ctKey});
-    var modemCount=clModems.length;
-    var monBytes=clModems.reduce(function(s,m){return s+(m.monIn||0)+(m.monOut||0)},0);
-    var prevBytes=clModems.reduce(function(s,m){return s+(m.prevIn||0)+(m.prevOut||0)},0);
-    var monGb=monBytes/1e9;var prevGb=prevBytes/1e9;
-    var charged=0;var tariffStr='—';
-    var bt=cl.billingType||'';var price=cl.price||0;
-    if(bt==='per_gb'){charged=monGb*price;tariffStr=price+'₽/ГБ';}
-    else if(bt==='per_modem'){charged=price*modemCount;tariffStr=price+'₽/мод';}
-    totalRevenue+=charged;totalTrafficBytes+=monBytes;totalCharged+=charged;
-    var paid=0;(cl.payments||[]).forEach(function(p){paid+=p.amount||0});totalPaid+=paid;
-    var balance=cl.balance||0;
-    var costPerGb=monGb>0?Math.round(charged/monGb):0;
-    var vsPrev=prevGb>0?Math.round((monGb-prevGb)/prevGb*100):null;
-    var color=CHART_COLORS.clients[i%CHART_COLORS.clients.length];
-    // Sparkline: daily traffic last 7 days from modem data
-    var sparkData=[];
-    clModems.forEach(function(m){if(m.dailyArr&&m.dailyArr.length>0)for(var di=0;di<m.dailyArr.length;di++){sparkData[di]=(sparkData[di]||0)+m.dailyArr[di]}});
-    var spark7=sparkData.slice(-7);while(spark7.length<7)spark7.unshift(0);
-    clientStats.push({cl:cl,ctKey:ctKey,modemCount:modemCount,monBytes:monBytes,monGb:monGb,prevGb:prevGb,charged:charged,tariffStr:tariffStr,balance:balance,costPerGb:costPerGb,vsPrev:vsPrev,color:color,paid:paid,spark7:spark7});
-  });
-  var totalGb=totalTrafficBytes/1e9;
-  var avgRubPerGb=totalGb>0?Math.round(totalRevenue/totalGb):0;
-  var activeModemsCount=d.modemTraffic.filter(function(m){return(m.monIn||0)+(m.monOut||0)>0}).length;
-  var debtClientsCount=clientStats.filter(function(s){return s.balance<0}).length;
-  var projectedMonthly=daysEl>0?Math.round(totalRevenue/daysEl*30):0;
-  var revenueVsPrev=clientStats.reduce(function(s,c){return s+(c.prevGb*(c.cl.price||0))},0);
-  var revenueGrowth=revenueVsPrev>0?Math.round((totalRevenue-revenueVsPrev)/revenueVsPrev*100):null;
-  var avgRevenuePerModem=activeModemsCount>0?Math.round(totalRevenue/activeModemsCount):0;
-  var activeClients=clientStats.filter(function(s){return s.monBytes>0}).length;
-  var arpu=activeClients>0?Math.round(totalRevenue/activeClients):0;
-  var revenuePerDay=daysEl>0?Math.round(totalRevenue/daysEl):0;
-
-  var out='<div style="padding:14px 24px">';
-
-  // Block A: Header + period selector
-  var finPeriod=localStorage.getItem('fin_period')||'7d';
-  out+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
-  out+='<h2 style="font-size:18px;font-weight:700;color:var(--text-0);margin:0">Доходность</h2>';
-  out+='<div class="fin-period-group">';
-  ['1d:Сегодня','7d:7 дней','30d:30 дней','q:Квартал','y:Год'].forEach(function(p){var parts=p.split(':');out+='<button class="fin-period-btn'+(finPeriod===parts[0]?' active':'')+'" data-on-click="finSetPeriod(this,\''+parts[0]+'\')">'+parts[1]+'</button>'});
-  out+='</div></div>';
-
-  // Block B: KPI cards (4)
-  out+='<div class="fin-summary">';
-  out+='<div class="fin-card fin-card--accent"><div class="fc-label">Выручка за период</div><div class="fc-value">'+shortCurrency(totalRevenue)+'</div>'+(revenueGrowth!==null?'<div class="fc-sub '+(revenueGrowth>=0?'up':'dn')+'">'+(revenueGrowth>=0?'↑':'↓')+' '+Math.abs(revenueGrowth)+'% vs пр. период</div>':'')+'</div>';
-  out+='<div class="fin-card"><div class="fc-label">Прогноз на месяц</div><div class="fc-value">'+shortCurrency(projectedMonthly)+'</div><div class="fc-sub">на основе '+daysEl+' дн.</div></div>';
-  out+='<div class="fin-card"><div class="fc-label">Средний ₽/ГБ</div><div class="fc-value">'+avgRubPerGb+' ₽</div><div class="fc-sub">'+fmtGb(totalTrafficBytes)+' трафика</div></div>';
-  out+='<div class="fin-card'+(debtClientsCount>0?' fin-card--alert':'')+'"><div class="fc-label">Долги</div><div class="fc-value" style="color:'+(debtClientsCount>0?'var(--danger)':'var(--success)')+'">'+debtClientsCount+'</div><div class="fc-sub">'+(debtClientsCount>0?'клиентов с отриц. балансом':'все балансы в норме')+'</div></div>';
-  out+='</div>';
-
-  // Block C: Widget grid (6)
-  out+='<div class="widget-grid" style="grid-template-columns:repeat(6,1fr);margin-bottom:12px;padding:0">';
-  out+='<div class="widget"><div class="widget-label">Трафик за период</div><div class="widget-value" style="font-size:16px">'+fmtGb(totalTrafficBytes)+'</div></div>';
-  out+='<div class="widget"><div class="widget-label">Доход / модем</div><div class="widget-value" style="font-size:16px">'+avgRevenuePerModem.toLocaleString('ru-RU')+' ₽</div></div>';
-  out+='<div class="widget"><div class="widget-label">Доход / сутки</div><div class="widget-value" style="font-size:16px">'+revenuePerDay.toLocaleString('ru-RU')+' ₽</div></div>';
-  out+='<div class="widget"><div class="widget-label">Активных модемов</div><div class="widget-value" style="font-size:16px">'+activeModemsCount+'</div></div>';
-  out+='<div class="widget"><div class="widget-label">ARPU</div><div class="widget-value" style="font-size:16px">'+arpu.toLocaleString('ru-RU')+' ₽</div></div>';
-  out+='<div class="widget"><div class="widget-label">Маржа, ₽/ГБ</div><div class="widget-value" style="font-size:16px;color:var(--success)">'+avgRubPerGb+' ₽</div></div>';
-  out+='</div>';
-
-  // Block D: Revenue chart placeholder
-  out+='<div class="analytics-card" style="margin-bottom:12px"><h3>Выручка по дням</h3><div id="finRevenueChartWrap" style="max-height:200px"><canvas id="finRevenueChart"></canvas></div></div>';
-
-  // Block E: Client table
-  out+='<div class="fin-table-wrap"><div class="fin-table-header"><div class="fin-table-title">Финансы по клиентам</div><div class="fin-table-badge">'+clientStats.length+' клиентов</div></div>';
-  out+='<table class="fin-table"><thead><tr>';
-  ['Клиент','Тариф','Трафик','Δ пр. период','Модемов','Начислено','₽/ГБ','Баланс','Тренд'].forEach(function(h){out+='<th>'+h+'</th>'});
-  out+='</tr></thead><tbody>';
-  clientStats.forEach(function(s){
-    var inactive=s.monBytes===0&&s.modemCount===0;
-    out+='<tr'+(inactive?' class="row-inactive"':'')+'>';
-    out+='<td><div style="display:flex;align-items:center;gap:6px"><div class="client-dot" style="background:'+s.color+'"></div><span style="font-weight:600">'+esc(s.cl.name||s.ctKey)+'</span></div></td>';
-    out+='<td style="text-align:center;font-family:var(--font-mono);font-size:11px">'+esc(s.tariffStr)+'</td>';
-    out+='<td style="text-align:center;font-family:var(--font-mono);font-weight:600">'+fmtGb(s.monBytes)+'</td>';
-    if(s.vsPrev!==null){out+='<td style="text-align:center"><span class="badge-delta '+(s.vsPrev>=0?'up':'dn')+'">'+(s.vsPrev>=0?'+':'')+s.vsPrev+'%</span></td>'}else{out+='<td style="text-align:center">—</td>'}
-    out+='<td style="text-align:center">'+s.modemCount+'</td>';
-    out+='<td style="text-align:center;font-family:var(--font-mono)">'+shortCurrency(s.charged)+'</td>';
-    out+='<td style="text-align:center;font-family:var(--font-mono)">'+(s.costPerGb>0?s.costPerGb+' ₽':'—')+'</td>';
-    if(s.balance<0)out+='<td style="text-align:center"><span class="badge-neg">'+Math.round(s.balance).toLocaleString('ru-RU')+' ₽</span></td>';
-    else if(s.balance>0)out+='<td style="text-align:center"><span class="badge-pos">+'+Math.round(s.balance).toLocaleString('ru-RU')+' ₽</span></td>';
-    else out+='<td style="text-align:center;color:var(--text-3)">0 ₽</td>';
-    // Sparkline
-    var maxSp=Math.max.apply(null,s.spark7)||1;
-    out+='<td style="text-align:center"><div class="widget-spark" style="display:inline-flex;height:18px;width:42px">';
-    s.spark7.forEach(function(v){var h=Math.max(2,Math.round(v/maxSp*18));out+='<div class="widget-spark-bar" style="height:'+h+'px;background:'+s.color+';opacity:.6"></div>'});
-    out+='</div></td>';
-    out+='</tr>';
-  });
-  out+='</tbody></table></div>';
-
-  // Block F: Two tables side by side
-  out+='<div class="fin-bottom">';
-
-  // Left: Operator efficiency
-  out+='<div class="fin-table-wrap"><div class="fin-table-header"><div class="fin-table-title">Эффективность операторов</div></div>';
-  out+='<table class="fin-table"><thead><tr>';
-  ['Оператор','Модемов','Трафик','Выручка','₽/мод','₽/ГБ'].forEach(function(h){out+='<th>'+h+'</th>'});
-  out+='</tr></thead><tbody>';
-  var opStats={};
-  d.modemTraffic.forEach(function(m){
-    var op=m.operator;if(!op)return;
-    if(!opStats[op])opStats[op]={cnt:0,t:0,rev:0};
-    opStats[op].cnt++;opStats[op].t+=(m.monIn||0)+(m.monOut||0);
-    var cl=(currentData.clients||[]).find(function(c){return(c.portName||c.username)===m.pn});
-    if(cl){var tGb=((m.monIn||0)+(m.monOut||0))/1e9;var cbt=cl.billingType||'';var cp=cl.price||0;
-      if(cbt==='per_gb')opStats[op].rev+=tGb*cp;else if(cbt==='per_modem')opStats[op].rev+=cp;}
-  });
-  Object.keys(opStats).sort(function(a,b){return opStats[b].rev-opStats[a].rev}).forEach(function(op){
-    var v=opStats[op];var tGb=v.t/1e9;var rpm=v.cnt>0?Math.round(v.rev/v.cnt):0;var rpg=tGb>0?Math.round(v.rev/tGb):0;
-    var flag='';var opL=op.toLowerCase();
-    if(opL.indexOf('orange ro')>-1||opL.indexOf('vodafone')>-1)flag='🇷🇴 ';
-    else if(opL.indexOf('orange md')>-1||opL.indexOf('moldtelecom')>-1)flag='🇲🇩 ';
-    var rpgBadge=rpg<500?'background:rgba(52,199,89,.12);color:var(--success)':rpg>1000?'background:rgba(230,126,34,.12);color:#e67e22':'';
-    out+='<tr><td>'+flag+esc(op)+'</td><td style="text-align:center">'+v.cnt+'</td><td style="text-align:center;font-family:var(--font-mono)">'+fmtGb(v.t)+'</td>';
-    out+='<td style="text-align:center;font-family:var(--font-mono);font-weight:600">'+shortCurrency(v.rev)+'</td>';
-    out+='<td style="text-align:center;color:var(--text-2)">'+rpm.toLocaleString('ru-RU')+' ₽</td>';
-    out+='<td style="text-align:center">'+(rpgBadge?'<span style="display:inline-block;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;'+rpgBadge+'">'+rpg+' ₽</span>':rpg+' ₽')+'</td></tr>';
-  });
-  out+='</tbody></table></div>';
-
-  // Right: Top modems by revenue
-  var _finModSort=window._finModSort||'revenue';var _showAllMod=window._showAllModemRev||false;
-  var modemRevMap={};
-  d.modemTraffic.forEach(function(m){
-    var cl=(currentData.clients||[]).find(function(c){return(c.portName||c.username)===m.pn});if(!cl)return;
-    var tGb=((m.monIn||0)+(m.monOut||0))/1e9;var bt=cl.billingType||'';var price=cl.price||0;
-    var rev=bt==='per_gb'?tGb*price:bt==='per_modem'?price:0;
-    if(!modemRevMap[m.nick]){modemRevMap[m.nick]={nick:m.nick,operator:m.operator||'—',tGb:0,rev:0}}
-    modemRevMap[m.nick].tGb+=tGb;modemRevMap[m.nick].rev+=rev;
-  });
-  var modemRevRows=Object.keys(modemRevMap).map(function(nick){var r=modemRevMap[nick];r.revPerGb=r.tGb>0?r.rev/r.tGb:0;return r});
-  modemRevRows.sort(function(a,b){return _finModSort==='per_gb'?b.revPerGb-a.revPerGb:b.rev-a.rev});
-  out+='<div class="fin-table-wrap"><div class="fin-table-header"><div class="fin-table-title">Топ модемов по доходу</div>';
-  out+='<div class="view-toggle"><button class="'+(_finModSort==='revenue'?'active':'')+'" data-on-click="window._finModSort=\'revenue\';renderFinancesTab()">По доходу</button><button class="'+(_finModSort==='per_gb'?'active':'')+'" data-on-click="window._finModSort=\'per_gb\';renderFinancesTab()">По ₽/ГБ</button></div></div>';
-  out+='<table class="fin-table"><thead><tr><th>Модем</th><th>Оператор</th><th>Трафик</th><th style="font-weight:700">Доход</th><th>₽/ГБ</th></tr></thead><tbody>';
-  var visModems=_showAllMod?modemRevRows:modemRevRows.slice(0,6);
-  visModems.forEach(function(r){
-    var rpg=r.tGb>0?Math.round(r.rev/r.tGb):0;
-    var flag='';var opL=(r.operator||'').toLowerCase();
-    if(opL.indexOf('orange ro')>-1||opL.indexOf('vodafone')>-1)flag='🇷🇴 ';
-    else if(opL.indexOf('orange md')>-1||opL.indexOf('moldtelecom')>-1)flag='🇲🇩 ';
-    out+='<tr><td><span class="modem-link" data-on-click="finJumpToModem(\''+esc(r.nick).replace(/'/g,"\\'")+'\')">'+esc(r.nick)+'</span></td>';
-    out+='<td style="color:var(--text-2)">'+flag+esc(r.operator)+'</td>';
-    out+='<td style="font-family:var(--font-mono)">'+r.tGb.toFixed(1)+' ГБ</td>';
-    out+='<td style="font-family:var(--font-mono);font-weight:600">'+shortCurrency(r.rev)+'</td>';
-    out+='<td style="font-family:var(--font-mono)">'+rpg+' ₽</td></tr>';
-  });
-  out+='</tbody></table>';
-  if(!_showAllMod&&modemRevRows.length>6){
-    out+='<div class="show-more-row"><button data-on-click="window._showAllModemRev=true;renderFinancesTab()">Показать все '+modemRevRows.length+' ↓</button></div>';
-  }
-  out+='</div>';
-  out+='</div>'; // fin-bottom
-
-  out+='</div>'; // padding wrapper
-  document.getElementById('acc-finances').innerHTML=out;
-}
-
 // ========== ДОХОДНОСТЬ (новая SaaS-style страница) ==========
 var _finCharts = {};
 var _finCurrentPeriod = new Date().toISOString().slice(0, 7);
@@ -274,12 +90,12 @@ function _renderFinanceDashboard(c, d) {
   h += '</select></div></div>';
 
   h += '<div class="fx-kpis">';
-  h += '<div class="fx-kpi"><div class="fx-kl">Выручка</div><div class="fx-kv">' + money(revenue) + '</div><div class="fx-ks">' + growthSub + '</div></div>';
+  h += '<div class="fx-kpi"><div class="fx-kl">Выручка (факт)</div><div class="fx-kv">' + money(revenue) + '</div><div class="fx-ks">' + growthSub + '</div></div>';
   var costSub = cost > 0
     ? (s.cost_carried_from ? '<span style="color:var(--am)">типовые из ' + esc(s.cost_carried_from) + '</span> · ' + costPct + '%' : (costPct + '% от выручки'))
     : '<span style="color:var(--am)">не введены</span>';
   h += '<div class="fx-kpi a"><div class="fx-kl">Затраты</div><div class="fx-kv">' + (cost > 0 ? money(cost) : '—') + '</div><div class="fx-ks">' + costSub + '</div></div>';
-  h += '<div class="fx-kpi g"><div class="fx-kl">Прибыль</div><div class="fx-kv" style="color:var(--gr)">' + money(profit) + '</div><div class="fx-ks">' + (isCur ? 'прогноз ' + shortCurrency(profitForecast) : 'за месяц') + '</div></div>';
+  h += '<div class="fx-kpi g"><div class="fx-kl">Прибыль</div><div class="fx-kv" style="color:var(--gr)">' + money(profit) + '</div><div class="fx-ks">' + (isCur ? 'run-rate ' + shortCurrency(profitForecast) + ' (ожидание)' : 'за месяц') + '</div></div>';
   h += '<div class="fx-kpi g"><div class="fx-kl">Маржа</div><div class="fx-kv" style="color:var(--gr)">' + (marginPct == null ? '—' : marginPct + '%') + '</div><div class="fx-ks">' + (s.margin_per_modem != null ? Math.round(s.margin_per_modem).toLocaleString('ru-RU') + ' ₽/модем' : '') + '</div></div>';
   h += '</div>';
 
@@ -320,8 +136,8 @@ function _renderFinanceDashboard(c, d) {
   });
   h += '</div></div>';
 
-  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Доходность по клиентам</span><span class="fx-cs">по MRR</span></div>';
-  h += '<div style="overflow-x:auto"><table class="fx-tbl"><thead><tr><th>Клиент</th><th>Тариф</th><th>Выручка</th><th>Δ M/M</th><th>% MRR</th><th>Баланс</th></tr></thead><tbody>';
+  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Доходность по клиентам</span><span class="fx-cs">по выручке за 30 дн (факт)</span></div>';
+  h += '<div style="overflow-x:auto"><table class="fx-tbl"><thead><tr><th>Клиент</th><th>Тариф</th><th>Выручка 30д</th><th>Δ M/M</th><th>% выручки</th><th>Баланс</th></tr></thead><tbody>';
   var rows = (d.per_client || []).filter(function(p) { return !(p.mrr === 0 && p.mrr_prev === 0 && !p.balance); });
   rows.forEach(function(p, i) {
     var col = CHART_COLORS.clients[i % CHART_COLORS.clients.length];
@@ -695,12 +511,15 @@ function uploadDocumentModal(clientId) {
   reader.readAsDataURL(file);
 }
 
-function deleteLedgerEntry(clientId, entryIndex) {
-  if (!confirm('\u0423\u0434\u0430\u043B\u0438\u0442\u044C \u044D\u0442\u0443 \u043E\u043F\u0435\u0440\u0430\u0446\u0438\u044E? \u0411\u0430\u043B\u0430\u043D\u0441 \u0431\u0443\u0434\u0435\u0442 \u043F\u0435\u0440\u0435\u0441\u0447\u0438\u0442\u0430\u043D.')) return;
-  api(API + '/api/admin/clients/' + clientId + '/ledger/' + entryIndex,{method:'DELETE'})
+// A4: физическое удаление ledger-записей запрещено на бэке (405). Платёж
+// сторнируется через существующий идемпотентный роут — payment_reversal
+// в одной транзакции с откатом баланса и реферальной комиссии.
+function reverseLedgerPayment(clientId, ledgerDbId) {
+  if (!confirm('Сторнировать этот платёж? Баланс и реферальная комиссия будут откачены (запись payment_reversal останется в истории).')) return;
+  api(API + '/api/admin/clients/' + clientId + '/payment/by-ledger/' + ledgerDbId,{method:'DELETE'})
     .then(function(d) {
-      if (d.ok) { showToast('\u041E\u043F\u0435\u0440\u0430\u0446\u0438\u044F \u0443\u0434\u0430\u043B\u0435\u043D\u0430', 'success'); renderOpsHistory(clientId); loadData(); }
-      else showToast(d.error || '\u041E\u0448\u0438\u0431\u043A\u0430', 'error');
+      if (d.ok) { showToast(d.already ? 'Платёж уже был сторнирован' : 'Платёж сторнирован', 'success'); renderOpsHistory(clientId); loadData(); }
+      else showToast(d.error || 'Ошибка', 'error');
     }).catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
 }
 
@@ -1484,58 +1303,4 @@ function renderFinRevenue(d){
           y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:9},callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid,drawTicks:false},border:{display:false}}}}
     });
   }, 30);
-}
-
-
-function _renderTrafficRecon(d) {
-  var GB = 1e9, PCT = 10, MIN = 0.5 * GB;
-  var rows = d.rows || [];
-  var status = (d.status && d.status.servers) || {};
-  var lastDate = rows.length ? rows[0].date : (d.status && d.status.date) || null;
-
-  var badges = '';
-  Object.keys(status).forEach(function(srv) {
-    var s = status[srv] || {};
-    badges += s.ok
-      ? '<span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--bg-3);color:var(--gr);margin-left:6px">' + esc(srv) + ' ✓ ' + (s.rows || 0) + '</span>'
-      : '<span style="font-size:10.5px;padding:2px 8px;border-radius:10px;background:var(--bg-3);color:var(--am)" title="' + esc(s.error || '') + '">' + esc(srv) + ' ⚠ нет данных</span>';
-  });
-
-  var bad = rows.filter(function(r) {
-    var base = Math.max(r.ps_in + r.ps_out, r.our_in + r.our_out);
-    return r.diff_pct >= PCT && base >= MIN;
-  }).slice(0, 15);
-
-  var h = '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Сверка трафика</span>'
-    + '<span class="fx-cs">наш учёт vs счётчики боксов (pmacct)' + (lastDate ? ' · до ' + esc(lastDate) : '') + badges + '</span></div>';
-
-  if (!rows.length) {
-    h += '<div style="padding:14px;color:var(--t3);font-size:12px">Данных пока нет — первая сверка пройдёт ночью (06:40 МСК).</div></div>';
-    return h;
-  }
-
-  var latest = rows.filter(function(r) { return r.date === lastDate; });
-  var latestBad = latest.filter(function(r) {
-    var base = Math.max(r.ps_in + r.ps_out, r.our_in + r.our_out);
-    return r.diff_pct >= PCT && base >= MIN;
-  });
-  h += '<div style="padding:4px 2px 10px;font-size:12px;color:' + (latestBad.length ? 'var(--am)' : 'var(--gr)') + '">'
-    + (latestBad.length
-      ? '⚖️ За ' + esc(lastDate) + ': расхождение ≥' + PCT + '% у ' + latestBad.length + ' из ' + latest.length + ' портов'
-      : '✓ За ' + esc(lastDate) + ': все ' + latest.length + ' портов сходятся (порог ' + PCT + '%)')
-    + '</div>';
-
-  if (bad.length) {
-    h += '<table class="fx-tbl"><thead><tr><th>Дата</th><th>Клиент</th><th>Сервер</th><th>Наш учёт</th><th>pmacct</th><th>Δ%</th></tr></thead><tbody>';
-    bad.forEach(function(r) {
-      var our = ((r.our_in + r.our_out) / GB).toFixed(1);
-      var ps = ((r.ps_in + r.ps_out) / GB).toFixed(1);
-      h += '<tr><td>' + esc(r.date) + '</td><td>' + esc(r.client_name || r.port_key) + '</td><td>' + esc(r.server_name) + '</td>'
-        + '<td>' + our + ' ГБ</td><td>' + ps + ' ГБ</td>'
-        + '<td style="color:var(--am);font-weight:600">' + r.diff_pct + '%</td></tr>';
-    });
-    h += '</tbody></table>';
-  }
-  h += '</div>';
-  return h;
 }

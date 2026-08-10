@@ -23,7 +23,8 @@ const {
 } = require('../tochka/documents');
 const { tochkaRequest: _rawTochkaRequest } = require('../tochka/api');
 const { buildDocHtml: _buildDocHtml } = require('../documents/generator');
-const { findClientByPayer, buildNaturalKey } = require('../billing/payer-match');
+const { findClientByPayer, buildNaturalKey, resolveNaturalKey } = require('../billing/payer-match');
+const { referralCommission } = require('../billing/referral');   // A1/Р6: комиссия 10%, единая константа
 
 module.exports = function createTochkaRouter(deps) {
   const {
@@ -166,7 +167,13 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
     // the same real transaction, so that constraint was insufficient.
     // Now: if a row already exists with the same natural_key (payer+amount
     // +date+purpose-prefix), the credit has already happened — bail out.
-    if (dbStmts.findBankPaymentByNaturalKey && dbStmts.findBankPaymentByNaturalKey.get(naturalKey)) {
+    // A3: two genuinely DIFFERENT payments can collide on the natural key
+    // (same payer/amount/date/purpose in one day). resolveNaturalKey tells
+    // a re-delivery (same paymentId → duplicate) from a real second payment
+    // (new paymentId → sequence suffix '#N', credited normally).
+    const nkRows = dbStmts.findBankPaymentsByNaturalKeyBase.all(naturalKey, naturalKey.length + 1, naturalKey + '#');
+    const nkResolved = resolveNaturalKey(nkRows, naturalKey, paymentId);
+    if (nkResolved.isDuplicate) {
       logger.info(`[Tochka Webhook] Duplicate natural_key (already processed) — payer=${payerInn} amount=${amount} date=${paymentDate}`);
       // Stage 18.13: дубль-кредит заблокирован — это хорошо, но стоит знать (редкое событие)
       try {
@@ -181,6 +188,9 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
       }
       return res.status(200).json({ ok: true, processed: false, reason: 'duplicate_natural_key' });
     }
+    // A3: не дубль — новый платёж. При коллизии natural_key с чужим платежом
+    // resolved.key несёт суффикс '#N', чтобы строки не перекрывались.
+    bankPayment.naturalKey = nkResolved.key;
 
     // Atomic insert — UNIQUE(payment_id) on bank_payments enforces idempotency
     // even under concurrent webhook delivery. Two parallel webhook requests
@@ -216,7 +226,7 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
             if (referrer) {
               referralOpts = {
                 referrerId: referrer.id,
-                delta: Math.round(amount * 0.15 * 100) / 100,
+                delta: referralCommission(amount),
               };
             }
           }
@@ -237,14 +247,8 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
           // on retry, which is the worse failure.
           dbStmts.updateBankPaymentMatch.run(1, matchedClient.id, matchedClient.name, 1, paymentId);
           try { settleBillsOnPayment(matchedClient, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
-          if (!matchedClient.payments) matchedClient.payments = [];
-          matchedClient.payments.push({
-            amount, date: paymentDate,
-            note: `Банк Точка: ${payerName} — ${purpose}`.slice(0, 200),
-            createdAt: new Date().toISOString(),
-            source: 'tochka_webhook',
-            paymentId
-          });
+          // C5: no in-memory client.payments push — the bank_payment ledger
+          // row written by atomicCredit above is the recorded fact.
           saveClients(clients);
           bankPayment.matched = true;
           bankPayment.matchedClientId = matchedClient.id;
@@ -447,16 +451,6 @@ r.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (req,
   
   const amount = bp.amount;
 
-  if (!client.payments) client.payments = [];
-  client.payments.push({
-    amount,
-    date: bp.date,
-    note: `Ручная привязка: ${bp.payerName} — ${bp.purpose}`.slice(0, 200),
-    createdAt: new Date().toISOString(),
-    source: 'tochka_manual',
-    paymentId: bp.paymentId
-  });
-
   const { balanceBefore, balanceAfter } = atomicCredit(client.id, amount, {
     type: 'bank_payment',
     date: bp.date,
@@ -483,6 +477,12 @@ r.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (r
   const client = clientById.get(clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
+  // B2 (Р15): fast-path анти-дабл (истина — UNIQUE-индекс idx_closing_docs_unique_period
+  // и INSERT OR IGNORE в insertClosing). «Перевыставить» = delete + create, не ломается.
+  if ((client.closingDocuments || []).some(d => d.period === period)) {
+    return res.status(409).json({ error: `Акт за ${period} уже существует. Удалите старый («перевыставить»), чтобы создать заново.` });
+  }
+
   
   let actItems = items;
   if (!actItems || actItems.length === 0) {
@@ -498,7 +498,10 @@ r.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (r
   let tochkaDocumentId = null;
   let tochkaPushed = false;
   let tochkaStatus = '';   // human-readable outcome surfaced to the operator
-  const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
+  // B2 (Р15/Р23): сквозной номер «№ N/YYYY» из атомарного счётчика doc_numbering
+  // (единая серия актов и счетов). Номер расходуется даже при неудачном пуше в
+  // Точку — дыры не переиспользуются.
+  const actNumber = documentsDb.nextDocNumber().label;
   if (!tochkaConfig.jwt || !tochkaConfig.customerCode || !tochkaConfig.accountId) {
     tochkaStatus = 'Точка не настроена (нет JWT / customerCode / accountId)';
   } else if (!client.inn) {
@@ -623,6 +626,9 @@ r.delete('/api/admin/clients/:id/closing_document/:docId', authMiddleware, admin
   client.closingDocuments.splice(docIdx, 1);
   // Stage 13.2: explicit row delete (saveClients no longer wipes the table).
   documentsDb.deleteClosing(doc.id);
+  // B2 (Р15): дыры в сквозной нумерации не переиспользуются — удаление
+  // фиксируем вместе с номером документа.
+  auditLog(req.user.login, 'delete_closing_document', { clientId: client.id, docId: doc.id, period: doc.period, actNumber: doc.actNumber || '', ip: getClientIp(req) });
   saveClients(clients);
   res.json({ ok: true });
 });
@@ -727,7 +733,8 @@ r.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, async
 
       // Try Tochka API
       let tochkaDocumentId = null;
-      const actNumber = `АКТ-${period.replace('-', '')}-${client.id.slice(0, 4)}`;
+      // B2 (Р15/Р23): сквозной номер «№ N/YYYY» (единая серия актов и счетов).
+      const actNumber = documentsDb.nextDocNumber().label;
       if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
         try {
           const actData = _buildActBody(client, period, actItems, actNumber);
@@ -784,7 +791,14 @@ r.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (
   let amount = manualAmount || (_calc ? _calc.amount : 0);
   if (!amount || amount <= 0) return res.status(400).json({ error: 'Cannot calculate bill amount (no charges found)' });
 
-  const billNumber = `СЧЁТ-${billPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
+  // B2 (Р15): fast-path анти-дабл (истина — UNIQUE idx_bills_unique_period +
+  // гейт в documentsDb.insertBill).
+  if ((client.bills || []).some(b => b.period === billPeriod)) {
+    return res.status(409).json({ error: `Счёт за ${billPeriod} уже существует. Удалите старый, чтобы выставить заново.` });
+  }
+
+  // B2 (Р15/Р23): сквозной номер «№ N/YYYY» (единая серия актов и счетов).
+  const billNumber = documentsDb.nextDocNumber().label;
   const billDate = now.toISOString().slice(0, 10);
 
   let tochkaBillId = null;
@@ -842,7 +856,8 @@ r.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, asyn
     const amount = _calcBill(client, serverData);
     if (!amount || amount <= 0) { skipped++; continue; }
 
-    const billNumber = `СЧЁТ-${billPeriod.replace('-', '')}-${client.id.slice(0, 4)}`;
+    // B2 (Р15/Р23): сквозной номер «№ N/YYYY» (единая серия актов и счетов).
+    const billNumber = documentsDb.nextDocNumber().label;
     let tochkaBillId = null;
 
     if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId) {
@@ -959,6 +974,8 @@ r.delete('/api/admin/clients/:id/bill/:billId', authMiddleware, adminMiddleware,
   client.bills.splice(idx, 1);
   // Stage 13.2: explicit row delete (saveClients no longer wipes the table).
   documentsDb.deleteBill(bill.id);
+  // B2 (Р15): дыры в сквозной нумерации не переиспользуются — фиксируем номер.
+  auditLog(req.user.login, 'delete_bill', { clientId: client.id, billId: bill.id, period: bill.period, billNumber: bill.billNumber || '', ip: getClientIp(req) });
   saveClients(clients);
   res.json({ ok: true });
 });

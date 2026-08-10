@@ -100,7 +100,6 @@
     <div class="nav-tab" data-on-click="switchMainTab('modems',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 17h.01"/><line x1="11" y1="17" x2="17" y2="17"/><path d="M9.5 9.5a5 5 0 0 1 5 0M7 7a8 8 0 0 1 10 0"/></svg></span>Модемы</div>
     <div class="nav-tab" data-on-click="switchMainTab('clients',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Клиенты</div>
     <div class="nav-tab" data-on-click="switchMainTab('bank',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>Финансы</div>
-    <div class="nav-tab" data-on-click="switchMainTab('crm',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="3" width="14" height="18" rx="2"/><circle cx="12" cy="10" r="2.3"/><path d="M8.5 16c0-1.8 1.6-2.8 3.5-2.8s3.5 1 3.5 2.8"/><line x1="3" y1="7.5" x2="5" y2="7.5"/><line x1="3" y1="12" x2="5" y2="12"/><line x1="3" y1="16.5" x2="5" y2="16.5"/></svg></span>CRM</div>
     <div class="nav-tab" data-on-click="switchMainTab('analytics',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></span>Настройки</div>
     <!-- Stage 18.18 — mobile-only footer inside the burger overlay. Hidden on
          desktop by `.nav-tabs-footer{display:none}` in layout.css and shown
@@ -163,174 +162,6 @@
   <div class="table-wrap" id="tableWrap"></div>
 </div>
 
-<!-- TAB: TRAFFIC (PAN-OS ACC Style) -->
-<div class="tab-content" id="tab-traffic">
-  <!-- ACC Sub-navigation -->
-  <div class="acc-sub-tabs">
-    <div class="acc-sub-tab active" data-on-click="switchAccTab('overview',this)">Трафик</div>
-    <div class="acc-sub-tab" data-on-click="switchAccTab('infra',this)">Инфраструктура</div>
-    <div class="acc-sub-tab" data-on-click="switchAccTab('finances',this)">Доходность</div>
-  </div>
-  <!-- hidden period/client controls (used by Resources tab) -->
-  <div style="display:none">
-    <div class="acc-period-group">
-      <button class="acc-period-btn" data-on-click="setAccPeriod('day',this)">Сегодня</button>
-      <button class="acc-period-btn" data-on-click="setAccPeriod('yesterday',this)">Вчера</button>
-      <button class="acc-period-btn active" data-on-click="setAccPeriod('month',this)">Месяц</button>
-      <button class="acc-period-btn" data-on-click="setAccPeriod('prevmonth',this)">Пред. мес</button>
-      <button class="acc-period-btn" data-on-click="setAccPeriod('lifetime',this)">Всё время</button>
-    </div>
-    <select id="accClientFilter" data-on-change="renderTrafficTab()"></select>
-    <button id="btnLoadRes" data-on-click="loadTopHosts(true)">⟳ Обновить ресурсы</button>
-  </div>
-
-  <!-- OVERVIEW -->
-  <div class="acc-sub-content active" id="acc-overview">
-    <div class="widget-grid" id="trafficWidgets"></div>
-    <div id="extendedWidgetsRow" style="padding:0 24px 0;display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:12px"></div>
-    <!-- Клиенты — перенесено из отдельной вкладки -->
-    <div style="padding:0 24px 14px">
-      <!-- Тепловая карта почасового трафика -->
-      <div class="analytics-card" id="heatmapBlock" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-          <h3 style="margin:0">Почасовой трафик <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">GMT+3 (МСК)</span></h3>
-          <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
-            <button data-on-click="setHeatmapView('country')" id="hmTabCountry" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По странам</button>
-            <button data-on-click="setHeatmapView('operator')" id="hmTabOperator" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По операторам</button>
-            <button data-on-click="setHeatmapView('client')" id="hmTabClient" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
-          </div>
-        </div>
-        <div id="heatmapSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
-        <div id="heatmapGrid" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-          <div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>
-        </div>
-        <div id="heatmapSummary" style="display:none;margin-top:16px;padding-top:16px;border-top:0.5px solid rgba(0,0,0,0.08)"></div>
-      </div>
-
-      <div class="analytics-card" style="margin-bottom:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-          <h3 style="margin:0">Распределение задержек</h3>
-          <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
-            <button data-on-click="setLatencyView('country')" id="latTabCountry" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По странам</button>
-            <button data-on-click="setLatencyView('operator')" id="latTabOperator" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По операторам</button>
-            <button data-on-click="setLatencyView('client')" id="latTabClient" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
-          </div>
-        </div>
-        <!-- Stage 18.7: redesign to match the «Почасовой трафик» card style.
-             - 30-day fixed window
-             - No legend strip above (it's inside the chart's tooltip)
-             - No summary panel below (the chart itself is the summary)
-             - Lines: P50 (median), P95 (worst), P95-connect (TCP-handshake),
-               and Errors-count on a secondary Y-axis. -->
-        <div id="latencySubTabs" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:12px"></div>
-        <div style="height:300px;padding:0 4px"><canvas id="latencyChartCanvas"></canvas></div>
-      </div>
-
-      <div class="analytics-card" style="margin-bottom:12px">
-        <h3 style="margin:0 0 10px">Клиенты</h3>
-        <div id="clientTrafficTable"></div>
-      </div>
-
-      <div class="analytics-card">
-        <div class="daily-chart-controls" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
-          <div class="daily-chart-nav" style="display:flex;align-items:center;gap:8px">
-            <button data-on-click="shiftDailyMonth(-1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">←</button>
-            <h3 style="margin:0;min-width:140px;text-align:center" id="dailyMonthLabel">Потребление по дням</h3>
-            <button data-on-click="shiftDailyMonth(1)" style="background:none;border:1px solid var(--border);border-radius:4px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:14px">→</button>
-          </div>
-          <div class="daily-chart-legend" id="dailyClientLegend" style="display:flex;flex-wrap:wrap;gap:10px"></div>
-          <div class="daily-chart-filters" style="display:flex;align-items:center;gap:8px">
-            <select id="dailyServerFilter" data-on-change="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
-              <option value="all">Все страны</option>
-            </select>
-            <select id="dailyModeFilter" data-on-change="onDailyModeChange()" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px">
-              <option value="countries">По странам</option>
-              <option value="clients">По клиентам</option>
-              <option value="modems">По модемам</option>
-            </select>
-            <select id="dailyClientFilter" data-on-change="renderDailyClientChart(window._dailyTrafficCache)" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:12px;display:none">
-              <option value="all">Все клиенты</option>
-            </select>
-          </div>
-        </div>
-        <div class="chart-wrap-daily" style="height:280px"><canvas id="chartDailyClientTraffic"></canvas></div>
-      </div>
-    </div>
-    <div class="analytics-card" style="margin:0 24px 24px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <h3 style="margin:0">Матрица трафика</h3>
-        <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
-          <button id="matrixViewModem" data-on-click="setMatrixView('modem')" style="background:none;border:none;border-bottom:2px solid var(--accent);margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--accent);cursor:pointer;font-weight:600;transition:all .15s">По модемам</button>
-          <button id="matrixViewClient" data-on-click="setMatrixView('client')" style="background:none;border:none;border-bottom:2px solid transparent;margin-bottom:-2px;padding:4px 10px;font-size:11px;color:var(--text-2);cursor:pointer;font-weight:500;transition:all .15s">По клиентам</button>
-        </div>
-      </div>
-      <div style="overflow-x:auto"><table class="log-table" id="trafficMatrix"></table></div>
-      <div id="trafficMatrixShowMore" style="text-align:center;padding:8px 0;display:none">
-        <button class="btn btn-sm" data-on-click="showAllMatrixRows()" style="font-size:11px">Показать все модемы ↓</button>
-      </div>
-    </div>
-
-    <!-- TOP RESOURCES (domains) — folded in from former "Ресурсы" sub-tab.
-         Lazy-loaded: data fetched only when the user clicks ⟳ Обновить. -->
-    <div class="analytics-card" style="margin:0 0 14px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-        <h3 style="margin:0">Топ доменов <span class="tab-count" id="resCount" style="display:none"></span></h3>
-        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-          <select id="resClientFilter" data-on-change="renderTopResources()" style="padding:5px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-0)">
-            <option value="">Все клиенты</option>
-          </select>
-          <button class="btn btn-sm" data-on-click="loadTopHosts(true)" style="font-size:11px">⟳ Обновить</button>
-          <span style="font-size:10px;color:var(--text-3)" id="resLastLoad">Нажмите «Обновить» для загрузки</span>
-        </div>
-      </div>
-      <div id="resourcesContent">
-        <div class="acc-loading" id="resLoading" style="display:none"><div class="spinner"></div> Загрузка топ-хостов...</div>
-        <div id="topResourcesList"></div>
-        <span id="resCountHeader" class="tab-count" style="display:none"></span>
-      </div>
-    </div>
-  </div>
-
-  <!-- FINANCES -->
-  <div class="acc-sub-content" id="acc-finances"></div>
-
-  <!-- INFRASTRUCTURE — combined Rotations + IP analytics + Capacity in one
-       scrollable view. Section headers + accent colors let the operator scan
-       all three operational dimensions in a single click. -->
-  <div class="acc-sub-content" id="acc-infra" style="padding:14px 20px">
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px;flex-wrap:wrap">
-      <span style="font-size:11px;color:var(--text-2)">Период:</span>
-      <select id="sysInfraDays" data-on-change="renderAccSubTab('infra')" style="padding:4px 10px;font-size:12px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-0)">
-        <option value="1">1 день</option><option value="3">3 дня</option><option value="7" selected>7 дней</option><option value="14">14 дней</option><option value="30">30 дней</option>
-      </select>
-    </div>
-    <div style="display:grid;gap:16px">
-      <section>
-        <div class="infra-section-title" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 14px;background:linear-gradient(90deg,rgba(59,157,216,0.16),rgba(59,157,216,0.03));border-left:4px solid #3B9DD8;border-radius:6px">
-          <span style="font-size:18px">🔄</span>
-          <h3 style="margin:0;font-size:14px;color:#3B9DD8;font-weight:700;letter-spacing:.02em">Ротации</h3>
-        </div>
-        <div id="acc-infra-rotations"></div>
-      </section>
-      <section>
-        <div class="infra-section-title" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 14px;background:linear-gradient(90deg,rgba(150,90,200,0.16),rgba(150,90,200,0.03));border-left:4px solid #965AC8;border-radius:6px">
-          <span style="font-size:18px">🌐</span>
-          <h3 style="margin:0;font-size:14px;color:#965AC8;font-weight:700;letter-spacing:.02em">IP-аналитика</h3>
-        </div>
-        <div id="acc-infra-ip"></div>
-      </section>
-      <section>
-        <div class="infra-section-title" style="display:flex;align-items:center;gap:10px;margin-bottom:12px;padding:8px 14px;background:linear-gradient(90deg,rgba(239,159,39,0.18),rgba(239,159,39,0.03));border-left:4px solid #EF9F27;border-radius:6px">
-          <span style="font-size:18px">📊</span>
-          <h3 style="margin:0;font-size:14px;color:#EF9F27;font-weight:700;letter-spacing:.02em">Ёмкость серверов</h3>
-        </div>
-        <div id="acc-infra-capacity"></div>
-      </section>
-    </div>
-  </div>
-
-  <!-- /конец под-вкладок «Аналитики» -->
-</div>
 
 <!-- TAB: DASHBOARD (бывший ⚡ NEW) — основной экран, единый вид.
      Always-visible: KPI row · heatmap · clients · daily chart · mini finances.
@@ -679,6 +510,11 @@
             <div style="font-size:11px;color:var(--text-2);margin-top:2px">Воспроизводит клиентскую нагрузку через выделенный тестовый пул модемов для диагностики таймаутов и breaking-point.</div>
           </div>
           <div id="simHeaderState" style="font-size:12px;color:var(--text-2)"></div>
+        </div>
+
+        <!-- D11: симулятор выключен настройкой simulator_enabled (дефолт — выкл, не для прода) -->
+        <div id="simDisabledBanner" class="sim-banner danger" style="display:none">
+          ⛔ Симулятор выключен (настройка <code>simulator_enabled</code>). Запуск запрещён (403). Включайте только на стенде — прогон гоняет реальную нагрузку через тест-пул модемов.
         </div>
 
         <!-- Live monitor — visible only when a run is active -->
@@ -1166,17 +1002,15 @@
           </div>
         </div>
 
-        <!-- Сессии, биллинг, CRM -->
+        <!-- Сессии, биллинг -->
         <div class="analytics-card" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Сессии, биллинг и CRM</h3><span class="settings-card-badge badge-restart">после перезапуска</span></div>
-          <div class="settings-card-desc">Параметры авторизации, автоматического биллинга и интеграции с CRM-системой.</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Сессии и биллинг</h3><span class="settings-card-badge badge-restart">после перезапуска</span></div>
+          <div class="settings-card-desc">Параметры авторизации и автоматического биллинга.</div>
           <div class="set-card">
             <div class="set-row"><div><div class="set-row-t">Время жизни сессии</div><div class="set-row-d">Через сколько дней сессия админа/клиента истекает и нужен повторный вход</div></div><div class="set-inp"><input id="sessionTtlDaysInput" type="number" min="1" max="365"><span>дн</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Повтор биллинга</div><div class="set-row-d">Если ежедневный биллинг не выполнился — через сколько часов повторить</div></div><div class="set-inp"><input id="billingRetryHoursInput" type="number" step="0.5" min="0.5" max="24"><span>ч</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Порог коррекции</div><div class="set-row-d">Минимальное расхождение трафика для коррекции при месячной сверке</div></div><div class="set-inp"><input id="reconciliationToleranceInput" type="number" step="0.001" min="0.001" max="1"><span>ГБ</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Авто-создание клиентов</div><div class="set-row-d">Интервал проверки новых модемов без клиента и создания записей</div></div><div class="set-inp"><input id="autoCreateIntervalInput" type="number" min="1" max="60"><span>мин</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Проверка CRM</div><div class="set-row-d">Как часто проверять статус оплат и слать напоминания в CRM</div></div><div class="set-inp"><input id="crmCheckIntervalInput" type="number" min="5" max="120"><span>мин</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Напоминание об оплате</div><div class="set-row-d">За сколько дней до исчерпания баланса напомнить клиенту</div></div><div class="set-inp"><input id="crmReminderDaysInput" type="number" min="1" max="30"><span>дн</span></div></div>
           </div>
           <div class="set-save-bar">
             <span id="sessionBillingSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
@@ -1257,7 +1091,7 @@
         </div>
       </div>
 
-      <!-- ===== ТАРИФ И БАЛАНС (доступ, реквизиты, биллинг, SLA, API) ===== -->
+      <!-- ===== ТАРИФ И БАЛАНС (доступ, реквизиты, биллинг, API) ===== -->
       <div id="cdPane_billing" style="display:none">
         <div class="set-grp-label">Доступ</div>
         <div class="set-card" style="padding:14px 16px">
@@ -1291,14 +1125,6 @@
           <div class="set-row"><div><div class="set-row-t" style="color:var(--warning)">Приостановить учёт баланса</div><div class="set-row-d">Биллинг не будет списывать средства с этого клиента</div></div><label class="tgl"><input type="checkbox" id="cfBillingPaused"><span></span></label></div>
           <div class="set-row"><div><div class="set-row-t">Разрешить уход в минус</div><div class="set-row-d">По умолчанию баланс не может опуститься ниже ~5 дней долга</div></div><label class="tgl"><input type="checkbox" id="cfAllowDebt"><span></span></label></div>
           <div class="set-row" id="cfMaxDebtWrap"><div><div class="set-row-t">Макс. долг</div><div class="set-row-d">В валюте клиента, 0 = без лимита</div></div><span class="set-inp"><input id="cfMaxDebt" type="number" min="0" step="0.01" placeholder="0" style="width:96px;text-align:right"><span>₽</span></span></div>
-        </div>
-
-        <div class="set-grp-label">SLA</div>
-        <div class="set-card">
-          <div class="set-row"><div class="set-row-t">Uptime</div><span class="set-inp"><input id="cfSlaUptime" type="number" min="0" max="100" step="0.1" placeholder="99" style="width:80px;text-align:center"><span>%</span></span></div>
-          <div class="set-row"><div class="set-row-t">Макс. задержка</div><span class="set-inp"><input id="cfSlaLatency" type="number" min="1" max="60000" placeholder="1000" style="width:80px;text-align:center"><span>мс</span></span></div>
-          <div class="set-row"><div class="set-row-t">Макс. ошибок</div><span class="set-inp"><input id="cfSlaErrPct" type="number" min="0" max="100" step="0.1" placeholder="5" style="width:80px;text-align:center"><span>%</span></span></div>
-          <div class="set-row"><div><div class="set-row-t">Авто-кредит при нарушении SLA</div><div class="set-row-d">Автоматически начислять компенсацию</div></div><label class="tgl"><input type="checkbox" id="cfSlaAutoCredit"><span></span></label></div>
         </div>
 
         <div id="cfApiKeySection" style="display:none">
@@ -1338,7 +1164,6 @@
       <div class="modal-tab active" id="opsTab_history" data-on-click="switchOpsTab('history')" style="cursor:pointer">💰 Операции</div>
       <div class="modal-tab" id="opsTab_documents" data-on-click="switchOpsTab('documents')" style="cursor:pointer">📄 Документы</div>
       <div class="modal-tab" id="opsTab_api" data-on-click="switchOpsTab('api')" style="cursor:pointer">🔌 API</div>
-      <div class="modal-tab" id="opsTab_sla" data-on-click="switchOpsTab('sla')" style="cursor:pointer">📊 SLA</div>
     </div>
     <div class="modal-body" id="clientOpsBody_legacy" style="max-height:calc(85vh - 120px);overflow-y:auto">
     </div>
@@ -1349,54 +1174,6 @@
      (Модемы / IP и ёмкость / Планирование); Системный лог moved to Настройки;
      Логи доменов removed (low-use research tool, duplicated Топ ресурсов). -->
 
-<div class="tab-content" id="tab-crm">
-  <div style="display:flex;align-items:center;gap:12px;padding:8px 16px;background:var(--bg-2);border-bottom:1px solid var(--border)">
-    <span style="font-size:13px;font-weight:600;color:var(--text-0)">Twenty CRM</span>
-    <span id="crmStatus" style="font-size:11px;color:var(--text-3)"></span>
-    <button class="btn btn-sm" data-on-click="crmExport('people')" title="Скачать людей CSV (Excel-совместимый: кириллица + таблица)">⬇ Люди</button>
-    <button class="btn btn-sm" data-on-click="crmExport('companies')" title="Скачать компании CSV (Excel-совместимый)">⬇ Компании</button>
-    <button class="btn btn-sm" data-on-click="crmExport('opportunities')" title="Скачать сделки CSV (Excel-совместимый)">⬇ Сделки</button>
-    <a href="https://crm.arendaproxy.ru" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none;margin-left:auto" title="Открыть в новом окне">↗ Открыть отдельно</a>
-  </div>
-  <iframe id="crmFrame" title="CRM" src="" style="width:100%;height:calc(100vh - 100px);border:none;display:block" allow="clipboard-write"></iframe>
-</div>
-
-<div class="tab-content" id="tab-ai_sales">
-  <div style="max-width:1100px;margin:0 auto;padding:10px">
-    <div id="ais_status" class="analytics-card" style="margin-bottom:12px;font-size:13px;color:var(--text-1)">Загрузка…</div>
-
-    <div class="analytics-card" style="margin-bottom:12px">
-      <h3 style="margin:0 0 10px">Ключи и CRM</h3>
-      <div class="settings-grid">
-        <div class="setting-field"><label>Anthropic API Key</label><input class="form-input" id="ais_anthropic" type="password" autocomplete="off" placeholder="sk-ant-..."></div>
-        <div class="setting-field"><label>Tavily API Key</label><input class="form-input" id="ais_tavily" type="password" autocomplete="off" placeholder="tvly-..."></div>
-        <div class="setting-field"><label>CRM DB URL (override)</label><input class="form-input" id="ais_crmurl" autocomplete="off" placeholder="postgresql://twenty:...@172.18.0.3:5432/default"></div>
-      </div>
-      <div style="margin-top:10px;display:flex;gap:8px;align-items:center;flex-wrap:wrap">
-        <button class="btn btn-sm btn-primary" data-on-click="aisSaveKeys()">Сохранить</button>
-        <button class="btn btn-sm" data-on-click="aisCrmPing()">Проверить CRM</button>
-        <span id="ais_crmping" style="font-size:12px;color:var(--text-3)"></span>
-      </div>
-    </div>
-
-    <div class="analytics-card" style="margin-bottom:12px">
-      <h3 style="margin:0 0 10px">Запуск ботов</h3>
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:flex-end">
-        <div class="setting-field" style="min-width:260px;flex:1"><label>Seed-компания (искать похожие)</label><input class="form-input" id="ais_seed" placeholder="напр. Prisync или клиент из CRM"></div>
-        <div class="setting-field" style="max-width:90px"><label>Кол-во</label><input class="form-input" id="ais_count" type="number" value="5" min="1" max="20"></div>
-        <button class="btn btn-sm btn-primary" data-on-click="aisRun('lookalikes')">🔎 Похожие + ЛПР</button>
-        <button class="btn btn-sm" data-on-click="aisRun('contacts')">🤝 Добрать ЛПР</button>
-        <button class="btn btn-sm" data-on-click="aisRun('push')">⬆ Залить в Twenty</button>
-      </div>
-      <div id="ais_job" style="margin-top:12px;display:none;font-size:12px"></div>
-    </div>
-
-    <div class="analytics-card">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h3 style="margin:0">Очередь (стейджинг)</h3><button class="btn btn-sm" data-on-click="aisLoadQueue()">↻ Обновить</button></div>
-      <div id="ais_queue" style="font-size:13px">—</div>
-    </div>
-  </div>
-</div>
 
 <script src="/js/utils.js?v=0718c"></script>
 <script src="/js/delegation.js?v=0727b"></script>

@@ -15,9 +15,10 @@ function runStartup(d) {
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
     autoCreateMissingClients, checkProxyLatency, proxyCheckRef,
-    runSlaCheck, runAutoReboot, dbAudit, tochkaConfig, runTochkaSync,
+    runAutoReboot, dbAudit, tochkaConfig, runTochkaSync,
     runRetentionCleanup, cleanupStalePortMappings,
     runDailyBilling, runMonthlyReconciliation,
+    runShadowBilling, runShadowBillingWeekly,
     autoGenerateMonthlyActs, autoGenerateMonthlyBills, syncBillStatuses,
     aiInsights, simulator, tgSummary, tgBot, clientById,
     kvSetCritical, kvGet, kvSet, knownModems, clients, getStaleNicks,
@@ -89,7 +90,7 @@ function runStartup(d) {
     } catch (e) { logger.warn('[ProxyExpiry] check failed: ' + e.message); }
   });
 
-  // Start modem tracking (IP + uptime) — every 5 min
+  // Start modem tracking (IP + uptime) — every tracking_interval_min (default 3)
   const TRACKING_INTERVAL_MS = (appSettings.tracking_interval_min || 3) * 60000;
   logger.info(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
   trackModems().catch(e => logger.error('[Tracking] Initial error:', e.message));
@@ -125,16 +126,6 @@ function runStartup(d) {
   proxyCheckRef.iv = setInterval(() => {
     checkProxyLatency().catch(e => logger.error('[ProxyCheck] Error:', e.message));
   }, pcMin * 60 * 1000);
-
-  // Phase 4: SLA check every 6 hours. First run 5 min after start.
-  setTimeout(() => {
-    dbAudit.runJobAsync('SlaCheck', 'initial', () => runSlaCheck())
-      .catch(e => logger.error('[SLA] Initial error:', e.message));
-  }, 5 * 60 * 1000);
-  _intervals.push(setInterval(() => {
-    dbAudit.runJobAsync('SlaCheck', 'periodic', () => runSlaCheck())
-      .catch(e => logger.error('[SLA] Periodic error:', e.message));
-  }, 6 * 60 * 60 * 1000));
 
   // Auto-reboot flaky modems every 15 min.
   // The throttle inside (auto_reboot_min_interval_min, default 60) ensures the
@@ -221,6 +212,15 @@ function runStartup(d) {
   scheduleRepeating(1, 0, 'DailyBilling', () =>
     dbAudit.runJobAsync('DailyBilling', null, () => runDailyBilling()));
 
+  // Фаза 0 (§2 ТЗ): теневой тест тарификации — 01:10 UTC, сразу за DailyBilling.
+  // Ничего не списывает: пишет сравнение V1 (legacy) vs V2 (канон) в billing_shadow_log.
+  scheduleRepeating(1, 10, 'ShadowBilling', () =>
+    dbAudit.runJobAsync('ShadowBilling', null, () => runShadowBilling()));
+  // Еженедельный отчёт по теневому тесту — понедельник 09:00 МСК (06:00 UTC);
+  // день недели проверяется внутри джобы (scheduleRepeating его не поддерживает).
+  scheduleRepeating(6, 0, 'ShadowBillingWeekly', () =>
+    dbAudit.runJobAsync('ShadowBillingWeekly', null, () => runShadowBillingWeekly()));
+
   // Monthly reconciliation at 03:30 UTC (06:30 MSK) on 1st of month — after TopHosts, before acts
   scheduleRepeating(3, 30, 'MonthlyReconciliation', () =>
     dbAudit.runJobAsync('MonthlyReconciliation', null, () => runMonthlyReconciliation()));
@@ -256,6 +256,8 @@ function runStartup(d) {
     clientById,
     getSetting,
     aiInsights,
+    // D3: дайджест «Лежат >12 ч» в сводке — тот же источник, что у колокольчика.
+    listDisconnectedModems: require('../jobs/notify-collect').scanDisconnected,
   });
   tgBot.init({
     logger,
@@ -266,7 +268,7 @@ function runStartup(d) {
   // Stage 18.13: alerts framework wires into the same bot/chat.
   alerts.init({ logger, getSetting, appSettings, kvSetCritical, kvGet, db, tgBot });
   // Stage 18.15: notification collector — periodic scan that pushes
-  // offline-modem / client-debt / CRM-reminder events into the same bell.
+  // offline-modem / client-debt events into the same bell.
   require('../jobs/notify-collect').init({
     logger, db, alerts, uptimeTracking, knownModems, clients, getStaleNicks, getSetting,
     // WP4.2: the bell's offline set must equal the card's disconnectedList —

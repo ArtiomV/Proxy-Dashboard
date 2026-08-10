@@ -151,7 +151,9 @@ const RULES = {
     priority: 'critical',
     defaultOn: true,
     cooldownSec: 86400,
-    dedupeKey: p => 'chrgfail_' + (p.client_id || ''),
+    // D4: долговые сигналы — общий dedupeKey-family debt_<client_id>_<signal>,
+    // чтобы кулдауны/дедуп были консистентны (частоты не менялись).
+    dedupeKey: p => 'debt_' + (p.client_id || '') + '_charge_failed',
     render: p => `🔴 <b>Списание не прошло</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: попытка списать ${p.amount} ₽, баланс был ${p.balance_before} ₽.\nСервис под угрозой отключения.`,
   },
 
@@ -299,8 +301,46 @@ const RULES = {
     priority: 'important',
     defaultOn: true,
     cooldownSec: 86400,
-    dedupeKey: p => 'neg_' + (p.client_id || ''),
+    dedupeKey: p => 'debt_' + (p.client_id || '') + '_balance_negative',   // D4: debt-family
     render: p => `⚠️ <b>Клиент в минусе</b>\n\n<b>${esc(p.client || '?')}</b>: баланс <b>${formatRub(p.balance)}</b>.\nЕсли в ближайший день не пополнит — сервис будет отключён по списанию.`,
+  },
+  // B3 (Р13): автоблок должников-физиков. День блока — факт гашения портов.
+  client_blocked_debt: {
+    title: 'Физик заблокирован по долгу',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'debt_' + (p.client_id || '') + '_blocked',   // D4: debt-family
+    render: p => `🔒 <b>Автоблок по долгу</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: баланс <b>${formatRub(p.balance)}</b>.\nПогашено портов: ${p.ports || '?'} («дата до» = ${p.validBefore || 'сегодня'}).\nПосле оплаты доступ восстановится автоматически (+30 дн).`,
+  },
+  // B3 (Р13): восстановление после оплаты.
+  client_unblocked_debt: {
+    title: 'Физик восстановлен после оплаты',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'debt_' + (p.client_id || '') + '_unblocked',   // D4: debt-family
+    render: p => `🔓 <b>Доступ восстановлен</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: баланс <b>${formatRub(p.balance)}</b>.\n«Дата до» продлена до ${p.validBefore || '?'} (портов: ${p.ports ?? '?'}).`,
+  },
+  // B3 (Р13): прогноз «за 3 дня» — баланс покрывает ≤ 3 суток списаний.
+  // Cooldown 3 суток: одно предупреждение на эпизод, чтобы не спамить ежедневно.
+  client_block_warning: {
+    title: 'Физик на пороге блокировки (≤3 дн)',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 259200,
+    dedupeKey: p => 'debt_' + (p.client_id || '') + '_block_warning',   // D4: debt-family
+    render: p => `⏳ <b>На пороге блокировки</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: баланс <b>${formatRub(p.balance)}</b> — хватит примерно на <b>${p.daysLeft} дн.</b> (среднесуточное списание ${formatRub(p.avgDaily)}).\nПри уходе в ноль порты будут погашены автоматически.`,
+  },
+  // B5 (C7): pricing_tiers промах — раньше молчаливый fallback в tiers[0]/23.
+  // Cooldown 6ч, чтобы AutoCreate по нескольким portName не спамил.
+  pricing_tier_miss: {
+    title: 'pricing_tiers: промах (fallback цены)',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 21600,
+    dedupeKey: () => 'global',
+    render: p => `⚠️ <b>pricing_tiers: ни один тир не подошёл</b>\n\nПроксей у клиента: ${p.count ?? '?'}, применён fallback <b>${p.fallback} ₽</b>.\nПроверь сетку в Настройках — min_proxies должен начинаться с 1.`,
   },
   proxy_expiring_3d: {
     title: 'Истекает срок прокси <3 дней',
@@ -349,6 +389,93 @@ const RULES = {
     render: p => `🔄 <b>Дашборд стартовал</b>\n\npm2 restart ${p.restartCount ? '#' + p.restartCount : ''}\nuptime perd: ${p.prevUptime || '?'}\n${p.reason ? 'Причина: ' + esc(p.reason) : ''}`,
   },
 
+  // ── D4: бывший URGENT_ACTIONS-контур logActivity (server.js) ─────────
+  // Раньше logActivity сам слал немедленный TG для ВСЕХ critical-событий и
+  // error-событий из URGENT_ACTIONS, кулдаун 15 мин на (action,target), гейт
+  // на telegram_summary_enabled. Теперь каждое событие — правило: те же
+  // каналы (TG + bell), тот же кулдаун 15 мин (cooldownSec 900), dedupeKey
+  // по target (= старый action|target, т.к. ruleId входит в ключ кулдауна).
+  // Немедленность сохранена: logActivity вызывает trigger() синхронно.
+  // server_unreachable и db_backup_failed маршрутизируются в свои давние
+  // правила выше (Stage 18.13) — здесь их нет.
+  billing_failed: {
+    title: 'Биллинг: сбой джобы списаний',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 900,
+    dedupeKey: p => 'ua_' + (p.target || 'global'),
+    render: _renderUrgentEvent,
+  },
+  billing_unique_conflict: {
+    title: 'Биллинг: конфликт уникальности списания',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 900,
+    dedupeKey: p => 'ua_' + (p.target || 'global'),
+    render: _renderUrgentEvent,
+  },
+  tochka_sync_failed: {
+    title: 'Точка: сбой синхронизации платежей',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 900,
+    dedupeKey: p => 'ua_' + (p.target || 'global'),
+    render: _renderUrgentEvent,
+  },
+  tochka_unverified_webhook: {
+    title: 'Точка: неверифицированный webhook',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 900,
+    dedupeKey: p => 'ua_' + (p.target || 'global'),
+    render: _renderUrgentEvent,
+  },
+  uncaught_exception: {
+    title: 'uncaughtException в процессе',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 900,
+    dedupeKey: p => 'ua_' + (p.target || 'global'),
+    render: _renderUrgentEvent,
+  },
+  unhandled_rejection: {
+    title: 'unhandledRejection в процессе',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 900,
+    dedupeKey: p => 'ua_' + (p.target || 'global'),
+    render: _renderUrgentEvent,
+  },
+  telegram_summary_failed: {
+    title: 'Дневная TG-сводка не отправлена',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 900,
+    dedupeKey: p => 'ua_' + (p.target || 'global'),
+    render: _renderUrgentEvent,
+  },
+  // Фолбэк для critical-событий с произвольным action (старый контур слал TG
+  // на ЛЮБОЙ critical — integrity_regression, disk_low и т.п.). Сохраняет
+  // покрытие: ни одно critical-событие не теряется при консолидации.
+  system_critical: {
+    title: 'Критическое событие (system_log)',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 900,
+    dedupeKey: p => 'crit_' + (p.action || '') + '_' + (p.target || 'global'),
+    render: _renderUrgentEvent,
+  },
+  // D7: бокс отвечает не по контракту (docs/PROXYSMART-CONTRACT.md) — поля
+  // отсутствуют или сменили тип. Одно сообщение в сутки на бокс.
+  proxysmart_contract_mismatch: {
+    title: 'Бокс отвечает не по контракту',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'pscontract_' + (p.server || 'unknown'),
+    render: p => `🔴 <b>Бокс ${esc(p.server || '?')} отвечает не по контракту</b>\n\nНарушения (${p.count || '?'}):\n<code>${esc((p.sample || '').slice(0, 500))}</code>\nПарсинг дашборда может молча деградировать — сверься с docs/PROXYSMART-CONTRACT.md.`,
+  },
+
   // ── 🔵 EARLY WARNING ────────────────────────────────────────
   heap_warn: {
     title: 'Heap >85% (превентивно)',
@@ -395,17 +522,8 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 86400,
     channel: 'bell',
-    dedupeKey: p => 'debt_bell_' + (p.client_id || ''),
+    dedupeKey: p => 'debt_' + (p.client_id || '') + '_debt',   // D4: debt-family
     render: p => `💸 <b>${esc(p.client || '?')}</b> — баланс ${formatRub(p.balance)}.`,
-  },
-  crm_reminder: {
-    title: 'Напоминание CRM',
-    priority: 'important',
-    defaultOn: true,
-    cooldownSec: 3600,
-    channel: 'bell',
-    dedupeKey: p => 'crm_bell_' + (p.id || ''),
-    render: p => `🔔 <b>${esc(p.name || 'Сделка')}</b>`,
   },
 };
 
@@ -431,6 +549,9 @@ const _entityFor = {
   failover_failed:           p => ({ kind: 'system',  id: 'failover' }),
   payment_received:          p => ({ kind: 'payment', id: p.natural_key || null }),
   client_balance_negative:   p => ({ kind: 'client',  id: p.client_id || null }),
+  client_blocked_debt:       p => ({ kind: 'client',  id: p.client_id || null }),
+  client_unblocked_debt:     p => ({ kind: 'client',  id: p.client_id || null }),
+  client_block_warning:      p => ({ kind: 'client',  id: p.client_id || null }),
   proxy_expiring_3d:         p => ({ kind: 'modem',   id: p.nick || p.portName || null }),
   sim_redirect_imposed:      p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   sim_status_bad:            p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
@@ -443,10 +564,19 @@ const _entityFor = {
   heap_warn:                 () => ({ kind: 'system', id: 'heap' }),
   disk_low_warn:             () => ({ kind: 'system', id: 'disk' }),
   cron_stuck:                p => ({ kind: 'system', id: 'cron:' + (p.job || '') }),
+  // D4 — бывший URGENT_ACTIONS-контур
+  billing_failed:            () => ({ kind: 'system', id: 'billing' }),
+  billing_unique_conflict:   () => ({ kind: 'system', id: 'billing' }),
+  tochka_sync_failed:        () => ({ kind: 'system', id: 'tochka' }),
+  tochka_unverified_webhook: () => ({ kind: 'system', id: 'tochka' }),
+  uncaught_exception:        () => ({ kind: 'system', id: 'process' }),
+  unhandled_rejection:       () => ({ kind: 'system', id: 'process' }),
+  telegram_summary_failed:   () => ({ kind: 'system', id: 'summary' }),
+  system_critical:           p => ({ kind: 'system', id: p.action || null }),
+  proxysmart_contract_mismatch: p => ({ kind: 'system', id: p.server || null }),
   // Stage 18.15 — bell-only sources
   modem_offline:             p => ({ kind: 'modem',  id: p.nick || p.imei || null }),
   client_debt:               p => ({ kind: 'client', id: p.client_id || null }),
-  crm_reminder:              p => ({ kind: 'crm',    id: p.id || null }),
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -545,8 +675,8 @@ function trigger(ruleId, payload) {
 }
 
 // Bell-only event recorder for sources that DON'T flow through the
-// Telegram framework (the collector job for offline modems, client debts,
-// CRM reminders). Same dedup model — caller passes a stable dedup_key
+// Telegram framework (the collector job for offline modems, client debts).
+// Same dedup model — caller passes a stable dedup_key
 // (typically embedding a daily bucket), and we skip if a row with that
 // key already exists. No cooldown, no TG send.
 let _findBellByKey = null;
@@ -604,6 +734,13 @@ function listRules() {
 function esc(s) {
   if (s == null) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+// D4: общий renderer бывшего URGENT_ACTIONS-контура — формат сообщения
+// сохранён 1-в-1 со старым _emitUrgentAlert из server.js.
+function _renderUrgentEvent(p) {
+  const icon = p.level === 'critical' ? '🚨' : '⚠️';
+  const lvl = String(p.level || 'error').toUpperCase();
+  return `${icon} <b>${lvl}</b>\n<code>${esc(String(p.action || '').slice(0, 60))}</code>${p.target ? ' · ' + esc(String(p.target).slice(0, 60)) : ''}\n${esc(String(p.message || '').slice(0, 800))}`;
 }
 function formatRub(n) {
   if (n == null || isNaN(n)) return '—';

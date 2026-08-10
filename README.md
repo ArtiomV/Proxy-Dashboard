@@ -85,12 +85,6 @@ TOCHKA_COMPANY_BIK=044525104
 TOCHKA_COMPANY_ACCOUNT=40802810...
 TOCHKA_COMPANY_CORR=30101810...
 
-# CRM (опционально, Twenty CRM)
-CRM_URL=https://crm.example.com
-CRM_EMAIL=admin@example.com
-CRM_PASSWORD=...
-CRM_DB_URL=postgres://...
-CRM_WORKSPACE=workspace_name
 ```
 
 ## Архитектура
@@ -123,12 +117,11 @@ project/
 │   │   ├── billing-ext.js      — monthly_costs + finance_dashboard + reconciliation (4 routes)
 │   │   ├── traffic.js          — daily/hourly/bandwidth (7 routes)
 │   │   ├── analytics.js        — /api/analytics/* (11 routes)
-│   │   ├── sla.js              — per-client SLA + overview (2 routes)
 │   │   ├── proxies.js          — modem control + port CRUD + bulk (28 routes)
-│   │   ├── proxy-checks.js     — proxy_check + top_hosts (6 routes)
+│   │   ├── proxy-checks.js     — proxy_check + top_hosts (4 routes)
 │   │   ├── servers.js          — server CRUD + settings (6 routes)
 │   │   ├── tochka.js           — webhook + admin tochka + per-client docs/bills (25 routes)
-│   │   ├── telegram-crm.js     — telegram + AI insights + CRM (5 routes)
+│   │   ├── telegram-crm.js     — telegram + AI insights (3 routes)
 │   │   ├── simulator.js        — весь /api/admin/simulator/* (19 routes)
 │   │   └── misc.js             — /admin, /api/docs, cache, vpn, shop (5 routes)
 │   ├── tochka/            — Tochka Bank API + document generation
@@ -408,7 +401,6 @@ Stage 3 нарезки немедленно ломает тест.
 | Аудит | `GET /api/admin/audit` | Лог действий |
 | Backup | `GET /api/admin/backup` | Экспорт БД (SQLite) |
 | Серверы | `POST /api/admin/reboot_server` | Перезагрузка сервера ProxySmart |
-| CRM | `GET /api/admin/crm_reminders` | Напоминания из CRM |
 
 ### Webhook
 
@@ -441,7 +433,6 @@ SQLite (WAL mode, foreign keys, auto-vacuum) с 20+ таблицами:
 | `proxy_checks` | Результаты проверки латентности прокси |
 | `speedtest_results` | Результаты speedtest (download, upload, latency) |
 | `kv_store` | Key-value хранилище для настроек |
-| `external_proxies` | Партнёрские прокси (legacy, не используется) |
 
 ### Автомиграция
 - При первом запуске создаёт таблицы из `schema.sql`

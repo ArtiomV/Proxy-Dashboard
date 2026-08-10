@@ -31,10 +31,7 @@ CREATE TABLE IF NOT EXISTS clients (
   auto_bills      INTEGER DEFAULT 1,
   allow_debt      INTEGER DEFAULT 0,
   max_debt        REAL,
-  sla_uptime_pct  REAL DEFAULT 99.0,
-  sla_max_latency_ms INTEGER DEFAULT 1000,
-  sla_max_error_pct REAL DEFAULT 5.0,
-  sla_auto_credit INTEGER DEFAULT 0,
+  debt_blocked    INTEGER DEFAULT 0, -- B3 (Р13): порт(ы) погашены автоблоком по долгу; сбрасывается при восстановлении после оплаты
   last_traffic_snapshot TEXT DEFAULT '{}',
   created_at      TEXT DEFAULT (datetime('now')),
   updated_at      TEXT DEFAULT (datetime('now'))
@@ -45,6 +42,10 @@ CREATE INDEX IF NOT EXISTS idx_clients_api_key ON clients(api_key);
 CREATE INDEX IF NOT EXISTS idx_clients_inn ON clients(inn);
 
 -- Payments (replaces client.payments[] array inside clients.json)
+-- LEGACY read-only (C5): никто не пишет и не читает (все читатели на
+-- billing_ledger). Дроп — после чистой сверки scripts/reconcile-payments.js,
+-- ручная миграция migrations/manual/056_drop_payments.sql (после применения
+-- убрать этот блок из baseline).
 CREATE TABLE IF NOT EXISTS payments (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
   client_id   TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
@@ -154,6 +155,16 @@ CREATE TABLE IF NOT EXISTS closing_documents (
 );
 CREATE INDEX IF NOT EXISTS idx_closing_docs_client ON closing_documents(client_id);
 CREATE INDEX IF NOT EXISTS idx_closing_docs_period ON closing_documents(period);
+-- B2 (Р15): анти-дабл гейт — один акт на (клиент, период, тип). Истина — БД;
+-- in-memory проверки в роутах/кроне — только fast-path.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_closing_docs_unique_period ON closing_documents(client_id, period, type);
+
+-- B2 (Р15/Р23): сквозной счётчик «№ N/YYYY» — единая серия для актов и счетов,
+-- старт с 1 на каждый год, дыры не переиспользуются.
+CREATE TABLE IF NOT EXISTS doc_numbering (
+  year     INTEGER PRIMARY KEY,
+  next_num INTEGER NOT NULL DEFAULT 1
+);
 
 -- Bills (replaces client.bills[] array)
 CREATE TABLE IF NOT EXISTS bills (
@@ -168,6 +179,8 @@ CREATE TABLE IF NOT EXISTS bills (
 );
 CREATE INDEX IF NOT EXISTS idx_bills_client ON bills(client_id);
 CREATE INDEX IF NOT EXISTS idx_bills_period ON bills(period);
+-- B2 (Р15): анти-дабл гейт — один счёт на (клиент, период).
+CREATE UNIQUE INDEX IF NOT EXISTS idx_bills_unique_period ON bills(client_id, period);
 
 -- Audit log (TASK-J, replaces audit_log.json)
 CREATE TABLE IF NOT EXISTS audit_log (
@@ -348,20 +361,6 @@ CREATE TABLE IF NOT EXISTS hourly_snapshots (
   last_updated_at            TEXT
 );
 
--- SLA violations (Phase 4) — per-client breaches of uptime/latency/errors SLA
-CREATE TABLE IF NOT EXISTS sla_violations (
-  id               INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_id        TEXT,
-  date             TEXT,
-  metric           TEXT,
-  expected         REAL,
-  actual           REAL,
-  credited_amount  REAL DEFAULT 0,
-  created_at       TEXT DEFAULT (datetime('now'))
-);
-CREATE INDEX IF NOT EXISTS idx_sla_violations_client ON sla_violations(client_id, date);
-CREATE INDEX IF NOT EXISTS idx_sla_violations_date ON sla_violations(date);
-
 -- API usage tracking (Phase 2) — per-client log of /api/v1/* requests
 CREATE TABLE IF NOT EXISTS api_usage (
   id               INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -417,24 +416,6 @@ CREATE TABLE IF NOT EXISTS proxy_checks (
 );
 CREATE INDEX IF NOT EXISTS idx_pc_nick ON proxy_checks(nick);
 CREATE INDEX IF NOT EXISTS idx_pc_checked ON proxy_checks(checked_at);
-
--- External proxies (non-modem proxies a client owns and routes through us).
--- Base columns only; migrations 005, etc. add extended ones. On existing prod
--- DBs IF NOT EXISTS makes this a no-op. On fresh DBs it gives migration 005's
--- ALTER TABLE statements something to ALTER.
-CREATE TABLE IF NOT EXISTS external_proxies (
-  id TEXT PRIMARY KEY,
-  client_id TEXT NOT NULL,
-  label TEXT DEFAULT '',
-  protocol TEXT DEFAULT 'HTTP',
-  host TEXT NOT NULL,
-  port INTEGER NOT NULL,
-  login TEXT DEFAULT '',
-  password TEXT DEFAULT '',
-  note TEXT DEFAULT '',
-  created_at TEXT DEFAULT (datetime('now')),
-  FOREIGN KEY (client_id) REFERENCES clients(id)
-);
 CREATE INDEX IF NOT EXISTS idx_pc_operator ON proxy_checks(operator);
 
 -- Migrations tracking

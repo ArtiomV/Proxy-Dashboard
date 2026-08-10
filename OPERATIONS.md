@@ -8,7 +8,7 @@
 ### Source layout (after 2026-05 refactor)
 - `server.js` — bootstrap + state init + shared helpers + cron scheduler (~5 100 lines, no route definitions).
 - `src/routes/*.js` — 18 Express `Router` factories, all 168 HTTP endpoints live here. Mounted by `server.js` via `app.use(require('./src/routes/X')(deps))`.
-- `src/db/*.js` — per-domain prepared-statement repositories (`clients`, `ledger`, `payments`, `documents`, `simulator`). Bulk reads/writes go through these; misc. ad-hoc queries still live inline in helpers in `server.js`.
+- `src/db/*.js` — per-domain prepared-statement repositories (`clients`, `ledger`, `documents`, `simulator`). Bulk reads/writes go through these; misc. ad-hoc queries still live inline in helpers in `server.js`. (`src/db/payments.js` удалён в C5 — legacy-таблица `payments` read-only, читатели на billing_ledger.)
 - `src/billing/atomic.js` — `atomicCredit` / `atomicDebit` (balance + ledger row in one transaction). Stage-4 patch: receives `getClientById` + `getBillingLedger` getters (not the maps directly) so it follows rebinds across `rebuildClientMaps()`.
 - `src/api/proxy-smart.js` — ProxySmart polling, `serverCache.json` cache, `invalidateCache()`.
 - `src/tochka/*` — bank-webhook JWT verify + document/bill generators.
@@ -22,6 +22,16 @@ npm test         # vitest run — must be green before any deploy
 npm run lint     # ESLint — 0 errors policy (warnings OK; silent catches are errors)
 ```
 Route snapshot (`tests/api/__snapshots__/routes.json`) freezes the (method, path) pair list at 168 entries. Refresh intentionally with `UPDATE_SNAPSHOT=1 npm test` — never accept drift without a sign-off.
+
+### Code style: молчаливые catch (правило, C7)
+- **Молчаливый catch при деградации обязан писать `warn`** (в logger; для
+  денежных/инфраструктурных деградаций — в `system_log` через logActivity).
+  Контекст обязателен: какой блок деградировал + `e.message`.
+- Пустой `catch (_) {}` допустим только для genuinely best-effort веток без
+  деградации (например, опциональный столбец до миграции) — с комментарием.
+- Правило введено 2026-08 (C7) и применяется к НОВОМУ и меняемому коду.
+  Глобальный аудит существующих ~160 молчаливых catch — отдельный этап ТЗ,
+  массово не правим вместе с фичами.
 
 ## Clean DB / migrations
 - `schema.sql` is the **initial baseline** (treated as migration 000). Subsequent changes go in `migrations/NNN_*.sql`.
@@ -39,6 +49,30 @@ Route snapshot (`tests/api/__snapshots__/routes.json`) freezes the (method, path
 - **015_ledger_unique vs 025_ledger_unique_all** — 025 supersedes 015
   (extends the uniqueness guarantee to all ledger rows, not just the subset
   015 covered). Keep both: 015's constraints are a subset and harmless.
+- **manual/-миграции** (`migrations/manual/*.sql`) НЕ подхватываются раннером
+  (он читает только `migrations/*.sql` верхнего уровня). Применяются
+  оператором вручную по инструкции в шапке файла — см. ниже про payments.
+  NB: номера manual/ и авторан-миграций независимы — `manual/056_drop_payments.sql`
+  (C5b) и авторан-`056_doc_numbering_and_debt_block.sql` (B2) — разные файлы,
+  это не коллизия.
+
+### Дроп legacy-таблицы payments (C5b, на проде, руками оператора)
+
+Таблица `payments` read-only: все читатели переведены на billing_ledger (C5a,
+2026-08). Дроп — только после чистой сверки:
+
+1. Pre-deploy снапшот БД: `cp dashboard.db dashboard.db.pre-056.bak`.
+2. Сверка (read-only, exit 0 = чисто):
+   `node scripts/reconcile-payments.js --db /root/Proxy-Dashboard/dashboard.db --out reconcile-report.json`
+   Для каждого клиента сравнивает Σ `payments` vs Σ ledger
+   (payment + bank_payment − payment_reversal). Расхождения — список для
+   ручной доимпортации в billing_ledger; после доимпортации прогнать сверку
+   повторно до exit 0.
+3. Применить ручную миграцию (команды — в шапке
+   `migrations/manual/056_drop_payments.sql`), отметить в `_migrations`,
+   `pm2 restart dashboard`.
+4. После дропа убрать `CREATE TABLE payments` (+ её индексы) из `schema.sql`
+   и строку из §1.1 FUNCTIONAL-SPEC.
 - **043_api_key_hash** calls `sha256hex()`, a JS function registered by
   server.js before the runner executes — it cannot be applied with the
   sqlite3 CLI. Keep comments in migration files free of `;` — the runner's
@@ -46,11 +80,10 @@ Route snapshot (`tests/api/__snapshots__/routes.json`) freezes the (method, path
   aborted startup).
 
 ## Deployment
-Current flow (production):
-```
-scp server.js root@159.194.228.17:/root/Proxy-Dashboard/server.js
-ssh root@159.194.228.17 'pm2 restart dashboard'
-```
+Current flow (production): `scripts/deploy.sh` (rsync + npm ci + pm2 restart).
+С D2 (2026-08) скрипт перед rsync делает **pre-deploy снапшот БД** на сервере
+(`$DB_BACKUP_DIR/pre-deploy-<timestamp>/`, ротация последних 5) — точка отката
+на случай сломанного деплоя/миграции. Usage: `SERVER=root@159.194.228.17 ./scripts/deploy.sh`.
 No staging env. **Future improvement** — add `staging.proxies.rent` with a separate DB and run integration tests there before prod cuts.
 
 Recommended deploy script (todo):
@@ -66,33 +99,63 @@ ssh $SERVER "sleep 5 && curl -sf http://localhost:3000/health || (pm2 restart da
 ```
 
 ## Database backup
-- Daily backup at 02:00 UTC to `/var/backups/proxy-dashboard/dashboard-YYYY-MM-DD.db`.
-- Retention: 14 days.
+- Daily backup at 02:00 UTC (джоба DbBackup, src/jobs/backup.js) to
+  `/var/backups/proxy-dashboard/dashboard-YYYY-MM-DD.db`, с верификацией
+  (открывается и проверяется наличие таблицы clients).
+- Retention: **7 daily** + **12 monthly** (D2): снапшот, сделанный 1-го числа,
+  копируется в `monthly/` и хранится год.
+- **Offsite (D2)**: после успешного DbBackup вызывается
+  `scripts/backup-offsite.sh` — выгрузка daily+monthly в облако через **rclone**
+  (remote из `$RCLONE_REMOTE`, назначение `<remote>:proxy-dashboard-backups`).
+  Сбой выгрузки НЕ роняет локальный бэкап, но пишет warn в лог и system_log
+  (`backup_offsite_failed`) — не молчит (C7). Если rclone/remote не настроены,
+  скрипт падает с понятной ошибкой — тот же warn.
+- **Pre-deploy снапшот (D2)**: `scripts/deploy.sh` перед rsync делает снапшот
+  БД на сервере в `$DB_BACKUP_DIR/pre-deploy-<timestamp>/` (sqlite3 `.backup`,
+  фолбэк — WAL-checkpoint + cp), хранятся последние 5. Это точка отката,
+  если деплой или авторан-миграция сломает БД.
 - Restore: stop dashboard → copy backup over `dashboard.db` → start.
-- **TODO** — sync backups offsite (S3 / external rsync target). Single-host backups don't protect against host loss.
+  Полный сценарий восстановления на чистой машине — **docs/DR-RUNBOOK.md** (D6).
+
+### Настройка rclone (оператор, на сервере)
+1. `rclone config` → завести remote типа S3 / Backblaze B2 (креды B2
+   предоставляет оператор — application key; хранятся в `~/.config/rclone/`,
+   НЕ в репо). Для B2: type=b2, account=keyID, key=applicationKey.
+2. В env дашборда: `RCLONE_REMOTE=<имя remote>` (например `b2`), затем
+   `pm2 restart dashboard --update-env`.
+3. Проверка руками: `bash scripts/backup-offsite.sh /var/backups/proxy-dashboard`.
+4. Lifecycle-правила на стороне бакета (TTL версий) — на усмотрение оператора;
+   ротация daily/monthly и так ограничивает объём выгрузки.
 
 ### Full state inventory (what a complete backup must include)
 A `dashboard.db` snapshot does NOT cover all process state — some
 artifacts still live on disk as JSON files. A complete backup needs:
 
   1. **`dashboard.db`** — primary store: clients, billing_ledger,
-     payments (read-only post-Stage-13.3), bank_payments, sessions,
+     payments (legacy read-only, дроп после сверки — C5b), bank_payments, sessions,
      audit_log, system_log, modem_meta, rotation_log, proxy_checks,
      traffic_hourly, daily_traffic, hourly_snapshots, ip_history,
-     api_usage, simulator_runs/samples, monthly_costs, sla_violations,
+     api_usage, simulator_runs/samples, monthly_costs,
      auto_reboot_log, top_hosts_detail, ip_tracking, uptime_tracking,
      client_documents, closing_documents, bills, kv_store(+_history),
-     external_proxies, _migrations.
+     _migrations.
 
   2. **`known_modems.json`** — server_name → port_id → modem metadata
      (IMEI, nick, model, last-seen). Mutated by every modem-polling
      cycle; restored at boot. Stale-port-cleanup runs against it.
 
-  3. **`tochka_config.json`** — AES-256-GCM encrypted Tochka Bank API
-     credentials (JWT, clientId, customerCode, accountId, company
-     details, bank account). Key derivation: $TOCHKA_CONFIG_KEY env
-     > /etc/machine-id > legacy hostname hash (Stage 12). Without the
-     key the backup file is unreadable on a different host.
+  3. **`tochka_config` (kv_store, внутри dashboard.db)** — D1 (2026-08):
+     Tochka Bank API credentials (JWT, clientId, customerCode, accountId,
+     company details, bank account) переехали из файла `tochka_config.json`
+     в kv_store: JSON-объект, каждое непустое значение — `enc1:` +
+     AES-256-GCM (per-field, как SENSITIVE_SETTINGS), запись через
+     kvSetCritical (shape-guard). Конфиг теперь входит в dashboard.db →
+     попадает в DbBackup автоматически. Приоритет источников при старте:
+     **.env (`TOCHKA_*`) > kv_store > legacy-файл**. Файл
+     `tochka_config.json` — DEPRECATED read-only фолбэк: если kv пуст,
+     а файл есть, при старте выполняется миграция файл → kv; файл не
+     удаляется и больше не перезаписывается. Ключ шифрования:
+     $TOCHKA_CONFIG_KEY env > /etc/machine-id > legacy hostname hash.
 
   4. **`speedtest_history.json`** — rolling per-modem speedtest entries
      (timestamp, download/upload Mbps, ping). Bounded by
@@ -103,7 +166,7 @@ artifacts still live on disk as JSON files. A complete backup needs:
      on next cycle. Useful for cold-start without waiting for first poll.
 
   6. **`.env`** — `$TOCHKA_CONFIG_KEY` (mandatory for tochka_config
-     decryption on a new host), `$ANTHROPIC_API_KEY`, `$CRM_DB_URL`,
+     decryption on a new host), `$ANTHROPIC_API_KEY`,
      other secrets.
 
   7. **`logs/dashboard.log`** — optional, log rotation handles size.
@@ -112,10 +175,11 @@ artifacts still live on disk as JSON files. A complete backup needs:
      records which migrations have run. Don't drop it on restore.
 
 ### Why files outside the DB?
-Historical: tochka_config.json + known_modems.json + speedtest predate
-the SQLite migration. **FOLLOWUP candidate** (deferred per TZ): fold
-the JSON state into `kv_store` so a single `dashboard.db` snapshot
-captures everything except `.env` secrets.
+Historical: known_modems.json + speedtest predate the SQLite migration.
+tochka_config folded into kv_store in D1 (2026-08) — see above.
+**FOLLOWUP candidate** (deferred per TZ): fold the remaining JSON state
+into `kv_store` so a single `dashboard.db` snapshot captures everything
+except `.env` secrets.
 
 ## Log rotation
 - `pm2-logrotate` module: 50 MB max, 14 retained, gzip compressed, daily.
@@ -129,6 +193,14 @@ captures everything except `.env` secrets.
 ## Alerting
 - Daily summary: Telegram, 08:00 MSK (configurable).
 - Urgent alerts: errors/critical events in `system_log` that match `URGENT_ACTIONS` set in `server.js` (server_unreachable, billing_failed, db_backup_failed, etc.) forward immediately to Telegram with 15-min cooldown per action.
+
+## Автоблок должников-физиков (B3, src/jobs/debt-block.js)
+- **Когда срабатывает:** в конце DailyBilling (01:00 UTC, и на retry-прогонах): физик (`client_type != 'legal'`) с `balance ≤ 0` и `allow_debt = 0` → всем его портам `PROXY_VALID_BEFORE` = сегодня (тот же путь, что ручной save_port_config: edit_port form → POST → apply_port). Юрлица никогда.
+- **Восстановление:** любое зачисление (atomicCredit → событие `client-credit`): `debt_blocked=1` и `balance > 0` → «дата до» = сегодня + 30 дней. Ручной платёж/webhook — сразу; банковский sync — до ~30 мин (цикл TochkaSync).
+- **Диагностика:** audit_log (`debt_block`/`debt_unblock`), system_log (`debt_block`, `debt_block_error`, `debt_restore`, `debt_restore_error`), TG-правила `client_blocked_debt`/`client_unblocked_debt`/`client_block_warning`.
+- **Ручная разблокировка:** поставить клиенту `allow_debt = 1` в настройках клиента и/или продлить «Действителен до» порта в UI (save_port_config) — автоблок уже истёкшие даты не перезаписывает, восстановление не укорачивает более поздние.
+- **Нумерация актов/счетов (B2):** счётчик `doc_numbering` (year → next_num), единая сквозная серия «№ N/YYYY» для актов и счетов; дыры не переиспользуются. Анти-дабл: UNIQUE(client_id, period, type) на closing_documents и UNIQUE(client_id, period) на bills — если INSERT внезапно падает с constraint-ошибкой, значит дубль за период: удалить старый документ (delete+create = «перевыставить»).
+
 
 ## Network security: ProxySmart API transport (OPEN ITEM)
 - Today the dashboard talks to ProxySmart servers over **plain HTTP with
@@ -151,10 +223,18 @@ Required:
 - `PORT` — HTTP listen port (default 3000)
 
 Optional:
-- `TOCHKA_CONFIG_KEY` — 64-char hex AES key for encrypting `tochka_config.json`. If unset, a host-derived key is used.
+- `TOCHKA_CONFIG_KEY` — 64-char hex AES key for encrypting the Tochka
+  config (kv_store `tochka_config`, enc1:-values). **ОБЯЗАТЕЛЕН на проде
+  (runbook, D1)**: без него ключ выводится из /etc/machine-id, а тот
+  фолбэк умирает при пересборке хоста — конфиг станет нечитаемым.
+  Генерация: `openssl rand -hex 32` (генерирует исполнитель, подставляет
+  в env оператор — не в репо/не в чате). Приоритет источников конфига
+  при старте: `.env (TOCHKA_*)` > kv_store > legacy-файл tochka_config.json
+  (deprecated read-only фолбэк). См. также docs/DR-RUNBOOK.md.
 - `DB_BACKUP_DIR` — backup destination (default `/var/backups/proxy-dashboard`)
+- `RCLONE_REMOTE` — имя rclone remote для offsite-выгрузки бэкапов (D2);
+  без него облачная выгрузка честно падает с warn в логах
 - `TRUSTED_PROXY` — comma-separated trusted reverse-proxy IPs (default `127.0.0.1,::1`)
-- `CRM_DB_URL` — Postgres URL for CRM read-only access (optional integration)
 - `TELEGRAM_*` — defaults loaded from app_settings table, env vars override
 
 ## API versioning

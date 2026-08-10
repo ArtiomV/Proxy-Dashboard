@@ -121,6 +121,24 @@
   },
   {
     "type": "index",
+    "name": "idx_bills_unique_period",
+    "tbl_name": "bills",
+    "sql": "CREATE UNIQUE INDEX idx_bills_unique_period ON bills(client_id, period)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bsl_client",
+    "tbl_name": "billing_shadow_log",
+    "sql": "CREATE INDEX idx_bsl_client ON billing_shadow_log(client_id, date)"
+  },
+  {
+    "type": "index",
+    "name": "idx_bsl_date",
+    "tbl_name": "billing_shadow_log",
+    "sql": "CREATE INDEX idx_bsl_date ON billing_shadow_log(date)"
+  },
+  {
+    "type": "index",
     "name": "idx_clients_api_key",
     "tbl_name": "clients",
     "sql": "CREATE INDEX idx_clients_api_key ON clients(api_key)"
@@ -154,6 +172,12 @@
     "name": "idx_closing_docs_period",
     "tbl_name": "closing_documents",
     "sql": "CREATE INDEX idx_closing_docs_period ON closing_documents(period)"
+  },
+  {
+    "type": "index",
+    "name": "idx_closing_docs_unique_period",
+    "tbl_name": "closing_documents",
+    "sql": "CREATE UNIQUE INDEX idx_closing_docs_unique_period ON closing_documents(client_id, period, type)"
   },
   {
     "type": "index",
@@ -439,48 +463,6 @@
   },
   {
     "type": "index",
-    "name": "idx_sales_companies_domain",
-    "tbl_name": "sales_companies",
-    "sql": "CREATE INDEX idx_sales_companies_domain ON sales_companies(domain)"
-  },
-  {
-    "type": "index",
-    "name": "idx_sales_companies_niche",
-    "tbl_name": "sales_companies",
-    "sql": "CREATE INDEX idx_sales_companies_niche ON sales_companies(niche_id)"
-  },
-  {
-    "type": "index",
-    "name": "idx_sales_companies_status",
-    "tbl_name": "sales_companies",
-    "sql": "CREATE INDEX idx_sales_companies_status ON sales_companies(status)"
-  },
-  {
-    "type": "index",
-    "name": "idx_sales_contacts_company",
-    "tbl_name": "sales_contacts",
-    "sql": "CREATE INDEX idx_sales_contacts_company ON sales_contacts(company_id)"
-  },
-  {
-    "type": "index",
-    "name": "idx_sales_contacts_status",
-    "tbl_name": "sales_contacts",
-    "sql": "CREATE INDEX idx_sales_contacts_status ON sales_contacts(status)"
-  },
-  {
-    "type": "index",
-    "name": "idx_sales_jobs_status",
-    "tbl_name": "sales_jobs",
-    "sql": "CREATE INDEX idx_sales_jobs_status ON sales_jobs(status)"
-  },
-  {
-    "type": "index",
-    "name": "idx_sales_niches_name",
-    "tbl_name": "sales_niches",
-    "sql": "CREATE INDEX idx_sales_niches_name ON sales_niches(name)"
-  },
-  {
-    "type": "index",
     "name": "idx_server_downtime_server",
     "tbl_name": "server_downtime",
     "sql": "CREATE INDEX idx_server_downtime_server ON server_downtime(server_name, down_from)"
@@ -520,18 +502,6 @@
     "name": "idx_sim_samples_run_ts",
     "tbl_name": "simulator_samples",
     "sql": "CREATE INDEX idx_sim_samples_run_ts ON simulator_samples(run_id, ts_ms)"
-  },
-  {
-    "type": "index",
-    "name": "idx_sla_violations_client",
-    "tbl_name": "sla_violations",
-    "sql": "CREATE INDEX idx_sla_violations_client ON sla_violations(client_id, date)"
-  },
-  {
-    "type": "index",
-    "name": "idx_sla_violations_date",
-    "tbl_name": "sla_violations",
-    "sql": "CREATE INDEX idx_sla_violations_date ON sla_violations(date)"
   },
   {
     "type": "index",
@@ -642,18 +612,6 @@
     "sql": "CREATE INDEX idx_traffic_hourly_srv ON traffic_hourly(server_name, hour_start)"
   },
   {
-    "type": "index",
-    "name": "idx_traffic_recon_date",
-    "tbl_name": "traffic_recon",
-    "sql": "CREATE INDEX idx_traffic_recon_date ON traffic_recon(date)"
-  },
-  {
-    "type": "index",
-    "name": "idx_traffic_recon_server",
-    "tbl_name": "traffic_recon",
-    "sql": "CREATE INDEX idx_traffic_recon_server ON traffic_recon(server_name, date)"
-  },
-  {
     "type": "table",
     "name": "_audit_active_context",
     "tbl_name": "_audit_active_context",
@@ -703,6 +661,12 @@
   },
   {
     "type": "table",
+    "name": "billing_shadow_log",
+    "tbl_name": "billing_shadow_log",
+    "sql": "CREATE TABLE billing_shadow_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, client_id TEXT NOT NULL, hours_present INTEGER NOT NULL DEFAULT 0, gb_durable REAL NOT NULL DEFAULT 0, gb_uncertain REAL NOT NULL DEFAULT 0, gb_live REAL NOT NULL DEFAULT 0, gb_v1 REAL NOT NULL DEFAULT 0, rub_v1 REAL NOT NULL DEFAULT 0, gb_v2 REAL NOT NULL DEFAULT 0, rub_v2 REAL NOT NULL DEFAULT 0, fallback_used INTEGER NOT NULL DEFAULT 0, created_at TEXT DEFAULT (datetime('now')), UNIQUE(date, client_id) )"
+  },
+  {
+    "type": "table",
     "name": "bills",
     "tbl_name": "bills",
     "sql": "CREATE TABLE bills ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, tochka_bill_id TEXT, period TEXT NOT NULL, bill_number TEXT, amount REAL NOT NULL, status TEXT DEFAULT 'unpaid', created_at TEXT DEFAULT (datetime('now')) , formula TEXT NOT NULL DEFAULT '')"
@@ -717,7 +681,7 @@
     "type": "table",
     "name": "clients",
     "tbl_name": "clients",
-    "sql": "CREATE TABLE clients ( id TEXT PRIMARY KEY, login TEXT UNIQUE NOT NULL, password TEXT, password_hash TEXT, port_name TEXT, name TEXT NOT NULL, contact TEXT DEFAULT '', notes TEXT DEFAULT '', billing_type TEXT DEFAULT 'per_gb', price REAL DEFAULT 0, currency TEXT DEFAULT 'RUB', balance REAL DEFAULT 0, api_key TEXT UNIQUE, api_key_prefix TEXT, -- display prefix for masked UI; api_key itself is a SHA-256 hash (migration 043) referral_code TEXT UNIQUE, referred_by TEXT, referral_balance REAL DEFAULT 0, reset_token TEXT, inn TEXT DEFAULT '', kpp TEXT DEFAULT '', legal_name TEXT DEFAULT '', contract_info TEXT DEFAULT '', address TEXT DEFAULT '', auto_acts INTEGER DEFAULT 1, auto_bills INTEGER DEFAULT 1, allow_debt INTEGER DEFAULT 0, max_debt REAL, sla_uptime_pct REAL DEFAULT 99.0, sla_max_latency_ms INTEGER DEFAULT 1000, sla_max_error_pct REAL DEFAULT 5.0, sla_auto_credit INTEGER DEFAULT 0, last_traffic_snapshot TEXT DEFAULT '{}', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')) , client_type TEXT DEFAULT 'legal', billing_paused INTEGER DEFAULT 0, contract_date TEXT DEFAULT '')"
+    "sql": "CREATE TABLE clients ( id TEXT PRIMARY KEY, login TEXT UNIQUE NOT NULL, password TEXT, password_hash TEXT, port_name TEXT, name TEXT NOT NULL, contact TEXT DEFAULT '', notes TEXT DEFAULT '', billing_type TEXT DEFAULT 'per_gb', price REAL DEFAULT 0, currency TEXT DEFAULT 'RUB', balance REAL DEFAULT 0, api_key TEXT UNIQUE, api_key_prefix TEXT, -- display prefix for masked UI; api_key itself is a SHA-256 hash (migration 043) referral_code TEXT UNIQUE, referred_by TEXT, referral_balance REAL DEFAULT 0, reset_token TEXT, inn TEXT DEFAULT '', kpp TEXT DEFAULT '', legal_name TEXT DEFAULT '', contract_info TEXT DEFAULT '', address TEXT DEFAULT '', auto_acts INTEGER DEFAULT 1, auto_bills INTEGER DEFAULT 1, allow_debt INTEGER DEFAULT 0, max_debt REAL, debt_blocked INTEGER DEFAULT 0, -- B3 (Р13): порт(ы) погашены автоблоком по долгу; сбрасывается при восстановлении после оплаты last_traffic_snapshot TEXT DEFAULT '{}', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')) , client_type TEXT DEFAULT 'legal', billing_paused INTEGER DEFAULT 0, contract_date TEXT DEFAULT '')"
   },
   {
     "type": "table",
@@ -745,15 +709,15 @@
   },
   {
     "type": "table",
-    "name": "domain_guard_hits",
-    "tbl_name": "domain_guard_hits",
-    "sql": "CREATE TABLE domain_guard_hits ( id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, server_name TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', nick TEXT NOT NULL DEFAULT '', host TEXT NOT NULL, matched_domain TEXT NOT NULL, hits_delta INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, created_at TEXT DEFAULT (datetime('now')), UNIQUE(date, server_name, client_name, host) )"
+    "name": "doc_numbering",
+    "tbl_name": "doc_numbering",
+    "sql": "CREATE TABLE doc_numbering ( year INTEGER PRIMARY KEY, next_num INTEGER NOT NULL DEFAULT 1 )"
   },
   {
     "type": "table",
-    "name": "external_proxies",
-    "tbl_name": "external_proxies",
-    "sql": "CREATE TABLE external_proxies ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL, label TEXT DEFAULT '', protocol TEXT DEFAULT 'HTTP', host TEXT NOT NULL, port INTEGER NOT NULL, login TEXT DEFAULT '', password TEXT DEFAULT '', note TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now')), change_ip_url TEXT DEFAULT '', valid_until TEXT, billing_type TEXT DEFAULT 'monthly', price REAL DEFAULT 0, traffic_used_gb REAL DEFAULT 0, FOREIGN KEY (client_id) REFERENCES clients(id) )"
+    "name": "domain_guard_hits",
+    "tbl_name": "domain_guard_hits",
+    "sql": "CREATE TABLE domain_guard_hits ( id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, server_name TEXT NOT NULL, client_name TEXT NOT NULL DEFAULT '', nick TEXT NOT NULL DEFAULT '', host TEXT NOT NULL, matched_domain TEXT NOT NULL, hits_delta INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, created_at TEXT DEFAULT (datetime('now')), UNIQUE(date, server_name, client_name, host) )"
   },
   {
     "type": "table",
@@ -853,30 +817,6 @@
   },
   {
     "type": "table",
-    "name": "sales_companies",
-    "tbl_name": "sales_companies",
-    "sql": "CREATE TABLE sales_companies ( id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')), niche_id INTEGER, -- FK sales_niches.id niche_name TEXT NOT NULL DEFAULT '', -- denormalized for convenience company TEXT NOT NULL DEFAULT '', website TEXT NOT NULL DEFAULT '', domain TEXT NOT NULL DEFAULT '', -- normalized host, for dedup country TEXT NOT NULL DEFAULT '', why_fit TEXT NOT NULL DEFAULT '', -- why they likely need proxies fit_score INTEGER NOT NULL DEFAULT 0, -- 0..100 source_url TEXT NOT NULL DEFAULT '', is_seed INTEGER NOT NULL DEFAULT 0, -- 1 = manually added seed status TEXT NOT NULL DEFAULT 'draft', -- draft|approved|rejected|pushed crm_company_id TEXT NOT NULL DEFAULT '', -- Twenty company id after push run_id TEXT NOT NULL DEFAULT '' )"
-  },
-  {
-    "type": "table",
-    "name": "sales_contacts",
-    "tbl_name": "sales_contacts",
-    "sql": "CREATE TABLE sales_contacts ( id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')), company_id INTEGER, -- FK sales_companies.id company TEXT NOT NULL DEFAULT '', -- denormalized name TEXT NOT NULL DEFAULT '', role TEXT NOT NULL DEFAULT '', -- CEO / Founder / CMO / Head of Growth ... linkedin TEXT NOT NULL DEFAULT '', contact TEXT NOT NULL DEFAULT '', -- general email / form / tg if found source_url TEXT NOT NULL DEFAULT '', status TEXT NOT NULL DEFAULT 'draft', -- draft|approved|rejected|pushed crm_person_id TEXT NOT NULL DEFAULT '', -- Twenty person id after push run_id TEXT NOT NULL DEFAULT '' )"
-  },
-  {
-    "type": "table",
-    "name": "sales_jobs",
-    "tbl_name": "sales_jobs",
-    "sql": "CREATE TABLE sales_jobs ( id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')), bot TEXT NOT NULL DEFAULT '', -- lookalikes | contacts | push params TEXT NOT NULL DEFAULT '', -- JSON of run params status TEXT NOT NULL DEFAULT 'running', -- running | done | error progress TEXT NOT NULL DEFAULT '', -- human-readable last progress line done INTEGER NOT NULL DEFAULT 0, -- items processed total INTEGER NOT NULL DEFAULT 0, -- items planned result TEXT NOT NULL DEFAULT '', -- JSON summary error TEXT NOT NULL DEFAULT '', started_by TEXT NOT NULL DEFAULT '', -- admin login finished_at TEXT )"
-  },
-  {
-    "type": "table",
-    "name": "sales_niches",
-    "tbl_name": "sales_niches",
-    "sql": "CREATE TABLE sales_niches ( id INTEGER PRIMARY KEY AUTOINCREMENT, created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%d %H:%M:%S','now')), name TEXT NOT NULL DEFAULT '', -- inferred segment, e.g. \"e-comm price monitoring\" description TEXT NOT NULL DEFAULT '', -- what such companies do why_proxies TEXT NOT NULL DEFAULT '', -- why this niche needs proxies seed_company TEXT NOT NULL DEFAULT '', -- the company that revealed this niche last_scanned_at TEXT, -- last look-alike scan status TEXT NOT NULL DEFAULT 'active' -- active|paused )"
-  },
-  {
-    "type": "table",
     "name": "server_downtime",
     "tbl_name": "server_downtime",
     "sql": "CREATE TABLE server_downtime ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, down_from TEXT NOT NULL, down_to TEXT NOT NULL, duration_sec INTEGER NOT NULL, alerted INTEGER NOT NULL DEFAULT 0, -- 1 if a server_unreachable alert fired created_at TEXT NOT NULL DEFAULT (datetime('now')) )"
@@ -907,12 +847,6 @@
   },
   {
     "type": "table",
-    "name": "sla_violations",
-    "tbl_name": "sla_violations",
-    "sql": "CREATE TABLE sla_violations ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT, date TEXT, metric TEXT, expected REAL, actual REAL, credited_amount REAL DEFAULT 0, created_at TEXT DEFAULT (datetime('now')) )"
-  },
-  {
-    "type": "table",
     "name": "system_log",
     "tbl_name": "system_log",
     "sql": "CREATE TABLE system_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, timestamp TEXT NOT NULL DEFAULT (datetime('now')), category TEXT NOT NULL, level TEXT NOT NULL DEFAULT 'info', action TEXT NOT NULL, target TEXT, message TEXT NOT NULL, details TEXT )"
@@ -934,12 +868,6 @@
     "name": "traffic_hourly",
     "tbl_name": "traffic_hourly",
     "sql": "CREATE TABLE traffic_hourly ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL DEFAULT '', port_id TEXT NOT NULL DEFAULT '', nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', client_name TEXT NOT NULL DEFAULT '', hour_start TEXT NOT NULL, -- '2026-03-29 14:00' bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0, uncertain INTEGER NOT NULL DEFAULT 0, corrected INTEGER DEFAULT 0, UNIQUE(port_id, hour_start) )"
-  },
-  {
-    "type": "table",
-    "name": "traffic_recon",
-    "tbl_name": "traffic_recon",
-    "sql": "CREATE TABLE traffic_recon ( id INTEGER PRIMARY KEY AUTOINCREMENT, date TEXT NOT NULL, server_name TEXT NOT NULL, port_key TEXT NOT NULL, client_name TEXT DEFAULT '', ps_in INTEGER DEFAULT 0, ps_out INTEGER DEFAULT 0, our_in INTEGER DEFAULT 0, our_out INTEGER DEFAULT 0, diff_pct REAL DEFAULT 0, created_at TEXT DEFAULT (datetime('now')), UNIQUE(port_key, date) )"
   },
   {
     "type": "table",
@@ -1012,6 +940,12 @@
     "name": "trg_clients_balance_au",
     "tbl_name": "clients",
     "sql": "CREATE TRIGGER trg_clients_balance_au AFTER UPDATE OF balance ON clients WHEN COALESCE(OLD.balance, 0) != COALESCE(NEW.balance, 0) BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, new_values, context_id) VALUES ('clients.balance', 'UPDATE', NEW.id, json_object('balance', OLD.balance), json_object('balance', NEW.balance, 'name', NEW.name), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
+  },
+  {
+    "type": "trigger",
+    "name": "trg_clients_price_au",
+    "tbl_name": "clients",
+    "sql": "CREATE TRIGGER trg_clients_price_au AFTER UPDATE OF price ON clients WHEN COALESCE(OLD.price, 0) != COALESCE(NEW.price, 0) BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, new_values, context_id) VALUES ('clients.price', 'UPDATE', NEW.id, json_object('price', OLD.price), json_object('price', NEW.price, 'name', NEW.name), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
   },
   {
     "type": "trigger",

@@ -17,6 +17,7 @@
 
 let db, logger, clientById, getSetting;
 let aiInsights;  // optional — injected via init; if absent, AI section is skipped
+let listDisconnectedModems;  // optional (D3) — async () => fleet.disconnectedList; без него дайджест оффлайна пропускается
 
 function init(deps) {
   db          = deps.db;
@@ -24,6 +25,7 @@ function init(deps) {
   clientById  = deps.clientById;
   getSetting  = deps.getSetting;
   aiInsights  = deps.aiInsights || null;
+  listDisconnectedModems = deps.listDisconnectedModems || null;
 }
 
 function fmtMoney(v) {
@@ -155,24 +157,29 @@ async function buildDailySummary(date) {
   }
 
   // ----- 3) Инфраструктура -----
-  // server_unreachable events from system_log
+  // server_unreachable events from system_log. C7: query uses the REAL columns
+  // (timestamp/category/action/target — the old `source`/`created_at` don't
+  // exist, the query threw daily and the silent catch left this block empty).
   let infraEvents = [];
   try {
     infraEvents = db.prepare(`
-      SELECT source, message, level, created_at
+      SELECT target, action, message, level, timestamp
       FROM system_log
-      WHERE created_at >= ? AND created_at < ?
+      WHERE timestamp >= ? AND timestamp < ?
         AND (action = 'server_unreachable' OR level IN ('error','critical'))
-      ORDER BY created_at DESC LIMIT 50
+      ORDER BY timestamp DESC LIMIT 50
     `).all(utcStartStr, utcEndStr);
-  } catch (_) { /* table or column may differ */ }
+  } catch (e) {
+    // Rule (OPERATIONS.md): деградация через catch обязана писать warn.
+    if (logger && logger.warn) logger.warn('[DailySummary] system_log query failed (infra block degraded): ' + (e.message || e));
+  }
 
   const serverDownSet = new Set();
   let errorCount = 0;
   for (const e of infraEvents) {
-    if (e.message && /unreachable|server_unreachable/i.test(e.message)) {
-      if (e.source) serverDownSet.add(e.source);
-    }
+    // server_unreachable rows are written by modem-tracking with the server
+    // name in `target` (category 'modem', level 'warn').
+    if (e.action === 'server_unreachable' && e.target) serverDownSet.add(e.target);
     if (e.level === 'error' || e.level === 'critical') errorCount++;
   }
 
@@ -196,20 +203,33 @@ async function buildDailySummary(date) {
     WHERE rebooted_at >= ? AND rebooted_at < ?
   `).get(utcStartStr, utcEndStr);
 
-  // SLA violations
-  let slaCount = 0;
-  try {
-    const sla = db.prepare(`SELECT COUNT(*) c FROM sla_violations WHERE date = ?`).get(date);
-    slaCount = (sla && sla.c) || 0;
-  } catch (_) { /* best-effort */ }
-
   lines.push('');
   lines.push('⚙️ <b>Инфраструктура</b>');
   if (serverDownSet.size) lines.push(`Серверы недоступны: <b>${Array.from(serverDownSet).join(', ')}</b>`);
   else lines.push('Все серверы доступны');
+  // D3: оффлайн-дайджест. TG-алерты оффлайна глушатся после stale_modem_hours
+  // (12 ч) — долголежащие модемы были видны только в колокольчике. Строка в
+  // сводке закрывает дыру. Источник тот же, что у колокольчика
+  // (notify-collect → fleet.disconnectedList), список — топ-10 + «и ещё N».
+  if (listDisconnectedModems) {
+    try {
+      const staleH = Number(getSetting('stale_modem_hours', 12)) || 12;
+      const nowMs = Date.now();
+      const longDead = (await listDisconnectedModems())
+        .filter(o => o.lastOnline && (nowMs - o.lastOnline) >= staleH * 3600 * 1000)
+        .sort((a, b) => a.lastOnline - b.lastOnline);   // дольше всех лежит — первым
+      if (longDead.length) {
+        const names = longDead.slice(0, 10).map(o => `${escHtml(o.nick || o.key)} (${escHtml(o.server)})`);
+        lines.push(`Лежат >${staleH} ч: <b>${longDead.length}</b> модемов: ${names.join(', ')}`
+          + (longDead.length > 10 ? ` …и ещё ${longDead.length - 10}` : ''));
+      }
+    } catch (e) {
+      // Rule (OPERATIONS.md): деградация через catch обязана писать warn.
+      if (logger && logger.warn) logger.warn('[DailySummary] offline digest failed (block degraded): ' + (e.message || e));
+    }
+  }
   if (proxyIssues.length) lines.push(`Проблемных прокси: ${proxyIssues.length} (latency >1500мс или errors >10%)`);
   if (rebootRow && rebootRow.n > 0) lines.push(`Авто-перезагрузок: ${rebootRow.n} (успешных ${rebootRow.ok}/${rebootRow.n})`);
-  if (slaCount) lines.push(`⚠️ SLA-нарушений: ${slaCount}`);
   if (errorCount) lines.push(`Ошибок в системном логе: ${errorCount}`);
 
   // ----- 4) Ротации -----
@@ -222,7 +242,10 @@ async function buildDailySummary(date) {
       FROM rotation_log
       WHERE started_at >= ? AND started_at < ?
     `).get(utcStartStr, utcEndStr);
-  } catch (_) { /* best-effort */ }
+  } catch (e) {
+    // Rule (OPERATIONS.md): деградация через catch обязана писать warn.
+    if (logger && logger.warn) logger.warn('[DailySummary] rotation_log query failed (rotations block degraded): ' + (e.message || e));
+  }
 
   if (rotRow && rotRow.total > 0) {
     lines.push('');

@@ -5,7 +5,7 @@
  *
  * Periodically scans live state for the "ambient" notifications that the
  * Telegram alerts framework doesn't already cover: long-offline modems,
- * clients in debt, due CRM reminders. Each finding is upserted into the
+ * clients in debt. Each finding is upserted into the
  * `notifications` table via alerts.recordBellEvent — which itself dedupes
  * by dedup_key. We use a per-day bucket in the key so the same condition
  * surfaces once per day rather than once per scan.
@@ -19,12 +19,11 @@
  *     since 2026-07-28 that includes long-dead modems too (no 48h cut-off);
  *     the per-day dedup_key below keeps a week-dead modem from flooding
  *     the bell (one entry per day)
- *   - CRM pass is best-effort: external Postgres failures are swallowed
- *     so a CRM outage doesn't block offline/debt collection
  */
 
 const NOTIF_TTL_DAYS = 30;
 const { computeFleet } = require('../modems/fleet');   // WP4.2: bell set == card set
+const scheduler = require('./scheduler');              // C8/§10.7: реестр → /api/admin/health.jobs
 const CLIENT_DEBT_THRESHOLD = -10;       // ₽
 
 let deps = null;
@@ -32,9 +31,13 @@ let _interval = null;
 
 function init(injectedDeps) {
   deps = injectedDeps;
+  // C8/§10.7: register in the unified scheduler registry (last-run/status in
+  // /api/admin/health → jobs). wrapJob preserves semantics — runOnce already
+  // catches per-pass errors internally, so behaviour/cadence don't change.
+  const { safeFn } = scheduler.wrapJob('NotifyCollect', 'every 2 min', runOnce, deps.logger);
   // First run after a short delay so live state has time to settle on boot.
-  setTimeout(runOnce, 30 * 1000);
-  _interval = setInterval(runOnce, 2 * 60 * 1000);
+  setTimeout(safeFn, 30 * 1000);
+  _interval = setInterval(safeFn, 2 * 60 * 1000);
   return { stop };
 }
 
@@ -65,9 +68,6 @@ async function runOnce() {
   if (!enabled || enabled('client_debt')) {
     try { passClientDebts(); }     catch (e) { deps.logger.warn('[NotifyCollect] debts: ' + e.message); }
   }
-  if (!enabled || enabled('crm_reminder')) {
-    try { await passCrmReminders(); } catch (e) { deps.logger.warn('[NotifyCollect] crm: ' + e.message); }
-  }
   try { passCleanup(); } catch (e) { deps.logger.warn('[NotifyCollect] cleanup: ' + e.message); }
 }
 
@@ -79,16 +79,25 @@ async function runOnce() {
 //     («алерт есть, в карточке пусто») — the fleet layer credits them;
 //   - the >12h stale suppression meant «в карточке есть, в колокольчике
 //     тишина» — removed; day-level dedup below keeps it from flooding.
-async function passOfflineModems() {
-  const { alerts, uptimeTracking, trackingDb, fetchAllServersDataCached, mergeServerData, getSetting } = deps;
-  if (!trackingDb || !fetchAllServersDataCached || !mergeServerData) return;
-  const day = todayBucket();
+//
+// D3: скан вынесен в scanDisconnected() — его же использует дневная TG-сводка
+// (строка «Лежат >12 ч»), чтобы источник данных был один.
+async function scanDisconnected() {
+  const { uptimeTracking, trackingDb, fetchAllServersDataCached, mergeServerData, getSetting } = deps;
+  if (!trackingDb || !fetchAllServersDataCached || !mergeServerData) return [];
   const results = await fetchAllServersDataCached();
   const merged = mergeServerData(results, '*');
   // Same disconnected threshold as the card (modem_offline_threshold_min, default 10).
   const discMs = (Number(getSetting && getSetting('modem_offline_threshold_min', 10)) || 10) * 60000;
   const fleet = computeFleet(trackingDb.metaFleetRoster.all(), uptimeTracking, merged.status || [], { disconnectedMs: discMs });
-  for (const o of fleet.disconnectedList) {
+  return fleet.disconnectedList;
+}
+
+async function passOfflineModems() {
+  const { alerts } = deps;
+  if (!deps.trackingDb || !deps.fetchAllServersDataCached || !deps.mergeServerData) return;
+  const day = todayBucket();
+  for (const o of await scanDisconnected()) {
     const lastMs = o.lastOnline || 0;
     const mins = lastMs ? Math.floor((Date.now() - lastMs) / 60000) : 0;
     const lastOnlineLocal = lastMs ? new Date(lastMs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) : '—';
@@ -177,45 +186,7 @@ function passClientDebts() {
   }
 }
 
-// ── Pass 3: CRM reminders ───────────────────────────────────────
-// Same query as /api/admin/crm_reminders (src/routes/telegram-crm.js).
-// Wrapped in try/catch — if the external CRM is down, swallow and skip.
-async function passCrmReminders() {
-  const { alerts } = deps;
-  const dbUrl = process.env.CRM_DB_URL;
-  const workspace = process.env.CRM_WORKSPACE;
-  if (!dbUrl || !workspace || !/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(workspace)) return;
-  let Pool;
-  try { Pool = require('pg').Pool; } catch (_) { return; }
-  const pool = new Pool({ connectionString: dbUrl, max: 1, idleTimeoutMillis: 5000 });
-  try {
-    const result = await pool.query(
-      `SELECT id, name, "reminderDate"
-       FROM ${workspace}.opportunity
-       WHERE "reminderDate" IS NOT NULL AND "reminderDate" <= NOW() AND "deletedAt" IS NULL
-       ORDER BY "reminderDate" ASC LIMIT 50`
-    );
-    for (const r of result.rows) {
-      // Per-day bucket so a long-overdue reminder doesn't surface 720x/day.
-      const day = todayBucket();
-      const dt = r.reminderDate ? new Date(r.reminderDate).toLocaleDateString('ru-RU', { timeZone: 'Europe/Moscow' }) : '';
-      alerts.recordBellEvent({
-        dedup_key: 'crm_' + r.id + '_' + day,
-        rule_id: 'crm_reminder',
-        priority: 'important',
-        entity_kind: 'crm',
-        entity_id: r.id,
-        title: 'Напоминание CRM',
-        message: `🔔 <b>${esc(r.name || 'Сделка')}</b>${dt ? ' (' + esc(dt) + ')' : ''}`,
-        payload: { id: r.id, name: r.name, reminderDate: r.reminderDate },
-      });
-    }
-  } finally {
-    pool.end().catch(() => {});
-  }
-}
-
-// ── Pass 4: purge old rows (TTL) ────────────────────────────────
+// ── Pass 3: purge old rows (TTL) ────────────────────────────────
 function passCleanup() {
   const { db } = deps;
   // P2-4: NOTIF_TTL_DAYS is a module constant, but pass it as a bound int rather
@@ -225,4 +196,4 @@ function passCleanup() {
   db.prepare("DELETE FROM notifications WHERE created_at < datetime('now', '-' || ? || ' days')").run(ttl);
 }
 
-module.exports = { init, runOnce };
+module.exports = { init, runOnce, scanDisconnected: async () => { if (!deps) return []; return scanDisconnected(); } };
