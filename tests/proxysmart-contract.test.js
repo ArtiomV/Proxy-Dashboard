@@ -52,11 +52,18 @@ describe('D7: proxysmart-contract — несоответствия ловятс�
     expect(v.some(s => s.includes('bandwidth_bytes_day_in'))).toBe(true);
 
     const vs = contract.validateShowStatusJson([{ modem_details: { NICK: 'X' } }]);
-    expect(vs.some(s => s.includes('IMEI'))).toBe(true);
-    expect(vs.some(s => s.includes('net_details'))).toBe(true);
+    expect(vs.some(s => s.includes('IMEI'))).toBe(true); // вся выборка без IMEI — парсер пропустит весь флот
+
+    const vsNet = contract.validateShowStatusJson([{ modem_details: { IMEI: '867', NICK: 'X' } }]);
+    expect(vsNet.some(s => s.includes('net_details'))).toBe(true);
 
     const vp = contract.validateListPortsJson({ imei1: [{ LOGIN: 'a' }] });
     expect(vp.some(s => s.includes('HTTP_PORT'))).toBe(true);
+  });
+
+  it('транзитный модем в добавлении (без IMEI) среди нормальных — НЕ нарушение', () => {
+    const adding = { Added_EVENT_ID: 'px_add_dev_x', modem_details: { ADDED_TIME: '' }, MSGS: ['error, dev lanmodem12 is not yet processed, wait up to 5 min, '] };
+    expect(contract.validateShowStatusJson([adding, GOOD_STATUS[0]])).toEqual([]);
   });
 });
 

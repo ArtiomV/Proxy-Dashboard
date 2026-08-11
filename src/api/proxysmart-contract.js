@@ -42,16 +42,25 @@ function validateBandwidthReportAll(bw) {
 
 // /apix/show_status_json → [ { modem_details: { IMEI, NICK, ... }, net_details: { IS_ONLINE, ... } } ]
 // Код читает: m.modem_details.IMEI/NICK/MODEL, m.net_details.IS_ONLINE/EXT_IP/ICCID/SimStatus…
+// Записи БЕЗ IMEI — легальны: ProxySmart так показывает модем в процессе
+// добавления ("dev … is not yet processed"), парсер их пропускает
+// (modem-tracking.js: `if (!imei) continue`). Нарушение — когда без IMEI
+// ВСЯ выборка (парсер пропустит весь флот) или битая запись С IMEI.
 function validateShowStatusJson(status) {
   const v = [];
   if (!Array.isArray(status)) return ['show_status_json: ожидался array, получен ' + typeof status];
-  for (const m of status.slice(0, SAMPLE)) {
+  const sample = status.slice(0, SAMPLE);
+  let skippedNoImei = 0;
+  for (const m of sample) {
     if (!m || typeof m !== 'object') { v.push('status[]: элемент не object'); continue; }
     const md = m.modem_details;
     if (!md || typeof md !== 'object') { v.push('status[]: нет modem_details'); continue; }
-    if (typeof md.IMEI !== 'string' || !md.IMEI) v.push('status[]: нет modem_details.IMEI');
-    if (typeof md.NICK !== 'string') v.push(`status[${md.IMEI || '?'}]: нет modem_details.NICK`);
-    if (!m.net_details || typeof m.net_details !== 'object') v.push(`status[${md.IMEI || '?'}]: нет net_details`);
+    if (typeof md.IMEI !== 'string' || !md.IMEI) { skippedNoImei++; continue; }
+    if (typeof md.NICK !== 'string') v.push(`status[${md.IMEI}]: нет modem_details.NICK`);
+    if (!m.net_details || typeof m.net_details !== 'object') v.push(`status[${md.IMEI}]: нет net_details`);
+  }
+  if (sample.length > 0 && skippedNoImei === sample.length) {
+    v.push(`show_status_json: все ${sample.length} эл-тов выборки без modem_details.IMEI — парсер пропустит весь флот`);
   }
   return v;
 }

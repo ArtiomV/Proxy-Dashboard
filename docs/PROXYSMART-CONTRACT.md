@@ -50,6 +50,9 @@ TG-алерт «бокс S<n> отвечает не по контракту» (�
 Читается: fleet/tracking (IS_ONLINE/EXT_IP/ICCID/NICK/IMEI), SIM-сигналы
 (SimStatus, HTTP_REDIRECT_IMPOSED, REBOOT_SCORE). Валидатор: массив,
 `modem_details.IMEI` (string), `NICK`, `net_details` (object).
+NB: запись без IMEI — легальна (модем в процессе добавления,
+`MSGS: "dev … is not yet processed"`); парсер её пропускает, валидатор —
+тоже, нарушение только если без IMEI вся выборка.
 
 ### GET /apix/list_ports_json
 Порты по IMEI (каждый цикл + действия с портами).
