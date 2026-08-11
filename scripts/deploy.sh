@@ -44,6 +44,7 @@ echo "==> Pre-deploy DB snapshot on $SERVER"
 echo "==> Syncing files to $SERVER:$REMOTE_DIR"
 rsync -av --delete \
   --exclude='node_modules' --exclude='logs' --exclude='*.db' \
+  --exclude='.env' --exclude='.env.*' \
   --exclude='*.db-wal' --exclude='*.db-shm' \
   --exclude='tochka_config.json' --exclude='known_modems.json' \
   --exclude='server_cache.json' --exclude='bank_payments.json' \
