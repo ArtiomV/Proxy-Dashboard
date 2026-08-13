@@ -25,7 +25,7 @@ function runStartup(d) {
     failoverEngine, fetchApi, fetchApiRaw, postFormApi, parseHtmlInputFields,
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
-    setHourlyAggSched,
+    setHourlyAggSched, runSpeedMonitor,
   } = d;
 
   // Schedule speedtests (configurable times, default 02:00 + 14:00)
@@ -169,6 +169,16 @@ function runStartup(d) {
   // tighter cadence means a payment is auto-credited within ≤30 min instead of
   // up to 4 h. Cheap: a 14-day statement + INN/name match, idempotent on re-run.
   _intervals.push(setInterval(() => _scheduledTochkaSync('periodic'), 30 * 60 * 1000));
+
+  // SpeedMonitor: почасовой замер скорости выбранных модемов
+  // (src/jobs/speed-monitor.js, ники из SPEED_MONITOR_NICKS). Первый прогон
+  // через 4 минуты после старта (после прогрева кэша), далее каждый час.
+  // Джоб сам резолвит ник → бокс, переезд симки на другой бокс переживает.
+  // Данные: таблица speed_monitor, выдача — GET /api/admin/speed-monitor.
+  setTimeout(() => dbAudit.runJobAsync('SpeedMonitor', 'startup', () => runSpeedMonitor())
+    .catch(e => logger.error('[SpeedMonitor] startup run failed:', e.message)), 4 * 60 * 1000);
+  _intervals.push(setInterval(() => dbAudit.runJobAsync('SpeedMonitor', 'hourly', () => runSpeedMonitor())
+    .catch(e => logger.error('[SpeedMonitor] hourly run failed:', e.message)), 60 * 60 * 1000));
 
   // Nightly DB cleanup at 00:30 UTC — remove old data using dynamic retention settings
   scheduleRepeating(0, 30, 'DbCleanup', () => {

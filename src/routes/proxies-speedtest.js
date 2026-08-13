@@ -10,6 +10,7 @@ module.exports = function createRouter(deps) {
     authMiddleware, adminMiddleware,
     fetchApi, findServer,
     pushSpeedtestEntry, speedtestHistory,
+    db,
   } = deps;
   const r = express.Router();
 
@@ -94,6 +95,49 @@ r.get('/api/admin/speedtest', authMiddleware, adminMiddleware, async (req, res) 
 
 r.get('/api/admin/speedtest_history', authMiddleware, adminMiddleware, (req, res) => {
   res.json(speedtestHistory);
+});
+
+// Почасовые замеры SpeedMonitor (таблица speed_monitor, миграция 058) —
+// агрегация по (nick, час МСК): avg/min/max DL, avg UL/ping, доля сбоев.
+// Именно то, что нужно для «какие симки убрать/добавить»: сравнение
+// стабильности операторов по часам суток на длинном ряду (60 дней).
+// ?hours=48 (дефолт, макс 1440) &nick=MD_01 &format=csv
+r.get('/api/admin/speed-monitor', authMiddleware, adminMiddleware, (req, res) => {
+  const hours = Math.min(Math.max(parseInt(req.query.hours, 10) || 48, 1), 24 * 60);
+  const nick = String(req.query.nick || '').trim();
+  const params = [`-${hours} hours`];
+  let where = "ts >= datetime('now', ?)";
+  if (nick) { where += ' AND nick = ?'; params.push(nick); }
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT nick,
+             strftime('%Y-%m-%d %H:00', ts, '+3 hours')        AS hour_msk,
+             COUNT(*)                                          AS samples,
+             SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END)           AS ok_count,
+             SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END)           AS fail_count,
+             ROUND(AVG(CASE WHEN ok = 1 THEN download END), 2) AS avg_dl,
+             ROUND(MIN(CASE WHEN ok = 1 THEN download END), 2) AS min_dl,
+             ROUND(MAX(CASE WHEN ok = 1 THEN download END), 2) AS max_dl,
+             ROUND(AVG(CASE WHEN ok = 1 THEN upload END), 2)   AS avg_ul,
+             ROUND(AVG(CASE WHEN ok = 1 THEN ping END), 1)     AS avg_ping
+        FROM speed_monitor
+       WHERE ${where}
+       GROUP BY nick, hour_msk
+       ORDER BY nick, hour_msk`).all(...params);
+  } catch (e) {
+    // Таблица появится после миграции 058 — до неё честный пустой ответ.
+    return res.json({ hours, rows: [], note: 'speed_monitor unavailable: ' + e.message });
+  }
+  if (req.query.format === 'csv') {
+    const header = 'nick,hour_msk,samples,ok,fail,avg_dl,min_dl,max_dl,avg_ul,avg_ping';
+    const csv = [header].concat(rows.map(x =>
+      [x.nick, x.hour_msk, x.samples, x.ok_count, x.fail_count,
+       x.avg_dl, x.min_dl, x.max_dl, x.avg_ul, x.avg_ping].join(','))).join('\n');
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    return res.send(csv);
+  }
+  res.json({ hours, rows });
 });
 
 

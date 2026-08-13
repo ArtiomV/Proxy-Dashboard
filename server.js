@@ -2752,6 +2752,11 @@ const _proxyCheckJobs = require('./src/jobs/proxy-checks').create({
 const checkProxyLatency = _proxyCheckJobs.checkProxyLatency;
 const runNightlySpeedtests = _proxyCheckJobs.runNightlySpeedtests;
 
+// Почасовой замер скорости выбранных модемов (список — SPEED_MONITOR_NICKS).
+const _speedMonitor = require('./src/jobs/speed-monitor').create({
+  db, logger, logActivity, apiServers, fetchApi,
+});
+
 function getSpeedtestLatest() {
   const latest = {};
   for (const [key, entries] of Object.entries(speedtestHistory)) {
@@ -3771,6 +3776,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched: (s) => { _hourlyAggSched = s; },
+    runSpeedMonitor: _speedMonitor.runSpeedMonitor,
   });
 
 });

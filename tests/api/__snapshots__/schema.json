@@ -505,6 +505,18 @@
   },
   {
     "type": "index",
+    "name": "idx_speedmon_nick_ts",
+    "tbl_name": "speed_monitor",
+    "sql": "CREATE INDEX idx_speedmon_nick_ts ON speed_monitor(nick, ts)"
+  },
+  {
+    "type": "index",
+    "name": "idx_speedmon_ts",
+    "tbl_name": "speed_monitor",
+    "sql": "CREATE INDEX idx_speedmon_ts ON speed_monitor(ts)"
+  },
+  {
+    "type": "index",
     "name": "idx_syslog_cat",
     "tbl_name": "system_log",
     "sql": "CREATE INDEX idx_syslog_cat ON system_log(category, timestamp)"
@@ -844,6 +856,12 @@
     "name": "simulator_samples",
     "tbl_name": "simulator_samples",
     "sql": "CREATE TABLE simulator_samples ( id INTEGER PRIMARY KEY AUTOINCREMENT, run_id INTEGER NOT NULL REFERENCES simulator_runs(id) ON DELETE CASCADE, ts_ms INTEGER NOT NULL, -- ms since run start (small int, fits 31 bits up to ~24 days) worker_id INTEGER NOT NULL, modem_nick TEXT NOT NULL, server_name TEXT NOT NULL, status TEXT NOT NULL, -- success | timeout | http_error | conn_error http_status INTEGER, total_ms INTEGER NOT NULL, connect_ms INTEGER, ttfb_ms INTEGER, -- time-to-first-byte (useful for diagnosing slow-body issue) bytes INTEGER NOT NULL DEFAULT 0, url TEXT, error_msg TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "speed_monitor",
+    "tbl_name": "speed_monitor",
+    "sql": "CREATE TABLE speed_monitor ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')), server TEXT NOT NULL DEFAULT '', nick TEXT NOT NULL, imei TEXT NOT NULL DEFAULT '', download REAL NOT NULL DEFAULT 0, upload REAL NOT NULL DEFAULT 0, ping REAL NOT NULL DEFAULT 0, ok INTEGER NOT NULL DEFAULT 1, error TEXT NOT NULL DEFAULT '' )"
   },
   {
     "type": "table",

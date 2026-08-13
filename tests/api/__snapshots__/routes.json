@@ -67,6 +67,7 @@
   "GET /api/admin/simulator/runs",
   "GET /api/admin/simulator/test-pool",
   "GET /api/admin/sms",
+  "GET /api/admin/speed-monitor",
   "GET /api/admin/speedtest",
   "GET /api/admin/speedtest/status",
   "GET /api/admin/speedtest_history",
