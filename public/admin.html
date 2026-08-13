@@ -298,8 +298,7 @@
           <button class="dchip" data-on-click="setSpeedMonHours(168,this)">7 дней</button>
         </div>
       </div>
-      <div id="speedMonMeta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
-      <!-- Разбиение по локациям — в попапе графика при наведении (tooltip footer) -->
+      <!-- Мета-плашки модемов убраны (дублируют легенду графика); разбиение по локациям — в попапе при наведении -->
       <div style="height:300px;position:relative"><canvas id="speedMonCanvas"></canvas><div id="speedMonSkel" class="skel" style="position:absolute;inset:0"></div></div>
       <div id="speedMonEmpty" style="display:none;color:var(--text-3);font-size:12px;padding:14px 4px">Пока нет замеров за выбранный период — почасовая джоба SpeedMonitor пишет сюда раз в час.</div>
     </div>
@@ -1245,7 +1244,7 @@
 <script src="/js/admin/finance.js?v=0813a"></script>
 <script src="/js/admin/modems.js?v=0722c"></script>
 <script src="/js/admin/settings.js?v=0813b"></script>
-<script src="/js/admin/speed-monitor.js?v=0814b"></script>
+<script src="/js/admin/speed-monitor.js?v=0814c"></script>
 <script src="/js/admin.js?v=0813f"></script>
 </body>
 </html>

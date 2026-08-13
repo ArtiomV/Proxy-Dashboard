@@ -66,25 +66,6 @@ function loadSpeedMonitor(force) {
     var rows = (d && d.rows) || [];
     var modems = (d && d.modems) || [];
     var emptyEl = document.getElementById('speedMonEmpty');
-    var metaEl = document.getElementById('speedMonMeta');
-
-    // Мета-плашки «ник · оператор · сервер · локация» с цветом датасета.
-    if (metaEl) {
-      if (!modems.length) { metaEl.innerHTML = ''; }
-      else {
-        metaEl.innerHTML = modems.map(function (m, i) {
-          var color = _SPEEDMON_PALETTE[i % _SPEEDMON_PALETTE.length];
-          return '<span style="display:inline-flex;align-items:center;gap:6px;font-size:11px;'
-            + 'border:0.5px solid var(--border);border-radius:8px;padding:3px 9px;background:var(--bg-1)">'
-            + '<span style="width:8px;height:8px;border-radius:50%;background:' + color + ';flex-shrink:0"></span>'
-            + '<b>' + esc(m.nick) + '</b>'
-            + (m.operator ? '<span style="color:var(--text-1)">' + esc(m.operator) + '</span>' : '')
-            + '<span style="color:var(--text-3)">' + esc([m.server, m.location && m.location !== m.server ? m.location : ''].filter(Boolean).join(' · ')) + '</span>'
-            + '</span>';
-        }).join('');
-      }
-    }
-
     // Разбиение по локациям для попапа графика (external-тултип): адрес
     // сервера из настроек (fallback — страна/имя бокса) → оператор → средние
     // ↓/↑ за наведённый час, взвешенные по числу успешных замеров. dl и ul
