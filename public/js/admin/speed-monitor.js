@@ -86,24 +86,25 @@ function loadSpeedMonitor(force) {
 
     // Разбиение по локациям для попапа графика (tooltip footer): адрес
     // сервера из настроек (fallback — страна/имя бокса) → оператор → средние
-    // ↓/↑ за наведённый час, взвешенные по числу успешных замеров.
+    // ↓/↑ за наведённый час, взвешенные по числу успешных замеров. dl и ul
+    // копим с раздельными счётчиками — если у оператора есть только одно
+    // направление, в попапе покажем то, что есть.
     var nickLoc = {}, nickOp = {};
     modems.forEach(function (m) {
       nickLoc[m.nick] = m.address || m.location || m.server || '—';
       nickOp[m.nick] = m.operator || 'оператор?';
     });
-    var hourLocOps = {};   // hour_msk → loc → op → { dl, ul, n } (суммы)
+    var hourLocOps = {};   // hour_msk → loc → op → { dl, nd, ul, nu } (суммы)
     rows.forEach(function (r) {
-      if (!(r.ok_count > 0) || r.avg_dl == null) return;
+      if (!(r.ok_count > 0)) return;
       var loc = nickLoc[r.nick];
       if (!loc) return;
       var op = nickOp[r.nick] || 'оператор?';
       var H = hourLocOps[r.hour_msk] || (hourLocOps[r.hour_msk] = {});
       var L = H[loc] || (H[loc] = {});
-      var O = L[op] || (L[op] = { dl: 0, ul: 0, n: 0 });
-      O.dl += r.avg_dl * r.ok_count;
-      O.ul += (r.avg_ul || 0) * r.ok_count;
-      O.n += r.ok_count;
+      var O = L[op] || (L[op] = { dl: 0, nd: 0, ul: 0, nu: 0 });
+      if (r.avg_dl != null) { O.dl += r.avg_dl * r.ok_count; O.nd += r.ok_count; }
+      if (r.avg_ul != null) { O.ul += r.avg_ul * r.ok_count; O.nu += r.ok_count; }
     });
 
     if (!rows.length) {
@@ -168,8 +169,10 @@ function loadSpeedMonitor(force) {
                 var v = ctx.parsed.y;
                 return ctx.dataset.label + ': ' + (v == null ? 'нет замера' : v.toFixed(2) + ' Мбит/с');
               },
-              // Блок локаций наведённого часа:
-              // «<Локация>: скорости по операторам — <оп>: ↓x.x ↑y.y Мбит/с».
+              // Блок локаций наведённого часа: строка-заголовок — только
+              // название локации, под ней операторы по одному на строку
+              // (по убыванию dl): «Moldcell ↓12.3 ↑4.5 Мбит/с». Если у
+              // оператора есть только одно направление — показываем его.
               footer: function (items) {
                 if (!items || !items.length) return [];
                 var H = hourLocOps[hours[items[0].dataIndex]];
@@ -177,10 +180,18 @@ function loadSpeedMonitor(force) {
                 var lines = [];
                 Object.keys(H).forEach(function (loc) {
                   var ops = H[loc];
-                  lines.push(loc + ': скорости по операторам — ' + Object.keys(ops).map(function (op) {
+                  lines.push(loc);
+                  Object.keys(ops).sort(function (a, b) {
+                    var da = ops[a].nd ? ops[a].dl / ops[a].nd : -1;
+                    var db = ops[b].nd ? ops[b].dl / ops[b].nd : -1;
+                    return db - da;
+                  }).forEach(function (op) {
                     var o = ops[op];
-                    return op + ': ↓' + (o.dl / o.n).toFixed(1) + ' ↑' + (o.ul / o.n).toFixed(1) + ' Мбит/с';
-                  }).join(' · '));
+                    var parts = [];
+                    if (o.nd) parts.push('↓' + (o.dl / o.nd).toFixed(1));
+                    if (o.nu) parts.push('↑' + (o.ul / o.nu).toFixed(1));
+                    if (parts.length) lines.push(op + ' ' + parts.join(' ') + ' Мбит/с');
+                  });
                 });
                 return lines;
               },
