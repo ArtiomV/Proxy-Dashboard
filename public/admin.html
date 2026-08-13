@@ -12,14 +12,14 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
-<link rel="stylesheet" href="css/variables.css?v=0630d">
+<link rel="stylesheet" href="css/variables.css?v=0814a">
 <link rel="stylesheet" href="css/base.css?v=0813b">
-<link rel="stylesheet" href="css/tables.css?v=0630d">
-<link rel="stylesheet" href="css/cards.css?v=0630d">
+<link rel="stylesheet" href="css/tables.css?v=0814a">
+<link rel="stylesheet" href="css/cards.css?v=0814a">
 <link rel="stylesheet" href="css/modal.css?v=0630d">
-<link rel="stylesheet" href="css/layout.css?v=0630d">
+<link rel="stylesheet" href="css/layout.css?v=0814a">
 <link rel="stylesheet" href="css/shell.css?v=0630d">
-<link rel="stylesheet" href="css/finance.css?v=0813a">
+<link rel="stylesheet" href="css/finance.css?v=0814a">
 <!-- Yandex.Metrika counter -->
 <script type="text/javascript">
     (function(m,e,t,r,i,k,a){
@@ -91,7 +91,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.2</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.4.0</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -107,7 +107,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.3.2</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.4.0</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -116,7 +116,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.2</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.4.0</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -181,7 +181,7 @@
 
     <!-- ───── ТРЕБУЕТ ВНИМАНИЯ: одна карточка с плитками алертов (по макету) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><path d="M12 4 2.5 20h19L12 4z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="16.8" x2="12.01" y2="16.8"/></svg>Требует внимания</div>
-    <div id="newExtWidgets" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px;align-items:stretch"><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div></div>
+    <div id="newExtWidgets" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:16px;align-items:stretch"><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div></div>
 
     <!-- ───── ПАРК ПО СЕРВЕРАМ (как в макете — наверх) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/></svg>Парк по серверам</div>
@@ -190,7 +190,7 @@
     <!-- ───── ФИНАНСЫ ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg>Финансы</div>
 
-    <div style="display:grid;grid-template-columns:1.7fr 1fr;gap:12px;margin-bottom:12px" id="newFinTopGrid">
+    <div style="display:grid;grid-template-columns:1.7fr 1fr;gap:12px;margin-bottom:16px" id="newFinTopGrid">
       <div class="analytics-card" style="margin:0" id="newFinRevenue">
         <div class="skel" style="height:170px"></div>
       </div>
@@ -199,7 +199,7 @@
       </div>
     </div>
 
-    <div class="analytics-card" style="margin-bottom:12px">
+    <div class="analytics-card" style="margin-bottom:16px">
       <h3 style="margin:0 0 10px">Клиенты</h3>
       <div id="newClientTable"><div class="skel" style="height:200px"></div></div>
     </div>
@@ -230,7 +230,7 @@
     <!-- ───── ТРАФИК ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="4" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16" y="4" width="4" height="16" rx="1"/></svg>Трафик</div>
 
-    <div class="analytics-card" style="margin-bottom:12px">
+    <div class="analytics-card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Почасовой трафик <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">GMT+3 (МСК)</span></h3>
         <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
@@ -246,7 +246,7 @@
       <div id="newHmSummary" style="display:none;margin-top:16px;padding-top:16px;border-top:0.5px solid rgba(0,0,0,0.08)"></div>
     </div>
 
-    <div class="analytics-card" style="margin-bottom:12px">
+    <div class="analytics-card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Потребление трафика <span style="font-size:10px;font-weight:400;color:var(--text-3)">за 60 дней</span></h3>
         <div style="display:flex;gap:0;border-bottom:2px solid var(--bg-3)">
@@ -288,7 +288,7 @@
 
     <!-- ───── СКОРОСТЬ МОДЕМОВ (почасовой мониторинг операторов) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><path d="M3 17l6-6 4 4 7-7"/><path d="M14 8h6v6"/></svg>Стабильность операторов</div>
-    <div class="analytics-card" style="margin-bottom:12px">
+    <div class="analytics-card" style="margin-bottom:16px">
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
         <h3 style="margin:0">Скорость модемов <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">почасовой замер · GMT+3 (МСК)</span></h3>
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -322,7 +322,7 @@
     </div>
     <div style="font-size:12px;color:var(--text-2);white-space:nowrap" title="Сумма по charge+correction за скользящие 30 дней (каноническая метрика)">Выручка 30д <b id="clMrrTotal" style="color:var(--text-0);font-family:var(--font-mono);font-weight:700;margin-left:4px">—</b></div>
   </div>
-  <div class="client-grid" style="padding:14px 24px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(420px,100%),1fr));gap:12px;align-items:start" id="clientCardList"></div>
+  <div class="client-grid" style="padding:14px 24px 24px;display:grid;grid-template-columns:repeat(auto-fill,minmax(min(420px,100%),1fr));gap:16px;align-items:start" id="clientCardList"></div>
 </div>
 
 <!-- TAB: BANK (Документооборот и операции) -->
@@ -501,6 +501,29 @@
             <span id="retailPoolStatus" style="font-size:11px"></span>
           </div>
         </div>
+        <!-- Пул портов розницы (B2C Этап 2): retail_pool — выдача/блок/hold -->
+        <div class="analytics-card" style="margin-top:16px;display:none" id="retailPoolPortsCard">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+            <h3 style="margin:0">Пул портов <span id="retailPoolCounts" style="font-size:11px;font-weight:400;color:var(--text-3)"></span></h3>
+            <div style="display:flex;gap:8px">
+              <button class="btn btn-sm" data-on-click="loadRetailPoolPorts()">Обновить</button>
+              <button class="btn btn-sm" data-on-click="loadLegacyPreview(this)">Импорт существующих</button>
+              <button class="btn btn-sm btn-primary" data-on-click="togglePoolAddForm()">Добавить порты</button>
+            </div>
+          </div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">Порты автовыдачи рознице. free — ждут выдачи, leased — у клиента, blocked — hold после grace (по hold_until порт удаляется безвозвратно).</div>
+          <div id="poolAddForm" style="display:none;margin-bottom:14px;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-2)">
+            <div style="display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+              <div class="form-group" style="margin:0"><label class="form-label" style="font-size:10px">Сервер</label><select class="form-input" id="poolAddServer" style="min-width:160px"></select></div>
+              <div class="form-group" style="margin:0"><label class="form-label" style="font-size:10px">Количество (1–50)</label><input class="form-input" id="poolAddCount" type="number" min="1" max="50" value="5" style="width:110px"></div>
+              <button class="btn btn-primary btn-sm" id="poolAddBtn" data-on-click="submitPoolAdd()">Создать</button>
+              <span id="poolAddStatus" style="font-size:11px"></span>
+            </div>
+            <div style="font-size:11px;color:var(--text-3);margin-top:8px">Операция длинная (до 2–3 мин на 10 портов): для каждого порта подбирается свободный модем на боксе.</div>
+          </div>
+          <div id="retailLegacyBox" style="display:none;margin-bottom:14px"></div>
+          <div id="retailPoolTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div></div>
+        </div>
         <div class="analytics-card" style="margin-top:16px">
           <h3 style="margin:0 0 12px" id="tariffFormTitle">Новый тариф</h3>
           <input type="hidden" id="tfId">
@@ -524,7 +547,7 @@
       <!-- Симулятор нагрузки -->
       <div id="settingsSection_simulator" class="settings-section" style="display:none">
         <style>
-          .sim-card{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:12px}
+          .sim-card{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:14px;margin-bottom:var(--gap-block)}
           .sim-card h3{margin:0 0 10px;font-size:14px;font-weight:700}
           .sim-grid-kpi{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:12px}
           .sim-kpi{padding:12px;border-radius:10px;background:var(--bg-2);border:1px solid var(--border)}
@@ -835,7 +858,7 @@
           .setting-field label{font-size:12px;font-weight:600;color:var(--text-1)}
           .setting-field .sf-desc{font-size:10px;color:var(--text-2);line-height:1.3;margin-bottom:2px}
           .setting-field input,.setting-field select{width:100%;max-width:160px}
-          .settings-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:12px}
+          .settings-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:12px;margin-bottom:var(--gap-block)}
           .settings-card-header{display:flex;align-items:center;gap:8px;margin-bottom:4px}
           .settings-card-header h3{margin-bottom:0}
           .settings-card-badge{font-size:9px;padding:2px 7px;border-radius:8px;font-weight:500;white-space:nowrap}
@@ -1245,6 +1268,6 @@
 <script src="/js/admin/modems.js?v=0722c"></script>
 <script src="/js/admin/settings.js?v=0813b"></script>
 <script src="/js/admin/speed-monitor.js?v=0814c"></script>
-<script src="/js/admin.js?v=0813f"></script>
+<script src="/js/admin.js?v=0814a"></script>
 </body>
 </html>

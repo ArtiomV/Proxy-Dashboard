@@ -74,6 +74,43 @@ describe('GET /api/dashboard_data', () => {
   });
 });
 
+describe('GET /api/dashboard_data — retail (B2C Э2)', () => {
+  // Поле retail появляется только при retail_enabled: balanceNegativeSince +
+  // порты пула клиента (status/holdUntil/testExpiresAt) для баннера конвейера.
+  it('no retail field when retail_enabled is off', async () => {
+    setRetail(false);
+    const res = await request(app).get('/api/dashboard_data').set('X-Auth-Token', clientToken);
+    expect(res.status).toBe(200);
+    expect(res.body).not.toHaveProperty('retail');
+  });
+
+  it('retail field with pool ports when retail_enabled is on', async () => {
+    setRetail(true);
+    const clientRow = db.prepare('SELECT id FROM clients WHERE login = ?').get(clientLogin);
+    const portId = 'ptest_' + crypto.randomBytes(3).toString('hex');
+    db.prepare(
+      "INSERT INTO retail_pool (server, port_id, status, client_id, hold_until, test_expires_at, updated_at) " +
+      "VALUES ('S1', ?, 'blocked', ?, '2030-01-01T00:00:00.000Z', NULL, datetime('now'))"
+    ).run(portId, String(clientRow.id));
+    try {
+      const res = await request(app).get('/api/dashboard_data').set('X-Auth-Token', clientToken);
+      expect(res.status).toBe(200);
+      expect(res.body).toHaveProperty('retail');
+      expect(res.body.retail).toHaveProperty('balanceNegativeSince');
+      expect(typeof res.body.retail.graceHours).toBe('number');
+      const p = (res.body.retail.ports || []).find(x => x.portId === portId);
+      expect(p).toBeDefined();
+      expect(p.server).toBe('S1');
+      expect(p.status).toBe('blocked');
+      expect(p.holdUntil).toBe('2030-01-01T00:00:00.000Z');
+      expect(p.testExpiresAt).toBeNull();
+    } finally {
+      db.prepare('DELETE FROM retail_pool WHERE server = ? AND port_id = ?').run('S1', portId);
+      setRetail(false);
+    }
+  });
+});
+
 describe('GET /api/billing_history', () => {
   it('200 + summary structure for newly-created client (no entries yet)', async () => {
     const res = await request(app).get('/api/billing_history').set('X-Auth-Token', clientToken);

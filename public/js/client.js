@@ -169,6 +169,72 @@ function renderDebtBanner(debtStatus,expiresAt){
   banner.innerHTML=html;
 }
 
+// --- B2C Э2: баннер конвейера автоблока (grace → блок → hold) ---
+// Данные — data.retail из /api/dashboard_data (есть ТОЛЬКО при retail_enabled;
+// у B2B-клиентов поля нет — баннер не создаётся и не мигает при загрузке).
+// Состояния: blocked (хотя бы один порт blocked) > grace (баланс ≤ 0,
+// порты ещё leased) > тест-день (testExpiresAt в будущем, компактная плашка).
+function _fmtRetailDt(ms){
+  return new Date(ms).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+function gotoBilling(){
+  var tabEl=document.querySelector('.nav-tab[data-on-click*="\'billing\'"]');
+  switchTab('billing',tabEl);
+}
+function renderRetailBanner(retail,balance){
+  var banner=document.getElementById('retailBanner');
+  if(!retail){
+    if(banner)banner.style.display='none';
+    return;
+  }
+  var ports=retail.ports||[];
+  var blocked=ports.filter(function(p){return p.status==='blocked'});
+  var testExp=null;
+  ports.forEach(function(p){
+    var t=p.testExpiresAt&&Date.parse(p.testExpiresAt);
+    if(t&&t>Date.now()&&(testExp===null||t<testExp))testExp=t;
+  });
+  var topupBtn=' <button data-on-click="gotoBilling()" style="margin-left:10px;padding:3px 12px;background:#fff;color:#1f2937;border:none;border-radius:6px;font-size:12px;font-weight:600;cursor:pointer;vertical-align:1px">Пополнить баланс</button>';
+  var html='',bg='';
+  if(blocked.length){
+    bg='var(--red)';
+    var hold=null;
+    blocked.forEach(function(p){
+      var t=p.holdUntil&&Date.parse(p.holdUntil);
+      if(t&&(hold===null||t<hold))hold=t;
+    });
+    html=icon('lock',14)+' <b>Прокси заблокирован.</b> '+(hold!==null
+      ?'Храним порт до <b>'+_fmtRetailDt(hold)+'</b> — после этого он будет удалён безвозвратно.'
+      :'Пополните баланс для восстановления.')+topupBtn;
+  }else if(retail.balanceNegativeSince&&(balance||0)<=0){
+    var since=Date.parse(retail.balanceNegativeSince);
+    if(!isNaN(since)){
+      bg='var(--yellow,#b8860b)';
+      var deadline=since+(retail.graceHours||24)*3600000;
+      html=icon('hourglass',14)+' <b>Баланс закончился.</b> Прокси работает до <b>'+_fmtRetailDt(deadline)+'</b> — пополните баланс.'+topupBtn;
+    }
+  }
+  // Тест-день: независимая компактная плашка — строкой в основном баннере
+  // либо отдельным info-баннером, когда других состояний нет.
+  if(testExp!==null){
+    var testLine=icon('flask',13)+' Тестовый период до <b>'+_fmtRetailDt(testExp)+'</b>';
+    if(html)html+='<div style="margin-top:6px;font-size:12px;opacity:.92">'+testLine+'</div>';
+    else{bg='var(--accent)';html=testLine;}
+  }
+  if(!html){
+    if(banner)banner.style.display='none';
+    return;
+  }
+  if(!banner){
+    banner=document.createElement('div');
+    banner.id='retailBanner';
+    var target=document.querySelector('#tab-traffic .container')||document.getElementById('tab-traffic');
+    if(target)target.insertBefore(banner,target.firstChild);
+  }
+  banner.style.cssText='display:block;margin:0 0 14px;padding:12px 16px;border-radius:8px;background:'+bg+';color:#fff;font-size:13px;line-height:1.5';
+  banner.innerHTML=html;
+}
+
 // --- Analytics ---
 var analyticsCharts={};
 var analyticsLoaded=false;
@@ -1251,6 +1317,7 @@ async function loadData(){
     modemLogins=data.modemLogins||{};
     billingData=data.billing||null;
     renderDebtBanner(billingData&&billingData.debtStatus,billingData&&billingData.expiresAt);
+    renderRetailBanner(data.retail,billingData&&billingData.balance);
 
     var ipTracking=data.ipTracking||{};
     var uptimeTracking=data.uptimeTracking||{};

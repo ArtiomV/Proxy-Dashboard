@@ -42,6 +42,7 @@ module.exports = function createClientPortalRouter(deps) {
     validate, ClientEmailSchema,
     getSetting, mailer, authTokensDb,
     proxyConf, modemRotationCache, proxySmart,
+    retailPoolDb,
     DOCUMENTS_DIR,
     getTochkaConfig,
   } = deps;
@@ -149,6 +150,23 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         // migration 043). A lost key is re-issued by admin via regenerate.
         apiKey: clientInfo.apiKeyPrefix ? clientInfo.apiKeyPrefix + '••••••••' : ''
       };
+
+      // B2C Э2: конвейер автоблока (grace → блок → hold → удаление). Поле
+      // появляется ТОЛЬКО при retail_enabled — payload B2B не меняется.
+      // graceHours нужен ЛК, чтобы посчитать дедлайн grace (balanceNegativeSince + Nч).
+      if (getSetting('retail_enabled', false)) {
+        merged.retail = {
+          balanceNegativeSince: clientInfo.balanceNegativeSince || null,
+          graceHours: Number(getSetting('retail_grace_hours', 24)) || 24,
+          ports: retailPoolDb.byClient(clientInfo.id).map(row => ({
+            server: row.server,
+            portId: row.port_id,
+            status: row.status,
+            holdUntil: row.hold_until || null,
+            testExpiresAt: row.test_expires_at || null
+          }))
+        };
+      }
     }
 
     // Include tracking data filtered for this user's modems

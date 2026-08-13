@@ -31,29 +31,29 @@
 
 /* ── Обзор («.fxw») — light component palette ── */
 #tab-bank .fxw{--ac:#2f6fe0;--acd:#2f6fe0;--gr:#16a34a;--am:#FFCC00;--rd:#dc3a34;--cd:#ffffff;--cd2:#f6f8fb;--bd:rgba(17,24,39,.09);--t0:#10151f;--t1:#39424f;--t2:#697587;--t3:#9aa4b3;color:var(--t0)}
-#tab-bank .fxw .fx-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
+#tab-bank .fxw .fx-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:var(--gap-block);flex-wrap:wrap}
 #tab-bank .fxw .fx-h{font-size:18px;font-weight:700;margin:0}
 #tab-bank .fxw .fx-act{display:flex;gap:7px;align-items:center}
 #tab-bank .fxw .fx-btn{display:inline-flex;align-items:center;gap:6px;padding:8px 14px;border-radius:8px;border:1px solid var(--bd);background:var(--cd2);color:var(--t1);font-size:12px;font-weight:500;cursor:pointer}
 #tab-bank .fxw .fx-btn:hover{background:#eef2f8}
 #tab-bank .fxw .fx-sel{background:var(--cd2);border:1px solid var(--bd);border-radius:8px;color:var(--t1);font-size:12px;padding:6px 8px}
-#tab-bank .fxw .fx-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:11px}
+#tab-bank .fxw .fx-kpis{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:var(--gap-block)}
 #tab-bank .fxw .fx-kpi{background:var(--cd);border:1px solid var(--bd);border-top:2.5px solid var(--acd);border-radius:12px;padding:13px 15px;box-shadow:var(--card-shadow)}
 #tab-bank .fxw .fx-kpi.a{border-top-color:var(--am)}
 #tab-bank .fxw .fx-kpi.g{border-top-color:var(--gr)}
 #tab-bank .fxw .fx-kl{font-size:10px;font-weight:600;color:var(--t2);letter-spacing:.5px;text-transform:uppercase}
 #tab-bank .fxw .fx-kv{font-size:21px;font-weight:700;margin:6px 0 3px;font-feature-settings:"tnum";white-space:nowrap}
 #tab-bank .fxw .fx-ks{font-size:11px;color:var(--t3)}
-#tab-bank .fxw .fx-wgs{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:12px}
+#tab-bank .fxw .fx-wgs{display:grid;grid-template-columns:repeat(4,1fr);gap:10px;margin-bottom:var(--gap-block)}
 #tab-bank .fxw .fx-wg{background:var(--cd);border:1px solid var(--bd);border-radius:10px;padding:11px 12px;box-shadow:var(--card-shadow)}
 #tab-bank .fxw .fx-wl{font-size:10px;color:var(--t3);font-weight:600;text-transform:uppercase;letter-spacing:.5px}
 #tab-bank .fxw .fx-wv{font-size:16px;font-weight:700;margin-top:4px;font-feature-settings:"tnum"}
-#tab-bank .fxw .fx-card{background:var(--cd);border:1px solid var(--bd);border-radius:12px;padding:13px 15px;margin-bottom:12px;box-shadow:var(--card-shadow)}
+#tab-bank .fxw .fx-card{background:var(--cd);border:1px solid var(--bd);border-radius:12px;padding:13px 15px;margin-bottom:var(--gap-block);box-shadow:var(--card-shadow)}
 #tab-bank .fxw .fx-ch{display:flex;align-items:center;justify-content:space-between;margin-bottom:10px}
 #tab-bank .fxw .fx-ct{font-size:13px;font-weight:700}
 #tab-bank .fxw .fx-cs{font-size:11px;color:var(--t3)}
 #tab-bank .fxw .fx-lk{font-size:11px;color:var(--ac);font-weight:600;cursor:pointer}
-#tab-bank .fxw .fx-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px}
+#tab-bank .fxw .fx-row2{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:var(--gap-block)}
 #tab-bank .fxw .fx-row2 .fx-card{margin-bottom:0}
 #tab-bank .fxw .fx-lr{display:flex;align-items:center;justify-content:space-between;padding:7px 0;border-bottom:1px solid var(--bd);font-size:12px}
 #tab-bank .fxw .fx-lr:last-child{border-bottom:none}
@@ -81,7 +81,7 @@
 #tab-bank .fxw .fx-pause{font-size:9px;font-weight:600;color:#000;background:var(--warning);padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap;vertical-align:middle}
 
 /* ── Дашборд: «Пульс бизнеса» hero KPI-карточки (как в макете) ── */
-#tab-dashboard .pulse-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}
+#tab-dashboard .pulse-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:var(--gap-block)}
 #tab-dashboard .pulse-card{background:var(--bg-1);border:1px solid var(--border);border-top:2.5px solid var(--accent);border-radius:12px;padding:13px 15px;box-shadow:var(--card-shadow)}
 #tab-dashboard .pulse-card.warn{border-top-color:var(--warning)}
 #tab-dashboard .pulse-card.success{border-top-color:var(--success)}
@@ -94,7 +94,7 @@
 /* ═══ Дашборд — единый чистый стиль под макет (карточки/лейблы/раскрывашки) ═══ */
 #tab-dashboard{padding:18px 26px 44px!important}
 #tab-dashboard>div>h2,#tab-dashboard h2{letter-spacing:-.3px}
-#tab-dashboard .dash-sec-label{font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin:22px 2px 11px;gap:8px}
+#tab-dashboard .dash-sec-label{font-size:11px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.7px;margin:var(--gap-section) 2px 12px;gap:8px}
 #tab-dashboard .analytics-card h3{font-weight:700;color:var(--text-0)}
 #tab-dashboard .analytics-card{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;box-shadow:var(--card-shadow)}
 #tab-dashboard .widget{background:var(--bg-1);border:1px solid var(--border);border-radius:12px;box-shadow:var(--card-shadow);padding:13px 15px}
@@ -133,7 +133,7 @@
 @media(max-width:640px){#tab-dashboard .att-grid{grid-template-columns:1fr 1fr}}
 
 /* ── KPI-плитки внутри раскрывашек (Ротации·IP·ёмкость, Задержки) ── */
-#tab-dashboard .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:14px}
+#tab-dashboard .kpi-row{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;margin-bottom:var(--gap-block)}
 #tab-dashboard .kpi-tile{background:var(--bg-2);border-radius:10px;padding:11px 12px;min-width:0;text-align:center}
 #tab-dashboard .kpi-tile .l{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #tab-dashboard .kpi-tile .v{font-size:18px;font-weight:700;color:var(--text-0);line-height:1.15;font-feature-settings:"tnum";white-space:nowrap}
@@ -157,7 +157,7 @@
 #tab-dashboard .acc-expand[open] > summary::after{transform:rotate(-90deg)}
 
 /* ── Парк по серверам — 3 колонки как в макете ── */
-#tab-dashboard .fleet-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:14px}
+#tab-dashboard .fleet-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:var(--gap-block)}
 @media(max-width:900px){#tab-dashboard .fleet-grid{grid-template-columns:repeat(2,1fr)}}
 @media(max-width:560px){#tab-dashboard .fleet-grid{grid-template-columns:1fr}}
 

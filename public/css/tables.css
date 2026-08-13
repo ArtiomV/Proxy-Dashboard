@@ -1,6 +1,6 @@
 /* Main table */
 .table-wrap{padding:0 24px 24px;overflow-x:auto;-webkit-overflow-scrolling:touch}
-.country-group{margin-top:14px;overflow-x:auto;-webkit-overflow-scrolling:touch}
+.country-group{margin-top:var(--gap-block);overflow-x:auto;-webkit-overflow-scrolling:touch}
 .country-header{display:flex;align-items:center;gap:10px;padding:8px 14px;background:var(--bg-2);border-radius:8px 8px 0 0;border:1px solid var(--border);border-bottom:none}
 .country-flag{font-size:20px}
 .country-name{font-size:13px;font-weight:600;color:var(--text-0)}

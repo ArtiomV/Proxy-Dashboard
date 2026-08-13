@@ -12,6 +12,9 @@
   --card-shadow:0 4px 24px rgba(0,0,0,.3),0 0 0 1px rgba(255,255,255,.03);
   --font-sans:'Inter',-apple-system,BlinkMacSystemFont,sans-serif;
   --font-mono:'JetBrains Mono','SF Mono',Monaco,monospace;
+  /* Единый шаг вертикальных отступов админки: 16px между блоками,
+     24px перед заголовком новой секции */
+  --gap-block:16px;--gap-section:24px;
   --green:#34C759;--green-bg:rgba(52,199,89,0.15);
   --red:#FF383C;--red-bg:rgba(255,56,60,0.15);--yellow:#FFCC00;
   --blue:#3498db;--blue-bg:rgba(52,152,219,.15);

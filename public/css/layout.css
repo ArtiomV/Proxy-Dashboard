@@ -43,10 +43,10 @@
 .show-more-row button{font-size:12px;color:var(--accent);background:none;border:none;cursor:pointer;font-family:inherit}
 
 /* Finance table wrap */
-.fin-table-wrap{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;overflow:hidden;margin-bottom:12px;box-shadow:var(--card-shadow)}
+.fin-table-wrap{background:var(--card-bg);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border:1px solid var(--card-border);border-radius:12px;overflow:hidden;margin-bottom:var(--gap-block);box-shadow:var(--card-shadow)}
 .fin-table-header{display:flex;justify-content:space-between;align-items:center;padding:14px;border-bottom:1px solid var(--border)}
 .fin-table-title{font-size:14px;font-weight:600;color:var(--text-0)}
-.fin-bottom{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch;margin-bottom:12px}
+.fin-bottom{display:grid;grid-template-columns:1fr 1fr;gap:12px;align-items:stretch;margin-bottom:var(--gap-block)}
 
 /* Refresh bar */
 .refresh-bar{height:2px;background:var(--accent);position:fixed;top:0;left:0;z-index:9998;transition:width .3s}

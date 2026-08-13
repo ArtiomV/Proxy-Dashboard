@@ -2860,6 +2860,7 @@ app.use(require('./src/routes/client-portal')({
   getSetting, authTokensDb,
   mailer: { send: (...args) => mailer.send(...args) },
   proxyConf, modemRotationCache, proxySmart,
+  retailPoolDb,   // B2C Э2: payload retail-конвейера в /api/dashboard_data
 }));
 
 // ── B2C retail (ТЗ 10.08) ─────────────────────────────────────────────────

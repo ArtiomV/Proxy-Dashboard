@@ -178,6 +178,7 @@ async function loadTariffsAdmin(){
   if(!box)return;
   _fillTariffServerSelect(document.getElementById('tfServer').value||'');
   loadRetailPoolAdmin();
+  loadRetailPoolPorts();
   try{
     var data=await api(API+'/api/admin/tariffs');
     if(!data||data.error){box.innerHTML='<div style="text-align:center;padding:24px;color:var(--danger);font-size:12px">'+esc((data&&data.error)||'Ошибка загрузки')+'</div>';return}
@@ -219,6 +220,198 @@ function saveRetailPoolAdmin(){
     if(d.ok){st.style.color='var(--success)';st.textContent='Сохранено: '+(names.join(', ')||'пусто');showToast('Пул розницы сохранён','success')}
     else{st.style.color='var(--danger)';st.textContent=d.error||'Ошибка'}
   }).catch(function(e){st.style.color='var(--danger)';st.textContent='Ошибка соединения'});
+}
+
+// ── Пул портов розницы (B2C Этап 2): таблица retail_pool + пополнение +
+// legacy-импорт. Секция целиком видна только при retail_enabled — карточку
+// прячем по /api/admin/settings (эндпоинты пула всё равно отдают 404 без флага).
+var _retailPoolRows=null;
+function _fmtIsoDt(iso){
+  if(!iso)return '—';
+  var t=Date.parse(iso);
+  if(isNaN(t))return esc(iso);
+  return new Date(t).toLocaleString('ru-RU',{timeZone:'Europe/Moscow',day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+async function loadRetailPoolPorts(){
+  var card=document.getElementById('retailPoolPortsCard');
+  if(!card)return;
+  try{
+    var settings=await api(API+'/api/admin/settings');
+    if(!settings||!settings.retail_enabled){card.style.display='none';return}
+    card.style.display='';
+  }catch(e){card.style.display='none';return}
+  var box=document.getElementById('retailPoolTable');
+  if(!_retailPoolRows)box.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div>';
+  try{
+    var data=await api(API+'/api/admin/retail/pool');
+    if(!data||data.error){box.innerHTML='<div style="text-align:center;padding:24px;color:var(--danger);font-size:12px">'+esc((data&&data.error)||'Ошибка загрузки')+'</div>';return}
+    _retailPoolRows=data.rows||[];
+    renderRetailPoolPorts(data.counts||{});
+  }catch(e){
+    box.innerHTML='<div style="text-align:center;padding:24px;color:var(--danger);font-size:12px">Ошибка соединения</div>';
+  }
+}
+function renderRetailPoolPorts(counts){
+  var box=document.getElementById('retailPoolTable');
+  var cEl=document.getElementById('retailPoolCounts');
+  if(cEl){
+    var parts=[];
+    [['free','свободно'],['reserved','резерв'],['leased','арендовано'],['blocked','заблокировано']].forEach(function(p){
+      if(counts[p[0]])parts.push(p[1]+': '+counts[p[0]]);
+    });
+    cEl.textContent=parts.length?' — '+parts.join(', '):'';
+  }
+  var rows=_retailPoolRows||[];
+  if(!rows.length){box.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Пул пуст — добавьте порты или импортируйте существующие</div>';return}
+  var badges={
+    free:['Свободен','rgba(16,185,129,.15)','#10B981'],
+    reserved:['Резерв','rgba(150,90,200,.15)','#965AC8'],
+    leased:['Арендован','rgba(59,157,216,.15)','#3B9DD8'],
+    blocked:['Заблокирован','rgba(239,68,68,.15)','#EF4444']
+  };
+  var h='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'+
+    '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Сервер</th>'+
+    '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Порт</th>'+
+    '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Статус</th>'+
+    '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Клиент</th>'+
+    '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Hold до</th>'+
+    '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Тест до</th>'+
+    '</tr></thead><tbody>';
+  rows.forEach(function(r){
+    var b=badges[r.status]||[r.status,'var(--bg-2)','var(--text-2)'];
+    h+='<tr>'+
+      '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(r.server)+'</td>'+
+      '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(r.port_id)+'</td>'+
+      '<td style="padding:6px 8px;border-bottom:1px solid var(--border)"><span style="background:'+b[1]+';color:'+b[2]+';padding:1px 7px;border-radius:8px;font-size:10px;font-weight:600">'+b[0]+'</span></td>'+
+      '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+(r.client_id!=null?esc(r.client_id):'<span style="color:var(--text-3)">—</span>')+'</td>'+
+      '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+_fmtIsoDt(r.hold_until)+'</td>'+
+      '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+_fmtIsoDt(r.test_expires_at)+'</td>'+
+    '</tr>';
+  });
+  h+='</tbody></table>';
+  box.innerHTML=h;
+}
+// «Добавить порты»: select бокса (кэш /api/admin/servers, как у тарифов) + N (1–50).
+// POST долгий — кнопка дизейблится со спиннером до ответа.
+function togglePoolAddForm(){
+  var f=document.getElementById('poolAddForm');
+  if(!f)return;
+  f.style.display=f.style.display==='none'?'':'none';
+  if(f.style.display!=='none')_fillPoolAddServerSelect();
+}
+function _fillPoolAddServerSelect(){
+  var sel=document.getElementById('poolAddServer');
+  if(!sel)return;
+  _loadAdminServers(function(servers){
+    sel.innerHTML=servers.map(function(s){return '<option value="'+esc(s.name)+'">'+esc(s.name)+'</option>'}).join('')||
+      '<option value="">— нет серверов —</option>';
+  });
+}
+async function submitPoolAdd(){
+  var btn=document.getElementById('poolAddBtn');
+  var st=document.getElementById('poolAddStatus');
+  var server=document.getElementById('poolAddServer').value;
+  var count=parseInt(document.getElementById('poolAddCount').value,10);
+  if(!server){st.style.color='var(--danger)';st.textContent='Выберите сервер';return}
+  if(!count||count<1||count>50){st.style.color='var(--danger)';st.textContent='Количество: целое 1–50';return}
+  btn.disabled=true;
+  st.style.color='var(--text-2)';st.textContent='Создание портов, это может занять несколько минут...';
+  try{
+    var data=await api(API+'/api/admin/retail/pool/add',{method:'POST',json:{server:server,count:count}});
+    var created=(data&&data.created)||[];
+    var errors=(data&&data.errors)||[];
+    if(data&&data.ok){
+      st.style.color='var(--success)';st.textContent='Создано: '+created.length+(errors.length?', ошибок: '+errors.length:'');
+      showToast('Создано портов: '+created.length+(errors.length?' · ошибок: '+errors.length:''),errors.length?'error':'success');
+    }else{
+      st.style.color='var(--danger)';st.textContent=(data&&data.error)||'Ошибка создания';
+      showToast((data&&data.error)||'Ошибка создания портов','error');
+    }
+    if(errors.length)console.warn('[RetailPool] add errors:',errors);
+    _retailPoolRows=null;
+    loadRetailPoolPorts();
+  }catch(e){
+    st.style.color='var(--danger)';st.textContent='Ошибка соединения';
+    showToast('Ошибка соединения','error');
+  }finally{
+    btn.disabled=false;
+  }
+}
+// Legacy-импорт: preview портов, выданных физикам вне пула → выбор чекбоксами
+// (все отмечены) → import выбранных → обновление таблицы пула.
+async function loadLegacyPreview(btn){
+  var box=document.getElementById('retailLegacyBox');
+  if(!box)return;
+  if(btn)btn.disabled=true;
+  box.style.display='';
+  box.innerHTML='<div style="padding:16px;text-align:center;color:var(--text-3);font-size:12px;border:1px solid var(--border);border-radius:10px">Сканируем порты всех серверов...</div>';
+  try{
+    var data=await api(API+'/api/admin/retail/pool/legacy_preview');
+    if(!data||data.error){box.innerHTML='<div style="padding:12px;color:var(--danger);font-size:12px">'+esc((data&&data.error)||'Ошибка загрузки')+'</div>';return}
+    var items=data.items||[];
+    if(!items.length){
+      box.innerHTML='<div style="padding:12px;color:var(--text-2);font-size:12px">Портов для импорта не найдено — все порты физиков уже в пуле.</div>';
+      return;
+    }
+    var h='<div style="border:1px solid var(--border);border-radius:10px;padding:12px;background:var(--bg-2)">'+
+      '<div style="font-size:12px;font-weight:600;margin-bottom:6px">Импорт существующих портов ('+items.length+')</div>'+
+      '<div style="font-size:11px;color:var(--text-3);margin-bottom:10px">Порты, уже выданные физикам вне пула. Отмеченные попадут в пул со статусом «Арендован» — дальше ими владеет конвейер автоблока.</div>'+
+      '<div style="max-height:260px;overflow-y:auto;margin-bottom:10px"><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'+
+      '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)"></th>'+
+      '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Сервер</th>'+
+      '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Порт</th>'+
+      '<th style="text-align:left;padding:4px 8px;border-bottom:1px solid var(--border)">Логин</th>'+
+      '</tr></thead><tbody>';
+    items.forEach(function(it,i){
+      h+='<tr>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid var(--border)"><input type="checkbox" class="legacy-import-chk" data-i="'+i+'" checked></td>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid var(--border)">'+esc(it.server)+'</td>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid var(--border)">'+esc(it.port_id)+'</td>'+
+        '<td style="padding:4px 8px;border-bottom:1px solid var(--border)">'+esc(it.login)+'</td>'+
+      '</tr>';
+    });
+    h+='</tbody></table></div>'+
+      '<button class="btn btn-primary btn-sm" id="legacyImportBtn" data-on-click="submitLegacyImport()">Импортировать выбранные</button> '+
+      '<button class="btn btn-sm" data-on-click="cancelLegacyImport()">Отмена</button> '+
+      '<span id="legacyImportStatus" style="font-size:11px"></span></div>';
+    box.innerHTML=h;
+    window._legacyPreviewItems=items;
+  }catch(e){
+    box.innerHTML='<div style="padding:12px;color:var(--danger);font-size:12px">Ошибка соединения</div>';
+  }finally{
+    if(btn)btn.disabled=false;
+  }
+}
+function cancelLegacyImport(){
+  var box=document.getElementById('retailLegacyBox');
+  if(box){box.style.display='none';box.innerHTML=''}
+  window._legacyPreviewItems=null;
+}
+async function submitLegacyImport(){
+  var items=window._legacyPreviewItems||[];
+  var selected=[].slice.call(document.querySelectorAll('.legacy-import-chk:checked')).map(function(c){return items[+c.getAttribute('data-i')]}).filter(Boolean)
+    .map(function(it){return {server:it.server,port_id:it.port_id,client_id:it.client_id}});
+  var st=document.getElementById('legacyImportStatus');
+  var btn=document.getElementById('legacyImportBtn');
+  if(!selected.length){st.style.color='var(--danger)';st.textContent='Ничего не выбрано';return}
+  if(btn)btn.disabled=true;
+  st.style.color='var(--text-2)';st.textContent='Импорт...';
+  try{
+    var data=await api(API+'/api/admin/retail/pool/legacy_import',{method:'POST',json:{items:selected}});
+    if(data&&data.ok){
+      var skipped=(data.skipped||[]).length;
+      showToast('Импортировано: '+data.imported+(skipped?' · пропущено: '+skipped:''),'success');
+      cancelLegacyImport();
+      _retailPoolRows=null;
+      loadRetailPoolPorts();
+    }else{
+      st.style.color='var(--danger)';st.textContent=(data&&data.error)||'Ошибка импорта';
+    }
+  }catch(e){
+    st.style.color='var(--danger)';st.textContent='Ошибка соединения';
+  }finally{
+    if(btn)btn.disabled=false;
+  }
 }
 function renderTariffsAdmin(){
   var box=document.getElementById('tariffsTable');
