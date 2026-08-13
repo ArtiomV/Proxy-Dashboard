@@ -141,7 +141,7 @@ function _renderFinanceDashboard(c, d) {
   var rows = (d.per_client || []).filter(function(p) { return !(p.mrr === 0 && p.mrr_prev === 0 && !p.balance); });
   rows.forEach(function(p, i) {
     var col = CHART_COLORS.clients[i % CHART_COLORS.clients.length];
-    var pausedTag = p.paused ? ' <span class="fx-pause">пауза</span>' : '';
+    var pausedTag = p.paused ? ' <span class="fx-pause">ПАУЗА</span>' : '';
     var dc = p.mrr_delta_pct == null ? 'var(--t3)' : p.mrr_delta_pct >= 0 ? 'var(--gr)' : 'var(--rd)';
     var ds = p.mrr_delta_pct == null ? '—' : (p.mrr_delta_pct >= 0 ? '+' : '') + p.mrr_delta_pct + '%';
     var pill = p.billingType === 'per_modem' ? '<span class="fx-pill pm">per_modem</span>' : '<span class="fx-pill pg">per_gb</span>';

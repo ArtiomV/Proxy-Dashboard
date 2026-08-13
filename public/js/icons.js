@@ -1,7 +1,7 @@
 /* public/js/icons.js — единый набор SVG-иконок вместо эмодзи.
  * Использование: icon('bell') → '<svg …>' (inline, currentColor).
  *   icon(name, sizePx, color)  — size по умолчанию 14, color по умолчанию currentColor
- *   flagIcon('MD'|'RU'|'RO'|'UA'|'DE'|'AT', sizePx) — флажок со скруглением.
+ *   flagIcon('MD'|'RU'|'RO'|'DE'|'AT', sizePx) — флажок со скруглением.
  * Иконки stroke-based (стиль Lucide), viewBox 24 — красиво на любой теме.
  * Глобально: window.icon / window.flagIcon (CommonJS-экспорт для тестов).
  */
@@ -101,12 +101,11 @@
     return '<svg width="' + s + '" height="' + s + '" viewBox="0 0 10 10" style="vertical-align:-1px;flex-shrink:0"><circle cx="5" cy="5" r="4.2" fill="' + color + '"/></svg>';
   }
 
-  // Флаги (замена regional-indicator эмодзи 🇷🇺🇲🇩🇷🇴🇺🇦🇩🇪🇦🇹).
+  // Флаги (замена regional-indicator эмодзи).
   var FLAGS = {
     RU: ['#fff', '#0039A6', '#D52B1E'],
     MD: ['#003DA5', '#FFD100', '#C1272D', 'v'],
     RO: ['#002B7F', '#FCD116', '#CE1126', 'v'],
-    UA: ['#0057B7', '#FFD700'],
     DE: ['#000', '#DD0000', '#FFCC00'],
     AT: ['#EF3340', '#fff', '#EF3340'],
   };

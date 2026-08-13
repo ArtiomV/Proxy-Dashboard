@@ -76,7 +76,7 @@
 #tab-bank .fxw .fx-pill{font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px}
 #tab-bank .fxw .fx-pill.pg{background:rgba(47,111,224,.10);color:#2f6fe0}
 #tab-bank .fxw .fx-pill.pm{background:rgba(181,116,10,.14);color:#9a6309}
-#tab-bank .fxw .fx-pause{font-size:9px;background:rgba(181,116,10,.16);color:#9a6309;padding:1px 6px;border-radius:8px;vertical-align:middle}
+#tab-bank .fxw .fx-pause{font-size:9px;font-weight:600;color:#000;background:var(--warning);padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap;vertical-align:middle}
 
 /* ── Дашборд: «Пульс бизнеса» hero KPI-карточки (как в макете) ── */
 #tab-dashboard .pulse-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:14px}

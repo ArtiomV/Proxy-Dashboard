@@ -2571,7 +2571,7 @@ function loadOperatorsMapping() {
           : o.source === 'auto'
             ? '<span style="background:rgba(52,199,89,.12);color:var(--green);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600">авто</span>'
             : '<span style="color:var(--text-3);font-size:10px">—</span>';
-        var FLAGS = { RO: flagIcon('RO'), MD: flagIcon('MD'), RU: flagIcon('RU'), UA: flagIcon('UA') };
+        var FLAGS = { RO: flagIcon('RO'), MD: flagIcon('MD'), RU: flagIcon('RU') };
         var country = o.country || '';
         var flag = FLAGS[country] || '';
         h += '<tr>';
@@ -2579,7 +2579,7 @@ function loadOperatorsMapping() {
         h += '<td style="padding:8px 6px">';
         h += '<select data-on-change="setOperatorCountry(\''+encodeURIComponent(o.operator_normalized)+'\', this.value)" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-1);padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer">';
         h += '<option value="" '+(!country?'selected':'')+'>— не задана —</option>';
-        ['RO','MD','RU','UA'].forEach(function(c){ h += '<option value="'+c+'" '+(country===c?'selected':'')+'>'+c+'</option>'; });
+        ['RO','MD','RU'].forEach(function(c){ h += '<option value="'+c+'" '+(country===c?'selected':'')+'>'+c+'</option>'; });
         h += '</select>';
         if (flag) h += ' <span style="font-size:14px;margin-left:6px">'+flag+'</span>';
         h += '</td>';
@@ -3270,7 +3270,7 @@ function renderNewFinClients(){
   if(!rows.length){ el.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:8px">Нет данных</div>'; return; }
   var h = '<table class="ztbl"><thead><tr><th>Клиент</th><th style="text-align:left">Тариф</th><th>Выручка 30д</th><th>Δ M/M</th><th>% выручки</th><th>Баланс</th></tr></thead><tbody>';
   rows.forEach(function(p){
-    var pausedTag = p.paused?' <span style="font-size:9px;background:var(--warning);color:#fff;padding:1px 5px;border-radius:8px">пауза</span>':'';
+    var pausedTag = p.paused?' <span style="font-size:9px;font-weight:600;color:#000;background:var(--warning);padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap">ПАУЗА</span>':'';
     var deltaCol = p.mrr_delta_pct==null?'var(--text-3)':p.mrr_delta_pct>=0?'var(--success)':'var(--danger)';
     var deltaStr = p.mrr_delta_pct==null?'—':((p.mrr_delta_pct>0?'+':'')+p.mrr_delta_pct+'%');
     var tariffStr = p.billingType==='per_modem'?(p.price+'₽/мес·мод'):(p.price+'₽/ГБ');
@@ -3398,7 +3398,7 @@ function renderNewClientTable(d){
     var deltaCol = r.delta==null ? 'var(--text-3)' : (r.delta>=0 ? 'var(--success)' : 'var(--danger)');
     var deltaStr = r.delta==null ? '—' : ((r.delta>0?'+':'')+r.delta+'%');
     var balCol = r.balance<0 ? 'var(--danger)' : (r.balance>0 ? 'var(--text-0)' : 'var(--text-3)');
-    var paused = r.paused ? ' <span style="font-size:9px;background:var(--warning);color:#fff;padding:1px 5px;border-radius:8px">пауза</span>' : '';
+    var paused = r.paused ? ' <span style="font-size:9px;font-weight:600;color:#000;background:var(--warning);padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap">ПАУЗА</span>' : '';
     var td = function(content,left){ return '<td'+(left?' style="text-align:left"':'')+'>'+content+'</td>'; };
     h += '<tr>';
     h += td('<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:3px;height:16px;background:'+col+';border-radius:2px"></span><strong style="color:var(--text-0)">'+esc(r.name)+'</strong>'+paused+'</span>',1);
