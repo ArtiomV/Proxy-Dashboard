@@ -26,7 +26,8 @@ for f in src/api/proxy-smart.js src/billing/atomic.js src/traffic/hourly.js; do
 done
 
 # D2: pre-deploy снапшот БД на сервере ДО rsync/миграций — точка отката, если
-# деплой (или авторан-миграция при старте) сломает БД. Храним последние 5.
+# деплой (или авторан-миграция при старте) сломает БД. Храним последние 2 —
+# полная история снапшотов есть в облаке (rclone, backup-offsite.sh).
 echo "==> Pre-deploy DB snapshot on $SERVER"
 "${SSH[@]}" "$SERVER" "set -e; cd $REMOTE_DIR; \
   BK=\${DB_BACKUP_DIR:-/var/backups/proxy-dashboard}; \
@@ -39,7 +40,7 @@ echo "==> Pre-deploy DB snapshot on $SERVER"
     { sqlite3 dashboard.db 'PRAGMA wal_checkpoint(TRUNCATE);' >/dev/null 2>&1 || true; cp dashboard.db \"\$D/dashboard.db\"; }; \
     echo \"snapshot: \$D/dashboard.db\"; \
   else echo 'dashboard.db not found — snapshot skipped'; fi; \
-  ls -d \"\$BK\"/pre-deploy-* 2>/dev/null | sort | head -n -5 | xargs -r rm -rf"
+  ls -d \"\$BK\"/pre-deploy-* 2>/dev/null | sort | head -n -2 | xargs -r rm -rf"
 
 echo "==> Syncing files to $SERVER:$REMOTE_DIR"
 rsync -av --delete \

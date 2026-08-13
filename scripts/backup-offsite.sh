@@ -29,6 +29,7 @@ fi
 
 # Копируем только снапшоты БД (daily в корне + monthly/), без sidecar-файлов.
 # Паттерн без '/' матчит basename на любой глубине — monthly/ попадает сам.
+# С 13.08.2026 снапшоты сжаты gzip (.db.gz) — матчим оба варианта.
 # Beget S3 режет всплески запросов (429 TooManyRequests на UploadPart при
 # multi-thread copy ~700 MB файла): глушим параллелизм и делаем до 3 попыток
 # с паузой — иначе ночная выгрузка молча не доезжает (13.08.2026).
@@ -36,7 +37,7 @@ attempt=1
 max_attempts=3
 while true; do
   if rclone copy "$BACKUP_DIR" "${REMOTE}:${DEST_PREFIX}" \
-    --include "dashboard-*.db" \
+    --include "dashboard-*.db*" \
     --checksum --stats-one-line --stats 30s \
     --transfers 2 --s3-upload-concurrency 1 --multi-thread-streams 1 \
     --retries 5 --retries-sleep 30s --low-level-retries 10; then
