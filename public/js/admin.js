@@ -3152,7 +3152,7 @@ function renderNewExtWidgets(){
   // Выручка по месяцам (тренд-факт + run-rate прогноз столбцом в графике) — между «Потреблением трафика» и «Операторами».
   var mrrCard='<div class="analytics-card" style="margin:0;display:flex;flex-direction:column">'
     +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:8px">'
-    +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">📈 Выручка: факт и прогноз</span>'
+    +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">📈 Выручка</span>'
     +'<span style="display:flex;gap:8px;font-size:9px;font-weight:600;color:var(--text-2);align-items:center"><span id="mrrLegend" style="display:flex;gap:8px"></span>'
     +'<span class="mrr-fb" style="position:relative;display:inline-flex">'
     +'<span data-on-click="toggleMrrFormula(this)" style="cursor:pointer;border:1px solid var(--border);border-radius:8px;padding:0 7px;font-size:9px;color:var(--text-2);font-weight:500">Формула</span>'
@@ -3160,8 +3160,11 @@ function renderNewExtWidgets(){
     +'<b>Выручка 30д (факт)</b> = списания + корректировки за скользящие 30 дн., без клиентов на паузе.<br>'
     +'<b>Run-rate (ожидание)</b> = прогноз месяца, НЕ выручка: Σ по клиентам — среднесуточное потребление за последние 7 дней × дней в месяце × тариф (per-GB); per-modem — цена × живые модемы.'
     +'</span></span></span></div>'
-    +'<div style="flex:1;min-height:120px;position:relative"><canvas id="newFinTrendCanvas"></canvas></div></div>';
+    +'<div style="flex:1;min-height:120px;position:relative"><canvas id="newFinTrendCanvas"></canvas><div id="mrrSkel" class="skel" style="position:absolute;inset:0"></div></div></div>';
   el.innerHTML=probCard+trendCard+mrrCard+opCard;
+  // Пока финданные едут — столбцы-скелетон в карточке «Выручка» (Stage: скелетоны).
+  var _mrrSkel = document.getElementById('mrrSkel');
+  if(_mrrSkel && !window._newFinData) _mrrSkel.innerHTML = skelBars(12);
   loadTrendData('New');
   try{ renderMrrChart(window._newFinData); }catch(_){}
 }
@@ -3440,12 +3443,19 @@ function renderNewHeatmap(data){ renderHeatmap(data, _hmNew); }
 
 // ── Daily chart ────────────────────────────────────────────────────
 function loadNewDailyChart(){
-  if(window._dailyTrafficCache){ renderNewDailyChart(window._dailyTrafficCache); return; }
+  var skel = document.getElementById('newDailySkel');
+  if(window._dailyTrafficCache){
+    if(skel) skel.style.display = 'none';
+    renderNewDailyChart(window._dailyTrafficCache); return;
+  }
+  // Столбцы-скелетон вместо пустого канваса, пока daily_traffic едет (Stage: скелетоны).
+  if(skel) skel.innerHTML = skelBars(30);
   api(API+'/api/admin/daily_traffic')
     .then(function(d){if(d&&d.__status>=400) throw new Error('HTTP '+d.__status); return d;})
     .then(function(d){ window._dailyTrafficCache = d; renderNewDailyChart(d); })
     .catch(function(e){
       var canvas = document.getElementById('newDailyCanvas');
+      if(skel) skel.style.display = 'none';
       if(canvas) canvas.parentElement.innerHTML = '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>';
     });
 }
@@ -3462,6 +3472,8 @@ function setNewDailyMode(m){
 function renderNewDailyChart(data){
   var canvas = document.getElementById('newDailyCanvas');
   if(!canvas || !data) return;
+  var skel = document.getElementById('newDailySkel');
+  if(skel) skel.style.display = 'none';   // данные пришли — скелетон убираем
   var ctx = canvas.getContext('2d');
   if(_newDailyChart){ _newDailyChart.destroy(); _newDailyChart = null; }
   var cc = getChartColorsLight();

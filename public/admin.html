@@ -13,7 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="css/variables.css?v=0630d">
-<link rel="stylesheet" href="css/base.css?v=0813a">
+<link rel="stylesheet" href="css/base.css?v=0813b">
 <link rel="stylesheet" href="css/tables.css?v=0630d">
 <link rel="stylesheet" href="css/cards.css?v=0630d">
 <link rel="stylesheet" href="css/modal.css?v=0630d">
@@ -181,7 +181,7 @@
 
     <!-- ───── ТРЕБУЕТ ВНИМАНИЯ: одна карточка с плитками алертов (по макету) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><path d="M12 4 2.5 20h19L12 4z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="16.8" x2="12.01" y2="16.8"/></svg>Требует внимания</div>
-    <div id="newExtWidgets" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px;align-items:stretch"></div>
+    <div id="newExtWidgets" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin-bottom:12px;align-items:stretch"><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div></div>
 
     <!-- ───── ПАРК ПО СЕРВЕРАМ (как в макете — наверх) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/></svg>Парк по серверам</div>
@@ -254,7 +254,7 @@
           <button id="newDailyMode_countries" class="new-hm-btn" data-on-click="setNewDailyMode('countries')">По странам</button>
         </div>
       </div>
-      <div class="chart-wrap-daily" style="height:300px"><canvas id="newDailyCanvas"></canvas></div>
+      <div class="chart-wrap-daily" style="height:300px;position:relative"><canvas id="newDailyCanvas"></canvas><div id="newDailySkel" class="skel" style="position:absolute;inset:0"></div></div>
     </div>
 
     <details class="acc-expand" data-section="resources">
@@ -1192,15 +1192,15 @@
      Логи доменов removed (low-use research tool, duplicated Топ ресурсов). -->
 
 
-<script src="/js/utils.js?v=0718c"></script>
+<script src="/js/utils.js?v=0813a"></script>
 <script src="/js/delegation.js?v=0727b"></script>
 <script src="/js/admin/delegated-helpers.js?v=0804a"></script>
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
-<script src="/js/admin/analytics.js?v=0719a"></script>
-<script src="/js/admin/finance.js?v=0804a"></script>
+<script src="/js/admin/analytics.js?v=0813a"></script>
+<script src="/js/admin/finance.js?v=0813a"></script>
 <script src="/js/admin/modems.js?v=0722c"></script>
 <script src="/js/admin/settings.js?v=0722b"></script>
 <script src="/js/admin/speed-monitor.js?v=0813b"></script>
-<script src="/js/admin.js?v=0813a"></script>
+<script src="/js/admin.js?v=0813b"></script>
 </body>
 </html>

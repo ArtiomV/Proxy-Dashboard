@@ -1205,6 +1205,8 @@ function dismissAllUnmatched() {
 
 function renderMrrChart(d){
   d = d || window._newFinData; if(!d) return;
+  var skel = document.getElementById('mrrSkel');
+  if(skel) skel.style.display = 'none';   // финданные пришли — скелетон убираем
   var lg = document.getElementById('mrrLegend');
   var cc = getChartColorsLight();
   // Текущий месяц — стек «Факт к дате» + «остаток прогноза» (2026-08-04),

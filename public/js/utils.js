@@ -133,6 +133,12 @@ async function api(path, opts){
   return data;
 }
 
+// Фигурные скелетоны (стили — base.css): skelBars — «столбцы» для
+// столбчатых графиков, skelHeat — «ячейки» для хитмапов. Возвращают HTML
+// для вставки в контейнер-заглушку до прихода данных.
+function skelBars(n){var s='<div class="skel-bars">';for(var i=0;i<(n||24);i++)s+='<i></i>';return s+'</div>';}
+function skelHeat(cols,rows){var s='<div class="skel-heat">';for(var i=0;i<((cols||24)*(rows||3));i++)s+='<i></i>';return s+'</div>';}
+
 // CommonJS export so the same source can be unit-tested in Node without a DOM.
 // Browsers see the `if (typeof module !== 'undefined')` guard as false and
 // continue with the bare function declarations above.
@@ -140,6 +146,6 @@ if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
     esc, fmtDateRu, parseTraffic, bytesToGb, fmtGb, fmtGbShort, pct,
     formatBytes, getModemStatus, formatUptime, formatTraffic,
-    renderSignalBars, renderNetBadge, api,
+    renderSignalBars, renderNetBadge, api, skelBars, skelHeat,
   };
 }

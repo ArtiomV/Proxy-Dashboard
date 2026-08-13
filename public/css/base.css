@@ -309,3 +309,23 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 .skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);animation:skel-shimmer 1.4s infinite}
 [data-theme="dark"] .skel::after{background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent)}
 @keyframes skel-shimmer{100%{transform:translateX(100%)}}
+
+/* Фигурные скелетоны под тип контента блока (дашборд):
+   .skel-bars — «столбцы» для столбчатых графиков (Потребление, Выручка):
+   качаются вверх-вниз, пока данные не пришли.
+   .skel-heat — «ячейки» для хитмапа (Почасовой трафик): пульсируют
+   затемнением, как будут пульсировать реальные ячейки по трафику. */
+.skel-bars{display:flex;align-items:flex-end;gap:5px;width:100%;height:100%;padding:10px 10px 6px}
+.skel-bars>i{flex:1;display:block;background:var(--bg-3);border-radius:3px 3px 0 0;animation:skel-bar 1.5s ease-in-out infinite}
+.skel-bars>i:nth-child(3n){animation-delay:.25s}
+.skel-bars>i:nth-child(3n+1){animation-delay:.5s}
+.skel-bars>i:nth-child(4n){animation-delay:.75s}
+.skel-bars>i:nth-child(5n){animation-delay:1s}
+@keyframes skel-bar{0%,100%{height:22%}50%{height:88%}}
+.skel-heat{display:grid;grid-template-columns:repeat(24,1fr);gap:3px;width:100%;height:100%;padding:8px}
+.skel-heat>i{display:block;background:var(--bg-3);border-radius:2px;min-height:14px;animation:skel-cell 1.9s ease-in-out infinite}
+.skel-heat>i:nth-child(4n){animation-delay:.3s}
+.skel-heat>i:nth-child(4n+1){animation-delay:.6s}
+.skel-heat>i:nth-child(4n+2){animation-delay:.9s}
+.skel-heat>i:nth-child(5n){animation-delay:1.2s}
+@keyframes skel-cell{0%,100%{opacity:.3}50%{opacity:1}}

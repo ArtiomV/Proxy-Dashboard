@@ -334,7 +334,7 @@ function loadHeatmapData(ctx){
   var key=ctx.view+'|'+ctx.id;
   if(ctx.cache[key]){renderHeatmap(ctx.cache[key],ctx);return;}
   var g=document.getElementById(ctx.grid);
-  if(g)g.innerHTML='<div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>';
+  if(g)g.innerHTML='<div class="skel" style="height:160px">'+skelHeat(24,3)+'</div>';
   api(API+'/api/analytics/heatmap?view='+ctx.view+'&id='+encodeURIComponent(ctx.id)+'&days=7')
     .then(function(d){if(d&&d.__status>=400)throw new Error('HTTP '+d.__status);return d})
     .then(function(data){ctx.cache[key]=data;renderHeatmap(data,ctx);})
