@@ -376,8 +376,55 @@ function renderAnalytics(){
   }
 }
 
-// --- Почасовой хитмап трафика клиента (Этап 3 унификации с админкой) ---
-// GET /api/client/hourly_traffic → {meta:{days,day_meta,has_hourly}, matrix[day][hour]=GB}
+// --- Почасовой хитмап трафика клиента — 1-в-1 с админским «Почасовой трафик»
+// (public/js/admin/analytics.js renderHeatmap): та же палитра heatColor,
+// ячейки 28px, легенда, сводка, тултип, полосатые «corrected»-ячейки.
+// GET /api/client/hourly_traffic → {meta:{days,day_meta,has_hourly,corrected}, matrix[day][hour]=GB}
+var _MONTHS_RU_GEN=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
+function _hmFmt(gb){if(!gb&&gb!==0)return'0 МБ';if(gb>=1000)return(gb/1000).toFixed(1)+' ТБ';if(gb>=1)return gb.toFixed(1)+' ГБ';return Math.round(gb*1024)+' МБ';}
+function _hmDateRu(ds){if(!ds)return'—';var p=ds.split('-');if(p.length<3)return ds;return parseInt(p[2],10)+' '+(_MONTHS_RU_GEN[parseInt(p[1],10)-1]||'');}
+function _hmPluralModem(n){var a=Math.abs(n)%100,b=a%10;if(a>10&&a<20)return n+' модемов';if(b>1&&b<5)return n+' модема';if(b===1)return n+' модем';return n+' модемов';}
+function _hmLerp(a,b,t){
+  var ah=parseInt(a.slice(1),16),bh=parseInt(b.slice(1),16);
+  var r=Math.round(((ah>>16)&255)+(((bh>>16)&255)-((ah>>16)&255))*t);
+  var g=Math.round(((ah>>8)&255)+(((bh>>8)&255)-((ah>>8)&255))*t);
+  var bl=Math.round((ah&255)+((bh&255)-(ah&255))*t);
+  return'#'+(r<16?'0':'')+r.toString(16)+(g<16?'0':'')+g.toString(16)+(bl<16?'0':'')+bl.toString(16);
+}
+function _hmDarken(hex,amt){
+  var h=parseInt(hex.slice(1),16);
+  return'#'+[[(h>>16)&255],[(h>>8)&255],[h&255]].map(function(v){return Math.max(0,Math.round(v[0]*(1-amt))).toString(16).padStart(2,'0')}).join('');
+}
+function _hmColor(val,maxV,accent){
+  if(!val||!maxV)return'var(--bg-3)';
+  var t=Math.pow(val/maxV,0.55);
+  if(t<0.4)return _hmLerp('#F1F1EF','#85B7EB',t/0.4);
+  if(t<0.8)return _hmLerp('#85B7EB',accent,(t-0.4)/0.4);
+  return _hmLerp(accent,_hmDarken(accent,0.35),(t-0.8)/0.2);
+}
+function _hmSumItem(label,val,sub,isPeak){
+  return'<div style="flex:1;display:flex;flex-direction:column;gap:3px;padding:0 20px;border-right:0.5px solid var(--border);min-width:130px;margin-bottom:6px">'
+    +'<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;white-space:nowrap">'+label+'</div>'
+    +'<div style="font-size:15px;font-weight:500;line-height:1.2;white-space:nowrap;'+(isPeak?'color:var(--accent)':'color:var(--text-0)')+'">'+val+'</div>'
+    +(sub?'<div style="font-size:10px;color:var(--text-3);white-space:nowrap">'+sub+'</div>':'')
+    +'</div>';
+}
+var _clientHmData=null;
+function showClientHeatTT(di,hr,event){
+  var tt=document.getElementById('clientHeatTT');
+  if(!tt){tt=document.createElement('div');tt.id='clientHeatTT';tt.style.cssText='position:fixed;z-index:3000;display:none;pointer-events:none;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:8px 12px;font-size:11px;color:var(--text-1);box-shadow:0 8px 24px rgba(0,0,0,.25);white-space:nowrap';document.body.appendChild(tt);}
+  var data=_clientHmData;if(!data||!data.meta)return;
+  var days=data.meta.days||[];var v=(data.matrix[di]||[])[hr]||0;
+  var mDiv=(tableData&&tableData.length)||1;
+  tt.innerHTML='<div style="font-weight:600;color:var(--text-0);margin-bottom:2px">'+_hmDateRu(days[di])+', '+('0'+hr).slice(-2)+':00–'+('0'+hr).slice(-2)+':59</div>'
+    +'<div>Всего: <b>'+_hmFmt(v)+'</b> &nbsp;·&nbsp; на модем: <b>'+_hmFmt(v/mDiv)+'</b></div>';
+  tt.style.display='block';
+  var x=event.clientX+14,y=event.clientY+14;
+  if(x+tt.offsetWidth>window.innerWidth-8)x=event.clientX-tt.offsetWidth-14;
+  if(y+tt.offsetHeight>window.innerHeight-8)y=event.clientY-tt.offsetHeight-14;
+  tt.style.left=x+'px';tt.style.top=y+'px';
+}
+function hideClientHeatTT(){var tt=document.getElementById('clientHeatTT');if(tt)tt.style.display='none';}
 function loadClientHeatmap(){
   var box=document.getElementById('clientHeatmap');
   if(!box) return;
@@ -386,37 +433,71 @@ function loadClientHeatmap(){
       box.innerHTML='<div style="padding:30px;text-align:center;color:var(--text-3);font-size:12px">Почасовые данные пока не накоплены — они собираются автоматически каждый час.</div>';
       return;
     }
-    var days=data.meta.days, dayMeta=data.meta.day_meta, m=data.matrix;
-    var max=0;
-    for(var i=0;i<m.length;i++){for(var j=0;j<24;j++){if(m[i][j]>max)max=m[i][j]}}
-    if(max<=0)max=1;
-    var html='<div style="overflow-x:auto"><div style="min-width:640px">';
-    // Шапка часов
-    html+='<div style="display:grid;grid-template-columns:52px repeat(24,1fr);gap:2px;margin-bottom:2px">';
-    html+='<div></div>';
-    for(var h=0;h<24;h++){
-      html+='<div style="font-size:9px;color:var(--text-3);text-align:center">'+(h%3===0?h:'')+'</div>';
+    _clientHmData=data;
+    var mat=data.matrix,days=data.meta.days||[],dm=data.meta.day_meta||[];
+    var accent='#1960C9';
+    var mCnt=(tableData&&tableData.length)||1,mDiv=mCnt||1;
+    var perModem=mat.map(function(row){return row.map(function(v){return v/mDiv;})});
+    var maxV=0;perModem.forEach(function(row){row.forEach(function(v){if(v>maxV)maxV=v;})});
+    var DAYS_RU=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    var h='<div style="min-width:560px">';
+    h+='<div style="display:flex;margin-left:58px;margin-bottom:4px">';
+    for(var hi=0;hi<24;hi+=2){
+      h+='<div style="flex:1;text-align:center;font-size:9px;color:var(--text-3)">'+String(hi).padStart(2,'0')+'</div>';
+      h+='<div style="flex:1"></div>';
     }
-    html+='</div>';
-    for(var di=0;di<days.length;di++){
-      var dm=dayMeta[di]||{label:'',dateShort:days[di].slice(5)};
-      html+='<div style="display:grid;grid-template-columns:52px repeat(24,1fr);gap:2px;margin-bottom:2px">';
-      html+='<div style="font-size:10px;color:var(--text-2);display:flex;align-items:center;white-space:nowrap">'+dm.label+' '+dm.dateShort+'</div>';
-      for(var hh=0;hh<24;hh++){
-        var v=m[di][hh]||0;
-        var a=v>0?(0.10+0.90*v/max):0;
-        var tip=(v>=1?v.toFixed(2)+' ГБ':Math.round(v*1024)+' МБ');
-        html+='<div title="'+days[di]+' '+('0'+hh).slice(-2)+':00 — '+tip+'" style="height:20px;border-radius:3px;background:'+(v>0?'var(--accent)':'var(--bg-2)')+';opacity:'+(v>0?Math.max(a,0.12):1)+'"></div>';
-      }
-      html+='</div>';
-    }
-    html+='</div></div>';
-    box.innerHTML=html;
-    var legend=document.getElementById('clientHeatmapLegend');
-    if(legend){
-      legend.innerHTML='<span>0</span>'+
-        '<span style="display:inline-block;width:60px;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--bg-2),var(--accent))"></span>'+
-        '<span>'+(max>=1?max.toFixed(1)+' ГБ/ч':Math.round(max*1024)+' МБ/ч')+'</span>';
+    h+='</div>';
+    mat.forEach(function(row,di){
+      var ds=days[di]||'';var dMeta=dm[di]||{};
+      var d=new Date(ds+'T00:00:00');
+      var dn=DAYS_RU[d.getDay()]||dMeta.label||'';
+      h+='<div style="display:flex;align-items:center;margin-bottom:3px">';
+      h+='<div style="width:58px;font-size:10px;color:var(--text-2);flex-shrink:0;text-align:right;padding-right:8px;line-height:1.3">';
+      h+='<div style="font-weight:500">'+dn+'</div><div style="font-size:9px;color:var(--text-3)">'+_hmDateRu(ds)+'</div></div>';
+      h+='<div style="display:flex;flex:1;gap:2px">';
+      row.forEach(function(val,hr){
+        var pmVal=perModem[di][hr];
+        var col=_hmColor(pmVal,maxV,accent);
+        var isCorrected=data.meta.corrected&&data.meta.corrected[di]&&data.meta.corrected[di][hr];
+        var bg=isCorrected
+          ? col+';background-image:repeating-linear-gradient(45deg, rgba(255,255,255,0.45) 0 3px, transparent 3px 6px)'
+          : col;
+        h+='<div style="flex:1;height:28px;border-radius:3px;background:'+bg+';cursor:pointer;transition:opacity .1s;position:relative"';
+        h+=' data-on-mouseenter="showClientHeatTT('+di+','+hr+',event)" data-on-mouseleave="hideClientHeatTT()">';
+        if(isCorrected)h+='<span style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;color:rgba(0,0,0,0.55);font-weight:600" title="Час содержит данные, восстановленные после сбоя счётчика — значение приблизительное">⚠</span>';
+        h+='</div>';
+      });
+      h+='</div></div>';
+    });
+    // Легенда (шкала на модем) — как в админке
+    h+='<div style="display:flex;align-items:center;gap:6px;margin-top:10px;font-size:10px;color:var(--text-3)">';
+    h+='<span>0</span><div style="display:flex;gap:2px">';
+    for(var li=0;li<=8;li++)h+='<div style="width:16px;height:10px;border-radius:2px;background:'+_hmColor(li/8*maxV,maxV,accent)+'"></div>';
+    h+='</div><span>'+_hmFmt(maxV)+'/мод</span></div>';
+    h+='</div>';
+    box.innerHTML=h;
+    // Сводка — те же 6 метрик, что в админке
+    var flat=[];mat.forEach(function(r){r.forEach(function(v){flat.push(v);})});
+    var total=flat.reduce(function(a,b){return a+b},0);
+    var n=mat.length||7;
+    var dTotals=mat.map(function(r){return r.reduce(function(a,b){return a+b},0)});
+    var hTotals=Array.from({length:24},function(_,hh){return mat.reduce(function(s,r){return s+(r[hh]||0)},0)});
+    var peakH=hTotals.indexOf(Math.max.apply(null,hTotals));
+    var positiveHours=hTotals.filter(function(v){return v>0});
+    var quietH=positiveHours.length>0?hTotals.indexOf(Math.min.apply(null,positiveHours)):0;
+    var peakD=dTotals.indexOf(Math.max.apply(null,dTotals));
+    var nightTotal=flat.filter(function(_,i){var hh=i%24;return hh>=0&&hh<=5;}).reduce(function(a,b){return a+b},0);
+    var nightPct=total>0?Math.round(nightTotal/total*100):0;
+    var sum=document.getElementById('clientHeatmapSummary');
+    if(sum){
+      sum.style.display='flex';
+      sum.innerHTML=
+        _hmSumItem('Всего за 7 дней',_hmFmt(total),_hmPluralModem(mCnt),false)
+        +_hmSumItem('Ср. на модем/сут',(n&&mDiv)?_hmFmt(total/n/mDiv):'—',(n?_hmFmt(total/n):'—')+' среднесуточно',false)
+        +_hmSumItem('Пиковый час',String(peakH).padStart(2,'0')+':00',(n&&mDiv)?_hmFmt(hTotals[peakH]/n/mDiv)+'/мод в среднем':'—',true)
+        +_hmSumItem('Тихий час',String(quietH).padStart(2,'0')+':00','Лучшее время для тех. работ',false)
+        +_hmSumItem('Пиковый день',(dm[peakD]?dm[peakD].label+', '+_hmDateRu(days[peakD]||''):_hmDateRu(days[peakD]||'')),mDiv?_hmFmt(dTotals[peakD]/mDiv)+'/мод':'—',true)
+        +_hmSumItem('Ночной трафик',nightPct+'%','00:00–06:00',false);
     }
   }).catch(function(){
     box.innerHTML='<div style="padding:30px;text-align:center;color:var(--text-3);font-size:12px">Не удалось загрузить почасовые данные.</div>';
@@ -1118,6 +1199,7 @@ function setStatus(state,text){
 function escapeHtml(str){return esc(str)}
 
 // --- Clipboard with fallback ---
+function copyIcon(){return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>'}
 function copyText(t,b){
   function onOk(){if(b){var o=b.innerHTML;b.innerHTML='\u2714';setTimeout(function(){b.innerHTML=o},1500)}showToast('Скопировано','info')}
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(onOk).catch(doFallback)}else{doFallback()}
@@ -1279,8 +1361,6 @@ async function loadData(){
     var _savedTab=localStorage.getItem('pr_active_tab');
     if(_savedTab){var _tabEl=document.querySelector('.nav-tab[onclick*="\''+_savedTab+'\'"]');if(_tabEl)switchTab(_savedTab,_tabEl)}
 
-    var now=new Date().toLocaleString('ru-RU');
-    document.getElementById('lastUpdate').textContent='Обновлено: '+now;
     setStatus(cachedServers.length>0?'loading':'ok',cachedServers.length>0?'Частичные данные':'OK');
 
   }catch(err){
@@ -1330,9 +1410,9 @@ function renderTable(){
     var name=countryNames[country]||country;
     var count=groupRows.length;
 
-    // colspan=10 for 10 columns (Модем, Реквизиты, Логин:Пароль, Смена IP, Ротация, Скорость, Аптайм, Сегодня, Вчера, Месяц)
+    // colspan=9 for 9 columns (Модем, Реквизиты, Логин:Пароль, Смена IP, Ротация, Скорость, Сегодня, Вчера, Месяц)
     html+='<tr class="country-header">'+
-      '<td colspan="10">'+
+      '<td colspan="9">'+
         name+
         '<span class="country-count">'+count+' модемов</span>'+
       '</td>'+
@@ -1359,10 +1439,10 @@ function renderTable(){
       if(row.httpPort||row.socksPort){
         reqHtml='';
         if(row.httpPort){
-          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">HTTP:</span> <span class="mono">'+serverIp+':'+row.httpPort+'</span> <button class="copy-btn" data-on-click="copyText(\''+serverIp+':'+row.httpPort+'\',this)">\ud83d\udccb</button></div>';
+          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">HTTP:</span> <span class="mono">'+serverIp+':'+row.httpPort+'</span> <button class="copy-btn" data-on-click="copyText(\''+serverIp+':'+row.httpPort+'\',this)">'+copyIcon()+'</button></div>';
         }
         if(row.socksPort){
-          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">SOCKS5:</span> <span class="mono">'+serverIp+':'+row.socksPort+'</span> <button class="copy-btn" data-on-click="copyText(\''+serverIp+':'+row.socksPort+'\',this)">\ud83d\udccb</button></div>';
+          reqHtml+='<div><span style="color:var(--text-2);font-size:11px">SOCKS5:</span> <span class="mono">'+serverIp+':'+row.socksPort+'</span> <button class="copy-btn" data-on-click="copyText(\''+serverIp+':'+row.socksPort+'\',this)">'+copyIcon()+'</button></div>';
         }
       }
 
@@ -1370,14 +1450,14 @@ function renderTable(){
       var loginPassHtml='-';
       if(row.proxyLogin||row.proxyPassword){
         var loginPassStr=escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword);
-        loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.proxyLogin).replace(/'/g,"\\'")+':'+escapeHtml(row.proxyPassword).replace(/'/g,"\\'")+'\',this)">\ud83d\udccb</button>';
+        loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.proxyLogin).replace(/'/g,"\\'")+':'+escapeHtml(row.proxyPassword).replace(/'/g,"\\'")+'\',this)">'+copyIcon()+'</button>';
       }
 
       // Смена IP cell: reset link + copy button + IP history button
       var changeIpHtml='';
       if(row.resetSecureLink){
         changeIpHtml+='<a href="'+escapeHtml(row.resetSecureLink)+'" target="_blank" style="color:var(--accent);text-decoration:none;font-size:12px" title="Сброс IP">\ud83d\udd04 Сброс</a> ';
-        changeIpHtml+='<button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.resetSecureLink).replace(/'/g,"\\'")+'\',this)" title="Копировать ссылку">\ud83d\udccb</button> ';
+        changeIpHtml+='<button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.resetSecureLink).replace(/'/g,"\\'")+'\',this)" title="Копировать ссылку">'+copyIcon()+'</button> ';
       }else{
         changeIpHtml+='<button class="action-btn-sm" data-on-click="resetIp(\''+escapeHtml(row.rawImei)+'\',\''+escapeHtml(row.serverName)+'\',this)" title="Сброс IP">\ud83d\udd04</button> ';
       }
@@ -1385,7 +1465,7 @@ function renderTable(){
 
       var rowStyle=row._cached?'opacity:0.6':(row._offline?'opacity:0.45':'');
 
-      // Скорость (последний замер speedtest, Мбит/с) и аптайм за 30 дней —
+      // Скорость (последний замер speedtest, Мбит/с) —
       // данные уже приходят в /api/dashboard_data, просто раньше не выводились.
       var speedHtml='<span class="text-dim">—</span>';
       if(row.speedDl||row.speedUl){
@@ -1393,12 +1473,6 @@ function renderTable(){
           '<span class="speed-dl">\u2193 '+(row.speedDl?row.speedDl.toFixed(1):'0')+'</span> '+
           '<span class="speed-ul">\u2191 '+(row.speedUl?row.speedUl.toFixed(1):'0')+'</span>'+
         '</span>';
-      }
-      var uptimeHtml='<span class="text-dim">—</span>';
-      if(row.uptimePct!==null&&row.uptimePct!==undefined){
-        var upVal=parseFloat(row.uptimePct);
-        var upCls=upVal>=99?'uptime-good':(upVal>=95?'uptime-warn':'uptime-bad');
-        uptimeHtml='<span class="'+upCls+'">'+row.uptimePct+'%</span>';
       }
 
       html+='<tr style="'+rowStyle+'">'+
@@ -1418,7 +1492,6 @@ function renderTable(){
         '<td style="text-align:center;white-space:nowrap">'+changeIpHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+buildRotationCell(row)+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+speedHtml+'</td>'+
-        '<td style="text-align:center;white-space:nowrap">'+uptimeHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+dayHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+yesterdayHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+monthHtml+'</td>'+
@@ -1469,22 +1542,19 @@ function renderTable(){
       if(mrow.speedDl||mrow.speedUl){
         mobileHtml+='<div class="mc-stat"><span class="mc-stat-lbl">\u0421\u043a\u043e\u0440\u043e\u0441\u0442\u044c</span><span class="mc-stat-val"><span class="speed-dl">\u2193'+(mrow.speedDl?mrow.speedDl.toFixed(1):'0')+'</span> <span class="speed-ul">\u2191'+(mrow.speedUl?mrow.speedUl.toFixed(1):'0')+'</span></span></div>';
       }
-      if(mrow.uptimePct!==null&&mrow.uptimePct!==undefined){
-        mobileHtml+='<div class="mc-stat"><span class="mc-stat-lbl">\u0410\u043f\u0442\u0430\u0439\u043c</span><span class="mc-stat-val">'+mrow.uptimePct+'%</span></div>';
-      }
       mobileHtml+='</div>';
       mobileHtml+='<div class="mc-expanded">';
       if(mServerIp&&mrow.httpPort){
-        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">HTTP</span><span class="mc-req-val">'+mServerIp+':'+mrow.httpPort+'</span><button class="mc-copy" data-on-click="copyText(\''+mServerIp+':'+mrow.httpPort+'\',this)">\ud83d\udccb</button></div>';
+        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">HTTP</span><span class="mc-req-val">'+mServerIp+':'+mrow.httpPort+'</span><button class="mc-copy" data-on-click="copyText(\''+mServerIp+':'+mrow.httpPort+'\',this)">'+copyIcon()+'</button></div>';
       }
       if(mServerIp&&mrow.socksPort){
-        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">SOCKS5</span><span class="mc-req-val">'+mServerIp+':'+mrow.socksPort+'</span><button class="mc-copy" data-on-click="copyText(\''+mServerIp+':'+mrow.socksPort+'\',this)">\ud83d\udccb</button></div>';
+        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">SOCKS5</span><span class="mc-req-val">'+mServerIp+':'+mrow.socksPort+'</span><button class="mc-copy" data-on-click="copyText(\''+mServerIp+':'+mrow.socksPort+'\',this)">'+copyIcon()+'</button></div>';
       }
       if(mrow.proxyLogin){
-        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041b\u043e\u0433\u0438\u043d</span><span class="mc-req-val">'+escapeHtml(mrow.proxyLogin)+'</span><button class="mc-copy" data-on-click="copyText(\''+escapeHtml(mrow.proxyLogin)+'\',this)">\ud83d\udccb</button></div>';
+        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041b\u043e\u0433\u0438\u043d</span><span class="mc-req-val">'+escapeHtml(mrow.proxyLogin)+'</span><button class="mc-copy" data-on-click="copyText(\''+escapeHtml(mrow.proxyLogin)+'\',this)">'+copyIcon()+'</button></div>';
       }
       if(mrow.proxyPassword){
-        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041f\u0430\u0440\u043e\u043b\u044c</span><span class="mc-req-val">'+escapeHtml(mrow.proxyPassword)+'</span><button class="mc-copy" data-on-click="copyText(\''+escapeHtml(mrow.proxyPassword)+'\',this)">\ud83d\udccb</button></div>';
+        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041f\u0430\u0440\u043e\u043b\u044c</span><span class="mc-req-val">'+escapeHtml(mrow.proxyPassword)+'</span><button class="mc-copy" data-on-click="copyText(\''+escapeHtml(mrow.proxyPassword)+'\',this)">'+copyIcon()+'</button></div>';
       }
       if(mrow.resetSecureLink){
         mobileHtml+='<a href="'+escapeHtml(mrow.resetSecureLink)+'" target="_blank" class="mc-reset-btn" style="display:block;text-align:center;text-decoration:none">\ud83d\udd04 \u0421\u0431\u0440\u043e\u0441\u0438\u0442\u044c IP</a>';
@@ -1603,33 +1673,31 @@ function buildRotationCell(row){
   if(row._offline)return'<span style="color:var(--text-3);font-size:11px">—</span>';
   var timeLeft=row.timeToRotation||'';
   var hasRotation=timeLeft&&timeLeft!=='None'&&timeLeft!=='null';
-  var opts=[{v:0,l:'Выкл'},{v:5,l:'5 мин'},{v:10,l:'10 мин'},{v:15,l:'15 мин'},{v:30,l:'30 мин'},{v:60,l:'1 час'},{v:120,l:'2 часа'},{v:180,l:'3 часа'},{v:360,l:'6 часов'},{v:720,l:'12 часов'},{v:1440,l:'24 часа'}];
   var cur=parseInt(row.autoRotation)||0;
   // If API doesn't give autoRotation value but timer is running, guess the interval
   if(cur===0&&hasRotation){
     var leftMin=parseTimeToMin(timeLeft);
     // Find the smallest preset >= leftMin (the interval must be >= time remaining)
-    for(var i=1;i<opts.length;i++){if(opts[i].v>=leftMin){cur=opts[i].v;break}}
+    var presets=[5,10,15,30,60,120,180,360,720,1440];
+    for(var i=0;i<presets.length;i++){if(presets[i]>=leftMin){cur=presets[i];break}}
     if(cur===0)cur=1440;
   }
-  var h='<select class="rotation-select" data-on-change="setRotation(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',this.value,this)" style="font-size:11px;padding:2px 4px;border:1px solid var(--border);border-radius:4px;background:var(--bg-2);color:var(--text-1);cursor:pointer">';
-  var matched=false;
-  for(var i=0;i<opts.length;i++){
-    var sel=opts[i].v===cur?' selected':'';
-    if(opts[i].v===cur)matched=true;
-    h+='<option value="'+opts[i].v+'"'+sel+'>'+opts[i].l+'</option>';
-  }
-  if(!matched&&cur>0)h+='<option value="'+cur+'" selected>'+cur+' мин</option>';
-  h+='</select>';
+  // Кастомное поле: любое значение в минутах (0 = выкл), применяется по Enter/blur
+  var h='<span style="display:inline-flex;align-items:center;gap:4px" title="Интервал ротации в минутах (0 — выключено)">';
+  h+='<input type="number" min="0" max="10080" step="1" value="'+cur+'" data-on-change="setRotation(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',this.value,this)" style="width:58px;font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-1);text-align:center;-moz-appearance:textfield">';
+  h+='<span style="font-size:10px;color:var(--text-3)">мин</span>';
+  h+='</span>';
   if(hasRotation)h+='<div style="font-size:9px;color:var(--accent);margin-top:2px">\u23F1 '+escapeHtml(timeLeft)+'</div>';
   return h;
 }
 
 function setRotation(nick,serverName,minutes,sel){
+  var mins=parseInt(minutes,10);
+  if(isNaN(mins)||mins<0){showToast('Введите число минут (0 — выкл)','error');return}
   sel.disabled=true;
-  api('/api/client/set_rotation',{method:'POST',json:{nick:nick,serverName:serverName,minutes:parseInt(minutes)}}).then(function(d){
+  api('/api/client/set_rotation',{method:'POST',json:{nick:nick,serverName:serverName,minutes:mins}}).then(function(d){
     sel.disabled=false;
-    if(d.ok){showToast('Ротация: '+(parseInt(minutes)===0?'выключена':minutes+' мин'),'success')}
+    if(d.ok){showToast('Ротация: '+(mins===0?'выключена':mins+' мин'),'success')}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(){sel.disabled=false;showToast('Ошибка сети','error')});
 }
@@ -2114,7 +2182,7 @@ function buildExportModal(){
     '<pre id="exportPreviewArea" style="margin:0;height:100%;min-height:180px;max-height:200px;overflow:auto;background:var(--bg-0);border:1px solid var(--border);border-radius:8px;color:var(--text-1);font-size:11px;font-family:monospace;padding:10px 12px;line-height:1.6;white-space:pre"></pre>'+
     '</div>'+
     '<div style="padding:12px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0">'+
-    '<button id="exportCopyBtn" data-on-click="copyExportData()" style="padding:7px 18px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">📋 Скопировать</button>'+
+    '<button id="exportCopyBtn" data-on-click="copyExportData()" style="padding:7px 18px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">'+copyIcon()+' Скопировать</button>'+
     '<button data-on-click="downloadExportData()" style="padding:7px 18px;background:var(--accent);border:none;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px">📥 Скачать файл</button>'+
     '</div>'+
     '</div>';

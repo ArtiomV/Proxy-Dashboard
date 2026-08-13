@@ -209,11 +209,13 @@ r.get('/api/client/hourly_traffic', authMiddleware, async (req, res) => {
     });
     const rows = db.prepare(sql).all(...params);
     let hasData = false;
+    const correctedCells = dateList.map(() => new Array(24).fill(false));
     const dateIdx = new Map(dateList.map((d, i) => [d, i]));
     for (const row of rows) {
       const di = dateIdx.get(row.day);
       if (di !== undefined && row.hour >= 0 && row.hour < 24) {
         matrix[di][row.hour] = row.bytes / 1e9;
+        if (row.corrected) correctedCells[di][row.hour] = true;
         hasData = true;
       }
     }
@@ -223,7 +225,7 @@ r.get('/api/client/hourly_traffic', authMiddleware, async (req, res) => {
       const d = new Date(date + 'T00:00:00');
       return { date, label: DAYS_RU[d.getDay()], dateShort: date.slice(5) };
     });
-    const resp = { meta: { id: portName, days: dateList, day_meta: dayMeta, has_hourly: hasData }, matrix };
+    const resp = { meta: { id: portName, days: dateList, day_meta: dayMeta, has_hourly: hasData, corrected: correctedCells }, matrix };
     _heatmapCache.set(cacheKey, { ts: Date.now(), data: resp });
     res.json(resp);
   } catch (e) {
