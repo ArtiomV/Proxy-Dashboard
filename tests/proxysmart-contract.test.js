@@ -65,6 +65,23 @@ describe('D7: proxysmart-contract — несоответствия ловятс�
     const adding = { Added_EVENT_ID: 'px_add_dev_x', modem_details: { ADDED_TIME: '' }, MSGS: ['error, dev lanmodem12 is not yet processed, wait up to 5 min, '] };
     expect(contract.validateShowStatusJson([adding, GOOD_STATUS[0]])).toEqual([]);
   });
+
+  it('null-счётчики (сброс на боксе) среди нормальных — НЕ нарушение, парсер мапит в 0', () => {
+    // Прод 13.08.2026: S1/S2 отдали bandwidth_bytes_day_in/out = null у части
+    // портов в момент сброса суточных счётчиков; bandwidth_bytes_prevmonth_in: null
+    // в ответе бокса — постоянное явление.
+    const nullCounters = { portB: { port: 'portB', portName: 'Client2', bandwidth_bytes_day_in: null, bandwidth_bytes_day_out: null } };
+    expect(contract.validateBandwidthReportAll({ ...nullCounters, ...GOOD_BW })).toEqual([]);
+  });
+
+  it('ВСЯ выборка без string day_in/day_out — нарушение (фид деградировал, трафик = 0)', () => {
+    const dead = {
+      portB: { port: 'portB', portName: 'C2', bandwidth_bytes_day_in: null, bandwidth_bytes_day_out: null },
+      portC: { port: 'portC', portName: 'C3', bandwidth_bytes_day_in: null, bandwidth_bytes_day_out: null },
+    };
+    const v = contract.validateBandwidthReportAll(dead);
+    expect(v.some(s => s.includes('все') && s.includes('day_in/day_out'))).toBe(true);
+  });
 });
 
 describe('D7: правило алерта «бокс отвечает не по контракту»', () => {

@@ -32,7 +32,15 @@ TG-алерт «бокс S<n> отвечает не по контракту» (�
 ```
 Читается: hourly-дельты (src/traffic/hourly.js), liveMonthGb портала,
 дневная сводка. Валидатор: `port` (string), `portName` (string),
-`bandwidth_bytes_day_in/out` (string) у каждой записи.
+`bandwidth_bytes_day_in/out` (string или null) у каждой записи.
+
+`null` в любых `bandwidth_*` — легален: бокс отдаёт null в момент сброса
+счётчиков (в проде `bandwidth_bytes_prevmonth_in: null` — постоянно, а
+13.08.2026 S1/S2 транзитно отдали null в day_in/day_out у части портов).
+Парсер мапит null в 0 (`parseBwToBytes: if (!val) return 0`), дельта-логика
+hourly.js это переваривает. Нарушение — значение не string и не null,
+либо ВСЯ выборка без string-счётчиков (фид деградировал → трафик посчитается
+нулевым, биллинг недоберёт).
 
 ### GET /apix/show_status_json
 Статус модемов (каждый цикл).

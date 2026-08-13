@@ -29,8 +29,26 @@ fi
 
 # Копируем только снапшоты БД (daily в корне + monthly/), без sidecar-файлов.
 # Паттерн без '/' матчит basename на любой глубине — monthly/ попадает сам.
-rclone copy "$BACKUP_DIR" "${REMOTE}:${DEST_PREFIX}" \
-  --include "dashboard-*.db" \
-  --checksum --stats-one-line --stats 30s
+# Beget S3 режет всплески запросов (429 TooManyRequests на UploadPart при
+# multi-thread copy ~700 MB файла): глушим параллелизм и делаем до 3 попыток
+# с паузой — иначе ночная выгрузка молча не доезжает (13.08.2026).
+attempt=1
+max_attempts=3
+while true; do
+  if rclone copy "$BACKUP_DIR" "${REMOTE}:${DEST_PREFIX}" \
+    --include "dashboard-*.db" \
+    --checksum --stats-one-line --stats 30s \
+    --transfers 2 --s3-upload-concurrency 1 --multi-thread-streams 1 \
+    --retries 5 --retries-sleep 30s --low-level-retries 10; then
+    break
+  fi
+  if [ "$attempt" -ge "$max_attempts" ]; then
+    echo "backup-offsite: rclone не смог выгрузить за $max_attempts попыток" >&2
+    exit 1
+  fi
+  echo "backup-offsite: попытка $attempt не удалась, повтор через 60s..." >&2
+  attempt=$((attempt + 1))
+  sleep 60
+done
 
 echo "offsite OK: $BACKUP_DIR → ${REMOTE}:${DEST_PREFIX}"

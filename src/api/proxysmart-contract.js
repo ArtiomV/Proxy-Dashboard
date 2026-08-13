@@ -26,17 +26,29 @@ function _sampleEntries(obj, mapFn) {
 // /apix/bandwidth_report_all → { portId: { port, portName, bandwidth_bytes_day_in, ... } }
 // Код читает: b.port, b.portName, b.bandwidth_bytes_day_in/out (строки вида "21.1 GB",
 // src/traffic/hourly.js parseBwToBytes), *_month_* (сверка), *_yesterday_*.
+// null в bandwidth_* — легален: бокс отдаёт null в момент сброса счётчиков
+// (см. bandwidth_bytes_prevmonth_in: null в проде, 13.08.2026), парсер мапит
+// его в 0 (parseBwToBytes: `if (!val) return 0`), дельта-логика это переваривает.
+// Нарушение — значение не string и не null (number/object/...) у записи, либо
+// ВСЯ выборка без string-счётчиков (фид деградировал целиком → трафик не посчитается).
 function validateBandwidthReportAll(bw) {
   const v = [];
   if (!bw || typeof bw !== 'object' || Array.isArray(bw)) return ['bandwidth_report_all: ожидался object, получен ' + (Array.isArray(bw) ? 'array' : typeof bw)];
+  let noDayCounters = 0;
+  let sampled = 0;
   _sampleEntries(bw, (key, b) => {
     if (!b || typeof b !== 'object') { v.push(`bw[${key}]: не object`); return null; }
     if (typeof b.port !== 'string' || !b.port) v.push(`bw[${key}]: нет port (string)`);
     if (typeof b.portName !== 'string') v.push(`bw[${key}]: нет portName (string)`);
-    if (typeof b.bandwidth_bytes_day_in !== 'string') v.push(`bw[${key}]: bandwidth_bytes_day_in не string ("N.N GB")`);
-    if (typeof b.bandwidth_bytes_day_out !== 'string') v.push(`bw[${key}]: bandwidth_bytes_day_out не string`);
+    if (b.bandwidth_bytes_day_in !== null && typeof b.bandwidth_bytes_day_in !== 'string') v.push(`bw[${key}]: bandwidth_bytes_day_in не string и не null ("N.N GB")`);
+    if (b.bandwidth_bytes_day_out !== null && typeof b.bandwidth_bytes_day_out !== 'string') v.push(`bw[${key}]: bandwidth_bytes_day_out не string и не null`);
+    if (typeof b.bandwidth_bytes_day_in !== 'string' && typeof b.bandwidth_bytes_day_out !== 'string') noDayCounters++;
+    sampled++;
     return null;
   });
+  if (sampled > 0 && noDayCounters === sampled) {
+    v.push(`bandwidth_report_all: все ${sampled} эл-тов выборки без string day_in/day_out — трафик посчитается нулевым`);
+  }
   return v;
 }
 
