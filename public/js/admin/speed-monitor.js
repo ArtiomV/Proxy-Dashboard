@@ -8,7 +8,10 @@
 // _dashUi, _dashUiSave (все доступны к моменту вызова — модуль только объявляет
 // функции, не трогает их на загрузке).
 
-var _speedMonHours = _dashUi.speedMonHours || 48;
+// NB: _dashUi объявлен в admin.js, который грузится ПОСЛЕ этого файла, —
+// трогать его на загрузке нельзя (ReferenceError убивал весь модуль, график
+// оставался пустым). Читаем persisted-значение лениво, внутри функций.
+var _speedMonHours = 48;
 var _speedMonLastFetch = 0;
 var _SPEEDMON_MIN_REFETCH_MS = 5 * 60 * 1000;   // renderAccNew дёргает часто
 
@@ -38,11 +41,25 @@ function _speedMonLabel(nick, modems) {
 function loadSpeedMonitor(force) {
   var canvas = document.getElementById('speedMonCanvas');
   if (!canvas) return;
+  // Ленивое чтение persisted-периода (см. NB выше): первый вызов — после
+  // загрузки admin.js, _dashUi уже существует.
+  try {
+    if (typeof _dashUi !== 'undefined' && _dashUi.speedMonHours
+        && !_speedMonHoursRestored) {
+      _speedMonHours = _dashUi.speedMonHours;
+      _speedMonHoursRestored = true;
+      document.querySelectorAll('[data-on-click^="setSpeedMonHours("]').forEach(function (c) {
+        c.classList.toggle('on', c.getAttribute('data-on-click') === 'setSpeedMonHours(' + _speedMonHours + ',this)');
+      });
+    }
+  } catch (_) {}
   var now = Date.now();
   if (!force && now - _speedMonLastFetch < _SPEEDMON_MIN_REFETCH_MS) return;
   _speedMonLastFetch = now;
 
   api(API + '/api/admin/speed-monitor?hours=' + _speedMonHours).then(function (d) {
+    var skel = document.getElementById('speedMonSkel');
+    if (skel) skel.style.display = 'none';   // данные пришли — скелетон убираем
     var rows = (d && d.rows) || [];
     var modems = (d && d.modems) || [];
     var emptyEl = document.getElementById('speedMonEmpty');

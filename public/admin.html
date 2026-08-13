@@ -13,7 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="css/variables.css?v=0630d">
-<link rel="stylesheet" href="css/base.css?v=0630d">
+<link rel="stylesheet" href="css/base.css?v=0813a">
 <link rel="stylesheet" href="css/tables.css?v=0630d">
 <link rel="stylesheet" href="css/cards.css?v=0630d">
 <link rel="stylesheet" href="css/modal.css?v=0630d">
@@ -177,7 +177,7 @@
 
     <!-- ───── ПУЛЬС БИЗНЕСА (hero KPI — как в макете) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><path d="M3 12h4l2 5 4-10 2 5h6"/></svg>Пульс бизнеса</div>
-    <div id="newPulseRow" class="pulse-grid"></div>
+    <div id="newPulseRow" class="pulse-grid"><div class="skel" style="height:96px"></div><div class="skel" style="height:96px"></div><div class="skel" style="height:96px"></div><div class="skel" style="height:96px"></div></div>
 
     <!-- ───── ТРЕБУЕТ ВНИМАНИЯ: одна карточка с плитками алертов (по макету) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><path d="M12 4 2.5 20h19L12 4z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="16.8" x2="12.01" y2="16.8"/></svg>Требует внимания</div>
@@ -185,23 +185,23 @@
 
     <!-- ───── ПАРК ПО СЕРВЕРАМ (как в макете — наверх) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/></svg>Парк по серверам</div>
-    <div id="newFleetServers" class="fleet-grid"><div style="grid-column:1/-1;color:var(--text-3);font-size:12px;padding:6px">Загрузка…</div></div>
+    <div id="newFleetServers" class="fleet-grid"><div class="skel" style="height:150px"></div><div class="skel" style="height:150px"></div><div class="skel" style="height:150px"></div><div class="skel" style="height:150px"></div></div>
 
     <!-- ───── ФИНАНСЫ ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg>Финансы</div>
 
     <div style="display:grid;grid-template-columns:1.7fr 1fr;gap:12px;margin-bottom:12px" id="newFinTopGrid">
       <div class="analytics-card" style="margin:0" id="newFinRevenue">
-        <div style="color:var(--text-3);font-size:11px">Загрузка…</div>
+        <div class="skel" style="height:170px"></div>
       </div>
       <div class="analytics-card" style="margin:0" id="newFinQuality">
-        <div style="color:var(--text-3);font-size:11px">Загрузка…</div>
+        <div class="skel" style="height:170px"></div>
       </div>
     </div>
 
     <div class="analytics-card" style="margin-bottom:12px">
       <h3 style="margin:0 0 10px">Клиенты</h3>
-      <div id="newClientTable"></div>
+      <div id="newClientTable"><div class="skel" style="height:200px"></div></div>
     </div>
 
     <!-- ───── ИНФРАСТРУКТУРА (детально, раскрывашки) ───── -->
@@ -209,7 +209,7 @@
 
     <details class="acc-expand" data-section="topproblems">
       <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><path d="M12 4 2.5 20h19L12 4z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="16.8" x2="12.01" y2="16.8"/></svg></span>Топ проблемных модемов</summary>
-      <div class="acc-expand-body"><div id="newTopProblems"><div style="color:var(--text-3);font-size:12px;padding:8px">Загрузка…</div></div></div>
+      <div class="acc-expand-body"><div id="newTopProblems"><div class="skel" style="height:34px;margin:6px 8px"></div><div class="skel" style="height:34px;margin:6px 8px"></div><div class="skel" style="height:34px;margin:6px 8px"></div></div></div>
     </details>
 
     <details class="acc-expand" data-section="infra" open>
@@ -217,13 +217,13 @@
       <div class="acc-expand-body">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-2)">Период:</span><button class="dchip" data-on-click="setNewInfraDays(1,this)">1 день</button><button class="dchip" data-on-click="setNewInfraDays(3,this)">3 дня</button><button class="dchip on" data-on-click="setNewInfraDays(7,this)">7 дней</button><button class="dchip" data-on-click="setNewInfraDays(14,this)">14 дней</button><button class="dchip" data-on-click="setNewInfraDays(30,this)">30 дней</button></div>
         <div id="newInfraKpis"></div>
-        <div id="newInfraTables"><div style="color:var(--text-3);font-size:12px;padding:8px">Загрузка…</div></div>
+        <div id="newInfraTables"><div class="skel" style="height:240px"></div></div>
       </div>
     </details>
     <details class="acc-expand" data-section="latency" open>
       <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><rect x="4" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16" y="4" width="4" height="16" rx="1"/></svg></span>Распределение задержек</summary>
       <div class="acc-expand-body">
-        <div id="latencySummary" style="padding:4px 2px"></div>
+        <div id="latencySummary" style="padding:4px 2px"><div class="skel" style="height:140px"></div></div>
       </div>
     </details>
 
@@ -241,7 +241,7 @@
       </div>
       <div id="newHmSubTabs" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px"></div>
       <div id="newHmGrid" style="overflow-x:auto;-webkit-overflow-scrolling:touch">
-        <div style="display:flex;align-items:center;justify-content:center;height:160px;color:var(--text-3);font-size:12px">Загрузка...</div>
+        <div class="skel" style="height:160px"></div>
       </div>
       <div id="newHmSummary" style="display:none;margin-top:16px;padding-top:16px;border-top:0.5px solid rgba(0,0,0,0.08)"></div>
     </div>
@@ -282,7 +282,7 @@
       <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><path d="M8 8l-4 4 4 4"/><path d="M16 8l4 4-4 4"/></svg></span>Обращения к API</summary>
       <div class="acc-expand-body">
         <div id="newApiAccessBar" style="display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:10px;flex-wrap:wrap"></div>
-        <div id="newApiAccess"><div style="color:var(--text-3);font-size:12px;padding:8px">Загрузка…</div></div>
+        <div id="newApiAccess"><div class="skel" style="height:32px;margin:6px 8px"></div><div class="skel" style="height:32px;margin:6px 8px"></div><div class="skel" style="height:32px;margin:6px 8px"></div><div class="skel" style="height:32px;margin:6px 8px"></div></div>
       </div>
     </details>
 
@@ -299,7 +299,7 @@
         </div>
       </div>
       <div id="speedMonMeta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
-      <div style="height:300px;position:relative"><canvas id="speedMonCanvas"></canvas></div>
+      <div style="height:300px;position:relative"><canvas id="speedMonCanvas"></canvas><div id="speedMonSkel" class="skel" style="position:absolute;inset:0"></div></div>
       <div id="speedMonEmpty" style="display:none;color:var(--text-3);font-size:12px;padding:14px 4px">Пока нет замеров за выбранный период — почасовая джоба SpeedMonitor пишет сюда раз в час.</div>
     </div>
   </div><!-- /tab-dashboard -->
@@ -1200,7 +1200,7 @@
 <script src="/js/admin/finance.js?v=0804a"></script>
 <script src="/js/admin/modems.js?v=0722c"></script>
 <script src="/js/admin/settings.js?v=0722b"></script>
-<script src="/js/admin/speed-monitor.js?v=0813a"></script>
-<script src="/js/admin.js?v=0804b"></script>
+<script src="/js/admin/speed-monitor.js?v=0813b"></script>
+<script src="/js/admin.js?v=0813a"></script>
 </body>
 </html>

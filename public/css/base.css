@@ -301,3 +301,11 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
   input[type="checkbox"]{width:20px;height:20px}
   .form-input,.search-box,select.form-input{min-height:44px;font-size:16px}
 }
+
+/* Skeleton-загрузка дашборда: вместо текста «Загрузка…» — блоки сразу
+   финальной высоты с shimmer-анимацией; лоадеры заменяют их реальным
+   контентом через innerHTML, так что скелетоны не «висят» после данных. */
+.skel{border-radius:8px;background:var(--bg-2);position:relative;overflow:hidden}
+.skel::after{content:'';position:absolute;inset:0;transform:translateX(-100%);background:linear-gradient(90deg,transparent,rgba(255,255,255,.35),transparent);animation:skel-shimmer 1.4s infinite}
+[data-theme="dark"] .skel::after{background:linear-gradient(90deg,transparent,rgba(255,255,255,.08),transparent)}
+@keyframes skel-shimmer{100%{transform:translateX(100%)}}

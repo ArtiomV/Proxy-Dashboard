@@ -2913,6 +2913,16 @@ function loadNewApiAccess(){
           + '</tr>';
       });
       h += '</tbody></table></div>';
+      // Раскрытие/сворачивание полного списка — как «+ ещё» в «Топ доменов»,
+      // плюс обратная кнопка «Свернуть» (zLess), чтобы вернуться к 12 строкам.
+      if(_totalRows > 12){
+        var _apiOpened = window._zxOpen && window._zxOpen.api;
+        if(_apiOpened){
+          h += '<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:6px 2px 0" data-on-click="zLess(\'api\')">Свернуть к 12 строкам</div>';
+        } else {
+          h += '<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:6px 2px 0" data-on-click="zMore(\'api\')">+ ещё ' + (_totalRows - 12) + '</div>';
+        }
+      }
       box.innerHTML = h;
     })
     .catch(function(){ box.innerHTML = '<div style="color:var(--danger);font-size:12px;padding:8px">Ошибка загрузки</div>'; });
@@ -3049,6 +3059,13 @@ function renderNewFleetServers(){
 }
 function _zxLim(key,cap){return (window._zxOpen&&window._zxOpen[key])?Infinity:cap;}
 function zMore(key){(window._zxOpen=window._zxOpen||{})[key]=1;
+  if(key==='tp')renderNewTopProblems();
+  else if(key==='sn')reloadNewInfra();
+  else if(key==='mx')renderNewMatrix();
+  else if(key==='api')loadNewApiAccess();
+  else if(key==='hosts')loadNewTopHosts();}
+// Обратное сворачивание к исходному капу после zMore.
+function zLess(key){if(window._zxOpen)delete window._zxOpen[key];
   if(key==='tp')renderNewTopProblems();
   else if(key==='sn')reloadNewInfra();
   else if(key==='mx')renderNewMatrix();
