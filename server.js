@@ -19,7 +19,8 @@ const { validate } = require('./src/middleware/validate');
 // routes that haven't been extracted, plus the create/payment/balance ones
 // passed via deps.
 const { LoginSchema, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema,
-  RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema } = require('./src/schemas');
+  RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema,
+  ClientEmailSchema } = require('./src/schemas');
 const { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday } = require('./src/utils/time');
 const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator } = require('./src/utils/traffic');
 const { parseHtmlInputFields } = require('./src/utils/html-forms');  // P2-2: extracted from server.js
@@ -2853,6 +2854,11 @@ app.use(require('./src/routes/client-portal')({
   getSpeedtestLatest,
   auditLog, logActivity, getClientIp,
   saveClients,
+  // POST /api/client/email: validate+схема, retail-флаг для verify-письма.
+  // mailer объявлен ниже (const, TDZ) — ленивый шим, как syncRotationLog выше.
+  validate, ClientEmailSchema,
+  getSetting, authTokensDb,
+  mailer: { send: (...args) => mailer.send(...args) },
   proxyConf, modemRotationCache, proxySmart,
 }));
 
@@ -3323,6 +3329,7 @@ const _proxiesDeps = {
   modemRotationCache,
   fetchAllServersDataCached,
   clientByLogin,
+  normalizeOperator,
   syncRotationLog: (...args) => syncRotationLog(...args),
   _rlSelect: { all: (...args) => _rlSelect.all(...args) },
 };
@@ -3763,6 +3770,7 @@ app.use(require('./src/routes/admin-meta')({
   db, logger, authMiddleware, adminMiddleware,
   operatorsDb, trackingDb, knownModems, saveKnownModems,
   logActivity, fetchAllServersDataCached, markModemDeleted, markModemRestored,
+  apiServers,
 }));
 
 const connsHistory = require('./src/jobs/conns-history').create({

@@ -2,12 +2,13 @@
 //
 // src/routes/client-portal.js — client-facing endpoints (Stage 3).
 //
-// 16 routes used by the client SPA (public/index.html):
+// 17 routes used by the client SPA (public/index.html):
 //   /api/dashboard_data, /api/billing_history,
 //   /api/client/{reset_ip, reset_ip_by_token, rotation_log, set_rotation,
 //                 ip_history, credentials_export, referral, documents,
 //                 documents/:docId/download, closing_documents,
-//                 closing_documents/:docId/pdf, bills, bills/:billId/pdf}
+//                 closing_documents/:docId/pdf, bills, bills/:billId/pdf,
+//                 email}
 //
 // Most require authMiddleware (session token). reset_ip_by_token uses
 // the resetTokenLimiter (separate rate limit + token-based auth instead
@@ -38,6 +39,8 @@ module.exports = function createClientPortalRouter(deps) {
     getSpeedtestLatest,
     auditLog, logActivity, getClientIp,
     saveClients,
+    validate, ClientEmailSchema,
+    getSetting, mailer, authTokensDb,
     proxyConf, modemRotationCache, proxySmart,
     DOCUMENTS_DIR,
     getTochkaConfig,
@@ -583,6 +586,43 @@ r.get('/api/client/bills/:billId/pdf', authMiddleware, async (req, res) => {
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// Установка/смена email из ЛК — ОБЩИЙ endpoint для ВСЕХ типов клиентов
+// (НЕ за retail-флагом): у TG-созданных аккаунтов email пуст, у части B2B
+// его тоже нет. Смена сбрасывает emailVerified; verify-письмо уходит только
+// при включённой рознице (тот же паттерн, что в registration.js /api/register).
+r.post('/api/client/email', authMiddleware, validate(ClientEmailSchema), (req, res) => {
+  const client = clientByLogin.get(req.user.login);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const normEmail = String(req.body.email).trim().toLowerCase();
+  if (clients.some(c => c !== client && c.email && c.email.toLowerCase() === normEmail)) {
+    return res.status(409).json({ error: 'Аккаунт с этим email уже существует' });
+  }
+  client.email = normEmail;
+  client.emailVerified = false;
+  try {
+    saveClients(clients);
+  } catch (e) {
+    // idx_clients_email — частичный UNIQUE по clients(email) (миграция 060).
+    if (e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''))) {
+      return res.status(409).json({ error: 'Аккаунт с этим email уже существует' });
+    }
+    throw e;
+  }
+  auditLog(req.user.login, 'email_changed', { email: normEmail, ip: getClientIp(req) });
+  let verificationSent = false;
+  if (getSetting('retail_enabled', false) && normEmail) {
+    const verifyToken = authTokensDb.issue(client.login, 'verify_email');
+    const base = (req.headers['x-forwarded-proto'] || req.protocol) + '://' + req.headers.host;
+    verificationSent = true;
+    mailer.send({
+      to: normEmail, kind: 'verify_email',
+      subject: 'Подтвердите email — Arendaproxy',
+      text: `Подтвердите адрес: ${base}/verify?token=${verifyToken}\nСсылка действует 24 часа.`,
+    }).catch(e => logger.warn('[ClientEmail] verify email send failed: ' + e.message));
+  }
+  res.json({ ok: true, email: normEmail, verificationSent });
 });
 
   return r;

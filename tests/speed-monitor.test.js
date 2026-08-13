@@ -28,6 +28,7 @@ function makeJob(fetchApi) {
     apiServers: [{ name: 'S1', country: 'MD' }, { name: 'S2', country: 'RO' }],
     fetchApi,
     normalizeOperator,
+    sleep: async () => {},   // пауза ретрая в тестах мгновенная
   });
   delete process.env.SPEED_MONITOR_NICKS;
   return job;
@@ -61,6 +62,15 @@ describe('SpeedMonitor: parseSpeedtestResult', () => {
       .toEqual({ dl: 31.7, ul: 8.9, ping: 55 });
     expect(parseSpeedtestResult(null)).toEqual({ dl: 0, ul: 0, ping: 0 });
     expect(parseSpeedtestResult('oops')).toEqual({ dl: 0, ul: 0, ping: 0 });
+  });
+
+  it('ping не берётся из служебных полей и отсекается при мусоре', () => {
+    // 2026-08-13: в проде в ping утекал таймаут fetchApi (180000 мс → 1800000.0).
+    expect(parseSpeedtestResult({ download: '5', latency: 1800000 })).toEqual({ dl: 5, ul: 0, ping: 0 });
+    expect(parseSpeedtestResult({ download: '5', timeout: 180000 })).toEqual({ dl: 5, ul: 0, ping: 0 });
+    expect(parseSpeedtestResult({ download: '5', ping: '1800000' })).toEqual({ dl: 5, ul: 0, ping: 0 });
+    expect(parseSpeedtestResult({ raw: 'Download: 5 Mbps\nPing: 99999999 ms' })).toEqual({ dl: 5, ul: 0, ping: 0 });
+    expect(parseSpeedtestResult({ download: '5', ping: 'abc' })).toEqual({ dl: 5, ul: 0, ping: 0 });
   });
 });
 
@@ -100,6 +110,7 @@ function makeJobWithSetting(fetchApi, settingCsv, envCsv) {
     fetchApi,
     normalizeOperator,
     getSetting: (k, def) => (k === 'speedtest_modems' ? settingCsv : def),
+    sleep: async () => {},   // пауза ретрая в тестах мгновенная
   });
   delete process.env.SPEED_MONITOR_NICKS;
   return job;
@@ -184,5 +195,113 @@ describe('SpeedMonitor: runSpeedMonitor', () => {
     const old = db.prepare("SELECT COUNT(*) c FROM speed_monitor WHERE ts < datetime('now', '-60 days')").get().c;
     expect(old).toBe(0);
     expect(db.prepare('SELECT COUNT(*) c FROM speed_monitor').get().c).toBe(3);
+  });
+});
+
+describe('SpeedMonitor: повторный замер (нестабильный dl)', () => {
+  // fetchApi со счётчиком вызовов speedtest; результаты — по очереди из dlSeq.
+  function seqFetch(dlSeq) {
+    let stCalls = 0;
+    const fetchApi = async (server, path) => {
+      if (path === '/apix/show_status_json') {
+        if (server.name !== 'S1') return [];
+        return [{ modem_details: { NICK: 'MD_01', IMEI: '860000000000001' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' } }];
+      }
+      if (path.startsWith('/apix/speedtest')) {
+        const dl = dlSeq[Math.min(stCalls, dlSeq.length - 1)];
+        stCalls++;
+        return { download: String(dl), upload: '5', ping: '20' };
+      }
+      throw new Error('unexpected ' + path);
+    };
+    return { fetchApi, calls: () => stCalls };
+  }
+
+  it('dl=1 → повтор → в БД ушёл лучший (30), attempts=2', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const f = seqFetch([1, 30]);
+    const job = makeJobWithSetting(f.fetchApi, 'MD_01');
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 1, failed: 0 });
+    expect(f.calls()).toBe(2);
+    const row = db.prepare("SELECT download, attempts FROM speed_monitor WHERE nick = 'MD_01'").get();
+    expect(row).toMatchObject({ download: 30, attempts: 2 });
+  });
+
+  it('dl=40 с первого замера → повтор не делаем (attempts=1, экономим трафик симки)', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const f = seqFetch([40, 1]);
+    const job = makeJobWithSetting(f.fetchApi, 'MD_01');
+    await job.runSpeedMonitor();
+    expect(f.calls()).toBe(1);
+    const row = db.prepare("SELECT download, attempts FROM speed_monitor WHERE nick = 'MD_01'").get();
+    expect(row).toMatchObject({ download: 40, attempts: 1 });
+  });
+
+  it('второй замер хуже → в БД остаётся первый (лучший по dl)', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const f = seqFetch([4, 0.5]);
+    const job = makeJobWithSetting(f.fetchApi, 'MD_01');
+    await job.runSpeedMonitor();
+    expect(f.calls()).toBe(2);
+    const row = db.prepare("SELECT download, attempts FROM speed_monitor WHERE nick = 'MD_01'").get();
+    expect(row).toMatchObject({ download: 4, attempts: 2 });
+  });
+
+  it('ok=0 → один ретрай; успех со второго раза пишется с attempts=2', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    let stCalls = 0;
+    const fetchApi = async (server, path) => {
+      if (path === '/apix/show_status_json') {
+        if (server.name !== 'S1') return [];
+        return [{ modem_details: { NICK: 'MD_01', IMEI: '860000000000001' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' } }];
+      }
+      if (path.startsWith('/apix/speedtest')) {
+        stCalls++;
+        if (stCalls === 1) return { error: 'modem busy' };
+        return { download: '25', upload: '8', ping: '30' };
+      }
+      throw new Error('unexpected ' + path);
+    };
+    const job = makeJobWithSetting(fetchApi, 'MD_01');
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 1, failed: 0 });
+    expect(stCalls).toBe(2);
+    const row = db.prepare("SELECT ok, download, attempts FROM speed_monitor WHERE nick = 'MD_01'").get();
+    expect(row).toMatchObject({ ok: 1, download: 25, attempts: 2 });
+  });
+
+  it('оба замера вернули нули → ok=0 empty_result (attempts=2), нули не «успех»', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    let stCalls = 0;
+    const fetchApi = async (server, path) => {
+      if (path === '/apix/show_status_json') {
+        if (server.name !== 'S1') return [];
+        return [{ modem_details: { NICK: 'MD_01', IMEI: '860000000000001' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' } }];
+      }
+      if (path.startsWith('/apix/speedtest')) { stCalls++; return { download: '0', upload: '0', ping: '0' }; }
+      throw new Error('unexpected ' + path);
+    };
+    const job = makeJobWithSetting(fetchApi, 'MD_01');
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 0, failed: 1 });
+    expect(stCalls).toBe(2);   // dl<5 → ретрай, но и он нулевой
+    const row = db.prepare("SELECT ok, error, attempts FROM speed_monitor WHERE nick = 'MD_01'").get();
+    expect(row).toMatchObject({ ok: 0, error: 'empty_result', attempts: 2 });
+  });
+
+  it('старые ok=1 с dl=ul=0 не роняют агрегаты (ок=0 в выдаче)', async () => {
+    const { asAdmin } = await import('./_helpers/app.js');
+    const request = (await import('supertest')).default;
+    const { app } = bootApp();
+    const token = asAdmin();
+    db.prepare('DELETE FROM speed_monitor').run();
+    // Историческая «нулевая успешная» строка + нормальная в тот же час.
+    db.prepare("INSERT INTO speed_monitor (nick, server, download, upload, ping, ok, operator, ts) VALUES ('MD_01','S1',0,0,0,1,'Moldcell',datetime('now','-1 hours'))").run();
+    db.prepare("INSERT INTO speed_monitor (nick, server, download, upload, ping, ok, operator, ts) VALUES ('MD_01','S1',30,10,40,1,'Moldcell',datetime('now','-1 hours'))").run();
+    const res = await request(app).get('/api/admin/speed-monitor?hours=48').set('X-Auth-Token', token);
+    expect(res.status).toBe(200);
+    const row = res.body.rows.find(r2 => r2.nick === 'MD_01');
+    expect(row).toMatchObject({ ok_count: 1, fail_count: 1, avg_dl: 30, min_dl: 30, max_dl: 30 });
   });
 });

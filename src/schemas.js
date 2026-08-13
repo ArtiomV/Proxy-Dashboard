@@ -72,6 +72,12 @@ const ChangePasswordSchema = z.object({
   new: z.string().min(8).max(100),
 });
 
+// Установка/смена email из ЛК (POST /api/client/email) — общий для всех
+// типов клиентов (TG-аккаунты и часть B2B без email).
+const ClientEmailSchema = z.object({
+  email: z.string().email().max(200),
+});
+
 // Telegram Login Widget payload (https://core.telegram.org/widgets/login)
 const TelegramAuthSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -84,4 +90,5 @@ const TelegramAuthSchema = z.object({
 });
 
 module.exports = { ClientCreateSchema, ClientUpdateSchema, PaymentSchema, BalanceAdjustSchema, LoginSchema,
-  RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema };
+  RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema,
+  ClientEmailSchema };

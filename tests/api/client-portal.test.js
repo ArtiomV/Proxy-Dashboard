@@ -9,10 +9,24 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import request from 'supertest';
 import crypto from 'crypto';
+import { createRequire } from 'module';
 import { bootApp, asAdmin } from '../_helpers/app.js';
+const require = createRequire(import.meta.url);
+const stateMod = require('../../src/state/index.js');
 
 let app, db, adminToken, clientLogin, clientToken;
 const PASSWORD = 'portal_pass_' + crypto.randomBytes(4).toString('hex');
+
+// Тот же паттерн, что в retail-stage1.test.js: флаг живёт и в kv_store, и в
+// in-memory appSettings (стабильная идентичность объекта).
+function setRetail(on) {
+  const row = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('app_settings');
+  const settings = row ? JSON.parse(row.value) : {};
+  settings.retail_enabled = on;
+  db.prepare('INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime(\'now\'))')
+    .run('app_settings', JSON.stringify(settings));
+  stateMod.state.appSettings.retail_enabled = on;
+}
 
 beforeAll(async () => {
   const ctx = bootApp();
@@ -103,5 +117,101 @@ describe('GET /api/billing_history', () => {
   it('401 without auth', async () => {
     const res = await request(app).get('/api/billing_history');
     expect(res.status).toBe(401);
+  });
+});
+
+describe('POST /api/client/email', () => {
+  // Розница нужна только для verify-письма (verificationSent); сам роут
+  // доступен при любом флаге. Включаем/выключаем локально, как retail-stage1.
+  let client2Login, client2Token;
+  const EMAIL1 = 'Portal_Email1@portal-test.local'; // регистр — специально, ждём lowercase
+  const EMAIL1_NORM = EMAIL1.toLowerCase();
+  const EMAIL2 = 'portal_email2@portal-test.local';
+  const EMAIL3 = 'portal_email3@portal-test.local';
+
+  beforeAll(async () => {
+    setRetail(true);
+    client2Login = 'portal2_' + crypto.randomBytes(3).toString('hex');
+    const create = await request(app).post('/api/admin/clients').set('X-Auth-Token', adminToken).send({
+      name: 'Portal Test 2', login: client2Login, password: PASSWORD,
+      portName: 'portal2_p_' + crypto.randomBytes(2).toString('hex'),
+      billingType: 'per_gb', price: 10, currency: 'RUB',
+    });
+    if (create.status !== 200) throw new Error('seed client2 failed: ' + create.status);
+    const login = await request(app).post('/api/login').send({ login: client2Login, password: PASSWORD });
+    if (login.status !== 200) throw new Error('client2 login failed: ' + login.status);
+    client2Token = login.body.token;
+  });
+
+  afterAll(() => {
+    setRetail(false);
+    try { db.prepare('DELETE FROM clients WHERE login = ?').run(client2Login); } catch (_) { /* best-effort */ }
+    try { db.prepare('DELETE FROM sessions WHERE login = ?').run(client2Login); } catch (_) { /* best-effort */ }
+    try { db.prepare('DELETE FROM auth_tokens WHERE login IN (?, ?)').run(clientLogin, client2Login); } catch (_) { /* best-effort */ }
+  });
+
+  it('401 without auth', async () => {
+    const res = await request(app).post('/api/client/email').send({ email: EMAIL1_NORM });
+    expect(res.status).toBe(401);
+  });
+
+  it('400 on invalid email (zod)', async () => {
+    const res = await request(app).post('/api/client/email').set('X-Auth-Token', clientToken)
+      .send({ email: 'not-an-email' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('Validation error');
+  });
+
+  it('sets email: 200, lowercase-нормализация, verify-письмо при retail_enabled', async () => {
+    const res = await request(app).post('/api/client/email').set('X-Auth-Token', clientToken)
+      .send({ email: EMAIL1 });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.email).toBe(EMAIL1_NORM);
+    expect(res.body.verificationSent).toBe(true);
+
+    // Профиль (referral endpoint) отражает email + сброшенную верификацию
+    const ref = await request(app).get('/api/client/referral').set('X-Auth-Token', clientToken);
+    expect(ref.body.email).toBe(EMAIL1_NORM);
+    expect(ref.body.emailVerified).toBe(false);
+
+    // Письмо ушло в очередь (без SendPulse-кредов — mail_outbox)
+    const outbox = JSON.parse(db.prepare('SELECT value FROM kv_store WHERE key = ?').get('mail_outbox').value);
+    const mail = outbox.filter(m => m.kind === 'verify_email' && m.to === EMAIL1_NORM).pop();
+    expect(mail).toBeTruthy();
+    expect(mail.text).toContain('/verify?token=');
+
+    // Полный цикл: подтверждаем email токеном из письма
+    const token = mail.text.match(/\/verify\?token=([0-9a-f]+)/)[1];
+    const ver = await request(app).post('/api/verify_email').send({ token });
+    expect(ver.status).toBe(200);
+    const ref2 = await request(app).get('/api/client/referral').set('X-Auth-Token', clientToken);
+    expect(ref2.body.emailVerified).toBe(true);
+  });
+
+  it('смена email сбрасывает emailVerified', async () => {
+    const res = await request(app).post('/api/client/email').set('X-Auth-Token', clientToken)
+      .send({ email: EMAIL2 });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const ref = await request(app).get('/api/client/referral').set('X-Auth-Token', clientToken);
+    expect(ref.body.email).toBe(EMAIL2);
+    expect(ref.body.emailVerified).toBe(false); // был true после verify выше
+  });
+
+  it('409 на дубль email другого клиента', async () => {
+    const set2 = await request(app).post('/api/client/email').set('X-Auth-Token', client2Token)
+      .send({ email: EMAIL3 });
+    expect(set2.status).toBe(200);
+
+    const dupe = await request(app).post('/api/client/email').set('X-Auth-Token', clientToken)
+      .send({ email: EMAIL3.toUpperCase() }); // регистр не должен обходить проверку
+    expect(dupe.status).toBe(409);
+    expect(dupe.body.error).toBe('Аккаунт с этим email уже существует');
+
+    // Себе самому тот же email — не дубль
+    const self = await request(app).post('/api/client/email').set('X-Auth-Token', client2Token)
+      .send({ email: EMAIL3 });
+    expect(self.status).toBe(200);
   });
 });

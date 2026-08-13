@@ -55,4 +55,21 @@ describe('normalizeOperator', () => {
     expect(normalizeOperator('Unknown', true)).toBe('');
     expect(normalizeOperator('  UNKNOWN  ', false)).toBe('');
   });
+  it('aliases: MOLDCELL/Moldcell и VF-RO/Vodafone RO — один оператор', () => {
+    expect(normalizeOperator('MOLDCELL', false)).toBe('Moldcell');
+    expect(normalizeOperator('Moldcell', false)).toBe('Moldcell');
+    expect(normalizeOperator('moldcell', false)).toBe('Moldcell');
+    expect(normalizeOperator('VF-RO', true)).toBe('Vodafone RO');
+    expect(normalizeOperator('vfro', true)).toBe('Vodafone RO');
+    expect(normalizeOperator('VF_RO', true)).toBe('Vodafone RO');
+    expect(normalizeOperator('Vodafone RO', true)).toBe('Vodafone RO');
+    expect(normalizeOperator('vodafone', true)).toBe('Vodafone RO');
+  });
+  it('aliases: регистр и суффиксы стран у orange/moldtelecom', () => {
+    expect(normalizeOperator('ORANGE', false)).toBe('Orange MD');
+    expect(normalizeOperator('ORANGE', true)).toBe('Orange RO');
+    expect(normalizeOperator('Orange MD', false)).toBe('Orange MD');
+    expect(normalizeOperator('MOLDTELECOM', false)).toBe('Moldtelecom');
+    expect(normalizeOperator('Unite', false)).toBe('Moldtelecom');
+  });
 });

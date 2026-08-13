@@ -160,13 +160,52 @@ function deleteServer(name){
 // ========== SETTINGS ==========
 var _minSpeedThreshold=2;
 var _errorRateThreshold=15;
+
+// Чекбокс-пикер ников почасового замера: известные модемы группами по серверу
+// («ник — оператор»), ники из текущего CSV вне списка — блоком «неизвестные»,
+// чтобы сохранение их не потеряло.
+function _renderSpeedtestModemPicker(currentCsv){
+  var box=document.getElementById('speedtestModemsBox');
+  if(!box)return;
+  var selected={};
+  String(currentCsv||'').split(',').map(function(t){return t.trim()}).filter(Boolean).forEach(function(n){selected[n]=true});
+  api(API+'/api/admin/known_modems').then(function(d){
+    var items=(d&&d.items)||[];
+    var bySrv={};
+    items.forEach(function(m){
+      if(!m||!m.nick)return;
+      (bySrv[m.server]=bySrv[m.server]||[]).push(m);
+    });
+    var h='';
+    Object.keys(bySrv).sort().forEach(function(srv){
+      h+='<div style="margin:8px 0 2px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px">'+esc(srv)+'</div>';
+      bySrv[srv].forEach(function(m){
+        var on=!!selected[m.nick];
+        if(on)delete selected[m.nick];
+        h+='<label style="display:inline-flex;align-items:center;gap:5px;margin:2px 14px 2px 0;font-size:12px;cursor:pointer"><input type="checkbox" class="speedtest-modem-chk" value="'+esc(m.nick)+'"'+(on?' checked':'')+'> '+esc(m.nick)+(m.operator?'<span style="color:var(--text-3)"> — '+esc(m.operator)+'</span>':'')+'</label>';
+      });
+    });
+    var unknown=Object.keys(selected);
+    if(unknown.length){
+      h+='<div style="margin:8px 0 2px;font-size:10px;font-weight:700;color:var(--warning);text-transform:uppercase;letter-spacing:.5px">Неизвестные (нет в списке модемов)</div>';
+      unknown.forEach(function(n){
+        h+='<label style="display:inline-flex;align-items:center;gap:5px;margin:2px 14px 2px 0;font-size:12px;cursor:pointer;color:var(--warning)"><input type="checkbox" class="speedtest-modem-chk" value="'+esc(n)+'" checked> '+esc(n)+'</label>';
+      });
+    }
+    box.innerHTML=h||'<div style="font-size:11px;color:var(--text-3)">Модемы не найдены</div>';
+  }).catch(function(){
+    box.innerHTML='<div style="font-size:11px;color:var(--danger)">Не удалось загрузить список модемов — при сохранении останется текущий CSV</div>';
+  });
+}
 function loadSettings(){
   api(API+'/api/admin/settings').then(function(s){
-    // Модемы почасового замера (speedtest_times/расписание убрано 2026-08-13:
-    // авто-замер всего флота отключён, остался почасовой SpeedMonitor).
+    // Модемы почасового замера: чекбокс-пикер из /api/admin/known_modems
+    // (скрытый input — фолбэк для сохранения, если список не загрузился).
+    var _smodCsv=s.speedtest_modems||'MD2_40,MD2_44,MD_01,MD_04,MD_10';
     var _smodEl=document.getElementById('speedtestModemsInput');
-    if(_smodEl)_smodEl.value=s.speedtest_modems||'MD2_40,MD2_44,MD_01,MD_04,MD_10';
-    document.getElementById('settingsStatus').textContent='Почасовой замер: '+(_smodEl?_smodEl.value:'');
+    if(_smodEl)_smodEl.value=_smodCsv;
+    _renderSpeedtestModemPicker(_smodCsv);
+    document.getElementById('settingsStatus').textContent='Почасовой замер: '+_smodCsv;
     _minSpeedThreshold=s.min_speed_threshold!=null?s.min_speed_threshold:2;
     document.getElementById('minSpeedInput').value=_minSpeedThreshold;
     _errorRateThreshold=s.error_rate_threshold!=null?s.error_rate_threshold:15;
@@ -282,9 +321,16 @@ function saveProxyCheckSettings(){
   }).catch(function(e){showToast(e.message,'error')});
 }
 function saveSettings(){
-  // Ники модемов почасового замера: CSV → нормализуем, пусто = дефолт на бэке.
-  var modemsRaw=(document.getElementById('speedtestModemsInput')||{}).value||'';
-  var modems=modemsRaw.split(',').map(function(t){return t.trim()}).filter(Boolean);
+  // Ники модемов почасового замера: отмеченные чекбоксы → CSV; если пикер не
+  // отрендерился (ошибка загрузки) — фолбэк на скрытый input с текущим CSV.
+  var modems;
+  var chks=document.querySelectorAll('.speedtest-modem-chk');
+  if(chks.length){
+    modems=[].slice.call(chks).filter(function(c){return c.checked}).map(function(c){return c.value});
+  }else{
+    var modemsRaw=(document.getElementById('speedtestModemsInput')||{}).value||'';
+    modems=modemsRaw.split(',').map(function(t){return t.trim()}).filter(Boolean);
+  }
   if(modems.some(function(n){return !/^[\w-]{1,64}$/.test(n)})){showToast('Ники: только латиница, цифры, _ и -','error');return}
   var minSpeed=parseFloat(document.getElementById('minSpeedInput').value)||2;
   var errThresh=parseInt(document.getElementById('errorRateThresholdInput').value)||15;

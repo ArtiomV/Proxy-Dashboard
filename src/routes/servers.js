@@ -285,6 +285,16 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
     }
     patch.speedtest_modems = nicks.join(',');
   }
+  // Боксы розничного пула: CSV имён серверов (порядок важен — первый из
+  // списка = бокс выдачи по умолчанию, см. retail.js buy_proxy).
+  if (req.body.retail_pool_servers != null) {
+    const names = String(req.body.retail_pool_servers).split(',')
+      .map(s => s.trim()).filter(Boolean);
+    if (names.length > 20 || names.some(n => !/^[\w-]{1,64}$/.test(n))) {
+      return res.status(400).json({ error: 'retail_pool_servers: CSV имён серверов, до 20 штук' });
+    }
+    patch.retail_pool_servers = names.join(',');
+  }
   // Data retention (days)
   if (req.body.retention_traffic_hourly != null) patch.retention_traffic_hourly = Math.max(7, Math.min(365, parseInt(req.body.retention_traffic_hourly) || 90));
   if (req.body.retention_daily_traffic != null)  patch.retention_daily_traffic  = Math.max(7, Math.min(365, parseInt(req.body.retention_daily_traffic) || 90));

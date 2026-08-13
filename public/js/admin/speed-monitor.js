@@ -3,6 +3,8 @@
 // линия DL на модем, дыры = часы без связи/замера. В легенде и мета-плашках —
 // ник · оператор · сервер · локация, чтобы было видно, какая симка/оператор
 // на какой локации стабильна, а какая проседает по часам.
+// Разбиение по локациям (адрес → оператор → ↓/↑) — в попапе графика при
+// наведении (Chart.js tooltip footer), а не отдельными плашками под картой.
 //
 // Зависит от глобалов admin.js/utils.js: api, esc, newChartSafe, getChartColors,
 // _dashUi, _dashUiSave (все доступны к моменту вызова — модуль только объявляет
@@ -82,51 +84,27 @@ function loadSpeedMonitor(force) {
       }
     }
 
-    // Разбиение по локациям: плашка на локацию (адрес сервера из настроек,
-    // fallback — страна/имя бокса). Тултип в стиле дашборда (title +
-    // cursor:help): «<Локация>: скорости по операторам — <оп>: ↓/↑».
-    // Средние взвешены по числу успешных замеров за выбранный период.
-    var locEl = document.getElementById('speedMonLoc');
-    if (locEl) {
-      if (!modems.length) { locEl.innerHTML = ''; }
-      else {
-        var nickLoc = {}, nickOp = {}, locOrder = [];
-        modems.forEach(function (m) {
-          nickLoc[m.nick] = m.address || m.location || m.server || '—';
-          nickOp[m.nick] = m.operator || 'оператор?';
-          if (locOrder.indexOf(nickLoc[m.nick]) < 0) locOrder.push(nickLoc[m.nick]);
-        });
-        var locOps = {};   // loc → op → { dl, ul, n } (суммы по замерам)
-        rows.forEach(function (r) {
-          if (!(r.ok_count > 0) || r.avg_dl == null) return;
-          var loc = nickLoc[r.nick];
-          if (!loc) return;
-          var op = nickOp[r.nick] || 'оператор?';
-          var L = locOps[loc] || (locOps[loc] = {});
-          var O = L[op] || (L[op] = { dl: 0, ul: 0, n: 0 });
-          O.dl += r.avg_dl * r.ok_count;
-          O.ul += (r.avg_ul || 0) * r.ok_count;
-          O.n += r.ok_count;
-        });
-        locEl.innerHTML = locOrder.map(function (loc) {
-          var ops = locOps[loc] || {};
-          var opKeys = Object.keys(ops);
-          var tip = loc + ': скорости по операторам — ' + (opKeys.length
-            ? opKeys.map(function (op) {
-                var o = ops[op];
-                return op + ': ↓' + (o.dl / o.n).toFixed(1) + ' ↑' + (o.ul / o.n).toFixed(1) + ' Мбит/с';
-              }).join(' · ')
-            : 'нет успешных замеров за период');
-          var cnt = 0;
-          modems.forEach(function (m) { if (nickLoc[m.nick] === loc) cnt++; });
-          return '<span title="' + esc(tip) + '" style="display:inline-flex;align-items:center;gap:6px;font-size:11px;'
-            + 'border:0.5px solid var(--border);border-radius:8px;padding:3px 9px;background:var(--bg-1);cursor:help">'
-            + icon('pin', 11) + '<b>' + esc(loc) + '</b>'
-            + '<span style="color:var(--text-3)">' + cnt + ' мод.</span>'
-            + '</span>';
-        }).join('');
-      }
-    }
+    // Разбиение по локациям для попапа графика (tooltip footer): адрес
+    // сервера из настроек (fallback — страна/имя бокса) → оператор → средние
+    // ↓/↑ за наведённый час, взвешенные по числу успешных замеров.
+    var nickLoc = {}, nickOp = {};
+    modems.forEach(function (m) {
+      nickLoc[m.nick] = m.address || m.location || m.server || '—';
+      nickOp[m.nick] = m.operator || 'оператор?';
+    });
+    var hourLocOps = {};   // hour_msk → loc → op → { dl, ul, n } (суммы)
+    rows.forEach(function (r) {
+      if (!(r.ok_count > 0) || r.avg_dl == null) return;
+      var loc = nickLoc[r.nick];
+      if (!loc) return;
+      var op = nickOp[r.nick] || 'оператор?';
+      var H = hourLocOps[r.hour_msk] || (hourLocOps[r.hour_msk] = {});
+      var L = H[loc] || (H[loc] = {});
+      var O = L[op] || (L[op] = { dl: 0, ul: 0, n: 0 });
+      O.dl += r.avg_dl * r.ok_count;
+      O.ul += (r.avg_ul || 0) * r.ok_count;
+      O.n += r.ok_count;
+    });
 
     if (!rows.length) {
       if (emptyEl) emptyEl.style.display = 'block';
@@ -189,6 +167,22 @@ function loadSpeedMonitor(force) {
               label: function (ctx) {
                 var v = ctx.parsed.y;
                 return ctx.dataset.label + ': ' + (v == null ? 'нет замера' : v.toFixed(2) + ' Мбит/с');
+              },
+              // Блок локаций наведённого часа:
+              // «<Локация>: скорости по операторам — <оп>: ↓x.x ↑y.y Мбит/с».
+              footer: function (items) {
+                if (!items || !items.length) return [];
+                var H = hourLocOps[hours[items[0].dataIndex]];
+                if (!H) return [];
+                var lines = [];
+                Object.keys(H).forEach(function (loc) {
+                  var ops = H[loc];
+                  lines.push(loc + ': скорости по операторам — ' + Object.keys(ops).map(function (op) {
+                    var o = ops[op];
+                    return op + ': ↓' + (o.dl / o.n).toFixed(1) + ' ↑' + (o.ul / o.n).toFixed(1) + ' Мбит/с';
+                  }).join(' · '));
+                });
+                return lines;
               },
             },
           },

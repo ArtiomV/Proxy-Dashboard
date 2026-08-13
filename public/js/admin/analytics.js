@@ -460,7 +460,7 @@ function getHeatmapModems(ctx){
       var srv=m._server||'';
       var cn=(COUNTRIES[srv]||{}).name||srv;
       byCountry[cn]=(byCountry[cn]||0)+1;
-      var op=(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var isRO=srv.indexOf('S2')===0;var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})();
+      var op=(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var isRO=srv.indexOf('S2')===0;var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','moldcell':'Moldcell','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vf-ro':'Vodafone RO','vfro':'Vodafone RO','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})();
       if(op)byOp[op]=(byOp[op]||0)+1;
       // Map IMEI to client portName via ports
       var ports=currentData.ports&&currentData.ports[imei];

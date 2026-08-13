@@ -148,9 +148,36 @@ function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');
 
 // ── Тарифы розницы (B2C, WP3) — минимальный CRUD поверх /api/admin/tariffs ──
 var _tariffsCache=[];
+var _adminServersCache=null;   // кэш GET /api/admin/servers для селектов
+function _loadAdminServers(cb){
+  if(_adminServersCache){cb(_adminServersCache);return}
+  api(API+'/api/admin/servers').then(function(d){
+    _adminServersCache=(d&&d.servers)||[];
+    cb(_adminServersCache);
+  }).catch(function(){cb([])});
+}
+// Поле «Сервер» тарифа — select из реальных боксов + «по умолчанию» (пусто).
+// Значение вне списка (legacy) добавляем опцией, чтобы не потерять.
+function _fillTariffServerSelect(selected){
+  var sel=document.getElementById('tfServer');
+  if(!sel)return;
+  _loadAdminServers(function(servers){
+    var h='<option value="">— по умолчанию (из retail_pool_servers)</option>';
+    var found=!selected;
+    servers.forEach(function(s){
+      if(s.name===selected)found=true;
+      h+='<option value="'+esc(s.name)+'">'+esc(s.name)+'</option>';
+    });
+    if(!found)h+='<option value="'+esc(selected)+'">'+esc(selected)+' (нет в списке)</option>';
+    sel.innerHTML=h;
+    sel.value=selected||'';
+  });
+}
 async function loadTariffsAdmin(){
   var box=document.getElementById('tariffsTable');
   if(!box)return;
+  _fillTariffServerSelect(document.getElementById('tfServer').value||'');
+  loadRetailPoolAdmin();
   try{
     var data=await api(API+'/api/admin/tariffs');
     if(!data||data.error){box.innerHTML='<div style="text-align:center;padding:24px;color:var(--danger);font-size:12px">'+esc((data&&data.error)||'Ошибка загрузки')+'</div>';return}
@@ -159,6 +186,39 @@ async function loadTariffsAdmin(){
   }catch(e){
     box.innerHTML='<div style="text-align:center;padding:24px;color:var(--danger);font-size:12px">Ошибка соединения</div>';
   }
+}
+
+// ── Пул розницы (retail_pool_servers) — чекбоксы боксов, хранение CSV-строкой ──
+function loadRetailPoolAdmin(){
+  var box=document.getElementById('retailPoolServersBox');
+  if(!box)return;
+  Promise.all([api(API+'/api/admin/servers'),api(API+'/api/admin/settings')]).then(function(rs){
+    var servers=(rs[0]&&rs[0].servers)||[];
+    _adminServersCache=servers;
+    var selected={};
+    String((rs[1]&&rs[1].retail_pool_servers)||'').split(',').map(function(t){return t.trim()}).filter(Boolean).forEach(function(n){selected[n]=true});
+    var h='';
+    servers.forEach(function(s){
+      var on=!!selected[s.name];
+      if(on)delete selected[s.name];
+      h+='<label style="display:inline-flex;align-items:center;gap:5px;margin:2px 14px 2px 0;font-size:12px;cursor:pointer"><input type="checkbox" class="retail-pool-chk" value="'+esc(s.name)+'"'+(on?' checked':'')+'> '+esc(s.name)+'</label>';
+    });
+    // Имена из CSV, которых нет среди серверов, — отдельно, чтобы не потерять.
+    Object.keys(selected).forEach(function(n){
+      h+='<label style="display:inline-flex;align-items:center;gap:5px;margin:2px 14px 2px 0;font-size:12px;cursor:pointer;color:var(--warning)"><input type="checkbox" class="retail-pool-chk" value="'+esc(n)+'" checked> '+esc(n)+' (нет в списке серверов)</label>';
+    });
+    box.innerHTML=h||'<div style="font-size:11px;color:var(--text-3)">Серверов нет — добавьте в «Инфраструктуре»</div>';
+  }).catch(function(){
+    box.innerHTML='<div style="font-size:11px;color:var(--danger)">Ошибка загрузки</div>';
+  });
+}
+function saveRetailPoolAdmin(){
+  var st=document.getElementById('retailPoolStatus');
+  var names=[].slice.call(document.querySelectorAll('.retail-pool-chk:checked')).map(function(c){return c.value});
+  api(API+'/api/admin/settings',{method:'PUT',json:{retail_pool_servers:names.join(',')}}).then(function(d){
+    if(d.ok){st.style.color='var(--success)';st.textContent='Сохранено: '+(names.join(', ')||'пусто');showToast('Пул розницы сохранён','success')}
+    else{st.style.color='var(--danger)';st.textContent=d.error||'Ошибка'}
+  }).catch(function(e){st.style.color='var(--danger)';st.textContent='Ошибка соединения'});
 }
 function renderTariffsAdmin(){
   var box=document.getElementById('tariffsTable');
@@ -201,7 +261,7 @@ function editTariffAdmin(id){
   document.getElementById('tfId').value=t.id;
   document.getElementById('tfName').value=t.name||'';
   document.getElementById('tfGeo').value=t.geo||'';
-  document.getElementById('tfServer').value=t.server||'';
+  _fillTariffServerSelect(t.server||'');
   document.getElementById('tfPrice').value=t.price;
   document.getElementById('tfDuration').value=t.duration_hours!=null?t.duration_hours:'';
   document.getElementById('tfMinTopup').value=t.min_topup_days||1;
@@ -212,6 +272,7 @@ function editTariffAdmin(id){
 function resetTariffForm(){
   document.getElementById('tariffFormTitle').textContent='Новый тариф';
   ['tfId','tfName','tfGeo','tfServer','tfPrice','tfDuration'].forEach(function(id){document.getElementById(id).value=''});
+  _fillTariffServerSelect('');   // select: гарантируем опции + «по умолчанию»
   document.getElementById('tfMinTopup').value='1';
   document.getElementById('tfPublic').checked=false;
   document.getElementById('tfActive').checked=true;
@@ -456,7 +517,7 @@ document.addEventListener('keydown',function(e){
   }
 });
 
-function processData(){if(!currentData)return;_initServers(currentData.servers);var downSet={};(currentData.cachedServers||[]).forEach(function(s){downSet[s.name]=true;});var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,_cached:!!m._cached,_serverDown:!!downSet[m._server],nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S\d+_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',iccid:(function(){var v=(m.net_details?String(m.net_details.ICCID||''):'').trim();return(v&&v.toLowerCase()!=='unknown')?v:''})(),signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isTestPool:!!m.isTestPool,isOnline:!m._cached&&!downSet[m._server]&&(m.net_details?m.net_details.IS_ONLINE==='yes':false),isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',band:(function(){var b=(m.net_details?String(m.net_details.BAND||''):'').trim();return(b&&b!=='?')?b:''})(),simStatus:(m.net_details?String(m.net_details.SimStatus||'').toUpperCase().trim():''),httpRedirect:(function(){var r=m.net_details?m.net_details.HTTP_REDIRECT_IMPOSED:null;if(r==null)return false;var s=String(r).toLowerCase().trim();return!!s&&['no','null','0','false','none'].indexOf(s)<0})(),rebootScore:(function(){var r=m.modem_details?m.modem_details.REBOOT_SCORE:null;return(r!=null&&r!==''&&isFinite(+r))?Math.round(+r):null})(),isLocked:(m.IS_LOCKED===true||m.IS_LOCKED==='true'),msg:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join('; '):(b||'');return [m.MSG||'',b].filter(Boolean).join('; ').trim()})(),webappDown:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join(' '):(b||'');return /web ?app|not available|restart the modem/i.test(String(m.MSG||'')+' '+b)})(),pktLoss:(function(){var p=(m.net_details?m.net_details.ping_stats:'')||'';var mm=/(\d+)\s*%\s*loss/i.exec(p);return mm?parseInt(mm[1],10):null})(),connDead:(function(){var c=String((m.net_details?m.net_details.ConnectionStatus:'')||'').toLowerCase();return /disconnect|ppp_disc|no carrier|down/.test(c)})(),ports:[]}}
+function processData(){if(!currentData)return;_initServers(currentData.servers);var downSet={};(currentData.cachedServers||[]).forEach(function(s){downSet[s.name]=true;});var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,_cached:!!m._cached,_serverDown:!!downSet[m._server],nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S\d+_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',iccid:(function(){var v=(m.net_details?String(m.net_details.ICCID||''):'').trim();return(v&&v.toLowerCase()!=='unknown')?v:''})(),signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','moldcell':'Moldcell','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vf-ro':'Vodafone RO','vfro':'Vodafone RO','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isTestPool:!!m.isTestPool,isOnline:!m._cached&&!downSet[m._server]&&(m.net_details?m.net_details.IS_ONLINE==='yes':false),isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',band:(function(){var b=(m.net_details?String(m.net_details.BAND||''):'').trim();return(b&&b!=='?')?b:''})(),simStatus:(m.net_details?String(m.net_details.SimStatus||'').toUpperCase().trim():''),httpRedirect:(function(){var r=m.net_details?m.net_details.HTTP_REDIRECT_IMPOSED:null;if(r==null)return false;var s=String(r).toLowerCase().trim();return!!s&&['no','null','0','false','none'].indexOf(s)<0})(),rebootScore:(function(){var r=m.modem_details?m.modem_details.REBOOT_SCORE:null;return(r!=null&&r!==''&&isFinite(+r))?Math.round(+r):null})(),isLocked:(m.IS_LOCKED===true||m.IS_LOCKED==='true'),msg:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join('; '):(b||'');return [m.MSG||'',b].filter(Boolean).join('; ').trim()})(),webappDown:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join(' '):(b||'');return /web ?app|not available|restart the modem/i.test(String(m.MSG||'')+' '+b)})(),pktLoss:(function(){var p=(m.net_details?m.net_details.ping_stats:'')||'';var mm=/(\d+)\s*%\s*loss/i.exec(p);return mm?parseInt(mm[1],10):null})(),connDead:(function(){var c=String((m.net_details?m.net_details.ConnectionStatus:'')||'').toLowerCase();return /disconnect|ppp_disc|no carrier|down/.test(c)})(),ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
   var bw=currentData.bandwidth||{};for(var mi in mm){var mod=mm[mi];for(var p=0;p<mod.ports.length;p++){var pt=mod.ports[p];if(bw[pt.portID])pt._bw=bw[pt.portID]}}
   // IP tracking & uptime tracking

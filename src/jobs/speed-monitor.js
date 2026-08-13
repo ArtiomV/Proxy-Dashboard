@@ -21,19 +21,35 @@
 // трафика за замер, суммарно до 5 модемов × 24 замера в сутки). Это
 // осознанная цена наблюдаемости — при необходимости список ников режется
 // через настройку speedtest_modems.
+//
+// 2026-08-13 — стабилизация замера. Разовый прогон /apix/speedtest бокса
+// крайне нестабилен (в проде один и тот же модем за полчаса давал dl 0.99
+// и 38.86 Мбит/с — маленькая выборка/погода в сети, не путаница единиц).
+// Поэтому: если первый замер ok, но dl < RETRY_DL_THRESHOLD — ОДИН повтор
+// через RETRY_DELAY_MS, в БД пишется ЛУЧШИЙ из двух (по dl); ошибка замера
+// (ok=0) — тоже один ретрай. При dl >= порога повтор не делаем: каждый
+// спидтест — живой трафик симки. Число попыток пишется в колонку attempts.
+// Результат dl=0 И ul=0 — не «ноль оператора», а непроведённый тест бокса:
+// пишется ok=0/error='empty_result' независимо от числа попыток.
 
 const DEFAULT_NICKS = 'MD2_40,MD2_44,MD_01,MD_04,MD_10';
 const RETENTION_DAYS = 60;
+const RETRY_DL_THRESHOLD = 5;    // Мбит/с — ниже: замер подозрительный, один повтор
+const RETRY_DELAY_MS = 25000;    // пауза перед повторным замером (~20–30с)
+const PING_SANE_MAX_MS = 60000;  // больше минуты «пинга» — это не пинг, а мусор
 
 // Парсер ответа /apix/speedtest — копия логики parseSpeedtestResult из
 // src/jobs/proxy-checks.js (та внутренняя, не экспортируется). Бокс отдаёт
 // либо поля download/upload/ping (в разном регистре), либо сырой текст.
+// 2026-08-13: ping НЕ берём из служебных полей (latency/timeout — оттуда
+// в БД утекал таймаут fetchApi, 180000 мс → ping=1800000.0) и отсекаем
+// нефизичные значения: не распарсился — пишем 0, а не мусор.
 function parseSpeedtestResult(result) {
   let dl = 0, ul = 0, ping = 0;
   if (result && typeof result === 'object') {
     dl = parseFloat(result.download || result.Download || result.dl || 0);
     ul = parseFloat(result.upload || result.Upload || result.ul || 0);
-    ping = parseFloat(result.ping || result.Ping || result.latency || 0);
+    ping = parseFloat(result.ping || result.Ping || 0);
     if (result.raw && typeof result.raw === 'string') {
       const dlMatch = result.raw.match(/download[:\s]*([\d.]+)/i);
       const ulMatch = result.raw.match(/upload[:\s]*([\d.]+)/i);
@@ -43,11 +59,16 @@ function parseSpeedtestResult(result) {
       if (pingMatch) ping = parseFloat(pingMatch[1]);
     }
   }
+  if (!isFinite(ping) || ping < 0 || ping > PING_SANE_MAX_MS) ping = 0;
   return { dl, ul, ping };
 }
 
 function create(deps) {
   const { db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting } = deps;
+  // Пауза инжектируется — тесты подсовывают мгновенный sleep.
+  const sleep = typeof deps.sleep === 'function'
+    ? deps.sleep
+    : (ms) => new Promise(r => setTimeout(r, ms));
 
   // env-override фиксируется на create() (тесты удаляют env сразу после
   // создания джобы); настройка speedtest_modems читается на каждый прогон.
@@ -62,8 +83,8 @@ function create(deps) {
   }
 
   const insertStmt = db.prepare(`INSERT INTO speed_monitor
-    (server, nick, imei, download, upload, ping, ok, error, operator)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    (server, nick, imei, download, upload, ping, ok, error, operator, attempts)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const pruneStmt = db.prepare(
     "DELETE FROM speed_monitor WHERE ts < datetime('now', ?)");
 
@@ -110,21 +131,49 @@ function create(deps) {
         const f = found.get(nick);
         if (!f || !f.isOnline) {
           const reason = !f ? 'not_found' : 'offline';
-          insertStmt.run(f ? f.server.name : '', nick, f ? f.imei : '', 0, 0, 0, 0, reason, f ? f.operator : '');
+          insertStmt.run(f ? f.server.name : '', nick, f ? f.imei : '', 0, 0, 0, 0, reason, f ? f.operator : '', 0);
           logger.info(`[SpeedMonitor] ${nick}: ${reason}, пропуск замера`);
           failed++;
           continue;
         }
-        try {
+        // Разовый замер бокса нестабилен — мерим с одним повтором:
+        // ok=0 → ретрай; ok=1, но dl < 5 Мбит/с → ретрай, пишем лучший по dl.
+        let attempts = 0;
+        const measureOnce = async () => {
+          attempts++;
           const result = await fetchApi(f.server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
           if (result && result.error) throw new Error(String(result.error));
-          const { dl, ul, ping } = parseSpeedtestResult(result);
-          insertStmt.run(f.server.name, nick, f.imei, dl, ul, ping, 1, '', f.operator);
-          logger.info(`[SpeedMonitor] ${nick} (${f.server.name}): DL=${dl} UL=${ul} Ping=${ping}`);
+          return parseSpeedtestResult(result);
+        };
+        try {
+          let best;
+          try {
+            best = await measureOnce();
+          } catch (e1) {
+            logger.warn(`[SpeedMonitor] ${nick}: замер не удался (${e1.message}), повтор через ${RETRY_DELAY_MS / 1000}с`);
+            await sleep(RETRY_DELAY_MS);
+            best = await measureOnce();   // упадёт — уйдёт во внешний catch
+          }
+          if (best.dl < RETRY_DL_THRESHOLD && attempts === 1) {
+            await sleep(RETRY_DELAY_MS);
+            try {
+              const second = await measureOnce();
+              if (second.dl > best.dl) best = second;
+            } catch (e2) {
+              logger.warn(`[SpeedMonitor] ${nick}: повторный замер не удался: ${e2.message}`);
+            }
+          }
+          // 2026-08-13: dl=0 И ul=0 — бокс не провёл тест (в проде кластеры
+          // таких строк у нескольких модемов сразу — сбой спидтеста на боксе).
+          // Это неуспешный замер, а не «оператор дал ноль»: ok=1 только при
+          // ненулевом dl или ul, иначе нули роняют средние и график.
+          if (!(best.dl > 0 || best.ul > 0)) throw new Error('empty_result');
+          insertStmt.run(f.server.name, nick, f.imei, best.dl, best.ul, best.ping, 1, '', f.operator, attempts);
+          logger.info(`[SpeedMonitor] ${nick} (${f.server.name}): DL=${best.dl} UL=${best.ul} Ping=${best.ping} attempts=${attempts}`);
           tested++;
         } catch (e) {
-          insertStmt.run(f.server.name, nick, f.imei, 0, 0, 0, 0, String(e.message || e).slice(0, 200), f.operator);
-          logger.warn(`[SpeedMonitor] ${nick} (${f.server.name}): ${e.message}`);
+          insertStmt.run(f.server.name, nick, f.imei, 0, 0, 0, 0, String(e.message || e).slice(0, 200), f.operator, attempts);
+          logger.warn(`[SpeedMonitor] ${nick} (${f.server.name}): ${e.message} (attempts=${attempts})`);
           failed++;
         }
       }

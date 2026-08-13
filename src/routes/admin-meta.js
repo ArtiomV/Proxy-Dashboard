@@ -26,6 +26,10 @@
 //   DELETE /api/admin/operators/:operator
 //     Drops the mapping entirely; next poll will re-create it as 'auto'.
 //
+//   GET  /api/admin/known_modems
+//     Лёгкий список известных модемов {server, nick, operator, address} —
+//     кормит чекбокс-пикеры админки (настройка speedtest_modems).
+//
 // Routes mounted via the standard factory pattern (server.js boot).
 
 const express = require('express');
@@ -35,6 +39,7 @@ module.exports = function createAdminMetaRouter(deps) {
     db, logger, authMiddleware, adminMiddleware,
     operatorsDb, trackingDb, knownModems, saveKnownModems,
     logActivity, fetchAllServersDataCached, markModemDeleted, markModemRestored,
+    apiServers,
   } = deps;
 
   const r = express.Router();
@@ -186,6 +191,45 @@ module.exports = function createAdminMetaRouter(deps) {
       res.json({ ok: true, operator });
     } catch (e) {
       logger.error('[admin-meta] remove operator: ' + e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── 5) Список известных модемов для UI-выбора (speedtest_modems и т.п.) ───
+  // Лёгкий GET: липкий ростер known_modems + последний оператор из modem_meta.
+  // Soft-deleted (modem_meta.deleted=1) не отдаём — их оператор удалил явно.
+  r.get('/api/admin/known_modems', authMiddleware, adminMiddleware, (req, res) => {
+    try {
+      const opByKey = {}, deleted = new Set();
+      for (const row of db.prepare(
+        "SELECT server_name, imei, operator, deleted FROM modem_meta WHERE imei IS NOT NULL AND imei != ''"
+      ).all()) {
+        const k = row.server_name + '|' + row.imei;
+        if (row.deleted) { deleted.add(k); continue; }
+        if (row.operator && String(row.operator).trim()) opByKey[k] = row.operator;
+      }
+      const addrBySrv = {};
+      for (const s of (apiServers || [])) addrBySrv[s.name] = s.address || '';
+      const items = [];
+      for (const [srvName, km] of Object.entries(knownModems || {})) {
+        for (const info of Object.values(km || {})) {
+          if (!info || !info.nick) continue;
+          const imei = info.imei || '';
+          if (imei && deleted.has(srvName + '|' + imei)) continue;
+          items.push({
+            server: srvName,
+            nick: info.nick,
+            operator: (imei && opByKey[srvName + '|' + imei]) || '',
+            address: addrBySrv[srvName] || '',
+          });
+        }
+      }
+      items.sort((a, b) => a.server === b.server
+        ? String(a.nick).localeCompare(String(b.nick), undefined, { numeric: true })
+        : String(a.server).localeCompare(String(b.server)));
+      res.json({ items });
+    } catch (e) {
+      logger.error('[admin-meta] known_modems: ' + e.message);
       res.status(500).json({ error: e.message });
     }
   });

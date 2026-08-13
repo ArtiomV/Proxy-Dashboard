@@ -2067,7 +2067,7 @@ function loadBills(){
       if(unpaid.length>0){badge.style.display='inline';badge.textContent=unpaid.length+' не оплачен';}
       else{badge.style.display='none';}
     }
-    if(!bills.length){el.innerHTML='<div style="text-align:center;padding:32px 16px"><div style="font-size:32px;margin-bottom:12px;opacity:.4">'+icon('receipt',32)+'</div><p style="font-size:14px;font-weight:500;color:var(--text-1);margin:0 0 6px">Счетов на оплату пока нет</p><p style="font-size:13px;color:var(--text-3);line-height:1.6;max-width:340px;margin:0 auto 16px">Счета выставляются по запросу. Для получения счёта — свяжитесь с менеджером.</p><a href="https://t.me/proxies_rent" target="_blank" style="display:inline-block;padding:7px 18px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text-0);text-decoration:none;background:var(--bg-2)">'+icon('plane',12)+' Написать менеджеру</a></div>';return}
+    if(!bills.length){el.innerHTML='<div style="text-align:center;padding:32px 16px"><div style="font-size:32px;margin-bottom:12px;opacity:.4">'+icon('receipt',32)+'</div><p style="font-size:14px;font-weight:500;color:var(--text-1);margin:0 0 6px">Счетов на оплату пока нет</p><p style="font-size:13px;color:var(--text-3);line-height:1.6;max-width:340px;margin:0 auto">Счета выставляются по запросу. Для получения счёта — свяжитесь с менеджером.</p></div>';return}
     var h='<table class="data-table" style="width:100%"><thead><tr><th style="text-align:left;padding:10px 12px">Период</th><th style="text-align:left;padding:10px 12px">Номер</th><th style="text-align:right;padding:10px 12px">Сумма</th><th style="text-align:center;padding:10px 12px">Статус</th><th style="text-align:center;padding:10px 12px">Действия</th></tr></thead><tbody>';
     bills.sort(function(a,b){return (b.period||'').localeCompare(a.period||'')});
     bills.forEach(function(b){
@@ -2251,11 +2251,19 @@ function loadProfile(){
     }
     var banner=document.getElementById('profileVerifyBanner');
     if(banner)banner.style.display=data.emailVerified?'none':'';
-    var email=data.email||'—';
+    var email=data.email||'';
     var refLink=data.referral_code?(window.location.origin+'/register?ref='+data.referral_code):'';
     var h='<div class="tools-section"><h3>Профиль</h3>'+
       '<div class="profile-row"><span class="profile-label">Логин</span><span class="profile-val mono">'+escapeHtml(authLogin)+'</span></div>'+
-      '<div class="profile-row"><span class="profile-label">Email</span><span class="profile-val">'+escapeHtml(email)+'</span></div>'+
+      '<div class="profile-row"><span class="profile-label">Email</span><span class="profile-val">'+
+        (email?escapeHtml(email):'<span style="color:var(--text-3)">Не указан</span>')+'</span>'+
+        '<button class="btn btn-sm" data-on-click="editProfileEmail()">Изменить</button></div>'+
+      (email?'':'<div style="font-size:12px;color:var(--text-3);margin:-4px 0 10px">Укажите email — на него придут чеки и ссылка для подтверждения.</div>')+
+      '<div id="profileEmailForm" style="display:none;margin-bottom:10px">'+
+        '<div class="form-group"><label>Новый email</label><input class="form-input" type="email" id="profileEmailInput" maxlength="200" value="'+escapeHtml(email)+'"></div>'+
+        '<button class="btn btn-accent" id="profileEmailSaveBtn" data-on-click="saveProfileEmail()">Сохранить</button> '+
+        '<button class="btn btn-sm" data-on-click="cancelProfileEmail()">Отмена</button>'+
+      '</div>'+
       '<div class="profile-row"><span class="profile-label">Статус email</span><span class="profile-val">'+
         (data.emailVerified?'<span style="color:var(--success);font-weight:600">Подтверждён</span>':'<span style="color:var(--warning);font-weight:600">Не подтверждён</span>')+
       '</span></div>'+
@@ -2271,6 +2279,43 @@ function loadProfile(){
   }).catch(function(e){
     box.innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
   });
+}
+
+// Установка/смена email — POST /api/client/email (общий для всех клиентов).
+// После сохранения перерисовываем профиль: emailVerified=false → баннер
+// верификации остаётся/появляется, статус email обновляется.
+function editProfileEmail(){
+  var f=document.getElementById('profileEmailForm');
+  if(f)f.style.display='';
+  var inp=document.getElementById('profileEmailInput');
+  if(inp)inp.focus();
+}
+
+function cancelProfileEmail(){
+  var f=document.getElementById('profileEmailForm');
+  if(f)f.style.display='none';
+}
+
+async function saveProfileEmail(){
+  var inp=document.getElementById('profileEmailInput');
+  var btn=document.getElementById('profileEmailSaveBtn');
+  var email=(inp.value||'').trim();
+  if(!email){showToast('Укажите email','error');return}
+  btn.disabled=true;
+  try{
+    var data=await api('/api/client/email',{method:'POST',json:{email:email}});
+    if(data&&data.ok){
+      showToast(data.verificationSent?'Письмо с подтверждением отправлено':'Email сохранён','success');
+      loadProfile();
+    }else{
+      // в т.ч. 409 «Аккаунт с этим email уже существует» — текстом из ответа
+      showToast((data&&data.error)||'Ошибка сохранения email','error');
+    }
+  }catch(e){
+    showToast('Ошибка соединения','error');
+  }finally{
+    btn.disabled=false;
+  }
 }
 
 async function doChangePassword(){

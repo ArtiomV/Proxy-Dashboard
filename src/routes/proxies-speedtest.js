@@ -11,8 +11,18 @@ module.exports = function createRouter(deps) {
     fetchApi, findServer,
     pushSpeedtestEntry, speedtestHistory,
     db, clientByLogin, knownModems,
+    normalizeOperator,
   } = deps;
   const r = express.Router();
+
+  // 2026-08-13: оператор из speed_monitor — историческое сырьё (до алиасов
+  // в normalizeOperator в БД попадали «MOLDCELL»/«VF-RO»). Нормализуем на
+  // чтении, чтобы варианты не плодили отдельные строки/легенды; БД не трогаем.
+  function _normMetaOp(raw, serverName) {
+    if (!raw || !normalizeOperator) return raw || '';
+    const srv = serverName ? findServer(serverName) : null;
+    return normalizeOperator(raw, !!(srv && srv.country === 'RO')) || raw;
+  }
 
 // модем), а nginx рвёт соединение на 30 с и отдаёт HTML-страницу 504 —
 // фронт получал «Unexpected token '<'... is not valid JSON». Быстрые модемы
@@ -110,17 +120,20 @@ r.get('/api/admin/speed-monitor', authMiddleware, adminMiddleware, (req, res) =>
   if (nick) { where += ' AND nick = ?'; params.push(nick); }
   let rows;
   try {
+    // 2026-08-13: исторические строки ok=1 с dl=0 И ul=0 — сбой спидтеста на
+    // боксе (кластеры у нескольких модемов разом), а не «ноль оператора».
+    // Считаем их сбоями и исключаем из средних, чтобы нули не роняли график.
     rows = db.prepare(`
       SELECT nick,
              strftime('%Y-%m-%d %H:00', ts, '+3 hours')        AS hour_msk,
              COUNT(*)                                          AS samples,
-             SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END)           AS ok_count,
-             SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END)           AS fail_count,
-             ROUND(AVG(CASE WHEN ok = 1 THEN download END), 2) AS avg_dl,
-             ROUND(MIN(CASE WHEN ok = 1 THEN download END), 2) AS min_dl,
-             ROUND(MAX(CASE WHEN ok = 1 THEN download END), 2) AS max_dl,
-             ROUND(AVG(CASE WHEN ok = 1 THEN upload END), 2)   AS avg_ul,
-             ROUND(AVG(CASE WHEN ok = 1 THEN ping END), 1)     AS avg_ping
+             SUM(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN 1 ELSE 0 END) AS ok_count,
+             SUM(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN 0 ELSE 1 END) AS fail_count,
+             ROUND(AVG(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN download END), 2) AS avg_dl,
+             ROUND(MIN(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN download END), 2) AS min_dl,
+             ROUND(MAX(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN download END), 2) AS max_dl,
+             ROUND(AVG(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN upload END), 2)   AS avg_ul,
+             ROUND(AVG(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN ping END), 1)     AS avg_ping
         FROM speed_monitor
        WHERE ${where}
        GROUP BY nick, hour_msk
@@ -150,7 +163,7 @@ r.get('/api/admin/speed-monitor', authMiddleware, adminMiddleware, (req, res) =>
       // замер; оператора добираем из более ранних строк, если в свежей пусто
       // (например, свежая — not_found/offline).
       const cur = seen.get(x.nick);
-      if (cur) { if (!cur.operator && x.operator) cur.operator = x.operator; continue; }
+      if (cur) { if (!cur.operator && x.operator) cur.operator = _normMetaOp(x.operator, x.server); continue; }
       const srv = x.server ? findServer(x.server) : null;
       seen.set(x.nick, {
         nick: x.nick,
@@ -159,7 +172,7 @@ r.get('/api/admin/speed-monitor', authMiddleware, adminMiddleware, (req, res) =>
         // Адрес локации из карточки сервера («Армянская …») — группировка
         // по локациям на дашборде; пусто, если адрес не заполнен.
         address: (srv && srv.address) || '',
-        operator: x.operator || '',
+        operator: _normMetaOp(x.operator, x.server),
       });
     }
     modems.push(...seen.values());
@@ -191,17 +204,19 @@ r.get('/api/client/speed_monitor', authMiddleware, (req, res) => {
   const params = [`-${hours} hours`, ...nickList];
   let rows;
   try {
+    // Те же правила, что у /api/admin/speed-monitor: ok=1 с dl=ul=0 — сбой
+    // бокса, из средних исключаем (см. комментарий в админском роуте выше).
     rows = db.prepare(`
       SELECT nick,
              strftime('%Y-%m-%d %H:00', ts, '+3 hours')        AS hour_msk,
              COUNT(*)                                          AS samples,
-             SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END)           AS ok_count,
-             SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END)           AS fail_count,
-             ROUND(AVG(CASE WHEN ok = 1 THEN download END), 2) AS avg_dl,
-             ROUND(MIN(CASE WHEN ok = 1 THEN download END), 2) AS min_dl,
-             ROUND(MAX(CASE WHEN ok = 1 THEN download END), 2) AS max_dl,
-             ROUND(AVG(CASE WHEN ok = 1 THEN upload END), 2)   AS avg_ul,
-             ROUND(AVG(CASE WHEN ok = 1 THEN ping END), 1)     AS avg_ping
+             SUM(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN 1 ELSE 0 END) AS ok_count,
+             SUM(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN 0 ELSE 1 END) AS fail_count,
+             ROUND(AVG(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN download END), 2) AS avg_dl,
+             ROUND(MIN(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN download END), 2) AS min_dl,
+             ROUND(MAX(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN download END), 2) AS max_dl,
+             ROUND(AVG(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN upload END), 2)   AS avg_ul,
+             ROUND(AVG(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN ping END), 1)     AS avg_ping
         FROM speed_monitor
        WHERE ts >= datetime('now', ?) AND nick IN (${inClause})
        GROUP BY nick, hour_msk
@@ -217,14 +232,14 @@ r.get('/api/client/speed_monitor', authMiddleware, (req, res) => {
          WHERE ts >= datetime('now', ?) AND nick IN (${inClause})
          ORDER BY ts DESC`).all(...params)) {
       const cur = seen.get(x.nick);
-      if (cur) { if (!cur.operator && x.operator) cur.operator = x.operator; continue; }
+      if (cur) { if (!cur.operator && x.operator) cur.operator = _normMetaOp(x.operator, x.server); continue; }
       const srv = x.server ? findServer(x.server) : null;
       seen.set(x.nick, {
         nick: x.nick,
         server: x.server || '',
         location: (srv && (srv.countryName || srv.country)) || x.server || '',
         address: (srv && srv.address) || '',
-        operator: x.operator || '',
+        operator: _normMetaOp(x.operator, x.server),
       });
     }
     modems.push(...seen.values());

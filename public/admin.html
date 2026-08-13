@@ -91,7 +91,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.1</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.2</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -107,7 +107,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.3.1</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.3.2</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -116,7 +116,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.1</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.2</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -299,8 +299,7 @@
         </div>
       </div>
       <div id="speedMonMeta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
-      <!-- Разбиение по локациям: плашка на локацию, тултип — скорости по операторам -->
-      <div id="speedMonLoc" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <!-- Разбиение по локациям — в попапе графика при наведении (tooltip footer) -->
       <div style="height:300px;position:relative"><canvas id="speedMonCanvas"></canvas><div id="speedMonSkel" class="skel" style="position:absolute;inset:0"></div></div>
       <div id="speedMonEmpty" style="display:none;color:var(--text-3);font-size:12px;padding:14px 4px">Пока нет замеров за выбранный период — почасовая джоба SpeedMonitor пишет сюда раз в час.</div>
     </div>
@@ -493,13 +492,23 @@
           <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">Единый прайс (Р36). Витрина клиента — тарифы с public=1 и active=1; duration_hours=24 — тест-день.</div>
           <div id="tariffsTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div></div>
         </div>
+        <!-- Пул розницы: боксы выдачи по умолчанию (retail_pool_servers, CSV) -->
+        <div class="analytics-card" style="margin-top:16px">
+          <h3 style="margin:0 0 6px">Пул розницы</h3>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Боксы, с которых выдаются прокси рознице, когда в тарифе сервер не задан («по умолчанию»). Основной бокс выдачи — первый по порядку из отмеченных.</div>
+          <div id="retailPoolServersBox" style="margin-bottom:10px"><div style="font-size:11px;color:var(--text-3)">Загрузка...</div></div>
+          <div style="display:flex;gap:8px;align-items:center">
+            <button class="btn btn-sm" data-on-click="saveRetailPoolAdmin()">Сохранить пул</button>
+            <span id="retailPoolStatus" style="font-size:11px"></span>
+          </div>
+        </div>
         <div class="analytics-card" style="margin-top:16px">
           <h3 style="margin:0 0 12px" id="tariffFormTitle">Новый тариф</h3>
           <input type="hidden" id="tfId">
           <div class="add-form">
             <div class="form-group"><label class="form-label" style="font-size:10px">Название</label><input class="form-input" id="tfName" placeholder="Россия · МТС" style="width:100%"></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Гео</label><input class="form-input" id="tfGeo" placeholder="RU" style="width:100%"></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">Сервер</label><input class="form-input" id="tfServer" placeholder="S1 (пусто — из пула)" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Сервер</label><select class="form-input" id="tfServer" style="width:100%"><option value="">— по умолчанию (из retail_pool_servers)</option></select></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Цена, ₽/мес</label><input class="form-input" id="tfPrice" type="number" min="1" placeholder="1500" style="width:100%"></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Длительность, часов</label><input class="form-input" id="tfDuration" type="number" min="1" placeholder="24 = тест-день" style="width:100%"></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Мин. пополнение, дней</label><input class="form-input" id="tfMinTopup" type="number" min="1" max="90" value="1" style="width:100%"></div>
@@ -886,7 +895,9 @@
 
           <div class="set-grp-label">СПИДТЕСТЫ</div>
           <div class="set-card">
-            <div class="set-row"><div><div class="set-row-t">Модемы ежечасного замера</div><div class="set-row-d">Ники через запятую — по ним идёт замер скорости каждый час (график «Скорость модемов»). Автозамер по всему флоту отключён: остальные модемы — только вручную по кнопке</div></div><input id="speedtestModemsInput" placeholder="MD2_40, MD2_44, MD_01, MD_04, MD_10" style="width:230px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Модемы ежечасного замера</div><div class="set-row-d">Отметьте ники — по ним идёт замер скорости каждый час (график «Скорость модемов»). Автозамер по всему флоту отключён: остальные модемы — только вручную по кнопке. Ничего не отмечено = дефолтный список на бэке</div></div></div>
+            <div id="speedtestModemsBox" style="padding:2px 14px 12px"><div style="font-size:11px;color:var(--text-3)">Загрузка списка модемов…</div></div>
+            <input type="hidden" id="speedtestModemsInput">
             <div class="set-row"><div><div class="set-row-t">Мин. скорость</div><div class="set-row-d">Ниже — скорость подсвечивается красным в таблице</div></div><div class="set-inp"><input id="minSpeedInput" type="number" step="0.5" min="0"><span>Mbps</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Порог медленного</div><div class="set-row-d">Если download/upload ниже — модем помечается для повторного теста</div></div><div class="set-inp"><input id="speedtestLowThresholdInput" type="number" step="0.1" min="0.1" max="50"><span>Mbps</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Задержка ре-теста</div><div class="set-row-d">Через сколько минут перетестировать медленный модем</div></div><div class="set-inp"><input id="speedtestRetestDelayInput" type="number" min="1" max="120"><span>мин</span></div></div>
@@ -1225,16 +1236,16 @@
      Логи доменов removed (low-use research tool, duplicated Топ ресурсов). -->
 
 
-<script src="/js/icons.js?v=0813e"></script>
+<script src="/js/icons.js?v=0813f"></script>
 <script src="/js/utils.js?v=0813a"></script>
 <script src="/js/delegation.js?v=0727b"></script>
 <script src="/js/admin/delegated-helpers.js?v=0804a"></script>
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
-<script src="/js/admin/analytics.js?v=0813b"></script>
+<script src="/js/admin/analytics.js?v=0813c"></script>
 <script src="/js/admin/finance.js?v=0813a"></script>
 <script src="/js/admin/modems.js?v=0722c"></script>
-<script src="/js/admin/settings.js?v=0813a"></script>
-<script src="/js/admin/speed-monitor.js?v=0813c"></script>
-<script src="/js/admin.js?v=0813d"></script>
+<script src="/js/admin/settings.js?v=0813b"></script>
+<script src="/js/admin/speed-monitor.js?v=0813d"></script>
+<script src="/js/admin.js?v=0813f"></script>
 </body>
 </html>

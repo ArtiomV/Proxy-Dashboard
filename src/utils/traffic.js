@@ -42,13 +42,27 @@ function normalizeOperator(rawOp, isRO) {
     'unite': 'Moldtelecom',
     'moldtelecom': 'Moldtelecom',
     'moldtelecom moldtelecom': 'Moldtelecom',
+    'moldcell': 'Moldcell',
     'orange': isRO ? 'Orange RO' : 'Orange MD',
     'orange ro': 'Orange RO',
     'orange md': 'Orange MD',
+    'vf-ro': 'Vodafone RO',
+    'vfro': 'Vodafone RO',
     'vodafone ro': 'Vodafone RO',
     'vodafone': 'Vodafone RO'
   };
-  return map[clean] || (clean ? clean.charAt(0).toUpperCase() + clean.slice(1) : '');
+  if (map[clean]) return map[clean];
+  // 2026-08-13: алиасы без разделителей — «VF_RO»/«vf ro»/«MOLDCELL » и т.п.
+  // не должны плодить отдельные операторы в легендах/группировках.
+  const squashMap = {
+    'moldcell': 'Moldcell',
+    'vfro': 'Vodafone RO',
+    'vodafone': 'Vodafone RO',
+    'vodafonero': 'Vodafone RO'
+  };
+  const squashed = clean.replace(/[\s._-]+/g, '');
+  if (squashMap[squashed]) return squashMap[squashed];
+  return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
 module.exports = { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator };
