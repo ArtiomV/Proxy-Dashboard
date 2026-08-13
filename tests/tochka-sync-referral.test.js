@@ -160,7 +160,10 @@ describe('A3: natural-key sequence anti-collision in sync', () => {
     // Both real payments credited — the old natural_key gate swallowed the second.
     expect(dbBalance(pair.referred.id)).toBe(10000);
     expect(dbReferral(pair.referrer.id)).toBe(1000);   // 10% of each 5000
-    const keys = db.prepare("SELECT natural_key FROM bank_payments WHERE payer_inn = '6000000002' ORDER BY id")
+    // ORDER BY rowid, не id: id — текстовый 'bp_<ms>_<random>', и при вставке
+    // обеих строк в одну миллисекунду порядок решал случайный суффикс —
+    // флейк в CI (keys[1] оказывался базовым ключом вместо '#2').
+    const keys = db.prepare("SELECT natural_key FROM bank_payments WHERE payer_inn = '6000000002' ORDER BY rowid")
       .all().map(r => r.natural_key);
     expect(keys.length).toBe(2);
     expect(keys[0]).not.toBe(keys[1]);
