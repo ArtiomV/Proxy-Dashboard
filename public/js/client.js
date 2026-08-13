@@ -1434,9 +1434,9 @@ function renderTable(){
     var name=countryNames[country]||country;
     var count=groupRows.length;
 
-    // colspan=9 for 9 columns (Модем, Реквизиты, Логин:Пароль, Смена IP, Ротация, Скорость, Сегодня, Вчера, Месяц)
+    // colspan=8 for 8 columns (Модем, Реквизиты, Логин:Пароль, Смена IP, Ротация, Сегодня, Вчера, Месяц)
     html+='<tr class="country-header">'+
-      '<td colspan="9">'+
+      '<td colspan="8">'+
         name+
         '<span class="country-count">'+count+' модемов</span>'+
       '</td>'+
@@ -1492,16 +1492,6 @@ function renderTable(){
 
       var rowStyle=row._cached?'opacity:0.6':(row._offline?'opacity:0.45':'');
 
-      // Скорость (последний замер speedtest, Мбит/с) —
-      // данные уже приходят в /api/dashboard_data, просто раньше не выводились.
-      var speedHtml='<span class="text-dim">—</span>';
-      if(row.speedDl||row.speedUl){
-        speedHtml='<span class="speed-cell" style="font-size:11px">'+
-          '<span class="speed-dl">\u2193 '+(row.speedDl?row.speedDl.toFixed(1):'0')+'</span> '+
-          '<span class="speed-ul">\u2191 '+(row.speedUl?row.speedUl.toFixed(1):'0')+'</span>'+
-        '</span>';
-      }
-
       html+='<tr style="'+rowStyle+'">'+
         '<td>'+
           '<div style="display:flex;align-items:center;gap:10px">'+
@@ -1518,7 +1508,6 @@ function renderTable(){
         '<td>'+loginPassHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+changeIpHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+buildRotationCell(row)+'</td>'+
-        '<td style="text-align:center;white-space:nowrap">'+speedHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+dayHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+yesterdayHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+monthHtml+'</td>'+
@@ -1566,9 +1555,6 @@ function renderTable(){
       mobileHtml+='<div class="mc-stats">';
       mobileHtml+='<div class="mc-stat"><span class="mc-stat-lbl">\u0412\u0447\u0435\u0440\u0430</span><span class="mc-stat-val">'+mYestVal+'</span></div>';
       mobileHtml+='<div class="mc-stat"><span class="mc-stat-lbl">\u041c\u0435\u0441\u044f\u0446</span><span class="mc-stat-val">'+mMonthVal+'</span></div>';
-      if(mrow.speedDl||mrow.speedUl){
-        mobileHtml+='<div class="mc-stat"><span class="mc-stat-lbl">\u0421\u043a\u043e\u0440\u043e\u0441\u0442\u044c</span><span class="mc-stat-val"><span class="speed-dl">\u2193'+(mrow.speedDl?mrow.speedDl.toFixed(1):'0')+'</span> <span class="speed-ul">\u2191'+(mrow.speedUl?mrow.speedUl.toFixed(1):'0')+'</span></span></div>';
-      }
       mobileHtml+='</div>';
       mobileHtml+='<div class="mc-expanded">';
       if(mServerIp&&mrow.httpPort){
