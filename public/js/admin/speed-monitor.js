@@ -164,11 +164,12 @@ function loadSpeedMonitor(force) {
           },
           tooltip: {
             mode: 'index', intersect: false,
+            displayColors: false,   // строк серий нет — цветные маркеры не нужны
             callbacks: {
-              label: function (ctx) {
-                var v = ctx.parsed.y;
-                return ctx.dataset.label + ': ' + (v == null ? 'нет замера' : v.toFixed(2) + ' Мбит/с');
-              },
+              // Строки серий («ник: ↓x.x») подавлены: в Chart.js 4 label,
+              // вернувший null, не рендерится (пустых строк не остаётся).
+              // Попап = title (час) + footer с блоком локаций.
+              label: function () { return null; },
               // Блок локаций наведённого часа: строка-заголовок — только
               // название локации, под ней операторы по одному на строку
               // (по убыванию dl): «Moldcell ↓12.3 ↑4.5 Мбит/с». Если у
