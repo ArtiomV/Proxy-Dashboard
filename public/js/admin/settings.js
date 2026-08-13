@@ -162,9 +162,11 @@ var _minSpeedThreshold=2;
 var _errorRateThreshold=15;
 function loadSettings(){
   api(API+'/api/admin/settings').then(function(s){
-    var times=s.speedtest_times||['02:00','14:00'];
-    document.getElementById('speedtestTimesInput').value=times.join(', ');
-    document.getElementById('settingsStatus').textContent='Текущее расписание: '+times.join(', ')+' UTC';
+    // Модемы почасового замера (speedtest_times/расписание убрано 2026-08-13:
+    // авто-замер всего флота отключён, остался почасовой SpeedMonitor).
+    var _smodEl=document.getElementById('speedtestModemsInput');
+    if(_smodEl)_smodEl.value=s.speedtest_modems||'MD2_40,MD2_44,MD_01,MD_04,MD_10';
+    document.getElementById('settingsStatus').textContent='Почасовой замер: '+(_smodEl?_smodEl.value:'');
     _minSpeedThreshold=s.min_speed_threshold!=null?s.min_speed_threshold:2;
     document.getElementById('minSpeedInput').value=_minSpeedThreshold;
     _errorRateThreshold=s.error_rate_threshold!=null?s.error_rate_threshold:15;
@@ -280,9 +282,10 @@ function saveProxyCheckSettings(){
   }).catch(function(e){showToast(e.message,'error')});
 }
 function saveSettings(){
-  var val=document.getElementById('speedtestTimesInput').value;
-  var times=val.split(',').map(function(t){return t.trim()}).filter(function(t){return/^\d{1,2}:\d{2}$/.test(t)});
-  if(!times.length){showToast('Неверный формат','error');return}
+  // Ники модемов почасового замера: CSV → нормализуем, пусто = дефолт на бэке.
+  var modemsRaw=(document.getElementById('speedtestModemsInput')||{}).value||'';
+  var modems=modemsRaw.split(',').map(function(t){return t.trim()}).filter(Boolean);
+  if(modems.some(function(n){return !/^[\w-]{1,64}$/.test(n)})){showToast('Ники: только латиница, цифры, _ и -','error');return}
   var minSpeed=parseFloat(document.getElementById('minSpeedInput').value)||2;
   var errThresh=parseInt(document.getElementById('errorRateThresholdInput').value)||15;
   var lowThresh=parseFloat(document.getElementById('speedtestLowThresholdInput').value)||1;
@@ -298,8 +301,8 @@ function saveSettings(){
   var staleH=parseInt(document.getElementById('staleModemHoursInput').value)||12;
   var offThMin=parseInt((document.getElementById('modemOfflineThresholdInput')||{}).value)||10;
   window._offlineThresholdMin=offThMin;
-  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_times:times,min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_low_threshold:lowThresh,speedtest_retest_delay_min:retestDelay,speedtest_max_history:maxHist,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
-    if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Расписание обновлено: '+times.join(', ')+' UTC';renderTable()}
+  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_low_threshold:lowThresh,speedtest_retest_delay_min:retestDelay,speedtest_max_history:maxHist,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
+    if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Почасовой замер: '+(modems.join(', ')||'дефолтный список')+' — применится со следующего часа';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
 }

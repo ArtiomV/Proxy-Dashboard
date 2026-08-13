@@ -275,6 +275,16 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.speedtest_low_threshold != null)    patch.speedtest_low_threshold    = Math.max(0.1, Math.min(50, parseFloat(req.body.speedtest_low_threshold) || 1));
   if (req.body.speedtest_retest_delay_min != null) patch.speedtest_retest_delay_min = Math.max(1, Math.min(120, parseInt(req.body.speedtest_retest_delay_min) || 10));
   if (req.body.speedtest_max_history != null)      patch.speedtest_max_history      = Math.max(5, Math.min(200, parseInt(req.body.speedtest_max_history) || 30));
+  // Модемы почасового SpeedMonitor: CSV ников (строка). Ники — [A-Za-z0-9_-],
+  // до 50 штук; пустая строка = вернуться к дефолту (джоба подставит сама).
+  if (req.body.speedtest_modems != null) {
+    const nicks = String(req.body.speedtest_modems).split(',')
+      .map(s => s.trim()).filter(Boolean);
+    if (nicks.length > 50 || nicks.some(n => !/^[\w-]{1,64}$/.test(n))) {
+      return res.status(400).json({ error: 'speedtest_modems: CSV ников [A-Za-z0-9_-], до 50 штук' });
+    }
+    patch.speedtest_modems = nicks.join(',');
+  }
   // Data retention (days)
   if (req.body.retention_traffic_hourly != null) patch.retention_traffic_hourly = Math.max(7, Math.min(365, parseInt(req.body.retention_traffic_hourly) || 90));
   if (req.body.retention_daily_traffic != null)  patch.retention_daily_traffic  = Math.max(7, Math.min(365, parseInt(req.body.retention_daily_traffic) || 90));

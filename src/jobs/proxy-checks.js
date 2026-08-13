@@ -2,9 +2,10 @@
 //
 // src/jobs/proxy-checks.js — периодические проверки качества прокси:
 // checkProxyLatency (батч ping-проверок каждые N минут, пишет proxy_checks)
-// и runNightlySpeedtests (ночной прогон Ookla speedtest по всем модемам,
-// с re-test низких скоростей). Extracted from server.js (Stage 9) — без
-// изменения логики.
+// и runNightlySpeedtests (прогон Ookla speedtest по всем модемам,
+// с re-test низких скоростей; с 2026-08-13 не планируется — см.
+// src/jobs/daily-schedule.js, оставлен для возможного возврата).
+// Extracted from server.js (Stage 9) — без изменения логики.
 
 function create(deps) {
   const {

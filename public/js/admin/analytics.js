@@ -548,7 +548,7 @@ function showHeatTT(di,hr,event,cell,ctx){
       tt.innerHTML+='<div style="font-size:10px;color:#9b9b98;margin-top:6px">Модемов: <b style="color:#1a1a1a;font-weight:600">'+mCnt+'</b> · с данными за час: <b style="color:#1a1a1a;font-weight:600">'+_hm+'</b></div>';
     }
     var isCorrected=data.meta&&data.meta.corrected&&data.meta.corrected[di]&&data.meta.corrected[di][hr];
-    if(isCorrected)tt.innerHTML+='<div style="font-size:10px;color:#D4880F;margin-top:6px">'+icon('alert',10)+' Данные скорректированы</div>';
+    if(isCorrected)tt.innerHTML+='<div style="font-size:10px;color:var(--warning);margin-top:6px">'+icon('alert',10)+' Данные скорректированы</div>';
   }
 
   tt.style.display='block';tt.style.left='-9999px';tt.style.top='-9999px';

@@ -28,7 +28,8 @@ function runStartup(d) {
     setHourlyAggSched, runSpeedMonitor,
   } = d;
 
-  // Schedule speedtests (configurable times, default 02:00 + 14:00)
+  // Авто-спидтесты всего флота отключены 2026-08-13 (daily-schedule.js) —
+  // вызов оставлен: rescheduleSpeedtests() теперь no-op, только чистит таймеры.
   rescheduleSpeedtests();
 
   // Schedule nightly TopHosts at 03:00
@@ -171,7 +172,8 @@ function runStartup(d) {
   _intervals.push(setInterval(() => _scheduledTochkaSync('periodic'), 30 * 60 * 1000));
 
   // SpeedMonitor: почасовой замер скорости выбранных модемов
-  // (src/jobs/speed-monitor.js, ники из SPEED_MONITOR_NICKS). Первый прогон
+  // (src/jobs/speed-monitor.js, ники из настройки speedtest_modems,
+  // читается на каждый прогон). Первый прогон
   // через 4 минуты после старта (после прогрева кэша), далее каждый час.
   // Джоб сам резолвит ник → бокс, переезд симки на другой бокс переживает.
   // Данные: таблица speed_monitor, выдача — GET /api/admin/speed-monitor.

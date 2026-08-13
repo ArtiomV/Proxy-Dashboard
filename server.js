@@ -1514,6 +1514,9 @@ function generateId() { return crypto.randomBytes(8).toString('hex'); }
 
 const SETTINGS_DEFAULTS = {
   speedtest_times: ['02:00', '14:00'],
+  // Ники модемов почасового замера скорости (SpeedMonitor), CSV.
+  // Редактируется в Настройках → «Спидтесты и пороги качества».
+  speedtest_modems: 'MD2_40,MD2_44,MD_01,MD_04,MD_10',
   pricing_tiers: [
     { min_proxies: 1, price: 30, label: '1-4 прокси' },
     { min_proxies: 5, price: 25, label: '5-9 прокси' },
@@ -2805,11 +2808,13 @@ const _proxyCheckJobs = require('./src/jobs/proxy-checks').create({
   apiServers, fetchApi, appSettings, pushSpeedtestEntry,
 });
 const checkProxyLatency = _proxyCheckJobs.checkProxyLatency;
-const runNightlySpeedtests = _proxyCheckJobs.runNightlySpeedtests;
+// runNightlySpeedtests (весь флот) больше нигде не планируется — 2026-08-13
+// авто-замер по всем модемам отключён (см. src/jobs/daily-schedule.js).
 
-// Почасовой замер скорости выбранных модемов (список — SPEED_MONITOR_NICKS).
+// Почасовой замер скорости выбранных модемов (список — настройка speedtest_modems,
+// env SPEED_MONITOR_NICKS остаётся override'ом для стендов).
 const _speedMonitor = require('./src/jobs/speed-monitor').create({
-  db, logger, logActivity, apiServers, fetchApi, normalizeOperator,
+  db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting,
 });
 
 function getSpeedtestLatest() {
@@ -3247,14 +3252,12 @@ app.use(require('./src/routes/clients')({
 
 // API Servers management
 // Servers + settings routes moved to src/routes/servers.js (Stage 3).
-// Dynamic speedtest scheduler + суточное расписание вынесены в
-// src/jobs/daily-schedule.js (Stage 9, boot-хвост). speedtestTimers/cronTimers
-// — те же объекты по ссылке для gracefulShutdown. runNightlySpeedtests
-// объявлен ниже по файлу — ленивая обёртка (тот же паттерн, что syncRotationLog).
+// Суточное расписание вынесено в src/jobs/daily-schedule.js (Stage 9,
+// boot-хвост). speedtestTimers/cronTimers — те же объекты по ссылке для
+// gracefulShutdown. Авто-спидтесты всего флота отключены 2026-08-13
+// (см. daily-schedule.js) — rescheduleSpeedtests оставлен no-op'ом.
 const _dailySched = require('./src/jobs/daily-schedule').create({
   logger, scheduler: require('./src/jobs/scheduler'),
-  getAppSettings: () => appSettings, getTzOffset,
-  runNightlySpeedtests: (...args) => runNightlySpeedtests(...args),
 });
 const scheduleRepeating = _dailySched.scheduleRepeating;
 const rescheduleSpeedtests = _dailySched.rescheduleSpeedtests;

@@ -1,12 +1,12 @@
 'use strict';
 //
 // src/jobs/daily-schedule.js — суточное расписание: scheduleRepeating
-// (единый реестр src/jobs/scheduler.js, WP6.4) и динамический планировщик
-// спидтестов (несколько времён в день). Extracted from server.js
-// (Stage 9, boot-хвост) — без изменения логики.
+// (единый реестр src/jobs/scheduler.js, WP6.4). Динамический планировщик
+// спидтестов по всему флоту отключён 2026-08-13 (см. rescheduleSpeedtests).
+// Extracted from server.js (Stage 9, boot-хвост) — без изменения логики.
 
 function create(deps) {
-  const { logger, scheduler, getAppSettings, getTzOffset, runNightlySpeedtests } = deps;
+  const { logger, scheduler } = deps;
 
   // Таймеры наружу (gracefulShutdown в server.js чистит их по ссылке).
   const speedtestTimers = [];
@@ -39,14 +39,12 @@ function create(deps) {
     speedtestTimers.forEach(t => { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); });
     speedtestTimers.length = 0;
 
-    const times = getAppSettings().speedtest_times || ['02:00', '14:00'];
-    const mskOff = getTzOffset('Europe/Moscow');
-    for (const timeStr of times) {
-      const parts = timeStr.split(':').map(Number);
-      if (parts.length !== 2 || isNaN(parts[0]) || isNaN(parts[1])) continue;
-      const utcHour = (parts[0] - mskOff + 24) % 24;
-      scheduleRepeating(utcHour, parts[1], 'Speedtest-' + timeStr + ' MSK', runNightlySpeedtests, true);
-    }
+    // 2026-08-13: автоматический замер скорости по ВСЕМУ флоту отключён —
+    // два прогона в сутки × весь парк жгли трафик симок без практической
+    // пользы (история speedtest_history.json дублируется ручным замером и
+    // почасовым SpeedMonitor). Остаются: почасовой SpeedMonitor по модемам
+    // из настройки speedtest_modems + ручной замер по кнопке. Функция
+    // оставлена: её дёргают boot и PUT /api/admin/settings.
   }
 
   return { scheduleRepeating, rescheduleSpeedtests, speedtestTimers, cronTimers };

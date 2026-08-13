@@ -156,6 +156,9 @@ r.get('/api/admin/speed-monitor', authMiddleware, adminMiddleware, (req, res) =>
         nick: x.nick,
         server: x.server || '',
         location: (srv && (srv.countryName || srv.country)) || x.server || '',
+        // Адрес локации из карточки сервера («Армянская …») — группировка
+        // по локациям на дашборде; пусто, если адрес не заполнен.
+        address: (srv && srv.address) || '',
         operator: x.operator || '',
       });
     }
@@ -220,6 +223,7 @@ r.get('/api/client/speed_monitor', authMiddleware, (req, res) => {
         nick: x.nick,
         server: x.server || '',
         location: (srv && (srv.countryName || srv.country)) || x.server || '',
+        address: (srv && srv.address) || '',
         operator: x.operator || '',
       });
     }

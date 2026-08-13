@@ -7,7 +7,9 @@
   --border:rgba(17,24,39,.09); --border-hover:rgba(17,24,39,.16);
   --text-0:#10151f; --text-1:#39424f; --text-2:#697587; --text-3:#9aa4b3;
   --accent:#2f6fe0; --accent-hover:#2560cc; --accent-dim:rgba(47,111,224,.10); --accent-glow:rgba(47,111,224,.18);
-  --success:#16a34a; --warning:#b5740a; --danger:#dc3a34;
+  /* --warning приведён к #FFCC00 — тот же жёлтый акцент, что на странице
+     клиентов (пауза/предупреждения/бейджи); был коричневатый #b5740a. */
+  --success:#16a34a; --warning:#FFCC00; --danger:#dc3a34;
   --card-bg:#ffffff; --card-border:rgba(17,24,39,.09);
   --card-shadow:0 1px 2px rgba(16,24,40,.05),0 0 0 1px rgba(17,24,39,.04);
   --zebra:#f8fafc;
@@ -28,7 +30,7 @@
 #tab-bank .form-input::placeholder{color:var(--text-3)}
 
 /* ── Обзор («.fxw») — light component palette ── */
-#tab-bank .fxw{--ac:#2f6fe0;--acd:#2f6fe0;--gr:#16a34a;--am:#b5740a;--rd:#dc3a34;--cd:#ffffff;--cd2:#f6f8fb;--bd:rgba(17,24,39,.09);--t0:#10151f;--t1:#39424f;--t2:#697587;--t3:#9aa4b3;color:var(--t0)}
+#tab-bank .fxw{--ac:#2f6fe0;--acd:#2f6fe0;--gr:#16a34a;--am:#FFCC00;--rd:#dc3a34;--cd:#ffffff;--cd2:#f6f8fb;--bd:rgba(17,24,39,.09);--t0:#10151f;--t1:#39424f;--t2:#697587;--t3:#9aa4b3;color:var(--t0)}
 #tab-bank .fxw .fx-hd{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;flex-wrap:wrap}
 #tab-bank .fxw .fx-h{font-size:18px;font-weight:700;margin:0}
 #tab-bank .fxw .fx-act{display:flex;gap:7px;align-items:center}

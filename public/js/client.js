@@ -48,6 +48,7 @@ function switchTab(name,el){
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='traffic') renderProxyTable();
   if(name==='analytics') renderAnalytics();
+  if(name==='history') loadHistory();
   if(name==='documents') loadDocuments();
   if(name==='api') loadApiDocs();
   if(name==='referral') loadReferral();
@@ -1136,7 +1137,6 @@ var refreshInterval=null;
 function showApp(){
   document.getElementById('loginOverlay').style.display='none';
   document.getElementById('appMain').style.display='block';
-  document.getElementById('currentUser').textContent=authLogin;
   loadData();
   if(refreshInterval) clearInterval(refreshInterval);
   refreshInterval=setInterval(loadData,60*60*1000);
@@ -1205,11 +1205,9 @@ async function fetchJSON(url){
 }
 
 function setStatus(state,text){
-  var dot=document.getElementById('statusDot');
   var txt=document.getElementById('statusText');
-  dot.className='status-indicator status-'+state;
   // «OK» не показываем — текст только при проблемах
-  txt.textContent=state==='ok'?'':text;
+  if(txt)txt.textContent=state==='ok'?'':text;
 }
 
 function escapeHtml(str){return esc(str)}
@@ -1741,6 +1739,29 @@ function resetIp(imei,serverName,btn){
   }).catch(function(){btn.disabled=false;showToast('Ошибка сети','error')});
 }
 
+// Форматирование лога ротации — общее для модалки и вкладки «История»
+function _fmtRotTime(v){if(!v||v==='\u2014')return'\u2014';var s=String(v).replace('@',' ').replace('T',' ');var d=new Date(s);if(isNaN(d.getTime())){var p=s.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):?(\d{2})?/);if(p)return p[3]+'.'+p[2]+'.'+p[1]+' '+p[4]+':'+p[5]+(p[6]?':'+p[6]:'');return s}return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
+function _rotCallerLabel(caller,mode){var map={schedule:'По расписанию',link:'По ссылке',api:'Через API',manual:'Вручную',webapp:'Из панели'};var c=caller?String(caller):'';var label=map[c.toLowerCase()]||(c?escapeHtml(c):'\u2014');var m=mode&&String(mode)!=='auto'?' <span style="font-size:10px;color:var(--text-3)">'+escapeHtml(String(mode))+'</span>':'';return label+m;}
+function _rotLogTableHtml(entries){
+  if(!entries.length) return '<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории ротации</div>';
+  var h='<table class="log-table"><thead><tr><th>Начало</th><th>Инициатор</th><th>Сек</th><th>Старый IP</th><th>Новый IP</th></tr></thead><tbody>';
+  entries.forEach(function(e){
+    var start=e.started_at||e.start_time||e.Start||e.start||'\u2014';
+    var took=e.took_sec||e.total_time||e.Took||e.took||'\u2014';
+    var oldIp=e.old_ip||e.OldIPv4||'\u2014';
+    var newIp=e.new_ip||e.NewIPv4||'\u2014';
+    h+='<tr>';
+    var unchanged=(oldIp!=='\u2014'&&newIp!=='\u2014'&&String(oldIp)===String(newIp));
+    h+='<td style="white-space:nowrap">'+_fmtRotTime(start)+'</td>';
+    h+='<td style="white-space:nowrap">'+_rotCallerLabel(e.caller,e.target_mode)+'</td>';
+    h+='<td>'+(took!=='\u2014'?parseFloat(took).toFixed(1):'\u2014')+'</td>';
+    h+='<td class="mono" style="color:var(--text-2)">'+escapeHtml(String(oldIp))+'</td>';
+    h+='<td class="mono" style="color:'+(unchanged?'var(--warning,#c60)':'var(--accent)')+'">'+escapeHtml(String(newIp))+(unchanged?' <span style="font-size:10px;color:var(--warning,#c60)">'+icon('alert',10)+' \u043d\u0435 \u0441\u043c\u0435\u043d\u0438\u043b\u0441\u044f</span>':'')+'</td>';
+    h+='</tr>';
+  });
+  return h+'</tbody></table>';
+}
+
 // IP history — same format as admin panel
 function showIpHistory(nick,serverName,imei){
   document.getElementById('ipModalTitle').textContent='IP история: '+nick;
@@ -1754,32 +1775,68 @@ function showIpHistory(nick,serverName,imei){
 
   api('/api/client/rotation_log?nick='+encodeURIComponent(nick)+'&serverName='+encodeURIComponent(serverName)).then(function(data){
     var entries=Array.isArray(data)?data:(data.log||data.logs||data.data||[]);
-    if(!entries.length){
-      document.getElementById('ipModalBody').innerHTML='<div style="text-align:center;padding:20px;color:var(--text-3)">Нет истории ротации</div>';
-      return;
-    }
-    function _fmtRot(v){if(!v||v==='\u2014')return'\u2014';var s=String(v).replace('@',' ').replace('T',' ');var d=new Date(s);if(isNaN(d.getTime())){var p=s.match(/(\d{4})-(\d{2})-(\d{2})\s+(\d{2}):(\d{2}):?(\d{2})?/);if(p)return p[3]+'.'+p[2]+'.'+p[1]+' '+p[4]+':'+p[5]+(p[6]?':'+p[6]:'');return s}return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit'})}
-    function _rotCaller(caller,mode){var map={schedule:'По расписанию',link:'По ссылке',api:'Через API',manual:'Вручную',webapp:'Из панели'};var c=caller?String(caller):'';var label=map[c.toLowerCase()]||(c?escapeHtml(c):'—');var m=mode&&String(mode)!=='auto'?' <span style="font-size:10px;color:var(--text-3)">'+escapeHtml(String(mode))+'</span>':'';return label+m;}
-    var h='<table class="log-table"><thead><tr><th>Начало</th><th>Инициатор</th><th>Сек</th><th>Старый IP</th><th>Новый IP</th></tr></thead><tbody>';
-    entries.forEach(function(e){
-      var start=e.started_at||e.start_time||e.Start||e.start||'\u2014';
-      var end=e.ended_at||e.end_time||e.End||e.end||'\u2014';
-      var took=e.took_sec||e.total_time||e.Took||e.took||'\u2014';
-      var attempt=e.attempt||e.Attempt||1;
-      var oldIp=e.old_ip||e.OldIPv4||'\u2014';
-      var newIp=e.new_ip||e.NewIPv4||'\u2014';
-      h+='<tr>';
-      var unchanged=(oldIp!=='\u2014'&&newIp!=='\u2014'&&String(oldIp)===String(newIp));
-      h+='<td style="white-space:nowrap">'+_fmtRot(start)+'</td>';
-      h+='<td style="white-space:nowrap">'+_rotCaller(e.caller,e.target_mode)+'</td>';
-      h+='<td>'+(took!=='\u2014'?parseFloat(took).toFixed(1):'\u2014')+'</td>';
-      h+='<td class="mono" style="color:var(--text-2)">'+escapeHtml(String(oldIp))+'</td>';
-      h+='<td class="mono" style="color:'+(unchanged?'var(--warning,#c60)':'var(--accent)')+'">'+escapeHtml(String(newIp))+(unchanged?' <span style="font-size:10px;color:var(--warning,#c60)">'+icon('alert',10)+' \u043d\u0435 \u0441\u043c\u0435\u043d\u0438\u043b\u0441\u044f</span>':'')+'</td>';
-      h+='</tr>';
-    });
-    document.getElementById('ipModalBody').innerHTML=h+'</tbody></table>';
+    document.getElementById('ipModalBody').innerHTML=_rotLogTableHtml(entries);
   }).catch(function(e){
     document.getElementById('ipModalBody').innerHTML='<div style="color:var(--danger)">'+e.message+'</div>';
+  });
+}
+
+// ==================== Вкладка «История» ====================
+// Sub-табы: «Смена IP» (лог ротации по выбранному модему) и «Замеры
+// скорости» (почасовой SpeedMonitor-график — карта перенесена сюда из
+// «Аналитики», чтобы обе истории были доступны без длинного скролла).
+var historySub='ip';
+var historyModem=null; // {nick,serverName}
+
+function switchHistorySub(sub){
+  historySub=sub;
+  ['ip','speed'].forEach(function(s){
+    var b=document.getElementById('hsub-'+s);
+    if(b){b.style.borderBottom=s===sub?'2px solid var(--accent)':'2px solid transparent';b.style.color=s===sub?'var(--accent)':'var(--text-2)';}
+  });
+  document.getElementById('historySubIp').style.display=sub==='ip'?'':'none';
+  document.getElementById('historySubSpeed').style.display=sub==='speed'?'':'none';
+  // График пересоздаём при открытии — в скрытой вкладке canvas имеет нулевой размер
+  if(sub==='speed') loadClientSpeed();
+}
+
+function loadHistory(){
+  renderHistoryModemPills();
+  loadHistoryRotation();
+  if(historySub==='speed') loadClientSpeed();
+}
+
+function renderHistoryModemPills(){
+  var box=document.getElementById('historyModemPills');
+  if(!box)return;
+  var rows=tableData.filter(function(r){return r.modemNick&&r.serverName;});
+  if(!historyModem&&rows.length) historyModem={nick:rows[0].modemNick,serverName:rows[0].serverName};
+  var h='';
+  rows.forEach(function(r){
+    var active=historyModem&&historyModem.nick===r.modemNick&&historyModem.serverName===r.serverName;
+    var arg=r.modemNick.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    var arg2=r.serverName.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+    h+='<button data-on-click="pickHistoryModem(\''+arg+'\',\''+arg2+'\')" style="padding:4px 12px;font-size:11px;cursor:pointer;border-radius:6px;border:1px solid '+(active?'var(--accent)':'var(--border)')+';background:'+(active?'var(--accent)':'var(--bg-2)')+';color:'+(active?'#fff':'var(--text-1)')+'">'+escapeHtml(r.modemNick)+'</button>';
+  });
+  box.innerHTML=h||'<span style="font-size:12px;color:var(--text-3)">Нет модемов</span>';
+}
+
+function pickHistoryModem(nick,serverName){
+  historyModem={nick:nick,serverName:serverName};
+  renderHistoryModemPills();
+  loadHistoryRotation();
+}
+
+function loadHistoryRotation(){
+  var box=document.getElementById('historyRotationLog');
+  if(!box)return;
+  if(!historyModem){box.innerHTML='';return}
+  box.innerHTML='<div style="display:flex;flex-direction:column;gap:8px;padding:4px 0"><div class="skel" style="height:34px"></div><div class="skel" style="height:34px"></div><div class="skel" style="height:34px"></div></div>';
+  api('/api/client/rotation_log?nick='+encodeURIComponent(historyModem.nick)+'&serverName='+encodeURIComponent(historyModem.serverName)).then(function(data){
+    var entries=Array.isArray(data)?data:(data.log||data.logs||data.data||[]);
+    box.innerHTML=_rotLogTableHtml(entries);
+  }).catch(function(e){
+    box.innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
   });
 }
 
@@ -2278,10 +2335,11 @@ function _loadExportState(){
     if(s.format&&fmts.find(function(f){return f.id===s.format;}))exportFormat=s.format;
     else exportFormat=fmts.length?fmts[0].id:'txt_login_at';
     if(s.proto)exportProto=s.proto;
+    if(s.rotation!==undefined)exportRotation=!!s.rotation;
   }catch(e){}
 }
 function _saveExportState(){
-  try{localStorage.setItem('exportState',JSON.stringify({tab:exportTab,format:exportFormat,proto:exportProto}));}catch(e){}
+  try{localStorage.setItem('exportState',JSON.stringify({tab:exportTab,format:exportFormat,proto:exportProto,rotation:exportRotation}));}catch(e){}
 }
 
 function openExportModal(){
@@ -2341,7 +2399,7 @@ function buildExportModal(){
     '</div></div>'+
     '<div><div style="font-size:10px;color:var(--text-3);margin-bottom:4px">Ссылка смены IP</div>'+
     '<label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:11px;color:var(--text-1);height:27px">'+
-    '<input type="checkbox" id="exportRotationCheck" checked data-on-change="exportRotation=this.checked;refreshExportPreview()"> Включить</label>'+
+    '<input type="checkbox" id="exportRotationCheck" checked data-on-change="exportRotation=this.checked;refreshExportPreview();_saveExportState()"> Включить</label>'+
     '</div>'+
     '<div><div style="font-size:10px;color:var(--text-3);margin-bottom:4px">Локация</div>'+
     '<div style="display:flex;gap:4px">'+
@@ -2364,6 +2422,8 @@ function buildExportModal(){
 }
 
 function _rebuildExportModal(){
+  var chk=document.getElementById('exportRotationCheck');
+  if(chk)chk.checked=exportRotation;
   switchExportTab(exportTab);
 }
 
@@ -2500,11 +2560,14 @@ function buildExportContent(fmt){
   if(!fmt)fmt=exportFormat;
   var lines=[];
   var proto=exportProto;
-  var withRot=!!(document.getElementById('exportRotationCheck')||{}).checked;
+  var withRot=exportRotation;
 
   if(fmt==='txt_login_at'){
     proxies.forEach(function(p){
-      lines.push(exportTxtOrder==='host_colon'?p.host+':'+p.port+':'+p.login+':'+p.pass:p.login+':'+p.pass+'@'+p.host+':'+p.port);
+      var line=exportTxtOrder==='host_colon'?p.host+':'+p.port+':'+p.login+':'+p.pass:p.login+':'+p.pass+'@'+p.host+':'+p.port;
+      // Ссылка смены IP — через | после строки подключения (нет ссылки — без неё)
+      if(withRot&&p.changeip)line+='|'+p.changeip;
+      lines.push(line);
     });
   } else if(fmt==='json'){
     var arr=proxies.map(function(p){

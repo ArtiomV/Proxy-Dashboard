@@ -88,6 +88,69 @@ describe('SpeedMonitor: GET /api/admin/speed-monitor', () => {
   });
 });
 
+// Джоб с никами из настройки speedtest_modems (getSetting), без env-override.
+function makeJobWithSetting(fetchApi, settingCsv, envCsv) {
+  if (envCsv) process.env.SPEED_MONITOR_NICKS = envCsv;
+  const { normalizeOperator } = cjsRequire('../src/utils/traffic.js');
+  const job = speedMonitor.create({
+    db,
+    logger: { info() {}, warn() {}, error() {} },
+    logActivity() {},
+    apiServers: [{ name: 'S1', country: 'MD' }],
+    fetchApi,
+    normalizeOperator,
+    getSetting: (k, def) => (k === 'speedtest_modems' ? settingCsv : def),
+  });
+  delete process.env.SPEED_MONITOR_NICKS;
+  return job;
+}
+
+describe('SpeedMonitor: список модемов из настройки speedtest_modems', () => {
+  it('без env ники берутся из getSetting на каждый прогон', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const job = makeJobWithSetting(statusFetch({ download: '20', upload: '5', ping: '30' }), 'MD_01');
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 1, failed: 0 });
+    const nicks = db.prepare('SELECT nick FROM speed_monitor').all().map(x => x.nick);
+    expect(nicks).toEqual(['MD_01']);
+  });
+
+  it('env SPEED_MONITOR_NICKS — override над настройкой', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const job = makeJobWithSetting(statusFetch({ download: '1', upload: '1', ping: '1' }), 'MD_01', 'MD_04');
+    await job.runSpeedMonitor();
+    const nicks = db.prepare('SELECT nick FROM speed_monitor').all().map(x => x.nick);
+    expect(nicks).toEqual(['MD_04']);
+  });
+
+  it('пустая/битая настройка → дефолтный список DEFAULT_NICKS', () => {
+    const { DEFAULT_NICKS } = cjsRequire('../src/jobs/speed-monitor.js');
+    const job = makeJobWithSetting(statusFetch({}), '  ');
+    expect(job.getTargetNicks()).toEqual(DEFAULT_NICKS.split(','));
+  });
+
+  it('PUT /api/admin/settings: speedtest_modems валидируется и сохраняется', async () => {
+    const { asAdmin } = await import('./_helpers/app.js');
+    const request = (await import('supertest')).default;
+    const { app } = bootApp();
+    const token = asAdmin();
+
+    const bad = await request(app).put('/api/admin/settings')
+      .set('X-Auth-Token', token).send({ speedtest_modems: 'MD_01,плохой ник!' });
+    expect(bad.status).toBe(400);
+
+    const ok = await request(app).put('/api/admin/settings')
+      .set('X-Auth-Token', token).send({ speedtest_modems: ' MD_01 , MD_04 ' });
+    expect(ok.status).toBe(200);
+    const row = db.prepare("SELECT value FROM kv_store WHERE key = 'app_settings'").get();
+    expect(JSON.parse(row.value).speedtest_modems).toBe('MD_01,MD_04');
+
+    // Возвращаем дефолт — blob общий для других тестов процесса.
+    await request(app).put('/api/admin/settings')
+      .set('X-Auth-Token', token).send({ speedtest_modems: 'MD2_40,MD2_44,MD_01,MD_04,MD_10' });
+  });
+});
+
 describe('SpeedMonitor: runSpeedMonitor', () => {
   it('онлайн → ok-строка; оффлайн и не найден → ok=0 с причиной', async () => {
     db.prepare('DELETE FROM speed_monitor').run();

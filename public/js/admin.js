@@ -306,7 +306,7 @@ function renderSysDashboard(targetId){
       h += '<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap">';
       h += _sysKpi('Uptime', Math.floor((d.uptime_sec||0)/3600)+'ч '+Math.floor(((d.uptime_sec||0)%3600)/60)+'мин');
       h += _sysKpi('DB', (d.db&&d.db.size_mb||0)+' MB');
-      if(d.disk)h += _sysKpi('Диск', d.disk.free_gb+' ГБ своб.', d.disk.used_pct+'% занято из '+d.disk.total_gb+' ГБ', d.disk.used_pct>=85?'var(--danger)':(d.disk.used_pct>=75?'#D4880F':null));
+      if(d.disk)h += _sysKpi('Диск', d.disk.free_gb+' ГБ своб.', d.disk.used_pct+'% занято из '+d.disk.total_gb+' ГБ', d.disk.used_pct>=85?'var(--danger)':(d.disk.used_pct>=75?'var(--warning)':null));
       h += _sysKpi('Sessions', d.sessions || 0);
       h += _sysKpi('Memory RSS', (d.memory&&d.memory.rss_mb||0)+' MB', 'heap '+((d.memory&&d.memory.heap_mb)||0)+' MB');
       h += _sysKpi('API errors 24h', d.api_errors_24h || 0, null, d.api_errors_24h > 0 ? 'var(--danger)' : 'var(--success)');
@@ -3207,7 +3207,7 @@ function renderNewTopProblems(){
 // «Требует внимания» — одна карточка с плитками алертов (по макету):
 // 4 инфра-плитки (кликабельные, открывают попап со списком) + 2 бизнес-плитки
 // (долги с суммой, паузы). Тренд/Операторы живут в раскрывашке «Тренд и операторы».
-function _dwIcon(n){var P={gear:'<circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/>',line:'<path d="M4 17l5-5 4 3 7-8"/>',ant:'<circle cx="12" cy="13" r="1"/><path d="M12 14v6"/><path d="M8.5 9.5a5 5 0 0 1 7 0"/><path d="M6 6.5a8.5 8.5 0 0 1 12 0"/>',sat:'<rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/>'};return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="flex-shrink:0;vertical-align:-3px;color:var(--accent);margin-right:6px">'+(P[n]||'')+'</svg>';}
+function _dwIcon(n){var P={gear:'<circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>',line:'<path d="M4 17l5-5 4 3 7-8"/>',ant:'<circle cx="12" cy="13" r="1"/><path d="M12 14v6"/><path d="M8.5 9.5a5 5 0 0 1 7 0"/><path d="M6 6.5a8.5 8.5 0 0 1 12 0"/>',sat:'<rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/>'};return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="flex-shrink:0;vertical-align:-3px;color:var(--accent);margin-right:6px">'+(P[n]||'')+'</svg>';}
 function _dwT(t,ic){return '<div style="font-size:13px;font-weight:700;color:var(--text-0);margin-bottom:10px">'+_dwIcon(ic)+t+'</div>';}
 function renderNewExtWidgets(){
   var el=document.getElementById('newExtWidgets'); if(!el) return;
@@ -3269,7 +3269,7 @@ function renderNewExtWidgets(){
     +'<span data-on-click="toggleMrrFormula(this)" style="cursor:pointer;border:1px solid var(--border);border-radius:8px;padding:0 7px;font-size:9px;color:var(--text-2);font-weight:500">Формула</span>'
     +'<span class="mrr-fp" style="display:none;position:absolute;top:18px;right:0;z-index:60;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:9px 11px;width:290px;font-size:10px;font-weight:400;color:var(--text-1);box-shadow:var(--card-shadow);line-height:1.55">'
     +'<b>Выручка 30д (факт)</b> = списания + корректировки за скользящие 30 дн., без клиентов на паузе.<br>'
-    +'<b>Run-rate (ожидание)</b> = прогноз месяца, НЕ выручка: Σ по клиентам — среднесуточное потребление за последние 7 дней × дней в месяце × тариф (per-GB); per-modem — цена × живые модемы.'
+    +'<b>Прогноз месяца</b> = НЕ выручка, а ожидание при текущем темпе: Σ по клиентам — среднесуточное потребление за последние 7 дней × дней в месяце × тариф (per-GB); per-modem — цена × живые модемы.'
     +'</span></span></span></div>'
     +'<div style="flex:1;min-height:120px;position:relative"><canvas id="newFinTrendCanvas"></canvas><div id="mrrSkel" class="skel" style="position:absolute;inset:0"></div></div></div>';
   el.innerHTML=probCard+trendCard+mrrCard+opCard;
@@ -3332,15 +3332,13 @@ function renderNewFinance(d){
     hq += qtile('Расходы (мес.)', _cost>0?_fmtRub(_cost):'—', null);
     hq += qtile('Прибыль 30д', _cost>0?_fmtRub(_profit):'—', _cost>0?(_profit>=0?'var(--success)':'var(--danger)'):null);
     hq += qtile('Маржинальность', (_marginPct==null||!_cost)?'—':_marginPct+'%', (_marginPct!=null&&_cost)?(_marginPct>=50?'var(--success)':_marginPct>=25?'var(--warning)':'var(--danger)'):null);
-    // A9: run-rate — ожидание при текущем темпе, НЕ выручка; рядом с фактом, но подписан отдельно.
-    hq += qtile('Run-rate (ожидание)', s.run_rate_eom!=null?_fmtRub(s.run_rate_eom):(s.forecast_eom?_fmtRub(s.forecast_eom):'—'), null);
     hq += qtile('NRR · 3 мес', s.nrr_pct==null?'—':s.nrr_pct+'%', nrrColor);
     hq += qtile('Churn · мес', s.churn_rate_pct==null?'—':s.churn_rate_pct+'%', churnColor);
     hq += qtile('ARPU', _fmtRub(s.arpu), null);
     hq += qtile('Активных клиентов', String(s.active_clients||0), null);
     hq += '</div>';
     hq += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:8px">Концентрация выручки</div>';
-    hq += cbar('Top-1', con.top1_name?esc(con.top1_name):'', con.top1_pct, con.top1_pct>=50?'#ef4444':con.top1_pct>=35?'#f0a533':'var(--accent)');
+    hq += cbar('Top-1', con.top1_name?esc(con.top1_name):'', con.top1_pct, con.top1_pct>=50?'#ef4444':con.top1_pct>=35?'var(--warning)':'var(--accent)');
     hq += cbar('Top-3', '', con.top3_pct, 'var(--accent)');
     hq += cbar('Top-5', '', con.top5_pct, '#10b981');
     q.innerHTML = hq;
@@ -3954,7 +3952,7 @@ function loadFailoverLog(){
       var rows=(d&&d.log)||[];
       if(!rows.length){box.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:12px">История пуста</div>';return;}
       var resultBadge=function(r,dry){
-        var map={ok:['#34c759','выполнен'],failed:['#e84141','ошибка'],dry_run:['#3b82f6','dry-run'],skipped_no_spare:['#e84141','нет спейра'],skipped_rate:['#EF9F27','лимит'],skipped_cooldown:['#9b9b98','cooldown']};
+        var map={ok:['#34c759','выполнен'],failed:['#e84141','ошибка'],dry_run:['#3b82f6','dry-run'],skipped_no_spare:['#e84141','нет спейра'],skipped_rate:['#FFCC00','лимит'],skipped_cooldown:['#9b9b98','cooldown']};
         var m=map[r]||['#9b9b98',r];
         return '<span style="background:'+m[0]+'22;color:'+m[0]+';padding:1px 7px;border-radius:8px;font-size:10px;font-weight:600">'+m[1]+'</span>';
       };

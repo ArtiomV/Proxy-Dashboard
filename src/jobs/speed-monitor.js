@@ -2,22 +2,25 @@
 //
 // src/jobs/speed-monitor.js — почасовой замер скорости выбранных модемов.
 //
-// В отличие от runNightlySpeedtests (весь флот 2 раза в сутки, история —
-// JSON-файл с капом 30 записей на модем), SpeedMonitor мерит МАЛЫЙ список
-// ников каждый час и пишет в SQLite-таблицу speed_monitor (миграция 058):
+// runNightlySpeedtests (весь флот 2 раза в сутки, история —
+// JSON-файл с капом 30 записей на модем) отключён 2026-08-13: SpeedMonitor
+// мерит МАЛЫЙ список ников каждый час и пишет в SQLite-таблицу speed_monitor
+// (миграция 058):
 // ряд достаточно длинный и плотный, чтобы видеть стабильность оператора
 // по часам суток (какие симки убрать, какие добавить).
 //
-// Список ников — env SPEED_MONITOR_NICKS (через запятую), дефолт ниже.
-// Ник → бокс/IMEI резолвится каждый прогон по /apix/show_status_json всех
-// серверов: симка/модем могут переехать на другой бокс, привязка по нику
-// это переживает. Модем оффлайн или не найден — тоже пишется строка
+// Список ников — настройка speedtest_modems (Настройки → «Спидтесты»,
+// CSV через запятую), читается на каждый прогон: правки применяются без
+// рестарта. env SPEED_MONITOR_NICKS — override для стендов/тестов, дефолт
+// ниже. Ник → бокс/IMEI резолвится каждый прогон по /apix/show_status_json
+// всех серверов: симка/модем могут переехать на другой бокс, привязка по
+// нику это переживает. Модем оффлайн или не найден — тоже пишется строка
 // (ok=0): отсутствие связи — тоже данные о стабильности.
 //
 // NB: каждый замер — реальный speedtest ЧЕРЕЗ симку (десятки–сотни МБ
 // трафика за замер, суммарно до 5 модемов × 24 замера в сутки). Это
 // осознанная цена наблюдаемости — при необходимости список ников режется
-// через SPEED_MONITOR_NICKS.
+// через настройку speedtest_modems.
 
 const DEFAULT_NICKS = 'MD2_40,MD2_44,MD_01,MD_04,MD_10';
 const RETENTION_DAYS = 60;
@@ -44,10 +47,19 @@ function parseSpeedtestResult(result) {
 }
 
 function create(deps) {
-  const { db, logger, logActivity, apiServers, fetchApi, normalizeOperator } = deps;
+  const { db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting } = deps;
 
-  const TARGET_NICKS = (process.env.SPEED_MONITOR_NICKS || DEFAULT_NICKS)
+  // env-override фиксируется на create() (тесты удаляют env сразу после
+  // создания джобы); настройка speedtest_modems читается на каждый прогон.
+  const ENV_NICKS = String(process.env.SPEED_MONITOR_NICKS || '')
     .split(',').map(s => s.trim()).filter(Boolean);
+
+  function getTargetNicks() {
+    if (ENV_NICKS.length) return ENV_NICKS;
+    const csv = getSetting ? getSetting('speedtest_modems', DEFAULT_NICKS) : DEFAULT_NICKS;
+    const list = String(csv || '').split(',').map(s => s.trim()).filter(Boolean);
+    return list.length ? list : DEFAULT_NICKS.split(',');
+  }
 
   const insertStmt = db.prepare(`INSERT INTO speed_monitor
     (server, nick, imei, download, upload, ping, ok, error, operator)
@@ -66,6 +78,7 @@ function create(deps) {
     }
     running = true;
     try {
+      const TARGET_NICKS = getTargetNicks();
       // 1) Резолв ников → бокс/IMEI/онлайн/оператор по всем серверам.
       const found = new Map();   // nick → { server, imei, isOnline, operator }
       for (const server of apiServers) {
@@ -130,7 +143,7 @@ function create(deps) {
     }
   }
 
-  return { runSpeedMonitor, TARGET_NICKS };
+  return { runSpeedMonitor, getTargetNicks };
 }
 
 module.exports = { create, parseSpeedtestResult, DEFAULT_NICKS };

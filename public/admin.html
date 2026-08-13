@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="css/modal.css?v=0630d">
 <link rel="stylesheet" href="css/layout.css?v=0630d">
 <link rel="stylesheet" href="css/shell.css?v=0630d">
-<link rel="stylesheet" href="css/finance.css?v=0630d">
+<link rel="stylesheet" href="css/finance.css?v=0813a">
 <!-- Yandex.Metrika counter -->
 <script type="text/javascript">
     (function(m,e,t,r,i,k,a){
@@ -87,11 +87,11 @@
 <div class="header">
   <div class="header-left">
     <div class="sb-brand">
-      <a class="header-logo" href="/admin"><img src="https://proxies.rent/img/logo.webp" alt=""></a>
-      <span class="header-brand-name">Arendaproxy.ru</span>
+      <a class="header-logo" href="/admin"><img src="/img/brand-logo.webp" alt="Arendaproxy"></a>
+      <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.0</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.1</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -100,14 +100,14 @@
     <div class="nav-tab" data-on-click="switchMainTab('modems',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 17h.01"/><line x1="11" y1="17" x2="17" y2="17"/><path d="M9.5 9.5a5 5 0 0 1 5 0M7 7a8 8 0 0 1 10 0"/></svg></span>Модемы</div>
     <div class="nav-tab" data-on-click="switchMainTab('clients',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Клиенты</div>
     <div class="nav-tab" data-on-click="switchMainTab('bank',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>Финансы</div>
-    <div class="nav-tab" data-on-click="switchMainTab('analytics',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></span>Настройки</div>
+    <div class="nav-tab" data-on-click="switchMainTab('analytics',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg></span>Настройки</div>
     <!-- Stage 18.18 — mobile-only footer inside the burger overlay. Hidden on
          desktop by `.nav-tabs-footer{display:none}` in layout.css and shown
          only inside the mobile burger flyout. Lets us strip noise from the
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.3.0</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.3.1</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -116,7 +116,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.0</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.1</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -149,7 +149,7 @@
     <div style="display:flex;align-items:center;gap:10px">
       <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="11" y1="11" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg><input id="modemSearch" type="text" placeholder="Поиск: ник, IP, клиент…" data-on-input="renderTable()" autocomplete="off" style="border:none;background:none;outline:none;font-size:12px;color:var(--text-1);width:190px"></span>
       <div class="col-selector" style="flex:0 0 auto">
-        <button class="btn-filter-mini" data-on-click="toggleFilterDropdown()" title="Столбцы (для таблицы)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></button>
+        <button class="btn-filter-mini" data-on-click="toggleFilterDropdown()" title="Столбцы (для таблицы)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg></button>
         <div class="col-dropdown" id="filterDropdown" style="right:0;min-width:200px">
           <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600">Столбцы</div>
           <div id="colDropdown"></div>
@@ -205,7 +205,7 @@
     </div>
 
     <!-- ───── ИНФРАСТРУКТУРА (детально, раскрывашки) ───── -->
-    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg>Инфраструктура</div>
+    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg>Инфраструктура</div>
 
     <details class="acc-expand" data-section="topproblems">
       <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><path d="M12 4 2.5 20h19L12 4z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="16.8" x2="12.01" y2="16.8"/></svg></span>Топ проблемных модемов</summary>
@@ -213,7 +213,7 @@
     </details>
 
     <details class="acc-expand" data-section="infra" open>
-      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></span>Ротации · IP · ёмкость</summary>
+      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg></span>Ротации · IP · ёмкость</summary>
       <div class="acc-expand-body">
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-2)">Период:</span><button class="dchip" data-on-click="setNewInfraDays(1,this)">1 день</button><button class="dchip" data-on-click="setNewInfraDays(3,this)">3 дня</button><button class="dchip on" data-on-click="setNewInfraDays(7,this)">7 дней</button><button class="dchip" data-on-click="setNewInfraDays(14,this)">14 дней</button><button class="dchip" data-on-click="setNewInfraDays(30,this)">30 дней</button></div>
         <div id="newInfraKpis"></div>
@@ -299,6 +299,8 @@
         </div>
       </div>
       <div id="speedMonMeta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <!-- Разбиение по локациям: плашка на локацию, тултип — скорости по операторам -->
+      <div id="speedMonLoc" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
       <div style="height:300px;position:relative"><canvas id="speedMonCanvas"></canvas><div id="speedMonSkel" class="skel" style="position:absolute;inset:0"></div></div>
       <div id="speedMonEmpty" style="display:none;color:var(--text-3);font-size:12px;padding:14px 4px">Пока нет замеров за выбранный период — почасовая джоба SpeedMonitor пишет сюда раз в час.</div>
     </div>
@@ -884,7 +886,7 @@
 
           <div class="set-grp-label">СПИДТЕСТЫ</div>
           <div class="set-card">
-            <div class="set-row"><div><div class="set-row-t">Расписание (UTC)</div><div class="set-row-d">Время запуска тестов через запятую, формат ЧЧ:ММ</div></div><input id="speedtestTimesInput" placeholder="02:00, 14:00" style="width:140px;text-align:center;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Модемы ежечасного замера</div><div class="set-row-d">Ники через запятую — по ним идёт замер скорости каждый час (график «Скорость модемов»). Автозамер по всему флоту отключён: остальные модемы — только вручную по кнопке</div></div><input id="speedtestModemsInput" placeholder="MD2_40, MD2_44, MD_01, MD_04, MD_10" style="width:230px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">Мин. скорость</div><div class="set-row-d">Ниже — скорость подсвечивается красным в таблице</div></div><div class="set-inp"><input id="minSpeedInput" type="number" step="0.5" min="0"><span>Mbps</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Порог медленного</div><div class="set-row-d">Если download/upload ниже — модем помечается для повторного теста</div></div><div class="set-inp"><input id="speedtestLowThresholdInput" type="number" step="0.1" min="0.1" max="50"><span>Mbps</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Задержка ре-теста</div><div class="set-row-d">Через сколько минут перетестировать медленный модем</div></div><div class="set-inp"><input id="speedtestRetestDelayInput" type="number" min="1" max="120"><span>мин</span></div></div>
@@ -1223,16 +1225,16 @@
      Логи доменов removed (low-use research tool, duplicated Топ ресурсов). -->
 
 
-<script src="/js/icons.js?v=0813d"></script>
+<script src="/js/icons.js?v=0813e"></script>
 <script src="/js/utils.js?v=0813a"></script>
 <script src="/js/delegation.js?v=0727b"></script>
 <script src="/js/admin/delegated-helpers.js?v=0804a"></script>
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
-<script src="/js/admin/analytics.js?v=0813a"></script>
+<script src="/js/admin/analytics.js?v=0813b"></script>
 <script src="/js/admin/finance.js?v=0813a"></script>
 <script src="/js/admin/modems.js?v=0722c"></script>
-<script src="/js/admin/settings.js?v=0722b"></script>
-<script src="/js/admin/speed-monitor.js?v=0813b"></script>
-<script src="/js/admin.js?v=0813c"></script>
+<script src="/js/admin/settings.js?v=0813a"></script>
+<script src="/js/admin/speed-monitor.js?v=0813c"></script>
+<script src="/js/admin.js?v=0813d"></script>
 </body>
 </html>
