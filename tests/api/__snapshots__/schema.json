@@ -855,7 +855,7 @@
     "type": "table",
     "name": "retail_pool",
     "tbl_name": "retail_pool",
-    "sql": "CREATE TABLE retail_pool ( id INTEGER PRIMARY KEY, server TEXT NOT NULL, port_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'free', -- free|reserved|leased|blocked client_id TEXT, reserved_until TEXT, hold_until TEXT, last_client_id TEXT, updated_at TEXT, UNIQUE(server, port_id) )"
+    "sql": "CREATE TABLE retail_pool ( id INTEGER PRIMARY KEY, server TEXT NOT NULL, port_id TEXT NOT NULL, status TEXT NOT NULL DEFAULT 'free', -- free|reserved|leased|blocked client_id TEXT, reserved_until TEXT, hold_until TEXT, last_client_id TEXT, updated_at TEXT, test_expires_at TEXT, UNIQUE(server, port_id) )"
   },
   {
     "type": "table",

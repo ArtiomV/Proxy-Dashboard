@@ -25,7 +25,7 @@ function runStartup(d) {
     failoverEngine, fetchApi, fetchApiRaw, postFormApi, parseHtmlInputFields,
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
-    setHourlyAggSched, runSpeedMonitor,
+    setHourlyAggSched, runSpeedMonitor, runRetailGuard,
   } = d;
 
   // Авто-спидтесты всего флота отключены 2026-08-13 (daily-schedule.js) —
@@ -181,6 +181,23 @@ function runStartup(d) {
     .catch(e => logger.error('[SpeedMonitor] startup run failed:', e.message)), 4 * 60 * 1000);
   _intervals.push(setInterval(() => dbAudit.runJobAsync('SpeedMonitor', 'hourly', () => runSpeedMonitor())
     .catch(e => logger.error('[SpeedMonitor] hourly run failed:', e.message)), 60 * 60 * 1000));
+
+  // B2C Э2: RetailGuard — конвейер автоблока розницы (grace → block+hold →
+  // delete → restore + тест-день), цикл 10 минут. Тик планируется всегда,
+  // но retail_enabled проверяется на КАЖДОМ тике (и внутри runOnce) —
+  // включение настройки подхватывается без рестарта, при выключенном флаге
+  // прогон пропускается и прод не затрагивается. Первый прогон через 6 мин
+  // после старта (после прогрева кэша серверов).
+  setTimeout(() => {
+    if (!getSetting('retail_enabled', false)) return;
+    dbAudit.runJobAsync('RetailGuard', 'startup', () => runRetailGuard())
+      .catch(e => logger.error('[RetailGuard] startup run failed:', e.message));
+  }, 6 * 60 * 1000);
+  _intervals.push(setInterval(() => {
+    if (!getSetting('retail_enabled', false)) return;
+    dbAudit.runJobAsync('RetailGuard', 'periodic', () => runRetailGuard())
+      .catch(e => logger.error('[RetailGuard] periodic run failed:', e.message));
+  }, 10 * 60 * 1000));
 
   // Nightly DB cleanup at 00:30 UTC — remove old data using dynamic retention settings
   scheduleRepeating(0, 30, 'DbCleanup', () => {

@@ -186,3 +186,28 @@ describe('debt-block: восстановление после оплаты', () 
     expect(client.debtBlocked).toBe(false);
   });
 });
+
+describe('debt-block × retail-guard (B2C Э2): retail_enabled → no-op', () => {
+  function mkRetailDeps() {
+    const d = mkDeps();
+    d.getSetting = (k, def) => (k === 'retail_enabled' ? true : def);
+    return d;
+  }
+
+  it('runAfterDailyBilling при включённой рознице — no-op (конвейером владеет guard)', async () => {
+    const job = debtBlockMod.create(mkRetailDeps());
+    const client = mkClient();
+    await job.runAfterDailyBilling([client], serverResults());
+    expect(posted.length).toBe(0);
+    expect(client.debtBlocked).toBeFalsy();
+    expect(alertsFired.length).toBe(0);
+  });
+
+  it('restoreAfterCredit при включённой рознице — no-op (восстановит guard)', async () => {
+    const job = debtBlockMod.create(mkRetailDeps());
+    const client = mkClient({ balance: 500, debtBlocked: true });
+    expect(await job.restoreAfterCredit(client)).toBe(false);
+    expect(posted.length).toBe(0);
+    expect(client.debtBlocked).toBe(true);   // флаг не трогаем
+  });
+});

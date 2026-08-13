@@ -23,6 +23,7 @@ module.exports = function createRetailRouter(deps) {
     atomicDebit,
     getSetting,
     findServer, fetchApi, proxyConf, proxySmart, parseHtmlInputFields,
+    fetchAllServersDataCached,   // Э2: legacy_preview (скан портов всех серверов)
     auditLog, logActivity, getClientIp,
     alerts,
   } = deps;
@@ -132,6 +133,8 @@ module.exports = function createRetailRouter(deps) {
     retailPoolDb.lease(poolRow.id);
     if (isTestDay) {
       client.testUsed = true;
+      // Э2: дедлайн возврата тест-порта (миграция 062) — снимает retail-guard.
+      retailPoolDb.setTestExpires(poolRow.id, new Date(Date.now() + 24 * 3600 * 1000).toISOString());
     } else {
       client.tariffId = tariff.id;
     }
@@ -166,7 +169,129 @@ module.exports = function createRetailRouter(deps) {
 
   // Состояние пула (для админки «Розница»; витрина клиента — /api/client/tariffs в tariffs.js)
   r.get('/api/admin/retail/pool', authMiddleware, deps.adminMiddleware, (req, res) => {
-    res.json({ counts: retailPoolDb.countByStatus(), servers: String(getSetting('retail_pool_servers', '')).split(',').filter(Boolean) });
+    res.json({
+      counts: retailPoolDb.countByStatus(),
+      rows: retailPoolDb.all(),   // Э2: полный список (server, port_id, status, client_id, hold_until, test_expires_at, reserved_until)
+      servers: String(getSetting('retail_pool_servers', '')).split(',').filter(Boolean),
+    });
+  });
+
+  // ── Э2: пополнение пула. Для каждого порта: свободный IMEI на боксе
+  // (онлайн-модем без клиентских портов) → add_port с ПУСТЫМ portName
+  // (де-факто выключен, B6) → apply_port → строка retail_pool free.
+  // Операция длинная (до 2–3 мин на 10 портов) — идём последовательно.
+  r.post('/api/admin/retail/pool/add', authMiddleware, deps.adminMiddleware, async (req, res) => {
+    if (!getSetting('retail_enabled', false)) return res.status(404).json({ error: 'Not found' });
+    const { server: serverName } = req.body || {};
+    const count = Math.floor(Number(req.body && req.body.count));
+    if (!serverName) return res.status(400).json({ error: 'server required' });
+    if (!Number.isInteger(count) || count < 1 || count > 50) return res.status(400).json({ error: 'count: целое 1..50' });
+    const server = findServer(serverName);
+    if (!server) return res.status(400).json({ error: 'Server not found' });
+
+    const created = [], errors = [];
+    try {
+      // Живой снимок бокса: все модемы + все порты (spare-эвристика failover.js).
+      const statusRaw = await fetchApi(server, '/apix/show_status_json');
+      const portsData = await fetchApi(server, '/apix/list_ports_json');
+      const status = Array.isArray(statusRaw) ? statusRaw : (statusRaw && statusRaw.modems) || [];
+      // portID → IMEI: не стакаем free-порты пула на один модем.
+      const poolFreeImeis = new Set();
+      for (const row of retailPoolDb.byStatus('free')) {
+        if (row.server !== serverName) continue;
+        for (const [imei, plist] of Object.entries(portsData || {})) {
+          if ((plist || []).some(p => p && p.portID === row.port_id)) { poolFreeImeis.add(imei); break; }
+        }
+      }
+      // Свободный IMEI: онлайн-модем, ни одного порта с непустым portName,
+      // без free-строки пула. Сначала совсем пустые (меньше портов — раньше).
+      const candidates = [];
+      for (const m of status) {
+        const imei = m && m.modem_details && m.modem_details.IMEI;
+        if (!imei || poolFreeImeis.has(imei)) continue;
+        const online = m.net_details && m.net_details.IS_ONLINE === 'yes';
+        if (!online) continue;
+        const ports = (portsData && portsData[imei]) || [];
+        if (ports.some(p => p && (p.portName || '').trim())) continue;   // занят клиентом
+        candidates.push({ imei, ports: ports.length });
+      }
+      candidates.sort((a, b) => a.ports - b.ports);
+
+      for (let i = 0; i < count; i++) {
+        const cand = candidates[i];
+        if (!cand) { errors.push({ reason: `Свободных модемов на ${serverName} больше нет (нужно ${count}, доступно ${candidates.length})` }); break; }
+        try {
+          // Создание порта — та же механика store_port (proxies-ports.js):
+          // форма add_port → portName='' → POST → apply_port.
+          const addForm = await proxyConf.getConfForm(server, `/conf/add_port?imei=${cand.imei}`);
+          if (!addForm.ok) throw new Error(`add_port form: ${addForm.reason}`);
+          const formData = parseHtmlInputFields(addForm.html);
+          if (!formData.portID) throw new Error('add_port form returned no portID');
+          formData.portName = '';   // пустой portName = порт выключен, ждёт выдачи (B6)
+          const posted = await proxyConf.postConfForm(server, `/conf/add_port?imei=${cand.imei}`, formData);
+          if (!posted.ok) throw new Error(`add_port post: ${posted.reason}`);
+          try { await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(formData.portID)}`); } catch (e) {
+            logger.warn(`[RetailPool] apply_port ${formData.portID}: ${e.message}`);   // best-effort
+          }
+          retailPoolDb.insertFree(serverName, formData.portID);
+          created.push(formData.portID);
+          auditLog(req.user.login, 'retail_pool_add', { server: serverName, imei: cand.imei, portId: formData.portID, ip: getClientIp(req) });
+        } catch (e) {
+          errors.push({ imei: cand.imei, reason: e.message });
+        }
+      }
+      proxySmart.invalidateCache();
+      logActivity('modem', 'info', 'retail_pool_add', serverName,
+        `Пул розницы: создано ${created.length} портов (запрошено ${count})`, { created, errors: errors.length });
+      res.json({ ok: true, created, errors });
+    } catch (e) {
+      logger.error('[RetailPool] add failed: ' + e.message);
+      res.status(502).json({ error: 'Pool add failed', details: e.message, created, errors });
+    }
+  });
+
+  // ── Э2: legacy-preview. Порты, выданные физикам вне пула (portName = login
+  // клиента individual), ещё без строки в retail_pool — кандидаты на импорт.
+  r.get('/api/admin/retail/pool/legacy_preview', authMiddleware, deps.adminMiddleware, async (req, res) => {
+    if (!getSetting('retail_enabled', false)) return res.status(404).json({ error: 'Not found' });
+    try {
+      const results = await fetchAllServersDataCached();
+      const items = [];
+      for (const data of results || []) {
+        for (const list of Object.values(data.ports || {})) {
+          for (const p of list || []) {
+            if (!p || !p.portName) continue;
+            const client = clients.find(c => c.clientType === 'individual' && c.portName === p.portName);
+            if (!client) continue;
+            if (retailPoolDb.byPort(data.serverName, p.portID)) continue;   // уже в пуле
+            items.push({ server: data.serverName, port_id: p.portID, login: client.login, client_id: client.id });
+          }
+        }
+      }
+      res.json({ items });
+    } catch (e) {
+      logger.error('[RetailPool] legacy_preview failed: ' + e.message);
+      res.status(502).json({ error: 'legacy_preview failed', details: e.message });
+    }
+  });
+
+  // ── Э2: legacy-import — подтверждённый список из preview → leased.
+  // Идемпотентно: INSERT OR IGNORE, дубли отчитываются в skipped.
+  r.post('/api/admin/retail/pool/legacy_import', authMiddleware, deps.adminMiddleware, (req, res) => {
+    if (!getSetting('retail_enabled', false)) return res.status(404).json({ error: 'Not found' });
+    const items = Array.isArray(req.body && req.body.items) ? req.body.items.slice(0, 500) : [];
+    let imported = 0;
+    const skipped = [];
+    for (const it of items) {
+      if (!it || !it.server || !it.port_id || !it.client_id) { skipped.push({ item: it, reason: 'bad_shape' }); continue; }
+      const r = retailPoolDb.insertLeased(it.server, it.port_id, it.client_id);
+      if (r.changes > 0) imported++;
+      else skipped.push({ item: it, reason: 'duplicate' });
+    }
+    auditLog(req.user.login, 'retail_pool_legacy_import', { imported, skipped: skipped.length, ip: getClientIp(req) });
+    logActivity('modem', 'info', 'retail_pool_legacy_import', null,
+      `Импорт legacy-портов в пул: ${imported} строк`, { imported, skipped: skipped.length });
+    res.json({ ok: true, imported, skipped });
   });
 
   return r;

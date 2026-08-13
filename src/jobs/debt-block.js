@@ -18,6 +18,13 @@
 // Запись «дата до» идёт тем же путём, что ручной save_port_config: читаем
 // форму /conf/edit_port целиком (обход логин-стены S2 через proxyConf),
 // меняем только PROXY_VALID_BEFORE, POST обратно + apply_port.
+// B2C Э2: механика вынесена в src/services/port-validity.js (переиспользует
+// retail-guard); здесь остались только условия и оркестрация.
+//
+// Взаимодействие с retail-guard (Э2): при retail_enabled=true конвейером
+// владеет retail-guard (grace → block+hold → delete), поэтому ОБА входа
+// этой джобы — no-op (иначе двойная блокировка без grace). При выключенном
+// флаге — прежнее поведение.
 //
 // Факт автоблока персистируется в clients.debt_blocked (миграция 056) — после
 // рестарта восстановление по-прежнему знает, что порт гасили мы, а не оператор
@@ -26,73 +33,30 @@
 function create(deps) {
   const {
     logger, logActivity, alerts, auditLog,
-    proxyConf, fetchApi, parseHtmlInputFields, findServer, proxySmart,
-    ledgerDb, saveClients, getMoscowNow,
+    saveClients, getMoscowNow,
     fetchAllServersDataCached,
     clients,
+    getSetting,   // B2C Э2: retail_enabled — retail-guard владеет конвейером
   } = deps;
+
+  const portValidity = require('../services/port-validity').create(deps);
+  const setPortValidBefore = portValidity.setPortValidBefore;
+  const avgDailyCharge7d = portValidity.avgDailyCharge7d;
+  const _clientPorts = portValidity.clientPorts;
 
   const RESTORE_DAYS = 30;   // продление при восстановлении: сегодня + 30 дн
 
   function _mskDateStr(d) { return d.toLocaleDateString('en-CA'); }   // YYYY-MM-DD
   function _today() { return _mskDateStr(getMoscowNow()); }
 
-  // Среднесуточное списание за 7 дн (charge-строки ledger за [today-7 .. today-1] / 7)
-  // — тот же критерий, что в портале (billing_history.summary.avgDailyCharge7d).
-  function avgDailyCharge7d(clientId) {
-    const today = _today();
-    const d7 = getMoscowNow();
-    d7.setDate(d7.getDate() - 7);
-    const from = _mskDateStr(d7);
-    const total = (ledgerDb.listByClient(clientId) || [])
-      .filter(e => e.type === 'charge' && e.date && e.date > from && e.date < today)
-      .reduce((s, e) => s + (e.cost || 0), 0);
-    return Math.round((total / 7) * 100) / 100;
-  }
-
-  // Все порты клиента по всем серверам (из уже загруженных server data).
-  function _clientPorts(client, serverResults) {
-    const ports = [];
-    for (const data of serverResults || []) {
-      for (const list of Object.values(data.ports || {})) {
-        for (const p of list || []) {
-          if (p && p.portName && p.portName === client.portName) {
-            ports.push({
-              server: findServer(data.serverName),
-              portId: p.portID,
-              validBefore: p.PROXY_VALID_BEFORE || ''
-            });
-          }
-        }
-      }
-    }
-    return ports.filter(pt => pt.server && pt.portId);
-  }
-
-  // Тот же путь, что POST /api/admin/save_port_config (proxies-ports.js):
-  // форма целиком → правка одного поля → POST → apply_port.
-  async function setPortValidBefore(server, portId, dateStr) {
-    const form = await proxyConf.getConfForm(server, `/conf/edit_port/${portId}`);
-    if (!form.ok) throw new Error(`edit_port form: ${form.reason}`);
-    const formData = parseHtmlInputFields(form.html);
-    if (!formData.proxy_password) {
-      const portsData = await fetchApi(server, '/apix/list_ports_json');
-      for (const plist of Object.values(portsData || {})) {
-        for (const port of plist || []) {
-          if (port.portID === portId && port.PASSWORD) { formData.proxy_password = port.PASSWORD; break; }
-        }
-        if (formData.proxy_password) break;
-      }
-    }
-    formData.PROXY_VALID_BEFORE = dateStr;
-    const posted = await proxyConf.postConfForm(server, `/conf/edit_port/${portId}`, formData);
-    if (!posted.ok) throw new Error(`edit_port post: ${posted.reason}`);
-    await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`);
-    if (proxySmart && typeof proxySmart.invalidateCache === 'function') proxySmart.invalidateCache();
+  // B2C Э2: розничный конвейер активен → debt-block полностью отступает.
+  function _retailGuardOwns() {
+    return typeof getSetting === 'function' && !!getSetting('retail_enabled', false);
   }
 
   // ── Пост-биллинговый проход: блокировка должников + прогноз «за 3 дня» ──
   async function runAfterDailyBilling(clients, serverResults) {
+    if (_retailGuardOwns()) return;   // Э2: конвейером владеет retail-guard
     const today = _today();
     let dirty = false;
     for (const client of clients) {
@@ -149,6 +113,7 @@ function create(deps) {
 
   // ── Восстановление после оплаты (вызывается по событию client-credit) ──
   async function restoreAfterCredit(client) {
+    if (_retailGuardOwns()) return false;   // Э2: восстановлением владеет retail-guard
     if (!client || !client.debtBlocked) return false;   // гасили не мы — не трогаем
     if ((client.balance || 0) <= 0) return false;
     const until = new Date(getMoscowNow().getTime() + RESTORE_DAYS * 86400000);

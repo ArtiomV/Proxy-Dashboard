@@ -2895,6 +2895,7 @@ app.use(require('./src/routes/tariffs')({
 }));
 
 // Покупка прокси розницей (WP2): buy_proxy + тест-день + состояние пула.
+// Э2: fetchAllServersDataCached — legacy_preview пула.
 app.use(require('./src/routes/retail')({
   logger, authMiddleware, adminMiddleware,
   clients, saveClients,
@@ -2902,6 +2903,7 @@ app.use(require('./src/routes/retail')({
   atomicDebit,
   getSetting,
   findServer, fetchApi, proxyConf, proxySmart, parseHtmlInputFields,
+  fetchAllServersDataCached,
   auditLog, logActivity, getClientIp,
   alerts,
 }));
@@ -3526,7 +3528,28 @@ const _debtBlock = require('./src/jobs/debt-block').create({
   ledgerDb, saveClients, getMoscowNow,
   fetchAllServersDataCached,
   clients,
+  getSetting,   // B2C Э2: при retail_enabled=true оба входа — no-op (guard владеет)
 });
+
+// B2C Э2: единая точка клиентских уведомлений (TG в личку + system_log).
+const _clientNotify = require('./src/services/notify').create({
+  logger, logActivity, getSetting, tgBot,
+});
+
+// B2C Э2: retail-guard — конвейер автоблока розницы (grace → block+hold →
+// delete → restore + тест-день). Джоба создана всегда, но runOnce() сам
+// выходит по флагу retail_enabled; тик 10 мин — в src/boot/startup.js.
+const _retailGuard = require('./src/jobs/retail-guard').create({
+  logger, logActivity, auditLog, alerts,
+  proxyConf, fetchApi, parseHtmlInputFields, findServer, proxySmart,
+  ledgerDb, saveClients, getMoscowNow,
+  fetchAllServersDataCached,
+  clients, retailPoolDb, tariffsDb, getSetting,
+  notifyClient: _clientNotify.notifyClient,
+  kvGet: (k) => _kvGet.get(k),
+  kvSet: (k, v) => _kvSet.run(k, v),
+});
+const runRetailGuard = _retailGuard.runOnce;
 financeEvents.on('client-credit', ({ clientId }) => {
   const c = clientById.get(clientId);
   if (!c) return;
@@ -3890,6 +3913,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched: (s) => { _hourlyAggSched = s; },
     runSpeedMonitor: _speedMonitor.runSpeedMonitor,
+    runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
   });
 
 });

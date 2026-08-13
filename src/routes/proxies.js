@@ -91,7 +91,12 @@ r.post('/api/admin/apply_modem', authMiddleware, adminMiddleware, async (req, re
 r.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const { serverName, portID, newPortName } = req.body;
-    if (!serverName || !portID || !newPortName) return res.status(400).json({ error: 'serverName, portID, newPortName required' });
+    // B6: ПУСТОЙ newPortName — легальная ОТВЯЗКА (порт с пустым portName
+    // де-факто выключен: ждёт выдачи из розничного пула или ручной привязки).
+    // Фронт (admin.js «Отвязать») шлёт newPortName: ''. Требуем именно строку.
+    if (!serverName || !portID || typeof newPortName !== 'string') {
+      return res.status(400).json({ error: 'serverName, portID, newPortName (string, может быть пустым — отвязка) required' });
+    }
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
 
@@ -111,12 +116,14 @@ r.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req, r
         }
       } catch (e) { /* ignore */ }
     }
-    // Apply the rename
+    // Apply the rename (пустая строка = отвязка, B6)
     formData.portName = newPortName;
 
     const asPosted = await proxyConf.postConfForm(server, `/conf/edit_port/${portID}`, formData);
     if (!asPosted.ok) return res.status(502).json({ error: `ProxySmart не сохранил привязку (${asPosted.reason})` });
-    logger.info(`[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`);
+    logger.info(newPortName
+      ? `[AssignModem] Assigned port ${portID} to "${newPortName}" on ${serverName}`
+      : `[AssignModem] Unassigned port ${portID} on ${serverName} (пустой portName — порт выключен)`);
     // Invalidate cache so changes appear immediately
     proxySmart.invalidateCache();
     auditLog(req.user.login, 'assign_modem', { serverName, portID, newPortName, ip: getClientIp(req) });

@@ -332,6 +332,15 @@ const RULES = {
     dedupeKey: p => 'debt_' + (p.client_id || '') + '_block_warning',   // D4: debt-family
     render: p => `⏳ <b>На пороге блокировки</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: баланс <b>${formatRub(p.balance)}</b> — хватит примерно на <b>${p.daysLeft} дн.</b> (среднесуточное списание ${formatRub(p.avgDaily)}).\nПри уходе в ноль порты будут погашены автоматически.`,
   },
+  // B2C Э2: тест-день розницы завершён — порт отвязан и возвращён в пул.
+  retail_test_day_ended: {
+    title: 'Тест-день завершён',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'testday_' + (p.client_id || '') + '_' + (p.port_id || ''),
+    render: p => `🧪 <b>Тест-день завершён</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: порт <code>${esc(p.port_id || '?')}</code> (${esc(p.server || '?')}) отвязан и возвращён в пул.`,
+  },
   // B5 (C7): pricing_tiers промах — раньше молчаливый fallback в tiers[0]/23.
   // Cooldown 6ч, чтобы AutoCreate по нескольким portName не спамил.
   pricing_tier_miss: {
