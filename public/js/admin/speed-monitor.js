@@ -4,7 +4,8 @@
 // ник · оператор · сервер · локация, чтобы было видно, какая симка/оператор
 // на какой локации стабильна, а какая проседает по часам.
 // Разбиение по локациям (адрес → оператор → ↓/↑) — в попапе графика при
-// наведении (Chart.js tooltip footer), а не отдельными плашками под картой.
+// наведении (external-тултип в дизайне «Почасового трафика»), а не
+// отдельными плашками под картой.
 //
 // Зависит от глобалов admin.js/utils.js: api, esc, newChartSafe, getChartColors,
 // _dashUi, _dashUiSave (все доступны к моменту вызова — модуль только объявляет
@@ -84,7 +85,7 @@ function loadSpeedMonitor(force) {
       }
     }
 
-    // Разбиение по локациям для попапа графика (tooltip footer): адрес
+    // Разбиение по локациям для попапа графика (external-тултип): адрес
     // сервера из настроек (fallback — страна/имя бокса) → оператор → средние
     // ↓/↑ за наведённый час, взвешенные по числу успешных замеров. dl и ul
     // копим с раздельными счётчиками — если у оператора есть только одно
@@ -164,38 +165,66 @@ function loadSpeedMonitor(force) {
           },
           tooltip: {
             mode: 'index', intersect: false,
-            displayColors: false,   // строк серий нет — цветные маркеры не нужны
-            callbacks: {
-              // Строки серий («ник: ↓x.x») подавлены: в Chart.js 4 label,
-              // вернувший null, не рендерится (пустых строк не остаётся).
-              // Попап = title (час) + footer с блоком локаций.
-              label: function () { return null; },
-              // Блок локаций наведённого часа: строка-заголовок — только
-              // название локации, под ней операторы по одному на строку
-              // (по убыванию dl): «Moldcell ↓12.3 ↑4.5 Мбит/с». Если у
-              // оператора есть только одно направление — показываем его.
-              footer: function (items) {
-                if (!items || !items.length) return [];
-                var H = hourLocOps[hours[items[0].dataIndex]];
-                if (!H) return [];
-                var lines = [];
-                Object.keys(H).forEach(function (loc) {
+            enabled: false,   // рисует только external — на-канвас тултип не нужен
+            // Свой external-попап в дизайне тултипа «Почасового трафика»
+            // (analytics.js showHeatTT): белая карточка, заголовок — час,
+            // локация — жирный подзаголовок, под ней операторы строками
+            // «имя … ↓x.x ↑y.y Мбит/с», между локациями — пустая строка.
+            external: function (context) {
+              var ttEl = document.getElementById('speedMonTT');
+              if (!ttEl) {
+                ttEl = document.createElement('div');
+                ttEl.id = 'speedMonTT';
+                ttEl.style.cssText = 'position:fixed;z-index:10000;pointer-events:none;background:#fff;'
+                  + 'border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:170px;'
+                  + 'box-shadow:0 4px 20px rgba(0,0,0,0.09);opacity:0;transition:opacity .12s ease;'
+                  + 'font-family:Inter,-apple-system,sans-serif';
+                document.body.appendChild(ttEl);
+              }
+              var tt = context.tooltip;
+              if (!tt || tt.opacity === 0 || !tt.dataPoints || !tt.dataPoints.length) {
+                ttEl.style.opacity = '0';
+                return;
+              }
+              var H = hourLocOps[hours[tt.dataPoints[0].dataIndex]];
+              var h = '<div style="font-size:11px;color:#9b9b98;margin-bottom:6px">'
+                + esc((tt.title && tt.title[0]) || '') + '</div>';
+              if (H) {
+                Object.keys(H).forEach(function (loc, li) {
+                  // Пустая строка между блоками локаций.
+                  if (li) h += '<div style="height:13px"></div>';
+                  h += '<div style="font-size:12px;font-weight:600;color:#1a1a1a;margin-bottom:3px">'
+                    + esc(loc) + '</div>';
                   var ops = H[loc];
-                  lines.push(loc);
                   Object.keys(ops).sort(function (a, b) {
                     var da = ops[a].nd ? ops[a].dl / ops[a].nd : -1;
                     var db = ops[b].nd ? ops[b].dl / ops[b].nd : -1;
-                    return db - da;
+                    return db - da;   // по убыванию среднего ↓
                   }).forEach(function (op) {
                     var o = ops[op];
                     var parts = [];
                     if (o.nd) parts.push('↓' + (o.dl / o.nd).toFixed(1));
                     if (o.nu) parts.push('↑' + (o.ul / o.nu).toFixed(1));
-                    if (parts.length) lines.push(op + ' ' + parts.join(' ') + ' Мбит/с');
+                    if (!parts.length) return;
+                    h += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:2px 0">'
+                      + '<span style="font-size:11px;color:#9b9b98">' + esc(op) + '</span>'
+                      + '<span style="font-size:12px;font-weight:500;color:#1a1a1a;white-space:nowrap">'
+                      + parts.join(' ') + ' Мбит/с</span></div>';
                   });
                 });
-                return lines;
-              },
+              }
+              ttEl.innerHTML = h;
+              // Позиционирование — как в chartExtTooltip: от каретки, с клампом к окну.
+              var rect = context.chart.canvas.getBoundingClientRect();
+              ttEl.style.opacity = '1';
+              var w = ttEl.offsetWidth, ht = ttEl.offsetHeight;
+              var x = rect.left + tt.caretX + 14, y = rect.top + tt.caretY - 10;
+              if (x + w > window.innerWidth - 8) x = rect.left + tt.caretX - w - 14;
+              if (x < 8) x = 8;
+              if (y + ht > window.innerHeight - 8) y = window.innerHeight - ht - 8;
+              if (y < 8) y = 8;
+              ttEl.style.left = x + 'px';
+              ttEl.style.top = y + 'px';
             },
           },
         },
