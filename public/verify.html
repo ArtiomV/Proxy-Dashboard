@@ -1,0 +1,72 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arendaproxy — подтверждение email</title>
+  <link rel="icon" type="image/png" href="/img/brand-favicon-96.png" sizes="96x96">
+  <link rel="apple-touch-icon" sizes="180x180" href="/img/brand-apple-touch.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/variables.css?v=0813c">
+  <link rel="stylesheet" href="/css/base.css?v=0813c">
+  <link rel="stylesheet" href="/css/client-portal.css?v=0813d">
+  <style>
+    .login-box{background:var(--bg-2);border:1px solid var(--border);border-radius:20px;padding:48px 40px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+    .login-links{margin-top:16px;text-align:center;font-size:13px;color:#B3B3B3}
+    .login-links a{color:#1960C9;text-decoration:none}
+    .login-links a:hover{text-decoration:underline}
+    .auth-note{text-align:center;font-size:14px;color:#B3B3B3;margin-bottom:18px;line-height:1.6}
+    .auth-note.ok{color:#34C759}
+    .auth-note.fail{color:#FF383C}
+  </style>
+</head>
+<body>
+
+  <div class="login-overlay">
+    <div class="login-box">
+      <div class="login-logo"><img src="/img/brand-logo.webp" alt="Arendaproxy"><span>Arendaproxy</span></div>
+      <p class="login-sub">Подтверждение email</p>
+      <div class="auth-note" id="vfStatus">Подтверждаем адрес…</div>
+      <a class="btn-login" id="vfBtn" href="/" style="display:none;text-align:center;text-decoration:none;line-height:1.4;padding:14px">Перейти ко входу</a>
+      <div class="login-links"><a href="/">← На страницу входа</a></div>
+    </div>
+  </div>
+
+<script>
+// Подтверждение — автоматически по ?token= из письма (ссылка живёт 24ч)
+(async function(){
+  var st=document.getElementById('vfStatus');
+  var btn=document.getElementById('vfBtn');
+  var token=new URLSearchParams(window.location.search).get('token')||'';
+  if(!token){
+    st.textContent='Ссылка недействительна — нет токена';
+    st.className='auth-note fail';
+    btn.style.display='block';
+    return;
+  }
+  try{
+    var resp=await fetch('/api/verify_email',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({token:token})
+    });
+    if(resp.ok){
+      st.textContent='Email подтверждён. Теперь вы можете покупать прокси.';
+      st.className='auth-note ok';
+    }else{
+      var data=await resp.json();
+      st.textContent=data.error||'Ссылка недействительна или устарела';
+      st.className='auth-note fail';
+    }
+  }catch(e){
+    st.textContent='Ошибка соединения — попробуйте открыть ссылку ещё раз';
+    st.className='auth-note fail';
+  }
+  btn.style.display='block';
+})();
+</script>
+
+</body>
+</html>

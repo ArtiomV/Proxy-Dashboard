@@ -15,8 +15,9 @@ module.exports = function createAuthRouter(deps) {
     loginLimiter, validate, LoginSchema, authMiddleware, adminMiddleware,
     getUsers,             // () => users map (let-rebound in server.js, use getter)
     getClientById,        // (id) => client object (clientById Map .get)
+    getClientByEmail,     // (email) => client object | undefined (B2C: вход по email)
     generateToken,
-    createSession, deleteSession,
+    createSession, deleteSession, deleteSessionsByLogin,
     getSessionTTL,
     _readSessionToken,
     auditLog,
@@ -25,11 +26,27 @@ module.exports = function createAuthRouter(deps) {
   const r = express.Router();
 
   r.post('/api/login', loginLimiter, validate(LoginSchema), async (req, res) => {
-    const { login, password } = req.body;
+    let { login, password } = req.body;
     if (!login || !password) return res.status(400).json({ error: 'Login and password required' });
+    // B2C (WP1): логин содержит '@' → lookup email→login. B2B-путь не меняется.
+    if (login.indexOf('@') !== -1 && getClientByEmail) {
+      const byEmail = getClientByEmail(String(login).trim().toLowerCase());
+      if (byEmail) login = byEmail.login;
+    }
     const users = getUsers();
     const user = users[login];
     if (!user) return res.status(401).json({ error: 'Invalid login or password' });
+
+    // B2C (WP1): blocked=1 → 403 + kill сессий (проверка ДО пароля — заблокированному
+    // не сообщаем, верен ли пароль: 403 одинаков для любого пароля заблокированного).
+    const blockedClient = getClientById && (() => {
+      const c = user.clientId ? getClientById(user.clientId) : null;
+      return c && c.blocked ? c : null;
+    })();
+    if (blockedClient) {
+      deleteSessionsByLogin(login);
+      return res.status(403).json({ error: 'Аккаунт заблокирован' });
+    }
 
     // All users must have a bcrypt password_hash. Plaintext fallback removed —
     // all 8 prod clients have been migrated. Refuse login if hash missing.

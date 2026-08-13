@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arendaproxy — восстановление пароля</title>
+  <link rel="icon" type="image/png" href="/img/brand-favicon-96.png" sizes="96x96">
+  <link rel="apple-touch-icon" sizes="180x180" href="/img/brand-apple-touch.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/variables.css?v=0813c">
+  <link rel="stylesheet" href="/css/base.css?v=0813c">
+  <link rel="stylesheet" href="/css/client-portal.css?v=0813d">
+  <style>
+    .login-box{background:var(--bg-2);border:1px solid var(--border);border-radius:20px;padding:48px 40px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+    .login-links{margin-top:16px;text-align:center;font-size:13px;color:#B3B3B3}
+    .login-links a{color:#1960C9;text-decoration:none}
+    .login-links a:hover{text-decoration:underline}
+    .auth-note{text-align:center;font-size:13px;color:#34C759;margin-bottom:12px;min-height:18px;line-height:1.5}
+    .cf-turnstile{margin-bottom:14px}
+  </style>
+</head>
+<body>
+
+  <div class="login-overlay">
+    <div class="login-box">
+      <div class="login-logo"><img src="/img/brand-logo.webp" alt="Arendaproxy"><span>Arendaproxy</span></div>
+      <p class="login-sub">Восстановление пароля</p>
+      <div class="login-error" id="fgError"></div>
+      <div class="auth-note" id="fgNote"></div>
+
+      <div id="fgForm" style="display:none">
+        <input type="email" id="fgEmail" placeholder="Email" autocomplete="email">
+        <div id="turnstileWrap"></div>
+        <button class="btn-login" id="btnForgot" data-on-click="doForgot()">Отправить письмо</button>
+        <div class="login-links"><a href="/">← На страницу входа</a></div>
+      </div>
+
+      <div id="fgClosed" style="display:none;text-align:center;color:#B3B3B3;font-size:14px;line-height:1.6">
+        Самостоятельный сброс пароля недоступен.<br>Обратитесь к менеджеру.
+        <div class="login-links"><a href="/">← На страницу входа</a></div>
+      </div>
+    </div>
+  </div>
+
+<script src="/js/delegation.js?v=0813c"></script>
+<script>
+// Turnstile подключаем, только если розница включена и задан site-key
+(async function init(){
+  var cfg=null;
+  try{
+    var resp=await fetch('/api/public/auth_config');
+    cfg=await resp.json();
+  }catch(e){cfg={retail_enabled:false}}
+  if(!cfg||!cfg.retail_enabled){
+    document.getElementById('fgClosed').style.display='block';
+    return;
+  }
+  document.getElementById('fgForm').style.display='block';
+  if(cfg.turnstile_site_key){
+    var d=document.createElement('div');
+    d.className='cf-turnstile';
+    d.setAttribute('data-sitekey',cfg.turnstile_site_key);
+    d.setAttribute('data-theme','dark');
+    document.getElementById('turnstileWrap').appendChild(d);
+    var s=document.createElement('script');
+    s.src='https://challenges.cloudflare.com/turnstile/v0/api.js';
+    s.async=true;s.defer=true;
+    document.head.appendChild(s);
+  }
+  document.getElementById('fgEmail').focus();
+})();
+
+async function doForgot(){
+  var err=document.getElementById('fgError');
+  var note=document.getElementById('fgNote');
+  var btn=document.getElementById('btnForgot');
+  err.textContent='';note.textContent='';
+  var email=document.getElementById('fgEmail').value.trim();
+  if(!email){err.textContent='Введите email';return}
+  var turnstileToken='';
+  var tsInput=document.querySelector('#turnstileWrap [name="cf-turnstile-response"]');
+  if(tsInput)turnstileToken=tsInput.value;
+  btn.disabled=true;
+  try{
+    var resp=await fetch('/api/forgot_password',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({email:email,turnstile:turnstileToken||undefined})
+    });
+    var data=await resp.json();
+    if(!resp.ok){err.textContent=data.error||'Ошибка отправки';return}
+    // Ответ одинаковый независимо от наличия аккаунта — так задумано на сервере
+    note.textContent='Если аккаунт существует — письмо отправлено. Проверьте почту.';
+    document.getElementById('fgEmail').value='';
+  }catch(e){
+    err.textContent='Ошибка соединения';
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+document.getElementById('fgEmail').addEventListener('keydown',function(e){if(e.key==='Enter')doForgot()});
+</script>
+
+</body>
+</html>

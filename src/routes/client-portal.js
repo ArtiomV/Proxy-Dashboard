@@ -484,6 +484,11 @@ r.get('/api/client/referral', authMiddleware, (req, res) => {
   res.json({
     referrals_count: referrals.length,
     referral_balance: client.referral_balance || 0,
+    // B2C (WP3): вкладка «Профиль» ЛК берёт отсюда же email/верификацию и
+    // реф-код для ссылки /register?ref= — отдельный profile-endpoint не нужен.
+    referral_code: client.referral_code || '',
+    email: client.email || '',
+    emailVerified: !!client.emailVerified,
     referrals: referrals.map(r => ({ name: r.name, createdAt: r.createdAt }))
   });
 });

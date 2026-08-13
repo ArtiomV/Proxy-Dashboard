@@ -546,3 +546,40 @@ thead th,tbody td{padding:8px 10px}
 .btn{padding:6px 10px;font-size:12px}
 .user-info{display:none}
 }
+
+/* ── B2C (WP3): auth-ссылки на логине, баннер верификации, витрина тарифов ── */
+.login-links{margin-top:16px;text-align:center;font-size:13px;color:#B3B3B3}
+.login-links a{color:#1960C9;text-decoration:none}
+.login-links a:hover{text-decoration:underline}
+
+.verify-banner{
+padding:12px 16px;margin-bottom:18px;border-radius:10px;font-size:13px;line-height:1.5;
+background:rgba(255,204,0,.08);border:1px solid rgba(255,204,0,.35);color:var(--warning);
+}
+
+.shop-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px}
+.shop-card{
+background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;
+padding:20px;box-shadow:var(--card-shadow);display:flex;flex-direction:column;gap:8px;
+position:relative;transition:border-color .2s;
+}
+.shop-card:hover{border-color:var(--border-hover)}
+.shop-card-name{font-size:15px;font-weight:600;color:var(--text-0);padding-right:76px}
+.shop-card-badge{
+position:absolute;top:16px;right:16px;font-size:10px;font-weight:700;letter-spacing:.04em;
+padding:3px 8px;border-radius:8px;background:var(--accent-dim);color:var(--accent);
+text-transform:uppercase;
+}
+.shop-card-geo{font-size:12px;color:var(--text-2)}
+.shop-card-price{font-size:26px;font-weight:700;color:var(--text-0);margin-top:4px}
+.shop-card-price small{font-size:13px;font-weight:500;color:var(--text-2)}
+.shop-card-day{font-size:12px;color:var(--text-3)}
+.shop-card-buy{margin-top:10px;justify-content:center}
+.shop-empty{padding:40px;text-align:center;color:var(--text-3);font-size:13px;grid-column:1/-1}
+
+/* Профиль */
+.profile-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);font-size:13px}
+.profile-row:last-child{border-bottom:none}
+.profile-label{width:150px;flex-shrink:0;color:var(--text-3);font-size:12px}
+.profile-val{flex:1;color:var(--text-0);word-break:break-all}
+.profile-val.mono{font-family:var(--font-mono);font-size:12px}

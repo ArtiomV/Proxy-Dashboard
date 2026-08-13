@@ -12,7 +12,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/css/variables.css?v=0813c">
 <link rel="stylesheet" href="/css/base.css?v=0813c">
-<link rel="stylesheet" href="/css/client-portal.css?v=0813c">
+<link rel="stylesheet" href="/css/client-portal.css?v=0813d">
 <link rel="stylesheet" href="/css/shell.css?v=0813c">
 <!-- Yandex.Metrika counter -->
 <script type="text/javascript">
@@ -36,9 +36,13 @@
         <div class="login-logo"><img src="/img/brand-logo.webp" alt="Arendaproxy"><span>Arendaproxy</span></div>
         <p class="login-sub">Вход в личный кабинет</p>
         <div class="login-error" id="loginError"></div>
-        <input type="text" id="loginInput" placeholder="Логин" autocomplete="username">
+        <input type="text" id="loginInput" placeholder="Логин или email" autocomplete="username">
         <input type="password" id="passwordInput" placeholder="Пароль" autocomplete="current-password">
         <button class="btn-login" id="btnLogin" data-on-click="doLogin()">Войти</button>
+        <!-- B2C (WP3): ссылки видны только когда retail_enabled — показывает client.js -->
+        <div class="login-links" id="retailAuthLinks" style="display:none">
+          <a href="/register">Регистрация</a><span style="margin:0 8px;color:#5C5967">·</span><a href="/forgot">Забыли пароль?</a>
+        </div>
       </div>
     </div>
     <aside class="login-right">
@@ -75,7 +79,7 @@
           <a class="header-logo" href="/"><img src="/img/brand-logo.webp" alt="Arendaproxy"></a>
           <span class="header-brand-name">Arendaproxy</span>
         </div>
-        <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.2.0</a>
+        <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.0</a>
         <span class="header-client-info"><span class="status-indicator" id="statusDot"></span> <span id="statusText"></span></span>
       </div>
 
@@ -85,13 +89,15 @@
         <div class="nav-tab" data-on-click="switchTab('billing',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>История баланса</div>
         <div class="nav-tab" data-on-click="switchTab('documents',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg></span>Документы</div>
         <div class="nav-tab" data-on-click="switchTab('api',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l-5 6 5 6"/><path d="M16 6l5 6-5 6"/><path d="M13 4l-2 16"/></svg></span>API</div>
+        <div class="nav-tab" id="navTabShop" style="display:none" data-on-click="switchTab('shop',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16l-1.2 12.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 7z"/><path d="M8.5 10V6a3.5 3.5 0 0 1 7 0v4"/></svg></span>Купить прокси</div>
+        <div class="nav-tab" data-on-click="switchTab('profile',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.3 3-5.5 7-5.5s7 2.2 7 5.5"/></svg></span>Профиль</div>
         <div class="nav-tab" data-on-click="switchTab('referral',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Партнёрка</div>
       </nav>
 
       <div class="header-right">
         <span class="user-info" style="font-size:11px;color:var(--text-2)">Клиент: <strong id="currentUser" style="color:var(--text-0)"></strong></span>
         <div class="theme-toggle" id="themeToggle" data-on-click="toggleTheme()" title="Переключить тему"></div>
-        <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.2.0</a>
+        <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.0</a>
         <button class="btn-logout" data-on-click="doLogout()" title="Выйти">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -710,6 +716,37 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
       </div>
     </div>
 
+    <!-- TAB: Shop (B2C витрина, видна только при retail_enabled) -->
+    <div class="tab-pane" id="tab-shop">
+      <div class="container">
+        <div class="verify-banner" id="shopVerifyBanner" style="display:none">
+          Подтвердите email — письмо отправлено при регистрации. Без подтверждения покупка недоступна.
+        </div>
+        <div id="shopContent">
+          <div class="shop-grid">
+            <div class="skel" style="height:190px"></div>
+            <div class="skel" style="height:190px"></div>
+            <div class="skel" style="height:190px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: Profile -->
+    <div class="tab-pane" id="tab-profile">
+      <div class="container" style="max-width:720px">
+        <div class="verify-banner" id="profileVerifyBanner" style="display:none">
+          Подтвердите email — письмо отправлено при регистрации.
+        </div>
+        <div id="profileContent">
+          <div style="display:flex;flex-direction:column;gap:14px;padding:8px 0">
+            <div class="skel" style="height:110px"></div>
+            <div class="skel" style="height:90px"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+
     <div class="tab-pane" id="tab-referral">
       <div class="container">
         <div id="referralContent">
@@ -739,7 +776,7 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
 <script src="/js/icons.js?v=0813d"></script>
 <script src="/js/utils.js?v=0813c"></script>
 <script src="/js/delegation.js?v=0813c"></script>
-<script src="/js/client.js?v=0813e"></script>
+<script src="/js/client.js?v=0813f"></script>
 
 </body>
 </html>

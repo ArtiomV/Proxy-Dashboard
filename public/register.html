@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="ru" data-theme="dark">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Arendaproxy — регистрация</title>
+  <link rel="icon" type="image/png" href="/img/brand-favicon-96.png" sizes="96x96">
+  <link rel="apple-touch-icon" sizes="180x180" href="/img/brand-apple-touch.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="/css/variables.css?v=0813c">
+  <link rel="stylesheet" href="/css/base.css?v=0813c">
+  <link rel="stylesheet" href="/css/client-portal.css?v=0813d">
+  <style>
+    /* client-portal.css гасит карточку .login-box (там split-лейаут) — на
+       standalone auth-страницах карточку возвращаем, фирменный канвас остаётся */
+    .login-box{background:var(--bg-2);border:1px solid var(--border);border-radius:20px;padding:48px 40px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)}
+    /* Мелочи специфичные для auth-страниц; общий каркас — base.css (.login-*) */
+    .login-links{margin-top:16px;text-align:center;font-size:13px;color:#B3B3B3}
+    .login-links a{color:#1960C9;text-decoration:none}
+    .login-links a:hover{text-decoration:underline}
+    .consent-row{display:flex;align-items:flex-start;gap:8px;margin-bottom:14px;font-size:12px;color:#B3B3B3;line-height:1.5}
+    .consent-row input{width:auto!important;margin:2px 0 0!important;padding:0!important}
+    .auth-note{text-align:center;font-size:13px;color:#34C759;margin-bottom:12px;min-height:18px}
+    .tg-wrap{display:flex;justify-content:center;margin:6px 0 14px;min-height:0}
+    .tg-wrap:empty{display:none}
+    .cf-turnstile{margin-bottom:14px}
+  </style>
+</head>
+<body>
+
+  <div class="login-overlay">
+    <div class="login-box">
+      <div class="login-logo"><img src="/img/brand-logo.webp" alt="Arendaproxy"><span>Arendaproxy</span></div>
+      <p class="login-sub">Регистрация</p>
+      <div class="login-error" id="regError"></div>
+      <div class="auth-note" id="regNote"></div>
+
+      <div id="regForm" style="display:none">
+        <input type="email" id="regEmail" placeholder="Email" autocomplete="email">
+        <input type="password" id="regPassword" placeholder="Пароль (минимум 8 символов)" autocomplete="new-password">
+        <!-- Honeypot: невидимо для людей, боты заполняют — сервер молча вернёт ok -->
+        <input type="text" name="website" id="regWebsite" style="display:none" autocomplete="off" tabindex="-1" aria-hidden="true">
+        <label class="consent-row">
+          <input type="checkbox" id="regConsent">
+          <span>Соглашаюсь с условиями оферты и даю согласие на обработку персональных данных</span>
+        </label>
+        <div id="turnstileWrap"></div>
+        <button class="btn-login" id="btnRegister" data-on-click="doRegister()">Зарегистрироваться</button>
+        <div class="tg-wrap" id="tgWrap"></div>
+        <div class="login-links">Уже есть аккаунт? <a href="/">Войти</a></div>
+      </div>
+
+      <div id="regClosed" style="display:none;text-align:center;color:#B3B3B3;font-size:14px;line-height:1.6">
+        Регистрация закрыта.<br>Для подключения обратитесь к менеджеру.
+        <div class="login-links"><a href="/">← На страницу входа</a></div>
+      </div>
+    </div>
+  </div>
+
+<script src="/js/delegation.js?v=0813c"></script>
+<script>
+var _cfg=null;
+var _ref=new URLSearchParams(window.location.search).get('ref')||'';
+
+// Виджеты подключаем только если включена розница и заданы ключи
+(async function init(){
+  try{
+    var resp=await fetch('/api/public/auth_config');
+    _cfg=await resp.json();
+  }catch(e){_cfg={retail_enabled:false}}
+  if(!_cfg||!_cfg.retail_enabled){
+    document.getElementById('regClosed').style.display='block';
+    return;
+  }
+  document.getElementById('regForm').style.display='block';
+  if(_cfg.turnstile_site_key){
+    var d=document.createElement('div');
+    d.className='cf-turnstile';
+    d.setAttribute('data-sitekey',_cfg.turnstile_site_key);
+    d.setAttribute('data-theme','dark');
+    document.getElementById('turnstileWrap').appendChild(d);
+    var s=document.createElement('script');
+    s.src='https://challenges.cloudflare.com/turnstile/v0/api.js';
+    s.async=true;s.defer=true;
+    document.head.appendChild(s);
+  }
+  if(_cfg.telegram_bot_username){
+    var ts=document.createElement('script');
+    ts.src='https://telegram.org/js/telegram-widget.js?22';
+    ts.setAttribute('data-telegram-login',_cfg.telegram_bot_username);
+    ts.setAttribute('data-size','large');
+    ts.setAttribute('data-onauth','onTelegramAuth(user)');
+    ts.setAttribute('data-request-access','write');
+    ts.async=true;
+    document.getElementById('tgWrap').appendChild(ts);
+  }
+  document.getElementById('regEmail').focus();
+})();
+
+function _saveSession(data){
+  localStorage.setItem('pr_token',data.token);
+  localStorage.setItem('pr_login',data.login);
+  window.location.href='/';
+}
+
+async function doRegister(){
+  var err=document.getElementById('regError');
+  var note=document.getElementById('regNote');
+  var btn=document.getElementById('btnRegister');
+  err.textContent='';note.textContent='';
+  var email=document.getElementById('regEmail').value.trim();
+  var password=document.getElementById('regPassword').value;
+  var consent=document.getElementById('regConsent').checked;
+  if(!email){err.textContent='Введите email';return}
+  if(password.length<8){err.textContent='Пароль — минимум 8 символов';return}
+  if(!consent){err.textContent='Подтвердите согласие с условиями';return}
+  var turnstileToken='';
+  var tsInput=document.querySelector('#turnstileWrap [name="cf-turnstile-response"]');
+  if(tsInput)turnstileToken=tsInput.value;
+  btn.disabled=true;
+  try{
+    var resp=await fetch('/api/register',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        email:email,password:password,consent:true,
+        ref:_ref||undefined,
+        turnstile:turnstileToken||undefined,
+        website:document.getElementById('regWebsite').value
+      })
+    });
+    var data=await resp.json();
+    if(!resp.ok){err.textContent=data.error||'Ошибка регистрации';return}
+    if(!data.token){ // honeypot-«успех»: сервер вернул {ok:true} без сессии
+      note.textContent='Проверьте почту — мы отправили письмо с подтверждением.';
+      return;
+    }
+    note.textContent='Аккаунт создан! Проверьте почту для подтверждения email.';
+    _saveSession(data);
+  }catch(e){
+    err.textContent='Ошибка соединения';
+  }finally{
+    btn.disabled=false;
+  }
+}
+
+// Telegram Login Widget callback (глобальное имя — так требует виджет)
+async function onTelegramAuth(user){
+  var err=document.getElementById('regError');
+  err.textContent='';
+  try{
+    var resp=await fetch('/api/auth/telegram',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(user)
+    });
+    var data=await resp.json();
+    if(!resp.ok){err.textContent=data.error||'Ошибка входа через Telegram';return}
+    _saveSession(data);
+  }catch(e){
+    err.textContent='Ошибка соединения';
+  }
+}
+
+document.getElementById('regPassword').addEventListener('keydown',function(e){if(e.key==='Enter')doRegister()});
+</script>
+
+</body>
+</html>

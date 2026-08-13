@@ -45,4 +45,43 @@ const LoginSchema = z.object({
   password: z.string().min(1).max(200),
 });
 
-module.exports = { ClientCreateSchema, ClientUpdateSchema, PaymentSchema, BalanceAdjustSchema, LoginSchema };
+// ── B2C retail (WP1) ──────────────────────────────────────────────────────
+// Внутренний login = 'u_' + uid (regex выше email не принимает — схему B2B
+// не расширяем); email живёт в отдельной колонке clients.email.
+const RegisterSchema = z.object({
+  email: z.string().email().max(200),
+  password: z.string().min(8).max(100),
+  ref: z.string().max(20).optional(),
+  consent: z.literal(true),                       // чекбокс оферты/ПДн обязателен (WP8)
+  turnstile: z.string().max(2048).optional(),     // токен Cloudflare Turnstile
+  website: z.string().max(500).optional(),          // honeypot: заполнен → молчаливый ok в роуте (без 400, чтобы не подсказывать боту)
+});
+
+const ForgotPasswordSchema = z.object({
+  email: z.string().email().max(200),
+  turnstile: z.string().max(2048).optional(),
+});
+
+const ResetPasswordSchema = z.object({
+  token: z.string().min(16).max(200),
+  password: z.string().min(8).max(100),
+});
+
+const ChangePasswordSchema = z.object({
+  old: z.string().min(1).max(200),
+  new: z.string().min(8).max(100),
+});
+
+// Telegram Login Widget payload (https://core.telegram.org/widgets/login)
+const TelegramAuthSchema = z.object({
+  id: z.coerce.number().int().positive(),
+  first_name: z.string().max(200).optional(),
+  last_name: z.string().max(200).optional(),
+  username: z.string().max(200).optional(),
+  photo_url: z.string().max(500).optional(),
+  auth_date: z.coerce.number().int().positive(),
+  hash: z.string().min(1).max(200),
+});
+
+module.exports = { ClientCreateSchema, ClientUpdateSchema, PaymentSchema, BalanceAdjustSchema, LoginSchema,
+  RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema };

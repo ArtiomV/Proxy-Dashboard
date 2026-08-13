@@ -30,7 +30,21 @@ function create(deps) {
     withClientsLock,
     setLastBillingRunSummary,
     debtBlock,   // B3 (Р13): пост-биллинговый автоблок должников-физиков (опционально)
+    tariffsDb,   // Р36: единый прайс — getClientPrice (override → tariff → legacy price)
   } = deps;
+
+  // Р36/В.5: эффективная цена клиента. Приоритет:
+  //   price_override (индивидуальная цена корпората) → tariffs.price (по tariff_id)
+  //   → clients.price (legacy-совместимость).
+  // Ни одного источника → 0 (клиент пропускается биллингом + алерт наверху).
+  function getClientPrice(client) {
+    if (typeof client.priceOverride === 'number' && client.priceOverride > 0) return client.priceOverride;
+    if (client.tariffId != null && tariffsDb) {
+      const t = tariffsDb.byId(client.tariffId);
+      if (t && t.active && t.price > 0) return t.price;
+    }
+    return client.price || 0;
+  }
 
   let lastBillingRunSummary = null;
   let lastRunResults = null;   // server data последнего реального прогона (для debt-block)
@@ -130,7 +144,10 @@ async function _runDailyBillingImpl(retryClientIds) {
     : clients;
 
   for (const client of clientsToBill) {
-    if (!client.portName || !client.price || client.price <= 0 || client.billingPaused) {
+    // Р36: цена через getClientPrice (override → tariff → legacy price).
+    // Клиент без portName или без цены пропускается (свежий физик до покупки — ок).
+    const clientPrice = getClientPrice(client);
+    if (!client.portName || !clientPrice || clientPrice <= 0 || client.billingPaused) {
       if (client.billingPaused) logger.info(`[Billing] Skipping ${client.name} — billing paused`);
       skipped++;
       continue;
@@ -167,7 +184,10 @@ async function _runDailyBillingImpl(retryClientIds) {
         month_bytes: computeClientMonthBytes(results, client.portName)
       };
 
-      if (deltaBytes <= 0) {
+      // B6 (Р36/ТЗ B2C): traffic-гейт снят для individual + per_modem — аренда
+      // платит за день всегда, даже при нулевом трафике. B2B-ветки не меняются.
+      const isRetailLease = (client.clientType === 'individual') && client.billingType === 'per_modem';
+      if (deltaBytes <= 0 && !isRetailLease) {
         skipped++;
         continue;
       }
@@ -188,9 +208,9 @@ async function _runDailyBillingImpl(retryClientIds) {
             }
           }
         }
-        cost = (client.price * modemCount) / daysInMonth;
+        cost = (clientPrice * modemCount) / daysInMonth;
       } else {
-        cost = client.price * deltaGb;
+        cost = clientPrice * deltaGb;
       }
       cost = Math.round(cost * 100) / 100;
       if (cost <= 0) { skipped++; continue; }

@@ -18,7 +18,8 @@ const { validate } = require('./src/middleware/validate');
 // from src/schemas directly). server.js only needs the schemas used in PUT
 // routes that haven't been extracted, plus the create/payment/balance ones
 // passed via deps.
-const { LoginSchema, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema } = require('./src/schemas');
+const { LoginSchema, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema,
+  RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema } = require('./src/schemas');
 const { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday } = require('./src/utils/time');
 const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator } = require('./src/utils/traffic');
 const { parseHtmlInputFields } = require('./src/utils/html-forms');  // P2-2: extracted from server.js
@@ -132,6 +133,16 @@ trackingDb.init(db);
 healthDb.init(db);          // Stage 17
 require('./src/db/analytics').init(db);   // WP6.1: analytics query layer
 operatorsDb.init(db);       // Stage 17
+// B2C retail core (миграция 060): единый прайс, пул автовыдачи, эквайринг,
+// одноразовые email-токены (verify/reset).
+const tariffsDb = require('./src/db/tariffs');
+const retailPoolDb = require('./src/db/retail-pool');
+const cardPaymentsDb = require('./src/db/card-payments');
+const authTokensDb = require('./src/db/auth-tokens');
+tariffsDb.init(db);
+retailPoolDb.init(db);
+cardPaymentsDb.init(db);
+authTokensDb.init(db);
 // Aliases for legacy callsites that still hold raw prepared-statement refs.
 // These are passed to billing.init() and used by atomicCredit/atomicDebit
 // on the hot path — wrapping in a function would add a per-credit call.
@@ -453,6 +464,16 @@ function clientFromRow(r) {
     allowDebt: r.allow_debt === 1,
     maxDebt: r.max_debt != null ? r.max_debt : null,
     debtBlocked: r.debt_blocked === 1,
+    // B2C retail (миграция 060)
+    email: r.email || '', emailVerified: r.email_verified === 1,
+    tgChatId: r.tg_chat_id || '', regIp: r.reg_ip || '',
+    consentPdAt: r.consent_pd_at || '', blocked: r.blocked === 1,
+    abuseStrikes: r.abuse_strikes || 0,
+    balanceNegativeSince: r.balance_negative_since || null,
+    tariffId: r.tariff_id != null ? r.tariff_id : null,
+    priceOverride: r.price_override != null ? r.price_override : null,
+    holdTtlDays: r.hold_ttl_days != null ? r.hold_ttl_days : null,
+    testUsed: r.test_used === 1,
     last_traffic_snapshot: r.last_traffic_snapshot
       ? (typeof r.last_traffic_snapshot === 'string' ? JSON.parse(r.last_traffic_snapshot) : r.last_traffic_snapshot)
       : { timestamp: null, month_bytes: 0 },
@@ -1594,7 +1615,22 @@ const SETTINGS_DEFAULTS = {
   simulator_enabled: false,
   simulator_max_duration_min: 30,    // потолок длительности прогона
   simulator_max_workers: 50,         // потолок concurrency-воркеров
-  simulator_max_sse: 10              // лимит одновременных SSE-стримов
+  simulator_max_sse: 10,             // лимит одновременных SSE-стримов
+  // ── B2C розница (ТЗ 10.08): всё новое — за фича-флагом retail_enabled ──
+  retail_enabled: false,             // master switch: регистрация/витрина/покупка выключены
+  retail_pool_servers: '',           // CSV боксов розницы (отдельные от B2B, hfilter ВКЛ)
+  retail_hold_days: 7,               // hold после grace до удаления порта (per-клиент hold_ttl_days, -1 = ∞)
+  retail_grace_hours: 24,            // grace: порт работает после обнуления баланса
+  retail_pool_free_alert: 5,         // алерт «свободных < N» в пуле
+  retail_mass_buy_alert: 5,          // алерт при массовой покупке одним аккаунтом
+  retail_min_topup: 100,             // минимальная сумма пополнения, ₽
+  retail_test_day_price: 100,        // фикс-цена тест-дня, ₽ (тариф duration_hours=24)
+  retail_reg_limit_per_ip_day: 10,   // анти-мультиаккаунт: регистраций с IP в сутки
+  turnstile_secret_key: '',          // Cloudflare Turnstile (анти-бот на публичных формах)
+  turnstile_site_key: '',
+  sendpulse_smtp_user: '',           // SendPulse SMTP (верификация/сброс/чеки)
+  sendpulse_smtp_pass: '',
+  sendpulse_from: ''                 // From-адрес писем
 };
 
 // Stage 14.1: appSettings lives in state with stable identity. Rebinds
@@ -1606,7 +1642,7 @@ const SETTINGS_DEFAULTS = {
 // WP7.5: keys whose VALUES are encrypted at rest in kv_store (see
 // _encryptSettingVal below). Declared before the settings load because the
 // migration right after the load needs it.
-const SENSITIVE_SETTINGS = new Set(['anthropic_api_key']);
+const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'turnstile_secret_key', 'sendpulse_smtp_pass']);
 stateMod.setAppSettings({ ...SETTINGS_DEFAULTS });
 const appSettings = stateMod.state.appSettings;
 try {
@@ -1643,6 +1679,13 @@ try {
 function saveSettings() {
   _kvSet.run('app_settings', JSON.stringify(appSettings));
 }
+
+// Р36 data-миграция: appSettings.pricing_tiers → tariffs (одноразово, в пустую
+// таблицу). После неё kv pricing_tiers больше не читается — единый прайс в tariffs.
+try {
+  const seeded = tariffsDb.seedFromPricingTiers(appSettings.pricing_tiers);
+  if (seeded > 0) logger.info(`[Tariffs] Мигрировано ${seeded} тира(ов) из pricing_tiers в tariffs (Р36)`);
+} catch (e) { logger.error('[Tariffs] seedFromPricingTiers failed: ' + e.message); }
 
 // WP7.5: API secrets (Anthropic) are encrypted at rest in kv_store —
 // AES-256-GCM, same key scheme as tochka_config. In kv_store they live as
@@ -1688,22 +1731,22 @@ function setSettings(partial) {
 }
 
 function getPriceForProxyCount(count) {
-  const tiers = appSettings.pricing_tiers || [];
-  // Sort descending by min_proxies to find the right tier
-  const sorted = tiers.slice().sort((a, b) => b.min_proxies - a.min_proxies);
-  for (const tier of sorted) {
-    if (count >= tier.min_proxies) return tier.price;
-  }
-  // B5/C7: раньше промах молча деградировал в tiers[0].price или хардкод 23 —
-  // клиент создавался с непредсказуемой ценой. Fallback оставлен (AutoCreate не
-  // должен падать), но теперь это громкое событие: warn в лог/system_log +
-  // TG-алерт оператору (правило pricing_tier_miss, cooldown 6ч — AutoCreate
-  // может создавать несколько клиентов за прогон).
-  const fallback = tiers.length > 0 ? tiers[0].price : 23;
-  logger.warn(`[Pricing] getPriceForProxyCount(${count}): ни один тир pricing_tiers не подошёл — fallback ${fallback} ₽. Проверьте сетку (min_proxies должен начинаться с 1).`);
+  // Р36: источник цен — tariffs (is_default, min_proxies DESC). kv pricing_tiers
+  // мигрирован в tariffs при boot и больше не читается.
+  const tier = tariffsDb.defaultForCount(count);
+  if (tier) return tier.price;
+  // B5/C7: промах — громкое событие (warn в лог/system_log + TG-алерт), но
+  // AutoCreate не должен падать: фолбэк на цену стартового тира (min_proxies=1) —
+  // семантика прежнего tiers[0].price сохранена.
+  const defaults = tariffsDb.all().filter(t => t.is_default && t.active);
+  const entryTier = defaults.slice().sort((a, b) => a.min_proxies - b.min_proxies)[0];
+  const fallback = entryTier
+    ? entryTier.price
+    : (appSettings.pricing_tiers && appSettings.pricing_tiers.length > 0 ? appSettings.pricing_tiers[0].price : 23);
+  logger.warn(`[Pricing] getPriceForProxyCount(${count}): ни один дефолтный тариф не подошёл — fallback ${fallback} ₽. Проверьте прайс (min_proxies должен начинаться с 1).`);
   logActivity('system', 'warn', 'pricing_tier_miss', null,
-    `pricing_tiers: промах для ${count} прокси — fallback ${fallback} ₽`,
-    { count, fallback, tiers_count: tiers.length });
+    `tariffs: промах для ${count} прокси — fallback ${fallback} ₽`,
+    { count, fallback, tariffs_count: defaults.length });
   try { alerts.trigger('pricing_tier_miss', { count, fallback }); } catch (_) { /* alert best-effort */ }
   return fallback;
 }
@@ -1888,6 +1931,17 @@ const resetTokenLimiter = rateLimit({
   legacyHeaders: false
 });
 
+// B2C (WP1): антиспам публичных форм — register/forgot. 5/час/IP (образец — loginLimiter).
+const registerLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: 5,
+  keyGenerator: (req) => getClientIp(req),
+  message: { error: 'Слишком много запросов — попробуйте через час' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test' // supertest-харнесс: формы гоняются в цикле
+});
+
 const checkProxyLimiter = rateLimit({
   windowMs: 60 * 1000, // 1 minute
   max: 5, // max 5 batch checks per IP per minute
@@ -2062,7 +2116,8 @@ app.use(require('./src/routes/auth')({
   loginLimiter, validate, LoginSchema, authMiddleware, adminMiddleware,
   getUsers: () => users,
   getClientById: (id) => clientById.get(id),
-  generateToken, createSession, deleteSession, getSessionTTL,
+  getClientByEmail: (email) => clients.find(c => c.email && c.email.toLowerCase() === email),
+  generateToken, createSession, deleteSession, deleteSessionsByLogin, getSessionTTL,
   _readSessionToken, auditLog, getClientIp,
 }));
 
@@ -2796,6 +2851,50 @@ app.use(require('./src/routes/client-portal')({
   proxyConf, modemRotationCache, proxySmart,
 }));
 
+// ── B2C retail (ТЗ 10.08) ─────────────────────────────────────────────────
+// Mailer (SendPulse; без кредов — очередь mail_outbox, запуск не блокируется).
+const mailer = require('./src/services/mailer');
+mailer.init({
+  logger, getSetting,
+  kvGet: (k) => { const row = _kvGet.get(k); return row; },
+  kvSet: (k, v) => _kvSet.run(k, v),
+  logActivity,
+});
+
+// Регистрация/вход/пароль (WP1): register, TG-виджет, verify/forgot/reset,
+// change_password (общий для всех клиентов).
+app.use(require('./src/routes/registration')({
+  logger, validate, registerLimiter,
+  RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema,
+  ChangePasswordSchema, TelegramAuthSchema,
+  authMiddleware,
+  getUsers: () => users,
+  clients, saveClients, rebuildClientMaps,
+  generateToken, generateId, createSession, deleteSessionsByLogin, getSessionTTL,
+  getClientIp, auditLog, logActivity,
+  getSetting,
+  mailer, authTokensDb, tariffsDb, db,
+  alerts,
+}));
+
+// Единый прайс (Р36): админский CRUD + розничная витрина /api/client/tariffs.
+app.use(require('./src/routes/tariffs')({
+  logger, authMiddleware, adminMiddleware, validate,
+  tariffsDb, auditLog, getClientIp, getSetting, db,
+}));
+
+// Покупка прокси розницей (WP2): buy_proxy + тест-день + состояние пула.
+app.use(require('./src/routes/retail')({
+  logger, authMiddleware, adminMiddleware,
+  clients, saveClients,
+  tariffsDb, retailPoolDb,
+  atomicDebit,
+  getSetting,
+  findServer, fetchApi, proxyConf, proxySmart, parseHtmlInputFields,
+  auditLog, logActivity, getClientIp,
+  alerts,
+}));
+
 // All traffic endpoints moved to src/routes/traffic.js (Stage 3).
 app.use(require('./src/routes/traffic')({
   db, logger, authMiddleware, adminMiddleware,
@@ -3447,6 +3546,7 @@ const { runDailyBilling } = require('./src/jobs/billing').create({
   withClientsLock,
   setLastBillingRunSummary: (s) => { lastBillingRunSummary = s; },
   debtBlock: _debtBlock,
+  tariffsDb,   // Р36: getClientPrice (override → tariff → legacy price)
 });
 
 // Фаза 0 (§2 ТЗ): теневой тест тарификации — ежедневное сравнение V1/V2 в

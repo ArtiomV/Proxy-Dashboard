@@ -4,6 +4,8 @@
 //
 // Routes that don't fit into a domain router:
 //   GET  /admin                            — serves admin.html
+//   GET  /register|/forgot|/reset|/verify  — B2C auth-страницы (письма шлют
+//                                            на /verify и /reset без .html)
 //   GET  /api/docs                         — self-describing JSON API doc
 //   POST /api/admin/cache/invalidate       — drop ProxySmart cache
 //   GET  /api/admin/vpn_profile            — .ovpn file passthrough
@@ -22,6 +24,15 @@ module.exports = function createMiscRouter(deps) {
   r.get('/admin', (req, res) => {
     res.sendFile(path.join(__dirname, '..', '..', 'public', 'admin.html'));
   });
+
+  // B2C auth-страницы по красивым путям (express.static без extensions отдаёт
+  // только /register.html и т.п.; письма верификации/сброса ссылаются на /verify
+  // и /reset без расширения).
+  for (const page of ['register', 'forgot', 'reset', 'verify']) {
+    r.get('/' + page, (req, res) => {
+      res.sendFile(path.join(__dirname, '..', '..', 'public', page + '.html'));
+    });
+  }
 
   r.get('/api/docs', (req, res) => {
     const baseUrl = `${req.protocol}://${req.get('host')}`;

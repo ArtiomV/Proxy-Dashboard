@@ -91,7 +91,7 @@
       <span class="header-brand-name">Arendaproxy.ru</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.2.0</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.0</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -107,7 +107,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.2.0</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.3.0</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -116,7 +116,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.2.0</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.3.0</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -376,6 +376,7 @@
       <div class="snav-grp">ИНСТРУМЕНТЫ</div>
       <div class="settings-nav-item" id="snav_bank" data-on-click="switchSettingsSection('bank')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l6-3.5L14 6M3 6.5v5.5M13 6.5v5.5M5.6 6.5v5.5M8 6.5v5.5M10.4 6.5v5.5M2.5 13.5h11"/></svg>Банк</div>
       <div class="settings-nav-item" id="snav_simulator" data-on-click="switchSettingsSection('simulator')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5c2.4 1.6 3.4 4 3.4 6.5L9.5 11h-3L4.6 8C4.6 5.5 5.6 3.1 8 1.5z"/><circle cx="8" cy="6" r="1"/><path d="M6.4 11l-1.4 2.5M9.6 11l1.4 2.5"/></svg>Симулятор</div>
+      <div class="settings-nav-item" id="snav_tariffs" data-on-click="switchSettingsSection('tariffs')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5h11M2.5 8h11M2.5 11h7"/><circle cx="12.5" cy="12" r="2.2"/></svg>Тарифы розницы</div>
       <div class="settings-nav-item" id="snav_data" data-on-click="switchSettingsSection('data')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4.5" x2="14" y2="4.5"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="11.5" x2="14" y2="11.5"/><circle cx="6" cy="4.5" r="1.6" fill="var(--bg-1)"/><circle cx="10.5" cy="8" r="1.6" fill="var(--bg-1)"/><circle cx="5" cy="11.5" r="1.6" fill="var(--bg-1)"/></svg>Данные и хранение</div>
     </div>
     <!-- Content -->
@@ -479,6 +480,36 @@
       <!-- Банк -->
       <div id="settingsSection_bank" class="settings-section" style="display:none">
         <div id="bankConfigSection"></div>
+      </div>
+      <!-- Тарифы розницы (B2C, WP3): CRUD /api/admin/tariffs -->
+      <div id="settingsSection_tariffs" class="settings-section" style="display:none">
+        <div class="analytics-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <h3 style="margin:0">Тарифы розницы</h3>
+            <button class="btn btn-sm" data-on-click="loadTariffsAdmin()">Обновить</button>
+          </div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">Единый прайс (Р36). Витрина клиента — тарифы с public=1 и active=1; duration_hours=24 — тест-день.</div>
+          <div id="tariffsTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div></div>
+        </div>
+        <div class="analytics-card" style="margin-top:16px">
+          <h3 style="margin:0 0 12px" id="tariffFormTitle">Новый тариф</h3>
+          <input type="hidden" id="tfId">
+          <div class="add-form">
+            <div class="form-group"><label class="form-label" style="font-size:10px">Название</label><input class="form-input" id="tfName" placeholder="Россия · МТС" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Гео</label><input class="form-input" id="tfGeo" placeholder="RU" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Сервер</label><input class="form-input" id="tfServer" placeholder="S1 (пусто — из пула)" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Цена, ₽/мес</label><input class="form-input" id="tfPrice" type="number" min="1" placeholder="1500" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Длительность, часов</label><input class="form-input" id="tfDuration" type="number" min="1" placeholder="24 = тест-день" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Мин. пополнение, дней</label><input class="form-input" id="tfMinTopup" type="number" min="1" max="90" value="1" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">На витрине</label><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="tfPublic"> public</label></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Активен</label><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="tfActive" checked> active</label></div>
+          </div>
+          <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+            <button class="btn btn-primary" data-on-click="saveTariffAdmin()">Сохранить</button>
+            <button class="btn" data-on-click="resetTariffForm()">Сбросить форму</button>
+            <span id="tariffFormStatus" style="font-size:11px;margin-left:4px"></span>
+          </div>
+        </div>
       </div>
       <!-- Симулятор нагрузки -->
       <div id="settingsSection_simulator" class="settings-section" style="display:none">
@@ -1202,6 +1233,6 @@
 <script src="/js/admin/modems.js?v=0722c"></script>
 <script src="/js/admin/settings.js?v=0722b"></script>
 <script src="/js/admin/speed-monitor.js?v=0813b"></script>
-<script src="/js/admin.js?v=0813b"></script>
+<script src="/js/admin.js?v=0813c"></script>
 </body>
 </html>

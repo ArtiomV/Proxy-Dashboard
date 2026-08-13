@@ -52,6 +52,23 @@ function switchTab(name,el){
   if(name==='api') loadApiDocs();
   if(name==='referral') loadReferral();
   if(name==='billing') loadBillingHistory();
+  if(name==='shop') loadShop();
+  if(name==='profile') loadProfile();
+}
+
+// --- B2C retail config (WP3) ---
+// /api/public/auth_config — без auth; при ошибке/выкл рознице ссылки и вкладка
+// «Купить прокси» просто остаются скрытыми.
+var retailConfig=null;
+function initRetailConfig(){
+  fetch('/api/public/auth_config').then(function(r){return r.json()}).then(function(cfg){
+    retailConfig=cfg||{};
+    if(!retailConfig.retail_enabled)return;
+    var links=document.getElementById('retailAuthLinks');
+    if(links)links.style.display='';
+    var shopTab=document.getElementById('navTabShop');
+    if(shopTab)shopTab.style.display='';
+  }).catch(function(){});
 }
 
 // --- Onboarding ---
@@ -1103,6 +1120,7 @@ function formatNumber(n){
     window.history.replaceState({},'',window.location.pathname);
   }
   if(authToken){showApp()}else{showLogin()}
+  initRetailConfig();
   document.getElementById('passwordInput').addEventListener('keydown',function(e){if(e.key==='Enter')doLogin()});
   document.getElementById('loginInput').addEventListener('keydown',function(e){if(e.key==='Enter')document.getElementById('passwordInput').focus()});
 })();
@@ -2073,6 +2091,152 @@ function loadReferral(){
   }).catch(function(e){
     document.getElementById('referralContent').innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
   });
+}
+
+// ==================== B2C: вкладка «Купить прокси» (WP3) ====================
+// Витрина /api/client/tariffs (только при retail_enabled — вкладку прячет
+// initRetailConfig). Покупка — /api/client/buy_proxy; ошибки с полем code
+// маппим на понятные сообщения (Р38).
+
+var _shopLoaded=false;
+
+function loadShop(){
+  var box=document.getElementById('shopContent');
+  // Баннер верификации на витрине — тот же, что в профиле (EMAIL_NOT_VERIFIED
+  // приходит и от buy_proxy, если клиент ещё не подтвердил адрес).
+  api('/api/client/referral').then(function(p){
+    var b=document.getElementById('shopVerifyBanner');
+    if(b&&p&&!p.error)b.style.display=p.emailVerified?'none':'';
+  }).catch(function(){});
+  if(_shopLoaded)return;
+  api('/api/client/tariffs').then(function(data){
+    if(!data||data.error||!data.tariffs){
+      box.innerHTML='<div class="error-msg">'+escapeHtml((data&&data.error)||'Не удалось загрузить тарифы')+'</div>';
+      return;
+    }
+    _shopLoaded=true;
+    renderShop(data.tariffs);
+  }).catch(function(e){
+    box.innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
+  });
+}
+
+function renderShop(tariffs){
+  var box=document.getElementById('shopContent');
+  if(!tariffs.length){
+    box.innerHTML='<div class="shop-grid"><div class="shop-empty">Тарифы скоро появятся</div></div>';
+    return;
+  }
+  var h='<div class="shop-grid">';
+  tariffs.forEach(function(t){
+    var isTest=t.duration_hours===24;
+    h+='<div class="shop-card">'+
+      (isTest?'<span class="shop-card-badge">Тест-день</span>':'')+
+      '<div class="shop-card-name">'+escapeHtml(t.name)+'</div>'+
+      '<div class="shop-card-geo">'+escapeHtml(t.geo||'')+(t.server?' · '+escapeHtml(t.server):'')+'</div>'+
+      '<div class="shop-card-price">'+Math.round(t.price).toLocaleString('ru-RU')+' ₽<small>/мес</small></div>'+
+      (t.price_day?'<div class="shop-card-day">≈ '+t.price_day.toLocaleString('ru-RU')+' ₽/день</div>':'')+
+      '<button class="btn btn-accent shop-card-buy" data-on-click="buyProxy('+t.id+',this)">Купить</button>'+
+    '</div>';
+  });
+  h+='</div>';
+  box.innerHTML=h;
+}
+
+async function buyProxy(tariffId,btn){
+  if(btn)btn.disabled=true;
+  try{
+    var data=await api('/api/client/buy_proxy',{method:'POST',json:{tariff_id:tariffId}});
+    if(data&&data.ok){
+      showToast('Прокси выдан — реквизиты на вкладке «Панель управления»','success');
+      loadData(); // обновить порты/баланс ЛК
+      return;
+    }
+    var code=data&&data.code;
+    if(code==='EMAIL_NOT_VERIFIED'){
+      showToast('Сначала подтвердите email','error');
+      // К баннеру верификации — он на вкладке «Профиль»
+      var tabEl=document.querySelector('.nav-tab[data-on-click*="\'profile\'"]');
+      switchTab('profile',tabEl);
+      setTimeout(function(){
+        var b=document.getElementById('profileVerifyBanner');
+        if(b)b.scrollIntoView({behavior:'smooth',block:'center'});
+      },150);
+    }else if(code==='INSUFFICIENT_BALANCE'){
+      showToast('Недостаточно средств, нужно '+(data.required!=null?data.required:'—')+' ₽ — пополните баланс','error');
+    }else if(code==='POOL_EMPTY'){
+      showToast('Свободные прокси этой локации закончились','error');
+    }else if(code==='TEST_USED'){
+      showToast('Тест-день уже использован','error');
+    }else if(code==='TARIFF_LOCKED'){
+      showToast('Смена тарифа через поддержку','error');
+    }else{
+      showToast((data&&data.error)||'Ошибка покупки','error');
+    }
+  }catch(e){
+    showToast('Ошибка соединения','error');
+  }finally{
+    if(btn)btn.disabled=false;
+  }
+}
+
+// ==================== B2C: вкладка «Профиль» (WP3) ====================
+// Данные — /api/client/referral (там же email/emailVerified/referral_code,
+// отдельного profile-endpoint нет). Смена пароля — общий endpoint
+// /api/client/change_password; после ok сервер убивает сессии → relogin.
+
+function loadProfile(){
+  var box=document.getElementById('profileContent');
+  api('/api/client/referral').then(function(data){
+    if(!data||data.error){
+      box.innerHTML='<div class="error-msg">'+escapeHtml((data&&data.error)||'Не удалось загрузить профиль')+'</div>';
+      return;
+    }
+    var banner=document.getElementById('profileVerifyBanner');
+    if(banner)banner.style.display=data.emailVerified?'none':'';
+    var email=data.email||'—';
+    var refLink=data.referral_code?(window.location.origin+'/register?ref='+data.referral_code):'';
+    var h='<div class="tools-section"><h3>Профиль</h3>'+
+      '<div class="profile-row"><span class="profile-label">Логин</span><span class="profile-val mono">'+escapeHtml(authLogin)+'</span></div>'+
+      '<div class="profile-row"><span class="profile-label">Email</span><span class="profile-val">'+escapeHtml(email)+'</span></div>'+
+      '<div class="profile-row"><span class="profile-label">Статус email</span><span class="profile-val">'+
+        (data.emailVerified?'<span style="color:var(--success);font-weight:600">Подтверждён</span>':'<span style="color:var(--warning);font-weight:600">Не подтверждён</span>')+
+      '</span></div>'+
+      (refLink?'<div class="profile-row"><span class="profile-label">Реферальная ссылка</span><span class="profile-val mono">'+escapeHtml(refLink)+'</span>'+
+        '<button class="btn btn-sm" data-on-click="copyText(\''+refLink+'\',this)">Копировать</button></div>':'')+
+      '</div>'+
+      '<div class="tools-section"><h3>Смена пароля</h3>'+
+      '<div class="form-group"><label>Текущий пароль</label><input class="form-input" type="password" id="cpOld" autocomplete="current-password"></div>'+
+      '<div class="form-group"><label>Новый пароль (минимум 8 символов)</label><input class="form-input" type="password" id="cpNew" autocomplete="new-password"></div>'+
+      '<button class="btn btn-accent" id="cpBtn" data-on-click="doChangePassword()">Сменить пароль</button>'+
+      '</div>';
+    box.innerHTML=h;
+  }).catch(function(e){
+    box.innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
+  });
+}
+
+async function doChangePassword(){
+  var oldP=document.getElementById('cpOld').value;
+  var newP=document.getElementById('cpNew').value;
+  var btn=document.getElementById('cpBtn');
+  if(!oldP||!newP){showToast('Заполните оба поля','error');return}
+  if(newP.length<8){showToast('Новый пароль — минимум 8 символов','error');return}
+  btn.disabled=true;
+  try{
+    var data=await api('/api/client/change_password',{method:'POST',json:{old:oldP,new:newP}});
+    if(data&&data.ok){
+      // relogin:true — сервер убил все сессии, показываем логин заново
+      showToast('Пароль изменён — войдите с новым паролем','success');
+      setTimeout(doLogout,1200);
+    }else{
+      showToast((data&&data.error)||'Ошибка смены пароля','error');
+    }
+  }catch(e){
+    showToast('Ошибка соединения','error');
+  }finally{
+    btn.disabled=false;
+  }
 }
 
 // ==================== EXPORT MODAL ====================

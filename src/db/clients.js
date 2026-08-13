@@ -18,8 +18,11 @@ function init(db) {
     billing_type, price, currency, balance, api_key, api_key_prefix, referral_code, referred_by, referral_balance,
     reset_token, inn, kpp, legal_name, contract_info, address, auto_acts, auto_bills,
     last_traffic_snapshot, created_at, client_type, billing_paused, allow_debt, max_debt,
-    contract_date, debt_blocked)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    contract_date, debt_blocked,
+    email, email_verified, tg_chat_id, reg_ip, consent_pd_at, blocked, abuse_strikes,
+    balance_negative_since, tariff_id, price_override, hold_ttl_days, test_used)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       login=excluded.login, password=excluded.password, password_hash=excluded.password_hash,
       port_name=excluded.port_name, name=excluded.name, contact=excluded.contact,
@@ -37,6 +40,13 @@ function init(db) {
       max_debt=excluded.max_debt,
       contract_date=excluded.contract_date,
       debt_blocked=excluded.debt_blocked,
+      email=excluded.email, email_verified=excluded.email_verified,
+      tg_chat_id=excluded.tg_chat_id, reg_ip=excluded.reg_ip,
+      consent_pd_at=excluded.consent_pd_at, blocked=excluded.blocked,
+      abuse_strikes=excluded.abuse_strikes,
+      balance_negative_since=excluded.balance_negative_since,
+      tariff_id=excluded.tariff_id, price_override=excluded.price_override,
+      hold_ttl_days=excluded.hold_ttl_days, test_used=excluded.test_used,
       updated_at=datetime('now')`);
 
   S.deleteById = db.prepare('DELETE FROM clients WHERE id = ?');
@@ -66,7 +76,16 @@ function upsertRow(c) {
     c.allowDebt ? 1 : 0,
     typeof c.maxDebt === 'number' ? c.maxDebt : null,
     c.contractDate || '',   // #4 settlement date (mig 036)
-    c.debtBlocked ? 1 : 0   // B3 (Р13): автоблок по долгу (миграция 056)
+    c.debtBlocked ? 1 : 0,  // B3 (Р13): автоблок по долгу (миграция 056)
+    // B2C retail (миграция 060)
+    c.email || null, c.emailVerified ? 1 : 0, c.tgChatId || null,
+    c.regIp || null, c.consentPdAt || null, c.blocked ? 1 : 0,
+    c.abuseStrikes || 0,
+    c.balanceNegativeSince || null,
+    c.tariffId != null ? c.tariffId : null,
+    typeof c.priceOverride === 'number' ? c.priceOverride : null,
+    c.holdTtlDays != null ? c.holdTtlDays : null,
+    c.testUsed ? 1 : 0
   );
 }
 
