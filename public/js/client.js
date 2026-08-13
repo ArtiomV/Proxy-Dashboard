@@ -1190,7 +1190,8 @@ function setStatus(state,text){
   var dot=document.getElementById('statusDot');
   var txt=document.getElementById('statusText');
   dot.className='status-indicator status-'+state;
-  txt.textContent=text;
+  // «OK» не показываем — текст только при проблемах
+  txt.textContent=state==='ok'?'':text;
 }
 
 function escapeHtml(str){return esc(str)}
@@ -1201,6 +1202,16 @@ function copyText(t,b){
   function onOk(){if(b){var o=b.innerHTML;b.innerHTML=icon('check',13);setTimeout(function(){b.innerHTML=o},1500)}showToast('Скопировано','info')}
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(onOk).catch(doFallback)}else{doFallback()}
   function doFallback(){var a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;left:-9999px;opacity:0';document.body.appendChild(a);a.select();try{document.execCommand('copy');onOk()}catch(e){showToast('Ошибка','error')}document.body.removeChild(a)}
+}
+
+// --- Password visibility toggle (masked by default) ---
+function togglePassVis(btn){
+  var span=btn.parentElement.querySelector('.pass-val');
+  if(!span)return;
+  var full=span.getAttribute('data-full');
+  var masked=span.getAttribute('data-masked');
+  if(span.textContent===masked){span.textContent=full;btn.innerHTML=icon('eyeOff',12);}
+  else{span.textContent=masked;btn.innerHTML=icon('eye',12);}
 }
 
 // --- Load Data ---
@@ -1443,11 +1454,14 @@ function renderTable(){
         }
       }
 
-      // Логин:Пароль cell: one line, plain text, single copy button
+      // Логин:Пароль cell: пароль замаскирован, глаз раскрывает, копи-кнопка копирует полную пару
       var loginPassHtml='-';
       if(row.proxyLogin||row.proxyPassword){
-        var loginPassStr=escapeHtml(row.proxyLogin)+':'+escapeHtml(row.proxyPassword);
-        loginPassHtml='<span class="mono">'+loginPassStr+'</span> <button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.proxyLogin).replace(/'/g,"\\'")+':'+escapeHtml(row.proxyPassword).replace(/'/g,"\\'")+'\',this)">'+copyIcon()+'</button>';
+        var lpFull=String(row.proxyLogin)+':'+String(row.proxyPassword);
+        var lpMasked=escapeHtml(row.proxyLogin)+':\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022';
+        loginPassHtml='<span class="mono pass-val" data-full="'+escapeHtml(lpFull)+'" data-masked="'+lpMasked+'">'+lpMasked+'</span> '+
+          '<button class="copy-btn" data-on-click="togglePassVis(this)" title="Показать/скрыть пароль">'+icon('eye',12)+'</button> '+
+          '<button class="copy-btn" data-on-click="copyText(\''+escapeHtml(row.proxyLogin).replace(/'/g,"\\'")+':'+escapeHtml(row.proxyPassword).replace(/'/g,"\\'")+'\',this)">'+copyIcon()+'</button>';
       }
 
       // Смена IP cell: reset link + copy button + IP history button
@@ -1551,7 +1565,7 @@ function renderTable(){
         mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041b\u043e\u0433\u0438\u043d</span><span class="mc-req-val">'+escapeHtml(mrow.proxyLogin)+'</span><button class="mc-copy" data-on-click="copyText(\''+escapeHtml(mrow.proxyLogin)+'\',this)">'+copyIcon()+'</button></div>';
       }
       if(mrow.proxyPassword){
-        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041f\u0430\u0440\u043e\u043b\u044c</span><span class="mc-req-val">'+escapeHtml(mrow.proxyPassword)+'</span><button class="mc-copy" data-on-click="copyText(\''+escapeHtml(mrow.proxyPassword)+'\',this)">'+copyIcon()+'</button></div>';
+        mobileHtml+='<div class="mc-req-row"><span class="mc-req-lbl">\u041f\u0430\u0440\u043e\u043b\u044c</span><span class="mc-req-val pass-val" data-full="'+escapeHtml(mrow.proxyPassword)+'" data-masked="\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022">\u2022\u2022\u2022\u2022\u2022\u2022\u2022\u2022</span><button class="mc-copy" data-on-click="togglePassVis(this)" title="Показать/скрыть">'+icon('eye',12)+'</button><button class="mc-copy" data-on-click="copyText(\''+escapeHtml(mrow.proxyPassword)+'\',this)">'+copyIcon()+'</button></div>';
       }
       if(mrow.resetSecureLink){
         mobileHtml+='<a href="'+escapeHtml(mrow.resetSecureLink)+'" target="_blank" class="mc-reset-btn" style="display:block;text-align:center;text-decoration:none">\ud83d\udd04 \u0421\u0431\u0440\u043e\u0441\u0438\u0442\u044c IP</a>';

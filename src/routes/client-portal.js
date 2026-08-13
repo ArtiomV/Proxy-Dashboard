@@ -38,6 +38,7 @@ module.exports = function createClientPortalRouter(deps) {
     getSpeedtestLatest,
     auditLog, logActivity, getClientIp,
     saveClients,
+    proxyConf, modemRotationCache, proxySmart,
     DOCUMENTS_DIR,
     getTochkaConfig,
   } = deps;
@@ -336,7 +337,7 @@ r.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
     const { nick, serverName, minutes } = req.body;
     if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
     const mins = parseInt(minutes);
-    if (isNaN(mins) || mins < 0 || mins > 1440) return res.status(400).json({ error: 'minutes must be 0-1440' });
+    if (isNaN(mins) || mins < 0 || mins > 10080) return res.status(400).json({ error: 'minutes must be 0-10080' });
 
     // Verify the modem belongs to this client (WP2: single priority chain in
     // src/modems/ownership.js — live binding → roster (24h) → traffic_hourly).
@@ -361,13 +362,31 @@ r.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
     const modem = modems.find(m => m.modem_details && m.modem_details.NICK === nick);
     if (!modem) return res.status(404).json({ error: 'Modem not found' });
 
-    const imei = modem.modem_details.IMEI;
-    // Store rotation setting
-    await postApi(server, '/crud/store_modem', { IMEI: imei, AUTO_IP_ROTATION: String(mins) });
-    // Apply settings
-    await postApi(server, '/modem/settings', { imei });
+    const rawImei = String(modem.modem_details.IMEI).replace(/^S\d+_/, '');
+    // Тот же механизм, что в admin store_modem: /conf/edit + merge формы +
+    // verify-after-write. Старые /crud/store_modem + /modem/settings молча
+    // не применяли ротацию (см. историю в proxies.js) → «Failed to set rotation».
+    const form = await proxyConf.getConfForm(server, `/conf/edit/${rawImei}`);
+    if (!form.ok) {
+      logger.warn({ serverName, rawImei, reason: form.reason }, '[SetRotation] /conf/edit недоступен');
+      return res.status(502).json({ error: `ProxySmart не отдал форму модема (${form.reason})` });
+    }
+    const merged = { ...form.fields, IMEI: rawImei, AUTO_IP_ROTATION: String(mins) };
+    const posted = await proxyConf.postConfForm(server, `/conf/edit/${rawImei}`, merged);
+    if (!posted.ok) {
+      logger.warn({ serverName, rawImei, reason: posted.reason }, '[SetRotation] POST не прошёл');
+      return res.status(502).json({ error: `ProxySmart не сохранил настройки (${posted.reason})` });
+    }
+    const back = await proxyConf.getConfForm(server, `/conf/edit/${rawImei}`);
+    const gotRot = back.ok ? proxyConf.parseRotation(back.html) : null;
+    if (gotRot !== mins) {
+      logger.warn({ serverName, rawImei, mins, gotRot }, '[SetRotation] verify-after-write FAILED');
+      return res.status(502).json({ error: `ProxySmart не применил ротацию: запрошено ${mins}, в форме ${gotRot == null ? 'нет данных' : gotRot}` });
+    }
+    modemRotationCache[serverName + ':' + rawImei] = mins;
+    proxySmart.invalidateCache();
 
-    logger.info(`[Rotation] Client ${req.user.login} set ${nick} rotation to ${mins} min`);
+    logger.info(`[Rotation] Client ${req.user.login} set ${nick} rotation to ${mins} min (verified)`);
     auditLog(req.user.login, 'client_set_rotation', { nick, serverName, minutes: mins, ip: getClientIp(req) });
     res.json({ ok: true, minutes: mins });
   } catch (err) { res.status(502).json({ error: 'Failed to set rotation', details: err.message }); }

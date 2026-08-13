@@ -2793,6 +2793,7 @@ app.use(require('./src/routes/client-portal')({
   getSpeedtestLatest,
   auditLog, logActivity, getClientIp,
   saveClients,
+  proxyConf, modemRotationCache, proxySmart,
 }));
 
 // All traffic endpoints moved to src/routes/traffic.js (Stage 3).
