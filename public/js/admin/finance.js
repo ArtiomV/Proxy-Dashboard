@@ -83,8 +83,8 @@ function _renderFinanceDashboard(c, d) {
   var h = '<div class="fxw">';
 
   h += '<div class="fx-hd"><h2 class="fx-h">Финансы</h2><div class="fx-act">';
-  h += '<button class="fx-btn" data-on-click="generateBulkActs()">📃 Сформировать акты</button>';
-  h += '<button class="fx-btn" data-on-click="openFinanceCostsModal()">⚙ Затраты</button>';
+  h += '<button class="fx-btn" data-on-click="generateBulkActs()">' + icon('doc', 13) + ' Сформировать акты</button>';
+  h += '<button class="fx-btn" data-on-click="openFinanceCostsModal()">' + icon('gear', 13) + ' Затраты</button>';
   h += '<select id="finPeriodSelect" class="fx-sel" data-on-change="_finCurrentPeriod=this.value;renderFinancesTabNew()">';
   periods.forEach(function(p) { h += '<option value="' + p + '"' + (p === d.period ? ' selected' : '') + '>' + p + '</option>'; });
   h += '</select></div></div>';
@@ -110,7 +110,7 @@ function _renderFinanceDashboard(c, d) {
   h += '<div style="height:130px"><canvas id="fxDailyChart"></canvas></div></div>';
 
   h += '<div class="fx-row2">';
-  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Затраты по категориям</span><span class="fx-lk" data-on-click="openFinanceCostsModal()">✎ править</span></div>';
+  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Затраты по категориям</span><span class="fx-lk" data-on-click="openFinanceCostsModal()">' + icon('edit', 11) + ' править</span></div>';
   var catLabels = { server: 'Аренда серверов', sim: 'SIM-карты', electricity: 'Электричество', hosting: 'Хостинг', salary: 'Зарплата', other: 'Прочее' };
   var anyCost = false;
   Object.keys(catLabels).forEach(function(k) {
@@ -118,7 +118,7 @@ function _renderFinanceDashboard(c, d) {
     if (v > 0) { anyCost = true; h += '<div class="fx-lr"><span class="fx-nm">' + catLabels[k] + '</span><span class="fx-vv">' + Math.round(v).toLocaleString('ru-RU') + '</span></div>'; }
   });
   if (anyCost) {
-    if (s.cost_carried_from) h += '<div style="font-size:10px;color:var(--am);margin:2px 0 4px">⚠ Типовые значения из ' + esc(s.cost_carried_from) + ' — подтвердите через «править»</div>';
+    if (s.cost_carried_from) h += '<div style="font-size:10px;color:var(--am);margin:2px 0 4px">' + icon('alert', 10) + ' Типовые значения из ' + esc(s.cost_carried_from) + ' — подтвердите через «править»</div>';
     h += '<div class="fx-tot"><span>Итого</span><span class="fx-vv" style="color:var(--am)">' + money(cost) + '</span></div>';
   }
   else h += '<div class="fx-empty">Затраты за ' + esc(d.period) + ' не введены — нажмите «править».</div>';
@@ -236,14 +236,14 @@ function _renderCostsModal(d) {
 
   ov.innerHTML = '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;width:560px;max-width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-    + '<h3 style="margin:0;font-size:14px">⚙ Затраты — ' + esc(d.period) + '</h3>'
+    + '<h3 style="margin:0;font-size:14px">' + icon('gear', 14) + ' Затраты — ' + esc(d.period) + '</h3>'
     + '<button data-on-click="document.getElementById(\'_finCostsOverlay\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-2)">&times;</button>'
     + '</div>'
-    + (rows.length === 0 && (d.template || []).length > 0 ? '<div style="font-size:11px;color:var(--accent);margin-bottom:6px">⚠ Подставлены значения из предыдущего месяца — отредактируйте и сохраните</div>' : '')
+    + (rows.length === 0 && (d.template || []).length > 0 ? '<div style="font-size:11px;color:var(--accent);margin-bottom:6px">' + icon('alert', 11) + ' Подставлены значения из предыдущего месяца — отредактируйте и сохраните</div>' : '')
     + inputs
     + '<div class="set-save-bar" style="justify-content:flex-end">'
     + '<button class="btn" data-on-click="document.getElementById(\'_finCostsOverlay\').remove()">Отмена</button>'
-    + '<button class="btn btn-primary" data-on-click="saveCostsModal()">💾 Сохранить</button>'
+    + '<button class="btn btn-primary" data-on-click="saveCostsModal()">' + icon('save', 13) + ' Сохранить</button>'
     + '</div></div>';
   document.body.appendChild(ov);
 }
@@ -279,11 +279,11 @@ function openActEditor(clientId, docId) {
   });
   var h = '<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1600;display:flex;align-items:center;justify-content:center" id="actEditorOverlay">';
   h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:18px;width:640px;max-width:94vw;max-height:84vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span style="font-size:14px;font-weight:600;color:var(--text-0)">✏️ Акт ' + esc(doc.actNumber || '') + ' · ' + esc(doc.period || '') + '</span><button style="background:none;border:none;font-size:18px;color:var(--text-2);cursor:pointer;padding:0 4px" data-on-click="document.getElementById(\'actEditorOverlay\').remove()">&times;</button></div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><span style="font-size:14px;font-weight:600;color:var(--text-0)">' + icon('edit', 14) + ' Акт ' + esc(doc.actNumber || '') + ' · ' + esc(doc.period || '') + '</span><button style="background:none;border:none;font-size:18px;color:var(--text-2);cursor:pointer;padding:0 4px" data-on-click="document.getElementById(\'actEditorOverlay\').remove()">&times;</button></div>';
   h += '<div style="font-size:10px;color:var(--text-3);margin-bottom:10px">Изменения сохраняются в нашей базе (история в админке). Документ в интернет-банке не меняется — для замены есть «перевыставить».</div>';
   h += '<table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:8px"><thead><tr style="background:var(--bg-3)"><th style="padding:5px 8px;text-align:left;font-size:10px;color:var(--text-2)">Название</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:80px">Кол-во</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:70px">Ед.</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:100px">Цена</th><th style="padding:5px 8px;font-size:10px;color:var(--text-2);width:90px">Сумма</th><th style="width:30px"></th></tr></thead><tbody id="actEditRows"></tbody></table>';
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><button class="btn btn-sm" data-on-click="actEditorAddRow()" style="font-size:11px">➕ Позиция</button><span style="font-size:13px;font-weight:600">Итого: <span id="actEditTotal">0</span> ₽</span></div>';
-  h += '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" data-on-click="document.getElementById(\'actEditorOverlay\').remove()">Отмена</button><button class="btn btn-sm" title="Удалить документ в банке и создать заново с отредактированными позициями" data-on-click="actEditorReissue(\'' + clientId + '\',\'' + docId + '\',\'' + esc(doc.period || '') + '\')" style="color:var(--warning)">↻ В Точку с правками</button><button class="btn btn-primary btn-sm" data-on-click="actEditorSave(\'' + clientId + '\',\'' + docId + '\')">💾 Сохранить</button></div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><button class="btn btn-sm" data-on-click="actEditorAddRow()" style="font-size:11px">' + icon('plus', 11) + ' Позиция</button><span style="font-size:13px;font-weight:600">Итого: <span id="actEditTotal">0</span> ₽</span></div>';
+  h += '<div style="display:flex;gap:8px;justify-content:flex-end"><button class="btn btn-sm" data-on-click="document.getElementById(\'actEditorOverlay\').remove()">Отмена</button><button class="btn btn-sm" title="Удалить документ в банке и создать заново с отредактированными позициями" data-on-click="actEditorReissue(\'' + clientId + '\',\'' + docId + '\',\'' + esc(doc.period || '') + '\')" style="color:var(--warning)">↻ В Точку с правками</button><button class="btn btn-primary btn-sm" data-on-click="actEditorSave(\'' + clientId + '\',\'' + docId + '\')">' + icon('save', 12) + ' Сохранить</button></div>';
   h += '</div></div>';
   document.body.insertAdjacentHTML('beforeend', h);
   window._actEditRows = rows;
@@ -303,7 +303,7 @@ function actEditorRenderRows() {
       '<td style="padding:4px 6px"><select class="form-input" data-idx="' + i + '" data-f="unit" style="width:100%;font-size:11px;padding:3px 4px" data-on-change="actEditorField(this)">' + ['шт','услуга','ГБ','мес','день','ч','компл'].map(function(u){ return '<option value="' + u + '"' + (r.unit === u ? ' selected' : '') + '>' + u + '</option>'; }).join('') + '</select></td>' +
       '<td style="padding:4px 6px"><input class="form-input" type="number" step="any" data-idx="' + i + '" data-f="price" value="' + r.price + '" style="width:100%;font-size:11px;padding:4px 6px" data-on-change="actEditorField(this)"></td>' +
       '<td style="padding:4px 6px;text-align:right;font-family:var(--font-mono);font-size:11px" id="actEditAmt' + i + '">' + amount.toLocaleString('ru-RU') + '</td>' +
-      '<td style="padding:4px 2px;text-align:center"><button class="btn btn-sm" style="font-size:10px;padding:1px 5px;color:var(--danger)" data-on-click="actEditorDelRow(' + i + ')">✕</button></td></tr>';
+      '<td style="padding:4px 2px;text-align:center"><button class="btn btn-sm" style="font-size:10px;padding:1px 5px;color:var(--danger)" data-on-click="actEditorDelRow(' + i + ')">' + icon('x', 10) + '</button></td></tr>';
   });
   tb.innerHTML = h;
   document.getElementById('actEditTotal').textContent = (Math.round(total * 100) / 100).toLocaleString('ru-RU');
@@ -403,30 +403,30 @@ function renderOpsDocuments(clientId) {
 
   // === SECTION: АКТЫ ===
   h += '<div style="margin-bottom:16px">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">📃 Закрывающие документы (акты)</h4></div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">' + icon('doc', 13) + ' Закрывающие документы (акты)</h4></div>';
   h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:var(--bg-3);border-radius:6px">';
   h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период</label><input class="form-input" type="month" id="actPeriod" style="width:140px;font-size:12px;padding:4px 8px"></div>';
-  h += '<button class="btn btn-primary btn-sm" data-on-click="createAct(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">➕ Создать акт</button>';
+  h += '<button class="btn btn-primary btn-sm" data-on-click="createAct(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">' + icon('plus', 11) + ' Создать акт</button>';
   h += '</div>';
   if (actDocs.length) {
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Действия</th></tr></thead><tbody>';
     actDocs.forEach(function(d) {
       var isSigned = d.status === 'signed';
       var statusHtml = isSigned
-        ? '<span style="color:var(--success);font-size:11px">✅ Подписан</span>'
-        : '<span style="color:var(--danger);font-size:11px">❌ Не подписан</span>';
+        ? '<span style="color:var(--success);font-size:11px">' + icon('check', 11) + ' Подписан</span>'
+        : '<span style="color:var(--danger);font-size:11px">' + icon('x', 11) + ' Не подписан</span>';
       var toggleBtn = isSigned
-        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'unsigned\')">❌</button>'
-        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'signed\')">✅</button>';
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'unsigned\')">' + icon('x', 11) + '</button>'
+        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleActStatus(\'' + clientId + '\',\'' + d.id + '\',\'signed\')">' + icon('check', 11) + '</button>';
       var pdfBtn = (d.tochkaDocumentId
-        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadActPdf(\'' + clientId + '\',\'' + d.id + '\')">📥 PDF</button> '
-        : '') + '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="window.open(API+\'/api/admin/clients/'+clientId+'/closing_documents/'+d.id+'/print?token=\'+authToken,\'_blank\')">🖨</button>';
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadActPdf(\'' + clientId + '\',\'' + d.id + '\')">' + icon('download', 11) + ' PDF</button> '
+        : '') + '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="window.open(API+\'/api/admin/clients/'+clientId+'/closing_documents/'+d.id+'/print?token=\'+authToken,\'_blank\')">' + icon('print', 11) + '</button>';
       h += '<tr style="' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
       h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(d.period) + '</td>';
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Редактировать позиции акта" data-on-click="openActEditor(\'' + clientId + '\',\'' + d.id + '\')">✏️</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="\u041f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u0438\u0442\u044c: \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0438 \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0438\u043c \u0434\u0430\u043d\u043d\u044b\u043c" data-on-click="reissueAct(\'' + clientId + '\',\'' + d.id + '\',\'' + esc(d.period) + '\')">\u21bb</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0430\u043a\u0442" data-on-click="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">\ud83d\uddd1</button></td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Редактировать позиции акта" data-on-click="openActEditor(\'' + clientId + '\',\'' + d.id + '\')">' + icon('edit', 11) + '</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="\u041f\u0435\u0440\u0435\u0432\u044b\u0441\u0442\u0430\u0432\u0438\u0442\u044c: \u0443\u0434\u0430\u043b\u0438\u0442\u044c \u0438 \u0441\u043e\u0437\u0434\u0430\u0442\u044c \u0437\u0430\u043d\u043e\u0432\u043e \u043f\u043e \u0442\u0435\u043a\u0443\u0449\u0438\u043c \u0434\u0430\u043d\u043d\u044b\u043c" data-on-click="reissueAct(\'' + clientId + '\',\'' + d.id + '\',\'' + esc(d.period) + '\')">\u21bb</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0430\u043a\u0442" data-on-click="deleteAct(\'' + clientId + '\',\'' + d.id + '\')">' + icon('trash', 11) + '</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table>';
@@ -437,31 +437,31 @@ function renderOpsDocuments(clientId) {
 
   // === SECTION: СЧЕТА ===
   h += '<div style="margin-bottom:16px">';
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">💳 Счета на оплату</h4></div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">' + icon('card', 13) + ' Счета на оплату</h4></div>';
   h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:10px;padding:8px 10px;background:var(--bg-3);border-radius:6px;flex-wrap:wrap">';
   h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период</label><input class="form-input" type="month" id="billPeriod" style="width:140px;font-size:12px;padding:4px 8px"></div>';
   h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Сумма (авто)</label><input class="form-input" type="number" id="billAmount" placeholder="авто" style="width:100px;font-size:12px;padding:4px 8px"></div>';
-  h += '<button class="btn btn-primary btn-sm" data-on-click="createBill(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">➕ Выставить счёт</button>';
+  h += '<button class="btn btn-primary btn-sm" data-on-click="createBill(\'' + clientId + '\')" style="padding:4px 10px;font-size:11px">' + icon('plus', 11) + ' Выставить счёт</button>';
   h += '</div>';
   if (bills.length) {
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Период</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Номер</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Сумма</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Статус</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Действия</th></tr></thead><tbody>';
     bills.forEach(function(b) {
       var isPaid = b.status === 'paid';
       var statusHtml = isPaid
-        ? '<span style="color:var(--success);font-size:11px">✅ Оплачен</span>'
-        : '<span style="color:var(--danger);font-size:11px">⏳ Не оплачен</span>';
+        ? '<span style="color:var(--success);font-size:11px">' + icon('check', 11) + ' Оплачен</span>'
+        : '<span style="color:var(--danger);font-size:11px">' + icon('hourglass', 11) + ' Не оплачен</span>';
       var toggleBtn = isPaid
         ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'unpaid\')">↩</button>'
-        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'paid\')">✅</button>';
+        : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleBillStatus(\'' + clientId + '\',\'' + b.id + '\',\'paid\')">' + icon('check', 11) + '</button>';
       var pdfBtn = (b.tochkaBillId
-        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadBillPdf(\'' + clientId + '\',\'' + b.id + '\')">📥 PDF</button> '
-        : '') + '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="window.open(API+\'/api/admin/clients/'+clientId+'/bills/'+b.id+'/print?token=\'+authToken,\'_blank\')">🖨</button>';
+        ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadBillPdf(\'' + clientId + '\',\'' + b.id + '\')">' + icon('download', 11) + ' PDF</button> '
+        : '') + '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="window.open(API+\'/api/admin/clients/'+clientId+'/bills/'+b.id+'/print?token=\'+authToken,\'_blank\')">' + icon('print', 11) + '</button>';
       h += '<tr style="' + (isPaid ? '' : 'background:rgba(220,38,38,0.04)') + '">';
       h += '<td style="padding:5px 10px;font-weight:500;font-size:12px">' + esc(b.period) + '</td>';
       h += '<td style="padding:5px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
       h += '<td style="padding:5px 10px;text-align:center;font-weight:600;font-size:12px">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
       h += '<td style="padding:5px 10px;text-align:center">' + statusHtml + '</td>';
-      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Изменить сумму счёта" data-on-click="editBillAmount(\'' + clientId + '\',\'' + b.id + '\')">✏️</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--warning)" title="Перевыставить с новой суммой" data-on-click="reissueBillEdited(\'' + clientId + '\',\'' + b.id + '\')">↻</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u0447\u0451\u0442" data-on-click="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">\ud83d\uddd1</button></td>';
+      h += '<td style="padding:5px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Изменить сумму счёта" data-on-click="editBillAmount(\'' + clientId + '\',\'' + b.id + '\')">' + icon('edit', 11) + '</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--warning)" title="Перевыставить с новой суммой" data-on-click="reissueBillEdited(\'' + clientId + '\',\'' + b.id + '\')">↻</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="\u0423\u0434\u0430\u043b\u0438\u0442\u044c \u0441\u0447\u0451\u0442" data-on-click="deleteBill(\'' + clientId + '\',\'' + b.id + '\')">' + icon('trash', 11) + '</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table>';
@@ -472,7 +472,7 @@ function renderOpsDocuments(clientId) {
 
   // === SECTION: ФАЙЛЫ ===
   h += '<div>';
-  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">📎 Загруженные документы</h4></div>';
+  h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px"><h4 style="margin:0;font-size:13px;color:var(--text-1)">' + icon('link', 13) + ' Загруженные документы</h4></div>';
   if (fileDocs.length) {
     h += '<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr style="background:var(--bg-3)"><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Документ</th><th style="padding:6px 10px;text-align:left;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Дата</th><th style="padding:6px 10px;text-align:center;color:var(--text-2);font-weight:600;font-size:10px;text-transform:uppercase;letter-spacing:.5px">Действия</th></tr></thead><tbody>';
     fileDocs.forEach(function(d) {
@@ -657,11 +657,11 @@ function renderBankConfig() {
   var tochkaOk = currentData.tochkaConfigured;
   var h = '<div class="detail-card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:16px">';
-  h += '<h3 style="margin:0">\u{1F3E6} \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0422\u043E\u0447\u043A\u0430 \u0411\u0430\u043D\u043A</h3>';
+  h += '<h3 style="margin:0">' + icon('bank', 15) + ' \u041D\u0430\u0441\u0442\u0440\u043E\u0439\u043A\u0438 \u0422\u043E\u0447\u043A\u0430 \u0411\u0430\u043D\u043A</h3>';
   if (tochkaOk) {
-    h += '<span class="badge" style="background:var(--success);color:#fff;font-size:11px;padding:3px 10px;border-radius:8px">\u2705 API \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0451\u043D</span>';
+    h += '<span class="badge" style="background:var(--success);color:#fff;font-size:11px;padding:3px 10px;border-radius:8px">' + icon('check', 11) + ' API \u043F\u043E\u0434\u043A\u043B\u044E\u0447\u0451\u043D</span>';
   } else {
-    h += '<span class="badge" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px;border-radius:8px">\u274C API \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D</span>';
+    h += '<span class="badge" style="background:var(--danger);color:#fff;font-size:11px;padding:3px 10px;border-radius:8px">' + icon('x', 11) + ' API \u043D\u0435 \u043D\u0430\u0441\u0442\u0440\u043E\u0435\u043D</span>';
   }
   h += '</div>';
   h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(min(240px,100%),1fr));gap:10px;margin-bottom:12px">';
@@ -676,11 +676,11 @@ function renderBankConfig() {
   h += '</div>';
   // Bank details fields removed from UI (still stored in tochka_config if set)
   h += '<div style="display:flex;gap:8px;flex-wrap:wrap">';
-  h += '<button class="btn btn-primary" data-on-click="saveBankConfig()">\u{1F4BE} \u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C</button>';
+  h += '<button class="btn btn-primary" data-on-click="saveBankConfig()">' + icon('save', 13) + ' \u0421\u043E\u0445\u0440\u0430\u043D\u0438\u0442\u044C</button>';
   if (tochkaOk) {
-    h += '<button class="btn" style="background:#f59e0b;color:#fff" data-on-click="autodetectBank()">\u{1F50D} \u0410\u0432\u0442\u043E\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C</button>';
-    h += '<button class="btn btn-success" data-on-click="registerWebhook()">\u{1F517} \u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C webhook</button>';
-    h += '<button class="btn" style="background:#6366f1;color:#fff" data-on-click="syncPayments()">\u{1F504} \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u043B\u0430\u0442\u0435\u0436\u0438</button>';
+    h += '<button class="btn" style="background:#f59e0b;color:#fff" data-on-click="autodetectBank()">' + icon('search', 13) + ' \u0410\u0432\u0442\u043E\u043E\u043F\u0440\u0435\u0434\u0435\u043B\u0438\u0442\u044C</button>';
+    h += '<button class="btn btn-success" data-on-click="registerWebhook()">' + icon('link', 13) + ' \u0417\u0430\u0440\u0435\u0433\u0438\u0441\u0442\u0440\u0438\u0440\u043E\u0432\u0430\u0442\u044C webhook</button>';
+    h += '<button class="btn" style="background:#6366f1;color:#fff" data-on-click="syncPayments()">' + icon('refresh', 13) + ' \u0421\u0438\u043D\u0445\u0440\u043E\u043D\u0438\u0437\u0438\u0440\u043E\u0432\u0430\u0442\u044C \u043F\u043B\u0430\u0442\u0435\u0436\u0438</button>';
   }
   h += '</div>';
   if (tochkaOk) {
@@ -760,22 +760,22 @@ function syncPayments() {
   var dateFrom = document.getElementById('syncDateFrom') ? document.getElementById('syncDateFrom').value : '2024-01-01';
   var dateTo = document.getElementById('syncDateTo') ? document.getElementById('syncDateTo').value : new Date().toISOString().slice(0, 10);
   var statusEl = document.getElementById('syncStatus');
-  if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">\u23F3 \u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u044E \u0432\u044B\u043F\u0438\u0441\u043A\u0443... (\u0434\u043E 30 \u0441\u0435\u043A)</span>';
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">' + icon('hourglass', 12) + ' \u0417\u0430\u043F\u0440\u0430\u0448\u0438\u0432\u0430\u044E \u0432\u044B\u043F\u0438\u0441\u043A\u0443... (\u0434\u043E 30 \u0441\u0435\u043A)</span>';
   api(API + '/api/admin/tochka/sync',{method:'POST',json:{ dateFrom: dateFrom, dateTo: dateTo }})
     .then(function(d) {
       if (d.ok) {
-        var msg = '\u2705 \u0413\u043E\u0442\u043E\u0432\u043E! \u0412\u0441\u0435\u0433\u043E: ' + d.total + ', \u0438\u043C\u043F\u043E\u0440\u0442: ' + d.imported + ', \u043F\u0440\u0438\u0432\u044F\u0437\u0430\u043D\u043E: ' + d.matched + ', \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E: ' + d.skipped;
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">' + msg + '</span>';
+        var msg = '\u0413\u043E\u0442\u043E\u0432\u043E! \u0412\u0441\u0435\u0433\u043E: ' + d.total + ', \u0438\u043C\u043F\u043E\u0440\u0442: ' + d.imported + ', \u043F\u0440\u0438\u0432\u044F\u0437\u0430\u043D\u043E: ' + d.matched + ', \u043F\u0440\u043E\u043F\u0443\u0449\u0435\u043D\u043E: ' + d.skipped;
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">' + icon('check', 12) + ' ' + msg + '</span>';
         showToast(msg, 'success');
         loadData();
       } else {
         var errMsg = d.error || '\u041E\u0448\u0438\u0431\u043A\u0430';
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + errMsg + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">' + icon('x', 12) + ' ' + errMsg + '</span>';
         showToast(errMsg, 'error');
       }
     })
     .catch(function(e) {
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + esc(e.message) + '</span>';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">' + icon('x', 12) + ' ' + esc(e.message) + '</span>';
       showToast(e.message, 'error');
     });
 }
@@ -787,13 +787,13 @@ function renderBankDocuments() {
   var tochkaOk = currentData.tochkaConfigured;
   var h = '<div class="detail-card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
-  h += '<h3 style="margin:0">📃 Документооборот</h3>';
+  h += '<h3 style="margin:0">' + icon('doc', 15) + ' Документооборот</h3>';
   h += '</div>';
 
   // Bulk generation form
   h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px;padding:10px 12px;background:var(--bg-3);border-radius:8px;flex-wrap:wrap">';
   h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+(function(){var btns='';var now=new Date();for(var mi=0;mi<4;mi++){var d2=new Date(now.getFullYear(),now.getMonth()-mi,1);var val=d2.getFullYear()+'-'+String(d2.getMonth()+1).padStart(2,'0');var months=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];var lbl=months[d2.getMonth()]+' '+d2.getFullYear();btns+='<button class="btn btn-sm" style="font-size:10px;padding:2px 8px" data-on-click="document.getElementById(\'bulkActPeriod\').value=\''+val+'\'">'+lbl+'</button>';}return btns;}())+'<input class="form-input" type="month" id="bulkActPeriod" style="width:140px;font-size:12px;padding:4px 8px"></div></div>';
-  h += '<button class="btn btn-primary btn-sm" data-on-click="generateBulkActs()" style="white-space:nowrap;padding:4px 12px">📃 Сгенерировать акты для всех клиентов</button>';
+  h += '<button class="btn btn-primary btn-sm" data-on-click="generateBulkActs()" style="white-space:nowrap;padding:4px 12px">' + icon('doc', 12) + ' Сгенерировать акты для всех клиентов</button>';
   h += '<div id="bulkActStatus" style="font-size:12px;color:var(--text-3)"></div>';
   h += '</div>';
 
@@ -849,13 +849,13 @@ function loadAllActs() {
         pdocs.forEach(function(d) {
           var isSigned = d.status === 'signed';
           var statusHtml = isSigned
-            ? '<span style="color:var(--success);font-weight:600">✅ Подписан</span>'
-            : '<span style="color:var(--danger);font-weight:600">❌ Не подписан</span>';
+            ? '<span style="color:var(--success);font-weight:600">' + icon('check', 12) + ' Подписан</span>'
+            : '<span style="color:var(--danger);font-weight:600">' + icon('x', 12) + ' Не подписан</span>';
           var toggleBtn = isSigned
-            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleActStatus(\'' + d.clientId + '\',\'' + d.id + '\',\'unsigned\')">❌</button>'
-            : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleActStatus(\'' + d.clientId + '\',\'' + d.id + '\',\'signed\')">✅</button>';
+            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleActStatus(\'' + d.clientId + '\',\'' + d.id + '\',\'unsigned\')">' + icon('x', 11) + '</button>'
+            : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleActStatus(\'' + d.clientId + '\',\'' + d.id + '\',\'signed\')">' + icon('check', 11) + '</button>';
           var pdfBtn = d.tochkaDocumentId
-            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadActPdf(\'' + d.clientId + '\',\'' + d.id + '\')">📥</button>'
+            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadActPdf(\'' + d.clientId + '\',\'' + d.id + '\')">' + icon('download', 11) + '</button>'
             : '';
           h += '<tr style="' + (isSigned ? '' : 'background:rgba(220,38,38,0.04)') + '">';
           h += '<td style="padding:6px 10px;font-weight:500">' + esc(d.clientName || '') + '</td>';
@@ -863,7 +863,7 @@ function loadAllActs() {
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(d.actNumber || '') + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (d.totalAmount || 0).toLocaleString('ru-RU') + ' ₽</td>';
           h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
-          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Редактировать позиции акта" data-on-click="openActEditor(\'' + d.clientId + '\',\'' + d.id + '\')">✏️</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Перевыставить: удалить и создать заново" data-on-click="reissueAct(\'' + d.clientId + '\',\'' + d.id + '\',\'' + esc(d.period || '') + '\')">↻</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить акт" data-on-click="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">🗑</button></td>';
+          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Редактировать позиции акта" data-on-click="openActEditor(\'' + d.clientId + '\',\'' + d.id + '\')">' + icon('edit', 11) + '</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Перевыставить: удалить и создать заново" data-on-click="reissueAct(\'' + d.clientId + '\',\'' + d.id + '\',\'' + esc(d.period || '') + '\')">↻</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить акт" data-on-click="deleteActFromBank(\'' + d.clientId + '\',\'' + d.id + '\')">' + icon('trash', 11) + '</button></td>';
           h += '</tr>';
         });
         h += '</tbody></table></div></div>';
@@ -891,22 +891,22 @@ function generateBulkActs() {
   var period = document.getElementById('bulkActPeriod').value;
   if (!period) return showToast('Выберите период', 'error');
   var statusEl = document.getElementById('bulkActStatus');
-  if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">⏳ Генерирую акты...</span>';
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">' + icon('hourglass', 12) + ' Генерирую акты...</span>';
   api(API + '/api/admin/tochka/generate_acts',{method:'POST',json:{ period: period }})
     .then(function(d) {
       if (d.ok) {
-        var msg = '✅ Создано: ' + d.generated + ', пропущено: ' + d.skipped;
+        var msg = 'Создано: ' + d.generated + ', пропущено: ' + d.skipped;
         if (d.errors > 0) msg += ', ошибок: ' + d.errors;
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">' + msg + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">' + icon('check', 12) + ' ' + msg + '</span>';
         showToast(msg, 'success');
         loadData();
         setTimeout(function() { loadAllActs(); }, 1500);
       } else {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + esc(d.error || 'Ошибка') + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">' + icon('x', 12) + ' ' + esc(d.error || 'Ошибка') + '</span>';
         showToast(d.error || 'Ошибка', 'error');
       }
     }).catch(function(e) {
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + esc(e.message) + '</span>';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">' + icon('x', 12) + ' ' + esc(e.message) + '</span>';
       showToast(e.message, 'error');
     });
 }
@@ -927,13 +927,13 @@ function renderBankBills() {
   var tochkaOk = currentData.tochkaConfigured;
   var h = '<div class="detail-card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
-  h += '<h3 style="margin:0">💳 Счета на оплату</h3>';
+  h += '<h3 style="margin:0">' + icon('card', 15) + ' Счета на оплату</h3>';
   h += '</div>';
 
   // Bulk generation form
   h += '<div style="display:flex;gap:8px;align-items:flex-end;margin-bottom:16px;padding:10px 12px;background:var(--bg-3);border-radius:8px;flex-wrap:wrap">';
   h += '<div><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Период (ГГГГ-ММ)</label><div style="display:flex;gap:4px;flex-wrap:wrap;align-items:center">'+(function(){var btns='';var now=new Date();for(var mi=0;mi<4;mi++){var d2=new Date(now.getFullYear(),now.getMonth()-mi,1);var val=d2.getFullYear()+'-'+String(d2.getMonth()+1).padStart(2,'0');var months=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];var lbl=months[d2.getMonth()]+' '+d2.getFullYear();btns+='<button class="btn btn-sm" style="font-size:10px;padding:2px 8px" data-on-click="document.getElementById(\'bulkBillPeriod\').value=\''+val+'\'">'+lbl+'</button>';}return btns;}())+'<input class="form-input" type="month" id="bulkBillPeriod" style="width:140px;font-size:12px;padding:4px 8px"></div></div>';
-  h += '<button class="btn btn-primary btn-sm" data-on-click="generateBulkBills()" style="white-space:nowrap;padding:4px 12px">💳 Выставить счета всем клиентам</button>';
+  h += '<button class="btn btn-primary btn-sm" data-on-click="generateBulkBills()" style="white-space:nowrap;padding:4px 12px">' + icon('card', 12) + ' Выставить счета всем клиентам</button>';
   h += '<div id="bulkBillStatus" style="font-size:12px;color:var(--text-3)"></div>';
   h += '</div>';
 
@@ -989,13 +989,13 @@ function loadAllBills() {
         pbills.forEach(function(b) {
           var isPaid = b.status === 'paid';
           var statusHtml = isPaid
-            ? '<span style="color:var(--success);font-weight:600">✅ Оплачен</span>'
-            : '<span style="color:var(--danger);font-weight:600">⏳ Не оплачен</span>';
+            ? '<span style="color:var(--success);font-weight:600">' + icon('check', 12) + ' Оплачен</span>'
+            : '<span style="color:var(--danger);font-weight:600">' + icon('hourglass', 12) + ' Не оплачен</span>';
           var toggleBtn = isPaid
             ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleBillStatus(\'' + b.clientId + '\',\'' + b.id + '\',\'unpaid\')">↩</button>'
-            : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleBillStatus(\'' + b.clientId + '\',\'' + b.id + '\',\'paid\')">✅</button>';
+            : '<button class="btn btn-success btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="toggleBillStatus(\'' + b.clientId + '\',\'' + b.id + '\',\'paid\')">' + icon('check', 11) + '</button>';
           var pdfBtn = b.tochkaBillId
-            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadBillPdf(\'' + b.clientId + '\',\'' + b.id + '\')">📥</button>'
+            ? '<button class="btn btn-sm" style="font-size:10px;padding:2px 6px" data-on-click="downloadBillPdf(\'' + b.clientId + '\',\'' + b.id + '\')">' + icon('download', 11) + '</button>'
             : '';
           var _fHtml = '';
           if (b.billingType === 'per_gb' && b.formula && b.formula.kind === 'per_gb') {
@@ -1026,7 +1026,7 @@ function loadAllBills() {
           h += '<td style="padding:6px 10px;color:var(--text-3);font-size:11px">' + esc(b.billNumber || '') + '</td>';
           h += '<td style="padding:6px 10px;text-align:center;font-weight:600">' + (b.amount || 0).toLocaleString('ru-RU') + ' \u20BD</td>';
           h += '<td style="padding:6px 10px;text-align:center">' + statusHtml + '</td>';
-          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Изменить сумму счёта" data-on-click="editBillAmount(\'' + b.clientId + '\',\'' + b.id + '\')">✏️</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--warning)" title="Перевыставить с новой суммой: удалить старый в банке и создать заново" data-on-click="reissueBillEdited(\'' + b.clientId + '\',\'' + b.id + '\')">↻</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить счёт" data-on-click="deleteBillFromBank(\'' + b.clientId + '\',\'' + b.id + '\')">🗑</button></td>';
+          h += '<td style="padding:6px 10px;text-align:center;white-space:nowrap"><button class="btn btn-sm" style="font-size:10px;padding:2px 6px" title="Изменить сумму счёта" data-on-click="editBillAmount(\'' + b.clientId + '\',\'' + b.id + '\')">' + icon('edit', 11) + '</button> <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--warning)" title="Перевыставить с новой суммой: удалить старый в банке и создать заново" data-on-click="reissueBillEdited(\'' + b.clientId + '\',\'' + b.id + '\')">↻</button> ' + pdfBtn + ' ' + toggleBtn + ' <button class="btn btn-sm" style="font-size:10px;padding:2px 6px;color:var(--danger)" title="Удалить счёт" data-on-click="deleteBillFromBank(\'' + b.clientId + '\',\'' + b.id + '\')">' + icon('trash', 11) + '</button></td>';
           h += '</tr>';
         });
         h += '</tbody></table></div></div>';
@@ -1054,22 +1054,22 @@ function generateBulkBills() {
   var period = document.getElementById('bulkBillPeriod').value;
   if (!period) return showToast('Выберите период', 'error');
   var statusEl = document.getElementById('bulkBillStatus');
-  if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">⏳ Генерирую счета...</span>';
+  if (statusEl) statusEl.innerHTML = '<span style="color:var(--accent)">' + icon('hourglass', 12) + ' Генерирую счета...</span>';
   api(API + '/api/admin/tochka/generate_bills',{method:'POST',json:{ period: period }})
     .then(function(d) {
       if (d.ok) {
-        var msg = '✅ Создано: ' + d.generated + ', пропущено: ' + d.skipped;
+        var msg = 'Создано: ' + d.generated + ', пропущено: ' + d.skipped;
         if (d.errors > 0) msg += ', ошибок: ' + d.errors;
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">' + msg + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--success)">' + icon('check', 12) + ' ' + msg + '</span>';
         showToast(msg, 'success');
         loadData();
         setTimeout(function() { loadAllBills(); }, 1500);
       } else {
-        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">❌ ' + esc(d.error || 'Ошибка') + '</span>';
+        if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">' + icon('x', 12) + ' ' + esc(d.error || 'Ошибка') + '</span>';
         showToast(d.error || 'Ошибка', 'error');
       }
     }).catch(function(e) {
-      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">\u274C ' + esc(e.message) + '</span>';
+      if (statusEl) statusEl.innerHTML = '<span style="color:var(--danger)">' + icon('x', 12) + ' ' + esc(e.message) + '</span>';
       showToast(e.message, 'error');
     });
 }
@@ -1118,7 +1118,7 @@ function renderBankPayments() {
   var searchVal=_paymentsSearch.toLowerCase();
   var h = '<div class="detail-card">';
   h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">';
-  h += '<h3 style="margin:0">\u{1F3E6} Банк Точка</h3>';
+  h += '<h3 style="margin:0">' + icon('bank', 15) + ' Банк Точка</h3>';
   if (tochkaOk) {
     h += '<span class="badge" style="background:var(--success);color:#fff;font-size:10px;padding:2px 8px;border-radius:8px">API подключён</span>';
   } else {
@@ -1129,15 +1129,15 @@ function renderBankPayments() {
   h += '<div style="display:flex;gap:8px;align-items:center;margin-bottom:12px;padding:8px 10px;background:var(--bg-3);border-radius:8px">';
   h += '<input id="paymentsSearchInput" class="form-input" placeholder="Поиск по плательщику, ИНН, назначению..." data-on-input="filterPayments()" value="'+esc(searchVal)+'" style="flex:1;font-size:12px;padding:5px 10px">';
   var unmatchedCount=bp.filter(function(p){return!p.matched&&!p.dismissed&&p.webhookType==='incomingPayment'}).length;
-  if(unmatchedCount>0)h+='<span style="font-size:11px;color:var(--danger);font-weight:600;white-space:nowrap">⚠ Неопознанных: '+unmatchedCount+'</span>';
+  if(unmatchedCount>0)h+='<span style="font-size:11px;color:var(--danger);font-weight:600;white-space:nowrap">' + icon('alert', 11) + ' Неопознанных: '+unmatchedCount+'</span>';
   h += '</div>';
   var unmatched = bp.filter(function(p) { return !p.matched && !p.dismissed && p.webhookType === 'incomingPayment'; }).sort(function(a,b){return(b.date||'').localeCompare(a.date||'')});
   if(searchVal){unmatched=unmatched.filter(function(p){return(p.payerName||'').toLowerCase().indexOf(searchVal)!==-1||(p.payerInn||'').toLowerCase().indexOf(searchVal)!==-1||(p.purpose||'').toLowerCase().indexOf(searchVal)!==-1;})}
   if (unmatched.length > 0) {
     h += '<div style="background:rgba(220,38,38,0.1);border:1px solid var(--danger);border-radius:8px;padding:10px;margin-bottom:12px">';
     h += '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">';
-    h += '<span style="font-weight:600;color:var(--danger)">\u26A0\uFE0F \u041D\u0435\u043E\u043F\u043E\u0437\u043D\u0430\u043D\u043D\u044B\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438: ' + unmatched.length + '</span>';
-    h += '<button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg-3)" data-on-click="dismissAllUnmatched()">\u2716 \u0423\u0431\u0440\u0430\u0442\u044C \u0432\u0441\u0435</button>';
+    h += '<span style="font-weight:600;color:var(--danger)">' + icon('alert', 12) + ' \u041D\u0435\u043E\u043F\u043E\u0437\u043D\u0430\u043D\u043D\u044B\u0435 \u043F\u043B\u0430\u0442\u0435\u0436\u0438: ' + unmatched.length + '</span>';
+    h += '<button class="btn btn-sm" style="font-size:10px;padding:2px 8px;background:var(--bg-3)" data-on-click="dismissAllUnmatched()">' + icon('x', 11) + ' \u0423\u0431\u0440\u0430\u0442\u044C \u0432\u0441\u0435</button>';
     h += '</div>';
     h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch">';
     h += '<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr><th style="padding:4px 6px;text-align:left">\u0414\u0430\u0442\u0430</th><th style="padding:4px 6px;text-align:left">\u041F\u043B\u0430\u0442\u0435\u043B\u044C\u0449\u0438\u043A</th><th style="padding:4px 6px;text-align:left">\u0418\u041D\u041D</th><th style="padding:4px 6px;text-align:center">\u0421\u0443\u043C\u043C\u0430</th><th style="padding:4px 6px;text-align:left">\u041D\u0430\u0437\u043D\u0430\u0447\u0435\u043D\u0438\u0435</th><th style="padding:4px 6px">\u0414\u0435\u0439\u0441\u0442\u0432\u0438\u044F</th></tr></thead><tbody>';
@@ -1152,7 +1152,7 @@ function renderBankPayments() {
       h += '<option value="">---</option>';
       (currentData.clients || []).forEach(function(c) { h += '<option value="' + c.id + '">' + esc(c.name) + '</option>'; });
       h += '</select> <button class="btn btn-sm btn-primary" style="font-size:9px;padding:1px 6px" data-on-click="matchPayment(\'' + p.id + '\')">OK</button>';
-      h += ' <button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:var(--bg-3)" data-on-click="dismissPayment(\'' + p.id + '\')" title="\u0423\u0431\u0440\u0430\u0442\u044C">\u2716</button></td>';
+      h += ' <button class="btn btn-sm" style="font-size:9px;padding:1px 4px;background:var(--bg-3)" data-on-click="dismissPayment(\'' + p.id + '\')" title="\u0423\u0431\u0440\u0430\u0442\u044C">' + icon('x', 10) + '</button></td>';
       h += '</tr>';
     });
     h += '</tbody></table></div>';
@@ -1169,7 +1169,7 @@ function renderBankPayments() {
       h += '<td style="padding:4px 6px">' + fmtDateRu(p.date) + '</td>';
       h += '<td style="padding:4px 6px" title="' + esc(p.payerName || '') + '">' + esc(p.payerName || '') + '</td>';
       h += '<td style="padding:4px 6px;text-align:center;font-weight:500'+(isUnmatched?';color:var(--danger)':'')+'">' + p.amount + ' \u20BD</td>';
-      h += '<td style="padding:4px 6px;color:var(--success);font-weight:500">'+(isUnmatched?'<span style="color:var(--danger)">⚠ Не привязан</span>':'\u2705 ' + esc(p.matchedClientName || ''))+'</td>';
+      h += '<td style="padding:4px 6px;color:var(--success);font-weight:500">'+(isUnmatched?'<span style="color:var(--danger)">' + icon('alert', 11) + ' Не привязан</span>':icon('check', 11) + ' ' + esc(p.matchedClientName || ''))+'</td>';
       h += '</tr>';
     });
     h += '</tbody></table>' + '</div>';

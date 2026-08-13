@@ -34,7 +34,7 @@ function loadServersList(){
     d.servers.forEach(function(s){
       var cn=s.country||{};
       var cc=cn.country||'';
-      var flag=cc==='MD'?'🇲🇩':cc==='RO'?'🇷🇴':'🌍';
+      var flag=cc==='MD'?flagIcon('MD'):cc==='RO'?flagIcon('RO'):icon('globe');
       var cName=cn.name||cc;
       // «Модемов» и «в работе» — строго fleet (WP1: единый источник на все
       // страницы). Живой fallback-подсчёт удалён: он и давал расхождения.
@@ -56,12 +56,12 @@ function loadServersList(){
       h+='</div>';
       // Body (view mode)
       h+='<div class="server-body" id="srvBody_'+sn+'">';
-      h+='<div class="server-field"><div class="server-field-label">API Endpoint</div><div class="server-field-value"><span>'+esc(s.url)+'</span><button class="copy-btn" data-on-click="copyText(this.dataset.text,this)" data-text="'+esc(s.url)+'">📋</button></div></div>';
-      h+='<div class="server-field"><div class="server-field-label">Public IP</div><div class="server-field-value"><span>'+esc(s.publicIp||'—')+'</span>'+(s.publicIp?'<button class="copy-btn" data-on-click="copyText(\''+esc(s.publicIp)+'\',this)">📋</button>':'')+'</div></div>';
-      h+='<div class="server-field"><div class="server-field-label">Панель (API)</div><div class="server-field-value"><span>'+esc(s.panelUser||'—')+'</span> / <span id="panelPwdView_'+sn+'">'+(s.panelPassword?'••••••••':'—')+'</span>'+(s.panelPassword?'<button class="toggle-btn" data-on-click="togglePwdView(this,\'panelPwdView_'+sn+'\',\''+esc(s.panelPassword).replace(/'/g,"\\'")+'\')">👁</button>':'')+'</div></div>';
-      h+='<div class="server-field"><div class="server-field-label">SSH Доступ</div><div class="server-field-value"><span>'+esc(s.osLogin||'—')+'</span> / <span id="sshPwdView_'+sn+'">'+(s.osPassword?'••••••••':'—')+'</span>'+(s.osPassword?'<button class="toggle-btn" data-on-click="togglePwdView(this,\'sshPwdView_'+sn+'\',\''+esc(s.osPassword).replace(/'/g,"\\'")+'\')">👁</button>':'')+'</div></div>';
+      h+='<div class="server-field"><div class="server-field-label">API Endpoint</div><div class="server-field-value"><span>'+esc(s.url)+'</span><button class="copy-btn" data-on-click="copyText(this.dataset.text,this)" data-text="'+esc(s.url)+'">'+icon('copy',12)+'</button></div></div>';
+      h+='<div class="server-field"><div class="server-field-label">Public IP</div><div class="server-field-value"><span>'+esc(s.publicIp||'—')+'</span>'+(s.publicIp?'<button class="copy-btn" data-on-click="copyText(\''+esc(s.publicIp)+'\',this)">'+icon('copy',12)+'</button>':'')+'</div></div>';
+      h+='<div class="server-field"><div class="server-field-label">Панель (API)</div><div class="server-field-value"><span>'+esc(s.panelUser||'—')+'</span> / <span id="panelPwdView_'+sn+'">'+(s.panelPassword?'••••••••':'—')+'</span>'+(s.panelPassword?'<button class="toggle-btn" data-on-click="togglePwdView(this,\'panelPwdView_'+sn+'\',\''+esc(s.panelPassword).replace(/'/g,"\\'")+'\')">'+icon('eye',12)+'</button>':'')+'</div></div>';
+      h+='<div class="server-field"><div class="server-field-label">SSH Доступ</div><div class="server-field-value"><span>'+esc(s.osLogin||'—')+'</span> / <span id="sshPwdView_'+sn+'">'+(s.osPassword?'••••••••':'—')+'</span>'+(s.osPassword?'<button class="toggle-btn" data-on-click="togglePwdView(this,\'sshPwdView_'+sn+'\',\''+esc(s.osPassword).replace(/'/g,"\\'")+'\')">'+icon('eye',12)+'</button>':'')+'</div></div>';
       h+='<div class="server-field"><div class="server-field-label">Оборудование</div><div class="server-field-value" style="font-family:inherit"><span style="color:'+(s.hardware?'var(--text-1)':'var(--text-3)')+'">'+esc(s.hardware||'— не указаны —')+'</span></div></div>';
-      h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">📍 Адрес локации</div><div class="server-field-value" style="font-family:inherit"><span style="color:'+(s.address?'var(--text-1)':'var(--text-3)')+'">'+esc(s.address||'— не указан —')+'</span></div></div>';
+      h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">'+icon('pin',12)+' Адрес локации</div><div class="server-field-value" style="font-family:inherit"><span style="color:'+(s.address?'var(--text-1)':'var(--text-3)')+'">'+esc(s.address||'— не указан —')+'</span></div></div>';
       h+='</div>';
       // Edit body (hidden)
       h+='<div class="server-body" id="srvEdit_'+sn+'" style="display:none">';
@@ -70,16 +70,16 @@ function loadServersList(){
       h+='<div class="server-field"><div class="server-field-label">SSH Логин</div><input class="form-input" id="osLogin_'+sn+'" value="'+esc(s.osLogin||'')+'" placeholder="root" style="font-size:12px"></div>';
       h+='<div class="server-field"><div class="server-field-label">SSH Пароль</div><input class="form-input" id="osPass_'+sn+'" value="'+esc(s.osPassword||'')+'" placeholder="пароль" style="font-size:12px"></div>';
       h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">Оборудование</div><input class="form-input" id="hw_'+sn+'" value="'+esc(s.hardware||'')+'" placeholder="CPU, RAM, Disk, OS..." style="font-size:12px;width:100%"></div>';
-      h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">📍 Адрес локации</div><input class="form-input" id="addr_'+sn+'" value="'+esc(s.address||'')+'" placeholder="Город, ул. Примерная, д. 1" style="font-size:12px;width:100%"></div>';
+      h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">'+icon('pin',12)+' Адрес локации</div><input class="form-input" id="addr_'+sn+'" value="'+esc(s.address||'')+'" placeholder="Город, ул. Примерная, д. 1" style="font-size:12px;width:100%"></div>';
       h+='</div>';
       // Footer
       h+='<div class="server-footer"><div class="server-actions">';
-      h+='<button class="btn btn-sm" id="srvEditBtn_'+sn+'" data-on-click="toggleServerEdit(\''+sn+'\')" style="font-size:11px">✏️ Редактировать</button>';
-      h+='<button class="btn btn-sm" id="srvSaveBtn_'+sn+'" data-on-click="saveServerMeta(\''+sn+'\')" style="font-size:11px;display:none">💾 Сохранить</button>';
+      h+='<button class="btn btn-sm" id="srvEditBtn_'+sn+'" data-on-click="toggleServerEdit(\''+sn+'\')" style="font-size:11px">'+icon('edit',12)+' Редактировать</button>';
+      h+='<button class="btn btn-sm" id="srvSaveBtn_'+sn+'" data-on-click="saveServerMeta(\''+sn+'\')" style="font-size:11px;display:none">'+icon('save',12)+' Сохранить</button>';
       h+='<button class="btn btn-sm" id="srvCancelBtn_'+sn+'" data-on-click="toggleServerEdit(\''+sn+'\',true)" style="font-size:11px;display:none">Отмена</button>';
       h+='<span id="srvSaveStatus_'+sn+'" style="font-size:11px;margin-left:6px"></span>';
       h+='</div>';
-      h+='<button class="btn btn-sm" style="color:var(--danger);font-size:10px" data-on-click="deleteServer(\''+sn+'\')">✕ Удалить</button>';
+      h+='<button class="btn btn-sm" style="color:var(--danger);font-size:10px" data-on-click="deleteServer(\''+sn+'\')">'+icon('x',11)+' Удалить</button>';
       h+='</div>';
       h+='</div>';
     });
@@ -96,7 +96,7 @@ function _loadServerStats(){
       var el=document.getElementById('srvStats_'+name);if(!el)return;
       var s=st[name];if(!s){el.innerHTML='';return}
       var bits='';
-      if(s.rps!=null)bits+='<span class="meta-sep"></span><span title="Запросов в секунду по всему боксу (сейчас)">⚡ '+s.rps+' rps</span>';
+      if(s.rps!=null)bits+='<span class="meta-sep"></span><span title="Запросов в секунду по всему боксу (сейчас)">'+icon('bolt',11)+' '+s.rps+' rps</span>';
       if(s.uniqueIpPct!=null)bits+='<span class="meta-sep"></span><span title="Доля уникальных IP среди ротаций за '+(s.uniqDays||14)+' дн ('+(s.rotations||0).toLocaleString('ru-RU')+' ротаций)" style="color:'+(s.uniqueIpPct>=90?'var(--success)':s.uniqueIpPct>=75?'var(--warning)':'var(--danger)')+'">'+s.uniqueIpPct+'% уник. IP</span>';
       el.innerHTML=bits;
     });
@@ -127,7 +127,7 @@ function saveServerMeta(name){
   var st=document.getElementById('srvSaveStatus_'+name);
   st.textContent='Сохраняю и проверяю Панель...';st.style.color='var(--warning)';
   api(API+'/api/admin/servers/'+name,{method:'PATCH',json:{osLogin:osLogin,osPassword:osPass,panelUser:panelUser,panelPassword:panelPass,hardware:hw,address:addr}}).then(function(d){
-    if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)';setTimeout(function(){loadServersList()},1000)}
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';setTimeout(function(){loadServersList()},1000)}
     else{st.textContent=(d.error||'Ошибка')+(d.details?' ('+esc(d.details)+')':'');st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'})
 }
@@ -258,8 +258,8 @@ function tgSendTest(){
   tgSaveSettings().then(function(){
     return fetch(API+'/api/admin/telegram/send_test',{method:'POST',headers:{'Content-Type':'application/json','X-Auth-Token':authToken},body:'{}'}).then(function(r){return r.json()});
   }).then(function(d){
-    if(d.ok){st.textContent='✅ Отправлено за '+d.date;st.style.color='var(--success)';showToast('Сводка отправлена в Telegram','success')}
-    else{st.textContent='❌ '+(d.error||'Ошибка');st.style.color='var(--danger)';showToast(d.error||'Ошибка','error')}
+    if(d.ok){st.innerHTML=icon('check',12)+' Отправлено за '+esc(d.date);st.style.color='var(--success)';showToast('Сводка отправлена в Telegram','success')}
+    else{st.innerHTML=icon('x',12)+' '+esc(d.error||'Ошибка');st.style.color='var(--danger)';showToast(d.error||'Ошибка','error')}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)';showToast(e.message,'error')});
 }
 var _pcWarnMs=500,_pcBadMs=2000;
@@ -339,7 +339,7 @@ function saveRecoverySettings(){
   var st=document.getElementById('recoverySettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
   api(API+'/api/admin/settings',{method:'PUT',json:{recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold}}).then(function(d){
-    if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)';_showRestartBanner()}
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
 }
@@ -350,7 +350,7 @@ function saveTrackingSettings(){
   var st=document.getElementById('trackingSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
   api(API+'/api/admin/settings',{method:'PUT',json:{tracking_interval_min:tracking,rotation_cache_ttl_min:cacheTtl,rotation_sync_interval_min:syncInt}}).then(function(d){
-    if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)';_showRestartBanner()}
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
 }
@@ -366,7 +366,7 @@ function saveRetentionSettings(){
   var st=document.getElementById('retentionSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
   api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
-    if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)'}
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)'}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
 }
@@ -380,7 +380,7 @@ function saveSessionBillingSettings(){
   var st=document.getElementById('sessionBillingSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
   api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
-    if(d.ok){st.textContent='Сохранено ✓';st.style.color='var(--success)';_showRestartBanner()}
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
 }

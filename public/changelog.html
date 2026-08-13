@@ -83,7 +83,7 @@
     <p class="release-tagline">Главное — цифрам снова можно верить: списания больше не выглядят как приходы, удалённые модемы не считаются в парке, а уведомления не будят из-за того, чего не видно на экране. Плюс все графики приведены к одному стилю, а кабинет стал светлым.</p>
 
     <div class="section">
-      <h3><span class="ico">🔢</span> Исправлена достоверность цифр</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><rect x="3" y="7" width="18" height="11" rx="2"/><path d="M7 11h.01M11 11h.01M15 11h.01M17 11h.01M7 14.5h10"/></svg></span> Исправлена достоверность цифр</h3>
       <ul>
         <li><strong>Списания больше не показываются как поступления.</strong> В «Последних платежах» ручное списание 22 500 ₽ отображалось как <em>+22 500</em>. Причина: в реестре сумма хранится без знака, а направление — только в движении баланса. Теперь знак берётся из дельты баланса, и рядом видно назначение списания. На балансах и выручке это не отражалось — врало только отображение.</li>
         <li><strong>Удалённый модем продолжал жить в счётчиках.</strong> После удаления модем исчезал из списка, но парк показывал «91/92», а в «Модем отключён» он висел и слал уведомления. Счётчик парка строился отдельным запросом, который не учитывал удаление. Запрос вынесен в единый источник и покрыт авто-тестом, чтобы это не вернулось.</li>
@@ -93,7 +93,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">🔔</span> Уведомления стали тише и честнее</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" transform="translate(4 2)"/><path d="M10.5 19a1.5 1.5 0 0 0 3 0" transform="translate(-1 0)"/></svg></span> Уведомления стали тише и честнее</h3>
       <ul>
         <li><strong>«Отключился» и «включился» теперь строго в паре.</strong> Раньше могло прийти только одно из двух: сообщение об отключении слалось в обход общего механизма и не попадало в колокольчик. Теперь оба идут одним путём, а «вернулся» приходит только если было «отключился».</li>
         <li><strong>Сводка вместо потока.</strong> Если разом отваливается несколько модемов (порог настраивается, по умолчанию 5) — придёт одно сообщение со <em>всем</em> списком и разбивкой по серверам.</li>
@@ -102,7 +102,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">💰</span> Финансы</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><path d="M12 7v10"/><path d="M15 9c-.7-1-1.8-1.4-3-1.4-1.7 0-3 .8-3 2.2 0 3 6 1.5 6 4.4 0 1.4-1.3 2.2-3 2.2-1.3 0-2.5-.5-3.2-1.6"/></svg></span> Финансы</h3>
       <ul>
         <li><strong>Сверка счетов напрямую с банком.</strong> Раз в сутки дашборд спрашивает Точку о статусе каждого неоплаченного счёта и закрывает те, что банк считает оплаченными. Это второй, независимый источник: ловит оплаты, которые не удалось связать со счётом автоматически — платёж от третьего лица, разбитый на части или без номера в назначении.</li>
         <li><strong>«Выручка по дням» — с разбивкой по клиентам.</strong> Видно не только сколько, но и кто принёс.</li>
@@ -112,7 +112,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">📶</span> Модемы и коннекты</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 18v-4M9 18v-8M14 18V6M19 18V3"/></svg></span> Модемы и коннекты</h3>
       <ul>
         <li><strong>Коннекты видно в «Сетке»:</strong> у каждого модема число живых подключений и график за последние 60 минут.</li>
         <li><strong>Единая цветовая шкала:</strong> до 300 — зелёный, 300–700 — жёлтый, больше 700 — красный. Раньше в разных местах кабинета были разные пороги.</li>
@@ -122,7 +122,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">🎨</span> Дашборд и графики</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><circle cx="8.5" cy="10" r="1.2"/><circle cx="12" cy="7.5" r="1.2"/><circle cx="15.5" cy="10" r="1.2"/><path d="M12 21a3 3 0 0 1 0-6c3 0 5-1.5 5-4"/></svg></span> Дашборд и графики</h3>
       <ul>
         <li><strong>Кабинет снова светлый по умолчанию.</strong> Раньше принудительно включалась тёмная тема и затиралась сохранённая настройка — получался разнобой: тёмный сайдбар и светлое содержимое.</li>
         <li><strong>Все всплывающие подсказки на графиках — в одном стиле</strong> белой карточки с тенью (как у почасового трафика). Раньше они были белыми без тени и сливались с фоном.</li>
@@ -135,7 +135,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">⚡</span> Прочее</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg></span> Прочее</h3>
       <ul>
         <li><strong>Замер скорости больше не падает с ошибкой.</strong> Реальный замер через модем занимает 30–90 секунд, а веб-сервер обрывал запрос на 30-й — выходила «Ошибка сети». Теперь замер идёт фоновой задачей со счётчиком секунд.</li>
         <li><strong>Экспорт из CRM починен</strong> — корректная кодировка и нормальная таблица вместо «клока данных».</li>
@@ -144,7 +144,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">🧪</span> Под капотом</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M9.5 3h5"/><path d="M10 3v5.5L4.5 18a2.4 2.4 0 0 0 2.1 3.5h10.8a2.4 2.4 0 0 0 2.1-3.5L14 8.5V3"/><path d="M7.5 14h9"/></svg></span> Под капотом</h3>
       <ul>
         <li>Новые авто-тесты: сверка счетов с банком, реестр парка (защита от возврата бага с удалёнными модемами), парность уведомлений, история коннектов.</li>
         <li>Ключевые запросы и стили графиков сведены в единые источники — чтобы правки не расходились по копиям.</li>
@@ -163,7 +163,7 @@
     <p class="release-tagline">Кабинет перерисован целиком: левый сайдбар, светлый Дашборд-«командный центр», единый стиль всех страниц — плюс автоматизация финансов и самовосстановление парка модемов.</p>
 
     <div class="section">
-      <h3><span class="ico">🎨</span> Новый интерфейс</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><circle cx="8.5" cy="10" r="1.2"/><circle cx="12" cy="7.5" r="1.2"/><circle cx="15.5" cy="10" r="1.2"/><path d="M12 21a3 3 0 0 1 0-6c3 0 5-1.5 5-4"/></svg></span> Новый интерфейс</h3>
       <ul>
         <li><strong>Левый сайдбар вместо верхней навигации.</strong> Сверху — логотип и название, шесть разделов (Дашборд · Модемы · Клиенты · Финансы · CRM · Настройки), внизу — версия, тема, уведомления и выход.</li>
         <li><strong>Страницы «Аналитика» и «Продажи» удалены</strong> — всё, что там жило, переехало на Дашборд и в Настройки.</li>
@@ -175,7 +175,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">📊</span> Дашборд — «Командный центр»</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 20V4"/><path d="M4 20h16"/><path d="M8.5 16v-5M13 16V8M17.5 16v-8"/></svg></span> Дашборд — «Командный центр»</h3>
       <ul>
         <li><strong>Светлая тема и новая структура:</strong> Пульс бизнеса (трафик · активные модемы · MRR · балансы) → Требует внимания (проблемы, тренд, операторы) → Парк по серверам → Финансы → Клиенты → Инфраструктура → Трафик.</li>
         <li><strong>Финансовый ряд:</strong> график MRR за 12 месяцев (за ГБ + за модем) и «Качество выручки» — NRR, churn, ARPU и концентрация по клиентам.</li>
@@ -187,7 +187,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">💰</span> Финансы</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><path d="M12 7v10"/><path d="M15 9c-.7-1-1.8-1.4-3-1.4-1.7 0-3 .8-3 2.2 0 3 6 1.5 6 4.4 0 1.4-1.3 2.2-3 2.2-1.3 0-2.5-.5-3.2-1.6"/></svg></span> Финансы</h3>
       <ul>
         <li><strong>Вкладка «Обзор»</strong> (открывается по умолчанию): выручка / затраты / прибыль / маржа, выручка по дням, затраты по категориям, последние платежи, доходность по клиентам.</li>
         <li><strong>Счета закрываются автоматически.</strong> Входящий платёж из банка Точка сам находит свой счёт — по номеру в назначении, по сумме или полному покрытию — и помечает его оплаченным. Ручные отметки больше не «слетают».</li>
@@ -197,7 +197,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">📡</span> Модемы и надёжность</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 20h8"/><path d="M12 20v-4"/><circle cx="12" cy="13" r="1.6"/><path d="M7.5 8.5a6.4 6.4 0 0 1 9 0M5 6a10 10 0 0 1 14 0"/></svg></span> Модемы и надёжность</h3>
       <ul>
         <li><strong>Failover:</strong> умерший модем автоматически заменяется здоровым свободным, клиент не остаётся без прокси; журнал замен и настройки — в Настройках.</li>
         <li><strong>Авто-восстановление переработано:</strong> перезагрузка (до 3 раз) → переподключение; фильтры против ложных срабатываний (мёртвая SIM, фантомы, свободные модемы) и суточный лимит.</li>
@@ -209,14 +209,14 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">🔔</span> Уведомления</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" transform="translate(4 2)"/><path d="M10.5 19a1.5 1.5 0 0 0 3 0" transform="translate(-1 0)"/></svg></span> Уведомления</h3>
       <ul>
         <li><strong>Центр уведомлений</strong> — колокольчик с постоянной историей: офлайны, платежи, failover, место на диске и другие события; фильтры «Непрочитанные» и «Критичные», действия по каждой карточке.</li>
       </ul>
     </div>
 
     <div class="section">
-      <h3><span class="ico">⚡</span> Производительность и защита данных</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg></span> Производительность и защита данных</h3>
       <ul>
         <li><strong>Дашборд грузится в ~20 раз быстрее:</strong> главный запрос данных ускорен с 4 с до 180 мс (индексы + кэш), статика отдаётся со сжатием.</li>
         <li><strong>Метаданные серверов защищены</strong> от случайного затирания: журнал изменений и запрет «усыхающих» записей.</li>
@@ -237,7 +237,7 @@
     <p class="release-tagline">Полная переработка денежного потока, архитектуры и тестового покрытия. Внешне ничего не поменялось — внутри дашборд стал в разы надёжнее.</p>
 
     <div class="section">
-      <h3><span class="ico">💰</span> Деньги</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><path d="M12 7v10"/><path d="M15 9c-.7-1-1.8-1.4-3-1.4-1.7 0-3 .8-3 2.2 0 3 6 1.5 6 4.4 0 1.4-1.3 2.2-3 2.2-1.3 0-2.5-.5-3.2-1.6"/></svg></span> Деньги</h3>
       <ul>
         <li><strong>Платежи и реферальные комиссии теперь атомарны.</strong> Когда клиент оплачивает счёт, его баланс, журнал движений и комиссия реферера обновляются в одной транзакции БД. Если что-то прервётся посередине (сетевой сбой, рестарт процесса) — ничего не сохранится частично. Раньше реферальная комиссия писалась отдельным запросом за пределами транзакции — при крайне редком, но возможном падении между ними бухгалтерия расходилась.</li>
         <li><strong>Журнал движений (<code>billing_ledger</code>) стал единственным источником истины.</strong> Старая таблица <code>payments</code> переведена в режим «только чтение» — все новые платежи попадают через журнал, дубликатов больше нет.</li>
@@ -250,16 +250,16 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">🤖</span> ИИ-сводка в Telegram</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><rect x="5" y="9" width="14" height="11" rx="2"/><path d="M12 9V5"/><circle cx="12" cy="4" r="1.2"/><circle cx="9.5" cy="13.5" r="1.1"/><circle cx="14.5" cy="13.5" r="1.1"/><path d="M9 17h6"/></svg></span> ИИ-сводка в Telegram</h3>
       <ul>
-        <li><strong>Ежедневный анализ от Claude Opus 4.7.</strong> Каждое утро в 08:00 МСК после обычной сводки прилетает блок «🔍 ИИ-анализ за день» — с интерпретацией ключевых метрик, конкретными проблемами и рекомендациями.</li>
+        <li><strong>Ежедневный анализ от Claude Opus 4.7.</strong> Каждое утро в 08:00 МСК после обычной сводки прилетает блок «<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="11" cy="11" r="6.5"/><path d="M20.5 20.5 15.8 15.8"/></svg> ИИ-анализ за день» — с интерпретацией ключевых метрик, конкретными проблемами и рекомендациями.</li>
         <li><strong>Защита от пустых сводок.</strong> Бюджет токенов поднят с 4К до 32К — adaptive thinking успевает рассуждать. Раньше при сложных днях модель тратила весь бюджет на размышления и возвращала пустой ответ.</li>
         <li><strong>Диагностика причин ошибок.</strong> Если ИИ вернул пустой ответ — в логи теперь пишется ровно почему (упёрся в лимит, ошибка авторизации, перегрузка API).</li>
       </ul>
     </div>
 
     <div class="section">
-      <h3><span class="ico">🏗</span> Архитектура</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><rect x="5" y="3" width="14" height="18" rx="1"/><path d="M9 7h.01M14.5 7h.01M9 11h.01M14.5 11h.01M9 15h.01M14.5 15h.01"/><path d="M10 21v-3.5h4V21"/></svg></span> Архитектура</h3>
       <ul>
         <li><strong>Единый файл <code>server.js</code> (11 тыс. строк) разбит на 18 модулей-роутеров.</strong> Раньше всё лежало в одном месте, любая правка задевала случайные участки. Теперь auth / clients / billing / tochka / traffic / analytics / sla / proxies / simulator живут отдельно — править проще и риск зацепить чужое ушёл.</li>
         <li><strong>SQL-запросы вынесены в 5 репозиториев <code>src/db/*</code>.</strong> Все обращения к БД проходят через осмысленные функции вместо инлайн-SQL по всему коду.</li>
@@ -269,7 +269,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">🔒</span> Безопасность и качество</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><rect x="5" y="11" width="14" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/></svg></span> Безопасность и качество</h3>
       <ul>
         <li><strong>Восстановлен Content Security Policy.</strong> Браузер разрешает выполнять только наши скрипты + Chart.js, всё остальное блокируется на уровне политики — защита от XSS.</li>
         <li><strong>Ключ шифрования Tochka теперь обязателен.</strong> Раньше при отсутствии переменной <code>$TOCHKA_CONFIG_KEY</code> сервер делал производный ключ из имени хоста — при переезде на новый хост шифрование могло порваться. Теперь сервер просто откажется стартовать без явного ключа.</li>
@@ -280,7 +280,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">⚙️</span> Эксплуатация</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></span> Эксплуатация</h3>
       <ul>
         <li><strong>Безопасная запись файлов.</strong> Утечек состояния через unhandled promise rejection больше нет — все записи проходят через <code>safeWriteFile</code>.</li>
         <li><strong>Документация эксплуатации.</strong> Добавлен <code>OPERATIONS.md</code> с полной картой состояния: что в SQLite, что в JSON-файлах, как делать бэкап, что нельзя коммитить в git.</li>
@@ -299,7 +299,7 @@
     <p class="release-tagline">Симулятор нагрузки, ИИ-инсайты, перестройка вкладки аналитики, защита от потери данных.</p>
 
     <div class="section">
-      <h3><span class="ico">🧪</span> Симулятор нагрузки</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M9.5 3h5"/><path d="M10 3v5.5L4.5 18a2.4 2.4 0 0 0 2.1 3.5h10.8a2.4 2.4 0 0 0 2.1-3.5L14 8.5V3"/><path d="M7.5 14h9"/></svg></span> Симулятор нагрузки</h3>
       <ul>
         <li>Имитация наплыва трафика на выбранные модемы: режимы <strong>ramp</strong> (плавный рост), <strong>burst</strong> (резкий всплеск), <strong>breaking-point</strong> (поиск предельной нагрузки).</li>
         <li>Сравнение прогонов между собой, экспорт результатов, разбивка по каждому модему.</li>
@@ -308,7 +308,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">📊</span> Перестройка вкладки «Аналитика»</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 20V4"/><path d="M4 20h16"/><path d="M8.5 16v-5M13 16V8M17.5 16v-8"/></svg></span> Перестройка вкладки «Аналитика»</h3>
       <ul>
         <li>5 подвкладок: <strong>Трафик</strong>, <strong>Инфраструктура</strong> (ротации + ёмкость + IP в одном месте), <strong>Доходность</strong> и др.</li>
         <li>Удалены лишние блоки: «Планирование», «Логи доменов», «Последние неудачи в ротации».</li>
@@ -318,7 +318,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">❤️</span> Здоровье модемов</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 20s-7.5-4.6-7.5-10A4.3 4.3 0 0 1 12 6.6 4.3 4.3 0 0 1 19.5 10c0 5.4-7.5 10-7.5 10z"/></svg></span> Здоровье модемов</h3>
       <ul>
         <li>Новый health-score с порогом 5% ошибок, ступенчатой шкалой латентности, учётом длительности ротации.</li>
         <li>Колонка «Здоровье» в общей таблице модемов + детальный разбор в модалке модема.</li>
@@ -329,7 +329,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">🛡</span> Защита от потери данных серверов</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3l7.5 3v5.5c0 4.8-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.7-7.5-9.5V6z"/></svg></span> Защита от потери данных серверов</h3>
       <ul>
         <li>Метаданные серверов (S1, S2 и др.) теперь имеют версионную историю в <code>kv_store_history</code>.</li>
         <li>Помощник <code>kvSetCritical</code> блокирует случайное уменьшение списка серверов (защита от ситуации «случайно стерли S2»).</li>
@@ -338,7 +338,7 @@
     </div>
 
     <div class="section">
-      <h3><span class="ico">💸</span> Биллинг + SLA</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><path d="M12 7v10"/><path d="M15 9c-.7-1-1.8-1.4-3-1.4-1.7 0-3 .8-3 2.2 0 3 6 1.5 6 4.4 0 1.4-1.3 2.2-3 2.2-1.3 0-2.5-.5-3.2-1.6"/></svg></span> Биллинг + SLA</h3>
       <ul>
         <li>Исправлено race condition в начислении дневных списаний.</li>
         <li>Добавлен SLA-tracking — учёт нарушений по доступности.</li>
@@ -356,7 +356,7 @@
     </div>
     <p class="release-tagline">Расширенный мониторинг прокси, авто-восстановление модемов, развёрнутая документация.</p>
     <div class="section">
-      <h3><span class="ico">📡</span> Мониторинг</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 20h8"/><path d="M12 20v-4"/><circle cx="12" cy="13" r="1.6"/><path d="M7.5 8.5a6.4 6.4 0 0 1 9 0M5 6a10 10 0 0 1 14 0"/></svg></span> Мониторинг</h3>
       <ul>
         <li><strong>Замер задержки прокси.</strong> Через каждый порт регулярно прогоняется проверка — фиксируется connect-time и общее время ответа.</li>
         <li>Аналитика по латентности: P75, P99, распределение, percentile cards в детальной модалке модема.</li>
@@ -364,14 +364,14 @@
       </ul>
     </div>
     <div class="section">
-      <h3><span class="ico">🔧</span> Авто-восстановление</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M14.5 6.5a4 4 0 0 1 5.6 5.6L9 20.5l-4.5-1 1-4.5L16.6 3.9a4 4 0 0 1-2.1 2.6z"/><path d="M13 7.5 16.5 11"/></svg></span> Авто-восстановление</h3>
       <ul>
         <li>Авто-USB-reset для модемов, ушедших в оффлайн (вместо ручного дёрганья портов).</li>
         <li>9 точечных багфиксов: ротация, парсинг трафика, IP-история.</li>
       </ul>
     </div>
     <div class="section">
-      <h3><span class="ico">📝</span> Логирование</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg></span> Логирование</h3>
       <ul>
         <li>Полное логирование всех автоматических процессов (cron, билинг, ротация, ребуты) — теперь видно когда и почему сработал каждый автомат.</li>
         <li>Развёрнутый README с описанием всех функций дашборда.</li>
@@ -388,7 +388,7 @@
     </div>
     <p class="release-tagline">Конфигурация серверов переехала из <code>.env</code> в базу — управление через UI без перезапусков.</p>
     <div class="section">
-      <h3><span class="ico">🗄</span> Изменения</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><ellipse cx="12" cy="5.5" rx="8" ry="2.8"/><path d="M4 5.5V18.5c0 1.6 3.6 2.8 8 2.8s8-1.2 8-2.8V5.5"/><path d="M4 12c0 1.6 3.6 2.8 8 2.8s8-1.2 8-2.8"/></svg></span> Изменения</h3>
       <ul>
         <li>Список серверов и стран хранится в SQLite (<code>kv_store</code>) — добавлять/убирать серверы можно из настроек без правки <code>.env</code> и рестарта.</li>
         <li>Часовой агрегатор трафика версии 2 — корректнее работает с пропусками и поздними записями.</li>
@@ -407,7 +407,7 @@
     </div>
     <p class="release-tagline">UI для управления серверами + поддержка переименования портов на разных моделях.</p>
     <div class="section">
-      <h3><span class="ico">🛠</span> Изменения</h3>
+      <h3><span class="ico"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M14.5 6.5a4 4 0 0 1 5.6 5.6L9 20.5l-4.5-1 1-4.5L16.6 3.9a4 4 0 0 1-2.1 2.6z"/><path d="M13 7.5 16.5 11"/></svg></span> Изменения</h3>
       <ul>
         <li>Раздел «Серверы» в настройках — добавление/редактирование/удаление прямо из UI.</li>
         <li>Переменная <code>PORTNAME_OVERRIDE</code> для серверов без поддержки переименования портов.</li>
@@ -423,6 +423,7 @@
   </div>
 </div>
 
+<script src="/js/icons.js?v=0813d"></script>
 <script src="js/changelog.js"></script>
 </body>
 </html>

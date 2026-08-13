@@ -80,10 +80,10 @@ function chartStackRadius(r){
 // escape — that was a latent XSS path closed by the dedup.)
 function showToast(m,t,dur){
   var c=document.getElementById('toastContainer');if(!c)return;
-  var tp=t||'info';var icons={success:'✓',error:'✕',warning:'!',info:'i'};
+  var tp=t||'info';var icons={success:icon('check',10),error:icon('x',10),warning:'!',info:'i'};
   var ms=dur||(tp==='error'?6000:4000);
   var e=document.createElement('div');e.className='toast toast-'+tp;
-  e.innerHTML='<span class="toast-icon">'+icons[tp]+'</span><span class="toast-text">'+esc(m)+'</span><button class="toast-close" data-on-click="this.closest(\'.toast\').remove()">✕</button>';
+  e.innerHTML='<span class="toast-icon">'+icons[tp]+'</span><span class="toast-text">'+esc(m)+'</span><button class="toast-close" data-on-click="this.closest(\'.toast\').remove()">'+icon('x',11)+'</button>';
   c.appendChild(e);
   setTimeout(function(){if(e.parentNode)e.remove();},ms);
 }

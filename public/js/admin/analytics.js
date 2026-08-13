@@ -288,8 +288,8 @@ var _hmNew={get view(){return _newHmView;},set view(v){_newHmView=v;},get id(){r
 // and gets replaced as soon as the list arrives. This way new operators like
 // digi appear in the dropdown automatically without an admin.js edit.
 var _heatmapConfig={
-  country:[{id:'all',label:'🌍 Все страны',modems:51},{id:'moldova',label:'🇲🇩 Молдова',modems:28},{id:'romania',label:'🇷🇴 Румыния',modems:23}],
-  operator:[{id:'orange_ro',label:'🇷🇴 Orange RO',modems:6},{id:'vodafone_ro',label:'🇷🇴 Vodafone RO',modems:17},{id:'moldtelecom',label:'🇲🇩 Moldtelecom',modems:23},{id:'orange_md',label:'🇲🇩 Orange MD',modems:5}],
+  country:[{id:'all',label:'Все страны',modems:51},{id:'moldova',label:'Молдова',modems:28},{id:'romania',label:'Румыния',modems:23}],
+  operator:[{id:'orange_ro',label:'Orange RO',modems:6},{id:'vodafone_ro',label:'Vodafone RO',modems:17},{id:'moldtelecom',label:'Moldtelecom',modems:23},{id:'orange_md',label:'Orange MD',modems:5}],
   client:[]
 };
 function hmAccent(view,id){
@@ -323,7 +323,7 @@ function renderHeatmapSubTabs(ctx){
   cfg.forEach(function(item){
     var active=item.id===ctx.id;var col=hmAccent(view,item.id);
     // По макету чипы — чистый текст, без флагов/глобуса из конфига
-    var lbl=String(item.label||'').replace(/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}☀-➿]/gu,'').trim();
+    var lbl=String(item.label||'').replace(/[\u{1F1E6}-\u{1F1FF}\u{1F300}-\u{1FAFF}\u2600-\u27BF]/gu,'').trim();
     h+='<button data-on-click="selectHeatId(\''+esc(item.id)+'\''+(ctx.self?','+ctx.self:'')+')" style="background:'+(active?col:'var(--bg-3)')+';color:'+(active?'#fff':'var(--text-1)')+';border:none;border-radius:999px;padding:4px 12px;font-size:11px;cursor:pointer;font-weight:'+(active?'600':'400')+';transition:all .15s">'+esc(lbl)+'</button>';
   });
   c.innerHTML=h;
@@ -397,7 +397,7 @@ function renderHeatmap(data,ctx){
         : col;
       h+='<div style="flex:1;height:28px;border-radius:3px;background:'+bg+';cursor:pointer;transition:opacity .1s;position:relative"';
       h+=' data-on-mouseenter="showHeatTT('+di+','+hr+',event,this'+(ctx.self?','+ctx.self:'')+')" data-on-mouseleave="hideFloatTooltip(\''+ctx.ttId+'\')">';
-      if(isCorrected)h+='<span style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;color:rgba(0,0,0,0.55);font-weight:600" title="Час содержит данные восстановленные после сбоя счётчика — значение приблизительное">⚠</span>';
+      if(isCorrected)h+='<span style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;color:rgba(0,0,0,0.55);font-weight:600" title="Час содержит данные восстановленные после сбоя счётчика — значение приблизительное">'+icon('alert',9)+'</span>';
       h+='</div>';
     });
     h+='</div></div>';
@@ -548,7 +548,7 @@ function showHeatTT(di,hr,event,cell,ctx){
       tt.innerHTML+='<div style="font-size:10px;color:#9b9b98;margin-top:6px">Модемов: <b style="color:#1a1a1a;font-weight:600">'+mCnt+'</b> · с данными за час: <b style="color:#1a1a1a;font-weight:600">'+_hm+'</b></div>';
     }
     var isCorrected=data.meta&&data.meta.corrected&&data.meta.corrected[di]&&data.meta.corrected[di][hr];
-    if(isCorrected)tt.innerHTML+='<div style="font-size:10px;color:#D4880F;margin-top:6px">⚠ Данные скорректированы</div>';
+    if(isCorrected)tt.innerHTML+='<div style="font-size:10px;color:#D4880F;margin-top:6px">'+icon('alert',10)+' Данные скорректированы</div>';
   }
 
   tt.style.display='block';tt.style.left='-9999px';tt.style.top='-9999px';

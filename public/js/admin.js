@@ -60,17 +60,17 @@ var COLUMNS=[{id:'rail',label:'',visible:true,sortable:false,width:'6px'},
   {id:'phone',label:'Телефон',visible:false,sortable:false},
   {id:'trafficDay',label:'Сегодня',visible:true,sortable:true},
   {id:'trafficMon',label:'Месяц',visible:false,sortable:true},
-  {id:'speed',label:'Скорость <span class="th-hint" title="Download ↓ / Upload ↑ в Mbps&#10;Зелёный: > 30 Mbps&#10;Синий: 10–30 Mbps&#10;Оранжевый: < 10 Mbps&#10;⚠ — значение аномально низкое">ⓘ</span>',visible:false,sortable:true},
+  {id:'speed',label:'Скорость <span class="th-hint" title="Download ↓ / Upload ↑ в Mbps&#10;Зелёный: > 30 Mbps&#10;Синий: 10–30 Mbps&#10;Оранжевый: < 10 Mbps&#10;Внимание: значение аномально низкое">'+icon('info',11)+'</span>',visible:false,sortable:true},
   {id:'uptime',label:'Аптайм',visible:false,sortable:true},
   {id:'latency',label:'Латентность',visible:true,sortable:true},
-  {id:'conns',label:'Конн. <span class="th-hint" title="Живые TCP-подключения через прокси (HTTP + SOCKS5), суммарно по портам модема&#10;Клик — настройки порта: лимиты Max Conn / Conn Limit">ⓘ</span>',visible:true,sortable:true,width:'104px'},
+  {id:'conns',label:'Конн. <span class="th-hint" title="Живые TCP-подключения через прокси (HTTP + SOCKS5), суммарно по портам модема&#10;Клик — настройки порта: лимиты Max Conn / Conn Limit">'+icon('info',11)+'</span>',visible:true,sortable:true,width:'104px'},
   {id:'errors',label:'Ошибки',visible:false,sortable:true},
   {id:'health',label:'Здоровье',visible:true,sortable:true,width:'70px'},
   {id:'rotation',label:'Ротация',visible:false,sortable:true},
   {id:'band',label:'Band',visible:false,sortable:true},
   {id:'actions',label:'',visible:true,sortable:false,width:'118px'}
 ];
-var _countryFlags={'MD':'\u{1F1F2}\u{1F1E9}','RO':'\u{1F1F7}\u{1F1F4}','US':'\u{1F1FA}\u{1F1F8}','DE':'\u{1F1E9}\u{1F1EA}'};
+var _countryFlags={'MD':flagIcon('MD'),'RO':flagIcon('RO'),'US':flagIcon('US'),'DE':flagIcon('DE')};
 var _countryNamesRu={'Moldova':'\u041c\u043e\u043b\u0434\u043e\u0432\u0430','Romania':'\u0420\u0443\u043c\u044b\u043d\u0438\u044f'};
 var COUNTRIES={};
 var COUNTRY_ORDER=[];
@@ -221,7 +221,7 @@ function renderSysDashboard(targetId){
       // Server downtime history (mig 035)
       if (d.server_downtime && d.server_downtime.length) {
         h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:14px">';
-        h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">⚠ Недоступность серверов (история)</div>';
+        h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">'+icon('alert',11)+' Недоступность серверов (история)</div>';
         h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="width:100%;min-width:520px;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:left">С</th><th style="padding:4px 8px;text-align:left">По</th><th style="padding:4px 8px;text-align:right">Длительность</th></tr></thead><tbody>';
         d.server_downtime.forEach(function(r){
           var mins = Math.round((r.duration_sec||0)/60);
@@ -340,7 +340,7 @@ document.addEventListener('keydown',function(e){
   // ? : show shortcuts help
   if(!inField&&e.key==='?'){
     e.preventDefault();
-    showToast('⌨️  Cmd+K — поиск · / — поиск · Esc — закрыть модалку','info',5000);
+    showToast('Cmd+K — поиск · / — поиск · Esc — закрыть модалку','info',5000);
   }
 });
 
@@ -588,7 +588,7 @@ function bulkOsSpoof(){
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
   overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
-    +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">🛡 OS Spoofing — '+portsList.length+' портов</h3>'
+    +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">'+icon('shield',15)+' OS Spoofing — '+portsList.length+' портов</h3>'
     +'<select id="bulkOsSelect" class="form-input" style="width:100%;margin-bottom:12px">'
     +'<option value="">--Выкл--</option>'
     +'<option value="android:1">android:1 (p0f)</option>'
@@ -627,7 +627,7 @@ function bulkRotation(){
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
   overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
-    +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">⏱ Авторотация — '+modems.length+' модемов</h3>'
+    +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">'+icon('clock',15)+' Авторотация — '+modems.length+' модемов</h3>'
     +'<select id="bulkRotSelect" class="form-input" style="width:100%;margin-bottom:12px">'
     +'<option value="0">Выкл.</option>'
     +'<option value="5">5 мин</option>'
@@ -792,7 +792,7 @@ function renderNotifPanel(){
   if(uc)uc.textContent=unreadCount?unreadCount:'';
   if(cc)cc.textContent=critCount?critCount:'';
   if(!notifs.length){list.innerHTML='<div class="notif-empty">Нет уведомлений</div>';return}
-  var iconForPrio={critical:'🚨',important:'⚠️',early:'ℹ️',info:'•'};
+  var iconForPrio={critical:icon('siren',14),important:icon('alert',14),early:icon('info',14),info:'•'};
   var h='';
   notifs.forEach(function(n){
     var prio=n.priority||'info';
@@ -969,7 +969,7 @@ function renderAuditLog(){
     var skip={action:1,admin:1,timestamp:1,entity_type:1,entity_id:1,client_name:1,clientName:1,clientId:1,note:1,ip:1,nick:1,minutes:1,amount:1,count:1,portNameFilter:1,serverName:1,success:1};
     for(var k in e){if(!skip[k]&&e[k]!==null&&e[k]!==undefined&&e[k]!=='')details.push(esc(k)+': '+esc(String(e[k])))}
     h+='<tr><td style="font-size:10px;color:var(--text-2);font-family:monospace;white-space:nowrap">'+ts+'</td>';
-    h+='<td style="font-size:11px">'+(isClient?'<span style="color:var(--accent)">👤</span> ':'')+esc(e.admin||'—')+'</td>';
+    h+='<td style="font-size:11px">'+(isClient?'<span style="color:var(--accent)">'+icon('user',11)+'</span> ':'')+esc(e.admin||'—')+'</td>';
     h+='<td><span class="audit-action '+actCls+'">'+esc(a.replace('client_',''))+'</span></td>';
     h+='<td style="font-family:var(--font-mono);font-size:10px;color:var(--text-2)">'+esc(e.ip||'—')+'</td>';
     h+='<td style="font-size:11px;color:var(--text-1)">'+details.join(' · ')+'</td></tr>';
@@ -1097,7 +1097,7 @@ function renderClients(){
     h+='<div style="display:flex;gap:6px">';
     h+='<button class="btn btn-sm btn-primary" data-on-click="renderClientDetail(\''+c.id+'\',\'payments\')" style="flex:1;font-size:11px;justify-content:center">Платежи</button>';
     h+='<button class="btn btn-sm" data-on-click="renderClientDetail(\''+c.id+'\')" style="flex:1;font-size:11px;justify-content:center" title="Детали и настройки">Детали</button>';
-    h+='<button class="btn btn-sm" data-on-click="impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" style="font-size:11px" title="Войти как клиент">👤</button>';
+    h+='<button class="btn btn-sm" data-on-click="impersonateClient(\''+c.id+'\',\''+esc(c.name)+'\')" style="font-size:11px" title="Войти как клиент">'+icon('user',12)+'</button>';
     h+='</div>';
     h+='</div>';
     // Expandable modems
@@ -1238,7 +1238,7 @@ function initAnalyticsSelectors(){}
 
 // ========== UTILS ==========
 function copyText(t,b){
-  function onOk(){if(b){var o=b.innerHTML;b.innerHTML='\u2714';setTimeout(function(){b.innerHTML=o},1500)}showToast('Скопировано','info')}
+  function onOk(){if(b){var o=b.innerHTML;b.innerHTML=icon('check',12);setTimeout(function(){b.innerHTML=o},1500)}showToast('Скопировано','info')}
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(onOk).catch(doFallback)}else{doFallback()}
   function doFallback(){var a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;left:-9999px;opacity:0';document.body.appendChild(a);a.select();try{document.execCommand('copy');onOk()}catch(e){showToast('Ошибка копирования','error')}document.body.removeChild(a)}
 }
@@ -1580,7 +1580,7 @@ function renderOpsHistory(clientId) {
         else if (e.type === 'payment') { typeLabel = 'Пополнение'; typeColor = 'color:var(--success)'; amountStr = '+' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--success)'; }
         else if (e.type === 'payment_reversal') { typeLabel = 'Отмена'; typeColor = 'color:var(--warning)'; amountStr = (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--warning)'; }
         else if (e.type === 'adjustment') { typeLabel = 'Коррекция'; typeColor = 'color:var(--accent)'; amountStr = ((e.amount || 0) >= 0 ? '+' : '') + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = (e.amount || 0) >= 0 ? 'color:var(--success)' : 'color:var(--danger)'; }
-        else if (e.type === 'bank_payment') { typeLabel = '\u{1F3E6} \u0411\u0430\u043D\u043A'; typeColor = 'color:#6366f1'; amountStr = '+' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--success)'; }
+        else if (e.type === 'bank_payment') { typeLabel = icon('bank',11)+' \u0411\u0430\u043D\u043A'; typeColor = 'color:#6366f1'; amountStr = '+' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--success)'; }
         else if (e.type === 'manual_charge') { typeLabel = 'Ручное списание'; typeColor = 'color:var(--danger)'; amountStr = '-' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--danger)'; }
         else if (e.type === 'correction') { typeLabel = 'Корректировка'; typeColor = 'color:var(--warning)'; amountStr = '-' + (e.amount || 0).toFixed(2) + ' \u20BD'; amountColor = 'color:var(--warning)'; }
         else { typeLabel = e.type || '\u2014'; amountStr = (e.cost || e.amount || 0) + ' \u20BD'; }
@@ -1656,7 +1656,7 @@ function editPortFull(imei,server,portId){
   api(API+'/api/admin/get_port_config?serverName='+encodeURIComponent(server)+'&portId='+encodeURIComponent(portId))
   .then(function(cfg){
     function sel(id,val,opts){var h='<select class="form-input" id="'+id+'">';opts.forEach(function(o){h+='<option value="'+o[0]+'"'+(o[0]===val?' selected':'')+'>'+o[1]+'</option>'});return h+'</select>'}
-    var h='<div class="detail-card" style="margin-top:8px"><h4 style="margin-bottom:12px">⚙️ Настройки порта: '+esc(portId)+'</h4>';
+    var h='<div class="detail-card" style="margin-top:8px"><h4 style="margin-bottom:12px">'+icon('gear',14)+' Настройки порта: '+esc(portId)+'</h4>';
     h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin-bottom:6px">Доступы</div>';
     h+='<div class="form-row"><div class="form-group"><label>Логин</label><input class="form-input" id="epLogin" value="'+esc(cfg.proxy_login||'')+'"></div><div class="form-group"><label>Пароль</label><input class="form-input" id="epPass" value="'+esc(cfg.proxy_password||'')+'"></div></div>';
     h+='<div style="font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;margin:10px 0 6px">Порты</div>';
@@ -1696,7 +1696,7 @@ function savePortFull(imei,server,portId){
   };
   api(API+'/api/admin/save_port_config',{method:'POST',json:d})
   .then(function(r){
-    if(r.ok){showToast('Настройки порта сохранены ✓','success');document.getElementById('editPortForm').innerHTML='';setTimeout(loadData,2000)}
+    if(r.ok){showToast('Настройки порта сохранены','success');document.getElementById('editPortForm').innerHTML='';setTimeout(loadData,2000)}
     else showToast(r.error||'Ошибка сохранения','error');
   }).catch(function(e){showToast(e.message,'error')});
 }
@@ -1926,7 +1926,7 @@ function simRenderUrlList(){
       '</select>'+
       '<input type="text" placeholder="https://..." value="'+esc(u.url||'')+'" data-on-input="_simState.urls['+i+'].url=this.value" style="padding:4px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px">'+
       '<input type="number" class="w" min="1" max="100" value="'+(u.weight||1)+'" data-on-input="_simState.urls['+i+'].weight=parseInt(this.value)||1" title="Вес" style="padding:4px 7px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px">'+
-      (_simState.urls.length>1?'<button class="btn btn-sm" data-on-click="simRemoveUrlRow('+i+')" style="font-size:10px;padding:2px 6px">✕</button>':'')+
+      (_simState.urls.length>1?'<button class="btn btn-sm" data-on-click="simRemoveUrlRow('+i+')" style="font-size:10px;padding:2px 6px">'+icon('x',10)+'</button>':'')+
     '</div>';
   }).join('');
 }
@@ -1995,11 +1995,11 @@ function simStart(){
     .then(function(o){
       document.getElementById('simStartBtn').disabled = false;
       if(!o.ok){
-        document.getElementById('simStartStatus').textContent = '❌ ' + (o.d.error || 'ошибка');
-        if(o.d.missing) document.getElementById('simStartStatus').textContent += ' · ' + o.d.missing.join(', ');
+        document.getElementById('simStartStatus').innerHTML = icon('x',12) + ' ' + esc(o.d.error || 'ошибка');
+        if(o.d.missing) document.getElementById('simStartStatus').insertAdjacentHTML('beforeend', ' · ' + esc(o.d.missing.join(', ')));
         return;
       }
-      document.getElementById('simStartStatus').textContent = '✓ Запущен run #' + o.d.run_id;
+      document.getElementById('simStartStatus').innerHTML = icon('check',12) + ' Запущен run #' + esc(String(o.d.run_id));
       simAttachToRun(o.d.run_id);
     });
 }
@@ -2037,7 +2037,7 @@ function simAttachToRun(runId, snapshot){
         if(msg.snapshot) simRenderLiveSnapshot(msg.snapshot);
         if(msg.type==='tick') simFetchLiveAgg(runId);
       } else if(msg.type==='end'){
-        document.getElementById('simHeaderState').textContent = '✓ Run #'+runId+' завершён: ' + (msg.reason||'');
+        document.getElementById('simHeaderState').innerHTML = icon('check',12) + ' Run #'+runId+' завершён: ' + esc(msg.reason||'');
         if(msg.summary) simRenderLiveSummary(msg.summary);
         setTimeout(function(){ simShowIdle(); simLoadHistory(); }, 3000);
       }
@@ -2087,10 +2087,10 @@ function simFetchLiveAgg(runId){
       var bp = document.getElementById('simBreakingPoint');
       if(d.applicable && d.breaking_point){
         bp.style.display = '';
-        bp.innerHTML = '🔥 <strong>Breaking-point найден:</strong> ' + d.breaking_point.workers + ' воркеров на t='+d.breaking_point.t_sec+'с — таймаут '+d.breaking_point.timeout_pct+'%, P95 '+d.breaking_point.p95_ms+' мс (база '+d.breaking_point.base_p95_ms+' мс).';
+        bp.innerHTML = icon('fire',12) + ' <strong>Breaking-point найден:</strong> ' + d.breaking_point.workers + ' воркеров на t='+d.breaking_point.t_sec+'с — таймаут '+d.breaking_point.timeout_pct+'%, P95 '+d.breaking_point.p95_ms+' мс (база '+d.breaking_point.base_p95_ms+' мс).';
       } else if(d.applicable) {
         bp.style.display = '';
-        bp.innerHTML = '✓ Breaking-point не найден в этом ramp-прогоне (нагрузка стабильна).';
+        bp.innerHTML = icon('check',12) + ' Breaking-point не найден в этом ramp-прогоне (нагрузка стабильна).';
       } else {
         bp.style.display = 'none';
       }
@@ -2169,7 +2169,7 @@ function simShowIdle(){
   _simState.activeRun = null;
   if(_simState.sse){ try{_simState.sse.close()}catch(_){}; _simState.sse = null; }
   document.getElementById('simLive').style.display = 'none';
-  document.getElementById('simHeaderState').textContent = '⏸ Бездействует';
+  document.getElementById('simHeaderState').innerHTML = icon('pause',11) + ' Бездействует';
 }
 
 var _simHistSel = {};  // run_id → true (for comparison selection)
@@ -2256,9 +2256,9 @@ function simOpenRunDetail(id){
     ) : '—';
     var bpHtml = '';
     if(bp.applicable && bp.breaking_point){
-      bpHtml = '<div style="padding:10px 14px;border-radius:8px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);margin-bottom:12px;font-size:12px">🔥 <strong>Breaking-point:</strong> '+bp.breaking_point.workers+' воркеров на t='+bp.breaking_point.t_sec+'с — таймаут '+bp.breaking_point.timeout_pct+'%, P95 '+bp.breaking_point.p95_ms+' мс (база '+bp.breaking_point.base_p95_ms+' мс).</div>';
+      bpHtml = '<div style="padding:10px 14px;border-radius:8px;background:rgba(239,68,68,.08);border:1px solid rgba(239,68,68,.3);margin-bottom:12px;font-size:12px">'+icon('fire',12)+' <strong>Breaking-point:</strong> '+bp.breaking_point.workers+' воркеров на t='+bp.breaking_point.t_sec+'с — таймаут '+bp.breaking_point.timeout_pct+'%, P95 '+bp.breaking_point.p95_ms+' мс (база '+bp.breaking_point.base_p95_ms+' мс).</div>';
     } else if(bp.applicable){
-      bpHtml = '<div style="padding:10px 14px;border-radius:8px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);margin-bottom:12px;font-size:12px">✓ Breaking-point не найден — модемы выдержали полную ramp-нагрузку.</div>';
+      bpHtml = '<div style="padding:10px 14px;border-radius:8px;background:rgba(16,185,129,.08);border:1px solid rgba(16,185,129,.3);margin-bottom:12px;font-size:12px">'+icon('check',12)+' Breaking-point не найден — модемы выдержали полную ramp-нагрузку.</div>';
     }
     var kpiHtml = '<div class="sim-grid-kpi" style="margin-bottom:12px">'+
       '<div class="sim-kpi accent-blue"><div class="l">Запросов</div><div class="v">'+(s.total_requests||0)+'</div></div>'+
@@ -2540,13 +2540,12 @@ function refreshOperatorList() {
       var ops = (d && d.operators) || [];
       // Keep only operators with at least 1 modem currently using them, sort
       // by usage descending, and convert into the {id, label, modems} shape.
-      var FLAGS = { RO: '🇷🇴', MD: '🇲🇩', RU: '🇷🇺', UA: '🇺🇦' };
       var list = ops
         .filter(function(o){ return (o.modem_count || 0) > 0; })
         .sort(function(a,b){ return b.modem_count - a.modem_count; })
         .map(function(o){
-          var flag = FLAGS[o.country] || '🌐';
-          var label = flag + ' ' + (o.operator || o.operator_normalized);
+          // Чипы хитмапы (analytics.js) всё равно вырезают флаги из label — храним чистое имя.
+          var label = (o.operator || o.operator_normalized);
           return { id: o.operator_normalized, label: label, modems: o.modem_count };
         });
       if (list.length) _heatmapConfig.operator = list;
@@ -2572,7 +2571,7 @@ function loadOperatorsMapping() {
           : o.source === 'auto'
             ? '<span style="background:rgba(52,199,89,.12);color:var(--green);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600">авто</span>'
             : '<span style="color:var(--text-3);font-size:10px">—</span>';
-        var FLAGS = { RO: '🇷🇴', MD: '🇲🇩', RU: '🇷🇺', UA: '🇺🇦' };
+        var FLAGS = { RO: flagIcon('RO'), MD: flagIcon('MD'), RU: flagIcon('RU'), UA: flagIcon('UA') };
         var country = o.country || '';
         var flag = FLAGS[country] || '';
         h += '<tr>';
@@ -2580,7 +2579,7 @@ function loadOperatorsMapping() {
         h += '<td style="padding:8px 6px">';
         h += '<select data-on-change="setOperatorCountry(\''+encodeURIComponent(o.operator_normalized)+'\', this.value)" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-1);padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer">';
         h += '<option value="" '+(!country?'selected':'')+'>— не задана —</option>';
-        ['RO','MD','RU','UA'].forEach(function(c){ h += '<option value="'+c+'" '+(country===c?'selected':'')+'>'+(FLAGS[c]||'')+' '+c+'</option>'; });
+        ['RO','MD','RU','UA'].forEach(function(c){ h += '<option value="'+c+'" '+(country===c?'selected':'')+'>'+c+'</option>'; });
         h += '</select>';
         if (flag) h += ' <span style="font-size:14px;margin-left:6px">'+flag+'</span>';
         h += '</td>';
@@ -2639,7 +2638,7 @@ function dropOperatorMapping(opEnc) {
     row.id = 'stage17DeleteRow';
     row.style.cssText = 'margin-top:14px;padding:12px 14px;background:rgba(239,80,80,.06);border:1px solid rgba(239,80,80,.25);border-radius:10px;display:flex;align-items:center;gap:12px';
     row.innerHTML = '<div style="flex:1"><div style="font-size:13px;font-weight:600;color:var(--text-0)">Модем отключён</div><div style="font-size:11px;color:var(--text-2);margin-top:2px">Можно удалить из дашборда. Действие нельзя отменить.</div></div>'
-      + '<button data-on-click="deleteModem(\''+m.server+'\',\''+portIdRaw+'\',\''+esc(m.nick)+'\')" style="background:var(--danger);border:none;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">🗑 Удалить навсегда</button>';
+      + '<button data-on-click="deleteModem(\''+m.server+'\',\''+portIdRaw+'\',\''+esc(m.nick)+'\')" style="background:var(--danger);border:none;color:#fff;padding:8px 16px;border-radius:8px;font-size:12px;font-weight:600;cursor:pointer">'+icon('trash',12)+' Удалить навсегда</button>';
     body.appendChild(row);
   };
 })();
@@ -2662,8 +2661,8 @@ function dropOperatorMapping(opEnc) {
 function toggleTestPool(server, nick, enabled){
   document.getElementById('testPoolToggleStatus').textContent = '…';
   api(API+'/api/admin/modem/test-pool',{method:'POST',json:{ server: server, nick: nick, enabled: enabled }}).then(function(d){
-    if(d.ok){ document.getElementById('testPoolToggleStatus').textContent = enabled ? '✓ Добавлен' : '✓ Удалён'; }
-    else { document.getElementById('testPoolToggleStatus').textContent = '❌ '+(d.error||''); }
+    if(d.ok){ document.getElementById('testPoolToggleStatus').innerHTML = icon('check',12) + (enabled ? ' Добавлен' : ' Удалён'); }
+    else { document.getElementById('testPoolToggleStatus').innerHTML = icon('x',12) + ' ' + esc(d.error||''); }
   });
 }
 
@@ -2700,9 +2699,9 @@ function loadAlertRules(){
       var groups = { critical: [], important: [], early: [] };
       rules.forEach(function(r){ (groups[r.priority] || groups.important).push(r); });
       var titles = {
-        critical: { label: '🔴 Критические', desc: 'Срабатывают мгновенно при серьёзных сбоях' },
-        important: { label: '🟡 Важные',     desc: 'Заметные события с защитой от спама (cooldown)' },
-        early: { label: '🔵 Превентивные',    desc: 'Раннее предупреждение, пока ещё не критично' },
+        critical: { label: iconDot('#e84141') + ' Критические', desc: 'Срабатывают мгновенно при серьёзных сбоях' },
+        important: { label: iconDot('#FFCC00') + ' Важные',     desc: 'Заметные события с защитой от спама (cooldown)' },
+        early: { label: iconDot('#3498db') + ' Превентивные',    desc: 'Раннее предупреждение, пока ещё не критично' },
       };
       function _cdLabel(sec){
         if(!sec) return '';
@@ -2725,7 +2724,7 @@ function loadAlertRules(){
           var isBell = r.channel === 'bell';
           var chColor = isBell ? 'var(--text-2)' : 'var(--accent)';
           var chBg    = isBell ? 'var(--bg-3)'  : 'rgba(0,122,255,0.12)';
-          var chLabel = isBell ? '🔔 только в админке' : 'TG + 🔔';
+          var chLabel = isBell ? icon('bell',10) + ' только в админке' : 'TG + ' + icon('bell',10);
           var testTitle = isBell ? 'Создать тестовую запись в колокольчике' : 'Отправить пример в Telegram';
           h += '<div style="display:flex;align-items:center;gap:12px;padding:11px 14px;'+sep+'">';
           h += '<div style="flex:1;min-width:0">';
@@ -2733,7 +2732,7 @@ function loadAlertRules(){
           h += '<span style="background:'+chBg+';color:'+chColor+';padding:1px 7px;border-radius:8px;font-size:10px;font-weight:600;white-space:nowrap">'+chLabel+'</span></div>';
           h += '<div style="font-size:10px;color:var(--text-3);margin-top:2px;font-family:var(--font-mono)">'+esc(r.id)+' · повтор не чаще '+_cdLabel(r.cooldownSec)+'</div>';
           h += '</div>';
-          h += '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;flex-shrink:0" data-on-click="testAlertRule(\''+esc(r.id)+'\')" title="'+testTitle+'">📤 Тест</button>';
+          h += '<button class="btn btn-sm" style="font-size:11px;padding:4px 10px;flex-shrink:0" data-on-click="testAlertRule(\''+esc(r.id)+'\')" title="'+testTitle+'">'+icon('upload',11)+' Тест</button>';
           h += '<label class="tgl"><input type="checkbox" '+(r.enabled?'checked':'')+' data-on-change="toggleAlertRule(\''+esc(r.id)+'\', this.checked)"><span></span></label>';
           h += '</div>';
         });
@@ -2993,12 +2992,12 @@ function renderNewActionCenter(d){
   var paused = clients.filter(function(c){return c.paused;}).length;
   var allOk = !disc && !issues && !debtors.length && !paused;
   var h = '<div class="analytics-card" style="margin-bottom:18px">';
-  h += '<div style="font-size:12px;font-weight:600;color:var(--text-0);margin-bottom:8px">⚠ Требует внимания'+(allOk?' <span style="color:var(--success);font-weight:500;font-size:11px">· всё спокойно</span>':'')+'</div>';
+  h += '<div style="font-size:12px;font-weight:600;color:var(--text-0);margin-bottom:8px">'+icon('alert',12)+' Требует внимания'+(allOk?' <span style="color:var(--success);font-weight:500;font-size:11px">· всё спокойно</span>':'')+'</div>';
   h += '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px">';
-  h += _ncStatRow('📴 Модемов отключено >'+(window._offlineThresholdMin||10)+'м', disc, null, 'danger');
-  h += _ncStatRow('🐌 Сбоят прокси', issues, null, 'warn');
-  h += _ncStatRow('💸 Клиентов в долгу', debtors.length, debtors.length?_fmtRub(debtSum):null, 'danger');
-  h += _ncStatRow('⏸ На паузе', paused, null, 'warn');
+  h += _ncStatRow(icon('off',11) + ' Модемов отключено >'+(window._offlineThresholdMin||10)+'м', disc, null, 'danger');
+  h += _ncStatRow(icon('snail',11) + ' Сбоят прокси', issues, null, 'warn');
+  h += _ncStatRow(icon('money',11) + ' Клиентов в долгу', debtors.length, debtors.length?_fmtRub(debtSum):null, 'danger');
+  h += _ncStatRow(icon('pause',11) + ' На паузе', paused, null, 'warn');
   h += '<div id="newReconChip"></div>';   // filled async by loadNewReconciliation
   h += '</div></div>';
   el.innerHTML = h;
@@ -3009,7 +3008,7 @@ function _ncServerCard(name, working, total, disc, primary){
   working = working||0; total = total||0; disc = disc||0;
   if(total<working) total=working;
   var col = disc===0 ? 'var(--success)' : 'var(--warning)';
-  var sub = disc>0 ? '<span style="color:var(--danger)">⚠ '+disc+' отключено</span>' : 'все на связи';
+  var sub = disc>0 ? '<span style="color:var(--danger)">'+icon('alert',11)+' '+disc+' отключено</span>' : 'все на связи';
   return '<div class="widget">' +
     '<div class="widget-label">'+esc(name)+'</div>' +
     '<div class="widget-value" style="color:'+col+'">'+working+'<span style="font-size:13px;color:var(--text-3)">/'+total+'</span></div>' +
@@ -3081,12 +3080,12 @@ function renderNewTopProblems(){
     var r=off||iss; if(r) probs.push({m:m,reason:r.reason,sev:r.sev||3,kind:r.kind});
   });
   probs.sort(function(a,b){return (b.sev||0)-(a.sev||0);});
-  if(!probs.length){ el.innerHTML='<div style="color:var(--success);font-size:12px;padding:6px">✓ Проблемных модемов нет</div>'; return; }
+  if(!probs.length){ el.innerHTML='<div style="color:var(--success);font-size:12px;padding:6px">'+icon('check',12)+' Проблемных модемов нет</div>'; return; }
   var show=probs.slice(0,_zxLim('tp',8));
   var h='<table class="ztbl"><thead><tr><th style="text-align:left">Модем</th><th style="text-align:left">Причина</th><th>Действия</th></tr></thead><tbody>';
   show.forEach(function(p){ var m=p.m; var col=(typeof _mkColor!=='undefined'&&_mkColor[p.kind])||'var(--warning)'; var ci=COUNTRIES[m.server]||{}; var d='data-imei="'+(m.rawImei||'')+'" data-server="'+m.server+'" data-nick="'+esc(m.nick)+'"';
     var open='if(event.target.closest(\'button\'))return;openDetailAtTab(\''+esc(m.nick).replace(/'/g,"\\'")+'\',\''+m.server+'\',\'health\')';
-    h+='<tr data-on-click="'+open+'" style="cursor:pointer" title="Открыть детали модема — где именно проблема"><td style="text-align:left"><span style="width:3px;height:18px;background:'+col+';border-radius:2px;display:inline-block;vertical-align:middle;margin-right:8px"></span><strong>'+esc(m.nick)+'</strong> <span style="font-size:10px;color:var(--text-3)">'+(ci.flag||'')+' '+m.server+(ci.name?' · '+esc(ci.name):'')+'</span></td><td style="text-align:left;color:'+col+'">'+esc(p.reason)+'</td><td style="text-align:right"><button class="row-act" '+d+' title="Перезагрузка" data-on-click="rebootModem(this)">⏻</button> <button class="row-act" '+d+' title="Re-Add" data-on-click="readdModem(this)">⟳</button></td></tr>';
+    h+='<tr data-on-click="'+open+'" style="cursor:pointer" title="Открыть детали модема — где именно проблема"><td style="text-align:left"><span style="width:3px;height:18px;background:'+col+';border-radius:2px;display:inline-block;vertical-align:middle;margin-right:8px"></span><strong>'+esc(m.nick)+'</strong> <span style="font-size:10px;color:var(--text-3)">'+(ci.flag||'')+' '+m.server+(ci.name?' · '+esc(ci.name):'')+'</span></td><td style="text-align:left;color:'+col+'">'+esc(p.reason)+'</td><td style="text-align:right"><button class="row-act" '+d+' title="Перезагрузка" data-on-click="rebootModem(this)">'+icon('power',12)+'</button> <button class="row-act" '+d+' title="Re-Add" data-on-click="readdModem(this)">'+icon('refresh',12)+'</button></td></tr>';
   });
   h+='</tbody></table>';
   if(probs.length>show.length) h+='<div style="font-size:10.5px;color:var(--accent);cursor:pointer;padding:8px 14px" data-on-click="zMore(\'tp\')">+ ещё '+(probs.length-show.length)+'</div>';
@@ -3152,7 +3151,7 @@ function renderNewExtWidgets(){
   // Выручка по месяцам (тренд-факт + run-rate прогноз столбцом в графике) — между «Потреблением трафика» и «Операторами».
   var mrrCard='<div class="analytics-card" style="margin:0;display:flex;flex-direction:column">'
     +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:8px">'
-    +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">📈 Выручка</span>'
+    +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">'+icon('trend',12)+' Выручка</span>'
     +'<span style="display:flex;gap:8px;font-size:9px;font-weight:600;color:var(--text-2);align-items:center"><span id="mrrLegend" style="display:flex;gap:8px"></span>'
     +'<span class="mrr-fb" style="position:relative;display:inline-flex">'
     +'<span data-on-click="toggleMrrFormula(this)" style="cursor:pointer;border:1px solid var(--border);border-radius:8px;padding:0 7px;font-size:9px;color:var(--text-2);font-weight:500">Формула</span>'
@@ -3215,7 +3214,7 @@ function renderNewFinance(d){
         '<span style="font-family:var(--font-mono);font-weight:600;color:var(--text-0)">'+pct+'%</span></div>'+
       '<div style="height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+Math.min(pct,100)+'%;background:'+col+';border-radius:3px"></div></div></div>'; }
     var hq = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h3 style="margin:0;font-size:14px;font-weight:700;color:var(--text-0)">Качество выручки</h3>'
-      + '<button class="btn btn-sm" style="font-size:10px;padding:3px 9px" title="Ввести затраты месяца (себестоимость)" data-on-click="openFinanceCostsModal()">⚙ Затраты</button></div>';
+      + '<button class="btn btn-sm" style="font-size:10px;padding:3px 9px" title="Ввести затраты месяца (себестоимость)" data-on-click="openFinanceCostsModal()">'+icon('gear',11)+' Затраты</button></div>';
     hq += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">';
     hq += qtile('Выручка 30д (факт)', _fmtRub(_rev30), null);
     hq += qtile('Расходы (мес.)', _cost>0?_fmtRub(_cost):'—', null);
@@ -3251,9 +3250,9 @@ function renderNewFinance(d){
     var chRows = ch.slice(0,6).map(function(x){ return _ncListRow(esc(x.name), _fmtRub(x.last_mrr), 'var(--text-2)'); }).join('');
     var dbRows = debtors.map(function(c){ return _ncListRow(esc(c.name), _fmtRub(c.balance), 'var(--danger)'); }).join('');
     flow.innerHTML =
-      panel('➕ Новые клиенты', 'var(--success)', '+'+nw.length, nwRows, 'нет новых в этом месяце') +
-      panel('➖ Ушли (churned)', ch.length?'var(--danger)':'var(--success)', String(ch.length), chRows, '✓ никто не ушёл') +
-      panel('💸 Должники', debtors.length?'var(--danger)':'var(--success)', String(debtors.length), dbRows, '✓ все в плюсе');
+      panel(icon('plus',12) + ' Новые клиенты', 'var(--success)', '+'+nw.length, nwRows, 'нет новых в этом месяце') +
+      panel(icon('minus',12) + ' Ушли (churned)', ch.length?'var(--danger)':'var(--success)', String(ch.length), chRows, icon('check',11) + ' никто не ушёл') +
+      panel(icon('money',12) + ' Должники', debtors.length?'var(--danger)':'var(--success)', String(debtors.length), dbRows, icon('check',11) + ' все в плюсе');
   }
   // MRR перенесён в ряд «Требует внимания» (renderMrrChart), а в блоке Финансов
   // на его месте — «Выручка по дням» + «Последние платежи» (renderFinRevenue).
@@ -3332,7 +3331,7 @@ function renderNewFleetHealth(d){
     });
     h += '</tbody></table>';
   } else {
-    h += '<div style="color:var(--success);font-size:12px;padding:6px">✓ Все модемы здоровы</div>';
+    h += '<div style="color:var(--success);font-size:12px;padding:6px">'+icon('check',12)+' Все модемы здоровы</div>';
   }
   el.innerHTML = h;
 }
@@ -3347,9 +3346,9 @@ function loadNewReconciliation(){
       var clients = d.clients||[];
       var probs = clients.filter(function(c){return c.status && c.status!=='ok';});
       var chip = document.getElementById('newReconChip');
-      if(chip) chip.innerHTML = _ncStatRow('🧾 Расхождений биллинга', probs.length, null, 'warn');
+      if(chip) chip.innerHTML = _ncStatRow(icon('receipt',11) + ' Расхождений биллинга', probs.length, null, 'warn');
       if(!el) return;
-      if(!probs.length){ el.innerHTML='<div style="color:var(--success);font-size:12px;padding:8px">✓ Расхождений нет — весь отданный трафик выставлен в счёт ('+clients.length+' клиентов проверено)</div>'; return; }
+      if(!probs.length){ el.innerHTML='<div style="color:var(--success);font-size:12px;padding:8px">'+icon('check',12)+' Расхождений нет — весь отданный трафик выставлен в счёт ('+clients.length+' клиентов проверено)</div>'; return; }
       var label = {mismatch:'расхождение по ГБ', missing_billing:'не выставлен счёт', missing_traffic:'счёт без трафика'};
       var hh = '<table class="ztbl"><thead><tr><th style="text-align:left">Клиент</th><th style="text-align:left">Тариф</th><th style="text-align:left">Проблема</th><th style="padding:6px 8px;text-align:right">Дней без счёта</th></tr></thead><tbody>';
       probs.forEach(function(c){
@@ -3788,7 +3787,7 @@ function saveFailoverSettings(){
   api(API+'/api/admin/settings',{method:'PUT',json:body})
     .then(function(d){
       if(d&&!d.error){
-        if(st)st.textContent='Сохранено · '+(body.failover_enabled?(body.failover_dry_run?'авто ВКЛ, но dry-run (тест) — реальных переносов нет':'⚠️ авто ВКЛ, реальные переносы активны'):'авто выкл')+'. Требуется перезапуск процесса.';
+        if(st)st.innerHTML='Сохранено · '+(body.failover_enabled?(body.failover_dry_run?'авто ВКЛ, но dry-run (тест) — реальных переносов нет':icon('alert',11) + ' авто ВКЛ, реальные переносы активны'):'авто выкл')+'. Требуется перезапуск процесса.';
         showToast('Настройки failover сохранены','success');
         _showRestartBanner();
       } else { if(st)st.textContent='Ошибка: '+(d&&d.error||''); showToast('Не сохранилось','error'); }
@@ -3801,7 +3800,7 @@ function loadFailoverCandidates(){
   api(API+'/api/admin/failover/candidates')
     .then(function(d){
       var cands=(d&&d.candidates)||[];
-      if(!cands.length){box.innerHTML='<div style="color:var(--success);font-size:12px;padding:12px">✓ Нет модемов, требующих failover прямо сейчас</div>';return;}
+      if(!cands.length){box.innerHTML='<div style="color:var(--success);font-size:12px;padding:12px">'+icon('check',12)+' Нет модемов, требующих failover прямо сейчас</div>';return;}
       var h='<table style="width:100%;border-collapse:collapse;font-size:11px"><thead><tr>';
       h+='<th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Сервер</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Модем</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Клиенты</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Причина</th><th style="text-align:left;padding:6px 8px;font-size:10px;color:var(--text-3);text-transform:uppercase;font-weight:600;letter-spacing:.5px">Спейр</th><th style="padding:6px 8px"></th></tr></thead><tbody>';
       cands.forEach(function(c){

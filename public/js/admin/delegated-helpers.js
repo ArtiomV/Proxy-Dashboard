@@ -86,8 +86,8 @@ function aeRender() {
   }
   var content = '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;width:min(640px,100%);max-height:85vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
     + '<div style="padding:16px 20px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:center">'
-    + '<div><span style="font-size:16px">📤</span> <strong style="font-size:14px">Экспорт прокси</strong> <span style="color:var(--text-2);font-size:12px">' + r.lines.length + ' шт.</span></div>'
-    + '<button data-on-click="this.closest(\'#aeOverlay\').remove()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center">✕</button>'
+    + '<div><span style="font-size:16px">'+icon('upload',16)+'</span> <strong style="font-size:14px">Экспорт прокси</strong> <span style="color:var(--text-2);font-size:12px">' + r.lines.length + ' шт.</span></div>'
+    + '<button data-on-click="this.closest(\'#aeOverlay\').remove()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center">'+icon('x',13)+'</button>'
     + '</div>'
     + '<div style="padding:12px 20px;border-bottom:1px solid var(--border);display:flex;gap:8px;align-items:center;flex-wrap:wrap">'
     + '<div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden">'
@@ -99,8 +99,8 @@ function aeRender() {
     + '</div>'
     + '<div style="padding:12px 20px;flex:1;overflow:auto"><textarea id="aeText" style="width:100%;height:300px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;padding:10px;font-family:var(--font-mono);font-size:11px;color:var(--text-0);resize:vertical" readonly>' + esc(r.lines.join('\n')) + '</textarea></div>'
     + '<div style="padding:12px 20px;border-top:1px solid var(--border);display:flex;gap:8px;justify-content:flex-end">'
-    + '<button class="btn btn-sm" data-on-click="copyText(document.getElementById(\'aeText\').value,this)">📋 Скопировать</button>'
-    + '<button class="btn btn-primary btn-sm" data-on-click="aeDownload()">💾 Скачать .txt</button>'
+    + '<button class="btn btn-sm" data-on-click="copyText(document.getElementById(\'aeText\').value,this)">'+icon('copy',12)+' Скопировать</button>'
+    + '<button class="btn btn-primary btn-sm" data-on-click="aeDownload()">'+icon('save',12)+' Скачать .txt</button>'
     + '</div></div>';
   overlay.innerHTML = content;
 }
@@ -156,11 +156,11 @@ function togglePwdView(el, viewId, real) {
   if (sp.dataset.shown) {
     sp.textContent = '••••••••';
     sp.dataset.shown = '';
-    el.textContent = '👁';
+    el.innerHTML = icon('eye', 12);
   } else {
     sp.textContent = real;
     sp.dataset.shown = '1';
-    el.textContent = '🔒';
+    el.innerHTML = icon('lock', 12);
   }
 }
 

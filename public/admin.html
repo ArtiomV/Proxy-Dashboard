@@ -53,14 +53,14 @@
 <!-- Task 13: Bulk actions panel -->
 <div id="bulkPanel" class="bulk-panel" style="display:none">
   <span><span id="bulkCountLabel" class="bulk-count">0</span> выбрано</span>
-  <button class="btn btn-sm" data-on-click="bulkResetIp()" title="Сбросить IP на выбранных модемах">🔄 Сброс IP</button>
-  <button class="btn btn-sm" data-on-click="bulkReboot()" title="Перезагрузить выбранные модемы">⚡ Ребут</button>
-  <button class="btn btn-sm" data-on-click="bulkOsSpoof()" title="Установить OS Spoofing на портах выбранных модемов">🛡 OS Spoof</button>
-  <button class="btn btn-sm" data-on-click="bulkRotation()" title="Установить авторотацию на выбранных модемах">⏱ Ротация</button>
-  <button class="btn btn-sm" data-on-click="bulkExport()" title="Экспорт прокси выбранных модемов">📤 Экспорт</button>
-  <button class="btn btn-sm" data-on-click="bulkProxyCheck()" title="Замерить задержку через прокси выбранных модемов">📡 Замер задержки</button>
-  <button class="btn btn-sm" data-on-click="bulkDelete()" title="Удалить выбранные модемы из дашборда" style="color:var(--danger)">🗑 Удалить</button>
-  <button class="btn btn-sm bulk-cancel" data-on-click="clearBulkSel()" style="color:var(--danger)">✕ Отмена</button>
+  <button class="btn btn-sm" data-on-click="bulkResetIp()" title="Сбросить IP на выбранных модемах"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 3v4.5h-4.5"/></svg> Сброс IP</button>
+  <button class="btn btn-sm" data-on-click="bulkReboot()" title="Перезагрузить выбранные модемы"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg> Ребут</button>
+  <button class="btn btn-sm" data-on-click="bulkOsSpoof()" title="Установить OS Spoofing на портах выбранных модемов"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3l7.5 3v5.5c0 4.8-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.7-7.5-9.5V6z"/></svg> OS Spoof</button>
+  <button class="btn btn-sm" data-on-click="bulkRotation()" title="Установить авторотацию на выбранных модемах"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg> Ротация</button>
+  <button class="btn btn-sm" data-on-click="bulkExport()" title="Экспорт прокси выбранных модемов"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 15V3"/><path d="M6.5 8.5 12 3l5.5 5.5"/><path d="M4 20h16"/></svg> Экспорт</button>
+  <button class="btn btn-sm" data-on-click="bulkProxyCheck()" title="Замерить задержку через прокси выбранных модемов"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 20h8"/><path d="M12 20v-4"/><circle cx="12" cy="13" r="1.6"/><path d="M7.5 8.5a6.4 6.4 0 0 1 9 0M5 6a10 10 0 0 1 14 0"/></svg> Замер задержки</button>
+  <button class="btn btn-sm" data-on-click="bulkDelete()" title="Удалить выбранные модемы из дашборда" style="color:var(--danger)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6.5 7l1 13h9l1-13"/><path d="M10 11v6M14 11v6"/></svg> Удалить</button>
+  <button class="btn btn-sm bulk-cancel" data-on-click="clearBulkSel()" style="color:var(--danger)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M6 6l12 12M18 6 6 18"/></svg> Отмена</button>
 </div>
 
 <!-- Notification panel — Stage 18.15 rewrite: backed by /api/admin/notifications.
@@ -130,7 +130,7 @@
 </div>
 <!-- Server unreachable banner — visible on every tab -->
 <div id="serverDownBanner" style="display:none;align-items:center;gap:10px;padding:10px 16px;background:rgba(239,80,80,0.12);border-bottom:1px solid rgba(239,80,80,0.4);color:#c93838;font-size:12px;font-weight:500">
-  <span style="font-size:14px">⚠️</span>
+  <span style="font-size:14px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><path d="M12 17.2h.01"/></svg></span>
   <span id="serverDownBannerText" style="flex:1"></span>
   <span style="font-size:10px;color:#965252">данные с этих серверов могут быть устаревшими</span>
 </div>
@@ -149,7 +149,7 @@
     <div style="display:flex;align-items:center;gap:10px">
       <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="11" y1="11" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg><input id="modemSearch" type="text" placeholder="Поиск: ник, IP, клиент…" data-on-input="renderTable()" autocomplete="off" style="border:none;background:none;outline:none;font-size:12px;color:var(--text-1);width:190px"></span>
       <div class="col-selector" style="flex:0 0 auto">
-        <button class="btn-filter-mini" data-on-click="toggleFilterDropdown()" title="Столбцы (для таблицы)">⚙</button>
+        <button class="btn-filter-mini" data-on-click="toggleFilterDropdown()" title="Столбцы (для таблицы)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="3.2"/><path d="M19.4 13a7.6 7.6 0 0 0 0-2l2-1.6-2-3.4-2.4 1a7.6 7.6 0 0 0-1.7-1l-.4-2.6h-4l-.4 2.6a7.6 7.6 0 0 0-1.7 1l-2.4-1-2 3.4 2 1.6a7.6 7.6 0 0 0 0 2l-2 1.6 2 3.4 2.4-1a7.6 7.6 0 0 0 1.7 1l.4 2.6h4l.4-2.6a7.6 7.6 0 0 0 1.7-1l2.4 1 2-3.4z"/></svg></button>
         <div class="col-dropdown" id="filterDropdown" style="right:0;min-width:200px">
           <div style="padding:6px 8px;font-size:10px;color:var(--text-2);text-transform:uppercase;font-weight:600">Столбцы</div>
           <div id="colDropdown"></div>
@@ -386,7 +386,7 @@
            section switches and reloads via localStorage until the dashboard
            is actually restarted. -->
       <div id="globalRestartBanner" style="display:none;position:sticky;top:-24px;z-index:50;align-items:center;gap:12px;padding:12px 16px;border-radius:10px;background:rgba(245,158,11,.14);border:1px solid rgba(245,158,11,.4);margin:-24px -24px 16px;font-size:13px;color:var(--text-0)">
-        <span style="font-size:18px">⚠️</span>
+        <span style="font-size:18px"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><path d="M12 17.2h.01"/></svg></span>
         <span style="flex:1">Часть настроек применится только после перезапуска дашборда.</span>
         <button class="btn btn-primary" data-on-click="restartDashboard()" id="globalRestartBtn" style="white-space:nowrap;flex-shrink:0">Перезапустить сейчас</button>
       </div>
@@ -399,8 +399,8 @@
           </div>
           <div style="display:flex;gap:6px;margin-bottom:12px">
             <button class="btn btn-sm audit-filter-btn active" data-f="all" data-on-click="setAuditFilter('all')" style="font-size:11px">Все</button>
-            <button class="btn btn-sm audit-filter-btn" data-f="admin" data-on-click="setAuditFilter('admin')" style="font-size:11px">👨‍💼 Админ</button>
-            <button class="btn btn-sm audit-filter-btn" data-f="client" data-on-click="setAuditFilter('client')" style="font-size:11px">👤 Клиенты</button>
+            <button class="btn btn-sm audit-filter-btn" data-f="admin" data-on-click="setAuditFilter('admin')" style="font-size:11px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.3 3-5.5 7-5.5s7 2.2 7 5.5"/></svg> Админ</button>
+            <button class="btn btn-sm audit-filter-btn" data-f="client" data-on-click="setAuditFilter('client')" style="font-size:11px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.3 3-5.5 7-5.5s7 2.2 7 5.5"/></svg> Клиенты</button>
           </div>
           <div id="auditLogTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Нажмите «Обновить» для загрузки</div></div>
         </div>
@@ -464,8 +464,8 @@
               <div class="form-group"><label class="form-label" style="font-size:10px">Public IP</label><input class="form-input" id="newSrvIp" placeholder="1.2.3.4" style="width:100%"></div>
               <div class="form-group"><label class="form-label" style="font-size:10px">Страна</label>
                 <select class="form-input" id="newSrvCountry" style="width:100%">
-                  <option value="MD">🇲🇩 Moldova</option>
-                  <option value="RO">🇷🇴 Romania</option>
+                  <option value="MD">Moldova</option>
+                  <option value="RO">Romania</option>
                 </select>
               </div>
             </div>
@@ -523,7 +523,7 @@
 
         <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
           <div>
-            <h2 style="font-size:18px;font-weight:700;margin:0">🚀 Симулятор нагрузки</h2>
+            <h2 style="font-size:18px;font-weight:700;margin:0">Симулятор нагрузки</h2>
             <div style="font-size:11px;color:var(--text-2);margin-top:2px">Воспроизводит клиентскую нагрузку через выделенный тестовый пул модемов для диагностики таймаутов и breaking-point.</div>
           </div>
           <div id="simHeaderState" style="font-size:12px;color:var(--text-2)"></div>
@@ -531,17 +531,17 @@
 
         <!-- D11: симулятор выключен настройкой simulator_enabled (дефолт — выкл, не для прода) -->
         <div id="simDisabledBanner" class="sim-banner danger" style="display:none">
-          ⛔ Симулятор выключен (настройка <code>simulator_enabled</code>). Запуск запрещён (403). Включайте только на стенде — прогон гоняет реальную нагрузку через тест-пул модемов.
+          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg> Симулятор выключен (настройка <code>simulator_enabled</code>). Запуск запрещён (403). Включайте только на стенде — прогон гоняет реальную нагрузку через тест-пул модемов.
         </div>
 
         <!-- Live monitor — visible only when a run is active -->
         <div id="simLive" class="sim-card" style="display:none;border-color:#3B9DD8">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
             <div>
-              <h3 style="margin:0">🔴 Активный запуск: <span id="simLiveProfileName">—</span></h3>
+              <h3 style="margin:0"><svg width="10" height="10" viewBox="0 0 10 10" style="vertical-align:-1px"><circle cx="5" cy="5" r="4.2" fill="#e84141"/></svg> Активный запуск: <span id="simLiveProfileName">—</span></h3>
               <div style="font-size:11px;color:var(--text-3)">Run #<span id="simLiveRunId">—</span> · прошло <span id="simLiveElapsed">0</span>с</div>
             </div>
-            <button class="btn btn-sm" id="simAbortBtn" data-on-click="simAbort()" style="background:#EF4444;color:white;font-weight:600">⏹ Остановить</button>
+            <button class="btn btn-sm" id="simAbortBtn" data-on-click="simAbort()" style="background:#EF4444;color:white;font-weight:600"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg> Остановить</button>
           </div>
           <div class="sim-grid-kpi">
             <div class="sim-kpi accent-blue"><div class="l">Воркеры</div><div class="v"><span id="simLiveWorkers">0</span>/<span id="simLiveTarget">0</span></div></div>
@@ -571,14 +571,14 @@
               <div style="font-size:11px;color:var(--text-3);margin-top:2px">Колонка «В пуле» включает is_test_pool. Колонка «В профиле» добавляет модем в текущий запуск. Можно сразу со страницы.</div>
             </div>
             <div style="display:flex;gap:6px;align-items:center;font-size:11px">
-              <input type="text" id="simModemFilter" placeholder="🔍 ник / оператор" data-on-input="simRenderAllModems()" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px;width:160px">
+              <input type="text" id="simModemFilter" placeholder="ник / оператор" data-on-input="simRenderAllModems()" style="padding:4px 8px;border-radius:6px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1);font-size:11px;width:160px">
               <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="simPoolOnlyFilter" data-on-change="simRenderAllModems()"> только пул</label>
               <label style="display:flex;gap:5px;align-items:center;cursor:pointer"><input type="checkbox" id="simOnlineOnlyFilter" data-on-change="simRenderAllModems()" checked> только online</label>
               <button class="btn btn-sm" data-on-click="simLoadAllModems()">↻</button>
             </div>
           </div>
           <div class="sim-banner" style="background:rgba(239,68,68,.08);border-color:rgba(239,68,68,.3)">
-            ⚠️ Модемы в пуле получают реальную дополнительную нагрузку при запуске. Желательно выводить их из аренды клиента на время теста.
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><path d="M12 17.2h.01"/></svg> Модемы в пуле получают реальную дополнительную нагрузку при запуске. Желательно выводить их из аренды клиента на время теста.
           </div>
           <div id="simAllModemsList" style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
             <div style="text-align:center;padding:20px;color:var(--text-3);font-size:12px">Загрузка…</div>
@@ -586,8 +586,8 @@
           <div style="margin-top:8px;display:flex;flex-wrap:wrap;gap:6px;justify-content:space-between;align-items:center;font-size:11px;color:var(--text-3)">
             <span id="simModemCount">—</span>
             <div style="display:flex;gap:8px;flex-wrap:wrap">
-              <button class="btn btn-sm" data-on-click="simBulkPool(true)">✓ В пул отфильтрованные</button>
-              <button class="btn btn-sm" data-on-click="simBulkPool(false)">✕ Убрать из пула</button>
+              <button class="btn btn-sm" data-on-click="simBulkPool(true)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4.5 12.5l5 5 10-11"/></svg> В пул отфильтрованные</button>
+              <button class="btn btn-sm" data-on-click="simBulkPool(false)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M6 6l12 12M18 6 6 18"/></svg> Убрать из пула</button>
               <button class="btn btn-sm" data-on-click="simSelectAllInProfile(true)">+ Все в профиль</button>
               <button class="btn btn-sm" data-on-click="simSelectAllInProfile(false)">– Очистить профиль</button>
             </div>
@@ -602,8 +602,8 @@
             <select id="simProfileSelect" data-on-change="simLoadProfile(this.value)" style="min-width:220px">
               <option value="">— Ad-hoc (без сохранения) —</option>
             </select>
-            <button class="btn btn-sm" data-on-click="simSaveCurrentAsProfile()">💾 Сохранить как…</button>
-            <button class="btn btn-sm" data-on-click="simDeleteProfile()" id="simDelProfBtn" style="display:none">🗑 Удалить</button>
+            <button class="btn btn-sm" data-on-click="simSaveCurrentAsProfile()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M5 3h12l4 4v14H5z"/><path d="M8 3v5h8V3"/><path d="M8 21v-7h8v7"/></svg> Сохранить как…</button>
+            <button class="btn btn-sm" data-on-click="simDeleteProfile()" id="simDelProfBtn" style="display:none"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6.5 7l1 13h9l1-13"/><path d="M10 11v6M14 11v6"/></svg> Удалить</button>
           </div>
 
           <div class="sim-row" style="margin-top:12px">
@@ -664,9 +664,9 @@
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px">
             <h3 id="simDetailTitle" style="margin:0;font-size:16px;font-weight:700">Детали запуска</h3>
             <div style="display:flex;gap:8px;align-items:center">
-              <button class="btn btn-sm" id="simDetailExportCsv" data-on-click="simExport('csv')">⬇ CSV</button>
-              <button class="btn btn-sm" id="simDetailExportJson" data-on-click="simExport('json')">⬇ JSON</button>
-              <button class="btn btn-sm" data-on-click="simCloseDetail()">✕</button>
+              <button class="btn btn-sm" id="simDetailExportCsv" data-on-click="simExport('csv')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3v12"/><path d="M6.5 9.5 12 15l5.5-5.5"/><path d="M4 20h16"/></svg> CSV</button>
+              <button class="btn btn-sm" id="simDetailExportJson" data-on-click="simExport('json')"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3v12"/><path d="M6.5 9.5 12 15l5.5-5.5"/><path d="M4 20h16"/></svg> JSON</button>
+              <button class="btn btn-sm" data-on-click="simCloseDetail()"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
             </div>
           </div>
           <div id="simDetailBody"></div>
@@ -682,7 +682,7 @@
             <button class="btn btn-sm" data-on-click="loadAlertRules()">Обновить</button>
           </div>
           <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:760px">
-            Все источники уведомлений. <span style="color:var(--accent);font-weight:500">TG+🔔</span> — в Telegram-чат и в колокольчик. <span style="color:var(--text-2);font-weight:500">🔔</span> — только в колокольчик в админке. У каждого свой cooldown, чтобы не было спама. Кнопка «Тест» отправляет пример — посмотрите как карточка выглядит в боте или в колокольчике.
+            Все источники уведомлений. <span style="color:var(--accent);font-weight:500">TG+<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" transform="translate(4 2)"/><path d="M10.5 19a1.5 1.5 0 0 0 3 0" transform="translate(-1 0)"/></svg></span> — в Telegram-чат и в колокольчик. <span style="color:var(--text-2);font-weight:500"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" transform="translate(4 2)"/><path d="M10.5 19a1.5 1.5 0 0 0 3 0" transform="translate(-1 0)"/></svg></span> — только в колокольчик в админке. У каждого свой cooldown, чтобы не было спама. Кнопка «Тест» отправляет пример — посмотрите как карточка выглядит в боте или в колокольчике.
           </div>
           <div id="alertsList">Загрузка…</div>
         </div>
@@ -731,12 +731,12 @@
             Когда модем клиента реально умирает, система переносит его порт на здоровый свободный модем <b>того же сервера</b> — сменой IMEI на порте (portID, TCP-порт, логин, пароль сохраняются), так что <b>строка подключения клиента продолжает работать</b>; меняется только внешний IP (другой модем/SIM).<br><br>
             <b style="color:var(--text-1)">Как принимается решение (защита от ложных переносов).</b> Главный источник ложных срабатываний — «железо онлайн, но дата-канал оператора моргнул на 40–50 мин и сам поднялся». Поэтому решение <b>двухскоростное</b> и подключает <b>аптайм самого модема</b> как детектор лжи:
             <ul style="margin:7px 0 0 18px;padding:0;line-height:1.7">
-              <li>🔴 <b>Модем offline</b> ≥ «Offline до failover» → переносим <b>быстро</b> (железо реально пропало из сети).</li>
-              <li>🟡 <b>Модем online, но прокси в ошибках</b> → <b>медленный путь</b>: переносим, только если серия ошибок длится ≥ «Прокси мёртв — медленно» <b>И</b> аптайм модема за сегодня ниже «Мин. uptime модема». Если модем стабильно онлайн (высокий uptime) — это почти наверняка временное моргание оператора, <b>ждём, не трогаем</b>.</li>
-              <li>⚫ <b>Жёсткий предел:</b> если прокси мёртв ≥ «Прокси мёртв — жёстко» — переносим <b>в любом случае</b>, даже при идеальном uptime (значит сломалось всерьёз, а не моргнуло).</li>
+              <li><svg width="10" height="10" viewBox="0 0 10 10" style="vertical-align:-1px"><circle cx="5" cy="5" r="4.2" fill="#e84141"/></svg> <b>Модем offline</b> ≥ «Offline до failover» → переносим <b>быстро</b> (железо реально пропало из сети).</li>
+              <li><svg width="10" height="10" viewBox="0 0 10 10" style="vertical-align:-1px"><circle cx="5" cy="5" r="4.2" fill="#FFCC00"/></svg> <b>Модем online, но прокси в ошибках</b> → <b>медленный путь</b>: переносим, только если серия ошибок длится ≥ «Прокси мёртв — медленно» <b>И</b> аптайм модема за сегодня ниже «Мин. uptime модема». Если модем стабильно онлайн (высокий uptime) — это почти наверняка временное моргание оператора, <b>ждём, не трогаем</b>.</li>
+              <li><svg width="10" height="10" viewBox="0 0 10 10" style="vertical-align:-1px"><circle cx="5" cy="5" r="4.2" fill="#484f58"/></svg> <b>Жёсткий предел:</b> если прокси мёртв ≥ «Прокси мёртв — жёстко» — переносим <b>в любом случае</b>, даже при идеальном uptime (значит сломалось всерьёз, а не моргнуло).</li>
             </ul>
             <div style="margin-top:7px">Спейр выбирается только из модемов с хорошим собственным uptime (см. «Мин. uptime спейра»), плюс кулдаун на модем и лимит переносов в час — чтобы не было «качелей».</div><br>
-            <b style="color:var(--warning)">⚠️ Сначала проверьте механику вручную:</b> ниже выберите живой модем, нажмите «Найти спейр и перенести», убедитесь что прокси поднялся на новом модеме и строка клиента работает. Только потом включайте «Dry-run = выкл» для автоматики. По умолчанию авто-режим выключен, а dry-run включён (логирует «перенёс бы», но ничего не трогает).
+            <b style="color:var(--warning)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><path d="M12 17.2h.01"/></svg> Сначала проверьте механику вручную:</b> ниже выберите живой модем, нажмите «Найти спейр и перенести», убедитесь что прокси поднялся на новом модеме и строка клиента работает. Только потом включайте «Dry-run = выкл» для автоматики. По умолчанию авто-режим выключен, а dry-run включён (логирует «перенёс бы», но ничего не трогает).
           </div>
           <div class="set-card">
             <div class="set-row">
@@ -872,7 +872,7 @@
 
           <div class="set-grp-label">АВТО-РЕБУТ ПРОБЛЕМНЫХ</div>
           <div class="set-card">
-            <div class="set-row"><div><div class="set-row-t">Авто-перезагрузка проблемных</div><div class="set-row-d">⚠ Влияет на парк. Модемы из «Сбоит прокси» перезагружаются по интервалу ниже. Не триггерится «ротация без смены IP». По умолчанию выкл</div></div><label class="tgl"><input type="checkbox" id="autoRebootEnabledInput"><span></span></label></div>
+            <div class="set-row"><div><div class="set-row-t">Авто-перезагрузка проблемных</div><div class="set-row-d"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><path d="M12 17.2h.01"/></svg> Влияет на парк. Модемы из «Сбоит прокси» перезагружаются по интервалу ниже. Не триггерится «ротация без смены IP». По умолчанию выкл</div></div><label class="tgl"><input type="checkbox" id="autoRebootEnabledInput"><span></span></label></div>
             <div class="set-row"><div><div class="set-row-t">Интервал авто-ребута</div><div class="set-row-d">Не чаще одного перезапуска в интервал на модем (защита от петли)</div></div><div class="set-inp"><input id="autoRebootIntervalInput" type="number" step="5" min="15" max="720"><span>мин</span></div></div>
           </div>
 
@@ -1146,7 +1146,7 @@
 
         <div id="cfApiKeySection" style="display:none">
           <div class="set-grp-label">API Key</div>
-          <div class="set-card" style="padding:12px 16px"><div style="display:flex;align-items:center;gap:6px"><input class="form-input" id="cfApiKey" readonly style="font-size:10px;font-family:var(--font-mono);flex:1"><button class="btn btn-sm" data-on-click="copyText(document.getElementById('cfApiKey').value,this)" title="Копировать">📋</button><button class="btn btn-warning btn-sm" data-on-click="regenerateApiKeyInForm()" title="Перегенерировать">🔄</button></div></div>
+          <div class="set-card" style="padding:12px 16px"><div style="display:flex;align-items:center;gap:6px"><input class="form-input" id="cfApiKey" readonly style="font-size:10px;font-family:var(--font-mono);flex:1"><button class="btn btn-sm" data-on-click="copyText(document.getElementById('cfApiKey').value,this)" title="Копировать"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg></button><button class="btn btn-warning btn-sm" data-on-click="regenerateApiKeyInForm()" title="Перегенерировать"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 3v4.5h-4.5"/></svg></button></div></div>
         </div>
       </div>
 
@@ -1178,9 +1178,9 @@
       <button class="modal-close" data-on-click="closeClientOpsModal()">&times;</button>
     </div>
     <div style="display:flex;gap:0;border-bottom:1px solid var(--border);padding:0 4px">
-      <div class="modal-tab active" id="opsTab_history" data-on-click="switchOpsTab('history')" style="cursor:pointer">💰 Операции</div>
-      <div class="modal-tab" id="opsTab_documents" data-on-click="switchOpsTab('documents')" style="cursor:pointer">📄 Документы</div>
-      <div class="modal-tab" id="opsTab_api" data-on-click="switchOpsTab('api')" style="cursor:pointer">🔌 API</div>
+      <div class="modal-tab active" id="opsTab_history" data-on-click="switchOpsTab('history')" style="cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><path d="M12 7v10"/><path d="M15 9c-.7-1-1.8-1.4-3-1.4-1.7 0-3 .8-3 2.2 0 3 6 1.5 6 4.4 0 1.4-1.3 2.2-3 2.2-1.3 0-2.5-.5-3.2-1.6"/></svg> Операции</div>
+      <div class="modal-tab" id="opsTab_documents" data-on-click="switchOpsTab('documents')" style="cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg> Документы</div>
+      <div class="modal-tab" id="opsTab_api" data-on-click="switchOpsTab('api')" style="cursor:pointer"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M9 7V3M15 7V3"/><path d="M7 7h10v4a5 5 0 0 1-10 0z"/><path d="M12 16v5"/></svg> API</div>
     </div>
     <div class="modal-body" id="clientOpsBody_legacy" style="max-height:calc(85vh - 120px);overflow-y:auto">
     </div>
@@ -1192,6 +1192,7 @@
      Логи доменов removed (low-use research tool, duplicated Топ ресурсов). -->
 
 
+<script src="/js/icons.js?v=0813d"></script>
 <script src="/js/utils.js?v=0813a"></script>
 <script src="/js/delegation.js?v=0727b"></script>
 <script src="/js/admin/delegated-helpers.js?v=0804a"></script>

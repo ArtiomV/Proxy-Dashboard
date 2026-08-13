@@ -82,7 +82,7 @@ function _renderOnboarding(){
     var cls=i<onboardingStep?'#EAF3DE;color:#3B6D11':i===onboardingStep?'#185FA5;color:#fff':'var(--bg-2);color:var(--text-3)';
     var border=i<onboardingStep?'none':i===onboardingStep?'none':'1px solid var(--border)';
     pills+='<span style="padding:4px 12px;border-radius:20px;font-size:11px;font-weight:500;background:'+cls+';border:'+border+'">'+
-      (i<onboardingStep?'✓ ':'')+st.label+'</span>';
+      (i<onboardingStep?icon('check',10)+' ':'')+st.label+'</span>';
   });
   document.getElementById('onboardingPills').innerHTML=pills;
 }
@@ -119,13 +119,13 @@ function renderDebtBanner(debtStatus,expiresAt){
   var bg='';
   if(debtStatus&&debtStatus.state==='blocked'){
     bg='var(--red)';
-    html='🔒 <b>Доступ приостановлен за неоплату.</b> Баланс: '+formatNumber(debtStatus.balance)+' ₽. Порты погашены («дата до» истекла). После пополнения доступ восстановится автоматически (до ~30 мин). Для пополнения — свяжитесь с менеджером.';
+    html=icon('lock',14)+' <b>Доступ приостановлен за неоплату.</b> Баланс: '+formatNumber(debtStatus.balance)+' ₽. Порты погашены («дата до» истекла). После пополнения доступ восстановится автоматически (до ~30 мин). Для пополнения — свяжитесь с менеджером.';
   }else if(debtStatus&&debtStatus.state==='debt'){
     bg='var(--red)';
-    html='⚠️ <b>Отрицательный баланс: '+formatNumber(debtStatus.balance)+' ₽.</b> При следующем списании порты будут заблокированы. Пополните баланс — для этого свяжитесь с менеджером.';
+    html=icon('alert',14)+' <b>Отрицательный баланс: '+formatNumber(debtStatus.balance)+' ₽.</b> При следующем списании порты будут заблокированы. Пополните баланс — для этого свяжитесь с менеджером.';
   }else if(debtStatus&&debtStatus.state==='warning'){
     bg='var(--yellow,#b8860b)';
-    html='⏳ <b>Баланса хватит примерно на '+debtStatus.daysLeft+' дн.</b> ('+formatNumber(debtStatus.balance)+' ₽). При уходе в ноль порты будут заблокированы автоматически. Рекомендуем пополнить заранее.';
+    html=icon('hourglass',14)+' <b>Баланса хватит примерно на '+debtStatus.daysLeft+' дн.</b> ('+formatNumber(debtStatus.balance)+' ₽). При уходе в ноль порты будут заблокированы автоматически. Рекомендуем пополнить заранее.';
   }
   if(!html&&expiresAt){
     var t=Date.parse(expiresAt);
@@ -133,7 +133,7 @@ function renderDebtBanner(debtStatus,expiresAt){
       var daysLeft=Math.ceil((t-Date.now())/86400000);
       if(daysLeft>=0&&daysLeft<=3){
         bg='var(--yellow,#b8860b)';
-        html='⏰ <b>Срок действия прокси истекает '+expiresAt+'</b> (осталось '+daysLeft+' дн.). Продлите аренду через менеджера.';
+        html=icon('clock',14)+' <b>Срок действия прокси истекает '+expiresAt+'</b> (осталось '+daysLeft+' дн.). Продлите аренду через менеджера.';
       }
     }
   }
@@ -464,7 +464,7 @@ function loadClientHeatmap(){
           : col;
         h+='<div style="flex:1;height:28px;border-radius:3px;background:'+bg+';cursor:pointer;transition:opacity .1s;position:relative"';
         h+=' data-on-mouseenter="showClientHeatTT('+di+','+hr+',event)" data-on-mouseleave="hideClientHeatTT()">';
-        if(isCorrected)h+='<span style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;color:rgba(0,0,0,0.55);font-weight:600" title="Час содержит данные, восстановленные после сбоя счётчика — значение приблизительное">⚠</span>';
+        if(isCorrected)h+='<span style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;color:rgba(0,0,0,0.55);font-weight:600" title="Час содержит данные, восстановленные после сбоя счётчика — значение приблизительное">'+icon('alert',9)+'</span>';
         h+='</div>';
       });
       h+='</div></div>';
@@ -751,7 +751,6 @@ function loadDailyTrafficChart(textColor,gridColor){
     renderModemBar();
 
     // Country cards from filtered data
-    var _cFlags={'MD':'🇲🇩','RO':'🇷🇴'};
     var _cColors={'MD':{color:'rgba(25,96,201,0.8)',bg:'rgba(25,96,201,0.08)'},'RO':{color:'rgba(52,199,89,0.8)',bg:'rgba(52,199,89,0.08)'}};
     // Group by country instead of server
     var cnByCountry={};
@@ -766,7 +765,7 @@ function loadDailyTrafficChart(textColor,gridColor){
     var ccHtml='';
     Object.keys(cnByCountry).sort().forEach(function(cc){
       var cData=cnByCountry[cc];
-      var flag=_cFlags[cc]||'🌍';
+      var flag=(cc==='MD'||cc==='RO')?flagIcon(cc,13):icon('globe',13);
       var clr=_cColors[cc]||{color:'var(--text-2)',bg:'var(--bg-2)'};
       var gb=(cData.in+cData.out)/1073741824;
       var pct=totalGB>0?Math.round(gb/totalGB*100):0;
@@ -838,7 +837,6 @@ function loadDailyTrafficChart(textColor,gridColor){
           locTotals[sn2][todayDate]=(locTotals[sn2][todayDate]||0)+gb2;
         }
       }
-      var _locFlags={'MD':'🇲🇩','RO':'🇷🇴'};
       var _locClr={'MD':{color:'rgba(25,96,201,0.85)',bg:'rgba(25,96,201,0.08)'},'RO':{color:'rgba(52,199,89,0.85)',bg:'rgba(52,199,89,0.08)'}};
       // Aggregate locTotals by country
       var locByCountry={};
@@ -850,8 +848,7 @@ function loadDailyTrafficChart(textColor,gridColor){
       Object.keys(locByCountry).sort().forEach(function(cc){
         var lc=locByCountry[cc];
         var clr=_locClr[cc]||{color:'rgba(255,204,0,0.85)',bg:'rgba(255,204,0,0.08)'};
-        var flag=_locFlags[cc]||'🌍';
-        var m={name:lc.name+' '+flag,color:clr.color,bg:clr.bg};
+        var m={name:lc.name,color:clr.color,bg:clr.bg};
         var d2=dates.map(function(d){return+(lc.dates[d]||0).toFixed(3)});
         datasets.push({label:m.name,data:d2,borderColor:m.color,backgroundColor:m.bg,borderWidth:2,pointRadius:3,tension:0.35,fill:true});
       });
@@ -1015,7 +1012,7 @@ function loadBillingHistory(){
           amountStyle=isDebit?'color:var(--red)':'color:var(--green)';ftype='correction';
         }
         else if(e.type==='payment'){typeLabel='Пополнение';typeStyle='color:var(--green)';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
-        else if(e.type==='bank_payment'){typeLabel='🏦 Банк';typeStyle='color:#6366f1';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
+        else if(e.type==='bank_payment'){typeLabel=icon('bank',12)+' Банк';typeStyle='color:#6366f1';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
         else if(e.type==='payment_reversal'){typeLabel='Отмена';typeStyle='color:var(--orange,#f59e0b)';amountStr=formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--orange,#f59e0b)';}
         else if(e.type==='adjustment'){typeLabel='Корректировка';typeStyle='color:var(--blue)';amountStr=((e.amount||0)>=0?'+':'')+formatNumber(e.amount||0)+' '+cs;amountStyle=(e.amount||0)>=0?'color:var(--green)':'color:var(--red)';ftype='adjustment';}
         else{typeLabel=e.type||'—';amountStr=(e.cost||e.amount||0)+' '+cs;}
@@ -1201,7 +1198,7 @@ function escapeHtml(str){return esc(str)}
 // --- Clipboard with fallback ---
 function copyIcon(){return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/></svg>'}
 function copyText(t,b){
-  function onOk(){if(b){var o=b.innerHTML;b.innerHTML='\u2714';setTimeout(function(){b.innerHTML=o},1500)}showToast('Скопировано','info')}
+  function onOk(){if(b){var o=b.innerHTML;b.innerHTML=icon('check',13);setTimeout(function(){b.innerHTML=o},1500)}showToast('Скопировано','info')}
   if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(t).then(onOk).catch(doFallback)}else{doFallback()}
   function doFallback(){var a=document.createElement('textarea');a.value=t;a.style.cssText='position:fixed;left:-9999px;opacity:0';document.body.appendChild(a);a.select();try{document.execCommand('copy');onOk()}catch(e){showToast('Ошибка','error')}document.body.removeChild(a)}
 }
@@ -1349,7 +1346,7 @@ async function loadData(){
       }).join(', ');
       document.getElementById('errorContainer').innerHTML=
         '<div style="padding:10px 16px;background:rgba(255,204,0,0.15);border:1px solid rgba(255,204,0,0.3);border-radius:8px;color:var(--warning);font-size:12px;margin-bottom:12px">'+
-        '\u26A0\uFE0F Сервер недоступен: '+escapeHtml(cacheWarnings)+'. Трафик и доступы отображаются из кеша. Модемы помечены как offline.</div>';
+        icon('alert',13)+' Сервер недоступен: '+escapeHtml(cacheWarnings)+'. Трафик и доступы отображаются из кеша. Модемы помечены как offline.</div>';
     }
 
     try{renderTable()}catch(e){console.error('[loadData] renderTable:',e)}
@@ -1591,10 +1588,9 @@ function updateSummary(){
     if(!byCountry[cc])byCountry[cc]={count:0,name:ci.name||sn};
     byCountry[cc].count++;
   });
-  var countryFlags={'MD':'🇲🇩','RO':'🇷🇴'};
   document.getElementById('totalPorts').textContent=total+' / '+total;
   var splitParts=Object.keys(byCountry).sort().map(function(cc){
-    return (countryFlags[cc]||'🌍')+' '+byCountry[cc].name+': '+byCountry[cc].count;
+    return byCountry[cc].name+': '+byCountry[cc].count;
   });
   document.getElementById('portsCountrySplit').textContent=splitParts.join(' · ');
 
@@ -1641,7 +1637,7 @@ function updateSummary(){
       }
 
       if(balance<0){
-        document.getElementById('balanceWarning').innerHTML='<div class="balance-warning">\u26A0\uFE0F Баланс отрицательный. Пожалуйста, свяжитесь с администратором для пополнения.</div>';
+        document.getElementById('balanceWarning').innerHTML='<div class="balance-warning">'+icon('alert',13)+' Баланс отрицательный. Пожалуйста, свяжитесь с администратором для пополнения.</div>';
       } else {
         document.getElementById('balanceWarning').innerHTML='';
       }
@@ -1687,7 +1683,7 @@ function buildRotationCell(row){
   h+='<input type="number" min="0" max="10080" step="1" value="'+cur+'" data-on-change="setRotation(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',this.value,this)" style="width:58px;font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;background:var(--bg-2);color:var(--text-1);text-align:center;-moz-appearance:textfield">';
   h+='<span style="font-size:10px;color:var(--text-3)">мин</span>';
   h+='</span>';
-  if(hasRotation)h+='<div style="font-size:9px;color:var(--accent);margin-top:2px">\u23F1 '+escapeHtml(timeLeft)+'</div>';
+  if(hasRotation)h+='<div style="font-size:9px;color:var(--accent);margin-top:2px">'+icon('clock',9)+' '+escapeHtml(timeLeft)+'</div>';
   return h;
 }
 
@@ -1746,7 +1742,7 @@ function showIpHistory(nick,serverName,imei){
       h+='<td style="white-space:nowrap">'+_rotCaller(e.caller,e.target_mode)+'</td>';
       h+='<td>'+(took!=='\u2014'?parseFloat(took).toFixed(1):'\u2014')+'</td>';
       h+='<td class="mono" style="color:var(--text-2)">'+escapeHtml(String(oldIp))+'</td>';
-      h+='<td class="mono" style="color:'+(unchanged?'var(--warning,#c60)':'var(--accent)')+'">'+escapeHtml(String(newIp))+(unchanged?' <span style="font-size:10px;color:var(--warning,#c60)">\u26a0 \u043d\u0435 \u0441\u043c\u0435\u043d\u0438\u043b\u0441\u044f</span>':'')+'</td>';
+      h+='<td class="mono" style="color:'+(unchanged?'var(--warning,#c60)':'var(--accent)')+'">'+escapeHtml(String(newIp))+(unchanged?' <span style="font-size:10px;color:var(--warning,#c60)">'+icon('alert',10)+' \u043d\u0435 \u0441\u043c\u0435\u043d\u0438\u043b\u0441\u044f</span>':'')+'</td>';
       h+='</tr>';
     });
     document.getElementById('ipModalBody').innerHTML=h+'</tbody></table>';
@@ -1936,15 +1932,15 @@ function loadClosingDocs(){
       if(unsigned.length>0){badge.style.display='inline';badge.textContent=unsigned.length+' не подписан'+(unsigned.length>1?'о':'');}
       else{badge.style.display='none';}
     }
-    if(!docs.length){el.innerHTML='<div style="text-align:center;padding:32px 16px"><div style="font-size:32px;margin-bottom:12px;opacity:.4">📄</div><p style="font-size:14px;font-weight:500;color:var(--text-1);margin:0 0 6px">Актов пока нет</p><p style="font-size:13px;color:var(--text-3);line-height:1.6;max-width:340px;margin:0 auto">Акты формируются по итогам каждого месяца после подписания договора. Первый акт появится в начале следующего месяца.</p></div>';return}
+    if(!docs.length){el.innerHTML='<div style="text-align:center;padding:32px 16px"><div style="font-size:32px;margin-bottom:12px;opacity:.4">'+icon('doc',32)+'</div><p style="font-size:14px;font-weight:500;color:var(--text-1);margin:0 0 6px">Актов пока нет</p><p style="font-size:13px;color:var(--text-3);line-height:1.6;max-width:340px;margin:0 auto">Акты формируются по итогам каждого месяца после подписания договора. Первый акт появится в начале следующего месяца.</p></div>';return}
     var h='<table class="data-table" style="width:100%"><thead><tr><th style="text-align:left;padding:10px 12px">Период</th><th style="text-align:left;padding:10px 12px">Номер</th><th style="text-align:right;padding:10px 12px">Сумма</th><th style="text-align:center;padding:10px 12px">Статус</th><th style="text-align:center;padding:10px 12px">Действия</th></tr></thead><tbody>';
     docs.sort(function(a,b){return (b.period||'').localeCompare(a.period||'')});
     docs.forEach(function(d){
       var isSigned=d.status==='signed';
       var rowBg=isSigned?'':'background:rgba(239,68,68,0.08);';
       var statusHtml=isSigned
-        ?'<span style="color:var(--green);font-weight:600">\u2705 \u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d</span>'
-        :'<span style="color:var(--red);font-weight:600">\u274c \u041d\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d</span>';
+        ?'<span style="color:var(--green);font-weight:600">'+icon('check',11)+' \u041f\u043e\u0434\u043f\u0438\u0441\u0430\u043d</span>'
+        :'<span style="color:var(--red);font-weight:600">'+icon('x',11)+' \u041d\u0435 \u043f\u043e\u0434\u043f\u0438\u0441\u0430\u043d</span>';
       var periodLabel=d.period||'\u2014';
       if(d.period&&d.period.length===7){
         var parts=d.period.split('-');
@@ -1957,7 +1953,7 @@ function loadClosingDocs(){
       h+='<td style="padding:10px 12px;color:var(--text-3)">'+(d.actNumber||'\u2014')+'</td>';
       h+='<td style="padding:10px 12px;text-align:right;font-weight:600">'+formatNumber(d.totalAmount||0)+' \u20BD</td>';
       h+='<td style="padding:10px 12px;text-align:center">'+statusHtml+'</td>';
-      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" data-on-click="downloadClosingPdf(\''+d.id+'\')" style="font-size:12px;padding:4px 10px">\u{1F4E5} PDF</button></td>';
+      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" data-on-click="downloadClosingPdf(\''+d.id+'\')" style="font-size:12px;padding:4px 10px">'+icon('download',12)+' PDF</button></td>';
       h+='</tr>';
     });
     h+='</tbody></table>';
@@ -1982,15 +1978,15 @@ function loadBills(){
       if(unpaid.length>0){badge.style.display='inline';badge.textContent=unpaid.length+' не оплачен';}
       else{badge.style.display='none';}
     }
-    if(!bills.length){el.innerHTML='<div style="text-align:center;padding:32px 16px"><div style="font-size:32px;margin-bottom:12px;opacity:.4">🧾</div><p style="font-size:14px;font-weight:500;color:var(--text-1);margin:0 0 6px">Счетов на оплату пока нет</p><p style="font-size:13px;color:var(--text-3);line-height:1.6;max-width:340px;margin:0 auto 16px">Счета выставляются по запросу. Для получения счёта — свяжитесь с менеджером.</p><a href="https://t.me/proxies_rent" target="_blank" style="display:inline-block;padding:7px 18px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text-0);text-decoration:none;background:var(--bg-2)">✈️ Написать менеджеру</a></div>';return}
+    if(!bills.length){el.innerHTML='<div style="text-align:center;padding:32px 16px"><div style="font-size:32px;margin-bottom:12px;opacity:.4">'+icon('receipt',32)+'</div><p style="font-size:14px;font-weight:500;color:var(--text-1);margin:0 0 6px">Счетов на оплату пока нет</p><p style="font-size:13px;color:var(--text-3);line-height:1.6;max-width:340px;margin:0 auto 16px">Счета выставляются по запросу. Для получения счёта — свяжитесь с менеджером.</p><a href="https://t.me/proxies_rent" target="_blank" style="display:inline-block;padding:7px 18px;border:1px solid var(--border);border-radius:8px;font-size:13px;color:var(--text-0);text-decoration:none;background:var(--bg-2)">'+icon('plane',12)+' Написать менеджеру</a></div>';return}
     var h='<table class="data-table" style="width:100%"><thead><tr><th style="text-align:left;padding:10px 12px">Период</th><th style="text-align:left;padding:10px 12px">Номер</th><th style="text-align:right;padding:10px 12px">Сумма</th><th style="text-align:center;padding:10px 12px">Статус</th><th style="text-align:center;padding:10px 12px">Действия</th></tr></thead><tbody>';
     bills.sort(function(a,b){return (b.period||'').localeCompare(a.period||'')});
     bills.forEach(function(b){
       var isPaid=b.status==='paid';
       var rowBg=isPaid?'':'background:rgba(239,68,68,0.08);';
       var statusHtml=isPaid
-        ?'<span style="color:var(--green);font-weight:600">✅ Оплачен</span>'
-        :'<span style="color:var(--red);font-weight:600">⏳ Не оплачен</span>';
+        ?'<span style="color:var(--green);font-weight:600">'+icon('check',11)+' Оплачен</span>'
+        :'<span style="color:var(--red);font-weight:600">'+icon('hourglass',11)+' Не оплачен</span>';
       var periodLabel=b.period||'—';
       if(b.period&&b.period.length===7){
         var parts=b.period.split('-');
@@ -2003,7 +1999,7 @@ function loadBills(){
       h+='<td style="padding:10px 12px;color:var(--text-3)">'+(b.billNumber||'—')+'</td>';
       h+='<td style="padding:10px 12px;text-align:right;font-weight:600">'+formatNumber(b.amount||0)+' ₽</td>';
       h+='<td style="padding:10px 12px;text-align:center">'+statusHtml+'</td>';
-      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" data-on-click="downloadBillPdf(\''+b.id+'\')" style="font-size:12px;padding:4px 10px">📥 PDF</button></td>';
+      h+='<td style="padding:10px 12px;text-align:center"><button class="btn btn-sm" data-on-click="downloadBillPdf(\''+b.id+'\')" style="font-size:12px;padding:4px 10px">'+icon('download',12)+' PDF</button></td>';
       h+='</tr>';
     });
     h+='</tbody></table>';
@@ -2077,22 +2073,22 @@ var exportModemFilter=[]; // [] = все, [...nicks]
 
 var EXPORT_FORMATS={
   basic:[
-    {id:'txt_login_at',label:'Generic TXT',sub:'user:pass@ip:port',ext:'txt',icon:'📄'},
+    {id:'txt_login_at',label:'Generic TXT',sub:'user:pass@ip:port',ext:'txt',icon:icon('doc',15)},
     {id:'json',label:'JSON',sub:'Массив объектов',ext:'json',icon:'{}'},
-    {id:'csv',label:'CSV',sub:'С заголовками',ext:'csv',icon:'📊'},
+    {id:'csv',label:'CSV',sub:'С заголовками',ext:'csv',icon:icon('chart',15)},
   ],
   devtools:[
     {id:'curl',label:'cURL',sub:'Для терминала',ext:'sh',icon:'$_'},
-    {id:'python',label:'Python requests',sub:'Готовый код',ext:'py',icon:'🐍'},
-    {id:'dotenv',label:'.env',sub:'Env-переменные',ext:'env',icon:'🔑'},
+    {id:'python',label:'Python requests',sub:'Готовый код',ext:'py',icon:''},
+    {id:'dotenv',label:'.env',sub:'Env-переменные',ext:'env',icon:icon('key',15)},
   ],
   system:[
-    {id:'pac',label:'PAC',sub:'Auto-config файл',ext:'pac',icon:'🔧'},
-    {id:'foxyproxy',label:'FoxyProxy',sub:'JSON config',ext:'json',icon:'🦊'},
-    {id:'proxifier',label:'Proxifier',sub:'XML profile',ext:'ppx',icon:'🔷'},
+    {id:'pac',label:'PAC',sub:'Auto-config файл',ext:'pac',icon:icon('wrench',15)},
+    {id:'foxyproxy',label:'FoxyProxy',sub:'JSON config',ext:'json',icon:''},
+    {id:'proxifier',label:'Proxifier',sub:'XML profile',ext:'ppx',icon:iconDot('#3498db',12)},
   ],
   custom:[
-    {id:'custom',label:'Свой шаблон',sub:'Настраиваемый',ext:'txt',icon:'⌨️'},
+    {id:'custom',label:'Свой шаблон',sub:'Настраиваемый',ext:'txt',icon:icon('keyboard',15)},
   ]
 };
 
@@ -2135,15 +2131,15 @@ function buildExportModal(){
   div.innerHTML=
     '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:16px;width:min(720px,100%);height:min(640px,92vh);display:flex;flex-direction:column;overflow:hidden;box-shadow:0 20px 60px rgba(0,0,0,0.3)">'+
     '<div style="padding:18px 24px 12px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;align-items:flex-start;flex-shrink:0">'+
-    '<div><div style="display:flex;align-items:center;gap:8px;margin-bottom:3px"><span style="font-size:18px">📤</span><h2 style="font-size:15px;font-weight:700;color:var(--text-0);margin:0">Экспорт прокси</h2></div>'+
+    '<div><div style="display:flex;align-items:center;gap:8px;margin-bottom:3px"><span style="font-size:18px">'+icon('upload',16)+'</span><h2 style="font-size:15px;font-weight:700;color:var(--text-0);margin:0">Экспорт прокси</h2></div>'+
     '</div>'+
-    '<button data-on-click="closeExportModal()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">✕</button>'+
+    '<button data-on-click="closeExportModal()" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;width:28px;height:28px;cursor:pointer;color:var(--text-1);font-size:13px;display:flex;align-items:center;justify-content:center;flex-shrink:0">'+icon('x',12)+'</button>'+
     '</div>'+
     '<div style="padding:0 24px;border-bottom:1px solid var(--border);display:flex;gap:0;flex-shrink:0;overflow-x:auto" id="exportTabBar">'+
-    '<button data-on-click="switchExportTab(\'basic\')" id="etab-basic" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">📄 Базовые</button>'+
-    '<button data-on-click="switchExportTab(\'devtools\')" id="etab-devtools" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">💻 Для разработчиков</button>'+
-    '<button data-on-click="switchExportTab(\'system\')" id="etab-system" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">⚙️ Системные</button>'+
-    '<button data-on-click="switchExportTab(\'custom\')" id="etab-custom" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">⌨️ Свой шаблон</button>'+
+    '<button data-on-click="switchExportTab(\'basic\')" id="etab-basic" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">'+icon('doc',12)+' Базовые</button>'+
+    '<button data-on-click="switchExportTab(\'devtools\')" id="etab-devtools" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">'+icon('laptop',12)+' Для разработчиков</button>'+
+    '<button data-on-click="switchExportTab(\'system\')" id="etab-system" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">'+icon('gear',12)+' Системные</button>'+
+    '<button data-on-click="switchExportTab(\'custom\')" id="etab-custom" style="padding:9px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:12px;font-weight:500;color:var(--text-2);white-space:nowrap">'+icon('keyboard',12)+' Свой шаблон</button>'+
     '</div>'+
     '<div id="exportFormatGrid" style="padding:12px 24px;border-bottom:1px solid var(--border);flex-shrink:0;overflow-x:auto;min-height:104px"></div>'+
     '<div id="exportCustomTemplateRow" style="display:none;padding:0 24px 10px;border-bottom:1px solid var(--border);flex-shrink:0">'+
@@ -2172,7 +2168,7 @@ function buildExportModal(){
     '<div><div style="font-size:10px;color:var(--text-3);margin-bottom:4px">Локация</div>'+
     '<div style="display:flex;gap:4px">'+
     '<button data-on-click="toggleExportLoc(\'\')" id="eloc-all" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--accent);background:var(--accent);color:#fff">Все</button>'+
-    (function(){var _cf={'MD':'🇲🇩','RO':'🇷🇴'};var btns='';var seen={};Object.keys(COUNTRIES).forEach(function(sn){var ci=COUNTRIES[sn];var cc=ci.country||sn;if(seen[cc])return;seen[cc]=true;var flag=_cf[cc]||'🌍';btns+='<button data-on-click="toggleExportLoc(\''+cc+'\')" id="eloc-'+cc+'" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">'+flag+' '+ci.name+'</button>'});return btns})()+
+    (function(){var btns='';var seen={};Object.keys(COUNTRIES).forEach(function(sn){var ci=COUNTRIES[sn];var cc=ci.country||sn;if(seen[cc])return;seen[cc]=true;var flag=(cc==='MD'||cc==='RO')?flagIcon(cc,11):icon('globe',11);btns+='<button data-on-click="toggleExportLoc(\''+cc+'\')" id="eloc-'+cc+'" style="padding:3px 10px;font-size:11px;cursor:pointer;border-radius:5px;border:1px solid var(--border);background:var(--bg-2);color:var(--text-1)">'+flag+' '+ci.name+'</button>'});return btns})()+
     '</div></div>'+
     '</div></div>'+
     '<div style="padding:8px 24px 4px;flex-shrink:0;display:flex;justify-content:space-between;align-items:center">'+
@@ -2183,7 +2179,7 @@ function buildExportModal(){
     '</div>'+
     '<div style="padding:12px 24px;border-top:1px solid var(--border);display:flex;justify-content:flex-end;gap:8px;flex-shrink:0">'+
     '<button id="exportCopyBtn" data-on-click="copyExportData()" style="padding:7px 18px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:13px;cursor:pointer;display:flex;align-items:center;gap:6px">'+copyIcon()+' Скопировать</button>'+
-    '<button data-on-click="downloadExportData()" style="padding:7px 18px;background:var(--accent);border:none;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px">📥 Скачать файл</button>'+
+    '<button data-on-click="downloadExportData()" style="padding:7px 18px;background:var(--accent);border:none;border-radius:8px;color:#fff;font-size:13px;cursor:pointer;font-weight:600;display:flex;align-items:center;gap:6px">'+icon('download',13)+' Скачать файл</button>'+
     '</div>'+
     '</div>';
   document.body.appendChild(div);
@@ -2250,7 +2246,7 @@ function renderExportGrid(){
     html+='<div style="font-size:12px;font-weight:600;color:var(--text-0)">'+f.label+'</div>';
     html+='<div style="font-size:10px;color:var(--text-3);margin-top:2px;line-height:1.3;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+f.sub+'</div>';
     html+='<div style="margin-top:6px;display:inline-block;padding:1px 6px;background:var(--bg-0);border:1px solid var(--border);border-radius:4px;font-size:9px;color:var(--text-3);font-family:monospace">.'+f.ext+'</div>';
-    if(active)html+='<div style="position:absolute;top:6px;right:8px;color:var(--accent);font-size:13px;font-weight:700">✓</div>';
+    if(active)html+='<div style="position:absolute;top:6px;right:8px;color:var(--accent);font-size:13px;font-weight:700">'+icon('check',13)+'</div>';
     html+='</div>';
   });
   html+='</div>';
@@ -2412,7 +2408,7 @@ function refreshExportPreview(){
 function copyExportData(){
   var content=buildExportContent(exportFormat);
   var btn=document.getElementById('exportCopyBtn');
-  var ok=function(){if(btn){var o=btn.innerHTML;btn.innerHTML='✓ Скопировано';btn.style.color='var(--success)';setTimeout(function(){btn.innerHTML=o;btn.style.color='';},2000);}};
+  var ok=function(){if(btn){var o=btn.innerHTML;btn.innerHTML=icon('check',13)+' Скопировано';btn.style.color='var(--success)';setTimeout(function(){btn.innerHTML=o;btn.style.color='';},2000);}};
   navigator.clipboard.writeText(content).then(ok).catch(function(){
     var ta=document.createElement('textarea');ta.value=content;ta.style.cssText='position:fixed;opacity:0';
     document.body.appendChild(ta);ta.select();document.execCommand('copy');document.body.removeChild(ta);ok();
