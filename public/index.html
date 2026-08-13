@@ -10,7 +10,10 @@
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
-<link rel="stylesheet" href="/css/client-portal.css">
+<link rel="stylesheet" href="/css/variables.css?v=0813c">
+<link rel="stylesheet" href="/css/base.css?v=0813c">
+<link rel="stylesheet" href="/css/client-portal.css?v=0813c">
+<link rel="stylesheet" href="/css/shell.css?v=0813c">
 <!-- Yandex.Metrika counter -->
 <script type="text/javascript">
     (function(m,e,t,r,i,k,a){
@@ -68,23 +71,27 @@
   <div id="appMain" style="display:none">
     <div class="header">
       <div class="header-left">
-        <a class="header-logo" href="/"><img src="/img/brand-logo.webp" alt="Arendaproxy"></a>
+        <div class="sb-brand">
+          <a class="header-logo" href="/"><img src="/img/brand-logo.webp" alt="Arendaproxy"></a>
+          <span class="header-brand-name">Arendaproxy</span>
+        </div>
         <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v1.0.0</a>
         <span class="header-client-info"><span class="status-indicator" id="statusDot"></span> <span id="statusText">OK</span> <span id="lastUpdate" style="color:var(--text-3);font-size:10px;margin-left:4px"></span></span>
+        <span class="user-info" style="font-size:11px;color:var(--text-2)">Клиент: <strong id="currentUser" style="color:var(--text-0)"></strong></span>
       </div>
 
       <nav class="nav-tabs">
-        <div class="nav-tab active" data-on-click="switchTab('traffic',this)">Панель управления</div>
-        <div class="nav-tab" data-on-click="switchTab('analytics',this)">Аналитика</div>
-        <div class="nav-tab" data-on-click="switchTab('billing',this)">История баланса</div>
-        <div class="nav-tab" data-on-click="switchTab('documents',this)">Документы</div>
-        <div class="nav-tab" data-on-click="switchTab('api',this)">API</div>
-        <div class="nav-tab" data-on-click="switchTab('referral',this)">Партнёрская программа</div>
+        <div class="nav-tab active" data-on-click="switchTab('traffic',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></svg></span>Панель управления</div>
+        <div class="nav-tab" data-on-click="switchTab('analytics',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></span>Аналитика</div>
+        <div class="nav-tab" data-on-click="switchTab('billing',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>История баланса</div>
+        <div class="nav-tab" data-on-click="switchTab('documents',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg></span>Документы</div>
+        <div class="nav-tab" data-on-click="switchTab('api',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l-5 6 5 6"/><path d="M16 6l5 6-5 6"/><path d="M13 4l-2 16"/></svg></span>API</div>
+        <div class="nav-tab" data-on-click="switchTab('referral',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Партнёрская программа</div>
       </nav>
 
       <div class="header-right">
-        <span class="user-info" style="font-size:11px;color:var(--text-2)">Клиент: <strong id="currentUser" style="color:var(--text-0)"></strong></span>
         <div class="theme-toggle" id="themeToggle" data-on-click="toggleTheme()" title="Переключить тему"></div>
+        <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v1.0.0</a>
         <button class="btn-logout" data-on-click="doLogout()" title="Выйти">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -95,20 +102,20 @@
     <div class="tab-pane active" id="tab-traffic">
       <div class="container">
         <!-- Onboarding banner -->
-        <div id="onboardingBanner" style="display:none;border:1.5px solid #185FA5;border-radius:12px;padding:20px 48px 20px 24px;background:rgba(24,95,165,0.06);margin-bottom:18px;position:relative">
-          <button data-on-click="dismissOnboarding()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:16px;color:#185FA5;cursor:pointer;line-height:1;padding:4px">✕</button>
-          <div style="font-size:14px;font-weight:600;color:#0C447C;margin-bottom:4px">Добро пожаловать в Proxies.rent</div>
-          <div id="onboardingDesc" style="font-size:13px;color:#185FA5;line-height:1.6;margin-bottom:12px"></div>
+        <div id="onboardingBanner" style="display:none;border:1.5px solid var(--accent);border-radius:12px;padding:20px 48px 20px 24px;background:var(--accent-dim);margin-bottom:18px;position:relative">
+          <button data-on-click="dismissOnboarding()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:16px;color:var(--accent);cursor:pointer;line-height:1;padding:4px">✕</button>
+          <div style="font-size:14px;font-weight:600;color:var(--text-0);margin-bottom:4px">Добро пожаловать в Proxies.rent</div>
+          <div id="onboardingDesc" style="font-size:13px;color:var(--accent);line-height:1.6;margin-bottom:12px"></div>
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-            <div style="flex:1;height:4px;background:rgba(24,95,165,0.18);border-radius:2px">
-              <div id="onboardingProgress" style="height:100%;background:#1D9E75;border-radius:2px;transition:width .3s"></div>
+            <div style="flex:1;height:4px;background:var(--accent-dim);border-radius:2px">
+              <div id="onboardingProgress" style="height:100%;background:var(--success);border-radius:2px;transition:width .3s"></div>
             </div>
-            <span id="onboardingCounter" style="font-size:11px;color:#185FA5;white-space:nowrap"></span>
+            <span id="onboardingCounter" style="font-size:11px;color:var(--accent);white-space:nowrap"></span>
           </div>
           <div id="onboardingPills" style="display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:14px;scrollbar-width:none"></div>
           <div style="display:flex;align-items:center;gap:14px">
-            <button id="onboardingNextBtn" data-on-click="onboardingNext()" style="padding:7px 18px;background:#185FA5;color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer"></button>
-            <button data-on-click="dismissOnboarding()" style="background:none;border:none;font-size:13px;color:#185FA5;cursor:pointer;text-decoration:underline;text-decoration-style:dashed;text-underline-offset:3px">Пропустить тур</button>
+            <button id="onboardingNextBtn" data-on-click="onboardingNext()" style="padding:7px 18px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer"></button>
+            <button data-on-click="dismissOnboarding()" style="background:none;border:none;font-size:13px;color:var(--accent);cursor:pointer;text-decoration:underline;text-decoration-style:dashed;text-underline-offset:3px">Пропустить тур</button>
           </div>
         </div>
         <div class="summary-cards" id="summaryCards" style="display:none">
@@ -144,9 +151,15 @@
 
         <!-- Traffic table: 8 columns: Модем, Реквизиты, Логин:Пароль, Смена IP, Ротация, Сегодня, Вчера, Месяц -->
         <div class="table-wrapper">
-          <div class="loading-overlay" id="loading">
-            <div class="spinner"></div>
-            <span>Загрузка данных...</span>
+          <div class="loading-overlay" id="loading" style="flex-direction:column;align-items:stretch;gap:10px;padding:24px">
+            <div class="skel" style="height:36px"></div>
+            <div class="skel" style="height:36px"></div>
+            <div class="skel" style="height:36px"></div>
+            <div class="skel" style="height:36px"></div>
+            <div class="skel" style="height:36px"></div>
+            <div class="skel" style="height:36px"></div>
+            <div class="skel" style="height:36px"></div>
+            <div class="skel" style="height:36px"></div>
           </div>
           <table id="dataTable" style="display:none">
             <thead>
@@ -156,6 +169,8 @@
                 <th>Логин:Пароль</th>
                 <th>Смена IP</th>
                 <th>Ротация</th>
+                <th>Скорость</th>
+                <th>Аптайм</th>
                 <th data-on-click="sortTable('dayIn')">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
                 <th data-on-click="sortTable('yesterdayIn')">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
                 <th data-on-click="sortTable('monthIn')">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
@@ -246,7 +261,7 @@
               <button data-on-click="navigateDailyPeriod(1)" id="dailyNavRight" title="Следующий период" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);width:28px;height:28px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0">▶</button>
             </div>
           </div>
-          <div id="dailyChartLoading" style="text-align:center;padding:40px;color:var(--text-3);font-size:13px">Загрузка данных...</div>
+          <div id="dailyChartLoading" class="skel" style="height:360px"><div class="skel-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
           <div id="dailyChartEmpty" style="display:none;align-items:center;justify-content:center;height:360px;color:var(--text-3);font-size:13px;text-align:center">Нет данных за выбранный период.<br>Данные накапливаются каждый день автоматически.</div>
           <div id="dailyChartWrap" style="height:360px"><canvas id="analyticsDailyChart"></canvas></div>
         </div>
@@ -276,6 +291,30 @@
             <h3 style="font-size:14px;font-weight:600;margin-bottom:14px;color:var(--text-0)">Входящий / Исходящий</h3>
             <div id="analyticsInOutCards"></div>
           </div>
+        </div>
+
+        <!-- Heatmap: hourly traffic, last 7 days (MSK) -->
+        <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div>
+              <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Почасовой трафик</h3>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px">последние 7 дней, время московское</div>
+            </div>
+            <div id="clientHeatmapLegend" style="display:flex;align-items:center;gap:6px;font-size:10px;color:var(--text-3)"></div>
+          </div>
+          <div id="clientHeatmap"><div class="skel" style="height:190px"><div class="skel-heat"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
+        </div>
+
+        <!-- Speed monitor: hourly speed measurements per modem -->
+        <div id="clientSpeedCard" style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
+            <div>
+              <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Скорость модемов</h3>
+              <div style="font-size:11px;color:var(--text-3);margin-top:2px">почасовые замеры, последние 48 часов</div>
+            </div>
+          </div>
+          <div id="clientSpeedLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;font-size:11px;color:var(--text-2)"></div>
+          <div id="clientSpeedWrap" style="height:280px;position:relative"><canvas id="clientSpeedChart"></canvas><div id="clientSpeedSkel" class="skel" style="position:absolute;inset:0"><div class="skel-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
         </div>
       </div>
     </div>
@@ -339,19 +378,30 @@
         <div class="tools-section">
           <h3 style="display:flex;align-items:center;gap:8px">📃 Закрывающие документы (акты) <span id="unsignedBadge" style="display:none;background:var(--red);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600"></span></h3>
           <div id="closingDocsList">
-            <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
+            <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">
+              <div class="skel" style="height:44px"></div>
+              <div class="skel" style="height:44px"></div>
+              <div class="skel" style="height:44px"></div>
+            </div>
           </div>
         </div>
         <div class="tools-section" style="margin-top:20px">
           <h3 style="display:flex;align-items:center;gap:8px">💳 Счета на оплату <span id="unpaidBadge" style="display:none;background:var(--red);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600"></span></h3>
           <div id="billsList">
-            <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
+            <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">
+              <div class="skel" style="height:44px"></div>
+              <div class="skel" style="height:44px"></div>
+              <div class="skel" style="height:44px"></div>
+            </div>
           </div>
         </div>
         <div class="tools-section" style="margin-top:20px">
           <h3>Загруженные документы</h3>
           <div id="documentsList">
-            <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
+            <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">
+              <div class="skel" style="height:44px"></div>
+              <div class="skel" style="height:44px"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -649,7 +699,12 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
 
           <!-- Accordion by months -->
           <div id="billingAccordion">
-            <div style="text-align:center;padding:40px;color:var(--text-3)">Загрузка...</div>
+            <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">
+              <div class="skel" style="height:46px"></div>
+              <div class="skel" style="height:46px"></div>
+              <div class="skel" style="height:46px"></div>
+              <div class="skel" style="height:46px"></div>
+            </div>
           </div>
         </div>
       </div>
@@ -658,7 +713,14 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
     <div class="tab-pane" id="tab-referral">
       <div class="container">
         <div id="referralContent">
-          <div class="loading-overlay"><div class="spinner"></div><span>Загрузка...</span></div>
+          <div style="display:flex;flex-direction:column;gap:14px;padding:8px 0">
+            <div class="skel" style="height:120px"></div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px">
+              <div class="skel" style="height:90px"></div>
+              <div class="skel" style="height:90px"></div>
+              <div class="skel" style="height:90px"></div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -674,9 +736,9 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
 
   <div class="toast-container" id="toastContainer"></div>
 
-<script src="/js/utils.js?v=0717a"></script>
-<script src="/js/delegation.js?v=0727b"></script>
-<script src="/js/client.js?v=0722b"></script>
+<script src="/js/utils.js?v=0813c"></script>
+<script src="/js/delegation.js?v=0813c"></script>
+<script src="/js/client.js?v=0813c"></script>
 
 </body>
 </html>

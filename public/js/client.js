@@ -347,6 +347,8 @@ document.addEventListener('click',function(e){
 });
 
 function renderAnalytics(){
+  loadClientHeatmap();
+  loadClientSpeed();
   if(!tableData||!tableData.length) return;
 
   document.getElementById('analyticsSummary').style.display='';
@@ -372,6 +374,115 @@ function renderAnalytics(){
   } else {
     reloadDailyChart();
   }
+}
+
+// --- Почасовой хитмап трафика клиента (Этап 3 унификации с админкой) ---
+// GET /api/client/hourly_traffic → {meta:{days,day_meta,has_hourly}, matrix[day][hour]=GB}
+function loadClientHeatmap(){
+  var box=document.getElementById('clientHeatmap');
+  if(!box) return;
+  api('/api/client/hourly_traffic?days=7').then(function(data){
+    if(!data||!data.meta||!data.meta.has_hourly){
+      box.innerHTML='<div style="padding:30px;text-align:center;color:var(--text-3);font-size:12px">Почасовые данные пока не накоплены — они собираются автоматически каждый час.</div>';
+      return;
+    }
+    var days=data.meta.days, dayMeta=data.meta.day_meta, m=data.matrix;
+    var max=0;
+    for(var i=0;i<m.length;i++){for(var j=0;j<24;j++){if(m[i][j]>max)max=m[i][j]}}
+    if(max<=0)max=1;
+    var html='<div style="overflow-x:auto"><div style="min-width:640px">';
+    // Шапка часов
+    html+='<div style="display:grid;grid-template-columns:52px repeat(24,1fr);gap:2px;margin-bottom:2px">';
+    html+='<div></div>';
+    for(var h=0;h<24;h++){
+      html+='<div style="font-size:9px;color:var(--text-3);text-align:center">'+(h%3===0?h:'')+'</div>';
+    }
+    html+='</div>';
+    for(var di=0;di<days.length;di++){
+      var dm=dayMeta[di]||{label:'',dateShort:days[di].slice(5)};
+      html+='<div style="display:grid;grid-template-columns:52px repeat(24,1fr);gap:2px;margin-bottom:2px">';
+      html+='<div style="font-size:10px;color:var(--text-2);display:flex;align-items:center;white-space:nowrap">'+dm.label+' '+dm.dateShort+'</div>';
+      for(var hh=0;hh<24;hh++){
+        var v=m[di][hh]||0;
+        var a=v>0?(0.10+0.90*v/max):0;
+        var tip=(v>=1?v.toFixed(2)+' ГБ':Math.round(v*1024)+' МБ');
+        html+='<div title="'+days[di]+' '+('0'+hh).slice(-2)+':00 — '+tip+'" style="height:20px;border-radius:3px;background:'+(v>0?'var(--accent)':'var(--bg-2)')+';opacity:'+(v>0?Math.max(a,0.12):1)+'"></div>';
+      }
+      html+='</div>';
+    }
+    html+='</div></div>';
+    box.innerHTML=html;
+    var legend=document.getElementById('clientHeatmapLegend');
+    if(legend){
+      legend.innerHTML='<span>0</span>'+
+        '<span style="display:inline-block;width:60px;height:8px;border-radius:4px;background:linear-gradient(90deg,var(--bg-2),var(--accent))"></span>'+
+        '<span>'+(max>=1?max.toFixed(1)+' ГБ/ч':Math.round(max*1024)+' МБ/ч')+'</span>';
+    }
+  }).catch(function(){
+    box.innerHTML='<div style="padding:30px;text-align:center;color:var(--text-3);font-size:12px">Не удалось загрузить почасовые данные.</div>';
+  });
+}
+
+// --- Почасовые замеры скорости модемов клиента (SpeedMonitor) ---
+// GET /api/client/speed_monitor → {rows:[{nick,hour_msk,avg_dl,...}], modems:[{nick,operator,location}]}
+var _clientSpeedChart=null;
+function loadClientSpeed(){
+  var card=document.getElementById('clientSpeedCard');
+  var skel=document.getElementById('clientSpeedSkel');
+  if(!card) return;
+  api('/api/client/speed_monitor?hours=48').then(function(data){
+    if(skel) skel.style.display='none';
+    var rows=(data&&data.rows)||[];
+    if(!rows.length){card.style.display='none';return}
+    card.style.display='';
+    // Ось часов — объединение всех hour_msk
+    var hoursSet={};
+    rows.forEach(function(r){hoursSet[r.hour_msk]=1});
+    var hours=Object.keys(hoursSet).sort();
+    var labels=hours.map(function(h){return h.slice(8,10)+'.'+h.slice(5,7)+' '+h.slice(11,13)+':00'});
+    // Мета по никам: оператор + локация
+    var metaByNick={};
+    ((data&&data.modems)||[]).forEach(function(md){metaByNick[md.nick]=md});
+    var nicks=[];var seen={};
+    rows.forEach(function(r){if(!seen[r.nick]){seen[r.nick]=1;nicks.push(r.nick)}});
+    nicks.sort();
+    var colors=['#1960C9','#34C759','#FFCC00','#9b59b6','#FF383C','#3498db','#e67e22'];
+    var datasets=nicks.map(function(nick,idx){
+      var byHour={};
+      rows.forEach(function(r){if(r.nick===nick)byHour[r.hour_msk]=r.avg_dl});
+      var md=metaByNick[nick]||{};
+      var label=nick+(md.operator?' · '+md.operator:'')+(md.location?' · '+md.location:'');
+      return{
+        label:label,
+        data:hours.map(function(h){return byHour[h]!==undefined?byHour[h]:null}),
+        borderColor:colors[idx%colors.length],
+        backgroundColor:colors[idx%colors.length],
+        borderWidth:2,pointRadius:0,tension:.3,spanGaps:true
+      };
+    });
+    var isDark=document.documentElement.getAttribute('data-theme')!=='light';
+    var textColor=isDark?'#c9d1d9':'#24292f';
+    var gridColor=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.08)';
+    if(_clientSpeedChart){_clientSpeedChart.destroy();_clientSpeedChart=null}
+    var ctx=document.getElementById('clientSpeedChart').getContext('2d');
+    _clientSpeedChart=new Chart(ctx,{type:'line',data:{labels:labels,datasets:datasets},options:{
+      responsive:true,maintainAspectRatio:false,
+      interaction:{mode:'index',intersect:false},
+      plugins:{
+        legend:{display:true,position:'bottom',labels:{color:textColor,font:{size:10},boxWidth:10}},
+        tooltip:{callbacks:{label:function(c){return ' '+c.dataset.label+': '+(c.parsed.y!==null?c.parsed.y.toFixed(1)+' Мбит/с':'—')}}}
+      },
+      scales:{
+        x:{ticks:{color:textColor,font:{size:9},maxTicksLimit:12},grid:{color:gridColor}},
+        y:{beginAtZero:true,title:{display:true,text:'Мбит/с (скачивание)',color:textColor,font:{size:10}},ticks:{color:textColor,font:{size:10}},grid:{color:gridColor}}
+      }
+    }});
+    var legendBox=document.getElementById('clientSpeedLegend');
+    if(legendBox) legendBox.innerHTML='';
+  }).catch(function(){
+    if(skel) skel.style.display='none';
+    card.style.display='none';
+  });
 }
 
 function reloadDailyChart(){
@@ -1219,9 +1330,9 @@ function renderTable(){
     var name=countryNames[country]||country;
     var count=groupRows.length;
 
-    // colspan=8 for 8 columns (Модем, Реквизиты, Логин:Пароль, Смена IP, Ротация, Сегодня, Вчера, Месяц)
+    // colspan=10 for 10 columns (Модем, Реквизиты, Логин:Пароль, Смена IP, Ротация, Скорость, Аптайм, Сегодня, Вчера, Месяц)
     html+='<tr class="country-header">'+
-      '<td colspan="8">'+
+      '<td colspan="10">'+
         name+
         '<span class="country-count">'+count+' модемов</span>'+
       '</td>'+
@@ -1273,6 +1384,23 @@ function renderTable(){
       changeIpHtml+='<button class="action-btn-sm" data-on-click="showIpHistory(\''+escapeHtml(row.modemNick)+'\',\''+escapeHtml(row.serverName)+'\',\''+escapeHtml(row.imei)+'\')" title="IP история" style="font-size:12px">\ud83d\udcc3</button>';
 
       var rowStyle=row._cached?'opacity:0.6':(row._offline?'opacity:0.45':'');
+
+      // Скорость (последний замер speedtest, Мбит/с) и аптайм за 30 дней —
+      // данные уже приходят в /api/dashboard_data, просто раньше не выводились.
+      var speedHtml='<span class="text-dim">—</span>';
+      if(row.speedDl||row.speedUl){
+        speedHtml='<span class="speed-cell" style="font-size:11px">'+
+          '<span class="speed-dl">\u2193 '+(row.speedDl?row.speedDl.toFixed(1):'0')+'</span> '+
+          '<span class="speed-ul">\u2191 '+(row.speedUl?row.speedUl.toFixed(1):'0')+'</span>'+
+        '</span>';
+      }
+      var uptimeHtml='<span class="text-dim">—</span>';
+      if(row.uptimePct!==null&&row.uptimePct!==undefined){
+        var upVal=parseFloat(row.uptimePct);
+        var upCls=upVal>=99?'uptime-good':(upVal>=95?'uptime-warn':'uptime-bad');
+        uptimeHtml='<span class="'+upCls+'">'+row.uptimePct+'%</span>';
+      }
+
       html+='<tr style="'+rowStyle+'">'+
         '<td>'+
           '<div style="display:flex;align-items:center;gap:10px">'+
@@ -1289,6 +1417,8 @@ function renderTable(){
         '<td>'+loginPassHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+changeIpHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+buildRotationCell(row)+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+speedHtml+'</td>'+
+        '<td style="text-align:center;white-space:nowrap">'+uptimeHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+dayHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+yesterdayHtml+'</td>'+
         '<td style="text-align:center;white-space:nowrap">'+monthHtml+'</td>'+
@@ -1336,6 +1466,12 @@ function renderTable(){
       mobileHtml+='<div class="mc-stats">';
       mobileHtml+='<div class="mc-stat"><span class="mc-stat-lbl">\u0412\u0447\u0435\u0440\u0430</span><span class="mc-stat-val">'+mYestVal+'</span></div>';
       mobileHtml+='<div class="mc-stat"><span class="mc-stat-lbl">\u041c\u0435\u0441\u044f\u0446</span><span class="mc-stat-val">'+mMonthVal+'</span></div>';
+      if(mrow.speedDl||mrow.speedUl){
+        mobileHtml+='<div class="mc-stat"><span class="mc-stat-lbl">\u0421\u043a\u043e\u0440\u043e\u0441\u0442\u044c</span><span class="mc-stat-val"><span class="speed-dl">\u2193'+(mrow.speedDl?mrow.speedDl.toFixed(1):'0')+'</span> <span class="speed-ul">\u2191'+(mrow.speedUl?mrow.speedUl.toFixed(1):'0')+'</span></span></div>';
+      }
+      if(mrow.uptimePct!==null&&mrow.uptimePct!==undefined){
+        mobileHtml+='<div class="mc-stat"><span class="mc-stat-lbl">\u0410\u043f\u0442\u0430\u0439\u043c</span><span class="mc-stat-val">'+mrow.uptimePct+'%</span></div>';
+      }
       mobileHtml+='</div>';
       mobileHtml+='<div class="mc-expanded">';
       if(mServerIp&&mrow.httpPort){

@@ -15,7 +15,7 @@ module.exports = function createAnalyticsRouter(deps) {
   const {
     db, logger, authMiddleware, adminMiddleware,
     getMoscowToday, getMoscowNow,
-    clients,
+    clients, clientByLogin,
     dailyTraffic,
     apiServers,
     SERVER_COUNTRIES,
@@ -174,6 +174,60 @@ r.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res
     res.json(resp);
   } catch (e) {
     logger.error('[heatmap]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// Портал клиента: почасовой хитмап трафика самого клиента (как admin heatmap
+// view='client', но идентичность берём из сессии — чужой id передать нельзя).
+r.get('/api/client/hourly_traffic', authMiddleware, async (req, res) => {
+  const clientInfo = clientByLogin.get(req.user.login);
+  const portName = (clientInfo && clientInfo.portName) || req.user.portNameFilter;
+  if (!portName || portName === '*') return res.status(400).json({ error: 'No portName bound to account' });
+  const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+  try {
+    const cacheKey = `portal|${portName}|${days}`;
+    const cached = _heatmapCache.get(cacheKey);
+    if (cached && Date.now() - cached.ts < HEATMAP_TTL_MS) {
+      return res.json(cached.data);
+    }
+    const now2 = new Date();
+    const mskOffset = getTzOffset('Europe/Moscow');
+    const mskNow = new Date(now2.getTime() + mskOffset * 3600 * 1000);
+    const dateList = [];
+    for (let i = days - 1; i >= 0; i--) {
+      const d = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate() - i));
+      dateList.push(d.toISOString().slice(0, 10));
+    }
+    const startDate = dateList[0];
+    const utcFetchStartShifted = new Date(new Date(startDate + 'T00:00:00Z').getTime() - mskOffset * 3600 * 1000).toISOString().slice(0, 16).replace('T', ' ');
+    const matrix = dateList.map(() => new Array(24).fill(0));
+    const tzStr = tzModifier(mskOffset);
+
+    const { sql, params } = analyticsDb.heatmapSql({
+      tzStr, start: utcFetchStartShifted, view: 'client', idKey: portName, id: portName, servers: [],
+    });
+    const rows = db.prepare(sql).all(...params);
+    let hasData = false;
+    const dateIdx = new Map(dateList.map((d, i) => [d, i]));
+    for (const row of rows) {
+      const di = dateIdx.get(row.day);
+      if (di !== undefined && row.hour >= 0 && row.hour < 24) {
+        matrix[di][row.hour] = row.bytes / 1e9;
+        hasData = true;
+      }
+    }
+
+    const DAYS_RU = ['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
+    const dayMeta = dateList.map(date => {
+      const d = new Date(date + 'T00:00:00');
+      return { date, label: DAYS_RU[d.getDay()], dateShort: date.slice(5) };
+    });
+    const resp = { meta: { id: portName, days: dateList, day_meta: dayMeta, has_hourly: hasData }, matrix };
+    _heatmapCache.set(cacheKey, { ts: Date.now(), data: resp });
+    res.json(resp);
+  } catch (e) {
+    logger.error('[client/hourly_traffic]', e.message);
     res.status(500).json({ error: e.message });
   }
 });

@@ -3219,6 +3219,7 @@ const _proxiesDeps = {
   ipHistory,
   modemRotationCache,
   fetchAllServersDataCached,
+  clientByLogin,
   syncRotationLog: (...args) => syncRotationLog(...args),
   _rlSelect: { all: (...args) => _rlSelect.all(...args) },
 };

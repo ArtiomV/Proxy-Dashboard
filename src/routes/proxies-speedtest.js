@@ -10,7 +10,7 @@ module.exports = function createRouter(deps) {
     authMiddleware, adminMiddleware,
     fetchApi, findServer,
     pushSpeedtestEntry, speedtestHistory,
-    db,
+    db, clientByLogin, knownModems,
   } = deps;
   const r = express.Router();
 
@@ -149,6 +149,70 @@ r.get('/api/admin/speed-monitor', authMiddleware, adminMiddleware, (req, res) =>
       // Строки отсортированы от свежих: первая встреченная по нику — последний
       // замер; оператора добираем из более ранних строк, если в свежей пусто
       // (например, свежая — not_found/offline).
+      const cur = seen.get(x.nick);
+      if (cur) { if (!cur.operator && x.operator) cur.operator = x.operator; continue; }
+      const srv = x.server ? findServer(x.server) : null;
+      seen.set(x.nick, {
+        nick: x.nick,
+        server: x.server || '',
+        location: (srv && (srv.countryName || srv.country)) || x.server || '',
+        operator: x.operator || '',
+      });
+    }
+    modems.push(...seen.values());
+  } catch (_) { /* мета best-effort, строки уже отданы */ }
+  res.json({ hours, rows, modems });
+});
+
+// Портал клиента: почасовые замеры SpeedMonitor по модемам самого клиента.
+// Тот же формат, что у /api/admin/speed-monitor, но состав ников вычисляется
+// из привязки портов клиента (knownModems.portName) — чужие ники не отдаём.
+r.get('/api/client/speed_monitor', authMiddleware, (req, res) => {
+  const clientInfo = clientByLogin.get(req.user.login);
+  const portName = (clientInfo && clientInfo.portName) || req.user.portNameFilter;
+  if (!portName) return res.status(400).json({ error: 'No portName bound to account' });
+  const hours = Math.min(Math.max(parseInt(req.query.hours, 10) || 48, 1), 24 * 60);
+
+  // Никсы модемов клиента (portName '*' — аккаунт без фильтра, видит всё).
+  const nicks = new Set();
+  for (const portMap of Object.values(knownModems || {})) {
+    for (const info of Object.values(portMap || {})) {
+      if (!info || !info.nick) continue;
+      if (portName === '*' || info.portName === portName) nicks.add(info.nick);
+    }
+  }
+  if (nicks.size === 0) return res.json({ hours, rows: [], modems: [] });
+
+  const nickList = [...nicks];
+  const inClause = nickList.map(() => '?').join(',');
+  const params = [`-${hours} hours`, ...nickList];
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT nick,
+             strftime('%Y-%m-%d %H:00', ts, '+3 hours')        AS hour_msk,
+             COUNT(*)                                          AS samples,
+             SUM(CASE WHEN ok = 1 THEN 1 ELSE 0 END)           AS ok_count,
+             SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END)           AS fail_count,
+             ROUND(AVG(CASE WHEN ok = 1 THEN download END), 2) AS avg_dl,
+             ROUND(MIN(CASE WHEN ok = 1 THEN download END), 2) AS min_dl,
+             ROUND(MAX(CASE WHEN ok = 1 THEN download END), 2) AS max_dl,
+             ROUND(AVG(CASE WHEN ok = 1 THEN upload END), 2)   AS avg_ul,
+             ROUND(AVG(CASE WHEN ok = 1 THEN ping END), 1)     AS avg_ping
+        FROM speed_monitor
+       WHERE ts >= datetime('now', ?) AND nick IN (${inClause})
+       GROUP BY nick, hour_msk
+       ORDER BY nick, hour_msk`).all(...params);
+  } catch (e) {
+    return res.json({ hours, rows: [], modems: [], note: 'speed_monitor unavailable: ' + e.message });
+  }
+  const modems = [];
+  try {
+    const seen = new Map();
+    for (const x of db.prepare(`
+        SELECT nick, server, operator FROM speed_monitor
+         WHERE ts >= datetime('now', ?) AND nick IN (${inClause})
+         ORDER BY ts DESC`).all(...params)) {
       const cur = seen.get(x.nick);
       if (cur) { if (!cur.operator && x.operator) cur.operator = x.operator; continue; }
       const srv = x.server ? findServer(x.server) : null;
