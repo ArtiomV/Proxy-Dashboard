@@ -44,14 +44,14 @@ function parseSpeedtestResult(result) {
 }
 
 function create(deps) {
-  const { db, logger, logActivity, apiServers, fetchApi } = deps;
+  const { db, logger, logActivity, apiServers, fetchApi, normalizeOperator } = deps;
 
   const TARGET_NICKS = (process.env.SPEED_MONITOR_NICKS || DEFAULT_NICKS)
     .split(',').map(s => s.trim()).filter(Boolean);
 
   const insertStmt = db.prepare(`INSERT INTO speed_monitor
-    (server, nick, imei, download, upload, ping, ok, error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?)`);
+    (server, nick, imei, download, upload, ping, ok, error, operator)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const pruneStmt = db.prepare(
     "DELETE FROM speed_monitor WHERE ts < datetime('now', ?)");
 
@@ -66,18 +66,23 @@ function create(deps) {
     }
     running = true;
     try {
-      // 1) Резолв ников → бокс/IMEI/онлайн по всем серверам.
-      const found = new Map();   // nick → { server, imei, isOnline }
+      // 1) Резолв ников → бокс/IMEI/онлайн/оператор по всем серверам.
+      const found = new Map();   // nick → { server, imei, isOnline, operator }
       for (const server of apiServers) {
+        const isRO = (server.country || '') === 'RO';
         try {
           const status = await fetchApi(server, '/apix/show_status_json');
           for (const m of (Array.isArray(status) ? status : [])) {
-            const nick = m.modem_details && m.modem_details.NICK;
+            const md = m.modem_details || {};
+            const nick = md.NICK;
             if (!nick || !TARGET_NICKS.includes(nick)) continue;
+            const rawOp = (m.net_details && m.net_details.CELLOP) || md.OPERATOR || '';
             found.set(nick, {
               server,
-              imei: (m.modem_details && m.modem_details.IMEI) || '',
+              imei: md.IMEI || '',
               isOnline: !!(m.net_details && m.net_details.IS_ONLINE === 'yes'),
+              // Оператор на момент замера — для графика «где какой оператор».
+              operator: normalizeOperator ? normalizeOperator(rawOp, isRO) : rawOp,
             });
           }
         } catch (e) {
@@ -92,7 +97,7 @@ function create(deps) {
         const f = found.get(nick);
         if (!f || !f.isOnline) {
           const reason = !f ? 'not_found' : 'offline';
-          insertStmt.run(f ? f.server.name : '', nick, f ? f.imei : '', 0, 0, 0, 0, reason);
+          insertStmt.run(f ? f.server.name : '', nick, f ? f.imei : '', 0, 0, 0, 0, reason, f ? f.operator : '');
           logger.info(`[SpeedMonitor] ${nick}: ${reason}, пропуск замера`);
           failed++;
           continue;
@@ -101,11 +106,11 @@ function create(deps) {
           const result = await fetchApi(f.server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
           if (result && result.error) throw new Error(String(result.error));
           const { dl, ul, ping } = parseSpeedtestResult(result);
-          insertStmt.run(f.server.name, nick, f.imei, dl, ul, ping, 1, '');
+          insertStmt.run(f.server.name, nick, f.imei, dl, ul, ping, 1, '', f.operator);
           logger.info(`[SpeedMonitor] ${nick} (${f.server.name}): DL=${dl} UL=${ul} Ping=${ping}`);
           tested++;
         } catch (e) {
-          insertStmt.run(f.server.name, nick, f.imei, 0, 0, 0, 0, String(e.message || e).slice(0, 200));
+          insertStmt.run(f.server.name, nick, f.imei, 0, 0, 0, 0, String(e.message || e).slice(0, 200), f.operator);
           logger.warn(`[SpeedMonitor] ${nick} (${f.server.name}): ${e.message}`);
           failed++;
         }

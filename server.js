@@ -2754,7 +2754,7 @@ const runNightlySpeedtests = _proxyCheckJobs.runNightlySpeedtests;
 
 // Почасовой замер скорости выбранных модемов (список — SPEED_MONITOR_NICKS).
 const _speedMonitor = require('./src/jobs/speed-monitor').create({
-  db, logger, logActivity, apiServers, fetchApi,
+  db, logger, logActivity, apiServers, fetchApi, normalizeOperator,
 });
 
 function getSpeedtestLatest() {

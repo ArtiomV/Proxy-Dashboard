@@ -137,7 +137,31 @@ r.get('/api/admin/speed-monitor', authMiddleware, adminMiddleware, (req, res) =>
     res.setHeader('Content-Type', 'text/csv; charset=utf-8');
     return res.send(csv);
   }
-  res.json({ hours, rows });
+  // Мета по каждому нику для легенды графика: последний сервер (→ локация)
+  // и последний непустой оператор. Локация — countryName из конфига бокса.
+  const modems = [];
+  try {
+    const seen = new Map();
+    for (const x of db.prepare(`
+        SELECT nick, server, operator FROM speed_monitor
+         WHERE ${nick ? 'nick = ? AND ' : ''} ts >= datetime('now', ?)
+         ORDER BY ts DESC`).all(...(nick ? [nick, `-${hours} hours`] : [`-${hours} hours`]))) {
+      // Строки отсортированы от свежих: первая встреченная по нику — последний
+      // замер; оператора добираем из более ранних строк, если в свежей пусто
+      // (например, свежая — not_found/offline).
+      const cur = seen.get(x.nick);
+      if (cur) { if (!cur.operator && x.operator) cur.operator = x.operator; continue; }
+      const srv = x.server ? findServer(x.server) : null;
+      seen.set(x.nick, {
+        nick: x.nick,
+        server: x.server || '',
+        location: (srv && (srv.countryName || srv.country)) || x.server || '',
+        operator: x.operator || '',
+      });
+    }
+    modems.push(...seen.values());
+  } catch (_) { /* мета best-effort, строки уже отданы */ }
+  res.json({ hours, rows, modems });
 });
 
 

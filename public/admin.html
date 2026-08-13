@@ -285,6 +285,23 @@
         <div id="newApiAccess"><div style="color:var(--text-3);font-size:12px;padding:8px">Загрузка…</div></div>
       </div>
     </details>
+
+    <!-- ───── СКОРОСТЬ МОДЕМОВ (почасовой мониторинг операторов) ───── -->
+    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><path d="M3 17l6-6 4 4 7-7"/><path d="M14 8h6v6"/></svg>Стабильность операторов</div>
+    <div class="analytics-card" style="margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
+        <h3 style="margin:0">Скорость модемов <span style="font-size:10px;font-weight:400;color:var(--text-3);margin-left:4px">почасовой замер · GMT+3 (МСК)</span></h3>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span style="font-size:11px;color:var(--text-2)">Период:</span>
+          <button class="dchip" data-on-click="setSpeedMonHours(24,this)">24 ч</button>
+          <button class="dchip on" data-on-click="setSpeedMonHours(48,this)">48 ч</button>
+          <button class="dchip" data-on-click="setSpeedMonHours(168,this)">7 дней</button>
+        </div>
+      </div>
+      <div id="speedMonMeta" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px"></div>
+      <div style="height:300px;position:relative"><canvas id="speedMonCanvas"></canvas></div>
+      <div id="speedMonEmpty" style="display:none;color:var(--text-3);font-size:12px;padding:14px 4px">Пока нет замеров за выбранный период — почасовая джоба SpeedMonitor пишет сюда раз в час.</div>
+    </div>
   </div><!-- /tab-dashboard -->
 
 <!-- TAB: CLIENTS -->
@@ -1183,6 +1200,7 @@
 <script src="/js/admin/finance.js?v=0804a"></script>
 <script src="/js/admin/modems.js?v=0722c"></script>
 <script src="/js/admin/settings.js?v=0722b"></script>
+<script src="/js/admin/speed-monitor.js?v=0813a"></script>
 <script src="/js/admin.js?v=0804b"></script>
 </body>
 </html>

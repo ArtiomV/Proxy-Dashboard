@@ -861,7 +861,7 @@
     "type": "table",
     "name": "speed_monitor",
     "tbl_name": "speed_monitor",
-    "sql": "CREATE TABLE speed_monitor ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')), server TEXT NOT NULL DEFAULT '', nick TEXT NOT NULL, imei TEXT NOT NULL DEFAULT '', download REAL NOT NULL DEFAULT 0, upload REAL NOT NULL DEFAULT 0, ping REAL NOT NULL DEFAULT 0, ok INTEGER NOT NULL DEFAULT 1, error TEXT NOT NULL DEFAULT '' )"
+    "sql": "CREATE TABLE speed_monitor ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')), server TEXT NOT NULL DEFAULT '', nick TEXT NOT NULL, imei TEXT NOT NULL DEFAULT '', download REAL NOT NULL DEFAULT 0, upload REAL NOT NULL DEFAULT 0, ping REAL NOT NULL DEFAULT 0, ok INTEGER NOT NULL DEFAULT 1, error TEXT NOT NULL DEFAULT '' , operator TEXT NOT NULL DEFAULT '')"
   },
   {
     "type": "table",

@@ -2795,6 +2795,7 @@ function renderAccNew(){
   loadNewFinance();                        // → pulse + finance quality/trend + финсводка
   loadNewHeatmap();
   loadNewDailyChart();                      // потребление по дням (60д, по клиентам/странам)
+  try{ loadSpeedMonitor(); }catch(e){}       // почасовая скорость модемов (SpeedMonitor)
   // Wire collapsibles' lazy-load (once per session)
   if(!window._newDetailsWired){
     document.querySelectorAll('#tab-dashboard details.acc-expand').forEach(function(el){

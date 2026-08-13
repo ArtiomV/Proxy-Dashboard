@@ -20,25 +20,27 @@ const NICKS = 'MD_01,MD_04,MD_10';
 
 function makeJob(fetchApi) {
   process.env.SPEED_MONITOR_NICKS = NICKS;
+  const { normalizeOperator } = cjsRequire('../src/utils/traffic.js');
   const job = speedMonitor.create({
     db,
     logger: { info() {}, warn() {}, error() {} },
     logActivity() {},
-    apiServers: [{ name: 'S1' }, { name: 'S2' }],
+    apiServers: [{ name: 'S1', country: 'MD' }, { name: 'S2', country: 'RO' }],
     fetchApi,
+    normalizeOperator,
   });
   delete process.env.SPEED_MONITOR_NICKS;
   return job;
 }
 
-// S1: MD_01 онлайн, MD_04 оффлайн; MD_10 нет нигде.
+// S1: MD_01 онлайн (Moldtelecom), MD_04 оффлайн; MD_10 нет нигде.
 function statusFetch(dlResult) {
   return async (server, path) => {
     if (path === '/apix/show_status_json') {
       if (server.name !== 'S1') return [];
       return [
-        { modem_details: { NICK: 'MD_01', IMEI: '860000000000001' }, net_details: { IS_ONLINE: 'yes' } },
-        { modem_details: { NICK: 'MD_04', IMEI: '860000000000004' }, net_details: { IS_ONLINE: 'no' } },
+        { modem_details: { NICK: 'MD_01', IMEI: '860000000000001' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldtelecom' } },
+        { modem_details: { NICK: 'MD_04', IMEI: '860000000000004' }, net_details: { IS_ONLINE: 'no', CELLOP: 'orange' } },
         { modem_details: { NICK: 'MD_99', IMEI: '860000000000099' }, net_details: { IS_ONLINE: 'yes' } },
       ];
     }
@@ -62,17 +64,42 @@ describe('SpeedMonitor: parseSpeedtestResult', () => {
   });
 });
 
+describe('SpeedMonitor: GET /api/admin/speed-monitor', () => {
+  it('почасовая агрегация + мета (оператор/сервер/локация) по никам', async () => {
+    const { asAdmin } = await import('./_helpers/app.js');
+    const request = (await import('supertest')).default;
+    const { app } = bootApp();
+    const token = asAdmin();
+    db.prepare('DELETE FROM speed_monitor').run();
+    db.prepare("INSERT INTO speed_monitor (nick, server, download, upload, ping, ok, operator, ts) VALUES ('MD_01','S1',20,8,40,1,'Moldtelecom',datetime('now','-2 hours'))").run();
+    db.prepare("INSERT INTO speed_monitor (nick, server, download, upload, ping, ok, operator, ts) VALUES ('MD_01','S1',10,6,50,1,'Moldtelecom',datetime('now','-2 hours'))").run();
+    db.prepare("INSERT INTO speed_monitor (nick, server, ok, error, operator, ts) VALUES ('MD_01','S1',0,'offline','Moldtelecom',datetime('now','-1 hours'))").run();
+
+    const res = await request(app).get('/api/admin/speed-monitor?hours=48').set('X-Auth-Token', token);
+    expect(res.status).toBe(200);
+    expect(Array.isArray(res.body.rows)).toBe(true);
+    const hourRow = res.body.rows.find(r => r.nick === 'MD_01' && r.samples === 2);
+    expect(hourRow).toMatchObject({ ok_count: 2, avg_dl: 15, min_dl: 10, max_dl: 20 });
+    const failRow = res.body.rows.find(r => r.nick === 'MD_01' && r.fail_count === 1);
+    expect(failRow).toBeTruthy();
+    const meta = (res.body.modems || []).find(m => m.nick === 'MD_01');
+    expect(meta).toMatchObject({ server: 'S1', operator: 'Moldtelecom' });
+    expect(typeof meta.location).toBe('string');   // в тесте apiServers пуст → fallback на имя сервера
+  });
+});
+
 describe('SpeedMonitor: runSpeedMonitor', () => {
   it('онлайн → ok-строка; оффлайн и не найден → ok=0 с причиной', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
     const job = makeJob(statusFetch({ download: '25.4', upload: '10.2', ping: '48' }));
     const r = await job.runSpeedMonitor();
     expect(r).toMatchObject({ tested: 1, failed: 2 });
 
-    const rows = db.prepare('SELECT nick, ok, error, download, server, imei FROM speed_monitor ORDER BY nick').all();
+    const rows = db.prepare('SELECT nick, ok, error, download, server, imei, operator FROM speed_monitor ORDER BY nick').all();
     expect(rows.length).toBe(3);
     const byNick = Object.fromEntries(rows.map(x => [x.nick, x]));
-    expect(byNick.MD_01).toMatchObject({ ok: 1, download: 25.4, server: 'S1', imei: '860000000000001' });
-    expect(byNick.MD_04).toMatchObject({ ok: 0, error: 'offline' });
+    expect(byNick.MD_01).toMatchObject({ ok: 1, download: 25.4, server: 'S1', imei: '860000000000001', operator: 'Moldtelecom' });
+    expect(byNick.MD_04).toMatchObject({ ok: 0, error: 'offline', operator: 'Orange MD' });
     expect(byNick.MD_10).toMatchObject({ ok: 0, error: 'not_found', server: '' });
   });
 
