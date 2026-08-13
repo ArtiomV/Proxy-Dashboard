@@ -533,7 +533,8 @@ function showHeatTT(di,hr,event,cell,ctx){
     if(ops){
       var opArr=Object.keys(ops).map(function(k){var o=ops[k]||{};var m=o.modems||1;return{name:k,gb:(o.gb||0)/m,modems:o.modems||0,total:o.gb||0};}).filter(function(o){return o.total>0.0001;});
       if(opArr.length>0){
-        opArr.sort(function(a,b){return b.total-a.total;});
+        // Фиксированный алфавитный порядок — операторы не «прыгают» между часами.
+        opArr.sort(function(a,b){return a.name.localeCompare(b.name,'ru');});
         tt.innerHTML+='<div style="height:0.5px;background:rgba(0,0,0,0.08);margin:6px 0"></div>';
         opArr.forEach(function(o){
           tt.innerHTML+='<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:2px 0"><span style="font-size:11px;color:#9b9b98">'+esc(o.name)+' <span style="font-size:9px">('+o.modems+')</span></span><span style="font-size:12px;font-weight:500;color:#1a1a1a">'+trendFmt(o.gb)+'</span></div>';

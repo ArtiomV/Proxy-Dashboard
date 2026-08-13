@@ -190,17 +190,15 @@ function loadSpeedMonitor(force) {
               var h = '<div style="font-size:11px;color:#9b9b98;margin-bottom:6px">'
                 + esc((tt.title && tt.title[0]) || '') + '</div>';
               if (H) {
-                Object.keys(H).forEach(function (loc, li) {
+                Object.keys(H).sort().forEach(function (loc, li) {
                   // Пустая строка между блоками локаций.
                   if (li) h += '<div style="height:13px"></div>';
                   h += '<div style="font-size:12px;font-weight:600;color:#1a1a1a;margin-bottom:3px">'
                     + esc(loc) + '</div>';
                   var ops = H[loc];
-                  Object.keys(ops).sort(function (a, b) {
-                    var da = ops[a].nd ? ops[a].dl / ops[a].nd : -1;
-                    var db = ops[b].nd ? ops[b].dl / ops[b].nd : -1;
-                    return db - da;   // по убыванию среднего ↓
-                  }).forEach(function (op) {
+                  // Порядок фиксирован по алфавиту — иначе операторы «прыгают»
+                  // между попапами от часа к часу (была сортировка по ↓).
+                  Object.keys(ops).sort().forEach(function (op) {
                     var o = ops[op];
                     var parts = [];
                     if (o.nd) parts.push('↓' + (o.dl / o.nd).toFixed(1));
