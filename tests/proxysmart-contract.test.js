@@ -47,7 +47,8 @@ describe('D7: proxysmart-contract — несоответствия ловятс�
   });
 
   it('поля сменили тип/пропали — каждое фиксируется', () => {
-    const v = contract.validateBandwidthReportAll({ portA: { port: 'portA', bandwidth_bytes_day_in: 21.1 } });
+    // bool — невалидный тип счётчика; number/null были бы легальны (см. соседние тесты)
+    const v = contract.validateBandwidthReportAll({ portA: { port: 'portA', bandwidth_bytes_day_in: true } });
     expect(v.some(s => s.includes('portName'))).toBe(true);
     expect(v.some(s => s.includes('bandwidth_bytes_day_in'))).toBe(true);
 
@@ -66,18 +67,22 @@ describe('D7: proxysmart-contract — несоответствия ловятс�
     expect(contract.validateShowStatusJson([adding, GOOD_STATUS[0]])).toEqual([]);
   });
 
-  it('null-счётчики (сброс на боксе) среди нормальных — НЕ нарушение, парсер мапит в 0', () => {
+  it('null-счётчики (сброс на боксе) и числовой 0 (пустой день) — НЕ нарушение, парсер мапит в 0', () => {
     // Прод 13.08.2026: S1/S2 отдали bandwidth_bytes_day_in/out = null у части
-    // портов в момент сброса суточных счётчиков; bandwidth_bytes_prevmonth_in: null
-    // в ответе бокса — постоянное явление.
+    // портов в момент сброса суточных счётчиков (bandwidth_bytes_prevmonth_in: null
+    // — вообще постоянное явление), а S1–S4 — числовой 0 у портов без трафика за день.
     const nullCounters = { portB: { port: 'portB', portName: 'Client2', bandwidth_bytes_day_in: null, bandwidth_bytes_day_out: null } };
     expect(contract.validateBandwidthReportAll({ ...nullCounters, ...GOOD_BW })).toEqual([]);
+    const zeroCounters = { portC: { port: 'portC', portName: 'Client3', bandwidth_bytes_day_in: 0, bandwidth_bytes_day_out: 0 } };
+    expect(contract.validateBandwidthReportAll({ ...zeroCounters, ...GOOD_BW })).toEqual([]);
+    // даже ВСЯ выборка в null/0 — легально: ночной сброс счётчиков бьёт по всем портам сразу
+    expect(contract.validateBandwidthReportAll({ ...nullCounters, ...zeroCounters })).toEqual([]);
   });
 
-  it('ВСЯ выборка без string day_in/day_out — нарушение (фид деградировал, трафик = 0)', () => {
+  it('ВСЯ выборка с невалидным типом day_in/day_out — нарушение (фид деградировал, трафик = 0)', () => {
     const dead = {
-      portB: { port: 'portB', portName: 'C2', bandwidth_bytes_day_in: null, bandwidth_bytes_day_out: null },
-      portC: { port: 'portC', portName: 'C3', bandwidth_bytes_day_in: null, bandwidth_bytes_day_out: null },
+      portB: { port: 'portB', portName: 'C2', bandwidth_bytes_day_in: {}, bandwidth_bytes_day_out: {} },
+      portC: { port: 'portC', portName: 'C3', bandwidth_bytes_day_in: [1], bandwidth_bytes_day_out: 'oops'.length ? undefined : null },
     };
     const v = contract.validateBandwidthReportAll(dead);
     expect(v.some(s => s.includes('все') && s.includes('day_in/day_out'))).toBe(true);
