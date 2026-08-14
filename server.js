@@ -1903,12 +1903,16 @@ app.use(helmet({
       'script-src':  ["'self'", 'https://cdn.jsdelivr.net',
         // B2C auth-страницы (register/forgot/reset/verify): Turnstile и
         // Telegram Login Widget подгружают свои JS динамически.
-        'https://challenges.cloudflare.com', 'https://telegram.org'],
+        'https://challenges.cloudflare.com', 'https://telegram.org',
+        // Яндекс.Метрика: tag.js (бутстрап вынесен в /js/metrika.js).
+        'https://mc.yandex.ru'],
       'script-src-attr': ["'none'"],   // Stage 11: инлайн-обработчиков больше нет (data-on-* + delegation)
       'style-src':   ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       'font-src':    ["'self'", 'https://fonts.gstatic.com', 'data:'],
       'img-src':     ["'self'", 'data:', 'https:'],
-      'connect-src': ["'self'"],
+      'connect-src': ["'self'",
+        // Биконы Метрики (XHR/sendBeacon уходят на mc.yandex.*).
+        'https://mc.yandex.ru', 'https://mc.yandex.com'],
       'frame-src':   ["'self'",
         // Iframe'ы виджетов: Turnstile (капча) и Telegram OAuth.
         'https://challenges.cloudflare.com', 'https://oauth.telegram.org'],
