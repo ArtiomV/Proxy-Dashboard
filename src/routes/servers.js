@@ -145,7 +145,8 @@ r.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   // plaintext) to the UI. A mask communicates "configured" without exposure;
   // the value is only ever written (PUT), never read back.
   const masked = { ...appSettings };
-  for (const k of ['anthropic_api_key']) {
+  // WP5: telegram_bot_token тоже секрет (enc1: в kv) — маскируем, как API-ключи.
+  for (const k of ['anthropic_api_key', 'telegram_bot_token']) {
     const v = masked[k];
     masked[k] = (typeof v === 'string' && v) ? '••••••••' : '';
   }
@@ -311,9 +312,30 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   // Auto-create
   if (req.body.auto_create_interval_min != null) patch.auto_create_interval_min = Math.max(1, Math.min(60, parseInt(req.body.auto_create_interval_min) || 10));
   // Telegram daily summary
-  if (req.body.telegram_bot_token != null)       patch.telegram_bot_token       = String(req.body.telegram_bot_token).trim();
+  // WP5: токен — секрет; маска GET ('••••••••') не является значением —
+  // игнорируем её, чтобы сохранение нетронутой формы не затирало токен.
+  if (req.body.telegram_bot_token != null && req.body.telegram_bot_token !== '••••••••')  patch.telegram_bot_token       = String(req.body.telegram_bot_token).trim();
   if (req.body.telegram_chat_id != null)         patch.telegram_chat_id         = String(req.body.telegram_chat_id).trim();
   if (req.body.telegram_summary_enabled != null) patch.telegram_summary_enabled = !!req.body.telegram_summary_enabled;
+  // WP5 (B2C Э3): whitelist админов бота — CSV числовых telegram id.
+  // Пустая строка = legacy-режим (админ = telegram_chat_id).
+  if (req.body.telegram_admin_ids != null) {
+    const ids = String(req.body.telegram_admin_ids).split(',').map(s => s.trim()).filter(Boolean);
+    if (ids.length > 20 || ids.some(id => !/^\d{1,20}$/.test(id))) {
+      return res.status(400).json({ error: 'telegram_admin_ids: CSV числовых telegram id, до 20 штук' });
+    }
+    patch.telegram_admin_ids = ids.join(',');
+  }
+  if (req.body.telegram_bot_username != null) {
+    const un = String(req.body.telegram_bot_username).trim().replace(/^@/, '');
+    if (un && !/^[A-Za-z0-9_]{5,32}$/.test(un)) {
+      return res.status(400).json({ error: 'telegram_bot_username: 5-32 символа [A-Za-z0-9_]' });
+    }
+    patch.telegram_bot_username = un;
+  }
+  // WP5 (B2C Э3): пороги алертов розницы
+  if (req.body.retail_bulk_buy_threshold != null) patch.retail_bulk_buy_threshold = Math.max(1, Math.min(100, parseInt(req.body.retail_bulk_buy_threshold) || 3));
+  if (req.body.retail_pool_min_free != null)      patch.retail_pool_min_free      = Math.max(0, Math.min(1000, parseInt(req.body.retail_pool_min_free) || 0));
   // AI-insights key (Telegram daily summary). The '••••••••' mask shown by the GET
   // endpoint is NOT a value — ignore it so a save of an untouched form can't
   // clobber the real key with the mask itself.

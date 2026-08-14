@@ -35,6 +35,7 @@ module.exports = function createClientsRouter(deps) {
     DOCUMENTS_DIR,
     validateClientInput,
     appSettings,
+    notifyClient,   // B2C Э3 (WP5): «Зачислено N ₽» клиенту после ручного зачисления
   } = deps;
   const r = express.Router();
 
@@ -298,6 +299,13 @@ r.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, valida
 
   saveClients(clients);
   auditLog(req.user.login, 'add_payment', { clientId: client.id, clientName: client.name, amount: parsedAmount, note: note || '', ip: getClientIp(req) });
+  // B2C Э3 (WP5): уведомление клиенту — best-effort, основной поток не роняет.
+  if (notifyClient) {
+    Promise.resolve(notifyClient(client,
+      `Зачислено ${Math.round(parsedAmount * 100) / 100} ₽. Баланс: ${Math.round(balanceAfter * 100) / 100} ₽.`,
+      { action: 'balance_credited', details: { client_id: client.id, amount: parsedAmount, balance: balanceAfter } }
+    )).catch(e => logger.warn(`[Clients] notify ${client.login}: ${e.message}`));
+  }
   // C5: payment list is derived from billing_ledger (the in-memory
   // client.payments[] array is gone).
   res.json({ ok: true, payments: _listLedgerPayments(client.id), balance: client.balance });

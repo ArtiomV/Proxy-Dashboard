@@ -502,6 +502,14 @@ r.get('/api/client/referral', authMiddleware, (req, res) => {
   const client = clientByLogin.get(req.user.login);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const referrals = clients.filter(c => c.referred_by === client.id);
+  // B2C Э3 (WP5): статус привязки Telegram для блока в «Профиле».
+  // botUsername — из kv-кэша getMe (ключ tg_bot_username, см. telegram/bot.js),
+  // fallback — настройка telegram_bot_username. Общие поля, не за retail-флагом.
+  let botUsername = '';
+  try {
+    const row = db.prepare("SELECT value FROM kv_store WHERE key = 'tg_bot_username'").get();
+    botUsername = (row && row.value) || getSetting('telegram_bot_username', '') || '';
+  } catch (_) { botUsername = getSetting('telegram_bot_username', '') || ''; }
   res.json({
     referrals_count: referrals.length,
     referral_balance: client.referral_balance || 0,
@@ -510,6 +518,8 @@ r.get('/api/client/referral', authMiddleware, (req, res) => {
     referral_code: client.referral_code || '',
     email: client.email || '',
     emailVerified: !!client.emailVerified,
+    tgLinked: !!client.tgChatId,
+    botUsername,
     referrals: referrals.map(r => ({ name: r.name, createdAt: r.createdAt }))
   });
 });

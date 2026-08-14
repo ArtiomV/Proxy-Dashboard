@@ -318,6 +318,22 @@ function create(deps) {
     }
   }
 
+  // ── WP5: пул на исходе — «свободных < retail_pool_min_free» по каждому
+  // боксу розницы. Проверка в тике покрывает и покупки, и возвраты/удаления;
+  // дедуп + cooldown по серверу — внутри alerts.trigger (правило retail_pool_low).
+  function _checkPoolLow() {
+    try {
+      const minFree = Number(getSetting('retail_pool_min_free', 3));
+      const servers = String(getSetting('retail_pool_servers', '')).split(',').map(s => s.trim()).filter(Boolean);
+      if (!servers.length) return;
+      const freeRows = retailPoolDb.byStatus('free');
+      for (const srv of servers) {
+        const freeNow = freeRows.filter(r => r.server === srv).length;
+        if (freeNow < minFree) alerts.trigger('retail_pool_low', { server: srv, free: freeNow, min: minFree });
+      }
+    } catch (e) { logger.warn('[RetailGuard] pool_low check: ' + e.message); }
+  }
+
   let running = false;   // re-entrancy: прогон один за раз
 
   async function runOnce() {
@@ -341,6 +357,7 @@ function create(deps) {
       if (dirty) saveClients(clients);
       await _processExpiredHolds(stats);
       await _processExpiredTestDays(stats);
+      _checkPoolLow();   // WP5: алерт «свободных < retail_pool_min_free» (дедуп по серверу в alerts.js)
       return stats;
     } finally {
       running = false;

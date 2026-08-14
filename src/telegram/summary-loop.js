@@ -7,12 +7,14 @@
 // Extracted from server.js (Stage 9, boot-хвост) — без изменения логики.
 
 function create(deps) {
-  const { appSettings, tgSummary, tgBot, saveSettings, logger, logActivity } = deps;
+  const { appSettings, tgSummary, tgBot, saveSettings, logger, logActivity, getSetting } = deps;
 
   async function tick() {
     try {
       if (!appSettings.telegram_summary_enabled) return;
-      const token  = appSettings.telegram_bot_token;
+      // WP5: токен зашифрован в kv (enc1:) — читаем через getSetting, прямое
+      // обращение к appSettings отдало бы шифртекст.
+      const token  = getSetting ? getSetting('telegram_bot_token', '') : appSettings.telegram_bot_token;
       const chatId = appSettings.telegram_chat_id;
       const time   = appSettings.telegram_summary_time || '08:00';
       if (!token || !chatId) return;

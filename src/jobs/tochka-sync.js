@@ -13,7 +13,17 @@ function create(deps) {
     findClientByPayer, clientByInn, clients, atomicCredit, settleBillsOnPayment,
     documentsDb, logActivity, saveClients, alerts, insertBankPaymentToDb,
     _resetTochkaFailStreak,
+    notifyClient,   // B2C Э3 (WP5): «Зачислено N ₽» клиенту после автозачёта
   } = deps;
+
+  // Уведомление о зачислении — best-effort, основной поток не роняет.
+  function _notifyCredit(client, amount, balanceAfter) {
+    if (!notifyClient || !client) return;
+    Promise.resolve(notifyClient(client,
+      `Зачислено ${Math.round(amount * 100) / 100} ₽. Баланс: ${Math.round(balanceAfter * 100) / 100} ₽.`,
+      { action: 'balance_credited', details: { client_id: client.id, amount, balance: balanceAfter } }
+    )).catch(e => logger.warn(`[Tochka Sync] notify ${client.login}: ${e.message}`));
+  }
 
   // Р22: реферальная комиссия начисляется с любого канала зачисления.
   // Sync-путь раньше вызывал atomicCredit без referralOpts — реферер терял
@@ -158,6 +168,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
                 source: 'tochka_sync', tochkaPaymentId: paymentId
               }, referralOptsFor(client, amount));
               dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 1, existingRow.id);
+              _notifyCredit(client, amount, client.balance);   // WP5: «Зачислено N ₽» (client.balance уже обновлён atomicCredit)
               try { settleBillsOnPayment(client, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
               matched++; reconciled = true;
               saveClients(clients);
@@ -213,6 +224,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
           }, referralOptsFor(client, amount));
           try { settleBillsOnPayment(client, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
           matched++;
+          _notifyCredit(client, amount, client.balance);   // WP5: «Зачислено N ₽» (client.balance уже обновлён atomicCredit)
           // Stage 18.13: «новый платёж» — любой платёж от sync.
           try {
             alerts.trigger('payment_received', {

@@ -657,7 +657,9 @@ function _shouldUrgentAlert(action) { return URGENT_ACTIONS.has(action); }
 // шлёт синхронно в момент события. Гейт telegram_summary_enabled остаётся
 // здесь — framework про него не знает (он гейтит daily summary + этот контур).
 function _emitUrgentAlert(level, action, target, message) {
-  const token = appSettings.telegram_bot_token;
+  // Токен — через getSetting (enc1: в kv, SENSITIVE_SETTINGS): прямое чтение
+  // appSettings.telegram_bot_token отдало бы шифртекст.
+  const token = getSetting('telegram_bot_token', '');
   const chatId = appSettings.telegram_chat_id;
   if (!token || !chatId || !appSettings.telegram_summary_enabled) return;
   try {
@@ -1597,8 +1599,12 @@ const SETTINGS_DEFAULTS = {
   // Auto-create
   auto_create_interval_min: 10,
   // Telegram daily summary
+  // WP5 (B2C Э3): telegram_bot_token — секрет (SENSITIVE_SETTINGS, enc1: в kv;
+  // plaintext при сохранении шифруется автоматически, чтение — через getSetting).
   telegram_bot_token: '',
   telegram_chat_id: '',
+  telegram_admin_ids: '',          // CSV telegram id админов бота; пусто = legacy telegram_chat_id
+  telegram_bot_username: '',       // fallback username бота (основное — кэш getMe в kv tg_bot_username)
   telegram_summary_enabled: true,
   telegram_summary_time: '08:00', // HH:MM МСК
   telegram_last_sent_date: '',    // YYYY-MM-DD — written after each successful send
@@ -1627,6 +1633,9 @@ const SETTINGS_DEFAULTS = {
   retail_grace_hours: 24,            // grace: порт работает после обнуления баланса
   retail_pool_free_alert: 5,         // алерт «свободных < N» в пуле
   retail_mass_buy_alert: 5,          // алерт при массовой покупке одним аккаунтом
+  // WP5 (B2C Э3): пороги админ-алертов розницы (alerts.js retail_bulk_buy / retail_pool_low)
+  retail_bulk_buy_threshold: 3,      // leased-портов у одного аккаунта → алерт «массовая покупка»
+  retail_pool_min_free: 3,           // свободных портов на боксе < N → алерт «пул на исходе»
   retail_min_topup: 100,             // минимальная сумма пополнения, ₽
   retail_test_day_price: 100,        // фикс-цена тест-дня, ₽ (тариф duration_hours=24)
   retail_reg_limit_per_ip_day: 10,   // анти-мультиаккаунт: регистраций с IP в сутки
@@ -1646,7 +1655,7 @@ const SETTINGS_DEFAULTS = {
 // WP7.5: keys whose VALUES are encrypted at rest in kv_store (see
 // _encryptSettingVal below). Declared before the settings load because the
 // migration right after the load needs it.
-const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'turnstile_secret_key', 'sendpulse_smtp_pass']);
+const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'telegram_bot_token']);
 stateMod.setAppSettings({ ...SETTINGS_DEFAULTS });
 const appSettings = stateMod.state.appSettings;
 try {
@@ -2887,6 +2896,7 @@ app.use(require('./src/routes/registration')({
   getSetting,
   mailer, authTokensDb, tariffsDb, db,
   alerts,
+  tgBot,   // B2C Э3 (WP5): username бота для ссылки привязки (getMe + kv-кэш)
 }));
 
 // Единый прайс (Р36): админский CRUD + розничная витрина /api/client/tariffs.
@@ -2907,6 +2917,9 @@ app.use(require('./src/routes/retail')({
   fetchAllServersDataCached,
   auditLog, logActivity, getClientIp,
   alerts,
+  // B2C Э3 (WP5): уведомление клиенту о выдаче прокси. _clientNotify объявлен
+  // ниже (const, TDZ) — ленивый шим, как mailer в client-portal выше.
+  notifyClient: (...args) => _clientNotify.notifyClient(...args),
 }));
 
 // All traffic endpoints moved to src/routes/traffic.js (Stage 3).
@@ -3240,6 +3253,9 @@ app.use(require('./src/routes/clients')({
   DOCUMENTS_DIR,
   validateClientInput,
   appSettings,
+  // B2C Э3 (WP5): уведомление клиенту о ручном зачислении. _clientNotify
+  // объявлен ниже (const, TDZ) — ленивый шим.
+  notifyClient: (...args) => _clientNotify.notifyClient(...args),
 }));
 
 
@@ -3289,6 +3305,7 @@ app.use(require('./src/routes/telegram-crm')({
   logger, authMiddleware, adminMiddleware,
   tgBot, tgSummary, aiInsights,
   getAppSettings: () => appSettings,
+  getSetting,   // WP5: токен — enc1: в kv, читаем через getSetting
 }));
 
 // Shared handler for modem control actions (reduces duplication)
@@ -3593,6 +3610,7 @@ const _shadowBilling = require('./src/jobs/shadow-billing').create({
   getClientBytesForMskDate, computeClientYesterdayBytes, trafficBytesToGb,
   clients,
   appSettings, tgBot,
+  getSetting,   // WP5: токен — enc1: в kv, читаем через getSetting
 });
 
 // runMonthlyReconciliation moved to src/jobs/monthly-reconciliation.js (Stage 9).
@@ -3678,6 +3696,8 @@ app.use(require('./src/routes/tochka')({
   // runTochkaSync is defined later in this file — pass a lazy wrapper that
   // resolves at call time so the mount doesn't TDZ.
   runTochkaSync: (...args) => runTochkaSync(...args),
+  // B2C Э3 (WP5): уведомление клиенту о зачислении (webhook + ручная привязка).
+  notifyClient: _clientNotify.notifyClient,
 }));
 
 // Save Tochka config from admin UI
@@ -3700,6 +3720,8 @@ const { runTochkaSync } = require('./src/jobs/tochka-sync').create({
   findClientByPayer, clientByInn, clients, atomicCredit, settleBillsOnPayment,
   documentsDb, logActivity, saveClients, alerts, insertBankPaymentToDb,
   _resetTochkaFailStreak,
+  // B2C Э3 (WP5): уведомление клиенту об автозачёте по выписке.
+  notifyClient: _clientNotify.notifyClient,
 });
 
 
@@ -3915,6 +3937,8 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     setHourlyAggSched: (s) => { _hourlyAggSched = s; },
     runSpeedMonitor: _speedMonitor.runSpeedMonitor,
     runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
+    // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).
+    saveClients, auditLog, authTokensDb,
   });
 
 });

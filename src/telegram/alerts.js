@@ -341,6 +341,53 @@ const RULES = {
     dedupeKey: p => 'testday_' + (p.client_id || '') + '_' + (p.port_id || ''),
     render: p => `🧪 <b>Тест-день завершён</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: порт <code>${esc(p.port_id || '?')}</code> (${esc(p.server || '?')}) отвязан и возвращён в пул.`,
   },
+  // B2C Э3 (WP5): операционные алерты розницы — регистрации, покупки, пул.
+  retail_registered: {
+    title: 'Розница: новая регистрация',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 10,   // защита от двойного сабмита формы
+    dedupeKey: p => 'reg_' + (p.login || p.email || ''),
+    render: p => `🆕 <b>Новая розничная регистрация</b>\n\nЛогин: <code>${esc(p.login || '?')}</code>\nEmail: ${esc(p.email || '—')}\nКанал: ${p.via === 'telegram' ? 'Telegram Login' : 'email + пароль'}`,
+  },
+  retail_purchase: {
+    title: 'Розница: покупка прокси',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 10,
+    dedupeKey: p => 'buy_' + (p.login || '') + '_' + (p.tariff || '') + '_' + (p.price || 0),
+    render: p => `🛒 <b>Покупка прокси</b>\n\nКлиент: <b>${esc(p.login || '?')}</b>\nТариф: ${esc(p.tariff || '?')}\nСписано: ${formatRub(p.price)}`,
+  },
+  // Массовая покупка одним аккаунтом: триггерится из buy_proxy при
+  // ПЕРЕСЕЧЕНИИ порога (count === threshold), дедуп по clientId — суточный
+  // кулдаун на случай граничных гонок (reserve/lease).
+  retail_bulk_buy: {
+    title: 'Розница: массовая покупка одним аккаунтом',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'bulk_' + (p.client_id || ''),
+    render: p => `📦 <b>Массовая покупка</b>\n\nКлиент <b>${esc(p.login || '?')}</b> арендует уже <b>${p.count ?? '?'}</b> порт(ов) (порог ${p.threshold ?? '?'}).\nПроверь, не мультиаккаунт/перепродажа ли это.`,
+  },
+  // Пул на исходе: свободных портов на боксе < retail_pool_min_free.
+  // Триггеры: после покупки (retail.js) и тик retail-guard; дедуп по серверу.
+  retail_pool_low: {
+    title: 'Розница: пул на исходе',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'poollow_' + (p.server || 'unknown'),
+    render: p => `📉 <b>Пул розницы на исходе</b>\n\nНа <b>${esc(p.server || '?')}</b> свободных портов: <b>${p.free ?? '?'}</b> (минимум ${p.min ?? '?'}).\nПополни пул: Настройки → Розница → «Добавить порты».`,
+  },
+  // Пул пуст: buy_proxy не смог зарезервировать ни одного free-порта.
+  retail_pool_empty: {
+    title: 'Розница: пул пуст (покупка отклонена)',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 1800,
+    dedupeKey: p => 'poolempty_' + (p.server || 'unknown'),
+    render: p => `🔴 <b>Пул розницы пуст</b>\n\nНа <b>${esc(p.server || '?')}</b> (geo ${esc(p.geo || '?')}) нет свободных портов — клиенту отказано в покупке.\nСрочно пополни пул.`,
+  },
   // B5 (C7): pricing_tiers промах — раньше молчаливый fallback в tiers[0]/23.
   // Cooldown 6ч, чтобы AutoCreate по нескольким portName не спамил.
   pricing_tier_miss: {
@@ -583,6 +630,13 @@ const _entityFor = {
   telegram_summary_failed:   () => ({ kind: 'system', id: 'summary' }),
   system_critical:           p => ({ kind: 'system', id: p.action || null }),
   proxysmart_contract_mismatch: p => ({ kind: 'system', id: p.server || null }),
+  // B2C Э3 (WP5): розница
+  retail_registered:         p => ({ kind: 'client', id: p.login || null }),
+  retail_purchase:           p => ({ kind: 'client', id: p.login || null }),
+  retail_bulk_buy:           p => ({ kind: 'client', id: p.client_id || null }),
+  retail_pool_low:           p => ({ kind: 'system', id: p.server || null }),
+  retail_pool_empty:         p => ({ kind: 'system', id: p.server || null }),
+  retail_test_day_ended:     p => ({ kind: 'client', id: p.client_id || null }),
   // Stage 18.15 — bell-only sources
   modem_offline:             p => ({ kind: 'modem',  id: p.nick || p.imei || null }),
   client_debt:               p => ({ kind: 'client', id: p.client_id || null }),
@@ -665,7 +719,7 @@ function trigger(ruleId, payload) {
     // so the operator can preview how the card renders in the panel.
     if (rule.channel === 'bell') return true;
 
-    const token = appSettings.telegram_bot_token;
+    const token = getSetting('telegram_bot_token', '');   // WP5: enc1: в kv — не читать appSettings напрямую (шифртекст)
     const chatId = appSettings.telegram_chat_id;
     if (!token || !chatId) return true;   // bell saved, just no TG configured
 

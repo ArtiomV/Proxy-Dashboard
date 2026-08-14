@@ -43,8 +43,18 @@ module.exports = function createTochkaRouter(deps) {
     getMoscowToday,
     ledgerDb, clientsDb, documentsDb,
     runTochkaSync,
+    notifyClient,   // B2C Э3 (WP5): «Зачислено N ₽» клиенту после зачисления
   } = deps;
   const r = express.Router();
+
+  // Уведомление о зачислении — best-effort, основной поток не роняет.
+  function _notifyCredit(client, amount, balanceAfter) {
+    if (!notifyClient || !client) return;
+    Promise.resolve(notifyClient(client,
+      `Зачислено ${Math.round(amount * 100) / 100} ₽. Баланс: ${Math.round(balanceAfter * 100) / 100} ₽.`,
+      { action: 'balance_credited', details: { client_id: client.id, amount, balance: balanceAfter } }
+    )).catch(e => logger.warn(`[Tochka] notify ${client.login}: ${e.message}`));
+  }
 
   // A) Real-time auto-credit WITHOUT trusting the webhook. Tochka's JWT often
   // can't be verified (JWKS endpoint errors), so the webhook itself can't credit
@@ -253,6 +263,7 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
           bankPayment.matched = true;
           bankPayment.matchedClientId = matchedClient.id;
           bankPayment.autoCredit = true;
+          _notifyCredit(matchedClient, amount, matchedClient.balance);   // WP5: «Зачислено N ₽» (баланс обновлён atomicCredit)
           logger.info(`[Tochka Webhook] Auto-credited ${amount} RUB to ${matchedClient.name} (INN: ${payerInn})`);
           // Stage 18.13: «новый платёж» — любой платёж от webhook.
           try {
@@ -467,6 +478,7 @@ r.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (req,
   try { settleBillsOnPayment(client, amount, bp.purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
 
   saveClients(clients);
+  _notifyCredit(client, amount, balanceAfter);   // WP5: «Зачислено N ₽» клиенту
   res.json({ ok: true, balance: client.balance });
 });
 

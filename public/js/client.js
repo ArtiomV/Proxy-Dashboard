@@ -2323,6 +2323,17 @@ function loadProfile(){
       (refLink?'<div class="profile-row"><span class="profile-label">Реферальная ссылка</span><span class="profile-val mono">'+escapeHtml(refLink)+'</span>'+
         '<button class="btn btn-sm" data-on-click="copyText(\''+refLink+'\',this)">Копировать</button></div>':'')+
       '</div>'+
+      // B2C Э3 (WP5): привязка Telegram — статус/отвязка или кнопка + код.
+      '<div class="tools-section"><h3>Telegram-уведомления</h3>'+
+      (data.tgLinked?
+        '<div class="profile-row"><span class="profile-label">Статус</span><span class="profile-val"><span style="color:var(--success);font-weight:600">'+icon('check',12)+' Привязан</span></span>'+
+        '<button class="btn btn-sm" id="tgUnlinkBtn" data-on-click="doTgUnlink()">Отвязать</button></div>'+
+        '<div style="font-size:12px;color:var(--text-3)">Сюда приходят уведомления о зачислениях на баланс, выдаче прокси и предупреждениях об отключении.</div>'
+      :
+        '<div style="font-size:12px;color:var(--text-3);margin-bottom:10px">Зачисления на баланс, выдача прокси и предупреждения об отключении — прямо в Telegram'+(data.botUsername?' (@'+escapeHtml(data.botUsername)+')':'')+'.</div>'+
+        '<button class="btn btn-accent" id="tgLinkBtn" data-on-click="doTgLink()">'+icon('link',14)+' Привязать Telegram</button>'+
+        '<div id="tgLinkBox" style="display:none;margin-top:10px"></div>')+
+      '</div>'+
       '<div class="tools-section"><h3>Смена пароля</h3>'+
       '<div class="form-group"><label>Текущий пароль</label><input class="form-input" type="password" id="cpOld" autocomplete="current-password"></div>'+
       '<div class="form-group"><label>Новый пароль (минимум 8 символов)</label><input class="form-input" type="password" id="cpNew" autocomplete="new-password"></div>'+
@@ -2368,6 +2379,54 @@ async function saveProfileEmail(){
     showToast('Ошибка соединения','error');
   }finally{
     btn.disabled=false;
+  }
+}
+
+// B2C Э3 (WP5): привязка Telegram. Код одноразовый, TTL ~15 мин (ответ
+// tg_link_code). Открываем бота в новой вкладке; код показываем текстом —
+// на десктопе deep-link может не сработать, тогда /start link_<code> вручную.
+async function doTgLink(){
+  var btn=document.getElementById('tgLinkBtn');
+  var box=document.getElementById('tgLinkBox');
+  if(btn)btn.disabled=true;
+  try{
+    var data=await api('/api/client/tg_link_code',{method:'POST',json:{}});
+    if(data&&data.ok){
+      if(box){
+        box.style.display='';
+        box.innerHTML='<div style="font-size:12px;color:var(--text-2);margin-bottom:8px">Откройте бота и нажмите «Запустить» — аккаунт привяжется автоматически:</div>'+
+          '<div style="display:flex;gap:8px;align-items:center;flex-wrap:wrap">'+
+            '<a class="btn btn-sm btn-accent" href="'+escapeHtml(data.url)+'" target="_blank" rel="noopener">'+icon('send',12)+' Открыть Telegram</a>'+
+            '<span class="profile-val mono" style="font-size:12px">'+escapeHtml(data.code)+'</span>'+
+            '<button class="btn btn-sm" data-on-click="copyText(\''+data.code+'\',this)">'+icon('copy',11)+'</button>'+
+          '</div>'+
+          '<div style="font-size:11px;color:var(--text-3);margin-top:8px">'+icon('clock',11)+' Код действует '+(data.ttlMin||15)+' минут. Если ссылка не открылась — найдите бота и отправьте: <span class="mono">/start link_'+escapeHtml(data.code)+'</span></div>';
+      }
+    }else{
+      showToast((data&&data.error)||'Не удалось получить код привязки','error');
+    }
+  }catch(e){
+    showToast('Ошибка соединения','error');
+  }finally{
+    if(btn)btn.disabled=false;
+  }
+}
+
+async function doTgUnlink(){
+  var btn=document.getElementById('tgUnlinkBtn');
+  if(btn)btn.disabled=true;
+  try{
+    var data=await api('/api/client/tg_unlink',{method:'POST',json:{}});
+    if(data&&data.ok){
+      showToast('Telegram отвязан','success');
+      loadProfile();
+    }else{
+      showToast((data&&data.error)||'Ошибка отвязки','error');
+    }
+  }catch(e){
+    showToast('Ошибка соединения','error');
+  }finally{
+    if(btn)btn.disabled=false;
   }
 }
 

@@ -2,7 +2,9 @@
 // src/db/auth-tokens.js — repository for the `auth_tokens` table (WP1).
 //
 // Одноразовые токены email-потоков: verify_email (TTL 24ч) и reset_password
-// (TTL 1ч). Токен хранится как sha256 — plaintext уходит только в письмо.
+// (TTL 1ч). B2C Э3 (WP5): tg_link (TTL 15 мин) — код привязки Telegram из ЛК
+// (plaintext уходит клиенту в ответе API, в боте гасится через /start link_<code>).
+// Токен хранится как sha256 — plaintext уходит только в письмо/ответ API.
 // used=1 после успешного consume; просроченные чистятся лениво при consume.
 
 const crypto = require('crypto');
@@ -20,7 +22,7 @@ function init(db) {
   S.prune = db.prepare("DELETE FROM auth_tokens WHERE expires_at < datetime('now', '-7 days')");
 }
 
-const TTL_MS = { verify_email: 24 * 3600 * 1000, reset_password: 3600 * 1000 };
+const TTL_MS = { verify_email: 24 * 3600 * 1000, reset_password: 3600 * 1000, tg_link: 15 * 60 * 1000 };
 
 // Создаёт токен, инвалидируя прежние того же типа для этого логина.
 // Возвращает PLAINTEXT токен (его шлём в письме); в БД ложится sha256.

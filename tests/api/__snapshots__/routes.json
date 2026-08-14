@@ -201,6 +201,8 @@
   "POST /api/client/reset_ip_by_token",
   "POST /api/client/reset_link/rotate",
   "POST /api/client/set_rotation",
+  "POST /api/client/tg_link_code",
+  "POST /api/client/tg_unlink",
   "POST /api/forgot_password",
   "POST /api/login",
   "POST /api/logout",

@@ -26,6 +26,7 @@ function create(deps) {
     getClientBytesForMskDate, computeClientYesterdayBytes, trafficBytesToGb,
     clients,
     appSettings, tgBot,
+    getSetting,   // WP5: токен — enc1: в kv, читаем через getSetting
   } = deps;
 
   const upsertStmt = db.prepare(`INSERT INTO billing_shadow_log
@@ -171,7 +172,7 @@ function create(deps) {
     }
     const text = lines.join('\n');
 
-    const token = appSettings.telegram_bot_token;
+    const token = getSetting ? getSetting('telegram_bot_token', '') : appSettings.telegram_bot_token;
     const chatId = appSettings.telegram_chat_id;
     if (!token || !chatId) {
       logger.warn('[ShadowBillingWeekly] Telegram not configured (token/chat_id), report not sent');

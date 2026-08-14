@@ -8,6 +8,8 @@
 //   POST /api/forgot_password       — токен сброса на email (1ч, одноразовый)
 //   POST /api/reset_password        — новый пароль по токену + kill сессий
 //   POST /api/client/change_password — смена пароля из ЛК (ОБЩИЙ endpoint для всех клиентов)
+//   POST /api/client/tg_link_code    — код привязки Telegram (ОБЩИЙ; B2C Э3, WP5)
+//   POST /api/client/tg_unlink       — отвязка Telegram (ОБЩИЙ; B2C Э3, WP5)
 //   GET  /api/public/auth_config     — публичный конфиг auth-форм (флаг розницы, site-key
 //                                      Turnstile, username TG-бота для виджета). Без auth.
 //
@@ -33,6 +35,7 @@ module.exports = function createRegistrationRouter(deps) {
     getSetting,
     mailer, authTokensDb,
     db,
+    tgBot,                   // B2C Э3 (WP5): getBotUsername для ссылки привязки
   } = deps;
   const r = express.Router();
 
@@ -175,7 +178,8 @@ module.exports = function createRegistrationRouter(deps) {
     }).catch(e => logger.warn('[Register] verify email send failed: ' + e.message));
 
     auditLog(login, 'retail_register', { ip, email: normEmail, ref: ref || null });
-    try { deps.alerts && deps.alerts.trigger('retail_new_registration', { email: normEmail, ip }); } catch (_) {}
+    // B2C Э3 (WP5): админ-алерт розницы «новая регистрация» (правило alerts.js).
+    try { deps.alerts && deps.alerts.trigger('retail_registered', { login, email: normEmail, via: 'email', ip }); } catch (_) {}
     logActivity('client', 'info', 'retail_register', normEmail, `Новая розничная регистрация ${normEmail}`, { ip });
 
     const token = createClientSession(res, req, client);
@@ -237,6 +241,8 @@ module.exports = function createRegistrationRouter(deps) {
       getUsers()[login] = { passwordHash: '', portNameFilter: login, source: 'client', clientId: id };
       auditLog(login, 'retail_register_tg', { tg: tgId, ip: getClientIp(req) });
       logActivity('client', 'info', 'retail_register', client.name, `Регистрация через Telegram (${tgId})`, {});
+      // B2C Э3 (WP5): админ-алерт розницы — регистрация через TG Login Widget.
+      try { deps.alerts && deps.alerts.trigger('retail_registered', { login, email: client.email || null, via: 'telegram', tg: tgId }); } catch (_) {}
     }
     if (client.blocked) {
       deleteSessionsByLogin(client.login);
@@ -316,6 +322,41 @@ module.exports = function createRegistrationRouter(deps) {
     deleteSessionsByLogin(login); // перелогин на всех устройствах
     auditLog(login, 'password_changed', { ip: getClientIp(req) });
     res.json({ ok: true, relogin: true });
+  });
+
+  // ── B2C Э3 (WP5): привязка Telegram из ЛК — ОБЩИЕ endpoints (НЕ за
+  // retail-флагом): привязка нужна и B2B-клиентам для уведомлений. У клиентов
+  // без tg_chat_id ничего не меняется.
+  //
+  // Код — одноразовый auth_token типа tg_link (TTL 15 мин, authTokensDb);
+  // бот гасит его на /start link_<code> (src/telegram/bot.js).
+  r.post('/api/client/tg_link_code', authMiddleware, async (req, res) => {
+    const client = clients.find(c => c.login === req.user.login);
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    if (client.tgChatId) {
+      return res.status(409).json({ error: 'Telegram уже привязан — сначала отвяжите', code: 'TG_ALREADY_LINKED' });
+    }
+    // Username бота: getMe с кэшем в kv; fallback — настройка telegram_bot_username.
+    let username = '';
+    try { username = tgBot && await tgBot.getBotUsername() || ''; } catch (e) {
+      logger.warn('[TgLink] getBotUsername failed: ' + e.message);
+    }
+    if (!username) return res.status(503).json({ error: 'Telegram-бот не настроен', code: 'TG_BOT_NOT_CONFIGURED' });
+    const code = authTokensDb.issue(client.login, 'tg_link');
+    const ttlMin = Math.round((authTokensDb.TTL_MS.tg_link || 900000) / 60000);
+    auditLog(client.login, 'tg_link_code_issued', { ip: getClientIp(req) });
+    res.json({ ok: true, code, url: `https://t.me/${username}?start=link_${code}`, ttlMin });
+  });
+
+  r.post('/api/client/tg_unlink', authMiddleware, (req, res) => {
+    const client = clients.find(c => c.login === req.user.login);
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    if (!client.tgChatId) return res.json({ ok: true });   // идемпотентно
+    const oldTg = client.tgChatId;
+    client.tgChatId = null;
+    saveClients(clients);
+    auditLog(client.login, 'tg_unlinked', { tg: oldTg, ip: getClientIp(req) });
+    res.json({ ok: true });
   });
 
   return r;

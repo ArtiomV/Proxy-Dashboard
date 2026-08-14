@@ -20,7 +20,9 @@ beforeAll(() => {
   sendMessage = vi.fn().mockResolvedValue({});
   alerts.init({
     logger: { warn: () => {}, info: () => {}, error: () => {} },
-    getSetting: (k, d) => d,
+    // WP5: trigger() читает токен через getSetting (enc1: в kv) — мокаем его,
+    // appSettings больше не источник токена для отправки.
+    getSetting: (k, d) => (k === 'telegram_bot_token' ? 'tok' : d),
     appSettings: { telegram_bot_token: 'tok', telegram_chat_id: '123' },
     kvSetCritical: () => ({ ok: true }),
     kvGet: { get: () => undefined },

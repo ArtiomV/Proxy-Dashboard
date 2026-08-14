@@ -91,7 +91,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.4.0</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.5.0</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -107,7 +107,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.4.0</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.5.0</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -116,7 +116,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.4.0</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.5.0</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -901,6 +901,10 @@
             <div class="set-row"><div><div class="set-row-t">Chat ID</div><div class="set-row-d">Личный или групповой chat_id. Если пусто — отправь /start боту, заполнится сам</div></div><input id="tgChatId" placeholder="614664598" style="width:140px;text-align:center;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">Время отправки (МСК)</div><div class="set-row-d">Когда отправлять сводку за вчерашний день, формат ЧЧ:ММ</div></div><input id="tgSummaryTime" placeholder="08:00" pattern="\d{2}:\d{2}" style="width:84px;text-align:center;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">Ежедневная сводка</div><div class="set-row-d">Если выключено, сводка не отправляется автоматически</div></div><label class="tgl"><input type="checkbox" id="tgSummaryEnabled"><span></span></label></div>
+            <div class="set-row"><div><div class="set-row-t">ID админов бота</div><div class="set-row-d">Telegram id админов через запятую — только им доступны команды /today, /yesterday, /status. Пусто = legacy-режим (админ = Chat ID выше)</div></div><input id="tgAdminIds" placeholder="614664598,123456789" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Username бота</div><div class="set-row-d">Без @. Fallback для ссылки привязки из ЛК — обычно определяется сам через getMe</div></div><input id="tgBotUsername" placeholder="my_proxy_bot" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Алерт: массовая покупка</div><div class="set-row-d">Столько арендованных портов у одного аккаунта → алерт «массовая покупка» (розница)</div></div><div class="set-inp"><input id="retailBulkBuyThresholdInput" type="number" min="1" max="100"><span>портов</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Алерт: пул на исходе</div><div class="set-row-d">Свободных портов на боксе розницы меньше N → алерт (0 = выкл)</div></div><div class="set-inp"><input id="retailPoolMinFreeInput" type="number" min="0" max="1000"><span>шт</span></div></div>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
             <button class="btn btn-sm" data-on-click="tgPreview()">Превью текста</button>
@@ -1266,7 +1270,7 @@
 <script src="/js/admin/analytics.js?v=0814a"></script>
 <script src="/js/admin/finance.js?v=0813a"></script>
 <script src="/js/admin/modems.js?v=0722c"></script>
-<script src="/js/admin/settings.js?v=0813b"></script>
+<script src="/js/admin/settings.js?v=0814a"></script>
 <script src="/js/admin/speed-monitor.js?v=0814c"></script>
 <script src="/js/admin.js?v=0814a"></script>
 </body>

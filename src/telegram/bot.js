@@ -5,12 +5,19 @@
  *
  * Two surfaces:
  *   1) Long-poll loop that handles /start and registers chat_ids.
- *      The first admin that does /start becomes the recipient.
+ *      Legacy: the first admin that does /start becomes the recipient
+ *      (only while telegram_admin_ids whitelist AND telegram_chat_id are empty).
+ *      B2C Э3 (WP5): `/start link_<code>` привязывает TG-чат к аккаунту
+ *      клиента (код — auth_tokens type tg_link, выдаёт POST /api/client/tg_link_code).
  *   2) sendMessage()/runDailySummary() for outbound traffic.
+ *
+ * Роли: команды сводки (/today /yesterday /status) — только админам.
+ * Админ = chat_id из whitelist telegram_admin_ids (CSV); если whitelist пуст —
+ * legacy-fallback на telegram_chat_id (миграция без потери админа).
  *
  * State is kept in appSettings via the host's setSetting/getSetting helpers
  * (passed in via init): telegram_bot_token, telegram_chat_id,
- * telegram_summary_enabled, telegram_summary_time (HH:MM MSK).
+ * telegram_admin_ids, telegram_summary_enabled, telegram_summary_time (HH:MM MSK).
  */
 
 const https = require('https');
@@ -19,6 +26,14 @@ let logger;
 let getSetting;        // (key, def) => value
 let setSetting;        // (key, val) => Promise<void> | void
 let buildDailySummary; // async (yyyy-mm-dd) => { text, parse_mode }
+// B2C Э3 (WP5): привязка аккаунта из бота. Прокидываются из server.js через
+// src/boot/startup.js — бот сам про БД не знает.
+let authTokensDb;      // issue/consume одноразовых кодов (tg_link)
+let getClients;        // () => in-memory clients[]
+let saveClients;       // (clients) => persist через clientsRepo.upsertRow
+let auditLog;          // (login, action, details)
+let kvGet, kvSet;      // кэш username бота (ключ tg_bot_username)
+let _sendImpl = null;  // DI для тестов: подмена исходящих сообщений без сети
 let _lastUpdateId = 0;
 let _pollAbort = false;
 
@@ -27,6 +42,19 @@ function init(deps) {
   getSetting      = deps.getSetting;
   setSetting      = deps.setSetting;
   buildDailySummary = deps.buildDailySummary;
+  authTokensDb    = deps.authTokensDb || null;
+  getClients      = deps.getClients || null;
+  saveClients     = deps.saveClients || null;
+  auditLog        = deps.auditLog || null;
+  kvGet           = deps.kvGet || null;
+  kvSet           = deps.kvSet || null;
+  _sendImpl       = deps.sendMessageImpl || null;
+}
+
+// Внутренние отправители (handleUpdate) идут через _send — в тестах подменяется
+// через init({ sendMessageImpl }), в проде — боевой sendMessage (HTTPS в TG API).
+function _send(token, chatId, text, opts) {
+  return (typeof _sendImpl === 'function' ? _sendImpl : sendMessage)(token, chatId, text, opts);
 }
 
 // ---------------------------------------------------------------------------
@@ -116,31 +144,39 @@ async function handleUpdate(token, u) {
   const chatId = msg.chat && msg.chat.id;
   const txt = msg.text.trim();
 
-  if (txt === '/start') {
-    const currentChatId = String(getSetting('telegram_chat_id', '') || '');
-    if (!currentChatId) {
-      // First /start wins — register as recipient
+  // /start [payload]: payload link_<code> — привязка аккаунта из ЛК (WP5);
+  // без payload — регистрация админ-чата (legacy) либо подсказка про привязку.
+  if (txt === '/start' || txt.startsWith('/start ')) {
+    const arg = txt.slice('/start'.length).trim();
+    if (arg.startsWith('link_')) { await _handleLinkCode(token, chatId, arg.slice(5)); return; }
+
+    const whitelist = _adminWhitelist();
+    const legacyChatId = String(getSetting('telegram_chat_id', '') || '');
+    if (!whitelist.length && !legacyChatId) {
+      // Legacy-установка: первый /start wins — register as recipient.
+      // Действует только пока ни whitelist, ни chat_id не заданы.
       try { await setSetting('telegram_chat_id', String(chatId)); }
       catch (e) { logger.error('[Telegram] save chat_id: ' + e.message); }
-      await sendMessage(token, chatId,
-        '✅ <b>Бот подключён</b>\n\n' +
-        'Этот чат теперь получает ежедневные сводки proxies.rent.\n\n' +
-        'Команды:\n' +
-        '/today — сводка за сегодня (текущий момент)\n' +
-        '/yesterday — пересчитать вчерашнюю сводку\n' +
-        '/status — состояние подписки');
+      await _send(token, chatId, _adminGreeting());
       logger.info('[Telegram] chat_id registered: ' + chatId);
-    } else if (currentChatId === String(chatId)) {
-      await sendMessage(token, chatId, '✅ Этот чат уже получает сводки.');
+    } else if (_isAdminChat(chatId)) {
+      await _send(token, chatId, _adminGreeting());
     } else {
-      await sendMessage(token, chatId,
-        '⚠️ Сводки уже отправляются в другой чат. ' +
-        'Чтобы перенаправить — попроси админа очистить telegram_chat_id в настройках дашборда.');
+      await _send(token, chatId,
+        '👋 <b>Бот proxies.rent</b>\n\n' +
+        'Присылаю уведомления о балансе и прокси. Чтобы подключить — привяжите аккаунт: ' +
+        'личный кабинет → Профиль → «Привязать Telegram».');
     }
     return;
   }
 
   if (txt === '/yesterday' || txt === '/today') {
+    // Команды сводки — только админам (whitelist; пустой whitelist → legacy
+    // fallback на telegram_chat_id, см. _isAdminChat). Чужие — отказ.
+    if (!_isAdminChat(chatId)) {
+      await _send(token, chatId, '⛔ У тебя нет доступа к сводке.');
+      return;
+    }
     const now = new Date();
     const mskNow = new Date(now.getTime() + 3 * 3600000);
     let date;
@@ -148,28 +184,126 @@ async function handleUpdate(token, u) {
       mskNow.setUTCDate(mskNow.getUTCDate() - 1);
     }
     date = mskNow.toISOString().slice(0, 10);
-    const recipient = String(getSetting('telegram_chat_id', '') || '');
-    if (recipient && recipient !== String(chatId)) {
-      await sendMessage(token, chatId, '⛔ У тебя нет доступа к сводке.');
-      return;
-    }
     try {
       const summary = await buildDailySummary(date);
-      await sendMessage(token, chatId, summary.text, { parse_mode: summary.parse_mode });
+      await _send(token, chatId, summary.text, { parse_mode: summary.parse_mode });
     } catch (e) {
-      await sendMessage(token, chatId, '❌ Ошибка построения сводки: ' + e.message);
+      await _send(token, chatId, '❌ Ошибка построения сводки: ' + e.message);
     }
     return;
   }
 
   if (txt === '/status') {
+    if (!_isAdminChat(chatId)) {
+      await _send(token, chatId, '⛔ У тебя нет доступа к сводке.');
+      return;
+    }
     const enabled = !!getSetting('telegram_summary_enabled', true);
     const time = getSetting('telegram_summary_time', '08:00');
     const chat = getSetting('telegram_chat_id', '');
-    await sendMessage(token, chatId,
+    await _send(token, chatId,
       `📡 <b>Статус подписки</b>\nВключено: ${enabled ? 'да' : 'нет'}\nВремя: ${time} МСК\nchat_id: <code>${chat}</code>`);
     return;
   }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Роли (WP5): whitelist telegram_admin_ids (CSV telegram id).
+//  Пустой whitelist → legacy-fallback: админ = telegram_chat_id (старая
+//  установка не теряет доступа; data-миграция не нужна).
+// ────────────────────────────────────────────────────────────────
+function _adminWhitelist() {
+  return String(getSetting('telegram_admin_ids', '') || '')
+    .split(',').map(s => s.trim()).filter(Boolean);
+}
+
+function _isAdminChat(chatId) {
+  const sid = String(chatId);
+  const whitelist = _adminWhitelist();
+  if (whitelist.length) return whitelist.includes(sid);
+  const legacy = String(getSetting('telegram_chat_id', '') || '');
+  return !!legacy && legacy === sid;
+}
+
+function _adminGreeting() {
+  return '✅ <b>Бот подключён</b>\n\n' +
+    'Этот чат получает ежедневные сводки и алерты proxies.rent.\n\n' +
+    'Команды:\n' +
+    '/today — сводка за сегодня (текущий момент)\n' +
+    '/yesterday — пересчитать вчерашнюю сводку\n' +
+    '/status — состояние подписки';
+}
+
+// ────────────────────────────────────────────────────────────────
+//  Привязка аккаунта (WP5): /start link_<code>
+//  Код — одноразовый auth_token типа tg_link (TTL 15 мин), выданный из ЛК.
+// ────────────────────────────────────────────────────────────────
+async function _handleLinkCode(token, chatId, code) {
+  if (!authTokensDb || !getClients || !saveClients) {
+    await _send(token, chatId, '⚠️ Привязка временно недоступна — попробуйте позже.');
+    return;
+  }
+  const hit = authTokensDb.consume(String(code || ''), 'tg_link');
+  if (!hit) {
+    await _send(token, chatId,
+      '❌ Код недействителен или истёк. Получите новый в личном кабинете: Профиль → «Привязать Telegram».');
+    return;
+  }
+  const clients = getClients();
+  const client = clients.find(c => c.login === hit.login);
+  if (!client) {
+    await _send(token, chatId, '❌ Аккаунт не найден — получите новый код в личном кабинете.');
+    return;
+  }
+  const sid = String(chatId);
+  if (client.tgChatId === sid) {
+    await _send(token, chatId, '✅ Этот Telegram уже привязан к вашему аккаунту.');
+    return;
+  }
+  // Один TG-чат = один аккаунт (UNIQUE-индекс idx_clients_tg — последняя
+  // линия защиты; здесь — вежливая проверка до записи).
+  const occupant = clients.find(c => c !== client && c.tgChatId === sid);
+  if (occupant) {
+    try { if (auditLog) auditLog(client.login, 'tg_link_conflict', { tg: sid }); } catch (_) { /* best-effort */ }
+    await _send(token, chatId,
+      '⚠️ Этот Telegram уже привязан к другому аккаунту. ' +
+      'Сначала отвяжите его в личном кабинете того аккаунта (Профиль → «Отвязать»).');
+    return;
+  }
+  client.tgChatId = sid;
+  saveClients(clients);   // persist через clientsRepo.upsertRow (tg_chat_id)
+  try { if (auditLog) auditLog(client.login, 'tg_linked', { tg: sid }); } catch (_) { /* best-effort */ }
+  logger.info('[Telegram] account linked: ' + client.login + ' ↔ chat ' + sid);
+  await _send(token, chatId,
+    '✅ <b>Аккаунт привязан</b>\n\n' +
+    'Теперь сюда приходят уведомления: зачисления на баланс, выдача прокси, ' +
+    'предупреждения об отключении. Отвязать можно в личном кабинете (Профиль).');
+}
+
+// ---------------------------------------------------------------------------
+// getBotUsername — username бота для ссылки привязки (t.me/<user>?start=...).
+// Источник: getMe с кэшем в kv (ключ tg_bot_username); при недоступности API —
+// fallback на настройку telegram_bot_username (та же, что у Login Widget).
+// ---------------------------------------------------------------------------
+const BOT_USERNAME_KV_KEY = 'tg_bot_username';
+
+async function getBotUsername() {
+  let cached = '';
+  try { const row = kvGet && kvGet(BOT_USERNAME_KV_KEY); cached = row && row.value || ''; } catch (_) { /* best-effort */ }
+  if (cached) return cached;
+  const token = getSetting('telegram_bot_token', '');
+  if (token) {
+    try {
+      const r = await tgRequest(token, 'getMe');
+      if (r && r.ok && r.result && r.result.username) {
+        try { if (kvSet) kvSet(BOT_USERNAME_KV_KEY, String(r.result.username)); } catch (_) { /* best-effort */ }
+        return String(r.result.username);
+      }
+    } catch (e) {
+      logger.warn('[Telegram] getMe failed: ' + e.message);
+    }
+  }
+  return String(getSetting('telegram_bot_username', '') || '');
 }
 
 function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
@@ -181,4 +315,4 @@ function start() {
 
 function stop() { _pollAbort = true; }
 
-module.exports = { init, start, stop, sendMessage, tgRequest };
+module.exports = { init, start, stop, sendMessage, tgRequest, getBotUsername, handleUpdate, _isAdminChat, BOT_USERNAME_KV_KEY };

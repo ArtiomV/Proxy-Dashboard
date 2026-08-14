@@ -26,6 +26,7 @@ function runStartup(d) {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runRetailGuard,
+    saveClients, auditLog, authTokensDb,
   } = d;
 
   // Авто-спидтесты всего флота отключены 2026-08-13 (daily-schedule.js) —
@@ -293,6 +294,12 @@ function runStartup(d) {
     getSetting,
     setSetting,
     buildDailySummary: tgSummary.buildDailySummary,
+    // B2C Э3 (WP5): привязка аккаунта по /start link_<code> + кэш username бота.
+    authTokensDb,
+    getClients: () => clients,
+    saveClients, auditLog,
+    kvGet: (k) => kvGet.get(k),
+    kvSet: (k, v) => kvSet.run(k, v),
   });
   // Stage 18.13: alerts framework wires into the same bot/chat.
   alerts.init({ logger, getSetting, appSettings, kvSetCritical, kvGet, db, tgBot });
@@ -322,7 +329,9 @@ function runStartup(d) {
   // sendMessage directly via tgBot, bypassing alerts.trigger().
   setTimeout(() => {
     try {
-      const token = appSettings.telegram_bot_token;
+      // Токен в kv лежит зашифрованным (enc1:, SENSITIVE_SETTINGS) — читаем
+      // через getSetting, прямое appSettings.telegram_bot_token вернёт шифртекст.
+      const token = getSetting('telegram_bot_token', '');
       const chatId = appSettings.telegram_chat_id;
       if (!token || !chatId) return;
       if (appSettings.alert_dashboard_restarted_enabled === false) return;
@@ -334,6 +343,7 @@ function runStartup(d) {
   // Daily summary scheduler — модуль src/telegram/summary-loop.js.
   const _summaryLoop = require('../telegram/summary-loop').create({
     appSettings, tgSummary, tgBot, saveSettings, logger, logActivity,
+    getSetting,   // WP5: токен — enc1: в kv, читаем через getSetting
   });
   _intervals.push(setInterval(_summaryLoop.tick, 60 * 1000));
 

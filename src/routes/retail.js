@@ -26,6 +26,7 @@ module.exports = function createRetailRouter(deps) {
     fetchAllServersDataCached,   // Э2: legacy_preview (скан портов всех серверов)
     auditLog, logActivity, getClientIp,
     alerts,
+    notifyClient,   // B2C Э3 (WP5): «Прокси выдан» клиенту после покупки
   } = deps;
   const r = express.Router();
 
@@ -131,10 +132,12 @@ module.exports = function createRetailRouter(deps) {
 
     // leased + привязка тарифа (тест — тоже leased; возврат по 24ч делает retail-guard)
     retailPoolDb.lease(poolRow.id);
+    let testExpiresIso = null;
     if (isTestDay) {
       client.testUsed = true;
       // Э2: дедлайн возврата тест-порта (миграция 062) — снимает retail-guard.
-      retailPoolDb.setTestExpires(poolRow.id, new Date(Date.now() + 24 * 3600 * 1000).toISOString());
+      testExpiresIso = new Date(Date.now() + 24 * 3600 * 1000).toISOString();
+      retailPoolDb.setTestExpires(poolRow.id, testExpiresIso);
     } else {
       client.tariffId = tariff.id;
     }
@@ -161,7 +164,32 @@ module.exports = function createRetailRouter(deps) {
       { tariff: tariff.id, port: poolRow.port_id, server: serverName, charge, ip: getClientIp(req) });
     logActivity('client', 'info', 'retail_buy', client.login,
       `Куплен прокси по тарифу «${tariff.name}» (${serverName}/${poolRow.port_id})`, { charge });
-    try { alerts && alerts.trigger('retail_new_purchase', { client: client.login, tariff: tariff.name, charge }); } catch (_) {}
+    // B2C Э3 (WP5): админ-алерты розницы — покупка, массовая покупка, пул на исходе.
+    try { alerts && alerts.trigger('retail_purchase', { login: client.login, tariff: tariff.name, price: charge }); } catch (_) {}
+    try {
+      // Массовая покупка: триггер при ПЕРЕСЕЧЕНИИ порога leased-портов
+      // (count === threshold), дальше держит дедуп по clientId в alerts.js.
+      const threshold = Number(getSetting('retail_bulk_buy_threshold', 3)) || 3;
+      const leasedNow = retailPoolDb.byClient(client.id).filter(r => r.status === 'leased').length;
+      if (leasedNow === threshold) {
+        alerts && alerts.trigger('retail_bulk_buy', { client_id: client.id, login: client.login, count: leasedNow, threshold });
+      }
+    } catch (_) {}
+    try {
+      const minFree = Number(getSetting('retail_pool_min_free', 3));
+      const freeNow = retailPoolDb.byStatus('free').filter(r => r.server === serverName).length;
+      if (freeNow < minFree) alerts && alerts.trigger('retail_pool_low', { server: serverName, free: freeNow, min: minFree });
+    } catch (_) {}
+    // Клиенту — «Прокси выдан» (TG, если привязан; всегда — след в system_log).
+    if (notifyClient) {
+      const when = testExpiresIso
+        ? `\nТест-день действует до ${new Date(testExpiresIso).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })} МСК.`
+        : '';
+      Promise.resolve(notifyClient(client,
+        `Прокси выдан по тарифу «${tariff.name}» — реквизиты в личном кабинете на вкладке «Панель управления».${when}`,
+        { action: 'retail_buy', details: { client_id: client.id, tariff: tariff.id, port_id: poolRow.port_id, server: serverName } }
+      )).catch(e => logger.warn(`[Retail] notify ${client.login}: ${e.message}`));
+    }
 
     // Реквизиты клиент видит сразу (живьём из ProxySmart на dashboard_data)
     res.json({ ok: true, port_id: poolRow.port_id, server: serverName, tariff: tariff.name, charged: charge });

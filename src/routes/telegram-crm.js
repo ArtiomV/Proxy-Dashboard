@@ -15,13 +15,15 @@ module.exports = function createTelegramCrmRouter(deps) {
     authMiddleware, adminMiddleware,
     tgBot, tgSummary, aiInsights,
     getAppSettings,
+    getSetting,
   } = deps;
   const r = express.Router();
 
   r.post('/api/admin/telegram/send_test', authMiddleware, adminMiddleware, async (req, res) => {
     try {
       const appSettings = getAppSettings();
-      const token = appSettings.telegram_bot_token;
+      // WP5: токен — enc1: в kv (SENSITIVE_SETTINGS), читаем через getSetting.
+      const token = getSetting ? getSetting('telegram_bot_token', '') : appSettings.telegram_bot_token;
       const chatId = appSettings.telegram_chat_id;
       if (!token) return res.status(400).json({ error: 'telegram_bot_token not set' });
       if (!chatId) return res.status(400).json({ error: 'telegram_chat_id not set — send /start to the bot first' });

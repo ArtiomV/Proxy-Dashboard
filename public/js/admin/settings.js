@@ -260,22 +260,44 @@ function loadSettings(){
     var rtEl=document.getElementById('reconciliationToleranceInput');if(rtEl)rtEl.value=s.reconciliation_tolerance_gb||0.01;
     var acEl=document.getElementById('autoCreateIntervalInput');if(acEl)acEl.value=s.auto_create_interval_min||10;
     // Telegram
-    var tgT=document.getElementById('tgBotToken');if(tgT)tgT.value=s.telegram_bot_token||'';
+    // Токен — секрет (enc1: в kv): GET отдаёт маску '••••••••'. Показываем
+    // пустое поле с плейсхолдером; пустое при сохранении = «не менять».
+    var tgT=document.getElementById('tgBotToken');
+    if(tgT){
+      if(s.telegram_bot_token==='••••••••'){tgT.value='';tgT.placeholder='•••••••• (сохранён)';tgT.dataset.masked='1';}
+      else{tgT.value=s.telegram_bot_token||'';tgT.placeholder='123456:ABC...';tgT.dataset.masked='';}
+    }
     var tgC=document.getElementById('tgChatId');if(tgC)tgC.value=s.telegram_chat_id||'';
     var tgTm=document.getElementById('tgSummaryTime');if(tgTm)tgTm.value=s.telegram_summary_time||'08:00';
     var tgEn=document.getElementById('tgSummaryEnabled');if(tgEn)tgEn.checked=!!s.telegram_summary_enabled;
+    // WP5 (B2C Э3): whitelist админов бота + username-fallback + пороги алертов розницы
+    var tgA=document.getElementById('tgAdminIds');if(tgA)tgA.value=s.telegram_admin_ids||'';
+    var tgU=document.getElementById('tgBotUsername');if(tgU)tgU.value=s.telegram_bot_username||'';
+    var rbb=document.getElementById('retailBulkBuyThresholdInput');if(rbb)rbb.value=s.retail_bulk_buy_threshold!=null?s.retail_bulk_buy_threshold:3;
+    var rpf=document.getElementById('retailPoolMinFreeInput');if(rpf)rpf.value=s.retail_pool_min_free!=null?s.retail_pool_min_free:3;
     if(currentData) currentData.settings = s;
     renderPricingTiers();
   }).catch(function(){});
 }
 // Telegram: save fields when changed (debounced)
 function tgSaveSettings(){
+  var tgT=document.getElementById('tgBotToken');
   var data={
-    telegram_bot_token:(document.getElementById('tgBotToken').value||'').trim(),
     telegram_chat_id:(document.getElementById('tgChatId').value||'').trim(),
     telegram_summary_time:(document.getElementById('tgSummaryTime').value||'').trim(),
-    telegram_summary_enabled:!!document.getElementById('tgSummaryEnabled').checked
+    telegram_summary_enabled:!!document.getElementById('tgSummaryEnabled').checked,
+    telegram_admin_ids:(document.getElementById('tgAdminIds').value||'').trim(),
+    telegram_bot_username:(document.getElementById('tgBotUsername').value||'').trim()
   };
+  // Токен: при замаскированном значении пустое поле = «не менять» (иначе
+  // сохранение нетронутой формы затирало бы реальный токен enc1:).
+  var tok=(tgT.value||'').trim();
+  if(tok||!tgT.dataset.masked) data.telegram_bot_token=tok;
+  // Пороги алертов розницы (WP5): NaN-защита — сервер тоже валидирует.
+  var rbb=parseInt(document.getElementById('retailBulkBuyThresholdInput').value);
+  data.retail_bulk_buy_threshold=isNaN(rbb)?3:rbb;
+  var rpf=parseInt(document.getElementById('retailPoolMinFreeInput').value);
+  data.retail_pool_min_free=isNaN(rpf)?0:rpf;
   return api(API+'/api/admin/settings',{method:'PUT',json:data});
 }
 function tgPreview(){
