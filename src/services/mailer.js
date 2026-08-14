@@ -43,8 +43,10 @@ function isConfigured() {
 function _getTransport(c) {
   const key = c.user + '|' + c.pass;
   if (_transport && _transportKey === key) return _transport;
+  // 465/SSL на Hetzner-сервере закрыт провайдером (таймаут, 15.08.2026) —
+  // уходим на 587/STARTTLS, он открыт.
   _transport = _nodemailer.createTransport({
-    host: 'smtp-pulse.com', port: 465, secure: true,
+    host: 'smtp-pulse.com', port: 587, secure: false,
     auth: { user: c.user, pass: c.pass },
   });
   _transportKey = key;
