@@ -23,14 +23,18 @@
  *     в phonesPrimaryPhoneNumber (для TG-контакта телефона нет — handle
  *     остаётся в nameLastName и теле заметки). Дедуп по телефону / контакту:
  *     если персона уже есть — только добавляем заметку.
+ *   - opportunity (раздел «Сделки»): «Заявка: <контакт>», стадия NEW,
+ *     pointOfContactId → person. Для повторной заявки того же контакта новую
+ *     сделку НЕ плодим, если открытая уже есть — только заметку.
  *   - note + noteTarget → person: полный текст заявки, продукт, оффер,
  *     страница, UTM-метки.
  *
  * Тегирование: createdBySource='IMPORT', createdByName='Сайт arendaproxy.ru' —
  * записи фильтруются/удаляются массово:
  *   DELETE FROM <ws>."noteTarget" WHERE "createdByName"='Сайт arendaproxy.ru';
- *   DELETE FROM <ws>.note     WHERE "createdByName"='Сайт arendaproxy.ru';
- *   DELETE FROM <ws>.person   WHERE "createdByName"='Сайт arendaproxy.ru';
+ *   DELETE FROM <ws>.note        WHERE "createdByName"='Сайт arendaproxy.ru';
+ *   DELETE FROM <ws>.opportunity WHERE "createdByName"='Сайт arendaproxy.ru';
+ *   DELETE FROM <ws>.person      WHERE "createdByName"='Сайт arendaproxy.ru';
  */
 
 const TAG = 'Сайт arendaproxy.ru';
@@ -114,7 +118,23 @@ async function pushLead(getSetting, lead) {
       created = true;
     }
 
-    // Заметка с полным контекстом заявки.
+    // Сделка (раздел «Сделки» в Twenty): одна открытая на контакт — повторная
+    // заявка добавляет заметку, а не плодит дубли сделок.
+    let opportunityId = null;
+    const exOpp = await c.query(
+      `SELECT id FROM ${ws}.opportunity WHERE "deletedAt" IS NULL AND "pointOfContactId" = $1 LIMIT 1`, [personId]);
+    if (exOpp.rows.length) {
+      opportunityId = exOpp.rows[0].id;
+    } else {
+      const opp = await c.query(
+        `INSERT INTO ${ws}.opportunity ("name","stage","pointOfContactId","createdBySource","createdByName")
+         VALUES ($1,'NEW',$2,'IMPORT',$3) RETURNING id`,
+        [`Заявка: ${contact}`, personId, TAG]);
+      opportunityId = opp.rows[0].id;
+    }
+
+    // Заметка с полным контекстом заявки. Привязываем и к персоне, и к сделке,
+    // чтобы в карточке сделки была вся переписка заявок.
     const utm = lead.utm && typeof lead.utm === 'object' ? lead.utm : {};
     const lines = [
       `**Контакт:** ${contact}`,
@@ -130,10 +150,10 @@ async function pushLead(getSetting, lead) {
        VALUES ($1,$2,'IMPORT',$3) RETURNING id`,
       [`Заявка с сайта ${new Date().toISOString().slice(0, 16).replace('T', ' ')}`, lines.join('\n'), TAG]);
     await c.query(
-      `INSERT INTO ${ws}."noteTarget" ("noteId","targetPersonId","createdBySource","createdByName")
-       VALUES ($1,$2,'IMPORT',$3)`, [note.rows[0].id, personId, TAG]);
+      `INSERT INTO ${ws}."noteTarget" ("noteId","targetPersonId","targetOpportunityId","createdBySource","createdByName")
+       VALUES ($1,$2,$3,'IMPORT',$4)`, [note.rows[0].id, personId, opportunityId, TAG]);
 
-    return { personId: String(personId), created };
+    return { personId: String(personId), opportunityId: String(opportunityId), created };
   } finally { if (c) try { await c.end(); } catch { /* ignore */ } }
 }
 
