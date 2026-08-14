@@ -317,6 +317,9 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.session_ttl_days != null)            patch.session_ttl_days            = Math.max(1, Math.min(365, parseInt(req.body.session_ttl_days) || 30));
   if (req.body.billing_retry_delay_hours != null)   patch.billing_retry_delay_hours   = Math.max(0.5, Math.min(24, parseFloat(req.body.billing_retry_delay_hours) || 1));
   if (req.body.reconciliation_tolerance_gb != null) patch.reconciliation_tolerance_gb = Math.max(0.001, Math.min(1, parseFloat(req.body.reconciliation_tolerance_gb) || 0.01));
+  // Курсы валют затрат (₽ за 1 MDL/RON): 0 = авто (ЦБ), >0 = ручной фикс.
+  if (req.body.fx_rate_mdl != null) patch.fx_rate_mdl = Math.max(0, Math.min(10000, parseFloat(req.body.fx_rate_mdl) || 0));
+  if (req.body.fx_rate_ron != null) patch.fx_rate_ron = Math.max(0, Math.min(10000, parseFloat(req.body.fx_rate_ron) || 0));
   // Auto-create
   if (req.body.auto_create_interval_min != null) patch.auto_create_interval_min = Math.max(1, Math.min(60, parseInt(req.body.auto_create_interval_min) || 10));
   // Telegram daily summary

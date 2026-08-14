@@ -843,7 +843,7 @@
     "type": "table",
     "name": "monthly_costs",
     "tbl_name": "monthly_costs",
-    "sql": "CREATE TABLE monthly_costs ( id INTEGER PRIMARY KEY AUTOINCREMENT, period TEXT NOT NULL, category TEXT NOT NULL, subkey TEXT, amount REAL NOT NULL DEFAULT 0, notes TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), UNIQUE(period, category, subkey) )"
+    "sql": "CREATE TABLE monthly_costs ( id INTEGER PRIMARY KEY AUTOINCREMENT, period TEXT NOT NULL, category TEXT NOT NULL, subkey TEXT, amount REAL NOT NULL DEFAULT 0, notes TEXT, created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')), currency TEXT NOT NULL DEFAULT 'RUB', qty REAL, UNIQUE(period, category, subkey) )"
   },
   {
     "type": "table",

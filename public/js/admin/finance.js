@@ -188,51 +188,136 @@ function openFinanceCostsModal() {
     .then(function(d){ _renderCostsModal(d); })
     .catch(function(e){ showToast(e.message, 'error') });
 }
+// v2.10.8: валюта затрат. Дефолт — из сохранённой строки, иначе по стране
+// (MD → MDL, RO → RON), иначе RUB.
+function _costCurDefault(existing, country) {
+  if (existing && existing.currency) return existing.currency;
+  if (country === 'MD') return 'MDL';
+  if (country === 'RO') return 'RON';
+  return 'RUB';
+}
+function _costCurSelect(cur) {
+  return '<select class="form-input" data-role="currency" style="width:66px;padding:3px 4px;font-size:11px">'
+    + ['RUB','MDL','RON'].map(function(c){ return '<option value="'+c+'"'+(c===cur?' selected':'')+'>'+c+'</option>'; }).join('')
+    + '</select>';
+}
+function _fmtFxRate(v){ return v == null ? '—' : Number(v).toFixed(2); }
+// Пересчёт итогов SIM (qty × цена) и рублёвых эквивалентов «≈ X ₽».
+// Реагирует и на ручной курс в шапке: фикс > 0 перебивает курс ЦБ.
+function _finCostsRecalc(ov) {
+  var rates = (ov && ov._fxRates) || {};
+  var mdlOvEl = document.getElementById('fxMdlOv'), ronOvEl = document.getElementById('fxRonOv');
+  var mdlOv = mdlOvEl ? parseFloat(mdlOvEl.value) : NaN;
+  var ronOv = ronOvEl ? parseFloat(ronOvEl.value) : NaN;
+  var rate = {
+    MDL: (isFinite(mdlOv) && mdlOv > 0) ? mdlOv : rates.MDL,
+    RON: (isFinite(ronOv) && ronOv > 0) ? ronOv : rates.RON
+  };
+  ov.querySelectorAll('.set-row[data-cat]').forEach(function(row){
+    var curEl = row.querySelector('[data-role="currency"]');
+    var cur = curEl ? curEl.value : 'RUB';
+    var unitEl = row.querySelector('[data-role="cur-unit"]');
+    if (unitEl) unitEl.textContent = cur === 'RUB' ? '₽' : cur;
+    var amount = 0;
+    if (row.dataset.cat === 'sim') {
+      var qty = parseFloat((row.querySelector('[data-role="qty"]') || {}).value);
+      var price = parseFloat((row.querySelector('[data-role="price"]') || {}).value) || 0;
+      amount = Math.round(((isFinite(qty) && qty > 0 ? qty : 1) * price) * 100) / 100;
+      var totEl = row.querySelector('[data-role="total"]');
+      if (totEl) totEl.textContent = amount ? amount.toLocaleString('ru-RU') : '0';
+    } else {
+      amount = parseFloat((row.querySelector('[data-role="amount"]') || {}).value) || 0;
+    }
+    var eqEl = row.querySelector('[data-role="rub-eq"]');
+    if (eqEl) {
+      var r = rate[cur];
+      eqEl.textContent = (cur !== 'RUB' && amount > 0 && r)
+        ? '≈ ' + (Math.round(amount * r * 100) / 100).toLocaleString('ru-RU') + ' ₽'
+        : '';
+    }
+  });
+}
 function _renderCostsModal(d) {
   var ov = document.createElement('div');
   ov.id = '_finCostsOverlay';
   ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
   ov.onclick = function(e){ if(e.target===ov) ov.remove(); };
+  ov._fxRates = (d.fx && d.fx.rates) || {};
   var rows = (d.rows && d.rows.length) ? d.rows : (d.template || []).map(function(t){return Object.assign({},t)});
   var byCat = {};
   rows.forEach(function(r){ (byCat[r.category]=byCat[r.category]||[]).push(r); });
 
   var cats = d.categories || {};
-  // One labelled cost row in the Settings idiom (left title, right input + ₽ unit).
-  // data-cat / data-key on the <input> are READ BY saveCostsModal — must be preserved.
-  function _costRow(label, cls, cat, key, step, val){
-    return '<div class="set-row"><div class="set-row-t">'+label+'</div>'
-      + '<span class="set-inp"><input class="'+cls+'" data-cat="'+cat+'"'+(key!=null?' data-key="'+esc(key)+'"':'')
-      + ' type="number" min="0" step="'+step+'" value="'+(val!=null?val:'')+'" placeholder="0" style="width:108px;text-align:right"><span>₽</span></span></div>';
+  // Правая колонка строки затрат: инпуты + серая строка «≈ X ₽» под ними.
+  function _wrapRow(label, cat, key, inner){
+    return '<div class="set-row" data-cat="'+cat+'"'+(key!=null?' data-key="'+esc(key).replace(/"/g,'&quot;')+'"':'')+'>'
+      + '<div class="set-row-t">'+label+'</div>'
+      + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">'
+      + '<span class="set-inp">'+inner+'</span>'
+      + '<span data-role="rub-eq" style="font-size:10px;color:var(--text-3);min-height:12px"></span>'
+      + '</div></div>';
   }
   var inputs = '';
-  // Server costs
+  // Server costs — валюта по стране бокса (meta.serverCountry)
   var srvList = (d.meta && d.meta.servers) || ['S1','S2','S3','S4'];
+  var srvCountry = (d.meta && d.meta.serverCountry) || {};
   inputs += '<div class="set-grp-label">'+(cats.server?cats.server.label:'Аренда серверов')+'</div><div class="set-card">';
   srvList.forEach(function(s){
     var existing = (byCat.server||[]).find(function(r){return r.subkey===s});
-    inputs += _costRow(esc(s), 'form-input fc-server', 'server', s, 100, existing?existing.amount:null);
+    var cur = _costCurDefault(existing, srvCountry[s]);
+    inputs += _wrapRow(esc(s), 'server', s,
+      _costCurSelect(cur)
+      + '<input class="form-input fc-server" data-role="amount" type="number" min="0" step="100" value="'+(existing&&existing.amount!=null?existing.amount:'')+'" placeholder="0" style="width:100px;text-align:right">'
+      + '<span data-role="cur-unit" style="width:30px">'+cur+'</span>');
   });
   inputs += '</div>';
-  // SIM (per operator)
+  // SIM (per operator): кол-во × цена за SIM, итог считается сам
   var ops = (d.meta && d.meta.operators) || [];
-  inputs += '<div class="set-grp-label">'+(cats.sim?cats.sim.label:'SIM-карты')+' (₽/SIM в месяц)</div><div class="set-card">';
+  var opCountry = (d.meta && d.meta.operatorCountry) || {};
+  inputs += '<div class="set-grp-label">'+(cats.sim?cats.sim.label:'SIM-карты')+' (кол-во × цена за SIM в месяц)</div><div class="set-card">';
   if (ops.length === 0) {
     inputs += '<div class="set-row"><div class="set-row-d" style="max-width:none">Операторы не определены — укажите общую сумму через «Прочее»</div></div>';
   } else {
     ops.forEach(function(op){
       var existing = (byCat.sim||[]).find(function(r){return r.subkey===op});
-      inputs += _costRow(esc(op), 'form-input fc-sim', 'sim', op, 10, existing?existing.amount:null);
+      var cur = _costCurDefault(existing, opCountry[op]);
+      var qty = existing && existing.qty != null ? existing.qty : '';
+      // Старые строки без qty: вся сумма — это цена за 1 SIM.
+      var price = existing ? (existing.qty ? Math.round(existing.amount / existing.qty * 100) / 100 : existing.amount) : '';
+      inputs += _wrapRow(esc(op), 'sim', op,
+        _costCurSelect(cur)
+        + '<input class="form-input fc-sim" data-role="qty" type="number" min="0" step="1" value="'+qty+'" placeholder="шт" title="Кол-во SIM" style="width:56px;text-align:right">'
+        + '<span style="font-size:11px;color:var(--text-3)">×</span>'
+        + '<input class="form-input fc-sim" data-role="price" type="number" min="0" step="10" value="'+(price!=null?price:'')+'" placeholder="цена" title="Цена за SIM" style="width:80px;text-align:right">'
+        + '<span style="font-size:11px;color:var(--text-3)">=</span>'
+        + '<b data-role="total" style="min-width:56px;text-align:right;font-size:12px">0</b>'
+        + '<span data-role="cur-unit" style="width:30px">'+cur+'</span>');
     });
   }
   inputs += '</div>';
-  // Other (single value, no subkey)
+  // Other (single value, no subkey) — только RUB, без селекта валюты
   inputs += '<div class="set-grp-label">Прочие затраты</div><div class="set-card">';
   ['electricity','hosting','salary','other'].forEach(function(k){
     var existing = (byCat[k]||[])[0];
-    inputs += _costRow((cats[k]?cats[k].label:k), 'form-input fc-other', k, null, 100, existing?existing.amount:null);
+    inputs += _wrapRow((cats[k]?cats[k].label:k), k, null,
+      '<input class="form-input fc-other" data-role="amount" type="number" min="0" step="100" value="'+(existing&&existing.amount!=null?existing.amount:'')+'" placeholder="0" style="width:108px;text-align:right"><span>₽</span>');
   });
   inputs += '</div>';
+
+  // Шапка: текущий курс + ручной фикс (пусто = авто по ЦБ)
+  var fxBlock = '';
+  if (d.fx) {
+    var auto = d.fx.source === 'override' ? 'вручную'
+      : (d.fx.source === 'unavailable' ? 'курс недоступен'
+      : 'авто' + (String(d.fx.source).indexOf('+override') > 0 ? ' + ручной фикс' : ''));
+    var ovM = (d.fx_overrides && d.fx_overrides.MDL) || 0;
+    var ovR = (d.fx_overrides && d.fx_overrides.RON) || 0;
+    fxBlock = '<div style="font-size:11px;color:var(--text-2);margin-bottom:8px;line-height:1.7">'
+      + 'Курс ЦБ на ' + esc(d.fx.date || '') + ': 1 MDL = ' + _fmtFxRate(d.fx.rates && d.fx.rates.MDL) + ' ₽, 1 RON = ' + _fmtFxRate(d.fx.rates && d.fx.rates.RON) + ' ₽ (' + auto + ')<br>'
+      + 'Свой курс (пусто = авто): 1 MDL = <input id="fxMdlOv" type="number" min="0" step="0.01" placeholder="' + _fmtFxRate(d.fx.rates && d.fx.rates.MDL) + '" value="' + (ovM > 0 ? ovM : '') + '" style="width:64px;text-align:right"> ₽'
+      + ' · 1 RON = <input id="fxRonOv" type="number" min="0" step="0.01" placeholder="' + _fmtFxRate(d.fx.rates && d.fx.rates.RON) + '" value="' + (ovR > 0 ? ovR : '') + '" style="width:64px;text-align:right"> ₽'
+      + '</div>';
+  }
 
   ov.innerHTML = '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;width:560px;max-width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)">'
     + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
@@ -240,31 +325,68 @@ function _renderCostsModal(d) {
     + '<button data-on-click="document.getElementById(\'_finCostsOverlay\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-2)">&times;</button>'
     + '</div>'
     + (rows.length === 0 && (d.template || []).length > 0 ? '<div style="font-size:11px;color:var(--accent);margin-bottom:6px">' + icon('alert', 11) + ' Подставлены значения из предыдущего месяца — отредактируйте и сохраните</div>' : '')
+    + fxBlock
     + inputs
     + '<div class="set-save-bar" style="justify-content:flex-end">'
     + '<button class="btn" data-on-click="document.getElementById(\'_finCostsOverlay\').remove()">Отмена</button>'
     + '<button class="btn btn-primary" data-on-click="saveCostsModal()">' + icon('save', 13) + ' Сохранить</button>'
     + '</div></div>';
   document.body.appendChild(ov);
+  // CSP: инлайн-обработчики запрещены — один делегированный слушатель на оверлей.
+  ov.addEventListener('input', function(){ _finCostsRecalc(ov); });
+  _finCostsRecalc(ov);
 }
 function saveCostsModal() {
+  var ov = document.getElementById('_finCostsOverlay');
+  if (!ov) return;
+  // Ручной курс: пусто = авто (0), иначе число >= 0.
+  function _ovRate(id) {
+    var el = document.getElementById(id);
+    if (!el || el.value.trim() === '') return 0;
+    var v = parseFloat(el.value);
+    if (!isFinite(v) || v < 0) return null;
+    return v;
+  }
+  var fxMdl = _ovRate('fxMdlOv'), fxRon = _ovRate('fxRonOv');
+  if (fxMdl === null || fxRon === null) {
+    showToast('Курс должен быть числом ≥ 0 (пусто = авто по ЦБ)', 'error');
+    return;
+  }
   var items = [];
-  document.querySelectorAll('#_finCostsOverlay input').forEach(function(inp){
-    var v = parseFloat(inp.value);
-    if (!isFinite(v) || v <= 0) return;
-    items.push({ category: inp.dataset.cat, subkey: inp.dataset.key || null, amount: v });
+  ov.querySelectorAll('.set-row[data-cat]').forEach(function(row){
+    var cat = row.dataset.cat;
+    var curEl = row.querySelector('[data-role="currency"]');
+    var cur = curEl ? curEl.value : 'RUB';
+    var amount = 0, qty = null;
+    if (cat === 'sim') {
+      var q = parseFloat((row.querySelector('[data-role="qty"]') || {}).value);
+      var p = parseFloat((row.querySelector('[data-role="price"]') || {}).value) || 0;
+      qty = (isFinite(q) && q > 0) ? q : null;
+      amount = Math.round(((qty || 1) * p) * 100) / 100;
+    } else {
+      amount = parseFloat((row.querySelector('[data-role="amount"]') || {}).value);
+    }
+    if (!isFinite(amount) || amount <= 0) return;
+    items.push({ category: cat, subkey: row.dataset.key || null, amount: amount, currency: cur, qty: qty });
   });
-  api(API + '/api/admin/monthly_costs',{method:'POST',json:{ period: _finCurrentPeriod, items: items }})
-    .then(function(d){
-      if (d.ok) {
-        showToast('Затраты сохранены: ' + d.saved + ' позиций', 'success');
-        document.getElementById('_finCostsOverlay').remove();
-        renderFinancesTabNew();
-      } else {
-        showToast(d.error || 'Ошибка', 'error');
-      }
-    })
-    .catch(function(e){ showToast(e.message, 'error') });
+  // Сначала ручной курс (если модалка его показывала), потом сами затраты.
+  var saveFx = document.getElementById('fxMdlOv')
+    ? api(API + '/api/admin/settings', { method: 'PUT', json: { fx_rate_mdl: fxMdl, fx_rate_ron: fxRon } })
+    : Promise.resolve({ ok: true });
+  saveFx.then(function(sd){
+    if (sd && sd.error) { showToast(sd.error, 'error'); return; }
+    api(API + '/api/admin/monthly_costs',{method:'POST',json:{ period: _finCurrentPeriod, items: items }})
+      .then(function(d){
+        if (d.ok) {
+          showToast('Затраты сохранены: ' + d.saved + ' позиций', 'success');
+          document.getElementById('_finCostsOverlay').remove();
+          renderFinancesTabNew();
+        } else {
+          showToast(d.error || 'Ошибка', 'error');
+        }
+      })
+      .catch(function(e){ showToast(e.message, 'error') });
+  }).catch(function(e){ showToast(e.message, 'error') });
 }
 
 // Top Resources — uses server-side aggregated cache (auto-refreshes nightly at 03:00)

@@ -21,9 +21,34 @@ module.exports = function createBillingExtRouter(deps) {
     getApiServers, getServerCountries,
     normalizeOperator,
     appSettings,
+    fx,
     auditLog, logActivity,
   } = deps;
   const r = express.Router();
+
+  // v2.10.8: валюты затрат. Дефолт страны оператора — operator_country_map
+  // (Stage 17, ключи lowercased); fallback — хардкод-мапа известных сетей.
+  const COST_CURRENCIES = new Set(['RUB', 'MDL', 'RON']);
+  const OP_COUNTRY_FALLBACK = {
+    'moldcell': 'MD', 'moldtelecom': 'MD', 'orange md': 'MD', 'interdnestrcom': 'MD',
+    'orange ro': 'RO', 'vodafone ro': 'RO', 'digi': 'RO', 'digi mobil': 'RO', 'digi.ro': 'RO'
+  };
+  function _operatorCountryMap() {
+    const out = {};
+    let rows = [];
+    try { rows = db.prepare('SELECT operator, country FROM operator_country_map').all(); } catch (_) { /* таблица может отсутствовать на старых БД */ }
+    const byOp = {};
+    for (const row of rows) byOp[row.operator] = row.country;
+    const operators = db.prepare(`SELECT DISTINCT operator FROM modem_meta
+      WHERE operator != '' ORDER BY operator`).all().map(r => r.operator);
+    for (const op of operators) {
+      const key = String(op).toLowerCase().trim();
+      let country = byOp[key] || OP_COUNTRY_FALLBACK[key] || '';
+      if (!country && /(?:\b|_)ro(?:\b|$)/i.test(key)) country = 'RO';
+      out[op] = country; // '' = не определена → UI предложит RUB
+    }
+    return { operators, operatorCountry: out };
+  }
 
   // Stage 4 finish: finance_dashboard response cache moved into the router.
   // server.js no longer needs to own this — only billing-ext.js reads/writes.
@@ -40,29 +65,37 @@ module.exports = function createBillingExtRouter(deps) {
   const financeEvents = require('../billing/events');
   financeEvents.on('finance-write', () => { _financeCacheKey = ''; });
 
-r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) => {
+r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const period = String(req.query.period || '').match(/^\d{4}-\d{2}$/) ? req.query.period
                  : new Date().toISOString().slice(0, 7);
-    const rows = db.prepare(`SELECT id, period, category, subkey, amount, notes, updated_at
+    const rows = db.prepare(`SELECT id, period, category, subkey, amount, currency, qty, notes, updated_at
       FROM monthly_costs WHERE period = ? ORDER BY category, subkey`).all(period);
     // Если за период пусто — auto-fill из предыдущего месяца (как шаблон, без сохранения)
     let template = null;
     if (rows.length === 0) {
       const prev = db.prepare("SELECT MAX(period) as p FROM monthly_costs WHERE period < ?").get(period).p;
       if (prev) {
-        template = db.prepare(`SELECT category, subkey, amount, notes
+        template = db.prepare(`SELECT category, subkey, amount, currency, qty, notes
           FROM monthly_costs WHERE period = ?`).all(prev);
       }
     }
-    // Список операторов (для SIM): из live ProxySmart
-    const operators = db.prepare(`SELECT DISTINCT operator FROM modem_meta
-      WHERE operator != '' ORDER BY operator`).all().map(r => r.operator);
+    // Списки для perItem-категорий: операторы (SIM) из live ProxySmart, боксы.
+    // Страны — для дефолта валюты в UI: MD → MDL, RO → RON (v2.10.8).
+    const { operators, operatorCountry } = _operatorCountryMap();
     const servers = getApiServers().map(s => s.name);
+    const serverCountry = {};
+    const sc = getServerCountries();
+    for (const s of getApiServers()) serverCountry[s.name] = (sc[s.name] || {}).country || s.country || '';
+    // Курс ЦБ (или ручной фикс) — шапка модалки и пересчёт «≈ ₽» на фронте.
+    const rates = await fx.getRates();
     res.json({
       period, rows, template,
       categories: COST_CATEGORIES,
-      meta: { operators, servers }
+      meta: { operators, servers, serverCountry, operatorCountry },
+      fx: { rates: { MDL: rates.MDL, RON: rates.RON }, date: rates.date, source: rates.source },
+      // Текущий ручной фикс (0 = авто) — предзаполнение инпутов в модалке.
+      fx_overrides: { MDL: Number(appSettings.fx_rate_mdl) || 0, RON: Number(appSettings.fx_rate_ron) || 0 }
     });
   } catch (e) {
     logger.error('[monthly_costs/get]', e.message);
@@ -75,16 +108,26 @@ r.post('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) =
     const period = String(req.body?.period || '');
     if (!/^\d{4}-\d{2}$/.test(period)) return res.status(400).json({ error: 'period YYYY-MM required' });
     const items = Array.isArray(req.body?.items) ? req.body.items : [];
+    // Валюта — строго RUB|MDL|RON (v2.10.8); невалидная — 400, а не тихий скип.
+    for (const it of items) {
+      if (it && it.currency != null && !COST_CURRENCIES.has(String(it.currency))) {
+        return res.status(400).json({ error: 'currency: допустимо RUB | MDL | RON' });
+      }
+    }
     db.transaction(() => {
       db.prepare('DELETE FROM monthly_costs WHERE period = ?').run(period);
-      const ins = db.prepare(`INSERT INTO monthly_costs (period, category, subkey, amount, notes)
-        VALUES (?, ?, ?, ?, ?)`);
+      const ins = db.prepare(`INSERT INTO monthly_costs (period, category, subkey, amount, currency, qty, notes)
+        VALUES (?, ?, ?, ?, ?, ?, ?)`);
       for (const it of items) {
         if (!it || !it.category) continue;
         const amount = Number(it.amount);
         if (!Number.isFinite(amount) || amount < 0) continue;
         if (!COST_CATEGORIES[it.category]) continue;
-        ins.run(period, it.category, it.subkey || null, amount, (it.notes || '').slice(0, 500));
+        // qty — кол-во SIM (неотрицательное число) или NULL для прочих строк.
+        const qty = (it.qty == null || it.qty === '') ? null : Number(it.qty);
+        if (qty != null && (!Number.isFinite(qty) || qty < 0)) continue;
+        ins.run(period, it.category, it.subkey || null, amount,
+          String(it.currency || 'RUB'), qty, (it.notes || '').slice(0, 500));
       }
     })();
     auditLog(req.user.login, 'monthly_costs_save', { period, count: items.length });
@@ -255,19 +298,22 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     // -- Costs (current period) --
     // Затраты фиксированные помесячные: если месяц ещё не заполнен, подтягиваем
     // последний заполненный как типовые (cost_carried_from сообщает фронту источник).
-    let costRows = db.prepare(`SELECT category, subkey, amount FROM monthly_costs WHERE period = ?`).all(period);
+    let costRows = db.prepare(`SELECT category, subkey, amount, currency FROM monthly_costs WHERE period = ?`).all(period);
     let costCarriedFrom = null;
     if (!costRows.length) {
       const prev = db.prepare(`SELECT MAX(period) AS p FROM monthly_costs WHERE period < ?`).get(period).p;
       if (prev) {
-        costRows = db.prepare(`SELECT category, subkey, amount FROM monthly_costs WHERE period = ?`).all(prev);
+        costRows = db.prepare(`SELECT category, subkey, amount, currency FROM monthly_costs WHERE period = ?`).all(prev);
         costCarriedFrom = prev;
       }
     }
-    const totalCost = costRows.reduce((s, r) => s + (r.amount || 0), 0);
+    // v2.10.8: MDL/RON конвертируются в RUB по текущему курсу (ЦБ или ручной
+    // фикс). getRates кладёт курс в module-level, toRub — sync поверх него.
+    const fxRates = await fx.getRates();
+    const totalCost = costRows.reduce((s, r) => s + fx.toRub(r.amount || 0, r.currency || 'RUB'), 0);
     const costByCategory = {};
     costRows.forEach(r => {
-      costByCategory[r.category] = (costByCategory[r.category] || 0) + (r.amount || 0);
+      costByCategory[r.category] = (costByCategory[r.category] || 0) + fx.toRub(r.amount || 0, r.currency || 'RUB');
     });
     const costPerModem = totalModems > 0 ? Math.round((totalCost / totalModems) * 100) / 100 : 0;
 
@@ -477,6 +523,8 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
         per_modem: stats(perModemPrices)
       },
       cost_by_category: costByCategory,
+      // Курс конвертации затрат MDL/RON → RUB (для отображения в шапке).
+      fx: { MDL: fxRates.MDL, RON: fxRates.RON, date: fxRates.date, source: fxRates.source },
       per_server: perServer,
       per_operator: perOperator,
       per_client: perClient,

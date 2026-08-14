@@ -1604,6 +1604,10 @@ const SETTINGS_DEFAULTS = {
   session_ttl_days: 30,
   billing_retry_delay_hours: 1,
   reconciliation_tolerance_gb: 0.01,
+  // Курсы валют затрат (₽ за 1 MDL/RON). 0 = авто (ЦБ РФ ежедневно,
+  // src/services/fx.js); >0 = ручной фикс. Задаётся в модалке «Затраты».
+  fx_rate_mdl: 0,
+  fx_rate_ron: 0,
   // Auto-create
   auto_create_interval_min: 10,
   // Telegram daily summary
@@ -2957,6 +2961,15 @@ mailer.init({
   logActivity,
 });
 
+// FX (v2.10.8): курсы MDL/RON → RUB для блока затрат. ЦБ ежедневно + кэш
+// в kv_store; ручное переопределение — fx_rate_mdl/fx_rate_ron.
+const fx = require('./src/services/fx');
+fx.init({
+  logger, getSetting,
+  kvGet: (k) => _kvGet.get(k),
+  kvSet: (k, v) => _kvSet.run(k, v),
+});
+
 // Регистрация/вход/пароль (WP1): register, TG-виджет, verify/forgot/reset,
 // change_password (общий для всех клиентов).
 app.use(require('./src/routes/registration')({
@@ -4009,6 +4022,7 @@ app.use(require('./src/routes/billing-ext')({
   normalizeOperator,
   getMoscowToday, trafficBytesToGb, parseBwToBytes, ledgerExpense,
   appSettings,
+  fx,
   auditLog, logActivity,
 }));
 
