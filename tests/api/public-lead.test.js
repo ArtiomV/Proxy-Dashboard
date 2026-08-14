@@ -71,4 +71,16 @@ describe('POST /api/public/lead', () => {
     const row = db.prepare("SELECT * FROM leads WHERE contact = 'leadtest_@some_user' ORDER BY id DESC LIMIT 1").get();
     expect(row.contact_type).toBe('telegram');
   });
+
+  it('utm.ts — число (реальный ap_utm с сайта) → коерсится в строку, не 400', async () => {
+    // Регрессия: ap_utm в localStorage содержит ts: Date.now() (number) —
+    // strict-схема отклоняла реальные заявки с лендинга.
+    const res = await request(app).post('/api/public/lead').send({
+      contact: 'leadtest_@utm_ts',
+      utm: { utm_source: 'google', landing: '/', ts: 1786709205205 },
+    });
+    expect(res.status).toBe(200);
+    const row = db.prepare("SELECT * FROM leads WHERE contact = 'leadtest_@utm_ts' ORDER BY id DESC LIMIT 1").get();
+    expect(JSON.parse(row.utm_json)).toMatchObject({ utm_source: 'google', ts: '1786709205205' });
+  });
 });

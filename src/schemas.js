@@ -107,7 +107,9 @@ const LeadSchema = z.object({
   offer: z.string().max(50).default(''),
   page: z.string().max(300).default(''),
   ctaPosition: z.string().max(100).default(''),
-  utm: z.record(z.string().max(50), z.string().max(200)).optional(),
+  // utm — из localStorage ap_utm: там есть ts (number, Date.now()) — значения
+  // коерсим к строке, иначе валидация валит реальные заявки с сайта.
+  utm: z.record(z.string().max(50), z.coerce.string().max(200)).optional(),
   website: z.string().max(500).optional(),      // honeypot
 });
 
