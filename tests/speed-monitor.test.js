@@ -18,7 +18,7 @@ beforeAll(() => {
 
 const NICKS = 'MD_01,MD_04,MD_10';
 
-function makeJob(fetchApi) {
+function makeJob(fetchApi, opts = {}) {
   process.env.SPEED_MONITOR_NICKS = NICKS;
   const { normalizeOperator } = cjsRequire('../src/utils/traffic.js');
   const job = speedMonitor.create({
@@ -29,6 +29,7 @@ function makeJob(fetchApi) {
     fetchApi,
     normalizeOperator,
     sleep: async () => {},   // пауза ретрая в тестах мгновенная
+    ...opts,
   });
   delete process.env.SPEED_MONITOR_NICKS;
   return job;
@@ -99,7 +100,7 @@ describe('SpeedMonitor: GET /api/admin/speed-monitor', () => {
 });
 
 // Джоб с никами из настройки speedtest_modems (getSetting), без env-override.
-function makeJobWithSetting(fetchApi, settingCsv, envCsv) {
+function makeJobWithSetting(fetchApi, settingCsv, envCsv, opts = {}) {
   if (envCsv) process.env.SPEED_MONITOR_NICKS = envCsv;
   const { normalizeOperator } = cjsRequire('../src/utils/traffic.js');
   const job = speedMonitor.create({
@@ -111,6 +112,7 @@ function makeJobWithSetting(fetchApi, settingCsv, envCsv) {
     normalizeOperator,
     getSetting: (k, def) => (k === 'speedtest_modems' ? settingCsv : def),
     sleep: async () => {},   // пауза ретрая в тестах мгновенная
+    ...opts,
   });
   delete process.env.SPEED_MONITOR_NICKS;
   return job;
@@ -282,9 +284,11 @@ describe('SpeedMonitor: повторный замер (нестабильный 
       if (path.startsWith('/apix/speedtest')) { stCalls++; return { download: '0', upload: '0', ping: '0' }; }
       throw new Error('unexpected ' + path);
     };
-    const job = makeJobWithSetting(fetchApi, 'MD_01');
+    // retryRounds: 0 — раунды перезамеров покрыты отдельными тестами ниже,
+    // здесь проверяем смысл одиночного прогона.
+    const job = makeJobWithSetting(fetchApi, 'MD_01', undefined, { retryRounds: 0 });
     const r = await job.runSpeedMonitor();
-    expect(r).toMatchObject({ tested: 0, failed: 1 });
+    expect(r).toMatchObject({ tested: 0, failed: 1, recovered: 0 });
     expect(stCalls).toBe(2);   // dl<5 → ретрай, но и он нулевой
     const row = db.prepare("SELECT ok, error, attempts FROM speed_monitor WHERE nick = 'MD_01'").get();
     expect(row).toMatchObject({ ok: 0, error: 'empty_result', attempts: 2 });
@@ -303,5 +307,84 @@ describe('SpeedMonitor: повторный замер (нестабильный 
     expect(res.status).toBe(200);
     const row = res.body.rows.find(r2 => r2.nick === 'MD_01');
     expect(row).toMatchObject({ ok_count: 1, fail_count: 1, avg_dl: 30, min_dl: 30, max_dl: 30 });
+  });
+});
+
+describe('SpeedMonitor: настойчивые перезамеры (2026-08-14)', () => {
+  // Модем оффлайн в основном прогоне, оживает на N-м раунде перезамеров.
+  // statusOnlineAfterRounds: с какого вызова show_status_json модем онлайн
+  // (1-й вызов — основной прогон, 2-й — раунд 1, 3-й — раунд 2, ...).
+  function recoveringFetch(statusOnlineAfterRounds, dlResult) {
+    let statusCalls = 0, stCalls = 0;
+    const fetchApi = async (server, path) => {
+      if (path === '/apix/show_status_json') {
+        statusCalls++;
+        if (server.name !== 'S1') return [];
+        const online = statusCalls > statusOnlineAfterRounds ? 'yes' : 'no';
+        return [{ modem_details: { NICK: 'MD_04', IMEI: '860000000000004' }, net_details: { IS_ONLINE: online, CELLOP: 'orange' } }];
+      }
+      if (path.startsWith('/apix/speedtest')) { stCalls++; return dlResult; }
+      throw new Error('unexpected ' + path);
+    };
+    return { fetchApi, statusCalls: () => statusCalls, stCalls: () => stCalls };
+  }
+
+  it('оффлайн → ожил на 2-м раунде → ok-строка дописана, recovered=1', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const f = recoveringFetch(2, { download: '18', upload: '6', ping: '40' });
+    const job = makeJobWithSetting(f.fetchApi, 'MD_04', undefined, { retryRounds: 5 });
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 0, failed: 1, recovered: 1 });
+    const rows = db.prepare("SELECT ok, error, download, operator FROM speed_monitor WHERE nick = 'MD_04' ORDER BY ts").all();
+    expect(rows.length).toBe(2);   // исходная fail-строка + восстановленная ok
+    expect(rows[0]).toMatchObject({ ok: 0, error: 'offline' });
+    expect(rows[1]).toMatchObject({ ok: 1, download: 18, operator: 'Orange MD' });
+    expect(f.stCalls()).toBe(1);   // замер только когда модем ожил
+    expect(f.statusCalls()).toBe(3); // основной прогон + раунды 1 и 2
+  });
+
+  it('ошибка speedtest в прогоне → успех на 1-м раунде → recovered=1', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    let stCalls = 0;
+    const fetchApi = async (server, path) => {
+      if (path === '/apix/show_status_json') {
+        if (server.name !== 'S1') return [];
+        return [{ modem_details: { NICK: 'MD_01', IMEI: '860000000000001' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' } }];
+      }
+      if (path.startsWith('/apix/speedtest')) {
+        stCalls++;
+        // Основной прогон: обе попытки — ошибка. Раунд 1: успех.
+        return stCalls <= 2 ? { error: 'modem busy' } : { download: '25', upload: '8', ping: '30' };
+      }
+      throw new Error('unexpected ' + path);
+    };
+    const job = makeJobWithSetting(fetchApi, 'MD_01', undefined, { retryRounds: 3 });
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 0, failed: 1, recovered: 1 });
+    const rows = db.prepare("SELECT ok, download FROM speed_monitor WHERE nick = 'MD_01' ORDER BY ts").all();
+    expect(rows.length).toBe(2);
+    expect(rows[1]).toMatchObject({ ok: 1, download: 25 });
+  });
+
+  it('не ожил за отведённые раунды → лишних строк нет, recovered=0', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const f = recoveringFetch(Infinity, { download: '10', upload: '5', ping: '30' });
+    const job = makeJobWithSetting(f.fetchApi, 'MD_04', undefined, { retryRounds: 2 });
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 0, failed: 1, recovered: 0 });
+    const rows = db.prepare("SELECT ok, error FROM speed_monitor WHERE nick = 'MD_04'").all();
+    expect(rows.length).toBe(1);   // только исходная fail-строка
+    expect(rows[0]).toMatchObject({ ok: 0, error: 'offline' });
+    expect(f.stCalls()).toBe(0);   // оффлайн — замеров не было
+    expect(f.statusCalls()).toBe(3); // прогон + 2 раунда перерезолва
+  });
+
+  it('все успешны в основном прогоне → раунды перезамеров не запускаются', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const f = recoveringFetch(0, { download: '30', upload: '9', ping: '35' });
+    const job = makeJobWithSetting(f.fetchApi, 'MD_04', undefined, { retryRounds: 5 });
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 1, failed: 0, recovered: 0 });
+    expect(f.statusCalls()).toBe(1);   // только основной резолв
   });
 });
