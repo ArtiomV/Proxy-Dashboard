@@ -1886,7 +1886,9 @@ if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true
 const app = express();
 app.set('trust proxy', 1); // trust first proxy (nginx) — req.ip uses x-forwarded-for
 // CSP restored after Stage 5 (inline <script> blocks extracted into
-// public/js/admin.js + client.js). Stage 5 ph.2 / Stage 11: инлайн-обработчики
+// public/js/admin.js + client.js; B2C auth-страницы register/forgot/reset/verify —
+// в public/js/auth/*.js, 14.08.2026: инлайн там блокировался CSP, страницы
+// были пустыми). Stage 5 ph.2 / Stage 11: инлайн-обработчики
 // событий переведены на data-on-* + глобальную делегацию
 // (public/js/delegation.js) — script-src-attr зажат до 'none', 'unsafe-inline'
 // больше не нужен. Покрытие всех data-on-* локирует
@@ -1898,13 +1900,18 @@ app.use(helmet({
     useDefaults: true,
     directives: {
       'default-src': ["'self'"],
-      'script-src':  ["'self'", 'https://cdn.jsdelivr.net'],
+      'script-src':  ["'self'", 'https://cdn.jsdelivr.net',
+        // B2C auth-страницы (register/forgot/reset/verify): Turnstile и
+        // Telegram Login Widget подгружают свои JS динамически.
+        'https://challenges.cloudflare.com', 'https://telegram.org'],
       'script-src-attr': ["'none'"],   // Stage 11: инлайн-обработчиков больше нет (data-on-* + delegation)
       'style-src':   ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com'],
       'font-src':    ["'self'", 'https://fonts.gstatic.com', 'data:'],
       'img-src':     ["'self'", 'data:', 'https:'],
       'connect-src': ["'self'"],
-      'frame-src':   ["'self'"],
+      'frame-src':   ["'self'",
+        // Iframe'ы виджетов: Turnstile (капча) и Telegram OAuth.
+        'https://challenges.cloudflare.com', 'https://oauth.telegram.org'],
       'frame-ancestors': ["'none'"],
     },
   },
