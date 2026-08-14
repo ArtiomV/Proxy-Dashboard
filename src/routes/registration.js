@@ -46,6 +46,133 @@ module.exports = function createRegistrationRouter(deps) {
     return false;
   }
 
+  // OIDC state/nonce (Telegram Login, новый протокол взамен deprecated
+  // oauth-embed): in-memory Map с TTL 10 мин — одноразовые, чистим лениво.
+  const _oidcStates = new Map(); // state → { nonce, exp }
+  function _oidcStateNew() {
+    const now = Date.now();
+    for (const [s, v] of _oidcStates) if (v.exp < now) _oidcStates.delete(s);
+    const state = crypto.randomBytes(16).toString('hex');
+    _oidcStates.set(state, { nonce: crypto.randomBytes(16).toString('hex'), exp: now + 10 * 60 * 1000 });
+    return state;
+  }
+  function _oidcStateConsume(state) {
+    const v = _oidcStates.get(String(state || ''));
+    _oidcStates.delete(String(state || ''));
+    return v && v.exp >= Date.now() ? v : null;
+  }
+
+  // Повторная отправка письма верификации: cooldown 5 мин на логин.
+  const _resendCooldown = new Map(); // login → ts последней отправки
+  const RESEND_COOLDOWN_MS = 5 * 60 * 1000;
+
+  function _oidcCreds() {
+    return {
+      clientId: getSetting('telegram_oidc_client_id', '') || process.env.TELEGRAM_OIDC_CLIENT_ID || '',
+      secret: getSetting('telegram_oidc_secret', '') || process.env.TELEGRAM_OIDC_CLIENT_SECRET || '',
+    };
+  }
+
+  // JWKS oauth.telegram.org — кэш 1ч (ключи ротируются редко; промах по kid —
+  // один принудительный рефреш).
+  let _jwksCache = { at: 0, keys: [] };
+  async function _oidcJwks(force) {
+    if (!force && _jwksCache.keys.length && Date.now() - _jwksCache.at < 3600_000) return _jwksCache.keys;
+    const resp = await globalThis.fetch('https://oauth.telegram.org/.well-known/jwks.json');
+    if (!resp.ok) throw new Error('jwks fetch ' + resp.status);
+    const data = await resp.json();
+    _jwksCache = { at: Date.now(), keys: data.keys || [] };
+    return _jwksCache.keys;
+  }
+
+  function _b64url(buf) { return Buffer.from(buf).toString('base64url'); }
+
+  // Проверка id_token (JWT): подпись по JWKS + iss/aud/exp/nonce.
+  async function _oidcVerifyIdToken(idToken, clientId, expectedNonce) {
+    const parts = String(idToken || '').split('.');
+    if (parts.length !== 3) throw new Error('bad jwt');
+    const header = JSON.parse(Buffer.from(parts[0], 'base64url').toString('utf8'));
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf8'));
+    if (payload.iss !== 'https://oauth.telegram.org') throw new Error('bad iss');
+    if (payload.aud !== clientId) throw new Error('bad aud');
+    if (!payload.exp || payload.exp * 1000 < Date.now()) throw new Error('expired');
+    if (expectedNonce && payload.nonce !== expectedNonce) throw new Error('bad nonce');
+    let keys = await _oidcJwks(false);
+    let jwk = keys.find(k => k.kid === header.kid);
+    if (!jwk) { keys = await _oidcJwks(true); jwk = keys.find(k => k.kid === header.kid); }
+    if (!jwk) throw new Error('no jwk for kid');
+    const key = crypto.createPublicKey({ format: 'jwk', key: jwk });
+    const algByName = { RS256: 'RSA-SHA256', ES256: 'SHA256', ES256K: 'SHA256', EdDSA: null };
+    if (!(header.alg in algByName)) throw new Error('unsupported alg ' + header.alg);
+    const sig = Buffer.from(parts[2], 'base64url');
+    const data = Buffer.from(parts[0] + '.' + parts[1]);
+    const ok = crypto.verify(algByName[header.alg], data, key, sig);
+    if (!ok) throw new Error('bad signature');
+    return payload;
+  }
+
+  // Общий find-or-create для TG-входа (Login Widget POST и OIDC callback).
+  // profile: { id, first_name?, last_name?, username? }. Бросает {status, error}.
+  function _tgFindOrCreate(profile, req) {
+    const tgId = String(profile.id);
+    let client = clients.find(c => c.tgChatId === tgId);
+    let created = false;
+    if (!client) {
+      // WP7: лимит аккаунтов на reg_ip действует и на TG-путь (Э5).
+      // Проверка только при СОЗДАНИИ — вход существующего клиента не режем.
+      if (accountIpLimitHit(getClientIp(req))) {
+        throw { status: 403, error: 'Не удалось создать аккаунт — попробуйте позже' };
+      }
+      // TG-созданный аккаунт: пароль задаётся позже в профиле, email — перед первой оплатой (54-ФЗ)
+      const id = generateId();
+      const login = 'u_' + id;
+      client = {
+        id, login,
+        name: [profile.first_name, profile.last_name].filter(Boolean).join(' ') || (profile.username || tgId),
+        portName: login,
+        passwordHash: '',
+        contact: profile.username ? ('@' + profile.username) : '',
+        billingType: 'per_modem', price: 0, currency: 'RUB', balance: 0,
+        apiKey: crypto.createHash('sha256').update('prx_' + crypto.randomBytes(24).toString('hex')).digest('hex'),
+        apiKeyPrefix: '',
+        referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
+        referred_by: null, referral_balance: 0, resetToken: '',
+        clientType: 'individual', allowDebt: false,
+        tgChatId: tgId,
+        tgUsername: profile.username || '',
+        regIp: getClientIp(req),
+        consentPdAt: new Date().toISOString(),  // согласие — чекбоксом на форме перед виджетом
+        createdAt: new Date().toISOString(),
+      };
+      clients.push(client);
+      try {
+        saveClients(clients);
+      } catch (e) {
+        clients.pop();
+        if (e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''))) {
+          throw { status: 409, error: 'Этот Telegram-аккаунт уже привязан' };
+        }
+        throw e;
+      }
+      rebuildClientMaps();
+      getUsers()[login] = { passwordHash: '', portNameFilter: login, source: 'client', clientId: id };
+      created = true;
+      auditLog(login, 'retail_register_tg', { tg: tgId, ip: getClientIp(req) });
+      logActivity('client', 'info', 'retail_register', client.name, `Регистрация через Telegram (${tgId})`, {});
+      // B2C Э3 (WP5): админ-алерт розницы — регистрация через TG.
+      try { deps.alerts && deps.alerts.trigger('retail_registered', { login, email: client.email || null, via: 'telegram', tg: tgId }); } catch (_) {}
+    } else if (profile.username && client.tgUsername !== profile.username) {
+      client.tgUsername = profile.username; // username мог смениться — освежаем
+      saveClients(clients);
+    }
+    if (client.blocked) {
+      deleteSessionsByLogin(client.login);
+      throw { status: 403, error: 'Аккаунт заблокирован' };
+    }
+    return { client, created };
+  }
+
+
   // Turnstile: если secret не задан — проверка пропускается (dev/ранний запуск),
   // но honeypot + limiter остаются. Задан — токен обязателен и проверяется.
   async function verifyTurnstile(token, ip) {
@@ -110,12 +237,13 @@ module.exports = function createRegistrationRouter(deps) {
   // рознице — страницы login/register должны отличать «флаг выкл» от «нет роута».
   r.get('/api/public/auth_config', (req, res) => {
     if (!getSetting('retail_enabled', false)) {
-      return res.json({ retail_enabled: false, turnstile_site_key: '', telegram_bot_username: '' });
+      return res.json({ retail_enabled: false, turnstile_site_key: '', telegram_bot_username: '', telegram_oidc_enabled: false });
     }
     res.json({
       retail_enabled: true,
       turnstile_site_key: getSetting('turnstile_site_key', ''),
       telegram_bot_username: getSetting('telegram_bot_username', ''), // нет в SETTINGS_DEFAULTS — default ''
+      telegram_oidc_enabled: !!_oidcCreds().clientId, // OIDC Login взамен deprecated embed-виджета
     });
   });
 
@@ -224,57 +352,118 @@ module.exports = function createRegistrationRouter(deps) {
       return res.status(401).json({ error: 'Данные Telegram устарели — повторите вход' });
     }
 
-    const tgId = String(p.id);
-    let client = clients.find(c => c.tgChatId === tgId);
-    if (!client) {
-      // WP7: лимит аккаунтов на reg_ip действует и на TG-путь (Э5).
-      // Проверка только при СОЗДАНИИ — вход существующего клиента не режем.
-      if (accountIpLimitHit(getClientIp(req))) {
-        return res.status(403).json({ error: 'Не удалось создать аккаунт — попробуйте позже' });
-      }
-      // TG-созданный аккаунт: пароль задаётся позже в профиле, email — перед первой оплатой (54-ФЗ)
-      const id = generateId();
-      const login = 'u_' + id;
-      client = {
-        id, login,
-        name: [p.first_name, p.last_name].filter(Boolean).join(' ') || (p.username || tgId),
-        portName: login,
-        passwordHash: '',
-        contact: p.username ? ('@' + p.username) : '',
-        billingType: 'per_modem', price: 0, currency: 'RUB', balance: 0,
-        apiKey: crypto.createHash('sha256').update('prx_' + crypto.randomBytes(24).toString('hex')).digest('hex'),
-        apiKeyPrefix: '',
-        referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
-        referred_by: null, referral_balance: 0, resetToken: '',
-        clientType: 'individual', allowDebt: false,
-        tgChatId: tgId,
-        regIp: getClientIp(req),
-        consentPdAt: new Date().toISOString(),  // согласие — чекбоксом на форме перед виджетом
-        createdAt: new Date().toISOString(),
-      };
-      clients.push(client);
-      try {
-        saveClients(clients);
-      } catch (e) {
-        clients.pop();
-        if (e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''))) {
-          return res.status(409).json({ error: 'Этот Telegram-аккаунт уже привязан' });
-        }
-        throw e;
-      }
-      rebuildClientMaps();
-      getUsers()[login] = { passwordHash: '', portNameFilter: login, source: 'client', clientId: id };
-      auditLog(login, 'retail_register_tg', { tg: tgId, ip: getClientIp(req) });
-      logActivity('client', 'info', 'retail_register', client.name, `Регистрация через Telegram (${tgId})`, {});
-      // B2C Э3 (WP5): админ-алерт розницы — регистрация через TG Login Widget.
-      try { deps.alerts && deps.alerts.trigger('retail_registered', { login, email: client.email || null, via: 'telegram', tg: tgId }); } catch (_) {}
+    let result;
+    try {
+      result = _tgFindOrCreate(p, req);
+    } catch (err) {
+      if (err && err.status) return res.status(err.status).json({ error: err.error });
+      throw err;
     }
-    if (client.blocked) {
-      deleteSessionsByLogin(client.login);
-      return res.status(403).json({ error: 'Аккаунт заблокирован' });
+    const token = createClientSession(res, req, result.client);
+    res.json({ ok: true, token, login: result.client.login, client: publicClient(result.client) });
+  });
+
+  // ── Б2. Telegram OIDC Login (замена deprecated oauth-embed виджета) ──────
+  // Telegram перевёл Login Widget на OpenID Connect: oauth.telegram.org/auth
+  // на старый embed-поток отвечает просто «deprecated». Здесь — code flow:
+  //   GET /api/auth/telegram_oidc_start → 302 на oauth.telegram.org/auth
+  //   GET /api/auth/telegram_oidc       → callback: code → id_token (JWKS) →
+  //     find-or-create клиента → сессия (cookie) → редирект на /tg-auth,
+  //     где JS забирает токен из /api/auth/session_token в localStorage.
+  // Креды: telegram_oidc_client_id / telegram_oidc_secret (настройки; fallback —
+  // env TELEGRAM_OIDC_CLIENT_ID/SECRET). Redirect URL для BotFather:
+  // https://app.arendaproxy.ru/api/auth/telegram_oidc
+  r.get('/api/auth/telegram_oidc_start', (req, res) => {
+    if (!retailOn(res)) return;
+    const { clientId } = _oidcCreds();
+    if (!clientId) return res.status(503).send('Telegram-вход не настроен');
+    const state = _oidcStateNew();
+    const base = (req.headers['x-forwarded-proto'] || req.protocol) + '://' + req.headers.host;
+    const url = 'https://oauth.telegram.org/auth'
+      + '?client_id=' + encodeURIComponent(clientId)
+      + '&response_type=code'
+      + '&scope=' + encodeURIComponent('openid profile')
+      + '&redirect_uri=' + encodeURIComponent(base + '/api/auth/telegram_oidc')
+      + '&state=' + encodeURIComponent(state)
+      + '&nonce=' + encodeURIComponent(_oidcStates.get(state).nonce);
+    res.redirect(url);
+  });
+
+  r.get('/api/auth/telegram_oidc', async (req, res) => {
+    if (!retailOn(res)) return;
+    const fail = (msg) => res.redirect('/tg-auth?error=' + encodeURIComponent(msg));
+    try {
+      if (req.query.error) return fail('Вход отменён или отклонён Telegram');
+      const st = _oidcStateConsume(req.query.state);
+      if (!st) return fail('Сессия входа устарела — попробуйте ещё раз');
+      const { clientId, secret } = _oidcCreds();
+      if (!clientId || !secret) return fail('Telegram-вход не настроен');
+      const base = (req.headers['x-forwarded-proto'] || req.protocol) + '://' + req.headers.host;
+      const tokenResp = await globalThis.fetch('https://oauth.telegram.org/token', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+        body: new URLSearchParams({
+          grant_type: 'authorization_code',
+          client_id: clientId,
+          client_secret: secret,
+          code: String(req.query.code || ''),
+          redirect_uri: base + '/api/auth/telegram_oidc',
+        }).toString(),
+      });
+      const tokenData = await tokenResp.json().catch(() => ({}));
+      if (!tokenResp.ok || !tokenData.id_token) {
+        logger.warn('[TG-OIDC] token exchange failed: ' + tokenResp.status + ' ' + JSON.stringify(tokenData).slice(0, 200));
+        return fail('Не удалось подтвердить вход — попробуйте ещё раз');
+      }
+      const claims = await _oidcVerifyIdToken(tokenData.id_token, clientId, st.nonce);
+      const result = _tgFindOrCreate({
+        id: claims.sub,
+        first_name: claims.name || '',
+        username: claims.preferred_username || '',
+      }, req);
+      createClientSession(res, req, result.client);
+      res.redirect('/tg-auth');
+    } catch (e) {
+      if (e && e.status) return fail(e.error);
+      logger.warn('[TG-OIDC] callback failed: ' + e.message);
+      fail('Ошибка входа через Telegram — попробуйте ещё раз');
     }
-    const token = createClientSession(res, req, client);
-    res.json({ ok: true, token, login: client.login, client: publicClient(client) });
+  });
+
+  // Токен текущей сессии — для /tg-auth после OIDC-редиректа: cookie httpOnly,
+  // фронту нужен raw-токен в localStorage (основной транспорт — X-Auth-Token).
+  r.get('/api/auth/session_token', authMiddleware, (req, res) => {
+    let token = req.headers['x-auth-token'] || '';
+    if (!token) {
+      const m = (req.headers['cookie'] || '').match(/(?:^|;\s*)pr_session=([^;]+)/);
+      token = m ? decodeURIComponent(m[1]) : '';
+    }
+    const client = clients.find(c => c.login === req.user.login);
+    res.json({ ok: true, token, login: req.user.login, client: client ? publicClient(client) : null });
+  });
+
+  // ── Повторная отправка письма верификации (кулдаун 5 мин на аккаунт) ─────
+  r.post('/api/auth/resend_verification', authMiddleware, (req, res) => {
+    if (!retailOn(res)) return;
+    const client = clients.find(c => c.login === req.user.login);
+    if (!client) return res.status(404).json({ error: 'Аккаунт не найден' });
+    if (!client.email) return res.status(400).json({ error: 'Email не указан — добавьте его в профиле' });
+    if (client.emailVerified) return res.status(400).json({ error: 'Email уже подтверждён' });
+    const last = _resendCooldown.get(client.login) || 0;
+    if (Date.now() - last < RESEND_COOLDOWN_MS) {
+      const waitMin = Math.ceil((RESEND_COOLDOWN_MS - (Date.now() - last)) / 60000);
+      return res.status(429).json({ error: `Письмо уже отправлено — повторить можно через ${waitMin} мин` });
+    }
+    _resendCooldown.set(client.login, Date.now());
+    const verifyToken = authTokensDb.issue(client.login, 'verify_email');
+    const base = (req.headers['x-forwarded-proto'] || req.protocol) + '://' + req.headers.host;
+    mailer.send({
+      to: client.email, kind: 'verify_email',
+      subject: 'Подтвердите email — Arendaproxy',
+      text: `Подтвердите адрес: ${base}/verify?token=${verifyToken}\nСсылка действует 24 часа.`,
+    }).catch(e => logger.warn('[Resend] verify email send failed: ' + e.message));
+    auditLog(client.login, 'verify_email_resent', { ip: getClientIp(req) });
+    res.json({ ok: true, message: 'Письмо отправлено — проверьте почту (и папку «Спам»)' });
   });
 
   // ── Верификация email ───────────────────────────────────────────────────
@@ -379,6 +568,7 @@ module.exports = function createRegistrationRouter(deps) {
     if (!client.tgChatId) return res.json({ ok: true });   // идемпотентно
     const oldTg = client.tgChatId;
     client.tgChatId = null;
+    client.tgUsername = null;
     saveClients(clients);
     auditLog(client.login, 'tg_unlinked', { tg: oldTg, ip: getClientIp(req) });
     res.json({ ok: true });

@@ -148,7 +148,7 @@ async function handleUpdate(token, u) {
   // без payload — регистрация админ-чата (legacy) либо подсказка про привязку.
   if (txt === '/start' || txt.startsWith('/start ')) {
     const arg = txt.slice('/start'.length).trim();
-    if (arg.startsWith('link_')) { await _handleLinkCode(token, chatId, arg.slice(5)); return; }
+    if (arg.startsWith('link_')) { await _handleLinkCode(token, chatId, arg.slice(5), msg.from); return; }
 
     const whitelist = _adminWhitelist();
     const legacyChatId = String(getSetting('telegram_chat_id', '') || '');
@@ -238,7 +238,7 @@ function _adminGreeting() {
 //  Привязка аккаунта (WP5): /start link_<code>
 //  Код — одноразовый auth_token типа tg_link (TTL 15 мин), выданный из ЛК.
 // ────────────────────────────────────────────────────────────────
-async function _handleLinkCode(token, chatId, code) {
+async function _handleLinkCode(token, chatId, code, from) {
   if (!authTokensDb || !getClients || !saveClients) {
     await _send(token, chatId, '⚠️ Привязка временно недоступна — попробуйте позже.');
     return;
@@ -271,7 +271,8 @@ async function _handleLinkCode(token, chatId, code) {
     return;
   }
   client.tgChatId = sid;
-  saveClients(clients);   // persist через clientsRepo.upsertRow (tg_chat_id)
+  client.tgUsername = (from && from.username) || '';   // 065: показываем в профиле ЛК
+  saveClients(clients);   // persist через clientsRepo.upsertRow (tg_chat_id, tg_username)
   try { if (auditLog) auditLog(client.login, 'tg_linked', { tg: sid }); } catch (_) { /* best-effort */ }
   logger.info('[Telegram] account linked: ' + client.login + ' ↔ chat ' + sid);
   await _send(token, chatId,

@@ -147,7 +147,7 @@ r.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   const masked = { ...appSettings };
   // WP5: telegram_bot_token тоже секрет (enc1: в kv) — маскируем, как API-ключи.
   // WP3 (B2C Э4): tochka_acq_jwt — JWT эквайринга, тот же контур.
-  for (const k of ['anthropic_api_key', 'telegram_bot_token', 'tochka_acq_jwt', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'crm_db_url']) {
+  for (const k of ['anthropic_api_key', 'telegram_bot_token', 'tochka_acq_jwt', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'crm_db_url', 'telegram_oidc_secret']) {
     const v = masked[k];
     masked[k] = (typeof v === 'string' && v) ? '••••••••' : '';
   }
@@ -357,6 +357,9 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.turnstile_secret_key != null && req.body.turnstile_secret_key !== '••••••••') patch.turnstile_secret_key = String(req.body.turnstile_secret_key).trim();
   if (req.body.sendpulse_smtp_user != null)       patch.sendpulse_smtp_user       = String(req.body.sendpulse_smtp_user).trim();
   if (req.body.sendpulse_smtp_pass != null && req.body.sendpulse_smtp_pass !== '••••••••')   patch.sendpulse_smtp_pass   = String(req.body.sendpulse_smtp_pass).trim();
+  // Telegram OIDC Login (BotFather «Login widget»): client_id = bot_id, secret — секрет.
+  if (req.body.telegram_oidc_client_id != null)   patch.telegram_oidc_client_id   = String(req.body.telegram_oidc_client_id).trim();
+  if (req.body.telegram_oidc_secret != null && req.body.telegram_oidc_secret !== '••••••••') patch.telegram_oidc_secret = String(req.body.telegram_oidc_secret).trim();
   if (req.body.sendpulse_from != null) {
     const from = String(req.body.sendpulse_from).trim();
     if (from && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(from)) return res.status(400).json({ error: 'sendpulse_from: некорректный email' });

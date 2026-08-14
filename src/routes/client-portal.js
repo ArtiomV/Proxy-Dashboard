@@ -519,6 +519,7 @@ r.get('/api/client/referral', authMiddleware, (req, res) => {
     email: client.email || '',
     emailVerified: !!client.emailVerified,
     tgLinked: !!client.tgChatId,
+    tgUsername: client.tgUsername || '',   // 065: @username привязанного TG
     botUsername,
     referrals: referrals.map(r => ({ name: r.name, createdAt: r.createdAt }))
   });

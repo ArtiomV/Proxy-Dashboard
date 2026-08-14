@@ -28,7 +28,7 @@ module.exports = function createMiscRouter(deps) {
   // B2C auth-страницы по красивым путям (express.static без extensions отдаёт
   // только /register.html и т.п.; письма верификации/сброса ссылаются на /verify
   // и /reset без расширения).
-  for (const page of ['register', 'forgot', 'reset', 'verify']) {
+  for (const page of ['register', 'forgot', 'reset', 'verify', 'tg-auth']) {
     r.get('/' + page, (req, res) => {
       res.sendFile(path.join(__dirname, '..', '..', 'public', page + '.html'));
     });

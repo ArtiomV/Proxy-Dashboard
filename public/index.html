@@ -13,7 +13,7 @@
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/css/variables.css?v=0813c">
 <link rel="stylesheet" href="/css/base.css?v=0813c">
-<link rel="stylesheet" href="/css/client-portal.css?v=0814a">
+<link rel="stylesheet" href="/css/client-portal.css?v=0814b">
 <link rel="stylesheet" href="/css/shell.css?v=0813c">
 <!-- Yandex.Metrika counter (инлайн вынесен в /js/metrika.js — CSP) -->
 <script src="/js/metrika.js?v=0814a"></script>
@@ -73,7 +73,7 @@
           <a class="header-logo" href="/"><img src="/img/brand-logo.webp" alt="Arendaproxy"></a>
           <span class="header-brand-name">Arendaproxy.ru</span>
         </div>
-        <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.6</a>
+        <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.7</a>
         <span class="header-client-info"><span id="statusText"></span></span>
       </div>
 
@@ -91,7 +91,7 @@
 
       <div class="header-right">
         <div class="theme-toggle" id="themeToggle" data-on-click="toggleTheme()" title="Переключить тему"></div>
-        <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.6</a>
+        <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.7</a>
         <button class="btn-logout" data-on-click="doLogout()" title="Выйти">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -737,6 +737,7 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
       <div class="container">
         <div class="verify-banner" id="shopVerifyBanner" style="display:none">
           Подтвердите email — письмо отправлено при регистрации. Без подтверждения покупка недоступна.
+          <button class="btn btn-sm" data-on-click="doResendVerification(this)">Отправить письмо ещё раз</button>
         </div>
         <div id="shopContent">
           <div class="shop-grid">
@@ -753,6 +754,7 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
       <div class="container" style="max-width:720px">
         <div class="verify-banner" id="profileVerifyBanner" style="display:none">
           Подтвердите email — письмо отправлено при регистрации.
+          <button class="btn btn-sm" data-on-click="doResendVerification(this)">Отправить письмо ещё раз</button>
         </div>
         <div id="profileContent">
           <div style="display:flex;flex-direction:column;gap:14px;padding:8px 0">
@@ -792,7 +794,8 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
 <script src="/js/icons.js?v=0813d"></script>
 <script src="/js/utils.js?v=0813c"></script>
 <script src="/js/delegation.js?v=0813c"></script>
-<script src="/js/client.js?v=0814e"></script>
+<script src="/js/auth-utils.js?v=0814a"></script>
+<script src="/js/client.js?v=0814f"></script>
 
 </body>
 </html>

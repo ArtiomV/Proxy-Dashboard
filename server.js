@@ -470,6 +470,7 @@ function clientFromRow(r) {
     // B2C retail (миграция 060)
     email: r.email || '', emailVerified: r.email_verified === 1,
     tgChatId: r.tg_chat_id || '', regIp: r.reg_ip || '',
+    tgUsername: r.tg_username || '',   // миграция 065
     consentPdAt: r.consent_pd_at || '', blocked: r.blocked === 1,
     abuseStrikes: r.abuse_strikes || 0,
     balanceNegativeSince: r.balance_negative_since || null,
@@ -1611,6 +1612,8 @@ const SETTINGS_DEFAULTS = {
   telegram_chat_id: '',
   telegram_admin_ids: '',          // CSV telegram id админов бота; пусто = legacy telegram_chat_id
   telegram_bot_username: '',       // fallback username бота (основное — кэш getMe в kv tg_bot_username)
+  telegram_oidc_client_id: '',     // OIDC Login (BotFather «Login widget»): bot_id; пусто = из env TELEGRAM_OIDC_CLIENT_ID
+  telegram_oidc_secret: '',        // OIDC client_secret — СЕКРЕТ (enc1: в kv); пусто = env TELEGRAM_OIDC_CLIENT_SECRET
   telegram_summary_enabled: true,
   telegram_summary_time: '08:00', // HH:MM МСК
   telegram_last_sent_date: '',    // YYYY-MM-DD — written after each successful send
@@ -1676,7 +1679,7 @@ const SETTINGS_DEFAULTS = {
 // WP7.5: keys whose VALUES are encrypted at rest in kv_store (see
 // _encryptSettingVal below). Declared before the settings load because the
 // migration right after the load needs it.
-const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'telegram_bot_token', 'tochka_acq_jwt', 'crm_db_url']);
+const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'telegram_bot_token', 'tochka_acq_jwt', 'crm_db_url', 'telegram_oidc_secret']);
 stateMod.setAppSettings({ ...SETTINGS_DEFAULTS });
 const appSettings = stateMod.state.appSettings;
 try {

@@ -4,6 +4,8 @@ if(!_token){
   document.getElementById('rsForm').style.display='none';
   document.getElementById('rsError').textContent='Ссылка недействительна — нет токена';
 }else{
+  addPasswordToggle('rsPassword');
+  addPasswordToggle('rsPassword2');
   document.getElementById('rsPassword').focus();
 }
 

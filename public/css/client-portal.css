@@ -79,6 +79,16 @@ transition:color .3s ease,background .3s ease,border-color .3s ease,transform .1
 .login-box .btn-login:hover{background:#fff;color:#1960C9;border-color:#fff}
 .login-box .btn-login:active{transform:scale(.985)}
 .login-box .btn-login:disabled{opacity:.5;cursor:not-allowed}
+/* Telegram OIDC login — размер как .btn-login (14.08.2026: взамен deprecated iframe-виджета) */
+.login-box .btn-tg-login{display:flex;align-items:center;justify-content:center;gap:10px;box-sizing:border-box;background:#2AABEE;border-color:#2AABEE;text-decoration:none}
+.login-box .btn-tg-login:hover{background:#229ED9;border-color:#229ED9;color:#fff}
+.login-box .btn-tg-login svg{flex:0 0 auto}
+/* «Глазик» у полей пароля (auth-utils.js addPasswordToggle) */
+.pw-wrap{position:relative;width:100%}
+.pw-wrap input{padding-right:46px!important}
+.pw-eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#5C5967;padding:6px;margin:0;line-height:0;transition:color .2s}
+.pw-eye:hover{color:#EDEDED}
+.pw-eye svg{display:block}
 .login-error{color:#FF383C;font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
 /* Telegram Login Widget (вход через TG на странице логина, WP1) */
 .tg-wrap{display:flex;justify-content:center;margin:14px 0 0;min-height:0}

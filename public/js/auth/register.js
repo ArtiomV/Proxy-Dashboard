@@ -1,28 +1,6 @@
 // Извлечено из register.html (CSP: script-src без unsafe-inline — инлайн-скрипты заблокированы helmet).
-// Telegram Login Widget БЕЗ telegram-widget.js: он разбирает data-onauth через
-// eval(), что запрещено нашим CSP (script-src без unsafe-eval) — виджет молча
-// не рендерился. Рендерим iframe oauth.telegram.org напрямую и ловим
-// postMessage {event:'auth_user', auth_data} — протокол виджета (widget.js:315).
-function mountTelegramLogin(wrapId, botUsername, onAuth){
-  var wrap=document.getElementById(wrapId);
-  if(!wrap||!botUsername)return;
-  var ifr=document.createElement('iframe');
-  ifr.src='https://oauth.telegram.org/embed/'+encodeURIComponent(botUsername)
-    +'?origin='+encodeURIComponent(location.origin)
-    +'&return_to='+encodeURIComponent(location.href)
-    +'&size=large&request_access=write';
-  ifr.width=238; ifr.height=40;
-  ifr.setAttribute('frameborder','0');
-  ifr.setAttribute('scrolling','no');
-  ifr.style.border='none'; ifr.style.overflow='hidden';
-  wrap.appendChild(ifr);
-  window.addEventListener('message',function(e){
-    if(e.origin!=='https://oauth.telegram.org')return;
-    var d=e.data;
-    if(typeof d==='string'){try{d=JSON.parse(d)}catch(_){return}}
-    if(d&&d.event==='auth_user'&&!d.init&&d.auth_data)onAuth(d.auth_data);
-  });
-}
+// Telegram-вход — OIDC-кнопка из /js/auth-utils.js (старый iframe-виджет
+// oauth.telegram.org Telegram отключил: попап /auth отвечает «deprecated»).
 var _cfg=null;
 var _ref=new URLSearchParams(window.location.search).get('ref')||'';
 
@@ -48,9 +26,10 @@ var _ref=new URLSearchParams(window.location.search).get('ref')||'';
     s.async=true;s.defer=true;
     document.head.appendChild(s);
   }
-  if(_cfg.telegram_bot_username){
-    mountTelegramLogin('tgWrap', _cfg.telegram_bot_username, onTelegramAuth);
+  if(_cfg.telegram_oidc_enabled){
+    renderTelegramLoginButton('tgWrap','Войти через Telegram');
   }
+  addPasswordToggle('regPassword');
   document.getElementById('regEmail').focus();
 })();
 
@@ -98,24 +77,6 @@ async function doRegister(){
     err.textContent='Ошибка соединения';
   }finally{
     btn.disabled=false;
-  }
-}
-
-// Telegram Login Widget callback (глобальное имя — так требует виджет)
-async function onTelegramAuth(user){
-  var err=document.getElementById('regError');
-  err.textContent='';
-  try{
-    var resp=await fetch('/api/auth/telegram',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify(user)
-    });
-    var data=await resp.json();
-    if(!resp.ok){err.textContent=data.error||'Ошибка входа через Telegram';return}
-    _saveSession(data);
-  }catch(e){
-    err.textContent='Ошибка соединения';
   }
 }
 
