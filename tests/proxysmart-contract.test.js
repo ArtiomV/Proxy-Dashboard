@@ -53,7 +53,16 @@ describe('D7: proxysmart-contract — несоответствия ловятс�
     expect(v.some(s => s.includes('bandwidth_bytes_day_in'))).toBe(true);
 
     const vs = contract.validateShowStatusJson([{ modem_details: { NICK: 'X' } }]);
-    expect(vs.some(s => s.includes('IMEI'))).toBe(true); // вся выборка без IMEI — парсер пропустит весь флот
+    expect(vs.some(s => s.includes('IMEI'))).toBe(true); // весь массив без IMEI — парсер пропустит весь флот
+
+    // 15.08: ложного срабатывания быть не должно — первые записи выборки
+    // transient без IMEI (модем добавляется), но дальше по массиву IMEI есть.
+    const mixed = [
+      { modem_details: { NICK: 'ADDING1' } },
+      { modem_details: { NICK: 'ADDING2' } },
+      { modem_details: { IMEI: '867', NICK: 'OK', }, net_details: {} },
+    ];
+    expect(contract.validateShowStatusJson(mixed)).toEqual([]);
 
     const vsNet = contract.validateShowStatusJson([{ modem_details: { IMEI: '867', NICK: 'X' } }]);
     expect(vsNet.some(s => s.includes('net_details'))).toBe(true);
