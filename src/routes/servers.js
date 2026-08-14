@@ -147,7 +147,7 @@ r.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   const masked = { ...appSettings };
   // WP5: telegram_bot_token тоже секрет (enc1: в kv) — маскируем, как API-ключи.
   // WP3 (B2C Э4): tochka_acq_jwt — JWT эквайринга, тот же контур.
-  for (const k of ['anthropic_api_key', 'telegram_bot_token', 'tochka_acq_jwt', 'turnstile_secret_key', 'sendpulse_smtp_pass']) {
+  for (const k of ['anthropic_api_key', 'telegram_bot_token', 'tochka_acq_jwt', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'crm_db_url']) {
     const v = masked[k];
     masked[k] = (typeof v === 'string' && v) ? '••••••••' : '';
   }
@@ -187,6 +187,10 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   }
   if (req.body.auto_reboot_min_interval_min != null) {
     patch.auto_reboot_min_interval_min = Math.max(15, Math.min(720, parseInt(req.body.auto_reboot_min_interval_min) || 60));
+  }
+  // Порог TG-алерта по reboot score модема (0..100; notify-collect).
+  if (req.body.reboot_score_alert_threshold != null) {
+    patch.reboot_score_alert_threshold = Math.max(0, Math.min(100, parseInt(req.body.reboot_score_alert_threshold) || 70));
   }
   // Stage 18.8: hours-threshold for "stale modem" exclusion from agg endpoints.
   // Bounded 1..168 (1h .. 7d) — wider would defeat the purpose; tighter would
@@ -308,6 +312,7 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.retention_rotation_log != null)   patch.retention_rotation_log   = Math.max(7, Math.min(365, parseInt(req.body.retention_rotation_log) || 90));
   if (req.body.retention_proxy_checks != null)   patch.retention_proxy_checks   = Math.max(7, Math.min(365, parseInt(req.body.retention_proxy_checks) || 30));
   if (req.body.retention_modem_meta != null)     patch.retention_modem_meta     = Math.max(7, Math.min(365, parseInt(req.body.retention_modem_meta) || 30));
+  if (req.body.retention_top_hosts_daily != null) patch.retention_top_hosts_daily = Math.max(7, Math.min(365, parseInt(req.body.retention_top_hosts_daily) || 90));
   // Session & billing
   if (req.body.session_ttl_days != null)            patch.session_ttl_days            = Math.max(1, Math.min(365, parseInt(req.body.session_ttl_days) || 30));
   if (req.body.billing_retry_delay_hours != null)   patch.billing_retry_delay_hours   = Math.max(0.5, Math.min(24, parseFloat(req.body.billing_retry_delay_hours) || 1));
@@ -359,6 +364,15 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   }
   // WP7 (B2C Э5): антифрод розницы. 0 у suspend_hits / max_accounts / min_unique = контур выкл.
   if (req.body.domain_guard_suspend_hits != null) patch.domain_guard_suspend_hits = Math.max(0, Math.min(1000, parseInt(req.body.domain_guard_suspend_hits) || 0));
+  // Боксы под доменным контролем (CSV имён серверов, порядок не важен).
+  if (req.body.domain_guard_servers != null) {
+    const dgs = String(req.body.domain_guard_servers).split(',')
+      .map(s => s.trim()).filter(Boolean);
+    if (dgs.length > 20 || dgs.some(n => !/^[\w-]{1,64}$/.test(n))) {
+      return res.status(400).json({ error: 'domain_guard_servers: CSV имён серверов, до 20 штук' });
+    }
+    patch.domain_guard_servers = dgs.join(',');
+  }
   if (req.body.abuse_strikes_block != null)       patch.abuse_strikes_block       = Math.max(1, Math.min(100, parseInt(req.body.abuse_strikes_block) || 2));
   if (req.body.retail_max_accounts_per_ip != null) patch.retail_max_accounts_per_ip = Math.max(0, Math.min(100, parseInt(req.body.retail_max_accounts_per_ip) || 0));
   if (req.body.retail_min_unique_ips != null)     patch.retail_min_unique_ips     = Math.max(0, Math.min(100, parseInt(req.body.retail_min_unique_ips) || 0));
@@ -401,6 +415,30 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   // endpoint is NOT a value — ignore it so a save of an untouched form can't
   // clobber the real key with the mask itself.
   if (req.body.anthropic_api_key != null && req.body.anthropic_api_key !== '••••••••')        patch.anthropic_api_key        = String(req.body.anthropic_api_key).trim();
+  // AI-инсайты в ежедневной TG-сводке (вкл/выкл; ключ — anthropic_api_key выше).
+  if (req.body.ai_insights_enabled != null)       patch.ai_insights_enabled       = !!req.body.ai_insights_enabled;
+  // Публичный URL дашборда — ссылки в TG-сводке/алертах. Пусто = дефолт.
+  if (req.body.public_url != null) {
+    const pu = String(req.body.public_url).trim();
+    if (pu && !/^https?:\/\/[\w.-]+(?::\d+)?(?:\/[\w./-]*)?$/.test(pu)) {
+      return res.status(400).json({ error: 'public_url: http(s)://host[/path] или пусто' });
+    }
+    patch.public_url = pu.replace(/\/+$/, '');
+  }
+  // Twenty CRM: DSN базы (postgresql://user:pass@host:5432/db). Секрет — enc1:,
+  // маска '••••••••' при GET; пустое замаскированное поле = не менять.
+  if (req.body.crm_db_url != null && req.body.crm_db_url !== '••••••••') {
+    const cu = String(req.body.crm_db_url).trim();
+    if (cu && !/^postgres(ql)?:\/\//.test(cu)) {
+      return res.status(400).json({ error: 'crm_db_url: postgresql://user:pass@host:5432/db или пусто' });
+    }
+    patch.crm_db_url = cu;
+  }
+  // Симулятор нагрузки (стенд): включение + потолки прогона.
+  if (req.body.simulator_enabled != null)          patch.simulator_enabled          = !!req.body.simulator_enabled;
+  if (req.body.simulator_max_workers != null)      patch.simulator_max_workers      = Math.max(1, Math.min(200, parseInt(req.body.simulator_max_workers) || 50));
+  if (req.body.simulator_max_sse != null)          patch.simulator_max_sse          = Math.max(1, Math.min(100, parseInt(req.body.simulator_max_sse) || 10));
+  if (req.body.simulator_max_duration_min != null) patch.simulator_max_duration_min = Math.max(1, Math.min(240, parseInt(req.body.simulator_max_duration_min) || 30));
   if (req.body.telegram_summary_time != null) {
     const t = String(req.body.telegram_summary_time);
     if (/^\d{2}:\d{2}$/.test(t)) patch.telegram_summary_time = t;

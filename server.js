@@ -1676,7 +1676,7 @@ const SETTINGS_DEFAULTS = {
 // WP7.5: keys whose VALUES are encrypted at rest in kv_store (see
 // _encryptSettingVal below). Declared before the settings load because the
 // migration right after the load needs it.
-const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'telegram_bot_token', 'tochka_acq_jwt']);
+const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'telegram_bot_token', 'tochka_acq_jwt', 'crm_db_url']);
 stateMod.setAppSettings({ ...SETTINGS_DEFAULTS });
 const appSettings = stateMod.state.appSettings;
 try {

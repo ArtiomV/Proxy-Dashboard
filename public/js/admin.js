@@ -247,11 +247,9 @@ function _fmtIsoDt(iso){
 async function loadRetailPoolPorts(){
   var card=document.getElementById('retailPoolPortsCard');
   if(!card)return;
-  try{
-    var settings=await api(API+'/api/admin/settings');
-    if(!settings||!settings.retail_enabled){card.style.display='none';return}
-    card.style.display='';
-  }catch(e){card.style.display='none';return}
+  // Админская карточка: видна всегда — розница может быть ещё выключена,
+  // а пул уже надо наполнить. retail_enabled гейтит витрину, не конфиг.
+  card.style.display='';
   var box=document.getElementById('retailPoolTable');
   if(!_retailPoolRows)box.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div>';
   try{
@@ -444,9 +442,7 @@ async function loadCardPaymentsAdmin(){
   var card=document.getElementById('cardPaymentsCard');
   if(!card)return;
   try{
-    var settings=await api(API+'/api/admin/settings');
-    // Гейт как у карточки пула портов: без retail_enabled секция скрыта.
-    if(!settings||!settings.retail_enabled){card.style.display='none';return}
+    // Журнал платежей показываем всегда (настройка — до включения розницы).
     card.style.display='';
     var box=document.getElementById('cardPaymentsTable');
     box.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div>';
@@ -485,8 +481,7 @@ async function loadPromoCodesAdmin(){
   var card=document.getElementById('promoCodesCard');
   if(!card)return;
   try{
-    var settings=await api(API+'/api/admin/settings');
-    if(!settings||!settings.retail_enabled){card.style.display='none';return}
+    // Промокоды настраиваются и до включения розницы — карточка видна всегда.
     card.style.display='';
     var box=document.getElementById('promoCodesTable');
     var data=await api(API+'/api/admin/promo-codes');
@@ -573,7 +568,8 @@ async function loadAcquiringSettings(){
   if(!card)return;
   try{
     var s=await api(API+'/api/admin/settings');
-    if(!s||!s.retail_enabled){card.style.display='none';return}
+    // Настройки эквайринга доступны и при выключенной рознице — иначе
+    // ключи невозможно ввести до запуска. Карточка видна всегда.
     card.style.display='';
     var pv=document.getElementById('acqProvider');
     pv.value=(s.retail_acquiring_provider==='tochka')?'tochka':'none';

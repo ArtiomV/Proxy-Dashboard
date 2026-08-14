@@ -91,7 +91,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.1</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.2</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -107,7 +107,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.1</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.2</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -116,7 +116,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.1</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.2</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -502,6 +502,7 @@
             <div class="set-row"><div><div class="set-row-t">Антифрод: strikes до блока</div><div class="set-row-d">Столько нарушений AUP → аккаунт блокируется (blocked=1), сессии убиваются</div></div><div class="set-inp"><input id="abuseStrikesBlockInput" type="number" min="1" max="100"><span>шт</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Антифрод: аккаунтов с одного IP</div><div class="set-row-d">Больше N розничных аккаунтов с одного IP регистрации → отказ (0 = выкл)</div></div><div class="set-inp"><input id="retailMaxAccountsPerIpInput" type="number" min="0" max="100"><span>шт</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Пул: мин. уникальность IP</div><div class="set-row-d">Уникальных IP за 14 дней на боксе розницы ниже N% → алерт о деградации пула (0 = выкл)</div></div><div class="set-inp"><input id="retailMinUniqueIpsInput" type="number" min="0" max="100"><span>%</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Доменный контроль: боксы</div><div class="set-row-d">Боксы под контролем бан-листа (CSV, напр. S2,S4). Пусто = дефолт бэкенда</div></div><input id="domainGuardServersInput" placeholder="S2,S4" autocomplete="off" style="width:180px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
           </div>
           <div class="set-save-bar">
             <span id="retailSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
@@ -519,6 +520,7 @@
             <div class="set-row"><div><div class="set-row-t">SendPulse SMTP логин</div><div class="set-row-d">Логин SMTP-аккаунта SendPulse</div></div><input id="sendpulseUserInput" autocomplete="off" style="width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">SendPulse SMTP пароль</div><div class="set-row-d">Хранится зашифрованным; пустое при сохранении = не менять</div></div><input id="sendpulsePassInput" type="password" placeholder="••••••••" autocomplete="off" style="width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">From-адрес писем</div><div class="set-row-d">Отправитель писем клиентам (должен быть подтверждён в SendPulse)</div></div><input id="sendpulseFromInput" placeholder="noreply@arendaproxy.ru" autocomplete="off" style="width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Twenty CRM: DSN базы</div><div class="set-row-d">postgresql://user:pass@host:5432/db — push заявок с сайта в CRM. Хранится зашифрованным; пустое при сохранении = не менять; пусто совсем = дефолт бэкенда</div></div><input id="crmDbUrlInput" type="password" placeholder="postgresql://..." autocomplete="off" style="width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
           </div>
           <div class="set-save-bar">
             <span id="retailInfraStatus" style="font-size:11px;color:var(--text-2)"></span>
@@ -689,6 +691,23 @@
         <!-- D11: симулятор выключен настройкой simulator_enabled (дефолт — выкл, не для прода) -->
         <div id="simDisabledBanner" class="sim-banner danger" style="display:none">
           <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><rect x="9" y="9" width="6" height="6" rx="1"/></svg> Симулятор выключен (настройка <code>simulator_enabled</code>). Запуск запрещён (403). Включайте только на стенде — прогон гоняет реальную нагрузку через тест-пул модемов.
+        </div>
+
+        <!-- Настройки симулятора: включение + потолки (секция «Симулятор») -->
+        <div class="analytics-card" style="margin-bottom:16px">
+          <h3 style="margin:0 0 6px">Настройки симулятора</h3>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">Включение и потолки прогона. Симулятор гоняет реальную нагрузку через тест-пул модемов — не включайте на проде без необходимости.</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Симулятор включён</div><div class="set-row-d">Выкл = API симулятора отвечает 403, запуск запрещён</div></div><label class="tgl"><input type="checkbox" id="simEnabledInput"><span></span></label></div>
+            <div class="set-row"><div><div class="set-row-t">Макс. воркеров</div><div class="set-row-d">Потолок concurrency прогона (кламп при старте и в тике)</div></div><div class="set-inp"><input id="simMaxWorkersInput" type="number" min="1" max="200"><span>шт</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Макс. SSE-подписчиков</div><div class="set-row-d">Одновременных live-стримов прогона (каждый — соединение)</div></div><div class="set-inp"><input id="simMaxSseInput" type="number" min="1" max="100"><span>шт</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Макс. длительность</div><div class="set-row-d">Потолок длительности одного прогона</div></div><div class="set-inp"><input id="simMaxDurationInput" type="number" min="1" max="240"><span>мин</span></div></div>
+          </div>
+          <div class="set-save-bar">
+            <span id="simSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
+            <button class="btn btn-primary" data-on-click="saveSimulatorSettings()">Сохранить</button>
+          </div>
         </div>
 
         <!-- Live monitor — visible only when a run is active -->
@@ -996,6 +1015,9 @@
             <div class="set-row"><div><div class="set-row-t">Ежедневная сводка</div><div class="set-row-d">Если выключено, сводка не отправляется автоматически</div></div><label class="tgl"><input type="checkbox" id="tgSummaryEnabled"><span></span></label></div>
             <div class="set-row"><div><div class="set-row-t">ID админов бота</div><div class="set-row-d">Telegram id админов через запятую — только им доступны команды /today, /yesterday, /status. Пусто = legacy-режим (админ = Chat ID выше)</div></div><input id="tgAdminIds" placeholder="614664598,123456789" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">Username бота</div><div class="set-row-d">Без @. Fallback для ссылки привязки из ЛК — обычно определяется сам через getMe</div></div><input id="tgBotUsername" placeholder="my_proxy_bot" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Публичный URL дашборда</div><div class="set-row-d">Ссылки в сводке и алертах ведут сюда. Пусто = https://app.arendaproxy.ru</div></div><input id="publicUrlInput" placeholder="https://app.arendaproxy.ru" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">AI-инсайты в сводке</div><div class="set-row-d">Абзац аналитики от Claude в ежедневной сводке (нужен API-ключ ниже)</div></div><label class="tgl"><input type="checkbox" id="aiInsightsEnabledInput"><span></span></label></div>
+            <div class="set-row"><div><div class="set-row-t">Anthropic API Key</div><div class="set-row-d">Для AI-инсайтов. Хранится зашифрованным; пустое при сохранении = не менять</div></div><input id="anthropicApiKeyInput" type="password" placeholder="sk-ant-..." autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
             <button class="btn btn-sm" data-on-click="tgSaveSettings().then(function(){showToast('Настройки сохранены','success')}).catch(function(e){showToast(e.message,'error')})">Сохранить</button>
@@ -1038,6 +1060,7 @@
           <div class="set-card">
             <div class="set-row"><div><div class="set-row-t">Авто-перезагрузка проблемных</div><div class="set-row-d"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><path d="M12 17.2h.01"/></svg> Влияет на парк. Модемы из «Сбоит прокси» перезагружаются по интервалу ниже. Не триггерится «ротация без смены IP». По умолчанию выкл</div></div><label class="tgl"><input type="checkbox" id="autoRebootEnabledInput"><span></span></label></div>
             <div class="set-row"><div><div class="set-row-t">Интервал авто-ребута</div><div class="set-row-d">Не чаще одного перезапуска в интервал на модем (защита от петли)</div></div><div class="set-inp"><input id="autoRebootIntervalInput" type="number" step="5" min="15" max="720"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Алерт по reboot score</div><div class="set-row-d">Модем с оценкой перезагрузок выше порога → TG-алерт в сводке проблемных (0–100)</div></div><div class="set-inp"><input id="rebootScoreAlertInput" type="number" min="0" max="100"><span>баллов</span></div></div>
           </div>
 
           <div class="set-save-bar">
@@ -1175,6 +1198,7 @@
             <div class="set-row"><div><div class="set-row-t">Лог ротаций</div><div class="set-row-d">История смены IP-адресов модемов</div></div><div class="set-inp"><input id="retRotationLogInput" type="number" min="7" max="365"><span>дн</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Замеры прокси</div><div class="set-row-d">Результаты проверки задержки прокси к целевому сайту</div></div><div class="set-inp"><input id="retProxyChecksInput" type="number" min="7" max="365"><span>дн</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Метаданные модемов</div><div class="set-row-d">Кеш инфо о модемах (IMEI, оператор, модель)</div></div><div class="set-inp"><input id="retModemMetaInput" type="number" min="7" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Топ-хосты (доменный контроль)</div><div class="set-row-d">Дневная статистика хостов, к которым обращались через прокси</div></div><div class="set-inp"><input id="retTopHostsDailyInput" type="number" min="7" max="365"><span>дн</span></div></div>
           </div>
           <div class="set-save-bar">
             <span id="retentionSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>

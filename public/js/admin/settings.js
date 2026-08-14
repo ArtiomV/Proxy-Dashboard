@@ -295,6 +295,25 @@ function loadSettings(){
     var spP=document.getElementById('sendpulsePassInput');
     if(spP){if(s.sendpulse_smtp_pass==='••••••••'){spP.value='';spP.dataset.masked='1';}else{spP.value=s.sendpulse_smtp_pass||'';spP.dataset.masked='';}}
     var spF=document.getElementById('sendpulseFromInput');if(spF)spF.value=s.sendpulse_from||'';
+    // Twenty CRM DSN — секрет (enc1:), та же схема маски, что у SMTP-пароля
+    var crmD=document.getElementById('crmDbUrlInput');
+    if(crmD){if(s.crm_db_url==='••••••••'){crmD.value='';crmD.dataset.masked='1';}else{crmD.value=s.crm_db_url||'';crmD.dataset.masked='';}}
+    // Доменный контроль: боксы (CSV)
+    var dgs2=document.getElementById('domainGuardServersInput');if(dgs2)dgs2.value=s.domain_guard_servers||'';
+    // Telegram-доп.: публичный URL, AI-инсайты, Anthropic key (маска)
+    var puI=document.getElementById('publicUrlInput');if(puI)puI.value=s.public_url||'';
+    var aiE=document.getElementById('aiInsightsEnabledInput');if(aiE)aiE.checked=(s.ai_insights_enabled!==false);
+    var anK=document.getElementById('anthropicApiKeyInput');
+    if(anK){if(s.anthropic_api_key==='••••••••'){anK.value='';anK.dataset.masked='1';}else{anK.value=s.anthropic_api_key||'';anK.dataset.masked='';}}
+    // Авто-ребут: порог алерта по reboot score
+    var rbs=document.getElementById('rebootScoreAlertInput');if(rbs)rbs.value=s.reboot_score_alert_threshold!=null?s.reboot_score_alert_threshold:70;
+    // Хранение: топ-хосты доменного контроля
+    var rth=document.getElementById('retTopHostsDailyInput');if(rth)rth.value=s.retention_top_hosts_daily||90;
+    // Симулятор нагрузки
+    var simE=document.getElementById('simEnabledInput');if(simE)simE.checked=!!s.simulator_enabled;
+    var simW=document.getElementById('simMaxWorkersInput');if(simW)simW.value=s.simulator_max_workers||50;
+    var simS=document.getElementById('simMaxSseInput');if(simS)simS.value=s.simulator_max_sse||10;
+    var simD=document.getElementById('simMaxDurationInput');if(simD)simD.value=s.simulator_max_duration_min||30;
     if(currentData) currentData.settings = s;
     renderPricingTiers();
   }).catch(function(){});
@@ -302,17 +321,22 @@ function loadSettings(){
 // Telegram: save fields when changed (debounced)
 function tgSaveSettings(){
   var tgT=document.getElementById('tgBotToken');
+  var anK=document.getElementById('anthropicApiKeyInput');
   var data={
     telegram_chat_id:(document.getElementById('tgChatId').value||'').trim(),
     telegram_summary_time:(document.getElementById('tgSummaryTime').value||'').trim(),
     telegram_summary_enabled:!!document.getElementById('tgSummaryEnabled').checked,
     telegram_admin_ids:(document.getElementById('tgAdminIds').value||'').trim(),
-    telegram_bot_username:(document.getElementById('tgBotUsername').value||'').trim()
+    telegram_bot_username:(document.getElementById('tgBotUsername').value||'').trim(),
+    public_url:(document.getElementById('publicUrlInput').value||'').trim(),
+    ai_insights_enabled:!!document.getElementById('aiInsightsEnabledInput').checked
   };
   // Токен: при замаскированном значении пустое поле = «не менять» (иначе
   // сохранение нетронутой формы затирало бы реальный токен enc1:).
   var tok=(tgT.value||'').trim();
   if(tok||!tgT.dataset.masked) data.telegram_bot_token=tok;
+  // Anthropic key — та же схема маски.
+  if(anK){var ak=(anK.value||'').trim();if(ak||!anK.dataset.masked)data.anthropic_api_key=ak;}
   return api(API+'/api/admin/settings',{method:'PUT',json:data});
 }
 // Розница: общие настройки + алерты/антифрод (секция «Розница»).
@@ -329,7 +353,8 @@ function saveRetailSettings(){
     domain_guard_suspend_hits:_num('domainGuardSuspendHitsInput',1,0,1000),
     abuse_strikes_block:_num('abuseStrikesBlockInput',2,1,100),
     retail_max_accounts_per_ip:_num('retailMaxAccountsPerIpInput',2,0,100),
-    retail_min_unique_ips:_num('retailMinUniqueIpsInput',50,0,100)
+    retail_min_unique_ips:_num('retailMinUniqueIpsInput',50,0,100),
+    domain_guard_servers:(document.getElementById('domainGuardServersInput').value||'').trim()
   };
   var st=document.getElementById('retailSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
@@ -349,6 +374,9 @@ function saveRetailInfraSettings(){
   };
   var ts=(tsec.value||'').trim(); if(ts||!tsec.dataset.masked)data.turnstile_secret_key=ts;
   var sp=(spP.value||'').trim(); if(sp||!spP.dataset.masked)data.sendpulse_smtp_pass=sp;
+  // Twenty CRM DSN — секрет, та же схема маски.
+  var crmD=document.getElementById('crmDbUrlInput');
+  if(crmD){var cd=(crmD.value||'').trim();if(cd||!crmD.dataset.masked)data.crm_db_url=cd;}
   var st=document.getElementById('retailInfraStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
   api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
@@ -427,8 +455,10 @@ function saveSettings(){
   _errorRateThreshold=errThresh;
   var staleH=parseInt(document.getElementById('staleModemHoursInput').value)||12;
   var offThMin=parseInt((document.getElementById('modemOfflineThresholdInput')||{}).value)||10;
+  var rbs=parseInt((document.getElementById('rebootScoreAlertInput')||{}).value);
+  if(isNaN(rbs))rbs=70;
   window._offlineThresholdMin=offThMin;
-  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,reboot_score_alert_threshold:rbs,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
     if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Почасовой замер: '+(modems.join(', ')||'дефолтный список')+' — применится со следующего часа';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -491,7 +521,8 @@ function saveRetentionSettings(){
     retention_system_log:parseInt(document.getElementById('retSystemLogInput').value)||30,
     retention_rotation_log:parseInt(document.getElementById('retRotationLogInput').value)||90,
     retention_proxy_checks:parseInt(document.getElementById('retProxyChecksInput').value)||30,
-    retention_modem_meta:parseInt(document.getElementById('retModemMetaInput').value)||30
+    retention_modem_meta:parseInt(document.getElementById('retModemMetaInput').value)||30,
+    retention_top_hosts_daily:parseInt((document.getElementById('retTopHostsDailyInput')||{}).value)||90
   };
   var st=document.getElementById('retentionSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
@@ -511,6 +542,21 @@ function saveSessionBillingSettings(){
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
   api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';_showRestartBanner()}
+    else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
+  }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
+}
+// Симулятор нагрузки (секция «Симулятор»): включение + потолки прогона.
+function saveSimulatorSettings(){
+  var data={
+    simulator_enabled:!!document.getElementById('simEnabledInput').checked,
+    simulator_max_workers:parseInt(document.getElementById('simMaxWorkersInput').value)||50,
+    simulator_max_sse:parseInt(document.getElementById('simMaxSseInput').value)||10,
+    simulator_max_duration_min:parseInt(document.getElementById('simMaxDurationInput').value)||30
+  };
+  var st=document.getElementById('simSettingsStatus');
+  st.textContent='Сохраняю...';st.style.color='var(--warning)';
+  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';if(typeof initSimulator==='function')initSimulator()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
 }
