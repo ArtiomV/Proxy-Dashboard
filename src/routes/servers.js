@@ -336,6 +336,11 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   // WP5 (B2C Э3): пороги алертов розницы
   if (req.body.retail_bulk_buy_threshold != null) patch.retail_bulk_buy_threshold = Math.max(1, Math.min(100, parseInt(req.body.retail_bulk_buy_threshold) || 3));
   if (req.body.retail_pool_min_free != null)      patch.retail_pool_min_free      = Math.max(0, Math.min(1000, parseInt(req.body.retail_pool_min_free) || 0));
+  // WP7 (B2C Э5): антифрод розницы. 0 у suspend_hits / max_accounts / min_unique = контур выкл.
+  if (req.body.domain_guard_suspend_hits != null) patch.domain_guard_suspend_hits = Math.max(0, Math.min(1000, parseInt(req.body.domain_guard_suspend_hits) || 0));
+  if (req.body.abuse_strikes_block != null)       patch.abuse_strikes_block       = Math.max(1, Math.min(100, parseInt(req.body.abuse_strikes_block) || 2));
+  if (req.body.retail_max_accounts_per_ip != null) patch.retail_max_accounts_per_ip = Math.max(0, Math.min(100, parseInt(req.body.retail_max_accounts_per_ip) || 0));
+  if (req.body.retail_min_unique_ips != null)     patch.retail_min_unique_ips     = Math.max(0, Math.min(100, parseInt(req.body.retail_min_unique_ips) || 0));
   // AI-insights key (Telegram daily summary). The '••••••••' mask shown by the GET
   // endpoint is NOT a value — ignore it so a save of an untouched form can't
   // clobber the real key with the mask itself.

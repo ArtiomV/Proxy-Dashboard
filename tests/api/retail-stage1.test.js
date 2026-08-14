@@ -17,12 +17,16 @@ function setRetail(on) {
   const settings = row ? JSON.parse(row.value) : {};
   settings.retail_enabled = on;
   if (on) settings.retail_pool_servers = 'S1';
+  // WP7 (Э5): лимит аккаунтов на reg_ip — в сьюте регистраций много с одного
+  // тестового IP, поднимаем (сам лимит проверяется в retail-stage5.test.js).
+  if (on) settings.retail_max_accounts_per_ip = 1000;
   db.prepare('INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime(\'now\'))')
     .run('app_settings', JSON.stringify(settings));
   // in-memory appSettings — стабильная идентичность объекта (state-stable-identity):
   // мутация полей видна всем роутерам, захватившим ссылку при монтировании
   stateMod.state.appSettings.retail_enabled = on;
   if (on) stateMod.state.appSettings.retail_pool_servers = 'S1';
+  if (on) stateMod.state.appSettings.retail_max_accounts_per_ip = 1000;
 }
 
 function cleanup() {

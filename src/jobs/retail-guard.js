@@ -36,6 +36,7 @@ function create(deps) {
   const {
     logger, logActivity, auditLog, alerts,
     proxyConf, findServer,
+    fetchApi,                // WP7 (Э5): монитор уникальности IP (unique_ips_json)
     saveClients, getMoscowNow,
     fetchAllServersDataCached,
     clients, retailPoolDb, tariffsDb, getSetting,
@@ -138,6 +139,14 @@ function create(deps) {
 
   // ── шаг 4: balance > 0 → восстановление ──
   async function _restoreClient(client, serverResults, blockedRows, stats) {
+    // WP7 (Э5): порты, замороженные антифродом (kv-маркер abuse_hold из
+    // domain-guard), НЕ воскрешаем автоматически — разблокировка только
+    // админом («Реабилитировать порт»). Долговой конвейер такого клиента
+    // оставляем как есть (баланс плюсовой — гасить нечего).
+    try {
+      const marker = kvGet(`abuse_hold:${client.id}`);
+      if (marker && marker.value && JSON.parse(marker.value).length) return false;
+    } catch (_) { /* маркер битый/нет kv — не блокируем восстановление по долгу */ }
     const balance = client.balance || 0;
     const avg = portValidity.avgDailyCharge7d(client.id);
     // avg = 0 → 30 дн дефолт; floor=0 (баланса < сутки) — минимум 1 день,
@@ -334,6 +343,32 @@ function create(deps) {
     } catch (e) { logger.warn('[RetailGuard] pool_low check: ' + e.message); }
   }
 
+  // ── WP7 (Э5): монитор качества пула — деградация уникальности IP на
+  // розничных боксах. Метрика существующая: /apix/unique_ips_json
+  // (UNIQUE_IPS_PERCENT за 14 дней, та же, что в карточках серверов). Тик
+  // 10 мин — как UI-кэш servers.js; дедуп/cooldown по серверу — в alerts.js.
+  // retail_min_unique_ips = 0 → монитор выключен.
+  async function _checkPoolIpQuality() {
+    try {
+      const minUniq = Number(getSetting('retail_min_unique_ips', 50));
+      if (!minUniq) return;
+      const servers = String(getSetting('retail_pool_servers', '')).split(',').map(s => s.trim()).filter(Boolean);
+      for (const srv of servers) {
+        const server = findServer(srv);
+        if (!server) continue;
+        let uniq = null;
+        try { uniq = await fetchApi(server, '/apix/unique_ips_json', 12000); } catch (e) {
+          logger.warn(`[RetailGuard] unique_ips ${srv}: ${e.message}`);
+          continue;
+        }
+        const pct = uniq && Number(uniq.UNIQUE_IPS_PERCENT);
+        if (Number.isFinite(pct) && pct < minUniq) {
+          alerts.trigger('retail_pool_ip_degraded', { server: srv, uniqueIps: pct, min: minUniq });
+        }
+      }
+    } catch (e) { logger.warn('[RetailGuard] ip_quality check: ' + e.message); }
+  }
+
   let running = false;   // re-entrancy: прогон один за раз
 
   async function runOnce() {
@@ -347,6 +382,7 @@ function create(deps) {
       for (const client of clients) {
         if (client.clientType === 'legal') continue;   // юрлица — НИКОГДА
         if (client.allowDebt) continue;                // allow_debt = 1 — не трогаем
+        if (client.blocked) continue;                  // WP7: антифрод-блок — конвейер на паузе, разблокировка только админом
         if (!client.portName) continue;
         try {
           if (await _processClient(client, serverResults, stats)) dirty = true;
@@ -358,6 +394,7 @@ function create(deps) {
       await _processExpiredHolds(stats);
       await _processExpiredTestDays(stats);
       _checkPoolLow();   // WP5: алерт «свободных < retail_pool_min_free» (дедуп по серверу в alerts.js)
+      await _checkPoolIpQuality();   // WP7 (Э5): деградация уникальности IP розничных боксов
       return stats;
     } finally {
       running = false;

@@ -594,5 +594,29 @@ r.post('/api/admin/clients/:id/regenerate_key', authMiddleware, adminMiddleware,
   res.json({ ok: true, apiKey: plainApiKey });
 });
 
+// B2C Э5 (WP7): разблокировка аккаунта — ТОЛЬКО админом (§8 ТЗ). blocked=0;
+// опционально reset_strikes обнуляет abuse_strikes (иначе следующее
+// нарушение снова дойдёт до порога abuse_strikes_block и переблокирует).
+// Замороженные антифродом порты здесь НЕ воскрешаются — для этого
+// POST /api/admin/retail/client/rehabilitate (routes/retail.js).
+r.post('/api/admin/clients/:id/unblock', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const wasBlocked = !!client.blocked;
+  client.blocked = false;
+  const resetStrikes = !!(req.body && req.body.reset_strikes);
+  if (resetStrikes) client.abuseStrikes = 0;
+  saveClients(clients);
+  auditLog(req.user.login, 'retail_unblock', {
+    clientId: client.id, login: client.login,
+    wasBlocked, resetStrikes, abuseStrikes: client.abuseStrikes || 0,
+    ip: getClientIp(req),
+  });
+  logActivity('client', 'warning', 'retail_unblock', client.login,
+    `Аккаунт разблокирован админом${resetStrikes ? ' (strikes обнулены)' : ''}`,
+    { client_id: client.id, abuse_strikes: client.abuseStrikes || 0 });
+  res.json({ ok: true, blocked: false, abuseStrikes: client.abuseStrikes || 0 });
+});
+
   return r;
 };

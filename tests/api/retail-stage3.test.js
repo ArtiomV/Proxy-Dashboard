@@ -22,9 +22,12 @@ function setRetail(on) {
   const row = db.prepare('SELECT value FROM kv_store WHERE key = ?').get('app_settings');
   const settings = row ? JSON.parse(row.value) : {};
   settings.retail_enabled = on;
+  // WP7 (Э5): лимит аккаунтов на reg_ip — регистраций в сьюте больше дефолтных 2.
+  if (on) settings.retail_max_accounts_per_ip = 1000;
   db.prepare('INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime(\'now\'))')
     .run('app_settings', JSON.stringify(settings));
   stateMod.state.appSettings.retail_enabled = on;
+  if (on) stateMod.state.appSettings.retail_max_accounts_per_ip = 1000;
 }
 
 function kvSet(key, value) {

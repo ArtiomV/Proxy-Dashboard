@@ -89,6 +89,22 @@ module.exports = function createRegistrationRouter(deps) {
     return (row ? row.cnt : 0) >= limit;
   }
 
+  // Анти-мультиаккаунт (WP7, Э5): ВСЕГО аккаунтов с одного reg_ip — не более
+  // retail_max_accounts_per_ip (дефолт 2; 0 = выкл). B2B/админ-созданные
+  // клиенты без reg_ip не считаются (reg_ip NULL не матчится).
+  function accountIpLimitHit(ip) {
+    const limit = Number(getSetting('retail_max_accounts_per_ip', 2));
+    if (!ip || !limit) return false;
+    const row = db.prepare('SELECT COUNT(*) AS cnt FROM clients WHERE reg_ip = ?').get(ip);
+    const count = row ? row.cnt : 0;
+    if (count < limit) return false;
+    // Отказ — с нейтральным текстом (не раскрываем причину ботам), админу — алерт
+    // (дедуп по IP с cooldown внутри alerts.js) + след в аудите.
+    auditLog('system', 'retail_multiaccount_ip', { ip, count, limit });
+    try { deps.alerts && deps.alerts.trigger('retail_multiaccount_ip', { ip, count, limit }); } catch (_) { /* alert best-effort */ }
+    return true;
+  }
+
   // ── Публичный конфиг auth-форм (без auth): фронт прячет/показывает
   // регистрацию, Turnstile и TG-виджет по этим полям. НЕ 404 при выключенной
   // рознице — страницы login/register должны отличать «флаг выкл» от «нет роута».
@@ -117,6 +133,10 @@ module.exports = function createRegistrationRouter(deps) {
     if (regIpLimitHit(ip)) {
       auditLog('system', 'retail_reg_ip_limit', { ip });
       return res.status(429).json({ error: 'Слишком много регистраций с вашего IP — попробуйте завтра' });
+    }
+    // WP7: жёсткий лимит аккаунтов на reg_ip (мультиаккаунт-контур, Э5)
+    if (accountIpLimitHit(ip)) {
+      return res.status(403).json({ error: 'Не удалось создать аккаунт — попробуйте позже' });
     }
 
     const normEmail = String(email).trim().toLowerCase();
@@ -207,6 +227,11 @@ module.exports = function createRegistrationRouter(deps) {
     const tgId = String(p.id);
     let client = clients.find(c => c.tgChatId === tgId);
     if (!client) {
+      // WP7: лимит аккаунтов на reg_ip действует и на TG-путь (Э5).
+      // Проверка только при СОЗДАНИИ — вход существующего клиента не режем.
+      if (accountIpLimitHit(getClientIp(req))) {
+        return res.status(403).json({ error: 'Не удалось создать аккаунт — попробуйте позже' });
+      }
       // TG-созданный аккаунт: пароль задаётся позже в профиле, email — перед первой оплатой (54-ФЗ)
       const id = generateId();
       const login = 'u_' + id;

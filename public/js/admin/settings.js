@@ -275,6 +275,11 @@ function loadSettings(){
     var tgU=document.getElementById('tgBotUsername');if(tgU)tgU.value=s.telegram_bot_username||'';
     var rbb=document.getElementById('retailBulkBuyThresholdInput');if(rbb)rbb.value=s.retail_bulk_buy_threshold!=null?s.retail_bulk_buy_threshold:3;
     var rpf=document.getElementById('retailPoolMinFreeInput');if(rpf)rpf.value=s.retail_pool_min_free!=null?s.retail_pool_min_free:3;
+    // WP7 (B2C Э5): антифрод розницы
+    var dgs=document.getElementById('domainGuardSuspendHitsInput');if(dgs)dgs.value=s.domain_guard_suspend_hits!=null?s.domain_guard_suspend_hits:1;
+    var asb=document.getElementById('abuseStrikesBlockInput');if(asb)asb.value=s.abuse_strikes_block!=null?s.abuse_strikes_block:2;
+    var rma=document.getElementById('retailMaxAccountsPerIpInput');if(rma)rma.value=s.retail_max_accounts_per_ip!=null?s.retail_max_accounts_per_ip:2;
+    var rmu=document.getElementById('retailMinUniqueIpsInput');if(rmu)rmu.value=s.retail_min_unique_ips!=null?s.retail_min_unique_ips:50;
     if(currentData) currentData.settings = s;
     renderPricingTiers();
   }).catch(function(){});
@@ -298,6 +303,15 @@ function tgSaveSettings(){
   data.retail_bulk_buy_threshold=isNaN(rbb)?3:rbb;
   var rpf=parseInt(document.getElementById('retailPoolMinFreeInput').value);
   data.retail_pool_min_free=isNaN(rpf)?0:rpf;
+  // Антифрод розницы (WP7, Э5): те же NaN-дефолты, сервер валидирует границы.
+  var dgs=parseInt(document.getElementById('domainGuardSuspendHitsInput').value);
+  data.domain_guard_suspend_hits=isNaN(dgs)?1:dgs;
+  var asb=parseInt(document.getElementById('abuseStrikesBlockInput').value);
+  data.abuse_strikes_block=isNaN(asb)?2:asb;
+  var rma=parseInt(document.getElementById('retailMaxAccountsPerIpInput').value);
+  data.retail_max_accounts_per_ip=isNaN(rma)?2:rma;
+  var rmu=parseInt(document.getElementById('retailMinUniqueIpsInput').value);
+  data.retail_min_unique_ips=isNaN(rmu)?50:rmu;
   return api(API+'/api/admin/settings',{method:'PUT',json:data});
 }
 function tgPreview(){

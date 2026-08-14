@@ -1639,6 +1639,12 @@ const SETTINGS_DEFAULTS = {
   retail_min_topup: 100,             // минимальная сумма пополнения, ₽
   retail_test_day_price: 100,        // фикс-цена тест-дня, ₽ (тариф duration_hours=24)
   retail_reg_limit_per_ip_day: 10,   // анти-мультиаккаунт: регистраций с IP в сутки
+  // WP7 (B2C Э5): антифрод розницы. Всё выключаемо через 0, но по ТЗ
+  // авто-саспенд обязателен до запуска продаж — дефолты включены.
+  domain_guard_suspend_hits: 1,      // хитов по бан-листу на порту розницы → авто-саспенд (0 = выкл)
+  abuse_strikes_block: 2,            // столько нарушений AUP → blocked=1 + kill сессий
+  retail_max_accounts_per_ip: 2,     // всего розничных аккаунтов с одного reg_ip (0 = выкл)
+  retail_min_unique_ips: 50,         // % уникальных IP (14 дн) на боксе розницы; ниже → алерт (0 = выкл)
   turnstile_secret_key: '',          // Cloudflare Turnstile (анти-бот на публичных формах)
   turnstile_site_key: '',
   sendpulse_smtp_user: '',           // SendPulse SMTP (верификация/сброс/чеки)
@@ -2011,6 +2017,16 @@ function authMiddleware(req, res, next) {
   const sess = getSession(token);
   if (!sess) {
     return res.status(401).json({ error: 'Unauthorized' });
+  }
+  // B2C (WP7): заблокированный антифродом клиент режется на КАЖДОМ запросе,
+  // а не только при логине — сессии, выданные до блокировки, умирают сразу.
+  // Map-lookup по login, админов (portNameFilter '*') не трогаем.
+  if (!sess.isAdmin) {
+    const cl = clientByLogin.get(sess.login);
+    if (cl && cl.blocked) {
+      deleteSessionsByLogin(sess.login);
+      return res.status(403).json({ error: 'Аккаунт заблокирован' });
+    }
   }
   req.user = sess;
   // Ensure DB-audit knows who's behind any subsequent write in this request.
@@ -2917,6 +2933,11 @@ app.use(require('./src/routes/retail')({
   fetchAllServersDataCached,
   auditLog, logActivity, getClientIp,
   alerts,
+  // WP7 (B2C Э5): «Реабилитировать порт» — port-validity (runway/«дата до»)
+  // + kv-маркер антифрод-заморозки.
+  ledgerDb, getMoscowNow,
+  kvGet: (k) => _kvGet.get(k),
+  kvSet: (k, v) => _kvSet.run(k, v),
   // B2C Э3 (WP5): уведомление клиенту о выдаче прокси. _clientNotify объявлен
   // ниже (const, TDZ) — ленивый шим, как mailer в client-portal выше.
   notifyClient: (...args) => _clientNotify.notifyClient(...args),
@@ -3508,11 +3529,20 @@ async function aggregateTopHosts() { return _initTopHostsJob().aggregateTopHosts
 
 // WP2: доменный контроль bypass-боксов — матчит суточный top_hosts-снапшот
 // против бан-листа hfilter (config/blocked-domains.json).
+// WP7 (B2C Э5): deps расширены для авто-саспенда розницы (порты/пул/strikes).
+// _clientNotify объявлен ниже (const, TDZ) — ленивый шим, как в routes/retail.
 let _domainGuardJob = null;
 function _initDomainGuardJob() {
   if (_domainGuardJob) return _domainGuardJob;
   _domainGuardJob = require('./src/jobs/domain-guard').create({
     db, logger, getSetting, alerts, logActivity, getMoscowToday,
+    auditLog, clients, saveClients, retailPoolDb,
+    deleteSessionsByLogin,
+    proxyConf, fetchApi, parseHtmlInputFields, findServer, proxySmart,
+    ledgerDb, getMoscowNow,
+    kvGet: (k) => _kvGet.get(k),
+    kvSet: (k, v) => _kvSet.run(k, v),
+    notifyClient: (...args) => _clientNotify.notifyClient(...args),
   });
   return _domainGuardJob;
 }

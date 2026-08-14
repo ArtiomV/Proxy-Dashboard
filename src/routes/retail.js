@@ -9,6 +9,8 @@
 //   Тест-день: тариф duration_hours=24, разовое списание retail_test_day_price,
 //     1 раз на аккаунт (test_used), daily billing его НЕ трогает; возврат в пул
 //     через 24ч — retail-guard (этап 2).
+//   POST /api/admin/retail/client/rehabilitate { client_id } — Э5 (WP7):
+//     возврат портов, замороженных антифродом (только админом, auditLog).
 //
 // Лимита портов на аккаунт НЕТ (решение 10.08) — контур защиты: WP7 анти-мультиаккаунт.
 // Повторная покупка клиентом с tariff_id — только того же тарифа (один тариф на клиента, §Г.1).
@@ -27,8 +29,12 @@ module.exports = function createRetailRouter(deps) {
     auditLog, logActivity, getClientIp,
     alerts,
     notifyClient,   // B2C Э3 (WP5): «Прокси выдан» клиенту после покупки
+    getMoscowNow, kvGet, kvSet,   // WP7 (Э5): реабилитация портов (abuse_hold)
   } = deps;
   const r = express.Router();
+
+  // WP7 (Э5): «дата до»/runway — та же механика, что у retail-guard.
+  const portValidity = require('../services/port-validity').create(deps);
 
   function _clientOf(req) {
     return clients.find(c => c.login === req.user.login);
@@ -276,6 +282,62 @@ module.exports = function createRetailRouter(deps) {
       logger.error('[RetailPool] add failed: ' + e.message);
       res.status(502).json({ error: 'Pool add failed', details: e.message, created, errors });
     }
+  });
+
+  // ── Э5 (WP7): «Реабилитировать порт» — возврат портов, замороженных
+  // антифродом (domain-guard: «дата до» = сегодня + пул blocked с ∞ hold +
+  // kv-маркер abuse_hold). Только админом; разблокировка аккаунта (blocked=0)
+  // — отдельное действие в routes/clients.js (/unblock), здесь её нет:
+  // реабилитация порта заблокированному аккаунту бессмысленна.
+  r.post('/api/admin/retail/client/rehabilitate', authMiddleware, deps.adminMiddleware, async (req, res) => {
+    if (!getSetting('retail_enabled', false)) return res.status(404).json({ error: 'Not found' });
+    const client = clients.find(c => c.id === (req.body && req.body.client_id));
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+
+    let ports = [];
+    try {
+      const marker = kvGet(`abuse_hold:${client.id}`);
+      ports = marker && marker.value ? JSON.parse(marker.value) : [];
+    } catch (_) { ports = []; }
+    if (!Array.isArray(ports) || !ports.length) {
+      return res.json({ ok: true, restored: 0, note: 'Нет портов, замороженных антифродом' });
+    }
+
+    // «Дата до» — как при восстановлении после долга (retail-guard шаг 4):
+    // today + floor(balance / avgDailyCharge7d), avg=0 → 30 дн, минимум 1.
+    const balance = client.balance || 0;
+    const avg = portValidity.avgDailyCharge7d(client.id);
+    const days = avg > 0 ? Math.max(1, Math.floor(balance / avg)) : 30;
+    const until = getMoscowNow();
+    until.setDate(until.getDate() + days);
+    const untilStr = until.toLocaleDateString('en-CA');
+
+    const restored = [], errors = [];
+    for (const p of ports) {
+      const server = findServer(p.server);
+      if (!server) { errors.push({ port_id: p.port_id, reason: `сервер ${p.server} не найден` }); continue; }
+      try {
+        await portValidity.setPortValidBefore(server, p.port_id, untilStr);
+        const row = retailPoolDb.byPort(p.server, p.port_id);
+        if (row && row.status === 'blocked') retailPoolDb.unblock(row.id);
+        restored.push(p.port_id);
+      } catch (e) {
+        logger.error(`[Retail] rehabilitate ${p.server}/${p.port_id}: ${e.message}`);
+        errors.push({ port_id: p.port_id, reason: e.message });
+      }
+    }
+    // Маркер снимаем только если всё восстановлено — иначе retail-guard
+    // не должен начать авто-восстановление оставшихся портов.
+    if (!errors.length) kvSet(`abuse_hold:${client.id}`, '');
+
+    auditLog(req.user.login, 'retail_rehabilitate', {
+      clientId: client.id, login: client.login, ports: restored,
+      validBefore: untilStr, errors: errors.length, ip: getClientIp(req),
+    });
+    logActivity('client', 'warning', 'retail_rehabilitate', client.login,
+      `Реабилитация портов антифрода: восстановлено ${restored.length} («дата до» = ${untilStr})`,
+      { client_id: client.id, ports: restored, errors });
+    res.json({ ok: errors.length === 0, restored, validBefore: untilStr, errors });
   });
 
   // ── Э2: legacy-preview. Порты, выданные физикам вне пула (portName = login

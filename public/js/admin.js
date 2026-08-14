@@ -276,9 +276,15 @@ function renderRetailPoolPorts(counts){
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Клиент</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Hold до</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Тест до</th>'+
+    '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)"></th>'+
     '</tr></thead><tbody>';
   rows.forEach(function(r){
     var b=badges[r.status]||[r.status,'var(--bg-2)','var(--text-2)'];
+    // WP7 (Э5): blocked-строка с клиентом — кандидат на реабилитацию (антифрод/
+    // долг — эндпоинт сам решит по kv-маркеру abuse_hold).
+    var act=(r.status==='blocked'&&r.client_id!=null)
+      ?'<button class="btn btn-sm" style="font-size:11px;padding:3px 10px" data-on-click="rehabilitatePoolRow(\''+esc(r.client_id)+'\')">Реабилитировать</button>'
+      :'';
     h+='<tr>'+
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(r.server)+'</td>'+
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(r.port_id)+'</td>'+
@@ -286,10 +292,16 @@ function renderRetailPoolPorts(counts){
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+(r.client_id!=null?esc(r.client_id):'<span style="color:var(--text-3)">—</span>')+'</td>'+
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+_fmtIsoDt(r.hold_until)+'</td>'+
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+_fmtIsoDt(r.test_expires_at)+'</td>'+
+      '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+act+'</td>'+
     '</tr>';
   });
   h+='</tbody></table>';
   box.innerHTML=h;
+}
+// Кнопка «Реабилитировать» в строке пула (WP7, Э5): тот же endpoint, после
+// успеха — перезагрузка таблицы пула (строка уйдёт из blocked в leased).
+function rehabilitatePoolRow(clientId){
+  rehabilitateClientPorts(clientId,function(){_retailPoolRows=null;loadRetailPoolPorts();});
 }
 // «Добавить порты»: select бокса (кэш /api/admin/servers, как у тарифов) + N (1–50).
 // POST долгий — кнопка дизейблится со спиннером до ответа.
@@ -1495,6 +1507,38 @@ document.getElementById('clientModal').addEventListener('click',function(e){if(e
 function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
 function saveClient(){var id=document.getElementById('clientFormId').value;var maxDebtRaw=document.getElementById('cfMaxDebt').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,contractDate:document.getElementById('cfContractDate').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked,billingPaused:document.getElementById('cfBillingPaused').checked,allowDebt:document.getElementById('cfAllowDebt').checked,maxDebt:maxDebtRaw!==''?parseFloat(maxDebtRaw):undefined};if(!d.name||!d.portName||!d.login||(!id&&!d.password))return showToast('Заполните обязательные поля','error');api(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',json:d}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
 function deleteClient(id,name){confirmDialog('Удалить клиента «'+name+'»? Это действие нельзя отменить.',function(){api(API+'/api/admin/clients/'+id,{method:'DELETE'}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()}).catch(function(e){showToast(esc(e.message),'error')});},'Удалить','Удалить клиента')}
+// ── WP7 (B2C Э5): антифрод розницы — разблокировка только админом ──
+// «Снять блок»: blocked=0; при подтверждении — strikes тоже обнуляем (иначе
+// следующее нарушение снова доберётся до порога и переблокирует аккаунт).
+function unblockClientAbuse(id){
+  if(!id)return;
+  confirmDialog('Снять блокировку аккаунта и обнулить счётчик нарушений (strikes)? Замороженные порты при этом НЕ восстанавливаются — для этого «Реабилитировать порт».',function(){
+    api(API+'/api/admin/clients/'+id+'/unblock',{method:'POST',json:{reset_strikes:true}}).then(function(d){
+      if(d&&d.ok){
+        showToast('Блокировка снята','success');
+        // loadData() — fire-and-forget (не возвращает promise): обновим
+        // локальный объект сразу, чтобы дравер перерисовался без гонки.
+        var c=(currentData.clients||[]).find(function(x){return x.id===id});
+        if(c){c.blocked=false;c.abuseStrikes=0;renderClientDetail(id)}
+        loadData();
+      }
+      else showToast((d&&d.error)||'Ошибка','error');
+    }).catch(function(e){showToast(esc(e.message),'error')});
+  },'Снять блок','Антифрод');
+}
+// «Реабилитировать порт»: возврат портов, замороженных антифродом
+// (kv-маркер abuse_hold), «дата до» продлевается по балансу.
+function rehabilitateClientPorts(id,onDone){
+  if(!id)return;
+  confirmDialog('Вернуть клиенту порты, замороженные антифродом? «Дата до» будет продлена по текущему балансу.',function(){
+    api(API+'/api/admin/retail/client/rehabilitate',{method:'POST',json:{client_id:id}}).then(function(d){
+      if(d&&d.ok){showToast('Портов восстановлено: '+(d.restored||[]).length,'success')}
+      else if(d&&(d.restored||[]).length){showToast('Частично: '+d.restored.length+', ошибок: '+(d.errors||[]).length,'error')}
+      else showToast((d&&(d.note||d.error))||'Нечего восстанавливать','error');
+      if(typeof onDone==='function')onDone(); else loadData();
+    }).catch(function(e){showToast(esc(e.message),'error')});
+  },'Реабилитировать','Антифрод');
+}
 
 function impersonateClient(id,name){
   api(API+'/api/admin/impersonate/'+id,{method:'POST'}).then(function(d){
@@ -4275,6 +4319,19 @@ function renderClientDetail(id, tab){
   else{mh+='<div style="font-size:12px;color:var(--text-3);padding:8px 0">Нет привязанных модемов. Привязка — на странице «Модемы».</div>';}
   ml.innerHTML=mh;
   document.getElementById('cdDeleteBtn').style.display='';
+  // WP7 (B2C Э5): антифрод-блок для физлиц (или любого клиента со strikes/blocked).
+  var ab=document.getElementById('cdAbuseSection');
+  if(ab){
+    var showAb=(c.clientType==='individual')||c.blocked||(c.abuseStrikes>0);
+    ab.style.display=showAb?'':'none';
+    if(showAb){
+      var stEl=document.getElementById('cdAbuseStatus');
+      stEl.textContent=c.blocked?'Аккаунт ЗАБЛОКИРОВАН (антифрод)':'Аккаунт активен';
+      stEl.style.color=c.blocked?'var(--danger)':'var(--text-0)';
+      document.getElementById('cdAbuseStrikes').textContent='Нарушений AUP (strikes): '+(c.abuseStrikes||0);
+      document.getElementById('cdUnblockBtn').style.display=c.blocked?'':'none';
+    }
+  }
   switchDetailTab(tab||'overview');
 }
 function newClientForm(){
@@ -4286,6 +4343,7 @@ function newClientForm(){
   ['cdKpiBal','cdKpiCharge','cdKpiModems','cdKpiTraffic'].forEach(function(k){var e=document.getElementById(k);if(e)e.textContent='—';});
   document.getElementById('cdModemsList').innerHTML='<div style="font-size:12px;color:var(--text-3);padding:8px 0">Сначала сохраните клиента</div>';
   document.getElementById('cdDeleteBtn').style.display='none';
+  var nab=document.getElementById('cdAbuseSection');if(nab)nab.style.display='none';   // WP7: антифрод — только у существующего клиента
   switchDetailTab('overview');
 }
 

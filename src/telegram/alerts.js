@@ -379,6 +379,35 @@ const RULES = {
     dedupeKey: p => 'poollow_' + (p.server || 'unknown'),
     render: p => `📉 <b>Пул розницы на исходе</b>\n\nНа <b>${esc(p.server || '?')}</b> свободных портов: <b>${p.free ?? '?'}</b> (минимум ${p.min ?? '?'}).\nПополни пул: Настройки → Розница → «Добавить порты».`,
   },
+  // B2C Э5 (WP7): антифрод розницы — авто-саспенд порта по доменному
+  // контролю (domain-guard). При достижении порога strikes — blocked=1.
+  retail_abuse_suspend: {
+    title: 'Розница: авто-саспенд по антифроду (AUP)',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 300,
+    dedupeKey: p => 'abuse_' + (p.client_id || '') + '_' + (p.port_id || ''),
+    render: p => `🚨 <b>Антифрод: порт розницы приостановлен</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: порт <code>${esc(p.port_id || '?')}</code> (${esc(p.server || '?')}) — обращение к <code>${esc(p.host || '?')}</code> из бан-листа.\nНарушений (strikes): <b>${p.strikes ?? '?'}</b>${p.blocked ? '\n\n⛔ Порог strikes достигнут — аккаунт ЗАБЛОКИРОВАН, сессии убиты.' : ''}\nРазблокировка — только вручную (карточка клиента).`,
+  },
+  // B2C Э5 (WP7): анти-мультиаккаунт — отказ регистрации по лимиту reg_ip.
+  retail_multiaccount_ip: {
+    title: 'Розница: мультиаккаунт с одного IP',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 3600,   // дедуп по IP: одно сообщение в час на адрес
+    dedupeKey: p => 'multiip_' + (p.ip || 'unknown'),
+    render: p => `⚠️ <b>Мультиаккаунт: лимит регистраций с IP</b>\n\nIP <code>${esc(p.ip || '?')}</code>: уже <b>${p.count ?? '?'}</b> аккаунт(ов) (лимит ${p.limit ?? '?'}). Очередная регистрация отклонена.`,
+  },
+  // B2C Э5 (WP7): деградация уникальности IP розничного бокса (14-дневный
+  // скан /apix/unique_ips_json; проверка в тике retail-guard).
+  retail_pool_ip_degraded: {
+    title: 'Розница: деградация уникальности IP пула',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 21600,   // 6ч на бокс — метрика 14-дневная, быстро не меняется
+    dedupeKey: p => 'poolip_' + (p.server || 'unknown'),
+    render: p => `📉 <b>Уникальность IP пула деградировала</b>\n\n<b>${esc(p.server || '?')}</b>: уникальных IP за 14 дней <b>${p.uniqueIps ?? '?'}%</b> (порог ${p.min ?? '?'}%).\nРозница платит за «чистые» IP — проверь ротации и занятость модемов на боксе.`,
+  },
   // Пул пуст: buy_proxy не смог зарезервировать ни одного free-порта.
   retail_pool_empty: {
     title: 'Розница: пул пуст (покупка отклонена)',
@@ -637,6 +666,10 @@ const _entityFor = {
   retail_pool_low:           p => ({ kind: 'system', id: p.server || null }),
   retail_pool_empty:         p => ({ kind: 'system', id: p.server || null }),
   retail_test_day_ended:     p => ({ kind: 'client', id: p.client_id || null }),
+  // B2C Э5 (WP7): антифрод розницы
+  retail_abuse_suspend:      p => ({ kind: 'client', id: p.client_id || null }),
+  retail_multiaccount_ip:    () => ({ kind: 'system', id: 'multiaccount' }),
+  retail_pool_ip_degraded:   p => ({ kind: 'system', id: p.server || null }),
   // Stage 18.15 — bell-only sources
   modem_offline:             p => ({ kind: 'modem',  id: p.nick || p.imei || null }),
   client_debt:               p => ({ kind: 'client', id: p.client_id || null }),
