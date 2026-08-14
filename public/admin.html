@@ -496,6 +496,11 @@
             <div class="set-row"><div><div class="set-row-t">Пул: мин. уникальность IP</div><div class="set-row-d">Уникальных IP за 14 дней на боксе розницы ниже N% → алерт о деградации пула (0 = выкл)</div></div><div class="set-inp"><input id="retailMinUniqueIpsInput" type="number" min="0" max="100"><span>%</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Доменный контроль: боксы</div><div class="set-row-d">Боксы под контролем бан-листа (CSV, напр. S2,S4). Пусто = дефолт бэкенда</div></div><input id="domainGuardServersInput" placeholder="S2,S4" autocomplete="off" style="width:180px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
           </div>
+          <div class="set-grp-label">ШАРИНГ ПОРТОВ (15.08)</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Макс. клиентов на одной SIM</div><div class="set-row-d">Когда свободные порты кончились, на модеме можно достроить порты, пока клиентских портов меньше N. 1 = шаринг выключен (одна SIM — один клиент)</div></div><div class="set-inp"><input id="retailMaxClientsPerModemInput" type="number" min="1" max="20"><span>шт</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Якорный клиент для шаринга</div><div class="set-row-d">Логин клиента (u_…), на чьих модемах можно достраивать порты новым покупателям. Модемы других клиентов не трогаем никогда. Пусто = шаринг выключен</div></div><input id="retailShareAnchorLoginInput" placeholder="u_…" autocomplete="off" style="width:180px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+          </div>
           <div class="set-save-bar">
             <span id="retailSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>

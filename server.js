@@ -1646,6 +1646,10 @@ const SETTINGS_DEFAULTS = {
   // WP5 (B2C Э3): пороги админ-алертов розницы (alerts.js retail_bulk_buy / retail_pool_low)
   retail_bulk_buy_threshold: 3,      // leased-портов у одного аккаунта → алерт «массовая покупка»
   retail_pool_min_free: 3,           // свободных портов на боксе < N → алерт «пул на исходе»
+  // Шаринг (15.08): когда free-порты кончились — создаём новый порт на модеме
+  // якорного клиента. max=1 → шаринг выкл. anchor — ЛОГИН клиента (u_…).
+  retail_max_clients_per_modem: 1,   // макс клиентских портов на одной SIM
+  retail_share_anchor_login: '',     // логин клиента, на чьих модемах можно достраивать порты
   retail_test_day_price: 100,        // фикс-цена тест-дня, ₽ (тариф duration_hours=24)
   retail_reg_limit_per_ip_day: 10,   // анти-мультиаккаунт: регистраций с IP в сутки
   // WP3 (B2C Э4): эквайринг розницы (карта/СБП). Провайдер — настройкой

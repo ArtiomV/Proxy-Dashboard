@@ -115,6 +115,69 @@ module.exports = function createRetailRouter(deps) {
       const reservedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // TTL резерва 5 мин
       if (retailPoolDb.reserve(candidate.id, client.id, reservedUntil)) poolRow = candidate;
     }
+
+    // Шаринг (15.08): свободные порты кончились → создаём НОВЫЙ порт на модеме
+    // «якорного» клиента (настройка retail_share_anchor_login), если на нём
+    // клиентских портов меньше retail_max_clients_per_modem. Чужие модемы
+    // (порты не якоря) и свободные модемы здесь не трогаем: свободные —
+    // через /api/admin/retail/pool/add, чужие — никогда.
+    let sharedCreated = false;
+    if (!poolRow) {
+      const maxPerModem = Math.max(1, Number(getSetting('retail_max_clients_per_modem', 1)) || 1);
+      const anchorLogin = String(getSetting('retail_share_anchor_login', '') || '').trim();
+      if (maxPerModem > 1 && anchorLogin) {
+        const server0 = findServer(serverName);
+        if (server0) {
+          try {
+            const statusRaw = await fetchApi(server0, '/apix/show_status_json');
+            const portsData = await fetchApi(server0, '/apix/list_ports_json');
+            const status = Array.isArray(statusRaw) ? statusRaw : (statusRaw && statusRaw.modems) || [];
+            const cands = [];
+            for (const m of status) {
+              const imei = m && m.modem_details && m.modem_details.IMEI;
+              if (!imei) continue;
+              const online = m.net_details && m.net_details.IS_ONLINE === 'yes';
+              if (!online) continue;
+              const ports = (portsData && portsData[imei]) || [];
+              const named = ports.filter(p => p && (p.portName || '').trim());
+              if (!named.length) continue;                          // свободный модем — не наш случай
+              if (named.some(p => String(p.portName).trim() !== anchorLogin)) continue; // чужой/другой клиент
+              if (named.length >= maxPerModem) continue;            // мест нет
+              cands.push({ imei, used: named.length });
+            }
+            cands.sort((a, b) => a.used - b.used);
+            for (const cand of cands) {
+              try {
+                // Та же механика add_port, что у pool/add, но portName = логину
+                // покупателя сразу (порт активен с создания).
+                const addForm = await proxyConf.getConfForm(server0, `/conf/add_port?imei=${cand.imei}`);
+                if (!addForm.ok) throw new Error(`add_port form: ${addForm.reason}`);
+                const formData = parseHtmlInputFields(addForm.html);
+                if (!formData.portID) throw new Error('add_port form returned no portID');
+                formData.portName = client.login;
+                const posted = await proxyConf.postConfForm(server0, `/conf/add_port?imei=${cand.imei}`, formData);
+                if (!posted.ok) throw new Error(`add_port post: ${posted.reason}`);
+                try { await fetchApi(server0, `/apix/apply_port?arg=${encodeURIComponent(formData.portID)}`); } catch (e) {
+                  logger.warn(`[Retail] shared apply_port ${formData.portID}: ${e.message}`);  // best-effort
+                }
+                retailPoolDb.insertLeased(serverName, formData.portID, client.id);
+                poolRow = retailPoolDb.byPort(serverName, formData.portID);
+                sharedCreated = true;
+                auditLog(client.login, 'retail_buy_shared_port', { server: serverName, imei: cand.imei, port: formData.portID, anchor: anchorLogin });
+                logActivity('modem', 'info', 'retail_shared_port', serverName,
+                  `Шаринг: порт ${formData.portID} создан на модеме якоря ${anchorLogin} (imei ${cand.imei}) для ${client.login}`, {});
+                break;
+              } catch (e) {
+                logger.warn(`[Retail] shared add_port ${cand.imei}: ${e.message}`);
+              }
+            }
+          } catch (e) {
+            logger.warn(`[Retail] shared-модемы недоступны (${serverName}): ${e.message}`);
+          }
+        }
+      }
+    }
+
     if (!poolRow) {
       // Пул пуст — покупка недоступна + алерт админу (WP4)
       logger.warn(`[Retail] Пул исчерпан: ${serverName} (geo ${tariff.geo})`);
@@ -129,7 +192,9 @@ module.exports = function createRetailRouter(deps) {
       return res.status(503).json({ error: 'Сервер выдачи недоступен' });
     }
     try {
-      await _assignPortToClient(server, poolRow.port_id, client.login);
+      // Шаринговый порт создан сразу с portName=login — привязка не нужна,
+      // только лимиты тарифа. Обычный free-порт — assign + лимиты.
+      if (!sharedCreated) await _assignPortToClient(server, poolRow.port_id, client.login);
       await _applyTariffLimits(server, poolRow.port_id, tariff);
     } catch (e) {
       retailPoolDb.release(poolRow.id);
@@ -138,7 +203,7 @@ module.exports = function createRetailRouter(deps) {
     }
 
     // leased + привязка тарифа (тест — тоже leased; возврат по 24ч делает retail-guard)
-    retailPoolDb.lease(poolRow.id);
+    if (!sharedCreated) retailPoolDb.lease(poolRow.id);
     let testExpiresIso = null;
     if (isTestDay) {
       client.testUsed = true;

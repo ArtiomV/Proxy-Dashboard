@@ -283,6 +283,9 @@ function loadSettings(){
     var rrl=document.getElementById('retailRegLimitInput');if(rrl)rrl.value=s.retail_reg_limit_per_ip_day||10;
     var rbb=document.getElementById('retailBulkBuyThresholdInput');if(rbb)rbb.value=s.retail_bulk_buy_threshold!=null?s.retail_bulk_buy_threshold:3;
     var rpf=document.getElementById('retailPoolMinFreeInput');if(rpf)rpf.value=s.retail_pool_min_free!=null?s.retail_pool_min_free:3;
+    // Шаринг портов (15.08): лимит на SIM + якорный клиент
+    var rmc=document.getElementById('retailMaxClientsPerModemInput');if(rmc)rmc.value=s.retail_max_clients_per_modem!=null?s.retail_max_clients_per_modem:1;
+    var rsa=document.getElementById('retailShareAnchorLoginInput');if(rsa)rsa.value=s.retail_share_anchor_login||'';
     var dgs=document.getElementById('domainGuardSuspendHitsInput');if(dgs)dgs.value=s.domain_guard_suspend_hits!=null?s.domain_guard_suspend_hits:1;
     var asb=document.getElementById('abuseStrikesBlockInput');if(asb)asb.value=s.abuse_strikes_block!=null?s.abuse_strikes_block:2;
     var rma=document.getElementById('retailMaxAccountsPerIpInput');if(rma)rma.value=s.retail_max_accounts_per_ip!=null?s.retail_max_accounts_per_ip:2;
@@ -350,6 +353,8 @@ function saveRetailSettings(){
     retail_reg_limit_per_ip_day:_num('retailRegLimitInput',10,1,1000),
     retail_bulk_buy_threshold:_num('retailBulkBuyThresholdInput',3,0,100),
     retail_pool_min_free:_num('retailPoolMinFreeInput',0,0,1000),
+    retail_max_clients_per_modem:_num('retailMaxClientsPerModemInput',1,1,20),
+    retail_share_anchor_login:((document.getElementById('retailShareAnchorLoginInput')||{}).value||'').trim(),
     domain_guard_suspend_hits:_num('domainGuardSuspendHitsInput',1,0,1000),
     abuse_strikes_block:_num('abuseStrikesBlockInput',2,1,100),
     retail_max_accounts_per_ip:_num('retailMaxAccountsPerIpInput',2,0,100),
