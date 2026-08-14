@@ -73,6 +73,16 @@
     <p>Список доработок дашборда — на человеческом языке. Каждый блок отвечает на вопрос «что это даёт вам как пользователю / администратору».</p>
   </div>
 
+  <!-- v2.10.3 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>2.10.3</span>
+      <span class="release-date">14 августа 2026</span>
+      <span class="release-tag tag-fix">Эквайринг: верификация вебхуков</span>
+    </div>
+    <p class="release-tagline">Подключён интернет-эквайринг Точки: ключи и Customer Code введены (Настройки → Розница → «Эквайринг»), указана УСН «доходы» и Merchant ID. Исправлена верификация подписи вебхуков: если JWKS-эндпоинт Точки недоступен для API-ключа без open-banking-разрешения, используется публичный статический ключ банка — вебхуки оплаты больше не отклоняются с <code>key_not_found</code>.</p>
+  </div>
+
   <!-- v2.10.2 -->
   <div class="release">
     <div class="release-header">

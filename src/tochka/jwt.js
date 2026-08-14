@@ -36,11 +36,24 @@ function decodeJwtHeader(token) {
 
 // Fetch JWKS from Tochka Bank
 function fetchTochkaJwks(apiToken) {
+  // 2026-08: Tochka's authed JWKS endpoint now answers 501/"access token is
+  // missing" for keys without open-banking consent (e.g. an acquiring-only API
+  // key) — while webhooks still need verification. The bank publishes the same
+  // RSA signing key UNauthenticated at /doc/openapi/static/keys/public
+  // (single JWK, no kid). Strategy: authed JWKS first (rich, has kids); if it
+  // yields no keys — fall back to the static public key.
+  return fetchTochkaJwksAuthed(apiToken).then(jwks => {
+    if (jwks && Array.isArray(jwks.keys) && jwks.keys.length) return jwks;
+    logger.warn('[Tochka JWKS] authed endpoint gave no keys — falling back to static public key');
+    return fetchTochkaStaticKey();
+  }).catch(e => {
+    logger.warn('[Tochka JWKS] authed endpoint failed (' + e.message + ') — falling back to static public key');
+    return fetchTochkaStaticKey();
+  });
+}
+
+function fetchTochkaJwksAuthed(apiToken) {
   return new Promise((resolve, reject) => {
-    // Tochka's JWKS lives UNDER the authed /uapi/open-banking namespace and
-    // returns {"message":"The access token is missing"} without a Bearer token
-    // — so without it the keyset is empty and EVERY webhook fails as
-    // reason=key_not_found (auto-credit never fires). Send the API JWT.
     const headers = apiToken ? { Authorization: 'Bearer ' + apiToken } : {};
     https.get('https://enter.tochka.com/uapi/open-banking/.well-known/jwks.json', { timeout: 10000, headers }, (res) => {
       let data = '';
@@ -50,6 +63,24 @@ function fetchTochkaJwks(apiToken) {
         catch (e) { reject(new Error('JWKS parse error: ' + e.message)); }
       });
     }).on('error', reject).on('timeout', function() { this.destroy(); reject(new Error('JWKS fetch timeout')); });
+  });
+}
+
+// Single JWK (not a set): https://enter.tochka.com/doc/openapi/static/keys/public
+// Returns {keys:[jwk]} shape so callers need no branching.
+function fetchTochkaStaticKey() {
+  return new Promise((resolve, reject) => {
+    https.get('https://enter.tochka.com/doc/openapi/static/keys/public', { timeout: 10000 }, (res) => {
+      let data = '';
+      res.on('data', chunk => data += chunk);
+      res.on('end', () => {
+        try {
+          const jwk = JSON.parse(data);
+          if (!jwk || jwk.kty !== 'RSA' || !jwk.n) return reject(new Error('static key: unexpected shape'));
+          resolve({ keys: [jwk] });
+        } catch (e) { reject(new Error('static key parse error: ' + e.message)); }
+      });
+    }).on('error', reject).on('timeout', function() { this.destroy(); reject(new Error('static key fetch timeout')); });
   });
 }
 
@@ -115,6 +146,11 @@ async function verifyJwtSignature(token, apiToken) {
   const kid = header.kid;
   const alg = header.alg || 'RS256';
   let matchingKey = kid ? tochkaJwksCache.keys.find(k => k.kid === kid) : tochkaJwksCache.keys[0];
+  // Static-key fallback set is a single kid-less JWK — use it for any kid:
+  // the RSA signature check below remains the real authenticity gate.
+  if (!matchingKey && tochkaJwksCache.keys.length === 1 && !tochkaJwksCache.keys[0].kid) {
+    matchingKey = tochkaJwksCache.keys[0];
+  }
 
   // Tochka may rotate signing keys at any time. If kid not found in cache,
   // force-refresh the JWKS once and try again before rejecting.
