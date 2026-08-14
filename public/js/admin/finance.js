@@ -295,12 +295,15 @@ function _renderCostsModal(d) {
     });
   }
   inputs += '</div>';
-  // Other (single value, no subkey) — только RUB, без селекта валюты
+  // Other (single value, no subkey) — валюта выбирается, как у серверов/SIM (15.08)
   inputs += '<div class="set-grp-label">Прочие затраты</div><div class="set-card">';
   ['electricity','hosting','salary','other'].forEach(function(k){
     var existing = (byCat[k]||[])[0];
+    var cur = _costCurDefault(existing);
     inputs += _wrapRow((cats[k]?cats[k].label:k), k, null,
-      '<input class="form-input fc-other" data-role="amount" type="number" min="0" step="100" value="'+(existing&&existing.amount!=null?existing.amount:'')+'" placeholder="0" style="width:108px;text-align:right"><span>₽</span>');
+      _costCurSelect(cur)
+      + '<input class="form-input fc-other" data-role="amount" type="number" min="0" step="100" value="'+(existing&&existing.amount!=null?existing.amount:'')+'" placeholder="0" style="width:100px;text-align:right">'
+      + '<span data-role="cur-unit" style="width:30px">'+cur+'</span>');
   });
   inputs += '</div>';
 
