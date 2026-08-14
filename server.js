@@ -3014,6 +3014,9 @@ app.use(require('./src/routes/payments')({
     tochkaRequest: _tochkaRequest,     // сырой HTTPS-хелпер (config — 1-м аргументом)
     verifyJwtSignature,                // RS256 по JWKS Точки (src/tochka/jwt.js)
   }),
+  // Unified webhook URL у Точки: не-эквайринговые события (incomingPayment)
+  // уходят в банковский обработчик. Lazy — tochkaRouter создаётся ниже.
+  getBankWebhookHandler: () => tochkaRouter.bankWebhookHandler,
 }));
 
 // All traffic endpoints moved to src/routes/traffic.js (Stage 3).
@@ -3780,7 +3783,7 @@ async function syncBillStatuses() { return _initBillStatusSync().syncBillStatuse
 // Tochka routes (webhook + admin tochka + per-client closing_documents/bills)
 // moved to src/routes/tochka.js (Stage 3). The webhook uses a raw text body
 // parser; the router applies it internally via express.text() per-route.
-app.use(require('./src/routes/tochka')({
+const tochkaRouter = require('./src/routes/tochka')({
   db, logger, authMiddleware, adminMiddleware,
   verifyJwtSignature, _pickField, insertBankPaymentToDb,
   dbAudit, dbStmts, bankPaymentFromRow, getAllBankPayments,
@@ -3801,7 +3804,8 @@ app.use(require('./src/routes/tochka')({
   runTochkaSync: (...args) => runTochkaSync(...args),
   // B2C Э3 (WP5): уведомление клиенту о зачислении (webhook + ручная привязка).
   notifyClient: _clientNotify.notifyClient,
-}));
+});
+app.use(tochkaRouter);
 
 // Save Tochka config from admin UI
 

@@ -96,7 +96,10 @@ module.exports = function createTochkaRouter(deps) {
   // No more router-side _clientUpdateReferralBalance.run() — kept here as
   // a hint to anyone wondering where the old call went.
 
-r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async (req, res) => {
+// Bank webhook handler extracted so it can also serve the unified webhook URL
+// (one URL per API-key at Tochka): payments router forwards non-acquiring
+// events here (see src/routes/payments.js dispatcher).
+const bankWebhookHandler = async (req, res) => {
   logger.info('[Tochka Webhook] Received webhook');
   // Audit context — every webhook-driven write tags as source=webhook actor=tochka
   dbAudit.setActiveContext({ source: 'webhook', actor: 'tochka', ip: getClientIp(req), reason: 'tochka_webhook' });
@@ -301,7 +304,9 @@ r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), async
   } finally {
     dbAudit.clearActiveContext();
   }
-});
+};
+
+r.post('/api/tochka/webhook', express.text({ type: '*/*', limit: '1mb' }), bankWebhookHandler);
 
 r.post('/api/admin/tochka/config', authMiddleware, adminMiddleware, async (req, res) => {
   const { jwt, clientId, customerCode, accountId, companyName, companyInn, companyKpp, companyAddress, bankAccount, bankName, bankBic, bankCorrAccount } = req.body;
@@ -992,5 +997,8 @@ r.delete('/api/admin/clients/:id/bill/:billId', authMiddleware, adminMiddleware,
   res.json({ ok: true });
 });
 
+  // Unified-URL support: payments router forwards non-acquiring Tochka events
+  // (incomingPayment и т.п.) сюда же — один webhook URL на API-ключ у банка.
+  r.bankWebhookHandler = bankWebhookHandler;
   return r;
 };

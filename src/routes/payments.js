@@ -18,6 +18,7 @@
 const express = require('express');
 const crypto = require('crypto');
 const { referralCommission } = require('../billing/referral');   // Р6: комиссия 10% с любого канала
+const { decodeJwtPayload } = require('../tochka/jwt');           // peek webhookType для unified-URL роутинга
 
 module.exports = function createPaymentsRouter(deps) {
   const {
@@ -29,6 +30,7 @@ module.exports = function createPaymentsRouter(deps) {
     auditLog, logActivity, getClientIp,
     alerts, notifyClient,
     createProvider, dbAudit,
+    getBankWebhookHandler,
   } = deps;
   const r = express.Router();
 
@@ -142,7 +144,20 @@ module.exports = function createPaymentsRouter(deps) {
   // Тело — «голая» строка JWT (Content-Type: text/plain): express.text ДО
   // json-парсера здесь не нужен глобально — content-type не application/json.
   // Strict-подпись внутри provider.verify_webhook; подделка → 401.
+  //
+  // Unified URL: у API-ключа Точки ОДИН webhook URL на все типы событий.
+  // Поэтому сюда же приходят и банковские события (incomingPayment) — их
+  // передаём в банковский обработчик (routes/tochka.js), ничего не меняя.
+  // Тип читаем из payload БЕЗ верификации (это только роутинг; обработчик
+  // сам проверяет подпись — банковский мягко, эквайринг строго).
   r.post('/api/payments/webhook/tochka', webhookLimiter, express.text({ type: '*/*', limit: '100kb' }), async (req, res) => {
+    const peeked = decodeJwtPayload(typeof req.body === 'string' ? req.body.trim() : '');
+    if (peeked && peeked.webhookType && peeked.webhookType !== 'acquiringInternetPayment') {
+      const bankHandler = getBankWebhookHandler && getBankWebhookHandler();
+      if (bankHandler) return bankHandler(req, res);
+      logger.warn('[Payments webhook] не-эквайринговый тип ' + peeked.webhookType + ', а bank handler не подключён');
+      return res.status(200).json({ ok: true, ignored: 'no_bank_handler' });
+    }
     const provider = createProvider();
     if (!provider) return res.status(503).json({ ok: false, error: 'acquiring not configured' });
     if (dbAudit && dbAudit.setActiveContext) {
