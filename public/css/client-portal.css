@@ -83,11 +83,13 @@ transition:color .3s ease,background .3s ease,border-color .3s ease,transform .1
 .login-box .btn-tg-login{display:flex;align-items:center;justify-content:center;gap:10px;box-sizing:border-box;background:#2AABEE;border-color:#2AABEE;text-decoration:none}
 .login-box .btn-tg-login:hover{background:#229ED9;border-color:#229ED9;color:#fff}
 .login-box .btn-tg-login svg{flex:0 0 auto}
-/* «Глазик» у полей пароля (auth-utils.js addPasswordToggle) */
+/* «Глазик» у полей пароля (auth-utils.js addPasswordToggle).
+   Специфичность .login-box .pw-eye — чтобы перебить base.css .login-box button */
 .pw-wrap{position:relative;width:100%}
 .pw-wrap input{padding-right:46px!important}
-.pw-eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#5C5967;padding:6px;margin:0;line-height:0;transition:color .2s}
-.pw-eye:hover{color:#EDEDED}
+.login-box .pw-eye{position:absolute;right:8px;top:50%;transform:translateY(-50%);width:auto;background:none;border:none;cursor:pointer;color:#5C5967;padding:6px;margin:0;line-height:0;transition:color .2s}
+.login-box .pw-eye:hover{background:none;border:none;color:#EDEDED}
+.login-box .pw-eye:active{transform:translateY(-50%)}
 .pw-eye svg{display:block}
 .login-error{color:#FF383C;font-size:13px;margin-bottom:12px;text-align:center;min-height:18px}
 /* Telegram Login Widget (вход через TG на странице логина, WP1) */
