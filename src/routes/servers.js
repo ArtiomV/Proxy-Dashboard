@@ -11,13 +11,14 @@
 //   PUT    /api/admin/settings        — bounded-validation writes to appSettings
 
 const express = require('express');
+const credCheck = require('../services/cred-check');
 
 module.exports = function createServersRouter(deps) {
   const {
     logger, authMiddleware, adminMiddleware,
     apiServers, SERVER_COUNTRIES, appSettings,
     fetchApi, saveApiServersToDb, proxySmart,
-    auditLog, getClientIp,
+    auditLog, getClientIp, getSetting,
     // Stage 14.2: setSettings() batches the validated patch + saves once;
     // no more direct `appSettings.x = ...` mutations in this router.
     setSettings, rescheduleSpeedtests, rescheduleProxyCheck,
@@ -154,7 +155,7 @@ r.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   res.json(masked);
 });
 
-r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
+r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) => {
   // Stage 14.2: accumulate validated changes into one batch, then commit
   // via setSettings({...}). Previously each line did `appSettings.x = ...`
   // directly with one saveSettings() at the end — internally consistent
@@ -457,10 +458,19 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
     if (/^\d{2}:\d{2}$/.test(t)) patch.telegram_summary_time = t;
   }
 
+  // Live-проверка кредов ДО записи (15.08, по запросу): фатальный вердикт
+  // (auth-ответ сервиса — 535/401/истёкший JWT) отклоняет сохранение целиком;
+  // сетевой сбой — только warning в ответе, настройки сохраняются.
+  const credVerdict = await credCheck.validateSettingsPatch(patch, { getSetting });
+  if (credVerdict.errors.length) {
+    logger.warn('[Settings] cred check failed: ' + credVerdict.errors.join('; '));
+    return res.status(400).json({ error: 'Проверка доступов не пройдена: ' + credVerdict.errors.join('; '), cred_errors: credVerdict.errors });
+  }
+
   setSettings(patch);
   if (needsProxyReschedule) rescheduleProxyCheck();
   rescheduleSpeedtests();
-  res.json({ ok: true, settings: appSettings });
+  res.json({ ok: true, settings: appSettings, cred_checks: credVerdict.checks, cred_warnings: credVerdict.warnings });
 });
 
   return r;

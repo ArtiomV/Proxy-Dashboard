@@ -3419,7 +3419,7 @@ app.use(require('./src/routes/servers')({
   logger, authMiddleware, adminMiddleware,
   apiServers, SERVER_COUNTRIES, appSettings,
   fetchApi, saveApiServersToDb, proxySmart,
-  auditLog, getClientIp,
+  auditLog, getClientIp, getSetting,
   setSettings, rescheduleSpeedtests, rescheduleProxyCheck,
 }));
 

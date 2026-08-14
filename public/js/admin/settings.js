@@ -321,6 +321,14 @@ function loadSettings(){
     renderPricingTiers();
   }).catch(function(){});
 }
+// Live-проверка кредов при сохранении (15.08): сервер возвращает cred_checks
+// (проверка прошла) и cred_warnings (проверка не состоялась по сети — креды
+// сохранены, но не подтверждены). Фатальные ошибки приходят как d.error.
+function showCredVerdict(d){
+  if(!d)return;
+  (d.cred_checks||[]).forEach(function(m){showToast(m,'success')});
+  (d.cred_warnings||[]).forEach(function(m){showToast(m,'warning')});
+}
 // Telegram: save fields when changed (debounced)
 function tgSaveSettings(){
   var tgT=document.getElementById('tgBotToken');
@@ -385,7 +393,7 @@ function saveRetailInfraSettings(){
   var st=document.getElementById('retailInfraStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
   api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
-    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';showToast('Настройки регистрации сохранены','success')}
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';showToast('Настройки регистрации сохранены','success');showCredVerdict(d)}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
 }

@@ -606,7 +606,7 @@ async function saveAcquiringSettings(){
   try{
     var d=await api(API+'/api/admin/settings',{method:'PUT',json:data});
     if(d&&d.error){st.style.color='var(--danger)';st.textContent=d.error;showToast(d.error,'error');}
-    else{st.style.color='var(--success)';st.textContent='Сохранено';showToast('Настройки эквайринга сохранены','success');loadAcquiringSettings();}
+    else{st.style.color='var(--success)';st.textContent='Сохранено';showToast('Настройки эквайринга сохранены','success');showCredVerdict(d);loadAcquiringSettings();}
   }catch(e){
     st.style.color='var(--danger)';st.textContent='Ошибка соединения';
   }finally{
