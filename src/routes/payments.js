@@ -103,14 +103,11 @@ module.exports = function createPaymentsRouter(deps) {
     }
 
     // WP6: промокод на пополнение (percent/fixed). Бонус зачислится в webhook
-    // вместе с платежом; bonus_days сюда не подходит (он про покупку).
+    // вместе с платежом.
     let promoCode = null;
     if (req.body.promo) {
       const { promo, error } = promoDb.findValid(req.body.promo);
       if (error) return res.status(400).json({ error, code: 'PROMO_INVALID' });
-      if (promo.type === 'bonus_days') {
-        return res.status(400).json({ error: 'Этот промокод действует при покупке прокси', code: 'PROMO_WRONG_CONTEXT' });
-      }
       promoCode = promo.code;
     }
 

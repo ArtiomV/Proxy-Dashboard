@@ -91,7 +91,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.9.0</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.0</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -107,7 +107,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.9.0</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.0</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -116,7 +116,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.9.0</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.0</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -376,7 +376,7 @@
       <div class="snav-grp">ИНСТРУМЕНТЫ</div>
       <div class="settings-nav-item" id="snav_bank" data-on-click="switchSettingsSection('bank')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l6-3.5L14 6M3 6.5v5.5M13 6.5v5.5M5.6 6.5v5.5M8 6.5v5.5M10.4 6.5v5.5M2.5 13.5h11"/></svg>Банк</div>
       <div class="settings-nav-item" id="snav_simulator" data-on-click="switchSettingsSection('simulator')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5c2.4 1.6 3.4 4 3.4 6.5L9.5 11h-3L4.6 8C4.6 5.5 5.6 3.1 8 1.5z"/><circle cx="8" cy="6" r="1"/><path d="M6.4 11l-1.4 2.5M9.6 11l1.4 2.5"/></svg>Симулятор</div>
-      <div class="settings-nav-item" id="snav_tariffs" data-on-click="switchSettingsSection('tariffs')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5h11M2.5 8h11M2.5 11h7"/><circle cx="12.5" cy="12" r="2.2"/></svg>Тарифы розницы</div>
+      <div class="settings-nav-item" id="snav_tariffs" data-on-click="switchSettingsSection('tariffs')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5h11M2.5 8h11M2.5 11h7"/><circle cx="12.5" cy="12" r="2.2"/></svg>Розница</div>
       <div class="settings-nav-item" id="snav_data" data-on-click="switchSettingsSection('data')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4.5" x2="14" y2="4.5"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="11.5" x2="14" y2="11.5"/><circle cx="6" cy="4.5" r="1.6" fill="var(--bg-1)"/><circle cx="10.5" cy="8" r="1.6" fill="var(--bg-1)"/><circle cx="5" cy="11.5" r="1.6" fill="var(--bg-1)"/></svg>Данные и хранение</div>
     </div>
     <!-- Content -->
@@ -483,6 +483,49 @@
       </div>
       <!-- Тарифы розницы (B2C, WP3): CRUD /api/admin/tariffs -->
       <div id="settingsSection_tariffs" class="settings-section" style="display:none">
+        <!-- Настройки розницы: главный выключатель + жизненный цикл + алерты/антифрод -->
+        <div class="analytics-card" style="margin-bottom:16px">
+          <h3 style="margin:0 0 6px">Настройки розницы</h3>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">Все параметры B2C-продаж в одном месте: включение, цены, сроки, алерты и антифрод.</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Розница включена</div><div class="set-row-d">Регистрация, витрина тарифов, покупка и пополнение для физлиц. Выключено — B2C-контур полностью скрыт</div></div><label class="tgl"><input type="checkbox" id="retailEnabledInput"><span></span></label></div>
+            <div class="set-row"><div><div class="set-row-t">Цена тест-дня</div><div class="set-row-d">Разовое списание за тариф с длительностью 24ч (тест-день), ₽</div></div><div class="set-inp"><input id="retailTestDayPriceInput" type="number" min="0" max="100000"><span>₽</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Grace после обнуления</div><div class="set-row-d">Сколько часов порт работает после того, как деньги кончились</div></div><div class="set-inp"><input id="retailGraceHoursInput" type="number" min="1" max="720"><span>ч</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Hold до удаления порта</div><div class="set-row-d">После grace порт блокируется; через столько дней удаляется безвозвратно</div></div><div class="set-inp"><input id="retailHoldDaysInput" type="number" min="1" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Регистраций с IP в сутки</div><div class="set-row-d">Анти-мультиаккаунт: лимит регистраций с одного IP за 24 часа</div></div><div class="set-inp"><input id="retailRegLimitInput" type="number" min="1" max="1000"><span>шт</span></div></div>
+          </div>
+          <div class="set-grp-label">АЛЕРТЫ И АНТИФРОД</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Алерт: массовая покупка</div><div class="set-row-d">Столько арендованных портов у одного аккаунта → алерт «массовая покупка» (антифрод: мультиаккаунт/перепродажа)</div></div><div class="set-inp"><input id="retailBulkBuyThresholdInput" type="number" min="1" max="100"><span>портов</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Алерт: пул на исходе</div><div class="set-row-d">Свободных портов на боксе розницы меньше N → алерт (0 = выкл)</div></div><div class="set-inp"><input id="retailPoolMinFreeInput" type="number" min="0" max="1000"><span>шт</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Антифрод: хиты до саспенда</div><div class="set-row-d">Обращений к бан-листу на порту розницы → авто-саспенд порта (доменный контроль; 0 = выкл)</div></div><div class="set-inp"><input id="domainGuardSuspendHitsInput" type="number" min="0" max="1000"><span>хитов</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Антифрод: strikes до блока</div><div class="set-row-d">Столько нарушений AUP → аккаунт блокируется (blocked=1), сессии убиваются</div></div><div class="set-inp"><input id="abuseStrikesBlockInput" type="number" min="1" max="100"><span>шт</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Антифрод: аккаунтов с одного IP</div><div class="set-row-d">Больше N розничных аккаунтов с одного IP регистрации → отказ (0 = выкл)</div></div><div class="set-inp"><input id="retailMaxAccountsPerIpInput" type="number" min="0" max="100"><span>шт</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Пул: мин. уникальность IP</div><div class="set-row-d">Уникальных IP за 14 дней на боксе розницы ниже N% → алерт о деградации пула (0 = выкл)</div></div><div class="set-inp"><input id="retailMinUniqueIpsInput" type="number" min="0" max="100"><span>%</span></div></div>
+          </div>
+          <div class="set-save-bar">
+            <span id="retailSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
+            <button class="btn btn-primary" data-on-click="saveRetailSettings()">Сохранить</button>
+          </div>
+        </div>
+        <!-- Регистрация и письма: Turnstile (анти-бот) + SendPulse SMTP -->
+        <div class="analytics-card" style="margin-bottom:16px">
+          <h3 style="margin:0 0 6px">Регистрация и письма</h3>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">Cloudflare Turnstile — защита форм регистрации/сброса от ботов. SendPulse SMTP — письма верификации, сброса пароля и чеки оплаты.</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Turnstile Site Key</div><div class="set-row-d">Публичный ключ виджета (с сайта Cloudflare)</div></div><input id="turnstileSiteKeyInput" placeholder="0x4AAAA..." autocomplete="off" style="width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">Turnstile Secret Key</div><div class="set-row-d">Серверный ключ проверки. Хранится зашифрованным; пустое при сохранении = не менять</div></div><input id="turnstileSecretKeyInput" type="password" placeholder="••••••••" autocomplete="off" style="width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">SendPulse SMTP логин</div><div class="set-row-d">Логин SMTP-аккаунта SendPulse</div></div><input id="sendpulseUserInput" autocomplete="off" style="width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">SendPulse SMTP пароль</div><div class="set-row-d">Хранится зашифрованным; пустое при сохранении = не менять</div></div><input id="sendpulsePassInput" type="password" placeholder="••••••••" autocomplete="off" style="width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+            <div class="set-row"><div><div class="set-row-t">From-адрес писем</div><div class="set-row-d">Отправитель писем клиентам (должен быть подтверждён в SendPulse)</div></div><input id="sendpulseFromInput" placeholder="noreply@arendaproxy.ru" autocomplete="off" style="width:220px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
+          </div>
+          <div class="set-save-bar">
+            <span id="retailInfraStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
+            <button class="btn btn-primary" data-on-click="saveRetailInfraSettings()">Сохранить</button>
+          </div>
+        </div>
         <div class="analytics-card">
           <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
             <h3 style="margin:0">Тарифы розницы</h3>
@@ -560,10 +603,10 @@
             <h3 style="margin:0">Промокоды</h3>
             <button class="btn btn-sm" data-on-click="loadPromoCodesAdmin()">Обновить</button>
           </div>
-          <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">Процент и фикс — бонусом к пополнению; бонусные дни — при покупке прокси (зачисляются эквивалентом на баланс).</div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">Промокод даёт бонус к пополнению баланса: процент от суммы или фиксированную сумму. Зачисляется автоматически после оплаты.</div>
           <div class="add-form" style="margin-bottom:14px">
             <div class="form-group"><label class="form-label" style="font-size:10px">Код</label><input class="form-input" id="promoCode" placeholder="WELCOME10" style="width:100%;text-transform:uppercase"></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">Тип</label><select class="form-input" id="promoType" style="width:100%"><option value="percent">Процент к пополнению</option><option value="fixed">Фикс. сумма к пополнению</option><option value="bonus_days">Бонусные дни при покупке</option></select></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Тип</label><select class="form-input" id="promoType" style="width:100%"><option value="percent">Процент к пополнению</option><option value="fixed">Фикс. сумма к пополнению</option></select></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Значение</label><input class="form-input" id="promoValue" type="number" min="1" placeholder="10" style="width:100%"></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Лимит использований</label><input class="form-input" id="promoMaxUses" type="number" min="1" placeholder="без лимита" style="width:100%"></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Действует до</label><input class="form-input" id="promoExpires" type="date" style="width:100%"></div>
@@ -953,13 +996,6 @@
             <div class="set-row"><div><div class="set-row-t">Ежедневная сводка</div><div class="set-row-d">Если выключено, сводка не отправляется автоматически</div></div><label class="tgl"><input type="checkbox" id="tgSummaryEnabled"><span></span></label></div>
             <div class="set-row"><div><div class="set-row-t">ID админов бота</div><div class="set-row-d">Telegram id админов через запятую — только им доступны команды /today, /yesterday, /status. Пусто = legacy-режим (админ = Chat ID выше)</div></div><input id="tgAdminIds" placeholder="614664598,123456789" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">Username бота</div><div class="set-row-d">Без @. Fallback для ссылки привязки из ЛК — обычно определяется сам через getMe</div></div><input id="tgBotUsername" placeholder="my_proxy_bot" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
-            <div class="set-row"><div><div class="set-row-t">Алерт: массовая покупка</div><div class="set-row-d">Столько арендованных портов у одного аккаунта → алерт «массовая покупка» (розница)</div></div><div class="set-inp"><input id="retailBulkBuyThresholdInput" type="number" min="1" max="100"><span>портов</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Алерт: пул на исходе</div><div class="set-row-d">Свободных портов на боксе розницы меньше N → алерт (0 = выкл)</div></div><div class="set-inp"><input id="retailPoolMinFreeInput" type="number" min="0" max="1000"><span>шт</span></div></div>
-            <!-- WP7 (B2C Э5): антифрод розницы -->
-            <div class="set-row"><div><div class="set-row-t">Антифрод: хиты до саспенда</div><div class="set-row-d">Обращений к бан-листу на порту розницы → авто-саспенд порта (доменный контроль; 0 = выкл)</div></div><div class="set-inp"><input id="domainGuardSuspendHitsInput" type="number" min="0" max="1000"><span>хитов</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Антифрод: strikes до блока</div><div class="set-row-d">Столько нарушений AUP → аккаунт блокируется (blocked=1), сессии убиваются</div></div><div class="set-inp"><input id="abuseStrikesBlockInput" type="number" min="1" max="100"><span>шт</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Антифрод: аккаунтов с одного IP</div><div class="set-row-d">Больше N розничных аккаунтов с одного IP регистрации → отказ (0 = выкл)</div></div><div class="set-inp"><input id="retailMaxAccountsPerIpInput" type="number" min="0" max="100"><span>шт</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Пул: мин. уникальность IP</div><div class="set-row-d">Уникальных IP за 14 дней на боксе розницы ниже N% → алерт о деградации пула (0 = выкл)</div></div><div class="set-inp"><input id="retailMinUniqueIpsInput" type="number" min="0" max="100"><span>%</span></div></div>
           </div>
           <div style="display:flex;gap:8px;margin-top:12px;flex-wrap:wrap;align-items:center">
             <button class="btn btn-sm" data-on-click="tgSaveSettings().then(function(){showToast('Настройки сохранены','success')}).catch(function(e){showToast(e.message,'error')})">Сохранить</button>
@@ -981,9 +1017,11 @@
             <div id="speedtestModemsBox" style="padding:2px 14px 12px"><div style="font-size:11px;color:var(--text-3)">Загрузка списка модемов…</div></div>
             <input type="hidden" id="speedtestModemsInput">
             <div class="set-row"><div><div class="set-row-t">Мин. скорость</div><div class="set-row-d">Ниже — скорость подсвечивается красным в таблице</div></div><div class="set-inp"><input id="minSpeedInput" type="number" step="0.5" min="0"><span>Mbps</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Порог медленного</div><div class="set-row-d">Если download/upload ниже — модем помечается для повторного теста</div></div><div class="set-inp"><input id="speedtestLowThresholdInput" type="number" step="0.1" min="0.1" max="50"><span>Mbps</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Задержка ре-теста</div><div class="set-row-d">Через сколько минут перетестировать медленный модем</div></div><div class="set-inp"><input id="speedtestRetestDelayInput" type="number" min="1" max="120"><span>мин</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Макс. записей истории</div><div class="set-row-d">Сколько последних результатов хранить на модем</div></div><div class="set-inp"><input id="speedtestMaxHistoryInput" type="number" min="5" max="200"></div></div>
+            <div class="set-row"><div><div class="set-row-t">Перезамер: порог DL</div><div class="set-row-d">Замер с download ниже порога считается подозрительным — повтор через ~25 сек, пишется лучший</div></div><div class="set-inp"><input id="speedmonRetryDlInput" type="number" step="0.5" min="0.5" max="50"><span>Mbps</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Перезамер: каждые</div><div class="set-row-d">Неудачные модемы (оффлайн/сбой) перезамеряются с этим шагом до успеха</div></div><div class="set-inp"><input id="speedmonRetryRoundMinInput" type="number" min="1" max="30"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Перезамер: раундов</div><div class="set-row-d">Сколько раундов добивать неудачных (10 × 5 мин ≈ до следующего часового тика; 0 = выкл)</div></div><div class="set-inp"><input id="speedmonRetryRoundsInput" type="number" min="0" max="20"><span>шт</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Хранить замеры</div><div class="set-row-d">Дней истории почасовых замеров (таблица speed_monitor)</div></div><div class="set-inp"><input id="retSpeedMonitorInput" type="number" min="7" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Макс. записей истории</div><div class="set-row-d">Сколько последних результатов хранить на модем (ручные замеры)</div></div><div class="set-inp"><input id="speedtestMaxHistoryInput" type="number" min="5" max="200"></div></div>
           </div>
 
           <div class="set-grp-label">ПОРОГИ «ПРОБЛЕМНЫХ» МОДЕМОВ</div>
@@ -1175,7 +1213,8 @@
       <div class="modal-tab active" data-tab="info" data-on-click="switchTab('info',this)">Обзор</div>
       <div class="modal-tab" data-tab="health" data-on-click="switchTab('health',this)">Здоровье</div>
       <div class="modal-tab" data-tab="traffic" data-on-click="switchTab('traffic',this)">Трафик</div>
-      <div class="modal-tab" data-tab="history" data-on-click="switchTab('history',this)">История</div>
+      <div class="modal-tab" data-tab="iphistory" data-on-click="switchTab('iphistory',this)">Ротации IP</div>
+      <div class="modal-tab" data-tab="speed" data-on-click="switchTab('speed',this)">Скорость</div>
       <div class="modal-tab" data-tab="settings" data-on-click="switchTab('settings',this)">Настройки</div>
     </div>
     <div class="modal-body" id="modalBody"></div>

@@ -230,10 +230,12 @@ function loadSettings(){
     // Proxy check extended
     var pctmEl=document.getElementById('proxyCheckTimeoutInput');if(pctmEl)pctmEl.value=s.proxy_check_timeout_sec||15;
     var pccEl=document.getElementById('proxyCheckConcurrencyInput');if(pccEl)pccEl.value=s.proxy_check_concurrency||10;
-    // Speedtest extended
-    var stlEl=document.getElementById('speedtestLowThresholdInput');if(stlEl)stlEl.value=s.speedtest_low_threshold||1;
-    var strEl=document.getElementById('speedtestRetestDelayInput');if(strEl)strEl.value=s.speedtest_retest_delay_min||10;
+    // Speedtest extended (выборочный почасовой замер — SpeedMonitor)
     var stmEl=document.getElementById('speedtestMaxHistoryInput');if(stmEl)stmEl.value=s.speedtest_max_history||30;
+    var smDl=document.getElementById('speedmonRetryDlInput');if(smDl)smDl.value=s.speedmon_retry_dl_threshold!=null?s.speedmon_retry_dl_threshold:5;
+    var smRm=document.getElementById('speedmonRetryRoundMinInput');if(smRm)smRm.value=s.speedmon_retry_round_min||5;
+    var smRr=document.getElementById('speedmonRetryRoundsInput');if(smRr)smRr.value=s.speedmon_retry_rounds!=null?s.speedmon_retry_rounds:10;
+    var smRet=document.getElementById('retSpeedMonitorInput');if(smRet)smRet.value=s.retention_speed_monitor||60;
     // Recovery
     var reEl=document.getElementById('recoveryEnabledInput');if(reEl)reEl.checked=(s.recovery_enabled!==false);
     var roEl=document.getElementById('recoveryOfflineSecInput');if(roEl)roEl.value=s.recovery_offline_sec||300;
@@ -270,16 +272,29 @@ function loadSettings(){
     var tgC=document.getElementById('tgChatId');if(tgC)tgC.value=s.telegram_chat_id||'';
     var tgTm=document.getElementById('tgSummaryTime');if(tgTm)tgTm.value=s.telegram_summary_time||'08:00';
     var tgEn=document.getElementById('tgSummaryEnabled');if(tgEn)tgEn.checked=!!s.telegram_summary_enabled;
-    // WP5 (B2C Э3): whitelist админов бота + username-fallback + пороги алертов розницы
+    // WP5 (B2C Э3): whitelist админов бота + username-fallback
     var tgA=document.getElementById('tgAdminIds');if(tgA)tgA.value=s.telegram_admin_ids||'';
     var tgU=document.getElementById('tgBotUsername');if(tgU)tgU.value=s.telegram_bot_username||'';
+    // Розница — секция «Розница» (настройки, алерты, антифрод, рега/письма)
+    var ren=document.getElementById('retailEnabledInput');if(ren)ren.checked=!!s.retail_enabled;
+    var rtp=document.getElementById('retailTestDayPriceInput');if(rtp)rtp.value=s.retail_test_day_price!=null?s.retail_test_day_price:100;
+    var rgh=document.getElementById('retailGraceHoursInput');if(rgh)rgh.value=s.retail_grace_hours||24;
+    var rhd=document.getElementById('retailHoldDaysInput');if(rhd)rhd.value=s.retail_hold_days||7;
+    var rrl=document.getElementById('retailRegLimitInput');if(rrl)rrl.value=s.retail_reg_limit_per_ip_day||10;
     var rbb=document.getElementById('retailBulkBuyThresholdInput');if(rbb)rbb.value=s.retail_bulk_buy_threshold!=null?s.retail_bulk_buy_threshold:3;
     var rpf=document.getElementById('retailPoolMinFreeInput');if(rpf)rpf.value=s.retail_pool_min_free!=null?s.retail_pool_min_free:3;
-    // WP7 (B2C Э5): антифрод розницы
     var dgs=document.getElementById('domainGuardSuspendHitsInput');if(dgs)dgs.value=s.domain_guard_suspend_hits!=null?s.domain_guard_suspend_hits:1;
     var asb=document.getElementById('abuseStrikesBlockInput');if(asb)asb.value=s.abuse_strikes_block!=null?s.abuse_strikes_block:2;
     var rma=document.getElementById('retailMaxAccountsPerIpInput');if(rma)rma.value=s.retail_max_accounts_per_ip!=null?s.retail_max_accounts_per_ip:2;
     var rmu=document.getElementById('retailMinUniqueIpsInput');if(rmu)rmu.value=s.retail_min_unique_ips!=null?s.retail_min_unique_ips:50;
+    // Turnstile + SendPulse (секреты — маска GET: пустое поле при сохранении = не менять)
+    var tsk=document.getElementById('turnstileSiteKeyInput');if(tsk)tsk.value=s.turnstile_site_key||'';
+    var tsec=document.getElementById('turnstileSecretKeyInput');
+    if(tsec){if(s.turnstile_secret_key==='••••••••'){tsec.value='';tsec.dataset.masked='1';}else{tsec.value=s.turnstile_secret_key||'';tsec.dataset.masked='';}}
+    var spU=document.getElementById('sendpulseUserInput');if(spU)spU.value=s.sendpulse_smtp_user||'';
+    var spP=document.getElementById('sendpulsePassInput');
+    if(spP){if(s.sendpulse_smtp_pass==='••••••••'){spP.value='';spP.dataset.masked='1';}else{spP.value=s.sendpulse_smtp_pass||'';spP.dataset.masked='';}}
+    var spF=document.getElementById('sendpulseFromInput');if(spF)spF.value=s.sendpulse_from||'';
     if(currentData) currentData.settings = s;
     renderPricingTiers();
   }).catch(function(){});
@@ -298,21 +313,48 @@ function tgSaveSettings(){
   // сохранение нетронутой формы затирало бы реальный токен enc1:).
   var tok=(tgT.value||'').trim();
   if(tok||!tgT.dataset.masked) data.telegram_bot_token=tok;
-  // Пороги алертов розницы (WP5): NaN-защита — сервер тоже валидирует.
-  var rbb=parseInt(document.getElementById('retailBulkBuyThresholdInput').value);
-  data.retail_bulk_buy_threshold=isNaN(rbb)?3:rbb;
-  var rpf=parseInt(document.getElementById('retailPoolMinFreeInput').value);
-  data.retail_pool_min_free=isNaN(rpf)?0:rpf;
-  // Антифрод розницы (WP7, Э5): те же NaN-дефолты, сервер валидирует границы.
-  var dgs=parseInt(document.getElementById('domainGuardSuspendHitsInput').value);
-  data.domain_guard_suspend_hits=isNaN(dgs)?1:dgs;
-  var asb=parseInt(document.getElementById('abuseStrikesBlockInput').value);
-  data.abuse_strikes_block=isNaN(asb)?2:asb;
-  var rma=parseInt(document.getElementById('retailMaxAccountsPerIpInput').value);
-  data.retail_max_accounts_per_ip=isNaN(rma)?2:rma;
-  var rmu=parseInt(document.getElementById('retailMinUniqueIpsInput').value);
-  data.retail_min_unique_ips=isNaN(rmu)?50:rmu;
   return api(API+'/api/admin/settings',{method:'PUT',json:data});
+}
+// Розница: общие настройки + алерты/антифрод (секция «Розница»).
+function saveRetailSettings(){
+  function _num(id,def,min,max){var v=parseInt(document.getElementById(id).value);if(isNaN(v))v=def;return Math.max(min,Math.min(max,v))}
+  var data={
+    retail_enabled:!!document.getElementById('retailEnabledInput').checked,
+    retail_test_day_price:_num('retailTestDayPriceInput',100,0,100000),
+    retail_grace_hours:_num('retailGraceHoursInput',24,1,720),
+    retail_hold_days:_num('retailHoldDaysInput',7,1,365),
+    retail_reg_limit_per_ip_day:_num('retailRegLimitInput',10,1,1000),
+    retail_bulk_buy_threshold:_num('retailBulkBuyThresholdInput',3,1,100),
+    retail_pool_min_free:_num('retailPoolMinFreeInput',0,0,1000),
+    domain_guard_suspend_hits:_num('domainGuardSuspendHitsInput',1,0,1000),
+    abuse_strikes_block:_num('abuseStrikesBlockInput',2,1,100),
+    retail_max_accounts_per_ip:_num('retailMaxAccountsPerIpInput',2,0,100),
+    retail_min_unique_ips:_num('retailMinUniqueIpsInput',50,0,100)
+  };
+  var st=document.getElementById('retailSettingsStatus');
+  st.textContent='Сохраняю...';st.style.color='var(--warning)';
+  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';showToast('Настройки розницы сохранены','success');loadTariffsAdmin()}
+    else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
+  }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
+}
+// Розница: Turnstile + SendPulse (секреты — пустое замаскированное поле = не менять).
+function saveRetailInfraSettings(){
+  var tsec=document.getElementById('turnstileSecretKeyInput');
+  var spP=document.getElementById('sendpulsePassInput');
+  var data={
+    turnstile_site_key:(document.getElementById('turnstileSiteKeyInput').value||'').trim(),
+    sendpulse_smtp_user:(document.getElementById('sendpulseUserInput').value||'').trim(),
+    sendpulse_from:(document.getElementById('sendpulseFromInput').value||'').trim()
+  };
+  var ts=(tsec.value||'').trim(); if(ts||!tsec.dataset.masked)data.turnstile_secret_key=ts;
+  var sp=(spP.value||'').trim(); if(sp||!spP.dataset.masked)data.sendpulse_smtp_pass=sp;
+  var st=document.getElementById('retailInfraStatus');
+  st.textContent='Сохраняю...';st.style.color='var(--warning)';
+  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';showToast('Настройки регистрации сохранены','success')}
+    else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
+  }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
 }
 function tgPreview(){
   var st=document.getElementById('tgStatus');
@@ -370,9 +412,12 @@ function saveSettings(){
   if(modems.some(function(n){return !/^[\w-]{1,64}$/.test(n)})){showToast('Ники: только латиница, цифры, _ и -','error');return}
   var minSpeed=parseFloat(document.getElementById('minSpeedInput').value)||2;
   var errThresh=parseInt(document.getElementById('errorRateThresholdInput').value)||15;
-  var lowThresh=parseFloat(document.getElementById('speedtestLowThresholdInput').value)||1;
-  var retestDelay=parseInt(document.getElementById('speedtestRetestDelayInput').value)||10;
   var maxHist=parseInt(document.getElementById('speedtestMaxHistoryInput').value)||30;
+  var smDl=parseFloat(document.getElementById('speedmonRetryDlInput').value)||5;
+  var smRm=parseInt(document.getElementById('speedmonRetryRoundMinInput').value)||5;
+  var smRr=parseInt(document.getElementById('speedmonRetryRoundsInput').value);
+  if(isNaN(smRr))smRr=10;
+  var smRet=parseInt(document.getElementById('retSpeedMonitorInput').value)||60;
   var palLatency=parseInt(document.getElementById('proxyAlertLatencyInput').value)||1500;
   var palErrPct=parseFloat(document.getElementById('proxyAlertErrorPctInput').value)||5;
   var palWindow=parseInt(document.getElementById('proxyAlertWindowInput').value)||60;
@@ -383,7 +428,7 @@ function saveSettings(){
   var staleH=parseInt(document.getElementById('staleModemHoursInput').value)||12;
   var offThMin=parseInt((document.getElementById('modemOfflineThresholdInput')||{}).value)||10;
   window._offlineThresholdMin=offThMin;
-  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_low_threshold:lowThresh,speedtest_retest_delay_min:retestDelay,speedtest_max_history:maxHist,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
     if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Почасовой замер: '+(modems.join(', ')||'дефолтный список')+' — применится со следующего часа';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});

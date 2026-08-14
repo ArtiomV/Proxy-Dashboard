@@ -1,12 +1,10 @@
 // B2C Этап 7 (WP6): промокоды + вывод партнёрской комиссии.
 //   - src/db/promo-codes.js: findValid (нет/выключен/истёк/исчерпан),
 //     consume — атомарный лимит (UPDATE WHERE used < max_uses);
-//   - GET /api/client/promo/check — context-правила (percent/fixed → topup,
-//     bonus_days → buy) без списаний;
+//   - GET /api/client/promo/check — проверка кода для UI ЛК (без списаний);
 //   - POST /api/client/topup + webhook: бонус percent/fixed отдельной строкой
-//     ledger (type='promo_bonus'), used++; bonus_days → 400 PROMO_WRONG_CONTEXT;
-//   - POST /api/client/buy_proxy: promo-валидация до пула (невалидный/не тот
-//     контекст/тест-день → 400);
+//     ledger (type='promo_bonus'), used++;
+//   - bonus_days из промокодов убран (2026-08): покупка промокодов не принимает;
 //   - POST /api/client/referral/withdraw_to_balance: self-referral трюк —
 //     balance += amount и referral_balance = 0 в одной транзакции;
 //   - POST /api/admin/clients/:id/referral_payout: ручная выплата оператором
@@ -187,8 +185,6 @@ describe('WP6: GET /api/client/promo/check — контексты', () => {
     ({ token } = await registerVerified('check@wp6-test.local'));
     await request(app).post('/api/admin/promo-codes').set('X-Auth-Token', adminToken)
       .send({ code: 'WP6PCT', type: 'percent', value: 10 });
-    await request(app).post('/api/admin/promo-codes').set('X-Auth-Token', adminToken)
-      .send({ code: 'WP6DAYS', type: 'bonus_days', value: 3 });
   });
 
   it('percent в context=topup → ok с описанием; в context=buy → 400', async () => {
@@ -199,9 +195,10 @@ describe('WP6: GET /api/client/promo/check — контексты', () => {
     expect(bad.body.ok).toBe(false);
   });
 
-  it('bonus_days в context=buy → ok; несуществующий код → 404', async () => {
-    const ok = await request(app).get('/api/client/promo/check?code=WP6DAYS&context=buy').set('X-Auth-Token', token);
-    expect(ok.body).toMatchObject({ ok: true, description: '+3 дн. при покупке' });
+  it('bonus_days больше не создаётся → 400; несуществующий код → 404', async () => {
+    const bd = await request(app).post('/api/admin/promo-codes').set('X-Auth-Token', adminToken)
+      .send({ code: 'WP6DAYS', type: 'bonus_days', value: 3 });
+    expect(bd.status).toBe(400);
     const nf = await request(app).get('/api/client/promo/check?code=WP6NOPE&context=topup').set('X-Auth-Token', token);
     expect(nf.status).toBe(404);
   });
@@ -254,47 +251,12 @@ describe('WP6: промокод при пополнении', () => {
     expect(bonus).toMatchObject({ amount: 150 });
   });
 
-  it('bonus_days при пополнении → 400 PROMO_WRONG_CONTEXT; невалидный → 400 PROMO_INVALID', async () => {
+  it('невалидный промокод → 400 PROMO_INVALID', async () => {
     const { token } = await registerVerified('wrongctx@wp6-test.local');
-    const bd = await request(app).post('/api/client/topup').set('X-Auth-Token', token)
-      .send({ amount: 500, method: 'card', promo: 'WP6DAYS' });
-    expect(bd.status).toBe(400);
-    expect(bd.body.code).toBe('PROMO_WRONG_CONTEXT');
     const inv = await request(app).post('/api/client/topup').set('X-Auth-Token', token)
       .send({ amount: 500, method: 'card', promo: 'WP6NOPE' });
     expect(inv.status).toBe(400);
     expect(inv.body.code).toBe('PROMO_INVALID');
-  });
-});
-
-// ── buy_proxy: валидация промокода (до пула/провижининга) ───────────────────
-describe('WP6: buy_proxy — валидация промокода', () => {
-  let token, tariffId, testTariffId;
-  beforeAll(async () => {
-    const t = await request(app).post('/api/admin/tariffs').set('X-Auth-Token', adminToken)
-      .send({ name: 'wp6_buy', type: 'per_modem', geo: 'TST', server: 'S1', price: 3000, public: true });
-    tariffId = t.body.tariff.id;
-    const tt = await request(app).post('/api/admin/tariffs').set('X-Auth-Token', adminToken)
-      .send({ name: 'wp6_test', type: 'per_modem', geo: 'TST', server: 'S1', price: 100, public: true, duration_hours: 24 });
-    testTariffId = tt.body.tariff.id;
-    ({ token } = await registerVerified('buyer@wp6-test.local'));
-  });
-
-  it('percent при покупке → 400 PROMO_WRONG_CONTEXT; невалидный → PROMO_INVALID', async () => {
-    const res = await request(app).post('/api/client/buy_proxy').set('X-Auth-Token', token)
-      .send({ tariff_id: tariffId, promo: 'WP6PCT' });
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('PROMO_WRONG_CONTEXT');
-    const inv = await request(app).post('/api/client/buy_proxy').set('X-Auth-Token', token)
-      .send({ tariff_id: tariffId, promo: 'WP6NOPE' });
-    expect(inv.body.code).toBe('PROMO_INVALID');
-  });
-
-  it('промокод на тест-день → 400 PROMO_WRONG_CONTEXT', async () => {
-    const res = await request(app).post('/api/client/buy_proxy').set('X-Auth-Token', token)
-      .send({ tariff_id: testTariffId, promo: 'WP6DAYS' });
-    expect(res.status).toBe(400);
-    expect(res.body.code).toBe('PROMO_WRONG_CONTEXT');
   });
 });
 

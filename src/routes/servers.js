@@ -147,7 +147,7 @@ r.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   const masked = { ...appSettings };
   // WP5: telegram_bot_token тоже секрет (enc1: в kv) — маскируем, как API-ключи.
   // WP3 (B2C Э4): tochka_acq_jwt — JWT эквайринга, тот же контур.
-  for (const k of ['anthropic_api_key', 'telegram_bot_token', 'tochka_acq_jwt']) {
+  for (const k of ['anthropic_api_key', 'telegram_bot_token', 'tochka_acq_jwt', 'turnstile_secret_key', 'sendpulse_smtp_pass']) {
     const v = masked[k];
     masked[k] = (typeof v === 'string' && v) ? '••••••••' : '';
   }
@@ -161,11 +161,8 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   // but the only place in the codebase that mutated appSettings without
   // going through the canonical setSetting/setSettings helper. Now all
   // appSettings writes funnel through the same path.
-  const { speedtest_times, pricing_tiers, min_speed_threshold, proxy_check_target, proxy_check_warn_ms, proxy_check_bad_ms } = req.body;
+  const { pricing_tiers, min_speed_threshold, proxy_check_target, proxy_check_warn_ms, proxy_check_bad_ms } = req.body;
   const patch = {};
-  if (speedtest_times && Array.isArray(speedtest_times)) {
-    patch.speedtest_times = speedtest_times.filter(t => /^\d{2}:\d{2}$/.test(t));
-  }
   if (min_speed_threshold != null) {
     patch.min_speed_threshold = parseFloat(min_speed_threshold) || 2;
   }
@@ -287,6 +284,11 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
     }
     patch.speedtest_modems = nicks.join(',');
   }
+  // SpeedMonitor (выборочный почасовой замер): перезамеры и ретенция.
+  if (req.body.speedmon_retry_dl_threshold != null) patch.speedmon_retry_dl_threshold = Math.max(0.5, Math.min(50, parseFloat(req.body.speedmon_retry_dl_threshold) || 5));
+  if (req.body.speedmon_retry_round_min != null)    patch.speedmon_retry_round_min    = Math.max(1, Math.min(30, parseInt(req.body.speedmon_retry_round_min) || 5));
+  if (req.body.speedmon_retry_rounds != null)       patch.speedmon_retry_rounds       = Math.max(0, Math.min(20, parseInt(req.body.speedmon_retry_rounds) ?? 10));
+  if (req.body.retention_speed_monitor != null)     patch.retention_speed_monitor     = Math.max(7, Math.min(365, parseInt(req.body.retention_speed_monitor) || 60));
   // Боксы розничного пула: CSV имён серверов (порядок важен — первый из
   // списка = бокс выдачи по умолчанию, см. retail.js buy_proxy).
   if (req.body.retail_pool_servers != null) {
@@ -337,6 +339,23 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   // WP5 (B2C Э3): пороги алертов розницы
   if (req.body.retail_bulk_buy_threshold != null) patch.retail_bulk_buy_threshold = Math.max(1, Math.min(100, parseInt(req.body.retail_bulk_buy_threshold) || 3));
   if (req.body.retail_pool_min_free != null)      patch.retail_pool_min_free      = Math.max(0, Math.min(1000, parseInt(req.body.retail_pool_min_free) || 0));
+  // Розница: главный выключатель + параметры жизненного цикла (UI «Розница»)
+  if (req.body.retail_enabled != null)            patch.retail_enabled            = !!req.body.retail_enabled;
+  if (req.body.retail_test_day_price != null)     patch.retail_test_day_price     = Math.max(0, Math.min(100000, parseFloat(req.body.retail_test_day_price) || 0));
+  if (req.body.retail_grace_hours != null)        patch.retail_grace_hours        = Math.max(1, Math.min(720, parseInt(req.body.retail_grace_hours) || 24));
+  if (req.body.retail_hold_days != null)          patch.retail_hold_days          = Math.max(1, Math.min(365, parseInt(req.body.retail_hold_days) || 7));
+  if (req.body.retail_reg_limit_per_ip_day != null) patch.retail_reg_limit_per_ip_day = Math.max(1, Math.min(1000, parseInt(req.body.retail_reg_limit_per_ip_day) || 10));
+  // Регистрация и письма розницы: Turnstile (анти-бот) + SendPulse SMTP.
+  // Секреты: маска GET ('••••••••') не является значением — игнорируем её.
+  if (req.body.turnstile_site_key != null)        patch.turnstile_site_key        = String(req.body.turnstile_site_key).trim();
+  if (req.body.turnstile_secret_key != null && req.body.turnstile_secret_key !== '••••••••') patch.turnstile_secret_key = String(req.body.turnstile_secret_key).trim();
+  if (req.body.sendpulse_smtp_user != null)       patch.sendpulse_smtp_user       = String(req.body.sendpulse_smtp_user).trim();
+  if (req.body.sendpulse_smtp_pass != null && req.body.sendpulse_smtp_pass !== '••••••••')   patch.sendpulse_smtp_pass   = String(req.body.sendpulse_smtp_pass).trim();
+  if (req.body.sendpulse_from != null) {
+    const from = String(req.body.sendpulse_from).trim();
+    if (from && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(from)) return res.status(400).json({ error: 'sendpulse_from: некорректный email' });
+    patch.sendpulse_from = from;
+  }
   // WP7 (B2C Э5): антифрод розницы. 0 у suspend_hits / max_accounts / min_unique = контур выкл.
   if (req.body.domain_guard_suspend_hits != null) patch.domain_guard_suspend_hits = Math.max(0, Math.min(1000, parseInt(req.body.domain_guard_suspend_hits) || 0));
   if (req.body.abuse_strikes_block != null)       patch.abuse_strikes_block       = Math.max(1, Math.min(100, parseInt(req.body.abuse_strikes_block) || 2));

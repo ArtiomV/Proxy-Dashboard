@@ -1518,10 +1518,14 @@ function generateId() { return crypto.randomBytes(8).toString('hex'); }
 // available when api_servers loads from the DB during initial bootstrap.)
 
 const SETTINGS_DEFAULTS = {
-  speedtest_times: ['02:00', '14:00'],
   // Ники модемов почасового замера скорости (SpeedMonitor), CSV.
   // Редактируется в Настройках → «Спидтесты и пороги качества».
   speedtest_modems: 'MD2_40,MD2_44,MD_01,MD_04,MD_10',
+  // SpeedMonitor: перезамеры неудачных ников и ретенция (Настройки → «Спидтесты»)
+  speedmon_retry_dl_threshold: 5,   // dl ниже (Мбит/с) — замер подозрительный, повтор
+  speedmon_retry_round_min: 5,      // перезамер неудачных каждые N минут
+  speedmon_retry_rounds: 10,        // макс. раундов перезамера (~50 мин при 5)
+  retention_speed_monitor: 60,      // дней хранения строк speed_monitor
   pricing_tiers: [
     { min_proxies: 1, price: 30, label: '1-4 прокси' },
     { min_proxies: 5, price: 25, label: '5-9 прокси' },
@@ -2971,8 +2975,8 @@ app.use(require('./src/routes/public-lead')({ logger, db, validate, getSetting, 
 app.use(require('./src/routes/retail')({
   logger, authMiddleware, adminMiddleware,
   clients, saveClients,
-  tariffsDb, retailPoolDb, promoDb,
-  atomicDebit, atomicCredit,
+  tariffsDb, retailPoolDb,
+  atomicDebit,
   getSetting,
   findServer, fetchApi, proxyConf, proxySmart, parseHtmlInputFields,
   fetchAllServersDataCached,

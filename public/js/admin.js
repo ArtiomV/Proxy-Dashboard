@@ -472,7 +472,7 @@ async function loadCardPaymentsAdmin(){
   }catch(e){card.style.display='none';}
 }
 // ===== WP6 (B2C Э7): промокоды розницы — CRUD =====
-var _PROMO_TYPE_RU={percent:'Процент',fixed:'Фикс. сумма',bonus_days:'Бонусные дни'};
+var _PROMO_TYPE_RU={percent:'Процент',fixed:'Фикс. сумма'};
 async function loadPromoCodesAdmin(){
   var card=document.getElementById('promoCodesCard');
   if(!card)return;
@@ -497,7 +497,7 @@ async function loadPromoCodesAdmin(){
       h+='<tr>'+
         '<td style="padding:6px 8px;border-bottom:1px solid var(--border);font-family:monospace">'+esc(p.code)+'</td>'+
         '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(_PROMO_TYPE_RU[p.type]||p.type)+'</td>'+
-        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">'+esc(String(p.value))+(p.type==='percent'?'%':p.type==='fixed'?' ₽':' дн.')+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">'+esc(String(p.value))+(p.type==='percent'?'%':' ₽')+'</td>'+
         '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">'+p.used+(p.max_uses?' / '+p.max_uses:'')+'</td>'+
         '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+(p.expires_at?esc(String(p.expires_at).slice(0,10)):'—')+'</td>'+
         '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:'+(p.active?'var(--success)':'var(--text-3)')+'">'+(p.active?'Активен':'Выключен')+'</td>'+
@@ -1019,7 +1019,7 @@ function loadSpeedHistory(key){
     // After speedtest result: replace modal body with history view + back button
     var mb=document.getElementById('modalBody');if(!mb)return;
     var m=currentDetailModem;
-    var backFn=m?'switchTab(\'history\',document.querySelector(\'.modal-tab[data-tab="history"]\'))':'';
+    var backFn=m?'switchTab(\'speed\',document.querySelector(\'.modal-tab[data-tab="speed"]\'))':'';
     mb.innerHTML='<div style="padding:12px"><div style="margin-bottom:10px;display:flex;gap:6px;align-items:center">'
       +'<button class="btn btn-sm" data-on-click="'+backFn+'">← Назад</button>'
       +'<span style="font-size:11px;color:var(--text-2)">История скорости</span></div>'

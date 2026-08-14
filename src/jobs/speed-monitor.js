@@ -45,12 +45,14 @@
 // изначальная fail-строка прогона уже зафиксировала факт сбоя.
 
 const DEFAULT_NICKS = 'MD2_40,MD2_44,MD_01,MD_04,MD_10';
-const RETENTION_DAYS = 60;
-const RETRY_DL_THRESHOLD = 5;    // Мбит/с — ниже: замер подозрительный, один повтор
 const RETRY_DELAY_MS = 25000;    // пауза перед повторным замером (~20–30с)
 const PING_SANE_MAX_MS = 60000;  // больше минуты «пинга» — это не пинг, а мусор
-const RETRY_ROUND_MS = 5 * 60 * 1000;  // перезамер неудачных каждые 5 минут
-const RETRY_MAX_ROUNDS = 10;           // ~50 мин — до следующего часового тика
+// Дефолты настройки (Настройки → «Спидтесты»): speedmon_retry_dl_threshold,
+// speedmon_retry_round_min, speedmon_retry_rounds, retention_speed_monitor.
+const DEFAULT_RETRY_DL_THRESHOLD = 5;    // Мбит/с — ниже: замер подозрительный, один повтор
+const DEFAULT_RETRY_ROUND_MIN = 5;       // перезамер неудачных каждые N минут
+const DEFAULT_RETRY_ROUNDS = 10;         // ~50 мин — до следующего часового тика
+const DEFAULT_RETENTION_DAYS = 60;
 
 // Парсер ответа /apix/speedtest — копия логики parseSpeedtestResult из
 // src/jobs/proxy-checks.js (та внутренняя, не экспортируется). Бокс отдаёт
@@ -83,11 +85,26 @@ function create(deps) {
   const sleep = typeof deps.sleep === 'function'
     ? deps.sleep
     : (ms) => new Promise(r => setTimeout(r, ms));
-  // Параметры настойчивых перезамеров инжектируются — тесты гоняют раунды
-  // мгновенно и/или отключают их (retryRounds: 0), чтобы не менять смысл
-  // старых сценариев «один прогон — одна строка».
-  const retryRounds = Number.isInteger(deps.retryRounds) ? deps.retryRounds : RETRY_MAX_ROUNDS;
-  const retryRoundMs = Number.isFinite(deps.retryRoundMs) ? deps.retryRoundMs : RETRY_ROUND_MS;
+  // Параметры перезамеров: deps-override для тестов, иначе настройка
+  // (читается на КАЖДЫЙ прогон — правки применяются без рестарта).
+  function retryRounds() {
+    if (Number.isInteger(deps.retryRounds)) return deps.retryRounds;
+    const v = getSetting ? parseInt(getSetting('speedmon_retry_rounds', DEFAULT_RETRY_ROUNDS)) : DEFAULT_RETRY_ROUNDS;
+    return Number.isInteger(v) && v >= 0 ? v : DEFAULT_RETRY_ROUNDS;
+  }
+  function retryRoundMs() {
+    if (Number.isFinite(deps.retryRoundMs)) return deps.retryRoundMs;
+    const v = getSetting ? parseInt(getSetting('speedmon_retry_round_min', DEFAULT_RETRY_ROUND_MIN)) : DEFAULT_RETRY_ROUND_MIN;
+    return (Number.isInteger(v) && v >= 1 ? v : DEFAULT_RETRY_ROUND_MIN) * 60000;
+  }
+  function retryDlThreshold() {
+    const v = getSetting ? parseFloat(getSetting('speedmon_retry_dl_threshold', DEFAULT_RETRY_DL_THRESHOLD)) : DEFAULT_RETRY_DL_THRESHOLD;
+    return Number.isFinite(v) && v > 0 ? v : DEFAULT_RETRY_DL_THRESHOLD;
+  }
+  function retentionDays() {
+    const v = getSetting ? parseInt(getSetting('retention_speed_monitor', DEFAULT_RETENTION_DAYS)) : DEFAULT_RETENTION_DAYS;
+    return Number.isInteger(v) && v >= 7 ? v : DEFAULT_RETENTION_DAYS;
+  }
 
   // env-override фиксируется на create() (тесты удаляют env сразу после
   // создания джобы); настройка speedtest_modems читается на каждый прогон.
@@ -137,10 +154,11 @@ function create(deps) {
   }
 
   // Один замер ника с учётом нестабильности бокса: ok=0 → ретрай через
-  // RETRY_DELAY_MS; ok=1, но dl < RETRY_DL_THRESHOLD → один повтор, берём
+  // RETRY_DELAY_MS; ok=1, но dl < retryDlThreshold() → один повтор, берём
   // лучший по dl. Возвращает { best, attempts } либо бросает ошибку
   // (число совершённых попыток при этом — в err.attempts).
   async function measureNick(f, nick) {
+    const dlThreshold = retryDlThreshold();
     let attempts = 0;
     const measureOnce = async () => {
       attempts++;
@@ -156,7 +174,7 @@ function create(deps) {
       await sleep(RETRY_DELAY_MS);
       best = await measureOnce();   // упадёт — уйдёт наружу
     }
-    if (best.dl < RETRY_DL_THRESHOLD && attempts === 1) {
+    if (best.dl < dlThreshold && attempts === 1) {
       await sleep(RETRY_DELAY_MS);
       try {
         const second = await measureOnce();
@@ -240,9 +258,11 @@ function create(deps) {
       // промежуточные fail-строки не пишем — изначальная fail-строка прогона
       // уже зафиксировала сбой, лишние строки только мусорят таблицу.
       let recovered = 0;
-      for (let round = 1; round <= retryRounds && pending.size > 0; round++) {
-        logger.info(`[SpeedMonitor] перезамер, раунд ${round}/${retryRounds}: ждём ${Math.round(retryRoundMs / 1000)}с, в очереди ${[...pending.keys()].join(', ')}`);
-        await sleep(retryRoundMs);
+      const maxRounds = retryRounds();
+      const roundMs = retryRoundMs();
+      for (let round = 1; round <= maxRounds && pending.size > 0; round++) {
+        logger.info(`[SpeedMonitor] перезамер, раунд ${round}/${maxRounds}: ждём ${Math.round(roundMs / 1000)}с, в очереди ${[...pending.keys()].join(', ')}`);
+        await sleep(roundMs);
         const reFound = await resolveNicks([...pending.keys()]);
         for (const [nick, p] of [...pending]) {
           const f = reFound.get(nick);
@@ -269,9 +289,9 @@ function create(deps) {
         logger.warn(`[SpeedMonitor] перезамеры исчерпаны, остались без данных: ${[...pending.entries()].map(([n, p]) => `${n}(${p.lastError})`).join(', ')}`);
       }
 
-      // 3) Ретенция: 60 дней почасовых рядов достаточно для анализа,
-      // таблица не раздувается (~120 строк/сутки при 5 никах).
-      const pruned = pruneStmt.run(`-${RETENTION_DAYS} days`).changes;
+      // 3) Ретенция: retention_speed_monitor дней почасовых рядов (дефолт 60)
+      // достаточно для анализа, таблица не раздувается (~120 строк/сутки при 5 никах).
+      const pruned = pruneStmt.run(`-${retentionDays()} days`).changes;
 
       const stillFailed = failed - recovered;
       logger.info(`[SpeedMonitor] Complete: ${tested} ok, ${failed} failed, ${recovered} recovered (pruned ${pruned})`);

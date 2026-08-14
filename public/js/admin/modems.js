@@ -710,9 +710,9 @@ function _renderTrafficTab(body,m){
   _renderHosts(document.getElementById('ovSecHosts'),m);
 }
 function _renderHistoryTab(body,m){
-  body.innerHTML=_ovSecLabel('Ротации IP')+'<div id="ovSecRot"></div>'+_ovDivider()+_ovSecLabel('История скорости')+'<div id="ovSecSpeed"></div>';
-  _renderRotationLog(document.getElementById('ovSecRot'),m);
-  _renderSpeed(document.getElementById('ovSecSpeed'),m);
+  // Вкладка «История» разделена на «Ротации IP» (iphistory) и «Скорость»
+  // (speed) — этот рендер оставлен для старых ссылок: редирект на ротации.
+  _renderRotationLog(body,m);
 }
 
 function renderTabContent(tab){var body=document.getElementById('modalBody'),m=currentDetailModem;if(!m)return;

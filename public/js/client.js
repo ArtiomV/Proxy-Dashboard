@@ -2277,10 +2277,7 @@ function renderShop(tariffs){
     box.innerHTML='<div class="shop-grid"><div class="shop-empty">Тарифы скоро появятся</div></div>';
     return;
   }
-  var h='<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">'+
-    '<div class="form-group" style="margin:0"><label>Промокод</label><input class="form-input" type="text" id="shopPromo" placeholder="Необязательно" style="width:170px;text-transform:uppercase"></div>'+
-    '<div style="font-size:11px;color:var(--text-3);padding-bottom:8px">Промокод на бонусные дни применится при покупке</div></div>'+
-    '<div class="shop-grid">';
+  var h='<div class="shop-grid">';
   tariffs.forEach(function(t){
     var isTest=t.duration_hours===24;
     h+='<div class="shop-card">'+
@@ -2299,20 +2296,14 @@ function renderShop(tariffs){
 async function buyProxy(tariffId,btn){
   if(btn)btn.disabled=true;
   try{
-    var body={tariff_id:tariffId};
-    var promoVal=((document.getElementById('shopPromo')||{}).value||'').trim();
-    if(promoVal)body.promo=promoVal;
-    var data=await api('/api/client/buy_proxy',{method:'POST',json:body});
+    var data=await api('/api/client/buy_proxy',{method:'POST',json:{tariff_id:tariffId}});
     if(data&&data.ok){
       showToast('Прокси выдан — реквизиты на вкладке «Панель управления»','success');
-      if(data.promo_bonus)showToast('Промокод: +'+Math.round(data.promo_bonus).toLocaleString('ru-RU')+' ₽ бонусом на баланс','success');
       loadData(); // обновить порты/баланс ЛК
       return;
     }
     var code=data&&data.code;
-    if(code==='PROMO_INVALID'||code==='PROMO_WRONG_CONTEXT'){
-      showToast(data.error,'error');
-    }else if(code==='EMAIL_NOT_VERIFIED'){
+    if(code==='EMAIL_NOT_VERIFIED'){
       showToast('Сначала подтвердите email','error');
       // К баннеру верификации — он на вкладке «Профиль»
       var tabEl=document.querySelector('.nav-tab[data-on-click*="\'profile\'"]');

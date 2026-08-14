@@ -18,7 +18,7 @@ const { z } = require('zod');
 
 const PromoCreateSchema = z.object({
   code: z.string().min(3).max(50).regex(/^[A-Za-z0-9_-]+$/, 'Только латиница, цифры, - и _'),
-  type: z.enum(['percent', 'fixed', 'bonus_days']),
+  type: z.enum(['percent', 'fixed']),
   value: z.coerce.number().positive().max(100000),
   max_uses: z.coerce.number().int().positive().max(1000000).nullish(),
   expires_at: z.string().regex(/^\d{4}-\d{2}-\d{2}/).nullish(),  // YYYY-MM-DD
@@ -27,13 +27,12 @@ const PromoCreateSchema = z.object({
 // Человекочитаемое описание для ЛК.
 function describe(promo) {
   if (promo.type === 'percent') return `+${promo.value}% к пополнению`;
-  if (promo.type === 'fixed') return `+${promo.value} ₽ к пополнению`;
-  return `+${promo.value} дн. при покупке`;
+  return `+${promo.value} ₽ к пополнению`;
 }
 
-// Куда применим тип: percent/fixed — пополнение, bonus_days — покупка.
+// Промокоды применяются только при пополнении баланса (topup).
 function fitsContext(promo, context) {
-  return promo.type === 'bonus_days' ? context === 'buy' : context === 'topup';
+  return context === 'topup';
 }
 
 module.exports = function createPromoCodesRouter(deps) {
@@ -51,9 +50,7 @@ module.exports = function createPromoCodesRouter(deps) {
     if (!fitsContext(promo, context)) {
       return res.status(400).json({
         ok: false,
-        error: promo.type === 'bonus_days'
-          ? 'Этот промокод действует при покупке прокси'
-          : 'Этот промокод действует при пополнении баланса',
+        error: 'Этот промокод действует при пополнении баланса',
       });
     }
     res.json({ ok: true, type: promo.type, value: promo.value, description: describe(promo) });
