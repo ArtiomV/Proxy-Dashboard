@@ -176,9 +176,10 @@ module.exports = function createRetailRouter(deps) {
     try {
       // Массовая покупка: триггер при ПЕРЕСЕЧЕНИИ порога leased-портов
       // (count === threshold), дальше держит дедуп по clientId в alerts.js.
-      const threshold = Number(getSetting('retail_bulk_buy_threshold', 3)) || 3;
+      // threshold = 0 — антифрод-алерт отключён.
+      const threshold = Math.max(0, Number(getSetting('retail_bulk_buy_threshold', 3)) || 0);
       const leasedNow = retailPoolDb.byClient(client.id).filter(r => r.status === 'leased').length;
-      if (leasedNow === threshold) {
+      if (threshold > 0 && leasedNow === threshold) {
         alerts && alerts.trigger('retail_bulk_buy', { client_id: client.id, login: client.login, count: leasedNow, threshold });
       }
     } catch (_) {}

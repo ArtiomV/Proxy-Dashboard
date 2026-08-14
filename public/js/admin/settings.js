@@ -324,7 +324,7 @@ function saveRetailSettings(){
     retail_grace_hours:_num('retailGraceHoursInput',24,1,720),
     retail_hold_days:_num('retailHoldDaysInput',7,1,365),
     retail_reg_limit_per_ip_day:_num('retailRegLimitInput',10,1,1000),
-    retail_bulk_buy_threshold:_num('retailBulkBuyThresholdInput',3,1,100),
+    retail_bulk_buy_threshold:_num('retailBulkBuyThresholdInput',3,0,100),
     retail_pool_min_free:_num('retailPoolMinFreeInput',0,0,1000),
     domain_guard_suspend_hits:_num('domainGuardSuspendHitsInput',1,0,1000),
     abuse_strikes_block:_num('abuseStrikesBlockInput',2,1,100),

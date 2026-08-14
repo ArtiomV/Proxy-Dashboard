@@ -125,6 +125,11 @@ async function api(path, opts){
   var text = await res.text();
   var data = null;
   if (text) { try { data = JSON.parse(text); } catch(_) { data = text; } }
+  // Админка: успешное сохранение (любой не-GET к /api/admin/*) снимает
+  // «грязные» флаги с полей настроек — авторефреш снова может их обновлять.
+  if (res.ok && method !== 'GET' && path.indexOf('/api/admin/') !== -1 && typeof window !== 'undefined' && typeof window._clearSettingsDirty === 'function') {
+    try { window._clearSettingsDirty(); } catch(_) {}
+  }
   // Non-enumerable HTTP status for the few legacy call sites that used r.ok /
   // r.status (blob downloads aside). Invisible to JSON.stringify and for-in.
   if (data && typeof data === 'object') {

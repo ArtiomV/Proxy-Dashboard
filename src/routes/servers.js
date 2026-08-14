@@ -337,7 +337,8 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
     patch.telegram_bot_username = un;
   }
   // WP5 (B2C Э3): пороги алертов розницы
-  if (req.body.retail_bulk_buy_threshold != null) patch.retail_bulk_buy_threshold = Math.max(1, Math.min(100, parseInt(req.body.retail_bulk_buy_threshold) || 3));
+  // 0 = антифрод-алерт «массовая покупка» выключен.
+  if (req.body.retail_bulk_buy_threshold != null) patch.retail_bulk_buy_threshold = Math.max(0, Math.min(100, parseInt(req.body.retail_bulk_buy_threshold) || 0));
   if (req.body.retail_pool_min_free != null)      patch.retail_pool_min_free      = Math.max(0, Math.min(1000, parseInt(req.body.retail_pool_min_free) || 0));
   // Розница: главный выключатель + параметры жизненного цикла (UI «Розница»)
   if (req.body.retail_enabled != null)            patch.retail_enabled            = !!req.body.retail_enabled;
