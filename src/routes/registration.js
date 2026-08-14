@@ -113,9 +113,29 @@ module.exports = function createRegistrationRouter(deps) {
 
   // Общий find-or-create для TG-входа (Login Widget POST и OIDC callback).
   // profile: { id, first_name?, last_name?, username? }. Бросает {status, error}.
-  function _tgFindOrCreate(profile, req) {
+  //
+  // ВАЖНО (066): OIDC sub — НЕ telegram user id (другой namespace, 18 цифр).
+  // Поэтому для OIDC ищем по tg_oidc_sub; при промахе — по tg_username
+  // (если Telegram отдал preferred_username) и прикрепляем sub к найденному
+  // аккаунту — иначе вход через TG создавал дубль аккаунта у тех, кто
+  // регистрировался по email и привязывал TG через бота.
+  function _tgFindOrCreate(profile, req, oidcSub) {
     const tgId = String(profile.id);
-    let client = clients.find(c => c.tgChatId === tgId);
+    let client = null;
+    if (oidcSub) {
+      client = clients.find(c => c.tgOidcSub === String(oidcSub));
+      if (!client && profile.username) {
+        const un = String(profile.username).toLowerCase();
+        const cand = clients.find(c => c.tgUsername && c.tgUsername.toLowerCase() === un);
+        if (cand) {
+          cand.tgOidcSub = String(oidcSub);
+          saveClients(clients);
+          auditLog(cand.login, 'tg_oidc_attached', { sub: String(oidcSub), via: 'username', ip: getClientIp(req) });
+          client = cand;
+        }
+      }
+    }
+    if (!client) client = clients.find(c => c.tgChatId === tgId);
     let created = false;
     if (!client) {
       // WP7: лимит аккаунтов на reg_ip действует и на TG-путь (Э5).
@@ -138,7 +158,8 @@ module.exports = function createRegistrationRouter(deps) {
         referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
         referred_by: null, referral_balance: 0, resetToken: '',
         clientType: 'individual', allowDebt: false,
-        tgChatId: tgId,
+        tgChatId: oidcSub ? '' : tgId,          // legacy widget: user id; OIDC: отдельно
+        tgOidcSub: oidcSub ? String(oidcSub) : '',
         tgUsername: profile.username || '',
         regIp: getClientIp(req),
         consentPdAt: new Date().toISOString(),  // согласие — чекбоксом на форме перед виджетом
@@ -420,7 +441,7 @@ module.exports = function createRegistrationRouter(deps) {
         id: claims.sub,
         first_name: claims.name || '',
         username: claims.preferred_username || '',
-      }, req);
+      }, req, claims.sub);
       createClientSession(res, req, result.client);
       res.redirect('/tg-auth');
     } catch (e) {

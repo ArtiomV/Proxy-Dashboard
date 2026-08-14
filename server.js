@@ -471,6 +471,7 @@ function clientFromRow(r) {
     email: r.email || '', emailVerified: r.email_verified === 1,
     tgChatId: r.tg_chat_id || '', regIp: r.reg_ip || '',
     tgUsername: r.tg_username || '',   // миграция 065
+    tgOidcSub: r.tg_oidc_sub || '',    // миграция 066: OIDC sub ≠ tg user id
     consentPdAt: r.consent_pd_at || '', blocked: r.blocked === 1,
     abuseStrikes: r.abuse_strikes || 0,
     balanceNegativeSince: r.balance_negative_since || null,
