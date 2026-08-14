@@ -2958,6 +2958,11 @@ app.use(require('./src/routes/tariffs')({
 // цены на сайте синхронизируются с админкой автоматически.
 app.use(require('./src/routes/public-tariffs')({ tariffsDb, getSetting }));
 
+// Публичный приём заявок с лендинга (без auth, CORS '*'): telegram-form.js
+// дублирует заявку сюда параллельно с TG-ботом. Сохраняем в leads, пушим в
+// Twenty CRM (src/crm/twenty-leads.js), сбой CRM → алерт crm_lead_failed.
+app.use(require('./src/routes/public-lead')({ logger, db, validate, getSetting, alerts, getClientIp }));
+
 // Покупка прокси розницей (WP2): buy_proxy + тест-день + состояние пула.
 // Э2: fetchAllServersDataCached — legacy_preview пула.
 app.use(require('./src/routes/retail')({

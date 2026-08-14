@@ -417,6 +417,17 @@ const RULES = {
     dedupeKey: p => 'poolempty_' + (p.server || 'unknown'),
     render: p => `🔴 <b>Пул розницы пуст</b>\n\nНа <b>${esc(p.server || '?')}</b> (geo ${esc(p.geo || '?')}) нет свободных портов — клиенту отказано в покупке.\nСрочно пополни пул.`,
   },
+  // Заявка с лендинга не ушла в Twenty CRM. Заявка НЕ потеряна: она в
+  // локальной таблице leads и в TG-боте сайта — это сигнал починить контур
+  // (Twenty упала / сменилась workspace-схема после переустановки).
+  crm_lead_failed: {
+    title: 'CRM: заявка с сайта не ушла в Twenty',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 900,
+    dedupeKey: p => 'leadfail_' + (p.error || '').slice(0, 80),
+    render: p => `🔴 <b>Заявка не ушла в Twenty CRM</b>\n\nЗаявка #${p.id ?? '?'} (${esc(p.contact || '?')}) сохранена локально и продублирована в TG-боте, но push в Twenty упал:\n<code>${esc(p.error || '?')}</code>\nПроверь контейнер twenty-server/twenty-db и настройку crm_db_url.`,
+  },
   // B2C Э4 (WP3): эквайринг розницы. Зачисление карта/СБП по webhook;
   // error-поле — сбой контура (amount_mismatch / credit_failed) → critical.
   retail_card_payment: {
@@ -695,6 +706,8 @@ const _entityFor = {
   // B2C Э4 (WP3): эквайринг розницы
   retail_card_payment:       p => ({ kind: 'client', id: p.client_id || p.login || null }),
   retail_card_refund:        p => ({ kind: 'client', id: p.client_id || null }),
+  // Заявки с лендинга → Twenty CRM
+  crm_lead_failed:           () => ({ kind: 'system', id: 'crm' }),
   // Stage 18.15 — bell-only sources
   modem_offline:             p => ({ kind: 'modem',  id: p.nick || p.imei || null }),
   client_debt:               p => ({ kind: 'client', id: p.client_id || null }),

@@ -96,6 +96,21 @@ const TelegramAuthSchema = z.object({
   hash: z.string().min(1).max(200),
 });
 
+// Заявка с лендинга (POST /api/public/lead). Контакт — Telegram или телефон
+// (e-mail не собираем: по почте сложно связаться). utm — произвольные метки
+// из localStorage ap_utm, режем по размеру. website — honeypot: заполнен →
+// молчаливый ok в роуте (как в RegisterSchema, без 400, чтобы не подсказывать боту).
+const LeadSchema = z.object({
+  contact: z.string().min(3).max(100),
+  text: z.string().max(2000).default(''),
+  product: z.string().max(50).default(''),
+  offer: z.string().max(50).default(''),
+  page: z.string().max(300).default(''),
+  ctaPosition: z.string().max(100).default(''),
+  utm: z.record(z.string().max(50), z.string().max(200)).optional(),
+  website: z.string().max(500).optional(),      // honeypot
+});
+
 module.exports = { ClientCreateSchema, ClientUpdateSchema, PaymentSchema, BalanceAdjustSchema, LoginSchema,
   RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema,
-  ClientEmailSchema, TopupSchema };
+  ClientEmailSchema, TopupSchema, LeadSchema };
