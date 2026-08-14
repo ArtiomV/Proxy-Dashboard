@@ -24,7 +24,7 @@ module.exports = function createPaymentsRouter(deps) {
     logger, authMiddleware, adminMiddleware, validate, TopupSchema,
     topupLimiter, webhookLimiter,
     clients, clientById, saveClients,
-    getSetting, tariffsDb, cardPaymentsDb, ledgerDb,
+    getSetting, tariffsDb, cardPaymentsDb, ledgerDb, promoDb,
     atomicCredit, atomicDebit,
     auditLog, logActivity, getClientIp,
     alerts, notifyClient,
@@ -102,9 +102,21 @@ module.exports = function createPaymentsRouter(deps) {
       return res.status(400).json({ error: `Максимальная сумма пополнения — ${max} ₽`, code: 'AMOUNT_TOO_LARGE', max });
     }
 
+    // WP6: промокод на пополнение (percent/fixed). Бонус зачислится в webhook
+    // вместе с платежом; bonus_days сюда не подходит (он про покупку).
+    let promoCode = null;
+    if (req.body.promo) {
+      const { promo, error } = promoDb.findValid(req.body.promo);
+      if (error) return res.status(400).json({ error, code: 'PROMO_INVALID' });
+      if (promo.type === 'bonus_days') {
+        return res.status(400).json({ error: 'Этот промокод действует при покупке прокси', code: 'PROMO_WRONG_CONTEXT' });
+      }
+      promoCode = promo.code;
+    }
+
     // Читаемый уникальный заказ; ≤45 символов — лимит paymentLinkId Точки.
     const orderId = `R${client.id}-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`;
-    cardPaymentsDb.insertCreated(orderId, client.id, amount, method);
+    cardPaymentsDb.insertCreated(orderId, client.id, amount, method, promoCode);
 
     // Вызов провайдера — ВНЕ транзакций SQLite (сеть в транзакции недопустима).
     const base = (req.headers['x-forwarded-proto'] || req.protocol) + '://' + req.headers.host;
@@ -187,6 +199,36 @@ module.exports = function createPaymentsRouter(deps) {
         cardPaymentsDb.markCredited(orderId);
         saveClients(clients);
         _notifyCredit(client, row.amount, result.balanceAfter);
+        // WP6: бонус по промокоду — тем же платежом, отдельной строкой ledger
+        // (type='promo_bonus'). consume() атомарен; лимит исчерпан между
+        // созданием платежа и webhook → бонус честно пропускаем (лог+аудит).
+        if (row.promo_code) {
+          try {
+            const { promo } = promoDb.findValid(row.promo_code);
+            const bonus = promo
+              ? Math.round((promo.type === 'percent' ? row.amount * promo.value / 100 : promo.value) * 100) / 100
+              : 0;
+            if (promo && bonus > 0 && promoDb.consume(promo.id)) {
+              const bres = atomicCredit(client.id, bonus, {
+                type: 'promo_bonus', source: 'promo',
+                amount: bonus,
+                date: new Date().toISOString().slice(0, 10),
+                timestamp: new Date().toISOString(),
+                note: `Промокод ${promo.code} (+${promo.type === 'percent' ? promo.value + '%' : promo.value + ' ₽'})`,
+                paymentId: orderId,
+              });
+              saveClients(clients);
+              logActivity('client', 'info', 'promo_bonus', client.login,
+                `Промокод ${promo.code}: +${bonus} ₽ к пополнению ${orderId}`, { order_id: orderId, bonus });
+              _notifyCredit(client, bonus, bres.balanceAfter);
+            } else {
+              logger.warn(`[Payments webhook] promo ${row.promo_code} для ${orderId} не применён (лимит/неактивен)`);
+            }
+          } catch (e) {
+            // Бонус не зачислился — платёж уже зачтён, не валим webhook.
+            logger.error(`[Payments webhook] promo bonus failed ${orderId}: ${e.message}`);
+          }
+        }
         try { alerts && alerts.trigger('retail_card_payment', { login: client.login, client_id: client.id, amount: row.amount, method: row.method || verdict.method }); } catch (_) { /* alert best-effort */ }
         logActivity('client', 'info', 'retail_card_credited', client.login,
           `Эквайринг: зачислено ${row.amount} ₽ (${row.method || verdict.method}, ${orderId})`, { order_id: orderId });

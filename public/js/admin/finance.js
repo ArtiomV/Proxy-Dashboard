@@ -523,6 +523,21 @@ function reverseLedgerPayment(clientId, ledgerDbId) {
     }).catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
 }
 
+// WP6 (Р28): ручная выплата партнёрской комиссии деньгами оператором.
+// Списывает referral_balance и пишет payout в ledger; баланс клиента не трогает.
+function payoutReferral(clientId, balance) {
+  var amount = prompt('Сумма выплаты партнёрской комиссии, ₽ (доступно ' + Math.round(balance) + ' ₽):', Math.round(balance));
+  if (amount === null) return;
+  amount = parseFloat(amount);
+  if (!(amount > 0)) return showToast('Укажите сумму', 'error');
+  var note = prompt('Комментарий (как выплачено: карта/наличные):', 'Выплата на карту');
+  api(API + '/api/admin/clients/' + clientId + '/referral_payout',{method:'POST',json:{ amount: amount, note: note || '' }})
+    .then(function(d) {
+      if (d.ok) { showToast('Выплата ' + amount + ' ₽ записана', 'success'); renderOpsHistory(clientId); loadData(); }
+      else showToast(d.error || 'Ошибка', 'error');
+    }).catch(function(e) { showToast(e.message || 'Ошибка сети', 'error'); });
+}
+
 function addPaymentFromModal(clientId) {
   var amount = document.getElementById('opsPayAmount').value;
   var date = document.getElementById('opsPayDate').value;

@@ -2189,19 +2189,58 @@ function copyCodeBlock(btn){
   copyText(code,btn);
 }
 
-// Change #3: Referral simplification - only show stats, no referral code/link
+// WP6: реф-ссылка /register?ref= + самообслуживаемый вывод комиссии на баланс.
+// Вывод деньгами на карту — вручную через менеджера (админ: referral_payout).
 function loadReferral(){
   api('/api/client/referral').then(function(data){
-    document.getElementById('referralContent').innerHTML=
-      '<div class="referral-info">'+
-      '<div class="referral-hero"><h3>Партнёрская программа</h3><p>Рекомендуйте нас и получайте <strong>10%</strong> от каждого платежа на баланс или личную карту. За дополнительной информацией обращайтесь к менеджеру.</p></div>'+
-      '<div class="referral-cards">'+
+    var link=window.location.origin+'/register?ref='+(data.referral_code||'');
+    var bal=Math.round((data.referral_balance||0)*100)/100;
+    var h='<div class="referral-info">'+
+      '<div class="referral-hero"><h3>Партнёрская программа</h3><p>Рекомендуйте нас и получайте <strong>10%</strong> от каждого платежа на баланс или личную карту. За дополнительной информацией обращайтесь к менеджеру.</p></div>';
+    if(data.referral_code){
+      h+='<div class="form-group" style="margin-bottom:16px"><label>Ваша партнёрская ссылка</label>'+
+         '<div style="display:flex;gap:8px;align-items:center">'+
+         '<input class="form-input" id="referralLinkInput" readonly value="'+escapeHtml(link)+'" style="flex:1;font-size:12px">'+
+         '<button class="btn btn-sm" data-on-click="copyReferralLink(this)" title="Скопировать ссылку">'+icon('copy',12)+'</button>'+
+         '</div></div>';
+    }
+    h+='<div class="referral-cards">'+
       '<div class="card"><div class="card-label">Привлечено клиентов</div><div class="card-value">'+(data.referrals_count||0)+'</div></div>'+
-      '<div class="card"><div class="card-label">Заработано</div><div class="card-value">'+Math.floor(data.referral_balance||0).toString()+'</div></div>'+
-      '</div></div>';
+      '<div class="card"><div class="card-label">Заработано</div><div class="card-value">'+Math.floor(bal).toString()+'</div></div>'+
+      '</div>';
+    if(bal>0){
+      h+='<div style="margin-top:14px;display:flex;gap:10px;align-items:center;flex-wrap:wrap">'+
+         '<button class="btn btn-accent btn-sm" id="refWithdrawBtn" data-on-click="withdrawReferral(this)">Вывести '+bal.toLocaleString('ru-RU')+' ₽ на баланс</button>'+
+         '<span style="font-size:11px;color:var(--text-3)">Вывод на карту — через менеджера</span></div>';
+    }
+    h+='</div>';
+    document.getElementById('referralContent').innerHTML=h;
   }).catch(function(e){
     document.getElementById('referralContent').innerHTML='<div class="error-msg">'+escapeHtml(e.message)+'</div>';
   });
+}
+
+function copyReferralLink(btn){
+  var inp=document.getElementById('referralLinkInput');
+  if(inp)copyText(inp.value,btn);
+}
+
+async function withdrawReferral(btn){
+  if(btn)btn.disabled=true;
+  try{
+    var data=await api('/api/client/referral/withdraw_to_balance',{method:'POST'});
+    if(data&&data.ok){
+      showToast('Комиссия '+data.amount.toLocaleString('ru-RU')+' ₽ зачислена на баланс','success');
+      loadReferral();
+      loadData();
+      return;
+    }
+    showToast((data&&data.error)||'Не удалось выполнить вывод','error');
+  }catch(e){
+    showToast('Ошибка соединения','error');
+  }finally{
+    if(btn)btn.disabled=false;
+  }
 }
 
 // ==================== B2C: вкладка «Купить прокси» (WP3) ====================
@@ -2238,7 +2277,10 @@ function renderShop(tariffs){
     box.innerHTML='<div class="shop-grid"><div class="shop-empty">Тарифы скоро появятся</div></div>';
     return;
   }
-  var h='<div class="shop-grid">';
+  var h='<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap;margin-bottom:14px">'+
+    '<div class="form-group" style="margin:0"><label>Промокод</label><input class="form-input" type="text" id="shopPromo" placeholder="Необязательно" style="width:170px;text-transform:uppercase"></div>'+
+    '<div style="font-size:11px;color:var(--text-3);padding-bottom:8px">Промокод на бонусные дни применится при покупке</div></div>'+
+    '<div class="shop-grid">';
   tariffs.forEach(function(t){
     var isTest=t.duration_hours===24;
     h+='<div class="shop-card">'+
@@ -2257,14 +2299,20 @@ function renderShop(tariffs){
 async function buyProxy(tariffId,btn){
   if(btn)btn.disabled=true;
   try{
-    var data=await api('/api/client/buy_proxy',{method:'POST',json:{tariff_id:tariffId}});
+    var body={tariff_id:tariffId};
+    var promoVal=((document.getElementById('shopPromo')||{}).value||'').trim();
+    if(promoVal)body.promo=promoVal;
+    var data=await api('/api/client/buy_proxy',{method:'POST',json:body});
     if(data&&data.ok){
       showToast('Прокси выдан — реквизиты на вкладке «Панель управления»','success');
+      if(data.promo_bonus)showToast('Промокод: +'+Math.round(data.promo_bonus).toLocaleString('ru-RU')+' ₽ бонусом на баланс','success');
       loadData(); // обновить порты/баланс ЛК
       return;
     }
     var code=data&&data.code;
-    if(code==='EMAIL_NOT_VERIFIED'){
+    if(code==='PROMO_INVALID'||code==='PROMO_WRONG_CONTEXT'){
+      showToast(data.error,'error');
+    }else if(code==='EMAIL_NOT_VERIFIED'){
       showToast('Сначала подтвердите email','error');
       // К баннеру верификации — он на вкладке «Профиль»
       var tabEl=document.querySelector('.nav-tab[data-on-click*="\'profile\'"]');
@@ -2328,6 +2376,7 @@ function loadTopupSection(){
     }else{
       h+='<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">'+
         '<div class="form-group" style="margin:0"><label>Сумма, ₽</label><input class="form-input" type="number" id="topupAmount" min="'+t.min+'" max="'+t.max+'" step="1" placeholder="'+(t.min||100)+'" style="width:140px"></div>'+
+        '<div class="form-group" style="margin:0"><label>Промокод</label><input class="form-input" type="text" id="topupPromo" placeholder="Необязательно" style="width:150px;text-transform:uppercase"></div>'+
         '<div class="form-group" style="margin:0"><label>Способ оплаты</label><div style="display:flex;gap:6px">'+
           '<button class="btn btn-sm topup-method" data-method="sbp" data-on-click="pickTopupMethod(this)">'+icon('bolt',12)+' СБП</button>'+
           '<button class="btn btn-sm topup-method" data-method="card" data-on-click="pickTopupMethod(this)">'+icon('card',12)+' Карта</button>'+
@@ -2362,7 +2411,10 @@ async function submitTopup(btn){
   if(!(amount>0)){if(st){st.textContent='Укажите сумму';st.style.color='var(--danger)'}return}
   if(btn)btn.disabled=true;
   try{
-    var data=await api('/api/client/topup',{method:'POST',json:{amount:amount,method:window._topupMethod||'sbp'}});
+    var promoVal=((document.getElementById('topupPromo')||{}).value||'').trim();
+    var body={amount:amount,method:window._topupMethod||'sbp'};
+    if(promoVal)body.promo=promoVal;
+    var data=await api('/api/client/topup',{method:'POST',json:body});
     if(data&&data.ok&&data.confirmation_url){
       if(st){st.innerHTML='Счёт создан — перенаправляю на оплату. Если переход не сработал: <a href="'+esc(data.confirmation_url)+'" style="color:var(--accent)">ссылка на оплату</a>';st.style.color='var(--success)'}
       window.location.href=data.confirmation_url;
@@ -2376,6 +2428,8 @@ async function submitTopup(btn){
       if(st){st.textContent=data.error;st.style.color='var(--danger)'}
     }else if(code==='ACQUIRING_NOT_CONFIGURED'){
       if(st){st.textContent='Онлайн-оплата временно недоступна';st.style.color='var(--danger)'}
+    }else if(code==='PROMO_INVALID'||code==='PROMO_WRONG_CONTEXT'){
+      if(st){st.textContent=data.error;st.style.color='var(--danger)'}
     }else{
       if(st){st.textContent=(data&&data.error)||'Ошибка создания платежа';st.style.color='var(--danger)'}
     }

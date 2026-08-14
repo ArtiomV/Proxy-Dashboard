@@ -11,8 +11,8 @@ function init(db) {
   S.byOrderId = db.prepare('SELECT * FROM card_payments WHERE order_id = ?');
   S.byClient = db.prepare('SELECT * FROM card_payments WHERE client_id = ? ORDER BY id DESC LIMIT 100');
   S.insertCreated = db.prepare(
-    "INSERT OR IGNORE INTO card_payments (order_id, client_id, amount, method, status, created_at) " +
-    "VALUES (?, ?, ?, ?, 'created', datetime('now'))"
+    "INSERT OR IGNORE INTO card_payments (order_id, client_id, amount, method, status, created_at, promo_code) " +
+    "VALUES (?, ?, ?, ?, 'created', datetime('now'), ?)"
   );
   S.markPaid = db.prepare(
     "UPDATE card_payments SET status='paid', provider_payment_id=?, raw_json=? " +
@@ -33,8 +33,9 @@ function init(db) {
 function byOrderId(orderId) { return S.byOrderId.get(orderId); }
 function byClient(clientId) { return S.byClient.all(clientId); }
 // INSERT OR IGNORE: дубль webhook по order_id → changes=0 (идемпотентность).
-function insertCreated(orderId, clientId, amount, method) {
-  return S.insertCreated.run(orderId, clientId, amount, method || null);
+// promo_code (WP6) — применённый промокод; бонус зачисляется в webhook.
+function insertCreated(orderId, clientId, amount, method, promoCode) {
+  return S.insertCreated.run(orderId, clientId, amount, method || null, promoCode || null);
 }
 function markPaid(orderId, providerPaymentId, rawJson) {
   return S.markPaid.run(providerPaymentId || null, rawJson || null, orderId);

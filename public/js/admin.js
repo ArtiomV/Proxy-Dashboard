@@ -182,6 +182,7 @@ async function loadTariffsAdmin(){
   // WP3 (B2C Э4): эквайринг — настройки провайдера + журнал карточных платежей
   loadAcquiringSettings();
   loadCardPaymentsAdmin();
+  loadPromoCodesAdmin();
   try{
     var data=await api(API+'/api/admin/tariffs');
     if(!data||data.error){box.innerHTML='<div style="text-align:center;padding:24px;color:var(--danger);font-size:12px">'+esc((data&&data.error)||'Ошибка загрузки')+'</div>';return}
@@ -469,6 +470,86 @@ async function loadCardPaymentsAdmin(){
     h+='</tbody></table>';
     box.innerHTML=h;
   }catch(e){card.style.display='none';}
+}
+// ===== WP6 (B2C Э7): промокоды розницы — CRUD =====
+var _PROMO_TYPE_RU={percent:'Процент',fixed:'Фикс. сумма',bonus_days:'Бонусные дни'};
+async function loadPromoCodesAdmin(){
+  var card=document.getElementById('promoCodesCard');
+  if(!card)return;
+  try{
+    var settings=await api(API+'/api/admin/settings');
+    if(!settings||!settings.retail_enabled){card.style.display='none';return}
+    card.style.display='';
+    var box=document.getElementById('promoCodesTable');
+    var data=await api(API+'/api/admin/promo-codes');
+    var rows=(data&&data.promo_codes)||[];
+    if(!rows.length){box.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Промокодов пока нет</div>';return}
+    var h='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'+
+      '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Код</th>'+
+      '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Тип</th>'+
+      '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)">Значение</th>'+
+      '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)">Использовано</th>'+
+      '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">До</th>'+
+      '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Статус</th>'+
+      '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)"></th>'+
+      '</tr></thead><tbody>';
+    rows.forEach(function(p){
+      h+='<tr>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);font-family:monospace">'+esc(p.code)+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(_PROMO_TYPE_RU[p.type]||p.type)+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">'+esc(String(p.value))+(p.type==='percent'?'%':p.type==='fixed'?' ₽':' дн.')+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">'+p.used+(p.max_uses?' / '+p.max_uses:'')+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+(p.expires_at?esc(String(p.expires_at).slice(0,10)):'—')+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:'+(p.active?'var(--success)':'var(--text-3)')+'">'+(p.active?'Активен':'Выключен')+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">'+
+          '<button class="btn btn-sm" data-on-click="togglePromoCode('+p.id+')">'+(p.active?'Выключить':'Включить')+'</button> '+
+          '<button class="btn btn-sm btn-danger" data-on-click="deletePromoCode('+p.id+',\''+esc(p.code)+'\')">Удалить</button></td>'+
+      '</tr>';
+    });
+    h+='</tbody></table>';
+    box.innerHTML=h;
+  }catch(e){card.style.display='none';}
+}
+async function submitPromoCode(){
+  var st=document.getElementById('promoFormStatus');
+  var body={
+    code:(document.getElementById('promoCode').value||'').trim(),
+    type:document.getElementById('promoType').value,
+    value:parseFloat(document.getElementById('promoValue').value),
+    max_uses:parseInt(document.getElementById('promoMaxUses').value,10)||null,
+    expires_at:document.getElementById('promoExpires').value||null
+  };
+  try{
+    var data=await api(API+'/api/admin/promo-codes',{method:'POST',json:body});
+    if(data&&data.ok){
+      if(st){st.textContent='Создан';st.style.color='var(--success)'}
+      showToast('Промокод создан','success');
+      document.getElementById('promoCode').value='';
+      document.getElementById('promoValue').value='';
+      loadPromoCodesAdmin();
+    }else{
+      var msg=(data&&data.error)||'Ошибка';
+      if(data&&data.details){var k=Object.keys(data.details)[0];if(k&&data.details[k][0])msg=k+': '+data.details[k][0];}
+      if(st){st.textContent=msg;st.style.color='var(--danger)'}
+    }
+  }catch(e){if(st){st.textContent='Ошибка соединения';st.style.color='var(--danger)'}}
+}
+async function togglePromoCode(id){
+  try{
+    var data=await api(API+'/api/admin/promo-codes/'+id+'/toggle',{method:'POST'});
+    if(data&&data.ok)showToast(data.active?'Промокод включён':'Промокод выключен','success');
+    else showToast((data&&data.error)||'Ошибка','error');
+  }catch(e){showToast('Ошибка соединения','error');}
+  loadPromoCodesAdmin();
+}
+async function deletePromoCode(id,code){
+  if(!confirm('Удалить промокод '+code+'?'))return;
+  try{
+    var data=await api(API+'/api/admin/promo-codes/'+id,{method:'DELETE'});
+    if(data&&data.ok)showToast('Промокод удалён','success');
+    else showToast((data&&data.error)||'Ошибка','error');
+  }catch(e){showToast('Ошибка соединения','error');}
+  loadPromoCodesAdmin();
 }
 async function refundCardPayment(orderId,amount){
   if(!confirm('Вернуть платёж '+orderId+' на '+amount+' ₽? Деньги уйдут клиенту на карту, баланс будет сторнирован.'))return;
@@ -2030,6 +2111,11 @@ function renderOpsHistory(clientId) {
       h += '<div style="flex:1;min-width:100px"><label style="font-size:10px;color:var(--text-2);display:block;margin-bottom:2px">Комментарий</label><input class="form-input" id="opsPayNote" placeholder="Пополнение" style="width:100%;font-size:12px;padding:4px 8px"></div>';
       h += '<button class="btn btn-success btn-sm" data-on-click="addPaymentFromModal(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px">+ Пополнить</button>';
       h += '<button class="btn btn-sm" data-on-click="manualChargeFromModal(\'' + clientId + '\')" style="white-space:nowrap;padding:4px 12px;background:var(--danger);color:#fff">− Списать</button>';
+      // WP6: ручная выплата партнёрской комиссии деньгами (Р28) — ledger payout.
+      var refBal = client ? (client.referral_balance || 0) : 0;
+      if (refBal > 0) {
+        h += '<button class="btn btn-sm" data-on-click="payoutReferral(\'' + clientId + '\',' + refBal + ')" style="white-space:nowrap;padding:4px 12px" title="Выплата деньгами оператором — комиссия спишется, баланс клиента не изменится">Партнёрка: ' + Math.round(refBal) + ' ₽ → выплатить</button>';
+      }
       h += '</div>';
       h += '<div style="padding:12px 18px;background:var(--card-bg);border:1px solid var(--border);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;min-width:110px"><div style="font-size:10px;color:var(--text-2)">Баланс</div><div style="font-size:20px;font-weight:700;color:' + balColor + '">' + Math.round(bal) + ' \u20BD</div></div>';
       h += '</div>';

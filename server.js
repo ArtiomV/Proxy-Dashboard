@@ -140,10 +140,12 @@ const tariffsDb = require('./src/db/tariffs');
 const retailPoolDb = require('./src/db/retail-pool');
 const cardPaymentsDb = require('./src/db/card-payments');
 const authTokensDb = require('./src/db/auth-tokens');
+const promoDb = require('./src/db/promo-codes');
 tariffsDb.init(db);
 retailPoolDb.init(db);
 cardPaymentsDb.init(db);
 authTokensDb.init(db);
+promoDb.init(db);
 // Aliases for legacy callsites that still hold raw prepared-statement refs.
 // These are passed to billing.init() and used by atomicCredit/atomicDebit
 // on the hot path — wrapping in a function would add a per-credit call.
@@ -2911,6 +2913,7 @@ app.use(require('./src/routes/client-portal')({
   getTochkaConfig: () => tochkaConfig,
   getSpeedtestLatest,
   auditLog, logActivity, getClientIp,
+  atomicCredit,   // WP6: вывод рефкомиссии на баланс (self-referral трюк)
   saveClients,
   // POST /api/client/email: validate+схема, retail-флаг для verify-письма.
   // mailer объявлен ниже (const, TDZ) — ленивый шим, как syncRotationLog выше.
@@ -2968,8 +2971,8 @@ app.use(require('./src/routes/public-lead')({ logger, db, validate, getSetting, 
 app.use(require('./src/routes/retail')({
   logger, authMiddleware, adminMiddleware,
   clients, saveClients,
-  tariffsDb, retailPoolDb,
-  atomicDebit,
+  tariffsDb, retailPoolDb, promoDb,
+  atomicDebit, atomicCredit,
   getSetting,
   findServer, fetchApi, proxyConf, proxySmart, parseHtmlInputFields,
   fetchAllServersDataCached,
@@ -2985,6 +2988,11 @@ app.use(require('./src/routes/retail')({
   notifyClient: (...args) => _clientNotify.notifyClient(...args),
 }));
 
+// WP6 (Этап 7): промокоды розницы — проверка для ЛК + админский CRUD.
+app.use(require('./src/routes/promo-codes')({
+  logger, authMiddleware, adminMiddleware, promoDb, getSetting, auditLog, getClientIp,
+}));
+
 // B2C Э4 (WP3): эквайринг розницы — topup + webhook + история + возвраты.
 // Провайдер создаётся на КАЖДЫЙ запрос из живых настроек (смена кредов без
 // рестарта); тесты подменяют create через require-кэш src/payments/provider.
@@ -2992,7 +3000,7 @@ app.use(require('./src/routes/payments')({
   logger, authMiddleware, adminMiddleware, validate, TopupSchema,
   topupLimiter, webhookLimiter: acqWebhookLimiter,
   clients, clientById, saveClients,
-  getSetting, tariffsDb, cardPaymentsDb, ledgerDb,
+  getSetting, tariffsDb, cardPaymentsDb, ledgerDb, promoDb,
   atomicCredit, atomicDebit,
   auditLog, logActivity, getClientIp,
   alerts, dbAudit,

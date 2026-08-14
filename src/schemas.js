@@ -80,9 +80,11 @@ const ClientEmailSchema = z.object({
 
 // B2C Э4 (WP3): пополнение баланса эквайрингом (POST /api/client/topup).
 // Границы суммы проверяет роут по настройкам (min/max динамические).
+// WP6: promo — необязательный промокод (percent/fixed → бонус при зачислении).
 const TopupSchema = z.object({
   amount: z.coerce.number().positive().max(1000000),
   method: z.enum(['card', 'sbp']),
+  promo: z.string().max(50).optional(),
 });
 
 // Telegram Login Widget payload (https://core.telegram.org/widgets/login)

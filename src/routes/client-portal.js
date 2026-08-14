@@ -38,7 +38,7 @@ module.exports = function createClientPortalRouter(deps) {
     knownModems,
     getSpeedtestLatest,
     auditLog, logActivity, getClientIp,
-    saveClients,
+    saveClients, atomicCredit,
     validate, ClientEmailSchema,
     getSetting, mailer, authTokensDb,
     proxyConf, modemRotationCache, proxySmart,
@@ -522,6 +522,34 @@ r.get('/api/client/referral', authMiddleware, (req, res) => {
     botUsername,
     referrals: referrals.map(r => ({ name: r.name, createdAt: r.createdAt }))
   });
+});
+
+// WP6 (Этап 7): вывод рефкомиссии НА БАЛАНС — самообслуживание из ЛК.
+// Атомарно через atomicCredit с self-referral: referral_balance −= amount и
+// balance += amount в ОДНОЙ транзакции (+ строка ledger referral_withdraw).
+// Вывод деньгами на карту — вручную через оператора (админ: referral_payout).
+r.post('/api/client/referral/withdraw_to_balance', authMiddleware, (req, res) => {
+  const client = clientByLogin.get(req.user.login);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const amount = Math.round((client.referral_balance || 0) * 100) / 100;
+  if (!(amount > 0)) return res.status(400).json({ error: 'Нет средств к выводу' });
+  try {
+    const result = atomicCredit(client.id, amount, {
+      type: 'referral_withdraw', source: 'referral',
+      amount,
+      date: new Date().toISOString().slice(0, 10),
+      timestamp: new Date().toISOString(),
+      note: 'Вывод партнёрской комиссии на баланс',
+    }, { referral: { referrerId: client.id, delta: -amount } });
+    saveClients(clients);
+    auditLog(client.login, 'referral_withdraw_to_balance', { amount, ip: getClientIp(req) });
+    logActivity('client', 'info', 'referral_withdraw', client.login,
+      `Партнёрская комиссия выведена на баланс: ${amount} ₽`, { amount });
+    res.json({ ok: true, amount, balance: result.balanceAfter });
+  } catch (e) {
+    logger.error(`[Referral] withdraw ${client.login}: ${e.message}`);
+    res.status(500).json({ error: 'Не удалось выполнить вывод — попробуйте позже' });
+  }
 });
 
 r.get('/api/client/documents', authMiddleware, (req, res) => {

@@ -20,7 +20,7 @@ function _emitFinanceWrite() {
 
 module.exports = function createClientsRouter(deps) {
   const {
-    logger, authMiddleware, adminMiddleware,
+    db, logger, authMiddleware, adminMiddleware,
     validate, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema,
     fetchAllServersDataCached, mergeServerData, fetchApi,
     atomicCredit, atomicDebit,
@@ -309,6 +309,54 @@ r.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, valida
   // C5: payment list is derived from billing_ledger (the in-memory
   // client.payments[] array is gone).
   res.json({ ok: true, payments: _listLedgerPayments(client.id), balance: client.balance });
+});
+
+// WP6 (Этап 7, Р28): ручная выплата рефкомиссии ДЕНЬГАМИ (на карту — оператор
+// переводит сам, здесь только фиксация). referral_balance −= amount с гардом
+// (>= amount) + строка ledger type='payout' — одной транзакцией. Баланс
+// клиента не трогаем: деньги ушли мимо системы. Выводом на баланс клиент
+// управляет сам (POST /api/client/referral/withdraw_to_balance).
+r.post('/api/admin/clients/:id/referral_payout', authMiddleware, adminMiddleware, (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const amount = Math.round(parseFloat(req.body && req.body.amount) * 100) / 100;
+  if (!(amount > 0) || amount > 10000000) return res.status(400).json({ error: 'Invalid amount' });
+
+  const now = new Date();
+  const entry = {
+    type: 'payout', date: now.toISOString().slice(0, 10), timestamp: now.toISOString(),
+    amount, currency: client.currency || 'RUB',
+    note: req.body.note || 'Выплата партнёрской комиссии (вручную)',
+    source: 'referral',
+    balance_before: client.balance || 0, balance_after: client.balance || 0,
+  };
+  let newRefBalance;
+  try {
+    db.transaction(() => {
+      const upd = db.prepare(
+        'UPDATE clients SET referral_balance = ROUND(referral_balance - ?, 2) WHERE id = ? AND referral_balance >= ?'
+      ).run(amount, client.id, amount);
+      if (upd.changes === 0) {
+        const err = new Error('insufficient_referral_balance');
+        err.code = 'INSUFFICIENT_REFERRAL';
+        throw err;
+      }
+      _ledgerInsert.run(..._ledgerEntryParams(client.id, entry));
+      newRefBalance = db.prepare('SELECT referral_balance FROM clients WHERE id = ?').get(client.id).referral_balance;
+    })();
+  } catch (e) {
+    if (e.code === 'INSUFFICIENT_REFERRAL') {
+      return res.status(409).json({ error: `Недостаточно комиссии: доступно ${client.referral_balance || 0} ₽`, code: 'INSUFFICIENT_REFERRAL' });
+    }
+    logger.error(`[Referral] payout ${client.login}: ${e.message}`);
+    return res.status(500).json({ error: 'Payout failed', details: e.message });
+  }
+  client.referral_balance = newRefBalance;
+  saveClients(clients);
+  auditLog(req.user.login, 'referral_payout', { clientId: client.id, login: client.login, amount, ip: getClientIp(req) });
+  logActivity('client', 'info', 'referral_payout', client.login,
+    `Выплата партнёрской комиссии деньгами: ${amount} ₽ (оператор ${req.user.login})`, { amount });
+  res.json({ ok: true, amount, referral_balance: newRefBalance });
 });
 
 r.post('/api/admin/clients/:id/charge', authMiddleware, adminMiddleware, (req, res) => {

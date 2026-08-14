@@ -723,7 +723,7 @@
     "type": "table",
     "name": "card_payments",
     "tbl_name": "card_payments",
-    "sql": "CREATE TABLE card_payments ( id INTEGER PRIMARY KEY, order_id TEXT UNIQUE NOT NULL, client_id TEXT NOT NULL, amount REAL NOT NULL, method TEXT, -- card | sbp status TEXT NOT NULL DEFAULT 'created', -- created|paid|credited|failed|refunded provider_payment_id TEXT, raw_json TEXT, created_at TEXT, credited_at TEXT )"
+    "sql": "CREATE TABLE card_payments ( id INTEGER PRIMARY KEY, order_id TEXT UNIQUE NOT NULL, client_id TEXT NOT NULL, amount REAL NOT NULL, method TEXT, -- card | sbp status TEXT NOT NULL DEFAULT 'created', -- created|paid|credited|failed|refunded provider_payment_id TEXT, raw_json TEXT, created_at TEXT, credited_at TEXT , promo_code TEXT)"
   },
   {
     "type": "table",
@@ -862,6 +862,12 @@
     "name": "payments",
     "tbl_name": "payments",
     "sql": "CREATE TABLE payments ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, amount REAL NOT NULL, date TEXT NOT NULL, note TEXT DEFAULT '', source TEXT DEFAULT 'manual', payment_id TEXT, created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "promo_codes",
+    "tbl_name": "promo_codes",
+    "sql": "CREATE TABLE promo_codes ( id INTEGER PRIMARY KEY AUTOINCREMENT, code TEXT NOT NULL UNIQUE COLLATE NOCASE, type TEXT NOT NULL CHECK (type IN ('percent','fixed','bonus_days')), value REAL NOT NULL, max_uses INTEGER, -- NULL = без лимита used INTEGER NOT NULL DEFAULT 0, expires_at TEXT, -- NULL = бессрочный active INTEGER NOT NULL DEFAULT 1, created_at TEXT NOT NULL DEFAULT (datetime('now')) )"
   },
   {
     "type": "table",

@@ -21,8 +21,8 @@ module.exports = function createRetailRouter(deps) {
   const {
     logger, authMiddleware,
     clients, saveClients,
-    tariffsDb, retailPoolDb,
-    atomicDebit,
+    tariffsDb, retailPoolDb, promoDb,
+    atomicDebit, atomicCredit,
     getSetting,
     findServer, fetchApi, proxyConf, proxySmart, parseHtmlInputFields,
     fetchAllServersDataCached,   // Э2: legacy_preview (скан портов всех серверов)
@@ -88,6 +88,23 @@ module.exports = function createRetailRouter(deps) {
     const isTestDay = tariff.duration_hours === 24;
     if (isTestDay && client.testUsed) {
       return res.status(403).json({ error: 'Тест-день доступен один раз на аккаунт', code: 'TEST_USED' });
+    }
+
+    // WP6: промокод bonus_days при покупке (percent/fixed — про пополнение).
+    // Бонус зачисляется ПОСЛЕ успешной выдачи эквивалентом на баланс
+    // (tariff.price/30.4 × N) — деньги остаются единой моделью (§Г).
+    let promo = null;
+    const promoInput = req.body && req.body.promo;
+    if (promoInput) {
+      if (isTestDay) {
+        return res.status(400).json({ error: 'Промокоды не действуют на тест-день', code: 'PROMO_WRONG_CONTEXT' });
+      }
+      const found = promoDb.findValid(promoInput);
+      if (found.error) return res.status(400).json({ error: found.error, code: 'PROMO_INVALID' });
+      if (found.promo.type !== 'bonus_days') {
+        return res.status(400).json({ error: 'Этот промокод действует при пополнении баланса', code: 'PROMO_WRONG_CONTEXT' });
+      }
+      promo = found.promo;
     }
     // Один тариф на клиента: повторная покупка — только того же тарифа (§Г.1)
     if (client.tariffId != null && client.tariffId !== tariff.id && !isTestDay) {
@@ -166,6 +183,30 @@ module.exports = function createRetailRouter(deps) {
     saveClients(clients);
     proxySmart.invalidateCache();
 
+    // WP6: бонусные дни по промокоду — после успешной выдачи и списания.
+    // Зачисление эквивалентом (price/30.4 × N) удлиняет runway порта.
+    let promoBonus = 0;
+    if (promo) {
+      try {
+        promoBonus = Math.round((tariff.price / 30.4) * promo.value * 100) / 100;
+        if (promoBonus > 0 && promoDb.consume(promo.id)) {
+          atomicCredit(client.id, promoBonus, {
+            date: new Date().toISOString().slice(0, 10),
+            type: 'promo_bonus',
+            note: `Промокод ${promo.code} (+${promo.value} дн.)`,
+          });
+          saveClients(clients);
+          logActivity('client', 'info', 'promo_bonus', client.login,
+            `Промокод ${promo.code}: +${promo.value} дн. (${promoBonus} ₽) при покупке тарифа «${tariff.name}»`,
+            { promo: promo.code, bonus: promoBonus });
+        } else { promoBonus = 0; }
+      } catch (e) {
+        // Покупка состоялась — бонусный сбой её не отменяет; фиксируем.
+        promoBonus = 0;
+        logger.error(`[Retail] promo bonus failed для ${client.login} (${promo.code}): ${e.message}`);
+      }
+    }
+
     auditLog(client.login, isTestDay ? 'retail_buy_test_day' : 'retail_buy_proxy',
       { tariff: tariff.id, port: poolRow.port_id, server: serverName, charge, ip: getClientIp(req) });
     logActivity('client', 'info', 'retail_buy', client.login,
@@ -198,7 +239,8 @@ module.exports = function createRetailRouter(deps) {
     }
 
     // Реквизиты клиент видит сразу (живьём из ProxySmart на dashboard_data)
-    res.json({ ok: true, port_id: poolRow.port_id, server: serverName, tariff: tariff.name, charged: charge });
+    res.json({ ok: true, port_id: poolRow.port_id, server: serverName, tariff: tariff.name, charged: charge,
+      promo_bonus: promoBonus || undefined });
   });
 
   // Состояние пула (для админки «Розница»; витрина клиента — /api/client/tariffs в tariffs.js)
