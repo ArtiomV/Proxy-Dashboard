@@ -69,7 +69,56 @@ function initRetailConfig(){
     if(links)links.style.display='';
     var shopTab=document.getElementById('navTabShop');
     if(shopTab)shopTab.style.display='';
+    // WP1: вход через Telegram на странице логина — iframe напрямую,
+    // без telegram-widget.js (его data-onauth eval() режется CSP).
+    if(retailConfig.telegram_bot_username){
+      mountTelegramLogin('tgLoginWrap', retailConfig.telegram_bot_username, onTelegramAuth);
+    }
   }).catch(function(){});
+}
+
+// Telegram Login Widget БЕЗ telegram-widget.js (eval в нём блокируется CSP).
+// Протокол: iframe oauth.telegram.org/embed/<bot>, ответ — postMessage
+// {event:'auth_user', auth_data}.
+function mountTelegramLogin(wrapId, botUsername, onAuth){
+  var wrap=document.getElementById(wrapId);
+  if(!wrap||!botUsername)return;
+  var ifr=document.createElement('iframe');
+  ifr.src='https://oauth.telegram.org/embed/'+encodeURIComponent(botUsername)
+    +'?origin='+encodeURIComponent(location.origin)
+    +'&return_to='+encodeURIComponent(location.href)
+    +'&size=large&request_access=write';
+  ifr.width=238; ifr.height=40;
+  ifr.setAttribute('frameborder','0');
+  ifr.setAttribute('scrolling','no');
+  ifr.style.border='none'; ifr.style.overflow='hidden';
+  wrap.appendChild(ifr);
+  window.addEventListener('message',function(e){
+    if(e.origin!=='https://oauth.telegram.org')return;
+    var d=e.data;
+    if(typeof d==='string'){try{d=JSON.parse(d)}catch(_){return}}
+    if(d&&d.event==='auth_user'&&!d.init&&d.auth_data)onAuth(d.auth_data);
+  });
+}
+async function onTelegramAuth(user){
+  var errorEl=document.getElementById('loginError');
+  if(errorEl)errorEl.textContent='';
+  try{
+    var resp=await fetch('/api/auth/telegram',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify(user)
+    });
+    var data=await resp.json();
+    if(!resp.ok){if(errorEl)errorEl.textContent=data.error||'Ошибка входа через Telegram';return}
+    authToken=data.token;
+    authLogin=data.login;
+    localStorage.setItem('pr_token',authToken);
+    localStorage.setItem('pr_login',authLogin);
+    window.location.href='/';
+  }catch(e){
+    if(errorEl)errorEl.textContent='Ошибка соединения';
+  }
 }
 
 // --- Onboarding ---

@@ -1,4 +1,28 @@
 // Извлечено из register.html (CSP: script-src без unsafe-inline — инлайн-скрипты заблокированы helmet).
+// Telegram Login Widget БЕЗ telegram-widget.js: он разбирает data-onauth через
+// eval(), что запрещено нашим CSP (script-src без unsafe-eval) — виджет молча
+// не рендерился. Рендерим iframe oauth.telegram.org напрямую и ловим
+// postMessage {event:'auth_user', auth_data} — протокол виджета (widget.js:315).
+function mountTelegramLogin(wrapId, botUsername, onAuth){
+  var wrap=document.getElementById(wrapId);
+  if(!wrap||!botUsername)return;
+  var ifr=document.createElement('iframe');
+  ifr.src='https://oauth.telegram.org/embed/'+encodeURIComponent(botUsername)
+    +'?origin='+encodeURIComponent(location.origin)
+    +'&return_to='+encodeURIComponent(location.href)
+    +'&size=large&request_access=write';
+  ifr.width=238; ifr.height=40;
+  ifr.setAttribute('frameborder','0');
+  ifr.setAttribute('scrolling','no');
+  ifr.style.border='none'; ifr.style.overflow='hidden';
+  wrap.appendChild(ifr);
+  window.addEventListener('message',function(e){
+    if(e.origin!=='https://oauth.telegram.org')return;
+    var d=e.data;
+    if(typeof d==='string'){try{d=JSON.parse(d)}catch(_){return}}
+    if(d&&d.event==='auth_user'&&!d.init&&d.auth_data)onAuth(d.auth_data);
+  });
+}
 var _cfg=null;
 var _ref=new URLSearchParams(window.location.search).get('ref')||'';
 
@@ -25,14 +49,7 @@ var _ref=new URLSearchParams(window.location.search).get('ref')||'';
     document.head.appendChild(s);
   }
   if(_cfg.telegram_bot_username){
-    var ts=document.createElement('script');
-    ts.src='https://telegram.org/js/telegram-widget.js?22';
-    ts.setAttribute('data-telegram-login',_cfg.telegram_bot_username);
-    ts.setAttribute('data-size','large');
-    ts.setAttribute('data-onauth','onTelegramAuth(user)');
-    ts.setAttribute('data-request-access','write');
-    ts.async=true;
-    document.getElementById('tgWrap').appendChild(ts);
+    mountTelegramLogin('tgWrap', _cfg.telegram_bot_username, onTelegramAuth);
   }
   document.getElementById('regEmail').focus();
 })();

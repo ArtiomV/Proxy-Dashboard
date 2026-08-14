@@ -11,7 +11,7 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="/css/variables.css?v=0813c">
   <link rel="stylesheet" href="/css/base.css?v=0813c">
-  <link rel="stylesheet" href="/css/client-portal.css?v=0813d">
+  <link rel="stylesheet" href="/css/client-portal.css?v=0814a">
   <style>
     .login-box{background:var(--bg-2);border:1px solid var(--border);border-radius:20px;padding:48px 40px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)}
     .login-links{margin-top:16px;text-align:center;font-size:13px;color:#B3B3B3}
@@ -20,6 +20,9 @@
     .auth-note{text-align:center;font-size:14px;color:#B3B3B3;margin-bottom:18px;line-height:1.6}
     .auth-note.ok{color:#34C759}
     .auth-note.fail{color:#FF383C}
+
+    /* Пустые заглушки ошибки/нотиса не занимают место (был «пустой» зазор под заголовком) */
+    .login-error:empty,.auth-note:empty{display:none}
   </style>
 </head>
 <body>
