@@ -118,6 +118,7 @@
   "GET /api/dashboard_data",
   "GET /api/docs",
   "GET /api/public/auth_config",
+  "GET /api/public/tariffs",
   "GET /api/v1/proxies",
   "GET /api/v1/proxy",
   "GET /forgot",

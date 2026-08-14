@@ -2954,6 +2954,10 @@ app.use(require('./src/routes/tariffs')({
   tariffsDb, auditLog, getClientIp, getSetting, db,
 }));
 
+// Публичная витрина тарифов для лендинга arendaproxy.ru (без auth, CORS '*'):
+// цены на сайте синхронизируются с админкой автоматически.
+app.use(require('./src/routes/public-tariffs')({ tariffsDb, getSetting }));
+
 // Покупка прокси розницей (WP2): buy_proxy + тест-день + состояние пула.
 // Э2: fetchAllServersDataCached — legacy_preview пула.
 app.use(require('./src/routes/retail')({
