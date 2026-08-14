@@ -417,6 +417,28 @@ const RULES = {
     dedupeKey: p => 'poolempty_' + (p.server || 'unknown'),
     render: p => `🔴 <b>Пул розницы пуст</b>\n\nНа <b>${esc(p.server || '?')}</b> (geo ${esc(p.geo || '?')}) нет свободных портов — клиенту отказано в покупке.\nСрочно пополни пул.`,
   },
+  // B2C Э4 (WP3): эквайринг розницы. Зачисление карта/СБП по webhook;
+  // error-поле — сбой контура (amount_mismatch / credit_failed) → critical.
+  retail_card_payment: {
+    title: 'Розница: оплата картой/СБП',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 10,
+    dedupeKey: p => 'cardpay_' + (p.login || '') + '_' + (p.amount || 0) + '_' + (p.error || 'ok') + '_' + Date.now(),
+    render: p => p.error
+      ? `🚨 <b>Эквайринг: сбой зачисления</b>\n\nКлиент <b>${esc(p.login || '?')}</b>: ${formatRub(p.amount)} (${esc(p.method || '?')}) — <code>${esc(p.error)}</code>.\nПлатёж требует ручного разбора (card_payments).`
+      : `💳 <b>Оплата ${p.method === 'sbp' ? 'через СБП' : 'картой'}</b>\n\nКлиент: <b>${esc(p.login || '?')}</b>\nЗачислено: <b>${formatRub(p.amount)}</b>`,
+  },
+  retail_card_refund: {
+    title: 'Розница: возврат эквайринга',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 10,
+    dedupeKey: p => 'cardref_' + (p.order_id || '') + '_' + (p.error || 'ok'),
+    render: p => p.error
+      ? `🚨 <b>Возврат ${esc(p.order_id || '?')}: провайдер ОК, сторно НЕ записалось</b>\n\nКлиент <b>${esc(p.login || '?')}</b>: ${formatRub(p.amount)}.\nРасхождение ledger — ручной разбор!`
+      : `↩️ <b>Возврат эквайринга</b>\n\nКлиент <b>${esc(p.login || '?')}</b>: <b>${formatRub(p.amount)}</b> (${esc(p.order_id || '?')}).\nБаланс и рефкомиссия сторнированы.`,
+  },
   // B5 (C7): pricing_tiers промах — раньше молчаливый fallback в tiers[0]/23.
   // Cooldown 6ч, чтобы AutoCreate по нескольким portName не спамил.
   pricing_tier_miss: {
@@ -670,6 +692,9 @@ const _entityFor = {
   retail_abuse_suspend:      p => ({ kind: 'client', id: p.client_id || null }),
   retail_multiaccount_ip:    () => ({ kind: 'system', id: 'multiaccount' }),
   retail_pool_ip_degraded:   p => ({ kind: 'system', id: p.server || null }),
+  // B2C Э4 (WP3): эквайринг розницы
+  retail_card_payment:       p => ({ kind: 'client', id: p.client_id || p.login || null }),
+  retail_card_refund:        p => ({ kind: 'client', id: p.client_id || null }),
   // Stage 18.15 — bell-only sources
   modem_offline:             p => ({ kind: 'modem',  id: p.nick || p.imei || null }),
   client_debt:               p => ({ kind: 'client', id: p.client_id || null }),

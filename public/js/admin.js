@@ -179,6 +179,9 @@ async function loadTariffsAdmin(){
   _fillTariffServerSelect(document.getElementById('tfServer').value||'');
   loadRetailPoolAdmin();
   loadRetailPoolPorts();
+  // WP3 (B2C Э4): эквайринг — настройки провайдера + журнал карточных платежей
+  loadAcquiringSettings();
+  loadCardPaymentsAdmin();
   try{
     var data=await api(API+'/api/admin/tariffs');
     if(!data||data.error){box.innerHTML='<div style="text-align:center;padding:24px;color:var(--danger);font-size:12px">'+esc((data&&data.error)||'Ошибка загрузки')+'</div>';return}
@@ -419,6 +422,106 @@ async function submitLegacyImport(){
     }else{
       st.style.color='var(--danger)';st.textContent=(data&&data.error)||'Ошибка импорта';
     }
+  }catch(e){
+    st.style.color='var(--danger)';st.textContent='Ошибка соединения';
+  }finally{
+    if(btn)btn.disabled=false;
+  }
+}
+// ===== WP3 (B2C Э4): эквайринг розницы — настройки провайдера + журнал платежей =====
+var _CARD_PAYMENT_STATUS_RU={created:'Создан',paid:'Оплачен',credited:'Зачтён',failed:'Ошибка',refunded:'Возвращён'};
+var _CARD_PAYMENT_STATUS_COLOR={created:'var(--text-3)',paid:'var(--warning)',credited:'var(--success)',failed:'var(--danger)',refunded:'var(--text-2)'};
+async function loadCardPaymentsAdmin(){
+  var card=document.getElementById('cardPaymentsCard');
+  if(!card)return;
+  try{
+    var settings=await api(API+'/api/admin/settings');
+    // Гейт как у карточки пула портов: без retail_enabled секция скрыта.
+    if(!settings||!settings.retail_enabled){card.style.display='none';return}
+    card.style.display='';
+    var box=document.getElementById('cardPaymentsTable');
+    box.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div>';
+    var data=await api(API+'/api/admin/card_payments?limit=100');
+    var rows=(data&&data.payments)||[];
+    if(!rows.length){box.innerHTML='<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Платежей пока нет</div>';return}
+    var h='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'+
+      '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Заказ</th>'+
+      '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Клиент</th>'+
+      '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)">Сумма</th>'+
+      '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Метод</th>'+
+      '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Статус</th>'+
+      '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Дата</th>'+
+      '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)"></th>'+
+      '</tr></thead><tbody>';
+    rows.forEach(function(p){
+      var st=_CARD_PAYMENT_STATUS_RU[p.status]||p.status;
+      var clr=_CARD_PAYMENT_STATUS_COLOR[p.status]||'var(--text-2)';
+      h+='<tr>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);font-family:monospace;font-size:11px">'+esc(p.order_id)+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(p.client_login||('#'+p.client_id))+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">'+esc(String(p.amount))+' ₽</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+(p.method==='sbp'?'СБП':'Карта')+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);color:'+clr+'">'+esc(st)+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+_fmtIsoDt(p.created_at)+'</td>'+
+        '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">'+(p.status==='credited'?'<button class="btn btn-sm" data-on-click="refundCardPayment(\''+esc(p.order_id)+'\','+p.amount+')">Возврат</button>':'')+'</td>'+
+      '</tr>';
+    });
+    h+='</tbody></table>';
+    box.innerHTML=h;
+  }catch(e){card.style.display='none';}
+}
+async function refundCardPayment(orderId,amount){
+  if(!confirm('Вернуть платёж '+orderId+' на '+amount+' ₽? Деньги уйдут клиенту на карту, баланс будет сторнирован.'))return;
+  try{
+    var data=await api(API+'/api/admin/card_payments/'+encodeURIComponent(orderId)+'/refund',{method:'POST'});
+    if(data&&data.ok){showToast(data.already?'Платёж уже был возвращён':'Возврат выполнен','success');}
+    else{showToast((data&&data.error)||'Ошибка возврата','error');}
+  }catch(e){showToast('Ошибка соединения','error');}
+  loadCardPaymentsAdmin();
+}
+async function loadAcquiringSettings(){
+  var card=document.getElementById('acquiringCard');
+  if(!card)return;
+  try{
+    var s=await api(API+'/api/admin/settings');
+    if(!s||!s.retail_enabled){card.style.display='none';return}
+    card.style.display='';
+    var pv=document.getElementById('acqProvider');
+    pv.value=(s.retail_acquiring_provider==='tochka')?'tochka':'none';
+    // JWT — секрет: GET отдаёт маску '••••••••'. Пустое поле при сохранении = «не менять».
+    var jwt=document.getElementById('acqJwt');
+    if(s.tochka_acq_jwt==='••••••••'){jwt.value='';jwt.placeholder='•••••••• (сохранён)';jwt.dataset.masked='1';}
+    else{jwt.value=s.tochka_acq_jwt||'';jwt.dataset.masked='';}
+    document.getElementById('acqCustomerCode').value=s.tochka_acq_customer_code||'';
+    document.getElementById('acqMerchantId').value=s.tochka_acq_merchant_id||'';
+    document.getElementById('acqTaxSystem').value=s.tochka_acq_tax_system||'';
+    document.getElementById('acqMinTopup').value=s.retail_min_topup!=null?s.retail_min_topup:0;
+    document.getElementById('acqMaxTopup').value=s.retail_max_topup!=null?s.retail_max_topup:100000;
+  }catch(e){card.style.display='none';}
+}
+async function saveAcquiringSettings(){
+  var st=document.getElementById('acqSaveStatus');
+  var btn=document.getElementById('acqSaveBtn');
+  var data={
+    retail_acquiring_provider:document.getElementById('acqProvider').value,
+    tochka_acq_customer_code:(document.getElementById('acqCustomerCode').value||'').trim(),
+    tochka_acq_merchant_id:(document.getElementById('acqMerchantId').value||'').trim(),
+    tochka_acq_tax_system:document.getElementById('acqTaxSystem').value
+  };
+  // JWT: при замаскированном значении пустое поле = «не менять».
+  var jwt=document.getElementById('acqJwt');
+  var tok=(jwt.value||'').trim();
+  if(tok||!jwt.dataset.masked)data.tochka_acq_jwt=tok;
+  var mn=parseInt(document.getElementById('acqMinTopup').value);
+  data.retail_min_topup=isNaN(mn)?0:mn;
+  var mx=parseInt(document.getElementById('acqMaxTopup').value);
+  data.retail_max_topup=isNaN(mx)?100000:mx;
+  if(btn)btn.disabled=true;
+  st.style.color='var(--text-2)';st.textContent='Сохранение...';
+  try{
+    var d=await api(API+'/api/admin/settings',{method:'PUT',json:data});
+    if(d&&d.error){st.style.color='var(--danger)';st.textContent=d.error;showToast(d.error,'error');}
+    else{st.style.color='var(--success)';st.textContent='Сохранено';showToast('Настройки эквайринга сохранены','success');loadAcquiringSettings();}
   }catch(e){
     st.style.color='var(--danger)';st.textContent='Ошибка соединения';
   }finally{

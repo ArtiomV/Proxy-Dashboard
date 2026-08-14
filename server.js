@@ -20,7 +20,7 @@ const { validate } = require('./src/middleware/validate');
 // passed via deps.
 const { LoginSchema, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema,
   RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema,
-  ClientEmailSchema } = require('./src/schemas');
+  ClientEmailSchema, TopupSchema } = require('./src/schemas');
 const { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday } = require('./src/utils/time');
 const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator } = require('./src/utils/traffic');
 const { parseHtmlInputFields } = require('./src/utils/html-forms');  // P2-2: extracted from server.js
@@ -1636,9 +1636,18 @@ const SETTINGS_DEFAULTS = {
   // WP5 (B2C Э3): пороги админ-алертов розницы (alerts.js retail_bulk_buy / retail_pool_low)
   retail_bulk_buy_threshold: 3,      // leased-портов у одного аккаунта → алерт «массовая покупка»
   retail_pool_min_free: 3,           // свободных портов на боксе < N → алерт «пул на исходе»
-  retail_min_topup: 100,             // минимальная сумма пополнения, ₽
   retail_test_day_price: 100,        // фикс-цена тест-дня, ₽ (тариф duration_hours=24)
   retail_reg_limit_per_ip_day: 10,   // анти-мультиаккаунт: регистраций с IP в сутки
+  // WP3 (B2C Э4): эквайринг розницы (карта/СБП). Провайдер — настройкой
+  // retail_acquiring_provider (''|'none' = выкл → topup 503). Креды Точки —
+  // tochka_acq_*; jwt — секрет (SENSITIVE_SETTINGS, enc1: в kv).
+  retail_acquiring_provider: '',     // 'tochka' | 'none'|'' — эквайринг не подключён
+  retail_min_topup: 0,               // мин. пополнение, ₽; 0 = авто: суточное списание тарифа клиента (без тарифа — 100 ₽)
+  retail_max_topup: 100000,          // макс. пополнение за раз, ₽
+  tochka_acq_jwt: '',                // JWT (Bearer) интернет-эквайринга Точки — СЕКРЕТ
+  tochka_acq_customer_code: '',      // customerCode (9 цифр, тип Business)
+  tochka_acq_merchant_id: '',        // merchantId точки (15 цифр); обязателен при нескольких точках
+  tochka_acq_tax_system: '',         // osn|usn_income|usn_income_outcome|esn|patent; пусто — не слать в чек
   // WP7 (B2C Э5): антифрод розницы. Всё выключаемо через 0, но по ТЗ
   // авто-саспенд обязателен до запуска продаж — дефолты включены.
   domain_guard_suspend_hits: 1,      // хитов по бан-листу на порту розницы → авто-саспенд (0 = выкл)
@@ -1661,7 +1670,7 @@ const SETTINGS_DEFAULTS = {
 // WP7.5: keys whose VALUES are encrypted at rest in kv_store (see
 // _encryptSettingVal below). Declared before the settings load because the
 // migration right after the load needs it.
-const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'telegram_bot_token']);
+const SENSITIVE_SETTINGS = new Set(['anthropic_api_key', 'turnstile_secret_key', 'sendpulse_smtp_pass', 'telegram_bot_token', 'tochka_acq_jwt']);
 stateMod.setAppSettings({ ...SETTINGS_DEFAULTS });
 const appSettings = stateMod.state.appSettings;
 try {
@@ -1959,6 +1968,30 @@ const registerLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   skip: () => process.env.NODE_ENV === 'test' // supertest-харнесс: формы гоняются в цикле
+});
+
+// B2C Э4 (WP3): создание платежа эквайринга — 10/час на клиента
+// (ключ — login: роут идёт после authMiddleware, req.user уже есть).
+const topupLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: 10,
+  keyGenerator: (req) => (req.user && req.user.login) || getClientIp(req),
+  message: { error: 'Слишком много попыток оплаты — попробуйте через час' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test'
+});
+
+// B2C Э4 (WP3): webhook эквайринга — по IP, 60/мин. Банк ретраит не-200
+// 30 раз × 10 сек — лимит не должен резать штатные ретраи, только флуд.
+const acqWebhookLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 60,
+  keyGenerator: (req) => getClientIp(req),
+  message: { ok: false, error: 'rate limited' },
+  standardHeaders: true,
+  legacyHeaders: false,
+  skip: () => process.env.NODE_ENV === 'test'
 });
 
 const checkProxyLimiter = rateLimit({
@@ -2941,6 +2974,25 @@ app.use(require('./src/routes/retail')({
   // B2C Э3 (WP5): уведомление клиенту о выдаче прокси. _clientNotify объявлен
   // ниже (const, TDZ) — ленивый шим, как mailer в client-portal выше.
   notifyClient: (...args) => _clientNotify.notifyClient(...args),
+}));
+
+// B2C Э4 (WP3): эквайринг розницы — topup + webhook + история + возвраты.
+// Провайдер создаётся на КАЖДЫЙ запрос из живых настроек (смена кредов без
+// рестарта); тесты подменяют create через require-кэш src/payments/provider.
+app.use(require('./src/routes/payments')({
+  logger, authMiddleware, adminMiddleware, validate, TopupSchema,
+  topupLimiter, webhookLimiter: acqWebhookLimiter,
+  clients, clientById, saveClients,
+  getSetting, tariffsDb, cardPaymentsDb, ledgerDb,
+  atomicCredit, atomicDebit,
+  auditLog, logActivity, getClientIp,
+  alerts, dbAudit,
+  notifyClient: (...args) => _clientNotify.notifyClient(...args),
+  createProvider: () => require('./src/payments/provider').create({
+    logger, getSetting,
+    tochkaRequest: _tochkaRequest,     // сырой HTTPS-хелпер (config — 1-м аргументом)
+    verifyJwtSignature,                // RS256 по JWKS Точки (src/tochka/jwt.js)
+  }),
 }));
 
 // All traffic endpoints moved to src/routes/traffic.js (Stage 3).

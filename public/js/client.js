@@ -52,7 +52,7 @@ function switchTab(name,el){
   if(name==='documents') loadDocuments();
   if(name==='api') loadApiDocs();
   if(name==='referral') loadReferral();
-  if(name==='billing') loadBillingHistory();
+  if(name==='billing'){loadBillingHistory();loadTopupSection();}
   if(name==='shop') loadShop();
   if(name==='profile') loadProfile();
 }
@@ -1020,7 +1020,7 @@ function loadBillingHistory(){
       monthMap[key].entries.push(e);
       if(e.type==='charge'){monthMap[key].totalCharge+=(e.cost||0);monthMap[key].totalTraffic+=(e.delta_gb||0)}
       else if(e.type==='correction'){var cd=(e.balance_before!=null&&e.balance_after!=null)?(e.balance_before-e.balance_after):(e.amount||0);monthMap[key].totalCharge+=cd;if(e.delta_gb)monthMap[key].totalTraffic+=(cd>0?e.delta_gb:-e.delta_gb)}
-      else if(e.type==='payment'||e.type==='bank_payment'){monthMap[key].totalPayment+=(e.amount||0)}
+      else if(e.type==='payment'||e.type==='bank_payment'||e.type==='card_payment'){monthMap[key].totalPayment+=(e.amount||0)}
     });
 
     var sortedMonths=Object.keys(monthMap).sort().reverse();
@@ -1061,7 +1061,7 @@ function loadBillingHistory(){
       mg.entries.forEach(function(e){
         if(e.type==='charge')typeCounts.charge++;
         else if(e.type==='correction')typeCounts.correction++;
-        else if(e.type==='payment'||e.type==='bank_payment')typeCounts.payment++;
+        else if(e.type==='payment'||e.type==='bank_payment'||e.type==='card_payment')typeCounts.payment++;
       });
 
       // Month body (entries table)
@@ -1097,6 +1097,7 @@ function loadBillingHistory(){
         }
         else if(e.type==='payment'){typeLabel='Пополнение';typeStyle='color:var(--green)';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
         else if(e.type==='bank_payment'){typeLabel=icon('bank',12)+' Банк';typeStyle='color:#6366f1';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
+        else if(e.type==='card_payment'){typeLabel=icon('card',12)+' Карта/СБП';typeStyle='color:var(--green)';amountStr='+'+formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--green)';ftype='payment';}
         else if(e.type==='payment_reversal'){typeLabel='Отмена';typeStyle='color:var(--orange,#f59e0b)';amountStr=formatNumber(e.amount||0)+' '+cs;amountStyle='color:var(--orange,#f59e0b)';}
         else if(e.type==='adjustment'){typeLabel='Корректировка';typeStyle='color:var(--blue)';amountStr=((e.amount||0)>=0?'+':'')+formatNumber(e.amount||0)+' '+cs;amountStyle=(e.amount||0)>=0?'color:var(--green)':'color:var(--red)';ftype='adjustment';}
         else{typeLabel=e.type||'—';amountStr=(e.cost||e.amount||0)+' '+cs;}
@@ -2288,6 +2289,135 @@ async function buyProxy(tariffId,btn){
   }finally{
     if(btn)btn.disabled=false;
   }
+}
+
+// ==================== B2C Э4 (WP3): пополнение баланса (эквайринг) ==========
+// Блок на вкладке «История баланса»: форма (сумма + метод, СБП первым —
+// комиссия ниже) → POST /api/client/topup → редирект на confirmation_url.
+// Виден только при retail_enabled. Зачёт — по webhook банка; return-url
+// денег не начисляет, только показывает итог. История card_payments — ниже
+// аккордеона, status-бейджи.
+
+var CARD_PAYMENT_STATUS={
+  created:  {label:'Ожидает оплаты', color:'var(--warning)'},
+  paid:     {label:'Оплачен',        color:'var(--accent)'},
+  credited: {label:'Зачислен',       color:'var(--success)'},
+  failed:   {label:'Неуспешен',      color:'var(--danger)'},
+  refunded: {label:'Возвращён',      color:'var(--text-3)'}
+};
+
+function loadTopupSection(){
+  var sec=document.getElementById('topupSection');
+  var hist=document.getElementById('cardPaymentsSection');
+  if(!sec)return;
+  if(!retailConfig||!retailConfig.retail_enabled){
+    sec.style.display='none';
+    if(hist)hist.style.display='none';
+    return;
+  }
+  api('/api/client/payments').then(function(data){
+    if(!data||data.error){sec.style.display='none';return}
+    var t=data.topup||{};
+    var h='<div class="tools-section" style="margin-bottom:16px"><h3 style="margin-top:0">'+icon('money',14)+' Пополнить баланс</h3>';
+    if(!t.emailVerified){
+      // 54-ФЗ: чек на email — без подтверждения оплаты нет (403 EMAIL_NOT_VERIFIED)
+      h+='<div class="verify-banner" style="display:block;margin-bottom:0">Подтвердите email — на него приходит чек об оплате. Без подтверждения пополнение недоступно.'+
+         ' <button class="btn btn-sm" style="margin-left:8px" data-on-click="gotoProfile()">Перейти в профиль</button></div>';
+    }else if(!t.enabled){
+      h+='<div style="font-size:12px;color:var(--text-3)">Онлайн-оплата временно недоступна — пополнение через менеджера.</div>';
+    }else{
+      h+='<div style="display:flex;gap:8px;align-items:flex-end;flex-wrap:wrap">'+
+        '<div class="form-group" style="margin:0"><label>Сумма, ₽</label><input class="form-input" type="number" id="topupAmount" min="'+t.min+'" max="'+t.max+'" step="1" placeholder="'+(t.min||100)+'" style="width:140px"></div>'+
+        '<div class="form-group" style="margin:0"><label>Способ оплаты</label><div style="display:flex;gap:6px">'+
+          '<button class="btn btn-sm topup-method" data-method="sbp" data-on-click="pickTopupMethod(this)">'+icon('bolt',12)+' СБП</button>'+
+          '<button class="btn btn-sm topup-method" data-method="card" data-on-click="pickTopupMethod(this)">'+icon('card',12)+' Карта</button>'+
+        '</div></div>'+
+        '<button class="btn btn-accent" id="topupBtn" data-on-click="submitTopup(this)">Перейти к оплате</button>'+
+      '</div>'+
+      '<div style="font-size:11px;color:var(--text-3);margin-top:8px">Минимум '+(t.min||100)+' ₽, максимум '+formatNumber(t.max||100000)+' ₽. СБП — комиссия ниже. Чек придёт на email. Зачисление — автоматически после оплаты (обычно до минуты).</div>'+
+      '<div id="topupStatus" style="font-size:12px;margin-top:6px"></div>';
+    }
+    h+='</div>';
+    sec.innerHTML=h;
+    sec.style.display='';
+    pickTopupMethod(sec.querySelector('.topup-method[data-method="sbp"]'));
+    renderCardPayments(data.payments||[]);
+  }).catch(function(){sec.style.display='none'});
+}
+
+function pickTopupMethod(btn){
+  if(!btn)return;
+  window._topupMethod=btn.getAttribute('data-method');
+  document.querySelectorAll('.topup-method').forEach(function(b){
+    var on=b===btn;
+    b.style.background=on?'var(--accent)':'var(--bg-2)';
+    b.style.color=on?'#fff':'var(--text-2)';
+    b.style.border='1px solid '+(on?'var(--accent)':'var(--border)');
+  });
+}
+
+async function submitTopup(btn){
+  var st=document.getElementById('topupStatus');
+  var amount=parseFloat((document.getElementById('topupAmount')||{}).value);
+  if(!(amount>0)){if(st){st.textContent='Укажите сумму';st.style.color='var(--danger)'}return}
+  if(btn)btn.disabled=true;
+  try{
+    var data=await api('/api/client/topup',{method:'POST',json:{amount:amount,method:window._topupMethod||'sbp'}});
+    if(data&&data.ok&&data.confirmation_url){
+      if(st){st.innerHTML='Счёт создан — перенаправляю на оплату. Если переход не сработал: <a href="'+esc(data.confirmation_url)+'" style="color:var(--accent)">ссылка на оплату</a>';st.style.color='var(--success)'}
+      window.location.href=data.confirmation_url;
+      return;
+    }
+    var code=data&&data.code;
+    if(code==='EMAIL_NOT_VERIFIED'){
+      showToast('Сначала подтвердите email','error');
+      gotoProfile();
+    }else if(code==='AMOUNT_TOO_SMALL'||code==='AMOUNT_TOO_LARGE'){
+      if(st){st.textContent=data.error;st.style.color='var(--danger)'}
+    }else if(code==='ACQUIRING_NOT_CONFIGURED'){
+      if(st){st.textContent='Онлайн-оплата временно недоступна';st.style.color='var(--danger)'}
+    }else{
+      if(st){st.textContent=(data&&data.error)||'Ошибка создания платежа';st.style.color='var(--danger)'}
+    }
+  }catch(e){
+    if(st){st.textContent='Ошибка соединения';st.style.color='var(--danger)'}
+  }finally{
+    if(btn)btn.disabled=false;
+  }
+}
+
+function gotoProfile(){
+  var tabEl=document.querySelector('.nav-tab[data-on-click*="\'profile\'"]');
+  switchTab('profile',tabEl);
+}
+
+// История карточных платежей — списком под аккордеоном (status-бейджи).
+function renderCardPayments(payments){
+  var box=document.getElementById('cardPaymentsSection');
+  if(!box)return;
+  if(!payments.length){box.style.display='none';return}
+  var h='<h3 style="margin-top:18px">'+icon('history',14)+' Онлайн-платежи</h3>'+
+    '<div class="table-wrapper"><table style="width:100%;border-collapse:collapse;font-size:12px">'+
+    '<thead><tr style="background:var(--bg-3)">'+
+    '<th style="padding:7px 10px;text-align:left;color:var(--text-2);font-weight:500">Заказ</th>'+
+    '<th style="padding:7px 10px;text-align:center;color:var(--text-2);font-weight:500">Дата</th>'+
+    '<th style="padding:7px 10px;text-align:center;color:var(--text-2);font-weight:500">Метод</th>'+
+    '<th style="padding:7px 10px;text-align:center;color:var(--text-2);font-weight:500">Сумма</th>'+
+    '<th style="padding:7px 10px;text-align:center;color:var(--text-2);font-weight:500">Статус</th></tr></thead><tbody>';
+  payments.forEach(function(p){
+    var st=CARD_PAYMENT_STATUS[p.status]||{label:p.status,color:'var(--text-3)'};
+    var dt='—';
+    if(p.created_at){var t=Date.parse(p.created_at.replace(' ','T')+'Z');if(!isNaN(t))dt=new Date(t).toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}
+    h+='<tr style="border-bottom:1px solid var(--border)">'+
+      '<td style="padding:7px 10px;font-family:monospace;font-size:11px;color:var(--text-2)">'+esc(p.order_id)+'</td>'+
+      '<td style="padding:7px 10px;text-align:center;white-space:nowrap">'+dt+'</td>'+
+      '<td style="padding:7px 10px;text-align:center">'+(p.method==='sbp'?'СБП':(p.method==='card'?'Карта':'—'))+'</td>'+
+      '<td style="padding:7px 10px;text-align:center;font-weight:600">'+formatNumber(p.amount)+' ₽</td>'+
+      '<td style="padding:7px 10px;text-align:center"><span style="font-size:11px;font-weight:600;color:'+st.color+'">'+st.label+'</span></td></tr>';
+  });
+  h+='</tbody></table></div>';
+  box.innerHTML=h;
+  box.style.display='';
 }
 
 // ==================== B2C: вкладка «Профиль» (WP3) ====================

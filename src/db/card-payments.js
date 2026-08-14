@@ -23,6 +23,11 @@ function init(db) {
   );
   S.markStatus = db.prepare('UPDATE card_payments SET status=? WHERE order_id=?');
   S.recent = db.prepare('SELECT * FROM card_payments ORDER BY id DESC LIMIT ?');
+  // WP3: operationId провайдера привязываем к заказу сразу после create_payment
+  // (до webhook) — по нему админ делает возврат.
+  S.attachProvider = db.prepare(
+    "UPDATE card_payments SET provider_payment_id=? WHERE order_id=? AND status='created'"
+  );
 }
 
 function byOrderId(orderId) { return S.byOrderId.get(orderId); }
@@ -37,5 +42,6 @@ function markPaid(orderId, providerPaymentId, rawJson) {
 function markCredited(orderId) { return S.markCredited.run(orderId); }
 function markStatus(orderId, status) { return S.markStatus.run(status, orderId); }
 function recent(limit) { return S.recent.all(limit || 100); }
+function attachProvider(orderId, providerPaymentId) { return S.attachProvider.run(providerPaymentId, orderId); }
 
-module.exports = { init, byOrderId, byClient, insertCreated, markPaid, markCredited, markStatus, recent };
+module.exports = { init, byOrderId, byClient, insertCreated, markPaid, markCredited, markStatus, recent, attachProvider };

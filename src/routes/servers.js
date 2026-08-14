@@ -146,7 +146,8 @@ r.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   // the value is only ever written (PUT), never read back.
   const masked = { ...appSettings };
   // WP5: telegram_bot_token тоже секрет (enc1: в kv) — маскируем, как API-ключи.
-  for (const k of ['anthropic_api_key', 'telegram_bot_token']) {
+  // WP3 (B2C Э4): tochka_acq_jwt — JWT эквайринга, тот же контур.
+  for (const k of ['anthropic_api_key', 'telegram_bot_token', 'tochka_acq_jwt']) {
     const v = masked[k];
     masked[k] = (typeof v === 'string' && v) ? '••••••••' : '';
   }
@@ -341,6 +342,41 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
   if (req.body.abuse_strikes_block != null)       patch.abuse_strikes_block       = Math.max(1, Math.min(100, parseInt(req.body.abuse_strikes_block) || 2));
   if (req.body.retail_max_accounts_per_ip != null) patch.retail_max_accounts_per_ip = Math.max(0, Math.min(100, parseInt(req.body.retail_max_accounts_per_ip) || 0));
   if (req.body.retail_min_unique_ips != null)     patch.retail_min_unique_ips     = Math.max(0, Math.min(100, parseInt(req.body.retail_min_unique_ips) || 0));
+  // WP3 (B2C Э4): эквайринг розницы. provider — только известные значения;
+  // jwt — секрет (маска '••••••••' из GET не является значением — игнорируем,
+  // как telegram_bot_token). customer_code/merchant_id — цифровые коды Точки.
+  if (req.body.retail_acquiring_provider != null) {
+    const p = String(req.body.retail_acquiring_provider).trim();
+    if (!['', 'none', 'tochka'].includes(p)) {
+      return res.status(400).json({ error: 'retail_acquiring_provider: допустимо tochka | none | пусто' });
+    }
+    patch.retail_acquiring_provider = p;
+  }
+  if (req.body.retail_min_topup != null) patch.retail_min_topup = Math.max(0, Math.min(1000000, parseFloat(req.body.retail_min_topup) || 0));
+  if (req.body.retail_max_topup != null) {
+    const mx = Math.max(1, Math.min(1000000, parseFloat(req.body.retail_max_topup) || 100000));
+    patch.retail_max_topup = mx;
+  }
+  if (req.body.tochka_acq_jwt != null && req.body.tochka_acq_jwt !== '••••••••') {
+    patch.tochka_acq_jwt = String(req.body.tochka_acq_jwt).trim();
+  }
+  if (req.body.tochka_acq_customer_code != null) {
+    const cc = String(req.body.tochka_acq_customer_code).trim();
+    if (cc && !/^\d{9}$/.test(cc)) return res.status(400).json({ error: 'tochka_acq_customer_code: ровно 9 цифр' });
+    patch.tochka_acq_customer_code = cc;
+  }
+  if (req.body.tochka_acq_merchant_id != null) {
+    const mid = String(req.body.tochka_acq_merchant_id).trim();
+    if (mid && !/^\d{15}$/.test(mid)) return res.status(400).json({ error: 'tochka_acq_merchant_id: ровно 15 цифр' });
+    patch.tochka_acq_merchant_id = mid;
+  }
+  if (req.body.tochka_acq_tax_system != null) {
+    const ts = String(req.body.tochka_acq_tax_system).trim();
+    if (ts && !['osn', 'usn_income', 'usn_income_outcome', 'esn', 'patent'].includes(ts)) {
+      return res.status(400).json({ error: 'tochka_acq_tax_system: osn|usn_income|usn_income_outcome|esn|patent' });
+    }
+    patch.tochka_acq_tax_system = ts;
+  }
   // AI-insights key (Telegram daily summary). The '••••••••' mask shown by the GET
   // endpoint is NOT a value — ignore it so a save of an untouched form can't
   // clobber the real key with the mask itself.

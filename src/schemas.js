@@ -78,6 +78,13 @@ const ClientEmailSchema = z.object({
   email: z.string().email().max(200),
 });
 
+// B2C Э4 (WP3): пополнение баланса эквайрингом (POST /api/client/topup).
+// Границы суммы проверяет роут по настройкам (min/max динамические).
+const TopupSchema = z.object({
+  amount: z.coerce.number().positive().max(1000000),
+  method: z.enum(['card', 'sbp']),
+});
+
 // Telegram Login Widget payload (https://core.telegram.org/widgets/login)
 const TelegramAuthSchema = z.object({
   id: z.coerce.number().int().positive(),
@@ -91,4 +98,4 @@ const TelegramAuthSchema = z.object({
 
 module.exports = { ClientCreateSchema, ClientUpdateSchema, PaymentSchema, BalanceAdjustSchema, LoginSchema,
   RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema,
-  ClientEmailSchema };
+  ClientEmailSchema, TopupSchema };

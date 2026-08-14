@@ -91,7 +91,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.6.0</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.7.0</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -107,7 +107,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.6.0</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.7.0</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -116,7 +116,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.6.0</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.7.0</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -523,6 +523,36 @@
           </div>
           <div id="retailLegacyBox" style="display:none;margin-bottom:14px"></div>
           <div id="retailPoolTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div></div>
+        </div>
+        <!-- Эквайринг розницы (B2C Э4, WP3): настройки провайдера Точка + лимиты пополнения -->
+        <div class="analytics-card" id="acquiringCard" style="margin-top:16px;display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <h3 style="margin:0">Эквайринг (карта/СБП)</h3>
+            <button class="btn btn-sm" data-on-click="loadAcquiringSettings()">Обновить</button>
+          </div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">Приём оплаты от физлиц через Точка.Банк (платёжные ссылки). Вебхук для банка: <code>/api/payments/webhook/tochka</code>. Без JWT-настроек провайдер считается выключенным — пополнение в ЛК закрыто (503).</div>
+          <div class="add-form">
+            <div class="form-group"><label class="form-label" style="font-size:10px">Провайдер</label><select class="form-input" id="acqProvider"><option value="none">— выключен —</option><option value="tochka">Точка.Банк</option></select></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">JWT токен Точки</label><input class="form-input" id="acqJwt" type="password" placeholder="eyJhbGciOi..." autocomplete="off"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Customer Code (9 цифр)</label><input class="form-input" id="acqCustomerCode" placeholder="300000000" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Merchant ID (15 цифр, опц.)</label><input class="form-input" id="acqMerchantId" placeholder="200000000000000" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Система налогообложения (опц.)</label><select class="form-input" id="acqTaxSystem"><option value="">— не задано —</option><option value="osn">ОСН</option><option value="usn_income">УСН доход</option><option value="usn_income_outcome">УСН доход-расход</option><option value="esn">ЕСН</option><option value="patent">Патент</option></select></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Мин. пополнение, ₽ (0 — авто)</label><input class="form-input" id="acqMinTopup" type="number" min="0" max="1000000" placeholder="0" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Макс. пополнение, ₽</label><input class="form-input" id="acqMaxTopup" type="number" min="1" max="1000000" placeholder="100000" style="width:100%"></div>
+          </div>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:10px">
+            <button class="btn btn-sm btn-primary" id="acqSaveBtn" data-on-click="saveAcquiringSettings()">Сохранить</button>
+            <span id="acqSaveStatus" style="font-size:11px"></span>
+          </div>
+        </div>
+        <!-- Карточные платежи розницы (B2C Э4): журнал + возвраты -->
+        <div class="analytics-card" id="cardPaymentsCard" style="margin-top:16px;display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <h3 style="margin:0">Карточные платежи</h3>
+            <button class="btn btn-sm" data-on-click="loadCardPaymentsAdmin()">Обновить</button>
+          </div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:12px">Пополнения баланса физлиц картой/СБП. Зачёт — только по вебхуку банка. «Возврат» доступен для зачтённых платежей (refund в банке + сторно баланса).</div>
+          <div id="cardPaymentsTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div></div>
         </div>
         <div class="analytics-card" style="margin-top:16px">
           <h3 style="margin:0 0 12px" id="tariffFormTitle">Новый тариф</h3>
@@ -1296,6 +1326,6 @@
 <script src="/js/admin/modems.js?v=0722c"></script>
 <script src="/js/admin/settings.js?v=0814b"></script>
 <script src="/js/admin/speed-monitor.js?v=0814c"></script>
-<script src="/js/admin.js?v=0814b"></script>
+<script src="/js/admin.js?v=0814c"></script>
 </body>
 </html>
