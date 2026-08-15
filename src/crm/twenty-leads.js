@@ -51,7 +51,7 @@ async function _stage(c, ws) {
   if (_leadStage) return _leadStage;
   const r = await c.query(
     `SELECT e.enumlabel FROM pg_enum e
-       JOIN pg_type t ON e.oid = t.oid
+       JOIN pg_type t ON e.enumtypid = t.oid
        JOIN pg_namespace n ON t.typnamespace = n.oid
      WHERE n.nspname = $1 AND t.typname = 'opportunity_stage_enum'
      ORDER BY e.enumsortorder`, [ws]);
