@@ -23,7 +23,8 @@
  *     в phonesPrimaryPhoneNumber (для TG-контакта телефона нет — handle
  *     остаётся в nameLastName и теле заметки). Дедуп по телефону / контакту:
  *     если персона уже есть — только добавляем заметку.
- *   - opportunity (раздел «Сделки»): «Заявка: <контакт>», стадия NEW,
+ *   - opportunity (раздел «Сделки»): «Заявка: <контакт>», стартовая стадия
+ *     воронки (NEW_LEAD/NEW/первое значение enum'а — определяется из базы),
  *     pointOfContactId → person. Для повторной заявки того же контакта новую
  *     сделку НЕ плодим, если открытая уже есть — только заметку.
  *   - note + noteTarget → person: полный текст заявки, продукт, оффер,
@@ -41,6 +42,25 @@ const TAG = 'Сайт arendaproxy.ru';
 const DEFAULT_DB_URL = 'postgresql://twenty:TwentyCRM2026x@127.0.0.1:5432/default';
 
 let _wsSchema = null;   // кэш авто-определённой workspace-схемы
+let _leadStage = null;  // кэш валидной стартовой стадии сделки
+
+/** Стартовая стадия воронки: читаем enum из самой базы (15.08: хардкод 'NEW'
+ *  упал — в воронке владельца стадия называется 'NEW_LEAD'). Предпочитаем
+ *  NEW_LEAD → NEW → первое значение enum'а. */
+async function _stage(c, ws) {
+  if (_leadStage) return _leadStage;
+  const r = await c.query(
+    `SELECT e.enumlabel FROM pg_enum e
+       JOIN pg_type t ON e.oid = t.oid
+       JOIN pg_namespace n ON t.typnamespace = n.oid
+     WHERE n.nspname = $1 AND t.typname = 'opportunity_stage_enum'
+     ORDER BY e.enumsortorder`, [ws]);
+  const labels = r.rows.map(x => x.enumlabel);
+  _leadStage = labels.includes('NEW_LEAD') ? 'NEW_LEAD'
+             : labels.includes('NEW') ? 'NEW' : labels[0];
+  if (!_leadStage) throw new Error('Twenty: opportunity_stage_enum пуст — задайте стадии воронки в CRM');
+  return _leadStage;
+}
 
 function _dbUrl(getSetting) {
   return (getSetting && getSetting('crm_db_url', '')) || process.env.CRM_DB_URL || DEFAULT_DB_URL;
@@ -64,8 +84,8 @@ async function _workspace(c) {
   return _wsSchema;
 }
 
-/** Сброс кэша схемы (после переустановки Twenty / смены workspace). */
-function resetCache() { _wsSchema = null; }
+/** Сброс кэша схемы и стадии (после переустановки Twenty / смены воронки). */
+function resetCache() { _wsSchema = null; _leadStage = null; }
 
 /** Проверка связи: {ok, workspace, persons} или {ok:false, error}. */
 async function ping(getSetting) {
@@ -128,8 +148,8 @@ async function pushLead(getSetting, lead) {
     } else {
       const opp = await c.query(
         `INSERT INTO ${ws}.opportunity ("name","stage","pointOfContactId","createdBySource","createdByName")
-         VALUES ($1,'NEW',$2,'IMPORT',$3) RETURNING id`,
-        [`Заявка: ${contact}`, personId, TAG]);
+         VALUES ($1,$2,$3,'IMPORT',$4) RETURNING id`,
+        [`Заявка: ${contact}`, await _stage(c, ws), personId, TAG]);
       opportunityId = opp.rows[0].id;
     }
 
