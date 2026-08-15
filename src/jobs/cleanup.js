@@ -26,8 +26,8 @@ function create(deps) {
     SERVER_CACHE_FILE,
     appSettings,
     dailyTraffic, ipTracking, uptimeTracking, modemRotationCache,
-    knownModems,
-    saveKnownModems,
+    // knownModems/saveKnownModems больше не используются (2026-08-15: Pass A
+    // IMEI-дедупа удалён — он сносил живые биндинги на клон-IMEI железе S4).
     logActivity,
   } = deps;
 
@@ -91,71 +91,21 @@ function create(deps) {
         }
       }
 
-      // 3. known_modems.json: remove entries with stale lastSeen, only on
-      //    servers that ARE fresh (skipped servers untouched).
-      //    Also handle "IMEI reassigned" on the SAME server: if the same IMEI
-      //    has multiple km entries on one server (modem re-enumerated to a
-      //    different port), keep only the newest by lastSeen and remove older
-      //    ones that are not in live bw. 2026-08-03: scope narrowed from GLOBAL
-      //    to same-server — у E3372 бывают КЛОНИРОВАННЫЕ IMEI на разных стиках
-      //    (доказано: порт UDBqldZf на ro2 давал 78k хитов/день, пока клон с тем
-      //    же IMEI работал на S3 — глобальный дедуп снёс живой биндинг БА 32→31).
-      let kmRemoved = 0, kmChanged = false;
-
-      // Build per-(server,imei) index.
-      const byImei = {};   // 'srv|imei' -> [{srv, pid, lastSeen}]
-      for (const srvName of Object.keys(knownModems || {})) {
-        if (skippedSrv.includes(srvName)) continue;
-        const km = knownModems[srvName];
-        for (const [pid, info] of Object.entries(km)) {
-          if (!info.imei) continue;
-          const k = srvName + '|' + info.imei;
-          if (!byImei[k]) byImei[k] = [];
-          byImei[k].push({ srv: srvName, pid, lastSeen: info.lastSeen || 0 });
-        }
-      }
-      // Build live-IMEI set per server (modem currently visible in ProxySmart status,
-      // regardless of whether its port is in bw — could be a default/random port).
-      const liveImeisByServer = {};
-      for (const srvName of Object.keys(serverCache)) {
-        if (skippedSrv.includes(srvName)) continue;
-        liveImeisByServer[srvName] = new Set();
-        const stArr = Array.isArray(serverCache[srvName].status) ? serverCache[srvName].status : [];
-        for (const m of stArr) {
-          const imei = m.modem_details && m.modem_details.IMEI;
-          if (imei) liveImeisByServer[srvName].add(imei);
-        }
-      }
-      // Pass A: IMEI-dedup — newer wins (modem reassigned to different port).
-      for (const list of Object.values(byImei)) {
-        if (list.length < 2) continue;
-        list.sort((a, b) => b.lastSeen - a.lastSeen);
-        for (let i = 1; i < list.length; i++) {
-          const old = list[i];
-          if (liveIds.has(old.srv + '_' + old.pid)) continue;
-          delete knownModems[old.srv][old.pid];
-          kmRemoved++; kmChanged = true;
-        }
-      }
-      // Pass B was removed in Stage 17 by user policy:
-      // "Если однажды модем попал в базу — он должен там быть, пока я его
-      //  вручную не удалю. Удалить можно только отключенный модем."
-      // The old logic auto-evicted modems whose lastSeen was older than
-      // retention_stale_ports_days (default 3). That hid disconnected
-      // modems without operator awareness — replaced by:
-      //   - UI badge «потерян N мин назад» in the modem row
-      //   - explicit DELETE /api/admin/modems/:server/:port_id endpoint
-      //     (server-side guard ensures only offline modems are deletable)
-      // `cutoffMs`/`cutoffDate` are still computed above because they're
-      // used by daily_traffic retention (Pass A/C use their own predicates).
+      // 3. known_modems: НИЧЕГО не удаляем автоматически (2026-08-15).
+      //    Раньше здесь был Pass A (IMEI-дедуп на одном сервере: «новый
+      //    lastSeen вытесняет старый биндинг»). Он сломан на железе с
+      //    КЛОНИРОВАННЫМИ IMEI: на S4 один IMEI сидит на 2–3 портах РАЗНЫХ
+      //    клиентов (2 порта на модем), и Pass A каждые сутки сносил живые
+      //    клиентские биндинги без bw-трафика → счётчик клиента падал
+      //    (БА 32→30, 15.08 в 09:17: kmRemoved=2), а updateKnownModems потом
+      //    возвращал их обратно — отсюда «флапающий» total. Политика
+      //    оператора (Stage 17): «модем в базе, пока я его вручную не удалю».
+      //    Легальная пере-энумерация (тот же модем + тот же клиент, новый
+      //    portID) по-прежнему обрабатывается move-dedupe в updateKnownModems
+      //    (_dedupeSameModemClient: совпадение imei+portName).
+      const kmRemoved = 0;
+      // cutoffMs/cutoffDate вычислены выше для daily_traffic retention.
       void cutoffMs;
-      // Pass C REMOVED (2026-08-02, реша оператора «не прыгает без изменений»).
-      // Раньше: модем онлайн на ДРУГОМ порту → старая привязка удалялась. На
-      // флапающем железе (ro2, error -71) модем живёт на random-порту часами —
-      // и cleanup сносил клиентский биндинг (БА 32→31). Теперь ростер липкий:
-      // если модем вернётся с тем же portName под новым portID — его заменит
-      // move-dedupe в updateKnownModems; если с randomport — биндинг остаётся.
-      if (kmChanged) saveKnownModems();
 
       if (dtDeleted || dtMemKeys || kmRemoved) {
         logger.info(`[Retention] Stale port cleanup: daily_traffic=${dtDeleted} rows, dailyTraffic=${dtMemKeys} keys, known_modems=${kmRemoved} entries (threshold ${days}d)`);
