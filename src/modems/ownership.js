@@ -39,11 +39,15 @@ async function isModemOwned({ nick, portNameFilter, deps }) {
   } catch (_) { /* fall through to roster/history */ }
 
   // 2. roster binding (24h retention — the modem may be rebooting or briefly
-  //    absent from the live feed)
+  //    absent from the live feed). A port the box UNBOUND >10 min ago
+  //    (_missingSince — same threshold as computeClientWorking) no longer
+  //    grants access: иначе отвязанный порт сохранял бы доступ к порталу
+  //    до суток после удаления (тот же класс бага, что «33/33» 17.08).
   const now = Date.now();
   for (const ports of Object.values(knownModems || {})) {
     for (const info of Object.values(ports || {})) {
       if (info && info.nick === nick && info.portName === portNameFilter) {
+        if (info._missingSince && (now - info._missingSince) >= 10 * 60 * 1000) continue;
         const lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
         const ls = typeof lcs === 'number' ? lcs : Date.parse(lcs || 0);
         if (ls && (now - ls) <= ROSTER_RETAIN_MS) return true;

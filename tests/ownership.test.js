@@ -55,6 +55,19 @@ describe('isModemOwned — priority chain', () => {
     expect(await isModemOwned({ nick: 'MD_A', portNameFilter: 'CLIENT', deps })).toBe(true);
   });
 
+  it('roster binding box-unbound >10min (_missingSince) → no access via roster', async () => {
+    const deps = { ...noLive };
+    deps.knownModems = { S1: { p1: { nick: 'MD_A', portName: 'CLIENT', lastClientSeen: Date.now(), _missingSince: Date.now() - 30 * 60 * 1000 } } };
+    deps.db = { prepare: () => ({ get: () => undefined }) };   // no history
+    expect(await isModemOwned({ nick: 'MD_A', portNameFilter: 'CLIENT', deps })).toBe(false);
+  });
+
+  it('roster binding box-unbound <10min (flap) → still grants access', async () => {
+    const deps = { ...noLive };
+    deps.knownModems = { S1: { p1: { nick: 'MD_A', portName: 'CLIENT', lastClientSeen: Date.now(), _missingSince: Date.now() - 60 * 1000 } } };
+    expect(await isModemOwned({ nick: 'MD_A', portNameFilter: 'CLIENT', deps })).toBe(true);
+  });
+
   it('nothing anywhere → false', async () => {
     expect(await isModemOwned({ nick: 'MD_A', portNameFilter: 'CLIENT', deps: noLive })).toBe(false);
   });
