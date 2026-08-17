@@ -153,34 +153,6 @@ function blockBadge(c){if(!c)return'';var t=c.blocked?'Аккаунт забло
 // дашборд. Карточные статус-пилюли рисуют тот же значок inline.
 function pauseBadge(){return ' <span title="Пауза начислений — списания остановлены" style="display:inline-flex;align-items:center;color:#000;background:var(--warning);padding:3px 7px;border-radius:6px;white-space:nowrap">'+icon('moneyOff',11)+'</span>';}
 
-// Плавающие тултипы графиков/хитмапов (класс-маркер float-tt) живут в
-// position:fixed поверх страницы. Правила простые:
-//  - навёл мышь на график/ячейку — попап показан (штатные hover-обработчики);
-//  - убрал мышь — попап скрыт (штатный mouseleave / opacity=0 у Chart.js);
-//  - страница прокрутилась — попап скрываем (иначе он «висит» оторванным от
-//    точки), НО если курсор остался над источником, тут же перезапускаем
-//    hover синтетическим событием: попап пересчитается под новую позицию
-//    контента. Это закрывает и инерционный докрут тачпада (scroll-события
-//    после отпускания пальцев), и случай «навёл мышь, а попапа нет».
-// Источник привязывается при показе: t._anchor = canvas/ячейка.
-if (typeof window !== 'undefined') {
-  var _fttMouse = { x: -1, y: -1 };
-  document.addEventListener('mousemove', function (e) { _fttMouse.x = e.clientX; _fttMouse.y = e.clientY; }, true);
-  window.addEventListener('scroll', function () {
-    document.querySelectorAll('.float-tt').forEach(function (t) {
-      var a = t._anchor;
-      t.style.display = 'none'; t.style.opacity = '0';
-      if (a && a.isConnected && _fttMouse.x >= 0) {
-        var under = document.elementFromPoint(_fttMouse.x, _fttMouse.y);
-        if (under && (under === a || (a.contains && a.contains(under)))) {
-          a.dispatchEvent(new MouseEvent(a.tagName === 'CANVAS' ? 'mousemove' : 'mouseenter',
-            { clientX: _fttMouse.x, clientY: _fttMouse.y, bubbles: true }));
-        }
-      }
-    });
-  }, true);
-}
-
 // CommonJS export so the same source can be unit-tested in Node without a DOM.
 // Browsers see the `if (typeof module !== 'undefined')` guard as false and
 // continue with the bare function declarations above.

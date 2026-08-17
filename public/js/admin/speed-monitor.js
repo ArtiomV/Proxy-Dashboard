@@ -36,7 +36,9 @@ function _speedMonLabel(nick, modems) {
   if (!m) return nick;
   var parts = [nick];
   if (m.operator) parts.push(m.operator);
-  var loc = [m.server, m.location && m.location !== m.server ? m.location : ''].filter(Boolean).join(' · ');
+  // Локация — адрес площадки из карточки сервера («Армянская …»), а не
+  // техничекое «S1 · Moldova»: по адресу видно, о какой площадке речь.
+  var loc = m.address || m.location || m.server || '';
   if (loc) parts.push(loc);
   return parts.join(' · ');
 }
@@ -211,7 +213,6 @@ function loadSpeedMonitor(force) {
               ttEl.innerHTML = h;
               // Позиционирование — как в chartExtTooltip: от каретки, с клампом к окну.
               var rect = context.chart.canvas.getBoundingClientRect();
-              ttEl._anchor = context.chart.canvas;   // для scroll-hide (см. utils.js)
               ttEl.style.opacity = '1';
               var w = ttEl.offsetWidth, ht = ttEl.offsetHeight;
               var x = rect.left + tt.caretX + 14, y = rect.top + tt.caretY - 10;

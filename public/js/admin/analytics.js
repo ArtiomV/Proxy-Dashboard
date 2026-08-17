@@ -34,7 +34,6 @@ function chartExtTooltip(context){
     });
   }
   el.innerHTML=h;
-  el._anchor=context.chart.canvas;   // для scroll-hide: не скрывать, пока курсор над канвасом
   var rect=context.chart.canvas.getBoundingClientRect();
   el.style.opacity='1';
   var w=el.offsetWidth,ht=el.offsetHeight;
@@ -269,7 +268,6 @@ function showFloatTooltip(id,event,lines){
   var tt=document.getElementById(id);
   if(!tt){tt=document.createElement('div');tt.id=id;tt.className='float-tt';tt.style.cssText='position:fixed;z-index:9999;background:var(--bg-0);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:11px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:130px;line-height:1.6';document.body.appendChild(tt);}
   tt.innerHTML=lines.join('<br>');tt.style.display='block';
-  tt._anchor=(event&&event.target)||null;   // для scroll-hide (см. utils.js)
   tt.style.left='-9999px';tt.style.top='-9999px';
   var tw=tt.offsetWidth||200,th=tt.offsetHeight||100;
   var x=event.clientX+12,y=event.clientY-20;
@@ -554,7 +552,7 @@ function showHeatTT(di,hr,event,cell,ctx){
     if(isCorrected)tt.innerHTML+='<div style="font-size:10px;color:var(--warning);margin-top:6px">'+icon('alert',10)+' Данные скорректированы</div>';
   }
 
-  tt.style.display='block';tt._anchor=cell||null;tt.style.left='-9999px';tt.style.top='-9999px';
+  tt.style.display='block';tt.style.left='-9999px';tt.style.top='-9999px';
   var tw=tt.offsetWidth||200,th=tt.offsetHeight||100;
   var x=event.clientX+12,y=event.clientY-20;
   if(x+tw+8>window.innerWidth)x=event.clientX-tw-12;
