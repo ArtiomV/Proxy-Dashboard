@@ -166,6 +166,13 @@ CREATE TABLE IF NOT EXISTS doc_numbering (
   next_num INTEGER NOT NULL DEFAULT 1
 );
 
+-- 2026-08-17 (миграция 068): помесячная серия «№ N/MM-YYYY» — счётчик месяца
+-- ПЕРИОДА документа. Годовая таблица выше остаётся как архив старых номеров.
+CREATE TABLE IF NOT EXISTS doc_numbering_monthly (
+  ym       TEXT PRIMARY KEY,
+  next_num INTEGER NOT NULL DEFAULT 1
+);
+
 -- Bills (replaces client.bills[] array)
 CREATE TABLE IF NOT EXISTS bills (
   id              TEXT PRIMARY KEY,

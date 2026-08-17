@@ -68,9 +68,10 @@ function init(db) {
   // индексу бросил бы исключение внутри saveClients().
   S.billByClientPeriod = db.prepare('SELECT id FROM bills WHERE client_id = ? AND period = ?');
 
-  // B2 (Р15/Р23): сквозной счётчик «№ N/YYYY» для актов и счетов (единая серия).
-  S.docNumInit = db.prepare('INSERT OR IGNORE INTO doc_numbering (year, next_num) VALUES (?, 1)');
-  S.docNumBump = db.prepare('UPDATE doc_numbering SET next_num = next_num + 1 WHERE year = ? RETURNING next_num');
+  // 2026-08-17: помесячная серия «№ N/MM-YYYY» (миграция 068). Годовая
+  // таблица doc_numbering больше не используется — остаётся как архив.
+  S.docNumMInit = db.prepare('INSERT OR IGNORE INTO doc_numbering_monthly (ym, next_num) VALUES (?, 1)');
+  S.docNumMBump = db.prepare('UPDATE doc_numbering_monthly SET next_num = next_num + 1 WHERE ym = ? RETURNING next_num');
 }
 
 // ─── Client documents ─────────────────────────────────────────────────────
@@ -116,22 +117,32 @@ function insertBill(b, clientId) {
 function listBills(clientId) { return S.billsByClient.all(clientId); }
 function updateBillStatus(id, status) { return S.billUpdateStatus.run(status, id); }
 
-// B2 (Р15/Р23): атомарная выдача следующего сквозного номера «№ N/YYYY».
-// Единый счётчик для актов и счетов вместе (решение: одна серия на систему —
-// по ТЗ «сквозная по системе с годом»). Счётчик стартует с 1 для каждого
-// нового года (новая строка year); номера удалённых документов НЕ
-// переиспользуются (дыры — норма, фиксируются в audit_log при удалении).
-// INSERT OR IGNORE + UPDATE ... RETURNING в одной транзакции — гонка
-// крон+ручная генерация не может выдать один номер дважды.
-// `now` — injectable для тестов (переход через границу года).
-function nextDocNumber(now) {
-  const year = (now ? new Date(now) : new Date()).getFullYear();
+// B2 (Р15/Р23): атомарная выдача следующего сквозного номера. Единый счётчик
+// для актов и счетов вместе (одна серия на систему); номера удалённых
+// документов НЕ переиспользуются (дыры — норма).
+//
+// 2026-08-17 — новая модель: «№ N/MM-YYYY», счётчик привязан к МЕСЯЦУ
+// ПЕРИОДА документа (period 'YYYY-MM'), а не к дате создания: акт за июль,
+// выставленный в августе, получает номер из июльской серии. Если period не
+// передан/невалиден — берётся текущий месяц. INSERT OR IGNORE + UPDATE ...
+// RETURNING в одной транзакции — гонка крон+ручная генерация не может выдать
+// один номер дважды. `now` — injectable для тестов.
+function nextDocNumber(now, period) {
+  let year, month;   // month: 1..12
+  const pm = /^(\d{4})-(\d{2})/.exec(String(period || ''));
+  if (pm && +pm[2] >= 1 && +pm[2] <= 12) {
+    year = +pm[1]; month = +pm[2];
+  } else {
+    const d = now ? new Date(now) : new Date();
+    year = d.getFullYear(); month = d.getMonth() + 1;
+  }
+  const ym = `${year}-${String(month).padStart(2, '0')}`;
   let num;
   _db.transaction(() => {
-    S.docNumInit.run(year);
-    num = S.docNumBump.get(year).next_num - 1;
+    S.docNumMInit.run(ym);
+    num = S.docNumMBump.get(ym).next_num - 1;
   })();
-  return { num, year, label: `${num}/${year}` };
+  return { num, year, month, label: `${num}/${ym.slice(5)}-${year}` };
 }
 
 module.exports = {

@@ -1,9 +1,12 @@
-// B2 (Р15/Р23): сквозная нумерация «№ N/YYYY» — атомарный счётчик
-// doc_numbering + анти-дабл гейты UNIQUE(client_id, period[, type]).
+// B2 (Р15/Р23) + 2026-08-17: помесячная сквозная нумерация «№ N/MM-YYYY» —
+// атомарный счётчик doc_numbering_monthly (серия месяца ПЕРИОДА документа,
+// единая для актов и счетов) + анти-дабл гейты UNIQUE(client_id, period[, type]).
 //
 // Контракт:
+//   - номер относится к месяцу периода: акт за 2026-07, выставленный в
+//     августе, получает «N/07-2026» из июльской серии;
+//   - без period (или с кривым) — серия текущего месяца;
 //   - номера последовательны и не переиспользуются (дыры от удалений — норма);
-//   - новый год — новая строка счётчика, старт с 1;
 //   - две «конкурентные» вставки акта/счёта на один (клиент, период) → одна строка;
 //   - insertBill с чужим периодом-дубликатом молча отклоняется (не роняет
 //     транзакцию saveClients).
@@ -29,33 +32,42 @@ afterAll(() => {
   try { db.prepare('DELETE FROM closing_documents WHERE client_id = ?').run(clientId); } catch (_) { /* cleanup best-effort */ }
   try { db.prepare('DELETE FROM bills WHERE client_id = ?').run(clientId); } catch (_) { /* cleanup best-effort */ }
   try { db.prepare('DELETE FROM clients WHERE id = ?').run(clientId); } catch (_) { /* cleanup best-effort */ }
-  try { db.prepare("DELETE FROM doc_numbering WHERE year = 2099").run(); } catch (_) { /* cleanup best-effort */ }
+  try { db.prepare("DELETE FROM doc_numbering_monthly WHERE ym LIKE '2099-%'").run(); } catch (_) { /* cleanup best-effort */ }
 });
 
-describe('doc_numbering — сквозной счётчик «№ N/YYYY»', () => {
-  it('выдаёт последовательные номера атомарно (без дублей)', () => {
-    const a = documentsDb.nextDocNumber();
-    const b = documentsDb.nextDocNumber();
-    const year = new Date().getFullYear();
-    expect(a.year).toBe(year);
-    expect(b.num).toBe(a.num + 1);
-    expect(a.label).toBe(`${a.num}/${year}`);
-    expect(b.label).toBe(`${b.num}/${year}`);
+describe('doc_numbering_monthly — счётчик «№ N/MM-YYYY» по месяцу периода', () => {
+  it('номер из серии месяца периода, а не даты создания', () => {
+    const a = documentsDb.nextDocNumber(new Date('2026-08-17T10:00:00Z'), '2099-07');
+    expect(a.label).toBe('1/07-2099');      // создан в августе 2026, относится к июлю 2099
+    expect(a.year).toBe(2099);
+    expect(a.month).toBe(7);
   });
 
-  it('новый год — новая серия с 1 (старые документы не перенумеровываются)', () => {
-    const future = documentsDb.nextDocNumber(new Date('2099-02-01T00:00:00Z'));
-    expect(future.year).toBe(2099);
-    expect(future.num).toBe(1);
-    expect(future.label).toBe('1/2099');
-    const future2 = documentsDb.nextDocNumber(new Date('2099-03-01T00:00:00Z'));
-    expect(future2.num).toBe(2);
+  it('выдаёт последовательные номера атомарно внутри месяца (без дублей)', () => {
+    const a = documentsDb.nextDocNumber(null, '2099-07');
+    const b = documentsDb.nextDocNumber(null, '2099-07');
+    expect(b.num).toBe(a.num + 1);
+    expect(b.label).toBe(`${b.num}/07-2099`);
+  });
+
+  it('каждый месяц — своя серия с 1', () => {
+    const aug = documentsDb.nextDocNumber(null, '2099-08');
+    expect(aug.label).toBe('1/08-2099');
+  });
+
+  it('без period — текущий месяц; кривой period — тоже текущий месяц', () => {
+    const d = new Date();
+    const mm = String(d.getMonth() + 1).padStart(2, '0');
+    const cur = documentsDb.nextDocNumber();
+    expect(cur.label).toBe(`${cur.num}/${mm}-${d.getFullYear()}`);
+    const bad = documentsDb.nextDocNumber(null, 'not-a-period');
+    expect(bad.label).toBe(`${bad.num}/${mm}-${d.getFullYear()}`);
   });
 
   it('счётчик монотонен: «удаление» документа не освобождает номер (дыра не переиспользуется)', () => {
-    const before = documentsDb.nextDocNumber();
+    const before = documentsDb.nextDocNumber(null, '2099-09');
     // Имитация удаления документа с этим номером: счётчик не откатывается.
-    const after = documentsDb.nextDocNumber();
+    const after = documentsDb.nextDocNumber(null, '2099-09');
     expect(after.num).toBe(before.num + 1);
   });
 });
