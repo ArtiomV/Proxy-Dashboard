@@ -133,4 +133,12 @@ describe('buildTochkaActBody — no negative position ever leaves the builder', 
     // positionNumber stays 1-based and contiguous after the fold.
     expect(positions.map(p => p.positionNumber)).toEqual(positions.map((_, i) => i + 1));
   });
+
+  it('проставляет basedOn из client.contractInfo; без contractInfo поле не передаётся', () => {
+    const items = [{ name: 'Услуги', quantity: 1, unit: 'шт', price: 100, amount: 100 }];
+    const withContract = buildTochkaActBody(cfg, { ...client, contractInfo: 'Договор № 33 от 17.04.2026' }, '2026-05', items, '1/05-2026');
+    expect(withContract.Data.Content.Act.basedOn).toBe('Договор № 33 от 17.04.2026');
+    const without = buildTochkaActBody(cfg, client, '2026-05', items, '2/05-2026');
+    expect('basedOn' in without.Data.Content.Act).toBe(false);
+  });
 });

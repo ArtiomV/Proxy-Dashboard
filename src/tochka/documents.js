@@ -276,7 +276,9 @@ function buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber) {
   }
 
   // Build Act object
-  // NB: поле "Основание" не поддерживается API Точки для закрывающих документов — заполняется вручную
+  // 2026-08-17: поле «Основание» (basedOn) API Точки ПОДДЕРЖИВАЕТ (ActModel,
+  // проверено живым запросом: create+delete 200). Проставляем из
+  // client.contractInfo («Договор № … от …»); пустое — не передаём.
   const act = {
     Positions: positions.map((item, idx) => ({
       positionName: serviceName,
@@ -291,6 +293,9 @@ function buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber) {
     number: actNumber,
     totalAmount: Math.round(totalAmount * 100) / 100
   };
+  if (client.contractInfo && String(client.contractInfo).trim()) {
+    act.basedOn = String(client.contractInfo).trim();
+  }
 
   return {
     Data: {
