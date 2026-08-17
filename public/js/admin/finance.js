@@ -142,11 +142,13 @@ function _renderFinanceDashboard(c, d) {
   rows.forEach(function(p, i) {
     var col = CHART_COLORS.clients[i % CHART_COLORS.clients.length];
     var pausedTag = p.paused ? pauseBadge() : '';
+    var _cl = (typeof currentData !== 'undefined' && currentData.clients || []).find(function(c) { return c.name === p.name; });
+    var blkTag = blockBadge(_cl);
     var dc = p.mrr_delta_pct == null ? 'var(--t3)' : p.mrr_delta_pct >= 0 ? 'var(--gr)' : 'var(--rd)';
     var ds = p.mrr_delta_pct == null ? '—' : (p.mrr_delta_pct >= 0 ? '+' : '') + p.mrr_delta_pct + '%';
     var pill = p.billingType === 'per_modem' ? '<span class="fx-pill pm">per_modem</span>' : '<span class="fx-pill pg">per_gb</span>';
     var balCol = p.balance < 0 ? 'var(--rd)' : 'var(--t1)';
-    h += '<tr><td><span class="fx-cn"><span class="fx-dot" style="background:' + col + '"></span>' + esc(p.name) + pausedTag + '</span></td>'
+    h += '<tr><td><span class="fx-cn"><span class="fx-dot" style="background:' + col + '"></span>' + esc(p.name) + blkTag + pausedTag + '</span></td>'
       + '<td>' + pill + '</td><td>' + money(p.mrr) + '</td>'
       + '<td style="color:' + dc + '">' + ds + '</td><td>' + (p.share_pct || 0) + '%</td>'
       + '<td style="color:' + balCol + '">' + money(p.balance) + '</td></tr>';

@@ -144,6 +144,10 @@ async function api(path, opts){
 function skelBars(n){var s='<div class="skel-bars">';for(var i=0;i<(n||24);i++)s+='<i></i>';return s+'</div>';}
 function skelHeat(cols,rows){var s='<div class="skel-heat">';for(var i=0;i<((cols||24)*(rows||3));i++)s+='<i></i>';return s+'</div>';}
 
+// Единая метка «БЛОК»: антифрод-блокировка аккаунта или автоблок портов за
+// долг. Ничего не заблокировано → пустая строка.
+function blockBadge(c){if(!c)return'';var t=c.blocked?'Аккаунт заблокирован (антифрод)':(c.debtBlocked?'Порты заблокированы за долг — доступ восстановится после оплаты':null);return t?' <span title="'+t+'" style="font-size:9px;font-weight:600;color:#fff;background:var(--danger);padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap">БЛОК</span>':'';}
+
 // Единая метка «пауза начислений» — перечёркнутый рубль в жёлтом бейдже
 // (title поясняет смысл). Один вид на всех страницах: финансовые таблицы,
 // дашборд. Карточные статус-пилюли рисуют тот же значок inline.

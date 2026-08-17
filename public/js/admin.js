@@ -3877,12 +3877,15 @@ function renderNewFinClients(){
   var h = '<table class="ztbl"><thead><tr><th>Клиент</th><th style="text-align:left">Тариф</th><th>Выручка 30д</th><th>Δ M/M</th><th>% выручки</th><th>Баланс</th></tr></thead><tbody>';
   rows.forEach(function(p){
     var pausedTag = p.paused?pauseBadge():'';
+    // Флаги блокировки — из карточки клиента (per_client их не несёт).
+    var _cl=(currentData.clients||[]).find(function(c){return c.name===p.name;});
+    var blkTag = blockBadge(_cl);
     var deltaCol = p.mrr_delta_pct==null?'var(--text-3)':p.mrr_delta_pct>=0?'var(--success)':'var(--danger)';
     var deltaStr = p.mrr_delta_pct==null?'—':((p.mrr_delta_pct>0?'+':'')+p.mrr_delta_pct+'%');
     var tariffStr = p.billingType==='per_modem'?(p.price+'₽/мес·мод'):(p.price+'₽/ГБ');
     var balCol = p.balance<0?'var(--danger)':'var(--text-1)';
     h += '<tr>' +
-      '<td style="font-weight:500;color:var(--text-1)">'+esc(p.name)+pausedTag+'</td>' +
+      '<td style="font-weight:500;color:var(--text-1)">'+esc(p.name)+blkTag+pausedTag+'</td>' +
       '<td style="text-align:left;color:var(--text-2)">'+tariffStr+'</td>' +
       '<td style="font-weight:600;color:var(--text-1)">'+_fmtRub(p.mrr)+'</td>' +
       '<td style="color:'+deltaCol+'">'+deltaStr+'</td>' +
@@ -3990,7 +3993,8 @@ function renderNewClientTable(d){
     var r = byName[nm], fin = finByName[nm] || {}, cl = clients.find(function(c){return c.name===nm;}) || {};
     return { name:nm, today:r.today, yest:r.yest, online:r.online, modems:r.modems,
       billingType:fin.billingType, price:fin.price, mrr:fin.mrr, delta:fin.mrr_delta_pct, share:fin.share_pct,
-      balance: fin.balance!=null?fin.balance:(cl.balance||0), paused:fin.paused };
+      balance: fin.balance!=null?fin.balance:(cl.balance||0), paused:fin.paused,
+      blocked:!!cl.blocked, debtBlocked:!!cl.debtBlocked };
   }).filter(function(r){ return r.modems>0; });   // только активные (с модемами); неактивных на дашборде не показываем
   if(!rows.length){ el.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-3);font-size:12px">Нет данных</div>'; return; }
   rows.sort(function(a,b){ return (b.mrr||0)-(a.mrr||0) || (b.today-a.today); });
@@ -4005,9 +4009,10 @@ function renderNewClientTable(d){
     var deltaStr = r.delta==null ? '—' : ((r.delta>0?'+':'')+r.delta+'%');
     var balCol = r.balance<0 ? 'var(--danger)' : (r.balance>0 ? 'var(--text-0)' : 'var(--text-3)');
     var paused = r.paused ? pauseBadge() : '';
+    var blk = blockBadge(r);
     var td = function(content,left){ return '<td'+(left?' style="text-align:left"':'')+'>'+content+'</td>'; };
     h += '<tr>';
-    h += td('<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:3px;height:16px;background:'+col+';border-radius:2px"></span><strong style="color:var(--text-0)">'+esc(r.name)+'</strong>'+paused+'</span>',1);
+    h += td('<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:3px;height:16px;background:'+col+';border-radius:2px"></span><strong style="color:var(--text-0)">'+esc(r.name)+'</strong>'+blk+paused+'</span>',1);
     h += td('<span style="font-weight:600;color:'+liveColor+'">'+r.online+'/'+r.modems+'</span>');
     h += td('<span style="font-family:var(--font-mono)">'+fmtGb(r.today)+'</span>');
     h += td('<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;'+(r.billingType==='per_gb'?'background:var(--accent-dim);color:var(--accent)':'background:var(--bg-2);color:var(--text-2)')+'">'+tariff+'</span>');
