@@ -519,7 +519,7 @@ r.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (r
   // doc_numbering_monthly — серия МЕСЯЦА ПЕРИОДА документа (единая для актов
   // и счетов). Номер расходуется даже при неудачном пуше в Точку — дыры не
   // переиспользуются.
-  const actNumber = documentsDb.nextDocNumber(null, period).label;
+  const actNumber = documentsDb.nextDocNumber(null, period, client.id).label;
   if (!tochkaConfig.jwt || !tochkaConfig.customerCode || !tochkaConfig.accountId) {
     tochkaStatus = 'Точка не настроена (нет JWT / customerCode / accountId)';
   } else if (!client.inn) {
@@ -752,7 +752,7 @@ r.post('/api/admin/tochka/generate_acts', authMiddleware, adminMiddleware, async
       // Try Tochka API
       let tochkaDocumentId = null;
       // B2 (Р15/Р23): сквозной номер «№ N/MM-YYYY» — серия месяца периода.
-      const actNumber = documentsDb.nextDocNumber(null, period).label;
+      const actNumber = documentsDb.nextDocNumber(null, period, client.id).label;
       if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
         try {
           const actData = _buildActBody(client, period, actItems, actNumber);
@@ -816,7 +816,7 @@ r.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (
   }
 
   // B2 (Р15/Р23): сквозной номер «№ N/MM-YYYY» — серия месяца периода.
-  const billNumber = documentsDb.nextDocNumber(null, billPeriod).label;
+  const billNumber = documentsDb.nextDocNumber(null, billPeriod, client.id).label;
   const billDate = now.toISOString().slice(0, 10);
 
   let tochkaBillId = null;
@@ -875,7 +875,7 @@ r.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, asyn
     if (!amount || amount <= 0) { skipped++; continue; }
 
     // B2 (Р15/Р23): сквозной номер «№ N/MM-YYYY» — серия месяца периода.
-    const billNumber = documentsDb.nextDocNumber(null, billPeriod).label;
+    const billNumber = documentsDb.nextDocNumber(null, billPeriod, client.id).label;
     let tochkaBillId = null;
 
     if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId) {

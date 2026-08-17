@@ -775,6 +775,12 @@
   },
   {
     "type": "table",
+    "name": "doc_numbering_client",
+    "tbl_name": "doc_numbering_client",
+    "sql": "CREATE TABLE doc_numbering_client ( client_id TEXT PRIMARY KEY, next_num INTEGER NOT NULL DEFAULT 1 )"
+  },
+  {
+    "type": "table",
     "name": "doc_numbering_monthly",
     "tbl_name": "doc_numbering_monthly",
     "sql": "CREATE TABLE doc_numbering_monthly ( ym TEXT PRIMARY KEY, next_num INTEGER NOT NULL DEFAULT 1 )"

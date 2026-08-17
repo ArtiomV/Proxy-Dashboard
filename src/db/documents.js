@@ -68,8 +68,11 @@ function init(db) {
   // индексу бросил бы исключение внутри saveClients().
   S.billByClientPeriod = db.prepare('SELECT id FROM bills WHERE client_id = ? AND period = ?');
 
-  // 2026-08-17: помесячная серия «№ N/MM-YYYY» (миграция 068). Годовая
-  // таблица doc_numbering больше не используется — остаётся как архив.
+  // 2026-08-17: поклиентская сквозная серия «№ NN/MM-YYYY» (миграция 069).
+  // Помесячная doc_numbering_monthly остаётся только как фолбэк для вызовов
+  // без clientId; годовая doc_numbering — архив.
+  S.docNumCInit = db.prepare('INSERT OR IGNORE INTO doc_numbering_client (client_id, next_num) VALUES (?, 1)');
+  S.docNumCBump = db.prepare('UPDATE doc_numbering_client SET next_num = next_num + 1 WHERE client_id = ? RETURNING next_num');
   S.docNumMInit = db.prepare('INSERT OR IGNORE INTO doc_numbering_monthly (ym, next_num) VALUES (?, 1)');
   S.docNumMBump = db.prepare('UPDATE doc_numbering_monthly SET next_num = next_num + 1 WHERE ym = ? RETURNING next_num');
 }
@@ -117,17 +120,20 @@ function insertBill(b, clientId) {
 function listBills(clientId) { return S.billsByClient.all(clientId); }
 function updateBillStatus(id, status) { return S.billUpdateStatus.run(status, id); }
 
-// B2 (Р15/Р23): атомарная выдача следующего сквозного номера. Единый счётчик
-// для актов и счетов вместе (одна серия на систему); номера удалённых
-// документов НЕ переиспользуются (дыры — норма).
+// B2 (Р15/Р23): атомарная выдача следующего номера. Единый счётчик для актов
+// и счетов вместе; номера удалённых документов НЕ переиспользуются (дыры —
+// норма).
 //
-// 2026-08-17 — новая модель: «№ N/MM-YYYY», счётчик привязан к МЕСЯЦУ
-// ПЕРИОДА документа (period 'YYYY-MM'), а не к дате создания: акт за июль,
-// выставленный в августе, получает номер из июльской серии. Если period не
-// передан/невалиден — берётся текущий месяц. INSERT OR IGNORE + UPDATE ...
-// RETURNING в одной транзакции — гонка крон+ручная генерация не может выдать
-// один номер дважды. `now` — injectable для тестов.
-function nextDocNumber(now, period) {
+// 2026-08-17 — поклиентская модель: «№ NN/MM-YYYY». NN — сквозной номер
+// документа КЛИЕНТА (непрерывный с начала работы, не сбрасывается по месяцам;
+// акты и счета делят одну серию), MM-YYYY — месяц ПЕРИОДА документа: по
+// номеру видна сквозная история клиента, по суффиксу — за какой месяц
+// документ. Если period не передан/невалиден — текущий месяц. Если clientId
+// не передан (не должно происходить в проде) — фолбэк на старую помесячную
+// системную серию. INSERT OR IGNORE + UPDATE ... RETURNING в одной
+// транзакции — гонка крон+ручная генерация не выдаст один номер дважды.
+// `now` — injectable для тестов.
+function nextDocNumber(now, period, clientId) {
   let year, month;   // month: 1..12
   const pm = /^(\d{4})-(\d{2})/.exec(String(period || ''));
   if (pm && +pm[2] >= 1 && +pm[2] <= 12) {
@@ -136,13 +142,19 @@ function nextDocNumber(now, period) {
     const d = now ? new Date(now) : new Date();
     year = d.getFullYear(); month = d.getMonth() + 1;
   }
-  const ym = `${year}-${String(month).padStart(2, '0')}`;
+  const suffix = `${String(month).padStart(2, '0')}-${year}`;
   let num;
   _db.transaction(() => {
-    S.docNumMInit.run(ym);
-    num = S.docNumMBump.get(ym).next_num - 1;
+    if (clientId) {
+      S.docNumCInit.run(clientId);
+      num = S.docNumCBump.get(clientId).next_num - 1;
+    } else {
+      const ym = `${year}-${String(month).padStart(2, '0')}`;
+      S.docNumMInit.run(ym);
+      num = S.docNumMBump.get(ym).next_num - 1;
+    }
   })();
-  return { num, year, month, label: `${num}/${ym.slice(5)}-${year}` };
+  return { num, year, month, label: `${String(num).padStart(2, '0')}/${suffix}` };
 }
 
 module.exports = {

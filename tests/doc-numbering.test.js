@@ -1,6 +1,8 @@
-// B2 (Р15/Р23) + 2026-08-17: помесячная сквозная нумерация «№ N/MM-YYYY» —
-// атомарный счётчик doc_numbering_monthly (серия месяца ПЕРИОДА документа,
-// единая для актов и счетов) + анти-дабл гейты UNIQUE(client_id, period[, type]).
+// B2 (Р15/Р23) + 2026-08-17: поклиентская сквозная нумерация «№ NN/MM-YYYY» —
+// NN из атомарного счётчика doc_numbering_client (непрерывный с начала работы
+// с клиентом, единый для актов и счетов), MM-YYYY — месяц ПЕРИОДА документа.
+// Без clientId — фолбэк на помесячную системную серию doc_numbering_monthly.
+// + анти-дабл гейты UNIQUE(client_id, period[, type]).
 //
 // Контракт:
 //   - номер относится к месяцу периода: акт за 2026-07, выставленный в
@@ -33,41 +35,43 @@ afterAll(() => {
   try { db.prepare('DELETE FROM bills WHERE client_id = ?').run(clientId); } catch (_) { /* cleanup best-effort */ }
   try { db.prepare('DELETE FROM clients WHERE id = ?').run(clientId); } catch (_) { /* cleanup best-effort */ }
   try { db.prepare("DELETE FROM doc_numbering_monthly WHERE ym LIKE '2099-%'").run(); } catch (_) { /* cleanup best-effort */ }
+  try { db.prepare("DELETE FROM doc_numbering_client WHERE client_id LIKE 'docnum_seq_%'").run(); } catch (_) { /* cleanup best-effort */ }
 });
 
-describe('doc_numbering_monthly — счётчик «№ N/MM-YYYY» по месяцу периода', () => {
-  it('номер из серии месяца периода, а не даты создания', () => {
-    const a = documentsDb.nextDocNumber(new Date('2026-08-17T10:00:00Z'), '2099-07');
-    expect(a.label).toBe('1/07-2099');      // создан в августе 2026, относится к июлю 2099
-    expect(a.year).toBe(2099);
-    expect(a.month).toBe(7);
+describe('doc_numbering_client — поклиентский счётчик «№ NN/MM-YYYY»', () => {
+  const cidA = 'docnum_seq_A_' + crypto.randomBytes(3).toString('hex');
+  const cidB = 'docnum_seq_B_' + crypto.randomBytes(3).toString('hex');
+
+  it('NN — сквозной номер клиента (не сбрасывается по месяцам), суффикс — месяц периода', () => {
+    const a = documentsDb.nextDocNumber(new Date('2026-08-17T10:00:00Z'), '2099-07', cidA);
+    expect(a.label).toBe('01/07-2099');      // первый документ клиента, период июль 2099
+    const b = documentsDb.nextDocNumber(null, '2099-08', cidA);
+    expect(b.label).toBe('02/08-2099');      // второй документ клиента, период август
   });
 
-  it('выдаёт последовательные номера атомарно внутри месяца (без дублей)', () => {
-    const a = documentsDb.nextDocNumber(null, '2099-07');
-    const b = documentsDb.nextDocNumber(null, '2099-07');
-    expect(b.num).toBe(a.num + 1);
-    expect(b.label).toBe(`${b.num}/07-2099`);
+  it('серия независима между клиентами', () => {
+    const a = documentsDb.nextDocNumber(null, '2099-08', cidB);
+    expect(a.label).toBe('01/08-2099');      // у другого клиента — свой счётчик с 01
   });
 
-  it('каждый месяц — своя серия с 1', () => {
-    const aug = documentsDb.nextDocNumber(null, '2099-08');
-    expect(aug.label).toBe('1/08-2099');
+  it('без clientId — фолбэк на помесячную системную серию', () => {
+    const sys = documentsDb.nextDocNumber(null, '2099-10');
+    expect(sys.label).toMatch(/^\d{2}\/10-2099$/);
   });
 
   it('без period — текущий месяц; кривой period — тоже текущий месяц', () => {
     const d = new Date();
     const mm = String(d.getMonth() + 1).padStart(2, '0');
-    const cur = documentsDb.nextDocNumber();
-    expect(cur.label).toBe(`${cur.num}/${mm}-${d.getFullYear()}`);
-    const bad = documentsDb.nextDocNumber(null, 'not-a-period');
-    expect(bad.label).toBe(`${bad.num}/${mm}-${d.getFullYear()}`);
+    const cur = documentsDb.nextDocNumber(null, null, cidA);
+    expect(cur.label).toBe(`${String(cur.num).padStart(2, '0')}/${mm}-${d.getFullYear()}`);
+    const bad = documentsDb.nextDocNumber(null, 'not-a-period', cidA);
+    expect(bad.label).toBe(`${String(bad.num).padStart(2, '0')}/${mm}-${d.getFullYear()}`);
   });
 
   it('счётчик монотонен: «удаление» документа не освобождает номер (дыра не переиспользуется)', () => {
-    const before = documentsDb.nextDocNumber(null, '2099-09');
+    const before = documentsDb.nextDocNumber(null, '2099-09', cidA);
     // Имитация удаления документа с этим номером: счётчик не откатывается.
-    const after = documentsDb.nextDocNumber(null, '2099-09');
+    const after = documentsDb.nextDocNumber(null, '2099-09', cidA);
     expect(after.num).toBe(before.num + 1);
   });
 });

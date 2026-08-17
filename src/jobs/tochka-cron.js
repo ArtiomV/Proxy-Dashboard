@@ -192,7 +192,7 @@ function create(deps) {
         // (серия месяца периода; единая для актов и счетов). In-memory
         // проверка «акт уже есть» выше — fast-path; истина — UNIQUE-индекс +
         // INSERT OR IGNORE.
-        const actNumber = documentsDb.nextDocNumber(null, period).label;
+        const actNumber = documentsDb.nextDocNumber(null, period, client.id).label;
         if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
           try {
             const actData = tochkaDocs.buildTochkaActBody(tochkaConfig, client, period, actItems, actNumber);
@@ -275,7 +275,7 @@ function create(deps) {
         }
 
         // B2 (Р15/Р23): сквозной номер «№ N/MM-YYYY» — серия месяца периода.
-        const billNumber = documentsDb.nextDocNumber(null, currentPeriod).label;
+        const billNumber = documentsDb.nextDocNumber(null, currentPeriod, client.id).label;
         const billDate = `${currentPeriod}-01`;
 
         let tochkaBillId = null;

@@ -173,6 +173,13 @@ CREATE TABLE IF NOT EXISTS doc_numbering_monthly (
   next_num INTEGER NOT NULL DEFAULT 1
 );
 
+-- 2026-08-17 (миграция 069): поклиентская сквозная серия «№ NN/MM-YYYY» —
+-- NN непрерывный с начала работы с клиентом, MM-YYYY — месяц периода.
+CREATE TABLE IF NOT EXISTS doc_numbering_client (
+  client_id TEXT PRIMARY KEY,
+  next_num INTEGER NOT NULL DEFAULT 1
+);
+
 -- Bills (replaces client.bills[] array)
 CREATE TABLE IF NOT EXISTS bills (
   id              TEXT PRIMARY KEY,
