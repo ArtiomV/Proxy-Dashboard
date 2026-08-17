@@ -144,6 +144,21 @@ async function api(path, opts){
 function skelBars(n){var s='<div class="skel-bars">';for(var i=0;i<(n||24);i++)s+='<i></i>';return s+'</div>';}
 function skelHeat(cols,rows){var s='<div class="skel-heat">';for(var i=0;i<((cols||24)*(rows||3));i++)s+='<i></i>';return s+'</div>';}
 
+// Единая метка «пауза начислений» — перечёркнутый рубль в жёлтом бейдже
+// (title поясняет смысл). Один вид на всех страницах: финансовые таблицы,
+// дашборд. Карточные статус-пилюли рисуют тот же значок inline.
+function pauseBadge(){return ' <span title="Пауза начислений — списания остановлены" style="display:inline-flex;align-items:center;color:#000;background:var(--warning);padding:3px 7px;border-radius:6px;white-space:nowrap">'+icon('moneyOff',11)+'</span>';}
+
+// Плавающие тултипы графиков/хитмапов (класс-маркер float-tt) живут в
+// position:fixed поверх страницы: при прокрутке mouseleave по исходной
+// ячейке/канвасу не срабатывает, и попап «зависает» на экране. Скрываем все
+// на любом скролле (capture — ловим и скролл вложенных контейнеров).
+if (typeof window !== 'undefined') {
+  window.addEventListener('scroll', function () {
+    document.querySelectorAll('.float-tt').forEach(function (t) { t.style.display = 'none'; t.style.opacity = '0'; });
+  }, true);
+}
+
 // CommonJS export so the same source can be unit-tested in Node without a DOM.
 // Browsers see the `if (typeof module !== 'undefined')` guard as false and
 // continue with the bare function declarations above.

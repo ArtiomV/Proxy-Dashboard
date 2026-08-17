@@ -6,7 +6,7 @@ function chartExtTooltip(context){
   var tt=context.tooltip;
   var el=document.getElementById('chartExtTT');
   if(!el){
-    el=document.createElement('div');el.id='chartExtTT';
+    el=document.createElement('div');el.id='chartExtTT';el.className='float-tt';
     el.style.cssText='position:fixed;z-index:10000;pointer-events:none;background:#fff;border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:150px;box-shadow:0 4px 20px rgba(0,0,0,0.10);opacity:0;transition:opacity .12s ease;font-family:Inter,-apple-system,sans-serif';
     document.body.appendChild(el);
   }
@@ -266,7 +266,7 @@ function onTrendLeave(){
 }
 function showFloatTooltip(id,event,lines){
   var tt=document.getElementById(id);
-  if(!tt){tt=document.createElement('div');tt.id=id;tt.style.cssText='position:fixed;z-index:9999;background:var(--bg-0);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:11px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:130px;line-height:1.6';document.body.appendChild(tt);}
+  if(!tt){tt=document.createElement('div');tt.id=id;tt.className='float-tt';tt.style.cssText='position:fixed;z-index:9999;background:var(--bg-0);border:1px solid var(--border);border-radius:6px;padding:8px 10px;font-size:11px;pointer-events:none;box-shadow:0 4px 12px rgba(0,0,0,.15);min-width:130px;line-height:1.6';document.body.appendChild(tt);}
   tt.innerHTML=lines.join('<br>');tt.style.display='block';
   tt.style.left='-9999px';tt.style.top='-9999px';
   var tw=tt.offsetWidth||200,th=tt.offsetHeight||100;
@@ -509,7 +509,7 @@ function showHeatTT(di,hr,event,cell,ctx){
   var hrEnd=String((hr+1)%24).padStart(2,'0');
 
   var tt=document.getElementById(ctx.ttId);
-  if(!tt){tt=document.createElement('div');tt.id=ctx.ttId;tt.style.cssText='position:fixed;z-index:9999;pointer-events:none;background:#fff;border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:170px;box-shadow:0 4px 20px rgba(0,0,0,0.09)';document.body.appendChild(tt);}
+  if(!tt){tt=document.createElement('div');tt.id=ctx.ttId;tt.className='float-tt';tt.style.cssText='position:fixed;z-index:9999;pointer-events:none;background:#fff;border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:170px;box-shadow:0 4px 20px rgba(0,0,0,0.09)';document.body.appendChild(tt);}
 
   if(val<0.01){
     tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2,'0')+':00–'+hrEnd+':00</div>'

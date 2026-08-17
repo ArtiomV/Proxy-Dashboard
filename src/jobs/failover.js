@@ -336,11 +336,15 @@ async function failoverModem(dead, reason, opts) {
   const usedSpares = opts.usedSpares || new Set();
   usedSpares.add(dead.imei);
   const results = [];
+  // Алерты агрегируются ДО конца цикла по портам и уходят ОДНИМ сообщением на
+  // модем: у модема может быть несколько клиентских портов, иначе оператор
+  // получает пачку одинаковых пингов за один failover.
+  const moved = [], noSpare = [], failed = [];
   for (const dp of deadPorts) {
     const spare = findSpareFrom(dead.server, allData, usedSpares);
     if (!spare) {
       _record({ server: dead.server, clientPortName: dp.portName, deadImei: dead.imei, deadNick: dead.nick, deadPortId: dp.portId, reason, result: 'skipped_no_spare' });
-      try { deps.alerts.trigger('failover_no_spare', { server: dead.server, client: dp.portName, nick: dead.nick }); } catch (_) {}
+      noSpare.push(dp.portName);
       results.push({ portId: dp.portId, client: dp.portName, result: 'no_spare' });
       continue;
     }
@@ -361,13 +365,25 @@ async function failoverModem(dead, reason, opts) {
       _markSpareUsed(spare.imei);   // cross-pass guard: don't reuse until snapshot reflects the binding
       _record({ server: dead.server, clientPortName: dp.portName, deadImei: dead.imei, deadNick: dead.nick, deadPortId: dp.portId, spareImei: spare.imei, spareNick: spare.nick, reason, result: 'ok' });
       deps.logActivity('recovery', 'warn', 'failover', dead.nick, `Порт ${dp.portName} перенесён ${dead.nick}→${spare.nick} (${reason})`, { server: dead.server, portId: dp.portId, spare: spare.nick, reason });
-      try { deps.alerts.trigger('failover_done', { server: dead.server, client: dp.portName, deadNick: dead.nick, spareNick: spare.nick, reason }); } catch (_) {}
+      moved.push({ client: dp.portName, spareNick: spare.nick });
       results.push({ portId: dp.portId, client: dp.portName, result: 'ok', spare: spare.nick });
     } catch (e) {
       _record({ server: dead.server, clientPortName: dp.portName, deadImei: dead.imei, deadNick: dead.nick, deadPortId: dp.portId, spareImei: spare.imei, spareNick: spare.nick, reason, result: 'failed', error: e.message });
-      try { deps.alerts.trigger('failover_failed', { server: dead.server, client: dp.portName, error: e.message }); } catch (_) {}
+      failed.push({ client: dp.portName, error: e.message });
       results.push({ portId: dp.portId, client: dp.portName, result: 'failed', error: e.message });
     }
+  }
+  // Одно агрегированное уведомление на модем по каждому итогу. Кулдауны правил
+  // (alerts.js) дают повтор раз в 15 мин, пока модем мёртв и порты не перенесены
+  // (no_spare/failed не выставляют cooldown движка — скан дёргает их каждый тик).
+  if (moved.length) {
+    try { deps.alerts.trigger('failover_done', { server: dead.server, deadNick: dead.nick, reason, moves: moved, client: moved[0].client, spareNick: moved[0].spareNick }); } catch (_) { /* alert best-effort */ }
+  }
+  if (noSpare.length) {
+    try { deps.alerts.trigger('failover_no_spare', { server: dead.server, nick: dead.nick, clients: noSpare, client: noSpare[0] }); } catch (_) { /* alert best-effort */ }
+  }
+  if (failed.length) {
+    try { deps.alerts.trigger('failover_failed', { server: dead.server, clients: failed, client: failed[0].client, error: failed[0].error }); } catch (_) { /* alert best-effort */ }
   }
   try { deps.proxySmart.invalidateCache(); } catch (_) {}
   return { ok: true, results };

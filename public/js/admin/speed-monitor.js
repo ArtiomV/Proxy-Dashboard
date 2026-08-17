@@ -71,22 +71,19 @@ function loadSpeedMonitor(force) {
     // ↓/↑ за наведённый час, взвешенные по числу успешных замеров. dl и ul
     // копим с раздельными счётчиками — если у оператора есть только одно
     // направление, в попапе покажем то, что есть.
+    // Храним ПОЧАСОВЫЕ СТРОКИ ПО НИКАМ (не агрегат): попап агрегирует их
+    // на лету с учётом видимости серий — модем, скрытый в легенде графика,
+    // исчезает и из разбивки попапа (иначе «скрыли в легенде — в попапе видно»).
     var nickLoc = {}, nickOp = {};
     modems.forEach(function (m) {
       nickLoc[m.nick] = m.address || m.location || m.server || '—';
       nickOp[m.nick] = m.operator || 'оператор?';
     });
-    var hourLocOps = {};   // hour_msk → loc → op → { dl, nd, ul, nu } (суммы)
+    var hourNickRows = {};   // hour_msk → [ {nick, avg_dl, avg_ul, ok_count} ]
     rows.forEach(function (r) {
       if (!(r.ok_count > 0)) return;
-      var loc = nickLoc[r.nick];
-      if (!loc) return;
-      var op = nickOp[r.nick] || 'оператор?';
-      var H = hourLocOps[r.hour_msk] || (hourLocOps[r.hour_msk] = {});
-      var L = H[loc] || (H[loc] = {});
-      var O = L[op] || (L[op] = { dl: 0, nd: 0, ul: 0, nu: 0 });
-      if (r.avg_dl != null) { O.dl += r.avg_dl * r.ok_count; O.nd += r.ok_count; }
-      if (r.avg_ul != null) { O.ul += r.avg_ul * r.ok_count; O.nu += r.ok_count; }
+      if (!nickLoc[r.nick]) return;
+      (hourNickRows[r.hour_msk] || (hourNickRows[r.hour_msk] = [])).push(r);
     });
 
     if (!rows.length) {
@@ -121,6 +118,7 @@ function loadSpeedMonitor(force) {
       });
       return {
         label: _speedMonLabel(nick, modems),
+        _nick: nick,   // сырой ник — попап фильтрует разбивку по видимым сериям
         data: hours.map(function (h) { return byHour[h] != null ? byHour[h] : null; }),
         borderColor: color,
         backgroundColor: color,
@@ -156,6 +154,7 @@ function loadSpeedMonitor(force) {
               if (!ttEl) {
                 ttEl = document.createElement('div');
                 ttEl.id = 'speedMonTT';
+                ttEl.className = 'float-tt';
                 ttEl.style.cssText = 'position:fixed;z-index:10000;pointer-events:none;background:#fff;'
                   + 'border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:170px;'
                   + 'box-shadow:0 4px 20px rgba(0,0,0,0.09);opacity:0;transition:opacity .12s ease;'
@@ -167,7 +166,24 @@ function loadSpeedMonitor(force) {
                 ttEl.style.opacity = '0';
                 return;
               }
-              var H = hourLocOps[hours[tt.dataPoints[0].dataIndex]];
+              // Агрегируем разбивку ТОЛЬКО по видимым сериям: скрытый в легенде
+              // модем исключается и из попапа (локации/операторы без видимых
+              // модемов в этот час не показываем вовсе).
+              var visibleNicks = {};
+              var chart = context.chart;
+              (chart.data.datasets || []).forEach(function (ds, i) {
+                if (chart.isDatasetVisible(i) && ds._nick) visibleNicks[ds._nick] = true;
+              });
+              var H = null;
+              (hourNickRows[hours[tt.dataPoints[0].dataIndex]] || []).forEach(function (r) {
+                if (!visibleNicks[r.nick]) return;
+                var loc = nickLoc[r.nick], op = nickOp[r.nick] || 'оператор?';
+                if (!H) H = {};
+                var L = H[loc] || (H[loc] = {});
+                var O = L[op] || (L[op] = { dl: 0, nd: 0, ul: 0, nu: 0 });
+                if (r.avg_dl != null) { O.dl += r.avg_dl * r.ok_count; O.nd += r.ok_count; }
+                if (r.avg_ul != null) { O.ul += r.avg_ul * r.ok_count; O.nu += r.ok_count; }
+              });
               var h = '<div style="font-size:11px;color:#9b9b98;margin-bottom:6px">'
                 + esc((tt.title && tt.title[0]) || '') + '</div>';
               if (H) {

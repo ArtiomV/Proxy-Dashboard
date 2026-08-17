@@ -210,29 +210,46 @@ const RULES = {
     render: p => `🛑 <b>Recovery исчерпан</b>\n\n<b>${esc(p.nick)}</b> (${p.server}) не оживает после ${p.attempts} USB-resets. Нужен ручной hard-reset.`,
   },
   // ── Stage 19 — failover ──────────────────────────────────────
+  // Алерты агрегированы по модему (failover.js шлёт ОДИН trigger на весь
+  // набор портов): p.moves / p.clients — массивы; одиночные client/spareNick
+  // оставлены для обратной совместимости (ручные вызовы, старые тесты).
   failover_done: {
     title: 'Failover: клиент перенесён на спейр',
     priority: 'important',
     defaultOn: true,
     cooldownSec: 30,
-    dedupeKey: p => 'fdone_' + (p.server || '') + '_' + (p.client || '') + '_' + (p.spareNick || ''),
-    render: p => `🔀 <b>Failover выполнен</b>\n\nКлиент <b>${esc(p.client || '?')}</b> перенесён с модема <b>${esc(p.deadNick || '?')}</b> на <b>${esc(p.spareNick || '?')}</b> (${esc(p.server || '?')}).\nПричина: ${esc(p.reason || '?')}. Строка подключения сохранена, внешний IP сменился.`,
+    dedupeKey: p => 'fdone_' + (p.server || '') + '_' + (p.deadNick || '') + '_' + (p.client || ''),
+    render: p => {
+      const lines = Array.isArray(p.moves) && p.moves.length
+        ? p.moves.map(m => `• <b>${esc(m.client)}</b> → <b>${esc(m.spareNick)}</b>`).join('\n')
+        : `Клиент <b>${esc(p.client || '?')}</b> перенесён на <b>${esc(p.spareNick || '?')}</b>.`;
+      const n = Array.isArray(p.moves) && p.moves.length ? p.moves.length : 1;
+      return `🔀 <b>Failover выполнен</b>\n\nМодем <b>${esc(p.deadNick || '?')}</b> (${esc(p.server || '?')}) — перенесено портов: <b>${n}</b>.\n${lines}\nПричина: ${esc(p.reason || '?')}. Строки подключения сохранены, внешний IP сменился.`;
+    },
   },
   failover_no_spare: {
     title: 'Failover: нет здорового спейра',
     priority: 'critical',
     defaultOn: true,
-    cooldownSec: 3600,
-    dedupeKey: p => 'fnospare_' + (p.server || '') + '_' + (p.client || ''),
-    render: p => `🔴 <b>Failover невозможен — нет спейра</b>\n\nМодем <b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}) умер, клиент <b>${esc(p.client || '?')}</b> остался без рабочего прокси. На сервере нет здорового свободного модема для замены.`,
+    cooldownSec: 900,   // пока модем мёртв и не перенесён — напоминаем раз в 15 мин
+    dedupeKey: p => 'fnospare_' + (p.server || '') + '_' + (p.nick || ''),
+    render: p => {
+      const clients = Array.isArray(p.clients) && p.clients.length ? p.clients : [p.client || '?'];
+      return `🔴 <b>Failover невозможен — нет спейра</b>\n\nМодем <b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}) умер, без рабочего прокси остались: ${clients.map(c => `<b>${esc(c)}</b>`).join(', ')}.\nНа сервере нет здорового свободного модема для замены. Повторю через 15 мин, если не решится.`;
+    },
   },
   failover_failed: {
     title: 'Failover: ошибка переноса',
     priority: 'critical',
     defaultOn: true,
-    cooldownSec: 600,
+    cooldownSec: 900,   // 15 мин — авария продолжается, но спамить не надо
     dedupeKey: p => 'ffail_' + (p.server || '') + '_' + (p.client || ''),
-    render: p => `🔴 <b>Failover не удался</b>\n\nКлиент <b>${esc(p.client || '?')}</b> (${esc(p.server || '?')}): ${esc(p.error || 'неизвестная ошибка')}.\nНужно вмешаться вручную.`,
+    render: p => {
+      const lines = Array.isArray(p.clients) && p.clients.length
+        ? p.clients.map(c => `• <b>${esc(c.client)}</b>: ${esc(c.error || '?')}`).join('\n')
+        : `Клиент <b>${esc(p.client || '?')}</b>: ${esc(p.error || 'неизвестная ошибка')}.`;
+      return `🔴 <b>Failover не удался</b>\n\n${esc(p.server || '?')}:\n${lines}\nНужно вмешаться вручную.`;
+    },
   },
   // ── ProxySmart SIM / health signals (Batch 1) ────────────────
   // Fed by the notify-collect pass from the persisted modem_meta signal

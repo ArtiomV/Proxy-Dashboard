@@ -1639,7 +1639,10 @@ function renderClients(){
     var balWarn='';
     var color=colors[(count-1)%colors.length];
     var isInactive=!modems.length;
-    var _stp=balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?['ПАУЗА','var(--warning)','#000']:(isInactive?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff']));
+    // Метка «пауза начислений» — перечёркнутый рубль (title поясняет), а не
+    // текст ПАУЗА; БЛОК (антифрод) — приоритетнее должника.
+    var _pauseMark='<span title="Пауза начислений — списания остановлены" style="display:inline-flex;align-items:center">'+icon('moneyOff',11)+'</span>';
+    var _stp=c.blocked?['БЛОК','var(--danger)','#fff']:(balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?[_pauseMark,'var(--warning)','#000']:(isInactive?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff'])));
     var stPill='<span style="font-size:9px;font-weight:600;color:'+_stp[2]+';background:'+_stp[1]+';padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap">'+_stp[0]+'</span>';
     h+='<div class="client-card'+(isInactive?' client-card--inactive':'')+'">';
     // Header / balance / 2x2 stats / actions — mockup card layout
@@ -3871,7 +3874,7 @@ function renderNewFinClients(){
   if(!rows.length){ el.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:8px">Нет данных</div>'; return; }
   var h = '<table class="ztbl"><thead><tr><th>Клиент</th><th style="text-align:left">Тариф</th><th>Выручка 30д</th><th>Δ M/M</th><th>% выручки</th><th>Баланс</th></tr></thead><tbody>';
   rows.forEach(function(p){
-    var pausedTag = p.paused?' <span style="font-size:9px;font-weight:600;color:#000;background:var(--warning);padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap">ПАУЗА</span>':'';
+    var pausedTag = p.paused?pauseBadge():'';
     var deltaCol = p.mrr_delta_pct==null?'var(--text-3)':p.mrr_delta_pct>=0?'var(--success)':'var(--danger)';
     var deltaStr = p.mrr_delta_pct==null?'—':((p.mrr_delta_pct>0?'+':'')+p.mrr_delta_pct+'%');
     var tariffStr = p.billingType==='per_modem'?(p.price+'₽/мес·мод'):(p.price+'₽/ГБ');
@@ -3999,7 +4002,7 @@ function renderNewClientTable(d){
     var deltaCol = r.delta==null ? 'var(--text-3)' : (r.delta>=0 ? 'var(--success)' : 'var(--danger)');
     var deltaStr = r.delta==null ? '—' : ((r.delta>0?'+':'')+r.delta+'%');
     var balCol = r.balance<0 ? 'var(--danger)' : (r.balance>0 ? 'var(--text-0)' : 'var(--text-3)');
-    var paused = r.paused ? ' <span style="font-size:9px;font-weight:600;color:#000;background:var(--warning);padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap">ПАУЗА</span>' : '';
+    var paused = r.paused ? pauseBadge() : '';
     var td = function(content,left){ return '<td'+(left?' style="text-align:left"':'')+'>'+content+'</td>'; };
     h += '<tr>';
     h += td('<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:3px;height:16px;background:'+col+';border-radius:2px"></span><strong style="color:var(--text-0)">'+esc(r.name)+'</strong>'+paused+'</span>',1);
@@ -4497,8 +4500,8 @@ function renderClientDetail(id, tab){
   var ini=((ws.length>=2?(ws[0].charAt(0)+ws[1].charAt(0)):nm.slice(0,2)).toUpperCase())||'?';
   document.getElementById('cdAvatar').textContent=ini;
   document.getElementById('cdName').textContent=c.name||'';
-  var st=balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?['ПАУЗА','var(--warning)','#000']:(mc===0?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff']));
-  var pl=document.getElementById('cdPill');pl.textContent=st[0];pl.style.background=st[1];pl.style.color=st[2];
+  var st=c.blocked?['БЛОК','var(--danger)','#fff']:(balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?['<span title="Пауза начислений — списания остановлены" style="display:inline-flex;align-items:center">'+icon('moneyOff',11)+'</span>','var(--warning)','#000']:(mc===0?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff'])));
+  var pl=document.getElementById('cdPill');pl.innerHTML=st[0];pl.style.background=st[1];pl.style.color=st[2];
   var charge=Math.round(((currentData.clientMonthCharges||{})[id]||0));
   var gb=Math.round(((currentData.clientMonthGb||{})[id]||0)*10)/10;
   var be=document.getElementById('cdKpiBal');be.textContent=Math.round(balance).toLocaleString('ru-RU');be.style.color=balance<0?'var(--danger)':(balance>0?'var(--success)':'var(--text-0)');
