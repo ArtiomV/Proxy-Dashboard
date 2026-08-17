@@ -155,12 +155,28 @@ function pauseBadge(){return ' <span title="Пауза начислений — 
 
 // Плавающие тултипы графиков/хитмапов (класс-маркер float-tt) живут в
 // position:fixed поверх страницы: при прокрутке mouseleave по исходной
-// ячейке/канвасу не срабатывает, и попап «зависает» на экране. Скрываем все
-// на любом скролле (capture — ловим и скролл вложенных контейнеров).
+// ячейке/канвасу не срабатывает, и попап «зависает» на экране.
+// Скрываем их так:
+//  - wheel / touchmove (намеренная прокрутка) — всегда;
+//  - scroll — только если курсор НЕ над источником попапа (t._anchor).
+//    Иначе инерционный докрут тачпада (scroll-события без wheel) убивал
+//    попап, показанный под уже неподвижной мышью, — «попап не появляется».
+// Источник привязывается при показе: t._anchor = canvas/ячейка.
 if (typeof window !== 'undefined') {
-  window.addEventListener('scroll', function () {
-    document.querySelectorAll('.float-tt').forEach(function (t) { t.style.display = 'none'; t.style.opacity = '0'; });
-  }, true);
+  var _fttMouse = { x: -1, y: -1 };
+  document.addEventListener('mousemove', function (e) { _fttMouse.x = e.clientX; _fttMouse.y = e.clientY; }, true);
+  function _hideFloatTTs(force) {
+    document.querySelectorAll('.float-tt').forEach(function (t) {
+      if (!force && t._anchor) {
+        var under = document.elementFromPoint(_fttMouse.x, _fttMouse.y);
+        if (under && (under === t._anchor || (t._anchor.contains && t._anchor.contains(under)))) return;
+      }
+      t.style.display = 'none'; t.style.opacity = '0';
+    });
+  }
+  window.addEventListener('wheel', function () { _hideFloatTTs(true); }, { passive: true, capture: true });
+  window.addEventListener('touchmove', function () { _hideFloatTTs(true); }, { passive: true, capture: true });
+  window.addEventListener('scroll', function () { _hideFloatTTs(false); }, true);
 }
 
 // CommonJS export so the same source can be unit-tested in Node without a DOM.

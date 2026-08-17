@@ -211,6 +211,7 @@ function loadSpeedMonitor(force) {
               ttEl.innerHTML = h;
               // Позиционирование — как в chartExtTooltip: от каретки, с клампом к окну.
               var rect = context.chart.canvas.getBoundingClientRect();
+              ttEl._anchor = context.chart.canvas;   // для scroll-hide (см. utils.js)
               ttEl.style.opacity = '1';
               var w = ttEl.offsetWidth, ht = ttEl.offsetHeight;
               var x = rect.left + tt.caretX + 14, y = rect.top + tt.caretY - 10;
