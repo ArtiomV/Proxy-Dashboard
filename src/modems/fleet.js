@@ -214,12 +214,21 @@ function computeClientWorking(knownModems, fleet, opts) {
   opts = opts || {};
   const now = opts.now || Date.now();
   const retainMs = opts.retainMs || 24 * 3600 * 1000;   // same 24h roster retention as /api/admin/data
+  // Порт, которого нет на боксе дольше missingMs (клиент отвязал/удалил его
+  // в ProxySmart), больше НЕ «в работе» у клиента — даже если сам модем
+  // физически онлайн (кейс 17.08: СРТ удалил 10 портов MD3_*, модемы стоят
+  // в хабе и светятся online → счётчик показывал 33/33 вместо 23/33).
+  // Порог = fleet disconnectedMs, чтобы одно-опросный флап list_ports_json
+  // не дёргал счётчик (на том же пороге держится RECONCILE-guard в
+  // updateKnownModems, который сносит запись только через 7 дней).
+  const missingMs = opts.missingMs != null ? opts.missingMs : 10 * 60 * 1000;
   const active = new Set((fleet && fleet.activeKeys) || []);
   const dark = new Set(((fleet && fleet.disconnectedList) || []).map(o => o.key));
   const out = {};
   for (const [srvName, ports] of Object.entries(knownModems || {})) {
     for (const [pid, info] of Object.entries(ports || {})) {
       if (!info || !info.portName || /^random/i.test(info.portName)) continue;
+      if (info._missingSince && (now - info._missingSince) >= missingMs) continue;   // box-unbound
       const lcs = info.lastClientSeen != null ? info.lastClientSeen : info.lastSeen;
       const ls = typeof lcs === 'number' ? lcs : Date.parse(lcs || 0);
       if (!ls || (now - ls) > retainMs) continue;   // aged out of the roster — not counted either way

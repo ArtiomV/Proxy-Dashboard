@@ -244,4 +244,30 @@ describe('computeClientWorking', () => {
     expect(w.CLIENT).toBe(1);   // only A: B dark ≥10min, C dark 10d (≥10min), X aged out, random skipped
     expect(w.random77).toBeUndefined();
   });
+
+  it('box-unbound port (_missingSince ≥10min) is not working even if its modem is online', () => {
+    const meta = [
+      { srv: 'S3', imei: 'A', nick: 'MD_A' },   // живой биндинг
+      { srv: 'S3', imei: 'D', nick: 'MD_D' },   // порт удалён на боксе, модем онлайн
+      { srv: 'S3', imei: 'F', nick: 'MD_F' },   // порт пропал на 1 опрос (флап)
+    ];
+    const uptime = {
+      'S3_A': { last_online_check: ago(60 * 1000) },
+      'S3_D': { last_online_check: ago(60 * 1000) },
+      'S3_F': { last_online_check: ago(60 * 1000) },
+    };
+    const live = ['A', 'D', 'F'].map(i => ({
+      _server: 'S3',
+      modem_details: { IMEI: 'S3_' + i, NICK: 'MD_' + i },
+      net_details: { IS_ONLINE: 'yes' },
+    }));
+    const fleet = computeFleet(meta, uptime, live, { now: NOW });
+    const known = { S3: {
+      p1: { imei: 'A', nick: 'MD_A', portName: 'CLIENT', lastClientSeen: NOW },
+      p2: { imei: 'D', nick: 'MD_D', portName: 'CLIENT', lastClientSeen: NOW, _missingSince: NOW - 30 * 60 * 1000 },
+      p3: { imei: 'F', nick: 'MD_F', portName: 'CLIENT', lastClientSeen: NOW, _missingSince: NOW - 60 * 1000 },
+    }};
+    const w = computeClientWorking(known, fleet, { now: NOW });
+    expect(w.CLIENT).toBe(2);   // A + F (флап <10 мин); D отвязан на боксе 30 мин → не «в работе»
+  });
 });
