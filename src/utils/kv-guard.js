@@ -7,8 +7,14 @@
 // The DB-bound wrapper (kvSetCritical) stays in server.js.
 
 // Fields that env declares on api_servers entries (connection-level identity).
-// DB-stored values for these fields are ignored at merge time (env wins).
-const ENV_OWNED_FIELDS = ['url', 'user', 'pass', 'publicIp'];
+// url/publicIp: env still wins (network topology lives in .env).
+// user/pass — НЕ env-owned: UI-редактирование (Настройки → серверы) пишет их в
+// DB, и они обязаны переживать pm2-рестарт. До 2026-08-17 env выигрывал и при
+// каждом рестарте затирал пароль, введённый через админку, — «меняю пароль,
+// а он через время сбрасывается». env теперь лишь bootstrap-дефолт для первого
+// запуска (когда в DB ещё пусто).
+const ENV_OWNED_FIELDS = ['url', 'publicIp'];
+const DB_CRED_FIELDS = ['user', 'pass'];
 
 // Fields that DB owns (set via the admin UI). These must be merged INTO env
 // entries on startup, otherwise the next saveApiServersToDb() persists the
@@ -75,7 +81,9 @@ function shapeRegressions(before, after) {
 
 // Merge DB-stored server metadata into the env-defined servers list, IN PLACE.
 // New servers (DB-only) get appended. Env-defined servers get metadata fields
-// populated from DB only where they're currently absent (env owns connection).
+// populated from DB only where they're currently absent. Credentials
+// (user/pass) are DB-wins-if-nonempty: the Settings UI is the primary edit
+// path and its values must survive restarts (see DB_CRED_FIELDS note above).
 function mergeDbMetadataIntoEnvServers(envServers, dbServers, metaFields) {
   const fields = metaFields || DB_META_FIELDS;
   for (const s of dbServers) {
@@ -83,6 +91,9 @@ function mergeDbMetadataIntoEnvServers(envServers, dbServers, metaFields) {
     if (!existing) {
       envServers.push(s);
       continue;
+    }
+    for (const k of DB_CRED_FIELDS) {
+      if (s[k] !== undefined && s[k] !== '') existing[k] = s[k];
     }
     for (const k of fields) {
       if (s[k] !== undefined && s[k] !== '' && existing[k] == null) {
@@ -95,6 +106,7 @@ function mergeDbMetadataIntoEnvServers(envServers, dbServers, metaFields) {
 
 module.exports = {
   ENV_OWNED_FIELDS,
+  DB_CRED_FIELDS,
   DB_META_FIELDS,
   KV_CRITICAL_SHAPES,
   shapeRegressions,

@@ -297,11 +297,12 @@ for (const name of _envServerKeys) {
   });
 }
 // Load additional servers from DB (added via Settings UI) AND merge DB-stored
-// metadata into env-defined servers. Env owns connection (url/user/pass/publicIp);
-// DB owns metadata set via UI (address, hardware, ssh creds, country/tz).
+// metadata into env-defined servers. Env owns topology (url/publicIp); DB owns
+// credentials (user/pass — правятся через Настройки и обязаны переживать
+// рестарт) и metadata set via UI (address, hardware, ssh creds, country/tz).
 // Without the merge, env servers lose UI-set fields on every restart because
 // saveApiServersToDb() below would persist the impoverished env-only version
-// and overwrite the DB's metadata — silent data loss on every pm2 restart.
+// and overwrite the DB — silent data loss on every pm2 restart.
 // Merge logic lives in src/utils/kv-guard.js and has dedicated tests.
 try {
   const _dbRow = _kvGet.get('api_servers');

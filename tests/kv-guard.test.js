@@ -42,16 +42,26 @@ describe('mergeDbMetadataIntoEnvServers', () => {
     expect(env.map(s => s.name).sort()).toEqual(['S1', 'S3']);
   });
 
-  it('env-owned fields (url/user/pass/publicIp) survive even if DB disagrees', () => {
+  it('env owns url/publicIp; DB-set credentials (user/pass) WIN over env', () => {
+    // 2026-08-17: пароль, введённый через Настройки, раньше затирался env при
+    // каждом pm2-рестарте («меняю пароль — через время сбрасывается»).
     const env = [{ name: 'S1', url: 'http://env-url', user: 'env-u', pass: 'env-p', publicIp: 'env-ip' }];
     const db  = [{ name: 'S1', url: 'http://db-url', user: 'db-u', pass: 'db-p', publicIp: 'db-ip', address: 'somewhere' }];
     mergeDbMetadataIntoEnvServers(env, db);
     expect(env[0].url).toBe('http://env-url');
-    expect(env[0].user).toBe('env-u');
-    expect(env[0].pass).toBe('env-p');
     expect(env[0].publicIp).toBe('env-ip');
+    expect(env[0].user).toBe('db-u');
+    expect(env[0].pass).toBe('db-p');
     // But metadata still merges:
     expect(env[0].address).toBe('somewhere');
+  });
+
+  it('empty-string DB credentials do NOT overwrite env bootstrap values', () => {
+    const env = [{ name: 'S1', url: 'http://x', user: 'env-u', pass: 'env-p', publicIp: 'x' }];
+    const db  = [{ name: 'S1', user: '', pass: '' }];
+    mergeDbMetadataIntoEnvServers(env, db);
+    expect(env[0].user).toBe('env-u');
+    expect(env[0].pass).toBe('env-p');
   });
 
   it('empty-string DB values do NOT overwrite present env values', () => {
