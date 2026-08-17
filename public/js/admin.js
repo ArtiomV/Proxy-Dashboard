@@ -1640,9 +1640,11 @@ function renderClients(){
     var color=colors[(count-1)%colors.length];
     var isInactive=!modems.length;
     // Метка «пауза начислений» — перечёркнутый рубль (title поясняет), а не
-    // текст ПАУЗА; БЛОК (антифрод) — приоритетнее должника.
+    // текст ПАУЗА; БЛОК (антифрод ИЛИ автоблок портов за долг) — приоритетнее
+    // должника: порт заблокирован важнее, чем минус на балансе.
     var _pauseMark='<span title="Пауза начислений — списания остановлены" style="display:inline-flex;align-items:center">'+icon('moneyOff',11)+'</span>';
-    var _stp=c.blocked?['БЛОК','var(--danger)','#fff']:(balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?[_pauseMark,'var(--warning)','#000']:(isInactive?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff'])));
+    var _blkMark=c.blocked?'<span title="Аккаунт заблокирован (антифрод)">БЛОК</span>':(c.debtBlocked?'<span title="Порты заблокированы за долг — доступ восстановится после оплаты">БЛОК</span>':null);
+    var _stp=_blkMark?[_blkMark,'var(--danger)','#fff']:(balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?[_pauseMark,'var(--warning)','#000']:(isInactive?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff'])));
     var stPill='<span style="font-size:9px;font-weight:600;color:'+_stp[2]+';background:'+_stp[1]+';padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap">'+_stp[0]+'</span>';
     h+='<div class="client-card'+(isInactive?' client-card--inactive':'')+'">';
     // Header / balance / 2x2 stats / actions — mockup card layout
@@ -4500,7 +4502,8 @@ function renderClientDetail(id, tab){
   var ini=((ws.length>=2?(ws[0].charAt(0)+ws[1].charAt(0)):nm.slice(0,2)).toUpperCase())||'?';
   document.getElementById('cdAvatar').textContent=ini;
   document.getElementById('cdName').textContent=c.name||'';
-  var st=c.blocked?['БЛОК','var(--danger)','#fff']:(balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?['<span title="Пауза начислений — списания остановлены" style="display:inline-flex;align-items:center">'+icon('moneyOff',11)+'</span>','var(--warning)','#000']:(mc===0?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff'])));
+  var _cdBlk=c.blocked?'<span title="Аккаунт заблокирован (антифрод)">БЛОК</span>':(c.debtBlocked?'<span title="Порты заблокированы за долг — доступ восстановится после оплаты">БЛОК</span>':null);
+  var st=_cdBlk?[_cdBlk,'var(--danger)','#fff']:(balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?['<span title="Пауза начислений — списания остановлены" style="display:inline-flex;align-items:center">'+icon('moneyOff',11)+'</span>','var(--warning)','#000']:(mc===0?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff'])));
   var pl=document.getElementById('cdPill');pl.innerHTML=st[0];pl.style.background=st[1];pl.style.color=st[2];
   var charge=Math.round(((currentData.clientMonthCharges||{})[id]||0));
   var gb=Math.round(((currentData.clientMonthGb||{})[id]||0)*10)/10;
