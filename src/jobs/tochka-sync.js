@@ -138,10 +138,18 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
     // (репул выписки с пустым id не должен зачислить повторно).
     const baseKey = buildNaturalKey(payerInn, amount, dateStr, purpose);
     const nkRows = dbStmts.findBankPaymentsByNaturalKeyBase.all(baseKey, baseKey.length + 1, baseKey + '#');
-    const nkResolved = resolveNaturalKey(nkRows, baseKey, paymentId);
+    const nkResolved = resolveNaturalKey(nkRows, baseKey, paymentId, 'sync');
     const naturalKey = nkResolved.key;
     const existingRow = nkResolved.isDuplicate ? nkResolved.existing : null;
     if (existingRow) {
+      // Cross-channel re-delivery (webhook row recognised under our sync id):
+      // write our channel id onto the webhook's row — future syncs match by id,
+      // and the linked row stops claiming further identical payments (A3 1:1).
+      if (nkResolved.link && paymentId) {
+        try { dbStmts.linkBankPaymentTochkaId.run(paymentId, existingRow.id); } catch (e) {
+          logger.debug(`[Tochka Sync:${source}] cross-channel link failed: ${e.message}`);
+        }
+      }
       // The transaction is already recorded. Normally we skip (a webhook or an
       // earlier sync already handled it). BUT a row can sit UNCREDITED — the
       // real-time webhook can't verify Tochka's JWT signature (reason=

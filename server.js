@@ -237,7 +237,13 @@ const dbStmts = {
   // payer|amount|date|purpose in one day). resolveNaturalKey() picks dup vs
   // sequence. Replaces the Stage 18.6 single-row natural-key lookups.
   // Sync-reconcile also needs matched/dismissed state of the existing row.
-  findBankPaymentsByNaturalKeyBase: db.prepare("SELECT id, payment_id, tochka_payment_id, natural_key, matched, dismissed FROM bank_payments WHERE natural_key = ? OR substr(natural_key, 1, ?) = ? ORDER BY id"),
+  findBankPaymentsByNaturalKeyBase: db.prepare("SELECT id, payment_id, tochka_payment_id, natural_key, matched, dismissed FROM bank_payments WHERE natural_key = ? OR substr(natural_key, 1, ?) = ? ORDER BY received_at, id"),
+  // Cross-channel linking (see resolveNaturalKey): when the sync recognises
+  // the webhook's row (or vice versa) under a different channel id, we write
+  // the new id onto the SAME row — future lookups match by id in one hop and
+  // the linked row stops being eligible for further cross-channel claims.
+  linkBankPaymentPaymentId: db.prepare("UPDATE bank_payments SET payment_id = ? WHERE id = ? AND (payment_id IS NULL OR payment_id = '')"),
+  linkBankPaymentTochkaId: db.prepare("UPDATE bank_payments SET tochka_payment_id = ? WHERE id = ? AND (tochka_payment_id IS NULL OR tochka_payment_id = '')"),
   ledgerHasBankPaymentOn: db.prepare("SELECT 1 FROM billing_ledger WHERE client_id = ? AND type = 'bank_payment' AND ABS(amount - ?) < 0.01 AND date = ? LIMIT 1"),
   findBankPaymentByPaymentId: db.prepare('SELECT * FROM bank_payments WHERE payment_id = ? AND auto_credit = 1 LIMIT 1'),
   findBankPaymentByPaymentIdAny: db.prepare('SELECT id FROM bank_payments WHERE payment_id = ? LIMIT 1'),

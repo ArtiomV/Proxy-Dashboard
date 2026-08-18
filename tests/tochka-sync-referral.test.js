@@ -72,13 +72,15 @@ function makeSync(transactions, { clientsArr, clientByInn }) {
   const dbStmts = {
     findBankPaymentsByNaturalKeyBase: db.prepare(
       'SELECT id, payment_id, tochka_payment_id, natural_key, matched, dismissed FROM bank_payments ' +
-      'WHERE natural_key = ? OR substr(natural_key, 1, ?) = ? ORDER BY id'),
+      'WHERE natural_key = ? OR substr(natural_key, 1, ?) = ? ORDER BY received_at, id'),
     ledgerHasBankPaymentOn: db.prepare(
       "SELECT 1 FROM billing_ledger WHERE client_id = ? AND type = 'bank_payment' AND ABS(amount - ?) < 0.01 AND date = ? LIMIT 1"),
     findBankPaymentByTochkaId: db.prepare('SELECT id FROM bank_payments WHERE tochka_payment_id = ? LIMIT 1'),
     findBankPaymentByPaymentIdAny: db.prepare('SELECT id FROM bank_payments WHERE payment_id = ? LIMIT 1'),
     updateBankPaymentMatch: db.prepare(
       'UPDATE bank_payments SET matched = ?, matched_client_id = ?, matched_client_name = ?, auto_credit = ? WHERE id = ?'),
+    linkBankPaymentTochkaId: db.prepare(
+      "UPDATE bank_payments SET tochka_payment_id = ? WHERE id = ? AND (tochka_payment_id IS NULL OR tochka_payment_id = '')"),
   };
   const insertBankPaymentToDb = (bp) => {
     if (bp.paymentId && dbStmts.findBankPaymentByPaymentIdAny.get(bp.paymentId)) return false;
@@ -193,5 +195,47 @@ describe('A3: natural-key sequence anti-collision in sync', () => {
     await run({ dateFrom: '2026-06-01', dateTo: '2026-06-01', source: 'test' });
     expect(dbBalance(pair.referred.id)).toBe(7000);
     expect(ledgerRows(pair.referred.id).filter(e => e.type === 'bank_payment').length).toBe(1);
+  }, 20000);
+
+  it('webhook row + sync with a DIFFERENT transactionId → NO double credit, rows linked (СРТ 17.08 regression)', async () => {
+    const pair = seedPair('6000000004');
+    const purpose = 'Оплата Счёт№8 от 01.06.2026';
+    const base = '6000000004|93500|2026-06-01|' + purpose;
+    // Webhook arrived first and already credited: row carries payment_id,
+    // no tochka_payment_id yet.
+    atomic.atomicCredit(pair.referred.id, 93500, {
+      type: 'bank_payment', date: '2026-06-01', timestamp: new Date().toISOString(),
+      amount: 93500, currency: 'RUB',
+      note: 'Банк Точка (ИНН: 6000000004): ' + purpose,
+      source: 'tochka_webhook', paymentId: 'tb-wh-1',
+    });
+    db.prepare(`INSERT INTO bank_payments
+      (id, webhook_type, payer_inn, payer_name, amount, purpose, payment_id, date,
+       customer_code, matched, matched_client_id, matched_client_name, auto_credit,
+       dismissed, source, tochka_payment_id, received_at, natural_key)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run('wh-row-1', 'incomingPayment', '6000000004', 'Payer 6000000004', 93500, purpose,
+        'tb-wh-1', '2026-06-01', '', 1, pair.referred.id, pair.referred.name, 1,
+        0, '', '', new Date().toISOString(), base);
+
+    // Sync delivers the SAME transaction under its own id — must not re-credit.
+    const transactions = [tx({ inn: '6000000004', amount: 93500, purpose, transactionId: 'cbs-tb;555;1' })];
+    const run = makeSync(transactions, ctxFor(pair));
+    const res = await run({ dateFrom: '2026-06-01', dateTo: '2026-06-01', source: 'test' });
+    expect(res.ok).toBe(true);
+    expect(res.matched).toBe(0);
+    expect(dbBalance(pair.referred.id)).toBe(93500);   // not 187000
+    expect(ledgerRows(pair.referred.id).filter(e => e.type === 'bank_payment').length).toBe(1);
+
+    // Channels linked on the ONE existing row; no '#2' sibling was created.
+    const row = db.prepare("SELECT tochka_payment_id, natural_key FROM bank_payments WHERE id = 'wh-row-1'").get();
+    expect(row.tochka_payment_id).toBe('cbs-tb;555;1');
+    expect(row.natural_key).toBe(base);
+    expect(db.prepare("SELECT COUNT(*) c FROM bank_payments WHERE payer_inn = '6000000004'").get().c).toBe(1);
+
+    // And a re-sync now matches by id in one hop.
+    const res2 = await run({ dateFrom: '2026-06-01', dateTo: '2026-06-01', source: 'test' });
+    expect(res2.ok).toBe(true);
+    expect(dbBalance(pair.referred.id)).toBe(93500);
   }, 20000);
 });

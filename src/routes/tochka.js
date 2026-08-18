@@ -185,8 +185,15 @@ const bankWebhookHandler = async (req, res) => {
     // a re-delivery (same paymentId → duplicate) from a real second payment
     // (new paymentId → sequence suffix '#N', credited normally).
     const nkRows = dbStmts.findBankPaymentsByNaturalKeyBase.all(naturalKey, naturalKey.length + 1, naturalKey + '#');
-    const nkResolved = resolveNaturalKey(nkRows, naturalKey, paymentId);
+    const nkResolved = resolveNaturalKey(nkRows, naturalKey, paymentId, 'webhook');
     if (nkResolved.isDuplicate) {
+      // Cross-channel re-delivery: sync's row recognised under our webhook id —
+      // persist our id onto that row so future lookups match in one hop.
+      if (nkResolved.link && paymentId && nkResolved.existing) {
+        try { dbStmts.linkBankPaymentPaymentId.run(paymentId, nkResolved.existing.id); } catch (e) {
+          logger.debug(`[Tochka Webhook] cross-channel link failed: ${e.message}`);
+        }
+      }
       logger.info(`[Tochka Webhook] Duplicate natural_key (already processed) — payer=${payerInn} amount=${amount} date=${paymentDate}`);
       // Stage 18.13: дубль-кредит заблокирован — это хорошо, но стоит знать (редкое событие)
       try {
@@ -258,7 +265,11 @@ const bankWebhookHandler = async (req, res) => {
           // bank_payment row that admin can reconcile manually. The reverse
           // ordering (match-mark first, then credit) would risk double-credit
           // on retry, which is the worse failure.
-          dbStmts.updateBankPaymentMatch.run(1, matchedClient.id, matchedClient.name, 1, paymentId);
+          // Match-mark keyed by OUR row id (bankPayment.id), not Tochka's
+          // paymentId — updateBankPaymentMatch is WHERE id=?, and passing
+          // paymentId silently matched nothing (row stayed "unmatched"
+          // despite the credit).
+          dbStmts.updateBankPaymentMatch.run(1, matchedClient.id, matchedClient.name, 1, bankPayment.id);
           try { settleBillsOnPayment(matchedClient, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
           // C5: no in-memory client.payments push — the bank_payment ledger
           // row written by atomicCredit above is the recorded fact.

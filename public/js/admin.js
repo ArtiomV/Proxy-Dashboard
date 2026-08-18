@@ -1644,9 +1644,10 @@ function renderClients(){
     // должника: порт заблокирован важнее, чем минус на балансе.
     var _pauseMark='<span title="Пауза начислений — списания остановлены" style="display:inline-flex;align-items:center">'+icon('moneyOff',11)+'</span>';
     var _blkMark=c.blocked?'<span title="Аккаунт заблокирован (антифрод)">БЛОК</span>':(c.debtBlocked?'<span title="Порты заблокированы за долг — доступ восстановится после оплаты">БЛОК</span>':null);
-    var _stp=_blkMark?[_blkMark,'var(--danger)','#fff']:(balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?[_pauseMark,'var(--warning)','#000']:(isInactive?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:['АКТИВЕН','var(--success)','#fff'])));
+    var _dl=clientDaysLeft(c);var _expSoon=!_blkMark&&balance>=0&&!c.billingPaused&&!isInactive&&_dl!==null&&_dl<5;
+    var _stp=_blkMark?[_blkMark,'var(--danger)','#fff']:(balance<0?['ДОЛЖНИК','var(--danger)','#fff']:(c.billingPaused?[_pauseMark,'var(--warning)','#000']:(isInactive?['НЕТ МОДЕМОВ','var(--bg-3)','var(--text-2)']:(_expSoon?['ИСТЕКАЕТ · '+Math.max(0,Math.floor(_dl))+' ДН','var(--danger)','#fff']:['АКТИВЕН','var(--success)','#fff']))));
     var stPill='<span style="font-size:9px;font-weight:600;color:'+_stp[2]+';background:'+_stp[1]+';padding:3px 9px;border-radius:6px;letter-spacing:.5px;white-space:nowrap">'+_stp[0]+'</span>';
-    h+='<div class="client-card'+(isInactive?' client-card--inactive':'')+'">';
+    h+='<div class="client-card'+(isInactive?' client-card--inactive':'')+'"'+(_expSoon?' style="border-color:var(--danger);box-shadow:0 0 0 1px rgba(232,65,65,.35)"':'')+'>';
     // Header / balance / 2x2 stats / actions — mockup card layout
     var _nm=(c.name||'').replace(/^(ООО|ИП|ЗАО|АО|ПАО)\s*/i,'').replace(/["«»]/g,'').trim();
     var _ws=_nm.split(/\s+/).filter(Boolean);
@@ -3885,7 +3886,7 @@ function renderNewFinClients(){
     var tariffStr = p.billingType==='per_modem'?(p.price+'₽/мес·мод'):(p.price+'₽/ГБ');
     var balCol = p.balance<0?'var(--danger)':'var(--text-1)';
     h += '<tr>' +
-      '<td style="font-weight:500;color:var(--text-1)">'+esc(p.name)+blkTag+pausedTag+'</td>' +
+      '<td style="font-weight:500;color:var(--text-1)">'+esc(p.name)+blkTag+pausedTag+expiringBadge(_cl)+'</td>' +
       '<td style="text-align:left;color:var(--text-2)">'+tariffStr+'</td>' +
       '<td style="font-weight:600;color:var(--text-1)">'+_fmtRub(p.mrr)+'</td>' +
       '<td style="color:'+deltaCol+'">'+deltaStr+'</td>' +
@@ -4010,9 +4011,11 @@ function renderNewClientTable(d){
     var balCol = r.balance<0 ? 'var(--danger)' : (r.balance>0 ? 'var(--text-0)' : 'var(--text-3)');
     var paused = r.paused ? pauseBadge() : '';
     var blk = blockBadge(r);
+    var _clObj = clients.find(function(c){ return c.name === r.name; });
+    var expB = expiringBadge(_clObj);
     var td = function(content,left){ return '<td'+(left?' style="text-align:left"':'')+'>'+content+'</td>'; };
     h += '<tr>';
-    h += td('<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:3px;height:16px;background:'+col+';border-radius:2px"></span><strong style="color:var(--text-0)">'+esc(r.name)+'</strong>'+blk+paused+'</span>',1);
+    h += td('<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:3px;height:16px;background:'+col+';border-radius:2px"></span><strong style="color:var(--text-0)">'+esc(r.name)+'</strong>'+blk+paused+expB+'</span>',1);
     h += td('<span style="font-weight:600;color:'+liveColor+'">'+r.online+'/'+r.modems+'</span>');
     h += td('<span style="font-family:var(--font-mono)">'+fmtGb(r.today)+'</span>');
     h += td('<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;'+(r.billingType==='per_gb'?'background:var(--accent-dim);color:var(--accent)':'background:var(--bg-2);color:var(--text-2)')+'">'+tariff+'</span>');

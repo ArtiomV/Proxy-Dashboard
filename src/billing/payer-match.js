@@ -88,7 +88,18 @@ function buildNaturalKey(payerInn, amount, date, purpose) {
 //   empty paymentId with existing rows → can't distinguish re-delivery from
 //     a real second payment, so we conservatively treat it as a duplicate
 //     (statement re-pulls with empty transactionId must never re-credit).
-function resolveNaturalKey(existingRows, baseKey, paymentId) {
+// Cross-channel linking (2026-08-18, СРТ double-credit): Tochka reports
+// DIFFERENT ids for the SAME transaction on webhook (`tb-…`) vs statement
+// sync (`cbs-tb;…`), so a bare "different id → new payment" rule credited
+// the same money twice (webhook row + sync '#2' row). Fix: when the caller
+// declares its channel ('webhook' | 'sync'), an existing row from the
+// OPPOSITE channel that is not yet cross-linked (webhook row without
+// tochka_payment_id, or sync row without payment_id) is the same
+// transaction re-delivered → duplicate + link: the caller writes the new
+// channel's id onto that row. Linking is one-to-one: a linked row is no
+// longer eligible, so two genuinely identical payments (A3, two webhook
+// rows + two sync rows) still pair up 1:1 and BOTH get credited.
+function resolveNaturalKey(existingRows, baseKey, paymentId, channel) {
   if (!existingRows || existingRows.length === 0) {
     return { key: baseKey, isDuplicate: false, existing: null };
   }
@@ -97,6 +108,12 @@ function resolveNaturalKey(existingRows, baseKey, paymentId) {
       (r.payment_id && r.payment_id === paymentId) ||
       (r.tochka_payment_id && r.tochka_payment_id === paymentId));
     if (same) return { key: same.natural_key, isDuplicate: true, existing: same };
+    if (channel) {
+      const cross = existingRows.find(r => channel === 'sync'
+        ? (r.payment_id && !r.tochka_payment_id)   // webhook row, not yet linked
+        : (r.tochka_payment_id && !r.payment_id)); // sync row, not yet linked
+      if (cross) return { key: cross.natural_key, isDuplicate: true, existing: cross, link: true };
+    }
     let maxSeq = 1;
     for (const r of existingRows) {
       const m = /#(\d+)$/.exec(r.natural_key || '');

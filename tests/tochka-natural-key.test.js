@@ -142,3 +142,55 @@ describe('A3: resolveNaturalKey — sequence anti-collision', () => {
     expect(r).toEqual({ key: base, isDuplicate: false, existing: null });
   });
 });
+
+describe('cross-channel linking — webhook id ≠ sync id for the SAME transaction', () => {
+  // СРТ 2026-08-17: webhook credited 93500 (paymentId 'tb-danny-…'), sync 10s
+  // later saw a different id ('cbs-tb;…') and treated it as a second payment
+  // ('#2') → double credit. Cross-channel eligibility closes that hole while
+  // 1:1 linking keeps A3 (two genuine identical payments) intact.
+  const base2 = '9704223433|93500|2026-08-17|Оплата Счёт№8';
+  const whRow = (id, nk, pid, tpid = '') =>
+    ({ id, payment_id: pid, tochka_payment_id: tpid, natural_key: nk, matched: 1, dismissed: 0 });
+  const syncRow = (id, nk, tpid, pid = '') =>
+    ({ id, payment_id: pid, tochka_payment_id: tpid, natural_key: nk, matched: 1, dismissed: 0 });
+
+  it('sync meets unlinked webhook row with a different id → duplicate + link, no #2', () => {
+    const r = resolveNaturalKey([whRow('w1', base2, 'tb-danny-1')], base2, 'cbs-tb;99;1', 'sync');
+    expect(r.isDuplicate).toBe(true);
+    expect(r.link).toBe(true);
+    expect(r.existing.id).toBe('w1');
+    expect(r.key).toBe(base2);
+  });
+
+  it('webhook meets unlinked sync row with a different id → duplicate + link', () => {
+    const r = resolveNaturalKey([syncRow('s1', base2, 'cbs-tb;99;1')], base2, 'tb-danny-1', 'webhook');
+    expect(r.isDuplicate).toBe(true);
+    expect(r.link).toBe(true);
+    expect(r.existing.id).toBe('s1');
+  });
+
+  it('already-linked row is NOT eligible → a genuine second payment still gets #2', () => {
+    const linked = whRow('w1', base2, 'tb-1', 'cbs-1');   // both channels recorded
+    const r = resolveNaturalKey([linked], base2, 'cbs-2', 'sync');
+    expect(r.isDuplicate).toBe(false);
+    expect(r.key).toBe(base2 + '#2');
+  });
+
+  it('1:1 pairing: two webhook rows + two sync transactions → each claims its own, no #3', () => {
+    const rows = [whRow('w1', base2, 'tb-1'), whRow('w2', base2 + '#2', 'tb-2')];
+    const r1 = resolveNaturalKey(rows, base2, 'cbs-1', 'sync');
+    expect(r1.link).toBe(true);
+    expect(r1.existing.id).toBe('w1');
+    // simulate the caller persisting the link on w1
+    const rows2 = [{ ...rows[0], tochka_payment_id: 'cbs-1' }, rows[1]];
+    const r2 = resolveNaturalKey(rows2, base2, 'cbs-2', 'sync');
+    expect(r2.link).toBe(true);
+    expect(r2.existing.id).toBe('w2');
+  });
+
+  it('without a channel arg the legacy rule is preserved (different id → #N)', () => {
+    const r = resolveNaturalKey([whRow('w1', base2, 'tb-1')], base2, 'cbs-1');
+    expect(r.isDuplicate).toBe(false);
+    expect(r.key).toBe(base2 + '#2');
+  });
+});
