@@ -32,6 +32,44 @@ module.exports = function createAnalyticsDomainsRouter(deps) {
     res.json({ ok: true, started: true });
   });
 
+  // Drill-down: ВСЕ домены клиента за конкретный день (top_hosts_daily), с
+  // дельтой против предыдущего среза и флагом banned. ProxySmart отдаёт только
+  // хостнеймы (top_hosts), полных URL в источнике нет — «ссылки» = домены.
+  r.get('/api/admin/domain_guard/client_hosts', authMiddleware, adminMiddleware, (req, res) => {
+    try {
+      const server = String(req.query.server || '');
+      const client = String(req.query.client || '');
+      const date = String(req.query.date || '').slice(0, 10);
+      if (!server || !client || !date) return res.status(400).json({ error: 'server, client, date required' });
+
+      let blocklist = [];
+      try {
+        const cfg = JSON.parse(require('fs').readFileSync(
+          require('path').join(__dirname, '..', '..', 'config', 'blocked-domains.json'), 'utf8'));
+        blocklist = [...(cfg.domains || []), ...(cfg.custom || [])]
+          .map(d => String(d).toLowerCase().trim()).filter(Boolean);
+      } catch (e) { logger.warn('[domain_guard/client_hosts] blocklist: ' + e.message); }
+      const isBanned = (host) => {
+        const h = String(host).toLowerCase();
+        return blocklist.some(d => h === d || h.endsWith('.' + d));
+      };
+
+      const rows = db.prepare(`SELECT port_id, nick, host, count FROM top_hosts_daily
+        WHERE date = ? AND server_name = ? AND client_name = ?`).all(date, server, client);
+      const prevStmt = db.prepare(`SELECT count FROM top_hosts_daily
+        WHERE server_name = ? AND port_id = ? AND host = ? AND date < ?
+        ORDER BY date DESC LIMIT 1`);
+      const out = rows.map(rw => {
+        const prev = prevStmt.get(server, rw.port_id, rw.host, date);
+        const delta = !prev ? (rw.count || 0)
+          : (rw.count >= prev.count ? rw.count - prev.count : rw.count);
+        return { host: rw.host, port_id: rw.port_id, nick: rw.nick || '', count: rw.count || 0, delta, banned: isBanned(rw.host) };
+      }).filter(rw => rw.delta > 0);
+      out.sort((a, b) => b.delta - a.delta);
+      res.json({ date, server, client, rows: out });
+    } catch (err) { res.status(500).json({ error: 'Failed', details: err.message }); }
+  });
+
   r.get('/api/analytics/logs_domains_full', authMiddleware, adminMiddleware, (req, res) => {
     try {
       const { host = '', client = '', operator = '', server = '', nick = '' } = req.query;

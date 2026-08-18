@@ -83,7 +83,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.17</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.18</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -99,7 +99,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.17</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.18</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -108,7 +108,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.17</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.18</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -354,6 +354,7 @@
       <div class="settings-nav-item active" id="snav_serverHealth" data-on-click="switchSettingsSection('serverHealth')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M1.5 8h3l1.5 4 2-8 1.5 4h4"/></svg>Состояние сервера</div>
       <div class="settings-nav-item" id="snav_syslog" data-on-click="switchSettingsSection('syslog')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="2.5" width="13" height="11" rx="1.5"/><path d="M4 6l2.3 2L4 10"/><line x1="8" y1="10.3" x2="11.5" y2="10.3"/></svg>Системный лог</div>
       <div class="settings-nav-item" id="snav_audit" data-on-click="switchSettingsSection('audit')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5.5 4h8M5.5 8h8M5.5 12h6"/><circle cx="2.6" cy="4" r=".7"/><circle cx="2.6" cy="8" r=".7"/><circle cx="2.6" cy="12" r=".7"/></svg>Журнал действий</div>
+      <div class="settings-nav-item" id="snav_dguard" data-on-click="switchSettingsSection('dguard')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5l5 2v4c0 3.4-2.2 5.6-5 7-2.8-1.4-5-3.6-5-7v-4z"/><path d="M5.5 8l1.8 1.8 3.2-3.6"/></svg>Доменный контроль</div>
 
       <div class="snav-grp">ИНФРАСТРУКТУРА</div>
       <div class="settings-nav-item" id="snav_servers" data-on-click="switchSettingsSection('servers')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4.6" rx="1.2"/><rect x="2" y="8.9" width="12" height="4.6" rx="1.2"/><circle cx="4.6" cy="4.8" r=".5"/><circle cx="4.6" cy="11.2" r=".5"/></svg>Серверы</div>
@@ -396,6 +397,24 @@
             <button class="btn btn-sm audit-filter-btn" data-f="client" data-on-click="setAuditFilter('client')" style="font-size:11px"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.3 3-5.5 7-5.5s7 2.2 7 5.5"/></svg> Клиенты</button>
           </div>
           <div id="auditLogTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Нажмите «Обновить» для загрузки</div></div>
+        </div>
+      </div>
+      <!-- Доменный контроль: журнал совпадений с бан-листом + все домены клиента за день -->
+      <div id="settingsSection_dguard" class="settings-section" style="display:none">
+        <div class="analytics-card">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <h3 style="margin:0">Доменный контроль</h3>
+            <button class="btn btn-sm" data-on-click="loadDomainGuard()">Обновить</button>
+          </div>
+          <div style="font-size:11px;color:var(--text-3);margin-bottom:10px">Совпадения с бан-листом на боксах со снятой фильтрацией (ежедневная проверка). Кнопка «Все домены» показывает всё, куда клиент заходил в этот день. Источник (ProxySmart) отдаёт только домены — полных URL в данных нет.</div>
+          <div id="dguardHits" style="max-height:50vh;overflow-y:auto"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div></div>
+        </div>
+        <div class="analytics-card" id="dguardDrillCard" style="display:none">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <h3 style="margin:0" id="dguardDrillTitle">Домены клиента</h3>
+            <button class="btn btn-sm" data-on-click="closeDomainGuardDrill()">Скрыть</button>
+          </div>
+          <div id="dguardDrill" style="max-height:50vh;overflow-y:auto"></div>
         </div>
       </div>
       <!-- Системный лог -->
@@ -1397,15 +1416,16 @@
 
 
 <script src="/js/icons.js?v=0817a"></script>
-<script src="/js/utils.js?v=0818a"></script>
+<script src="/js/utils.js?v=0818b"></script>
 <script src="/js/delegation.js?v=0727b"></script>
 <script src="/js/admin/delegated-helpers.js?v=0804a"></script>
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
 <script src="/js/admin/analytics.js?v=0817c"></script>
 <script src="/js/admin/finance.js?v=0817b"></script>
 <script src="/js/admin/modems.js?v=0817a"></script>
+<script src="/js/admin/dguard.js?v=0818a"></script>
 <script src="/js/admin/settings.js?v=0815a"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
-<script src="/js/admin.js?v=0818a"></script>
+<script src="/js/admin.js?v=0818b"></script>
 </body>
 </html>

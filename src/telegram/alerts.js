@@ -492,11 +492,22 @@ const RULES = {
     cooldownSec: 72000,   // суточная джоба; 20ч, чтобы не заглушить следующий прогон
     dedupeKey: () => 'global',
     render: p => {
-      const lines = (p.top || []).map(h =>
-        `• <b>${esc(h.client)}</b> (${esc(h.server)}): <code>${esc(h.host)}</code> +${h.delta} (всего ${h.total})`);
+      const seen = {};
+      const lines = (p.top || []).map(h => {
+        let s = `• <b>${esc(h.client)}</b> (${esc(h.server)}): <code>${esc(h.host)}</code> +${h.delta} (всего ${h.total})`;
+        // Полный список доменов клиента за день — один раз на клиента/сервер,
+        // даже если совпадений с бан-листом у него несколько.
+        const key = h.server + '|' + h.client;
+        if (!seen[key] && h.allHosts && h.allHosts.length) {
+          seen[key] = 1;
+          const doms = h.allHosts.map(d => `<code>${esc(d.host)}</code> +${d.delta}`).join(', ');
+          s += `\n  └ Все домены за день: ${doms}${h.allHostsMore ? ` …и ещё ${h.allHostsMore}` : ''}`;
+        }
+        return s;
+      });
       return `🚨 <b>Доменный контроль за ${p.date}: ${p.count} совпадений с бан-листом</b>\n\n${lines.join('\n')}`
-        + (p.count > lines.length ? `\n…и ещё ${p.count - lines.length}` : '')
-        + `\n\nНа этих боксах фильтрация банков СНЯТА (hfilter-bypass) — это единственный контроль. Свяжись с клиентом.`;
+        + (p.count > (p.top || []).length ? `\n…и ещё ${p.count - (p.top || []).length}` : '')
+        + `\n\nНа этих боксах фильтрация банков СНЯТА (hfilter-bypass) — это единственный контроль. Свяжись с клиентом.\nПолная история по дням: админка → Настройки → Доменный контроль.`;
     },
   },
   domain_guard_failed: {

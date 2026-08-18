@@ -251,6 +251,29 @@ function create(deps) {
     });
     writeAll();
 
+    // Для алерта: к каждому хиту прикрепляем ПОЛНЫЙ список доменов, к которым
+    // обращался клиент за этот день (не только совпадения с бан-листом) —
+    // «выдавай все домены, куда человек заходил». Дельта та же логика, что у
+    // хитов: сегодняшний кумулятив минус последний прошлый срез.
+    if (hits.length) {
+      const _dayHosts = db.prepare(`SELECT host, count FROM top_hosts_daily
+        WHERE date = ? AND server_name = ? AND port_id = ?`);
+      for (const h of hits) {
+        try {
+          const all = [];
+          for (const r of _dayHosts.all(date, h.server, h.portId)) {
+            const prev = _prevCount.get(h.server, h.portId, r.host, date);
+            const delta = !prev ? (r.count || 0)
+              : (r.count >= prev.count ? r.count - prev.count : r.count);
+            if (delta > 0) all.push({ host: r.host, delta });
+          }
+          all.sort((a, b) => b.delta - a.delta);
+          h.allHosts = all.slice(0, 12);
+          if (all.length > h.allHosts.length) h.allHostsMore = all.length - h.allHosts.length;
+        } catch (e) { logger.warn('[DomainGuard] allHosts for alert failed: ' + e.message); }
+      }
+    }
+
     if (hits.length) {
       hits.sort((a, b) => b.delta - a.delta);
       alerts.trigger('domain_guard_hit', { date, count: hits.length, top: hits.slice(0, 8) });

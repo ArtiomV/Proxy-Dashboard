@@ -153,15 +153,6 @@ function blockBadge(c){if(!c)return'';var t=c.blocked?'Аккаунт забло
 // дашборд. Карточные статус-пилюли рисуют тот же значок inline.
 function pauseBadge(){return ' <span title="Пауза начислений — списания остановлены" style="display:inline-flex;align-items:center;color:#000;background:var(--warning);padding:3px 7px;border-radius:6px;white-space:nowrap">'+icon('moneyOff',11)+'</span>';}
 
-// Сколько дней клиент протянет на текущем балансе при текущем расходе
-// (clientRevenue30d/30 — дневная норма). null — расхода нет или баланс в
-// минусе (там работает метка ДОЛЖНИК). Порог «скоро истекает» — 5 дней,
-// тот же, что у счётчика «Истекают» на странице клиентов.
-function clientDaysLeft(c){if(!c)return null;var cd=(typeof currentData!=='undefined'&&currentData)||null;var ch=(cd&&cd.clientRevenue30d||{})[c.id]||0;var b=c.balance||0;if(ch<=0||b<0)return null;return b/(ch/30);}
-// Красная метка «N дн» для строк таблиц — клиент активен, но баланс
-// заканчивается. Пустая строка, если дней много или не применимо.
-function expiringBadge(c){var d=clientDaysLeft(c);if(d===null||d>=5)return'';var n=Math.max(0,Math.floor(d));return ' <span title="Баланса хватит примерно на '+n+' дн. — прокси скоро истекают" style="font-size:9px;font-weight:600;color:#fff;background:var(--danger);padding:2px 7px;border-radius:6px;white-space:nowrap">'+n+' дн</span>';}
-
 // CommonJS export so the same source can be unit-tested in Node without a DOM.
 // Browsers see the `if (typeof module !== 'undefined')` guard as false and
 // continue with the bare function declarations above.
