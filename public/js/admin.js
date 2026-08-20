@@ -3723,23 +3723,67 @@ function renderNewFleetServers(){
     var working=b.working||0, total=b.total||0, disc=b.disconnected||0; if(total<working) total=working;
     var onlPct = total ? Math.round(working/total*100) : 0;
     var ci = primary ? {} : (COUNTRIES[srv]||{});
-    var name = primary ? _dwIcon('sat')+'Весь парк' : ((ci.flag||'')+' '+esc(srv)+(ci.name?' · '+esc(ci.name):''));
     var col = disc===0 ? 'var(--success)' : 'var(--warning)';
     var today=0,mon=0,prob=0,sigAvg=0;
     if(primary){ Object.keys(agg).forEach(function(s){ today+=agg[s].today; mon+=agg[s].mon; prob+=agg[s].prob; }); }
     else { var a=agg[srv]||{sig:0,sigN:0,prob:0,today:0,mon:0}; today=a.today; mon=a.mon; prob=a.prob; sigAvg=a.sigN?Math.round(a.sig/a.sigN):0; }
-    var h='<div class="analytics-card" style="margin:0;padding:14px">';
-    h+='<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:5px"><span style="font-weight:700;font-size:13px;font-family:var(--font-mono)">'+name+'</span><span style="font-size:12px;font-weight:700;color:'+col+'">'+working+'/'+total+'</span></div>';
-    h+='<div style="font-size:10px;color:var(--text-3);margin-bottom:6px">'+(disc>0?'<span style="color:var(--danger)">'+disc+' отключено</span>':'&nbsp;')+'</div>';
-    h+='<div style="height:5px;background:var(--bg-3);border-radius:3px;overflow:hidden;margin-bottom:11px" title="'+onlPct+'% в работе"><div style="height:100%;width:'+onlPct+'%;background:'+col+';border-radius:3px"></div></div>';
-    h+='<div style="display:flex;flex-direction:column;gap:4px;font-size:11px">';
-    h+='<div style="display:flex;justify-content:space-between"><span style="color:var(--text-2)">Трафик сегодня</span><span style="font-family:var(--font-mono)">'+fmtGb(today)+'</span></div>';
-    if(primary) h+='<div style="display:flex;justify-content:space-between"><span style="color:var(--text-2)">Трафик месяц</span><span style="font-family:var(--font-mono);font-weight:600">'+fmtGb(mon)+'</span></div>';
-    if(!primary) h+='<div style="display:flex;justify-content:space-between;align-items:center"><span style="color:var(--text-2)">Сред. сигнал</span><span>'+(sigAvg?renderSignalBars(sigAvg):'<span style="color:var(--text-3)">—</span>')+'</span></div>';
-    h+='<div style="display:flex;justify-content:space-between"><span style="color:var(--text-2)">Проблемных</span><span style="color:'+(prob>0?'var(--warning)':'var(--text-3)')+';font-weight:600">'+prob+'</span></div>';
-    h+='</div>';
-    // Метрики загрузки бокса (ServerMetrics) — внутри карточки сервера (20.08)
-    if(!primary&&typeof srvMetInline==='function') h+=srvMetInline(srv);
+    var met=null, addr='';
+    if(!primary && window._srvMetData){
+      met = ((window._srvMetData.metrics||{})[srv])||null;
+      addr = (window._srvMetData.addresses||{})[srv]||'';
+    }
+    var h='<div class="analytics-card" style="margin:0;padding:14px'+(primary?';grid-column:1/-1':'')+'">';
+    // Шапка: имя/страна слева, справа крупно «working/total» + подпись.
+    h+='<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">'
+      +'<span style="font-weight:700;font-size:13px;font-family:var(--font-mono)">'+(primary?_dwIcon('sat')+'Весь парк':(ci.flag||'')+' '+esc(srv)+(ci.name?' · '+esc(ci.name):''))
+      +(addr?'<span style="display:block;font-size:9.5px;font-weight:400;color:var(--text-3);margin-top:1px">'+esc(addr)+'</span>':'')+'</span>'
+      +'<span style="text-align:right;flex-shrink:0"><span style="font-size:18px;font-weight:700;color:'+col+';font-family:var(--font-mono)">'+working+'<span style="font-size:12px;color:var(--text-3)">/'+total+'</span></span>'
+      +'<span style="display:block;font-size:9px;color:var(--text-3)">'+(disc>0?disc+' отключено':'все сервисы')+'</span></span></div>';
+    if(primary){
+      h+='<div style="height:5px;background:var(--bg-3);border-radius:3px;overflow:hidden;margin-bottom:11px" title="'+onlPct+'% в работе"><div style="height:100%;width:'+onlPct+'%;background:'+col+';border-radius:3px"></div></div>';
+      h+='<div style="display:flex;flex-wrap:wrap;gap:4px 22px;font-size:11px">';
+      h+='<div style="display:flex;gap:6px"><span style="color:var(--text-2)">Трафик сегодня</span><span style="font-family:var(--font-mono)">'+fmtGb(today)+'</span></div>';
+      h+='<div style="display:flex;gap:6px"><span style="color:var(--text-2)">Трафик месяц</span><span style="font-family:var(--font-mono);font-weight:600">'+fmtGb(mon)+'</span></div>';
+      h+='<div style="display:flex;gap:6px"><span style="color:var(--text-2)">Проблемных</span><span style="color:'+(prob>0?'var(--warning)':'var(--text-3)')+';font-weight:600">'+prob+'</span></div>';
+      h+='</div></div>';
+      return h;
+    }
+    // Строка статуса: точка + текст (недоступность / отключённые / стабильно).
+    var stDot='var(--success)', stTxt='Сервер работает стабильно';
+    if(met&&met.error){ stDot='var(--danger)'; stTxt='Бокс недоступен: '+met.error; }
+    else if(disc>0){ stDot='var(--warning)'; stTxt=disc+' отключено'; }
+    if(met&&met.age_sec>20*60&&met.collected_at){ var dt=new Date(Date.parse(met.collected_at)); stTxt+=' · данные на '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0'); }
+    h+='<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-2);margin-bottom:10px"><span style="width:7px;height:7px;border-radius:50%;background:'+stDot+';flex-shrink:0"></span>'+esc(stTxt)+'</div>';
+    // Три тайла: трафик / сигнал (шкала 0-5, dBm боксы не отдают) / проблемные.
+    function tile(ic,label,val,bg,fg,title){
+      return '<div style="flex:1;background:var(--bg-2);border-radius:10px;padding:9px 10px;min-width:0"'+(title?' title="'+esc(title)+'"':'')+'>'
+        +'<span style="width:26px;height:26px;border-radius:7px;background:'+bg+';color:'+fg+';display:flex;align-items:center;justify-content:center;margin-bottom:6px">'+icon(ic,13)+'</span>'
+        +'<span style="display:block;font-size:9px;color:var(--text-3);margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(label)+'</span>'
+        +'<span style="display:block;font-size:14px;font-weight:700;color:var(--text-0);font-family:var(--font-mono)">'+esc(val)+'</span></div>';
+    }
+    h+='<div style="display:flex;gap:8px;margin-bottom:10px">'
+      +tile('chart','Трафик сегодня',fmtGb(today),'var(--green-bg)','var(--success)')
+      +tile('signal','Средний сигнал',sigAvg?sigAvg+'/5':'—','var(--green-bg)','var(--success)','Боксы отдают шкалу 0–5, не dBm')
+      +tile('alert','Проблемных',String(prob),prob>0?'rgba(255,204,0,0.12)':'var(--bg-3)',prob>0?'var(--warning)':'var(--text-3)')
+      +'</div>';
+    // Строки метрик со спарклайнами за 24ч + пилюли средних.
+    if(met&&typeof srvMetRowV2==='function'){
+      var a24=met.avg24||{}, s24=met.series24||{};
+      h+=srvMetRowV2('cpu','CPU','Загрузка процессора',met.cpu_pct,null,a24.cpu_pct,s24.cpu);
+      h+=srvMetRowV2('ram','RAM','Использование памяти',met.mem_used_pct,_srvMetGb(met.mem_used_mb,met.mem_total_mb),a24.mem_used_pct,s24.mem);
+      h+=srvMetRowV2('disk','Диск','Использование диска',met.disk_used_pct,_srvMetGb(met.disk_used_mb,met.disk_total_mb),a24.disk_used_pct,s24.disk);
+      h+='<div style="text-align:center;font-size:9.5px;color:var(--text-3);margin:6px 0 2px"><span style="color:var(--success)">——</span> Текущие значения &nbsp;<span style="letter-spacing:2px">- - -</span> Средние за 24 часа</div>';
+      // Футер: температура / аптайм / соединения + пилюля-легенда справа.
+      var ft='';
+      if(met.temp_c!=null){ var tc=met.temp_c>=70?'var(--danger)':met.temp_c>=55?'var(--warning)':'var(--text-1)'; ft+='<span style="display:flex;align-items:center;gap:4px;color:'+tc+'">'+icon('thermo',12)+esc(String(met.temp_c))+'°C</span>'; }
+      var up=typeof _srvMetUptime==='function'?_srvMetUptime(met.uptime_sec):'';
+      if(up) ft+='<span style="display:flex;align-items:center;gap:4px">'+icon('clock',12)+esc(up)+'</span>';
+      if(met.conns!=null) ft+='<span style="display:flex;align-items:center;gap:4px">'+icon('link',12)+esc(String(met.conns))+'</span>';
+      if(ft) h+='<div style="display:flex;align-items:center;gap:14px;font-size:10.5px;color:var(--text-2);border-top:1px solid var(--border);padding-top:8px;margin-top:4px">'+ft+'<span style="margin-left:auto;font-size:9px;color:var(--text-3);background:var(--bg-3);border-radius:8px;padding:2px 7px;white-space:nowrap">Средние за 24 часа</span></div>';
+      if(met.mongo_ok===0||met.usb_errors) h+='<div style="font-size:10px;color:var(--danger);margin-top:6px">'+(met.mongo_ok===0?'MongoDB FAIL. ':'')+(met.usb_errors?'USB: '+esc(String(met.usb_errors)):'')+'</div>';
+    } else {
+      h+='<div style="font-size:11px;color:var(--text-3);padding:10px 0;border-top:1px solid var(--border)">Данных о загрузке ещё нет — джоба пишет раз в 10 мин</div>';
+    }
     h+='</div>';
     return h;
   }

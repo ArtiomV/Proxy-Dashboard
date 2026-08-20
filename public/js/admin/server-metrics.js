@@ -187,6 +187,56 @@ function srvMetInline(name) {
 // Данные складываем в window._srvMetData и перерендериваем карточки парка —
 // отдельного блока «Загрузка серверов» больше нет, метрики живут внутри
 // карточек «Парк по серверам» (20.08).
+//
+// ── Редизайн карточки сервера (20.08, макет от владельца) ──
+// Спарклайн 24ч: сплошная зелёная линия — текущие значения, пунктир —
+// среднее за 24 часа. Растягивается по ширине (viewBox 300x36).
+function _srvSpark(series, avgPct) {
+  var pts = [];
+  if (series && series.length) {
+    var n = series.length;
+    for (var i = 0; i < n; i++) {
+      var v = series[i];
+      if (v == null || !isFinite(v)) continue;
+      var x = n > 1 ? (i / (n - 1)) * 300 : 150;
+      var y = 34 - (Math.max(0, Math.min(100, v)) / 100) * 30;
+      pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+    }
+  }
+  var h = '<svg viewBox="0 0 300 36" preserveAspectRatio="none" style="width:100%;height:36px;display:block">';
+  if (avgPct != null && isFinite(avgPct)) {
+    var ay = 34 - (Math.max(0, Math.min(100, avgPct)) / 100) * 30;
+    h += '<line x1="0" y1="' + ay.toFixed(1) + '" x2="300" y2="' + ay.toFixed(1)
+      + '" style="stroke:var(--text-3)" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>';
+  }
+  if (pts.length > 1) {
+    h += '<polyline points="' + pts.join(' ') + '" fill="none" stroke-width="1.8"'
+      + ' stroke-linejoin="round" stroke-linecap="round"'
+      + ' style="stroke:var(--success);vector-effect:non-scaling-stroke"/>';
+  }
+  return h + '</svg>';
+}
+
+// Строка метрики: иконка + название/подпись + спарклайн + текущее значение
+// (крупно, с подписью-абсолютом типа «3,3/7,4 ГБ») + пилюля «ср. 24ч».
+function srvMetRowV2(ic, title, sub, curPct, absText, avgPct, series) {
+  var val = curPct == null ? '—' : curPct + '%';
+  return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border)">'
+    + '<span style="width:34px;height:34px;flex-shrink:0;border-radius:8px;background:var(--green-bg);color:var(--success);display:flex;align-items:center;justify-content:center">' + icon(ic, 16) + '</span>'
+    + '<span style="width:110px;flex-shrink:0">'
+    + '<span style="display:block;font-size:12px;font-weight:600;color:var(--text-0)">' + esc(title) + '</span>'
+    + '<span style="display:block;font-size:9.5px;color:var(--text-3)">' + esc(sub) + '</span></span>'
+    + '<span style="flex:1;min-width:60px">' + _srvSpark(series, avgPct) + '</span>'
+    + '<span style="min-width:56px;flex-shrink:0;text-align:right">'
+    + '<span style="display:block;font-size:16px;font-weight:700;color:var(--text-0);font-family:var(--font-mono)">' + esc(val) + '</span>'
+    + (absText ? '<span style="display:block;font-size:9px;color:var(--text-3);font-family:var(--font-mono)">' + esc(absText) + '</span>' : '')
+    + '</span>'
+    + (avgPct != null
+      ? '<span style="flex-shrink:0;font-size:9.5px;color:var(--text-3);background:var(--bg-3);border-radius:9px;padding:3px 7px;white-space:nowrap">ср. 24ч: ' + esc(String(avgPct)) + '%</span>'
+      : '')
+    + '</div>';
+}
+
 function renderServerMetrics(box, d) {
   window._srvMetData = d || {};
   if (typeof renderNewFleetServers === 'function') renderNewFleetServers();
@@ -203,5 +253,5 @@ function loadServerMetrics(force) {
 
 // Экспорт для node-тестов (паттерн public/js/utils.js).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { _srvMetBar, _srvMetUptime, _srvMetCard, renderServerMetrics, _srvMetColor, srvMetInline };
+  module.exports = { _srvMetBar, _srvMetUptime, _srvMetCard, renderServerMetrics, _srvMetColor, srvMetInline, _srvSpark, srvMetRowV2 };
 }

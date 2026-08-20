@@ -156,10 +156,9 @@
 #tab-dashboard .acc-expand > summary::after{content:'›';font-size:15px;transform:rotate(90deg);transition:transform .15s}
 #tab-dashboard .acc-expand[open] > summary::after{transform:rotate(-90deg)}
 
-/* ── Парк по серверам — 3 колонки как в макете ── */
-#tab-dashboard .fleet-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:var(--gap-block)}
-@media(max-width:900px){#tab-dashboard .fleet-grid{grid-template-columns:repeat(2,1fr)}}
-@media(max-width:560px){#tab-dashboard .fleet-grid{grid-template-columns:1fr}}
+/* ── Парк по серверам — 2 колонки (широкие карточки с графиками, 20.08) ── */
+#tab-dashboard .fleet-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:12px;margin-bottom:var(--gap-block)}
+@media(max-width:900px){#tab-dashboard .fleet-grid{grid-template-columns:1fr}}
 
 @media(max-width:480px){#tab-dashboard{padding:12px 12px 70px!important}}
 

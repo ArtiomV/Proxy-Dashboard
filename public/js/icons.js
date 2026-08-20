@@ -85,6 +85,11 @@
     send: '<path d="M21 3 10.5 13.5"/><path d="M21 3 14 21l-3.5-7.5L3 10z"/>',
     filter: '<path d="M4 5h16l-6.5 7.5V19l-3 2v-8.5z"/>',
     server: '<rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/>',
+    // hardware (карточка сервера, редизайн 20.08)
+    cpu: '<rect x="6" y="6" width="12" height="12" rx="2"/><rect x="10" y="10" width="4" height="4"/><path d="M9 3v3M15 3v3M9 18v3M15 18v3M3 9h3M3 15h3M18 9h3M18 15h3"/>',
+    ram: '<rect x="3" y="7" width="18" height="8" rx="1.5"/><path d="M7 15v3M12 15v3M17 15v3M7.5 10.5h.01M12 10.5h.01M16.5 10.5h.01"/>',
+    disk: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15h18"/><path d="M7 10h.01M17 17.5h.01"/>',
+    thermo: '<path d="M12 3a2 2 0 0 1 2 2v7.3a4.5 4.5 0 1 1-4 0V5a2 2 0 0 1 2-2z"/><path d="M12 10v6"/>',
     mobile: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 17.5h2"/>',
     sim: '<path d="M8 3h8l4 4v14H8z" transform="translate(-1 0)"/><rect x="9" y="11" width="7" height="6" rx="1"/>',
     gift: '<rect x="4" y="10" width="16" height="10" rx="1.5"/><path d="M12 10v10"/><path d="M12 10S9 10 7.8 8.8A2.1 2.1 0 0 1 10.8 6C12 7.5 12 10 12 10zM12 10s3 0 4.2-1.2A2.1 2.1 0 0 0 13.2 6C12 7.5 12 10 12 10z"/>',

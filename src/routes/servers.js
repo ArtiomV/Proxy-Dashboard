@@ -88,11 +88,29 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
         samples: a.samples,
       };
     }
+    // Ряды за 24ч для спарклайнов карточек (редизайн 20.08): до 48 точек,
+    // равномерное прореживание, null там, где метрики не было.
+    const seriesRows = db.prepare(`SELECT server_name, cpu_pct, mem_used_pct, disk_used_pct
+      FROM server_metrics WHERE collected_at > ? ORDER BY collected_at`).all(sinceIso);
+    const bySrv = {};
+    for (const r of seriesRows) (bySrv[r.server_name] || (bySrv[r.server_name] = [])).push(r);
+    const series24 = {};
+    for (const [name, arr] of Object.entries(bySrv)) {
+      const step = Math.max(1, Math.ceil(arr.length / 48));
+      const cpu = [], mem = [], disk = [];
+      for (let i = 0; i < arr.length; i += step) {
+        cpu.push(arr[i].cpu_pct);
+        mem.push(arr[i].mem_used_pct);
+        disk.push(arr[i].disk_used_pct);
+      }
+      series24[name] = { cpu, mem, disk };
+    }
     for (const row of rows) {
       byName[row.server_name] = {
         ...row,
         age_sec: Math.max(0, Math.round((Date.now() - Date.parse(row.collected_at)) / 1000)),
         avg24: avg24[row.server_name] || null,
+        series24: series24[row.server_name] || null,
       };
     }
   } catch (e) {
