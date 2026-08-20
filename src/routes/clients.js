@@ -36,6 +36,9 @@ module.exports = function createClientsRouter(deps) {
     validateClientInput,
     appSettings,
     notifyClient,   // B2C Э3 (WP5): «Зачислено N ₽» клиенту после ручного зачисления
+    // Ручная блокировка клиента (POST /:id/block): гашение портов и пула.
+    proxyConf, parseHtmlInputFields, findServer, proxySmart, getMoscowNow,
+    retailPoolDb, alerts,
   } = deps;
   const r = express.Router();
 
@@ -640,6 +643,70 @@ r.post('/api/admin/clients/:id/regenerate_key', authMiddleware, adminMiddleware,
   client.apiKeyPrefix = plainApiKey.slice(0, 8);
   saveClients(clients);
   res.json({ ok: true, apiKey: plainApiKey });
+});
+
+// Ручная блокировка клиента админом: blocked=1, сброс всех сессий, гашение
+// всех портов (B2B — «дата до» = сегодня, как debt-block; розница — пул →
+// blocked с ∞ hold, как domain-guard). Идемпотентно: повторный вызов по уже
+// заблокированному клиенту только дожимает порты.
+r.post('/api/admin/clients/:id/block', authMiddleware, adminMiddleware, async (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+  const wasBlocked = !!client.blocked;
+  client.blocked = true;
+  saveClients(clients);
+  try { deleteSessionsByLogin(client.login); } catch (_) { /* best-effort */ }
+
+  const today = getMoscowNow().toLocaleDateString('en-CA');   // YYYY-MM-DD
+  const result = { b2b: 0, retail: 0, errors: [] };
+  try {
+    const portValidity = require('../services/port-validity').create({
+      proxyConf, fetchApi, parseHtmlInputFields, findServer, proxySmart, ledgerDb, getMoscowNow,
+    });
+    const serverResults = await fetchAllServersDataCached();
+    for (const pt of portValidity.clientPorts(client, serverResults)) {
+      try {
+        await portValidity.setPortValidBefore(pt.server, pt.portId, today);
+        result.b2b++;
+      } catch (e) {
+        result.errors.push(`${pt.server && pt.server.name || '?'}/${pt.portId}: ${e.message}`);
+      }
+    }
+  } catch (e) {
+    result.errors.push('b2b: ' + e.message);
+  }
+  try {
+    if (retailPoolDb) {
+      for (const pr of retailPoolDb.byClient(client.id)) {
+        if (pr.status === 'leased' || pr.status === 'reserved') { retailPoolDb.block(pr.id, null); result.retail++; }
+      }
+    }
+  } catch (e) {
+    result.errors.push('retail: ' + e.message);
+  }
+
+  logger.warn(`[Clients] ${client.login}: ручная блокировка админом ${req.user.login} — погашено B2B ${result.b2b}, розница ${result.retail}${result.errors.length ? ', ошибки: ' + result.errors.join('; ') : ''}`);
+  auditLog(req.user.login, 'client_block_admin', {
+    clientId: client.id, login: client.login, wasBlocked,
+    b2b: result.b2b, retail: result.retail, errors: result.errors,
+    ip: getClientIp(req),
+  });
+  logActivity('client', 'warning', 'client_block_admin', client.login,
+    `Клиент заблокирован админом: погашено портов B2B ${result.b2b}, розница ${result.retail}`,
+    { client_id: client.id, b2b: result.b2b, retail: result.retail });
+  try {
+    alerts.trigger('client_blocked_admin', {
+      client_id: client.id, client: client.name || client.login,
+      b2b: result.b2b, retail: result.retail,
+      errors: result.errors.length ? result.errors.join('; ') : '',
+    });
+  } catch (_) { /* alert best-effort */ }
+  try {
+    await notifyClient(client,
+      'Аккаунт заблокирован администратором. Доступ к прокси приостановлен — свяжитесь с поддержкой.',
+      { action: 'client_block_admin', details: { client_id: client.id } });
+  } catch (e) { logger.warn(`[Clients] notify ${client.login}: ${e.message}`); }
+  res.json({ ok: true, blocked: true, ...result });
 });
 
 // B2C Э5 (WP7): разблокировка аккаунта — ТОЛЬКО админом (§8 ТЗ). blocked=0;

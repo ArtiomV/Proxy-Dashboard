@@ -3401,6 +3401,9 @@ app.use(require('./src/routes/clients')({
   // B2C Э3 (WP5): уведомление клиенту о ручном зачислении. _clientNotify
   // объявлен ниже (const, TDZ) — ленивый шим.
   notifyClient: (...args) => _clientNotify.notifyClient(...args),
+  // Ручная блокировка клиента (POST /clients/:id/block): гашение портов/пула.
+  proxyConf, parseHtmlInputFields, findServer, proxySmart, getMoscowNow,
+  retailPoolDb, alerts,
 }));
 
 

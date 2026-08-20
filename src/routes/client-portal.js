@@ -61,11 +61,12 @@ module.exports = function createClientPortalRouter(deps) {
       .reduce((sum, e) => sum + ledgerExpense(e), 0);
     return Math.round((last7dTotal / 7) * 100) / 100;
   }
-  function _debtStatus(clientInfo, avgDailyCharge7d) {
+  function _debtStatus(clientInfo, avgDailyCharge7d, hasPorts) {
     if (!clientInfo || clientInfo.clientType === 'legal' || clientInfo.allowDebt) return null;
-    // Нет привязанных портов — продлевать нечего, блокировать нечего:
-    // баннер «Отрицательный баланс… пополните» не показываем (20.08).
-    if (!String(clientInfo.portName || '').trim()) return null;
+    // Нет живых портов — продлевать нечего, блокировать нечего: баннер
+    // «Отрицательный баланс… пополните» не показываем (20.08). portName тут
+    // не гейт: это имя привязки (= логин), оно остаётся и без портов.
+    if (hasPorts === false) return null;
     const balance = clientInfo.balance || 0;
     if (balance <= 0) return { state: clientInfo.debtBlocked ? 'blocked' : 'debt', balance };
     if (avgDailyCharge7d > 0 && balance <= 3 * avgDailyCharge7d) {
@@ -128,8 +129,10 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
       // B3 (Р13): портал-баннер — статус долга/блокировки + ближайшая «дата до»
       // по портам (истекающая аренда — клиентский контур ProxyExpiryCheck).
       let earliestExpiry = null;
+      let portCount = 0;
       for (const list of Object.values(merged.ports || {})) {
         for (const p of list || []) {
+          portCount++;
           const vb = p && p.PROXY_VALID_BEFORE;
           if (!vb) continue;
           const t = Date.parse(vb);
@@ -147,7 +150,7 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         liveMonthGb,
         billedMonthGb: Math.round(billedMonthGb * 1000) / 1000,
         lastHourGb,
-        debtStatus: _debtStatus(clientInfo, _avgDailyCharge7d(ledgerEntries)),
+        debtStatus: _debtStatus(clientInfo, _avgDailyCharge7d(ledgerEntries), portCount > 0),
         expiresAt: earliestExpiry !== null ? new Date(earliestExpiry).toISOString().slice(0, 10) : null,
         // Masked: only the prefix is shown (keys are hashed at rest since
         // migration 043). A lost key is re-issued by admin via regenerate.
@@ -226,9 +229,18 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
   }
 });
 
-r.get('/api/billing_history', authMiddleware, (req, res) => {
+r.get('/api/billing_history', authMiddleware, async (req, res) => {
   const clientInfo = clientByLogin.get(req.user.login);
   if (!clientInfo) return res.status(404).json({ error: 'Client not found' });
+
+  // Есть ли у клиента живые порты (для баннера долга): cached-данные боксов.
+  // Без портов «Отрицательный баланс» не показываем — продлевать нечего.
+  let hasPorts = true;   // fail-open: при ошибке боксов поведение как раньше
+  try {
+    const results = await fetchAllServersDataCached();
+    const mergedPorts = mergeServerData(results, req.user.portNameFilter).ports || {};
+    hasPorts = Object.values(mergedPorts).some(list => Array.isArray(list) && list.length > 0);
+  } catch (_) { /* боксы недоступны — не гасим баннер ошибочно */ }
 
   const entries = ledgerDb.listByClient(clientInfo.id);
 
@@ -273,7 +285,7 @@ r.get('/api/billing_history', authMiddleware, (req, res) => {
       daysUntilZero: avgDailyCharge7d > 0 ? Math.floor(clientInfo.balance / avgDailyCharge7d) : null
     },
     // B3 (Р13): портал-баннер (blocked/debt/warning) — рендерится на вкладке «История баланса».
-    debtStatus: _debtStatus(clientInfo, avgDailyCharge7d),
+    debtStatus: _debtStatus(clientInfo, avgDailyCharge7d, hasPorts),
     
     entries: filtered.map(({ db_id, ...e }) => e)
   });

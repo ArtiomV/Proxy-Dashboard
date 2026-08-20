@@ -152,6 +152,7 @@
   "POST /api/admin/clients",
   "POST /api/admin/clients/:id/balance_adjust",
   "POST /api/admin/clients/:id/bill_status",
+  "POST /api/admin/clients/:id/block",
   "POST /api/admin/clients/:id/charge",
   "POST /api/admin/clients/:id/closing_document_status",
   "POST /api/admin/clients/:id/document",

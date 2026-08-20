@@ -435,8 +435,13 @@ function saveProxyCheckSettings(){
   var concurrency=parseInt(document.getElementById('proxyCheckConcurrencyInput').value)||10;
   if(warn>=bad){showToast('Порог жёлтого должен быть меньше красного','error');return}
   if(interval<5||interval>1440){showToast('Интервал: от 5 до 1440 мин','error');return}
+  // Пороги «Сбоит прокси» (группа в той же карточке): боевой порог
+  // проблемных модемов → авто-ребут / failover.
+  var palLatency=parseInt(document.getElementById('proxyAlertLatencyInput').value)||1500;
+  var palErrPct=parseFloat(document.getElementById('proxyAlertErrorPctInput').value)||5;
+  var palWindow=parseInt(document.getElementById('proxyAlertWindowInput').value)||60;
   _pcWarnMs=warn;_pcBadMs=bad;
-  api(API+'/api/admin/settings',{method:'PUT',json:{proxy_check_target:target,proxy_check_warn_ms:warn,proxy_check_bad_ms:bad,proxy_check_interval_min:interval,proxy_check_timeout_sec:timeout,proxy_check_concurrency:concurrency}}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{proxy_check_target:target,proxy_check_warn_ms:warn,proxy_check_bad_ms:bad,proxy_check_interval_min:interval,proxy_check_timeout_sec:timeout,proxy_check_concurrency:concurrency,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow}}).then(function(d){
     if(d.ok){showToast('Настройки замера сохранены','success');document.getElementById('proxyCheckSettingsStatus').textContent='Сохранено: '+target+' | каждые '+interval+' мин | зелёный <'+warn+'мс | жёлтый <'+bad+'мс | красный >'+bad+'мс';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -444,6 +449,10 @@ function saveProxyCheckSettings(){
 function saveSettings(){
   // Ники модемов почасового замера: отмеченные чекбоксы → CSV; если пикер не
   // отрендерился (ошибка загрузки) — фолбэк на скрытый input с текущим CSV.
+  // Раздел «Спидтесты»: только замер скорости и подсветка в таблицах.
+  // Пороги «Сбоит прокси» — saveProxyCheckSettings, авто-ребут —
+  // saveRecoverySettings, пороги оффлайна — saveAlertThresholds,
+  // reconcile_days — saveSessionBillingSettings.
   var modems;
   var chks=document.querySelectorAll('.speedtest-modem-chk');
   if(chks.length){
@@ -461,23 +470,26 @@ function saveSettings(){
   var smRr=parseInt(document.getElementById('speedmonRetryRoundsInput').value);
   if(isNaN(smRr))smRr=10;
   var smRet=parseInt(document.getElementById('retSpeedMonitorInput').value)||60;
-  var palLatency=parseInt(document.getElementById('proxyAlertLatencyInput').value)||1500;
-  var palErrPct=parseFloat(document.getElementById('proxyAlertErrorPctInput').value)||5;
-  var palWindow=parseInt(document.getElementById('proxyAlertWindowInput').value)||60;
-  var arEnabled=!!(document.getElementById('autoRebootEnabledInput')||{}).checked;
-  var arInterval=parseInt(document.getElementById('autoRebootIntervalInput').value)||60;
-  var recDays=parseInt((document.getElementById('reconcileDaysInput')||{}).value)||2;
   _minSpeedThreshold=minSpeed;
   _errorRateThreshold=errThresh;
-  var staleH=parseInt(document.getElementById('staleModemHoursInput').value)||12;
-  var offThMin=parseInt((document.getElementById('modemOfflineThresholdInput')||{}).value)||10;
-  var rbs=parseInt((document.getElementById('rebootScoreAlertInput')||{}).value);
-  if(isNaN(rbs))rbs=70;
-  window._offlineThresholdMin=offThMin;
-  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,reboot_score_alert_threshold:rbs,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin,reconcile_days:recDays}}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet}}).then(function(d){
     if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Почасовой замер: '+(modems.join(', ')||'дефолтный список')+' — применится со следующего часа';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
+}
+// Раздел «Уведомления» → «Пороги доступности модемов»: stale_modem_hours +
+// modem_offline_threshold_min (исключение из агрегаций и TG-алерты оффлайна).
+function saveAlertThresholds(){
+  var staleH=parseInt(document.getElementById('staleModemHoursInput').value)||12;
+  var offThMin=parseInt((document.getElementById('modemOfflineThresholdInput')||{}).value)||10;
+  window._staleModemHours=staleH;
+  window._offlineThresholdMin=offThMin;
+  var st=document.getElementById('alertThresholdsStatus');
+  if(st){st.textContent='Сохраняю...';st.style.color='var(--warning)';}
+  api(API+'/api/admin/settings',{method:'PUT',json:{stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
+    if(d.ok){if(st){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';}showToast('Пороги доступности сохранены','success');renderTable()}
+    else{if(st){st.textContent=d.error||'Ошибка';st.style.color='var(--danger)';}showToast(d.error||'Ошибка','error');}
+  }).catch(function(e){if(st){st.textContent=e.message;st.style.color='var(--danger)';}showToast(e.message,'error')});
 }
 
 // Stage 19.2 — restart-needed state is GLOBAL + persistent. Any settings save
@@ -513,9 +525,14 @@ function saveRecoverySettings(){
   var skipDeadSim=document.getElementById('recoverySkipDeadSimInput').checked;
   var skipUnsold=document.getElementById('recoverySkipUnsoldInput').checked;
   var rndReboot=(document.getElementById('randomRebootEnabledInput')||{}).checked!==false;
+  // Авто-ребут проблемных (группа в той же карточке «Восстановление»).
+  var arEnabled=!!(document.getElementById('autoRebootEnabledInput')||{}).checked;
+  var arInterval=parseInt((document.getElementById('autoRebootIntervalInput')||{}).value)||60;
+  var rbs=parseInt((document.getElementById('rebootScoreAlertInput')||{}).value);
+  if(isNaN(rbs))rbs=70;
   var st=document.getElementById('recoverySettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:{recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold,random_modem_reboot_enabled:rndReboot}}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold,random_modem_reboot_enabled:rndReboot,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,reboot_score_alert_threshold:rbs}}).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -553,7 +570,8 @@ function saveSessionBillingSettings(){
     session_ttl_days:parseInt(document.getElementById('sessionTtlDaysInput').value)||30,
     billing_retry_delay_hours:parseFloat(document.getElementById('billingRetryHoursInput').value)||1,
     reconciliation_tolerance_gb:parseFloat(document.getElementById('reconciliationToleranceInput').value)||0.01,
-    auto_create_interval_min:parseInt(document.getElementById('autoCreateIntervalInput').value)||10
+    auto_create_interval_min:parseInt(document.getElementById('autoCreateIntervalInput').value)||10,
+    reconcile_days:parseInt((document.getElementById('reconcileDaysInput')||{}).value)||2
   };
   var st=document.getElementById('sessionBillingSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';

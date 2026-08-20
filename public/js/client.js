@@ -1449,6 +1449,8 @@ async function loadData(){
         icon('alert',13)+' Сервер недоступен: '+escapeHtml(cacheWarnings)+'. Трафик и доступы отображаются из кеша. Модемы помечены как offline.</div>';
     }
 
+    // Скролл не дёргаем при ререндере (контейнеры схлопываются → прыгало наверх).
+    var _sy=window.scrollY;
     try{renderTable()}catch(e){console.error('[loadData] renderTable:',e)}
     try{renderProxyTable()}catch(e){console.error('[loadData] renderProxyTable:',e)}
     try{updateSummary()}catch(e){console.error('[loadData] updateSummary:',e)}
@@ -1459,6 +1461,7 @@ async function loadData(){
     if(_savedTab){var _tabEl=document.querySelector('.nav-tab[onclick*="\''+_savedTab+'\'"]');if(_tabEl)switchTab(_savedTab,_tabEl)}
 
     setStatus(cachedServers.length>0?'loading':'ok',cachedServers.length>0?'Частичные данные':'OK');
+    requestAnimationFrame(function(){requestAnimationFrame(function(){window.scrollTo(0,_sy)})});
 
   }catch(err){
     if(err.message==='Сессия истекла') return;

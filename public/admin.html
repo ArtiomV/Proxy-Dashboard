@@ -83,7 +83,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.23</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.24</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -99,7 +99,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.23</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.24</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -108,7 +108,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.23</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.24</a>
     <span class="last-update" id="lastUpdate"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
@@ -178,15 +178,6 @@
     <!-- ───── ПАРК ПО СЕРВЕРАМ (как в макете — наверх) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/></svg>Парк по серверам</div>
     <div id="newFleetServers" class="fleet-grid"><div class="skel" style="height:150px"></div><div class="skel" style="height:150px"></div><div class="skel" style="height:150px"></div><div class="skel" style="height:150px"></div></div>
-
-    <!-- Загрузка серверов — часть раздела «Парк по серверам» (ServerMetrics: SSH + /system_status, раз в 10 мин) -->
-    <div class="analytics-card" style="margin-bottom:16px">
-      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;flex-wrap:wrap;gap:8px">
-        <span style="font-size:12px;font-weight:600;color:var(--text-1)">Загрузка серверов <span style="font-weight:400;font-size:11px;color:var(--text-3)">· CPU · load · RAM · swap · диск · температура · аптайм — замер раз в 10 мин</span></span>
-        <button class="dchip" data-on-click="loadServerMetrics(true)">Обновить</button>
-      </div>
-      <div id="serverMetrics" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px"><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div><div class="skel" style="height:170px"></div></div>
-    </div>
 
     <!-- ───── ФИНАНСЫ ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg>Финансы</div>
@@ -374,12 +365,13 @@
       <div class="settings-nav-item" id="snav_failover" data-on-click="switchSettingsSection('failover')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h8.5M9 3.5l2 2-2 2"/><path d="M13.5 10.5H5M7 8.5l-2 2 2 2"/></svg>Failover</div>
       <div class="settings-nav-item" id="snav_recovery" data-on-click="switchSettingsSection('recovery')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 8a5.4 5.4 0 11-1.6-3.8"/><path d="M13.6 2.6v3.1h-3.1"/></svg>Восстановление</div>
       <div class="settings-nav-item" id="snav_proxycheck" data-on-click="switchSettingsSection('proxycheck')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="6" height="5" rx="1"/><path d="M5.6 5V2.4M8.4 5V2.4M7 10v3.6"/></svg>Проверка прокси</div>
+      <div class="settings-nav-item" id="snav_speedtest" data-on-click="switchSettingsSection('speedtest')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 11.5a6 6 0 0111 0"/><path d="M8 11.5l2.6-3.4"/><circle cx="8" cy="11.5" r=".9"/></svg>Спидтесты</div>
 
       <div class="snav-grp">ИНСТРУМЕНТЫ</div>
       <div class="settings-nav-item" id="snav_bank" data-on-click="switchSettingsSection('bank')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 6l6-3.5L14 6M3 6.5v5.5M13 6.5v5.5M5.6 6.5v5.5M8 6.5v5.5M10.4 6.5v5.5M2.5 13.5h11"/></svg>Банк</div>
       <div class="settings-nav-item" id="snav_simulator" data-on-click="switchSettingsSection('simulator')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M8 1.5c2.4 1.6 3.4 4 3.4 6.5L9.5 11h-3L4.6 8C4.6 5.5 5.6 3.1 8 1.5z"/><circle cx="8" cy="6" r="1"/><path d="M6.4 11l-1.4 2.5M9.6 11l1.4 2.5"/></svg>Симулятор</div>
       <div class="settings-nav-item" id="snav_tariffs" data-on-click="switchSettingsSection('tariffs')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5h11M2.5 8h11M2.5 11h7"/><circle cx="12.5" cy="12" r="2.2"/></svg>Розница</div>
-      <div class="settings-nav-item" id="snav_data" data-on-click="switchSettingsSection('data')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4.5" x2="14" y2="4.5"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="11.5" x2="14" y2="11.5"/><circle cx="6" cy="4.5" r="1.6" fill="var(--bg-1)"/><circle cx="10.5" cy="8" r="1.6" fill="var(--bg-1)"/><circle cx="5" cy="11.5" r="1.6" fill="var(--bg-1)"/></svg>Данные и хранение</div>
+      <div class="settings-nav-item" id="snav_data" data-on-click="switchSettingsSection('data')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><line x1="2" y1="4.5" x2="14" y2="4.5"/><line x1="2" y1="8" x2="14" y2="8"/><line x1="2" y1="11.5" x2="14" y2="11.5"/><circle cx="6" cy="4.5" r="1.6" fill="var(--bg-1)"/><circle cx="10.5" cy="8" r="1.6" fill="var(--bg-1)"/><circle cx="5" cy="11.5" r="1.6" fill="var(--bg-1)"/></svg>Система</div>
     </div>
     <!-- Content -->
     <div style="flex:1;overflow-y:auto;padding:24px">
@@ -1029,8 +1021,8 @@
           <button class="btn btn-primary" data-on-click="restartDashboard()" id="restartDashboardBtn">Перезапустить сервер</button>
         </div>
 
-        <!-- Telegram-уведомления -->
-        <div class="analytics-card" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+        <!-- Telegram-уведомления (раздел «Уведомления») -->
+        <div class="analytics-card" data-subsec="alerts" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
           <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Telegram-уведомления</h3></div>
           <div class="settings-card-desc">Ежедневная сводка по дашборду в Telegram — финансы, трафик, инфраструктура и ротации за сутки. Отправляется в назначенный чат в указанное время МСК.</div>
           <div class="set-card">
@@ -1053,10 +1045,12 @@
           <pre id="tgPreviewArea" style="display:none;background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:10px;font-size:11px;font-family:var(--font-mono);white-space:pre-wrap;word-break:break-word;margin-top:8px;max-height:300px;overflow:auto"></pre>
         </div>
 
-        <!-- Спидтесты + пороги «проблемных» + авто-ребут — 3 группы, одно сохранение -->
-        <div class="analytics-card" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Спидтесты и пороги качества</h3></div>
-          <div class="settings-card-desc">Измерение скорости модемов, пороги «проблемных» (по ним модем попадает в карточку «Сбоит прокси») и авто-перезагрузка. Сохраняются вместе.</div>
+        <!-- Спидтесты (раздел «Спидтесты»): почасовой замер + пороги качества.
+             Пороги «Сбоит прокси» — в «Проверка прокси», авто-ребут — в
+             «Восстановление», пороги оффлайна — в «Уведомления». -->
+        <div class="analytics-card" data-subsec="speedtest" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Спидтесты</h3></div>
+          <div class="settings-card-desc">Измерение скорости модемов: выборочный почасовой замер, перезамеры неудачных, пороги подсветки в таблицах.</div>
 
           <div class="set-grp-label">СПИДТЕСТЫ</div>
           <div class="set-card">
@@ -1071,28 +1065,30 @@
             <div class="set-row"><div><div class="set-row-t">Макс. записей истории</div><div class="set-row-d">Сколько последних результатов хранить на модем (ручные замеры)</div></div><div class="set-inp"><input id="speedtestMaxHistoryInput" type="number" min="5" max="200"></div></div>
           </div>
 
-          <div class="set-grp-label">ПОРОГИ «ПРОБЛЕМНЫХ» МОДЕМОВ</div>
+          <div class="set-grp-label">ПОДСВЕТКА В ТАБЛИЦАХ</div>
           <div class="set-card">
-            <div class="set-row"><div><div class="set-row-t">Подсветка ошибок в таблице</div><div class="set-row-d">Только красная ячейка (7 дней). На авто-действия НЕ влияет — для них «Сбоит прокси» ниже</div></div><div class="set-inp"><input id="errorRateThresholdInput" type="number" step="1" min="1" max="100"><span>%</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Порог «оффлайн модем»</div><div class="set-row-d">Дольше — модем исключается из агрегаций (Online, графики, ёмкость, ротации, IP). Без перезапуска</div></div><div class="set-inp"><input id="staleModemHoursInput" type="number" step="1" min="1" max="168"><span>ч</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Порог «модем отключен»</div><div class="set-row-d">Сколько минут модем молчит, прежде чем попадёт в «Модем отключен» / «Офлайн» и уйдёт TG-алерт. Без перезапуска</div></div><div class="set-inp"><input id="modemOfflineThresholdInput" type="number" step="1" min="1" max="120"><span>мин</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: задержка</div><div class="set-row-d">Модем проблемный, если средняя задержка выше</div></div><div class="set-inp"><input id="proxyAlertLatencyInput" type="number" step="50" min="100" max="60000"><span>мс</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: ошибок</div><div class="set-row-d">Боевой порог: помечает модем проблемным → авто-ребут / failover</div></div><div class="set-inp"><input id="proxyAlertErrorPctInput" type="number" step="0.5" min="0" max="100"><span>%</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: окно</div><div class="set-row-d">За какой период оцениваем задержку и ошибки (5–720)</div></div><div class="set-inp"><input id="proxyAlertWindowInput" type="number" step="5" min="5" max="720"><span>мин</span></div></div>
-          </div>
-
-          <div class="set-grp-label">АВТО-РЕБУТ ПРОБЛЕМНЫХ</div>
-          <div class="set-card">
-            <div class="set-row"><div><div class="set-row-t">Авто-перезагрузка проблемных</div><div class="set-row-d"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><path d="M12 17.2h.01"/></svg> Влияет на парк. Модемы из «Сбоит прокси» перезагружаются по интервалу ниже. Не триггерится «ротация без смены IP». По умолчанию выкл</div></div><label class="tgl"><input type="checkbox" id="autoRebootEnabledInput"><span></span></label></div>
-            <div class="set-row"><div><div class="set-row-t">Интервал авто-ребута</div><div class="set-row-d">Не чаще одного перезапуска в интервал на модем (защита от петли)</div></div><div class="set-inp"><input id="autoRebootIntervalInput" type="number" step="5" min="15" max="720"><span>мин</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Алерт по reboot score</div><div class="set-row-d">Модем с оценкой перезагрузок выше порога → TG-алерт в сводке проблемных (0–100)</div></div><div class="set-inp"><input id="rebootScoreAlertInput" type="number" min="0" max="100"><span>баллов</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Удержание портов в знаменателе</div><div class="set-row-d">Сколько дней порт, исчезнувший с бокса, ещё считается у клиента (защита от флапов API). По истечении — выбывает из счётчиков</div></div><div class="set-inp"><input id="reconcileDaysInput" type="number" min="1" max="30"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Подсветка ошибок в таблице</div><div class="set-row-d">Только красная ячейка (7 дней). На авто-действия НЕ влияет — для них «Сбоит прокси» в разделе «Проверка прокси»</div></div><div class="set-inp"><input id="errorRateThresholdInput" type="number" step="1" min="1" max="100"><span>%</span></div></div>
           </div>
 
           <div class="set-save-bar">
             <span id="settingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>
             <button class="btn btn-primary" data-on-click="saveSettings()">Сохранить</button>
+          </div>
+        </div>
+
+        <!-- Пороги доступности модемов (раздел «Уведомления») -->
+        <div class="analytics-card" data-subsec="alerts" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Пороги доступности модемов</h3></div>
+          <div class="settings-card-desc">Когда модем считается оффлайн: исключение из агрегаций и TG-алерты «Модем отключен» / «Модем поднялся».</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Порог «оффлайн модем»</div><div class="set-row-d">Дольше — модем исключается из агрегаций (Online, графики, ёмкость, ротации, IP). Без перезапуска</div></div><div class="set-inp"><input id="staleModemHoursInput" type="number" step="1" min="1" max="168"><span>ч</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Порог «модем отключен»</div><div class="set-row-d">Сколько минут модем молчит, прежде чем попадёт в «Модем отключен» / «Офлайн» и уйдёт TG-алерт. Без перезапуска</div></div><div class="set-inp"><input id="modemOfflineThresholdInput" type="number" step="1" min="1" max="120"><span>мин</span></div></div>
+          </div>
+          <div class="set-save-bar">
+            <span id="alertThresholdsStatus" style="font-size:11px;color:var(--text-2)"></span>
+            <span style="flex:1"></span>
+            <button class="btn btn-primary" data-on-click="saveAlertThresholds()">Сохранить</button>
           </div>
         </div>
 
@@ -1133,6 +1129,13 @@
             <div class="set-row">
               <div class="set-row-t"><span class="pc-lat pc-bad" style="font-size:10px">Красный</span> &nbsp;всё, что выше жёлтого</div>
             </div>
+          </div>
+
+          <div class="set-grp-label">«СБОИТ ПРОКСИ» — ПОРОГИ ПРОБЛЕМНЫХ</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: задержка</div><div class="set-row-d">Модем проблемный, если средняя задержка выше</div></div><div class="set-inp"><input id="proxyAlertLatencyInput" type="number" step="50" min="100" max="60000"><span>мс</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: ошибок</div><div class="set-row-d">Боевой порог: помечает модем проблемным → авто-ребут / failover</div></div><div class="set-inp"><input id="proxyAlertErrorPctInput" type="number" step="0.5" min="0" max="100"><span>%</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: окно</div><div class="set-row-d">За какой период оцениваем задержку и ошибки (5–720)</div></div><div class="set-inp"><input id="proxyAlertWindowInput" type="number" step="5" min="5" max="720"><span>мин</span></div></div>
           </div>
 
           <div class="set-save-bar">
@@ -1193,6 +1196,13 @@
             </div>
           </div>
 
+          <div class="set-grp-label">АВТО-РЕБУТ ПРОБЛЕМНЫХ</div>
+          <div class="set-card">
+            <div class="set-row"><div><div class="set-row-t">Авто-перезагрузка проблемных</div><div class="set-row-d"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3 2.5 20h19L12 3z"/><path d="M12 9.5v4.5"/><path d="M12 17.2h.01"/></svg> Влияет на парк. Модемы из «Сбоит прокси» перезагружаются по интервалу ниже. Не триггерится «ротация без смены IP». По умолчанию выкл</div></div><label class="tgl"><input type="checkbox" id="autoRebootEnabledInput"><span></span></label></div>
+            <div class="set-row"><div><div class="set-row-t">Интервал авто-ребута</div><div class="set-row-d">Не чаще одного перезапуска в интервал на модем (защита от петли)</div></div><div class="set-inp"><input id="autoRebootIntervalInput" type="number" step="5" min="15" max="720"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Алерт по reboot score</div><div class="set-row-d">Модем с оценкой перезагрузок выше порога → TG-алерт в сводке проблемных (0–100)</div></div><div class="set-inp"><input id="rebootScoreAlertInput" type="number" min="0" max="100"><span>баллов</span></div></div>
+          </div>
+
           <div class="set-save-bar">
             <span id="recoverySettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
             <span style="flex:1"></span>
@@ -1246,6 +1256,7 @@
             <div class="set-row"><div><div class="set-row-t">Повтор биллинга</div><div class="set-row-d">Если ежедневный биллинг не выполнился — через сколько часов повторить</div></div><div class="set-inp"><input id="billingRetryHoursInput" type="number" step="0.5" min="0.5" max="24"><span>ч</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Порог коррекции</div><div class="set-row-d">Минимальное расхождение трафика для коррекции при месячной сверке</div></div><div class="set-inp"><input id="reconciliationToleranceInput" type="number" step="0.001" min="0.001" max="1"><span>ГБ</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Авто-создание клиентов</div><div class="set-row-d">Интервал проверки новых модемов без клиента и создания записей</div></div><div class="set-inp"><input id="autoCreateIntervalInput" type="number" min="1" max="60"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Удержание портов в знаменателе</div><div class="set-row-d">Сколько дней порт, исчезнувший с бокса, ещё считается у клиента (защита от флапов API). По истечении — выбывает из счётчиков</div></div><div class="set-inp"><input id="reconcileDaysInput" type="number" min="1" max="30"><span>дн</span></div></div>
           </div>
           <div class="set-save-bar">
             <span id="sessionBillingSettingsStatus" style="font-size:11px;color:var(--text-2)"></span>
@@ -1327,9 +1338,9 @@
         </div>
 
         <!-- WP7 (B2C Э5): антифрод розницы — статус, strikes, разблокировка
-             только админом. Секция видна для физлиц (и при blocked/strikes). -->
+             только админом + ручная блокировка клиента и всех его соединений. -->
         <div id="cdAbuseSection" style="display:none">
-          <div class="set-grp-label">Антифрод (розница)</div>
+          <div class="set-grp-label">Блокировка и антифрод</div>
           <div class="set-card">
             <div class="set-row">
               <div>
@@ -1337,6 +1348,7 @@
                 <div class="set-row-d" id="cdAbuseStrikes">Нарушений AUP: 0</div>
               </div>
               <div style="display:flex;gap:6px;flex-shrink:0">
+                <button class="btn btn-sm" id="cdBlockBtn" data-on-click="blockClientAdmin(document.getElementById('clientFormId').value)" style="font-size:12px;color:var(--danger)">Заблокировать</button>
                 <button class="btn btn-sm" id="cdUnblockBtn" data-on-click="unblockClientAbuse(document.getElementById('clientFormId').value)" style="font-size:12px">Снять блок</button>
                 <button class="btn btn-sm" id="cdRehabBtn" data-on-click="rehabilitateClientPorts(document.getElementById('clientFormId').value)" style="font-size:12px">Реабилитировать порт</button>
               </div>
@@ -1436,11 +1448,11 @@
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
 <script src="/js/admin/analytics.js?v=0817c"></script>
 <script src="/js/admin/finance.js?v=0817b"></script>
-<script src="/js/admin/modems.js?v=0818a"></script>
+<script src="/js/admin/modems.js?v=0820d"></script>
 <script src="/js/admin/dguard.js?v=0818a"></script>
-<script src="/js/admin/settings.js?v=0820c"></script>
+<script src="/js/admin/settings.js?v=0820d"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
-<script src="/js/admin/server-metrics.js?v=0820a"></script>
-<script src="/js/admin.js?v=0820c"></script>
+<script src="/js/admin/server-metrics.js?v=0820d"></script>
+<script src="/js/admin.js?v=0820d"></script>
 </body>
 </html>

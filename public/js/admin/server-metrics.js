@@ -119,31 +119,63 @@ function _srvMetCard(name, m, address) {
   return h;
 }
 
-function renderServerMetrics(box, d) {
-  var metrics = d.metrics || {};
-  var addresses = d.addresses || {};
-  var names = Object.keys(metrics).sort();
-  if (!names.length) {
-    box.innerHTML = '<div style="color:var(--text-3);font-size:12px;padding:10px 2px">Серверы не настроены.</div>';
-    return;
+// Компактный блок метрик для встраивания в карточку «Парк по серверам»:
+// CPU/RAM/Диск шкалами + строка флагов (температура, аптайм, conn/rps, mongo,
+// usb, дрейф). Данных нет — пустая строка (карточка живёт и без метрик).
+function srvMetInline(name) {
+  var d = window._srvMetData || {};
+  var m = (d.metrics || {})[name];
+  if (!m) return '';
+  var h = '<div style="margin-top:9px;padding-top:9px;border-top:1px solid var(--border)">';
+  if (m.error) {
+    return h + '<div style="font-size:10px;color:var(--danger)">Бокс недоступен: ' + esc(m.error) + '</div></div>';
   }
-  box.innerHTML = names.map(function (n) {
-    return _srvMetCard(n, metrics[n], addresses[n]);
-  }).join('');
+  var hasSsh = m.cpu_pct != null || m.load1 != null || m.mem_used_pct != null
+    || m.swap_used_pct != null || m.disk_used_pct != null;
+  if (hasSsh) {
+    h += '<div style="display:flex;flex-direction:column;gap:4px">';
+    h += _srvMetBar('CPU', m.cpu_pct);
+    h += _srvMetBar('RAM', m.mem_used_pct);
+    h += _srvMetBar('Диск', m.disk_used_pct);
+    h += '</div>';
+  }
+  var bits = [];
+  if (m.temp_c != null) {
+    var tc = m.temp_c >= 70 ? 'var(--danger)' : m.temp_c >= 55 ? 'var(--warning)' : 'var(--text-2)';
+    bits.push('<span style="color:' + tc + '">' + esc(String(m.temp_c)) + '°C</span>');
+  }
+  var up = _srvMetUptime(m.uptime_sec);
+  if (up) bits.push('<span style="color:var(--text-3)">аптайм ' + esc(up) + '</span>');
+  if (m.conns != null) bits.push('<span style="color:var(--text-2)">' + esc(String(m.conns)) + ' conn</span>');
+  if (m.mongo_ok === 0) bits.push('<span style="color:var(--danger)">MongoDB FAIL</span>');
+  if (m.usb_errors) bits.push('<span style="color:var(--danger)">USB: ' + esc(m.usb_errors) + '</span>');
+  if (!hasSsh && !m.error) bits.push('<span style="color:var(--warning)">SSH недоступен</span>');
+  if ((m.age_sec || 0) > _SRVMET_STALE_SEC && m.collected_at) {
+    var dtM = new Date(m.collected_at);
+    bits.push('<span style="color:var(--text-3)">данные на ' + String(dtM.getHours()).padStart(2, '0') + ':' + String(dtM.getMinutes()).padStart(2, '0') + '</span>');
+  }
+  if (bits.length) h += '<div style="display:flex;gap:10px;flex-wrap:wrap;margin-top:6px;font-size:10px">' + bits.join('') + '</div>';
+  return h + '</div>';
+}
+
+// Данные складываем в window._srvMetData и перерендериваем карточки парка —
+// отдельного блока «Загрузка серверов» больше нет, метрики живут внутри
+// карточек «Парк по серверам» (20.08).
+function renderServerMetrics(box, d) {
+  window._srvMetData = d || {};
+  if (typeof renderNewFleetServers === 'function') renderNewFleetServers();
 }
 
 function loadServerMetrics(force) {
-  var box = document.getElementById('serverMetrics');
-  if (!box) return;
   var now = Date.now();
   if (!force && now - _srvMetLastFetch < _SRVMET_MIN_REFETCH_MS) return;
   _srvMetLastFetch = now;
   api(API + '/api/admin/server_metrics').then(function (d) {
-    renderServerMetrics(box, d || {});
+    renderServerMetrics(null, d || {});
   }).catch(function () { /* транзиент (рестарт бэка) — следующий тик подхватит */ });
 }
 
 // Экспорт для node-тестов (паттерн public/js/utils.js).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { _srvMetBar, _srvMetUptime, _srvMetCard, renderServerMetrics, _srvMetColor };
+  module.exports = { _srvMetBar, _srvMetUptime, _srvMetCard, renderServerMetrics, _srvMetColor, srvMetInline };
 }

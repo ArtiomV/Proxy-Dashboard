@@ -35,7 +35,7 @@ function newChartSafe(canvasEl, cfg) {
 }
 var API='',authToken=localStorage.getItem('pr_admin_token')||'',currentData=null;
 var sortCol='nick',sortDir='asc',activeServerFilter=localStorage.getItem('admin_srv_filter')||'all',activeStatusFilter='all',activeClientFilter='';
-var autoRefreshTimer=null,charts={},REFRESH_MS=10000;
+var autoRefreshTimer=null,charts={},REFRESH_MS=60000;   // 20.08: 10с → 60с (данные всё равно кэшированные, флапало при ререндере)
 
 // ── Resilience: never surface a raw JSON-parse/HTML error to the user. During a
 // backend restart/deploy nginx briefly returns a 502 HTML page ("<!DOCTYPE…"),
@@ -110,10 +110,12 @@ function switchBankNav(name){
 var _activeSettingsSection='audit';
 function switchSettingsSection(name){
   try{if(window.matchMedia('(max-width:480px)').matches){var _c=document.querySelector('.tab-sidebar-layout>div:last-child');if(_c)setTimeout(function(){_c.scrollIntoView({behavior:'smooth',block:'start'});},60);}}catch(_){}
-  // recovery / proxycheck / data are three VIEWS of the shared settingsSection_data:
-  // show that section and filter its cards by [data-subsec]. Cards without a
-  // data-subsec belong to the «Данные и хранение» (data) view.
-  var DATA_VIEWS={recovery:1,proxycheck:1,data:1};
+  // recovery / proxycheck / speedtest / data are VIEWS of the shared
+  // settingsSection_data: show that section and filter its cards by
+  // [data-subsec]. Cards without a data-subsec belong to the «Система» (data)
+  // view. «alerts» — тоже смешанный вид: settingsSection_alerts (правила
+  // уведомлений) + data-карточки с subsec=alerts (Telegram, пороги доступности).
+  var DATA_VIEWS={recovery:1,proxycheck:1,speedtest:1,alerts:1,data:1};
   ['bank','audit','dguard','servers','syslog','serverHealth','simulator','operators','alerts','failover','tariffs'].forEach(function(s){
     var sec=document.getElementById('settingsSection_'+s);
     if(sec)sec.style.display=s===name?'':'none';
@@ -128,7 +130,7 @@ function switchSettingsSection(name){
       });
     }
   }
-  ['bank','data','audit','dguard','servers','syslog','serverHealth','simulator','operators','alerts','failover','recovery','proxycheck','tariffs'].forEach(function(s){
+  ['bank','data','audit','dguard','servers','syslog','serverHealth','simulator','operators','alerts','failover','recovery','proxycheck','speedtest','tariffs'].forEach(function(s){
     var nav=document.getElementById('snav_'+s);
     if(nav){nav.classList.toggle('active',s===name);}
   });
@@ -885,10 +887,15 @@ function loadData(){
     .then(function(data){
       currentData=data;
       updateServerDownBanner(data.cachedServers);
+      // Ререндер не должен дёргать скролл: запоминаем позицию до перерисовки
+      // (контейнеры временно схлопываются → браузер подбрасывал наверх) и
+      // возвращаем после двух кадров, когда layout устаканился (20.08).
+      var _sy=window.scrollY;
       processData();renderServerFilter();renderTable();updateHeaderStats();
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
       var _st=localStorage.getItem('admin_active_tab')||'dashboard';
       var _te=document.querySelector('.nav-tab[data-on-click*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te,true);
+      requestAnimationFrame(function(){requestAnimationFrame(function(){window.scrollTo(0,_sy)})});
     })
     .catch(function(e){
       if(e.name==='AbortError')return; // superseded by newer fetch
@@ -1773,6 +1780,23 @@ function unblockClientAbuse(id){
       else showToast((d&&d.error)||'Ошибка','error');
     }).catch(function(e){showToast(esc(e.message),'error')});
   },'Снять блок','Антифрод');
+}
+// Ручная блокировка клиента и всех его соединений: blocked=1, сброс сессий,
+// гашение всех портов (B2B «дата до» = сегодня, розница — пул → blocked).
+function blockClientAdmin(id){
+  if(!id)return;
+  confirmDialog('Заблокировать клиента и ВСЕ его соединения? Сессии будут сброшены, все порты погашены (доступ отключится сразу). Списания по заблокированным портам остановятся.',function(){
+    showToast('Блокирую: гашение портов на боксах, до ~30 сек…','info');
+    api(API+'/api/admin/clients/'+id+'/block',{method:'POST',json:{}}).then(function(d){
+      if(d&&d.ok){
+        showToast('Заблокирован: портов погашено '+(d.b2b||0)+(d.retail?', розницы '+d.retail:'')+(d.errors&&d.errors.length?' (ошибки: '+d.errors.length+')':''),d.errors&&d.errors.length?'warning':'success');
+        var c=(currentData.clients||[]).find(function(x){return x.id===id});
+        if(c){c.blocked=true;renderClientDetail(id)}
+        loadData();
+      }
+      else showToast((d&&d.error)||'Ошибка','error');
+    }).catch(function(e){showToast(esc(e.message),'error')});
+  },'Заблокировать','Блокировка клиента');
 }
 // «Реабилитировать порт»: возврат портов, замороженных антифродом
 // (kv-маркер abuse_hold), «дата до» продлевается по балансу.
@@ -3713,7 +3737,10 @@ function renderNewFleetServers(){
     if(primary) h+='<div style="display:flex;justify-content:space-between"><span style="color:var(--text-2)">Трафик месяц</span><span style="font-family:var(--font-mono);font-weight:600">'+fmtGb(mon)+'</span></div>';
     if(!primary) h+='<div style="display:flex;justify-content:space-between;align-items:center"><span style="color:var(--text-2)">Сред. сигнал</span><span>'+(sigAvg?renderSignalBars(sigAvg):'<span style="color:var(--text-3)">—</span>')+'</span></div>';
     h+='<div style="display:flex;justify-content:space-between"><span style="color:var(--text-2)">Проблемных</span><span style="color:'+(prob>0?'var(--warning)':'var(--text-3)')+';font-weight:600">'+prob+'</span></div>';
-    h+='</div></div>';
+    h+='</div>';
+    // Метрики загрузки бокса (ServerMetrics) — внутри карточки сервера (20.08)
+    if(!primary&&typeof srvMetInline==='function') h+=srvMetInline(srv);
+    h+='</div>';
     return h;
   }
   var html = fcard(null, true);
@@ -4579,18 +4606,17 @@ function renderClientDetail(id, tab){
   else{mh+='<div style="font-size:12px;color:var(--text-3);padding:8px 0">Нет привязанных модемов. Привязка — на странице «Модемы».</div>';}
   ml.innerHTML=mh;
   document.getElementById('cdDeleteBtn').style.display='';
-  // WP7 (B2C Э5): антифрод-блок для физлиц (или любого клиента со strikes/blocked).
+  // Блокировка/антифрод — секция видна для любого существующего клиента.
   var ab=document.getElementById('cdAbuseSection');
   if(ab){
-    var showAb=(c.clientType==='individual')||c.blocked||(c.abuseStrikes>0);
-    ab.style.display=showAb?'':'none';
-    if(showAb){
-      var stEl=document.getElementById('cdAbuseStatus');
-      stEl.textContent=c.blocked?'Аккаунт ЗАБЛОКИРОВАН (антифрод)':'Аккаунт активен';
-      stEl.style.color=c.blocked?'var(--danger)':'var(--text-0)';
-      document.getElementById('cdAbuseStrikes').textContent='Нарушений AUP (strikes): '+(c.abuseStrikes||0);
-      document.getElementById('cdUnblockBtn').style.display=c.blocked?'':'none';
-    }
+    ab.style.display='';
+    var stEl=document.getElementById('cdAbuseStatus');
+    stEl.textContent=c.blocked?'Аккаунт ЗАБЛОКИРОВАН':'Аккаунт активен';
+    stEl.style.color=c.blocked?'var(--danger)':'var(--text-0)';
+    document.getElementById('cdAbuseStrikes').textContent='Нарушений AUP (strikes): '+(c.abuseStrikes||0);
+    document.getElementById('cdUnblockBtn').style.display=c.blocked?'':'none';
+    var bb=document.getElementById('cdBlockBtn');if(bb)bb.style.display=c.blocked?'none':'';
+    var rb=document.getElementById('cdRehabBtn');if(rb)rb.style.display=(c.clientType==='individual'||c.blocked||(c.abuseStrikes>0))?'':'none';
   }
   switchDetailTab(tab||'overview');
 }
