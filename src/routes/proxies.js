@@ -60,11 +60,10 @@ r.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, re
     // вообще прислали — раньше любой save без ротации затирал кэш нулём).
     const wantRot = modemData.AUTO_IP_ROTATION != null ? (parseInt(modemData.AUTO_IP_ROTATION) || 0) : null;
     if (wantRot != null) {
-      const back = await proxyConf.getConfForm(server, `/conf/edit/${rawImei}`);
-      const gotRot = back.ok ? proxyConf.parseRotation(back.html) : null;
-      if (gotRot !== wantRot) {
-        logger.warn({ serverName, rawImei, wantRot, gotRot, backReason: back.ok ? null : back.reason }, '[StoreModem] verify-after-write FAILED');
-        return res.status(502).json({ error: `ProxySmart не применил AUTO_IP_ROTATION: запрошено ${wantRot}, в форме ${gotRot == null ? 'нет данных' : gotRot}` });
+      const ver = await proxyConf.verifyRotation(server, `/conf/edit/${rawImei}`, wantRot);
+      if (!ver.ok) {
+        logger.warn({ serverName, rawImei, wantRot, gotRot: ver.gotRot }, '[StoreModem] verify-after-write FAILED');
+        return res.status(502).json({ error: `ProxySmart не применил AUTO_IP_ROTATION: запрошено ${wantRot}, в форме ${ver.gotRot == null ? 'нет данных' : ver.gotRot}` });
       }
       modemRotationCache[serverName + ':' + rawImei] = wantRot;
     }

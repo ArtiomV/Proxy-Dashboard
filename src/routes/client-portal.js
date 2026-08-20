@@ -398,11 +398,10 @@ r.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
       logger.warn({ serverName, rawImei, reason: posted.reason }, '[SetRotation] POST не прошёл');
       return res.status(502).json({ error: `ProxySmart не сохранил настройки (${posted.reason})` });
     }
-    const back = await proxyConf.getConfForm(server, `/conf/edit/${rawImei}`);
-    const gotRot = back.ok ? proxyConf.parseRotation(back.html) : null;
-    if (gotRot !== mins) {
-      logger.warn({ serverName, rawImei, mins, gotRot }, '[SetRotation] verify-after-write FAILED');
-      return res.status(502).json({ error: `ProxySmart не применил ротацию: запрошено ${mins}, в форме ${gotRot == null ? 'нет данных' : gotRot}` });
+    const back = await proxyConf.verifyRotation(server, `/conf/edit/${rawImei}`, mins);
+    if (!back.ok) {
+      logger.warn({ serverName, rawImei, mins, gotRot: back.gotRot }, '[SetRotation] verify-after-write FAILED');
+      return res.status(502).json({ error: `ProxySmart не применил ротацию: запрошено ${mins}, в форме ${back.gotRot == null ? 'нет данных' : back.gotRot}` });
     }
     modemRotationCache[serverName + ':' + rawImei] = mins;
     proxySmart.invalidateCache();
@@ -677,6 +676,12 @@ r.post('/api/client/email', authMiddleware, validate(ClientEmailSchema), (req, r
       to: normEmail, kind: 'verify_email',
       subject: 'Подтвердите email — Arendaproxy',
       text: `Подтвердите адрес: ${base}/verify?token=${verifyToken}\nСсылка действует 24 часа.`,
+      html: mailer.renderTemplate({
+        title: 'Подтвердите email',
+        intro: 'Вы изменили email в личном кабинете Arendaproxy.ru. Подтвердите новый адрес — ссылка действует 24 часа.',
+        ctaText: 'Подтвердить email', ctaUrl: `${base}/verify?token=${verifyToken}`,
+        note: 'Если вы не меняли email — срочно свяжитесь с поддержкой.',
+      }),
     }).catch(e => logger.warn('[ClientEmail] verify email send failed: ' + e.message));
   }
   res.json({ ok: true, email: normEmail, verificationSent });

@@ -344,6 +344,12 @@ module.exports = function createRegistrationRouter(deps) {
       to: normEmail, kind: 'verify_email',
       subject: 'Подтвердите email — Arendaproxy',
       text: `Подтвердите адрес: ${base}/verify?token=${verifyToken}\nСсылка действует 24 часа.`,
+      html: mailer.renderTemplate({
+        title: 'Подтвердите email',
+        intro: 'Вы зарегистрировались в личном кабинете Arendaproxy.ru. Нажмите кнопку, чтобы подтвердить адрес — ссылка действует 24 часа.',
+        ctaText: 'Подтвердить email', ctaUrl: `${base}/verify?token=${verifyToken}`,
+        note: 'Если вы не регистрировались — просто проигнорируйте письмо.',
+      }),
     }).catch(e => logger.warn('[Register] verify email send failed: ' + e.message));
 
     auditLog(login, 'retail_register', { ip, email: normEmail, ref: ref || null });
@@ -482,6 +488,12 @@ module.exports = function createRegistrationRouter(deps) {
       to: client.email, kind: 'verify_email',
       subject: 'Подтвердите email — Arendaproxy',
       text: `Подтвердите адрес: ${base}/verify?token=${verifyToken}\nСсылка действует 24 часа.`,
+      html: mailer.renderTemplate({
+        title: 'Подтвердите email',
+        intro: 'Повторное письмо подтверждения адреса для личного кабинета Arendaproxy.ru. Ссылка действует 24 часа.',
+        ctaText: 'Подтвердить email', ctaUrl: `${base}/verify?token=${verifyToken}`,
+        note: 'Если вы не запрашивали письмо — просто проигнорируйте его.',
+      }),
     }).catch(e => logger.warn('[Resend] verify email send failed: ' + e.message));
     auditLog(client.login, 'verify_email_resent', { ip: getClientIp(req) });
     res.json({ ok: true, message: 'Письмо отправлено — проверьте почту (и папку «Спам»)' });
@@ -517,6 +529,12 @@ module.exports = function createRegistrationRouter(deps) {
         to: normEmail, kind: 'reset_password',
         subject: 'Сброс пароля — Arendaproxy',
         text: `Сброс пароля: ${base}/reset?token=${token}\nСсылка действует 1 час. Если это были не вы — игнорируйте письмо.`,
+        html: mailer.renderTemplate({
+          title: 'Сброс пароля',
+          intro: 'Запрошен сброс пароля от личного кабинета Arendaproxy.ru. Ссылка действует 1 час.',
+          ctaText: 'Задать новый пароль', ctaUrl: `${base}/reset?token=${token}`,
+          note: 'Если это были не вы — просто проигнорируйте письмо, пароль не изменится.',
+        }),
       }).catch(e => logger.warn('[Forgot] reset email send failed: ' + e.message));
       auditLog(client.login, 'password_reset_requested', { ip });
     }

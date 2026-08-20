@@ -249,9 +249,18 @@ module.exports = function createRetailRouter(deps) {
       }
     } catch (_) {}
     try {
+      // Пул на исходе — агрегированно по всем боксам розницы (как в
+      // retail-guard._checkPoolLow): один алерт в сутки, а не по серверу.
       const minFree = Number(getSetting('retail_pool_min_free', 3));
-      const freeNow = retailPoolDb.byStatus('free').filter(r => r.server === serverName).length;
-      if (freeNow < minFree) alerts && alerts.trigger('retail_pool_low', { server: serverName, free: freeNow, min: minFree });
+      const poolServers = String(getSetting('retail_pool_servers', '')).split(',').map(s => s.trim()).filter(Boolean);
+      const freeRows = retailPoolDb.byStatus('free');
+      const totalFree = poolServers.length
+        ? freeRows.filter(r => poolServers.includes(r.server)).length
+        : freeRows.length;
+      if (totalFree < minFree) {
+        const perServer = poolServers.map(srv => `${srv}: ${freeRows.filter(r => r.server === srv).length}`).join(', ');
+        alerts && alerts.trigger('retail_pool_low', { free: totalFree, min: minFree, breakdown: perServer });
+      }
     } catch (_) {}
     // Клиенту — «Прокси выдан» (TG, если привязан; всегда — след в system_log).
     if (notifyClient) {

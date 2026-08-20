@@ -57,6 +57,7 @@
   "GET /api/admin/retail/pool",
   "GET /api/admin/retail/pool/legacy_preview",
   "GET /api/admin/rotation_log",
+  "GET /api/admin/server_metrics",
   "GET /api/admin/server_stats",
   "GET /api/admin/servers",
   "GET /api/admin/settings",

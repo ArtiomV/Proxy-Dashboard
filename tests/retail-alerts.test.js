@@ -69,13 +69,12 @@ describe('WP5: retail-алерты — срабатывание и рендер'
     expect(alerts.trigger('retail_bulk_buy', { client_id: 'c2', login: 'u_c2', count: 3, threshold: 3 })).toBe(true);
   });
 
-  it('retail_pool_low: дедуп по серверу; текст содержит free/min', () => {
-    expect(alerts.trigger('retail_pool_low', { server: 'S1', free: 2, min: 3 })).toBe(true);
+  it('retail_pool_low: агрегированный (20.08) — глобальный дедуп; текст содержит free/min и разбивку', () => {
+    expect(alerts.trigger('retail_pool_low', { free: 2, min: 3, breakdown: 'S1: 2, S2: 0' })).toBe(true);
     const text = sendMessage.mock.calls[0][2];
-    expect(text).toContain('S1');
+    expect(text).toContain('S1: 2');
     expect(text).toContain('2');
-    expect(alerts.trigger('retail_pool_low', { server: 'S1', free: 1, min: 3 })).toBe(false);  // тот же сервер — кулдаун
-    expect(alerts.trigger('retail_pool_low', { server: 'S2', free: 0, min: 3 })).toBe(true);   // другой сервер — проходит
+    expect(alerts.trigger('retail_pool_low', { free: 1, min: 3, breakdown: 'S1: 1' })).toBe(false);  // глобальный кулдаун (сутки)
   });
 
   it('retail_pool_empty: критический, дедуп по серверу', () => {

@@ -15,7 +15,7 @@ const credCheck = require('../services/cred-check');
 
 module.exports = function createServersRouter(deps) {
   const {
-    logger, authMiddleware, adminMiddleware,
+    db, logger, authMiddleware, adminMiddleware,
     apiServers, SERVER_COUNTRIES, appSettings,
     fetchApi, saveApiServersToDb, proxySmart,
     auditLog, getClientIp, getSetting,
@@ -61,6 +61,32 @@ r.get('/api/admin/server_stats', authMiddleware, adminMiddleware, async (req, re
     }
   }));
   res.json({ stats: out });
+});
+
+// ServerMetrics (джоба src/jobs/server-metrics.js): последняя строка метрик
+// по каждому боксу + возраст данных (сек). SSH-поля могут отсутствовать —
+// фронт показывает то, что есть (HTTP-метрики панели), с пометкой.
+r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) => {
+  const byName = {};
+  try {
+    const rows = db.prepare(`SELECT * FROM server_metrics
+      WHERE id IN (SELECT MAX(id) FROM server_metrics GROUP BY server_name)`).all();
+    for (const row of rows) {
+      byName[row.server_name] = {
+        ...row,
+        age_sec: Math.max(0, Math.round((Date.now() - Date.parse(row.collected_at)) / 1000)),
+      };
+    }
+  } catch (e) {
+    logger.warn('[ServerMetrics] read failed: ' + e.message);
+  }
+  // Адрес площадки из конфига сервера (карточка показывает «S1 · Армянская …»).
+  const addresses = {};
+  for (const s of apiServers) {
+    addresses[s.name] = s.address || '';
+    if (!(s.name in byName)) byName[s.name] = null;   // данных ещё нет
+  }
+  res.json({ metrics: byName, addresses });
 });
 
 r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
@@ -360,7 +386,7 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.retail_enabled != null)            patch.retail_enabled            = !!req.body.retail_enabled;
   if (req.body.retail_test_day_price != null)     patch.retail_test_day_price     = Math.max(0, Math.min(100000, parseFloat(req.body.retail_test_day_price) || 0));
   if (req.body.retail_grace_hours != null)        patch.retail_grace_hours        = Math.max(1, Math.min(720, parseInt(req.body.retail_grace_hours) || 24));
-  if (req.body.retail_hold_days != null)          patch.retail_hold_days          = Math.max(1, Math.min(365, parseInt(req.body.retail_hold_days) || 7));
+  if (req.body.retail_hold_days != null)          patch.retail_hold_days          = Math.max(1, Math.min(365, parseInt(req.body.retail_hold_days) || 2));
   if (req.body.retail_reg_limit_per_ip_day != null) patch.retail_reg_limit_per_ip_day = Math.max(1, Math.min(1000, parseInt(req.body.retail_reg_limit_per_ip_day) || 10));
   // Регистрация и письма розницы: Turnstile (анти-бот) + SendPulse SMTP.
   // Секреты: маска GET ('••••••••') не является значением — игнорируем её.

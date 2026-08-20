@@ -1589,6 +1589,7 @@ const SETTINGS_DEFAULTS = {
   // Auto-reboot of flaky modems (high latency / high errors only — NOT for rotation-fail)
   auto_reboot_enabled:         false, // disabled by default — admin enables in Settings
   auto_reboot_min_interval_min: 60,   // throttle: don't reboot same modem more often than this
+  random_modem_reboot_enabled: true,  // 20.08: random-ник (сбойный ре-енум) → ребут по IMEI, троттл 30 мин
   stale_modem_hours: 12,              // Stage 18.8 — exclude modems offline >Nh from agg endpoints
   modem_offline_threshold_min: 10,    // 2026-07-28 — минут тишины, после которых модем «отключен» (карточка + TG-алерт)
   // Speedtest (additional)
@@ -1650,7 +1651,7 @@ const SETTINGS_DEFAULTS = {
   // ── B2C розница (ТЗ 10.08): всё новое — за фича-флагом retail_enabled ──
   retail_enabled: false,             // master switch: регистрация/витрина/покупка выключены
   retail_pool_servers: '',           // CSV боксов розницы (отдельные от B2B, hfilter ВКЛ)
-  retail_hold_days: 7,               // hold после grace до удаления порта (per-клиент hold_ttl_days, -1 = ∞)
+  retail_hold_days: 2,               // hold после grace до удаления порта (per-клиент hold_ttl_days, -1 = ∞)
   retail_grace_hours: 24,            // grace: порт работает после обнуления баланса
   retail_pool_free_alert: 5,         // алерт «свободных < N» в пуле
   retail_mass_buy_alert: 5,          // алерт при массовой покупке одним аккаунтом
@@ -2912,6 +2913,13 @@ const _speedMonitor = require('./src/jobs/speed-monitor').create({
   db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting,
 });
 
+// ServerMetrics: снимок загрузки боксов (SSH cpu/load/mem/… + HTTP-панель
+// /system_status) каждые 10 мин — блок «Загрузка серверов» на дашборде.
+// proxyConf определён выше (обход логин-стены /modem/login внутри getPage).
+const _serverMetrics = require('./src/jobs/server-metrics').create({
+  db, logger, apiServers, proxyConf,
+});
+
 function getSpeedtestLatest() {
   const latest = {};
   for (const [key, entries] of Object.entries(speedtestHistory)) {
@@ -2953,7 +2961,7 @@ app.use(require('./src/routes/client-portal')({
   // mailer объявлен ниже (const, TDZ) — ленивый шим, как syncRotationLog выше.
   validate, ClientEmailSchema,
   getSetting, authTokensDb,
-  mailer: { send: (...args) => mailer.send(...args) },
+  mailer: { send: (...args) => mailer.send(...args), renderTemplate: (...args) => mailer.renderTemplate(...args) },
   proxyConf, modemRotationCache, proxySmart,
   retailPoolDb,   // B2C Э2: payload retail-конвейера в /api/dashboard_data
 }));
@@ -3423,7 +3431,7 @@ const _dailySched = require('./src/jobs/daily-schedule').create({
 const scheduleRepeating = _dailySched.scheduleRepeating;
 const rescheduleSpeedtests = _dailySched.rescheduleSpeedtests;
 app.use(require('./src/routes/servers')({
-  logger, authMiddleware, adminMiddleware,
+  db, logger, authMiddleware, adminMiddleware,
   apiServers, SERVER_COUNTRIES, appSettings,
   fetchApi, saveApiServersToDb, proxySmart,
   auditLog, getClientIp, getSetting,
@@ -4083,6 +4091,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched: (s) => { _hourlyAggSched = s; },
     runSpeedMonitor: _speedMonitor.runSpeedMonitor,
+    runServerMetrics: _serverMetrics.runServerMetrics,
     runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
     // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).
     saveClients, auditLog, authTokensDb,

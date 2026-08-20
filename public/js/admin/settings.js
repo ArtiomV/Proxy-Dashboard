@@ -279,7 +279,7 @@ function loadSettings(){
     var ren=document.getElementById('retailEnabledInput');if(ren)ren.checked=!!s.retail_enabled;
     var rtp=document.getElementById('retailTestDayPriceInput');if(rtp)rtp.value=s.retail_test_day_price!=null?s.retail_test_day_price:100;
     var rgh=document.getElementById('retailGraceHoursInput');if(rgh)rgh.value=s.retail_grace_hours||24;
-    var rhd=document.getElementById('retailHoldDaysInput');if(rhd)rhd.value=s.retail_hold_days||7;
+    var rhd=document.getElementById('retailHoldDaysInput');if(rhd)rhd.value=s.retail_hold_days||2;
     var rrl=document.getElementById('retailRegLimitInput');if(rrl)rrl.value=s.retail_reg_limit_per_ip_day||10;
     var rbb=document.getElementById('retailBulkBuyThresholdInput');if(rbb)rbb.value=s.retail_bulk_buy_threshold!=null?s.retail_bulk_buy_threshold:3;
     var rpf=document.getElementById('retailPoolMinFreeInput');if(rpf)rpf.value=s.retail_pool_min_free!=null?s.retail_pool_min_free:3;
@@ -357,7 +357,7 @@ function saveRetailSettings(){
     retail_enabled:!!document.getElementById('retailEnabledInput').checked,
     retail_test_day_price:_num('retailTestDayPriceInput',100,0,100000),
     retail_grace_hours:_num('retailGraceHoursInput',24,1,720),
-    retail_hold_days:_num('retailHoldDaysInput',7,1,365),
+    retail_hold_days:_num('retailHoldDaysInput',2,1,365),
     retail_reg_limit_per_ip_day:_num('retailRegLimitInput',10,1,1000),
     retail_bulk_buy_threshold:_num('retailBulkBuyThresholdInput',3,0,100),
     retail_pool_min_free:_num('retailPoolMinFreeInput',0,0,1000),

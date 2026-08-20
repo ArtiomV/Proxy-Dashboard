@@ -25,7 +25,7 @@ function runStartup(d) {
     failoverEngine, fetchApi, fetchApiRaw, postFormApi, parseHtmlInputFields,
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
-    setHourlyAggSched, runSpeedMonitor, runRetailGuard,
+    setHourlyAggSched, runSpeedMonitor, runServerMetrics, runRetailGuard,
     saveClients, auditLog, authTokensDb,
   } = d;
 
@@ -182,6 +182,16 @@ function runStartup(d) {
     .catch(e => logger.error('[SpeedMonitor] startup run failed:', e.message)), 4 * 60 * 1000);
   _intervals.push(setInterval(() => dbAudit.runJobAsync('SpeedMonitor', 'hourly', () => runSpeedMonitor())
     .catch(e => logger.error('[SpeedMonitor] hourly run failed:', e.message)), 60 * 60 * 1000));
+
+  // ServerMetrics: снимок загрузки боксов (SSH cpu/load/mem/swap/disk/temp/
+  // uptime + HTTP-панель /system_status) в таблицу server_metrics — блок
+  // «Загрузка серверов» на дашборде. SSH с дашборд-сервера закрыт файрволом
+  // боксов — джоба молча переживает и пишет то, что собрала по HTTP.
+  // Первый прогон через 2 мин после старта, далее каждые 10 мин.
+  setTimeout(() => dbAudit.runJobAsync('ServerMetrics', 'startup', () => runServerMetrics())
+    .catch(e => logger.error('[ServerMetrics] startup run failed:', e.message)), 2 * 60 * 1000);
+  _intervals.push(setInterval(() => dbAudit.runJobAsync('ServerMetrics', 'periodic', () => runServerMetrics())
+    .catch(e => logger.error('[ServerMetrics] periodic run failed:', e.message)), 10 * 60 * 1000));
 
   // B2C Э2: RetailGuard — конвейер автоблока розницы (grace → block+hold →
   // delete → restore + тест-день), цикл 10 минут. Тик планируется всегда,

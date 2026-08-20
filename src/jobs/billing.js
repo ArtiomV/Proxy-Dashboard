@@ -147,6 +147,14 @@ async function _runDailyBillingImpl(retryClientIds) {
     // Р36: цена через getClientPrice (override → tariff → legacy price).
     // Клиент без portName или без цены пропускается (свежий физик до покупки — ок).
     const clientPrice = getClientPrice(client);
+    // 20.08: полностью заблокированный клиент (антифрод blocked или автоблок
+    // по долгу debtBlocked — порты уже погашены) не тарифицируется: он не
+    // может пользоваться прокси, накручивать минус на баланс бессмысленно.
+    if (client.blocked || client.debtBlocked) {
+      logger.info(`[Billing] Skipping ${client.name} — ${client.blocked ? 'blocked (antifraud)' : 'debt-blocked'}`);
+      skipped++;
+      continue;
+    }
     if (!client.portName || !clientPrice || clientPrice <= 0 || client.billingPaused) {
       if (client.billingPaused) logger.info(`[Billing] Skipping ${client.name} — billing paused`);
       skipped++;

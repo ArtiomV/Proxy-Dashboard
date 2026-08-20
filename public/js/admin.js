@@ -3405,6 +3405,7 @@ function renderAccNew(){
   loadNewHeatmap();
   loadNewDailyChart();                      // потребление по дням (60д, по клиентам/странам)
   try{ loadSpeedMonitor(); }catch(e){}       // почасовая скорость модемов (SpeedMonitor)
+  try{ loadServerMetrics(); }catch(e){}      // загрузка серверов (ServerMetrics: SSH + /system_status)
   // Wire collapsibles' lazy-load (once per session)
   if(!window._newDetailsWired){
     document.querySelectorAll('#tab-dashboard details.acc-expand').forEach(function(el){

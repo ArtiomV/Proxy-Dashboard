@@ -60,6 +60,8 @@ describe('POST /api/admin/store_modem — verify-after-write', () => {
       getConfForm: async () => ({ ok: true, fields: { AUTO_IP_ROTATION: formRot, name: 'RO2_49' }, html: `AUTO_IP_ROTATION" value="${formRot}">`, status: 200 }),
       postConfForm: async () => ({ ok: true, status: 302, location: '/conf' }),   // «успех», но значение не применилось
       parseRotation: (html) => { const m = html.match(/value="(\d*)"/); return m && m[1] !== '' ? parseInt(m[1]) : null; },
+      // 20.08: verify вынесен в proxyConf.verifyRotation (settle-delay + ретраи)
+      verifyRotation: async (server, path, want) => ({ ok: parseInt(formRot) === want, gotRot: parseInt(formRot) }),
     });
     const res = await request(app).post('/api/admin/store_modem').send({ serverName: 'S2', IMEI: '531737907724202', AUTO_IP_ROTATION: '0' });
     expect(res.status).toBe(502);
@@ -73,6 +75,7 @@ describe('POST /api/admin/store_modem — verify-after-write', () => {
       getConfForm: async () => ({ ok: true, fields: { AUTO_IP_ROTATION: formRot, name: 'RO2_49' }, html: `AUTO_IP_ROTATION" value="${formRot}">`, status: 200 }),
       postConfForm: async (server, path, fields) => { formRot = fields.AUTO_IP_ROTATION; return { ok: true, status: 302, location: '/conf' }; },
       parseRotation: (html) => { const m = html.match(/value="(\d*)"/); return m && m[1] !== '' ? parseInt(m[1]) : null; },
+      verifyRotation: async (server, path, want) => ({ ok: parseInt(formRot) === want, gotRot: parseInt(formRot) }),
     });
     const res = await request(app).post('/api/admin/store_modem').send({ serverName: 'S2', IMEI: '531737907724202', AUTO_IP_ROTATION: '0' });
     expect(res.status).toBe(200);

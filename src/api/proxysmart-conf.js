@@ -113,6 +113,29 @@ async function getConfForm(server, path) {
   return { ok: true, fields, html: res.body, status: 200 };
 }
 
+// GET произвольной страницы панели (/system_status и т.п.) →
+// { ok:true, html, status:200 } | { ok:false, reason, status }.
+// Тот же обход логин-стены, что у getConfForm, но без парсинга формы:
+// ok:true при HTTP 200 и не-логин-стене. Использует джоба ServerMetrics.
+async function getPage(server, path) {
+  let res = await _raw(server, { method: 'GET', path });
+  for (let attempt = 0; attempt < 2 && _looksLikeLogin(res); attempt++) {
+    let cookie;
+    try { cookie = await _session(server, attempt > 0); }
+    catch (e) {
+      _logger.warn(`[ProxyConf] ${server.name}: login failed: ${e.message}`);
+      return { ok: false, reason: 'AUTH_WALLED', status: res.status };
+    }
+    res = await _raw(server, { method: 'GET', path, cookie });
+  }
+  if (_looksLikeLogin(res)) {
+    _dropSession(server);
+    return { ok: false, reason: 'AUTH_WALLED', status: 302 };
+  }
+  if (res.status !== 200) return { ok: false, reason: 'HTTP_' + res.status, status: res.status };
+  return { ok: true, html: res.body, status: 200 };
+}
+
 // POST /conf/... → { ok:true, status, location } | { ok:false, reason, status }
 // 302 → /conf (или не на логин) у ProxySmart = успешное сохранение.
 async function postConfForm(server, path, fields) {
@@ -164,4 +187,19 @@ function parseRotation(html) {
   return m[1] === '' ? 0 : parseInt(m[1], 10);
 }
 
-module.exports = { init, getConfForm, postConfForm, getConfAction, parseRotation, _dropSession, _sessions };
+// Verify-after-write с паузами (20.08): ProxySmart применяет конфиг не
+// мгновенно — мгновенный re-read после POST возвращал старое значение и
+// фронт получал ложное «не применил». Перечитываем до 3 раз с паузой 1.5с.
+// Возвращает { ok, gotRot } — ok:true когда форма подтвердила want.
+async function verifyRotation(server, path, want, { attempts = 3, delayMs = 1500 } = {}) {
+  let gotRot = null;
+  for (let i = 0; i < attempts; i++) {
+    if (i > 0) await new Promise(r => setTimeout(r, delayMs));
+    const back = await getConfForm(server, path);
+    gotRot = back.ok ? parseRotation(back.html) : null;
+    if (gotRot === want) return { ok: true, gotRot };
+  }
+  return { ok: false, gotRot };
+}
+
+module.exports = { init, getConfForm, postConfForm, getConfAction, getPage, parseRotation, verifyRotation, _dropSession, _sessions };

@@ -22,6 +22,11 @@ function create(deps) {
   })();
 
   async function runAutoReboot() {
+    // 20.08: random-ник = сбойный ре-енум модема (NICK вида «random####») —
+    // такой модем лечится только перезагрузкой. Обрабатываем независимо от
+    // auto_reboot_enabled: отдельный флаг random_modem_reboot_enabled (on по
+    // умолчанию), тот же троттлинг по auto_reboot_log.
+    await _rebootRandomModems();
     if (!appSettings.auto_reboot_enabled) return;
     const minInterval = Math.max(15, parseInt(appSettings.auto_reboot_min_interval_min) || 60);
 
@@ -79,6 +84,46 @@ function create(deps) {
     }
     if (attempted > 0) {
       logger.info(`[AutoReboot] cycle: ${succeeded}/${attempted} reboots, ${candidates.length - attempted} throttled`);
+    }
+  }
+
+  // Модемы с NICK «random####» — сбойная ре-енумерация хаба; ребутим по IMEI.
+  // Троттлинг: не чаще 30 мин на модем (своя причина 'random_nick' в логе).
+  async function _rebootRandomModems() {
+    const enabled = appSettings.random_modem_reboot_enabled !== false;   // default on
+    if (!enabled) return;
+    let live;
+    try { live = await fetchAllServersDataCached(); } catch (e) { return; }
+    const sinceExpr = `datetime('now', '-30 minutes')`;
+    const recent = db.prepare(`
+      SELECT server_name, nick, MAX(rebooted_at) AS last
+        FROM auto_reboot_log
+       WHERE rebooted_at >= ${sinceExpr}
+       GROUP BY server_name, nick
+    `).all();
+    const recentSet = new Set(recent.map(r => r.server_name + '|' + r.nick));
+    for (const data of live) {
+      if (!Array.isArray(data.status) || data._cached) continue;
+      const srv = data.serverName;
+      for (const m of data.status) {
+        const md = m.modem_details || {};
+        const nick = (md.NICK || '').trim();
+        if (!/^random/i.test(nick) || !md.IMEI) continue;
+        if (recentSet.has(srv + '|' + nick)) continue;
+        const server = findServer(srv);
+        if (!server) continue;
+        try {
+          await fetchApi(server, `/apix/reboot_modem_by_imei?IMEI=${encodeURIComponent(md.IMEI)}`);
+          if (_autoRebootInsert) _autoRebootInsert.run(srv, nick, md.IMEI, 'random_nick', 'success', null);
+          logger.warn(`[AutoReboot] ${srv}/${nick} IMEI=${md.IMEI} — random-ник, reboot`);
+          logActivity('modem', 'warn', 'auto_reboot', nick,
+            'Auto-reboot: модем ре-енумерился с random-ником',
+            { server: srv, nick, imei: md.IMEI, reasons: ['random_nick'] });
+        } catch (e) {
+          if (_autoRebootInsert) _autoRebootInsert.run(srv, nick, md.IMEI, 'random_nick', 'failed', e.message);
+          logger.error(`[AutoReboot] random ${srv}/${nick} failed:`, e.message);
+        }
+      }
     }
   }
 

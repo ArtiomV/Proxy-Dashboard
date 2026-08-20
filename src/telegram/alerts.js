@@ -386,15 +386,17 @@ const RULES = {
     dedupeKey: p => 'bulk_' + (p.client_id || ''),
     render: p => `📦 <b>Массовая покупка</b>\n\nКлиент <b>${esc(p.login || '?')}</b> арендует уже <b>${p.count ?? '?'}</b> порт(ов) (порог ${p.threshold ?? '?'}).\nПроверь, не мультиаккаунт/перепродажа ли это.`,
   },
-  // Пул на исходе: свободных портов на боксе < retail_pool_min_free.
-  // Триггеры: после покупки (retail.js) и тик retail-guard; дедуп по серверу.
+  // Пул на исходе: свободных портов СУММАРНО по боксам розницы <
+  // retail_pool_min_free. Триггеры: после покупки (retail.js) и тик
+  // retail-guard. 20.08: агрегировано (один алерт на весь пул), cooldown —
+  // сутки: раньше шёл по каждому серверу раз в час.
   retail_pool_low: {
     title: 'Розница: пул на исходе',
     priority: 'important',
     defaultOn: true,
-    cooldownSec: 3600,
-    dedupeKey: p => 'poollow_' + (p.server || 'unknown'),
-    render: p => `📉 <b>Пул розницы на исходе</b>\n\nНа <b>${esc(p.server || '?')}</b> свободных портов: <b>${p.free ?? '?'}</b> (минимум ${p.min ?? '?'}).\nПополни пул: Настройки → Розница → «Добавить порты».`,
+    cooldownSec: 86400,
+    dedupeKey: () => 'poollow_global',
+    render: p => `📉 <b>Пул розницы на исходе</b>\n\nСвободных портов суммарно: <b>${p.free ?? '?'}</b> (минимум ${p.min ?? '?'})${p.breakdown ? `\nПо боксам: ${esc(p.breakdown)}` : ''}.\nПополни пул: Настройки → Розница → «Добавить порты».`,
   },
   // B2C Э5 (WP7): антифрод розницы — авто-саспенд порта по доменному
   // контролю (domain-guard). При достижении порога strikes — blocked=1.
@@ -724,7 +726,7 @@ const _entityFor = {
   retail_registered:         p => ({ kind: 'client', id: p.login || null }),
   retail_purchase:           p => ({ kind: 'client', id: p.login || null }),
   retail_bulk_buy:           p => ({ kind: 'client', id: p.client_id || null }),
-  retail_pool_low:           p => ({ kind: 'system', id: p.server || null }),
+  retail_pool_low:           () => ({ kind: 'system', id: 'pool' }),
   retail_pool_empty:         p => ({ kind: 'system', id: p.server || null }),
   retail_test_day_ended:     p => ({ kind: 'client', id: p.client_id || null }),
   // B2C Э5 (WP7): антифрод розницы

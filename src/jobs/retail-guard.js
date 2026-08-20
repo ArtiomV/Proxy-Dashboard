@@ -14,7 +14,7 @@
 //   2. grace истёк → «дата до» = сегодня для всех портов клиента
 //      (setPortValidBefore, src/services/port-validity.js); строки пула
 //      leased → blocked с hold_until = now + hold_ttl_days
-//      (per-клиент; NULL в clients → retail_hold_days=7; -1 → hold_until=NULL,
+//      (per-клиент; NULL в clients → retail_hold_days=2; -1 → hold_until=NULL,
 //      порт НИКОГДА не удаляется).
 //   3. hold_until прошёл → delete_port на боксе + DELETE строки пула + audit.
 //      Legacy-клиентам (порт без строки пула) дедлайн считается от
@@ -54,7 +54,7 @@ function create(deps) {
   function _graceHours() { return Number(getSetting('retail_grace_hours', 24)) || 24; }
   // per-клиент hold_ttl_days (Р33): NULL → дефолт из настройки; -1 → ∞ hold.
   function _holdDays(client) {
-    return client.holdTtlDays != null ? client.holdTtlDays : (Number(getSetting('retail_hold_days', 7)) || 7);
+    return client.holdTtlDays != null ? client.holdTtlDays : (Number(getSetting('retail_hold_days', 2)) || 2);
   }
 
   // ── дедуп уведомлений по дате ──
@@ -242,6 +242,12 @@ function create(deps) {
   async function _processClient(client, serverResults, stats) {
     const balance = client.balance || 0;
 
+    // Клиент без портов (свежая регистрация, порты удалены по hold) —
+    // нечего продлевать/блокировать: grace- и low-balance-уведомления не шлём.
+    const ownsPorts = retailPoolDb.byClient(client.id).length > 0
+      || portValidity.clientPorts(client, serverResults).length > 0;
+    if (!ownsPorts) return false;
+
     if (balance > 0) {
       const blockedRows = retailPoolDb.byClient(client.id).filter(r => r.status === 'blocked');
       if (client.balanceNegativeSince || blockedRows.length) {
@@ -327,18 +333,24 @@ function create(deps) {
     }
   }
 
-  // ── WP5: пул на исходе — «свободных < retail_pool_min_free» по каждому
-  // боксу розницы. Проверка в тике покрывает и покупки, и возвраты/удаления;
-  // дедуп + cooldown по серверу — внутри alerts.trigger (правило retail_pool_low).
+  // ── WP5: пул на исходе — «свободных < retail_pool_min_free» СУММАРНО по
+  // всем боксам розницы (20.08: раньше алерт шёл по каждому серверу раз в
+  // час — шумно; суть метрики — «в пуле в принципе есть что продавать»).
+  // Проверка в тике покрывает и покупки, и возвраты/удаления; дедуп +
+  // cooldown сутки — внутри alerts.trigger (правило retail_pool_low).
   function _checkPoolLow() {
     try {
       const minFree = Number(getSetting('retail_pool_min_free', 3));
       const servers = String(getSetting('retail_pool_servers', '')).split(',').map(s => s.trim()).filter(Boolean);
       if (!servers.length) return;
       const freeRows = retailPoolDb.byStatus('free');
-      for (const srv of servers) {
-        const freeNow = freeRows.filter(r => r.server === srv).length;
-        if (freeNow < minFree) alerts.trigger('retail_pool_low', { server: srv, free: freeNow, min: minFree });
+      const perServer = servers.map(srv => ({ server: srv, free: freeRows.filter(r => r.server === srv).length }));
+      const totalFree = perServer.reduce((a, s) => a + s.free, 0);
+      if (totalFree < minFree) {
+        alerts.trigger('retail_pool_low', {
+          free: totalFree, min: minFree,
+          breakdown: perServer.map(s => `${s.server}: ${s.free}`).join(', '),
+        });
       }
     } catch (e) { logger.warn('[RetailGuard] pool_low check: ' + e.message); }
   }
