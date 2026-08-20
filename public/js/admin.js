@@ -785,15 +785,36 @@ function renderSysDashboard(targetId){
         h += '</tbody></table></div>';
       }
       h += '</div>';
-      // Server downtime history (mig 035)
+      // Server downtime history (mig 035). Эпизоды одного сервера с паузой
+      // <10 мин между ними сливаем в один — иначе флапящий бокс (упал-поднялся
+      // каждые 2 мин) забивает таблицу десятками строк по 1–3 минуты (20.08).
       if (d.server_downtime && d.server_downtime.length) {
+        var dtRows = d.server_downtime.slice().sort(function(a, b){
+          if (a.server_name !== b.server_name) return a.server_name < b.server_name ? -1 : 1;
+          return String(a.down_from) < String(b.down_from) ? -1 : 1;
+        });
+        var merged = [];
+        dtRows.forEach(function(r){
+          var fromMs = Date.parse(r.down_from);
+          var last = merged[merged.length - 1];
+          if (last && last.server_name === r.server_name && Number.isFinite(fromMs) && (fromMs - last._toMs) < 10 * 60e3) {
+            var toMs2 = Date.parse(r.down_to || r.down_from);
+            if (toMs2 > last._toMs) { last._toMs = toMs2; last.down_to = r.down_to || r.down_from; }
+            last._flaps = (last._flaps || 1) + 1;
+          } else {
+            var toMs = Date.parse(r.down_to || r.down_from);
+            merged.push({ server_name: r.server_name, down_from: r.down_from, down_to: r.down_to, _toMs: Number.isFinite(toMs) ? toMs : fromMs, _flaps: 1 });
+          }
+        });
+        merged.sort(function(a, b){ return String(b.down_from) < String(a.down_from) ? -1 : 1; });   // свежие сверху
         h += '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:8px;padding:12px;margin-top:14px">';
-        h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">'+icon('alert',11)+' Недоступность серверов (история)</div>';
-        h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="width:100%;min-width:520px;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:left">С</th><th style="padding:4px 8px;text-align:left">По</th><th style="padding:4px 8px;text-align:right">Длительность</th></tr></thead><tbody>';
-        d.server_downtime.forEach(function(r){
-          var mins = Math.round((r.duration_sec||0)/60);
+        h += '<div style="font-size:11px;color:var(--text-2);text-transform:uppercase;margin-bottom:6px">'+icon('alert',11)+' Недоступность серверов (история) <span style="text-transform:none;font-weight:400">· эпизоды с паузой &lt;10 мин объединены · данные с момента включения учёта (20.08, 09:00 МСК)</span></div>';
+        h += '<div style="overflow-x:auto;-webkit-overflow-scrolling:touch"><table style="width:100%;min-width:520px;font-size:11px;border-collapse:collapse"><thead><tr style="color:var(--text-2)"><th style="padding:4px 8px;text-align:left">Сервер</th><th style="padding:4px 8px;text-align:left">С</th><th style="padding:4px 8px;text-align:left">По</th><th style="padding:4px 8px;text-align:right">Длительность</th><th style="padding:4px 8px;text-align:right">Эпизодов</th></tr></thead><tbody>';
+        merged.slice(0, 30).forEach(function(r){
+          var durSec = Math.max(0, Math.round((r._toMs - Date.parse(r.down_from)) / 1000));
+          var mins = Math.round(durSec / 60);
           var dur = mins >= 60 ? (Math.floor(mins/60)+'ч '+(mins%60)+'м') : (mins+' мин');
-          h += '<tr><td style="padding:4px 8px;font-weight:600">'+esc(r.server_name)+'</td><td style="padding:4px 8px">'+esc((r.down_from||"").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px">'+esc((r.down_to||"").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px;text-align:right;color:var(--danger);font-weight:600">'+dur+'</td></tr>';
+          h += '<tr><td style="padding:4px 8px;font-weight:600">'+esc(r.server_name)+'</td><td style="padding:4px 8px">'+esc((r.down_from||"").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px">'+esc((r.down_to||"…").slice(5,16).replace("T"," "))+'</td><td style="padding:4px 8px;text-align:right;color:var(--danger);font-weight:600">'+dur+'</td><td style="padding:4px 8px;text-align:right;color:var(--text-3)">'+(r._flaps > 1 ? r._flaps : '—')+'</td></tr>';
         });
         h += '</tbody></table></div></div>';
       }

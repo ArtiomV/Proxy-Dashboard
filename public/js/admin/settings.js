@@ -466,7 +466,6 @@ function saveSettings(){
   var palWindow=parseInt(document.getElementById('proxyAlertWindowInput').value)||60;
   var arEnabled=!!(document.getElementById('autoRebootEnabledInput')||{}).checked;
   var arInterval=parseInt(document.getElementById('autoRebootIntervalInput').value)||60;
-  var rndReboot=(document.getElementById('randomRebootEnabledInput')||{}).checked!==false;
   var recDays=parseInt((document.getElementById('reconcileDaysInput')||{}).value)||2;
   _minSpeedThreshold=minSpeed;
   _errorRateThreshold=errThresh;
@@ -475,7 +474,7 @@ function saveSettings(){
   var rbs=parseInt((document.getElementById('rebootScoreAlertInput')||{}).value);
   if(isNaN(rbs))rbs=70;
   window._offlineThresholdMin=offThMin;
-  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,reboot_score_alert_threshold:rbs,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin,random_modem_reboot_enabled:rndReboot,reconcile_days:recDays}}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,reboot_score_alert_threshold:rbs,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin,reconcile_days:recDays}}).then(function(d){
     if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Почасовой замер: '+(modems.join(', ')||'дефолтный список')+' — применится со следующего часа';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -513,9 +512,10 @@ function saveRecoverySettings(){
   var readdAfter=document.getElementById('recoveryReaddAfterInput').checked;
   var skipDeadSim=document.getElementById('recoverySkipDeadSimInput').checked;
   var skipUnsold=document.getElementById('recoverySkipUnsoldInput').checked;
+  var rndReboot=(document.getElementById('randomRebootEnabledInput')||{}).checked!==false;
   var st=document.getElementById('recoverySettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:{recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold}}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold,random_modem_reboot_enabled:rndReboot}}).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});

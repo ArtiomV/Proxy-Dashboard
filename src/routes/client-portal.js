@@ -63,6 +63,9 @@ module.exports = function createClientPortalRouter(deps) {
   }
   function _debtStatus(clientInfo, avgDailyCharge7d) {
     if (!clientInfo || clientInfo.clientType === 'legal' || clientInfo.allowDebt) return null;
+    // Нет привязанных портов — продлевать нечего, блокировать нечего:
+    // баннер «Отрицательный баланс… пополните» не показываем (20.08).
+    if (!String(clientInfo.portName || '').trim()) return null;
     const balance = clientInfo.balance || 0;
     if (balance <= 0) return { state: clientInfo.debtBlocked ? 'blocked' : 'debt', balance };
     if (avgDailyCharge7d > 0 && balance <= 3 * avgDailyCharge7d) {
