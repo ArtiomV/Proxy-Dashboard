@@ -59,7 +59,7 @@ function loadServersList(){
       h+='<div class="server-field"><div class="server-field-label">API Endpoint</div><div class="server-field-value"><span>'+esc(s.url)+'</span><button class="copy-btn" data-on-click="copyText(this.dataset.text,this)" data-text="'+esc(s.url)+'">'+icon('copy',12)+'</button></div></div>';
       h+='<div class="server-field"><div class="server-field-label">Public IP</div><div class="server-field-value"><span>'+esc(s.publicIp||'—')+'</span>'+(s.publicIp?'<button class="copy-btn" data-on-click="copyText(\''+esc(s.publicIp)+'\',this)">'+icon('copy',12)+'</button>':'')+'</div></div>';
       h+='<div class="server-field"><div class="server-field-label">Панель (API)</div><div class="server-field-value"><span>'+esc(s.panelUser||'—')+'</span> / <span id="panelPwdView_'+sn+'">'+(s.panelPassword?'••••••••':'—')+'</span>'+(s.panelPassword?'<button class="toggle-btn" data-on-click="togglePwdView(this,\'panelPwdView_'+sn+'\',\''+esc(s.panelPassword).replace(/'/g,"\\'")+'\')">'+icon('eye',12)+'</button>':'')+'</div></div>';
-      h+='<div class="server-field"><div class="server-field-label">SSH Доступ</div><div class="server-field-value"><span>'+esc(s.osLogin||'—')+'</span> / <span id="sshPwdView_'+sn+'">'+(s.osPassword?'••••••••':'—')+'</span>'+(s.osPassword?'<button class="toggle-btn" data-on-click="togglePwdView(this,\'sshPwdView_'+sn+'\',\''+esc(s.osPassword).replace(/'/g,"\\'")+'\')">'+icon('eye',12)+'</button>':'')+'</div></div>';
+      h+='<div class="server-field"><div class="server-field-label">SSH Доступ</div><div class="server-field-value"><span>'+esc(s.osLogin||'—')+(s.sshPort?'<span style="color:var(--text-3)">:'+esc(String(s.sshPort))+'</span>':'')+'</span> / <span id="sshPwdView_'+sn+'">'+(s.osPassword?'••••••••':'—')+'</span>'+(s.osPassword?'<button class="toggle-btn" data-on-click="togglePwdView(this,\'sshPwdView_'+sn+'\',\''+esc(s.osPassword).replace(/'/g,"\\'")+'\')">'+icon('eye',12)+'</button>':'')+'</div></div>';
       h+='<div class="server-field"><div class="server-field-label">Оборудование</div><div class="server-field-value" style="font-family:inherit"><span style="color:'+(s.hardware?'var(--text-1)':'var(--text-3)')+'">'+esc(s.hardware||'— не указаны —')+'</span></div></div>';
       h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">'+icon('pin',12)+' Адрес локации</div><div class="server-field-value" style="font-family:inherit"><span style="color:'+(s.address?'var(--text-1)':'var(--text-3)')+'">'+esc(s.address||'— не указан —')+'</span></div></div>';
       h+='</div>';
@@ -68,7 +68,8 @@ function loadServersList(){
       h+='<div class="server-field"><div class="server-field-label">Панель Логин</div><input class="form-input" id="panelUser_'+sn+'" value="'+esc(s.panelUser||'')+'" placeholder="proxy" style="font-size:12px"></div>';
       h+='<div class="server-field"><div class="server-field-label">Панель Пароль</div><input class="form-input" id="panelPass_'+sn+'" value="'+esc(s.panelPassword||'')+'" placeholder="пароль" style="font-size:12px"></div>';
       h+='<div class="server-field"><div class="server-field-label">SSH Логин</div><input class="form-input" id="osLogin_'+sn+'" value="'+esc(s.osLogin||'')+'" placeholder="root" style="font-size:12px"></div>';
-      h+='<div class="server-field"><div class="server-field-label">SSH Пароль</div><input class="form-input" id="osPass_'+sn+'" value="'+esc(s.osPassword||'')+'" placeholder="пароль" style="font-size:12px"></div>';
+      h+='<div class="server-field"><div class="server-field-label">SSH Пароль</div><input class="form-input" id="osPass_'+sn+'" value="'+esc(s.osPassword||'')+'" placeholder="пароль (пусто = вход по ключу)" style="font-size:12px"></div>';
+      h+='<div class="server-field"><div class="server-field-label">SSH Порт</div><input class="form-input" id="sshPort_'+sn+'" value="'+esc(s.sshPort?String(s.sshPort):'')+'" placeholder="2222 (пусто = 2222/22)" style="font-size:12px"></div>';
       h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">Оборудование</div><input class="form-input" id="hw_'+sn+'" value="'+esc(s.hardware||'')+'" placeholder="CPU, RAM, Disk, OS..." style="font-size:12px;width:100%"></div>';
       h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">'+icon('pin',12)+' Адрес локации</div><input class="form-input" id="addr_'+sn+'" value="'+esc(s.address||'')+'" placeholder="Город, ул. Примерная, д. 1" style="font-size:12px;width:100%"></div>';
       h+='</div>';
@@ -124,9 +125,10 @@ function saveServerMeta(name){
   var panelPass=document.getElementById('panelPass_'+name).value;
   var hw=document.getElementById('hw_'+name).value;
   var addr=(document.getElementById('addr_'+name)||{}).value||'';
+  var sshPort=(document.getElementById('sshPort_'+name)||{}).value||'';
   var st=document.getElementById('srvSaveStatus_'+name);
   st.textContent='Сохраняю и проверяю Панель...';st.style.color='var(--warning)';
-  api(API+'/api/admin/servers/'+name,{method:'PATCH',json:{osLogin:osLogin,osPassword:osPass,panelUser:panelUser,panelPassword:panelPass,hardware:hw,address:addr}}).then(function(d){
+  api(API+'/api/admin/servers/'+name,{method:'PATCH',json:{osLogin:osLogin,osPassword:osPass,sshPort:sshPort,panelUser:panelUser,panelPassword:panelPass,hardware:hw,address:addr}}).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';setTimeout(function(){loadServersList()},1000)}
     else{st.textContent=(d.error||'Ошибка')+(d.details?' ('+esc(d.details)+')':'');st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'})

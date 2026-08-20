@@ -149,6 +149,22 @@ describe('ServerMetrics: runServerMetrics (fallback на HTTP)', () => {
     expect(row.error).toBe('');
   });
 
+  it('sshPort из конфига сервера идёт первым (mon@ на нестандартном порту)', async () => {
+    db.prepare('DELETE FROM server_metrics').run();
+    const ports = [];
+    const job = serverMetrics.create({
+      db,
+      logger: { info() {}, warn() {}, error() {} },
+      apiServers: [{ name: 'S11', url: 'http://box', user: 'u', pass: 'p', osLogin: 'mon', publicIp: '1.2.3.4', sshPort: 6001 }],
+      execFile: (cmd, args, opts, cb) => { ports.push(Number(args[args.indexOf('-p') + 1])); cb(new Error('Connection timed out')); },
+      proxyConf: { getPage: async () => ({ ok: true, html: STATUS_HTML, status: 200 }) },
+    });
+    await job.runServerMetrics();
+    expect(ports[0]).toBe(6001);          // сначала кастомный порт
+    expect(ports).toContain(2222);        // затем дефолтные
+    expect(ports.filter(p => p === 6001)).toHaveLength(1);  // без дублей
+  });
+
   it('недоступны оба источника → строка с error, без ssh-кредов SSH не зовём', async () => {
     db.prepare('DELETE FROM server_metrics').run();
     let sshCalls = 0;

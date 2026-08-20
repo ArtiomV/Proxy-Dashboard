@@ -19,7 +19,7 @@ const DB_CRED_FIELDS = ['user', 'pass'];
 // Fields that DB owns (set via the admin UI). These must be merged INTO env
 // entries on startup, otherwise the next saveApiServersToDb() persists the
 // impoverished env-only version and wipes them. See incident 2026-05-20.
-const DB_META_FIELDS = ['osLogin', 'osPassword', 'hardware', 'address', 'country', 'countryName', 'tz'];
+const DB_META_FIELDS = ['osLogin', 'osPassword', 'sshPort', 'hardware', 'address', 'country', 'countryName', 'tz'];
 
 // Per-key shape descriptors. Each function receives the raw JSON string and
 // returns a numeric "fill level" object. Shape comparison flags any numeric

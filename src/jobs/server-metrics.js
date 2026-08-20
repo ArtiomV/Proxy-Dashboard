@@ -23,7 +23,7 @@ const SSH_PORTS = [2222, 22];
 // паузой (дельта → cpu%), loadavg, free -m, df -m /, uptime, термозоны +
 // lm-sensors (если установлен). Секции разделены строкой '---'.
 const SSH_CMD = "grep '^cpu ' /proc/stat; sleep 1; grep '^cpu ' /proc/stat; " +
-  'echo ---; cat /proc/loadavg; echo ---; free -m; echo ---; df -m /; echo ---; ' +
+  'echo ---; cat /proc/loadavg; echo ---; LC_ALL=C free -m; echo ---; df -m /; echo ---; ' +
   'cat /proc/uptime; echo ---; cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null; ' +
   "sensors 2>/dev/null | grep -i 'package\\|core 0' | head -2";
 
@@ -201,12 +201,21 @@ function create(deps) {
     });
   }
 
-  // SSH-сбор: ключ → sshpass, порты 2222 → 22, таймаут 10с. Нет кредов или
-  // все попытки мимо — null (файрвол боксов — штатная ситуация, info-лог).
+  // SSH-сбор: ключ → sshpass, порты — server.sshPort (если задан, напр.
+  // read-only mon@ на нестандартном порту) → 2222 → 22, таймаут 10с. Нет
+  // кредов или все попытки мимо — null (файрвол боксов — штатная ситуация,
+  // info-лог).
+  function _sshPorts(server) {
+    const custom = Number(server.sshPort);
+    const list = [];
+    if (custom > 0 && custom < 65536) list.push(custom);
+    for (const p of SSH_PORTS) if (!list.includes(p)) list.push(p);
+    return list;
+  }
   async function collectSsh(server) {
     if (!server.osLogin || !server.publicIp) return null;
     let lastErr = null;
-    for (const port of SSH_PORTS) {
+    for (const port of _sshPorts(server)) {
       try { return parseSshMetrics(await _sshOnce(server, port, true)); }
       catch (e) { lastErr = e; }
     }
@@ -214,7 +223,7 @@ function create(deps) {
       logger.info(`[ServerMetrics] ${server.name}: SSH недоступен (${String((lastErr && lastErr.message) || lastErr).slice(0, 120)}) — fallback на HTTP-панель`);
       return null;
     }
-    for (const port of SSH_PORTS) {
+    for (const port of _sshPorts(server)) {
       try { return parseSshMetrics(await _sshOnce(server, port, false)); }
       catch (e) { lastErr = e; }
     }

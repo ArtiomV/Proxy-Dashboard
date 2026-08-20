@@ -94,7 +94,7 @@ r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
     name: s.name, url: s.url, publicIp: s.publicIp,
     country: SERVER_COUNTRIES[s.name] || {},
     panelUser: s.user || '', panelPassword: s.pass || '',
-    osLogin: s.osLogin || '', osPassword: s.osPassword || '',
+    osLogin: s.osLogin || '', osPassword: s.osPassword || '', sshPort: s.sshPort || '',
     hardware: s.hardware || '', address: s.address || ''
   })) });
 });
@@ -102,9 +102,16 @@ r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
 r.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, async (req, res) => {
   const srv = apiServers.find(s => s.name === req.params.name);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  const { osLogin, osPassword, hardware, address, panelUser, panelPassword } = req.body;
+  const { osLogin, osPassword, sshPort, hardware, address, panelUser, panelPassword } = req.body;
   if (osLogin     !== undefined) srv.osLogin    = osLogin;
   if (osPassword  !== undefined) srv.osPassword = osPassword;
+  if (sshPort !== undefined) {
+    const p = Number(sshPort);
+    if (sshPort !== '' && sshPort !== null && !(p > 0 && p < 65536)) {
+      return res.status(400).json({ error: 'sshPort must be 1..65535 or empty' });
+    }
+    srv.sshPort = p > 0 && p < 65536 ? p : undefined;
+  }
   if (hardware    !== undefined) srv.hardware   = hardware;
   if (address     !== undefined) srv.address    = address;
 
