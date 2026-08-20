@@ -295,9 +295,15 @@ async function trackModems() {
           if (!nickToShow) {
             try { const row = db.prepare('SELECT nick FROM modem_meta WHERE server_name=? AND imei=? LIMIT 1').get(server.name, imei); if (row) nickToShow = row.nick || ''; } catch (_) {}
           }
-          try { alerts.trigger('modem_recovered', { server: server.name, imei, nick: nickToShow, downSec }); } catch (_) {}
-          uptimeTracking[key].offline_alerted = false;   // пара закрыта
-          delete _downSince[key];
+          // Флаг снимаем ТОЛЬКО при реально ушедшем сообщении (trigger=true).
+          // Иначе подавленное кулдауном «вернулся» съедало флаг — и при
+          // следующем падении оператор видел «оффлайн» без парного «вернулся».
+          try {
+            if (alerts.trigger('modem_recovered', { server: server.name, imei, nick: nickToShow, downSec })) {
+              uptimeTracking[key].offline_alerted = false;   // пара закрыта
+              delete _downSince[key];
+            }
+          } catch (_) {}
         }
         // Stage 18.9: separate timestamp for "last time we SAW this modem alive".
         // last_check is bumped every tick (even for offline modems via the
@@ -488,18 +494,26 @@ async function trackModems() {
           // логировался как остальные. Теперь — через общий alerts.trigger,
           // как парный ему modem_recovered.
           try {
-            alerts.trigger('modem_offline_20m', {
+            // Флаги парности ставим ТОЛЬКО при реально отправленном алерте
+            // (trigger=true). Раньше они ставились всегда — даже когда отправку
+            // подавили кулдаун/выкл. правило/boot grace: «оффлайн» оператору не
+            // приходил, зато «вернулся» потом уходил → в чате сирота-поднятие.
+            // При trigger=false не трогаем offlineAlertSent — на следующем тике
+            // попробуем снова (кулдаун внутри alerts сам не даст спамить).
+            const sent = alerts.trigger('modem_offline_20m', {
               server: server.name, imei, nick: nickToShow, mins: minsOff,
               lastOnline: new Date(lastOnlineMs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }),
             });
-            offlineAlertSent[key] = true;
-            // Флаг парности в персистентном uptimeTracking: «вернулся» уйдёт
-            // только если этот «оффлайн» реально был отправлен.
-            if (uptimeTracking[key]) uptimeTracking[key].offline_alerted = true;
-            _downSince[key] = lastOnlineMs;   // для сводки «N модемов не работает»
-            logActivity('modem', 'warn', 'modem_offline_alert', nickToShow || imei,
-              `Offline ${minsOff} min — alert sent`,
-              { server: server.name, imei, mins_offline: minsOff });
+            if (sent) {
+              offlineAlertSent[key] = true;
+              // Флаг парности в персистентном uptimeTracking: «вернулся» уйдёт
+              // только если этот «оффлайн» реально был отправлен.
+              if (uptimeTracking[key]) uptimeTracking[key].offline_alerted = true;
+              _downSince[key] = lastOnlineMs;   // для сводки «N модемов не работает»
+              logActivity('modem', 'warn', 'modem_offline_alert', nickToShow || imei,
+                `Offline ${minsOff} min — alert sent`,
+                { server: server.name, imei, mins_offline: minsOff });
+            }
           } catch (e) { logger.warn('[OfflineAlert] dispatch failed: ' + e.message); }
         }
       }

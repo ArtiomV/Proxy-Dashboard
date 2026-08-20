@@ -221,6 +221,8 @@ function loadSettings(){
     var _pawEl=document.getElementById('proxyAlertWindowInput');if(_pawEl)_pawEl.value=s.proxy_alert_window_min!=null?s.proxy_alert_window_min:60;
     var _arE=document.getElementById('autoRebootEnabledInput');if(_arE)_arE.checked=!!s.auto_reboot_enabled;
     var _arI=document.getElementById('autoRebootIntervalInput');if(_arI)_arI.value=s.auto_reboot_min_interval_min!=null?s.auto_reboot_min_interval_min:60;
+    var _rrE=document.getElementById('randomRebootEnabledInput');if(_rrE)_rrE.checked=(s.random_modem_reboot_enabled!==false);
+    var _rcD=document.getElementById('reconcileDaysInput');if(_rcD)_rcD.value=s.reconcile_days||2;
     _pcWarnMs=s.proxy_check_warn_ms||500;
     _pcBadMs=s.proxy_check_bad_ms||2000;
     var pctEl=document.getElementById('proxyCheckTargetInput');if(pctEl)pctEl.value=s.proxy_check_target||'https://www.instagram.com/';
@@ -279,7 +281,7 @@ function loadSettings(){
     var ren=document.getElementById('retailEnabledInput');if(ren)ren.checked=!!s.retail_enabled;
     var rtp=document.getElementById('retailTestDayPriceInput');if(rtp)rtp.value=s.retail_test_day_price!=null?s.retail_test_day_price:100;
     var rgh=document.getElementById('retailGraceHoursInput');if(rgh)rgh.value=s.retail_grace_hours||24;
-    var rhd=document.getElementById('retailHoldDaysInput');if(rhd)rhd.value=s.retail_hold_days||2;
+    var rhd=document.getElementById('retailHoldDaysInput');if(rhd)rhd.value=s.retail_hold_days||7;
     var rrl=document.getElementById('retailRegLimitInput');if(rrl)rrl.value=s.retail_reg_limit_per_ip_day||10;
     var rbb=document.getElementById('retailBulkBuyThresholdInput');if(rbb)rbb.value=s.retail_bulk_buy_threshold!=null?s.retail_bulk_buy_threshold:3;
     var rpf=document.getElementById('retailPoolMinFreeInput');if(rpf)rpf.value=s.retail_pool_min_free!=null?s.retail_pool_min_free:3;
@@ -357,7 +359,7 @@ function saveRetailSettings(){
     retail_enabled:!!document.getElementById('retailEnabledInput').checked,
     retail_test_day_price:_num('retailTestDayPriceInput',100,0,100000),
     retail_grace_hours:_num('retailGraceHoursInput',24,1,720),
-    retail_hold_days:_num('retailHoldDaysInput',2,1,365),
+    retail_hold_days:_num('retailHoldDaysInput',7,1,365),
     retail_reg_limit_per_ip_day:_num('retailRegLimitInput',10,1,1000),
     retail_bulk_buy_threshold:_num('retailBulkBuyThresholdInput',3,0,100),
     retail_pool_min_free:_num('retailPoolMinFreeInput',0,0,1000),
@@ -464,6 +466,8 @@ function saveSettings(){
   var palWindow=parseInt(document.getElementById('proxyAlertWindowInput').value)||60;
   var arEnabled=!!(document.getElementById('autoRebootEnabledInput')||{}).checked;
   var arInterval=parseInt(document.getElementById('autoRebootIntervalInput').value)||60;
+  var rndReboot=(document.getElementById('randomRebootEnabledInput')||{}).checked!==false;
+  var recDays=parseInt((document.getElementById('reconcileDaysInput')||{}).value)||2;
   _minSpeedThreshold=minSpeed;
   _errorRateThreshold=errThresh;
   var staleH=parseInt(document.getElementById('staleModemHoursInput').value)||12;
@@ -471,7 +475,7 @@ function saveSettings(){
   var rbs=parseInt((document.getElementById('rebootScoreAlertInput')||{}).value);
   if(isNaN(rbs))rbs=70;
   window._offlineThresholdMin=offThMin;
-  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,reboot_score_alert_threshold:rbs,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,reboot_score_alert_threshold:rbs,stale_modem_hours:staleH,modem_offline_threshold_min:offThMin,random_modem_reboot_enabled:rndReboot,reconcile_days:recDays}}).then(function(d){
     if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Почасовой замер: '+(modems.join(', ')||'дефолтный список')+' — применится со следующего часа';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});

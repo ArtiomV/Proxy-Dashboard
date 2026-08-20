@@ -220,7 +220,7 @@ function computeClientWorking(knownModems, fleet, opts) {
   // в хабе и светятся online → счётчик показывал 33/33 вместо 23/33).
   // Порог = fleet disconnectedMs, чтобы одно-опросный флап list_ports_json
   // не дёргал счётчик (на том же пороге держится RECONCILE-guard в
-  // updateKnownModems, который сносит запись только через 7 дней).
+  // updateKnownModems, который сносит запись только через 2 дня).
   const missingMs = opts.missingMs != null ? opts.missingMs : 10 * 60 * 1000;
   const active = new Set((fleet && fleet.activeKeys) || []);
   const dark = new Set(((fleet && fleet.disconnectedList) || []).map(o => o.key));

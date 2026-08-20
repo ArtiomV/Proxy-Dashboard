@@ -181,24 +181,41 @@ function create(deps) {
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const pruneStmt = db.prepare('DELETE FROM server_metrics WHERE collected_at < ?');
 
-  function _sshOnce(server, port) {
+  // SSH: сначала пробуем ключ из ~/.ssh/id_ed25519 (публичная часть выдана
+  // владельцу — добавляется в authorized_keys боксов), если мимо — sshpass
+  // с паролем из конфига сервера. BatchMode=yes — без интерактива.
+  function _sshArgs(server, port, useKey) {
+    return ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no',
+      '-o', 'UserKnownHostsFile=/dev/null', '-o', 'ConnectTimeout=8',
+      '-o', 'IdentitiesOnly=yes',
+      '-p', String(port), `${server.osLogin}@${server.publicIp}`, SSH_CMD];
+  }
+
+  function _sshOnce(server, port, useKey) {
     return new Promise((resolve, reject) => {
-      execFile('sshpass', ['-p', server.osPassword,
-        'ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no',
-        '-o', 'UserKnownHostsFile=/dev/null', '-o', 'ConnectTimeout=8',
-        '-p', String(port), `${server.osLogin}@${server.publicIp}`, SSH_CMD],
-        { timeout: SSH_TIMEOUT_MS, maxBuffer: 256 * 1024 },
+      const args = _sshArgs(server, port, useKey);
+      const bin = useKey ? 'ssh' : 'sshpass';
+      const argv = useKey ? args : ['-p', server.osPassword, 'ssh', ...args];
+      execFile(bin, argv, { timeout: SSH_TIMEOUT_MS, maxBuffer: 256 * 1024 },
         (err, stdout) => (err ? reject(err) : resolve(stdout)));
     });
   }
 
-  // SSH-сбор: 2222 → 22, таймаут 10с. Нет кредов или все порты мимо — null
-  // (файрвол боксов — штатная ситуация, info-лог один раз на прогон).
+  // SSH-сбор: ключ → sshpass, порты 2222 → 22, таймаут 10с. Нет кредов или
+  // все попытки мимо — null (файрвол боксов — штатная ситуация, info-лог).
   async function collectSsh(server) {
-    if (!server.osLogin || !server.osPassword || !server.publicIp) return null;
+    if (!server.osLogin || !server.publicIp) return null;
     let lastErr = null;
     for (const port of SSH_PORTS) {
-      try { return parseSshMetrics(await _sshOnce(server, port)); }
+      try { return parseSshMetrics(await _sshOnce(server, port, true)); }
+      catch (e) { lastErr = e; }
+    }
+    if (!server.osPassword) {
+      logger.info(`[ServerMetrics] ${server.name}: SSH недоступен (${String((lastErr && lastErr.message) || lastErr).slice(0, 120)}) — fallback на HTTP-панель`);
+      return null;
+    }
+    for (const port of SSH_PORTS) {
+      try { return parseSshMetrics(await _sshOnce(server, port, false)); }
       catch (e) { lastErr = e; }
     }
     logger.info(`[ServerMetrics] ${server.name}: SSH недоступен (${String((lastErr && lastErr.message) || lastErr).slice(0, 120)}) — fallback на HTTP-панель`);

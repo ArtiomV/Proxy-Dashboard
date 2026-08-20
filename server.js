@@ -1592,6 +1592,7 @@ const SETTINGS_DEFAULTS = {
   random_modem_reboot_enabled: true,  // 20.08: random-ник (сбойный ре-енум) → ребут по IMEI, троттл 30 мин
   stale_modem_hours: 12,              // Stage 18.8 — exclude modems offline >Nh from agg endpoints
   modem_offline_threshold_min: 10,    // 2026-07-28 — минут тишины, после которых модем «отключен» (карточка + TG-алерт)
+  reconcile_days: 2,                  // 20.08: сколько дней исчезнувший с бокса порт держится в знаменателе клиента (анти-флап)
   // Speedtest (additional)
   speedtest_low_threshold: 1,
   speedtest_retest_delay_min: 10,
@@ -1651,7 +1652,7 @@ const SETTINGS_DEFAULTS = {
   // ── B2C розница (ТЗ 10.08): всё новое — за фича-флагом retail_enabled ──
   retail_enabled: false,             // master switch: регистрация/витрина/покупка выключены
   retail_pool_servers: '',           // CSV боксов розницы (отдельные от B2B, hfilter ВКЛ)
-  retail_hold_days: 2,               // hold после grace до удаления порта (per-клиент hold_ttl_days, -1 = ∞)
+  retail_hold_days: 7,               // hold после grace до удаления порта (per-клиент hold_ttl_days, -1 = ∞)
   retail_grace_hours: 24,            // grace: порт работает после обнуления баланса
   retail_pool_free_alert: 5,         // алерт «свободных < N» в пуле
   retail_mass_buy_alert: 5,          // алерт при массовой покупке одним аккаунтом

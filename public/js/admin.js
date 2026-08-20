@@ -1214,28 +1214,60 @@ function bulkRotation(){
     +'</div></div>';
   document.body.appendChild(overlay);
   document.getElementById('bulkRotBtn').onclick=function(){
-    var rot=document.getElementById('bulkRotSelect').value;
-    var btn=this;btn.disabled=true;btn.textContent='Применяю...';
-    api(API+'/api/admin/bulk_rotation',{method:'POST',json:{modems:modems,rotation:parseInt(rot)}})
-    .then(function(d){
-      if(d.ok){showToast('Ротация установлена: '+d.updated+' модемов'+(d.failed?' ('+d.failed+' ошибок)':''),'success');overlay.remove();clearBulkSel();setTimeout(loadData,3000)}
-      else{
-        // При частичном фейле показываем ПОДРОБНЫЙ список — тост с причинами легко пропустить.
-        if(d.failures&&d.failures.length){
-          var fl=d.failures.map(function(f){return '<div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)"><b>'+esc(f.imei)+'</b> — '+esc(f.reason)+'</div>';}).join('');
-          var ov2=document.createElement('div');
-          ov2.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10001;display:flex;align-items:center;justify-content:center';
-          ov2.onclick=function(e){if(e.target===ov2)ov2.remove()};
-          ov2.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:18px;width:440px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
-            +'<div style="font-size:13px;font-weight:600;color:var(--danger);margin-bottom:10px">Не применено: '+d.failed+' из '+modems.length+'</div>'
-            +'<div style="max-height:50vh;overflow-y:auto;margin-bottom:12px">'+fl+'</div>'
-            +'<div style="font-size:10px;color:var(--text-3);margin-bottom:10px">У этих модемов показ ротации сброшен до «нет данных» — обновится из бокса сам. Обычные причины: модем в ротации/ребуте — повторите через минуту.</div>'
-            +'<div style="text-align:right"><button class="btn btn-primary btn-sm" data-on-click="this.closest(\'div[style*=fixed]\').remove()">Понял</button></div></div>';
-          document.body.appendChild(ov2);
-        } else showToast(d.error||'Ошибка','error');
-        btn.disabled=false;btn.textContent='Применить';
+    var rot=parseInt(document.getElementById('bulkRotSelect').value);
+    if(window._bulkRotRunning){showToast('Массовая ротация уже выполняется','warning');return}
+    overlay.remove();   // модалку закрываем сразу — дальше прогресс живёт в тосте
+    window._bulkRotRunning=true;
+    var c=document.getElementById('toastContainer');
+    var prog=null;
+    // Один живой тост-прогресс: текст обновляется по каждому модему
+    // («3/10 — MD_04»). По одному модему за запрос: bulk-эндпоинт делает
+    // GET формы + POST + verify-after-write на каждый модем, а за один
+    // HTTP-запрос это не укладывается в разумный таймаут — отсюда и
+    // «ротация не применяется»: запрос обрывался на середине пачки.
+    function setProgress(txt){
+      if(!c)return;
+      if(!prog){prog=document.createElement('div');prog.className='toast toast-info';
+        prog.innerHTML='<span class="toast-icon">'+icon('clock',10)+'</span><span class="toast-text"></span><button class="toast-close" data-on-click="this.closest(\'.toast\').remove()">'+icon('x',11)+'</button>';
+        c.appendChild(prog);}
+      prog.querySelector('.toast-text').textContent=txt;
+    }
+    var ok=0, failures=[], i=0;
+    function finish(){
+      window._bulkRotRunning=false;
+      if(prog&&prog.parentNode)prog.remove();
+      if(failures.length){
+        var fl=failures.map(function(f){return '<div style="font-size:12px;padding:5px 0;border-bottom:1px solid var(--border)"><b>'+esc(f.nick)+'</b> — '+esc(f.reason)+'</div>';}).join('');
+        var ov2=document.createElement('div');
+        ov2.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10001;display:flex;align-items:center;justify-content:center';
+        ov2.onclick=function(e){if(e.target===ov2)ov2.remove()};
+        ov2.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:18px;width:440px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
+          +'<div style="font-size:13px;font-weight:600;color:var(--danger);margin-bottom:10px">Не применено: '+failures.length+' из '+modems.length+'</div>'
+          +'<div style="max-height:50vh;overflow-y:auto;margin-bottom:12px">'+fl+'</div>'
+          +'<div style="font-size:10px;color:var(--text-3);margin-bottom:10px">У этих модемов показ ротации сброшен до «нет данных» — обновится из бокса сам. Обычные причины: модем в ротации/ребуте — повторите через минуту.</div>'
+          +'<div style="text-align:right"><button class="btn btn-primary btn-sm" data-on-click="this.closest(\'div[style*=fixed]\').remove()">Понял</button></div></div>';
+        document.body.appendChild(ov2);
+        showToast('Ротация: применено '+ok+' из '+modems.length,'error');
+      } else {
+        showToast('Ротация установлена: '+ok+' модемов','success');
       }
-    }).catch(function(e){showToast(e.message,'error');btn.disabled=false;btn.textContent='Применить'});
+      clearBulkSel();setTimeout(loadData,1500);
+    }
+    function next(){
+      if(i>=modems.length){finish();return}
+      var m=modems[i];var s=window._bulkSel[m.imei]||{};
+      var label=s.nick||m.imei;
+      setProgress('Ротация: '+(i+1)+'/'+modems.length+' — '+label);
+      api(API+'/api/admin/bulk_rotation',{method:'POST',json:{modems:[m],rotation:rot}})
+      .then(function(d){
+        if(d.ok)ok++;
+        else{var f=(d.failures&&d.failures[0])||{imei:m.imei,reason:d.error||'ошибка'};failures.push({nick:label,reason:f.reason||'ошибка'});}
+      })
+      .catch(function(e){failures.push({nick:label,reason:String(e.message||e).slice(0,80)});})
+      .then(function(){i++;next();});
+    }
+    setProgress('Ротация: 0/'+modems.length+'…');
+    next();
   };
 }
 

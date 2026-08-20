@@ -215,6 +215,14 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.auto_reboot_min_interval_min != null) {
     patch.auto_reboot_min_interval_min = Math.max(15, Math.min(720, parseInt(req.body.auto_reboot_min_interval_min) || 60));
   }
+  // 20.08: random-ник → авто-ребут (default on); удержание портов в
+  // знаменателе против флапов API боксов (default 2 дня).
+  if (req.body.random_modem_reboot_enabled != null) {
+    patch.random_modem_reboot_enabled = !!req.body.random_modem_reboot_enabled;
+  }
+  if (req.body.reconcile_days != null) {
+    patch.reconcile_days = Math.max(1, Math.min(30, parseInt(req.body.reconcile_days) || 2));
+  }
   // Порог TG-алерта по reboot score модема (0..100; notify-collect).
   if (req.body.reboot_score_alert_threshold != null) {
     patch.reboot_score_alert_threshold = Math.max(0, Math.min(100, parseInt(req.body.reboot_score_alert_threshold) || 70));
@@ -386,7 +394,7 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.retail_enabled != null)            patch.retail_enabled            = !!req.body.retail_enabled;
   if (req.body.retail_test_day_price != null)     patch.retail_test_day_price     = Math.max(0, Math.min(100000, parseFloat(req.body.retail_test_day_price) || 0));
   if (req.body.retail_grace_hours != null)        patch.retail_grace_hours        = Math.max(1, Math.min(720, parseInt(req.body.retail_grace_hours) || 24));
-  if (req.body.retail_hold_days != null)          patch.retail_hold_days          = Math.max(1, Math.min(365, parseInt(req.body.retail_hold_days) || 2));
+  if (req.body.retail_hold_days != null)          patch.retail_hold_days          = Math.max(1, Math.min(365, parseInt(req.body.retail_hold_days) || 7));
   if (req.body.retail_reg_limit_per_ip_day != null) patch.retail_reg_limit_per_ip_day = Math.max(1, Math.min(1000, parseInt(req.body.retail_reg_limit_per_ip_day) || 10));
   // Регистрация и письма розницы: Turnstile (анти-бот) + SendPulse SMTP.
   // Секреты: маска GET ('••••••••') не является значением — игнорируем её.

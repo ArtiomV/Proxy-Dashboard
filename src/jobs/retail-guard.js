@@ -14,7 +14,7 @@
 //   2. grace истёк → «дата до» = сегодня для всех портов клиента
 //      (setPortValidBefore, src/services/port-validity.js); строки пула
 //      leased → blocked с hold_until = now + hold_ttl_days
-//      (per-клиент; NULL в clients → retail_hold_days=2; -1 → hold_until=NULL,
+//      (per-клиент; NULL в clients → retail_hold_days=7; -1 → hold_until=NULL,
 //      порт НИКОГДА не удаляется).
 //   3. hold_until прошёл → delete_port на боксе + DELETE строки пула + audit.
 //      Legacy-клиентам (порт без строки пула) дедлайн считается от
@@ -54,7 +54,7 @@ function create(deps) {
   function _graceHours() { return Number(getSetting('retail_grace_hours', 24)) || 24; }
   // per-клиент hold_ttl_days (Р33): NULL → дефолт из настройки; -1 → ∞ hold.
   function _holdDays(client) {
-    return client.holdTtlDays != null ? client.holdTtlDays : (Number(getSetting('retail_hold_days', 2)) || 2);
+    return client.holdTtlDays != null ? client.holdTtlDays : (Number(getSetting('retail_hold_days', 7)) || 7);
   }
 
   // ── дедуп уведомлений по дате ──
