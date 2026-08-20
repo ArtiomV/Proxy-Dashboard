@@ -111,11 +111,11 @@ padding-left:clamp(36px,5vw,72px);
 .lr-features li svg{flex:0 0 auto;width:23px;height:23px}
 .lr-clients{margin-bottom:28px}
 .lr-clients-label{display:block;color:#8A8794;font-size:11px;text-transform:uppercase;letter-spacing:1.6px;margin-bottom:18px}
-.lr-logos{display:grid;grid-template-columns:repeat(4,1fr);align-items:center;justify-items:center;gap:18px 24px;opacity:.95;max-width:520px}
-/* Единый масштаб логотипов: все 8 рендерятся на одну ширину (112px), как
+.lr-logos{display:grid;grid-template-columns:repeat(4,1fr);align-items:center;justify-items:center;gap:14px 20px;opacity:.9;max-width:440px}
+/* Единый масштаб логотипов: все 8 рендерятся на одну ширину, как
    mpstats/wbstat. Внутренние поля webp-файлов обрезаны, поэтому при равной
    ширине видимый размер логотипов одинаковый. */
-.lr-logos img{width:112px;max-height:30px;height:auto;display:block}
+.lr-logos img{width:92px;max-height:24px;height:auto;display:block}
 .lr-legal{color:#7A7785;font-size:13px;margin:0;letter-spacing:.2px}
 .lr-legal b{color:#D5D3DA;font-weight:500}
 
