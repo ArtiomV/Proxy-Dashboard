@@ -111,8 +111,11 @@ padding-left:clamp(36px,5vw,72px);
 .lr-features li svg{flex:0 0 auto;width:23px;height:23px}
 .lr-clients{margin-bottom:28px}
 .lr-clients-label{display:block;color:#8A8794;font-size:11px;text-transform:uppercase;letter-spacing:1.6px;margin-bottom:18px}
-.lr-logos{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));align-items:center;justify-items:start;gap:20px 28px;opacity:.95;max-width:520px}
-.lr-logos img{height:26px;width:auto;max-width:120px;object-fit:contain;display:block}
+.lr-logos{display:grid;grid-template-columns:repeat(4,1fr);align-items:center;justify-items:center;gap:18px 24px;opacity:.95;max-width:520px}
+/* Единая «ячейка» под каждый логотип: у файлов разные пропорции
+   (webp ~3:1, wbstat.svg ~6:1), поэтому height+max-width давал разную
+   высоту. Фиксированный бокс + object-fit:contain выравнивает все 8. */
+.lr-logos img{width:112px;height:30px;object-fit:contain;object-position:center;display:block}
 .lr-legal{color:#7A7785;font-size:13px;margin:0;letter-spacing:.2px}
 .lr-legal b{color:#D5D3DA;font-weight:500}
 

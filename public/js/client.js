@@ -1298,8 +1298,8 @@ function togglePassVis(btn){
   if(!span)return;
   var full=span.getAttribute('data-full');
   var masked=span.getAttribute('data-masked');
-  if(span.textContent===masked){span.textContent=full;btn.innerHTML=icon('eyeOff',12);}
-  else{span.textContent=masked;btn.innerHTML=icon('eye',12);}
+  if(span.textContent===masked){span.textContent=full;btn.innerHTML=icon('eyeOff',12);_revealMark(full,true);}
+  else{span.textContent=masked;btn.innerHTML=icon('eye',12);_revealMark(full,false);}
 }
 
 // --- Load Data ---
@@ -1451,7 +1451,7 @@ async function loadData(){
 
     // Скролл не дёргаем при ререндере (контейнеры схлопываются → прыгало наверх).
     var _sy=window.scrollY;
-    try{renderTable()}catch(e){console.error('[loadData] renderTable:',e)}
+    try{renderTable(true)}catch(e){console.error('[loadData] renderTable:',e)}
     try{renderProxyTable()}catch(e){console.error('[loadData] renderProxyTable:',e)}
     try{updateSummary()}catch(e){console.error('[loadData] updateSummary:',e)}
     try{initOnboarding()}catch(e){console.error('[loadData] initOnboarding:',e)}
@@ -1474,7 +1474,17 @@ async function loadData(){
 }
 
 // Traffic table: 8 columns: Модем, Реквизиты, Логин:Пароль, Смена IP, Ротация, Сегодня, Вчера, Месяц
-function renderTable(){
+// auto=true — вызов из авторефреша: если пользователь сейчас вводит значение
+// (фокус в поле внутри таблицы/карточек), ререндер откладываем до следующего
+// тика — иначе набитое, но не применённое значение стиралось каждые 60 сек.
+function renderTable(auto){
+  if(auto){
+    var _ae=document.activeElement;
+    if(_ae&&(_ae.tagName==='INPUT'||_ae.tagName==='SELECT'||_ae.tagName==='TEXTAREA')){
+      var _dt=document.getElementById('dataTable'),_mm=document.getElementById('mobileModemCards');
+      if((_dt&&_dt.contains(_ae))||(_mm&&_mm.contains(_ae)))return;
+    }
+  }
   var rows=tableData.slice();
 
 
@@ -1655,7 +1665,9 @@ function renderTable(){
     }
   }
   var mobileEl=document.getElementById('mobileModemCards');
-  if(mobileEl) mobileEl.innerHTML=mobileHtml;
+  if(mobileEl){mobileEl.innerHTML=mobileHtml;_restoreOpenMc();}
+  // Восстанавливаем раскрытые «глазом» пароли после ререндера (авторефреш).
+  if(typeof restoreRevealedSecrets==='function')restoreRevealedSecrets();
 }
 
 function sortTable(key){
@@ -1663,9 +1675,20 @@ function sortTable(key){
   else{currentSort.key=key;currentSort.dir='asc'}
   renderTable();
 }
+window._openMc=window._openMc||{};   // раскрытые мобильные карточки (по нику) — переживают авторефреш
 function toggleMc(id){
   var el=document.getElementById(id);
-  if(el) el.classList.toggle('open');
+  if(!el)return;
+  el.classList.toggle('open');
+  var nm=el.querySelector('.mc-name');
+  var key=nm?nm.textContent:id;
+  if(el.classList.contains('open'))window._openMc[key]=1;else delete window._openMc[key];
+}
+function _restoreOpenMc(){
+  document.querySelectorAll('#mobileModemCards .mc').forEach(function(card){
+    var nm=card.querySelector('.mc-name');
+    if(nm&&window._openMc[nm.textContent])card.classList.add('open');
+  });
 }
 
 function updateSummary(){

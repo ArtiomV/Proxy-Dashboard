@@ -891,7 +891,7 @@ function loadData(){
       // (контейнеры временно схлопываются → браузер подбрасывал наверх) и
       // возвращаем после двух кадров, когда layout устаканился (20.08).
       var _sy=window.scrollY;
-      processData();renderServerFilter();renderTable();updateHeaderStats();
+      processData();renderServerFilter();renderTable(true);updateHeaderStats();
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
       var _st=localStorage.getItem('admin_active_tab')||'dashboard';
       var _te=document.querySelector('.nav-tab[data-on-click*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te,true);
@@ -1182,7 +1182,7 @@ function bulkOsSpoof(){
   var overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
-  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
+  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)">'
     +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">'+icon('shield',15)+' OS Spoofing — '+portsList.length+' портов</h3>'
     +'<select id="bulkOsSelect" class="form-input" style="width:100%;margin-bottom:12px">'
     +'<option value="">--Выкл--</option>'
@@ -1221,7 +1221,7 @@ function bulkRotation(){
   var overlay=document.createElement('div');
   overlay.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10000;display:flex;align-items:center;justify-content:center';
   overlay.onclick=function(e){if(e.target===overlay)overlay.remove()};
-  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
+  overlay.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:20px;width:420px;max-width:90vw;box-shadow:0 24px 64px rgba(0,0,0,.5)">'
     +'<h3 style="margin:0 0 12px;font-size:14px;color:var(--text-0)">'+icon('clock',15)+' Авторотация — '+modems.length+' модемов</h3>'
     +'<select id="bulkRotSelect" class="form-input" style="width:100%;margin-bottom:12px">'
     +'<option value="0">Выкл.</option>'
@@ -1269,7 +1269,7 @@ function bulkRotation(){
         var ov2=document.createElement('div');
         ov2.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:10001;display:flex;align-items:center;justify-content:center';
         ov2.onclick=function(e){if(e.target===ov2)ov2.remove()};
-        ov2.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:18px;width:440px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">'
+        ov2.innerHTML='<div style="background:var(--bg-1);border-radius:12px;padding:18px;width:440px;max-width:92vw;box-shadow:0 24px 64px rgba(0,0,0,.5)">'
           +'<div style="font-size:13px;font-weight:600;color:var(--danger);margin-bottom:10px">Не применено: '+failures.length+' из '+modems.length+'</div>'
           +'<div style="max-height:50vh;overflow-y:auto;margin-bottom:12px">'+fl+'</div>'
           +'<div style="font-size:10px;color:var(--text-3);margin-bottom:10px">У этих модемов показ ротации сброшен до «нет данных» — обновится из бокса сам. Обычные причины: модем в ротации/ребуте — повторите через минуту.</div>'
@@ -1542,7 +1542,7 @@ function _loadProxyCheckThresholds(){
       // «отключено >N мин» labels and the блип tooltip read it.
       var mot=Number(s.modem_offline_threshold_min);
       if(mot>0&&window._offlineThresholdMin!==mot){window._offlineThresholdMin=mot;changed=true;}
-      if(changed&&currentData&&typeof renderTable==='function'){try{renderTable();}catch(_){}}
+      if(changed&&currentData&&typeof renderTable==='function'){try{renderTable(true);}catch(_){}}
     })
     .catch(function(){});
 }
@@ -1931,7 +1931,7 @@ function showProblemPopup(label,key){
   var items=(window._problemData&&window._problemData[key])||[];
   if(!items.length)return;
   var h='<div style="position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.5);z-index:1500;display:flex;align-items:center;justify-content:center" data-on-click="this.remove()">';
-  h+='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;min-width:340px;max-width:520px;max-height:70vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)" data-on-click="event.stopPropagation()">';
+  h+='<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;min-width:340px;max-width:520px;max-height:70vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)">';
   h+='<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px"><span style="font-size:14px;font-weight:600;color:var(--text-0)">'+esc(label)+' <span style="color:var(--text-3);font-weight:400">('+items.length+')</span></span><button style="background:none;border:none;font-size:18px;color:var(--text-2);cursor:pointer;padding:0 4px" data-on-click="this.closest(\'div[style*=fixed]\').remove()">&times;</button></div>';
   h+='<div style="display:flex;flex-direction:column;gap:6px">';
   items.forEach(function(item){

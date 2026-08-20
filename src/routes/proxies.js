@@ -71,7 +71,10 @@ r.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, re
     auditLog(req.user.login, 'store_modem', { serverName, IMEI: rawImei, ip: getClientIp(req) });
     proxySmart.invalidateCache(); // invalidate data cache
     res.json({ ok: true, verified: wantRot != null });
-  } catch (err) { res.status(502).json({ error: 'Store modem failed', details: err.message }); }
+  } catch (err) {
+    logger.error({ serverName: req.body && req.body.serverName, imei: req.body && req.body.IMEI, err: err.message, stack: err.stack }, '[StoreModem] необработанная ошибка');
+    res.status(502).json({ error: 'Store modem failed', details: err.message });
+  }
 });
 
 r.post('/api/admin/apply_modem', authMiddleware, adminMiddleware, async (req, res) => {

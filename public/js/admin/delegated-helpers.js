@@ -140,12 +140,24 @@ function openModemDetailByNick(nick) {
 }
 
 // Показать/скрыть секрет в поле (modems.js peek): real — реальное значение,
-// masked — маска (по умолчанию восемь точек).
+// masked — маска (по умолчанию восемь точек). Раскрытые значения запоминаются
+// (window._peekRevealed по id поля) и восстанавливаются после авторефреша —
+// раньше каждые 60 сек пароли снова прятались под маску.
+if (typeof window !== 'undefined') window._peekRevealed = window._peekRevealed || {};
 function peekField(el, id, real, masked) {
   var v = document.getElementById(id);
-  if (!v) return;
+  if (!v || typeof window === 'undefined') return;
   var mask = masked || '••••••••';
-  v.textContent = (v.textContent === mask) ? real : mask;
+  var show = (v.textContent === mask);
+  v.textContent = show ? real : mask;
+  if (show) window._peekRevealed[id] = real; else delete window._peekRevealed[id];
+  if (el) el.innerHTML = icon(show ? 'eyeOff' : 'eye', 11);
+}
+function restorePeekFields() {
+  for (var id in window._peekRevealed) {
+    var v = document.getElementById(id);
+    if (v && v.textContent !== window._peekRevealed[id]) v.textContent = window._peekRevealed[id];
+  }
 }
 
 // Показать/скрыть пароль на карточке сервера (settings.js): переключает

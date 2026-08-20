@@ -90,7 +90,27 @@ function showToast(m,t,dur){
 
 // api(path, opts) — ONE fetch wrapper for both SPAs (admin.js + client.js).
 //
-// Replaces ~180 open-coded copies of
+
+// Раскрытые пароли переживают авторефреш (20.08): запоминаем раскрытые
+// значения в глобальном мапе и восстанавливаем после каждого ререндера.
+// Ключ — само значение (data-full); хранится только флаг, не копия секрета.
+if (typeof window !== 'undefined') window._revealedSecrets = window._revealedSecrets || {};
+function _revealMark(key, on) {
+  if (!key || typeof window === 'undefined') return;
+  if (on) window._revealedSecrets[key] = 1; else delete window._revealedSecrets[key];
+}
+function restoreRevealedSecrets() {
+  document.querySelectorAll('.pass-val[data-full]').forEach(function (sp) {
+    var full = sp.getAttribute('data-full');
+    var revealed = !!window._revealedSecrets[full];
+    var masked = sp.getAttribute('data-masked');
+    var want = revealed ? full : masked;
+    if (sp.textContent !== want) sp.textContent = want;
+    var btn = sp.parentElement ? sp.parentElement.querySelector('[data-on-click^="togglePassVis"]') : null;
+    if (btn) btn.innerHTML = icon(revealed ? 'eyeOff' : 'eye', 12);
+  });
+}
+//// Replaces ~180 open-coded copies of
 //   fetch(URL, {headers:{'X-Auth-Token':authToken}}).then(r => r.json())
 // and the JSON-write variant with Content-Type boilerplate.
 //
