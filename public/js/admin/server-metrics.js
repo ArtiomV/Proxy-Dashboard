@@ -20,6 +20,20 @@ function _srvMetColor(pct) {
   return 'var(--success)';
 }
 
+// MiB → «3,3/7,4 ГБ» (десятичная запятая, округление до 0.1 ГБ до сотни).
+function _srvMetGb(usedMb, totalMb) {
+  if (usedMb == null || totalMb == null) return null;
+  var f = function (v) { v = v / 1024; return (v >= 100 ? String(Math.round(v)) : String(Math.round(v * 10) / 10)).replace('.', ','); };
+  return f(usedMb) + '/' + f(totalMb) + ' ГБ';
+}
+
+// Подпись значения шкалы: «44% · 3,3/7,4 ГБ» (если есть абсолютные цифры).
+function _srvMetVal(pct, usedMb, totalMb) {
+  if (pct == null) return null;
+  var gb = _srvMetGb(usedMb, totalMb);
+  return pct + '%' + (gb ? ' · ' + gb : '');
+}
+
 // Одна шкала «подпись [====----] NN%». pct null → прочерк (метрики нет).
 function _srvMetBar(label, pct, widthPct, color, valueText) {
   var w = pct == null ? 0 : Math.max(0, Math.min(100, widthPct != null ? widthPct : pct));
@@ -29,7 +43,7 @@ function _srvMetBar(label, pct, widthPct, color, valueText) {
     + '<span style="width:44px;flex-shrink:0;color:var(--text-2)">' + esc(label) + '</span>'
     + '<span style="flex:1;height:6px;border-radius:3px;background:var(--bg-3);overflow:hidden;display:block">'
     + '<span style="display:block;height:100%;width:' + w + '%;background:' + c + ';border-radius:3px"></span></span>'
-    + '<span style="width:52px;flex-shrink:0;text-align:right;color:' + (pct == null ? 'var(--text-3)' : 'var(--text-1)') + ';font-family:var(--font-mono)">' + esc(val) + '</span>'
+    + '<span style="min-width:52px;flex-shrink:0;text-align:right;color:' + (pct == null ? 'var(--text-3)' : 'var(--text-1)') + ';font-family:var(--font-mono);white-space:nowrap">' + esc(val) + '</span>'
     + '</div>';
 }
 
@@ -81,9 +95,9 @@ function _srvMetCard(name, m, address) {
     h += _srvMetBar('Load', l1, l1 != null ? (l1 / 4) * 100 : null,
       l1 != null ? (l1 >= 4 ? 'var(--danger)' : l1 >= 2 ? 'var(--warning)' : 'var(--success)') : null,
       l1 != null ? String(l1) : null);
-    h += _srvMetBar('RAM', m.mem_used_pct);
+    h += _srvMetBar('RAM', m.mem_used_pct, null, null, _srvMetVal(m.mem_used_pct, m.mem_used_mb, m.mem_total_mb));
     h += _srvMetBar('Swap', m.swap_used_pct);
-    h += _srvMetBar('Диск', m.disk_used_pct);
+    h += _srvMetBar('Диск', m.disk_used_pct, null, null, _srvMetVal(m.disk_used_pct, m.disk_used_mb, m.disk_total_mb));
     h += '</div>';
     // Температура и аптайм — текстом с цветовой индикацией.
     var bits = [];
@@ -135,8 +149,8 @@ function srvMetInline(name) {
   if (hasSsh) {
     h += '<div style="display:flex;flex-direction:column;gap:4px">';
     h += _srvMetBar('CPU', m.cpu_pct);
-    h += _srvMetBar('RAM', m.mem_used_pct);
-    h += _srvMetBar('Диск', m.disk_used_pct);
+    h += _srvMetBar('RAM', m.mem_used_pct, null, null, _srvMetVal(m.mem_used_pct, m.mem_used_mb, m.mem_total_mb));
+    h += _srvMetBar('Диск', m.disk_used_pct, null, null, _srvMetVal(m.disk_used_pct, m.disk_used_mb, m.disk_total_mb));
     h += '</div>';
   }
   var bits = [];

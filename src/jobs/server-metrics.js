@@ -54,6 +54,7 @@ function parseSshMetrics(text) {
     cpu_pct: null, load1: null, load5: null, load15: null,
     mem_used_pct: null, swap_used_pct: null, disk_used_pct: null,
     temp_c: null, uptime_sec: null,
+    mem_used_mb: null, mem_total_mb: null, disk_used_mb: null, disk_total_mb: null,
   };
   const sections = String(text || '').split(/^---\s*$/m).map(s => s.trim());
   if (sections[0]) out.cpu_pct = _parseCpuPct(sections[0]);
@@ -69,7 +70,11 @@ function parseSshMetrics(text) {
   // free -m: «Mem: total used free shared buff/cache available» / «Swap: …»
   const free = sections[2] || '';
   const mm = free.match(/^Mem:\s+(\d+)\s+\d+\s+\d+\s+\d+\s+\d+\s+(\d+)/m);
-  if (mm) out.mem_used_pct = _pct(+mm[1] - +mm[2], +mm[1]);
+  if (mm) {
+    out.mem_used_pct = _pct(+mm[1] - +mm[2], +mm[1]);
+    out.mem_total_mb = +mm[1];
+    out.mem_used_mb = +mm[1] - +mm[2];   // total − available (как htop «used»)
+  }
   const sm = free.match(/^Swap:\s+(\d+)\s+(\d+)\s+(\d+)/m);
   if (sm) out.swap_used_pct = +sm[1] > 0 ? _pct(+sm[2], +sm[1]) : 0;
 
@@ -79,6 +84,8 @@ function parseSshMetrics(text) {
     if (cells.length >= 5 && cells[cells.length - 1] === '/') {
       const pm = line.match(/(\d+)%/);
       if (pm) out.disk_used_pct = +pm[1];
+      if (/^\d+$/.test(cells[1])) out.disk_total_mb = +cells[1];
+      if (/^\d+$/.test(cells[2])) out.disk_used_mb = +cells[2];
       break;
     }
   }
@@ -177,8 +184,9 @@ function create(deps) {
   const insertStmt = db.prepare(`INSERT INTO server_metrics
     (server_name, collected_at, source, cpu_pct, load1, load5, load15,
      mem_used_pct, swap_used_pct, disk_used_pct, temp_c, uptime_sec,
+     mem_used_mb, mem_total_mb, disk_used_mb, disk_total_mb,
      conns, rps, mongo_ok, usb_errors, box_time_drift_sec, error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const pruneStmt = db.prepare('DELETE FROM server_metrics WHERE collected_at < ?');
 
   // SSH: сначала пробуем ключ из ~/.ssh/id_ed25519 (публичная часть выдана
@@ -257,6 +265,7 @@ function create(deps) {
       cpu_pct: null, load1: null, load5: null, load15: null,
       mem_used_pct: null, swap_used_pct: null, disk_used_pct: null,
       temp_c: null, uptime_sec: null,
+      mem_used_mb: null, mem_total_mb: null, disk_used_mb: null, disk_total_mb: null,
       conns: null, rps: null, mongo_ok: null, usb_errors: '',
       box_time_drift_sec: null, error: '',
     };
@@ -285,6 +294,7 @@ function create(deps) {
             row.cpu_pct, row.load1, row.load5, row.load15,
             row.mem_used_pct, row.swap_used_pct, row.disk_used_pct,
             row.temp_c, row.uptime_sec,
+            row.mem_used_mb, row.mem_total_mb, row.disk_used_mb, row.disk_total_mb,
             row.conns, row.rps, row.mongo_ok, row.usb_errors,
             row.box_time_drift_sec, row.error);
           if (row.error) failed++;

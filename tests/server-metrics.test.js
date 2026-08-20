@@ -50,8 +50,12 @@ describe('ServerMetrics: parseSshMetrics', () => {
     expect(m.load15).toBe(0.6);
     // mem: (1836-612)/1836 = 66.7%
     expect(m.mem_used_pct).toBe(66.7);
+    expect(m.mem_total_mb).toBe(1836);
+    expect(m.mem_used_mb).toBe(1224);   // 1836 − 612 (available)
     expect(m.swap_used_pct).toBe(25);
     expect(m.disk_used_pct).toBe(67);
+    expect(m.disk_total_mb).toBe(120000);
+    expect(m.disk_used_mb).toBe(80000);
     expect(m.uptime_sec).toBe(123457);
     // sensors приоритетнее термозон (55.5 > 55.0)
     expect(m.temp_c).toBe(55.5);
