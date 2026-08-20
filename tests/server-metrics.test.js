@@ -36,6 +36,9 @@ const SSH_OUT = [
   '55000',
   '42000',
   'Package id 0:  +55.5°C  (high = +80.0°C, crit = +100.0°C)',
+  '---',
+  '84',   // ss established — fallback панельных «connections»
+  '1',    // pgrep mongod — fallback mongo_ok
 ].join('\n');
 
 describe('ServerMetrics: parseSshMetrics', () => {
@@ -59,6 +62,9 @@ describe('ServerMetrics: parseSshMetrics', () => {
     expect(m.uptime_sec).toBe(123457);
     // sensors приоритетнее термозон (55.5 > 55.0)
     expect(m.temp_c).toBe(55.5);
+    // секция 6: SSH-fallback панельных метрик
+    expect(m.conns).toBe(84);
+    expect(m.mongo_ok).toBe(1);
   });
 
   it('без sensors температура берётся из термозон (/1000)', () => {
@@ -167,6 +173,40 @@ describe('ServerMetrics: runServerMetrics (fallback на HTTP)', () => {
     expect(ports[0]).toBe(6001);          // сначала кастомный порт
     expect(ports).toContain(2222);        // затем дефолтные
     expect(ports.filter(p => p === 6001)).toHaveLength(1);  // без дублей
+  });
+
+  it('панель виснет → conns/mongo из SSH-fallback секции (source=ssh)', async () => {
+    db.prepare('DELETE FROM server_metrics').run();
+    const job = serverMetrics.create({
+      db,
+      logger: { info() {}, warn() {}, error() {} },
+      apiServers: [{ name: 'S12', url: 'http://box', user: 'u', pass: 'p', osLogin: 'mon', publicIp: '1.2.3.4', sshPort: 6001 }],
+      execFile: (cmd, args, opts, cb) => cb(null, SSH_OUT),
+      proxyConf: { getPage: async () => ({ ok: false, reason: 'TIMEOUT', status: 0 }) },
+    });
+    const r = await job.runServerMetrics();
+    expect(r).toMatchObject({ ok: 1 });
+    const row = db.prepare('SELECT * FROM server_metrics WHERE server_name = ?').get('S12');
+    expect(row.source).toBe('ssh');
+    expect(row.cpu_pct).toBe(22.2);
+    expect(row.conns).toBe(84);
+    expect(row.mongo_ok).toBe(1);
+  });
+
+  it('панель отвечает → её conns приоритетнее SSH-fallback', async () => {
+    db.prepare('DELETE FROM server_metrics').run();
+    const job = serverMetrics.create({
+      db,
+      logger: { info() {}, warn() {}, error() {} },
+      apiServers: [{ name: 'S13', url: 'http://box', user: 'u', pass: 'p', osLogin: 'mon', publicIp: '1.2.3.4' }],
+      execFile: (cmd, args, opts, cb) => cb(null, SSH_OUT),
+      proxyConf: { getPage: async () => ({ ok: true, html: STATUS_HTML, status: 200 }) },
+    });
+    await job.runServerMetrics();
+    const row = db.prepare('SELECT * FROM server_metrics WHERE server_name = ?').get('S13');
+    expect(row.source).toBe('mixed');
+    expect(row.conns).toBe(93);        // из панели, не 84 из SSH
+    expect(row.usb_errors).toMatch(/^2: /);   // есть только у панели
   });
 
   it('недоступны оба источника → строка с error, без ssh-кредов SSH не зовём', async () => {

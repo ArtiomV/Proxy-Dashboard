@@ -25,7 +25,12 @@ const SSH_PORTS = [2222, 22];
 const SSH_CMD = "grep '^cpu ' /proc/stat; sleep 1; grep '^cpu ' /proc/stat; " +
   'echo ---; cat /proc/loadavg; echo ---; LC_ALL=C free -m; echo ---; df -m /; echo ---; ' +
   'cat /proc/uptime; echo ---; cat /sys/class/thermal/thermal_zone*/temp 2>/dev/null; ' +
-  "sensors 2>/dev/null | grep -i 'package\\|core 0' | head -2";
+  "sensors 2>/dev/null | grep -i 'package\\|core 0' | head -2; " +
+  // Fallback для HTTP-метрик панели: когда /system_status виснет (замечено на
+  // загруженных боксах), conns/mongo добираем по SSH. Число ESTABLISHED
+  // TCP-сессий совпадает с панельным «connections» (проверено на S3: 84 vs 83).
+  'echo ---; ss -tn state established 2>/dev/null | tail -n +2 | wc -l; ' +
+  'pgrep -x mongod >/dev/null && echo 1 || echo 0';
 
 function _pct(used, total) {
   if (!(total > 0)) return null;
@@ -55,6 +60,7 @@ function parseSshMetrics(text) {
     mem_used_pct: null, swap_used_pct: null, disk_used_pct: null,
     temp_c: null, uptime_sec: null,
     mem_used_mb: null, mem_total_mb: null, disk_used_mb: null, disk_total_mb: null,
+    conns: null, mongo_ok: null,   // SSH-fallback для зависшей /system_status
   };
   const sections = String(text || '').split(/^---\s*$/m).map(s => s.trim());
   if (sections[0]) out.cpu_pct = _parseCpuPct(sections[0]);
@@ -111,6 +117,13 @@ function parseSshMetrics(text) {
     const v = maxMilli / 1000;
     if (v > 0 && v < 150) out.temp_c = Math.round(v * 10) / 10;
   }
+
+  // Секция 6 — SSH-fallback HTTP-метрик: первая строка = число ESTABLISHED
+  // TCP (≈ панельные «connections»), вторая = жив ли mongod (1/0). HTTP-
+  // значения приоритетнее (мердж в collectServer пропускает null HTTP-поля).
+  const fbLines = (sections[6] || '').split('\n').map(l => l.trim()).filter(Boolean);
+  if (/^\d+$/.test(fbLines[0] || '')) out.conns = parseInt(fbLines[0], 10);
+  if (/^[01]$/.test(fbLines[1] || '')) out.mongo_ok = parseInt(fbLines[1], 10);
   return out;
 }
 
@@ -270,7 +283,12 @@ function create(deps) {
       box_time_drift_sec: null, error: '',
     };
     if (ssh) Object.assign(row, ssh);
-    if (http) Object.assign(row, http);
+    // HTTP поверх SSH, но только непустые поля: когда /system_status отвечает,
+    // её conns/mongo/usb — авторитетнее SSH-fallback'а; null у HTTP (поле не
+    // распарсилось) не должен затирать SSH-значение.
+    if (http) for (const k of Object.keys(http)) {
+      if (http[k] !== null && http[k] !== '') row[k] = http[k];
+    }
     if (!ssh && !http) row.error = 'unreachable: ssh+http failed';
     return row;
   }
