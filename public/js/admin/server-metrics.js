@@ -108,6 +108,15 @@ function _srvMetCard(name, m, address) {
     var up = _srvMetUptime(m.uptime_sec);
     if (up) bits.push('<span style="color:var(--text-2)">аптайм ' + esc(up) + '</span>');
     if (bits.length) h += '<div style="display:flex;gap:12px;margin-top:8px;font-size:11px">' + bits.join('') + '</div>';
+    // Среднее за 24ч рядом с текущим — видно, пик это или норма.
+    if (m.avg24) {
+      var a = m.avg24, ab = [];
+      if (a.cpu_pct != null) ab.push('CPU ' + a.cpu_pct + '%');
+      if (a.mem_used_pct != null) ab.push('RAM ' + a.mem_used_pct + '%');
+      if (a.disk_used_pct != null) ab.push('диск ' + a.disk_used_pct + '%');
+      if (a.temp_c != null) ab.push(a.temp_c + '°C');
+      if (ab.length) h += '<div style="margin-top:6px;font-size:10px;color:var(--text-3)" title="Среднее за последние 24 часа (' + (a.samples || 0) + ' замеров)">среднее за 24ч: ' + esc(ab.join(' · ')) + '</div>';
+    }
   } else {
     h += '<div style="font-size:11px;color:var(--warning);margin-bottom:6px">Расширенные метрики недоступны (SSH)</div>';
   }
@@ -164,6 +173,9 @@ function srvMetInline(name) {
   if (m.mongo_ok === 0) bits.push('<span style="color:var(--danger)">MongoDB FAIL</span>');
   if (m.usb_errors) bits.push('<span style="color:var(--danger)">USB: ' + esc(m.usb_errors) + '</span>');
   if (!hasSsh && !m.error) bits.push('<span style="color:var(--warning)">SSH недоступен</span>');
+  if (m.avg24 && m.avg24.cpu_pct != null) {
+    bits.push('<span style="color:var(--text-3)" title="Средняя нагрузка за последние 24 часа">ср. 24ч: CPU ' + m.avg24.cpu_pct + '% · RAM ' + (m.avg24.mem_used_pct != null ? m.avg24.mem_used_pct + '%' : '—') + '</span>');
+  }
   if ((m.age_sec || 0) > _SRVMET_STALE_SEC && m.collected_at) {
     var dtM = new Date(m.collected_at);
     bits.push('<span style="color:var(--text-3)">данные на ' + String(dtM.getHours()).padStart(2, '0') + ':' + String(dtM.getMinutes()).padStart(2, '0') + '</span>');

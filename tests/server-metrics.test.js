@@ -237,9 +237,10 @@ describe('ServerMetrics: GET /api/admin/server_metrics', () => {
     db.prepare('DELETE FROM server_metrics').run();
     const ins = db.prepare(`INSERT INTO server_metrics
       (server_name, collected_at, source, cpu_pct, load1, mem_used_pct, conns, rps)
-      VALUES (?, ?, 'mixed', 30, 1.2, 66.7, 93, 1.2)`);
-    ins.run('S1', new Date(Date.now() - 3600e3).toISOString());   // старая
-    ins.run('S1', new Date(Date.now() - 60e3).toISOString());     // свежая
+      VALUES (?, ?, 'mixed', ?, 1.2, ?, 93, 1.2)`);
+    ins.run('S1', new Date(Date.now() - 25 * 3600e3).toISOString(), 99, 99); // за пределами 24ч (id ниже — вставлена первой)
+    ins.run('S1', new Date(Date.now() - 3600e3).toISOString(), 10, 50);   // в пределах 24ч
+    ins.run('S1', new Date(Date.now() - 60e3).toISOString(), 30, 66.7);   // свежая
 
     const res = await request(app).get('/api/admin/server_metrics').set('X-Auth-Token', token);
     expect(res.status).toBe(200);
@@ -248,6 +249,9 @@ describe('ServerMetrics: GET /api/admin/server_metrics', () => {
     expect(m.cpu_pct).toBe(30);
     expect(m.age_sec).toBeGreaterThanOrEqual(55);
     expect(m.age_sec).toBeLessThan(3600);   // выбрана свежая строка, не часовой давности
+    // среднее за 24ч: только две свежие строки (99%-ная старше суток не считается)
+    expect(m.avg24).toMatchObject({ cpu_pct: 20, samples: 2 });
+    expect(Math.abs(m.avg24.mem_used_pct - 58.4)).toBeLessThan(0.1);
     expect(res.body.addresses).toBeTruthy();
   });
 });

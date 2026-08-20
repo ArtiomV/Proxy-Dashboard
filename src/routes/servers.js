@@ -71,10 +71,28 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
   try {
     const rows = db.prepare(`SELECT * FROM server_metrics
       WHERE id IN (SELECT MAX(id) FROM server_metrics GROUP BY server_name)`).all();
+    // Средние за сутки по числовым метрикам (NULL-поля AVG игнорирует сам).
+    // collected_at хранится ISO со 'T' — сравниваем с ISO-строкой, не datetime().
+    const sinceIso = new Date(Date.now() - 24 * 3600e3).toISOString();
+    const avgRows = db.prepare(`SELECT server_name,
+        AVG(cpu_pct) a_cpu, AVG(mem_used_pct) a_mem, AVG(disk_used_pct) a_disk,
+        AVG(temp_c) a_temp, COUNT(*) samples
+      FROM server_metrics WHERE collected_at > ? GROUP BY server_name`).all(sinceIso);
+    const avg24 = {};
+    for (const a of avgRows) {
+      avg24[a.server_name] = {
+        cpu_pct: a.a_cpu == null ? null : Math.round(a.a_cpu * 10) / 10,
+        mem_used_pct: a.a_mem == null ? null : Math.round(a.a_mem * 10) / 10,
+        disk_used_pct: a.a_disk == null ? null : Math.round(a.a_disk * 10) / 10,
+        temp_c: a.a_temp == null ? null : Math.round(a.a_temp * 10) / 10,
+        samples: a.samples,
+      };
+    }
     for (const row of rows) {
       byName[row.server_name] = {
         ...row,
         age_sec: Math.max(0, Math.round((Date.now() - Date.parse(row.collected_at)) / 1000)),
+        avg24: avg24[row.server_name] || null,
       };
     }
   } catch (e) {
