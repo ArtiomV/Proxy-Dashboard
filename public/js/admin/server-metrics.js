@@ -219,8 +219,9 @@ function _srvSpark(series, avgPct) {
 
 // Строка метрики: иконка + название/подпись + спарклайн + текущее значение
 // (крупно, с подписью-абсолютом типа «3,3/7,4 ГБ») + пилюля «ср. 24ч».
+function _fmtP(v) { return v == null ? null : String(Math.round(v * 10) / 10).replace('.', ','); }
 function srvMetRowV2(ic, title, sub, curPct, absText, avgPct, series) {
-  var val = curPct == null ? '—' : curPct + '%';
+  var val = curPct == null ? '—' : _fmtP(curPct) + '%';
   return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border)">'
     + '<span style="width:34px;height:34px;flex-shrink:0;border-radius:8px;background:var(--green-bg);color:var(--success);display:flex;align-items:center;justify-content:center">' + icon(ic, 16) + '</span>'
     + '<span style="width:110px;flex-shrink:0">'
@@ -232,7 +233,7 @@ function srvMetRowV2(ic, title, sub, curPct, absText, avgPct, series) {
     + (absText ? '<span style="display:block;font-size:9px;color:var(--text-3);font-family:var(--font-mono)">' + esc(absText) + '</span>' : '')
     + '</span>'
     + (avgPct != null
-      ? '<span style="flex-shrink:0;font-size:9.5px;color:var(--text-3);background:var(--bg-3);border-radius:9px;padding:3px 7px;white-space:nowrap">ср. 24ч: ' + esc(String(avgPct)) + '%</span>'
+      ? '<span style="flex-shrink:0;font-size:9.5px;color:var(--text-3);background:var(--bg-3);border-radius:9px;padding:3px 7px;white-space:nowrap">ср. 24ч: ' + esc(_fmtP(avgPct)) + '%</span>'
       : '')
     + '</div>';
 }
