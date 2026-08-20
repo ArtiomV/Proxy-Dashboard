@@ -2303,8 +2303,11 @@ async function buyProxy(tariffId,btn){
   try{
     var data=await api('/api/client/buy_proxy',{method:'POST',json:{tariff_id:tariffId}});
     if(data&&data.ok){
-      showToast('Прокси выдан — реквизиты на вкладке «Панель управления»','success');
+      showToast('Прокси выдан — показываю реквизиты','success');
       loadData(); // обновить порты/баланс ЛК
+      // Сразу ведём к реквизитам — не заставляем клиента искать вкладку.
+      var tabEl=document.querySelector('.nav-tab[data-on-click*="\'traffic\'"]');
+      switchTab('traffic',tabEl);
       return;
     }
     var code=data&&data.code;
@@ -2318,7 +2321,16 @@ async function buyProxy(tariffId,btn){
         if(b)b.scrollIntoView({behavior:'smooth',block:'center'});
       },150);
     }else if(code==='INSUFFICIENT_BALANCE'){
-      showToast('Недостаточно средств, нужно '+(data.required!=null?data.required:'—')+' ₽ — пополните баланс','error');
+      // Не просто тост: ведём на вкладку «Баланс» и подставляем нужную сумму
+      // в форму пополнения (округляем вверх до рубля).
+      showToast('Недостаточно средств — открыл пополнение с нужной суммой','warning');
+      if(data.required!=null)window._topupPrefill=Math.ceil(data.required);
+      var tabB=document.querySelector('.nav-tab[data-on-click*="\'billing\'"]');
+      switchTab('billing',tabB);
+      setTimeout(function(){
+        var sec=document.getElementById('topupSection');
+        if(sec)sec.scrollIntoView({behavior:'smooth',block:'center'});
+      },400);
     }else if(code==='POOL_EMPTY'){
       showToast('Свободные прокси этой локации закончились','error');
     }else if(code==='TEST_USED'){
@@ -2386,6 +2398,13 @@ function loadTopupSection(){
     sec.innerHTML=h;
     sec.style.display='';
     pickTopupMethod(sec.querySelector('.topup-method[data-method="sbp"]'));
+    // Префилл суммы после «недостаточно средств» на витрине (buyProxy
+    // кладёт window._topupPrefill и переключает сюда вкладку).
+    if(window._topupPrefill){
+      var inp=document.getElementById('topupAmount');
+      if(inp)inp.value=window._topupPrefill;
+      window._topupPrefill=null;
+    }
     renderCardPayments(data.payments||[]);
   }).catch(function(){sec.style.display='none'});
 }
