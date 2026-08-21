@@ -250,11 +250,12 @@ describe('ServerMetrics: GET /api/admin/server_metrics', () => {
     expect(m.age_sec).toBeGreaterThanOrEqual(55);
     expect(m.age_sec).toBeLessThan(3600);   // выбрана свежая строка, не часовой давности
     // среднее за 24ч: только две свежие строки (99%-ная старше суток не считается)
-    expect(m.avg24).toMatchObject({ cpu_pct: 20, samples: 2 });
+    expect(m.avg24).toMatchObject({ cpu_pct: 20, conns: 93, samples: 2 });
     expect(Math.abs(m.avg24.mem_used_pct - 58.4)).toBeLessThan(0.1);
     // спарклайны: только точки за 24ч, в хронологическом порядке
     expect(m.series24.cpu).toEqual([10, 30]);
     expect(m.series24.mem).toEqual([50, 66.7]);
+    expect(m.series24.conns).toEqual([93, 93]);
     expect(res.body.addresses).toBeTruthy();
   });
 });

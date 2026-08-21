@@ -76,7 +76,7 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
     const sinceIso = new Date(Date.now() - 24 * 3600e3).toISOString();
     const avgRows = db.prepare(`SELECT server_name,
         AVG(cpu_pct) a_cpu, AVG(mem_used_pct) a_mem, AVG(disk_used_pct) a_disk,
-        AVG(temp_c) a_temp, COUNT(*) samples
+        AVG(temp_c) a_temp, AVG(conns) a_conns, COUNT(*) samples
       FROM server_metrics WHERE collected_at > ? GROUP BY server_name`).all(sinceIso);
     const avg24 = {};
     for (const a of avgRows) {
@@ -85,25 +85,27 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
         mem_used_pct: a.a_mem == null ? null : Math.round(a.a_mem * 10) / 10,
         disk_used_pct: a.a_disk == null ? null : Math.round(a.a_disk * 10) / 10,
         temp_c: a.a_temp == null ? null : Math.round(a.a_temp * 10) / 10,
+        conns: a.a_conns == null ? null : Math.round(a.a_conns),
         samples: a.samples,
       };
     }
     // Ряды за 24ч для спарклайнов карточек (редизайн 20.08): до 48 точек,
     // равномерное прореживание, null там, где метрики не было.
-    const seriesRows = db.prepare(`SELECT server_name, cpu_pct, mem_used_pct, disk_used_pct
+    const seriesRows = db.prepare(`SELECT server_name, cpu_pct, mem_used_pct, disk_used_pct, conns
       FROM server_metrics WHERE collected_at > ? ORDER BY collected_at`).all(sinceIso);
     const bySrv = {};
     for (const r of seriesRows) (bySrv[r.server_name] || (bySrv[r.server_name] = [])).push(r);
     const series24 = {};
     for (const [name, arr] of Object.entries(bySrv)) {
       const step = Math.max(1, Math.ceil(arr.length / 48));
-      const cpu = [], mem = [], disk = [];
+      const cpu = [], mem = [], disk = [], conns = [];
       for (let i = 0; i < arr.length; i += step) {
         cpu.push(arr[i].cpu_pct);
         mem.push(arr[i].mem_used_pct);
         disk.push(arr[i].disk_used_pct);
+        conns.push(arr[i].conns);
       }
-      series24[name] = { cpu, mem, disk };
+      series24[name] = { cpu, mem, disk, conns };
     }
     for (const row of rows) {
       byName[row.server_name] = {

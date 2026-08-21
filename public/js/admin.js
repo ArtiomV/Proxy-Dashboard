@@ -3732,14 +3732,12 @@ function renderNewFleetServers(){
       met = ((window._srvMetData.metrics||{})[srv])||null;
       addr = (window._srvMetData.addresses||{})[srv]||'';
     }
-    var h='<div class="analytics-card" style="margin:0;padding:14px'+(primary?';grid-column:1/-1':'')+'">';
-    // Шапка: имя/страна слева, справа крупно «working/total» + подпись.
-    h+='<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">'
-      +'<span style="font-weight:700;font-size:13px;font-family:var(--font-mono)">'+(primary?_dwIcon('sat')+'Весь парк':(ci.flag||'')+' '+esc(srv)+(ci.name?' · '+esc(ci.name):''))
-      +(addr?'<span style="display:block;font-size:9.5px;font-weight:400;color:var(--text-3);margin-top:1px">'+esc(addr)+'</span>':'')+'</span>'
-      +'<span style="text-align:right;flex-shrink:0"><span style="font-size:18px;font-weight:700;color:'+col+';font-family:var(--font-mono)">'+working+'<span style="font-size:12px;color:var(--text-3)">/'+total+'</span></span>'
-      +'<span style="display:block;font-size:9px;color:var(--text-3)">'+(disc>0?disc+' отключено':'все сервисы')+'</span></span></div>';
     if(primary){
+      var h='<div class="analytics-card" style="margin:0;padding:14px;grid-column:1/-1">';
+      h+='<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">'
+        +'<span style="font-weight:700;font-size:13px;font-family:var(--font-mono)">'+_dwIcon('sat')+'Весь парк</span>'
+        +'<span style="text-align:right;flex-shrink:0"><span style="font-size:18px;font-weight:700;color:'+col+';font-family:var(--font-mono)">'+working+'<span style="font-size:12px;color:var(--text-3)">/'+total+'</span></span>'
+        +'<span style="display:block;font-size:9px;color:var(--text-3)">'+(disc>0?disc+' отключено':'все сервисы')+'</span></span></div>';
       h+='<div style="height:5px;background:var(--bg-3);border-radius:3px;overflow:hidden;margin-bottom:11px" title="'+onlPct+'% в работе"><div style="height:100%;width:'+onlPct+'%;background:'+col+';border-radius:3px"></div></div>';
       h+='<div style="display:flex;flex-wrap:wrap;gap:4px 22px;font-size:11px">';
       h+='<div style="display:flex;gap:6px"><span style="color:var(--text-2)">Трафик сегодня</span><span style="font-family:var(--font-mono)">'+fmtGb(today)+'</span></div>';
@@ -3748,46 +3746,57 @@ function renderNewFleetServers(){
       h+='</div></div>';
       return h;
     }
+    addr=addr||ci.address||'';
+    var flag=(typeof flagIcon==='function'&&ci.country)?flagIcon(ci.country,32):(ci.flag||'');
+    var h='<article class="server-overview-card">';
+    h+='<header class="server-overview-header">'
+      +'<div class="server-overview-identity"><span class="server-overview-flag">'+flag+'</span><span class="server-overview-heading">'
+      +'<span class="server-overview-title">'+esc(srv)+(ci.name?' <span class="server-overview-bullet">•</span> '+esc(ci.name):'')+'</span>'
+      +(addr?'<span class="server-overview-address">'+esc(addr)+'</span>':'')+'</span></div>'
+      +'<div class="server-overview-services"><span class="server-overview-services-value" style="color:'+col+'">'+working+'/'+total+'</span>'
+      +'<span class="server-overview-services-label">'+(disc>0?disc+' отключено':'все сервисы')+'</span></div>'
+      +'</header>';
     // Строка статуса: точка + текст (недоступность / отключённые / стабильно).
     var stDot='var(--success)', stTxt='Сервер работает стабильно';
     if(met&&met.error){ stDot='var(--danger)'; stTxt='Бокс недоступен: '+met.error; }
     else if(disc>0){ stDot='var(--warning)'; stTxt=disc+' отключено'; }
     if(met&&met.age_sec>20*60&&met.collected_at){ var dt=new Date(Date.parse(met.collected_at)); stTxt+=' · данные на '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0'); }
-    h+='<div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--text-2);margin-bottom:10px"><span style="width:7px;height:7px;border-radius:50%;background:'+stDot+';flex-shrink:0"></span>'+esc(stTxt)+'</div>';
-    // Три тайла: трафик / сигнал (шкала 0-5, dBm боксы не отдают) / проблемные.
-    function tile(ic,label,val,bg,fg,title){
-      return '<div style="flex:1;background:var(--bg-2);border:1px solid var(--border);border-radius:12px;padding:10px 11px;min-width:0"'+(title?' title="'+esc(title)+'"':'')+'>'
-        +'<span style="width:28px;height:28px;border-radius:8px;background:'+bg+';color:'+fg+';display:flex;align-items:center;justify-content:center;margin-bottom:7px">'+icon(ic,14)+'</span>'
-        +'<span style="display:block;font-size:9px;color:var(--text-3);margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(label)+'</span>'
-        +'<span style="display:block;font-size:15px;font-weight:700;color:var(--text-0);font-family:var(--font-mono)">'+esc(val)+'</span></div>';
+    h+='<div class="server-overview-status"><span class="server-overview-status-dot" style="background:'+stDot+'"></span>'+esc(stTxt)+'</div>';
+    // Единая панель из трёх KPI с вертикальными разделителями, как в макете.
+    function tile(ic,label,val,tone,title){
+      return '<div class="server-summary-item server-summary-item--'+tone+'"'+(title?' title="'+esc(title)+'"':'')+'>'
+        +'<span class="server-icon-box server-summary-icon">'+icon(ic,24)+'</span>'
+        +'<span class="server-summary-copy"><span class="server-summary-label">'+esc(label)+'</span>'
+        +'<span class="server-summary-value">'+esc(val)+'</span></span></div>';
     }
-    h+='<div style="display:flex;gap:8px;margin-bottom:10px">'
-      +tile('chart','Трафик сегодня',fmtGb(today),'var(--green-bg)','var(--success)')
-      +tile('signal','Средний сигнал',sigAvg?sigAvg+'/5':'—','var(--green-bg)','var(--success)','Боксы отдают шкалу 0–5, не dBm')
-      +tile('alert','Проблемных',String(prob),prob>0?'rgba(255,204,0,0.12)':'var(--bg-3)',prob>0?'var(--warning)':'var(--text-3)')
+    h+='<div class="server-summary-strip">'
+      +tile('traffic','Трафик сегодня',fmtGb(today),'green')
+      +tile('signal','Средний сигнал',sigAvg?sigAvg+'/5':'—','green','Боксы отдают шкалу 0–5, не dBm')
+      +tile('alert','Проблемных модемов',String(prob),prob>0?'warning':'muted')
       +'</div>';
-    // Строки метрик со спарклайнами за 24ч + пилюли средних.
+    // CPU/RAM/соединения — три строки со спарклайнами и средними за сутки.
     if(met&&typeof srvMetRowV2==='function'){
       var a24=met.avg24||{}, s24=met.series24||{};
+      h+='<div class="server-metrics-list">';
       h+=srvMetRowV2('cpu','CPU','Загрузка процессора',met.cpu_pct,null,a24.cpu_pct,s24.cpu);
       h+=srvMetRowV2('ram','RAM','Использование памяти',met.mem_used_pct,_srvMetGb(met.mem_used_mb,met.mem_total_mb),a24.mem_used_pct,s24.mem);
-      h+=srvMetRowV2('disk','Диск','Использование диска',met.disk_used_pct,_srvMetGb(met.disk_used_mb,met.disk_total_mb),a24.disk_used_pct,s24.disk);
-      h+='<div style="display:flex;justify-content:center;align-items:center;gap:16px;font-size:9.5px;color:var(--text-3);margin:8px 0 2px">'
-        +'<span style="display:inline-flex;align-items:center;gap:5px"><svg width="22" height="6" aria-hidden="true"><line x1="0" y1="3" x2="22" y2="3" style="stroke:var(--success)" stroke-width="2" stroke-linecap="round"/></svg>Текущие значения</span>'
-        +'<span style="display:inline-flex;align-items:center;gap:5px"><svg width="22" height="6" aria-hidden="true"><line x1="0" y1="3" x2="22" y2="3" style="stroke:var(--text-3)" stroke-width="1.5" stroke-dasharray="4 3" stroke-linecap="round"/></svg>Средние за 24 часа</span></div>';
-      // Футер: стат-блоки «значение / подпись» + пилюля-легенда справа (по макету).
-      var stat=function(v,l,c){ return '<span style="min-width:0"><span style="display:block;font-size:13px;font-weight:700;font-family:var(--font-mono);color:'+(c||'var(--text-0)')+'">'+esc(v)+'</span><span style="display:block;font-size:9px;color:var(--text-3);margin-top:1px">'+esc(l)+'</span></span>'; };
+      h+=srvMetRowV2('connections','Соединения','Активные подключения',met.conns,null,a24.conns,s24.conns,{unit:'',integer:true,tone:'purple',relativeScale:true});
+      h+='</div>';
+      var diskPct=met.disk_used_pct==null?0:Math.max(0,Math.min(100,met.disk_used_pct));
+      h+='<div class="server-disk-row"><span class="server-icon-box server-disk-icon">'+icon('disk',24)+'</span>'
+        +'<span class="server-disk-title">Диск</span><span class="server-disk-value">'+(met.disk_used_pct==null?'—':esc(_fmtP(met.disk_used_pct))+'%')+'</span>'
+        +'<span class="server-disk-absolute">'+esc(_srvMetGb(met.disk_used_mb,met.disk_total_mb)||'')+'</span>'
+        +'<span class="server-disk-track"><span style="width:'+diskPct+'%;background:'+_srvMetColor(met.disk_used_pct)+'"></span></span></div>';
       var ft='';
-      if(met.temp_c!=null){ var tc=met.temp_c>=70?'var(--danger)':met.temp_c>=55?'var(--warning)':'var(--text-0)'; ft+=stat(met.temp_c+'°C','Температура',tc); }
+      if(met.temp_c!=null){ ft+='<span class="server-footer-stat server-footer-stat--temp"><span class="server-footer-icon">'+icon('thermo',22)+'</span><span><b>'+esc(String(met.temp_c))+'°C</b><small>Температура</small></span></span>'; }
       var up=typeof _srvMetUptime==='function'?_srvMetUptime(met.uptime_sec):'';
-      if(up) ft+=stat(up,'Аптайм');
-      if(met.conns!=null) ft+=stat(String(met.conns),'Соединений');
-      if(ft) h+='<div style="display:flex;align-items:center;gap:26px;border-top:1px solid var(--border);padding-top:9px;margin-top:5px">'+ft+'<span style="margin-left:auto;font-size:9px;color:var(--text-3);background:var(--bg-3);border-radius:8px;padding:3px 8px;white-space:nowrap">Средние значения за 24 часа</span></div>';
+      if(up) ft+='<span class="server-footer-stat server-footer-stat--uptime"><span class="server-footer-icon">'+icon('clock',22)+'</span><span><b>'+esc(up)+'</b><small>Аптайм</small></span></span>';
+      if(ft) h+='<footer class="server-overview-footer">'+ft+'</footer>';
       if(met.mongo_ok===0||met.usb_errors) h+='<div style="font-size:10px;color:var(--danger);margin-top:6px">'+(met.mongo_ok===0?'MongoDB FAIL. ':'')+(met.usb_errors?'USB: '+esc(String(met.usb_errors)):'')+'</div>';
     } else {
-      h+='<div style="font-size:11px;color:var(--text-3);padding:10px 0;border-top:1px solid var(--border)">Данных о загрузке ещё нет — джоба пишет раз в 10 мин</div>';
+      h+='<div class="server-overview-empty">Данных о загрузке ещё нет — джоба пишет раз в 10 мин</div>';
     }
-    h+='</div>';
+    h+='</article>';
     return h;
   }
   var html = fcard(null, true);

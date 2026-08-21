@@ -189,30 +189,46 @@ function srvMetInline(name) {
 // карточек «Парк по серверам» (20.08).
 //
 // ── Редизайн карточки сервера (20.08, макет от владельца) ──
-// Спарклайн 24ч: сплошная зелёная линия — текущие значения, пунктир —
-// среднее за 24 часа. Растягивается по ширине (viewBox 300x36).
-function _srvSpark(series, avgPct) {
+// Спарклайн 24ч: плавная линия + лёгкая заливка, пунктир — среднее.
+// Для процентов шкала фиксирована 0..100; для соединений подстраивается
+// под фактический диапазон, чтобы небольшие колебания оставались заметны.
+function _srvSpark(series, avgValue, tone, relativeScale) {
   var pts = [];
+  var vals = (series || []).filter(function (v) { return v != null && isFinite(v); }).map(Number);
+  var min = 0, max = 100;
+  if (relativeScale && vals.length) {
+    min = Math.min.apply(null, vals.concat(avgValue == null ? [] : [Number(avgValue)]));
+    max = Math.max.apply(null, vals.concat(avgValue == null ? [] : [Number(avgValue)]));
+    var pad = Math.max(1, (max - min) * 0.35);
+    min -= pad; max += pad;
+  }
+  function yFor(v) { return 33 - ((Math.max(min, Math.min(max, v)) - min) / Math.max(1, max - min)) * 28; }
   if (series && series.length) {
     var n = series.length;
     for (var i = 0; i < n; i++) {
       var v = series[i];
       if (v == null || !isFinite(v)) continue;
       var x = n > 1 ? (i / (n - 1)) * 300 : 150;
-      var y = 34 - (Math.max(0, Math.min(100, v)) / 100) * 30;
-      pts.push(x.toFixed(1) + ',' + y.toFixed(1));
+      pts.push({ x: x, y: yFor(Number(v)) });
     }
   }
-  var h = '<svg viewBox="0 0 300 36" preserveAspectRatio="none" style="width:100%;height:36px;display:block">';
-  if (avgPct != null && isFinite(avgPct)) {
-    var ay = 34 - (Math.max(0, Math.min(100, avgPct)) / 100) * 30;
+  var purple = tone === 'purple';
+  var stroke = purple ? 'var(--server-purple)' : 'var(--success)';
+  var fill = purple ? 'var(--server-purple-bg)' : 'var(--green-bg)';
+  var h = '<svg viewBox="0 0 300 36" preserveAspectRatio="none" class="server-spark" aria-hidden="true">';
+  if (avgValue != null && isFinite(avgValue)) {
+    var ay = yFor(Number(avgValue));
     h += '<line x1="0" y1="' + ay.toFixed(1) + '" x2="300" y2="' + ay.toFixed(1)
       + '" style="stroke:var(--text-3)" stroke-width="1" stroke-dasharray="4 3" opacity="0.7"/>';
   }
   if (pts.length > 1) {
-    h += '<polyline points="' + pts.join(' ') + '" fill="none" stroke-width="1.8"'
-      + ' stroke-linejoin="round" stroke-linecap="round"'
-      + ' style="stroke:var(--success);vector-effect:non-scaling-stroke"/>';
+    var path = 'M' + pts[0].x.toFixed(1) + ',' + pts[0].y.toFixed(1);
+    for (var p = 1; p < pts.length; p++) {
+      var prev = pts[p - 1], cur = pts[p], mid = (prev.x + cur.x) / 2;
+      path += ' C' + mid.toFixed(1) + ',' + prev.y.toFixed(1) + ' ' + mid.toFixed(1) + ',' + cur.y.toFixed(1) + ' ' + cur.x.toFixed(1) + ',' + cur.y.toFixed(1);
+    }
+    h += '<path d="' + path + ' L300,36 L0,36 Z" style="fill:' + fill + '" opacity="0.48"/>';
+    h += '<path d="' + path + '" fill="none" stroke-width="1.8" stroke-linecap="round" style="stroke:' + stroke + ';vector-effect:non-scaling-stroke"/>';
   }
   return h + '</svg>';
 }
@@ -220,21 +236,25 @@ function _srvSpark(series, avgPct) {
 // Строка метрики: иконка + название/подпись + спарклайн + текущее значение
 // (крупно, с подписью-абсолютом типа «3,3/7,4 ГБ») + пилюля «ср. 24ч».
 function _fmtP(v) { return v == null ? null : String(Math.round(v * 10) / 10).replace('.', ','); }
-function srvMetRowV2(ic, title, sub, curPct, absText, avgPct, series) {
-  var val = curPct == null ? '—' : _fmtP(curPct) + '%';
-  return '<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-top:1px solid var(--border)">'
-    + '<span style="width:34px;height:34px;flex-shrink:0;border-radius:8px;background:var(--green-bg);color:var(--success);display:flex;align-items:center;justify-content:center">' + icon(ic, 16) + '</span>'
-    + '<span style="width:110px;flex-shrink:0">'
-    + '<span style="display:block;font-size:12px;font-weight:600;color:var(--text-0)">' + esc(title) + '</span>'
-    + '<span style="display:block;font-size:9.5px;color:var(--text-3)">' + esc(sub) + '</span></span>'
-    + '<span style="flex:1;min-width:60px">' + _srvSpark(series, avgPct) + '</span>'
-    + '<span style="min-width:56px;flex-shrink:0;text-align:right">'
-    + '<span style="display:block;font-size:16px;font-weight:700;color:var(--text-0);font-family:var(--font-mono)">' + esc(val) + '</span>'
-    + (absText ? '<span style="display:block;font-size:9px;color:var(--text-3);font-family:var(--font-mono)">' + esc(absText) + '</span>' : '')
+function srvMetRowV2(ic, title, sub, current, absText, average, series, options) {
+  options = options || {};
+  var unit = options.unit == null ? '%' : options.unit;
+  var tone = options.tone || 'green';
+  var val = current == null ? '—' : (options.integer ? String(Math.round(current)) : _fmtP(current)) + unit;
+  var avg = average == null ? null : (options.integer ? String(Math.round(average)) : _fmtP(average)) + unit;
+  return '<div class="server-metric-row server-metric-row--' + tone + '">'
+    + '<span class="server-icon-box server-metric-icon">' + icon(ic, 24) + '</span>'
+    + '<span class="server-metric-copy">'
+    + '<span class="server-metric-title">' + esc(title) + '</span>'
+    + '<span class="server-metric-sub">' + esc(sub) + '</span></span>'
+    + '<span class="server-metric-spark">' + _srvSpark(series, average, tone, !!options.relativeScale) + '</span>'
+    + '<span class="server-metric-current">'
+    + '<span class="server-metric-value">' + esc(val) + '</span>'
+    + (absText ? '<span class="server-metric-absolute">' + esc(absText) + '</span>' : '')
     + '</span>'
-    + (avgPct != null
-      ? '<span style="flex-shrink:0;font-size:9.5px;color:var(--text-3);background:var(--bg-3);border-radius:9px;padding:3px 7px;white-space:nowrap">ср. 24ч: ' + esc(_fmtP(avgPct)) + '%</span>'
-      : '')
+    + (avg != null
+      ? '<span class="server-metric-average">ср. 24ч:&nbsp; ' + esc(avg) + '</span>'
+      : '<span class="server-metric-average server-metric-average--empty">—</span>')
     + '</div>';
 }
 
