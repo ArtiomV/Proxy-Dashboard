@@ -243,7 +243,7 @@ function srvMetRowV2(ic, title, sub, current, absText, average, series, options)
   var val = current == null ? '—' : (options.integer ? String(Math.round(current)) : _fmtP(current)) + unit;
   var avg = average == null ? null : (options.integer ? String(Math.round(average)) : _fmtP(average)) + unit;
   return '<div class="server-metric-row server-metric-row--' + tone + '">'
-    + '<span class="server-icon-box server-metric-icon">' + icon(ic, 24) + '</span>'
+    + '<span class="server-icon-box server-metric-icon">' + icon(ic, 18) + '</span>'
     + '<span class="server-metric-copy">'
     + '<span class="server-metric-title">' + esc(title) + '</span>'
     + '<span class="server-metric-sub">' + esc(sub) + '</span></span>'

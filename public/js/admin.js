@@ -3748,7 +3748,7 @@ function renderNewFleetServers(){
     }
     addr=addr||ci.address||'';
     var flag=(typeof flagIcon==='function'&&ci.country)?flagIcon(ci.country,32):(ci.flag||'');
-    var h='<article class="server-overview-card">';
+    var h='<article class="server-overview-card" data-srv-spark="'+esc(srv)+'">';
     h+='<header class="server-overview-header">'
       +'<div class="server-overview-identity"><span class="server-overview-flag">'+flag+'</span><span class="server-overview-heading">'
       +'<span class="server-overview-title">'+esc(srv)+(ci.name?' <span class="server-overview-bullet">•</span> '+esc(ci.name):'')+'</span>'
@@ -3765,7 +3765,7 @@ function renderNewFleetServers(){
     // Единая панель из трёх KPI с вертикальными разделителями, как в макете.
     function tile(ic,label,val,tone,title){
       return '<div class="server-summary-item server-summary-item--'+tone+'"'+(title?' title="'+esc(title)+'"':'')+'>'
-        +'<span class="server-icon-box server-summary-icon">'+icon(ic,24)+'</span>'
+        +'<span class="server-icon-box server-summary-icon">'+icon(ic,18)+'</span>'
         +'<span class="server-summary-copy"><span class="server-summary-label">'+esc(label)+'</span>'
         +'<span class="server-summary-value">'+esc(val)+'</span></span></div>';
     }
@@ -3777,20 +3777,22 @@ function renderNewFleetServers(){
     // CPU/RAM/соединения — три строки со спарклайнами и средними за сутки.
     if(met&&typeof srvMetRowV2==='function'){
       var a24=met.avg24||{}, s24=met.series24||{};
+      // Ряды для ховер-тултипа: время + все метрики точки (21.08).
+      if(s24&&s24.ts&&s24.ts.length) (window._srvFleetSeries=window._srvFleetSeries||{})[srv]={ts:s24.ts,cpu:s24.cpu,mem:s24.mem,conns:s24.conns};
       h+='<div class="server-metrics-list">';
       h+=srvMetRowV2('cpu','CPU','Загрузка процессора',met.cpu_pct,null,a24.cpu_pct,s24.cpu);
       h+=srvMetRowV2('ram','RAM','Использование памяти',met.mem_used_pct,_srvMetGb(met.mem_used_mb,met.mem_total_mb),a24.mem_used_pct,s24.mem);
       h+=srvMetRowV2('connections','Соединения','Активные подключения',met.conns,null,a24.conns,s24.conns,{unit:'',integer:true,tone:'purple',relativeScale:true});
       h+='</div>';
       var diskPct=met.disk_used_pct==null?0:Math.max(0,Math.min(100,met.disk_used_pct));
-      h+='<div class="server-disk-row"><span class="server-icon-box server-disk-icon">'+icon('disk',24)+'</span>'
+      h+='<div class="server-disk-row"><span class="server-icon-box server-disk-icon">'+icon('disk',18)+'</span>'
         +'<span class="server-disk-title">Диск</span><span class="server-disk-value">'+(met.disk_used_pct==null?'—':esc(_fmtP(met.disk_used_pct))+'%')+'</span>'
         +'<span class="server-disk-absolute">'+esc(_srvMetGb(met.disk_used_mb,met.disk_total_mb)||'')+'</span>'
         +'<span class="server-disk-track"><span style="width:'+diskPct+'%;background:'+_srvMetColor(met.disk_used_pct)+'"></span></span></div>';
       var ft='';
-      if(met.temp_c!=null){ ft+='<span class="server-footer-stat server-footer-stat--temp"><span class="server-footer-icon">'+icon('thermo',22)+'</span><span><b>'+esc(String(met.temp_c))+'°C</b><small>Температура</small></span></span>'; }
+      if(met.temp_c!=null){ ft+='<span class="server-footer-stat server-footer-stat--temp"><span class="server-footer-icon">'+icon('thermo',16)+'</span><span><b>'+esc(String(met.temp_c))+'°C</b><small>Температура</small></span></span>'; }
       var up=typeof _srvMetUptime==='function'?_srvMetUptime(met.uptime_sec):'';
-      if(up) ft+='<span class="server-footer-stat server-footer-stat--uptime"><span class="server-footer-icon">'+icon('clock',22)+'</span><span><b>'+esc(up)+'</b><small>Аптайм</small></span></span>';
+      if(up) ft+='<span class="server-footer-stat server-footer-stat--uptime"><span class="server-footer-icon">'+icon('clock',16)+'</span><span><b>'+esc(up)+'</b><small>Аптайм</small></span></span>';
       if(ft) h+='<footer class="server-overview-footer">'+ft+'</footer>';
       if(met.mongo_ok===0||met.usb_errors) h+='<div style="font-size:10px;color:var(--danger);margin-top:6px">'+(met.mongo_ok===0?'MongoDB FAIL. ':'')+(met.usb_errors?'USB: '+esc(String(met.usb_errors)):'')+'</div>';
     } else {
@@ -3803,6 +3805,38 @@ function renderNewFleetServers(){
   names.forEach(function(n){ html += fcard(n, false); });
   el.innerHTML = html;
 }
+// Ховер-тултип спарклайнов карточек серверов (21.08): при наведении на любой
+// спарклайн карточки показываем время точки и значения CPU/RAM/conns в ней.
+(function bindSrvSparkTip(){
+  if(window._srvSparkTipBound) return; window._srvSparkTipBound=1;
+  var tip=null;
+  function ensureTip(){
+    if(!tip){ tip=document.createElement('div'); tip.className='srv-spark-tip'; tip.style.display='none'; document.body.appendChild(tip); }
+    return tip;
+  }
+  document.addEventListener('mousemove', function(e){
+    var t=ensureTip();
+    var svg=e.target&&e.target.closest?e.target.closest('.server-spark'):null;
+    var card=svg&&svg.closest?svg.closest('[data-srv-spark]'):null;
+    var d=card?(window._srvFleetSeries||{})[card.getAttribute('data-srv-spark')]:null;
+    if(!d||!d.ts||!d.ts.length){ if(t.style.display!=='none') t.style.display='none'; return; }
+    var r=svg.getBoundingClientRect();
+    var frac=r.width?Math.max(0,Math.min(1,(e.clientX-r.left)/r.width)):0;
+    var i=Math.round(frac*(d.ts.length-1));
+    var dt=new Date(d.ts[i]);
+    var fv=function(v,u){ return v==null?'—':String(Math.round(v*10)/10).replace('.',',')+u; };
+    t.innerHTML='<b>'+dt.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'})+'</b>'
+      +'<span>CPU: '+fv(d.cpu&&d.cpu[i],' %')+'</span>'
+      +'<span>RAM: '+fv(d.mem&&d.mem[i],' %')+'</span>'
+      +'<span>Соединения: '+((d.conns&&d.conns[i])!=null?d.conns[i]:'—')+'</span>';
+    t.style.display='flex';
+    var tw=t.offsetWidth, th=t.offsetHeight;
+    var x=e.clientX+14, y=e.clientY-th-10;
+    if(x+tw>window.innerWidth-8) x=e.clientX-tw-14;
+    if(y<8) y=e.clientY+16;
+    t.style.left=x+'px'; t.style.top=y+'px';
+  }, {passive:true});
+})();
 function _zxLim(key,cap){return (window._zxOpen&&window._zxOpen[key])?Infinity:cap;}
 function zMore(key){(window._zxOpen=window._zxOpen||{})[key]=1;
   if(key==='tp')renderNewTopProblems();

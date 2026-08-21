@@ -256,6 +256,7 @@ describe('ServerMetrics: GET /api/admin/server_metrics', () => {
     expect(m.series24.cpu).toEqual([10, 30]);
     expect(m.series24.mem).toEqual([50, 66.7]);
     expect(m.series24.conns).toEqual([93, 93]);
+    expect(m.series24.ts).toHaveLength(2);   // метки времени для ховер-тултипа
     expect(res.body.addresses).toBeTruthy();
   });
 });
