@@ -247,6 +247,10 @@
 #tab-dashboard .server-footer-stat b{display:block;font-size:13px;line-height:15px;color:#111722;font-weight:700;font-feature-settings:"tnum";white-space:nowrap}
 #tab-dashboard .server-footer-stat small{display:block;margin-top:2px;font-size:11px;line-height:13px;color:#60708e;white-space:nowrap}
 #tab-dashboard .server-footer-stat em{display:block;margin-top:1px;font-size:10px;line-height:12px;font-style:normal;color:#52688e;white-space:nowrap}
+/* 21.08: RAM/Диск одной строкой — «RAM 3,3/15,2 ГБ · 22%» */
+#tab-dashboard .server-footer-stat--inline .server-footer-copy{display:flex;align-items:baseline;gap:6px}
+#tab-dashboard .server-footer-stat--inline small{order:-1;margin-top:0;font-weight:600}
+#tab-dashboard .server-footer-stat--inline em{margin-top:0}
 #tab-dashboard .server-overview-empty{margin-top:7px;padding:14px 2px;border-top:1px solid var(--border);font-size:11px;color:var(--text-3)}
 
 /* ── Подложки иконок раздела скрыты по просьбе владельца (21.08). Цвета иконок
