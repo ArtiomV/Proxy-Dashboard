@@ -3824,8 +3824,8 @@ function renderNewFleetServers(){
         +'<b>'+(ev?esc(ev.message):'Новых событий нет')+'</b></span>'
         +'<button type="button" class="server-card-link" data-on-click="openServerOverviewSection(\'syslog\')">Открыть лог <span>→</span></button></section>';
 
-      function footerStat(mod,ic,val,label,extra,inline){
-        return '<span class="server-footer-stat server-footer-stat--'+mod+(inline?' server-footer-stat--inline':'')+'"><span class="server-footer-icon">'+icon(ic,18)+'</span>'
+      function footerStat(mod,ic,val,label,extra){
+        return '<span class="server-footer-stat server-footer-stat--'+mod+'"><span class="server-footer-icon">'+icon(ic,18)+'</span>'
           +'<span class="server-footer-copy"><b>'+esc(val||'—')+'</b><small>'+esc(label)+'</small>'
           +(extra?'<em>'+esc(extra)+'</em>':'')+'</span></span>';
       }
@@ -3833,8 +3833,8 @@ function renderNewFleetServers(){
       h+='<footer class="server-overview-footer">'
         +footerStat('temp','thermo',met.temp_c==null?'—':String(_fmtP(met.temp_c))+'°C','Температура')
         +footerStat('uptime','clock',up||'—','Аптайм')
-        +footerStat('ram','ram',_srvMetGb(met.mem_used_mb,met.mem_total_mb)||'—','RAM',met.mem_used_pct==null?'':_fmtP(met.mem_used_pct)+'%',true)
-        +footerStat('disk','disk',_srvMetGb(met.disk_used_mb,met.disk_total_mb)||'—','Диск',met.disk_used_pct==null?'':_fmtP(met.disk_used_pct)+'%',true)
+        +footerStat('ram','ram',met.mem_used_pct==null?'—':_fmtP(met.mem_used_pct)+'%','RAM '+(_srvMetGb(met.mem_used_mb,met.mem_total_mb)||''))
+        +footerStat('disk','disk',met.disk_used_pct==null?'—':_fmtP(met.disk_used_pct)+'%','Диск '+(_srvMetGb(met.disk_used_mb,met.disk_total_mb)||''))
         +'</footer>';
     } else {
       h+='<div class="server-overview-empty">Данных о загрузке ещё нет — джоба пишет раз в 10 мин</div>';
