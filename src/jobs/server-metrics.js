@@ -30,7 +30,9 @@ const SSH_CMD = "grep '^cpu ' /proc/stat; sleep 1; grep '^cpu ' /proc/stat; " +
   // загруженных боксах), conns/mongo добираем по SSH. Число ESTABLISHED
   // TCP-сессий совпадает с панельным «connections» (проверено на S3: 84 vs 83).
   'echo ---; ss -tn state established 2>/dev/null | tail -n +2 | wc -l; ' +
-  'pgrep -x mongod >/dev/null && echo 1 || echo 0';
+  'pgrep -x mongod >/dev/null && echo 1 || echo 0; ' +
+  // Модель CPU + потоки для подписи строки CPU в карточке сервера (21.08).
+  "echo ---; grep -m1 'model name' /proc/cpuinfo | cut -d: -f2-; nproc";
 
 function _pct(used, total) {
   if (!(total > 0)) return null;
@@ -61,6 +63,7 @@ function parseSshMetrics(text) {
     temp_c: null, uptime_sec: null,
     mem_used_mb: null, mem_total_mb: null, disk_used_mb: null, disk_total_mb: null,
     conns: null, mongo_ok: null,   // SSH-fallback для зависшей /system_status
+    cpu_model: null, cpu_cores: null,
   };
   const sections = String(text || '').split(/^---\s*$/m).map(s => s.trim());
   if (sections[0]) out.cpu_pct = _parseCpuPct(sections[0]);
@@ -124,6 +127,11 @@ function parseSshMetrics(text) {
   const fbLines = (sections[6] || '').split('\n').map(l => l.trim()).filter(Boolean);
   if (/^\d+$/.test(fbLines[0] || '')) out.conns = parseInt(fbLines[0], 10);
   if (/^[01]$/.test(fbLines[1] || '')) out.mongo_ok = parseInt(fbLines[1], 10);
+
+  // Секция 7 — модель CPU (« Intel(R) Core(TM) i3-10100 CPU @ 3.60GHz») + nproc.
+  const hw = (sections[7] || '').split('\n').map(l => l.trim()).filter(Boolean);
+  if (hw[0]) out.cpu_model = hw[0].slice(0, 120);
+  if (/^\d+$/.test(hw[1] || '')) out.cpu_cores = parseInt(hw[1], 10);
   return out;
 }
 
@@ -198,8 +206,9 @@ function create(deps) {
     (server_name, collected_at, source, cpu_pct, load1, load5, load15,
      mem_used_pct, swap_used_pct, disk_used_pct, temp_c, uptime_sec,
      mem_used_mb, mem_total_mb, disk_used_mb, disk_total_mb,
-     conns, rps, mongo_ok, usb_errors, box_time_drift_sec, error)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     conns, rps, mongo_ok, usb_errors, box_time_drift_sec, error,
+     cpu_model, cpu_cores)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const pruneStmt = db.prepare('DELETE FROM server_metrics WHERE collected_at < ?');
 
   // SSH: сначала пробуем ключ из ~/.ssh/id_ed25519 (публичная часть выдана
@@ -281,6 +290,7 @@ function create(deps) {
       mem_used_mb: null, mem_total_mb: null, disk_used_mb: null, disk_total_mb: null,
       conns: null, rps: null, mongo_ok: null, usb_errors: '',
       box_time_drift_sec: null, error: '',
+      cpu_model: null, cpu_cores: null,
     };
     if (ssh) Object.assign(row, ssh);
     // HTTP поверх SSH, но только непустые поля: когда /system_status отвечает,
@@ -314,7 +324,8 @@ function create(deps) {
             row.temp_c, row.uptime_sec,
             row.mem_used_mb, row.mem_total_mb, row.disk_used_mb, row.disk_total_mb,
             row.conns, row.rps, row.mongo_ok, row.usb_errors,
-            row.box_time_drift_sec, row.error);
+            row.box_time_drift_sec, row.error,
+            row.cpu_model, row.cpu_cores);
           if (row.error) failed++;
           else if (row.source === 'http') partial++;   // SSH недоступен — только панель
           else ok++;

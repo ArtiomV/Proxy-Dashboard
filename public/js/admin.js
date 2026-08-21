@@ -3790,7 +3790,10 @@ function renderNewFleetServers(){
       // Ряды для ховер-тултипа: время + все метрики точки (21.08).
       if(s24&&s24.ts&&s24.ts.length) (window._srvFleetSeries=window._srvFleetSeries||{})[srv]={ts:s24.ts,cpu:s24.cpu,mem:s24.mem,conns:s24.conns};
       h+='<div class="server-metrics-list">';
-      h+=srvMetRowV2('cpu','CPU','Загрузка процессора',met.cpu_pct,null,a24.cpu_pct,s24.cpu);
+      // Подпись CPU — реальная модель с бокса (SSH, поле cpu_model): «i3-10100 · 8 пот.»
+      var cpuSub='Загрузка процессора';
+      if(met.cpu_model){ var cm=String(met.cpu_model).replace(/\(R\)|\(TM\)|Intel|Core|CPU/gi,'').replace(/@.*$/,'').replace(/\s+/g,' ').trim(); if(cm) cpuSub=cm+(met.cpu_cores?' · '+met.cpu_cores+' пот.':''); }
+      h+=srvMetRowV2('cpu','CPU',cpuSub,met.cpu_pct,null,a24.cpu_pct,s24.cpu);
       h+=srvMetRowV2('connections','Соединения','Активные подключения',met.conns,null,a24.conns,s24.conns,{unit:'',integer:true,tone:'purple',relativeScale:true});
       h+='</div>';
 

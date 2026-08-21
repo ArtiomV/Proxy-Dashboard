@@ -249,6 +249,18 @@
 #tab-dashboard .server-footer-stat em{display:block;margin-top:1px;font-size:9.5px;line-height:11px;font-style:normal;color:#52688e;white-space:nowrap}
 #tab-dashboard .server-overview-empty{margin-top:7px;padding:14px 2px;border-top:1px solid var(--border);font-size:11px;color:var(--text-3)}
 
+/* ── Подложки иконок раздела скрыты по просьбе владельца (21.08). Цвета иконок
+   сохранены; вернуть подложки — просто удалить этот блок ── */
+#tab-dashboard .server-icon-box,
+#tab-dashboard .server-flap-icon,
+#tab-dashboard .server-summary-item--warning .server-summary-icon,
+#tab-dashboard .server-summary-item--muted .server-summary-icon,
+#tab-dashboard .server-metric-row--purple .server-metric-icon,
+#tab-dashboard .server-disk-icon,
+#tab-dashboard .server-footer-icon,
+#tab-dashboard .server-footer-stat--temp .server-footer-icon,
+#tab-dashboard .server-footer-stat--uptime .server-footer-icon{background:transparent!important}
+
 /* Тултип ховера по спарклайнам карточек серверов (21.08): время + CPU/RAM/conns */
 .srv-spark-tip{position:fixed;z-index:9999;pointer-events:none;display:flex;flex-direction:column;gap:2px;
   padding:7px 10px;border-radius:8px;background:rgba(16,23,35,.94);color:#e7ecf4;

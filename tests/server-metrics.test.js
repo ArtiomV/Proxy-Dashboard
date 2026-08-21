@@ -39,6 +39,9 @@ const SSH_OUT = [
   '---',
   '84',   // ss established — fallback панельных «connections»
   '1',    // pgrep mongod — fallback mongo_ok
+  '---',
+  ' Intel(R) Core(TM) i3-10100 CPU @ 3.60GHz',   // model name
+  '8',                                           // nproc
 ].join('\n');
 
 describe('ServerMetrics: parseSshMetrics', () => {
@@ -65,6 +68,9 @@ describe('ServerMetrics: parseSshMetrics', () => {
     // секция 6: SSH-fallback панельных метрик
     expect(m.conns).toBe(84);
     expect(m.mongo_ok).toBe(1);
+    // секция 7: модель CPU + потоки
+    expect(m.cpu_model).toBe('Intel(R) Core(TM) i3-10100 CPU @ 3.60GHz');
+    expect(m.cpu_cores).toBe(8);
   });
 
   it('без sensors температура берётся из термозон (/1000)', () => {
