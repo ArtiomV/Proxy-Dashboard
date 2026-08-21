@@ -26,6 +26,7 @@ function runStartup(d) {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runServerMetrics, runRetailGuard,
+    runBlockedPortCleanup,
     saveClients, auditLog, authTokensDb,
   } = d;
 
@@ -209,6 +210,16 @@ function runStartup(d) {
     dbAudit.runJobAsync('RetailGuard', 'periodic', () => runRetailGuard())
       .catch(e => logger.error('[RetailGuard] periodic run failed:', e.message));
   }, 10 * 60 * 1000));
+
+  // 21.08: BlockedPortCleanup — удаление портов заблокированных клиентов
+  // (ручной блок + долговой) после истечения hold (retail_hold_days дней от
+  // blocked_since, миграция 073). Работает НЕЗАВИСИМО от retail_enabled —
+  // иначе при выключенной рознице порты заблокированных висят вечно.
+  // Цикл 30 мин, первый прогон через 8 мин после старта. Юрлиц не трогает.
+  setTimeout(() => dbAudit.runJobAsync('BlockedPortCleanup', 'startup', () => runBlockedPortCleanup())
+    .catch(e => logger.error('[BlockedPortCleanup] startup run failed:', e.message)), 8 * 60 * 1000);
+  _intervals.push(setInterval(() => dbAudit.runJobAsync('BlockedPortCleanup', 'periodic', () => runBlockedPortCleanup())
+    .catch(e => logger.error('[BlockedPortCleanup] periodic run failed:', e.message)), 30 * 60 * 1000));
 
   // Nightly DB cleanup at 00:30 UTC — remove old data using dynamic retention settings
   scheduleRepeating(0, 30, 'DbCleanup', () => {

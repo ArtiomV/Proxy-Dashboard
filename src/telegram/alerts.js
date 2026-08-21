@@ -359,6 +359,16 @@ const RULES = {
     dedupeKey: p => 'adminblock_' + (p.client_id || ''),
     render: p => `🔒 <b>Клиент заблокирован админом</b>\n\n<b>${esc(p.client || '?')}</b>: сессии сброшены, погашено портов: B2B ${p.b2b ?? 0}, розница ${p.retail ?? 0}.${p.errors ? `\nОшибки: <code>${esc(String(p.errors).slice(0, 300))}</code>` : ''}`,
   },
+  // 21.08: BlockedPortCleanup — истёк срок хранения портов заблокированного
+  // клиента (blocked_since + retail_hold_days), порты удалены с бокса.
+  blocked_ports_deleted: {
+    title: 'Порты заблокированного удалены',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'blockeddel_' + (p.client_id || ''),
+    render: p => `🗑 <b>Порты заблокированного удалены</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: срок хранения истёк (блок от ${esc(String(p.blocked_since || '?').slice(0, 10))}), удалено портов: ${p.ports || '?'}.\nКлиент перешёл в «Неактивные». После оплаты выдадим новые порты автоматически.`,
+  },
   // B2C Э2: тест-день розницы завершён — порт отвязан и возвращён в пул.
   retail_test_day_ended: {
     title: 'Тест-день завершён',
@@ -708,6 +718,7 @@ const _entityFor = {
   payment_received:          p => ({ kind: 'payment', id: p.natural_key || null }),
   client_balance_negative:   p => ({ kind: 'client',  id: p.client_id || null }),
   client_blocked_debt:       p => ({ kind: 'client',  id: p.client_id || null }),
+  blocked_ports_deleted:     p => ({ kind: 'client',  id: p.client_id || null }),
   client_blocked_admin:      p => ({ kind: 'client',  id: p.client_id || null }),
   client_unblocked_debt:     p => ({ kind: 'client',  id: p.client_id || null }),
   client_block_warning:      p => ({ kind: 'client',  id: p.client_id || null }),

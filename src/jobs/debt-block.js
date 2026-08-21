@@ -85,6 +85,11 @@ function create(deps) {
         }
         if (blocked === 0) continue;                    // ничего не погасили — повторим завтра
         client.debtBlocked = true;
+        // Миграция 073: от этой метки джоба автоудаления отсчитывает hold
+        // (retail_hold_days) до удаления портов. Не перезаписываем, если
+        // клиент уже был заблокирован ранее (например, вручную) — hold
+        // тикает от первой блокировки.
+        if (!client.blockedSince) client.blockedSince = new Date().toISOString();
         dirty = true;
         logger.warn(`[DebtBlock] ${client.name}: баланс ${balance} ₽ — погашено портов: ${blocked} («дата до» = ${today})`);
         logActivity('billing', 'warn', 'debt_block', client.name,
@@ -135,6 +140,7 @@ function create(deps) {
       }
     }
     client.debtBlocked = false;
+    if (!client.blocked) client.blockedSince = null;   // долг погашен, ручного блока нет — hold отменяется
     saveClients(clients);
     logger.info(`[DebtBlock] ${client.name}: баланс восстановлен (${client.balance} ₽) — «дата до» продлена до ${untilStr}, портов: ${restored}`);
     logActivity('billing', 'info', 'debt_restore', client.name,

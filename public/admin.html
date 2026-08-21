@@ -311,6 +311,7 @@
       <span class="cl-chip" data-f="active" data-on-click="setClientFilter2('active')">Активные · <b id="clCntActive">0</b></span>
       <span class="cl-chip" data-f="debtors" data-on-click="setClientFilter2('debtors')">Должники · <b id="clCntDebt">0</b></span>
       <span class="cl-chip" data-f="expiring" data-on-click="setClientFilter2('expiring')">Истекают · <b id="clCntExp">0</b></span>
+      <span class="cl-chip" data-f="inactive" data-on-click="setClientFilter2('inactive')" title="Заблокированные клиенты, чьи порты уже удалены (нет модемов)">Неактивные · <b id="clCntInact">0</b></span>
     </div>
     <div style="font-size:12px;color:var(--text-2);white-space:nowrap" title="Сумма по charge+correction за скользящие 30 дней (каноническая метрика)">Выручка 30д <b id="clMrrTotal" style="color:var(--text-0);font-family:var(--font-mono);font-weight:700;margin-left:4px">—</b></div>
   </div>
@@ -1389,7 +1390,7 @@
         <div class="set-grp-label">Биллинг</div>
         <div class="set-card">
           <div class="set-row"><div><div class="set-row-t" style="color:var(--warning)">Приостановить учёт баланса</div><div class="set-row-d">Биллинг не будет списывать средства с этого клиента</div></div><label class="tgl"><input type="checkbox" id="cfBillingPaused"><span></span></label></div>
-          <div class="set-row"><div><div class="set-row-t">Разрешить уход в минус</div><div class="set-row-d">По умолчанию баланс не может опуститься ниже ~5 дней долга</div></div><label class="tgl"><input type="checkbox" id="cfAllowDebt"><span></span></label></div>
+          <div class="set-row"><div><div class="set-row-t">Разрешить уход в минус</div><div class="set-row-d">Для юрлиц включено по умолчанию — их порты не блокируются и не удаляются автоматически. Для физиков: баланс не может опуститься ниже ~5 дней долга</div></div><label class="tgl"><input type="checkbox" id="cfAllowDebt"><span></span></label></div>
           <div class="set-row" id="cfMaxDebtWrap"><div><div class="set-row-t">Макс. долг</div><div class="set-row-d">В валюте клиента, 0 = без лимита</div></div><span class="set-inp"><input id="cfMaxDebt" type="number" min="0" step="0.01" placeholder="0" style="width:96px;text-align:right"><span>₽</span></span></div>
         </div>
 
@@ -1453,6 +1454,6 @@
 <script src="/js/admin/settings.js?v=0820f"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0821c"></script>
-<script src="/js/admin.js?v=0821f"></script>
+<script src="/js/admin.js?v=0821g"></script>
 </body>
 </html>

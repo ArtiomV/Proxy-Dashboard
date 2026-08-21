@@ -482,6 +482,7 @@ function clientFromRow(r) {
     consentPdAt: r.consent_pd_at || '', blocked: r.blocked === 1,
     abuseStrikes: r.abuse_strikes || 0,
     balanceNegativeSince: r.balance_negative_since || null,
+    blockedSince: r.blocked_since || null,   // миграция 073: от неё тикает hold до удаления портов
     tariffId: r.tariff_id != null ? r.tariff_id : null,
     priceOverride: r.price_override != null ? r.price_override : null,
     holdTtlDays: r.hold_ttl_days != null ? r.hold_ttl_days : null,
@@ -3711,6 +3712,18 @@ const _clientNotify = require('./src/services/notify').create({
   logger, logActivity, getSetting, tgBot,
 });
 
+// 21.08: автоудаление портов заблокированных клиентов после истечения hold
+// (retail_hold_days дней от blocked_since, миграция 073). Независимо от
+// retail-конвейера: закрывает и ручные блоки, и долговые. Юрлиц — никогда.
+const _blockedPortCleanup = require('./src/jobs/blocked-port-cleanup').create({
+  logger, logActivity, auditLog, alerts,
+  proxyConf, fetchApi, parseHtmlInputFields, findServer, proxySmart,
+  ledgerDb, saveClients, getMoscowNow,
+  fetchAllServersDataCached,
+  clients, getSetting,
+  notifyClient: _clientNotify.notifyClient,
+});
+
 // B2C Э2: retail-guard — конвейер автоблока розницы (grace → block+hold →
 // delete → restore + тест-день). Джоба создана всегда, но runOnce() сам
 // выходит по флагу retail_enabled; тик 10 мин — в src/boot/startup.js.
@@ -3725,6 +3738,7 @@ const _retailGuard = require('./src/jobs/retail-guard').create({
   kvSet: (k, v) => _kvSet.run(k, v),
 });
 const runRetailGuard = _retailGuard.runOnce;
+const runBlockedPortCleanup = _blockedPortCleanup.runOnce;   // 21.08: удаление портов после hold
 financeEvents.on('client-credit', ({ clientId }) => {
   const c = clientById.get(clientId);
   if (!c) return;
@@ -4097,6 +4111,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runSpeedMonitor: _speedMonitor.runSpeedMonitor,
     runServerMetrics: _serverMetrics.runServerMetrics,
     runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
+    runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
     // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).
     saveClients, auditLog, authTokensDb,
   });

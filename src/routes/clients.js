@@ -120,7 +120,9 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
     autoActs: true,
     autoBills: true,
     billingPaused: false,
-    allowDebt: !!allowDebt,
+    // 21.08: юрлицам базово разрешён уход в минус (их порты не блокируются и
+    // не удаляются автоматически); физикам — запрещён, если не задано явно.
+    allowDebt: allowDebt !== undefined ? !!allowDebt : (clientType === 'legal'),
     maxDebt: typeof maxDebt === 'number' ? maxDebt : null,
     clientType: clientType || 'individual',   // 2026-08-04: базово физ. лицо (реша оператора)
     createdAt: new Date().toISOString()
@@ -654,6 +656,11 @@ r.post('/api/admin/clients/:id/block', authMiddleware, adminMiddleware, async (r
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const wasBlocked = !!client.blocked;
   client.blocked = true;
+  // Миграция 073: фиксируем вход в блокировку — от этой метки джоба
+  // автоудаления отсчитывает hold (retail_hold_days). Повторный блок дату
+  // НЕ перезаписывает: hold тикает от первой блокировки, иначе случайный
+  // double-click отодвигал бы удаление портов.
+  if (!client.blockedSince) client.blockedSince = new Date().toISOString();
   saveClients(clients);
   try { deleteSessionsByLogin(client.login); } catch (_) { /* best-effort */ }
 
@@ -719,6 +726,7 @@ r.post('/api/admin/clients/:id/unblock', authMiddleware, adminMiddleware, (req, 
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const wasBlocked = !!client.blocked;
   client.blocked = false;
+  client.blockedSince = null;   // миграция 073: блок снят — hold-дедлайн отменяется
   const resetStrikes = !!(req.body && req.body.reset_strikes);
   if (resetStrikes) client.abuseStrikes = 0;
   saveClients(clients);

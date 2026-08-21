@@ -21,9 +21,9 @@ function init(db) {
     contract_date, debt_blocked,
     email, email_verified, tg_chat_id, reg_ip, consent_pd_at, blocked, abuse_strikes,
     balance_negative_since, tariff_id, price_override, hold_ttl_days, test_used,
-    tg_username, tg_oidc_sub)
+    tg_username, tg_oidc_sub, blocked_since)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       login=excluded.login, password=excluded.password, password_hash=excluded.password_hash,
       port_name=excluded.port_name, name=excluded.name, contact=excluded.contact,
@@ -49,6 +49,7 @@ function init(db) {
       tariff_id=excluded.tariff_id, price_override=excluded.price_override,
       hold_ttl_days=excluded.hold_ttl_days, test_used=excluded.test_used,
       tg_username=excluded.tg_username, tg_oidc_sub=excluded.tg_oidc_sub,
+      blocked_since=excluded.blocked_since,
       updated_at=datetime('now')`);
 
   S.deleteById = db.prepare('DELETE FROM clients WHERE id = ?');
@@ -89,7 +90,8 @@ function upsertRow(c) {
     c.holdTtlDays != null ? c.holdTtlDays : null,
     c.testUsed ? 1 : 0,
     c.tgUsername || null,      // миграция 065: @username привязанного TG
-    c.tgOidcSub || null        // миграция 066: OIDC sub (не равен tg user id!)
+    c.tgOidcSub || null,       // миграция 066: OIDC sub (не равен tg user id!)
+    c.blockedSince || null     // миграция 073: вход в блокировку (ручную/долговую)
   );
 }
 
