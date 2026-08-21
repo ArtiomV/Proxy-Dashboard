@@ -235,12 +235,20 @@ describe('ServerMetrics: GET /api/admin/server_metrics', () => {
     const { app } = bootApp();
     const token = asAdmin();
     db.prepare('DELETE FROM server_metrics').run();
+    db.prepare('DELETE FROM server_downtime').run();
     const ins = db.prepare(`INSERT INTO server_metrics
       (server_name, collected_at, source, cpu_pct, load1, mem_used_pct, conns, rps)
       VALUES (?, ?, 'mixed', ?, 1.2, ?, 93, 1.2)`);
     ins.run('S1', new Date(Date.now() - 25 * 3600e3).toISOString(), 99, 99); // за пределами 24ч (id ниже — вставлена первой)
     ins.run('S1', new Date(Date.now() - 3600e3).toISOString(), 10, 50);   // в пределах 24ч
     ins.run('S1', new Date(Date.now() - 60e3).toISOString(), 30, 66.7);   // свежая
+    db.prepare('UPDATE server_metrics SET usb_errors = ? WHERE id = (SELECT MAX(id) FROM server_metrics WHERE server_name = ?)')
+      .run('8: Bluetooth: HCI socket layer initialized', 'S1');
+    const down = db.prepare(`INSERT INTO server_downtime
+      (server_name, down_from, down_to, duration_sec, alerted) VALUES (?, ?, ?, ?, 0)`);
+    down.run('S1', new Date(Date.now() - 3 * 3600e3).toISOString(), new Date(Date.now() - 2.9 * 3600e3).toISOString(), 360);
+    down.run('S1', new Date(Date.now() - 2 * 3600e3).toISOString(), new Date(Date.now() - 1.75 * 3600e3).toISOString(), 900);
+    down.run('S1', new Date(Date.now() - 30 * 3600e3).toISOString(), new Date(Date.now() - 29 * 3600e3).toISOString(), 3600); // вне окна
 
     const res = await request(app).get('/api/admin/server_metrics').set('X-Auth-Token', token);
     expect(res.status).toBe(200);
@@ -257,6 +265,10 @@ describe('ServerMetrics: GET /api/admin/server_metrics', () => {
     expect(m.series24.mem).toEqual([50, 66.7]);
     expect(m.series24.conns).toEqual([93, 93]);
     expect(m.series24.ts).toHaveLength(2);   // метки времени для ховер-тултипа
+    expect(m.downtime24).toMatchObject({ episodes: 2, duration_sec: 1260 });
+    expect(m.downtime24.events).toHaveLength(2);
+    expect(m.latest_event).toMatchObject({ source: 'USB 8', message: 'Bluetooth: HCI socket layer initialized' });
+    expect(res.body.generated_at).toBeTruthy();
     expect(res.body.addresses).toBeTruthy();
   });
 });

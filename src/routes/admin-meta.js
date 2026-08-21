@@ -211,11 +211,21 @@ module.exports = function createAdminMetaRouter(deps) {
       const addrBySrv = {};
       for (const s of (apiServers || [])) addrBySrv[s.name] = s.address || '';
       const items = [];
+      const seenNick = new Set();   // 21.08: на S1 у части модемов по 2 порта
+      // на один IMEI — пикер показывал ник дважды. Дедуп по сервер+ник:
+      // предпочитаем запись с IMEI/оператором.
       for (const [srvName, km] of Object.entries(knownModems || {})) {
         for (const info of Object.values(km || {})) {
           if (!info || !info.nick) continue;
           const imei = info.imei || '';
           if (imei && deleted.has(srvName + '|' + imei)) continue;
+          const nk = srvName + '|' + info.nick;
+          if (seenNick.has(nk)) {
+            const prev = items.find(x => x.server === srvName && x.nick === info.nick);
+            if (prev && !prev.operator && imei && opByKey[srvName + '|' + imei]) prev.operator = opByKey[srvName + '|' + imei];
+            continue;
+          }
+          seenNick.add(nk);
           items.push({
             server: srvName,
             nick: info.nick,

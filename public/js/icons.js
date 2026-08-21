@@ -91,6 +91,7 @@
     disk: '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3 15h18"/><path d="M7 10h.01M17 17.5h.01"/>',
     thermo: '<path d="M12 3a2 2 0 0 1 2 2v7.3a4.5 4.5 0 1 1-4 0V5a2 2 0 0 1 2-2z"/><path d="M12 10v6"/>',
     traffic: '<path d="M4 4v16h16"/><path d="m7 15 4-4 3 2.5 5-6"/>',
+    pulse: '<path d="M3 13h4l2-7 3 13 2.5-9 2 5H21"/>',
     connections: '<circle cx="12" cy="12" r="2.2"/><path d="m10.4 10.4-4-4M13.6 10.4l4-4M10.4 13.6l-4 4M13.6 13.6l4 4"/><path d="M4 8V4h4M16 4h4v4M4 16v4h4M20 16v4h-4"/>',
     mobile: '<rect x="7" y="3" width="10" height="18" rx="2"/><path d="M11 17.5h2"/>',
     sim: '<path d="M8 3h8l4 4v14H8z" transform="translate(-1 0)"/><rect x="9" y="11" width="7" height="6" rx="1"/>',

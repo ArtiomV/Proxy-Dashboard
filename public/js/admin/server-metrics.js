@@ -236,6 +236,59 @@ function _srvSpark(series, avgValue, tone, relativeScale) {
 // Строка метрики: иконка + название/подпись + спарклайн + текущее значение
 // (крупно, с подписью-абсолютом типа «3,3/7,4 ГБ») + пилюля «ср. 24ч».
 function _fmtP(v) { return v == null ? null : String(Math.round(v * 10) / 10).replace('.', ','); }
+
+function _srvMetMinutes(sec) {
+  var mins = Math.max(0, Math.round((Number(sec) || 0) / 60));
+  return mins + ' мин';
+}
+
+function _srvMetEpisodeLabel(count) {
+  count = Math.max(0, Number(count) || 0);
+  var mod10 = count % 10, mod100 = count % 100;
+  var word = mod10 === 1 && mod100 !== 11 ? 'эпизод'
+    : (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14) ? 'эпизода' : 'эпизодов');
+  return count + ' ' + word;
+}
+
+function _srvMetClock(ts) {
+  var d = new Date(ts);
+  if (!isFinite(d.getTime())) return '—';
+  return d.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' });
+}
+
+function _srvMetEventStamp(ts) {
+  var d = new Date(ts);
+  if (!isFinite(d.getTime())) return '';
+  var day = d.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' }).replace('.', '');
+  return day + ', ' + _srvMetClock(ts);
+}
+
+function _srvMetLastFlap(downtime) {
+  var events = downtime && downtime.events || [];
+  if (!events.length) return '';
+  var e = events[events.length - 1];
+  return _srvMetClock(e.from) + '–' + _srvMetClock(e.to) + ' · ' + _srvMetMinutes(e.duration_sec);
+}
+
+// Зелёные сутки с красными отрезками недоступности. Минимальная видимая
+// ширина короткого эпизода — 1.4%, иначе 2–3 минуты теряются на Retina.
+function _srvMetFlapTimeline(downtime, generatedAt) {
+  var now = Date.parse(generatedAt) || Date.now();
+  var start = now - 24 * 3600e3;
+  var spans = '';
+  (downtime && downtime.events || []).forEach(function (e) {
+    var from = Math.max(start, Date.parse(e.from));
+    var to = Math.min(now, Date.parse(e.to));
+    if (!isFinite(from) || !isFinite(to) || to <= from) return;
+    var left = Math.max(0, Math.min(100, (from - start) / (24 * 3600e3) * 100));
+    var width = Math.max(1.4, (to - from) / (24 * 3600e3) * 100);
+    if (left + width > 100) width = 100 - left;
+    spans += '<i style="left:' + left.toFixed(3) + '%;width:' + width.toFixed(3) + '%" title="'
+      + esc(_srvMetClock(e.from) + '–' + _srvMetClock(e.to)) + '"></i>';
+  });
+  return '<span class="server-flap-timeline" aria-label="Эпизоды недоступности за 24 часа">' + spans + '</span>';
+}
+
 function srvMetRowV2(ic, title, sub, current, absText, average, series, options) {
   options = options || {};
   var unit = options.unit == null ? '%' : options.unit;
@@ -274,5 +327,9 @@ function loadServerMetrics(force) {
 
 // Экспорт для node-тестов (паттерн public/js/utils.js).
 if (typeof module !== 'undefined' && module.exports) {
-  module.exports = { _srvMetBar, _srvMetUptime, _srvMetCard, renderServerMetrics, _srvMetColor, srvMetInline, _srvSpark, srvMetRowV2 };
+  module.exports = {
+    _srvMetBar, _srvMetUptime, _srvMetCard, renderServerMetrics, _srvMetColor,
+    srvMetInline, _srvSpark, srvMetRowV2, _srvMetMinutes, _srvMetEpisodeLabel,
+    _srvMetEventStamp, _srvMetLastFlap, _srvMetFlapTimeline,
+  };
 }

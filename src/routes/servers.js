@@ -68,12 +68,14 @@ r.get('/api/admin/server_stats', authMiddleware, adminMiddleware, async (req, re
 // фронт показывает то, что есть (HTTP-метрики панели), с пометкой.
 r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) => {
   const byName = {};
+  const nowMs = Date.now();
+  const generatedAt = new Date(nowMs).toISOString();
+  const sinceIso = new Date(nowMs - 24 * 3600e3).toISOString();
   try {
     const rows = db.prepare(`SELECT * FROM server_metrics
       WHERE id IN (SELECT MAX(id) FROM server_metrics GROUP BY server_name)`).all();
     // Средние за сутки по числовым метрикам (NULL-поля AVG игнорирует сам).
     // collected_at хранится ISO со 'T' — сравниваем с ISO-строкой, не datetime().
-    const sinceIso = new Date(Date.now() - 24 * 3600e3).toISOString();
     const avgRows = db.prepare(`SELECT server_name,
         AVG(cpu_pct) a_cpu, AVG(mem_used_pct) a_mem, AVG(disk_used_pct) a_disk,
         AVG(temp_c) a_temp, AVG(conns) a_conns, COUNT(*) samples
@@ -112,7 +114,7 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
     for (const row of rows) {
       byName[row.server_name] = {
         ...row,
-        age_sec: Math.max(0, Math.round((Date.now() - Date.parse(row.collected_at)) / 1000)),
+        age_sec: Math.max(0, Math.round((nowMs - Date.parse(row.collected_at)) / 1000)),
         avg24: avg24[row.server_name] || null,
         series24: series24[row.server_name] || null,
       };
@@ -120,13 +122,85 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
   } catch (e) {
     logger.warn('[ServerMetrics] read failed: ' + e.message);
   }
+
+  // Флапание за последние 24 часа. Эпизоды подрезаем границами окна, чтобы
+  // длительность и полоска не завышались, если падение началось раньше суток.
+  // Отдельный try сохраняет совместимость с очень старыми БД без миграции 035.
+  const downtime24 = {};
+  try {
+    const rows = db.prepare(`SELECT server_name, down_from, down_to, duration_sec
+      FROM server_downtime WHERE down_to > ? AND down_from < ? ORDER BY down_from`).all(sinceIso, generatedAt);
+    for (const row of rows) {
+      const fromMs = Date.parse(row.down_from);
+      const toMs = Date.parse(row.down_to);
+      if (!Number.isFinite(fromMs) || !Number.isFinite(toMs) || toMs <= fromMs) continue;
+      const clippedFrom = Math.max(fromMs, nowMs - 24 * 3600e3);
+      const clippedTo = Math.min(toMs, nowMs);
+      if (clippedTo <= clippedFrom) continue;
+      const d = downtime24[row.server_name] || (downtime24[row.server_name] = {
+        episodes: 0, duration_sec: 0, events: [],
+      });
+      d.episodes += 1;
+      d.duration_sec += Math.round((clippedTo - clippedFrom) / 1000);
+      d.events.push({
+        from: new Date(clippedFrom).toISOString(),
+        to: new Date(clippedTo).toISOString(),
+        duration_sec: Math.round((clippedTo - clippedFrom) / 1000),
+      });
+    }
+  } catch (_) { /* server_downtime may not exist on an old local DB */ }
+
+  // Последнее серверное событие. Аппаратные USB-события берём из истории
+  // метрик; для серверов без них используем свежую запись system_log,
+  // адресованную самому серверу.
+  const latestEvents = {};
+  const eventSinceIso = new Date(nowMs - 7 * 24 * 3600e3).toISOString();
+  try {
+    const rows = db.prepare(`SELECT server_name, collected_at, usb_errors
+      FROM server_metrics
+      WHERE collected_at > ? AND trim(COALESCE(usb_errors, '')) <> ''
+      ORDER BY collected_at DESC`).all(eventSinceIso);
+    for (const row of rows) {
+      if (latestEvents[row.server_name]) continue;
+      const raw = String(row.usb_errors || '').trim();
+      const parsed = raw.match(/^(\d+)\s*:\s*([\s\S]*)$/);
+      latestEvents[row.server_name] = {
+        timestamp: row.collected_at,
+        source: parsed ? 'USB ' + parsed[1] : 'USB',
+        message: (parsed ? parsed[2] : raw) || 'Обнаружено USB-событие',
+      };
+    }
+  } catch (_) { /* server_metrics may not exist on an old local DB */ }
+  try {
+    const rows = db.prepare(`SELECT timestamp, category, action, target, message
+      FROM system_log WHERE timestamp > ? AND target IS NOT NULL AND trim(target) <> ''
+      ORDER BY id DESC LIMIT 500`).all(eventSinceIso.replace('T', ' ').replace('Z', ''));
+    const labels = { system: 'Система', modem: 'Модем', recovery: 'Восстановление', proxy_check: 'Прокси' };
+    const serverNames = new Set(apiServers.map(s => s.name));
+    for (const row of rows) {
+      if (!serverNames.has(row.target)) continue;
+      const prev = latestEvents[row.target];
+      if (prev && Date.parse(prev.timestamp) >= Date.parse(row.timestamp)) continue;
+      latestEvents[row.target] = {
+        timestamp: row.timestamp,
+        source: labels[row.category] || row.category || 'Система',
+        message: row.message || row.action || 'Системное событие',
+      };
+    }
+  } catch (_) { /* system_log may not exist on an old local DB */ }
+
+  for (const [name, metric] of Object.entries(byName)) {
+    if (!metric) continue;
+    metric.downtime24 = downtime24[name] || { episodes: 0, duration_sec: 0, events: [] };
+    metric.latest_event = latestEvents[name] || null;
+  }
   // Адрес площадки из конфига сервера (карточка показывает «S1 · Армянская …»).
   const addresses = {};
   for (const s of apiServers) {
     addresses[s.name] = s.address || '';
     if (!(s.name in byName)) byName[s.name] = null;   // данных ещё нет
   }
-  res.json({ metrics: byName, addresses });
+  res.json({ metrics: byName, addresses, generated_at: generatedAt });
 });
 
 r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {

@@ -43,4 +43,25 @@ describe('GET /api/admin/known_modems', () => {
       db.prepare("DELETE FROM modem_meta WHERE server_name = 'KM_T'").run();
     }
   });
+
+  it('два порта одного модема (один IMEI/ник) — одна запись в пикере', async () => {
+    const request = (await import('supertest')).default;
+    const { state, setKnownModems } = stateMod;
+    const backup = JSON.parse(JSON.stringify(state.knownModems));
+    try {
+      setKnownModems({
+        ...backup,
+        KM_D: {
+          KM_D_p1: { imei: 'KM_IMEI_D', nick: 'KM_DD', portName: 'a', lastSeen: 1 },
+          KM_D_p2: { imei: 'KM_IMEI_D', nick: 'KM_DD', portName: 'b', lastSeen: 1 },
+        },
+      });
+      const res = await request(app).get('/api/admin/known_modems').set('X-Auth-Token', asAdmin());
+      expect(res.status).toBe(200);
+      const mine = (res.body.items || []).filter(m => m.server === 'KM_D' && m.nick === 'KM_DD');
+      expect(mine.length).toBe(1);
+    } finally {
+      setKnownModems(backup);
+    }
+  });
 });

@@ -3703,6 +3703,15 @@ function _ncServerCard(name, working, total, disc, primary){
     '<div class="widget-sub">'+sub+'</div>' +
     '</div>';
 }
+
+function openServerOverviewSection(section){
+  var tab=null;
+  document.querySelectorAll('.nav-tab').forEach(function(el){
+    if((el.getAttribute('data-on-click')||'').indexOf("switchMainTab('analytics'")===0) tab=el;
+  });
+  if(tab) switchMainTab('analytics',tab);
+  setTimeout(function(){ switchSettingsSection(section); },80);
+}
 function renderNewFleetServers(){
   var el = document.getElementById('newFleetServers'); if(!el) return;
   var fleet = currentData.fleet || {};
@@ -3774,34 +3783,57 @@ function renderNewFleetServers(){
       +tile('signal','Средний сигнал',sigAvg?sigAvg+'/5':'—','green','Боксы отдают шкалу 0–5, не dBm')
       +tile('alert','Проблемных модемов',String(prob),prob>0?'warning':'muted')
       +'</div>';
-    // CPU/RAM/соединения — три строки со спарклайнами и средними за сутки.
+    // Новый макет: два оперативных графика, затем флапание, системное событие
+    // и общий нижний ряд аппаратных показателей (RAM/диск переехали вниз).
     if(met&&typeof srvMetRowV2==='function'){
       var a24=met.avg24||{}, s24=met.series24||{};
       // Ряды для ховер-тултипа: время + все метрики точки (21.08).
       if(s24&&s24.ts&&s24.ts.length) (window._srvFleetSeries=window._srvFleetSeries||{})[srv]={ts:s24.ts,cpu:s24.cpu,mem:s24.mem,conns:s24.conns};
       h+='<div class="server-metrics-list">';
       h+=srvMetRowV2('cpu','CPU','Загрузка процессора',met.cpu_pct,null,a24.cpu_pct,s24.cpu);
-      h+=srvMetRowV2('ram','RAM','Использование памяти',met.mem_used_pct,_srvMetGb(met.mem_used_mb,met.mem_total_mb),a24.mem_used_pct,s24.mem);
       h+=srvMetRowV2('connections','Соединения','Активные подключения',met.conns,null,a24.conns,s24.conns,{unit:'',integer:true,tone:'purple',relativeScale:true});
       h+='</div>';
-      var diskPct=met.disk_used_pct==null?0:Math.max(0,Math.min(100,met.disk_used_pct));
-      h+='<div class="server-disk-row"><span class="server-icon-box server-disk-icon">'+icon('disk',18)+'</span>'
-        +'<span class="server-disk-title">Диск</span><span class="server-disk-value">'+(met.disk_used_pct==null?'—':esc(_fmtP(met.disk_used_pct))+'%')+'</span>'
-        +'<span class="server-disk-absolute">'+esc(_srvMetGb(met.disk_used_mb,met.disk_total_mb)||'')+'</span>'
-        +'<span class="server-disk-track"><span style="width:'+diskPct+'%;background:'+_srvMetColor(met.disk_used_pct)+'"></span></span></div>';
-      var ft='';
-      if(met.temp_c!=null){ ft+='<span class="server-footer-stat server-footer-stat--temp"><span class="server-footer-icon">'+icon('thermo',16)+'</span><span><b>'+esc(String(met.temp_c))+'°C</b><small>Температура</small></span></span>'; }
+
+      var down=met.downtime24||{episodes:0,duration_sec:0,events:[]};
+      var hasFlaps=Number(down.episodes)>0;
+      h+='<section class="server-flap-card'+(hasFlaps?' server-flap-card--warning':'')+'">'
+        +'<span class="server-icon-box server-flap-icon">'+icon('pulse',20)+'</span>'
+        +'<span class="server-flap-copy"><b>Флапание за 24 часа</b><span class="server-flap-meta">'
+        +'<span class="server-flap-count">'+esc(_srvMetEpisodeLabel(down.episodes))+'</span>'
+        +'<strong>'+esc(_srvMetMinutes(down.duration_sec))+'</strong><span>недоступности</span>'
+        +(hasFlaps?'<span class="server-flap-last">Последний: '+esc(_srvMetLastFlap(down))+'</span>':'')
+        +'</span></span>'
+        +_srvMetFlapTimeline(down,(window._srvMetData||{}).generated_at)
+        +'<button type="button" class="server-card-link server-card-link--warning" data-on-click="openServerOverviewSection(\'serverHealth\')">История <span>→</span></button>'
+        +'</section>';
+
+      var ev=met.latest_event||null;
+      h+='<section class="server-event-card"><span class="server-event-icon">'+icon('info',22)+'</span>'
+        +'<span class="server-event-copy"><span class="server-event-meta">Системное событие'
+        +(ev&&ev.source?' <i>•</i> '+esc(ev.source):'')
+        +(ev&&ev.timestamp?' <i>•</i> '+esc(_srvMetEventStamp(ev.timestamp)):'')+'</span>'
+        +'<b>'+(ev?esc(ev.message):'Новых событий нет')+'</b></span>'
+        +'<button type="button" class="server-card-link" data-on-click="openServerOverviewSection(\'syslog\')">Открыть лог <span>→</span></button></section>';
+
+      function footerStat(mod,ic,val,label,extra){
+        return '<span class="server-footer-stat server-footer-stat--'+mod+'"><span class="server-footer-icon">'+icon(ic,18)+'</span>'
+          +'<span class="server-footer-copy"><b>'+esc(val||'—')+'</b><small>'+esc(label)+'</small>'
+          +(extra?'<em>'+esc(extra)+'</em>':'')+'</span></span>';
+      }
       var up=typeof _srvMetUptime==='function'?_srvMetUptime(met.uptime_sec):'';
-      if(up) ft+='<span class="server-footer-stat server-footer-stat--uptime"><span class="server-footer-icon">'+icon('clock',16)+'</span><span><b>'+esc(up)+'</b><small>Аптайм</small></span></span>';
-      if(ft) h+='<footer class="server-overview-footer">'+ft+'</footer>';
-      if(met.mongo_ok===0||met.usb_errors) h+='<div style="font-size:10px;color:var(--danger);margin-top:6px">'+(met.mongo_ok===0?'MongoDB FAIL. ':'')+(met.usb_errors?'USB: '+esc(String(met.usb_errors)):'')+'</div>';
+      h+='<footer class="server-overview-footer">'
+        +footerStat('temp','thermo',met.temp_c==null?'—':String(_fmtP(met.temp_c))+'°C','Температура')
+        +footerStat('uptime','clock',up||'—','Аптайм')
+        +footerStat('ram','ram',met.mem_used_pct==null?'—':_fmtP(met.mem_used_pct)+'%','RAM',_srvMetGb(met.mem_used_mb,met.mem_total_mb)||'')
+        +footerStat('disk','disk',met.disk_used_pct==null?'—':_fmtP(met.disk_used_pct)+'%','Диск',_srvMetGb(met.disk_used_mb,met.disk_total_mb)||'')
+        +'</footer>';
     } else {
       h+='<div class="server-overview-empty">Данных о загрузке ещё нет — джоба пишет раз в 10 мин</div>';
     }
     h+='</article>';
     return h;
   }
-  var html = fcard(null, true);
+  var html = '';
   names.forEach(function(n){ html += fcard(n, false); });
   el.innerHTML = html;
 }
