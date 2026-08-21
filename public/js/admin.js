@@ -3800,7 +3800,7 @@ function renderNewFleetServers(){
       var cpuSub='Загрузка процессора';
       if(met.cpu_model){ var cm=String(met.cpu_model).replace(/\(R\)|\(TM\)|Intel|Core|CPU/gi,'').replace(/@.*$/,'').replace(/\s+/g,' ').trim(); if(cm) cpuSub=cm+(met.cpu_cores?' · '+met.cpu_cores+' пот.':''); }
       h+=srvMetRowV2('cpu','CPU',cpuSub,met.cpu_pct,null,a24.cpu_pct,s24.cpu);
-      h+=srvMetRowV2('connections','Соединения','Активные подключения',met.conns,null,a24.conns,s24.conns,{unit:'',integer:true,tone:'purple',relativeScale:true});
+      h+=srvMetRowV2('connections','Соединения','TCP-подключения',met.conns,null,a24.conns,s24.conns,{unit:'',integer:true,tone:'purple',relativeScale:true});
       h+='</div>';
 
       var down=met.downtime24||{episodes:0,duration_sec:0,events:[]};
