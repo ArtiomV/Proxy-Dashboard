@@ -36,6 +36,7 @@ function create(deps) {
     fetchAllServersDataCached,
     clients, getSetting,
     notifyClient,
+    knownModems, saveKnownModems, proxySmart,
   } = deps;
 
   const portValidity = require('../services/port-validity').create(deps);
@@ -65,9 +66,22 @@ function create(deps) {
       if (!targets.length) return stats;
       stats.candidates = targets.length;
       const serverResults = await fetchAllServersDataCached();
+      let rosterDirty = false;
       for (const client of targets) {
         const ports = portValidity.clientPorts(client, serverResults);
-        if (!ports.length) continue;   // портов на боксах уже нет — нечего удалять
+        if (!ports.length) {
+          // Портов на боксах уже нет, но в ростере known_modems записи могли
+          // остаться (кейс: удаление прошло до фикса 21.08 — счётчик «N/N»
+          // зависал на reconcile_days=2 сут). Чистим по portName клиента.
+          for (const km of Object.values(knownModems || {})) {
+            for (const pid of Object.keys(km || {})) {
+              if (km[pid] && client.portName && km[pid].portName === client.portName) {
+                delete km[pid]; rosterDirty = true;
+              }
+            }
+          }
+          continue;
+        }
         let ok = 0;
         for (const pt of ports) {
           try {
@@ -79,6 +93,14 @@ function create(deps) {
             }
             ok++;
             stats.deleted.push(pt.portId);
+            // Сносим реквизит из ростера known_modems СРАЗУ: счётчик «модемов
+            // у клиента» (routes/ops-ext) читает ростер, а его собственная
+            // реконсиляция с боксом длилась бы reconcile_days (2 сут) — для
+            // нашего осознанного удаления ждать сходимости незачем.
+            try {
+              const km = knownModems && knownModems[pt.server.name];
+              if (km && km[pt.portId]) { delete km[pt.portId]; rosterDirty = true; }
+            } catch (_) { /* roster best-effort */ }
             logger.warn(`[BlockedCleanup] ${client.login}: порт ${pt.server.name}/${pt.portId} удалён (blocked_since ${client.blockedSince}, hold ${_holdDays()} дн)`);
             try { auditLog('system', 'blocked_port_deleted', { clientId: client.id, clientName: client.name, server: pt.server.name, portId: pt.portId, blockedSince: client.blockedSince }); } catch (_) { /* audit best-effort */ }
           } catch (e) {
@@ -102,6 +124,12 @@ function create(deps) {
               { action: 'blocked_ports_deleted', details: { client_id: client.id, deleted: ok } });
           } catch (e) { logger.warn(`[BlockedCleanup] notify ${client.login}: ${e.message}`); }
         }
+      }
+      if (rosterDirty) {
+        try { saveKnownModems(); } catch (_) { /* best-effort */ }
+        // Сбрасываем SWR-кэш опроса боксов — иначе удалённый порт «воскреснет»
+        // в админке на TTL кэша (см. markModemDeleted в server.js).
+        try { proxySmart && proxySmart.invalidateCache(); } catch (_) { /* best-effort */ }
       }
       return stats;
     } finally {

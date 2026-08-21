@@ -3722,6 +3722,7 @@ const _blockedPortCleanup = require('./src/jobs/blocked-port-cleanup').create({
   fetchAllServersDataCached,
   clients, getSetting,
   notifyClient: _clientNotify.notifyClient,
+  knownModems, saveKnownModems,
 });
 
 // B2C Э2: retail-guard — конвейер автоблока розницы (grace → block+hold →

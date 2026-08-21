@@ -46,6 +46,8 @@ function mkDeps({ holdDays = '2', clientsList = [] } = {}) {
     clients: clientsList,
     getSetting: (k, dflt) => (k === 'retail_hold_days' ? holdDays : dflt),
     notifyClient: async (c, text) => { notified.push({ id: c.id, text }); },
+    knownModems: {},
+    saveKnownModems: () => {},
   };
 }
 
@@ -124,6 +126,20 @@ describe('blocked-port-cleanup: удаление портов после hold', 
     const stats = await job.runOnce();
     expect(deleted).toEqual([]);
     expect(stats.candidates).toBe(1);
+  });
+
+  it('портов нет, но в ростере осталась запись → ростер чистим, чужие записи целы', async () => {
+    const client = mkClient({ portName: 'ghost' });
+    const deps = mkDeps({ clientsList: [client] });
+    const roster = { S1: { pGhost: { portName: 'ghost' }, pOther: { portName: 'someone_else' } } };
+    let rosterSaved = 0;
+    deps.knownModems = roster;
+    deps.saveKnownModems = () => { rosterSaved++; };
+    const job = cleanupMod.create(deps);
+    await job.runOnce();
+    expect(roster.S1.pGhost).toBeUndefined();
+    expect(roster.S1.pOther).toBeDefined();
+    expect(rosterSaved).toBe(1);
   });
 
   it('retail_hold_days из настройки уважается (hold=15 → 11 дней ещё мало)', async () => {

@@ -1683,14 +1683,14 @@ function renderClients(){
   // WP8: _mrr и эвристика expiring — из canonical clientRevenue30d (скользящие
   // 30 дней), а не месяц-ту-дейт: дневная норма расхода ch/30 теперь верна и
   // 1-го числа (месяц-ту-дейт давал пустой список expiring в начале месяца).
-  var _cnt={all:0,active:0,debtors:0,expiring:0,inactive:0},_mrr=0;cl.forEach(function(c){var b=c.balance!==undefined?c.balance:0;var ch=((currentData.clientRevenue30d||{})[c.id]||0);var md=(pnm[c.portName]||[]).length;if(md===0&&(c.blocked||c.debtBlocked)){_cnt.inactive++;return;}_cnt.all++;_mrr+=ch;if(b<0){_cnt.debtors++;}else{if(md>0)_cnt.active++;if(ch>0&&b/(ch/30)<5)_cnt.expiring++;}});
+  var _cnt={all:0,active:0,debtors:0,expiring:0,inactive:0},_mrr=0;cl.forEach(function(c){var b=c.balance!==undefined?c.balance:0;var ch=((currentData.clientRevenue30d||{})[c.id]||0);var md=(pnm[c.portName]||[]).length;if(md===0){_cnt.inactive++;return;}_cnt.all++;_mrr+=ch;if(b<0){_cnt.debtors++;}else{if(md>0)_cnt.active++;if(ch>0&&b/(ch/30)<5)_cnt.expiring++;}});
   var h='';var count=0;var colors=CHART_COLORS.clients;
   cl.forEach(function(c,i){
     var modems=pnm[c.portName]||[];
-    // 21.08: «Неактивные» — заблокированные (вручную или за долг) клиенты без
-    // модемов (порты уже удалены BlockedPortCleanup). Скрыты из всех фильтров,
-    // показываются только на своей вкладке.
-    var _isInact=modems.length===0&&(c.blocked||c.debtBlocked);
+    // 21.08: «Неактивные» — клиенты без модемов (порты удалены BlockedPortCleanup
+    // после hold, отвязаны вручную или ещё не выдавались). Скрыты из всех
+    // фильтров, показываются только на своей вкладке.
+    var _isInact=modems.length===0;
     if(_clientFilter==='inactive'){if(!_isInact)return;}
     else if(_isInact)return;
     if(search&&(c.name+' '+c.portName+' '+c.login+' '+(c.contact||'')+' '+(c.legalName||'')).toLowerCase().indexOf(search)===-1)return;
