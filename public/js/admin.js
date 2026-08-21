@@ -3746,7 +3746,7 @@ function renderNewFleetServers(){
       h+='<div style="display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:6px">'
         +'<span style="font-weight:700;font-size:13px;font-family:var(--font-mono)">'+_dwIcon('sat')+'Весь парк</span>'
         +'<span style="text-align:right;flex-shrink:0"><span style="font-size:18px;font-weight:700;color:'+col+';font-family:var(--font-mono)">'+working+'<span style="font-size:12px;color:var(--text-3)">/'+total+'</span></span>'
-        +'<span style="display:block;font-size:9px;color:var(--text-3)">'+(disc>0?disc+' отключено':'все сервисы')+'</span></span></div>';
+        +'<span style="display:block;font-size:9px;color:var(--text-3)">'+(disc>0?disc+' отключено':'Модемы')+'</span></span></div>';
       h+='<div style="height:5px;background:var(--bg-3);border-radius:3px;overflow:hidden;margin-bottom:11px" title="'+onlPct+'% в работе"><div style="height:100%;width:'+onlPct+'%;background:'+col+';border-radius:3px"></div></div>';
       h+='<div style="display:flex;flex-wrap:wrap;gap:4px 22px;font-size:11px">';
       h+='<div style="display:flex;gap:6px"><span style="color:var(--text-2)">Трафик сегодня</span><span style="font-family:var(--font-mono)">'+fmtGb(today)+'</span></div>';
@@ -3763,7 +3763,7 @@ function renderNewFleetServers(){
       +'<span class="server-overview-title">'+esc(srv)+(ci.name?' <span class="server-overview-bullet">•</span> '+esc(ci.name):'')+'</span>'
       +(addr?'<span class="server-overview-address">'+esc(addr)+'</span>':'')+'</span></div>'
       +'<div class="server-overview-services"><span class="server-overview-services-value" style="color:'+col+'">'+working+'/'+total+'</span>'
-      +'<span class="server-overview-services-label">'+(disc>0?disc+' отключено':'все сервисы')+'</span></div>'
+      +'<span class="server-overview-services-label">'+(disc>0?disc+' отключено':'Модемы')+'</span></div>'
       +'</header>';
     // Строка статуса: точка + текст (недоступность / отключённые / стабильно).
     var stDot='var(--success)', stTxt='Сервер работает стабильно';
