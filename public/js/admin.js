@@ -3833,7 +3833,7 @@ function renderNewFleetServers(){
       h+='<footer class="server-overview-footer">'
         +footerStat('temp','thermo',met.temp_c==null?'—':String(_fmtP(met.temp_c))+'°C','Температура')
         +footerStat('uptime','clock',up||'—','Аптайм')
-        +footerStat('ram','ram',met.mem_used_pct==null?'—':_fmtP(met.mem_used_pct)+'%','RAM',_srvMetGb(met.mem_used_mb,met.mem_total_mb)||'')
+        +footerStat('ram','ram',_srvMetGb(met.mem_used_mb,met.mem_total_mb)||'—','RAM',met.mem_used_pct==null?'':_fmtP(met.mem_used_pct)+'%')
         +footerStat('disk','disk',met.disk_used_pct==null?'—':_fmtP(met.disk_used_pct)+'%','Диск',_srvMetGb(met.disk_used_mb,met.disk_total_mb)||'')
         +'</footer>';
     } else {
