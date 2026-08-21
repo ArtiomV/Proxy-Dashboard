@@ -169,13 +169,13 @@
 #tab-dashboard .server-overview-flag{width:43px;height:30px;display:flex;align-items:center;justify-content:center;flex-shrink:0;margin-top:0}
 #tab-dashboard .server-overview-flag svg{display:block;width:43px;height:30px;border-radius:5px;box-shadow:0 2px 6px rgba(28,37,54,.08)}
 #tab-dashboard .server-overview-heading{display:block;min-width:0}
-#tab-dashboard .server-overview-title{display:block;font-size:19px;line-height:22px;font-weight:700;letter-spacing:.01em;white-space:nowrap;color:#101723}
-#tab-dashboard .server-overview-bullet{display:inline-block;margin:0 6px;font-size:17px}
-#tab-dashboard .server-overview-address{display:block;margin-top:1px;font-size:14px;line-height:17px;font-weight:400;color:#60708e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tab-dashboard .server-overview-title{display:block;font-size:14px;line-height:17px;font-weight:700;letter-spacing:.01em;white-space:nowrap;color:#101723}
+#tab-dashboard .server-overview-bullet{display:inline-block;margin:0 5px;font-size:13px}
+#tab-dashboard .server-overview-address{display:block;margin-top:1px;font-size:11px;line-height:14px;font-weight:400;color:#60708e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #tab-dashboard .server-overview-services{text-align:right;flex-shrink:0;margin-top:1px}
-#tab-dashboard .server-overview-services-value{display:block;font-size:28px;line-height:27px;font-weight:700;letter-spacing:-.02em;font-feature-settings:"tnum"}
-#tab-dashboard .server-overview-services-label{display:block;margin-top:2px;font-size:13px;line-height:15px;color:#60708e;white-space:nowrap}
-#tab-dashboard .server-overview-status{height:16px;margin:2px 10px 0;display:flex;align-items:center;gap:8px;font-size:14px;line-height:16px;color:#60708e}
+#tab-dashboard .server-overview-services-value{display:block;font-size:21px;line-height:22px;font-weight:700;letter-spacing:-.02em;font-feature-settings:"tnum"}
+#tab-dashboard .server-overview-services-label{display:block;margin-top:2px;font-size:11px;line-height:13px;color:#60708e;white-space:nowrap}
+#tab-dashboard .server-overview-status{height:16px;margin:2px 10px 0;display:flex;align-items:center;gap:8px;font-size:11px;line-height:16px;color:#60708e}
 #tab-dashboard .server-overview-status-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;box-shadow:0 0 5px color-mix(in srgb,currentColor 25%,transparent)}
 
 #tab-dashboard .server-summary-strip{height:64px;box-sizing:border-box;margin-top:10px;display:grid;grid-template-columns:34.2% 32.8% 33%;align-items:center;border:1px solid rgba(62,79,105,.13);border-radius:10px;overflow:hidden}
@@ -189,9 +189,9 @@
 #tab-dashboard .server-summary-item--warning .server-summary-icon{background:rgba(245,158,11,.11);color:#ef9400}
 #tab-dashboard .server-summary-item--muted .server-summary-icon{background:var(--bg-3);color:var(--text-3)}
 #tab-dashboard .server-summary-copy{display:block;min-width:0}
-#tab-dashboard .server-summary-label{display:block;font-size:13px;line-height:16px;font-weight:400;color:#53627e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tab-dashboard .server-summary-label{display:block;font-size:11px;line-height:14px;font-weight:400;color:#53627e;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #tab-dashboard .server-summary-item:last-child .server-summary-label{overflow:visible;text-overflow:clip}
-#tab-dashboard .server-summary-value{display:block;margin-top:3px;font-size:20px;line-height:22px;font-weight:700;color:#111722;font-feature-settings:"tnum";white-space:nowrap}
+#tab-dashboard .server-summary-value{display:block;margin-top:3px;font-size:16px;line-height:19px;font-weight:700;color:#111722;font-feature-settings:"tnum";white-space:nowrap}
 
 #tab-dashboard .server-metrics-list{margin-top:6px}
 #tab-dashboard .server-metric-row{height:60px;box-sizing:border-box;display:grid;grid-template-columns:40px 14px 132px 14px minmax(100px,1fr) 18px 62px 12px 92px;align-items:center;border-bottom:1px solid rgba(62,79,105,.11)}
@@ -204,14 +204,14 @@
 #tab-dashboard .server-metric-icon svg{width:23px;height:23px}
 #tab-dashboard .server-metric-row--purple .server-metric-icon{background:var(--server-purple-bg);color:var(--server-purple)}
 #tab-dashboard .server-metric-copy{display:block;min-width:0}
-#tab-dashboard .server-metric-title{display:block;font-size:15px;line-height:18px;font-weight:600;color:#111722}
-#tab-dashboard .server-metric-sub{display:block;margin-top:3px;font-size:12px;line-height:15px;color:#60708e;white-space:nowrap}
+#tab-dashboard .server-metric-title{display:block;font-size:13px;line-height:16px;font-weight:600;color:#111722}
+#tab-dashboard .server-metric-sub{display:block;margin-top:3px;font-size:11px;line-height:13px;color:#60708e;white-space:nowrap}
 #tab-dashboard .server-metric-spark{display:block;min-width:0}
 #tab-dashboard .server-spark{width:100%;height:36px;display:block;overflow:visible}
 #tab-dashboard .server-metric-current{display:block;min-width:0}
-#tab-dashboard .server-metric-value{display:block;font-size:19px;line-height:21px;font-weight:700;color:#111722;font-feature-settings:"tnum";white-space:nowrap}
-#tab-dashboard .server-metric-absolute{display:block;margin-top:2px;font-size:9.5px;line-height:11px;color:#60708e;font-feature-settings:"tnum";white-space:nowrap}
-#tab-dashboard .server-metric-average{justify-self:end;display:block;box-sizing:border-box;min-width:92px;padding:6px 8px;border-radius:7px;background:#f4f5f7;color:#60708e;font-size:11px;line-height:13px;text-align:center;white-space:nowrap;font-feature-settings:"tnum"}
+#tab-dashboard .server-metric-value{display:block;font-size:16px;line-height:19px;font-weight:700;color:#111722;font-feature-settings:"tnum";white-space:nowrap}
+#tab-dashboard .server-metric-absolute{display:block;margin-top:2px;font-size:10px;line-height:12px;color:#60708e;font-feature-settings:"tnum";white-space:nowrap}
+#tab-dashboard .server-metric-average{justify-self:end;display:block;box-sizing:border-box;min-width:92px;padding:6px 8px;border-radius:7px;background:#f4f5f7;color:#60708e;font-size:10px;line-height:12px;text-align:center;white-space:nowrap;font-feature-settings:"tnum"}
 #tab-dashboard .server-metric-average--empty{visibility:hidden}
 
 #tab-dashboard .server-flap-card{height:56px;box-sizing:border-box;margin-top:10px;padding:0 10px;display:grid;grid-template-columns:32px minmax(270px,1.55fr) minmax(145px,1fr) 70px;align-items:center;column-gap:14px;border:1px solid rgba(62,79,105,.13);border-radius:9px;background:#fff;color:#60708e}
@@ -244,9 +244,9 @@
 #tab-dashboard .server-footer-icon{width:35px;height:35px;display:flex;align-items:center;justify-content:center;flex-shrink:0;border-radius:8px;background:rgba(22,163,74,.09);color:var(--success)}
 #tab-dashboard .server-footer-stat--temp .server-footer-icon{background:rgba(245,158,11,.11);color:#ff9800}
 #tab-dashboard .server-footer-copy{display:block;min-width:0}
-#tab-dashboard .server-footer-stat b{display:block;font-size:15px;line-height:16px;color:#111722;font-weight:700;font-feature-settings:"tnum";white-space:nowrap}
+#tab-dashboard .server-footer-stat b{display:block;font-size:13px;line-height:15px;color:#111722;font-weight:700;font-feature-settings:"tnum";white-space:nowrap}
 #tab-dashboard .server-footer-stat small{display:block;margin-top:2px;font-size:11px;line-height:13px;color:#60708e;white-space:nowrap}
-#tab-dashboard .server-footer-stat em{display:block;margin-top:1px;font-size:9.5px;line-height:11px;font-style:normal;color:#52688e;white-space:nowrap}
+#tab-dashboard .server-footer-stat em{display:block;margin-top:1px;font-size:10px;line-height:12px;font-style:normal;color:#52688e;white-space:nowrap}
 #tab-dashboard .server-overview-empty{margin-top:7px;padding:14px 2px;border-top:1px solid var(--border);font-size:11px;color:var(--text-3)}
 
 /* ── Подложки иконок раздела скрыты по просьбе владельца (21.08). Цвета иконок
@@ -274,11 +274,11 @@
   #tab-dashboard .server-overview-identity{gap:12px}
   #tab-dashboard .server-overview-flag,#tab-dashboard .server-overview-flag svg{width:34px;height:25px;border-radius:3px}
   #tab-dashboard .server-overview-flag{margin-top:2px}
-  #tab-dashboard .server-overview-title{font-size:15.5px;line-height:19px}
-  #tab-dashboard .server-overview-bullet{margin:0 4px;font-size:14px}
+  #tab-dashboard .server-overview-title{font-size:13px;line-height:16px}
+  #tab-dashboard .server-overview-bullet{margin:0 4px;font-size:12px}
   #tab-dashboard .server-overview-address{font-size:11px;line-height:14px}
   #tab-dashboard .server-overview-services{margin-top:2px}
-  #tab-dashboard .server-overview-services-value{font-size:20px;line-height:20px}
+  #tab-dashboard .server-overview-services-value{font-size:19px;line-height:20px}
   #tab-dashboard .server-overview-services-label{font-size:10px;line-height:12px}
   #tab-dashboard .server-overview-status{height:14px;margin:6px 6px 0;gap:6px;font-size:11px;line-height:14px}
   #tab-dashboard .server-overview-status-dot{width:7px;height:7px}
@@ -290,16 +290,16 @@
   #tab-dashboard .server-summary-icon{width:36px;height:36px}
   #tab-dashboard .server-summary-icon svg{width:18px;height:18px}
   #tab-dashboard .server-summary-label{font-size:11px}
-  #tab-dashboard .server-summary-value{font-size:15.5px;line-height:18px}
+  #tab-dashboard .server-summary-value{font-size:15px;line-height:17px}
   #tab-dashboard .server-metrics-list{margin-top:4px}
   #tab-dashboard .server-metric-row{height:52px;grid-template-columns:32px 10px 112px 10px minmax(50px,1fr) 12px 54px 10px 84px}
   #tab-dashboard .server-metric-icon{width:32px;height:32px;border-radius:8px}
   #tab-dashboard .server-metric-icon svg{width:18px;height:18px}
   #tab-dashboard .server-metric-title{font-size:12.5px;line-height:15px}
-  #tab-dashboard .server-metric-sub{margin-top:2px;font-size:10px;line-height:12px}
+  #tab-dashboard .server-metric-sub{margin-top:2px;font-size:10.5px;line-height:12px}
   #tab-dashboard .server-spark{height:28px}
   #tab-dashboard .server-metric-value{font-size:15px;line-height:17px}
-  #tab-dashboard .server-metric-average{min-width:84px;padding:5px 7px;border-radius:6px;font-size:9.5px;line-height:12px}
+  #tab-dashboard .server-metric-average{min-width:84px;padding:5px 7px;border-radius:6px;font-size:10px;line-height:12px}
   #tab-dashboard .server-flap-card{height:54px;margin-top:8px;padding:0 8px;grid-template-columns:28px minmax(190px,1.6fr) minmax(80px,.8fr) 58px;column-gap:10px}
   #tab-dashboard .server-flap-icon{width:28px;height:28px}
   #tab-dashboard .server-flap-copy>b{font-size:12px;line-height:14px}
@@ -317,15 +317,15 @@
   #tab-dashboard .server-footer-icon{width:30px;height:30px;border-radius:7px}
   #tab-dashboard .server-footer-stat b{font-size:13px;line-height:14px}
   #tab-dashboard .server-footer-stat small{font-size:10px;line-height:11px}
-  #tab-dashboard .server-footer-stat em{font-size:8.5px;line-height:10px}
+  #tab-dashboard .server-footer-stat em{font-size:9.5px;line-height:11px}
 }
 @media(max-width:480px){
   #tab-dashboard .server-overview-flag{width:36px;height:27px}
   #tab-dashboard .server-overview-flag svg{width:36px;height:27px}
   #tab-dashboard .server-overview-identity{gap:9px}
-  #tab-dashboard .server-overview-title{font-size:15px}
+  #tab-dashboard .server-overview-title{font-size:13px}
   #tab-dashboard .server-overview-address{font-size:11px}
-  #tab-dashboard .server-overview-services-value{font-size:19px}
+  #tab-dashboard .server-overview-services-value{font-size:17px}
   #tab-dashboard .server-overview-services-label{font-size:10px}
   #tab-dashboard .server-overview-status{font-size:11px}
   #tab-dashboard .server-summary-strip{height:auto;grid-template-columns:1fr}
