@@ -3805,24 +3805,28 @@ function renderNewFleetServers(){
 
       var down=met.downtime24||{episodes:0,duration_sec:0,events:[]};
       var hasFlaps=Number(down.episodes)>0;
+      var lastFlap=hasFlaps?_srvMetLastFlap(down):'';
       h+='<section class="server-flap-card'+(hasFlaps?' server-flap-card--warning':'')+'">'
         +'<span class="server-icon-box server-flap-icon">'+icon('pulse',20)+'</span>'
         +'<span class="server-flap-copy"><b>Флапание за 24 часа</b><span class="server-flap-meta">'
         +'<span class="server-flap-count">'+esc(_srvMetEpisodeLabel(down.episodes))+'</span>'
         +'<strong>'+esc(_srvMetMinutes(down.duration_sec))+'</strong><span>недоступности</span>'
-        +(hasFlaps?'<span class="server-flap-last">Последний: '+esc(_srvMetLastFlap(down))+'</span>':'')
+        +(hasFlaps?'<span class="server-flap-last">Последний: '+esc(lastFlap)+'</span>':'')
         +'</span></span>'
         +_srvMetFlapTimeline(down,(window._srvMetData||{}).generated_at)
-        +'<button type="button" class="server-card-link server-card-link--warning" data-on-click="openServerOverviewSection(\'serverHealth\')">История <span>→</span></button>'
+        +(hasFlaps?'<span class="server-flap-last-mobile">Последний: '+esc(lastFlap)+'</span>':'')
+        +'<button type="button" class="server-card-link server-card-link--warning" data-on-click="openServerOverviewSection(\'serverHealth\')">История <span class="server-card-arrow">→</span></button>'
         +'</section>';
 
       var ev=met.latest_event||null;
+      var evStamp=ev&&ev.timestamp?_srvMetEventStamp(ev.timestamp):'';
       h+='<section class="server-event-card"><span class="server-event-icon">'+icon('info',22)+'</span>'
         +'<span class="server-event-copy"><span class="server-event-meta">Системное событие'
         +(ev&&ev.source?' <i>•</i> '+esc(ev.source):'')
-        +(ev&&ev.timestamp?' <i>•</i> '+esc(_srvMetEventStamp(ev.timestamp)):'')+'</span>'
+        +(evStamp?' <span class="server-event-date-inline"><i>•</i> '+esc(evStamp)+'</span>':'')+'</span>'
         +'<b>'+(ev?esc(ev.message):'Новых событий нет')+'</b></span>'
-        +'<button type="button" class="server-card-link" data-on-click="openServerOverviewSection(\'syslog\')">Открыть лог <span>→</span></button></section>';
+        +(evStamp?'<span class="server-event-date">'+esc(evStamp)+'</span>':'')
+        +'<button type="button" class="server-card-link" data-on-click="openServerOverviewSection(\'syslog\')"><span class="server-link-long">Открыть лог</span><span class="server-link-short">Лог</span> <span class="server-card-arrow">→</span></button></section>';
 
       function footerStat(mod,ic,val,label,extra){
         return '<span class="server-footer-stat server-footer-stat--'+mod+'"><span class="server-footer-icon">'+icon(ic,18)+'</span>'
@@ -3833,8 +3837,8 @@ function renderNewFleetServers(){
       h+='<footer class="server-overview-footer">'
         +footerStat('temp','thermo',met.temp_c==null?'—':String(_fmtP(met.temp_c))+'°C','Температура')
         +footerStat('uptime','clock',up||'—','Аптайм')
-        +footerStat('ram','ram',met.mem_used_pct==null?'—':_fmtP(met.mem_used_pct)+'%','RAM '+(_srvMetGb(met.mem_used_mb,met.mem_total_mb)||''))
-        +footerStat('disk','disk',met.disk_used_pct==null?'—':_fmtP(met.disk_used_pct)+'%','Диск '+(_srvMetGb(met.disk_used_mb,met.disk_total_mb)||''))
+        +footerStat('ram','ram',met.mem_used_pct==null?'—':_fmtP(met.mem_used_pct)+'%','RAM',_srvMetGb(met.mem_used_mb,met.mem_total_mb))
+        +footerStat('disk','disk',met.disk_used_pct==null?'—':_fmtP(met.disk_used_pct)+'%','Диск',_srvMetGb(met.disk_used_mb,met.disk_total_mb))
         +'</footer>';
     } else {
       h+='<div class="server-overview-empty">Данных о загрузке ещё нет — джоба пишет раз в 10 мин</div>';
