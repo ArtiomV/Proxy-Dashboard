@@ -21,12 +21,20 @@ function create(deps) {
     persistServerDownSince,
     modemPing, modemRate,
     maintenance,   // B3 (23.08): src/maintenance.js — пометка простоев в окне обслуживания
+    events,        // SSE (23.08): шина src/events.js — fleet_update/ping_result/modem_rate
   } = deps;
+
+  // SSE (23.08): снимок «up» прошлого цикла для diff'а статусов (в памяти;
+  // рестарт = первый цикл без событий — это корректно, данных ещё нет).
+  const _prevUp = new Map();
 
 async function trackModems() {
   const now = Date.now();
   let totalTracked = 0;
   const seenRecoveryKeys = new Set();
+  // SSE (23.08): накопители diff'а цикла для fleet_update.
+  const _fleetFlips = [];      // [{server, nick, up}]
+  let _fleetDirty = false;     // сервер упал/поднялся — даже без флипов модемов
 
   for (const server of apiServers) {
     let statusArr;
@@ -35,16 +43,17 @@ async function trackModems() {
       statusArr = Array.isArray(data.status) ? data.status : [];
       // A1 (23.08): разбор ping_stats бокса (latency/loss) — история, алерты
       // «online, но без интернета», вход для ping-based аптайма ниже.
-      if (modemPing) { try { modemPing.ingest(server.name, statusArr, now); } catch (e) { logger.warn('[ModemPing] ingest: ' + e.message); } }
+      if (modemPing) { try { modemPing.ingest(server.name, statusArr, now); if (events) events.publish('ping_result', { server: server.name, modems: statusArr.length }); } catch (e) { logger.warn('[ModemPing] ingest: ' + e.message); } }
       // A3 (23.08): дельта суточных bw-счётчиков → текущая скорость модемов
       // (скользящее окно 10 мин). Без новых запросов — из того же data.
-      if (modemRate) { try { modemRate.ingest(server.name, data, now); } catch (e) { logger.warn('[ModemRate] ingest: ' + e.message); } }
+      if (modemRate) { try { modemRate.ingest(server.name, data, now); if (events) events.publish('modem_rate', { server: server.name }); } catch (e) { logger.warn('[ModemRate] ingest: ' + e.message); } }
       // Stage 18.13: server returned to life after recorded outage → recovery alert.
       // Stage 18.21: gated on _serverUnreachableAlertSent — we don't emit a
       // «вернулся» message unless we previously sent a «недоступен» one.
       // Otherwise sub-10-min blips spawned recovery noise (asymmetric to the
       // 10-min grace on unreachable).
       if (_serverDownSince[server.name]) {
+        _fleetDirty = true;   // SSE (23.08): бокс вернулся → fleet_update
         const downStart = _serverDownSince[server.name];
         const downSec = Math.round((Date.now() - downStart) / 1000);
         const alerted = _serverUnreachableAlertSent[server.name] ? 1 : 0;
@@ -69,6 +78,7 @@ async function trackModems() {
       logger.info(`[Tracking] Server ${server.name} unreachable: ${e.message} — marking all modems as down`);
       logActivity('modem', 'warn', 'server_unreachable', server.name, `Server unreachable: ${e.message}`);
       if (!_serverDownSince[server.name]) { _serverDownSince[server.name] = Date.now(); if (persistServerDownSince) persistServerDownSince(); }
+      _fleetDirty = true;   // SSE (23.08): бокс недоступен → fleet_update
       // Stage 18.14: only alert if down ≥10 min — RO server has occasional
       // transient ECONNRESET that recovers within minutes; firing per blip
       // was just noise. Cooldown (1h) still prevents repeat spam after that.
@@ -268,6 +278,12 @@ async function trackModems() {
         const pa = modemPing.alive(server.name, imei);
         if (pa === false) isUp = false;
       }
+      // SSE (23.08): флип статуса модема между циклами → в fleet_update.
+      {
+        const _pv = _prevUp.get(key);
+        if (_pv !== undefined && _pv !== isUp) _fleetFlips.push({ server: server.name, nick, up: isUp });
+        _prevUp.set(key, isUp);
+      }
       uptimeTracking[key].total_checks++;
       uptimeTracking[key].daily[todayBucket].total++;
       if (isUp) {
@@ -456,6 +472,9 @@ async function trackModems() {
       const todayBucket = new Date().toLocaleDateString('en-CA');
       for (const imei of offlineImeis) {
         const key = prefix + imei;
+        // SSE (23.08): модем выпал из фида бокса — тоже флип в «down».
+        if (_prevUp.get(key) === true) _fleetFlips.push({ server: server.name, nick: imei, up: false });
+        _prevUp.set(key, false);
         if (!uptimeTracking[key]) {
           uptimeTracking[key] = { total_checks: 0, online_checks: 0, first_check: now, daily: {} };
         }
@@ -551,7 +570,7 @@ async function trackModems() {
     for (const k of uptimeKeys) {
       const days = Object.keys(uptimeTracking[k].daily || {});
       const latest = days.length ? days.sort().pop() : '';
-      if (latest < now7d) { delete uptimeTracking[k]; }
+      if (latest < now7d) { delete uptimeTracking[k]; _prevUp.delete(k); }
     }
   }
 
@@ -602,6 +621,17 @@ async function trackModems() {
   } catch (e) { logger.warn('[ModemsDownBulk] ' + e.message); }
 
   saveUptimeTracking();
+  // SSE (23.08): состав/статусы изменились за цикл → пуш подписчикам.
+  // Payload компактный (до 20 флипов строками) — фронту достаточно самого
+  // факта изменения, он перезапрашивает затронутые данные сам.
+  if (events && (_fleetFlips.length || _fleetDirty)) {
+    try {
+      events.publish('fleet_update', {
+        flips: _fleetFlips.slice(0, 20).map(f => (f.up ? '+' : '-') + f.server + '/' + f.nick),
+        total: _fleetFlips.length,
+      });
+    } catch (_) { /* publish не должен ронять tracking */ }
+  }
   // BUG-02: saveIpHistory() removed — recordIpChange() now does direct DB writes
   logger.info(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);
   logActivity('modem', 'info', 'tracking_complete', null, `Tracked ${totalTracked} modems across ${apiServers.length} servers`, { modem_count: totalTracked, ip_count: Object.keys(ipTracking).length });

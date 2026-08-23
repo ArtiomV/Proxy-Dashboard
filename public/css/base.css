@@ -281,6 +281,12 @@ textarea.form-input{resize:vertical;min-height:50px;font-family:inherit}
 
 .last-update{font-size:10px;color:var(--text-3)}
 
+/* SSE (23.08): индикатор realtime-канала в шапке */
+.sse-ind{display:inline-flex;align-items:center;gap:4px;font-size:10px;color:var(--text-3);margin-left:6px;text-transform:uppercase;letter-spacing:.04em}
+.sse-dot{width:7px;height:7px;border-radius:50%;background:var(--text-3);display:inline-block}
+.sse-live .sse-dot{background:var(--success,#22c55e);box-shadow:0 0 4px var(--success,#22c55e)}
+.sse-offline .sse-dot{background:var(--danger,#ef4444)}
+
 /* Scrollbar (kept in base for global styling) */
 
 /* Billing badge */

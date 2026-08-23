@@ -37,6 +37,7 @@ const maintenance = require('../maintenance');   // B3 (23.08): окна обс�
 
 const COOLDOWN_KV_KEY = 'telegram_alert_cooldowns';
 let logger, getSetting, appSettings, kvSetCritical, kvGet, db, tgBot;
+let eventsBus = null;        // SSE (23.08): шина src/events.js — событие 'alert' после _persistToBell
 let _insertNotif = null;   // prepared statement, lazy-init on first trigger
 
 // B2 (23.08): acknowledge («в работе»/«решено»). Активные ack-и кэшируются
@@ -156,6 +157,7 @@ function init(deps) {
   kvGet         = deps.kvGet;
   db            = deps.db;
   tgBot         = deps.tgBot;
+  eventsBus     = deps.events || null;   // SSE (23.08): опционально, тесты/стенды могут не передавать
 
   // Restore cooldowns persisted from the previous process so a quick restart
   // doesn't reset all rate-limits.
@@ -1087,6 +1089,16 @@ function trigger(ruleId, payload) {
     // Bell first — independent of Telegram. Even if chat_id is unset or TG is
     // down, admins still see the event in the in-app panel.
     _persistToBell(rule, ruleId, payload, dedup, text);
+
+    // SSE (23.08): дублируем алерт в realtime-канал мгновенно — колокольчик
+    // обновляется без ожидания polling'а. ПОСЛЕ _persistToBell: SSE лишь
+    // сигналит «перечитай», данные уже в таблице notifications.
+    try {
+      if (eventsBus) eventsBus.publish('alert', {
+        ruleId, priority: rule.priority || 'info',
+        server: (payload && payload.server) || '', nick: (payload && payload.nick) || '',
+      });
+    } catch (_) { /* best-effort: publish не должен ронять trigger */ }
 
     // channel:'bell' rules (Stage 18.15) stop here — they're populated by
     // the collector job and shouldn't ping Telegram even if the chat is

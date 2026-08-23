@@ -327,6 +327,7 @@ function loadSettings(){
     var _vE=document.getElementById('volumeEnabledInput');if(_vE)_vE.checked=(s.volume_enabled!==false);
     // B2 (23.08): TTL кнопки «В работе» (секция «Уведомления»)
     var _ackT=document.getElementById('ackTtlHoursInput');if(_ackT)_ackT.value=s.ack_ttl_hours!=null?s.ack_ttl_hours:2;
+    var _sseE=document.getElementById('sseEnabledInput');if(_sseE)_sseE.checked=(s.sse_enabled!==false);
   }).catch(function(){});
 }
 // Live-проверка кредов при сохранении (15.08): сервер возвращает cred_checks
@@ -671,6 +672,14 @@ function saveAckTtl(){
     if(d.ok){if(st)st.textContent='Сохранено';setTimeout(function(){if(st)st.textContent=''},2500);showToast('TTL «В работе» сохранён','success')}
     else{if(st)st.textContent=d.error||'Ошибка';showToast(d.error||'Ошибка','error')}
   }).catch(function(e){if(st)st.textContent=e.message;showToast(e.message,'error')});
+}
+
+// ========== SSE (23.08): realtime-обновления админки ==========
+function saveSseEnabled(v){
+  api(API+'/api/admin/settings',{method:'PUT',json:{sse_enabled:!!v}}).then(function(d){
+    if(d.ok){showToast(v?'Realtime-обновления включены':'Realtime выключен — обновление по таймеру','success')}
+    else{showToast(d.error||'Ошибка','error')}
+  }).catch(function(e){showToast(e.message,'error')});
 }
 
 // ========== B3 (23.08): окна обслуживания ==========

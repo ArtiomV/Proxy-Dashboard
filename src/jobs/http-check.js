@@ -96,7 +96,7 @@ function fetchThroughProxy(proxy, targetUrl, timeoutMs) {
 }
 
 function create(deps) {
-  const { db, logger, alerts, getSetting, fetchAllServersDataCached, apiServers } = deps;
+  const { db, logger, alerts, getSetting, fetchAllServersDataCached, apiServers, events } = deps;   // events — SSE (23.08): httpcheck_result после прогона
   const _fetch = deps.fetchThroughProxy || fetchThroughProxy;
   const _insert = db.prepare(
     'INSERT INTO modem_httpcheck (ts, server, nick, status, total_ms, content_ok, error) VALUES (?,?,?,?,?,?,?)'
@@ -216,6 +216,8 @@ function create(deps) {
         }
       }
       logger.info(`[HttpCheck] ${ok} ok, ${failed} failed of ${targets.length}`);
+      // SSE (23.08): свежие HTTP-чеки → realtime-обновление колонки в админке.
+      if (events) { try { events.publish('httpcheck_result', { ok, failed, total: targets.length }); } catch (_) { /* best-effort */ } }
       return { ok, failed, total: targets.length };
     } finally {
       running = false;

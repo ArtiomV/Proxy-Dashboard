@@ -28,6 +28,7 @@ function runStartup(d) {
     setHourlyAggSched, runSpeedMonitor, runServerMetrics, runRetailGuard,
     runBlockedPortCleanup, runHttpCheck, runVolumeGuard,
     saveClients, auditLog, authTokensDb,
+    events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
   } = d;
 
   // Авто-спидтесты всего флота отключены 2026-08-13 (daily-schedule.js) —
@@ -376,7 +377,7 @@ function runStartup(d) {
     onAlertAck: (kind, hash, user) => alerts.onAlertAck(kind, hash, user),
   });
   // Stage 18.13: alerts framework wires into the same bot/chat.
-  alerts.init({ logger, getSetting, appSettings, kvSetCritical, kvGet, db, tgBot });
+  alerts.init({ logger, getSetting, appSettings, kvSetCritical, kvGet, db, tgBot, events });
   // Stage 18.15: notification collector — periodic scan that pushes
   // offline-modem / client-debt events into the same bell.
   require('../jobs/notify-collect').init({

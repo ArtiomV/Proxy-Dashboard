@@ -1662,6 +1662,8 @@ const SETTINGS_DEFAULTS = {
   volume_enabled: true,                    // A4: объёмные алерты
   // ── B2 (ТЗ мониторинга v2, этап 4, 23.08) ────────────────────────
   ack_ttl_hours: 2,                        // B2: TTL «в работе» для ack-кнопок в Telegram
+  // ── SSE (ТЗ мониторинга v2, этап 5, 23.08) ─────────────────────────
+  sse_enabled: true,                         // realtime-обновления админки (GET /api/admin/events); выкл → фронт на polling 60 сек
   // A4: пакеты операторов (JSON; UI Настройки → «Пакеты операторов»).
   // per_sim — объём на симку (Orange 400 ГБ); shared — общий котёл (30 ТБ).
   operator_packages: JSON.stringify([
@@ -2868,6 +2870,9 @@ try {
 // trackModems extracted to src/jobs/modem-tracking.js (2026-07) — verbatim
 // move into a deps-injected factory. The two scheduler call sites at ~5466
 // are unchanged.
+// SSE (23.08, этап 5): шина realtime-событий админки — джобы публикуют,
+// роут /api/admin/events раздаёт подписчикам. Без подписчиков publish — no-op.
+const eventsBus = require('./src/events').create({ logger });
 // A1 (23.08): пинг модемов из ping_stats бокса — история + алерты + вход для
 // ping-based аптайма. Создаётся до modem-tracking, которому передаётся в deps.
 const modemPing = require('./src/jobs/modem-ping').create({ db, logger, alerts, getSetting });
@@ -2878,6 +2883,7 @@ const modemRate = require('./src/jobs/modem-rate').create({ db, logger });
 // Тикает из startup.js каждые httpcheck_interval_min.
 const httpCheck = require('./src/jobs/http-check').create({
   db, logger, alerts, getSetting, fetchAllServersDataCached, apiServers,
+  events: eventsBus,   // SSE (23.08): httpcheck_result после прогона
 });
 // A4 (23.08): объёмные алерты с пакетами операторов (трафик из traffic_hourly).
 // Тикает из startup.js каждый час.
@@ -2892,6 +2898,7 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   _metaIccidGetByImei, persistServerDownSince: _persistServerDownSince,
   modemPing, modemRate,
   maintenance: require('./src/maintenance'),   // B3 (23.08): пометка простоев в окне обслуживания
+  events: eventsBus,                           // SSE (23.08): fleet_update / ping_result / modem_rate
 });
 
 // ========== PROXY LATENCY MONITORING ==========
@@ -3003,6 +3010,7 @@ const _speedMonitor = require('./src/jobs/speed-monitor').create({
 // proxyConf определён выше (обход логин-стены /modem/login внутри getPage).
 const _serverMetrics = require('./src/jobs/server-metrics').create({
   db, logger, apiServers, proxyConf,
+  events: eventsBus,   // SSE (23.08): metrics_update после прогона
 });
 
 function getSpeedtestLatest() {
@@ -4063,6 +4071,12 @@ app.use(require('./src/routes/sla')({
   db, logger, authMiddleware, adminMiddleware,
 }));
 
+// SSE (23.08, этап 5) — realtime-канал админки (GET /api/admin/events)
+// поверх шины src/events.js; auth — admin-сессия (cookie или ?token=).
+app.use(require('./src/routes/events')({
+  logger, authMiddleware, adminMiddleware, getSetting, events: eventsBus,
+}));
+
 // Stage 18.15 — bell endpoints (list/badge/read/dismiss). See module header.
 app.use(require('./src/routes/notifications')({
   logger, db, authMiddleware, adminMiddleware,
@@ -4213,6 +4227,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
     runVolumeGuard: () => volumeGuard.runOnce(),   // A4 (23.08): объёмные алерты
+    events: eventsBus,   // SSE (23.08): alerts.init публикует событие 'alert'
     // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).
     saveClients, auditLog, authTokensDb,
   });
@@ -4232,6 +4247,9 @@ function gracefulShutdown(signal) {
   for (const t of _dailySched.speedtestTimers.concat(_dailySched.cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }
   // Stop the telegram poll loop (avoid hanging in long-poll for 25s after SIGTERM)
   try { if (tgBot && tgBot.stop) tgBot.stop(); } catch (_) { /* best-effort: error intentionally swallowed */ }
+  // SSE (23.08): предупреждаем realtime-клиентов событием 'bye' и закрываем
+  // потоки — фронт переподключается с backoff после рестарта процесса.
+  try { eventsBus.closeAll(); } catch (_) { /* best-effort */ }
 
   // Stop accepting new connections (no-op in test mode where httpServer is null)
   if (httpServer) httpServer.close(() => {

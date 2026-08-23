@@ -198,7 +198,7 @@ function parseSystemStatus(html, nowMs) {
 }
 
 function create(deps) {
-  const { db, logger, apiServers, proxyConf } = deps;
+  const { db, logger, apiServers, proxyConf, events } = deps;   // events — SSE (23.08): metrics_update после прогона
   // execFile инжектируется (тесты подсовывают заглушку), sshpass — из $PATH.
   const execFile = deps.execFile || require('child_process').execFile;
 
@@ -314,6 +314,7 @@ function create(deps) {
     running = true;
     try {
       let ok = 0, partial = 0, failed = 0;
+      const _rows = [];   // SSE (23.08): компактный снимок прогона для metrics_update
       for (const server of apiServers) {
         try {
           const row = await collectServer(server);
@@ -329,6 +330,7 @@ function create(deps) {
           if (row.error) failed++;
           else if (row.source === 'http') partial++;   // SSH недоступен — только панель
           else ok++;
+          _rows.push({ s: row.server_name, cpu: row.cpu_pct, mem: row.mem_used_pct, conns: row.conns, err: !!row.error });
         } catch (e) {
           failed++;
           logger.warn(`[ServerMetrics] ${server.name}: ${e.message}`);
@@ -338,6 +340,8 @@ function create(deps) {
       const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400e3).toISOString();
       const pruned = pruneStmt.run(cutoff).changes;
       logger.info(`[ServerMetrics] Complete: ${ok} full, ${partial} http-only, ${failed} failed (pruned ${pruned})`);
+      // SSE (23.08): свежие метрики боксов → realtime-обновление карточек админки.
+      if (events) { try { events.publish('metrics_update', { servers: _rows }); } catch (_) { /* best-effort */ } }
       return { ok, partial, failed, pruned };
     } finally {
       running = false;

@@ -13,7 +13,7 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="css/variables.css?v=0814a">
-<link rel="stylesheet" href="css/base.css?v=0813b">
+<link rel="stylesheet" href="css/base.css?v=0823h">
 <link rel="stylesheet" href="css/tables.css?v=0814a">
 <link rel="stylesheet" href="css/cards.css?v=0814a">
 <link rel="stylesheet" href="css/modal.css?v=0630d">
@@ -110,6 +110,7 @@
   <div class="header-right">
     <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.27</a>
     <span class="last-update" id="lastUpdate"></span>
+    <span class="sse-ind" id="sseIndicator" style="display:none" title="Realtime-обновления"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
       <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M8 2C5.79 2 4 3.79 4 6v3.5l-1 1.5h10l-1-1.5V6c0-2.21-1.79-4-4-4z" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linejoin="round"/><path d="M6.5 13.5a1.5 1.5 0 003 0" stroke="currentColor" stroke-width="1.2" stroke-linecap="round"/></svg>
       <span class="notif-badge" id="notifBadge" style="display:none">0</span>
@@ -918,6 +919,18 @@
             <span id="ackTtlSaveHint" style="font-size:11px;color:var(--text-3)"></span>
           </div>
         </div>
+        <div class="set-grp-label">REALTIME-ОБНОВЛЕНИЯ (SSE)</div>
+        <div class="set-card">
+          <div class="set-row">
+            <div>
+              <div class="set-row-t">Мгновенные обновления админки</div>
+              <div class="set-row-d">Данные появляются в момент поступления (SSE-канал), без ожидания таймера. При выключении — обновление страницы по таймеру раз в минуту, как раньше. Индикатор live/offline — в шапке.</div>
+            </div>
+            <div class="set-inp">
+              <label class="tgl"><input type="checkbox" id="sseEnabledInput" data-on-change="saveSseEnabled(this.checked)"><span></span></label>
+            </div>
+          </div>
+        </div>
       </div>
 
       <div id="settingsSection_operators" class="settings-section" style="display:none">
@@ -1536,13 +1549,14 @@
 <script src="/js/delegation.js?v=0727b"></script>
 <script src="/js/admin/delegated-helpers.js?v=0820e"></script>
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
-<script src="/js/admin/analytics.js?v=0823g"></script>
+<script src="/js/admin/analytics.js?v=0823h"></script>
 <script src="/js/admin/finance.js?v=0822a"></script>
 <script src="/js/admin/modems.js?v=0823e"></script>
 <script src="/js/admin/dguard.js?v=0818a"></script>
-<script src="/js/admin/settings.js?v=0823g"></script>
+<script src="/js/admin/settings.js?v=0823h"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0823e"></script>
-<script src="/js/admin.js?v=0823g"></script>
+<script src="/js/admin.js?v=0823h"></script>
+<script src="/js/admin/sse.js?v=0823h"></script>
 </body>
 </html>

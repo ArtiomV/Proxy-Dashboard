@@ -38,6 +38,7 @@
   "GET /api/admin/db_audit",
   "GET /api/admin/domain_guard",
   "GET /api/admin/domain_guard/client_hosts",
+  "GET /api/admin/events",
   "GET /api/admin/failover/candidates",
   "GET /api/admin/failover/log",
   "GET /api/admin/failover/spares",

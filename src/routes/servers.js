@@ -447,6 +447,8 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
     patch.operator_packages = JSON.stringify(clean);
   }
   if (req.body.volume_enabled != null) patch.volume_enabled = !!req.body.volume_enabled;
+  // SSE (23.08): realtime-канал админки; выкл → фронт работает на polling 60 сек
+  if (req.body.sse_enabled != null) patch.sse_enabled = !!req.body.sse_enabled;
   // Stage 19 — failover
   if (req.body.failover_enabled != null)          patch.failover_enabled          = !!req.body.failover_enabled;
   if (req.body.failover_dry_run != null)          patch.failover_dry_run          = !!req.body.failover_dry_run;

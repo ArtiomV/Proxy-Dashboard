@@ -2024,6 +2024,9 @@ function updateHeaderStats(){
 // the time left until the next refresh.
 function _armRefreshBar(){var bar=document.getElementById('refreshBar');if(!bar)return;bar.style.transition='none';bar.style.width='0%';void bar.offsetWidth;bar.style.transition='width '+REFRESH_MS+'ms linear';bar.style.width='100%';}
 function startAutoRefresh(){if(autoRefreshTimer)clearInterval(autoRefreshTimer);_armRefreshBar();autoRefreshTimer=setInterval(loadData,REFRESH_MS)}
+// SSE (23.08): при живом realtime-канале polling урежается до 5 мин
+// (страховка), при обрыве возвращается к 60 сек. Вызывается из sse.js.
+function setPollingInterval(ms){if(REFRESH_MS===ms)return;REFRESH_MS=ms;if(autoRefreshTimer)startAutoRefresh();}
 
 // ========== PRICING TIERS ==========
 function uploadDocument(clientId){
