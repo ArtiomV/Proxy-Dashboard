@@ -701,6 +701,23 @@ const RULES = {
     dedupeKey: p => 'pingslow_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
     render: p => `🟡 <b>Деградация канала</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — пинг ${p.latency} мс, потери ${p.loss}% (3 замера подряд).`,
   },
+  // A2 (23.08): HTTP-чек сайта через прокси-порт модема.
+  modem_http_fail: {
+    title: 'Сайт не открывается через прокси',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'httpfail_' + (p.server || '') + '_' + (p.nick || ''),
+    render: p => `🔴 <b>Сайт не открывается через прокси</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}) — чек <code>${esc(p.url || '')}</code> упал 2 раза подряд.\nПричина: <b>${esc(p.error || ('HTTP ' + (p.status || '?')))}</b>${/content_blocked/.test(p.error || '') ? '\nПохоже на заглушку оператора («пополните баланс») — проверь симку.' : ''}`,
+  },
+  modem_http_recovered: {
+    title: 'HTTP-чек восстановился',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 60,
+    dedupeKey: p => 'httprec_' + (p.server || '') + '_' + (p.nick || ''),
+    render: p => `🟢 <b>Сайт снова открывается</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}) — чек проходит${p.ms != null ? ` (${p.ms} мс)` : ''}.`,
+  },
 
   // ── 🔵 EARLY WARNING ────────────────────────────────────────
   heap_warn: {
@@ -772,6 +789,8 @@ const _entityFor = {
   modem_ping_dead:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   modem_ping_recovered:      p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   modem_ping_slow:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
+  modem_http_fail:           p => ({ kind: 'modem',   id: p.nick || null }),
+  modem_http_recovered:      p => ({ kind: 'modem',   id: p.nick || null }),
   recovery_exhausted:        p => ({ kind: 'modem',   id: p.nick || null }),
   failover_done:             p => ({ kind: 'modem',   id: p.spareNick || p.deadNick || null }),
   failover_no_spare:         p => ({ kind: 'modem',   id: p.nick || null }),

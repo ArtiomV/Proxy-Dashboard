@@ -19,7 +19,7 @@ function create(deps) {
     _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
     _metaIccidGetByImei,
     persistServerDownSince,
-    modemPing,
+    modemPing, modemRate,
   } = deps;
 
 async function trackModems() {
@@ -35,6 +35,9 @@ async function trackModems() {
       // A1 (23.08): разбор ping_stats бокса (latency/loss) — история, алерты
       // «online, но без интернета», вход для ping-based аптайма ниже.
       if (modemPing) { try { modemPing.ingest(server.name, statusArr, now); } catch (e) { logger.warn('[ModemPing] ingest: ' + e.message); } }
+      // A3 (23.08): дельта суточных bw-счётчиков → текущая скорость модемов
+      // (скользящее окно 10 мин). Без новых запросов — из того же data.
+      if (modemRate) { try { modemRate.ingest(server.name, data, now); } catch (e) { logger.warn('[ModemRate] ingest: ' + e.message); } }
       // Stage 18.13: server returned to life after recorded outage → recovery alert.
       // Stage 18.21: gated on _serverUnreachableAlertSent — we don't emit a
       // «вернулся» message unless we previously sent a «недоступен» one.

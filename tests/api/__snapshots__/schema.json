@@ -379,6 +379,12 @@
   },
   {
     "type": "index",
+    "name": "idx_modem_httpcheck_nick",
+    "tbl_name": "modem_httpcheck",
+    "sql": "CREATE INDEX idx_modem_httpcheck_nick ON modem_httpcheck (server, nick, ts)"
+  },
+  {
+    "type": "index",
     "name": "idx_modem_meta_deleted",
     "tbl_name": "modem_meta",
     "sql": "CREATE INDEX idx_modem_meta_deleted ON modem_meta(deleted) WHERE deleted = 1"
@@ -400,6 +406,12 @@
     "name": "idx_modem_ping_nick",
     "tbl_name": "modem_ping",
     "sql": "CREATE INDEX idx_modem_ping_nick ON modem_ping(server, nick, ts)"
+  },
+  {
+    "type": "index",
+    "name": "idx_modem_rate_nick",
+    "tbl_name": "modem_rate",
+    "sql": "CREATE INDEX idx_modem_rate_nick ON modem_rate (server, nick, ts)"
   },
   {
     "type": "index",
@@ -859,6 +871,12 @@
   },
   {
     "type": "table",
+    "name": "modem_httpcheck",
+    "tbl_name": "modem_httpcheck",
+    "sql": "CREATE TABLE modem_httpcheck ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, -- ISO UTC server TEXT NOT NULL, nick TEXT NOT NULL, status INTEGER, -- HTTP status или NULL при сетевой ошибке total_ms INTEGER, content_ok INTEGER, error TEXT NOT NULL DEFAULT '' )"
+  },
+  {
+    "type": "table",
     "name": "modem_meta",
     "tbl_name": "modem_meta",
     "sql": "CREATE TABLE modem_meta ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), is_test_pool INTEGER NOT NULL DEFAULT 0, sim_status TEXT DEFAULT '', reboot_score INTEGER DEFAULT NULL, http_redirect INTEGER NOT NULL DEFAULT 0, band TEXT DEFAULT '', is_locked INTEGER NOT NULL DEFAULT 0, signals_updated_at TEXT DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, signal_strength TEXT DEFAULT '', iccid TEXT DEFAULT '', cell_op TEXT DEFAULT '', net_type TEXT DEFAULT '', modem_uptime TEXT DEFAULT '', UNIQUE(server_name, imei) )"
@@ -868,6 +886,12 @@
     "name": "modem_ping",
     "tbl_name": "modem_ping",
     "sql": "CREATE TABLE modem_ping ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, -- ISO-метка опроса (UTC) server TEXT NOT NULL, nick TEXT NOT NULL, latency_ms INTEGER, -- NULL = не распарсилось loss_pct INTEGER, -- 0–100 ok INTEGER NOT NULL DEFAULT 1 -- 1 = loss < ping_loss_dead_pct )"
+  },
+  {
+    "type": "table",
+    "name": "modem_rate",
+    "tbl_name": "modem_rate",
+    "sql": "CREATE TABLE modem_rate ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, -- ISO UTC server TEXT NOT NULL, nick TEXT NOT NULL, rate_in_mbps REAL NOT NULL DEFAULT 0, rate_out_mbps REAL NOT NULL DEFAULT 0 )"
   },
   {
     "type": "table",

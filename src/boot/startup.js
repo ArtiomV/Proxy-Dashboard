@@ -26,7 +26,7 @@ function runStartup(d) {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runServerMetrics, runRetailGuard,
-    runBlockedPortCleanup,
+    runBlockedPortCleanup, runHttpCheck,
     saveClients, auditLog, authTokensDb,
   } = d;
 
@@ -217,6 +217,26 @@ function runStartup(d) {
     dbAudit.runJobAsync('RetailGuard', 'periodic', () => runRetailGuard())
       .catch(e => logger.error('[RetailGuard] periodic run failed:', e.message));
   }, 10 * 60 * 1000));
+
+  // A2 (23.08): HTTP-чек сайта через прокси-порты (scope = speedtest_list по
+  // умолчанию). Интервал читается с КАЖДОГО тика — правка настройки
+  // httpcheck_interval_min применяется без рестарта (тик 1 мин — это
+  // планировщик; прогон запускается, когда пришло время).
+  if (runHttpCheck) {
+    let _hcLastRun = 0;
+    setTimeout(() => {
+      _hcLastRun = Date.now();
+      dbAudit.runJobAsync('HttpCheck', 'startup', () => runHttpCheck())
+        .catch(e => logger.error('[HttpCheck] startup run failed:', e.message));
+    }, 5 * 60 * 1000);
+    _intervals.push(setInterval(() => {
+      const everyMs = Math.max(5, parseInt(getSetting('httpcheck_interval_min', 15)) || 15) * 60000;
+      if (Date.now() - _hcLastRun < everyMs) return;
+      _hcLastRun = Date.now();
+      dbAudit.runJobAsync('HttpCheck', 'periodic', () => runHttpCheck())
+        .catch(e => logger.error('[HttpCheck] periodic run failed:', e.message));
+    }, 60 * 1000));
+  }
 
   // 21.08: BlockedPortCleanup — удаление портов заблокированных клиентов
   // (ручной блок + долговой) после истечения hold (retail_hold_days дней от

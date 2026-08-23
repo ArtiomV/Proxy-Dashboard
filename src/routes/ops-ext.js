@@ -41,7 +41,7 @@ module.exports = function createOpsExtRouter(deps) {
     logActivity,
     getMoscowNow, getMoscowToday, getMoscowYesterday,
     ledgerExpense, parseBwToBytes, trafficBytesToGb,
-    getModemPingLatest,
+    getModemPingLatest, getModemRateLatest, getModemRateTop, getHttpCheckLatest,
   } = deps;
   const r = express.Router();
   // Stage 4: billing_ledger reads come from DB. Two cheap aggregate queries
@@ -429,6 +429,11 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       proxyIssues: computeProxyIssues(),
       // A1 (23.08): последний пинг каждого модема (latency/loss/ok) для UI.
       modemPing: (getModemPingLatest ? getModemPingLatest() : {}),
+      // A3 (23.08): текущая скорость модемов + топ-5 грузящих для дашборда.
+      modemRate: (getModemRateLatest ? getModemRateLatest() : {}),
+      modemRateTop: (getModemRateTop ? getModemRateTop(5) : []),
+      // A2 (23.08): последний HTTP-чек каждого модема (scope speedtest_list).
+      modemHttpCheck: (getHttpCheckLatest ? getHttpCheckLatest() : {}),
     });
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
@@ -442,9 +447,47 @@ r.get('/api/admin/modem_ping', authMiddleware, adminMiddleware, (req, res) => {
     const nick = String(req.query.nick || '').trim();
     const hours = Math.min(72, Math.max(1, parseInt(req.query.hours, 10) || 24));
     if (!server || !nick) return res.status(400).json({ error: 'server and nick required' });
-    const since = Date.now() - hours * 3600000;
+    const since = new Date(Date.now() - hours * 3600000).toISOString();
     const rows = db.prepare(`
       SELECT ts, latency_ms, loss_pct, ok FROM modem_ping
+      WHERE server = ? AND nick = ? AND ts >= ?
+      ORDER BY ts ASC
+    `).all(server, nick, since);
+    res.json({ rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// A3 (23.08): история текущей скорости модема для спарклайна (до 72ч).
+r.get('/api/admin/modem_rate', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const server = String(req.query.server || '').trim();
+    const nick = String(req.query.nick || '').trim();
+    const hours = Math.min(72, Math.max(1, parseInt(req.query.hours, 10) || 24));
+    if (!server || !nick) return res.status(400).json({ error: 'server and nick required' });
+    const since = new Date(Date.now() - hours * 3600000).toISOString();
+    const rows = db.prepare(`
+      SELECT ts, rate_in_mbps, rate_out_mbps FROM modem_rate
+      WHERE server = ? AND nick = ? AND ts >= ?
+      ORDER BY ts ASC
+    `).all(server, nick, since);
+    res.json({ rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
+// A2 (23.08): история HTTP-чеков модема (страница спидтестов / карточка).
+r.get('/api/admin/modem_httpcheck', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const server = String(req.query.server || '').trim();
+    const nick = String(req.query.nick || '').trim();
+    const hours = Math.min(168, Math.max(1, parseInt(req.query.hours, 10) || 24));
+    if (!server || !nick) return res.status(400).json({ error: 'server and nick required' });
+    const since = new Date(Date.now() - hours * 3600000).toISOString();
+    const rows = db.prepare(`
+      SELECT ts, status, total_ms, content_ok, error FROM modem_httpcheck
       WHERE server = ? AND nick = ? AND ts >= ?
       ORDER BY ts ASC
     `).all(server, nick, since);

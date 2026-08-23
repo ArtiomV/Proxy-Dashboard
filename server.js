@@ -1647,6 +1647,16 @@ const SETTINGS_DEFAULTS = {
   ping_latency_warn_ms: 800,               // latency > → деградация (3 опроса)
   ping_stale_cycles: 5,                    // ping_stats не меняется N опросов → протух
   retention_modem_ping: 30,                // дней истории modem_ping
+  // ── A2/A3 (ТЗ мониторинга v2, этап 2, 23.08) ─────────────────────
+  httpcheck_enabled: true,                 // A2: HTTP-чек сайта через прокси
+  httpcheck_url: 'https://example.com',    // цель чека
+  httpcheck_must_contain: '',              // пусто = не проверять наличие
+  httpcheck_must_not_contain: '',          // пусто = не проверять отсутствие (заглушка оператора)
+  httpcheck_interval_min: 15,              // период чеков
+  httpcheck_scope: 'speedtest_list',       // all | speedtest_list (ники speedtest_modems)
+  httpcheck_timeout_ms: 15000,
+  retention_modem_httpcheck: 30,
+  retention_modem_rate: 7,                 // A3: дней снапшотов modem_rate
   // ── Domain guard (WP2): контроль доменов на bypass-боксах ────────
   domain_guard_servers: 'S2,S4',           // боксы со снятой hfilter-фильтрацией
   retention_top_hosts_daily: 90,           // дней истории top_hosts_daily / domain_guard_hits
@@ -2846,6 +2856,14 @@ try {
 // A1 (23.08): пинг модемов из ping_stats бокса — история + алерты + вход для
 // ping-based аптайма. Создаётся до modem-tracking, которому передаётся в deps.
 const modemPing = require('./src/jobs/modem-ping').create({ db, logger, alerts, getSetting });
+// A3 (23.08): текущая скорость модемов из дельт bw-счётчиков цикла опроса —
+// без новых запросов к боксам. modem-tracking кормит ingest() полным data.
+const modemRate = require('./src/jobs/modem-rate').create({ db, logger });
+// A2 (23.08): HTTP-чек сайта через прокси-порты модемов («глазами клиента»).
+// Тикает из startup.js каждые httpcheck_interval_min.
+const httpCheck = require('./src/jobs/http-check').create({
+  db, logger, alerts, getSetting, fetchAllServersDataCached, apiServers,
+});
 const { trackModems } = require('./src/jobs/modem-tracking').create({
   apiServers, fetchServerData, db, logger, logActivity, alerts,
   SERVER_COUNTRIES, normalizeOperator, operatorsDb, fetchApi, postFormApi,
@@ -2854,7 +2872,7 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
   _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
   _metaIccidGetByImei, persistServerDownSince: _persistServerDownSince,
-  modemPing,
+  modemPing, modemRate,
 });
 
 // ========== PROXY LATENCY MONITORING ==========
@@ -4086,6 +4104,9 @@ app.use(require('./src/routes/ops-ext')({
   ledgerExpense, parseBwToBytes, trafficBytesToGb,
   getBalanceReconcile: () => balanceReconcile,
   getModemPingLatest: () => modemPing.latest(),   // A1 (23.08): свежие пинги для UI
+  getModemRateLatest: () => modemRate.latest(),   // A3 (23.08): текущая скорость модемов
+  getModemRateTop: (n) => modemRate.top(n),       // A3: топ грузящих для дашборда
+  getHttpCheckLatest: () => httpCheck.latest(),   // A2 (23.08): последние HTTP-чеки
 }));
 
 app.use(require('./src/routes/billing-ext')({
@@ -4161,6 +4182,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runServerMetrics: _serverMetrics.runServerMetrics,
     runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
+    runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
     // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).
     saveClients, auditLog, authTokensDb,
   });

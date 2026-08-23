@@ -64,6 +64,7 @@ var COLUMNS=[{id:'rail',label:'',visible:true,sortable:false,width:'6px'},
   {id:'uptime',label:'Аптайм',visible:false,sortable:true},
   {id:'latency',label:'Латентность',visible:true,sortable:true},
   {id:'ping',label:'Пинг <span class="th-hint" title="Замер бокса через модем (~1/мин): задержка и потери&#10;Зелёный: норма&#10;Оранжевый: >800 мс или потери ≥30%&#10;Красный: интернета нет (loss 100%)&#10;Серый: данные протухли">'+icon('info',11)+'</span>',visible:true,sortable:true},
+  {id:'rateNow',label:'Сейчас <span class="th-hint" title="Текущая скорость модема (Мбит/с) — дельта суточных счётчиков бокса за скользящее окно 10 мин.&#10;↑ исходящий / ↓ входящий">'+icon('info',11)+'</span>',visible:true,sortable:true},
   {id:'conns',label:'Конн. <span class="th-hint" title="Живые TCP-подключения через прокси (HTTP + SOCKS5), суммарно по портам модема&#10;Клик — настройки порта: лимиты Max Conn / Conn Limit">'+icon('info',11)+'</span>',visible:true,sortable:true,width:'104px'},
   {id:'errors',label:'Ошибки',visible:false,sortable:true},
   {id:'health',label:'Здоровье',visible:true,sortable:true,width:'70px'},
@@ -3852,6 +3853,23 @@ function renderNewFleetServers(){
   var html = '';
   names.forEach(function(n){ html += fcard(n, false); });
   el.innerHTML = html;
+  _renderRateTopStrip();
+}
+
+// A3 (23.08): «Топ грузящих сейчас» — 5 модемов по текущей скорости (окно 10 мин).
+function _renderRateTopStrip(){
+  var el=document.getElementById('rateTopStrip'); if(!el) return;
+  var top=(currentData&&currentData.modemRateTop)||[];
+  if(!top.length){ el.innerHTML=''; return; }
+  var h='<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:9px 14px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;font-size:11px">';
+  h+='<span style="color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;font-size:10px">Грузят сейчас</span>';
+  top.forEach(function(t){
+    var tot=t.total;var col=tot>=20?'var(--danger)':(tot>=5?'var(--warning)':'var(--text-1)');
+    var nick=t.key.slice(t.key.indexOf('_')+1);
+    h+='<span style="display:inline-flex;align-items:baseline;gap:5px;cursor:pointer" data-on-click="openDetailAtTab(\''+esc(nick).replace(/'/g,"\\'")+'\',\''+esc(t.key.slice(0,t.key.indexOf('_')))+'\',\'info\')" title="Текущая скорость за окно 10 мин"><b>'+esc(nick)+'</b><span class="mono" style="color:'+col+';font-weight:600">'+tot.toFixed(1)+' Мбит/с</span><span class="mono" style="color:var(--text-3);font-size:10px">↓'+t.rate_in_mbps+' ↑'+t.rate_out_mbps+'</span></span>';
+  });
+  h+='</div>';
+  el.innerHTML=h;
 }
 // Ховер-тултип спарклайнов карточек серверов (21.08): при наведении на любой
 // спарклайн карточки показываем время точки и значения CPU/RAM/conns в ней.
