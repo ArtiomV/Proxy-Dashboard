@@ -19,6 +19,12 @@
   },
   {
     "type": "index",
+    "name": "idx_alert_acks_rule",
+    "tbl_name": "alert_acks",
+    "sql": "CREATE INDEX idx_alert_acks_rule ON alert_acks(rule_id, dedup_key)"
+  },
+  {
+    "type": "index",
     "name": "idx_api_usage_client",
     "tbl_name": "api_usage",
     "sql": "CREATE INDEX idx_api_usage_client ON api_usage(client_id, timestamp)"
@@ -367,6 +373,12 @@
   },
   {
     "type": "index",
+    "name": "idx_maintenance_target",
+    "tbl_name": "maintenance_windows",
+    "sql": "CREATE INDEX idx_maintenance_target ON maintenance_windows(target_type, target_id, from_ts)"
+  },
+  {
+    "type": "index",
     "name": "idx_mc_cat",
     "tbl_name": "monthly_costs",
     "sql": "CREATE INDEX idx_mc_cat ON monthly_costs(category, period)"
@@ -697,6 +709,12 @@
   },
   {
     "type": "table",
+    "name": "alert_acks",
+    "tbl_name": "alert_acks",
+    "sql": "CREATE TABLE alert_acks ( id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id TEXT NOT NULL, dedup_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('ack','solved')), acked_by TEXT NOT NULL DEFAULT '', acked_at TEXT NOT NULL, until_ts INTEGER )"
+  },
+  {
+    "type": "table",
     "name": "api_access_log",
     "tbl_name": "api_access_log",
     "sql": "CREATE TABLE api_access_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')), -- UTC caller_type TEXT NOT NULL, -- api_key | portal | reset_link | webhook | auth client_id INTEGER, client_name TEXT, identity TEXT, -- api-key prefix / login / token tail / 'tochka' method TEXT, path TEXT, purpose TEXT, -- human category (RU) status INTEGER, duration_ms INTEGER, ip TEXT, user_agent TEXT )"
@@ -865,6 +883,12 @@
   },
   {
     "type": "table",
+    "name": "maintenance_windows",
+    "tbl_name": "maintenance_windows",
+    "sql": "CREATE TABLE maintenance_windows ( id INTEGER PRIMARY KEY AUTOINCREMENT, target_type TEXT NOT NULL CHECK (target_type IN ('server','modem')), target_id TEXT NOT NULL, from_ts INTEGER NOT NULL, to_ts INTEGER NOT NULL, comment TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
     "name": "modem_health_daily",
     "tbl_name": "modem_health_daily",
     "sql": "CREATE TABLE modem_health_daily ( date TEXT NOT NULL, -- YYYY-MM-DD (MSK calendar day) server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT, -- denormalized for cheap display joins score INTEGER, -- 0–100, NULL when no data that day error_pct REAL, -- 0–100 latency_ms INTEGER, -- avg latency from proxy_checks uptime_pct REAL, -- 0–100, from uptime_tracking daily bucket total_checks INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (date, server_name, imei) )"
@@ -951,7 +975,7 @@
     "type": "table",
     "name": "server_downtime",
     "tbl_name": "server_downtime",
-    "sql": "CREATE TABLE server_downtime ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, down_from TEXT NOT NULL, down_to TEXT NOT NULL, duration_sec INTEGER NOT NULL, alerted INTEGER NOT NULL DEFAULT 0, -- 1 if a server_unreachable alert fired created_at TEXT NOT NULL DEFAULT (datetime('now')) )"
+    "sql": "CREATE TABLE server_downtime ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, down_from TEXT NOT NULL, down_to TEXT NOT NULL, duration_sec INTEGER NOT NULL, alerted INTEGER NOT NULL DEFAULT 0, -- 1 if a server_unreachable alert fired created_at TEXT NOT NULL DEFAULT (datetime('now')) , maintenance INTEGER NOT NULL DEFAULT 0)"
   },
   {
     "type": "table",

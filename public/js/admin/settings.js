@@ -325,6 +325,8 @@ function loadSettings(){
     renderPricingTiers();
     opPkgRender(s);
     var _vE=document.getElementById('volumeEnabledInput');if(_vE)_vE.checked=(s.volume_enabled!==false);
+    // B2 (23.08): TTL кнопки «В работе» (секция «Уведомления»)
+    var _ackT=document.getElementById('ackTtlHoursInput');if(_ackT)_ackT.value=s.ack_ttl_hours!=null?s.ack_ttl_hours:2;
   }).catch(function(){});
 }
 // Live-проверка кредов при сохранении (15.08): сервер возвращает cred_checks
@@ -658,4 +660,90 @@ function opPkgSave(){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12)+' — применяется со следующего часового прогона';st.style.color='var(--success)';}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)';}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)';});
+}
+
+// ========== B2 (23.08): TTL «В работе» для ack-кнопок алертов ==========
+function saveAckTtl(){
+  var ttl=parseInt(document.getElementById('ackTtlHoursInput').value)||2;
+  if(ttl<1||ttl>72){showToast('TTL: от 1 до 72 часов','error');return}
+  var st=document.getElementById('ackTtlSaveHint');
+  api(API+'/api/admin/settings',{method:'PUT',json:{ack_ttl_hours:ttl}}).then(function(d){
+    if(d.ok){if(st)st.textContent='Сохранено';setTimeout(function(){if(st)st.textContent=''},2500);showToast('TTL «В работе» сохранён','success')}
+    else{if(st)st.textContent=d.error||'Ошибка';showToast(d.error||'Ошибка','error')}
+  }).catch(function(e){if(st)st.textContent=e.message;showToast(e.message,'error')});
+}
+
+// ========== B3 (23.08): окна обслуживания ==========
+function _maintFmt(ts){
+  var d=new Date(ts);
+  if(!isFinite(d.getTime()))return '—';
+  return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+}
+// Подсказки в поле «Объект»: сервера из fleet, модемы — известные ники.
+function _maintFillTargets(){
+  var dl=document.getElementById('maintTargetList');if(!dl)return;
+  var type=(document.getElementById('maintTypeInput')||{}).value||'server';
+  var h='';
+  if(type==='server'){
+    var bs=(currentData&&currentData.fleet&&currentData.fleet.byServer)||{};
+    Object.keys(bs).sort().forEach(function(s){h+='<option value="'+esc(s)+'">';});
+    dl.innerHTML=h;
+  }else{
+    api(API+'/api/admin/known_modems').then(function(d){
+      var items=(d&&d.items)||[];
+      var seen={};
+      items.forEach(function(m){if(m&&m.nick&&!seen[m.nick]){seen[m.nick]=1;h+='<option value="'+esc(m.nick)+'">';}});
+      dl.innerHTML=h;
+    }).catch(function(){});
+  }
+}
+function loadMaintenanceWindows(){
+  var box=document.getElementById('maintList');if(!box)return;
+  _maintFillTargets();
+  api(API+'/api/admin/maintenance').then(function(d){
+    var ws=(d&&d.windows)||[];
+    var now=Date.now();
+    if(!ws.length){box.innerHTML='<div style="color:var(--text-3);font-size:12px;padding:14px;text-align:center">Окон нет</div>';return}
+    var h='';
+    ws.forEach(function(w,i){
+      var active=w.from_ts<=now&&now<=w.to_ts;
+      var future=w.from_ts>now;
+      var st=active?'<span style="color:var(--success);font-weight:600">активно</span>'
+        :future?'<span style="color:var(--text-2)">будущее</span>'
+        :'<span style="color:var(--text-3)">завершено</span>';
+      h+='<div style="display:flex;align-items:center;gap:10px;padding:8px 12px;font-size:12px'+(i?';border-top:1px solid var(--border)':'')+'">'
+        +'<span style="font-family:var(--font-mono);font-weight:600">'+esc(w.target_id)+'</span>'
+        +'<span style="color:var(--text-3);font-size:10px">'+(w.target_type==='server'?'сервер':'модем')+'</span>'
+        +'<span style="color:var(--text-2)">'+_maintFmt(w.from_ts)+' — '+_maintFmt(w.to_ts)+'</span>'
+        +st
+        +(w.comment?'<span style="color:var(--text-3);flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+esc(w.comment)+'</span>':'<span style="flex:1"></span>')
+        +(w.created_by?'<span style="color:var(--text-3);font-size:10px">'+esc(w.created_by)+'</span>':'')
+        +'<button class="btn btn-sm" style="padding:2px 8px;color:var(--danger)" data-on-click="deleteMaintenanceWindow('+w.id+')" title="Удалить окно">×</button></div>';
+    });
+    box.innerHTML=h;
+  }).catch(function(e){box.innerHTML='<div style="color:var(--danger);font-size:12px;padding:14px">Ошибка: '+esc(e.message)+'</div>'});
+}
+function createMaintenanceWindow(){
+  var type=document.getElementById('maintTypeInput').value;
+  var target=(document.getElementById('maintTargetInput').value||'').trim();
+  var fromV=document.getElementById('maintFromInput').value;
+  var toV=document.getElementById('maintToInput').value;
+  var comment=(document.getElementById('maintCommentInput').value||'').trim();
+  var st=document.getElementById('maintCreateStatus');
+  if(!target){st.textContent='Укажите объект (сервер или ник модема)';st.style.color='var(--danger)';return}
+  var fromTs=fromV?new Date(fromV).getTime():NaN;
+  var toTs=toV?new Date(toV).getTime():NaN;
+  if(!isFinite(fromTs)||!isFinite(toTs)||toTs<=fromTs){st.textContent='Некорректный интервал «с — до»';st.style.color='var(--danger)';return}
+  st.textContent='Создаю...';st.style.color='var(--warning)';
+  api(API+'/api/admin/maintenance',{method:'POST',json:{target_type:type,target_id:target,from_ts:fromTs,to_ts:toTs,comment:comment}}).then(function(d){
+    if(d.ok){st.textContent='Окно создано — алерты по объекту заглушены на период окна';st.style.color='var(--success)';loadMaintenanceWindows();setTimeout(loadData,1500)}
+    else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
+  }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
+}
+function deleteMaintenanceWindow(id){
+  if(!confirm('Удалить окно обслуживания?'))return;
+  api(API+'/api/admin/maintenance/'+id,{method:'DELETE'}).then(function(d){
+    if(d.ok){showToast('Окно удалено','success');loadMaintenanceWindows();setTimeout(loadData,1500)}
+    else showToast(d.error||'Ошибка','error');
+  }).catch(function(e){showToast(e.message||'Ошибка сети','error')});
 }

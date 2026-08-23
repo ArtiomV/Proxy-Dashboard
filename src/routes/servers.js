@@ -365,6 +365,10 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.modem_offline_threshold_min != null) {
     patch.modem_offline_threshold_min = Math.max(1, Math.min(120, parseInt(req.body.modem_offline_threshold_min) || 10));
   }
+  // B2 (23.08): TTL «в работе» для ack-кнопок алертов в Telegram (часы).
+  if (req.body.ack_ttl_hours != null) {
+    patch.ack_ttl_hours = Math.max(1, Math.min(72, parseInt(req.body.ack_ttl_hours) || 2));
+  }
   if (pricing_tiers && Array.isArray(pricing_tiers)) {
     patch.pricing_tiers = pricing_tiers.map(t => ({
       min_proxies: parseInt(t.min_proxies) || 1,

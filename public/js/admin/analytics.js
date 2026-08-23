@@ -649,3 +649,81 @@ var _MONTHS_RU_NOM=['Январь','Февраль','Март','Апрель','�
 var _MONTHS_RU_SHORT=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 // «2026-03» → «Март» (или «Мар» при short). Возвращает исходную строку, если формат иной.
 function _ymRu(ym,short){ if(ym==null)return ''; var s=String(ym); var m=/^(\d{4})-(\d{2})/.exec(s); if(!m)return s; var mi=parseInt(m[2],10)-1; return (short?_MONTHS_RU_SHORT:_MONTHS_RU_NOM)[mi]||s; }
+
+// ========== C1 (23.08): SLA/uptime-отчёт ==========
+var _slaMonth='';
+// Дефолт месяца — текущий; вызывается при входе в раздел.
+function initSlaReport(){
+  var inp=document.getElementById('slaMonthInput');
+  if(inp&&!inp.value){
+    var d=new Date();
+    inp.value=d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0');
+  }
+  _slaMonth=inp?inp.value:'';
+  if(_slaMonth)loadSlaReport();
+}
+function _slaPctCell(p){
+  if(p==null)return '—';
+  var c=p>=99.9?'var(--success)':p>=99?'var(--text-1)':p>=95?'var(--warning)':'var(--danger)';
+  return '<span style="color:'+c+';font-weight:600">'+String(p).replace('.',',')+'%</span>';
+}
+function loadSlaReport(){
+  var inp=document.getElementById('slaMonthInput');
+  var area=document.getElementById('slaReportArea');
+  if(!inp||!area)return;
+  var month=inp.value;
+  if(!/^\d{4}-\d{2}$/.test(month)){area.innerHTML='<div style="color:var(--danger);font-size:12px">Выберите месяц</div>';return}
+  _slaMonth=month;
+  area.innerHTML='<div style="color:var(--text-3);font-size:12px">Строю отчёт…</div>';
+  api(API+'/api/admin/sla_report?month='+encodeURIComponent(month)).then(function(d){
+    if(d.error){area.innerHTML='<div style="color:var(--danger);font-size:12px">'+esc(d.error)+'</div>';return}
+    var h='<div style="font-size:11px;color:var(--text-3);margin-bottom:10px">Месяц: '+esc(d.month)+' ('+(d.minutes_in_month||0).toLocaleString('ru-RU')+' мин) · сформирован '+esc(new Date(d.generated_at).toLocaleString('ru-RU'))+'</div>';
+    // Серверы
+    h+='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin:10px 0 6px">Серверы</div>';
+    if(!d.servers||!d.servers.length){
+      h+='<div style="font-size:11px;color:var(--success)">Простоев за месяц не зафиксировано — все серверы 100%.</div>';
+    }else{
+      h+='<table class="log-table"><thead><tr><th>Сервер</th><th>Uptime</th><th>Эпизоды</th><th>Простой, мин</th><th>Обслуживание, мин</th></tr></thead><tbody>';
+      d.servers.forEach(function(s){
+        h+='<tr><td style="font-family:var(--font-mono);font-weight:600">'+esc(s.server)+'</td><td>'+_slaPctCell(s.uptime_pct)+'</td><td>'+s.episodes+'</td><td>'+String(s.downtime_min).replace('.',',')+'</td><td style="color:var(--text-3)">'+String(s.maintenance_min).replace('.',',')+'</td></tr>';
+      });
+      h+='</tbody></table>';
+    }
+    // Операторы
+    if(d.operators&&d.operators.length){
+      h+='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin:14px 0 6px">По операторам (средний uptime модемов)</div>';
+      h+='<table class="log-table"><thead><tr><th>Оператор</th><th>Uptime</th><th>Модемов</th></tr></thead><tbody>';
+      d.operators.forEach(function(o){
+        h+='<tr><td>'+esc(o.operator)+'</td><td>'+_slaPctCell(o.uptime_pct)+'</td><td>'+o.modems+'</td></tr>';
+      });
+      h+='</tbody></table>';
+    }
+    // Модемы
+    h+='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin:14px 0 6px">Модемы (по пингам A1)</div>';
+    if(!d.modems||!d.modems.length){
+      h+='<div style="font-size:11px;color:var(--text-3)">Данных пингов за месяц нет (история modem_ping накопилась с 23.08).</div>';
+    }else{
+      h+='<div style="max-height:420px;overflow-y:auto"><table class="log-table"><thead><tr><th>Модем</th><th>Сервер</th><th>Оператор</th><th>Uptime</th><th>Пингов</th></tr></thead><tbody>';
+      d.modems.forEach(function(m){
+        h+='<tr><td style="font-family:var(--font-mono)">'+esc(m.nick)+'</td><td>'+esc(m.server)+'</td><td style="color:var(--text-2)">'+esc(m.operator||'—')+'</td><td>'+_slaPctCell(m.uptime_pct)+'</td><td>'+m.pings+'</td></tr>';
+      });
+      h+='</tbody></table></div>';
+    }
+    area.innerHTML=h;
+  }).catch(function(e){area.innerHTML='<div style="color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>'});
+}
+// CSV идёт с auth-заголовком — простая ссылка не подходит, качаем через fetch→Blob.
+function slaExportCsv(){
+  var month=_slaMonth||((document.getElementById('slaMonthInput')||{}).value||'');
+  if(!month){showToast('Сначала постройте отчёт за месяц','error');return}
+  fetch(API+'/api/admin/sla_report?month='+encodeURIComponent(month)+'&format=csv',{headers:{'X-Auth-Token':authToken}})
+    .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.blob()})
+    .then(function(blob){
+      var a=document.createElement('a');
+      a.href=URL.createObjectURL(blob);
+      a.download='sla-'+month+'.csv';
+      document.body.appendChild(a);a.click();a.remove();
+      setTimeout(function(){URL.revokeObjectURL(a.href)},5000);
+      showToast('CSV сохранён','success');
+    }).catch(function(e){showToast('Экспорт: '+e.message,'error')});
+}

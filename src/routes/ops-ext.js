@@ -12,6 +12,7 @@ const { computeFleet, annotateTestPool, computeClientWorking } = require('../mod
 const simulatorDb = require('../db/simulator');
 const { computeRevenueWindow } = require('../billing/revenue');   // WP8: canonical revenue
 const scheduler = require('../jobs/scheduler');                  // WP6.4: job registry for /api/admin/health
+const maintenance = require('../maintenance');                   // B3 (23.08): окна обслуживания
 
 // ── /api/admin/data section degradation wrapper (WP6.2) ──────────────────
 // One failing section degrades to its fallback instead of 502ing the panel.
@@ -397,6 +398,16 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     const billingSec = _runSection(logger, 'billing', _billingSection, { clientMonthCharges: {}, clientMonthGb: {}, revenue30d: { byClient: {}, total: 0, windowDays: 30, asOf: getMoscowToday() } });
     const trafficSec = _runSection(logger, 'traffic', () => _trafficSection(merged), { clientLiveMonthGb: {}, clientLastHourGb: {}, clientTodayGb: {}, modemTrend: {}, clientTrend: {} });
     const fleetSec = _runSection(logger, 'fleet', () => _fleetSection(merged, clientsSec.sanitizedClients), { fleet: { total: 0, online: 0, offline: 0, byServer: {} } });
+    // B3 (23.08): окна обслуживания — активные и ближайшие 24ч, для бейджа
+    // «🔧 Обслуживание до HH:MM» на карточке сервера.
+    const maintSec = _runSection(logger, 'maintenance', () => {
+      const now = Date.now();
+      const wins = maintenance.listWindows(db, { active: true });
+      return {
+        active: wins.filter(w => w.from_ts <= now && now <= w.to_ts),
+        upcoming: wins.filter(w => w.from_ts > now && w.from_ts <= now + 24 * 3600 * 1000),
+      };
+    }, { active: [], upcoming: [] });
 
     res.json({
       connsHistory: (deps.getConnsHistory ? deps.getConnsHistory() : {}),
@@ -434,6 +445,8 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       modemRateTop: (getModemRateTop ? getModemRateTop(5) : []),
       // A2 (23.08): последний HTTP-чек каждого модема (scope speedtest_list).
       modemHttpCheck: (getHttpCheckLatest ? getHttpCheckLatest() : {}),
+      // B3 (23.08): окна обслуживания (активные + ближайшие 24ч).
+      maintenance: maintSec,
     });
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });

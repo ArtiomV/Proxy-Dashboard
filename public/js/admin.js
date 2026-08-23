@@ -118,7 +118,7 @@ function switchSettingsSection(name){
   // view. «alerts» — тоже смешанный вид: settingsSection_alerts (правила
   // уведомлений) + data-карточки с subsec=alerts (Telegram, пороги доступности).
   var DATA_VIEWS={recovery:1,proxycheck:1,speedtest:1,alerts:1,data:1};
-  ['bank','audit','dguard','servers','syslog','serverHealth','simulator','operators','alerts','failover','tariffs'].forEach(function(s){
+  ['bank','audit','dguard','servers','syslog','serverHealth','simulator','operators','packages','maintenance','sla','alerts','failover','tariffs'].forEach(function(s){
     var sec=document.getElementById('settingsSection_'+s);
     if(sec)sec.style.display=s===name?'':'none';
   });
@@ -132,7 +132,7 @@ function switchSettingsSection(name){
       });
     }
   }
-  ['bank','data','audit','dguard','servers','syslog','serverHealth','simulator','operators','alerts','failover','recovery','proxycheck','speedtest','tariffs'].forEach(function(s){
+  ['bank','data','audit','dguard','servers','syslog','serverHealth','simulator','operators','packages','maintenance','sla','alerts','failover','recovery','proxycheck','speedtest','tariffs'].forEach(function(s){
     var nav=document.getElementById('snav_'+s);
     if(nav){nav.classList.toggle('active',s===name);}
   });
@@ -146,6 +146,8 @@ function switchSettingsSection(name){
   if(name==='simulator')initSimulator();
   if(name==='operators')loadOperatorsMapping();
   if(name==='alerts')loadAlertRules();
+  if(name==='maintenance')loadMaintenanceWindows();
+  if(name==='sla')initSlaReport();
   if(name==='failover'){loadFailoverSettings();loadFailoverCandidates();loadFailoverLog();}
   if(name==='tariffs')loadTariffsAdmin();
 }
@@ -3774,6 +3776,11 @@ function renderNewFleetServers(){
       +'<div class="server-overview-services"><span class="server-overview-services-value" style="color:'+(isDown?'var(--danger)':col)+'">'+working+'/'+total+'</span>'
       +'<span class="server-overview-services-label">'+(isDown?'Бокс недоступен':(disc>0?disc+' отключено':'Модемы'))+'</span></div>'
       +'</header>';
+    // B3 (23.08): бейдж «🔧 Обслуживание до HH:MM» при активном окне (данные —
+    // maintenance.active из /api/admin/data).
+    var _mw=((currentData.maintenance||{}).active||[]).filter(function(w){return w.target_type==='server'&&w.target_id===srv;})[0];
+    if(_mw){var _mtd=new Date(_mw.to_ts);
+      h+='<div style="margin:2px 0 6px;font-size:11px;color:var(--warning)">🔧 Обслуживание до '+String(_mtd.getHours()).padStart(2,'0')+':'+String(_mtd.getMinutes()).padStart(2,'0')+(_mw.comment?' · '+esc(_mw.comment):'')+'</div>';}
     // Строка статуса: точка + текст (недоступность / отключённые / стабильно).
     var stDot='var(--success)', stTxt='Сервер работает стабильно';
     if(met&&met.error){ stDot='var(--danger)'; stTxt='Бокс недоступен: '+met.error; }

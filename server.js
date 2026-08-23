@@ -1660,6 +1660,8 @@ const SETTINGS_DEFAULTS = {
   // ── A4/B1 (ТЗ мониторинга v2, этап 3, 23.08) ─────────────────────
   alert_dependencies_enabled: true,        // B1: бокс лежит → модемные алерты его сервера молчат
   volume_enabled: true,                    // A4: объёмные алерты
+  // ── B2 (ТЗ мониторинга v2, этап 4, 23.08) ────────────────────────
+  ack_ttl_hours: 2,                        // B2: TTL «в работе» для ack-кнопок в Telegram
   // A4: пакеты операторов (JSON; UI Настройки → «Пакеты операторов»).
   // per_sim — объём на симку (Orange 400 ГБ); shared — общий котёл (30 ТБ).
   operator_packages: JSON.stringify([
@@ -2889,6 +2891,7 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
   _metaIccidGetByImei, persistServerDownSince: _persistServerDownSince,
   modemPing, modemRate,
+  maintenance: require('./src/maintenance'),   // B3 (23.08): пометка простоев в окне обслуживания
 });
 
 // ========== PROXY LATENCY MONITORING ==========
@@ -4048,6 +4051,16 @@ app.use(require('./src/routes/simulator')({
 // Stage 18.13 — alert rules CRUD + test endpoint
 app.use(require('./src/routes/alerts')({
   logger, authMiddleware, adminMiddleware, appSettings, kvSetCritical, setSettings,
+}));
+
+// B3 (23.08) — окна обслуживания: CRUD для UI (подавление — в alerts.js).
+app.use(require('./src/routes/maintenance')({
+  db, logger, authMiddleware, adminMiddleware,
+}));
+
+// C1 (23.08) — SLA/uptime-отчёт (server_downtime без maintenance + modem_ping).
+app.use(require('./src/routes/sla')({
+  db, logger, authMiddleware, adminMiddleware,
 }));
 
 // Stage 18.15 — bell endpoints (list/badge/read/dismiss). See module header.

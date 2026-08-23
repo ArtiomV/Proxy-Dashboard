@@ -21,6 +21,9 @@
  *   - per-key cooldown (in-memory; persists across restarts via kv_store)
  *   - boot grace window (no alerts in the first 5 minutes after process start
  *     so backlog from before-restart doesn't flood the channel)
+ *   - B2: активный ack («в работе»/«решено» из inline-кнопок TG) глушит
+ *     правило по dedup-ключу (таблица alert_acks)
+ *   - B3: maintenance-окно по объекту глушит его алерты (maintenance_windows)
  *
  * Why a framework and not inline `tgSend()` calls everywhere:
  *   - one place to add/remove/tune rules
@@ -29,9 +32,23 @@
  *   - admin can toggle rules from UI without redeploy
  */
 
+const crypto = require('crypto');
+const maintenance = require('../maintenance');   // B3 (23.08): окна обслуживания
+
 const COOLDOWN_KV_KEY = 'telegram_alert_cooldowns';
 let logger, getSetting, appSettings, kvSetCritical, kvGet, db, tgBot;
 let _insertNotif = null;   // prepared statement, lazy-init on first trigger
+
+// B2 (23.08): acknowledge («в работе»/«решено»). Активные ack-и кэшируются
+// из alert_acks (перечитываем раз в 30 сек, инвалидация при записи в
+// onAlertAck). Подавление — до until_ts ('ack') или до конца инцидента
+// ('solved'). TTL «в работе» — настройка ack_ttl_hours (дефолт 2).
+const _ackCache = { ts: 0, rows: [] };
+const ACK_CACHE_MS = 30 * 1000;
+// Лимит callback_data Telegram — 64 байта, поэтому в кнопках всегда хэш
+// (первые 16 hex sha1 пары ruleId|dedup), а не сама пара. Маппинг живёт в
+// памяти: после рестарта старые кнопки отвечают «кнопка устарела».
+const _ackHashMap = new Map();   // hash16 → { ruleId, dedup, chatId?, messageId? }
 
 const _bootAt = Date.now();
 const BOOT_GRACE_MS = 5 * 60 * 1000;   // 5 min — quiet right after restart
@@ -56,6 +73,79 @@ const SUPPRESSIBLE_RULES = new Set([
 ]);
 function _depsEnabled() {
   return !appSettings || appSettings.alert_dependencies_enabled !== false;
+}
+
+// ── B2: ack-подавление ───────────────────────────────────────────
+function _ackRows() {
+  const now = Date.now();
+  if (now - _ackCache.ts < ACK_CACHE_MS) return _ackCache.rows;
+  try {
+    _ackCache.rows = db.prepare(`
+      SELECT rule_id, dedup_key, kind, until_ts FROM alert_acks
+       WHERE kind = 'solved' OR (kind = 'ack' AND until_ts > ?)
+    `).all(now);
+  } catch (_) { _ackCache.rows = []; }   // таблицы ещё нет → ack-ов нет
+  _ackCache.ts = now;
+  return _ackCache.rows;
+}
+function _ackActive(ruleId, dedup) {
+  const now = Date.now();
+  return _ackRows().some(r =>
+    r.rule_id === ruleId && r.dedup_key === dedup
+    && (r.kind === 'solved' || (r.until_ts && r.until_ts > now)));
+}
+function _ackInvalidate() { _ackCache.ts = 0; }
+function _ackTtlMs() {
+  const h = Math.max(1, Math.min(72, Number(getSetting('ack_ttl_hours', 2)) || 2));
+  return { hours: h, ms: h * 3600 * 1000 };
+}
+function _ackHash(ruleId, dedup) {
+  return crypto.createHash('sha1').update(ruleId + '|' + dedup).digest('hex').slice(0, 16);
+}
+
+// B2: обработчик inline-кнопок из TG-бота (вызывается из bot.js через
+// deps.onAlertAck). kind: 'ack' | 'solved'. Возвращает объект-результат —
+// текст ответа пользователю собирает бот.
+async function onAlertAck(kind, hash, user) {
+  const ent = _ackHashMap.get(String(hash || ''));
+  if (!ent) return { ok: false, error: 'stale' };
+  const now = Date.now();
+  const ttl = _ackTtlMs();
+  try {
+    const existing = db.prepare(`
+      SELECT id, kind, acked_by, until_ts FROM alert_acks
+       WHERE rule_id = ? AND dedup_key = ? ORDER BY id DESC LIMIT 1
+    `).get(ent.ruleId, ent.dedup);
+    const active = existing && (existing.kind === 'solved' || (existing.until_ts && existing.until_ts > now));
+    if (active) {
+      // Дедупликация: повторное «в работе» продлевает until_ts, «решено»
+      // поверх активного ack доводит до solved. Повторное «решено» — no-op.
+      if (kind === 'ack' && existing.kind === 'ack') {
+        db.prepare('UPDATE alert_acks SET until_ts = ? WHERE id = ?').run(now + ttl.ms, existing.id);
+        _ackInvalidate();
+        return { ok: true, already: true, by: existing.acked_by, ttlHours: ttl.hours };
+      }
+      if (existing.kind === 'solved') {
+        return { ok: true, already: true, solved: true, by: existing.acked_by, ttlHours: ttl.hours };
+      }
+    }
+    db.prepare(`INSERT INTO alert_acks (rule_id, dedup_key, kind, acked_by, acked_at, until_ts)
+                VALUES (?, ?, ?, ?, ?, ?)`)
+      .run(ent.ruleId, ent.dedup, kind, String(user || ''), new Date(now).toISOString(),
+        kind === 'solved' ? null : now + ttl.ms);
+    _ackInvalidate();
+    // Убрать кнопки из исходного сообщения (best-effort).
+    if (ent.chatId && ent.messageId) {
+      const token = getSetting('telegram_bot_token', '');
+      tgBot.tgRequest(token, 'editMessageReplyMarkup',
+        { chat_id: ent.chatId, message_id: ent.messageId, reply_markup: { inline_keyboard: [] } })
+        .catch(() => {});
+    }
+    return { ok: true, ttlHours: ttl.hours };
+  } catch (e) {
+    logger.warn('[Alerts] onAlertAck: ' + e.message);
+    return { ok: false, error: e.message };
+  }
 }
 
 function init(deps) {
@@ -143,6 +233,16 @@ const RULES = {
     cooldownSec: 86400,
     dedupeKey: () => 'global',
     render: p => `🔴 <b>Backup БД упал</b>\n\nПричина: <code>${esc(p.error || 'unknown')}</code>\nНужно срочно проверить — без бэкапа БД уязвима.`,
+  },
+  // D3 (23.08): еженедельный тест восстановления бэкапа (src/jobs/backup-test.js).
+  // Бэкап считается существующим только после проверки восстановления.
+  backup_restore_failed: {
+    title: 'Тест восстановления бэкапа не прошёл',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: () => 'global',
+    render: p => `🔴 <b>Бэкап не прошёл тест восстановления</b>\n\nИсточник: <b>${esc(p.source || '?')}</b>${p.file ? `, файл: <code>${esc(p.file)}</code>` : ''}\nОшибка: <code>${esc(p.error || 'unknown')}</code>\nБэкап считается существующим только после проверки восстановления — разберись срочно.`,
   },
   balance_drift: {
     title: 'Баланс клиента не сходится с ledger',
@@ -818,6 +918,7 @@ const _entityFor = {
   server_recovered:          p => ({ kind: 'system', id: p.server || null }),
   tochka_webhook_failed:     () => ({ kind: 'system', id: 'tochka' }),
   db_backup_failed:          () => ({ kind: 'system', id: 'backup' }),
+  backup_restore_failed:     () => ({ kind: 'system', id: 'backup' }),
   duplicate_credit_blocked:  p => ({ kind: 'payment', id: p.natural_key || null }),
   heap_high:                 () => ({ kind: 'system', id: 'heap' }),
   disk_low_critical:         () => ({ kind: 'system', id: 'disk' }),
@@ -959,6 +1060,14 @@ function trigger(ruleId, payload) {
     }
 
     const dedup = (typeof rule.dedupeKey === 'function') ? rule.dedupeKey(payload || {}) : 'global';
+
+    // B3 (23.08): объект в maintenance-окне → алерты по нему молчат.
+    if (maintenance.isInMaintenance(db, { server: payload && payload.server, nick: payload && payload.nick }, Date.now())) return false;
+    // B2 (23.08): активный ack («в работе» до until_ts / «решено») глушит
+    // правило по dedup-ключу. Cooldown при ack НЕ трогаем: по истечении TTL
+    // алерт повторится сам, если проблема жива.
+    if (_ackActive(ruleId, dedup)) return false;
+
     const cooldownKey = ruleId + '|' + dedup;
     const lastSentAt = cooldownState.get(cooldownKey) || 0;
     if (Date.now() - lastSentAt < (rule.cooldownSec || 0) * 1000) return false;
@@ -989,7 +1098,28 @@ function trigger(ruleId, payload) {
     const chatId = appSettings.telegram_chat_id;
     if (!token || !chatId) return true;   // bell saved, just no TG configured
 
-    tgBot.sendMessage(token, chatId, text).catch(e => {
+    // B2 (23.08): inline-кнопки «🔧 В работе» / «✅ Решено» под critical/
+    // important-алертами (кроме bell-only и *_recovered — там глушить нечего).
+    const wantsButtons = (rule.priority === 'critical' || rule.priority === 'important')
+      && rule.channel !== 'bell' && !/_recovered$/.test(ruleId);
+    let ackHash = null;
+    let sendOpts;
+    if (wantsButtons) {
+      ackHash = _ackHash(ruleId, dedup);
+      _ackHashMap.set(ackHash, { ruleId, dedup });
+      sendOpts = { reply_markup: { inline_keyboard: [[
+        { text: '🔧 В работе', callback_data: 'a:ack:' + ackHash },
+        { text: '✅ Решено', callback_data: 'a:solve:' + ackHash },
+      ]] } };
+    }
+
+    tgBot.sendMessage(token, chatId, text, sendOpts).then(r => {
+      // Запоминаем message_id — после ack убираем кнопки editMessageReplyMarkup.
+      if (ackHash && r && r.ok && r.result && r.result.message_id) {
+        const ent = _ackHashMap.get(ackHash);
+        if (ent) { ent.chatId = chatId; ent.messageId = r.result.message_id; }
+      }
+    }).catch(e => {
       // Roll back the cooldown if Telegram actually rejected (so we retry next time).
       // Don't roll back on transient network — Telegram could have sent it.
       const msg = e && e.message || '';
@@ -1084,5 +1214,7 @@ function formatDuration(sec) {
 }
 
 module.exports = { init, trigger, clearCooldown, listRules, recordBellEvent, isRuleEnabled, RULES,
+  onAlertAck,                     // B2: обработчик inline-кнопок (bot.js)
+  _ackHash, _ackInvalidate,       // B2: для тестов
   _boxDownState: boxDownState,   // B1: для тестов и диагностики
 };

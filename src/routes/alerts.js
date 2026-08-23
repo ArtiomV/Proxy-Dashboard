@@ -49,6 +49,7 @@ module.exports = function (deps) {
       server_recovered:           { server: 'TEST', downSec: 312 },
       tochka_webhook_failed:      { streak: 3, error: 'signature mismatch (тест)' },
       db_backup_failed:           { error: 'ENOSPC: no space left (тест)' },
+      backup_restore_failed:      { source: 's3', file: 'dashboard-2026-08-22.db.gz', error: 'integrity_check failed (тест)' },
       duplicate_credit_blocked:   { client: 'Тестовый клиент', amount: 1000, natural_key: 'test|1000|2026-05-24|...' },
       heap_high:                  { pct: 92, usedMB: 460, totalMB: 500 },
       disk_low_critical:          { freeGB: 4.2, pct: 8 },

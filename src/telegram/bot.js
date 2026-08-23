@@ -34,6 +34,8 @@ let saveClients;       // (clients) => persist через clientsRepo.upsertRow
 let auditLog;          // (login, action, details)
 let kvGet, kvSet;      // кэш username бота (ключ tg_bot_username)
 let _sendImpl = null;  // DI для тестов: подмена исходящих сообщений без сети
+let _tgReqImpl = null; // DI для тестов: подмена сырых вызовов TG API (answerCallbackQuery и т.п.)
+let onAlertAck = null; // B2 (23.08): обработчик ack-кнопок алертов (src/telegram/alerts.js)
 let _lastUpdateId = 0;
 let _pollAbort = false;
 
@@ -49,12 +51,20 @@ function init(deps) {
   kvGet           = deps.kvGet || null;
   kvSet           = deps.kvSet || null;
   _sendImpl       = deps.sendMessageImpl || null;
+  _tgReqImpl      = deps.tgRequestImpl || null;
+  onAlertAck      = deps.onAlertAck || null;
 }
 
 // Внутренние отправители (handleUpdate) идут через _send — в тестах подменяется
 // через init({ sendMessageImpl }), в проде — боевой sendMessage (HTTPS в TG API).
 function _send(token, chatId, text, opts) {
   return (typeof _sendImpl === 'function' ? _sendImpl : sendMessage)(token, chatId, text, opts);
+}
+
+// Сырые вызовы Bot API, для которых нет обёртки-сообщения (answerCallbackQuery,
+// editMessageReplyMarkup). В тестах — через init({ tgRequestImpl }).
+function _api(token, method, params) {
+  return (typeof _tgReqImpl === 'function' ? _tgReqImpl : tgRequest)(token, method, params);
 }
 
 // ---------------------------------------------------------------------------
@@ -87,14 +97,17 @@ function tgRequest(token, method, params) {
 async function sendMessage(token, chatId, text, opts = {}) {
   if (!token) throw new Error('telegram_bot_token not set');
   if (!chatId) throw new Error('telegram_chat_id not set');
+  // B2 (23.08): opts.reply_markup — inline-клавиатура (кнопки ack алертов).
+  const base = { chat_id: chatId, parse_mode: opts.parse_mode || 'HTML', disable_web_page_preview: true };
+  if (opts.reply_markup) base.reply_markup = opts.reply_markup;
   // Telegram message hard limit 4096 chars — split or truncate.
   const TXT_LIMIT = 4000;
   if (text.length > TXT_LIMIT) {
     // send first chunk with note
     const first = text.slice(0, TXT_LIMIT) + '\n…(обрезано — открой дашборд для полного списка)';
-    return tgRequest(token, 'sendMessage', { chat_id: chatId, text: first, parse_mode: opts.parse_mode || 'HTML', disable_web_page_preview: true });
+    return _api(token, 'sendMessage', { ...base, text: first });
   }
-  return tgRequest(token, 'sendMessage', { chat_id: chatId, text, parse_mode: opts.parse_mode || 'HTML', disable_web_page_preview: true });
+  return _api(token, 'sendMessage', { ...base, text });
 }
 
 // ---------------------------------------------------------------------------
@@ -139,6 +152,8 @@ async function pollLoop() {
 }
 
 async function handleUpdate(token, u) {
+  // B2 (23.08): inline-кнопки под алертами («🔧 В работе» / «✅ Решено»).
+  if (u.callback_query) { await _handleAlertCallback(token, u.callback_query); return; }
   const msg = u.message || u.edited_message;
   if (!msg || !msg.text) return;
   const chatId = msg.chat && msg.chat.id;
@@ -205,6 +220,45 @@ async function handleUpdate(token, u) {
       `📡 <b>Статус подписки</b>\nВключено: ${enabled ? 'да' : 'нет'}\nВремя: ${time} МСК\nchat_id: <code>${chat}</code>`);
     return;
   }
+}
+
+// ────────────────────────────────────────────────────────────────
+//  B2 (23.08): callback_query от inline-кнопок алертов.
+//  data: 'a:ack:<hash16>' | 'a:solve:<hash16>' (хэш пары ruleId|dedup —
+//  лимит callback_data 64 байта). Разбор и запись — в alerts.onAlertAck.
+// ────────────────────────────────────────────────────────────────
+function _escTg(s) {
+  return String(s == null ? '' : s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+async function _handleAlertCallback(token, cq) {
+  const chatId = cq.message && cq.message.chat && cq.message.chat.id;
+  const answer = async (text) => {
+    try { await _api(token, 'answerCallbackQuery', { callback_query_id: cq.id, text }); }
+    catch (e) { logger.warn('[Telegram] answerCallbackQuery: ' + e.message); }
+  };
+  if (!_isAdminChat(chatId)) { await answer('⛔ Нет доступа'); return; }
+  const m = String(cq.data || '').match(/^a:(ack|solve):([0-9a-f]{16})$/);
+  if (!m) { await answer('Неизвестная кнопка'); return; }
+  if (typeof onAlertAck !== 'function') { await answer('Обработчик алертов недоступен'); return; }
+  const kind = m[1] === 'solve' ? 'solved' : 'ack';
+  const from = cq.from || {};
+  const user = from.username ? '@' + from.username : (from.first_name || 'admin');
+  let r;
+  try { r = await onAlertAck(kind, m[2], user); }
+  catch (e) { await answer('Ошибка: ' + e.message); return; }
+  if (!r || !r.ok) {
+    await answer(r && r.error === 'stale' ? 'Кнопка устарела — продублируй алерт' : 'Ошибка обработки');
+    return;
+  }
+  if (r.already) {
+    await answer(kind === 'ack' ? ('Уже в работе у ' + (r.by || '?')) : 'Уже отмечено решённым');
+    return;
+  }
+  await answer(kind === 'ack' ? 'Взято в работу' : 'Отмечено решённым');
+  const timeMsk = new Date().toLocaleTimeString('ru-RU', { timeZone: 'Europe/Moscow', hour: '2-digit', minute: '2-digit' });
+  await _send(token, chatId, kind === 'ack'
+    ? `🔧 Взял ${_escTg(user)} в ${timeMsk} МСК — алерт заглушен на ${r.ttlHours} ч`
+    : `✅ ${_escTg(user)} отметил алерт решённым`);
 }
 
 // ────────────────────────────────────────────────────────────────

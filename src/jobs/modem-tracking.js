@@ -20,6 +20,7 @@ function create(deps) {
     _metaIccidGetByImei,
     persistServerDownSince,
     modemPing, modemRate,
+    maintenance,   // B3 (23.08): src/maintenance.js — пометка простоев в окне обслуживания
   } = deps;
 
 async function trackModems() {
@@ -51,8 +52,11 @@ async function trackModems() {
         // Persist the outage episode (skip sub-2-min single-poll blips). (mig 035)
         if (downSec >= 120) {
           try {
-            db.prepare('INSERT INTO server_downtime (server_name, down_from, down_to, duration_sec, alerted) VALUES (?,?,?,?,?)')
-              .run(server.name, new Date(downStart).toISOString(), new Date().toISOString(), downSec, alerted);
+            // B3 (23.08): простой в активном окне обслуживания → maintenance=1,
+            // такие эпизоды исключаются из SLA-отчёта (C1).
+            const _maint = (maintenance && maintenance.isInMaintenance(db, { server: server.name }, Date.now())) ? 1 : 0;
+            db.prepare('INSERT INTO server_downtime (server_name, down_from, down_to, duration_sec, alerted, maintenance) VALUES (?,?,?,?,?,?)')
+              .run(server.name, new Date(downStart).toISOString(), new Date().toISOString(), downSec, alerted, _maint);
             logActivity('modem', 'info', 'server_downtime_recorded', server.name, `S ${server.name} был недоступен ${Math.round(downSec / 60)} мин`, { downSec, alerted });
           } catch (e) { logger.warn('[Downtime] record failed: ' + e.message); }
         }

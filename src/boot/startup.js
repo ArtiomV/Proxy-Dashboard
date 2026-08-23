@@ -287,6 +287,16 @@ function runStartup(d) {
   scheduleRepeating(2, 0, 'DbBackup', backupJobs.runDbBackup);
   scheduleRepeating(2, 30, 'HistoryPrune', backupJobs.runHistoryPrune);
 
+  // D3 (23.08): еженедельный тест восстановления бэкапа — воскресенье 03:10 UTC
+  // (день недели проверяем внутри: scheduleRepeating поддерживает только «ежедневно»).
+  // Последний дамп из облака (rclone) или локальный fallback → gunzip →
+  // integrity_check + счётчики; фейл → critical-алерт backup_restore_failed.
+  const _backupTest = require('../jobs/backup-test').create({ logger, alerts, logActivity, fs, path });
+  scheduleRepeating(3, 10, 'BackupRestoreTest', () => {
+    if (new Date().getUTCDay() !== 0) return;   // только воскресенье
+    return dbAudit.runJobAsync('BackupRestoreTest', 'weekly', () => _backupTest.runOnce());
+  });
+
   // Hourly: just the stale-port mapping cleanup (cheap, keeps the "modem
   // disconnected ≥ N days → vanish" window precise to the hour instead of
   // ±1 day from the nightly run).
@@ -361,6 +371,9 @@ function runStartup(d) {
     saveClients, auditLog,
     kvGet: (k) => kvGet.get(k),
     kvSet: (k, v) => kvSet.run(k, v),
+    // B2 (23.08): inline-кнопки ack под алертами — обработчик из alerts.js
+    // (алерты инициализируются ниже; колбэки придут только после tgBot.start()).
+    onAlertAck: (kind, hash, user) => alerts.onAlertAck(kind, hash, user),
   });
   // Stage 18.13: alerts framework wires into the same bot/chat.
   alerts.init({ logger, getSetting, appSettings, kvSetCritical, kvGet, db, tgBot });

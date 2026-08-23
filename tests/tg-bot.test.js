@@ -3,16 +3,16 @@
 // (паттерн retail-guard/alerts-urgent): исходящие сообщения подменяются
 // через init({ sendMessageImpl }), сеть не трогаем.
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
 const bot = require('../src/telegram/bot.js');
 
-let sent, buildCalls, settings, clientsArr, audited, saveCalls, linkCodes;
+let sent, buildCalls, settings, clientsArr, audited, saveCalls, linkCodes, apiCalls;
 
-function setup({ settings: s = {}, clients = [], codes = {} } = {}) {
-  sent = []; buildCalls = []; audited = []; saveCalls = 0;
+function setup({ settings: s = {}, clients = [], codes = {}, onAlertAck = null } = {}) {
+  sent = []; buildCalls = []; audited = []; saveCalls = 0; apiCalls = [];
   settings = { telegram_bot_token: 'tok', ...s };
   clientsArr = clients;
   linkCodes = codes;   // code → login (одноразовый: удаляем при consume)
@@ -33,6 +33,9 @@ function setup({ settings: s = {}, clients = [], codes = {} } = {}) {
     saveClients: () => { saveCalls++; },
     auditLog: (who, action, details) => audited.push({ who, action, details }),
     sendMessageImpl: async (token, chatId, text) => { sent.push({ token, chatId, text }); return { ok: true }; },
+    // B2: сырые вызовы Bot API (answerCallbackQuery, sendMessage с reply_markup)
+    tgRequestImpl: async (token, method, params) => { apiCalls.push({ token, method, params }); return { ok: true, result: {} }; },
+    onAlertAck,
   });
 }
 
@@ -152,5 +155,83 @@ describe('WP5: привязка аккаунта /start link_<code>', () => {
     await bot.handleUpdate('tok', upd(999, '/start link_GOOD'));
     expect(saveCalls).toBe(0);
     expect(sent[0].text).toContain('уже привязан к вашему аккаунту');
+  });
+});
+
+// ── B2 (ТЗ мониторинга v2, этап 4, 23.08): callback_query от ack-кнопок ──
+const HASH = '0123456789abcdef';
+
+function cbUpd(chatId, data, from = { id: 42, username: 'op' }) {
+  return {
+    update_id: 9,
+    callback_query: { id: 'cbq1', data, from, message: { chat: { id: chatId }, message_id: 55 } },
+  };
+}
+
+describe('B2: callback_query (кнопки «в работе»/«решено»)', () => {
+  it('чужой чат → «Нет доступа», onAlertAck не вызывается', async () => {
+    const ack = vi.fn();
+    setup({ settings: { telegram_admin_ids: '111' }, onAlertAck: ack });
+    await bot.handleUpdate('tok', cbUpd(999, 'a:ack:' + HASH));
+    expect(ack).not.toHaveBeenCalled();
+    const ans = apiCalls.find(c => c.method === 'answerCallbackQuery');
+    expect(ans.params.text).toContain('Нет доступа');
+  });
+
+  it('свой админ: ack → onAlertAck(ack, hash, @user) + сообщение в чат', async () => {
+    const ack = vi.fn().mockResolvedValue({ ok: true, ttlHours: 2 });
+    setup({ settings: { telegram_admin_ids: '111' }, onAlertAck: ack });
+    await bot.handleUpdate('tok', cbUpd(111, 'a:ack:' + HASH));
+    expect(ack).toHaveBeenCalledWith('ack', HASH, '@op');
+    const ans = apiCalls.find(c => c.method === 'answerCallbackQuery');
+    expect(ans.params.text).toContain('Взято в работу');
+    expect(sent).toHaveLength(1);
+    expect(sent[0].text).toContain('Взял @op');
+    expect(sent[0].text).toContain('2 ч');
+  });
+
+  it('solve → kind=solved, сообщение «отметил решённым»', async () => {
+    const ack = vi.fn().mockResolvedValue({ ok: true, ttlHours: 2 });
+    setup({ settings: { telegram_admin_ids: '111' }, onAlertAck: ack });
+    await bot.handleUpdate('tok', cbUpd(111, 'a:solve:' + HASH, { id: 42, first_name: 'Ivan' }));
+    expect(ack).toHaveBeenCalledWith('solved', HASH, 'Ivan');
+    expect(sent[0].text).toContain('Ivan отметил алерт решённым');
+  });
+
+  it('stale (кнопка после рестарта) → «продублируй алерт», сообщения нет', async () => {
+    const ack = vi.fn().mockResolvedValue({ ok: false, error: 'stale' });
+    setup({ settings: { telegram_admin_ids: '111' }, onAlertAck: ack });
+    await bot.handleUpdate('tok', cbUpd(111, 'a:ack:' + HASH));
+    const ans = apiCalls.find(c => c.method === 'answerCallbackQuery');
+    expect(ans.params.text).toContain('продублируй');
+    expect(sent).toHaveLength(0);
+  });
+
+  it('already → «Уже в работе у …», сообщения нет', async () => {
+    const ack = vi.fn().mockResolvedValue({ ok: true, already: true, by: '@boss' });
+    setup({ settings: { telegram_admin_ids: '111' }, onAlertAck: ack });
+    await bot.handleUpdate('tok', cbUpd(111, 'a:ack:' + HASH));
+    const ans = apiCalls.find(c => c.method === 'answerCallbackQuery');
+    expect(ans.params.text).toContain('Уже в работе у @boss');
+    expect(sent).toHaveLength(0);
+  });
+
+  it('мусорный callback_data → «Неизвестная кнопка», onAlertAck не вызывается', async () => {
+    const ack = vi.fn();
+    setup({ settings: { telegram_admin_ids: '111' }, onAlertAck: ack });
+    await bot.handleUpdate('tok', cbUpd(111, 'a:hack:xyz'));
+    expect(ack).not.toHaveBeenCalled();
+    const ans = apiCalls.find(c => c.method === 'answerCallbackQuery');
+    expect(ans.params.text).toContain('Неизвестная кнопка');
+  });
+
+  it('sendMessage пробрасывает reply_markup в Bot API', async () => {
+    setup();
+    await bot.sendMessage('tok', '123', 'alert text', {
+      reply_markup: { inline_keyboard: [[{ text: '🔧 В работе', callback_data: 'a:ack:' + HASH }]] },
+    });
+    const sm = apiCalls.find(c => c.method === 'sendMessage');
+    expect(sm.params.chat_id).toBe('123');
+    expect(sm.params.reply_markup.inline_keyboard[0][0].callback_data).toBe('a:ack:' + HASH);
   });
 });
