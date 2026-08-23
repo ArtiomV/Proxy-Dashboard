@@ -394,6 +394,49 @@ function _fleetSection(merged, sanitizedClients) {
   for (const c of sanitizedClients) {
     c.modemWorking = c.portName ? (_clientWorking[c.portName] || 0) : 0;
   }
+  // Трафик карточек «Парк по серверам» — из СОБСТВЕННОГО учёта
+  // (traffic_hourly + daily_traffic), живые счётчики бокса лишь как нижняя
+  // граница: при рестарте панели ProxySmart её счётчики обнуляются
+  // (инцидент 23.08: на MD-боксах proxysmart.service перезапустился → у всех
+  // портов month==day==lifetime). «Larger source wins» — как routes/traffic.js.
+  try {
+    const live = {};
+    for (const [k, v] of Object.entries(merged.bandwidth || {})) {
+      const i = k.indexOf('_');
+      if (i <= 0) continue;
+      const srv = k.slice(0, i);
+      const s = live[srv] || (live[srv] = { day: 0, mon: 0 });
+      s.day += (parseBwToBytes(v.bandwidth_bytes_day_in) || 0) + (parseBwToBytes(v.bandwidth_bytes_day_out) || 0);
+      s.mon += (parseBwToBytes(v.bandwidth_bytes_month_in) || 0) + (parseBwToBytes(v.bandwidth_bytes_month_out) || 0);
+    }
+    const todayMsk = getMoscowToday();
+    const monthStart = todayMsk.slice(0, 7) + '-01';
+    const hourlyToday = {};
+    for (const row of db.prepare(
+      `SELECT server_name AS srv, SUM(bytes_in + bytes_out) AS t FROM traffic_hourly
+        WHERE strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) = ? GROUP BY server_name`).all(todayMsk)) {
+      if (row.srv) hourlyToday[row.srv] = row.t || 0;
+    }
+    const dailyMonth = {};
+    for (const row of db.prepare(
+      `SELECT substr(port_name, 1, instr(port_name, '_') - 1) AS srv, SUM(bytes_in + bytes_out) AS t
+         FROM daily_traffic WHERE date >= ? AND date < ? GROUP BY srv`).all(monthStart, todayMsk)) {
+      if (row.srv) dailyMonth[row.srv] = row.t || 0;
+    }
+    let allToday = 0, allMonth = 0;
+    for (const srv of Object.keys(fleet.byServer)) {
+      const b = fleet.byServer[srv];
+      const l = live[srv] || { day: 0, mon: 0 };
+      const today = Math.max(l.day, hourlyToday[srv] || 0);
+      const month = Math.max(l.mon, (dailyMonth[srv] || 0) + (hourlyToday[srv] || 0));
+      b.todayBytes = today;
+      b.monthBytes = month;
+      allToday += today;
+      allMonth += month;
+    }
+    fleet.todayBytes = allToday;
+    fleet.monthBytes = allMonth;
+  } catch (e) { logger.warn('[fleet] server traffic sums failed (degraded): ' + e.message); }
   return { fleet };
 }
 

@@ -119,7 +119,17 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         liveMonthBytes += parseBwToBytes(bwData.bandwidth_bytes_month_in);
         liveMonthBytes += parseBwToBytes(bwData.bandwidth_bytes_month_out);
       }
-      const liveMonthGb = trafficBytesToGb(liveMonthBytes);
+      // Пол от собственного учёта (23.08): счётчики бокса обнуляются при
+      // рестарте панели ProxySmart — тогда месяц добираем из traffic_hourly.
+      let ownMonthBytes = 0;
+      try {
+        const row = db.prepare(
+          `SELECT SUM(bytes_in + bytes_out) AS t FROM traffic_hourly
+            WHERE client_name = ? AND strftime('%Y-%m', datetime(hour_start, '+3 hours')) = ?`
+        ).get(clientInfo.portName || '', getMoscowToday().slice(0, 7));
+        ownMonthBytes = (row && row.t) || 0;
+      } catch (_) { /* best-effort */ }
+      const liveMonthGb = trafficBytesToGb(Math.max(liveMonthBytes, ownMonthBytes));
 
       // Billed month GB from ledger (for comparison)
       const billedMonthGb = ledgerEntries

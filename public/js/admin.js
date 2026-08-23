@@ -3788,6 +3788,17 @@ function renderNewFleetServers(){
     var today=0,mon=0,prob=0,sigAvg=0;
     if(primary){ Object.keys(agg).forEach(function(s){ today+=agg[s].today; mon+=agg[s].mon; prob+=agg[s].prob; }); }
     else { var a=agg[srv]||{sig:0,sigN:0,prob:0,today:0,mon:0}; today=a.today; mon=a.mon; prob=a.prob; sigAvg=a.sigN?Math.round(a.sig/a.sigN):0; }
+    // Трафик из собственного учёта (бекенд, traffic_hourly/daily_traffic) —
+    // устойчив к обнулению счётчиков бокса при рестарте ProxySmart (23.08).
+    // Живые счётчики (agg) — fallback, если бэкенд-суммы не пришли.
+    if(primary){
+      if(typeof fleet.todayBytes==='number') today=fleet.todayBytes;
+      if(typeof fleet.monthBytes==='number') mon=fleet.monthBytes;
+    } else {
+      var fb2=bs[srv]||{};
+      if(typeof fb2.todayBytes==='number') today=fb2.todayBytes;
+      if(typeof fb2.monthBytes==='number') mon=fb2.monthBytes;
+    }
     var met=null, addr='';
     if(!primary && window._srvMetData){
       met = ((window._srvMetData.metrics||{})[srv])||null;
