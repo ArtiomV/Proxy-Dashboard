@@ -61,7 +61,7 @@ function _srvMetCard(name, m, address) {
   var stale = m && (m.age_sec || 0) > _SRVMET_STALE_SEC;
   var down = !!(m && m.error);
   var wrap = down
-    ? 'border:1px solid rgba(239,75,75,.5);border-radius:10px;padding:12px 14px;background:linear-gradient(160deg,#fff 0%,#fff4f4 100%);box-shadow:0 2px 12px rgba(239,75,75,.14)'
+    ? 'border:2px solid #e13232;border-radius:10px;padding:12px 14px;background:linear-gradient(160deg,#ffdcdc 0%,#ffb9b9 100%);box-shadow:0 4px 18px rgba(225,50,50,.35)'
     : 'border:0.5px solid var(--border);border-radius:10px;padding:12px 14px;background:var(--bg-2)'
       + (stale ? ';opacity:0.55' : '');
   var h = '<div style="' + wrap + '">';
