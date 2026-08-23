@@ -69,19 +69,25 @@ function buildDayContext(date) {
   try {
     ctx.servers = db.prepare(`
       WITH active AS (
-        SELECT DISTINCT server_name FROM proxy_checks WHERE checked_at >= ? AND checked_at < ?
+        SELECT DISTINCT server AS server_name FROM modem_ping WHERE ts >= ? AND ts < ?
         UNION
         SELECT DISTINCT server_name FROM traffic_hourly WHERE hour_start >= ? AND hour_start < ?
       ),
-      checks AS (
-        SELECT server_name,
-               COUNT(*) AS total_checks,
-               SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS err_checks,
-               ROUND(AVG(CASE WHEN error IS NULL THEN total_ms END), 0) AS avg_total_ms,
-               ROUND(AVG(CASE WHEN error IS NULL THEN connect_ms END), 0) AS avg_connect_ms
-        FROM proxy_checks
-        WHERE checked_at >= ? AND checked_at < ?
-        GROUP BY server_name
+      pings AS (
+        SELECT server AS server_name,
+               COUNT(*) AS total_pings,
+               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed_pings
+        FROM modem_ping
+        WHERE ts >= ? AND ts < ?
+        GROUP BY server
+      ),
+      http_checks AS (
+        SELECT server AS server_name,
+               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'no_valid_client_credentials') THEN 1 ELSE 0 END) AS total_http,
+               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'no_valid_client_credentials') THEN 1 ELSE 0 END) AS failed_http
+        FROM modem_httpcheck
+        WHERE ts >= ? AND ts < ?
+        GROUP BY server
       ),
       traffic AS (
         SELECT server_name, SUM(bytes_in + bytes_out) AS bytes
@@ -99,19 +105,32 @@ function buildDayContext(date) {
         GROUP BY server_name
       )
       SELECT a.server_name,
-             c.total_checks, c.err_checks, c.avg_total_ms, c.avg_connect_ms,
+             p.total_pings, p.failed_pings,
+             h.total_http, h.failed_http,
              t.bytes,
              r.total AS rot_total, r.failed AS rot_failed, r.avg_sec AS rot_avg_sec
       FROM active a
-      LEFT JOIN checks c ON c.server_name = a.server_name
+      LEFT JOIN pings p ON p.server_name = a.server_name
+      LEFT JOIN http_checks h ON h.server_name = a.server_name
       LEFT JOIN traffic t ON t.server_name = a.server_name
       LEFT JOIN rotations r ON r.server_name = a.server_name
       ORDER BY a.server_name
-    `).all(b.fromIso, b.toIso, b.from, b.to, b.fromIso, b.toIso, b.from, b.to, b.fromIso, b.toIso).map(r => ({
+    `).all(
+      b.fromIso, b.toIso, b.from, b.to,
+      b.fromIso, b.toIso, b.fromIso, b.toIso,
+      b.from, b.to, b.fromIso, b.toIso
+    ).map(r => ({
       server: r.server_name,
-      checks: { total: r.total_checks || 0, errors: r.err_checks || 0,
-                error_pct: r.total_checks > 0 ? Math.round(r.err_checks / r.total_checks * 1000) / 10 : 0 },
-      latency: { total_ms: r.avg_total_ms, connect_ms: r.avg_connect_ms },
+      ping: {
+        total: r.total_pings || 0,
+        failures: r.failed_pings || 0,
+        failure_pct: r.total_pings > 0 ? Math.round(r.failed_pings / r.total_pings * 1000) / 10 : 0,
+      },
+      http: {
+        total: r.total_http || 0,
+        failures: r.failed_http || 0,
+        failure_pct: r.total_http > 0 ? Math.round(r.failed_http / r.total_http * 1000) / 10 : 0,
+      },
       traffic_gb: r.bytes ? Math.round(r.bytes / 1e9 * 100) / 100 : 0,
       rotations: r.rot_total
         ? { total: r.rot_total, failed: r.rot_failed,
@@ -121,25 +140,52 @@ function buildDayContext(date) {
     }));
   } catch (e) { logger.warn('[AIInsights] servers query: ' + e.message); ctx.servers = []; }
 
-  // ── 2) Top outlier modems (high latency OR high errors) — capped at 15
+  // ── 2) Modems with repeated native-ping or HTTP failures — capped at 15
   try {
     ctx.problem_modems = db.prepare(`
-      SELECT server_name, nick,
-             COALESCE(operator, '') AS operator,
-             COUNT(*) AS total,
-             SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors,
-             ROUND(AVG(CASE WHEN error IS NULL THEN total_ms END), 0) AS avg_ms
-      FROM proxy_checks
-      WHERE checked_at >= ? AND checked_at < ?
-      GROUP BY server_name, nick
-      HAVING (errors * 100.0 / total > 15) OR (avg_ms > 1500)
-      ORDER BY errors DESC, avg_ms DESC
+      WITH keys AS (
+        SELECT server, nick FROM modem_ping WHERE ts >= ? AND ts < ?
+        UNION
+        SELECT server, nick FROM modem_httpcheck WHERE ts >= ? AND ts < ?
+      ),
+      p AS (
+        SELECT server, nick, COUNT(*) AS total,
+               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures
+        FROM modem_ping WHERE ts >= ? AND ts < ? GROUP BY server, nick
+      ),
+      h AS (
+        SELECT server, nick,
+               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'no_valid_client_credentials') THEN 1 ELSE 0 END) AS total,
+               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'no_valid_client_credentials') THEN 1 ELSE 0 END) AS failures
+        FROM modem_httpcheck WHERE ts >= ? AND ts < ? GROUP BY server, nick
+      )
+      SELECT k.server, k.nick,
+             COALESCE(p.total, 0) AS ping_total,
+             COALESCE(p.failures, 0) AS ping_failures,
+             COALESCE(h.total, 0) AS http_total,
+             COALESCE(h.failures, 0) AS http_failures
+      FROM keys k
+      LEFT JOIN p ON p.server = k.server AND p.nick = k.nick
+      LEFT JOIN h ON h.server = k.server AND h.nick = k.nick
+      WHERE (p.total > 0 AND p.failures * 100.0 / p.total > 15)
+         OR h.failures > 0
+      ORDER BY ping_failures DESC, http_failures DESC
       LIMIT 15
-    `).all(b.fromIso, b.toIso).map(r => ({
-      modem: r.nick, server: r.server_name, operator: r.operator,
-      checks: r.total, errors: r.errors,
-      error_pct: Math.round(r.errors / r.total * 1000) / 10,
-      avg_latency_ms: r.avg_ms,
+    `).all(
+      b.fromIso, b.toIso, b.fromIso, b.toIso,
+      b.fromIso, b.toIso, b.fromIso, b.toIso
+    ).map(r => ({
+      modem: r.nick, server: r.server,
+      ping: {
+        total: r.ping_total,
+        failures: r.ping_failures,
+        failure_pct: r.ping_total ? Math.round(r.ping_failures / r.ping_total * 1000) / 10 : 0,
+      },
+      http: {
+        total: r.http_total,
+        failures: r.http_failures,
+        failure_pct: r.http_total ? Math.round(r.http_failures / r.http_total * 1000) / 10 : 0,
+      },
     }));
   } catch (e) { logger.warn('[AIInsights] modems query: ' + e.message); ctx.problem_modems = []; }
 
@@ -200,24 +246,22 @@ function buildDayContext(date) {
     });
   } catch (e) { logger.warn('[AIInsights] traffic query: ' + e.message); ctx.traffic_top = []; }
 
-  // ── 5) Trend: compare yesterday's overall checks/errors vs trailing 7-day avg
+  // ── 5) Trend: compare native-ping failures with the trailing 7-day average
   try {
     const baselineFrom = new Date(b.fromIso); baselineFrom.setUTCDate(baselineFrom.getUTCDate() - 7);
     const trend = db.prepare(`
       SELECT
         COUNT(*) AS total,
-        SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors,
-        ROUND(AVG(CASE WHEN error IS NULL THEN total_ms END), 0) AS avg_ms
-      FROM proxy_checks
-      WHERE checked_at >= ? AND checked_at < ?
+        SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures
+      FROM modem_ping
+      WHERE ts >= ? AND ts < ?
     `).get(baselineFrom.toISOString(), b.fromIso);
     if (trend && trend.total) {
       const days = 7;
       ctx.baseline_7d = {
-        avg_daily_checks: Math.round(trend.total / days),
-        avg_daily_errors: Math.round(trend.errors / days),
-        baseline_error_pct: Math.round(trend.errors / trend.total * 1000) / 10,
-        baseline_avg_ms: trend.avg_ms,
+        avg_daily_pings: Math.round(trend.total / days),
+        avg_daily_ping_failures: Math.round(trend.failures / days),
+        baseline_ping_failure_pct: Math.round(trend.failures / trend.total * 1000) / 10,
       };
     }
   } catch (e) { logger.warn('[AIInsights] trend query: ' + e.message); }
@@ -242,7 +286,7 @@ const SYSTEM_PROMPT = `Ты — старший аналитик инфрастр
   <b>🎯 Главное</b> — 1-2 предложения про самое важное (победа или проблема).
   <b>⚠️ Требует внимания</b> — конкретные проблемы с цифрами и локациями. Если ничего критичного — напиши «всё в норме» честно.
   <b>💡 Рекомендации</b> — 2-3 действия, что сделать дальше.
-- Будь конкретным: называй серверы, модемы, проценты. НЕ «некоторые серверы проблемные», А «S1 (Молдова) — средняя задержка 1850мс при норме <500мс».
+- Будь конкретным: называй серверы, модемы, проценты. НЕ «некоторые серверы проблемные», А «S1 (Молдова) — 8% неуспешных пингов и 3 HTTP-сбоя».
 - Игнорируй шум: мелкие колебания одного модема — нормально. Сигнал — повторяющийся паттерн, целиком сервер, аномальный сдвиг трафика, всплеск ошибок.
 - Сравнивай с baseline_7d если он есть — это даёт контекст «хуже/лучше обычного».
 - Если данных мало (<100 проверок за день), скажи об этом и не выдумывай выводы.

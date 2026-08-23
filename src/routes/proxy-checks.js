@@ -2,9 +2,7 @@
 //
 // src/routes/proxy-checks.js — proxy health-check (Stage 3).
 //
-// 4 routes:
-//   GET  /api/admin/proxy_checks            — latency history per modem
-//   POST /api/admin/proxy_check             — manual single/bulk latency probe
+// 2 routes:
 //   GET  /api/admin/top_hosts               — live top domains snapshot
 //   POST /api/tools/check_proxy             — client-tool: test arbitrary proxy list
 // (top_hosts_aggregated/top_hosts_refresh were removed with #tab-traffic, C4 —
@@ -12,108 +10,14 @@
 
 const express = require('express');
 const http = require('http');
-const https = require('https');
 const net = require('net');
-const { pickValidClientHttpPort } = require('../utils/proxy-port');
 
 module.exports = function createProxyChecksRouter(deps) {
   const {
-    db, logger, authMiddleware, adminMiddleware, checkProxyLimiter,
-    fetchAllServersDataCached, fetchApi, findServer,
-    apiServers, SERVER_COUNTRIES,
-    curlCheckProxy, normalizeOperator,
-    dbStmts,
-    appSettings,
+    authMiddleware, adminMiddleware, checkProxyLimiter,
+    fetchApi, findServer,
   } = deps;
   const r = express.Router();
-
-r.get('/api/admin/proxy_checks', authMiddleware, adminMiddleware, (req, res) => {
-  try {
-    const nick = req.query.nick;
-    const days = Math.min(parseInt(req.query.days) || 7, 30);
-    const since = new Date(Date.now() - days * 86400000).toISOString();
-    if (nick) {
-      const checks = dbStmts.proxyCheckByNick.all(nick, since);
-      res.json({ checks });
-    } else {
-      const checks = dbStmts.proxyCheckRecent.all(since);
-      res.json({ checks });
-    }
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-r.post('/api/admin/proxy_check', authMiddleware, adminMiddleware, async (req, res) => {
-  try {
-    const { modems } = req.body; // [{nick, server}] or single {nick, server}
-    const list = Array.isArray(modems) ? modems : (req.body.nick ? [{ nick: req.body.nick, server: req.body.server }] : []);
-    if (!list.length) return res.status(400).json({ error: 'No modems specified' });
-    if (list.length > 50) return res.status(400).json({ error: 'Max 50 modems per request' });
-
-    const results = await fetchAllServersDataCached();
-    const nowIso = new Date().toISOString();
-
-    // Build proxy map: nick+server → proxyUrl
-    const proxyMap = {};
-    for (const data of results) {
-      const srv = data.serverName || '';
-      const sc = SERVER_COUNTRIES[srv] || {};
-      const serverIp = sc.serverIp || '';
-      if (!serverIp) continue;
-      const statusArr = Array.isArray(data.status) ? data.status : [];
-      const portsMap = data.ports || {};
-      const modemInfo = {};
-      for (const m of statusArr) {
-        const md = m.modem_details || {};
-        const imei = md.IMEI;
-        if (!imei) continue;
-        modemInfo[imei] = { nick: md.NICK || imei, operator: normalizeOperator(m.net_details?.CELLOP, srv === 'S2' || srv.startsWith('S2')) };
-      }
-      for (const [imei, portList] of Object.entries(portsMap)) {
-        const info = modemInfo[imei];
-        if (!info) continue;
-        const p = pickValidClientHttpPort(portList);
-        if (!p) continue;
-        proxyMap[info.nick + '|' + srv] = {
-          server: srv, nick: info.nick, client: p.portName, operator: info.operator || '',
-          proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
-        };
-      }
-    }
-
-    // Run checks
-    const checks = [];
-    for (const item of list) {
-      const key = (item.nick || '') + '|' + (item.server || '');
-      const proxy = proxyMap[key];
-      if (!proxy) {
-        checks.push({ nick: item.nick, server: item.server, error: 'Proxy not found' });
-        continue;
-      }
-      // Unassigned proxies don't accept connections in ProxySmart.
-      // Skip the actual check and return a clear explanation instead of
-      // a misleading "connection refused" / "407" error.
-      if (!proxy.client || !proxy.client.trim()) {
-        checks.push({
-          nick: proxy.nick, server: proxy.server, client: '',
-          operator: proxy.operator, status_code: null, total_ms: null, connect_ms: null,
-          error: 'Прокси не в аренде — присвойте portName клиенту, чтобы порт стал активным'
-        });
-        continue;
-      }
-      const r = await curlCheckProxy(proxy.proxyUrl);
-      const entry = { server: proxy.server, nick: proxy.nick, client: proxy.client, operator: proxy.operator, ...r };
-      dbStmts.proxyCheckInsert.run(entry.server, entry.nick, entry.client, entry.operator || '', nowIso, entry.connect_ms, entry.total_ms, entry.status_code, entry.error);
-      checks.push(entry);
-    }
-
-    res.json({ ok: true, checks });
-  } catch (e) {
-    logger.error('[ProxyCheck] Manual check error:', e.message);
-    res.status(500).json({ error: e.message });
-  }
-});
 
 r.get('/api/admin/top_hosts', authMiddleware, adminMiddleware, async (req, res) => {
   try {

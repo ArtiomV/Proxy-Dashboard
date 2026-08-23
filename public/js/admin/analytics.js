@@ -1,5 +1,5 @@
 // public/js/admin/analytics.js — analytics tab (WP6.3 carve-out from admin.js,
-// VERBATIM): category card, trend/heatmap/latency charts, traffic matrix,
+// VERBATIM): category card, trend/heatmap charts, traffic matrix,
 // top resources. Classic script, shared global scope.
 
 function chartExtTooltip(context){
@@ -571,80 +571,6 @@ function fmtMs(ms){
   if(s<10) return s.toFixed(2)+' с';
   return s.toFixed(1)+' с';
 }
-// Short variant for threshold labels — strips trailing zeros so 500/2000/4000
-// render as «0.5 с», «2 с», «4 с» (instead of «0.50 с»).
-function fmtMsShort(ms){
-  if(ms==null)return'—';
-  var s=ms/1000;
-  return (s%1===0?s.toFixed(0):s.toFixed(2).replace(/\.?0+$/,''))+' с';
-}
-
-// Renders distribution stacked bar + percentile cards. Falls back gracefully
-// if backend hasn't returned overall/buckets/prior (older API).
-function renderLatencySummary(data){
-  // Stage 17 — compact rebuild. Previous version stacked three full-width
-  // blocks (distribution + connect strip + percentile cards) taking ~150px.
-  // New layout: a single row with percentile chips + an inline distribution
-  // bar with the legend baked into the segments. TCP-handshake details
-  // moved behind a «Подробнее» toggle (rare-use). Total ~50px vs ~150px.
-  var sum=document.getElementById('latencySummary');if(!sum)return;
-  var ov=data.overall||{};
-  var pr=data.prior||{};
-  var bk=data.buckets||{};
-  var th=data.thresholds||{warn_ms:_pcWarnMs,bad_ms:_pcBadMs,very_slow_ms:_pcBadMs*2};
-  var okN=ov.ok_checks||0;
-  var html='';
-
-  // ── Row 1: KPI-плитки перцентилей (по макету: P50 медиана / P75 / P99 + Ошибки) ──
-  html+='<div class="kpi-row">';
-  function pct(label,sub,cur,prev,thresholdBad,thresholdWarn){
-    var col='var(--text-0)';
-    if(cur!=null){
-      if(thresholdBad&&cur>thresholdBad)col='var(--red)';
-      else if(thresholdWarn&&cur>thresholdWarn)col='var(--orange)';
-      else col='var(--green)';
-    }
-    var delta='';
-    if(cur!=null&&prev!=null&&prev>0){
-      var diff=cur-prev,dpct=Math.round(diff/prev*100);
-      if(Math.abs(dpct)>=5){
-        var dCol=diff<0?'var(--green)':'var(--red)';
-        delta=' <span style="font-size:10px;color:'+dCol+';font-weight:500">'+(diff<0?'▼':'▲')+Math.abs(dpct)+'%</span>';
-      }
-    }
-    return'<div class="kpi-tile"><div class="l">'+label+(sub?' <span style="text-transform:none;letter-spacing:0">'+sub+'</span>':'')+'</div><div class="v" style="color:'+col+'">'+fmtMs(cur)+delta+'</div></div>';
-  }
-  html+=pct('P50 медиана',null,ov.p50,pr.p50,_pcBadMs,_pcWarnMs);
-  html+=pct('P75',null,ov.p75,pr.p75,_pcBadMs,_pcWarnMs);
-  html+=pct('P99',null,ov.p99,pr.p99,_pcBadMs,_pcWarnMs);
-  html+='</div>';
-
-  // ── Row 2: compact distribution bar with inline thresholds ──
-  if(okN>0){
-    var f=bk.fast||0,o=bk.ok||0,s=bk.slow||0,vs=bk.very_slow||0;
-    var pf=f/okN*100,po=o/okN*100,ps=s/okN*100,pvs=vs/okN*100;
-    function seg(pct,col,label,cnt){
-      if(pct<=0)return'';
-      return'<div title="'+esc(label)+': '+cnt+' ('+pct.toFixed(1)+'%)" style="flex:'+pct+';background:'+col+';display:flex;align-items:center;justify-content:center;color:#fff;font-size:10px;font-weight:600;min-width:0;overflow:hidden;white-space:nowrap">'+(pct>=10?pct.toFixed(0)+'%':'')+'</div>';
-    }
-    html+='<div style="margin-top:4px;padding:0 4px">';
-    html+='<div style="display:flex;height:14px;border-radius:4px;overflow:hidden;background:var(--bg-3)">';
-    html+=seg(pf,'rgb(52,199,89)','< '+fmtMsShort(th.warn_ms),f);
-    html+=seg(po,'rgb(255,159,10)',fmtMsShort(th.warn_ms)+'–'+fmtMsShort(th.bad_ms),o);
-    html+=seg(ps,'rgb(255,99,71)',fmtMsShort(th.bad_ms)+'–'+fmtMsShort(th.very_slow_ms),s);
-    html+=seg(pvs,'rgb(165,40,40)','≥ '+fmtMsShort(th.very_slow_ms),vs);
-    html+='</div>';
-    // Словесная легенда (по макету): Быстрые · ОК · Медленные · Оч. медл.
-    html+='<div style="display:flex;gap:12px 16px;flex-wrap:wrap;margin-top:7px;font-size:11px;color:var(--text-2)" title="< '+th.warn_ms+' мс — быстро; '+th.warn_ms+'–'+th.bad_ms+' — норма; '+th.bad_ms+'–'+th.very_slow_ms+' — медленно; ≥ '+th.very_slow_ms+' — очень медленно">';
-    [['rgb(52,199,89)','Быстрые',pf],['rgb(255,159,10)','ОК',po],['rgb(255,99,71)','Медленные',ps],['rgb(165,40,40)','Оч. медл.',pvs]].forEach(function(x){
-      html+='<span style="display:inline-flex;align-items:center;gap:5px"><span style="width:8px;height:8px;border-radius:50%;background:'+x[0]+'"></span>'+x[1]+' <b>'+Math.round(x[2])+'%</b></span>';
-    });
-    html+='</div></div>';
-  }
-
-  sum.innerHTML=html;
-}
-
 var _MONTHS_RU_NOM=['Январь','Февраль','Март','Апрель','Май','Июнь','Июль','Август','Сентябрь','Октябрь','Ноябрь','Декабрь'];
 var _MONTHS_RU_SHORT=['Янв','Фев','Мар','Апр','Май','Июн','Июл','Авг','Сен','Окт','Ноя','Дек'];
 // «2026-03» → «Март» (или «Мар» при short). Возвращает исходную строку, если формат иной.

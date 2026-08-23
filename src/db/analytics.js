@@ -49,7 +49,6 @@ function init(db) {
   `);
   S.healthChecks = db.prepare(`
     SELECT server AS server_name, nick,
-           AVG(latency_ms) FILTER (WHERE ok = 1) as avg_latency,
            COUNT(*) as total_checks,
            SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) as err_checks
     FROM modem_ping
@@ -216,20 +215,6 @@ function init(db) {
     WHERE hour_start >= ${sinceExpr}${staleFilter}
   `);
 
-  // ── latency_stats from ProxySmart modem ping ──────────────────────
-  S.latencyDayVals = (tzStr, filter) => db.prepare(
-    `SELECT strftime('%Y-%m-%d', datetime(p.ts, '${tzStr}')) as day, p.latency_ms AS total_ms, NULL AS connect_ms FROM modem_ping p WHERE p.ts >= ? AND p.latency_ms IS NOT NULL AND p.ok = 1${filter} ORDER BY day, total_ms`);
-  S.latencyErrByDay = (tzStr, filter) => db.prepare(
-    `SELECT strftime('%Y-%m-%d', datetime(p.ts, '${tzStr}')) as day, COUNT(*) as cnt FROM modem_ping p WHERE p.ts >= ? AND p.ok = 0${filter} GROUP BY day`);
-  S.latencyTotalByDay = (tzStr, filter) => db.prepare(
-    `SELECT strftime('%Y-%m-%d', datetime(p.ts, '${tzStr}')) as day, COUNT(*) as cnt FROM modem_ping p WHERE p.ts >= ?${filter} GROUP BY day`);
-  S.latencyPriorVals = (filter) => db.prepare(
-    `SELECT p.latency_ms AS total_ms, NULL AS connect_ms FROM modem_ping p WHERE p.ts >= ? AND p.ts < ? AND p.latency_ms IS NOT NULL AND p.ok = 1${filter}`);
-  S.latencyPriorTotal = (filter) => db.prepare(
-    `SELECT COUNT(*) as cnt FROM modem_ping p WHERE p.ts >= ? AND p.ts < ?${filter}`);
-  S.latencyPriorErr = (filter) => db.prepare(
-    `SELECT COUNT(*) as cnt FROM modem_ping p WHERE p.ts >= ? AND p.ts < ? AND p.ok = 0${filter}`);
-
   // ── logs_domains_full ────────────────────────────────────────────────
   S.topHostsRows = (whereSql, limit) => db.prepare(`
     SELECT server_name, port_id, nick, client_name, operator, country, host, count
@@ -289,33 +274,6 @@ function notInClause(column, values) {
   return { clause: ` AND ${column} NOT IN (${arr.map(() => '?').join(',')})`, params: arr };
 }
 
-// ProxySmart modem_ping filter shared by latency_stats (view-scoped
-// + stale + unbound). The legacy function name is kept for route/test API
-// compatibility. Returns { clause, params } — appended after the
-// time bounds, so params must be appended after the time params.
-function proxyChecksFilter({ view, idKey, id, servers, staleNicks, unboundNicks, unboundFilter = true }) {
-  let clause = '';
-  const params = [];
-  if (idKey !== 'all') {
-    if (view === 'country' && servers && servers.length) {
-      clause += ' AND p.server IN (' + servers.map(() => '?').join(',') + ')';
-      params.push(...servers);
-    } else if (view === 'operator') {
-      clause += " AND EXISTS (SELECT 1 FROM modem_meta mm WHERE mm.server_name = p.server AND mm.nick = p.nick AND LOWER(REPLACE(mm.operator, ' ', '_')) LIKE ?)";
-      params.push('%' + idKey + '%');
-    } else if (view === 'client') {
-      clause += " AND EXISTS (SELECT 1 FROM known_modems km WHERE km.server_name = p.server AND json_extract(km.data, '$.nick') = p.nick AND json_extract(km.data, '$.portName') = ?)";
-      params.push(id);
-    }
-  }
-  for (const set of [staleNicks, unboundNicks]) {
-    const { clause: c, params: p } = notInClause('p.nick', set);
-    clause += c;
-    params.push(...p);
-  }
-  return { clause, params };
-}
-
 // heatmap day×hour matrix query (+ optional per-operator breakdown).
 // servers: resolved server names for country view (already filtered).
 function heatmapSql({ tzStr, start, view, idKey, id, servers }) {
@@ -366,7 +324,7 @@ function topHostsWhere({ host, client, operator, server, nick, minCount }) {
 
 module.exports = {
   init, UNBOUND_FILTER,
-  notInClause, proxyChecksFilter, heatmapSql, heatmapOperatorSql, topHostsWhere,
+  notInClause, heatmapSql, heatmapOperatorSql, topHostsWhere,
   // modem_health accessors (days is a negative int)
   healthActive:   (days) => S.healthActive.all(days, days),
   healthChecks:   (days) => S.healthChecks.all(days),
@@ -414,11 +372,4 @@ module.exports = {
     operators: S.topHostsFacetOperators.all().map(r => r.operator),
     servers: S.topHostsFacetServers.all().map(r => r.server_name),
   }),
-  // latency
-  latencyDayVals:    (tzStr, filter, since, params) => S.latencyDayVals(tzStr, filter).all(since, ...params),
-  latencyErrByDay:   (tzStr, filter, since, params) => S.latencyErrByDay(tzStr, filter).all(since, ...params),
-  latencyTotalByDay: (tzStr, filter, since, params) => S.latencyTotalByDay(tzStr, filter).all(since, ...params),
-  latencyPriorVals:  (filter, since, until, params) => S.latencyPriorVals(filter).all(since, until, ...params),
-  latencyPriorTotal: (filter, since, until, params) => S.latencyPriorTotal(filter).get(since, until, ...params),
-  latencyPriorErr:   (filter, since, until, params) => S.latencyPriorErr(filter).get(since, until, ...params),
 };

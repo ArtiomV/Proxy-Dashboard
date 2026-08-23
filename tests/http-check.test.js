@@ -17,7 +17,7 @@ function mk(overrides = {}) {
     httpcheck_url: 'https://example.com',
     httpcheck_must_contain: '',
     httpcheck_must_not_contain: '',
-    httpcheck_scope: 'speedtest_list',
+    httpcheck_scope: 'all',
     httpcheck_timeout_ms: 15000,
     speedtest_modems: 'MD2_39',
     ...overrides,
@@ -100,11 +100,11 @@ describe('http-check', () => {
     expect(db.prepare('SELECT COUNT(*) c FROM modem_httpcheck').get().c).toBe(0);
   });
 
-  it('scope=speedtest_list: ник вне списка не проверяется', async () => {
+  it('legacy scope больше не ограничивает HTTP-проверку списком Speedtest', async () => {
     const job = mk({ speedtest_modems: 'OTHER_NICK' });
     const res = await job.runOnce();
-    expect(res.total).toBe(0);
-    expect(db.prepare('SELECT COUNT(*) c FROM modem_httpcheck').get().c).toBe(0);
+    expect(res).toMatchObject({ total: 1, ok: 1 });
+    expect(db.prepare('SELECT COUNT(*) c FROM modem_httpcheck').get().c).toBe(1);
   });
 
   it('пропускает невалидные реквизиты и выбирает действующий клиентский порт', async () => {
@@ -149,7 +149,7 @@ describe('http-check', () => {
       fetchThroughProxy: async () => { fetches++; return { status: 200, totalMs: 80, body: 'ok' }; },
     });
     const res = await job.runOnce();
-    expect(res).toMatchObject({ ok: 0, failed: 1 });
+    expect(res).toMatchObject({ ok: 0, failed: 0, skipped: 1 });
     expect(fetches).toBe(0);
     expect(job.latest()['S1_MD2_39'].error).toBe('no_valid_client_credentials');
     expect(alertsFired).toEqual([]);

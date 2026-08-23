@@ -452,7 +452,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       // A3 (23.08): текущая скорость модемов + топ-5 грузящих для дашборда.
       modemRate: (getModemRateLatest ? getModemRateLatest() : {}),
       modemRateTop: (getModemRateTop ? getModemRateTop(5) : []),
-      // A2 (23.08): последний HTTP-чек каждого модема (scope speedtest_list).
+      // A2 (23.08): последний HTTP-чек каждого модема с причиной пропуска.
       modemHttpCheck: (getHttpCheckLatest ? getHttpCheckLatest() : {}),
       // B3 (23.08): окна обслуживания (активные + ближайшие 24ч).
       maintenance: maintSec,

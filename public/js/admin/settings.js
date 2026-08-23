@@ -218,22 +218,12 @@ function loadSettings(){
     // 2026-07-28: modem_offline_threshold_min — минут тишины до статуса «отключен».
     window._offlineThresholdMin = s.modem_offline_threshold_min != null ? s.modem_offline_threshold_min : 10;
     var _motEl=document.getElementById('modemOfflineThresholdInput');if(_motEl)_motEl.value=window._offlineThresholdMin;
-    var _palEl=document.getElementById('proxyAlertLatencyInput');if(_palEl)_palEl.value=s.proxy_alert_latency_ms!=null?s.proxy_alert_latency_ms:1500;
     var _paeEl=document.getElementById('proxyAlertErrorPctInput');if(_paeEl)_paeEl.value=s.proxy_alert_error_pct!=null?s.proxy_alert_error_pct:5;
     var _pawEl=document.getElementById('proxyAlertWindowInput');if(_pawEl)_pawEl.value=s.proxy_alert_window_min!=null?s.proxy_alert_window_min:60;
     var _arE=document.getElementById('autoRebootEnabledInput');if(_arE)_arE.checked=!!s.auto_reboot_enabled;
     var _arI=document.getElementById('autoRebootIntervalInput');if(_arI)_arI.value=s.auto_reboot_min_interval_min!=null?s.auto_reboot_min_interval_min:60;
     var _rrE=document.getElementById('randomRebootEnabledInput');if(_rrE)_rrE.checked=(s.random_modem_reboot_enabled!==false);
     var _rcD=document.getElementById('reconcileDaysInput');if(_rcD)_rcD.value=s.reconcile_days||2;
-    _pcWarnMs=s.proxy_check_warn_ms||500;
-    _pcBadMs=s.proxy_check_bad_ms||2000;
-    var pctEl=document.getElementById('proxyCheckTargetInput');if(pctEl)pctEl.value=s.proxy_check_target||'';
-    var pcwEl=document.getElementById('proxyCheckWarnInput');if(pcwEl)pcwEl.value=_pcWarnMs;
-    var pcbEl=document.getElementById('proxyCheckBadInput');if(pcbEl)pcbEl.value=_pcBadMs;
-    var pciEl=document.getElementById('proxyCheckIntervalInput');if(pciEl)pciEl.value=s.proxy_check_interval_min||60;
-    // Proxy check extended
-    var pctmEl=document.getElementById('proxyCheckTimeoutInput');if(pctmEl)pctmEl.value=s.proxy_check_timeout_sec||15;
-    var pccEl=document.getElementById('proxyCheckConcurrencyInput');if(pccEl)pccEl.value=s.proxy_check_concurrency||10;
     // Speedtest extended (выборочный почасовой замер — SpeedMonitor)
     var stmEl=document.getElementById('speedtestMaxHistoryInput');if(stmEl)stmEl.value=s.speedtest_max_history||30;
     var smDl=document.getElementById('speedmonRetryDlInput');if(smDl)smDl.value=s.speedmon_retry_dl_threshold!=null?s.speedmon_retry_dl_threshold:5;
@@ -323,7 +313,8 @@ function loadSettings(){
     var simD=document.getElementById('simMaxDurationInput');if(simD)simD.value=s.simulator_max_duration_min||30;
     if(currentData) currentData.settings = s;
     renderPricingTiers();
-    opPkgRender(s);
+    if(window._operatorsList)opPkgRender(s);
+    else refreshOperatorList().then(function(){opPkgRender(s);});
     var _vE=document.getElementById('volumeEnabledInput');if(_vE)_vE.checked=(s.volume_enabled!==false);
     // B2 (23.08): TTL кнопки «В работе» (секция «Уведомления»)
     var _ackT=document.getElementById('ackTtlHoursInput');if(_ackT)_ackT.value=s.ack_ttl_hours!=null?s.ack_ttl_hours:2;
@@ -431,19 +422,11 @@ function tgSendTest(){
     else{st.innerHTML=icon('x',12)+' '+esc(d.error||'Ошибка');st.style.color='var(--danger)';showToast(d.error||'Ошибка','error')}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)';showToast(e.message,'error')});
 }
-var _pcWarnMs=500,_pcBadMs=2000;
 function saveProxyCheckSettings(){
-  var warn=parseInt(document.getElementById('proxyCheckWarnInput').value)||500;
-  var bad=parseInt(document.getElementById('proxyCheckBadInput').value)||2000;
-  if(warn>=bad){showToast('Порог жёлтого должен быть меньше красного','error');return}
-  // Пороги «Сбоит прокси» (группа в той же карточке): боевой порог
-  // проблемных модемов → авто-ребут / failover.
-  var palLatency=parseInt(document.getElementById('proxyAlertLatencyInput').value)||1500;
   var palErrPct=parseFloat(document.getElementById('proxyAlertErrorPctInput').value)||5;
   var palWindow=parseInt(document.getElementById('proxyAlertWindowInput').value)||60;
-  _pcWarnMs=warn;_pcBadMs=bad;
-  api(API+'/api/admin/settings',{method:'PUT',json:{proxy_check_warn_ms:warn,proxy_check_bad_ms:bad,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow}}).then(function(d){
-    if(d.ok){showToast('Пороги ProxySmart-пинга сохранены','success');document.getElementById('proxyCheckSettingsStatus').textContent='Сохранено: зелёный <'+warn+'мс | жёлтый <'+bad+'мс | потери >'+palErrPct+'%';renderTable()}
+  api(API+'/api/admin/settings',{method:'PUT',json:{proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow}}).then(function(d){
+    if(d.ok){showToast('Порог сбоев пинга сохранён','success');document.getElementById('proxyCheckSettingsStatus').textContent='Сохранено: потери >'+palErrPct+'% за '+palWindow+' мин';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
 }
@@ -605,31 +588,58 @@ function _opPkgParse(s){
   try{var a=JSON.parse((s&&s.operator_packages)||'[]');return Array.isArray(a)?a:[];}
   catch(e){return [];}
 }
+function _opPkgOptions(selected){
+  var names=[];
+  (window._operatorsList||[]).forEach(function(o){
+    var n=String(o.operator||'').trim();
+    if(n&&!names.some(function(x){return x.toLowerCase()===n.toLowerCase()}))names.push(n);
+  });
+  if(selected&&!names.some(function(x){return x.toLowerCase()===String(selected).toLowerCase()}))names.push(String(selected));
+  names.sort(function(a,b){return a.localeCompare(b,'ru',{sensitivity:'base'});});
+  return '<option value="">Выберите оператора</option>'+names.map(function(n){return '<option value="'+esc(n)+'"'+(String(n).toLowerCase()===String(selected||'').toLowerCase()?' selected':'')+'>'+esc(n)+'</option>';}).join('');
+}
+function opPkgCalc(row){
+  if(!row)return;
+  var type=row.querySelector('.opp-type').value;
+  var volume=parseFloat(row.querySelector('.opp-vol').value)||0;
+  var sims=parseInt(row.querySelector('.opp-sims').value)||0;
+  var out=row.querySelector('.opp-calc');if(!out)return;
+  if(!volume||!sims){out.textContent='—';return;}
+  out.textContent=type==='per_sim'
+    ?(volume*sims).toLocaleString('ru-RU')+' ГБ всего'
+    :(Math.round(volume/sims*10)/10).toLocaleString('ru-RU')+' ГБ / SIM';
+}
 function opPkgRender(s){
   var box=document.getElementById('opPkgRows');if(!box)return;
   var pkgs=_opPkgParse(s);
-  var h='<div style="display:grid;grid-template-columns:1.4fr 110px 110px 110px 110px 30px;gap:6px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;padding:0 2px 5px">';
-  h+='<div>Оператор</div><div>Тип пакета</div><div>Объём, ГБ</div><div>Порог часа, ГБ</div><div>Темп, %/сут</div><div></div></div>';
+  var grid='minmax(170px,1.4fr) 110px 110px 74px minmax(125px,1fr) 105px 92px 30px';
+  var h='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;padding:0 2px 5px;min-width:900px">';
+  h+='<div>Оператор</div><div>Схема</div><div>Объём, ГБ</div><div>SIM</div><div>Расчёт</div><div>Порог часа</div><div>Темп, %/сут</div><div></div></div>';
   pkgs.forEach(function(p,i){
-    h+='<div style="display:grid;grid-template-columns:1.4fr 110px 110px 110px 110px 30px;gap:6px;margin-bottom:6px" class="op-pkg-row">'
-      +'<input class="input opp-op" value="'+esc(p.operator||'')+'" placeholder="Moldtelecom" style="font-size:12px">'
-      +'<select class="input opp-type" style="font-size:12px"><option value="per_sim"'+(p.type==='per_sim'?' selected':'')+'>на симку</option><option value="shared"'+(p.type==='shared'?' selected':'')+'>общий</option></select>'
-      +'<input class="input opp-vol" type="number" min="0" value="'+(p.volume_gb||0)+'" style="font-size:12px">'
+    var type=p.type==='shared'?'shared':'per_sim',sims=parseInt(p.sim_count)||0,vol=Number(p.volume_gb)||0;
+    var calc=vol&&sims?(type==='per_sim'?(vol*sims).toLocaleString('ru-RU')+' ГБ всего':(Math.round(vol/sims*10)/10).toLocaleString('ru-RU')+' ГБ / SIM'):'—';
+    h+='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;margin-bottom:6px;min-width:900px" class="op-pkg-row">'
+      +'<select class="input opp-op" style="font-size:12px">'+_opPkgOptions(p.operator||'')+'</select>'
+      +'<select class="input opp-type" data-on-change="opPkgCalc(this.closest(\'.op-pkg-row\'))" style="font-size:12px"><option value="per_sim"'+(type==='per_sim'?' selected':'')+'>на SIM</option><option value="shared"'+(type==='shared'?' selected':'')+'>бандл</option></select>'
+      +'<input class="input opp-vol" type="number" min="0" value="'+vol+'" data-on-input="opPkgCalc(this.closest(\'.op-pkg-row\'))" title="Для «на SIM» — лимит одной SIM; для «бандл» — общий объём" style="font-size:12px">'
+      +'<input class="input opp-sims" type="number" min="0" step="1" value="'+sims+'" data-on-input="opPkgCalc(this.closest(\'.op-pkg-row\'))" style="font-size:12px">'
+      +'<span class="opp-calc" style="display:flex;align-items:center;padding:0 7px;color:var(--text-2);font-size:11px;white-space:nowrap">'+calc+'</span>'
       +'<input class="input opp-hour" type="number" min="0" value="'+(p.hourly_gb||'')+'" placeholder="авто" style="font-size:12px">'
       +'<input class="input opp-pace" type="number" min="0" max="100" value="'+(p.pace_pct||0)+'" style="font-size:12px">'
       +'<button class="btn btn-sm" style="padding:2px 7px;color:var(--danger)" data-on-click="opPkgDelRow(this)">×</button></div>';
   });
-  box.innerHTML=h||'<div style="font-size:11px;color:var(--text-3)">Пакеты не заданы — добавьте операторов</div>';
+  box.innerHTML='<div style="overflow-x:auto">'+h+(pkgs.length?'':'<div style="font-size:11px;color:var(--text-3);padding:10px 2px">Пакеты не заданы — добавьте оператора</div>')+'</div>';
 }
 function opPkgAddRow(){
   var box=document.getElementById('opPkgRows');if(!box)return;
   var cur=[];box.querySelectorAll('.op-pkg-row').forEach(function(r){
     cur.push({operator:r.querySelector('.opp-op').value.trim(),type:r.querySelector('.opp-type').value,
       volume_gb:parseFloat(r.querySelector('.opp-vol').value)||0,
+      sim_count:parseInt(r.querySelector('.opp-sims').value)||0,
       hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
       pace_pct:parseFloat(r.querySelector('.opp-pace').value)||0});
   });
-  cur.push({operator:'',type:'per_sim',volume_gb:0,hourly_gb:0,pace_pct:0});
+  cur.push({operator:'',type:'per_sim',volume_gb:0,sim_count:0,hourly_gb:0,pace_pct:0});
   opPkgRender({operator_packages:JSON.stringify(cur)});
 }
 function opPkgDelRow(btn){
@@ -642,6 +652,7 @@ function opPkgSave(){
     if(!op){bad=true;return;}
     rows.push({operator:op,type:r.querySelector('.opp-type').value,
       volume_gb:parseFloat(r.querySelector('.opp-vol').value)||0,
+      sim_count:parseInt(r.querySelector('.opp-sims').value)||0,
       hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
       pace_pct:parseFloat(r.querySelector('.opp-pace').value)||0});
   });

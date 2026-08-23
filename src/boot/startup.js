@@ -14,7 +14,7 @@ function runStartup(d) {
     healthDb, uptimeTracking, getSetting, setSetting,
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
-    autoCreateMissingClients, proxyCheckRef,
+    autoCreateMissingClients,
     runAutoReboot, dbAudit, tochkaConfig, runTochkaSync,
     runRetentionCleanup, cleanupStalePortMappings,
     runDailyBilling, runMonthlyReconciliation,
@@ -129,13 +129,6 @@ function runStartup(d) {
     autoCreateMissingClients().catch(e => logger.error('[AutoCreate] Error:', e.message));
   }, (appSettings.auto_create_interval_min || 10) * 60000));
 
-  // External target latency probes are intentionally not scheduled anymore.
-  // ProxySmart already measures Ping Destination through every modem and the
-  // modem-ping job consumes net_details.ping_stats once a minute. Keep the
-  // legacy manual endpoint/history available for diagnostics only.
-  logger.info('[ProxyCheck] Scheduled external latency checks disabled; using ProxySmart ping_stats');
-  proxyCheckRef.iv = null;
-
   // Auto-reboot flaky modems every 15 min.
   // The throttle inside (auto_reboot_min_interval_min, default 60) ensures the
   // same modem isn't rebooted more than once per hour even if checked every 15.
@@ -217,8 +210,8 @@ function runStartup(d) {
       .catch(e => logger.error('[RetailGuard] periodic run failed:', e.message));
   }, 10 * 60 * 1000));
 
-  // A2 (23.08): HTTP-чек сайта через прокси-порты (scope = speedtest_list по
-  // умолчанию). Интервал читается с КАЖДОГО тика — правка настройки
+  // A2 (23.08): HTTP-чек сайта через валидные клиентские прокси-порты всего
+  // парка. Интервал читается с КАЖДОГО тика — правка настройки
   // httpcheck_interval_min применяется без рестарта (тик 1 мин — это
   // планировщик; прогон запускается, когда пришло время).
   if (runHttpCheck) {

@@ -150,7 +150,7 @@ historical notes (e.g. "moved in Stage 4"). Verified via:
 
 server.js is at **3,858** lines vs. the TZ's <250 aspirational target.
 Extracted so far: cleanup.js, tochka-cron.js, top-hosts.js, crm-sync.js,
-billing.js, modem-tracking.js, sla.js, proxy-checks.js, auto-reboot.js,
+billing.js, modem-tracking.js, sla.js, auto-reboot.js,
 monthly-reconciliation.js, services/modems.js, services/proxy-data.js,
 services/proxy-issues.js, db/migrations.js, daily-schedule.js,
 watchdogs.js, telegram/summary-loop.js, hourly-agg-schedule.js,
@@ -166,8 +166,8 @@ watchdogs.js, telegram/summary-loop.js, hourly-agg-schedule.js,
 | ~~`_runDailyBillingImpl`~~       |   215 | `src/jobs/billing.js`       | HIGH   |
 | ~~`trackModems`~~                |   162 | `src/jobs/modem-tracking.js`| MED    |
 | ~~`runMonthlyReconciliation`~~   |    95 | `src/jobs/monthly-reconciliation.js` | HIGH |
-| ~~`checkProxyLatency`~~          |    82 | `src/jobs/proxy-checks.js`  | LOW    |
-| ~~`runNightlySpeedtests`~~       |    78 | `src/jobs/proxy-checks.js`  | LOW    |
+| ~~`checkProxyLatency`~~          |    82 | удалён: используется нативный Ping Destination | LOW |
+| ~~`runNightlySpeedtests`~~       |    78 | удалён; выборочный speed-monitor живёт отдельно | LOW |
 | ~~`injectOfflineModems`~~        |    69 | `src/services/modems.js`    | LOW    |
 | ~~`mergeServerData`~~            |    68 | `src/services/proxy-data.js`| MED    |
 | ~~`runSlaCheck`~~                |    61 | `src/jobs/sla.js`           | LOW    |

@@ -549,8 +549,7 @@ SQLite (WAL mode, foreign keys, auto-vacuum) с 20+ таблицами:
     { "minModems": 50, "maxModems": 99, "price": 4050 },
     { "minModems": 100, "maxModems": 999, "price": 3825 }
   ],
-  "speedTestTimes": ["02:00", "14:00"],
-  "proxy_check_interval_min": 60
+  "speedTestTimes": ["02:00", "14:00"]
 }
 ```
 
@@ -559,7 +558,8 @@ SQLite (WAL mode, foreign keys, auto-vacuum) с 20+ таблицами:
 - **Трафик и uptime**: каждые 3 минуты (`trackModems`)
 - **Почасовая агрегация**: каждые 10 минут (`aggregateHourlyTraffic`)
 - **Speedtest**: по расписанию (например, 02:00 и 14:00)
-- **Проверка латентности**: каждые 60 минут
+- **Ping Destination**: нативные значения ProxySmart при каждом цикле tracking
+- **HTTP-мониторинг**: каждые 15 минут через валидный клиентский порт каждого реального модема
 - **Синхронизация ротации**: каждые 30 минут
 - **Очистка аудита**: записи старше 90 дней
 - **Авто-восстановление**: USB-reset офлайн модемов (в цикле trackModems)

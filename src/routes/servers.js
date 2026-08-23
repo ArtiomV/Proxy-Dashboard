@@ -21,7 +21,7 @@ module.exports = function createServersRouter(deps) {
     auditLog, getClientIp, getSetting,
     // Stage 14.2: setSettings() batches the validated patch + saves once;
     // no more direct `appSettings.x = ...` mutations in this router.
-    setSettings, rescheduleSpeedtests, rescheduleProxyCheck,
+    setSettings, rescheduleSpeedtests,
   } = deps;
   const r = express.Router();
 
@@ -314,16 +314,13 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   // but the only place in the codebase that mutated appSettings without
   // going through the canonical setSetting/setSettings helper. Now all
   // appSettings writes funnel through the same path.
-  const { pricing_tiers, min_speed_threshold, proxy_check_target, proxy_check_warn_ms, proxy_check_bad_ms } = req.body;
+  const { pricing_tiers, min_speed_threshold } = req.body;
   const patch = {};
   if (min_speed_threshold != null) {
     patch.min_speed_threshold = parseFloat(min_speed_threshold) || 2;
   }
   if (req.body.error_rate_threshold != null) {
     patch.error_rate_threshold = Math.max(1, Math.min(100, parseInt(req.body.error_rate_threshold) || 15));
-  }
-  if (req.body.proxy_alert_latency_ms != null) {
-    patch.proxy_alert_latency_ms = Math.max(100, Math.min(60000, parseInt(req.body.proxy_alert_latency_ms) || 1500));
   }
   if (req.body.proxy_alert_error_pct != null) {
     patch.proxy_alert_error_pct = Math.max(0, Math.min(100, parseFloat(req.body.proxy_alert_error_pct) || 5));
@@ -376,34 +373,6 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
       label: t.label || ''
     }));
   }
-  if (proxy_check_target != null) {
-    const url = String(proxy_check_target).trim();
-    // SSRF-defense: reject internal/loopback/metadata hosts. proxy_check_target
-    // is fed to curl from each ProxySmart server, so a malicious admin could
-    // pivot to internal services on those machines (or use server as a probe).
-    let ok = false;
-    if (url && /^https?:\/\/.+/.test(url)) {
-      try {
-        const u = new URL(url);
-        const host = u.hostname.toLowerCase();
-        const bad = /^(localhost$|127\.|10\.|192\.168\.|172\.(1[6-9]|2[0-9]|3[01])\.|0\.|169\.254\.|::1$|fc00:|fe80:|metadata\.)/i;
-        if (!bad.test(host) && !/^\d+$/.test(host) && host !== '0.0.0.0') ok = true;
-      } catch (_) { ok = false; }
-    }
-    if (ok) patch.proxy_check_target = url;
-    else return res.status(400).json({ error: 'proxy_check_target rejected (internal/loopback/metadata host)' });
-  }
-  if (proxy_check_warn_ms != null) {
-    patch.proxy_check_warn_ms = Math.max(50, parseInt(proxy_check_warn_ms) || 500);
-  }
-  if (proxy_check_bad_ms != null) {
-    patch.proxy_check_bad_ms = Math.max(100, parseInt(proxy_check_bad_ms) || 2000);
-  }
-  let needsProxyReschedule = false;
-  if (req.body.proxy_check_interval_min != null) {
-    patch.proxy_check_interval_min = Math.max(5, Math.min(1440, parseInt(req.body.proxy_check_interval_min) || 60));
-    needsProxyReschedule = true;
-  }
   // Auto-recovery
   if (req.body.recovery_offline_sec != null)   patch.recovery_offline_sec   = Math.max(10, Math.min(600, parseInt(req.body.recovery_offline_sec) || 60));
   if (req.body.recovery_max_attempts != null)  patch.recovery_max_attempts  = Math.max(1, Math.min(10, parseInt(req.body.recovery_max_attempts) || 3));
@@ -431,15 +400,24 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
     if (!Array.isArray(arr) || arr.length > 20) {
       return res.status(400).json({ error: 'operator_packages: массив до 20 строк' });
     }
+    const knownOperators = new Set(db.prepare(`
+      SELECT LOWER(TRIM(operator)) AS operator FROM modem_meta WHERE TRIM(COALESCE(operator, '')) <> ''
+      UNION SELECT LOWER(TRIM(canonical)) FROM operator_alias_map WHERE TRIM(COALESCE(canonical, '')) <> ''
+      UNION SELECT LOWER(TRIM(operator)) FROM operator_country_map WHERE TRIM(COALESCE(operator, '')) <> ''
+    `).all().map(row => row.operator));
     const clean = [];
     for (const p of arr) {
       const op = String((p && p.operator) || '').trim().slice(0, 60);
       if (!op) return res.status(400).json({ error: 'operator_packages: пустое имя оператора' });
+      if (!knownOperators.has(op.toLowerCase())) {
+        return res.status(400).json({ error: `operator_packages: оператор «${op}» отсутствует в справочнике` });
+      }
       const type = p.type === 'shared' ? 'shared' : 'per_sim';
       const num = (v, max) => { const n = parseFloat(v); return (Number.isFinite(n) && n >= 0 && n <= max) ? n : 0; };
       clean.push({
         operator: op, type,
         volume_gb: num(p.volume_gb, 1e6),
+        sim_count: Math.floor(num(p.sim_count, 10000)),
         hourly_gb: num(p.hourly_gb, 1e5),
         pace_pct: Math.min(100, num(p.pace_pct, 100)),
       });
@@ -465,8 +443,6 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.rotation_cache_ttl_min != null)     patch.rotation_cache_ttl_min     = Math.max(5, Math.min(240, parseInt(req.body.rotation_cache_ttl_min) || 30));
   if (req.body.rotation_sync_interval_min != null) patch.rotation_sync_interval_min = Math.max(5, Math.min(240, parseInt(req.body.rotation_sync_interval_min) || 30));
   // Proxy check (additional)
-  if (req.body.proxy_check_timeout_sec != null) patch.proxy_check_timeout_sec = Math.max(5, Math.min(120, parseInt(req.body.proxy_check_timeout_sec) || 15));
-  if (req.body.proxy_check_concurrency != null) patch.proxy_check_concurrency = Math.max(1, Math.min(50, parseInt(req.body.proxy_check_concurrency) || 10));
   // Speedtest (additional)
   if (req.body.speedtest_low_threshold != null)    patch.speedtest_low_threshold    = Math.max(0.1, Math.min(50, parseFloat(req.body.speedtest_low_threshold) || 1));
   if (req.body.speedtest_retest_delay_min != null) patch.speedtest_retest_delay_min = Math.max(1, Math.min(120, parseInt(req.body.speedtest_retest_delay_min) || 10));
@@ -661,7 +637,6 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   }
 
   setSettings(patch);
-  if (needsProxyReschedule) rescheduleProxyCheck();
   rescheduleSpeedtests();
   res.json({ ok: true, settings: appSettings, cred_checks: credVerdict.checks, cred_warnings: credVerdict.warnings });
 });

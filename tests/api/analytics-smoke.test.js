@@ -41,14 +41,6 @@ describe('analytics endpoints (WP6.1 split) — 200 + basic shape', () => {
     expect(Array.isArray(res.body.servers)).toBe(true);
   });
 
-  it('GET /api/analytics/latency_stats', async () => {
-    const res = await GET('/api/analytics/latency_stats?days=7');
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('overall');
-    expect(res.body).toHaveProperty('prior');
-    expect(Array.isArray(res.body.days)).toBe(true);
-  });
-
   it('GET /api/analytics/rotations', async () => {
     const res = await GET('/api/analytics/rotations?days=7');
     expect(res.status).toBe(200);

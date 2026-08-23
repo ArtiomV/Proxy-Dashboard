@@ -58,7 +58,6 @@ const trafficDb = require('./src/db/traffic');
 const trackingDb = require('./src/db/tracking');
 const healthDb = require('./src/db/health');           // Stage 17: daily health snapshots
 const operatorsDb = require('./src/db/operators');     // Stage 17: operator-country mapping
-const { execFile } = require('child_process');
 const os = require('os');
 
 // DASHBOARD_DB_PATH override lets tests point at an isolated temp DB
@@ -260,16 +259,6 @@ const dbStmts = {
   getAuditLog: db.prepare('SELECT * FROM audit_log ORDER BY id DESC LIMIT ? OFFSET ?'),
   countAuditLog: db.prepare('SELECT COUNT(*) as cnt FROM audit_log'),
   // cleanOldAudit — moved to runRetentionCleanup()
-
-  // Proxy latency monitoring
-  proxyCheckInsert: db.prepare(`INSERT INTO proxy_checks (server_name, nick, client_name, operator, checked_at, connect_ms, total_ms, status_code, error) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`),
-  // Explicit columns instead of SELECT * — proxy_checks has 11 columns; the UI
-  // only reads 7. Returning 1000 rows × unused columns wastes bytes on the wire.
-  proxyCheckRecent: db.prepare(`SELECT checked_at, server_name, nick, client_name, operator, connect_ms, total_ms, error FROM proxy_checks WHERE checked_at >= ? ORDER BY checked_at DESC LIMIT 1000`),
-  proxyCheckByNick: db.prepare(`SELECT checked_at, server_name, nick, client_name, operator, connect_ms, total_ms, error FROM proxy_checks WHERE nick = ? AND checked_at >= ? ORDER BY checked_at DESC LIMIT 100`),
-  proxyCheckSummary: db.prepare(`SELECT nick, server_name, COUNT(*) as total_checks, AVG(total_ms) as avg_ms, SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as error_count FROM proxy_checks WHERE checked_at >= ? GROUP BY nick, server_name`),
-  proxyCheckLast: db.prepare(`SELECT nick, server_name, connect_ms, total_ms, status_code, error, checked_at FROM proxy_checks WHERE id IN (SELECT MAX(id) FROM proxy_checks GROUP BY nick, server_name)`),
-  // proxyCheckCleanOld — moved to runRetentionCleanup()
 
   // System activity log
   systemLogInsert: db.prepare('INSERT INTO system_log (category, level, action, target, message, details) VALUES (?, ?, ?, ?, ?, ?)'),
@@ -1543,10 +1532,6 @@ const SETTINGS_DEFAULTS = {
     { min_proxies: 10, price: 23, label: '10-19 прокси' },
     { min_proxies: 20, price: 20, label: '20+ прокси' }
   ],
-  proxy_check_target: 'https://www.instagram.com/',
-  proxy_check_warn_ms: 500,
-  proxy_check_bad_ms: 2000,
-  proxy_check_interval_min: 60,
   // Auto-recovery — REWORKED 2026-06-26 for the unified fleet. New MF289D modems
   // have NO USB reset, only reboot + Re-Add → action is now REBOOT (×N), then one
   // Re-Add, then give up. Gated so it never storms futile resets (dead SIM,
@@ -1581,14 +1566,11 @@ const SETTINGS_DEFAULTS = {
   rotation_cache_ttl_min: 30,
   rotation_sync_interval_min: 30,
   // Proxy check (additional)
-  proxy_check_timeout_sec: 15,
-  proxy_check_concurrency: 10,
   error_rate_threshold: 15, // % errors to highlight red in modem table
   // "Сбоит прокси" alerts (Проблемы инфраструктуры): per-modem flaky thresholds
-  proxy_alert_latency_ms: 1500, // avg latency above which modem is flagged as flaky
   proxy_alert_error_pct:  5,    // error % above which modem is flagged as flaky
   proxy_alert_window_min: 60,   // evaluation window (minutes)
-  // Auto-reboot of flaky modems (high latency / high errors only — NOT for rotation-fail)
+  // Auto-reboot of flaky modems (sustained ping loss only — NOT for rotation-fail)
   auto_reboot_enabled:         false, // disabled by default — admin enables in Settings
   auto_reboot_min_interval_min: 60,   // throttle: don't reboot same modem more often than this
   random_modem_reboot_enabled: true,  // 20.08: random-ник (сбойный ре-енум) → ребут по IMEI, троттл 30 мин
@@ -1654,7 +1636,8 @@ const SETTINGS_DEFAULTS = {
   httpcheck_must_contain: '',              // пусто = не проверять наличие
   httpcheck_must_not_contain: '',          // пусто = не проверять отсутствие (заглушка оператора)
   httpcheck_interval_min: 15,              // период чеков
-  httpcheck_scope: 'speedtest_list',       // all | speedtest_list (ники speedtest_modems)
+  httpcheck_scope: 'all',                  // legacy key; HTTP monitoring now covers the whole fleet
+  httpcheck_concurrency: 8,
   httpcheck_timeout_ms: 15000,
   retention_modem_httpcheck: 30,
   retention_modem_rate: 7,                 // A3: дней снапшотов modem_rate
@@ -1668,11 +1651,11 @@ const SETTINGS_DEFAULTS = {
   // A4: пакеты операторов (JSON; UI Настройки → «Пакеты операторов»).
   // per_sim — объём на симку (Orange 400 ГБ); shared — общий котёл (30 ТБ).
   operator_packages: JSON.stringify([
-    { operator: 'Orange MD',   type: 'per_sim', volume_gb: 400,   hourly_gb: 20, pace_pct: 10 },
-    { operator: 'Moldtelecom', type: 'shared',  volume_gb: 30720, hourly_gb: 30, pace_pct: 5 },
-    { operator: 'Moldcell',    type: 'shared',  volume_gb: 30720, hourly_gb: 30, pace_pct: 5 },
-    { operator: 'Digi',        type: 'per_sim', volume_gb: 0,     hourly_gb: 30, pace_pct: 0 },
-    { operator: 'Orange RO',   type: 'per_sim', volume_gb: 0,     hourly_gb: 30, pace_pct: 0 },
+    { operator: 'Orange MD',   type: 'per_sim', volume_gb: 400,   sim_count: 0, hourly_gb: 20, pace_pct: 10 },
+    { operator: 'Moldtelecom', type: 'shared',  volume_gb: 30720, sim_count: 0, hourly_gb: 30, pace_pct: 5 },
+    { operator: 'Moldcell',    type: 'shared',  volume_gb: 30720, sim_count: 0, hourly_gb: 30, pace_pct: 5 },
+    { operator: 'Digi',        type: 'per_sim', volume_gb: 0,     sim_count: 0, hourly_gb: 30, pace_pct: 0 },
+    { operator: 'Orange RO',   type: 'per_sim', volume_gb: 0,     sim_count: 0, hourly_gb: 30, pace_pct: 0 },
   ]),
   volume_hourly_default_gb: 30,            // порог часа, если в пакете не задан
   // ── Domain guard (WP2): контроль доменов на bypass-боксах ────────
@@ -2902,61 +2885,6 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   events: eventsBus,                           // SSE (23.08): fleet_update / ping_result / modem_rate
 });
 
-// ========== PROXY LATENCY MONITORING ==========
-const _proxyCheckRef = { iv: null };   // shared с src/boot/startup.js
-function rescheduleProxyCheck() {
-  if (_proxyCheckRef.iv) clearInterval(_proxyCheckRef.iv);
-  _proxyCheckRef.iv = null;
-  logger.info('[ProxyCheck] External schedule remains disabled; latency comes from ProxySmart ping_stats');
-}
-function getProxyCheckTimeout() { return appSettings.proxy_check_timeout_sec || 15; }
-function getProxyCheckConcurrency() { return appSettings.proxy_check_concurrency || 10; }
-
-function curlCheckProxy(proxyUrl, targetUrl) {
-  const target = targetUrl || appSettings.proxy_check_target || 'https://www.instagram.com/';
-  // P1-5: block curl flag/option injection. execFile uses no shell, but a value
-  // beginning with '-' could be misread by curl as an option. Require an explicit
-  // allowed scheme on BOTH operands, and pass the target after '--' (end of
-  // options) so it can never be interpreted as a flag (e.g. '-K/etc/passwd').
-  const SCHEME = /^(https?|socks5h?):\/\//i;
-  if (!SCHEME.test(String(proxyUrl)) || !SCHEME.test(String(target))) {
-    return Promise.resolve({ connect_ms: null, total_ms: null, status_code: null, error: 'INVALID_URL' });
-  }
-  return new Promise((resolve) => {
-    const args = [
-      '--proxy', proxyUrl,
-      '-w', '%{time_connect}|||%{time_total}|||%{http_code}',
-      '-o', '/dev/null', '-s',
-      '--max-time', String(getProxyCheckTimeout()),
-      '-L', // follow redirects
-      '--', target
-    ];
-    execFile('curl', args, { timeout: (getProxyCheckTimeout() + 5) * 1000 }, (err, stdout) => {
-      if (err) {
-        const isTimeout = err.killed || (err.message && err.message.includes('timed out'));
-        resolve({ connect_ms: null, total_ms: null, status_code: null, error: isTimeout ? 'TIMEOUT' : err.message.slice(0, 200) });
-        return;
-      }
-      const parts = stdout.trim().split('|||');
-      if (parts.length === 3) {
-        const connectRaw = parseFloat(parts[0]);
-        const totalRaw = parseFloat(parts[1]);
-        const statusRaw = parseInt(parts[2]);
-        const connectMs = isNaN(connectRaw) ? null : Math.round(connectRaw * 1000);
-        const totalMs = isNaN(totalRaw) ? null : Math.round(totalRaw * 1000);
-        const statusCode = isNaN(statusRaw) ? null : statusRaw;
-        const error = (statusCode && statusCode >= 400) ? `HTTP ${statusCode}` : null;
-        resolve({ connect_ms: connectMs, total_ms: totalMs, status_code: statusCode, error });
-      } else {
-        resolve({ connect_ms: null, total_ms: null, status_code: null, error: 'Parse error' });
-      }
-    });
-  });
-}
-
-// checkProxyLatency / runNightlySpeedtests / parseSpeedtestResult moved to
-// src/jobs/proxy-checks.js (Stage 9); делегаты созданы выше (_proxyCheckJobs).
-
 const SPEEDTEST_HISTORY_FILE = path.join(__dirname, 'speedtest_history.json');
 function getMaxSpeedtestEntries() { return appSettings.speedtest_max_history || 30; }
 
@@ -2973,8 +2901,6 @@ function saveSpeedtestHistory() {
     .catch(e => { logger.error('[saveSpeedtestHistory] write failed:', e.message); });
 }
 
-// speedtestRunning flag moved into src/jobs/proxy-checks.js (re-entrancy guard).
-
 function pushSpeedtestEntry(key, entry) {
   if (!speedtestHistory[key]) speedtestHistory[key] = [];
   speedtestHistory[key].push(entry);
@@ -2983,18 +2909,6 @@ function pushSpeedtestEntry(key, entry) {
   }
   saveSpeedtestHistory();
 }
-
-// Stage 9: проверки качества прокси вынесены в джобы-модули.
-// Экземпляры создаются здесь — все их зависимости уже определены,
-// а callsites ниже по файлу (load-time и runtime) получают делегаты.
-const _proxyCheckJobs = require('./src/jobs/proxy-checks').create({
-  db, dbStmts, logger, logActivity,
-  fetchAllServersDataCached, SERVER_COUNTRIES, normalizeOperator, isAutoRandomPort: _isAutoRandomPort,
-  getProxyCheckConcurrency, curlCheckProxy,
-  apiServers, fetchApi, appSettings, pushSpeedtestEntry,
-});
-// runNightlySpeedtests (весь флот) больше нигде не планируется — 2026-08-13
-// авто-замер по всем модемам отключён (см. src/jobs/daily-schedule.js).
 
 // Почасовой замер скорости выбранных модемов (список — настройка speedtest_modems,
 // env SPEED_MONITOR_NICKS остаётся override'ом для стендов).
@@ -3324,33 +3238,12 @@ app.use(require('./src/routes/analytics-capacity')({
   logger, authMiddleware, adminMiddleware,
   getStaleNicks, getStaleImeis,
 }));
-app.use(require('./src/routes/analytics-latency')({
-  db, logger, authMiddleware, adminMiddleware,
-  appSettings,
-  apiServers,
-  SERVER_COUNTRIES,
-  getStaleNicks, getUnboundNicks,
-  getTzOffset,
-}));
 app.use(require('./src/routes/analytics-domains')({
   logger, authMiddleware, adminMiddleware,
   db, runDomainGuard, logActivity,
 }));
 
-// Heatmap response cache: key=view|id|days, TTL 5 min.
-// Heatmap data only changes once per hour (when hourly aggregation runs),
-// so a 5-min cache saves ~hundreds of strftime invocations per request.
-const _heatmapCache = new Map();
-const HEATMAP_TTL_MS = 5 * 60 * 1000;
-
-
-// Per-port heatmap for a specific modem (nick)
-
-
-// "Сбоит прокси" — качество прокси-сервиса (latency + error rate).
-// Триггеры:
-//   1) avg latency за окно > proxy_alert_latency_ms
-//   2) error_rate за окно > proxy_alert_error_pct
+// "Сбоит прокси" — устойчивые потери нативного ProxySmart-пинга.
 // IP-ротация НЕ учитывается — для этого есть отдельная карточка "Завис IP",
 // которая опирается на ip_tracking (живые проверки IP), а не на rotation_log
 // (который часто содержит исторические/auto-rotation записи без реального
@@ -3360,7 +3253,7 @@ const { computeProxyIssues } = require('./src/services/proxy-issues').create({ d
 
 // Auto-reboot of flaky modems.
 // Triggers when a modem appears in proxyIssues with reasons OTHER than just
-// rotation-fail (i.e. actual quality problems: high latency or high error %).
+// rotation-fail (only actual sustained ping-loss problems are eligible).
 // Throttle: never reboots the same modem more often than auto_reboot_min_interval_min.
 // Safe by design — opt-in via appSettings.auto_reboot_enabled.
 // runAutoReboot moved to src/jobs/auto-reboot.js (Stage 9).
@@ -3369,30 +3262,16 @@ const { runAutoReboot } = require('./src/jobs/auto-reboot').create({
   computeProxyIssues, fetchAllServersDataCached, findServer, fetchApi,
 });
 
-// Compatibility-shaped ping summary for the existing modem cards. The source
-// is ProxySmart ping_stats (modem_ping), not our retired external HTTP latency
-// probe. Keeping the response keys avoids a risky frontend flag day.
+// ProxySmart ping failure summary for modem cards. Latency is displayed only
+// in the dedicated native Ping column and is not aggregated/scored separately.
 function getProxyCheckSummary() {
   try {
     const since7d = new Date(Date.now() - 7 * 86400000).toISOString();
     const summary = db.prepare(`
       SELECT server AS server_name, nick, COUNT(*) AS total_checks,
-             AVG(latency_ms) FILTER (WHERE ok = 1) AS avg_ms,
              SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_count
       FROM modem_ping WHERE ts >= ? GROUP BY server, nick
     `).all(since7d);
-    const last = db.prepare(`
-      WITH ranked AS (
-        SELECT server, nick, latency_ms, ok, ts,
-               ROW_NUMBER() OVER (PARTITION BY server, nick ORDER BY ts DESC) AS rn
-        FROM modem_ping
-      )
-      SELECT server AS server_name, nick, NULL AS connect_ms,
-             latency_ms AS total_ms, CASE WHEN ok = 1 THEN 200 ELSE NULL END AS status_code,
-             CASE WHEN ok = 1 THEN NULL ELSE 'ping_loss' END AS error,
-             ts AS checked_at
-      FROM ranked WHERE rn = 1
-    `).all();
     // Per-modem count of CONSECUTIVE trailing failed checks (most recent ones,
     // until the latest success) over the last 2h. The UI flags «прокси не
     // отвечает» only at ≥3 in a row, so a single flaky timeout never trips it.
@@ -3417,29 +3296,22 @@ function getProxyCheckSummary() {
         "FROM modem_ping WHERE ts >= ? GROUP BY server, nick");
       today = getProxyCheckSummary._today.all(sinceToday);
     } catch (_) { /* no rows */ }
-    return { summary, last, consec, today };
-  } catch (e) { return { summary: [], last: [], consec: [], today: [] }; }
+    return { summary, consec, today };
+  } catch (e) { return { summary: [], consec: [], today: [] }; }
 }
 
 // Detailed proxy check history API
 // Proxy-checks + top-hosts routes moved to src/routes/proxy-checks.js (Stage 3).
 app.use(require('./src/routes/proxy-checks')({
-  db, logger, authMiddleware, adminMiddleware, checkProxyLimiter,
-  fetchAllServersDataCached, fetchApi, findServer,
-  apiServers, SERVER_COUNTRIES,
-  curlCheckProxy, normalizeOperator,
-  dbStmts,
-  appSettings,
+  authMiddleware, adminMiddleware, checkProxyLimiter,
+  fetchApi, findServer,
 }));
-
-// Latency analytics — daily percentiles, overall distribution, and prior-period
-// comparison. Used by the "Распределение задержек" card.
 
 // ============================================================================
 // PHASE 3 — "Система" tab analytics endpoints
 // ============================================================================
 
-// 3.1 Modem health: per-modem uptime, latency, errors, rotations, traffic, score
+// 3.1 Modem health: per-modem uptime, ping failures, rotations, traffic, score
 
 // 3.2 Rotation analytics
 
@@ -3547,7 +3419,7 @@ app.use(require('./src/routes/servers')({
   apiServers, SERVER_COUNTRIES, appSettings,
   fetchApi, saveApiServersToDb, proxySmart,
   auditLog, getClientIp, getSetting,
-  setSettings, rescheduleSpeedtests, rescheduleProxyCheck,
+  setSettings, rescheduleSpeedtests,
   _serverDownSince,   // незакрытые простои → downtime24 в /api/admin/server_metrics
 }));
 
@@ -4226,7 +4098,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     healthDb, uptimeTracking, getSetting, setSetting,
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
-    autoCreateMissingClients, proxyCheckRef: _proxyCheckRef,
+    autoCreateMissingClients,
     runAutoReboot, dbAudit, tochkaConfig, runTochkaSync,
     runRetentionCleanup, cleanupStalePortMappings,
     runDailyBilling, runMonthlyReconciliation,
@@ -4260,7 +4132,6 @@ function gracefulShutdown(signal) {
   logger.info(`\n[Shutdown] Received ${signal}, shutting down gracefully...`);
 
   if (_hourlyAggSched) _hourlyAggSched.stop();
-  if (_proxyCheckRef.iv) clearInterval(_proxyCheckRef.iv);
   for (const iv of _intervals) clearInterval(iv);
   _intervals.length = 0;
   for (const t of _dailySched.speedtestTimers.concat(_dailySched.cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }

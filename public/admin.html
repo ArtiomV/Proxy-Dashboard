@@ -158,7 +158,7 @@
 
 <!-- TAB: DASHBOARD (бывший ⚡ NEW) — основной экран, единый вид.
      Always-visible: KPI row · heatmap · clients · daily chart · mini finances.
-     Collapsibles (<details>): latency · infra · top hosts · matrix. -->
+     Collapsibles (<details>): infra · top hosts · matrix. -->
 <div class="tab-content active" id="tab-dashboard" style="padding:14px 24px">
     <!-- Header -->
     <div style="display:flex;justify-content:space-between;align-items:flex-end;margin-bottom:12px;flex-wrap:wrap;gap:10px">
@@ -179,7 +179,6 @@
     <!-- ───── ПАРК ПО СЕРВЕРАМ (как в макете — наверх) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/></svg>Парк по серверам</div>
     <div id="newFleetServers" class="fleet-grid"><div class="skel" style="height:150px"></div><div class="skel" style="height:150px"></div><div class="skel" style="height:150px"></div><div class="skel" style="height:150px"></div></div>
-    <div id="rateTopStrip" style="margin:0 0 16px"></div>
 
     <!-- ───── ФИНАНСЫ ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg>Финансы</div>
@@ -212,12 +211,6 @@
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-2)">Период:</span><button class="dchip" data-on-click="setNewInfraDays(1,this)">1 день</button><button class="dchip" data-on-click="setNewInfraDays(3,this)">3 дня</button><button class="dchip on" data-on-click="setNewInfraDays(7,this)">7 дней</button><button class="dchip" data-on-click="setNewInfraDays(14,this)">14 дней</button><button class="dchip" data-on-click="setNewInfraDays(30,this)">30 дней</button></div>
         <div id="newInfraKpis"></div>
         <div id="newInfraTables"><div class="skel" style="height:240px"></div></div>
-      </div>
-    </details>
-    <details class="acc-expand" data-section="latency" open>
-      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><rect x="4" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16" y="4" width="4" height="16" rx="1"/></svg></span>Распределение задержек</summary>
-      <div class="acc-expand-body">
-        <div id="latencySummary" style="padding:4px 2px"><div class="skel" style="height:140px"></div></div>
       </div>
     </details>
 
@@ -966,7 +959,7 @@
             </div>
           </div>
           <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:820px">
-            Защита пакетов трафика: алерт, когда модем скачал больше порога за час, и когда суточный темп грозит исчерпать пакет раньше времени. <b>per_sim</b> — объём на каждую симку (Orange 400 ГБ); <b>shared</b> — общий котёл на оператора (Moldtelecom/Moldcell 30 ТБ). Порог часа пустой у per_sim = 5% пакета; порог темпа — % пакета в сутки (0 = выкл). Имя оператора — как в колонке «Оператор» (Moldtelecom, Moldcell, Orange MD, Digi, Orange RO).
+            Выберите оператора из общего справочника, схему пакета и количество SIM. Для <b>«на SIM»</b> объём задаётся на одну SIM; для <b>«бандл»</b> — общий объём на все SIM. Расчёт рядом сразу покажет суммарный пакет или среднюю долю на SIM. Порог часа пустой = автоматически; темп 0% = выключен.
           </div>
           <div id="opPkgRows"></div>
           <div id="opPkgStatus" style="font-size:11px;color:var(--text-3);margin-top:8px"></div>
@@ -1202,29 +1195,13 @@
 
         <!-- Штатный пинг ProxySmart -->
         <div class="analytics-card" data-subsec="proxycheck" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Пинг ProxySmart</h3><span class="settings-card-badge" style="color:var(--success)">без внешних чеков</span></div>
-          <div class="settings-card-desc">Задержка и потери берутся из <b>Ping Destination</b> каждого модема в ProxySmart (bbc.com, около раза в минуту). Дашборд больше не пингует сайты самостоятельно.</div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Сбои пинга ProxySmart</h3><span class="settings-card-badge" style="color:var(--success)">без внешних чеков</span></div>
+          <div class="settings-card-desc">Сбой — нативный замер <b>Ping Destination</b> модема в ProxySmart завершился потерей пакетов. Отдельный расчёт латентности и внешние пинги отключены.</div>
 
-          <div class="set-grp-label">ПОРОГИ ЗАДЕРЖКИ (МС)</div>
+          <div class="set-grp-label">ПОРОГИ ПРОБЛЕМНЫХ МОДЕМОВ</div>
           <div class="set-card">
-            <div class="set-row">
-              <div class="set-row-t"><span class="pc-lat pc-good" style="font-size:10px">Зелёный</span> &nbsp;до</div>
-              <div class="set-inp"><input id="proxyCheckWarnInput" type="number" min="50" step="50"><span>мс</span></div>
-            </div>
-            <div class="set-row">
-              <div class="set-row-t"><span class="pc-lat pc-warn" style="font-size:10px">Жёлтый</span> &nbsp;до</div>
-              <div class="set-inp"><input id="proxyCheckBadInput" type="number" min="100" step="100"><span>мс</span></div>
-            </div>
-            <div class="set-row">
-              <div class="set-row-t"><span class="pc-lat pc-bad" style="font-size:10px">Красный</span> &nbsp;всё, что выше жёлтого</div>
-            </div>
-          </div>
-
-          <div class="set-grp-label">«СБОИТ ПРОКСИ» — ПОРОГИ ПРОБЛЕМНЫХ</div>
-          <div class="set-card">
-            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: задержка</div><div class="set-row-d">Модем проблемный, если средняя задержка выше</div></div><div class="set-inp"><input id="proxyAlertLatencyInput" type="number" step="50" min="100" max="60000"><span>мс</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: потери</div><div class="set-row-d">Средний packet loss из ProxySmart выше порога → авто-ребут / failover</div></div><div class="set-inp"><input id="proxyAlertErrorPctInput" type="number" step="0.5" min="0" max="100"><span>%</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: окно</div><div class="set-row-d">За какой период оцениваем задержку и ошибки (5–720)</div></div><div class="set-inp"><input id="proxyAlertWindowInput" type="number" step="5" min="5" max="720"><span>мин</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Потери пакетов</div><div class="set-row-d">Средний packet loss из ProxySmart выше порога → авто-ребут / failover</div></div><div class="set-inp"><input id="proxyAlertErrorPctInput" type="number" step="0.5" min="0" max="100"><span>%</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Окно анализа</div><div class="set-row-d">За какой период оцениваем потери (5–720)</div></div><div class="set-inp"><input id="proxyAlertWindowInput" type="number" step="5" min="5" max="720"><span>мин</span></div></div>
           </div>
 
           <div class="set-save-bar">
@@ -1535,14 +1512,14 @@
 <script src="/js/delegation.js?v=0727b"></script>
 <script src="/js/admin/delegated-helpers.js?v=0820e"></script>
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
-<script src="/js/admin/analytics.js?v=0823h"></script>
+<script src="/js/admin/analytics.js?v=0823j"></script>
 <script src="/js/admin/finance.js?v=0823b"></script>
-<script src="/js/admin/modems.js?v=0823f"></script>
+<script src="/js/admin/modems.js?v=0823j"></script>
 <script src="/js/admin/dguard.js?v=0818a"></script>
-<script src="/js/admin/settings.js?v=0823i"></script>
+<script src="/js/admin/settings.js?v=0823j"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0823e"></script>
-<script src="/js/admin.js?v=0823i"></script>
+<script src="/js/admin.js?v=0823j"></script>
 <script src="/js/admin/sse.js?v=0823h"></script>
 </body>
 </html>

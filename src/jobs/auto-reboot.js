@@ -2,7 +2,7 @@
 //
 // src/jobs/auto-reboot.js — авто-перезагрузка «хромающих» модемов.
 // Срабатывает, когда модем попадает в proxyIssues по причинам качества
-// (высокая задержка или высокий % ошибок, не rotation-fail). Троттлинг:
+// (устойчивые потери пинга, не rotation-fail). Троттлинг:
 // не чаще auto_reboot_min_interval_min на модем. Opt-in через
 // appSettings.auto_reboot_enabled. Extracted from server.js (Stage 9) —
 // без изменения логики.
@@ -30,7 +30,7 @@ function create(deps) {
     if (!appSettings.auto_reboot_enabled) return;
     const minInterval = Math.max(15, parseInt(appSettings.auto_reboot_min_interval_min) || 60);
 
-    // computeProxyIssues already returns only latency/error-driven issues
+    // computeProxyIssues already returns only sustained ping-loss issues
     const candidates = computeProxyIssues();
     if (candidates.length === 0) return;
 

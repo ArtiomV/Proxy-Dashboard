@@ -23,17 +23,11 @@ function create(deps) {
 
   // Mirror of the score formula in src/routes/analytics.js (modem_health).
   // Kept inline so this module has no cross-dep on the route file.
-  function computeScore(errPct, latencyMs, uptimePct) {
+  function computeScore(errPct, uptimePct) {
     const ERROR_NORMAL_PCT = 5;
-    const LAT_WARN_MS = 2000;
-    const LAT_BAD_MS  = 4000;
     let score = 100;
     if (errPct != null && errPct > ERROR_NORMAL_PCT) {
       score -= Math.min(40, (errPct - ERROR_NORMAL_PCT) * 2);
-    }
-    if (latencyMs != null) {
-      if (latencyMs > LAT_BAD_MS) score -= 30;
-      else if (latencyMs > LAT_WARN_MS) score -= 15;
     }
     if (uptimePct != null && uptimePct < 95) {
       score -= Math.min(30, (95 - uptimePct));
@@ -86,7 +80,6 @@ function create(deps) {
     // Per-modem checks aggregate.
     const checks = db.prepare(`
       SELECT server AS server_name, nick,
-             AVG(latency_ms) FILTER (WHERE ok = 1) as avg_lat,
              COUNT(*) as total,
              SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) as err
       FROM modem_ping
@@ -102,7 +95,6 @@ function create(deps) {
         if (!m.imei) continue;  // skip modems we have no IMEI for — can't join uptime
         const c = checksByKey[m.server_name + '|' + m.nick] || {};
         const errPct = c.total > 0 ? Math.round(c.err / c.total * 1000) / 10 : null;
-        const latency = c.avg_lat != null ? Math.round(c.avg_lat) : null;
         // Uptime ratio for THIS specific day from uptimeTracking.daily bucket.
         let uptimePct = null;
         const ut = uptimeTracking[m.server_name + '_' + m.imei];
@@ -110,15 +102,15 @@ function create(deps) {
           const d = ut.daily[mskDate];
           if (d.total > 0) uptimePct = Math.round(d.online / d.total * 1000) / 10;
         }
-        const score = computeScore(errPct, latency, uptimePct);
+        const score = computeScore(errPct, uptimePct);
         healthDb.upsertSnapshot({
           date: mskDate,
           server_name: m.server_name,
           imei: m.imei,
           nick: m.nick,
-          score: (errPct == null && latency == null && uptimePct == null) ? null : score,
+          score: (errPct == null && uptimePct == null) ? null : score,
           error_pct: errPct,
-          latency_ms: latency,
+          latency_ms: null,
           uptime_pct: uptimePct,
           total_checks: c.total || 0,
         });

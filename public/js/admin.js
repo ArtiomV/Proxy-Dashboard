@@ -65,9 +65,8 @@ var COLUMNS=[{id:'rail',label:'',visible:true,sortable:false,width:'6px'},
   {id:'rateNow',label:'Трафик сейчас <span class="th-hint" title="Текущая скорость модема (Мбит/с) — дельта суточных счётчиков бокса за скользящее окно 10 мин.&#10;↑ исходящий / ↓ входящий">'+icon('info',11)+'</span>',visible:true,sortable:true},
   {id:'speed',label:'Скорость <span class="th-hint" title="Download ↓ / Upload ↑ в Mbps&#10;Зелёный: > 30 Mbps&#10;Синий: 10–30 Mbps&#10;Оранжевый: < 10 Mbps&#10;Внимание: значение аномально низкое">'+icon('info',11)+'</span>',visible:false,sortable:true},
   {id:'uptime',label:'Аптайм',visible:false,sortable:true},
-  {id:'latency',label:'Латентность (старый замер)',visible:false,sortable:true},
   {id:'conns',label:'Конн. <span class="th-hint" title="Живые TCP-подключения через прокси (HTTP + SOCKS5), суммарно по портам модема&#10;Клик — настройки порта: лимиты Max Conn / Conn Limit">'+icon('info',11)+'</span>',visible:true,sortable:true,width:'104px'},
-  {id:'errors',label:'Ошибки',visible:false,sortable:true},
+  {id:'errors',label:'Сбои пинга',visible:false,sortable:true},
   {id:'health',label:'Здоровье',visible:true,sortable:true,width:'70px'},
   {id:'rotation',label:'Ротация',visible:false,sortable:true},
   {id:'band',label:'Band',visible:false,sortable:true},
@@ -161,7 +160,20 @@ document.addEventListener('input',function(e){var t=e.target;if(t&&t.dataset&&t.
 document.addEventListener('change',function(e){var t=e.target;if(t&&t.dataset&&t.closest&&t.closest('#tab-analytics')&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))t.dataset.dirty='1'});
 function _analyticsDirty(){var t=document.getElementById('tab-analytics');if(!t)return false;var ae=document.activeElement;if(ae&&t.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return true;return !!t.querySelector('[data-dirty="1"]')}
 function _clearSettingsDirty(){var t=document.getElementById('tab-analytics');if(!t)return;t.querySelectorAll('[data-dirty="1"]').forEach(function(el){el.dataset.dirty=''})}
-function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});el.classList.add('active');document.getElementById('tab-'+name).classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients')renderClients();if(name==='analytics'&&!(auto&&_analyticsDirty())){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
+function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});if(el)el.classList.add('active');var tc=document.getElementById('tab-'+name);if(tc)tc.classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'&&!auto){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients'&&!auto)renderClients();if(name==='analytics'&&!auto){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
+
+// Polling/SSE refreshes already rendered blocks in place. Re-entering the tab
+// used to reset asynchronous screens to their «Загрузка» skeleton every minute.
+function refreshActiveTabInPlace(name){
+  if(name==='dashboard'){
+    try{renderNewExtWidgets();}catch(e){}
+    try{renderNewFleetServers();}catch(e){}
+    try{renderNewTopProblems();}catch(e){}
+    try{var d=collectTrafficData();if(d)renderNewClientTable(d);}catch(e){}
+  }else if(name==='clients'){
+    try{renderClients();}catch(e){}
+  }
+}
 
 // ── Тарифы розницы (B2C, WP3) — минимальный CRUD поверх /api/admin/tariffs ──
 var _tariffsCache=[];
@@ -946,7 +958,7 @@ function loadData(){
       processData();renderServerFilter();renderTable(true);updateHeaderStats();
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
       var _st=localStorage.getItem('admin_active_tab')||'dashboard';
-      var _te=document.querySelector('.nav-tab[data-on-click*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te,true);
+      refreshActiveTabInPlace(_st);
       requestAnimationFrame(function(){requestAnimationFrame(function(){window.scrollTo(0,_sy)})});
     })
     .catch(function(e){
@@ -1057,28 +1069,19 @@ function processData(){if(!currentData)return;_initServers(currentData.servers);
   // Proxy check summary: map by server_nick for fast lookup
   var pcs=currentData.proxyCheckSummary||{};
   var pcSummary=pcs.summary||[];
-  var pcLast=pcs.last||[];
   var pcSumMap={};
-  for(var pi=0;pi<pcSummary.length;pi++){var p=pcSummary[pi];pcSumMap[p.server_name+'_'+p.nick]={total:p.total_checks||0,avgMs:Math.round(p.avg_ms)||0,errors:p.error_count||0}}
-  var pcLastMap={};
-  for(var li=0;li<pcLast.length;li++){var l=pcLast[li];pcLastMap[l.server_name+'_'+l.nick]={connectMs:l.connect_ms,totalMs:l.total_ms,status:l.status_code,error:l.error,checkedAt:l.checked_at}}
+  for(var pi=0;pi<pcSummary.length;pi++){var p=pcSummary[pi];pcSumMap[p.server_name+'_'+p.nick]={total:p.total_checks||0,errors:p.error_count||0}}
   var pcConsecMap={},pcConsec=pcs.consec||[];for(var ci=0;ci<pcConsec.length;ci++){pcConsecMap[pcConsec[ci].server_name+'_'+pcConsec[ci].nick]=pcConsec[ci].consec||0}
   var pcTodayMap={},pcToday=pcs.today||[];for(var ti=0;ti<pcToday.length;ti++){var pt=pcToday[ti];pcTodayMap[pt.server_name+'_'+pt.nick]={total:pt.total_checks||0,errors:pt.error_count||0}}
   for(var imei in mm){
     var m=mm[imei],pKey=m.server+'_'+m.nick;
     var sm=pcSumMap[pKey];
-    var lt=pcLastMap[pKey];
-    m.pcAvgMs=sm?sm.avgMs:null;
     m.pcErrorPct=sm&&sm.total>0?Math.round((sm.errors||0)/sm.total*100):null;
     var td=pcTodayMap[pKey];
     m.pcChecksToday=td?td.total:0;
     m.pcErrToday=td?td.errors:0;
     m.pcErrorPctToday=td&&td.total>0?Math.round((td.errors||0)/td.total*100):null;
-    m.pcLastMs=lt?lt.totalMs:null;
-    m.pcLastError=lt?lt.error:null;
     m.pcConsecFails=pcConsecMap[pKey]||0;
-    m.pcLastStatus=lt?lt.status:null;
-    m.pcCheckedAt=lt?lt.checkedAt:null;
   }
   currentData._modemMap=mm;
   // Health scores are a separate analytical aggregate (7-day window). Loaded
@@ -1351,29 +1354,6 @@ function bulkRotation(){
   };
 }
 
-function bulkProxyCheck(){
-  var items=Object.keys(window._bulkSel);if(!items.length)return;
-  var mm=currentData&&currentData._modemMap||{};
-  var modems=[];
-  items.forEach(function(imei){
-    var s=window._bulkSel[imei];
-    for(var k in mm){if(mm[k].rawImei===imei&&mm[k].server===s.server){modems.push({nick:mm[k].nick,server:s.server});break}}
-  });
-  if(!modems.length){showToast('Нет модемов для проверки','error');return}
-  confirmDialog('Замерить задержку для '+modems.length+' модемов?\nМожет занять до '+Math.ceil(modems.length/10*15)+' сек.',function(){
-    showToast('Замер задержки для '+modems.length+' модемов...','info');
-    api(API+'/api/admin/proxy_check',{method:'POST',json:{modems:modems}})
-    .then(function(d){
-      if(!d.ok){showToast(d.error||'Ошибка','error');return}
-      var checks=d.checks||[];var ok=0,err=0;
-      checks.forEach(function(c){if(c.error)err++;else ok++});
-      showToast('Замер завершён: '+ok+' ок, '+err+' ошибок','success');
-      _proxyLogCache={};
-      setTimeout(loadData,1000);
-    }).catch(function(){showToast('Ошибка сети','error')});
-  },'Замерить','Замер задержки прокси');
-}
-
 function bulkExport(){
   var items=Object.keys(window._bulkSel);if(!items.length)return;
   var mm=currentData&&currentData._modemMap||{};
@@ -1566,24 +1546,14 @@ if(typeof window!=='undefined'){
   setInterval(function(){ if(typeof authToken!=='undefined'&&authToken){refreshNotifBadge();} },30000);
 }
 
-// Stage 18.16: bootstrap latency thresholds early. loadSettings() only runs
-// when the user opens «Настройки», so before that _pcWarnMs/_pcBadMs sat at
-// the hardcoded 500/2000 defaults — making the modem table flip latency
-// colors (yellow→green or vice versa) the moment Settings was visited and
-// the real thresholds (e.g. 1500/3000) finally loaded. Fetch them once on
-// startup so colors are stable from the first render.
-function _loadProxyCheckThresholds(){
+// Bootstrap runtime thresholds before Settings is opened.
+function _loadRuntimeThresholds(){
   if(!authToken)return;
   api(API+'/api/admin/settings')
     .then(function(d){return (d&&d.__status>=400)?null:d})
     .then(function(s){
       if(!s)return;
-      var warn=Number(s.proxy_check_warn_ms);
-      var bad =Number(s.proxy_check_bad_ms);
       var changed=false;
-      // `>0` (not `||`) so an explicit `0` doesn't silently revert to a default.
-      if(warn>0&&warn!==_pcWarnMs){_pcWarnMs=warn;changed=true;}
-      if(bad >0&&bad !==_pcBadMs ){_pcBadMs =bad; changed=true;}
       var ert=Number(s.error_rate_threshold);
       if(ert>0&&ert!==_errorRateThreshold){_errorRateThreshold=ert;changed=true;}
       // Stage 18.16: same bootstrap issue applies to stale_modem_hours — the
@@ -1599,7 +1569,7 @@ function _loadProxyCheckThresholds(){
     .catch(function(){});
 }
 if(typeof window!=='undefined'){
-  setTimeout(_loadProxyCheckThresholds,300);
+  setTimeout(_loadRuntimeThresholds,300);
 }
 
 // ========== TASK 15: AUDIT LOG ==========
@@ -3254,7 +3224,6 @@ function renderHealthDailyTimeline(m) {
           else if (r.score >= 50) bg = 'rgb(255,159,10)';  // orange
           else                    bg = 'rgb(239,80,80)';   // red
           title = date + ' · Скор: ' + r.score +
-                  (r.latency_ms != null ? ' · Латенси: ' + fmtMs(r.latency_ms) : '') +
                   (r.error_pct != null ? ' · Ошибки: ' + r.error_pct + '%' : '') +
                   (r.uptime_pct != null ? ' · Аптайм: ' + r.uptime_pct + '%' : '') +
                   ' · Проверок: ' + (r.total_checks || 0);
@@ -3533,7 +3502,7 @@ function testAlertRule(id){
 // ========================================================================
 // Lives parallel to the existing 3 sub-tabs (Трафик/Инфра/Доходность).
 // Same render functions where they accept target IDs (renderSys*); for the
-// heatmap / clients / daily / latency / matrix / top hosts blocks we
+// heatmap / clients / daily / matrix / top hosts blocks we
 // write thin parallel renderers that hit the same endpoints. After UX
 // validation this view will replace the three legacy tabs.
 // ── персист UI-состояния дашборда: раскрывашки + вкладки/фильтры виджетов ──
@@ -3541,15 +3510,13 @@ var _dashUi=(function(){try{return JSON.parse(localStorage.getItem('dash_ui_stat
 function _dashUiSave(patch){try{Object.keys(patch).forEach(function(k){_dashUi[k]=patch[k]});localStorage.setItem('dash_ui_state',JSON.stringify(_dashUi))}catch(e){}}
 var _newHmView=_dashUi.hmView||'country', _newHmId=_dashUi.hmId||'all';
 var _newHmData=null;
-var _newLatencyData=null;
 var _newDailyChart=null;
-var _newLatencyChart=null;
 
 // ⚡ «Командный центр» — decision-first unified analytics view.
 // Order = urgency: Пульс → Требует внимания → Финансы → Парк → Трафик.
 // Always-visible: pulse, action-center, finance summary+flow, fleet servers+health,
 // heatmap, daily, traffic-clients. Lazy (<details>): per-client P&L, reconciliation,
-// infra (rotations/IP/capacity), latency dist, top hosts, traffic matrix.
+// infra (rotations/IP/capacity), top hosts, traffic matrix.
 function renderAccNew(){
   if(!currentData){return;}
   var d = collectTrafficData();
@@ -3591,8 +3558,7 @@ function renderAccNew(){
     if(el.dataset.loaded === '1') return;
     el.dataset.loaded = '1';
     var s = el.dataset.section;
-    if(s === 'latency'){ loadNewLatency(); }
-    else if(s === 'infra'){ reloadNewInfra(); }
+    if(s === 'infra'){ reloadNewInfra(); }
     else if(s === 'apiaccess'){ loadNewApiAccess(); }
     else if(s === 'matrix'){ renderNewMatrix(); }
     else if(s === 'finclients'){ renderNewFinClients(); }
@@ -3611,8 +3577,7 @@ function onNewSectionToggle(ev){
   if(!el.open) return;
   // infra + finclients + apiaccess re-render cheaply on each open; others load once
   if(el.dataset.loaded === '1' && section !== 'infra' && section !== 'finclients' && section !== 'apiaccess') return;
-  if(section === 'latency'){ loadNewLatency(); }
-  else if(section === 'infra'){ reloadNewInfra(); }
+  if(section === 'infra'){ reloadNewInfra(); }
   else if(section === 'matrix'){ renderNewMatrix(); }
   else if(section === 'finclients'){ renderNewFinClients(); }
   else if(section === 'recon'){ loadNewReconciliation(); }
@@ -3915,12 +3880,12 @@ function renderNewFleetServers(){
       function footerStat(mod,ic,val,label,extra){
         var info=extra?'<span class="server-footer-info" tabindex="0" role="img" aria-label="'+esc(label)+': '+esc(extra)+'" data-tip="'+esc(extra)+'">i</span>':'';
         return '<span class="server-footer-stat server-footer-stat--'+mod+'"><span class="server-footer-icon">'+icon(ic,18)+'</span>'
-          +'<span class="server-footer-copy"><b>'+esc(val||'—')+'</b><small>'+esc(label)+info+'</small></span></span>';
+          +'<span class="server-footer-copy"><b>'+esc(val||'—')+'</b>'+(label?'<small>'+esc(label)+info+'</small>':info)+'</span></span>';
       }
       var up=typeof _srvMetUptime==='function'?_srvMetUptime(met.uptime_sec):'';
       h+='<footer class="server-overview-footer">'
-        +footerStat('temp','thermo',met.temp_c==null?'—':String(_fmtP(met.temp_c))+'°C','Температура')
-        +footerStat('uptime','clock',up||'—','Аптайм')
+        +footerStat('temp','thermo',met.temp_c==null?'—':String(_fmtP(met.temp_c))+'°C','')
+        +footerStat('uptime','clock',up||'—','')
         +footerStat('ram','ram',met.mem_used_pct==null?'—':_fmtP(met.mem_used_pct)+'%','RAM',_srvMetGb(met.mem_used_mb,met.mem_total_mb))
         +footerStat('disk','disk',met.disk_used_pct==null?'—':_fmtP(met.disk_used_pct)+'%','Диск',_srvMetGb(met.disk_used_mb,met.disk_total_mb))
         +'</footer>';
@@ -3933,23 +3898,6 @@ function renderNewFleetServers(){
   var html = '';
   names.forEach(function(n){ html += fcard(n, false); });
   el.innerHTML = html;
-  _renderRateTopStrip();
-}
-
-// A3 (23.08): «Топ грузящих сейчас» — 5 модемов по текущей скорости (окно 10 мин).
-function _renderRateTopStrip(){
-  var el=document.getElementById('rateTopStrip'); if(!el) return;
-  var top=(currentData&&currentData.modemRateTop)||[];
-  if(!top.length){ el.innerHTML=''; return; }
-  var h='<div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:9px 14px;background:var(--bg-2);border:1px solid var(--border);border-radius:10px;font-size:11px">';
-  h+='<span style="color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;font-size:10px">Грузят сейчас</span>';
-  top.forEach(function(t){
-    var tot=t.total;var col=tot>=20?'var(--danger)':(tot>=5?'var(--warning)':'var(--text-1)');
-    var nick=t.key.slice(t.key.indexOf('_')+1);
-    h+='<span style="display:inline-flex;align-items:baseline;gap:5px;cursor:pointer" data-on-click="openDetailAtTab(\''+esc(nick).replace(/'/g,"\\'")+'\',\''+esc(t.key.slice(0,t.key.indexOf('_')))+'\',\'info\')" title="Текущая скорость за окно 10 мин"><b>'+esc(nick)+'</b><span class="mono" style="color:'+col+';font-weight:600">'+tot.toFixed(1)+' Мбит/с</span><span class="mono" style="color:var(--text-3);font-size:10px">↓'+t.rate_in_mbps+' ↑'+t.rate_out_mbps+'</span></span>';
-  });
-  h+='</div>';
-  el.innerHTML=h;
 }
 // Ховер-тултип спарклайнов карточек серверов (21.08): при наведении на любой
 // спарклайн карточки показываем время точки и значения CPU/RAM/conns в ней.
@@ -4227,7 +4175,6 @@ function loadNewFleetHealth(){
 function _ncHealthReason(m){
   if(m.error_pct!=null && m.error_pct>10) return 'много ошибок ('+m.error_pct+'%)';
   if(m.uptime_pct!=null && m.uptime_pct<90) return 'низкий аптайм ('+m.uptime_pct+'%)';
-  if(m.latency_ms!=null && m.latency_ms>2000) return 'медленный ('+fmtMs(m.latency_ms)+')';
   if(m.error_pct!=null && m.error_pct>3) return 'ошибки ('+m.error_pct+'%)';
   return 'низкий скоринг';
 }
@@ -4256,7 +4203,6 @@ function renderNewFleetHealth(d){
         '<td style="text-align:left;color:var(--text-2)">'+esc(m.server_name||'')+'</td>' +
         '<td style="text-align:left;color:var(--text-2)">'+esc(_ncHealthReason(m))+'</td>' +
         '<td>'+(m.uptime_pct!=null?m.uptime_pct+'%':'—')+'</td>' +
-        '<td>'+fmtMs(m.latency_ms)+'</td>' +
         '<td style="text-align:center"><span style="display:inline-block;padding:2px 8px;border-radius:10px;background:'+col+';color:#fff;font-weight:700">'+m.health_score+'</span></td>' +
         '</tr>';
     });
@@ -4489,44 +4435,6 @@ function renderNewDailyChart(data){
       scales: {
         x: { stacked: true, ticks: { font: { size: 9 }, color: cc.text, maxRotation: 0, autoSkip: true, maxTicksLimit: 20 }, grid: { display: false }, border: { display: false } },
         y: { stacked: true, beginAtZero: true, ticks: { font: { size: 10 }, color: cc.text, callback: function(v){ return v+' ГБ'; } }, grid: { color: cc.grid, drawTicks: false }, border: { display: false } }
-      }
-    }
-  });
-}
-
-// ── Latency (collapsible) — по макету: без чипов стран, всегда весь парк ──
-function loadNewLatency(){
-  var url = API + '/api/analytics/latency_stats?view=country&id=all&days=30';
-  api(url)
-    .then(function(d){ if(d&&d.__status>=400) throw new Error('HTTP '+d.__status); return d; })
-    .then(function(d){ _newLatencyData = d; renderLatencySummary(d); })
-    .catch(function(e){
-      var c = document.getElementById('latencySummary');
-      if(c) c.innerHTML = '<div style="padding:30px;color:var(--danger);font-size:12px;text-align:center">Ошибка: '+esc(e.message)+'</div>';
-    });
-}
-function renderNewLatencyChart(data){
-  if(!data || !data.days) return;
-  var canvas = document.getElementById('newLatencyCanvas');
-  if(!canvas) return;
-  if(_newLatencyChart){ _newLatencyChart.destroy(); _newLatencyChart = null; }
-  var ctx = canvas.getContext('2d');
-  var cc = getChartColors();
-  var labels = data.days.map(function(d){ return d.slice(8,10) + '.' + d.slice(5,7); });
-  _newLatencyChart = newChartSafe(ctx, {
-    type: 'line',
-    data: { labels: labels, datasets: [
-      { label: 'P50', data: data.median_ms, borderColor: 'var(--accent)', backgroundColor: 'rgba(59,130,246,0.1)', fill: true, tension: 0.3, pointRadius: 2, borderWidth: 2 },
-      { label: 'P95', data: data.p95_ms, borderColor: '#EF9F27', fill: false, tension: 0.3, pointRadius: 2, borderWidth: 2, borderDash: [4,3] },
-      { label: 'P95 connect', data: data.connect_p95_ms||[], borderColor: '#7c3aed', fill: false, tension: 0.3, pointRadius: 2, borderWidth: 2, borderDash: [2,3] }
-    ]},
-    options: {
-      responsive: true, maintainAspectRatio: false, animation: false,
-      interaction: { mode: 'index', intersect: false },
-      plugins: { legend: { display: false }, tooltip: { mode: 'index', intersect: false, callbacks: { label: function(ctx){ return ctx.dataset.label + ': ' + fmtMs(ctx.parsed.y); } } } },
-      scales: {
-        x: { ticks: { font: { size: 10 }, color: '#9b9b98', maxRotation: 0, autoSkip: true }, grid: { color: cc.gridLine, drawTicks: false }, border: { display: false } },
-        y: { beginAtZero: true, ticks: { font: { size: 10 }, color: '#6b6b68', callback: function(v){ return (v/1000).toFixed(v<1000?2:1) + ' с'; } }, grid: { color: cc.gridLine, drawTicks: false }, border: { display: false } }
       }
     }
   });

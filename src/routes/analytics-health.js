@@ -74,7 +74,6 @@ module.exports = function createAnalyticsHealthRouter(deps) {
         const rot = rotMap[key] || {};
         const tr = trafMap[key] || {};
         const errPct = ch.total_checks > 0 ? (ch.err_checks / ch.total_checks) * 100 : null;
-        const latency = ch.avg_latency != null ? Math.round(ch.avg_latency) : null;
 
         const up = pollingUptime(m.server_name, m.imei);
         const uptimeRatio = up ? up.ratio : 0;
@@ -87,8 +86,6 @@ module.exports = function createAnalyticsHealthRouter(deps) {
         const breakdown = [];
 
         const ERROR_NORMAL_PCT = 5;
-        const LAT_WARN_MS = 2000;
-        const LAT_BAD_MS  = 4000;
         const ROT_NORMAL_SEC = 15;
         const ROT_BAD_SEC    = 30;
 
@@ -99,7 +96,7 @@ module.exports = function createAnalyticsHealthRouter(deps) {
         score -= errCost;
         breakdown.push({
           factor: 'error_pct',
-          label: 'Ошибки',
+          label: 'Сбои пинга',
           value: errPct != null ? Math.round(errPct * 10) / 10 : null,
           unit: '%',
           norm: '≤ ' + ERROR_NORMAL_PCT + '%',
@@ -115,33 +112,7 @@ module.exports = function createAnalyticsHealthRouter(deps) {
             : 'good',
         });
 
-        // Factor 2: Latency — ≤warn no penalty; warn-bad ×0.9; >bad ×0.75.
-        const beforeLatency = score;
-        let latencyMult = 1, latencyTier = 'good';
-        if (latency != null) {
-          if (latency > LAT_BAD_MS)       { latencyMult = 0.75; latencyTier = 'bad';  }
-          else if (latency > LAT_WARN_MS) { latencyMult = 0.9;  latencyTier = 'warn'; }
-        } else {
-          latencyTier = 'unknown';
-        }
-        score *= latencyMult;
-        const latencyCost = beforeLatency - score;
-        breakdown.push({
-          factor: 'latency_ms',
-          label: 'Задержка',
-          value: latency,
-          unit: 'мс',
-          norm: '≤ ' + LAT_WARN_MS + ' мс',
-          warn_at: '> ' + LAT_WARN_MS + ' мс',
-          bad_at: '> ' + LAT_BAD_MS + ' мс',
-          impact: -Math.round(latencyCost * 10) / 10,
-          impact_explain: latency == null ? 'нет данных'
-            : latencyMult === 1 ? 'в норме, штрафа нет'
-            : `× ${latencyMult} (${latencyTier === 'bad' ? '−25%' : '−10%'}) → −${Math.round(latencyCost*10)/10} баллов`,
-          status: latencyTier,
-        });
-
-        // Factor 3: Rotation duration — ≤normal no penalty; above ×0.95/×0.85.
+        // Factor 2: Rotation duration — ≤normal no penalty; above ×0.95/×0.85.
         const beforeRot = score;
         const rotAvg = rot.avg_sec != null ? rot.avg_sec : null;
         let rotMult = 1, rotTier = 'good';
@@ -168,7 +139,7 @@ module.exports = function createAnalyticsHealthRouter(deps) {
           status: rotTier,
         });
 
-        // Factor 4: Uptime — multiplies by the polling online/total ratio.
+        // Factor 3: Uptime — multiplies by the polling online/total ratio.
         const beforeUptime = score;
         if (up) score *= uptimeRatio;
         const uptimeCost = beforeUptime - score;
@@ -187,7 +158,7 @@ module.exports = function createAnalyticsHealthRouter(deps) {
           status: !up ? 'unknown' : uptimePct >= 99 ? 'good' : uptimePct >= 95 ? 'warn' : 'bad',
         });
 
-        // Factor 5: Device/SIM health — latest ProxySmart signals.
+        // Factor 4: Device/SIM health — latest ProxySmart signals.
         const REBOOT_BAD = 70;
         const _simRaw = String(m.sim_status || '').toUpperCase();
         const _simBad = !!_simRaw && _simRaw !== 'UNKNOWN' && !/\bOK\b|READY/.test(_simRaw);
@@ -248,7 +219,6 @@ module.exports = function createAnalyticsHealthRouter(deps) {
           nick: m.nick,
           server_name: m.server_name,
           operator: m.operator || '',
-          latency_ms: latency,
           error_pct: errPct != null ? Math.round(errPct * 10) / 10 : null,
           total_checks: ch.total_checks || 0,
           rotations: rot.total || 0,

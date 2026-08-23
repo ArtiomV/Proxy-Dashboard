@@ -8,8 +8,9 @@
 // Проверки: status 200–399, опционально тело содержит httpcheck_must_contain
 // и НЕ содержит httpcheck_must_not_contain. https-цели идут через CONNECT.
 //
-// Scope по умолчанию — speedtest_list (ники настройки speedtest_modems):
-// не дудосим целевой сайт сотней запросов каждые 15 мин.
+// Охват — весь парк. Реальный запрос выполняется только через действующие
+// клиентские реквизиты; свободные/просроченные порты получают понятный skip.
+// Сеть защищена ограниченной параллельностью.
 //
 // Алерты: 2 подряд неудачи → modem_http_fail (important, с причиной);
 // восстановление → modem_ping_recovered-аналог modem_http_recovered.
@@ -112,19 +113,14 @@ function create(deps) {
       url: String(getSetting('httpcheck_url', 'https://example.com') || '').trim(),
       mustContain: String(getSetting('httpcheck_must_contain', '') || '').trim(),
       mustNotContain: String(getSetting('httpcheck_must_not_contain', '') || '').trim(),
-      scope: String(getSetting('httpcheck_scope', 'speedtest_list') || 'speedtest_list'),
       timeoutMs: Math.max(3000, parseInt(getSetting('httpcheck_timeout_ms', 15000)) || 15000),
+      concurrency: Math.max(1, Math.min(20, parseInt(getSetting('httpcheck_concurrency', 8)) || 8)),
     };
   }
 
-  // Резолв целей: ник → { server, nick, proxy:{host,port,login,password} }.
-  // scope=speedtest_list → ники speedtest_modems; scope=all → все онлайн-модемы.
-  async function _resolveTargets(cfg) {
+  // Резолв всех модемов: ник → { server, nick, proxy:{host,port,login,password} }.
+  async function _resolveTargets() {
     const allData = await fetchAllServersDataCached();
-    const wanted = cfg.scope === 'all'
-      ? null
-      : new Set(String(getSetting('speedtest_modems', '') || '').split(',').map(s => s.trim()).filter(Boolean));
-    if (wanted && !wanted.size) return [];
     const hostByServer = {};
     for (const s of (apiServers || [])) hostByServer[s.name] = s.publicIp || new URL(s.url).hostname;
 
@@ -138,7 +134,6 @@ function create(deps) {
         const md = m.modem_details || {};
         const nick = md.NICK;
         if (!nick || /^random/i.test(nick)) continue;
-        if (wanted && !wanted.has(nick)) continue;
         if (!m.net_details || m.net_details.IS_ONLINE !== 'yes') {
           targets.push({ server: srv, nick, offline: true });
           continue;
@@ -163,10 +158,10 @@ function create(deps) {
     if (running) return { skipped: 'already_running' };
     running = true;
     try {
-      const targets = await _resolveTargets(cfg);
+      const targets = await _resolveTargets();
       const tsIso = new Date().toISOString();
-      let ok = 0, failed = 0;
-      for (const t of targets) {
+      let ok = 0, failed = 0, skipped = 0;
+      async function checkTarget(t) {
         const key = t.server + '_' + t.nick;
         let st = state.get(key);
         if (!st) { st = { failStreak: 0, failing: false, last: null }; state.set(key, st); }
@@ -203,8 +198,15 @@ function create(deps) {
         catch (e) { logger.warn('[HttpCheck] insert failed: ' + e.message); }
         st.last = { status, total_ms: totalMs, content_ok: contentOk, error, ts: tsIso, offline: !!t.offline };
 
+        const isSkipped = !!(t.offline || t.unavailable);
         const good = !error;
-        if (good) {
+        if (isSkipped) {
+          skipped++;
+          // Без валидного маршрута проверки это не HTTP-сбой. Не создаём
+          // ложный красный статус и recovery без фактического успешного чека.
+          st.failStreak = 0;
+          st.failing = false;
+        } else if (good) {
           ok++;
           if (st.failing) { st.failing = false; alerts.trigger('modem_http_recovered', { server: t.server, nick: t.nick, ms: totalMs }); }
           st.failStreak = 0;
@@ -218,10 +220,13 @@ function create(deps) {
           }
         }
       }
-      logger.info(`[HttpCheck] ${ok} ok, ${failed} failed of ${targets.length}`);
+      for (let i = 0; i < targets.length; i += cfg.concurrency) {
+        await Promise.all(targets.slice(i, i + cfg.concurrency).map(checkTarget));
+      }
+      logger.info(`[HttpCheck] ${ok} ok, ${failed} failed, ${skipped} skipped of ${targets.length}`);
       // SSE (23.08): свежие HTTP-чеки → realtime-обновление колонки в админке.
-      if (events) { try { events.publish('httpcheck_result', { ok, failed, total: targets.length }); } catch (_) { /* best-effort */ } }
-      return { ok, failed, total: targets.length };
+      if (events) { try { events.publish('httpcheck_result', { ok, failed, skipped, total: targets.length }); } catch (_) { /* best-effort */ } }
+      return { ok, failed, skipped, total: targets.length };
     } finally {
       running = false;
     }
