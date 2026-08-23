@@ -83,6 +83,41 @@ describe('GET /api/client/sla_report', () => {
     expect((await request(app).get('/api/client/sla_report?month=2026-13').set('X-Auth-Token', clientToken)).status).toBe(400);
     expect((await request(app).get('/api/client/sla_report?month=2026-08')).status).toBe(401);
   });
+
+  it('day param scopes the report to one day; days[] covers the month', async () => {
+    const nick = 'SLAD_' + crypto.randomBytes(3).toString('hex');
+    const port = 'slad_port_' + crypto.randomBytes(3).toString('hex');
+    const assign = db.prepare(`INSERT INTO traffic_hourly
+      (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
+      VALUES ('S1', ?, ?, 'Orange MD', ?, ?, 1, 0)`);
+    assign.run(port, nick, clientPortName, '2026-08-15 10:00');
+    assign.run(port, nick, clientPortName, '2026-08-16 10:00');
+    const ping = db.prepare('INSERT INTO modem_ping (server, nick, ok, ts) VALUES (?, ?, ?, ?)');
+    ping.run('S1', nick, 1, '2026-08-15T10:05:00.000Z');
+    ping.run('S1', nick, 0, '2026-08-15T10:15:00.000Z');
+    ping.run('S1', nick, 1, '2026-08-16T10:05:00.000Z');
+    try {
+      const dayRes = await request(app).get('/api/client/sla_report?month=2026-08&day=2026-08-15').set('X-Auth-Token', clientToken);
+      expect(dayRes.status).toBe(200);
+      expect(dayRes.body.period).toEqual({ month: '2026-08', day: '2026-08-15' });
+      expect(dayRes.body.summary).toMatchObject({ pings: 2, ok_pings: 1, uptime_pct: 50 });
+      expect(Array.isArray(dayRes.body.days)).toBe(true);
+      const d15 = dayRes.body.days.find(x => x.day === '2026-08-15');
+      const d16 = dayRes.body.days.find(x => x.day === '2026-08-16');
+      expect(d15).toMatchObject({ pings: 2, ok_pings: 1 });
+      expect(d16).toMatchObject({ pings: 1, ok_pings: 1, uptime_pct: 100 });
+
+      const monthRes = await request(app).get('/api/client/sla_report?month=2026-08').set('X-Auth-Token', clientToken);
+      expect(monthRes.body.period.day).toBeNull();
+      expect(monthRes.body.summary.pings).toBe(3);
+
+      expect((await request(app).get('/api/client/sla_report?month=2026-08&day=2026-09-01').set('X-Auth-Token', clientToken)).status).toBe(400);
+      expect((await request(app).get('/api/client/sla_report?month=2026-08&day=2026-08-32').set('X-Auth-Token', clientToken)).status).toBe(400);
+    } finally {
+      db.prepare('DELETE FROM traffic_hourly WHERE port_id = ?').run(port);
+      db.prepare('DELETE FROM modem_ping WHERE nick = ?').run(nick);
+    }
+  });
 });
 
 afterAll(() => {

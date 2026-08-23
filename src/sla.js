@@ -130,8 +130,8 @@ function buildReport(db, month) {
 // Client-scoped SLA. A modem belongs to the report only during hours in which
 // traffic_hourly records that client's port assignment. This prevents leaking
 // another client's uptime before/after a SIM reassignment.
-function clientUptime(db, month, clientName) {
-  const b = monthBounds(month);
+// Ядро: произвольные границы [fromIso, toIso) + опциональная разбивка по дням.
+function _clientUptimeRange(db, fromIso, toIso, clientName, groupByDay) {
   if (!String(clientName || '').trim()) return [];
   let rows = [];
   try {
@@ -145,6 +145,7 @@ function clientUptime(db, month, clientName) {
            AND trim(COALESCE(nick, '')) <> ''
       )
       SELECT mp.server, mp.nick,
+             ${groupByDay ? "substr(mp.ts, 1, 10) AS day," : "NULL AS day,"}
              COUNT(mp.id) AS pings,
              SUM(mp.ok) AS ok_pings,
              MIN(mp.ts) AS observed_from,
@@ -159,11 +160,15 @@ function clientUptime(db, month, clientName) {
          AND datetime(mp.ts) < datetime(assigned.hour_start, '+1 hour')
         LEFT JOIN modem_meta mm
           ON mm.server_name = mp.server AND mm.nick = mp.nick
-       GROUP BY mp.server, mp.nick
-       ORDER BY mp.server, mp.nick
-    `).all(String(clientName).trim(), b.fromIso, b.toIso);
+       GROUP BY ${groupByDay ? 'day, ' : ''}mp.server, mp.nick
+       ORDER BY ${groupByDay ? 'day, ' : ''}mp.server, mp.nick
+    `).all(String(clientName).trim(), fromIso, toIso);
   } catch (_) { rows = []; }
-  return rows.map(r => ({
+  return rows;
+}
+
+function _mapClientRow(r) {
+  return {
     server: r.server,
     nick: r.nick,
     operator: r.operator || '',
@@ -174,16 +179,56 @@ function clientUptime(db, month, clientName) {
     observed_from: r.observed_from || null,
     observed_to: r.observed_to || null,
     uptime_pct: r.pings ? _pct((r.ok_pings || 0) / r.pings) : null,
-  }));
+  };
 }
 
-function buildClientReport(db, month, clientName) {
-  monthBounds(month); // validate even when the client has no assignments
-  const modems = clientUptime(db, month, clientName);
+function clientUptime(db, month, clientName) {
+  const b = monthBounds(month);
+  return _clientUptimeRange(db, b.fromIso, b.toIso, clientName, false).map(_mapClientRow);
+}
+
+// Валидация day ('YYYY-MM-DD' внутри month). Возвращает null либо границы дня.
+function _dayBounds(month, day) {
+  if (day == null || day === '') return null;
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(String(day));
+  if (!m || String(day).slice(0, 7) !== month) {
+    throw new Error('day: ожидается YYYY-MM-DD внутри выбранного месяца');
+  }
+  const fromMs = Date.UTC(+m[1], +m[2] - 1, +m[3]);
+  const d = new Date(fromMs);
+  if (d.toISOString().slice(0, 10) !== day) throw new Error('day: некорректная дата');
+  return { fromIso: d.toISOString(), toIso: new Date(fromMs + 86400000).toISOString() };
+}
+
+function buildClientReport(db, month, clientName, day) {
+  const b = monthBounds(month); // validate even when the client has no assignments
+  const dayB = _dayBounds(month, day);
+  const period = dayB || b;
+  const modems = _clientUptimeRange(db, period.fromIso, period.toIso, clientName, false).map(_mapClientRow);
   const pings = modems.reduce((sum, m) => sum + m.pings, 0);
   const okPings = modems.reduce((sum, m) => sum + m.ok_pings, 0);
+
+  // Per-day breakdown за весь месяц (та же методология) — питает выбор дня в UI.
+  // Сворачиваем помодемные дневные строки в один ряд на день.
+  const byDay = {};
+  for (const r of _clientUptimeRange(db, b.fromIso, b.toIso, clientName, true)) {
+    const d = byDay[r.day] || (byDay[r.day] = { day: r.day, pings: 0, ok_pings: 0 });
+    d.pings += Number(r.pings) || 0;
+    d.ok_pings += Number(r.ok_pings) || 0;
+  }
+  const days = Object.values(byDay)
+    .sort((a, c) => a.day.localeCompare(c.day))
+    .map(d => ({
+      day: d.day,
+      pings: d.pings,
+      ok_pings: d.ok_pings,
+      failed_pings: Math.max(0, d.pings - d.ok_pings),
+      uptime_pct: d.pings ? _pct(d.ok_pings / d.pings) : null,
+    }));
+
   return {
     month,
+    period: { month, day: dayB ? String(day) : null },
     generated_at: new Date().toISOString(),
     methodology: 'proxysmart_ping_during_client_assignment',
     summary: {
@@ -193,6 +238,7 @@ function buildClientReport(db, month, clientName) {
       ok_pings: okPings,
       failed_pings: Math.max(0, pings - okPings),
     },
+    days,
     modems,
   };
 }

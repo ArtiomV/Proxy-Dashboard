@@ -85,7 +85,10 @@ async function scanDisconnected() {
   const merged = mergeServerData(results, '*');
   // Same disconnected threshold as the card (modem_offline_threshold_min, default 10).
   const discMs = (Number(getSetting && getSetting('modem_offline_threshold_min', 10)) || 10) * 60000;
-  const fleet = computeFleet(trackingDb.metaFleetRoster.all(), uptimeTracking, merged.status || [], { disconnectedMs: discMs });
+  const roster = typeof trackingDb.metaFleetRosterStmt === 'function'
+    ? trackingDb.metaFleetRosterStmt().all()
+    : (trackingDb.metaFleetRoster ? trackingDb.metaFleetRoster.all() : []);
+  const fleet = computeFleet(roster, uptimeTracking, merged.status || [], { disconnectedMs: discMs });
   return fleet.disconnectedList;
 }
 

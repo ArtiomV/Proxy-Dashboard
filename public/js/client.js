@@ -58,24 +58,54 @@ function switchTab(name,el){
   if(name==='profile') loadProfile();
 }
 
-var _clientSlaLoadedMonth='';
+var _clientSlaLoadedKey='';
+var _clientSlaDay='';
 function _clientSlaDate(ts){
   if(!ts)return '—';
   var d=new Date(ts);if(!isFinite(d.getTime()))return '—';
   return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
 }
+function _clientSlaDayColor(uptimePct,pings){
+  if(!pings||uptimePct==null)return'var(--text-3)';
+  return uptimePct>=99?'var(--success)':uptimePct>=95?'var(--warning)':'var(--danger)';
+}
+// Чипы дней месяца: клик → отчёт за день; «Месяц» — сводка за весь месяц.
+function _clientSlaRenderDays(month,days){
+  var box=document.getElementById('clientSlaDays');if(!box)return;
+  var byDay={};(days||[]).forEach(function(d){byDay[d.day]=d;});
+  var dim=new Date(month+'-01T00:00:00Z');
+  var daysInMonth=new Date(Date.UTC(dim.getUTCFullYear(),dim.getUTCMonth()+1,0)).getUTCDate();
+  var chipStyle=function(sel,bg){return 'display:inline-flex;align-items:center;justify-content:center;min-width:30px;height:26px;padding:0 6px;border-radius:7px;font-size:11px;font-weight:600;cursor:pointer;border:1px solid '+(sel?'var(--accent)':'var(--card-border)')+';background:'+bg+';color:'+(sel?'var(--accent)':'var(--text-1)')+';';};
+  var h='<span style="'+chipStyle(!_clientSlaDay,'var(--card-bg)')+'" data-on-click="selectClientSlaDay(\'\')">Месяц</span>';
+  for(var i=1;i<=daysInMonth;i++){
+    var day=month+'-'+String(i).padStart(2,'0');
+    var d=byDay[day];
+    var col=_clientSlaDayColor(d?d.uptime_pct:null,d?d.pings:0);
+    var title=d&&d.pings?day+': '+String(d.uptime_pct).replace('.',',')+'% · '+d.pings+' проверок':day+': нет данных';
+    h+='<span style="'+chipStyle(_clientSlaDay===day,'var(--card-bg)')+'border-left:3px solid '+col+'" title="'+esc(title)+'" data-on-click="selectClientSlaDay(\''+day+'\')">'+i+'</span>';
+  }
+  box.innerHTML=h;
+}
+function selectClientSlaDay(day){
+  _clientSlaDay=day||'';
+  loadClientSla(true);
+}
 function loadClientSla(force){
   var input=document.getElementById('clientSlaMonth');if(!input)return;
   if(!input.value)input.value=new Date().toISOString().slice(0,7);
   var month=input.value;
-  if(!force&&_clientSlaLoadedMonth===month)return;
+  if(_clientSlaDay&&_clientSlaDay.slice(0,7)!==month)_clientSlaDay='';
+  var key=month+'|'+_clientSlaDay;
+  if(!force&&_clientSlaLoadedKey===key)return;
   var loading=document.getElementById('clientSlaLoading');
   var empty=document.getElementById('clientSlaEmpty');
   var wrap=document.getElementById('clientSlaTableWrap');
   if(loading){loading.style.display='';loading.textContent='Загрузка отчёта…';}
   if(empty)empty.style.display='none';if(wrap)wrap.style.display='none';
-  api('/api/client/sla_report?month='+encodeURIComponent(month)).then(function(d){
-    _clientSlaLoadedMonth=month;
+  var url='/api/client/sla_report?month='+encodeURIComponent(month)+(_clientSlaDay?'&day='+encodeURIComponent(_clientSlaDay):'');
+  api(url).then(function(d){
+    _clientSlaLoadedKey=key;
+    _clientSlaRenderDays(month,d.days||[]);
     var s=d.summary||{},rows=d.modems||[];
     document.getElementById('clientSlaPct').textContent=s.uptime_pct==null?'—':String(s.uptime_pct).replace('.',',')+'%';
     document.getElementById('clientSlaModems').textContent=String(s.modems||0);
@@ -83,10 +113,10 @@ function loadClientSla(force){
     document.getElementById('clientSlaChecks').textContent=Number(s.pings||0).toLocaleString('ru-RU')+' всего';
     document.getElementById('clientSlaFailed').textContent=Number(s.failed_pings||0).toLocaleString('ru-RU');
     if(loading)loading.style.display='none';
-    if(!rows.length){if(empty)empty.style.display='';return;}
+    if(!rows.length){if(empty){empty.style.display='';empty.textContent=_clientSlaDay?'За выбранный день нет проверок, подтверждённых историей привязки.':'За выбранный месяц пока нет проверок, подтверждённых историей привязки.';}return;}
     document.getElementById('clientSlaRows').innerHTML=rows.map(function(m){
       var pct=m.uptime_pct==null?'—':String(m.uptime_pct).replace('.',',')+'%';
-      var color=m.uptime_pct==null?'var(--text-3)':m.uptime_pct>=99?'var(--success)':m.uptime_pct>=95?'var(--warning)':'var(--danger)';
+      var color=_clientSlaDayColor(m.uptime_pct,m.pings);
       return '<tr><td style="font-family:var(--font-mono);font-weight:600">'+esc(m.nick||'—')+'</td>'
         +'<td>'+esc(m.server||'—')+'</td><td>'+esc(m.operator||'—')+'</td>'
         +'<td style="font-family:var(--font-mono);font-weight:700;color:'+color+'">'+esc(pct)+'</td>'

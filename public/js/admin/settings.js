@@ -2,13 +2,15 @@
 // VERBATIM): pricing tiers, servers list, all settings sections.
 
 function renderPricingTiers() {
+  var area = document.getElementById('pricingTiersArea');
+  if (!area) return;   // UI блока тарифов убран из admin.html; вызов из loadSettings остаётся
   var tiers = (currentData && currentData.settings && currentData.settings.pricing_tiers) || [{min_proxies:1,price:30,label:'1-4'},{min_proxies:5,price:25,label:'5-9'},{min_proxies:10,price:23,label:'10-19'},{min_proxies:20,price:20,label:'20+'}];
   var h = '<table class="log-table"><thead><tr><th>От (портов)</th><th>Цена (руб/мод)</th><th>Описание</th></tr></thead><tbody>';
   tiers.forEach(function(t, i) {
     h += '<tr><td><input class="form-input" type="number" id="tierMin_'+i+'" value="'+t.min_proxies+'" style="width:80px"></td><td><input class="form-input" type="number" id="tierPrice_'+i+'" value="'+t.price+'" style="width:80px"></td><td><input class="form-input" id="tierLabel_'+i+'" value="'+(t.label||'')+'" style="width:120px"></td></tr>';
   });
   h += '</tbody></table>';
-  document.getElementById('pricingTiersArea').innerHTML = h;
+  area.innerHTML = h;
 }
 function savePricingTiers() {
   var tiers = [];

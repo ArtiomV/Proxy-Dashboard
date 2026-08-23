@@ -85,10 +85,11 @@ module.exports = function createClientPortalRouter(deps) {
 
 r.get('/api/client/sla_report', authMiddleware, (req, res) => {
   const month = String(req.query.month || '');
+  const day = req.query.day != null && req.query.day !== '' ? String(req.query.day) : null;
   const clientInfo = clientByLogin.get(req.user.login);
   if (!clientInfo) return res.status(404).json({ error: 'Клиент не найден' });
   try {
-    return res.json(sla.buildClientReport(db, month, clientInfo.portName || clientInfo.login));
+    return res.json(sla.buildClientReport(db, month, clientInfo.portName || clientInfo.login, day));
   } catch (e) {
     return res.status(400).json({ error: e.message });
   }
@@ -200,24 +201,39 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         clientImeis.add(imei);
       }
 
-      const cutoff30 = new Date(Date.now() - 30 * 86400000).toLocaleDateString('en-CA');
+      // Аптайм из modem_ping (минутные пинги ProxySmart) — та же методология,
+      // что у клиентского SLA-отчёта, поэтому цифры в ЛК и на вкладке «SLA»
+      // больше не расходятся. IMEI → (server, nick) через modem_meta.
+      const pingUptimeByImei = {};
+      if (clientImeis.size) {
+        try {
+          const sinceIso = new Date(Date.now() - 30 * 86400000).toISOString();
+          // merged.ports ключи могут нести префикс сервера («S1_86…») — снимаем.
+          const rawByFull = {};
+          for (const full of clientImeis) rawByFull[String(full).replace(/^S\d+_/, '')] = full;
+          const rawList = Object.keys(rawByFull);
+          const marks = rawList.map(() => '?').join(',');
+          for (const r of db.prepare(`
+            SELECT mm.imei, COUNT(p.id) AS pings, SUM(p.ok) AS ok_pings,
+                   MIN(p.ts) AS first_ts
+              FROM modem_meta mm
+              JOIN modem_ping p ON p.server = mm.server_name AND p.nick = mm.nick
+             WHERE mm.imei IN (${marks}) AND p.ts >= ?
+             GROUP BY mm.imei
+          `).all(...rawList, sinceIso)) {
+            pingUptimeByImei[rawByFull[r.imei] || r.imei] = {
+              total_checks: Number(r.pings) || 0,
+              online_checks: Number(r.ok_pings) || 0,
+              first_check: r.first_ts || null,
+              uptime30d: r.pings ? Math.round((r.ok_pings || 0) / r.pings * 1000) / 10 : null,
+            };
+          }
+        } catch (_) { /* modem_ping отсутствует → аптайм просто не отдаём */ }
+      }
 
       for (const imei of clientImeis) {
         if (ipTracking[imei]) filteredIpTracking[imei] = ipTracking[imei];
-        if (uptimeTracking[imei]) {
-          const ut = uptimeTracking[imei];
-          // Compute 30-day uptime from daily buckets
-          let online30 = 0, total30 = 0;
-          for (const [date, bucket] of Object.entries(ut.daily || {})) {
-            if (date >= cutoff30) { online30 += bucket.online; total30 += bucket.total; }
-          }
-          filteredUptimeTracking[imei] = {
-            total_checks: ut.total_checks,
-            online_checks: ut.online_checks,
-            first_check: ut.first_check,
-            uptime30d: total30 > 0 ? Math.round(online30 / total30 * 1000) / 10 : null
-          };
-        }
+        if (pingUptimeByImei[imei]) filteredUptimeTracking[imei] = pingUptimeByImei[imei];
         if (speedLatest[imei]) filteredSpeedtest[imei] = speedLatest[imei];
         if (ipHistory[imei]) filteredIpHistory[imei] = ipHistory[imei];
       }

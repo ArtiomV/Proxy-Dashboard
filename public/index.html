@@ -319,6 +319,8 @@
           </div>
           <input type="month" id="clientSlaMonth" class="input" data-on-change="loadClientSla(true)" style="width:170px">
         </div>
+        <!-- Выбор дня: чипы по дням месяца, окраска по доступности -->
+        <div id="clientSlaDays" style="display:flex;flex-wrap:wrap;gap:5px;margin-bottom:14px"></div>
         <div class="summary-cards" id="clientSlaSummary">
           <div class="card"><div class="card-label">Доступность</div><div class="card-value" id="clientSlaPct">—</div><div class="card-sub">по всем проверкам</div></div>
           <div class="card"><div class="card-label">Модемов в отчёте</div><div class="card-value" id="clientSlaModems">—</div><div class="card-sub">с подтверждённой привязкой</div></div>
@@ -824,7 +826,7 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
 <script src="/js/utils.js?v=0820e"></script>
 <script src="/js/delegation.js?v=0813c"></script>
 <script src="/js/auth-utils.js?v=0814a"></script>
-<script src="/js/client.js?v=0823k"></script>
+<script src="/js/client.js?v=0823m"></script>
 
 </body>
 </html>

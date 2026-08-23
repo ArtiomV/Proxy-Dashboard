@@ -45,11 +45,12 @@ beforeAll(() => {
     getStaleNicks: () => new Set(),
     getSetting: (k, d) => d,
     trackingDb: {
-      metaFleetRoster: { all: () => [
+      // Real module shape (src/db/tracking.js): accessor returns the prepared stmt.
+      metaFleetRosterStmt: () => ({ all: () => [
         { srv: 'S1', imei: 'A', nick: 'MD_A' },
         { srv: 'S1', imei: 'B', nick: 'MD_B' },
         { srv: 'S1', imei: 'G', nick: 'MD_G' },
-      ] },
+      ] }),
     },
     fetchAllServersDataCached: async () => [],
     mergeServerData: () => ({ status: live }),

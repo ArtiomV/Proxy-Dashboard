@@ -53,7 +53,7 @@ describe('interval jobs register in the scheduler registry (C8)', () => {
       alerts: { isRuleEnabled: () => false, recordBellEvent() {}, trigger: () => true },
       uptimeTracking: {}, knownModems: {}, clients: [],
       getStaleNicks: () => new Set(), getSetting: (k, d) => d,
-      trackingDb: { metaFleetRoster: { all: () => [] } },
+      trackingDb: { metaFleetRosterStmt: () => ({ all: () => [] }) },
       fetchAllServersDataCached: async () => [],
       mergeServerData: () => ({ status: [] }),
     });
