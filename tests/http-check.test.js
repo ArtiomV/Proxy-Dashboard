@@ -31,7 +31,7 @@ function mk(overrides = {}) {
     fetchAllServersDataCached: async () => [{
       serverName: 'S1',
       status: [{ modem_details: { IMEI: 'imei1', NICK: 'MD2_39' }, net_details: { IS_ONLINE: 'yes' } }],
-      ports: { imei1: [{ portID: 'portA', HTTP_PORT: '8012', LOGIN: 'u', PASSWORD: 'p' }] },
+      ports: { imei1: [{ portID: 'portA', portName: 'client-a', HTTP_PORT: '8012', LOGIN: 'u', PASSWORD: 'p' }] },
     }],
     // Сеть не дёргаем: поведение чека управляет тест.
     fetchThroughProxy: async (proxy, url, timeout) => fetchBehavior(proxy, url, timeout),
@@ -105,6 +105,54 @@ describe('http-check', () => {
     const res = await job.runOnce();
     expect(res.total).toBe(0);
     expect(db.prepare('SELECT COUNT(*) c FROM modem_httpcheck').get().c).toBe(0);
+  });
+
+  it('пропускает невалидные реквизиты и выбирает действующий клиентский порт', async () => {
+    mk(); // восстановить базовые настройки после кейса scope выше
+    let usedProxy = null;
+    const job = hcMod.create({
+      db,
+      logger: { info() {}, warn() {}, error() {} },
+      alerts: { trigger: (rule, payload) => alertsFired.push({ rule, payload }) },
+      getSetting: (k, dflt) => (k in settings ? settings[k] : dflt),
+      apiServers: API_SERVERS,
+      fetchAllServersDataCached: async () => [{
+        serverName: 'S1',
+        status: [{ modem_details: { IMEI: 'imei1', NICK: 'MD2_39' }, net_details: { IS_ONLINE: 'yes' } }],
+        ports: { imei1: [
+          { portName: 'expired-client', HTTP_PORT: '8011', LOGIN: 'bad', PASSWORD: 'bad', IS_EXPIRED: 'true' },
+          { portName: 'randomport1', HTTP_PORT: '8012', LOGIN: 'bad2', PASSWORD: 'bad2' },
+          { portName: 'live-client', HTTP_PORT: '8013', LOGIN: 'live', PASSWORD: 'secret', IS_EXPIRED: 'false', IS_OVER_QUOTA: 'false' },
+        ] },
+      }],
+      fetchThroughProxy: async (proxy) => { usedProxy = proxy; return { status: 200, totalMs: 80, body: 'ok' }; },
+    });
+    const res = await job.runOnce();
+    expect(res).toMatchObject({ ok: 1, failed: 0 });
+    expect(usedProxy).toMatchObject({ port: 8013, login: 'live', password: 'secret' });
+  });
+
+  it('не делает HTTP-запрос без действующих клиентских реквизитов', async () => {
+    mk();
+    let fetches = 0;
+    const job = hcMod.create({
+      db,
+      logger: { info() {}, warn() {}, error() {} },
+      alerts: { trigger: (rule, payload) => alertsFired.push({ rule, payload }) },
+      getSetting: (k, dflt) => (k in settings ? settings[k] : dflt),
+      apiServers: API_SERVERS,
+      fetchAllServersDataCached: async () => [{
+        serverName: 'S1',
+        status: [{ modem_details: { IMEI: 'imei1', NICK: 'MD2_39' }, net_details: { IS_ONLINE: 'yes' } }],
+        ports: { imei1: [{ portName: 'client-a', HTTP_PORT: '8012', LOGIN: 'u', PASSWORD: 'p', IS_OVER_QUOTA: 'yes' }] },
+      }],
+      fetchThroughProxy: async () => { fetches++; return { status: 200, totalMs: 80, body: 'ok' }; },
+    });
+    const res = await job.runOnce();
+    expect(res).toMatchObject({ ok: 0, failed: 1 });
+    expect(fetches).toBe(0);
+    expect(job.latest()['S1_MD2_39'].error).toBe('no_valid_client_credentials');
+    expect(alertsFired).toEqual([]);
   });
 
   it('оффлайн-модем пишет error=offline без алерта (территория modem_offline)', async () => {

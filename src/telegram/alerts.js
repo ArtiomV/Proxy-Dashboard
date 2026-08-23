@@ -158,6 +158,10 @@ function init(deps) {
   db            = deps.db;
   tgBot         = deps.tgBot;
   eventsBus     = deps.events || null;   // SSE (23.08): опционально, тесты/стенды могут не передавать
+  // Tests and embedded harnesses can re-initialise the singleton with a new
+  // SQLite connection. Prepared statements are connection-bound.
+  _insertNotif = null;
+  _findBellByKey = null;
 
   // Restore cooldowns persisted from the previous process so a quick restart
   // doesn't reset all rate-limits.
@@ -886,29 +890,6 @@ const RULES = {
     render: p => `⏱ <b>Cron «${esc(p.job)}» молчит</b>\n\nПоследний запуск: ${p.lastRunAgo} назад (ожидался каждые ${p.intervalLabel}).\nВозможно, заклинило.`,
   },
 
-  // ── 🔔 BELL-ONLY (Stage 18.15) ──────────────────────────────
-  // Populated by the periodic collector job, not the Telegram framework.
-  // channel:'bell' tells trigger() to skip the TG send — these only land
-  // in the in-app notifications panel. They still appear in the Settings
-  // page and respect the per-rule enable toggle.
-  modem_offline: {
-    title: 'Модем оффлайн (в колокольчике)',
-    priority: 'important',
-    defaultOn: true,
-    cooldownSec: 86400,
-    channel: 'bell',
-    dedupeKey: p => 'mof_bell_' + (p.nick || p.imei || ''),
-    render: p => `📴 <b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — не отвечает ${p.mins || '?'} мин.`,
-  },
-  client_debt: {
-    title: 'Клиент в долгу',
-    priority: 'important',
-    defaultOn: true,
-    cooldownSec: 86400,
-    channel: 'bell',
-    dedupeKey: p => 'debt_' + (p.client_id || '') + '_debt',   // D4: debt-family
-    render: p => `💸 <b>${esc(p.client || '?')}</b> — баланс ${formatRub(p.balance)}.`,
-  },
 };
 
 // Bell-only metadata: how to navigate to the source when a card in the
@@ -986,9 +967,6 @@ const _entityFor = {
   retail_card_refund:        p => ({ kind: 'client', id: p.client_id || null }),
   // Заявки с лендинга → Twenty CRM
   crm_lead_failed:           () => ({ kind: 'system', id: 'crm' }),
-  // Stage 18.15 — bell-only sources
-  modem_offline:             p => ({ kind: 'modem',  id: p.nick || p.imei || null }),
-  client_debt:               p => ({ kind: 'client', id: p.client_id || null }),
 };
 
 // ────────────────────────────────────────────────────────────────
@@ -1012,6 +990,7 @@ function isRuleEnabled(ruleId) {
 // the inserted row id, or null on failure.
 function _persistToBell(rule, ruleId, payload, dedup, renderedHtml) {
   try {
+    if (!_findBellByKey) _findBellByKey = db.prepare('SELECT id FROM notifications WHERE dedup_key = ? AND datetime(created_at) >= datetime(?) LIMIT 1');
     if (!_insertNotif) {
       _insertNotif = db.prepare(`INSERT INTO notifications
         (dedup_key, rule_id, priority, entity_kind, entity_id, title, message, payload_json, created_at)
@@ -1019,8 +998,14 @@ function _persistToBell(rule, ruleId, payload, dedup, renderedHtml) {
     }
     const entFn = _entityFor[ruleId];
     const ent = entFn ? entFn(payload || {}) : { kind: 'system', id: null };
+    const bellKey = ruleId + '|' + dedup;
+    // Collector and event-driven paths can observe the same state within one
+    // scan cycle. Correlate them before INSERT, but keep later incidents: the
+    // window is short and recoveries still create a fresh episode card.
+    const recentSince = new Date(Date.now() - 10 * 60 * 1000).toISOString();
+    if (_findBellByKey.get(bellKey, recentSince)) return null;
     const info = _insertNotif.run(
-      ruleId + '|' + dedup,
+      bellKey,
       ruleId,
       rule.priority || 'info',
       ent.kind || 'system',
@@ -1153,16 +1138,16 @@ function trigger(ruleId, payload) {
 let _findBellByKey = null;
 function recordBellEvent(opts) {
   try {
-    if (!_findBellByKey) {
-      _findBellByKey = db.prepare('SELECT id FROM notifications WHERE dedup_key = ? LIMIT 1');
-    }
+    if (!_findBellByKey) _findBellByKey = db.prepare('SELECT id FROM notifications WHERE dedup_key = ? AND datetime(created_at) >= datetime(?) LIMIT 1');
     if (!_insertNotif) {
       _insertNotif = db.prepare(`INSERT INTO notifications
         (dedup_key, rule_id, priority, entity_kind, entity_id, title, message, payload_json, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now'))`);
     }
     if (!opts || !opts.dedup_key) return null;
-    if (_findBellByKey.get(opts.dedup_key)) return null;
+    const windowSec = Math.max(1, Number(opts.dedup_window_sec) || 86400);
+    const since = new Date(Date.now() - windowSec * 1000).toISOString();
+    if (_findBellByKey.get(opts.dedup_key, since)) return null;
     const info = _insertNotif.run(
       opts.dedup_key,
       opts.rule_id || 'frontend',

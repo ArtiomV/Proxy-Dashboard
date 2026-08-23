@@ -14,7 +14,7 @@ function runStartup(d) {
     healthDb, uptimeTracking, getSetting, setSetting,
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
-    autoCreateMissingClients, checkProxyLatency, proxyCheckRef,
+    autoCreateMissingClients, proxyCheckRef,
     runAutoReboot, dbAudit, tochkaConfig, runTochkaSync,
     runRetentionCleanup, cleanupStalePortMappings,
     runDailyBilling, runMonthlyReconciliation,
@@ -129,15 +129,12 @@ function runStartup(d) {
     autoCreateMissingClients().catch(e => logger.error('[AutoCreate] Error:', e.message));
   }, (appSettings.auto_create_interval_min || 10) * 60000));
 
-  // Proxy latency monitoring
-  const pcMin = appSettings.proxy_check_interval_min || 60;
-  logger.info(`[ProxyCheck] Starting proxy latency monitoring (every ${pcMin} min)...`);
-  setTimeout(() => {
-    checkProxyLatency().catch(e => logger.error('[ProxyCheck] Initial error:', e.message));
-  }, 30 * 1000);
-  proxyCheckRef.iv = setInterval(() => {
-    checkProxyLatency().catch(e => logger.error('[ProxyCheck] Error:', e.message));
-  }, pcMin * 60 * 1000);
+  // External target latency probes are intentionally not scheduled anymore.
+  // ProxySmart already measures Ping Destination through every modem and the
+  // modem-ping job consumes net_details.ping_stats once a minute. Keep the
+  // legacy manual endpoint/history available for diagnostics only.
+  logger.info('[ProxyCheck] Scheduled external latency checks disabled; using ProxySmart ping_stats');
+  proxyCheckRef.iv = null;
 
   // Auto-reboot flaky modems every 15 min.
   // The throttle inside (auto_reboot_min_interval_min, default 60) ensures the

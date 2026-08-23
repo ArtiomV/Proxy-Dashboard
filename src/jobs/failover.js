@@ -181,24 +181,24 @@ async function findSpare(serverName, excludeImeis) {
 // modem stays registered (uptime ~99%), then self-recovers. Errors alone can't
 // tell a blip from a death, so we add the modem's OWN uptime as a lie-detector.
 //
-// _glitchState walks the trailing run of errored proxy checks (errors only —
-// latency is ignored): how many in a row, and for how long. Returns
+// _glitchState walks the trailing run of failed ProxySmart ping samples
+// (latency is ignored): how many in a row, and for how long. Returns
 // { errStreak, streakMin, fresh }. `fresh` = the latest check is recent (else
 // the modem isn't being checked → don't act).
 function _glitchState(serverName, nick) {
   try {
     const rows = deps.db.prepare(
-      `SELECT error, checked_at FROM proxy_checks
-       WHERE server_name = ? AND nick = ? ORDER BY checked_at DESC LIMIT 40`
+      `SELECT ok, ts FROM modem_ping
+       WHERE server = ? AND nick = ? ORDER BY ts DESC LIMIT 40`
     ).all(serverName, nick);
     if (!rows.length) return { errStreak: 0, streakMin: 0, fresh: false };
-    const latestMs = Date.parse(rows[0].checked_at);
+    const latestMs = Date.parse(rows[0].ts);
     const fresh = !isNaN(latestMs) && (Date.now() - latestMs) <= 90 * 60 * 1000;
     let errStreak = 0, oldestErrMs = Date.now();
     for (const r of rows) {
-      if (r.error == null) break;          // a success breaks the streak
+      if (Number(r.ok) === 1) break;       // a success breaks the streak
       errStreak++;
-      const t = Date.parse(r.checked_at);
+      const t = Date.parse(r.ts);
       if (!isNaN(t)) oldestErrMs = t;
     }
     const streakMin = errStreak > 0 ? Math.round((Date.now() - oldestErrMs) / 60000) : 0;

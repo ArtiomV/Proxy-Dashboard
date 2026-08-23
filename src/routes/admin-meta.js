@@ -33,6 +33,7 @@
 // Routes mounted via the standard factory pattern (server.js boot).
 
 const express = require('express');
+const { setOperatorAliases } = require('../utils/traffic');
 
 module.exports = function createAdminMetaRouter(deps) {
   const {
@@ -40,6 +41,7 @@ module.exports = function createAdminMetaRouter(deps) {
     operatorsDb, trackingDb, knownModems, saveKnownModems,
     logActivity, fetchAllServersDataCached, markModemDeleted, markModemRestored,
     apiServers,
+    getSetting, setSettings,
   } = deps;
 
   const r = express.Router();
@@ -108,10 +110,37 @@ module.exports = function createAdminMetaRouter(deps) {
     }
   });
 
+  r.put('/api/admin/modems/:server_name/:imei/contract', authMiddleware, adminMiddleware, (req, res) => {
+    const serverName = String(req.params.server_name || '').trim();
+    const imei = String(req.params.imei || '').trim();
+    const renewalDate = String((req.body && req.body.renewal_date) || '').trim();
+    if (renewalDate && !/^\d{4}-\d{2}-\d{2}$/.test(renewalDate)) {
+      return res.status(400).json({ error: 'renewal_date must be YYYY-MM-DD or empty' });
+    }
+    const parsedDate = renewalDate ? new Date(renewalDate + 'T00:00:00Z') : null;
+    if (renewalDate && (Number.isNaN(parsedDate.getTime()) || parsedDate.toISOString().slice(0, 10) !== renewalDate)) {
+      return res.status(400).json({ error: 'Некорректная дата' });
+    }
+    const result = db.prepare(
+      "UPDATE modem_meta SET contract_renewal_date = ?, updated_at = datetime('now') WHERE server_name = ? AND imei = ?"
+    ).run(renewalDate, serverName, imei);
+    if (!result.changes) return res.status(404).json({ error: 'SIM/модем не найден' });
+    logActivity('admin', 'info', 'sim_contract_date_set', `${serverName}/${imei}`,
+      `SIM contract date ${renewalDate || 'cleared'} by ${req.user && req.user.login}`,
+      { server_name: serverName, imei, renewal_date: renewalDate });
+    res.json({ ok: true, server_name: serverName, imei, renewal_date: renewalDate });
+  });
+
   // ── 2) List operators (with usage counts) ────────────────────────────────
   r.get('/api/admin/operators', authMiddleware, adminMiddleware, (req, res) => {
     try {
       const mappings = operatorsDb.listAll();
+      const aliases = operatorsDb.listAliases();
+      const aliasesByCanonical = {};
+      for (const row of aliases) {
+        const key = String(row.canonical || '').toLowerCase();
+        (aliasesByCanonical[key] = aliasesByCanonical[key] || []).push(row.alias);
+      }
       // Cross-join with modem_meta to expose live usage counts per operator.
       // Empty operator strings are excluded — those are unknowns, not real
       // operator entries.
@@ -140,6 +169,7 @@ module.exports = function createAdminMetaRouter(deps) {
           servers: u.servers ? u.servers.split(',') : [],
           first_seen_on: m ? m.first_seen_on : null,
           updated_at: m ? m.updated_at : null,
+          aliases: aliasesByCanonical[String(u.operator_raw || '').toLowerCase()] || [],
         };
       });
       // Also surface any mapping rows that no longer have modems (so the
@@ -155,10 +185,97 @@ module.exports = function createAdminMetaRouter(deps) {
           servers: [],
           first_seen_on: m.first_seen_on,
           updated_at: m.updated_at,
+          aliases: aliasesByCanonical[String(m.operator || '').toLowerCase()] || [],
         }));
-      res.json({ operators: merged.concat(orphans) });
+      res.json({ operators: merged.concat(orphans), aliases });
     } catch (e) {
       logger.error('[admin-meta] list operators: ' + e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // Merge a vendor/raw spelling into one canonical operator. Existing rows
+  // are rewritten where it is safe, while future polling is canonicalized by
+  // the shared runtime alias map.
+  r.put('/api/admin/operators/:operator/alias', authMiddleware, adminMiddleware, (req, res) => {
+    try {
+      const alias = String(req.params.operator || '').replace(/\s+/g, ' ').trim();
+      const canonical = String((req.body && req.body.canonical) || '').replace(/\s+/g, ' ').trim();
+      if (!alias || !canonical || alias.length > 60 || canonical.length > 60 || alias.toLowerCase() === canonical.toLowerCase()) {
+        return res.status(400).json({ error: 'Укажите два разных названия длиной до 60 символов' });
+      }
+      const sourceMap = operatorsDb.getOne(alias);
+      const targetMap = operatorsDb.getOne(canonical);
+      let rewritten = 0;
+      const tables = ['modem_meta', 'traffic_hourly', 'proxy_checks', 'speed_monitor', 'top_hosts_daily'];
+      const tx = db.transaction(() => {
+        if (sourceMap && sourceMap.country && !targetMap) operatorsDb.setManual(canonical, sourceMap.country);
+        operatorsDb.setAlias(alias, canonical);
+        for (const table of tables) {
+          const cols = db.prepare(`PRAGMA table_info(${table})`).all().map(c => c.name);
+          if (!cols.includes('operator')) continue;
+          rewritten += db.prepare(`UPDATE ${table} SET operator = ? WHERE LOWER(TRIM(operator)) = LOWER(?)`).run(canonical, alias).changes;
+        }
+        // The source mapping would otherwise reappear as an orphan row in the
+        // combined operators screen. The alias row now owns this spelling.
+        operatorsDb.remove(alias);
+      });
+      tx();
+      setOperatorAliases(operatorsDb.aliasMap());
+
+      // Packages and operator costs live in app settings. Keep those references
+      // canonical too, otherwise a merged name would silently lose its limits.
+      let settingsRewritten = 0;
+      if (typeof getSetting === 'function' && typeof setSettings === 'function') {
+        const patch = {};
+        try {
+          const rawPackages = getSetting('operator_packages', '[]');
+          const packages = Array.isArray(rawPackages) ? rawPackages : JSON.parse(String(rawPackages || '[]'));
+          if (Array.isArray(packages)) {
+            const hasCanonical = packages.some(p => String((p && p.operator) || '').trim().toLowerCase() === canonical.toLowerCase());
+            let converted = false;
+            const nextPackages = [];
+            for (const p of packages) {
+              const op = String((p && p.operator) || '').trim();
+              if (op.toLowerCase() !== alias.toLowerCase()) { nextPackages.push(p); continue; }
+              settingsRewritten++;
+              if (!hasCanonical && !converted) { nextPackages.push({ ...p, operator: canonical }); converted = true; }
+            }
+            if (settingsRewritten) patch.operator_packages = JSON.stringify(nextPackages);
+          }
+        } catch (_) { /* malformed legacy setting is left untouched */ }
+        const costs = getSetting('operator_gb_costs', {});
+        if (costs && typeof costs === 'object' && !Array.isArray(costs)) {
+          const nextCosts = { ...costs };
+          const aliasKey = Object.keys(nextCosts).find(k => k.trim().toLowerCase() === alias.toLowerCase());
+          const canonicalKey = Object.keys(nextCosts).find(k => k.trim().toLowerCase() === canonical.toLowerCase());
+          if (aliasKey) {
+            if (!canonicalKey) nextCosts[canonical] = nextCosts[aliasKey];
+            delete nextCosts[aliasKey];
+            patch.operator_gb_costs = nextCosts;
+            settingsRewritten++;
+          }
+        }
+        if (Object.keys(patch).length) setSettings(patch);
+      }
+      logActivity('admin', 'info', 'operator_alias_set', alias,
+        `${alias} → ${canonical} by ${req.user && req.user.login}`, { alias, canonical, rewritten, settings_rewritten: settingsRewritten });
+      res.json({ ok: true, alias, canonical, rewritten, settings_rewritten: settingsRewritten });
+    } catch (e) {
+      logger.error('[admin-meta] set operator alias: ' + e.message);
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  r.delete('/api/admin/operators/:operator/alias', authMiddleware, adminMiddleware, (req, res) => {
+    try {
+      const alias = String(req.params.operator || '').trim();
+      operatorsDb.removeAlias(alias);
+      setOperatorAliases(operatorsDb.aliasMap());
+      logActivity('admin', 'info', 'operator_alias_removed', alias,
+        `Operator alias removed by ${req.user && req.user.login}`);
+      res.json({ ok: true, alias });
+    } catch (e) {
       res.status(500).json({ error: e.message });
     }
   });

@@ -30,6 +30,13 @@ function init(db) {
   S.delete = db.prepare(`DELETE FROM operator_country_map WHERE operator = ?`);
   S.all = db.prepare(`SELECT operator, country, source, updated_at, first_seen_on FROM operator_country_map ORDER BY country, operator`);
   S.get = db.prepare(`SELECT operator, country, source FROM operator_country_map WHERE operator = ?`);
+  S.aliasSet = db.prepare(`
+    INSERT INTO operator_alias_map (alias, canonical, updated_at)
+    VALUES (?, ?, datetime('now'))
+    ON CONFLICT(alias) DO UPDATE SET canonical = excluded.canonical, updated_at = excluded.updated_at
+  `);
+  S.aliasDelete = db.prepare(`DELETE FROM operator_alias_map WHERE alias = ? COLLATE NOCASE`);
+  S.aliasAll = db.prepare(`SELECT alias, canonical, updated_at FROM operator_alias_map ORDER BY canonical COLLATE NOCASE, alias COLLATE NOCASE`);
 }
 
 function upsertAuto(operator, country, firstSeenOn) {
@@ -50,4 +57,18 @@ function remove(operator) {
 function listAll() { return S.all.all(); }
 function getOne(operator) { return S.get.get(operator.toLowerCase().trim()); }
 
-module.exports = { init, upsertAuto, setManual, remove, listAll, getOne };
+function setAlias(alias, canonical) {
+  const a = String(alias || '').replace(/\s+/g, ' ').trim();
+  const c = String(canonical || '').replace(/\s+/g, ' ').trim();
+  if (!a || !c || a.toLowerCase() === c.toLowerCase()) return null;
+  return S.aliasSet.run(a, c);
+}
+function removeAlias(alias) { return S.aliasDelete.run(String(alias || '').trim()); }
+function listAliases() { return S.aliasAll.all(); }
+function aliasMap() {
+  const out = {};
+  for (const row of listAliases()) out[String(row.alias).toLowerCase()] = row.canonical;
+  return out;
+}
+
+module.exports = { init, upsertAuto, setManual, remove, listAll, getOne, setAlias, removeAlias, listAliases, aliasMap };

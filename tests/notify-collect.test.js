@@ -36,7 +36,7 @@ beforeAll(() => {
   job = notifyCollect.init({
     logger: silentLogger, db,
     alerts: {
-      isRuleEnabled: (r) => r === 'modem_offline',
+      isRuleEnabled: (r) => r === 'modem_offline_20m',
       recordBellEvent: (e) => bells.push(e),
       trigger: () => true,
     },
@@ -64,7 +64,7 @@ describe('notify-collect offline pass == fleet card (WP4.2)', () => {
     const ids = bells.map(b => b.entity_id).sort();
     expect(ids).toEqual(['MD_A']);
     // sanity: the single event looks like the card entry
-    expect(bells[0].rule_id).toBe('modem_offline');
+    expect(bells[0].rule_id).toBe('modem_offline_20m');
     expect(bells[0].payload.server).toBe('S1');
     expect(bells[0].payload.mins).toBeGreaterThanOrEqual(29);
   });

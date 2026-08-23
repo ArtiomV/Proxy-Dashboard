@@ -14,6 +14,7 @@ const express = require('express');
 const http = require('http');
 const https = require('https');
 const net = require('net');
+const { pickValidClientHttpPort } = require('../utils/proxy-port');
 
 module.exports = function createProxyChecksRouter(deps) {
   const {
@@ -72,14 +73,12 @@ r.post('/api/admin/proxy_check', authMiddleware, adminMiddleware, async (req, re
       for (const [imei, portList] of Object.entries(portsMap)) {
         const info = modemInfo[imei];
         if (!info) continue;
-        for (const p of portList) {
-          if (!p.HTTP_PORT || !p.LOGIN || !p.PASSWORD) continue;
-          proxyMap[info.nick + '|' + srv] = {
-            server: srv, nick: info.nick, client: p.portName || '', operator: info.operator || '',
-            proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
-          };
-          break;
-        }
+        const p = pickValidClientHttpPort(portList);
+        if (!p) continue;
+        proxyMap[info.nick + '|' + srv] = {
+          server: srv, nick: info.nick, client: p.portName, operator: info.operator || '',
+          proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
+        };
       }
     }
 

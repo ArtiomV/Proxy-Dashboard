@@ -118,8 +118,8 @@
 
 ### 2.7. Алерты
 - Оффлайн-модем: TG-алерт в окне [threshold; 12ч) тишины; парность «отключился/вернулся» через offline_alerted; сводный «🚨 Не работает модемов: N» (modems_down_bulk) — порог настраивается, soft-deleted не попадают (janitor _downSince).
-- Колокольчик = ровно fleet.disconnectedList (per-day dedup).
-- Серверные: server_unreachable (≥10 мин), дневная сводка, долги.
+- Колокольчик и Telegram используют единый реестр правил и стабильные dedup-key. Collector не создаёт вторую карточку для уже зафиксированного event-driven инцидента; исторические bell-only дубли `modem_offline`/`client_debt` удалены.
+- Серверные: server_unreachable (≥10 мин), дневная сводка, долги. Для критичных/важных Telegram-алертов доступны действия «В работе»/«Решено».
 
 ### 2.8. Recovery / failover
 - Auto-recovery: ребут модема → Re-Add → сдача (recovery_exhausted) с дневными капами.
@@ -217,15 +217,15 @@ cleanup (00:30 + hourly): retention; Pass A — dedupe per (server,imei); мёр
 #### Дашборд («Командный центр»)
 - **Пульс бизнеса**: Трафик сегодня (парк), Активные модемы working/total, Выручка 30д (факт) (+Δ М/М), На балансах (Σ положительных балансов).
 - **Требует внимания** (4 карточки): «Проблемы инфраструктуры» (плитки Модем отключен / Низкая скорость / Завис IP / Сбоит прокси — клик открывает попап со списком); «Потребление трафика» (тренд 6 мес); «Выручка: факт и прогноз» (стек-бар «За ГБ»/«За модем» + run-rate прогноз месяца полупрозрачным столбцом, поповер «Формула» — см. §2.6); «Операторы» (трафик/модем/сут, ₽/ГБ себестоимость).
-- **Парк по серверам**: «Весь парк» + карточка на сервер (working/total, отключено, трафик сегодня/месяц, сигнал, проблемные).
-- **Финансы**: «Выручка по дням» (стек по клиентам, 30 дн) + «Последние пополнения» (5, с разделителями); «Качество выручки» — плитки в порядке: Выручка 30д (факт) → Расходы (мес.) → Прибыль 30д → Маржинальность → Run-rate (ожидание) → NRR 3мес → Churn → ARPU → Активных клиентов + кнопка **«⚙ Затраты»** (редактор себестоимости) + бары концентрации Top-1/3/5.
+- **Парк по серверам**: карточка на каждый сервер (working/total, отключено, трафик сегодня/месяц, сигнал, проблемные); агрегат «Весь парк» не дублируется.
+- **Финансы**: «Выручка за 30 дней» (стек по клиентам) + «Последние пополнения» (5, с разделителями); «Качество выручки» — плитки в порядке: Выручка 30д (факт) → Расходы (мес.) → Прибыль 30д → Маржинальность → Run-rate (ожидание) → NRR 3мес → Churn → ARPU → Активных клиентов + кнопка **«⚙ Затраты»** (редактор себестоимости) + бары концентрации Top-1/3/5.
 - **Клиенты**: таблица Клиент/Live/Сегодня/Тариф/Выручка 30д/Δ M/M/% выручки/Баланс.
 - **Инфраструктура** (раскрывашки): Топ проблемных модемов (ребут/Re-Add), Ротации·IP·ёмкость (периоды 1–30 дн, успешность %, уникальных IP, подсетей/модем), Распределение задержек (P50/P95/ошибки), Сверка биллинга (расхождения ГБ, «не выставлен счёт», «счёт без трафика»).
 - **Трафик**: почасовая тепловая карта (страны/операторы/клиенты, GMT+3), потребление 60 дней (стек по клиентам/странам), топ доменов, матрица трафика, обращения к API (кто/тип/цель/статус/мс/IP).
 
 #### Модемы
 - Чипы-фильтры: Все/Онлайн/Проблемы/SIM/Офлайн/Свободные; селекты сервера (группы по странам) и клиента; виды Таблица/Сетка. Тест-пул 🧪 из счётчиков исключён.
-- Таблица: rail причины, статус-пилюля (+«блип»), флаги 🧪⛔📴♻🔒🌐⚠, чипы исключения «Не в стат.»/«Без клиента», портName-бейджи, креды (копия), IP, трафик, скорость, аптайм, латентность (инлайн-лог проверок по клику), TCP-коннекты со спарклайном 60 мин, ошибки %, здоровье, ротация. По серверу: «↻ Сброс IP», «⏻ Ребут» (пароль).
+- Таблица: rail причины, статус-пилюля (+«блип»), флаги 🧪⛔📴♻🔒🌐⚠, чипы исключения «Не в стат.»/«Без клиента», portName-бейджи, креды (копия), IP; мониторинговые колонки идут **Пинг ProxySmart → HTTP → трафик**. Затем скорость, аптайм, TCP-коннекты со спарклайном 60 мин, ошибки %, здоровье, ротация. По серверу: «↻ Сброс IP», «⏻ Ребут» (пароль).
 - Bulk: сброс IP, ребут, OS-spoof, ротация, экспорт (формат/фильтры/скачать), proxy-check, удаление.
 - Карточка модема: Обзор (баннер состояния, действия Сброс IP/Ребут/Re-Add/Доступ, KPI, Сеть и сигнал, Подключение — по каждому порту своя «📋 строка» креда, Трафик, тоггл тест-пула), Здоровье (скор /100, таймлайн 30 дн, разложение по факторам, формула), Трафик (heatmap + топ доменов модема), История (ротации IP, спидтесты + запуск), Настройки (идентификация, сеть/ротация, порты: перенос/редактирование/удаление/добавление). SMS/USSD, VPN-профиль.
 
@@ -238,7 +238,7 @@ cleanup (00:30 + hourly): retention; Pass A — dedupe per (server,imei); мёр
 Сайдбар: Акты (массовая генерация за месяц, аккордеон по месяцам, действия ✏️/📥/✅/↻/🗑), Счета (аналогично + формула), Платежи (неопознанные — привязка к клиенту вручную, последние платежи). Редактор затрат (по серверам ₽, SIM ₽/мес по операторам, прочее; шаблон из прошлого месяца). Настройка Точки (JWT/Customer Code/Account ID, webhook, синхронизация платежей).
 
 #### Настройки
-Мониторинг (здоровье сервера, системный лог, журнал действий); Инфраструктура (серверы — карточки с кредами, операторы→страны); Автоматика (правила уведомлений с каналами/кулдаунами/тестом, порог массового падения `modems_down_threshold`, failover — тогглы/пороги/кандидаты/ручной перенос/история, восстановление, проверка прокси); Инструменты (банк-конфиг, симулятор нагрузки с профилями/SSE-стримом, тест-пул); Данные (Telegram-уведомления и сводка, спидтесты/пороги, `stale_modem_hours`, `modem_offline_threshold_min`, трекинг, хранение, сессии/биллинг, тарифная сетка pricing_tiers).
+Мониторинг (единый экран «Состояние сервера» с вердиктом, KPI, ресурсами, трендом, событиями и простоями; системный лог; журнал действий; SLA); Инфраструктура (серверы — карточки с кредами; единый справочник стран/операторов/пакетов + алиасы разных названий одного оператора); Автоматика (правила уведомлений с каналами/кулдаунами/тестом, зависимости/ack/окна обслуживания, порог массового падения `modems_down_threshold`, failover — тогглы/пороги/кандидаты/ручной перенос/история, восстановление, HTTP-проверка только через валидные клиентские реквизиты, нативный Ping Destination ProxySmart); Инструменты (банк-конфиг, симулятор нагрузки с профилями/SSE-стримом, тест-пул); Данные (Telegram-уведомления и сводка, спидтесты/пороги, `stale_modem_hours`, `modem_offline_threshold_min`, трекинг, хранение, сессии/биллинг, тарифная сетка pricing_tiers).
 
 ### 4.2. Клиентский портал (public/index.html + client.js)
 - Логин (поддержка impersonate админом), тёмная тема.
@@ -271,7 +271,7 @@ cleanup (00:30 + hourly): retention; Pass A — dedupe per (server,imei); мёр
 ## 5. Интеграции
 
 ### 5.1. ProxySmart /apix
-Используемые эндпоинты: show_status_json, bandwidth_report_all, list_ports_json, top_hosts (через шим на боксах), speedtest, reset/reboot_modem_by_imei, reboot_server (через панельную сессию — fetchApiPanel), apply_port, get_counters_port, get_rotation_log, unique_ips_json. Кэширование server_cache + поведение при недоступности (cached → offline-аннотация). Контракт (обязательные поля ответов, валидатор, известные пробелы) — docs/PROXYSMART-CONTRACT.md (D7).
+Используемые эндпоинты: show_status_json (включая нативный `ping_stats` для настроенного на боксах Ping Destination `bbc.com`), bandwidth_report_all, list_ports_json, top_hosts (через шим на боксах), speedtest, reset/reboot_modem_by_imei, reboot_server (через панельную сессию — fetchApiPanel), apply_port, get_counters_port, get_rotation_log, unique_ips_json. Кэширование server_cache + поведение при недоступности (cached → offline-аннотация). Контракт (обязательные поля ответов, валидатор, известные пробелы) — docs/PROXYSMART-CONTRACT.md (D7).
 
 ### 5.2. Точка Банк (enter.tochka.com, Bearer JWT + CustomerCode)
 - **Выписки (statements)**: init → poll до Ready (backoff), окно 14 дней; sync каждые 30 мин + 90 с после старта + дебаунс по вебхуку + вручную. Только Credit-строки.
@@ -281,7 +281,7 @@ cleanup (00:30 + hourly): retention; Pass A — dedupe per (server,imei); мёр
 - Конфиг Точки — kv_store `tochka_config` (D1, 2026-08): каждое непустое поле `enc1:` AES-256-GCM (ключ: TOCHKA_CONFIG_KEY env → /etc/machine-id → legacy hostname). Приоритет источников: env TOCHKA_* > kv > legacy `tochka_config.json` (мигрирует в kv при первом чтении, далее файл read-only deprecated).
 
 ### 5.3. Telegram
-Long-poll бот (без webhook). Команды: `/start` (первый чат = получатель алертов), `/today`, `/yesterday`, `/status`. Алерты по правилам (см. §8) + дневная сводка в `telegram_summary_time` (финансы/трафик/модемы/AI-insights + блок «лежат >12 ч» (D3), 3 ретрая; маркер `telegram_last_sent_date`). Boot-сообщение через 30 с после старта. Inline-кнопок/действий из TG нет — только исходящее. Отдельно: `logActivity` critical/error по whitelist URGENT_ACTIONS идёт через `alerts.trigger()` (D4) — правила в §8, гейт token/chatId/telegram_summary_enabled сохранён.
+Long-poll бот (без webhook). Команды: `/start` (первый чат = получатель алертов), `/today`, `/yesterday`, `/status`. Алерты по правилам (см. §8) + дневная сводка в `telegram_summary_time` (финансы/трафик/модемы/AI-insights + блок «лежат >12 ч» (D3), 3 ретрая; маркер `telegram_last_sent_date`). Boot-сообщение через 30 с после старта. Для critical/important есть inline-действия «В работе» (TTL) и «Решено» (до закрытия инцидента). Отдельно: `logActivity` critical/error по whitelist URGENT_ACTIONS идёт через `alerts.trigger()` (D4) — правила в §8, гейт token/chatId/telegram_summary_enabled сохранён.
 
 ### 5.4. CRM
 CRM (Twenty) вынесена из админки (2026, ТЗ C2): iframe-вкладка, CRM-синк, напоминания и экспорт удалены; AI-лидген (sales_*) удалён вместе с ней (ТЗ C3).
@@ -352,7 +352,8 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 - **trackModems** (~3 мин): фетч боксов, server down/recovered, meta-upsert, IP-трекинг, uptime-бакеты, авто-recovery, offline-алерты (порог `modem_offline_threshold_min`), сводка mass-down, prune.
 - **HourlyAgg** (каждый час :00, 5 попыток): дельты → traffic_hourly; детект ресета счётчиков; spike-clamp (3×/1.5× от 24ч-среднего, floor 500 МБ); сглаживание uncertain медианой.
 - **NotifyCollect** (2 мин): bell по fleet.disconnectedList (per-day дедуп), SIM-сигналы, долги, TTL-чистка.
-- **ProxyCheck** (60 мин): curl-замеры проданных неистёкших портов → proxy_checks.
+- **ModemPing** (из цикла tracking): сохраняет нативные ProxySmart `ping_stats` → modem_ping; отдельный внешний latency-cron не запускается.
+- **HttpCheck**: проверяет сайт только через проданный неистёкший порт с непустыми валидными клиентскими login/password; невалидные/служебные реквизиты пропускает без ложного алерта.
 - **AutoCreate** (10 мин): новый portName → авто-клиент (per_gb, цена по сетке).
 - **AutoReboot** (15 мин, выкл по дефолту): ребут проблемных по computeProxyIssues с троттлом.
 - **TochkaSync** (30 мин + дебаунс от webhook): выписка 14 дней, идемпотентный зачёт, bill-settle.
@@ -369,7 +370,7 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 
 Каждое правило: вкл/выкл (`alert_<id>_enabled`), канал TG+колокольчик или только колокольчик, кулдаун per dedupeKey (персист в kv, TTL 7д), boot-grace 5 мин, каждый триггер пишется в notifications.
 
-**D4 (2026-08):** бывший URGENT_ACTIONS-контур logActivity консолидирован в этот движок. logActivity больше не шлёт TG сам — вызывает `alerts.trigger()` синхронно (немедленность critical сохранена). Кулдауны прежние: 15 мин (cooldownSec 900) на (rule, target); гейт `telegram_summary_enabled` остался на стороне logActivity. Правила контура: billing_failed, billing_unique_conflict, tochka_sync_failed, tochka_unverified_webhook, uncaught_exception, unhandled_rejection, telegram_summary_failed + generic-фолбэк system_critical (любое critical-событие system_log). server_unreachable и db_backup_failed маршрутизируются в свои давние правила. **Долговые сигналы — общий dedupeKey-family `debt_<client_id>_<signal>`**: client_charge_failed (`…_charge_failed`), client_balance_negative (`…_balance_negative`), client_debt (`…_debt`, bell-only), client_blocked_debt / client_unblocked_debt / client_block_warning; частоты не изменились.
+**D4 (2026-08):** бывший URGENT_ACTIONS-контур logActivity консолидирован в этот движок. logActivity больше не шлёт TG сам — вызывает `alerts.trigger()` синхронно (немедленность critical сохранена). Кулдауны прежние: 15 мин (cooldownSec 900) на (rule, target); гейт `telegram_summary_enabled` остался на стороне logActivity. Правила контура: billing_failed, billing_unique_conflict, tochka_sync_failed, tochka_unverified_webhook, uncaught_exception, unhandled_rejection, telegram_summary_failed + generic-фолбэк system_critical (любое critical-событие system_log). server_unreachable и db_backup_failed маршрутизируются в свои давние правила. **Долговые сигналы — общий dedupeKey-family `debt_<client_id>_<signal>`**: client_charge_failed (`…_charge_failed`), client_balance_negative (`…_balance_negative`), client_blocked_debt / client_unblocked_debt / client_block_warning. Отдельное bell-only `client_debt` удалено как дубль.
 
 **D3 (2026-08):** дневная TG-сводка содержит строку «Лежат >12 ч: N модемов (список, топ-10 + …и ещё N)» — источник тот же fleet.disconnectedList, что у колокольчика (notify-collect); закрывает дыру «TG-алерт оффлайна глушится после stale_modem_hours».
 
@@ -378,7 +379,7 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 **🔴 critical:** server_unreachable (≥10 мин), modems_down_bulk (≥порога), tochka_webhook_failed, db_backup_failed, balance_drift, duplicate_credit_blocked, client_charge_failed (maxDebt), client_blocked_debt (автоблок по долгу, §2.9), failover_no_spare, failover_failed, domain_guard_hit, domain_guard_failed, heap_high, disk_low_critical, proxysmart_contract_mismatch + URGENT-контур (D4 выше).
 **🟡 important:** modem_offline_20m (порог настраиваемый, парность), modem_recovered, recovery_exhausted, failover_done, sim_redirect_imposed, sim_iccid_changed, sim_status_bad, reboot_score_high (≥70), payment_received, client_balance_negative, client_block_warning (прогноз блокировки ≤3 дн, §2.9), client_unblocked_debt (восстановление после оплаты, §2.9), pricing_tier_miss (промах сетки цен, §2.10), proxy_expiring_3d, traffic_spike_burst, dashboard_restarted.
 **🔵 early:** heap_warn, disk_low_warn, cron_stuck.
-**🔔 bell-only:** modem_offline, client_debt.
+**🔔 bell-only:** отдельные legacy-правила удалены; карточки колокольчика создаются тем же каноническим событием, что и Telegram, с корреляционным окном.
 
 ---
 

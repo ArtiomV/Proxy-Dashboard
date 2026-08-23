@@ -45,10 +45,6 @@ function stop() {
   if (_interval) { clearInterval(_interval); _interval = null; }
 }
 
-function todayBucket() {
-  return new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
-}
-
 function esc(s) {
   if (s == null) return '';
   return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
@@ -59,13 +55,13 @@ async function runOnce() {
   const enabled = deps.alerts && deps.alerts.isRuleEnabled;
   // Per-rule toggle gates whole passes — if the admin turned the rule off in
   // Settings → Уведомления, we skip the scan entirely. Saves an SQLite walk.
-  if (!enabled || enabled('modem_offline')) {
+  if (!enabled || enabled('modem_offline_20m')) {
     try { await passOfflineModems(); } catch (e) { deps.logger.warn('[NotifyCollect] offline: ' + e.message); }
   }
   if (!enabled || enabled('sim_redirect_imposed') || enabled('sim_status_bad') || enabled('reboot_score_high')) {
     try { passSimSignals(); }      catch (e) { deps.logger.warn('[NotifyCollect] sim: ' + e.message); }
   }
-  if (!enabled || enabled('client_debt')) {
+  if (!enabled || enabled('client_balance_negative')) {
     try { passClientDebts(); }     catch (e) { deps.logger.warn('[NotifyCollect] debts: ' + e.message); }
   }
   try { passCleanup(); } catch (e) { deps.logger.warn('[NotifyCollect] cleanup: ' + e.message); }
@@ -96,15 +92,17 @@ async function scanDisconnected() {
 async function passOfflineModems() {
   const { alerts } = deps;
   if (!deps.trackingDb || !deps.fetchAllServersDataCached || !deps.mergeServerData) return;
-  const day = todayBucket();
   for (const o of await scanDisconnected()) {
     const lastMs = o.lastOnline || 0;
     const mins = lastMs ? Math.floor((Date.now() - lastMs) / 60000) : 0;
     const lastOnlineLocal = lastMs ? new Date(lastMs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) : '—';
     const nick = o.nick || o.key;
     alerts.recordBellEvent({
-      dedup_key: 'modem_offline_' + nick + '_' + day,
-      rule_id: 'modem_offline',
+      // Exact canonical alert key: if the tracking alert already wrote the
+      // bell card, recordBellEvent sees it and does not create a second one.
+      dedup_key: 'modem_offline_20m|mof_' + o.server + '_' + (String(o.key).split('|')[1] || ''),
+      dedup_window_sec: 86400,
+      rule_id: 'modem_offline_20m',
       priority: mins > 60 ? 'important' : 'early',
       entity_kind: 'modem',
       entity_id: nick,
@@ -169,13 +167,13 @@ function passSimSignals() {
 function passClientDebts() {
   const { alerts, clients } = deps;
   if (!Array.isArray(clients)) return;
-  const day = todayBucket();
   for (const c of clients) {
     const bal = Number(c.balance) || 0;
     if (bal >= CLIENT_DEBT_THRESHOLD) continue;
     alerts.recordBellEvent({
-      dedup_key: 'client_debt_' + c.id + '_' + day,
-      rule_id: 'client_debt',
+      dedup_key: 'client_balance_negative|debt_' + c.id + '_balance_negative',
+      dedup_window_sec: 86400,
+      rule_id: 'client_balance_negative',
       priority: bal < -1000 ? 'important' : 'early',
       entity_kind: 'client',
       entity_id: c.id,

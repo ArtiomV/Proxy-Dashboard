@@ -106,7 +106,7 @@ function _renderFinanceDashboard(c, d) {
   h += '<div class="fx-wg"><div class="fx-wl">ARPU</div><div class="fx-wv">' + money(s.arpu) + '</div></div>';
   h += '</div>';
 
-  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Выручка по дням</span><span class="fx-cs">последние 30 дней · ₽</span></div>';
+  h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Выручка за 30 дней</span></div>';
   h += '<div style="height:130px"><canvas id="fxDailyChart"></canvas></div></div>';
 
   h += '<div class="fx-row2">';
@@ -1402,7 +1402,7 @@ function renderMrrChart(d){
         y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:9},callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid,drawTicks:false},border:{display:false}}}}
   });
 }
-// «Выручка по дням» + «Последние платежи» — в блоке Финансов на месте бывшего MRR.
+// «Выручка за 30 дней» + «Последние платежи» — в блоке Финансов на месте бывшего MRR.
 function renderFinRevenue(d){
   var el = document.getElementById('newFinRevenue'); if(!el) return;
   var dr = d.daily_revenue || [], dates = dr.map(function(r){return r.date;});
@@ -1413,9 +1413,8 @@ function renderFinRevenue(d){
     return sb-sa;
   });
   var MAXG=6, top=names.slice(0,MAXG), rest=names.slice(MAXG), palette=getChartPaletteLight();
-  var h = '<div class="fin-card-head"><div class="fin-card-heading"><h3 class="fin-card-title">Выручка по дням</h3>'
-    +'<span class="fin-card-subtitle">Динамика поступлений с разбивкой по клиентам</span></div>'
-    +'<span class="fin-period-badge">'+icon('clock',12)+' 30 дней · ₽</span></div>';
+  var h = '<div class="fin-card-head"><div class="fin-card-heading"><h3 class="fin-card-title">Выручка за 30 дней</h3>'
+    +'<span class="fin-card-subtitle">Динамика поступлений с разбивкой по клиентам</span></div></div>';
   h += '<div class="fin-revenue-chart"><canvas id="newFinRevCanvas"></canvas></div>';
   h += '<section class="fin-recent-block"><div class="fin-subhead"><span class="fin-subhead-title"><span class="fin-subhead-icon">'+icon('plus',14)+'</span>Последние пополнения</span>'
     +'<button type="button" class="fin-link" data-on-click="finNavBank()">Все платежи <span class="fin-link-arrow">→</span></button></div>';

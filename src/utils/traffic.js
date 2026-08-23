@@ -21,6 +21,32 @@ function parseTrafficValue(val) {
 
 const parseBwToBytes = parseTrafficValue;
 
+let operatorAliases = Object.create(null);
+
+function setOperatorAliases(aliases) {
+  const next = Object.create(null);
+  if (aliases && typeof aliases === 'object') {
+    for (const [alias, canonical] of Object.entries(aliases)) {
+      const key = String(alias || '').replace(/\s+/g, ' ').trim().toLowerCase();
+      const value = String(canonical || '').replace(/\s+/g, ' ').trim();
+      if (key && value && key !== value.toLowerCase()) next[key] = value;
+    }
+  }
+  operatorAliases = next;
+}
+
+function resolveOperatorAlias(rawOp) {
+  let clean = String(rawOp || '').replace(/\s+/g, ' ').trim();
+  const seen = new Set();
+  for (let i = 0; i < 10; i++) {
+    const key = clean.toLowerCase();
+    if (!key || seen.has(key) || !operatorAliases[key]) break;
+    seen.add(key);
+    clean = operatorAliases[key];
+  }
+  return clean;
+}
+
 function trafficBytesToGb(bytes) {
   return Math.round(bytes / 1e9 * 1000) / 1000;
 }
@@ -38,6 +64,9 @@ function normalizeOperator(rawOp, isRO) {
   // one and so write-paths can fall back to a persisted source (modem_meta /
   // proxy_checks). Empty/placeholder rows are hidden from operator breakdowns.
   if (!clean || clean === 'unknown') return '';
+  // Manual aliases have priority over built-in heuristics. This lets an admin
+  // collapse a new/vendor-specific carrier spelling without a deploy.
+  if (operatorAliases[clean]) return resolveOperatorAlias(clean);
   const map = {
     'unite': 'Moldtelecom',
     'moldtelecom': 'Moldtelecom',
@@ -65,4 +94,4 @@ function normalizeOperator(rawOp, isRO) {
   return clean.charAt(0).toUpperCase() + clean.slice(1);
 }
 
-module.exports = { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator };
+module.exports = { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator, setOperatorAliases, resolveOperatorAlias };

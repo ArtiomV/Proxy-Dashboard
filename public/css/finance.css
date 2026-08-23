@@ -333,8 +333,10 @@
 #tab-dashboard .server-footer-stat--temp .server-footer-icon{background:rgba(245,158,11,.11);color:#ff9800}
 #tab-dashboard .server-footer-copy{display:block;min-width:0}
 #tab-dashboard .server-footer-stat b{display:block;font-size:13px;line-height:15px;color:#111722;font-weight:700;font-feature-settings:"tnum";white-space:nowrap}
-#tab-dashboard .server-footer-stat small{display:inline-block;margin-top:2px;font-size:11px;line-height:13px;color:#60708e;white-space:nowrap}
-#tab-dashboard .server-footer-stat em{display:inline-block;margin:1px 0 0 3px;font-size:10px;line-height:12px;font-style:normal;color:#52688e;white-space:nowrap}
+#tab-dashboard .server-footer-stat small{display:flex;align-items:center;gap:4px;width:max-content;margin-top:2px;font-size:11px;line-height:13px;color:#60708e;white-space:nowrap}
+#tab-dashboard .server-footer-info{position:relative;display:inline-flex;align-items:center;justify-content:center;width:13px;height:13px;box-sizing:border-box;border:1px solid currentColor;border-radius:50%;color:#7a89a4;font:700 9px/1 var(--font);cursor:help;outline:0}
+#tab-dashboard .server-footer-info::after{content:attr(data-tip);position:absolute;z-index:20;left:50%;bottom:calc(100% + 7px);transform:translate(-50%,4px);padding:5px 8px;border:1px solid rgba(62,79,105,.18);border-radius:6px;background:#101828;color:#fff;box-shadow:0 5px 16px rgba(16,24,40,.18);font-size:10px;font-weight:500;line-height:13px;white-space:nowrap;opacity:0;visibility:hidden;pointer-events:none;transition:opacity .14s ease,transform .14s ease}
+#tab-dashboard .server-footer-info:hover::after,#tab-dashboard .server-footer-info:focus::after{opacity:1;visibility:visible;transform:translate(-50%,0)}
 #tab-dashboard .server-overview-empty{margin-top:7px;padding:14px 2px;border-top:1px solid var(--border);font-size:11px;color:var(--text-3)}
 
 /* ── Подложки иконок раздела скрыты по просьбе владельца (21.08). Цвета иконок
@@ -405,7 +407,6 @@
   #tab-dashboard .server-footer-icon{width:30px;height:30px;border-radius:7px}
   #tab-dashboard .server-footer-stat b{font-size:13px;line-height:14px}
   #tab-dashboard .server-footer-stat small{font-size:10px;line-height:11px}
-  #tab-dashboard .server-footer-stat em{font-size:9.5px;line-height:11px}
 }
 @media(max-width:480px){
   #tab-dashboard .server-overview-card{padding:14px;border-radius:14px}
@@ -478,7 +479,6 @@
   #tab-dashboard .server-footer-icon svg{width:22px;height:22px}
   #tab-dashboard .server-footer-stat b{font-size:15px;line-height:17px}
   #tab-dashboard .server-footer-stat small{display:inline-block;margin-top:1px;font-size:11px;line-height:14px}
-  #tab-dashboard .server-footer-stat em{display:inline-block;margin:0 0 0 3px;font-size:10px;line-height:12px}
 }
 @media(max-width:400px){
   #tab-dashboard .server-summary-label{font-size:11px;line-height:14px}

@@ -69,9 +69,6 @@ module.exports = function (deps) {
       heap_warn:                  { pct: 87, usedMB: 435, totalMB: 500 },
       disk_low_warn:              { freeGB: 18.1, pct: 15 },
       cron_stuck:                 { job: 'TestCron', lastRunAgo: '5 ч', intervalLabel: '1 ч' },
-      // Stage 18.15 — bell-only rules
-      modem_offline:              { nick: 'TEST_MODEM', imei: '123', server: 'TEST', mins: 25 },
-      client_debt:                { client_id: 'test', client: 'Тестовый клиент', balance: -500 },
     };
     // Bypass cooldown for tests by clearing first.
     try { alerts.clearCooldown(id, samples[id] || {}); } catch (_) {}

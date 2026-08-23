@@ -504,6 +504,7 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.retention_system_log != null)     patch.retention_system_log     = Math.max(7, Math.min(365, parseInt(req.body.retention_system_log) || 30));
   if (req.body.retention_rotation_log != null)   patch.retention_rotation_log   = Math.max(7, Math.min(365, parseInt(req.body.retention_rotation_log) || 90));
   if (req.body.retention_proxy_checks != null)   patch.retention_proxy_checks   = Math.max(7, Math.min(365, parseInt(req.body.retention_proxy_checks) || 30));
+  if (req.body.retention_modem_ping != null)     patch.retention_modem_ping     = Math.max(7, Math.min(365, parseInt(req.body.retention_modem_ping) || 30));
   if (req.body.retention_modem_meta != null)     patch.retention_modem_meta     = Math.max(7, Math.min(365, parseInt(req.body.retention_modem_meta) || 30));
   if (req.body.retention_top_hosts_daily != null) patch.retention_top_hosts_daily = Math.max(7, Math.min(365, parseInt(req.body.retention_top_hosts_daily) || 90));
   // Session & billing

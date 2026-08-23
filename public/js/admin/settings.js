@@ -227,7 +227,7 @@ function loadSettings(){
     var _rcD=document.getElementById('reconcileDaysInput');if(_rcD)_rcD.value=s.reconcile_days||2;
     _pcWarnMs=s.proxy_check_warn_ms||500;
     _pcBadMs=s.proxy_check_bad_ms||2000;
-    var pctEl=document.getElementById('proxyCheckTargetInput');if(pctEl)pctEl.value=s.proxy_check_target||'https://www.instagram.com/';
+    var pctEl=document.getElementById('proxyCheckTargetInput');if(pctEl)pctEl.value=s.proxy_check_target||'';
     var pcwEl=document.getElementById('proxyCheckWarnInput');if(pcwEl)pcwEl.value=_pcWarnMs;
     var pcbEl=document.getElementById('proxyCheckBadInput');if(pcbEl)pcbEl.value=_pcBadMs;
     var pciEl=document.getElementById('proxyCheckIntervalInput');if(pciEl)pciEl.value=s.proxy_check_interval_min||60;
@@ -258,7 +258,7 @@ function loadSettings(){
     var r2=document.getElementById('retAuditLogInput');if(r2)r2.value=s.retention_audit_log||90;
     var r3=document.getElementById('retSystemLogInput');if(r3)r3.value=s.retention_system_log||30;
     var r4=document.getElementById('retRotationLogInput');if(r4)r4.value=s.retention_rotation_log||90;
-    var r5=document.getElementById('retProxyChecksInput');if(r5)r5.value=s.retention_proxy_checks||30;
+    var r5=document.getElementById('retProxyChecksInput');if(r5)r5.value=s.retention_modem_ping||30;
     var r6=document.getElementById('retModemMetaInput');if(r6)r6.value=s.retention_modem_meta||30;
     // Session, billing
     var stEl=document.getElementById('sessionTtlDaysInput');if(stEl)stEl.value=s.session_ttl_days||30;
@@ -433,23 +433,17 @@ function tgSendTest(){
 }
 var _pcWarnMs=500,_pcBadMs=2000;
 function saveProxyCheckSettings(){
-  var target=document.getElementById('proxyCheckTargetInput').value.trim();
-  if(!target||!/^https?:\/\/.+/.test(target)){showToast('Неверный URL','error');return}
   var warn=parseInt(document.getElementById('proxyCheckWarnInput').value)||500;
   var bad=parseInt(document.getElementById('proxyCheckBadInput').value)||2000;
-  var interval=parseInt(document.getElementById('proxyCheckIntervalInput').value)||60;
-  var timeout=parseInt(document.getElementById('proxyCheckTimeoutInput').value)||15;
-  var concurrency=parseInt(document.getElementById('proxyCheckConcurrencyInput').value)||10;
   if(warn>=bad){showToast('Порог жёлтого должен быть меньше красного','error');return}
-  if(interval<5||interval>1440){showToast('Интервал: от 5 до 1440 мин','error');return}
   // Пороги «Сбоит прокси» (группа в той же карточке): боевой порог
   // проблемных модемов → авто-ребут / failover.
   var palLatency=parseInt(document.getElementById('proxyAlertLatencyInput').value)||1500;
   var palErrPct=parseFloat(document.getElementById('proxyAlertErrorPctInput').value)||5;
   var palWindow=parseInt(document.getElementById('proxyAlertWindowInput').value)||60;
   _pcWarnMs=warn;_pcBadMs=bad;
-  api(API+'/api/admin/settings',{method:'PUT',json:{proxy_check_target:target,proxy_check_warn_ms:warn,proxy_check_bad_ms:bad,proxy_check_interval_min:interval,proxy_check_timeout_sec:timeout,proxy_check_concurrency:concurrency,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow}}).then(function(d){
-    if(d.ok){showToast('Настройки замера сохранены','success');document.getElementById('proxyCheckSettingsStatus').textContent='Сохранено: '+target+' | каждые '+interval+' мин | зелёный <'+warn+'мс | жёлтый <'+bad+'мс | красный >'+bad+'мс';renderTable()}
+  api(API+'/api/admin/settings',{method:'PUT',json:{proxy_check_warn_ms:warn,proxy_check_bad_ms:bad,proxy_alert_latency_ms:palLatency,proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow}}).then(function(d){
+    if(d.ok){showToast('Пороги ProxySmart-пинга сохранены','success');document.getElementById('proxyCheckSettingsStatus').textContent='Сохранено: зелёный <'+warn+'мс | жёлтый <'+bad+'мс | потери >'+palErrPct+'%';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
 }
@@ -561,7 +555,7 @@ function saveRetentionSettings(){
     retention_audit_log:parseInt(document.getElementById('retAuditLogInput').value)||90,
     retention_system_log:parseInt(document.getElementById('retSystemLogInput').value)||30,
     retention_rotation_log:parseInt(document.getElementById('retRotationLogInput').value)||90,
-    retention_proxy_checks:parseInt(document.getElementById('retProxyChecksInput').value)||30,
+    retention_modem_ping:parseInt(document.getElementById('retProxyChecksInput').value)||30,
     retention_modem_meta:parseInt(document.getElementById('retModemMetaInput').value)||30,
     retention_top_hosts_daily:parseInt((document.getElementById('retTopHostsDailyInput')||{}).value)||90
   };

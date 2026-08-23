@@ -25,7 +25,11 @@ function makeDeps(overrides) {
     server_name TEXT, client_port_name TEXT, dead_imei TEXT, dead_nick TEXT,
     dead_port_id TEXT, spare_imei TEXT, spare_nick TEXT, mode TEXT,
     trigger_reason TEXT, result TEXT, error TEXT, dry_run INTEGER DEFAULT 0);
-    CREATE TABLE proxy_checks (id INTEGER PRIMARY KEY, server_name TEXT, nick TEXT, error TEXT, total_ms INTEGER, checked_at TEXT);`);
+    CREATE TABLE modem_ping (
+      id INTEGER PRIMARY KEY, ts TEXT NOT NULL, server TEXT NOT NULL,
+      nick TEXT NOT NULL, latency_ms INTEGER, loss_pct INTEGER,
+      ok INTEGER NOT NULL DEFAULT 1
+    );`);
 
   const nowIso = new Date().toISOString();
   // knownModems: DEAD (bound, has client port) + SPARE (unbound, online) + BUSY (bound)
@@ -207,10 +211,11 @@ describe('failover engine', () => {
   });
 
   describe('glitch detection: two-speed, uptime-gated', () => {
-    // Insert error checks at the given "minutes ago" offsets (newest = smallest).
+    // Insert failed native ProxySmart ping samples at the given "minutes ago"
+    // offsets (newest = smallest).
     const insErr = (db, nick, minsAgo) => {
-      const ins = db.prepare('INSERT INTO proxy_checks (server_name, nick, error, total_ms, checked_at) VALUES (?,?,?,?,?)');
-      minsAgo.forEach(m => ins.run('S2', nick, 'boom', null, new Date(Date.now() - m * 60000).toISOString()));
+      const ins = db.prepare('INSERT INTO modem_ping (server, nick, ok, latency_ms, loss_pct, ts) VALUES (?,?,?,?,?,?)');
+      minsAgo.forEach(m => ins.run('S2', nick, 0, null, 100, new Date(Date.now() - m * 60000).toISOString()));
     };
     const setUptime = (deps, imei, pct) => {
       deps.uptimeTracking['S2_' + imei] = { total_checks: 100, online_checks: pct, last_online_check: new Date().toISOString() };
@@ -254,8 +259,8 @@ describe('failover engine', () => {
     it('does NOT fire on slow-but-successful checks (latency ignored)', () => {
       const eng = freshEngine(); const deps = makeDeps(); eng.init(deps);
       setUptime(deps, 'IMEI_X', 50);
-      const ins = deps.db.prepare('INSERT INTO proxy_checks (server_name, nick, error, total_ms, checked_at) VALUES (?,?,?,?,?)');
-      [0, 25, 50].forEach(m => ins.run('S2', 'RO_X', null, 9000, new Date(Date.now() - m * 60000).toISOString()));  // 9s but no error
+      const ins = deps.db.prepare('INSERT INTO modem_ping (server, nick, ok, latency_ms, loss_pct, ts) VALUES (?,?,?,?,?,?)');
+      [0, 25, 50].forEach(m => ins.run('S2', 'RO_X', 1, 9000, 0, new Date(Date.now() - m * 60000).toISOString()));  // 9s but successful
       expect(eng._glitchDecision('S2', 'RO_X', 'IMEI_X').fire).toBe(false);
     });
 
@@ -264,8 +269,8 @@ describe('failover engine', () => {
       // BUSY is online+bound → make it a glitch candidate via HARD CAP (≥90 min of
       // errors; its mocked uptime 99% wouldn't trip the slow path). DEAD is offline
       // 60 min → hard_offline. Only ONE spare (SPARE) exists.
-      const ins = deps.db.prepare('INSERT INTO proxy_checks (server_name, nick, error, total_ms, checked_at) VALUES (?,?,?,?,?)');
-      [0, 45, 95].forEach(m => ins.run('S2', 'RO_BUSY', 'boom', null, new Date(Date.now() - m * 60000).toISOString()));
+      const ins = deps.db.prepare('INSERT INTO modem_ping (server, nick, ok, latency_ms, loss_pct, ts) VALUES (?,?,?,?,?,?)');
+      [0, 45, 95].forEach(m => ins.run('S2', 'RO_BUSY', 0, null, 100, new Date(Date.now() - m * 60000).toISOString()));
       const cand = await eng.previewCandidates();
       const dead = cand.find(c => c.nick === 'RO_DEAD');
       const busy = cand.find(c => c.nick === 'RO_BUSY');

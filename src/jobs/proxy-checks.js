@@ -7,10 +7,12 @@
 // src/jobs/daily-schedule.js, оставлен для возможного возврата).
 // Extracted from server.js (Stage 9) — без изменения логики.
 
+const { pickValidClientHttpPort } = require('../utils/proxy-port');
+
 function create(deps) {
   const {
     db, dbStmts, logger, logActivity,
-    fetchAllServersDataCached, SERVER_COUNTRIES, normalizeOperator, isAutoRandomPort,
+    fetchAllServersDataCached, SERVER_COUNTRIES, normalizeOperator,
     getProxyCheckConcurrency, curlCheckProxy,
     apiServers, fetchApi, appSettings, pushSpeedtestEntry,
   } = deps;
@@ -49,24 +51,15 @@ function create(deps) {
           if (!info) continue;
           // Skip offline modems (not rotating)
           if (!info.isOnline && !info.isRotating) continue;
-          for (const p of portList) {
-            if (!p.HTTP_PORT || !p.LOGIN || !p.PASSWORD) continue;
-            // Skip ports that are NOT actively serving a paying client — probing them
-            // just generates false errors that wrongly flag a working modem as down:
-            //  • unassigned (no portName), • ProxySmart "randomport*" phantoms,
-            //  • expired rentals (PROXY_VALID_BEFORE in the past → port blocked by us).
-            if (!p.portName || !p.portName.trim()) continue;
-            if (isAutoRandomPort(p.portName)) continue;
-            if (p.PROXY_VALID_BEFORE) { const _vb = Date.parse(p.PROXY_VALID_BEFORE); if (!isNaN(_vb) && _vb < Date.now()) continue; }
-            proxies.push({
-              server: srv,
-              nick: info.nick,
-              client: p.portName,
-              operator: info.operator || '',
-              proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
-            });
-            break; // one check per modem is enough
-          }
+          const p = pickValidClientHttpPort(portList);
+          if (!p) continue;
+          proxies.push({
+            server: srv,
+            nick: info.nick,
+            client: p.portName,
+            operator: info.operator || '',
+            proxyUrl: `http://${p.LOGIN}:${p.PASSWORD}@${serverIp}:${p.HTTP_PORT}`,
+          });
         }
       }
 

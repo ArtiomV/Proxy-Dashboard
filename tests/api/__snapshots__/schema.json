@@ -397,6 +397,12 @@
   },
   {
     "type": "index",
+    "name": "idx_modem_meta_contract_renewal",
+    "tbl_name": "modem_meta",
+    "sql": "CREATE INDEX idx_modem_meta_contract_renewal ON modem_meta(contract_renewal_date) WHERE contract_renewal_date <> ''"
+  },
+  {
+    "type": "index",
     "name": "idx_modem_meta_deleted",
     "tbl_name": "modem_meta",
     "sql": "CREATE INDEX idx_modem_meta_deleted ON modem_meta(deleted) WHERE deleted = 1"
@@ -460,6 +466,12 @@
     "name": "idx_op_country_country",
     "tbl_name": "operator_country_map",
     "sql": "CREATE INDEX idx_op_country_country ON operator_country_map(country)"
+  },
+  {
+    "type": "index",
+    "name": "idx_operator_alias_canonical",
+    "tbl_name": "operator_alias_map",
+    "sql": "CREATE INDEX idx_operator_alias_canonical ON operator_alias_map(canonical COLLATE NOCASE)"
   },
   {
     "type": "index",
@@ -903,7 +915,7 @@
     "type": "table",
     "name": "modem_meta",
     "tbl_name": "modem_meta",
-    "sql": "CREATE TABLE modem_meta ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), is_test_pool INTEGER NOT NULL DEFAULT 0, sim_status TEXT DEFAULT '', reboot_score INTEGER DEFAULT NULL, http_redirect INTEGER NOT NULL DEFAULT 0, band TEXT DEFAULT '', is_locked INTEGER NOT NULL DEFAULT 0, signals_updated_at TEXT DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, signal_strength TEXT DEFAULT '', iccid TEXT DEFAULT '', cell_op TEXT DEFAULT '', net_type TEXT DEFAULT '', modem_uptime TEXT DEFAULT '', UNIQUE(server_name, imei) )"
+    "sql": "CREATE TABLE modem_meta ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), is_test_pool INTEGER NOT NULL DEFAULT 0, sim_status TEXT DEFAULT '', reboot_score INTEGER DEFAULT NULL, http_redirect INTEGER NOT NULL DEFAULT 0, band TEXT DEFAULT '', is_locked INTEGER NOT NULL DEFAULT 0, signals_updated_at TEXT DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, signal_strength TEXT DEFAULT '', iccid TEXT DEFAULT '', cell_op TEXT DEFAULT '', net_type TEXT DEFAULT '', modem_uptime TEXT DEFAULT '', contract_renewal_date TEXT NOT NULL DEFAULT '', UNIQUE(server_name, imei) )"
   },
   {
     "type": "table",
@@ -934,6 +946,12 @@
     "name": "notifications",
     "tbl_name": "notifications",
     "sql": "CREATE TABLE notifications ( id INTEGER PRIMARY KEY AUTOINCREMENT, dedup_key TEXT NOT NULL, rule_id TEXT NOT NULL, -- e.g. 'server_unreachable', 'modem_offline', 'client_debt' priority TEXT NOT NULL DEFAULT 'info', -- critical | important | early | info entity_kind TEXT, -- modem | client | crm | system | payment entity_id TEXT, -- nick / client_id / crm_id / null title TEXT NOT NULL, message TEXT NOT NULL, -- short HTML-safe message payload_json TEXT, -- original alerts.trigger payload created_at TEXT NOT NULL DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "operator_alias_map",
+    "tbl_name": "operator_alias_map",
+    "sql": "CREATE TABLE operator_alias_map ( alias TEXT PRIMARY KEY COLLATE NOCASE, canonical TEXT NOT NULL, updated_at TEXT NOT NULL DEFAULT (datetime('now')), CHECK (length(trim(alias)) BETWEEN 1 AND 60), CHECK (length(trim(canonical)) BETWEEN 1 AND 60) )"
   },
   {
     "type": "table",

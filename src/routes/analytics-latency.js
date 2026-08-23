@@ -1,10 +1,10 @@
 'use strict';
 //
-// src/routes/analytics-latency.js — proxy latency endpoint (WP6.1 carve-out
+// src/routes/analytics-latency.js — ProxySmart modem-ping latency endpoint
 // from analytics.js): latency_stats. (latency_day was removed with the hidden
 // #tab-traffic view, C4.)
-// Query strings come from src/db/analytics.js; the view/stale/unbound filter
-// fragment is shared through analyticsDb.proxyChecksFilter.
+// Query strings come from src/db/analytics.js; the legacy-named filter helper
+// now targets modem_ping and preserves the route contract for the frontend.
 
 const express = require('express');
 const analyticsDb = require('../db/analytics');

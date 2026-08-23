@@ -29,8 +29,8 @@ function init(db) {
   // ── modem_health (days as `? || ' days`, always negative) ────────────
   S.healthActive = db.prepare(`
     WITH active AS (
-      SELECT DISTINCT server_name, nick FROM proxy_checks
-      WHERE checked_at >= datetime('now', ? || ' days')${UNBOUND_FILTER}
+      SELECT DISTINCT server AS server_name, nick FROM modem_ping
+      WHERE ts >= datetime('now', ? || ' days')
       UNION
       SELECT DISTINCT server_name, nick FROM traffic_hourly
       WHERE hour_start >= datetime('now', ? || ' days')${UNBOUND_FILTER}
@@ -48,13 +48,13 @@ function init(db) {
     ORDER BY a.server_name, a.nick
   `);
   S.healthChecks = db.prepare(`
-    SELECT server_name, nick,
-           AVG(total_ms) FILTER (WHERE error IS NULL) as avg_latency,
+    SELECT server AS server_name, nick,
+           AVG(latency_ms) FILTER (WHERE ok = 1) as avg_latency,
            COUNT(*) as total_checks,
-           SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as err_checks
-    FROM proxy_checks
-    WHERE checked_at >= datetime('now', ? || ' days')${UNBOUND_FILTER}
-    GROUP BY server_name, nick
+           SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) as err_checks
+    FROM modem_ping
+    WHERE ts >= datetime('now', ? || ' days')
+    GROUP BY server, nick
   `);
   S.healthRotations = db.prepare(`
     SELECT server_name, nick,
@@ -216,19 +216,19 @@ function init(db) {
     WHERE hour_start >= ${sinceExpr}${staleFilter}
   `);
 
-  // ── latency_stats (tz + shared filter clause) ────────────────────────
+  // ── latency_stats from ProxySmart modem ping ──────────────────────
   S.latencyDayVals = (tzStr, filter) => db.prepare(
-    `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, total_ms, connect_ms FROM proxy_checks WHERE checked_at >= ? AND total_ms IS NOT NULL AND error IS NULL${filter} ORDER BY day, total_ms`);
+    `SELECT strftime('%Y-%m-%d', datetime(p.ts, '${tzStr}')) as day, p.latency_ms AS total_ms, NULL AS connect_ms FROM modem_ping p WHERE p.ts >= ? AND p.latency_ms IS NOT NULL AND p.ok = 1${filter} ORDER BY day, total_ms`);
   S.latencyErrByDay = (tzStr, filter) => db.prepare(
-    `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND error IS NOT NULL${filter} GROUP BY day`);
+    `SELECT strftime('%Y-%m-%d', datetime(p.ts, '${tzStr}')) as day, COUNT(*) as cnt FROM modem_ping p WHERE p.ts >= ? AND p.ok = 0${filter} GROUP BY day`);
   S.latencyTotalByDay = (tzStr, filter) => db.prepare(
-    `SELECT strftime('%Y-%m-%d', datetime(checked_at, '${tzStr}')) as day, COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ?${filter} GROUP BY day`);
+    `SELECT strftime('%Y-%m-%d', datetime(p.ts, '${tzStr}')) as day, COUNT(*) as cnt FROM modem_ping p WHERE p.ts >= ?${filter} GROUP BY day`);
   S.latencyPriorVals = (filter) => db.prepare(
-    `SELECT total_ms, connect_ms FROM proxy_checks WHERE checked_at >= ? AND checked_at < ? AND total_ms IS NOT NULL AND error IS NULL${filter}`);
+    `SELECT p.latency_ms AS total_ms, NULL AS connect_ms FROM modem_ping p WHERE p.ts >= ? AND p.ts < ? AND p.latency_ms IS NOT NULL AND p.ok = 1${filter}`);
   S.latencyPriorTotal = (filter) => db.prepare(
-    `SELECT COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND checked_at < ?${filter}`);
+    `SELECT COUNT(*) as cnt FROM modem_ping p WHERE p.ts >= ? AND p.ts < ?${filter}`);
   S.latencyPriorErr = (filter) => db.prepare(
-    `SELECT COUNT(*) as cnt FROM proxy_checks WHERE checked_at >= ? AND checked_at < ? AND error IS NOT NULL${filter}`);
+    `SELECT COUNT(*) as cnt FROM modem_ping p WHERE p.ts >= ? AND p.ts < ? AND p.ok = 0${filter}`);
 
   // ── logs_domains_full ────────────────────────────────────────────────
   S.topHostsRows = (whereSql, limit) => db.prepare(`
@@ -289,30 +289,30 @@ function notInClause(column, values) {
   return { clause: ` AND ${column} NOT IN (${arr.map(() => '?').join(',')})`, params: arr };
 }
 
-// proxy_checks filter shared by latency_stats (view-scoped
-// + stale + unbound). Returns { clause, params } — appended after the
+// ProxySmart modem_ping filter shared by latency_stats (view-scoped
+// + stale + unbound). The legacy function name is kept for route/test API
+// compatibility. Returns { clause, params } — appended after the
 // time bounds, so params must be appended after the time params.
 function proxyChecksFilter({ view, idKey, id, servers, staleNicks, unboundNicks, unboundFilter = true }) {
   let clause = '';
   const params = [];
   if (idKey !== 'all') {
     if (view === 'country' && servers && servers.length) {
-      clause += ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
+      clause += ' AND p.server IN (' + servers.map(() => '?').join(',') + ')';
       params.push(...servers);
     } else if (view === 'operator') {
-      clause += " AND LOWER(REPLACE(operator, ' ', '_')) LIKE ?";
+      clause += " AND EXISTS (SELECT 1 FROM modem_meta mm WHERE mm.server_name = p.server AND mm.nick = p.nick AND LOWER(REPLACE(mm.operator, ' ', '_')) LIKE ?)";
       params.push('%' + idKey + '%');
     } else if (view === 'client') {
-      clause += ' AND client_name = ?';
+      clause += " AND EXISTS (SELECT 1 FROM known_modems km WHERE km.server_name = p.server AND json_extract(km.data, '$.nick') = p.nick AND json_extract(km.data, '$.portName') = ?)";
       params.push(id);
     }
   }
   for (const set of [staleNicks, unboundNicks]) {
-    const { clause: c, params: p } = notInClause('nick', set);
+    const { clause: c, params: p } = notInClause('p.nick', set);
     clause += c;
     params.push(...p);
   }
-  if (unboundFilter) clause += UNBOUND_FILTER;
   return { clause, params };
 }
 

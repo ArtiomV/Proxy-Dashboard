@@ -183,16 +183,16 @@ async function buildDailySummary(date) {
     if (e.level === 'error' || e.level === 'critical') errorCount++;
   }
 
-  // proxy issues right now
+  // Connectivity issues from ProxySmart's own per-modem ping destination.
   const proxyIssues = db.prepare(`
-    SELECT server_name, nick,
-           AVG(total_ms) FILTER (WHERE error IS NULL) AS avg_ms,
+    SELECT server AS server_name, nick,
+           AVG(latency_ms) FILTER (WHERE ok = 1) AS avg_ms,
            COUNT(*) AS total,
-           SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors
-    FROM proxy_checks
-    WHERE checked_at >= ? AND checked_at < ?
-    GROUP BY server_name, nick
-    HAVING (avg_ms > 1500 OR (errors*100.0/total) > 10)
+           AVG(COALESCE(loss_pct, CASE WHEN ok = 1 THEN 0 ELSE 100 END)) AS loss_pct
+    FROM modem_ping
+    WHERE ts >= ? AND ts < ?
+    GROUP BY server, nick
+    HAVING (avg_ms > 1500 OR loss_pct > 10)
   `).all(utcStartStr, utcEndStr);
 
   // Auto-reboots
@@ -228,7 +228,7 @@ async function buildDailySummary(date) {
       if (logger && logger.warn) logger.warn('[DailySummary] offline digest failed (block degraded): ' + (e.message || e));
     }
   }
-  if (proxyIssues.length) lines.push(`Проблемных прокси: ${proxyIssues.length} (latency >1500мс или errors >10%)`);
+  if (proxyIssues.length) lines.push(`Проблемных прокси: ${proxyIssues.length} (пинг >1500мс или потери >10%)`);
   if (rebootRow && rebootRow.n > 0) lines.push(`Авто-перезагрузок: ${rebootRow.n} (успешных ${rebootRow.ok}/${rebootRow.n})`);
   if (errorCount) lines.push(`Ошибок в системном логе: ${errorCount}`);
 

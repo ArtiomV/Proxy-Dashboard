@@ -9,7 +9,7 @@
 //
 //   backfillIfEmpty(days)  — called once at boot; for any of the last `days`
 //                            days that have no rows in modem_health_daily,
-//                            computes a snapshot from existing proxy_checks
+//                            computes a snapshot from ProxySmart modem_ping
 //                            + uptime_tracking and writes it. This populates
 //                            the timeline retroactively so the «Здоровье»
 //                            tab has data on the very first deploy.
@@ -62,11 +62,11 @@ function create(deps) {
   // Compute and write snapshots for a single MSK day. Returns rows written.
   function snapshotDay(mskDate) {
     const r = mskDayRange(mskDate);
-    // Active modems for this day: those with any proxy_checks OR traffic_hourly.
+    // Active modems for this day: those with ProxySmart ping OR traffic.
     const modems = db.prepare(`
       WITH active AS (
-        SELECT DISTINCT server_name, nick FROM proxy_checks
-        WHERE checked_at >= ? AND checked_at < ?
+        SELECT DISTINCT server AS server_name, nick FROM modem_ping
+        WHERE ts >= ? AND ts < ?
         UNION
         SELECT DISTINCT server_name, nick FROM traffic_hourly
         WHERE hour_start >= ? AND hour_start < ?
@@ -85,13 +85,13 @@ function create(deps) {
 
     // Per-modem checks aggregate.
     const checks = db.prepare(`
-      SELECT server_name, nick,
-             AVG(total_ms) FILTER (WHERE error IS NULL) as avg_lat,
+      SELECT server AS server_name, nick,
+             AVG(latency_ms) FILTER (WHERE ok = 1) as avg_lat,
              COUNT(*) as total,
-             SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) as err
-      FROM proxy_checks
-      WHERE checked_at >= ? AND checked_at < ?
-      GROUP BY server_name, nick
+             SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) as err
+      FROM modem_ping
+      WHERE ts >= ? AND ts < ?
+      GROUP BY server, nick
     `).all(r.fromIso, r.toIso);
     const checksByKey = {};
     for (const c of checks) checksByKey[c.server_name + '|' + c.nick] = c;

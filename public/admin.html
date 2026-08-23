@@ -15,11 +15,11 @@
 <link rel="stylesheet" href="css/variables.css?v=0814a">
 <link rel="stylesheet" href="css/base.css?v=0823h">
 <link rel="stylesheet" href="css/tables.css?v=0814a">
-<link rel="stylesheet" href="css/cards.css?v=0814a">
+<link rel="stylesheet" href="css/cards.css?v=0823b">
 <link rel="stylesheet" href="css/modal.css?v=0630d">
 <link rel="stylesheet" href="css/layout.css?v=0814a">
 <link rel="stylesheet" href="css/shell.css?v=0630d">
-<link rel="stylesheet" href="css/finance.css?v=0823e">
+<link rel="stylesheet" href="css/finance.css?v=0823f">
 <!-- Yandex.Metrika counter (инлайн вынесен в /js/metrika.js — CSP) -->
 <script src="/js/metrika.js?v=0814a"></script>
 <noscript><div><img src="https://mc.yandex.ru/watch/107161941" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
@@ -50,7 +50,7 @@
   <button class="btn btn-sm" data-on-click="bulkOsSpoof()" title="Установить OS Spoofing на портах выбранных модемов"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3l7.5 3v5.5c0 4.8-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.7-7.5-9.5V6z"/></svg> OS Spoof</button>
   <button class="btn btn-sm" data-on-click="bulkRotation()" title="Установить авторотацию на выбранных модемах"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg> Ротация</button>
   <button class="btn btn-sm" data-on-click="bulkExport()" title="Экспорт прокси выбранных модемов"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 15V3"/><path d="M6.5 8.5 12 3l5.5 5.5"/><path d="M4 20h16"/></svg> Экспорт</button>
-  <button class="btn btn-sm" data-on-click="bulkProxyCheck()" title="Замерить задержку через прокси выбранных модемов"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 20h8"/><path d="M12 20v-4"/><circle cx="12" cy="13" r="1.6"/><path d="M7.5 8.5a6.4 6.4 0 0 1 9 0M5 6a10 10 0 0 1 14 0"/></svg> Замер задержки</button>
+  <button class="btn btn-sm" data-on-click="loadData()" title="Пинги замеряет ProxySmart через каждый модем; кнопка обновляет свежие данные"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M8 20h8"/><path d="M12 20v-4"/><circle cx="12" cy="13" r="1.6"/><path d="M7.5 8.5a6.4 6.4 0 0 1 9 0M5 6a10 10 0 0 1 14 0"/></svg> Пинг ProxySmart</button>
   <button class="btn btn-sm" data-on-click="bulkDelete()" title="Удалить выбранные модемы из дашборда" style="color:var(--danger)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M4 7h16"/><path d="M9 7V5a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/><path d="M6.5 7l1 13h9l1-13"/><path d="M10 11v6M14 11v6"/></svg> Удалить</button>
   <button class="btn btn-sm bulk-cancel" data-on-click="clearBulkSel()" style="color:var(--danger)"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M6 6l12 12M18 6 6 18"/></svg> Отмена</button>
 </div>
@@ -362,15 +362,14 @@
 
       <div class="snav-grp">ИНФРАСТРУКТУРА</div>
       <div class="settings-nav-item" id="snav_servers" data-on-click="switchSettingsSection('servers')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4.6" rx="1.2"/><rect x="2" y="8.9" width="12" height="4.6" rx="1.2"/><circle cx="4.6" cy="4.8" r=".5"/><circle cx="4.6" cy="11.2" r=".5"/></svg>Серверы</div>
-      <div class="settings-nav-item" id="snav_operators" data-on-click="switchSettingsSection('operators')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c2.2 2 2.2 10 0 12M8 2c-2.2 2-2.2 10 0 12"/></svg>Операторы и страны</div>
-      <div class="settings-nav-item" id="snav_packages" data-on-click="switchSettingsSection('packages')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="1.5" y="4" width="13" height="9" rx="1.5"/><path d="M1.5 7h13"/><path d="M5 10.5h3"/></svg>Пакеты операторов</div>
+      <div class="settings-nav-item" id="snav_operators" data-on-click="switchSettingsSection('operators')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c2.2 2 2.2 10 0 12M8 2c-2.2 2-2.2 10 0 12"/></svg>Операторы, страны и пакеты</div>
       <div class="settings-nav-item" id="snav_maintenance" data-on-click="switchSettingsSection('maintenance')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.6 2.6a3.2 3.2 0 0 0-4.3 4.3L2.4 9.8a1.6 1.6 0 0 0 0 2.3l1.5 1.5a1.6 1.6 0 0 0 2.3 0l2.9-2.9a3.2 3.2 0 0 0 4.3-4.3l-2 2-1.6-.4-.4-1.6z"/></svg>Обслуживание</div>
 
       <div class="snav-grp">АВТОМАТИКА</div>
       <div class="settings-nav-item" id="snav_alerts" data-on-click="switchSettingsSection('alerts')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4.5 6.5a3.5 3.5 0 017 0c0 3 1.5 4.5 1.5 4.5H3s1.5-1.5 1.5-4.5z"/><path d="M6.5 13.4a1.6 1.6 0 003 0"/></svg>Уведомления</div>
       <div class="settings-nav-item" id="snav_failover" data-on-click="switchSettingsSection('failover')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 5.5h8.5M9 3.5l2 2-2 2"/><path d="M13.5 10.5H5M7 8.5l-2 2 2 2"/></svg>Failover</div>
       <div class="settings-nav-item" id="snav_recovery" data-on-click="switchSettingsSection('recovery')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M13.4 8a5.4 5.4 0 11-1.6-3.8"/><path d="M13.6 2.6v3.1h-3.1"/></svg>Восстановление</div>
-      <div class="settings-nav-item" id="snav_proxycheck" data-on-click="switchSettingsSection('proxycheck')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="6" height="5" rx="1"/><path d="M5.6 5V2.4M8.4 5V2.4M7 10v3.6"/></svg>Проверка прокси</div>
+      <div class="settings-nav-item" id="snav_proxycheck" data-on-click="switchSettingsSection('proxycheck')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="5" width="6" height="5" rx="1"/><path d="M5.6 5V2.4M8.4 5V2.4M7 10v3.6"/></svg>Пинг ProxySmart</div>
       <div class="settings-nav-item" id="snav_speedtest" data-on-click="switchSettingsSection('speedtest')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 11.5a6 6 0 0111 0"/><path d="M8 11.5l2.6-3.4"/><circle cx="8" cy="11.5" r=".9"/></svg>Спидтесты</div>
 
       <div class="snav-grp">ИНСТРУМЕНТЫ</div>
@@ -936,21 +935,27 @@
       <div id="settingsSection_operators" class="settings-section" style="display:none">
         <div class="analytics-card">
           <div class="settings-card-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
-            <h3 style="margin:0">Операторы и страны</h3>
+            <h3 style="margin:0">Операторы, страны и алиасы</h3>
             <button class="btn btn-sm" data-on-click="loadOperatorsMapping()">Обновить</button>
           </div>
           <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:760px">
             Привязка операторов к странам нужна для аналитики (флаги в таблицах, группировки в распределении задержек, фильтры в графиках). Новые операторы появляются автоматически: каждый раз когда модем-поллинг впервые видит оператора на сервере, страна берётся из настроек сервера (RO/MD/RU). Если автоматическая привязка ошиблась — поменяйте вручную в таблице ниже; ручной выбор не перезатирается следующим опросом.
           </div>
+          <div class="operator-alias-form" style="display:grid;grid-template-columns:1fr 32px 1fr auto;gap:8px;align-items:center;margin-bottom:12px">
+            <input class="input" id="opAliasInput" list="opCanonicalOptions" placeholder="Название из ProxySmart">
+            <span style="text-align:center;color:var(--text-3)">→</span>
+            <input class="input" id="opCanonicalInput" list="opCanonicalOptions" placeholder="Единое название оператора">
+            <button class="btn btn-sm btn-primary" data-on-click="mergeOperatorAlias()">Объединить</button>
+            <datalist id="opCanonicalOptions"></datalist>
+          </div>
+          <div id="opAliasStatus" style="font-size:11px;color:var(--text-3);margin:-4px 0 10px"></div>
           <div id="opMapList" style="background:var(--bg-1);border:1px solid var(--border);border-radius:10px;overflow:hidden">
             <div style="color:var(--text-3);font-size:12px;padding:18px;text-align:center">Загрузка списка операторов…</div>
           </div>
         </div>
-      </div>
 
       <!-- A4 (23.08): пакеты операторов — объёмные алерты (volume_modem_hourly /
            volume_package_pace). Хранится JSON в настройке operator_packages. -->
-      <div id="settingsSection_packages" class="settings-section" style="display:none">
         <div class="analytics-card">
           <div class="settings-card-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
             <h3 style="margin:0">Пакеты операторов</h3>
@@ -1195,29 +1200,10 @@
           </div>
         </div>
 
-        <!-- Замер задержки (Proxy Check) — redesigned -->
+        <!-- Штатный пинг ProxySmart -->
         <div class="analytics-card" data-subsec="proxycheck" style="margin-bottom:16px;background:transparent;border:none;padding:0;box-shadow:none">
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Проверка прокси</h3></div>
-          <div class="settings-card-desc">Периодическая проверка отклика каждого прокси через HTTP-запрос к целевому сайту. Цветовая индикация в таблице: зелёный / жёлтый / красный.</div>
-
-          <div class="set-card">
-            <div class="set-row">
-              <div><div class="set-row-t">Целевой сайт</div><div class="set-row-d">URL, на который шлём тестовый запрос через каждый прокси</div></div>
-              <input id="proxyCheckTargetInput" placeholder="https://www.instagram.com/" style="width:230px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)">
-            </div>
-            <div class="set-row">
-              <div><div class="set-row-t">Интервал проверок</div><div class="set-row-d">Как часто запускать цикл проверки всех прокси</div></div>
-              <div class="set-inp"><input id="proxyCheckIntervalInput" type="number" min="5" max="1440" step="5"><span>мин</span></div>
-            </div>
-            <div class="set-row">
-              <div><div class="set-row-t">Таймаут запроса</div><div class="set-row-d">Максимальное время ожидания ответа от прокси</div></div>
-              <div class="set-inp"><input id="proxyCheckTimeoutInput" type="number" min="5" max="120"><span>сек</span></div>
-            </div>
-            <div class="set-row">
-              <div><div class="set-row-t">Параллельных проверок</div><div class="set-row-d">Сколько прокси проверять одновременно (больше = быстрее, выше нагрузка)</div></div>
-              <div class="set-inp"><input id="proxyCheckConcurrencyInput" type="number" min="1" max="50"></div>
-            </div>
-          </div>
+          <div style="display:flex;align-items:center;gap:8px;margin-bottom:4px"><h3 style="margin:0">Пинг ProxySmart</h3><span class="settings-card-badge" style="color:var(--success)">без внешних чеков</span></div>
+          <div class="settings-card-desc">Задержка и потери берутся из <b>Ping Destination</b> каждого модема в ProxySmart (bbc.com, около раза в минуту). Дашборд больше не пингует сайты самостоятельно.</div>
 
           <div class="set-grp-label">ПОРОГИ ЗАДЕРЖКИ (МС)</div>
           <div class="set-card">
@@ -1237,7 +1223,7 @@
           <div class="set-grp-label">«СБОИТ ПРОКСИ» — ПОРОГИ ПРОБЛЕМНЫХ</div>
           <div class="set-card">
             <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: задержка</div><div class="set-row-d">Модем проблемный, если средняя задержка выше</div></div><div class="set-inp"><input id="proxyAlertLatencyInput" type="number" step="50" min="100" max="60000"><span>мс</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: ошибок</div><div class="set-row-d">Боевой порог: помечает модем проблемным → авто-ребут / failover</div></div><div class="set-inp"><input id="proxyAlertErrorPctInput" type="number" step="0.5" min="0" max="100"><span>%</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: потери</div><div class="set-row-d">Средний packet loss из ProxySmart выше порога → авто-ребут / failover</div></div><div class="set-inp"><input id="proxyAlertErrorPctInput" type="number" step="0.5" min="0" max="100"><span>%</span></div></div>
             <div class="set-row"><div><div class="set-row-t">«Сбоит прокси»: окно</div><div class="set-row-d">За какой период оцениваем задержку и ошибки (5–720)</div></div><div class="set-inp"><input id="proxyAlertWindowInput" type="number" step="5" min="5" max="720"><span>мин</span></div></div>
           </div>
 
@@ -1339,7 +1325,7 @@
             <div class="set-row"><div><div class="set-row-t">Аудит-лог</div><div class="set-row-d">Действия администраторов: клиенты, оплаты, настройки</div></div><div class="set-inp"><input id="retAuditLogInput" type="number" min="7" max="365"><span>дн</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Системный лог</div><div class="set-row-d">Логи автопроцессов: биллинг, спидтесты, очистка, синхронизация</div></div><div class="set-inp"><input id="retSystemLogInput" type="number" min="7" max="365"><span>дн</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Лог ротаций</div><div class="set-row-d">История смены IP-адресов модемов</div></div><div class="set-inp"><input id="retRotationLogInput" type="number" min="7" max="365"><span>дн</span></div></div>
-            <div class="set-row"><div><div class="set-row-t">Замеры прокси</div><div class="set-row-d">Результаты проверки задержки прокси к целевому сайту</div></div><div class="set-inp"><input id="retProxyChecksInput" type="number" min="7" max="365"><span>дн</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Пинги модемов</div><div class="set-row-d">История Ping Destination из ProxySmart</div></div><div class="set-inp"><input id="retProxyChecksInput" type="number" min="7" max="365"><span>дн</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Метаданные модемов</div><div class="set-row-d">Кеш инфо о модемах (IMEI, оператор, модель)</div></div><div class="set-inp"><input id="retModemMetaInput" type="number" min="7" max="365"><span>дн</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Топ-хосты (доменный контроль)</div><div class="set-row-d">Дневная статистика хостов, к которым обращались через прокси</div></div><div class="set-inp"><input id="retTopHostsDailyInput" type="number" min="7" max="365"><span>дн</span></div></div>
           </div>
@@ -1550,13 +1536,13 @@
 <script src="/js/admin/delegated-helpers.js?v=0820e"></script>
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
 <script src="/js/admin/analytics.js?v=0823h"></script>
-<script src="/js/admin/finance.js?v=0822a"></script>
-<script src="/js/admin/modems.js?v=0823e"></script>
+<script src="/js/admin/finance.js?v=0823b"></script>
+<script src="/js/admin/modems.js?v=0823f"></script>
 <script src="/js/admin/dguard.js?v=0818a"></script>
-<script src="/js/admin/settings.js?v=0823h"></script>
+<script src="/js/admin/settings.js?v=0823i"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0823e"></script>
-<script src="/js/admin.js?v=0823h"></script>
+<script src="/js/admin.js?v=0823i"></script>
 <script src="/js/admin/sse.js?v=0823h"></script>
 </body>
 </html>

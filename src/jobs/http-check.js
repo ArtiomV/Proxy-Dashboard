@@ -20,6 +20,7 @@
 
 const http = require('http');
 const tls = require('tls');
+const { pickValidClientHttpPort } = require('../utils/proxy-port');
 
 const MAX_BODY = 512 * 1024;   // must-contain проверяем по первым 512 КБ
 
@@ -142,8 +143,8 @@ function create(deps) {
           targets.push({ server: srv, nick, offline: true });
           continue;
         }
-        const port = (portsMap[md.IMEI] || [])[0];
-        if (!port || !port.HTTP_PORT) { targets.push({ server: srv, nick, offline: true }); continue; }
+        const port = pickValidClientHttpPort(portsMap[md.IMEI]);
+        if (!port) { targets.push({ server: srv, nick, unavailable: true }); continue; }
         targets.push({
           server: srv, nick,
           proxy: { host, port: parseInt(port.HTTP_PORT, 10), login: port.LOGIN || '', password: port.PASSWORD || '' },
@@ -173,6 +174,8 @@ function create(deps) {
         let status = null, totalMs = null, contentOk = null, error = '';
         if (t.offline) {
           error = 'offline';
+        } else if (t.unavailable) {
+          error = 'no_valid_client_credentials';
         } else {
           try {
             const r = await _fetch(t.proxy, cfg.url, cfg.timeoutMs);
@@ -209,7 +212,7 @@ function create(deps) {
           failed++;
           st.failStreak++;
           // Оффлайн-модем — территория modem_offline-алертов, не дублируем.
-          if (!t.offline && st.failStreak >= 2 && !st.failing) {
+          if (!t.offline && !t.unavailable && st.failStreak >= 2 && !st.failing) {
             st.failing = true;
             alerts.trigger('modem_http_fail', { server: t.server, nick: t.nick, error, status, url: cfg.url });
           }

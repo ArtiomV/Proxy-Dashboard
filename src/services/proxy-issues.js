@@ -1,7 +1,7 @@
 'use strict';
 //
-// src/services/proxy-issues.js — computeProxyIssues: агрегация proxy_checks
-// за окно и список модемов с проблемами качества (latency/error% выше порогов).
+// src/services/proxy-issues.js — computeProxyIssues: агрегация штатного
+// ProxySmart ping_stats за окно и список модемов с высокой задержкой/потерями.
 // Extracted from server.js (Stage 9) — без изменения логики. Потребители:
 // /api/admin/data (карточка проблем) и runAutoReboot.
 
@@ -13,27 +13,35 @@ function create(deps) {
       const winMin   = Math.max(5, Math.min(720, appSettings.proxy_alert_window_min || 60));
       const latLimit = Math.max(100, Math.min(60000, appSettings.proxy_alert_latency_ms || 1500));
       const errLimit = Math.max(0, Math.min(100, appSettings.proxy_alert_error_pct || 5));
-      const sinceExpr = `datetime('now', '-${winMin} minutes')`;
+      const since = new Date(Date.now() - winMin * 60000).toISOString();
 
       const checkRows = db.prepare(`
-        SELECT server_name, nick,
-               AVG(total_ms) FILTER (WHERE error IS NULL) AS avg_ms,
-               COUNT(*)                                  AS total,
-               SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) AS errors,
-               MAX(client_name)                          AS client_name,
-               MAX(operator)                             AS operator
-          FROM proxy_checks
-         WHERE checked_at >= ${sinceExpr}
-         GROUP BY server_name, nick
-      `).all();
+        SELECT p.server AS server_name, p.nick,
+               AVG(p.latency_ms) FILTER (WHERE p.ok = 1 AND p.latency_ms IS NOT NULL) AS avg_ms,
+               COUNT(*) AS total,
+               AVG(COALESCE(p.loss_pct, CASE WHEN p.ok = 1 THEN 0 ELSE 100 END)) AS avg_loss,
+               SUM(CASE WHEN p.ok = 0 THEN 1 ELSE 0 END) AS errors,
+               COALESCE((SELECT json_extract(k.data, '$.portName')
+                         FROM known_modems k
+                         WHERE k.server_name = p.server
+                           AND json_extract(k.data, '$.nick') = p.nick
+                           AND COALESCE(json_extract(k.data, '$.portName'), '') <> ''
+                         ORDER BY k.updated_at DESC LIMIT 1), '') AS client_name,
+               COALESCE((SELECT m.operator FROM modem_meta m
+                         WHERE m.server_name = p.server AND m.nick = p.nick
+                         ORDER BY m.updated_at DESC LIMIT 1), '') AS operator
+          FROM modem_ping p
+         WHERE p.ts >= ?
+         GROUP BY p.server, p.nick
+      `).all(since);
 
       const issues = [];
       for (const c of checkRows) {
-        const errPct  = c.total > 0 ? Math.round(c.errors / c.total * 1000) / 10 : 0;
+        const errPct  = c.avg_loss != null ? Math.round(Number(c.avg_loss) * 10) / 10 : 0;
         const latency = c.avg_ms != null ? Math.round(c.avg_ms) : null;
         const reasons = [];
         if (latency != null && latency > latLimit) reasons.push(`задержка ${latency}мс`);
-        if (errPct > errLimit) reasons.push(`ошибки ${errPct}%`);
+        if (errPct > errLimit) reasons.push(`потери ${errPct}%`);
         if (reasons.length === 0) continue;
         issues.push({
           nick: c.nick,

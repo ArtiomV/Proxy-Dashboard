@@ -21,7 +21,7 @@ module.exports = function createAnalyticsHealthRouter(deps) {
       const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
       const errThreshold = Number(appSettings.error_rate_threshold) || 15;
 
-      // Base set: modems active in the period (proxy_checks OR traffic_hourly),
+      // Base set: modems active in the period (ProxySmart ping OR traffic),
       // deduped to the latest modem_meta row per (server, nick).
       const modems = analyticsDb.healthActive(-days);
       // Stage 18.8/18.14: stale modems are tagged `stale: true` and excluded

@@ -24,6 +24,7 @@ const kv = { telegram_bot_token: 'tok' };   // getSetting читает отсю�
 
 beforeAll(() => {
   db = new Database(':memory:');
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '032_notifications.sql'), 'utf8'));
   // Минимальный server_downtime — нужен для ALTER TABLE в миграции 076.
   db.exec('CREATE TABLE server_downtime (id INTEGER PRIMARY KEY, server_name TEXT, down_from TEXT, down_to TEXT)');
   db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '076_monitoring_v2_stage4.sql'), 'utf8'));
@@ -79,9 +80,23 @@ describe('B2: кнопки под алертами', () => {
     expect(sendMessage.mock.calls[0][3]).toBeUndefined();
   });
 
-  it('bell-правило не уходит в TG вовсе', () => {
-    expect(alerts.trigger('modem_offline', { server: 'ACKB5', nick: 'B5', mins: 30 })).toBe(true);
-    expect(sendMessage).not.toHaveBeenCalled();
+  it('старое bell-only правило удалено — офлайн идёт через единое правило', () => {
+    expect(alerts.RULES.modem_offline).toBeUndefined();
+    expect(alerts.RULES.modem_offline_20m).toBeTruthy();
+  });
+
+  it('коллектор и event-driven путь не создают две карточки одного офлайна', () => {
+    const payload = { server: 'DEDUP', imei: 'imei-1', nick: 'M1', mins: 30, lastOnline: '—' };
+    const key = 'modem_offline_20m|mof_DEDUP_imei-1';
+    alerts.recordBellEvent({
+      dedup_key: key, dedup_window_sec: 86400, rule_id: 'modem_offline_20m',
+      priority: 'important', entity_kind: 'modem', entity_id: 'M1',
+      title: 'Модем офлайн', message: 'тест', payload,
+    });
+    alerts.clearCooldown('modem_offline_20m', payload);
+    expect(alerts.trigger('modem_offline_20m', payload)).toBe(true);
+    const count = db.prepare('SELECT COUNT(*) AS n FROM notifications WHERE dedup_key = ?').get(key).n;
+    expect(count).toBe(1);
   });
 });
 

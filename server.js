@@ -22,7 +22,7 @@ const { LoginSchema, ClientCreateSchema, PaymentSchema, BalanceAdjustSchema,
   RegisterSchema, ForgotPasswordSchema, ResetPasswordSchema, ChangePasswordSchema, TelegramAuthSchema,
   ClientEmailSchema, TopupSchema } = require('./src/schemas');
 const { getTzOffset, getMoscowNow, getMoscowToday, getMoscowYesterday } = require('./src/utils/time');
-const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator } = require('./src/utils/traffic');
+const { parseTrafficValue, parseBwToBytes, trafficBytesToGb, normalizeOperator, setOperatorAliases } = require('./src/utils/traffic');
 const { parseHtmlInputFields } = require('./src/utils/html-forms');  // P2-2: extracted from server.js
 const { sha256hex } = require('./src/utils/secrets');
 const proxySmart = require('./src/api/proxy-smart');
@@ -134,6 +134,7 @@ trackingDb.init(db);
 healthDb.init(db);          // Stage 17
 require('./src/db/analytics').init(db);   // WP6.1: analytics query layer
 operatorsDb.init(db);       // Stage 17
+setOperatorAliases(operatorsDb.aliasMap());
 // B2C retail core (миграция 060): единый прайс, пул автовыдачи, эквайринг,
 // одноразовые email-токены (verify/reset).
 const tariffsDb = require('./src/db/tariffs');
@@ -2905,11 +2906,8 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
 const _proxyCheckRef = { iv: null };   // shared с src/boot/startup.js
 function rescheduleProxyCheck() {
   if (_proxyCheckRef.iv) clearInterval(_proxyCheckRef.iv);
-  const min = appSettings.proxy_check_interval_min || 60;
-  _proxyCheckRef.iv = setInterval(() => {
-    checkProxyLatency().catch(e => logger.error('[ProxyCheck] Error:', e.message));
-  }, min * 60 * 1000);
-  logger.info(`[ProxyCheck] Rescheduled: every ${min} min`);
+  _proxyCheckRef.iv = null;
+  logger.info('[ProxyCheck] External schedule remains disabled; latency comes from ProxySmart ping_stats');
 }
 function getProxyCheckTimeout() { return appSettings.proxy_check_timeout_sec || 15; }
 function getProxyCheckConcurrency() { return appSettings.proxy_check_concurrency || 10; }
@@ -2995,7 +2993,6 @@ const _proxyCheckJobs = require('./src/jobs/proxy-checks').create({
   getProxyCheckConcurrency, curlCheckProxy,
   apiServers, fetchApi, appSettings, pushSpeedtestEntry,
 });
-const checkProxyLatency = _proxyCheckJobs.checkProxyLatency;
 // runNightlySpeedtests (весь флот) больше нигде не планируется — 2026-08-13
 // авто-замер по всем модемам отключён (см. src/jobs/daily-schedule.js).
 
@@ -3104,6 +3101,7 @@ app.use(require('./src/routes/tariffs')({
 // Публичная витрина тарифов для лендинга arendaproxy.ru (без auth, CORS '*'):
 // цены на сайте синхронизируются с админкой автоматически.
 app.use(require('./src/routes/public-tariffs')({ tariffsDb, getSetting }));
+app.use(require('./src/routes/public-status')({ db, apiServers, SERVER_COUNTRIES }));
 
 // Публичный приём заявок с лендинга (без auth, CORS '*'): telegram-form.js
 // дублирует заявку сюда параллельно с TG-ботом. Сохраняем в leads, пушим в
@@ -3371,23 +3369,41 @@ const { runAutoReboot } = require('./src/jobs/auto-reboot').create({
   computeProxyIssues, fetchAllServersDataCached, findServer, fetchApi,
 });
 
-// Proxy check summary helper — last 7 days
+// Compatibility-shaped ping summary for the existing modem cards. The source
+// is ProxySmart ping_stats (modem_ping), not our retired external HTTP latency
+// probe. Keeping the response keys avoids a risky frontend flag day.
 function getProxyCheckSummary() {
   try {
     const since7d = new Date(Date.now() - 7 * 86400000).toISOString();
-    const summary = dbStmts.proxyCheckSummary.all(since7d);
-    const last = dbStmts.proxyCheckLast.all();
+    const summary = db.prepare(`
+      SELECT server AS server_name, nick, COUNT(*) AS total_checks,
+             AVG(latency_ms) FILTER (WHERE ok = 1) AS avg_ms,
+             SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS error_count
+      FROM modem_ping WHERE ts >= ? GROUP BY server, nick
+    `).all(since7d);
+    const last = db.prepare(`
+      WITH ranked AS (
+        SELECT server, nick, latency_ms, ok, ts,
+               ROW_NUMBER() OVER (PARTITION BY server, nick ORDER BY ts DESC) AS rn
+        FROM modem_ping
+      )
+      SELECT server AS server_name, nick, NULL AS connect_ms,
+             latency_ms AS total_ms, CASE WHEN ok = 1 THEN 200 ELSE NULL END AS status_code,
+             CASE WHEN ok = 1 THEN NULL ELSE 'ping_loss' END AS error,
+             ts AS checked_at
+      FROM ranked WHERE rn = 1
+    `).all();
     // Per-modem count of CONSECUTIVE trailing failed checks (most recent ones,
     // until the latest success) over the last 2h. The UI flags «прокси не
     // отвечает» only at ≥3 in a row, so a single flaky timeout never trips it.
     let consec = [];
     try {
       if (!getProxyCheckSummary._consec) getProxyCheckSummary._consec = db.prepare(
-        "WITH recent AS (SELECT server_name, nick, error, ROW_NUMBER() OVER (PARTITION BY server_name, nick ORDER BY checked_at DESC) rn FROM proxy_checks WHERE checked_at >= datetime('now','-2 hours')), " +
-        "firstok AS (SELECT server_name, nick, MIN(rn) ok_rn FROM recent WHERE error IS NULL GROUP BY server_name, nick), " +
+        "WITH recent AS (SELECT server AS server_name, nick, ok, ROW_NUMBER() OVER (PARTITION BY server, nick ORDER BY ts DESC) rn FROM modem_ping WHERE ts >= ?), " +
+        "firstok AS (SELECT server_name, nick, MIN(rn) ok_rn FROM recent WHERE ok = 1 GROUP BY server_name, nick), " +
         "tot AS (SELECT server_name, nick, MAX(rn) mx FROM recent GROUP BY server_name, nick) " +
         "SELECT t.server_name, t.nick, CASE WHEN f.ok_rn IS NULL THEN t.mx ELSE f.ok_rn-1 END consec FROM tot t LEFT JOIN firstok f ON f.server_name=t.server_name AND f.nick=t.nick");
-      consec = getProxyCheckSummary._consec.all();
+      consec = getProxyCheckSummary._consec.all(new Date(Date.now() - 2 * 3600000).toISOString());
     } catch (_) { /* window-fn unsupported / no rows */ }
     // Per-modem error stats for TODAY (since MSK midnight). The fleet cards show
     // today's reality, not the 7-day window — a modem can have a noisy week but
@@ -3397,8 +3413,8 @@ function getProxyCheckSummary() {
       const mskMidnight = Math.floor((Date.now() + 3 * 3600000) / 86400000) * 86400000 - 3 * 3600000;
       const sinceToday = new Date(mskMidnight).toISOString();
       if (!getProxyCheckSummary._today) getProxyCheckSummary._today = db.prepare(
-        "SELECT server_name, nick, COUNT(*) total_checks, SUM(CASE WHEN error IS NOT NULL THEN 1 ELSE 0 END) error_count " +
-        "FROM proxy_checks WHERE checked_at >= ? GROUP BY server_name, nick");
+        "SELECT server AS server_name, nick, COUNT(*) total_checks, SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) error_count " +
+        "FROM modem_ping WHERE ts >= ? GROUP BY server, nick");
       today = getProxyCheckSummary._today.all(sinceToday);
     } catch (_) { /* no rows */ }
     return { summary, last, consec, today };
@@ -4098,6 +4114,7 @@ app.use(require('./src/routes/admin-meta')({
   operatorsDb, trackingDb, knownModems, saveKnownModems,
   logActivity, fetchAllServersDataCached, markModemDeleted, markModemRestored,
   apiServers,
+  getSetting, setSettings,
 }));
 
 const connsHistory = require('./src/jobs/conns-history').create({
@@ -4150,6 +4167,7 @@ app.use(require('./src/routes/ops-ext')({
   getModemRateLatest: () => modemRate.latest(),   // A3 (23.08): текущая скорость модемов
   getModemRateTop: (n) => modemRate.top(n),       // A3: топ грузящих для дашборда
   getHttpCheckLatest: () => httpCheck.latest(),   // A2 (23.08): последние HTTP-чеки
+  getOperatorAliases: () => operatorsDb.aliasMap(),
 }));
 
 app.use(require('./src/routes/billing-ext')({
@@ -4208,7 +4226,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     healthDb, uptimeTracking, getSetting, setSetting,
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
-    autoCreateMissingClients, checkProxyLatency, proxyCheckRef: _proxyCheckRef,
+    autoCreateMissingClients, proxyCheckRef: _proxyCheckRef,
     runAutoReboot, dbAudit, tochkaConfig, runTochkaSync,
     runRetentionCleanup, cleanupStalePortMappings,
     runDailyBilling, runMonthlyReconciliation,

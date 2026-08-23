@@ -14,12 +14,14 @@ const Database = require('better-sqlite3');
 const tgSummary = require('../src/telegram/daily_summary.js');
 
 const SCHEMA = fs.readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8');
+const MODEM_PING_MIGRATION = fs.readFileSync(path.join(__dirname, '..', 'migrations', '074_modem_ping.sql'), 'utf8');
 
 let db, warns, logger;
 
 function boot() {
   db = new Database(':memory:');
   db.exec(SCHEMA);
+  db.exec(MODEM_PING_MIGRATION);
   // auto_reboot_log создаётся миграцией (не входит в baseline schema.sql);
   // блок инфраструктуры читает его без try/catch.
   db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (
@@ -86,6 +88,7 @@ describe('D3: daily_summary — дайджест модемов, лежащих 
   function bootWithDigest(listOrFn) {
     db = new Database(':memory:');
     db.exec(SCHEMA);
+    db.exec(MODEM_PING_MIGRATION);
     db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       rebooted_at TEXT NOT NULL, status TEXT

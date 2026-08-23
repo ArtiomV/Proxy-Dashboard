@@ -43,6 +43,7 @@ module.exports = function createOpsExtRouter(deps) {
     getMoscowNow, getMoscowToday, getMoscowYesterday,
     ledgerExpense, parseBwToBytes, trafficBytesToGb,
     getModemPingLatest, getModemRateLatest, getModemRateTop, getHttpCheckLatest,
+    getOperatorAliases,
   } = deps;
   const r = express.Router();
   // Stage 4: billing_ledger reads come from DB. Two cheap aggregate queries
@@ -237,24 +238,31 @@ function _metaSection(merged) {
   // Offline modems report an empty live PHONE_NUMBER — fill it from the
   // persisted modem_meta so the phone still shows for disconnected modems.
   try {
-    const _phoneMap = {};
-    for (const r of db.prepare("SELECT server_name, imei, phone FROM modem_meta WHERE phone <> ''").all()) {
-      _phoneMap[r.server_name + '|' + r.imei] = r.phone;
+    const _operatorAliases = typeof getOperatorAliases === 'function' ? getOperatorAliases() : {};
+    const _simMetaMap = {};
+    for (const r of db.prepare("SELECT server_name, imei, phone, contract_renewal_date FROM modem_meta").all()) {
+      _simMetaMap[r.server_name + '|' + r.imei] = r;
     }
     for (const m of (merged.status || [])) {
       const md = m && m.modem_details;
-      if (!md || (md.PHONE_NUMBER && String(md.PHONE_NUMBER).trim())) continue;
+      if (!md) continue;
       const srv = m._server || '';
       const raw = String(md.IMEI || '').indexOf(srv + '_') === 0 ? String(md.IMEI).slice(srv.length + 1) : String(md.IMEI || '');
-      const ph = _phoneMap[srv + '|' + raw];
-      if (ph) md.PHONE_NUMBER = ph;
+      const nd = m.net_details || {};
+      const rawOperator = String(nd.CELLOP || '').replace(/\s+/g, ' ').trim();
+      const canonical = _operatorAliases[rawOperator.toLowerCase()];
+      if (canonical) m.net_details = { ...nd, CELLOP: canonical };
+      const saved = _simMetaMap[srv + '|' + raw];
+      if (!saved) continue;
+      if (!(md.PHONE_NUMBER && String(md.PHONE_NUMBER).trim()) && saved.phone) md.PHONE_NUMBER = saved.phone;
+      md.CONTRACT_RENEWAL_DATE = saved.contract_renewal_date || '';
     }
-  } catch (e) { logger.warn('[data] phone enrich: ' + e.message); }
+  } catch (e) { logger.warn('[data] SIM/operator enrich: ' + e.message); }
   const servers = getApiServers().map(s => {
     const sc = getServerCountries()[s.name] || {};
     return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz, address: s.address || '' };
   });
-  return { servers };
+  return { servers, operatorAliases: typeof getOperatorAliases === 'function' ? getOperatorAliases() : {} };
 }
 
 // Section: clients (roster modem counts + sanitized client list)
@@ -427,6 +435,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       rosterWindowHours: 24,
       ...merged,
       servers: meta.servers,
+      operatorAliases: meta.operatorAliases,
       clients: clientsSec.sanitizedClients,
       ipTracking: getIpTracking(),
       uptimeTracking: getUptimeTracking(),

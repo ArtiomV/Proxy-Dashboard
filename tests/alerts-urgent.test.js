@@ -91,7 +91,6 @@ describe('D4: долговые сигналы — общий dedupeKey-family', 
     const p = { client_id: 'cl_1' };
     expect(alerts.RULES.client_charge_failed.dedupeKey(p)).toBe('debt_cl_1_charge_failed');
     expect(alerts.RULES.client_balance_negative.dedupeKey(p)).toBe('debt_cl_1_balance_negative');
-    expect(alerts.RULES.client_debt.dedupeKey(p)).toBe('debt_cl_1_debt');
     expect(alerts.RULES.client_blocked_debt.dedupeKey(p)).toBe('debt_cl_1_blocked');
     expect(alerts.RULES.client_unblocked_debt.dedupeKey(p)).toBe('debt_cl_1_unblocked');
     expect(alerts.RULES.client_block_warning.dedupeKey(p)).toBe('debt_cl_1_block_warning');
@@ -100,8 +99,7 @@ describe('D4: долговые сигналы — общий dedupeKey-family', 
   it('частоты не изменились: кулдауны долговых правил прежние', () => {
     expect(alerts.RULES.client_charge_failed.cooldownSec).toBe(86400);
     expect(alerts.RULES.client_balance_negative.cooldownSec).toBe(86400);
-    expect(alerts.RULES.client_debt.cooldownSec).toBe(86400);
-    expect(alerts.RULES.client_debt.channel).toBe('bell');
+    expect(alerts.RULES.client_debt).toBeUndefined();
     expect(alerts.RULES.client_block_warning.cooldownSec).toBe(259200);
   });
 });

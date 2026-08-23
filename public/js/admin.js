@@ -58,13 +58,14 @@ var COLUMNS=[{id:'rail',label:'',visible:true,sortable:false,width:'6px'},
   {id:'extIp',label:'Внеш.IP',visible:false,sortable:false},
   {id:'netType',label:'Сеть',visible:true,sortable:true},
   {id:'phone',label:'Телефон',visible:false,sortable:false},
-  {id:'trafficDay',label:'Сегодня',visible:true,sortable:true},
-  {id:'trafficMon',label:'Месяц',visible:false,sortable:true},
+  {id:'ping',label:'Пинг <span class="th-hint" title="Замер ProxySmart через модем (~1/мин): задержка и потери&#10;Зелёный: норма&#10;Оранжевый: >800 мс или потери ≥30%&#10;Красный: интернета нет (loss 100%)&#10;Серый: данные протухли">'+icon('info',11)+'</span>',visible:true,sortable:true},
+  {id:'http',label:'HTTP <span class="th-hint" title="HTTP-проверка через действующие реквизиты клиента&#10;Зелёный: ответ 2xx/3xx и контент прошёл проверку&#10;Красный: ошибка соединения, статуса или контента">'+icon('info',11)+'</span>',visible:true,sortable:false},
+  {id:'trafficDay',label:'Трафик сегодня',visible:true,sortable:true},
+  {id:'trafficMon',label:'Трафик месяц',visible:false,sortable:true},
+  {id:'rateNow',label:'Трафик сейчас <span class="th-hint" title="Текущая скорость модема (Мбит/с) — дельта суточных счётчиков бокса за скользящее окно 10 мин.&#10;↑ исходящий / ↓ входящий">'+icon('info',11)+'</span>',visible:true,sortable:true},
   {id:'speed',label:'Скорость <span class="th-hint" title="Download ↓ / Upload ↑ в Mbps&#10;Зелёный: > 30 Mbps&#10;Синий: 10–30 Mbps&#10;Оранжевый: < 10 Mbps&#10;Внимание: значение аномально низкое">'+icon('info',11)+'</span>',visible:false,sortable:true},
   {id:'uptime',label:'Аптайм',visible:false,sortable:true},
-  {id:'latency',label:'Латентность',visible:true,sortable:true},
-  {id:'ping',label:'Пинг <span class="th-hint" title="Замер бокса через модем (~1/мин): задержка и потери&#10;Зелёный: норма&#10;Оранжевый: >800 мс или потери ≥30%&#10;Красный: интернета нет (loss 100%)&#10;Серый: данные протухли">'+icon('info',11)+'</span>',visible:true,sortable:true},
-  {id:'rateNow',label:'Сейчас <span class="th-hint" title="Текущая скорость модема (Мбит/с) — дельта суточных счётчиков бокса за скользящее окно 10 мин.&#10;↑ исходящий / ↓ входящий">'+icon('info',11)+'</span>',visible:true,sortable:true},
+  {id:'latency',label:'Латентность (старый замер)',visible:false,sortable:true},
   {id:'conns',label:'Конн. <span class="th-hint" title="Живые TCP-подключения через прокси (HTTP + SOCKS5), суммарно по портам модема&#10;Клик — настройки порта: лимиты Max Conn / Conn Limit">'+icon('info',11)+'</span>',visible:true,sortable:true,width:'104px'},
   {id:'errors',label:'Ошибки',visible:false,sortable:true},
   {id:'health',label:'Здоровье',visible:true,sortable:true,width:'70px'},
@@ -111,6 +112,7 @@ function switchBankNav(name){
 }
 var _activeSettingsSection='audit';
 function switchSettingsSection(name){
+  if(name==='packages')name='operators'; // legacy bookmark after section merge
   try{if(window.matchMedia('(max-width:480px)').matches){var _c=document.querySelector('.tab-sidebar-layout>div:last-child');if(_c)setTimeout(function(){_c.scrollIntoView({behavior:'smooth',block:'start'});},60);}}catch(_){}
   // recovery / proxycheck / speedtest / data are VIEWS of the shared
   // settingsSection_data: show that section and filter its cards by
@@ -118,7 +120,7 @@ function switchSettingsSection(name){
   // view. «alerts» — тоже смешанный вид: settingsSection_alerts (правила
   // уведомлений) + data-карточки с subsec=alerts (Telegram, пороги доступности).
   var DATA_VIEWS={recovery:1,proxycheck:1,speedtest:1,alerts:1,data:1};
-  ['bank','audit','dguard','servers','syslog','serverHealth','simulator','operators','packages','maintenance','sla','alerts','failover','tariffs'].forEach(function(s){
+  ['bank','audit','dguard','servers','syslog','serverHealth','simulator','operators','maintenance','sla','alerts','failover','tariffs'].forEach(function(s){
     var sec=document.getElementById('settingsSection_'+s);
     if(sec)sec.style.display=s===name?'':'none';
   });
@@ -132,7 +134,7 @@ function switchSettingsSection(name){
       });
     }
   }
-  ['bank','data','audit','dguard','servers','syslog','serverHealth','simulator','operators','packages','maintenance','sla','alerts','failover','recovery','proxycheck','speedtest','tariffs'].forEach(function(s){
+  ['bank','data','audit','dguard','servers','syslog','serverHealth','simulator','operators','maintenance','sla','alerts','failover','recovery','proxycheck','speedtest','tariffs'].forEach(function(s){
     var nav=document.getElementById('snav_'+s);
     if(nav){nav.classList.toggle('active',s===name);}
   });
@@ -757,7 +759,7 @@ function _sysError(msg){return '<div style="color:var(--danger);padding:20px">'+
 
 
 // ----- 3.6 System dashboard -----
-function renderSysDashboard(targetId){
+function _renderSysDashboardLegacy(targetId){
   var c = document.getElementById(targetId || 'sys-content');
   c.innerHTML = _sysLoader();
   api(API + '/api/admin/system_health')
@@ -841,6 +843,52 @@ function renderSysDashboard(targetId){
       }, 40);
     })
     .catch(function(e){c.innerHTML = _sysError(e.message)});
+}
+
+// «Состояние сервера» v2: операционный экран в той же светлой карточной
+// стилистике, что дашборд/финансы. На первом экране — вердикт, серверы и
+// ресурсы; подробные события и история остаются ниже.
+function renderSysDashboard(targetId){
+  var c=document.getElementById(targetId||'serverHealthContent');if(!c)return;
+  c.innerHTML=_sysLoader();
+  api(API+'/api/admin/system_health').then(function(d){
+    if(d.error){c.innerHTML=_sysError(d.error);return;}
+    var cached={};((currentData&&currentData.cachedServers)||[]).forEach(function(s){cached[s.name]=s;});
+    var fleet=(currentData&&currentData.fleet&&currentData.fleet.byServer)||{};
+    var critical=(d.recent_critical||[]), errorCount=critical.filter(function(x){return x.level==='error';}).length;
+    var diskBad=d.disk&&d.disk.used_pct>=85, warn=Number(d.api_errors_24h)>0||diskBad||Object.keys(cached).length>0;
+    var h='<section class="sh-shell">';
+    h+='<header class="sh-head"><div><span class="sh-eyebrow">Мониторинг платформы</span><h2>Состояние сервера</h2><p>Приложение, база, системные ресурсы и доступность ProxySmart-боксов</p></div>'
+      +'<div class="sh-head-actions"><span class="sh-verdict '+(warn?'is-warn':'is-ok')+'"><i></i>'+(warn?'Требует внимания':'Система в норме')+'</span><button class="btn btn-sm" data-on-click="renderSysDashboard(\'serverHealthContent\')">'+icon('refresh',12)+' Обновить</button></div></header>';
+    function kpi(ic,label,value,sub,tone){return '<article class="sh-kpi '+(tone||'')+'"><span class="sh-kpi-icon">'+icon(ic,18)+'</span><span><small>'+label+'</small><b>'+value+'</b><em>'+sub+'</em></span></article>';}
+    var up=Math.max(0,Number(d.uptime_sec)||0),upText=Math.floor(up/86400)+'д '+Math.floor((up%86400)/3600)+'ч';
+    h+='<div class="sh-kpis">'
+      +kpi('pulse','Аптайм приложения',upText,'с последнего запуска','is-green')
+      +kpi('alert','API-ошибки за 24ч',String(d.api_errors_24h||0),errorCount+' error-событий в ленте',d.api_errors_24h?'is-red':'is-green')
+      +kpi('database','База данных',((d.db&&d.db.size_mb)||0)+' МБ','SQLite · рабочий файл','is-blue')
+      +kpi('users','Активные сессии',String(d.sessions||0),'администраторы и клиенты','is-purple')+'</div>';
+
+    h+='<div class="sh-grid"><article class="sh-card sh-servers"><div class="sh-card-head"><div><small>Инфраструктура</small><h3>Серверы ProxySmart</h3></div><span>'+(d.servers||[]).length+' шт.</span></div><div class="sh-server-list">';
+    (d.servers||[]).forEach(function(s){var off=!!cached[s.name],f=fleet[s.name]||{},on=f.working!=null?f.working:(f.online||0),tot=f.total||0;h+='<div class="sh-server-row"><span class="sh-server-dot '+(off?'is-off':'is-on')+'"></span><span class="sh-server-name"><b>'+esc(s.name)+'</b><small>'+esc(s.country||'Без страны')+'</small></span><span class="sh-server-modems"><b>'+on+'/'+tot+'</b><small>модемов</small></span><span class="sh-server-state '+(off?'is-off':'is-on')+'">'+(off?'Нет связи':'В сети')+'</span></div>';});
+    h+='</div></article>';
+
+    var mem=d.memory||{},disk=d.disk||{};function bar(label,pct,meta,tone){pct=Math.max(0,Math.min(100,Number(pct)||0));return '<div class="sh-resource"><div><span>'+label+'</span><b>'+meta+'</b></div><div class="sh-bar"><i class="'+(tone||'')+'" style="width:'+pct+'%"></i></div></div>';}
+    var memPct=mem.heap_total_mb?Math.round(mem.heap_mb/mem.heap_total_mb*100):0;
+    h+='<article class="sh-card sh-resources"><div class="sh-card-head"><div><small>Ресурсы</small><h3>Запас мощности</h3></div></div>'
+      +bar('Диск',disk.used_pct||0,(disk.free_gb!=null?disk.free_gb+' ГБ свободно':'нет данных'),disk.used_pct>=85?'is-red':disk.used_pct>=75?'is-orange':'is-green')
+      +bar('Heap Node.js',memPct,(mem.heap_mb||0)+' / '+(mem.heap_total_mb||0)+' МБ',memPct>=85?'is-red':'is-blue')
+      +'<div class="sh-resource-note"><span>RSS процесса</span><b>'+(mem.rss_mb||0)+' МБ</b></div></article>';
+
+    h+='<article class="sh-card sh-chart"><div class="sh-card-head"><div><small>7 дней</small><h3>Ошибки и предупреждения</h3></div></div><div class="sh-chart-box"><canvas id="sysErrChart"></canvas></div></article>';
+    h+='<article class="sh-card sh-events"><div class="sh-card-head"><div><small>Последние</small><h3>События, требующие внимания</h3></div><button class="btn btn-sm" data-on-click="switchSettingsSection(\'syslog\')">Открыть лог →</button></div><div class="sh-event-list">';
+    if(!critical.length)h+='<div class="sh-empty">'+icon('check',18)+' Новых проблем нет</div>';
+    critical.slice(0,8).forEach(function(e){h+='<div class="sh-event"><span class="sh-event-level '+(e.level==='error'?'is-error':'is-warn')+'">'+icon(e.level==='error'?'alert':'info',14)+'</span><span><b>'+esc(e.message||e.action||'Событие')+'</b><small>'+esc(e.category||'system')+(e.target?' · '+esc(e.target):'')+'</small></span><time>'+esc((e.timestamp||'').slice(5,16).replace('T',' '))+'</time></div>';});
+    h+='</div></article></div>';
+
+    if(d.server_downtime&&d.server_downtime.length){h+='<article class="sh-card sh-downtime"><div class="sh-card-head"><div><small>История</small><h3>Недоступность серверов</h3></div></div><div class="sh-down-list">';d.server_downtime.slice(0,12).forEach(function(x){var mins=Math.max(1,Math.round((x.duration_sec||0)/60));h+='<div><b>'+esc(x.server_name)+'</b><span>'+esc((x.down_from||'').slice(5,16).replace('T',' '))+' → '+esc((x.down_to||'').slice(5,16).replace('T',' '))+'</span><strong>'+mins+' мин</strong></div>';});h+='</div></article>';}
+    h+='</section>';c.innerHTML=h;
+    setTimeout(function(){var cv=document.getElementById('sysErrChart');if(!cv||!window.Chart)return;if(_sysCharts.err)try{_sysCharts.err.destroy();}catch(_){}var cc=getChartColorsLight(),e7=d.errors_by_day||[];_sysCharts.err=newChartSafe(cv,{type:'bar',data:{labels:e7.map(function(x){return x.date.slice(5)}),datasets:[{label:'Ошибки',data:e7.map(function(x){return x.errors}),backgroundColor:'#ef4444',borderRadius:5,maxBarThickness:26},{label:'Предупреждения',data:e7.map(function(x){return x.warns}),backgroundColor:'#f59e0b',borderRadius:5,maxBarThickness:26}]},options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,pointStyle:'circle',boxWidth:6,color:cc.text,font:{size:10}}}},scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:10}},grid:{display:false},border:{display:false}},y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,precision:0},grid:{color:cc.grid},border:{display:false}}}}});},20);
+  }).catch(function(e){c.innerHTML=_sysError(e.message);});
 }
 
 // renderSysLogs and its helpers removed — domain log explorer dropped
@@ -943,7 +991,7 @@ document.addEventListener('keydown',function(e){
   }
 });
 
-function processData(){if(!currentData)return;_initServers(currentData.servers);var downSet={};(currentData.cachedServers||[]).forEach(function(s){downSet[s.name]=true;});var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,_cached:!!m._cached,_serverDown:!!downSet[m._server],nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S\d+_/,''),phone:m.modem_details.PHONE_NUMBER||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',iccid:(function(){var v=(m.net_details?String(m.net_details.ICCID||''):'').trim();return(v&&v.toLowerCase()!=='unknown')?v:''})(),signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','moldcell':'Moldcell','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vf-ro':'Vodafone RO','vfro':'Vodafone RO','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isTestPool:!!m.isTestPool,isOnline:!m._cached&&!downSet[m._server]&&(m.net_details?m.net_details.IS_ONLINE==='yes':false),isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',band:(function(){var b=(m.net_details?String(m.net_details.BAND||''):'').trim();return(b&&b!=='?')?b:''})(),simStatus:(m.net_details?String(m.net_details.SimStatus||'').toUpperCase().trim():''),httpRedirect:(function(){var r=m.net_details?m.net_details.HTTP_REDIRECT_IMPOSED:null;if(r==null)return false;var s=String(r).toLowerCase().trim();return!!s&&['no','null','0','false','none'].indexOf(s)<0})(),rebootScore:(function(){var r=m.modem_details?m.modem_details.REBOOT_SCORE:null;return(r!=null&&r!==''&&isFinite(+r))?Math.round(+r):null})(),isLocked:(m.IS_LOCKED===true||m.IS_LOCKED==='true'),msg:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join('; '):(b||'');return [m.MSG||'',b].filter(Boolean).join('; ').trim()})(),webappDown:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join(' '):(b||'');return /web ?app|not available|restart the modem/i.test(String(m.MSG||'')+' '+b)})(),pktLoss:(function(){var p=(m.net_details?m.net_details.ping_stats:'')||'';var mm=/(\d+)\s*%\s*loss/i.exec(p);return mm?parseInt(mm[1],10):null})(),connDead:(function(){var c=String((m.net_details?m.net_details.ConnectionStatus:'')||'').toLowerCase();return /disconnect|ppp_disc|no carrier|down/.test(c)})(),ports:[]}}
+function processData(){if(!currentData)return;_initServers(currentData.servers);var downSet={};(currentData.cachedServers||[]).forEach(function(s){downSet[s.name]=true;});var mm={},sa=currentData.status||[];for(var i=0;i<sa.length;i++){var m=sa[i],imei=m.modem_details?m.modem_details.IMEI:null;if(!imei)continue;mm[imei]={raw:m,server:m._server,_cached:!!m._cached,_serverDown:!!downSet[m._server],nick:m.modem_details.NICK||'',imei:imei,rawImei:imei.replace(/^S\d+_/,''),phone:m.modem_details.PHONE_NUMBER||'',contractRenewalDate:m.modem_details.CONTRACT_RENEWAL_DATE||'',model:m.modem_details.MODEL_SHOWN||m.modem_details.MODEL||'',uptime:m.modem_details.UDEV_UPTIME||0,notes:m.modem_details.NOTES||'',usbId:m.modem_details.USB_ID||'',extIp:(m.net_details?m.net_details.EXT_IP:'')||'',netType:(m.net_details?m.net_details.CurrentNetworkType:'')||'',iccid:(function(){var v=(m.net_details?String(m.net_details.ICCID||''):'').trim();return(v&&v.toLowerCase()!=='unknown')?v:''})(),signal:parseInt(m.net_details?m.net_details.SIGNAL_STRENGTH:'0')||0,operator:(function(){var r=(m.net_details?m.net_details.CELLOP:'')||'';var srv=m._server||'';var isRO=srv.indexOf('S2')===0||srv==='S2';var _c=r.toLowerCase().replace(/\s+/g,' ').trim();var n={'unite':'Moldtelecom','moldtelecom':'Moldtelecom','moldtelecom moldtelecom':'Moldtelecom','moldcell':'Moldcell','orange':isRO?'Orange RO':'Orange MD','orange ro':'Orange RO','orange md':'Orange MD','vf-ro':'Vodafone RO','vfro':'Vodafone RO','vodafone ro':'Vodafone RO','vodafone':'Vodafone RO'};return n[_c]||r})(),apn:(m.net_details?m.net_details.APN:'')||'',isTestPool:!!m.isTestPool,isOnline:!m._cached&&!downSet[m._server]&&(m.net_details?m.net_details.IS_ONLINE==='yes':false),isRotating:m.IS_ROTATED==='true',isRebooting:m.IS_REBOOTING==='true',state:m.STATE,connectionStatus:(m.net_details?m.net_details.ConnectionStatus:'')||'',timeToRotation:m.modem_details.TIME_TO_IP_ROTATION||'',autoRotation:m.modem_details.AUTO_IP_ROTATION||'',targetMode:m.modem_details.TARGET_MODE||'',ping:(m.net_details?m.net_details.ping_stats:'')||'',band:(function(){var b=(m.net_details?String(m.net_details.BAND||''):'').trim();return(b&&b!=='?')?b:''})(),simStatus:(m.net_details?String(m.net_details.SimStatus||'').toUpperCase().trim():''),httpRedirect:(function(){var r=m.net_details?m.net_details.HTTP_REDIRECT_IMPOSED:null;if(r==null)return false;var s=String(r).toLowerCase().trim();return!!s&&['no','null','0','false','none'].indexOf(s)<0})(),rebootScore:(function(){var r=m.modem_details?m.modem_details.REBOOT_SCORE:null;return(r!=null&&r!==''&&isFinite(+r))?Math.round(+r):null})(),isLocked:(m.IS_LOCKED===true||m.IS_LOCKED==='true'),msg:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join(' '):(b||'');return [m.MSG||'',b].filter(Boolean).join('; ').trim()})(),webappDown:(function(){var b=m.MSGS;b=Array.isArray(b)?b.join(' '):(b||'');return /web ?app|not available|restart the modem/i.test(String(m.MSG||'')+' '+b)})(),pktLoss:(function(){var p=(m.net_details?m.net_details.ping_stats:'')||'';var mm=/(\d+)\s*%\s*loss/i.exec(p);return mm?parseInt(mm[1],10):null})(),connDead:(function(){var c=String((m.net_details?m.net_details.ConnectionStatus:'')||'').toLowerCase();return /disconnect|ppp_disc|no carrier|down/.test(c)})(),ports:[]}}
   var po=currentData.ports||{};for(var pi in po){if(mm[pi])mm[pi].ports=po[pi]}
   var bw=currentData.bandwidth||{};for(var mi in mm){var mod=mm[mi];for(var p=0;p<mod.ports.length;p++){var pt=mod.ports[p];if(bw[pt.portID])pt._bw=bw[pt.portID]}}
   // IP tracking & uptime tracking
@@ -3263,8 +3311,10 @@ function loadOperatorsMapping() {
     .then(function(d){
       var ops = (d && d.operators) || [];
       if (!ops.length) { box.innerHTML = '<div style="color:var(--text-3);font-size:12px;padding:12px">Операторов пока не определено.</div>'; return; }
+      var dl=document.getElementById('opCanonicalOptions');
+      if(dl)dl.innerHTML=ops.map(function(o){return '<option value="'+esc(o.operator||o.operator_normalized)+'"></option>';}).join('');
       var h = '<table style="width:100%;border-collapse:collapse;font-size:12px">';
-      h += '<thead><tr style="color:var(--text-3);font-size:10px;text-transform:uppercase;letter-spacing:.05em"><th style="text-align:left;padding:8px 6px">Оператор</th><th style="text-align:left;padding:8px 6px">Страна</th><th style="text-align:left;padding:8px 6px">Источник</th><th style="text-align:right;padding:8px 6px">Модемов</th><th style="padding:8px 6px"></th></tr></thead><tbody>';
+      h += '<thead><tr style="color:var(--text-3);font-size:10px;text-transform:uppercase;letter-spacing:.05em"><th style="text-align:left;padding:8px 6px">Оператор</th><th style="text-align:left;padding:8px 6px">Алиасы</th><th style="text-align:left;padding:8px 6px">Страна</th><th style="text-align:left;padding:8px 6px">Источник</th><th style="text-align:right;padding:8px 6px">Модемов</th><th style="padding:8px 6px"></th></tr></thead><tbody>';
       ops.forEach(function(o){
         var srcBadge = o.source === 'manual'
           ? '<span style="background:rgba(99,102,241,.15);color:var(--accent);padding:1px 6px;border-radius:3px;font-size:10px;font-weight:600">вручную</span>'
@@ -3276,6 +3326,7 @@ function loadOperatorsMapping() {
         var flag = FLAGS[country] || '';
         h += '<tr>';
         h += '<td style="padding:8px 6px;color:var(--text-0)"><strong>'+esc(o.operator)+'</strong><div style="font-size:10px;color:var(--text-3);margin-top:2px">'+(o.servers || []).join(', ')+'</div></td>';
+        h += '<td style="padding:8px 6px;max-width:260px">'+((o.aliases||[]).length?(o.aliases||[]).map(function(a){return '<span style="display:inline-flex;align-items:center;gap:3px;margin:1px 4px 1px 0;padding:2px 6px;border-radius:999px;background:var(--bg-3);color:var(--text-2)">'+esc(a)+' <button type="button" title="Удалить алиас" data-on-click="dropOperatorAlias(\''+encodeURIComponent(a)+'\')" style="border:0;background:none;color:var(--text-3);padding:0;cursor:pointer">×</button></span>';}).join(''):'<span style="color:var(--text-3)">—</span>')+'</td>';
         h += '<td style="padding:8px 6px">';
         h += '<select data-on-change="setOperatorCountry(\''+encodeURIComponent(o.operator_normalized)+'\', this.value)" style="background:var(--bg-2);border:1px solid var(--border);color:var(--text-1);padding:4px 8px;border-radius:6px;font-size:12px;cursor:pointer">';
         h += '<option value="" '+(!country?'selected':'')+'>— не задана —</option>';
@@ -3295,6 +3346,25 @@ function loadOperatorsMapping() {
       box.innerHTML = h;
     })
     .catch(function(e){ box.innerHTML = '<div style="color:var(--danger);font-size:12px;padding:12px">Ошибка: '+esc(e.message)+'</div>'; });
+}
+function mergeOperatorAlias(){
+  var alias=(document.getElementById('opAliasInput').value||'').trim();
+  var canonical=(document.getElementById('opCanonicalInput').value||'').trim();
+  var st=document.getElementById('opAliasStatus');
+  if(!alias||!canonical||alias.toLowerCase()===canonical.toLowerCase()){st.style.color='var(--danger)';st.textContent='Укажите два разных названия';return;}
+  st.style.color='var(--warning)';st.textContent='Объединяю…';
+  api(API+'/api/admin/operators/'+encodeURIComponent(alias)+'/alias',{method:'PUT',json:{canonical:canonical}})
+    .then(function(d){
+      if(!d.ok)throw new Error(d.error||'Ошибка');
+      document.getElementById('opAliasInput').value='';document.getElementById('opCanonicalInput').value='';
+      st.style.color='var(--success)';st.textContent='Объединено'+(d.rewritten?' · обновлено строк: '+d.rewritten:'');
+      loadOperatorsMapping();refreshOperatorList();
+    }).catch(function(e){st.style.color='var(--danger)';st.textContent=e.message;});
+}
+function dropOperatorAlias(aliasEnc){
+  api(API+'/api/admin/operators/'+aliasEnc+'/alias',{method:'DELETE'})
+    .then(function(){loadOperatorsMapping();refreshOperatorList();})
+    .catch(function(e){showToast(e.message,'error');});
 }
 function setOperatorCountry(opEnc, country) {
   if (!country) return; // ignore the "не задана" choice for now
@@ -3843,9 +3913,9 @@ function renderNewFleetServers(){
         +'<button type="button" class="server-card-link" data-on-click="openServerOverviewSection(\'syslog\')"><span class="server-link-long">Открыть лог</span><span class="server-link-short">Лог</span> <span class="server-card-arrow">→</span></button></section>';
 
       function footerStat(mod,ic,val,label,extra){
+        var info=extra?'<span class="server-footer-info" tabindex="0" role="img" aria-label="'+esc(label)+': '+esc(extra)+'" data-tip="'+esc(extra)+'">i</span>':'';
         return '<span class="server-footer-stat server-footer-stat--'+mod+'"><span class="server-footer-icon">'+icon(ic,18)+'</span>'
-          +'<span class="server-footer-copy"><b>'+esc(val||'—')+'</b><small>'+esc(label)+'</small>'
-          +(extra?'<em>'+esc(extra)+'</em>':'')+'</span></span>';
+          +'<span class="server-footer-copy"><b>'+esc(val||'—')+'</b><small>'+esc(label)+info+'</small></span></span>';
       }
       var up=typeof _srvMetUptime==='function'?_srvMetUptime(met.uptime_sec):'';
       h+='<footer class="server-overview-footer">'
@@ -4113,7 +4183,7 @@ function renderNewFinance(d){
       panel(icon('money',12) + ' Должники', debtors.length?'var(--danger)':'var(--success)', String(debtors.length), dbRows, icon('check',11) + ' все в плюсе');
   }
   // MRR перенесён в ряд «Требует внимания» (renderMrrChart), а в блоке Финансов
-  // на его месте — «Выручка по дням» + «Последние платежи» (renderFinRevenue).
+  // на его месте — «Выручка за 30 дней» + «Последние платежи» (renderFinRevenue).
   renderFinRevenue(d);
   renderMrrChart(d);
 }
