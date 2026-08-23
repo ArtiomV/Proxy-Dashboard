@@ -56,7 +56,6 @@ const ledgerDb = require('./src/db/ledger');
 const kvDb = require('./src/db/kv');
 const trafficDb = require('./src/db/traffic');
 const trackingDb = require('./src/db/tracking');
-const healthDb = require('./src/db/health');           // Stage 17: daily health snapshots
 const operatorsDb = require('./src/db/operators');     // Stage 17: operator-country mapping
 const os = require('os');
 
@@ -130,7 +129,6 @@ ledgerDb.init(db);
 kvDb.init(db);
 trafficDb.init(db);
 trackingDb.init(db);
-healthDb.init(db);          // Stage 17
 require('./src/db/analytics').init(db);   // WP6.1: analytics query layer
 operatorsDb.init(db);       // Stage 17
 setOperatorAliases(operatorsDb.aliasMap());
@@ -2750,6 +2748,7 @@ try {
 const _ipUpsert = trackingDb.ipUpsertStmt();
 const _utUpsert = trackingDb.utUpsertStmt();
 const _utDailyUpsert = trackingDb.utDailyUpsertStmt();
+const _clientUtIncrement = trackingDb.clientUtIncrementStmt();
 const _ihInsert = trackingDb.ihInsertStmt();
 const _ihUpdateEnd = trackingDb.ihUpdateEndStmt();
 const _ihDeleteById = trackingDb.ihDeleteByIdStmt();
@@ -2786,6 +2785,23 @@ function saveUptimeTracking() {
     });
     batch();
   } catch (e) { logger.error('[saveUptimeTracking] SQLite error:', e.message); }
+}
+
+function saveClientUptimeTicks(ticks) {
+  if (!Array.isArray(ticks) || ticks.length === 0) return;
+  try {
+    const batch = db.transaction(() => {
+      for (const tick of ticks) {
+        _clientUtIncrement.run(
+          tick.key,
+          tick.date,
+          tick.clientName,
+          tick.online ? 1 : 0
+        );
+      }
+    });
+    batch();
+  } catch (e) { logger.error('[saveClientUptimeTicks] SQLite error:', e.message); }
 }
 
 // (saveIpHistory removed 2026-07 — dead code: recordIpChange does direct
@@ -2882,6 +2898,7 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   apiServers, fetchServerData, db, logger, logActivity, alerts,
   SERVER_COUNTRIES, normalizeOperator, operatorsDb, fetchApi, postFormApi,
   recordIpChange, saveIpTracking, saveUptimeTracking,
+  saveClientUptimeTicks,
   _serverDownSince, _serverUnreachableAlertSent, uptimeTracking, ipTracking,
   offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
   _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
@@ -3234,12 +3251,6 @@ app.use(require('./src/routes/analytics')({
 }));
 
 // WP6.1: analytics carve-outs (same endpoint paths, query layer src/db/analytics.js)
-app.use(require('./src/routes/analytics-health')({
-  db, logger, authMiddleware, adminMiddleware,
-  appSettings,
-  getStaleNicks, getUnboundNicks,
-  uptimeTracking,
-}));
 app.use(require('./src/routes/analytics-capacity')({
   logger, authMiddleware, adminMiddleware,
   getStaleNicks, getStaleImeis,
@@ -4101,7 +4112,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     logger, db, fs, path,
     rescheduleSpeedtests, scheduleRepeating,
     aggregateTopHosts, runDomainGuard, balanceReconcile,
-    healthDb, uptimeTracking, getSetting, setSetting,
+    uptimeTracking, getSetting, setSetting,
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
     autoCreateMissingClients,

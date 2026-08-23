@@ -5,10 +5,12 @@
 //
 //   Серверы: server_downtime (эпизоды, пересекающие месяц, клиппятся на его
 //     границы; maintenance=1 исключаются из простоя — B3).
-//   Модемы: доля ok=1 в modem_ping за месяц (ping-based «up», A1).
+//   Модемы: доля online/total в минутных uptime_daily за месяц.
 //   Операторы: средний uptime модемов оператора (оператор — из modem_meta).
 //
-// Все метки времени в источниках — ISO UTC, сравнение лексикографическое.
+// Клиенты: те же минутные счётчики, сегментированные по владельцу модема.
+
+const uptimePeriod = require('./uptime-period');
 
 function monthBounds(month) {
   const m = /^(\d{4})-(\d{2})$/.exec(String(month || ''));
@@ -68,35 +70,11 @@ function serverUptime(db, month) {
   })).sort((a, c) => a.server.localeCompare(c.server));
 }
 
-// Модемы: доля ok=1 среди пингов за месяц по (server, nick).
+// Модемы: доля online среди всех периодических проверок за месяц.
 function modemUptime(db, month) {
   const b = monthBounds(month);
-  let rows;
-  try {
-    rows = db.prepare(`
-      SELECT mp.server, mp.nick,
-             COUNT(*) AS pings,
-             SUM(mp.ok) AS ok_pings,
-             mm.operator AS operator
-        FROM modem_ping mp
-        LEFT JOIN (
-          SELECT server_name, nick, MAX(NULLIF(TRIM(operator), '')) AS operator
-            FROM modem_meta
-           GROUP BY server_name, nick
-        ) mm ON mm.server_name = mp.server AND mm.nick = mp.nick
-       WHERE mp.ts >= ? AND mp.ts < ?
-       GROUP BY mp.server, mp.nick
-       ORDER BY mp.server, mp.nick
-    `).all(b.fromIso, b.toIso);
-  } catch (_) { rows = []; }
-  return rows.map(r => ({
-    server: r.server,
-    nick: r.nick,
-    operator: r.operator || '',
-    pings: r.pings,
-    ok_pings: r.ok_pings || 0,
-    uptime_pct: r.pings ? _pct((r.ok_pings || 0) / r.pings) : null,
-  }));
+  return uptimePeriod.modemRows(db, b.fromIso.slice(0, 10), b.toIso.slice(0, 10))
+    .map(uptimePeriod.mapRow);
 }
 
 // Операторы: средний uptime их модемов (модемы без оператора не участвуют).
@@ -127,59 +105,21 @@ function buildReport(db, month) {
   };
 }
 
-// Client-scoped SLA. A modem belongs to the report only during hours in which
-// traffic_hourly records that client's port assignment. This prevents leaking
-// another client's uptime before/after a SIM reassignment.
-// Ядро: произвольные границы [fromIso, toIso) + опциональная разбивка по дням.
+// Client-scoped SLA. New checks are attributed at collection time through
+// client_uptime_daily. Historical days are attributed by traffic_hourly, while
+// their online/total counters still come from the canonical uptime_daily.
 function _clientUptimeRange(db, fromIso, toIso, clientName, groupByDay) {
-  if (!String(clientName || '').trim()) return [];
-  let rows = [];
-  try {
-    rows = db.prepare(`
-      WITH assigned AS (
-        SELECT DISTINCT server_name, nick, hour_start
-          FROM traffic_hourly
-         WHERE client_name = ?
-           AND datetime(hour_start) >= datetime(?)
-           AND datetime(hour_start) < datetime(?)
-           AND trim(COALESCE(nick, '')) <> ''
-      )
-      SELECT mp.server, mp.nick,
-             ${groupByDay ? "substr(mp.ts, 1, 10) AS day," : "NULL AS day,"}
-             COUNT(mp.id) AS pings,
-             SUM(mp.ok) AS ok_pings,
-             MIN(mp.ts) AS observed_from,
-             MAX(mp.ts) AS observed_to,
-             COUNT(DISTINCT assigned.hour_start) AS assigned_hours,
-             MAX(NULLIF(TRIM(mm.operator), '')) AS operator
-        FROM assigned
-        JOIN modem_ping mp
-          ON mp.server = assigned.server_name
-         AND mp.nick = assigned.nick
-         AND datetime(mp.ts) >= datetime(assigned.hour_start)
-         AND datetime(mp.ts) < datetime(assigned.hour_start, '+1 hour')
-        LEFT JOIN modem_meta mm
-          ON mm.server_name = mp.server AND mm.nick = mp.nick
-       GROUP BY ${groupByDay ? 'day, ' : ''}mp.server, mp.nick
-       ORDER BY ${groupByDay ? 'day, ' : ''}mp.server, mp.nick
-    `).all(String(clientName).trim(), fromIso, toIso);
-  } catch (_) { rows = []; }
-  return rows;
+  return uptimePeriod.clientRows(
+    db,
+    String(fromIso).slice(0, 10),
+    String(toIso).slice(0, 10),
+    clientName,
+    groupByDay
+  );
 }
 
 function _mapClientRow(r) {
-  return {
-    server: r.server,
-    nick: r.nick,
-    operator: r.operator || '',
-    pings: Number(r.pings) || 0,
-    ok_pings: Number(r.ok_pings) || 0,
-    failed_pings: Math.max(0, (Number(r.pings) || 0) - (Number(r.ok_pings) || 0)),
-    assigned_hours: Number(r.assigned_hours) || 0,
-    observed_from: r.observed_from || null,
-    observed_to: r.observed_to || null,
-    uptime_pct: r.pings ? _pct((r.ok_pings || 0) / r.pings) : null,
-  };
+  return uptimePeriod.mapRow(r);
 }
 
 function clientUptime(db, month, clientName) {
@@ -205,38 +145,38 @@ function buildClientReport(db, month, clientName, day) {
   const dayB = _dayBounds(month, day);
   const period = dayB || b;
   const modems = _clientUptimeRange(db, period.fromIso, period.toIso, clientName, false).map(_mapClientRow);
-  const pings = modems.reduce((sum, m) => sum + m.pings, 0);
-  const okPings = modems.reduce((sum, m) => sum + m.ok_pings, 0);
+  const checks = modems.reduce((sum, m) => sum + m.checks, 0);
+  const onlineChecks = modems.reduce((sum, m) => sum + m.online_checks, 0);
 
   // Per-day breakdown за весь месяц (та же методология) — питает выбор дня в UI.
   // Сворачиваем помодемные дневные строки в один ряд на день.
   const byDay = {};
   for (const r of _clientUptimeRange(db, b.fromIso, b.toIso, clientName, true)) {
-    const d = byDay[r.day] || (byDay[r.day] = { day: r.day, pings: 0, ok_pings: 0 });
-    d.pings += Number(r.pings) || 0;
-    d.ok_pings += Number(r.ok_pings) || 0;
+    const d = byDay[r.day] || (byDay[r.day] = { day: r.day, checks: 0, online_checks: 0 });
+    d.checks += Number(r.checks) || 0;
+    d.online_checks += Number(r.online_checks) || 0;
   }
   const days = Object.values(byDay)
     .sort((a, c) => a.day.localeCompare(c.day))
     .map(d => ({
       day: d.day,
-      pings: d.pings,
-      ok_pings: d.ok_pings,
-      failed_pings: Math.max(0, d.pings - d.ok_pings),
-      uptime_pct: d.pings ? _pct(d.ok_pings / d.pings) : null,
+      checks: d.checks,
+      online_checks: d.online_checks,
+      failed_checks: Math.max(0, d.checks - d.online_checks),
+      uptime_pct: d.checks ? _pct(d.online_checks / d.checks) : null,
     }));
 
   return {
     month,
     period: { month, day: dayB ? String(day) : null },
     generated_at: new Date().toISOString(),
-    methodology: 'proxysmart_ping_during_client_assignment',
+    methodology: 'periodic_modem_availability_during_client_assignment',
     summary: {
-      uptime_pct: pings ? _pct(okPings / pings) : null,
+      uptime_pct: checks ? _pct(onlineChecks / checks) : null,
       modems: modems.length,
-      pings,
-      ok_pings: okPings,
-      failed_pings: Math.max(0, pings - okPings),
+      checks,
+      online_checks: onlineChecks,
+      failed_checks: Math.max(0, checks - onlineChecks),
     },
     days,
     modems,
@@ -246,12 +186,12 @@ function buildClientReport(db, month, clientName, day) {
 // CSV с BOM (Excel RU открывает UTF-8 корректно) и разделителем ';'.
 function toCsv(report) {
   const cell = v => String(v == null ? '' : v).replace(/;/g, ',');
-  const lines = ['type;target;operator;uptime_pct;episodes;downtime_min;pings'];
+  const lines = ['type;target;operator;uptime_pct;episodes;downtime_min;checks'];
   for (const s of report.servers) {
     lines.push(['server', s.server, '', s.uptime_pct, s.episodes, s.downtime_min, ''].map(cell).join(';'));
   }
   for (const m of report.modems) {
-    lines.push(['modem', m.server + '/' + m.nick, m.operator, m.uptime_pct, '', '', m.pings].map(cell).join(';'));
+    lines.push(['modem', m.server + '/' + m.nick, m.operator, m.uptime_pct, '', '', m.checks].map(cell).join(';'));
   }
   for (const o of report.operators) {
     lines.push(['operator', o.operator, '', o.uptime_pct, '', '', o.modems].map(cell).join(';'));

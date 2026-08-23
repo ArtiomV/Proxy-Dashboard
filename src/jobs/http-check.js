@@ -235,7 +235,9 @@ function create(deps) {
   // Снимок для UI: { 'S1_MD2_39': { status, total_ms, content_ok, error, ts } }
   function latest() {
     const out = {};
-    for (const [k, st] of state) if (st.last) out[k] = st.last;
+    for (const [k, st] of state) {
+      if (st.last) out[k] = { ...st.last, fail_streak: st.failStreak, failing: st.failing };
+    }
     return out;
   }
 

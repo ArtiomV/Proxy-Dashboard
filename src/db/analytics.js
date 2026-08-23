@@ -26,51 +26,6 @@ function init(db) {
   S.modemHeatmap = (tzStr) => db.prepare(
     `SELECT CASE WHEN client_name IS NULL OR TRIM(client_name) = '' THEN '' ELSE client_name END as cn, strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? GROUP BY cn, day, hour`);
 
-  // ── modem_health (days as `? || ' days`, always negative) ────────────
-  S.healthActive = db.prepare(`
-    WITH active AS (
-      SELECT DISTINCT server AS server_name, nick FROM modem_ping
-      WHERE ts >= datetime('now', ? || ' days')
-      UNION
-      SELECT DISTINCT server_name, nick FROM traffic_hourly
-      WHERE hour_start >= datetime('now', ? || ' days')${UNBOUND_FILTER}
-    ),
-    meta_latest AS (
-      SELECT server_name, nick, imei, operator, sim_status, reboot_score,
-             ROW_NUMBER() OVER (PARTITION BY server_name, nick ORDER BY updated_at DESC) as rn
-      FROM modem_meta
-    )
-    SELECT a.server_name, a.nick, COALESCE(m.imei, '') as imei, COALESCE(m.operator, '') as operator,
-           COALESCE(m.sim_status, '') as sim_status, m.reboot_score as reboot_score
-    FROM active a
-    LEFT JOIN meta_latest m
-      ON m.server_name = a.server_name AND m.nick = a.nick AND m.rn = 1
-    ORDER BY a.server_name, a.nick
-  `);
-  S.healthChecks = db.prepare(`
-    SELECT server AS server_name, nick,
-           COUNT(*) as total_checks,
-           SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) as err_checks
-    FROM modem_ping
-    WHERE ts >= datetime('now', ? || ' days')
-    GROUP BY server, nick
-  `);
-  S.healthRotations = db.prepare(`
-    SELECT server_name, nick,
-           COUNT(*) as total,
-           SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
-           AVG(took_sec) as avg_sec
-    FROM rotation_log
-    WHERE started_at >= datetime('now', ? || ' days') AND ended_at IS NOT NULL
-    GROUP BY server_name, nick
-  `);
-  S.healthTraffic = db.prepare(`
-    SELECT server_name, nick, SUM(bytes_in + bytes_out) as bytes
-    FROM traffic_hourly
-    WHERE hour_start >= datetime('now', ? || ' days')${UNBOUND_FILTER}
-    GROUP BY server_name, nick
-  `);
-
   // ── rotations (stale filter is dynamic — builder below) ──────────────
   S.rotationsTotals = (sinceExpr, staleFilter) => db.prepare(`
     SELECT COUNT(*) as total,
@@ -325,11 +280,6 @@ function topHostsWhere({ host, client, operator, server, nick, minCount }) {
 module.exports = {
   init, UNBOUND_FILTER,
   notInClause, heatmapSql, heatmapOperatorSql, topHostsWhere,
-  // modem_health accessors (days is a negative int)
-  healthActive:   (days) => S.healthActive.all(days, days),
-  healthChecks:   (days) => S.healthChecks.all(days),
-  healthRotations:(days) => S.healthRotations.all(days),
-  healthTraffic:  (days) => S.healthTraffic.all(days),
   // monthly_traffic
   monthlyTraffic: (startDate) => S.monthlyTraffic.all(startDate),
   // modem_heatmap

@@ -3,7 +3,8 @@
 // src/services/proxy-issues.js — computeProxyIssues: агрегация штатного
 // ProxySmart ping_stats за окно и список модемов с устойчивыми потерями.
 // Extracted from server.js (Stage 9) — без изменения логики. Потребители:
-// /api/admin/data (карточка проблем) и runAutoReboot.
+// /api/admin/data (один из сигналов единой плитки «Сбоит прокси») и
+// runAutoReboot.
 
 function create(deps) {
   const { db, appSettings, logger } = deps;

@@ -103,8 +103,6 @@
   "GET /api/analytics/heatmap",
   "GET /api/analytics/ip_stats",
   "GET /api/analytics/logs_domains_full",
-  "GET /api/analytics/modem_health",
-  "GET /api/analytics/modem_health_history",
   "GET /api/analytics/modem_heatmap",
   "GET /api/analytics/monthly_traffic",
   "GET /api/analytics/rotations",

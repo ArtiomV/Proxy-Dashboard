@@ -49,9 +49,11 @@ beforeAll(async () => {
 });
 
 describe('GET /api/client/sla_report', () => {
-  it('returns only pings from hours assigned to the authenticated client', async () => {
+  it('returns only periodic checks assigned to the authenticated client', async () => {
     const ownNick = 'SLA_' + crypto.randomBytes(3).toString('hex');
     const otherNick = 'OTHER_' + crypto.randomBytes(3).toString('hex');
+    const ownImei = 'sla-imei-' + crypto.randomBytes(3).toString('hex');
+    const otherImei = 'other-imei-' + crypto.randomBytes(3).toString('hex');
     const ownPort = 'sla_port_' + crypto.randomBytes(3).toString('hex');
     const otherPort = 'sla_other_' + crypto.randomBytes(3).toString('hex');
     db.prepare(`INSERT INTO traffic_hourly
@@ -62,20 +64,23 @@ describe('GET /api/client/sla_report', () => {
       (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
       VALUES ('S1', ?, ?, 'Moldcell', 'another-client', '2026-08-15 10:00', 1, 0)`)
       .run(otherPort, otherNick);
-    const ping = db.prepare('INSERT INTO modem_ping (server, nick, ok, ts) VALUES (?, ?, ?, ?)');
-    ping.run('S1', ownNick, 1, '2026-08-15T10:05:00.000Z');
-    ping.run('S1', ownNick, 0, '2026-08-15T10:15:00.000Z');
-    ping.run('S1', otherNick, 1, '2026-08-15T10:05:00.000Z');
+    const meta = db.prepare('INSERT INTO modem_meta (server_name, imei, nick, operator) VALUES (?, ?, ?, ?)');
+    meta.run('S1', ownImei, ownNick, 'Orange MD');
+    meta.run('S1', otherImei, otherNick, 'Moldcell');
+    const uptime = db.prepare('INSERT INTO client_uptime_daily (key, date, client_name, online, total) VALUES (?, ?, ?, ?, ?)');
+    uptime.run('S1_' + ownImei, '2026-08-15', clientPortName, 1, 2);
+    uptime.run('S1_' + otherImei, '2026-08-15', 'another-client', 1, 1);
     try {
       const res = await request(app).get('/api/client/sla_report?month=2026-08').set('X-Auth-Token', clientToken);
       expect(res.status).toBe(200);
-      expect(res.body.summary).toMatchObject({ modems: 1, pings: 2, ok_pings: 1, failed_pings: 1, uptime_pct: 50 });
+      expect(res.body.summary).toMatchObject({ modems: 1, checks: 2, online_checks: 1, failed_checks: 1, uptime_pct: 50 });
       expect(res.body.modems).toHaveLength(1);
       expect(res.body.modems[0].nick).toBe(ownNick);
       expect(res.body.modems.some(m => m.nick === otherNick)).toBe(false);
     } finally {
       db.prepare('DELETE FROM traffic_hourly WHERE port_id IN (?, ?)').run(ownPort, otherPort);
-      db.prepare('DELETE FROM modem_ping WHERE nick IN (?, ?)').run(ownNick, otherNick);
+      db.prepare('DELETE FROM client_uptime_daily WHERE key IN (?, ?)').run('S1_' + ownImei, 'S1_' + otherImei);
+      db.prepare('DELETE FROM modem_meta WHERE imei IN (?, ?)').run(ownImei, otherImei);
     }
   });
 
@@ -86,36 +91,39 @@ describe('GET /api/client/sla_report', () => {
 
   it('day param scopes the report to one day; days[] covers the month', async () => {
     const nick = 'SLAD_' + crypto.randomBytes(3).toString('hex');
+    const imei = 'slad-imei-' + crypto.randomBytes(3).toString('hex');
     const port = 'slad_port_' + crypto.randomBytes(3).toString('hex');
     const assign = db.prepare(`INSERT INTO traffic_hourly
       (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
       VALUES ('S1', ?, ?, 'Orange MD', ?, ?, 1, 0)`);
     assign.run(port, nick, clientPortName, '2026-08-15 10:00');
     assign.run(port, nick, clientPortName, '2026-08-16 10:00');
-    const ping = db.prepare('INSERT INTO modem_ping (server, nick, ok, ts) VALUES (?, ?, ?, ?)');
-    ping.run('S1', nick, 1, '2026-08-15T10:05:00.000Z');
-    ping.run('S1', nick, 0, '2026-08-15T10:15:00.000Z');
-    ping.run('S1', nick, 1, '2026-08-16T10:05:00.000Z');
+    db.prepare('INSERT INTO modem_meta (server_name, imei, nick, operator) VALUES (?, ?, ?, ?)')
+      .run('S1', imei, nick, 'Orange MD');
+    const uptime = db.prepare('INSERT INTO client_uptime_daily (key, date, client_name, online, total) VALUES (?, ?, ?, ?, ?)');
+    uptime.run('S1_' + imei, '2026-08-15', clientPortName, 1, 2);
+    uptime.run('S1_' + imei, '2026-08-16', clientPortName, 1, 1);
     try {
       const dayRes = await request(app).get('/api/client/sla_report?month=2026-08&day=2026-08-15').set('X-Auth-Token', clientToken);
       expect(dayRes.status).toBe(200);
       expect(dayRes.body.period).toEqual({ month: '2026-08', day: '2026-08-15' });
-      expect(dayRes.body.summary).toMatchObject({ pings: 2, ok_pings: 1, uptime_pct: 50 });
+      expect(dayRes.body.summary).toMatchObject({ checks: 2, online_checks: 1, uptime_pct: 50 });
       expect(Array.isArray(dayRes.body.days)).toBe(true);
       const d15 = dayRes.body.days.find(x => x.day === '2026-08-15');
       const d16 = dayRes.body.days.find(x => x.day === '2026-08-16');
-      expect(d15).toMatchObject({ pings: 2, ok_pings: 1 });
-      expect(d16).toMatchObject({ pings: 1, ok_pings: 1, uptime_pct: 100 });
+      expect(d15).toMatchObject({ checks: 2, online_checks: 1 });
+      expect(d16).toMatchObject({ checks: 1, online_checks: 1, uptime_pct: 100 });
 
       const monthRes = await request(app).get('/api/client/sla_report?month=2026-08').set('X-Auth-Token', clientToken);
       expect(monthRes.body.period.day).toBeNull();
-      expect(monthRes.body.summary.pings).toBe(3);
+      expect(monthRes.body.summary.checks).toBe(3);
 
       expect((await request(app).get('/api/client/sla_report?month=2026-08&day=2026-09-01').set('X-Auth-Token', clientToken)).status).toBe(400);
       expect((await request(app).get('/api/client/sla_report?month=2026-08&day=2026-08-32').set('X-Auth-Token', clientToken)).status).toBe(400);
     } finally {
       db.prepare('DELETE FROM traffic_hourly WHERE port_id = ?').run(port);
-      db.prepare('DELETE FROM modem_ping WHERE nick = ?').run(nick);
+      db.prepare('DELETE FROM client_uptime_daily WHERE key = ?').run('S1_' + imei);
+      db.prepare('DELETE FROM modem_meta WHERE imei = ?').run(imei);
     }
   });
 });

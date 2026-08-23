@@ -623,47 +623,78 @@ function opPkgLoadForecasts(){
     });
   }).catch(function(){});
 }
+function _opPkgMeta(operator){
+  var key=String(operator||'').toLowerCase();
+  return (window._operatorsList||[]).find(function(o){return String(o.operator||o.operator_normalized||'').toLowerCase()===key;})||{};
+}
+function _opPkgCurrency(p,operator){
+  if(p&&['RUB','MDL','RON'].indexOf(String(p.currency||'').toUpperCase())>=0)return String(p.currency).toUpperCase();
+  var c=_opPkgMeta(operator).country;
+  return c==='MD'?'MDL':c==='RO'?'RON':'RUB';
+}
+function _opPkgCollectRow(r){
+  var type=r.querySelector('.opp-type').value;
+  return {operator:r.querySelector('.opp-op').value.trim(),type:type,
+    volume_gb:type==='unlimited'?0:(parseFloat(r.querySelector('.opp-vol').value)||0),
+    max_sims:type==='per_sim'?1:(parseInt(r.querySelector('.opp-max').value,10)||0),
+    price:parseFloat(r.querySelector('.opp-price').value)||0,
+    currency:r.querySelector('.opp-cur').value,
+    hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
+    pace_pct:type==='unlimited'?0:(parseFloat(r.querySelector('.opp-pace').value)||0)};
+}
+function opPkgRecalcRow(row){
+  if(!row)return;
+  var p=_opPkgCollectRow(row),meta=_opPkgMeta(p.operator),sim=Number(meta.modem_count)||0;
+  var bundles=sim===0?0:(p.max_sims>0?Math.ceil(sim/p.max_sims):null);
+  var total=bundles==null?null:Math.round(bundles*p.price*100)/100;
+  var capacity=p.type==='unlimited'?null:(bundles==null?null:Math.round(bundles*p.volume_gb*10)/10);
+  var set=function(sel,value){var el=row.querySelector(sel);if(el)el.textContent=value;};
+  set('.opp-sim-count',sim+' SIM');
+  set('.opp-bundle-count',bundles==null?'—':bundles+' '+(bundles===1?'бандл':'бандла'));
+  set('.opp-total',total==null?'заполните лимит':total.toLocaleString('ru-RU')+' '+p.currency+'/мес');
+  set('.opp-capacity',p.type==='unlimited'?'безлимит':capacity==null?'объём не рассчитан':capacity.toLocaleString('ru-RU')+' ГБ всего');
+  var missing=[];if(!(p.price>0))missing.push('цена');if(p.type!=='per_sim'&&!(p.max_sims>0))missing.push('SIM в бандле');if(p.type!=='unlimited'&&!(p.volume_gb>0))missing.push('объём');
+  var note=row.querySelector('.opp-missing');
+  if(note){note.textContent=missing.length?'Нужно заполнить: '+missing.join(', '):'Расчёт заполнен';note.classList.toggle('is-ok',!missing.length);}
+  var forecast=row.querySelector('.opp-forecast');
+  if(forecast)forecast.textContent=_opPkgForecastText(p.operator,p.type);
+}
 function opPkgTypeChanged(row){
   if(!row)return;
-  var type=row.querySelector('.opp-type').value;
-  var unlimited=type==='unlimited';
-  var volume=row.querySelector('.opp-vol');
-  var pace=row.querySelector('.opp-pace');
-  volume.disabled=unlimited;
-  pace.disabled=unlimited;
-  volume.placeholder=unlimited?'∞':'0';
-  if(unlimited){volume.value='';pace.value='0';}
-  var forecast=row.querySelector('.opp-forecast');
-  if(forecast)forecast.textContent=_opPkgForecastText(row.querySelector('.opp-op').value,type);
+  var type=row.querySelector('.opp-type').value,unlimited=type==='unlimited',perSim=type==='per_sim';
+  var volume=row.querySelector('.opp-vol'),pace=row.querySelector('.opp-pace'),max=row.querySelector('.opp-max');
+  volume.disabled=unlimited;pace.disabled=unlimited;volume.placeholder=unlimited?'∞':'ГБ';
+  max.disabled=perSim;if(perSim)max.value='1';
+  opPkgRecalcRow(row);
 }
 function opPkgRender(s){
   var box=document.getElementById('opPkgRows');if(!box)return;
-  var pkgs=_opPkgParse(s);
-  var grid='minmax(190px,1.5fr) 125px 120px 115px 105px 130px 30px';
-  var h='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;padding:0 2px 5px;min-width:850px">';
-  h+='<div>Оператор</div><div>Схема</div><div>Объём, ГБ</div><div>Порог часа</div><div>Темп, %/сут</div><div>Прогноз</div><div></div></div>';
+  var pkgs=_opPkgParse(s),h='';
   pkgs.forEach(function(p,i){
-    var type=p.type==='shared'||p.type==='unlimited'?p.type:'per_sim',unlimited=type==='unlimited',vol=Number(p.volume_gb)||0;
-    h+='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;margin-bottom:6px;min-width:850px" class="op-pkg-row">'
-      +'<select class="input opp-op" style="font-size:12px">'+_opPkgOptions(p.operator||'')+'</select>'
-      +'<select class="input opp-type" data-on-change="opPkgTypeChanged(this.closest(\'.op-pkg-row\'))" style="font-size:12px"><option value="per_sim"'+(type==='per_sim'?' selected':'')+'>на SIM</option><option value="shared"'+(type==='shared'?' selected':'')+'>бандл</option><option value="unlimited"'+(type==='unlimited'?' selected':'')+'>безлимит</option></select>'
-      +'<input class="input opp-vol" type="number" min="0" value="'+(unlimited?'':vol)+'" placeholder="'+(unlimited?'∞':'0')+'" '+(unlimited?'disabled ':'')+'title="Для «на SIM» — лимит одной SIM; для «бандл» — общий объём" style="font-size:12px">'
-      +'<input class="input opp-hour" type="number" min="0" value="'+(p.hourly_gb||'')+'" placeholder="авто" style="font-size:12px">'
-      +'<input class="input opp-pace" type="number" min="0" max="100" value="'+(unlimited?0:(p.pace_pct||0))+'" '+(unlimited?'disabled ':'')+'style="font-size:12px">'
-      +'<span class="opp-forecast" style="align-self:center;font-size:11px;color:var(--text-2);white-space:nowrap" title="При текущем среднем расходе за месяц">'+esc(_opPkgForecastText(p.operator,type))+'</span>'
-      +'<button class="btn btn-sm" style="padding:2px 7px;color:var(--danger)" data-on-click="opPkgDelRow(this)">×</button></div>';
+    var type=p.type==='shared'||p.type==='unlimited'?p.type:'per_sim',unlimited=type==='unlimited',perSim=type==='per_sim';
+    var meta=_opPkgMeta(p.operator),sim=Number(meta.modem_count)||0,cur=_opPkgCurrency(p,p.operator),max=perSim?1:(Number(p.max_sims)||0);
+    h+='<article class="op-pkg-row">'
+      +'<div class="opp-head"><div class="opp-title"><select class="input opp-op" data-on-change="opPkgRecalcRow(this.closest(\'.op-pkg-row\'))">'+_opPkgOptions(p.operator||'')+'</select><span class="opp-live"><i></i><span class="opp-sim-count">'+sim+' SIM</span> из базы</span></div>'
+      +'<div class="opp-head-actions"><select class="input opp-type" data-on-change="opPkgTypeChanged(this.closest(\'.op-pkg-row\'))"><option value="per_sim"'+(perSim?' selected':'')+'>На SIM</option><option value="shared"'+(type==='shared'?' selected':'')+'>Бандл</option><option value="unlimited"'+(unlimited?' selected':'')+'>Безлимит</option></select><button class="opp-remove" data-on-click="opPkgDelRow(this)" title="Удалить пакет">×</button></div></div>'
+      +'<div class="opp-fields">'
+      +'<label><span>Цена бандла в месяц</span><div class="opp-input-pair"><input class="input opp-price" type="number" min="0" step="0.01" value="'+(p.price||'')+'" placeholder="0" data-on-input="opPkgRecalcRow(this.closest(\'.op-pkg-row\'))"><select class="input opp-cur" data-on-change="opPkgRecalcRow(this.closest(\'.op-pkg-row\'))"><option value="RUB"'+(cur==='RUB'?' selected':'')+'>RUB</option><option value="MDL"'+(cur==='MDL'?' selected':'')+'>MDL</option><option value="RON"'+(cur==='RON'?' selected':'')+'>RON</option></select></div></label>'
+      +'<label><span>Трафик на бандл</span><div class="opp-input-unit"><input class="input opp-vol" type="number" min="0" value="'+(unlimited?'':(Number(p.volume_gb)||''))+'" placeholder="'+(unlimited?'∞':'ГБ')+'" '+(unlimited?'disabled ':'')+'data-on-input="opPkgRecalcRow(this.closest(\'.op-pkg-row\'))"><b>ГБ</b></div></label>'
+      +'<label><span>Максимум SIM в бандле</span><div class="opp-input-unit"><input class="input opp-max" type="number" min="1" step="1" value="'+(max||'')+'" placeholder="шт" '+(perSim?'disabled ':'')+'data-on-input="opPkgRecalcRow(this.closest(\'.op-pkg-row\'))"><b>SIM</b></div></label>'
+      +'</div>'
+      +'<div class="opp-calc"><div><span>Подключено</span><b class="opp-sim-count">'+sim+' SIM</b></div><em>→</em><div><span>К оплате бандлов</span><b class="opp-bundle-count">—</b></div><em>→</em><div class="is-total"><span>Оплата оператору</span><b class="opp-total">—</b><small class="opp-capacity"></small></div></div>'
+      +'<div class="opp-foot"><span class="opp-missing"></span><span>Прогноз: <b class="opp-forecast">'+esc(_opPkgForecastText(p.operator,type))+'</b></span></div>'
+      +'<details class="opp-advanced"><summary>Пороги алертов</summary><div><label>Аномалия за час, ГБ <input class="input opp-hour" type="number" min="0" value="'+(p.hourly_gb||'')+'" placeholder="авто"></label><label>Темп пакета, %/сут <input class="input opp-pace" type="number" min="0" max="100" value="'+(unlimited?0:(p.pace_pct||0))+'" '+(unlimited?'disabled ':'')+'placeholder="0"></label></div></details>'
+      +'</article>';
   });
-  box.innerHTML='<div style="overflow-x:auto">'+h+(pkgs.length?'':'<div style="font-size:11px;color:var(--text-3);padding:10px 2px">Пакеты не заданы — добавьте оператора</div>')+'</div>';
+  box.innerHTML='<div class="op-pkg-list">'+h+(pkgs.length?'':'<div class="opp-empty">Пакеты не заданы — добавьте оператора</div>')+'</div>';
+  box.querySelectorAll('.op-pkg-row').forEach(function(row){opPkgTypeChanged(row);});
 }
 function opPkgAddRow(){
   var box=document.getElementById('opPkgRows');if(!box)return;
   var cur=[];box.querySelectorAll('.op-pkg-row').forEach(function(r){
-    cur.push({operator:r.querySelector('.opp-op').value.trim(),type:r.querySelector('.opp-type').value,
-      volume_gb:parseFloat(r.querySelector('.opp-vol').value)||0,
-      hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
-      pace_pct:parseFloat(r.querySelector('.opp-pace').value)||0});
+    cur.push(_opPkgCollectRow(r));
   });
-  cur.push({operator:'',type:'per_sim',volume_gb:0,hourly_gb:0,pace_pct:0});
+  cur.push({operator:'',type:'per_sim',volume_gb:0,max_sims:1,price:0,currency:'RUB',hourly_gb:0,pace_pct:0});
   opPkgRender({operator_packages:JSON.stringify(cur)});
 }
 function opPkgDelRow(btn){
@@ -672,21 +703,19 @@ function opPkgDelRow(btn){
 function opPkgSave(){
   var rows=[];var bad=false;
   document.querySelectorAll('#opPkgRows .op-pkg-row').forEach(function(r){
-    var op=r.querySelector('.opp-op').value.trim();
+    var p=_opPkgCollectRow(r),op=p.operator;
     if(!op){bad=true;return;}
-    rows.push({operator:op,type:r.querySelector('.opp-type').value,
-      volume_gb:parseFloat(r.querySelector('.opp-vol').value)||0,
-      hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
-      pace_pct:parseFloat(r.querySelector('.opp-pace').value)||0});
+    rows.push(p);
   });
   var st=document.getElementById('opPkgStatus');
   if(bad){st.textContent='Заполните имя оператора в каждой строке';st.style.color='var(--danger)';return;}
+  var seen={};for(var i=0;i<rows.length;i++){var key=rows[i].operator.toLowerCase();if(seen[key]){st.textContent='Оператор «'+rows[i].operator+'» добавлен дважды';st.style.color='var(--danger)';return;}seen[key]=true;}
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
   api(API+'/api/admin/settings',{method:'PUT',json:{
     operator_packages:JSON.stringify(rows),
     volume_enabled:!!document.getElementById('volumeEnabledInput').checked
   }}).then(function(d){
-    if(d.ok){st.innerHTML='Сохранено '+icon('check',12)+' — применяется со следующего часового прогона';st.style.color='var(--success)';opPkgLoadForecasts();}
+    if(d.ok){var incomplete=rows.filter(function(p){return !(p.price>0)||(p.type!=='per_sim'&&!(p.max_sims>0))||(p.type!=='unlimited'&&!(p.volume_gb>0));}).length;st.innerHTML='Сохранено '+icon('check',12)+(incomplete?' · нужно дополнить пакетов: '+incomplete:' · оплата пересчитана автоматически');st.style.color=incomplete?'var(--warning)':'var(--success)';if(currentData)currentData.settings=d.settings||currentData.settings;opPkgLoadForecasts();}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)';}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)';});
 }

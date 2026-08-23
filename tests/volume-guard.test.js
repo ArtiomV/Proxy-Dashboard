@@ -65,6 +65,31 @@ describe('volume-guard', () => {
     expect(unlimited.days_left).toBeUndefined();
   });
 
+  it('shared forecast scales capacity by the number of required bundles', () => {
+    for (let d = 1; d <= 10; d++) {
+      const day = String(d).padStart(2, '0');
+      addRow('S1', 'M_1', 'Moldcell', '2026-08-' + day + ' 01:00', 3 * 1e9);
+      addRow('S1', 'M_2', 'Moldcell', '2026-08-' + day + ' 02:00', 3 * 1e9);
+      addRow('S1', 'M_3', 'Moldcell', '2026-08-' + day + ' 03:00', 3 * 1e9);
+    }
+    const forecasts = vgMod.buildForecasts(db, [
+      { operator: 'Moldcell', type: 'shared', volume_gb: 100, max_sims: 2 },
+    ], new Date('2026-08-10T12:00:00.000Z'));
+    expect(forecasts[0]).toMatchObject({
+      scope: 'package', modems: 3, max_sims: 2, bundle_count: 2,
+      package_gb: 200, used_gb: 90,
+    });
+  });
+
+  it('shared package with no active SIM is not marked as exhausted', () => {
+    const forecasts = vgMod.buildForecasts(db, [
+      { operator: 'Moldcell', type: 'shared', volume_gb: 100, max_sims: 10 },
+    ], new Date('2026-08-10T12:00:00.000Z'));
+    expect(forecasts[0]).toMatchObject({
+      status: 'no_usage', modems: 0, bundle_count: 0, package_gb: 0, days_left: null,
+    });
+  });
+
   it('модем за час выше порога per_sim → volume_modem_hourly с % пакета', () => {
     addRow('S1', 'MD_01', 'Orange MD', '2026-08-23 05:00', 25 * 1e9);   // 25 ГБ > 20 ГБ
     const job = mk();

@@ -23,6 +23,7 @@ const { tochkaRequest } = require('../tochka/api');
 const { isModemOwned } = require('../modems/ownership');
 const { sha256hex } = require('../utils/secrets');
 const sla = require('../sla');
+const uptimePeriod = require('../uptime-period');
 
 module.exports = function createClientPortalRouter(deps) {
   const {
@@ -211,45 +212,64 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         clientImeis.add(imei);
       }
 
-      // Аптайм из modem_ping (минутные пинги ProxySmart) — та же методология,
-      // что у клиентского SLA-отчёта, поэтому цифры в ЛК и на вкладке «SLA»
-      // больше не расходятся. IMEI → (server, nick) через modem_meta.
-      const pingUptimeByImei = {};
-      if (clientImeis.size) {
-        try {
-          const sinceIso = new Date(Date.now() - 30 * 86400000).toISOString();
-          // merged.ports ключи могут нести префикс сервера («S1_86…») — снимаем.
-          const rawByFull = {};
-          for (const full of clientImeis) rawByFull[String(full).replace(/^S\d+_/, '')] = full;
-          const rawList = Object.keys(rawByFull);
-          const marks = rawList.map(() => '?').join(',');
-          for (const r of db.prepare(`
-            SELECT mm.imei, COUNT(p.id) AS pings, SUM(p.ok) AS ok_pings,
-                   MIN(p.ts) AS first_ts
-              FROM modem_meta mm
-              JOIN modem_ping p ON p.server = mm.server_name AND p.nick = mm.nick
-             WHERE mm.imei IN (${marks}) AND p.ts >= ?
-             GROUP BY mm.imei
-          `).all(...rawList, sinceIso)) {
-            pingUptimeByImei[rawByFull[r.imei] || r.imei] = {
-              total_checks: Number(r.pings) || 0,
-              online_checks: Number(r.ok_pings) || 0,
-              first_check: r.first_ts || null,
-              uptime30d: r.pings ? Math.round((r.ok_pings || 0) / r.pings * 1000) / 10 : null,
-            };
-          }
-        } catch (_) { /* modem_ping отсутствует → аптайм просто не отдаём */ }
-      }
+      // Единый аптайм: сумма минутных online/total-проверок за 30 дней.
+      // Клиентские строки атрибутируются владельцу в момент каждого опроса;
+      // для истории до внедрения используется подтверждённая дневная привязка.
+      const periodicUptimeByImei = {};
+      const periodicUptimeSummary = {
+        period_days: 30,
+        checks: 0,
+        online_checks: 0,
+        failed_checks: 0,
+        uptime_pct: null,
+      };
+      try {
+        const bounds = uptimePeriod.rollingBounds(30);
+        const rows = uptimePeriod.clientRows(
+          db, bounds.fromDate, bounds.toDate,
+          clientInfo ? (clientInfo.portName || clientInfo.login) : req.user.portNameFilter,
+          false
+        );
+        const fullByCanonical = {};
+        for (const full of clientImeis) {
+          const value = String(full);
+          const match = /^(S\d+)_(.+)$/.exec(value);
+          fullByCanonical[match ? match[1] + '_' + match[2] : value] = full;
+        }
+        for (const raw of rows) {
+          const row = uptimePeriod.mapRow(raw);
+          periodicUptimeSummary.checks += row.checks;
+          periodicUptimeSummary.online_checks += row.online_checks;
+          const canonical = row.server + '_' + String(row.imei || '').replace(/^S\d+_/, '');
+          const full = fullByCanonical[canonical];
+          if (!full) continue;
+          periodicUptimeByImei[full] = {
+            total_checks: row.checks,
+            online_checks: row.online_checks,
+            first_check: row.observed_from,
+            uptime30d: row.uptime_pct,
+            period_days: bounds.days,
+          };
+        }
+        periodicUptimeSummary.failed_checks = Math.max(
+          0,
+          periodicUptimeSummary.checks - periodicUptimeSummary.online_checks
+        );
+        periodicUptimeSummary.uptime_pct = periodicUptimeSummary.checks
+          ? Math.round(periodicUptimeSummary.online_checks / periodicUptimeSummary.checks * 10000) / 100
+          : null;
+      } catch (_) { /* история аптайма отсутствует → аптайм просто не отдаём */ }
 
       for (const imei of clientImeis) {
         if (ipTracking[imei]) filteredIpTracking[imei] = ipTracking[imei];
-        if (pingUptimeByImei[imei]) filteredUptimeTracking[imei] = pingUptimeByImei[imei];
+        if (periodicUptimeByImei[imei]) filteredUptimeTracking[imei] = periodicUptimeByImei[imei];
         if (speedLatest[imei]) filteredSpeedtest[imei] = speedLatest[imei];
         if (ipHistory[imei]) filteredIpHistory[imei] = ipHistory[imei];
       }
 
       merged.ipTracking = filteredIpTracking;
       merged.uptimeTracking = filteredUptimeTracking;
+      merged.uptimeSummary30d = periodicUptimeSummary;
       merged.speedtestLatest = filteredSpeedtest;
       merged.ipHistory = filteredIpHistory;
     }

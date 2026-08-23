@@ -11,7 +11,7 @@ function runStartup(d) {
     logger, db, fs, path,
     rescheduleSpeedtests, scheduleRepeating,
     aggregateTopHosts, runDomainGuard, balanceReconcile,
-    healthDb, uptimeTracking, getSetting, setSetting,
+    uptimeTracking, getSetting, setSetting,
     alerts, logActivity, fetchAllServersDataCached, appSettings,
     trackModems, _intervals, syncYesterdayTraffic, topHostsCache,
     autoCreateMissingClients,
@@ -46,19 +46,6 @@ function runStartup(d) {
   // WP5: daily balance-vs-ledger reconciliation at 04:00 UTC (after billing
   // settles). Observation only — drift logs critical + TG alert, no auto-fix.
   scheduleRepeating(4, 0, 'BalanceReconcile', () => balanceReconcile.runOnce());
-
-  // Stage 17: nightly modem-health snapshot at 23:55 MSK (20:55 UTC) — captures
-  // the score for the day that's about to end. Also runs a one-shot 30-day
-  // backfill at boot so the «Здоровье» tab has historical data immediately
-  // on first deploy (not only after 30 cron firings).
-  const _healthSnap = require('../jobs/health-snapshot').create({
-    db, logger, healthDb, uptimeTracking, getSetting,
-  });
-  try {
-    const r = _healthSnap.backfillIfEmpty(30);
-    if (r && r.filled) logger.info(`[HealthSnapshot] Backfill done: ${r.filled} rows`);
-  } catch (e) { logger.warn('[HealthSnapshot] Backfill error: ' + e.message); }
-  scheduleRepeating(20, 55, 'HealthSnapshot', () => _healthSnap.runDailySnapshot());
 
   // Stage 18.13: hourly health / capacity check — fires alerts for heap,
   // disk, and stuck cron jobs. Watchdogs живут в src/jobs/watchdogs.js.

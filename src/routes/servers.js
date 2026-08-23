@@ -448,7 +448,9 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
     patch.operator_gb_costs = oc;
   }
   // A4 (23.08): пакеты операторов — JSON-массив [{operator, type, volume_gb,
-  // hourly_gb, pace_pct}]. Количество SIM определяется по модемам в БД.
+  // max_sims, price, currency, hourly_gb, pace_pct}]. Количество SIM берётся
+  // из modem_meta; стоимость = ceil(SIM/max_sims) × price. Для per_sim
+  // max_sims всегда 1.
   // До 20 строк; operator ≤60 символов; type — per_sim/shared/unlimited.
   if (req.body.operator_packages != null) {
     let arr;
@@ -471,9 +473,14 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
       }
       const type = p.type === 'shared' || p.type === 'unlimited' ? p.type : 'per_sim';
       const num = (v, max) => { const n = parseFloat(v); return (Number.isFinite(n) && n >= 0 && n <= max) ? n : 0; };
+      const currency = ['RUB', 'MDL', 'RON'].includes(String(p.currency || '').toUpperCase())
+        ? String(p.currency).toUpperCase() : 'RUB';
       clean.push({
         operator: op, type,
         volume_gb: type === 'unlimited' ? 0 : num(p.volume_gb, 1e6),
+        max_sims: type === 'per_sim' ? 1 : Math.floor(num(p.max_sims, 1e5)),
+        price: num(p.price, 1e9),
+        currency,
         hourly_gb: num(p.hourly_gb, 1e5),
         pace_pct: type === 'unlimited' ? 0 : Math.min(100, num(p.pace_pct, 100)),
       });
@@ -697,6 +704,11 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   }
 
   setSettings(patch);
+  if (Object.prototype.hasOwnProperty.call(patch, 'operator_packages')
+      || Object.prototype.hasOwnProperty.call(patch, 'fx_rate_mdl')
+      || Object.prototype.hasOwnProperty.call(patch, 'fx_rate_ron')) {
+    try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
+  }
   rescheduleSpeedtests();
   res.json({ ok: true, settings: appSettings, cred_checks: credVerdict.checks, cred_warnings: credVerdict.warnings });
 });

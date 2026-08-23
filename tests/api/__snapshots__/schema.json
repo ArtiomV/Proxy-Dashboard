@@ -151,6 +151,12 @@
   },
   {
     "type": "index",
+    "name": "idx_client_uptime_daily_client",
+    "tbl_name": "client_uptime_daily",
+    "sql": "CREATE INDEX idx_client_uptime_daily_client ON client_uptime_daily(client_name, date, key)"
+  },
+  {
+    "type": "index",
     "name": "idx_clients_api_key",
     "tbl_name": "clients",
     "sql": "CREATE INDEX idx_clients_api_key ON clients(api_key)"
@@ -292,18 +298,6 @@
     "name": "idx_failover_ts",
     "tbl_name": "failover_log",
     "sql": "CREATE INDEX idx_failover_ts ON failover_log(ts DESC)"
-  },
-  {
-    "type": "index",
-    "name": "idx_health_daily_date",
-    "tbl_name": "modem_health_daily",
-    "sql": "CREATE INDEX idx_health_daily_date ON modem_health_daily(date DESC)"
-  },
-  {
-    "type": "index",
-    "name": "idx_health_daily_modem",
-    "tbl_name": "modem_health_daily",
-    "sql": "CREATE INDEX idx_health_daily_modem ON modem_health_daily(server_name, imei, date DESC)"
   },
   {
     "type": "index",
@@ -793,6 +787,12 @@
   },
   {
     "type": "table",
+    "name": "client_uptime_daily",
+    "tbl_name": "client_uptime_daily",
+    "sql": "CREATE TABLE client_uptime_daily ( key TEXT NOT NULL, date TEXT NOT NULL, client_name TEXT NOT NULL, online INTEGER NOT NULL DEFAULT 0, total INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (key, date, client_name) )"
+  },
+  {
+    "type": "table",
     "name": "clients",
     "tbl_name": "clients",
     "sql": "CREATE TABLE clients ( id TEXT PRIMARY KEY, login TEXT UNIQUE NOT NULL, password TEXT, password_hash TEXT, port_name TEXT, name TEXT NOT NULL, contact TEXT DEFAULT '', notes TEXT DEFAULT '', billing_type TEXT DEFAULT 'per_gb', price REAL DEFAULT 0, currency TEXT DEFAULT 'RUB', balance REAL DEFAULT 0, api_key TEXT UNIQUE, api_key_prefix TEXT, -- display prefix for masked UI; api_key itself is a SHA-256 hash (migration 043) referral_code TEXT UNIQUE, referred_by TEXT, referral_balance REAL DEFAULT 0, reset_token TEXT, inn TEXT DEFAULT '', kpp TEXT DEFAULT '', legal_name TEXT DEFAULT '', contract_info TEXT DEFAULT '', address TEXT DEFAULT '', auto_acts INTEGER DEFAULT 1, auto_bills INTEGER DEFAULT 1, allow_debt INTEGER DEFAULT 0, max_debt REAL, debt_blocked INTEGER DEFAULT 0, -- B3 (Р13): порт(ы) погашены автоблоком по долгу; сбрасывается при восстановлении после оплаты last_traffic_snapshot TEXT DEFAULT '{}', created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now')) , client_type TEXT DEFAULT 'legal', billing_paused INTEGER DEFAULT 0, contract_date TEXT DEFAULT '', email TEXT, email_verified INTEGER DEFAULT 0, tg_chat_id TEXT, reg_ip TEXT, consent_pd_at TEXT, blocked INTEGER DEFAULT 0, abuse_strikes INTEGER DEFAULT 0, balance_negative_since TEXT, tariff_id INTEGER, price_override REAL, hold_ttl_days INTEGER, test_used INTEGER DEFAULT 0, tg_username TEXT, tg_oidc_sub TEXT, blocked_since TEXT)"
@@ -898,12 +898,6 @@
     "name": "maintenance_windows",
     "tbl_name": "maintenance_windows",
     "sql": "CREATE TABLE maintenance_windows ( id INTEGER PRIMARY KEY AUTOINCREMENT, target_type TEXT NOT NULL CHECK (target_type IN ('server','modem')), target_id TEXT NOT NULL, from_ts INTEGER NOT NULL, to_ts INTEGER NOT NULL, comment TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')) )"
-  },
-  {
-    "type": "table",
-    "name": "modem_health_daily",
-    "tbl_name": "modem_health_daily",
-    "sql": "CREATE TABLE modem_health_daily ( date TEXT NOT NULL, -- YYYY-MM-DD (MSK calendar day) server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT, -- denormalized for cheap display joins score INTEGER, -- 0–100, NULL when no data that day error_pct REAL, -- 0–100 latency_ms INTEGER, -- avg latency from proxy_checks uptime_pct REAL, -- 0–100, from uptime_tracking daily bucket total_checks INTEGER NOT NULL DEFAULT 0, PRIMARY KEY (date, server_name, imei) )"
   },
   {
     "type": "table",

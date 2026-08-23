@@ -38,6 +38,7 @@ var currentSort={key:'modemNick',dir:'asc'};
 var countryNames={'MD':'\ud83c\uddf2\ud83c\udde9 Молдова','RO':'\ud83c\uddf7\ud83c\uddf4 Румыния','??':'\ud83c\udf10 Другое'};
 var countryOrder=['MD','RO','??'];
 var COUNTRIES={}; // populated from server data in loadData
+function clientServerDisplayName(name){var c=COUNTRIES[name]||{};return c.displayName||name;}
 
 // --- Tabs ---
 function switchTab(name,el){
@@ -65,8 +66,8 @@ function _clientSlaDate(ts){
   var d=new Date(ts);if(!isFinite(d.getTime()))return '—';
   return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
 }
-function _clientSlaDayColor(uptimePct,pings){
-  if(!pings||uptimePct==null)return'var(--text-3)';
+function _clientSlaDayColor(uptimePct,checks){
+  if(!checks||uptimePct==null)return'var(--text-3)';
   return uptimePct>=99?'var(--success)':uptimePct>=95?'var(--warning)':'var(--danger)';
 }
 // Чипы дней месяца: клик → отчёт за день; «Месяц» — сводка за весь месяц.
@@ -80,8 +81,8 @@ function _clientSlaRenderDays(month,days){
   for(var i=1;i<=daysInMonth;i++){
     var day=month+'-'+String(i).padStart(2,'0');
     var d=byDay[day];
-    var col=_clientSlaDayColor(d?d.uptime_pct:null,d?d.pings:0);
-    var title=d&&d.pings?day+': '+String(d.uptime_pct).replace('.',',')+'% · '+d.pings+' проверок':day+': нет данных';
+    var col=_clientSlaDayColor(d?d.uptime_pct:null,d?d.checks:0);
+    var title=d&&d.checks?day+': '+String(d.uptime_pct).replace('.',',')+'% · '+d.checks+' проверок':day+': нет данных';
     h+='<span style="'+chipStyle(_clientSlaDay===day,'var(--card-bg)')+'border-left:3px solid '+col+'" title="'+esc(title)+'" data-on-click="selectClientSlaDay(\''+day+'\')">'+i+'</span>';
   }
   box.innerHTML=h;
@@ -109,18 +110,18 @@ function loadClientSla(force){
     var s=d.summary||{},rows=d.modems||[];
     document.getElementById('clientSlaPct').textContent=s.uptime_pct==null?'—':String(s.uptime_pct).replace('.',',')+'%';
     document.getElementById('clientSlaModems').textContent=String(s.modems||0);
-    document.getElementById('clientSlaOk').textContent=Number(s.ok_pings||0).toLocaleString('ru-RU');
-    document.getElementById('clientSlaChecks').textContent=Number(s.pings||0).toLocaleString('ru-RU')+' всего';
-    document.getElementById('clientSlaFailed').textContent=Number(s.failed_pings||0).toLocaleString('ru-RU');
+    document.getElementById('clientSlaOk').textContent=Number(s.online_checks||0).toLocaleString('ru-RU');
+    document.getElementById('clientSlaChecks').textContent=Number(s.checks||0).toLocaleString('ru-RU')+' всего';
+    document.getElementById('clientSlaFailed').textContent=Number(s.failed_checks||0).toLocaleString('ru-RU');
     if(loading)loading.style.display='none';
     if(!rows.length){if(empty){empty.style.display='';empty.textContent=_clientSlaDay?'За выбранный день нет проверок, подтверждённых историей привязки.':'За выбранный месяц пока нет проверок, подтверждённых историей привязки.';}return;}
     document.getElementById('clientSlaRows').innerHTML=rows.map(function(m){
       var pct=m.uptime_pct==null?'—':String(m.uptime_pct).replace('.',',')+'%';
-      var color=_clientSlaDayColor(m.uptime_pct,m.pings);
+      var color=_clientSlaDayColor(m.uptime_pct,m.checks);
       return '<tr><td style="font-family:var(--font-mono);font-weight:600">'+esc(m.nick||'—')+'</td>'
-        +'<td>'+esc(m.server||'—')+'</td><td>'+esc(m.operator||'—')+'</td>'
+        +'<td>'+esc(clientServerDisplayName(m.server)||'—')+'</td><td>'+esc(m.operator||'—')+'</td>'
         +'<td style="font-family:var(--font-mono);font-weight:700;color:'+color+'">'+esc(pct)+'</td>'
-        +'<td>'+Number(m.pings||0).toLocaleString('ru-RU')+'</td><td>'+Number(m.failed_pings||0).toLocaleString('ru-RU')+'</td>'
+        +'<td>'+Number(m.checks||0).toLocaleString('ru-RU')+'</td><td>'+Number(m.failed_checks||0).toLocaleString('ru-RU')+'</td>'
         +'<td style="font-size:11px;color:var(--text-2);white-space:nowrap">'+esc(_clientSlaDate(m.observed_from))+' — '+esc(_clientSlaDate(m.observed_to))+'</td></tr>';
     }).join('');
     if(wrap)wrap.style.display='';
@@ -1387,7 +1388,7 @@ async function loadData(){
     // Populate COUNTRIES from server data
     if(data.servers&&data.servers.length){
       COUNTRIES={};
-      data.servers.forEach(function(s){COUNTRIES[s.name]={serverIp:s.publicIp||'',country:s.country||'',name:s.countryName||s.name}});
+      data.servers.forEach(function(s){COUNTRIES[s.name]={serverIp:s.publicIp||'',country:s.country||'',name:s.countryName||s.name,displayName:s.displayName||s.name}});
     }
     var bwData=data.bandwidth;
     var statusData=data.status;
@@ -1445,7 +1446,7 @@ async function loadData(){
         // IP tracking info
         var ipInfo=ipTracking[imei]||null;
 
-        // Uptime percentage — prefer 30-day window from server, fall back to all-time
+        // Uptime percentage — the same 30-day periodic counters as client SLA.
         var uptimePct=null;
         if(uptimeTracking[imei]){
           var ut=uptimeTracking[imei];
@@ -1832,9 +1833,15 @@ function updateSummary(){
   }
 
   // --- Uptime card ---
+  var uptimeSummary=data.uptimeSummary30d||null;
   var uptimePcts=tableData.filter(function(r){return r.uptimePct!==null}).map(function(r){return parseFloat(r.uptimePct)});
-  if(uptimePcts.length>0){
-    var avgUp=uptimePcts.reduce(function(a,b){return a+b},0)/uptimePcts.length;
+  if((uptimeSummary&&uptimeSummary.checks>0)||uptimePcts.length>0){
+    // Primary path is the weighted online/total ratio returned by the same
+    // canonical reader as the SLA report. The average is only a compatibility
+    // fallback for an older backend during a rolling deployment.
+    var avgUp=uptimeSummary&&uptimeSummary.uptime_pct!=null
+      ?parseFloat(uptimeSummary.uptime_pct)
+      :uptimePcts.reduce(function(a,b){return a+b},0)/uptimePcts.length;
     var upEl=document.getElementById('avgUptime');
     upEl.textContent=avgUp.toFixed(1)+'%';
     upEl.className='card-value '+(avgUp>=99?'uptime-good':avgUp>=95?'uptime-warn':'uptime-bad');
@@ -2050,8 +2057,8 @@ function exportCredentialsCSV(){
     if(!row.proxyLogin) return;
     var ci=COUNTRIES[row.serverName]||{};
     var serverIp=ci.serverIp||'';
-    lines.push([row.modemNick,row.serverName,'HTTP',serverIp,row.httpPort,row.proxyLogin,row.proxyPassword,row.httpCreds||''].join(','));
-    lines.push([row.modemNick,row.serverName,'SOCKS5',serverIp,row.socksPort,row.proxyLogin,row.proxyPassword,row.socks5Creds||''].join(','));
+    lines.push([row.modemNick,clientServerDisplayName(row.serverName),'HTTP',serverIp,row.httpPort,row.proxyLogin,row.proxyPassword,row.httpCreds||''].join(','));
+    lines.push([row.modemNick,clientServerDisplayName(row.serverName),'SOCKS5',serverIp,row.socksPort,row.proxyLogin,row.proxyPassword,row.socks5Creds||''].join(','));
   });
   if(lines.length<=1){showToast('Нет данных для экспорта','error');return}
   downloadFile(lines.join('\n'),'proxies_rent_credentials.csv','text/csv');
@@ -2386,7 +2393,7 @@ function renderShop(tariffs){
     h+='<div class="shop-card">'+
       (isTest?'<span class="shop-card-badge">Тест-день</span>':'')+
       '<div class="shop-card-name">'+escapeHtml(t.name)+'</div>'+
-      '<div class="shop-card-geo">'+escapeHtml(t.geo||'')+(t.server?' · '+escapeHtml(t.server):'')+'</div>'+
+      '<div class="shop-card-geo">'+escapeHtml(t.geo||'')+(t.server?' · '+escapeHtml(clientServerDisplayName(t.server)):'')+'</div>'+
       '<div class="shop-card-price">'+Math.round(t.price).toLocaleString('ru-RU')+' ₽<small>/мес</small></div>'+
       (t.price_day?'<div class="shop-card-day">≈ '+t.price_day.toLocaleString('ru-RU')+' ₽/день</div>':'')+
       '<button class="btn btn-accent shop-card-buy" data-on-click="buyProxy('+t.id+',this)">Купить</button>'+

@@ -2,7 +2,7 @@
 //   - serverUptime: эпизоды server_downtime, пересекающие месяц, клиппятся
 //     на его границы; maintenance=1 исключён из простоя и числа эпизодов,
 //     но виден отдельными колонками;
-//   - modemUptime: доля ok=1 в modem_ping, оператор из modem_meta;
+//   - modemUptime: доля online/total в минутных uptime_daily;
 //   - operatorUptime: средний uptime модемов оператора (без оператора — мимо);
 //   - toCsv: BOM + разделитель ';' (Excel RU);
 //   - GET /api/admin/sla_report: валидация month, JSON и CSV.
@@ -27,13 +27,21 @@ function freshDb() {
       server_name TEXT NOT NULL, down_from TEXT NOT NULL, down_to TEXT NOT NULL,
       maintenance INTEGER NOT NULL DEFAULT 0
     );
-    CREATE TABLE modem_ping (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      server TEXT, nick TEXT, ok INTEGER, ts TEXT
+    CREATE TABLE uptime_daily (
+      key TEXT, date TEXT, online INTEGER, total INTEGER,
+      PRIMARY KEY (key, date)
+    );
+    CREATE TABLE client_uptime_daily (
+      key TEXT, date TEXT, client_name TEXT, online INTEGER, total INTEGER,
+      PRIMARY KEY (key, date, client_name)
     );
     CREATE TABLE modem_meta (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
-      server_name TEXT, nick TEXT, operator TEXT
+      server_name TEXT, imei TEXT, nick TEXT, operator TEXT,
+      updated_at TEXT DEFAULT CURRENT_TIMESTAMP
+    );
+    CREATE TABLE traffic_hourly (
+      server_name TEXT, nick TEXT, client_name TEXT, hour_start TEXT
     );
   `);
   return db;
@@ -48,17 +56,19 @@ function seed(db) {
   ep.run('S1', '2026-06-01T00:00:00.000Z', '2026-06-02T00:00:00.000Z', 0);   // вне месяца — не попадает
   ep.run('S2', '2026-08-05T00:00:00.000Z', '2026-08-05T00:30:00.000Z', 0);   // другой сервер, 30 мин
 
-  const ping = db.prepare('INSERT INTO modem_ping (server, nick, ok, ts) VALUES (?, ?, ?, ?)');
-  const aug = h => `2026-08-15T${String(h).padStart(2, '0')}:00:00.000Z`;
-  for (let i = 0; i < 10; i++) ping.run('S1', 'M1', i < 8 ? 1 : 0, aug(i));        // M1: 8/10
-  for (let i = 0; i < 4; i++) ping.run('S1', 'M2', i < 2 ? 1 : 0, aug(i));         // M2: 2/4
-  for (let i = 0; i < 3; i++) ping.run('S2', 'M3', 1, aug(i));                     // M3: 3/3, без meta
-  ping.run('S1', 'M1', 0, '2026-07-20T00:00:00.000Z');                             // вне месяца — не считается
+  const meta = db.prepare('INSERT INTO modem_meta (server_name, imei, nick, operator) VALUES (?, ?, ?, ?)');
+  meta.run('S1', 'I1', 'M1', 'Moldtelecom');
+  meta.run('S1', 'I2', 'M2', 'Orange MD');
+  meta.run('S2', 'I3', 'M3', '');
 
-  const meta = db.prepare('INSERT INTO modem_meta (server_name, nick, operator) VALUES (?, ?, ?)');
-  meta.run('S1', 'M1', 'Moldtelecom');
-  meta.run('S1', 'M2', 'Orange MD');
-  meta.run('S1', 'M2', '   ');   // пустой оператор не должен перебивать непустого (MAX по NULLIF)
+  const uptime = db.prepare('INSERT INTO uptime_daily (key, date, online, total) VALUES (?, ?, ?, ?)');
+  uptime.run('S1_I1', '2026-08-15', 8, 10);       // M1: 80%
+  uptime.run('S1_I2', '2026-08-15', 2, 4);        // M2: 50%
+  uptime.run('S2_I3', '2026-08-15', 3, 3);        // M3: 100%
+  uptime.run('S1_I1', '2026-07-20', 0, 1);        // вне месяца
+
+  db.prepare('INSERT INTO client_uptime_daily (key, date, client_name, online, total) VALUES (?, ?, ?, ?, ?)')
+    .run('S1_I1', '2026-08-15', 'client-a', 8, 10);
 }
 
 describe('C1: sla.js — расчёт', () => {
@@ -87,11 +97,11 @@ describe('C1: sla.js — расчёт', () => {
     expect(s2.downtime_min).toBe(30);
   });
 
-  it('modemUptime: доля ok-пингов + оператор из modem_meta', () => {
+  it('modemUptime: единые периодические проверки + оператор из modem_meta', () => {
     const rows = sla.modemUptime(db, MONTH);
     const m1 = rows.find(r => r.nick === 'M1');
-    expect(m1.pings).toBe(10);
-    expect(m1.ok_pings).toBe(8);
+    expect(m1.checks).toBe(10);
+    expect(m1.online_checks).toBe(8);
     expect(m1.uptime_pct).toBe(80);
     expect(m1.operator).toBe('Moldtelecom');
     const m2 = rows.find(r => r.nick === 'M2');
@@ -100,6 +110,27 @@ describe('C1: sla.js — расчёт', () => {
     const m3 = rows.find(r => r.nick === 'M3');
     expect(m3.uptime_pct).toBe(100);
     expect(m3.operator).toBe('');
+  });
+
+  it('client report считает офлайн-проверки, а не только сохранённые пинги', () => {
+    const report = sla.buildClientReport(db, MONTH, 'client-a');
+    expect(report.summary).toMatchObject({ checks: 10, online_checks: 8, failed_checks: 2, uptime_pct: 80 });
+    expect(report.modems[0]).toMatchObject({ nick: 'M1', checks: 10, failed_checks: 2, uptime_pct: 80 });
+  });
+
+  it('legacy-привязка не дублирует день после появления прямых клиентских тиков', () => {
+    db.prepare('INSERT INTO uptime_daily (key, date, online, total) VALUES (?, ?, ?, ?)')
+      .run('S1_I2', '2026-08-16', 1, 2);
+    db.prepare('INSERT INTO traffic_hourly (server_name, nick, client_name, hour_start) VALUES (?, ?, ?, ?)')
+      .run('S1', 'M2', 'client-b', '2026-08-15T22:00:00.000Z'); // 16.08 MSK
+
+    expect(sla.buildClientReport(db, MONTH, 'client-b').summary)
+      .toMatchObject({ checks: 2, online_checks: 1, uptime_pct: 50 });
+
+    db.prepare('INSERT INTO client_uptime_daily (key, date, client_name, online, total) VALUES (?, ?, ?, ?, ?)')
+      .run('S1_I2', '2026-08-16', 'client-a', 1, 2);
+    expect(sla.buildClientReport(db, MONTH, 'client-b').summary)
+      .toMatchObject({ checks: 0, online_checks: 0, uptime_pct: null });
   });
 
   it('operatorUptime: средний uptime модемов, модемы без оператора мимо', () => {
@@ -118,7 +149,7 @@ describe('C1: sla.js — расчёт', () => {
     expect(rep.operators.length).toBe(2);
     const csv = sla.toCsv(rep);
     expect(csv.charCodeAt(0)).toBe(0xFEFF);
-    expect(csv).toContain('type;target;operator;uptime_pct;episodes;downtime_min;pings');
+    expect(csv).toContain('type;target;operator;uptime_pct;episodes;downtime_min;checks');
     expect(csv).toContain('server;S1;;99.6;3;180;');
     expect(csv).toContain('modem;S1/M1;Moldtelecom;80;;;10');
     expect(csv).toContain('operator;Moldtelecom;;80;;;1');

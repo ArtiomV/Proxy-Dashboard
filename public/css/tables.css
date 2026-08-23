@@ -128,7 +128,6 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .mt-op{font-size:10.5px;color:var(--text-2);margin-top:3px;display:flex;align-items:center;gap:5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .mt-op i{width:5px;height:5px;border-radius:50%;background:var(--accent);opacity:.65;flex-shrink:0}
 .mt-sub{font-size:11px;color:var(--text-3);margin-top:3px;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;word-break:break-word}
-.mt-health{font-size:11px;margin-top:2px;line-height:1.2}
 .mt-conns{display:flex;align-items:center;gap:6px;margin-top:6px;padding-top:6px;border-top:1px solid var(--border)}
 .mt-conns-spark{display:inline-flex;align-items:center;min-height:15px}
 .mt-conns-n{font-family:var(--font-mono);font-size:12px;font-weight:600;line-height:1}

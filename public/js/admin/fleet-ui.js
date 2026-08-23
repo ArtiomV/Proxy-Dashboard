@@ -54,7 +54,7 @@ function renderModemsTopBar(){
   // Сервер (сгруппирован по стране) + Клиент — инлайн-селекты
   var sv=(currentData&&currentData.servers)||[];var seen={};sv.forEach(function(s){var c=COUNTRIES[s.name]||{};var cc=c.country||s.name;if(!seen[cc])seen[cc]={flag:c.flag||'',name:c.name||cc,servers:[]};seen[cc].servers.push(s.name);});
   var srvSel='<select class="flt-select" data-on-change="setServerFilter(this.value)"><option value="all"'+(activeServerFilter==='all'?' selected':'')+'>Все серверы</option>';
-  Object.keys(seen).forEach(function(cc){var g=seen[cc];srvSel+='<optgroup label="'+esc(g.name)+'"><option value="country:'+cc+'"'+(activeServerFilter==='country:'+cc?' selected':'')+'>'+esc(g.name)+' — все</option>';g.servers.sort().forEach(function(sn){srvSel+='<option value="'+esc(sn)+'"'+(activeServerFilter===sn?' selected':'')+'>'+esc(sn)+'</option>';});srvSel+='</optgroup>';});
+  Object.keys(seen).forEach(function(cc){var g=seen[cc];srvSel+='<optgroup label="'+esc(g.name)+'"><option value="country:'+cc+'"'+(activeServerFilter==='country:'+cc?' selected':'')+'>'+esc(g.name)+' — все</option>';g.servers.sort().forEach(function(sn){srvSel+='<option value="'+esc(sn)+'"'+(activeServerFilter===sn?' selected':'')+'>'+esc(_serverDisplayLabel(sn))+'</option>';});srvSel+='</optgroup>';});
   srvSel+='</select>';
   var cls=(currentData&&currentData.clients)||[];
   var clSel='<select class="flt-select" data-on-change="setClientFilter(this.value)"><option value=""'+(activeClientFilter===''?' selected':'')+'>Все клиенты</option>';
@@ -66,4 +66,3 @@ function renderModemsTopBar(){
   var tb=document.getElementById('modemsTopBar');if(tb)tb.innerHTML=bar;
   var na=document.getElementById('needsAttention');if(na)na.innerHTML='';
 }
-

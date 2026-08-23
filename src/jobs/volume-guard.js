@@ -74,13 +74,28 @@ function buildForecasts(db, pkgs, now = new Date()) {
       out.push({ scope: 'package', operator: pkg.operator, type, status: 'unlimited', modems: new Set(matches.map(r => r.server_name + '/' + r.nick)).size });
       continue;
     }
-    const limitGb = Number(pkg.volume_gb);
-    if (!(limitGb > 0)) {
+    const baseLimitGb = Number(pkg.volume_gb);
+    if (!(baseLimitGb > 0)) {
       out.push({ scope: 'package', operator: pkg.operator, type, status: 'not_configured', modems: matches.length });
       continue;
     }
-    const make = (scope, usedGb, extra) => {
+    const make = (scope, usedGb, extra, limitGb = baseLimitGb) => {
       const dailyGb = usedGb / elapsedDays;
+      // A configured bundle may have no active SIM yet. Its capacity is then
+      // correctly zero, but zero usage must not be reported as "exhausted".
+      if (!(limitGb > 0)) {
+        return {
+          scope, operator: pkg.operator, type,
+          package_gb: 0,
+          used_gb: Math.round(usedGb * 10) / 10,
+          remaining_gb: 0,
+          gb_day: Math.round(dailyGb * 10) / 10,
+          days_left: null,
+          full_date: null,
+          status: 'no_usage',
+          ...extra,
+        };
+      }
       const remainingGb = Math.max(0, limitGb - usedGb);
       const daysLeft = usedGb >= limitGb ? 0 : (dailyGb > 0 ? remainingGb / dailyGb : null);
       return {
@@ -103,9 +118,15 @@ function buildForecasts(db, pkgs, now = new Date()) {
       }
     } else {
       const usedGb = matches.reduce((sum, row) => sum + (Number(row.b) || 0) / GB, 0);
+      const simCount = new Set(matches.map(r => r.server_name + '/' + r.nick)).size;
+      const maxSims = Math.max(0, Math.floor(Number(pkg.max_sims) || 0));
+      // Legacy shared rows had no max_sims and represented one common bundle.
+      const bundleCount = maxSims > 0 ? (simCount > 0 ? Math.ceil(simCount / maxSims) : 0) : 1;
+      const totalLimitGb = baseLimitGb * bundleCount;
       out.push(make('package', usedGb, {
-        modems: new Set(matches.map(r => r.server_name + '/' + r.nick)).size,
-      }));
+        modems: simCount, max_sims: maxSims, bundle_count: bundleCount,
+        volume_gb_per_bundle: baseLimitGb,
+      }, totalLimitGb));
     }
   }
   return out.sort((a, b) => {
@@ -206,14 +227,19 @@ function create(deps) {
       `).get(monthUtc + '-01 00:00', String(pkg.operator).toLowerCase().trim() + '%');
       const usedGb = ((row && row.b) || 0) / GB;
       const dailyGb = usedGb / Math.max(1, dayOfMonth);
-      const limitGb = Number(pkg.volume_gb) * Number(pkg.pace_pct) / 100;
+      const simCount = Number((row && row.modems) || 0);
+      const maxSims = Math.max(0, Math.floor(Number(pkg.max_sims) || 0));
+      const bundleCount = maxSims > 0 ? (simCount > 0 ? Math.ceil(simCount / maxSims) : 0) : 1;
+      const totalPackageGb = Number(pkg.volume_gb) * bundleCount;
+      const limitGb = totalPackageGb * Number(pkg.pace_pct) / 100;
       if (dailyGb <= limitGb) continue;
-      const daysLeft = dailyGb > 0 ? Math.max(0, Math.round((Number(pkg.volume_gb) - usedGb) / dailyGb)) : null;
+      const daysLeft = dailyGb > 0 ? Math.max(0, Math.round((totalPackageGb - usedGb) / dailyGb)) : null;
       if (alerts.trigger('volume_package_pace', {
         scope: 'package', operator: pkg.operator,
-        gb_day: Math.round(dailyGb * 10) / 10, package_gb: Number(pkg.volume_gb),
+        gb_day: Math.round(dailyGb * 10) / 10, package_gb: totalPackageGb,
+        volume_gb_per_bundle: Number(pkg.volume_gb), bundle_count: bundleCount, max_sims: maxSims,
         used_gb: Math.round(usedGb), days_left: daysLeft,
-        modems: (row && row.modems) || 0, pace_pct: Number(pkg.pace_pct),
+        modems: simCount, pace_pct: Number(pkg.pace_pct),
       })) paceAlerts++;
     }
 

@@ -64,13 +64,16 @@ describe('http-check', () => {
     const job = mk();
     await job.runOnce();
     expect(alertsFired.length).toBe(0);          // первый фейл — только стрик
+    expect(job.latest()['S1_MD2_39']).toMatchObject({ fail_streak: 1, failing: false });
     await job.runOnce();
     expect(alertsFired.map(a => a.rule)).toEqual(['modem_http_fail']);
+    expect(job.latest()['S1_MD2_39']).toMatchObject({ fail_streak: 2, failing: true });
     await job.runOnce();
     expect(alertsFired.length).toBe(1);          // не дублируется
     fetchBehavior = async () => ({ status: 200, totalMs: 250, body: 'ok' });
     await job.runOnce();
     expect(alertsFired[1].rule).toBe('modem_http_recovered');
+    expect(job.latest()['S1_MD2_39']).toMatchObject({ fail_streak: 0, failing: false });
   });
 
   it('must_not_contain ловит заглушку оператора', async () => {

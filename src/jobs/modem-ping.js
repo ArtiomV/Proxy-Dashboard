@@ -11,7 +11,7 @@
 //   1. парсит ping_stats → { latency_ms, loss_pct };
 //   2. следит за свежестью: значение не изменилось ping_stale_cycles опросов
 //      подряд → данные протухли, алерты и влияние на аптайм отключаются;
-//   3. пишет строку в modem_ping (история для спарклайнов/SLA);
+//   3. пишет строку в modem_ping (история пинга для интерфейса и алертов);
 //   4. алерты: online (IS_ONLINE=yes), но loss ≥ ping_loss_dead_pct два
 //      опроса подряд → modem_ping_dead; latency > ping_latency_warn_ms или
 //      loss ≥ ping_loss_warn_pct три опроса → modem_ping_slow; выход из

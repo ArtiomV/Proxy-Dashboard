@@ -25,6 +25,7 @@ function mkRotationDb() {
     'CREATE TABLE ip_tracking (key TEXT PRIMARY KEY, ip TEXT, updated_at TEXT)',
     'CREATE TABLE uptime_tracking (key TEXT PRIMARY KEY, total_checks INTEGER, online_checks INTEGER, first_check TEXT, last_check TEXT, last_online_check TEXT, offline_alerted INTEGER)',
     'CREATE TABLE uptime_daily (key TEXT, date TEXT, online INTEGER, total INTEGER, UNIQUE(key, date))',
+    'CREATE TABLE client_uptime_daily (key TEXT, date TEXT, client_name TEXT, online INTEGER, total INTEGER, UNIQUE(key, date, client_name))',
     'CREATE TABLE ip_history (id INTEGER PRIMARY KEY, key TEXT, ip TEXT, started_at TEXT, ended_at TEXT)',
     `CREATE TABLE modem_meta (
       server_name TEXT, imei TEXT, nick TEXT, operator TEXT, model TEXT, phone TEXT,

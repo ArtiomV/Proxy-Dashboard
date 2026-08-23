@@ -241,7 +241,7 @@ code (API):     &lt;path d="M8 8l-4 4 4 4"/&gt;&lt;path d="M16 8l4 4-4 4"/&gt;</
 <tr><td>Счётчик</td><td>16px / 700, tnum</td><td>success при 0, иначе danger/warning</td></tr>
 <tr><td>Интерактив</td><td>4 инфраструктурные плитки при N&gt;0 кликабельны</td><td><code>cursor:pointer</code>, hover <code>filter:brightness(.97)</code> → попап списка модемов <code>showProblemPopup(label,key)</code></td></tr>
 </table></div>
-<p>Четыре плитки в фиксированном порядке: <b>Модем отключен</b> (danger; fleet.disconnectedList, «блипы» &lt;10 мин не считаются), <b>Низкая скорость</b> (warning; флаг lowSpeed), <b>Завис IP</b> (warning; ipStuck), <b>Сбоит прокси</b> (danger; proxyIssues). Бизнес-плиток («Клиентов в долгу», «На паузе») в блоке НЕТ — убраны по решению 02.07.</p>
+<p>Четыре плитки в фиксированном порядке: <b>Модем отключен</b> (danger; fleet.disconnectedList, «блипы» &lt;10 мин не считаются), <b>Низкая скорость</b> (warning; флаг lowSpeed), <b>Завис IP</b> (warning; ipStuck), <b>Сбоит прокси</b> (danger; активный клиентский прокси с устойчивыми потерями/серией ping-провалов, двумя HTTP-провалами, разрывом соединения, проблемой SIM/редиректом либо недоступным WebApp). Категории не дублируются; одиночный плохой замер не считается проблемой.</p>
 
 <h3>4.2 Карточка «Тренд»</h3>
 <ul>
@@ -315,16 +315,9 @@ code (API):     &lt;path d="M8 8l-4 4 4 4"/&gt;&lt;path d="M16 8l4 4-4 4"/&gt;</
 </table></div>
 
 <h2 id="s8"><span class="no">8.</span>Секция «Инфраструктура» — раскрывашки</h2>
-<p>Порядок: <b>Топ проблемных модемов</b> (закрыта) → <b>Ротации · IP · ёмкость</b> (открыта) → <b>Распределение задержек</b> (открыта).</p>
+<p>Порядок: <b>Ротации · IP · ёмкость</b> (открыта) → <b>Распределение задержек</b> (открыта). Отдельного блока «Топ проблемных модемов» нет: его полезные случаи перенесены в «Сбоит прокси».</p>
 
-<h3>8.1 Топ проблемных модемов</h3>
-<ul>
-<li>Таблица 12px <b>с шапкой</b> (Модем · Причина · Действия — th 9.5px UPPERCASE text-3, выравнивание как у колонок). Строка: цветной rail 3×18px + <b>ник</b> + сервер (флаг + «S2 · Румыния», 10px text-3) · причина текстом цвета категории (offline — danger, IP/скорость — warning), всё слева · справа две кнопки-действия.</li>
-<li>Кнопки <code>.row-act</code>: 26×26, радиус 7, бордер-волосок, bg-1, hover bg-2 — «⏻» (ребут) и «⟳» (Re-Add).</li>
-<li>До <b>8 строк</b> + кликабельная строка «+ ещё N» (10.5px, accent, cursor:pointer) — клик раскрывает полный список (<code>zMore(key)</code> + флаг <code>window._zxOpen</code>, переживает автообновление). Тот же паттерн у Подсетей, Матрицы, API и Топ ресурсов. Сортировка по убыванию severity.</li>
-</ul>
-
-<h3>8.2 Ротации · IP · ёмкость</h3>
+<h3>8.1 Ротации · IP · ёмкость</h3>
 <div class="demo"><div class="cap">Живой образец: чипы периода и KPI-плитка</div>
 <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;margin-bottom:12px"><span style="font-size:11px;color:var(--t2)">Период:</span><button class="x-chip">1 день</button><button class="x-chip">3 дня</button><button class="x-chip on">7 дней</button><button class="x-chip">14 дней</button><button class="x-chip">30 дней</button></div>
 <div style="display:flex;gap:8px;flex-wrap:wrap">
@@ -341,7 +334,7 @@ code (API):     &lt;path d="M8 8l-4 4 4 4"/&gt;&lt;path d="M16 8l4 4-4 4"/&gt;</
 <li>Данные: <code>/api/analytics/rotations?days=D</code>, <code>/api/analytics/ip_stats?days=D</code> (поля <code>subnet_summary</code>, <code>subnets</code>) и <code>/api/analytics/capacity?days=D</code> — один Promise.all.</li>
 </ul>
 
-<h3>8.3 Распределение задержек</h3>
+<h3>8.2 Распределение задержек</h3>
 <ul>
 <li>Три KPI-плитки: «P50 МЕДИАНА» (напр. «0.76 с»), «P75» («0.93 с ▲7%»), «P99» («8.57 с ▲56%»). Дельта против прошлого периода — мелкий суффикс: рост danger, снижение success. P99 при больших значениях — danger.</li>
 <li>Полоса распределения: высота ~14px, радиус, сегменты слева направо: Быстрые (success) → ОК (success 50% прозрачности) → Медленные (warning) → Оч. медленные (тёмно-красный); в самом широком сегменте — его % белым 10px.</li>
@@ -380,7 +373,7 @@ code (API):     &lt;path d="M8 8l-4 4 4 4"/&gt;&lt;path d="M16 8l4 4-4 4"/&gt;</
 <li><b>Троттлинг финансов:</b> <code>/api/admin/finance_dashboard</code> и график MRR обновляются не чаще раза в ~55 с; между тиками пересобирается только дешёвый DOM. Chart.js-инстансы не destroy/create на каждый тик — иначе видимое мигание.</li>
 <li><b>Раскрывашки:</b> открытые по умолчанию секции наполняет сам renderAccNew (guard <code>dataset.loaded</code>); закрытые грузятся при первом открытии (<code>toggle</code>-обработчик), «Ротации·IP·ёмкость» и «Обращения к API» перезагружаются при каждом открытии.</li>
 <li><b>Состояние переживает автообновление:</b> открытость details, выбранный период инфраструктуры (<code>_NEW_INFRA_DAYS</code>), фильтры API (<code>_apiAccessState</code>), вид/чип хитмапа — всё в JS-глобалях; рендер не должен их сбрасывать.</li>
-<li><b>Клики:</b> плитки внимания → попап списка модемов; ⏻/⟳ в «Топ проблемных» → экшены с тостами; строки клиентов некликабельны (просмотр).</li>
+<li><b>Клики:</b> плитки внимания → попап списка модемов с точной причиной; строки клиентов некликабельны (просмотр).</li>
 <li><b>Пустые состояния:</b> каждая карточка обязана иметь текст-заглушку («Нет данных», «Загрузка…») 11–12px text-3 — контейнеры не схлопывать.</li>
 </ul>
 
@@ -413,7 +406,6 @@ code (API):     &lt;path d="M8 8l-4 4 4 4"/&gt;&lt;path d="M16 8l4 4-4 4"/&gt;</
 <tr><td>Парк</td><td>fleet.byServer + _modemMap</td><td><code>renderNewFleetServers()</code> → <code>#newFleetServers</code></td></tr>
 <tr><td>Финансы</td><td><code>GET /api/admin/finance_dashboard</code> (throttle 55 c)</td><td><code>loadNewFinance()</code> → график + «Качество выручки»</td></tr>
 <tr><td>Клиенты</td><td>clients + finance.per_client + трафик портов</td><td><code>renderNewClientTable()</code> → <code>#newClientTable</code></td></tr>
-<tr><td>Топ проблемных</td><td>_modemMap + правила issues</td><td><code>renderNewTopProblems()</code></td></tr>
 <tr><td>Ротации·IP</td><td><code>GET /api/analytics/rotations?days</code> + <code>ip_stats?days</code></td><td><code>reloadNewInfra()</code> (+ <code>setNewInfraDays</code>)</td></tr>
 <tr><td>Задержки</td><td><code>GET /api/analytics/latency_stats</code></td><td><code>renderLatencySummary()</code> → <code>#latencySummary</code></td></tr>
 <tr><td>Хитмап</td><td><code>GET /api/analytics/heatmap?view&amp;id&amp;days=7</code></td><td><code>loadNewHeatmap()</code></td></tr>

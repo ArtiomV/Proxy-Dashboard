@@ -17,22 +17,6 @@ beforeAll(() => {
 const GET = (path) => request(app).get(path).set('X-Auth-Token', adminToken);
 
 describe('analytics endpoints (WP6.1 split) — 200 + basic shape', () => {
-  it('GET /api/analytics/modem_health', async () => {
-    const res = await GET('/api/analytics/modem_health?days=7');
-    expect(res.status).toBe(200);
-    expect(res.body).toHaveProperty('modems');
-    expect(res.body).toHaveProperty('summary');
-    expect(Array.isArray(res.body.modems)).toBe(true);
-  });
-
-  it('GET /api/analytics/modem_health_history validates params', async () => {
-    const bad = await GET('/api/analytics/modem_health_history');
-    expect(bad.status).toBe(400);
-    const ok = await GET('/api/analytics/modem_health_history?server=S1&imei=123');
-    expect(ok.status).toBe(200);
-    expect(ok.body).toHaveProperty('rows');
-  });
-
   it('GET /api/analytics/capacity', async () => {
     const res = await GET('/api/analytics/capacity?days=7');
     expect(res.status).toBe(200);

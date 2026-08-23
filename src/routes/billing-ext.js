@@ -8,6 +8,12 @@
 const express = require('express');
 const { COST_CATEGORIES } = require('../billing/cost-categories');  // P2-2: was a server.js dep
 const { computeRevenueWindow } = require('../billing/revenue');     // WP8: canonical revenue
+const {
+  parseOperatorPackages,
+  operatorKey,
+  readActiveSimCounts,
+  calculateOperatorPackageCosts,
+} = require('../billing/operator-package-costs');
 
 module.exports = function createBillingExtRouter(deps) {
   const {
@@ -39,8 +45,14 @@ module.exports = function createBillingExtRouter(deps) {
     try { rows = db.prepare('SELECT operator, country FROM operator_country_map').all(); } catch (_) { /* таблица может отсутствовать на старых БД */ }
     const byOp = {};
     for (const row of rows) byOp[row.operator] = row.country;
-    const operators = db.prepare(`SELECT DISTINCT operator FROM modem_meta
-      WHERE operator != '' ORDER BY operator`).all().map(r => r.operator);
+    let operators = [];
+    try {
+      operators = db.prepare(`SELECT DISTINCT operator FROM modem_meta
+        WHERE operator != '' AND COALESCE(deleted, 0) = 0 ORDER BY operator`).all().map(r => r.operator);
+    } catch (_) {
+      operators = db.prepare(`SELECT DISTINCT operator FROM modem_meta
+        WHERE operator != '' ORDER BY operator`).all().map(r => r.operator);
+    }
     for (const op of operators) {
       const key = String(op).toLowerCase().trim();
       let country = byOp[key] || OP_COUNTRY_FALLBACK[key] || '';
@@ -48,6 +60,17 @@ module.exports = function createBillingExtRouter(deps) {
       out[op] = country; // '' = не определена → UI предложит RUB
     }
     return { operators, operatorCountry: out };
+  }
+  function _operatorPackageCosts(operatorCountry) {
+    const defaults = {};
+    for (const [operator, country] of Object.entries(operatorCountry || {})) {
+      const currency = country === 'MD' ? 'MDL' : country === 'RO' ? 'RON' : 'RUB';
+      defaults[operator] = currency;
+      defaults[operatorKey(operator)] = currency;
+    }
+    const packages = parseOperatorPackages(appSettings.operator_packages || '[]');
+    const roster = readActiveSimCounts(db);
+    return calculateOperatorPackageCosts(packages, roster, defaults);
   }
 
   // Stage 4 finish: finance_dashboard response cache moved into the router.
@@ -83,7 +106,10 @@ r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, async (req, r
     // Списки для perItem-категорий: операторы (SIM) из live ProxySmart, боксы.
     // Страны — для дефолта валюты в UI: MD → MDL, RO → RON (v2.10.8).
     const { operators, operatorCountry } = _operatorCountryMap();
+    const operatorCosts = _operatorPackageCosts(operatorCountry);
     const servers = getApiServers().map(s => s.name);
+    const serverLabels = {};
+    for (const s of getApiServers()) serverLabels[s.name] = s.displayName || s.name;
     const serverCountry = {};
     const sc = getServerCountries();
     for (const s of getApiServers()) serverCountry[s.name] = (sc[s.name] || {}).country || s.country || '';
@@ -92,7 +118,9 @@ r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, async (req, r
     res.json({
       period, rows, template,
       categories: COST_CATEGORIES,
-      meta: { operators, servers, serverCountry, operatorCountry },
+      meta: { operators, servers, serverLabels, serverCountry, operatorCountry },
+      operator_costs: operatorCosts.rows,
+      unconfigured_operators: operatorCosts.unconfigured,
       fx: { rates: { MDL: rates.MDL, RON: rates.RON }, date: rates.date, source: rates.source },
       // Текущий ручной фикс (0 = авто) — предзаполнение инпутов в модалке.
       fx_overrides: { MDL: Number(appSettings.fx_rate_mdl) || 0, RON: Number(appSettings.fx_rate_ron) || 0 }
@@ -115,6 +143,14 @@ r.post('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) =
       }
     }
     db.transaction(() => {
+      // The new costs UI does not edit SIM rows: they come from operator
+      // packages. Preserve legacy manual SIM rows as a fallback for packages
+      // that are still incomplete; configured packages override them in the
+      // finance calculation and therefore never double-count.
+      const preserveLegacySim = !items.some(it => it && it.category === 'sim');
+      const legacySim = preserveLegacySim
+        ? db.prepare(`SELECT category, subkey, amount, currency, qty, notes FROM monthly_costs WHERE period = ? AND category = 'sim'`).all(period)
+        : [];
       db.prepare('DELETE FROM monthly_costs WHERE period = ?').run(period);
       const ins = db.prepare(`INSERT INTO monthly_costs (period, category, subkey, amount, currency, qty, notes)
         VALUES (?, ?, ?, ?, ?, ?, ?)`);
@@ -128,6 +164,10 @@ r.post('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) =
         if (qty != null && (!Number.isFinite(qty) || qty < 0)) continue;
         ins.run(period, it.category, it.subkey || null, amount,
           String(it.currency || 'RUB'), qty, (it.notes || '').slice(0, 500));
+      }
+      for (const it of legacySim) {
+        ins.run(period, it.category, it.subkey || null, it.amount,
+          String(it.currency || 'RUB'), it.qty, (it.notes || '').slice(0, 500));
       }
     })();
     auditLog(req.user.login, 'monthly_costs_save', { period, count: items.length });
@@ -307,6 +347,19 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
         costCarriedFrom = prev;
       }
     }
+    // SIM expenses are automatic when a complete operator package exists.
+    // A matching legacy manual SIM row is then ignored so the same expense is
+    // never counted twice. Incomplete packages keep the old row as a safe
+    // fallback until the missing fields are filled in Settings.
+    const { operatorCountry } = _operatorCountryMap();
+    const operatorCosts = _operatorPackageCosts(operatorCountry);
+    const automaticOps = new Set(operatorCosts.rows.filter(r => r.configured).map(r => operatorKey(r.operator)));
+    costRows = costRows.filter(r => r.category !== 'sim' || !automaticOps.has(operatorKey(r.subkey)));
+    for (const row of operatorCosts.rows) {
+      if (!row.configured || !(row.amount > 0)) continue;
+      costRows.push({ category: 'sim', subkey: row.operator, amount: row.amount, currency: row.currency, qty: row.sim_count, automatic: true });
+    }
+
     // v2.10.8: MDL/RON конвертируются в RUB по текущему курсу (ЦБ или ручной
     // фикс). getRates кладёт курс в module-level, toRub — sync поверх него.
     const fxRates = await fx.getRates();
@@ -523,6 +576,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
         per_modem: stats(perModemPrices)
       },
       cost_by_category: costByCategory,
+      operator_package_costs: operatorCosts,
       // Курс конвертации затрат MDL/RON → RUB (для отображения в шапке).
       fx: { MDL: fxRates.MDL, RON: fxRates.RON, date: fxRates.date, source: fxRates.source },
       per_server: perServer,

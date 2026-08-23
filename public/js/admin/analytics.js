@@ -611,7 +611,7 @@ function loadSlaReport(){
     }else{
       h+='<table class="log-table"><thead><tr><th>Сервер</th><th>Uptime</th><th>Эпизоды</th><th>Простой, мин</th><th>Обслуживание, мин</th></tr></thead><tbody>';
       d.servers.forEach(function(s){
-        h+='<tr><td style="font-family:var(--font-mono);font-weight:600">'+esc(s.server)+'</td><td>'+_slaPctCell(s.uptime_pct)+'</td><td>'+s.episodes+'</td><td>'+String(s.downtime_min).replace('.',',')+'</td><td style="color:var(--text-3)">'+String(s.maintenance_min).replace('.',',')+'</td></tr>';
+        h+='<tr><td style="font-family:var(--font-mono);font-weight:600">'+esc(_serverDisplayLabel(s.server))+'</td><td>'+_slaPctCell(s.uptime_pct)+'</td><td>'+s.episodes+'</td><td>'+String(s.downtime_min).replace('.',',')+'</td><td style="color:var(--text-3)">'+String(s.maintenance_min).replace('.',',')+'</td></tr>';
       });
       h+='</tbody></table>';
     }
@@ -625,13 +625,13 @@ function loadSlaReport(){
       h+='</tbody></table>';
     }
     // Модемы
-    h+='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin:14px 0 6px">Модемы (по пингам A1)</div>';
+    h+='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin:14px 0 6px">Модемы (минутные проверки доступности)</div>';
     if(!d.modems||!d.modems.length){
-      h+='<div style="font-size:11px;color:var(--text-3)">Данных пингов за месяц нет (история modem_ping накопилась с 23.08).</div>';
+      h+='<div style="font-size:11px;color:var(--text-3)">За выбранный месяц нет периодических проверок доступности.</div>';
     }else{
-      h+='<div style="max-height:420px;overflow-y:auto"><table class="log-table"><thead><tr><th>Модем</th><th>Сервер</th><th>Оператор</th><th>Uptime</th><th>Пингов</th></tr></thead><tbody>';
+      h+='<div style="max-height:420px;overflow-y:auto"><table class="log-table"><thead><tr><th>Модем</th><th>Сервер</th><th>Оператор</th><th>Uptime</th><th>Проверок</th></tr></thead><tbody>';
       d.modems.forEach(function(m){
-        h+='<tr><td style="font-family:var(--font-mono)">'+esc(m.nick)+'</td><td>'+esc(m.server)+'</td><td style="color:var(--text-2)">'+esc(m.operator||'—')+'</td><td>'+_slaPctCell(m.uptime_pct)+'</td><td>'+m.pings+'</td></tr>';
+        h+='<tr><td style="font-family:var(--font-mono)">'+esc(m.nick)+'</td><td>'+esc(_serverDisplayLabel(m.server))+'</td><td style="color:var(--text-2)">'+esc(m.operator||'—')+'</td><td>'+_slaPctCell(m.uptime_pct)+'</td><td>'+m.checks+'</td></tr>';
       });
       h+='</tbody></table></div>';
     }

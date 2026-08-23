@@ -2,8 +2,8 @@
 //
 // src/routes/analytics.js — read-only analytics endpoints.
 //
-// WP6.1: modem_health*/capacity/logs_domains_full carved out to
-// analytics-health.js / analytics-capacity.js / analytics-domains.js. ALL SQL lives in src/db/analytics.js — routes here
+// WP6.1: capacity/logs_domains_full carved out to dedicated routers.
+// ALL SQL lives in src/db/analytics.js — routes here only shape responses.
 // only shape parameters and responses.
 
 const express = require('express');

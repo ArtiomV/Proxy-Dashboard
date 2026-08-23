@@ -10,6 +10,7 @@
 | `IMEI` | Аппаратный идентификатор модема (строка 15 цифр). Ключ модема внутри сервера; глобальный ключ — `<server>|<imei>` (fleet) или `<server>_<imei>` (uptimeTracking). | modem_details.IMEI, modem_meta.imei, known_modems |
 | `nick` | Человекочитаемое имя модема (NICK на боксе, напр. `RO_1`). Не стабилен при глитче (модем может стать `random####` — такие исключаются из fleet). | modem_details.NICK, modem_meta.nick |
 | `login` | Логин учётной записи дашборда (клиентской или админской). `clients.login` → sessions.login; портал авторизует по нему + port_name_filter. Также `LOGIN` в записи порта — логин прокси-доступа (не путать!). | clients.login, sessions; ports[].LOGIN |
+| `operator_packages` | JSON-настройка пакетов: `operator`, `type`, `volume_gb`, `max_sims`, `price`, `currency`, пороги. Число SIM не хранится вручную: это distinct активные ICCID (fallback server+IMEI/nick) из `modem_meta`, без soft-deleted. | `kv_store.app_settings`; расчёт в `src/billing/operator-package-costs.js` |
 
 Цепочка привязки трафика к клиенту:
 `traffic_hourly.port_id` (full) → `known_modems[server][port_id]` (port_key) →
@@ -78,7 +79,7 @@ erDiagram
 | Источник | Природа | Потребители (по факту кода) |
 |---|---|---|
 | `hourly_snapshots` | Последние сырые счётчики боксов (дельта-база) | **только HourlyAgg** (src/traffic/hourly.js) ✓ |
-| `traffic_hourly` | Почасовые дельты, UTC, канон | биллинг (durable-путь), акты/сверка (MonthlyReconciliation, balance/акты через ledger, записанный из него), daily_summary, аналитика (src/db/analytics.js), health-snapshot, ownership, портал (только «последний час», client-portal.js:107+) |
+| `traffic_hourly` | Почасовые дельты, UTC, канон | биллинг (durable-путь), акты/сверка (MonthlyReconciliation, balance/акты через ledger, записанный из него), daily_summary, аналитика (src/db/analytics.js), ownership, портал (только «последний час», client-portal.js:107+) |
 | `daily_traffic` | Суточные MAX-счётчики, МСК-день | durable-фолбэк биллинга (billing.js, shadow-billing.js), портал/аналитика (analytics.js:338+), ops-ext, billing-ext, servers |
 | live (ProxySmart bw-ответ) | Текущие счётчики в памяти/кэше | UI дашборда, портал (`liveMonthGb`), live-фолбэк биллинга при hours_present < 20 и legacy V1 max(durable, live) до Фазы 2 (billing.js), shadow-лог gb_live |
 

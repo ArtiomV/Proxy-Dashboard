@@ -204,8 +204,8 @@ function _costCurSelect(cur) {
     + '</select>';
 }
 function _fmtFxRate(v){ return v == null ? '—' : Number(v).toFixed(2); }
-// Пересчёт итогов SIM (qty × цена) и рублёвых эквивалентов «≈ X ₽».
-// Реагирует и на ручной курс в шапке: фикс > 0 перебивает курс ЦБ.
+// Пересчёт ручных строк и автоматических SIM-пакетов в один рублёвый итог.
+// Ручной курс в шапке (если задан) перебивает курс ЦБ.
 function _finCostsRecalc(ov) {
   var rates = (ov && ov._fxRates) || {};
   var mdlOvEl = document.getElementById('fxMdlOv'), ronOvEl = document.getElementById('fxRonOv');
@@ -215,21 +215,14 @@ function _finCostsRecalc(ov) {
     MDL: (isFinite(mdlOv) && mdlOv > 0) ? mdlOv : rates.MDL,
     RON: (isFinite(ronOv) && ronOv > 0) ? ronOv : rates.RON
   };
+  var manualRub=0,simRub=0;
   ov.querySelectorAll('.set-row[data-cat]').forEach(function(row){
     var curEl = row.querySelector('[data-role="currency"]');
     var cur = curEl ? curEl.value : 'RUB';
     var unitEl = row.querySelector('[data-role="cur-unit"]');
     if (unitEl) unitEl.textContent = cur === 'RUB' ? '₽' : cur;
-    var amount = 0;
-    if (row.dataset.cat === 'sim') {
-      var qty = parseFloat((row.querySelector('[data-role="qty"]') || {}).value);
-      var price = parseFloat((row.querySelector('[data-role="price"]') || {}).value) || 0;
-      amount = Math.round(((isFinite(qty) && qty > 0 ? qty : 1) * price) * 100) / 100;
-      var totEl = row.querySelector('[data-role="total"]');
-      if (totEl) totEl.textContent = amount ? amount.toLocaleString('ru-RU') : '0';
-    } else {
-      amount = parseFloat((row.querySelector('[data-role="amount"]') || {}).value) || 0;
-    }
+    var amount = parseFloat((row.querySelector('[data-role="amount"]') || {}).value) || 0;
+    var rub=cur==='RUB'?amount:(amount*(rate[cur]||0));manualRub+=rub;
     var eqEl = row.querySelector('[data-role="rub-eq"]');
     if (eqEl) {
       var r = rate[cur];
@@ -238,107 +231,117 @@ function _finCostsRecalc(ov) {
         : '';
     }
   });
+  ov.querySelectorAll('[data-auto-amount]').forEach(function(row){
+    var amount=parseFloat(row.dataset.autoAmount)||0,cur=row.dataset.autoCurrency||'RUB';
+    simRub+=cur==='RUB'?amount:(amount*(rate[cur]||0));
+    var eq=row.querySelector('[data-role="auto-rub"]');
+    if(eq)eq.textContent=amount>0&&cur!=='RUB'&&rate[cur]?'≈ '+Math.round(amount*rate[cur]).toLocaleString('ru-RU')+' ₽':'';
+  });
+  var setMoney=function(id,value){var el=document.getElementById(id);if(el)el.textContent=Math.round(value).toLocaleString('ru-RU')+' ₽';};
+  setMoney('fcManualTotal',manualRub);setMoney('fcAutoSimTotal',simRub);setMoney('fcGrandTotal',manualRub+simRub);
+}
+function _finCostNative(amount,currency){
+  return (Number(amount)||0).toLocaleString('ru-RU')+' '+(currency==='RUB'?'₽':currency);
+}
+function openOperatorPackagesFromCosts(){
+  var ov=document.getElementById('_finCostsOverlay');if(ov)ov.remove();
+  var tab=null;document.querySelectorAll('.nav-tab').forEach(function(el){if((el.getAttribute('data-on-click')||'').indexOf("switchMainTab('analytics'")===0)tab=el;});
+  switchMainTab('analytics',tab);
+  setTimeout(function(){switchSettingsSection('operators');},60);
 }
 function _renderCostsModal(d) {
   var ov = document.createElement('div');
   ov.id = '_finCostsOverlay';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:9000;display:flex;align-items:center;justify-content:center;padding:20px';
+  ov.className = 'fcm-overlay';
   ov.onclick = function(e){ if(e.target===ov) ov.remove(); };
   ov._fxRates = (d.fx && d.fx.rates) || {};
   var rows = (d.rows && d.rows.length) ? d.rows : (d.template || []).map(function(t){return Object.assign({},t)});
   var byCat = {};
   rows.forEach(function(r){ (byCat[r.category]=byCat[r.category]||[]).push(r); });
+  var cats = d.categories || {},meta=d.meta||{},serverLabels=meta.serverLabels||{};
 
-  var cats = d.categories || {};
-  // Правая колонка строки затрат: инпуты + серая строка «≈ X ₽» под ними.
-  function _wrapRow(label, cat, key, inner){
-    return '<div class="set-row" data-cat="'+cat+'"'+(key!=null?' data-key="'+esc(key).replace(/"/g,'&quot;')+'"':'')+'>'
-      + '<div class="set-row-t">'+label+'</div>'
-      + '<div style="display:flex;flex-direction:column;align-items:flex-end;gap:2px">'
-      + '<span class="set-inp">'+inner+'</span>'
-      + '<span data-role="rub-eq" style="font-size:10px;color:var(--text-3);min-height:12px"></span>'
-      + '</div></div>';
+  function editRow(label,sub,cat,key,existing,country){
+    var cur=_costCurDefault(existing,country);
+    return '<div class="fcm-edit-row set-row" data-cat="'+cat+'"'+(key!=null?' data-key="'+esc(key).replace(/"/g,'&quot;')+'"':'')+'>'
+      +'<div class="fcm-edit-label"><b>'+label+'</b>'+(sub?'<small>'+sub+'</small>':'')+'</div>'
+      +'<div class="fcm-edit-input">'+_costCurSelect(cur)
+      +'<input class="form-input" data-role="amount" type="number" min="0" step="100" value="'+(existing&&existing.amount!=null?existing.amount:'')+'" placeholder="0">'
+      +'<span data-role="cur-unit">'+cur+'</span><small data-role="rub-eq"></small></div></div>';
   }
-  var inputs = '';
-  // Server costs — валюта по стране бокса (meta.serverCountry)
-  var srvList = (d.meta && d.meta.servers) || ['S1','S2','S3','S4'];
-  var srvCountry = (d.meta && d.meta.serverCountry) || {};
-  inputs += '<div class="set-grp-label">'+(cats.server?cats.server.label:'Аренда серверов')+'</div><div class="set-card">';
+
+  var automatic=(d.operator_costs||[]).slice(),seenAuto={};
+  automatic.forEach(function(c){seenAuto[String(c.operator||'').toLowerCase()]=true;});
+  (d.unconfigured_operators||[]).forEach(function(c){
+    var key=String(c.operator||'').toLowerCase();if(seenAuto[key])return;seenAuto[key]=true;
+    automatic.push({operator:c.operator,sim_count:c.sim_count||0,type:'shared',configured:false,missing:c.missing||['пакет оператора'],bundle_count:null,max_sims:0,price:0,currency:'RUB',amount:0});
+  });
+  (byCat.sim||[]).forEach(function(r){
+    var key=String(r.subkey||'').toLowerCase();if(seenAuto[key])return;seenAuto[key]=true;
+    automatic.push({operator:r.subkey,sim_count:r.qty||0,type:'shared',configured:false,missing:['пакет оператора'],bundle_count:null,max_sims:0,price:0,currency:r.currency||'RUB',amount:0});
+  });
+  var missingCount=0,autoHtml='';
+  automatic.sort(function(a,b){return String(a.operator).localeCompare(String(b.operator),'ru');}).forEach(function(c){
+    var legacy=(byCat.sim||[]).find(function(r){return String(r.subkey||'').toLowerCase()===String(c.operator||'').toLowerCase();});
+    var configured=!!c.configured,effectiveAmount=configured?(Number(c.amount)||0):(legacy?(Number(legacy.amount)||0):0);
+    var effectiveCurrency=configured?(c.currency||'RUB'):(legacy?(legacy.currency||'RUB'):(c.currency||'RUB'));
+    if(!configured)missingCount++;
+    var typeLabel=c.type==='per_sim'?'на SIM':c.type==='unlimited'?'безлимит':'бандл';
+    var formula=configured
+      ? (c.sim_count+' SIM ÷ '+c.max_sims+' = '+c.bundle_count+' '+(c.bundle_count===1?'бандл':'бандла')+' × '+_finCostNative(c.price,c.currency))
+      : 'Нужно заполнить: '+((c.missing||[]).join(', ')||'параметры пакета');
+    var traffic=c.type==='unlimited'?'Безлимитный трафик':((c.volume_gb||0).toLocaleString('ru-RU')+' ГБ/бандл'+(c.total_volume_gb!=null?' · '+Number(c.total_volume_gb).toLocaleString('ru-RU')+' ГБ всего':''));
+    var source=configured?'из «Пакетов операторов»':(legacy?'временно используется старая ручная сумма':'в расчёт пока не входит');
+    var legacyAttrs=(!configured&&legacy)
+      ? ' data-legacy-amount="'+(Number(legacy.amount)||0)+'" data-legacy-currency="'+esc(legacy.currency||'RUB')+'" data-legacy-qty="'+(Number(legacy.qty)||0)+'" data-legacy-key="'+esc(legacy.subkey||c.operator).replace(/"/g,'&quot;')+'"'
+      : '';
+    autoHtml+='<div class="fcm-auto-row'+(configured?'':' is-missing')+'" data-auto-amount="'+effectiveAmount+'" data-auto-currency="'+esc(effectiveCurrency)+'"'+legacyAttrs+'>'
+      +'<div class="fcm-auto-op"><b>'+esc(c.operator)+'</b><span>'+esc(typeLabel)+' · '+c.sim_count+' активных SIM</span></div>'
+      +'<div class="fcm-auto-formula"><span>'+esc(formula)+'</span><small>'+esc(traffic)+'</small></div>'
+      +'<div class="fcm-auto-total"><b>'+_finCostNative(effectiveAmount,effectiveCurrency)+'</b><small data-role="auto-rub"></small><em>'+esc(source)+'</em></div></div>';
+  });
+  if(!autoHtml)autoHtml='<div class="fcm-empty">В базе пока нет операторов с SIM. Добавьте пакет, когда появится оператор.</div>';
+
+  var serverHtml='',srvList=meta.servers||[];
   srvList.forEach(function(s){
-    var existing = (byCat.server||[]).find(function(r){return r.subkey===s});
-    var cur = _costCurDefault(existing, srvCountry[s]);
-    inputs += _wrapRow(esc(s), 'server', s,
-      _costCurSelect(cur)
-      + '<input class="form-input fc-server" data-role="amount" type="number" min="0" step="100" value="'+(existing&&existing.amount!=null?existing.amount:'')+'" placeholder="0" style="width:100px;text-align:right">'
-      + '<span data-role="cur-unit" style="width:30px">'+cur+'</span>');
+    var existing=(byCat.server||[]).find(function(r){return r.subkey===s});
+    serverHtml+=editRow(esc(serverLabels[s]||s),'Аренда сервера','server',s,existing,(meta.serverCountry||{})[s]);
   });
-  inputs += '</div>';
-  // SIM (per operator): кол-во × цена за SIM, итог считается сам
-  var ops = (d.meta && d.meta.operators) || [];
-  var opCountry = (d.meta && d.meta.operatorCountry) || {};
-  inputs += '<div class="set-grp-label">'+(cats.sim?cats.sim.label:'SIM-карты')+' (кол-во × цена за SIM в месяц)</div><div class="set-card">';
-  if (ops.length === 0) {
-    inputs += '<div class="set-row"><div class="set-row-d" style="max-width:none">Операторы не определены — укажите общую сумму через «Прочее»</div></div>';
-  } else {
-    ops.forEach(function(op){
-      var existing = (byCat.sim||[]).find(function(r){return r.subkey===op});
-      var cur = _costCurDefault(existing, opCountry[op]);
-      var qty = existing && existing.qty != null ? existing.qty : '';
-      // Старые строки без qty: вся сумма — это цена за 1 SIM.
-      var price = existing ? (existing.qty ? Math.round(existing.amount / existing.qty * 100) / 100 : existing.amount) : '';
-      inputs += _wrapRow(esc(op), 'sim', op,
-        _costCurSelect(cur)
-        + '<input class="form-input fc-sim" data-role="qty" type="number" min="0" step="1" value="'+qty+'" placeholder="шт" title="Кол-во SIM" style="width:56px;text-align:right">'
-        + '<span style="font-size:11px;color:var(--text-3)">×</span>'
-        + '<input class="form-input fc-sim" data-role="price" type="number" min="0" step="10" value="'+(price!=null?price:'')+'" placeholder="цена" title="Цена за SIM" style="width:80px;text-align:right">'
-        + '<span style="font-size:11px;color:var(--text-3)">=</span>'
-        + '<b data-role="total" style="min-width:56px;text-align:right;font-size:12px">0</b>'
-        + '<span data-role="cur-unit" style="width:30px">'+cur+'</span>');
-    });
-  }
-  inputs += '</div>';
-  // Other (single value, no subkey) — валюта выбирается, как у серверов/SIM (15.08)
-  inputs += '<div class="set-grp-label">Прочие затраты</div><div class="set-card">';
+  if(!serverHtml)serverHtml='<div class="fcm-empty">Серверы не найдены</div>';
+
+  var otherHtml='';
   ['electricity','hosting','salary','other'].forEach(function(k){
-    var existing = (byCat[k]||[])[0];
-    var cur = _costCurDefault(existing);
-    inputs += _wrapRow((cats[k]?cats[k].label:k), k, null,
-      _costCurSelect(cur)
-      + '<input class="form-input fc-other" data-role="amount" type="number" min="0" step="100" value="'+(existing&&existing.amount!=null?existing.amount:'')+'" placeholder="0" style="width:100px;text-align:right">'
-      + '<span data-role="cur-unit" style="width:30px">'+cur+'</span>');
+    var existing=(byCat[k]||[])[0];
+    otherHtml+=editRow(esc(cats[k]?cats[k].label:k),'Вводится вручную',k,null,existing,'');
   });
-  inputs += '</div>';
 
-  // Шапка: текущий курс + ручной фикс (пусто = авто по ЦБ)
-  var fxBlock = '';
-  if (d.fx) {
-    var auto = d.fx.source === 'override' ? 'вручную'
-      : (d.fx.source === 'unavailable' ? 'курс недоступен'
-      : 'авто' + (String(d.fx.source).indexOf('+override') > 0 ? ' + ручной фикс' : ''));
-    var ovM = (d.fx_overrides && d.fx_overrides.MDL) || 0;
-    var ovR = (d.fx_overrides && d.fx_overrides.RON) || 0;
-    fxBlock = '<div style="font-size:11px;color:var(--text-2);margin-bottom:8px;line-height:1.7">'
-      + 'Курс ЦБ на ' + esc(d.fx.date || '') + ': 1 MDL = ' + _fmtFxRate(d.fx.rates && d.fx.rates.MDL) + ' ₽, 1 RON = ' + _fmtFxRate(d.fx.rates && d.fx.rates.RON) + ' ₽ (' + auto + ')<br>'
-      + 'Свой курс (пусто = авто): 1 MDL = <input id="fxMdlOv" type="number" min="0" step="0.01" placeholder="' + _fmtFxRate(d.fx.rates && d.fx.rates.MDL) + '" value="' + (ovM > 0 ? ovM : '') + '" style="width:64px;text-align:right"> ₽'
-      + ' · 1 RON = <input id="fxRonOv" type="number" min="0" step="0.01" placeholder="' + _fmtFxRate(d.fx.rates && d.fx.rates.RON) + '" value="' + (ovR > 0 ? ovR : '') + '" style="width:64px;text-align:right"> ₽'
-      + '</div>';
+  var fxBlock='';
+  if(d.fx){
+    var ovM=(d.fx_overrides&&d.fx_overrides.MDL)||0,ovR=(d.fx_overrides&&d.fx_overrides.RON)||0;
+    fxBlock='<details class="fcm-fx"><summary>Курсы пересчёта <span>1 MDL = '+_fmtFxRate(d.fx.rates&&d.fx.rates.MDL)+' ₽ · 1 RON = '+_fmtFxRate(d.fx.rates&&d.fx.rates.RON)+' ₽</span></summary>'
+      +'<div><label>Свой MDL <input id="fxMdlOv" type="number" min="0" step="0.01" placeholder="'+_fmtFxRate(d.fx.rates&&d.fx.rates.MDL)+'" value="'+(ovM>0?ovM:'')+'"> ₽</label>'
+      +'<label>Свой RON <input id="fxRonOv" type="number" min="0" step="0.01" placeholder="'+_fmtFxRate(d.fx.rates&&d.fx.rates.RON)+'" value="'+(ovR>0?ovR:'')+'"> ₽</label>'
+      +'<small>Пусто — автоматический курс на '+esc(d.fx.date||'сегодня')+'</small></div></details>';
   }
 
-  ov.innerHTML = '<div style="background:var(--bg-1);border:1px solid var(--border);border-radius:12px;padding:20px;width:560px;max-width:100%;max-height:85vh;overflow-y:auto;box-shadow:0 24px 64px rgba(0,0,0,.5)">'
-    + '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">'
-    + '<h3 style="margin:0;font-size:14px">' + icon('gear', 14) + ' Затраты — ' + esc(d.period) + '</h3>'
-    + '<button data-on-click="document.getElementById(\'_finCostsOverlay\').remove()" style="background:none;border:none;font-size:18px;cursor:pointer;color:var(--text-2)">&times;</button>'
-    + '</div>'
-    + (rows.length === 0 && (d.template || []).length > 0 ? '<div style="font-size:11px;color:var(--accent);margin-bottom:6px">' + icon('alert', 11) + ' Подставлены значения из предыдущего месяца — отредактируйте и сохраните</div>' : '')
-    + fxBlock
-    + inputs
-    + '<div class="set-save-bar" style="justify-content:flex-end">'
-    + '<button class="btn" data-on-click="document.getElementById(\'_finCostsOverlay\').remove()">Отмена</button>'
-    + '<button class="btn btn-primary" data-on-click="saveCostsModal()">' + icon('save', 13) + ' Сохранить</button>'
-    + '</div></div>';
+  var missingBanner=missingCount
+    ? '<div class="fcm-missing"><div>'+icon('alert',14)+' <span><b>Нужно дополнить пакеты: '+missingCount+'</b><small>Без цены, объёма или лимита SIM автоматический расчёт невозможен.</small></span></div><button class="btn btn-sm" data-on-click="openOperatorPackagesFromCosts()">Заполнить пакеты →</button></div>'
+    : '';
+
+  ov.innerHTML='<div class="fcm-modal">'
+    +'<div class="fcm-head"><div><small>Финансы · '+esc(d.period)+'</small><h3>Затраты месяца</h3><p>SIM считаются автоматически, остальные расходы вводятся вручную.</p></div>'
+    +'<button class="fcm-close" data-on-click="document.getElementById(\'_finCostsOverlay\').remove()">&times;</button></div>'
+    +'<div class="fcm-summary"><div><span>SIM и бандлы</span><b id="fcAutoSimTotal">0 ₽</b></div><div><span>Ручные расходы</span><b id="fcManualTotal">0 ₽</b></div><div class="is-total"><span>Итого за месяц</span><b id="fcGrandTotal">0 ₽</b></div></div>'
+    +(rows.length===0&&(d.template||[]).length>0?'<div class="fcm-carried">'+icon('info',12)+' Ручные значения подставлены из предыдущего месяца — проверьте их перед сохранением.</div>':'')
+    +missingBanner
+    +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>SIM и пакеты операторов</h4><p>Только для чтения · данные берутся из базы и настроек пакета</p></div><button class="btn btn-sm" data-on-click="openOperatorPackagesFromCosts()">Настроить</button></div><div class="fcm-auto-list">'+autoHtml+'</div></section>'
+    +'<div class="fcm-two-col"><section class="fcm-section"><div class="fcm-section-head"><div><h4>Серверы</h4><p>Ежемесячная аренда площадок</p></div></div>'+serverHtml+'</section>'
+    +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>Прочее</h4><p>Электричество, связь и команда</p></div></div>'+otherHtml+'</section></div>'
+    +fxBlock
+    +'<div class="fcm-save"><button class="btn" data-on-click="document.getElementById(\'_finCostsOverlay\').remove()">Отмена</button><button class="btn btn-primary" data-on-click="saveCostsModal()">'+icon('save',13)+' Сохранить ручные расходы</button></div>'
+    +'</div>';
   document.body.appendChild(ov);
-  // CSP: инлайн-обработчики запрещены — один делегированный слушатель на оверлей.
-  ov.addEventListener('input', function(){ _finCostsRecalc(ov); });
+  ov.addEventListener('input',function(){_finCostsRecalc(ov);});
+  ov.addEventListener('change',function(){_finCostsRecalc(ov);});
   _finCostsRecalc(ov);
 }
 function saveCostsModal() {
@@ -362,17 +365,18 @@ function saveCostsModal() {
     var cat = row.dataset.cat;
     var curEl = row.querySelector('[data-role="currency"]');
     var cur = curEl ? curEl.value : 'RUB';
-    var amount = 0, qty = null;
-    if (cat === 'sim') {
-      var q = parseFloat((row.querySelector('[data-role="qty"]') || {}).value);
-      var p = parseFloat((row.querySelector('[data-role="price"]') || {}).value) || 0;
-      qty = (isFinite(q) && q > 0) ? q : null;
-      amount = Math.round(((qty || 1) * p) * 100) / 100;
-    } else {
-      amount = parseFloat((row.querySelector('[data-role="amount"]') || {}).value);
-    }
+    var qty = null;
+    var amount = parseFloat((row.querySelector('[data-role="amount"]') || {}).value);
     if (!isFinite(amount) || amount <= 0) return;
     items.push({ category: cat, subkey: row.dataset.key || null, amount: amount, currency: cur, qty: qty });
+  });
+  // Пока пакет не заполнен, модалка может явно показать старую ручную сумму
+  // как fallback. Переносим только такой видимый fallback; готовые пакеты
+  // остаются полностью автоматическими и никогда не дублируются.
+  ov.querySelectorAll('.fcm-auto-row[data-legacy-amount]').forEach(function(row){
+    var amount=parseFloat(row.dataset.legacyAmount)||0;if(!(amount>0))return;
+    items.push({category:'sim',subkey:row.dataset.legacyKey||null,amount:amount,
+      currency:row.dataset.legacyCurrency||'RUB',qty:parseFloat(row.dataset.legacyQty)||null});
   });
   // Сначала ручной курс (если модалка его показывала), потом сами затраты.
   var saveFx = document.getElementById('fxMdlOv')
@@ -383,7 +387,7 @@ function saveCostsModal() {
     api(API + '/api/admin/monthly_costs',{method:'POST',json:{ period: _finCurrentPeriod, items: items }})
       .then(function(d){
         if (d.ok) {
-          showToast('Затраты сохранены: ' + d.saved + ' позиций', 'success');
+          showToast('Ручные расходы сохранены. SIM пересчитаны по пакетам операторов.', 'success');
           document.getElementById('_finCostsOverlay').remove();
           renderFinancesTabNew();
         } else {

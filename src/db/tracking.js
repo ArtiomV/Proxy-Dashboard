@@ -13,6 +13,13 @@ function init(db) {
     VALUES (?, ?, ?, ?, ?, ?, ?)`);
   S.utDailyUpsert = db.prepare(`INSERT INTO uptime_daily (key, date, online, total) VALUES (?, ?, ?, ?)
     ON CONFLICT(key, date) DO UPDATE SET online=excluded.online, total=excluded.total`);
+  S.clientUtIncrement = db.prepare(`
+    INSERT INTO client_uptime_daily (key, date, client_name, online, total)
+    VALUES (?, ?, ?, ?, 1)
+    ON CONFLICT(key, date, client_name) DO UPDATE SET
+      online = client_uptime_daily.online + excluded.online,
+      total = client_uptime_daily.total + 1
+  `);
   S.ihInsert    = db.prepare('INSERT INTO ip_history (key, ip, started_at, ended_at) VALUES (?, ?, ?, ?)');
   S.ihUpdateEnd = db.prepare('UPDATE ip_history SET ended_at = ? WHERE id = ?');
   S.ihDeleteById = db.prepare('DELETE FROM ip_history WHERE id = ?');
@@ -155,6 +162,7 @@ module.exports = {
   ipUpsertStmt:        () => S.ipUpsert,
   utUpsertStmt:        () => S.utUpsert,
   utDailyUpsertStmt:   () => S.utDailyUpsert,
+  clientUtIncrementStmt: () => S.clientUtIncrement,
   ihInsertStmt:        () => S.ihInsert,
   ihUpdateEndStmt:     () => S.ihUpdateEnd,
   ihDeleteByIdStmt:    () => S.ihDeleteById,

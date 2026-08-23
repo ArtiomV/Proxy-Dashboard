@@ -13,7 +13,7 @@ function create(deps) {
   const {
     apiServers, fetchServerData, db, logger, logActivity, alerts,
     SERVER_COUNTRIES, normalizeOperator, operatorsDb, fetchApi, postFormApi,
-    recordIpChange, saveIpTracking, saveUptimeTracking,
+    recordIpChange, saveIpTracking, saveUptimeTracking, saveClientUptimeTicks,
     _serverDownSince, _serverUnreachableAlertSent, uptimeTracking, ipTracking,
     offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
     _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
@@ -28,6 +28,12 @@ function create(deps) {
   // рестарт = первый цикл без событий — это корректно, данных ещё нет).
   const _prevUp = new Map();
 
+  // All persisted daily buckets and all period readers use Moscow calendar
+  // days. Keeping this explicit avoids a one-day split when the host runs in
+  // another timezone or changes DST.
+  const moscowDate = ms => new Date((ms == null ? Date.now() : ms) + 3 * 3600000)
+    .toISOString().slice(0, 10);
+
 async function trackModems() {
   const now = Date.now();
   let totalTracked = 0;
@@ -35,6 +41,32 @@ async function trackModems() {
   // SSE (23.08): накопители diff'а цикла для fleet_update.
   const _fleetFlips = [];      // [{server, nick, up}]
   let _fleetDirty = false;     // сервер упал/поднялся — даже без флипов модемов
+  const clientUptimeTicks = [];
+
+  // Attribute the same periodic online/offline tick to every client currently
+  // bound to this modem. A Set prevents two ports of one client from doubling
+  // its denominator. Recently removed ports stop counting after the same
+  // 10-minute grace used by the ownership/fleet code.
+  function addClientUptimeTicks(serverName, imei, date, online) {
+    const rawImei = String(imei || '').replace(/^S\d+_/, '');
+    const names = new Set();
+    for (const info of Object.values(knownModems[serverName] || {})) {
+      if (!info) continue;
+      const infoImei = String(info.imei || '').replace(/^S\d+_/, '');
+      if (!infoImei || infoImei !== rawImei) continue;
+      if (info._missingSince && now - info._missingSince >= DISCONNECTED_MS) continue;
+      const clientName = String(info.portName || '').trim();
+      if (clientName && !/^random/i.test(clientName)) names.add(clientName);
+    }
+    for (const clientName of names) {
+      clientUptimeTicks.push({
+        key: serverName + '_' + rawImei,
+        date,
+        clientName,
+        online: !!online,
+      });
+    }
+  }
 
   for (const server of apiServers) {
     let statusArr;
@@ -89,7 +121,7 @@ async function trackModems() {
         }
       }
       // Server unreachable = all its modems are down
-      const todayBucket = new Date().toLocaleDateString('en-CA');
+      const todayBucket = moscowDate(now);
       for (const k of Object.keys(uptimeTracking)) {
         if (k.startsWith(server.name + '_')) {
           seenRecoveryKeys.add(k); // preserve autoRecovery state for unreachable servers
@@ -98,6 +130,7 @@ async function trackModems() {
           uptimeTracking[k].total_checks++;
           uptimeTracking[k].daily[todayBucket].total++;
           // don't increment online = downtime
+          addClientUptimeTicks(server.name, k.slice(server.name.length + 1), todayBucket, false);
         }
       }
       continue;
@@ -266,7 +299,7 @@ async function trackModems() {
       }
       if (!uptimeTracking[key].daily) uptimeTracking[key].daily = {};
 
-      const todayBucket = new Date().toLocaleDateString('en-CA');
+      const todayBucket = moscowDate(now);
       if (!uptimeTracking[key].daily[todayBucket]) uptimeTracking[key].daily[todayBucket] = { online: 0, total: 0 };
 
       // A1 (23.08): «up» теперь ping-based — модем online по IS_ONLINE, но с
@@ -351,9 +384,10 @@ async function trackModems() {
         // offline again later, we want to alert (don't keep stale "sent" flag).
         if (offlineAlertSent[key]) delete offlineAlertSent[key];
       }
+      addClientUptimeTicks(server.name, imei, todayBucket, isUp);
 
       // Prune daily buckets older than 35 days
-      const cutoffPrune = new Date(now - 35 * 86400000).toLocaleDateString('en-CA');
+      const cutoffPrune = moscowDate(now - 35 * 86400000);
       for (const d of Object.keys(uptimeTracking[key].daily)) {
         if (d < cutoffPrune) delete uptimeTracking[key].daily[d];
       }
@@ -430,8 +464,8 @@ async function trackModems() {
     // ── Stage 17.1 fix: account for OFFLINE modems that disappeared from ProxySmart's
     //    status response entirely. Previously trackModems iterated only over
     //    `statusArr`, so a switched-off modem never got `total++` — its uptime %
-    //    stayed frozen at the last known value (often 100%). Health-score then
-    //    showed the modem as healthy/green even though it had been off for days.
+    //    stayed frozen at the last known value (often 100%), even though it had
+    //    been off for days.
     //
     //    Fix: after the statusArr pass, walk known_modems[server.name] and for
     //    every modem-IMEI that we did NOT just process, write a downtime tick
@@ -469,7 +503,7 @@ async function trackModems() {
           offlineImeis.add(info.imei);
         }
       }
-      const todayBucket = new Date().toLocaleDateString('en-CA');
+      const todayBucket = moscowDate(now);
       for (const imei of offlineImeis) {
         const key = prefix + imei;
         // SSE (23.08): модем выпал из фида бокса — тоже флип в «down».
@@ -483,6 +517,7 @@ async function trackModems() {
         uptimeTracking[key].total_checks++;
         uptimeTracking[key].daily[todayBucket].total++;
         // online intentionally NOT incremented — this is the whole point.
+        addClientUptimeTicks(server.name, imei, todayBucket, false);
         // last_check tracks polling activity (when did we LAST tick this row).
         // last_online_check is NOT touched here — see Stage 18.9 comment in
         // the statusArr loop above. That field is the source of truth for
@@ -566,7 +601,7 @@ async function trackModems() {
   const MAX_UPTIME_KEYS = 500;
   const uptimeKeys = Object.keys(uptimeTracking);
   if (uptimeKeys.length > MAX_UPTIME_KEYS) {
-    const now7d = new Date(Date.now() - 7 * 86400000).toLocaleDateString('en-CA');
+    const now7d = moscowDate(now - 7 * 86400000);
     for (const k of uptimeKeys) {
       const days = Object.keys(uptimeTracking[k].daily || {});
       const latest = days.length ? days.sort().pop() : '';
@@ -621,6 +656,7 @@ async function trackModems() {
   } catch (e) { logger.warn('[ModemsDownBulk] ' + e.message); }
 
   saveUptimeTracking();
+  if (saveClientUptimeTicks) saveClientUptimeTicks(clientUptimeTicks);
   // SSE (23.08): состав/статусы изменились за цикл → пуш подписчикам.
   // Payload компактный (до 20 флипов строками) — фронту достаточно самого
   // факта изменения, он перезапрашивает затронутые данные сам.

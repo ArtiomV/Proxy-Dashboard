@@ -48,4 +48,16 @@ describe('WP7.1: normalized uptime_tracking', () => {
     db.prepare("DELETE FROM uptime_tracking WHERE key = 'WT_S1_T1'").run();
     db.prepare("DELETE FROM uptime_daily WHERE key = 'WT_S1_T1'").run();
   });
+
+  it('client daily uptime increments from the same periodic ticks', () => {
+    const stmt = trackingDb.clientUtIncrementStmt();
+    stmt.run('S1_I1', '2026-08-23', 'client-a', 1);
+    stmt.run('S1_I1', '2026-08-23', 'client-a', 0);
+    const row = db.prepare(`
+      SELECT online, total FROM client_uptime_daily
+       WHERE key='S1_I1' AND date='2026-08-23' AND client_name='client-a'
+    `).get();
+    expect(row).toEqual({ online: 1, total: 2 });
+    db.prepare("DELETE FROM client_uptime_daily WHERE key='S1_I1' AND client_name='client-a'").run();
+  });
 });

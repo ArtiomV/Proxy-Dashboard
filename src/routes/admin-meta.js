@@ -144,12 +144,18 @@ module.exports = function createAdminMetaRouter(deps) {
       // Cross-join with modem_meta to expose live usage counts per operator.
       // Empty operator strings are excluded — those are unknowns, not real
       // operator entries.
+      const modemMetaColumns = db.prepare('PRAGMA table_info(modem_meta)').all().map(c => c.name);
+      const activeModemSql = modemMetaColumns.includes('deleted') ? ' AND COALESCE(deleted, 0) = 0' : '';
+      const simIdentitySql = modemMetaColumns.includes('iccid')
+        ? `CASE WHEN TRIM(COALESCE(iccid, '')) <> '' THEN 'iccid:' || TRIM(iccid)
+             ELSE 'modem:' || server_name || '|' || COALESCE(NULLIF(TRIM(imei), ''), nick) END`
+        : `server_name || '|' || COALESCE(NULLIF(TRIM(imei), ''), nick)`;
       const usage = db.prepare(`
         SELECT LOWER(TRIM(operator)) as operator_norm, operator as operator_raw,
-               COUNT(DISTINCT imei) as modem_count,
+               COUNT(DISTINCT ${simIdentitySql}) as modem_count,
                GROUP_CONCAT(DISTINCT server_name) as servers
         FROM modem_meta
-        WHERE operator IS NOT NULL AND TRIM(operator) != ''
+        WHERE operator IS NOT NULL AND TRIM(operator) != ''${activeModemSql}
         GROUP BY operator_norm
         ORDER BY modem_count DESC
       `).all();

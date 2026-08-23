@@ -19,7 +19,7 @@
 <link rel="stylesheet" href="css/modal.css?v=0630d">
 <link rel="stylesheet" href="css/layout.css?v=0814a">
 <link rel="stylesheet" href="css/shell.css?v=0630d">
-<link rel="stylesheet" href="css/finance.css?v=0823f">
+<link rel="stylesheet" href="css/finance.css?v=0823q">
 <!-- Yandex.Metrika counter (инлайн вынесен в /js/metrika.js — CSP) -->
 <script src="/js/metrika.js?v=0814a"></script>
 <noscript><div><img src="https://mc.yandex.ru/watch/107161941" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
@@ -83,7 +83,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.34</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.35</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -99,7 +99,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.34</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.35</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -108,7 +108,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.34</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.35</a>
     <span class="last-update" id="lastUpdate"></span>
     <span class="sse-ind" id="sseIndicator" style="display:none" title="Realtime-обновления"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
@@ -199,11 +199,6 @@
 
     <!-- ───── ИНФРАСТРУКТУРА (детально, раскрывашки) ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg>Инфраструктура</div>
-
-    <details class="acc-expand" data-section="topproblems">
-      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><path d="M12 4 2.5 20h19L12 4z"/><line x1="12" y1="10" x2="12" y2="14"/><line x1="12" y1="16.8" x2="12.01" y2="16.8"/></svg></span>Топ проблемных модемов</summary>
-      <div class="acc-expand-body"><div id="newTopProblems"><div class="skel" style="height:34px;margin:6px 8px"></div><div class="skel" style="height:34px;margin:6px 8px"></div><div class="skel" style="height:34px;margin:6px 8px"></div></div></div>
-    </details>
 
     <details class="acc-expand" data-section="infra" open>
       <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg></span>Ротации · IP · ёмкость</summary>
@@ -960,7 +955,7 @@
             </div>
           </div>
           <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:820px">
-            Количество SIM определяется автоматически по модемам оператора в базе. Для <b>«на SIM»</b> объём задаётся на одну SIM, для <b>«бандл»</b> — общий объём, а <b>«безлимит»</b> отключает контроль исчерпания и темпа. Прогноз считает дату исчерпания по среднему расходу текущего месяца; для пакетов на SIM показывается ближайшая к исчерпанию SIM. Почасовой порог аномального расхода работает для всех схем; пустое значение = автоматически.
+            Здесь задаётся единый источник данных для мониторинга и финансов: цена одного бандла, его объём и максимальное число SIM. Фактическое количество SIM система берёт из базы, количество оплачиваемых бандлов и месячную сумму считает автоматически. Для <b>«На SIM»</b> один бандл равен одной SIM; <b>«Безлимит»</b> отключает только прогноз исчерпания трафика.
           </div>
           <div id="opPkgRows"></div>
           <div id="opPkgStatus" style="font-size:11px;color:var(--text-3);margin-top:8px"></div>
@@ -997,7 +992,7 @@
       </div>
 
       <!-- C1 (23.08): SLA/uptime-отчёт за месяц — серверы (server_downtime без
-           maintenance), модемы (modem_ping), сводка по операторам, CSV. -->
+           maintenance), модемы (минутные online/total), операторы, CSV. -->
       <div id="settingsSection_sla" class="settings-section" style="display:none">
         <div class="analytics-card">
           <div class="settings-card-header" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
@@ -1009,7 +1004,7 @@
             </div>
           </div>
           <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:820px">
-            Доступность за месяц: по серверам — из записей простоя (эпизоды в окнах обслуживания исключены), по модемам — доля успешных пингов (A1). Сводка по операторам — средний uptime их модемов.
+            Доступность за месяц: по серверам — из записей простоя (эпизоды в окнах обслуживания исключены), по модемам — доля минутных проверок «онлайн» среди всех проверок. Сводка по операторам — средний uptime их модемов.
           </div>
           <div id="slaReportArea"><div style="color:var(--text-3);font-size:12px">Выберите месяц и нажмите «Построить»</div></div>
         </div>
@@ -1343,7 +1338,6 @@
     <div class="modal-header"><h3 id="modalTitle">Детали</h3><button class="modal-close" data-on-click="closeModal()">&times;</button></div>
     <div class="modal-tabs" id="modalTabs">
       <div class="modal-tab active" data-tab="info" data-on-click="switchTab('info',this)">Обзор</div>
-      <div class="modal-tab" data-tab="health" data-on-click="switchTab('health',this)">Здоровье</div>
       <div class="modal-tab" data-tab="traffic" data-on-click="switchTab('traffic',this)">Трафик</div>
       <div class="modal-tab" data-tab="iphistory" data-on-click="switchTab('iphistory',this)">Ротации IP</div>
       <div class="modal-tab" data-tab="speed" data-on-click="switchTab('speed',this)">Скорость</div>
@@ -1511,16 +1505,16 @@
 <script src="/js/icons.js?v=0821e"></script>
 <script src="/js/utils.js?v=0820e"></script>
 <script src="/js/delegation.js?v=0727b"></script>
-<script src="/js/admin/delegated-helpers.js?v=0820e"></script>
-<script src="/js/admin/fleet-ui.js?v=0719a"></script>
-<script src="/js/admin/analytics.js?v=0823j"></script>
-<script src="/js/admin/finance.js?v=0823b"></script>
-<script src="/js/admin/modems.js?v=0823n"></script>
-<script src="/js/admin/dguard.js?v=0818a"></script>
-<script src="/js/admin/settings.js?v=0823n"></script>
+<script src="/js/admin/delegated-helpers.js?v=0823p"></script>
+<script src="/js/admin/fleet-ui.js?v=0823p"></script>
+<script src="/js/admin/analytics.js?v=0823p"></script>
+<script src="/js/admin/finance.js?v=0823q"></script>
+<script src="/js/admin/modems.js?v=0823p"></script>
+<script src="/js/admin/dguard.js?v=0823p"></script>
+<script src="/js/admin/settings.js?v=0823q"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0823n"></script>
-<script src="/js/admin.js?v=0823o"></script>
+<script src="/js/admin.js?v=0823r"></script>
 <script src="/js/admin/sse.js?v=0823k"></script>
 </body>
 </html>

@@ -21,7 +21,7 @@ function loadDomainGuard(){
     _dguardRows.forEach(function(r, i){
       h += '<tr><td style="font-family:monospace;font-size:10px">' + esc(r.date) + '</td>'
         + '<td style="font-weight:600">' + esc(r.client_name || '—') + (r.nick ? ' <span style="color:var(--text-3);font-weight:400;font-size:10px">· ' + esc(r.nick) + '</span>' : '') + '</td>'
-        + '<td>' + esc(r.server_name) + '</td>'
+        + '<td>' + esc(_serverDisplayLabel(r.server_name)) + '</td>'
         + '<td><span style="color:var(--danger);font-weight:600">' + esc(r.host) + '</span></td>'
         + '<td style="font-family:monospace">+' + r.hits_delta + '</td>'
         + '<td style="font-family:monospace;color:var(--text-3)">' + r.total + '</td>'
@@ -38,7 +38,7 @@ function openDomainGuardDrill(i){
   if(!r) return;
   var card = document.getElementById('dguardDrillCard');
   var box = document.getElementById('dguardDrill');
-  document.getElementById('dguardDrillTitle').textContent = 'Все домены: ' + (r.client_name || '?') + ' · ' + r.server_name + ' · ' + r.date;
+  document.getElementById('dguardDrillTitle').textContent = 'Все домены: ' + (r.client_name || '?') + ' · ' + _serverDisplayLabel(r.server_name) + ' · ' + r.date;
   card.style.display = '';
   box.innerHTML = '<div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div>';
   api(API + '/api/admin/domain_guard/client_hosts?server=' + encodeURIComponent(r.server_name)

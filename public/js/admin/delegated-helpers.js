@@ -121,14 +121,15 @@ function aeSetProto(p) {
 
 // Открыть модем по нику из карты currentData._modemMap в модалке деталей
 // (бывшая IIFE из карточки «модем»).
-function openModemDetailByNick(nick) {
+function openModemDetailByNick(nick, server) {
   var map = (typeof currentData !== 'undefined' && currentData && currentData._modemMap) || null;
   if (!map) return;
   for (var imei in map) {
     var m = map[imei];
-    if (m.nick === nick) {
+    if (m.nick === nick && (!server || m.server === server)) {
       currentDetailModem = m;
-      document.getElementById('modalTitle').textContent = m.nick + ' (' + m.server + ')';
+      var serverLabel = typeof _serverDisplayLabel === 'function' ? _serverDisplayLabel(m.server) : m.server;
+      document.getElementById('modalTitle').textContent = m.nick + ' (' + serverLabel + ')';
       switchTab('info', document.querySelector('.modal-tab[data-tab=info]'));
       document.getElementById('detailModal').classList.add('show');
       // закрыть оверлей, из которого открыли (если был)

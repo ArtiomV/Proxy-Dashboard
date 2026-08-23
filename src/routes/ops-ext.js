@@ -13,6 +13,7 @@ const simulatorDb = require('../db/simulator');
 const { computeRevenueWindow } = require('../billing/revenue');   // WP8: canonical revenue
 const scheduler = require('../jobs/scheduler');                  // WP6.4: job registry for /api/admin/health
 const maintenance = require('../maintenance');                   // B3 (23.08): окна обслуживания
+const uptimePeriod = require('../uptime-period');
 
 // ── /api/admin/data section degradation wrapper (WP6.2) ──────────────────
 // One failing section degrades to its fallback instead of 502ing the panel.
@@ -481,7 +482,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       operatorAliases: meta.operatorAliases,
       clients: clientsSec.sanitizedClients,
       ipTracking: getIpTracking(),
-      uptimeTracking: getUptimeTracking(),
+      uptimeTracking: uptimePeriod.rollingTracking(db, getUptimeTracking(), 30),
       speedtestLatest: getSpeedtestLatest(),
       ipHistory: getIpHistory(),
       settings: appSettings,
