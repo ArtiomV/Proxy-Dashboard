@@ -18,6 +18,7 @@ function create(deps) {
     offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
     _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
     _metaIccidGetByImei,
+    persistServerDownSince,
   } = deps;
 
 async function trackModems() {
@@ -50,12 +51,13 @@ async function trackModems() {
         }
         delete _serverDownSince[server.name];
         delete _serverUnreachableAlertSent[server.name];
+        if (persistServerDownSince) persistServerDownSince();
         alerts.clearCooldown('server_unreachable', { server: server.name });
       }
     } catch (e) {
       logger.info(`[Tracking] Server ${server.name} unreachable: ${e.message} — marking all modems as down`);
       logActivity('modem', 'warn', 'server_unreachable', server.name, `Server unreachable: ${e.message}`);
-      if (!_serverDownSince[server.name]) _serverDownSince[server.name] = Date.now();
+      if (!_serverDownSince[server.name]) { _serverDownSince[server.name] = Date.now(); if (persistServerDownSince) persistServerDownSince(); }
       // Stage 18.14: only alert if down ≥10 min — RO server has occasional
       // transient ECONNRESET that recovers within minutes; firing per blip
       // was just noise. Cooldown (1h) still prevents repeat spam after that.

@@ -2479,6 +2479,20 @@ const _serverDownSince = {};
 // for modems.
 const _serverUnreachableAlertSent = {};
 
+// 23.08: карту «down since» персистим в kv — иначе каждый pm2-рестарт/деплой
+// обнулял счётчик простоя: TG-алерт «уже N мин» и флапание в карточке
+// начинали отсчёт заново при часах реального простоя.
+function _persistServerDownSince() {
+  try { _kvSet.run('server_down_since', JSON.stringify(_serverDownSince)); } catch (_) { /* best-effort: error intentionally swallowed */ }
+}
+try {
+  const _dsRow = _kvGet.get('server_down_since');
+  if (_dsRow) {
+    const _m = JSON.parse(_dsRow.value);
+    for (const [k, v] of Object.entries(_m)) if (Number.isFinite(v)) _serverDownSince[k] = v;
+  }
+} catch (_) { /* best-effort: error intentionally swallowed */ }
+
 // Stage 18.10: per-modem flag — true if a Telegram «модем оффлайн >20 мин»
 // alert was already sent in this offline streak. Reset when the modem comes
 // back online (or when it crosses the stale_modem_hours threshold and stops
@@ -2808,7 +2822,7 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   _serverDownSince, _serverUnreachableAlertSent, uptimeTracking, ipTracking,
   offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
   _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
-  _metaIccidGetByImei,
+  _metaIccidGetByImei, persistServerDownSince: _persistServerDownSince,
 });
 
 // ========== PROXY LATENCY MONITORING ==========
