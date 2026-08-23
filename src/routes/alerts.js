@@ -45,7 +45,7 @@ module.exports = function (deps) {
     if (!rule) return res.status(404).json({ error: 'unknown rule' });
     // Sample payloads chosen to render meaningfully for each rule.
     const samples = {
-      server_unreachable:         { server: 'TEST', error: 'connection refused (тест)' },
+      server_unreachable:         { server: 'TEST', error: 'connection refused (тест)', downSec: 754 },
       server_recovered:           { server: 'TEST', downSec: 312 },
       tochka_webhook_failed:      { streak: 3, error: 'signature mismatch (тест)' },
       db_backup_failed:           { error: 'ENOSPC: no space left (тест)' },

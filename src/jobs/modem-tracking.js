@@ -61,7 +61,7 @@ async function trackModems() {
       // was just noise. Cooldown (1h) still prevents repeat spam after that.
       const downMs = Date.now() - _serverDownSince[server.name];
       if (downMs >= DISCONNECTED_MS) {   // тот же 10-мин порог, что у модемов (WP1)
-        if (alerts.trigger('server_unreachable', { server: server.name, error: e.message })) {
+        if (alerts.trigger('server_unreachable', { server: server.name, error: e.message, downSec: Math.round(downMs / 1000) })) {
           _serverUnreachableAlertSent[server.name] = true;
         }
       }

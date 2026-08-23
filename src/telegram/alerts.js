@@ -88,7 +88,17 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 3600,   // повтор раз в час, если не вернулся
     dedupeKey: p => 'srv_' + (p.server || 'unknown'),
-    render: p => `🔴 <b>Сервер недоступен</b>\n\nСервер <b>${esc(p.server)}</b> не отвечает (${p.error || 'timeout'}).\nВсе модемы этого сервера в downtime.`,
+    render: p => {
+      // downSec передаёт modem-tracking (знает _serverDownSince); из fallback-контура
+      // (server.js _emitUrgentAlert) приходит без него — тогда строку пропускаем.
+      let downLine = '';
+      if (p.downSec) {
+        const since = new Date(Date.now() - p.downSec * 1000)
+          .toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+        downLine = `\nНедоступен с <b>${since} МСК</b> — уже <b>${formatDuration(p.downSec)}</b>.`;
+      }
+      return `🔴 <b>Сервер недоступен</b>\n\nСервер <b>${esc(p.server)}</b> не отвечает (${p.error || 'timeout'}).${downLine}\nВсе модемы этого сервера в downtime.`;
+    },
   },
   server_recovered: {
     title: 'Сервер вернулся в строй',
