@@ -299,8 +299,11 @@
 
 #tab-dashboard .server-flap-card{height:56px;box-sizing:border-box;margin-top:10px;padding:0 10px;display:grid;grid-template-columns:32px minmax(270px,1.55fr) minmax(145px,1fr) 70px;align-items:center;column-gap:14px;border:1px solid rgba(62,79,105,.13);border-radius:9px;background:#fff;color:#60708e}
 #tab-dashboard .server-flap-card--warning{border-color:rgba(245,158,11,.42);background:linear-gradient(90deg,rgba(245,158,11,.035),rgba(245,158,11,.015))}
+#tab-dashboard .server-flap-card--danger{border-color:rgba(225,50,50,.55);background:linear-gradient(90deg,rgba(225,50,50,.11),rgba(225,50,50,.05))}
+#tab-dashboard .server-flap-card--danger .server-flap-icon{background:rgba(225,50,50,.13);color:#d42a2a}
+#tab-dashboard .server-flap-card--danger .server-flap-count{border-color:rgba(225,50,50,.55);color:#d42a2a;font-weight:700}
 #tab-dashboard .server-flap-icon{width:32px;height:32px;border-radius:7px;background:rgba(245,158,11,.10);color:#f07f00}
-#tab-dashboard .server-flap-card:not(.server-flap-card--warning) .server-flap-icon{background:var(--green-bg);color:var(--success)}
+#tab-dashboard .server-flap-card:not(.server-flap-card--warning):not(.server-flap-card--danger) .server-flap-icon{background:var(--green-bg);color:var(--success)}
 #tab-dashboard .server-flap-copy{display:block;min-width:0}
 #tab-dashboard .server-flap-copy>b{display:block;font-size:13px;line-height:16px;color:#111722;white-space:nowrap}
 #tab-dashboard .server-flap-meta{display:flex;align-items:center;gap:6px;margin-top:3px;font-size:10px;line-height:13px;white-space:nowrap}

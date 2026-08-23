@@ -3806,16 +3806,17 @@ function renderNewFleetServers(){
 
       var down=met.downtime24||{episodes:0,duration_sec:0,events:[]};
       var hasFlaps=Number(down.episodes)>0;
+      var ongoing=(down.events||[]).some(function(e){return e.ongoing;});
       var lastFlap=hasFlaps?_srvMetLastFlap(down):'';
-      h+='<section class="server-flap-card'+(hasFlaps?' server-flap-card--warning':'')+'">'
+      h+='<section class="server-flap-card'+(ongoing?' server-flap-card--danger':(hasFlaps?' server-flap-card--warning':''))+'">'
         +'<span class="server-icon-box server-flap-icon">'+icon('pulse',20)+'</span>'
-        +'<span class="server-flap-copy"><b>Флапание за 24 часа</b><span class="server-flap-meta">'
+        +'<span class="server-flap-copy"><b>'+(ongoing?'Сервер недоступен сейчас':'Флапание за 24 часа')+'</b><span class="server-flap-meta">'
         +'<span class="server-flap-count">'+esc(_srvMetEpisodeLabel(down.episodes))+'</span>'
         +'<strong>'+esc(_srvMetMinutes(down.duration_sec))+'</strong><span>недоступности</span>'
-        +(hasFlaps?'<span class="server-flap-last">Последний: '+esc(lastFlap)+'</span>':'')
+        +(hasFlaps?'<span class="server-flap-last">'+(ongoing?'Идёт':'Последний')+': '+esc(lastFlap)+'</span>':'')
         +'</span></span>'
         +_srvMetFlapTimeline(down,(window._srvMetData||{}).generated_at)
-        +(hasFlaps?'<span class="server-flap-last-mobile">Последний: '+esc(lastFlap)+'</span>':'')
+        +(hasFlaps?'<span class="server-flap-last-mobile">'+(ongoing?'Идёт':'Последний')+': '+esc(lastFlap)+'</span>':'')
         +'<button type="button" class="server-card-link server-card-link--warning" data-on-click="openServerOverviewSection(\'serverHealth\')">История <span class="server-card-arrow">→</span></button>'
         +'</section>';
 

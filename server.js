@@ -3441,6 +3441,7 @@ app.use(require('./src/routes/servers')({
   fetchApi, saveApiServersToDb, proxySmart,
   auditLog, getClientIp, getSetting,
   setSettings, rescheduleSpeedtests, rescheduleProxyCheck,
+  _serverDownSince,   // незакрытые простои → downtime24 в /api/admin/server_metrics
 }));
 
 

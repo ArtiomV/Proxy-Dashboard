@@ -148,6 +148,11 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
         duration_sec: Math.round((clippedTo - clippedFrom) / 1000),
       });
     }
+  // Незакрытые эпизоды: сервер лежит ПРЯМО СЕЙЧАС — в server_downtime запись
+  // появится только после восстановления (modem-tracking), поэтому текущий
+  // простой подмешиваем из in-memory _serverDownSince. Иначе карточка лежащего
+  // бокса показывала «флапание: 0 мин» (баг 23.08).
+  _mergeOngoingDowntime(downtime24, deps._serverDownSince, nowMs);
   } catch (_) { /* server_downtime may not exist on an old local DB */ }
 
   // Последнее серверное событие. Аппаратные USB-события берём из истории
@@ -630,3 +635,29 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
 
   return r;
 };
+
+// Подмешивает незакрытые (текущие) эпизоды простоя из in-memory карты
+// { serverName: downSinceMs } в downtime24, собранный из server_downtime.
+// Эпизод помечается ongoing:true, границы подрезаются окном 24ч — как у
+// закрытых. Чистая функция: покрыта тестами напрямую.
+function _mergeOngoingDowntime(downtime24, downSinceMap, nowMs) {
+  if (!downSinceMap) return downtime24;
+  for (const [name, since] of Object.entries(downSinceMap)) {
+    const fromMs = Number(since);
+    if (!Number.isFinite(fromMs)) continue;
+    const clippedFrom = Math.max(fromMs, nowMs - 24 * 3600e3);
+    if (nowMs <= clippedFrom) continue;
+    const d = downtime24[name] || (downtime24[name] = { episodes: 0, duration_sec: 0, events: [] });
+    d.episodes += 1;
+    d.duration_sec += Math.round((nowMs - clippedFrom) / 1000);
+    d.events.push({
+      from: new Date(clippedFrom).toISOString(),
+      to: new Date(nowMs).toISOString(),
+      duration_sec: Math.round((nowMs - clippedFrom) / 1000),
+      ongoing: true,
+    });
+  }
+  return downtime24;
+}
+
+module.exports._mergeOngoingDowntime = _mergeOngoingDowntime;

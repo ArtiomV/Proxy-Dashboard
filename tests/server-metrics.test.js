@@ -278,3 +278,28 @@ describe('ServerMetrics: GET /api/admin/server_metrics', () => {
     expect(res.body.addresses).toBeTruthy();
   });
 });
+
+describe('downtime24: незакрытый эпизод (_mergeOngoingDowntime)', () => {
+  const { _mergeOngoingDowntime } = require('../src/routes/servers.js');
+  it('текущий простой попадает в эпизоды с ongoing:true и нарастающей длительностью', () => {
+    const now = Date.now();
+    const d24 = {};
+    _mergeOngoingDowntime(d24, { S1: now - 25 * 60e3 }, now);
+    expect(d24.S1.episodes).toBe(1);
+    expect(d24.S1.duration_sec).toBeGreaterThanOrEqual(1499);
+    expect(d24.S1.duration_sec).toBeLessThanOrEqual(1501);
+    expect(d24.S1.events[0].ongoing).toBe(true);
+  });
+  it('эпизод старше 24ч подрезается окном; null-карта — no-op', () => {
+    const now = Date.now();
+    const d24 = { S2: { episodes: 1, duration_sec: 300, events: [] } };
+    _mergeOngoingDowntime(d24, { S2: now - 26 * 3600e3, S3: now - 5 * 60e3 }, now);
+    expect(d24.S2.episodes).toBe(2);
+    expect(d24.S2.duration_sec).toBe(300 + 24 * 3600);
+    expect(d24.S2.events[0].ongoing).toBe(true);
+    expect(d24.S3.episodes).toBe(1);
+    const before = JSON.stringify(d24);
+    _mergeOngoingDowntime(d24, null, now);
+    expect(JSON.stringify(d24)).toBe(before);
+  });
+});

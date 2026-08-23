@@ -270,6 +270,7 @@ function _srvMetLastFlap(downtime) {
   var events = downtime && downtime.events || [];
   if (!events.length) return '';
   var e = events[events.length - 1];
+  if (e.ongoing) return 'с ' + _srvMetClock(e.from) + ' · ' + _srvMetMinutes(e.duration_sec) + ', продолжается';
   return _srvMetClock(e.from) + '–' + _srvMetClock(e.to) + ' · ' + _srvMetMinutes(e.duration_sec);
 }
 
