@@ -78,7 +78,9 @@ var COUNTRIES={};
 var COUNTRY_ORDER=[];
 function _initServers(servers){if(!servers||!servers.length)return;COUNTRIES={};COUNTRY_ORDER=[];servers.slice().sort(function(a,b){return a.name.localeCompare(b.name)}).forEach(function(s){COUNTRIES[s.name]={flag:_countryFlags[s.country]||'',name:_countryNamesRu[s.countryName]||s.countryName||s.name,displayName:s.displayName||s.name,serverIp:s.publicIp||'',country:s.country||'',address:s.address||''};COUNTRY_ORDER.push(s.name);});}
 function _serverDisplayName(name){var c=COUNTRIES[name]||{};return c.displayName||name;}
-function _serverDisplayLabel(name){var d=_serverDisplayName(name);return d===name?name:d+' ('+name+')';}
+// Старые S-коды из интерфейса убраны (23.08): сервера показываем только под
+// названиями, заданными владельцем. Технический ключ остаётся лишь в БД.
+function _serverDisplayLabel(name){return _serverDisplayName(name);}
 
 // ========== THEME ==========
 // Весь кабинет — СВЕТЛАЯ тема по умолчанию (Дашборд/Финансы и так scoped-light в
@@ -883,7 +885,7 @@ function renderSysDashboard(targetId){
       +kpi('users','Активные сессии',String(d.sessions||0),'администраторы и клиенты','is-purple')+'</div>';
 
     h+='<div class="sh-grid"><article class="sh-card sh-servers"><div class="sh-card-head"><div><small>Инфраструктура</small><h3>Серверы ProxySmart</h3></div><span>'+(d.servers||[]).length+' шт.</span></div><div class="sh-server-list">';
-    (d.servers||[]).forEach(function(s){var off=!!cached[s.name],f=fleet[s.name]||{},on=f.working!=null?f.working:(f.online||0),tot=f.total||0;h+='<div class="sh-server-row"><span class="sh-server-dot '+(off?'is-off':'is-on')+'"></span><span class="sh-server-name"><b title="Внутренний ID: '+esc(s.name)+'">'+esc(s.displayName||s.name)+'</b><small>'+esc(s.country||'Без страны')+'</small></span><span class="sh-server-modems"><b>'+on+'/'+tot+'</b><small>модемов</small></span><span class="sh-server-state '+(off?'is-off':'is-on')+'">'+(off?'Нет связи':'В сети')+'</span></div>';});
+    (d.servers||[]).forEach(function(s){var off=!!cached[s.name],f=fleet[s.name]||{},on=f.working!=null?f.working:(f.online||0),tot=f.total||0;h+='<div class="sh-server-row"><span class="sh-server-dot '+(off?'is-off':'is-on')+'"></span><span class="sh-server-name"><b>'+esc(s.displayName||s.name)+'</b><small>'+esc(s.country||'Без страны')+'</small></span><span class="sh-server-modems"><b>'+on+'/'+tot+'</b><small>модемов</small></span><span class="sh-server-state '+(off?'is-off':'is-on')+'">'+(off?'Нет связи':'В сети')+'</span></div>';});
     h+='</div></article>';
 
     var mem=d.memory||{},disk=d.disk||{};function bar(label,pct,meta,tone){pct=Math.max(0,Math.min(100,Number(pct)||0));return '<div class="sh-resource"><div><span>'+label+'</span><b>'+meta+'</b></div><div class="sh-bar"><i class="'+(tone||'')+'" style="width:'+pct+'%"></i></div></div>';}
@@ -3811,7 +3813,7 @@ function renderNewFleetServers(){
     var h='<article class="server-overview-card'+(isDown?' server-overview-card--down':'')+'" data-srv-spark="'+esc(srv)+'">';
     h+='<header class="server-overview-header">'
       +'<div class="server-overview-identity"><span class="server-overview-flag">'+flag+'</span><span class="server-overview-heading">'
-      +'<span class="server-overview-title" title="Внутренний ID: '+esc(srv)+'">'+esc(ci.displayName||srv)+(ci.name?' <span class="server-overview-bullet">•</span> '+esc(ci.name):'')+'</span>'
+      +'<span class="server-overview-title">'+esc(ci.displayName||srv)+(ci.name?' <span class="server-overview-bullet">•</span> '+esc(ci.name):'')+'</span>'
       +(addr?'<span class="server-overview-address">'+esc(addr)+'</span>':'')+'</span></div>'
       +'<div class="server-overview-services"><span class="server-overview-services-value" style="color:'+(isDown?'var(--danger)':col)+'">'+working+'/'+total+'</span>'
       +'<span class="server-overview-services-label">'+(isDown?'Бокс недоступен':(disc>0?disc+' отключено':'Модемы'))+'</span></div>'

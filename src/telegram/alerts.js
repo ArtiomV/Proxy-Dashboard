@@ -76,6 +76,23 @@ function _depsEnabled() {
   return !appSettings || appSettings.alert_dependencies_enabled !== false;
 }
 
+// Отображаемое название сервера (23.08): площадки переименовываются в
+// настройках, технические S-коды в уведомлениях не показываем. Кэш на минуту.
+let _srvNamesCache = null, _srvNamesCacheAt = 0;
+function _srvLabel(name) {
+  if (!name) return name;
+  try {
+    if (!_srvNamesCache || Date.now() - _srvNamesCacheAt > 60e3) {
+      const row = kvGet && kvGet('api_servers');
+      const list = row && row.value ? JSON.parse(row.value) : [];
+      _srvNamesCache = {};
+      if (Array.isArray(list)) for (const s of list) _srvNamesCache[s.name] = s.displayName || s.name;
+      _srvNamesCacheAt = Date.now();
+    }
+    return _srvNamesCache[name] || name;
+  } catch (_) { return name; }
+}
+
 // ── B2: ack-подавление ───────────────────────────────────────────
 function _ackRows() {
   const now = Date.now();
@@ -213,7 +230,7 @@ const RULES = {
           .toLocaleString('ru-RU', { timeZone: 'Europe/Moscow', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
         downLine = `\nНедоступен с <b>${since} МСК</b> — уже <b>${formatDuration(p.downSec)}</b>.`;
       }
-      return `🔴 <b>Сервер недоступен</b>\n\nСервер <b>${esc(p.server)}</b> не отвечает (${p.error || 'timeout'}).${downLine}\nВсе модемы этого сервера в downtime.`;
+      return `🔴 <b>Сервер недоступен</b>\n\nСервер <b>${esc(_srvLabel(p.server))}</b> не отвечает (${p.error || 'timeout'}).${downLine}\nВсе модемы этого сервера в downtime.`;
     },
   },
   server_recovered: {
@@ -222,7 +239,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 60,
     dedupeKey: p => 'srvrec_' + (p.server || 'unknown'),
-    render: p => `🟢 <b>Сервер на связи</b>\n\nСервер <b>${esc(p.server)}</b> снова отвечает после ${formatDuration(p.downSec)} простоя.${p.suppressed ? `\nЗа время простоя подавлено каскадных алертов модемов: <b>${p.suppressed}</b> — смотри сводку по серверу.` : ''}`,
+    render: p => `🟢 <b>Сервер на связи</b>\n\nСервер <b>${esc(_srvLabel(p.server))}</b> снова отвечает после ${formatDuration(p.downSec)} простоя.${p.suppressed ? `\nЗа время простоя подавлено каскадных алертов модемов: <b>${p.suppressed}</b> — смотри сводку по серверу.` : ''}`,
   },
   tochka_webhook_failed: {
     title: 'Webhook от Точки сбоит подряд',
@@ -335,7 +352,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 60,
     dedupeKey: p => 'mrec_' + (p.server || '') + '_' + (p.imei || ''),
-    render: p => `🟢 <b>Модем на связи</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — снова отвечает после ${formatDuration(p.downSec || 0)} простоя.`,
+    render: p => `🟢 <b>Модем на связи</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(_srvLabel(p.server) || '?')}) — снова отвечает после ${formatDuration(p.downSec || 0)} простоя.`,
   },
   recovery_exhausted: {
     title: 'Auto-recovery исчерпал попытки',
@@ -360,7 +377,7 @@ const RULES = {
         ? p.moves.map(m => `• <b>${esc(m.client)}</b> → <b>${esc(m.spareNick)}</b>`).join('\n')
         : `Клиент <b>${esc(p.client || '?')}</b> перенесён на <b>${esc(p.spareNick || '?')}</b>.`;
       const n = Array.isArray(p.moves) && p.moves.length ? p.moves.length : 1;
-      return `🔀 <b>Failover выполнен</b>\n\nМодем <b>${esc(p.deadNick || '?')}</b> (${esc(p.server || '?')}) — перенесено портов: <b>${n}</b>.\n${lines}\nПричина: ${esc(p.reason || '?')}. Строки подключения сохранены, внешний IP сменился.`;
+      return `🔀 <b>Failover выполнен</b>\n\nМодем <b>${esc(p.deadNick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — перенесено портов: <b>${n}</b>.\n${lines}\nПричина: ${esc(p.reason || '?')}. Строки подключения сохранены, внешний IP сменился.`;
     },
   },
   failover_no_spare: {
@@ -371,7 +388,7 @@ const RULES = {
     dedupeKey: p => 'fnospare_' + (p.server || '') + '_' + (p.nick || ''),
     render: p => {
       const clients = Array.isArray(p.clients) && p.clients.length ? p.clients : [p.client || '?'];
-      return `🔴 <b>Failover невозможен — нет спейра</b>\n\nМодем <b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}) умер, без рабочего прокси остались: ${clients.map(c => `<b>${esc(c)}</b>`).join(', ')}.\nНа сервере нет здорового свободного модема для замены. Повторю через 15 мин, если не решится.`;
+      return `🔴 <b>Failover невозможен — нет спейра</b>\n\nМодем <b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) умер, без рабочего прокси остались: ${clients.map(c => `<b>${esc(c)}</b>`).join(', ')}.\nНа сервере нет здорового свободного модема для замены. Повторю через 15 мин, если не решится.`;
     },
   },
   failover_failed: {
@@ -384,7 +401,7 @@ const RULES = {
       const lines = Array.isArray(p.clients) && p.clients.length
         ? p.clients.map(c => `• <b>${esc(c.client)}</b>: ${esc(c.error || '?')}`).join('\n')
         : `Клиент <b>${esc(p.client || '?')}</b>: ${esc(p.error || 'неизвестная ошибка')}.`;
-      return `🔴 <b>Failover не удался</b>\n\n${esc(p.server || '?')}:\n${lines}\nНужно вмешаться вручную.`;
+      return `🔴 <b>Failover не удался</b>\n\n${esc(_srvLabel(p.server) || '?')}:\n${lines}\nНужно вмешаться вручную.`;
     },
   },
   // ── ProxySmart SIM / health signals (Batch 1) ────────────────
@@ -397,7 +414,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 3600,
     dedupeKey: p => 'simred_' + (p.server || '') + '_' + (p.imei || ''),
-    render: p => `⚠️ <b>Проблема с SIM</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — оператор навязал HTTP-редирект.\nОбычно это значит: на SIM кончились деньги или она заблокирована.`,
+    render: p => `⚠️ <b>Проблема с SIM</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(_srvLabel(p.server) || '?')}) — оператор навязал HTTP-редирект.\nОбычно это значит: на SIM кончились деньги или она заблокирована.`,
   },
   sim_iccid_changed: {
     title: 'SIM заменена (ICCID сменился)',
@@ -405,7 +422,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 3600,
     dedupeKey: p => 'iccid_' + (p.server || '') + '_' + (p.imei || ''),
-    render: p => `🔄 <b>SIM заменена</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — ICCID изменился при том же модеме.\nБыл: <code>${esc(p.old_iccid || '')}</code>\nСтал: <code>${esc(p.new_iccid || '')}</code>\nЕсли SIM никто не менял — разберись, откуда новая карта.`,
+    render: p => `🔄 <b>SIM заменена</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(_srvLabel(p.server) || '?')}) — ICCID изменился при том же модеме.\nБыл: <code>${esc(p.old_iccid || '')}</code>\nСтал: <code>${esc(p.new_iccid || '')}</code>\nЕсли SIM никто не менял — разберись, откуда новая карта.`,
   },
   sim_status_bad: {
     title: 'SIM: статус не OK',
@@ -413,7 +430,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 3600,
     dedupeKey: p => 'simstat_' + (p.server || '') + '_' + (p.imei || ''),
-    render: p => `📵 <b>Проблема с SIM</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — статус SIM: <b>${esc(p.simStatus || '?')}</b> (ожидается OK).`,
+    render: p => `📵 <b>Проблема с SIM</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(_srvLabel(p.server) || '?')}) — статус SIM: <b>${esc(p.simStatus || '?')}</b> (ожидается OK).`,
   },
   reboot_score_high: {
     title: 'Модему может потребоваться ребут (reboot score)',
@@ -421,7 +438,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 86400,
     dedupeKey: p => 'reboot_' + (p.server || '') + '_' + (p.imei || ''),
-    render: p => `♻️ <b>Модему может потребоваться ребут</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — reboot score <b>${p.score}</b>. Возможно нужен USB-reset.`,
+    render: p => `♻️ <b>Модему может потребоваться ребут</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(_srvLabel(p.server) || '?')}) — reboot score <b>${p.score}</b>. Возможно нужен USB-reset.`,
   },
 
   payment_received: {
@@ -512,7 +529,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 3600,
     dedupeKey: p => 'testday_' + (p.client_id || '') + '_' + (p.port_id || ''),
-    render: p => `🧪 <b>Тест-день завершён</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: порт <code>${esc(p.port_id || '?')}</code> (${esc(p.server || '?')}) отвязан и возвращён в пул.`,
+    render: p => `🧪 <b>Тест-день завершён</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: порт <code>${esc(p.port_id || '?')}</code> (${esc(_srvLabel(p.server) || '?')}) отвязан и возвращён в пул.`,
   },
   // B2C Э3 (WP5): операционные алерты розницы — регистрации, покупки, пул.
   retail_registered: {
@@ -562,7 +579,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 300,
     dedupeKey: p => 'abuse_' + (p.client_id || '') + '_' + (p.port_id || ''),
-    render: p => `🚨 <b>Антифрод: порт розницы приостановлен</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: порт <code>${esc(p.port_id || '?')}</code> (${esc(p.server || '?')}) — обращение к <code>${esc(p.host || '?')}</code> из бан-листа.\nНарушений (strikes): <b>${p.strikes ?? '?'}</b>${p.blocked ? '\n\n⛔ Порог strikes достигнут — аккаунт ЗАБЛОКИРОВАН, сессии убиты.' : ''}\nРазблокировка — только вручную (карточка клиента).`,
+    render: p => `🚨 <b>Антифрод: порт розницы приостановлен</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: порт <code>${esc(p.port_id || '?')}</code> (${esc(_srvLabel(p.server) || '?')}) — обращение к <code>${esc(p.host || '?')}</code> из бан-листа.\nНарушений (strikes): <b>${p.strikes ?? '?'}</b>${p.blocked ? '\n\n⛔ Порог strikes достигнут — аккаунт ЗАБЛОКИРОВАН, сессии убиты.' : ''}\nРазблокировка — только вручную (карточка клиента).`,
   },
   // B2C Э5 (WP7): анти-мультиаккаунт — отказ регистрации по лимиту reg_ip.
   retail_multiaccount_ip: {
@@ -581,7 +598,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 21600,   // 6ч на бокс — метрика 14-дневная, быстро не меняется
     dedupeKey: p => 'poolip_' + (p.server || 'unknown'),
-    render: p => `📉 <b>Уникальность IP пула деградировала</b>\n\n<b>${esc(p.server || '?')}</b>: уникальных IP за 14 дней <b>${p.uniqueIps ?? '?'}%</b> (порог ${p.min ?? '?'}%).\nРозница платит за «чистые» IP — проверь ротации и занятость модемов на боксе.`,
+    render: p => `📉 <b>Уникальность IP пула деградировала</b>\n\n<b>${esc(_srvLabel(p.server) || '?')}</b>: уникальных IP за 14 дней <b>${p.uniqueIps ?? '?'}%</b> (порог ${p.min ?? '?'}%).\nРозница платит за «чистые» IP — проверь ротации и занятость модемов на боксе.`,
   },
   // Пул пуст: buy_proxy не смог зарезервировать ни одного free-порта.
   retail_pool_empty: {
@@ -590,7 +607,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 1800,
     dedupeKey: p => 'poolempty_' + (p.server || 'unknown'),
-    render: p => `🔴 <b>Пул розницы пуст</b>\n\nНа <b>${esc(p.server || '?')}</b> (geo ${esc(p.geo || '?')}) нет свободных портов — клиенту отказано в покупке.\nСрочно пополни пул.`,
+    render: p => `🔴 <b>Пул розницы пуст</b>\n\nНа <b>${esc(_srvLabel(p.server) || '?')}</b> (geo ${esc(p.geo || '?')}) нет свободных портов — клиенту отказано в покупке.\nСрочно пополни пул.`,
   },
   // Заявка с лендинга не ушла в Twenty CRM. Заявка НЕ потеряна: она в
   // локальной таблице leads и в TG-боте сайта — это сигнал починить контур
@@ -777,7 +794,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 86400,
     dedupeKey: p => 'pscontract_' + (p.server || 'unknown'),
-    render: p => `🔴 <b>Бокс ${esc(p.server || '?')} отвечает не по контракту</b>\n\nНарушения (${p.count || '?'}):\n<code>${esc((p.sample || '').slice(0, 500))}</code>\nПарсинг дашборда может молча деградировать — сверься с docs/PROXYSMART-CONTRACT.md.`,
+    render: p => `🔴 <b>Бокс ${esc(_srvLabel(p.server) || '?')} отвечает не по контракту</b>\n\nНарушения (${p.count || '?'}):\n<code>${esc((p.sample || '').slice(0, 500))}</code>\nПарсинг дашборда может молча деградировать — сверься с docs/PROXYSMART-CONTRACT.md.`,
   },
 
   // D2 (23.08): SSL-сертификат домена. ≤14 дней — important, ≤3 / ошибка
@@ -809,7 +826,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 1800,
     dedupeKey: p => 'pingdead_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
-    render: p => `🔴 <b>Модем online, но интернета нет</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — потери пинга <b>${p.loss}%</b> два замера подряд${p.latency != null ? ` (${p.latency} мс)` : ''}.\nСимка в сети, но трафик не идёт — проверь площадку/баланс оператора.`,
+    render: p => `🔴 <b>Модем online, но интернета нет</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(_srvLabel(p.server) || '?')}) — потери пинга <b>${p.loss}%</b> два замера подряд${p.latency != null ? ` (${p.latency} мс)` : ''}.\nСимка в сети, но трафик не идёт — проверь площадку/баланс оператора.`,
   },
   modem_ping_recovered: {
     title: 'Пинг модема восстановился',
@@ -817,7 +834,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 60,
     dedupeKey: p => 'pingrec_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
-    render: p => `🟢 <b>Интернет на модеме вернулся</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — пинг снова проходит${p.latency != null ? ` (${p.latency} мс)` : ''}.`,
+    render: p => `🟢 <b>Интернет на модеме вернулся</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(_srvLabel(p.server) || '?')}) — пинг снова проходит${p.latency != null ? ` (${p.latency} мс)` : ''}.`,
   },
   modem_ping_slow: {
     title: 'Модем: деградация канала',
@@ -825,7 +842,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 3600,
     dedupeKey: p => 'pingslow_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
-    render: p => `🟡 <b>Деградация канала</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — пинг ${p.latency} мс, потери ${p.loss}% (3 замера подряд).`,
+    render: p => `🟡 <b>Деградация канала</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(_srvLabel(p.server) || '?')}) — пинг ${p.latency} мс, потери ${p.loss}% (3 замера подряд).`,
   },
   // A2 (23.08): HTTP-чек сайта через прокси-порт модема.
   modem_http_fail: {
@@ -834,7 +851,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 3600,
     dedupeKey: p => 'httpfail_' + (p.server || '') + '_' + (p.nick || ''),
-    render: p => `🔴 <b>Сайт не открывается через прокси</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}) — чек <code>${esc(p.url || '')}</code> упал 2 раза подряд.\nПричина: <b>${esc(p.error || ('HTTP ' + (p.status || '?')))}</b>${/content_blocked/.test(p.error || '') ? '\nПохоже на заглушку оператора («пополните баланс») — проверь симку.' : ''}`,
+    render: p => `🔴 <b>Сайт не открывается через прокси</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — чек <code>${esc(p.url || '')}</code> упал 2 раза подряд.\nПричина: <b>${esc(p.error || ('HTTP ' + (p.status || '?')))}</b>${/content_blocked/.test(p.error || '') ? '\nПохоже на заглушку оператора («пополните баланс») — проверь симку.' : ''}`,
   },
   modem_http_recovered: {
     title: 'HTTP-чек восстановился',
@@ -842,7 +859,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 60,
     dedupeKey: p => 'httprec_' + (p.server || '') + '_' + (p.nick || ''),
-    render: p => `🟢 <b>Сайт снова открывается</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}) — чек проходит${p.ms != null ? ` (${p.ms} мс)` : ''}.`,
+    render: p => `🟢 <b>Сайт снова открывается</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — чек проходит${p.ms != null ? ` (${p.ms} мс)` : ''}.`,
   },
   server_metric_anomaly: {
     title: 'Сервер: отклонение от динамической нормы',
@@ -850,7 +867,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 21600,
     dedupeKey: p => 'srvanom_' + (p.server || '') + '_' + (p.metric || ''),
-    render: p => `🟠 <b>Аномалия серверной метрики</b>\n\n<b>${esc(p.server || '?')}</b>: ${esc(p.label || p.metric || 'метрика')} = <b>${p.current}</b>. Обычный уровень за 7 дней — ${p.baseline}, динамический порог — ${p.threshold}${p.deviation_pct != null ? ` (отклонение <b>+${p.deviation_pct}%</b>)` : ''}.`,
+    render: p => `🟠 <b>Аномалия серверной метрики</b>\n\n<b>${esc(_srvLabel(p.server) || '?')}</b>: ${esc(p.label || p.metric || 'метрика')} = <b>${p.current}</b>. Обычный уровень за 7 дней — ${p.baseline}, динамический порог — ${p.threshold}${p.deviation_pct != null ? ` (отклонение <b>+${p.deviation_pct}%</b>)` : ''}.`,
   },
   server_disk_forecast: {
     title: 'Сервер: прогноз исчерпания диска',
@@ -858,7 +875,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 86400,
     dedupeKey: p => 'srvdisk_' + (p.server || ''),
-    render: p => `🟡 <b>Диск может заполниться</b>\n\n<b>${esc(p.server || '?')}</b>: свободно ${p.free_gb} ГБ, рост ~${p.growth_gb_day} ГБ/сут. При текущем темпе место закончится примерно через <b>${p.days_left} дн</b> (${esc(p.full_date || '?')}).`,
+    render: p => `🟡 <b>Диск может заполниться</b>\n\n<b>${esc(_srvLabel(p.server) || '?')}</b>: свободно ${p.free_gb} ГБ, рост ~${p.growth_gb_day} ГБ/сут. При текущем темпе место закончится примерно через <b>${p.days_left} дн</b> (${esc(p.full_date || '?')}).`,
   },
   // A4 (23.08): объёмные алерты с пакетами по операторам.
   volume_modem_hourly: {
@@ -867,7 +884,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 21600,   // 6 ч — дедуп по модему
     dedupeKey: p => 'volh_' + (p.server || '') + '_' + (p.nick || ''),
-    render: p => `🟠 <b>Аномальный трафик за час</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}, ${esc(p.operator || '?')}) — <b>${p.gb} ГБ</b> за час при пороге ${p.threshold_gb} ГБ${p.pct_of_package != null ? ` — это <b>${p.pct_of_package}%</b> пакета симки` : ''}.\nЕсли это не клиентская нагрузка — проверь модем.`,
+    render: p => `🟠 <b>Аномальный трафик за час</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}, ${esc(p.operator || '?')}) — <b>${p.gb} ГБ</b> за час при пороге ${p.threshold_gb} ГБ${p.pct_of_package != null ? ` — это <b>${p.pct_of_package}%</b> пакета симки` : ''}.\nЕсли это не клиентская нагрузка — проверь модем.`,
   },
   volume_package_pace: {
     title: 'Пакет оператора: темп расхода',
@@ -876,7 +893,7 @@ const RULES = {
     cooldownSec: 21600,   // 6 ч — дедуп по оператору/симке
     dedupeKey: p => 'volp_' + (p.scope === 'sim' ? (p.server || '') + '_' + (p.nick || '') : (p.operator || '')),
     render: p => p.scope === 'sim'
-      ? `🟠 <b>Симка выходит за темп пакета</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}, ${esc(p.operator || '?')}) — <b>${p.gb_day} ГБ</b> за сегодня при пакете ${p.package_gb} ГБ (порог ${p.pace_pct}%/сут).`
+      ? `🟠 <b>Симка выходит за темп пакета</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}, ${esc(p.operator || '?')}) — <b>${p.gb_day} ГБ</b> за сегодня при пакете ${p.package_gb} ГБ (порог ${p.pace_pct}%/сут).`
       : `🟠 <b>Пакет ${esc(p.operator || '?')} расходуется быстрее нормы</b>\n\nТекущий темп: <b>${p.gb_day} ГБ/сут</b> (${p.modems} модемов, израсходовано ${p.used_gb} из ${p.package_gb} ГБ)${p.days_left != null ? ` — такими темпами пакета хватит ещё на <b>~${p.days_left} дн</b>` : ''}.`,
   },
   volume_package_exhaustion: {
@@ -886,7 +903,7 @@ const RULES = {
     cooldownSec: 86400,
     dedupeKey: p => 'volforecast_' + (p.scope === 'sim' ? (p.server || '') + '_' + (p.nick || '') : (p.operator || '')),
     render: p => p.scope === 'sim'
-      ? `🟠 <b>Пакет SIM скоро закончится</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}, ${esc(p.operator || '?')}): использовано ${p.used_gb} из ${p.package_gb} ГБ, темп ${p.gb_day} ГБ/сут. Осталось примерно <b>${p.days_left} дн</b>${p.full_date ? ` — до ${esc(p.full_date)}` : ''}.`
+      ? `🟠 <b>Пакет SIM скоро закончится</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}, ${esc(p.operator || '?')}): использовано ${p.used_gb} из ${p.package_gb} ГБ, темп ${p.gb_day} ГБ/сут. Осталось примерно <b>${p.days_left} дн</b>${p.full_date ? ` — до ${esc(p.full_date)}` : ''}.`
       : `🟠 <b>Бандл ${esc(p.operator || '?')} скоро закончится</b>\n\nИспользовано ${p.used_gb} из ${p.package_gb} ГБ (${p.modems || 0} модемов), темп ${p.gb_day} ГБ/сут. Осталось примерно <b>${p.days_left} дн</b>${p.full_date ? ` — до ${esc(p.full_date)}` : ''}.`,
   },
 

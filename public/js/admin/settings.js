@@ -69,7 +69,7 @@ function loadServersList(){
       h+='</div>';
       // Edit body (hidden)
       h+='<div class="server-body" id="srvEdit_'+sn+'" style="display:none">';
-      h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">Отображаемое название</div><input class="form-input" id="displayName_'+sn+'" maxlength="60" value="'+displayName+'" placeholder="Например, Кишинёв — Армянская" style="font-size:12px;width:100%"><div style="font-size:10px;color:var(--text-3);margin-top:4px">Внутренний ID '+sn+' не меняется: так сохраняются история метрик и связи модемов.</div></div>';
+      h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">Отображаемое название</div><input class="form-input" id="displayName_'+sn+'" maxlength="60" value="'+displayName+'" placeholder="Например, Кишинёв — Армянская" style="font-size:12px;width:100%"><div style="font-size:10px;color:var(--text-3);margin-top:4px">Внутренний технический код '+sn+' не меняется: так сохраняются история метрик и связи модемов.</div></div>';
       h+='<div class="server-field"><div class="server-field-label">Панель Логин</div><input class="form-input" id="panelUser_'+sn+'" value="'+esc(s.panelUser||'')+'" placeholder="proxy" style="font-size:12px"></div>';
       h+='<div class="server-field"><div class="server-field-label">Панель Пароль</div><input class="form-input" id="panelPass_'+sn+'" value="'+esc(s.panelPassword||'')+'" placeholder="пароль" style="font-size:12px"></div>';
       h+='<div class="server-field"><div class="server-field-label">SSH Логин</div><input class="form-input" id="osLogin_'+sn+'" value="'+esc(s.osLogin||'')+'" placeholder="root" style="font-size:12px"></div>';

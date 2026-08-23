@@ -67,7 +67,7 @@ function _srvMetCard(name, m, address) {
   var h = '<div style="' + wrap + '">';
   // Шапка: имя · адрес площадки; справа — источник и возраст/время данных.
   h += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px">'
-    + '<span style="font-size:12px;font-weight:600;color:var(--text-0)" title="Внутренний ID: ' + esc(name) + '">' + esc(displayName)
+    + '<span style="font-size:12px;font-weight:600;color:var(--text-0)">' + esc(displayName)
     + (address ? ' <span style="font-weight:400;color:var(--text-2)">· ' + esc(address) + '</span>' : '')
     + '</span>';
   var meta = [];

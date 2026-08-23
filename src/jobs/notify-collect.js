@@ -26,6 +26,23 @@ const { computeFleet } = require('../modems/fleet');   // WP4.2: bell set == car
 const scheduler = require('./scheduler');              // C8/§10.7: реестр → /api/admin/health.jobs
 const CLIENT_DEBT_THRESHOLD = -10;       // ₽
 
+// Отображаемое название сервера для текстов уведомлений (23.08): S-коды
+// наружу не показываем. Кэш на минуту.
+let _srvNamesCache = null, _srvNamesCacheAt = 0;
+function _srvLabel(db, name) {
+  if (!name) return name;
+  try {
+    if (!_srvNamesCache || Date.now() - _srvNamesCacheAt > 60e3) {
+      const row = db.prepare("SELECT value FROM kv_store WHERE key = 'api_servers'").get();
+      const list = row && row.value ? JSON.parse(row.value) : [];
+      _srvNamesCache = {};
+      if (Array.isArray(list)) for (const s of list) _srvNamesCache[s.name] = s.displayName || s.name;
+      _srvNamesCacheAt = Date.now();
+    }
+    return _srvNamesCache[name] || name;
+  } catch (_) { return name; }
+}
+
 let deps = null;
 let _interval = null;
 
@@ -110,7 +127,7 @@ async function passOfflineModems() {
       entity_kind: 'modem',
       entity_id: nick,
       title: 'Модем оффлайн',
-      message: `📴 <b>${esc(nick)}</b> (${esc(o.server)}) — не отвечает ${mins} мин.\nПоследний онлайн: ${esc(lastOnlineLocal)} МСК`,
+      message: `📴 <b>${esc(nick)}</b> (${esc(_srvLabel(deps.db, o.server))}) — не отвечает ${mins} мин.\nПоследний онлайн: ${esc(lastOnlineLocal)} МСК`,
       payload: { server: o.server, imei: String(o.key).split('|')[1] || '', nick, mins, lastOnline: lastOnlineLocal },
     });
   }

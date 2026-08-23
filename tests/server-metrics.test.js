@@ -95,6 +95,18 @@ describe('ServerMetrics: parseSshMetrics', () => {
     const absent = SSH_OUT.replace(/^Swap:.*$/m, '');
     expect(parseSshMetrics(absent).swap_used_pct).toBeNull();
   });
+
+  it('секции 8/9: дрейф часов (epoch бокса) и USB-ошибки ядра', () => {
+    const out = SSH_OUT
+      + '\n---\n1755000000'
+      + '\n---\nusb 1-7.3.2.1: USB disconnect, device number 79\nusb 1-7.4: reset high-speed USB device';
+    const m = parseSshMetrics(out, (1755000000 + 65) * 1000);
+    expect(m.box_time_drift_sec).toBe(-65);
+    expect(m.usb_errors).toMatch(/^2: usb 1-7\.3\.2\.1: USB disconnect/);
+    // без nowMs дрейф не считается; без секции USB — пустая строка
+    expect(parseSshMetrics(SSH_OUT).box_time_drift_sec).toBeNull();
+    expect(parseSshMetrics(SSH_OUT).usb_errors).toBe('');
+  });
 });
 
 // Фрагмент /system_status (реальная структура панели).
@@ -199,20 +211,37 @@ describe('ServerMetrics: runServerMetrics (fallback на HTTP)', () => {
     expect(row.mongo_ok).toBe(1);
   });
 
-  it('панель отвечает → её conns приоритетнее SSH-fallback', async () => {
+  it('SSH доступен → панель не дёргается, всё из SSH (source=ssh)', async () => {
     db.prepare('DELETE FROM server_metrics').run();
+    let httpCalls = 0;
     const job = serverMetrics.create({
       db,
       logger: { info() {}, warn() {}, error() {} },
       apiServers: [{ name: 'S13', url: 'http://box', user: 'u', pass: 'p', osLogin: 'mon', publicIp: '1.2.3.4' }],
       execFile: (cmd, args, opts, cb) => cb(null, SSH_OUT),
-      proxyConf: { getPage: async () => ({ ok: true, html: STATUS_HTML, status: 200 }) },
+      proxyConf: { getPage: async () => { httpCalls++; return { ok: true, html: STATUS_HTML, status: 200 }; } },
     });
     await job.runServerMetrics();
     const row = db.prepare('SELECT * FROM server_metrics WHERE server_name = ?').get('S13');
-    expect(row.source).toBe('mixed');
-    expect(row.conns).toBe(93);        // из панели, не 84 из SSH
-    expect(row.usb_errors).toMatch(/^2: /);   // есть только у панели
+    expect(httpCalls).toBe(0);           // SSH-first: микса источников нет
+    expect(row.source).toBe('ssh');
+    expect(row.conns).toBe(84);          // ESTABLISHED TCP по SSH, не панельные 93
+    expect(row.cpu_pct).toBe(22.2);
+  });
+
+  it('SSH успешен, но метрики пустые → считаем сбор неудачным, fallback на HTTP', async () => {
+    db.prepare('DELETE FROM server_metrics').run();
+    const job = serverMetrics.create({
+      db,
+      logger: { info() {}, warn() {}, error() {} },
+      apiServers: [{ name: 'S14', url: 'http://box', user: 'u', pass: 'p', osLogin: 'mon', osPassword: 'x', publicIp: '1.2.3.4' }],
+      execFile: (cmd, args, opts, cb) => cb(null, 'garbage'),   // ssh exit 0, stdout непарсабелен
+      proxyConf: { getPage: async () => ({ ok: true, html: STATUS_HTML, status: 200 }) },
+    });
+    await job.runServerMetrics();
+    const row = db.prepare('SELECT * FROM server_metrics WHERE server_name = ?').get('S14');
+    expect(row.source).toBe('http');     // пустая SSH-строка не пишется
+    expect(row.conns).toBe(93);
   });
 
   it('недоступны оба источника → строка с error, без ssh-кредов SSH не зовём', async () => {
