@@ -102,8 +102,8 @@ function runStartup(d) {
     } catch (e) { logger.warn('[ProxyExpiry] check failed: ' + e.message); }
   });
 
-  // Start modem tracking (IP + uptime) — every tracking_interval_min (default 3)
-  const TRACKING_INTERVAL_MS = (appSettings.tracking_interval_min || 3) * 60000;
+  // Start modem tracking (IP + uptime) — every tracking_interval_min (default 1)
+  const TRACKING_INTERVAL_MS = (appSettings.tracking_interval_min || 1) * 60000;
   logger.info(`[Tracking] Starting IP & uptime tracking (every ${TRACKING_INTERVAL_MS / 60000} min)...`);
   trackModems().catch(e => logger.error('[Tracking] Initial error:', e.message));
   _intervals.push(setInterval(() => {

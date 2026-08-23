@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const { tochkaRequest } = require('../tochka/api');
 const { isModemOwned } = require('../modems/ownership');
 const { sha256hex } = require('../utils/secrets');
+const sla = require('../sla');
 
 module.exports = function createClientPortalRouter(deps) {
   const {
@@ -81,6 +82,17 @@ module.exports = function createClientPortalRouter(deps) {
   // Closing-documents/bills routes need the live tochkaConfig — call the
   // getter on every request since saveTochkaConfig() rebinds the global.
   const tochkaConfig = new Proxy({}, { get: (_t, k) => getTochkaConfig()[k] });
+
+r.get('/api/client/sla_report', authMiddleware, (req, res) => {
+  const month = String(req.query.month || '');
+  const clientInfo = clientByLogin.get(req.user.login);
+  if (!clientInfo) return res.status(404).json({ error: 'Клиент не найден' });
+  try {
+    return res.json(sla.buildClientReport(db, month, clientInfo.portName || clientInfo.login));
+  } catch (e) {
+    return res.status(400).json({ error: e.message });
+  }
+});
 
 r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) => {
   try {
@@ -218,7 +230,7 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
 
     // Include server info for client portal (needed for IP addresses)
     merged.servers = apiServers.map(s => ({
-      name: s.name, publicIp: s.publicIp,
+      name: s.name, displayName: s.displayName || s.name, publicIp: s.publicIp,
       country: (SERVER_COUNTRIES[s.name] || {}).country || '',
       countryName: (SERVER_COUNTRIES[s.name] || {}).name || s.name
     }));

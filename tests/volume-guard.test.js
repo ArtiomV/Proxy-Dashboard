@@ -13,6 +13,7 @@ let db, alertsFired, settings;
 const PKG = JSON.stringify([
   { operator: 'Orange MD',   type: 'per_sim', volume_gb: 400,   hourly_gb: 20, pace_pct: 10 },
   { operator: 'Moldtelecom', type: 'shared',  volume_gb: 30720, hourly_gb: 30, pace_pct: 5 },
+  { operator: 'Digi',        type: 'unlimited', volume_gb: 0,   hourly_gb: 30, pace_pct: 0 },
 ]);
 
 function mk(overrides = {}) {
@@ -47,6 +48,23 @@ beforeEach(() => {
 });
 
 describe('volume-guard', () => {
+  it('buildForecasts: per-SIM and shared packages get explicit days/date forecasts', () => {
+    for (let d = 1; d <= 10; d++) {
+      const day = String(d).padStart(2, '0');
+      addRow('S1', 'MD_01', 'Orange MD', '2026-08-' + day + ' 01:00', 10 * 1e9);
+      addRow('S1', 'MDT_01', 'Moldtelecom', '2026-08-' + day + ' 02:00', 90 * 1e9);
+    }
+    const forecasts = vgMod.buildForecasts(db, JSON.parse(PKG), new Date('2026-08-10T12:00:00.000Z'));
+    const sim = forecasts.find(f => f.scope === 'sim' && f.nick === 'MD_01');
+    expect(sim).toMatchObject({ used_gb: 100, gb_day: 10, days_left: 30, full_date: '2026-09-09' });
+    const shared = forecasts.find(f => f.scope === 'package' && f.operator === 'Moldtelecom');
+    expect(shared.used_gb).toBe(900);
+    expect(shared.days_left).toBeGreaterThan(300);
+    const unlimited = forecasts.find(f => f.operator === 'Digi');
+    expect(unlimited.status).toBe('unlimited');
+    expect(unlimited.days_left).toBeUndefined();
+  });
+
   it('модем за час выше порога per_sim → volume_modem_hourly с % пакета', () => {
     addRow('S1', 'MD_01', 'Orange MD', '2026-08-23 05:00', 25 * 1e9);   // 25 ГБ > 20 ГБ
     const job = mk();
@@ -105,5 +123,19 @@ describe('volume-guard', () => {
     const res = job.runOnce();
     expect(res.hourlyAlerts).toBe(1);
     expect(alertsFired[0].payload.threshold_gb).toBe(30);
+  });
+
+  it('безлимит: почасовая аномалия работает, алерт темпа не создаётся', () => {
+    const today = new Date().toISOString().slice(0, 10);
+    addRow('S1', 'DIGI_1', 'Digi', today + ' 01:00', 35 * 1e9);
+    const job = mk();
+    const res = job.runOnce();
+    expect(res.hourlyAlerts).toBe(1);
+    expect(res.paceAlerts).toBe(0);
+    expect(alertsFired).toHaveLength(1);
+    expect(alertsFired[0]).toMatchObject({
+      rule: 'volume_modem_hourly',
+      payload: { operator: 'Digi', pct_of_package: null, threshold_gb: 30 },
+    });
   });
 });

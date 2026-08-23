@@ -844,6 +844,22 @@ const RULES = {
     dedupeKey: p => 'httprec_' + (p.server || '') + '_' + (p.nick || ''),
     render: p => `🟢 <b>Сайт снова открывается</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}) — чек проходит${p.ms != null ? ` (${p.ms} мс)` : ''}.`,
   },
+  server_metric_anomaly: {
+    title: 'Сервер: отклонение от динамической нормы',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 21600,
+    dedupeKey: p => 'srvanom_' + (p.server || '') + '_' + (p.metric || ''),
+    render: p => `🟠 <b>Аномалия серверной метрики</b>\n\n<b>${esc(p.server || '?')}</b>: ${esc(p.label || p.metric || 'метрика')} = <b>${p.current}</b>. Обычный уровень за 7 дней — ${p.baseline}, динамический порог — ${p.threshold}${p.deviation_pct != null ? ` (отклонение <b>+${p.deviation_pct}%</b>)` : ''}.`,
+  },
+  server_disk_forecast: {
+    title: 'Сервер: прогноз исчерпания диска',
+    priority: 'early',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'srvdisk_' + (p.server || ''),
+    render: p => `🟡 <b>Диск может заполниться</b>\n\n<b>${esc(p.server || '?')}</b>: свободно ${p.free_gb} ГБ, рост ~${p.growth_gb_day} ГБ/сут. При текущем темпе место закончится примерно через <b>${p.days_left} дн</b> (${esc(p.full_date || '?')}).`,
+  },
   // A4 (23.08): объёмные алерты с пакетами по операторам.
   volume_modem_hourly: {
     title: 'Модем: аномальный трафик за час',
@@ -862,6 +878,16 @@ const RULES = {
     render: p => p.scope === 'sim'
       ? `🟠 <b>Симка выходит за темп пакета</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}, ${esc(p.operator || '?')}) — <b>${p.gb_day} ГБ</b> за сегодня при пакете ${p.package_gb} ГБ (порог ${p.pace_pct}%/сут).`
       : `🟠 <b>Пакет ${esc(p.operator || '?')} расходуется быстрее нормы</b>\n\nТекущий темп: <b>${p.gb_day} ГБ/сут</b> (${p.modems} модемов, израсходовано ${p.used_gb} из ${p.package_gb} ГБ)${p.days_left != null ? ` — такими темпами пакета хватит ещё на <b>~${p.days_left} дн</b>` : ''}.`,
+  },
+  volume_package_exhaustion: {
+    title: 'Прогноз исчерпания пакета',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'volforecast_' + (p.scope === 'sim' ? (p.server || '') + '_' + (p.nick || '') : (p.operator || '')),
+    render: p => p.scope === 'sim'
+      ? `🟠 <b>Пакет SIM скоро закончится</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}, ${esc(p.operator || '?')}): использовано ${p.used_gb} из ${p.package_gb} ГБ, темп ${p.gb_day} ГБ/сут. Осталось примерно <b>${p.days_left} дн</b>${p.full_date ? ` — до ${esc(p.full_date)}` : ''}.`
+      : `🟠 <b>Бандл ${esc(p.operator || '?')} скоро закончится</b>\n\nИспользовано ${p.used_gb} из ${p.package_gb} ГБ (${p.modems || 0} модемов), темп ${p.gb_day} ГБ/сут. Осталось примерно <b>${p.days_left} дн</b>${p.full_date ? ` — до ${esc(p.full_date)}` : ''}.`,
   },
 
   // ── 🔵 EARLY WARNING ────────────────────────────────────────
@@ -916,6 +942,9 @@ const _entityFor = {
   modem_http_recovered:      p => ({ kind: 'modem',   id: p.nick || null }),
   volume_modem_hourly:       p => ({ kind: 'modem',   id: p.nick || null }),
   volume_package_pace:       p => ({ kind: 'system',  id: 'volume:' + (p.operator || p.nick || '') }),
+  volume_package_exhaustion: p => ({ kind: p.scope === 'sim' ? 'modem' : 'system', id: p.nick || ('volume:' + (p.operator || '')) }),
+  server_metric_anomaly:     p => ({ kind: 'system',  id: 'server:' + (p.server || '') }),
+  server_disk_forecast:      p => ({ kind: 'system',  id: 'server:' + (p.server || '') }),
   recovery_exhausted:        p => ({ kind: 'modem',   id: p.nick || null }),
   failover_done:             p => ({ kind: 'modem',   id: p.spareNick || p.deadNick || null }),
   failover_no_spare:         p => ({ kind: 'modem',   id: p.nick || null }),
@@ -977,7 +1006,7 @@ function isRuleEnabled(ruleId) {
   if (!rule) return false;
   // appSettings.alert_<ruleId>_enabled — null/undefined = use default
   const key = 'alert_' + ruleId + '_enabled';
-  const v = appSettings[key];
+  const v = appSettings && appSettings[key];
   if (v === undefined || v === null) return !!rule.defaultOn;
   return !!v;
 }
@@ -1130,6 +1159,45 @@ function trigger(ruleId, payload) {
   }
 }
 
+// Explicit diagnostics from Settings → Notifications. Unlike trigger(), this
+// deliberately ignores the production gates (rule toggle, boot grace,
+// cooldown, maintenance, ack and dependency suppression): the operator is
+// testing delivery, not simulating another incident. Returning a structured
+// reason avoids the old misleading catch-all «disabled or no chat_id».
+async function testRule(ruleId, payload) {
+  const rule = RULES[ruleId];
+  if (!rule) return { ok: false, reason: 'unknown_rule' };
+
+  let text;
+  try { text = rule.render(payload || {}); }
+  catch (e) { return { ok: false, reason: 'render_failed', error: e.message }; }
+  text = `🧪 <b>ТЕСТОВОЕ УВЕДОМЛЕНИЕ</b>\n\n${text}`;
+
+  if (rule.channel === 'bell') {
+    const dedup = 'manual_test_' + Date.now();
+    _persistToBell(rule, ruleId, payload || {}, dedup, text);
+    try { if (eventsBus) eventsBus.publish('alert', { ruleId, priority: rule.priority || 'info', test: true }); }
+    catch (_) { /* best-effort */ }
+    return { ok: true, channel: 'bell' };
+  }
+
+  const token = typeof getSetting === 'function' ? getSetting('telegram_bot_token', '') : '';
+  const chatId = appSettings && appSettings.telegram_chat_id;
+  if (!token) return { ok: false, reason: 'telegram_bot_token_missing' };
+  if (!chatId) return { ok: false, reason: 'telegram_chat_id_missing' };
+
+  try {
+    const result = await tgBot.sendMessage(token, chatId, text);
+    if (result && result.ok === false) {
+      return { ok: false, reason: 'telegram_rejected', error: result.description || 'Telegram rejected the message' };
+    }
+    return { ok: true, channel: 'telegram' };
+  } catch (e) {
+    if (logger && logger.warn) logger.warn('[Alerts] test send (' + ruleId + '): ' + (e && e.message || e));
+    return { ok: false, reason: 'telegram_error', error: e && e.message || String(e) };
+  }
+}
+
 // Bell-only event recorder for sources that DON'T flow through the
 // Telegram framework (the collector job for offline modems, client debts).
 // Same dedup model — caller passes a stable dedup_key
@@ -1210,7 +1278,7 @@ function formatDuration(sec) {
   return h + ' ч ' + (m % 60) + ' мин';
 }
 
-module.exports = { init, trigger, clearCooldown, listRules, recordBellEvent, isRuleEnabled, RULES,
+module.exports = { init, trigger, testRule, clearCooldown, listRules, recordBellEvent, isRuleEnabled, RULES,
   onAlertAck,                     // B2: обработчик inline-кнопок (bot.js)
   _ackHash, _ackInvalidate,       // B2: для тестов
   _boxDownState: boxDownState,   // B1: для тестов и диагностики

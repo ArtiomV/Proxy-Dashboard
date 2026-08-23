@@ -555,7 +555,7 @@ SQLite (WAL mode, foreign keys, auto-vacuum) с 20+ таблицами:
 
 ### Автоматизация (фоновые процессы)
 - **Опрос модемов**: статусы каждые ~30 сек (кеш ProxySmart)
-- **Трафик и uptime**: каждые 3 минуты (`trackModems`)
+- **Трафик и uptime**: каждую минуту (`trackModems`)
 - **Почасовая агрегация**: каждые 10 минут (`aggregateHourlyTraffic`)
 - **Speedtest**: по расписанию (например, 02:00 и 14:00)
 - **Ping Destination**: нативные значения ProxySmart при каждом цикле tracking

@@ -12,6 +12,8 @@
 
 const express = require('express');
 const credCheck = require('../services/cred-check');
+const predictive = require('../monitoring/predictive');
+const { buildForecasts } = require('../jobs/volume-guard');
 
 module.exports = function createServersRouter(deps) {
   const {
@@ -119,6 +121,27 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
         series24: series24[row.server_name] || null,
       };
     }
+    // Семидневный robust baseline + линейный прогноз заполнения диска. Это
+    // вычисляемые поля: источник истины остаётся server_metrics, поэтому
+    // смена алгоритма не требует миграции исторических данных.
+    const predictiveSince = new Date(nowMs - 7 * 24 * 3600e3).toISOString();
+    const predictiveRows = db.prepare(`SELECT id, server_name, collected_at,
+        cpu_pct, mem_used_pct, temp_c, conns, disk_used_mb, disk_total_mb
+      FROM server_metrics WHERE collected_at > ? ORDER BY server_name, collected_at`).all(predictiveSince);
+    const predictiveByServer = {};
+    for (const item of predictiveRows) {
+      (predictiveByServer[item.server_name] || (predictiveByServer[item.server_name] = [])).push(item);
+    }
+    for (const [name, metric] of Object.entries(byName)) {
+      const history = predictiveByServer[name] || [];
+      const latest = history[history.length - 1] || metric;
+      const analysis = predictive.analyze(history, latest, {
+        minSamples: Number(getSetting('predictive_min_samples', 24)) || 24,
+      });
+      metric.baselines = analysis.baselines;
+      metric.anomalies = analysis.anomalies;
+      metric.disk_forecast = analysis.disk_forecast;
+    }
   } catch (e) {
     logger.warn('[ServerMetrics] read failed: ' + e.message);
   }
@@ -208,9 +231,20 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
   res.json({ metrics: byName, addresses, generated_at: generatedAt });
 });
 
+r.get('/api/admin/operator-package-forecast', authMiddleware, adminMiddleware, (req, res) => {
+  let packages = [];
+  try {
+    const raw = getSetting('operator_packages', '[]');
+    packages = Array.isArray(raw) ? raw : JSON.parse(String(raw || '[]'));
+    if (!Array.isArray(packages)) packages = [];
+  } catch (_) { packages = []; }
+  const forecasts = buildForecasts(db, packages, new Date());
+  res.json({ generated_at: new Date().toISOString(), forecasts });
+});
+
 r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
   res.json({ servers: apiServers.map(s => ({
-    name: s.name, url: s.url, publicIp: s.publicIp,
+    name: s.name, displayName: s.displayName || s.name, url: s.url, publicIp: s.publicIp,
     country: SERVER_COUNTRIES[s.name] || {},
     panelUser: s.user || '', panelPassword: s.pass || '',
     osLogin: s.osLogin || '', osPassword: s.osPassword || '', sshPort: s.sshPort || '',
@@ -221,7 +255,20 @@ r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
 r.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, async (req, res) => {
   const srv = apiServers.find(s => s.name === req.params.name);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  const { osLogin, osPassword, sshPort, hardware, address, panelUser, panelPassword } = req.body;
+  const { displayName, osLogin, osPassword, sshPort, hardware, address, panelUser, panelPassword } = req.body;
+  if (displayName !== undefined) {
+    const cleanName = String(displayName || '').replace(/\s+/g, ' ').trim();
+    if (cleanName.length > 60 || /[\u0000-\u001f\u007f]/.test(cleanName)) {
+      return res.status(400).json({ error: 'Название сервера: до 60 символов, без управляющих символов' });
+    }
+    const effective = cleanName || srv.name;
+    const duplicate = apiServers.find(s => s !== srv
+      && String(s.displayName || s.name).trim().toLocaleLowerCase('ru-RU') === effective.toLocaleLowerCase('ru-RU'));
+    if (duplicate) return res.status(409).json({ error: 'Такое отображаемое название уже используется' });
+    // `name` (S1/S2/…) remains the immutable operational key used by metrics,
+    // modem history and ProxySmart. Only the human-facing alias is editable.
+    srv.displayName = cleanName && cleanName !== srv.name ? cleanName : undefined;
+  }
   if (osLogin     !== undefined) srv.osLogin    = osLogin;
   if (osPassword  !== undefined) srv.osPassword = osPassword;
   if (sshPort !== undefined) {
@@ -245,28 +292,39 @@ r.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, async (req,
     if (!candidate.user || !candidate.pass) {
       return res.status(400).json({ error: 'panel user and password cannot be empty' });
     }
-    try {
-      await fetchApi(candidate, '/apix/show_status_json', 8000);
-    } catch (e) {
-      return res.status(502).json({ error: 'Panel auth failed — credentials not saved', details: e.message });
+    const credentialsChanged = candidate.user !== srv.user || candidate.pass !== srv.pass;
+    if (credentialsChanged) {
+      try {
+        await fetchApi(candidate, '/apix/show_status_json', 8000);
+      } catch (e) {
+        return res.status(502).json({ error: 'Panel auth failed — credentials not saved', details: e.message });
+      }
+      proxySmart.invalidateCache();
     }
     srv.user = candidate.user;
     srv.pass = candidate.pass;
-    proxySmart.invalidateCache();
   }
 
   saveApiServersToDb();
   auditLog(req.user.login, 'update_server', { name: req.params.name, fields: Object.keys(req.body || {}), ip: getClientIp(req) });
-  res.json({ ok: true });
+  res.json({ ok: true, name: srv.name, displayName: srv.displayName || srv.name });
 });
 
 r.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) => {
-  const { name, url, user, pass, publicIp, country, countryName, tz } = req.body;
+  const { name, displayName, url, user, pass, publicIp, country, countryName, tz } = req.body;
   if (!name || !url || !user || !pass) return res.status(400).json({ error: 'name, url, user, pass required' });
   if (apiServers.find(s => s.name === name)) return res.status(409).json({ error: 'Server name already exists' });
+  const cleanDisplayName = String(displayName || '').replace(/\s+/g, ' ').trim();
+  if (cleanDisplayName.length > 60 || /[\u0000-\u001f\u007f]/.test(cleanDisplayName)) {
+    return res.status(400).json({ error: 'Название сервера: до 60 символов, без управляющих символов' });
+  }
+  const effectiveName = cleanDisplayName || String(name);
+  if (apiServers.some(s => String(s.displayName || s.name).trim().toLocaleLowerCase('ru-RU') === effectiveName.toLocaleLowerCase('ru-RU'))) {
+    return res.status(409).json({ error: 'Такое отображаемое название уже используется' });
+  }
   // Test connectivity
   try {
-    const testServer = { name, url, user, pass, publicIp: publicIp || new URL(url).hostname, country: country || '', countryName: countryName || name, tz: tz || 'Europe/Moscow' };
+    const testServer = { name, displayName: cleanDisplayName || undefined, url, user, pass, publicIp: publicIp || new URL(url).hostname, country: country || '', countryName: countryName || name, tz: tz || 'Europe/Moscow' };
     const status = await fetchApi(testServer, '/apix/show_status_json', 10000);
     const modemCount = Array.isArray(status) ? status.length : 0;
     // Add to runtime. SERVER_COUNTRIES is rebuilt inside saveApiServersToDb
@@ -283,14 +341,7 @@ r.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) =
 });
 
 r.delete('/api/admin/servers/:name', authMiddleware, adminMiddleware, (req, res) => {
-  const idx = apiServers.findIndex(s => s.name === req.params.name);
-  if (idx === -1) return res.status(404).json({ error: 'Server not found' });
-  apiServers.splice(idx, 1);
-  // SERVER_COUNTRIES rebuilt inside saveApiServersToDb (WP4.3).
-  saveApiServersToDb();
-  proxySmart.invalidateCache();
-  auditLog(req.user.login, 'delete_server', { name: req.params.name, ip: getClientIp(req) });
-  res.json({ ok: true });
+  res.status(405).json({ error: 'Удаление серверов отключено. Сервер можно только редактировать.' });
 });
 
 r.get('/api/admin/settings', authMiddleware, adminMiddleware, (req, res) => {
@@ -391,8 +442,8 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
     patch.operator_gb_costs = oc;
   }
   // A4 (23.08): пакеты операторов — JSON-массив [{operator, type, volume_gb,
-  // hourly_gb, pace_pct}]. До 20 строк; operator ≤60 символов; type — только
-  // per_sim/shared; числа в разумных пределах.
+  // hourly_gb, pace_pct}]. Количество SIM определяется по модемам в БД.
+  // До 20 строк; operator ≤60 символов; type — per_sim/shared/unlimited.
   if (req.body.operator_packages != null) {
     let arr;
     try { arr = JSON.parse(String(req.body.operator_packages)); }
@@ -412,19 +463,22 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
       if (!knownOperators.has(op.toLowerCase())) {
         return res.status(400).json({ error: `operator_packages: оператор «${op}» отсутствует в справочнике` });
       }
-      const type = p.type === 'shared' ? 'shared' : 'per_sim';
+      const type = p.type === 'shared' || p.type === 'unlimited' ? p.type : 'per_sim';
       const num = (v, max) => { const n = parseFloat(v); return (Number.isFinite(n) && n >= 0 && n <= max) ? n : 0; };
       clean.push({
         operator: op, type,
-        volume_gb: num(p.volume_gb, 1e6),
-        sim_count: Math.floor(num(p.sim_count, 10000)),
+        volume_gb: type === 'unlimited' ? 0 : num(p.volume_gb, 1e6),
         hourly_gb: num(p.hourly_gb, 1e5),
-        pace_pct: Math.min(100, num(p.pace_pct, 100)),
+        pace_pct: type === 'unlimited' ? 0 : Math.min(100, num(p.pace_pct, 100)),
       });
     }
     patch.operator_packages = JSON.stringify(clean);
   }
   if (req.body.volume_enabled != null) patch.volume_enabled = !!req.body.volume_enabled;
+  if (req.body.package_forecast_warn_days != null) patch.package_forecast_warn_days = Math.max(1, Math.min(90, parseInt(req.body.package_forecast_warn_days) || 7));
+  if (req.body.predictive_enabled != null) patch.predictive_enabled = !!req.body.predictive_enabled;
+  if (req.body.predictive_min_samples != null) patch.predictive_min_samples = Math.max(12, Math.min(500, parseInt(req.body.predictive_min_samples) || 24));
+  if (req.body.disk_forecast_warn_days != null) patch.disk_forecast_warn_days = Math.max(1, Math.min(365, parseInt(req.body.disk_forecast_warn_days) || 30));
   // SSE (23.08): realtime-канал админки; выкл → фронт работает на polling 60 сек
   if (req.body.sse_enabled != null) patch.sse_enabled = !!req.body.sse_enabled;
   // Stage 19 — failover
@@ -439,7 +493,7 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.failover_cooldown_h != null)       patch.failover_cooldown_h       = Math.max(1, Math.min(72, parseInt(req.body.failover_cooldown_h) || 6));
   if (req.body.failover_max_per_hour != null)     patch.failover_max_per_hour     = Math.max(1, Math.min(50, parseInt(req.body.failover_max_per_hour) || 5));
   // Modem tracking & rotation
-  if (req.body.tracking_interval_min != null)      patch.tracking_interval_min      = Math.max(1, Math.min(30, parseInt(req.body.tracking_interval_min) || 3));
+  if (req.body.tracking_interval_min != null)      patch.tracking_interval_min      = Math.max(1, Math.min(30, parseInt(req.body.tracking_interval_min) || 1));
   if (req.body.rotation_cache_ttl_min != null)     patch.rotation_cache_ttl_min     = Math.max(5, Math.min(240, parseInt(req.body.rotation_cache_ttl_min) || 30));
   if (req.body.rotation_sync_interval_min != null) patch.rotation_sync_interval_min = Math.max(5, Math.min(240, parseInt(req.body.rotation_sync_interval_min) || 30));
   // Proxy check (additional)

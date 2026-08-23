@@ -8,9 +8,13 @@
 //   [{ operator: 'Orange MD',     type: 'per_sim', volume_gb: 400,
 //      hourly_gb: 20,  pace_pct: 10 },
 //    { operator: 'Moldtelecom',   type: 'shared',  volume_gb: 30720,
-//      hourly_gb: 30,  pace_pct: 5  }, ...]
+//      hourly_gb: 30,  pace_pct: 5  },
+//    { operator: 'Digi',          type: 'unlimited', volume_gb: 0,
+//      hourly_gb: 30,  pace_pct: 0  }, ...]
 //   per_sim — объём на каждую симку (Orange 400 ГБ);
 //   shared  — общий котёл на оператора (Moldtelecom/Moldcell 30 ТБ).
+//   unlimited — безлимит: проверяем только аномальный расход за час, без
+//               алертов об исчерпании и темпе.
 //   hourly_gb — порог мгновенной аномалии (ГБ/час на модем);
 //               пусто у per_sim → 5% пакета; пусто у shared →
 //               volume_hourly_default_gb.
@@ -30,6 +34,87 @@
 
 const GB = 1e9;
 
+function findPackage(pkgs, operator) {
+  const op = String(operator || '').toLowerCase().trim();
+  if (!op) return null;
+  for (const p of pkgs || []) {
+    const po = String(p.operator || '').toLowerCase().trim();
+    if (po && (op === po || op.startsWith(po) || po.startsWith(op))) return p;
+  }
+  return null;
+}
+
+function _forecastDate(now, daysLeft) {
+  if (!Number.isFinite(daysLeft)) return null;
+  return new Date(now.getTime() + Math.max(0, daysLeft) * 86400e3).toISOString().slice(0, 10);
+}
+
+// Forecasts are based on current-month average daily usage. This intentionally
+// shares the same traffic_hourly source as billing and package alerts.
+function buildForecasts(db, pkgs, now = new Date()) {
+  const date = new Date(now);
+  if (!Number.isFinite(date.getTime())) return [];
+  const todayUtc = date.toISOString().slice(0, 10);
+  const monthUtc = todayUtc.slice(0, 7);
+  const elapsedDays = Math.max(1, Number(todayUtc.slice(8, 10)));
+  let rows = [];
+  try {
+    rows = db.prepare(`
+      SELECT server_name, nick, operator, SUM(bytes_in + bytes_out) AS b
+      FROM traffic_hourly WHERE hour_start >= ?
+      GROUP BY server_name, nick, operator
+    `).all(monthUtc + '-01 00:00');
+  } catch (_) { return []; }
+
+  const out = [];
+  for (const pkg of pkgs || []) {
+    const type = pkg.type === 'shared' || pkg.type === 'unlimited' ? pkg.type : 'per_sim';
+    const matches = rows.filter(r => findPackage([pkg], r.operator));
+    if (type === 'unlimited') {
+      out.push({ scope: 'package', operator: pkg.operator, type, status: 'unlimited', modems: new Set(matches.map(r => r.server_name + '/' + r.nick)).size });
+      continue;
+    }
+    const limitGb = Number(pkg.volume_gb);
+    if (!(limitGb > 0)) {
+      out.push({ scope: 'package', operator: pkg.operator, type, status: 'not_configured', modems: matches.length });
+      continue;
+    }
+    const make = (scope, usedGb, extra) => {
+      const dailyGb = usedGb / elapsedDays;
+      const remainingGb = Math.max(0, limitGb - usedGb);
+      const daysLeft = usedGb >= limitGb ? 0 : (dailyGb > 0 ? remainingGb / dailyGb : null);
+      return {
+        scope, operator: pkg.operator, type,
+        package_gb: limitGb,
+        used_gb: Math.round(usedGb * 10) / 10,
+        remaining_gb: Math.round(remainingGb * 10) / 10,
+        gb_day: Math.round(dailyGb * 10) / 10,
+        days_left: daysLeft == null ? null : Math.round(daysLeft * 10) / 10,
+        full_date: _forecastDate(date, daysLeft),
+        status: usedGb >= limitGb ? 'exhausted' : dailyGb > 0 ? 'forecast' : 'no_usage',
+        ...extra,
+      };
+    };
+    if (type === 'per_sim') {
+      for (const row of matches) {
+        out.push(make('sim', (Number(row.b) || 0) / GB, {
+          server: row.server_name, nick: row.nick, operator_actual: row.operator,
+        }));
+      }
+    } else {
+      const usedGb = matches.reduce((sum, row) => sum + (Number(row.b) || 0) / GB, 0);
+      out.push(make('package', usedGb, {
+        modems: new Set(matches.map(r => r.server_name + '/' + r.nick)).size,
+      }));
+    }
+  }
+  return out.sort((a, b) => {
+    const ad = a.days_left == null ? Infinity : a.days_left;
+    const bd = b.days_left == null ? Infinity : b.days_left;
+    return ad - bd;
+  });
+}
+
 function create(deps) {
   const { db, logger, alerts, getSetting } = deps;
 
@@ -43,13 +128,7 @@ function create(deps) {
   }
 
   function _findPkg(pkgs, operator) {
-    const op = String(operator || '').toLowerCase().trim();
-    if (!op) return null;
-    for (const p of pkgs) {
-      const po = String(p.operator || '').toLowerCase().trim();
-      if (po && (op === po || op.startsWith(po) || po.startsWith(op))) return p;
-    }
-    return null;
+    return findPackage(pkgs, operator);
   }
 
   function _hourlyThresholdGb(pkg) {
@@ -76,7 +155,7 @@ function create(deps) {
       GROUP BY server_name, nick
     `).all(lastHour);
 
-    let hourlyAlerts = 0, paceAlerts = 0;
+    let hourlyAlerts = 0, paceAlerts = 0, forecastAlerts = 0;
     for (const r of hourRows) {
       const pkg = _findPkg(pkgs, r.operator);
       if (!pkg) continue;
@@ -138,13 +217,22 @@ function create(deps) {
       })) paceAlerts++;
     }
 
-    if (hourlyAlerts || paceAlerts) {
-      logger.info(`[VolumeGuard] hour=${lastHour}: ${hourlyAlerts} hourly, ${paceAlerts} pace alerts`);
+    // 3) Явный прогноз исчерпания — независимо от ручного pace_pct.
+    // Пер-SIM пакеты прогнозируются для каждой SIM, shared — одним котлом.
+    const forecasts = buildForecasts(db, pkgs, new Date());
+    const warnDays = Math.max(1, Number(getSetting('package_forecast_warn_days', 7)) || 7);
+    for (const f of forecasts) {
+      if (f.days_left == null || f.days_left > warnDays) continue;
+      if (alerts.trigger('volume_package_exhaustion', f)) forecastAlerts++;
     }
-    return { hour: lastHour, hourlyAlerts, paceAlerts };
+
+    if (hourlyAlerts || paceAlerts || forecastAlerts) {
+      logger.info(`[VolumeGuard] hour=${lastHour}: ${hourlyAlerts} hourly, ${paceAlerts} pace, ${forecastAlerts} forecast alerts`);
+    }
+    return { hour: lastHour, hourlyAlerts, paceAlerts, forecastAlerts, forecasts };
   }
 
   return { runOnce, _packages, _findPkg };
 }
 
-module.exports = { create };
+module.exports = { create, findPackage, buildForecasts };

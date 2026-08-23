@@ -39,17 +39,22 @@ beforeAll(() => {
 afterAll(() => db.close());
 
 describe('GET /api/public/status', () => {
-  it('returns real country aggregates and never invents residential uptime', async () => {
+  it('returns real mobile aggregates and the product-fixed RU component', async () => {
     const res = await request(app).get('/api/public/status');
     expect(res.status).toBe(200);
     expect(res.headers['access-control-allow-origin']).toBe('*');
-    expect(res.body.source).toBe('proxysmart_ping_stats');
+    expect(res.body.source).toBe('mixed');
     const md = res.body.components.find(c => c.id === 'mobile-md');
     const ro = res.body.components.find(c => c.id === 'mobile-ro');
     const ru = res.body.components.find(c => c.id === 'residential-ru');
     expect(md).toMatchObject({ status: 'operational', online: 1, total: 1 });
     expect(ro).toMatchObject({ status: 'major_outage', online: 0, total: 1 });
-    expect(ru).toMatchObject({ status: 'unknown', uptime60d: null });
+    expect(ru).toMatchObject({
+      status: 'operational', reason: 'product_fixed_100', source: 'product_fixed',
+      currentPct: 100, uptime60d: 100,
+    });
+    expect(ru.days).toHaveLength(60);
+    expect(ru.days.every(day => day.uptime === 100)).toBe(true);
     expect(res.body.overall).toBe('major_outage');
   });
 });

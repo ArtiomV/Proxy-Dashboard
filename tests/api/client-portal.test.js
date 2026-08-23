@@ -14,7 +14,7 @@ import { bootApp, asAdmin } from '../_helpers/app.js';
 const require = createRequire(import.meta.url);
 const stateMod = require('../../src/state/index.js');
 
-let app, db, adminToken, clientLogin, clientToken;
+let app, db, adminToken, clientLogin, clientToken, clientPortName;
 const PASSWORD = 'portal_pass_' + crypto.randomBytes(4).toString('hex');
 
 // Тот же паттерн, что в retail-stage1.test.js: флаг живёт и в kv_store, и в
@@ -35,9 +35,10 @@ beforeAll(async () => {
   adminToken = asAdmin();
   clientLogin = 'portal_' + crypto.randomBytes(3).toString('hex');
   // Create client through the admin route so users{} is populated.
+  clientPortName = 'portal_p_' + crypto.randomBytes(2).toString('hex');
   const create = await request(app).post('/api/admin/clients').set('X-Auth-Token', adminToken).send({
     name: 'Portal Test', login: clientLogin, password: PASSWORD,
-    portName: 'portal_p_' + crypto.randomBytes(2).toString('hex'),
+    portName: clientPortName,
     billingType: 'per_gb', price: 10, currency: 'RUB',
   });
   if (create.status !== 200) throw new Error('seed failed: ' + create.status);
@@ -45,6 +46,43 @@ beforeAll(async () => {
   const login = await request(app).post('/api/login').send({ login: clientLogin, password: PASSWORD });
   if (login.status !== 200) throw new Error('client login failed: ' + login.status);
   clientToken = login.body.token;
+});
+
+describe('GET /api/client/sla_report', () => {
+  it('returns only pings from hours assigned to the authenticated client', async () => {
+    const ownNick = 'SLA_' + crypto.randomBytes(3).toString('hex');
+    const otherNick = 'OTHER_' + crypto.randomBytes(3).toString('hex');
+    const ownPort = 'sla_port_' + crypto.randomBytes(3).toString('hex');
+    const otherPort = 'sla_other_' + crypto.randomBytes(3).toString('hex');
+    db.prepare(`INSERT INTO traffic_hourly
+      (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
+      VALUES ('S1', ?, ?, 'Orange MD', ?, '2026-08-15 10:00', 1, 0)`)
+      .run(ownPort, ownNick, clientPortName);
+    db.prepare(`INSERT INTO traffic_hourly
+      (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
+      VALUES ('S1', ?, ?, 'Moldcell', 'another-client', '2026-08-15 10:00', 1, 0)`)
+      .run(otherPort, otherNick);
+    const ping = db.prepare('INSERT INTO modem_ping (server, nick, ok, ts) VALUES (?, ?, ?, ?)');
+    ping.run('S1', ownNick, 1, '2026-08-15T10:05:00.000Z');
+    ping.run('S1', ownNick, 0, '2026-08-15T10:15:00.000Z');
+    ping.run('S1', otherNick, 1, '2026-08-15T10:05:00.000Z');
+    try {
+      const res = await request(app).get('/api/client/sla_report?month=2026-08').set('X-Auth-Token', clientToken);
+      expect(res.status).toBe(200);
+      expect(res.body.summary).toMatchObject({ modems: 1, pings: 2, ok_pings: 1, failed_pings: 1, uptime_pct: 50 });
+      expect(res.body.modems).toHaveLength(1);
+      expect(res.body.modems[0].nick).toBe(ownNick);
+      expect(res.body.modems.some(m => m.nick === otherNick)).toBe(false);
+    } finally {
+      db.prepare('DELETE FROM traffic_hourly WHERE port_id IN (?, ?)').run(ownPort, otherPort);
+      db.prepare('DELETE FROM modem_ping WHERE nick IN (?, ?)').run(ownNick, otherNick);
+    }
+  });
+
+  it('validates month and requires auth', async () => {
+    expect((await request(app).get('/api/client/sla_report?month=2026-13').set('X-Auth-Token', clientToken)).status).toBe(400);
+    expect((await request(app).get('/api/client/sla_report?month=2026-08')).status).toBe(401);
+  });
 });
 
 afterAll(() => {

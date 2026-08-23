@@ -38,7 +38,7 @@ const PS_CACHE_TTL = 10 * 1000;
 // A live multi-server fetch takes 4–6s (ProxySmart's bandwidth_report_all is slow).
 // Serve a cache up to MAX_STALE old INSTANTLY while refreshing in the background, so
 // the dashboard never blocks on it. Only a truly cold start (no cache / older than
-// this) waits. Tracking runs every 3 min, so ≤MAX_STALE staleness is harmless.
+// this) waits. Tracking runs every minute, so ≤MAX_STALE staleness is harmless.
 const PS_CACHE_MAX_STALE = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------

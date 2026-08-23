@@ -18,6 +18,7 @@
 const RETENTION_DAYS = 7;
 const SSH_TIMEOUT_MS = 10000;
 const SSH_PORTS = [2222, 22];
+const predictive = require('../monitoring/predictive');
 
 // Одна удалённая команда: два снимка агрегированной строки /proc/stat с
 // паузой (дельта → cpu%), loadavg, free -m, df -m /, uptime, термозоны +
@@ -198,7 +199,8 @@ function parseSystemStatus(html, nowMs) {
 }
 
 function create(deps) {
-  const { db, logger, apiServers, proxyConf, events } = deps;   // events — SSE (23.08): metrics_update после прогона
+  const { db, logger, apiServers, proxyConf, events, alerts } = deps;   // events — SSE (23.08): metrics_update после прогона
+  const getSetting = deps.getSetting || ((_key, fallback) => fallback);
   // execFile инжектируется (тесты подсовывают заглушку), sshpass — из $PATH.
   const execFile = deps.execFile || require('child_process').execFile;
 
@@ -210,6 +212,45 @@ function create(deps) {
      cpu_model, cpu_cores)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   const pruneStmt = db.prepare('DELETE FROM server_metrics WHERE collected_at < ?');
+  const historyStmt = db.prepare(`SELECT id, collected_at, cpu_pct, mem_used_pct, temp_c, conns,
+      disk_used_mb, disk_total_mb
+    FROM server_metrics WHERE server_name = ? AND collected_at >= ? ORDER BY collected_at`);
+
+  function _runPredictive(serverName) {
+    if (!alerts || getSetting('predictive_enabled', true) === false) return { anomalies: 0, disk: 0 };
+    const since = new Date(Date.now() - RETENTION_DAYS * 86400e3).toISOString();
+    const rows = historyStmt.all(serverName, since);
+    if (!rows.length) return { anomalies: 0, disk: 0 };
+    const result = predictive.analyze(rows, rows[rows.length - 1], {
+      minSamples: Number(getSetting('predictive_min_samples', 24)) || 24,
+    });
+    let anomalies = 0, disk = 0;
+    for (const item of result.anomalies) {
+      if (alerts.trigger('server_metric_anomaly', {
+        server: serverName,
+        metric: item.metric,
+        label: item.label,
+        current: item.current,
+        baseline: item.median,
+        threshold: item.threshold,
+        deviation_pct: item.deviation_pct,
+        samples: item.samples,
+      })) anomalies++;
+    }
+    const forecast = result.disk_forecast;
+    const warnDays = Math.max(1, Number(getSetting('disk_forecast_warn_days', 30)) || 30);
+    if (forecast && forecast.days_left != null && forecast.days_left <= warnDays) {
+      if (alerts.trigger('server_disk_forecast', {
+        server: serverName,
+        days_left: forecast.days_left,
+        full_date: forecast.full_date,
+        growth_gb_day: Math.round(forecast.growth_mb_day / 1024 * 10) / 10,
+        free_gb: Math.round(forecast.free_mb / 1024 * 10) / 10,
+        confidence: forecast.confidence,
+      })) disk++;
+    }
+    return { anomalies, disk };
+  }
 
   // SSH: сначала пробуем ключ из ~/.ssh/id_ed25519 (публичная часть выдана
   // владельцу — добавляется в authorized_keys боксов), если мимо — sshpass
@@ -313,7 +354,7 @@ function create(deps) {
     }
     running = true;
     try {
-      let ok = 0, partial = 0, failed = 0;
+      let ok = 0, partial = 0, failed = 0, anomalyAlerts = 0, diskForecastAlerts = 0;
       const _rows = [];   // SSE (23.08): компактный снимок прогона для metrics_update
       for (const server of apiServers) {
         try {
@@ -330,6 +371,11 @@ function create(deps) {
           if (row.error) failed++;
           else if (row.source === 'http') partial++;   // SSH недоступен — только панель
           else ok++;
+          if (!row.error) {
+            const predictiveAlerts = _runPredictive(row.server_name);
+            anomalyAlerts += predictiveAlerts.anomalies;
+            diskForecastAlerts += predictiveAlerts.disk;
+          }
           _rows.push({ s: row.server_name, cpu: row.cpu_pct, mem: row.mem_used_pct, conns: row.conns, err: !!row.error });
         } catch (e) {
           failed++;
@@ -342,7 +388,7 @@ function create(deps) {
       logger.info(`[ServerMetrics] Complete: ${ok} full, ${partial} http-only, ${failed} failed (pruned ${pruned})`);
       // SSE (23.08): свежие метрики боксов → realtime-обновление карточек админки.
       if (events) { try { events.publish('metrics_update', { servers: _rows }); } catch (_) { /* best-effort */ } }
-      return { ok, partial, failed, pruned };
+      return { ok, partial, failed, pruned, anomalyAlerts, diskForecastAlerts };
     } finally {
       running = false;
     }

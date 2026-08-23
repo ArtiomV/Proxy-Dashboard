@@ -260,7 +260,7 @@ function _metaSection(merged) {
   } catch (e) { logger.warn('[data] SIM/operator enrich: ' + e.message); }
   const servers = getApiServers().map(s => {
     const sc = getServerCountries()[s.name] || {};
-    return { name: s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz, address: s.address || '' };
+    return { name: s.name, displayName: s.displayName || s.name, publicIp: s.publicIp, country: sc.country, countryName: sc.name, tz: sc.tz, address: s.address || '' };
   });
   return { servers, operatorAliases: typeof getOperatorAliases === 'function' ? getOperatorAliases() : {} };
 }
@@ -595,6 +595,7 @@ r.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) =>
       const sc = getServerCountries()[s.name] || {};
       return {
         name: s.name,
+        displayName: s.displayName || s.name,
         country: sc.name || '',
         publicIp: s.publicIp || ''
       };

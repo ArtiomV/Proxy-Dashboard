@@ -321,6 +321,7 @@ function rebuildServerCountries() {
       serverIp: s.publicIp,
       country: s.country || '',
       name: s.countryName || s.name,
+      displayName: s.displayName || s.name,
       tz: s.tz || 'Europe/Moscow'
     };
   }
@@ -1562,7 +1563,7 @@ const SETTINGS_DEFAULTS = {
   failover_cooldown_h: 6,              // don't re-failover the same modem within N hours
   failover_max_per_hour: 5,            // server-wide brake — more than N/h looks like a server fault, not modems
   // Modem tracking & rotation
-  tracking_interval_min: 3,
+  tracking_interval_min: 1,
   rotation_cache_ttl_min: 30,
   rotation_sync_interval_min: 30,
   // Proxy check (additional)
@@ -1644,18 +1645,23 @@ const SETTINGS_DEFAULTS = {
   // ── A4/B1 (ТЗ мониторинга v2, этап 3, 23.08) ─────────────────────
   alert_dependencies_enabled: true,        // B1: бокс лежит → модемные алерты его сервера молчат
   volume_enabled: true,                    // A4: объёмные алерты
+  package_forecast_warn_days: 7,           // прогноз пакетов: алерт, если осталось не больше N дней
+  predictive_enabled: true,                // динамический baseline серверных метрик + прогноз диска
+  predictive_min_samples: 24,              // минимум 24 исторических снимка (~4 часа)
+  disk_forecast_warn_days: 30,             // предупредить об исчерпании диска заранее
   // ── B2 (ТЗ мониторинга v2, этап 4, 23.08) ────────────────────────
   ack_ttl_hours: 2,                        // B2: TTL «в работе» для ack-кнопок в Telegram
   // ── SSE (ТЗ мониторинга v2, этап 5, 23.08) ─────────────────────────
   sse_enabled: true,                         // realtime-обновления админки (GET /api/admin/events); выкл → фронт на polling 60 сек
   // A4: пакеты операторов (JSON; UI Настройки → «Пакеты операторов»).
-  // per_sim — объём на симку (Orange 400 ГБ); shared — общий котёл (30 ТБ).
+  // per_sim — объём на SIM; shared — общий бандл; unlimited — безлимит.
+  // Фактическое количество SIM/модемов всегда берётся из БД.
   operator_packages: JSON.stringify([
-    { operator: 'Orange MD',   type: 'per_sim', volume_gb: 400,   sim_count: 0, hourly_gb: 20, pace_pct: 10 },
-    { operator: 'Moldtelecom', type: 'shared',  volume_gb: 30720, sim_count: 0, hourly_gb: 30, pace_pct: 5 },
-    { operator: 'Moldcell',    type: 'shared',  volume_gb: 30720, sim_count: 0, hourly_gb: 30, pace_pct: 5 },
-    { operator: 'Digi',        type: 'per_sim', volume_gb: 0,     sim_count: 0, hourly_gb: 30, pace_pct: 0 },
-    { operator: 'Orange RO',   type: 'per_sim', volume_gb: 0,     sim_count: 0, hourly_gb: 30, pace_pct: 0 },
+    { operator: 'Orange MD',   type: 'per_sim', volume_gb: 400,   hourly_gb: 20, pace_pct: 10 },
+    { operator: 'Moldtelecom', type: 'shared',  volume_gb: 30720, hourly_gb: 30, pace_pct: 5 },
+    { operator: 'Moldcell',    type: 'shared',  volume_gb: 30720, hourly_gb: 30, pace_pct: 5 },
+    { operator: 'Digi',        type: 'per_sim', volume_gb: 0,     hourly_gb: 30, pace_pct: 0 },
+    { operator: 'Orange RO',   type: 'per_sim', volume_gb: 0,     hourly_gb: 30, pace_pct: 0 },
   ]),
   volume_hourly_default_gb: 30,            // порог часа, если в пакете не задан
   // ── Domain guard (WP2): контроль доменов на bypass-боксах ────────
@@ -2543,8 +2549,8 @@ const offlineAlertSent = {};
 const _downSince = {};
 // Boot grace: skip alerts for the first N minutes after process start to
 // avoid a flood of «X offline >20m» for modems that were already offline
-// before we started. Tracking polls every 3 min, so 6 min = ~2 cycles to
-// fully populate uptimeTracking.last_online_check.
+// before we started. Tracking polls every minute; the 6-minute grace gives
+// several cycles to fully populate uptimeTracking.last_online_check.
 const _alertEnabledAt = Date.now() + 6 * 60 * 1000;
 
 // Load uptime tracking from SQLite
@@ -2812,7 +2818,7 @@ function recordIpChange(key, oldIp, newIp, timestamp) {
 }
 
 // Combined tracking: IP changes + uptime percentage (runs every
-// tracking_interval_min, default 3 min — см. startup.js)
+// tracking_interval_min, default 1 min — см. startup.js)
 // Uptime fix: skip rotating/rebooting modems, skip unreachable servers
 // modem_meta statements → src/db/tracking.js
 const _modemMetaUpsert = trackingDb.modemMetaUpsertStmt();
@@ -2920,7 +2926,7 @@ const _speedMonitor = require('./src/jobs/speed-monitor').create({
 // /system_status) каждые 10 мин — блок «Загрузка серверов» на дашборде.
 // proxyConf определён выше (обход логин-стены /modem/login внутри getPage).
 const _serverMetrics = require('./src/jobs/server-metrics').create({
-  db, logger, apiServers, proxyConf,
+  db, logger, apiServers, proxyConf, alerts, getSetting,
   events: eventsBus,   // SSE (23.08): metrics_update после прогона
 });
 

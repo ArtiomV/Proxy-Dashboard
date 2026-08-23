@@ -75,6 +75,17 @@
       .forEach(function(t){es.addEventListener(t,_onEvent(t))});
   }
 
+  // Called by the persisted Settings toggle. A channel that reached the
+  // three-failure circuit breaker used to stay `_dead` until a full page
+  // reload, making an enabled toggle look as if it had switched itself off.
+  window.setAdminSseEnabled=function(enabled){
+    if(_reconnectT){clearTimeout(_reconnectT);_reconnectT=null;}
+    if(es){try{es.close()}catch(_){}es=null;}
+    _fails=0;_backoff=3000;
+    if(!enabled){_dead=true;_ind('offline');_setPolling(60000);return;}
+    _dead=false;_connect();
+  };
+
   // Старт после логина: ждём появления токена (страница грузится и без него).
   var _waitT=setInterval(function(){
     if(typeof authToken!=='undefined'&&authToken){clearInterval(_waitT);_connect();}

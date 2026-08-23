@@ -44,11 +44,13 @@ function loadServersList(){
       if(modemCount<onlineCount)modemCount=onlineCount;
       var isOnline=onlineCount>0;
       var sn=esc(s.name);
+      var displayName=esc(s.displayName||s.name);
 
       h+='<div class="server-card" id="srv_'+sn+'">';
       // Header
       h+='<div class="server-header"><div class="server-header-left">';
-      h+='<span class="server-id">'+sn+'</span>';
+      h+='<span class="server-id">'+displayName+'</span>';
+      if((s.displayName||s.name)!==s.name)h+='<span title="Внутренний неизменяемый ID" style="font-family:var(--font-mono);font-size:10px;color:var(--text-3);background:var(--bg-3);padding:2px 6px;border-radius:7px">'+sn+'</span>';
       h+='<div class="server-country">'+flag+' '+esc(cName)+'</div>';
       h+='<div class="server-meta"><span class="meta-sep"></span>'+modemCount+' модемов<span class="meta-sep"></span>'+onlineCount+' в работе<span id="srvStats_'+sn+'"></span></div>';
       h+='</div>';
@@ -65,6 +67,7 @@ function loadServersList(){
       h+='</div>';
       // Edit body (hidden)
       h+='<div class="server-body" id="srvEdit_'+sn+'" style="display:none">';
+      h+='<div class="server-field" style="grid-column:1/-1"><div class="server-field-label">Отображаемое название</div><input class="form-input" id="displayName_'+sn+'" maxlength="60" value="'+displayName+'" placeholder="Например, Кишинёв — Армянская" style="font-size:12px;width:100%"><div style="font-size:10px;color:var(--text-3);margin-top:4px">Внутренний ID '+sn+' не меняется: так сохраняются история метрик и связи модемов.</div></div>';
       h+='<div class="server-field"><div class="server-field-label">Панель Логин</div><input class="form-input" id="panelUser_'+sn+'" value="'+esc(s.panelUser||'')+'" placeholder="proxy" style="font-size:12px"></div>';
       h+='<div class="server-field"><div class="server-field-label">Панель Пароль</div><input class="form-input" id="panelPass_'+sn+'" value="'+esc(s.panelPassword||'')+'" placeholder="пароль" style="font-size:12px"></div>';
       h+='<div class="server-field"><div class="server-field-label">SSH Логин</div><input class="form-input" id="osLogin_'+sn+'" value="'+esc(s.osLogin||'')+'" placeholder="root" style="font-size:12px"></div>';
@@ -80,7 +83,6 @@ function loadServersList(){
       h+='<button class="btn btn-sm" id="srvCancelBtn_'+sn+'" data-on-click="toggleServerEdit(\''+sn+'\',true)" style="font-size:11px;display:none">Отмена</button>';
       h+='<span id="srvSaveStatus_'+sn+'" style="font-size:11px;margin-left:6px"></span>';
       h+='</div>';
-      h+='<button class="btn btn-sm" style="color:var(--danger);font-size:10px" data-on-click="deleteServer(\''+sn+'\')">'+icon('x',11)+' Удалить</button>';
       h+='</div>';
       h+='</div>';
     });
@@ -119,6 +121,7 @@ function toggleServerEdit(name,cancel){
   }
 }
 function saveServerMeta(name){
+  var displayName=document.getElementById('displayName_'+name).value;
   var osLogin=document.getElementById('osLogin_'+name).value;
   var osPass=document.getElementById('osPass_'+name).value;
   var panelUser=document.getElementById('panelUser_'+name).value;
@@ -128,13 +131,14 @@ function saveServerMeta(name){
   var sshPort=(document.getElementById('sshPort_'+name)||{}).value||'';
   var st=document.getElementById('srvSaveStatus_'+name);
   st.textContent='Сохраняю и проверяю Панель...';st.style.color='var(--warning)';
-  api(API+'/api/admin/servers/'+name,{method:'PATCH',json:{osLogin:osLogin,osPassword:osPass,sshPort:sshPort,panelUser:panelUser,panelPassword:panelPass,hardware:hw,address:addr}}).then(function(d){
-    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';setTimeout(function(){loadServersList()},1000)}
+  api(API+'/api/admin/servers/'+name,{method:'PATCH',json:{displayName:displayName,osLogin:osLogin,osPassword:osPass,sshPort:sshPort,panelUser:panelUser,panelPassword:panelPass,hardware:hw,address:addr}}).then(function(d){
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';setTimeout(function(){loadServersList();loadData()},700)}
     else{st.textContent=(d.error||'Ошибка')+(d.details?' ('+esc(d.details)+')':'');st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'})
 }
 function addServer(){
   var name=document.getElementById('newSrvName').value.trim();
+  var displayName=(document.getElementById('newSrvDisplayName')||{}).value||'';
   var url=document.getElementById('newSrvUrl').value.trim();
   var user=document.getElementById('newSrvUser').value.trim()||'proxy';
   var pass=document.getElementById('newSrvPass').value.trim();
@@ -145,23 +149,16 @@ function addServer(){
   var status=document.getElementById('addSrvStatus');
   if(!name||!url||!pass){status.textContent='Заполните имя, URL и пароль';status.style.color='var(--danger)';return}
   status.textContent='Проверяю подключение...';status.style.color='var(--warning)';
-  api(API+'/api/admin/servers',{method:'POST',json:{name:name,url:url,user:user,pass:pass,publicIp:publicIp,country:country,countryName:countryName,tz:tz}}).then(function(d){
+  api(API+'/api/admin/servers',{method:'POST',json:{name:name,displayName:displayName.trim(),url:url,user:user,pass:pass,publicIp:publicIp,country:country,countryName:countryName,tz:tz}}).then(function(d){
     if(d.ok){status.textContent='Добавлен! '+d.modemCount+' модемов';status.style.color='var(--success)';loadServersList();setTimeout(loadData,2000)}
     else{status.textContent=d.error||'Ошибка';status.style.color='var(--danger)'}
   }).catch(function(e){status.textContent=e.message;status.style.color='var(--danger)'})
 }
 
-function deleteServer(name){
-  if(!confirm('Удалить сервер '+name+'?'))return;
-  api(API+'/api/admin/servers/'+name,{method:'DELETE'}).then(function(d){
-    if(d.ok){showToast('Сервер '+name+' удалён','success');loadServersList();setTimeout(loadData,2000)}
-    else showToast(d.error||'Ошибка','error')
-  }).catch(function(e){showToast(e.message||'Ошибка сети','error')})
-}
-
 // ========== SETTINGS ==========
 var _minSpeedThreshold=2;
 var _errorRateThreshold=15;
+var _sseSaveSeq=0,_sseSavePending=false,_sseConfirmed=null;
 
 // Чекбокс-пикер ников почасового замера: известные модемы группами по серверу
 // («ник — оператор»), ники из текущего CSV вне списка — блоком «неизвестные»,
@@ -180,7 +177,7 @@ function _renderSpeedtestModemPicker(currentCsv){
     });
     var h='';
     Object.keys(bySrv).sort().forEach(function(srv){
-      h+='<div style="margin:8px 0 2px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px">'+esc(srv)+'</div>';
+      h+='<div style="margin:8px 0 2px;font-size:10px;font-weight:700;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px">'+esc(typeof _serverDisplayLabel==='function'?_serverDisplayLabel(srv):srv)+'</div>';
       bySrv[srv].forEach(function(m){
         var on=!!selected[m.nick];
         if(on)delete selected[m.nick];
@@ -201,6 +198,12 @@ function _renderSpeedtestModemPicker(currentCsv){
 }
 function loadSettings(){
   api(API+'/api/admin/settings').then(function(s){
+    // Restore the persisted realtime toggle first. This must not depend on
+    // rendering any of the dozens of settings below: an unrelated missing
+    // element/renderer used to throw before the old last-line assignment and
+    // leave the checkbox visually OFF even while the DB/API value was true.
+    var _sseE=document.getElementById('sseEnabledInput');
+    if(_sseE&&!_sseSavePending){_sseConfirmed=(s.sse_enabled!==false);_sseE.checked=_sseConfirmed;}
     // Модемы почасового замера: чекбокс-пикер из /api/admin/known_modems
     // (скрытый input — фолбэк для сохранения, если список не загрузился).
     var _smodCsv=s.speedtest_modems||'MD2_40,MD2_44,MD_01,MD_04,MD_10';
@@ -240,7 +243,7 @@ function loadSettings(){
     var rsdEl=document.getElementById('recoverySkipDeadSimInput');if(rsdEl)rsdEl.checked=(s.recovery_skip_dead_sim!==false);
     var rsuEl=document.getElementById('recoverySkipUnsoldInput');if(rsuEl)rsuEl.checked=(s.recovery_skip_unsold===true);
     // Tracking & rotation
-    var tiEl=document.getElementById('trackingIntervalMinInput');if(tiEl)tiEl.value=s.tracking_interval_min||3;
+    var tiEl=document.getElementById('trackingIntervalMinInput');if(tiEl)tiEl.value=s.tracking_interval_min||1;
     var rcEl=document.getElementById('rotationCacheTtlInput');if(rcEl)rcEl.value=s.rotation_cache_ttl_min||30;
     var rsEl=document.getElementById('rotationSyncIntervalInput');if(rsEl)rsEl.value=s.rotation_sync_interval_min||30;
     // Retention
@@ -315,10 +318,10 @@ function loadSettings(){
     renderPricingTiers();
     if(window._operatorsList)opPkgRender(s);
     else refreshOperatorList().then(function(){opPkgRender(s);});
+    opPkgLoadForecasts();
     var _vE=document.getElementById('volumeEnabledInput');if(_vE)_vE.checked=(s.volume_enabled!==false);
     // B2 (23.08): TTL кнопки «В работе» (секция «Уведомления»)
     var _ackT=document.getElementById('ackTtlHoursInput');if(_ackT)_ackT.value=s.ack_ttl_hours!=null?s.ack_ttl_hours:2;
-    var _sseE=document.getElementById('sseEnabledInput');if(_sseE)_sseE.checked=(s.sse_enabled!==false);
   }).catch(function(){});
 }
 // Live-проверка кредов при сохранении (15.08): сервер возвращает cred_checks
@@ -522,7 +525,7 @@ function saveRecoverySettings(){
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
 }
 function saveTrackingSettings(){
-  var tracking=parseInt(document.getElementById('trackingIntervalMinInput').value)||3;
+  var tracking=parseInt(document.getElementById('trackingIntervalMinInput').value)||1;
   var cacheTtl=parseInt(document.getElementById('rotationCacheTtlInput').value)||30;
   var syncInt=parseInt(document.getElementById('rotationSyncIntervalInput').value)||30;
   var st=document.getElementById('trackingSettingsStatus');
@@ -598,34 +601,54 @@ function _opPkgOptions(selected){
   names.sort(function(a,b){return a.localeCompare(b,'ru',{sensitivity:'base'});});
   return '<option value="">Выберите оператора</option>'+names.map(function(n){return '<option value="'+esc(n)+'"'+(String(n).toLowerCase()===String(selected||'').toLowerCase()?' selected':'')+'>'+esc(n)+'</option>';}).join('');
 }
-function opPkgCalc(row){
+var _opPkgForecasts=[];
+function _opPkgForecastText(operator,type){
+  if(type==='unlimited')return '∞ безлимит';
+  var op=String(operator||'').toLowerCase();
+  var rows=_opPkgForecasts.filter(function(f){return String(f.operator||'').toLowerCase()===op;});
+  if(!rows.length)return 'нет данных';
+  var known=rows.filter(function(f){return f.days_left!=null;}).sort(function(a,b){return a.days_left-b.days_left;});
+  if(!known.length)return rows.some(function(f){return f.status==='not_configured';})?'задайте объём':'нет расхода';
+  var f=known[0],days=Math.max(0,Math.round(f.days_left));
+  return '~'+days+' д'+(f.scope==='sim'&&f.nick?' · '+f.nick:'');
+}
+function opPkgLoadForecasts(){
+  api(API+'/api/admin/operator-package-forecast').then(function(d){
+    _opPkgForecasts=(d&&d.forecasts)||[];
+    document.querySelectorAll('#opPkgRows .op-pkg-row').forEach(function(r){
+      var cell=r.querySelector('.opp-forecast');
+      if(cell)cell.textContent=_opPkgForecastText(r.querySelector('.opp-op').value,r.querySelector('.opp-type').value);
+    });
+  }).catch(function(){});
+}
+function opPkgTypeChanged(row){
   if(!row)return;
   var type=row.querySelector('.opp-type').value;
-  var volume=parseFloat(row.querySelector('.opp-vol').value)||0;
-  var sims=parseInt(row.querySelector('.opp-sims').value)||0;
-  var out=row.querySelector('.opp-calc');if(!out)return;
-  if(!volume||!sims){out.textContent='—';return;}
-  out.textContent=type==='per_sim'
-    ?(volume*sims).toLocaleString('ru-RU')+' ГБ всего'
-    :(Math.round(volume/sims*10)/10).toLocaleString('ru-RU')+' ГБ / SIM';
+  var unlimited=type==='unlimited';
+  var volume=row.querySelector('.opp-vol');
+  var pace=row.querySelector('.opp-pace');
+  volume.disabled=unlimited;
+  pace.disabled=unlimited;
+  volume.placeholder=unlimited?'∞':'0';
+  if(unlimited){volume.value='';pace.value='0';}
+  var forecast=row.querySelector('.opp-forecast');
+  if(forecast)forecast.textContent=_opPkgForecastText(row.querySelector('.opp-op').value,type);
 }
 function opPkgRender(s){
   var box=document.getElementById('opPkgRows');if(!box)return;
   var pkgs=_opPkgParse(s);
-  var grid='minmax(170px,1.4fr) 110px 110px 74px minmax(125px,1fr) 105px 92px 30px';
-  var h='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;padding:0 2px 5px;min-width:900px">';
-  h+='<div>Оператор</div><div>Схема</div><div>Объём, ГБ</div><div>SIM</div><div>Расчёт</div><div>Порог часа</div><div>Темп, %/сут</div><div></div></div>';
+  var grid='minmax(190px,1.5fr) 125px 120px 115px 105px 130px 30px';
+  var h='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;padding:0 2px 5px;min-width:850px">';
+  h+='<div>Оператор</div><div>Схема</div><div>Объём, ГБ</div><div>Порог часа</div><div>Темп, %/сут</div><div>Прогноз</div><div></div></div>';
   pkgs.forEach(function(p,i){
-    var type=p.type==='shared'?'shared':'per_sim',sims=parseInt(p.sim_count)||0,vol=Number(p.volume_gb)||0;
-    var calc=vol&&sims?(type==='per_sim'?(vol*sims).toLocaleString('ru-RU')+' ГБ всего':(Math.round(vol/sims*10)/10).toLocaleString('ru-RU')+' ГБ / SIM'):'—';
-    h+='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;margin-bottom:6px;min-width:900px" class="op-pkg-row">'
+    var type=p.type==='shared'||p.type==='unlimited'?p.type:'per_sim',unlimited=type==='unlimited',vol=Number(p.volume_gb)||0;
+    h+='<div style="display:grid;grid-template-columns:'+grid+';gap:6px;margin-bottom:6px;min-width:850px" class="op-pkg-row">'
       +'<select class="input opp-op" style="font-size:12px">'+_opPkgOptions(p.operator||'')+'</select>'
-      +'<select class="input opp-type" data-on-change="opPkgCalc(this.closest(\'.op-pkg-row\'))" style="font-size:12px"><option value="per_sim"'+(type==='per_sim'?' selected':'')+'>на SIM</option><option value="shared"'+(type==='shared'?' selected':'')+'>бандл</option></select>'
-      +'<input class="input opp-vol" type="number" min="0" value="'+vol+'" data-on-input="opPkgCalc(this.closest(\'.op-pkg-row\'))" title="Для «на SIM» — лимит одной SIM; для «бандл» — общий объём" style="font-size:12px">'
-      +'<input class="input opp-sims" type="number" min="0" step="1" value="'+sims+'" data-on-input="opPkgCalc(this.closest(\'.op-pkg-row\'))" style="font-size:12px">'
-      +'<span class="opp-calc" style="display:flex;align-items:center;padding:0 7px;color:var(--text-2);font-size:11px;white-space:nowrap">'+calc+'</span>'
+      +'<select class="input opp-type" data-on-change="opPkgTypeChanged(this.closest(\'.op-pkg-row\'))" style="font-size:12px"><option value="per_sim"'+(type==='per_sim'?' selected':'')+'>на SIM</option><option value="shared"'+(type==='shared'?' selected':'')+'>бандл</option><option value="unlimited"'+(type==='unlimited'?' selected':'')+'>безлимит</option></select>'
+      +'<input class="input opp-vol" type="number" min="0" value="'+(unlimited?'':vol)+'" placeholder="'+(unlimited?'∞':'0')+'" '+(unlimited?'disabled ':'')+'title="Для «на SIM» — лимит одной SIM; для «бандл» — общий объём" style="font-size:12px">'
       +'<input class="input opp-hour" type="number" min="0" value="'+(p.hourly_gb||'')+'" placeholder="авто" style="font-size:12px">'
-      +'<input class="input opp-pace" type="number" min="0" max="100" value="'+(p.pace_pct||0)+'" style="font-size:12px">'
+      +'<input class="input opp-pace" type="number" min="0" max="100" value="'+(unlimited?0:(p.pace_pct||0))+'" '+(unlimited?'disabled ':'')+'style="font-size:12px">'
+      +'<span class="opp-forecast" style="align-self:center;font-size:11px;color:var(--text-2);white-space:nowrap" title="При текущем среднем расходе за месяц">'+esc(_opPkgForecastText(p.operator,type))+'</span>'
       +'<button class="btn btn-sm" style="padding:2px 7px;color:var(--danger)" data-on-click="opPkgDelRow(this)">×</button></div>';
   });
   box.innerHTML='<div style="overflow-x:auto">'+h+(pkgs.length?'':'<div style="font-size:11px;color:var(--text-3);padding:10px 2px">Пакеты не заданы — добавьте оператора</div>')+'</div>';
@@ -635,11 +658,10 @@ function opPkgAddRow(){
   var cur=[];box.querySelectorAll('.op-pkg-row').forEach(function(r){
     cur.push({operator:r.querySelector('.opp-op').value.trim(),type:r.querySelector('.opp-type').value,
       volume_gb:parseFloat(r.querySelector('.opp-vol').value)||0,
-      sim_count:parseInt(r.querySelector('.opp-sims').value)||0,
       hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
       pace_pct:parseFloat(r.querySelector('.opp-pace').value)||0});
   });
-  cur.push({operator:'',type:'per_sim',volume_gb:0,sim_count:0,hourly_gb:0,pace_pct:0});
+  cur.push({operator:'',type:'per_sim',volume_gb:0,hourly_gb:0,pace_pct:0});
   opPkgRender({operator_packages:JSON.stringify(cur)});
 }
 function opPkgDelRow(btn){
@@ -652,7 +674,6 @@ function opPkgSave(){
     if(!op){bad=true;return;}
     rows.push({operator:op,type:r.querySelector('.opp-type').value,
       volume_gb:parseFloat(r.querySelector('.opp-vol').value)||0,
-      sim_count:parseInt(r.querySelector('.opp-sims').value)||0,
       hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
       pace_pct:parseFloat(r.querySelector('.opp-pace').value)||0});
   });
@@ -663,7 +684,7 @@ function opPkgSave(){
     operator_packages:JSON.stringify(rows),
     volume_enabled:!!document.getElementById('volumeEnabledInput').checked
   }}).then(function(d){
-    if(d.ok){st.innerHTML='Сохранено '+icon('check',12)+' — применяется со следующего часового прогона';st.style.color='var(--success)';}
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12)+' — применяется со следующего часового прогона';st.style.color='var(--success)';opPkgLoadForecasts();}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)';}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)';});
 }
@@ -681,10 +702,27 @@ function saveAckTtl(){
 
 // ========== SSE (23.08): realtime-обновления админки ==========
 function saveSseEnabled(v){
+  var seq=++_sseSaveSeq;
+  var el=document.getElementById('sseEnabledInput');
+  _sseSavePending=true;if(el){el.disabled=true;el.checked=!!v;}
   api(API+'/api/admin/settings',{method:'PUT',json:{sse_enabled:!!v}}).then(function(d){
-    if(d.ok){showToast(v?'Realtime-обновления включены':'Realtime выключен — обновление по таймеру','success')}
-    else{showToast(d.error||'Ошибка','error')}
-  }).catch(function(e){showToast(e.message,'error')});
+    if(seq!==_sseSaveSeq)return;
+    _sseSavePending=false;if(el)el.disabled=false;
+    if(d&&d.ok){
+      var actual=d.settings?(d.settings.sse_enabled!==false):!!v;
+      _sseConfirmed=actual;if(el)el.checked=actual;
+      if(currentData){currentData.settings=currentData.settings||{};currentData.settings.sse_enabled=actual;}
+      if(typeof window.setAdminSseEnabled==='function')window.setAdminSseEnabled(actual);
+      showToast(actual?'Realtime-обновления включены':'Realtime выключен — обновление по таймеру','success');
+    }else{
+      if(el&&_sseConfirmed!==null)el.checked=_sseConfirmed;
+      showToast(d&&d.error||'Настройка не сохранилась','error');
+    }
+  }).catch(function(e){
+    if(seq!==_sseSaveSeq)return;
+    _sseSavePending=false;if(el){el.disabled=false;if(_sseConfirmed!==null)el.checked=_sseConfirmed;}
+    showToast(e.message,'error');
+  });
 }
 
 // ========== B3 (23.08): окна обслуживания ==========

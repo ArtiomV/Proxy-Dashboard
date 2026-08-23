@@ -39,7 +39,7 @@ module.exports = function (deps) {
     }
   });
 
-  r.post('/api/admin/alerts/:id/test', authMiddleware, adminMiddleware, (req, res) => {
+  r.post('/api/admin/alerts/:id/test', authMiddleware, adminMiddleware, async (req, res) => {
     const id = req.params.id;
     const rule = alerts.RULES[id];
     if (!rule) return res.status(404).json({ error: 'unknown rule' });
@@ -66,14 +66,33 @@ module.exports = function (deps) {
       proxy_expiring_3d:          { server: 'TEST', portId: 'port123', portName: 'TestClient', client: 'TestClient', daysLeft: 2, validBefore: '2026-05-26' },
       traffic_spike_burst:        { count: 7 },
       dashboard_restarted:        { restartCount: 42 },
+      reboot_score_high:          { nick: 'TEST_MODEM', imei: '123', server: 'S1', score: 82 },
+      modem_ping_slow:            { nick: 'TEST_MODEM', imei: '123', server: 'S1', latency: 930, loss: 35 },
       heap_warn:                  { pct: 87, usedMB: 435, totalMB: 500 },
       disk_low_warn:              { freeGB: 18.1, pct: 15 },
       cron_stuck:                 { job: 'TestCron', lastRunAgo: '5 ч', intervalLabel: '1 ч' },
+      server_metric_anomaly:      { server: 'S1', metric: 'cpu_pct', label: 'CPU', current: 91, baseline: 37, threshold: 74, deviation_pct: 146 },
+      server_disk_forecast:       { server: 'S1', free_gb: 18.4, growth_gb_day: 1.2, days_left: 15, full_date: '07.09.2026' },
+      volume_package_exhaustion:  { scope: 'bundle', operator: 'Orange MD', used_gb: 3120, package_gb: 4000, modems: 10, gb_day: 180, days_left: 5, full_date: '28.08.2026' },
     };
-    // Bypass cooldown for tests by clearing first.
-    try { alerts.clearCooldown(id, samples[id] || {}); } catch (_) {}
-    const sent = alerts.trigger(id, samples[id] || {});
-    res.json({ ok: sent, id, note: sent ? 'отправлено' : 'не отправлено (отключено или нет telegram_chat_id)' });
+    let result;
+    try {
+      result = await alerts.testRule(id, samples[id] || {});
+    } catch (e) {
+      logger.error('[Alerts] manual test failed: ' + e.message);
+      return res.status(500).json({ ok: false, id, reason: 'internal_error', note: 'Тестовое уведомление не отправлено', details: e.message });
+    }
+    const notes = {
+      telegram_bot_token_missing: 'Не отправлено: не настроен telegram_bot_token',
+      telegram_chat_id_missing: 'Не отправлено: не настроен telegram_chat_id',
+      render_failed: 'Не отправлено: ошибка формирования текста уведомления',
+      telegram_rejected: 'Telegram отклонил тестовое уведомление',
+      telegram_error: 'Не удалось связаться с Telegram',
+    };
+    const note = result.ok
+      ? (result.channel === 'bell' ? 'Тестовая запись добавлена в колокольчик' : 'Тестовое уведомление отправлено в Telegram')
+      : (notes[result.reason] || 'Тестовое уведомление не отправлено');
+    res.status(result.ok ? 200 : 502).json({ ok: result.ok, id, channel: result.channel || null, reason: result.reason || null, note, details: result.error || null });
   });
 
   return r;

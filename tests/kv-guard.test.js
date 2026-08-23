@@ -19,6 +19,7 @@ describe('mergeDbMetadataIntoEnvServers', () => {
     const db  = [{
       name: 'S1', url: 'http://1.2.3.4', user: 'u', pass: 'p', publicIp: '1.2.3.4',
       address: 'Kishinev, Armyanskaya 30',
+      displayName: 'Кишинёв — Армянская',
       hardware: 'i3-10100 / 8GB',
       country: 'MD', countryName: 'Moldova', tz: 'Europe/Chisinau',
       osLogin: 'md1', osPassword: 'Admin123',
@@ -28,6 +29,7 @@ describe('mergeDbMetadataIntoEnvServers', () => {
     expect(env[0]).toMatchObject({
       name: 'S1',
       address: 'Kishinev, Armyanskaya 30',
+      displayName: 'Кишинёв — Армянская',
       hardware: 'i3-10100 / 8GB',
       country: 'MD',
       osLogin: 'md1',
@@ -74,7 +76,7 @@ describe('mergeDbMetadataIntoEnvServers', () => {
 
   it('exposes all expected DB metadata fields', () => {
     expect(DB_META_FIELDS).toEqual(
-      expect.arrayContaining(['osLogin', 'osPassword', 'hardware', 'address', 'country', 'countryName', 'tz'])
+      expect.arrayContaining(['displayName', 'osLogin', 'osPassword', 'hardware', 'address', 'country', 'countryName', 'tz'])
     );
   });
 });

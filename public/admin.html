@@ -463,12 +463,13 @@
       <div id="settingsSection_servers" class="settings-section" style="display:none">
         <div style="padding:14px 24px">
           <h3 style="font-size:15px;font-weight:500;margin-bottom:4px">API серверы</h3>
-          <div style="font-size:12px;color:var(--text-2);margin-bottom:20px">Управление серверами, на которых работают прокси-модемы</div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:20px">Управление серверами, на которых работают прокси-модемы. S1/S2 остаются внутренними ID, а отображаемое название можно менять.</div>
           <div id="serversList"></div>
           <div class="add-card">
             <div class="add-title"><span class="add-plus">+</span> Добавить сервер</div>
             <div class="add-form">
               <div class="form-group"><label class="form-label" style="font-size:10px">Имя</label><input class="form-input" id="newSrvName" placeholder="S5" style="width:100%"></div>
+              <div class="form-group"><label class="form-label" style="font-size:10px">Отображаемое название</label><input class="form-input" id="newSrvDisplayName" maxlength="60" placeholder="Склад — Бухарест" style="width:100%"></div>
               <div class="form-group"><label class="form-label" style="font-size:10px">URL</label><input class="form-input" id="newSrvUrl" placeholder="http://IP:PORT" style="width:100%"></div>
               <div class="form-group"><label class="form-label" style="font-size:10px">Логин</label><input class="form-input" id="newSrvUser" placeholder="proxy" style="width:100%"></div>
               <div class="form-group"><label class="form-label" style="font-size:10px">Пароль</label><input class="form-input" id="newSrvPass" placeholder="password" type="password" style="width:100%"></div>
@@ -959,7 +960,7 @@
             </div>
           </div>
           <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:820px">
-            Выберите оператора из общего справочника, схему пакета и количество SIM. Для <b>«на SIM»</b> объём задаётся на одну SIM; для <b>«бандл»</b> — общий объём на все SIM. Расчёт рядом сразу покажет суммарный пакет или среднюю долю на SIM. Порог часа пустой = автоматически; темп 0% = выключен.
+            Количество SIM определяется автоматически по модемам оператора в базе. Для <b>«на SIM»</b> объём задаётся на одну SIM, для <b>«бандл»</b> — общий объём, а <b>«безлимит»</b> отключает контроль исчерпания и темпа. Прогноз считает дату исчерпания по среднему расходу текущего месяца; для пакетов на SIM показывается ближайшая к исчерпанию SIM. Почасовой порог аномального расхода работает для всех схем; пустое значение = автоматически.
           </div>
           <div id="opPkgRows"></div>
           <div id="opPkgStatus" style="font-size:11px;color:var(--text-3);margin-top:8px"></div>
@@ -1514,12 +1515,12 @@
 <script src="/js/admin/fleet-ui.js?v=0719a"></script>
 <script src="/js/admin/analytics.js?v=0823j"></script>
 <script src="/js/admin/finance.js?v=0823b"></script>
-<script src="/js/admin/modems.js?v=0823j"></script>
+<script src="/js/admin/modems.js?v=0823k"></script>
 <script src="/js/admin/dguard.js?v=0818a"></script>
-<script src="/js/admin/settings.js?v=0823j"></script>
+<script src="/js/admin/settings.js?v=0823k"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
-<script src="/js/admin/server-metrics.js?v=0823e"></script>
-<script src="/js/admin.js?v=0823j"></script>
-<script src="/js/admin/sse.js?v=0823h"></script>
+<script src="/js/admin/server-metrics.js?v=0823k"></script>
+<script src="/js/admin.js?v=0823k"></script>
+<script src="/js/admin/sse.js?v=0823k"></script>
 </body>
 </html>

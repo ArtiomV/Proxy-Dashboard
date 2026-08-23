@@ -127,6 +127,76 @@ function buildReport(db, month) {
   };
 }
 
+// Client-scoped SLA. A modem belongs to the report only during hours in which
+// traffic_hourly records that client's port assignment. This prevents leaking
+// another client's uptime before/after a SIM reassignment.
+function clientUptime(db, month, clientName) {
+  const b = monthBounds(month);
+  if (!String(clientName || '').trim()) return [];
+  let rows = [];
+  try {
+    rows = db.prepare(`
+      WITH assigned AS (
+        SELECT DISTINCT server_name, nick, hour_start
+          FROM traffic_hourly
+         WHERE client_name = ?
+           AND datetime(hour_start) >= datetime(?)
+           AND datetime(hour_start) < datetime(?)
+           AND trim(COALESCE(nick, '')) <> ''
+      )
+      SELECT mp.server, mp.nick,
+             COUNT(mp.id) AS pings,
+             SUM(mp.ok) AS ok_pings,
+             MIN(mp.ts) AS observed_from,
+             MAX(mp.ts) AS observed_to,
+             COUNT(DISTINCT assigned.hour_start) AS assigned_hours,
+             MAX(NULLIF(TRIM(mm.operator), '')) AS operator
+        FROM assigned
+        JOIN modem_ping mp
+          ON mp.server = assigned.server_name
+         AND mp.nick = assigned.nick
+         AND datetime(mp.ts) >= datetime(assigned.hour_start)
+         AND datetime(mp.ts) < datetime(assigned.hour_start, '+1 hour')
+        LEFT JOIN modem_meta mm
+          ON mm.server_name = mp.server AND mm.nick = mp.nick
+       GROUP BY mp.server, mp.nick
+       ORDER BY mp.server, mp.nick
+    `).all(String(clientName).trim(), b.fromIso, b.toIso);
+  } catch (_) { rows = []; }
+  return rows.map(r => ({
+    server: r.server,
+    nick: r.nick,
+    operator: r.operator || '',
+    pings: Number(r.pings) || 0,
+    ok_pings: Number(r.ok_pings) || 0,
+    failed_pings: Math.max(0, (Number(r.pings) || 0) - (Number(r.ok_pings) || 0)),
+    assigned_hours: Number(r.assigned_hours) || 0,
+    observed_from: r.observed_from || null,
+    observed_to: r.observed_to || null,
+    uptime_pct: r.pings ? _pct((r.ok_pings || 0) / r.pings) : null,
+  }));
+}
+
+function buildClientReport(db, month, clientName) {
+  monthBounds(month); // validate even when the client has no assignments
+  const modems = clientUptime(db, month, clientName);
+  const pings = modems.reduce((sum, m) => sum + m.pings, 0);
+  const okPings = modems.reduce((sum, m) => sum + m.ok_pings, 0);
+  return {
+    month,
+    generated_at: new Date().toISOString(),
+    methodology: 'proxysmart_ping_during_client_assignment',
+    summary: {
+      uptime_pct: pings ? _pct(okPings / pings) : null,
+      modems: modems.length,
+      pings,
+      ok_pings: okPings,
+      failed_pings: Math.max(0, pings - okPings),
+    },
+    modems,
+  };
+}
+
 // CSV с BOM (Excel RU открывает UTF-8 корректно) и разделителем ';'.
 function toCsv(report) {
   const cell = v => String(v == null ? '' : v).replace(/;/g, ',');
@@ -144,4 +214,4 @@ function toCsv(report) {
   return '﻿' + lines.join('\n') + '\n';
 }
 
-module.exports = { monthBounds, serverUptime, modemUptime, operatorUptime, buildReport, toCsv };
+module.exports = { monthBounds, serverUptime, modemUptime, operatorUptime, buildReport, clientUptime, buildClientReport, toCsv };

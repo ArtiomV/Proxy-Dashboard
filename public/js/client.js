@@ -48,6 +48,7 @@ function switchTab(name,el){
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='traffic') renderProxyTable();
   if(name==='analytics') renderAnalytics();
+  if(name==='sla') loadClientSla();
   if(name==='history') loadHistory();
   if(name==='documents') loadDocuments();
   if(name==='api') loadApiDocs();
@@ -55,6 +56,47 @@ function switchTab(name,el){
   if(name==='billing'){loadBillingHistory();loadTopupSection();}
   if(name==='shop') loadShop();
   if(name==='profile') loadProfile();
+}
+
+var _clientSlaLoadedMonth='';
+function _clientSlaDate(ts){
+  if(!ts)return '—';
+  var d=new Date(ts);if(!isFinite(d.getTime()))return '—';
+  return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'2-digit'})+' '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+}
+function loadClientSla(force){
+  var input=document.getElementById('clientSlaMonth');if(!input)return;
+  if(!input.value)input.value=new Date().toISOString().slice(0,7);
+  var month=input.value;
+  if(!force&&_clientSlaLoadedMonth===month)return;
+  var loading=document.getElementById('clientSlaLoading');
+  var empty=document.getElementById('clientSlaEmpty');
+  var wrap=document.getElementById('clientSlaTableWrap');
+  if(loading){loading.style.display='';loading.textContent='Загрузка отчёта…';}
+  if(empty)empty.style.display='none';if(wrap)wrap.style.display='none';
+  api('/api/client/sla_report?month='+encodeURIComponent(month)).then(function(d){
+    _clientSlaLoadedMonth=month;
+    var s=d.summary||{},rows=d.modems||[];
+    document.getElementById('clientSlaPct').textContent=s.uptime_pct==null?'—':String(s.uptime_pct).replace('.',',')+'%';
+    document.getElementById('clientSlaModems').textContent=String(s.modems||0);
+    document.getElementById('clientSlaOk').textContent=Number(s.ok_pings||0).toLocaleString('ru-RU');
+    document.getElementById('clientSlaChecks').textContent=Number(s.pings||0).toLocaleString('ru-RU')+' всего';
+    document.getElementById('clientSlaFailed').textContent=Number(s.failed_pings||0).toLocaleString('ru-RU');
+    if(loading)loading.style.display='none';
+    if(!rows.length){if(empty)empty.style.display='';return;}
+    document.getElementById('clientSlaRows').innerHTML=rows.map(function(m){
+      var pct=m.uptime_pct==null?'—':String(m.uptime_pct).replace('.',',')+'%';
+      var color=m.uptime_pct==null?'var(--text-3)':m.uptime_pct>=99?'var(--success)':m.uptime_pct>=95?'var(--warning)':'var(--danger)';
+      return '<tr><td style="font-family:var(--font-mono);font-weight:600">'+esc(m.nick||'—')+'</td>'
+        +'<td>'+esc(m.server||'—')+'</td><td>'+esc(m.operator||'—')+'</td>'
+        +'<td style="font-family:var(--font-mono);font-weight:700;color:'+color+'">'+esc(pct)+'</td>'
+        +'<td>'+Number(m.pings||0).toLocaleString('ru-RU')+'</td><td>'+Number(m.failed_pings||0).toLocaleString('ru-RU')+'</td>'
+        +'<td style="font-size:11px;color:var(--text-2);white-space:nowrap">'+esc(_clientSlaDate(m.observed_from))+' — '+esc(_clientSlaDate(m.observed_to))+'</td></tr>';
+    }).join('');
+    if(wrap)wrap.style.display='';
+  }).catch(function(e){
+    if(loading){loading.style.display='';loading.textContent=e.message||'Не удалось загрузить отчёт';}
+  });
 }
 
 // --- B2C retail config (WP3) ---
@@ -114,7 +156,7 @@ function onboardingNext(){
   onboardingStep++;
   var step=ONBOARDING_STEPS[onboardingStep];
   // Navigate to the tab
-  var tabEl=document.querySelector('.nav-tab[onclick*="\''+step.tab+'\'"]');
+  var tabEl=document.querySelector('.nav-tab[data-on-click*="\''+step.tab+'\'"]');
   switchTab(step.tab,tabEl);
   // Move banner to new tab pane
   var banner=document.getElementById('onboardingBanner');
@@ -1458,7 +1500,7 @@ async function loadData(){
 
     // Restore saved tab
     var _savedTab=localStorage.getItem('pr_active_tab');
-    if(_savedTab){var _tabEl=document.querySelector('.nav-tab[onclick*="\''+_savedTab+'\'"]');if(_tabEl)switchTab(_savedTab,_tabEl)}
+    if(_savedTab){var _tabEl=document.querySelector('.nav-tab[data-on-click*="\''+_savedTab+'\'"]');if(_tabEl)switchTab(_savedTab,_tabEl)}
 
     setStatus(cachedServers.length>0?'loading':'ok',cachedServers.length>0?'Частичные данные':'OK');
     requestAnimationFrame(function(){requestAnimationFrame(function(){window.scrollTo(0,_sy)})});

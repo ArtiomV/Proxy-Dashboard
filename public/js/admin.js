@@ -76,7 +76,9 @@ var _countryFlags={'MD':flagIcon('MD'),'RO':flagIcon('RO'),'US':flagIcon('US'),'
 var _countryNamesRu={'Moldova':'\u041c\u043e\u043b\u0434\u043e\u0432\u0430','Romania':'\u0420\u0443\u043c\u044b\u043d\u0438\u044f'};
 var COUNTRIES={};
 var COUNTRY_ORDER=[];
-function _initServers(servers){if(!servers||!servers.length)return;COUNTRIES={};COUNTRY_ORDER=[];servers.slice().sort(function(a,b){return a.name.localeCompare(b.name)}).forEach(function(s){COUNTRIES[s.name]={flag:_countryFlags[s.country]||'',name:_countryNamesRu[s.countryName]||s.countryName||s.name,serverIp:s.publicIp||'',country:s.country||'',address:s.address||''};COUNTRY_ORDER.push(s.name);});}
+function _initServers(servers){if(!servers||!servers.length)return;COUNTRIES={};COUNTRY_ORDER=[];servers.slice().sort(function(a,b){return a.name.localeCompare(b.name)}).forEach(function(s){COUNTRIES[s.name]={flag:_countryFlags[s.country]||'',name:_countryNamesRu[s.countryName]||s.countryName||s.name,displayName:s.displayName||s.name,serverIp:s.publicIp||'',country:s.country||'',address:s.address||''};COUNTRY_ORDER.push(s.name);});}
+function _serverDisplayName(name){var c=COUNTRIES[name]||{};return c.displayName||name;}
+function _serverDisplayLabel(name){var d=_serverDisplayName(name);return d===name?name:d+' ('+name+')';}
 
 // ========== THEME ==========
 // Весь кабинет — СВЕТЛАЯ тема по умолчанию (Дашборд/Финансы и так scoped-light в
@@ -195,7 +197,7 @@ function _fillTariffServerSelect(selected){
     var found=!selected;
     servers.forEach(function(s){
       if(s.name===selected)found=true;
-      h+='<option value="'+esc(s.name)+'">'+esc(s.name)+'</option>';
+      h+='<option value="'+esc(s.name)+'">'+esc((s.displayName&&s.displayName!==s.name)?s.displayName+' ('+s.name+')':s.name)+'</option>';
     });
     if(!found)h+='<option value="'+esc(selected)+'">'+esc(selected)+' (нет в списке)</option>';
     sel.innerHTML=h;
@@ -235,7 +237,7 @@ function loadRetailPoolAdmin(){
     servers.forEach(function(s){
       var on=!!selected[s.name];
       if(on)delete selected[s.name];
-      h+='<label style="display:inline-flex;align-items:center;gap:5px;margin:2px 14px 2px 0;font-size:12px;cursor:pointer"><input type="checkbox" class="retail-pool-chk" value="'+esc(s.name)+'"'+(on?' checked':'')+'> '+esc(s.name)+'</label>';
+      h+='<label style="display:inline-flex;align-items:center;gap:5px;margin:2px 14px 2px 0;font-size:12px;cursor:pointer"><input type="checkbox" class="retail-pool-chk" value="'+esc(s.name)+'"'+(on?' checked':'')+'> '+esc((s.displayName&&s.displayName!==s.name)?s.displayName+' ('+s.name+')':s.name)+'</label>';
     });
     // Имена из CSV, которых нет среди серверов, — отдельно, чтобы не потерять.
     Object.keys(selected).forEach(function(n){
@@ -346,7 +348,7 @@ function _fillPoolAddServerSelect(){
   var sel=document.getElementById('poolAddServer');
   if(!sel)return;
   _loadAdminServers(function(servers){
-    sel.innerHTML=servers.map(function(s){return '<option value="'+esc(s.name)+'">'+esc(s.name)+'</option>'}).join('')||
+    sel.innerHTML=servers.map(function(s){return '<option value="'+esc(s.name)+'">'+esc((s.displayName&&s.displayName!==s.name)?s.displayName+' ('+s.name+')':s.name)+'</option>'}).join('')||
       '<option value="">— нет серверов —</option>';
   });
 }
@@ -881,7 +883,7 @@ function renderSysDashboard(targetId){
       +kpi('users','Активные сессии',String(d.sessions||0),'администраторы и клиенты','is-purple')+'</div>';
 
     h+='<div class="sh-grid"><article class="sh-card sh-servers"><div class="sh-card-head"><div><small>Инфраструктура</small><h3>Серверы ProxySmart</h3></div><span>'+(d.servers||[]).length+' шт.</span></div><div class="sh-server-list">';
-    (d.servers||[]).forEach(function(s){var off=!!cached[s.name],f=fleet[s.name]||{},on=f.working!=null?f.working:(f.online||0),tot=f.total||0;h+='<div class="sh-server-row"><span class="sh-server-dot '+(off?'is-off':'is-on')+'"></span><span class="sh-server-name"><b>'+esc(s.name)+'</b><small>'+esc(s.country||'Без страны')+'</small></span><span class="sh-server-modems"><b>'+on+'/'+tot+'</b><small>модемов</small></span><span class="sh-server-state '+(off?'is-off':'is-on')+'">'+(off?'Нет связи':'В сети')+'</span></div>';});
+    (d.servers||[]).forEach(function(s){var off=!!cached[s.name],f=fleet[s.name]||{},on=f.working!=null?f.working:(f.online||0),tot=f.total||0;h+='<div class="sh-server-row"><span class="sh-server-dot '+(off?'is-off':'is-on')+'"></span><span class="sh-server-name"><b title="Внутренний ID: '+esc(s.name)+'">'+esc(s.displayName||s.name)+'</b><small>'+esc(s.country||'Без страны')+'</small></span><span class="sh-server-modems"><b>'+on+'/'+tot+'</b><small>модемов</small></span><span class="sh-server-state '+(off?'is-off':'is-on')+'">'+(off?'Нет связи':'В сети')+'</span></div>';});
     h+='</div></article>';
 
     var mem=d.memory||{},disk=d.disk||{};function bar(label,pct,meta,tone){pct=Math.max(0,Math.min(100,Number(pct)||0));return '<div class="sh-resource"><div><span>'+label+'</span><b>'+meta+'</b></div><div class="sh-bar"><i class="'+(tone||'')+'" style="width:'+pct+'%"></i></div></div>';}
@@ -916,7 +918,7 @@ function updateServerDownBanner(cachedServers){
   var now=Date.now();
   var parts=cachedServers.map(function(s){
     var ageMin=Math.round((now-(s.cachedAt||now))/60000);
-    return '<b>'+esc(s.name)+'</b> ('+(ageMin>0?ageMin+' мин назад':'недоступен')+')';
+    return '<b>'+esc(_serverDisplayLabel(s.name))+'</b> ('+(ageMin>0?ageMin+' мин назад':'недоступен')+')';
   });
   var noun=cachedServers.length===1?'Сервер':'Серверов недоступно: '+cachedServers.length+' —';
   document.getElementById('serverDownBannerText').innerHTML=noun+' '+parts.join(', ')+'. Последние данные показаны из кеша.';
@@ -2542,7 +2544,7 @@ function simRenderAllModems(){
   var poolCount = 0, profileCount = 0;
   servers.forEach(function(srv){
     var arr = byServer[srv];
-    html += '<tr style="background:var(--bg-2)"><td colspan="7" style="font-size:10px;font-weight:700;color:var(--text-2);padding:4px 8px">'+esc(srv)+' ('+arr.length+')</td></tr>';
+    html += '<tr style="background:var(--bg-2)"><td colspan="7" style="font-size:10px;font-weight:700;color:var(--text-2);padding:4px 8px">'+esc(_serverDisplayLabel(srv))+' ('+arr.length+')</td></tr>';
     arr.forEach(function(m){
       var key = m.server+'|'+m.nick;
       var inProfile = !!_simState.selectedModems[key];
@@ -3492,7 +3494,7 @@ function toggleAlertRule(id, enabled){
 function testAlertRule(id){
   api(API+'/api/admin/alerts/'+encodeURIComponent(id)+'/test',{method:'POST'})
     .then(function(d){
-      showToast(d && d.ok ? 'Тест отправлен в Telegram' : (d && d.note || 'Не отправлено'), d && d.ok ? 'success' : 'warning');
+      showToast((d&&d.note)||'Тест выполнен', d&&d.ok?'success':'warning');
     })
     .catch(function(e){ showToast('Сеть: '+e.message, 'error'); });
 }
@@ -3809,7 +3811,7 @@ function renderNewFleetServers(){
     var h='<article class="server-overview-card'+(isDown?' server-overview-card--down':'')+'" data-srv-spark="'+esc(srv)+'">';
     h+='<header class="server-overview-header">'
       +'<div class="server-overview-identity"><span class="server-overview-flag">'+flag+'</span><span class="server-overview-heading">'
-      +'<span class="server-overview-title">'+esc(srv)+(ci.name?' <span class="server-overview-bullet">•</span> '+esc(ci.name):'')+'</span>'
+      +'<span class="server-overview-title" title="Внутренний ID: '+esc(srv)+'">'+esc(ci.displayName||srv)+(ci.name?' <span class="server-overview-bullet">•</span> '+esc(ci.name):'')+'</span>'
       +(addr?'<span class="server-overview-address">'+esc(addr)+'</span>':'')+'</span></div>'
       +'<div class="server-overview-services"><span class="server-overview-services-value" style="color:'+(isDown?'var(--danger)':col)+'">'+working+'/'+total+'</span>'
       +'<span class="server-overview-services-label">'+(isDown?'Бокс недоступен':(disc>0?disc+' отключено':'Модемы'))+'</span></div>'
@@ -3823,6 +3825,10 @@ function renderNewFleetServers(){
     var stDot='var(--success)', stTxt='Сервер работает стабильно';
     if(met&&met.error){ stDot='var(--danger)'; stTxt='Бокс недоступен: '+met.error; }
     else if(disc>0){ stDot='var(--warning)'; stTxt=disc+' отключено'; }
+    else if(met&&met.anomalies&&met.anomalies.length){
+      stDot='var(--warning)';
+      stTxt='Отклонение от нормы: '+met.anomalies.map(function(a){return a.label||a.metric;}).join(', ');
+    }
     if(met&&met.age_sec>20*60&&met.collected_at){ var dt=new Date(Date.parse(met.collected_at)); stTxt+=' · данные на '+String(dt.getHours()).padStart(2,'0')+':'+String(dt.getMinutes()).padStart(2,'0'); }
     h+='<div class="server-overview-status"><span class="server-overview-status-dot" style="background:'+stDot+'"></span>'+esc(stTxt)+'</div>';
     // Единая панель из трёх KPI с вертикальными разделителями, как в макете.
@@ -3883,11 +3889,20 @@ function renderNewFleetServers(){
           +'<span class="server-footer-copy"><b>'+esc(val||'—')+'</b>'+(label?'<small>'+esc(label)+info+'</small>':info)+'</span></span>';
       }
       var up=typeof _srvMetUptime==='function'?_srvMetUptime(met.uptime_sec):'';
+      var diskExtra=_srvMetGb(met.disk_used_mb,met.disk_total_mb);
+      var diskFc=met.disk_forecast||null;
+      if(diskFc&&diskFc.status==='growing'&&diskFc.days_left!=null){
+        diskExtra=(diskExtra?diskExtra+' · ':'')+'прогноз: ~'+Math.max(0,Math.round(diskFc.days_left))+' д, до '+diskFc.full_date;
+      }else if(diskFc&&diskFc.status==='stable'){
+        diskExtra=(diskExtra?diskExtra+' · ':'')+'рост не подтверждён';
+      }else if(diskFc&&diskFc.status==='insufficient_history'){
+        diskExtra=(diskExtra?diskExtra+' · ':'')+'прогноз после накопления истории';
+      }
       h+='<footer class="server-overview-footer">'
         +footerStat('temp','thermo',met.temp_c==null?'—':String(_fmtP(met.temp_c))+'°C','')
         +footerStat('uptime','clock',up||'—','')
         +footerStat('ram','ram',met.mem_used_pct==null?'—':_fmtP(met.mem_used_pct)+'%','RAM',_srvMetGb(met.mem_used_mb,met.mem_total_mb))
-        +footerStat('disk','disk',met.disk_used_pct==null?'—':_fmtP(met.disk_used_pct)+'%','Диск',_srvMetGb(met.disk_used_mb,met.disk_total_mb))
+        +footerStat('disk','disk',met.disk_used_pct==null?'—':_fmtP(met.disk_used_pct)+'%','Диск',diskExtra)
         +'</footer>';
     } else {
       h+='<div class="server-overview-empty">Данных о загрузке ещё нет — джоба пишет раз в 10 мин</div>';

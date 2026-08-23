@@ -47,17 +47,17 @@ function _srvMetBar(label, pct, widthPct, color, valueText) {
     + '</div>';
 }
 
-// Аптайм сек → «12д 4ч» / «5ч 20м» / «40м».
+// Аптайм сервера — одна короткая единица, чтобы значение не переносилось:
+// до суток округляем до целых часов, от суток — до целых дней.
 function _srvMetUptime(sec) {
   if (!(sec > 0)) return null;
-  var d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
-  if (d > 0) return d + 'д ' + h + 'ч';
-  if (h > 0) return h + 'ч ' + m + 'м';
-  return m + 'м';
+  if (sec >= 86400) return Math.max(1, Math.round(sec / 86400)) + 'д';
+  return Math.max(1, Math.round(sec / 3600)) + 'ч';
 }
 
 // Одна карточка сервера. m — строка метрик (может быть null — данных ещё нет).
 function _srvMetCard(name, m, address) {
+  var displayName = typeof _serverDisplayName === 'function' ? _serverDisplayName(name) : name;
   var stale = m && (m.age_sec || 0) > _SRVMET_STALE_SEC;
   var down = !!(m && m.error);
   var wrap = down
@@ -67,7 +67,7 @@ function _srvMetCard(name, m, address) {
   var h = '<div style="' + wrap + '">';
   // Шапка: имя · адрес площадки; справа — источник и возраст/время данных.
   h += '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:8px">'
-    + '<span style="font-size:12px;font-weight:600;color:var(--text-0)">' + esc(name)
+    + '<span style="font-size:12px;font-weight:600;color:var(--text-0)" title="Внутренний ID: ' + esc(name) + '">' + esc(displayName)
     + (address ? ' <span style="font-weight:400;color:var(--text-2)">· ' + esc(address) + '</span>' : '')
     + '</span>';
   var meta = [];

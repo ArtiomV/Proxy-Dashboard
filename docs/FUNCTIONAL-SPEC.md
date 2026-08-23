@@ -240,10 +240,13 @@ cleanup (00:30 + hourly): retention; Pass A — dedupe per (server,imei); мёр
 #### Настройки
 Мониторинг (единый экран «Состояние сервера» с вердиктом, KPI, ресурсами, трендом, событиями и простоями; системный лог; журнал действий; SLA); Инфраструктура (серверы — карточки с кредами; единый справочник стран/операторов/пакетов + алиасы разных названий одного оператора); Автоматика (правила уведомлений с каналами/кулдаунами/тестом, зависимости/ack/окна обслуживания, порог массового падения `modems_down_threshold`, failover — тогглы/пороги/кандидаты/ручной перенос/история, восстановление, HTTP-проверка только через валидные клиентские реквизиты, нативный Ping Destination ProxySmart); Инструменты (банк-конфиг, симулятор нагрузки с профилями/SSE-стримом, тест-пул); Данные (Telegram-уведомления и сводка, спидтесты/пороги, `stale_modem_hours`, `modem_offline_threshold_min`, трекинг, хранение, сессии/биллинг, тарифная сетка pricing_tiers).
 
+Предиктивный слой не хранит отдельную модель: при чтении/сборе используется 7-дневная история `server_metrics`. Для CPU/RAM/температуры/соединений robust baseline = медиана + 6×MAD с безопасным абсолютным порогом; превышение создаёт `server_metric_anomaly`. Для диска линейная регрессия по `disk_used_mb` выдаёт рост МБ/сут и дату заполнения только при достаточной истории и `R² ≥ 0.25`; горизонт алерта задаёт `disk_forecast_warn_days` (30 по умолчанию). Карточка показывает прогноз в `i` у диска.
+
 ### 4.2. Клиентский портал (public/index.html + client.js)
 - Логин (поддержка impersonate админом), тёмная тема.
 - **Панель**: активных портов (по странам), трафик сегодня/за месяц (**биллинговый объём = совпадает с актом**), баланс, аптайм 30д; таблица модемов (статус, реквизиты ip:port + копия, логин:пароль, смена IP по ссылке/кнопке, история IP, выбор ротации, трафик ↓/↑); экспорт прокси (TXT/JSON/CSV, cURL/Python/.env, PAC/FoxyProxy, свой шаблон; фильтры).
 - **Аналитика**: трафик за период, прогноз до конца месяца (объём ÷ дней × дней в мес.), топ-день, среднесуточное, посл. час; чарты по локациям/модемам, периоды/диапазоны.
+- **SLA**: помесячная доступность по нативным ProxySmart-пингам. Историческая область клиента ограничена часами `traffic_hourly`, где `client_name` совпадает с его `portName`; поэтому после перепривязки SIM данные другого клиента не раскрываются. API: `GET /api/client/sla_report?month=YYYY-MM`.
 - **История баланса**: баланс, расход за месяц, средний расход/день, дней до нуля; по месяцам (трафик/списано/оплачено, фильтры типов).
 - **Документы**: акты (PDF, бейдж неподписанных), счета (PDF, неоплаченные), файлы.
 - **API**: документация по X-API-Key, GET /api/v1/proxy, смена IP, коды ошибок.
@@ -349,7 +352,7 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 | 20:55 | HealthSnapshot | дневной скор здоровья модемов → modem_health_daily |
 
 ### Интервальные
-- **trackModems** (~3 мин): фетч боксов, server down/recovered, meta-upsert, IP-трекинг, uptime-бакеты, авто-recovery, offline-алерты (порог `modem_offline_threshold_min`), сводка mass-down, prune.
+- **trackModems** (1 мин): фетч боксов, server down/recovered, meta-upsert, IP-трекинг, uptime-бакеты, авто-recovery, offline-алерты (порог `modem_offline_threshold_min`), сводка mass-down, prune.
 - **HourlyAgg** (каждый час :00, 5 попыток): дельты → traffic_hourly; детект ресета счётчиков; spike-clamp (3×/1.5× от 24ч-среднего, floor 500 МБ); сглаживание uncertain медианой.
 - **NotifyCollect** (2 мин): bell по fleet.disconnectedList (per-day дедуп), SIM-сигналы, долги, TTL-чистка.
 - **ModemPing** (из цикла tracking): сохраняет нативные ProxySmart `ping_stats` → modem_ping; отдельный внешний latency-cron не запускается.
@@ -360,6 +363,8 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 - **Failover scan** (3 мин): кандидаты → teleport на спейр (гейты/кулдауны/рейт-лимит).
 - **StalePortsHourly** (60 мин): чистка портов, отсутствующих >3 дней из daily_traffic; IMEI-dedupe per-server.
 - **Watchdogs** (5 мин/60 мин): heap/диск/cron_stuck (джобы молчат >2× интервала).
+- **ServerMetrics** (10 мин): SSH+HTTP снимок; после записи — динамический baseline и прогноз диска. Внешний watchdog не является этой джобой: он подтверждён на S3 как `/home/mon/dashboard-watchdog.sh`, cron раз в 5 минут, проверяет `/healthz` независимо от процесса Dashboard.
+- **VolumeGuard** (60 мин): ручные пороги часа/темпа плюс прогноз исчерпания per-SIM/shared пакетов по среднему расходу текущего месяца; `unlimited` не прогнозируется.
 - **ConnsHist** (60 с): TCP-коннекты по модемам (in-memory, 65 мин).
 - **TG summary-loop** (60 с): дневная сводка по расписанию.
 - **Billing catch-up** при старте (snapshot >26ч → немедленный биллинг).
@@ -377,8 +382,8 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 **D7 (2026-08):** proxysmart_contract_mismatch — бокс отвечает не по контракту (shape-валидация /apix/* в цикле опроса, docs/PROXYSMART-CONTRACT.md), cooldown сутки на бокс.
 
 **🔴 critical:** server_unreachable (≥10 мин), modems_down_bulk (≥порога), tochka_webhook_failed, db_backup_failed, balance_drift, duplicate_credit_blocked, client_charge_failed (maxDebt), client_blocked_debt (автоблок по долгу, §2.9), failover_no_spare, failover_failed, domain_guard_hit, domain_guard_failed, heap_high, disk_low_critical, proxysmart_contract_mismatch + URGENT-контур (D4 выше).
-**🟡 important:** modem_offline_20m (порог настраиваемый, парность), modem_recovered, recovery_exhausted, failover_done, sim_redirect_imposed, sim_iccid_changed, sim_status_bad, reboot_score_high (≥70), payment_received, client_balance_negative, client_block_warning (прогноз блокировки ≤3 дн, §2.9), client_unblocked_debt (восстановление после оплаты, §2.9), pricing_tier_miss (промах сетки цен, §2.10), proxy_expiring_3d, traffic_spike_burst, dashboard_restarted.
-**🔵 early:** heap_warn, disk_low_warn, cron_stuck.
+**🟡 important:** modem_offline_20m (порог настраиваемый, парность), modem_recovered, recovery_exhausted, failover_done, sim_redirect_imposed, sim_iccid_changed, sim_status_bad, reboot_score_high (≥70), payment_received, client_balance_negative, client_block_warning (прогноз блокировки ≤3 дн, §2.9), client_unblocked_debt (восстановление после оплаты, §2.9), pricing_tier_miss (промах сетки цен, §2.10), proxy_expiring_3d, traffic_spike_burst, dashboard_restarted, server_metric_anomaly, volume_package_exhaustion.
+**🔵 early:** heap_warn, disk_low_warn, cron_stuck, server_disk_forecast.
 **🔔 bell-only:** отдельные legacy-правила удалены; карточки колокольчика создаются тем же каноническим событием, что и Telegram, с корреляционным окном.
 
 ---
@@ -397,7 +402,7 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 
 ## 10. Замеченные несостыковки (к рефакторингу)
 
-1. ~~`trackModems`: дефолт `tracking_interval_min=3`, а лог/комментарии пишут «every 5 min»~~ — закрыто (C8, 2026-08): комментарии в server.js и startup.js синхронизированы с `tracking_interval_min` (дефолт 3).
+1. ~~`trackModems`: дефолт и комментарии расходились~~ — закрыто (C8, 2026-08): комментарии в server.js и startup.js синхронизированы с `tracking_interval_min` (текущий дефолт 1 минута).
 2. `payments` — мёртвая таблица (read-only legacy). C5a закрыт: все читатели (портал, публичное API, бут) читают billing_ledger, in-memory `client.payments[]` и роут `DELETE /payment/:index` выпилены, `src/db/payments.js` удалён. Осталось C5b: сверка `scripts/reconcile-payments.js` на проде → ручной дроп `migrations/manual/056_drop_payments.sql`.
 3. ~~`daily_summary` читает system_log с несуществующей колонкой `source` — деградирует молча в try/catch~~ — закрыто (C7, 2026-08): запрос переписан под реальные колонки (timestamp/action/target), молчаливые catch переведены на warn; покрыто tests/daily-summary.test.js.
 4. `tochkaRequest` имеет две сигнатуры (config-first в api.js и method-first через обёртку в server.js) — **унифицировать при выносе** в общий модуль (кода не касались, C8).
