@@ -38,6 +38,26 @@ const BOOT_GRACE_MS = 5 * 60 * 1000;   // 5 min — quiet right after restart
 const cooldownState = new Map();       // key: ruleId|dedupeKey → unix ms last sent
 let _persistTimer = null;
 
+// B1 (ТЗ мониторинга v2, 23.08): зависимости алертов. Пока по серверу активен
+// «server_unreachable», модемные правила этого сервера подавляются — бокс упал
+// → один алерт про бокс, а не 25 про его модемы. Подавленные считаются и
+// репортятся сводкой в сообщении «сервер вернулся».
+// Ограничение: состояние в памяти — после рестарта подавление включается
+// заново с первого же server_unreachable (кулдауны персистентны, поэтому при
+// быстром рестарте подавление может простаивать до конца кулдауна правила).
+const boxDownState = new Map();        // server → { since: ms, suppressed: n }
+const SUPPRESSIBLE_RULES = new Set([
+  'modem_offline_20m', 'modem_recovered',
+  'modem_ping_dead', 'modem_ping_recovered', 'modem_ping_slow',
+  'modem_http_fail', 'modem_http_recovered',
+  'recovery_exhausted', 'failover_done', 'failover_no_spare', 'failover_failed',
+  'sim_iccid_changed', 'sim_status_bad', 'sim_redirect_imposed',
+  'reboot_score_high', 'proxy_expiring_3d',
+]);
+function _depsEnabled() {
+  return !appSettings || appSettings.alert_dependencies_enabled !== false;
+}
+
 function init(deps) {
   logger        = deps.logger;
   getSetting    = deps.getSetting;
@@ -106,7 +126,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 60,
     dedupeKey: p => 'srvrec_' + (p.server || 'unknown'),
-    render: p => `🟢 <b>Сервер на связи</b>\n\nСервер <b>${esc(p.server)}</b> снова отвечает после ${formatDuration(p.downSec)} простоя.`,
+    render: p => `🟢 <b>Сервер на связи</b>\n\nСервер <b>${esc(p.server)}</b> снова отвечает после ${formatDuration(p.downSec)} простоя.${p.suppressed ? `\nЗа время простоя подавлено каскадных алертов модемов: <b>${p.suppressed}</b> — смотри сводку по серверу.` : ''}`,
   },
   tochka_webhook_failed: {
     title: 'Webhook от Точки сбоит подряд',
@@ -718,6 +738,25 @@ const RULES = {
     dedupeKey: p => 'httprec_' + (p.server || '') + '_' + (p.nick || ''),
     render: p => `🟢 <b>Сайт снова открывается</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}) — чек проходит${p.ms != null ? ` (${p.ms} мс)` : ''}.`,
   },
+  // A4 (23.08): объёмные алерты с пакетами по операторам.
+  volume_modem_hourly: {
+    title: 'Модем: аномальный трафик за час',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 21600,   // 6 ч — дедуп по модему
+    dedupeKey: p => 'volh_' + (p.server || '') + '_' + (p.nick || ''),
+    render: p => `🟠 <b>Аномальный трафик за час</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}, ${esc(p.operator || '?')}) — <b>${p.gb} ГБ</b> за час при пороге ${p.threshold_gb} ГБ${p.pct_of_package != null ? ` — это <b>${p.pct_of_package}%</b> пакета симки` : ''}.\nЕсли это не клиентская нагрузка — проверь модем.`,
+  },
+  volume_package_pace: {
+    title: 'Пакет оператора: темп расхода',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 21600,   // 6 ч — дедуп по оператору/симке
+    dedupeKey: p => 'volp_' + (p.scope === 'sim' ? (p.server || '') + '_' + (p.nick || '') : (p.operator || '')),
+    render: p => p.scope === 'sim'
+      ? `🟠 <b>Симка выходит за темп пакета</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(p.server || '?')}, ${esc(p.operator || '?')}) — <b>${p.gb_day} ГБ</b> за сегодня при пакете ${p.package_gb} ГБ (порог ${p.pace_pct}%/сут).`
+      : `🟠 <b>Пакет ${esc(p.operator || '?')} расходуется быстрее нормы</b>\n\nТекущий темп: <b>${p.gb_day} ГБ/сут</b> (${p.modems} модемов, израсходовано ${p.used_gb} из ${p.package_gb} ГБ)${p.days_left != null ? ` — такими темпами пакета хватит ещё на <b>~${p.days_left} дн</b>` : ''}.`,
+  },
 
   // ── 🔵 EARLY WARNING ────────────────────────────────────────
   heap_warn: {
@@ -791,6 +830,8 @@ const _entityFor = {
   modem_ping_slow:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   modem_http_fail:           p => ({ kind: 'modem',   id: p.nick || null }),
   modem_http_recovered:      p => ({ kind: 'modem',   id: p.nick || null }),
+  volume_modem_hourly:       p => ({ kind: 'modem',   id: p.nick || null }),
+  volume_package_pace:       p => ({ kind: 'system',  id: 'volume:' + (p.operator || p.nick || '') }),
   recovery_exhausted:        p => ({ kind: 'modem',   id: p.nick || null }),
   failover_done:             p => ({ kind: 'modem',   id: p.spareNick || p.deadNick || null }),
   failover_no_spare:         p => ({ kind: 'modem',   id: p.nick || null }),
@@ -902,6 +943,21 @@ function trigger(ruleId, payload) {
     if (!isRuleEnabled(ruleId)) return false;
     if (Date.now() - _bootAt < BOOT_GRACE_MS) return false;
 
+    // B1: зависимости. Бокс лежит → модемные правила этого сервера молчат
+    // и копятся в счётчике; сводка уходит в «server_recovered».
+    const _srv = payload && payload.server;
+    if (ruleId === 'server_recovered' && _srv) {
+      const st = boxDownState.get(_srv);
+      if (st) {
+        if (st.suppressed > 0) payload = { ...payload, suppressed: st.suppressed };
+        boxDownState.delete(_srv);
+      }
+    } else if (_depsEnabled() && ruleId !== 'server_unreachable' && _srv
+               && boxDownState.has(_srv) && SUPPRESSIBLE_RULES.has(ruleId)) {
+      boxDownState.get(_srv).suppressed++;
+      return false;
+    }
+
     const dedup = (typeof rule.dedupeKey === 'function') ? rule.dedupeKey(payload || {}) : 'global';
     const cooldownKey = ruleId + '|' + dedup;
     const lastSentAt = cooldownState.get(cooldownKey) || 0;
@@ -913,6 +969,11 @@ function trigger(ruleId, payload) {
 
     cooldownState.set(cooldownKey, Date.now());
     _persistCooldowns();
+
+    // B1: с этого момента модемные алерты лежащего бокса подавляются.
+    if (ruleId === 'server_unreachable' && _srv && _depsEnabled()) {
+      boxDownState.set(_srv, { since: Date.now(), suppressed: 0 });
+    }
 
     // Bell first — independent of Telegram. Even if chat_id is unset or TG is
     // down, admins still see the event in the in-app panel.
@@ -1022,4 +1083,6 @@ function formatDuration(sec) {
   return h + ' ч ' + (m % 60) + ' мин';
 }
 
-module.exports = { init, trigger, clearCooldown, listRules, recordBellEvent, isRuleEnabled, RULES };
+module.exports = { init, trigger, clearCooldown, listRules, recordBellEvent, isRuleEnabled, RULES,
+  _boxDownState: boxDownState,   // B1: для тестов и диагностики
+};

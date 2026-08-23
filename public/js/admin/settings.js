@@ -323,6 +323,8 @@ function loadSettings(){
     var simD=document.getElementById('simMaxDurationInput');if(simD)simD.value=s.simulator_max_duration_min||30;
     if(currentData) currentData.settings = s;
     renderPricingTiers();
+    opPkgRender(s);
+    var _vE=document.getElementById('volumeEnabledInput');if(_vE)_vE.checked=(s.volume_enabled!==false);
   }).catch(function(){});
 }
 // Live-проверка кредов при сохранении (15.08): сервер возвращает cred_checks
@@ -599,3 +601,61 @@ function saveSimulatorSettings(){
 }
 
 // ========== DOCUMENTS ==========
+
+// ========== A4 (23.08): Пакеты операторов (объёмные алерты) ==========
+// JSON-массив в настройке operator_packages; сохранение без рестарта.
+function _opPkgParse(s){
+  try{var a=JSON.parse((s&&s.operator_packages)||'[]');return Array.isArray(a)?a:[];}
+  catch(e){return [];}
+}
+function opPkgRender(s){
+  var box=document.getElementById('opPkgRows');if(!box)return;
+  var pkgs=_opPkgParse(s);
+  var h='<div style="display:grid;grid-template-columns:1.4fr 110px 110px 110px 110px 30px;gap:6px;font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;font-weight:600;padding:0 2px 5px">';
+  h+='<div>Оператор</div><div>Тип пакета</div><div>Объём, ГБ</div><div>Порог часа, ГБ</div><div>Темп, %/сут</div><div></div></div>';
+  pkgs.forEach(function(p,i){
+    h+='<div style="display:grid;grid-template-columns:1.4fr 110px 110px 110px 110px 30px;gap:6px;margin-bottom:6px" class="op-pkg-row">'
+      +'<input class="input opp-op" value="'+esc(p.operator||'')+'" placeholder="Moldtelecom" style="font-size:12px">'
+      +'<select class="input opp-type" style="font-size:12px"><option value="per_sim"'+(p.type==='per_sim'?' selected':'')+'>на симку</option><option value="shared"'+(p.type==='shared'?' selected':'')+'>общий</option></select>'
+      +'<input class="input opp-vol" type="number" min="0" value="'+(p.volume_gb||0)+'" style="font-size:12px">'
+      +'<input class="input opp-hour" type="number" min="0" value="'+(p.hourly_gb||'')+'" placeholder="авто" style="font-size:12px">'
+      +'<input class="input opp-pace" type="number" min="0" max="100" value="'+(p.pace_pct||0)+'" style="font-size:12px">'
+      +'<button class="btn btn-sm" style="padding:2px 7px;color:var(--danger)" data-on-click="opPkgDelRow(this)">×</button></div>';
+  });
+  box.innerHTML=h||'<div style="font-size:11px;color:var(--text-3)">Пакеты не заданы — добавьте операторов</div>';
+}
+function opPkgAddRow(){
+  var box=document.getElementById('opPkgRows');if(!box)return;
+  var cur=[];box.querySelectorAll('.op-pkg-row').forEach(function(r){
+    cur.push({operator:r.querySelector('.opp-op').value.trim(),type:r.querySelector('.opp-type').value,
+      volume_gb:parseFloat(r.querySelector('.opp-vol').value)||0,
+      hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
+      pace_pct:parseFloat(r.querySelector('.opp-pace').value)||0});
+  });
+  cur.push({operator:'',type:'per_sim',volume_gb:0,hourly_gb:0,pace_pct:0});
+  opPkgRender({operator_packages:JSON.stringify(cur)});
+}
+function opPkgDelRow(btn){
+  var row=btn.closest('.op-pkg-row');if(row)row.remove();
+}
+function opPkgSave(){
+  var rows=[];var bad=false;
+  document.querySelectorAll('#opPkgRows .op-pkg-row').forEach(function(r){
+    var op=r.querySelector('.opp-op').value.trim();
+    if(!op){bad=true;return;}
+    rows.push({operator:op,type:r.querySelector('.opp-type').value,
+      volume_gb:parseFloat(r.querySelector('.opp-vol').value)||0,
+      hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
+      pace_pct:parseFloat(r.querySelector('.opp-pace').value)||0});
+  });
+  var st=document.getElementById('opPkgStatus');
+  if(bad){st.textContent='Заполните имя оператора в каждой строке';st.style.color='var(--danger)';return;}
+  st.textContent='Сохраняю...';st.style.color='var(--warning)';
+  api(API+'/api/admin/settings',{method:'PUT',json:{
+    operator_packages:JSON.stringify(rows),
+    volume_enabled:!!document.getElementById('volumeEnabledInput').checked
+  }}).then(function(d){
+    if(d.ok){st.innerHTML='Сохранено '+icon('check',12)+' — применяется со следующего часового прогона';st.style.color='var(--success)';}
+    else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)';}
+  }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)';});
+}

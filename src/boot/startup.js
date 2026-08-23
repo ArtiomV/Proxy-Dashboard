@@ -26,7 +26,7 @@ function runStartup(d) {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runServerMetrics, runRetailGuard,
-    runBlockedPortCleanup, runHttpCheck,
+    runBlockedPortCleanup, runHttpCheck, runVolumeGuard,
     saveClients, auditLog, authTokensDb,
   } = d;
 
@@ -236,6 +236,19 @@ function runStartup(d) {
       dbAudit.runJobAsync('HttpCheck', 'periodic', () => runHttpCheck())
         .catch(e => logger.error('[HttpCheck] periodic run failed:', e.message));
     }, 60 * 1000));
+  }
+
+  // A4 (23.08): объёмные алерты с пакетами операторов — почасовой прогон по
+  // traffic_hourly (после часовой агрегации). Первый прогон через 7 мин.
+  if (runVolumeGuard) {
+    setTimeout(() => {
+      dbAudit.runJobAsync('VolumeGuard', 'startup', () => runVolumeGuard())
+        .catch(e => logger.error('[VolumeGuard] startup run failed:', e.message));
+    }, 7 * 60 * 1000);
+    _intervals.push(setInterval(() => {
+      dbAudit.runJobAsync('VolumeGuard', 'hourly', () => runVolumeGuard())
+        .catch(e => logger.error('[VolumeGuard] hourly run failed:', e.message));
+    }, 60 * 60 * 1000));
   }
 
   // 21.08: BlockedPortCleanup — удаление портов заблокированных клиентов

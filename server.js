@@ -1657,6 +1657,19 @@ const SETTINGS_DEFAULTS = {
   httpcheck_timeout_ms: 15000,
   retention_modem_httpcheck: 30,
   retention_modem_rate: 7,                 // A3: дней снапшотов modem_rate
+  // ── A4/B1 (ТЗ мониторинга v2, этап 3, 23.08) ─────────────────────
+  alert_dependencies_enabled: true,        // B1: бокс лежит → модемные алерты его сервера молчат
+  volume_enabled: true,                    // A4: объёмные алерты
+  // A4: пакеты операторов (JSON; UI Настройки → «Пакеты операторов»).
+  // per_sim — объём на симку (Orange 400 ГБ); shared — общий котёл (30 ТБ).
+  operator_packages: JSON.stringify([
+    { operator: 'Orange MD',   type: 'per_sim', volume_gb: 400,   hourly_gb: 20, pace_pct: 10 },
+    { operator: 'Moldtelecom', type: 'shared',  volume_gb: 30720, hourly_gb: 30, pace_pct: 5 },
+    { operator: 'Moldcell',    type: 'shared',  volume_gb: 30720, hourly_gb: 30, pace_pct: 5 },
+    { operator: 'Digi',        type: 'per_sim', volume_gb: 0,     hourly_gb: 30, pace_pct: 0 },
+    { operator: 'Orange RO',   type: 'per_sim', volume_gb: 0,     hourly_gb: 30, pace_pct: 0 },
+  ]),
+  volume_hourly_default_gb: 30,            // порог часа, если в пакете не задан
   // ── Domain guard (WP2): контроль доменов на bypass-боксах ────────
   domain_guard_servers: 'S2,S4',           // боксы со снятой hfilter-фильтрацией
   retention_top_hosts_daily: 90,           // дней истории top_hosts_daily / domain_guard_hits
@@ -2864,6 +2877,9 @@ const modemRate = require('./src/jobs/modem-rate').create({ db, logger });
 const httpCheck = require('./src/jobs/http-check').create({
   db, logger, alerts, getSetting, fetchAllServersDataCached, apiServers,
 });
+// A4 (23.08): объёмные алерты с пакетами операторов (трафик из traffic_hourly).
+// Тикает из startup.js каждый час.
+const volumeGuard = require('./src/jobs/volume-guard').create({ db, logger, alerts, getSetting });
 const { trackModems } = require('./src/jobs/modem-tracking').create({
   apiServers, fetchServerData, db, logger, logActivity, alerts,
   SERVER_COUNTRIES, normalizeOperator, operatorsDb, fetchApi, postFormApi,
@@ -4183,6 +4199,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
+    runVolumeGuard: () => volumeGuard.runOnce(),   // A4 (23.08): объёмные алерты
     // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).
     saveClients, auditLog, authTokensDb,
   });

@@ -417,6 +417,32 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
     });
     patch.operator_gb_costs = oc;
   }
+  // A4 (23.08): пакеты операторов — JSON-массив [{operator, type, volume_gb,
+  // hourly_gb, pace_pct}]. До 20 строк; operator ≤60 символов; type — только
+  // per_sim/shared; числа в разумных пределах.
+  if (req.body.operator_packages != null) {
+    let arr;
+    try { arr = JSON.parse(String(req.body.operator_packages)); }
+    catch (_) { return res.status(400).json({ error: 'operator_packages: невалидный JSON' }); }
+    if (!Array.isArray(arr) || arr.length > 20) {
+      return res.status(400).json({ error: 'operator_packages: массив до 20 строк' });
+    }
+    const clean = [];
+    for (const p of arr) {
+      const op = String((p && p.operator) || '').trim().slice(0, 60);
+      if (!op) return res.status(400).json({ error: 'operator_packages: пустое имя оператора' });
+      const type = p.type === 'shared' ? 'shared' : 'per_sim';
+      const num = (v, max) => { const n = parseFloat(v); return (Number.isFinite(n) && n >= 0 && n <= max) ? n : 0; };
+      clean.push({
+        operator: op, type,
+        volume_gb: num(p.volume_gb, 1e6),
+        hourly_gb: num(p.hourly_gb, 1e5),
+        pace_pct: Math.min(100, num(p.pace_pct, 100)),
+      });
+    }
+    patch.operator_packages = JSON.stringify(clean);
+  }
+  if (req.body.volume_enabled != null) patch.volume_enabled = !!req.body.volume_enabled;
   // Stage 19 — failover
   if (req.body.failover_enabled != null)          patch.failover_enabled          = !!req.body.failover_enabled;
   if (req.body.failover_dry_run != null)          patch.failover_dry_run          = !!req.body.failover_dry_run;
