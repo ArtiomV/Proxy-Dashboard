@@ -4,8 +4,8 @@
 //
 // 17 routes used by the client SPA (public/index.html):
 //   /api/dashboard_data, /api/billing_history,
-//   /api/client/{reset_ip, reset_ip_by_token, rotation_log, set_rotation,
-//                 ip_history, credentials_export, referral, documents,
+//   /api/client/{reset_ip, reset_ip_by_token, set_rotation,
+//                 credentials_export, referral, documents,
 //                 documents/:docId/download, closing_documents,
 //                 closing_documents/:docId/pdf, bills, bills/:billId/pdf,
 //                 email}
@@ -33,10 +33,9 @@ module.exports = function createClientPortalRouter(deps) {
     getMoscowToday, getMoscowNow, trafficBytesToGb, parseBwToBytes, parseTrafficValue,
     ledgerExpense,
     SERVER_COUNTRIES,
-    syncRotationLog, _rlSelect,
     apiServers,
     clients, clientById, clientByLogin, clientByApiKey, clientByResetToken,
-    dailyTraffic, ledgerDb, ipTracking, uptimeTracking, ipHistory,
+    dailyTraffic, ledgerDb, ipTracking, uptimeTracking,
     knownModems,
     getSpeedtestLatest,
     auditLog, logActivity, getClientIp,
@@ -204,7 +203,6 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
       const filteredIpTracking = {};
       const filteredUptimeTracking = {};
       const filteredSpeedtest = {};
-      const filteredIpHistory = {};
       const speedLatest = getSpeedtestLatest();
 
       const clientImeis = new Set();
@@ -264,14 +262,12 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         if (ipTracking[imei]) filteredIpTracking[imei] = ipTracking[imei];
         if (periodicUptimeByImei[imei]) filteredUptimeTracking[imei] = periodicUptimeByImei[imei];
         if (speedLatest[imei]) filteredSpeedtest[imei] = speedLatest[imei];
-        if (ipHistory[imei]) filteredIpHistory[imei] = ipHistory[imei];
       }
 
       merged.ipTracking = filteredIpTracking;
       merged.uptimeTracking = filteredUptimeTracking;
       merged.uptimeSummary30d = periodicUptimeSummary;
       merged.speedtestLatest = filteredSpeedtest;
-      merged.ipHistory = filteredIpHistory;
     }
 
     // Include server info for client portal (needed for IP addresses)
@@ -403,29 +399,6 @@ async function _resetIpImpl(req, res) {
   res.status(404).json({ error: 'Modem not found' });
 }
 
-r.get('/api/client/rotation_log', authMiddleware, async (req, res) => {
-  try {
-    const { nick, serverName } = req.query;
-    if (!nick || !serverName) return res.status(400).json({ error: 'nick and serverName required' });
-    // Verify client owns this modem (WP2: live → roster → history)
-    const pnf = req.user.portNameFilter;
-    if (pnf !== '*') {
-      const owned = await isModemOwned({ nick, portNameFilter: pnf, deps: _ownershipDeps });
-      if (!owned) return res.status(403).json({ error: 'Modem not assigned to this client' });
-    }
-    const server = findServer(serverName);
-    if (!server) return res.status(400).json({ error: 'Server not found' });
-    // Fetch from ProxySmart and sync to DB (same as admin)
-    try {
-      const result = await fetchApi(server, `/apix/get_rotation_log?arg=${encodeURIComponent(nick)}`);
-      const entries = Array.isArray(result) ? result : (result?.log || result?.logs || result?.data || []);
-      syncRotationLog(serverName, nick, entries);
-    } catch (fetchErr) { /* serve from DB if ProxySmart fails */ }
-    const rows = _rlSelect.all(serverName, nick);
-    res.json(rows);
-  } catch (err) { res.status(502).json({ error: 'Failed', details: err.message }); }
-});
-
 r.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
   try {
     const { nick, serverName, minutes } = req.body;
@@ -483,19 +456,6 @@ r.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
     auditLog(req.user.login, 'client_set_rotation', { nick, serverName, minutes: mins, ip: getClientIp(req) });
     res.json({ ok: true, minutes: mins });
   } catch (err) { res.status(502).json({ error: 'Failed to set rotation', details: err.message }); }
-});
-
-r.get('/api/client/ip_history', authMiddleware, async (req, res) => {
-  const { key } = req.query;
-  if (!key) return res.status(400).json({ error: 'key required' });
-  // Verify client owns this modem (key is IMEI)
-  const pnf = req.user.portNameFilter;
-  if (pnf !== '*') {
-    const results = await fetchAllServersDataCached();
-    const merged = mergeServerData(results, pnf);
-    if (!merged.ports[key]) return res.status(403).json({ error: 'Modem not assigned to this client' });
-  }
-  res.json(ipHistory[key] || []);
 });
 
 r.get('/api/client/credentials_export', authMiddleware, async (req, res) => {

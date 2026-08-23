@@ -4057,6 +4057,7 @@ app.use(require('./src/routes/ops-ext')({
   getModemRateTop: (n) => modemRate.top(n),       // A3: топ грузящих для дашборда
   getHttpCheckLatest: () => httpCheck.latest(),   // A2 (23.08): последние HTTP-чеки
   getOperatorAliases: () => operatorsDb.aliasMap(),
+  getServerDownSince: () => _serverDownSince,
 }));
 
 app.use(require('./src/routes/billing-ext')({

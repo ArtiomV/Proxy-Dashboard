@@ -243,6 +243,11 @@ function _finCostsRecalc(ov) {
 function _finCostNative(amount,currency){
   return (Number(amount)||0).toLocaleString('ru-RU')+' '+(currency==='RUB'?'₽':currency);
 }
+function _finServerCountLabel(value){
+  var n=Math.max(0,Number(value)||0),m10=n%10,m100=n%100;
+  var word=m10===1&&m100!==11?'сервер':m10>=2&&m10<=4&&(m100<12||m100>14)?'сервера':'серверов';
+  return n+' '+word;
+}
 function openOperatorPackagesFromCosts(){
   var ov=document.getElementById('_finCostsOverlay');if(ov)ov.remove();
   var tab=null;document.querySelectorAll('.nav-tab').forEach(function(el){if((el.getAttribute('data-on-click')||'').indexOf("switchMainTab('analytics'")===0)tab=el;});
@@ -255,6 +260,7 @@ function _renderCostsModal(d) {
   ov.className = 'fcm-overlay';
   ov.onclick = function(e){ if(e.target===ov) ov.remove(); };
   ov._fxRates = (d.fx && d.fx.rates) || {};
+  var usingTemplate=!(d.rows&&d.rows.length)&&!!(d.template&&d.template.length);
   var rows = (d.rows && d.rows.length) ? d.rows : (d.template || []).map(function(t){return Object.assign({},t)});
   var byCat = {};
   rows.forEach(function(r){ (byCat[r.category]=byCat[r.category]||[]).push(r); });
@@ -285,11 +291,18 @@ function _renderCostsModal(d) {
     var configured=!!c.configured,effectiveAmount=configured?(Number(c.amount)||0):(legacy?(Number(legacy.amount)||0):0);
     var effectiveCurrency=configured?(c.currency||'RUB'):(legacy?(legacy.currency||'RUB'):(c.currency||'RUB'));
     if(!configured)missingCount++;
-    var typeLabel=c.type==='per_sim'?'на SIM':c.type==='unlimited'?'безлимит':'бандл';
-    var formula=configured
-      ? (c.sim_count+' SIM ÷ '+c.max_sims+' = '+c.bundle_count+' '+(c.bundle_count===1?'бандл':'бандла')+' × '+_finCostNative(c.price,c.currency))
-      : 'Нужно заполнить: '+((c.missing||[]).join(', ')||'параметры пакета');
-    var traffic=c.type==='unlimited'?'Безлимитный трафик':((c.volume_gb||0).toLocaleString('ru-RU')+' ГБ/бандл'+(c.total_volume_gb!=null?' · '+Number(c.total_volume_gb).toLocaleString('ru-RU')+' ГБ всего':''));
+    var typeLabel=c.type==='per_sim'?'оплата за SIM':c.type==='unlimited'?'безлимит':'общий бандл';
+    var formula='Нужно заполнить: '+((c.missing||[]).join(', ')||'параметры пакета');
+    var traffic='';
+    if(configured&&c.type==='per_sim'){
+      formula=c.sim_count+' SIM × '+_finCostNative(c.price,c.currency)+' за SIM';
+      traffic=(c.volume_gb||0).toLocaleString('ru-RU')+' ГБ/SIM'+(c.total_volume_gb!=null?' · '+Number(c.total_volume_gb).toLocaleString('ru-RU')+' ГБ всего':'');
+    }else if(configured&&c.type==='unlimited'){
+      formula='Фиксированная цена за месяц';traffic='Безлимитный трафик';
+    }else if(configured){
+      formula=c.sim_count+' SIM ÷ '+c.max_sims+' = '+c.bundle_count+' '+(c.bundle_count===1?'бандл':'бандла')+' × '+_finCostNative(c.price,c.currency);
+      traffic=(c.volume_gb||0).toLocaleString('ru-RU')+' ГБ/бандл'+(c.total_volume_gb!=null?' · '+Number(c.total_volume_gb).toLocaleString('ru-RU')+' ГБ всего':'');
+    }
     var source=configured?'из «Пакетов операторов»':(legacy?'временно используется старая ручная сумма':'в расчёт пока не входит');
     var legacyAttrs=(!configured&&legacy)
       ? ' data-legacy-amount="'+(Number(legacy.amount)||0)+'" data-legacy-currency="'+esc(legacy.currency||'RUB')+'" data-legacy-qty="'+(Number(legacy.qty)||0)+'" data-legacy-key="'+esc(legacy.subkey||c.operator).replace(/"/g,'&quot;')+'"'
@@ -301,18 +314,48 @@ function _renderCostsModal(d) {
   });
   if(!autoHtml)autoHtml='<div class="fcm-empty">В базе пока нет операторов с SIM. Добавьте пакет, когда появится оператор.</div>';
 
-  var serverHtml='',srvList=meta.servers||[];
-  srvList.forEach(function(s){
-    var existing=(byCat.server||[]).find(function(r){return r.subkey===s});
-    serverHtml+=editRow(esc(serverLabels[s]||s),'Аренда сервера','server',s,existing,(meta.serverCountry||{})[s]);
+  var locations=(meta.locations||[]).slice();
+  // Compatibility with an older backend response: keep every server separate
+  // until grouped physical addresses are available.
+  if(!locations.length&&(meta.servers||[]).length){
+    locations=(meta.servers||[]).map(function(s){return {key:'server:'+s,label:serverLabels[s]||s,address:'',address_missing:true,country:(meta.serverCountry||{})[s],servers:[{name:s,displayName:serverLabels[s]||s}]};});
+  }
+  function combineExisting(list){
+    if(!list.length)return null;if(list.length===1)return list[0];
+    var currency=list[0].currency||'RUB',same=list.every(function(r){return (r.currency||'RUB')===currency;});
+    if(same)return Object.assign({},list[0],{amount:list.reduce(function(sum,r){return sum+(Number(r.amount)||0);},0)});
+    var rates=(d.fx&&d.fx.rates)||{};
+    var rub=list.reduce(function(sum,r){var cur=r.currency||'RUB',amount=Number(r.amount)||0;return sum+(cur==='RUB'?amount:amount*(Number(rates[cur])||0));},0);
+    return Object.assign({},list[0],{amount:Math.round(rub*100)/100,currency:'RUB'});
+  }
+  function locationExisting(cat,loc){
+    var keys=[loc.key,loc.address].concat((loc.servers||[]).reduce(function(a,s){a.push(s.name,'server:'+s.name);return a;},[])).filter(Boolean);
+    var matched=(byCat[cat]||[]).filter(function(r){return keys.indexOf(r.subkey)>=0;});
+    if(!matched.length&&locations.length===1)matched=(byCat[cat]||[]).filter(function(r){return !r.subkey;});
+    return combineExisting(matched);
+  }
+  var locationHtml='';
+  locations.forEach(function(loc){
+    var serverNames=(loc.servers||[]).map(function(s){return s.displayName||s.name;});
+    var subtitle=loc.address_missing?'Адрес не указан в API-серверах':serverNames.join(' · ');
+    var expenses='';
+    [['server','Аренда площадки','Ежемесячно за весь адрес'],['electricity','Электричество','Расход этой локации'],['hosting','Связь','Каналы и услуги связи'],['salary','Команда','Расход команды на локации']].forEach(function(item){
+      expenses+=editRow(item[1],item[2],item[0],loc.key,locationExisting(item[0],loc),loc.country||'');
+    });
+    locationHtml+='<article class="fcm-location-card"><div class="fcm-location-head"><span class="fcm-location-pin">'+icon('pin',15)+'</span><div><b>'+esc(loc.label||'Локация')+'</b><small>'+esc(subtitle)+'</small></div><em>'+_finServerCountLabel(serverNames.length)+'</em></div><div class="fcm-location-costs">'+expenses+'</div></article>';
   });
-  if(!serverHtml)serverHtml='<div class="fcm-empty">Серверы не найдены</div>';
+  if(!locationHtml)locationHtml='<div class="fcm-empty">Локации не найдены. Укажите адреса у API-серверов.</div>';
 
-  var otherHtml='';
-  ['electricity','hosting','salary','other'].forEach(function(k){
-    var existing=(byCat[k]||[])[0];
-    otherHtml+=editRow(esc(cats[k]?cats[k].label:k),'Вводится вручную',k,null,existing,'');
-  });
+  var unallocatedHtml='';
+  if(locations.length!==1){
+    ['electricity','hosting','salary'].forEach(function(k){
+      var existing=(byCat[k]||[]).find(function(r){return !r.subkey;});
+      if(existing)unallocatedHtml+=editRow(esc(cats[k]?cats[k].label:k),'Старая общая сумма — распределите по локациям',k,null,existing,'');
+    });
+  }
+  var otherExisting=(byCat.other||[]).find(function(r){return !r.subkey;})||(byCat.other||[])[0];
+  var otherHtml=editRow(esc(cats.other?cats.other.label:'Прочее'),'Общие расходы, не привязанные к адресу','other',null,otherExisting,'');
+  if(unallocatedHtml)otherHtml+='<div class="fcm-unallocated"><b>Не распределено по локациям</b><small>Старые общие суммы сохранены. Перенесите их в нужные карточки и очистите здесь.</small>'+unallocatedHtml+'</div>';
 
   var fxBlock='';
   if(d.fx){
@@ -324,18 +367,18 @@ function _renderCostsModal(d) {
   }
 
   var missingBanner=missingCount
-    ? '<div class="fcm-missing"><div>'+icon('alert',14)+' <span><b>Нужно дополнить пакеты: '+missingCount+'</b><small>Без цены, объёма или лимита SIM автоматический расчёт невозможен.</small></span></div><button class="btn btn-sm" data-on-click="openOperatorPackagesFromCosts()">Заполнить пакеты →</button></div>'
+    ? '<div class="fcm-missing"><div>'+icon('alert',14)+' <span><b>Нужно дополнить пакеты: '+missingCount+'</b><small>Заполните обязательные поля выбранного типа тарифа.</small></span></div><button class="btn btn-sm" data-on-click="openOperatorPackagesFromCosts()">Заполнить пакеты →</button></div>'
     : '';
 
   ov.innerHTML='<div class="fcm-modal">'
-    +'<div class="fcm-head"><div><small>Финансы · '+esc(d.period)+'</small><h3>Затраты месяца</h3><p>SIM считаются автоматически, остальные расходы вводятся вручную.</p></div>'
+    +'<div class="fcm-head"><div><small>Финансы · '+esc(d.period)+'</small><h3>Затраты месяца</h3><p>Пакеты считаются автоматически, расходы площадок задаются один раз на физический адрес.</p></div>'
     +'<button class="fcm-close" data-on-click="document.getElementById(\'_finCostsOverlay\').remove()">&times;</button></div>'
     +'<div class="fcm-summary"><div><span>SIM и бандлы</span><b id="fcAutoSimTotal">0 ₽</b></div><div><span>Ручные расходы</span><b id="fcManualTotal">0 ₽</b></div><div class="is-total"><span>Итого за месяц</span><b id="fcGrandTotal">0 ₽</b></div></div>'
-    +(rows.length===0&&(d.template||[]).length>0?'<div class="fcm-carried">'+icon('info',12)+' Ручные значения подставлены из предыдущего месяца — проверьте их перед сохранением.</div>':'')
+    +(usingTemplate?'<div class="fcm-carried">'+icon('info',12)+' Ручные значения подставлены из предыдущего месяца — проверьте их перед сохранением.</div>':'')
     +missingBanner
     +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>SIM и пакеты операторов</h4><p>Только для чтения · данные берутся из базы и настроек пакета</p></div><button class="btn btn-sm" data-on-click="openOperatorPackagesFromCosts()">Настроить</button></div><div class="fcm-auto-list">'+autoHtml+'</div></section>'
-    +'<div class="fcm-two-col"><section class="fcm-section"><div class="fcm-section-head"><div><h4>Серверы</h4><p>Ежемесячная аренда площадок</p></div></div>'+serverHtml+'</section>'
-    +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>Прочее</h4><p>Электричество, связь и команда</p></div></div>'+otherHtml+'</section></div>'
+    +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>Расходы по локациям</h4><p>Один адрес — одна аренда, независимо от числа серверов</p></div></div><div class="fcm-location-list">'+locationHtml+'</div></section>'
+    +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>Прочее</h4><p>Только расходы, которые нельзя отнести к конкретной локации</p></div></div>'+otherHtml+'</section>'
     +fxBlock
     +'<div class="fcm-save"><button class="btn" data-on-click="document.getElementById(\'_finCostsOverlay\').remove()">Отмена</button><button class="btn btn-primary" data-on-click="saveCostsModal()">'+icon('save',13)+' Сохранить ручные расходы</button></div>'
     +'</div>';

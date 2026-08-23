@@ -29,7 +29,8 @@ describe('operator package automatic costs', () => {
       sim_count: 27, max_sims: 10, bundle_count: 3, amount: 1500, total_volume_gb: 3000, configured: true,
     });
     expect(result.rows.find(r => r.operator === 'Digi')).toMatchObject({
-      sim_count: 12, max_sims: 20, bundle_count: 1, amount: 1000, total_volume_gb: null, configured: true,
+      sim_count: 12, max_sims: 0, bundle_count: null, billing_units: 1,
+      amount: 1000, total_volume_gb: null, configured: true,
     });
     expect(result.unconfigured).toEqual([
       { operator: 'Unknown Mobile', sim_count: 3, missing: ['пакет оператора'] },
@@ -40,12 +41,17 @@ describe('operator package automatic costs', () => {
     const result = calculateOperatorPackageCosts([
       { operator: 'Empty', type: 'shared', volume_gb: 0, max_sims: 0, price: 0 },
       { operator: 'Ready', type: 'shared', volume_gb: 500, max_sims: 10, price: 250 },
-    ], { empty: 5, ready: 0 });
+      { operator: 'Unlimited', type: 'unlimited', max_sims: 0, price: 900 },
+    ], { empty: 5, ready: 0, unlimited: 0 });
     expect(result.rows[0]).toMatchObject({
       configured: false, bundle_count: null, amount: 0,
       missing: ['цена', 'SIM в бандле', 'объём трафика'],
     });
     expect(result.rows[1]).toMatchObject({ configured: true, sim_count: 0, bundle_count: 0, amount: 0 });
+    expect(result.rows[2]).toMatchObject({
+      configured: true, sim_count: 0, max_sims: 0, bundle_count: null,
+      billing_units: 0, amount: 0, missing: [],
+    });
   });
 
   it('reads distinct active SIM identities and ignores soft-deleted modems', () => {

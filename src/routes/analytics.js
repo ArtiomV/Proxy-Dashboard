@@ -21,6 +21,7 @@ module.exports = function createAnalyticsRouter(deps) {
     portKeyToPortName,
     getStaleNicks, getStaleKeys,
     getTzOffset,
+    normalizeOperator,
   } = deps;
   const r = express.Router();
   // Stage 4 finish: heatmap response cache is local to the router. Period →
@@ -337,6 +338,33 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
     const reused = analyticsDb.ipReused(sinceExpr, staleArgs, staleFilter);
     const lifetimeAll = analyticsDb.ipLifetime(sinceExpr, staleArgs, staleFilter).avg_sec;
     const poolsRows = analyticsDb.ipPools(sinceExpr, staleArgs, staleFilter);
+    const operatorRows = analyticsDb.ipOperatorRows(
+      sinceExpr,
+      staleArgs,
+      staleFilter.replace(/\bkey\b/g, 'h.key')
+    );
+
+    // Aliases such as "MOLDCELL" and "Moldcell" are collapsed through the
+    // same normalizer used by the rest of the dashboard. Sets preserve truly
+    // unique IPs even when two raw operator names map to one canonical name.
+    const operatorGroups = new Map();
+    for (const row of operatorRows) {
+      const isRO = ((SERVER_COUNTRIES[row.server] || {}).country || '') === 'RO';
+      const operator = (typeof normalizeOperator === 'function'
+        ? normalizeOperator(row.operator, isRO)
+        : row.operator) || 'Неизвестный';
+      if (!operatorGroups.has(operator)) {
+        operatorGroups.set(operator, { ips: new Set(), modems: new Set() });
+      }
+      const group = operatorGroups.get(operator);
+      if (row.ip) group.ips.add(row.ip);
+      if (row.key) group.modems.add(row.key);
+    }
+    const operators = Array.from(operatorGroups, ([operator, group]) => ({
+      operator,
+      ip_count: group.ips.size,
+      modems: group.modems.size,
+    })).sort((a, b) => b.ip_count - a.ip_count || a.operator.localeCompare(b.operator, 'ru'));
 
     // Per-modem /24 subnet diversity
     const subRows = analyticsDb.ipSubnets(sinceExpr, staleArgs, staleFilter);
@@ -372,6 +400,7 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
       },
       reused,
       pools: poolsRows,
+      operators,
       subnets: subnets.slice(0, 50),
       subnet_summary: subnetSummary
     });

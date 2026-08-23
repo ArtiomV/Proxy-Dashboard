@@ -65,21 +65,28 @@ function calculateOperatorPackageCosts(packages, simRoster, defaultCurrencyByOpe
     configured.add(key);
     const type = raw.type === 'shared' || raw.type === 'unlimited' ? raw.type : 'per_sim';
     const simCount = Number(roster.counts[key]) || 0;
-    const maxSims = type === 'per_sim' ? 1 : Math.max(0, Math.floor(Number(raw.max_sims) || 0));
-    const bundleCount = simCount === 0 ? 0 : (maxSims > 0 ? Math.ceil(simCount / maxSims) : null);
+    const maxSims = type === 'per_sim' ? 1
+      : type === 'shared' ? Math.max(0, Math.floor(Number(raw.max_sims) || 0))
+        : 0;
+    // per_sim: every active SIM is a paid unit; shared: SIMs occupy one or
+    // more bundles; unlimited: one fixed operator plan while it has active SIMs.
+    const bundleCount = type === 'unlimited' ? null
+      : simCount === 0 ? 0
+        : (maxSims > 0 ? Math.ceil(simCount / maxSims) : null);
+    const billingUnits = type === 'unlimited' ? (simCount > 0 ? 1 : 0) : bundleCount;
     const price = Math.max(0, Number(raw.price) || 0);
     const currencyCandidate = String(raw.currency || defaultCurrencyByOperator[operator] || defaultCurrencyByOperator[key] || 'RUB').toUpperCase();
     const currency = VALID_CURRENCIES.has(currencyCandidate) ? currencyCandidate : 'RUB';
     const volumeGb = type === 'unlimited' ? 0 : Math.max(0, Number(raw.volume_gb) || 0);
-    const amount = bundleCount == null ? 0 : Math.round(bundleCount * price * 100) / 100;
+    const amount = billingUnits == null ? 0 : Math.round(billingUnits * price * 100) / 100;
     const totalVolumeGb = type === 'unlimited' || bundleCount == null ? null : Math.round(bundleCount * volumeGb * 10) / 10;
     const missing = [];
     if (!(price > 0)) missing.push('цена');
-    if (type !== 'per_sim' && !(maxSims > 0)) missing.push('SIM в бандле');
+    if (type === 'shared' && !(maxSims > 0)) missing.push('SIM в бандле');
     if (type !== 'unlimited' && !(volumeGb > 0)) missing.push('объём трафика');
     rows.push({
       operator, type, sim_count: simCount, max_sims: maxSims,
-      bundle_count: bundleCount, price, currency, amount,
+      bundle_count: bundleCount, billing_units: billingUnits, price, currency, amount,
       volume_gb: volumeGb, total_volume_gb: totalVolumeGb,
       configured: missing.length === 0, missing,
     });

@@ -6,6 +6,7 @@
 
 const express = require('express');
 const analyticsDb = require('../db/analytics');
+const trackingDb = require('../db/tracking');
 
 module.exports = function createAnalyticsCapacityRouter(deps) {
   const {
@@ -25,8 +26,31 @@ module.exports = function createAnalyticsCapacityRouter(deps) {
       const staleNicks = (typeof getStaleNicks === 'function') ? getStaleNicks() : new Set();
       const { clause: staleFilter, params: staleArgs } = analyticsDb.notInClause('nick', staleNicks);
 
-      // Per-server utilization
-      const servers = analyticsDb.capacityServers(sinceExpr, staleFilter).all(...staleArgs);
+      // The capacity denominator is the same stable roster used by the fleet
+      // headline: real, non-test, non-random, non-deleted modem_meta rows.
+      // Traffic activity is period-bound, but hardware must not disappear from
+      // "fleet capacity" merely because a server produced no traffic rows.
+      const roster = trackingDb.metaFleetRosterStmt().all();
+      const rosterByServer = new Map();
+      for (const modem of roster) {
+        rosterByServer.set(modem.srv, (rosterByServer.get(modem.srv) || 0) + 1);
+      }
+
+      // Per-server traffic utilization, merged onto the stable roster so a
+      // quiet/offline server remains visible with zero period traffic.
+      const trafficServers = analyticsDb.capacityServers(sinceExpr, staleFilter).all(...staleArgs);
+      const trafficByServer = new Map(trafficServers.map(row => [row.server_name, row]));
+      const servers = Array.from(rosterByServer, ([serverName, modemCount]) => {
+        const traffic = trafficByServer.get(serverName) || {};
+        return {
+          server_name: serverName,
+          modem_count: modemCount,
+          total_bytes: Number(traffic.total_bytes) || 0,
+          avg_hour_bytes: Number(traffic.avg_hour_bytes) || 0,
+          max_hour_bytes: Number(traffic.max_hour_bytes) || 0,
+          active_days: Number(traffic.active_days) || 0,
+        };
+      }).sort((a, b) => b.total_bytes - a.total_bytes || a.server_name.localeCompare(b.server_name));
 
       // Modem count growth by month — stale IMEIs excluded at SELECT level
       // (nicks would be the wrong key here).
@@ -38,14 +62,16 @@ module.exports = function createAnalyticsCapacityRouter(deps) {
       const totals = analyticsDb.capacityTotals(sinceExpr, staleFilter).get(...staleArgs);
 
       const totalGb = totals.total_bytes ? totals.total_bytes / 1e9 : 0;
-      const avgPerModem = totals.total_modems > 0 ? totalGb / totals.total_modems : 0;
+      const totalModems = roster.length;
+      const totalServers = rosterByServer.size;
+      const avgPerModem = totalModems > 0 ? totalGb / totalModems : 0;
 
       res.json({
         days,
         summary: {
           total_gb: Math.round(totalGb * 10) / 10,
-          total_modems: totals.total_modems || 0,
-          total_servers: totals.total_servers || 0,
+          total_modems: totalModems,
+          total_servers: totalServers,
           avg_gb_per_modem: Math.round(avgPerModem * 100) / 100,
         },
         servers: servers.map(s => ({

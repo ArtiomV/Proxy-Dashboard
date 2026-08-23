@@ -14,6 +14,7 @@ const { computeRevenueWindow } = require('../billing/revenue');   // WP8: canoni
 const scheduler = require('../jobs/scheduler');                  // WP6.4: job registry for /api/admin/health
 const maintenance = require('../maintenance');                   // B3 (23.08): окна обслуживания
 const uptimePeriod = require('../uptime-period');
+const { resolvePeriod, buildDowntimeWindow } = require('../server-downtime-window');
 
 // ── /api/admin/data section degradation wrapper (WP6.2) ──────────────────
 // One failing section degrades to its fallback instead of 502ing the panel.
@@ -45,8 +46,41 @@ module.exports = function createOpsExtRouter(deps) {
     ledgerExpense, parseBwToBytes, trafficBytesToGb,
     getModemPingLatest, getModemRateLatest, getModemRateTop, getHttpCheckLatest,
     getOperatorAliases,
+    getServerDownSince,
   } = deps;
   const r = express.Router();
+
+  function _readServerDowntimeWindow(period, serverName) {
+    const periodKey = resolvePeriod(period);
+    if (!periodKey) return null;
+    const nowMs = Date.now();
+    const preview = buildDowntimeWindow({ nowMs, period: periodKey });
+    const params = [preview.to, preview.to, preview.from];
+    let where = 'down_from < ? AND COALESCE(down_to, ?) > ?';
+    if (serverName) { where += ' AND server_name = ?'; params.push(serverName); }
+    let rows = [];
+    try {
+      rows = db.prepare(`SELECT server_name, down_from, down_to, duration_sec,
+          alerted, maintenance FROM server_downtime WHERE ${where} ORDER BY down_from`).all(...params);
+    } catch (_) {
+      try {
+        rows = db.prepare(`SELECT server_name, down_from, down_to, duration_sec,
+            alerted, 0 AS maintenance FROM server_downtime WHERE ${where} ORDER BY down_from`).all(...params);
+      } catch (_) { rows = []; }
+    }
+    const countries = getServerCountries();
+    const servers = getApiServers().filter(server => !serverName || server.name === serverName).map(server => ({
+      name: server.name,
+      displayName: server.displayName || server.name,
+      country: (countries[server.name] || {}).name || server.countryName || server.country || '',
+    }));
+    const ongoing = {};
+    const live = typeof getServerDownSince === 'function' ? getServerDownSince() : {};
+    for (const [name, since] of Object.entries(live || {})) {
+      if (!serverName || name === serverName) ongoing[name] = since;
+    }
+    return buildDowntimeWindow({ rows, servers, ongoing, nowMs, period: periodKey });
+  }
   // Stage 4: billing_ledger reads come from DB. Two cheap aggregate queries
   // replace what used to walk the in-memory `billingLedger` object.
   const _ledgerCountStmt = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger');
@@ -563,6 +597,21 @@ r.get('/api/admin/modem_httpcheck', authMiddleware, adminMiddleware, (req, res) 
   }
 });
 
+r.get('/api/admin/server_downtime', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const period = resolvePeriod(req.query.period || '24h');
+    if (!period) return res.status(400).json({ error: 'period: 24h | 7d | 30d | 90d' });
+    const server = String(req.query.server || '').trim();
+    if (!server) return res.status(400).json({ error: 'server required' });
+    const known = getApiServers().some(item => item.name === server);
+    if (!known) return res.status(404).json({ error: 'Server not found' });
+    res.json(_readServerDowntimeWindow(period, server));
+  } catch (e) {
+    logger.error('[server_downtime]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
 r.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) => {
   try {
     // Billing success 24h
@@ -644,6 +693,7 @@ r.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) =>
         publicIp: s.publicIp || ''
       };
     });
+    const serverDowntime24h = _readServerDowntimeWindow('24h', '');
 
     res.json({
       timestamp: new Date().toISOString(),
@@ -656,6 +706,7 @@ r.get('/api/admin/system_health', authMiddleware, adminMiddleware, (req, res) =>
       },
       disk,
       server_downtime: serverDowntime,
+      server_downtime_24h: serverDowntime24h,
       sessions: sessionCount,
       memory: {
         rss_mb: Math.round(memUsage.rss / 1048576),

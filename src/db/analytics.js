@@ -132,6 +132,16 @@ function init(db) {
      GROUP BY key
      ORDER BY subnets DESC
   `);
+  S.ipOperatorRows = (sinceExpr, staleFilter) => db.prepare(`
+    SELECT DISTINCT h.ip, h.key,
+           substr(h.key, 1, instr(h.key, '_') - 1) as server,
+           COALESCE(m.operator, '') as operator
+      FROM ip_history h
+      LEFT JOIN modem_meta m
+        ON h.key = m.server_name || '_' || m.imei
+     WHERE h.started_at >= ${sinceExpr}
+       AND instr(h.key, '_') > 0${staleFilter}
+  `);
   S.modemNickByKey = db.prepare('SELECT server_name, imei, nick FROM modem_meta');
 
   // ── traffic_forecast ─────────────────────────────────────────────────
@@ -300,6 +310,7 @@ module.exports = {
   ipLifetime:    (sinceExpr, staleArgs, staleFilter = '') => S.ipLifetime(sinceExpr, staleFilter).get(...staleArgs),
   ipPools:       (sinceExpr, staleArgs, staleFilter = '') => S.ipPools(sinceExpr, staleFilter).all(...staleArgs),
   ipSubnets:     (sinceExpr, staleArgs, staleFilter = '') => S.ipSubnets(sinceExpr, staleFilter).all(...staleArgs),
+  ipOperatorRows:(sinceExpr, staleArgs, staleFilter = '') => S.ipOperatorRows(sinceExpr, staleFilter).all(...staleArgs),
   modemNickByKey: () => S.modemNickByKey.all(),
   // forecast
   forecastDailyTraffic: (days) => S.forecastDailyTraffic.all(days),

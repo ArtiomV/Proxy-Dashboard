@@ -15,11 +15,11 @@
 <link rel="stylesheet" href="css/variables.css?v=0814a">
 <link rel="stylesheet" href="css/base.css?v=0823h">
 <link rel="stylesheet" href="css/tables.css?v=0814a">
-<link rel="stylesheet" href="css/cards.css?v=0823b">
+<link rel="stylesheet" href="css/cards.css?v=0823c">
 <link rel="stylesheet" href="css/modal.css?v=0630d">
 <link rel="stylesheet" href="css/layout.css?v=0814a">
 <link rel="stylesheet" href="css/shell.css?v=0630d">
-<link rel="stylesheet" href="css/finance.css?v=0823q">
+<link rel="stylesheet" href="css/finance.css?v=0823t">
 <!-- Yandex.Metrika counter (инлайн вынесен в /js/metrika.js — CSP) -->
 <script src="/js/metrika.js?v=0814a"></script>
 <noscript><div><img src="https://mc.yandex.ru/watch/107161941" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
@@ -83,7 +83,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.35</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.36</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -99,7 +99,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.35</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.36</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -108,7 +108,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.35</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.36</a>
     <span class="last-update" id="lastUpdate"></span>
     <span class="sse-ind" id="sseIndicator" style="display:none" title="Realtime-обновления"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
@@ -197,18 +197,6 @@
       <div id="newClientTable"><div class="skel" style="height:200px"></div></div>
     </div>
 
-    <!-- ───── ИНФРАСТРУКТУРА (детально, раскрывашки) ───── -->
-    <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg>Инфраструктура</div>
-
-    <details class="acc-expand" data-section="infra" open>
-      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/></svg></span>Ротации · IP · ёмкость</summary>
-      <div class="acc-expand-body">
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-2)">Период:</span><button class="dchip" data-on-click="setNewInfraDays(1,this)">1 день</button><button class="dchip" data-on-click="setNewInfraDays(3,this)">3 дня</button><button class="dchip on" data-on-click="setNewInfraDays(7,this)">7 дней</button><button class="dchip" data-on-click="setNewInfraDays(14,this)">14 дней</button><button class="dchip" data-on-click="setNewInfraDays(30,this)">30 дней</button></div>
-        <div id="newInfraKpis"></div>
-        <div id="newInfraTables"><div class="skel" style="height:240px"></div></div>
-      </div>
-    </details>
-
     <!-- ───── ТРАФИК ───── -->
     <div class="dash-sec-label"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="14" height="14" style="flex-shrink:0"><rect x="4" y="12" width="4" height="8" rx="1"/><rect x="10" y="8" width="4" height="12" rx="1"/><rect x="16" y="4" width="4" height="16" rx="1"/></svg>Трафик</div>
 
@@ -257,6 +245,15 @@
           <span id="newMatrixCount" style="font-size:11px;color:var(--text-3)"></span>
         </div>
         <div style="overflow-x:auto"><table class="ztbl" id="newMatrixTable"></table></div>
+      </div>
+    </details>
+
+    <details class="acc-expand" data-section="infra" open>
+      <summary><span class="acc-expand-icon" style="display:inline-flex;color:var(--accent)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="16" height="16" style="flex-shrink:0"><path d="M4 7.5h10M4 12h7M4 16.5h4"/><path d="M17 5v14M14.5 16.5 17 19l2.5-2.5"/></svg></span>Ротации IP</summary>
+      <div class="acc-expand-body">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:11px;flex-wrap:wrap"><span style="font-size:11px;color:var(--text-2)">Период:</span><button class="dchip" data-on-click="setNewInfraDays(1,this)">1 день</button><button class="dchip" data-on-click="setNewInfraDays(3,this)">3 дня</button><button class="dchip on" data-on-click="setNewInfraDays(7,this)">7 дней</button><button class="dchip" data-on-click="setNewInfraDays(14,this)">14 дней</button><button class="dchip" data-on-click="setNewInfraDays(30,this)">30 дней</button></div>
+        <div id="newInfraKpis"></div>
+        <div id="newInfraTables"><div class="skel" style="height:240px"></div></div>
       </div>
     </details>
 
@@ -955,7 +952,7 @@
             </div>
           </div>
           <div style="font-size:12px;color:var(--text-2);line-height:1.5;margin-bottom:12px;max-width:820px">
-            Здесь задаётся единый источник данных для мониторинга и финансов: цена одного бандла, его объём и максимальное число SIM. Фактическое количество SIM система берёт из базы, количество оплачиваемых бандлов и месячную сумму считает автоматически. Для <b>«На SIM»</b> один бандл равен одной SIM; <b>«Безлимит»</b> отключает только прогноз исчерпания трафика.
+            Фактическое количество SIM система берёт из базы. Для <b>«Бандла»</b> задайте цену, общий трафик и максимум SIM; число бандлов рассчитается автоматически. Для <b>«На SIM»</b> нужны цена и трафик одной SIM. Для <b>«Безлимита»</b> указывается только фиксированная месячная цена.
           </div>
           <div id="opPkgRows"></div>
           <div id="opPkgStatus" style="font-size:11px;color:var(--text-3);margin-top:8px"></div>
@@ -1508,13 +1505,13 @@
 <script src="/js/admin/delegated-helpers.js?v=0823p"></script>
 <script src="/js/admin/fleet-ui.js?v=0823p"></script>
 <script src="/js/admin/analytics.js?v=0823p"></script>
-<script src="/js/admin/finance.js?v=0823q"></script>
+<script src="/js/admin/finance.js?v=0823t"></script>
 <script src="/js/admin/modems.js?v=0823p"></script>
 <script src="/js/admin/dguard.js?v=0823p"></script>
-<script src="/js/admin/settings.js?v=0823q"></script>
+<script src="/js/admin/settings.js?v=0823t"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0823n"></script>
-<script src="/js/admin.js?v=0823r"></script>
+<script src="/js/admin.js?v=0823u"></script>
 <script src="/js/admin/sse.js?v=0823k"></script>
 </body>
 </html>

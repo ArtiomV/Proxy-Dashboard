@@ -861,6 +861,77 @@ function _renderSysDashboardLegacy(targetId){
 // «Состояние сервера» v2: операционный экран в той же светлой карточной
 // стилистике, что дашборд/финансы. На первом экране — вердикт, серверы и
 // ресурсы; подробные события и история остаются ниже.
+function _shDowntimeDuration(sec){
+  var mins=Math.max(0,Math.round((Number(sec)||0)/60));
+  if(mins<60)return mins+' мин';
+  var hours=Math.floor(mins/60),rest=mins%60;
+  if(hours<24)return hours+' ч'+(rest?' '+rest+' мин':'');
+  var days=Math.floor(hours/24),hoursRest=hours%24;
+  return days+' д'+(hoursRest?' '+hoursRest+' ч':'');
+}
+function _shDowntimeEpisodes(count){
+  var n=Math.max(0,Number(count)||0),m10=n%10,m100=n%100;
+  var word=m10===1&&m100!==11?'сбой':m10>=2&&m10<=4&&(m100<12||m100>14)?'сбоя':'сбоев';
+  return n+' '+word;
+}
+function _shDowntimeStamp(ts){
+  var d=new Date(ts);if(!isFinite(d.getTime()))return '—';
+  return d.toLocaleDateString('ru-RU',{day:'2-digit',month:'short'}).replace('.','')+', '+d.toLocaleTimeString('ru-RU',{hour:'2-digit',minute:'2-digit'});
+}
+function _shDowntimeTrack(events,fromIso,toIso,extraClass){
+  var from=Date.parse(fromIso),to=Date.parse(toIso),range=to-from,spans='';
+  (events||[]).forEach(function(event){
+    var start=Math.max(from,Date.parse(event.from)),end=Math.min(to,Date.parse(event.to));
+    if(!isFinite(start)||!isFinite(end)||end<=start||!(range>0))return;
+    var left=Math.max(0,Math.min(100,(start-from)/range*100));
+    var width=Math.max(.35,(end-start)/range*100);if(left+width>100)width=100-left;
+    var title=_shDowntimeStamp(event.from)+' — '+(event.ongoing?'продолжается':_shDowntimeStamp(event.to))+' · '+_shDowntimeDuration(event.duration_sec);
+    spans+='<i class="'+(event.ongoing?'is-ongoing':'')+'" style="left:'+left.toFixed(3)+'%;width:'+width.toFixed(3)+'%" title="'+esc(title)+'"></i>';
+  });
+  return '<span class="sh-down-track '+(extraClass||'')+'">'+spans+'</span>';
+}
+function _shDowntimeSection(payload,servers){
+  payload=payload||{};var map={};(payload.servers||[]).forEach(function(server){map[server.name]=server;});
+  var h='<article class="sh-card sh-downtime"><div class="sh-card-head"><div><small>Последние 24 часа</small><h3>Недоступность серверов</h3></div><span>Нажмите на линию для подробностей</span></div><div class="sh-down-timelines">';
+  (servers||[]).forEach(function(server){
+    var row=map[server.name]||{events:[],episodes:0,duration_sec:0},ongoing=(row.events||[]).some(function(event){return event.ongoing;});
+    var summary=ongoing?'Сейчас недоступен':row.episodes?_shDowntimeEpisodes(row.episodes)+' · '+_shDowntimeDuration(row.duration_sec):'Сбоев не было';
+    var encoded=encodeURIComponent(server.name);
+    h+='<div class="sh-down-timeline-row"><span class="sh-down-server"><b>'+esc(server.displayName||server.name)+'</b><small class="'+(ongoing?'is-down':'')+'">'+esc(summary)+'</small></span>'
+      +'<button class="sh-down-line-button" data-on-click="openServerDowntimeModal(\''+encoded+'\')" title="Открыть историю '+esc(server.displayName||server.name)+'">'
+      +_shDowntimeTrack(row.events,payload.from,payload.to,'')+'<span class="sh-down-axis"><small>24 ч назад</small><small>сейчас</small></span></button>'
+      +'<button class="sh-down-details" data-on-click="openServerDowntimeModal(\''+encoded+'\')">Подробнее <span>→</span></button></div>';
+  });
+  if(!(servers||[]).length)h+='<div class="sh-empty">Нет настроенных серверов</div>';
+  return h+'</div></article>';
+}
+
+var _serverDowntimeModalState={server:'',period:'24h',seq:0};
+function openServerDowntimeModal(serverEncoded){
+  var server='';try{server=decodeURIComponent(String(serverEncoded||''));}catch(_){server=String(serverEncoded||'');}
+  if(!server)return;_serverDowntimeModalState.server=server;_serverDowntimeModalState.period='24h';
+  var old=document.getElementById('serverDowntimeOverlay');if(old)old.remove();
+  var ov=document.createElement('div');ov.id='serverDowntimeOverlay';ov.className='sdm-overlay';ov.setAttribute('data-on-click','if (event.target===this) this.remove()');
+  var filters=[['24h','24 часа'],['7d','7 дней'],['30d','30 дней'],['90d','90 дней']].map(function(item){return '<button class="sdm-period'+(item[0]==='24h'?' is-active':'')+'" data-period="'+item[0]+'" data-on-click="loadServerDowntimeModal(\''+item[0]+'\')">'+item[1]+'</button>';}).join('');
+  ov.innerHTML='<div class="sdm-modal"><header class="sdm-head"><div><small>Доступность ProxySmart</small><h3>'+esc(_serverDisplayLabel(server))+'</h3><p>Красные отрезки — периоды, когда сервер не отвечал.</p></div><button class="sdm-close" data-on-click="document.getElementById(\'serverDowntimeOverlay\').remove()">×</button></header>'
+    +'<div class="sdm-periods">'+filters+'</div><div id="serverDowntimeModalBody" class="sdm-body">'+_sysLoader()+'</div></div>';
+  document.body.appendChild(ov);loadServerDowntimeModal('24h');
+}
+function loadServerDowntimeModal(period){
+  var state=_serverDowntimeModalState,allowed={"24h":1,"7d":1,"30d":1,"90d":1};state.period=allowed[period]?period:'24h';var seq=++state.seq;
+  var ov=document.getElementById('serverDowntimeOverlay'),body=document.getElementById('serverDowntimeModalBody');if(!ov||!body)return;
+  ov.querySelectorAll('.sdm-period').forEach(function(button){button.classList.toggle('is-active',button.dataset.period===state.period);});body.innerHTML=_sysLoader();
+  api(API+'/api/admin/server_downtime?server='+encodeURIComponent(state.server)+'&period='+state.period).then(function(data){
+    if(seq!==state.seq||!document.getElementById('serverDowntimeOverlay'))return;if(data.error){body.innerHTML=_sysError(data.error);return;}
+    var server=(data.servers&&data.servers[0])||{events:[],episodes:0,duration_sec:0,uptime_pct:100};
+    var h='<div class="sdm-summary"><div><span>Доступность</span><b>'+Number(server.uptime_pct||0).toLocaleString('ru-RU',{maximumFractionDigits:3})+'%</b></div><div><span>Сбоев</span><b>'+server.episodes+'</b></div><div><span>Недоступность</span><b>'+_shDowntimeDuration(server.duration_sec)+'</b></div></div>';
+    h+='<div class="sdm-timeline">'+_shDowntimeTrack(server.events,data.from,data.to,'is-large')+'<div class="sh-down-axis"><small>'+_shDowntimeStamp(data.from)+'</small><small>'+_shDowntimeStamp(data.to)+'</small></div></div>';
+    h+='<div class="sdm-list-head"><b>Эпизоды</b><span>Сначала последние</span></div><div class="sdm-list">';
+    if(!server.events.length)h+='<div class="sdm-empty">'+icon('check',18)+' За выбранный период сервер был доступен</div>';
+    server.events.slice().reverse().forEach(function(event){var status=event.ongoing?'Продолжается':event.maintenance?'Технические работы':'Завершён';h+='<div class="sdm-event"><span class="sdm-event-dot '+(event.ongoing?'is-live':'')+'"></span><span><b>'+_shDowntimeStamp(event.from)+' — '+(event.ongoing?'сейчас':_shDowntimeStamp(event.to))+'</b><small>'+esc(status)+'</small></span><strong>'+_shDowntimeDuration(event.duration_sec)+'</strong></div>';});
+    body.innerHTML=h+'</div>';
+  }).catch(function(error){if(seq===state.seq)body.innerHTML=_sysError(error.message||'Не удалось загрузить историю');});
+}
 function renderSysDashboard(targetId){
   var c=document.getElementById(targetId||'serverHealthContent');if(!c)return;
   c.innerHTML=_sysLoader();
@@ -898,7 +969,7 @@ function renderSysDashboard(targetId){
     critical.slice(0,8).forEach(function(e){h+='<div class="sh-event"><span class="sh-event-level '+(e.level==='error'?'is-error':'is-warn')+'">'+icon(e.level==='error'?'alert':'info',14)+'</span><span><b>'+esc(e.message||e.action||'Событие')+'</b><small>'+esc(e.category||'system')+(e.target?' · '+esc(e.target):'')+'</small></span><time>'+esc((e.timestamp||'').slice(5,16).replace('T',' '))+'</time></div>';});
     h+='</div></article></div>';
 
-    if(d.server_downtime&&d.server_downtime.length){h+='<article class="sh-card sh-downtime"><div class="sh-card-head"><div><small>История</small><h3>Недоступность серверов</h3></div></div><div class="sh-down-list">';d.server_downtime.slice(0,12).forEach(function(x){var mins=Math.max(1,Math.round((x.duration_sec||0)/60));h+='<div><b>'+esc(_serverDisplayLabel(x.server_name))+'</b><span>'+esc((x.down_from||'').slice(5,16).replace('T',' '))+' → '+esc((x.down_to||'').slice(5,16).replace('T',' '))+'</span><strong>'+mins+' мин</strong></div>';});h+='</div></article>';}
+    h+=_shDowntimeSection(d.server_downtime_24h,d.servers||[]);
     h+='</section>';c.innerHTML=h;
     setTimeout(function(){var cv=document.getElementById('sysErrChart');if(!cv||!window.Chart)return;if(_sysCharts.err)try{_sysCharts.err.destroy();}catch(_){}var cc=getChartColorsLight(),e7=d.errors_by_day||[];_sysCharts.err=newChartSafe(cv,{type:'bar',data:{labels:e7.map(function(x){return x.date.slice(5)}),datasets:[{label:'Ошибки',data:e7.map(function(x){return x.errors}),backgroundColor:'#ef4444',borderRadius:5,maxBarThickness:26},{label:'Предупреждения',data:e7.map(function(x){return x.warns}),backgroundColor:'#f59e0b',borderRadius:5,maxBarThickness:26}]},options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,pointStyle:'circle',boxWidth:6,color:cc.text,font:{size:10}}}},scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:10}},grid:{display:false},border:{display:false}},y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,precision:0},grid:{color:cc.grid},border:{display:false}}}}});},20);
   }).catch(function(e){c.innerHTML=_sysError(e.message);});
@@ -3884,7 +3955,7 @@ function renderNewFleetServers(){
         +'</span></span>'
         +_srvMetFlapTimeline(down,(window._srvMetData||{}).generated_at)
         +(hasFlaps?'<span class="server-flap-last-mobile">'+(ongoing?'Идёт':'Последний')+': '+esc(lastFlap)+'</span>':'')
-        +'<button type="button" class="server-card-link server-card-link--warning" data-on-click="openServerOverviewSection(\'serverHealth\')">История <span class="server-card-arrow">→</span></button>'
+        +'<button type="button" class="server-card-link server-card-link--warning" data-on-click="openServerDowntimeModal(\''+encodeURIComponent(srv)+'\')">История <span class="server-card-arrow">→</span></button>'
         +'</section>';
 
       var ev=met.latest_event||null;
@@ -4400,7 +4471,7 @@ function renderNewDailyChart(data){
   });
 }
 
-// ── «Ротации IP и ёмкость»: три итога + две короткие расшифровки ──
+// ── «Ротации IP»: стабильный парк + надёжность и разнообразие адресов ──
 // Все части грузятся одним Promise.all, чтобы период и момент среза совпадали.
 var _NEW_INFRA_DAYS = _dashUi.infraDays || 7;
 function setNewInfraDays(d,el){_NEW_INFRA_DAYS=d;_dashUiSave({infraDays:d});if(el&&el.parentNode){Array.prototype.forEach.call(el.parentNode.children,function(c){if(c.classList)c.classList.remove('on')});el.classList.add('on');}reloadNewInfra();}
@@ -4413,7 +4484,7 @@ function reloadNewInfra(){
     api(API+'/api/analytics/ip_stats?days='+days).catch(function(){return {};}),
     api(API+'/api/analytics/capacity?days='+days).catch(function(){return {};})
   ]).then(function(res){
-    var rot=res[0]||{},ip=res[1]||{},cap=(res[2]||{}).summary||{};
+    var rot=res[0]||{},ip=res[1]||{},capacity=res[2]||{},cap=capacity.summary||{};
     var rs=rot.summary||{},ips=ip.summary||{},sn=ip.subnet_summary||{};
     var success=rs.success_pct==null?null:Number(rs.success_pct),failed=Math.max(0,Number(rs.failed)||0);
     function summaryCard(iconName,title,value,meta,tone){
@@ -4428,16 +4499,32 @@ function reloadNewInfra(){
         +'</div>';
     }
     if(!tblEl)return;
-    var serverRows=(rot.per_server||[]).map(function(sv){
+    var rotationsByServer={},poolsByServer={},serverNames=[];
+    (rot.per_server||[]).forEach(function(row){rotationsByServer[row.server_name]=row;if(serverNames.indexOf(row.server_name)<0)serverNames.push(row.server_name);});
+    (ip.pools||[]).forEach(function(row){poolsByServer[row.server]=row;if(serverNames.indexOf(row.server)<0)serverNames.push(row.server);});
+    (capacity.servers||[]).forEach(function(row){if(serverNames.indexOf(row.server_name)<0)serverNames.push(row.server_name);});
+    var serverRows=serverNames.map(function(serverName){
+      var sv=rotationsByServer[serverName]||{server_name:serverName,total:0,failed:0,avg_sec:null};
+      var pool=poolsByServer[serverName]||{};
       var total=Number(sv.total)||0,bad=Number(sv.failed)||0,pct=total?Math.round((total-bad)/total*1000)/10:null;
       var tone=pct==null?'':pct>=95?'is-good':pct>=80?'is-warn':'is-bad';
       return '<div class="infra-list-row"><div class="infra-list-name"><b>'+esc(_serverDisplayLabel(sv.server_name)||'—')+'</b><small>'+total.toLocaleString('ru-RU')+' ротаций</small></div>'
-        +'<div class="infra-list-metric '+tone+'"><b>'+(pct==null?'—':pct+'%')+'</b><small>'+bad+' сбоев</small></div>'
+        +'<div class="infra-list-metric is-accent"><b>'+Number(pool.ip_count||0).toLocaleString('ru-RU')+' IP</b><small>уникальных</small></div>'
+        +'<div class="infra-list-metric '+tone+'"><b>'+(pct==null?'—':pct+'%')+'</b><small>'+(total?bad+' сбоев':'нет замеров')+'</small></div>'
         +'<div class="infra-list-metric"><b>'+(sv.avg_sec!=null?Math.round(sv.avg_sec*10)/10+' с':'—')+'</b><small>среднее</small></div></div>';
     }).join('');
-    if(!serverRows)serverRows='<div class="infra-empty">За период ротаций не было</div>';
+    if(!serverRows)serverRows='<div class="infra-empty">Серверов в реестре пока нет</div>';
 
-    var subnetAll=ip.subnets||[],limit=_zxLim('sn',8),maxSubnet=Math.max(1,sn.max||0);
+    var operatorAll=ip.operators||[],maxOperatorIps=Math.max(1,operatorAll.reduce(function(max,row){return Math.max(max,Number(row.ip_count)||0);},0));
+    var operatorRows=operatorAll.map(function(row){
+      var width=Math.max(4,Math.round((Number(row.ip_count)||0)/maxOperatorIps*100));
+      return '<div class="infra-ip-row"><div class="infra-list-name"><b>'+esc(row.operator||'Неизвестный')+'</b><small>'+Number(row.modems||0).toLocaleString('ru-RU')+' модемов</small></div>'
+        +'<div class="infra-ip-bar"><i style="width:'+width+'%"></i></div>'
+        +'<div class="infra-list-metric is-accent"><b>'+Number(row.ip_count||0).toLocaleString('ru-RU')+' IP</b><small>уникальных</small></div></div>';
+    }).join('');
+    if(!operatorRows)operatorRows='<div class="infra-empty">Данных по операторам пока нет</div>';
+
+    var subnetAll=ip.subnets||[],expanded=!!(window._zxOpen&&window._zxOpen.sn),limit=expanded?subnetAll.length:8,maxSubnet=Math.max(1,sn.max||0);
     var subnetRows=subnetAll.slice(0,limit).map(function(x){
       var width=Math.max(4,Math.round((Number(x.subnets)||0)/maxSubnet*100));
       return '<div class="infra-ip-row"><div class="infra-list-name"><b>'+esc(x.nick)+'</b><small>'+esc(_serverDisplayLabel(x.server))+'</small></div>'
@@ -4445,11 +4532,14 @@ function reloadNewInfra(){
         +'<div class="infra-list-metric is-accent"><b>'+x.subnets+'</b><small>подсетей · '+x.ips+' IP</small></div></div>';
     }).join('');
     if(!subnetRows)subnetRows='<div class="infra-empty">Данных об IP пока нет</div>';
-    var more=subnetAll.length>limit?'<button class="infra-more" data-on-click="zMore(\'sn\')">Показать ещё '+(subnetAll.length-limit)+'</button>':'';
+    var more=subnetAll.length>8?(expanded
+      ?'<button class="infra-more" data-on-click="zLess(\'sn\')">Скрыть</button>'
+      :'<button class="infra-more" data-on-click="zMore(\'sn\')">Показать ещё '+(subnetAll.length-8)+'</button>'):'';
 
     tblEl.innerHTML='<div class="infra-panels">'
       +'<section class="infra-panel"><div class="infra-panel-head"><div><h4>Надёжность ротаций</h4><p>По каждому серверу за выбранный период</p></div><span>'+days+'д</span></div><div class="infra-list">'+serverRows+'</div></section>'
-      +'<section class="infra-panel"><div class="infra-panel-head"><div><h4>Разнообразие IP</h4><p>Модемы с наибольшим числом /24 подсетей</p></div><span>топ</span></div><div class="infra-list">'+subnetRows+more+'</div></section>'
+      +'<section class="infra-panel"><div class="infra-panel-head"><div><h4>Уникальные IP по операторам</h4><p>Без повторов внутри каждого оператора</p></div><span>'+days+'д</span></div><div class="infra-list">'+operatorRows+'</div></section>'
+      +'<section class="infra-panel is-wide"><div class="infra-panel-head"><div><h4>Разнообразие IP по модемам</h4><p>Модемы с наибольшим числом /24 подсетей</p></div><span>топ</span></div><div class="infra-list">'+subnetRows+more+'</div></section>'
       +'</div>';
   });
 }

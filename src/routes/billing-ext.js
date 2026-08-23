@@ -7,6 +7,7 @@
 
 const express = require('express');
 const { COST_CATEGORIES } = require('../billing/cost-categories');  // P2-2: was a server.js dep
+const { buildCostLocations } = require('../billing/cost-locations');
 const { computeRevenueWindow } = require('../billing/revenue');     // WP8: canonical revenue
 const {
   parseOperatorPackages,
@@ -107,18 +108,20 @@ r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, async (req, r
     // Страны — для дефолта валюты в UI: MD → MDL, RO → RON (v2.10.8).
     const { operators, operatorCountry } = _operatorCountryMap();
     const operatorCosts = _operatorPackageCosts(operatorCountry);
-    const servers = getApiServers().map(s => s.name);
+    const apiServers = getApiServers();
+    const servers = apiServers.map(s => s.name);
     const serverLabels = {};
-    for (const s of getApiServers()) serverLabels[s.name] = s.displayName || s.name;
+    for (const s of apiServers) serverLabels[s.name] = s.displayName || s.name;
     const serverCountry = {};
     const sc = getServerCountries();
-    for (const s of getApiServers()) serverCountry[s.name] = (sc[s.name] || {}).country || s.country || '';
+    for (const s of apiServers) serverCountry[s.name] = (sc[s.name] || {}).country || s.country || '';
+    const locations = buildCostLocations(apiServers, sc);
     // Курс ЦБ (или ручной фикс) — шапка модалки и пересчёт «≈ ₽» на фронте.
     const rates = await fx.getRates();
     res.json({
       period, rows, template,
       categories: COST_CATEGORIES,
-      meta: { operators, servers, serverLabels, serverCountry, operatorCountry },
+      meta: { operators, servers, serverLabels, serverCountry, locations, operatorCountry },
       operator_costs: operatorCosts.rows,
       unconfigured_operators: operatorCosts.unconfigured,
       fx: { rates: { MDL: rates.MDL, RON: rates.RON }, date: rates.date, source: rates.source },

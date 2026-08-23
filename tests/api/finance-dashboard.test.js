@@ -24,7 +24,8 @@ describe('P2-2: finance routes contract', () => {
     expect(Object.keys(res.body.categories).sort()).toEqual(
       ['electricity', 'hosting', 'other', 'salary', 'server', 'sim'].sort()
     );
-    expect(res.body.categories.server).toMatchObject({ perItem: true, itemType: 'server' });
+    // v2.10.36: площадочные расходы привязаны к локации (адресу), не к серверу.
+    expect(res.body.categories.server).toMatchObject({ perItem: true, itemType: 'location' });
   });
 
   it('GET /api/admin/finance_dashboard returns the metrics payload', async () => {

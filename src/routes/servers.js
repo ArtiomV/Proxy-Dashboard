@@ -449,8 +449,8 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   }
   // A4 (23.08): пакеты операторов — JSON-массив [{operator, type, volume_gb,
   // max_sims, price, currency, hourly_gb, pace_pct}]. Количество SIM берётся
-  // из modem_meta; стоимость = ceil(SIM/max_sims) × price. Для per_sim
-  // max_sims всегда 1.
+  // из modem_meta. shared = ceil(SIM/max_sims) × price; per_sim = SIM × price;
+  // unlimited = одна фиксированная месячная цена при наличии активных SIM.
   // До 20 строк; operator ≤60 символов; type — per_sim/shared/unlimited.
   if (req.body.operator_packages != null) {
     let arr;
@@ -478,7 +478,7 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
       clean.push({
         operator: op, type,
         volume_gb: type === 'unlimited' ? 0 : num(p.volume_gb, 1e6),
-        max_sims: type === 'per_sim' ? 1 : Math.floor(num(p.max_sims, 1e5)),
+        max_sims: type === 'per_sim' ? 1 : type === 'shared' ? Math.floor(num(p.max_sims, 1e5)) : 0,
         price: num(p.price, 1e9),
         currency,
         hourly_gb: num(p.hourly_gb, 1e5),
