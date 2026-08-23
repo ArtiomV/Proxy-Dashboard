@@ -74,8 +74,14 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
   const generatedAt = new Date(nowMs).toISOString();
   const sinceIso = new Date(nowMs - 24 * 3600e3).toISOString();
   try {
+    // Последняя СОДЕРЖАТЕЛЬНАЯ строка по каждому боксу: разовые пустые
+    // прогоны (ssh отработал, но stdout обрезался — все поля NULL) не должны
+    // гасить карточку до следующего сбора; строки с error остаются — они
+    // сигнал недоступности.
     const rows = db.prepare(`SELECT * FROM server_metrics
-      WHERE id IN (SELECT MAX(id) FROM server_metrics GROUP BY server_name)`).all();
+      WHERE id IN (SELECT MAX(id) FROM server_metrics
+        WHERE cpu_pct IS NOT NULL OR conns IS NOT NULL OR COALESCE(error, '') <> ''
+        GROUP BY server_name)`).all();
     // Средние за сутки по числовым метрикам (NULL-поля AVG игнорирует сам).
     // collected_at хранится ISO со 'T' — сравниваем с ISO-строкой, не datetime().
     const avgRows = db.prepare(`SELECT server_name,

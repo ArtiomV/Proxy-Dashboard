@@ -283,20 +283,35 @@ function create(deps) {
     for (const p of SSH_PORTS) if (!list.includes(p)) list.push(p);
     return list;
   }
+  // Результат SSH-сбора считаем состоявшимся, только если распарсилось хотя
+  // бы одно ключевое поле. Бывают прогоны, где ssh завершается успешно, но
+  // stdout пуст/обрезан — parseSshMetrics тогда отдаёт объект из одних null,
+  // и в server_metrics ложится пустая строка, которую API отдаёт как
+  // «последнюю»: карточка сервера пустеет до следующего сбора (баг 23.08).
+  function _sshResultUsable(m) {
+    return m && (m.cpu_pct != null || m.load1 != null || m.mem_used_pct != null
+      || m.disk_used_pct != null || m.uptime_sec != null || m.conns != null);
+  }
   async function collectSsh(server) {
     if (!server.osLogin || !server.publicIp) return null;
     let lastErr = null;
     for (const port of _sshPorts(server)) {
-      try { return parseSshMetrics(await _sshOnce(server, port, true)); }
-      catch (e) { lastErr = e; }
+      try {
+        const parsed = parseSshMetrics(await _sshOnce(server, port, true));
+        if (_sshResultUsable(parsed)) return parsed;
+        lastErr = new Error('empty ssh metrics');
+      } catch (e) { lastErr = e; }
     }
     if (!server.osPassword) {
       logger.info(`[ServerMetrics] ${server.name}: SSH недоступен (${String((lastErr && lastErr.message) || lastErr).slice(0, 120)}) — fallback на HTTP-панель`);
       return null;
     }
     for (const port of _sshPorts(server)) {
-      try { return parseSshMetrics(await _sshOnce(server, port, false)); }
-      catch (e) { lastErr = e; }
+      try {
+        const parsed = parseSshMetrics(await _sshOnce(server, port, false));
+        if (_sshResultUsable(parsed)) return parsed;
+        lastErr = new Error('empty ssh metrics');
+      } catch (e) { lastErr = e; }
     }
     logger.info(`[ServerMetrics] ${server.name}: SSH недоступен (${String((lastErr && lastErr.message) || lastErr).slice(0, 120)}) — fallback на HTTP-панель`);
     return null;
