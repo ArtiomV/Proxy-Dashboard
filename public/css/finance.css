@@ -102,6 +102,81 @@
 #tab-dashboard .widget-value{font-size:21px;font-weight:700;color:var(--text-0);margin-top:4px}
 #tab-dashboard .widget-sub{font-size:11px;color:var(--text-3);margin-top:2px}
 #tab-dashboard details.acc-expand{border-radius:12px}
+
+/* ── Финансы на главном экране: график, пополнения и качество выручки ── */
+#tab-dashboard .finance-overview-grid{display:grid;grid-template-columns:minmax(0,1.7fr) minmax(340px,1fr);gap:12px;margin-bottom:16px;align-items:stretch}
+#tab-dashboard .finance-panel{min-width:0;margin:0;padding:16px 18px;border-radius:14px;overflow:hidden}
+#tab-dashboard .fin-card-head{display:flex;align-items:flex-start;justify-content:space-between;gap:14px;margin-bottom:13px}
+#tab-dashboard .fin-card-heading{min-width:0}
+#tab-dashboard .fin-card-title{display:block;margin:0;font-size:15px;line-height:19px;font-weight:700;color:var(--text-0);letter-spacing:-.12px}
+#tab-dashboard .fin-card-subtitle{display:block;margin-top:3px;font-size:10.5px;line-height:14px;color:var(--text-3)}
+#tab-dashboard .fin-period-badge{display:inline-flex;align-items:center;gap:5px;flex-shrink:0;padding:5px 9px;border:1px solid rgba(47,111,224,.13);border-radius:999px;background:rgba(47,111,224,.07);color:var(--accent);font-size:10px;line-height:12px;font-weight:600;white-space:nowrap}
+#tab-dashboard .fin-period-badge svg{width:12px;height:12px}
+#tab-dashboard .fin-revenue-chart{height:218px;position:relative;min-width:0}
+
+#tab-dashboard .fin-recent-block{margin-top:13px;padding-top:13px;border-top:1px solid var(--border)}
+#tab-dashboard .fin-subhead{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:4px}
+#tab-dashboard .fin-subhead-title{display:flex;align-items:center;gap:7px;min-width:0;font-size:13px;line-height:17px;font-weight:700;color:var(--text-0)}
+#tab-dashboard .fin-subhead-icon{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:7px;background:rgba(22,163,74,.09);color:var(--success);flex-shrink:0}
+#tab-dashboard .fin-subhead-icon svg{width:14px;height:14px}
+#tab-dashboard .fin-link{display:inline-flex;align-items:center;gap:4px;border:0;background:none;padding:4px 0;color:var(--accent);font:inherit;font-size:10.5px;line-height:14px;font-weight:600;white-space:nowrap;cursor:pointer}
+#tab-dashboard .fin-link:hover{color:var(--accent-hover)}
+#tab-dashboard .fin-link-arrow{font-size:16px;line-height:10px}
+#tab-dashboard .fin-payment-list{display:block}
+#tab-dashboard .fin-payment-row{display:grid;grid-template-columns:30px minmax(0,1fr) auto;align-items:center;gap:10px;min-height:45px;padding:5px 2px;border-top:1px solid rgba(17,24,39,.065)}
+#tab-dashboard .fin-payment-row:first-child{border-top:0}
+#tab-dashboard .fin-payment-icon{display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:9px;background:rgba(22,163,74,.08);color:var(--success)}
+#tab-dashboard .fin-payment-icon svg{width:14px;height:14px}
+#tab-dashboard .fin-payment-copy{min-width:0}
+#tab-dashboard .fin-payment-client{display:block;font-size:12px;line-height:15px;color:var(--text-1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tab-dashboard .fin-payment-meta{display:block;margin-top:2px;font-size:10px;line-height:13px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tab-dashboard .fin-payment-amount{justify-self:end;padding:4px 8px;border-radius:7px;background:rgba(22,163,74,.07);color:var(--success);font-family:var(--font-mono);font-size:11.5px;line-height:14px;font-weight:600;white-space:nowrap;font-feature-settings:"tnum"}
+#tab-dashboard .fin-empty{padding:15px 2px;color:var(--text-3);font-size:11px}
+
+#tab-dashboard .fin-quality-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:13px}
+#tab-dashboard .fin-cost-btn{display:inline-flex;align-items:center;gap:5px;padding:5px 9px!important;border-radius:8px!important;background:var(--bg-3)!important;color:var(--text-2)!important;font-size:10px!important;line-height:12px!important;font-weight:600!important}
+#tab-dashboard .fin-cost-btn:hover{background:var(--bg-4)!important;color:var(--text-0)!important}
+#tab-dashboard .fin-quality-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:16px}
+#tab-dashboard .fin-quality-tile{--fin-tone:var(--text-3);position:relative;min-width:0;min-height:67px;box-sizing:border-box;display:flex;flex-direction:column;justify-content:center;padding:10px 13px 10px 15px;border:1px solid rgba(17,24,39,.055);border-radius:11px;background:linear-gradient(145deg,#f8fafc 0%,#f2f5f9 100%);overflow:hidden}
+#tab-dashboard .fin-quality-tile::before{content:'';position:absolute;left:0;top:13px;bottom:13px;width:3px;border-radius:0 3px 3px 0;background:var(--fin-tone);opacity:.82}
+#tab-dashboard .fin-quality-tile--accent{--fin-tone:var(--accent)}
+#tab-dashboard .fin-quality-tile--success{--fin-tone:var(--success)}
+#tab-dashboard .fin-quality-tile--warning{--fin-tone:#d99d00}
+#tab-dashboard .fin-quality-tile--danger{--fin-tone:var(--danger)}
+#tab-dashboard .fin-quality-label{font-size:9.5px;line-height:12px;font-weight:700;color:var(--text-3);letter-spacing:.045em;text-transform:uppercase;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tab-dashboard .fin-quality-value{display:block;margin-top:5px;font-size:18px;line-height:21px;font-weight:700;color:var(--text-0);font-feature-settings:"tnum";white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tab-dashboard .fin-quality-tile--success .fin-quality-value{color:var(--success)}
+#tab-dashboard .fin-quality-tile--warning .fin-quality-value{color:#a97800}
+#tab-dashboard .fin-quality-tile--danger .fin-quality-value{color:var(--danger)}
+#tab-dashboard .fin-concentration{padding-top:1px}
+#tab-dashboard .fin-concentration-title{margin-bottom:10px;font-size:9.5px;line-height:12px;color:var(--text-3);text-transform:uppercase;letter-spacing:.055em;font-weight:700}
+#tab-dashboard .fin-concentration-row{margin-bottom:11px}
+#tab-dashboard .fin-concentration-row:last-child{margin-bottom:0}
+#tab-dashboard .fin-concentration-meta{display:flex;justify-content:space-between;align-items:baseline;gap:8px;margin-bottom:5px;font-size:11px;line-height:14px}
+#tab-dashboard .fin-concentration-label{min-width:0;color:var(--text-1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#tab-dashboard .fin-concentration-client{font-weight:400;color:var(--text-3)}
+#tab-dashboard .fin-concentration-value{flex-shrink:0;color:var(--text-0);font-family:var(--font-mono);font-weight:600;font-feature-settings:"tnum"}
+#tab-dashboard .fin-concentration-track{height:7px;border-radius:999px;background:#edf1f6;overflow:hidden}
+#tab-dashboard .fin-concentration-fill{height:100%;border-radius:999px;background:var(--accent);box-shadow:0 0 8px rgba(47,111,224,.14)}
+#tab-dashboard .fin-concentration-fill--danger{background:#ef4b4b;box-shadow:0 0 8px rgba(239,75,75,.13)}
+#tab-dashboard .fin-concentration-fill--warning{background:#e4ad18;box-shadow:0 0 8px rgba(228,173,24,.13)}
+#tab-dashboard .fin-concentration-fill--success{background:#14b87a;box-shadow:0 0 8px rgba(20,184,122,.13)}
+
+@media(max-width:900px){
+  #tab-dashboard .finance-overview-grid{grid-template-columns:1fr}
+  #tab-dashboard .finance-quality-panel .fin-quality-grid{grid-template-columns:repeat(4,minmax(0,1fr))}
+}
+@media(max-width:640px){
+  #tab-dashboard .finance-panel{padding:14px}
+  #tab-dashboard .fin-card-head{margin-bottom:10px}
+  #tab-dashboard .fin-revenue-chart{height:190px}
+  #tab-dashboard .finance-quality-panel .fin-quality-grid{grid-template-columns:1fr 1fr}
+  #tab-dashboard .fin-quality-tile{min-height:64px;padding:9px 11px 9px 13px}
+  #tab-dashboard .fin-quality-value{font-size:16px;line-height:19px}
+  #tab-dashboard .fin-payment-row{grid-template-columns:26px minmax(0,1fr) auto;gap:8px}
+  #tab-dashboard .fin-payment-icon{width:26px;height:26px;border-radius:7px}
+  #tab-dashboard .fin-payment-amount{padding:3px 5px;font-size:10.5px}
+}
 /* ── Таблицы дашборда: вариант A «зебра» ── */
 #tab-dashboard table.ztbl{width:100%;border-collapse:collapse;font-size:11.5px}
 #tab-dashboard .ztbl th{font-size:10px;font-weight:600;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;text-align:right;padding:8px 10px;background:var(--bg-3);border:none}

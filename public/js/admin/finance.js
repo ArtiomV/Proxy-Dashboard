@@ -1405,46 +1405,55 @@ function renderMrrChart(d){
 // «Выручка по дням» + «Последние платежи» — в блоке Финансов на месте бывшего MRR.
 function renderFinRevenue(d){
   var el = document.getElementById('newFinRevenue'); if(!el) return;
-  var h = '<h3 style="margin:0 0 8px;font-size:14px;font-weight:700;color:var(--text-0)">Выручка по дням <span style="font-size:10px;font-weight:400;color:var(--text-3)">30 дней · по клиентам · ₽</span></h3>';
-  h += '<div style="height:210px;position:relative"><canvas id="newFinRevCanvas"></canvas></div>';
-  h += '<div style="height:0.5px;background:var(--border);margin:11px 0 9px"></div>';
-  h += '<div style="display:flex;align-items:baseline;justify-content:space-between;margin-bottom:6px"><span style="font-size:13px;font-weight:700;color:var(--text-0)">Последние пополнения</span><span style="font-size:11px;color:var(--accent);cursor:pointer" data-on-click="finNavBank()">все →</span></div>';
+  var dr = d.daily_revenue || [], dates = dr.map(function(r){return r.date;});
+  var byClient = d.daily_revenue_by_client || {};
+  // Топ-клиенты по суммарной выручке за окно, остальные — «Прочие».
+  var names = Object.keys(byClient).sort(function(a,b){
+    var sa=dates.reduce(function(s,dt){return s+(byClient[a][dt]||0);},0), sb=dates.reduce(function(s,dt){return s+(byClient[b][dt]||0);},0);
+    return sb-sa;
+  });
+  var MAXG=6, top=names.slice(0,MAXG), rest=names.slice(MAXG), palette=getChartPaletteLight();
+  var h = '<div class="fin-card-head"><div class="fin-card-heading"><h3 class="fin-card-title">Выручка по дням</h3>'
+    +'<span class="fin-card-subtitle">Динамика поступлений с разбивкой по клиентам</span></div>'
+    +'<span class="fin-period-badge">'+icon('clock',12)+' 30 дней · ₽</span></div>';
+  h += '<div class="fin-revenue-chart"><canvas id="newFinRevCanvas"></canvas></div>';
+  h += '<section class="fin-recent-block"><div class="fin-subhead"><span class="fin-subhead-title"><span class="fin-subhead-icon">'+icon('plus',14)+'</span>Последние пополнения</span>'
+    +'<button type="button" class="fin-link" data-on-click="finNavBank()">Все платежи <span class="fin-link-arrow">→</span></button></div>';
   // Только ПОПОЛНЕНИЯ (положительные), последние 5 — как на странице «Финансы».
   var rp = (d.recent_payments || []).filter(function(p){return p.amount >= 0;}).slice(0, 5);
-  if(!rp.length) h += '<div style="color:var(--text-3);font-size:12px">Пополнений пока нет.</div>';
-  else rp.forEach(function(p, ri){
-    var sub = esc((p.date||'').slice(5)) + ' · ' + esc(p.source||'');
-    h += '<div style="display:flex;align-items:center;justify-content:space-between;gap:10px;padding:7px 2px;'+(ri>0?'border-top:1px solid var(--border);':'')+'"><div style="min-width:0"><div style="font-size:12px;color:var(--text-1);font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc(p.client)+'</div><div style="font-size:10px;color:var(--text-3);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+sub+'</div></div>'
-      + '<span style="font-family:var(--font-mono);font-size:12px;font-weight:600;white-space:nowrap;color:var(--success)">+'+Math.abs(Math.round(p.amount)).toLocaleString('ru-RU')+' ₽</span></div>';
-  });
+  if(!rp.length) h += '<div class="fin-empty">Пополнений пока нет.</div>';
+  else {
+    h += '<div class="fin-payment-list">';
+    rp.forEach(function(p){
+      var sub = esc((p.date||'').slice(5)) + (p.source?' · '+esc(p.source):'');
+      h += '<div class="fin-payment-row"><span class="fin-payment-icon">'+icon('money',14)+'</span><span class="fin-payment-copy">'
+        +'<span class="fin-payment-client">'+esc(p.client)+'</span><span class="fin-payment-meta">'+sub+'</span></span>'
+        +'<span class="fin-payment-amount">+'+Math.abs(Math.round(p.amount)).toLocaleString('ru-RU')+' ₽</span></div>';
+    });
+    h += '</div>';
+  }
+  h += '</section>';
   el.innerHTML = h;
   setTimeout(function(){
     var cv = document.getElementById('newFinRevCanvas'); if(!cv || !window.Chart) return;
     if(window._newFinRevChart){ try{window._newFinRevChart.destroy();}catch(_){} }
     var cc = getChartColorsLight();
-    var dr = d.daily_revenue || []; var dates = dr.map(function(r){return r.date;});
-    var byClient = d.daily_revenue_by_client || {};
-    // топ-клиенты по суммарной выручке за окно, остальные — «Прочие»
-    var names = Object.keys(byClient).sort(function(a,b){
-      var sa=dates.reduce(function(s,dt){return s+(byClient[a][dt]||0);},0), sb=dates.reduce(function(s,dt){return s+(byClient[b][dt]||0);},0);
-      return sb-sa;
-    });
-    var MAXG=6, top=names.slice(0,MAXG), rest=names.slice(MAXG);
-    var palette=getChartPaletteLight();
-    var datasets=top.map(function(nm,i){ return Object.assign({label:nm, data:dates.map(function(dt){return (byClient[nm][dt]||0);}), backgroundColor:palette[i%palette.length], stack:'r', borderRadius:chartStackRadius()}, CHART_BAR_STACK); });
-    if(rest.length) datasets.push(Object.assign({label:'Прочие', data:dates.map(function(dt){return rest.reduce(function(s,nm){return s+(byClient[nm][dt]||0);},0);}), backgroundColor:'#cbd5e1', stack:'r', borderRadius:chartStackRadius()}, CHART_BAR_STACK));
+    var finBarOpts=Object.assign({},CHART_BAR_STACK,{maxBarThickness:28,barPercentage:.64,categoryPercentage:.82});
+    var datasets=top.map(function(nm,i){ return Object.assign({label:nm, data:dates.map(function(dt){return (byClient[nm][dt]||0);}), backgroundColor:palette[i%palette.length], stack:'r', borderRadius:chartStackRadius()}, finBarOpts); });
+    if(rest.length) datasets.push(Object.assign({label:'Прочие', data:dates.map(function(dt){return rest.reduce(function(s,nm){return s+(byClient[nm][dt]||0);},0);}), backgroundColor:'#cbd5e1', stack:'r', borderRadius:chartStackRadius()}, finBarOpts));
     // fallback: если разбивки нет — единый ряд из daily_revenue
-    if(!datasets.length) datasets=[Object.assign({label:'Выручка', data:dr.map(function(r){return r.revenue;}), backgroundColor:'#2f6fe0', stack:'r', borderRadius:chartStackRadius()}, CHART_BAR_STACK)];
+    if(!datasets.length) datasets=[Object.assign({label:'Выручка', data:dr.map(function(r){return r.revenue;}), backgroundColor:'#2f6fe0', stack:'r', borderRadius:chartStackRadius()}, finBarOpts)];
     window._newFinRevChart = newChartSafe(cv, {
       type:'bar',
       data:{ labels:dates.map(function(dt){return (dt||'').slice(5);}), datasets:datasets },
       options:{responsive:true,maintainAspectRatio:false,animation:false,interaction:{mode:'index',intersect:false},
+        layout:{padding:{top:2}},
         plugins:{legend:{display:false},
           tooltip:{mode:'index',intersect:false,itemSort:function(a,b){return b.parsed.y-a.parsed.y;},
             callbacks:{label:function(ctx){return ctx.dataset.label+': '+(ctx.parsed.y||0).toLocaleString('ru-RU')+' ₽';},
               footer:function(items){var t=0;items.forEach(function(i){t+=i.parsed.y||0;});return 'Итого: '+t.toLocaleString('ru-RU')+' ₽';}}}},
-        scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9},maxRotation:0,autoSkip:true,maxTicksLimit:10},grid:{display:false},border:{display:false}},
-          y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:9},callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:cc.grid,drawTicks:false},border:{display:false}}}}
+        scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:9.5},maxRotation:0,autoSkip:true,maxTicksLimit:10,padding:6},grid:{display:false},border:{display:false}},
+          y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,font:{size:9.5},padding:6,callback:function(v){return v>=1000?(v/1000).toFixed(0)+'k':v;}},grid:{color:'rgba(47,63,85,.065)',drawTicks:false},border:{display:false}}}}
     });
   }, 30);
 }

@@ -4027,34 +4027,37 @@ function renderNewFinance(d){
   // Quality panel
   var q = document.getElementById('newFinQuality');
   if(q){
-    var nrrColor = s.nrr_pct==null?null:(s.nrr_pct>=100?'var(--success)':s.nrr_pct>=90?'var(--warning)':'var(--danger)');
-    var churnColor = s.churn_rate_pct>=5?'var(--danger)':'var(--success)';
+    var nrrTone = s.nrr_pct==null?'neutral':(s.nrr_pct>=100?'success':s.nrr_pct>=90?'warning':'danger');
+    var churnTone = s.churn_rate_pct==null?'neutral':(s.churn_rate_pct>=5?'danger':'success');
     // 2026-08-04: порядок по решению оператора — Выручка, Расходы, Прибыль,
     // Маржинальность, дальше остальное; кнопка ввода затрат прямо в карточке.
     var _cost = s.total_cost||0, _rev30 = (s.revenue_30d_fact!=null?s.revenue_30d_fact:s.mrr)||0, _profit = _rev30-_cost;
     var _marginPct = _rev30>0 ? Math.round(_profit/_rev30*1000)/10 : null;
-    function qtile(l,v,c){ return '<div class="kpi-tile"><div class="l">'+l+'</div><div class="v" style="font-size:16px'+(c?';color:'+c:'')+'">'+v+'</div></div>'; }
-    function cbar(l,sub,pct,col){ pct=pct||0; return '<div style="margin-bottom:9px">'+
-      '<div style="display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:11px;margin-bottom:3px">'+
-        '<span style="color:var(--text-1);font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0">'+l+(sub?' <span style="font-weight:400;color:var(--text-3)">'+sub+'</span>':'')+'</span>'+
-        '<span style="font-family:var(--font-mono);font-weight:600;color:var(--text-0)">'+pct+'%</span></div>'+
-      '<div style="height:6px;background:var(--bg-3);border-radius:3px;overflow:hidden"><div style="height:100%;width:'+Math.min(pct,100)+'%;background:'+col+';border-radius:3px"></div></div></div>'; }
-    var hq = '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px"><h3 style="margin:0;font-size:14px;font-weight:700;color:var(--text-0)">Качество выручки</h3>'
-      + '<button class="btn btn-sm" style="font-size:10px;padding:3px 9px" title="Ввести затраты месяца (себестоимость)" data-on-click="openFinanceCostsModal()">'+icon('gear',11)+' Затраты</button></div>';
-    hq += '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:12px">';
-    hq += qtile('Выручка 30д (факт)', _fmtRub(_rev30), null);
-    hq += qtile('Расходы (мес.)', _cost>0?_fmtRub(_cost):'—', null);
-    hq += qtile('Прибыль 30д', _cost>0?_fmtRub(_profit):'—', _cost>0?(_profit>=0?'var(--success)':'var(--danger)'):null);
-    hq += qtile('Маржинальность', (_marginPct==null||!_cost)?'—':_marginPct+'%', (_marginPct!=null&&_cost)?(_marginPct>=50?'var(--success)':_marginPct>=25?'var(--warning)':'var(--danger)'):null);
-    hq += qtile('NRR · 3 мес', s.nrr_pct==null?'—':s.nrr_pct+'%', nrrColor);
-    hq += qtile('Churn · мес', s.churn_rate_pct==null?'—':s.churn_rate_pct+'%', churnColor);
-    hq += qtile('ARPU', _fmtRub(s.arpu), null);
-    hq += qtile('Активных клиентов', String(s.active_clients||0), null);
+    function qtile(l,v,tone){ return '<div class="fin-quality-tile fin-quality-tile--'+(tone||'neutral')+'"><span class="fin-quality-label">'+l+'</span><span class="fin-quality-value">'+v+'</span></div>'; }
+    function cbar(l,sub,pct,tone){
+      pct=Number(pct)||0;
+      return '<div class="fin-concentration-row"><div class="fin-concentration-meta"><span class="fin-concentration-label">'+l
+        +(sub?' <span class="fin-concentration-client">'+sub+'</span>':'')+'</span><span class="fin-concentration-value">'+pct+'%</span></div>'
+        +'<div class="fin-concentration-track"><div class="fin-concentration-fill fin-concentration-fill--'+(tone||'accent')+'" style="width:'+Math.min(Math.max(pct,0),100)+'%"></div></div></div>';
+    }
+    var hq = '<div class="fin-quality-head"><div class="fin-card-heading"><h3 class="fin-card-title">Качество выручки</h3>'
+      +'<span class="fin-card-subtitle">Доходность, удержание и структура клиентов</span></div>'
+      +'<button class="btn btn-sm fin-cost-btn" title="Ввести затраты месяца (себестоимость)" data-on-click="openFinanceCostsModal()">'+icon('gear',11)+' Затраты</button></div>';
+    hq += '<div class="fin-quality-grid">';
+    hq += qtile('Выручка 30д (факт)', _fmtRub(_rev30), 'accent');
+    hq += qtile('Расходы (мес.)', _cost>0?_fmtRub(_cost):'—', 'neutral');
+    hq += qtile('Прибыль 30д', _cost>0?_fmtRub(_profit):'—', _cost>0?(_profit>=0?'success':'danger'):'neutral');
+    hq += qtile('Маржинальность', (_marginPct==null||!_cost)?'—':_marginPct+'%', (_marginPct!=null&&_cost)?(_marginPct>=50?'success':_marginPct>=25?'warning':'danger'):'neutral');
+    hq += qtile('NRR · 3 мес', s.nrr_pct==null?'—':s.nrr_pct+'%', nrrTone);
+    hq += qtile('Churn · мес', s.churn_rate_pct==null?'—':s.churn_rate_pct+'%', churnTone);
+    hq += qtile('ARPU', _fmtRub(s.arpu), 'neutral');
+    hq += qtile('Активных клиентов', String(s.active_clients||0), 'accent');
     hq += '</div>';
-    hq += '<div style="font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:8px">Концентрация выручки</div>';
-    hq += cbar('Top-1', con.top1_name?esc(con.top1_name):'', con.top1_pct, con.top1_pct>=50?'#ef4444':con.top1_pct>=35?'var(--warning)':'var(--accent)');
-    hq += cbar('Top-3', '', con.top3_pct, 'var(--accent)');
-    hq += cbar('Top-5', '', con.top5_pct, '#10b981');
+    hq += '<div class="fin-concentration"><div class="fin-concentration-title">Концентрация выручки</div>';
+    hq += cbar('Top-1', con.top1_name?esc(con.top1_name):'', con.top1_pct, con.top1_pct>=50?'danger':con.top1_pct>=35?'warning':'accent');
+    hq += cbar('Top-3', '', con.top3_pct, 'accent');
+    hq += cbar('Top-5', '', con.top5_pct, 'success');
+    hq += '</div>';
     q.innerHTML = hq;
   }
   // Flow: new / churned / debtors
