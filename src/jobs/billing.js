@@ -162,15 +162,29 @@ async function _runDailyBillingImpl(retryClientIds) {
     }
 
     // Check server availability for this client's ports
+    // 23.08: durable-fallback. Раньше клиент пропускался целиком, если его
+    // бокс недоступен в момент биллинга — хотя traffic_hourly (часовая
+    // агрегация, пишется весь день) уже содержит весь вчерашний трафик.
+    // Теперь: если durable-данные за вчера есть (или клиент per_modem —
+    // аренда не зависит от трафика) — биллим по ним сразу; расхождения
+    // с живыми данными потом ловит ShadowBilling/сверка. Пропуск + retry
+    // остаются только для случая, когда durable тоже пуст.
+    let durableFallbackReason = null;
     const cachedServers = getClientCachedServers(results, client.portName);
     if (cachedServers.length > 0 || results.length < apiServers.length) {
       const reason = cachedServers.length > 0
         ? `cached data on [${cachedServers.join(', ')}]`
         : `only ${results.length}/${apiServers.length} servers`;
-      logger.info(`[Billing] Skipping ${client.name}: ${reason}`);
-      skippedClients.push(client.id);
-      skipped++;
-      continue;
+      const durableBytes = getClientBytesForMskDate(client.portName, yesterdayStr);
+      if (durableBytes > 0 || client.billingType === 'per_modem') {
+        logger.warn(`[Billing] ${client.name}: ${reason} — billing from durable/cached data (fallback), shadow-billing will reconcile`);
+        durableFallbackReason = reason;
+      } else {
+        logger.info(`[Billing] Skipping ${client.name}: ${reason} (no durable data either)`);
+        skippedClients.push(client.id);
+        skipped++;
+        continue;
+      }
     }
 
     try {
@@ -194,8 +208,11 @@ async function _runDailyBillingImpl(retryClientIds) {
 
       // B6 (Р36/ТЗ B2C): traffic-гейт снят для individual + per_modem — аренда
       // платит за день всегда, даже при нулевом трафике. B2B-ветки не меняются.
+      // 23.08: + durable-fallback per_modem — при лежащем боксе аренда
+      // начисляется по durable-числу модемов, трафик для цены не нужен.
       const isRetailLease = (client.clientType === 'individual') && client.billingType === 'per_modem';
-      if (deltaBytes <= 0 && !isRetailLease) {
+      const isFallbackLease = !!durableFallbackReason && client.billingType === 'per_modem';
+      if (deltaBytes <= 0 && !isRetailLease && !isFallbackLease) {
         skipped++;
         continue;
       }
@@ -215,6 +232,19 @@ async function _runDailyBillingImpl(retryClientIds) {
               if (b.portName === client.portName) modemCount++;
             }
           }
+        }
+        // 23.08: при durable-fallback (бокс недоступен) live-данные могут
+        // не содержать порты клиента — считаем модемы из traffic_hourly
+        // (distinct nick за вчера), как делает billing_rerun.
+        if (modemCount === 0 && durableFallbackReason) {
+          try {
+            const r = db.prepare(`
+              SELECT COUNT(DISTINCT nick) AS n FROM traffic_hourly
+              WHERE client_name = ?
+                AND substr(datetime(hour_start, '+3 hours'), 1, 10) = ?
+            `).get(client.portName, yesterdayStr);
+            modemCount = (r && r.n) || 0;
+          } catch (_) { /* best-effort */ }
         }
         cost = (clientPrice * modemCount) / daysInMonth;
       } else {
@@ -249,7 +279,8 @@ async function _runDailyBillingImpl(retryClientIds) {
           note: client.billingType === 'per_modem'
             ? `Списание за аренду ${modemCount} ${modemPlural(modemCount)} (${yesterdayLabel})`
             : `Списание за трафик (${yesterdayLabel})`,
-          traffic_source: 'daily_billing'
+          traffic_source: durableFallbackReason ? 'daily_billing_durable_fallback' : 'daily_billing',
+          fallback_reason: durableFallbackReason || undefined,
         }, { minBalance });
       } catch (e) {
         if (e && e.code === 'INSUFFICIENT_BALANCE') {

@@ -29,6 +29,7 @@ function runStartup(d) {
     runBlockedPortCleanup, runHttpCheck, runVolumeGuard,
     saveClients, auditLog, authTokensDb,
     events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
+    ledgerDb, getMoscowYesterday,   // 23.08: billing catch-up по непробиленным
   } = d;
 
   // Авто-спидтесты всего флота отключены 2026-08-13 (daily-schedule.js) —
@@ -451,9 +452,24 @@ function runStartup(d) {
         }
       }
       if (needsCatchup) {
-        logger.info('[Billing] Catch-up: missed billing detected, running now...');
-        logActivity('billing', 'warn', 'billing_catchup', null, 'Missed billing detected, running catch-up');
-        await runDailyBilling();
+        // 23.08: catch-up до-билливает ТОЛЬКО клиентов без списания за вчера.
+        // Раньше вызывался полный runDailyBilling(), который упирался в гвард
+        // «Already billed for <дата>» (хоть одно списание за день есть →
+        // весь прогон пропускался) — и частично пропущенные клиенты
+        // (лежавший бокс) так и не добилливались. Retry-режим фильтрует
+        // уже пробиленных, поэтому двойных списаний не будет.
+        const yesterday = getMoscowYesterday();
+        const chargedIds = new Set(ledgerDb.chargedClientIdsForDate(yesterday));
+        const unbilled = clients
+          .filter(c => !chargedIds.has(c.id) && c.portName && !c.billingPaused && !c.blocked && !c.debtBlocked)
+          .map(c => c.id);
+        if (!unbilled.length) {
+          logger.info('[Billing] Catch-up: all billable clients already charged for ' + yesterday + ', nothing to do');
+        } else {
+          logger.info(`[Billing] Catch-up: missed billing detected, running for ${unbilled.length} unbilled client(s)...`);
+          logActivity('billing', 'warn', 'billing_catchup', null, `Missed billing detected, running catch-up for ${unbilled.length} client(s)`);
+          await runDailyBilling(unbilled);
+        }
       }
     } catch (e) {
       logger.error('[Billing] Catch-up error:', e.message);

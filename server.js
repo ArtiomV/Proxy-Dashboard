@@ -4228,6 +4228,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
     runVolumeGuard: () => volumeGuard.runOnce(),   // A4 (23.08): объёмные алерты
     events: eventsBus,   // SSE (23.08): alerts.init публикует событие 'alert'
+    ledgerDb, getMoscowYesterday,   // 23.08: catch-up до-билливает только непробиленных
     // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).
     saveClients, auditLog, authTokensDb,
   });
