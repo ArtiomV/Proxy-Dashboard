@@ -9,10 +9,16 @@
 
   function _ind(state){
     var el=document.getElementById('sseIndicator');
-    if(!el)return;
-    if(state==='live'){el.style.display='';el.className='sse-ind sse-live';el.title='Realtime-обновления активны';el.innerHTML='<span class="sse-dot"></span>live';}
-    else if(state==='offline'){el.style.display='';el.className='sse-ind sse-offline';el.title='Realtime-канал недоступен — работает обновление по таймеру';el.innerHTML='<span class="sse-dot"></span>offline';}
-    else{el.style.display='none';}
+    if(el){
+      if(state==='live'){el.style.display='';el.className='sse-ind sse-live';el.title='Realtime-обновления активны';el.innerHTML='<span class="sse-dot"></span>live';}
+      else if(state==='offline'){el.style.display='';el.className='sse-ind sse-offline';el.title='Realtime-канал недоступен — работает обновление по таймеру';el.innerHTML='<span class="sse-dot"></span>offline';}
+      else{el.style.display='none';}
+    }
+    // Ползунок над страницей — индикатор polling-таймера: при живом SSE
+    // прячем (обновления идут по событиям), при обрыве возвращаем.
+    // _armRefreshBar трогает только transition/width, display сохраняется.
+    var bar=document.getElementById('refreshBar');
+    if(bar)bar.style.display=(state==='live')?'none':'';
   }
 
   function _setPolling(ms){
