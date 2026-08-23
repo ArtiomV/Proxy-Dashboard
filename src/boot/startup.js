@@ -63,6 +63,13 @@ function runStartup(d) {
   const _watchdogs = require('../jobs/watchdogs').create({ db, logger, alerts, logActivity, fs });
   _intervals.push(setInterval(_watchdogs.hourlyHealthCheck, 60 * 60 * 1000));
 
+  // D2 (23.08): суточный контроль SSL-сертификата домена (≤14 дн — important,
+  // ≤3 дн / ошибка TLS — critical). Разово при старте (с паузой, чтобы сеть
+  // поднялась) + каждый день в 04:10 UTC (07:10 МСК).
+  const _sslMon = require('../jobs/ssl-monitor').create({ logger, alerts, getSetting, logActivity });
+  setTimeout(() => { _sslMon.checkOnce().catch(e => logger.warn('[SSLMonitor] initial: ' + e.message)); }, 3 * 60 * 1000);
+  scheduleRepeating(4, 10, 'SSLMonitor', () => _sslMon.checkOnce());
+
   // Stage 18.13: daily proxy-expiry check at 09:30 МСК (06:30 UTC) — alert
   // for ports expiring within 3 days. Runs once per day; per-port cooldown
   // is 24h inside the alert rule.

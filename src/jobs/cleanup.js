@@ -137,6 +137,8 @@ function create(deps) {
       auto_reboot_log:  { col: 'rebooted_at', key: 'retention_auto_reboot', def: 90 },
       // Simulator runs — 30 days; CASCADE on simulator_samples handles the rest.
       simulator_runs:   { col: 'started_at', key: 'retention_simulator_runs', def: 30 },
+      // A1 (23.08): история пингов модемов (~51k строк/сут на флот 106).
+      modem_ping:       { col: 'ts', key: 'retention_modem_ping', def: 30 },
     };
     const results = {};
     for (const [table, { col, key, def }] of Object.entries(retentions)) {

@@ -1638,6 +1638,15 @@ const SETTINGS_DEFAULTS = {
   tochka_strict_webhook: false,
   // ── ProxySmart SIM/health signals (Batch 1) ──────────────────────
   reboot_score_alert_threshold: 70,        // reboot_score ≥ this → «нужен ребут» alert
+  // ── D1/D2/A1 (ТЗ мониторинга v2, 23.08) ──────────────────────────
+  ssl_monitor_enabled: true,               // D2: суточный контроль SSL домена
+  ssl_monitor_host: '',                    // пусто = app.arendaproxy.ru
+  ping_enabled: true,                      // A1: разбор net_details.ping_stats
+  ping_loss_dead_pct: 100,                 // loss ≥ → «интернета нет» (2 опроса)
+  ping_loss_warn_pct: 30,                  // loss ≥ → деградация (3 опроса)
+  ping_latency_warn_ms: 800,               // latency > → деградация (3 опроса)
+  ping_stale_cycles: 5,                    // ping_stats не меняется N опросов → протух
+  retention_modem_ping: 30,                // дней истории modem_ping
   // ── Domain guard (WP2): контроль доменов на bypass-боксах ────────
   domain_guard_servers: 'S2,S4',           // боксы со снятой hfilter-фильтрацией
   retention_top_hosts_daily: 90,           // дней истории top_hosts_daily / domain_guard_hits
@@ -1973,6 +1982,25 @@ app.use(express.static(path.join(__dirname, 'public'), {
     }
   }
 }));
+
+// D1 (23.08, ТЗ мониторинга v2): dead man's switch. Внешний сторож (cron на
+// боксе S3) дёргает /healthz каждые 5 мин: 200 = дашборд жив, БД пишется и
+// цикл опроса боксов тикает; 503 — процесс жив, но внутренности сломаны
+// (сторож шлёт TG после двух подряд 503/таймаутов). Без auth, данных о
+// клиентах не отдаёт.
+const _healthzDbStmt = db.prepare("INSERT OR REPLACE INTO kv_store (key, value) VALUES ('_healthz_ping', ?)");
+app.get('/healthz', (req, res) => {
+  let ok = true;
+  const checks = {};
+  try {
+    _healthzDbStmt.run(String(Date.now()));
+    checks.db = 'ok';
+  } catch (e) { checks.db = 'fail'; ok = false; }
+  const pollAgeSec = proxySmart.lastPollAt ? Math.round((Date.now() - proxySmart.lastPollAt) / 1000) : null;
+  checks.last_poll_age_sec = pollAgeSec;
+  if (pollAgeSec == null || pollAgeSec > 300) ok = false;   // цикл опроса — раз в 1–3 мин
+  res.status(ok ? 200 : 503).json({ ok, ...checks });
+});
 
 // DB-audit per-request context (lazy: only inserts a context_id row when
 // the handler does an actual DB write that hits an audited table).
@@ -2815,6 +2843,9 @@ try {
 // trackModems extracted to src/jobs/modem-tracking.js (2026-07) — verbatim
 // move into a deps-injected factory. The two scheduler call sites at ~5466
 // are unchanged.
+// A1 (23.08): пинг модемов из ping_stats бокса — история + алерты + вход для
+// ping-based аптайма. Создаётся до modem-tracking, которому передаётся в deps.
+const modemPing = require('./src/jobs/modem-ping').create({ db, logger, alerts, getSetting });
 const { trackModems } = require('./src/jobs/modem-tracking').create({
   apiServers, fetchServerData, db, logger, logActivity, alerts,
   SERVER_COUNTRIES, normalizeOperator, operatorsDb, fetchApi, postFormApi,
@@ -2823,6 +2854,7 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
   _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
   _metaIccidGetByImei, persistServerDownSince: _persistServerDownSince,
+  modemPing,
 });
 
 // ========== PROXY LATENCY MONITORING ==========
@@ -4053,6 +4085,7 @@ app.use(require('./src/routes/ops-ext')({
   getMoscowNow, getMoscowToday, getMoscowYesterday,
   ledgerExpense, parseBwToBytes, trafficBytesToGb,
   getBalanceReconcile: () => balanceReconcile,
+  getModemPingLatest: () => modemPing.latest(),   // A1 (23.08): свежие пинги для UI
 }));
 
 app.use(require('./src/routes/billing-ext')({

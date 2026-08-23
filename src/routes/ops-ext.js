@@ -41,6 +41,7 @@ module.exports = function createOpsExtRouter(deps) {
     logActivity,
     getMoscowNow, getMoscowToday, getMoscowYesterday,
     ledgerExpense, parseBwToBytes, trafficBytesToGb,
+    getModemPingLatest,
   } = deps;
   const r = express.Router();
   // Stage 4: billing_ledger reads come from DB. Two cheap aggregate queries
@@ -426,9 +427,30 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       tochkaConfig: (() => { const tc = getTochkaConfig(); return { jwt: tc.jwt ? '****' + tc.jwt.slice(-8) : '', clientId: tc.clientId, customerCode: tc.customerCode, accountId: tc.accountId, companyName: tc.companyName, companyInn: tc.companyInn, companyKpp: tc.companyKpp, companyAddress: tc.companyAddress, bankAccount: tc.bankAccount, bankName: tc.bankName, bankBic: tc.bankBic, bankCorrAccount: tc.bankCorrAccount }; })(),
       proxyCheckSummary: getProxyCheckSummary(),
       proxyIssues: computeProxyIssues(),
+      // A1 (23.08): последний пинг каждого модема (latency/loss/ok) для UI.
+      modemPing: (getModemPingLatest ? getModemPingLatest() : {}),
     });
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
+  }
+});
+
+// A1 (23.08): история пингов модема для спарклайна в карточке модема (до 72ч).
+r.get('/api/admin/modem_ping', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const server = String(req.query.server || '').trim();
+    const nick = String(req.query.nick || '').trim();
+    const hours = Math.min(72, Math.max(1, parseInt(req.query.hours, 10) || 24));
+    if (!server || !nick) return res.status(400).json({ error: 'server and nick required' });
+    const since = Date.now() - hours * 3600000;
+    const rows = db.prepare(`
+      SELECT ts, latency_ms, loss_pct, ok FROM modem_ping
+      WHERE server = ? AND nick = ? AND ts >= ?
+      ORDER BY ts ASC
+    `).all(server, nick, since);
+    res.json({ rows });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 

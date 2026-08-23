@@ -19,6 +19,7 @@ function create(deps) {
     _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
     _metaIccidGetByImei,
     persistServerDownSince,
+    modemPing,
   } = deps;
 
 async function trackModems() {
@@ -31,6 +32,9 @@ async function trackModems() {
     try {
       const data = await fetchServerData(server);
       statusArr = Array.isArray(data.status) ? data.status : [];
+      // A1 (23.08): разбор ping_stats бокса (latency/loss) — история, алерты
+      // «online, но без интернета», вход для ping-based аптайма ниже.
+      if (modemPing) { try { modemPing.ingest(server.name, statusArr, now); } catch (e) { logger.warn('[ModemPing] ingest: ' + e.message); } }
       // Stage 18.13: server returned to life after recorded outage → recovery alert.
       // Stage 18.21: gated on _serverUnreachableAlertSent — we don't emit a
       // «вернулся» message unless we previously sent a «недоступен» one.
@@ -248,7 +252,15 @@ async function trackModems() {
       const todayBucket = new Date().toLocaleDateString('en-CA');
       if (!uptimeTracking[key].daily[todayBucket]) uptimeTracking[key].daily[todayBucket] = { online: 0, total: 0 };
 
-      const isUp = isOnline || isRotating || isRebooting || extIp === 'IP_RESET';
+      // A1 (23.08): «up» теперь ping-based — модем online по IS_ONLINE, но с
+      // loss ≥ ping_loss_dead_pct считается недоступным (инцидент S1 21.08:
+      // модемы «up», трафика нет). Ротация/ребут/IP_RESET — штатно «up».
+      // alive() === null (нет свежих данных / фича выкл) — старое поведение.
+      let isUp = isOnline || isRotating || isRebooting || extIp === 'IP_RESET';
+      if (isUp && !isRotating && !isRebooting && extIp !== 'IP_RESET' && modemPing) {
+        const pa = modemPing.alive(server.name, imei);
+        if (pa === false) isUp = false;
+      }
       uptimeTracking[key].total_checks++;
       uptimeTracking[key].daily[todayBucket].total++;
       if (isUp) {

@@ -654,6 +654,54 @@ const RULES = {
     render: p => `🔴 <b>Бокс ${esc(p.server || '?')} отвечает не по контракту</b>\n\nНарушения (${p.count || '?'}):\n<code>${esc((p.sample || '').slice(0, 500))}</code>\nПарсинг дашборда может молча деградировать — сверься с docs/PROXYSMART-CONTRACT.md.`,
   },
 
+  // D2 (23.08): SSL-сертификат домена. ≤14 дней — important, ≤3 / ошибка
+  // TLS-хендшейка — critical. Джоба src/jobs/ssl-monitor.js, суточная.
+  ssl_cert_expiring: {
+    title: 'SSL-сертификат истекает',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'ssl_' + (p.host || 'unknown'),
+    render: p => `🟡 <b>SSL-сертификат истекает</b>\n\n<b>${esc(p.host || '?')}</b>: осталось <b>${p.daysLeft} дн</b> (действует до ${esc(p.validTo || '?')} МСК).\nПродли заранее.`,
+  },
+  ssl_cert_critical: {
+    title: 'SSL-сертификат критично',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'sslc_' + (p.server || p.host || 'unknown'),
+    render: p => p.error
+      ? `🔴 <b>SSL-проверка не удалась</b>\n\n<b>${esc(p.host || '?')}</b>: ${esc(p.error)}.\nЕсли это не сетевой сбой — cert мог протухнуть, клиенты видят ошибку браузера.`
+      : `🔴 <b>SSL-сертификат истекает!</b>\n\n<b>${esc(p.host || '?')}</b>: осталось <b>${p.daysLeft} дн</b> (до ${esc(p.validTo || '?')} МСК).\nПосле истечения клиенты увидят ошибку браузера.`,
+  },
+
+  // A1 (23.08): «симка online, но интернета нет» — по ping_stats бокса
+  // (src/jobs/modem-ping.js). dead: loss ≥ порога 2 опроса подряд.
+  modem_ping_dead: {
+    title: 'Модем online, но без интернета',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 1800,
+    dedupeKey: p => 'pingdead_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
+    render: p => `🔴 <b>Модем online, но интернета нет</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — потери пинга <b>${p.loss}%</b> два замера подряд${p.latency != null ? ` (${p.latency} мс)` : ''}.\nСимка в сети, но трафик не идёт — проверь площадку/баланс оператора.`,
+  },
+  modem_ping_recovered: {
+    title: 'Пинг модема восстановился',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 60,
+    dedupeKey: p => 'pingrec_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
+    render: p => `🟢 <b>Интернет на модеме вернулся</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — пинг снова проходит${p.latency != null ? ` (${p.latency} мс)` : ''}.`,
+  },
+  modem_ping_slow: {
+    title: 'Модем: деградация канала',
+    priority: 'early',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'pingslow_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
+    render: p => `🟡 <b>Деградация канала</b>\n\n<b>${esc(p.nick || p.imei)}</b> (${esc(p.server || '?')}) — пинг ${p.latency} мс, потери ${p.loss}% (3 замера подряд).`,
+  },
+
   // ── 🔵 EARLY WARNING ────────────────────────────────────────
   heap_warn: {
     title: 'Heap >85% (превентивно)',
@@ -721,6 +769,9 @@ const _entityFor = {
   modem_offline_20m:         p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   modems_down_bulk:          () => ({ kind: 'fleet',   id: null }),
   modem_recovered:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
+  modem_ping_dead:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
+  modem_ping_recovered:      p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
+  modem_ping_slow:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   recovery_exhausted:        p => ({ kind: 'modem',   id: p.nick || null }),
   failover_done:             p => ({ kind: 'modem',   id: p.spareNick || p.deadNick || null }),
   failover_no_spare:         p => ({ kind: 'modem',   id: p.nick || null }),
@@ -744,6 +795,8 @@ const _entityFor = {
   heap_warn:                 () => ({ kind: 'system', id: 'heap' }),
   disk_low_warn:             () => ({ kind: 'system', id: 'disk' }),
   cron_stuck:                p => ({ kind: 'system', id: 'cron:' + (p.job || '') }),
+  ssl_cert_expiring:         p => ({ kind: 'system', id: 'ssl:' + (p.host || '') }),
+  ssl_cert_critical:         p => ({ kind: 'system', id: 'ssl:' + (p.host || '') }),
   // D4 — бывший URGENT_ACTIONS-контур
   billing_failed:            () => ({ kind: 'system', id: 'billing' }),
   billing_unique_conflict:   () => ({ kind: 'system', id: 'billing' }),

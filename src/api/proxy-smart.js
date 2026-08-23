@@ -31,6 +31,9 @@ let serverCache = {};
 let _psCache = null;
 let _psCacheTs = 0;
 let _psFetchPromise = null;
+// D1 (23.08): метка последней ПОПЫТКИ опроса бокса (не только успеха) —
+// /healthz смотрит на неё: «дашборд жив и опрашивает» отделено от «боксы лежат».
+let _lastPollAt = 0;
 const PS_CACHE_TTL = 10 * 1000;
 // A live multi-server fetch takes 4–6s (ProxySmart's bandwidth_report_all is slow).
 // Serve a cache up to MAX_STALE old INSTANTLY while refreshing in the background, so
@@ -332,6 +335,7 @@ function getCachedDataAsOffline(serverName) {
 // ---------------------------------------------------------------------------
 
 async function fetchServerData(server) {
+  _lastPollAt = Date.now();
   const [bw, status, ports] = await Promise.all([
     fetchApi(server, '/apix/bandwidth_report_all'),
     fetchApi(server, '/apix/show_status_json'),
@@ -510,6 +514,7 @@ module.exports = {
   fetchAllServersDataCached,
   // Expose cache state for external read (e.g. tests)
   get serverCache() { return serverCache; },
+  get lastPollAt() { return _lastPollAt; },
   get _psCache() { return _psCache; },
   get _psCacheTs() { return _psCacheTs; },
   // Drop the multi-server fetchAllServersDataCached() cache so the next call

@@ -397,6 +397,12 @@
   },
   {
     "type": "index",
+    "name": "idx_modem_ping_nick",
+    "tbl_name": "modem_ping",
+    "sql": "CREATE INDEX idx_modem_ping_nick ON modem_ping(server, nick, ts)"
+  },
+  {
+    "type": "index",
     "name": "idx_notif_read_user",
     "tbl_name": "notification_read_state",
     "sql": "CREATE INDEX idx_notif_read_user ON notification_read_state(user_login, dismissed_at, read_at)"
@@ -856,6 +862,12 @@
     "name": "modem_meta",
     "tbl_name": "modem_meta",
     "sql": "CREATE TABLE modem_meta ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '', phone TEXT NOT NULL DEFAULT '', updated_at TEXT NOT NULL DEFAULT (datetime('now')), is_test_pool INTEGER NOT NULL DEFAULT 0, sim_status TEXT DEFAULT '', reboot_score INTEGER DEFAULT NULL, http_redirect INTEGER NOT NULL DEFAULT 0, band TEXT DEFAULT '', is_locked INTEGER NOT NULL DEFAULT 0, signals_updated_at TEXT DEFAULT '', deleted INTEGER NOT NULL DEFAULT 0, signal_strength TEXT DEFAULT '', iccid TEXT DEFAULT '', cell_op TEXT DEFAULT '', net_type TEXT DEFAULT '', modem_uptime TEXT DEFAULT '', UNIQUE(server_name, imei) )"
+  },
+  {
+    "type": "table",
+    "name": "modem_ping",
+    "tbl_name": "modem_ping",
+    "sql": "CREATE TABLE modem_ping ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, -- ISO-метка опроса (UTC) server TEXT NOT NULL, nick TEXT NOT NULL, latency_ms INTEGER, -- NULL = не распарсилось loss_pct INTEGER, -- 0–100 ok INTEGER NOT NULL DEFAULT 1 -- 1 = loss < ping_loss_dead_pct )"
   },
   {
     "type": "table",
