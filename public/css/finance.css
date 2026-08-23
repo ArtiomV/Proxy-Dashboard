@@ -252,6 +252,14 @@
 #tab-dashboard .server-overview-services-label{display:block;margin-top:2px;font-size:11px;line-height:13px;color:#60708e;white-space:nowrap}
 #tab-dashboard .server-overview-status{height:16px;margin:2px 10px 0;display:flex;align-items:center;gap:8px;font-size:11px;line-height:16px;color:#60708e}
 #tab-dashboard .server-overview-status-dot{width:9px;height:9px;border-radius:50%;flex-shrink:0;box-shadow:0 0 5px color-mix(in srgb,currentColor 25%,transparent)}
+/* Бокс полностью недоступен (ssh+http failed) — вся карточка красная */
+#tab-dashboard .server-overview-card--down{
+  border-color:rgba(239,75,75,.5);
+  background:linear-gradient(160deg,#fff 0%,#fff4f4 100%);
+  box-shadow:0 4px 20px rgba(239,75,75,.18)
+}
+#tab-dashboard .server-overview-card--down .server-overview-title{color:var(--danger)}
+#tab-dashboard .server-overview-card--down .server-overview-status{color:var(--danger);font-weight:600}
 
 #tab-dashboard .server-summary-strip{height:64px;box-sizing:border-box;margin-top:10px;display:grid;grid-template-columns:34.2% 32.8% 33%;align-items:center;border:1px solid rgba(62,79,105,.13);border-radius:10px;overflow:hidden}
 #tab-dashboard .server-summary-item{height:44px;min-width:0;display:grid;grid-template-columns:44px minmax(0,1fr);align-items:center;gap:18px;padding:0 13px;box-sizing:content-box;color:var(--success)}

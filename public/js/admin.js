@@ -3763,13 +3763,14 @@ function renderNewFleetServers(){
     }
     addr=addr||ci.address||'';
     var flag=(typeof flagIcon==='function'&&ci.country)?flagIcon(ci.country,32):(ci.flag||'');
-    var h='<article class="server-overview-card" data-srv-spark="'+esc(srv)+'">';
+    var isDown=!!(met&&met.error);   // ssh+http failed → вся карточка красная
+    var h='<article class="server-overview-card'+(isDown?' server-overview-card--down':'')+'" data-srv-spark="'+esc(srv)+'">';
     h+='<header class="server-overview-header">'
       +'<div class="server-overview-identity"><span class="server-overview-flag">'+flag+'</span><span class="server-overview-heading">'
       +'<span class="server-overview-title">'+esc(srv)+(ci.name?' <span class="server-overview-bullet">•</span> '+esc(ci.name):'')+'</span>'
       +(addr?'<span class="server-overview-address">'+esc(addr)+'</span>':'')+'</span></div>'
-      +'<div class="server-overview-services"><span class="server-overview-services-value" style="color:'+col+'">'+working+'/'+total+'</span>'
-      +'<span class="server-overview-services-label">'+(disc>0?disc+' отключено':'Модемы')+'</span></div>'
+      +'<div class="server-overview-services"><span class="server-overview-services-value" style="color:'+(isDown?'var(--danger)':col)+'">'+working+'/'+total+'</span>'
+      +'<span class="server-overview-services-label">'+(isDown?'Бокс недоступен':(disc>0?disc+' отключено':'Модемы'))+'</span></div>'
       +'</header>';
     // Строка статуса: точка + текст (недоступность / отключённые / стабильно).
     var stDot='var(--success)', stTxt='Сервер работает стабильно';
