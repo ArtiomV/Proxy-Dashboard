@@ -87,9 +87,13 @@ function fetchThroughProxy(proxy, targetUrl, timeoutMs) {
           // (ключевые фразы заглушек видны и в chunked-потоке).
           finish(status, headEnd >= 0 ? buf.slice(headEnd + 4) : buf);
         });
-        tlsSock.on('error', reject);
-        tlsSock.on('timeout', () => { tlsSock.destroy(); reject(new Error('timeout')); });
       });
+      // 24.08: error/timeout вешаем СРАЗУ, а не внутри secureConnect-колбэка.
+      // Раньше при обрыве туннеля посреди TLS-handshake 'error' стрелял до
+      // появления слушателя → uncaughtException → рестарт всего дашборда
+      // (4 краша за 23–24.08 по этой причине).
+      tlsSock.on('error', reject);
+      tlsSock.on('timeout', () => { tlsSock.destroy(); reject(new Error('timeout')); });
     });
     connReq.on('error', reject);
     connReq.on('timeout', () => { connReq.destroy(); reject(new Error('timeout')); });

@@ -181,4 +181,34 @@ describe('http-check', () => {
     expect(row.error).toBe('offline');
     expect(alertsFired.length).toBe(0);
   });
+
+  // Регрессия 24.08: обрыв CONNECT-туннеля посреди TLS-handshake раньше
+  // стрелял 'error' на tlsSock ДО установки слушателя (он вешался внутри
+  // secureConnect-колбэка) → uncaughtException → pm2-рестарт всего дашборда.
+  // Теперь слушатели вешаются сразу — промис просто reject'ится.
+  it('обрыв туннеля посреди TLS-handshake → reject, без uncaughtException', async () => {
+    const http = require('http');
+    const proxy = http.createServer();
+    proxy.on('connect', (req, socket) => {
+      socket.write('HTTP/1.1 200 Connection Established\r\n\r\n');
+      setImmediate(() => socket.destroy()); // рвём до завершения handshake
+    });
+    await new Promise(r => proxy.listen(0, '127.0.0.1', r));
+    const port = proxy.address().port;
+
+    let uncaught = null;
+    const onUncaught = (e) => { uncaught = e; };
+    process.on('uncaughtException', onUncaught);
+    try {
+      await expect(hcMod.fetchThroughProxy(
+        { host: '127.0.0.1', port, login: 'u', password: 'p' },
+        'https://example.com/', 5000
+      )).rejects.toThrow();
+      await new Promise(r => setImmediate(r)); // дать шанс всплыть uncaught
+      expect(uncaught).toBeNull();
+    } finally {
+      process.removeListener('uncaughtException', onUncaught);
+      proxy.close();
+    }
+  });
 });
