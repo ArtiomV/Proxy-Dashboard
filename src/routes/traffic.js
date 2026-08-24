@@ -76,6 +76,42 @@ r.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
 
   const today = new Date().toLocaleDateString('en-CA', { timeZone: 'Europe/Moscow' });
 
+  // Для ПРОШЛЫХ дней: MAX-merge с traffic_hourly (та же логика, что в
+  // /api/admin/daily_traffic). daily_traffic пишется из счётчика
+  // bandwidth_bytes_yesterday_* бокса — если панель бокса рестартовала в
+  // течение дня, счётчик обнуляется и день занижается (инцидент 23.08.26:
+  // рестарт proxysmart на всех MD-боксах). traffic_hourly пишется из дельт
+  // каждый час и такой рестарт переживает. Берём больший источник — как и
+  // биллинг (MAX(durable, live)).
+  try {
+    const hourlyRows = db.prepare(`
+      SELECT port_id, client_name,
+             strftime('%Y-%m-%d', datetime(hour_start, '+3 hours')) as date,
+             SUM(bytes_in) as bin, SUM(bytes_out) as bout
+      FROM traffic_hourly
+      WHERE hour_start >= datetime('now', '-31 days')
+      GROUP BY port_id, date
+    `).all();
+    for (const hr of hourlyRows) {
+      if (hr.date >= today) continue; // сегодня — живой счётчик ниже
+      if (portNameFilter !== '*' && hr.client_name !== portNameFilter && !result[hr.port_id]) continue;
+      if (fromDate && hr.date < fromDate) continue;
+      if (toDate && hr.date > toDate) continue;
+      if (!result[hr.port_id]) result[hr.port_id] = {};
+      const cur = result[hr.port_id][hr.date];
+      const curTot = cur ? (cur.in || 0) + (cur.out || 0) : 0;
+      if ((hr.bin || 0) + (hr.bout || 0) > curTot) {
+        result[hr.port_id][hr.date] = {
+          in: hr.bin || 0,
+          out: hr.bout || 0,
+          portName: (cur && cur.portName) || hr.client_name || '',
+        };
+      }
+    }
+  } catch (e) {
+    logger.warn('[client/daily_traffic] traffic_hourly override failed: ' + e.message);
+  }
+
   if (includeToday) {
     // Add today's live data from ProxySmart
     try {
