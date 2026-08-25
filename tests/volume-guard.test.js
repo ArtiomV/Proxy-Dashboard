@@ -150,6 +150,58 @@ describe('volume-guard', () => {
     expect(alertsFired[0].payload.threshold_gb).toBe(30);
   });
 
+  it('renewal_day: период считается от даты обновления тарифа, а не от 1-го числа', () => {
+    // Расход в прошлом биллинговом периоде (до обновления 20-го) не должен
+    // попадать в остаток текущего периода.
+    for (let d = 1; d <= 19; d++) {
+      addRow('S1', 'MDT_1', 'Moldtelecom', '2026-08-' + String(d).padStart(2, '0') + ' 01:00', 100 * 1e9);
+    }
+    for (let d = 20; d <= 25; d++) {
+      addRow('S1', 'MDT_1', 'Moldtelecom', '2026-08-' + String(d).padStart(2, '0') + ' 01:00', 10 * 1e9);
+    }
+    const forecasts = vgMod.buildForecasts(db, [
+      { operator: 'Moldtelecom', type: 'shared', volume_gb: 1000, renewal_day: 20 },
+    ], new Date('2026-08-25T12:00:00.000Z'));
+    expect(forecasts[0]).toMatchObject({
+      used_gb: 60,                    // только 20–25 августа, не 1900 ГБ с начала месяца
+      period_start: '2026-08-20',
+      reset_date: '2026-09-20',
+    });
+    // Без renewal_day — старое поведение: календарный месяц
+    const legacy = vgMod.buildForecasts(db, [
+      { operator: 'Moldtelecom', type: 'shared', volume_gb: 100000 },
+    ], new Date('2026-08-25T12:00:00.000Z'));
+    expect(legacy[0]).toMatchObject({ used_gb: 1960, period_start: '2026-08-01', reset_date: '2026-09-01' });
+  });
+
+  it('packagePeriod: дата обновления в будущем месяце и 31-е в коротком месяце', () => {
+    const p = vgMod.packagePeriod({ renewal_day: 5 }, new Date('2026-08-03T12:00:00.000Z'));
+    expect(p.start.toISOString().slice(0, 10)).toBe('2026-07-05');
+    expect(p.reset.toISOString().slice(0, 10)).toBe('2026-08-05');
+    const feb = vgMod.packagePeriod({ renewal_day: 31 }, new Date('2026-03-10T12:00:00.000Z'));
+    expect(feb.start.toISOString().slice(0, 10)).toBe('2026-02-28');
+    expect(feb.reset.toISOString().slice(0, 10)).toBe('2026-03-31');
+  });
+
+  it('shared pace: расход до даты обновления не учитывается в темпе', () => {
+    const today = new Date();
+    const dayOfMonth = Number(today.toISOString().slice(8, 10));
+    if (dayOfMonth < 3) return; // в первые дни месяца кейс вырождается
+    const month = today.toISOString().slice(0, 7);
+    // Обновление вчера: старые 2000 ГБ/день с 1-го числа не должны давать алерт темпа.
+    const renewal = dayOfMonth - 1;
+    for (let d = 1; d < renewal; d++) {
+      addRow('S1', 'MDT_' + d, 'Moldtelecom', month + '-' + String(d).padStart(2, '0') + ' 01:00', 2000 * 1e9);
+    }
+    const job = mk({
+      operator_packages: JSON.stringify([
+        { operator: 'Moldtelecom', type: 'shared', volume_gb: 30720, pace_pct: 5, renewal_day: renewal },
+      ]),
+    });
+    job.runOnce();
+    expect(alertsFired.filter(x => x.rule === 'volume_package_pace' && x.payload.scope === 'package')).toEqual([]);
+  });
+
   it('безлимит: почасовая аномалия работает, алерт темпа не создаётся', () => {
     const today = new Date().toISOString().slice(0, 10);
     addRow('S1', 'DIGI_1', 'Digi', today + ' 01:00', 35 * 1e9);

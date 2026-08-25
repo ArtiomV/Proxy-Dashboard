@@ -6,15 +6,18 @@
 // Пакеты — настройка operator_packages (JSON-массив, редактируется в
 // Настройки → «Пакеты операторов» без рестарта):
 //   [{ operator: 'Orange MD',     type: 'per_sim', volume_gb: 400,
-//      hourly_gb: 20,  pace_pct: 10 },
+//      renewal_day: 15, hourly_gb: 20,  pace_pct: 10 },
 //    { operator: 'Moldtelecom',   type: 'shared',  volume_gb: 30720,
-//      hourly_gb: 30,  pace_pct: 5  },
+//      renewal_day: 1,  hourly_gb: 30,  pace_pct: 5  },
 //    { operator: 'Digi',          type: 'unlimited', volume_gb: 0,
 //      hourly_gb: 30,  pace_pct: 0  }, ...]
 //   per_sim — объём на каждую симку (Orange 400 ГБ);
 //   shared  — общий котёл на оператора (Moldtelecom/Moldcell 30 ТБ).
 //   unlimited — безлимит: проверяем только аномальный расход за час, без
 //               алертов об исчерпании и темпе.
+//   renewal_day — день месяца, когда оператор обнуляет пакет (26.08);
+//               остаток и темп считаются от последней такой даты, а не от
+//               1-го числа. Пусто/1 — календарный месяц.
 //   hourly_gb — порог мгновенной аномалии (ГБ/час на модем);
 //               пусто у per_sim → 5% пакета; пусто у shared →
 //               volume_hourly_default_gb.
@@ -49,34 +52,65 @@ function _forecastDate(now, daysLeft) {
   return new Date(now.getTime() + Math.max(0, daysLeft) * 86400e3).toISOString().slice(0, 10);
 }
 
-// Forecasts are based on current-month average daily usage. This intentionally
-// shares the same traffic_hourly source as billing and package alerts.
+// 26.08: день обновления тарифа (1–31). У операторов пакет обнуляется не 1-го
+// числа, а в свою дату биллинга (Moldtelecom/Moldcell — общий бандл, Orange —
+// пакет на SIM). Остаток и темп считаем от последней такой даты, а не от
+// начала календарного месяца. По умолчанию 1 — старое поведение.
+function renewalDayOf(pkg) {
+  const d = Math.floor(Number(pkg && pkg.renewal_day));
+  return d >= 1 && d <= 31 ? d : 1;
+}
+
+function _daysInMonthUtc(y, m) { return new Date(Date.UTC(y, m + 1, 0)).getUTCDate(); }
+
+// Период пакета: от последнего дня обновления (<= now, UTC) до следующего.
+// Если дня нет в месяце (31 в феврале) — берём последний день месяца.
+function packagePeriod(pkg, now = new Date()) {
+  const day = renewalDayOf(pkg);
+  let y = now.getUTCFullYear();
+  let m = now.getUTCMonth();
+  let start = new Date(Date.UTC(y, m, Math.min(day, _daysInMonthUtc(y, m))));
+  if (start.getTime() > now.getTime()) {
+    m -= 1; if (m < 0) { m = 11; y -= 1; }
+    start = new Date(Date.UTC(y, m, Math.min(day, _daysInMonthUtc(y, m))));
+  }
+  let ny = y; let nm = m + 1;
+  if (nm > 11) { nm = 0; ny += 1; }
+  const reset = new Date(Date.UTC(ny, nm, Math.min(day, _daysInMonthUtc(ny, nm))));
+  return { start, reset };
+}
+
+// Forecasts are based on average daily usage within the current billing
+// period (от даты обновления тарифа). This intentionally shares the same
+// traffic_hourly source as billing and package alerts.
 function buildForecasts(db, pkgs, now = new Date()) {
   const date = new Date(now);
   if (!Number.isFinite(date.getTime())) return [];
-  const todayUtc = date.toISOString().slice(0, 10);
-  const monthUtc = todayUtc.slice(0, 7);
-  const elapsedDays = Math.max(1, Number(todayUtc.slice(8, 10)));
-  let rows = [];
-  try {
-    rows = db.prepare(`
-      SELECT server_name, nick, operator, SUM(bytes_in + bytes_out) AS b
-      FROM traffic_hourly WHERE hour_start >= ?
-      GROUP BY server_name, nick, operator
-    `).all(monthUtc + '-01 00:00');
-  } catch (_) { return []; }
-
   const out = [];
   for (const pkg of pkgs || []) {
     const type = pkg.type === 'shared' || pkg.type === 'unlimited' ? pkg.type : 'per_sim';
+    const { start, reset } = packagePeriod(pkg, date);
+    const periodStart = start.toISOString().slice(0, 10);
+    const resetDate = reset.toISOString().slice(0, 10);
+    const elapsedDays = Math.max(1, Math.floor((date.getTime() - start.getTime()) / 86400e3) + 1);
+    let rows = [];
+    try {
+      rows = db.prepare(`
+        SELECT server_name, nick, operator, SUM(bytes_in + bytes_out) AS b
+        FROM traffic_hourly WHERE hour_start >= ?
+        GROUP BY server_name, nick, operator
+      `).all(periodStart + ' 00:00');
+    } catch (_) { continue; }
+
     const matches = rows.filter(r => findPackage([pkg], r.operator));
+    const periodExtra = { period_start: periodStart, reset_date: resetDate };
     if (type === 'unlimited') {
-      out.push({ scope: 'package', operator: pkg.operator, type, status: 'unlimited', modems: new Set(matches.map(r => r.server_name + '/' + r.nick)).size });
+      out.push({ scope: 'package', operator: pkg.operator, type, status: 'unlimited', modems: new Set(matches.map(r => r.server_name + '/' + r.nick)).size, ...periodExtra });
       continue;
     }
     const baseLimitGb = Number(pkg.volume_gb);
     if (!(baseLimitGb > 0)) {
-      out.push({ scope: 'package', operator: pkg.operator, type, status: 'not_configured', modems: matches.length });
+      out.push({ scope: 'package', operator: pkg.operator, type, status: 'not_configured', modems: matches.length, ...periodExtra });
       continue;
     }
     const make = (scope, usedGb, extra, limitGb = baseLimitGb) => {
@@ -113,7 +147,7 @@ function buildForecasts(db, pkgs, now = new Date()) {
     if (type === 'per_sim') {
       for (const row of matches) {
         out.push(make('sim', (Number(row.b) || 0) / GB, {
-          server: row.server_name, nick: row.nick, operator_actual: row.operator,
+          server: row.server_name, nick: row.nick, operator_actual: row.operator, ...periodExtra,
         }));
       }
     } else {
@@ -125,7 +159,7 @@ function buildForecasts(db, pkgs, now = new Date()) {
       const totalLimitGb = baseLimitGb * bundleCount;
       out.push(make('package', usedGb, {
         modems: simCount, max_sims: maxSims, bundle_count: bundleCount,
-        volume_gb_per_bundle: baseLimitGb,
+        volume_gb_per_bundle: baseLimitGb, ...periodExtra,
       }, totalLimitGb));
     }
   }
@@ -194,8 +228,6 @@ function create(deps) {
 
     // 2) Темп расхода пакета.
     const todayUtc = new Date().toISOString().slice(0, 10);          // 'YYYY-MM-DD'
-    const monthUtc = todayUtc.slice(0, 7);                           // 'YYYY-MM'
-    const dayOfMonth = Number(todayUtc.slice(8, 10));
 
     // per_sim: суточное потребление модема против доли его пакета.
     const todayRows = db.prepare(`
@@ -217,16 +249,20 @@ function create(deps) {
       })) paceAlerts++;
     }
 
-    // shared: среднесуточный расход MTD по оператору против темпа котла.
+    // shared: среднесуточный расход за текущий биллинговый период оператора
+    // (от дня обновления тарифа, а не от 1-го числа) против темпа котла.
     for (const pkg of pkgs) {
       if (pkg.type !== 'shared' || !(Number(pkg.volume_gb) > 0) || !(Number(pkg.pace_pct) > 0)) continue;
+      const { start } = packagePeriod(pkg);
+      const periodStart = start.toISOString().slice(0, 10) + ' 00:00';
+      const elapsedDays = Math.max(1, Math.floor((Date.now() - start.getTime()) / 86400e3) + 1);
       const row = db.prepare(`
         SELECT SUM(bytes_in + bytes_out) AS b, COUNT(DISTINCT nick) AS modems
         FROM traffic_hourly
         WHERE hour_start >= ? AND LOWER(operator) LIKE ?
-      `).get(monthUtc + '-01 00:00', String(pkg.operator).toLowerCase().trim() + '%');
+      `).get(periodStart, String(pkg.operator).toLowerCase().trim() + '%');
       const usedGb = ((row && row.b) || 0) / GB;
-      const dailyGb = usedGb / Math.max(1, dayOfMonth);
+      const dailyGb = usedGb / elapsedDays;
       const simCount = Number((row && row.modems) || 0);
       const maxSims = Math.max(0, Math.floor(Number(pkg.max_sims) || 0));
       const bundleCount = maxSims > 0 ? (simCount > 0 ? Math.ceil(simCount / maxSims) : 0) : 1;
@@ -261,4 +297,4 @@ function create(deps) {
   return { runOnce, _packages, _findPkg };
 }
 
-module.exports = { create, findPackage, buildForecasts };
+module.exports = { create, findPackage, buildForecasts, packagePeriod, renewalDayOf };

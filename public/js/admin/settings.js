@@ -612,7 +612,8 @@ function _opPkgForecastText(operator,type){
   var known=rows.filter(function(f){return f.days_left!=null;}).sort(function(a,b){return a.days_left-b.days_left;});
   if(!known.length)return rows.some(function(f){return f.status==='not_configured';})?'задайте объём':'нет расхода';
   var f=known[0],days=Math.max(0,Math.round(f.days_left));
-  return '~'+days+' д'+(f.scope==='sim'&&f.nick?' · '+f.nick:'');
+  var reset=f.reset_date?' · обновление '+String(f.reset_date).slice(8,10)+'.'+String(f.reset_date).slice(5,7):'';
+  return '~'+days+' д'+(f.scope==='sim'&&f.nick?' · '+f.nick:'')+reset;
 }
 function opPkgLoadForecasts(){
   api(API+'/api/admin/operator-package-forecast').then(function(d){
@@ -640,7 +641,8 @@ function _opPkgCollectRow(r){
     price:parseFloat(r.querySelector('.opp-price').value)||0,
     currency:r.querySelector('.opp-cur').value,
     hourly_gb:parseFloat(r.querySelector('.opp-hour').value)||0,
-    pace_pct:type==='unlimited'?0:(parseFloat(r.querySelector('.opp-pace').value)||0)};
+    pace_pct:type==='unlimited'?0:(parseFloat(r.querySelector('.opp-pace').value)||0),
+    renewal_day:Math.min(31,Math.max(1,parseInt(r.querySelector('.opp-renewal').value,10)||1))};
 }
 function opPkgRecalcRow(row){
   if(!row)return;
@@ -693,7 +695,7 @@ function opPkgRender(s){
       +'</div>'
       +'<div class="opp-calc"><div class="opp-calc-connected"><span>Подключено</span><b class="opp-sim-count">'+sim+' SIM</b></div><em>→</em><div class="opp-calc-units"><span class="opp-unit-label">К оплате бандлов</span><b class="opp-bundle-count">—</b></div><em>→</em><div class="is-total"><span class="opp-total-label">Оплата оператору</span><b class="opp-total">—</b><small class="opp-capacity"></small></div></div>'
       +'<div class="opp-foot"><span class="opp-missing"></span><span>Прогноз: <b class="opp-forecast">'+esc(_opPkgForecastText(p.operator,type))+'</b></span></div>'
-      +'<details class="opp-advanced"><summary>Пороги алертов</summary><div><label>Аномалия за час, ГБ <input class="input opp-hour" type="number" min="0" value="'+(p.hourly_gb||'')+'" placeholder="авто"></label><label>Темп пакета, %/сут <input class="input opp-pace" type="number" min="0" max="100" value="'+(unlimited?0:(p.pace_pct||0))+'" '+(unlimited?'disabled ':'')+'placeholder="0"></label></div></details>'
+      +'<details class="opp-advanced"><summary>Обновление тарифа и пороги</summary><div><label>День обновления тарифа <input class="input opp-renewal" type="number" min="1" max="31" step="1" value="'+(Math.min(31,Math.max(1,parseInt(p.renewal_day,10)||1)))+'" placeholder="1" title="Число месяца, когда оператор обнуляет пакет. Остаток и темп считаются от этой даты"></label><label>Аномалия за час, ГБ <input class="input opp-hour" type="number" min="0" value="'+(p.hourly_gb||'')+'" placeholder="авто"></label><label>Темп пакета, %/сут <input class="input opp-pace" type="number" min="0" max="100" value="'+(unlimited?0:(p.pace_pct||0))+'" '+(unlimited?'disabled ':'')+'placeholder="0"></label></div></details>'
       +'</article>';
   });
   box.innerHTML='<div class="op-pkg-list">'+h+(pkgs.length?'':'<div class="opp-empty">Пакеты не заданы — добавьте оператора</div>')+'</div>';
@@ -704,7 +706,7 @@ function opPkgAddRow(){
   var cur=[];box.querySelectorAll('.op-pkg-row').forEach(function(r){
     cur.push(_opPkgCollectRow(r));
   });
-  cur.push({operator:'',type:'per_sim',volume_gb:0,max_sims:1,price:0,currency:'RUB',hourly_gb:0,pace_pct:0});
+  cur.push({operator:'',type:'per_sim',volume_gb:0,max_sims:1,price:0,currency:'RUB',hourly_gb:0,pace_pct:0,renewal_day:1});
   opPkgRender({operator_packages:JSON.stringify(cur)});
 }
 function opPkgDelRow(btn){
