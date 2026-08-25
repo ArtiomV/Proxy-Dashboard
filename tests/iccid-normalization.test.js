@@ -89,4 +89,36 @@ describe('ICCID normalization (25.08)', () => {
     await job.trackModems();
     expect(fired.filter(a => a.rule === 'sim_iccid_changed')).toEqual([]);
   });
+
+  it('номер из реестра SIM важнее номера от бокса (26.08)', async () => {
+    const { deps, upserts } = mkDeps({ storedIccid: null, feedIccid: '8937312345678901234' });
+    // Бокс отдаёт устаревший номер, в реестре — актуальный
+    deps.fetchServerData = async () => ({
+      status: [{
+        modem_details: { IMEI, NICK: 'MD1_01', IS_ONLINE: 'yes', PHONE_NUMBER: '+37360000000' },
+        net_details: { ICCID: '8937312345678901234' },
+      }],
+      bw: {}, ports: {},
+    });
+    deps._simRegistryPhoneByIccid = { get: () => ({ phone: '+37360111222' }) };
+    const job = create(deps);
+    await job.trackModems();
+    // phone — 6-й аргумент upsert
+    expect(upserts[0][5]).toBe('+37360111222');
+  });
+
+  it('без записи в реестре используется номер бокса', async () => {
+    const { deps, upserts } = mkDeps({ storedIccid: null, feedIccid: '8937312345678901234' });
+    deps.fetchServerData = async () => ({
+      status: [{
+        modem_details: { IMEI, NICK: 'MD1_01', IS_ONLINE: 'yes', PHONE_NUMBER: '+37360000000' },
+        net_details: { ICCID: '8937312345678901234' },
+      }],
+      bw: {}, ports: {},
+    });
+    deps._simRegistryPhoneByIccid = { get: () => null };
+    const job = create(deps);
+    await job.trackModems();
+    expect(upserts[0][5]).toBe('+37360000000');
+  });
 });

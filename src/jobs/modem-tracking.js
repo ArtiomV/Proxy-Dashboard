@@ -260,7 +260,10 @@ async function trackModems() {
               } catch (_) { /* best-effort */ }
             }
             let _phone = _blank(md.PHONE_NUMBER);
-            if (!_phone && /^\d{15,24}$/.test(_iccidKey) && _simRegistryPhoneByIccid) {
+            // 26.08: номер из загруженного реестра SIM важнее номера от бокса —
+            // операторские выгрузки актуальнее того, что ProxySmart кэширует
+            // у себя (на боксе номер может устареть после переноса SIM).
+            if (/^\d{15,24}$/.test(_iccidKey) && _simRegistryPhoneByIccid) {
               try {
                 const registryRow = _simRegistryPhoneByIccid.get(_iccidKey);
                 if (registryRow && registryRow.phone) _phone = registryRow.phone;
