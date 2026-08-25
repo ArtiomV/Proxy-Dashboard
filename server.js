@@ -2410,6 +2410,16 @@ proxySmart.init({
       });
     } catch (_) { /* alert best-effort */ }
   },
+  // 25.08: 401 от бокса = сломалась авторизация ProxySmart (пароль панели
+  // сменился/сбросился). Critical в журнал + TG; троттлинг 6ч на бокс — внутри.
+  onAuthError: (serverName, errMsg) => {
+    try {
+      logActivity('system', 'critical', 'proxysmart_auth_error', serverName,
+        `ProxySmart отвечает 401 — проверьте логин/пароль в Настройки → Серверы (${errMsg.slice(0, 120)})`,
+        { server: serverName });
+      alerts.trigger('proxysmart_auth_error', { server: serverName });
+    } catch (_) { /* alert best-effort */ }
+  },
 });
 
 // Refresh rotation cache on startup and periodically
@@ -2496,6 +2506,7 @@ function _isAutoRandomPort(name) {
 // mergeServerData moved to src/services/proxy-data.js (Stage 9).
 const { mergeServerData } = require('./src/services/proxy-data').create({
   db, knownModems, filterByPortName, isAutoRandomPort: _isAutoRandomPort, modemLogins,
+  getServerApiHealth: proxySmart.getServerApiHealth,   // 25.08: 401 vs сетевой аут в баннере
 });
 
 const MAX_IP_HISTORY = 100;
@@ -2947,6 +2958,7 @@ const _speedMonitor = require('./src/jobs/speed-monitor').create({
 const _serverMetrics = require('./src/jobs/server-metrics').create({
   db, logger, apiServers, proxyConf, alerts, getSetting,
   events: eventsBus,   // SSE (23.08): metrics_update после прогона
+  getServerApiHealth: proxySmart.getServerApiHealth,   // 25.08: 401 → явное «auth error» в карточке
 });
 
 function getSpeedtestLatest() {

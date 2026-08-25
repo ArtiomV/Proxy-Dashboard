@@ -6,16 +6,25 @@
 // (Stage 9) — без изменения логики.
 
 function create(deps) {
-  const { db, knownModems, filterByPortName, isAutoRandomPort, modemLogins } = deps;
+  const { db, knownModems, filterByPortName, isAutoRandomPort, modemLogins, getServerApiHealth } = deps;
 
   function mergeServerData(allData, portNameFilter) {
     const mergedBw = {}, mergedStatus = [], mergedPorts = {};
     const cachedServers = [];
+    const apiHealth = typeof getServerApiHealth === 'function' ? getServerApiHealth() : {};
     for (const data of allData) {
       const filtered = portNameFilter === '*' ? data : filterByPortName(data, portNameFilter);
       const prefix = data.serverName + '_';
       const isCached = !!data._cached;
-      if (isCached) cachedServers.push({ name: data.serverName, cachedAt: data._cachedAt });
+      if (isCached) {
+        const h = apiHealth[data.serverName] || {};
+        cachedServers.push({
+          name: data.serverName, cachedAt: data._cachedAt,
+          // 25.08: 401 — сломалась авторизация, а не сеть; фронт покажет это явно
+          authError: !!h.authError,
+          lastError: h.lastError || '',
+        });
+      }
       for (const [portId, b] of Object.entries(filtered.bw)) {
         const bwOverride = process.env[`PORTNAME_OVERRIDE_${data.serverName}`];
         const cleanName = isAutoRandomPort(b.portName) ? '' : b.portName;

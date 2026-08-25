@@ -213,7 +213,7 @@ function parseSystemStatus(html, nowMs) {
 }
 
 function create(deps) {
-  const { db, logger, apiServers, proxyConf, events, alerts } = deps;   // events — SSE (23.08): metrics_update после прогона
+  const { db, logger, apiServers, proxyConf, events, alerts, getServerApiHealth } = deps;   // events — SSE (23.08): metrics_update после прогона
   const getSetting = deps.getSetting || ((_key, fallback) => fallback);
   // execFile инжектируется (тесты подсовывают заглушку), sshpass — из $PATH.
   const execFile = deps.execFile || require('child_process').execFile;
@@ -378,6 +378,12 @@ function create(deps) {
       row.source = 'http';
       return row;
     }
+    // 25.08: различаем «лежит всё» и «слетела авторизация» — при 401 от
+    // основного API в карточке сервера пишем это явно, а не «unreachable».
+    try {
+      const h = (typeof getServerApiHealth === 'function' ? getServerApiHealth() : {})[server.name];
+      if (h && h.authError) { row.error = 'auth error: ProxySmart вернул 401 — проверьте логин/пароль в Настройки → Серверы'; return row; }
+    } catch (_) { /* best-effort */ }
     row.error = 'unreachable: ssh+http failed';
     return row;
   }

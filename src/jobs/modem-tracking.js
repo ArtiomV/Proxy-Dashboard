@@ -225,8 +225,13 @@ async function trackModems() {
           // в upsert сохранит последнее валидное значение офлайн-модема).
           const _blank = (v) => { const s = String(v == null ? '' : v).trim(); return (!s || s.toLowerCase() === 'unknown') ? '' : s; };
           const _signal = _blank(nd.SIGNAL_STRENGTH);
-          const _iccid = _blank(nd.ICCID);
-          const _iccidKey = String(_iccid).replace(/\D/g, '');
+          // 25.08: ICCID храним и сравниваем нормализованным — только цифры.
+          // ProxySmart иногда отдаёт технический суффикс-филлер «F»
+          // (8937…82F); без нормализации тот же SIM периодически выглядел
+          // как «замена» и плодил ложные алерты. Пустой результат →
+          // preserve-on-empty в upsert сохранит прошлое валидное значение.
+          const _iccid = _blank(nd.ICCID).replace(/\D/g, '');
+          const _iccidKey = _iccid;
           const _cellOp = _blank(nd.CELLOP);
           const _netType = _blank(nd.CurrentNetworkType);
           const _uptime = _blank(md.UPTIME);
@@ -238,16 +243,19 @@ async function trackModems() {
               && !_deletedModemSet.has(server.name + '|' + imei)) {   // 041: don't resurrect a soft-deleted modem
             // ICCID-change = замена SIM. Алертим только при РЕАЛЬНОЙ смене: было
             // непустое → стало другое непустое (первая запись ICCID — не смена).
+            // 25.08: сравниваем НОРМАЛИЗОВАННЫЕ значения (только цифры) — иначе
+            // одна и та же SIM с суффиксом «F» и без него давала ложную «замену».
             if (_iccid) {
               try {
                 const prev = _metaIccidGetByImei.get(server.name, imei);
-                if (prev && prev.iccid && prev.iccid !== _iccid) {
+                const prevNorm = prev && prev.iccid ? String(prev.iccid).replace(/\D/g, '') : '';
+                if (prevNorm && prevNorm !== _iccid) {
                   alerts.trigger('sim_iccid_changed', {
                     nick: md.NICK || imei, imei, server: server.name,
-                    old_iccid: prev.iccid, new_iccid: _iccid,
+                    old_iccid: prevNorm, new_iccid: _iccid,
                   });
                   logActivity('modem', 'warning', 'sim_iccid_changed', md.NICK || imei,
-                    `ICCID сменился: ${prev.iccid} → ${_iccid}`, { server: server.name, imei, old_iccid: prev.iccid, new_iccid: _iccid });
+                    `ICCID сменился: ${prevNorm} → ${_iccid}`, { server: server.name, imei, old_iccid: prevNorm, new_iccid: _iccid });
                 }
               } catch (_) { /* best-effort */ }
             }

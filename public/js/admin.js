@@ -990,7 +990,11 @@ function updateServerDownBanner(cachedServers){
   var now=Date.now();
   var parts=cachedServers.map(function(s){
     var ageMin=Math.round((now-(s.cachedAt||now))/60000);
-    return '<b>'+esc(_serverDisplayLabel(s.name))+'</b> ('+(ageMin>0?ageMin+' мин назад':'недоступен')+')';
+    var label='<b>'+esc(_serverDisplayLabel(s.name))+'</b> ('+(ageMin>0?ageMin+' мин назад':'недоступен')+')';
+    // 25.08: 401 = слетела авторизация ProxySmart — пишем явно, это чинится
+    // сменой кредов, а не сетью.
+    if(s.authError)label+=' <span style="color:var(--danger);font-weight:600">— ошибка авторизации (401): обновите логин/пароль в Настройки → Серверы</span>';
+    return label;
   });
   var noun=cachedServers.length===1?'Сервер':'Серверов недоступно: '+cachedServers.length+' —';
   document.getElementById('serverDownBannerText').innerHTML=noun+' '+parts.join(', ')+'. Последние данные показаны из кеша.';

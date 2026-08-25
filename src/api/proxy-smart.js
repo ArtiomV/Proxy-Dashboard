@@ -22,7 +22,16 @@ let updateKnownModems, injectOfflineModems, injectRotationData;
 // D7: колбэк shape-валидации ответов (src/api/proxysmart-contract.js) —
 // вызывается при несоответствии контракту; в server.js подключён TG-алерт.
 let onContractMismatch = null;
+// 25.08: колбэк при 401 от бокса (с троттлингом) — server.js вешает critical-алерт.
+let onAuthError = null;
 const _contract = require('./proxysmart-contract');
+
+// 25.08: per-server здоровье API для админки — отличаем «бокс лежит» от
+// «слетела авторизация ProxySmart» (401) и «данные давно не обновлялись».
+// name -> { lastOkAt, lastError, lastErrorAt, authError }
+const serverApiHealth = {};
+const AUTH_ALERT_THROTTLE_MS = 6 * 60 * 60 * 1000;
+const _authAlertedAt = {};
 
 // ---------------------------------------------------------------------------
 // Module-level cache state
@@ -55,6 +64,7 @@ function init(deps) {
   injectOfflineModems = deps.injectOfflineModems;
   injectRotationData  = deps.injectRotationData;
   onContractMismatch  = deps.onContractMismatch || null;   // D7
+  onAuthError         = deps.onAuthError || null;          // 25.08
 
   // Load persisted server cache from disk
   const fs = require('fs');
@@ -356,6 +366,7 @@ async function fetchServerData(server) {
   injectRotationData(result);
   // Cache successful response
   cacheServerData(result);
+  serverApiHealth[server.name] = { lastOkAt: Date.now(), lastError: null, lastErrorAt: null, authError: false };
   return result;
 }
 
@@ -371,7 +382,26 @@ async function fetchAllServersData() {
       results.push(data);
     } else {
       const srvName = apiServers[i].name;
-      logger.info(`[API] Server ${srvName} unreachable: ${settled[i].reason?.message || 'unknown'}`);
+      const errMsg = settled[i].reason?.message || 'unknown';
+      logger.info(`[API] Server ${srvName} unreachable: ${errMsg}`);
+      // 25.08: фиксируем здоровье API. 401 = сломалась авторизация (смена
+      // пароля панели / сброс basic-auth) — это НЕ сетевой аут, лечится
+      // обновлением кредов, поэтому сигналим отдельно и в админку, и в алерты.
+      const isAuth = /HTTP 401/.test(errMsg);
+      const prev = serverApiHealth[srvName] || {};
+      serverApiHealth[srvName] = {
+        lastOkAt: prev.lastOkAt || null,
+        lastError: errMsg.slice(0, 200),
+        lastErrorAt: Date.now(),
+        authError: isAuth,
+      };
+      if (isAuth && onAuthError) {
+        const now = Date.now();
+        if (now - (_authAlertedAt[srvName] || 0) > AUTH_ALERT_THROTTLE_MS) {
+          _authAlertedAt[srvName] = now;
+          try { onAuthError(srvName, errMsg); } catch (_) { /* best-effort */ }
+        }
+      }
       // Try to use cached data
       const cached = getCachedDataAsOffline(srvName);
       if (cached) {
@@ -514,6 +544,8 @@ module.exports = {
   fetchAllServersDataCached,
   // Expose cache state for external read (e.g. tests)
   get serverCache() { return serverCache; },
+  // 25.08: per-server API health (401 vs сетевой аут vs ок) для админки
+  getServerApiHealth() { return serverApiHealth; },
   get lastPollAt() { return _lastPollAt; },
   get _psCache() { return _psCache; },
   get _psCacheTs() { return _psCacheTs; },

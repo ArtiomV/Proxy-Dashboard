@@ -797,6 +797,19 @@ const RULES = {
     render: p => `🔴 <b>Бокс ${esc(_srvLabel(p.server) || '?')} отвечает не по контракту</b>\n\nНарушения (${p.count || '?'}):\n<code>${esc((p.sample || '').slice(0, 500))}</code>\nПарсинг дашборда может молча деградировать — сверься с docs/PROXYSMART-CONTRACT.md.`,
   },
 
+  // 25.08: бокс отвечает 401 — сломалась basic-auth авторизация ProxySmart
+  // (пароль панели сменился или сбросился). Это не сетевой аут: бокс жив,
+  // но дашборд не может забрать данные. Троттлинг 6ч на бокс — снаружи,
+  // в proxy-smart.js; здесь ещё суточный cooldown для надёжности.
+  proxysmart_auth_error: {
+    title: 'Ошибка авторизации ProxySmart',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 86400,
+    dedupeKey: p => 'psauth_' + (p.server || 'unknown'),
+    render: p => `🔴 <b>Бокс ${esc(_srvLabel(p.server) || '?')}: ошибка авторизации (401)</b>\n\nProxySmart отклоняет логин/пароль API — данные этого сервера показываются из кеша и скоро устареют.\nОбнови креды: Настройки → Серверы → «${esc(_srvLabel(p.server) || p.server || '?')}».`,
+  },
+
   // D2 (23.08): SSL-сертификат домена. ≤14 дней — important, ≤3 / ошибка
   // TLS-хендшейка — critical. Джоба src/jobs/ssl-monitor.js, суточная.
   ssl_cert_expiring: {
@@ -997,6 +1010,7 @@ const _entityFor = {
   telegram_summary_failed:   () => ({ kind: 'system', id: 'summary' }),
   system_critical:           p => ({ kind: 'system', id: p.action || null }),
   proxysmart_contract_mismatch: p => ({ kind: 'system', id: p.server || null }),
+  proxysmart_auth_error:      p => ({ kind: 'system', id: p.server || null }),
   // B2C Э3 (WP5): розница
   retail_registered:         p => ({ kind: 'client', id: p.login || null }),
   retail_purchase:           p => ({ kind: 'client', id: p.login || null }),
