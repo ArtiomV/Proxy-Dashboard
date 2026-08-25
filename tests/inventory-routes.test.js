@@ -95,4 +95,18 @@ describe('inventory admin routes', () => {
     expect(listed.body.summary).toMatchObject({ registry_total: 1, registry_matched: 1, phone_missing: 0, modems_without_iccid: 1 });
     expect(listed.body.items[0].bindings[0].nick).toBe('MD_01');
   });
+
+  it('matches a 19-digit operator export against a 20-digit modem ICCID', () => {
+    // Модем отдаёт полный ICCID, выгрузка оператора обрезала контрольную цифру Луна
+    db.prepare('INSERT INTO modem_meta (server_name, imei, nick, iccid) VALUES (?, ?, ?, ?)')
+      .run('S2', '123456789012347', 'MD_03', '89373030000028670882');
+    const result = invoke('post', '/api/admin/sim_registry/import', {
+      body: { text: 'ICCID;Телефон\n8937303000002867088;37367779662' },
+    });
+    expect(result.status).toBe(200);
+    expect(result.body).toMatchObject({ processed: 1, inserted: 1, matched: 1, modem_rows_updated: 1 });
+    expect(db.prepare("SELECT phone FROM modem_meta WHERE nick = 'MD_03'").get().phone).toBe('37367779662');
+    expect(db.prepare('SELECT iccid FROM sim_registry WHERE phone = ?').get('37367779662').iccid)
+      .toBe('89373030000028670882');
+  });
 });

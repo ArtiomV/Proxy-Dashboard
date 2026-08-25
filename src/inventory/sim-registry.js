@@ -9,9 +9,29 @@ function compactHeader(value) {
   return String(value || '').replace(/^\uFEFF/, '').trim().toLowerCase().replace(/[\s.-]+/g, '');
 }
 
+// Контрольная цифра Луна для ICCID: по стандарту ITU-T E.118 последняя цифра
+// вычисляется по алгоритму Луна от всех предыдущих.
+function luhnCheckDigit(payload) {
+  let total = 0;
+  for (let i = payload.length - 1, pos = 0; i >= 0; i -= 1, pos += 1) {
+    let d = payload.charCodeAt(i) - 48;
+    if (pos % 2 === 0) {
+      d *= 2;
+      if (d > 9) d -= 9;
+    }
+    total += d;
+  }
+  return (10 - (total % 10)) % 10;
+}
+
 function normalizeIccid(value) {
   const digits = String(value == null ? '' : value).replace(/\D/g, '');
-  return /^\d{15,24}$/.test(digits) ? digits : '';
+  if (!/^\d{15,24}$/.test(digits)) return '';
+  // Выгрузки операторов часто обрезают контрольную цифру Луна (19 цифр вместо 20).
+  // Достраиваем её детерминированно — это не нечёткое сравнение: итоговый ICCID
+  // либо совпадает с модемным полностью, либо не совпадает вовсе.
+  if (digits.length === 19) return digits + luhnCheckDigit(digits);
+  return digits;
 }
 
 function normalizePhone(value) {
