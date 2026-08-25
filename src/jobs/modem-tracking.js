@@ -17,7 +17,7 @@ function create(deps) {
     _serverDownSince, _serverUnreachableAlertSent, uptimeTracking, ipTracking,
     offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
     _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
-    _metaIccidGetByImei,
+    _metaIccidGetByImei, _simRegistryPhoneByIccid,
     persistServerDownSince,
     modemPing, modemRate,
     maintenance,   // B3 (23.08): src/maintenance.js — пометка простоев в окне обслуживания
@@ -226,6 +226,7 @@ async function trackModems() {
           const _blank = (v) => { const s = String(v == null ? '' : v).trim(); return (!s || s.toLowerCase() === 'unknown') ? '' : s; };
           const _signal = _blank(nd.SIGNAL_STRENGTH);
           const _iccid = _blank(nd.ICCID);
+          const _iccidKey = String(_iccid).replace(/\D/g, '');
           const _cellOp = _blank(nd.CELLOP);
           const _netType = _blank(nd.CurrentNetworkType);
           const _uptime = _blank(md.UPTIME);
@@ -250,7 +251,14 @@ async function trackModems() {
                 }
               } catch (_) { /* best-effort */ }
             }
-            _modemMetaUpsert.run(server.name, imei, md.NICK || '', normOp, md.MODEL || '', md.PHONE_NUMBER || '',
+            let _phone = _blank(md.PHONE_NUMBER);
+            if (!_phone && /^\d{15,24}$/.test(_iccidKey) && _simRegistryPhoneByIccid) {
+              try {
+                const registryRow = _simRegistryPhoneByIccid.get(_iccidKey);
+                if (registryRow && registryRow.phone) _phone = registryRow.phone;
+              } catch (_) { /* registry enrichment is best-effort */ }
+            }
+            _modemMetaUpsert.run(server.name, imei, md.NICK || '', normOp, md.MODEL || '', _phone,
               _simStatus, _rebootScore, _httpRedirect, _band, _isLocked,
               _signal, _iccid, _cellOp, _netType, _uptime);
           }

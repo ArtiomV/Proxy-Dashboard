@@ -275,7 +275,12 @@ function _metaSection(merged) {
   try {
     const _operatorAliases = typeof getOperatorAliases === 'function' ? getOperatorAliases() : {};
     const _simMetaMap = {};
-    for (const r of db.prepare("SELECT server_name, imei, phone, contract_renewal_date FROM modem_meta").all()) {
+    const _registryPhones = {};
+    for (const r of db.prepare("SELECT iccid, phone FROM sim_registry").all()) {
+      const key = String(r.iccid || '').replace(/\D/g, '');
+      if (key) _registryPhones[key] = r.phone || '';
+    }
+    for (const r of db.prepare("SELECT server_name, imei, phone, iccid, contract_renewal_date FROM modem_meta").all()) {
       _simMetaMap[r.server_name + '|' + r.imei] = r;
     }
     for (const m of (merged.status || [])) {
@@ -288,9 +293,12 @@ function _metaSection(merged) {
       const canonical = _operatorAliases[rawOperator.toLowerCase()];
       if (canonical) m.net_details = { ...nd, CELLOP: canonical };
       const saved = _simMetaMap[srv + '|' + raw];
-      if (!saved) continue;
-      if (!(md.PHONE_NUMBER && String(md.PHONE_NUMBER).trim()) && saved.phone) md.PHONE_NUMBER = saved.phone;
-      md.CONTRACT_RENEWAL_DATE = saved.contract_renewal_date || '';
+      const iccid = String(nd.ICCID || (saved && saved.iccid) || '').replace(/\D/g, '');
+      if (!(md.PHONE_NUMBER && String(md.PHONE_NUMBER).trim())) {
+        const matchedPhone = _registryPhones[iccid] || (saved && saved.phone) || '';
+        if (matchedPhone) md.PHONE_NUMBER = matchedPhone;
+      }
+      md.CONTRACT_RENEWAL_DATE = (saved && saved.contract_renewal_date) || '';
     }
   } catch (e) { logger.warn('[data] SIM/operator enrich: ' + e.message); }
   const servers = getApiServers().map(s => {

@@ -84,6 +84,7 @@ tr:hover td:first-child{box-shadow:inset 2px 0 0 var(--accent)}
 .mk-kpi-click:hover{border-color:var(--border-hover)}
 .mk-kpi-click.on{border-color:var(--accent)}
 /* unified modems filter bar */
+.modem-page-heading{display:flex;align-items:center;gap:9px;min-width:0}.modem-page-heading>span:first-child{font-size:16px;font-weight:600;color:var(--text-0)}.modem-result-counter{display:inline-flex;align-items:baseline;gap:4px;padding:3px 8px;border:1px solid color-mix(in srgb,var(--accent) 18%,var(--border));border-radius:999px;background:var(--accent-dim);white-space:nowrap;font-size:10px;line-height:1}.modem-result-counter b{color:var(--accent);font-size:11px;font-variant-numeric:tabular-nums}.modem-result-counter span{color:var(--text-3)}
 .modems-filterbar{display:flex;align-items:center;gap:10px;flex-wrap:wrap;padding:14px 24px 6px}
 .modem-search{flex:0 0 230px;max-width:230px;font-size:12px;padding:7px 12px;border:1px solid var(--border);border-radius:18px;background:var(--bg-1);color:var(--text-1);outline:none;transition:border-color .12s}
 .modem-search:focus{border-color:var(--accent)}

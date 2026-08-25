@@ -2841,6 +2841,7 @@ const _modemMetaUpsert = trackingDb.modemMetaUpsertStmt();
 const _metaOpGet = trackingDb.metaOperatorGetStmt();
 const _metaOpGetByImei = trackingDb.metaOperatorGetByImeiStmt(); // Stage 17 guard
 const _metaIccidGetByImei = trackingDb.metaIccidGetByImeiStmt(); // WP4: SIM-swap detect
+const _simRegistryPhoneByIccid = trackingDb.simRegistryPhoneByIccidStmt();
 // Latest real operator observed by the proxy-check job — secondary fallback for
 // the hourly aggregator when modem_meta has no usable row (e.g. RO2_3).
 const _pcOpGet = db.prepare(
@@ -2902,7 +2903,8 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   _serverDownSince, _serverUnreachableAlertSent, uptimeTracking, ipTracking,
   offlineAlertSent, autoRecovery, appSettings, knownModems, _downSince,
   _alertEnabledAt, _metaOpGetByImei, _modemMetaUpsert, _deletedModemSet,
-  _metaIccidGetByImei, persistServerDownSince: _persistServerDownSince,
+  _metaIccidGetByImei, _simRegistryPhoneByIccid,
+  persistServerDownSince: _persistServerDownSince,
   modemPing, modemRate,
   maintenance: require('./src/maintenance'),   // B3 (23.08): пометка простоев в окне обслуживания
   events: eventsBus,                           // SSE (23.08): fleet_update / ping_result / modem_rate
@@ -4004,6 +4006,14 @@ app.use(require('./src/routes/admin-meta')({
   logActivity, fetchAllServersDataCached, markModemDeleted, markModemRestored,
   apiServers,
   getSetting, setSettings,
+}));
+
+// Structured equipment inventory and ICCID -> phone registry.
+app.use(require('./src/routes/inventory')({
+  db, logger, authMiddleware, adminMiddleware,
+  getApiServers: () => apiServers,
+  getServerCountries: () => SERVER_COUNTRIES,
+  logActivity,
 }));
 
 const connsHistory = require('./src/jobs/conns-history').create({

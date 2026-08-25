@@ -840,3 +840,155 @@ function deleteMaintenanceWindow(id){
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message||'Ошибка сети','error')});
 }
+
+// ========== УЧЁТ ОБОРУДОВАНИЯ ПО ЛОКАЦИЯМ ==========
+var _equipmentData=null,_equipmentLoadSeq=0;
+function loadEquipmentInventory(){
+  var seq=++_equipmentLoadSeq;
+  api(API+'/api/admin/equipment').then(function(d){
+    if(seq!==_equipmentLoadSeq)return;
+    if(!d||d.error)throw new Error(d&&d.error||'Не удалось загрузить оборудование');
+    _equipmentData=d;
+    var sel=document.getElementById('equipmentLocationInput');
+    if(sel){
+      var old=sel.value;
+      sel.innerHTML=(d.locations||[]).filter(function(l){return !l.missing}).map(function(l){return '<option value="'+esc(l.key)+'">'+esc(l.label)+(l.country?' · '+esc(l.country):'')+'</option>';}).join('');
+      if(old&&Array.prototype.some.call(sel.options,function(o){return o.value===old}))sel.value=old;
+    }
+    var s=d.summary||{};
+    var el=document.getElementById('equipmentTotalUnits');if(el)el.textContent=(s.total_units||0).toLocaleString('ru-RU');
+    el=document.getElementById('equipmentTotalTypes');if(el)el.textContent=(s.equipment_types||0).toLocaleString('ru-RU');
+    el=document.getElementById('equipmentLocationCount');if(el)el.textContent=(s.locations_with_equipment||0).toLocaleString('ru-RU');
+    renderEquipmentInventory();
+  }).catch(function(e){var box=document.getElementById('equipmentLocations');if(box)box.innerHTML='<div class="inv-error">'+esc(e.message)+'</div>';});
+}
+function renderEquipmentInventory(){
+  var box=document.getElementById('equipmentLocations');if(!box||!_equipmentData)return;
+  var items=_equipmentData.items||[];
+  var groups={};items.forEach(function(item){(groups[item.location_key]=groups[item.location_key]||[]).push(item);});
+  var h='';
+  (_equipmentData.locations||[]).forEach(function(location){
+    var rows=groups[location.key]||[];
+    var serverNames=(location.servers||[]).map(function(s){return s.displayName||s.name}).join(', ');
+    h+='<section class="equipment-location-card'+(location.missing?' is-missing':'')+'">';
+    h+='<header><div class="equipment-location-pin">'+icon('pin',15)+'</div><div><h3>'+esc(location.label)+'</h3><p>'+(location.missing?'Локация больше не связана с сервером':esc(serverNames||'Серверы не указаны'))+'</p></div><strong>'+rows.reduce(function(sum,row){return sum+row.quantity},0)+' шт.</strong></header>';
+    if(!rows.length)h+='<div class="equipment-empty">Оборудование пока не добавлено</div>';
+    else{
+      h+='<div class="equipment-row equipment-row-head"><span>Тип</span><span>Количество</span><span>Примечание</span><span></span></div>';
+      rows.forEach(function(row){
+        h+='<div class="equipment-row">'
+          +'<input class="form-input" id="eqType_'+row.id+'" maxlength="120" value="'+esc(row.equipment_type)+'" aria-label="Тип оборудования">'
+          +'<input class="form-input eq-qty" id="eqQty_'+row.id+'" type="number" min="0" max="1000000" step="1" value="'+row.quantity+'" aria-label="Количество">'
+          +'<input class="form-input" id="eqNotes_'+row.id+'" maxlength="500" value="'+esc(row.notes||'')+'" placeholder="Примечание" aria-label="Примечание">'
+          +'<div class="equipment-row-actions"><button class="btn btn-sm" data-on-click="saveEquipmentItem('+row.id+')" title="Сохранить">'+icon('save',13)+'</button><button class="btn btn-sm is-danger" data-on-click="deleteEquipmentItem('+row.id+')" title="Удалить">×</button></div>'
+          +'</div>';
+      });
+    }
+    h+='</section>';
+  });
+  box.innerHTML=h||'<div class="equipment-empty is-page">Сначала укажите адрес локации в разделе «Серверы»</div>';
+}
+function addEquipmentItem(){
+  var st=document.getElementById('equipmentAddStatus');
+  var payload={
+    location_key:(document.getElementById('equipmentLocationInput')||{}).value||'',
+    equipment_type:(document.getElementById('equipmentTypeInput')||{}).value||'',
+    quantity:parseInt((document.getElementById('equipmentQuantityInput')||{}).value,10),
+    notes:(document.getElementById('equipmentNotesInput')||{}).value||''
+  };
+  if(!payload.location_key||!payload.equipment_type.trim()||!isFinite(payload.quantity)){if(st){st.textContent='Заполните локацию, тип и количество';st.style.color='var(--danger)';}return}
+  if(st){st.textContent='Сохраняю…';st.style.color='var(--warning)';}
+  api(API+'/api/admin/equipment',{method:'POST',json:payload}).then(function(d){
+    if(!d.ok)throw new Error(d.error||'Ошибка сохранения');
+    document.getElementById('equipmentTypeInput').value='';document.getElementById('equipmentNotesInput').value='';document.getElementById('equipmentQuantityInput').value='1';
+    if(st){st.textContent='Позиция сохранена';st.style.color='var(--success)';}loadEquipmentInventory();
+  }).catch(function(e){if(st){st.textContent=e.message;st.style.color='var(--danger)';}});
+}
+function saveEquipmentItem(id){
+  var row=(_equipmentData&&_equipmentData.items||[]).find(function(item){return item.id===id});if(!row)return;
+  var payload={location_key:row.location_key,equipment_type:document.getElementById('eqType_'+id).value,quantity:parseInt(document.getElementById('eqQty_'+id).value,10),notes:document.getElementById('eqNotes_'+id).value};
+  api(API+'/api/admin/equipment/'+id,{method:'PATCH',json:payload}).then(function(d){if(!d.ok)throw new Error(d.error||'Ошибка');showToast('Оборудование сохранено','success');loadEquipmentInventory();}).catch(function(e){showToast(e.message,'error');});
+}
+function deleteEquipmentItem(id){
+  var row=(_equipmentData&&_equipmentData.items||[]).find(function(item){return item.id===id});if(!row)return;
+  confirmDialog('Удалить «'+row.equipment_type+'» из учёта?',function(){api(API+'/api/admin/equipment/'+id,{method:'DELETE'}).then(function(d){if(!d.ok)throw new Error(d.error||'Ошибка');showToast('Позиция удалена','success');loadEquipmentInventory();}).catch(function(e){showToast(e.message,'error');});},'Удалить','Удалить позицию');
+}
+
+// ========== ICCID -> НОМЕР ТЕЛЕФОНА ==========
+var _simRegistryData=null,_simRegistryLoadSeq=0;
+function loadSimRegistry(){
+  var seq=++_simRegistryLoadSeq;
+  api(API+'/api/admin/sim_registry').then(function(d){
+    if(seq!==_simRegistryLoadSeq)return;
+    if(!d||d.error)throw new Error(d&&d.error||'Не удалось загрузить реестр');
+    _simRegistryData=d;
+    var s=d.summary||{},ids={simRegistryTotal:s.registry_total||0,simRegistryMatched:s.registry_matched||0,simRegistryUnregistered:s.detected_not_registered||0,simRegistryMissingPhone:s.phone_missing||0,simRegistryMissingIccid:s.modems_without_iccid||0};
+    Object.keys(ids).forEach(function(id){var el=document.getElementById(id);if(el)el.textContent=ids[id].toLocaleString('ru-RU');});
+    renderSimRegistry();
+  }).catch(function(e){var box=document.getElementById('simRegistryTable');if(box)box.innerHTML='<div class="inv-error">'+esc(e.message)+'</div>';});
+}
+function renderSimRegistry(){
+  var box=document.getElementById('simRegistryTable');if(!box||!_simRegistryData)return;
+  var q=((document.getElementById('simRegistrySearch')||{}).value||'').trim().toLowerCase();
+  var items=(_simRegistryData.items||[]).filter(function(item){
+    if(!q)return true;
+    var bindings=(item.bindings||[]).map(function(b){return [b.server_name,b.server,b.nick,b.imei].join(' ')}).join(' ');
+    return [item.iccid,item.phone,item.operator,item.notes,bindings].join(' ').toLowerCase().indexOf(q)>=0;
+  });
+  var hint=document.getElementById('simRegistryListHint');if(hint)hint.textContent=' · '+items.length+' из '+(_simRegistryData.items||[]).length;
+  if(!items.length){box.innerHTML='<div class="equipment-empty is-page">Ничего не найдено</div>';return}
+  var h='<div class="sim-registry-row sim-registry-head"><span>ICCID / статус</span><span>Номер телефона</span><span>Оператор</span><span>Привязан к модему</span><span>Примечание</span><span></span></div>';
+  items.forEach(function(item){
+    var bindings=item.bindings||[];
+    var bindHtml=bindings.length?bindings.slice(0,2).map(function(b){return '<b>'+esc(b.nick||b.imei)+'</b><small>'+esc(b.server_name||b.server)+'</small>';}).join(''):'<span class="sim-muted">Пока не найдено</span>';
+    if(bindings.length>2)bindHtml+='<small>+'+(bindings.length-2)+' ещё</small>';
+    var badge=item.conflict?'<em class="sim-state is-red">Конфликт номера</em>':item.registered?(item.matched?'<em class="sim-state is-green">Сопоставлено</em>':'<em class="sim-state">В резерве</em>'):'<em class="sim-state is-orange">Нет в реестре</em>';
+    h+='<div class="sim-registry-row'+(item.conflict?' has-conflict':'')+'">'
+      +'<div class="sim-identity"><code>'+esc(item.iccid)+'</code>'+badge+'</div>'
+      +'<input class="form-input" id="simPhone_'+item.iccid+'" value="'+esc(item.phone||'')+'" placeholder="+373…" aria-label="Номер телефона">'
+      +'<input class="form-input" id="simOperator_'+item.iccid+'" value="'+esc(item.operator||'')+'" placeholder="Оператор" aria-label="Оператор">'
+      +'<div class="sim-binding">'+bindHtml+'</div>'
+      +'<input class="form-input" id="simNotes_'+item.iccid+'" value="'+esc(item.notes||'')+'" maxlength="500" placeholder="Примечание" aria-label="Примечание">'
+      +'<div class="sim-row-actions"><button class="btn btn-sm" data-on-click="saveSimRegistryRow(\''+item.iccid+'\')">'+(item.registered?'Сохранить':'Внести')+'</button>'+(item.registered?'<button class="btn btn-sm is-danger" data-on-click="deleteSimRegistryRow(\''+item.iccid+'\')" title="Удалить">×</button>':'')+'</div>'
+      +'</div>';
+  });
+  box.innerHTML=h;
+}
+function readSimRegistryFile(files){
+  var file=files&&files[0],st=document.getElementById('simRegistryImportStatus');if(!file)return;
+  if(file.size>75000){if(st){st.textContent='Файл больше 75 КБ — разделите его на части';st.style.color='var(--danger)';}return}
+  var reader=new FileReader();
+  reader.onload=function(){document.getElementById('simRegistryImportText').value=String(reader.result||'');if(st){st.textContent='Файл загружен: '+file.name;st.style.color='var(--text-2)';}};
+  reader.onerror=function(){if(st){st.textContent='Не удалось прочитать файл';st.style.color='var(--danger)';}};
+  reader.readAsText(file);
+}
+function importSimRegistry(){
+  var text=(document.getElementById('simRegistryImportText')||{}).value||'',st=document.getElementById('simRegistryImportStatus');
+  if(!text.trim()){st.textContent='Вставьте таблицу или выберите файл';st.style.color='var(--danger)';return}
+  st.textContent='Сопоставляю ICCID…';st.style.color='var(--warning)';
+  api(API+'/api/admin/sim_registry/import',{method:'POST',json:{text:text}}).then(function(d){
+    if(!d.ok)throw new Error(d.error||'Ошибка импорта');
+    var errorText=d.errors&&d.errors.length?' · пропущено '+d.errors.length:'';
+    st.textContent='Обработано '+d.processed+' · новых '+d.inserted+' · обновлено '+d.updated+' · найдено в модемах '+d.matched+errorText;st.style.color=d.errors&&d.errors.length?'var(--warning)':'var(--success)';
+    loadSimRegistry();if(typeof loadData==='function')setTimeout(loadData,300);
+  }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)';});
+}
+function _saveSimRegistryPayload(payload,st,done){
+  if(st){st.textContent='Сохраняю…';st.style.color='var(--warning)';}
+  api(API+'/api/admin/sim_registry',{method:'POST',json:payload}).then(function(d){
+    if(!d.ok)throw new Error(d.error||'Ошибка сохранения');
+    if(st){st.textContent=d.matched?'Сохранено и сопоставлено с модемом':'Сохранено в реестр';st.style.color='var(--success)';}
+    if(done)done();loadSimRegistry();if(typeof loadData==='function')setTimeout(loadData,300);
+  }).catch(function(e){if(st){st.textContent=e.message;st.style.color='var(--danger)';}else showToast(e.message,'error');});
+}
+function addSimRegistryRow(){
+  var payload={iccid:(document.getElementById('simManualIccid')||{}).value||'',phone:(document.getElementById('simManualPhone')||{}).value||'',operator:(document.getElementById('simManualOperator')||{}).value||'',notes:(document.getElementById('simManualNotes')||{}).value||''};
+  _saveSimRegistryPayload(payload,document.getElementById('simManualStatus'),function(){['simManualIccid','simManualPhone','simManualOperator','simManualNotes'].forEach(function(id){document.getElementById(id).value='';});});
+}
+function saveSimRegistryRow(iccid){
+  var payload={iccid:iccid,phone:document.getElementById('simPhone_'+iccid).value,operator:document.getElementById('simOperator_'+iccid).value,notes:document.getElementById('simNotes_'+iccid).value};
+  _saveSimRegistryPayload(payload,null,function(){showToast('Связка ICCID и номера сохранена','success');});
+}
+function deleteSimRegistryRow(iccid){
+  confirmDialog('Удалить ICCID '+iccid+' из загруженного реестра?',function(){api(API+'/api/admin/sim_registry/'+encodeURIComponent(iccid),{method:'DELETE'}).then(function(d){if(!d.ok)throw new Error(d.error||'Ошибка');showToast('Строка удалена из реестра','success');loadSimRegistry();}).catch(function(e){showToast(e.message,'error');});},'Удалить','Удалить связку');
+}

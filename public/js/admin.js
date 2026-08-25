@@ -114,14 +114,14 @@ function switchBankNav(name){
 var _activeSettingsSection='audit';
 function switchSettingsSection(name){
   if(name==='packages')name='operators'; // legacy bookmark after section merge
-  try{if(window.matchMedia('(max-width:480px)').matches){var _c=document.querySelector('.tab-sidebar-layout>div:last-child');if(_c)setTimeout(function(){_c.scrollIntoView({behavior:'smooth',block:'start'});},60);}}catch(_){}
+  try{if(window.matchMedia('(max-width:480px)').matches){var _c=document.querySelector('#tab-analytics .tab-sidebar-layout>div:last-child');if(_c)setTimeout(function(){_c.scrollIntoView({behavior:'smooth',block:'start'});},60);}}catch(_){}
   // recovery / proxycheck / speedtest / data are VIEWS of the shared
   // settingsSection_data: show that section and filter its cards by
   // [data-subsec]. Cards without a data-subsec belong to the «Система» (data)
   // view. «alerts» — тоже смешанный вид: settingsSection_alerts (правила
   // уведомлений) + data-карточки с subsec=alerts (Telegram, пороги доступности).
   var DATA_VIEWS={recovery:1,proxycheck:1,speedtest:1,alerts:1,data:1};
-  ['bank','audit','dguard','servers','syslog','serverHealth','simulator','operators','maintenance','sla','alerts','failover','tariffs'].forEach(function(s){
+  ['bank','audit','dguard','servers','equipment','simRegistry','syslog','serverHealth','simulator','operators','maintenance','sla','alerts','failover','tariffs'].forEach(function(s){
     var sec=document.getElementById('settingsSection_'+s);
     if(sec)sec.style.display=s===name?'':'none';
   });
@@ -135,7 +135,7 @@ function switchSettingsSection(name){
       });
     }
   }
-  ['bank','data','audit','dguard','servers','syslog','serverHealth','simulator','operators','maintenance','sla','alerts','failover','recovery','proxycheck','speedtest','tariffs'].forEach(function(s){
+  ['bank','data','audit','dguard','servers','equipment','simRegistry','syslog','serverHealth','simulator','operators','maintenance','sla','alerts','failover','recovery','proxycheck','speedtest','tariffs'].forEach(function(s){
     var nav=document.getElementById('snav_'+s);
     if(nav){nav.classList.toggle('active',s===name);}
   });
@@ -144,6 +144,8 @@ function switchSettingsSection(name){
   if(name==='audit')loadAuditLog();
   if(name==='dguard')loadDomainGuard();
   if(name==='servers')loadServersList();
+  if(name==='equipment')loadEquipmentInventory();
+  if(name==='simRegistry')loadSimRegistry();
   if(name==='syslog')loadSystemLog();
   if(name==='serverHealth')renderSysDashboard('serverHealthContent');
   if(name==='simulator')initSimulator();

@@ -14,8 +14,8 @@
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="css/variables.css?v=0814a">
 <link rel="stylesheet" href="css/base.css?v=0823h">
-<link rel="stylesheet" href="css/tables.css?v=0814a">
-<link rel="stylesheet" href="css/cards.css?v=0823c">
+<link rel="stylesheet" href="css/tables.css?v=0825b">
+<link rel="stylesheet" href="css/cards.css?v=0825a">
 <link rel="stylesheet" href="css/modal.css?v=0630d">
 <link rel="stylesheet" href="css/layout.css?v=0814a">
 <link rel="stylesheet" href="css/shell.css?v=0630d">
@@ -83,7 +83,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.38</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.39</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -99,7 +99,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.38</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.39</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -108,7 +108,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.38</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.39</a>
     <span class="last-update" id="lastUpdate"></span>
     <span class="sse-ind" id="sseIndicator" style="display:none" title="Realtime-обновления"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
@@ -131,14 +131,13 @@
      The hidden #searchBox stays so any leftover JS that reads `.value`
      (renderTable still does) gets an empty string without a null check. -->
 <input type="hidden" id="searchBox" value="">
-<span id="searchCounter" style="display:none"></span>
 
 <!-- TAB: MODEMS -->
 <div class="tab-content" id="tab-modems" style="position:relative">
   <!-- Two-tier header (matches Клиенты): row1 = title | search + ⚙;
        row2 = status chips | server/client selects + view toggle. -->
   <div class="page-hdr" style="display:flex;align-items:center;justify-content:space-between;padding:13px 24px;border-bottom:1px solid var(--border);gap:12px">
-    <span style="font-size:16px;font-weight:600;color:var(--text-0)">Модемы</span>
+    <div class="modem-page-heading"><span>Модемы</span><span id="searchCounter" class="modem-result-counter" style="display:none" aria-live="polite"></span></div>
     <div style="display:flex;align-items:center;gap:10px">
       <span style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);border:1px solid var(--border);border-radius:999px;padding:6px 13px"><svg width="14" height="14" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="var(--text-3)" stroke-width="1.4"/><line x1="11" y1="11" x2="14" y2="14" stroke="var(--text-3)" stroke-width="1.4" stroke-linecap="round"/></svg><input id="modemSearch" type="text" placeholder="Поиск: ник, IP, клиент…" data-on-input="renderTable()" autocomplete="off" style="border:none;background:none;outline:none;font-size:12px;color:var(--text-1);width:190px"></span>
       <div class="col-selector" style="flex:0 0 auto">
@@ -347,6 +346,8 @@
 
       <div class="snav-grp">ИНФРАСТРУКТУРА</div>
       <div class="settings-nav-item" id="snav_servers" data-on-click="switchSettingsSection('servers')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="2.5" width="12" height="4.6" rx="1.2"/><rect x="2" y="8.9" width="12" height="4.6" rx="1.2"/><circle cx="4.6" cy="4.8" r=".5"/><circle cx="4.6" cy="11.2" r=".5"/></svg>Серверы</div>
+      <div class="settings-nav-item" id="snav_equipment" data-on-click="switchSettingsSection('equipment')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 5.2 8 2l6 3.2v6.2L8 14.5l-6-3.1z"/><path d="m2.3 5.4 5.7 3 5.7-3M8 8.4v6"/></svg>Учёт оборудования</div>
+      <div class="settings-nav-item" id="snav_simRegistry" data-on-click="switchSettingsSection('simRegistry')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M4 1.8h5l3 3v9.4H4z"/><path d="M9 1.8v3h3M6.2 8h3.6M6.2 10.5h3.6"/></svg>SIM и номера</div>
       <div class="settings-nav-item" id="snav_operators" data-on-click="switchSettingsSection('operators')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><circle cx="8" cy="8" r="6"/><path d="M2 8h12"/><path d="M8 2c2.2 2 2.2 10 0 12M8 2c-2.2 2-2.2 10 0 12"/></svg>Операторы, страны и пакеты</div>
       <div class="settings-nav-item" id="snav_maintenance" data-on-click="switchSettingsSection('maintenance')" style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9.6 2.6a3.2 3.2 0 0 0-4.3 4.3L2.4 9.8a1.6 1.6 0 0 0 0 2.3l1.5 1.5a1.6 1.6 0 0 0 2.3 0l2.9-2.9a3.2 3.2 0 0 0 4.3-4.3l-2 2-1.6-.4-.4-1.6z"/></svg>Обслуживание</div>
 
@@ -478,6 +479,71 @@
               <span id="addSrvStatus" style="font-size:11px;margin-left:8px"></span>
             </div>
           </div>
+        </div>
+      </div>
+      <!-- Учёт оборудования по физическим локациям -->
+      <div id="settingsSection_equipment" class="settings-section" style="display:none">
+        <div class="inv-page-head">
+          <div><div class="inv-eyebrow">ИНФРАСТРУКТУРА</div><h2>Учёт оборудования</h2><p>Количество и состав оборудования на каждой физической локации. Серверы с одинаковым адресом объединяются автоматически.</p></div>
+          <button class="btn btn-sm" data-on-click="loadEquipmentInventory()">Обновить</button>
+        </div>
+        <div class="inv-kpis">
+          <div class="inv-kpi"><span>Всего единиц</span><b id="equipmentTotalUnits">—</b></div>
+          <div class="inv-kpi"><span>Типов оборудования</span><b id="equipmentTotalTypes">—</b></div>
+          <div class="inv-kpi"><span>Локаций заполнено</span><b id="equipmentLocationCount">—</b></div>
+        </div>
+        <div class="inv-add-card">
+          <div class="inv-card-title"><span class="inv-card-icon">+</span><div><b>Добавить позицию</b><small>Одинаковый тип на одной локации обновит существующую строку</small></div></div>
+          <div class="equipment-add-grid">
+            <label><span>Локация</span><select class="form-input" id="equipmentLocationInput"></select></label>
+            <label><span>Тип оборудования</span><input class="form-input" id="equipmentTypeInput" maxlength="120" placeholder="UPS, роутер, USB-хаб…"></label>
+            <label><span>Количество</span><input class="form-input" id="equipmentQuantityInput" type="number" min="0" max="1000000" step="1" value="1"></label>
+            <label><span>Примечание</span><input class="form-input" id="equipmentNotesInput" maxlength="500" placeholder="Модель или комментарий"></label>
+            <button class="btn btn-primary" data-on-click="addEquipmentItem()">Добавить</button>
+          </div>
+          <div id="equipmentAddStatus" class="inv-status"></div>
+        </div>
+        <div id="equipmentLocations" class="equipment-locations"><div class="acc-loading"><span class="spinner"></span>Загрузка оборудования…</div></div>
+      </div>
+
+      <!-- Реестр ICCID -> номер телефона -->
+      <div id="settingsSection_simRegistry" class="settings-section" style="display:none">
+        <div class="inv-page-head">
+          <div><div class="inv-eyebrow">SIM-КАРТЫ</div><h2>ICCID и номера телефонов</h2><p>Загрузите реестр оператора — система автоматически найдёт SIM в модемах по ICCID и подставит номер телефона.</p></div>
+          <button class="btn btn-sm" data-on-click="loadSimRegistry()">Обновить</button>
+        </div>
+        <div class="inv-kpis sim-kpis">
+          <div class="inv-kpi"><span>В реестре</span><b id="simRegistryTotal">—</b></div>
+          <div class="inv-kpi is-green"><span>Сопоставлено</span><b id="simRegistryMatched">—</b></div>
+          <div class="inv-kpi is-orange"><span>Не внесено</span><b id="simRegistryUnregistered">—</b></div>
+          <div class="inv-kpi is-red"><span>Без номера</span><b id="simRegistryMissingPhone">—</b></div>
+          <div class="inv-kpi is-orange"><span>Без ICCID</span><b id="simRegistryMissingIccid">—</b></div>
+        </div>
+        <div class="sim-import-card">
+          <div class="sim-import-copy">
+            <div class="inv-card-title"><span class="inv-card-icon">⇧</span><div><b>Импорт таблицы</b><small>CSV, TSV или вставка из Excel · до 1 500 строк</small></div></div>
+            <div class="sim-format"><b>Формат:</b> <code>ICCID;Телефон;Оператор;Примечание</code><br>Обязательны первые две колонки. Заголовок можно оставить.</div>
+            <label class="sim-file-btn">Выбрать файл<input type="file" accept=".csv,.tsv,.txt,text/csv,text/tab-separated-values" data-on-change="readSimRegistryFile(this.files)"></label>
+          </div>
+          <div class="sim-import-input">
+            <textarea class="form-input" id="simRegistryImportText" rows="6" placeholder="ICCID;Телефон;Оператор;Примечание&#10;8937…;+373…;Orange;Корпоративная"></textarea>
+            <div class="sim-import-actions"><span id="simRegistryImportStatus" class="inv-status"></span><button class="btn btn-primary" data-on-click="importSimRegistry()">Импортировать</button></div>
+          </div>
+        </div>
+        <div class="inv-add-card sim-manual-card">
+          <div class="inv-card-title"><span class="inv-card-icon">+</span><div><b>Добавить одну SIM</b><small>Также подходит для исправления номера в уже загруженной строке</small></div></div>
+          <div class="sim-manual-grid">
+            <label><span>ICCID</span><input class="form-input" id="simManualIccid" inputmode="numeric" placeholder="15–24 цифры"></label>
+            <label><span>Телефон</span><input class="form-input" id="simManualPhone" placeholder="+373…"></label>
+            <label><span>Оператор</span><input class="form-input" id="simManualOperator" placeholder="Orange"></label>
+            <label><span>Примечание</span><input class="form-input" id="simManualNotes" placeholder="Необязательно"></label>
+            <button class="btn btn-primary" data-on-click="addSimRegistryRow()">Сохранить</button>
+          </div>
+          <div id="simManualStatus" class="inv-status"></div>
+        </div>
+        <div class="sim-table-card">
+          <div class="sim-table-head"><div><b>Реестр и найденные SIM</b><span id="simRegistryListHint"></span></div><input class="form-input" id="simRegistrySearch" placeholder="Поиск по ICCID, номеру, модему…" data-on-input="renderSimRegistry()"></div>
+          <div id="simRegistryTable"><div class="acc-loading"><span class="spinner"></span>Загрузка реестра…</div></div>
         </div>
       </div>
       <!-- Банк -->
@@ -1506,12 +1572,12 @@
 <script src="/js/admin/fleet-ui.js?v=0823p"></script>
 <script src="/js/admin/analytics.js?v=0823p"></script>
 <script src="/js/admin/finance.js?v=0823t"></script>
-<script src="/js/admin/modems.js?v=0823p"></script>
+<script src="/js/admin/modems.js?v=0825b"></script>
 <script src="/js/admin/dguard.js?v=0823p"></script>
-<script src="/js/admin/settings.js?v=0823t"></script>
+<script src="/js/admin/settings.js?v=0825a"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0823n"></script>
-<script src="/js/admin.js?v=0823u"></script>
+<script src="/js/admin.js?v=0825a"></script>
 <script src="/js/admin/sse.js?v=0823k"></script>
 </body>
 </html>

@@ -283,6 +283,12 @@
   },
   {
     "type": "index",
+    "name": "idx_equipment_location",
+    "tbl_name": "equipment_inventory",
+    "sql": "CREATE INDEX idx_equipment_location ON equipment_inventory(location_key)"
+  },
+  {
+    "type": "index",
     "name": "idx_failover_dead",
     "tbl_name": "failover_log",
     "sql": "CREATE INDEX idx_failover_dead ON failover_log(dead_imei, ts DESC)"
@@ -556,6 +562,12 @@
     "name": "idx_sessions_login",
     "tbl_name": "sessions",
     "sql": "CREATE INDEX idx_sessions_login ON sessions(login)"
+  },
+  {
+    "type": "index",
+    "name": "idx_sim_registry_phone",
+    "tbl_name": "sim_registry",
+    "sql": "CREATE INDEX idx_sim_registry_phone ON sim_registry(phone)"
   },
   {
     "type": "index",
@@ -847,6 +859,12 @@
   },
   {
     "type": "table",
+    "name": "equipment_inventory",
+    "tbl_name": "equipment_inventory",
+    "sql": "CREATE TABLE equipment_inventory ( id INTEGER PRIMARY KEY AUTOINCREMENT, location_key TEXT NOT NULL, equipment_type TEXT NOT NULL COLLATE NOCASE, quantity INTEGER NOT NULL DEFAULT 0 CHECK(quantity >= 0), notes TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')), UNIQUE(location_key, equipment_type) )"
+  },
+  {
+    "type": "table",
     "name": "failover_log",
     "tbl_name": "failover_log",
     "sql": "CREATE TABLE failover_log ( id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')), server_name TEXT NOT NULL, client_port_name TEXT, -- the client (portName) being rescued dead_imei TEXT, -- modem we're moving the port OFF dead_nick TEXT, dead_port_id TEXT NOT NULL, -- the port being teleported spare_imei TEXT, -- modem we're moving the port ONTO spare_nick TEXT, mode TEXT NOT NULL DEFAULT 'A', -- A = move_port (seamless) trigger_reason TEXT, -- recovery_exhausted | hard_offline | glitch_errors | manual result TEXT NOT NULL, -- ok | failed | skipped_no_spare | skipped_cooldown | skipped_rate | dry_run error TEXT, dry_run INTEGER NOT NULL DEFAULT 0 )"
@@ -1000,6 +1018,12 @@
     "name": "sessions",
     "tbl_name": "sessions",
     "sql": "CREATE TABLE sessions ( token TEXT PRIMARY KEY, login TEXT NOT NULL, port_name_filter TEXT, is_admin INTEGER DEFAULT 0, expires_at INTEGER NOT NULL, created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "sim_registry",
+    "tbl_name": "sim_registry",
+    "sql": "CREATE TABLE sim_registry ( iccid TEXT PRIMARY KEY, phone TEXT NOT NULL, operator TEXT NOT NULL DEFAULT '', notes TEXT NOT NULL DEFAULT '', source TEXT NOT NULL DEFAULT 'import', imported_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')) )"
   },
   {
     "type": "table",

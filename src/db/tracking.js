@@ -63,6 +63,16 @@ function init(db) {
   S.metaIccidGetByImei = db.prepare(
     'SELECT iccid FROM modem_meta WHERE server_name = ? AND imei = ? LIMIT 1'
   );
+  // v2.10.39: обогащение номером из реестра SIM. Таблица появляется миграцией
+  // 081 — prepare делаем мягко: если sim_registry ещё нет (тесты с минимальной
+  // схемой, старые БД), возвращаем заглушку, которая ничего не находит.
+  try {
+    S.simRegistryPhoneByIccid = db.prepare(
+      'SELECT phone FROM sim_registry WHERE iccid = ? LIMIT 1'
+    );
+  } catch (_) {
+    S.simRegistryPhoneByIccid = { get: () => undefined, run: () => ({ changes: 0 }) };
+  }
   S.metaOperatorGet = db.prepare(
     'SELECT operator FROM modem_meta WHERE server_name = ? AND nick = ? LIMIT 1'
   );
@@ -168,6 +178,7 @@ module.exports = {
   ihDeleteByIdStmt:    () => S.ihDeleteById,
   modemMetaUpsertStmt: () => S.modemMetaUpsert,
   metaIccidGetByImeiStmt: () => S.metaIccidGetByImei,
+  simRegistryPhoneByIccidStmt: () => S.simRegistryPhoneByIccid,
   metaOperatorGetStmt: () => S.metaOperatorGet,
   metaOperatorGetByImeiStmt: () => S.metaOperatorGetByImei,
   metaListRecentForServerStmt: () => S.metaListRecentForServer,    // Stage 18
