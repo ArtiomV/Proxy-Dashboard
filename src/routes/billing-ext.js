@@ -9,6 +9,7 @@ const express = require('express');
 const { COST_CATEGORIES } = require('../billing/cost-categories');  // P2-2: was a server.js dep
 const { buildCostLocations } = require('../billing/cost-locations');
 const { computeRevenueWindow } = require('../billing/revenue');     // WP8: canonical revenue
+const decisionFinance = require('../billing/decision-finance');
 const {
   parseOperatorPackages,
   operatorKey,
@@ -216,6 +217,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const _notPaused = _pausedArr.length ? ` AND client_id NOT IN (${_pausedArr.map(() => '?').join(',')})` : '';
     const rev30 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30, excludeIds: pausedIds });
     const mrrByClient = rev30.byClient;
+    const rev7 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 7, excludeIds: pausedIds });
 
     // -- per-client previous 30d (60..30 days ago) --
     const revPrev30 = computeRevenueWindow({ db, ledgerExpense, today: getMoscowToday(), days: 30, fromDays: 60 });
@@ -293,6 +295,9 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const modemsByServer = {};
     const modemsByOperator = {};
     const modemsByPortName = {};
+    const clientIdByPortName = {};
+    const clientAssetsById = {};
+    for (const c of getClients()) if (c.portName) clientIdByPortName[c.portName] = c.id;
     for (const data of liveResults) {
       const srv = data.serverName;
       if (typeof data.bw !== 'object') continue;
@@ -308,6 +313,25 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
         }
       }
       const portsMap = data.ports || {};
+      // Один IMEI может иметь несколько портов. Для себестоимости и прогноза
+      // продлений считаем уникальный клиентский модем, а не строки bandwidth.
+      for (const [imei, modemPorts] of Object.entries(portsMap)) {
+        if (!Array.isArray(modemPorts)) continue;
+        for (const p of modemPorts) {
+          const bwRow = data.bw[p.portID] || {};
+          const portName = String(bwRow.portName || p.portName || '').trim();
+          const clientId = clientIdByPortName[portName];
+          if (!clientId) continue;
+          const assets = clientAssetsById[clientId] || (clientAssetsById[clientId] = {});
+          const assetKey = srv + '|' + imei;
+          const validBefore = String(p.PROXY_VALID_BEFORE || '').slice(0, 10);
+          if (!assets[assetKey]) {
+            assets[assetKey] = { server: srv, imei, operator: opByImei[imei] || '', validBefore };
+          } else if (validBefore && (!assets[assetKey].validBefore || validBefore < assets[assetKey].validBefore)) {
+            assets[assetKey].validBefore = validBefore;
+          }
+        }
+      }
       for (const [portId, b] of Object.entries(data.bw)) {
         totalModems++;
         modemsByServer[srv].total++;
@@ -367,6 +391,9 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     // фикс). getRates кладёт курс в module-level, toRub — sync поверх него.
     const fxRates = await fx.getRates();
     const totalCost = costRows.reduce((s, r) => s + fx.toRub(r.amount || 0, r.currency || 'RUB'), 0);
+    const costRowsRub = costRows.map(r => ({
+      ...r, amount_rub: fx.toRub(r.amount || 0, r.currency || 'RUB'),
+    }));
     const costByCategory = {};
     costRows.forEach(r => {
       costByCategory[r.category] = (costByCategory[r.category] || 0) + fx.toRub(r.amount || 0, r.currency || 'RUB');
@@ -419,6 +446,53 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
         ? Math.round((modemsByOperator[op].rented / modemsByOperator[op].total) * 1000) / 10 : 0
     }));
 
+    // Decision finance: себестоимость каждого клиента, возраст дебиторки и
+    // сценарий выручки на 30 дней, если истекающие порты не продлят.
+    const decisionClients = getClients().map(c => ({
+      id: c.id, name: c.name, billingType: c.billingType || 'per_gb', price: c.price || 0,
+      balance: c.balance || 0, balanceNegativeSince: c.balanceNegativeSince || null,
+      bills: c.bills || [], paused: !!c.billingPaused,
+      revenue: mrrByClient[c.id] || 0,
+      avgDailyRevenue: (rev7.byClient[c.id] || 0) / 7,
+      assets: Object.values(clientAssetsById[c.id] || {}),
+    }));
+    const locationByServer = {};
+    for (const location of buildCostLocations(getApiServers(), getServerCountries())) {
+      for (const server of location.servers || []) locationByServer[server.name] = location.key;
+    }
+    const unitEconomics = decisionFinance.allocateUnitEconomics(decisionClients, costRowsRub, locationByServer);
+    const unitByClient = Object.fromEntries(unitEconomics.rows.map(row => [row.id, row]));
+    const receivables = decisionFinance.buildReceivablesAging(decisionClients, now);
+    const revenueForecast30d = decisionFinance.forecastRevenue30d(decisionClients, now, 30);
+
+    // Read-only reconciliation. A bank row is not considered delivered until
+    // the corresponding credit exists in the authoritative billing_ledger.
+    let bankReconciliation = {
+      status: 'unavailable', unmatched_count: 0, unmatched_amount: 0,
+      credited_missing_count: 0, credited_missing_amount: 0,
+    };
+    try {
+      const unmatched = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(amount),0) AS amount
+        FROM bank_payments WHERE webhook_type='incomingPayment' AND matched=0 AND dismissed=0`).get();
+      const missing = db.prepare(`SELECT COUNT(*) AS n, COALESCE(SUM(bp.amount),0) AS amount
+        FROM bank_payments bp
+        WHERE bp.webhook_type='incomingPayment' AND bp.matched=1
+          AND NOT EXISTS (
+            SELECT 1 FROM billing_ledger bl
+            WHERE bl.type='bank_payment' AND bl.client_id=bp.matched_client_id
+              AND bl.date=bp.date AND ABS(bl.amount-bp.amount)<0.01
+          )`).get();
+      bankReconciliation = {
+        status: Number(unmatched.n || 0) || Number(missing.n || 0) ? 'attention' : 'ok',
+        unmatched_count: Number(unmatched.n || 0),
+        unmatched_amount: Math.round(Number(unmatched.amount || 0) * 100) / 100,
+        credited_missing_count: Number(missing.n || 0),
+        credited_missing_amount: Math.round(Number(missing.amount || 0) * 100) / 100,
+      };
+    } catch (e) {
+      logger.warn('[finance_dashboard] bank reconciliation unavailable: ' + e.message);
+    }
+
     // -- Per-client breakdown --
     const perClient = getClients()
       .map(c => {
@@ -426,6 +500,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
         const cPrev = prevMrrByClient[c.id] || 0;
         const delta = cPrev > 0 ? Math.round(((cMrr - cPrev) / cPrev) * 1000) / 10 : null;
         const sharePct = totalMrr > 0 ? Math.round((cMrr / totalMrr) * 1000) / 10 : 0;
+        const unit = unitByClient[c.id] || {};
         return {
           id: c.id,
           name: c.name,
@@ -436,7 +511,11 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
           mrr_prev: cPrev,
           mrr_delta_pct: delta,
           share_pct: sharePct,
-          paused: !!c.billingPaused
+          paused: !!c.billingPaused,
+          allocated_cost: unit.allocated_cost || 0,
+          margin: unit.margin == null ? cMrr : unit.margin,
+          margin_pct: unit.margin_pct == null ? null : unit.margin_pct,
+          modem_count: unit.modems || 0,
         };
       })
       .sort((a, b) => b.mrr - a.mrr);
@@ -580,6 +659,10 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
       },
       cost_by_category: costByCategory,
       operator_package_costs: operatorCosts,
+      unit_economics: unitEconomics,
+      receivables,
+      revenue_forecast_30d: revenueForecast30d,
+      bank_reconciliation: bankReconciliation,
       // Курс конвертации затрат MDL/RON → RUB (для отображения в шапке).
       fx: { MDL: fxRates.MDL, RON: fxRates.RON, date: fxRates.date, source: fxRates.source },
       per_server: perServer,

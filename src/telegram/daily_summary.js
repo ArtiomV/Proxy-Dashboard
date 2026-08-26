@@ -45,6 +45,11 @@ function trunc(s, n) {
   s = String(s || '');
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
+function hasTable(name) {
+  try {
+    return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
+  } catch (_) { return false; }
+}
 
 const RU_MONTHS = ['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 const RU_WEEKDAYS = ['воскресенье','понедельник','вторник','среда','четверг','пятница','суббота'];
@@ -231,6 +236,61 @@ async function buildDailySummary(date) {
   if (proxyIssues.length) lines.push(`Проблемных прокси: ${proxyIssues.length} (пинг >1500мс или потери >10%)`);
   if (rebootRow && rebootRow.n > 0) lines.push(`Авто-перезагрузок: ${rebootRow.n} (успешных ${rebootRow.ok}/${rebootRow.n})`);
   if (errorCount) lines.push(`Ошибок в системном логе: ${errorCount}`);
+  // Correlated incidents are the useful overnight signal: one operator/server
+  // episode instead of dozens of modem cards.
+  try {
+    const incidents = hasTable('monitoring_incidents') ? db.prepare(`SELECT state,server,operator,opened_at,closed_at,duration_sec,modem_count,client_count
+      FROM monitoring_incidents WHERE opened_at >= ? AND opened_at < ? ORDER BY opened_at`).all(utcStart.toISOString(), utcEnd.toISOString()) : [];
+    if (incidents.length) {
+      lines.push(`Инцидентов: <b>${incidents.length}</b>`);
+      for (const it of incidents.slice(0, 8)) {
+        const state = it.state === 'closed' ? `закрыт за ${Math.max(1, Math.round((it.duration_sec || 0) / 60))} мин` : 'ещё открыт';
+        lines.push(`  • ${escHtml(it.operator || 'общая связь')} · ${escHtml(it.server)} — ${it.modem_count} мод., ${it.client_count} кл. · ${state}`);
+      }
+    }
+  } catch (e) {
+    if (logger && logger.warn) logger.warn('[DailySummary] incidents query failed (block degraded): ' + (e.message || e));
+  }
+
+  // Non-critical alerts are deliberately not duplicated to Telegram during
+  // the quiet window. They remain in the bell and are condensed here, so the
+  // morning summary closes the loop without an overnight message storm.
+  if (getSetting('telegram_night_digest_enabled', true) !== false && hasTable('notifications')) {
+    try {
+      const from = String(getSetting('telegram_quiet_from', '23:00'));
+      const to = String(getSetting('telegram_quiet_to', '08:00'));
+      const parseMin = value => {
+        const m = /^(\d{2}):(\d{2})$/.exec(value);
+        if (!m || +m[1] > 23 || +m[2] > 59) return null;
+        return +m[1] * 60 + +m[2];
+      };
+      const fromMin = parseMin(from), toMin = parseMin(to);
+      if (fromMin != null && toMin != null && fromMin !== toMin) {
+        const wallToUtc = (dayOffset, mins) => {
+          const d = new Date(date + 'T00:00:00Z');
+          d.setUTCDate(d.getUTCDate() + dayOffset);
+          d.setUTCMinutes(mins - 180); // MSK → UTC
+          return d.toISOString().slice(0, 19).replace('T', ' ');
+        };
+        const quietStart = wallToUtc(0, fromMin);
+        const quietEnd = wallToUtc(fromMin > toMin ? 1 : 0, toMin);
+        const quietRows = db.prepare(`
+          SELECT rule_id, title, COUNT(*) AS n
+          FROM notifications
+          WHERE created_at >= ? AND created_at < ? AND priority <> 'critical'
+            AND json_extract(COALESCE(payload_json, '{}'), '$._telegram_night_deferred') = 1
+          GROUP BY rule_id, title ORDER BY n DESC, title LIMIT 8
+        `).all(quietStart, quietEnd);
+        const quietTotal = quietRows.reduce((sum, row) => sum + Number(row.n || 0), 0);
+        if (quietTotal) {
+          lines.push(`Ночью без Telegram: <b>${quietTotal}</b> некритичных событий (они сохранены в колокольчике)`);
+          for (const row of quietRows) lines.push(`  • ${escHtml(row.title || row.rule_id)} — ${row.n}`);
+        }
+      }
+    } catch (e) {
+      if (logger && logger.warn) logger.warn('[DailySummary] quiet digest failed (block degraded): ' + (e.message || e));
+    }
+  }
 
   // ----- 4) Ротации -----
   let rotRow = null;

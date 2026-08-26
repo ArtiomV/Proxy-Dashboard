@@ -19,8 +19,8 @@
 <link rel="stylesheet" href="css/modal.css?v=0630d">
 <link rel="stylesheet" href="css/layout.css?v=0814a">
 <link rel="stylesheet" href="css/shell.css?v=0630d">
-<link rel="stylesheet" href="css/finance.css?v=0823t">
-<link rel="stylesheet" href="css/dashboard2.css?v=0826a">
+<link rel="stylesheet" href="css/finance.css?v=0826b">
+<link rel="stylesheet" href="css/dashboard2.css?v=0826b">
 <!-- Yandex.Metrika counter (инлайн вынесен в /js/metrika.js — CSP) -->
 <script src="/js/metrika.js?v=0814a"></script>
 <noscript><div><img src="https://mc.yandex.ru/watch/107161941" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
@@ -47,7 +47,6 @@
 <div id="bulkPanel" class="bulk-panel" style="display:none">
   <span><span id="bulkCountLabel" class="bulk-count">0</span> выбрано</span>
   <button class="btn btn-sm" data-on-click="bulkResetIp()" title="Сбросить IP на выбранных модемах"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M20 12a8 8 0 1 1-2.34-5.66"/><path d="M20 3v4.5h-4.5"/></svg> Сброс IP</button>
-  <button class="btn btn-sm" data-on-click="bulkReboot()" title="Перезагрузить выбранные модемы"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg> Ребут</button>
   <button class="btn btn-sm" data-on-click="bulkOsSpoof()" title="Установить OS Spoofing на портах выбранных модемов"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 3l7.5 3v5.5c0 4.8-3.2 8.3-7.5 9.5-4.3-1.2-7.5-4.7-7.5-9.5V6z"/></svg> OS Spoof</button>
   <button class="btn btn-sm" data-on-click="bulkRotation()" title="Установить авторотацию на выбранных модемах"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3.5 2"/></svg> Ротация</button>
   <button class="btn btn-sm" data-on-click="bulkExport()" title="Экспорт прокси выбранных модемов"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px"><path d="M12 15V3"/><path d="M6.5 8.5 12 3l5.5 5.5"/><path d="M4 20h16"/></svg> Экспорт</button>
@@ -84,7 +83,7 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.44</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.45</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
@@ -101,7 +100,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.44</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.45</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -110,7 +109,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.44</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.45</a>
     <span class="last-update" id="lastUpdate"></span>
     <span class="sse-ind" id="sseIndicator" style="display:none" title="Realtime-обновления"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
@@ -325,7 +324,7 @@
     <section class="d2-bottom-grid">
       <article class="d2-panel">
         <div class="d2-panel-head">
-          <div><span class="d2-panel-kicker">Резерв</span><h2>Готовность к отказу</h2></div>
+          <div><span class="d2-panel-kicker">Резерв</span><h2>Ёмкость и отказоустойчивость</h2></div>
         </div>
         <div id="d2Capacity"><div class="d2-skeleton"></div></div>
       </article>
@@ -335,6 +334,13 @@
           <button class="d2-link" data-on-click="d2OpenFinance()">Финансы <span>→</span></button>
         </div>
         <div id="d2Finance"><div class="d2-skeleton"></div></div>
+      </article>
+      <article class="d2-panel">
+        <div class="d2-panel-head">
+          <div><span class="d2-panel-kicker">Трафик</span><h2>Эффективность SIM</h2></div>
+          <button class="d2-link" data-on-click="d2OpenSettings('operators')">Пакеты <span>→</span></button>
+        </div>
+        <div id="d2Packages"><div class="d2-skeleton"></div></div>
       </article>
     </section>
   </main>
@@ -368,13 +374,15 @@
     <!-- Sidebar -->
     <div class="tab-sidebar" style="width:196px;border-right:1px solid var(--border);flex-shrink:0;background:var(--bg-1);padding:20px 0">
       <div style="padding:0 16px 10px;font-size:10px;font-weight:700;color:var(--text-3);letter-spacing:.8px">ФИНАНСЫ</div>
-      <div class="settings-nav-item active" id="bnav_acts" data-on-click="switchBankNav('acts')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Акты</div>
+      <div class="settings-nav-item active" id="bnav_overview" data-on-click="switchBankNav('overview')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>Обзор</div>
+      <div class="settings-nav-item" id="bnav_acts" data-on-click="switchBankNav('acts')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><line x1="9" y1="13" x2="15" y2="13"/><line x1="9" y1="17" x2="13" y2="17"/></svg>Акты</div>
       <div class="settings-nav-item" id="bnav_bills" data-on-click="switchBankNav('bills')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><path d="M5 21V4a1 1 0 0 1 1-1h12a1 1 0 0 1 1 1v17l-2.5-1.5L14 21l-2-1.5L10 21l-2.5-1.5z"/><line x1="9" y1="8" x2="15" y2="8"/><line x1="9" y1="12" x2="15" y2="12"/></svg>Счета</div>
       <div class="settings-nav-item" id="bnav_payments" data-on-click="switchBankNav('payments')"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-3px;margin-right:9px"><circle cx="12" cy="12" r="9"/><path d="M12 7.5v9"/><path d="M8.5 13l3.5 3.5 3.5-3.5"/></svg>Платежи</div>
     </div>
     <!-- Content -->
     <div style="flex:1;overflow-y:auto;padding:24px">
-      <div id="bankDocumentsSection" class="bank-sub-section"></div>
+      <div id="bankOverviewSection" class="bank-sub-section"></div>
+      <div id="bankDocumentsSection" class="bank-sub-section" style="display:none"></div>
       <div id="bankBillsSection" class="bank-sub-section" style="display:none"></div>
       <div id="bankPaymentsSection" class="bank-sub-section" style="display:none"></div>
     </div>
@@ -525,6 +533,9 @@
               <div class="form-group"><label class="form-label" style="font-size:10px">Логин</label><input class="form-input" id="newSrvUser" placeholder="proxy" style="width:100%"></div>
               <div class="form-group"><label class="form-label" style="font-size:10px">Пароль</label><input class="form-input" id="newSrvPass" placeholder="password" type="password" style="width:100%"></div>
               <div class="form-group"><label class="form-label" style="font-size:10px">Public IP</label><input class="form-input" id="newSrvIp" placeholder="1.2.3.4" style="width:100%"></div>
+              <div class="form-group"><label class="form-label" style="font-size:10px">SSH логин (выгрузка метрик)</label><input class="form-input" id="newSrvOsLogin" placeholder="mon" style="width:100%"></div>
+              <div class="form-group"><label class="form-label" style="font-size:10px">SSH пароль</label><input class="form-input" id="newSrvOsPass" placeholder="пусто = вход по ключу" type="password" style="width:100%"></div>
+              <div class="form-group"><label class="form-label" style="font-size:10px">SSH порт</label><input class="form-input" id="newSrvSshPort" type="number" min="1" max="65535" placeholder="6005 (пусто = 2222/22)" style="width:100%"></div>
               <div class="form-group"><label class="form-label" style="font-size:10px">Страна</label>
                 <select class="form-input" id="newSrvCountry" style="width:100%">
                   <option value="MD">Moldova</option>
@@ -1248,6 +1259,7 @@
             <div class="set-row"><div><div class="set-row-t">Chat ID</div><div class="set-row-d">Личный или групповой chat_id. Если пусто — отправь /start боту, заполнится сам</div></div><input id="tgChatId" placeholder="614664598" style="width:140px;text-align:center;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">Время отправки (МСК)</div><div class="set-row-d">Когда отправлять сводку за вчерашний день, формат ЧЧ:ММ</div></div><input id="tgSummaryTime" placeholder="08:00" pattern="\d{2}:\d{2}" style="width:84px;text-align:center;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">Ежедневная сводка</div><div class="set-row-d">Если выключено, сводка не отправляется автоматически</div></div><label class="tgl"><input type="checkbox" id="tgSummaryEnabled"><span></span></label></div>
+            <div class="set-row"><div><div class="set-row-t">Тихий режим ночью</div><div class="set-row-d">Некритичные события остаются в колокольчике и одной строкой входят в утреннюю сводку. Критические алерты приходят сразу.</div></div><div style="display:flex;align-items:center;gap:8px"><input id="tgQuietFrom" type="time" aria-label="Начало тихого режима" style="width:92px;text-align:center;padding:7px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px"><span style="color:var(--text-3)">—</span><input id="tgQuietTo" type="time" aria-label="Конец тихого режима" style="width:92px;text-align:center;padding:7px 8px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px"><label class="tgl" title="Включить тихий режим"><input type="checkbox" id="tgNightDigestEnabled"><span></span></label></div></div>
             <div class="set-row"><div><div class="set-row-t">ID админов бота</div><div class="set-row-d">Telegram id админов через запятую — только им доступны команды /today, /yesterday, /status. Пусто = legacy-режим (админ = Chat ID выше)</div></div><input id="tgAdminIds" placeholder="614664598,123456789" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">Username бота</div><div class="set-row-d">Без @. Fallback для ссылки привязки из ЛК — обычно определяется сам через getMe</div></div><input id="tgBotUsername" placeholder="my_proxy_bot" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
             <div class="set-row"><div><div class="set-row-t">Публичный URL дашборда</div><div class="set-row-d">Ссылки в сводке и алертах ведут сюда. Пусто = https://app.arendaproxy.ru</div></div><input id="publicUrlInput" placeholder="https://app.arendaproxy.ru" autocomplete="off" style="width:200px;padding:7px 10px;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--text-0);font-size:12px;font-family:var(--font-mono)"></div>
@@ -1629,14 +1641,14 @@
 <script src="/js/admin/delegated-helpers.js?v=0823p"></script>
 <script src="/js/admin/fleet-ui.js?v=0823p"></script>
 <script src="/js/admin/analytics.js?v=0823p"></script>
-<script src="/js/admin/finance.js?v=0823t"></script>
+<script src="/js/admin/finance.js?v=0826b"></script>
 <script src="/js/admin/modems.js?v=0825b"></script>
 <script src="/js/admin/dguard.js?v=0823p"></script>
-<script src="/js/admin/settings.js?v=0826a"></script>
+<script src="/js/admin/settings.js?v=0826b"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
-<script src="/js/admin/server-metrics.js?v=0823n"></script>
-<script src="/js/admin/dashboard2.js?v=0826a"></script>
-<script src="/js/admin.js?v=0826a"></script>
+<script src="/js/admin/server-metrics.js?v=0826b"></script>
+<script src="/js/admin/dashboard2.js?v=0826b"></script>
+<script src="/js/admin.js?v=0826b"></script>
 <script src="/js/admin/sse.js?v=0823k"></script>
 </body>
 </html>

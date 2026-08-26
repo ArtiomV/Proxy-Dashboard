@@ -112,6 +112,7 @@ function create(deps) {
           st.down = true;
           alerts.trigger('modem_ping_dead', {
             server: serverName, nick, imei,
+            operator: nd.CELLOP || '',
             loss: parsed.loss_pct, latency: parsed.latency_ms,
           });
         }
@@ -120,7 +121,7 @@ function create(deps) {
       // Пинг ок
       if (st.down) {
         st.down = false;
-        alerts.trigger('modem_ping_recovered', { server: serverName, nick, imei, latency: parsed.latency_ms });
+        alerts.trigger('modem_ping_recovered', { server: serverName, nick, imei, operator: nd.CELLOP || '', latency: parsed.latency_ms });
       }
       st.deadStreak = 0;
       const slow = parsed.latency_ms > warnMs || parsed.loss_pct >= warnPct;

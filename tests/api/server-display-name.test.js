@@ -73,4 +73,24 @@ describe('API server display names', () => {
     expect(apiServers.map(s => s.name)).toEqual(['S1', 'S2']);
     expect(saved).toBe(0);
   });
+
+  it('accepts SSH credentials (mon read-only) when adding a server (26.08)', async () => {
+    const result = await request(app).post('/api/admin/servers').send({
+      name: 'RO1', url: 'http://ro1:7005', user: 'proxy', pass: 'secret',
+      publicIp: '92.180.31.223', osLogin: 'mon', osPassword: '', sshPort: 6005,
+    });
+    expect(result.status).toBe(200);
+    const added = apiServers.find(s => s.name === 'RO1');
+    expect(added).toMatchObject({ osLogin: 'mon', sshPort: 6005 });
+    expect(added.osPassword).toBeUndefined();   // пустой пароль не сохраняем — вход по ключу
+    expect(saved).toBe(1);
+  });
+
+  it('rejects an out-of-range SSH port when adding a server', async () => {
+    const result = await request(app).post('/api/admin/servers').send({
+      name: 'RO2', url: 'http://ro2:7005', user: 'proxy', pass: 'secret', sshPort: 99999,
+    });
+    expect(result.status).toBe(400);
+    expect(apiServers.find(s => s.name === 'RO2')).toBeUndefined();
+  });
 });

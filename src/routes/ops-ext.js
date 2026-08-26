@@ -508,6 +508,15 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
         upcoming: wins.filter(w => w.from_ts > now && w.from_ts <= now + 24 * 3600 * 1000),
       };
     }, { active: [], upcoming: [] });
+    const incidentSec = _runSection(logger, 'incidents', () => ({
+      active: db.prepare("SELECT * FROM monitoring_incidents WHERE state='open' ORDER BY opened_at DESC LIMIT 20").all(),
+      recent: db.prepare("SELECT * FROM monitoring_incidents ORDER BY opened_at DESC LIMIT 20").all(),
+    }), { active: [], recent: [] });
+    const speedBaselineSec = _runSection(logger, 'speed-baseline', () => {
+      const out = {};
+      for (const row of db.prepare('SELECT * FROM modem_speed_baseline_state').all()) out[row.server+'_'+row.nick]=row;
+      return out;
+    }, {});
 
     res.json({
       connsHistory: (deps.getConnsHistory ? deps.getConnsHistory() : {}),
@@ -548,6 +557,8 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       modemHttpCheck: (getHttpCheckLatest ? getHttpCheckLatest() : {}),
       // B3 (23.08): окна обслуживания (активные + ближайшие 24ч).
       maintenance: maintSec,
+      incidents: incidentSec,
+      speedBaseline: speedBaselineSec,
     });
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });

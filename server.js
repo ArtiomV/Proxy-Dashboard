@@ -1613,6 +1613,9 @@ const SETTINGS_DEFAULTS = {
   telegram_oidc_secret: '',        // OIDC client_secret — СЕКРЕТ (enc1: в kv); пусто = env TELEGRAM_OIDC_CLIENT_SECRET
   telegram_summary_enabled: true,
   telegram_summary_time: '08:00', // HH:MM МСК
+  telegram_night_digest_enabled: true, // некритичные TG-события ночью → утренняя сводка
+  telegram_quiet_from: '23:00',   // HH:MM МСК
+  telegram_quiet_to: '08:00',     // HH:MM МСК
   telegram_last_sent_date: '',    // YYYY-MM-DD — written after each successful send
   // Strict mode for Tochka webhook signatures: when true, unverified webhooks
   // are rejected outright instead of being saved for manual review. Default
@@ -2949,7 +2952,7 @@ function pushSpeedtestEntry(key, entry) {
 // Почасовой замер скорости выбранных модемов (список — настройка speedtest_modems,
 // env SPEED_MONITOR_NICKS остаётся override'ом для стендов).
 const _speedMonitor = require('./src/jobs/speed-monitor').create({
-  db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting,
+  db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting, alerts,
 });
 
 // ServerMetrics: снимок загрузки боксов (SSH cpu/load/mem/… + HTTP-панель

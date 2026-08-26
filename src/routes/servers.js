@@ -13,7 +13,7 @@
 const express = require('express');
 const credCheck = require('../services/cred-check');
 const predictive = require('../monitoring/predictive');
-const { buildForecasts } = require('../jobs/volume-guard');
+const { buildForecasts, buildPackageEfficiency } = require('../jobs/volume-guard');
 
 module.exports = function createServersRouter(deps) {
   const {
@@ -147,6 +147,7 @@ r.get('/api/admin/server_metrics', authMiddleware, adminMiddleware, (req, res) =
       metric.baselines = analysis.baselines;
       metric.anomalies = analysis.anomalies;
       metric.disk_forecast = analysis.disk_forecast;
+      metric.cpu_forecast = analysis.cpu_forecast;
     }
   } catch (e) {
     logger.warn('[ServerMetrics] read failed: ' + e.message);
@@ -245,7 +246,8 @@ r.get('/api/admin/operator-package-forecast', authMiddleware, adminMiddleware, (
     if (!Array.isArray(packages)) packages = [];
   } catch (_) { packages = []; }
   const forecasts = buildForecasts(db, packages, new Date());
-  res.json({ generated_at: new Date().toISOString(), forecasts });
+  const efficiency = buildPackageEfficiency(db, packages, new Date());
+  res.json({ generated_at: new Date().toISOString(), forecasts, efficiency });
 });
 
 r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
@@ -317,9 +319,17 @@ r.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, async (req,
 });
 
 r.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) => {
-  const { name, displayName, url, user, pass, publicIp, country, countryName, tz } = req.body;
+  const { name, displayName, url, user, pass, publicIp, country, countryName, tz, osLogin, osPassword, sshPort } = req.body;
   if (!name || !url || !user || !pass) return res.status(400).json({ error: 'name, url, user, pass required' });
   if (apiServers.find(s => s.name === name)) return res.status(409).json({ error: 'Server name already exists' });
+  // 26.08: SSH-реквизиты (mon read-only для выгрузки метрик) принимаем сразу
+  // при добавлении — иначе сервер стартует без CPU/RAM до ручной правки.
+  let sshPortNum;
+  if (sshPort !== undefined && sshPort !== '' && sshPort !== null) {
+    const p = Number(sshPort);
+    if (!(p > 0 && p < 65536)) return res.status(400).json({ error: 'sshPort must be 1..65535 or empty' });
+    sshPortNum = p;
+  }
   const cleanDisplayName = String(displayName || '').replace(/\s+/g, ' ').trim();
   if (cleanDisplayName.length > 60 || /[\u0000-\u001f\u007f]/.test(cleanDisplayName)) {
     return res.status(400).json({ error: 'Название сервера: до 60 символов, без управляющих символов' });
@@ -331,6 +341,9 @@ r.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) =
   // Test connectivity
   try {
     const testServer = { name, displayName: cleanDisplayName || undefined, url, user, pass, publicIp: publicIp || new URL(url).hostname, country: country || '', countryName: countryName || name, tz: tz || 'Europe/Moscow' };
+    if (osLogin !== undefined && String(osLogin).trim()) testServer.osLogin = String(osLogin).trim();
+    if (osPassword !== undefined && String(osPassword)) testServer.osPassword = String(osPassword);
+    if (sshPortNum) testServer.sshPort = sshPortNum;
     const status = await fetchApi(testServer, '/apix/show_status_json', 10000);
     const modemCount = Array.isArray(status) ? status.length : 0;
     // Add to runtime. SERVER_COUNTRIES is rebuilt inside saveApiServersToDb
@@ -448,7 +461,7 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
     patch.operator_gb_costs = oc;
   }
   // A4 (23.08): пакеты операторов — JSON-массив [{operator, type, volume_gb,
-  // max_sims, price, currency, hourly_gb, pace_pct}]. Количество SIM берётся
+  // max_sims, price, currency, renewal_day, hourly_gb, pace_pct}]. Количество SIM берётся
   // из modem_meta. shared = ceil(SIM/max_sims) × price; per_sim = SIM × price;
   // unlimited = одна фиксированная месячная цена при наличии активных SIM.
   // До 20 строк; operator ≤60 символов; type — per_sim/shared/unlimited.
@@ -481,6 +494,7 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
         max_sims: type === 'per_sim' ? 1 : type === 'shared' ? Math.floor(num(p.max_sims, 1e5)) : 0,
         price: num(p.price, 1e9),
         currency,
+        renewal_day: Math.max(1, Math.min(31, parseInt(p.renewal_day) || 1)),
         hourly_gb: num(p.hourly_gb, 1e5),
         pace_pct: type === 'unlimited' ? 0 : Math.min(100, num(p.pace_pct, 100)),
       });
@@ -565,6 +579,7 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.telegram_bot_token != null && req.body.telegram_bot_token !== '••••••••')  patch.telegram_bot_token       = String(req.body.telegram_bot_token).trim();
   if (req.body.telegram_chat_id != null)         patch.telegram_chat_id         = String(req.body.telegram_chat_id).trim();
   if (req.body.telegram_summary_enabled != null) patch.telegram_summary_enabled = !!req.body.telegram_summary_enabled;
+  if (req.body.telegram_night_digest_enabled != null) patch.telegram_night_digest_enabled = !!req.body.telegram_night_digest_enabled;
   // WP5 (B2C Э3): whitelist админов бота — CSV числовых telegram id.
   // Пустая строка = legacy-режим (админ = telegram_chat_id).
   if (req.body.telegram_admin_ids != null) {
@@ -689,9 +704,21 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.simulator_max_workers != null)      patch.simulator_max_workers      = Math.max(1, Math.min(200, parseInt(req.body.simulator_max_workers) || 50));
   if (req.body.simulator_max_sse != null)          patch.simulator_max_sse          = Math.max(1, Math.min(100, parseInt(req.body.simulator_max_sse) || 10));
   if (req.body.simulator_max_duration_min != null) patch.simulator_max_duration_min = Math.max(1, Math.min(240, parseInt(req.body.simulator_max_duration_min) || 30));
+  const validClock = value => {
+    const m = /^(\d{2}):(\d{2})$/.exec(String(value || ''));
+    return !!m && Number(m[1]) <= 23 && Number(m[2]) <= 59;
+  };
   if (req.body.telegram_summary_time != null) {
     const t = String(req.body.telegram_summary_time);
-    if (/^\d{2}:\d{2}$/.test(t)) patch.telegram_summary_time = t;
+    if (validClock(t)) patch.telegram_summary_time = t;
+  }
+  if (req.body.telegram_quiet_from != null) {
+    const t = String(req.body.telegram_quiet_from);
+    if (validClock(t)) patch.telegram_quiet_from = t;
+  }
+  if (req.body.telegram_quiet_to != null) {
+    const t = String(req.body.telegram_quiet_to);
+    if (validClock(t)) patch.telegram_quiet_to = t;
   }
 
   // Live-проверка кредов ДО записи (15.08, по запросу): фатальный вердикт

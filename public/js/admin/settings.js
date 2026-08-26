@@ -145,13 +145,16 @@ function addServer(){
   var user=document.getElementById('newSrvUser').value.trim()||'proxy';
   var pass=document.getElementById('newSrvPass').value.trim();
   var publicIp=document.getElementById('newSrvIp').value.trim();
+  var osLogin=(document.getElementById('newSrvOsLogin')||{}).value.trim();
+  var osPass=(document.getElementById('newSrvOsPass')||{}).value||'';
+  var sshPort=(document.getElementById('newSrvSshPort')||{}).value.trim();
   var country=document.getElementById('newSrvCountry').value;
   var countryName=country==='MD'?'Moldova':'Romania';
   var tz=country==='MD'?'Europe/Chisinau':'Europe/Bucharest';
   var status=document.getElementById('addSrvStatus');
   if(!name||!url||!pass){status.textContent='Заполните имя, URL и пароль';status.style.color='var(--danger)';return}
   status.textContent='Проверяю подключение...';status.style.color='var(--warning)';
-  api(API+'/api/admin/servers',{method:'POST',json:{name:name,displayName:displayName.trim(),url:url,user:user,pass:pass,publicIp:publicIp,country:country,countryName:countryName,tz:tz}}).then(function(d){
+  api(API+'/api/admin/servers',{method:'POST',json:{name:name,displayName:displayName.trim(),url:url,user:user,pass:pass,publicIp:publicIp,country:country,countryName:countryName,tz:tz,osLogin:osLogin,osPassword:osPass,sshPort:sshPort}}).then(function(d){
     if(d.ok){status.textContent='Добавлен! '+d.modemCount+' модемов';status.style.color='var(--success)';loadServersList();setTimeout(loadData,2000)}
     else{status.textContent=d.error||'Ошибка';status.style.color='var(--danger)'}
   }).catch(function(e){status.textContent=e.message;status.style.color='var(--danger)'})
@@ -271,6 +274,9 @@ function loadSettings(){
     var tgC=document.getElementById('tgChatId');if(tgC)tgC.value=s.telegram_chat_id||'';
     var tgTm=document.getElementById('tgSummaryTime');if(tgTm)tgTm.value=s.telegram_summary_time||'08:00';
     var tgEn=document.getElementById('tgSummaryEnabled');if(tgEn)tgEn.checked=!!s.telegram_summary_enabled;
+    var tgNd=document.getElementById('tgNightDigestEnabled');if(tgNd)tgNd.checked=(s.telegram_night_digest_enabled!==false);
+    var tgQf=document.getElementById('tgQuietFrom');if(tgQf)tgQf.value=s.telegram_quiet_from||'23:00';
+    var tgQt=document.getElementById('tgQuietTo');if(tgQt)tgQt.value=s.telegram_quiet_to||'08:00';
     // WP5 (B2C Э3): whitelist админов бота + username-fallback
     var tgA=document.getElementById('tgAdminIds');if(tgA)tgA.value=s.telegram_admin_ids||'';
     var tgU=document.getElementById('tgBotUsername');if(tgU)tgU.value=s.telegram_bot_username||'';
@@ -342,6 +348,9 @@ function tgSaveSettings(){
     telegram_chat_id:(document.getElementById('tgChatId').value||'').trim(),
     telegram_summary_time:(document.getElementById('tgSummaryTime').value||'').trim(),
     telegram_summary_enabled:!!document.getElementById('tgSummaryEnabled').checked,
+    telegram_night_digest_enabled:!!document.getElementById('tgNightDigestEnabled').checked,
+    telegram_quiet_from:(document.getElementById('tgQuietFrom').value||'23:00').trim(),
+    telegram_quiet_to:(document.getElementById('tgQuietTo').value||'08:00').trim(),
     telegram_admin_ids:(document.getElementById('tgAdminIds').value||'').trim(),
     telegram_bot_username:(document.getElementById('tgBotUsername').value||'').trim(),
     public_url:(document.getElementById('publicUrlInput').value||'').trim(),
@@ -604,6 +613,7 @@ function _opPkgOptions(selected){
   return '<option value="">Выберите оператора</option>'+names.map(function(n){return '<option value="'+esc(n)+'"'+(String(n).toLowerCase()===String(selected||'').toLowerCase()?' selected':'')+'>'+esc(n)+'</option>';}).join('');
 }
 var _opPkgForecasts=[];
+var _opPkgEfficiency=[];
 function _opPkgForecastText(operator,type){
   if(type==='unlimited')return '∞ безлимит';
   var op=String(operator||'').toLowerCase();
@@ -615,12 +625,26 @@ function _opPkgForecastText(operator,type){
   var reset=f.reset_date?' · обновление '+String(f.reset_date).slice(8,10)+'.'+String(f.reset_date).slice(5,7):'';
   return '~'+days+' д'+(f.scope==='sim'&&f.nick?' · '+f.nick:'')+reset;
 }
+function _opPkgEfficiencyText(operator,type){
+  var op=String(operator||'').toLowerCase();
+  var e=_opPkgEfficiency.find(function(x){return String(x.operator||'').toLowerCase()===op;});
+  if(!e)return 'прошлый период: нет данных';
+  if(type==='unlimited')return 'прошлый период: '+Number(e.used_gb||0).toLocaleString('ru-RU')+' ГБ';
+  if(e.status==='not_configured')return 'прошлый период: заполните параметры';
+  var pct=e.utilization_pct==null?'—':Math.round(e.utilization_pct)+'%';
+  var unused=Number(e.unused_gb||0).toLocaleString('ru-RU')+' ГБ не использовано';
+  var money=e.wasted_cost>0?' · ~'+Math.round(e.wasted_cost).toLocaleString('ru-RU')+' '+esc(e.currency||''):' ';
+  return 'прошлый период: '+pct+' использовано · '+unused+money;
+}
 function opPkgLoadForecasts(){
   api(API+'/api/admin/operator-package-forecast').then(function(d){
     _opPkgForecasts=(d&&d.forecasts)||[];
+    _opPkgEfficiency=(d&&d.efficiency)||[];
     document.querySelectorAll('#opPkgRows .op-pkg-row').forEach(function(r){
       var cell=r.querySelector('.opp-forecast');
       if(cell)cell.textContent=_opPkgForecastText(r.querySelector('.opp-op').value,r.querySelector('.opp-type').value);
+      var efficiency=r.querySelector('.opp-efficiency');
+      if(efficiency)efficiency.textContent=_opPkgEfficiencyText(r.querySelector('.opp-op').value,r.querySelector('.opp-type').value);
     });
   }).catch(function(){});
 }
@@ -662,6 +686,8 @@ function opPkgRecalcRow(row){
   if(note){note.textContent=missing.length?'Нужно заполнить: '+missing.join(', '):'Расчёт заполнен';note.classList.toggle('is-ok',!missing.length);}
   var forecast=row.querySelector('.opp-forecast');
   if(forecast)forecast.textContent=_opPkgForecastText(p.operator,p.type);
+  var efficiency=row.querySelector('.opp-efficiency');
+  if(efficiency)efficiency.textContent=_opPkgEfficiencyText(p.operator,p.type);
 }
 function opPkgTypeChanged(row){
   if(!row)return;
@@ -694,7 +720,7 @@ function opPkgRender(s){
       +'<label class="opp-field-max"><span>Максимум SIM в бандле</span><div class="opp-input-unit"><input class="input opp-max" type="number" min="1" step="1" value="'+max+'" placeholder="шт" data-on-input="opPkgRecalcRow(this.closest(\'.op-pkg-row\'))"><b>SIM</b></div></label>'
       +'</div>'
       +'<div class="opp-calc"><div class="opp-calc-connected"><span>Подключено</span><b class="opp-sim-count">'+sim+' SIM</b></div><em>→</em><div class="opp-calc-units"><span class="opp-unit-label">К оплате бандлов</span><b class="opp-bundle-count">—</b></div><em>→</em><div class="is-total"><span class="opp-total-label">Оплата оператору</span><b class="opp-total">—</b><small class="opp-capacity"></small></div></div>'
-      +'<div class="opp-foot"><span class="opp-missing"></span><span>Прогноз: <b class="opp-forecast">'+esc(_opPkgForecastText(p.operator,type))+'</b></span></div>'
+      +'<div class="opp-foot"><span class="opp-missing"></span><span>Прогноз: <b class="opp-forecast">'+esc(_opPkgForecastText(p.operator,type))+'</b></span><span class="opp-efficiency">'+esc(_opPkgEfficiencyText(p.operator,type))+'</span></div>'
       +'<details class="opp-advanced"><summary>Обновление тарифа и пороги</summary><div><label>День обновления тарифа <input class="input opp-renewal" type="number" min="1" max="31" step="1" value="'+(Math.min(31,Math.max(1,parseInt(p.renewal_day,10)||1)))+'" placeholder="1" title="Число месяца, когда оператор обнуляет пакет. Остаток и темп считаются от этой даты"></label><label>Аномалия за час, ГБ <input class="input opp-hour" type="number" min="0" value="'+(p.hourly_gb||'')+'" placeholder="авто"></label><label>Темп пакета, %/сут <input class="input opp-pace" type="number" min="0" max="100" value="'+(unlimited?0:(p.pace_pct||0))+'" '+(unlimited?'disabled ':'')+'placeholder="0"></label></div></details>'
       +'</article>';
   });

@@ -39,6 +39,7 @@ const COOLDOWN_KV_KEY = 'telegram_alert_cooldowns';
 let logger, getSetting, appSettings, kvSetCritical, kvGet, db, tgBot;
 let eventsBus = null;        // SSE (23.08): шина src/events.js — событие 'alert' после _persistToBell
 let _insertNotif = null;   // prepared statement, lazy-init on first trigger
+let _incidentManager = null; // correlation: 3+ modem failures → one incident
 
 // B2 (23.08): acknowledge («в работе»/«решено»). Активные ack-и кэшируются
 // из alert_acks (перечитываем раз в 30 сек, инвалидация при записи в
@@ -179,6 +180,13 @@ function init(deps) {
   // SQLite connection. Prepared statements are connection-bound.
   _insertNotif = null;
   _findBellByKey = null;
+  if (_incidentManager && _incidentManager.shutdown) _incidentManager.shutdown();
+  _incidentManager = require('./incidents').create({
+    db, logger, getSetting,
+    // Bypass correlation for the synthetic incident rules and for delayed
+    // individual fallbacks. All normal gates still run in _triggerNow().
+    emit: (ruleId, payload) => _triggerNow(ruleId, payload),
+  });
 
   // Restore cooldowns persisted from the previous process so a quick restart
   // doesn't reset all rate-limits.
@@ -333,6 +341,23 @@ const RULES = {
       return `🚨 <b>Не работает модемов: ${p.count}</b>\n\nПо серверам: ${esc(p.servers || '—')}\n\n${esc(kept.join('\n'))}`
         + (more > 0 ? `\n…и ещё ${more}` : '');
     },
+  },
+
+  fleet_incident_opened: {
+    title: 'Групповой инцидент в парке',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 300,
+    dedupeKey: p => 'incident_' + (p.incident_id || ''),
+    render: p => `🚨 <b>Групповой инцидент</b>\n\n<b>${esc(p.hypothesis || 'Общая проблема')}</b> на <b>${esc(_srvLabel(p.server) || '?')}</b>.\nЗатронуто модемов: <b>${p.modems || 0}</b>, клиентов: <b>${p.clients || 0}</b>.\nМодемы: ${esc(p.modem_list || '—')}\nСигналы: ${esc(p.reasons || '—')}\n\nОдиночные алерты этой группы подавлены.`,
+  },
+  fleet_incident_closed: {
+    title: 'Групповой инцидент завершён',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 60,
+    dedupeKey: p => 'incident_closed_' + (p.incident_id || ''),
+    render: p => `🟢 <b>Инцидент завершён</b>\n\n${esc(p.operator || 'Проблема связи')} на <b>${esc(_srvLabel(p.server) || '?')}</b>.\nДлился <b>${formatDuration(p.duration_sec || 0)}</b>, затронуто модемов: <b>${p.modems || 0}</b>, клиентов: <b>${p.clients || 0}</b>.`,
   },
 
   // ── 🟡 IMPORTANT ────────────────────────────────────────────
@@ -874,6 +899,22 @@ const RULES = {
     dedupeKey: p => 'httprec_' + (p.server || '') + '_' + (p.nick || ''),
     render: p => `🟢 <b>Сайт снова открывается</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — чек проходит${p.ms != null ? ` (${p.ms} мс)` : ''}.`,
   },
+  modem_speed_baseline_degraded: {
+    title: 'Модем: скорость ниже собственной нормы',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 21600,
+    dedupeKey: p => 'speedbase_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
+    render: p => `🟠 <b>Модем деградировал</b>\n\n<b>${esc(p.nick || p.imei || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — скорость <b>${p.current} Мбит/с</b>, собственная норма за 7 дней <b>${p.baseline} Мбит/с</b>.\nПадение на <b>${p.drop_pct}%</b> подтверждено двумя замерами подряд (${p.samples} замеров в baseline).`,
+  },
+  modem_speed_baseline_recovered: {
+    title: 'Модем: скорость вернулась к норме',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 60,
+    dedupeKey: p => 'speedbaserec_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
+    render: p => `🟢 <b>Скорость восстановилась</b>\n\n<b>${esc(p.nick || p.imei || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — сейчас <b>${p.current} Мбит/с</b>, норма за 7 дней ${p.baseline} Мбит/с.`,
+  },
   server_metric_anomaly: {
     title: 'Сервер: отклонение от динамической нормы',
     priority: 'important',
@@ -964,12 +1005,16 @@ const _entityFor = {
   client_charge_failed:      p => ({ kind: 'client',  id: p.client_id || null }),
   modem_offline_20m:         p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   modems_down_bulk:          () => ({ kind: 'fleet',   id: null }),
+  fleet_incident_opened:     p => ({ kind: 'fleet',   id: p.incident_id || null }),
+  fleet_incident_closed:     p => ({ kind: 'fleet',   id: p.incident_id || null }),
   modem_recovered:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   modem_ping_dead:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   modem_ping_recovered:      p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   modem_ping_slow:           p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   modem_http_fail:           p => ({ kind: 'modem',   id: p.nick || null }),
   modem_http_recovered:      p => ({ kind: 'modem',   id: p.nick || null }),
+  modem_speed_baseline_degraded: p => ({ kind: 'modem', id: p.nick || p.imei || null }),
+  modem_speed_baseline_recovered: p => ({ kind: 'modem', id: p.nick || p.imei || null }),
   volume_modem_hourly:       p => ({ kind: 'modem',   id: p.nick || null }),
   volume_package_pace:       p => ({ kind: 'system',  id: 'volume:' + (p.operator || p.nick || '') }),
   volume_package_exhaustion: p => ({ kind: p.scope === 'sim' ? 'modem' : 'system', id: p.nick || ('volume:' + (p.operator || '')) }),
@@ -1084,7 +1129,7 @@ function _persistToBell(rule, ruleId, payload, dedup, renderedHtml) {
   }
 }
 
-function trigger(ruleId, payload) {
+function _triggerNow(ruleId, payload) {
   try {
     const rule = RULES[ruleId];
     if (!rule) { logger.warn('[Alerts] unknown rule: ' + ruleId); return false; }
@@ -1131,9 +1176,22 @@ function trigger(ruleId, payload) {
       boxDownState.set(_srv, { since: Date.now(), suppressed: 0 });
     }
 
+    const nightDeferred = rule.channel !== 'bell'
+      && rule.priority !== 'critical'
+      && appSettings.telegram_summary_enabled !== false
+      && appSettings.telegram_night_digest_enabled !== false
+      && _isQuietTime(
+        Date.now(),
+        appSettings.telegram_quiet_from || '23:00',
+        appSettings.telegram_quiet_to || '08:00'
+      );
+    const bellPayload = nightDeferred
+      ? { ...(payload || {}), _telegram_night_deferred: true }
+      : payload;
+
     // Bell first — independent of Telegram. Even if chat_id is unset or TG is
     // down, admins still see the event in the in-app panel.
-    _persistToBell(rule, ruleId, payload, dedup, text);
+    _persistToBell(rule, ruleId, bellPayload, dedup, text);
 
     // SSE (23.08): дублируем алерт в realtime-канал мгновенно — колокольчик
     // обновляется без ожидания polling'а. ПОСЛЕ _persistToBell: SSE лишь
@@ -1150,6 +1208,13 @@ function trigger(ruleId, payload) {
     // configured. The «Test» button in Settings still calls through here,
     // so the operator can preview how the card renders in the panel.
     if (rule.channel === 'bell') return true;
+
+    // Night mode reduces Telegram noise without hiding evidence: the event is
+    // already persisted in the in-app bell above and will be counted in the
+    // morning summary. Critical rules (including correlated fleet incidents)
+    // always remain immediate. The gate is tied to the daily summary switch so
+    // events cannot be silently deferred when no digest is going to be sent.
+    if (nightDeferred) return true;
 
     const token = getSetting('telegram_bot_token', '');   // WP5: enc1: в kv — не читать appSettings напрямую (шифртекст)
     const chatId = appSettings.telegram_chat_id;
@@ -1188,6 +1253,27 @@ function trigger(ruleId, payload) {
     logger.warn('[Alerts] trigger error: ' + e.message);
     return false;
   }
+}
+
+function trigger(ruleId, payload) {
+  try {
+    // Do not queue disabled/boot-grace/maintenance/server-cascade events: the
+    // normal path owns those gates and their suppression counters.
+    const _irule = RULES[ruleId];
+    const _idedup = _irule && typeof _irule.dedupeKey === 'function' ? _irule.dedupeKey(payload || {}) : 'global';
+    const _icooldown = _irule ? (cooldownState.get(ruleId + '|' + _idedup) || 0) : 0;
+    const canCorrelate = _incidentManager && isRuleEnabled(ruleId)
+      && Date.now() - _bootAt >= BOOT_GRACE_MS
+      && !(payload && payload.server && _depsEnabled() && boxDownState.has(payload.server) && SUPPRESSIBLE_RULES.has(ruleId))
+      && !maintenance.isInMaintenance(db, { server: payload && payload.server, nick: payload && payload.nick }, Date.now())
+      && !_ackActive(ruleId, _idedup)
+      && (!_irule || Date.now() - _icooldown >= (_irule.cooldownSec || 0) * 1000);
+    if (canCorrelate) {
+      const result = _incidentManager.handle(ruleId, payload || {});
+      if (result && result.handled) return !!result.accepted;
+    }
+  } catch (e) { logger.warn('[Incidents] handle: ' + e.message); }
+  return _triggerNow(ruleId, payload);
 }
 
 // Explicit diagnostics from Settings → Notifications. Unlike trigger(), this
@@ -1309,8 +1395,27 @@ function formatDuration(sec) {
   return h + ' ч ' + (m % 60) + ' мин';
 }
 
+// Pure helper exported for regression tests. Moscow has a fixed UTC+3 offset,
+// so daylight-saving conversions are deliberately unnecessary here.
+function _isQuietTime(nowMs, from, to) {
+  const parse = value => {
+    const m = /^(\d{2}):(\d{2})$/.exec(String(value || ''));
+    if (!m) return null;
+    const h = Number(m[1]), min = Number(m[2]);
+    return h <= 23 && min <= 59 ? h * 60 + min : null;
+  };
+  const start = parse(from), end = parse(to);
+  if (start == null || end == null || start === end) return false;
+  const msk = new Date(Number(nowMs) + 3 * 3600 * 1000);
+  const current = msk.getUTCHours() * 60 + msk.getUTCMinutes();
+  return start < end
+    ? current >= start && current < end
+    : current >= start || current < end;
+}
+
 module.exports = { init, trigger, testRule, clearCooldown, listRules, recordBellEvent, isRuleEnabled, RULES,
   onAlertAck,                     // B2: обработчик inline-кнопок (bot.js)
   _ackHash, _ackInvalidate,       // B2: для тестов
+  _isQuietTime,                  // ночной digest: pure helper для тестов
   _boxDownState: boxDownState,   // B1: для тестов и диагностики
 };

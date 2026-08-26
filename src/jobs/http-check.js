@@ -136,6 +136,7 @@ function create(deps) {
       const portsMap = data.ports || {};
       for (const m of (Array.isArray(data.status) ? data.status : [])) {
         const md = m.modem_details || {};
+        const nd = m.net_details || {};
         const nick = md.NICK;
         if (!nick || /^random/i.test(nick)) continue;
         if (!m.net_details || m.net_details.IS_ONLINE !== 'yes') {
@@ -145,7 +146,8 @@ function create(deps) {
         const port = pickValidClientHttpPort(portsMap[md.IMEI]);
         if (!port) { targets.push({ server: srv, nick, unavailable: true }); continue; }
         targets.push({
-          server: srv, nick,
+          server: srv, nick, imei: md.IMEI || '', operator: nd.CELLOP || '',
+          clients: port.portName ? [String(port.portName)] : [],
           proxy: { host, port: parseInt(port.HTTP_PORT, 10), login: port.LOGIN || '', password: port.PASSWORD || '' },
         });
       }
@@ -212,7 +214,7 @@ function create(deps) {
           st.failing = false;
         } else if (good) {
           ok++;
-          if (st.failing) { st.failing = false; alerts.trigger('modem_http_recovered', { server: t.server, nick: t.nick, ms: totalMs }); }
+          if (st.failing) { st.failing = false; alerts.trigger('modem_http_recovered', { server: t.server, nick: t.nick, imei: t.imei, operator: t.operator, clients: t.clients, ms: totalMs }); }
           st.failStreak = 0;
         } else {
           failed++;
@@ -220,7 +222,7 @@ function create(deps) {
           // Оффлайн-модем — территория modem_offline-алертов, не дублируем.
           if (!t.offline && !t.unavailable && st.failStreak >= 2 && !st.failing) {
             st.failing = true;
-            alerts.trigger('modem_http_fail', { server: t.server, nick: t.nick, error, status, url: cfg.url });
+            alerts.trigger('modem_http_fail', { server: t.server, nick: t.nick, imei: t.imei, operator: t.operator, clients: t.clients, error, status, url: cfg.url });
           }
         }
       }

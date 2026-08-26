@@ -318,6 +318,7 @@ function srvMetRowV2(ic, title, sub, current, absText, average, series, options)
 function renderServerMetrics(box, d) {
   window._srvMetData = d || {};
   if (typeof renderNewFleetServers === 'function') renderNewFleetServers();
+  try { if (localStorage.getItem('admin_active_tab') === 'dashboard2' && typeof renderDashboard2 === 'function') renderDashboard2(); } catch (_) {}
 }
 
 function loadServerMetrics(force) {

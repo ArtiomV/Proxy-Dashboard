@@ -19,8 +19,10 @@ const Database = require('better-sqlite3');
 const alerts = require('../src/telegram/alerts.js');
 
 let db, sendMessage, tgRequest;
-const appSettings = { telegram_chat_id: '123' };
-const kv = { telegram_bot_token: 'tok' };   // getSetting читает отсюда
+// This suite tests Telegram buttons/cooldowns, not the five-minute incident
+// correlation queue (covered separately in incidents.test.js).
+const appSettings = { telegram_chat_id: '123', alert_incident_correlation_enabled: false };
+const kv = { telegram_bot_token: 'tok', alert_incident_correlation_enabled: false };   // getSetting читает отсюда
 
 beforeAll(() => {
   db = new Database(':memory:');

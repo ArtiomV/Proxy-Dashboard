@@ -94,20 +94,19 @@ function doLogin(){window.location.href='/'}
 function doLogout(){api(API+'/api/logout',{method:'POST'});authToken='';localStorage.removeItem('pr_admin_token');localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');window.location.href='/'}
 
 // ========== NAV ==========
-var _activeBankTab='acts';
+var _activeBankTab='overview';
 var _bankEverRendered=false;
 function switchBankNav(name){
-  // Вкладка «Обзор» со страницы финансов убрана (2026-08-04): сводка живёт на
-  // дашборде (ряд «Требует внимания» + финсводка), здесь только документы/деньги.
-  ['acts','bills','payments'].forEach(function(t){
+  ['overview','acts','bills','payments'].forEach(function(t){
     var nav=document.getElementById('bnav_'+t);
-    var secMap={acts:'bankDocumentsSection',bills:'bankBillsSection',payments:'bankPaymentsSection'};
+    var secMap={overview:'bankOverviewSection',acts:'bankDocumentsSection',bills:'bankBillsSection',payments:'bankPaymentsSection'};
     var sec=document.getElementById(secMap[t]);
     if(nav)nav.classList.toggle('active',t===name);
     if(sec)sec.style.display=t===name?'':'none';
   });
   _activeBankTab=name;
-  if(name==='acts'&&currentData)renderBankDocuments();
+  if(name==='overview')renderFinancesTabNew();
+  else if(name==='acts'&&currentData)renderBankDocuments();
   else if(name==='bills'&&currentData)renderBankBills();
   else if(name==='payments'&&currentData)renderBankPayments();
 }
@@ -164,7 +163,7 @@ document.addEventListener('input',function(e){var t=e.target;if(t&&t.dataset&&t.
 document.addEventListener('change',function(e){var t=e.target;if(t&&t.dataset&&t.closest&&t.closest('#tab-analytics')&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))t.dataset.dirty='1'});
 function _analyticsDirty(){var t=document.getElementById('tab-analytics');if(!t)return false;var ae=document.activeElement;if(ae&&t.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return true;return !!t.querySelector('[data-dirty="1"]')}
 function _clearSettingsDirty(){var t=document.getElementById('tab-analytics');if(!t)return;t.querySelectorAll('[data-dirty="1"]').forEach(function(el){el.dataset.dirty=''})}
-function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});if(el)el.classList.add('active');var tc=document.getElementById('tab-'+name);if(tc)tc.classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'&&!auto){try{renderAccNew();}catch(e){console.error(e);}}if(name==='dashboard2'&&!auto){try{renderDashboard2();}catch(e){console.error(e);}}if(name==='clients'&&!auto)renderClients();if(name==='analytics'&&!auto){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
+function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});if(el)el.classList.add('active');var tc=document.getElementById('tab-'+name);if(tc)tc.classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'&&!auto){try{renderAccNew();}catch(e){console.error(e);}}if(name==='dashboard2'&&!auto){try{renderDashboard2();loadServerMetrics();}catch(e){console.error(e);}}if(name==='clients'&&!auto)renderClients();if(name==='analytics'&&!auto){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
 
 // Polling/SSE refreshes already rendered blocks in place. Re-entering the tab
 // used to reset asynchronous screens to their «Загрузка» skeleton every minute.
@@ -1164,6 +1163,8 @@ function processData(){if(!currentData)return;_initServers(currentData.servers);
     m.pcErrToday=td?td.errors:0;
     m.pcErrorPctToday=td&&td.total>0?Math.round((td.errors||0)/td.total*100):null;
     m.pcConsecFails=pcConsecMap[pKey]||0;
+    var _base=(currentData.speedBaseline||{})[pKey];
+    if(_base){m.baselineDegraded=!!_base.degraded;m.speedBaselineDl=Number(_base.baseline_dl||0);m.speedBaselineCurrent=Number(_base.current_dl||0);}
   }
   currentData._modemMap=mm;
 }
@@ -1271,14 +1272,6 @@ function bulkResetIp(){
     Promise.all(promises).then(function(){showToast('Сброс IP отправлен для '+items.length+' модемов','success');clearBulkSel();setTimeout(loadData,3000)}).catch(function(e){showToast('Ошибка: '+esc(e.message),'error')});
   },'Сбросить','Массовый сброс IP');
 }
-function bulkReboot(){
-  var items=Object.keys(window._bulkSel);if(!items.length)return;
-  confirmDialog('Перезагрузить '+items.length+' модемов?',function(){
-    var promises=items.map(function(imei){var s=window._bulkSel[imei];return api(API+'/api/admin/reboot',{method:'POST',json:{imei:imei,serverName:s.server}})});
-    Promise.all(promises).then(function(){showToast('Ребут отправлен для '+items.length+' модемов','success');clearBulkSel();setTimeout(loadData,5000)}).catch(function(e){showToast('Ошибка: '+esc(e.message),'error')});
-  },'Перезагрузить','Массовый ребут',true);
-}
-
 function bulkDelete(){
   var items=Object.keys(window._bulkSel);if(!items.length)return;
   confirmDialog('Удалить '+items.length+' модем(ов) из дашборда?\n\nОфлайн/призрачные исчезнут навсегда. Физически живые вернутся при следующем опросе ProxySmart.',function(){

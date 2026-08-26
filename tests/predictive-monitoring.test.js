@@ -57,4 +57,16 @@ describe('predictive monitoring', () => {
     expect(f.days_left).toBeNull();
     expect(f.full_date).toBeNull();
   });
+
+  it('forecasts CPU capacity only from a sustained daily trend', () => {
+    const growing = Array.from({ length: 7 * 6 }, (_, i) => row(i / 6, 3000, 30 + (i / 6) * 5));
+    const f = predictive.cpuForecast(growing, { minDays: 4, limitPct: 85 });
+    expect(f.status).toBe('growing');
+    expect(f.growth_pct_day).toBeCloseTo(5, 0);
+    expect(f.days_left).toBeGreaterThan(4);
+    expect(f.days_left).toBeLessThan(7);
+    const flat = predictive.cpuForecast(growing.map((r, i) => ({ ...r, cpu_pct: 35 + (i % 3) })), { minDays: 4 });
+    expect(flat.status).toBe('stable');
+    expect(flat.days_left).toBeNull();
+  });
 });

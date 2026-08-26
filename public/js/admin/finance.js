@@ -52,6 +52,9 @@ function _injectFinxStyle() { /* finance styles now live in css/finance.css */ }
 function _renderFinanceDashboard(c, d) {
   var s = d.summary || {};
   var costByCat = d.cost_by_category || {};
+  var f30 = d.revenue_forecast_30d || {};
+  var aging = d.receivables || {};
+  var bankRec = d.bank_reconciliation || {};
   _injectFinxStyle();
 
   var periods = [];
@@ -95,8 +98,8 @@ function _renderFinanceDashboard(c, d) {
     ? (s.cost_carried_from ? '<span style="color:var(--am)">типовые из ' + esc(s.cost_carried_from) + '</span> · ' + costPct + '%' : (costPct + '% от выручки'))
     : '<span style="color:var(--am)">не введены</span>';
   h += '<div class="fx-kpi a"><div class="fx-kl">Затраты</div><div class="fx-kv">' + (cost > 0 ? money(cost) : '—') + '</div><div class="fx-ks">' + costSub + '</div></div>';
-  h += '<div class="fx-kpi g"><div class="fx-kl">Прибыль</div><div class="fx-kv" style="color:var(--gr)">' + money(profit) + '</div><div class="fx-ks">' + (isCur ? 'run-rate ' + shortCurrency(profitForecast) + ' (ожидание)' : 'за месяц') + '</div></div>';
-  h += '<div class="fx-kpi g"><div class="fx-kl">Маржа</div><div class="fx-kv" style="color:var(--gr)">' + (marginPct == null ? '—' : marginPct + '%') + '</div><div class="fx-ks">' + (s.margin_per_modem != null ? Math.round(s.margin_per_modem).toLocaleString('ru-RU') + ' ₽/модем' : '') + '</div></div>';
+  h += '<div class="fx-kpi '+(profit>=0?'g':'r')+'"><div class="fx-kl">Прибыль</div><div class="fx-kv" style="color:var('+(profit>=0?'--gr':'--rd')+')">' + money(profit) + '</div><div class="fx-ks">' + (isCur ? 'run-rate ' + shortCurrency(profitForecast) + ' (ожидание)' : 'за месяц') + '</div></div>';
+  h += '<div class="fx-kpi '+(marginPct==null?'':marginPct>=0?'g':'r')+'"><div class="fx-kl">Маржа</div><div class="fx-kv" style="color:var('+(marginPct==null?'--t0':marginPct>=0?'--gr':'--rd')+')">' + (marginPct == null ? '—' : marginPct + '%') + '</div><div class="fx-ks">' + (s.margin_per_modem != null ? Math.round(s.margin_per_modem).toLocaleString('ru-RU') + ' ₽/модем' : '') + '</div></div>';
   h += '</div>';
 
   h += '<div class="fx-wgs">';
@@ -105,6 +108,15 @@ function _renderFinanceDashboard(c, d) {
   h += '<div class="fx-wg"><div class="fx-wl">На балансах</div><div class="fx-wv">' + shortCurrency(posBal) + '</div></div>';
   h += '<div class="fx-wg"><div class="fx-wl">ARPU</div><div class="fx-wv">' + money(s.arpu) + '</div></div>';
   h += '</div>';
+
+  var oldestDebt=(aging.rows||[])[0];
+  var riskClients=(f30.per_client||[]).filter(function(x){return Number(x.revenue_at_risk)>0;}).slice(0,3);
+  h += '<div class="fx-card fx-decisions"><div class="fx-ch"><span class="fx-ct">Решения на 30 дней</span><span class="fx-cs">сценарий без автоматического продления</span></div><div class="fx-decision-grid">';
+  h += '<div class="fx-decision"><span>Выручка без продлений</span><strong>'+money(f30.without_renewals)+'</strong><small>'+(Number(f30.revenue_at_risk)>0?'Под риском '+money(f30.revenue_at_risk)+(riskClients.length?' · '+esc(riskClients.map(function(x){return x.name;}).join(', ')):''):'Истечений с потерей выручки нет')+'</small></div>';
+  h += '<div class="fx-decision '+(Number(aging.total)>0?'is-warn':'is-good')+'"><span>Дебиторская задолженность</span><strong>'+money(aging.total||0)+'</strong><small>'+(oldestDebt?'Самая старая: '+esc(oldestDebt.name)+' · '+oldestDebt.age_days+' д':'Просроченной задолженности нет')+'</small></div>';
+  var bankBad=bankRec.status==='attention';
+  h += '<div class="fx-decision '+(bankBad?'is-warn':bankRec.status==='ok'?'is-good':'')+'"><span>Сверка с банком</span><strong>'+(bankBad?(Number(bankRec.unmatched_count||0)+Number(bankRec.credited_missing_count||0))+' требуют проверки':bankRec.status==='ok'?'Сходится':'Нет данных')+'</strong><small>'+(bankBad?'Не сопоставлено '+money(bankRec.unmatched_amount||0)+(bankRec.credited_missing_count?' · нет записи в ledger: '+bankRec.credited_missing_count:''):'Входящие платежи подтверждены в ledger')+'</small></div>';
+  h += '</div></div>';
 
   h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Выручка за 30 дней</span></div>';
   h += '<div style="height:130px"><canvas id="fxDailyChart"></canvas></div></div>';
@@ -137,7 +149,7 @@ function _renderFinanceDashboard(c, d) {
   h += '</div></div>';
 
   h += '<div class="fx-card"><div class="fx-ch"><span class="fx-ct">Доходность по клиентам</span><span class="fx-cs">по выручке за 30 дн (факт)</span></div>';
-  h += '<div style="overflow-x:auto"><table class="fx-tbl"><thead><tr><th>Клиент</th><th>Тариф</th><th>Выручка 30д</th><th>Δ M/M</th><th>% выручки</th><th>Баланс</th></tr></thead><tbody>';
+  h += '<div style="overflow-x:auto"><table class="fx-tbl"><thead><tr><th>Клиент</th><th>Тариф</th><th>Выручка 30д</th><th>Себестоимость</th><th>Маржа</th><th>Δ M/M</th><th>Баланс</th></tr></thead><tbody>';
   var rows = (d.per_client || []).filter(function(p) { return !(p.mrr === 0 && p.mrr_prev === 0 && !p.balance); });
   rows.forEach(function(p, i) {
     var col = CHART_COLORS.clients[i % CHART_COLORS.clients.length];
@@ -148,9 +160,11 @@ function _renderFinanceDashboard(c, d) {
     var ds = p.mrr_delta_pct == null ? '—' : (p.mrr_delta_pct >= 0 ? '+' : '') + p.mrr_delta_pct + '%';
     var pill = p.billingType === 'per_modem' ? '<span class="fx-pill pm">per_modem</span>' : '<span class="fx-pill pg">per_gb</span>';
     var balCol = p.balance < 0 ? 'var(--rd)' : 'var(--t1)';
+    var marginCol=Number(p.margin)<0?'var(--rd)':Number(p.margin_pct)<20?'var(--am)':'var(--gr)';
     h += '<tr><td><span class="fx-cn"><span class="fx-dot" style="background:' + col + '"></span>' + esc(p.name) + blkTag + pausedTag + '</span></td>'
       + '<td>' + pill + '</td><td>' + money(p.mrr) + '</td>'
-      + '<td style="color:' + dc + '">' + ds + '</td><td>' + (p.share_pct || 0) + '%</td>'
+      + '<td>'+money(p.allocated_cost||0)+'</td><td style="color:'+marginCol+'">'+money(p.margin)+' <small>'+(p.margin_pct==null?'—':p.margin_pct+'%')+'</small></td>'
+      + '<td style="color:' + dc + '">' + ds + '</td>'
       + '<td style="color:' + balCol + '">' + money(p.balance) + '</td></tr>';
   });
   h += '</tbody></table></div></div>';

@@ -78,6 +78,20 @@ describe('C7: daily_summary — блок «Инфраструктура» про
     expect(text).toContain('Все серверы доступны');
     expect(text).toContain('💰 <b>Финансы</b>');
   });
+
+  it('утром считает только реально отложенные ночные Telegram-события', async () => {
+    db.exec(`CREATE TABLE notifications (
+      id INTEGER PRIMARY KEY, rule_id TEXT, title TEXT, priority TEXT,
+      payload_json TEXT, created_at TEXT
+    )`);
+    const ins=db.prepare('INSERT INTO notifications(rule_id,title,priority,payload_json,created_at) VALUES(?,?,?,?,?)');
+    ins.run('modem_ping_dead','Пинг не проходит','important','{"_telegram_night_deferred":true}','2026-08-09 22:00:00');
+    ins.run('client_debt','Долг клиента','important','{}','2026-08-09 22:10:00');
+    const { text } = await tgSummary.buildDailySummary(DAY);
+    expect(text).toContain('Ночью без Telegram: <b>1</b>');
+    expect(text).toContain('Пинг не проходит — 1');
+    expect(text).not.toContain('Долг клиента — 1');
+  });
 });
 
 // D3 (2026-08): строка «Лежат >12 ч: N модемов (список)» в сводке — дыра

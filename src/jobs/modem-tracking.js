@@ -583,6 +583,14 @@ async function trackModems() {
             try { const r = db.prepare('SELECT nick FROM modem_meta WHERE server_name=? AND imei=? LIMIT 1').get(server.name, imei); if (r) nickToShow = r.nick || ''; } catch (_) {}
           }
           const minsOff = Math.floor(offlineMs / 60000);
+          let incidentOperator='';
+          try { const mr=_metaOpGetByImei.get(server.name,imei); incidentOperator=(mr&&mr.operator)||''; } catch (_) {}
+          const incidentClients=[];
+          for (const info of Object.values(km)) {
+            if (!info || String(info.imei||'')!==String(imei||'')) continue;
+            const cn=String(info.portName||'').trim();
+            if (cn&&!/^random/i.test(cn)&&!incidentClients.includes(cn)) incidentClients.push(cn);
+          }
           // 2026-07-16: раньше слали напрямую tgBot.sendMessage, минуя alerts —
           // алерт не попадал в колокольчик, не уважал вкл/выкл правила и не
           // логировался как остальные. Теперь — через общий alerts.trigger,
@@ -596,6 +604,7 @@ async function trackModems() {
             // попробуем снова (кулдаун внутри alerts сам не даст спамить).
             const sent = alerts.trigger('modem_offline_20m', {
               server: server.name, imei, nick: nickToShow, mins: minsOff,
+              operator: incidentOperator, clients: incidentClients,
               lastOnline: new Date(lastOnlineMs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }),
             });
             if (sent) {

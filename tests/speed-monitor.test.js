@@ -3,7 +3,7 @@
 //   • runSpeedMonitor — резолв ников по show_status_json, ok/offline/not_found
 //     строки в speed_monitor, ретенция, re-entrancy guard
 
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, vi } from 'vitest';
 import { createRequire } from 'module';
 import { bootApp } from './_helpers/app.js';
 
@@ -197,6 +197,23 @@ describe('SpeedMonitor: runSpeedMonitor', () => {
     const old = db.prepare("SELECT COUNT(*) c FROM speed_monitor WHERE ts < datetime('now', '-60 days')").get().c;
     expect(old).toBe(0);
     expect(db.prepare('SELECT COUNT(*) c FROM speed_monitor').get().c).toBe(3);
+  });
+});
+
+describe('SpeedMonitor: динамическая норма модема', () => {
+  it('два замера ниже 50% недельной медианы открывают деградацию, 75% закрывают', () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    db.prepare('DELETE FROM modem_speed_baseline_state').run();
+    const ins=db.prepare("INSERT INTO speed_monitor(server,nick,download,upload,ping,ok,operator,ts) VALUES('S1','MD_BASE',30,5,20,1,'Moldcell',datetime('now',?))");
+    for(let i=1;i<=12;i++)ins.run('-'+i+' hours');
+    const trigger=vi.fn();
+    const job=makeJobWithSetting(statusFetch({download:'30'}),'MD_BASE',undefined,{alerts:{trigger}});
+    const f={server:{name:'S1'},imei:'base-imei',operator:'Moldcell'};
+    expect(job.evaluateBaseline(f,'MD_BASE',10)).toMatchObject({bad:true,consecutive:1,degraded:false});
+    expect(job.evaluateBaseline(f,'MD_BASE',9)).toMatchObject({bad:true,consecutive:2,degraded:true});
+    expect(trigger).toHaveBeenCalledWith('modem_speed_baseline_degraded',expect.objectContaining({nick:'MD_BASE',baseline:30,current:9}));
+    expect(job.evaluateBaseline(f,'MD_BASE',25)).toMatchObject({bad:false,degraded:false});
+    expect(trigger).toHaveBeenCalledWith('modem_speed_baseline_recovered',expect.objectContaining({nick:'MD_BASE',baseline:30,current:25}));
   });
 });
 

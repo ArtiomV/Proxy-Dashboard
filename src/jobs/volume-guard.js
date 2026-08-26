@@ -170,6 +170,98 @@ function buildForecasts(db, pkgs, now = new Date()) {
   });
 }
 
+// Итог уже завершившегося расчётного периода. В отличие от прогноза выше,
+// здесь показываем не "сколько осталось сейчас", а сколько оплаченного
+// трафика фактически сгорело в прошлом периоде и какую долю платежа это
+// составляет. Количество SIM всегда читается из живого modem_meta.
+function buildPackageEfficiency(db, pkgs, now = new Date()) {
+  const date = new Date(now);
+  if (!Number.isFinite(date.getTime())) return [];
+  let roster = [];
+  try {
+    roster = db.prepare(`
+      SELECT server_name, nick, operator,
+             CASE
+               WHEN TRIM(COALESCE(iccid, '')) <> '' THEN 'iccid:' || TRIM(iccid)
+               ELSE 'modem:' || server_name || '|' || COALESCE(NULLIF(TRIM(imei), ''), nick)
+             END AS sim_key
+      FROM modem_meta
+      WHERE TRIM(COALESCE(operator, '')) <> '' AND COALESCE(deleted, 0) = 0
+    `).all();
+  } catch (_) {
+    try {
+      roster = db.prepare(`
+        SELECT server_name, nick, operator,
+               'modem:' || server_name || '|' || COALESCE(NULLIF(TRIM(imei), ''), nick) AS sim_key
+        FROM modem_meta WHERE TRIM(COALESCE(operator, '')) <> ''
+      `).all();
+    } catch (_) { roster = []; }
+  }
+
+  const out = [];
+  for (const pkg of pkgs || []) {
+    const operator = String(pkg.operator || '').trim();
+    if (!operator) continue;
+    const type = pkg.type === 'shared' || pkg.type === 'unlimited' ? pkg.type : 'per_sim';
+    const current = packagePeriod(pkg, date);
+    const previous = packagePeriod(pkg, new Date(current.start.getTime() - 1));
+    const periodStart = previous.start.toISOString().slice(0, 10);
+    const periodEnd = current.start.toISOString().slice(0, 10);
+    let trafficRows = [];
+    try {
+      trafficRows = db.prepare(`
+        SELECT server_name, nick, operator, SUM(bytes_in + bytes_out) AS b
+        FROM traffic_hourly
+        WHERE hour_start >= ? AND hour_start < ?
+        GROUP BY server_name, nick, operator
+      `).all(periodStart + ' 00:00', periodEnd + ' 00:00');
+    } catch (_) { trafficRows = []; }
+
+    const matchingRoster = roster.filter(r => findPackage([pkg], r.operator));
+    const simCount = new Set(matchingRoster.map(r => r.sim_key)).size;
+    const usedGbRaw = trafficRows
+      .filter(r => findPackage([pkg], r.operator))
+      .reduce((sum, row) => sum + (Number(row.b) || 0) / GB, 0);
+    const usedGb = Math.round(usedGbRaw * 10) / 10;
+    const price = Math.max(0, Number(pkg.price) || 0);
+    const currency = String(pkg.currency || 'RUB').toUpperCase();
+
+    if (type === 'unlimited') {
+      out.push({
+        operator, type, period_start: periodStart, period_end: periodEnd,
+        sim_count: simCount, bundle_count: simCount > 0 ? 1 : 0,
+        purchased_gb: null, used_gb: usedGb, unused_gb: null,
+        utilization_pct: null, monthly_cost: simCount > 0 ? price : 0,
+        wasted_cost: null, currency, status: 'unlimited',
+      });
+      continue;
+    }
+
+    const volumeGb = Math.max(0, Number(pkg.volume_gb) || 0);
+    const maxSims = type === 'per_sim' ? 1 : Math.max(0, Math.floor(Number(pkg.max_sims) || 0));
+    const bundleCount = simCount === 0 ? 0 : (maxSims > 0 ? Math.ceil(simCount / maxSims) : null);
+    const purchasedGb = bundleCount == null ? null : Math.round(bundleCount * volumeGb * 10) / 10;
+    const monthlyCost = bundleCount == null ? null : Math.round(bundleCount * price * 100) / 100;
+    const unusedGb = purchasedGb == null ? null : Math.round(Math.max(0, purchasedGb - usedGb) * 10) / 10;
+    const utilizationPct = purchasedGb > 0 ? Math.round(Math.min(usedGb / purchasedGb * 100, 9999) * 10) / 10 : null;
+    const wastedCost = monthlyCost != null && purchasedGb > 0
+      ? Math.round(monthlyCost * Math.max(0, 1 - usedGb / purchasedGb) * 100) / 100
+      : null;
+    let status = 'ok';
+    if (!(volumeGb > 0) || bundleCount == null) status = 'not_configured';
+    else if (usedGb > purchasedGb) status = 'overrun';
+    else if (utilizationPct != null && utilizationPct < 50) status = 'underused';
+    out.push({
+      operator, type, period_start: periodStart, period_end: periodEnd,
+      sim_count: simCount, max_sims: maxSims, bundle_count: bundleCount,
+      purchased_gb: purchasedGb, used_gb: usedGb, unused_gb: unusedGb,
+      utilization_pct: utilizationPct, monthly_cost: monthlyCost,
+      wasted_cost: wastedCost, currency, status,
+    });
+  }
+  return out.sort((a, b) => Number(b.wasted_cost || 0) - Number(a.wasted_cost || 0));
+}
+
 function create(deps) {
   const { db, logger, alerts, getSetting } = deps;
 
@@ -297,4 +389,4 @@ function create(deps) {
   return { runOnce, _packages, _findPkg };
 }
 
-module.exports = { create, findPackage, buildForecasts, packagePeriod, renewalDayOf };
+module.exports = { create, findPackage, buildForecasts, buildPackageEfficiency, packagePeriod, renewalDayOf };

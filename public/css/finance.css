@@ -41,6 +41,7 @@
 #tab-bank .fxw .fx-kpi{background:var(--cd);border:1px solid var(--bd);border-top:2.5px solid var(--acd);border-radius:12px;padding:13px 15px;box-shadow:var(--card-shadow)}
 #tab-bank .fxw .fx-kpi.a{border-top-color:var(--am)}
 #tab-bank .fxw .fx-kpi.g{border-top-color:var(--gr)}
+#tab-bank .fxw .fx-kpi.r{border-top-color:var(--rd)}
 #tab-bank .fxw .fx-kl{font-size:10px;font-weight:600;color:var(--t2);letter-spacing:.5px;text-transform:uppercase}
 #tab-bank .fxw .fx-kv{font-size:21px;font-weight:700;margin:6px 0 3px;font-feature-settings:"tnum";white-space:nowrap}
 #tab-bank .fxw .fx-ks{font-size:11px;color:var(--t3)}
@@ -528,7 +529,10 @@
 #settingsSection_operators .opp-calc.is-unlimited{grid-template-columns:1fr}
 #settingsSection_operators .opp-calc.is-unlimited .opp-calc-connected,#settingsSection_operators .opp-calc.is-unlimited .opp-calc-units,#settingsSection_operators .opp-calc.is-unlimited>em{display:none}
 #settingsSection_operators .opp-calc.is-unlimited .is-total{border-left:0;padding:11px 13px}
-#settingsSection_operators .opp-foot{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:8px;color:var(--text-3);font-size:10px}
+#settingsSection_operators .opp-foot{display:flex;align-items:center;justify-content:space-between;gap:7px 14px;flex-wrap:wrap;margin-top:8px;color:var(--text-3);font-size:10px}
+#settingsSection_operators .opp-efficiency{flex-basis:100%;padding-top:7px;border-top:1px solid var(--border);color:var(--text-2)}
+.fx-decisions{margin-bottom:12px}.fx-decision-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.fx-decision{min-width:0;padding:12px;border:1px solid var(--border);border-radius:10px;background:var(--bg-0)}.fx-decision>span{display:block;color:var(--text-3);font-size:9px;font-weight:650;letter-spacing:.05em;text-transform:uppercase}.fx-decision>strong{display:block;margin-top:7px;color:var(--text-0);font:700 17px var(--font-mono)}.fx-decision>small{display:block;margin-top:5px;color:var(--text-3);font-size:9px;line-height:1.45;overflow:hidden;text-overflow:ellipsis}.fx-decision.is-warn>strong{color:var(--danger)}.fx-decision.is-good>strong{color:var(--success)}
+@media(max-width:760px){.fx-decision-grid{grid-template-columns:1fr}.fx-decision>strong{font-size:15px}}
 #settingsSection_operators .opp-missing{color:var(--warning);font-weight:600}
 #settingsSection_operators .opp-missing.is-ok{color:var(--success)}
 #settingsSection_operators .opp-advanced{margin-top:9px;border-top:1px solid var(--border);padding-top:8px}

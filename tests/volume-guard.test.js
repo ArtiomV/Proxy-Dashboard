@@ -183,6 +183,27 @@ describe('volume-guard', () => {
     expect(feb.reset.toISOString().slice(0, 10)).toBe('2026-03-31');
   });
 
+  it('эффективность: считает сгоревший трафик и его стоимость за прошлый период', () => {
+    db.exec(`CREATE TABLE modem_meta (
+      server_name TEXT, nick TEXT, imei TEXT, iccid TEXT, operator TEXT, deleted INTEGER DEFAULT 0
+    )`);
+    db.prepare("INSERT INTO modem_meta VALUES ('S1','A','1','sim-a','Orange MD',0)").run();
+    db.prepare("INSERT INTO modem_meta VALUES ('S1','B','2','sim-b','Orange MD',0)").run();
+    // На 10 августа завершённый период — июль. Две SIM по 100 ГБ = 200 ГБ,
+    // использовано 50 ГБ, значит 75% пакета и оплаты не использованы.
+    addRow('S1', 'A', 'Orange MD', '2026-07-05 01:00', 30 * 1e9);
+    addRow('S1', 'B', 'Orange MD', '2026-07-06 01:00', 20 * 1e9);
+    const rows = vgMod.buildPackageEfficiency(db, [
+      { operator: 'Orange MD', type: 'per_sim', volume_gb: 100, price: 40, currency: 'MDL' },
+    ], new Date('2026-08-10T12:00:00.000Z'));
+    expect(rows[0]).toMatchObject({
+      period_start: '2026-07-01', period_end: '2026-08-01', sim_count: 2,
+      bundle_count: 2, purchased_gb: 200, used_gb: 50, unused_gb: 150,
+      utilization_pct: 25, monthly_cost: 80, wasted_cost: 60,
+      currency: 'MDL', status: 'underused',
+    });
+  });
+
   it('shared pace: расход до даты обновления не учитывается в темпе', () => {
     const today = new Date();
     const dayOfMonth = Number(today.toISOString().slice(8, 10));
