@@ -20,6 +20,7 @@
 <link rel="stylesheet" href="css/layout.css?v=0814a">
 <link rel="stylesheet" href="css/shell.css?v=0630d">
 <link rel="stylesheet" href="css/finance.css?v=0823t">
+<link rel="stylesheet" href="css/dashboard2.css?v=0826a">
 <!-- Yandex.Metrika counter (инлайн вынесен в /js/metrika.js — CSP) -->
 <script src="/js/metrika.js?v=0814a"></script>
 <noscript><div><img src="https://mc.yandex.ru/watch/107161941" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
@@ -83,12 +84,13 @@
       <span class="header-brand-name">Arendaproxy</span>
       <span class="header-admin-badge">ADMIN</span>
     </div>
-    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.43</a>
+    <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.44</a>
     <div class="header-stats" id="headerStats"></div>
   </div>
 
   <nav class="nav-tabs">
     <div class="nav-tab active" data-on-click="switchMainTab('dashboard',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></svg></span>Дашборд</div>
+    <div class="nav-tab" data-on-click="switchMainTab('dashboard2',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 12h10M4 19h7"/><circle cx="18" cy="12" r="2.5"/><circle cx="15" cy="19" r="2.5"/></svg></span>Дашборд 2</div>
     <div class="nav-tab" data-on-click="switchMainTab('modems',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="13" width="18" height="8" rx="2"/><path d="M7 17h.01"/><line x1="11" y1="17" x2="17" y2="17"/><path d="M9.5 9.5a5 5 0 0 1 5 0M7 7a8 8 0 0 1 10 0"/></svg></span>Модемы</div>
     <div class="nav-tab" data-on-click="switchMainTab('clients',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Клиенты</div>
     <div class="nav-tab" data-on-click="switchMainTab('bank',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>Финансы</div>
@@ -99,7 +101,7 @@
          top bar (theme/logout/version) while keeping those controls one tap
          away in the menu. -->
     <div class="nav-tabs-footer">
-      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.43</a>
+      <a class="header-version-badge" href="/changelog.html" target="_blank" rel="noopener" title="История изменений">v2.10.44</a>
       <button class="btn-logout-mobile" data-on-click="doLogout()">
         <svg width="14" height="14" viewBox="0 0 16 16" fill="none" style="margin-right:6px"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         Выйти
@@ -108,7 +110,7 @@
   </nav>
 
   <div class="header-right">
-    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.43</a>
+    <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.44</a>
     <span class="last-update" id="lastUpdate"></span>
     <span class="sse-ind" id="sseIndicator" style="display:none" title="Realtime-обновления"></span>
     <button class="header-notif-btn" id="notifBtn" data-on-click="toggleNotifPanel()" title="Уведомления">
@@ -281,6 +283,62 @@
       <div id="speedMonEmpty" style="display:none;color:var(--text-3);font-size:12px;padding:14px 4px">Пока нет замеров за выбранный период — почасовая джоба SpeedMonitor пишет сюда раз в час.</div>
     </div>
   </div><!-- /tab-dashboard -->
+
+<!-- TAB: DASHBOARD 2 — экспериментальный decision-first экран без длинных
+     графиков и дублирующих метрик. Старый дашборд сохранён без изменений. -->
+<div class="tab-content" id="tab-dashboard2">
+  <main class="d2-page">
+    <header class="d2-heading">
+      <div>
+        <div class="d2-eyebrow">Операционный обзор</div>
+        <h1>Дашборд 2</h1>
+        <p>Только то, что требует решения сейчас.</p>
+      </div>
+      <div class="d2-heading-actions">
+        <span class="d2-live"><i></i><span id="d2UpdatedAt">данные загружаются</span></span>
+        <button class="btn btn-sm" data-on-click="loadData()">Обновить</button>
+      </div>
+    </header>
+
+    <section id="d2Kpis" class="d2-kpis" aria-label="Ключевые показатели">
+      <div class="d2-skeleton"></div><div class="d2-skeleton"></div><div class="d2-skeleton"></div><div class="d2-skeleton"></div>
+    </section>
+
+    <section class="d2-main-grid">
+      <article class="d2-panel d2-actions-panel">
+        <div class="d2-panel-head">
+          <div><span class="d2-panel-kicker">Приоритет</span><h2>Что требует действий</h2></div>
+          <button class="d2-link" data-on-click="d2OpenModems('problem')">Все модемы <span>→</span></button>
+        </div>
+        <div id="d2Actions" class="d2-action-list"><div class="d2-skeleton d2-skeleton-tall"></div></div>
+      </article>
+
+      <article class="d2-panel">
+        <div class="d2-panel-head">
+          <div><span class="d2-panel-kicker">Парк</span><h2>Серверы</h2></div>
+          <button class="d2-link" data-on-click="d2OpenSettings('serverHealth')">Мониторинг <span>→</span></button>
+        </div>
+        <div id="d2Servers" class="d2-server-list"><div class="d2-skeleton d2-skeleton-tall"></div></div>
+      </article>
+    </section>
+
+    <section class="d2-bottom-grid">
+      <article class="d2-panel">
+        <div class="d2-panel-head">
+          <div><span class="d2-panel-kicker">Резерв</span><h2>Готовность к отказу</h2></div>
+        </div>
+        <div id="d2Capacity"><div class="d2-skeleton"></div></div>
+      </article>
+      <article class="d2-panel">
+        <div class="d2-panel-head">
+          <div><span class="d2-panel-kicker">Деньги</span><h2>Финансовый итог</h2></div>
+          <button class="d2-link" data-on-click="d2OpenFinance()">Финансы <span>→</span></button>
+        </div>
+        <div id="d2Finance"><div class="d2-skeleton"></div></div>
+      </article>
+    </section>
+  </main>
+</div>
 
 <!-- TAB: CLIENTS -->
 <div class="tab-content" id="tab-clients">
@@ -1577,6 +1635,7 @@
 <script src="/js/admin/settings.js?v=0826a"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0823n"></script>
+<script src="/js/admin/dashboard2.js?v=0826a"></script>
 <script src="/js/admin.js?v=0826a"></script>
 <script src="/js/admin/sse.js?v=0823k"></script>
 </body>

@@ -270,8 +270,9 @@ function _metaSection(merged) {
   // tiles. modem_meta is the source of truth for is_test_pool.
   try { annotateTestPool(merged.status, simulatorDb.testPoolKeySet()); }
   catch (e) { logger.warn('[data] test-pool annotate: ' + e.message); }
-  // Offline modems report an empty live PHONE_NUMBER — fill it from the
-  // persisted modem_meta so the phone still shows for disconnected modems.
+  // Phone display: the SIM registry is the source of truth (26.08) — the box
+  // may cache a stale PHONE_NUMBER. Modems whose SIM is not in the registry
+  // fall back to the persisted modem_meta phone when the live feed is empty.
   try {
     const _operatorAliases = typeof getOperatorAliases === 'function' ? getOperatorAliases() : {};
     const _simMetaMap = {};
@@ -294,8 +295,13 @@ function _metaSection(merged) {
       if (canonical) m.net_details = { ...nd, CELLOP: canonical };
       const saved = _simMetaMap[srv + '|' + raw];
       const iccid = String(nd.ICCID || (saved && saved.iccid) || '').replace(/\D/g, '');
-      if (!(md.PHONE_NUMBER && String(md.PHONE_NUMBER).trim())) {
-        const matchedPhone = _registryPhones[iccid] || (saved && saved.phone) || '';
+      // 26.08: реестр SIM — источник истины по номеру (тот же приоритет, что в
+      // tracking-инжесте v2.10.42). Бокс может кэшировать устаревший номер.
+      const registryPhone = _registryPhones[iccid] || '';
+      if (registryPhone) {
+        md.PHONE_NUMBER = registryPhone;
+      } else if (!(md.PHONE_NUMBER && String(md.PHONE_NUMBER).trim())) {
+        const matchedPhone = (saved && saved.phone) || '';
         if (matchedPhone) md.PHONE_NUMBER = matchedPhone;
       }
       md.CONTRACT_RENEWAL_DATE = (saved && saved.contract_renewal_date) || '';
