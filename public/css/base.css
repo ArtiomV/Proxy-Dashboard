@@ -121,6 +121,7 @@ body{font-family:var(--font-sans);background:var(--bg-0);color:var(--text-1);tra
 .status-pill{display:inline-flex;align-items:center;justify-content:center;font-size:9px;font-weight:700;letter-spacing:.05em;padding:3px 8px;border-radius:8px;color:#fff;line-height:1;text-transform:uppercase;min-width:42px;text-align:center;box-shadow:0 1px 2px rgba(0,0,0,.15);user-select:none}
 .status-pill.online{background:linear-gradient(135deg,#28b94e,#1d9e3d);box-shadow:0 0 0 1px rgba(40,185,78,.35),0 1px 3px rgba(40,185,78,.25)}
 .status-pill.offline{background:linear-gradient(135deg,#e84141,#c92929);box-shadow:0 0 0 1px rgba(232,65,65,.35),0 1px 3px rgba(232,65,65,.25)}
+.status-pill.idle{background:linear-gradient(135deg,#8a94a6,#6b7280);box-shadow:0 0 0 1px rgba(138,148,166,.35),0 1px 3px rgba(138,148,166,.25)}
 .status-pill.rotating{background:linear-gradient(135deg,#ef9f27,#d18910);box-shadow:0 0 0 1px rgba(239,159,39,.35),0 1px 3px rgba(239,159,39,.25);animation:status-pulse 1.5s infinite ease-in-out}
 .status-pill.rebooting{background:linear-gradient(135deg,#9560d8,#7a3fc4);box-shadow:0 0 0 1px rgba(149,96,216,.35),0 1px 3px rgba(149,96,216,.25);animation:status-pulse 1s infinite ease-in-out}
 @keyframes status-pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:.7;transform:scale(.94)}}

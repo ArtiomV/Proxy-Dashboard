@@ -32,6 +32,10 @@ function loadServersList(){
   api(API+'/api/admin/servers').then(function(d){
     var el=document.getElementById('serversList');if(!el)return;
     if(!d.servers||!d.servers.length){el.innerHTML='<div style="color:var(--text-3);font-size:12px">Нет серверов</div>';return}
+    // 26.08: «недоступен» — это падает/не отвечает сам сервер (cachedServers),
+    // а не «0 модемов в работе». Иначе живой сервер без модемов показывал
+    // красный OFFLINE, как будто он лежит (инцидент RO1 26.08).
+    var _downSet={};((currentData&&currentData.cachedServers)||[]).forEach(function(x){_downSet[typeof x==='string'?x:x.name]=true;});
     var h='';
     d.servers.forEach(function(s){
       var cn=s.country||{};
@@ -45,6 +49,9 @@ function loadServersList(){
       var modemCount=_fb?_fb.total:0;
       if(modemCount<onlineCount)modemCount=onlineCount;
       var isOnline=onlineCount>0;
+      var isDown=!!_downSet[s.name];
+      var pillCls=isOnline?'online':(isDown?'offline':'idle');
+      var pillText=isOnline?'ONLINE':(isDown?'OFFLINE':'НЕТ МОДЕМОВ');
       var sn=esc(s.name);
       var displayName=esc(s.displayName||s.name);
 
@@ -56,7 +63,7 @@ function loadServersList(){
       h+='<div class="server-country">'+flag+' '+esc(cName)+'</div>';
       h+='<div class="server-meta"><span class="meta-sep"></span>'+modemCount+' модемов<span class="meta-sep"></span>'+onlineCount+' в работе<span id="srvStats_'+sn+'"></span></div>';
       h+='</div>';
-      h+='<span class="status-pill '+(isOnline?'online':'offline')+'">'+(isOnline?'ONLINE':'OFFLINE')+'</span>';
+      h+='<span class="status-pill '+pillCls+'">'+pillText+'</span>';
       h+='</div>';
       // Body (view mode)
       h+='<div class="server-body" id="srvBody_'+sn+'">';
