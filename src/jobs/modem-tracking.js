@@ -8,6 +8,7 @@
 // nothing global is captured.
 //
 const { DISCONNECTED_MS } = require('../modems/fleet');
+const { stripServerPrefix } = require('../utils/imei');
 
 function create(deps) {
   const {
@@ -48,11 +49,11 @@ async function trackModems() {
   // its denominator. Recently removed ports stop counting after the same
   // 10-minute grace used by the ownership/fleet code.
   function addClientUptimeTicks(serverName, imei, date, online) {
-    const rawImei = String(imei || '').replace(/^S\d+_/, '');
+    const rawImei = stripServerPrefix(imei, serverName);
     const names = new Set();
     for (const info of Object.values(knownModems[serverName] || {})) {
       if (!info) continue;
-      const infoImei = String(info.imei || '').replace(/^S\d+_/, '');
+      const infoImei = stripServerPrefix(info.imei, serverName);
       if (!infoImei || infoImei !== rawImei) continue;
       if (info._missingSince && now - info._missingSince >= DISCONNECTED_MS) continue;
       const clientName = String(info.portName || '').trim();

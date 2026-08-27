@@ -7,6 +7,7 @@
 // modem config (store/apply/assign/available/status), rotation_log, ip_history.
 
 const express = require('express');
+const { stripServerPrefix } = require('../utils/imei');
 
 module.exports = function createProxiesRouter(deps) {
   const {
@@ -32,8 +33,8 @@ r.post('/api/admin/store_modem', authMiddleware, adminMiddleware, async (req, re
     if (!serverName || !modemData.IMEI) return res.status(400).json({ error: 'serverName and IMEI required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    // Strip server prefix from IMEI (e.g. "S2_012345" → "012345")
-    const rawImei = modemData.IMEI.replace(/^S\d+_/, '');
+    // Strip server prefix from IMEI (e.g. "S2_012345" / "RO1-MF289_012345" → "012345")
+    const rawImei = stripServerPrefix(modemData.IMEI, server.name);
     modemData.IMEI = rawImei;
     // First GET current config to preserve existing fields. proxyConf обходит
     // логин-стену /conf/* (S2): раньше POST улетал в /modem/login, а фронт
@@ -84,7 +85,7 @@ r.post('/api/admin/apply_modem', authMiddleware, adminMiddleware, async (req, re
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     // Strip server prefix from IMEI
-    imei = imei.replace(/^S\d+_/, '');
+    imei = stripServerPrefix(imei, server.name);
     const result = await postFormApi(server, '/modem/settings', { imei });
     res.json({ ok: true, result });
   } catch (err) { res.status(502).json({ error: 'Apply modem failed', details: err.message }); }

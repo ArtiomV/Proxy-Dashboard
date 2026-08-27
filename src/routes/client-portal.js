@@ -231,7 +231,10 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         const fullByCanonical = {};
         for (const full of clientImeis) {
           const value = String(full);
-          const match = /^(S\d+)_(.+)$/.exec(value);
+          // Префикс — ИМЯ сервера (S1_, RO1-MF289_…), а не только S\d+_:
+          // матчим по хвосту из цифр IMEI, иначе аптайм модемов с не-S
+          // серверов молча не находился (27.08).
+          const match = /^(.*)_(\d{14,15})$/.exec(value);
           fullByCanonical[match ? match[1] + '_' + match[2] : value] = full;
         }
         for (const raw of rows) {

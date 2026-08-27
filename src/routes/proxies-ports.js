@@ -3,6 +3,7 @@
 // src/routes/proxies-ports.js — port CRUD + bulk operations (WP6.5 carve-out from proxies.js, VERBATIM move).
 //
 const express = require('express');
+const { stripServerPrefix } = require('../utils/imei');
 
 function validPortName(value) {
   const name = String(value || '').trim();
@@ -38,7 +39,8 @@ r.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res
     if (!serverName || !portData.IMEI) return res.status(400).json({ error: 'serverName and IMEI required' });
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const rawImei = portData.IMEI.replace(/^S\d+_/, '');
+    // Срезаем серверный префикс по ИМЕНИ сервера (RO1-MF289_…), не только /^S\d+_/.
+    const rawImei = stripServerPrefix(portData.IMEI, server.name);
     const checkedName = validPortName(portData.portName);
     if (!checkedName.ok) return res.status(400).json({ error: checkedName.error });
     portData.portName = checkedName.name;
@@ -352,9 +354,9 @@ r.post('/api/admin/bulk_rotation', authMiddleware, adminMiddleware, async (req, 
     let ok = 0, failed = 0;
     const failures = [];
     for (const m of modems) {
-      const rawImei = String(m.imei || '').replace(/^S\d+_/, '');
+      const server = findServer(m.serverName);
+      const rawImei = stripServerPrefix(m.imei, server && server.name);
       try {
-        const server = findServer(m.serverName);
         if (!server) { failed++; failures.push({ imei: rawImei, reason: 'server not found' }); continue; }
         // proxyConf обходит логин-стену /conf/* (S2) — раньше POST уходил в
         // /modem/login, а модем считался ok: «выключил, но ротируется».

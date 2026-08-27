@@ -7,6 +7,7 @@
 
 function create(deps) {
   const { db, knownModems, filterByPortName, isAutoRandomPort, modemLogins, getServerApiHealth } = deps;
+  const { stripServerPrefix } = require('../utils/imei');
 
   function mergeServerData(allData, portNameFilter) {
     const mergedBw = {}, mergedStatus = [], mergedPorts = {};
@@ -96,7 +97,7 @@ function create(deps) {
       if (statusImeis.has(imei)) continue;
       // Find server name and nick from port data or knownModems
       const srv = (portList[0] && portList[0]._server) || '';
-      const rawImei = imei.replace(/^S\d+_/, '');
+      const rawImei = stripServerPrefix(imei, srv);
       let nick = '', model = '';
       const km = knownModems[srv];
       if (km) {
