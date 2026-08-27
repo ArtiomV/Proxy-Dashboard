@@ -966,10 +966,13 @@ function _wanChartAttach(plot,points){
     dotD.style.display='';dotD.style.left=leftPx+'px';dotD.style.top=dY+'px';
     dotU.style.display='';dotU.style.left=leftPx+'px';dotU.style.top=uY+'px';
     var stamp=point.collected_at?new Date(point.collected_at).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
-    tip.innerHTML='<b>'+esc(stamp)+'</b>'
-      +'<span><i class="d">↓</i>'+_wanNumber(point.download_mbps)+' Мбит/с</span>'
-      +'<span><i class="u">↑</i>'+_wanNumber(point.upload_mbps)+' Мбит/с</span>'
-      +(point.ping_ms!=null&&point.ping_ms!==''?'<span class="p">пинг '+_wanNumber(point.ping_ms,0)+' мс</span>':'');
+    // Формат = единый тултип графиков сайта (chartExtTooltip): заголовок
+    // приглушённым, строки «цветной маркер + подпись — значение жирным»,
+    // разделитель и футер с пингом.
+    tip.innerHTML='<div class="tt-title">'+esc(stamp)+'</div>'
+      +'<div class="tt-row"><span class="tt-k"><i style="background:var(--primary)"></i>Получение</span><span class="tt-v">'+_wanNumber(point.download_mbps)+' Мбит/с</span></div>'
+      +'<div class="tt-row"><span class="tt-k"><i style="background:#10b981"></i>Отдача</span><span class="tt-v">'+_wanNumber(point.upload_mbps)+' Мбит/с</span></div>'
+      +(point.ping_ms!=null&&point.ping_ms!==''?'<div class="tt-sep"></div><div class="tt-row"><span class="tt-k">Пинг</span><span class="tt-v">'+_wanNumber(point.ping_ms,0)+' мс</span></div>':'');
     tip.style.display='';
     var tw=tip.offsetWidth,lx=leftPx+12;if(lx+tw>rect.width)lx=leftPx-tw-12;
     tip.style.left=Math.max(0,lx)+'px';
