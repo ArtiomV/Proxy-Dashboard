@@ -201,19 +201,35 @@ describe('SpeedMonitor: runSpeedMonitor', () => {
 });
 
 describe('SpeedMonitor: динамическая норма модема', () => {
-  it('два замера ниже 50% недельной медианы открывают деградацию, 75% закрывают', () => {
+  it('сравнивает со средним того же часа отдельно для будней, два провала открывают деградацию', () => {
     db.prepare('DELETE FROM speed_monitor').run();
     db.prepare('DELETE FROM modem_speed_baseline_state').run();
-    const ins=db.prepare("INSERT INTO speed_monitor(server,nick,download,upload,ping,ok,operator,ts) VALUES('S1','MD_BASE',30,5,20,1,'Moldcell',datetime('now',?))");
-    for(let i=1;i<=12;i++)ins.run('-'+i+' hours');
+    const fixedNow=new Date('2026-08-27T10:30:00.000Z'); // четверг, 13:00 МСК
+    const ins=db.prepare("INSERT INTO speed_monitor(server,nick,download,upload,ping,ok,operator,ts) VALUES('S1','MD_BASE',?,5,20,1,'Moldcell',?)");
+    let matching=0;
+    for(let days=1;days<=56&&matching<12;days++){
+      const d=new Date(fixedNow.getTime()-days*86400e3);
+      const bucket=speedMonitor.speedBaselineBucket(d,'Europe/Moscow');
+      if(bucket.dayType==='weekday'){ins.run(30,d.toISOString().replace('T',' ').slice(0,19));matching++;}
+    }
+    // Эти высокие значения не должны попадать в норму: другой час и выходные.
+    ins.run(120,'2026-08-26 09:30:00');
+    ins.run(120,'2026-08-23 10:30:00');
     const trigger=vi.fn();
-    const job=makeJobWithSetting(statusFetch({download:'30'}),'MD_BASE',undefined,{alerts:{trigger}});
-    const f={server:{name:'S1'},imei:'base-imei',operator:'Moldcell'};
+    const job=makeJobWithSetting(statusFetch({download:'30'}),'MD_BASE',undefined,{alerts:{trigger},now:()=>fixedNow});
+    const f={server:{name:'S1',tz:'Europe/Moscow'},imei:'base-imei',operator:'Moldcell'};
     expect(job.evaluateBaseline(f,'MD_BASE',10)).toMatchObject({bad:true,consecutive:1,degraded:false});
     expect(job.evaluateBaseline(f,'MD_BASE',9)).toMatchObject({bad:true,consecutive:2,degraded:true});
-    expect(trigger).toHaveBeenCalledWith('modem_speed_baseline_degraded',expect.objectContaining({nick:'MD_BASE',baseline:30,current:9}));
+    expect(trigger).toHaveBeenCalledWith('modem_speed_baseline_degraded',expect.objectContaining({nick:'MD_BASE',baseline:30,current:9,baseline_scope:'будни · 13:00'}));
     expect(job.evaluateBaseline(f,'MD_BASE',25)).toMatchObject({bad:false,degraded:false});
     expect(trigger).toHaveBeenCalledWith('modem_speed_baseline_recovered',expect.objectContaining({nick:'MD_BASE',baseline:30,current:25}));
+    expect(db.prepare("SELECT baseline_hour,day_type,baseline_window_days FROM modem_speed_baseline_state WHERE server='S1' AND nick='MD_BASE'").get())
+      .toMatchObject({baseline_hour:13,day_type:'weekday',baseline_window_days:56});
+  });
+
+  it('определяет выходные и локальный час в часовом поясе сервера', () => {
+    expect(speedMonitor.speedBaselineBucket(new Date('2026-08-23T08:15:00Z'),'Europe/Chisinau')).toEqual({hour:11,dayType:'weekend'});
+    expect(speedMonitor.speedBaselineBucket(new Date('2026-08-24T08:15:00Z'),'Europe/Chisinau')).toEqual({hour:11,dayType:'weekday'});
   });
 });
 

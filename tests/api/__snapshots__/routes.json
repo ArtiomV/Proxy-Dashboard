@@ -53,6 +53,7 @@
   "GET /api/admin/ip_history",
   "GET /api/admin/jobs/:id",
   "GET /api/admin/known_modems",
+  "GET /api/admin/location_wan_speed",
   "GET /api/admin/maintenance",
   "GET /api/admin/modem_httpcheck",
   "GET /api/admin/modem_ping",

@@ -79,6 +79,31 @@ function parseSpeedtestResult(result) {
   return { dl, ul, ping };
 }
 
+// Бакет нормы: тот же локальный час и тот же тип дня. Так утренние/вечерние
+// просадки мобильной сети не сравниваются с ночью, а выходные — с буднями.
+function speedBaselineBucket(value, timezone = 'Europe/Moscow') {
+  const date = value instanceof Date ? value : new Date(value);
+  if (!Number.isFinite(date.getTime())) return null;
+  let parts;
+  try {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: timezone || 'Europe/Moscow', weekday: 'short', hour: '2-digit', hourCycle: 'h23',
+    }).formatToParts(date);
+  } catch (_) {
+    parts = new Intl.DateTimeFormat('en-US', {
+      timeZone: 'Europe/Moscow', weekday: 'short', hour: '2-digit', hourCycle: 'h23',
+    }).formatToParts(date);
+  }
+  const pick = type => (parts.find(part => part.type === type) || {}).value;
+  const weekday = pick('weekday');
+  return { hour: Number(pick('hour')), dayType: weekday === 'Sat' || weekday === 'Sun' ? 'weekend' : 'weekday' };
+}
+
+function parseSqliteUtc(value) {
+  const text = String(value || '');
+  return new Date(/[zZ]|[+-]\d\d:\d\d$/.test(text) ? text : text.replace(' ', 'T') + 'Z');
+}
+
 function create(deps) {
   const { db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting, alerts } = deps;
   // Пауза инжектируется — тесты подсовывают мгновенный sleep.
@@ -127,27 +152,30 @@ function create(deps) {
   try {
     baselineGet=db.prepare('SELECT * FROM modem_speed_baseline_state WHERE server=? AND nick=?');
     baselineUpsert=db.prepare(`INSERT INTO modem_speed_baseline_state
-      (server,nick,operator,baseline_dl,current_dl,sample_count,consecutive_bad,degraded,degraded_since,updated_at)
-      VALUES (?,?,?,?,?,?,?,?,?,datetime('now'))
+      (server,nick,operator,baseline_dl,current_dl,sample_count,consecutive_bad,degraded,degraded_since,
+       baseline_hour,day_type,baseline_window_days,updated_at)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'))
       ON CONFLICT(server,nick) DO UPDATE SET operator=excluded.operator,baseline_dl=excluded.baseline_dl,
       current_dl=excluded.current_dl,sample_count=excluded.sample_count,consecutive_bad=excluded.consecutive_bad,
-      degraded=excluded.degraded,degraded_since=excluded.degraded_since,updated_at=datetime('now')`);
+      degraded=excluded.degraded,degraded_since=excluded.degraded_since,baseline_hour=excluded.baseline_hour,
+      day_type=excluded.day_type,baseline_window_days=excluded.baseline_window_days,updated_at=datetime('now')`);
   } catch (_) { /* older/minimal test schemas: baseline evaluation is optional */ }
 
-  function median(values){
-    if(!values.length)return null;
-    const a=values.slice().sort((x,y)=>x-y),mid=Math.floor(a.length/2);
-    return a.length%2?a[mid]:(a[mid-1]+a[mid])/2;
-  }
+  const baselineWindowDays=56;
+  const now = typeof deps.now === 'function' ? deps.now : () => new Date();
   function evaluateBaseline(f,nick,download){
     if(!baselineGet||!baselineUpsert||!alerts||!(download>0))return null;
-    const rows=db.prepare("SELECT download FROM speed_monitor WHERE server=? AND nick=? AND ok=1 AND download>0 AND ts>=datetime('now','-7 days') ORDER BY download").all(f.server.name,nick);
+    const measuredAt=now(),timezone=(f.server&&f.server.tz)||'Europe/Moscow';
+    const bucket=speedBaselineBucket(measuredAt,timezone);
+    const history=db.prepare("SELECT download,ts FROM speed_monitor WHERE server=? AND nick=? AND ok=1 AND download>0 AND ts>=datetime('now','-56 days') ORDER BY ts").all(f.server.name,nick);
+    const rows=history.filter(row=>{const candidate=speedBaselineBucket(parseSqliteUtc(row.ts),timezone);return candidate&&bucket&&candidate.hour===bucket.hour&&candidate.dayType===bucket.dayType;});
     const minSamples=Math.max(6,Math.min(72,Number(getSetting('speed_baseline_min_samples',12))||12));
-    const baseline=median(rows.map(r=>Number(r.download)).filter(Number.isFinite));
+    const values=rows.map(r=>Number(r.download)).filter(Number.isFinite);
+    const baseline=values.length?values.reduce((sum,value)=>sum+value,0)/values.length:null;
     const prev=baselineGet.get(f.server.name,nick)||{};
     if(baseline==null||rows.length<minSamples){
-      baselineUpsert.run(f.server.name,nick,f.operator||'',baseline,download,rows.length,0,Number(prev.degraded||0),prev.degraded_since||null);
-      return {ready:false,samples:rows.length,baseline};
+      baselineUpsert.run(f.server.name,nick,f.operator||'',baseline,download,rows.length,0,Number(prev.degraded||0),prev.degraded_since||null,bucket&&bucket.hour,bucket&&bucket.dayType,baselineWindowDays);
+      return {ready:false,samples:rows.length,baseline,bucket};
     }
     const ratio=Math.max(.2,Math.min(.9,Number(getSetting('speed_baseline_drop_ratio',.5))||.5));
     const bad=download<=baseline*ratio;
@@ -156,14 +184,16 @@ function create(deps) {
     if(bad&&consecutive>=2&&!degraded){
       degraded=1;since=new Date().toISOString();
       alerts.trigger('modem_speed_baseline_degraded',{server:f.server.name,nick,imei:f.imei,operator:f.operator,
-        current:Math.round(download*10)/10,baseline:Math.round(baseline*10)/10,drop_pct:Math.round((1-download/baseline)*100),samples:rows.length});
+        current:Math.round(download*10)/10,baseline:Math.round(baseline*10)/10,drop_pct:Math.round((1-download/baseline)*100),samples:rows.length,
+        baseline_hour:bucket.hour,day_type:bucket.dayType,baseline_scope:(bucket.dayType==='weekend'?'выходные':'будни')+' · '+String(bucket.hour).padStart(2,'0')+':00'});
     }else if(degraded&&download>=baseline*.75){
       degraded=0;since=null;
       alerts.trigger('modem_speed_baseline_recovered',{server:f.server.name,nick,imei:f.imei,operator:f.operator,
-        current:Math.round(download*10)/10,baseline:Math.round(baseline*10)/10});
+        current:Math.round(download*10)/10,baseline:Math.round(baseline*10)/10,
+        baseline_scope:(bucket.dayType==='weekend'?'выходные':'будни')+' · '+String(bucket.hour).padStart(2,'0')+':00'});
     }
-    baselineUpsert.run(f.server.name,nick,f.operator||'',baseline,download,rows.length,consecutive,degraded,since);
-    return {ready:true,samples:rows.length,baseline,current:download,bad,degraded:!!degraded,consecutive};
+    baselineUpsert.run(f.server.name,nick,f.operator||'',baseline,download,rows.length,consecutive,degraded,since,bucket.hour,bucket.dayType,baselineWindowDays);
+    return {ready:true,samples:rows.length,baseline,current:download,bad,degraded:!!degraded,consecutive,bucket};
   }
 
   // Резолв ников → бокс/IMEI/онлайн/оператор по всем серверам. Вызывается и
@@ -351,4 +381,4 @@ function create(deps) {
   return { runSpeedMonitor, getTargetNicks, evaluateBaseline };
 }
 
-module.exports = { create, parseSpeedtestResult, DEFAULT_NICKS };
+module.exports = { create, parseSpeedtestResult, speedBaselineBucket, DEFAULT_NICKS };

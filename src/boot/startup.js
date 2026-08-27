@@ -25,7 +25,7 @@ function runStartup(d) {
     failoverEngine, fetchApi, fetchApiRaw, postFormApi, parseHtmlInputFields,
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
-    setHourlyAggSched, runSpeedMonitor, runServerMetrics, runRetailGuard,
+    setHourlyAggSched, runSpeedMonitor, runLocationWanSpeed, runServerMetrics, runRetailGuard,
     runBlockedPortCleanup, runHttpCheck, runVolumeGuard,
     saveClients, auditLog, authTokensDb,
     events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
@@ -169,6 +169,15 @@ function runStartup(d) {
     .catch(e => logger.error('[SpeedMonitor] startup run failed:', e.message)), 4 * 60 * 1000);
   _intervals.push(setInterval(() => dbAudit.runJobAsync('SpeedMonitor', 'hourly', () => runSpeedMonitor())
     .catch(e => logger.error('[SpeedMonitor] hourly run failed:', e.message)), 60 * 60 * 1000));
+
+  // Проводной канал: один speedtest на физическую локацию каждый час.
+  // Первый запуск отложен, чтобы не делить SSH и канал со стартовыми джобами.
+  if (runLocationWanSpeed) {
+    setTimeout(() => dbAudit.runJobAsync('LocationWanSpeed', 'startup', () => runLocationWanSpeed())
+      .catch(e => logger.error('[LocationWanSpeed] startup run failed:', e.message)), 8 * 60 * 1000);
+    _intervals.push(setInterval(() => dbAudit.runJobAsync('LocationWanSpeed', 'hourly', () => runLocationWanSpeed())
+      .catch(e => logger.error('[LocationWanSpeed] hourly run failed:', e.message)), 60 * 60 * 1000));
+  }
 
   // ServerMetrics: снимок загрузки боксов (SSH cpu/load/mem/swap/disk/temp/
   // uptime + HTTP-панель /system_status) в таблицу server_metrics — блок

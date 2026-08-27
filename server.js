@@ -2955,6 +2955,12 @@ const _speedMonitor = require('./src/jobs/speed-monitor').create({
   db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting, alerts,
 });
 
+// Один замер проводного канала на физическую локацию. Серверы по одному
+// адресу объединяются; при недоступности первого пробуем следующий на площадке.
+const _locationWanSpeed = require('./src/jobs/location-wan-speed').create({
+  db, logger, apiServers,
+});
+
 // ServerMetrics: снимок загрузки боксов (SSH cpu/load/mem/… + HTTP-панель
 // /system_status) каждые 10 мин — блок «Загрузка серверов» на дашборде.
 // proxyConf определён выше (обход логин-стены /modem/login внутри getPage).
@@ -4155,6 +4161,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched: (s) => { _hourlyAggSched = s; },
     runSpeedMonitor: _speedMonitor.runSpeedMonitor,
+    runLocationWanSpeed: _locationWanSpeed.runLocationWanSpeed,
     runServerMetrics: _serverMetrics.runServerMetrics,
     runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold

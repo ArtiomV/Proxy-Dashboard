@@ -163,7 +163,7 @@ document.addEventListener('input',function(e){var t=e.target;if(t&&t.dataset&&t.
 document.addEventListener('change',function(e){var t=e.target;if(t&&t.dataset&&t.closest&&t.closest('#tab-analytics')&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))t.dataset.dirty='1'});
 function _analyticsDirty(){var t=document.getElementById('tab-analytics');if(!t)return false;var ae=document.activeElement;if(ae&&t.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return true;return !!t.querySelector('[data-dirty="1"]')}
 function _clearSettingsDirty(){var t=document.getElementById('tab-analytics');if(!t)return;t.querySelectorAll('[data-dirty="1"]').forEach(function(el){el.dataset.dirty=''})}
-function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});if(el)el.classList.add('active');var tc=document.getElementById('tab-'+name);if(tc)tc.classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'&&!auto){try{renderAccNew();}catch(e){console.error(e);}}if(name==='dashboard2'&&!auto){try{renderDashboard2();loadServerMetrics();}catch(e){console.error(e);}}if(name==='clients'&&!auto)renderClients();if(name==='analytics'&&!auto){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
+function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});if(el)el.classList.add('active');var tc=document.getElementById('tab-'+name);if(tc)tc.classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'&&!auto){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients'&&!auto)renderClients();if(name==='analytics'&&!auto){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
 
 // Polling/SSE refreshes already rendered blocks in place. Re-entering the tab
 // used to reset asynchronous screens to their «Загрузка» skeleton every minute.
@@ -172,8 +172,6 @@ function refreshActiveTabInPlace(name){
     try{renderNewExtWidgets();}catch(e){}
     try{renderNewFleetServers();}catch(e){}
     try{var d=collectTrafficData();if(d)renderNewClientTable(d);}catch(e){}
-  }else if(name==='dashboard2'){
-    try{renderDashboard2();}catch(e){}
   }else if(name==='clients'){
     try{renderClients();}catch(e){}
   }
@@ -935,6 +933,44 @@ function loadServerDowntimeModal(period){
     body.innerHTML=h+'</div>';
   }).catch(function(error){if(seq===state.seq)body.innerHTML=_sysError(error.message||'Не удалось загрузить историю');});
 }
+
+var _locationWanHours=168,_locationWanSeq=0;
+function _wanNumber(value,digits){var n=Number(value);return Number.isFinite(n)?n.toLocaleString('ru-RU',{maximumFractionDigits:digits==null?1:digits}):'—';}
+function _wanPath(points,key,max){
+  if(points.length<2)return '';
+  return points.map(function(point,index){var x=2+(index/(points.length-1))*296,y=58-(Math.max(0,Number(point[key])||0)/max)*52;return (index?'L':'M')+x.toFixed(1)+' '+y.toFixed(1);}).join(' ');
+}
+function _wanChart(points){
+  var max=Math.max.apply(null,[1].concat(points.map(function(point){return Math.max(Number(point.download_mbps)||0,Number(point.upload_mbps)||0);}))) * 1.08;
+  if(points.length<2)return '<div class="wan-no-chart">Нужно минимум два замера для графика</div>';
+  return '<svg class="wan-chart" viewBox="0 0 300 62" preserveAspectRatio="none" role="img" aria-label="График download и upload"><path class="wan-grid" d="M2 58H298 M2 32H298 M2 6H298"></path><path class="wan-down" d="'+_wanPath(points,'download_mbps',max)+'"></path><path class="wan-up" d="'+_wanPath(points,'upload_mbps',max)+'"></path></svg>';
+}
+function loadLocationWanSpeed(hours){
+  var container=document.getElementById('locationWanSpeed');if(!container)return;
+  _locationWanHours=hours||_locationWanHours;var seq=++_locationWanSeq;
+  container.classList.add('is-loading');
+  api(API+'/api/admin/location_wan_speed?hours='+_locationWanHours).then(function(data){
+    if(seq!==_locationWanSeq||!document.getElementById('locationWanSpeed'))return;
+    if(data.error){container.innerHTML=_sysError(data.error);return;}
+    var byLocation={};(data.rows||[]).forEach(function(row){(byLocation[row.location_key]||(byLocation[row.location_key]=[])).push(row);});
+    var filters=[[24,'24 часа'],[168,'7 дней'],[720,'30 дней']].map(function(item){return '<button class="wan-period '+(_locationWanHours===item[0]?'is-active':'')+'" data-on-click="loadLocationWanSpeed('+item[0]+')">'+item[1]+'</button>';}).join('');
+    var html='<article class="sh-card wan-panel"><div class="sh-card-head wan-head"><div><small>Проводной интернет</small><h3>Скорость по локациям</h3><p>Один почасовой замер на площадку, независимо от количества серверов</p></div><div class="wan-periods">'+filters+'</div></div><div class="wan-locations">';
+    (data.locations||[]).forEach(function(location){
+      var rows=byLocation[location.key]||[],valid=rows.filter(function(row){return !!row.ok;}),latest=rows[rows.length-1]||null,lastGood=valid[valid.length-1]||null;
+      var avgDown=valid.length?valid.reduce(function(sum,row){return sum+(Number(row.download_mbps)||0);},0)/valid.length:null;
+      var minDown=valid.length?Math.min.apply(null,valid.map(function(row){return Number(row.download_mbps)||0;})):null;
+      var stamp=lastGood&&lastGood.collected_at?new Date(lastGood.collected_at).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'нет замеров';
+      html+='<section class="wan-location '+(latest&&!latest.ok?'has-error':'')+'"><header><span class="wan-status"></span><span><b>'+esc(location.label)+'</b><small>'+esc((location.servers||[]).map(function(server){return server.displayName||server.name;}).join(' · '))+'</small></span><em>'+esc(stamp)+'</em></header>';
+      if(!lastGood){html+='<div class="wan-empty"><b>Данных пока нет</b><span>'+(latest&&latest.error?esc(latest.error):'Первый замер появится после запуска почасового мониторинга')+'</span></div>';}
+      else html+='<div class="wan-current"><div><small>Получение</small><strong><i>↓</i>'+_wanNumber(lastGood.download_mbps)+' <em>Мбит/с</em></strong></div><div><small>Отдача</small><strong><i>↑</i>'+_wanNumber(lastGood.upload_mbps)+' <em>Мбит/с</em></strong></div><div><small>Пинг</small><strong>'+_wanNumber(lastGood.ping_ms,0)+' <em>мс</em></strong></div></div>'
+        +'<div class="wan-plot">'+_wanChart(valid)+'<div class="wan-legend"><span class="is-down">Получение</span><span class="is-up">Отдача</span></div></div>'
+        +'<footer><span>Средняя ↓ <b>'+_wanNumber(avgDown)+' Мбит/с</b></span><span>Минимальная ↓ <b>'+_wanNumber(minDown)+' Мбит/с</b></span><span>Источник <b>'+esc(lastGood.server_name||'—')+'</b></span>'+(latest&&!latest.ok?'<span class="wan-last-error">Последний замер: ошибка</span>':'')+'</footer>';
+      html+='</section>';
+    });
+    if(!(data.locations||[]).length)html+='<div class="wan-empty"><b>Нет настроенных локаций</b><span>Укажите адреса в настройках серверов</span></div>';
+    container.innerHTML=html+'</div></article>';container.classList.remove('is-loading');
+  }).catch(function(error){if(seq===_locationWanSeq){container.innerHTML=_sysError(error.message||'Не удалось загрузить скорость локаций');container.classList.remove('is-loading');}});
+}
 function renderSysDashboard(targetId){
   var c=document.getElementById(targetId||'serverHealthContent');if(!c)return;
   c.innerHTML=_sysLoader();
@@ -955,6 +991,8 @@ function renderSysDashboard(targetId){
       +kpi('database','База данных',((d.db&&d.db.size_mb)||0)+' МБ','SQLite · рабочий файл','is-blue')
       +kpi('users','Активные сессии',String(d.sessions||0),'администраторы и клиенты','is-purple')+'</div>';
 
+    h+='<div id="locationWanSpeed" class="wan-host">'+_sysLoader()+'</div>';
+
     h+='<div class="sh-grid"><article class="sh-card sh-servers"><div class="sh-card-head"><div><small>Инфраструктура</small><h3>Серверы ProxySmart</h3></div><span>'+(d.servers||[]).length+' шт.</span></div><div class="sh-server-list">';
     (d.servers||[]).forEach(function(s){var off=!!cached[s.name],f=fleet[s.name]||{},on=f.working!=null?f.working:(f.online||0),tot=f.total||0;h+='<div class="sh-server-row"><span class="sh-server-dot '+(off?'is-off':'is-on')+'"></span><span class="sh-server-name"><b>'+esc(s.displayName||s.name)+'</b><small>'+esc(s.country||'Без страны')+'</small></span><span class="sh-server-modems"><b>'+on+'/'+tot+'</b><small>модемов</small></span><span class="sh-server-state '+(off?'is-off':'is-on')+'">'+(off?'Нет связи':'В сети')+'</span></div>';});
     h+='</div></article>';
@@ -973,7 +1011,7 @@ function renderSysDashboard(targetId){
     h+='</div></article></div>';
 
     h+=_shDowntimeSection(d.server_downtime_24h,d.servers||[]);
-    h+='</section>';c.innerHTML=h;
+    h+='</section>';c.innerHTML=h;loadLocationWanSpeed(_locationWanHours);
     setTimeout(function(){var cv=document.getElementById('sysErrChart');if(!cv||!window.Chart)return;if(_sysCharts.err)try{_sysCharts.err.destroy();}catch(_){}var cc=getChartColorsLight(),e7=d.errors_by_day||[];_sysCharts.err=newChartSafe(cv,{type:'bar',data:{labels:e7.map(function(x){return x.date.slice(5)}),datasets:[{label:'Ошибки',data:e7.map(function(x){return x.errors}),backgroundColor:'#ef4444',borderRadius:5,maxBarThickness:26},{label:'Предупреждения',data:e7.map(function(x){return x.warns}),backgroundColor:'#f59e0b',borderRadius:5,maxBarThickness:26}]},options:{responsive:true,maintainAspectRatio:false,animation:false,plugins:{legend:{position:'bottom',labels:{usePointStyle:true,pointStyle:'circle',boxWidth:6,color:cc.text,font:{size:10}}}},scales:{x:{stacked:true,ticks:{color:cc.text,font:{size:10}},grid:{display:false},border:{display:false}},y:{stacked:true,beginAtZero:true,ticks:{color:cc.text,precision:0},grid:{color:cc.grid},border:{display:false}}}}});},20);
   }).catch(function(e){c.innerHTML=_sysError(e.message);});
 }
@@ -2538,7 +2576,7 @@ function regenerateApiKeyInForm(){
       currentData=data;processData();renderServerFilter();renderClientFilterDD();renderTable();updateHeaderStats();
       generateNotifications();
       document.getElementById('lastUpdate').textContent=new Date().toLocaleTimeString('ru-RU');
-      var _st=localStorage.getItem('admin_active_tab')||'dashboard';var _te=document.querySelector('.nav-tab[data-on-click*="\''+_st+'\'"]');if(_te)switchMainTab(_st,_te);
+      var _st=localStorage.getItem('admin_active_tab')||'dashboard';var _te=document.querySelector('.nav-tab[data-on-click*="\''+_st+'\'"]');if(!_te){_st='dashboard';localStorage.setItem('admin_active_tab',_st);_te=document.querySelector('.nav-tab[data-on-click*="\'dashboard\'"]')}if(_te)switchMainTab(_st,_te);
       startAutoRefresh()
     })
     .catch(function(e){
@@ -3938,7 +3976,7 @@ function renderNewFleetServers(){
       h+='<div class="server-metrics-list">';
       // Подпись CPU — реальная модель с бокса (SSH, поле cpu_model): «i3-10100 · 8 пот.»
       var cpuSub='Загрузка процессора';
-      if(met.cpu_model){ var cm=String(met.cpu_model).replace(/\(R\)|\(TM\)|Intel|Core|CPU/gi,'').replace(/@.*$/,'').replace(/\s+/g,' ').trim(); if(cm) cpuSub=cm+(met.cpu_cores?' · '+met.cpu_cores+' пот.':''); }
+      if(met.cpu_model&&typeof _srvMetCpuModelLabel==='function') cpuSub=_srvMetCpuModelLabel(met.cpu_model,met.cpu_cores)||cpuSub;
       h+=srvMetRowV2('cpu','CPU',cpuSub,met.cpu_pct,null,a24.cpu_pct,s24.cpu);
       h+=srvMetRowV2('connections','Соединения','TCP-подключения',met.conns,null,a24.conns,s24.conns,{unit:'',integer:true,tone:'purple',relativeScale:true});
       h+='</div>';
@@ -4146,7 +4184,6 @@ function loadNewFinance(force){
       _newFinAt = Date.now();
       renderNewPulse(d);
       renderNewFinance(d);
-      try{ if(localStorage.getItem('admin_active_tab')==='dashboard2')renderDashboard2(); }catch(_){}
       try{ var _td = collectTrafficData(); if(_td) renderNewClientTable(_td); }catch(_){}  // объединённая таблица клиентов: подтянуть доходность сразу
     })
     .catch(function(e){ var q=document.getElementById('newFinQuality'); if(q) q.innerHTML='<div style="color:var(--danger);font-size:12px">Ошибка: '+esc(e.message)+'</div>'; });

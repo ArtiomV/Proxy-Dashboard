@@ -268,11 +268,13 @@ function create(deps) {
 
   // SSH: сначала пробуем ключ из ~/.ssh/id_ed25519 (публичная часть выдана
   // владельцу — добавляется в authorized_keys боксов), если мимо — sshpass
-  // с паролем из конфига сервера. BatchMode=yes — без интерактива.
+  // с паролем из конфига сервера. Для ключа BatchMode=yes; для sshpass нужен
+  // BatchMode=no, иначе OpenSSH запрещает парольную аутентификацию до её старта.
   function _sshArgs(server, port, useKey) {
-    return ['-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=no',
+    return ['-o', `BatchMode=${useKey ? 'yes' : 'no'}`, '-o', 'StrictHostKeyChecking=no',
       '-o', 'UserKnownHostsFile=/dev/null', '-o', 'ConnectTimeout=8',
       '-o', 'IdentitiesOnly=yes',
+      ...(useKey ? [] : ['-o', 'PreferredAuthentications=password,keyboard-interactive']),
       '-p', String(port), `${server.osLogin}@${server.publicIp}`, SSH_CMD];
   }
 

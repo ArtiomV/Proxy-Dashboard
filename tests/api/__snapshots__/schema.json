@@ -373,6 +373,12 @@
   },
   {
     "type": "index",
+    "name": "idx_location_wan_speed_key_ts",
+    "tbl_name": "location_wan_speed",
+    "sql": "CREATE INDEX idx_location_wan_speed_key_ts ON location_wan_speed(location_key, collected_at)"
+  },
+  {
+    "type": "index",
     "name": "idx_maintenance_target",
     "tbl_name": "maintenance_windows",
     "sql": "CREATE INDEX idx_maintenance_target ON maintenance_windows(target_type, target_id, from_ts)"
@@ -919,6 +925,12 @@
   },
   {
     "type": "table",
+    "name": "location_wan_speed",
+    "tbl_name": "location_wan_speed",
+    "sql": "CREATE TABLE location_wan_speed ( id INTEGER PRIMARY KEY AUTOINCREMENT, location_key TEXT NOT NULL, location_label TEXT NOT NULL, server_name TEXT NOT NULL DEFAULT '', collected_at TEXT NOT NULL, download_mbps REAL, upload_mbps REAL, ping_ms REAL, jitter_ms REAL, packet_loss_pct REAL, provider TEXT NOT NULL DEFAULT '', external_ip TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '', ok INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '' )"
+  },
+  {
+    "type": "table",
     "name": "maintenance_windows",
     "tbl_name": "maintenance_windows",
     "sql": "CREATE TABLE maintenance_windows ( id INTEGER PRIMARY KEY AUTOINCREMENT, target_type TEXT NOT NULL CHECK (target_type IN ('server','modem')), target_id TEXT NOT NULL, from_ts INTEGER NOT NULL, to_ts INTEGER NOT NULL, comment TEXT NOT NULL DEFAULT '', created_by TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL DEFAULT (datetime('now')) )"
@@ -951,7 +963,7 @@
     "type": "table",
     "name": "modem_speed_baseline_state",
     "tbl_name": "modem_speed_baseline_state",
-    "sql": "CREATE TABLE modem_speed_baseline_state ( server TEXT NOT NULL, nick TEXT NOT NULL, operator TEXT NOT NULL DEFAULT '', baseline_dl REAL, current_dl REAL, sample_count INTEGER NOT NULL DEFAULT 0, consecutive_bad INTEGER NOT NULL DEFAULT 0, degraded INTEGER NOT NULL DEFAULT 0, degraded_since TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY(server,nick) )"
+    "sql": "CREATE TABLE modem_speed_baseline_state ( server TEXT NOT NULL, nick TEXT NOT NULL, operator TEXT NOT NULL DEFAULT '', baseline_dl REAL, current_dl REAL, sample_count INTEGER NOT NULL DEFAULT 0, consecutive_bad INTEGER NOT NULL DEFAULT 0, degraded INTEGER NOT NULL DEFAULT 0, degraded_since TEXT, updated_at TEXT NOT NULL DEFAULT (datetime('now')), baseline_hour INTEGER, day_type TEXT NOT NULL DEFAULT '', baseline_window_days INTEGER NOT NULL DEFAULT 56, PRIMARY KEY(server,nick) )"
   },
   {
     "type": "table",

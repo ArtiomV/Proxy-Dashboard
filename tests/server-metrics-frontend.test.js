@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
-const { _srvMetUptime } = require('../public/js/admin/server-metrics.js');
+const { _srvMetUptime, _srvMetCpuModelLabel } = require('../public/js/admin/server-metrics.js');
 
 describe('server card uptime formatter', () => {
   it('rounds sub-day uptime to one hours-only value', () => {
@@ -20,5 +20,17 @@ describe('server card uptime formatter', () => {
   it('keeps missing uptime empty', () => {
     expect(_srvMetUptime(0)).toBeNull();
     expect(_srvMetUptime(null)).toBeNull();
+  });
+});
+
+describe('server card CPU model formatter', () => {
+  it('removes the CPU generation prefix from the displayed model', () => {
+    expect(_srvMetCpuModelLabel('12th Gen Intel(R) Core(TM) i5-12400 CPU @ 2.50GHz', 12))
+      .toBe('i5-12400 · 12 пот.');
+  });
+
+  it('keeps models without a generation prefix compact', () => {
+    expect(_srvMetCpuModelLabel('Intel(R) Core(TM) i3-10100 CPU @ 3.60GHz', 8))
+      .toBe('i3-10100 · 8 пот.');
   });
 });

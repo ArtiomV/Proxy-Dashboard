@@ -23,6 +23,7 @@ describe('mergeDbMetadataIntoEnvServers', () => {
       hardware: 'i3-10100 / 8GB',
       country: 'MD', countryName: 'Moldova', tz: 'Europe/Chisinau',
       osLogin: 'md1', osPassword: 'Admin123',
+      manualSshLogin: 'root', manualSshPassword: 'RealSecret', manualSshPort: 22,
     }];
     mergeDbMetadataIntoEnvServers(env, db);
     expect(env).toHaveLength(1);
@@ -34,6 +35,8 @@ describe('mergeDbMetadataIntoEnvServers', () => {
       country: 'MD',
       osLogin: 'md1',
       osPassword: 'Admin123',
+      manualSshLogin: 'root',
+      manualSshPassword: 'RealSecret',
     });
   });
 
@@ -76,7 +79,7 @@ describe('mergeDbMetadataIntoEnvServers', () => {
 
   it('exposes all expected DB metadata fields', () => {
     expect(DB_META_FIELDS).toEqual(
-      expect.arrayContaining(['displayName', 'osLogin', 'osPassword', 'hardware', 'address', 'country', 'countryName', 'tz'])
+      expect.arrayContaining(['displayName', 'osLogin', 'osPassword', 'manualSshLogin', 'manualSshPassword', 'manualSshPort', 'hardware', 'address', 'country', 'countryName', 'tz'])
     );
   });
 });

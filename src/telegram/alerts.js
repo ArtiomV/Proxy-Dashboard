@@ -905,7 +905,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 21600,
     dedupeKey: p => 'speedbase_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
-    render: p => `🟠 <b>Модем деградировал</b>\n\n<b>${esc(p.nick || p.imei || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — скорость <b>${p.current} Мбит/с</b>, собственная норма за 7 дней <b>${p.baseline} Мбит/с</b>.\nПадение на <b>${p.drop_pct}%</b> подтверждено двумя замерами подряд (${p.samples} замеров в baseline).`,
+    render: p => `🟠 <b>Модем деградировал</b>\n\n<b>${esc(p.nick || p.imei || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — скорость <b>${p.current} Мбит/с</b>, средняя для этого часа (${esc(p.baseline_scope || 'тот же тип дня')}) <b>${p.baseline} Мбит/с</b>.\nПадение на <b>${p.drop_pct}%</b> подтверждено двумя замерами подряд (${p.samples} сопоставимых замеров).`,
   },
   modem_speed_baseline_recovered: {
     title: 'Модем: скорость вернулась к норме',
@@ -913,7 +913,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 60,
     dedupeKey: p => 'speedbaserec_' + (p.server || '') + '_' + (p.imei || p.nick || ''),
-    render: p => `🟢 <b>Скорость восстановилась</b>\n\n<b>${esc(p.nick || p.imei || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — сейчас <b>${p.current} Мбит/с</b>, норма за 7 дней ${p.baseline} Мбит/с.`,
+    render: p => `🟢 <b>Скорость восстановилась</b>\n\n<b>${esc(p.nick || p.imei || '?')}</b> (${esc(_srvLabel(p.server) || '?')}) — сейчас <b>${p.current} Мбит/с</b>, средняя для этого часа (${esc(p.baseline_scope || 'тот же тип дня')}) ${p.baseline} Мбит/с.`,
   },
   server_metric_anomaly: {
     title: 'Сервер: отклонение от динамической нормы',

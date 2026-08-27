@@ -14,6 +14,7 @@ const express = require('express');
 const credCheck = require('../services/cred-check');
 const predictive = require('../monitoring/predictive');
 const { buildForecasts, buildPackageEfficiency } = require('../jobs/volume-guard');
+const { buildCostLocations } = require('../billing/cost-locations');
 
 module.exports = function createServersRouter(deps) {
   const {
@@ -27,11 +28,8 @@ module.exports = function createServersRouter(deps) {
   } = deps;
   const r = express.Router();
 
-// WP5+WP6: живая статистика сервера — системный RPS + активные коннекты +
-// уникальность IP-пула. Источники: /modem/common_status (rps, count_connections,
-// devices) и /apix/unique_ips_json (UNIQUE_IPS_PERCENT за 14 дней). unique_ips
-// — это 14-дневный скан, поэтому кэшируем per-server на 10 мин; common_status
-// дешёвый, но кэшируем вместе одним TTL для простоты. Per-server graceful:
+// Живая статистика сервера — системный RPS, активные подключения и устройства.
+// Источник: /modem/common_status. Per-server graceful:
 // упавший бокс → null (карточка просто не покажет плашки).
 const _srvStatsCache = new Map();   // name → { at, data }
 const SRV_STATS_TTL_MS = 10 * 60 * 1000;
@@ -42,18 +40,12 @@ r.get('/api/admin/server_stats', authMiddleware, adminMiddleware, async (req, re
     const cached = _srvStatsCache.get(s.name);
     if (cached && (Date.now() - cached.at) < SRV_STATS_TTL_MS) { out[s.name] = cached.data; return; }
     try {
-      const [common, uniq] = await Promise.all([
-        fetchApi(s, '/modem/common_status', 8000).catch(() => null),
-        fetchApi(s, '/apix/unique_ips_json', 12000).catch(() => null),
-      ]);
-      if (!common && !uniq) { out[s.name] = null; return; }
+      const common = await fetchApi(s, '/modem/common_status', 8000).catch(() => null);
+      if (!common) { out[s.name] = null; return; }
       const data = {
         rps: common && Number.isFinite(+common.rps) ? Math.round(+common.rps) : null,
         conns: common && Number.isFinite(+common.count_connections) ? +common.count_connections : null,
         devices: common && Number.isFinite(+common.devices) ? +common.devices : null,
-        uniqueIpPct: uniq && Number.isFinite(+uniq.UNIQUE_IPS_PERCENT) ? +uniq.UNIQUE_IPS_PERCENT : null,
-        rotations: uniq && Number.isFinite(+uniq.TOTAL_ROTATIONS) ? +uniq.TOTAL_ROTATIONS : null,
-        uniqDays: uniq && Number.isFinite(+uniq.DAYS) ? +uniq.DAYS : null,
       };
       _srvStatsCache.set(s.name, { at: Date.now(), data });
       out[s.name] = data;
@@ -63,6 +55,29 @@ r.get('/api/admin/server_stats', authMiddleware, adminMiddleware, async (req, re
     }
   }));
   res.json({ stats: out });
+});
+
+// История проводного канала по физическим площадкам. Несколько серверов с
+// одинаковым адресом представлены одной локацией и одним рядом измерений.
+r.get('/api/admin/location_wan_speed', authMiddleware, adminMiddleware, (req, res) => {
+  const requested = Number(req.query.hours);
+  const hours = Number.isFinite(requested) ? Math.max(24, Math.min(24 * 90, Math.round(requested))) : 24 * 7;
+  const since = new Date(Date.now() - hours * 3600e3).toISOString();
+  try {
+    const rows = db.prepare(`SELECT location_key, location_label, server_name, collected_at,
+        download_mbps, upload_mbps, ping_ms, jitter_ms, packet_loss_pct,
+        provider, external_ip, method, ok, error
+      FROM location_wan_speed WHERE collected_at >= ? ORDER BY collected_at`).all(since);
+    res.json({
+      generated_at: new Date().toISOString(),
+      hours,
+      locations: buildCostLocations(apiServers),
+      rows,
+    });
+  } catch (error) {
+    logger.warn('[LocationWAN] read failed: ' + error.message);
+    res.status(500).json({ error: 'Не удалось прочитать историю проводного канала' });
+  }
 });
 
 // ServerMetrics (джоба src/jobs/server-metrics.js): последняя строка метрик
@@ -256,6 +271,8 @@ r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
     country: SERVER_COUNTRIES[s.name] || {},
     panelUser: s.user || '', panelPassword: s.pass || '',
     osLogin: s.osLogin || '', osPassword: s.osPassword || '', sshPort: s.sshPort || '',
+    manualSshLogin: s.manualSshLogin || '', manualSshPassword: s.manualSshPassword || '',
+    manualSshPort: s.manualSshPort || '',
     hardware: s.hardware || '', address: s.address || ''
   })) });
 });
@@ -263,7 +280,8 @@ r.get('/api/admin/servers', authMiddleware, adminMiddleware, (req, res) => {
 r.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, async (req, res) => {
   const srv = apiServers.find(s => s.name === req.params.name);
   if (!srv) return res.status(404).json({ error: 'Server not found' });
-  const { displayName, osLogin, osPassword, sshPort, hardware, address, panelUser, panelPassword } = req.body;
+  const { displayName, osLogin, osPassword, sshPort, manualSshLogin, manualSshPassword,
+    manualSshPort, hardware, address, panelUser, panelPassword } = req.body;
   if (displayName !== undefined) {
     const cleanName = String(displayName || '').replace(/\s+/g, ' ').trim();
     if (cleanName.length > 60 || /[\u0000-\u001f\u007f]/.test(cleanName)) {
@@ -285,6 +303,15 @@ r.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, async (req,
       return res.status(400).json({ error: 'sshPort must be 1..65535 or empty' });
     }
     srv.sshPort = p > 0 && p < 65536 ? p : undefined;
+  }
+  if (manualSshLogin !== undefined) srv.manualSshLogin = String(manualSshLogin || '').trim() || undefined;
+  if (manualSshPassword !== undefined) srv.manualSshPassword = String(manualSshPassword || '') || undefined;
+  if (manualSshPort !== undefined) {
+    const p = Number(manualSshPort);
+    if (manualSshPort !== '' && manualSshPort !== null && !(p > 0 && p < 65536)) {
+      return res.status(400).json({ error: 'Порт ручного SSH должен быть от 1 до 65535 или пустым' });
+    }
+    srv.manualSshPort = p > 0 && p < 65536 ? p : undefined;
   }
   if (hardware    !== undefined) srv.hardware   = hardware;
   if (address     !== undefined) srv.address    = address;
@@ -319,7 +346,8 @@ r.patch('/api/admin/servers/:name', authMiddleware, adminMiddleware, async (req,
 });
 
 r.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) => {
-  const { name, displayName, url, user, pass, publicIp, country, countryName, tz, osLogin, osPassword, sshPort } = req.body;
+  const { name, displayName, url, user, pass, publicIp, country, countryName, tz,
+    osLogin, osPassword, sshPort, manualSshLogin, manualSshPassword, manualSshPort } = req.body;
   if (!name || !url || !user || !pass) return res.status(400).json({ error: 'name, url, user, pass required' });
   if (apiServers.find(s => s.name === name)) return res.status(409).json({ error: 'Server name already exists' });
   // 26.08: SSH-реквизиты (mon read-only для выгрузки метрик) принимаем сразу
@@ -329,6 +357,12 @@ r.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) =
     const p = Number(sshPort);
     if (!(p > 0 && p < 65536)) return res.status(400).json({ error: 'sshPort must be 1..65535 or empty' });
     sshPortNum = p;
+  }
+  let manualSshPortNum;
+  if (manualSshPort !== undefined && manualSshPort !== '' && manualSshPort !== null) {
+    const p = Number(manualSshPort);
+    if (!(p > 0 && p < 65536)) return res.status(400).json({ error: 'Порт ручного SSH должен быть от 1 до 65535 или пустым' });
+    manualSshPortNum = p;
   }
   const cleanDisplayName = String(displayName || '').replace(/\s+/g, ' ').trim();
   if (cleanDisplayName.length > 60 || /[\u0000-\u001f\u007f]/.test(cleanDisplayName)) {
@@ -344,6 +378,9 @@ r.post('/api/admin/servers', authMiddleware, adminMiddleware, async (req, res) =
     if (osLogin !== undefined && String(osLogin).trim()) testServer.osLogin = String(osLogin).trim();
     if (osPassword !== undefined && String(osPassword)) testServer.osPassword = String(osPassword);
     if (sshPortNum) testServer.sshPort = sshPortNum;
+    if (manualSshLogin !== undefined && String(manualSshLogin).trim()) testServer.manualSshLogin = String(manualSshLogin).trim();
+    if (manualSshPassword !== undefined && String(manualSshPassword)) testServer.manualSshPassword = String(manualSshPassword);
+    if (manualSshPortNum) testServer.manualSshPort = manualSshPortNum;
     const status = await fetchApi(testServer, '/apix/show_status_json', 10000);
     const modemCount = Array.isArray(status) ? status.length : 0;
     // Add to runtime. SERVER_COUNTRIES is rebuilt inside saveApiServersToDb

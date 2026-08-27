@@ -55,6 +55,18 @@ function _srvMetUptime(sec) {
   return Math.max(1, Math.round(sec / 3600)) + 'ч';
 }
 
+// Короткая модель CPU для карточки: системные префиксы вроде «12th Gen»
+// занимают место, но не помогают отличить процессор (остаётся «i5-12400»).
+function _srvMetCpuModelLabel(model, cores) {
+  var shortModel = String(model || '')
+    .replace(/\b\d{1,2}(?:st|nd|rd|th)\s+Gen(?:eration)?\b/gi, '')
+    .replace(/\(R\)|\(TM\)|Intel|Core|CPU/gi, '')
+    .replace(/@.*$/, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return shortModel ? shortModel + (cores ? ' · ' + cores + ' пот.' : '') : '';
+}
+
 // Одна карточка сервера. m — строка метрик (может быть null — данных ещё нет).
 function _srvMetCard(name, m, address) {
   var displayName = typeof _serverDisplayName === 'function' ? _serverDisplayName(name) : name;
@@ -318,7 +330,6 @@ function srvMetRowV2(ic, title, sub, current, absText, average, series, options)
 function renderServerMetrics(box, d) {
   window._srvMetData = d || {};
   if (typeof renderNewFleetServers === 'function') renderNewFleetServers();
-  try { if (localStorage.getItem('admin_active_tab') === 'dashboard2' && typeof renderDashboard2 === 'function') renderDashboard2(); } catch (_) {}
 }
 
 function loadServerMetrics(force) {
@@ -333,7 +344,7 @@ function loadServerMetrics(force) {
 // Экспорт для node-тестов (паттерн public/js/utils.js).
 if (typeof module !== 'undefined' && module.exports) {
   module.exports = {
-    _srvMetBar, _srvMetUptime, _srvMetCard, renderServerMetrics, _srvMetColor,
+    _srvMetBar, _srvMetUptime, _srvMetCpuModelLabel, _srvMetCard, renderServerMetrics, _srvMetColor,
     srvMetInline, _srvSpark, srvMetRowV2, _srvMetMinutes, _srvMetEpisodeLabel,
     _srvMetEventStamp, _srvMetLastFlap, _srvMetFlapTimeline,
   };

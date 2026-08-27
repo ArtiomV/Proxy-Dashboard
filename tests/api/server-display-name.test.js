@@ -74,16 +74,22 @@ describe('API server display names', () => {
     expect(saved).toBe(0);
   });
 
-  it('accepts SSH credentials (mon read-only) when adding a server (26.08)', async () => {
+  it('stores technical monitoring and manual owner SSH credentials separately', async () => {
     const result = await request(app).post('/api/admin/servers').send({
       name: 'RO1', url: 'http://ro1:7005', user: 'proxy', pass: 'secret',
       publicIp: '92.180.31.223', osLogin: 'mon', osPassword: '', sshPort: 6005,
+      manualSshLogin: 'root', manualSshPassword: 'owner-secret', manualSshPort: 22,
     });
     expect(result.status).toBe(200);
     const added = apiServers.find(s => s.name === 'RO1');
-    expect(added).toMatchObject({ osLogin: 'mon', sshPort: 6005 });
+    expect(added).toMatchObject({ osLogin: 'mon', sshPort: 6005,
+      manualSshLogin: 'root', manualSshPassword: 'owner-secret', manualSshPort: 22 });
     expect(added.osPassword).toBeUndefined();   // пустой пароль не сохраняем — вход по ключу
     expect(saved).toBe(1);
+    const list = await request(app).get('/api/admin/servers');
+    expect(list.body.servers.find(s => s.name === 'RO1')).toMatchObject({
+      manualSshLogin: 'root', manualSshPassword: 'owner-secret', manualSshPort: 22,
+    });
   });
 
   it('rejects an out-of-range SSH port when adding a server', async () => {
@@ -92,5 +98,14 @@ describe('API server display names', () => {
     });
     expect(result.status).toBe(400);
     expect(apiServers.find(s => s.name === 'RO2')).toBeUndefined();
+  });
+
+  it('updates manual SSH without changing monitoring SSH', async () => {
+    apiServers[0].osLogin='mon';apiServers[0].sshPort=6005;
+    const result=await request(app).patch('/api/admin/servers/S1').send({
+      manualSshLogin:'admin',manualSshPassword:'real-pass',manualSshPort:2222,
+    });
+    expect(result.status).toBe(200);
+    expect(apiServers[0]).toMatchObject({osLogin:'mon',sshPort:6005,manualSshLogin:'admin',manualSshPassword:'real-pass',manualSshPort:2222});
   });
 });
