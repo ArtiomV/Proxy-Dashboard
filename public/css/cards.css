@@ -120,6 +120,25 @@
 .add-plus{width:22px;height:22px;border-radius:6px;background:var(--accent);color:#fff;display:flex;align-items:center;justify-content:center;font-size:14px;font-weight:700}
 .add-form{display:grid;grid-template-columns:90px 1fr 110px 110px 130px 110px;gap:8px;align-items:end}
 
+/* Servers: operator checklist for connecting a new USB modem. */
+.server-modem-guide{margin:0 0 14px;border:1px solid var(--border);border-radius:12px;background:var(--bg-1);box-shadow:0 1px 3px rgba(16,24,40,.04);color:var(--text-0)}
+.server-modem-guide>summary{display:flex;align-items:center;gap:11px;padding:13px 15px;cursor:pointer;list-style:none;user-select:none}
+.server-modem-guide>summary::-webkit-details-marker{display:none}
+.server-modem-guide-icon{display:flex;align-items:center;justify-content:center;width:34px;height:34px;flex:0 0 34px;border-radius:10px;background:rgba(47,111,224,.09);color:var(--accent)}
+.server-modem-guide-heading{min-width:0;flex:1}.server-modem-guide-heading b,.server-modem-guide-heading small{display:block}.server-modem-guide-heading b{font-size:13px}.server-modem-guide-heading small{margin-top:2px;color:var(--text-3);font-size:10px;font-weight:400}
+.server-modem-guide-chevron{width:8px;height:8px;margin-right:4px;border-right:1.5px solid var(--text-3);border-bottom:1.5px solid var(--text-3);transform:rotate(45deg);transition:transform .15s}
+.server-modem-guide[open] .server-modem-guide-chevron{transform:rotate(225deg)}
+.server-modem-guide-body{padding:0 15px 14px;border-top:1px solid var(--border)}
+.server-modem-steps{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:0;margin:0;padding:0;list-style:none}
+.server-modem-steps li{display:flex;align-items:flex-start;gap:9px;min-width:0;padding:14px 12px 12px;border-left:1px solid var(--border)}
+.server-modem-steps li:first-child{padding-left:0;border-left:0}.server-modem-steps li:last-child{padding-right:0}
+.server-modem-steps li>span{display:flex;align-items:center;justify-content:center;width:22px;height:22px;flex:0 0 22px;border-radius:50%;background:var(--accent);color:#fff;font:700 10px/1 var(--font)}
+.server-modem-steps li>div{min-width:0}.server-modem-steps b{display:block;margin:2px 0 4px;font-size:10.5px}.server-modem-steps p{margin:0;color:var(--text-2);font-size:9.5px;line-height:1.45}.server-modem-steps code{padding:1px 3px;border-radius:4px;background:var(--bg-2);color:var(--text-1);font-size:8.5px;white-space:normal}
+.server-modem-guide-notes{display:grid;grid-template-columns:1fr 1fr;gap:10px;padding-top:12px;border-top:1px solid var(--border)}
+.server-modem-guide-notes p{margin:0;padding-left:10px;border-left:2px solid var(--success);color:var(--text-2);font-size:9.5px;line-height:1.45}.server-modem-guide-notes p:last-child{border-left-color:var(--accent)}.server-modem-guide-notes b{color:var(--text-0)}
+@media(max-width:1100px){.server-modem-steps{grid-template-columns:repeat(2,minmax(0,1fr))}.server-modem-steps li{border-left:0;border-top:1px solid var(--border);padding:12px}.server-modem-steps li:nth-child(-n+2){border-top:0}.server-modem-steps li:nth-child(odd){padding-left:0;border-right:1px solid var(--border)}.server-modem-steps li:nth-child(even){padding-right:0}}
+@media(max-width:620px){.server-modem-guide>summary{padding:12px}.server-modem-guide-heading small{white-space:normal}.server-modem-guide-body{padding:0 12px 12px}.server-modem-steps{grid-template-columns:1fr}.server-modem-steps li,.server-modem-steps li:first-child,.server-modem-steps li:last-child,.server-modem-steps li:nth-child(odd),.server-modem-steps li:nth-child(even){padding:11px 0;border:0;border-top:1px solid var(--border)}.server-modem-steps li:first-child{border-top:0}.server-modem-guide-notes{grid-template-columns:1fr}}
+
 /* Loading state for sections */
 .acc-loading{display:flex;align-items:center;justify-content:center;padding:40px;color:var(--text-3);gap:8px}
 .acc-loading .spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin .8s linear infinite}
