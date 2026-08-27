@@ -4800,7 +4800,7 @@ function loadFailoverLog(){
 
 // ===== Unified client detail modal (tabbed «Детали») =====
 function switchDetailTab(tab){
-  ['overview','billing','modems','payments'].forEach(function(t){
+  ['overview','billing','modems','payments','documents'].forEach(function(t){
     var b=document.getElementById('cdTab_'+t),p=document.getElementById('cdPane_'+t);
     if(b)b.classList.toggle('active',t===tab);
     if(p)p.style.display=(t===tab)?'block':'none';
@@ -4808,6 +4808,10 @@ function switchDetailTab(tab){
   if(tab==='payments'){
     if(currentOpsClientId){ renderOpsHistory(currentOpsClientId); }
     else { var ob=document.getElementById('clientOpsBody'); if(ob)ob.innerHTML='<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Сначала сохраните клиента</div>'; }
+  }
+  if(tab==='documents'){
+    if(currentOpsClientId){ renderOpsDocuments(currentOpsClientId,'clientDocsBody'); }
+    else { var db=document.getElementById('clientDocsBody'); if(db)db.innerHTML='<div style="color:var(--text-3);font-size:13px;padding:30px;text-align:center">Сначала сохраните клиента</div>'; }
   }
 }
 function _cdModemsFor(c){

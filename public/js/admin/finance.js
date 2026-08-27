@@ -580,8 +580,15 @@ function editBillAmount(clientId, billId) {
   });
 }
 
-function renderOpsDocuments(clientId) {
-  var body = document.getElementById('clientOpsBody');
+// 27.08: после редизайна v2.0 раздел живёт во вкладке «Документы» карточки
+// клиента (контейнер clientDocsBody). Старый ops-модал мёртв, но оставляем
+// дефолт clientOpsBody для обратной совместимости вызовов.
+function _docsTargetId() {
+  var pane = document.getElementById('cdPane_documents');
+  return (pane && pane.style.display !== 'none') ? 'clientDocsBody' : 'clientOpsBody';
+}
+function renderOpsDocuments(clientId, targetId) {
+  var body = document.getElementById(targetId || _docsTargetId());
   var client = (currentData.clients || []).find(function(c) { return c.id === clientId; });
   var actDocs = client ? (client.closingDocuments || []).slice().sort(function(a,b){ return (b.period||'').localeCompare(a.period||''); }) : [];
   var bills = client ? (client.bills || []).slice().sort(function(a,b){ return (b.period||'').localeCompare(a.period||''); }) : [];
