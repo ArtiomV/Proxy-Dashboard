@@ -83,14 +83,14 @@ Route snapshot (`tests/api/__snapshots__/routes.json`) freezes the (method, path
 Current flow (production): `scripts/deploy.sh` (rsync + npm ci + pm2 restart).
 С D2 (2026-08) скрипт перед rsync делает **pre-deploy снапшот БД** на сервере
 (`$DB_BACKUP_DIR/pre-deploy-<timestamp>/`, ротация последних 5) — точка отката
-на случай сломанного деплоя/миграции. Usage: `SERVER=root@159.194.228.17 ./scripts/deploy.sh`.
+на случай сломанного деплоя/миграции. Usage: `SERVER=root@2.29.2.168 ./scripts/deploy.sh`.
 No staging env. **Future improvement** — add `staging.proxies.rent` with a separate DB and run integration tests there before prod cuts.
 
 Recommended deploy script (todo):
 ```bash
 #!/bin/bash
 set -euo pipefail
-SERVER=root@159.194.228.17
+SERVER=root@2.29.2.168
 DIR=/root/Proxy-Dashboard
 rsync -av --exclude='*.db' --exclude='node_modules' --exclude='logs' \
   ./ $SERVER:$DIR/
