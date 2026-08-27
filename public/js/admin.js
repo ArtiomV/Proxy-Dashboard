@@ -940,10 +940,41 @@ function _wanPath(points,key,max){
   if(points.length<2)return '';
   return points.map(function(point,index){var x=2+(index/(points.length-1))*296,y=58-(Math.max(0,Number(point[key])||0)/max)*52;return (index?'L':'M')+x.toFixed(1)+' '+y.toFixed(1);}).join(' ');
 }
+var _wanLastPoints=[];
 function _wanChart(points){
   var max=Math.max.apply(null,[1].concat(points.map(function(point){return Math.max(Number(point.download_mbps)||0,Number(point.upload_mbps)||0);}))) * 1.08;
   if(points.length<2)return '<div class="wan-no-chart">Нужно минимум два замера для графика</div>';
   return '<svg class="wan-chart" viewBox="0 0 300 62" preserveAspectRatio="none" role="img" aria-label="График download и upload"><path class="wan-grid" d="M2 58H298 M2 32H298 M2 6H298"></path><path class="wan-down" d="'+_wanPath(points,'download_mbps',max)+'"></path><path class="wan-up" d="'+_wanPath(points,'upload_mbps',max)+'"></path></svg>';
+}
+// Наведение на график: вертикальная линия, точки на обеих линиях и попап
+// со временем замера, download, upload и пингом.
+function _wanChartAttach(plot,points){
+  var svg=plot.querySelector('svg.wan-chart');if(!svg||!points||points.length<2)return;
+  var max=Math.max.apply(null,[1].concat(points.map(function(point){return Math.max(Number(point.download_mbps)||0,Number(point.upload_mbps)||0);}))) * 1.08;
+  var guide=document.createElement('div');guide.className='wan-guide';guide.style.display='none';
+  var dotD=document.createElement('div');dotD.className='wan-dot is-down';dotD.style.display='none';
+  var dotU=document.createElement('div');dotU.className='wan-dot is-up';dotU.style.display='none';
+  var tip=document.createElement('div');tip.className='wan-tip';tip.style.display='none';
+  plot.appendChild(guide);plot.appendChild(dotD);plot.appendChild(dotU);plot.appendChild(tip);
+  svg.addEventListener('mousemove',function(ev){
+    var rect=svg.getBoundingClientRect();if(!rect.width)return;
+    var vf=Math.min(1,Math.max(0,((ev.clientX-rect.left)/rect.width*300-2)/296));
+    var idx=Math.round(vf*(points.length-1)),point=points[idx];if(!point)return;
+    var leftPx=(2+(idx/(points.length-1))*296)/300*rect.width;
+    guide.style.display='';guide.style.left=leftPx+'px';
+    var dY=58-(Math.max(0,Number(point.download_mbps)||0)/max)*52,uY=58-(Math.max(0,Number(point.upload_mbps)||0)/max)*52;
+    dotD.style.display='';dotD.style.left=leftPx+'px';dotD.style.top=dY+'px';
+    dotU.style.display='';dotU.style.left=leftPx+'px';dotU.style.top=uY+'px';
+    var stamp=point.collected_at?new Date(point.collected_at).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'';
+    tip.innerHTML='<b>'+esc(stamp)+'</b>'
+      +'<span><i class="d">↓</i>'+_wanNumber(point.download_mbps)+' Мбит/с</span>'
+      +'<span><i class="u">↑</i>'+_wanNumber(point.upload_mbps)+' Мбит/с</span>'
+      +(point.ping_ms!=null&&point.ping_ms!==''?'<span class="p">пинг '+_wanNumber(point.ping_ms,0)+' мс</span>':'');
+    tip.style.display='';
+    var tw=tip.offsetWidth,lx=leftPx+12;if(lx+tw>rect.width)lx=leftPx-tw-12;
+    tip.style.left=Math.max(0,lx)+'px';
+  });
+  svg.addEventListener('mouseleave',function(){guide.style.display='none';dotD.style.display='none';dotU.style.display='none';tip.style.display='none';});
 }
 function loadLocationWanSpeed(hours){
   var container=document.getElementById('locationWanSpeed');if(!container)return;
@@ -955,20 +986,23 @@ function loadLocationWanSpeed(hours){
     var byLocation={};(data.rows||[]).forEach(function(row){(byLocation[row.location_key]||(byLocation[row.location_key]=[])).push(row);});
     var filters=[[24,'24 часа'],[168,'7 дней'],[720,'30 дней']].map(function(item){return '<button class="wan-period '+(_locationWanHours===item[0]?'is-active':'')+'" data-on-click="loadLocationWanSpeed('+item[0]+')">'+item[1]+'</button>';}).join('');
     var html='<article class="sh-card wan-panel"><div class="sh-card-head wan-head"><div><small>Проводной интернет</small><h3>Скорость по локациям</h3><p>Один почасовой замер на площадку, независимо от количества серверов</p></div><div class="wan-periods">'+filters+'</div></div><div class="wan-locations">';
-    (data.locations||[]).forEach(function(location){
+    _wanLastPoints=[];
+    (data.locations||[]).forEach(function(location,locIdx){
       var rows=byLocation[location.key]||[],valid=rows.filter(function(row){return !!row.ok;}),latest=rows[rows.length-1]||null,lastGood=valid[valid.length-1]||null;
+      _wanLastPoints[locIdx]=valid;
       var avgDown=valid.length?valid.reduce(function(sum,row){return sum+(Number(row.download_mbps)||0);},0)/valid.length:null;
       var minDown=valid.length?Math.min.apply(null,valid.map(function(row){return Number(row.download_mbps)||0;})):null;
       var stamp=lastGood&&lastGood.collected_at?new Date(lastGood.collected_at).toLocaleString('ru-RU',{day:'2-digit',month:'short',hour:'2-digit',minute:'2-digit'}):'нет замеров';
       html+='<section class="wan-location '+(latest&&!latest.ok?'has-error':'')+'"><header><span class="wan-status"></span><span><b>'+esc(location.label)+'</b><small>'+esc((location.servers||[]).map(function(server){return server.displayName||server.name;}).join(' · '))+'</small></span><em>'+esc(stamp)+'</em></header>';
       if(!lastGood){html+='<div class="wan-empty"><b>Данных пока нет</b><span>'+(latest&&latest.error?esc(latest.error):'Первый замер появится после запуска почасового мониторинга')+'</span></div>';}
       else html+='<div class="wan-current"><div><small>Получение</small><strong><i>↓</i>'+_wanNumber(lastGood.download_mbps)+' <em>Мбит/с</em></strong></div><div><small>Отдача</small><strong><i>↑</i>'+_wanNumber(lastGood.upload_mbps)+' <em>Мбит/с</em></strong></div><div><small>Пинг</small><strong>'+_wanNumber(lastGood.ping_ms,0)+' <em>мс</em></strong></div></div>'
-        +'<div class="wan-plot">'+_wanChart(valid)+'<div class="wan-legend"><span class="is-down">Получение</span><span class="is-up">Отдача</span></div></div>'
+        +'<div class="wan-plot" data-loc-idx="'+locIdx+'">'+_wanChart(valid)+'<div class="wan-legend"><span class="is-down">Получение</span><span class="is-up">Отдача</span></div></div>'
         +'<footer><span>Средняя ↓ <b>'+_wanNumber(avgDown)+' Мбит/с</b></span><span>Минимальная ↓ <b>'+_wanNumber(minDown)+' Мбит/с</b></span><span>Источник <b>'+esc(lastGood.server_name||'—')+'</b></span>'+(latest&&!latest.ok?'<span class="wan-last-error">Последний замер: ошибка</span>':'')+'</footer>';
       html+='</section>';
     });
     if(!(data.locations||[]).length)html+='<div class="wan-empty"><b>Нет настроенных локаций</b><span>Укажите адреса в настройках серверов</span></div>';
     container.innerHTML=html+'</div></article>';container.classList.remove('is-loading');
+    container.querySelectorAll('.wan-plot[data-loc-idx]').forEach(function(plot){_wanChartAttach(plot,_wanLastPoints[Number(plot.getAttribute('data-loc-idx'))]||[]);});
   }).catch(function(error){if(seq===_locationWanSeq){container.innerHTML=_sysError(error.message||'Не удалось загрузить скорость локаций');container.classList.remove('is-loading');}});
 }
 function renderSysDashboard(targetId){
