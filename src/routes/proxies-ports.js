@@ -115,7 +115,7 @@ r.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res
       }
     }
     if (!persisted) {
-      logger.warn(`[store_port] port ${actualPortId} did NOT persist on ${serverName} — ProxySmart rejected the authoritative form (portName=${JSON.stringify(portData.portName)}, verify=${verifyError ? verifyError.message : 'not_found'})`);
+      logger.warn(`[store_port] port ${actualPortId} did NOT persist on ${serverName} — ProxySmart rejected the authoritative form (imei=${rawImei}, portName=${JSON.stringify(portData.portName)}, form=${JSON.stringify({ http_port: formData.http_port, socks_port: formData.socks_port, proxy_login: formData.proxy_login })}, verify=${verifyError ? verifyError.message : 'not_found'})`);
       return res.status(422).json({ ok: false, error: 'ProxySmart отклонил порт. Имя уже проверено, а ID, порты и реквизиты были назначены самим ProxySmart. Порт не создан; повторять запрос не нужно.' });
     }
 
