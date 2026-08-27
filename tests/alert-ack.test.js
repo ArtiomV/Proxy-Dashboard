@@ -21,7 +21,7 @@ const alerts = require('../src/telegram/alerts.js');
 let db, sendMessage, tgRequest;
 // This suite tests Telegram buttons/cooldowns, not the five-minute incident
 // correlation queue (covered separately in incidents.test.js).
-const appSettings = { telegram_chat_id: '123', alert_incident_correlation_enabled: false };
+const appSettings = { telegram_chat_id: '123', alert_incident_correlation_enabled: false, telegram_night_digest_enabled: false };
 const kv = { telegram_bot_token: 'tok', alert_incident_correlation_enabled: false };   // getSetting читает отсюда
 
 beforeAll(() => {

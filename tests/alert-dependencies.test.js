@@ -9,7 +9,7 @@ const require = createRequire(import.meta.url);
 const alerts = require('../src/telegram/alerts.js');
 
 let sendMessage;
-const appSettings = { telegram_chat_id: '123', alert_dependencies_enabled: true };
+const appSettings = { telegram_chat_id: '123', alert_dependencies_enabled: true, telegram_night_digest_enabled: false };
 
 beforeAll(() => {
   sendMessage = vi.fn().mockResolvedValue({});

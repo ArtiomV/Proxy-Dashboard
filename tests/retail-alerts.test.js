@@ -16,7 +16,7 @@ beforeAll(() => {
     logger: { warn: () => {}, info: () => {}, error: () => {} },
     // WP5: токен читается через getSetting (enc1: в kv) — мокаем его.
     getSetting: (k, d) => (k === 'telegram_bot_token' ? 'tok' : d),
-    appSettings: { telegram_chat_id: '123' },
+    appSettings: { telegram_chat_id: '123', telegram_night_digest_enabled: false },
     kvSetCritical: () => ({ ok: true }),
     kvGet: { get: () => undefined },
     db: { prepare: () => ({ run: () => ({ lastInsertRowid: 1 }), get: () => undefined }) },
