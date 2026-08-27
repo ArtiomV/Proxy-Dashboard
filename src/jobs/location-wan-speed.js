@@ -13,17 +13,22 @@ const SSH_PORTS = [2222, 22];
 const SSH_TIMEOUT_MS = 150000;
 const RETENTION_DAYS = 90;
 
+// Порядок методов: Ookla → Cloudflare → speedtest-cli (только если нет curl).
+// speedtest-cli (старый python-клиент) на части боксов возвращает МУСОР с exit 0
+// (инцидент 27.08: RO1/S1 — download 0.0, ping 1800000 мс, сервер в Турции),
+// поэтому он больше не может перебивать рабочий Cloudflare-тест.
+// Результат с download ИЛИ upload = 0 отбраковывается в parseWanSpeedOutput.
 const WAN_SPEED_CMD = [
   'if command -v speedtest >/dev/null 2>&1; then',
   "  out=$(speedtest --accept-license --accept-gdpr --format=json 2>/dev/null) && { printf '%s\\n%s' '__METHOD_OOKLA__' \"$out\"; exit 0; };",
   'fi;',
+  'if command -v curl >/dev/null 2>&1; then',
+  "  down=$(curl -L -o /dev/null -sS --max-time 60 -w '%{speed_download}|%{time_connect}|%{remote_ip}' 'https://speed.cloudflare.com/__down?bytes=50000000') || exit 41;",
+  "  up=$(dd if=/dev/zero bs=1M count=10 2>/dev/null | curl -o /dev/null -sS --max-time 60 -w '%{speed_upload}' -X POST --data-binary @- 'https://speed.cloudflare.com/__up') || exit 42;",
+  "  printf '%s\\n%s\\n%s' '__METHOD_CLOUDFLARE__' \"$down\" \"$up\"; exit 0;",
+  'fi;',
   'if command -v speedtest-cli >/dev/null 2>&1; then',
   "  out=$(speedtest-cli --json 2>/dev/null) && { printf '%s\\n%s' '__METHOD_SPEEDTEST_CLI__' \"$out\"; exit 0; };",
-  'fi;',
-  'if command -v curl >/dev/null 2>&1; then',
-  "  down=$(curl -L -o /dev/null -sS --max-time 60 -w '%{speed_download}|%{time_connect}|%{remote_ip}' 'https://speed.cloudflare.com/__down?bytes=25000000') || exit 41;",
-  "  up=$(dd if=/dev/zero bs=1M count=5 2>/dev/null | curl -o /dev/null -sS --max-time 60 -w '%{speed_upload}' -X POST --data-binary @- 'https://speed.cloudflare.com/__up') || exit 42;",
-  "  printf '%s\\n%s\\n%s' '__METHOD_CLOUDFLARE__' \"$down\" \"$up\"; exit 0;",
   'fi;',
   "printf '%s' '__NO_SPEEDTEST_TOOL__'; exit 43",
 ].join(' ');
@@ -48,7 +53,7 @@ function parseWanSpeedOutput(stdout) {
     const j = extractJson(text);
     const download = j.download && Number(j.download.bandwidth);
     const upload = j.upload && Number(j.upload.bandwidth);
-    if (!(download > 0 || upload > 0)) throw new Error('Ookla не вернул скорость');
+    if (!(download > 0 && upload > 0)) throw new Error('Ookla вернул нулевую скорость');
     return {
       method: 'ookla',
       download_mbps: round(download * 8 / 1e6),
@@ -62,7 +67,7 @@ function parseWanSpeedOutput(stdout) {
   }
   if (text.startsWith('__METHOD_SPEEDTEST_CLI__')) {
     const j = extractJson(text);
-    if (!(Number(j.download) > 0 || Number(j.upload) > 0)) throw new Error('speedtest-cli не вернул скорость');
+    if (!(Number(j.download) > 0 && Number(j.upload) > 0)) throw new Error('speedtest-cli вернул нулевую скорость');
     return {
       method: 'speedtest-cli',
       download_mbps: round(Number(j.download) / 1e6),
@@ -128,16 +133,21 @@ function create(deps) {
 
   async function measureServer(server) {
     if (!server.osLogin || !server.publicIp) throw new Error('не настроен технический SSH-доступ');
-    let lastError = null;
+    let lastError = null, keyError = null;
     for (const port of sshPorts(server)) {
       try { return parseWanSpeedOutput(await sshOnce(server, port, true)); }
-      catch (error) { lastError = error; }
+      catch (error) { if (!keyError) keyError = error; lastError = error; }
     }
     if (server.osPassword) {
       for (const port of sshPorts(server)) {
         try { return parseWanSpeedOutput(await sshOnce(server, port, false)); }
         catch (error) { lastError = error; }
       }
+    }
+    // Если sshpass-фолбэк тоже упал, его ошибка («Auth failed») маскирует
+    // настоящую причину — показываем ошибку ключевой попытки тоже.
+    if (keyError && lastError && keyError.message !== lastError.message) {
+      throw new Error(`${keyError.message.slice(0, 140)} | fallback: ${lastError.message.slice(0, 100)}`);
     }
     throw lastError || new Error('SSH недоступен');
   }

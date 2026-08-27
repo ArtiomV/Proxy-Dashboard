@@ -491,6 +491,7 @@ function _fleetSection(merged, sanitizedClients) {
 
 r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, async (req, res) => {
   try {
+    const _t0 = Date.now();
     const results = await getFetchAllServersDataCached()();
     const merged = getMergeServerData()(results, '*');
     const meta = _runSection(logger, 'meta', () => _metaSection(merged), { servers: [] });
@@ -517,6 +518,8 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       for (const row of db.prepare('SELECT * FROM modem_speed_baseline_state').all()) out[row.server+'_'+row.nick]=row;
       return out;
     }, {});
+    const _sectionsMs = Date.now() - _t0;
+    if (_sectionsMs > 800) logger.info(`[data] sections took ${_sectionsMs}ms`);
 
     res.json({
       connsHistory: (deps.getConnsHistory ? deps.getConnsHistory() : {}),
@@ -541,7 +544,18 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       ipTracking: getIpTracking(),
       uptimeTracking: uptimePeriod.rollingTracking(db, getUptimeTracking(), 30),
       speedtestLatest: getSpeedtestLatest(),
-      ipHistory: getIpHistory(),
+      // ipHistory: фронту нужна только ПОСЛЕДНЯЯ запись на модем (детект застоя
+      // IP, admin.js processData). Полная история — 17k+ строк / ~1.7 МБ в каждом
+      // ответе /api/admin/data (27.08: «дашборд долго грузится»). Шлём урезанное.
+      ipHistory: (() => {
+        const full = getIpHistory() || {};
+        const last = {};
+        for (const k in full) {
+          const arr = full[k];
+          if (Array.isArray(arr) && arr.length) last[k] = [arr[arr.length - 1]];
+        }
+        return last;
+      })(),
       settings: appSettings,
       bankPayments: getAllBankPayments(),
       tochkaConfigured: !!getTochkaConfig().jwt,

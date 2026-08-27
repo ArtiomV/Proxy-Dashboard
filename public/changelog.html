@@ -73,6 +73,15 @@
     <p>Список доработок дашборда — на человеческом языке. Каждый блок отвечает на вопрос «что это даёт вам как пользователю / администратору».</p>
   </div>
 
+  <!-- v2.10.51 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>2.10.51</span>
+      <span class="release-date">27 августа 2026</span>
+      <span class="release-tag tag-fix">Скорость панели</span>
+    </div>
+    <p class="release-tagline">Дашборд загружается заметно быстрее: ответ основного API теперь сжимается gzip на nginx (2,6 МБ → ~0,5 МБ), а из ответа убрана полная история смен IP — фронту нужна только последняя запись на модем. Заодно починен почасовой замер проводного канала: сломанный на боксах speedtest-cli (download 0, ping 30 минут, сервер в Турции) больше не перебивает точный Cloudflare-замер.</p>
+  </div>
   <!-- v2.10.50 -->
   <div class="release">
     <div class="release-header">
