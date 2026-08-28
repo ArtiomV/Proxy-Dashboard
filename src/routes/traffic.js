@@ -12,6 +12,7 @@
 //   GET  /api/admin/unique_ips                — count distinct IPs per modem
 
 const express = require('express');
+const todayCalc = require('../traffic/today');
 
 module.exports = function createTrafficRouter(deps) {
   const {
@@ -113,16 +114,22 @@ r.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
   }
 
   if (includeToday) {
-    // Add today's live data from ProxySmart
+    // Add today's live data from ProxySmart.
+    // Через hourly+дельту, как в /api/admin/daily_traffic: сырой day-счётчик
+    // до 03:00 MSK содержит весь вчерашний день (инцидент 28.08).
     try {
       const results = await fetchAllServersDataCached();
       const merged = mergeServerData(results, portNameFilter);
+      const thToday = todayCalc.hourlyTodayByPort(db, today);
+      const snaps = todayCalc.snapshotBaselines(db, today);
+      const rawFallback = !todayCalc.hasOwnAccounting(thToday, snaps);
       const todayData = {};
       for (const [portId, b] of Object.entries(merged.bandwidth || {})) {
         const dIn = parseTrafficValue(b.bandwidth_bytes_day_in);
         const dOut = parseTrafficValue(b.bandwidth_bytes_day_out);
-        if (dIn > 0 || dOut > 0) {
-          todayData[portId] = { in: dIn, out: dOut, portName: b.portName || '' };
+        const t = rawFallback ? { in: dIn, out: dOut } : todayCalc.todayBytes(thToday, snaps, portId, dIn, dOut);
+        if (t.in > 0 || t.out > 0) {
+          todayData[portId] = { in: t.in, out: t.out, portName: b.portName || '' };
         }
       }
       res.json({ daily: result, today: todayData, todayDate: today });
@@ -216,6 +223,13 @@ r.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req, r
   } catch (e) {
     logger.warn('[daily_traffic] traffic_hourly override failed: ' + e.message);
   }
+  // Today: traffic_hourly(MSK) + клампленая live-дельта сверх снапшота.
+  // Сырые bandwidth_bytes_day_* напрямую показывать нельзя: бокс сбрасывает
+  // их в 00:00 UTC (03:00 MSK), и с 00:00 до 03:00 MSK «сегодня» показывало
+  // весь вчерашний день (инцидент 28.08 — «Румыния 300 ГБ в час ночи»).
+  const _thToday = todayCalc.hourlyTodayByPort(db, todayStr);
+  const _snaps = todayCalc.snapshotBaselines(db, todayStr);
+  const _rawFallback = !todayCalc.hasOwnAccounting(_thToday, _snaps);
   for (const data of results) {
     if (typeof data.bw !== 'object') continue;
     const srvName = data.serverName || '';
@@ -223,15 +237,17 @@ r.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req, r
       const pn = b.portName || pnMap[(data.serverName || '') + '_' + portId] || 'Не назначен';
       const dayIn = parseBwToBytes(b.bandwidth_bytes_day_in);
       const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
-      if (dayIn > 0 || dayOut > 0) {
+      const fp = portId.startsWith(srvName + '_') ? portId : srvName + '_' + portId;
+      const t = _rawFallback ? { in: dayIn, out: dayOut } : todayCalc.todayBytes(_thToday, _snaps, fp, dayIn, dayOut);
+      if (t.in > 0 || t.out > 0) {
         if (!byClient[pn]) byClient[pn] = {};
         if (!byClient[pn][todayStr]) byClient[pn][todayStr] = { in: 0, out: 0, servers: {} };
-        byClient[pn][todayStr].in += dayIn;
-        byClient[pn][todayStr].out += dayOut;
+        byClient[pn][todayStr].in += t.in;
+        byClient[pn][todayStr].out += t.out;
         if (srvName) {
           if (!byClient[pn][todayStr].servers[srvName]) byClient[pn][todayStr].servers[srvName] = { in: 0, out: 0 };
-          byClient[pn][todayStr].servers[srvName].in += dayIn;
-          byClient[pn][todayStr].servers[srvName].out += dayOut;
+          byClient[pn][todayStr].servers[srvName].in += t.in;
+          byClient[pn][todayStr].servers[srvName].out += t.out;
         }
       }
     }
@@ -300,21 +316,28 @@ r.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req, r
         byModem[modemKey].days[date] += (entry.in || 0) + (entry.out || 0);
       }
     }
-    // Today's live (bw keys already prefixed in merged data: S1_portXXX)
+    // Today's live (bw keys bare per server; считаем через hourly+дельту,
+    // как основной цикл выше — инцидент 28.08, сырой day-счётчик до 03:00 MSK
+    // содержит вчерашний день).
     const _nowLocal2 = new Date(Date.now() + 3 * 3600000);
     const todayStr2 = _nowLocal2.toISOString().slice(0, 10);
+    // todayStr2 всегда совпадает с todayStr основного цикла (обе — MSK-дата),
+    // поэтому переиспользуем _thToday/_snaps/_rawFallback.
     for (const data of results) {
       if (typeof data.bw !== 'object') continue;
+      const srvName2 = data.serverName || '';
       for (const [portId, b] of Object.entries(data.bw)) {
         const nick = portIdToNick[portId] || portId;
         const pn2 = b.portName || portIdToClientName[portId] || '';
         const modemKey2 = nick + (pn2 ? ':' + pn2 : '');
         const dayIn = parseBwToBytes(b.bandwidth_bytes_day_in);
         const dayOut = parseBwToBytes(b.bandwidth_bytes_day_out);
-        if (dayIn + dayOut > 0) {
+        const fp2 = portId.startsWith(srvName2 + '_') ? portId : srvName2 + '_' + portId;
+        const t2 = _rawFallback ? { in: dayIn, out: dayOut } : todayCalc.todayBytes(_thToday, _snaps, fp2, dayIn, dayOut);
+        if (t2.in + t2.out > 0) {
           if (!byModem[modemKey2]) byModem[modemKey2] = { portName: pn2, server: data.serverName, nick: nick, operator: portIdToOperator[portId] || '', days: {} };
           if (!byModem[modemKey2].days[todayStr2]) byModem[modemKey2].days[todayStr2] = 0;
-          byModem[modemKey2].days[todayStr2] += dayIn + dayOut;
+          byModem[modemKey2].days[todayStr2] += t2.in + t2.out;
         }
       }
     }

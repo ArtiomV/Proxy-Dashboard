@@ -8,6 +8,7 @@
 // during mount-time evaluation.
 
 const express = require('express');
+const todayCalc = require('../traffic/today');
 const { computeFleet, annotateTestPool, computeClientWorking } = require('../modems/fleet');
 const simulatorDb = require('../db/simulator');
 const { computeRevenueWindow } = require('../billing/revenue');   // WP8: canonical revenue
@@ -406,14 +407,23 @@ function _trafficSection(merged) {
     const cid = portNameToClientId[r.client_name];
     if (cid) clientLastHourGb[cid] = trafficBytesToGb(r.total);
   }
-  // Today per client from live data.
+  // Today per client: traffic_hourly(MSK) + live-дельта сверх снапшота.
+  // Сырой day-счётчик до 03:00 MSK содержит весь вчерашний день
+  // (инцидент 28.08 — «Румыния 300 ГБ в час ночи»), см. src/traffic/today.js.
+  const _todayMsk = getMoscowToday();
+  const _thToday = todayCalc.hourlyTodayByPort(db, _todayMsk);
+  const _snaps = todayCalc.snapshotBaselines(db, _todayMsk);
+  const _rawFallback = !todayCalc.hasOwnAccounting(_thToday, _snaps);
   const clientTodayGb = {};
   for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
     const pn = bwData.portName;
     if (!pn || !portNameToClientId[pn]) continue;
     const cid = portNameToClientId[pn];
     if (!clientTodayGb[cid]) clientTodayGb[cid] = 0;
-    clientTodayGb[cid] += trafficBytesToGb(parseBwToBytes(bwData.bandwidth_bytes_day_in) + parseBwToBytes(bwData.bandwidth_bytes_day_out));
+    const dIn = parseBwToBytes(bwData.bandwidth_bytes_day_in);
+    const dOut = parseBwToBytes(bwData.bandwidth_bytes_day_out);
+    const t = _rawFallback ? { in: dIn, out: dOut } : todayCalc.todayBytes(_thToday, _snaps, bwKey, dIn, dOut);
+    clientTodayGb[cid] += trafficBytesToGb(t.in + t.out);
   }
   // Override yesterday bandwidth with recorded daily_traffic (stable, not degraded by modem restarts)
   const _yesterdayStr = getMoscowYesterday();
@@ -450,13 +460,21 @@ function _fleetSection(merged, sanitizedClients) {
   // портов month==day==lifetime). «Larger source wins» — как routes/traffic.js.
   try {
     const live = {};
+    // Live-дельта сверх снапшота — «сегодня» без сырого day-счётчика,
+    // который до 03:00 MSK содержит весь вчерашний день (инцидент 28.08).
+    const _todayMskF = getMoscowToday();
+    const _snapsF = todayCalc.snapshotBaselines(db, _todayMskF);
     for (const [k, v] of Object.entries(merged.bandwidth || {})) {
       const i = k.indexOf('_');
       if (i <= 0) continue;
       const srv = k.slice(0, i);
-      const s = live[srv] || (live[srv] = { day: 0, mon: 0 });
-      s.day += (parseBwToBytes(v.bandwidth_bytes_day_in) || 0) + (parseBwToBytes(v.bandwidth_bytes_day_out) || 0);
+      const s = live[srv] || (live[srv] = { day: 0, mon: 0, dayDelta: 0 });
+      const dIn = parseBwToBytes(v.bandwidth_bytes_day_in) || 0;
+      const dOut = parseBwToBytes(v.bandwidth_bytes_day_out) || 0;
+      s.day += dIn + dOut;
       s.mon += (parseBwToBytes(v.bandwidth_bytes_month_in) || 0) + (parseBwToBytes(v.bandwidth_bytes_month_out) || 0);
+      const snap = _snapsF.get(k);
+      if (snap) s.dayDelta += todayCalc.clampLiveDelta(dIn - snap.in) + todayCalc.clampLiveDelta(dOut - snap.out);
     }
     const todayMsk = getMoscowToday();
     const monthStart = todayMsk.slice(0, 7) + '-01';
@@ -473,10 +491,15 @@ function _fleetSection(merged, sanitizedClients) {
       if (row.srv) dailyMonth[row.srv] = row.t || 0;
     }
     let allToday = 0, allMonth = 0;
+    const _hasOwnTraffic = Object.keys(hourlyToday).length > 0 || _snapsF.size > 0;
     for (const srv of Object.keys(fleet.byServer)) {
       const b = fleet.byServer[srv];
-      const l = live[srv] || { day: 0, mon: 0 };
-      const today = Math.max(l.day, hourlyToday[srv] || 0);
+      const l = live[srv] || { day: 0, mon: 0, dayDelta: 0 };
+      // Свой учёт (hourly + live-дельта) — основной; max() с сырым счётчиком
+      // только как фолбэк на свежей установке без hourly/snapshots.
+      const today = _hasOwnTraffic
+        ? (hourlyToday[srv] || 0) + (l.dayDelta || 0)
+        : Math.max(l.day, hourlyToday[srv] || 0);
       const month = Math.max(l.mon, (dailyMonth[srv] || 0) + (hourlyToday[srv] || 0));
       b.todayBytes = today;
       b.monthBytes = month;
