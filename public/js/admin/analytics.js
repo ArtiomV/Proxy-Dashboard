@@ -108,6 +108,11 @@ function collectTrafficData(){
       var monIn=parseTraffic(bw.bandwidth_bytes_month_in),monOut=parseTraffic(bw.bandwidth_bytes_month_out);
       var prevIn=parseTraffic(bw.bandwidth_bytes_prevmonth_in),prevOut=parseTraffic(bw.bandwidth_bytes_prevmonth_out);
       var lifeIn=parseTraffic(bw.bandwidth_bytes_lifetime_in),lifeOut=parseTraffic(bw.bandwidth_bytes_lifetime_out);
+      // Бэкенд-коррекция «сегодня» (traffic_hourly + live-дельта сверх снапшота):
+      // сырые day-счётчики в reset-окне содержат вчерашний день (инцидент 29.08 —
+      // hero-KPI «Трафик сегодня» показывал 326 ГБ в 01:00 МСК).
+      var _ptb=currentData.portTodayBytes||null;
+      if(_ptb&&port.portID){var _ptv=_ptb[m.server+'_'+port.portID];if(_ptv){dayIn=_ptv.in;dayOut=_ptv.out;if(accPeriod==='day'){din=dayIn;dout=dayOut;}}}
       var rawOp=m.operator||'Неизвестный';
       var op=rawOp;
       totalIn+=din;totalOut+=dout;

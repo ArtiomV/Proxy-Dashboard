@@ -944,7 +944,10 @@ var _wanLastPoints=[];
 function _wanChart(points){
   var max=Math.max.apply(null,[1].concat(points.map(function(point){return Math.max(Number(point.download_mbps)||0,Number(point.upload_mbps)||0);}))) * 1.08;
   if(points.length<2)return '<div class="wan-no-chart">Нужно минимум два замера для графика</div>';
-  return '<svg class="wan-chart" viewBox="0 0 300 62" preserveAspectRatio="none" role="img" aria-label="График download и upload"><path class="wan-grid" d="M2 58H298 M2 32H298 M2 6H298"></path><path class="wan-down" d="'+_wanPath(points,'download_mbps',max)+'"></path><path class="wan-up" d="'+_wanPath(points,'upload_mbps',max)+'"></path></svg>';
+  var dD=_wanPath(points,'download_mbps',max),dU=_wanPath(points,'upload_mbps',max);
+  // Мягкие заливки под кривыми — две серии различимы даже там, где линии
+  // сближаются/пересекаются (Армянская: download проседает до уровня upload).
+  return '<svg class="wan-chart" viewBox="0 0 300 62" preserveAspectRatio="none" role="img" aria-label="График download и upload"><path class="wan-grid" d="M2 58H298 M2 32H298 M2 6H298"></path><path class="wan-down-fill" d="'+dD+' L298 58 L2 58 Z"></path><path class="wan-up-fill" d="'+dU+' L298 58 L2 58 Z"></path><path class="wan-down" d="'+dD+'"></path><path class="wan-up" d="'+dU+'"></path></svg>';
 }
 // Наведение на график: вертикальная линия, точки на обеих линиях и попап
 // со временем замера, download, upload и пингом.
@@ -3774,8 +3777,12 @@ function renderNewPulse(fin){
   // Бывший ряд «Пульс» удалён — заполняем его только если элемент ещё на странице.
   var el = document.getElementById('newPulseRow');
   if(el){
-    var _td=collectTrafficData(), _today=0;
-    if(_td&&_td.modemTraffic){_td.modemTraffic.forEach(function(m){_today+=(m.dayIn||0)+(m.dayOut||0);});}
+    // «Трафик сегодня» — из backend-учёта (fleet.todayBytes: hourly + live-дельта,
+    // корректно в reset-окне). Сырые day-счётчики модемов — только как fallback
+    // (через collectTrafficData, который уже подменяет их на portTodayBytes).
+    var _today=0;
+    if(currentData.fleet&&typeof currentData.fleet.todayBytes==='number'){ _today=currentData.fleet.todayBytes; }
+    else { var _td=collectTrafficData(); if(_td&&_td.modemTraffic){_td.modemTraffic.forEach(function(m){_today+=(m.dayIn||0)+(m.dayOut||0);});} }
     var _fl=(currentData.fleet&&currentData.fleet.byServer)||null, _fw=0, _ft=0;
     if(_fl){Object.keys(_fl).forEach(function(k){var b=_fl[k]||{};_fw+=(b.working!=null?b.working:(b.online||0));_ft+=(b.total||0);});}
     if(_ft<_fw)_ft=_fw;

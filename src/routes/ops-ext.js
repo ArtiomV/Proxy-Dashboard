@@ -415,14 +415,20 @@ function _trafficSection(merged) {
   const _snaps = todayCalc.snapshotBaselines(db, _todayMsk);
   const _rawFallback = !todayCalc.hasOwnAccounting(_thToday, _snaps);
   const clientTodayGb = {};
+  // Per-port «сегодня» (байты) — фронт подменяет сырые day-счётчики в
+  // collectTrafficData: hero-KPI, таблица клиентов, таблица модемов, вкладка
+  // «Трафик → Сегодня» (инцидент 29.08: hero-KPI показывал 326 ГБ в 01:00 МСК
+  // из-за доресетных счётчиков RO).
+  const portTodayBytes = {};
   for (const [bwKey, bwData] of Object.entries(merged.bandwidth || {})) {
+    const dIn = parseBwToBytes(bwData.bandwidth_bytes_day_in);
+    const dOut = parseBwToBytes(bwData.bandwidth_bytes_day_out);
+    const t = _rawFallback ? { in: dIn, out: dOut } : todayCalc.todayBytes(_thToday, _snaps, bwKey, dIn, dOut);
+    if (t.in > 0 || t.out > 0) portTodayBytes[bwKey] = { in: t.in, out: t.out };
     const pn = bwData.portName;
     if (!pn || !portNameToClientId[pn]) continue;
     const cid = portNameToClientId[pn];
     if (!clientTodayGb[cid]) clientTodayGb[cid] = 0;
-    const dIn = parseBwToBytes(bwData.bandwidth_bytes_day_in);
-    const dOut = parseBwToBytes(bwData.bandwidth_bytes_day_out);
-    const t = _rawFallback ? { in: dIn, out: dOut } : todayCalc.todayBytes(_thToday, _snaps, bwKey, dIn, dOut);
     clientTodayGb[cid] += trafficBytesToGb(t.in + t.out);
   }
   // Override yesterday bandwidth with recorded daily_traffic (stable, not degraded by modem restarts)
@@ -437,7 +443,7 @@ function _trafficSection(merged) {
   // Trends (cached 60s by the _getXxxTrend helpers).
   const modemTrend = _getModemTrend();
   const clientTrend = _getClientTrend();
-  return { clientLiveMonthGb, clientLastHourGb, clientTodayGb, modemTrend, clientTrend };
+  return { clientLiveMonthGb, clientLastHourGb, clientTodayGb, portTodayBytes, modemTrend, clientTrend };
 }
 
 // Section: fleet (roster count + per-client «в работе»)
@@ -523,7 +529,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     const meta = _runSection(logger, 'meta', () => _metaSection(merged), { servers: [] });
     const clientsSec = _runSection(logger, 'clients', _clientsSection, _clientsFallback());
     const billingSec = _runSection(logger, 'billing', _billingSection, { clientMonthCharges: {}, clientMonthGb: {}, revenue30d: { byClient: {}, total: 0, windowDays: 30, asOf: getMoscowToday() } });
-    const trafficSec = _runSection(logger, 'traffic', () => _trafficSection(merged), { clientLiveMonthGb: {}, clientLastHourGb: {}, clientTodayGb: {}, modemTrend: {}, clientTrend: {} });
+    const trafficSec = _runSection(logger, 'traffic', () => _trafficSection(merged), { clientLiveMonthGb: {}, clientLastHourGb: {}, clientTodayGb: {}, portTodayBytes: {}, modemTrend: {}, clientTrend: {} });
     const fleetSec = _runSection(logger, 'fleet', () => _fleetSection(merged, clientsSec.sanitizedClients), { fleet: { total: 0, online: 0, offline: 0, byServer: {} } });
     // B3 (23.08): окна обслуживания — активные и ближайшие 24ч, для бейджа
     // «🔧 Обслуживание до HH:MM» на карточке сервера.
