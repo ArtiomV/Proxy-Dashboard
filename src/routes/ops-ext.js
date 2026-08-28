@@ -461,20 +461,23 @@ function _fleetSection(merged, sanitizedClients) {
   try {
     const live = {};
     // Live-дельта сверх снапшота — «сегодня» без сырого day-счётчика,
-    // который до 03:00 MSK содержит весь вчерашний день (инцидент 28.08).
+    // который до конца reset-окна содержит вчерашний день (инциденты 28-29.08).
+    // Считаем через todayCalc.todayBytes per-port: он же ловит локальный
+    // reset бокса (счётчик упал ниже baseline → baseline=0).
     const _todayMskF = getMoscowToday();
+    const _thTodayF = todayCalc.hourlyTodayByPort(db, _todayMskF);
     const _snapsF = todayCalc.snapshotBaselines(db, _todayMskF);
     for (const [k, v] of Object.entries(merged.bandwidth || {})) {
       const i = k.indexOf('_');
       if (i <= 0) continue;
       const srv = k.slice(0, i);
-      const s = live[srv] || (live[srv] = { day: 0, mon: 0, dayDelta: 0 });
+      const s = live[srv] || (live[srv] = { day: 0, mon: 0, today: 0 });
       const dIn = parseBwToBytes(v.bandwidth_bytes_day_in) || 0;
       const dOut = parseBwToBytes(v.bandwidth_bytes_day_out) || 0;
       s.day += dIn + dOut;
       s.mon += (parseBwToBytes(v.bandwidth_bytes_month_in) || 0) + (parseBwToBytes(v.bandwidth_bytes_month_out) || 0);
-      const snap = _snapsF.get(k);
-      if (snap) s.dayDelta += todayCalc.clampLiveDelta(dIn - snap.in) + todayCalc.clampLiveDelta(dOut - snap.out);
+      const t = todayCalc.todayBytes(_thTodayF, _snapsF, k, dIn, dOut);
+      s.today += t.in + t.out;
     }
     const todayMsk = getMoscowToday();
     const monthStart = todayMsk.slice(0, 7) + '-01';
@@ -494,11 +497,11 @@ function _fleetSection(merged, sanitizedClients) {
     const _hasOwnTraffic = Object.keys(hourlyToday).length > 0 || _snapsF.size > 0;
     for (const srv of Object.keys(fleet.byServer)) {
       const b = fleet.byServer[srv];
-      const l = live[srv] || { day: 0, mon: 0, dayDelta: 0 };
-      // Свой учёт (hourly + live-дельта) — основной; max() с сырым счётчиком
-      // только как фолбэк на свежей установке без hourly/snapshots.
+      const l = live[srv] || { day: 0, mon: 0, today: 0 };
+      // Свой учёт (hourly + live-дельта per-port) — основной; max() с сырым
+      // счётчиком только как фолбэк на свежей установке без hourly/snapshots.
       const today = _hasOwnTraffic
-        ? (hourlyToday[srv] || 0) + (l.dayDelta || 0)
+        ? Math.max(l.today || 0, hourlyToday[srv] || 0)   // hourly ловит порты, ушедшие офлайн intraday
         : Math.max(l.day, hourlyToday[srv] || 0);
       const month = Math.max(l.mon, (dailyMonth[srv] || 0) + (hourlyToday[srv] || 0));
       b.todayBytes = today;
