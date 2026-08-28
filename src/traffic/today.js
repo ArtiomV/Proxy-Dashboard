@@ -12,7 +12,9 @@
 // Формула: today(port) = traffic_hourly за MSK-дату + live-дельта сверх
 // снапшота day_at_last_hour_start_* (её почасово ведёт src/traffic/hourly.js).
 // Дельта клампится в [0, 20 ГБ] и берётся только если снапшот обновлён
-// после MSK-полуночи — иначе в неё попадёт вчерашний хвост.
+// после MSK-полуночи — иначе в неё попадёт вчерашний хвост. Если живой
+// счётчик упал ниже baseline — бокс сбросил счётчик в свою локальную
+// полночь (у MD/RO = 00:00 МСК): baseline считается нулём (см. todayBytes).
 
 // Как MAX_HOURLY_BYTES в src/traffic/hourly.js — sanity-cap на порт.
 const MAX_LIVE_DELTA = 20 * 1e9;
@@ -69,8 +71,18 @@ function snapshotBaselines(db, todayMsk) {
 function todayBytes(hourlyMap, snapMap, fullPortId, dayIn, dayOut) {
   const h = hourlyMap.get(fullPortId);
   const s = snapMap.get(fullPortId);
-  const liveIn  = s ? clampLiveDelta(dayIn  - s.in)  : 0;
-  const liveOut = s ? clampLiveDelta(dayOut - s.out) : 0;
+  // Счётчик УПАЛ ниже baseline → бокс уже сбросил day-счётчик после снапшота.
+  // Сброс идёт в ЛОКАЛЬНУЮ полночь площадки (= 00:00 МСК у MD/RO летом), а не
+  // в 00:00 UTC: агрегатор в 21:00:00 UTC снимает baseline буквально за
+  // секунды до reset, и «live − baseline» уходит в минус (инцидент 29.08:
+  // карточки MD показывали «0 Б» с 00:00 до 01:00 МСК). Счётчик растёт
+  // монотонно и падает только на reset → падение = reset: считаем от нуля,
+  // живое значение и есть трафик с момента сброса. Доресетный хвост MSK-суток
+  // (00:00 → reset) уже записан в traffic_hourly фолдом reset-часа.
+  const baseIn  = (s && dayIn  >= s.in)  ? s.in  : 0;
+  const baseOut = (s && dayOut >= s.out) ? s.out : 0;
+  const liveIn  = s ? clampLiveDelta(dayIn  - baseIn)  : 0;
+  const liveOut = s ? clampLiveDelta(dayOut - baseOut) : 0;
   return { in: (h ? h.in : 0) + liveIn, out: (h ? h.out : 0) + liveOut };
 }
 

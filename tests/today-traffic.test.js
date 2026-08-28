@@ -97,4 +97,21 @@ describe('today-traffic: MSK-сегодня против UTC-reset счётчи�
     const snaps = todayCalc.snapshotBaselines(db, TODAY);
     expect(todayCalc.hasOwnAccounting(th, snaps)).toBe(false);
   });
+
+  it('локальный reset бокса (00:00 МСК) после снапшота 21:00 UTC — baseline=0, не «0 Б»', () => {
+    // Инцидент 29.08: MD-боксы сбрасывают счётчики в ЛОКАЛЬНУЮ полночь
+    // (00:00 МСК = 21:00 UTC) через секунды после снапшота агрегатора.
+    // Живой счётчик (0.5 ГБ) < baseline (17.6 ГБ) → дельта уходит в минус.
+    db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
+      VALUES ('S4', 'S4_portA', 'm1', 'Moldcell', 'cli', '2026-08-27 21:00:00', 0.2e9, 0.05e9)`).run();
+    db.prepare(`INSERT INTO hourly_snapshots (port_id, day_at_last_hour_start_in, day_at_last_hour_start_out, last_updated_at)
+      VALUES ('S4_portA', 17.6e9, 4e9, ?)`).run(NOW_UTC);
+
+    const th = todayCalc.hourlyTodayByPort(db, TODAY);
+    const snaps = todayCalc.snapshotBaselines(db, TODAY);
+    // Живой счётчик после локального reset: 0.5 GB in / 0.1 GB out.
+    const t = todayCalc.todayBytes(th, snaps, 'S4_portA', 0.5e9, 0.1e9);
+    expect(t.in).toBe(0.2e9 + 0.5e9);   // hourly + live от нуля, НЕ 0
+    expect(t.out).toBe(0.05e9 + 0.1e9);
+  });
 });
