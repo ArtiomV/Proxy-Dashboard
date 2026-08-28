@@ -560,6 +560,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       clientLiveMonthGb: trafficSec.clientLiveMonthGb,
       clientLastHourGb: trafficSec.clientLastHourGb,
       clientTodayGb: trafficSec.clientTodayGb,
+      portTodayBytes: trafficSec.portTodayBytes,
       modemTrend: trafficSec.modemTrend,
       clientTrend: trafficSec.clientTrend,
       fleet: fleetSec.fleet,
