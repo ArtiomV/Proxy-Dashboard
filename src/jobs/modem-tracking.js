@@ -158,7 +158,10 @@ async function trackModems() {
           if (/^random/i.test(nick) || imei.indexOf('.') >= 0) continue;
           const nd = m.net_details || {};
           const rawOp = (nd.CELLOP || md.OPERATOR || '').toLowerCase().trim();
-          const isRO = server.name === 'S2' || server.name.indexOf('S2') === 0;
+          // Страна — из конфига сервера (SERVER_COUNTRIES), а не из имени:
+          // раньше тут был захардкожен 'S2', поэтому RO1-MF289 (Румыния)
+          // записывал Orange-модемы как «Orange MD».
+          const isRO = ((SERVER_COUNTRIES[server.name] || {}).country || '') === 'RO';
           // normalizeOperator already derives from CELLOP/OPERATOR and collapses
           // the "unknown" placeholder + empties to ''. Do NOT fall back to the raw
           // nd.CELLOP/md.OPERATOR here — that re-injects the literal "Unknown"

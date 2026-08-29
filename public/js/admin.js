@@ -973,7 +973,7 @@ function _wanChartAttach(plot,points){
     // разделитель и футер с пингом.
     tip.innerHTML='<div class="tt-title">'+esc(stamp)+'</div>'
       +'<div class="tt-row"><span class="tt-k"><i style="background:#10b981"></i>Получение</span><span class="tt-v">'+_wanNumber(point.download_mbps)+' Мбит/с</span></div>'
-      +'<div class="tt-row"><span class="tt-k"><i style="background:var(--primary)"></i>Отдача</span><span class="tt-v">'+_wanNumber(point.upload_mbps)+' Мбит/с</span></div>'
+      +'<div class="tt-row"><span class="tt-k"><i style="background:var(--accent)"></i>Отдача</span><span class="tt-v">'+_wanNumber(point.upload_mbps)+' Мбит/с</span></div>'
       +(point.ping_ms!=null&&point.ping_ms!==''?'<div class="tt-sep"></div><div class="tt-row"><span class="tt-k">Пинг</span><span class="tt-v">'+_wanNumber(point.ping_ms,0)+' мс</span></div>':'');
     tip.style.display='';
     var tw=tip.offsetWidth,lx=leftPx+12;if(lx+tw>rect.width)lx=leftPx-tw-12;
