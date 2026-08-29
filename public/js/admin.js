@@ -4125,9 +4125,8 @@ function zLess(key){if(window._zxOpen)delete window._zxOpen[key];
   else if(key==='mx')renderNewMatrix();
   else if(key==='api')loadNewApiAccess();
   else if(key==='hosts')loadNewTopHosts();}
-// «Требует внимания» — одна карточка с плитками алертов (по макету):
-// 4 инфра-плитки (кликабельные, открывают попап со списком) + 2 бизнес-плитки
-// (долги с суммой, паузы). Тренд/Операторы живут в раскрывашке «Тренд и операторы».
+// «Требует внимания» — ряд из трёх карточек: «Проблемы инфраструктуры»
+// (плитки алертов, кликабельные), «Потребление трафика» и «Выручка».
 function _dwIcon(n){var P={gear:'<circle cx="12" cy="12" r="3.2"/><path d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 0 0 2.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 0 0 1.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 0 0-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 0 0-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 0 0-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 0 0-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 0 0 1.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"/>',line:'<path d="M4 17l5-5 4 3 7-8"/>',ant:'<circle cx="12" cy="13" r="1"/><path d="M12 14v6"/><path d="M8.5 9.5a5 5 0 0 1 7 0"/><path d="M6 6.5a8.5 8.5 0 0 1 12 0"/>',sat:'<rect x="3" y="4" width="18" height="7" rx="1.6"/><rect x="3" y="13" width="18" height="7" rx="1.6"/><circle cx="6.5" cy="7.5" r=".4"/><circle cx="6.5" cy="16.5" r=".4"/>'};return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" width="15" height="15" style="flex-shrink:0;vertical-align:-3px;color:var(--accent);margin-right:6px">'+(P[n]||'')+'</svg>';}
 function _dwT(t,ic){return '<div style="font-size:13px;font-weight:700;color:var(--text-0);margin-bottom:10px">'+_dwIcon(ic)+t+'</div>';}
 function renderNewExtWidgets(){
@@ -4172,18 +4171,8 @@ function renderNewExtWidgets(){
     +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">'+_dwIcon('line')+'Потребление трафика</span>'
     +'<span id="trendLegendNew" style="display:flex;gap:8px;font-size:9px;font-weight:600;color:var(--text-2)"></span></div>'
     +'<div style="flex:1;min-height:120px;position:relative"><canvas id="newTrendCanvas"></canvas></div></div>';
-  var allOps={};Object.keys(d.serverOpTraffic).forEach(function(s){Object.keys(d.serverOpTraffic[s]).forEach(function(op){if(!op)return;if(!allOps[op])allOps[op]={t:0,cnt:0};var v=d.serverOpTraffic[s][op];allOps[op].t+=v.tIn+v.tOut;allOps[op].cnt+=v.count;});});
-  var opDays=getDaysElapsed();var opList=Object.keys(allOps).filter(function(op){var l=String(op).toLowerCase();return op&&l!=='неизвестный'&&l!=='unknown';}).sort(function(a,b){return allOps[b].t-allOps[a].t});var opMax=opList.length?(allOps[opList[0]].t/opDays)||1:1;
-  // Ряд «Требует внимания» = grid со stretch: карточки одной высоты по самой
-  // высокой. У «Тренда» контент flex:1 и тянется, а у «Проблем»/«Операторов»
-  // высота была по содержимому — снизу оставалась пустота. Даём обеим
-  // растущий контейнер (см. также .att-grid{grid-auto-rows:1fr}).
-  var opCard='<div class="analytics-card" style="margin:0">'+_dwT('Операторы','ant')
-    +'<div style="flex:1;display:flex;flex-direction:column;justify-content:space-between;gap:4px">';
-  var _opCosts=_opGbCosts();
-  opList.forEach(function(op,oi){var v=allOps[op];var avgpmd=fmtGb(v.cnt&&opDays?v.t/v.cnt/opDays:0);var tpd=v.t/opDays;var w=Math.max(tpd/opMax*100,2);var col=CHART_COLORS.operators[oi%CHART_COLORS.operators.length];var _cst=_opCosts[op]?'<span style="color:var(--accent);font-weight:600"> · '+_opCosts[op]+'₽/ГБ</span>':'';opCard+='<div style="margin-bottom:0"><div style="display:flex;align-items:baseline;font-size:10px;margin-bottom:2px;gap:4px"><span style="flex:1;color:var(--text-1);font-weight:500">'+esc(op)+'</span><span style="color:var(--text-2)">'+avgpmd+'/мод/сут</span><span style="color:var(--text-3)">· '+v.cnt+' мод.</span>'+_cst+'</div><div style="height:4px;background:var(--bg-3);border-radius:2px"><div style="height:4px;border-radius:2px;background:'+col+';width:'+w+'%"></div></div></div>';});
-  opCard+='</div></div>';
-  // Выручка по месяцам (тренд-факт + run-rate прогноз столбцом в графике) — между «Потреблением трафика» и «Операторами».
+  // Карточка «Операторы» убрана с дашборда (29.08, v2.10.60) — ряд
+  // «Требует внимания» теперь из трёх карточек: Проблемы / Трафик / Выручка.
   var mrrCard='<div class="analytics-card" style="margin:0;display:flex;flex-direction:column">'
     +'<div style="display:flex;align-items:baseline;justify-content:space-between;gap:6px;margin-bottom:8px">'
     +'<span style="font-size:12px;font-weight:600;color:var(--text-0);white-space:nowrap">'+icon('trend',12)+' Выручка</span>'
@@ -4195,17 +4184,13 @@ function renderNewExtWidgets(){
     +'<b>Прогноз месяца</b> = НЕ выручка, а ожидание при текущем темпе: Σ по клиентам — среднесуточное потребление за последние 7 дней × дней в месяце × тариф (per-GB); per-modem — цена × живые модемы.'
     +'</span></span></span></div>'
     +'<div style="flex:1;min-height:120px;position:relative"><canvas id="newFinTrendCanvas"></canvas><div id="mrrSkel" class="skel" style="position:absolute;inset:0"></div></div></div>';
-  el.innerHTML=probCard+trendCard+mrrCard+opCard;
+  el.innerHTML=probCard+trendCard+mrrCard;
   // Пока финданные едут — столбцы-скелетон в карточке «Выручка» (Stage: скелетоны).
   var _mrrSkel = document.getElementById('mrrSkel');
   if(_mrrSkel && !window._newFinData) _mrrSkel.innerHTML = skelBars(12);
   loadTrendData('New');
   try{ renderMrrChart(window._newFinData); }catch(_){}
 }
-
-// «Тренд и операторы» — раскрывашка в Инфраструктуре (по макету).
-// Рендерит только когда секция открыта; вызывается из renderAccNew (каждые 10с)
-// и из onNewSectionToggle при открытии.
 
 // ── 3. Финансы (pulse + quality + flow + trend) ────────────────────
 var _newFinAt=0;
@@ -4358,9 +4343,57 @@ function loadNewReconciliation(){
 // ── Clients table (with revenue + balance columns merged) ─────────
 // Объединённая таблица: «Клиенты-трафик» + «Клиенты по доходности» в одну.
 // Сегодня/Вчера по трафику + Тариф/Выручка 30д/Δ/доля/Баланс. Всё центрировано, равные отступы.
+// Переключатель «Трафик / Доходность» (29.08, v2.10.60): режим «Доходность»
+// повторяет блок «Доходность по клиентам» страницы финансов (per_client из
+// /api/admin/finance_dashboard). Выбор живёт в _dashUi, поэтому авто-рефреш
+// дашборда режим не сбрасывает.
+var _newClientView = _dashUi.clientView || 'traffic';
+function setNewClientView(v){
+  _newClientView = (v === 'finance') ? 'finance' : 'traffic';
+  _dashUiSave({clientView:_newClientView});
+  try{ var d = collectTrafficData(); renderNewClientTable(d || {}); }catch(_){}
+}
+function _syncNewClientViewButtons(){
+  ['traffic','finance'].forEach(function(x){ var b = document.getElementById('ncv_'+x); if(b) b.classList.toggle('is-active', x === _newClientView); });
+}
+// Режим «Доходность»: те же колонки, что в finance.js — Клиент, Тариф,
+// Выручка 30д, Себестоимость, Маржа, Δ M/M, Баланс.
+function renderNewClientFinTable(el){
+  var finList = (window._newFinData && window._newFinData.per_client) || null;
+  if(!finList){ el.innerHTML = '<div class="skel" style="height:200px"></div>'; return; }
+  var rows = finList.filter(function(p){ return !(p.mrr === 0 && p.mrr_prev === 0 && !p.balance); });
+  if(!rows.length){ el.innerHTML = '<div style="text-align:center;padding:30px;color:var(--text-3);font-size:12px">Нет данных</div>'; return; }
+  var th = function(t,left){ return '<th'+(left?' style="text-align:left"':'')+'>'+t+'</th>'; };
+  var h = '<table class="ztbl"><thead><tr>'+th('Клиент',1)+th('Тариф')+th('Выручка 30д')+th('Себестоимость')+th('Маржа')+th('Δ M/M')+th('Баланс')+'</tr></thead><tbody>';
+  rows.forEach(function(p,i){
+    var col = CHART_COLORS.clients[i % CHART_COLORS.clients.length];
+    var cl = (currentData.clients || []).find(function(c){ return c.name === p.name; });
+    var tariff = p.billingType === 'per_modem'
+      ? '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--bg-2);color:var(--text-2)">'+(p.price!=null?p.price+'₽/мод':'per_modem')+'</span>'
+      : '<span style="font-size:10px;font-weight:600;padding:2px 8px;border-radius:999px;background:var(--accent-dim);color:var(--accent)">'+(p.price!=null?p.price+'₽/ГБ':'per_gb')+'</span>';
+    var marginCol = Number(p.margin) < 0 ? 'var(--danger)' : (Number(p.margin_pct) < 20 ? 'var(--warning)' : 'var(--success)');
+    var deltaCol = p.mrr_delta_pct == null ? 'var(--text-3)' : (p.mrr_delta_pct >= 0 ? 'var(--success)' : 'var(--danger)');
+    var deltaStr = p.mrr_delta_pct == null ? '—' : ((p.mrr_delta_pct > 0 ? '+' : '') + p.mrr_delta_pct + '%');
+    var balCol = p.balance < 0 ? 'var(--danger)' : (p.balance > 0 ? 'var(--text-0)' : 'var(--text-3)');
+    var td = function(content,left){ return '<td'+(left?' style="text-align:left"':'')+'>'+content+'</td>'; };
+    h += '<tr>'
+      + td('<span style="display:inline-flex;align-items:center;gap:7px"><span style="width:3px;height:16px;background:'+col+';border-radius:2px"></span><strong style="color:var(--text-0)">'+esc(p.name)+'</strong>'+blockBadge(cl)+(p.paused?pauseBadge():'')+'</span>',1)
+      + td(tariff)
+      + td('<span style="font-family:var(--font-mono);font-weight:600">'+_fmtRub(p.mrr)+'</span>')
+      + td('<span style="font-family:var(--font-mono)">'+_fmtRub(p.allocated_cost||0)+'</span>')
+      + td('<span style="font-family:var(--font-mono);color:'+marginCol+'">'+_fmtRub(p.margin)+' <small>'+(p.margin_pct==null?'—':p.margin_pct+'%')+'</small></span>')
+      + td('<span style="color:'+deltaCol+'">'+deltaStr+'</span>')
+      + td('<span style="font-family:var(--font-mono);color:'+balCol+'">'+_fmtRub(p.balance)+'</span>')
+      + '</tr>';
+  });
+  el.innerHTML = h + '</tbody></table>';
+}
 function renderNewClientTable(d){
   var el = document.getElementById('newClientTable');
   if(!el) return;
+  _syncNewClientViewButtons();
+  if(_newClientView === 'finance'){ renderNewClientFinTable(el); return; }
+  if(!d || !d.modemTraffic) return;
   var clients = currentData.clients || [];
   var nameByPort = {}; clients.forEach(function(c){ if(c.portName) nameByPort[c.portName] = c.name; });
   var finList = (window._newFinData && window._newFinData.per_client) || [];
