@@ -945,9 +945,8 @@ function _wanChart(points){
   var max=Math.max.apply(null,[1].concat(points.map(function(point){return Math.max(Number(point.download_mbps)||0,Number(point.upload_mbps)||0);}))) * 1.08;
   if(points.length<2)return '<div class="wan-no-chart">Нужно минимум два замера для графика</div>';
   var dD=_wanPath(points,'download_mbps',max),dU=_wanPath(points,'upload_mbps',max);
-  // Мягкие заливки под кривыми — две серии различимы даже там, где линии
-  // сближаются/пересекаются (Армянская: download проседает до уровня upload).
-  return '<svg class="wan-chart" viewBox="0 0 300 62" preserveAspectRatio="none" role="img" aria-label="График download и upload"><path class="wan-grid" d="M2 58H298 M2 32H298 M2 6H298"></path><path class="wan-down-fill" d="'+dD+' L298 58 L2 58 Z"></path><path class="wan-up-fill" d="'+dU+' L298 58 L2 58 Z"></path><path class="wan-down" d="'+dD+'"></path><path class="wan-up" d="'+dU+'"></path></svg>';
+  // Две линии в одном стиле, без заливок: загрузка — зелёная, отдача — синяя.
+  return '<svg class="wan-chart" viewBox="0 0 300 62" preserveAspectRatio="none" role="img" aria-label="График download и upload"><path class="wan-grid" d="M2 58H298 M2 32H298 M2 6H298"></path><path class="wan-down" d="'+dD+'"></path><path class="wan-up" d="'+dU+'"></path></svg>';
 }
 // Наведение на график: вертикальная линия, точки на обеих линиях и попап
 // со временем замера, download, upload и пингом.
@@ -973,8 +972,8 @@ function _wanChartAttach(plot,points){
     // приглушённым, строки «цветной маркер + подпись — значение жирным»,
     // разделитель и футер с пингом.
     tip.innerHTML='<div class="tt-title">'+esc(stamp)+'</div>'
-      +'<div class="tt-row"><span class="tt-k"><i style="background:var(--primary)"></i>Получение</span><span class="tt-v">'+_wanNumber(point.download_mbps)+' Мбит/с</span></div>'
-      +'<div class="tt-row"><span class="tt-k"><i style="background:#10b981"></i>Отдача</span><span class="tt-v">'+_wanNumber(point.upload_mbps)+' Мбит/с</span></div>'
+      +'<div class="tt-row"><span class="tt-k"><i style="background:#10b981"></i>Получение</span><span class="tt-v">'+_wanNumber(point.download_mbps)+' Мбит/с</span></div>'
+      +'<div class="tt-row"><span class="tt-k"><i style="background:var(--primary)"></i>Отдача</span><span class="tt-v">'+_wanNumber(point.upload_mbps)+' Мбит/с</span></div>'
       +(point.ping_ms!=null&&point.ping_ms!==''?'<div class="tt-sep"></div><div class="tt-row"><span class="tt-k">Пинг</span><span class="tt-v">'+_wanNumber(point.ping_ms,0)+' мс</span></div>':'');
     tip.style.display='';
     var tw=tip.offsetWidth,lx=leftPx+12;if(lx+tw>rect.width)lx=leftPx-tw-12;
