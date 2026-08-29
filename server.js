@@ -2583,7 +2583,13 @@ function _staleHours(hours) {
 function getStaleImeis(hours) {
   const h = _staleHours(hours);
   const cutoffMs = Date.now() - h * 3600 * 1000;
-  const stale = new Set();
+  // Модем — это физическое устройство (IMEI), а не пара «сервер+IMEI».
+  // Железка могла побывать на нескольких боксах (S4→S3→RO1): uptime_tracking
+  // тогда хранит по строке на сервер, и древняя строка прошлого сервера
+  // раньше помечала ЖИВОЙ модем устаревшим — так пропали ротации S3/RO1
+  // (29.08). Поэтому сначала группируем строки по IMEI, и считаем модем
+  // устаревшим, только когда ВСЕ его строки старше cutoff.
+  const byImei = new Map(); // imei -> { total, stale }
   for (const [key, ut] of Object.entries(uptimeTracking)) {
     if (!ut) continue;
     // Key format is "S1_<imei>" or just "<imei>" (legacy). Take the trailing IMEI.
@@ -2597,22 +2603,30 @@ function getStaleImeis(hours) {
     //   - legacy fallback: if last_online_check is missing but online_checks > 0,
     //     use last_check (modem has been alive at some point, we just don't
     //     know exactly when — the new field will populate on next online tick).
+    let keyStale = false;
     const lastOnlineIso = ut.last_online_check;
     if (lastOnlineIso) {
       const lastMs = Date.parse(lastOnlineIso);
-      if (!isNaN(lastMs) && lastMs < cutoffMs) stale.add(imei);
-      continue;
+      keyStale = !isNaN(lastMs) && lastMs < cutoffMs;
+    } else if ((ut.online_checks || 0) === 0) {
+      keyStale = true;
+    } else {
+      // Legacy: never seen online via new field, but has historical online_checks.
+      // Use the old field; it'll be replaced as soon as the modem comes online once.
+      const lastIso = ut.last_check;
+      if (lastIso) {
+        const lastMs = Date.parse(lastIso);
+        keyStale = !isNaN(lastMs) && lastMs < cutoffMs;
+      }
     }
-    if ((ut.online_checks || 0) === 0) {
-      stale.add(imei);
-      continue;
-    }
-    // Legacy: never seen online via new field, but has historical online_checks.
-    // Use the old field; it'll be replaced as soon as the modem comes online once.
-    const lastIso = ut.last_check;
-    if (!lastIso) continue;
-    const lastMs = Date.parse(lastIso);
-    if (!isNaN(lastMs) && lastMs < cutoffMs) stale.add(imei);
+    const agg = byImei.get(imei) || { total: 0, stale: 0 };
+    agg.total += 1;
+    if (keyStale) agg.stale += 1;
+    byImei.set(imei, agg);
+  }
+  const stale = new Set();
+  for (const [imei, agg] of byImei) {
+    if (agg.stale === agg.total) stale.add(imei);
   }
   return stale;
 }
