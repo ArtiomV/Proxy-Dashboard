@@ -7,8 +7,9 @@
 // Источник дампа: облако через rclone (RCLONE_REMOTE / RCLONE_DEST_PREFIX,
 // как у scripts/backup-offsite.sh); если облако не настроено/недоступно —
 // fallback на последний локальный dashboard-*.db.gz из DB_BACKUP_DIR (warn
-// в лог: тест идёт по локальной копии). Проверка: gunzip в /tmp →
-// better-sqlite3 readonly → PRAGMA integrity_check + счётчики ключевых
+// в лог: тест идёт по локальной копии). Проверка: gunzip во временный каталог
+// (по умолчанию DB_BACKUP_DIR/tmp на диске, НЕ tmpfs /tmp — см. инцидент
+// 30.08) → better-sqlite3 readonly → PRAGMA integrity_check + счётчики ключевых
 // таблиц > 0. Любой фейл → alerts.trigger('backup_restore_failed'),
 // отсутствие дампов — тоже фейл («бэкапов нет»). Регистрация: startup.js,
 // scheduleRepeating 03:10 UTC + проверка воскресенья внутри расписания.
@@ -20,7 +21,18 @@ const zlib = require('zlib');
 function create(deps) {
   const { logger, alerts, logActivity, fs, path } = deps;
   const _execFile = deps.execFile || require('child_process').execFile;
-  const _tmpDir = deps.tmpDir || require('os').tmpdir();
+  // 30.08: /tmp на проде — tmpfs в ОЗУ (1.9G), дамп ~700M туда не влезал при
+  // частично занятом tmpfs (ENOSPC на ровном месте). По умолчанию распаковываем
+  // на ДИСК рядом с локальными бэкапами; переопределить — BACKUP_TEST_TMPDIR.
+  const _tmpDir = deps.tmpDir || process.env.BACKUP_TEST_TMPDIR || _defaultTmpDir();
+
+  function _defaultTmpDir() {
+    try {
+      const d = path.join(process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard', 'tmp');
+      fs.mkdirSync(d, { recursive: true });
+      return d;
+    } catch (_) { return require('os').tmpdir(); }
+  }
 
   function _exec(cmd, args) {
     return new Promise((resolve, reject) => {

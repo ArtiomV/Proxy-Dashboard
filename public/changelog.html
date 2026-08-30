@@ -73,6 +73,15 @@
     <p>Список доработок дашборда — на человеческом языке. Каждый блок отвечает на вопрос «что это даёт вам как пользователю / администратору».</p>
   </div>
 
+  <!-- v2.10.61 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>2.10.61</span>
+      <span class="release-date">30 августа 2026</span>
+      <span class="release-tag tag-fix">Бэкапы</span>
+    </div>
+    <p class="release-tagline">Тест восстановления бэкапа больше не распаковывает дамп в /tmp — на сервере это tmpfs в оперативной памяти (1,9 ГБ), куда 700-мегабайтная база не влезала, если tmpfs частично занят (инцидент 30.08, ENOSPC). По умолчанию распаковка идёт на диск в DB_BACKUP_DIR/tmp, переопределяется переменной BACKUP_TEST_TMPDIR.</p>
+  </div>
   <!-- v2.10.60 -->
   <div class="release">
     <div class="release-header">
