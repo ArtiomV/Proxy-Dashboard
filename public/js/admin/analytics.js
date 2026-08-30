@@ -112,7 +112,12 @@ function collectTrafficData(){
       // сырые day-счётчики в reset-окне содержат вчерашний день (инцидент 29.08 —
       // hero-KPI «Трафик сегодня» показывал 326 ГБ в 01:00 МСК).
       var _ptb=currentData.portTodayBytes||null;
-      if(_ptb&&port.portID){var _ptv=_ptb[m.server+'_'+port.portID];if(_ptv){dayIn=_ptv.in;dayOut=_ptv.out;if(accPeriod==='day'){din=dayIn;dout=dayOut;}}}
+      // portID в currentData.ports УЖЕ префиксован сервером («S1_port…»), а ключи
+      // portTodayBytes — тоже («S1_port…», src/services/proxy-data.js). Прямой
+      // lookup сначала; конкатенация — только фолбэк для непрефиксованных id
+      // (инцидент 31.08: двойной префикс «S1_S1_port…» → 0/171 hit → таблица
+      // «Клиенты» падала на сырые day-счётчики и до 03:00 МСК показывала вчера).
+      if(_ptb&&port.portID){var _ptv=_ptb[port.portID]||_ptb[m.server+'_'+port.portID];if(_ptv){dayIn=_ptv.in;dayOut=_ptv.out;if(accPeriod==='day'){din=dayIn;dout=dayOut;}}}
       var rawOp=m.operator||'Неизвестный';
       var op=rawOp;
       totalIn+=din;totalOut+=dout;

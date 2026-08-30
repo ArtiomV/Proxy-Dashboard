@@ -4550,6 +4550,35 @@ function renderNewDailyChart(data){
       Object.keys(data[client]).forEach(function(date){ var e=data[client][date]; groups[client][date]=(groups[client][date]||0)+((e.in||0)+(e.out||0)); });
     }
   });
+  // Live-столбец «сегодня»: daily_traffic пишется агрегатором с отставанием (час
+  // UTC закрывается позже), поэтому текущий день в графике почти пуст до ночи
+  // (инцидент 31.08: столбец 31.08 = 0,10 ГБ при реальных ~21 ГБ). Берём live
+  // portTodayBytes — тот же источник, что у hero «Трафик сегодня» — и
+  // раскладываем по клиентам (или странам через bandwidth[key]._server).
+  // Ключи обеих мап — префиксованные portID («S1_port…»), значения перезаписывают
+  // агрегированное (они полные: traffic_hourly + live-дельта, а не дополнение).
+  (function(){
+    var _ptbLive = currentData.portTodayBytes || {};
+    var _bwLive = currentData.bandwidth || {};
+    if(!Object.keys(_ptbLive).length) return;
+    var _todayD = dates[dates.length-1];
+    var liveByGroup = {};
+    Object.keys(_ptbLive).forEach(function(k){
+      var v=_ptbLive[k]; if(!v) return;
+      var bytes=(v.in||0)+(v.out||0); if(!bytes) return;
+      var bw=_bwLive[k]||{};
+      var pn=bw.portName; if(!pn) return;
+      if(_hasValid && !_validClients[pn]) return;
+      var g;
+      if(_newDailyMode==='countries'){ var ci=COUNTRIES[bw._server]||{}; g=ci.name||bw._server||'Прочее'; }
+      else g=pn;
+      liveByGroup[g]=(liveByGroup[g]||0)+bytes;
+    });
+    Object.keys(liveByGroup).forEach(function(g){
+      if(!groups[g]) groups[g]={};
+      groups[g][_todayD]=liveByGroup[g];
+    });
+  })();
   var keys = Object.keys(groups).sort(function(a,b){ var sa=dates.reduce(function(s,d){return s+(groups[a][d]||0)},0), sb=dates.reduce(function(s,d){return s+(groups[b][d]||0)},0); return sb-sa; });
   var MAXG = _newDailyMode==='countries' ? 8 : 12;
   var top = keys.slice(0,MAXG), rest = keys.slice(MAXG);
