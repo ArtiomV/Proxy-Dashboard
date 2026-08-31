@@ -84,7 +84,10 @@ function _srvLabel(name) {
   if (!name) return name;
   try {
     if (!_srvNamesCache || Date.now() - _srvNamesCacheAt > 60e3) {
-      const row = kvGet && kvGet('api_servers');
+      // kvGet по контракту — функция (k) => row, но исторически сюда мог
+      // приехать prepared statement ({ get(k) }) — принимаем обе формы,
+      // иначе TypeError улетает в catch и сервер показывается сырым S-кодом.
+      const row = kvGet && (typeof kvGet === 'function' ? kvGet('api_servers') : (kvGet.get ? kvGet.get('api_servers') : null));
       const list = row && row.value ? JSON.parse(row.value) : [];
       _srvNamesCache = {};
       if (Array.isArray(list)) for (const s of list) _srvNamesCache[s.name] = s.displayName || s.name;
@@ -180,6 +183,7 @@ function init(deps) {
   // SQLite connection. Prepared statements are connection-bound.
   _insertNotif = null;
   _findBellByKey = null;
+  _srvNamesCache = null; _srvNamesCacheAt = 0;   // displayName-мапа читается от нового kvGet
   if (_incidentManager && _incidentManager.shutdown) _incidentManager.shutdown();
   _incidentManager = require('./incidents').create({
     db, logger, getSetting,

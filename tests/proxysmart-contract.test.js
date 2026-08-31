@@ -109,4 +109,24 @@ describe('D7: правило алерта «бокс отвечает не по 
     expect(text).toContain('S2');
     expect(text).toContain('не по контракту');
   });
+
+  // Инцидент 30.08: startup.js передавал в alerts.init СЫРОЙ prepared statement
+  // как kvGet — _srvLabel звал kvGet('api_servers'), ловил TypeError в catch и
+  // уведомления шли с техническими S-кодами («Бокс S1 отвечает не по контракту»)
+  // вместо displayName. _srvLabel обязан принимать обе формы kvGet.
+  it('_srvLabel: displayName читается и из statement-формы kvGet', () => {
+    const apiServers = JSON.stringify([{ name: 'S1', displayName: 'MD1-ARM-3372' }]);
+    alerts.init({
+      logger: { warn() {}, info() {}, error() {} },
+      getSetting: (k, d) => d,
+      appSettings: {},
+      kvSetCritical: () => ({ ok: true }),
+      kvGet: { get: (k) => (k === 'api_servers' ? { value: apiServers } : undefined) },   // statement-форма
+      db: { prepare: () => ({ run: () => ({}), get: () => undefined, all: () => [] }) },
+      tgBot: { sendMessage: async () => ({}) },
+    });
+    const text = alerts.RULES.proxysmart_contract_mismatch.render({ server: 'S1', count: 1, sample: 'x' });
+    expect(text).toContain('MD1-ARM-3372');
+    expect(text).not.toContain('Бокс S1');
+  });
 });

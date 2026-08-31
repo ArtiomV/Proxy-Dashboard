@@ -364,7 +364,11 @@ function runStartup(d) {
     onAlertAck: (kind, hash, user) => alerts.onAlertAck(kind, hash, user),
   });
   // Stage 18.13: alerts framework wires into the same bot/chat.
-  alerts.init({ logger, getSetting, appSettings, kvSetCritical, kvGet, db, tgBot, events });
+  // kvGet оборачиваем в функцию: выше по файлу kvGet — prepared statement
+  // (у него .get(k)), а alerts.js зовёт kvGet(key). Без обёртки _srvLabel
+  // падал в catch и уведомления показывали сырые S-коды вместо displayName
+  // (инцидент 30.08: «Бокс S1 отвечает не по контракту» вместо MD1-ARM-3372).
+  alerts.init({ logger, getSetting, appSettings, kvSetCritical, kvGet: (k) => kvGet.get(k), db, tgBot, events });
   // Stage 18.15: notification collector — periodic scan that pushes
   // offline-modem / client-debt events into the same bell.
   require('../jobs/notify-collect').init({
