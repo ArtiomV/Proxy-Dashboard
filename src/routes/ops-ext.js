@@ -324,7 +324,15 @@ function _clientsSection() {
   // roster entry with a real client portName — no 24h retention, no uptime
   // gate. Liveness is the modemWorking number's job, not the total's.
   const _clientModemSets = {};   // portName -> Set('server|portId')
+  // 31.08: серверы, которых нет в конфиге, не участвуют в знаменателе — их
+  // ростерные записи больше не стареют (фид не опрашивается) и без фильтра
+  // висят вечно. Boot-purge в server.js чистит хранилище; это страховка на
+  // случай удаления сервера без рестарта процесса. Пустой конфиг (тесты,
+  // сломанный env/kv) — фильтр выключен, иначе знаменатели обнулились бы.
+  const _cfgList = getApiServers();
+  const _configuredServers = _cfgList.length ? new Set(_cfgList.map(s => s.name)) : null;
   for (const [srvName, ports] of Object.entries(getKnownModems() || {})) {
+    if (_configuredServers && !_configuredServers.has(srvName)) continue;
     for (const [pid, info] of Object.entries(ports || {})) {
       if (!info || !info.portName || /^random/i.test(info.portName)) continue;
       (_clientModemSets[info.portName] || (_clientModemSets[info.portName] = new Set())).add(srvName + '|' + pid);

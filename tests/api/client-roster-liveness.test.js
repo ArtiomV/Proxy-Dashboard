@@ -30,6 +30,12 @@ beforeAll(() => {
       pNoId:      { portName: 'CLIENT', imei: '',      nick: '',     lastClientSeen: NOW },   // identity-less bound port
       pNoUptime:  { portName: 'CLIENT', imei: 'NEW1',  nick: 'MD_N', lastClientSeen: NOW },   // no uptime record yet
     },
+    // 31.08: призрак удалённого из конфига сервера — записи S2 больше не
+    // стареют (фид не опрашивается) и НЕ должны попадать в знаменатель.
+    S2: {
+      pGhost1:    { portName: 'CLIENT', imei: 'GHOST1', nick: 'MD_G1', lastClientSeen: NOW },
+      pGhost2:    { portName: 'CLIENT', imei: 'GHOST2', nick: 'MD_G2', lastClientSeen: NOW },
+    },
   };
   const uptime = {
     'S4_LIVE1': { last_online_check: new Date(NOW - 3600 * 1000).toISOString() },
@@ -48,7 +54,7 @@ beforeAll(() => {
     getAllBankPayments: () => [],
     getSessionCount: () => 0,
     getClients: () => [{ login: 'c1', portName: 'CLIENT', password: 'x', passwordHash: 'y' }],
-    getApiServers: () => [],
+    getApiServers: () => [{ name: 'S4', url: 'http://x', displayName: 'S4' }],
     getServerCountries: () => ({}),
     getRunningJobs: () => new Map(),
     getLastBillingRunSummary: () => null,
@@ -88,6 +94,14 @@ describe('/api/admin/data — клиентский ростер: стабиль�
     const c = (res.body.clients || []).find(x => x.portName === 'CLIENT');
     expect(c).toBeTruthy();
     // Все 4 привязанных: живой + мёртвый DEAD1 + identity-less + без uptime-записи.
+    expect(c.modemCount).toBe(4);
+  });
+
+  it('призрачный ростер удалённого из конфига сервера (S2) не раздувает modemCount', async () => {
+    const res = await request(app).get('/api/admin/data');
+    const c = (res.body.clients || []).find(x => x.portName === 'CLIENT');
+    // 4 живых записи S4; 2 призрака S2 (сервер удалён 27.08, фид не
+    // опрашивается → reconcile-старение не работает) отфильтрованы.
     expect(c.modemCount).toBe(4);
   });
 });

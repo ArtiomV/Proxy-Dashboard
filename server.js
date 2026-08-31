@@ -1192,6 +1192,30 @@ try {
   }
 } catch (e) { logger.error('Failed to load known_modems:', e.message); }
 
+// 31.08: призрачный ростер удалённых серверов. Реконсиляция ростера
+// (src/services/modems.js) старит записи только по СВЕЖЕМУ фиду бокса;
+// сервер, удалённый из конфига, больше никогда не опрашивается → его записи
+// замерзали навсегда и раздували знаменатель «модемов у клиента» (инцидент
+// 27.08: после удаления S2 знаменатель БА висел 46 вместо 34 несколько дней).
+// Сервер, ЕСТЬ в конфиге, не трогаем: бокс может просто лежать — его ростер
+// честно дожидается reconcile-окна по свежему фиду. Пустой конфиг (случайно
+// стёртый env/kv) — тоже не повод сносить весь ростер.
+try {
+  if (apiServers.length) {
+    const _configured = new Set(apiServers.map(s => s.name));
+    let _purged = 0;
+    for (const srv of Object.keys(knownModems)) {
+      if (_configured.has(srv)) continue;
+      _purged += Object.keys(knownModems[srv] || {}).length;
+      delete knownModems[srv];
+    }
+    if (_purged) {
+      logger.info(`[roster] purged ${_purged} ghost entries of servers absent from config`);
+      saveKnownModems();
+    }
+  }
+} catch (e) { logger.warn('[roster] ghost purge failed: ' + e.message); }
+
 function saveKnownModems() {
   // WP4: persist to SQLite instead of the JSON file (the roster is now part
   // of every dashboard.db backup). Full wipe+rewrite in one transaction —
