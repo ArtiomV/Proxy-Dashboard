@@ -44,7 +44,9 @@ describe('calculateMonthlyBillAmount (per_gb, формула avg-7дн)', () => 
 
   it('просадка не уронит счёт: берётся прошлый месяц', () => {
     const entries = [{ type: 'charge', date: PREV + '-15', cost: 500000, delta_gb: 20000 }];
-    entries.push({ type: 'charge', date: daysAgo(1), cost: 100, delta_gb: 5 });
+    // Дата — строго в текущем месяце: daysAgo(1) на 1-е число попадает в прошлый
+    // месяц и легитимно увеличивает prev_amount (флак на границе месяца).
+    entries.push({ type: 'charge', date: ym(0) + '-01', cost: 100, delta_gb: 5 });
     expect(calculateMonthlyBillAmount(client, [], ledgerOf(entries))).toBe(500000);
   });
 });

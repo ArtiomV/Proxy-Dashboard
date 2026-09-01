@@ -73,6 +73,15 @@
     <p>Список доработок дашборда — на человеческом языке. Каждый блок отвечает на вопрос «что это даёт вам как пользователю / администратору».</p>
   </div>
 
+  <!-- v2.10.65 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>2.10.65</span>
+      <span class="release-date">1 сентября 2026</span>
+      <span class="release-tag tag-fix">Точка</span>
+    </div>
+    <p class="release-tagline">Восстановлена связь с API Точки. 20.08 банк перевёл enter.tochka.com на сертификат НУЦ Минцифры (Russian Trusted Root/Sub CA), которому Node по умолчанию не доверяет — все запросы падали с «self-signed certificate in certificate chain»: акты и счета создавались только локально, выписка не синхронизировалась. Дашборд теперь доверяет и корням Минцифры (certs/russian-trusted-ca-bundle.pem), и стандартным корням — цепочка любого типа будет принята.</p>
+  </div>
   <!-- v2.10.64 -->
   <div class="release">
     <div class="release-header">

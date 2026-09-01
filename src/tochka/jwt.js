@@ -3,6 +3,7 @@
 const https = require('https');
 const crypto = require('crypto');
 const logger = require('../logger');
+const { getTochkaCA } = require('./ca');   // 01.09: цепочка Минцифры у enter.tochka.com
 
 // Cache for Tochka JWKS public keys.
 // Keep TTL short — Tochka rotates signing keys without notice, and stale cache
@@ -55,7 +56,7 @@ function fetchTochkaJwks(apiToken) {
 function fetchTochkaJwksAuthed(apiToken) {
   return new Promise((resolve, reject) => {
     const headers = apiToken ? { Authorization: 'Bearer ' + apiToken } : {};
-    https.get('https://enter.tochka.com/uapi/open-banking/.well-known/jwks.json', { timeout: 10000, headers }, (res) => {
+    https.get('https://enter.tochka.com/uapi/open-banking/.well-known/jwks.json', { timeout: 10000, headers, ca: getTochkaCA() || undefined }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {
@@ -70,7 +71,7 @@ function fetchTochkaJwksAuthed(apiToken) {
 // Returns {keys:[jwk]} shape so callers need no branching.
 function fetchTochkaStaticKey() {
   return new Promise((resolve, reject) => {
-    https.get('https://enter.tochka.com/doc/openapi/static/keys/public', { timeout: 10000 }, (res) => {
+    https.get('https://enter.tochka.com/doc/openapi/static/keys/public', { timeout: 10000, ca: getTochkaCA() || undefined }, (res) => {
       let data = '';
       res.on('data', chunk => data += chunk);
       res.on('end', () => {

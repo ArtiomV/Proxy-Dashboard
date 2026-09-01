@@ -132,7 +132,9 @@ describe('volume-guard', () => {
     expect(a).toBeTruthy();
     expect(a.payload.operator).toBe('Moldtelecom');
     expect(a.payload.gb_day).toBeCloseTo(2000, 0);
-    expect(a.payload.days_left).toBe(0);   // 2000 ГБ/сут × 23 дня > пакет 30720 — уже исчерпан
+    // days_left = round((30720 − 2000·day)/2000), не ниже 0 — считаем от текущей
+    // даты, иначе тест флакает на границе месяца (на 1-е число пакет ещё не исчерпан).
+    expect(a.payload.days_left).toBe(Math.max(0, Math.round((30720 - 2000 * day) / 2000)));
   });
 
   it('выключен настройкой / нет пакетов — skip', () => {

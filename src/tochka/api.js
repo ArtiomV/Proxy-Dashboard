@@ -2,6 +2,7 @@
 
 const https = require('https');
 const logger = require('../logger');
+const { getTochkaCA } = require('./ca');
 
 // Tochka API helper — HTTPS requests to enter.tochka.com
 function tochkaRequest(tochkaConfig, method, apiPath, body) {
@@ -21,7 +22,8 @@ function tochkaRequest(tochkaConfig, method, apiPath, body) {
       path: apiPath,
       method: method,
       headers,
-      timeout: 30000
+      timeout: 30000,
+      ca: getTochkaCA() || undefined   // 01.09: цепочка Минцифры (см. src/tochka/ca.js)
     }, (res) => {
       const chunks = [];
       res.on('data', chunk => chunks.push(chunk));
