@@ -43,6 +43,21 @@
 // (GROUP BY час МСК), так что дыра в выдаче закрывается задним числом.
 // Промежуточные fail-строки на раундах НЕ пишем — не засоряем таблицу,
 // изначальная fail-строка прогона уже зафиксировала факт сбоя.
+//
+// 2026-09-01 — авто-режим и защита от массового сбоя бокса.
+// Цель мониторинга — «скорость оператора на локации», конкретные модемы
+// не важны. Настройка speedtest_modems='auto': цели выбираются на каждый
+// прогон — до speedmon_per_operator (дефолт 2) онлайн-модемов на пару
+// (сервер, оператор), приоритет никам со свежей историей (не рвётся норма).
+// Если целевой модем оффлайн/сбоит — замеряем подмену: онлайн-модем того же
+// (сервер, оператор) из пула, строка пишется под ником подмены.
+// Circuit breaker: 3 подряд сбоя замера на одном боксе (инцидент 01.09 —
+// сломанный DNS на боксе давал empty_result у всех модемов, 11 ников по
+// ~2 мин × раунды перезамеров съели часовые тики 03:00 и 04:00) → бокс
+// считаем сломанным: остальные цели пропускаем мгновенно (fail-строка
+// 'box_outage'), в раунды бокс идёт одним пробником, шлём алерт
+// speedtest_box_outage. Прогон ограничен бюджетом speedmon_max_run_min
+// (дефолт 20 мин) — перезамеры никогда не сдвигают следующий часовой тик.
 
 const DEFAULT_NICKS = 'MD2_40,MD2_44,MD_01,MD_04,MD_10';
 const RETRY_DELAY_MS = 25000;    // пауза перед повторным замером (~20–30с)
@@ -53,6 +68,9 @@ const DEFAULT_RETRY_DL_THRESHOLD = 5;    // Мбит/с — ниже: замер
 const DEFAULT_RETRY_ROUND_MIN = 5;       // перезамер неудачных каждые N минут
 const DEFAULT_RETRY_ROUNDS = 10;         // ~50 мин — до следующего часового тика
 const DEFAULT_RETENTION_DAYS = 60;
+const DEFAULT_PER_OPERATOR = 2;   // авто-режим: столько модемов на (сервер, оператор)
+const DEFAULT_MAX_RUN_MIN = 20;   // потолок прогона: перезамеры не сдвигают часовой тик
+const CB_FAIL_THRESHOLD = 3;      // подряд сбоев замера на боксе → спидтест бокса сломан
 
 // Парсер ответа /apix/speedtest — копия логики parseSpeedtestResult из
 // src/jobs/proxy-checks.js (та внутренняя, не экспортируется). Бокс отдаёт
@@ -130,6 +148,23 @@ function create(deps) {
     const v = getSetting ? parseInt(getSetting('retention_speed_monitor', DEFAULT_RETENTION_DAYS)) : DEFAULT_RETENTION_DAYS;
     return Number.isInteger(v) && v >= 7 ? v : DEFAULT_RETENTION_DAYS;
   }
+  function perOperator() {
+    if (Number.isInteger(deps.perOperator)) return deps.perOperator;
+    const v = getSetting ? parseInt(getSetting('speedmon_per_operator', DEFAULT_PER_OPERATOR)) : DEFAULT_PER_OPERATOR;
+    return Number.isInteger(v) && v >= 1 && v <= 5 ? v : DEFAULT_PER_OPERATOR;
+  }
+  function maxRunMs() {
+    if (Number.isFinite(deps.maxRunMs)) return deps.maxRunMs;
+    const v = getSetting ? parseInt(getSetting('speedmon_max_run_min', DEFAULT_MAX_RUN_MIN)) : DEFAULT_MAX_RUN_MIN;
+    return (Number.isInteger(v) && v >= 5 ? v : DEFAULT_MAX_RUN_MIN) * 60000;
+  }
+  // Режим 'auto' — явное значение настройки; пустая настройка по-прежнему
+  // означает дефолтный список (обратная совместимость).
+  function isAutoMode() {
+    if (ENV_NICKS.length) return false;
+    const csv = getSetting ? getSetting('speedtest_modems', DEFAULT_NICKS) : DEFAULT_NICKS;
+    return String(csv || '').trim().toLowerCase() === 'auto';
+  }
 
   // env-override фиксируется на create() (тесты удаляют env сразу после
   // создания джобы); настройка speedtest_modems читается на каждый прогон.
@@ -196,11 +231,11 @@ function create(deps) {
     return {ready:true,samples:rows.length,baseline,current:download,bad,degraded:!!degraded,consecutive,bucket};
   }
 
-  // Резолв ников → бокс/IMEI/онлайн/оператор по всем серверам. Вызывается и
-  // в начале прогона, и на каждом раунде перезамеров: модем мог вернуться
-  // онлайн или переехать на другой бокс.
-  async function resolveNicks(targetNicks) {
-    const found = new Map();   // nick → { server, imei, isOnline, operator }
+  // Полный снимок флота: nick → { server, imei, isOnline, operator } по ВСЕМ
+  // модемам всех серверов. Раньше резолвились только целевые ники — для
+  // авто-режима и подмены модема того же оператора нужен полный список.
+  async function fetchFleet() {
+    const fleet = new Map();
     for (const server of apiServers) {
       const isRO = (server.country || '') === 'RO';
       try {
@@ -208,9 +243,9 @@ function create(deps) {
         for (const m of (Array.isArray(status) ? status : [])) {
           const md = m.modem_details || {};
           const nick = md.NICK;
-          if (!nick || !targetNicks.includes(nick)) continue;
+          if (!nick) continue;
           const rawOp = (m.net_details && m.net_details.CELLOP) || md.OPERATOR || '';
-          found.set(nick, {
+          fleet.set(nick, {
             server,
             imei: md.IMEI || '',
             isOnline: !!(m.net_details && m.net_details.IS_ONLINE === 'yes'),
@@ -222,7 +257,73 @@ function create(deps) {
         logger.warn(`[SpeedMonitor] ${server.name}: status fetch failed: ${e.message}`);
       }
     }
-    return found;
+    return fleet;
+  }
+
+  // Цели прогона. Явный список (настройка/env) — как раньше, ник может быть
+  // не найден (f=null → not_found). Режим 'auto': до N онлайн-модемов на
+  // каждую пару (сервер, оператор) — цель мониторинга «скорость оператора на
+  // локации», конкретные модемы не важны. Приоритет — никам со свежей
+  // историей в speed_monitor (не рвётся 56-дневная норма evaluateBaseline).
+  function planTargets(fleet) {
+    if (!isAutoMode()) return getTargetNicks().map(nick => ({ nick, f: fleet.get(nick) || null }));
+    const recent = new Set();
+    try {
+      for (const r of db.prepare("SELECT server, nick FROM speed_monitor WHERE ts >= datetime('now','-7 days') GROUP BY server, nick").all()) {
+        recent.add(r.server + '|' + r.nick);
+      }
+    } catch (_) { /* минимальная тестовая схема без таблицы — просто без приоритета */ }
+    const groups = new Map();   // 'server|operator' → [{ nick, f }]
+    for (const [nick, f] of fleet) {
+      if (!f.isOnline || !f.operator) continue;
+      const key = f.server.name + '|' + f.operator;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push({ nick, f });
+    }
+    const targets = [];
+    const chosen = new Set();
+    for (const [key, arr] of [...groups.entries()].sort()) {
+      const srvName = key.slice(0, key.indexOf('|'));
+      arr.sort((a, b) => {
+        const ar = recent.has(srvName + '|' + a.nick) ? 0 : 1;
+        const br = recent.has(srvName + '|' + b.nick) ? 0 : 1;
+        return ar - br || a.nick.localeCompare(b.nick);
+      });
+      for (const t of arr.slice(0, perOperator())) {
+        if (!chosen.has(t.nick)) { chosen.add(t.nick); targets.push(t); }
+      }
+    }
+    return targets;
+  }
+
+  // Пул подмены: онлайн-модемы того же (сервер, оператор), не выбранные
+  // целями. Если целевой модем оффлайн/сбоит — мерим подмену: нас интересует
+  // оператор на локации, а не конкретная симка.
+  function buildSubPool(fleet, targets) {
+    const chosen = new Set(targets.map(t => t.nick));
+    const pool = new Map();   // 'server|operator' → [{ nick, f }]
+    for (const [nick, f] of fleet) {
+      if (!f.isOnline || !f.operator || chosen.has(nick)) continue;
+      const key = f.server.name + '|' + f.operator;
+      if (!pool.has(key)) pool.set(key, []);
+      pool.get(key).push({ nick, f });
+    }
+    return pool;
+  }
+
+  // Один вызов спидтеста бокса — общий для основного замера и подмены.
+  async function measureOnceRaw(server, nick) {
+    const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
+    if (result && result.error) throw new Error(String(result.error));
+    return parseSpeedtestResult(result);
+  }
+
+  // Одиночный замер подмены: один вызов, без ретрая по низкому dl (экономим
+  // трафик чужой симки) — годится любой ненулевой результат.
+  async function measureSubstitute(fSub, nick) {
+    const best = await measureOnceRaw(fSub.server, nick);
+    if (!(best.dl > 0 || best.ul > 0)) throw new Error('empty_result');
+    return best;
   }
 
   // Один замер ника с учётом нестабильности бокса: ok=0 → ретрай через
@@ -234,9 +335,7 @@ function create(deps) {
     let attempts = 0;
     const measureOnce = async () => {
       attempts++;
-      const result = await fetchApi(f.server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
-      if (result && result.error) throw new Error(String(result.error));
-      return parseSpeedtestResult(result);
+      return measureOnceRaw(f.server, nick);
     };
     let best;
     try {
@@ -291,37 +390,100 @@ function create(deps) {
     }
     running = true;
     try {
-      const TARGET_NICKS = getTargetNicks();
-      // 1) Резолв ников → бокс/IMEI/онлайн/оператор по всем серверам.
-      const found = await resolveNicks(TARGET_NICKS);
+      const deadline = Date.now() + maxRunMs();
+      // 1) Полный снимок флота → цели прогона (+ пул подмены по операторам).
+      const fleet = await fetchFleet();
+      const targets = planTargets(fleet);
+      const subPool = buildSubPool(fleet, targets);
+      const TARGET_NICKS = targets.map(t => t.nick);
+      if (isAutoMode()) {
+        logger.info(`[SpeedMonitor] авто-режим: ${TARGET_NICKS.length} целей (до ${perOperator()} на оператора локации): ${TARGET_NICKS.join(', ')}`);
+      }
+
+      // Circuit breaker (01.09): CB_FAIL_THRESHOLD подряд сбоев замера на одном
+      // боксе — сломан сам спидтест бокса (DNS/маршрутизация), а не модемы.
+      // Остальные цели бокса пропускаем мгновенно (fail-строка 'box_outage'),
+      // в раунды перезамеров бокс идёт одним пробником — иначе 11 ников по
+      // ~2 мин × раунды блокировали часовые тики и давали дыры в данных.
+      const broken = new Set();        // server.name с массовым сбоем
+      const failStreak = new Map();    // server.name → подряд сбоев замера
+      const noteOk = sn => failStreak.set(sn, 0);
+      const noteFail = sn => {
+        const n = (failStreak.get(sn) || 0) + 1;
+        failStreak.set(sn, n);
+        if (n >= CB_FAIL_THRESHOLD && !broken.has(sn)) {
+          broken.add(sn);
+          logger.error(`[SpeedMonitor] ${sn}: ${CB_FAIL_THRESHOLD} подряд сбоев замера — спидтест на боксе сломан, остальные цели пропущены до восстановления пробника`);
+          try { if (alerts) alerts.trigger('speedtest_box_outage', { server: sn, fails: n }); } catch (_) { /* best-effort */ }
+        }
+      };
+
+      // Подмена: до 2 онлайн-модемов того же (сервер, оператор) из пула.
+      // Успех пишется под ником подмены — данные об операторе локации есть,
+      // даже когда целевая симка уехала/легла. true = кто-то замерился.
+      async function trySubstitutes(t, pool) {
+        const key = t.f.server.name + '|' + t.f.operator;
+        for (const s of (pool.get(key) || []).slice(0, 2)) {
+          try {
+            const best = await measureSubstitute(s.f, s.nick);
+            evaluateBaseline(s.f, s.nick, best.dl);
+            insertStmt.run(s.f.server.name, s.nick, s.f.imei, best.dl, best.ul, best.ping, 1, '', s.f.operator, 1);
+            logger.info(`[SpeedMonitor] ${t.nick} → подмена ${s.nick} (${s.f.server.name}, ${s.f.operator}): DL=${best.dl} UL=${best.ul} Ping=${best.ping}`);
+            noteOk(s.f.server.name);
+            return true;
+          } catch (e) {
+            logger.warn(`[SpeedMonitor] подмена ${s.nick} за ${t.nick} не удалась: ${e.message}`);
+            noteFail(s.f.server.name);
+          }
+        }
+        return false;
+      }
 
       // 2) Замеры — последовательно, чтобы не душить бокс параллельными
       // speedtest'ами (он и так гоняет трафик через живые симки).
       let tested = 0, failed = 0;
       // Неудачные ники уходят в pending: их перезамеряем каждые 5 минут до
-      // успеха (но не дольше ~50 минут — до следующего часового тика).
-      const pending = new Map();   // nick → { f|null, lastError, attempts }
-      for (const nick of TARGET_NICKS) {
-        const f = found.get(nick);
+      // успеха (но не дольше бюджета прогона — до следующего часового тика).
+      const pending = new Map();   // nick → { f|null, serverName, lastError, attempts }
+      for (const t of targets) {
+        const { nick } = t;
+        const f = t.f;
         if (!f || !f.isOnline) {
-          const reason = !f ? 'not_found' : 'offline';
+          // Оффлайн: сперва подмена тем же оператором (not_found — без
+          // контекста сервера, подменять нечего).
+          if (f && f.operator && !broken.has(f.server.name) && await trySubstitutes(t, subPool)) { tested++; continue; }
+          const reason = !f ? 'not_found' : (broken.has(f.server.name) ? 'box_outage' : 'offline');
           insertStmt.run(f ? f.server.name : '', nick, f ? f.imei : '', 0, 0, 0, 0, reason, f ? f.operator : '', 0);
           logger.info(`[SpeedMonitor] ${nick}: ${reason}, пропуск замера (в очередь перезамеров)`);
           failed++;
-          pending.set(nick, { f: f || null, lastError: reason, attempts: 0 });
+          pending.set(nick, { f: f || null, serverName: f ? f.server.name : '', lastError: reason, attempts: 0 });
+          continue;
+        }
+        if (broken.has(f.server.name)) {
+          insertStmt.run(f.server.name, nick, f.imei, 0, 0, 0, 0, 'box_outage', f.operator, 0);
+          logger.warn(`[SpeedMonitor] ${nick} (${f.server.name}): box_outage — замер пропущен, бокс в блокировке`);
+          failed++;
+          pending.set(nick, { f, serverName: f.server.name, lastError: 'box_outage', attempts: 0 });
           continue;
         }
         try {
           const { best, attempts } = await tryMeasureNick(f, nick);
-          evaluateBaseline(f,nick,best.dl);
+          evaluateBaseline(f, nick, best.dl);
           insertStmt.run(f.server.name, nick, f.imei, best.dl, best.ul, best.ping, 1, '', f.operator, attempts);
           logger.info(`[SpeedMonitor] ${nick} (${f.server.name}): DL=${best.dl} UL=${best.ul} Ping=${best.ping} attempts=${attempts}`);
+          noteOk(f.server.name);
           tested++;
         } catch (e) {
-          insertStmt.run(f.server.name, nick, f.imei, 0, 0, 0, 0, String(e.message || e).slice(0, 200), f.operator, e.attempts || 0);
+          noteFail(f.server.name);
+          // Подмена тем же оператором — пока бокс не признан сломанным.
+          if (f.operator && !broken.has(f.server.name) && await trySubstitutes(t, subPool)) { tested++; continue; }
+          // Этот ник реально мерили — в строке его честная ошибка, даже если
+          // именно она добила streak и перевела бокс в box_outage.
+          const errText = String(e.message || e).slice(0, 200);
+          insertStmt.run(f.server.name, nick, f.imei, 0, 0, 0, 0, errText, f.operator, e.attempts || 0);
           logger.warn(`[SpeedMonitor] ${nick} (${f.server.name}): ${e.message} (attempts=${e.attempts || 0}) — в очередь перезамеров`);
           failed++;
-          pending.set(nick, { f, lastError: String(e.message || e).slice(0, 200), attempts: 0 });
+          pending.set(nick, { f, serverName: f.server.name, lastError: errText, attempts: 0 });
         }
       }
 
@@ -330,32 +492,53 @@ function create(deps) {
       // кто ожил. Успех пишется ok-строкой в тот же часовой бакет агрегации;
       // промежуточные fail-строки не пишем — изначальная fail-строка прогона
       // уже зафиксировала сбой, лишние строки только мусорят таблицу.
+      // Сломанный бокс мерим одним пробником за раунд; пробник ожил — бокс
+      // разблокируется и остальные его ники добираются в этом же раунде.
       let recovered = 0;
       const maxRounds = retryRounds();
       const roundMs = retryRoundMs();
       for (let round = 1; round <= maxRounds && pending.size > 0; round++) {
+        if (Date.now() + roundMs > deadline) {
+          logger.info('[SpeedMonitor] бюджет времени прогона исчерпан — перезамеры стоп, следующий часовой тик не сдвигаем');
+          break;
+        }
         logger.info(`[SpeedMonitor] перезамер, раунд ${round}/${maxRounds}: ждём ${Math.round(roundMs / 1000)}с, в очереди ${[...pending.keys()].join(', ')}`);
         await sleep(roundMs);
-        const reFound = await resolveNicks([...pending.keys()]);
+        const reFleet = await fetchFleet();
+        const rePool = buildSubPool(reFleet, targets);
+        const probed = new Set();   // сломанный бокс: один пробник на раунд
         for (const [nick, p] of [...pending]) {
-          const f = reFound.get(nick);
+          const f = reFleet.get(nick) || p.f;
+          if (f) { p.f = f; p.serverName = f.server.name; }
           if (!f || !f.isOnline) {
-            p.f = f || p.f;
             p.lastError = !f ? 'not_found' : 'offline';
             continue;
           }
+          if (broken.has(f.server.name)) {
+            if (probed.has(f.server.name)) continue;
+            probed.add(f.server.name);
+          }
           try {
             const { best, attempts } = await tryMeasureNick(f, nick);
-            evaluateBaseline(f,nick,best.dl);
+            evaluateBaseline(f, nick, best.dl);
             insertStmt.run(f.server.name, nick, f.imei, best.dl, best.ul, best.ping, 1, '', f.operator, attempts);
             logger.info(`[SpeedMonitor] ${nick} (${f.server.name}): восстановлен на раунде ${round} — DL=${best.dl} UL=${best.ul} Ping=${best.ping}`);
             pending.delete(nick);
             recovered++;
+            noteOk(f.server.name);
+            broken.delete(f.server.name);   // пробник ожил → бокс снова в строю
           } catch (e) {
-            p.f = f;
             p.lastError = String(e.message || e).slice(0, 200);
             p.attempts += 1;
+            noteFail(f.server.name);
             logger.warn(`[SpeedMonitor] ${nick}: раунд ${round} не удался (${e.message})`);
+            // Подмена в раунде — один модем, одна попытка.
+            if (!broken.has(f.server.name) && f.operator) {
+              if (await trySubstitutes({ nick, f }, rePool)) {
+                pending.delete(nick);
+                recovered++;
+              }
+            }
           }
         }
       }
@@ -378,7 +561,7 @@ function create(deps) {
     }
   }
 
-  return { runSpeedMonitor, getTargetNicks, evaluateBaseline };
+  return { runSpeedMonitor, getTargetNicks, evaluateBaseline, planTargets, isAutoMode };
 }
 
 module.exports = { create, parseSpeedtestResult, speedBaselineBucket, DEFAULT_NICKS };

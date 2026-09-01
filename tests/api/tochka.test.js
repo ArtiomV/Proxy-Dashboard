@@ -224,6 +224,29 @@ describe('POST /api/admin/tochka/create_act — act actually reaches Tochka', ()
   });
 });
 
+// 01.09 regression: «перевыставить акт с правками» из UI присылает позиции без
+// amount — итог акта схлопывался в 0 ₽, хотя в самом документе реальные цифры.
+describe('POST /api/admin/tochka/create_act — позиции без amount нормализуются', () => {
+  it('amount = qty × price, totalAmount — сумма позиций', async () => {
+    const tag = crypto.randomBytes(3).toString('hex');
+    const create = await request(app).post('/api/admin/clients').set('X-Auth-Token', adminToken)
+      .send({ name: 'ActNorm ' + tag, login: 'actn_' + tag, password: 'longpass', portName: 'actn_' + tag, price: 100 });
+    expect(create.status).toBe(200);
+    const clientId = create.body.client.id;
+
+    const res = await request(app).post('/api/admin/tochka/create_act').set('X-Auth-Token', adminToken)
+      .send({ clientId, period: '2026-04', items: [
+        { name: 'Услуги связи', quantity: 2, unit: 'шт', price: 150 },
+        { name: 'Трафик', quantity: 10.5, unit: 'ГБ', price: 23 },
+      ] });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.document.items[0].amount).toBe(300);
+    expect(res.body.document.items[1].amount).toBe(241.5);
+    expect(res.body.document.totalAmount).toBe(541.5);
+  });
+});
+
 describe('tochka config: masked jwt does not clobber the stored token', () => {
   it('keeps stored jwt when the form echoes back the ****-mask', async () => {
     await request(app).post('/api/admin/tochka/config').set('X-Auth-Token', adminToken)

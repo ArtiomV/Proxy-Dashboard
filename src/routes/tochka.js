@@ -516,6 +516,16 @@ r.post('/api/admin/tochka/create_act', authMiddleware, adminMiddleware, async (r
   if (!actItems || actItems.length === 0) {
     ({ actItems } = _buildAct(client, period));
   }
+  // Позиции от UI («перевыставить с правками», finance.js actEditorReissue)
+  // приходят БЕЗ amount — без нормализации итог акта схлопывался в 0 ₽
+  // (инцидент 01.09: акт ушёл в Точку корректно, а локально totalAmount=0).
+  const _r2 = v => Math.round(v * 100) / 100;
+  actItems = actItems.map(it => ({
+    ...it,
+    amount: (typeof it.amount === 'number' && isFinite(it.amount))
+      ? _r2(it.amount)
+      : _r2((Number(it.quantity) || 0) * (Number(it.price) || 0)),
+  }));
 
   const totalAmount = actItems.reduce((s, i) => s + (i.amount || 0), 0);
 

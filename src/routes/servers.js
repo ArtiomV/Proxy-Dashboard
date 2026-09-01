@@ -577,6 +577,9 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   }
   // SpeedMonitor (выборочный почасовой замер): перезамеры и ретенция.
   if (req.body.speedmon_retry_dl_threshold != null) patch.speedmon_retry_dl_threshold = Math.max(0.5, Math.min(50, parseFloat(req.body.speedmon_retry_dl_threshold) || 5));
+  // 01.09: авто-режим — до N модемов на (сервер, оператор); потолок прогона.
+  if (req.body.speedmon_per_operator != null)   patch.speedmon_per_operator   = Math.max(1, Math.min(5, parseInt(req.body.speedmon_per_operator) || 2));
+  if (req.body.speedmon_max_run_min != null)    patch.speedmon_max_run_min    = Math.max(5, Math.min(50, parseInt(req.body.speedmon_max_run_min) || 20));
   if (req.body.speedmon_retry_round_min != null)    patch.speedmon_retry_round_min    = Math.max(1, Math.min(30, parseInt(req.body.speedmon_retry_round_min) || 5));
   if (req.body.speedmon_retry_rounds != null)       patch.speedmon_retry_rounds       = Math.max(0, Math.min(20, parseInt(req.body.speedmon_retry_rounds) ?? 10));
   if (req.body.retention_speed_monitor != null)     patch.retention_speed_monitor     = Math.max(7, Math.min(365, parseInt(req.body.retention_speed_monitor) || 60));

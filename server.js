@@ -1541,13 +1541,17 @@ function generateId() { return crypto.randomBytes(8).toString('hex'); }
 // available when api_servers loads from the DB during initial bootstrap.)
 
 const SETTINGS_DEFAULTS = {
-  // Ники модемов почасового замера скорости (SpeedMonitor), CSV.
+  // Ники модемов почасового замера скорости (SpeedMonitor), CSV либо 'auto'
+  // (01.09: авто-режим — до speedmon_per_operator модемов на каждую пару
+  // сервер/оператор, цель «скорость оператора на локации», не конкретных ников).
   // Редактируется в Настройках → «Спидтесты и пороги качества».
-  speedtest_modems: 'MD2_40,MD2_44,MD_01,MD_04,MD_10',
+  speedtest_modems: 'auto',
   // SpeedMonitor: перезамеры неудачных ников и ретенция (Настройки → «Спидтесты»)
   speedmon_retry_dl_threshold: 5,   // dl ниже (Мбит/с) — замер подозрительный, повтор
   speedmon_retry_round_min: 5,      // перезамер неудачных каждые N минут
   speedmon_retry_rounds: 10,        // макс. раундов перезамера (~50 мин при 5)
+  speedmon_per_operator: 2,         // авто-режим: модемов на (сервер, оператор)
+  speedmon_max_run_min: 20,         // потолок прогона, мин (не сдвигать часовой тик)
   retention_speed_monitor: 60,      // дней хранения строк speed_monitor
   pricing_tiers: [
     { min_proxies: 1, price: 30, label: '1-4 прокси' },

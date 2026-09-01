@@ -253,6 +253,14 @@ const RULES = {
     dedupeKey: p => 'srvrec_' + (p.server || 'unknown'),
     render: p => `🟢 <b>Сервер на связи</b>\n\nСервер <b>${esc(_srvLabel(p.server))}</b> снова отвечает после ${formatDuration(p.downSec)} простоя.${p.suppressed ? `\nЗа время простоя подавлено каскадных алертов модемов: <b>${p.suppressed}</b> — смотри сводку по серверу.` : ''}`,
   },
+  speedtest_box_outage: {
+    title: 'Спидтесты на боксе сломаны',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'spd_out_' + (p.server || 'unknown'),
+    render: p => `🟠 <b>Спидтесты на боксе не работают</b>\n\n<b>${esc(_srvLabel(p.server) || '?')}</b>: ${p.fails || 3} модемов подряд вернули пустой результат — похоже, сломан сам замер на боксе (DNS/маршрутизация), а не модемы. Остальные замеры бокса приостановлены до восстановления пробника, почасовые тики не блокируются. Проверьте DNS/интернет на боксе.`,
+  },
   tochka_webhook_failed: {
     title: 'Webhook от Точки сбоит подряд',
     priority: 'critical',

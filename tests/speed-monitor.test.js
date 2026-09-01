@@ -421,3 +421,105 @@ describe('SpeedMonitor: настойчивые перезамеры (2026-08-14)
     expect(f.statusCalls()).toBe(1);   // только основной резолв
   });
 });
+
+describe('SpeedMonitor: авто-режим, подмена оператора, circuit breaker (2026-09-01)', () => {
+  // Флот: S1 — 3 Moldcell онлайн + 1 Orange онлайн; S2 — 3 Digi онлайн.
+  function fleetFetch(dlResult) {
+    return async (server, path) => {
+      if (path === '/apix/show_status_json') {
+        if (server.name === 'S1') return [
+          { modem_details: { NICK: 'MC_1', IMEI: '1' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' } },
+          { modem_details: { NICK: 'MC_2', IMEI: '2' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' } },
+          { modem_details: { NICK: 'MC_3', IMEI: '3' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' } },
+          { modem_details: { NICK: 'OR_1', IMEI: '4' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'orange' } },
+        ];
+        if (server.name === 'S2') return [
+          { modem_details: { NICK: 'DG_1', IMEI: '5' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'digi' } },
+          { modem_details: { NICK: 'DG_2', IMEI: '6' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'digi' } },
+          { modem_details: { NICK: 'DG_3', IMEI: '7' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'digi' } },
+        ];
+        return [];
+      }
+      if (path.startsWith('/apix/speedtest')) return dlResult;
+      throw new Error('unexpected ' + path);
+    };
+  }
+  const TWO_SRV = [{ name: 'S1', country: 'MD' }, { name: 'S2', country: 'RO' }];
+
+  it('auto: до 2 модемов на (сервер, оператор), оффлайн и бес-операторные пропускаются', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const { normalizeOperator } = cjsRequire('../src/utils/traffic.js');
+    const job = speedMonitor.create({
+      db, logger: { info() {}, warn() {}, error() {} }, logActivity() {},
+      apiServers: TWO_SRV, fetchApi: fleetFetch({ download: '12', upload: '4', ping: '30' }),
+      normalizeOperator, getSetting: (k, d) => (k === 'speedtest_modems' ? 'auto' : d),
+      sleep: async () => {},
+    });
+    expect(job.isAutoMode()).toBe(true);
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 5, failed: 0 });
+    const nicks = db.prepare('SELECT DISTINCT nick FROM speed_monitor').all().map(x => x.nick).sort();
+    expect(nicks).toEqual(['DG_1', 'DG_2', 'MC_1', 'MC_2', 'OR_1']);
+  });
+
+  it('auto: приоритет никам со свежей историей (не рвётся норма)', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    db.prepare("INSERT INTO speed_monitor (server, nick, ok, ts) VALUES ('S2','DG_3',1,datetime('now','-1 day'))").run();
+    const { normalizeOperator } = cjsRequire('../src/utils/traffic.js');
+    const job = speedMonitor.create({
+      db, logger: { info() {}, warn() {}, error() {} }, logActivity() {},
+      apiServers: TWO_SRV, fetchApi: fleetFetch({ download: '12', upload: '4', ping: '30' }),
+      normalizeOperator, getSetting: (k, d) => (k === 'speedtest_modems' ? 'auto' : d),
+      sleep: async () => {},
+    });
+    await job.runSpeedMonitor();
+    const dg = db.prepare("SELECT DISTINCT nick FROM speed_monitor WHERE server='S2' AND ts >= datetime('now','-1 hour')").all().map(x => x.nick).sort();
+    expect(dg).toEqual(['DG_1', 'DG_3']);   // DG_3 с историей вытеснил DG_2
+  });
+
+  it('целевой оффлайн → мерим подмену того же оператора, строка под ником подмены', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    const fetchApi = async (server, path) => {
+      if (path === '/apix/show_status_json') {
+        if (server.name !== 'S1') return [];
+        return [
+          { modem_details: { NICK: 'OFF_1', IMEI: '8' }, net_details: { IS_ONLINE: 'no', CELLOP: 'orange' } },
+          { modem_details: { NICK: 'SUB_1', IMEI: '9' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'orange' } },
+          { modem_details: { NICK: 'OTHER', IMEI: '10' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' } },
+        ];
+      }
+      if (path.startsWith('/apix/speedtest')) return { download: '15', upload: '6', ping: '40' };
+      throw new Error('unexpected ' + path);
+    };
+    const job = makeJobWithSetting(fetchApi, 'OFF_1');
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 1, failed: 0 });
+    const rows = db.prepare('SELECT nick, ok, download, operator FROM speed_monitor').all();
+    expect(rows.length).toBe(1);
+    expect(rows[0]).toMatchObject({ nick: 'SUB_1', ok: 1, download: 15, operator: 'Orange MD' });
+  });
+
+  it('3 подряд empty_result на боксе → box_outage: 4-й ник пропущен без замера, алерт', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    let stCalls = 0;
+    const fetchApi = async (server, path) => {
+      if (path === '/apix/show_status_json') {
+        if (server.name !== 'S1') return [];
+        return ['T1', 'T2', 'T3', 'T4'].map((n, i) => ({
+          modem_details: { NICK: n, IMEI: String(20 + i) },
+          net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' },
+        }));
+      }
+      if (path.startsWith('/apix/speedtest')) { stCalls++; return { download: '0', upload: '0', ping: '0' }; }
+      throw new Error('unexpected ' + path);
+    };
+    const trigger = vi.fn();
+    const job = makeJobWithSetting(fetchApi, 'T1,T2,T3,T4', undefined, { retryRounds: 0, alerts: { trigger } });
+    const r = await job.runSpeedMonitor();
+    expect(r).toMatchObject({ tested: 0, failed: 4 });
+    expect(stCalls).toBe(6);   // T1..T3 по 2 попытки, T4 — ни одного замера
+    const rows = db.prepare('SELECT nick, ok, error FROM speed_monitor ORDER BY nick').all();
+    expect(rows.map(x => x.nick + ':' + x.error)).toEqual(['T1:empty_result', 'T2:empty_result', 'T3:empty_result', 'T4:box_outage']);
+    expect(trigger).toHaveBeenCalledWith('speedtest_box_outage', expect.objectContaining({ server: 'S1' }));
+  });
+});
