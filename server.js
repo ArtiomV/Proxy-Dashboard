@@ -1305,9 +1305,11 @@ function markModemDeleted(serverName, imei, nick) {
 
 // Un-delete a modem: clear modem_meta.deleted AND drop it from the in-memory
 // set (BOTH required — the poll loop checks the set, so clearing only the DB
-// flag wouldn't surface the modem until a restart). Since delete is now
-// permanent (no auto-restore), this is the ONLY way back. Called by the
-// admin restore route.
+// flag wouldn't surface the modem until a restart). This is the INSTANT manual
+// path; alongside it there is a gated auto-restore (_autoRestoreIfStable in
+// src/services/modems.js): a soft-deleted modem comes back by itself only if it
+// was seen OFFLINE after the delete and then stayed online for
+// modem_restore_online_polls consecutive polls. Called by the admin restore route.
 function markModemRestored(serverName, imei, nick) {
   imei = imei || '';
   if (!nick && imei) {

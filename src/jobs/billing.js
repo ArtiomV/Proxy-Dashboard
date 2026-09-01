@@ -270,7 +270,12 @@ async function _runDailyBillingImpl(retryClientIds) {
           timestamp: new Date().toISOString(),
           delta_bytes: Math.round(deltaBytes),
           delta_gb: deltaGb,
-          price_per_unit: client.price,
+          // Эффективная цена списания (priceOverride → tariff → price), а НЕ
+          // сырое client.price: иначе при расхождении источников деньги
+          // считаются по одной ставке, а акт потом разбивается по другой
+          // (инцидент 01.09: списание 31.08 по 23 ₽, но price_per_unit=29 —
+          // акт распилился на «по 23 ₽» + «по 29 ₽»).
+          price_per_unit: clientPrice,
           billing_type: client.billingType || 'per_gb',
           modem_count: modemCount || null,
           days_in_month: daysInMonth,

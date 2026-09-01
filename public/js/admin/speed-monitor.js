@@ -30,19 +30,6 @@ function setSpeedMonHours(h, el) {
   loadSpeedMonitor(true);
 }
 
-function _speedMonLabel(nick, modems) {
-  var m = null;
-  (modems || []).forEach(function (x) { if (x.nick === nick) m = x; });
-  if (!m) return nick;
-  var parts = [nick];
-  if (m.operator) parts.push(m.operator);
-  // Локация — адрес площадки из карточки сервера («Армянская …»), а не
-  // техничекое «S1 · Moldova»: по адресу видно, о какой площадке речь.
-  var loc = m.address || m.location || m.server || '';
-  if (loc) parts.push(loc);
-  return parts.join(' · ');
-}
-
 function loadSpeedMonitor(force) {
   var canvas = document.getElementById('speedMonCanvas');
   if (!canvas) return;
@@ -68,24 +55,27 @@ function loadSpeedMonitor(force) {
     var rows = (d && d.rows) || [];
     var modems = (d && d.modems) || [];
     var emptyEl = document.getElementById('speedMonEmpty');
-    // Разбиение по локациям для попапа графика (external-тултип): адрес
-    // сервера из настроек (fallback — страна/имя бокса) → оператор → средние
-    // ↓/↑ за наведённый час, взвешенные по числу успешных замеров. dl и ul
-    // копим с раздельными счётчиками — если у оператора есть только одно
-    // направление, в попапе покажем то, что есть.
-    // Храним ПОЧАСОВЫЕ СТРОКИ ПО НИКАМ (не агрегат): попап агрегирует их
-    // на лету с учётом видимости серий — модем, скрытый в легенде графика,
-    // исчезает и из разбивки попапа (иначе «скрыли в легенде — в попапе видно»).
+    // Группировка «оператор · локация» (2026-09-01): линия на оператор
+    // локации, а не на модем — цель мониторинга «скорость оператора на
+    // площадке», модемы в авто-режиме ротируются/подменяются. Час = среднее
+    // успешных замеров группы, взвешенное по ok_count. dl и ul копим с
+    // раздельными счётчиками — если есть только одно направление, в попапе
+    // покажем то, что есть.
     var nickLoc = {}, nickOp = {};
     modems.forEach(function (m) {
       nickLoc[m.nick] = m.address || m.location || m.server || '—';
       nickOp[m.nick] = m.operator || 'оператор?';
     });
-    var hourNickRows = {};   // hour_msk → [ {nick, avg_dl, avg_ul, ok_count} ]
+    var groupOf = function (nick) { return (nickOp[nick] || 'оператор?') + ' · ' + (nickLoc[nick] || '—'); };
+    var hourGroup = {};   // hour_msk → gkey → { dl, nd, ul, nu }
     rows.forEach(function (r) {
       if (!(r.ok_count > 0)) return;
       if (!nickLoc[r.nick]) return;
-      (hourNickRows[r.hour_msk] || (hourNickRows[r.hour_msk] = [])).push(r);
+      var g = groupOf(r.nick);
+      var H = hourGroup[r.hour_msk] || (hourGroup[r.hour_msk] = {});
+      var G = H[g] || (H[g] = { dl: 0, nd: 0, ul: 0, nu: 0 });
+      if (r.avg_dl != null) { G.dl += r.avg_dl * r.ok_count; G.nd += r.ok_count; }
+      if (r.avg_ul != null) { G.ul += r.avg_ul * r.ok_count; G.nu += r.ok_count; }
     });
 
     if (!rows.length) {
@@ -95,7 +85,7 @@ function loadSpeedMonitor(force) {
     }
     if (emptyEl) emptyEl.style.display = 'none';
 
-    // Ось — объединение часов всех ников (у каждого свои дыры).
+    // Ось — объединение часов всех строк (у каждой группы свои дыры).
     var hourSet = {};
     rows.forEach(function (r) { hourSet[r.hour_msk] = 1; });
     var hours = Object.keys(hourSet).sort();
@@ -105,23 +95,25 @@ function loadSpeedMonitor(force) {
       return m2 ? m2[2] + '.' + m2[1] + ' ' + m2[3] + ':00' : h;
     });
 
-    var nicks = [];
-    rows.forEach(function (r) { if (nicks.indexOf(r.nick) < 0) nicks.push(r.nick); });
-    nicks.sort();
+    var gkeys = [];
+    rows.forEach(function (r) {
+      if (!nickLoc[r.nick]) return;
+      var g = groupOf(r.nick);
+      if (gkeys.indexOf(g) < 0) gkeys.push(g);
+    });
+    gkeys.sort();
 
-    var datasets = nicks.map(function (nick, i) {
+    var datasets = gkeys.map(function (g, i) {
       var color = _SPEEDMON_PALETTE[i % _SPEEDMON_PALETTE.length];
-      var byHour = {};
-      rows.forEach(function (r) {
-        if (r.nick !== nick) return;
-        // Час без успешного замера → null (дыра в линии), а не 0 —
-        // 0 выглядел бы как «оператор дал ноль скорости».
-        byHour[r.hour_msk] = r.ok_count > 0 ? r.avg_dl : null;
-      });
       return {
-        label: _speedMonLabel(nick, modems),
-        _nick: nick,   // сырой ник — попап фильтрует разбивку по видимым сериям
-        data: hours.map(function (h) { return byHour[h] != null ? byHour[h] : null; }),
+        label: g,
+        _gkey: g,   // попап фильтрует разбивку по видимым сериям
+        data: hours.map(function (h) {
+          var G = hourGroup[h] && hourGroup[h][g];
+          // Час без успешного замера → null (дыра в линии), а не 0 —
+          // 0 выглядел бы как «оператор дал ноль скорости».
+          return G && G.nd > 0 ? Math.round((G.dl / G.nd) * 10) / 10 : null;
+        }),
         borderColor: color,
         backgroundColor: color,
         borderWidth: 2,
@@ -168,23 +160,22 @@ function loadSpeedMonitor(force) {
                 ttEl.style.opacity = '0';
                 return;
               }
-              // Агрегируем разбивку ТОЛЬКО по видимым сериям: скрытый в легенде
-              // модем исключается и из попапа (локации/операторы без видимых
-              // модемов в этот час не показываем вовсе).
-              var visibleNicks = {};
+              // Агрегируем разбивку ТОЛЬКО по видимым сериям: скрытая в легенде
+              // группа «оператор · локация» исключается и из попапа.
+              var visibleGroups = {};
               var chart = context.chart;
               (chart.data.datasets || []).forEach(function (ds, i) {
-                if (chart.isDatasetVisible(i) && ds._nick) visibleNicks[ds._nick] = true;
+                if (chart.isDatasetVisible(i) && ds._gkey) visibleGroups[ds._gkey] = true;
               });
               var H = null;
-              (hourNickRows[hours[tt.dataPoints[0].dataIndex]] || []).forEach(function (r) {
-                if (!visibleNicks[r.nick]) return;
-                var loc = nickLoc[r.nick], op = nickOp[r.nick] || 'оператор?';
+              var gh = hourGroup[hours[tt.dataPoints[0].dataIndex]] || {};
+              Object.keys(gh).forEach(function (g) {
+                if (!visibleGroups[g]) return;
+                var sep = g.lastIndexOf(' · ');
+                var op = g.slice(0, sep), loc = g.slice(sep + 3);
                 if (!H) H = {};
                 var L = H[loc] || (H[loc] = {});
-                var O = L[op] || (L[op] = { dl: 0, nd: 0, ul: 0, nu: 0 });
-                if (r.avg_dl != null) { O.dl += r.avg_dl * r.ok_count; O.nd += r.ok_count; }
-                if (r.avg_ul != null) { O.ul += r.avg_ul * r.ok_count; O.nu += r.ok_count; }
+                L[op] = gh[g];
               });
               var h = '<div style="font-size:11px;color:#9b9b98;margin-bottom:6px">'
                 + esc((tt.title && tt.title[0]) || '') + '</div>';

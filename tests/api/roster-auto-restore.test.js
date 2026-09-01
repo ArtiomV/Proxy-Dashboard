@@ -1,6 +1,9 @@
 // Auto-restore of soft-deleted modems (2026-08-04): a reconnected modem must
 // reappear on its own — but only after N CONSECUTIVE online polls, so a
 // flapping modem's one-poll blip never clears the deleted flag.
+// Гейт «реального возврата» (2026-09-01, MD1): восстановление только если
+// модем после удаления хоть раз был замечен ОФФЛАЙН — удалённый «на живую»
+// (непрерывно онлайн) модем не воскресает.
 
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'module';
@@ -45,6 +48,7 @@ describe('roster auto-restore (hysteresis)', () => {
   it('restores a deleted modem only on the 3rd consecutive online poll', () => {
     const { svc, deletedModemSet, knownModems, calls } = makeSvc();
 
+    svc.updateKnownModems(makeFeed(false));  // сначала модем реально ушёл в оффлайн (гейт 2026-09-01)
     svc.updateKnownModems(makeFeed(true));
     svc.updateKnownModems(makeFeed(true));
     expect(deletedModemSet.has(SRV + '|' + IMEI)).toBe(true);   // ещё удалён
@@ -55,6 +59,14 @@ describe('roster auto-restore (hysteresis)', () => {
     expect(calls.undelete).toBe(1);                              // DB-флаг снят
     expect(deletedModemSet.has(SRV + '|' + IMEI)).toBe(false);   // set очищен
     expect(knownModems[SRV][PID].portName).toBe('WildBox');      // порт в ростере → в счётчик клиента
+  });
+
+  it('never restores a deleted modem that stays online (deleted «на живую», MD1 case)', () => {
+    const { svc, deletedModemSet, knownModems, calls } = makeSvc();
+    for (let i = 0; i < 6; i++) svc.updateKnownModems(makeFeed(true));
+    expect(calls.undelete).toBe(0);                            // оффлайна не было — не «возврат»
+    expect(deletedModemSet.has(SRV + '|' + IMEI)).toBe(true);
+    expect((knownModems[SRV] || {})[PID]).toBeUndefined();
   });
 
   it('never restores a deleted modem that stays offline', () => {
@@ -88,6 +100,7 @@ describe('roster auto-restore (hysteresis)', () => {
 
   it('threshold is configurable via appSettings.modem_restore_online_polls', () => {
     const { svc, knownModems, calls } = makeSvc({ modem_restore_online_polls: 1 });
+    svc.updateKnownModems(makeFeed(false));   // гейт: сначала оффлайн
     svc.updateKnownModems(makeFeed(true));
     expect(calls.undelete).toBe(1);
     expect(knownModems[SRV][PID]).toBeTruthy();

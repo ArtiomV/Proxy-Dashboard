@@ -38,14 +38,30 @@ function create(deps) {
   // modem_restore_online_polls (дефолт 3) ПОДРЯД онлайн-опросов (~90 с при 30-с
   // опросе). Любой офлайн-опрос сбрасывает серию. Ручной restore через
   // POST /api/admin/modems/:srv/:imei/restore остаётся (мгновенный путь).
+  //
+  // Гейт «реального возврата» (2026-09-01, MD1): удалённый модем, который НИ РАЗУ
+  // не уходил в оффлайн после удаления, не воскресает вообще — оператор удалил
+  // живой модем осознанно, а железо на боксе продолжало отвечать, поэтому модем
+  // «возвращался» через ~90 с после каждого удаления. Теперь online-стreak копится
+  // только если модем после удаления хоть раз был замечен ОФФЛАЙН (физически
+  // отключали и подключили обратно). Флапающий оффлайн↔онлайн модем система сочтёт
+  // вернувшимся — для жёсткого запрета остаётся ручной путь (удалить → не
+  // подключать обратно).
   const _deletedOnlineStreak = new Map();   // 'srv|imei' -> consecutive online polls
+  const _deletedSeenOffline = new Map();    // 'srv|imei' -> true, если после удаления был оффлайн
   function _autoRestoreIfStable(srvName, imei, isOnline) {
     const key = srvName + '|' + imei;
-    if (!isOnline) { _deletedOnlineStreak.delete(key); return false; }
+    if (!isOnline) {
+      _deletedSeenOffline.set(key, true);
+      _deletedOnlineStreak.delete(key);
+      return false;
+    }
+    if (!_deletedSeenOffline.get(key)) return false;   // не уходил в оффлайн — не «возврат»
     const need = Math.max(1, Number(appSettings.modem_restore_online_polls) || 3);
     const n = (_deletedOnlineStreak.get(key) || 0) + 1;
     if (n < need) { _deletedOnlineStreak.set(key, n); return false; }
     _deletedOnlineStreak.delete(key);
+    _deletedSeenOffline.delete(key);
     deletedModemSet.delete(key);
     try {
       let nick = '';
@@ -108,9 +124,11 @@ function create(deps) {
           ? now
           : (prevKm.lastClientSeen || (prevKm.portName ? (prevKm.lastSeen || now) : 0));
         // Soft-delete с гистерезисом: удалённый модем пропускаем, ПОКА он не
-        // доказал устойчивый возврат — N подряд онлайн-опросов (_autoRestoreIfStable).
-        // Одиночный блип не воскрешает; реально подключённый обратно модем
-        // воскресает сам через ~90 с. См. комментарий у _autoRestoreIfStable.
+        // доказал устойчивый возврат — был замечен оффлайн после удаления и
+        // затем N подряд онлайн-опросов (_autoRestoreIfStable). Удалённый
+        // «на живую» (непрерывно онлайн) модем не воскресает; реально
+        // отключённый и подключённый обратно — воскресает сам через ~90 с
+        // после возврата. См. комментарий у _autoRestoreIfStable.
         if (imei && deletedModemSet.has(srvName + '|' + imei)) {
           const _on = !!(modemStatus && modemStatus.net_details && modemStatus.net_details.IS_ONLINE === 'yes');
           if (!_autoRestoreIfStable(srvName, imei, _on)) continue;
