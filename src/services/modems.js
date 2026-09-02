@@ -64,9 +64,11 @@ function create(deps) {
     _deletedSeenOffline.delete(key);
     deletedModemSet.delete(key);
     try {
-      let nick = '';
-      try { const r = trackingDb.metaNickByImeiStmt().get(srvName, imei); if (r && r.nick) nick = r.nick; } catch (_) { /* best-effort */ }
-      trackingDb.metaUndeleteWideStmt().run(srvName, imei, nick);
+      // Восстанавливаем ТОЛЬКО вернувшийся IMEI (узкий undelete). Wide-вариант
+      // по нику снимал deleted=1 и со СТАРОГО железа этого слота — оно без
+      // живого фида инжектилось оффлайн-дубликатом (инцидент 2026-09-01,
+      // MD2_54/55/58: рядом с новым модемом висел старый IMEI «отключен»).
+      trackingDb.metaUndeleteStmt().run(srvName, imei);
     } catch (e) { logger.warn('[roster] auto-restore db write failed: ' + e.message); }
     logger.info('[roster] auto-restored ' + key + ' after ' + n + ' consecutive online polls');
     return true;

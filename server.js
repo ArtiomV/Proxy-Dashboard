@@ -1276,8 +1276,17 @@ function markModemDeleted(serverName, imei, nick) {
   //    of which identifier the modem_meta row carries.
   try { changes = trackingDb.metaSoftDeleteWideStmt().run(serverName, imei, nick).changes; }
   catch (e) { logger.warn('[soft-delete] flag failed: ' + e.message); }
-  // 2) In-memory set so the hot poll loop skips it without a DB hit.
-  if (imei) _deletedModemSet.add(serverName + '|' + imei);
+  // 2) In-memory set so the hot poll loop skips it without a DB hit. ProxySmart
+  //    даёт ник по слоту: под одним ником после смены железа живёт ДРУГОЙ IMEI
+  //    (инцидент 2026-09-01, MD2_54/55/58 — живой модем с новым IMEI оставался
+  //    видимым до рестарта). Кладём ВСЕ IMEI, которые носили этот ник.
+  let allImeis = imei ? [imei] : [];
+  try {
+    for (const r of trackingDb.metaImeisWideStmt().all(serverName, imei, nick)) {
+      if (r.imei && !allImeis.includes(r.imei)) allImeis.push(r.imei);
+    }
+  } catch (_) { /* best-effort */ }
+  for (const im of allImeis) _deletedModemSet.add(serverName + '|' + im);
   // 3) Purge known_modems entries for this modem — КРОМЕ записей с реальной
   //    клиентской привязкой (2026-08-04, реша оператора): реквизит живёт и
   //    трафиком даже когда модем мёртв/скрыт (UDBqldZf давал 78k hits/день
@@ -1287,16 +1296,15 @@ function markModemDeleted(serverName, imei, nick) {
   //    (meta_/recovered_ и безымянные дубли) — источник флапа в списке.
   const km = knownModems[serverName];
   if (km) {
-    const metaId = imei ? ('meta_' + imei) : '';
-    const recId  = imei ? ('recovered_' + imei) : '';
+    const purgeIds = new Set();
+    for (const im of allImeis) { purgeIds.add('meta_' + im); purgeIds.add('recovered_' + im); }
     let removed = 0;
     for (const pid of Object.keys(km)) {
       const info = km[pid] || {};
       if (info.portName && !/^random/i.test(info.portName)) continue;   // реквизит клиента — не трогаем
-      if ((imei && info.imei === imei) ||
+      if ((info.imei && allImeis.includes(info.imei)) ||
           (nick && info.nick === nick) ||
-          (metaId && pid === metaId) ||
-          (recId && pid === recId)) { delete km[pid]; removed++; }
+          purgeIds.has(pid)) { delete km[pid]; removed++; }
     }
     if (removed) saveKnownModems();
   }
@@ -1315,15 +1323,14 @@ function markModemDeleted(serverName, imei, nick) {
 // modem_restore_online_polls consecutive polls. Called by the admin restore route.
 function markModemRestored(serverName, imei, nick) {
   imei = imei || '';
-  if (!nick && imei) {
-    try { const r = trackingDb.metaNickByImeiStmt().get(serverName, imei); if (r && r.nick) nick = r.nick; } catch (_) { /* best-effort */ }
-  }
-  nick = nick || '';
-  if (!imei && !nick) return 0;
+  if (!imei) return 0;
   let changes = 0;
-  try { changes = trackingDb.metaUndeleteWideStmt().run(serverName, imei, nick).changes; }
+  // УЗКИЙ restore — только конкретный IMEI. Wide-вариант по нику воскрешал и
+  // старое железо этого слота (ProxySmart даёт ник по слоту), и оно без живого
+  // фида появлялось оффлайн-дубликатом рядом с новым модемом (2026-09-01).
+  try { changes = trackingDb.metaUndeleteStmt().run(serverName, imei).changes; }
   catch (e) { logger.warn('[soft-delete] undelete failed: ' + e.message); }
-  if (imei) _deletedModemSet.delete(serverName + '|' + imei);
+  _deletedModemSet.delete(serverName + '|' + imei);
   try { proxySmart.invalidateCache(); } catch (_) { /* best-effort */ }
   return changes;
 }

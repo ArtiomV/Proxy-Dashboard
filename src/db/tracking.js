@@ -141,6 +141,13 @@ function init(db) {
   S.metaNickByImei = db.prepare(
     "SELECT nick FROM modem_meta WHERE server_name = ? AND imei = ? AND nick IS NOT NULL AND nick <> '' LIMIT 1"
   );
+  // 041c: all IMEIs that ever carried this nick. ProxySmart назначает ник по
+  // слоту, поэтому при смене железа под одним ником живут разные IMEI — и
+  // in-memory _deletedModemSet обязан покрывать их ВСЕ, иначе свежий IMEI
+  // остаётся видимым до рестарта (инцидент 2026-09-01, MD2_54/55/58).
+  S.metaImeisWide = db.prepare(
+    "SELECT imei FROM modem_meta WHERE server_name = ? AND (imei = ? OR (nick = ? AND nick <> '')) AND imei IS NOT NULL AND imei <> ''"
+  );
   // ON CONFLICT DO UPDATE (не OR IGNORE): при повторной выборке бэкфиллит
   // caller/target_mode в строки, синканные до миграции 050. Ключ уникальности
   // — (server_name, nick, started_at).
@@ -190,6 +197,7 @@ module.exports = {
   metaSoftDeleteWideStmt:      () => S.metaSoftDeleteWide,          // 041b
   metaUndeleteWideStmt:        () => S.metaUndeleteWide,            // 041b
   metaNickByImeiStmt:          () => S.metaNickByImei,              // 041b
+  metaImeisWideStmt:           () => S.metaImeisWide,               // 041c
   rotationUpsertStmt:  () => S.rotationUpsert,
   rotationSelectStmt:  () => S.rotationSelect,
   ipAllStmt:           () => S.ipAll,

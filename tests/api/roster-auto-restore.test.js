@@ -38,7 +38,7 @@ function makeSvc(appSettings = {}) {
     appSettings,
     trackingDb: {
       metaNickByImeiStmt: () => ({ get: () => ({ nick: 'MD_01' }) }),
-      metaUndeleteWideStmt: () => ({ run: () => { calls.undelete++; return { changes: 1 }; } }),
+      metaUndeleteStmt: () => ({ run: () => { calls.undelete++; return { changes: 1 }; } }),
     },
   });
   return { svc, deletedModemSet, knownModems, calls };
@@ -104,5 +104,18 @@ describe('roster auto-restore (hysteresis)', () => {
     svc.updateKnownModems(makeFeed(true));
     expect(calls.undelete).toBe(1);
     expect(knownModems[SRV][PID]).toBeTruthy();
+  });
+
+  it('restores ONLY the returned IMEI — sibling IMEI under the same nick stays deleted (MD2_54/55/58, 2026-09-01)', () => {
+    const OLD_IMEI = 'IMEI_OLD_SLOT';
+    const { svc, deletedModemSet, knownModems, calls } = makeSvc();
+    deletedModemSet.add(SRV + '|' + OLD_IMEI);   // старое железо того же слота, тоже удалено
+    svc.updateKnownModems(makeFeed(false));
+    svc.updateKnownModems(makeFeed(true));
+    svc.updateKnownModems(makeFeed(true));
+    svc.updateKnownModems(makeFeed(true));
+    expect(calls.undelete).toBe(1);
+    expect(deletedModemSet.has(SRV + '|' + IMEI)).toBe(false);       // вернувшийся восстановлен
+    expect(deletedModemSet.has(SRV + '|' + OLD_IMEI)).toBe(true);    // старый НЕ воскресает
   });
 });
