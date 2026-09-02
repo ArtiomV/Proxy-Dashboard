@@ -58,6 +58,12 @@ function init(db) {
     (client_id, client_name, api_key_prefix, endpoint, method, status_code,
      response_time_ms, user_agent, ip, error, key_via)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+  // v2.10.68: карточка API-ключа в ЛК — «последнее использование» и число
+  // запросов за 24 ч. timestamp в api_usage — UTC (CURRENT_TIMESTAMP).
+  S.apiUsageLastByClient = db.prepare(
+    'SELECT MAX(timestamp) AS last_used_at FROM api_usage WHERE client_id = ?');
+  S.apiUsageCount24hByClient = db.prepare(
+    "SELECT COUNT(*) AS n FROM api_usage WHERE client_id = ? AND timestamp >= datetime('now', '-1 day')");
 
   // Stage 8: scattered queries previously inlined in server.js.
   // 90-day retention purge + load (called once at startup in server.js).
@@ -136,6 +142,8 @@ module.exports = {
   snapshotGetStmt:    () => S.snapshotGet,
   snapshotGetAllStmt: () => S.snapshotGetAll,
   apiUsageInsertStmt: () => S.apiUsageInsert,
+  apiUsageLastByClientStmt:     () => S.apiUsageLastByClient,
+  apiUsageCount24hByClientStmt: () => S.apiUsageCount24hByClient,
   // Stage 8 additions
   dailyPurge90dStmt:           () => S.dailyPurge90d,
   dailyLast90dStmt:            () => S.dailyLast90d,

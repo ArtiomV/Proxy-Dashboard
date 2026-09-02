@@ -12,6 +12,7 @@ const fs = require('fs');
 const fsPromises = require('fs/promises');
 const path = require('path');
 const { sha256hex } = require('../utils/secrets');
+const { rotateApiKey } = require('../services/api-keys');   // v2.10.68: grace-ротация
 const financeEvents = require('../billing/events');   // WP7.2: cache invalidation on client mutations
 const { referralCommission } = require('../billing/referral');   // A1/Р6: комиссия 10%, единая константа
 function _emitFinanceWrite() {
@@ -100,6 +101,7 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
     payments: [],
     apiKey: sha256hex(plainApiKey),
     apiKeyPrefix: plainApiKey.slice(0, 8),
+    apiKeyCreatedAt: new Date().toISOString(),   // миграция 086: «выдан» в карточке ЛК с первого дня
     referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
     referred_by: null,
     referral_balance: 0,
@@ -636,15 +638,20 @@ r.delete('/api/admin/clients/:id/document/:docId', authMiddleware, adminMiddlewa
 });
 
 r.post('/api/admin/clients/:id/regenerate_key', authMiddleware, adminMiddleware, (req, res) => {
-  
+
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
   // Hash-only at rest; the new plaintext is returned once, then unrecoverable.
-  const plainApiKey = 'prx_' + crypto.randomBytes(24).toString('hex');
-  client.apiKey = sha256hex(plainApiKey);
-  client.apiKeyPrefix = plainApiKey.slice(0, 8);
+  // v2.10.68: grace-ротация через общий сервис — прежний ключ работает ещё
+  // 24 ч (apiKeyPrev), интеграция клиента не обрывается мгновенно.
+  // rebuildClientMaps обязателен: карты ключей перестраиваются только здесь и
+  // на буте — без ребилда новый ключ НЕ заработал бы, а старый продолжил бы
+  // работать до рестарта (жилой баг прежнего regenerate).
+  const { plain, prevExpiresAt } = rotateApiKey(client);
   saveClients(clients);
-  res.json({ ok: true, apiKey: plainApiKey });
+  rebuildClientMaps();
+  auditLog(req.user.login, 'regenerate_api_key', { clientId: client.id, clientName: client.name, prevExpiresAt, ip: getClientIp(req) });
+  res.json({ ok: true, apiKey: plain, prevExpiresAt });
 });
 
 // Ручная блокировка клиента админом: blocked=1, сброс всех сессий, гашение

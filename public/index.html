@@ -74,7 +74,7 @@
           <a class="header-logo" href="/"><img src="/img/brand-logo.webp" alt="Arendaproxy"></a>
           <span class="header-brand-name">Arendaproxy.ru</span>
         </div>
-        <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.67</a>
+        <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.68</a>
         <span class="header-client-info"><span id="statusText"></span></span>
       </div>
 
@@ -91,7 +91,7 @@
 
       <div class="header-right">
         <div class="theme-toggle" id="themeToggle" data-on-click="toggleTheme()" title="Переключить тему"></div>
-        <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.67</a>
+        <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.68</a>
         <button class="btn-logout" data-on-click="doLogout()" title="Выйти">
           <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
         </button>
@@ -417,9 +417,21 @@
           <p>API-ключ используется для аутентификации. Передавайте его через заголовок <code>X-API-Key</code> или как параметр <code>?apikey=</code> в URL.</p>
           <div class="api-key-box">
             <code id="apiDocKey">—</code>
-            <button data-on-click="copyText(document.getElementById('apiDocKey').textContent,this)">Копировать</button>
           </div>
-          <div class="api-note" style="margin-top:14px;margin-bottom:0">Никому не сообщайте ваш API-ключ. Если он скомпрометирован — обратитесь к администратору для перевыпуска.</div>
+          <div id="apiKeyMeta" style="display:none;margin-top:10px;font-size:12.5px;color:var(--text-2);line-height:1.7"></div>
+          <div id="apiKeyGraceWarn" class="api-note warn" style="display:none;margin-top:10px;margin-bottom:0"></div>
+          <!-- Показывается сразу после перевыпуска: полный ключ виден один раз -->
+          <div id="apiNewKeyBox" style="display:none;margin-top:12px">
+            <div class="api-note warn" style="margin-top:0;margin-bottom:8px"><b>Сохраните новый ключ сейчас.</b> Он показывается один раз и больше не будет доступен в панели.</div>
+            <div class="api-key-box" style="margin-top:0">
+              <code id="apiNewKey"></code>
+              <button data-on-click="copyText(document.getElementById('apiNewKey').textContent,this)">Копировать</button>
+            </div>
+          </div>
+          <div style="margin-top:12px">
+            <button class="btn" id="btnRegenKey" data-on-click="regenerateApiKey()">Перевыпустить ключ</button>
+          </div>
+          <div class="api-note" style="margin-top:14px;margin-bottom:0">Никому не сообщайте ваш API-ключ. Ключ хранится в зашифрованном виде — показать текущий невозможно, можно только перевыпустить. При перевыпуске прежний ключ продолжает работать ещё 24 часа, чтобы вы успели обновить интеграцию без обрыва.</div>
         </div>
 
         <!-- TOC -->

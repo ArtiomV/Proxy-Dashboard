@@ -114,9 +114,10 @@ function create(deps) {
           closingDocuments: [],
           bills: [],
           // Hash-only at rest (migration 043); no one sees this plaintext —
-          // admin issues a working key via regenerate when the client asks.
+          // клиент перевыпускает ключ сам из ЛК (v2.10.68) или админ через regenerate.
           apiKey: sha256hex('prx_' + crypto.randomBytes(24).toString('hex')),
           apiKeyPrefix: '',
+          apiKeyCreatedAt: new Date().toISOString(),   // миграция 086
           referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
           referred_by: null,
           referral_balance: 0,

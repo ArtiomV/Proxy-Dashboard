@@ -231,6 +231,7 @@
   "POST /api/admin/usb_reset",
   "POST /api/auth/resend_verification",
   "POST /api/auth/telegram",
+  "POST /api/client/api_key/regenerate",
   "POST /api/client/buy_proxy",
   "POST /api/client/change_password",
   "POST /api/client/email",

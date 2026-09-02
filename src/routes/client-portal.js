@@ -2,10 +2,10 @@
 //
 // src/routes/client-portal.js — client-facing endpoints (Stage 3).
 //
-// 17 routes used by the client SPA (public/index.html):
+// 18 routes used by the client SPA (public/index.html):
 //   /api/dashboard_data, /api/billing_history,
 //   /api/client/{reset_ip, reset_ip_by_token, set_rotation,
-//                 credentials_export, referral, documents,
+//                 api_key/regenerate, credentials_export, referral, documents,
 //                 documents/:docId/download, closing_documents,
 //                 closing_documents/:docId/pdf, bills, bills/:billId/pdf,
 //                 email}
@@ -22,6 +22,7 @@ const crypto = require('crypto');
 const { tochkaRequest } = require('../tochka/api');
 const { isModemOwned } = require('../modems/ownership');
 const { sha256hex } = require('../utils/secrets');
+const { rotateApiKey } = require('../services/api-keys');   // v2.10.68: grace-ротация
 const sla = require('../sla');
 const uptimePeriod = require('../uptime-period');
 
@@ -40,6 +41,10 @@ module.exports = function createClientPortalRouter(deps) {
     getSpeedtestLatest,
     auditLog, logActivity, getClientIp,
     saveClients, atomicCredit,
+    // v2.10.68: self-serve перевыпуск API-ключа (grace-ротация) + статистика
+    // ключа из api_usage. rebuildClientMaps обязателен после ротации — карты
+    // ключей иначе перестроятся только на рестарте.
+    trafficDb, rebuildClientMaps, notifyClient,
     validate, ClientEmailSchema,
     getSetting, mailer, authTokensDb,
     proxyConf, modemRotationCache, proxySmart,
@@ -176,8 +181,28 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
         debtStatus: _debtStatus(clientInfo, _avgDailyCharge7d(ledgerEntries), portCount > 0),
         expiresAt: earliestExpiry !== null ? new Date(earliestExpiry).toISOString().slice(0, 10) : null,
         // Masked: only the prefix is shown (keys are hashed at rest since
-        // migration 043). A lost key is re-issued by admin via regenerate.
-        apiKey: clientInfo.apiKeyPrefix ? clientInfo.apiKeyPrefix + '••••••••' : ''
+        // migration 043). Полный ключ клиент получает один раз — в момент
+        // (пере)выпуска; self-serve перевыпуск — POST /api/client/api_key/regenerate.
+        apiKey: clientInfo.apiKeyPrefix ? clientInfo.apiKeyPrefix + '••••••••' : '',
+        // v2.10.68: карточка ключа в ЛК — когда выдан, активный grace прежнего
+        // ключа, последнее использование и запросы за 24 ч (api_usage, UTC→ISO).
+        apiKeyInfo: (() => {
+          let lastUsedAt = null, requests24h = 0;
+          try {
+            const lu = trafficDb.apiUsageLastByClientStmt().get(clientInfo.id);
+            if (lu && lu.last_used_at) lastUsedAt = lu.last_used_at.replace(' ', 'T') + 'Z';
+            const c24 = trafficDb.apiUsageCount24hByClientStmt().get(clientInfo.id);
+            requests24h = (c24 && c24.n) || 0;
+          } catch (_) { /* best-effort */ }
+          const prevExp = clientInfo.apiKeyPrevExpiresAt;
+          return {
+            prefix: clientInfo.apiKeyPrefix || '',
+            createdAt: clientInfo.apiKeyCreatedAt || null,
+            prevExpiresAt: (prevExp && Date.parse(prevExp) > Date.now()) ? prevExp : null,
+            lastUsedAt,
+            requests24h
+          };
+        })()
       };
 
       // B2C Э2: конвейер автоблока (grace → блок → hold → удаление). Поле
@@ -283,6 +308,44 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
     res.json(merged);
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
+  }
+});
+
+// ── Self-serve перевыпуск API-ключа (v2.10.68) ─────────────────────────────
+// Grace-ротация: новый ключ работает сразу, прежний — ещё api_key_grace_hours
+// (дефолт 24 ч, Настройки админки), затем отклоняется в findClientByApiKey.
+// Полный plaintext возвращается ОДИН РАЗ в ответе — в БД только SHA-256.
+// Анти-спам: не чаще раза в 60 секунд (ключи не резина, а каждая ротация
+// шлёт клиенту Telegram и пишет аудит).
+r.post('/api/client/api_key/regenerate', dashboardLimiter, authMiddleware, async (req, res) => {
+  try {
+    const client = clientByLogin.get(req.user.login);
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    // Анти-спам на ПОВТОРНУЮ ротацию (есть прежний ключ и он выдан < 60 с
+    // назад). Первая ротация после создания клиента не лимитируется —
+    // apiKeyCreatedAt у свежесозданного клиента тоже «только что».
+    const createdAt = Date.parse(client.apiKeyCreatedAt || '') || 0;
+    if (client.apiKeyPrev && Date.now() - createdAt < 60 * 1000) {
+      return res.status(429).json({ error: 'Ключ перевыпущен менее минуты назад. Подождите и попробуйте снова.' });
+    }
+    const graceHours = Number(getSetting('api_key_grace_hours', 24)) || 24;
+    const { plain, prevExpiresAt } = rotateApiKey(client, graceHours);
+    saveClients(clients);
+    rebuildClientMaps();   // иначе новый ключ заработает только после рестарта
+    auditLog(req.user.login, 'api_key_regenerate_self', { clientId: client.id, prevExpiresAt, ip: getClientIp(req) });
+    try {
+      await notifyClient(client,
+        '🔑 Ваш API-ключ был перевыпущен в личном кабинете.\n' +
+        (prevExpiresAt
+          ? 'Прежний ключ перестанет работать ' + new Date(prevExpiresAt).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) + ' (мск).'
+          : 'Прежний ключ отключён.') +
+        '\nЕсли это были не вы — срочно свяжитесь с поддержкой.',
+        { action: 'api_key_regenerated', level: 'warn' });
+    } catch (_) { /* TG-ошибка не должна ронять ротацию */ }
+    res.json({ ok: true, apiKey: plain, prevExpiresAt, graceHours });
+  } catch (e) {
+    logger.error('[client-portal] api_key regenerate error: ' + e.message);
+    res.status(500).json({ error: e.message });
   }
 });
 

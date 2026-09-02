@@ -60,6 +60,10 @@ const state = {
   clientById: new Map(),
   clientByLogin: new Map(),
   clientByApiKey: new Map(),
+  // Grace-ротация (миграция 086): хэш ПРЕЖНЕГО ключа → клиент. Срок годности
+  // проверяется в точке lookup (findClientByApiKey) — карта не чистится по
+  // времени, протухший prev просто отклоняется до следующего rebuild.
+  clientByApiKeyPrev: new Map(),
   clientByInn: new Map(),
   clientByResetToken: new Map(),
   // Stage 14.1
@@ -87,12 +91,14 @@ function rebuildMaps() {
   state.clientById.clear();
   state.clientByLogin.clear();
   state.clientByApiKey.clear();
+  state.clientByApiKeyPrev.clear();
   state.clientByInn.clear();
   state.clientByResetToken.clear();
   for (const c of state.clients) {
     if (c.id) state.clientById.set(c.id, c);
     if (c.login) state.clientByLogin.set(c.login, c);
     if (c.apiKey) state.clientByApiKey.set(c.apiKey, c);
+    if (c.apiKeyPrev) state.clientByApiKeyPrev.set(c.apiKeyPrev, c);
     if (c.inn) state.clientByInn.set(c.inn, c);
     if (c.resetToken) state.clientByResetToken.set(c.resetToken, c);
   }

@@ -35,7 +35,8 @@ beforeEach(() => {
   db.exec(`CREATE TABLE api_usage (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     client_id TEXT, client_name TEXT, api_key_prefix TEXT, endpoint TEXT, method TEXT,
-    status_code INTEGER, response_time_ms INTEGER, user_agent TEXT, ip TEXT, error TEXT, key_via TEXT)`);
+    status_code INTEGER, response_time_ms INTEGER, user_agent TEXT, ip TEXT, error TEXT, key_via TEXT,
+    timestamp TEXT DEFAULT CURRENT_TIMESTAMP)`);
   trafficDb.init(db);
   cache = {};
   daily.init({ dailyUpsertStmt: trafficDb.dailyUpsertStmt(), dailyTraffic: cache });

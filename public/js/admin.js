@@ -2580,7 +2580,7 @@ function savePortFull(imei,server,portId){
 
 // ========== REGENERATE API KEY ==========
 function regenerateApiKey(clientId){
-  if(!confirm('Перегенерировать API ключ?'))return;
+  if(!confirm('Перегенерировать API ключ?\n\nНовый заработает сразу, прежний продолжит работать ещё 24 часа (grace-ротация).'))return;
   api(API+'/api/admin/clients/'+clientId+'/regenerate_key',{method:'POST'}).then(function(d){
     if(d.ok){showToast('Новый ключ: '+d.apiKey,'success');loadData()}else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message||'Ошибка сети','error')});
@@ -2588,7 +2588,7 @@ function regenerateApiKey(clientId){
 function regenerateApiKeyInForm(){
   var clientId=document.getElementById('clientFormId').value;
   if(!clientId){showToast('Сначала сохраните клиента','error');return}
-  if(!confirm('Перегенерировать API ключ?'))return;
+  if(!confirm('Перегенерировать API ключ?\n\nНовый заработает сразу, прежний продолжит работать ещё 24 часа (grace-ротация).'))return;
   api(API+'/api/admin/clients/'+clientId+'/regenerate_key',{method:'POST'}).then(function(d){
     if(d.ok){document.getElementById('cfApiKey').value=d.apiKey;showToast('Ключ обновлён','success');loadData()}else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message||'Ошибка сети','error')});

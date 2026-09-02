@@ -2088,21 +2088,83 @@ function downloadBillPdf(billId){
 
 // --- API Docs ---
 var apiBase=window.location.origin;
+// Свежеперевыпущенный plaintext-ключ этой сессии (v2.10.68): только он
+// подставляется в примеры кода. Ключ из billingData всегда замаскирован
+// (на сервере хранится лишь хэш) — подставлять маску в примеры нельзя.
+var _sessionApiKey='';
+
+function _fmtDt(iso){
+  if(!iso) return '—';
+  var d=new Date(iso);
+  if(isNaN(d)) return '—';
+  return d.toLocaleString('ru-RU',{day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit'});
+}
+
+function _renderApiKeyCard(){
+  var keyEl=document.getElementById('apiDocKey');
+  if(!keyEl) return;
+  var info=(billingData && billingData.apiKeyInfo) || {};
+  var masked=info.prefix ? info.prefix+'••••••••' : (billingData && billingData.apiKey) || '';
+  keyEl.textContent=masked||'—';
+  // Мета-блок: когда выдан, последнее использование, запросы за 24 ч
+  var meta=document.getElementById('apiKeyMeta');
+  if(meta){
+    if(info.prefix){
+      meta.style.display='block';
+      meta.innerHTML='Выдан: <b>'+escapeHtml(_fmtDt(info.createdAt))+'</b>'
+        +' &nbsp;·&nbsp; Последнее использование: <b>'+escapeHtml(_fmtDt(info.lastUsedAt))+'</b>'
+        +' &nbsp;·&nbsp; Запросов за 24 ч: <b>'+(info.requests24h||0)+'</b>';
+    } else meta.style.display='none';
+  }
+  // Grace-предупреждение: прежний ключ ещё работает до дедлайна
+  var gw=document.getElementById('apiKeyGraceWarn');
+  if(gw){
+    if(info.prevExpiresAt){
+      gw.style.display='block';
+      gw.textContent='Идёт ротация: прежний ключ перестанет работать '+_fmtDt(info.prevExpiresAt)+'. Обновите ключ в вашей интеграции до этого момента.';
+    } else gw.style.display='none';
+  }
+}
 
 function loadApiDocs(){
   var keyEl=document.getElementById('apiDocKey');
-  var realKey=billingData && billingData.apiKey ? billingData.apiKey : '';
-  if(realKey){
-    keyEl.textContent=realKey;
-    // Replace YOUR_API_KEY with real key in all code blocks, highlighted
-    document.querySelectorAll('#tab-api .code-block, #tab-api code, #tab-api td').forEach(function(el){
-      if(el.innerHTML.indexOf('YOUR_API_KEY')!==-1){
-        el.innerHTML=el.innerHTML.replace(/YOUR_API_KEY/g,'<span class="api-key-highlight">'+realKey+'</span>');
-      }
-    });
+  var hasKey=billingData && billingData.apiKey;
+  if(hasKey){
+    _renderApiKeyCard();
+    // Подставляем ключ в примеры кода ТОЛЬКО если в этой сессии есть свежий
+    // plaintext (сразу после перевыпуска). Маску не подставляем никогда.
+    if(_sessionApiKey){
+      document.querySelectorAll('#tab-api .code-block, #tab-api code, #tab-api td').forEach(function(el){
+        if(el.innerHTML.indexOf('YOUR_API_KEY')!==-1){
+          el.innerHTML=el.innerHTML.replace(/YOUR_API_KEY/g,'<span class="api-key-highlight">'+_sessionApiKey+'</span>');
+        }
+      });
+    }
   } else {
     keyEl.textContent='Загрузите данные на вкладке «Панель управления»';
   }
+}
+
+// Self-serve перевыпуск ключа (v2.10.68): новый работает сразу, прежний —
+// ещё graceHours (24 ч). Plaintext показываем один раз в apiNewKeyBox.
+function regenerateApiKey(){
+  if(!confirm('Перевыпустить API-ключ?\n\nНовый ключ заработает сразу, прежний продолжит работать ещё 24 часа — успеете обновить интеграцию без обрыва.')) return;
+  var btn=document.getElementById('btnRegenKey');
+  if(btn){btn.disabled=true;btn.textContent='Перевыпускаем…';}
+  api('/api/client/api_key/regenerate',{method:'POST'}).then(function(d){
+    if(!d||!d.ok) throw new Error((d&&d.error)||'Не удалось перевыпустить ключ');
+    _sessionApiKey=d.apiKey;
+    var box=document.getElementById('apiNewKeyBox');
+    document.getElementById('apiNewKey').textContent=d.apiKey;
+    if(box){box.style.display='block';box.scrollIntoView({behavior:'smooth',block:'center'});}
+    showToast('Ключ перевыпущен — сохраните его','success');
+    // Подтягиваем свежий prefix/createdAt/prevExpiresAt и перерисовываем карточку
+    if(typeof loadData==='function'){loadData().then(function(){_renderApiKeyCard();});}
+  }).catch(function(e){
+    showToast(e.message||'Ошибка перевыпуска','error');
+  }).finally(function(){
+    if(btn){btn.disabled=false;btn.textContent='Перевыпустить ключ';}
+  });
 }
 
 function switchLang(el,lang,group){

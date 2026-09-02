@@ -155,6 +155,7 @@ module.exports = function createRegistrationRouter(deps) {
         billingType: 'per_modem', price: 0, currency: 'RUB', balance: 0,
         apiKey: crypto.createHash('sha256').update('prx_' + crypto.randomBytes(24).toString('hex')).digest('hex'),
         apiKeyPrefix: '',
+        apiKeyCreatedAt: new Date().toISOString(),   // миграция 086
         referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
         referred_by: null, referral_balance: 0, resetToken: '',
         clientType: 'individual', allowDebt: false,
@@ -308,6 +309,7 @@ module.exports = function createRegistrationRouter(deps) {
       balance: 0,
       apiKey: crypto.createHash('sha256').update('prx_' + crypto.randomBytes(24).toString('hex')).digest('hex'),
       apiKeyPrefix: '',   // plaintext нигде не сохраняется; клиент перевыпускает ключ из ЛК
+      apiKeyCreatedAt: new Date().toISOString(),   // миграция 086
       referral_code: 'REF-' + crypto.randomBytes(4).toString('hex').toUpperCase(),
       referred_by: null, referral_balance: 0,
       resetToken: '',

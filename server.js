@@ -455,6 +455,9 @@ function clientFromRow(r) {
     portName: r.port_name || '', name: r.name, contact: r.contact || '', notes: r.notes || '',
     billingType: r.billing_type || 'per_gb', price: r.price || 0, currency: r.currency || 'RUB',
     balance: r.balance || 0, apiKey: r.api_key || '', apiKeyPrefix: r.api_key_prefix || '', referral_code: r.referral_code || '',
+    apiKeyCreatedAt: r.api_key_created_at || null,          // миграция 086
+    apiKeyPrev: r.api_key_prev || '',                       // миграция 086 (хэш прежнего ключа, grace)
+    apiKeyPrevExpiresAt: r.api_key_prev_expires_at || null, // миграция 086
     referred_by: r.referred_by || null, referral_balance: r.referral_balance || 0,
     resetToken: r.reset_token || '', inn: r.inn || '', kpp: r.kpp || '',
     legalName: r.legal_name || '', contractInfo: r.contract_info || '', contractDate: r.contract_date || '',
@@ -3051,6 +3054,11 @@ app.use(require('./src/routes/client-portal')({
   auditLog, logActivity, getClientIp,
   atomicCredit,   // WP6: вывод рефкомиссии на баланс (self-referral трюк)
   saveClients,
+  // v2.10.68: self-serve перевыпуск API-ключа — статистика ключа, ребилд карт
+  // после ротации и TG-уведомление (_clientNotify объявлен ниже — ленивый шим,
+  // как mailer). rebuildClientMaps объявлен выше (function declaration).
+  trafficDb, rebuildClientMaps,
+  notifyClient: (...args) => _clientNotify.notifyClient(...args),
   // POST /api/client/email: validate+схема, retail-флаг для verify-письма.
   // mailer объявлен ниже (const, TDZ) — ленивый шим, как syncRotationLog выше.
   validate, ClientEmailSchema,
@@ -3221,8 +3229,17 @@ function _readApiKey(req, res) {
 
 // API keys are hashed at rest (migration 043): the clientByApiKey map is
 // keyed by SHA-256 of the key, so lookups hash the presented key first.
+// Grace-ротация (миграция 086): после перевыпуска прежний ключ работает ещё
+// 24 ч (apiKeyPrev + apiKeyPrevExpiresAt) — клиент обновляет интеграцию без
+// обрыва. Протухший prev отклоняем здесь же; карта чистится на rebuild.
 function findClientByApiKey(key) {
-  return key ? (clientByApiKey.get(sha256hex(key)) || null) : null;
+  if (!key) return null;
+  const h = sha256hex(key);
+  const direct = clientByApiKey.get(h);
+  if (direct) return direct;
+  const prev = stateMod.state.clientByApiKeyPrev.get(h);
+  if (prev && prev.apiKeyPrevExpiresAt && Date.parse(prev.apiKeyPrevExpiresAt) > Date.now()) return prev;
+  return null;
 }
 
 app.use('/api/v1', apiV1Limiter, (req, res, next) => {
