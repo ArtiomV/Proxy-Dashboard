@@ -250,6 +250,8 @@ function loadSettings(){
     // 2026-07-28: modem_offline_threshold_min — минут тишины до статуса «отключен».
     window._offlineThresholdMin = s.modem_offline_threshold_min != null ? s.modem_offline_threshold_min : 10;
     var _motEl=document.getElementById('modemOfflineThresholdInput');if(_motEl)_motEl.value=window._offlineThresholdMin;
+    // v2.10.69: порог TG-алерта по HTTP-чекам (N подряд неудач до modem_http_fail)
+    var _hatEl=document.getElementById('httpcheckAlertThresholdInput');if(_hatEl)_hatEl.value=s.httpcheck_alert_threshold!=null?s.httpcheck_alert_threshold:3;
     var _paeEl=document.getElementById('proxyAlertErrorPctInput');if(_paeEl)_paeEl.value=s.proxy_alert_error_pct!=null?s.proxy_alert_error_pct:5;
     var _pawEl=document.getElementById('proxyAlertWindowInput');if(_pawEl)_pawEl.value=s.proxy_alert_window_min!=null?s.proxy_alert_window_min:60;
     var _arE=document.getElementById('autoRebootEnabledInput');if(_arE)_arE.checked=!!s.auto_reboot_enabled;
@@ -509,11 +511,12 @@ function saveSettings(){
 function saveAlertThresholds(){
   var staleH=parseInt(document.getElementById('staleModemHoursInput').value)||12;
   var offThMin=parseInt((document.getElementById('modemOfflineThresholdInput')||{}).value)||10;
+  var httpAlertN=Math.max(1,Math.min(20,parseInt((document.getElementById('httpcheckAlertThresholdInput')||{}).value)||3));
   window._staleModemHours=staleH;
   window._offlineThresholdMin=offThMin;
   var st=document.getElementById('alertThresholdsStatus');
   if(st){st.textContent='Сохраняю...';st.style.color='var(--warning)';}
-  api(API+'/api/admin/settings',{method:'PUT',json:{stale_modem_hours:staleH,modem_offline_threshold_min:offThMin}}).then(function(d){
+  api(API+'/api/admin/settings',{method:'PUT',json:{stale_modem_hours:staleH,modem_offline_threshold_min:offThMin,httpcheck_alert_threshold:httpAlertN}}).then(function(d){
     if(d.ok){if(st){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';}showToast('Пороги доступности сохранены','success');renderTable()}
     else{if(st){st.textContent=d.error||'Ошибка';st.style.color='var(--danger)';}showToast(d.error||'Ошибка','error');}
   }).catch(function(e){if(st){st.textContent=e.message;st.style.color='var(--danger)';}showToast(e.message,'error')});

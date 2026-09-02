@@ -469,6 +469,11 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   if (req.body.modem_offline_threshold_min != null) {
     patch.modem_offline_threshold_min = Math.max(1, Math.min(120, parseInt(req.body.modem_offline_threshold_min) || 10));
   }
+  // v2.10.69: сколько ПОДРЯД неудачных HTTP-чеков до TG-алерта
+  // modem_http_fail (src/jobs/http-check.js). Bounded 1..20.
+  if (req.body.httpcheck_alert_threshold != null) {
+    patch.httpcheck_alert_threshold = Math.max(1, Math.min(20, parseInt(req.body.httpcheck_alert_threshold) || 3));
+  }
   // B2 (23.08): TTL «в работе» для ack-кнопок алертов в Telegram (часы).
   if (req.body.ack_ttl_hours != null) {
     patch.ack_ttl_hours = Math.max(1, Math.min(72, parseInt(req.body.ack_ttl_hours) || 2));

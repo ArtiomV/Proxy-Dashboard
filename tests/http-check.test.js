@@ -59,15 +59,17 @@ describe('http-check', () => {
     expect(job.latest()['S1_MD2_39'].status).toBe(200);
   });
 
-  it('2 подряд неудачи → modem_http_fail, затем recovered', async () => {
+  it('3 подряд неудачи → modem_http_fail, затем recovered (дефолтный порог)', async () => {
     fetchBehavior = async () => { throw new Error('timeout'); };
     const job = mk();
     await job.runOnce();
     expect(alertsFired.length).toBe(0);          // первый фейл — только стрик
     expect(job.latest()['S1_MD2_39']).toMatchObject({ fail_streak: 1, failing: false });
     await job.runOnce();
+    expect(alertsFired.length).toBe(0);          // второй — ещё рано (порог 3, v2.10.69)
+    await job.runOnce();
     expect(alertsFired.map(a => a.rule)).toEqual(['modem_http_fail']);
-    expect(job.latest()['S1_MD2_39']).toMatchObject({ fail_streak: 2, failing: true });
+    expect(job.latest()['S1_MD2_39']).toMatchObject({ fail_streak: 3, failing: true });
     await job.runOnce();
     expect(alertsFired.length).toBe(1);          // не дублируется
     fetchBehavior = async () => ({ status: 200, totalMs: 250, body: 'ok' });
@@ -76,9 +78,17 @@ describe('http-check', () => {
     expect(job.latest()['S1_MD2_39']).toMatchObject({ fail_streak: 0, failing: false });
   });
 
+  it('порог настраивается: httpcheck_alert_threshold=1 → алерт на первой же неудаче', async () => {
+    fetchBehavior = async () => { throw new Error('timeout'); };
+    const job = mk({ httpcheck_alert_threshold: 1 });
+    await job.runOnce();
+    expect(alertsFired.map(a => a.rule)).toEqual(['modem_http_fail']);
+  });
+
   it('must_not_contain ловит заглушку оператора', async () => {
     fetchBehavior = async () => ({ status: 200, totalMs: 100, body: '<html>Пополните баланс</html>' });
     const job = mk({ httpcheck_must_not_contain: 'Пополните баланс' });
+    await job.runOnce();
     await job.runOnce();
     await job.runOnce();
     expect(alertsFired[0].rule).toBe('modem_http_fail');

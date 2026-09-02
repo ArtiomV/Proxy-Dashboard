@@ -1674,6 +1674,7 @@ const SETTINGS_DEFAULTS = {
   httpcheck_scope: 'all',                  // legacy key; HTTP monitoring now covers the whole fleet
   httpcheck_concurrency: 8,
   httpcheck_timeout_ms: 15000,
+  httpcheck_alert_threshold: 3,        // сколько ПОДРЯД неудачных HTTP-чеков до TG-алерта modem_http_fail
   retention_modem_httpcheck: 30,
   retention_modem_rate: 7,                 // A3: дней снапшотов modem_rate
   // ── A4/B1 (ТЗ мониторинга v2, этап 3, 23.08) ─────────────────────

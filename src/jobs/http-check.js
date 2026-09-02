@@ -12,7 +12,8 @@
 // клиентские реквизиты; свободные/просроченные порты получают понятный skip.
 // Сеть защищена ограниченной параллельностью.
 //
-// Алерты: 2 подряд неудачи → modem_http_fail (important, с причиной);
+// Алерты: httpcheck_alert_threshold (дефолт 3, Настройки → Уведомления) подряд
+// неудачи → modem_http_fail (important, с причиной);
 // восстановление → modem_ping_recovered-аналог modem_http_recovered.
 // Стрики в памяти — рестарт просто перезапускает стрик (как modem-ping).
 //
@@ -119,6 +120,9 @@ function create(deps) {
       mustNotContain: String(getSetting('httpcheck_must_not_contain', '') || '').trim(),
       timeoutMs: Math.max(3000, parseInt(getSetting('httpcheck_timeout_ms', 15000)) || 15000),
       concurrency: Math.max(1, Math.min(20, parseInt(getSetting('httpcheck_concurrency', 8)) || 8)),
+      // v2.10.69: порог TG-алерта modem_http_fail — N ПОДРЯД неудачных чеков
+      // (раньше было зашито 2). Раздел «Уведомления» → «Пороги доступности».
+      alertThreshold: Math.max(1, Math.min(20, parseInt(getSetting('httpcheck_alert_threshold', 3)) || 3)),
     };
   }
 
@@ -220,7 +224,7 @@ function create(deps) {
           failed++;
           st.failStreak++;
           // Оффлайн-модем — территория modem_offline-алертов, не дублируем.
-          if (!t.offline && !t.unavailable && st.failStreak >= 2 && !st.failing) {
+          if (!t.offline && !t.unavailable && st.failStreak >= cfg.alertThreshold && !st.failing) {
             st.failing = true;
             alerts.trigger('modem_http_fail', { server: t.server, nick: t.nick, imei: t.imei, operator: t.operator, clients: t.clients, error, status, url: cfg.url });
           }
