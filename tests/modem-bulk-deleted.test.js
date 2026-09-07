@@ -61,4 +61,22 @@ describe('modems_down_bulk: soft-deleted модемы не алертят и н�
     expect(bulk[0].payload.list).toContain('MD_REAL');
     expect(bulk[0].payload.list).not.toContain('MD_DEL');
   });
+
+  it('long-dead (> stale_modem_hours) вычищается из сводки и из _downSince (MD2_66 ×2, 2026-09-07)', async () => {
+    const { deps, fired } = mkDeps();
+    const now = Date.now();
+    // Модем вынут из слота 30ч назад: не удалён, не вернётся — «мёртвый по политике».
+    deps._downSince['S4_999'] = now - 30 * 3600 * 1000;
+    deps.knownModems.S4.p3 = { imei: '999', nick: 'MD_STALE' };
+    deps.uptimeTracking['S4_999'] = { last_online_check: new Date(now - 30 * 3600 * 1000).toISOString(), daily: {} };
+    const job = create(deps);
+    await job.trackModems();
+
+    expect(deps._downSince['S4_999']).toBeUndefined();               // запись не живёт до рестарта
+    const bulk = fired.filter(f => f.rule === 'modems_down_bulk');
+    expect(bulk.length).toBe(1);
+    expect(bulk[0].payload.count).toBe(1);
+    expect(bulk[0].payload.list).toContain('MD_REAL');               // свежий оффлайн остаётся
+    expect(bulk[0].payload.list).not.toContain('MD_STALE');          // long-dead не числится
+  });
 });

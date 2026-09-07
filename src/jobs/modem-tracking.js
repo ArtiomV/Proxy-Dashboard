@@ -660,6 +660,20 @@ async function trackModems() {
       const _us = k.indexOf('_');
       if (_deletedModemSet.has(k.slice(0, _us) + '|' + k.slice(_us + 1))) delete _downSince[k];
     }
+    // Long-dead janitor (2026-09-07, MD2_66 ×2): модем, ВЫНУТЫЙ из слота,
+    // неотличим от «лежит» — его запись в _downSince жила до рестарта и вечно
+    // копила простой в сводке (3330/4275 мин), наследуя ник слота, в который
+    // уже воткнули другое железо. Одиночные алерты по таким модемам давно не
+    // шлются (порог stale_modem_hours в offline-алерте) — применяем тот же
+    // порог и к сводке: лежащий дольше stale-порога «мёртвый по политике» и
+    // в сводке не числится. Запись удаляем (а не скрываем), чтобы она не жила
+    // до рестарта; при реальном возврате модема _downSince пересоздастся
+    // штатным offline-алертом.
+    const _staleMs = (Number(appSettings.stale_modem_hours) || 12) * 3600 * 1000;
+    const _nowPrune = Date.now();
+    for (const k of Object.keys(_downSince)) {
+      if (_nowPrune - _downSince[k] > _staleMs) delete _downSince[k];
+    }
     const _downKeys = Object.keys(_downSince);
     if (_thr > 0 && _downKeys.length >= _thr) {
       const _now = Date.now();
