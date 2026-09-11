@@ -180,6 +180,11 @@ function loadTrendData(sfx){
 function trendFmt(gb){if(!gb&&gb!==0)return'0 МБ';if(gb>=1000)return(gb/1000).toFixed(1)+' ТБ';if(gb>=1)return gb.toFixed(1)+' ГБ';return Math.round(gb*1024)+' МБ';}
 var _MONTHS_RU_GEN=['января','февраля','марта','апреля','мая','июня','июля','августа','сентября','октября','ноября','декабря'];
 function fmtDateRuLong(ds){if(!ds)return'—';var p=ds.split('-');if(p.length<3)return ds;var m=parseInt(p[1],10)-1,day=parseInt(p[2],10);return day+' '+(_MONTHS_RU_GEN[m]||'');}
+// Короткая форма для узких подписей строк тепловой карты: «11 сен» вместо
+// «11 сентября» — длинное родительное название не влезало в колонку 58px
+// и переносилось на вторую строку (2026-09-11).
+var _MONTHS_RU_GEN_SHORT=['янв','фев','мар','апр','мая','июн','июл','авг','сен','окт','ноя','дек'];
+function fmtDateRuShort(ds){if(!ds)return'—';var p=ds.split('-');if(p.length<3)return ds;var m=parseInt(p[1],10)-1,day=parseInt(p[2],10);return day+' '+(_MONTHS_RU_GEN_SHORT[m]||'');}
 function pluralModem(n){var a=Math.abs(n)%100,b=a%10;if(a>10&&a<20)return n+' модемов';if(b>1&&b<5)return n+' модема';if(b===1)return n+' модем';return n+' модемов';}
 function renderTrendCard(months,sfx){sfx=sfx||'';
   // Дашбордная карточка «Потребление трафика» — полноценный Chart.js как MRR.
@@ -390,10 +395,10 @@ function renderHeatmap(data,ctx){
     var ds=days[di]||'';var dMeta=dm[di]||{};
     var d=new Date(ds+'T00:00:00');
     var dn=DAYS_RU[d.getDay()]||dMeta.label||'';
-    var dShort=fmtDateRuLong(ds);
+    var dShort=fmtDateRuShort(ds);
     h+='<div style="display:flex;align-items:center;margin-bottom:3px">';
     h+='<div style="width:58px;font-size:10px;color:#6b6b68;flex-shrink:0;text-align:right;padding-right:8px;line-height:1.3">';
-    h+='<div style="font-weight:500">'+dn+'</div><div style="font-size:9px;color:#9b9b98">'+dShort+'</div></div>';
+    h+='<div style="font-weight:500">'+dn+'</div><div style="font-size:9px;color:#9b9b98;white-space:nowrap">'+dShort+'</div></div>';
     h+='<div style="display:flex;flex:1;gap:2px">';
     row.forEach(function(val,hr){
       var pmVal=perModem[di][hr];
