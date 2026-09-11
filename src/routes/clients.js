@@ -42,6 +42,7 @@ module.exports = function createClientsRouter(deps) {
     retailPoolDb, alerts,
   } = deps;
   const r = express.Router();
+  const portValidity = require('../services/port-validity').create(deps);
 
   // 19.07: recalcFromLedger здесь больше не используется. Реплей остался в
   // src/billing/recalc.js как диагностика; enforcement — ledgerFinalBalance.
@@ -211,6 +212,28 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
   rebuildClientMaps();
   users[updated.login] = { passwordHash: updated.passwordHash, portNameFilter: updated.portName, source: 'client', clientId: updated.id };
   _emitFinanceWrite();
+
+  // Политика Б (2026-09-11, grshabl): учёт баланса отключён → портам нечего
+  // протухать. При ВКЛЮЧЕНИИ паузы снимаем «дату до» со всех портов клиента
+  // (пустое PROXY_VALID_BEFORE = бессрочно). Иначе срок тикал в никуда:
+  // billing пропускает paused-клиента, антидолговые конвейеры его не трогают,
+  // и порт умирал по дате без единого уведомления.
+  if (updated.billingPaused && !old.billingPaused && updated.portName) {
+    try {
+      const results = await fetchAllServersDataCached();
+      const pts = portValidity.clientPorts(updated, results);
+      let cleared = 0;
+      for (const pt of pts) {
+        if (!pt.validBefore) continue;
+        try { await portValidity.setPortValidBefore(pt.server, pt.portId, ''); cleared++; }
+        catch (e) { logger.warn(`[Clients] ${updated.login}: снятие «даты до» с ${pt.portId}: ${e.message}`); }
+      }
+      if (cleared) {
+        logger.info(`[Clients] ${updated.login}: billing paused — «дата до» снята с ${cleared} портов (бессрочно)`);
+        auditLog(req.user.login, 'billing_pause_validity_cleared', { clientId: updated.id, clientName: updated.name, portsCleared: cleared, ip: getClientIp(req) });
+      }
+    } catch (e) { logger.warn(`[Clients] validity-clear on pause failed: ${e.message}`); }
+  }
 
   // B1 (Р14): журнал смены цены (кто/когда/старая/новая). Акт mid-month
   // разбивается по price_per_unit из ledger, а эта запись — аудит ручной

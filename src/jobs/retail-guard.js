@@ -394,6 +394,7 @@ function create(deps) {
       for (const client of clients) {
         if (client.clientType === 'legal') continue;   // юрлица — НИКОГДА
         if (client.allowDebt) continue;                // allow_debt = 1 — не трогаем
+        if (client.billingPaused) continue;            // учёт отключён (политика Б, 2026-09-11): порты бессрочные, конвейер не трогает
         if (client.blocked) continue;                  // WP7: антифрод-блок — конвейер на паузе, разблокировка только админом
         if (!client.portName) continue;
         try {

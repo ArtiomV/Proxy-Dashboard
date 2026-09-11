@@ -90,6 +90,15 @@ describe('debt-block: автоблок после DailyBilling', () => {
     expect(client.debtBlocked).toBeFalsy();
   });
 
+  it('billingPaused — не трогаем (политика Б, 2026-09-11: «дата до» снимается при паузе, конвейер срок не ставит)', async () => {
+    const job = debtBlockMod.create(mkDeps());
+    const client = mkClient({ billingPaused: true });
+    await job.runAfterDailyBilling([client], serverResults());
+    expect(posted.length).toBe(0);
+    expect(client.debtBlocked).toBeFalsy();
+    expect(alertsFired.length).toBe(0);
+  });
+
   it('per_modem физик — блокируется так же (Р25)', async () => {
     const job = debtBlockMod.create(mkDeps());
     const client = mkClient({ billingType: 'per_modem' });

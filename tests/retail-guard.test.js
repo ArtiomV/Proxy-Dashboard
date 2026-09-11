@@ -308,6 +308,17 @@ describe('retail-guard: границы населения и флаг', () => {
     expect(posted.length).toBe(0);
   });
 
+  it('billingPaused = true — не трогается (политика Б, 2026-09-11: порты бессрочные)', async () => {
+    const { deps } = mkDeps();
+    const guard = guardMod.create(deps);
+    const client = mkClient({ billingPaused: true });
+    deps.clients.push(client);
+    await guard.runOnce();
+    expect(client.balanceNegativeSince).toBe(null);
+    expect(posted.length).toBe(0);
+    expect(notified.length).toBe(0);
+  });
+
   it('retail_enabled = false → прогон пропускается полностью', async () => {
     const { deps } = mkDeps();
     deps.getSetting = (k, d) => (k === 'retail_enabled' ? false : d);

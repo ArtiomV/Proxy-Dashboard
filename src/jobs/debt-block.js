@@ -63,6 +63,7 @@ function create(deps) {
       if (!client.portName) continue;
       if (client.clientType === 'legal') continue;      // юрлица — никогда
       if (client.allowDebt) continue;                   // allow_debt = 1 — не трогаем
+      if (client.billingPaused) continue;               // учёт отключён (политика Б, 2026-09-11): «дата до» снимается при паузе, конвейер срок не ставит
       const balance = client.balance || 0;
 
       if (balance <= 0) {
