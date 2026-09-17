@@ -95,7 +95,9 @@ function _renderFinanceDashboard(c, d) {
   h += '<div class="fx-kpis">';
   h += '<div class="fx-kpi"><div class="fx-kl">Выручка (факт)</div><div class="fx-kv">' + money(revenue) + '</div><div class="fx-ks">' + growthSub + '</div></div>';
   var costSub = cost > 0
-    ? (s.cost_source === 'recurring' ? '<span style="color:var(--am)">по плановым операциям</span> · ' + costPct + '%' : (costPct + '% от выручки'))
+    ? (s.cost_source === 'recurring' ? '<span style="color:var(--am)">по плановым операциям</span> · ' + costPct + '%'
+      : s.cost_source === 'mixed' ? '<span style="color:var(--am)">частично по плану</span> · ' + costPct + '%'
+      : (costPct + '% от выручки'))
     : '<span style="color:var(--am)">не введены</span>';
   h += '<div class="fx-kpi a"><div class="fx-kl">Затраты</div><div class="fx-kv">' + (cost > 0 ? money(cost) : '—') + '</div><div class="fx-ks">' + costSub + '</div></div>';
   h += '<div class="fx-kpi '+(profit>=0?'g':'r')+'"><div class="fx-kl">Прибыль</div><div class="fx-kv" style="color:var('+(profit>=0?'--gr':'--rd')+')">' + money(profit) + '</div><div class="fx-ks">' + (isCur ? 'run-rate ' + shortCurrency(profitForecast) + ' (ожидание)' : 'за месяц') + '</div></div>';
@@ -130,7 +132,7 @@ function _renderFinanceDashboard(c, d) {
     if (v > 0) { anyCost = true; h += '<div class="fx-lr"><span class="fx-nm">' + catLabels[k] + '</span><span class="fx-vv">' + Math.round(v).toLocaleString('ru-RU') + '</span></div>'; }
   });
   if (anyCost) {
-    if (s.cost_source === 'recurring') h += '<div style="font-size:10px;color:var(--am);margin:2px 0 4px">' + icon('alert', 10) + ' Затраты по плановым операциям — разовые суммы за месяц задаются через «править»</div>';
+    if (s.cost_source === 'recurring' || s.cost_source === 'mixed') h += '<div style="font-size:10px;color:var(--am);margin:2px 0 4px">' + icon('alert', 10) + ' ' + (s.cost_source === 'mixed' ? 'Часть затрат — по плановым операциям' : 'Затраты по плановым операциям — разовые суммы за месяц задаются через «править»') + '</div>';
     h += '<div class="fx-tot"><span>Итого</span><span class="fx-vv" style="color:var(--am)">' + money(cost) + '</span></div>';
   }
   else h += '<div class="fx-empty">Затраты за ' + esc(d.period) + ' не введены — нажмите «править».</div>';
@@ -229,13 +231,17 @@ function _finCostsRecalc(ov) {
     MDL: (isFinite(mdlOv) && mdlOv > 0) ? mdlOv : rates.MDL,
     RON: (isFinite(ronOv) && ronOv > 0) ? ronOv : rates.RON
   };
-  var manualRub=0,simRub=0;
+  var manualRub=0,simRub=0,planRub=0;
+  // Разовые строки с введённым значением >0 перекрывают плановое правило
+  // с тем же (cat,key) — такое правило не считаем в «Плановые» дважды.
+  var overriddenPlan={};
   ov.querySelectorAll('.set-row[data-cat]').forEach(function(row){
     var curEl = row.querySelector('[data-role="currency"]');
     var cur = curEl ? curEl.value : 'RUB';
     var unitEl = row.querySelector('[data-role="cur-unit"]');
     if (unitEl) unitEl.textContent = cur === 'RUB' ? '₽' : cur;
     var amount = parseFloat((row.querySelector('[data-role="amount"]') || {}).value) || 0;
+    if (amount > 0) overriddenPlan[row.dataset.cat+'|'+(row.dataset.key||'')]=true;
     var rub=cur==='RUB'?amount:(amount*(rate[cur]||0));manualRub+=rub;
     var eqEl = row.querySelector('[data-role="rub-eq"]');
     if (eqEl) {
@@ -245,6 +251,25 @@ function _finCostsRecalc(ov) {
         : '';
     }
   });
+  // Плановые правила: обновляем cur-unit/rub-eq, в итог — только активные
+  // в просматриваемом периоде и не перекрытые разовой строкой.
+  ov.querySelectorAll('.fcm-rule-row').forEach(function(row){
+    var curEl = row.querySelector('[data-role="currency"]');
+    var cur = curEl ? curEl.value : 'RUB';
+    var unitEl = row.querySelector('[data-role="cur-unit"]');
+    if (unitEl) unitEl.textContent = cur === 'RUB' ? '₽' : cur;
+    var amount = parseFloat((row.querySelector('[data-role="amount"]') || {}).value) || 0;
+    var eqEl = row.querySelector('[data-role="rub-eq"]');
+    if (eqEl) {
+      var r = rate[cur];
+      eqEl.textContent = (cur !== 'RUB' && amount > 0 && r)
+        ? '≈ ' + (Math.round(amount * r * 100) / 100).toLocaleString('ru-RU') + ' ₽'
+        : '';
+    }
+    if (row.dataset.active === '1' && amount > 0 && !overriddenPlan[row.dataset.cat+'|'+(row.dataset.key||'')]) {
+      planRub += cur==='RUB'?amount:(amount*(rate[cur]||0));
+    }
+  });
   ov.querySelectorAll('[data-auto-amount]').forEach(function(row){
     var amount=parseFloat(row.dataset.autoAmount)||0,cur=row.dataset.autoCurrency||'RUB';
     simRub+=cur==='RUB'?amount:(amount*(rate[cur]||0));
@@ -252,7 +277,86 @@ function _finCostsRecalc(ov) {
     if(eq)eq.textContent=amount>0&&cur!=='RUB'&&rate[cur]?'≈ '+Math.round(amount*rate[cur]).toLocaleString('ru-RU')+' ₽':'';
   });
   var setMoney=function(id,value){var el=document.getElementById(id);if(el)el.textContent=Math.round(value).toLocaleString('ru-RU')+' ₽';};
-  setMoney('fcManualTotal',manualRub);setMoney('fcAutoSimTotal',simRub);setMoney('fcGrandTotal',manualRub+simRub);
+  setMoney('fcManualTotal',manualRub);setMoney('fcAutoSimTotal',simRub);setMoney('fcPlanTotal',planRub);setMoney('fcGrandTotal',manualRub+simRub+planRub);
+}
+// Текущий месяц по МСК (как серверная логика recurring_costs).
+function _finCurMskMonth(){ return new Date().toLocaleString('sv-SE',{timeZone:'Europe/Moscow'}).slice(0,7); }
+function _finRuleLabel(rule, cats, meta){
+  var base=cats[rule.category]?cats[rule.category].label:rule.category;
+  var sub=rule.subkey||'';
+  if(!sub)return esc(base);
+  var resolved=null;
+  (meta.locations||[]).forEach(function(loc){ if(loc.key===sub||loc.address===sub)resolved=loc.label; });
+  var serverLabels=meta.serverLabels||{};
+  if(!resolved&&serverLabels[sub])resolved=serverLabels[sub];
+  if(!resolved&&sub.indexOf('server:')===0&&serverLabels[sub.slice(7)])resolved=serverLabels[sub.slice(7)];
+  return esc(base)+' · '+esc(resolved||sub);
+}
+// HTML блока «Плановые операции»: список всех правил + форма добавления.
+// Класс fcm-rule-row (не set-row), чтобы saveCostsModal не слал их в monthly_costs.
+// data-active="1" — правило активно в просматриваемом периоде (маппинг
+// rule_id из recurring.active → id из recurring.all); data-qty — для PUT.
+function _buildRulesHtml(d){
+  var meta=d.meta||{},cats=d.categories||{};
+  var recurring=d.recurring||{},allRules=recurring.all||[];
+  var activeIds={};
+  (recurring.active||[]).forEach(function(r){ if(r.rule_id!=null)activeIds[r.rule_id]=true; });
+  var overriddenRuleIds={};
+  (d.effective||[]).forEach(function(e){ if(e.source==='override'&&e.rule_id!=null)overriddenRuleIds[e.rule_id]=true; });
+  var curMsk=_finCurMskMonth();
+  var rulesHtml='';
+  allRules.forEach(function(rule){
+    var overridden=!!overriddenRuleIds[rule.id];
+    var completed=!!(rule.end_period&&rule.end_period<curMsk);
+    var range='с '+esc(rule.start_period)+(rule.end_period?' по '+esc(rule.end_period):' · бессрочно');
+    rulesHtml+='<div class="fcm-edit-row fcm-rule-row" data-rule-id="'+rule.id+'" data-cat="'+esc(rule.category)+'"'
+      +(rule.subkey!=null?' data-key="'+esc(rule.subkey).replace(/"/g,'&quot;')+'"':'')
+      +' data-start="'+esc(rule.start_period)+'"'+(rule.end_period?' data-end="'+esc(rule.end_period)+'"':'')
+      +(rule.qty!=null?' data-qty="'+rule.qty+'"':'')
+      +(activeIds[rule.id]?' data-active="1"':'')
+      +' data-notes="'+esc(rule.notes||'').replace(/"/g,'&quot;')+'">'
+      +'<div class="fcm-edit-label"><b>'+_finRuleLabel(rule,cats,meta)+'</b><small>'+range+(rule.notes?' · '+esc(rule.notes):'')+'</small>'
+      +(overridden?'<small style="color:var(--am)">переопределено в этом месяце</small>':'')
+      +(completed?'<small style="color:var(--text-3)">завершено</small>':'')+'</div>'
+      +'<div class="fcm-edit-input">'+_costCurSelect(rule.currency||'RUB')
+      +'<input class="form-input" data-role="amount" type="number" min="0" step="100" value="'+(Number(rule.amount)||0)+'"'+(completed?' disabled':'')+'>'
+      +'<span data-role="cur-unit">'+esc(rule.currency||'RUB')+'</span><small data-role="rub-eq"></small></div>'
+      +'<div style="display:flex;gap:6px;margin-left:8px;flex-shrink:0">'
+      +(completed
+        ?'<button class="btn btn-sm" style="color:var(--danger)" data-on-click="deleteRecurringRule('+rule.id+')">'+icon('x',11)+' Удалить</button>'
+        :'<button class="btn btn-sm" data-on-click="saveRecurringRule('+rule.id+')">'+icon('save',11)+' Сохранить</button>'
+         +'<button class="btn btn-sm" style="color:var(--danger)" data-on-click="stopRecurringRule('+rule.id+')">Остановить</button>')
+      +'</div></div>';
+  });
+  if(!rulesHtml)rulesHtml='<div class="fcm-empty">Плановых операций пока нет — добавьте первую, и она будет применяться к каждому месяцу автоматически.</div>';
+  return rulesHtml+_buildAddRuleHtml(d);
+}
+// Форма добавления: subkey — селект локации для perItem-категорий,
+// для прочих (other) subkey всегда null. Инициализация — _rcAddKeyToggle().
+function _buildAddRuleHtml(d){
+  var cats=d.categories||{};
+  var catOptions=Object.keys(cats).filter(function(k){return k!=='sim';}).map(function(k){return '<option value="'+k+'">'+esc(cats[k].label||k)+'</option>';}).join('');
+  return '<div class="fcm-edit-row fcm-rule-add" id="rcAddRow">'
+    +'<div class="fcm-edit-label"><select class="form-input" id="rcAddCat" style="font-size:11px;padding:3px 4px" data-on-change="_rcAddKeyToggle()">'+catOptions+'</select>'
+    +'<span id="rcAddKeyWrap"></span>'
+    +'<input class="form-input" id="rcAddStart" placeholder="YYYY-MM" value="'+esc(d.period)+'" title="действует с месяца" style="width:92px;font-size:11px;padding:3px 6px;margin-top:4px"></div>'
+    +'<div class="fcm-edit-input">'+_costCurSelect('RUB')
+    +'<input class="form-input" data-role="amount" type="number" min="0" step="100" placeholder="сумма">'
+    +'<span data-role="cur-unit">RUB</span></div>'
+    +'<div style="display:flex;gap:6px;margin-left:8px;flex-shrink:0"><button class="btn btn-sm btn-primary" data-on-click="addRecurringRule()">'+icon('plus',11)+' Добавить</button></div></div>';
+}
+function _rcAddKeyControl(cat, meta, cats){
+  var def=cats[cat]||{};
+  if(!def.perItem||def.itemType!=='location')return '';
+  var opts='<option value="">(общая)</option>';
+  (meta.locations||[]).forEach(function(loc){ opts+='<option value="'+esc(loc.key).replace(/"/g,'&quot;')+'">'+esc(loc.label||loc.key)+'</option>'; });
+  return '<select class="form-input" id="rcAddKey" title="локация (необяз.)" style="font-size:11px;padding:3px 4px;margin-top:4px">'+opts+'</select>';
+}
+function _rcAddKeyToggle(){
+  var ov=document.getElementById('_finCostsOverlay');if(!ov)return;
+  var wrap=document.getElementById('rcAddKeyWrap');if(!wrap)return;
+  var cat=(document.getElementById('rcAddCat')||{}).value||'other';
+  wrap.innerHTML=_rcAddKeyControl(cat,ov._rcMeta||{},ov._rcCats||{});
 }
 function _finCostNative(amount,currency){
   return (Number(amount)||0).toLocaleString('ru-RU')+' '+(currency==='RUB'?'₽':currency);
@@ -282,12 +386,13 @@ function _renderCostsModal(d) {
   var byCat = {};
   rows.forEach(function(r){ (byCat[r.category]=byCat[r.category]||[]).push(r); });
   var cats = d.categories || {},meta=d.meta||{},serverLabels=meta.serverLabels||{};
-  var recurring=d.recurring||{},activeRules=recurring.active||[],allRules=recurring.all||[];
+  var recurring=d.recurring||{},activeRules=recurring.active||[];
   var byCatPlan={};
   activeRules.forEach(function(r){ (byCatPlan[r.category]=byCatPlan[r.category]||[]).push(r); });
-  // Правила, перекрытые разовой строкой в этом периоде (бейдж в списке).
-  var overriddenRuleIds={};
-  (d.effective||[]).forEach(function(e){ if(e.source==='override'&&e.rule_id!=null)overriddenRuleIds[e.rule_id]=true; });
+  // Ключи строк месяца, реально отрисованные в секциях, — чтобы POST
+  // wipe+insert не потерял строки, не попавшие ни в одну секцию (M5).
+  var renderedKeys={};
+  function _markRendered(list){ (list||[]).forEach(function(r){ renderedKeys[r.category+'|'+(r.subkey||'')]=true; }); }
 
   function editRow(label,sub,cat,key,existing,country,plan){
     var cur=_costCurDefault(existing,country);
@@ -297,17 +402,7 @@ function _renderCostsModal(d) {
       +'<div class="fcm-edit-label"><b>'+label+'</b>'+(sub?'<small>'+sub+'</small>':'')+planHint+'</div>'
       +'<div class="fcm-edit-input">'+_costCurSelect(cur)
       +'<input class="form-input" data-role="amount" type="number" min="0" step="100" value="'+(existing&&existing.amount!=null?existing.amount:'')+'" placeholder="'+(plan?String(Number(plan.amount)||0):'0')+'">'
-      +'<span data-role="cur-unit">'+cur+'</span><small data-role="rub-eq"></small></div></div>';
-  }
-  function ruleLabel(rule){
-    var base=cats[rule.category]?cats[rule.category].label:rule.category;
-    var sub=rule.subkey||'';
-    if(!sub)return esc(base);
-    var resolved=null;
-    (meta.locations||[]).forEach(function(loc){ if(loc.key===sub||loc.address===sub)resolved=loc.label; });
-    if(!resolved&&serverLabels[sub])resolved=serverLabels[sub];
-    if(!resolved&&sub.indexOf('server:')===0&&serverLabels[sub.slice(7)])resolved=serverLabels[sub.slice(7)];
-    return esc(base)+' · '+esc(resolved||sub);
+      +'<span data-role="cur-unit">'+esc(cur)+'</span><small data-role="rub-eq"></small></div></div>';
   }
 
   var automatic=(d.operator_costs||[]).slice(),seenAuto={};
@@ -320,6 +415,7 @@ function _renderCostsModal(d) {
     var key=String(r.subkey||'').toLowerCase();if(seenAuto[key])return;seenAuto[key]=true;
     automatic.push({operator:r.subkey,sim_count:r.qty||0,type:'shared',configured:false,missing:['пакет оператора'],bundle_count:null,max_sims:0,price:0,currency:r.currency||'RUB',amount:0});
   });
+  _markRendered(byCat.sim); // SIM-строки отрисованы в секции пакетов (legacy fallback)
   var missingCount=0,autoHtml='';
   automatic.sort(function(a,b){return String(a.operator).localeCompare(String(b.operator),'ru');}).forEach(function(c){
     var legacy=(byCat.sim||[]).find(function(r){return String(r.subkey||'').toLowerCase()===String(c.operator||'').toLowerCase();});
@@ -367,6 +463,7 @@ function _renderCostsModal(d) {
     var keys=[loc.key,loc.address].concat((loc.servers||[]).reduce(function(a,s){a.push(s.name,'server:'+s.name);return a;},[])).filter(Boolean);
     var matched=(byCat[cat]||[]).filter(function(r){return keys.indexOf(r.subkey)>=0;});
     if(!matched.length&&locations.length===1)matched=(byCat[cat]||[]).filter(function(r){return !r.subkey;});
+    _markRendered(matched);
     return combineExisting(matched);
   }
   // Активное плановое правило для того же ключа — подсказка «по плану …».
@@ -392,13 +489,24 @@ function _renderCostsModal(d) {
   if(locations.length!==1){
     ['electricity','hosting','salary'].forEach(function(k){
       var existing=(byCat[k]||[]).find(function(r){return !r.subkey;});
-      if(existing)unallocatedHtml+=editRow(esc(cats[k]?cats[k].label:k),'Старая общая сумма — распределите по локациям',k,null,existing,'');
+      if(existing){_markRendered([existing]);unallocatedHtml+=editRow(esc(cats[k]?cats[k].label:k),'Старая общая сумма — распределите по локациям',k,null,existing,'');}
     });
   }
   var otherExisting=(byCat.other||[]).find(function(r){return !r.subkey;})||(byCat.other||[])[0];
   var otherPlan=(byCatPlan.other||[]).find(function(r){return !r.subkey;})||(byCatPlan.other||[])[0]||null;
   var otherHtml=editRow(esc(cats.other?cats.other.label:'Прочее'),'Общие расходы, не привязанные к адресу','other',null,otherExisting,'',otherPlan);
+  if(otherExisting)_markRendered([otherExisting]);
   if(unallocatedHtml)otherHtml+='<div class="fcm-unallocated"><b>Не распределено по локациям</b><small>Старые общие суммы сохранены. Перенесите их в нужные карточки и очистите здесь.</small>'+unallocatedHtml+'</div>';
+  // Строки месяца, не попавшие ни в одну секцию (устаревшие ключи и т.п.) —
+  // отрисовываем как есть, иначе POST wipe+insert молча бы их стёр (M5).
+  var extraRows=rows.filter(function(r){ return !renderedKeys[r.category+'|'+(r.subkey||'')]; });
+  if(extraRows.length){
+    var extraHtml='';
+    extraRows.forEach(function(r){
+      extraHtml+=editRow(esc(cats[r.category]?cats[r.category].label:r.category),esc(r.subkey||''),r.category,r.subkey!=null?r.subkey:null,r,'');
+    });
+    otherHtml+='<div class="fcm-unallocated"><b>Другие строки этого месяца</b><small>Разовые/override суммы, не привязанные к текущим локациям — сохраняются как есть.</small>'+extraHtml+'</div>';
+  }
 
   var fxBlock='';
   if(d.fx){
@@ -413,43 +521,15 @@ function _renderCostsModal(d) {
     ? '<div class="fcm-missing"><div>'+icon('alert',14)+' <span><b>Нужно дополнить пакеты: '+missingCount+'</b><small>Заполните обязательные поля выбранного типа тарифа.</small></span></div><button class="btn btn-sm" data-on-click="openOperatorPackagesFromCosts()">Заполнить пакеты →</button></div>'
     : '';
 
-  // Плановые операции: список всех правил + форма добавления. Класс
-  // fcm-rule-row (не set-row), чтобы saveCostsModal не слал их в monthly_costs.
-  var rulesHtml='';
-  allRules.forEach(function(rule){
-    var overridden=!!overriddenRuleIds[rule.id];
-    var range='с '+esc(rule.start_period)+(rule.end_period?' по '+esc(rule.end_period):' · бессрочно');
-    rulesHtml+='<div class="fcm-edit-row fcm-rule-row" data-rule-id="'+rule.id+'" data-cat="'+esc(rule.category)+'"'
-      +(rule.subkey!=null?' data-key="'+esc(rule.subkey).replace(/"/g,'&quot;')+'"':'')
-      +' data-start="'+esc(rule.start_period)+'"'+(rule.end_period?' data-end="'+esc(rule.end_period)+'"':'')
-      +' data-notes="'+esc(rule.notes||'').replace(/"/g,'&quot;')+'">'
-      +'<div class="fcm-edit-label"><b>'+ruleLabel(rule)+'</b><small>'+range+(rule.notes?' · '+esc(rule.notes):'')+'</small>'
-      +(overridden?'<small style="color:var(--am)">переопределено в этом месяце</small>':'')+'</div>'
-      +'<div class="fcm-edit-input">'+_costCurSelect(rule.currency||'RUB')
-      +'<input class="form-input" data-role="amount" type="number" min="0" step="100" value="'+(Number(rule.amount)||0)+'">'
-      +'<span data-role="cur-unit">'+esc(rule.currency||'RUB')+'</span><small data-role="rub-eq"></small></div>'
-      +'<div style="display:flex;gap:6px;margin-left:8px;flex-shrink:0">'
-      +'<button class="btn btn-sm" data-on-click="saveRecurringRule('+rule.id+')">'+icon('save',11)+' Сохранить</button>'
-      +'<button class="btn btn-sm" style="color:var(--danger)" data-on-click="stopRecurringRule('+rule.id+')">Остановить</button></div></div>';
-  });
-  if(!rulesHtml)rulesHtml='<div class="fcm-empty">Плановых операций пока нет — добавьте первую, и она будет применяться к каждому месяцу автоматически.</div>';
-  var catOptions=Object.keys(cats).filter(function(k){return k!=='sim';}).map(function(k){return '<option value="'+k+'">'+esc(cats[k].label||k)+'</option>';}).join('');
-  var addRuleHtml='<div class="fcm-edit-row fcm-rule-add" id="rcAddRow">'
-    +'<div class="fcm-edit-label"><select class="form-input" id="rcAddCat" style="font-size:11px;padding:3px 4px">'+catOptions+'</select>'
-    +'<input class="form-input" id="rcAddKey" placeholder="уточнение (необяз.)" style="font-size:11px;padding:3px 6px;margin-top:4px">'
-    +'<input class="form-input" id="rcAddStart" placeholder="YYYY-MM" value="'+esc(d.period)+'" title="действует с месяца" style="width:92px;font-size:11px;padding:3px 6px;margin-top:4px"></div>'
-    +'<div class="fcm-edit-input">'+_costCurSelect('RUB')
-    +'<input class="form-input" data-role="amount" type="number" min="0" step="100" placeholder="сумма">'
-    +'<span data-role="cur-unit">RUB</span></div>'
-    +'<div style="display:flex;gap:6px;margin-left:8px;flex-shrink:0"><button class="btn btn-sm btn-primary" data-on-click="addRecurringRule()">'+icon('plus',11)+' Добавить</button></div></div>';
+  var rulesHtml=_buildRulesHtml(d);
 
   ov.innerHTML='<div class="fcm-modal">'
     +'<div class="fcm-head"><div><small>Финансы · '+esc(d.period)+'</small><h3>Затраты месяца</h3><p>Пакеты считаются автоматически, расходы площадок задаются один раз на физический адрес.</p></div>'
     +'<button class="fcm-close" data-on-click="document.getElementById(\'_finCostsOverlay\').remove()">&times;</button></div>'
-    +'<div class="fcm-summary"><div><span>SIM и бандлы</span><b id="fcAutoSimTotal">0 ₽</b></div><div><span>Ручные расходы</span><b id="fcManualTotal">0 ₽</b></div><div class="is-total"><span>Итого за месяц</span><b id="fcGrandTotal">0 ₽</b></div></div>'
+    +'<div class="fcm-summary"><div><span>SIM и бандлы</span><b id="fcAutoSimTotal">0 ₽</b></div><div><span>Ручные расходы</span><b id="fcManualTotal">0 ₽</b></div><div><span>Плановые</span><b id="fcPlanTotal">0 ₽</b></div><div class="is-total"><span>Итого за месяц</span><b id="fcGrandTotal">0 ₽</b></div></div>'
     +(activeRules.length?'<div class="fcm-carried">'+icon('info',12)+' Плановые операции применяются автоматически; здесь задаются только разовые суммы за '+esc(d.period)+'.</div>':'')
     +missingBanner
-    +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>Плановые операции</h4><p>Повторяются каждый месяц в своём диапазоне дат; разовые суммы ниже перекрывают их только на '+esc(d.period)+'</p></div></div><div class="fcm-rule-list">'+rulesHtml+addRuleHtml+'</div></section>'
+    +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>Плановые операции</h4><p>Повторяются каждый месяц в своём диапазоне дат; разовые суммы ниже перекрывают их только на '+esc(d.period)+'</p></div></div><div class="fcm-rule-list">'+rulesHtml+'</div></section>'
     +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>SIM и пакеты операторов</h4><p>Только для чтения · данные берутся из базы и настроек пакета</p></div><button class="btn btn-sm" data-on-click="openOperatorPackagesFromCosts()">Настроить</button></div><div class="fcm-auto-list">'+autoHtml+'</div></section>'
     +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>Расходы по локациям</h4><p>Один адрес — одна аренда, независимо от числа серверов</p></div></div><div class="fcm-location-list">'+locationHtml+'</div></section>'
     +'<section class="fcm-section"><div class="fcm-section-head"><div><h4>Прочее</h4><p>Только расходы, которые нельзя отнести к конкретной локации</p></div></div>'+otherHtml+'</section>'
@@ -457,6 +537,8 @@ function _renderCostsModal(d) {
     +'<div class="fcm-save"><button class="btn" data-on-click="document.getElementById(\'_finCostsOverlay\').remove()">Отмена</button><button class="btn btn-primary" data-on-click="saveCostsModal()">'+icon('save',13)+' Сохранить ручные расходы</button></div>'
     +'</div>';
   document.body.appendChild(ov);
+  ov._rcMeta=meta;ov._rcCats=cats;
+  _rcAddKeyToggle();
   ov.addEventListener('input',function(){_finCostsRecalc(ov);});
   ov.addEventListener('change',function(){_finCostsRecalc(ov);});
   _finCostsRecalc(ov);
@@ -516,7 +598,22 @@ function saveCostsModal() {
 }
 
 // -- Плановые операции (recurring_costs): сохранить/остановить/добавить -----
-// После каждой операции модалка перезагружается, чтобы показать свежий список.
+// После каждой операции перезапрашиваем ТОЛЬКО блок правил (M6): инпуты
+// разовых сумм месяца (.set-row) при этом не трогаются.
+function _reloadRulesList() {
+  var ov = document.getElementById('_finCostsOverlay');
+  if (!ov) return;
+  api(API + '/api/admin/monthly_costs?period=' + encodeURIComponent(_finCurrentPeriod))
+    .then(function(d) {
+      var list = ov.querySelector('.fcm-rule-list');
+      if (!list) return;
+      ov._rcMeta = d.meta || {}; ov._rcCats = d.categories || {};
+      list.innerHTML = _buildRulesHtml(d);
+      _rcAddKeyToggle();
+      _finCostsRecalc(ov);
+    })
+    .catch(function(e){ showToast(e.message, 'error') });
+}
 function saveRecurringRule(id) {
   var row = document.querySelector('.fcm-rule-row[data-rule-id="' + id + '"]');
   if (!row) return;
@@ -529,18 +626,35 @@ function saveRecurringRule(id) {
     end_period: row.dataset.end || null,
     notes: row.dataset.notes || null
   };
+  // qty шлём, только если оно есть у правила — иначе бэк сохранит старое (M2).
+  if (row.dataset.qty != null && row.dataset.qty !== '') body.qty = parseFloat(row.dataset.qty);
   api(API + '/api/admin/recurring_costs/' + id, { method: 'PUT', json: body })
     .then(function(d) {
-      if (d && d.ok) { showToast('Плановая операция обновлена', 'success'); openFinanceCostsModal(); }
+      if (d && d.ok) { showToast('Плановая операция обновлена', 'success'); _reloadRulesList(); }
       else showToast((d && d.error) || 'Ошибка', 'error');
     })
     .catch(function(e){ showToast(e.message, 'error') });
 }
 function stopRecurringRule(id) {
-  if (!confirm('Остановить плановую операцию? Она будет действовать до конца текущего месяца включительно.')) return;
+  var row = document.querySelector('.fcm-rule-row[data-rule-id="' + id + '"]');
+  var curMsk = _finCurMskMonth();
+  var future = row && (row.dataset.start || '') > curMsk;
+  var msg = future
+    ? 'Это правило ещё не начало действовать и будет удалено полностью. Продолжить?'
+    : 'Остановить плановую операцию? Она будет действовать до конца ' + curMsk + ' включительно.';
+  if (!confirm(msg)) return;
   api(API + '/api/admin/recurring_costs/' + id, { method: 'DELETE' })
     .then(function(d) {
-      if (d && d.ok) { showToast(d.deleted ? 'Плановая операция удалена' : 'Плановая операция остановлена', 'success'); openFinanceCostsModal(); }
+      if (d && d.ok) { showToast(d.deleted ? 'Плановая операция удалена' : (d.alreadyStopped ? 'Правило уже было завершено' : 'Плановая операция остановлена'), 'success'); _reloadRulesList(); }
+      else showToast((d && d.error) || 'Ошибка', 'error');
+    })
+    .catch(function(e){ showToast(e.message, 'error') });
+}
+function deleteRecurringRule(id) {
+  if (!confirm('Удалить завершённое правило полностью?')) return;
+  api(API + '/api/admin/recurring_costs/' + id + '?hard=1', { method: 'DELETE' })
+    .then(function(d) {
+      if (d && d.ok) { showToast('Плановая операция удалена', 'success'); _reloadRulesList(); }
       else showToast((d && d.error) || 'Ошибка', 'error');
     })
     .catch(function(e){ showToast(e.message, 'error') });
@@ -548,16 +662,17 @@ function stopRecurringRule(id) {
 function addRecurringRule() {
   var row = document.getElementById('rcAddRow');
   if (!row) return;
+  var keyEl = document.getElementById('rcAddKey'); // селект локации; для other его нет → null
   var body = {
     category: (document.getElementById('rcAddCat') || {}).value,
-    subkey: (((document.getElementById('rcAddKey') || {}).value) || '').trim() || null,
+    subkey: keyEl ? (((keyEl.value) || '').trim() || null) : null,
     amount: parseFloat((row.querySelector('[data-role="amount"]') || {}).value),
     currency: (row.querySelector('[data-role="currency"]') || {}).value || 'RUB',
     start_period: (((document.getElementById('rcAddStart') || {}).value) || '').trim()
   };
   api(API + '/api/admin/recurring_costs', { method: 'POST', json: body })
     .then(function(d) {
-      if (d && d.ok) { showToast('Плановая операция добавлена', 'success'); openFinanceCostsModal(); }
+      if (d && d.ok) { showToast('Плановая операция добавлена', 'success'); _reloadRulesList(); }
       else showToast((d && d.error) || 'Ошибка', 'error');
     })
     .catch(function(e){ showToast(e.message, 'error') });

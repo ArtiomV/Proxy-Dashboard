@@ -8,13 +8,14 @@
 // override на конкретный месяц — POST monthly_costs правила НИКОГДА не
 // трогает, поэтому плановые операции не меняются при сохранении месяца.
 
-const PERIOD_RE = /^\d{4}-\d{2}$/;
+const PERIOD_RE = /^\d{4}-(0[1-9]|1[0-2])$/;
 const VALID_CURRENCIES = new Set(['RUB', 'MDL', 'RON']);
 // Открытый диапазон (end_period IS NULL) сравниваем как «до бесконечности».
 const OPEN_END = '9999-12';
 
+// Текущий месяц по МСК — как весь остальной финансовый код (getMoscowToday).
 function currentPeriod() {
-  return new Date().toISOString().slice(0, 7);
+  return new Date().toLocaleString('sv-SE', { timeZone: 'Europe/Moscow' }).slice(0, 7);
 }
 
 function _key(category, subkey) {
@@ -35,7 +36,7 @@ function resolveMonthlyCosts(db, period) {
   const rules = db.prepare(`SELECT id AS rule_id, category, subkey, amount, currency, qty, notes, start_period, end_period
     FROM recurring_costs
     WHERE start_period <= ? AND (end_period IS NULL OR end_period >= ?)
-    ORDER BY category, subkey`).all(period, period);
+    ORDER BY category, subkey, id`).all(period, period);
   const merged = new Map();
   for (const rule of rules) {
     merged.set(_key(rule.category, rule.subkey), {
@@ -60,7 +61,7 @@ function resolveMonthlyCosts(db, period) {
 function listAllRules(db) {
   return db.prepare(`SELECT id, category, subkey, amount, currency, qty, notes,
       start_period, end_period, created_at, updated_at
-    FROM recurring_costs ORDER BY category, subkey, start_period`).all();
+    FROM recurring_costs ORDER BY category, subkey, start_period, id`).all();
 }
 
 // Валидация тела POST/PUT. Возвращает { error } или { rule } с

@@ -24,8 +24,10 @@ CREATE INDEX IF NOT EXISTS idx_rc_range ON recurring_costs(start_period, end_per
 -- Бэкфилл: один раз переносим последний заполненный месяц monthly_costs в
 -- бессрочные правила (старое поведение «шаблона» не теряется при переезде).
 -- Срабатывает только когда recurring_costs пуста и monthly_costs не пуста.
+-- Маркер в notes делает происхождение правила видимым в UI.
 INSERT INTO recurring_costs (category, subkey, amount, currency, qty, notes, start_period, end_period)
-SELECT category, subkey, amount, currency, qty, notes,
+SELECT category, subkey, amount, currency, qty,
+       COALESCE(notes || ' · ', '') || '[миграция: проверьте]',
        (SELECT MAX(period) FROM monthly_costs), NULL
   FROM monthly_costs
  WHERE period = (SELECT MAX(period) FROM monthly_costs)

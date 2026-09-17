@@ -94,7 +94,7 @@ module.exports = function createBillingExtRouter(deps) {
 r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const period = String(req.query.period || '').match(/^\d{4}-\d{2}$/) ? req.query.period
-                 : new Date().toISOString().slice(0, 7);
+                 : getMoscowToday().slice(0, 7);
     // Повторение — явные правила recurring_costs; monthly_costs хранит только
     // разовые суммы и override этого месяца (неявный «шаблон из последнего
     // заполненного месяца» убран: правка старого месяца не должна менять
@@ -187,16 +187,20 @@ r.post('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) =
 
 r.post('/api/admin/recurring_costs', authMiddleware, adminMiddleware, (req, res) => {
   try {
-    const v = recurringCosts.validateRuleInput(db, COST_CATEGORIES, req.body, {});
-    if (v.error) return res.status(400).json({ error: v.error });
-    const rule = v.rule;
-    const info = db.prepare(`INSERT INTO recurring_costs (category, subkey, amount, currency, qty, notes, start_period, end_period)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
-      .run(rule.category, rule.subkey, rule.amount, rule.currency, rule.qty, rule.notes, rule.start_period, rule.end_period);
-    const saved = db.prepare('SELECT * FROM recurring_costs WHERE id = ?').get(info.lastInsertRowid);
-    auditLog(req.user.login, 'recurring_cost_create', { id: saved.id, category: rule.category, subkey: rule.subkey, start_period: rule.start_period });
+    // Валидация (включая проверку пересечения диапазонов) и вставка — атомарно.
+    const saved = db.transaction(() => {
+      const v = recurringCosts.validateRuleInput(db, COST_CATEGORIES, req.body, {});
+      if (v.error) return v;
+      const rule = v.rule;
+      const info = db.prepare(`INSERT INTO recurring_costs (category, subkey, amount, currency, qty, notes, start_period, end_period)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+        .run(rule.category, rule.subkey, rule.amount, rule.currency, rule.qty, rule.notes, rule.start_period, rule.end_period);
+      return { rule: db.prepare('SELECT * FROM recurring_costs WHERE id = ?').get(info.lastInsertRowid) };
+    })();
+    if (saved.error) return res.status(400).json({ error: saved.error });
+    auditLog(req.user.login, 'recurring_cost_create', { id: saved.rule.id, category: saved.rule.category, subkey: saved.rule.subkey, start_period: saved.rule.start_period });
     try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
-    res.json({ ok: true, rule: saved });
+    res.json({ ok: true, rule: saved.rule });
   } catch (e) {
     logger.error('[recurring_costs/post]', e.message);
     res.status(500).json({ error: e.message });
@@ -207,18 +211,24 @@ r.put('/api/admin/recurring_costs/:id', authMiddleware, adminMiddleware, (req, r
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
-    const existing = db.prepare('SELECT id FROM recurring_costs WHERE id = ?').get(id);
+    const existing = db.prepare('SELECT * FROM recurring_costs WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'Правило не найдено' });
     const v = recurringCosts.validateRuleInput(db, COST_CATEGORIES, req.body, { excludeId: id });
     if (v.error) return res.status(400).json({ error: v.error });
     const rule = v.rule;
+    // qty не пришло в теле — сохраняем текущее значение правила.
+    if (req.body && req.body.qty === undefined) rule.qty = existing.qty;
     db.prepare(`UPDATE recurring_costs
       SET category = ?, subkey = ?, amount = ?, currency = ?, qty = ?, notes = ?,
           start_period = ?, end_period = ?, updated_at = datetime('now')
       WHERE id = ?`)
       .run(rule.category, rule.subkey, rule.amount, rule.currency, rule.qty, rule.notes, rule.start_period, rule.end_period, id);
     const saved = db.prepare('SELECT * FROM recurring_costs WHERE id = ?').get(id);
-    auditLog(req.user.login, 'recurring_cost_update', { id, category: rule.category, subkey: rule.subkey });
+    auditLog(req.user.login, 'recurring_cost_update', {
+      id,
+      old: { amount: existing.amount, currency: existing.currency, qty: existing.qty, start_period: existing.start_period, end_period: existing.end_period },
+      new: { amount: rule.amount, currency: rule.currency, qty: rule.qty, start_period: rule.start_period, end_period: rule.end_period },
+    });
     try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
     res.json({ ok: true, rule: saved });
   } catch (e) {
@@ -229,24 +239,59 @@ r.put('/api/admin/recurring_costs/:id', authMiddleware, adminMiddleware, (req, r
 
 // «Остановить»: будущее правило (ещё не начало действовать) удаляется
 // физически; действующее закрывается концом текущего месяца включительно —
-// история прошлых месяцев не переписывается.
+// история прошлых месяцев не переписывается. Уже завершённое правило —
+// no-op (alreadyStopped), stop НЕ «оживляет» его задним числом.
+// Параметры (query или body):
+//   end=YYYY-MM — явный месяц окончания (>= start_period);
+//   hard=1      — физическое удаление, только для завершённых
+//                 (end_period < текущего месяца) или будущих правил.
 r.delete('/api/admin/recurring_costs/:id', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
-    const existing = db.prepare('SELECT id, start_period FROM recurring_costs WHERE id = ?').get(id);
+    const existing = db.prepare('SELECT id, start_period, end_period FROM recurring_costs WHERE id = ?').get(id);
     if (!existing) return res.status(404).json({ error: 'Правило не найдено' });
     const cur = recurringCosts.currentPeriod();
+
+    const body = req.body || {};
+    const endRaw = req.query.end != null ? req.query.end : body.end;
+    let explicitEnd = null;
+    if (endRaw != null && endRaw !== '') {
+      explicitEnd = String(endRaw);
+      if (!/^\d{4}-(0[1-9]|1[0-2])$/.test(explicitEnd)) return res.status(400).json({ error: 'end: формат YYYY-MM' });
+      if (explicitEnd < existing.start_period) return res.status(400).json({ error: 'end не может быть раньше start_period' });
+    }
+    const hard = req.query.hard === '1' || body.hard === '1' || body.hard === 1 || body.hard === true;
+
+    if (hard) {
+      const completed = !!(existing.end_period && existing.end_period < cur);
+      const future = existing.start_period > cur;
+      if (!completed && !future) {
+        return res.status(409).json({ error: 'hard=1 допустим только для завершённых или ещё не начавшихся правил; действующее — остановите (end_period)' });
+      }
+      db.prepare('DELETE FROM recurring_costs WHERE id = ?').run(id);
+      auditLog(req.user.login, 'recurring_cost_delete', { id, hard: true });
+      try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
+      return res.json({ ok: true, deleted: true });
+    }
+
     if (existing.start_period > cur) {
       db.prepare('DELETE FROM recurring_costs WHERE id = ?').run(id);
       auditLog(req.user.login, 'recurring_cost_delete', { id });
       try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
       return res.json({ ok: true, deleted: true });
     }
-    db.prepare(`UPDATE recurring_costs SET end_period = ?, updated_at = datetime('now') WHERE id = ?`).run(cur, id);
-    auditLog(req.user.login, 'recurring_cost_stop', { id, end_period: cur });
+
+    // Уже завершено (кончилось не позже текущего месяца) — ничего не меняем.
+    if (existing.end_period && existing.end_period <= cur) {
+      return res.json({ ok: true, alreadyStopped: true });
+    }
+
+    const stopAt = explicitEnd || cur;
+    db.prepare(`UPDATE recurring_costs SET end_period = ?, updated_at = datetime('now') WHERE id = ?`).run(stopAt, id);
+    auditLog(req.user.login, 'recurring_cost_stop', { id, end_period: stopAt });
     try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
-    res.json({ ok: true, stopped: true });
+    res.json({ ok: true, stopped: true, end_period: stopAt });
   } catch (e) {
     logger.error('[recurring_costs/delete]', e.message);
     res.status(500).json({ error: e.message });
@@ -258,7 +303,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const now = new Date();
     const todayStr = now.toISOString().slice(0, 10);
     const period = String(req.query.period || '').match(/^\d{4}-\d{2}$/) ? req.query.period
-                 : todayStr.slice(0, 7);
+                 : getMoscowToday().slice(0, 7);
     const cacheKey = period;
     if (_financeCache && _financeCacheKey === cacheKey && (Date.now() - _financeCacheTs) < FINANCE_CACHE_TTL_MS) {
       return res.json(_financeCache);
@@ -438,7 +483,11 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     // больше не смешиваются молча.
     const resolvedCosts = recurringCosts.resolveMonthlyCosts(db, period);
     let costRows = resolvedCosts.effective;
-    const costSource = resolvedCosts.oneOffs.length > 0 ? 'entered'
+    // 'entered' — месяц заполнен вручную целиком; 'mixed' — разовые строки
+    // плюс применённые плановые правила; 'recurring' — только план.
+    const hasRuleApplied = resolvedCosts.effective.some(e => e.source === 'rule' || e.source === 'override');
+    const costSource = resolvedCosts.oneOffs.length > 0
+      ? (hasRuleApplied ? 'mixed' : 'entered')
       : resolvedCosts.effective.length > 0 ? 'recurring' : 'none';
     // SIM expenses are automatic when a complete operator package exists.
     // A matching legacy manual SIM row is then ignored so the same expense is
