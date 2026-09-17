@@ -11,6 +11,7 @@
   "DELETE /api/admin/operators/:operator",
   "DELETE /api/admin/operators/:operator/alias",
   "DELETE /api/admin/promo-codes/:id",
+  "DELETE /api/admin/recurring_costs/:id",
   "DELETE /api/admin/servers/:name",
   "DELETE /api/admin/sim_registry/:iccid",
   "DELETE /api/admin/simulator/profiles/:id",
@@ -194,6 +195,7 @@
   "POST /api/admin/reboot",
   "POST /api/admin/reboot_server",
   "POST /api/admin/reconnect_all",
+  "POST /api/admin/recurring_costs",
   "POST /api/admin/reset_bandwidth",
   "POST /api/admin/reset_complete",
   "POST /api/admin/reset_ip",
@@ -260,6 +262,7 @@
   "PUT /api/admin/modems/:server_name/:imei/contract",
   "PUT /api/admin/operators/:operator/alias",
   "PUT /api/admin/operators/:operator/country",
+  "PUT /api/admin/recurring_costs/:id",
   "PUT /api/admin/settings",
   "PUT /api/admin/tariffs/:id"
 ]

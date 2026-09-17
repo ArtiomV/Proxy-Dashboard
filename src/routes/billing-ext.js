@@ -16,6 +16,7 @@ const {
   readActiveSimCounts,
   calculateOperatorPackageCosts,
 } = require('../billing/operator-package-costs');
+const recurringCosts = require('../billing/recurring-costs');
 
 module.exports = function createBillingExtRouter(deps) {
   const {
@@ -94,17 +95,11 @@ r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, async (req, r
   try {
     const period = String(req.query.period || '').match(/^\d{4}-\d{2}$/) ? req.query.period
                  : new Date().toISOString().slice(0, 7);
-    const rows = db.prepare(`SELECT id, period, category, subkey, amount, currency, qty, notes, updated_at
-      FROM monthly_costs WHERE period = ? ORDER BY category, subkey`).all(period);
-    // Если за период пусто — auto-fill из предыдущего месяца (как шаблон, без сохранения)
-    let template = null;
-    if (rows.length === 0) {
-      const prev = db.prepare("SELECT MAX(period) as p FROM monthly_costs WHERE period < ?").get(period).p;
-      if (prev) {
-        template = db.prepare(`SELECT category, subkey, amount, currency, qty, notes
-          FROM monthly_costs WHERE period = ?`).all(prev);
-      }
-    }
+    // Повторение — явные правила recurring_costs; monthly_costs хранит только
+    // разовые суммы и override этого месяца (неявный «шаблон из последнего
+    // заполненного месяца» убран: правка старого месяца не должна менять
+    // будущие, а разовый расход не должен копироваться вечно).
+    const resolved = recurringCosts.resolveMonthlyCosts(db, period);
     // Списки для perItem-категорий: операторы (SIM) из live ProxySmart, боксы.
     // Страны — для дефолта валюты в UI: MD → MDL, RO → RON (v2.10.8).
     const { operators, operatorCountry } = _operatorCountryMap();
@@ -120,7 +115,10 @@ r.get('/api/admin/monthly_costs', authMiddleware, adminMiddleware, async (req, r
     // Курс ЦБ (или ручной фикс) — шапка модалки и пересчёт «≈ ₽» на фронте.
     const rates = await fx.getRates();
     res.json({
-      period, rows, template,
+      period,
+      rows: resolved.oneOffs,
+      recurring: { active: resolved.rules, all: recurringCosts.listAllRules(db) },
+      effective: resolved.effective,
       categories: COST_CATEGORIES,
       meta: { operators, servers, serverLabels, serverCountry, locations, operatorCountry },
       operator_costs: operatorCosts.rows,
@@ -180,6 +178,77 @@ r.post('/api/admin/monthly_costs', authMiddleware, adminMiddleware, (req, res) =
     res.json({ ok: true, period, saved: items.length });
   } catch (e) {
     logger.error('[monthly_costs/post]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// -- Плановые (повторяющиеся) расходы: CRUD над recurring_costs -------------
+// POST monthly_costs эти правила НИКОГДА не меняет — только эти три роуты.
+
+r.post('/api/admin/recurring_costs', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const v = recurringCosts.validateRuleInput(db, COST_CATEGORIES, req.body, {});
+    if (v.error) return res.status(400).json({ error: v.error });
+    const rule = v.rule;
+    const info = db.prepare(`INSERT INTO recurring_costs (category, subkey, amount, currency, qty, notes, start_period, end_period)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+      .run(rule.category, rule.subkey, rule.amount, rule.currency, rule.qty, rule.notes, rule.start_period, rule.end_period);
+    const saved = db.prepare('SELECT * FROM recurring_costs WHERE id = ?').get(info.lastInsertRowid);
+    auditLog(req.user.login, 'recurring_cost_create', { id: saved.id, category: rule.category, subkey: rule.subkey, start_period: rule.start_period });
+    try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
+    res.json({ ok: true, rule: saved });
+  } catch (e) {
+    logger.error('[recurring_costs/post]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+r.put('/api/admin/recurring_costs/:id', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
+    const existing = db.prepare('SELECT id FROM recurring_costs WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Правило не найдено' });
+    const v = recurringCosts.validateRuleInput(db, COST_CATEGORIES, req.body, { excludeId: id });
+    if (v.error) return res.status(400).json({ error: v.error });
+    const rule = v.rule;
+    db.prepare(`UPDATE recurring_costs
+      SET category = ?, subkey = ?, amount = ?, currency = ?, qty = ?, notes = ?,
+          start_period = ?, end_period = ?, updated_at = datetime('now')
+      WHERE id = ?`)
+      .run(rule.category, rule.subkey, rule.amount, rule.currency, rule.qty, rule.notes, rule.start_period, rule.end_period, id);
+    const saved = db.prepare('SELECT * FROM recurring_costs WHERE id = ?').get(id);
+    auditLog(req.user.login, 'recurring_cost_update', { id, category: rule.category, subkey: rule.subkey });
+    try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
+    res.json({ ok: true, rule: saved });
+  } catch (e) {
+    logger.error('[recurring_costs/put]', e.message);
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// «Остановить»: будущее правило (ещё не начало действовать) удаляется
+// физически; действующее закрывается концом текущего месяца включительно —
+// история прошлых месяцев не переписывается.
+r.delete('/api/admin/recurring_costs/:id', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) return res.status(400).json({ error: 'bad id' });
+    const existing = db.prepare('SELECT id, start_period FROM recurring_costs WHERE id = ?').get(id);
+    if (!existing) return res.status(404).json({ error: 'Правило не найдено' });
+    const cur = recurringCosts.currentPeriod();
+    if (existing.start_period > cur) {
+      db.prepare('DELETE FROM recurring_costs WHERE id = ?').run(id);
+      auditLog(req.user.login, 'recurring_cost_delete', { id });
+      try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
+      return res.json({ ok: true, deleted: true });
+    }
+    db.prepare(`UPDATE recurring_costs SET end_period = ?, updated_at = datetime('now') WHERE id = ?`).run(cur, id);
+    auditLog(req.user.login, 'recurring_cost_stop', { id, end_period: cur });
+    try { require('../billing/events').emit('finance-write'); } catch (_) { /* best-effort */ }
+    res.json({ ok: true, stopped: true });
+  } catch (e) {
+    logger.error('[recurring_costs/delete]', e.message);
     res.status(500).json({ error: e.message });
   }
 });
@@ -363,17 +432,14 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
     const utilPct = totalModems > 0 ? Math.round((rentedModems / totalModems) * 1000) / 10 : 0;
 
     // -- Costs (current period) --
-    // Затраты фиксированные помесячные: если месяц ещё не заполнен, подтягиваем
-    // последний заполненный как типовые (cost_carried_from сообщает фронту источник).
-    let costRows = db.prepare(`SELECT category, subkey, amount, currency FROM monthly_costs WHERE period = ?`).all(period);
-    let costCarriedFrom = null;
-    if (!costRows.length) {
-      const prev = db.prepare(`SELECT MAX(period) AS p FROM monthly_costs WHERE period < ?`).get(period).p;
-      if (prev) {
-        costRows = db.prepare(`SELECT category, subkey, amount, currency FROM monthly_costs WHERE period = ?`).all(prev);
-        costCarriedFrom = prev;
-      }
-    }
+    // Затраты = плановые правила recurring_costs + разовые строки/override
+    // месяца (resolveMonthlyCosts). cost_source сообщает фронту, из чего
+    // собрана сумма: введённый месяц, только план или ничего — факт и оценка
+    // больше не смешиваются молча.
+    const resolvedCosts = recurringCosts.resolveMonthlyCosts(db, period);
+    let costRows = resolvedCosts.effective;
+    const costSource = resolvedCosts.oneOffs.length > 0 ? 'entered'
+      : resolvedCosts.effective.length > 0 ? 'recurring' : 'none';
     // SIM expenses are automatic when a complete operator package exists.
     // A matching legacy manual SIM row is then ignored so the same expense is
     // never counted twice. Incomplete packages keep the old row as a safe
@@ -647,7 +713,7 @@ r.get('/api/admin/finance_dashboard', authMiddleware, adminMiddleware, async (re
         cpm: costPerModem,
         margin_per_modem: marginPerModem,
         total_cost: Math.round(totalCost),
-        cost_carried_from: costCarriedFrom,
+        cost_source: costSource,
         forecast_eom: forecastEOM,
         forecast_so_far: Math.round(monthRevenueSoFar)
       },

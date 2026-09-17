@@ -41,6 +41,8 @@ afterAll(() => {
   globalThis.fetch = _origFetch;
   setFxOverrides(0, 0);
   db.prepare(`DELETE FROM monthly_costs WHERE period IN ('2025-01','2025-02','2025-03')`).run();
+  db.prepare(`DELETE FROM recurring_costs WHERE (category = 'sim' AND subkey = 'Moldcell')
+    OR (start_period IN ('2025-01','2025-02','2025-03'))`).run();
   db.prepare("DELETE FROM sessions WHERE login = 'fx_admin'").run();
 });
 
@@ -76,14 +78,34 @@ describe('v2.10.8: monthly_costs currency/qty', () => {
     expect(get.body.fx_overrides).toEqual({ MDL: 0, RON: 0 });
   });
 
-  it('template из прошлого месяца несёт currency/qty', async () => {
+  it('POST monthly_costs не создаёт повторений; повторение — через recurring_costs', async () => {
+    // Пустой месяц: ни строк, ни «шаблона из прошлого месяца».
     const get = await request(app)
       .get('/api/admin/monthly_costs?period=2025-02')
       .set('X-Auth-Token', adminToken);
     expect(get.status).toBe(200);
     expect(get.body.rows).toEqual([]);
-    const sim = (get.body.template || []).find(r => r.category === 'sim');
-    expect(sim).toMatchObject({ currency: 'MDL', qty: 25 });
+    expect(get.body.template).toBeUndefined();
+    const carriedSim = (get.body.recurring.active || []).find(r => r.category === 'sim' && r.subkey === 'Moldcell');
+    expect(carriedSim).toBeUndefined();
+
+    // Повторение создаётся явным правилом — с currency/qty.
+    const post = await request(app)
+      .post('/api/admin/recurring_costs')
+      .set('X-Auth-Token', adminToken)
+      .send({ category: 'sim', subkey: 'Moldcell', amount: 100, currency: 'MDL', qty: 25, start_period: '2025-02', end_period: '2025-02' });
+    expect(post.status).toBe(200);
+    expect(post.body.ok).toBe(true);
+
+    const get2 = await request(app)
+      .get('/api/admin/monthly_costs?period=2025-02')
+      .set('X-Auth-Token', adminToken);
+    const rule = (get2.body.recurring.active || []).find(r => r.category === 'sim' && r.subkey === 'Moldcell');
+    expect(rule).toMatchObject({ amount: 100, currency: 'MDL', qty: 25, start_period: '2025-02' });
+    const eff = (get2.body.effective || []).find(e => e.category === 'sim' && e.subkey === 'Moldcell');
+    expect(eff).toMatchObject({ source: 'rule', amount: 100, currency: 'MDL', qty: 25 });
+    // Разовых строк правило не создаёт.
+    expect(get2.body.rows).toEqual([]);
   });
 
   it('невалидная currency → 400', async () => {
