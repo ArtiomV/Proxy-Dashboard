@@ -35,7 +35,26 @@ function create(deps) {
     Object.assign(formData, patch);
     const posted = await proxyConf.postConfForm(server, `/conf/edit_port/${portId}`, formData);
     if (!posted.ok) throw new Error(`edit_port post: ${posted.reason}`);
-    await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`);
+    const applied = await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`);
+    if (applied && (applied.error || applied.ok === false)) {
+      throw new Error(`apply_port: ${applied.error || applied.reason || 'rejected'}`);
+    }
+    if (Object.prototype.hasOwnProperty.call(patch, 'PROXY_VALID_BEFORE')) {
+      const fresh = await fetchApi(server, '/apix/list_ports_json');
+      let confirmed = null;
+      for (const list of Object.values(fresh || {})) {
+        const found = Array.isArray(list) && list.find(port => port && port.portID === portId);
+        if (found) { confirmed = found; break; }
+      }
+      if (!confirmed) throw new Error('verification: port missing from list_ports_json');
+      // API отдаёт дату со временем («YYYY-MM-DD HH:MM:SS»), постим только дату —
+      // сравниваем по первым 10 символам, как делают UI и billing-ext.
+      const wantVb = String(patch.PROXY_VALID_BEFORE).slice(0, 10);
+      const gotVb = String(confirmed.PROXY_VALID_BEFORE || '').slice(0, 10);
+      if (gotVb !== wantVb) {
+        throw new Error(`verification: valid-before is ${gotVb || 'empty'}, expected ${wantVb}`);
+      }
+    }
     if (proxySmart && typeof proxySmart.invalidateCache === 'function') proxySmart.invalidateCache();
   }
 
@@ -57,7 +76,7 @@ function create(deps) {
     d7.setDate(d7.getDate() - 7);
     const from = _mskDateStr(d7);
     const total = (ledgerDb.listByClient(clientId) || [])
-      .filter(e => e.type === 'charge' && e.date && e.date > from && e.date < today)
+      .filter(e => e.type === 'charge' && e.date && e.date >= from && e.date < today)
       .reduce((s, e) => s + (e.cost || 0), 0);
     return Math.round((total / 7) * 100) / 100;
   }

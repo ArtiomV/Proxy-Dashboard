@@ -26,7 +26,7 @@ function runStartup(d) {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runLocationWanSpeed, runServerMetrics, runRetailGuard,
-    runBlockedPortCleanup, runHttpCheck, runVolumeGuard,
+    runBlockedPortCleanup, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
     saveClients, auditLog, authTokensDb,
     events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
     ledgerDb, getMoscowYesterday,   // 23.08: billing catch-up по непробиленным
@@ -35,6 +35,15 @@ function runStartup(d) {
   // Авто-спидтесты всего флота отключены 2026-08-13 (daily-schedule.js) —
   // вызов оставлен: rescheduleSpeedtests() теперь no-op, только чистит таймеры.
   rescheduleSpeedtests();
+
+  if (runCardPaymentRecovery) {
+    setTimeout(() => runCardPaymentRecovery().catch(e => logger.error('[Payments recovery] startup: ' + e.message)), 30000);
+    _intervals.push(setInterval(() => runCardPaymentRecovery().catch(e => logger.error('[Payments recovery] periodic: ' + e.message)), 5 * 60000));
+  }
+  if (runDebtRestoreRecovery) {
+    setTimeout(() => runDebtRestoreRecovery().catch(e => logger.error('[DebtBlock] startup recovery: ' + e.message)), 60000);
+    _intervals.push(setInterval(() => runDebtRestoreRecovery().catch(e => logger.error('[DebtBlock] periodic recovery: ' + e.message)), 10 * 60000));
+  }
 
   // Schedule nightly TopHosts at 03:00
   scheduleRepeating(3, 0, 'TopHosts', aggregateTopHosts);

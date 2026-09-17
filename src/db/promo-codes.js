@@ -33,6 +33,13 @@ function findValid(code) {
   return { promo };
 }
 
+// Промокод из заказа без проверки срока/активности — для recovery: код мог
+// истечь или быть отключён после оформления. consume() лимит списаний
+// по-прежнему контролирует атомарно.
+function byCode(code) {
+  return S.byCode.get(String(code || '').trim());
+}
+
 // Атомарно списывает одно применение. false → лимит исчерпан/отключён.
 function consume(promoId) {
   return S.consume.run(promoId).changes > 0;
@@ -42,5 +49,5 @@ function create({ code, type, value, max_uses = null, expires_at = null }) {
   return S.insert.run(String(code).trim(), type, value, max_uses, expires_at, 1).lastInsertRowid;
 }
 
-module.exports = { init, list: () => S.list.all(), findValid, consume, create,
+module.exports = { init, list: () => S.list.all(), byCode, findValid, consume, create,
   setActive: (id, on) => S.setActive.run(on ? 1 : 0, id), remove: (id) => S.remove.run(id) };

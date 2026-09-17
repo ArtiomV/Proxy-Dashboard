@@ -19,7 +19,7 @@ let cacheFile;
 beforeAll(() => {
   cacheFile = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'pdcache-')), 'server_cache.json');
   // В фиде живёт только LIVE1 — всё остальное «выпало из фида»
-  fs.writeFileSync(cacheFile, JSON.stringify({ S2: { status: [{ modem_details: { IMEI: 'LIVE1' } }] } }));
+  fs.writeFileSync(cacheFile, JSON.stringify({ S2: { cachedAt: Date.now(), bw: {}, ports: {}, status: [{ modem_details: { IMEI: 'LIVE1' } }] } }));
 });
 afterAll(() => { try { fs.rmSync(path.dirname(cacheFile), { recursive: true, force: true }); } catch (_) {} });
 

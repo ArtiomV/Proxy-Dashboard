@@ -14,12 +14,18 @@ function create(deps) {
       const winMin   = Math.max(5, Math.min(720, appSettings.proxy_alert_window_min || 60));
       const errLimit = Math.max(0, Math.min(100, appSettings.proxy_alert_error_pct || 5));
       const since = new Date(Date.now() - winMin * 60000).toISOString();
+      const freshTtlMin = Math.max(1, Number(appSettings.ping_fresh_ttl_min || 10));
+      const freshSince = new Date(Date.now() - freshTtlMin * 60000).toISOString();
 
       const checkRows = db.prepare(`
         SELECT p.server AS server_name, p.nick,
                COUNT(*) AS total,
                AVG(COALESCE(p.loss_pct, CASE WHEN p.ok = 1 THEN 0 ELSE 100 END)) AS avg_loss,
                SUM(CASE WHEN p.ok = 0 THEN 1 ELSE 0 END) AS errors,
+               (SELECT p2.ok FROM modem_ping p2
+                 WHERE p2.server = p.server AND p2.nick = p.nick
+                 ORDER BY p2.ts DESC LIMIT 1) AS latest_ok,
+               MAX(p.ts) AS latest_ts,
                COALESCE((SELECT json_extract(k.data, '$.portName')
                          FROM known_modems k
                          WHERE k.server_name = p.server
@@ -36,6 +42,7 @@ function create(deps) {
 
       const issues = [];
       for (const c of checkRows) {
+        if (c.latest_ok !== 0 || !c.latest_ts || c.latest_ts < freshSince) continue;
         const errPct  = c.avg_loss != null ? Math.round(Number(c.avg_loss) * 10) / 10 : 0;
         const reasons = [];
         if (errPct > errLimit) reasons.push(`потери ${errPct}%`);

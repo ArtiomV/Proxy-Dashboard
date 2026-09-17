@@ -475,6 +475,7 @@ function clientFromRow(r) {
     abuseStrikes: r.abuse_strikes || 0,
     balanceNegativeSince: r.balance_negative_since || null,
     blockedSince: r.blocked_since || null,   // миграция 073: от неё тикает hold до удаления портов
+    debtRestoreUntil: r.debt_restore_until || null, // миграция 089: фиксированная цель восстановления
     tariffId: r.tariff_id != null ? r.tariff_id : null,
     priceOverride: r.price_override != null ? r.price_override : null,
     holdTtlDays: r.hold_ttl_days != null ? r.hold_ttl_days : null,
@@ -1671,6 +1672,7 @@ const SETTINGS_DEFAULTS = {
   ping_loss_warn_pct: 30,                  // loss ≥ → деградация (3 опроса)
   ping_latency_warn_ms: 800,               // latency > → деградация (3 опроса)
   ping_stale_cycles: 5,                    // ping_stats не меняется N опросов → протух
+  ping_fresh_ttl_min: 10,                  // единый TTL нативного ping_stats для UI/алертов
   retention_modem_ping: 30,                // дней истории modem_ping
   // ── A2/A3 (ТЗ мониторинга v2, этап 2, 23.08) ─────────────────────
   httpcheck_enabled: true,                 // A2: HTTP-чек сайта через прокси
@@ -3158,7 +3160,7 @@ app.use(require('./src/routes/promo-codes')({
 // B2C Э4 (WP3): эквайринг розницы — topup + webhook + история + возвраты.
 // Провайдер создаётся на КАЖДЫЙ запрос из живых настроек (смена кредов без
 // рестарта); тесты подменяют create через require-кэш src/payments/provider.
-app.use(require('./src/routes/payments')({
+const paymentsRouter = require('./src/routes/payments')({
   logger, authMiddleware, adminMiddleware, validate, TopupSchema,
   topupLimiter, webhookLimiter: acqWebhookLimiter,
   clients, clientById, saveClients,
@@ -3175,7 +3177,8 @@ app.use(require('./src/routes/payments')({
   // Unified webhook URL у Точки: не-эквайринговые события (incomingPayment)
   // уходят в банковский обработчик. Lazy — tochkaRouter создаётся ниже.
   getBankWebhookHandler: () => tochkaRouter.bankWebhookHandler,
-}));
+});
+app.use(paymentsRouter);
 
 // All traffic endpoints moved to src/routes/traffic.js (Stage 3).
 app.use(require('./src/routes/traffic')({
@@ -4233,6 +4236,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runLocationWanSpeed: _locationWanSpeed.runLocationWanSpeed,
     runServerMetrics: _serverMetrics.runServerMetrics,
     runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
+    runDebtRestoreRecovery: _debtBlock.retryPendingRestores,
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
     runVolumeGuard: () => volumeGuard.runOnce(),   // A4 (23.08): объёмные алерты
@@ -4240,6 +4244,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     ledgerDb, getMoscowYesterday,   // 23.08: catch-up до-билливает только непробиленных
     // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).
     saveClients, auditLog, authTokensDb,
+    runCardPaymentRecovery: () => paymentsRouter.runRecovery(),
   });
 
 });

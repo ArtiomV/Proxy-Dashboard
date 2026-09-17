@@ -189,6 +189,16 @@ function buildDayContext(date) {
     }));
   } catch (e) { logger.warn('[AIInsights] modems query: ' + e.message); ctx.problem_modems = []; }
 
+  // Actual failure causes, not just percentages; never include proxy credentials.
+  try {
+    ctx.http_errors = db.prepare(`
+      SELECT server, nick, error, COUNT(*) AS count
+      FROM modem_httpcheck WHERE ts >= ? AND ts < ?
+        AND TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'no_valid_client_credentials')
+      GROUP BY server, nick, error ORDER BY count DESC, server, nick LIMIT 50
+    `).all(b.fromIso, b.toIso);
+  } catch (e) { logger.warn('[AIInsights] HTTP errors query: ' + e.message); ctx.http_errors = []; }
+
   // ── 3) Critical system events
   try {
     const errLog = db.prepare(`
@@ -287,6 +297,10 @@ const SYSTEM_PROMPT = `Ты — старший аналитик инфрастр
   <b>⚠️ Требует внимания</b> — конкретные проблемы с цифрами и локациями. Если ничего критичного — напиши «всё в норме» честно.
   <b>💡 Рекомендации</b> — 2-3 действия, что сделать дальше.
 - Будь конкретным: называй серверы, модемы, проценты. НЕ «некоторые серверы проблемные», А «S1 (Молдова) — 8% неуспешных пингов и 3 HTTP-сбоя».
+- Успешный ICMP-пинг не исключает DNS/TCP/TLS, фильтрацию сайта, авторизацию порта или ротацию IP. HTTP-сбой не доказывает поломку USB, SIM или модема.
+- Не выводи физическую топологию USB-хабов из номеров модемов. Не рекомендуй групповой перезапуск без подтверждения причины; сначала проверить коды ошибок и клиентский маршрут.
+- HTTP 500 API сервера и HTTP-ответ целевого сайта через прокси — разные сигналы. Различай их. Связь падения трафика со сбоем — гипотеза, пока нет подтверждения.
+- Не повторяй модемы в списке; количество должно совпадать с числом уникальных пар сервер/модем. problem_modems ограничен 15 записями и не является полным списком.
 - Игнорируй шум: мелкие колебания одного модема — нормально. Сигнал — повторяющийся паттерн, целиком сервер, аномальный сдвиг трафика, всплеск ошибок.
 - Сравнивай с baseline_7d если он есть — это даёт контекст «хуже/лучше обычного».
 - Если данных мало (<100 проверок за день), скажи об этом и не выдумывай выводы.
