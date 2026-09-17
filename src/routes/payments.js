@@ -12,8 +12,10 @@
 //
 // Зачёт ТОЛЬКО по webhook (не по return-url!). Деньги — только через
 // atomicCredit/atomicDebit; вызовы провайдера — ВНЕ SQLite-транзакций.
-// Идемпотентность webhook: markPaid (UPDATE … WHERE status='created') —
-// дубль → changes=0 → 200 без зачёта.
+// Идемпотентность: durable-claim finance_idempotency (card_payment:<order_id>,
+// promo_bonus:<order_id>) вставляется в той же транзакции, что и баланс+ledger;
+// markCredited — тоже внутри неё. Крах между webhook и зачислением догоняет
+// recovery-джоба (runRecovery, 5 мин) по строкам в статусе 'paid'.
 
 const express = require('express');
 const crypto = require('crypto');
@@ -69,6 +71,67 @@ module.exports = function createPaymentsRouter(deps) {
       `Зачислено ${Math.round(amount * 100) / 100} ₽. Баланс: ${Math.round(balanceAfter * 100) / 100} ₽.`,
       { action: 'balance_credited', details: { client_id: client.id, amount, balance: balanceAfter } }
     )).catch(e => logger.warn(`[Payments] notify ${client.login}: ${e.message}`));
+  }
+
+  function _creditMain(row, finalizeInsideTx) {
+    const client = clientById.get(row.client_id);
+    if (!client) throw new Error(`client ${row.client_id} not found`);
+    const historical = ledgerDb && typeof ledgerDb.listByClient === 'function'
+      ? (ledgerDb.listByClient(client.id) || []).filter(e => e.type === 'card_payment' && e.paymentId === row.order_id)
+      : [];
+    if (historical.length > 1) throw new Error(`multiple historical ledger rows for ${row.order_id}`);
+    if (historical.length === 1) {
+      const recorded = Number(historical[0].amount);
+      if (!Number.isFinite(recorded) || Math.abs(recorded - Number(row.amount)) > 0.005) {
+        throw new Error(`historical ledger amount mismatch for ${row.order_id}`);
+      }
+      return { client, result: { duplicate: true, historical: true, balanceBefore: client.balance, balanceAfter: client.balance } };
+    }
+    const result = atomicCredit(client.id, row.amount, {
+      type: 'card_payment', source: 'acquiring', amount: row.amount,
+      date: new Date().toISOString().slice(0, 10), timestamp: new Date().toISOString(),
+      note: `Пополнение ${row.method === 'sbp' ? 'СБП' : 'картой'} (${row.order_id})`,
+      paymentId: row.order_id,
+    }, {
+      ...(_referralOptsFor(client, row.amount) || {}),
+      idempotencyKey: `card_payment:${row.order_id}`,
+      insideTx: finalizeInsideTx ? () => cardPaymentsDb.markCredited(row.order_id) : undefined,
+    });
+    return { client, result };
+  }
+
+  function _creditPromo(row, client) {
+    if (!row.promo_code) return null;
+    const promo = typeof promoDb.byCode === 'function'
+      ? promoDb.byCode(row.promo_code)
+      : (promoDb.findValid(row.promo_code) || {}).promo;
+    if (!promo) throw new Error(`promo ${row.promo_code} attached to payment is missing`);
+    const bonus = Math.round((promo.type === 'percent' ? row.amount * promo.value / 100 : promo.value) * 100) / 100;
+    if (bonus <= 0) throw new Error(`promo ${row.promo_code} has invalid bonus`);
+    return atomicCredit(client.id, bonus, {
+      type: 'promo_bonus', source: 'promo', amount: bonus,
+      date: new Date().toISOString().slice(0, 10), timestamp: new Date().toISOString(),
+      note: `Промокод ${promo.code} (+${promo.type === 'percent' ? promo.value + '%' : promo.value + ' ₽'})`,
+      paymentId: row.order_id,
+    }, {
+      idempotencyKey: `promo_bonus:${row.order_id}`,
+      insideTx: () => {
+        if (!promoDb.consume(promo.id)) throw new Error('promo limit exhausted');
+        cardPaymentsDb.markCredited(row.order_id);
+      },
+    });
+  }
+
+  function _completeCredit(row) {
+    const main = _creditMain(row, !row.promo_code);
+    const promo = _creditPromo(row, main.client);
+    // Duplicate claims can only be observed after their transaction committed.
+    // This also reconciles historical ledger rows created before durable claims.
+    if ((main.result.duplicate && !row.promo_code) || (promo && promo.duplicate)) {
+      cardPaymentsDb.markCredited(row.order_id);
+    }
+    saveClients(clients);
+    return { ...main, promo };
   }
 
   function _publicPayment(p) {
@@ -181,17 +244,28 @@ module.exports = function createPaymentsRouter(deps) {
     const rawJson = JSON.stringify(verdict.raw || {});
 
     if (status === 'paid') {
+      if (row.provider_payment_id && providerPaymentId && row.provider_payment_id !== providerPaymentId) {
+        logger.error(`[Payments webhook] provider id mismatch ${orderId}`);
+        return res.status(200).json({ ok: true, processed: false, reason: 'provider_id_mismatch' });
+      }
       // Сверка суммы: расхождение = подозрительно, деньги НЕ зачисляем.
-      if (verdict.amount != null && Math.abs(verdict.amount - row.amount) > 0.005) {
+      if (!Number.isFinite(Number(row.amount)) || Number(row.amount) <= 0 ||
+          (verdict.amount != null && (!Number.isFinite(Number(verdict.amount)) || Math.abs(Number(verdict.amount) - Number(row.amount)) > 0.005))) {
         logger.error(`[Payments webhook] amount mismatch ${orderId}: webhook ${verdict.amount} != db ${row.amount}`);
         try { alerts && alerts.trigger('retail_card_payment', { login: row.client_id, amount: row.amount, method: row.method, error: 'amount_mismatch' }); } catch (_) { /* alert best-effort */ }
         return res.status(200).json({ ok: true, processed: false, reason: 'amount_mismatch' });
       }
-      // Идемпотентность: UPDATE … WHERE status='created' — дубль → changes=0.
-      const marked = cardPaymentsDb.markPaid(orderId, providerPaymentId, rawJson);
-      if (marked.changes === 0) {
+      // Идемпотентность по статусу: credited → дубль без зачёта; терминальный
+      // failed/refunded → paid-событие подозрительно, деньги не зачисляем;
+      // повторный webhook по 'paid' идёт в _completeCredit (recovery-путь).
+      if (row.status === 'credited') {
         return res.status(200).json({ ok: true, duplicate: true, status: row.status });
       }
+      if (row.status !== 'created' && row.status !== 'paid') {
+        logger.warn(`[Payments webhook] paid event for ${orderId} in terminal status ${row.status}`);
+        return res.status(200).json({ ok: true, processed: false, reason: 'terminal_status', status: row.status });
+      }
+      if (row.status === 'created') cardPaymentsDb.markPaid(orderId, providerPaymentId, rawJson);
       const client = clientById.get(row.client_id);
       if (!client) {
         // Клиента удалили между оплатой и webhook — строка paid остаётся
@@ -200,55 +274,22 @@ module.exports = function createPaymentsRouter(deps) {
         return res.status(200).json({ ok: true, processed: false, reason: 'client_not_found' });
       }
       try {
-        const result = atomicCredit(client.id, row.amount, {
-          type: 'card_payment', source: 'acquiring',
-          amount: row.amount,
-          date: new Date().toISOString().slice(0, 10),
-          timestamp: new Date().toISOString(),
-          note: `Пополнение ${row.method === 'sbp' ? 'СБП' : 'картой'} (${orderId})`,
-          paymentId: orderId,
-        }, _referralOptsFor(client, row.amount));
-        cardPaymentsDb.markCredited(orderId);
-        saveClients(clients);
-        _notifyCredit(client, row.amount, result.balanceAfter);
-        // WP6: бонус по промокоду — тем же платежом, отдельной строкой ledger
-        // (type='promo_bonus'). consume() атомарен; лимит исчерпан между
-        // созданием платежа и webhook → бонус честно пропускаем (лог+аудит).
-        if (row.promo_code) {
-          try {
-            const { promo } = promoDb.findValid(row.promo_code);
-            const bonus = promo
-              ? Math.round((promo.type === 'percent' ? row.amount * promo.value / 100 : promo.value) * 100) / 100
-              : 0;
-            if (promo && bonus > 0 && promoDb.consume(promo.id)) {
-              const bres = atomicCredit(client.id, bonus, {
-                type: 'promo_bonus', source: 'promo',
-                amount: bonus,
-                date: new Date().toISOString().slice(0, 10),
-                timestamp: new Date().toISOString(),
-                note: `Промокод ${promo.code} (+${promo.type === 'percent' ? promo.value + '%' : promo.value + ' ₽'})`,
-                paymentId: orderId,
-              });
-              saveClients(clients);
-              logActivity('client', 'info', 'promo_bonus', client.login,
-                `Промокод ${promo.code}: +${bonus} ₽ к пополнению ${orderId}`, { order_id: orderId, bonus });
-              _notifyCredit(client, bonus, bres.balanceAfter);
-            } else {
-              logger.warn(`[Payments webhook] promo ${row.promo_code} для ${orderId} не применён (лимит/неактивен)`);
-            }
-          } catch (e) {
-            // Бонус не зачислился — платёж уже зачтён, не валим webhook.
-            logger.error(`[Payments webhook] promo bonus failed ${orderId}: ${e.message}`);
-          }
+        const { result, promo } = _completeCredit(row);
+        if (!result.duplicate) _notifyCredit(client, row.amount, result.balanceAfter);
+        // Бонус — отдельное устойчивое событие. Пока его транзакция не
+        // завершилась, заказ остаётся paid и будет поднят recovery job.
+        if (promo && !promo.duplicate) {
+          logActivity('client', 'info', 'promo_bonus', client.login,
+            `Промокод ${row.promo_code}: бонус к пополнению ${orderId}`, { order_id: orderId });
+          _notifyCredit(client, promo.balanceAfter - promo.balanceBefore, promo.balanceAfter);
         }
         try { alerts && alerts.trigger('retail_card_payment', { login: client.login, client_id: client.id, amount: row.amount, method: row.method || verdict.method }); } catch (_) { /* alert best-effort */ }
         logActivity('client', 'info', 'retail_card_credited', client.login,
           `Эквайринг: зачислено ${row.amount} ₽ (${row.method || verdict.method}, ${orderId})`, { order_id: orderId });
       } catch (e) {
-        // Строка остаётся 'paid' — зачисление восстановится ретраем webhook
-        // (markPaid идемпотентен, повторный webhook дойдёт сюда снова? НЕТ —
-        // status уже 'paid', markPaid даст changes=0. Поэтому здесь — громкий
-        // алерт: такой платёж требует ручного зачисления).
+        // Строка остаётся 'paid' — зачисление догонит recovery-джоба
+        // (runRecovery, 5 мин; backoff 1/5/15/60 мин по recovery_attempts).
+        // Здесь — громкий алерт + 500, чтобы банк тоже ретраил webhook.
         logger.error(`[Payments webhook] credit failed for ${orderId}: ${e.message}`);
         try { alerts && alerts.trigger('retail_card_payment', { login: client.login, client_id: client.id, amount: row.amount, method: row.method, error: 'credit_failed' }); } catch (_) { /* alert best-effort */ }
         return res.status(500).json({ ok: false, error: 'credit failed' });
@@ -360,6 +401,35 @@ module.exports = function createPaymentsRouter(deps) {
     try { alerts && alerts.trigger('retail_card_refund', { login: client.login, client_id: client.id, amount: row.amount, order_id: orderId }); } catch (_) { /* alert best-effort */ }
     res.json({ ok: true, balance: client.balance });
   });
+
+  let recoveryRunning = false;
+  r.runRecovery = async function runRecovery() {
+    if (recoveryRunning) return { skipped: 'already_running' };
+    recoveryRunning = true;
+    let credited = 0, failed = 0;
+    try {
+      for (const row of cardPaymentsDb.pendingPaid(50)) {
+        try {
+          _completeCredit(row);
+          credited++;
+        } catch (e) {
+          failed++;
+          logger.error(`[Payments recovery] ${row.order_id}: ${e.message}`);
+          if (typeof cardPaymentsDb.markRecoveryFailure === 'function') {
+            cardPaymentsDb.markRecoveryFailure(row.order_id, e.message);
+          }
+          const paidAt = Date.parse(row.created_at || '');
+          if (Number.isFinite(paidAt) && Date.now() - paidAt >= 15 * 60000) {
+            try { alerts && alerts.trigger('retail_card_payment', {
+              login: row.client_id, client_id: row.client_id, amount: row.amount,
+              method: row.method, error: 'recovery_failed', order_id: row.order_id,
+            }); } catch (_) { /* alert best-effort */ }
+          }
+        }
+      }
+      return { credited, failed };
+    } finally { recoveryRunning = false; }
+  };
 
   return r;
 };

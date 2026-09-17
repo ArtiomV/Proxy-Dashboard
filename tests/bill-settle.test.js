@@ -47,6 +47,16 @@ describe('settleBillsOnPayment', () => {
     expect(client.bills[0].status).toBe('unpaid');
   });
 
+  it('частичная оплата с номером счёта не закрывает его и не уходит на другой счёт', () => {
+    const deps = mkDeps();
+    const client = { id: 'c1', name: 'X', bills: [
+      bill('target', '2026-06', 10000, 'unpaid', 'INV-100'),
+      bill('other', '2026-07', 1, 'unpaid', 'INV-200'),
+    ] };
+    expect(settleBillsOnPayment(client, 1, 'Оплата INV-100', deps)).toEqual([]);
+    expect(client.bills.map(b => b.status)).toEqual(['unpaid', 'unpaid']);
+  });
+
   it('не закрывает новый счёт, пока старый не покрыт (стоп на первом непокрытом)', () => {
     const deps = mkDeps();
     const client = { id: 'c1', name: 'X', bills: [
@@ -65,5 +75,21 @@ describe('settleBillsOnPayment', () => {
     expect(settleBillsOnPayment({ id: 'c', name: 'X' }, 100, 'x', deps)).toEqual([]);
     const client = { id: 'c1', name: 'X', bills: [bill('b1', '2026-07', 100, 'paid')] };
     expect(settleBillsOnPayment(client, 100, 'x', deps)).toEqual([]);
+  });
+
+  it('ошибка сохранения не оставляет фиктивный paid в памяти', () => {
+    const deps = mkDeps();
+    deps.documentsDb.updateBillStatus.mockImplementation(() => { throw new Error('disk full'); });
+    const client = { id: 'c1', name: 'X', bills: [bill('b1', '2026-07', 100)] };
+    expect(settleBillsOnPayment(client, 100, 'оплата', deps)).toEqual([]);
+    expect(client.bills[0].status).toBe('unpaid');
+  });
+
+  it('нечисловая и бесконечная сумма ничего не меняют', () => {
+    const deps = mkDeps();
+    const client = { id: 'c1', name: 'X', bills: [bill('b1', '2026-07', 100)] };
+    expect(settleBillsOnPayment(client, Infinity, 'оплата', deps)).toEqual([]);
+    expect(settleBillsOnPayment(client, 'x', 'оплата', deps)).toEqual([]);
+    expect(client.bills[0].status).toBe('unpaid');
   });
 });

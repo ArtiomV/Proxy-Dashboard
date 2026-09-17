@@ -89,6 +89,51 @@ describe('billing/atomic', () => {
       const after = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger').get().n;
       expect(after).toBe(before);
     });
+
+    it('idempotency key applies balance and ledger exactly once', () => {
+      const id = makeClient({ balance: 0 });
+      const entry = { type: 'card_payment', date: '2026-01-05', amount: 500, paymentId: 'order-1' };
+      const first = billing.atomicCredit(id, 500, entry, { idempotencyKey: 'card_payment:order-1' });
+      const second = billing.atomicCredit(id, 500, entry, { idempotencyKey: 'card_payment:order-1' });
+      expect(first.duplicate).toBe(false);
+      expect(second.duplicate).toBe(true);
+      expect(getBalance(id)).toBe(500);
+      expect(getLedgerCount(id)).toBe(1);
+    });
+
+    it('same idempotency key with different amount/client = conflict, no money moved', () => {
+      const a = makeClient({ balance: 0 });
+      const b = makeClient({ balance: 0 });
+      const entry = { type: 'card_payment', date: '2026-01-06', amount: 500, paymentId: 'order-2' };
+      billing.atomicCredit(a, 500, entry, { idempotencyKey: 'card_payment:order-2' });
+      // Другая сумма по тому же ключу
+      let thrown;
+      try { billing.atomicCredit(a, 999, entry, { idempotencyKey: 'card_payment:order-2' }); }
+      catch (e) { thrown = e; }
+      expect(thrown).toBeDefined();
+      expect(thrown.code).toBe('IDEMPOTENCY_CONFLICT');
+      // Другой клиент по тому же ключу
+      thrown = undefined;
+      try { billing.atomicCredit(b, 500, entry, { idempotencyKey: 'card_payment:order-2' }); }
+      catch (e) { thrown = e; }
+      expect(thrown).toBeDefined();
+      expect(thrown.code).toBe('IDEMPOTENCY_CONFLICT');
+      expect(getBalance(a)).toBe(500);
+      expect(getBalance(b)).toBe(0);
+      expect(getLedgerCount(a)).toBe(1);
+      expect(getLedgerCount(b)).toBe(0);
+    });
+
+    it('rejects non-finite and garbage amounts (credit and debit)', () => {
+      const id = makeClient({ balance: 100 });
+      const entry = { type: 'payment', date: '2026-01-07' };
+      for (const bad of [Infinity, -Infinity, NaN, '100abc', null, undefined, '']) {
+        expect(() => billing.atomicCredit(id, bad, entry)).toThrow(/invalid amount/);
+        expect(() => billing.atomicDebit(id, bad, entry)).toThrow(/invalid amount/);
+      }
+      expect(getBalance(id)).toBe(100);
+      expect(getLedgerCount(id)).toBe(0);
+    });
   });
 
   describe('atomicDebit', () => {

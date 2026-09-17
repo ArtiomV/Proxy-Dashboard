@@ -23,6 +23,14 @@ function init(db) {
   );
   S.markStatus = db.prepare('UPDATE card_payments SET status=? WHERE order_id=?');
   S.recent = db.prepare('SELECT * FROM card_payments ORDER BY id DESC LIMIT ?');
+  S.pendingPaid = db.prepare(
+    "SELECT * FROM card_payments WHERE status='paid' " +
+    "AND (next_recovery_at IS NULL OR next_recovery_at <= datetime('now')) ORDER BY id LIMIT ?"
+  );
+  S.markRecoveryFailure = db.prepare(
+    "UPDATE card_payments SET recovery_attempts=recovery_attempts+1, next_recovery_at=?, recovery_error=? " +
+    "WHERE order_id=? AND status='paid'"
+  );
   // WP3: operationId провайдера привязываем к заказу сразу после create_payment
   // (до webhook) — по нему админ делает возврат.
   S.attachProvider = db.prepare(
@@ -43,6 +51,19 @@ function markPaid(orderId, providerPaymentId, rawJson) {
 function markCredited(orderId) { return S.markCredited.run(orderId); }
 function markStatus(orderId, status) { return S.markStatus.run(status, orderId); }
 function recent(limit) { return S.recent.all(limit || 100); }
+function pendingPaid(limit) { return S.pendingPaid.all(limit || 50); }
+function markRecoveryFailure(orderId, error, nowMs = Date.now()) {
+  const row = S.byOrderId.get(orderId);
+  const delays = [1, 5, 15, 60];
+  const attempts = Number(row && row.recovery_attempts) || 0;
+  const delayMin = delays[Math.min(attempts, delays.length - 1)];
+  // SQLite UTC-формат ('YYYY-MM-DD HH:MM:SS'), как datetime('now') в pendingPaid:
+  // toISOString() с 'T' лексикографически БОЛЬШЕ даты с пробелом в тот же день,
+  // и ретрай не выбирался бы до завтра (DEEP-01).
+  const next = new Date(nowMs + delayMin * 60000).toISOString().slice(0, 19).replace('T', ' ');
+  return S.markRecoveryFailure.run(next, String(error || '').slice(0, 1000), orderId);
+}
 function attachProvider(orderId, providerPaymentId) { return S.attachProvider.run(providerPaymentId, orderId); }
 
-module.exports = { init, byOrderId, byClient, insertCreated, markPaid, markCredited, markStatus, recent, attachProvider };
+module.exports = { init, byOrderId, byClient, insertCreated, markPaid, markCredited, markStatus,
+  recent, pendingPaid, markRecoveryFailure, attachProvider };

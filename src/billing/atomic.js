@@ -23,6 +23,25 @@ let db, _clientGetBalance, _clientUpdateBalance, _ledgerInsert, _ledgerEntryPara
 let _clientUpdateReferralBalance; // Stage 13.1
 let getClientById;
 
+// Ленивые prepared statements привязаны к конкретной БД — init() их сбрасывает,
+// иначе повторный init (честные тесты на нескольких БД) молча писал бы в прежнюю.
+let _clientGetReferralBalance = null;
+let _idempotencyInsert = null;
+let _idempotencyClaimGet = null;
+
+// Число и ТОЛЬКО число: Number, не parseFloat — мусорные строки вида '100abc'
+// отклоняются, как и NaN/Infinity и переполнение диапазона копеек (DEEP-05).
+function _normalizeAmount(raw, fnName) {
+  if (raw == null || (typeof raw === 'string' && raw.trim() === '')) {
+    throw new Error(`${fnName}: invalid amount`);
+  }
+  const num = Number(raw);
+  if (!Number.isFinite(num) || Math.abs(num) > Number.MAX_SAFE_INTEGER / 100) {
+    throw new Error(`${fnName}: invalid amount`);
+  }
+  return Math.round(num * 100) / 100;
+}
+
 // WP7.2: every successful ledger write emits 'finance-write' so caches
 // (finance dashboard) invalidate through ONE hook, not per-endpoint resets.
 const financeEvents = require('./events');
@@ -41,6 +60,9 @@ function init(deps) {
   // path goes through one entry point — no more route-side `.run()` calls
   // sitting OUTSIDE the txn (the original /payment bug).
   _clientUpdateReferralBalance = deps._clientUpdateReferralBalance;
+  _clientGetReferralBalance = null;
+  _idempotencyInsert = null;
+  _idempotencyClaimGet = null;
 
   // Accept either a getter (preferred) or the raw object/map (legacy).
   if (typeof deps.getClientById === 'function') {
@@ -61,7 +83,6 @@ function init(deps) {
  * Throws if referrerId is set but no such row exists — caller's choice
  * of catching that defines the failure mode (rolls back the whole txn).
  */
-let _clientGetReferralBalance = null;
 function _applyReferralInsideTx(referrerId, delta) {
   if (!_clientUpdateReferralBalance) {
     throw new Error('atomic.init() not given _clientUpdateReferralBalance');
@@ -91,36 +112,69 @@ function _applyReferralInsideTx(referrerId, delta) {
  * @param {string} clientId
  * @param {number} amount
  * @param {object} [ledgerEntry] — if provided, inserted in same transaction
- * @param {object} [opts] — { referral: { referrerId, delta } }
- * Returns { balanceBefore, balanceAfter, ledgerDbId, referral? }
+ * @param {object} [opts] — { referral: { referrerId, delta },
+ *   idempotencyKey: durable-claim в finance_idempotency той же транзакцией;
+ *   повтор с теми же клиентом/суммой → { duplicate: true } без денег, повтор
+ *   с ДРУГИМИ клиентом/суммой → ошибка IDEMPOTENCY_CONFLICT (DEEP-04);
+ *   insideTx: fn() — доп. запись внутри той же транзакции (напр. markCredited) }
+ * Returns { balanceBefore, balanceAfter, ledgerDbId, referral?, duplicate }
  */
 function atomicCredit(clientId, amount, ledgerEntry, opts) {
   opts = opts || {};
-  amount = Math.round(parseFloat(amount) * 100) / 100;
-  if (isNaN(amount)) throw new Error('atomicCredit: invalid amount');
+  amount = _normalizeAmount(amount, 'atomicCredit');
   // Stage 16: intentional early-return — amount=0 is a no-op (no balance
   // change, no ledger entry). Some refresh paths call with 0 just to
   // re-read the current balance. If a future caller needs amount=0
   // WITH an audit trail, add an explicit `opts.forceLog` flag rather
   // than removing this short-circuit.
   if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
-  let balanceBefore, balanceAfter, ledgerDbId;
+  let balanceBefore, balanceAfter, ledgerDbId, duplicate = false;
   let referralResult = null;
-  db.transaction(() => {
-    const row = _clientGetBalance.get(clientId);
-    if (!row) throw new Error(`atomicCredit: client ${clientId} not found`);
-    balanceBefore = row.balance || 0;
-    balanceAfter = Math.round((balanceBefore + amount) * 100) / 100;
-    _clientUpdateBalance.run(balanceAfter, clientId);
-    if (ledgerEntry) {
-      const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
-      const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
-      ledgerDbId = result.lastInsertRowid;
+  try {
+    db.transaction(() => {
+      if (opts.idempotencyKey) {
+        if (!_idempotencyInsert) _idempotencyInsert = db.prepare(
+          'INSERT INTO finance_idempotency (event_key, client_id, amount) VALUES (?, ?, ?)'
+        );
+        _idempotencyInsert.run(String(opts.idempotencyKey), clientId, amount);
+      }
+      if (typeof opts.insideTx === 'function') opts.insideTx();
+      const row = _clientGetBalance.get(clientId);
+      if (!row) throw new Error(`atomicCredit: client ${clientId} not found`);
+      balanceBefore = row.balance || 0;
+      balanceAfter = Math.round((balanceBefore + amount) * 100) / 100;
+      _clientUpdateBalance.run(balanceAfter, clientId);
+      if (ledgerEntry) {
+        const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
+        const result = _ledgerInsert.run(..._ledgerEntryParams(clientId, entry));
+        ledgerDbId = result.lastInsertRowid;
+      }
+      if (opts.referral && opts.referral.referrerId && opts.referral.delta) {
+        referralResult = _applyReferralInsideTx(opts.referral.referrerId, opts.referral.delta);
+      }
+    })();
+  } catch (e) {
+    // Только конфликт ИМЕННО нашего claim-ключа. Любой другой UNIQUE/PK
+    // (insideTx callback, ledger) — обычная ошибка: транзакция уже откачена,
+    // пробрасываем вызывающему (§14.3 FIX-SPEC).
+    if (opts.idempotencyKey && e && /UNIQUE constraint failed: finance_idempotency\./i.test(e.message || '')) {
+      if (!_idempotencyClaimGet) _idempotencyClaimGet = db.prepare(
+        'SELECT client_id, amount FROM finance_idempotency WHERE event_key = ?'
+      );
+      const claim = _idempotencyClaimGet.get(String(opts.idempotencyKey));
+      // Тот же ключ с ДРУГИМИ клиентом/суммой — это конфликт, а не дубль:
+      // молчаливый duplicate здесь прятал бы финансовую ошибку (DEEP-04).
+      if (!claim || claim.client_id !== clientId || Math.abs(claim.amount - amount) > 0.005) {
+        const err = new Error(`atomicCredit: idempotency key conflict: ${opts.idempotencyKey}`);
+        err.code = 'IDEMPOTENCY_CONFLICT';
+        throw err;
+      }
+      const row = _clientGetBalance.get(clientId);
+      const current = row ? row.balance : 0;
+      return { duplicate: true, balanceBefore: current, balanceAfter: current };
     }
-    if (opts.referral && opts.referral.referrerId && opts.referral.delta) {
-      referralResult = _applyReferralInsideTx(opts.referral.referrerId, opts.referral.delta);
-    }
-  })();
+    throw e;
+  }
   const client = getClientById && getClientById(clientId);
   if (client) client.balance = balanceAfter;
   // Sync referrer in-memory ONLY after the txn committed successfully.
@@ -134,7 +188,7 @@ function atomicCredit(clientId, amount, ledgerEntry, opts) {
   // покрывает все пути зачисления разом (ручной платёж, webhook, sync, ручная
   // привязка) — до ~30 мин задержки для банковского sync (цикл TochkaSync).
   try { financeEvents.emit('client-credit', { clientId, amount, balanceBefore, balanceAfter }); } catch (_) { /* best-effort */ }
-  return { balanceBefore, balanceAfter, ledgerDbId, referral: referralResult };
+  return { balanceBefore, balanceAfter, ledgerDbId, referral: referralResult, duplicate };
 }
 
 /**
@@ -149,8 +203,7 @@ function atomicCredit(clientId, amount, ledgerEntry, opts) {
  */
 function atomicDebit(clientId, amount, ledgerEntry, opts) {
   opts = opts || {};
-  amount = Math.round(parseFloat(amount) * 100) / 100;
-  if (isNaN(amount)) throw new Error('atomicDebit: invalid amount');
+  amount = _normalizeAmount(amount, 'atomicDebit');
   // Stage 16: same intentional no-op as atomicCredit — amount=0 returns
   // current balance without writing a ledger entry. See atomicCredit
   // comment above for the design rationale.
