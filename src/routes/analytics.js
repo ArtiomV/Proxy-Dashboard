@@ -430,7 +430,9 @@ r.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req, 
     // like "S1_portXXX" — matched via the live portKey mapping).
     const perClient = {};
     for (const row of rows) {
-      const pnCandidate = portKeyToPortName[row.port_name] || row.port_name;
+      // 2026-09-17: client_name в daily_traffic — устойчивая атрибуция,
+      // живая карта портов ломается при удалении портов клиента.
+      const pnCandidate = row.client_name || portKeyToPortName[row.port_name] || row.port_name;
       const client = portToClient[pnCandidate];
       if (!client) continue;
       if (!perClient[client.id]) perClient[client.id] = { id: client.id, name: client.name, portName: client.portName, price: client.price || 0, currency: client.currency || 'RUB', balance: client.balance || 0, billingType: client.billingType || 'per_gb', days: {} };

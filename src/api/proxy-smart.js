@@ -523,11 +523,43 @@ async function fetchApiPanel(server, apiPath, timeout = 15000) {
   throw new Error(`${server.name}: panel session rejected after relogin`);
 }
 
+
+// ---------------------------------------------------------------------------
+// Нормализация ответа /apix/speedtest: бокс отдаёт строки вида «646,72kbps»,
+// «5,23mbps», «0.00bps», «2589.5ms» (европейская запятая, разные юниты).
+// 2026-09-13: parseFloat обрезал «646,72kbps» до 646 и терял юнит — 0,65 Мбит/с
+// записывались как 646 «Мбит/с» (аномалии 300–1000 в мониторинге).
+// ---------------------------------------------------------------------------
+function parseSpeedToMbps(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return isFinite(value) ? value : 0;
+  const s = String(value).trim().toLowerCase().replace(/\s+/g, '').replace(',', '.');
+  const m = s.match(/^([\d.]+)(gbps|mbps|kbps|bps)?$/);
+  const num = parseFloat(m ? m[1] : s);
+  if (!isFinite(num)) return 0;
+  switch (m && m[2]) {
+    case 'gbps': return num * 1000;
+    case 'kbps': return num / 1000;
+    case 'bps': return num / 1000000;
+    default: return num; // без юнита — legacy Мбит/с
+  }
+}
+
+function parsePingMs(value) {
+  if (value === null || value === undefined) return 0;
+  if (typeof value === 'number') return isFinite(value) ? value : 0;
+  const s = String(value).trim().toLowerCase().replace(/\s+/g, '').replace(',', '.').replace(/ms$/, '');
+  const num = parseFloat(s);
+  return isFinite(num) ? num : 0;
+}
+
 // ---------------------------------------------------------------------------
 // Exports
 // ---------------------------------------------------------------------------
 
 module.exports = {
+  parseSpeedToMbps,
+  parsePingMs,
   init,
   extractServerName,
   getHttpLib,

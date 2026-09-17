@@ -17,8 +17,8 @@ describe('stale port cleanup authority', () => {
       S4: { cachedAt: Date.now() - 86400000, bw: {}, ports: {} },
     }));
     const db = new Database(':memory:');
-    db.exec('CREATE TABLE daily_traffic(port_name TEXT, date TEXT)');
-    db.prepare('INSERT INTO daily_traffic VALUES (?, ?), (?, ?)')
+    db.exec("CREATE TABLE daily_traffic(port_name TEXT, date TEXT, client_name TEXT NOT NULL DEFAULT '')");
+    db.prepare("INSERT INTO daily_traffic VALUES (?, ?, ''), (?, ?, '')")
       .run('S1_port-live', old, 'S4_port-old', old);
     const memory = { 'S1_port-live': { [old]: {} }, 'S4_port-old': { [old]: {} } };
     const result = cleanup.create({ db, fs, SERVER_CACHE_FILE: cache,

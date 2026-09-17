@@ -39,7 +39,7 @@ module.exports = function createClientsRouter(deps) {
     notifyClient,   // B2C Э3 (WP5): «Зачислено N ₽» клиенту после ручного зачисления
     // Ручная блокировка клиента (POST /:id/block): гашение портов и пула.
     proxyConf, parseHtmlInputFields, findServer, proxySmart, getMoscowNow,
-    retailPoolDb, alerts,
+    retailPoolDb, alerts, knownModems, saveKnownModems,
   } = deps;
   const r = express.Router();
   const portValidity = require('../services/port-validity').create(deps);
@@ -744,6 +744,60 @@ r.post('/api/admin/clients/:id/block', authMiddleware, adminMiddleware, async (r
       { action: 'client_block_admin', details: { client_id: client.id } });
   } catch (e) { logger.warn(`[Clients] notify ${client.login}: ${e.message}`); }
   res.json({ ok: true, blocked: true, ...result });
+});
+
+// Ручное удаление ВСЕХ портов клиента (POST /:id/delete-ports): то же, что
+// jobs/blocked-port-cleanup по истечении retail_hold_days, но немедленно и по
+// кнопке админа. Плюс снос строк retail-пула — портов физически нет.
+r.post('/api/admin/clients/:id/delete-ports', authMiddleware, adminMiddleware, async (req, res) => {
+  const client = clientById.get(req.params.id);
+  if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  const result = { deleted: 0, poolRemoved: 0, errors: [] };
+  let rosterDirty = false;
+  try {
+    const serverResults = await fetchAllServersDataCached();
+    for (const pt of portValidity.clientPorts(client, serverResults)) {
+      try {
+        const del = await proxyConf.getConfAction(pt.server, `/conf/delete_port/${encodeURIComponent(pt.portId)}`);
+        if (!del.ok) {
+          result.errors.push(`${pt.server.name}/${pt.portId}: ${del.reason}`);
+          continue;
+        }
+        result.deleted++;
+        // Сразу сносим реквизит из ростера knownModems: счётчик модемов
+        // клиента читает ростер, а его реконсиляция с боксом шла бы 2 суток.
+        try {
+          const km = knownModems && knownModems[pt.server.name];
+          if (km && km[pt.portId]) { delete km[pt.portId]; rosterDirty = true; }
+        } catch (_) { /* roster best-effort */ }
+        logger.warn(`[Clients] ${client.login}: порт ${pt.server.name}/${pt.portId} удалён вручную админом ${req.user.login}`);
+      } catch (e) {
+        result.errors.push(`${pt.server && pt.server.name || '?'}/${pt.portId}: ${e.message}`);
+      }
+    }
+  } catch (e) {
+    result.errors.push('ports: ' + e.message);
+  }
+  try {
+    if (retailPoolDb) {
+      for (const pr of retailPoolDb.byClient(client.id)) { retailPoolDb.remove(pr.id); result.poolRemoved++; }
+    }
+  } catch (e) { result.errors.push('retail: ' + e.message); }
+  if (rosterDirty) { try { saveKnownModems(); } catch (_) { /* best-effort */ } }
+  // Сбрасываем SWR-кэш опроса боксов — иначе удалённые порты «воскреснут» на TTL кэша
+  try { proxySmart && proxySmart.invalidateCache(); } catch (_) { /* best-effort */ }
+
+  logger.warn(`[Clients] ${client.login}: ручное удаление портов админом ${req.user.login} — удалено ${result.deleted}, пул −${result.poolRemoved}${result.errors.length ? ', ошибки: ' + result.errors.join('; ') : ''}`);
+  auditLog(req.user.login, 'client_ports_deleted_admin', {
+    clientId: client.id, login: client.login, deleted: result.deleted,
+    poolRemoved: result.poolRemoved, errors: result.errors, ip: getClientIp(req),
+  });
+  logActivity('client', 'warning', 'client_ports_deleted_admin', client.login,
+    `Админ удалил все порты клиента: ${result.deleted} на боксах, строк пула −${result.poolRemoved}`,
+    { client_id: client.id, deleted: result.deleted, poolRemoved: result.poolRemoved });
+  try { alerts.trigger('blocked_ports_deleted', { client_id: client.id, client: client.name || client.login, ports: result.deleted, blocked_since: 'manual_admin' }); } catch (_) { /* alert best-effort */ }
+  res.json({ ok: true, ...result });
 });
 
 // B2C Э5 (WP7): разблокировка аккаунта — ТОЛЬКО админом (§8 ТЗ). blocked=0;

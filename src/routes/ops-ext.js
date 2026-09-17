@@ -15,6 +15,7 @@ const { computeRevenueWindow } = require('../billing/revenue');   // WP8: canoni
 const scheduler = require('../jobs/scheduler');                  // WP6.4: job registry for /api/admin/health
 const maintenance = require('../maintenance');                   // B3 (23.08): окна обслуживания
 const uptimePeriod = require('../uptime-period');
+const { packagePeriod, findPackage } = require('../jobs/volume-guard');   // остаток пакетов операторов
 const { resolvePeriod, buildDowntimeWindow } = require('../server-downtime-window');
 
 // ── /api/admin/data section degradation wrapper (WP6.2) ──────────────────
@@ -36,7 +37,7 @@ module.exports = function createOpsExtRouter(deps) {
     getApiServers, getServerCountries,
     getRunningJobs,
     getLastBillingRunSummary, getLastReconciliationMonth, getIntervals,
-    getFetchAllServersDataCached, getMergeServerData,
+    getFetchAllServersDataCached, getMergeServerData, getSetting,
     getIpTracking, getUptimeTracking, getIpHistory, getKnownModems,
     getDailyTraffic, getPortKeyToPortName,
     getTochkaConfig, getProxyCheckSummary,
@@ -263,6 +264,63 @@ r.get('/api/admin/api_usage', authMiddleware, adminMiddleware, (req, res) => {
 // The mega-handler is decomposed into independently-guarded sections: one
 // failing section degrades to empty values instead of 502ing the whole panel.
 // Each builder returns ONLY its payload slice; the handler merges them.
+
+// Section: operator packages — остаток трафика по модему (колонка «Остаток
+// пакета» на странице модемов). Та же логика периода, что у volume-guard
+// (renewal_day): расход считается от последнего обновления пакета.
+function _packagesSection(merged) {
+  let pkgs = [];
+  try { pkgs = JSON.parse(getSetting('operator_packages', '') || '[]'); } catch (_) { pkgs = []; }
+  if (!Array.isArray(pkgs) || !pkgs.length) return {};
+  const out = {};
+  const GB = 1e9;
+  const usedNickStmt = db.prepare("SELECT COALESCE(SUM(bytes_in+bytes_out),0) AS b FROM traffic_hourly WHERE server_name=? AND nick=? AND hour_start>=?");
+  const usedOpStmt = db.prepare("SELECT COALESCE(SUM(bytes_in+bytes_out),0) AS b FROM traffic_hourly WHERE operator=? AND hour_start>=?");
+  const sharedUsed = {};
+  // 2026-09-17: CELLOP из фида бывает MVNO-брендом («UNITE» = Moldtelecom) —
+  // пакет не матчился и остаток не показывался. Авторитетный оператор —
+  // нормализованный modem_meta.operator (тот же, что стемпит traffic_hourly).
+  const opByNick = {};
+  for (const r of db.prepare('SELECT nick, operator, MAX(id) FROM modem_meta GROUP BY nick').all()) {
+    if (r.nick && r.operator) opByNick[r.nick] = r.operator;
+  }
+  const aliases = (typeof getOperatorAliases === 'function' ? getOperatorAliases() : {}) || {};
+  for (const m of (merged.status || [])) {
+    const md = m && m.modem_details, nd = m && m.net_details;
+    const nick = md && md.NICK, srv = m._server;
+    if (!nick || !srv) continue;
+    // 2026-09-17: RO-боксы отдают голый «ORANGE» — prefix-match в
+    // findPackage цеплял пакет Orange MD (400 ГБ) вместо безлимитного
+    // Orange RO. Сначала точное совпадение по «оператор + страна сервера».
+    const feedOp = String((nd && nd.CELLOP) || '').trim();
+    const metaOp = opByNick[nick] || '';
+    const rawOp = String(metaOp || aliases[feedOp.toLowerCase()] || feedOp).toLowerCase().trim();
+    const srvCountry = String(((getServerCountries()[srv] || {}).country) || '').toLowerCase();
+    let pkg = null;
+    for (const cand of [rawOp + ' ' + srvCountry, rawOp]) {
+      pkg = pkgs.find(pp => String(pp.operator || '').toLowerCase().trim() === cand.trim()) || null;
+      if (pkg) break;
+    }
+    if (!pkg) pkg = findPackage(pkgs, rawOp);
+    if (!pkg) continue;
+    const key = srv + '_' + nick;
+    if (pkg.type === 'unlimited') { out[key] = { kind: 'unlimited' }; continue; }
+    const period = packagePeriod(pkg, new Date());
+    const since = period.start.toISOString().slice(0, 13).replace('T', ' ') + ':00';
+    if (pkg.type === 'shared') {
+      const skey = pkg.operator + '|' + since;
+      // usage по каноническому имени пакета (так стемпит traffic_hourly —
+      // CELLOP из фида может отличаться регистром/брендом)
+      if (!(skey in sharedUsed)) sharedUsed[skey] = ((usedOpStmt.get(pkg.operator, since) || {}).b || 0) / GB;
+      const used = sharedUsed[skey];
+      out[key] = { kind: 'shared', total: pkg.volume_gb || 0, used: +used.toFixed(1), left: +Math.max(0, (pkg.volume_gb || 0) - used).toFixed(1) };
+    } else {
+      const used = ((usedNickStmt.get(srv, nick, since) || {}).b || 0) / GB;
+      out[key] = { kind: 'per_sim', total: pkg.volume_gb || 0, used: +used.toFixed(1), left: +Math.max(0, (pkg.volume_gb || 0) - used).toFixed(1) };
+    }
+  }
+  return out;
+}
 
 // Section: meta (test-pool flags, phone enrich, server list)
 function _metaSection(merged) {
@@ -537,6 +595,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
     const meta = _runSection(logger, 'meta', () => _metaSection(merged), { servers: [] });
     const clientsSec = _runSection(logger, 'clients', _clientsSection, _clientsFallback());
     const billingSec = _runSection(logger, 'billing', _billingSection, { clientMonthCharges: {}, clientMonthGb: {}, revenue30d: { byClient: {}, total: 0, windowDays: 30, asOf: getMoscowToday() } });
+    const pkgSec = _runSection(logger, 'packages', () => _packagesSection(merged), {});
     const trafficSec = _runSection(logger, 'traffic', () => _trafficSection(merged), { clientLiveMonthGb: {}, clientLastHourGb: {}, clientTodayGb: {}, portTodayBytes: {}, modemTrend: {}, clientTrend: {} });
     const fleetSec = _runSection(logger, 'fleet', () => _fleetSection(merged, clientsSec.sanitizedClients), { fleet: { total: 0, online: 0, offline: 0, byServer: {} } });
     // B3 (23.08): окна обслуживания — активные и ближайшие 24ч, для бейджа
@@ -569,6 +628,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       clientLastHourGb: trafficSec.clientLastHourGb,
       clientTodayGb: trafficSec.clientTodayGb,
       portTodayBytes: trafficSec.portTodayBytes,
+      modemPackages: pkgSec,
       modemTrend: trafficSec.modemTrend,
       clientTrend: trafficSec.clientTrend,
       fleet: fleetSec.fleet,

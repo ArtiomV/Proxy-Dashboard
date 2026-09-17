@@ -1,4 +1,5 @@
 'use strict';
+const { parseSpeedToMbps, parsePingMs } = require('../api/proxy-smart');
 //
 // src/jobs/speed-monitor.js — почасовой замер скорости выбранных модемов.
 //
@@ -81,16 +82,16 @@ const CB_FAIL_THRESHOLD = 3;      // подряд сбоев замера на �
 function parseSpeedtestResult(result) {
   let dl = 0, ul = 0, ping = 0;
   if (result && typeof result === 'object') {
-    dl = parseFloat(result.download || result.Download || result.dl || 0);
-    ul = parseFloat(result.upload || result.Upload || result.ul || 0);
-    ping = parseFloat(result.ping || result.Ping || 0);
+    dl = parseSpeedToMbps(result.download ?? result.Download ?? result.dl ?? 0);
+    ul = parseSpeedToMbps(result.upload ?? result.Upload ?? result.ul ?? 0);
+    ping = parsePingMs(result.ping ?? result.Ping ?? 0);
     if (result.raw && typeof result.raw === 'string') {
-      const dlMatch = result.raw.match(/download[:\s]*([\d.]+)/i);
-      const ulMatch = result.raw.match(/upload[:\s]*([\d.]+)/i);
-      const pingMatch = result.raw.match(/ping[:\s]*([\d.]+)/i);
-      if (dlMatch) dl = parseFloat(dlMatch[1]);
-      if (ulMatch) ul = parseFloat(ulMatch[1]);
-      if (pingMatch) ping = parseFloat(pingMatch[1]);
+      const dlMatch = result.raw.match(/download[:\s]*([\d.,]+\s*(?:gbps|mbps|kbps|bps)?)/i);
+      const ulMatch = result.raw.match(/upload[:\s]*([\d.,]+\s*(?:gbps|mbps|kbps|bps)?)/i);
+      const pingMatch = result.raw.match(/ping[:\s]*([\d.,]+\s*ms)/i);
+      if (dlMatch) dl = parseSpeedToMbps(dlMatch[1]);
+      if (ulMatch) ul = parseSpeedToMbps(ulMatch[1]);
+      if (pingMatch) ping = parsePingMs(pingMatch[1]);
     }
   }
   if (!isFinite(ping) || ping < 0 || ping > PING_SANE_MAX_MS) ping = 0;

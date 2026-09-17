@@ -482,7 +482,13 @@ async function aggregateHourlyTraffic() {
               } catch (_) { /* best-effort */ }
             }
           } else if (deltaMon > UNCERTAIN_THRESHOLD && deltaDay === 0) {
-            // Month counter grew significantly but day counter shows zero — counter anomaly
+            // Month counter grew significantly but day counter shows zero — counter anomaly.
+            // 2026-09-17: раньше такая дельта ТЕРЯЛась (finalInc оставался по дневному
+            // счётчику = 0) — трафик не попадал в traffic_hourly и биллинг
+            // (кейс MD_19/MD3_*: day=0, month растёт). Теперь доверяем месячной
+            // дельте и пишем её (с пометкой uncertain=2).
+            finalIncIn = incInMon;
+            finalIncOut = incOutMon;
             uncertain = 2;
             uncertainCount++;
             logger.warn(`[HourlyAgg] uncertain (month>0, day=0): nick=${nick} day_delta=${(deltaDay/1e6).toFixed(1)}MB month_delta=${(deltaMon/1e6).toFixed(1)}MB`);

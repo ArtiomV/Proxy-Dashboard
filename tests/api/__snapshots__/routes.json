@@ -169,6 +169,7 @@
   "POST /api/admin/clients/:id/block",
   "POST /api/admin/clients/:id/charge",
   "POST /api/admin/clients/:id/closing_document_status",
+  "POST /api/admin/clients/:id/delete-ports",
   "POST /api/admin/clients/:id/document",
   "POST /api/admin/clients/:id/payment",
   "POST /api/admin/clients/:id/referral_payout",

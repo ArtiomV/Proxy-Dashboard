@@ -81,7 +81,10 @@ function create(deps) {
       `).all(cutoffDate);
       let dtDeleted = 0;
       if (stale.length) {
-        const stmt = db.prepare('DELETE FROM daily_traffic WHERE port_name = ?');
+        // 2026-09-17: строки с client_name — история потребления клиента,
+        // её храним (даже после удаления портов). Чистим только безымянный
+        // технический мусор (random-порты без привязки).
+        const stmt = db.prepare("DELETE FROM daily_traffic WHERE port_name = ? AND client_name = ''");
         const tx = db.transaction(() => {
           for (const r of stale) {
             const serverName = serverOfKey(r.port_name);

@@ -146,7 +146,7 @@ function init(db) {
 
   // ── traffic_forecast ─────────────────────────────────────────────────
   S.forecastDailyTraffic = db.prepare(`
-    SELECT port_name, date, SUM(bytes_in + bytes_out) as bytes
+    SELECT port_name, MAX(client_name) AS client_name, date, SUM(bytes_in + bytes_out) as bytes
     FROM daily_traffic
     WHERE date >= substr(datetime('now', ? || ' days'), 1, 10)
     GROUP BY port_name, date

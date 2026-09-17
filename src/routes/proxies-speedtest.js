@@ -1,4 +1,5 @@
 'use strict';
+const { parseSpeedToMbps, parsePingMs } = require('../api/proxy-smart');
 //
 // src/routes/proxies-speedtest.js — speedtest endpoints (WP6.5 carve-out from proxies.js, VERBATIM move).
 //
@@ -46,9 +47,9 @@ async function _runSpeedtest(jobId, server, serverName, nick, imei) {
     // Save to history when imei provided and result is valid
     if (imei && result && !result.error) {
       const key = `${serverName}_${imei}`;
-      const dl = parseFloat(result.download || result.Download || result.dl || 0);
-      const ul = parseFloat(result.upload || result.Upload || result.ul || 0);
-      const ping = parseFloat(result.ping || result.Ping || result.latency || 0);
+      const dl = parseSpeedToMbps(result.download ?? result.Download ?? result.dl ?? 0);
+      const ul = parseSpeedToMbps(result.upload ?? result.Upload ?? result.ul ?? 0);
+      const ping = parsePingMs(result.ping ?? result.Ping ?? result.latency ?? 0);
       if (dl > 0 || ul > 0) {
         pushSpeedtestEntry(key, { date: new Date().toISOString(), download: dl, upload: ul, ping, raw: result });
       }
@@ -92,9 +93,9 @@ r.get('/api/admin/speedtest', authMiddleware, adminMiddleware, async (req, res) 
     const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
     if (imei && result && !result.error) {
       const key = `${serverName}_${imei}`;
-      const dl = parseFloat(result.download || result.Download || result.dl || 0);
-      const ul = parseFloat(result.upload || result.Upload || result.ul || 0);
-      const ping = parseFloat(result.ping || result.Ping || result.latency || 0);
+      const dl = parseSpeedToMbps(result.download ?? result.Download ?? result.dl ?? 0);
+      const ul = parseSpeedToMbps(result.upload ?? result.Upload ?? result.ul ?? 0);
+      const ping = parsePingMs(result.ping ?? result.Ping ?? result.latency ?? 0);
       if (dl > 0 || ul > 0) {
         pushSpeedtestEntry(key, { date: new Date().toISOString(), download: dl, upload: ul, ping, raw: result });
       }

@@ -62,6 +62,7 @@ var COLUMNS=[{id:'rail',label:'',visible:true,sortable:false,width:'6px'},
   {id:'http',label:'HTTP <span class="th-hint" title="HTTP-проверка через действующие реквизиты клиента&#10;Зелёный: ответ 2xx/3xx и контент прошёл проверку&#10;Красный: ошибка соединения, статуса или контента">'+icon('info',11)+'</span>',visible:true,sortable:false},
   {id:'trafficDay',label:'Трафик сегодня',visible:true,sortable:true},
   {id:'trafficMon',label:'Трафик месяц',visible:false,sortable:true},
+  {id:'trafficLeft',label:'Остаток пакета <span class="th-hint" title="Остаток трафика по пакету оператора (Настройки → Пакеты операторов)&#10;per_sim — пакет на SIM, «общ.» — общий котёл оператора&#10;Красный: <10% или исчерпан, оранжевый: <25%">'+icon('info',11)+'</span>',visible:true,sortable:true},
   {id:'rateNow',label:'Трафик сейчас <span class="th-hint" title="Текущая скорость модема (Мбит/с) — дельта суточных счётчиков бокса за скользящее окно 10 мин.&#10;↑ исходящий / ↓ входящий">'+icon('info',11)+'</span>',visible:true,sortable:true},
   {id:'speed',label:'Скорость <span class="th-hint" title="Download ↓ / Upload ↑ в Mbps&#10;Зелёный: > 30 Mbps&#10;Синий: 10–30 Mbps&#10;Оранжевый: < 10 Mbps&#10;Внимание: значение аномально низкое">'+icon('info',11)+'</span>',visible:false,sortable:true},
   {id:'uptime',label:'Аптайм 30д',visible:false,sortable:true},
@@ -1240,6 +1241,7 @@ function processData(){if(!currentData)return;_initServers(currentData.servers);
     m.pcErrToday=td?td.errors:0;
     m.pcErrorPctToday=td&&td.total>0?Math.round((td.errors||0)/td.total*100):null;
     m.pcConsecFails=pcConsecMap[pKey]||0;
+    m.pkg=(currentData.modemPackages||{})[pKey]||null;
     var _base=(currentData.speedBaseline||{})[pKey];
     if(_base){m.baselineDegraded=!!_base.degraded;m.speedBaselineDl=Number(_base.baseline_dl||0);m.speedBaselineCurrent=Number(_base.current_dl||0);}
   }
@@ -1984,6 +1986,23 @@ function rehabilitateClientPorts(id,onDone){
       if(typeof onDone==='function')onDone(); else loadData();
     }).catch(function(e){showToast(esc(e.message),'error')});
   },'Реабилитировать','Антифрод');
+}
+
+// «Удалить порты»: немедленное удаление всех портов клиента на боксах —
+// то же, что джоба blocked-port-cleanup по истечении hold, но по кнопке,
+// без ожидания retail_hold_days. Блокировка аккаунта сохраняется.
+function deleteClientPorts(id){
+  if(!id)return;
+  confirmDialog('Удалить ВСЕ порты клиента на боксах? Доступ исчезнет сразу, восстановить нельзя — только выдать новые. Блокировка аккаунта при этом сохраняется.',function(){
+    showToast('Удаляю порты на боксах…','info');
+    api(API+'/api/admin/clients/'+id+'/delete-ports',{method:'POST',json:{}}).then(function(d){
+      if(d&&d.ok){
+        showToast('Удалено портов: '+(d.deleted||0)+(d.poolRemoved?', строк пула: '+d.poolRemoved:'')+(d.errors&&d.errors.length?' (ошибки: '+d.errors.length+')':''),d.errors&&d.errors.length?'warning':'success');
+        loadData();
+      }
+      else showToast((d&&d.error)||'Ошибка','error');
+    }).catch(function(e){showToast(esc(e.message),'error')});
+  },'Удалить порты','Удаление портов');
 }
 
 function impersonateClient(id,name){
@@ -4519,7 +4538,10 @@ function renderNewDailyChart(data){
   var _validClients = {};
   var _mmv = currentData._modemMap || {};
   Object.keys(_mmv).forEach(function(k){ (_mmv[k].ports||[]).forEach(function(p){ if(p.portName) _validClients[p.portName]=1; }); });
-  (currentData.clients||[]).forEach(function(c){ if(c.portName && c.modemCount>0) _validClients[c.portName]=1; });
+  // 2026-09-17: все клиенты с portName показываются, включая заблокированных
+  // и удаливших порты — история потребления хранится и должна отображаться
+  // (кейс speech2text: порты удалены → клиент пропал с графика 30 дней).
+  (currentData.clients||[]).forEach(function(c){ if(c.portName) _validClients[c.portName]=1; });
   var _hasValid = Object.keys(_validClients).length>0;
   // groupKey → {date: bytes}
   var groups = {};

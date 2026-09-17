@@ -1933,11 +1933,18 @@ function getClientBytesForMskDate(portName, date) {
   const r1 = trafficDb.hourlyByClientDateStmt().get(portName, date);
   if (r1.bytes > 0) return r1.bytes;
   // Fallback — daily_traffic stores by port_id; resolve via in-memory map
-  const portIds = [];
+  // 2026-09-17: плюс порты, найденные по client_name в самой таблице —
+  // живая карта теряет порты удалённых клиентов (кейс speech2text).
+  const portIdsSet = new Set();
   for (const [k, v] of Object.entries(portKeyToPortName)) {
-    if (v === portName) portIds.push(k);
+    if (v === portName) portIdsSet.add(k);
   }
-  return trafficDb.dailySumByDateAndPorts(db, date, portIds);
+  try {
+    for (const row of db.prepare("SELECT DISTINCT port_name FROM daily_traffic WHERE client_name = ?").all(portName)) {
+      portIdsSet.add(row.port_name);
+    }
+  } catch (_) { /* best-effort */ }
+  return trafficDb.dailySumByDateAndPorts(db, date, [...portIdsSet]);
 }
 
 // Sum stored daily_traffic bytes for a client over a month (e.g. "2026-03")
@@ -3495,7 +3502,7 @@ app.use(require('./src/routes/clients')({
   notifyClient: (...args) => _clientNotify.notifyClient(...args),
   // Ручная блокировка клиента (POST /clients/:id/block): гашение портов/пула.
   proxyConf, parseHtmlInputFields, findServer, proxySmart, getMoscowNow,
-  retailPoolDb, alerts,
+  retailPoolDb, alerts, knownModems, saveKnownModems,
 }));
 
 
@@ -4137,6 +4144,7 @@ app.use(require('./src/routes/ops-ext')({
   getLastReconciliationMonth: _monthlyRecon.getLastReconciliationMonth,
   getIntervals: () => _intervals,
   getFetchAllServersDataCached: () => fetchAllServersDataCached,  getMergeServerData: () => mergeServerData,
+  getSetting,
   getIpTracking: () => ipTracking,
   getUptimeTracking: () => uptimeTracking,
   getKnownModems: () => knownModems,
