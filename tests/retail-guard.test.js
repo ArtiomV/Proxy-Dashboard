@@ -24,6 +24,7 @@ function mkPoolDb(rows) {
     byPort: (srv, pid) => rows.find(r => r.server === srv && r.port_id === pid),
     block: (id, holdUntil) => { const r = rows.find(x => x.id === id); r.status = 'blocked'; r.hold_until = holdUntil; },
     unblock: (id) => { const r = rows.find(x => x.id === id); r.status = 'leased'; r.hold_until = null; },
+    setRestoreUntil: (id, value) => { const r = rows.find(x => x.id === id); r.restore_until = value; },
     release: (id) => { const r = rows.find(x => x.id === id); r.status = 'free'; r.client_id = null; r.hold_until = null; r.test_expires_at = null; },
     remove: (id) => { const i = rows.findIndex(x => x.id === id); if (i >= 0) rows.splice(i, 1); },
   };
@@ -47,7 +48,14 @@ function mkDeps({ poolRows = [], ledgerEntries = [], resultsFn } = {}) {
         postConfForm: async (srv, path, formData) => { posted.push({ path, formData }); return { ok: true }; },
         getConfAction: async (srv, path) => { deleted.push(path); return { ok: true }; },
       },
-      fetchApi: async (srv, path) => { applied.push(path); return {}; },
+      fetchApi: async (srv, path) => {
+        applied.push(path);
+        if (path === '/apix/list_ports_json') {
+          const validBefore = posted.length ? posted[posted.length - 1].formData.PROXY_VALID_BEFORE : TODAY;
+          return { imei1: [{ portID: 'p1', PROXY_VALID_BEFORE: validBefore }] };
+        }
+        return {};
+      },
       parseHtmlInputFields: () => ({ proxy_password: 'pw1' }),
       findServer: () => server,
       proxySmart: { invalidateCache() {} },
@@ -121,7 +129,7 @@ describe('retail-guard: grace → block → hold → delete', () => {
     await guard.runOnce();
 
     expect(lastValidBefore()).toBe(TODAY);
-    expect(applied).toEqual(['/apix/apply_port?arg=p1']);
+    expect(applied).toContain('/apix/apply_port?arg=p1');
     expect(poolRows[0].status).toBe('blocked');
     expect(Date.parse(poolRows[0].hold_until)).toBe(T0.getTime() + 7 * 86400e3);
     expect(audited.some(a => a.action === 'retail_block')).toBe(true);
@@ -210,6 +218,63 @@ describe('retail-guard: grace → block → hold → delete', () => {
 });
 
 describe('retail-guard: восстановление', () => {
+  it('ошибка продления оставляет порт blocked и повторяет операцию', async () => {
+    const poolRows = [{ id: 1, server: 'S1', port_id: 'p1', status: 'blocked', client_id: 'c1', hold_until: '2026-08-01T00:00:00Z' }];
+    const { deps } = mkDeps({ poolRows, resultsFn: () => serverResults('u_a', TODAY) });
+    deps.proxyConf.getConfForm = async () => ({ ok: false, reason: 'server down' });
+    const guard = guardMod.create(deps);
+    const client = mkClient({ balance: 500, debtBlocked: true, balanceNegativeSince: T0.toISOString() });
+    deps.clients.push(client);
+    const first = await guard.runOnce();
+    const second = await guard.runOnce();
+    expect(first.restored).toEqual([]);
+    expect(second.restored).toEqual([]);
+    expect(poolRows[0].status).toBe('blocked');
+    expect(client.balanceNegativeSince).toBeTruthy();
+    expect(notified.some(n => /сервис восстановлен/i.test(n.text))).toBe(false);
+  });
+
+  it('retry после смены дня использует сохранённую целевую дату', async () => {
+    const poolRows = [{ id: 1, server: 'S1', port_id: 'p1', status: 'blocked', client_id: 'c1', hold_until: '2026-09-30T00:00:00Z' }];
+    const { deps } = mkDeps({ poolRows, resultsFn: () => serverResults('u_a', TODAY) });
+    let fail = true;
+    deps.proxyConf.getConfForm = async () => fail
+      ? ({ ok: false, reason: 'server down' })
+      : ({ ok: true, html: '<form><input name="proxy_password" value="pw1"></form>' });
+    const guard = guardMod.create(deps);
+    deps.clients.push(mkClient({ balance: 500, balanceNegativeSince: T0.toISOString() }));
+    await guard.runOnce();
+    expect(poolRows[0].restore_until).toBe('2026-09-09');
+    setNow(new Date(T0.getTime() + 86400e3));
+    fail = false;
+    await guard.runOnce();
+    expect(lastValidBefore()).toBe('2026-09-09');
+    expect(poolRows[0].status).toBe('leased');
+  });
+
+  it('сохранённая целевая дата из прошлого пересчитывается от сегодня', async () => {
+    const poolRows = [{ id: 1, server: 'S1', port_id: 'p1', status: 'blocked', client_id: 'c1', hold_until: '2026-09-30T00:00:00Z', restore_until: '2026-08-01' }];
+    const { deps } = mkDeps({ poolRows, resultsFn: () => serverResults('u_a', TODAY) });
+    const guard = guardMod.create(deps);
+    deps.clients.push(mkClient({ balance: 500, balanceNegativeSince: T0.toISOString() }));
+    await guard.runOnce();
+    expect(lastValidBefore()).toBe('2026-09-09');
+    expect(poolRows[0].status).toBe('leased');
+  });
+
+  it('apply without authoritative confirmation remains pending', async () => {
+    const poolRows = [{ id: 1, server: 'S1', port_id: 'p1', status: 'blocked', client_id: 'c1', hold_until: '2026-09-30T00:00:00Z' }];
+    const { deps } = mkDeps({ poolRows, resultsFn: () => serverResults('u_a', TODAY) });
+    deps.fetchApi = async (_srv, path) => path === '/apix/list_ports_json'
+      ? { imei1: [{ portID: 'p1', PROXY_VALID_BEFORE: TODAY }] }
+      : {};
+    const guard = guardMod.create(deps);
+    deps.clients.push(mkClient({ balance: 500, balanceNegativeSince: T0.toISOString() }));
+    const result = await guard.runOnce();
+    expect(result.restored).toEqual([]);
+    expect(poolRows[0].status).toBe('blocked');
+  });
+
   it('шаг 4: balance > 0 → blocked → leased, hold NULL, «дата до» = today + floor(balance/avg)', async () => {
     // Списания 100 ₽/день 04–09.08 → avg = 600/7 ≈ 85.71; balance 500 → 5 дней.
     const ledger = [];

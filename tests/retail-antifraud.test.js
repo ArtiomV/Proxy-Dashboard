@@ -103,7 +103,14 @@ function mkDgDeps({ poolRows = [], settings = {}, snapshotRows } = {}) {
       postConfForm: async (srv, path, formData) => { posted.push({ path, formData }); return { ok: true }; },
       getConfAction: async () => ({ ok: true }),
     },
-    fetchApi: async (srv, path) => { applied.push(path); return {}; },
+    fetchApi: async (srv, path) => {
+      applied.push(path);
+      if (path === '/apix/list_ports_json') {
+        const validBefore = posted.length ? posted[posted.length - 1].formData.PROXY_VALID_BEFORE : TODAY;
+        return { imei1: [{ portID: 'p1', PROXY_VALID_BEFORE: validBefore }] };
+      }
+      return {};
+    },
     parseHtmlInputFields: () => ({ proxy_password: 'pw1' }),
     findServer: () => server,
     proxySmart: { invalidateCache() {} },

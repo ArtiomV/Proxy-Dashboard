@@ -45,6 +45,7 @@ function create(deps) {
   const _clientPorts = portValidity.clientPorts;
 
   const RESTORE_DAYS = 30;   // продление при восстановлении: сегодня + 30 дн
+  const restoring = new Set();
 
   function _mskDateStr(d) { return d.toLocaleDateString('en-CA'); }   // YYYY-MM-DD
   function _today() { return _mskDateStr(getMoscowNow()); }
@@ -118,19 +119,27 @@ function create(deps) {
   }
 
   // ── Восстановление после оплаты (вызывается по событию client-credit) ──
-  async function restoreAfterCredit(client) {
+  async function _restoreAfterCredit(client) {
     if (_retailGuardOwns()) return false;   // Э2: восстановлением владеет retail-guard
     if (!client || !client.debtBlocked) return false;   // гасили не мы — не трогаем
     if ((client.balance || 0) <= 0) return false;
-    const until = new Date(getMoscowNow().getTime() + RESTORE_DAYS * 86400000);
-    const untilStr = _mskDateStr(until);
+    let untilStr = client.debtRestoreUntil;
+    // Цель из прошлого (retry после долгого простоя) продлевала бы порт
+    // задним числом — пересчитываем от сегодня и пересохраняем.
+    if (untilStr && untilStr <= _today()) untilStr = null;
+    if (!untilStr) {
+      const until = new Date(getMoscowNow().getTime() + RESTORE_DAYS * 86400000);
+      untilStr = _mskDateStr(until);
+      client.debtRestoreUntil = untilStr;
+      saveClients(clients);
+    }
 
     const results = await fetchAllServersDataCached();
     const ports = _clientPorts(client, results);
     let restored = 0;
     for (const pt of ports) {
       // Не укорачиваем более поздний срок (ручной override «продлить до…»).
-      if (pt.validBefore && pt.validBefore > untilStr) continue;
+      if (pt.validBefore && pt.validBefore > untilStr) { restored++; continue; }
       try {
         await setPortValidBefore(pt.server, pt.portId, untilStr);
         restored++;
@@ -140,7 +149,12 @@ function create(deps) {
           `Восстановление: порт ${pt.portId} не продлён: ${e.message}`, { client_id: client.id, port_id: pt.portId });
       }
     }
+    if (ports.length === 0 || restored !== ports.length) {
+      logger.warn(`[DebtBlock] ${client.name}: восстановлено ${restored}/${ports.length}, повтор будет выполнен позже`);
+      return false;
+    }
     client.debtBlocked = false;
+    client.debtRestoreUntil = null;
     if (!client.blocked) client.blockedSince = null;   // долг погашен, ручного блока нет — hold отменяется
     saveClients(clients);
     logger.info(`[DebtBlock] ${client.name}: баланс восстановлен (${client.balance} ₽) — «дата до» продлена до ${untilStr}, портов: ${restored}`);
@@ -155,7 +169,24 @@ function create(deps) {
     return true;
   }
 
-  return { runAfterDailyBilling, restoreAfterCredit, setPortValidBefore, avgDailyCharge7d };
+  async function restoreAfterCredit(client) {
+    if (!client || restoring.has(client.id)) return false;
+    restoring.add(client.id);
+    try { return await _restoreAfterCredit(client); }
+    finally { restoring.delete(client.id); }
+  }
+
+  async function retryPendingRestores() {
+    let restored = 0, pending = 0;
+    for (const client of clients) {
+      if (!client.debtBlocked || (client.balance || 0) <= 0) continue;
+      if (await restoreAfterCredit(client)) restored++;
+      else pending++;
+    }
+    return { restored, pending };
+  }
+
+  return { runAfterDailyBilling, restoreAfterCredit, retryPendingRestores, setPortValidBefore, avgDailyCharge7d };
 }
 
 module.exports = { create };

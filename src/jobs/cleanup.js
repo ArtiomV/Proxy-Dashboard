@@ -51,16 +51,28 @@ function create(deps) {
 
       const FRESHNESS_MS = 30 * 60 * 1000;
       const liveIds = new Set();
+      const authoritativeServers = new Set();
       const skippedSrv = [];
       for (const [srvName, entry] of Object.entries(serverCache)) {
         if (!entry || !entry.bw) continue;
         const age = Date.now() - (entry.cachedAt || 0);
-        if (age > FRESHNESS_MS) { skippedSrv.push(srvName); continue; }
+        if (age < 0 || age > FRESHNESS_MS || !entry.ports || typeof entry.ports !== 'object') {
+          skippedSrv.push(srvName); continue;
+        }
+        authoritativeServers.add(srvName);
         for (const pid of Object.keys(entry.bw)) liveIds.add(srvName + '_' + pid);
+        for (const list of Object.values(entry.ports)) {
+          for (const port of (Array.isArray(list) ? list : [])) {
+            if (port && port.portID) liveIds.add(srvName + '_' + port.portID);
+          }
+        }
       }
-      if (liveIds.size === 0) {
+      if (authoritativeServers.size === 0) {
         return { skipped: 'no_fresh_servers', skippedSrv };
       }
+      const serverOfKey = key => [...authoritativeServers]
+        .sort((a, b) => b.length - a.length)
+        .find(serverName => String(key).startsWith(serverName + '_')) || '';
 
       // 1. daily_traffic table: stale port_ids whose latest activity < cutoff.
       const stale = db.prepare(`
@@ -72,6 +84,8 @@ function create(deps) {
         const stmt = db.prepare('DELETE FROM daily_traffic WHERE port_name = ?');
         const tx = db.transaction(() => {
           for (const r of stale) {
+            const serverName = serverOfKey(r.port_name);
+            if (!authoritativeServers.has(serverName)) continue;
             if (liveIds.has(r.port_name)) continue;     // still live → keep
             dtDeleted += stmt.run(r.port_name).changes;
           }
@@ -82,6 +96,8 @@ function create(deps) {
       // 2. In-memory dailyTraffic: drop matching keys.
       let dtMemKeys = 0;
       for (const k of Object.keys(dailyTraffic)) {
+        const serverName = serverOfKey(k);
+        if (!authoritativeServers.has(serverName)) continue;
         if (liveIds.has(k)) continue;
         const dates = Object.keys(dailyTraffic[k]);
         const lastDate = dates.length ? dates.sort().slice(-1)[0] : '';

@@ -9,8 +9,8 @@
 //
 // Что делает джоба на каждом цикле (вызывается из modem-tracking):
 //   1. парсит ping_stats → { latency_ms, loss_pct };
-//   2. следит за свежестью: значение не изменилось ping_stale_cycles опросов
-//      подряд → данные протухли, алерты и влияние на аптайм отключаются;
+//   2. следит за свежестью по времени получения живого ответа; одинаковые
+//      результаты являются допустимыми новыми наблюдениями;
 //   3. пишет строку в modem_ping (история пинга для интерфейса и алертов);
 //   4. алерты: online (IS_ONLINE=yes), но loss ≥ ping_loss_dead_pct два
 //      опроса подряд → modem_ping_dead; latency > ping_latency_warn_ms или
@@ -24,11 +24,12 @@
 
 function create(deps) {
   const { db, logger, alerts, getSetting } = deps;
+  const _now = deps.now || (() => Date.now());
   const _insert = db.prepare(
     'INSERT INTO modem_ping (ts, server, nick, latency_ms, loss_pct, ok) VALUES (?,?,?,?,?,?)'
   );
 
-  // key: `${server}_${imei}` → { nick, lastRaw, unchangedCycles, deadStreak,
+  // key: `${server}_${imei}` → { nick, lastRaw, deadStreak,
   //   slowStreak, down, slow, last: {latency_ms, loss_pct, ok, fresh, ts} }
   const state = new Map();
 
@@ -47,15 +48,25 @@ function create(deps) {
   function alive(serverName, imei) {
     if (!_enabled()) return null;
     const st = state.get(serverName + '_' + imei);
-    if (!st || !st.last || !st.last.fresh) return null;
+    if (!st || !st.last || !_isFresh(st.last)) return null;
     return st.last.ok;
+  }
+
+  function _ttlMs() {
+    return Math.max(1, Number(getSetting('ping_fresh_ttl_min', 10)) || 10) * 60000;
+  }
+
+  function _isFresh(last) {
+    if (!last || last.quality !== 'valid') return false;
+    const observed = Date.parse(last.ts);
+    return Number.isFinite(observed) && _now() - observed <= _ttlMs();
   }
 
   // Снимок для UI: { 'S1_MD2_39': { latency_ms, loss_pct, ok, fresh, ts } }
   function latest() {
     const out = {};
     for (const st of state.values()) {
-      if (st.last) out[st.server + '_' + st.nick] = st.last;
+      if (st.last) out[st.server + '_' + st.nick] = { ...st.last, fresh: _isFresh(st.last) };
     }
     return out;
   }
@@ -66,7 +77,6 @@ function create(deps) {
     const deadPct = Number(getSetting('ping_loss_dead_pct', 100));
     const warnPct = Number(getSetting('ping_loss_warn_pct', 30));
     const warnMs  = Number(getSetting('ping_latency_warn_ms', 800));
-    const staleCycles = Number(getSetting('ping_stale_cycles', 5));
     const tsIso = new Date(nowMs).toISOString();
 
     for (const m of statusArr) {
@@ -81,29 +91,32 @@ function create(deps) {
       const key = serverName + '_' + imei;
       let st = state.get(key);
       if (!st) {
-        st = { server: serverName, nick, lastRaw: '', unchangedCycles: 0,
+        st = { server: serverName, nick, lastRaw: '',
                deadStreak: 0, slowStreak: 0, down: false, slow: false, last: null };
         state.set(key, st);
       }
       st.nick = nick;
 
-      // Свежесть: одинаковая строка N опросов подряд → бокс перестал мерить.
-      if (typeof raw === 'string' && raw) {
-        if (raw === st.lastRaw) st.unchangedCycles++;
-        else { st.lastRaw = raw; st.unchangedCycles = 0; }
-      }
       const parsed = parsePingStats(raw);
-      if (!parsed) continue;
+      if (!parsed) {
+        st.last = { latency_ms: null, loss_pct: null, ok: null, fresh: false,
+          quality: raw ? 'invalid' : 'missing', ts: tsIso };
+        st.deadStreak = 0;
+        st.slowStreak = 0;
+        continue;
+      }
 
-      const fresh = st.unchangedCycles < staleCycles;
       const ok = parsed.loss_pct < deadPct;
-      st.last = { latency_ms: parsed.latency_ms, loss_pct: parsed.loss_pct, ok, fresh, ts: tsIso };
+      st.lastRaw = raw;
+      st.last = { latency_ms: parsed.latency_ms, loss_pct: parsed.loss_pct, ok,
+        fresh: true, quality: 'valid', ts: tsIso };
       try { _insert.run(tsIso, serverName, nick, parsed.latency_ms, parsed.loss_pct, ok ? 1 : 0); }
       catch (e) { logger.warn('[ModemPing] insert failed: ' + e.message); }
 
       // Модем оффлайн — территория modem_offline-алертов, здесь молчим.
-      // Протухшие данные — тоже молчим.
-      if (!online || !fresh) { st.deadStreak = 0; st.slowStreak = 0; continue; }
+      // Свежесть здесь не проверяем: принятый parsed-результат — по
+      // определению свежее наблюдение (TTL действует на чтении: alive/latest).
+      if (!online) { st.deadStreak = 0; st.slowStreak = 0; continue; }
 
       if (!ok) {
         st.deadStreak++;

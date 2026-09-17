@@ -1,6 +1,6 @@
 // ModemPing (A1, 23.08): парсинг ping_stats, свежесть, стрики алертов
 // (dead/slow/recovered) и влияние alive() на аптайм.
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { createRequire } from 'module';
 
 const require = createRequire(import.meta.url);
@@ -36,6 +36,8 @@ function statusEntry(imei, nick, pingStats, online = 'yes') {
 }
 
 beforeEach(() => {
+  vi.useFakeTimers();
+  vi.setSystemTime(NOW);
   db = new Database(':memory:');
   db.exec(`CREATE TABLE modem_ping (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -43,6 +45,7 @@ beforeEach(() => {
     latency_ms INTEGER, loss_pct INTEGER, ok INTEGER
   )`);
 });
+afterEach(() => vi.useRealTimers());
 
 describe('parsePingStats', () => {
   it('parses "183ms, 0% loss"', () => {
@@ -80,11 +83,20 @@ describe('ingest + alive', () => {
     expect(job.alive('S1', 'imei1')).toBeNull();
   });
 
-  it('alive=null when data went stale (unchanged N cycles)', () => {
-    const job = mk({ ping_stale_cycles: 3 });
-    for (let i = 0; i < 4; i++) job.ingest('S1', [statusEntry('imei1', 'M', '900ms, 100% loss')], NOW + i * 60000);
+  it('alive=null when the last observation exceeds TTL', () => {
+    const job = mk({ ping_fresh_ttl_min: 10 });
+    job.ingest('S1', [statusEntry('imei1', 'M', '900ms, 100% loss')], NOW);
+    vi.setSystemTime(NOW + 11 * 60000);
     expect(job.alive('S1', 'imei1')).toBeNull();
     expect(job.latest()['S1_M'].fresh).toBe(false);
+  });
+
+  it('missing ping invalidates the previous result immediately', () => {
+    const job = mk();
+    job.ingest('S1', [statusEntry('imei1', 'M', '20ms, 0% loss')], NOW);
+    job.ingest('S1', [statusEntry('imei1', 'M', '')], NOW + 60000);
+    expect(job.alive('S1', 'imei1')).toBeNull();
+    expect(job.latest()['S1_M']).toMatchObject({ fresh: false, quality: 'missing' });
   });
 
   it('skips entries without IMEI', () => {

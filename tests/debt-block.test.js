@@ -28,7 +28,14 @@ function mkDeps(ledgerEntries = [], resultsFn = serverResults) {
       getConfForm: async () => ({ ok: true, html: '<form><input name="proxy_password" value="pw1"></form>' }),
       postConfForm: async (srv, path, formData) => { posted.push({ path, formData }); return { ok: true }; },
     },
-    fetchApi: async (srv, path) => { applied.push(path); return {}; },
+    fetchApi: async (srv, path) => {
+      applied.push(path);
+      if (path === '/apix/list_ports_json') {
+        const validBefore = posted.length ? posted[posted.length - 1].formData.PROXY_VALID_BEFORE : TODAY;
+        return { imei1: [{ portID: 'p1', PROXY_VALID_BEFORE: validBefore }] };
+      }
+      return {};
+    },
     parseHtmlInputFields: () => ({ proxy_password: 'pw1' }),
     findServer: () => server,
     proxySmart: { invalidateCache() {} },
@@ -66,7 +73,7 @@ describe('debt-block: автоблок после DailyBilling', () => {
     expect(posted.length).toBe(1);
     expect(posted[0].path).toBe('/conf/edit_port/p1');
     expect(lastPostedValidBefore()).toBe(TODAY);
-    expect(applied).toEqual(['/apix/apply_port?arg=p1']);
+    expect(applied).toContain('/apix/apply_port?arg=p1');
     expect(client.debtBlocked).toBe(true);
     expect(saved).toBe(1);
     expect(alertsFired.some(a => a.rule === 'client_blocked_debt')).toBe(true);
@@ -164,9 +171,9 @@ describe('debt-block: восстановление после оплаты', () 
 
     expect(ok).toBe(true);
     expect(lastPostedValidBefore()).toBe(RESTORE_UNTIL);
-    expect(applied).toEqual(['/apix/apply_port?arg=p1']);
+    expect(applied).toContain('/apix/apply_port?arg=p1');
     expect(client.debtBlocked).toBe(false);
-    expect(saved).toBe(1);
+    expect(saved).toBe(2); // persist fixed target, then clear it after confirmation
     expect(alertsFired.some(a => a.rule === 'client_unblocked_debt')).toBe(true);
     expect(audited.some(a => a.action === 'debt_unblock')).toBe(true);
   });
@@ -193,6 +200,35 @@ describe('debt-block: восстановление после оплаты', () 
     // порт имел 2026-12-31 > restore-until → записи не было, но флаг снят
     expect(posted.length).toBe(0);
     expect(client.debtBlocked).toBe(false);
+  });
+
+  it('периодический recovery повторяет незавершённое восстановление после рестарта', async () => {
+    const deps = mkDeps([], () => serverResults('clientA', TODAY));
+    const client = mkClient({ balance: 500, debtBlocked: true });
+    deps.clients.push(client);
+    let down = true;
+    deps.proxyConf.getConfForm = async () => down
+      ? ({ ok: false, reason: 'server down' })
+      : ({ ok: true, html: '<form><input name="proxy_password" value="pw1"></form>' });
+    const firstJob = debtBlockMod.create(deps);
+    expect(await firstJob.restoreAfterCredit(client)).toBe(false);
+    expect(client.debtRestoreUntil).toBe(RESTORE_UNTIL);
+    down = false;
+    const restartedJob = debtBlockMod.create(deps);
+    await expect(restartedJob.retryPendingRestores()).resolves.toEqual({ restored: 1, pending: 0 });
+    expect(client.debtBlocked).toBe(false);
+    expect(client.debtRestoreUntil).toBe(null);
+  });
+
+  it('сохранённая цель из прошлого пересчитывается от сегодня', async () => {
+    const deps = mkDeps([], () => serverResults('clientA', TODAY));
+    const client = mkClient({ balance: 500, debtBlocked: true, debtRestoreUntil: '2026-08-01' });
+    deps.clients.push(client);
+    const job = debtBlockMod.create(deps);
+    expect(await job.restoreAfterCredit(client)).toBe(true);
+    expect(lastPostedValidBefore()).toBe(RESTORE_UNTIL);
+    expect(client.debtBlocked).toBe(false);
+    expect(client.debtRestoreUntil).toBe(null);
   });
 });
 

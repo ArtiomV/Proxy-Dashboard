@@ -47,6 +47,7 @@ function create(deps) {
   const portValidity = require('../services/port-validity').create(deps);
 
   const DAY_MS = 86400000;
+  let pendingRestoreRows = new Set();
 
   function _nowMs() { return getMoscowNow().getTime(); }
   function _today() { return getMoscowNow().toLocaleDateString('en-CA'); }   // YYYY-MM-DD
@@ -152,24 +153,51 @@ function create(deps) {
     // avg = 0 → 30 дн дефолт; floor=0 (баланса < сутки) — минимум 1 день,
     // иначе «дата до» = сегодня и порт умирал бы сразу после восстановления.
     const days = avg > 0 ? Math.max(1, Math.floor(balance / avg)) : 30;
-    const until = getMoscowNow();
-    until.setDate(until.getDate() + days);
-    const untilStr = until.toLocaleDateString('en-CA');
+    let untilStr = blockedRows.map(r => r.restore_until).filter(Boolean).sort()[0] || null;
+    // Цель из прошлого (retry после долгого простоя) продлевала бы порт
+    // задним числом — пересчитываем от сегодня и пересохраняем.
+    if (untilStr && untilStr <= _today()) untilStr = null;
+    if (!untilStr) {
+      const until = getMoscowNow();
+      until.setDate(until.getDate() + days);
+      untilStr = until.toLocaleDateString('en-CA');
+      for (const row of blockedRows) {
+        if (typeof retailPoolDb.setRestoreUntil === 'function') retailPoolDb.setRestoreUntil(row.id, untilStr);
+        row.restore_until = untilStr;
+      }
+    }
 
+    const livePorts = portValidity.clientPorts(client, serverResults);
+    const required = blockedRows.length
+      ? blockedRows.map(row => ({ row, pt: livePorts.find(pt => pt.server && pt.server.name === row.server && pt.portId === row.port_id) }))
+      : livePorts.map(pt => ({ row: null, pt }));
     let restored = 0;
-    for (const pt of portValidity.clientPorts(client, serverResults)) {
+    let pending = 0;
+    for (const item of required) {
+      const pt = item.pt;
+      if (!pt) { pending++; continue; }
       // Не укорачиваем более поздний срок (ручной override «продлить до…»).
-      if (pt.validBefore && pt.validBefore > untilStr) continue;
+      if (pt.validBefore && pt.validBefore > untilStr) {
+        restored++;
+        if (item.row) retailPoolDb.unblock(item.row.id);
+        continue;
+      }
       try {
         await portValidity.setPortValidBefore(pt.server, pt.portId, untilStr);
         restored++;
+        if (item.row) retailPoolDb.unblock(item.row.id);
       } catch (e) {
+        pending++;
         logger.error(`[RetailGuard] ${client.login}: порт ${pt.portId} не продлён: ${e.message}`);
         logActivity('billing', 'error', 'retail_restore_error', client.login,
           `Восстановление: порт ${pt.portId} не продлён: ${e.message}`, { client_id: client.id, port_id: pt.portId });
       }
     }
-    for (const row of blockedRows) retailPoolDb.unblock(row.id);
+    if (pending > 0 || required.length === 0) {
+      for (const item of required) if (item.row && (!item.pt || item.row.status === 'blocked')) pendingRestoreRows.add(item.row.id);
+      logger.warn(`[RetailGuard] ${client.login}: восстановлено ${restored}/${required.length}, pending=${pending || required.length}`);
+      return false;
+    }
     client.balanceNegativeSince = null;
     client.debtBlocked = false;   // сброс legacy-флага (миграция 056)
 
@@ -280,6 +308,7 @@ function create(deps) {
   // ── фаза по строкам пула: hold истёк → удалить порт + строку (шаг 3) ──
   async function _processExpiredHolds(stats) {
     for (const row of retailPoolDb.byStatus('blocked')) {
+      if (pendingRestoreRows.has(row.id)) continue;
       if (!row.hold_until) continue;                       // ∞ hold (-1) — НИКОГДА
       if (Date.parse(row.hold_until) > _nowMs()) continue;
       const server = findServer(row.server);
@@ -387,6 +416,7 @@ function create(deps) {
     if (!getSetting('retail_enabled', false)) return { skipped: 'retail_disabled' };
     if (running) return { skipped: 'already_running' };
     running = true;
+    pendingRestoreRows = new Set();
     const stats = { grace: [], blocked: [], restored: [], deleted: [], testDayEnded: [] };
     try {
       const serverResults = await fetchAllServersDataCached();

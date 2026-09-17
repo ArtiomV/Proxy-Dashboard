@@ -32,7 +32,7 @@ function init(db) {
   );
   S.release = db.prepare(
     "UPDATE retail_pool SET status='free', client_id=NULL, reserved_until=NULL, hold_until=NULL, " +
-    "test_expires_at=NULL, " +
+    "test_expires_at=NULL, restore_until=NULL, " +
     "last_client_id=COALESCE(client_id, last_client_id), updated_at=datetime('now') WHERE id = ?"
   );
   S.block = db.prepare(
@@ -40,7 +40,10 @@ function init(db) {
   );
   // Восстановление после пополнения (Э2): blocked → leased, hold снимается.
   S.unblock = db.prepare(
-    "UPDATE retail_pool SET status='leased', hold_until=NULL, updated_at=datetime('now') WHERE id = ?"
+    "UPDATE retail_pool SET status='leased', hold_until=NULL, restore_until=NULL, updated_at=datetime('now') WHERE id = ?"
+  );
+  S.setRestoreUntil = db.prepare(
+    "UPDATE retail_pool SET restore_until=?, updated_at=datetime('now') WHERE id=? AND status='blocked'"
   );
   // Э2: дедлайн возврата тест-дня (миграция 062); NULL у обычных подписок.
   S.setTestExpires = db.prepare(
@@ -83,6 +86,7 @@ function lease(id) { return S.lease.run(id); }
 function release(id) { return S.release.run(id); }
 function block(id, holdUntil) { return S.block.run(holdUntil, id); }
 function unblock(id) { return S.unblock.run(id); }
+function setRestoreUntil(id, dateStr) { return S.setRestoreUntil.run(dateStr, id); }
 function setTestExpires(id, iso) { return S.setTestExpires.run(iso, id); }
 function rebind(id, server, portId) { return S.rebind.run(server, portId, id); }
 function insertFree(server, portId) { return S.insertFree.run(server, portId); }
@@ -93,7 +97,7 @@ function expiredHolds() { return S.expiredHolds.all(); }
 
 module.exports = {
   init, byId, byPort, byStatus, all, byClient, countByStatus, nextFree,
-  reserve, lease, release, block, unblock, setTestExpires, rebind,
+  reserve, lease, release, block, unblock, setRestoreUntil, setTestExpires, rebind,
   insertFree, insertLeased, remove,
   expiredReservations, expiredHolds,
 };

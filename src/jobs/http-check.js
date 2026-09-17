@@ -32,72 +32,77 @@ function fetchThroughProxy(proxy, targetUrl, timeoutMs) {
   return new Promise((resolve, reject) => {
     const started = Date.now();
     const target = new URL(targetUrl);
+    if (!['http:', 'https:'].includes(target.protocol)) return reject(new Error('unsupported_protocol'));
     const auth = (proxy.login && proxy.password)
       ? 'Basic ' + Buffer.from(proxy.login + ':' + proxy.password).toString('base64') : null;
-
-    const finish = (status, bodyBuf) => resolve({ status, totalMs: Date.now() - started, body: bodyBuf.toString('utf8') });
-
-    const collect = (res, sock) => {
+    const resources = new Set();
+    let settled = false;
+    // One deadline includes TCP, CONNECT, TLS and body, even if bytes keep arriving.
+    const timer = setTimeout(() => finish(new Error('timeout')), timeoutMs);
+    function finish(error, status, body) {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      for (const resource of resources) resource.destroy();
+      if (error) reject(error);
+      else resolve({ status, totalMs: Date.now() - started, body: body.toString('utf8') });
+    }
+    function track(resource) {
+      resources.add(resource);
+      resource.on('error', error => finish(error));
+      return resource;
+    }
+    const collect = res => {
+      track(res);
       const chunks = []; let bytes = 0;
-      res.on('data', c => { bytes += c.length; if (bytes <= MAX_BODY) chunks.push(c); if (bytes > MAX_BODY) { res.destroy(); } });
-      res.on('end', () => finish(res.statusCode || 0, Buffer.concat(chunks)));
-      res.on('close', () => finish(res.statusCode || 0, Buffer.concat(chunks)));
-      res.on('error', reject);
-      if (sock) sock.on('error', reject);
+      res.on('data', chunk => {
+        const remaining = MAX_BODY - bytes;
+        chunks.push(chunk.subarray(0, remaining));
+        bytes += Math.min(remaining, chunk.length);
+        // Content checks intentionally inspect only the first MAX_BODY bytes.
+        if (bytes >= MAX_BODY) finish(null, res.statusCode || 0, Buffer.concat(chunks));
+      });
+      res.on('end', () => finish(null, res.statusCode || 0, Buffer.concat(chunks)));
+      res.on('aborted', () => finish(new Error('response_aborted')));
+      res.on('close', () => {
+        if (!res.complete) finish(new Error('response_aborted'));
+      });
     };
-
+    const headers = { Host: target.host, 'User-Agent': 'Mozilla/5.0 (httpcheck)',
+      Accept: '*/*', 'Accept-Encoding': 'identity', Connection: 'close' };
     if (target.protocol === 'http:') {
-      // Обычный absolute-URI GET через прокси (как checkOneProxy).
-      const req = http.request({
-        hostname: proxy.host, port: proxy.port, method: 'GET',
-        path: targetUrl,
-        headers: { Host: target.host, ...(auth ? { 'Proxy-Authorization': auth } : {}) },
-        timeout: timeoutMs,
-      }, res => collect(res));
-      req.on('error', reject);
-      req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
-      req.end();
+      track(http.request({ hostname: proxy.host, port: proxy.port, method: 'GET',
+        path: targetUrl, agent: false,
+        headers: { ...headers, ...(auth ? { 'Proxy-Authorization': auth } : {}) },
+      }, collect)).end();
       return;
     }
-
-    // https — CONNECT-туннель, затем TLS поверх него.
-    const connReq = http.request({
-      hostname: proxy.host, port: proxy.port, method: 'CONNECT',
-      path: target.hostname + ':443',
-      headers: { Host: target.hostname + ':443', ...(auth ? { 'Proxy-Authorization': auth } : {}) },
-      timeout: timeoutMs,
-    });
-    connReq.on('connect', (res, socket) => {
-      if (res.statusCode !== 200) {
-        socket.destroy();
-        return reject(new Error('CONNECT status ' + res.statusCode));
-      }
-      const tlsSock = tls.connect({ socket, servername: target.hostname, rejectUnauthorized: false, timeout: timeoutMs }, () => {
-        const reqStr = `GET ${target.pathname || '/'}${target.search || ''} HTTP/1.1\r\nHost: ${target.host}\r\nUser-Agent: Mozilla/5.0 (httpcheck)\r\nAccept: */*\r\nConnection: close\r\n\r\n`;
-        tlsSock.write(reqStr);
-        let buf = Buffer.alloc(0);
-        tlsSock.on('data', c => {
-          buf = Buffer.concat([buf, c]);
-          if (buf.length > MAX_BODY) tlsSock.destroy();
-        });
-        tlsSock.on('end', () => {
-          const headEnd = buf.indexOf('\r\n\r\n');
-          const head = headEnd >= 0 ? buf.slice(0, headEnd).toString('latin1') : '';
-          const status = parseInt((head.match(/^HTTP\/\d\.\d (\d+)/) || [])[1] || '0', 10);
-          // chunked-декод не делаем: для must-contain достаточно сырого тела
-          // (ключевые фразы заглушек видны и в chunked-потоке).
-          finish(status, headEnd >= 0 ? buf.slice(headEnd + 4) : buf);
-        });
+    const authority = target.hostname + ':' + (target.port || '443');
+    const connReq = track(http.request({
+      hostname: proxy.host, port: proxy.port, method: 'CONNECT', path: authority,
+      agent: false,
+      headers: { Host: authority, ...(auth ? { 'Proxy-Authorization': auth } : {}) },
+    }));
+    connReq.on('connect', (res, socket, head) => {
+      track(socket);
+      if (settled) { socket.destroy(); return; }
+      if (res.statusCode !== 200) return finish(new Error('CONNECT status ' + res.statusCode));
+      if (head.length) socket.unshift(head);
+      const tlsSock = track(tls.connect({ socket, servername: target.hostname,
+        rejectUnauthorized: true }, () => {
+        if (settled) return;
+        // Let Node parse framing/chunked encoding for HTTPS just as for HTTP.
+        const agent = new http.Agent({ keepAlive: false });
+        resources.add(agent);
+        agent.createConnection = () => tlsSock;
+        track(http.request({ hostname: target.hostname, port: target.port || 443,
+          method: 'GET', path: target.pathname + target.search, headers, agent,
+        }, collect)).end();
+      }));
+      tlsSock.on('close', () => {
+        if (!settled) finish(new Error('tunnel_closed'));
       });
-      // 24.08: error/timeout вешаем СРАЗУ, а не внутри secureConnect-колбэка.
-      // Раньше при обрыве туннеля посреди TLS-handshake 'error' стрелял до
-      // появления слушателя → uncaughtException → рестарт всего дашборда
-      // (4 краша за 23–24.08 по этой причине).
-      tlsSock.on('error', reject);
-      tlsSock.on('timeout', () => { tlsSock.destroy(); reject(new Error('timeout')); });
     });
-    connReq.on('error', reject);
-    connReq.on('timeout', () => { connReq.destroy(); reject(new Error('timeout')); });
     connReq.end();
   });
 }

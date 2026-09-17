@@ -6,10 +6,13 @@
 //
 function create(deps) {
   const { db, logger, logActivity, fs, path } = deps;
+  let backupRunning = false;
 
   // Nightly DB backup — SQLite Online Backup API (safe while live).
   // Keeps 7 days of snapshots; older ones pruned (with sidecars).
   async function runDbBackup() {
+    if (backupRunning) return { skipped: 'already_running' };
+    backupRunning = true;
     try {
       const backupDir = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
       try { fs.mkdirSync(backupDir, { recursive: true }); } catch (_) { /* best-effort: error intentionally swallowed */ }
@@ -62,35 +65,21 @@ function create(deps) {
     } catch (e) {
       logger.error('[DbBackup] FAILED: ' + (e.stack || e.message));
       logActivity('system', 'critical', 'db_backup_failed', null, 'DB backup failed', { error: e.message });
+    } finally {
+      backupRunning = false;
     }
   }
 
-  // Nightly history pruning — rotation_log / system_log / proxy_checks are
-  // append-only and were the bulk of the live DB. Bare-date cutoff is
-  // index-friendly and format-agnostic across the three timestamp formats.
+  // Nightly history pruning — no-op с 2026-09: retention rotation_log /
+  // system_log / proxy_checks (и остальных time-bounded таблиц) теперь ведёт
+  // jobs/cleanup.js (runRetentionCleanup, настраиваемые retention_* политики).
+  // Функция сохранена для расписания (startup.js, 02:30 UTC) и внешнего API.
   const HISTORY_RETENTION_DAYS = 60;
   function runHistoryPrune() {
-    try {
-      const cutoff = new Date(Date.now() - HISTORY_RETENTION_DAYS * 86400000).toISOString().slice(0, 10);
-      const targets = [
-        ['rotation_log', 'started_at'],
-        ['system_log',   'timestamp'],
-        ['proxy_checks', 'checked_at'],
-      ];
-      let total = 0;
-      const parts = [];
-      for (const [table, col] of targets) {
-        const r = db.prepare(`DELETE FROM ${table} WHERE ${col} < ?`).run(cutoff);
-        total += r.changes;
-        parts.push(`${table}=${r.changes}`);
-      }
-      logger.info(`[HistoryPrune] cutoff<${cutoff} (${HISTORY_RETENTION_DAYS}d), deleted ${total} rows (${parts.join(', ')})`);
-      if (total > 0) {
-        logActivity('system', 'info', 'history_prune', null, `Pruned ${total} rows older than ${HISTORY_RETENTION_DAYS}d`, { total, cutoff, parts });
-      }
-    } catch (e) {
-      logger.error('[HistoryPrune] ' + (e.stack || e.message));
-    }
+    // Retention is owned by jobs/cleanup.js and its configurable policy.
+    // Kept as a no-op for scheduler/API compatibility.
+    logger.info('[HistoryPrune] skipped: unified retention runs in DbCleanup');
+    return { skipped: 'unified_retention' };
   }
 
   return { runDbBackup, runHistoryPrune, HISTORY_RETENTION_DAYS };
@@ -144,21 +133,44 @@ function runOffsiteUpload(logger, logActivity, backupDir) {
 // в память. Удаляет исходный .db после успешной записи .gz.
 function gzipFile(dest) {
   const zlib = require('zlib');
-  return new Promise((resolve, reject) => {
-    const fs = require('fs');
-    const out = dest + '.gz';
-    const rs = fs.createReadStream(dest);
-    const ws = fs.createWriteStream(out);
-    const gz = zlib.createGzip({ level: 6 });
-    rs.on('error', reject);
-    ws.on('error', reject);
-    gz.on('error', reject);
-    ws.on('finish', () => {
-      try { fs.unlinkSync(dest); } catch (_) { /* best-effort */ }
-      resolve(out);
+  const fs = require('fs');
+  const crypto = require('crypto');
+  const { Writable } = require('stream');
+  const { pipeline } = require('stream/promises');
+  async function sha256(file, compressed) {
+    const hash = crypto.createHash('sha256');
+    const sink = new Writable({
+      write(chunk, _enc, callback) { hash.update(chunk); callback(); },
     });
-    rs.pipe(gz).pipe(ws);
-  });
+    if (compressed) await pipeline(fs.createReadStream(file), zlib.createGunzip(), sink);
+    else await pipeline(fs.createReadStream(file), sink);
+    return hash.digest('hex');
+  }
+  return (async () => {
+    const out = dest + '.gz';
+    const tmp = `${out}.${process.pid}.${Date.now()}.partial`;
+    const rs = fs.createReadStream(dest);
+    const ws = fs.createWriteStream(tmp, { flags: 'wx' });
+    const gz = zlib.createGzip({ level: 6 });
+    try {
+      await pipeline(rs, gz, ws);
+      if (fs.statSync(tmp).size === 0) throw new Error('gzip output is empty');
+      const [sourceHash, restoredHash] = await Promise.all([sha256(dest, false), sha256(tmp, true)]);
+      if (sourceHash !== restoredHash) throw new Error('gzip verification hash mismatch');
+      const tmpFd = fs.openSync(tmp, 'r');
+      try { fs.fsyncSync(tmpFd); } finally { fs.closeSync(tmpFd); }
+      fs.renameSync(tmp, out);
+      try {
+        const dirFd = fs.openSync(require('path').dirname(out), 'r');
+        try { fs.fsyncSync(dirFd); } finally { fs.closeSync(dirFd); }
+      } catch (_) { /* directory fsync is not supported on every platform */ }
+      try { fs.unlinkSync(dest); } catch (_) { /* best-effort */ }
+      return out;
+    } catch (e) {
+      try { fs.unlinkSync(tmp); } catch (_) { /* best-effort */ }
+      throw e;
+    }
+  })();
 }
 
 module.exports = { create, rotateMonthlyBackup, runOffsiteUpload, gzipFile };
