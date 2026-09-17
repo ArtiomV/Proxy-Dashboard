@@ -24,7 +24,8 @@ describe('stale port cleanup authority', () => {
     const result = cleanup.create({ db, fs, SERVER_CACHE_FILE: cache,
       appSettings: {}, dailyTraffic: memory, logger: { info() {}, error() {} }, logActivity() {} })
       .cleanupStalePortMappings();
-    expect(result.skippedSrv).toEqual(['S4']);
+    // 2026-09-18: skippedSrv теперь несёт причину пропуска (FIX-04/DEEP-11)
+    expect(result.skippedSrv).toEqual([{ server: 'S4', reason: 'stale' }]);
     expect(db.prepare('SELECT port_name FROM daily_traffic ORDER BY port_name').all().map(r => r.port_name))
       .toEqual(['S1_port-live', 'S4_port-old']);
     expect(Object.keys(memory).sort()).toEqual(['S1_port-live', 'S4_port-old']);

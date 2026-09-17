@@ -20,6 +20,42 @@
 // extraction style (server.js owns let bindings, deps are passed by ref
 // or via getters for the few rebound globals).
 
+// ---------------------------------------------------------------------------
+// 2026-09-18 (FIX-04/DEEP-11): контрактная валидация снимка server_cache.json.
+// Сервер авторитетен для stale-очистки только при полном свежем снимке:
+//   - cachedAt — конечное число > 0, возраст в [0, freshnessMs]
+//     ('invalid' → NaN раньше проходил обе проверки, строка — тоже отказ);
+//   - поле error или флаг invalid — бокс вернул ошибку, а не полный ответ;
+//   - bw — plain object (строка truthy, а Object.keys(строки) давал символы);
+//   - ports — plain object, значения — массивы объектов с portID.
+// Достоверный ПУСТОЙ снимок (bw={}, ports={}) валиден — это легальное
+// состояние бокса «портов нет», а не повреждение.
+// Возвращает строку-причину или null для валидного снимка.
+// ---------------------------------------------------------------------------
+function _isPlainObject(v) {
+  return !!v && typeof v === 'object' && !Array.isArray(v);
+}
+
+function _snapshotInvalidReason(entry, freshnessMs) {
+  if (!_isPlainObject(entry)) return 'snapshot_not_object';
+  if (entry.error || entry.invalid) return 'snapshot_has_error';
+  if (typeof entry.cachedAt !== 'number' || !Number.isFinite(entry.cachedAt) || entry.cachedAt <= 0) {
+    return 'cached_at_invalid';
+  }
+  const age = Date.now() - entry.cachedAt;
+  if (age < 0) return 'cached_at_future';
+  if (age > freshnessMs) return 'stale';
+  if (!_isPlainObject(entry.bw)) return 'bw_not_object';
+  if (!_isPlainObject(entry.ports)) return 'ports_not_object';
+  for (const list of Object.values(entry.ports)) {
+    if (!Array.isArray(list)) return 'ports_list_not_array';
+    for (const port of list) {
+      if (!_isPlainObject(port) || !port.portID) return 'port_entry_invalid';
+    }
+  }
+  return null;
+}
+
 function create(deps) {
   const {
     db, logger, fs,
@@ -54,15 +90,18 @@ function create(deps) {
       const authoritativeServers = new Set();
       const skippedSrv = [];
       for (const [srvName, entry] of Object.entries(serverCache)) {
-        if (!entry || !entry.bw) continue;
-        const age = Date.now() - (entry.cachedAt || 0);
-        if (age < 0 || age > FRESHNESS_MS || !entry.ports || typeof entry.ports !== 'object') {
-          skippedSrv.push(srvName); continue;
+        const reason = _snapshotInvalidReason(entry, FRESHNESS_MS);
+        if (reason) {
+          // 2026-09-18 (FIX-04/DEEP-11): диагностируем причину — раньше
+          // мусорный снимок (cachedAt='invalid', bw-строка) молча считался
+          // авторитетным (NaN проходил обе проверки возраста), и очистка
+          // удаляла живые порты по повреждённым данным.
+          skippedSrv.push({ server: srvName, reason }); continue;
         }
         authoritativeServers.add(srvName);
         for (const pid of Object.keys(entry.bw)) liveIds.add(srvName + '_' + pid);
         for (const list of Object.values(entry.ports)) {
-          for (const port of (Array.isArray(list) ? list : [])) {
+          for (const port of list) {
             if (port && port.portID) liveIds.add(srvName + '_' + port.portID);
           }
         }
@@ -70,9 +109,15 @@ function create(deps) {
       if (authoritativeServers.size === 0) {
         return { skipped: 'no_fresh_servers', skippedSrv };
       }
-      const serverOfKey = key => [...authoritativeServers]
-        .sort((a, b) => b.length - a.length)
-        .find(serverName => String(key).startsWith(serverName + '_')) || '';
+      // 2026-09-18 (DEEP-11): сервер ключа ищем среди ВСЕХ закэшированных
+      // серверов (длиннейший префикс первым). Если самый длинный матч —
+      // неавторитетный сервер (S1_X при живом S1), ключ неоднозначен:
+      // сохраняем запись, а не угадываем владельца разбиением по префиксу.
+      const allServers = Object.keys(serverCache).sort((a, b) => b.length - a.length);
+      const serverOfKey = key => {
+        const match = allServers.find(serverName => String(key).startsWith(serverName + '_')) || '';
+        return authoritativeServers.has(match) ? match : '';
+      };
 
       // 1. daily_traffic table: stale port_ids whose latest activity < cutoff.
       const stale = db.prepare(`

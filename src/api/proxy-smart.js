@@ -280,6 +280,13 @@ function saveServerCache() {
 }
 
 function cacheServerData(data) {
+  // 2026-09-18 (DEEP-11): в кэш пишем только снимок по контракту — cleanup
+  // считает сервер авторитетным по этой записи. Повреждённый ответ не должен
+  // затирать подтверждённый снимок со свежим cachedAt.
+  if (_contract.validateFetchResult(data).length) {
+    if (logger) logger.warn(`[cacheServerData] ${data && data.serverName}: снимок не по контракту — кэш не обновлён`);
+    return;
+  }
   serverCache[data.serverName] = {
     bw: data.bw,
     status: data.status,
@@ -355,8 +362,9 @@ async function fetchServerData(server) {
   // D7: лёгкая shape-валидация ответов по контракту (docs/PROXYSMART-CONTRACT.md).
   // Несоответствие → warn + алерт (cooldown сутки, в вызывающей стороне);
   // опрос не прерываем — парсинг и так устойчив к пропущенным полям.
+  let violations = [];
   try {
-    const violations = _contract.validateFetchResult(result);
+    violations = _contract.validateFetchResult(result);
     if (violations.length) {
       logger.warn(`[API] ${server.name}: ответ не по контракту (${violations.length}): ${violations.slice(0, 3).join('; ')}`);
       if (onContractMismatch) onContractMismatch(server.name, violations);
@@ -365,7 +373,23 @@ async function fetchServerData(server) {
   // Inject rotation data from cache
   injectRotationData(result);
   // Cache successful response
-  cacheServerData(result);
+  // 2026-09-18 (DEEP-11): повреждённый ответ бокса НЕ перезаписывает
+  // подтверждённый хороший снимок — cleanup доверяет server_cache.json при
+  // stale-очистке портов, мусорный снимок привёл бы к удалению живых портов.
+  // Если валидного снимка ещё нет — сохраняем с флагом invalid: cleanup его
+  // не примет (сервер не авторитетен), а диагностика увидит факт ответа.
+  if (violations.length) {
+    const prev = serverCache[server.name];
+    if (!prev || prev.invalid) {
+      serverCache[server.name] = {
+        bw: result.bw, status: result.status, ports: result.ports,
+        serverName: server.name, cachedAt: Date.now(), invalid: true,
+      };
+      saveServerCache();
+    }
+  } else {
+    cacheServerData(result);
+  }
   serverApiHealth[server.name] = { lastOkAt: Date.now(), lastError: null, lastErrorAt: null, authError: false };
   return result;
 }
