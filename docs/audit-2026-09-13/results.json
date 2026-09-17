@@ -1,0 +1,76 @@
+[
+  {
+    "case": "partial_payment",
+    "payment": 1,
+    "invoice": 10000,
+    "actualStatus": "paid"
+  },
+  {
+    "case": "retention_unreachable",
+    "dtDeleted": 1,
+    "dtMemKeys": 1,
+    "kmRemoved": 0,
+    "skippedSrv": [
+      "S4"
+    ],
+    "days": 3
+  },
+  {
+    "case": "stale_ping_still_reboot_candidate",
+    "fresh": false,
+    "historyRows": 66,
+    "issues": [
+      {
+        "nick": "M",
+        "server": "S1",
+        "operator": "",
+        "client": "",
+        "errorPct": 100,
+        "reasons": [
+          "потери 100%"
+        ],
+        "detail": "потери 100%"
+      }
+    ]
+  },
+  {
+    "case": "missing_ping_preserves_old_fresh_state",
+    "lastAgeHours": 24,
+    "alive": true,
+    "fresh": true
+  },
+  {
+    "case": "six_days_divided_by_seven",
+    "dailyCharges": 100,
+    "expectedAverage": 100,
+    "actualAverage": 85.71
+  },
+  {
+    "case": "paid_webhook_cannot_retry_credit",
+    "firstStatus": 500,
+    "retry": {
+      "ok": true,
+      "duplicate": true,
+      "status": "paid"
+    },
+    "creditCalls": 1,
+    "dbStatus": "paid"
+  },
+  {
+    "case": "restore_failure_reported_as_success",
+    "restoreAttemptsAfterTwoRuns": 1,
+    "poolStatus": "leased",
+    "firstRestored": [
+      "r"
+    ],
+    "secondRestored": [],
+    "messages": [
+      "Оплата получена — сервис восстановлен. Прокси продлён до 2026-10-13."
+    ]
+  },
+  {
+    "case": "gzip_failure_overwrites_previous_archive",
+    "oldBytes": 16,
+    "newBytes": 0
+  }
+]

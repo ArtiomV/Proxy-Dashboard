@@ -1,0 +1,14 @@
+# Install as /etc/logrotate.d/proxy-dashboard on the production host.
+# Adjust path if REMOTE_DIR differs. Run logrotate hourly for maxsize checks.
+/root/Proxy-Dashboard/logs/dashboard.log {
+    daily
+    maxsize 50M
+    rotate 14
+    maxage 14
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+    su root root
+}

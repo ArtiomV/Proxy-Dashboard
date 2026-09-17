@@ -1,0 +1,612 @@
+{
+  "generatedAt": "2026-09-14T19:12:57.759Z",
+  "node": "v25.1.0",
+  "meaning": "Positive assertions reproduce known defects. Not a complete audit or passing product regression suite.",
+  "scope": "round3..round20 only; earlier reproduce.cjs and tests/ not executed by this runner",
+  "fingerprintScope": "server/schema/package manifests/src/public-js/migrations",
+  "fingerprintFiles": 271,
+  "sourceSha256Before": "718557cfdc6d922b6fbbe60ae24df185ae2faff07a28a407de7992229d2bb561",
+  "sourceSha256After": "718557cfdc6d922b6fbbe60ae24df185ae2faff07a28a407de7992229d2bb561",
+  "sourceUnchanged": true,
+  "total": 18,
+  "confirmed": 18,
+  "results": [
+    {
+      "file": "reproduce-round3.cjs",
+      "sha256": "723e740fa15436c93f09c4df5d71bb965e5ccf99f79c0b4882ce338c5798de92",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 272,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "in-memory SQLite and local modules only",
+        "results": [
+          {
+            "finding": "DEEP-20/21",
+            "secondPurchaseDuplicate": true,
+            "balance": 900,
+            "chargeRow": {
+              "amount": 0,
+              "balance_before": 1000,
+              "balance_after": 900
+            }
+          },
+          {
+            "finding": "DEEP-19",
+            "bankEntriesForSamePayment": 2,
+            "balance": 1000
+          },
+          {
+            "finding": "DEEP-26",
+            "requestedDelete": [
+              "a",
+              "b"
+            ],
+            "actualDelete": [
+              "a",
+              "c"
+            ],
+            "remaining": [
+              "b"
+            ]
+          },
+          {
+            "finding": "DEEP-30",
+            "deliveredVersions": [
+              1,
+              3,
+              2
+            ]
+          },
+          {
+            "finding": "DEEP-33/34",
+            "probedPorts": [
+              10001,
+              10001
+            ],
+            "ignoredPort": 10002,
+            "redirectAccepted": 2
+          },
+          {
+            "finding": "DEEP-28",
+            "cacheLostTimestamp": true,
+            "sqliteHasTimestamp": true
+          },
+          {
+            "finding": "DEEP-29",
+            "incrementalWrites": [
+              100,
+              200
+            ],
+            "storedBytes": 100,
+            "scope": "actual repository conflict behavior; full aggregator scheduling needs regression test"
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round4.cjs",
+      "sha256": "1f0a82ef10a10c0434583984bb479992b62297d9368109ee458d5e0b3e609217",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 131,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "in-memory DB, local code, stubbed remote mutations",
+        "results": [
+          {
+            "finding": "DEEP-38",
+            "livePortUnbound": true,
+            "rosterEmpty": true,
+            "historicalOwnershipGranted": true
+          },
+          {
+            "finding": "DEEP-37",
+            "ownershipFeedServer": "S1",
+            "mutated": {
+              "action": "rotation",
+              "server": "S4",
+              "imei": "foreign-imei"
+            }
+          },
+          {
+            "finding": "DEEP-39",
+            "clientBlocked": true,
+            "resetSucceeded": true,
+            "mutated": {
+              "action": "reset",
+              "server": "S4"
+            }
+          },
+          {
+            "finding": "DEEP-41",
+            "writeFailed": true,
+            "runtimeAutoRebootEnabled": true
+          },
+          {
+            "finding": "DEEP-42",
+            "configuredGraceHours": 0,
+            "appliedGraceHours": 24
+          },
+          {
+            "finding": "DEEP-40",
+            "clientMissing": true,
+            "oldSessionAccepted": true,
+            "scope": "old-binding"
+          },
+          {
+            "finding": "DEEP-43",
+            "staleBackup": "dashboard-1999-01-01.db.gz",
+            "restoreTestOk": true
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round5.cjs",
+      "sha256": "74c1858d15a09aa08e670b5cacc7ce0b349ecd3210e29bad9dc54465984422c2",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 97,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "local modules with recording adapters",
+        "results": [
+          {
+            "finding": "DEEP-45",
+            "privateTariffPurchased": true
+          },
+          {
+            "finding": "DEEP-46",
+            "tariffType": "per_gb",
+            "clientBillingType": "per_modem",
+            "durationHours": 48,
+            "deadlinesCreated": 0,
+            "chargedAsMonthlyRate": 101.33
+          },
+          {
+            "finding": "DEEP-47",
+            "priceBeforeDeactivation": 3040,
+            "priceAfterDeactivation": 0
+          },
+          {
+            "finding": "DEEP-49",
+            "actualOwner": "alice",
+            "requestedOwner": "bob1",
+            "applyReturnedOk": false,
+            "reportedApplied": true
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round6.cjs",
+      "sha256": "4b944d17db71560c16eecd1f0b8fd2e787aa1d79f847fba680287ec9b7ddc8cd",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 125,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "local code, disabled timers, no network",
+        "results": [
+          {
+            "finding": "DEEP-50",
+            "twoConcurrentMovesToSameSpare": [
+              {
+                "port": "p1",
+                "target": "spare",
+                "owner": "carol"
+              },
+              {
+                "port": "p2",
+                "target": "spare",
+                "owner": "carol"
+              }
+            ]
+          },
+          {
+            "finding": "DEEP-51",
+            "rosterOwners": [
+              "alice",
+              "bob"
+            ],
+            "actualOwnerMoved": "carol"
+          },
+          {
+            "finding": "DEEP-52",
+            "applyFailedTwice": true,
+            "reportedResults": [
+              "ok",
+              "ok"
+            ]
+          },
+          {
+            "finding": "DEEP-53",
+            "clientBlocked": true,
+            "credentialsReturned": 1
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round7.cjs",
+      "sha256": "dbf95933ebf15bb522051f1de668a13f2272e7bfaabb317d4fb02a78974f899b",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 99,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "SQLite in memory and local handler; no network",
+        "results": [
+          {
+            "finding": "DEEP-54",
+            "secondDocumentIgnored": true,
+            "durableDocuments": 1,
+            "scope": "repository gate; concurrent bank route requires integration regression"
+          },
+          {
+            "finding": "DEEP-55",
+            "changedSignedAct": true,
+            "statusAfterEdit": "signed",
+            "totalAfterEdit": 200
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round8.cjs",
+      "sha256": "a79d27e4adab58f144d2f535563ccda07261a4d5311c1e5f18fe601b7f7a8ee8",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 123,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "real handlers, SQLite repositories, temporary files; bank stubbed",
+        "results": [
+          {
+            "finding": "DEEP-54",
+            "bankCreates": 2,
+            "successResponses": 2,
+            "memoryBills": 2,
+            "sqliteBills": 1
+          },
+          {
+            "finding": "DEEP-57/54",
+            "bankDeleteStatus": 500,
+            "responseOk": true,
+            "originalLocalBillDeleted": true,
+            "previouslyIgnoredBillPersistedAfterDeletion": true
+          },
+          {
+            "finding": "DEEP-56",
+            "sqliteDeleteRejected": true,
+            "fileExists": false,
+            "metadataStillExists": true
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round9.cjs",
+      "sha256": "8cb9a774714893443e465227b31c7503e3718c07f123e2c794eb67b1b6b2bfc5",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 49,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "browser functions in VM with simulated DOM/fetch",
+        "results": [
+          {
+            "finding": "DEEP-58",
+            "unrelatedMutationClearedUnsavedSettings": true
+          },
+          {
+            "finding": "DEEP-59",
+            "receivedVersions": [
+              2,
+              1
+            ],
+            "finalDisplayedStateVersion": 1
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round10.cjs",
+      "sha256": "9fbbd5b3ab30e2f3ed604b4a7198b0cec2c6c1698811d07ce26fc792fe8cbc6b",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 114,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "finding": "DEEP-60",
+        "expressVersion": "4.22.1",
+        "unhandledRejection": true,
+        "errorMiddlewareReached": false,
+        "responseSent": false,
+        "finalCallbackReached": false,
+        "isolation": "real Express app.handle and SQLite; no network listener"
+      }
+    },
+    {
+      "file": "reproduce-round11.cjs",
+      "sha256": "5e64f6868442716d42bf4750c083a34c5f58fad39f8771ef5b611f30652f3909",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 107,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "all HTTP/TCP adapters stubbed; no network",
+        "results": [
+          {
+            "finding": "DEEP-61",
+            "privateHostsPassedToNetworkAdapter": [
+              "localhost",
+              "::ffff:127.0.0.1"
+            ]
+          },
+          {
+            "finding": "DEEP-62",
+            "httpStatus": 407,
+            "tcpConnectSucceeded": true,
+            "reportedWorking": true
+          },
+          {
+            "finding": "DEEP-60",
+            "nullProxyElementRejectsHandler": true
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round12.cjs",
+      "sha256": "ae6c111d2453b113ff35c6946cbdfb05062e825ec60bd878e617e438855297b6",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 110,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "real route handlers and SQLite in memory, no network",
+        "results": [
+          {
+            "finding": "DEEP-63",
+            "actualOlderDayBytes": 100,
+            "adminAliceBytes": 100,
+            "adminBobBytes": 100
+          },
+          {
+            "finding": "DEEP-64",
+            "authenticatedClient": "alice",
+            "returnedLaterDayOwner": "bob"
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round13.cjs",
+      "sha256": "e112673bf3abf0ecd6ab509fd563278010b491b7aab1bcb1c3ac9dcc872fd224",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 84,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "real route, repositories, SQLite in memory",
+        "results": [
+          {
+            "finding": "DEEP-65",
+            "forceReportedBytes": 100,
+            "actualPersistedBytes": 1000
+          },
+          {
+            "finding": "DEEP-66",
+            "transactionRolledBack": true,
+            "sqliteRows": 0,
+            "memoryBytes": 100
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round14.cjs",
+      "sha256": "be0af5d7848833b2fdc46e949167714b2527a3a2a291ed7150c021e8b377f676",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 47,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "isolation": "real aggregator and scheduler, SQLite in memory, controlled timers",
+        "results": [
+          {
+            "finding": "DEEP-35",
+            "feedFailed": true,
+            "markedHourRecorded": true,
+            "retriesScheduled": 0
+          },
+          {
+            "finding": "DEEP-67",
+            "stopCalledBeforeRetry": true,
+            "attemptsAfterStop": 1
+          }
+        ]
+      }
+    },
+    {
+      "file": "reproduce-round15.cjs",
+      "sha256": "a66b3ae2fecc7fdc197b788c52c586dac81522816382b8e30967783eee1f635c",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 51,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "finding": "DEEP-68",
+        "isolation": "real uptime query, SQLite in memory",
+        "historyChecksBefore": 100,
+        "historicalOperatorAfterMetadataUpdate": "new-operator",
+        "historyRowsAfterMetadataDelete": 0,
+        "originalMeasurementsStillStored": true
+      }
+    },
+    {
+      "file": "reproduce-round16.cjs",
+      "sha256": "2310973525db6780c85607fd6ea7060632d1929c158ab4b511520e95a08e4db2",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 181,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "findings": [
+          "DEEP-70",
+          "DEEP-71",
+          "DEEP-72"
+        ],
+        "isolation": "actual route callbacks with SQLite in memory; actual frontend functions in VM with controlled promises",
+        "unreadCriticalBadge": 1,
+        "criticalListCount": 0,
+        "unreadListCount": 0,
+        "otherAdminUnread": 201,
+        "notificationServer": "S4",
+        "openedServer": "S1",
+        "activeFilter": "critical",
+        "staleResponsePriority": "info"
+      }
+    },
+    {
+      "file": "reproduce-round17.cjs",
+      "sha256": "223c043f36afd49d92d312137e79ca35bac815434804ec4a97d4f73384bc1ce0",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 62,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "findings": [
+          "DEEP-73",
+          "DEEP-74"
+        ],
+        "isolation": "actual alerts module with controlled clock/timer; actual bot.sendMessage with injected API; SQLite in memory",
+        "rejectedFirstSendReturnedAccepted": true,
+        "rejectionLogged": false,
+        "retrySuppressed": true,
+        "solvedSurvivesRecovery": true,
+        "newOutageAfterTwoHoursSuppressed": true,
+        "limitation": "recovery public calls replayed; full modem-tracking job and live Telegram not executed"
+      }
+    },
+    {
+      "file": "reproduce-round18.cjs",
+      "sha256": "b7307a3089265674a4e0b3b4212e6d25d271b8c6ca8e0effa785bd6b799c989c",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 55,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "findings": [
+          "DEEP-75",
+          "DEEP-76",
+          "DEEP-77"
+        ],
+        "isolation": "actual incident and ping factories, SQLite in memory, injected SQLite trigger; no network",
+        "restart": {
+          "healthySamples": 9,
+          "recoveryCalls": 0,
+          "incidentStillOpen": true
+        },
+        "failedClose": {
+          "closedEventEmitted": true,
+          "removedFromMemory": true,
+          "durableState": "open",
+          "restoredAsOpen": true
+        },
+        "suppressedFailure": {
+          "badSamples": 10,
+          "openAttempts": 1,
+          "recoveryWithoutAcceptedOpen": true
+        },
+        "limitation": "factory reinitialization models restart; full server boot not executed"
+      }
+    },
+    {
+      "file": "reproduce-round19.cjs",
+      "sha256": "f033141f19595875b4944c808d4656eda0ff06fad56ee251b69fd32a69c08461",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 94,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "findings": [
+          "DEEP-78",
+          "DEEP-79"
+        ],
+        "isolation": "real incident manager and SQLite in memory; controlled payloads, no network",
+        "metadata": {
+          "exactImeiProvided": true,
+          "selectedOperator": "wrong-operator"
+        },
+        "regroup": {
+          "incidentsBeforeRecovery": 2,
+          "recoveredModems": 5,
+          "incidentsStillOpen": 1,
+          "stuckMember": "S2|i1",
+          "stuckOperator": "operator-B"
+        },
+        "limitation": "operator-change payload sequence supplied directly; upstream feed change not simulated"
+      }
+    },
+    {
+      "file": "reproduce-round20.cjs",
+      "sha256": "301fc806da13f2172443c5498f45a76787ccd753cbdf3d831379ebce162a811f",
+      "confirmed": true,
+      "exitCode": 0,
+      "signal": null,
+      "durationMs": 136,
+      "error": null,
+      "stderr": "",
+      "payload": {
+        "findings": [
+          "DEEP-80",
+          "DEEP-81"
+        ],
+        "isolation": "actual maintenance, collector, fleet and bell persistence; SQLite in memory, timers disabled, no network",
+        "sameNickWindowMatchesServers": [
+          "S1",
+          "S4"
+        ],
+        "serverMaintenanceActive": true,
+        "offlineEventPersistedDuringMaintenance": true
+      }
+    }
+  ]
+}
