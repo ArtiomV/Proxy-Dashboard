@@ -30,6 +30,12 @@ function init(db) {
     "SELECT DISTINCT client_id FROM billing_ledger WHERE date = ? AND type = 'charge'"
   );
   S.count = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger');
+  // 2026-09-18 · FIX-01 п.7 / §14.2/§17.3.1: сверка событий по идентификатору
+  // платежа ГЛОБАЛЬНО (без привязки к текущему клиенту — платёж мог быть
+  // исторически записан другому). Индекс idx_ledger_payment — миграция 091.
+  S.byPayment = db.prepare(`SELECT id, client_id, type, date, timestamp, amount,
+    currency, note, source, payment_id
+    FROM billing_ledger WHERE payment_id = ? AND type = ? ORDER BY id`);
   // C5: recorded payments minus reversals per client — the ledger-based
   // replacement for the legacy in-memory client.payments[] sum.
   // WP3 (B2C Э4): 'card_payment' (эквайринг) — тот же «платёж», включаем.
@@ -82,6 +88,7 @@ function chargedClientIdsForDate(date) {
   return S.chargedClientIdsForDate.all(date).map(r => r.client_id);
 }
 function rowCount() { return S.count.get().n; }
+function listByPayment(paymentId, type) { return S.byPayment.all(String(paymentId), String(type)); }
 
 // C5: total recorded payments minus reversals from listByClient-shaped
 // entries (payment + bank_payment + card_payment − payment_reversal).
@@ -101,5 +108,5 @@ function paymentsTotalByClient(clientId) { return S.paymentsTotal.get(clientId).
 module.exports = {
   init, deleteByClient, deleteById, insertStmt, listByClient,
   existsChargeOnDate, chargedClientIdsForDate, rowCount,
-  paymentsTotal, paymentsTotalByClient,
+  paymentsTotal, paymentsTotalByClient, listByPayment,
 };

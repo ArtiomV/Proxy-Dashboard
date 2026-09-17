@@ -367,6 +367,12 @@
   },
   {
     "type": "index",
+    "name": "idx_ledger_payment",
+    "tbl_name": "billing_ledger",
+    "sql": "CREATE INDEX idx_ledger_payment ON billing_ledger(payment_id, type)"
+  },
+  {
+    "type": "index",
     "name": "idx_ledger_type",
     "tbl_name": "billing_ledger",
     "sql": "CREATE INDEX idx_ledger_type ON billing_ledger(type)"
@@ -819,7 +825,7 @@
     "type": "table",
     "name": "card_payments",
     "tbl_name": "card_payments",
-    "sql": "CREATE TABLE card_payments ( id INTEGER PRIMARY KEY, order_id TEXT UNIQUE NOT NULL, client_id TEXT NOT NULL, amount REAL NOT NULL, method TEXT, -- card | sbp status TEXT NOT NULL DEFAULT 'created', -- created|paid|credited|failed|refunded provider_payment_id TEXT, raw_json TEXT, created_at TEXT, credited_at TEXT , promo_code TEXT, recovery_attempts INTEGER NOT NULL DEFAULT 0, next_recovery_at TEXT, recovery_error TEXT)"
+    "sql": "CREATE TABLE card_payments ( id INTEGER PRIMARY KEY, order_id TEXT UNIQUE NOT NULL, client_id TEXT NOT NULL, amount REAL NOT NULL, method TEXT, -- card | sbp status TEXT NOT NULL DEFAULT 'created', -- created|paid|credited|failed|refunded provider_payment_id TEXT, raw_json TEXT, created_at TEXT, credited_at TEXT , promo_code TEXT, recovery_attempts INTEGER NOT NULL DEFAULT 0, next_recovery_at TEXT, recovery_error TEXT, promo_status TEXT, promo_bonus_amount REAL)"
   },
   {
     "type": "table",

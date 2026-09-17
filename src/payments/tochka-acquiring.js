@@ -122,6 +122,9 @@ function create(deps) {
   // ── refund ───────────────────────────────────────────────────────────────
   // Возврат по operationId (только платежи в APPROVED). Бросает Error —
   // роут НЕ сторнирует ledger, если провайдер не подтвердил.
+  // 2026-09-18 (DEEP-03): err.definitive=true означает, что банк ТОЧНО отклонил
+  // возврат (HTTP 4xx — денег не было, захват можно отпустить и разрешить
+  // повтор). Сеть/таймаут/5xx — исход неизвестен: слепой повтор запрещён.
   async function refund(provider_payment_id, amount) {
     const cfg = _config();
     if (!_configured(cfg)) throw new Error('tochka acquiring not configured (jwt/customerCode)');
@@ -132,7 +135,10 @@ function create(deps) {
     const d = resp && resp.data && resp.data.Data;
     if (resp.status !== 200 || !d) {
       const msg = resp && resp.data && (resp.data.message || JSON.stringify(resp.data).slice(0, 200));
-      throw new Error('tochka refund failed (http ' + (resp && resp.status) + '): ' + (msg || 'no Data'));
+      const err = new Error('tochka refund failed (http ' + (resp && resp.status) + '): ' + (msg || 'no Data'));
+      err.httpStatus = resp && resp.status;
+      err.definitive = typeof err.httpStatus === 'number' && err.httpStatus >= 400 && err.httpStatus < 500;
+      throw err;
     }
     return { ok: true, orderId: d.orderId || null, isRefund: d.isRefund === true };
   }

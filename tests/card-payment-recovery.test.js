@@ -25,7 +25,7 @@ describe('card payment recovery', () => {
       auditLog() {}, logActivity() {}, getClientIp: () => '', alerts: { trigger() {} },
       createProvider: () => null,
     });
-    await expect(router.runRecovery()).resolves.toEqual({ credited: 1, failed: 0 });
+    await expect(router.runRecovery()).resolves.toMatchObject({ credited: 1, failed: 0 });
     expect(atomicCredit).toHaveBeenCalledWith('c1', 500, expect.objectContaining({ paymentId: 'o1' }),
       expect.objectContaining({ idempotencyKey: 'card_payment:o1' }));
     expect(markCredited).toHaveBeenCalledWith('o1');
@@ -45,12 +45,12 @@ describe('card payment recovery', () => {
       validate: () => pass, TopupSchema: {}, topupLimiter: pass, webhookLimiter: pass,
       clients: [client], clientById: new Map([['c1', client]]), saveClients: vi.fn(),
       getSetting: (_k, d) => d, tariffsDb: {},
-      cardPaymentsDb: { pendingPaid: () => [row], markCredited: vi.fn() },
+      cardPaymentsDb: { pendingPaid: () => [row], markCredited: vi.fn(), setPromoStatus: vi.fn() },
       ledgerDb: {}, promoDb: { byCode: () => ({ id: 7, code: 'OLD10', type: 'percent', value: 10, active: 0 }), consume },
       atomicCredit, atomicDebit: vi.fn(), auditLog() {}, logActivity() {}, getClientIp: () => '',
       alerts: { trigger() {} }, createProvider: () => null,
     });
-    await expect(router.runRecovery()).resolves.toEqual({ credited: 1, failed: 0 });
+    await expect(router.runRecovery()).resolves.toMatchObject({ credited: 1, failed: 0 });
     expect(atomicCredit).toHaveBeenCalledTimes(2);
     expect(atomicCredit.mock.calls[1][1]).toBe(20);
     expect(consume).toHaveBeenCalledWith(7);
@@ -66,7 +66,11 @@ describe('card payment recovery', () => {
       amount REAL NOT NULL, method TEXT, status TEXT NOT NULL DEFAULT 'created',
       provider_payment_id TEXT, raw_json TEXT, created_at TEXT, credited_at TEXT,
       promo_code TEXT, recovery_attempts INTEGER NOT NULL DEFAULT 0,
-      next_recovery_at TEXT, recovery_error TEXT)`);
+      next_recovery_at TEXT, recovery_error TEXT,
+      promo_status TEXT, promo_bonus_amount REAL);
+      CREATE TABLE finance_idempotency (
+        event_key TEXT PRIMARY KEY, client_id TEXT NOT NULL, amount REAL NOT NULL,
+        created_at TEXT NOT NULL DEFAULT (datetime('now')))`);
     cardPaymentsRepo.init(db);
     db.prepare("INSERT INTO card_payments (order_id, client_id, amount, status, created_at) " +
       "VALUES ('o9', 'c1', 100, 'paid', datetime('now'))").run();

@@ -21,6 +21,7 @@ const require = createRequire(import.meta.url);
 const stateMod = require('../../src/state/index.js');
 const providerMod = require('../../src/payments/provider.js');
 const tochkaAcq = require('../../src/payments/tochka-acquiring.js');
+const cardPaymentsRepo = require('../../src/db/card-payments.js');
 
 const origCreate = providerMod.create;
 
@@ -29,7 +30,7 @@ const createdLogins = [];
 
 // ── Мок провайдера: «сырьё» webhook — JSON-строка, «подпись» — заголовок
 // X-Test-Sig: valid (иначе мок отвечает ok:false, как strict-verify Точки).
-const mockState = { nullProvider: false, failRefund: false };
+const mockState = { nullProvider: false, failRefund: false, refundDefinitive: false, refundCalls: 0 };
 const mockProvider = {
   name: 'mock',
   async create_payment(p) {
@@ -50,7 +51,13 @@ const mockProvider = {
     };
   },
   async refund(providerPaymentId, amount) {
+    mockState.refundCalls++;
     if (mockState.failRefund) throw new Error('provider down');
+    if (mockState.refundDefinitive) {
+      const e = new Error('tochka refund failed (http 409): not approved');
+      e.httpStatus = 409; e.definitive = true;
+      throw e;
+    }
     return { ok: true, providerPaymentId, amount };
   },
 };
@@ -329,17 +336,70 @@ describe('WP3: возврат (POST /api/admin/card_payments/:orderId/refund)', 
     expect(client.balance).toBe(800);
   });
 
-  it('провайдер упал → 502, ledger и статус НЕ тронуты', async () => {
+  it('провайдер упал (исход неизвестен) → 502 REFUND_UNCERTAIN, захват сохранён, слепой повтор запрещён', async () => {
+    // DEEP-03/§14.3: сетевая ошибка — это НЕ «возврата не было». Заказ уходит
+    // в refund_pending с durable-ключом; повторный вызов банка заблокирован,
+    // пока исход не подтверждён (webhook REFUNDED / ручная сверка).
     const { client, orderId } = await creditedPayment('rf_fail@wp3-test.local', 600);
     mockState.failRefund = true;
     const res = await request(app)
       .post(`/api/admin/card_payments/${orderId}/refund`)
       .set('X-Auth-Token', adminToken);
     expect(res.status).toBe(502);
+    expect(res.body.code).toBe('REFUND_UNCERTAIN');
     mockState.failRefund = false;
     expect(client.balance).toBe(600);
     expect(ledgerOf(client.id).find(e => e.type === 'payment_reversal')).toBeUndefined();
+    expect(db.prepare('SELECT status FROM card_payments WHERE order_id = ?').get(orderId).status).toBe('refund_pending');
+    // Слепой повтор НЕ вызывает провайдера повторно.
+    const retry = await request(app)
+      .post(`/api/admin/card_payments/${orderId}/refund`)
+      .set('X-Auth-Token', adminToken);
+    expect(retry.status).toBe(409);
+    expect(retry.body.code).toBe('REFUND_REVIEW_REQUIRED');
+    expect(client.balance).toBe(600);
+    // Webhook REFUNDED подтверждает исход — сторно доводится без вызова банка.
+    const conf = await webhook({ order_id: orderId, status: 'refunded', amount: 600 });
+    expect(conf.status).toBe(200);
+    expect(db.prepare('SELECT status FROM card_payments WHERE order_id = ?').get(orderId).status).toBe('refunded');
+    expect(client.balance).toBe(0);
+    expect(ledgerOf(client.id).filter(e => e.type === 'payment_reversal').length).toBe(1);
+  });
+
+  it('банк точно отклонил возврат (4xx) → 502 REFUND_REFUSED, захват отпущен, повтор разрешён', async () => {
+    const { client, orderId } = await creditedPayment('rf_refused@wp3-test.local', 500);
+    mockState.refundDefinitive = true;
+    const res = await request(app)
+      .post(`/api/admin/card_payments/${orderId}/refund`)
+      .set('X-Auth-Token', adminToken);
+    expect(res.status).toBe(502);
+    expect(res.body.code).toBe('REFUND_REFUSED');
+    mockState.refundDefinitive = false;
     expect(db.prepare('SELECT status FROM card_payments WHERE order_id = ?').get(orderId).status).toBe('credited');
+    expect(client.balance).toBe(500);
+    // Повтор проходит полный цикл: провайдер снова вызван, сторно записано.
+    const retry = await request(app)
+      .post(`/api/admin/card_payments/${orderId}/refund`)
+      .set('X-Auth-Token', adminToken);
+    expect(retry.status).toBe(200);
+    expect(client.balance).toBe(0);
+    expect(db.prepare('SELECT status FROM card_payments WHERE order_id = ?').get(orderId).status).toBe('refunded');
+  });
+
+  it('крах после подтверждения банка до записи сторно → recovery доводит без вызова банка', async () => {
+    const { client, orderId } = await creditedPayment('rf_crash@wp3-test.local', 700);
+    // Имитация краха между фазами: банк подтвердил, сторно не записано.
+    cardPaymentsRepo.claimRefund(orderId, client.id, 700);
+    cardPaymentsRepo.refundProviderOk(orderId);
+    const refundsBefore = mockState.refundCalls;
+    const res = await request(app)
+      .post(`/api/admin/card_payments/${orderId}/refund`)
+      .set('X-Auth-Token', adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.resumed).toBe(true);
+    expect(mockState.refundCalls).toBe(refundsBefore);   // провайдер НЕ вызывался
+    expect(client.balance).toBe(0);
+    expect(db.prepare('SELECT status FROM card_payments WHERE order_id = ?').get(orderId).status).toBe('refunded');
   });
 
   it('refund незачтённого платежа → 409; несуществующего → 404; клиенту → 403', async () => {
@@ -502,6 +562,18 @@ describe('WP3: provider factory + маппинг tochka-acquiring (без сет
     const bad = tochkaAcq.create(fakeDeps({
       tochkaRequest: async () => ({ status: 409, data: { message: 'not approved' } }),
     }));
-    await expect(bad.refund('op-2', 100)).rejects.toThrow(/refund failed/);
+    // DEEP-03: 4xx — банк точно отклонил (definitive), 5xx/сеть — неизвестно.
+    const err = await bad.refund('op-2', 100).catch(e => e);
+    expect(err).toBeInstanceOf(Error);
+    expect(err.message).toMatch(/refund failed/);
+    expect(err.definitive).toBe(true);
+    const bad5xx = tochkaAcq.create(fakeDeps({
+      tochkaRequest: async () => ({ status: 500, data: { message: 'oops' } }),
+    }));
+    expect((await bad5xx.refund('op-3', 100).catch(e => e)).definitive).toBe(false);
+    const netErr = tochkaAcq.create(fakeDeps({
+      tochkaRequest: async () => { throw new Error('Tochka API timeout'); },
+    }));
+    expect((await netErr.refund('op-4', 100).catch(e => e)).definitive).toBeUndefined();
   });
 });

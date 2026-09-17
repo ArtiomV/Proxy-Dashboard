@@ -200,6 +200,8 @@ function atomicCredit(clientId, amount, ledgerEntry, opts) {
  * Duplicate-charge protection:
  *   - If UNIQUE index idx_ledger_unique_charge rejects insert (migration 015),
  *     returns { duplicate: true, balanceBefore } without modifying balance.
+ *   - 2026-09-18 (DEEP-03): opts.insideTx fn() — доп. запись внутри той же
+ *     транзакции (напр. markRefunded при возврате), как у atomicCredit.
  */
 function atomicDebit(clientId, amount, ledgerEntry, opts) {
   opts = opts || {};
@@ -224,6 +226,7 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
         err.minBalance = opts.minBalance;
         throw err;
       }
+      if (typeof opts.insideTx === 'function') opts.insideTx();
       _clientUpdateBalance.run(balanceAfter, clientId);
       if (ledgerEntry) {
         const entry = { ...ledgerEntry, balance_before: balanceBefore, balance_after: balanceAfter };
