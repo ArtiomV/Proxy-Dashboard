@@ -52,7 +52,9 @@ function mkDeps({ poolRows = [], ledgerEntries = [], resultsFn } = {}) {
         applied.push(path);
         if (path === '/apix/list_ports_json') {
           const validBefore = posted.length ? posted[posted.length - 1].formData.PROXY_VALID_BEFORE : TODAY;
-          return { imei1: [{ portID: 'p1', PROXY_VALID_BEFORE: validBefore }] };
+          // Реальный API отдаёт portName (clientPorts матчит по нему);
+          // DEEP-09: owner-верификация в port-validity читает это поле.
+          return { imei1: [{ portID: 'p1', portName: 'u_a', PROXY_VALID_BEFORE: validBefore }] };
         }
         return {};
       },

@@ -22,9 +22,10 @@ function init(db) {
     email, email_verified, tg_chat_id, reg_ip, consent_pd_at, blocked, abuse_strikes,
     balance_negative_since, tariff_id, price_override, hold_ttl_days, test_used,
     tg_username, tg_oidc_sub, blocked_since,
-    api_key_created_at, api_key_prev, api_key_prev_expires_at, debt_restore_until)
+    api_key_created_at, api_key_prev, api_key_prev_expires_at, debt_restore_until,
+    debt_restore_ports)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
-            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(id) DO UPDATE SET
       login=excluded.login, password=excluded.password, password_hash=excluded.password_hash,
       port_name=excluded.port_name, name=excluded.name, contact=excluded.contact,
@@ -55,6 +56,7 @@ function init(db) {
       api_key_prev=excluded.api_key_prev,
       api_key_prev_expires_at=excluded.api_key_prev_expires_at,
       debt_restore_until=excluded.debt_restore_until,
+      debt_restore_ports=excluded.debt_restore_ports,
       updated_at=datetime('now')`);
 
   S.deleteById = db.prepare('DELETE FROM clients WHERE id = ?');
@@ -100,7 +102,9 @@ function upsertRow(c) {
     c.apiKeyCreatedAt || null, // миграция 086: когда выдан текущий ключ
     c.apiKeyPrev || null,      // миграция 086: хэш прежнего ключа (grace)
     c.apiKeyPrevExpiresAt || null, // миграция 086: до когда работает прежний
-    c.debtRestoreUntil || null     // миграция 089: фиксированная цель retry
+    c.debtRestoreUntil || null,     // миграция 089: фиксированная цель retry
+    // миграция 092: ожидаемые пары server+portID восстановления (JSON)
+    Array.isArray(c.debtRestorePorts) && c.debtRestorePorts.length ? JSON.stringify(c.debtRestorePorts) : null
   );
 }
 

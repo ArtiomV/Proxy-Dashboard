@@ -476,6 +476,10 @@ function clientFromRow(r) {
     balanceNegativeSince: r.balance_negative_since || null,
     blockedSince: r.blocked_since || null,   // миграция 073: от неё тикает hold до удаления портов
     debtRestoreUntil: r.debt_restore_until || null, // миграция 089: фиксированная цель восстановления
+    // миграция 092: durable-список ожидаемых портов восстановления (DEEP-08)
+    debtRestorePorts: r.debt_restore_ports
+      ? (() => { try { return JSON.parse(r.debt_restore_ports); } catch (_) { return null; } })()
+      : null,
     tariffId: r.tariff_id != null ? r.tariff_id : null,
     priceOverride: r.price_override != null ? r.price_override : null,
     holdTtlDays: r.hold_ttl_days != null ? r.hold_ttl_days : null,
@@ -524,10 +528,14 @@ function loadClients() {
   return clientsList;
 }
 
+// 2026-09-18 · DEEP-10 (§15.1): запись возвращает проверяемый результат —
+// true при успешном коммите, false при отказе. Вызывающий, чьё сетевое
+// действие зависит от durability (debt-block, retail-guard), ОБЯЗАН
+// проверить возврат: проглоченная ошибка не подтверждение сохранения.
 function saveClients(clientsList) {
   if (!Array.isArray(clientsList)) {
     logger.error('[CRITICAL] saveClients called without array argument! Aborting write.');
-    return;
+    return false;
   }
   try {
     db.transaction(() => {
@@ -562,8 +570,10 @@ function saveClients(clientsList) {
         for (const b of (c.bills || []))            documentsDb.insertBill(b, c.id);
       }
     })();
+    return true;
   } catch (e) {
     logger.error('[SQLite] Error saving clients:', e.message);
+    return false;
   }
 }
 

@@ -25,9 +25,12 @@
 //   • клиенту — уведомление, админу — TG-алерт, в audit — запись.
 //
 // Дедлайн: blocked_since + retail_hold_days (та же настройка, что «Hold до
-// удаления порта» в Настройки → Розница). blocked_since проставляется при
-// ручной блокировке (routes/clients.js) и при долговой (jobs/debt-block.js);
+// удаления порта» в Настройки → Розница; per-клиент hold_ttl_days=-1 —
+// бессрочный hold, НИКОГДА). blocked_since проставляется при ручной
+// блокировке (routes/clients.js) и при долговой (jobs/debt-block.js);
 // снятие блока / оплата долга сбрасывает метку → джоба клиента не трогает.
+// 2026-09-18 · DEEP-06: долговой блок с положительным балансом (оплата пришла,
+// восстановление идёт/ожидается) и billingPaused из удаления исключены.
 
 function create(deps) {
   const {
@@ -43,7 +46,9 @@ function create(deps) {
 
   const DAY_MS = 86400000;
 
-  function _holdDays() {
+  // per-клиент hold_ttl_days (как в retail-guard): NULL → настройка; -1 → ∞ hold.
+  function _holdDays(client) {
+    if (client && client.holdTtlDays != null) return client.holdTtlDays;
     const v = Number(getSetting('retail_hold_days', 7));
     return Number.isFinite(v) && v >= 1 ? v : 7;
   }
@@ -55,14 +60,25 @@ function create(deps) {
     running = true;
     const stats = { deleted: [], failed: [], candidates: 0 };
     try {
-      const holdMs = _holdDays() * DAY_MS;
       const nowMs = getMoscowNow().getTime();
-      const targets = clients.filter(c =>
-        (c.blocked || c.debtBlocked) &&
-        c.clientType !== 'legal' &&           // юрлица — никогда
-        c.blockedSince &&
-        nowMs - Date.parse(c.blockedSince) >= holdMs
-      );
+      const targets = clients.filter(c => {
+        if (!(c.blocked || c.debtBlocked)) return false;
+        if (c.clientType === 'legal') return false;   // юрлица — никогда
+        if (c.billingPaused) return false;            // политика Б (2026-09-11): порты бессрочные
+        if (!c.blockedSince) return false;
+        const holdDays = _holdDays(c);
+        if (holdDays === -1) return false;            // ∞ hold — НИКОГДА
+        if (nowMs - Date.parse(c.blockedSince) < holdDays * DAY_MS) return false;
+        // DEEP-06 (§15.1, 2026-09-18): ручной/антифрод-блок (c.blocked)
+        // удаляем независимо от баланса; чисто ДОЛГОВОЙ блок при плюсовом
+        // балансе — НЕТ: оплата пришла, восстановление идёт или ожидается
+        // (незавершённое восстановление возможно только при balance > 0),
+        // старый blockedSince — не основание для удаления. Маркер цели
+        // (debt_restore_until / pool restore_until) durable и переживает
+        // рестарт; при новом уходе в минус блок-фаза его пересоздаёт.
+        if (!c.blocked && (c.balance || 0) > 0) return false;
+        return true;
+      });
       if (!targets.length) return stats;
       stats.candidates = targets.length;
       const serverResults = await fetchAllServersDataCached();
@@ -101,7 +117,7 @@ function create(deps) {
               const km = knownModems && knownModems[pt.server.name];
               if (km && km[pt.portId]) { delete km[pt.portId]; rosterDirty = true; }
             } catch (_) { /* roster best-effort */ }
-            logger.warn(`[BlockedCleanup] ${client.login}: порт ${pt.server.name}/${pt.portId} удалён (blocked_since ${client.blockedSince}, hold ${_holdDays()} дн)`);
+            logger.warn(`[BlockedCleanup] ${client.login}: порт ${pt.server.name}/${pt.portId} удалён (blocked_since ${client.blockedSince}, hold ${_holdDays(client)} дн)`);
             try { auditLog('system', 'blocked_port_deleted', { clientId: client.id, clientName: client.name, server: pt.server.name, portId: pt.portId, blockedSince: client.blockedSince }); } catch (_) { /* audit best-effort */ }
           } catch (e) {
             stats.failed.push(pt.portId);

@@ -139,6 +139,21 @@ function create(deps) {
   }
 
   // ── шаг 4: balance > 0 → восстановление ──
+  // DEEP-09 (§15.1): unblock строки пула — условный UPDATE (status='blocked').
+  // changes=0 означает, что строку уже изменил другой писатель (переаренда,
+  // ручной unblock) — это конфликт, а не подтверждённое восстановление.
+  function _confirmUnblock(row, client) {
+    const res = retailPoolDb.unblock(row.id);
+    if (res && res.changes === 0) {
+      logger.warn(`[RetailGuard] ${client.login}: pool#${row.id} (${row.server}/${row.port_id}) — конфликт unblock (строка уже изменена), порт остаётся pending`);
+      logActivity('billing', 'warn', 'retail_restore_conflict', client.login,
+        `Восстановление: строка пула ${row.server}/${row.port_id} изменена конкурентно — повтор в след. цикле`,
+        { client_id: client.id, port_id: row.port_id });
+      return false;
+    }
+    return true;
+  }
+
   async function _restoreClient(client, serverResults, blockedRows, stats) {
     // WP7 (Э5): порты, замороженные антифродом (kv-маркер abuse_hold из
     // domain-guard), НЕ воскрешаем автоматически — разблокировка только
@@ -154,6 +169,11 @@ function create(deps) {
     // иначе «дата до» = сегодня и порт умирал бы сразу после восстановления.
     const days = avg > 0 ? Math.max(1, Math.floor(balance / avg)) : 30;
     let untilStr = blockedRows.map(r => r.restore_until).filter(Boolean).sort()[0] || null;
+    // DEEP-14 (§15.1): legacy-клиент без строк пула тоже получает ФИКСИРОВАННУЮ
+    // цель — иначе ежедневный retry пересчитывал «дата до» от сегодня и
+    // бесконечно сдвигал срок вперёд. Храним в clients.debt_restore_until
+    // (миграция 089), как legacy debt-block.
+    if (!untilStr && blockedRows.length === 0) untilStr = client.debtRestoreUntil || null;
     // Цель из прошлого (retry после долгого простоя) продлевала бы порт
     // задним числом — пересчитываем от сегодня и пересохраняем.
     if (untilStr && untilStr <= _today()) untilStr = null;
@@ -161,16 +181,35 @@ function create(deps) {
       const until = getMoscowNow();
       until.setDate(until.getDate() + days);
       untilStr = until.toLocaleDateString('en-CA');
-      for (const row of blockedRows) {
-        if (typeof retailPoolDb.setRestoreUntil === 'function') retailPoolDb.setRestoreUntil(row.id, untilStr);
-        row.restore_until = untilStr;
+      if (blockedRows.length) {
+        for (const row of blockedRows) {
+          if (typeof retailPoolDb.setRestoreUntil === 'function') retailPoolDb.setRestoreUntil(row.id, untilStr);
+          row.restore_until = untilStr;
+        }
+      } else {
+        // DEEP-10: цель legacy-восстановления должна быть durable ДО сетевых
+        // действий; отказ записи → отмена попытки, повтор в следующем цикле.
+        client.debtRestoreUntil = untilStr;
+        if (saveClients(clients) === false) {
+          client.debtRestoreUntil = null;
+          logger.error(`[RetailGuard] ${client.login}: цель восстановления не сохранена — сетевые действия отменены`);
+          logActivity('billing', 'error', 'retail_restore_persist_error', client.login,
+            'Восстановление: не удалось сохранить цель retry в БД — попытка отменена', { client_id: client.id });
+          return false;
+        }
       }
     }
 
     const livePorts = portValidity.clientPorts(client, serverResults);
-    const required = blockedRows.length
-      ? blockedRows.map(row => ({ row, pt: livePorts.find(pt => pt.server && pt.server.name === row.server && pt.portId === row.port_id) }))
-      : livePorts.map(pt => ({ row: null, pt }));
+    // DEEP-14: смешанный набор pool+legacy — порты клиента, не имеющие строки
+    // пула, включаем в восстановление как legacy-элементы (раньше при наличии
+    // blockedRows они молча пропускались и оставались погашенными).
+    const pooledKeys = new Set(retailPoolDb.byClient(client.id).map(r => `${r.server}:${r.port_id}`));
+    const legacyPorts = livePorts.filter(pt => pt.server && !pooledKeys.has(`${pt.server.name}:${pt.portId}`));
+    const required = [
+      ...blockedRows.map(row => ({ row, pt: livePorts.find(pt => pt.server && pt.server.name === row.server && pt.portId === row.port_id) })),
+      ...legacyPorts.map(pt => ({ row: null, pt })),
+    ];
     let restored = 0;
     let pending = 0;
     for (const item of required) {
@@ -178,14 +217,16 @@ function create(deps) {
       if (!pt) { pending++; continue; }
       // Не укорачиваем более поздний срок (ручной override «продлить до…»).
       if (pt.validBefore && pt.validBefore > untilStr) {
+        if (item.row && !_confirmUnblock(item.row, client)) { pending++; continue; }
         restored++;
-        if (item.row) retailPoolDb.unblock(item.row.id);
         continue;
       }
       try {
-        await portValidity.setPortValidBefore(pt.server, pt.portId, untilStr);
+        // DEEP-09: владелец перепроверяется свежим чтением до POST и после
+        // apply — retry не должен продлить порт, уже переданный другому.
+        await portValidity.setPortValidBefore(pt.server, pt.portId, untilStr, { expectedPortName: client.portName });
+        if (item.row && !_confirmUnblock(item.row, client)) { pending++; continue; }
         restored++;
-        if (item.row) retailPoolDb.unblock(item.row.id);
       } catch (e) {
         pending++;
         logger.error(`[RetailGuard] ${client.login}: порт ${pt.portId} не продлён: ${e.message}`);
@@ -200,6 +241,7 @@ function create(deps) {
     }
     client.balanceNegativeSince = null;
     client.debtBlocked = false;   // сброс legacy-флага (миграция 056)
+    client.debtRestoreUntil = null;   // DEEP-14: фиксированная цель legacy retry отработала
 
     stats.restored.push(client.id);
     logger.info(`[RetailGuard] ${client.login}: восстановлен (${balance} ₽) — «дата до» = ${untilStr}, портов: ${restored}, строк unblock: ${blockedRows.length}`);
@@ -311,6 +353,16 @@ function create(deps) {
       if (pendingRestoreRows.has(row.id)) continue;
       if (!row.hold_until) continue;                       // ∞ hold (-1) — НИКОГДА
       if (Date.parse(row.hold_until) > _nowMs()) continue;
+      // FIX-03 п.9 / DEEP-06 (§15.1): незавершённое восстановление защищено и
+      // после рестарта — in-memory pendingRestoreRows недостаточно. Durable-
+      // маркер restore_until у клиента с положительным балансом = retry в
+      // полёте: порт по старому hold_until НЕ удаляем. При balance ≤ 0
+      // блок-фаза начнёт новый цикл и сбросит маркер (block() обнуляет
+      // restore_until) — удаление снова разрешено.
+      if (row.restore_until) {
+        const owner = clients.find(c => c.id === row.client_id);
+        if (owner && (owner.balance || 0) > 0) continue;
+      }
       const server = findServer(row.server);
       if (!server) {
         logger.error(`[RetailGuard] pool#${row.id}: сервер ${row.server} не найден — повтор в след. цикле`);
@@ -433,7 +485,12 @@ function create(deps) {
           logger.error(`[RetailGuard] ${client.login || client.id}: ${e.message}`);
         }
       }
-      if (dirty) saveClients(clients);
+      if (dirty && saveClients(clients) === false) {
+        // DEEP-10: отказ записи виден как ошибка persistence, а не тихий успех.
+        logger.error('[RetailGuard] saveClients: состояние клиентов НЕ сохранено — изменения будут повторены в след. цикле');
+        logActivity('billing', 'error', 'retail_guard_persist_error', 'system',
+          'RetailGuard: ошибка сохранения состояния клиентов в БД', {});
+      }
       await _processExpiredHolds(stats);
       await _processExpiredTestDays(stats);
       _checkPoolLow();   // WP5: алерт «свободных < retail_pool_min_free» (дедуп по серверу в alerts.js)

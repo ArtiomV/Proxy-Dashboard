@@ -36,11 +36,19 @@ function init(db) {
     "last_client_id=COALESCE(client_id, last_client_id), updated_at=datetime('now') WHERE id = ?"
   );
   S.block = db.prepare(
-    "UPDATE retail_pool SET status='blocked', hold_until=?, updated_at=datetime('now') WHERE id = ?"
+    // restore_until=NULL: повторный блок начинает НОВЫЙ долговой цикл —
+    // фиксированная цель прошлого восстановления недействительна (2026-09-18,
+    // DEEP-14/FIX-03 п.5); иначе _processExpiredHolds видел бы протухший
+    // маркер pending-восстановления.
+    "UPDATE retail_pool SET status='blocked', hold_until=?, restore_until=NULL, updated_at=datetime('now') WHERE id = ?"
   );
   // Восстановление после пополнения (Э2): blocked → leased, hold снимается.
+  // 2026-09-18 · DEEP-09 (§15.1): UPDATE условный — изменение нуля строк
+  // (строка уже leased/free/переарендована конкурентом) означает конфликт,
+  // а НЕ подтверждённое восстановление; caller обязан проверить changes.
   S.unblock = db.prepare(
-    "UPDATE retail_pool SET status='leased', hold_until=NULL, restore_until=NULL, updated_at=datetime('now') WHERE id = ?"
+    "UPDATE retail_pool SET status='leased', hold_until=NULL, restore_until=NULL, updated_at=datetime('now') " +
+    "WHERE id = ? AND status = 'blocked'"
   );
   S.setRestoreUntil = db.prepare(
     "UPDATE retail_pool SET restore_until=?, updated_at=datetime('now') WHERE id=? AND status='blocked'"

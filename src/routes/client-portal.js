@@ -57,13 +57,15 @@ module.exports = function createClientPortalRouter(deps) {
   // B3 (Р13): портал-баннер блокировки/предупреждения. Критерий «за 3 дня» —
   // баланс ≤ 3 × среднесуточное списание за 7 дн (тот же, что в джобе
   // debt-block; юрлица и allow_debt=1 баннера не получают никогда).
+  // 2026-09-18 · FIX-07: окно — полуинтервал [сегодня−7; сегодня): нижняя
+  // граница ВКЛЮЧЕНА (>=), текущий день исключён; деление всегда на 7.
   function _avgDailyCharge7d(entries) {
     const today = getMoscowToday(); // "YYYY-MM-DD"
     const d7 = getMoscowNow();
     d7.setDate(d7.getDate() - 7);
-    const sevenDaysAgoStr = d7.toLocaleDateString('en-CA'); // exclusive lower bound
+    const sevenDaysAgoStr = d7.toLocaleDateString('en-CA'); // inclusive lower bound
     const last7dTotal = (entries || [])
-      .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date > sevenDaysAgoStr && e.date < today)
+      .filter(e => (e.type === 'charge' || e.type === 'correction') && e.date && e.date >= sevenDaysAgoStr && e.date < today)
       .reduce((sum, e) => sum + ledgerExpense(e), 0);
     return Math.round((last7dTotal / 7) * 100) / 100;
   }

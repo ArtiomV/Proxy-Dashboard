@@ -17,19 +17,47 @@ function create(deps) {
   function _mskDateStr(d) { return d.toLocaleDateString('en-CA'); }   // YYYY-MM-DD
   function _today() { return _mskDateStr(getMoscowNow()); }
 
+  // 2026-09-18 · DEEP-09 (§15.1): изменения одного порта сериализуются
+  // внутри процесса — цепочка read-form → POST → apply → verify не должна
+  // пересекаться с другим писателем того же server+portID (включая UI).
+  // Межпроцессной гонки это не закрывает: server-side CAS у ProxySmart нет,
+  // остаточная внешняя гонка документирована в §15.1; владельца и срок
+  // перечитываем свежим чтением (см. ниже).
+  const _portLocks = new Map();   // `${serverName}:${portId}` → Promise
+
+  // Свежая запись порта из list_ports_json (обход кэша — читаем напрямую).
+  async function _readPort(server, portId) {
+    const data = await fetchApi(server, '/apix/list_ports_json');
+    for (const list of Object.values(data || {})) {
+      const found = Array.isArray(list) && list.find(p => p && p.portID === portId);
+      if (found) return found;
+    }
+    return null;
+  }
+
   // Форма целиком → правка полей → POST → apply_port.
-  async function _editPort(server, portId, patch) {
+  // opts.expectedPortName — ожидаемый владелец (client.portName): перед POST
+  // и после apply владелец перечитывается; смена владельца = конфликт,
+  // полную форму конкурента НЕ затираем (DEEP-09).
+  async function _editPortUnlocked(server, portId, patch, opts = {}) {
+    const expectedOwner = opts.expectedPortName != null ? String(opts.expectedPortName) : null;
     const form = await proxyConf.getConfForm(server, `/conf/edit_port/${portId}`);
     if (!form.ok) throw new Error(`edit_port form: ${form.reason}`);
     const formData = parseHtmlInputFields(form.html);
-    // proxy_password в HTML-форме нет — добираем из API портов.
-    if (!formData.proxy_password) {
-      const portsData = await fetchApi(server, '/apix/list_ports_json');
-      for (const plist of Object.values(portsData || {})) {
-        for (const port of plist || []) {
-          if (port.portID === portId && port.PASSWORD) { formData.proxy_password = port.PASSWORD; break; }
-        }
-        if (formData.proxy_password) break;
+    // proxy_password в HTML-форме нет — добираем из API портов. Заодно это же
+    // чтение — повторная проверка владельца ПЕРЕД мутацией: форму могли
+    // пересохранить (переаренда порта) между нашим чтением и POST.
+    let livePort = null;
+    if (!formData.proxy_password || expectedOwner !== null) {
+      livePort = await _readPort(server, portId);
+      if (livePort && !formData.proxy_password && livePort.PASSWORD) {
+        formData.proxy_password = livePort.PASSWORD;
+      }
+    }
+    if (expectedOwner !== null) {
+      if (!livePort) throw new Error('conflict: port missing from list_ports_json before mutation');
+      if (String(livePort.portName || '') !== expectedOwner) {
+        throw new Error(`conflict: port owner is ${livePort.portName || 'empty'}, expected ${expectedOwner}`);
       }
     }
     Object.assign(formData, patch);
@@ -39,37 +67,50 @@ function create(deps) {
     if (applied && (applied.error || applied.ok === false)) {
       throw new Error(`apply_port: ${applied.error || applied.reason || 'rejected'}`);
     }
-    if (Object.prototype.hasOwnProperty.call(patch, 'PROXY_VALID_BEFORE')) {
-      const fresh = await fetchApi(server, '/apix/list_ports_json');
-      let confirmed = null;
-      for (const list of Object.values(fresh || {})) {
-        const found = Array.isArray(list) && list.find(port => port && port.portID === portId);
-        if (found) { confirmed = found; break; }
-      }
+    if (Object.prototype.hasOwnProperty.call(patch, 'PROXY_VALID_BEFORE') || expectedOwner !== null) {
+      const confirmed = await _readPort(server, portId);
       if (!confirmed) throw new Error('verification: port missing from list_ports_json');
-      // API отдаёт дату со временем («YYYY-MM-DD HH:MM:SS»), постим только дату —
-      // сравниваем по первым 10 символам, как делают UI и billing-ext.
-      const wantVb = String(patch.PROXY_VALID_BEFORE).slice(0, 10);
-      const gotVb = String(confirmed.PROXY_VALID_BEFORE || '').slice(0, 10);
-      if (gotVb !== wantVb) {
-        throw new Error(`verification: valid-before is ${gotVb || 'empty'}, expected ${wantVb}`);
+      if (expectedOwner !== null && String(confirmed.portName || '') !== expectedOwner) {
+        throw new Error(`verification: port owner is ${confirmed.portName || 'empty'}, expected ${expectedOwner}`);
+      }
+      if (Object.prototype.hasOwnProperty.call(patch, 'PROXY_VALID_BEFORE')) {
+        // API отдаёт дату со временем («YYYY-MM-DD HH:MM:SS»), постим только дату —
+        // сравниваем по первым 10 символам, как делают UI и billing-ext.
+        const wantVb = String(patch.PROXY_VALID_BEFORE).slice(0, 10);
+        const gotVb = String(confirmed.PROXY_VALID_BEFORE || '').slice(0, 10);
+        if (gotVb !== wantVb) {
+          throw new Error(`verification: valid-before is ${gotVb || 'empty'}, expected ${wantVb}`);
+        }
       }
     }
     if (proxySmart && typeof proxySmart.invalidateCache === 'function') proxySmart.invalidateCache();
   }
 
+  function _editPort(server, portId, patch, opts) {
+    const key = `${server && server.name}:${portId}`;
+    const prev = _portLocks.get(key) || Promise.resolve();
+    const next = prev.catch(() => {}).then(() => _editPortUnlocked(server, portId, patch, opts));
+    _portLocks.set(key, next);
+    next.catch(() => {}).then(() => { if (_portLocks.get(key) === next) _portLocks.delete(key); });
+    return next;
+  }
+
   // «Дата до» (PROXY_VALID_BEFORE): YYYY-MM-DD; сегодня = порт погашен.
-  function setPortValidBefore(server, portId, dateStr) {
-    return _editPort(server, portId, { PROXY_VALID_BEFORE: dateStr });
+  function setPortValidBefore(server, portId, dateStr, opts) {
+    return _editPort(server, portId, { PROXY_VALID_BEFORE: dateStr }, opts);
   }
 
   // Привязка/отвязка: пустой portName = порт выключен (B6).
-  function setPortName(server, portId, name) {
-    return _editPort(server, portId, { portName: name });
+  function setPortName(server, portId, name, opts) {
+    return _editPort(server, portId, { portName: name }, opts);
   }
 
-  // Среднесуточное списание за 7 дн (charge-строки ledger за [today-7 .. today-1] / 7)
-  // — тот же критерий, что в портале (billing_history.summary.avgDailyCharge7d).
+  // Среднесуточное списание за 7 дн (charge-строки ledger за полуинтервал
+  // [сегодня−7; сегодня) московских дат: нижняя граница включена, текущий день
+  // исключён; деление всегда на 7, округление до копейки после деления) —
+  // FIX-07 (2026-09-18); тот же критерий, что в портале
+  // (billing_history.summary.avgDailyCharge7d). Политика типов (только
+  // charge; corrections/manual_charge) в этой задаче не меняется.
   function avgDailyCharge7d(clientId) {
     const today = _today();
     const d7 = getMoscowNow();
