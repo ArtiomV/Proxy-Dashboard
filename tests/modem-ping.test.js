@@ -42,7 +42,13 @@ beforeEach(() => {
   db.exec(`CREATE TABLE modem_ping (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL, server TEXT NOT NULL, nick TEXT NOT NULL,
-    latency_ms INTEGER, loss_pct INTEGER, ok INTEGER
+    latency_ms INTEGER, loss_pct INTEGER, ok INTEGER, measured_at TEXT
+  );
+  CREATE TABLE modem_ping_state (
+    server TEXT NOT NULL, nick TEXT NOT NULL, imei TEXT,
+    quality TEXT NOT NULL, latency_ms INTEGER, loss_pct INTEGER, ok INTEGER,
+    observed_at TEXT NOT NULL, measured_at TEXT, updated_at TEXT NOT NULL,
+    PRIMARY KEY (server, nick)
   )`);
 });
 afterEach(() => vi.useRealTimers());
@@ -103,6 +109,23 @@ describe('ingest + alive', () => {
     const job = mk();
     job.ingest('S1', [{ modem_details: {}, net_details: { ping_stats: '1ms, 0% loss' } }], NOW);
     expect(db.prepare('SELECT COUNT(*) c FROM modem_ping').get().c).toBe(0);
+  });
+
+  it('одинаковые значения с новым живым опросом остаются валидными наблюдениями', () => {
+    const job = mk();
+    for (let i = 0; i < 3; i++) job.ingest('S1', [statusEntry('imei1', 'M', '183ms, 0% loss')], NOW + i * 60000);
+    vi.setSystemTime(NOW + 120000);
+    expect(job.alive('S1', 'imei1')).toBe(true);
+    expect(db.prepare('SELECT COUNT(*) c FROM modem_ping').get().c).toBe(3);
+  });
+
+  it('пишет текущее состояние в modem_ping_state; measured_at не выдумывается (NULL)', () => {
+    const job = mk();
+    job.ingest('S1', [statusEntry('imei1', 'M', '183ms, 0% loss')], NOW);
+    const st = db.prepare('SELECT * FROM modem_ping_state WHERE server=? AND nick=?').get('S1', 'M');
+    expect(st).toMatchObject({ quality: 'valid', loss_pct: 0, ok: 1, measured_at: null, imei: 'imei1' });
+    const hist = db.prepare('SELECT measured_at FROM modem_ping').get();
+    expect(hist.measured_at).toBeNull();
   });
 });
 

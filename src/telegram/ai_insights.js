@@ -276,6 +276,18 @@ function buildDayContext(date) {
     }
   } catch (e) { logger.warn('[AIInsights] trend query: ' + e.message); }
 
+  // ── 6) FIX-05/06 (2026-09-18): качество текущих наблюдений пинга.
+  // Проценты выше считаются по пригодным замерам (modem_ping — только valid);
+  // число модемов с недостоверным текущим наблюдением показывается отдельно.
+  try {
+    const rows = db.prepare(`
+      SELECT quality, COUNT(*) AS n FROM modem_ping_state GROUP BY quality
+    `).all();
+    const byQuality = {};
+    for (const r of rows) byQuality[r.quality] = Number(r.n);
+    ctx.ping_current = { by_quality: byQuality };
+  } catch (e) { logger.warn('[AIInsights] ping state query: ' + e.message); }
+
   return ctx;
 }
 

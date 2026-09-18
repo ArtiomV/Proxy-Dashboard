@@ -1,11 +1,12 @@
 'use strict';
 //
 // src/jobs/auto-reboot.js — авто-перезагрузка «хромающих» модемов.
-// Срабатывает, когда модем попадает в proxyIssues по причинам качества
-// (устойчивые потери пинга, не rotation-fail). Троттлинг:
-// не чаще auto_reboot_min_interval_min на модем. Opt-in через
-// appSettings.auto_reboot_enabled. Extracted from server.js (Stage 9) —
-// без изменения логики.
+// Срабатывает, когда модем попадает в proxyIssues с подтверждённым
+// устойчивым dead-отказом пинга (FIX-05, 2026-09-18: degraded-записи и
+// неподтверждённые/протухшие данные reboot не вызывают — только
+// диагностика). Троттлинг: не чаще auto_reboot_min_interval_min на модем.
+// Opt-in через appSettings.auto_reboot_enabled. Extracted from server.js
+// (Stage 9).
 
 function create(deps) {
   const {
@@ -30,8 +31,17 @@ function create(deps) {
     if (!appSettings.auto_reboot_enabled) return;
     const minInterval = Math.max(15, parseInt(appSettings.auto_reboot_min_interval_min) || 60);
 
-    // computeProxyIssues already returns only sustained ping-loss issues
-    const candidates = computeProxyIssues();
+    // FIX-05 (2026-09-18): reboot — только по dead-кандидатам: подтверждённый
+    // устойчивый текущий отказ источника (свежий валидный замер за dead-порогом,
+    // ≥2 failed за TTL-окно — см. proxy-issues.js). Degraded-модемы (DEEP-13)
+    // остаются в списке проблем UI и в диагностических modem_ping_*-алертах,
+    // но без подтверждённого отказа автоматически не перезагружаются.
+    const allIssues = computeProxyIssues();
+    const candidates = allIssues.filter(it => it.dead === true);
+    const degraded = allIssues.length - candidates.length;
+    if (degraded > 0) {
+      logger.info(`[AutoReboot] ${degraded} degraded-модем(а) без подтверждённого dead-отказа — только диагностика, reboot не выполняется`);
+    }
     if (candidates.length === 0) return;
 
     // Build IMEI lookup: nick + server_name → imei (need IMEI for reboot API)
@@ -57,10 +67,21 @@ function create(deps) {
     `).all();
     const recentSet = new Set(recent.map(r => r.server_name + '|' + r.nick));
 
+    // FIX-05 §16.2 (2026-09-18): пока ждали IMEI-lookup (await выше), кандидат
+    // мог восстановиться или данные протухнуть — пересчитываем и ребутим
+    // только тех, кто ВСЁ ЕЩЁ подтверждённо лежит.
+    const stillDead = new Set(
+      computeProxyIssues().filter(it => it.dead === true).map(it => it.server + '|' + it.nick)
+    );
+
     let attempted = 0, succeeded = 0;
     for (const it of candidates) {
       const key = it.server + '|' + it.nick;
       if (recentSet.has(key)) continue; // already rebooted recently
+      if (!stillDead.has(key)) {
+        logger.info(`[AutoReboot] ${it.server}/${it.nick} — отказ не подтвердился после lookup, reboot отменён`);
+        continue;
+      }
       const imei = imeiMap[key];
       if (!imei) {
         logger.warn(`[AutoReboot] no IMEI for ${it.server}/${it.nick}, skipping`);

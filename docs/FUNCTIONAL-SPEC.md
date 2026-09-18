@@ -354,10 +354,10 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 - **trackModems** (1 мин): фетч боксов, server down/recovered, meta-upsert, IP-трекинг, uptime-бакеты, авто-recovery, offline-алерты (порог `modem_offline_threshold_min`), сводка mass-down, prune.
 - **HourlyAgg** (каждый час :00, 5 попыток): дельты → traffic_hourly; детект ресета счётчиков; spike-clamp (3×/1.5× от 24ч-среднего, floor 500 МБ); сглаживание uncertain медианой.
 - **NotifyCollect** (2 мин): bell по fleet.disconnectedList (per-day дедуп), SIM-сигналы, долги, TTL-чистка.
-- **ModemPing** (из цикла tracking): сохраняет нативные ProxySmart `ping_stats` → modem_ping; отдельный внешний latency-cron не запускается.
+- **ModemPing** (из цикла tracking): сохраняет нативные ProxySmart `ping_stats` → modem_ping (только пригодные замеры) и текущее состояние наблюдения → modem_ping_state (valid/missing/invalid, observed_at; measured_at API не отдаёт); свежесть — общая политика src/services/ping-freshness.js (TTL `ping_fresh_ttl_min`, дефолт 10 мин); отдельный внешний latency-cron не запускается.
 - **HttpCheck**: проверяет сайт только через проданный неистёкший порт с непустыми валидными клиентскими login/password; невалидные/служебные реквизиты пропускает без ложного алерта.
 - **AutoCreate** (10 мин): новый portName → авто-клиент (per_gb, цена по сетке).
-- **AutoReboot** (15 мин, выкл по дефолту): ребут проблемных по computeProxyIssues с троттлом.
+- **AutoReboot** (15 мин, выкл по дефолту): ребут только dead-кандидатов computeProxyIssues (подтверждённый устойчивый свежий отказ пинга; degraded и неподтверждённые данные — только диагностика) с троттлом и перепроверкой после IMEI-lookup.
 - **TochkaSync** (30 мин + дебаунс от webhook): выписка 14 дней, идемпотентный зачёт, bill-settle.
 - **CardPaymentRecovery** (5 мин + прогон через 30 с после старта): дозачёт заказов эквайринга, застрявших в `paid` (крах/ошибка между webhook банка и зачислением). Основная сумма и промо-бонус — отдельные durable-ключи finance_idempotency, `markCredited` — в той же транзакции, поэтому повторный прогон денег не добавляет. Ретраи с backoff 1/5/15/60 мин (recovery_attempts/next_recovery_at/recovery_error в card_payments, формат времени — SQLite UTC); алерт после 15 мин неуспеха.
 - **Failover scan** (3 мин): кандидаты → teleport на спейр (гейты/кулдауны/рейт-лимит).

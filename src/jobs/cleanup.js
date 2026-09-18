@@ -203,6 +203,9 @@ function create(deps) {
       simulator_runs:   { col: 'started_at', key: 'retention_simulator_runs', def: 30 },
       // A1 (23.08): история пингов модемов (~51k строк/сут на флот 106).
       modem_ping:       { col: 'ts', key: 'retention_modem_ping', def: 30 },
+      // FIX-05/06 (2026-09-18): текущее состояние наблюдения — строки слотов,
+      // которых давно нет в фиде, подлежат тому же сроку, что и история.
+      modem_ping_state: { col: 'updated_at', key: 'retention_modem_ping', def: 30 },
       // A3 (23.08): снимки текущей скорости каждые 5 мин (~30k строк/сут).
       modem_rate:       { col: 'ts', key: 'retention_modem_rate', def: 7 },
       // A2 (23.08): HTTP-чеки через прокси (~10 ников × 4/час ≈ 1k строк/сут).

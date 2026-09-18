@@ -3,11 +3,20 @@
 // Public, privacy-safe source for arendaproxy.ru/status/. It exposes only
 // country-level availability computed from ProxySmart modem_ping; no IMEI,
 // client, proxy credentials, IP addresses or internal event text leave the app.
+//
+// FIX-05/06 (2026-09-18): текущий статус — из modem_ping_state с общей
+// политикой свежести src/services/ping-freshness.js (TTL общий с остальными
+// потребителями, возраст пересчитывается на каждом чтении, missing/invalid
+// наблюдения не считаются ни живыми, ни мёртвыми — они «пропуски»).
+// История modem_ping — только пригодные измерения, поэтому агрегаты uptime
+// по ней корректны без дополнительной фильтрации.
+const pingFresh = require('../services/ping-freshness');
+
 module.exports = function createPublicStatusRouter(deps) {
-  const { db, apiServers, SERVER_COUNTRIES } = deps;
+  const { db, apiServers, SERVER_COUNTRIES, appSettings } = deps;
   const express = require('express');
   const r = express.Router();
-  const STALE_MIN = 10;
+  const _ttlMs = () => pingFresh.ttlMs((k, d) => (appSettings && appSettings[k] != null ? appSettings[k] : d));
 
   function fixedOperationalComponent() {
     const days = [];
@@ -44,30 +53,30 @@ module.exports = function createPublicStatusRouter(deps) {
     const total = rosterRows.reduce((sum, row) => sum + Number(row.total || 0), 0);
 
     const latest = db.prepare(`
-      WITH ranked AS (
-        SELECT server, nick, ts, ok,
-               ROW_NUMBER() OVER (PARTITION BY server, nick ORDER BY ts DESC) AS rn
-        FROM modem_ping p
-        WHERE server IN (${marks})
-          AND EXISTS (
-            SELECT 1 FROM modem_meta m
-            WHERE m.server_name = p.server AND m.nick = p.nick
-              AND (m.deleted IS NULL OR m.deleted = 0)
-              AND (m.is_test_pool IS NULL OR m.is_test_pool = 0)
-          )
-      )
-      SELECT server, nick, ts, ok FROM ranked WHERE rn = 1
+      SELECT s.server, s.nick, s.quality, s.ok, s.observed_at, s.measured_at
+      FROM modem_ping_state s
+      WHERE s.server IN (${marks})
+        AND EXISTS (
+          SELECT 1 FROM modem_meta m
+          WHERE m.server_name = s.server AND m.nick = s.nick
+            AND (m.deleted IS NULL OR m.deleted = 0)
+            AND (m.is_test_pool IS NULL OR m.is_test_pool = 0)
+        )
     `).all(...servers);
-    const freshCutoff = Date.now() - STALE_MIN * 60000;
-    const fresh = latest.filter(row => {
-      const t = Date.parse(row.ts);
-      return Number.isFinite(t) && t >= freshCutoff;
-    });
-    const online = fresh.filter(row => Number(row.ok) === 1).length;
+    const ttl = _ttlMs();
+    const nowMs = Date.now();
+    let online = 0, freshCount = 0, skipped = 0;
+    for (const row of latest) {
+      const q = pingFresh.qualityAt(row, nowMs, ttl);
+      if (q === 'valid') { freshCount++; if (Number(row.ok) === 1) online++; }
+      else if (q === 'missing' || q === 'invalid') skipped++;  // пропуски — отдельно, не 0% и не 100%
+      // stale — просто нет свежих данных (как раньше по возрасту ts)
+    }
     const denominator = Math.max(total, latest.length);
-    const currentPct = denominator > 0 ? Math.round(online / denominator * 1000) / 10 : null;
+    // Ноль пригодных измерений → «нет данных» (null), а не 0%/100%.
+    const currentPct = (denominator > 0 && freshCount > 0) ? Math.round(online / denominator * 1000) / 10 : null;
     let status = 'unknown';
-    if (denominator > 0 && fresh.length > 0) status = online === 0 ? 'major_outage' : currentPct >= 98 ? 'operational' : 'degraded';
+    if (denominator > 0 && freshCount > 0) status = online === 0 ? 'major_outage' : currentPct >= 98 ? 'operational' : 'degraded';
 
     const aggregate = db.prepare(`
       SELECT AVG(ok) * 100 AS uptime, COUNT(*) AS checks
@@ -102,7 +111,8 @@ module.exports = function createPublicStatusRouter(deps) {
       uptime60d,
       online,
       total: denominator,
-      freshChecks: fresh.length,
+      freshChecks: freshCount,
+      skippedChecks: skipped,
       days: dailyRows.map(row => ({ day: row.day, uptime: Math.round(Number(row.uptime) * 1000) / 1000, checks: Number(row.checks) })),
     };
   }
@@ -122,7 +132,7 @@ module.exports = function createPublicStatusRouter(deps) {
       : live.some(c => c.status === 'major_outage') ? 'major_outage'
       : live.some(c => c.status === 'degraded') ? 'degraded'
       : 'operational';
-    res.json({ updatedAt: new Date().toISOString(), source: 'mixed', staleAfterMinutes: STALE_MIN, overall, components });
+    res.json({ updatedAt: new Date().toISOString(), source: 'mixed', staleAfterMinutes: Math.round(_ttlMs() / 60000), overall, components });
   });
 
   return r;

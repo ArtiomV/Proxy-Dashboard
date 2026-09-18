@@ -3140,7 +3140,7 @@ app.use(require('./src/routes/tariffs')({
 // Публичная витрина тарифов для лендинга arendaproxy.ru (без auth, CORS '*'):
 // цены на сайте синхронизируются с админкой автоматически.
 app.use(require('./src/routes/public-tariffs')({ tariffsDb, getSetting }));
-app.use(require('./src/routes/public-status')({ db, apiServers, SERVER_COUNTRIES }));
+app.use(require('./src/routes/public-status')({ db, apiServers, SERVER_COUNTRIES, appSettings }));
 
 // Публичный приём заявок с лендинга (без auth, CORS '*'): telegram-form.js
 // дублирует заявку сюда параллельно с TG-ботом. Сохраняем в leads, пушим в
