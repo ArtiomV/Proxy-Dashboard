@@ -54,8 +54,37 @@ function mkPoolDb(rows = []) {
   };
 }
 
+// DEEP-22 (2026-09-18): buy_proxy ведёт durable-покупку — in-memory стаб
+// retail_purchases с той же статусной машиной и UNIQUE-ограничениями.
+function mkPurchasesDb() {
+  const rows = [];
+  return {
+    _rows: rows,
+    byStatus: (st) => rows.filter(r => r.status === st),
+    createReserved: (p) => {
+      const inFlight = rows.some(r => r.client_id === p.clientId &&
+        ['reserved', 'provisioning', 'provisioned', 'charge_failed', 'quarantine'].includes(r.status));
+      const testUsed = p.testDay && rows.some(r => r.client_id === p.clientId && r.test_day === 1 && r.status !== 'failed');
+      if (inFlight || testUsed) {
+        const e = new Error('UNIQUE constraint failed: retail_purchases.client_id');
+        e.code = 'SQLITE_CONSTRAINT_UNIQUE';
+        throw e;
+      }
+      const row = { id: p.id, client_id: p.clientId, tariff_id: p.tariffId, server: null, port_id: null, pool_row_id: null, amount: p.amount, test_day: p.testDay ? 1 : 0, status: 'reserved' };
+      rows.push(row);
+      return row;
+    },
+    setPortInfo: (id, server, portId, poolRowId) => {
+      const r = rows.find(x => x.id === id);
+      if (r) { r.server = server; r.port_id = portId; r.pool_row_id = poolRowId; }
+    },
+    setStatus: (id, status) => { const r = rows.find(x => x.id === id); if (r) r.status = status; },
+  };
+}
+
 function mountRetail({ poolRows = [], clients = [], tariffs = {}, settings = {}, fetchApiImpl, fetchAllResults, posted, user } = {}) {
   const poolDb = mkPoolDb(poolRows);
+  const purchasesDb = mkPurchasesDb();
   const cfg = { retail_enabled: true, retail_pool_servers: 'S1', retail_test_day_price: 100, ...settings };
   const auth = (req, res, next) => { req.user = user || { login: 'test_admin', isAdmin: 1 }; next(); };
   const router = createRetailRouter({
@@ -64,8 +93,10 @@ function mountRetail({ poolRows = [], clients = [], tariffs = {}, settings = {},
     clients, saveClients: () => {},
     tariffsDb: { byId: (id) => tariffs[id] || null },
     retailPoolDb: poolDb,
+    retailPurchasesDb: purchasesDb,
     atomicDebit: () => {},
     getSetting: (k, d) => (k in cfg ? cfg[k] : d),
+    getMoscowNow: () => new Date(),
     findServer: () => SRV,
     fetchApi: fetchApiImpl || (async () => ({})),
     proxyConf: {
@@ -85,7 +116,7 @@ function mountRetail({ poolRows = [], clients = [], tariffs = {}, settings = {},
   const app = express();
   app.use(express.json());
   app.use(router);
-  return { app, poolDb };
+  return { app, poolDb, purchasesDb };
 }
 
 describe('GET /api/admin/retail/pool — rows', () => {

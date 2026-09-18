@@ -100,6 +100,24 @@ function _applyReferralInsideTx(referrerId, delta) {
   return { referrerId, newBalance };
 }
 
+// 2026-09-18 · DEEP-21 (§ FIX-SPEC): сумма финансового события задаётся один
+// раз. Сумма ledger-строки ОБЯЗАНА совпадать с изменением баланса: charge
+// берётся из cost, остальные типы — из amount; расхождение — программная
+// ошибка (бросаем ДО транзакции, а не пишем ноль/иное в журнал).
+function _assertLedgerAmount(ledgerEntry, amount, fnName) {
+  if (!ledgerEntry) return;
+  const isCharge = ledgerEntry.type === 'charge';
+  const has = isCharge ? ledgerEntry.cost != null : ledgerEntry.amount != null;
+  if (!has) {
+    if (isCharge) ledgerEntry.cost = amount; else ledgerEntry.amount = amount;
+    return;
+  }
+  const ledgerAmount = Number(isCharge ? ledgerEntry.cost : ledgerEntry.amount);
+  if (!Number.isFinite(ledgerAmount) || Math.abs(ledgerAmount - amount) > 0.005) {
+    throw new Error(`${fnName}: ledger amount mismatch (entry=${ledgerEntry.cost ?? ledgerEntry.amount}, balance delta=${amount})`);
+  }
+}
+
 /**
  * atomicCredit — atomically add amount to client balance AND insert ledger entry
  * BUG-02 fix: balance + ledger in single transaction (no partial state)
@@ -128,6 +146,7 @@ function atomicCredit(clientId, amount, ledgerEntry, opts) {
   // WITH an audit trail, add an explicit `opts.forceLog` flag rather
   // than removing this short-circuit.
   if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
+  _assertLedgerAmount(ledgerEntry, amount, 'atomicCredit');
   let balanceBefore, balanceAfter, ledgerDbId, duplicate = false;
   let referralResult = null;
   try {
@@ -210,6 +229,7 @@ function atomicDebit(clientId, amount, ledgerEntry, opts) {
   // current balance without writing a ledger entry. See atomicCredit
   // comment above for the design rationale.
   if (amount === 0) { const row = _clientGetBalance.get(clientId); const b = row ? row.balance : 0; return { balanceBefore: b, balanceAfter: b }; }
+  _assertLedgerAmount(ledgerEntry, amount, 'atomicDebit');
   let balanceBefore, balanceAfter, ledgerDbId, duplicate = false;
   let referralResult = null;
   try {

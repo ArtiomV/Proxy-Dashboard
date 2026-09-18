@@ -3,12 +3,18 @@
 // src/routes/retail.js — B2C покупка прокси (WP2, ТЗ 10.08).
 //
 //   POST /api/client/buy_proxy { tariff_id } — автовыдача из пула:
-//     проверки → reserve (атомарно) → assign_modem(portName=login) →
-//     save_port_config лимитов → leased → tariff_id → списание первых суток
-//     ПОСЛЕДНИМ шагом (при фейле бокса деньги не тронуты, порт → free).
+//     проверки → durable-покупка (retail_purchases, DEEP-22) → reserve
+//     (атомарно) → assign_modem(portName=login) → save_port_config лимитов →
+//     leased → tariff_id → списание первых суток ПОСЛЕДНИМ шагом.
+//     Статусная машина покупки: reserved → provisioning → provisioned →
+//     charged; failed (отвязка ПОДТВЕРЖДЕНА свежим чтением, деньги не
+//     тронуты), charge_failed (порт выдан, списание не прошло — recovery
+//     досписывает по purchase_id), quarantine (исход сети неизвестен — порт
+//     НЕ возвращается в free вслепую). Списание идемпотентно по purchase_id
+//     (миграция 097), вторая покупка в день — независимая (DEEP-20/21).
 //   Тест-день: тариф duration_hours=24, разовое списание retail_test_day_price,
-//     1 раз на аккаунт (test_used), daily billing его НЕ трогает; возврат в пул
-//     через 24ч — retail-guard (этап 2).
+//     1 раз на аккаунт (test_used + durable UNIQUE idx_retail_purchases_testday),
+//     daily billing его НЕ трогает; возврат в пул через 24ч — retail-guard.
 //   POST /api/admin/retail/client/rehabilitate { client_id } — Э5 (WP7):
 //     возврат портов, замороженных антифродом (только админом, auditLog).
 //
@@ -16,12 +22,13 @@
 // Повторная покупка клиентом с tariff_id — только того же тарифа (один тариф на клиента, §Г.1).
 
 const express = require('express');
+const crypto = require('crypto');
 
 module.exports = function createRetailRouter(deps) {
   const {
     logger, authMiddleware,
     clients, saveClients,
-    tariffsDb, retailPoolDb,
+    tariffsDb, retailPoolDb, retailPurchasesDb,
     atomicDebit,
     getSetting,
     findServer, fetchApi, proxyConf, proxySmart, parseHtmlInputFields,
@@ -72,6 +79,32 @@ module.exports = function createRetailRouter(deps) {
     await proxyConf.postConfForm(server, `/conf/edit_port/${portId}`, formData).catch(() => {});
   }
 
+  // 2026-09-18 · DEEP-22: компенсация провижининга. Порт переводится в free
+  // ТОЛЬКО после подтверждённой отвязки: postConfForm(portName='') + apply +
+  // СВЕЖЕЕ чтение реестра портов (portName фактически пуст). Любой сбой или
+  // неподтверждённое чтение → false: исход неизвестен, порт НЕ освобождаем
+  // (иначе активный порт с живым доступом продавался бы повторно).
+  async function _tryUnbindPort(server, portId) {
+    try {
+      const form = await proxyConf.getConfForm(server, `/conf/edit_port/${portId}`);
+      if (!form.ok) return false;
+      const formData = parseHtmlInputFields(form.html);
+      formData.portName = '';
+      const posted = await proxyConf.postConfForm(server, `/conf/edit_port/${portId}`, formData);
+      if (!posted.ok) return false;
+      try { await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`); } catch (_) { /* best-effort */ }
+      const portsData = await fetchApi(server, '/apix/list_ports_json');
+      for (const plist of Object.values(portsData || {})) {
+        for (const p of plist || []) {
+          if (p && p.portID === portId) return !String(p.portName || '').trim();
+        }
+      }
+      return false;   // порт не найден в свежем реестре — отвязка не доказана
+    } catch (_) {
+      return false;
+    }
+  }
+
   r.post('/api/client/buy_proxy', authMiddleware, async (req, res) => {
     if (!getSetting('retail_enabled', false)) return res.status(404).json({ error: 'Not found' });
     const client = _clientOf(req);
@@ -103,10 +136,40 @@ module.exports = function createRetailRouter(deps) {
       return res.status(402).json({ error: `Недостаточно средств: нужно ${firstDayCost} ₽`, code: 'INSUFFICIENT_BALANCE', required: firstDayCost });
     }
 
+    // 2026-09-18 · DEEP-22: durable-покупка ДО любых сетевых вызовов.
+    // Финансовый резерв: UNIQUE idx_retail_purchases_inflight закрывает гонку
+    // двух запросов по одному балансу/тест-дню (проверки выше — не транзакция);
+    // UNIQUE idx_retail_purchases_testday — durable право на тест-день.
+    // DEEP-20/21: сумма списания вычисляется ОДИН раз здесь и дальше идёт
+    // и в purchase.amount, и в ledger.cost, и в ответ API.
+    const charge = isTestDay
+      ? firstDayCost
+      : Math.round((tariff.price / new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate()) * 100) / 100;
+    const purchaseId = 'pur_' + crypto.randomBytes(8).toString('hex');
+    try {
+      retailPurchasesDb.createReserved({
+        id: purchaseId, clientId: client.id, tariffId: tariff.id,
+        amount: charge, testDay: isTestDay,
+      });
+    } catch (e) {
+      if (e && /UNIQUE constraint/i.test(e.message || '')) {
+        const inFlight = ['reserved', 'provisioning', 'provisioned', 'charge_failed', 'quarantine']
+          .some(st => retailPurchasesDb.byStatus(st).some(p => p.client_id === client.id));
+        if (inFlight) {
+          return res.status(409).json({ error: 'Предыдущая покупка ещё выполняется — повторите через минуту', code: 'PURCHASE_IN_FLIGHT' });
+        }
+        return res.status(403).json({ error: 'Тест-день доступен один раз на аккаунт', code: 'TEST_USED' });
+      }
+      throw e;
+    }
+
     // Атомарный резерв свободного порта на боксе тарифа (гонки: UPDATE … WHERE status='free')
     const poolServers = String(getSetting('retail_pool_servers', '')).split(',').map(s => s.trim()).filter(Boolean);
     const serverName = tariff.server || poolServers[0];
-    if (!serverName) return res.status(503).json({ error: 'Пул розницы не настроен' });
+    if (!serverName) {
+      retailPurchasesDb.setStatus(purchaseId, 'failed', 'pool_not_configured');
+      return res.status(503).json({ error: 'Пул розницы не настроен' });
+    }
 
     let poolRow = null;
     for (let attempt = 0; attempt < 5 && !poolRow; attempt++) {
@@ -115,6 +178,7 @@ module.exports = function createRetailRouter(deps) {
       const reservedUntil = new Date(Date.now() + 5 * 60 * 1000).toISOString(); // TTL резерва 5 мин
       if (retailPoolDb.reserve(candidate.id, client.id, reservedUntil)) poolRow = candidate;
     }
+    if (poolRow) retailPurchasesDb.setPortInfo(purchaseId, serverName, poolRow.port_id, poolRow.id);
 
     // Шаринг (15.08): свободные порты кончились → создаём НОВЫЙ порт на модеме
     // «якорного» клиента (настройка retail_share_anchor_login), если на нём
@@ -162,6 +226,7 @@ module.exports = function createRetailRouter(deps) {
                 }
                 retailPoolDb.insertLeased(serverName, formData.portID, client.id);
                 poolRow = retailPoolDb.byPort(serverName, formData.portID);
+                if (poolRow) retailPurchasesDb.setPortInfo(purchaseId, serverName, formData.portID, poolRow.id);
                 sharedCreated = true;
                 auditLog(client.login, 'retail_buy_shared_port', { server: serverName, imei: cand.imei, port: formData.portID, anchor: anchorLogin });
                 logActivity('modem', 'info', 'retail_shared_port', serverName,
@@ -180,27 +245,41 @@ module.exports = function createRetailRouter(deps) {
 
     if (!poolRow) {
       // Пул пуст — покупка недоступна + алерт админу (WP4)
+      retailPurchasesDb.setStatus(purchaseId, 'failed', 'pool_empty');
       logger.warn(`[Retail] Пул исчерпан: ${serverName} (geo ${tariff.geo})`);
       try { alerts && alerts.trigger('retail_pool_empty', { server: serverName, geo: tariff.geo }); } catch (_) {}
       return res.status(409).json({ error: 'Свободные прокси этой локации закончились — попробуйте позже', code: 'POOL_EMPTY' });
     }
 
-    // Провижининг ВНЕ транзакции; при фейле — порт обратно в free, деньги не тронуты
+    // Провижининг ВНЕ транзакции; компенсация — только ПОДТВЕРЖДЁННАЯ отвязка
+    // (DEEP-22): release без неё делал активный порт free с живым доступом.
     const server = findServer(serverName);
     if (!server) {
-      retailPoolDb.release(poolRow.id);
+      retailPurchasesDb.setStatus(purchaseId, 'quarantine', 'server_unknown');
+      try { alerts && alerts.trigger('retail_purchase_quarantine', { client: client.login, port: poolRow.port_id, server: serverName, reason: 'server_unknown', purchase_id: purchaseId }); } catch (_) {}
       return res.status(503).json({ error: 'Сервер выдачи недоступен' });
     }
+    retailPurchasesDb.setStatus(purchaseId, 'provisioning');
     try {
       // Шаринговый порт создан сразу с portName=login — привязка не нужна,
       // только лимиты тарифа. Обычный free-порт — assign + лимиты.
       if (!sharedCreated) await _assignPortToClient(server, poolRow.port_id, client.login);
       await _applyTariffLimits(server, poolRow.port_id, tariff);
     } catch (e) {
-      retailPoolDb.release(poolRow.id);
-      logger.error(`[Retail] Провижининг порта ${poolRow.port_id} failed: ${e.message}`);
+      const unbound = await _tryUnbindPort(server, poolRow.port_id);
+      if (unbound) {
+        retailPoolDb.release(poolRow.id);
+        retailPurchasesDb.setStatus(purchaseId, 'failed', e.message);
+      } else {
+        // Исход неизвестен: привязка могла пройти. Порт НЕ в free — durable
+        // quarantine, reconcile по свежему владельцу делает retail-guard.
+        retailPurchasesDb.setStatus(purchaseId, 'quarantine', e.message);
+        try { alerts && alerts.trigger('retail_purchase_quarantine', { client: client.login, port: poolRow.port_id, server: serverName, reason: e.message, purchase_id: purchaseId }); } catch (_) {}
+      }
+      logger.error(`[Retail] Провижининг порта ${poolRow.port_id} failed: ${e.message} (компенсация: ${unbound ? 'порт отвязан и возвращён в free' : 'НЕ подтверждена — quarantine'})`);
       return res.status(502).json({ error: 'Не удалось выдать прокси — повторите через минуту', details: e.message });
     }
+    retailPurchasesDb.setStatus(purchaseId, 'provisioned');
 
     // leased + привязка тарифа (тест — тоже leased; возврат по 24ч делает retail-guard)
     if (!sharedCreated) retailPoolDb.lease(poolRow.id);
@@ -214,20 +293,37 @@ module.exports = function createRetailRouter(deps) {
       client.tariffId = tariff.id;
     }
 
-    // Списание — ПОСЛЕДНИЙ шаг (atomicDebit; деньги только через atomic*, §Г.5)
-    const charge = isTestDay
-      ? firstDayCost
-      : Math.round((tariff.price / new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate()) * 100) / 100;
+    // Списание — ПОСЛЕДНИЙ шаг (atomicDebit; деньги только через atomic*, §Г.5).
+    // DEEP-20/21: идемпотентность покупки — purchase_id (idx_ledger_purchase_unique),
+    // НЕ общий ключ client+date+type; сумма события — единый `charge` (cost в
+    // ledger). Дата — в зоне биллинга (МСК), как у суточного расчёта.
+    // minBalance=0: физик без allowDebt не уходит в минус гоночным списанием.
+    let chargeFailed = null;
     try {
-      atomicDebit(client.id, charge, {
-        date: new Date().toISOString().slice(0, 10),
+      const debitRes = atomicDebit(client.id, charge, {
+        date: getMoscowNow().toLocaleDateString('en-CA'),
         type: 'charge',
         note: isTestDay ? 'test_day' : 'first_day',
-      });
+        cost: charge,
+        purchase_id: purchaseId,
+      }, { minBalance: 0 });
+      if (debitRes && debitRes.duplicate) {
+        // Повтор ТОЙ ЖЕ покупки (replay/recovery) — деньги уже списаны этим
+        // purchase_id, второго списания нет. Это штатная идемпотентность.
+        logger.info(`[Retail] Списание ${purchaseId} уже проведено (duplicate) — идемпотентный повтор`);
+      }
     } catch (e) {
-      logger.error(`[Retail] Списание первых суток failed для ${client.login}: ${e.message}`);
-      // Порт уже выдан — не откатываем (биллинг доберёт ретраем); фиксируем инцидент
-      try { alerts && alerts.trigger('retail_first_day_charge_failed', { client: client.login, charge }); } catch (_) {}
+      chargeFailed = e;
+    }
+    if (chargeFailed) {
+      // Порт выдан — НЕ откатываем вслепую. Операция durable: recovery
+      // (retail-guard) доспишет по purchase_id; API НЕ сообщает charged
+      // (DEEP-22: раньше клиент видел «charged» при фактическом отказе).
+      retailPurchasesDb.setStatus(purchaseId, 'charge_failed', chargeFailed.message);
+      logger.error(`[Retail] Списание первых суток failed для ${client.login} (${purchaseId}): ${chargeFailed.message}`);
+      try { alerts && alerts.trigger('retail_first_day_charge_failed', { client: client.login, charge, purchase_id: purchaseId }); } catch (_) {}
+    } else {
+      retailPurchasesDb.setStatus(purchaseId, 'charged');
     }
     saveClients(clients);
     proxySmart.invalidateCache();
@@ -274,7 +370,12 @@ module.exports = function createRetailRouter(deps) {
     }
 
     // Реквизиты клиент видит сразу (живьём из ProxySmart на dashboard_data)
-    res.json({ ok: true, port_id: poolRow.port_id, server: serverName, tariff: tariff.name, charged: charge });
+    res.json({
+      ok: true, port_id: poolRow.port_id, server: serverName, tariff: tariff.name,
+      charged: chargeFailed ? 0 : charge,
+      charge_pending: !!chargeFailed,   // DEEP-22: честный статус списания
+      purchase_id: purchaseId,
+    });
   });
 
   // Состояние пула (для админки «Розница»; витрина клиента — /api/client/tariffs в tariffs.js)

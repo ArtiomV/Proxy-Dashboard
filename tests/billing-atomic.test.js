@@ -106,9 +106,10 @@ describe('billing/atomic', () => {
       const b = makeClient({ balance: 0 });
       const entry = { type: 'card_payment', date: '2026-01-06', amount: 500, paymentId: 'order-2' };
       billing.atomicCredit(a, 500, entry, { idempotencyKey: 'card_payment:order-2' });
-      // Другая сумма по тому же ключу
+      // Другая сумма по тому же ключу (entry.amount синхронен с вызовом —
+      // DEEP-21 требует сумму ledger = изменению баланса)
       let thrown;
-      try { billing.atomicCredit(a, 999, entry, { idempotencyKey: 'card_payment:order-2' }); }
+      try { billing.atomicCredit(a, 999, { ...entry, amount: 999 }, { idempotencyKey: 'card_payment:order-2' }); }
       catch (e) { thrown = e; }
       expect(thrown).toBeDefined();
       expect(thrown.code).toBe('IDEMPOTENCY_CONFLICT');

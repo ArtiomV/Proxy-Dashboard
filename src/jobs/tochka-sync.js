@@ -161,19 +161,37 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
       // bank_payment (legacy rows without a natural_key + crash recovery between
       // atomicCredit and the match-mark) → idempotent even across a crash.
       let reconciled = false;
-      if (!existingRow.matched && !existingRow.dismissed) {
+      if (!existingRow.matched && !existingRow.dismissed && !existingRow.reconciliation_required) {
         const _m = findClientByPayer(payerInn, payerName, clientByInn, clients);
         const client = _m && _m.client;
         if (client) {
           const _byLabel = _m.by === 'name' ? ('названию «' + (payerName || '').slice(0, 40) + '»') : ('ИНН ' + payerInn);
-          const alreadyInLedger = dbStmts.ledgerHasBankPaymentOn.get(client.id, amount, dateStr);
+          // 2026-09-18 · DEEP-24 (§ FIX-SPEC): сверка по ИДЕНТИФИКАТОРУ
+          // события. Сравнение «клиент+сумма+дата» склеивало два разных
+          // платежа одной суммы: второй помечался matched без зачисления.
+          // Теперь доказательством служит только конкретный payment_id
+          // события в ledger; без какого-либо id события платёж НЕ
+          // помечается оплаченным — он уходит в reconciliation_required.
+          const eventIds = [existingRow.payment_id, existingRow.tochka_payment_id, paymentId]
+            .filter((v, i, a) => v && a.indexOf(v) === i);
+          if (!eventIds.length) {
+            try { dbStmts.markBankPaymentReconciliation.run(existingRow.id); } catch (e) {
+              logger.debug(`[Tochka Sync:${source}] reconciliation mark failed: ${e.message}`);
+            }
+            logger.warn(`[Tochka Sync:${source}] payment ${existingRow.id} (${amount}, ${dateStr}): нет идентификатора события — reconciliation_required, не matched`);
+            logActivity('billing', 'warn', 'bank_reconciliation_required', client.name,
+              `Платёж ${amount} ₽ за ${dateStr}: неоднозначная legacy-история (нет bank event id) — требуется ручная сверка`,
+              { client_id: client.id, bank_payment_id: existingRow.id, amount, date: dateStr });
+          } else {
+          const alreadyInLedger = eventIds.some(id => dbStmts.ledgerHasBankPaymentEvent.get(client.id, id));
           if (!alreadyInLedger) {
             try {
               atomicCredit(client.id, amount, {
                 type: 'bank_payment', amount, date: dateStr,
                 timestamp: new Date().toISOString(),
                 note: ('Авто-зачисление (синк, ' + _byLabel + '): ' + (purpose || '')).slice(0, 300),
-                source: 'tochka_sync', tochkaPaymentId: paymentId
+                source: 'tochka_sync', tochkaPaymentId: paymentId,
+                paymentId: existingRow.payment_id || paymentId   // DEEP-24: идентификатор ЭТОГО события
               }, referralOptsFor(client, amount));
               dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 1, existingRow.id);
               _notifyCredit(client, amount, client.balance);   // WP5: «Зачислено N ₽» (client.balance уже обновлён atomicCredit)
@@ -187,6 +205,7 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
             // Already credited via another row — just clear the "unmatched"
             // flag, do NOT credit again.
             dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 0, existingRow.id);
+          }
           }
         }
       }
@@ -228,7 +247,8 @@ async function runTochkaSync({ dateFrom, dateTo, source = 'manual' } = {}) {
             timestamp: new Date().toISOString(),
             note: ('Синхронизация из Точки (' + _byLabel + '): ' + (purpose || '')).slice(0, 200),
             source: 'tochka_sync',
-            tochkaPaymentId: paymentId
+            tochkaPaymentId: paymentId,
+            paymentId: paymentId || bankPayment.id   // DEEP-24: ledger хранит идентификатор события
           }, referralOptsFor(client, amount));
           try { settleBillsOnPayment(client, amount, purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
           matched++;

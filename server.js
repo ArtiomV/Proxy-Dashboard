@@ -139,11 +139,15 @@ const retailPoolDb = require('./src/db/retail-pool');
 const cardPaymentsDb = require('./src/db/card-payments');
 const authTokensDb = require('./src/db/auth-tokens');
 const promoDb = require('./src/db/promo-codes');
+const retailPurchasesDb = require('./src/db/retail-purchases');   // DEEP-22 (миграция 098)
+const billingRunsDb = require('./src/db/billing-runs');           // DEEP-23 (миграция 099)
 tariffsDb.init(db);
 retailPoolDb.init(db);
 cardPaymentsDb.init(db);
 authTokensDb.init(db);
 promoDb.init(db);
+retailPurchasesDb.init(db);
+billingRunsDb.init(db);
 // Aliases for legacy callsites that still hold raw prepared-statement refs.
 // These are passed to billing.init() and used by atomicCredit/atomicDebit
 // on the hot path — wrapping in a function would add a per-credit call.
@@ -235,7 +239,7 @@ const dbStmts = {
   // payer|amount|date|purpose in one day). resolveNaturalKey() picks dup vs
   // sequence. Replaces the Stage 18.6 single-row natural-key lookups.
   // Sync-reconcile also needs matched/dismissed state of the existing row.
-  findBankPaymentsByNaturalKeyBase: db.prepare("SELECT id, payment_id, tochka_payment_id, natural_key, matched, dismissed FROM bank_payments WHERE natural_key = ? OR substr(natural_key, 1, ?) = ? ORDER BY received_at, id"),
+  findBankPaymentsByNaturalKeyBase: db.prepare("SELECT id, payment_id, tochka_payment_id, natural_key, matched, dismissed, reconciliation_required FROM bank_payments WHERE natural_key = ? OR substr(natural_key, 1, ?) = ? ORDER BY received_at, id"),
   // Cross-channel linking (see resolveNaturalKey): when the sync recognises
   // the webhook's row (or vice versa) under a different channel id, we write
   // the new id onto the SAME row — future lookups match by id in one hop and
@@ -243,6 +247,12 @@ const dbStmts = {
   linkBankPaymentPaymentId: db.prepare("UPDATE bank_payments SET payment_id = ? WHERE id = ? AND (payment_id IS NULL OR payment_id = '')"),
   linkBankPaymentTochkaId: db.prepare("UPDATE bank_payments SET tochka_payment_id = ? WHERE id = ? AND (tochka_payment_id IS NULL OR tochka_payment_id = '')"),
   ledgerHasBankPaymentOn: db.prepare("SELECT 1 FROM billing_ledger WHERE client_id = ? AND type = 'bank_payment' AND ABS(amount - ?) < 0.01 AND date = ? LIMIT 1"),
+  // 2026-09-18 · DEEP-24 (§ FIX-SPEC): сверка по ИДЕНТИФИКАТОРУ события.
+  // «клиент+сумма+дата» (ledgerHasBankPaymentOn выше) склеивает два разных
+  // платежа одной суммы — оставлен только для обратной совместимости, новые
+  // пути проверяют конкретный payment_id события в ledger.
+  ledgerHasBankPaymentEvent: db.prepare("SELECT 1 FROM billing_ledger WHERE client_id = ? AND type = 'bank_payment' AND payment_id = ? LIMIT 1"),
+  markBankPaymentReconciliation: db.prepare('UPDATE bank_payments SET reconciliation_required = 1 WHERE id = ?'),
   findBankPaymentByPaymentId: db.prepare('SELECT * FROM bank_payments WHERE payment_id = ? AND auto_credit = 1 LIMIT 1'),
   findBankPaymentByPaymentIdAny: db.prepare('SELECT id FROM bank_payments WHERE payment_id = ? LIMIT 1'),
   findBankPaymentByTochkaId: db.prepare('SELECT id FROM bank_payments WHERE tochka_payment_id = ? LIMIT 1'),
@@ -608,7 +618,10 @@ const BILLING_LEDGER_FILE = path.join(__dirname, 'billing_ledger.json'); // lega
 }
 
 function _ledgerEntryParams(clientId, e) {
-  const amount = e.type === 'charge' ? (e.cost || 0) : (e.amount || 0);
+  // 2026-09-18 · DEEP-21: сумма события задаётся один раз. Для charge берём
+  // cost, но принимаем и amount (и наоборот) — покупка первых суток раньше
+  // передавала ни того ни другого и в журнал уходил 0 при реальном списании.
+  const amount = e.type === 'charge' ? (e.cost ?? e.amount ?? 0) : (e.amount ?? e.cost ?? 0);
   const details = {};
   if (e.delta_bytes != null) details.delta_bytes = e.delta_bytes;
   if (e.price_per_unit != null) details.price_per_unit = e.price_per_unit;
@@ -622,7 +635,8 @@ function _ledgerEntryParams(clientId, e) {
     e.currency || 'RUB', e.balance_before ?? null, e.balance_after ?? null,
     e.delta_gb ?? null, e.modem_count ?? null, e.days_in_month ?? null,
     e.note || '', e.source || null, e.paymentId || null,
-    Object.keys(details).length > 0 ? JSON.stringify(details) : null
+    Object.keys(details).length > 0 ? JSON.stringify(details) : null,
+    e.purchase_id || e.purchaseId || null   // DEEP-20: идемпотентность покупки (миграция 097)
   ];
 }
 
@@ -927,6 +941,7 @@ function bankPaymentFromRow(row) {
     matched: !!row.matched, matchedClientId: row.matched_client_id,
     matchedClientName: row.matched_client_name, autoCredit: !!row.auto_credit,
     dismissed: !!row.dismissed, source: row.source || '',
+    reconciliationRequired: !!row.reconciliation_required,   // DEEP-24 (миграция 096)
     tochkaPaymentId: row.tochka_payment_id || '', receivedAt: row.received_at
   };
 }
@@ -3152,8 +3167,8 @@ app.use(require('./src/routes/public-lead')({ logger, db, validate, getSetting, 
 app.use(require('./src/routes/retail')({
   logger, authMiddleware, adminMiddleware,
   clients, saveClients,
-  tariffsDb, retailPoolDb,
-  atomicDebit,
+  tariffsDb, retailPoolDb, retailPurchasesDb,
+  atomicDebit, atomicCredit,
   getSetting,
   findServer, fetchApi, proxyConf, proxySmart, parseHtmlInputFields,
   fetchAllServersDataCached,
@@ -3842,7 +3857,8 @@ const _retailGuard = require('./src/jobs/retail-guard').create({
   proxyConf, fetchApi, parseHtmlInputFields, findServer, proxySmart,
   ledgerDb, saveClients, getMoscowNow,
   fetchAllServersDataCached,
-  clients, retailPoolDb, tariffsDb, getSetting,
+  clients, retailPoolDb, retailPurchasesDb, tariffsDb, getSetting,
+  atomicDebit,
   notifyClient: _clientNotify.notifyClient,
   kvGet: (k) => _kvGet.get(k),
   kvSet: (k, v) => _kvSet.run(k, v),
@@ -3863,7 +3879,7 @@ const { runDailyBilling } = require('./src/jobs/billing').create({
   fetchAllServersData,
   refreshPortKeyMapping,
   getMoscowYesterday, getMoscowNow,
-  ledgerDb,
+  ledgerDb, billingRunsDb,
   clients,
   dailyTraffic, recordDailyTraffic,
   parseBwToBytes, trafficBytesToGb,
@@ -4259,7 +4275,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
     runVolumeGuard: () => volumeGuard.runOnce(),   // A4 (23.08): объёмные алерты
     events: eventsBus,   // SSE (23.08): alerts.init публикует событие 'alert'
-    ledgerDb, getMoscowYesterday,   // 23.08: catch-up до-билливает только непробиленных
+    ledgerDb, billingRunsDb, getMoscowYesterday,   // 23.08/DEEP-23: catch-up по durable-заданиям
     // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).
     saveClients, auditLog, authTokensDb,
     runCardPaymentRecovery: () => paymentsRouter.runRecovery(),

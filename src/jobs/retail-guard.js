@@ -42,7 +42,8 @@ function create(deps) {
     fetchApi,                // WP7 (Э5): монитор уникальности IP (unique_ips_json)
     saveClients, getMoscowNow,
     fetchAllServersDataCached,
-    clients, retailPoolDb, tariffsDb, getSetting,
+    clients, retailPoolDb, retailPurchasesDb, tariffsDb, getSetting,
+    atomicDebit,             // DEEP-22: досписание charge_failed по purchase_id
     notifyClient,
     kvGet, kvSet,
   } = deps;
@@ -488,6 +489,137 @@ function create(deps) {
     } catch (e) { logger.warn('[RetailGuard] ip_quality check: ' + e.message); }
   }
 
+  // ── 2026-09-18 · DEEP-22 (§ FIX-SPEC): recovery durable-покупок ──
+  // Три durable-состояния требуют исполнителя после рестарта/сбоя:
+  //   charge_failed — порт выдан, списание не прошло → досписываем по
+  //     purchase_id (idx_ledger_purchase_unique делает повтор duplicate);
+  //   quarantine — исход сети неизвестен → reconcile по СВЕЖЕМУ владельцу
+  //     порта: пустой portName = подтверждённая отвязка (порт → free), логин
+  //     клиента = порт фактически выдан (lease + досписание), чужой логин —
+  //     ручная сверка, порт НЕ free;
+  //   истёкшие reserved — само истечение TTL не доказывает отсутствие
+  //     выданного порта: владелец проверяется свежим чтением реестра бокса.
+  // created_at хранится в SQLite-UTC; дата списания — в зоне биллинга (МСК),
+  // как у buy_proxy (getMoscowNow).
+  function _mskDateOfUtc(sqliteTs) {
+    const ms = Date.parse(String(sqliteTs || '').replace(' ', 'T') + 'Z');
+    if (!Number.isFinite(ms)) return _today();
+    return new Date(ms + 3 * 3600e3).toISOString().slice(0, 10);
+  }
+  // Свежий владелец порта на боксе: null — порт не найден/бокс недоступен
+  // (состояние неизвестно — НЕ основание для free).
+  async function _freshPortOwner(serverName, portId) {
+    const server = findServer(serverName);
+    if (!server) return null;
+    let portsData;
+    try { portsData = await fetchApi(server, '/apix/list_ports_json'); } catch (_) { return null; }
+    for (const plist of Object.values(portsData || {})) {
+      for (const p of plist || []) {
+        if (p && p.portID === portId) return String(p.portName || '').trim();
+      }
+    }
+    return null;
+  }
+  function _retryCharge(p, client) {
+    const res = atomicDebit(client.id, p.amount, {
+      date: _mskDateOfUtc(p.created_at),
+      type: 'charge',
+      note: p.test_day ? 'test_day' : 'first_day',
+      cost: p.amount,
+      purchase_id: p.id,
+    }, { minBalance: 0 });
+    return res;
+  }
+  async function _processPurchaseRecovery(stats) {
+    if (!retailPurchasesDb || !atomicDebit) return;
+    // 1) charge_failed → досписание. INSUFFICIENT_BALANCE — ждём пополнения
+    // (статус сохраняется, in-flight блокирует новые покупки до сверки).
+    for (const p of retailPurchasesDb.recoverableCharges()) {
+      const client = clients.find(c => c.id === p.client_id);
+      if (!client) {
+        retailPurchasesDb.setStatus(p.id, 'quarantine', 'client_gone');
+        continue;
+      }
+      try {
+        _retryCharge(p, client);   // duplicate = уже списано этим purchase_id
+        retailPurchasesDb.setStatus(p.id, 'charged');
+        stats.purchaseCharged.push(p.id);
+        logger.info(`[RetailGuard] recovery: покупка ${p.id} досписана (${p.amount} ₽, ${client.login})`);
+        saveClients(clients);
+      } catch (e) {
+        if (e && e.code === 'INSUFFICIENT_BALANCE') {
+          logger.warn(`[RetailGuard] recovery: ${p.id} — недостаточно средств, ждём пополнения (${client.login})`);
+        } else {
+          logger.error(`[RetailGuard] recovery: ${p.id} — ${e.message}`);
+        }
+      }
+    }
+    // 2) quarantine → reconcile по свежему владельцу.
+    for (const p of retailPurchasesDb.quarantined()) {
+      const owner = await _freshPortOwner(p.server, p.port_id);
+      if (owner === null) continue;   // неизвестно — повтор в след. цикле
+      const row = p.pool_row_id != null ? retailPoolDb.byId(p.pool_row_id) : null;
+      const client = clients.find(c => c.id === p.client_id);
+      if (!owner) {
+        if (row && row.status !== 'free') retailPoolDb.release(row.id);
+        retailPurchasesDb.setStatus(p.id, 'failed', 'unbind_confirmed');
+        logger.info(`[RetailGuard] recovery: ${p.id} — отвязка подтверждена, ${p.server}/${p.port_id} → free`);
+        continue;
+      }
+      if (client && owner === client.login) {
+        if (row && row.status === 'reserved') retailPoolDb.lease(row.id);
+        // Порт фактически выдан — доводим через ветку досписания.
+        retailPurchasesDb.setStatus(p.id, 'charge_failed', 'reconcile_issued');
+        logger.warn(`[RetailGuard] recovery: ${p.id} — порт ${p.server}/${p.port_id} выдан ${client.login}, досписание в этом/след. цикле`);
+        continue;
+      }
+      logger.error(`[RetailGuard] recovery: ${p.id} — ${p.server}/${p.port_id} занят чужим portName «${owner}», требуется ручная сверка; порт НЕ free`);
+      logActivity('billing', 'error', 'retail_purchase_reconcile', null,
+        `Покупка ${p.id}: порт ${p.server}/${p.port_id} занят «${owner}» вместо ожидаемого — ручная сверка`,
+        { purchase_id: p.id, client_id: p.client_id, owner });
+    }
+    // 3) Истёкшие reserved. Grace 2× TTL: строку, захваченную < 10 минут
+    // назад, может ещё обслуживать живой запрос buy_proxy — не трогаем.
+    const graceMs = 10 * 60e3;
+    const _exp = retailPoolDb.expiredReservations();
+    for (const row of _exp) {
+      if (Date.parse(row.reserved_until) > _nowMs() - graceMs) continue;
+      const p = retailPurchasesDb.byPoolRow ? retailPurchasesDb.byPoolRow(row.id) : null;
+      if (p && (p.status === 'quarantine' || p.status === 'charge_failed')) continue;   // свои ветки выше
+      if (p && p.status === 'charged') {
+        retailPoolDb.lease(row.id);   // списание прошло, lease не дошёл
+        continue;
+      }
+      const owner = await _freshPortOwner(row.server, row.port_id);
+      if (owner === null) {
+        logger.error(`[RetailGuard] pool#${row.id} (${row.server}/${row.port_id}): владелец не подтверждён (бокс недоступен/порт не найден) — НЕ free, повтор в след. цикле`);
+        continue;
+      }
+      const client = clients.find(c => c.id === row.client_id);
+      if (!owner) {
+        retailPoolDb.release(row.id);
+        if (p && ['reserved', 'provisioning', 'provisioned'].includes(p.status)) {
+          retailPurchasesDb.setStatus(p.id, 'failed', 'reservation_expired_unbound');
+        }
+        logger.info(`[RetailGuard] pool#${row.id} (${row.server}/${row.port_id}): резерв истёк, portName пуст → free`);
+        continue;
+      }
+      if (client && owner === client.login) {
+        // Порт выдан, процесс умер до lease/списания — доводим, не free.
+        retailPoolDb.lease(row.id);
+        if (p && ['reserved', 'provisioning', 'provisioned'].includes(p.status)) {
+          retailPurchasesDb.setStatus(p.id, 'charge_failed', 'reconcile_issued');
+        }
+        logger.warn(`[RetailGuard] pool#${row.id} (${row.server}/${row.port_id}): резерв истёк, но порт выдан ${client.login} — lease + досписание`);
+        continue;
+      }
+      logger.error(`[RetailGuard] pool#${row.id} (${row.server}/${row.port_id}): занят чужим portName «${owner}» — ручная сверка, НЕ free`);
+      if (p && ['reserved', 'provisioning', 'provisioned'].includes(p.status)) {
+        retailPurchasesDb.setStatus(p.id, 'quarantine', 'owner_mismatch');
+      }
+    }
+  }
+
   let running = false;   // re-entrancy: прогон один за раз
 
   async function runOnce() {
@@ -495,7 +627,7 @@ function create(deps) {
     if (running) return { skipped: 'already_running' };
     running = true;
     pendingRestoreRows = new Set();
-    const stats = { grace: [], blocked: [], restored: [], deleted: [], testDayEnded: [] };
+    const stats = { grace: [], blocked: [], restored: [], deleted: [], testDayEnded: [], purchaseCharged: [] };
     try {
       const serverResults = await fetchAllServersDataCached();
       let dirty = false;
@@ -519,6 +651,7 @@ function create(deps) {
       }
       await _processExpiredHolds(stats);
       await _processExpiredTestDays(stats);
+      await _processPurchaseRecovery(stats);   // DEEP-22: durable-покупки и истёкшие резервы
       _checkPoolLow();   // WP5: алерт «свободных < retail_pool_min_free» (дедуп по серверу в alerts.js)
       await _checkPoolIpQuality();   // WP7 (Э5): деградация уникальности IP розничных боксов
       return stats;

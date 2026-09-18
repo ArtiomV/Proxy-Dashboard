@@ -471,30 +471,82 @@ r.post('/api/admin/tochka/match_payment', authMiddleware, adminMiddleware, (req,
   const bpRow = dbStmts.getBankPaymentById.get(paymentId);
   if (!bpRow) return res.status(404).json({ error: 'Payment not found' });
   const bp = bankPaymentFromRow(bpRow);
-  
+
   const client = clientById.get(clientId);
   if (!client) return res.status(404).json({ error: 'Client not found' });
 
-  
   const amount = bp.amount;
+  // 2026-09-18 · DEEP-19 (§ FIX-SPEC): единая bank-event settlement.
+  // Идентичность события — id банковской строки + её канальные id; кредит,
+  // реферальная комиссия и отметка matched подтверждаются ОДНОЙ транзакцией
+  // (atomicCredit: finance_idempotency claim + balance + ledger + insideTx).
+  // Повтор возвращает исходный результат, другой получатель — конфликт.
+  const eventIds = [bp.paymentId, bp.tochkaPaymentId, bp.id].filter((v, i, a) => v && a.indexOf(v) === i);
+  const hasLedgerProof = () => eventIds.some(id => dbStmts.ledgerHasBankPaymentEvent.get(client.id, id));
 
-  const { balanceBefore, balanceAfter } = atomicCredit(client.id, amount, {
-    type: 'bank_payment',
-    date: bp.date,
-    timestamp: new Date().toISOString(),
-    amount,
-    currency: 'RUB',
-    note: `Ручная привязка (ИНН: ${bp.payerInn}): ${bp.purpose}`.slice(0, 300),
-    source: 'tochka_manual',
-    paymentId: bp.paymentId
-  });
+  if (bp.matched) {
+    if (bp.matchedClientId && bp.matchedClientId !== client.id) {
+      // Тот же банковский event другому получателю — конфликт; требуется
+      // отдельный reversal/reassign, молчаливое переприсвоение запрещено.
+      return res.status(409).json({ error: 'Платёж уже привязан к другому клиенту — нужен reversal/reassign', code: 'MATCH_CONFLICT', matchedClientId: bp.matchedClientId });
+    }
+    // matched сам по себе НЕ доказательство ledger-зачисления (legacy-строки
+    // могли быть помечены без кредита). Нет доказательства — не зачисляем
+    // вслепую, отправляем на ручную сверку (DEEP-24 статус).
+    if (!hasLedgerProof()) {
+      try { dbStmts.markBankPaymentReconciliation.run(paymentId); } catch (_) { /* best-effort */ }
+      return res.status(409).json({ error: 'Платёж помечен matched, но зачисление в ledger не подтверждено — требуется сверка', code: 'BANK_RECONCILIATION_REQUIRED' });
+    }
+    return res.json({ ok: true, balance: client.balance, already: true });
+  }
 
-  // Update bank payment in SQLite
-  dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 0, paymentId);
+  // Реферальная комиссия — как в sync/webhook-путях (ручная привязка раньше
+  // её теряла). Применяется в той же транзакции, что и кредит.
+  let referralOpts = null;
+  if (client.referred_by) {
+    const referrer = clientById.get(client.referred_by);
+    if (referrer) {
+      referralOpts = { referrerId: referrer.id, delta: referralCommission(amount) };
+    }
+  }
+
+  let credit;
+  try {
+    credit = atomicCredit(client.id, amount, {
+      type: 'bank_payment',
+      date: bp.date,
+      timestamp: new Date().toISOString(),
+      amount,
+      currency: 'RUB',
+      note: `Ручная привязка (ИНН: ${bp.payerInn}): ${bp.purpose}`.slice(0, 300),
+      source: 'tochka_manual',
+      paymentId: bp.paymentId || bp.id
+    }, {
+      idempotencyKey: 'bank_match:' + paymentId,
+      referral: referralOpts || undefined,
+      // Отметка matched — внутри той же транзакции: больше нет окна
+      // «деньги зачислены, событие не отмечено» (и наоборот).
+      insideTx: () => dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 0, paymentId),
+    });
+  } catch (e) {
+    if (e && e.code === 'IDEMPOTENCY_CONFLICT') {
+      return res.status(409).json({ error: 'Событие уже зачислено с другими параметрами', code: 'MATCH_CONFLICT' });
+    }
+    throw e;
+  }
+
+  if (credit.duplicate) {
+    // Повтор (в т.ч. после сбоя доставки ответа): claim этой же операции уже
+    // зачислил деньги — второго кредита нет, matched восстанавливаем
+    // идемпотентно и возвращаем исходный результат.
+    dbStmts.updateBankPaymentMatch.run(1, client.id, client.name, 0, paymentId);
+    return res.json({ ok: true, balance: client.balance, already: true });
+  }
+
   try { settleBillsOnPayment(client, amount, bp.purpose, { documentsDb, logActivity, logger }); } catch (e) { logger.error('[BillSettle]', e.message); }
 
   saveClients(clients);
-  _notifyCredit(client, amount, balanceAfter);   // WP5: «Зачислено N ₽» клиенту
+  _notifyCredit(client, amount, credit.balanceAfter);   // WP5: «Зачислено N ₽» клиенту
   res.json({ ok: true, balance: client.balance });
 });
 

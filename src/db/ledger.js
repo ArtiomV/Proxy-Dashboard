@@ -13,21 +13,30 @@ function init(db) {
   S.deleteById = db.prepare('DELETE FROM billing_ledger WHERE id = ?');
   S.insert = db.prepare(`INSERT INTO billing_ledger
     (client_id, type, date, timestamp, amount, currency, balance_before, balance_after,
-     gb_used, modem_count, days_in_month, note, source, payment_id, details)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+     gb_used, modem_count, days_in_month, note, source, payment_id, details, purchase_id)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
   S.byClient = db.prepare(`SELECT id, type, date, timestamp, amount, currency,
     balance_before, balance_after, gb_used, modem_count, days_in_month,
-    note, source, payment_id, details
+    note, source, payment_id, details, purchase_id
     FROM billing_ledger WHERE client_id = ? ORDER BY id`);
   // Stage 8: duplicate-detection helpers used by the daily-billing
   // skip-guard. existsChargeOnDate trips when any client was already billed
   // on the given date; chargedClientIdsForDate returns the set of client IDs
   // that DID get billed (for retry-mode filtering).
+  // 2026-09-18 · DEEP-20: строки покупки (purchase_id NOT NULL — первые сутки
+  // /тест-день) НЕ считаются суточным расчётом: раньше одна first_day-строка
+  // за расчётную дату удовлетворяла гварду и останавливала биллинг всех
+  // клиентов. Предикат зеркалит частичный idx_ledger_unique_chargelike.
   S.existsChargeOnDate = db.prepare(
-    "SELECT id FROM billing_ledger WHERE date = ? AND type = 'charge' LIMIT 1"
+    "SELECT id FROM billing_ledger WHERE date = ? AND type = 'charge' AND purchase_id IS NULL LIMIT 1"
   );
   S.chargedClientIdsForDate = db.prepare(
-    "SELECT DISTINCT client_id FROM billing_ledger WHERE date = ? AND type = 'charge'"
+    "SELECT DISTINCT client_id FROM billing_ledger WHERE date = ? AND type = 'charge' AND purchase_id IS NULL"
+  );
+  // DEEP-23: базовая линия catch-up при пустой истории billing_runs (первый
+  // запуск после миграции) — последняя дата суточного списания в ledger.
+  S.lastChargeDate = db.prepare(
+    "SELECT MAX(date) AS d FROM billing_ledger WHERE type = 'charge' AND purchase_id IS NULL"
   );
   S.count = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger');
   // 2026-09-18 · FIX-01 п.7 / §14.2/§17.3.1: сверка событий по идентификатору
@@ -67,6 +76,7 @@ function listByClient(clientId) {
     if (r.note) entry.note = r.note;
     if (r.source) entry.source = r.source;
     if (r.payment_id) entry.paymentId = r.payment_id;
+    if (r.purchase_id) entry.purchaseId = r.purchase_id;   // DEEP-20: идемпотентность покупки
     if (r.details && r.details !== '{}') {
       try { Object.assign(entry, JSON.parse(r.details)); } catch (_) { /* best-effort */ }
     }
@@ -89,6 +99,7 @@ function chargedClientIdsForDate(date) {
 }
 function rowCount() { return S.count.get().n; }
 function listByPayment(paymentId, type) { return S.byPayment.all(String(paymentId), String(type)); }
+function lastChargeDate() { const r = S.lastChargeDate.get(); return r ? r.d : null; }
 
 // C5: total recorded payments minus reversals from listByClient-shaped
 // entries (payment + bank_payment + card_payment − payment_reversal).
@@ -108,5 +119,5 @@ function paymentsTotalByClient(clientId) { return S.paymentsTotal.get(clientId).
 module.exports = {
   init, deleteByClient, deleteById, insertStmt, listByClient,
   existsChargeOnDate, chargedClientIdsForDate, rowCount,
-  paymentsTotal, paymentsTotalByClient, listByPayment,
+  paymentsTotal, paymentsTotalByClient, listByPayment, lastChargeDate,
 };

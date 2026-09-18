@@ -250,31 +250,61 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
 });
 
 r.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res) => {
-  
+  // 2026-09-18 · DEEP-26 (§ FIX-SPEC): адресное удаление по ID.
+  // Индекс в массиве, запомненный ДО await проверки портов, после конкурентного
+  // удаления указывал уже на ДРУГОГО клиента (удалялись A и C вместо A и B) —
+  // splice/удаление теперь разрешается по ID ПОСЛЕ await. Порты проверяются по
+  // полному свежему реестру (bw + ports всех серверов); отказ фида — это
+  // «невозможно подтвердить удаление» (502), а не разрешение удалить.
   const client = clientById.get(req.params.id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
-  const idx = clients.indexOf(client);
-  if (idx === -1) return res.status(404).json({ error: 'Client not found' });
 
+  let results;
   try {
-    const results = await fetchAllServersDataCached();
-    let hasActivePorts = false;
-    for (const data of results) {
-      if (typeof data.bw === 'object') {
-        for (const [portId, b] of Object.entries(data.bw)) {
-          if (b.portName === client.portName) { hasActivePorts = true; break; }
+    results = await fetchAllServersDataCached();
+  } catch (e) {
+    logger.error('[DeleteClient] Port feed unavailable, refusing deletion:', e.message);
+    return res.status(502).json({ error: 'Не удалось проверить порты клиента — удаление отменено, повторите позже', code: 'PORTS_FEED_UNAVAILABLE' });
+  }
+  if (!Array.isArray(results)) {
+    logger.error('[DeleteClient] Port feed returned invalid data, refusing deletion');
+    return res.status(502).json({ error: 'Реестр портов недоступен — удаление отменено', code: 'PORTS_FEED_UNAVAILABLE' });
+  }
+
+  let hasActivePorts = false;
+  outer:
+  for (const data of results) {
+    if (!data) continue;
+    // Живые счётчики bw (нулевой трафик живого порта тоже занят — матч по
+    // portName, не по байтам) и авторитетный реестр назначений ports.
+    if (data.bw && typeof data.bw === 'object') {
+      for (const b of Object.values(data.bw)) {
+        if (b && b.portName === client.portName) { hasActivePorts = true; break outer; }
+      }
+    }
+    if (data.ports && typeof data.ports === 'object') {
+      for (const plist of Object.values(data.ports)) {
+        for (const p of plist || []) {
+          if (p && p.portName === client.portName) { hasActivePorts = true; break outer; }
         }
       }
-      if (hasActivePorts) break;
     }
+  }
+  if (hasActivePorts) {
+    return res.status(400).json({
+      error: `Нельзя удалить: у клиента есть активные порты (portName: ${client.portName}). Сначала закройте все порты.`
+    });
+  }
 
-    if (hasActivePorts) {
-      return res.status(400).json({
-        error: `Нельзя удалить: у клиента есть активные порты (portName: ${client.portName}). Сначала закройте все порты.`
-      });
-    }
-  } catch (e) {
-    logger.warn('[DeleteClient] Could not verify ports, proceeding with deletion:', e.message);
+  // Проверка версии ПОСЛЕ await: клиент мог быть уже удалён/заменён
+  // конкурентным запросом — чужой ID не удаляем.
+  const fresh = clientById.get(req.params.id);
+  if (!fresh || fresh.login !== client.login) {
+    return res.status(409).json({ error: 'Клиент изменён или уже удалён конкурентной операцией', code: 'CONCURRENT_MODIFICATION' });
+  }
+  const idx = clients.findIndex(c => c.id === req.params.id);
+  if (idx === -1) {
+    return res.status(409).json({ error: 'Клиент уже удалён конкурентной операцией', code: 'CONCURRENT_MODIFICATION' });
   }
 
   const removed = clients.splice(idx, 1)[0];
@@ -283,6 +313,9 @@ r.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, 
   delete users[removed.login];
   deleteSessionsByLogin(removed.login);
   _emitFinanceWrite();
+  // Политика архивирования: billing_ledger/bank_payments НЕ каскадируются с
+  // строкой clients — финансовая история удалённого клиента сохраняется в БД
+  // (client_id остаётся в записях для сверок и документов прошлых периодов).
   auditLog(req.user.login, 'delete_client', { clientId: removed.id, clientName: removed.name, ip: getClientIp(req) });
   res.json({ ok: true });
 });

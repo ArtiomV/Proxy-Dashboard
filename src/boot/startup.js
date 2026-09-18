@@ -29,7 +29,7 @@ function runStartup(d) {
     runBlockedPortCleanup, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
     saveClients, auditLog, authTokensDb,
     events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
-    ledgerDb, getMoscowYesterday,   // 23.08: billing catch-up по непробиленным
+    ledgerDb, billingRunsDb, getMoscowYesterday,   // 23.08/DEEP-23: billing catch-up по durable-заданиям
   } = d;
 
   // Авто-спидтесты всего флота отключены 2026-08-13 (daily-schedule.js) —
@@ -435,9 +435,61 @@ function runStartup(d) {
   logger.info(`[HourlyAgg] ${snapshotCount} snapshots loaded, refreshing in 15s (no DB write)`);
   setTimeout(() => hourlyTraffic.refreshSnapshotsOnly().catch(e => logger.error('[HourlyAgg:startup]', e.message)), 15000);
 
-  // Billing catch-up: if last snapshot is older than 26 hours, run now
+  // Billing catch-up — 2026-09-18 · DEEP-23 (§ FIX-SPEC): восстановление ищет
+  // НЕЗАВЕРШЁННЫЕ durable-задания (billing_jobs pending/failed/no_data), а не
+  // возраст traffic snapshot (свежий snapshot раньше скрывал незавершённый
+  // расчёт: он обновлялся ДО успешного debit). За многодневный простой
+  // формируется очередь ВСЕХ пропущенных дат (по одному прогону на дату с её
+  // durable-контекстом), а не один прогон «за вчера».
   (async () => {
     try {
+      const yesterday = getMoscowYesterday();
+      if (billingRunsDb) {
+        // 1) Незавершённые задания прошлых прогонов — доводим по их датам.
+        const open = billingRunsDb.openJobs(yesterday);
+        const byDate = new Map();
+        for (const j of open) {
+          if (!byDate.has(j.billing_date)) byDate.set(j.billing_date, []);
+          byDate.get(j.billing_date).push(j.client_id);
+        }
+        for (const [date, ids] of [...byDate.entries()].sort()) {
+          const billable = clients.filter(c => ids.includes(c.id) && c.portName && !c.billingPaused && !c.blocked && !c.debtBlocked).map(c => c.id);
+          if (!billable.length) continue;
+          logger.info(`[Billing] Catch-up: ${ids.length} unfinished job(s) for ${date}, running for ${billable.length} client(s)...`);
+          logActivity('billing', 'warn', 'billing_catchup', null, `Unfinished billing jobs for ${date}, running catch-up for ${billable.length} client(s)`);
+          await runDailyBilling(billable, { billingDate: date });
+        }
+        // 2) Очередь пропущенных дат: от последнего completed-прогона (при
+        // пустой истории billing_runs — от последнего суточного charge в
+        // ledger, baseline первого запуска после миграции) до вчера.
+        let cursor = billingRunsDb.lastCompletedDate('daily');
+        if (!cursor && ledgerDb.lastChargeDate) cursor = ledgerDb.lastChargeDate();
+        if (!cursor) cursor = yesterday;   // нет истории вообще — только свежий прогон планировщиком
+        const missed = [];
+        for (let d = new Date(cursor + 'T00:00:00Z'); ; ) {
+          d.setUTCDate(d.getUTCDate() + 1);
+          const ds = d.toISOString().slice(0, 10);
+          if (ds > yesterday) break;
+          missed.push(ds);
+        }
+        if (missed.length > 31) {
+          // Страховка от «вечного» catch-up при годовом простое: добиваем
+          // последний месяц, остальное — ручная сверка через billing_rerun.
+          logger.error(`[Billing] Catch-up: ${missed.length} missed dates — добиваем последние 31, остальное вручную`);
+          logActivity('billing', 'error', 'billing_catchup_overflow', null, `${missed.length} missed billing dates, catching up last 31 only`);
+          missed.splice(0, missed.length - 31);
+        }
+        for (const date of missed) {
+          logger.info(`[Billing] Catch-up: missed billing date ${date}, running...`);
+          logActivity('billing', 'warn', 'billing_catchup', null, `Missed billing date ${date}, running catch-up`);
+          await runDailyBilling(undefined, { billingDate: date });
+        }
+        if (!byDate.size && !missed.length) {
+          logger.info('[Billing] Catch-up: no unfinished jobs or missed dates, nothing to do');
+        }
+        return;
+      }
+      // Legacy-путь (без billing_runs): snapshot старше 26 часов.
       const now = Date.now();
       let needsCatchup = false;
       for (const c of clients) {
@@ -452,22 +504,17 @@ function runStartup(d) {
       }
       if (needsCatchup) {
         // 23.08: catch-up до-билливает ТОЛЬКО клиентов без списания за вчера.
-        // Раньше вызывался полный runDailyBilling(), который упирался в гвард
-        // «Already billed for <дата>» (хоть одно списание за день есть →
-        // весь прогон пропускался) — и частично пропущенные клиенты
-        // (лежавший бокс) так и не добилливались. Retry-режим фильтрует
-        // уже пробиленных, поэтому двойных списаний не будет.
-        const yesterday = getMoscowYesterday();
-        const chargedIds = new Set(ledgerDb.chargedClientIdsForDate(yesterday));
+        const yesterday2 = getMoscowYesterday();
+        const chargedIds = new Set(ledgerDb.chargedClientIdsForDate(yesterday2));
         const unbilled = clients
           .filter(c => !chargedIds.has(c.id) && c.portName && !c.billingPaused && !c.blocked && !c.debtBlocked)
           .map(c => c.id);
         if (!unbilled.length) {
-          logger.info('[Billing] Catch-up: all billable clients already charged for ' + yesterday + ', nothing to do');
+          logger.info('[Billing] Catch-up: all billable clients already charged for ' + yesterday2 + ', nothing to do');
         } else {
           logger.info(`[Billing] Catch-up: missed billing detected, running for ${unbilled.length} unbilled client(s)...`);
           logActivity('billing', 'warn', 'billing_catchup', null, `Missed billing detected, running catch-up for ${unbilled.length} client(s)`);
-          await runDailyBilling(unbilled);
+          await runDailyBilling(unbilled, { billingDate: yesterday2 });
         }
       }
     } catch (e) {

@@ -71,10 +71,13 @@ function tx({ inn, amount, purpose, transactionId, date = '2026-06-01' }) {
 function makeSync(transactions, { clientsArr, clientByInn }) {
   const dbStmts = {
     findBankPaymentsByNaturalKeyBase: db.prepare(
-      'SELECT id, payment_id, tochka_payment_id, natural_key, matched, dismissed FROM bank_payments ' +
+      'SELECT id, payment_id, tochka_payment_id, natural_key, matched, dismissed, reconciliation_required FROM bank_payments ' +
       'WHERE natural_key = ? OR substr(natural_key, 1, ?) = ? ORDER BY received_at, id'),
-    ledgerHasBankPaymentOn: db.prepare(
-      "SELECT 1 FROM billing_ledger WHERE client_id = ? AND type = 'bank_payment' AND ABS(amount - ?) < 0.01 AND date = ? LIMIT 1"),
+    // DEEP-24 (2026-09-18): сверка по идентификатору события, не по сумме/дате.
+    ledgerHasBankPaymentEvent: db.prepare(
+      "SELECT 1 FROM billing_ledger WHERE client_id = ? AND type = 'bank_payment' AND payment_id = ? LIMIT 1"),
+    markBankPaymentReconciliation: db.prepare(
+      'UPDATE bank_payments SET reconciliation_required = 1 WHERE id = ?'),
     findBankPaymentByTochkaId: db.prepare('SELECT id FROM bank_payments WHERE tochka_payment_id = ? LIMIT 1'),
     findBankPaymentByPaymentIdAny: db.prepare('SELECT id FROM bank_payments WHERE payment_id = ? LIMIT 1'),
     updateBankPaymentMatch: db.prepare(

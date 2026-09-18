@@ -15,7 +15,7 @@ function create(deps) {
     fetchAllServersData,
     refreshPortKeyMapping,
     getMoscowYesterday, getMoscowNow,
-    ledgerDb,
+    ledgerDb, billingRunsDb,   // DEEP-23: durable runs/jobs (миграция 099; опционально — legacy-путь без него)
     clients,
     dailyTraffic, recordDailyTraffic,
     parseBwToBytes, trafficBytesToGb,
@@ -50,9 +50,9 @@ function create(deps) {
   let lastRunResults = null;   // server data последнего реального прогона (для debt-block)
   let lastRunExecuted = false;
 
-  function runDailyBilling(retryClientIds) {
+  function runDailyBilling(retryClientIds, runOpts) {
     // Mutex: serialize billing vs saveClients to avoid reading stale client snapshots.
-    return withClientsLock(() => _runDailyBillingImpl(retryClientIds))
+    return withClientsLock(() => _runDailyBillingImpl(retryClientIds, runOpts))
       .then(async r => {
         setLastBillingRunSummary(lastBillingRunSummary);
         // B3 (Р13): автоблок — ПОСЛЕ освобождения clients-lock (внутри сетевые
@@ -70,18 +70,54 @@ function create(deps) {
       });
   }
 
-async function _runDailyBillingImpl(retryClientIds) {
+async function _runDailyBillingImpl(retryClientIds, runOpts) {
   lastRunExecuted = false;
   lastRunResults = null;
   const isRetry = Array.isArray(retryClientIds) && retryClientIds.length > 0;
-  // Guard: prevent double billing for same date (atomic check)
-  const yesterdayCheck = getMoscowYesterday();
+  // 2026-09-18 · DEEP-23: расчётная дата — часть durable-контекста прогона.
+  // Retry/catch-up передают исходную дату явно; «вчера» вычисляется только
+  // для свежего планового прогона (раньше retry в setTimeout пересчитывал
+  // «вчера» на момент запуска и биллил не ту дату).
+  const billingDate = (runOpts && runOpts.billingDate) || getMoscowYesterday();
+  const isCurrentDate = billingDate === getMoscowYesterday();
+  // Guard: prevent double billing for same date (atomic check).
+  // DEEP-23: при durable-учёте гвард — billing_runs + незакрытые задания, а
+  // НЕ «хотя бы один charge за дату» (одна first_day-строка покупки или одно
+  // частичное списание раньше останавливали расчёт всех клиентов, DEEP-20).
   const skipResult = db.transaction(() => {
+    if (billingRunsDb) {
+      if (!isRetry) {
+        const runRow = billingRunsDb.runFor(billingDate);
+        const openJobs = billingRunsDb.openJobsForDate(billingDate);
+        if (runRow && runRow.status === 'completed' && openJobs.length === 0) {
+          return { skip: true, reason: `Already billed for ${billingDate}` };
+        }
+      } else {
+        const chargedIds = ledgerDb.chargedClientIdsForDate(billingDate);
+        if (chargedIds.length > 0) {
+          const filtered = retryClientIds.filter(id => !chargedIds.includes(id));
+          // DEEP-23: уже пробиленные клиенты с ОТКРЫТЫМ заданием (крах между
+          // debit и отметкой) сверяются здесь — задание закрывается 'done',
+          // а не висит 'pending' вечно.
+          for (const id of retryClientIds.filter(x => chargedIds.includes(x))) {
+            try {
+              const openJob = billingRunsDb.jobFor(billingDate, id);
+              if (openJob && ['pending', 'failed', 'no_data'].includes(openJob.status)) {
+                billingRunsDb.markJob(billingDate, id, 'done', {});
+              }
+            } catch (_) { /* best-effort */ }
+          }
+          retryClientIds = filtered;
+          if (retryClientIds.length === 0) return { skip: true, reason: 'Retry: all clients already billed' };
+        }
+      }
+      return { skip: false };
+    }
     if (!isRetry) {
-      const existingCharge = ledgerDb.existsChargeOnDate(yesterdayCheck);
-      if (existingCharge) return { skip: true, reason: `Already billed for ${yesterdayCheck}` };
+      const existingCharge = ledgerDb.existsChargeOnDate(billingDate);
+      if (existingCharge) return { skip: true, reason: `Already billed for ${billingDate}` };
     } else {
-      const chargedIds = ledgerDb.chargedClientIdsForDate(yesterdayCheck);
+      const chargedIds = ledgerDb.chargedClientIdsForDate(billingDate);
       if (chargedIds.length > 0) {
         retryClientIds = retryClientIds.filter(id => !chargedIds.includes(id));
         if (retryClientIds.length === 0) return { skip: true, reason: 'Retry: all clients already billed' };
@@ -94,8 +130,9 @@ async function _runDailyBillingImpl(retryClientIds) {
     logActivity('billing', 'info', 'billing_skip', null, skipResult.reason);
     return;
   }
-  logger.info(`[Billing] Starting ${isRetry ? 'RETRY' : 'daily'} billing run...`);
-  logActivity('billing', 'info', 'billing_start', null, `Starting ${isRetry ? 'RETRY' : 'daily'} billing run`);
+  if (billingRunsDb) billingRunsDb.beginRun(billingDate);
+  logger.info(`[Billing] Starting ${isRetry ? 'RETRY' : 'daily'} billing run for ${billingDate}...`);
+  logActivity('billing', 'info', 'billing_start', null, `Starting ${isRetry ? 'RETRY' : 'daily'} billing run for ${billingDate}`);
 
   let results;
   try {
@@ -103,6 +140,9 @@ async function _runDailyBillingImpl(retryClientIds) {
   } catch (e) {
     logger.error('[Billing] Failed to fetch server data:', e.message);
     lastBillingRunSummary = { error: e.message, timestamp: new Date().toISOString() };
+    // DEEP-23: прогон failed durable — задания остаются открытыми, recovery
+    // (startup catch-up) доведёт их, а не потеряет вместе с процессом.
+    if (billingRunsDb) { try { billingRunsDb.failRun(billingDate, e.message); } catch (_) { /* best-effort */ } }
     return;
   }
 
@@ -111,15 +151,22 @@ async function _runDailyBillingImpl(retryClientIds) {
   lastRunExecuted = true;
   lastRunResults = results;   // B3: debt-block использует ports из этих же данных
 
-  const yesterdayStr = getMoscowYesterday();
-  const moscowYesterday = getMoscowNow();
-  moscowYesterday.setDate(moscowYesterday.getDate() - 1);
-  const yesterdayLabel = moscowYesterday.toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const yesterdayStr = billingDate;
+  // Метка даты — из самой расчётной даты (retry старых дат не подставляет
+  // «вчера» на момент запуска). UTC-полдень — без сдвигов локальной зоны.
+  const [_by, _bm, _bd] = yesterdayStr.split('-').map(Number);
+  const yesterdayLabel = new Date(Date.UTC(_by, _bm - 1, _bd, 12))
+    .toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric', timeZone: 'UTC' });
 
   let charged = 0, skipped = 0;
   const skippedClients = []; // for retry
 
-  // 1. Save ALL ports' yesterday traffic to dailyTraffic (single source of truth)
+  // 1. Save ALL ports' yesterday traffic to dailyTraffic (single source of truth).
+  // DEEP-23: живые счётчики «bandwidth_bytes_yesterday_*» валидны ТОЛЬКО для
+  // текущей расчётной даты; catch-up старых дат читает durable-историю
+  // (traffic_hourly/daily_traffic), сегодняшними счётчиками прошлые дни не
+  // подменяются.
+  if (isCurrentDate) {
   for (const data of results) {
     if (data._cached || typeof data.bw !== 'object') continue;
     const prefix = data.serverName + '_';
@@ -137,6 +184,7 @@ async function _runDailyBillingImpl(retryClientIds) {
       }
     }
   }
+  }   // isCurrentDate
 
   // 2. Bill each client
   const clientsToBill = isRetry
@@ -146,7 +194,16 @@ async function _runDailyBillingImpl(retryClientIds) {
   for (const client of clientsToBill) {
     // Р36: цена через getClientPrice (override → tariff → legacy price).
     // Клиент без portName или без цены пропускается (свежий физик до покупки — ок).
-    const clientPrice = getClientPrice(client);
+    // DEEP-23: при retry тарифный контекст — из durable-задания (цена на
+    // момент первой попытки), а не текущая карточка клиента.
+    let clientPrice = getClientPrice(client);
+    if (isRetry && billingRunsDb) {
+      try {
+        const job = billingRunsDb.jobFor(yesterdayStr, client.id);
+        const ctx = job && job.context ? JSON.parse(job.context) : null;
+        if (ctx && typeof ctx.price === 'number' && ctx.price > 0) clientPrice = ctx.price;
+      } catch (_) { /* битый контекст — живём с текущей ценой */ }
+    }
     // 20.08: полностью заблокированный клиент (антифрод blocked или автоблок
     // по долгу debtBlocked — порты уже погашены) не тарифицируется: он не
     // может пользоваться прокси, накручивать минус на баланс бессмысленно.
@@ -159,6 +216,17 @@ async function _runDailyBillingImpl(retryClientIds) {
       if (client.billingPaused) logger.info(`[Billing] Skipping ${client.name} — billing paused`);
       skipped++;
       continue;
+    }
+
+    // DEEP-23: durable-задание client/date с контекстом расчёта. ensureJob —
+    // INSERT OR IGNORE: контекст первой попытки сохраняется при повторах.
+    if (billingRunsDb) {
+      try {
+        billingRunsDb.ensureJob(yesterdayStr, client.id, {
+          price: clientPrice, billing_type: client.billingType || 'per_gb',
+          port_name: client.portName, billing_date: yesterdayStr,
+        });
+      } catch (_) { /* durable-учёт не должен ронять расчёт */ }
     }
 
     // Check server availability for this client's ports
@@ -181,6 +249,7 @@ async function _runDailyBillingImpl(retryClientIds) {
         durableFallbackReason = reason;
       } else {
         logger.info(`[Billing] Skipping ${client.name}: ${reason} (no durable data either)`);
+        if (billingRunsDb) { try { billingRunsDb.markJob(yesterdayStr, client.id, 'no_data', { error: reason }); } catch (_) {} }
         skippedClients.push(client.id);
         skipped++;
         continue;
@@ -192,7 +261,9 @@ async function _runDailyBillingImpl(retryClientIds) {
       // that zero the bandwidth_bytes_yesterday_* counters (which has caused missed bills
       // when a server reboots across midnight).
       const deltaBytesDurable = getClientBytesForMskDate(client.portName, yesterdayStr);
-      const deltaBytesLive = computeClientYesterdayBytes(results, client.portName);
+      // DEEP-23: live-счётчики «за вчера» валидны только для текущей даты —
+      // для catch-up старых дат они содержат ЧУЖОЙ день, берём 0.
+      const deltaBytesLive = isCurrentDate ? computeClientYesterdayBytes(results, client.portName) : 0;
       const deltaBytes = Math.max(deltaBytesDurable, deltaBytesLive);
       const deltaGb = trafficBytesToGb(deltaBytes);
 
@@ -213,6 +284,9 @@ async function _runDailyBillingImpl(retryClientIds) {
       const isRetailLease = (client.clientType === 'individual') && client.billingType === 'per_modem';
       const isFallbackLease = !!durableFallbackReason && client.billingType === 'per_modem';
       if (deltaBytes <= 0 && !isRetailLease && !isFallbackLease) {
+        // DEEP-23: завершённое НУЛЕВОЕ списание — отдельный durable-статус
+        // (не ошибка и не недостаток данных; retry ему не нужен).
+        if (billingRunsDb) { try { billingRunsDb.markJob(yesterdayStr, client.id, 'zero', { amount: 0 }); } catch (_) {} }
         skipped++;
         continue;
       }
@@ -251,7 +325,11 @@ async function _runDailyBillingImpl(retryClientIds) {
         cost = clientPrice * deltaGb;
       }
       cost = Math.round(cost * 100) / 100;
-      if (cost <= 0) { skipped++; continue; }
+      if (cost <= 0) {
+        if (billingRunsDb) { try { billingRunsDb.markJob(yesterdayStr, client.id, 'zero', { amount: 0 }); } catch (_) {} }
+        skipped++;
+        continue;
+      }
 
       // Debt policy: by default charges ALWAYS go through, even if balance
       // goes far negative — clients accumulate debt and admin reconciles
@@ -300,6 +378,9 @@ async function _runDailyBillingImpl(retryClientIds) {
               amount: cost, balance_before: e.balanceBefore,
             });
           } catch (_) {}
+          // DEEP-23: политика (не transient-ошибка) — retry не планируем,
+          // но статус durable, чтобы дату не считать «потерянной».
+          if (billingRunsDb) { try { billingRunsDb.markJob(yesterdayStr, client.id, 'skipped', { error: 'insufficient_balance' }); } catch (_) {} }
           skipped++;
           continue;
         }
@@ -316,16 +397,26 @@ async function _runDailyBillingImpl(retryClientIds) {
 
       if (debitRes && debitRes.duplicate) {
         logger.info(`[Billing] ${client.name}: charge for ${yesterdayStr} already posted (duplicate), skipping`);
+        // Уже списано (напр. крах прошлого прогона после debit, до отметки) —
+        // задание ЗАВЕРШЕНО, а не открыто.
+        if (billingRunsDb) { try { billingRunsDb.markJob(yesterdayStr, client.id, 'done', { amount: cost }); } catch (_) {} }
         skipped++;
         continue;
       }
 
+      if (billingRunsDb) { try { billingRunsDb.markJob(yesterdayStr, client.id, 'done', { amount: cost }); } catch (_) {} }
       charged++;
       logger.info(`[Billing] ${client.name}: ${deltaGb}GB, ${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
       logActivity('billing', 'info', 'daily_charge', client.name, `Charged ${cost} ${client.currency || 'RUB'} for ${deltaGb}GB`, { client_id: client.id, gb: deltaGb, cost, balance: client.balance });
     } catch (e) {
       logger.error(`[Billing] Error billing ${client.name}:`, e.message);
       logActivity('billing', 'error', 'billing_error', client.name, `Billing error: ${e.message}`, { client_id: client.id });
+      // DEEP-23: ошибка списания — durable 'failed' + в retry-очередь (раньше
+      // ошибки только логировались и в skippedClients не попадали — клиент
+      // терялся до следующего дня).
+      if (billingRunsDb) { try { billingRunsDb.markJob(yesterdayStr, client.id, 'failed', { error: e.message }); } catch (_) {} }
+      skippedClients.push(client.id);
+      skipped++;
     }
   }
 
@@ -343,13 +434,18 @@ async function _runDailyBillingImpl(retryClientIds) {
 
   logger.info(`[Billing] Complete: ${charged} charged, ${skipped} skipped`);
   logActivity('billing', charged > 0 ? 'info' : 'warn', 'billing_complete', null, `Billing complete: ${charged} charged, ${skipped} skipped`, { charged, skipped, date: yesterdayStr, is_retry: isRetry });
+  if (billingRunsDb) {
+    try { billingRunsDb.completeRun(yesterdayStr, lastBillingRunSummary); } catch (_) { /* best-effort */ }
+  }
 
-  // 3. Schedule retry if clients were skipped due to server issues (max 1 retry, not on retry runs)
+  // 3. Schedule retry if clients were skipped due to server issues (max 1 retry, not on retry runs).
+  // DEEP-23: retry сохраняет РАСЧЁТНУЮ дату и контекст (durable-задания), а не
+  // пересчитывает «вчера» на момент запуска таймера.
   if (!isRetry && skippedClients.length > 0) {
     const _retryHours = appSettings.billing_retry_delay_hours || 1;
     logger.info(`[Billing] Scheduling retry in ${_retryHours}h for ${skippedClients.length} skipped client(s)...`);
     setTimeout(() => {
-      runDailyBilling(skippedClients).catch(e => logger.error('[Billing] Retry error:', e.message));
+      runDailyBilling(skippedClients, { billingDate: yesterdayStr }).catch(e => logger.error('[Billing] Retry error:', e.message));
     }, _retryHours * 3600000);
   }
 }

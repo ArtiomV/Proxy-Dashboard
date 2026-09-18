@@ -75,11 +75,14 @@ function init(db) {
     "INSERT OR IGNORE INTO retail_pool (server, port_id, status, client_id, updated_at) VALUES (?, ?, 'leased', ?, datetime('now'))"
   );
   S.remove = db.prepare('DELETE FROM retail_pool WHERE id = ?');
+  // 2026-09-18 · DEEP-22: reserved_until/hold_until пишутся ISO-строкой с 'T'
+  // (toISOString) — прямое строковое сравнение с datetime('now') ('… …')
+  // никогда не срабатывало ('T' > ' '). datetime() нормализует оба формата.
   S.expiredReservations = db.prepare(
-    "SELECT * FROM retail_pool WHERE status='reserved' AND reserved_until < datetime('now')"
+    "SELECT * FROM retail_pool WHERE status='reserved' AND datetime(reserved_until) < datetime('now')"
   );
   S.expiredHolds = db.prepare(
-    "SELECT * FROM retail_pool WHERE status='blocked' AND hold_until IS NOT NULL AND hold_until < datetime('now')"
+    "SELECT * FROM retail_pool WHERE status='blocked' AND hold_until IS NOT NULL AND datetime(hold_until) < datetime('now')"
   );
 }
 
