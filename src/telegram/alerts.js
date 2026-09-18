@@ -659,12 +659,17 @@ const RULES = {
   },
   // B2C Э4 (WP3): эквайринг розницы. Зачисление карта/СБП по webhook;
   // error-поле — сбой контура (amount_mismatch / credit_failed) → critical.
+  // 2026-09-18 · DEEP-17 (§14.1): дедуп по order_id + типу проблемы, БЕЗ
+  // Date.now() — повтор одного unresolved-инцидента (recovery каждые 5 мин)
+  // не создаёт сообщение каждый цикл; успешные оплаты разных заказов имеют
+  // разные ключи и не подавляют друг друга. Fallback без order_id — как раньше
+  // (login+amount), но тоже без метки времени.
   retail_card_payment: {
     title: 'Розница: оплата картой/СБП',
     priority: 'important',
     defaultOn: true,
-    cooldownSec: 10,
-    dedupeKey: p => 'cardpay_' + (p.login || '') + '_' + (p.amount || 0) + '_' + (p.error || 'ok') + '_' + Date.now(),
+    cooldownSec: 3600,   // час на инцидент: recovery сканирует каждые 5 мин
+    dedupeKey: p => 'cardpay_' + (p.order_id || ((p.login || '') + '_' + (p.amount || 0))) + '_' + (p.error || 'ok'),
     render: p => p.error
       ? `🚨 <b>Эквайринг: сбой зачисления</b>\n\nКлиент <b>${esc(p.login || '?')}</b>: ${formatRub(p.amount)} (${esc(p.method || '?')}) — <code>${esc(p.error)}</code>.\nПлатёж требует ручного разбора (card_payments).`
       : `💳 <b>Оплата ${p.method === 'sbp' ? 'через СБП' : 'картой'}</b>\n\nКлиент: <b>${esc(p.login || '?')}</b>\nЗачислено: <b>${formatRub(p.amount)}</b>`,

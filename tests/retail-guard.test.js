@@ -25,7 +25,8 @@ function mkPoolDb(rows) {
     block: (id, holdUntil) => { const r = rows.find(x => x.id === id); r.status = 'blocked'; r.hold_until = holdUntil; },
     unblock: (id) => { const r = rows.find(x => x.id === id); r.status = 'leased'; r.hold_until = null; },
     setRestoreUntil: (id, value) => { const r = rows.find(x => x.id === id); r.restore_until = value; },
-    release: (id) => { const r = rows.find(x => x.id === id); r.status = 'free'; r.client_id = null; r.hold_until = null; r.test_expires_at = null; },
+    markPendingRelease: (id, reason) => { const r = rows.find(x => x.id === id); r.pending_release = reason; },
+    release: (id) => { const r = rows.find(x => x.id === id); r.status = 'free'; r.client_id = null; r.hold_until = null; r.test_expires_at = null; r.pending_release = null; },
     remove: (id) => { const i = rows.findIndex(x => x.id === id); if (i >= 0) rows.splice(i, 1); },
   };
 }
@@ -51,10 +52,14 @@ function mkDeps({ poolRows = [], ledgerEntries = [], resultsFn } = {}) {
       fetchApi: async (srv, path) => {
         applied.push(path);
         if (path === '/apix/list_ports_json') {
-          const validBefore = posted.length ? posted[posted.length - 1].formData.PROXY_VALID_BEFORE : TODAY;
+          const lastForm = posted.length ? posted[posted.length - 1].formData : {};
+          const validBefore = lastForm.PROXY_VALID_BEFORE !== undefined ? lastForm.PROXY_VALID_BEFORE : TODAY;
           // Реальный API отдаёт portName (clientPorts матчит по нему);
           // DEEP-09: owner-верификация в port-validity читает это поле.
-          return { imei1: [{ portID: 'p1', portName: 'u_a', PROXY_VALID_BEFORE: validBefore }] };
+          // DEEP-15: записанный portName отражается в свежем чтении —
+          // иначе подтверждение отвязки не проходит (как и на боксе).
+          const portName = lastForm.portName !== undefined ? lastForm.portName : 'u_a';
+          return { imei1: [{ portID: 'p1', portName, PROXY_VALID_BEFORE: validBefore }] };
         }
         return {};
       },

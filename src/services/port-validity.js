@@ -67,7 +67,8 @@ function create(deps) {
     if (applied && (applied.error || applied.ok === false)) {
       throw new Error(`apply_port: ${applied.error || applied.reason || 'rejected'}`);
     }
-    if (Object.prototype.hasOwnProperty.call(patch, 'PROXY_VALID_BEFORE') || expectedOwner !== null) {
+    if (Object.prototype.hasOwnProperty.call(patch, 'PROXY_VALID_BEFORE') || expectedOwner !== null
+        || Object.prototype.hasOwnProperty.call(patch, 'portName')) {
       const confirmed = await _readPort(server, portId);
       if (!confirmed) throw new Error('verification: port missing from list_ports_json');
       if (expectedOwner !== null && String(confirmed.portName || '') !== expectedOwner) {
@@ -80,6 +81,16 @@ function create(deps) {
         const gotVb = String(confirmed.PROXY_VALID_BEFORE || '').slice(0, 10);
         if (gotVb !== wantVb) {
           throw new Error(`verification: valid-before is ${gotVb || 'empty'}, expected ${wantVb}`);
+        }
+      }
+      // 2026-09-18 · DEEP-15 (§15.2): назначение/отвязка portName подтверждается
+      // свежим чтением, как setPortValidBefore подтверждает срок — один
+      // HTTP 200/apply не доказывает отключение прежнего клиента.
+      if (Object.prototype.hasOwnProperty.call(patch, 'portName')) {
+        const wantName = String(patch.portName || '');
+        const gotName = String(confirmed.portName || '');
+        if (gotName !== wantName) {
+          throw new Error(`verification: portName is ${gotName || 'empty'}, expected ${wantName || 'empty'}`);
         }
       }
     }
@@ -100,7 +111,8 @@ function create(deps) {
     return _editPort(server, portId, { PROXY_VALID_BEFORE: dateStr }, opts);
   }
 
-  // Привязка/отвязка: пустой portName = порт выключен (B6).
+  // Привязка/отвязка: пустой portName = порт выключен (B6). Сохранённое
+  // назначение подтверждается свежим чтением после apply (DEEP-15, §15.2).
   function setPortName(server, portId, name, opts) {
     return _editPort(server, portId, { portName: name }, opts);
   }

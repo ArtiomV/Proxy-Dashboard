@@ -42,6 +42,16 @@ module.exports = function createPaymentsRouter(deps) {
     return clients.find(c => c.login === req.user.login);
   }
 
+  // 2026-09-18 · DEEP-17 (§14.1): время из БД — SQLite UTC ('YYYY-MM-DD
+  // HH:MM:SS') либо ISO. Date.parse строки с пробелом читает её как ЛОКАЛЬНУЮ —
+  // нормализуем к UTC перед парсингом; невалидное значение → NaN.
+  function _utcMs(value) {
+    const s = String(value || '').trim();
+    if (!s) return NaN;
+    const norm = s.includes('T') ? s : s.replace(' ', 'T');
+    return Date.parse(/Z$|[+-]\d{2}:?\d{2}$/.test(norm) ? norm : norm + 'Z');
+  }
+
   // Минимум пополнения: настройка retail_min_topup (>0); 0/не задана —
   // суточное списание тарифа клиента (price/30.4); без тарифа — 100 ₽.
   function _minTopupFor(client) {
@@ -312,7 +322,7 @@ module.exports = function createPaymentsRouter(deps) {
       if (!Number.isFinite(Number(row.amount)) || Number(row.amount) <= 0 ||
           (verdict.amount != null && (!Number.isFinite(Number(verdict.amount)) || Math.abs(Number(verdict.amount) - Number(row.amount)) > 0.005))) {
         logger.error(`[Payments webhook] amount mismatch ${orderId}: webhook ${verdict.amount} != db ${row.amount}`);
-        try { alerts && alerts.trigger('retail_card_payment', { login: row.client_id, amount: row.amount, method: row.method, error: 'amount_mismatch' }); } catch (_) { /* alert best-effort */ }
+        try { alerts && alerts.trigger('retail_card_payment', { login: row.client_id, client_id: row.client_id, amount: row.amount, method: row.method, order_id: orderId, error: 'amount_mismatch' }); } catch (_) { /* alert best-effort */ }
         return res.status(200).json({ ok: true, processed: false, reason: 'amount_mismatch' });
       }
       // Идемпотентность по статусу: credited → дубль без зачёта; терминальный
@@ -325,7 +335,15 @@ module.exports = function createPaymentsRouter(deps) {
         logger.warn(`[Payments webhook] paid event for ${orderId} in terminal status ${row.status}`);
         return res.status(200).json({ ok: true, processed: false, reason: 'terminal_status', status: row.status });
       }
-      if (row.status === 'created') cardPaymentsDb.markPaid(orderId, providerPaymentId, rawJson);
+      if (row.status === 'created') {
+        cardPaymentsDb.markPaid(orderId, providerPaymentId, rawJson);
+      } else if (!row.paid_at && typeof cardPaymentsDb.confirmPaidAt === 'function') {
+        // DEEP-17 (§14.1): повторный ВЕРИФИЦИРОВАННЫЙ paid-webhook по строке,
+        // оплаченной до появления paid_at (миграция 094) — это реальное
+        // подтверждение банка, его время сохраняем. Не путаем с вымышленным
+        // временем: без webhook-подтверждения paid_at остаётся NULL.
+        cardPaymentsDb.confirmPaidAt(orderId);
+      }
       const client = clientById.get(row.client_id);
       if (!client) {
         // Клиента удалили между оплатой и webhook — строка paid остаётся
@@ -343,7 +361,7 @@ module.exports = function createPaymentsRouter(deps) {
             `Промокод ${row.promo_code}: бонус к пополнению ${orderId}`, { order_id: orderId });
           _notifyCredit(client, promo.balanceAfter - promo.balanceBefore, promo.balanceAfter);
         }
-        try { alerts && alerts.trigger('retail_card_payment', { login: client.login, client_id: client.id, amount: row.amount, method: row.method || verdict.method }); } catch (_) { /* alert best-effort */ }
+        try { alerts && alerts.trigger('retail_card_payment', { login: client.login, client_id: client.id, amount: row.amount, method: row.method || verdict.method, order_id: orderId }); } catch (_) { /* alert best-effort */ }
         logActivity('client', 'info', 'retail_card_credited', client.login,
           `Эквайринг: зачислено ${row.amount} ₽ (${row.method || verdict.method}, ${orderId})`, { order_id: orderId });
       } catch (e) {
@@ -351,7 +369,7 @@ module.exports = function createPaymentsRouter(deps) {
         // (runRecovery, 5 мин; backoff 1/5/15/60 мин по recovery_attempts).
         // Здесь — громкий алерт + 500, чтобы банк тоже ретраил webhook.
         logger.error(`[Payments webhook] credit failed for ${orderId}: ${e.message}`);
-        try { alerts && alerts.trigger('retail_card_payment', { login: client.login, client_id: client.id, amount: row.amount, method: row.method, error: 'credit_failed' }); } catch (_) { /* alert best-effort */ }
+        try { alerts && alerts.trigger('retail_card_payment', { login: client.login, client_id: client.id, amount: row.amount, method: row.method, order_id: orderId, error: 'credit_failed' }); } catch (_) { /* alert best-effort */ }
         return res.status(500).json({ ok: false, error: 'credit failed' });
       }
       return res.status(200).json({ ok: true, credited: true });
@@ -565,12 +583,21 @@ module.exports = function createPaymentsRouter(deps) {
           if (typeof cardPaymentsDb.markRecoveryFailure === 'function') {
             cardPaymentsDb.markRecoveryFailure(row.order_id, e.message);
           }
-          const paidAt = Date.parse(row.created_at || '');
-          if (Number.isFinite(paidAt) && Date.now() - paidAt >= 15 * 60000) {
-            try { alerts && alerts.trigger('retail_card_payment', {
-              login: row.client_id, client_id: row.client_id, amount: row.amount,
-              method: row.method, error: 'recovery_failed', order_id: row.order_id,
-            }); } catch (_) { /* alert best-effort */ }
+          // 2026-09-18 · DEEP-17 (§14.1): возраст НЕЗАВЕРШЁННОГО зачисления
+          // считается от paid_at (первое проверенное подтверждение банка),
+          // а не от created_at — заказ мог быть создан задолго до оплаты.
+          const paidAtMs = _utcMs(row.paid_at);
+          if (Number.isFinite(paidAtMs)) {
+            if (Date.now() - paidAtMs >= 15 * 60000) {
+              try { alerts && alerts.trigger('retail_card_payment', {
+                login: row.client_id, client_id: row.client_id, amount: row.amount,
+                method: row.method, error: 'recovery_failed', order_id: row.order_id,
+              }); } catch (_) { /* alert best-effort */ }
+            }
+          } else {
+            // Строка оплачена до появления paid_at (миграция 094): возраст
+            // неизвестен, вымышленное время не приписываем — диагностируем.
+            logger.warn(`[Payments recovery] ${row.order_id}: paid_at отсутствует (legacy-строка) — возраст незавершённого зачисления не определить`);
           }
         }
       }

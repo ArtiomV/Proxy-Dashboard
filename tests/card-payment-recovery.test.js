@@ -67,7 +67,7 @@ describe('card payment recovery', () => {
       provider_payment_id TEXT, raw_json TEXT, created_at TEXT, credited_at TEXT,
       promo_code TEXT, recovery_attempts INTEGER NOT NULL DEFAULT 0,
       next_recovery_at TEXT, recovery_error TEXT,
-      promo_status TEXT, promo_bonus_amount REAL);
+      promo_status TEXT, promo_bonus_amount REAL, paid_at TEXT);
       CREATE TABLE finance_idempotency (
         event_key TEXT PRIMARY KEY, client_id TEXT NOT NULL, amount REAL NOT NULL,
         created_at TEXT NOT NULL DEFAULT (datetime('now')))`);

@@ -32,8 +32,15 @@ function init(db) {
   );
   S.release = db.prepare(
     "UPDATE retail_pool SET status='free', client_id=NULL, reserved_until=NULL, hold_until=NULL, " +
-    "test_expires_at=NULL, restore_until=NULL, " +
+    "test_expires_at=NULL, restore_until=NULL, pending_release=NULL, " +
     "last_client_id=COALESCE(client_id, last_client_id), updated_at=datetime('now') WHERE id = ?"
+  );
+  // 2026-09-18 · DEEP-15 (§15.2): отложенный возврат тестового порта.
+  // Отвязка не подтверждена (сервер неизвестен/недоступен, дедлайн невалиден,
+  // apply не применил portName) → строка НЕ free, порт не продаётся; причина
+  // фиксируется durable (миграция 095), повтор — в следующих циклах guard.
+  S.markPendingRelease = db.prepare(
+    "UPDATE retail_pool SET pending_release=?, updated_at=datetime('now') WHERE id=? AND status='leased'"
   );
   S.block = db.prepare(
     // restore_until=NULL: повторный блок начинает НОВЫЙ долговой цикл —
@@ -92,6 +99,7 @@ function reserve(id, clientId, reservedUntil) {
 }
 function lease(id) { return S.lease.run(id); }
 function release(id) { return S.release.run(id); }
+function markPendingRelease(id, reason) { return S.markPendingRelease.run(String(reason || 'unknown').slice(0, 60), id); }
 function block(id, holdUntil) { return S.block.run(holdUntil, id); }
 function unblock(id) { return S.unblock.run(id); }
 function setRestoreUntil(id, dateStr) { return S.setRestoreUntil.run(dateStr, id); }
@@ -105,7 +113,7 @@ function expiredHolds() { return S.expiredHolds.all(); }
 
 module.exports = {
   init, byId, byPort, byStatus, all, byClient, countByStatus, nextFree,
-  reserve, lease, release, block, unblock, setRestoreUntil, setTestExpires, rebind,
+  reserve, lease, release, markPendingRelease, block, unblock, setRestoreUntil, setTestExpires, rebind,
   insertFree, insertLeased, remove,
   expiredReservations, expiredHolds,
 };

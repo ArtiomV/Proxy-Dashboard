@@ -51,10 +51,19 @@ function create(deps) {
         }
         const status = res.data?.Data?.paymentStatus;
         if (status === PAID_STATUS) {
+          // 2026-09-18 · DEEP-18 (§17.2): DB-first, как settlement (FIX-02,
+          // bill-settle.js). Память, счётчик paid и запись в журнал — только
+          // ПОСЛЕ успешной записи в таблицу; ошибка SQLite (или 0 обновлённых
+          // строк) не оставляет фиктивный paid — счёт повторяется в след. проходе.
+          try {
+            const result = documentsDb.updateBillStatus(bill.id, 'paid');
+            if (result && result.changes === 0) throw new Error('bill row was not updated');
+          } catch (e) {
+            logger.error(`[BillStatusSync] ${bill.billNumber || bill.id}: updateBillStatus failed: ${e.message} — повтор в след. проходе`);
+            continue;
+          }
           bill.status = 'paid';
-          // Пишем в таблицу напрямую — нужна немедленная персистентность
-          // (saveClients тоже не потеряет: insertBill — UPSERT по status).
-          documentsDb.updateBillStatus(bill.id, 'paid');
+          // saveClients тоже не потеряет: insertBill — UPSERT по status.
           paid++;
           logger.info(`[BillStatusSync] ${client.name}: счёт ${bill.billNumber || bill.id} (${bill.amount}₽) оплачен по данным Точки`);
           logActivity('billing', 'info', 'bill_auto_paid', client.name,

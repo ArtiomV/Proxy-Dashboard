@@ -16,9 +16,19 @@ function init(db) {
     "INSERT OR IGNORE INTO card_payments (order_id, client_id, amount, method, status, created_at, promo_code, promo_bonus_amount) " +
     "VALUES (?, ?, ?, ?, 'created', datetime('now'), ?, ?)"
   );
+  // 2026-09-18 · DEEP-17 (§14.1): paid_at — время ПЕРВОГО проверенного
+  // подтверждения оплаты банком (переход created → paid по верифицированному
+  // webhook). Возраст незавершённого зачисления считается от paid_at,
+  // а не от created_at (миграция 094).
   S.markPaid = db.prepare(
-    "UPDATE card_payments SET status='paid', provider_payment_id=?, raw_json=? " +
+    "UPDATE card_payments SET status='paid', provider_payment_id=?, raw_json=?, paid_at=datetime('now') " +
     "WHERE order_id=? AND status='created'"
+  );
+  // Повторный верифицированный webhook по legacy-строке (paid без paid_at):
+  // это реальное подтверждение банка — фиксируем его время, но не перезаписываем
+  // уже сохранённое и не приписываем ничего строкам вне статуса 'paid'.
+  S.confirmPaidAt = db.prepare(
+    "UPDATE card_payments SET paid_at=datetime('now') WHERE order_id=? AND status='paid' AND paid_at IS NULL"
   );
   S.markCredited = db.prepare(
     "UPDATE card_payments SET status='credited', credited_at=datetime('now') WHERE order_id=? AND status='paid'"
@@ -86,6 +96,10 @@ function insertCreated(orderId, clientId, amount, method, promoCode, promoBonusA
 function markPaid(orderId, providerPaymentId, rawJson) {
   return S.markPaid.run(providerPaymentId || null, rawJson || null, orderId);
 }
+// DEEP-17: сохранить paid_at при проверенном подтверждении банка для строк,
+// оплаченных до появления колонки (миграция 094). changes=0 — paid_at уже
+// есть или заказ не в статусе paid: вымышленное время не приписываем.
+function confirmPaidAt(orderId) { return S.confirmPaidAt.run(orderId); }
 function markCredited(orderId) { return S.markCredited.run(orderId); }
 function markStatus(orderId, status) { return S.markStatus.run(status, orderId); }
 function recent(limit) { return S.recent.all(limit || 100); }
@@ -142,6 +156,6 @@ function releaseRefundClaim(orderId) {
 // между фазами) — recovery доводит их без сети.
 function pendingRefundFinalize(limit) { return S.pendingRefundFinalize.all(limit || 50); }
 
-module.exports = { init, byOrderId, byClient, insertCreated, markPaid, markCredited, markStatus,
+module.exports = { init, byOrderId, byClient, insertCreated, markPaid, confirmPaidAt, markCredited, markStatus,
   recent, pendingPaid, markRecoveryFailure, attachProvider, setPromoStatus, completeOrder,
   claimRefund, refundProviderOk, markRefunded, releaseRefundClaim, pendingRefundFinalize };

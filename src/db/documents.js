@@ -46,13 +46,13 @@ function init(db) {
   S.billDeleteByClient = db.prepare('DELETE FROM bills WHERE client_id = ?');
   S.billDeleteById     = db.prepare('DELETE FROM bills WHERE id = ?');
   // UPSERT, not INSERT OR IGNORE: status is the one mutable field, and every
-  // status writer (bill-settle, bill-status-sync, bill_status route) mutates
-  // the in-memory bill BEFORE persisting — so saveClients upserting status
-  // can never revert the DB to a stale value, it can only write the same or
-  // a newer one. This closes the foot-gun where a future code path mutates
-  // bill.status in memory, calls plain saveClients(), and silently loses the
-  // change on reload. amount/period/etc. stay insert-once (same philosophy
-  // as clients.balance, which is excluded from the clients upsert).
+  // status writer (bill-settle, bill-status-sync, bill_status route) persists
+  // the change through this table — saveClients upserting status can never
+  // revert the DB to a stale value, it can only write the same or a newer one.
+  // This closes the foot-gun where a future code path mutates bill.status in
+  // memory, calls plain saveClients(), and silently loses the change on reload.
+  // amount/period/etc. stay insert-once (same philosophy as clients.balance,
+  // which is excluded from the clients upsert).
   S.billInsert = db.prepare(
     'INSERT INTO bills (id, client_id, tochka_bill_id, period, bill_number, amount, status, created_at, formula) ' +
     'VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ' +

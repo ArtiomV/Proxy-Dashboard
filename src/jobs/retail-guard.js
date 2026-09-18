@@ -28,7 +28,10 @@
 //   6. Low-balance: runway = balance / (price/дней_в_месяце) ≤ 3/1 дн
 //      → уведомление (дедуп kv по дате, фактически 1/сутки).
 //   7. Тест-день: leased с test_expires_at < now → отвязка порта
-//      (пустой portName, B6) → строка в free + admin-алерт.
+//      (пустой portName, B6, подтверждается свежим чтением) → строка в free +
+//      admin-алерт. Неизвестный сервер / невалидный дедлайн / неподтверждённая
+//      отвязка → НЕ free: durable-маркер pending_release, повтор в след. цикле
+//      (DEEP-15, §15.2).
 //
 // Дедуп уведомлений: kv_store, ключ guard:dedup:{clientId}:{kind}:{YYYY-MM-DD}.
 
@@ -388,14 +391,36 @@ function create(deps) {
 
   // ── фаза тест-дня: leased с test_expires_at < now → вернуть в пул (шаг 7) ──
   async function _processExpiredTestDays(stats) {
+    // 2026-09-18 · DEEP-15 (§15.2): leased → free только после ПОДТВЕРЖДЁННОЙ
+    // отвязки. Неизвестный/недоступный сервер, невалидный дедлайн или apply без
+    // фактической смены portName НЕ переводят порт в free — иначе он продавался
+    // бы с живым доступом прежнего клиента. Такая строка хранит durable-маркер
+    // pending_release (миграция 095) и повторяется в следующих циклах.
+    const _pending = (row, reason) => {
+      if (typeof retailPoolDb.markPendingRelease === 'function') retailPoolDb.markPendingRelease(row.id, reason);
+      logger.error(`[RetailGuard] test-day return ${row.server}/${row.port_id}: ${reason} — порт НЕ возвращён в free, повтор в след. цикле`);
+    };
     for (const row of retailPoolDb.byStatus('leased')) {
-      if (!row.test_expires_at) continue;
-      if (Date.parse(row.test_expires_at) > _nowMs()) continue;
+      if (!row.test_expires_at && !row.pending_release) continue;
+      const dlMs = row.test_expires_at ? Date.parse(row.test_expires_at) : NaN;
+      if (!Number.isFinite(dlMs)) {
+        // Битая дата — диагностируемое состояние; в free не переводим.
+        _pending(row, 'invalid_deadline');
+        continue;
+      }
+      if (dlMs > _nowMs() && !row.pending_release) continue;
       const server = findServer(row.server);
+      if (!server) {
+        // Сервер удалён из конфигурации/недоступен — отвязать и подтвердить
+        // нечем; строка остаётся leased (порт недоступен для продажи).
+        _pending(row, 'server_unknown');
+        continue;
+      }
       const client = clients.find(c => c.id === row.client_id) || null;
       try {
-        // Отвязка пустым portName (B6) — порт выключается и ждёт следующей выдачи.
-        if (server) await portValidity.setPortName(server, row.port_id, '');
+        // Отвязка пустым portName (B6) — порт выключается и ждёт следующей
+        // выдачи; setPortName подтверждает сохранённое назначение свежим чтением.
+        await portValidity.setPortName(server, row.port_id, '');
         retailPoolDb.release(row.id);
         stats.testDayEnded.push(row.port_id);
         logger.info(`[RetailGuard] Тест-день завершён: ${row.server}/${row.port_id} → free`);
@@ -409,6 +434,7 @@ function create(deps) {
           } catch (_) { /* notify best-effort */ }
         }
       } catch (e) {
+        _pending(row, 'unbind_unconfirmed');
         logger.error(`[RetailGuard] test-day return ${row.server}/${row.port_id}: ${e.message} — повтор в след. цикле`);
       }
     }
