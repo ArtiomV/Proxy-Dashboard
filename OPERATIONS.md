@@ -101,12 +101,16 @@ ssh $SERVER "sleep 5 && curl -sf http://localhost:3000/health || (pm2 restart da
 ## Database backup
 - Daily backup at 02:00 UTC (джоба DbBackup, src/jobs/backup.js) to
   `/var/backups/proxy-dashboard/dashboard-YYYY-MM-DD.db`, с верификацией
-  (открывается и проверяется наличие таблицы clients).
+  (PRAGMA quick_check + наличие таблицы clients — DEEP-16, 18.09.2026) и
+  атомарной публикацией .gz (временный файл + rename, FIX-08).
 - Retention: **7 daily** + **12 monthly** (D2): снапшот, сделанный 1-го числа,
-  копируется в `monthly/` и хранится год.
+  копируется в `monthly/` и хранится год. Последняя пригодная копия не
+  удаляется ротацией никогда (FIX-08 п.8).
 - **Offsite (D2)**: после успешного DbBackup вызывается
   `scripts/backup-offsite.sh` — выгрузка daily+monthly в облако через **rclone**
   (remote из `$RCLONE_REMOTE`, назначение `<remote>:proxy-dashboard-backups`).
+  Выгружаются только точные имена опубликованных архивов (manifest
+  `--files-from`; DEEP-16, 18.09.2026) — .partial/.tmp/-wal/-shm не попадают.
   Сбой выгрузки НЕ роняет локальный бэкап, но пишет warn в лог и system_log
   (`backup_offsite_failed`) — не молчит (C7). Если rclone/remote не настроены,
   скрипт падает с понятной ошибкой — тот же warn.

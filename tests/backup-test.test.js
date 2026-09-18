@@ -146,4 +146,48 @@ describe('D3: runOnce — локальный fallback', () => {
     expect(deps.alerts.trigger).toHaveBeenCalledWith('backup_restore_failed',
       expect.objectContaining({ source: 'local', file: 'dashboard-2026-08-23.db.gz' }));
   });
+
+  // FIX-08 п.7 (18.09.2026): последний архив повреждён — итог остаётся явным
+  // фейлом (не маскируется успехом старого), но пригодный предыдущий архив
+  // указывается как recoverableFrom для оценки восстановимости.
+  it('последний архив битый, предыдущий валидный → ok:false + recoverableFrom', async () => {
+    const backupDir = path.join(workDir, 'backups');
+    const tmpDir = path.join(workDir, 'tmp');
+    fs.mkdirSync(backupDir); fs.mkdirSync(tmpDir);
+    const dbFile = path.join(workDir, 'src.db');
+    makeValidDbFile(dbFile);
+    const good = zlib.gzipSync(fs.readFileSync(dbFile));
+    fs.writeFileSync(path.join(backupDir, 'dashboard-2026-08-16.db.gz'), good);
+    fs.writeFileSync(path.join(backupDir, 'dashboard-2026-08-23.db.gz'), zlib.gzipSync(Buffer.from('corrupted')));
+    process.env.DB_BACKUP_DIR = backupDir;
+
+    const deps = makeDeps({ tmpDir });
+    const job = backupTest.create(deps);
+    const r = await job.runOnce();
+    // Повреждение последнего НЕ скрыто: фейл + алерт именно на последний файл.
+    expect(r.ok).toBe(false);
+    expect(r.recoverableFrom).toBe('dashboard-2026-08-16.db.gz');
+    expect(deps.alerts.trigger).toHaveBeenCalledWith('backup_restore_failed',
+      expect.objectContaining({
+        file: 'dashboard-2026-08-23.db.gz',
+        recoverableFrom: 'dashboard-2026-08-16.db.gz',
+      }));
+    expect(deps.logger.warn).toHaveBeenCalledWith(expect.stringContaining('dashboard-2026-08-16.db.gz'));
+    // temp-файлы проверки предыдущих архивов прибиты
+    expect(fs.readdirSync(tmpDir).filter(f => f.startsWith('backup-test-'))).toHaveLength(0);
+  });
+
+  // FIX-08 п.6: .partial/.tmp в каталоге бэкапов не считаются готовым бэкапом.
+  it('stray .partial от прошлого crash не выбирается как бэкап', async () => {
+    const backupDir = path.join(workDir, 'backups');
+    fs.mkdirSync(backupDir);
+    fs.writeFileSync(path.join(backupDir, 'dashboard-2026-09-18.db.gz.999.123.partial'), 'not-ready');
+    process.env.DB_BACKUP_DIR = backupDir;
+
+    const deps = makeDeps();
+    const job = backupTest.create(deps);
+    const r = await job.runOnce();
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('бэкапов нет');
+  });
 });

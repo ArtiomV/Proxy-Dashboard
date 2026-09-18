@@ -27,9 +27,32 @@ if [ ! -d "$BACKUP_DIR" ]; then
   exit 1
 fi
 
-# Копируем только снапшоты БД (daily в корне + monthly/), без sidecar-файлов.
-# Паттерн без '/' матчит basename на любой глубине — monthly/ попадает сам.
-# С 13.08.2026 снапшоты сжаты gzip (.db.gz) — матчим оба варианта.
+# DEEP-16 (18.09.2026): выгружаем только ТОЧНЫЕ имена опубликованных архивов
+# через manifest (--files-from). Wildcard dashboard-*.db* недопустим: он
+# захватывает sidecar-файлы .db-wal/.db-shm и недописанные .db.gz.*.partial.
+# Опубликованный архив — dashboard-YYYY-MM-DD.db.gz в корне (daily) и в
+# monthly/; шаблон с '?' фиксирует длину даты, .gz на конце исключает
+# .partial/.tmp. Остатки .partial после crash в облако не попадают и не
+# удаляются отсюда — это не файлы этой операции (FIX-08 п.6).
+MANIFEST="$(mktemp "${TMPDIR:-/tmp}/backup-offsite-manifest.XXXXXX")"
+trap 'rm -f "$MANIFEST"' EXIT
+
+find "$BACKUP_DIR" -maxdepth 2 -type f -name 'dashboard-????-??-??.db.gz' -print \
+  | sed "s|^$BACKUP_DIR/||" > "$MANIFEST"
+
+# Legacy несжатые .db: отдельное подтверждение готовности. Файл считаем
+# готовым только если нет sidecar -wal/-shm (неоткрытая живая БД) и он не
+# изменялся последний час (не идёт запись снимка прямо сейчас).
+find "$BACKUP_DIR" -maxdepth 1 -type f -name 'dashboard-????-??-??.db' -mmin +60 -print \
+  | while IFS= read -r f; do
+      [ ! -e "${f}-wal" ] && [ ! -e "${f}-shm" ] && echo "${f#$BACKUP_DIR/}"
+    done >> "$MANIFEST" || true
+
+if [ ! -s "$MANIFEST" ]; then
+  echo "backup-offsite: опубликованных архивов в $BACKUP_DIR не найдено — выгружать нечего" >&2
+  exit 1
+fi
+
 # Beget S3 режет всплески запросов (429 TooManyRequests на UploadPart при
 # multi-thread copy ~700 MB файла): глушим параллелизм и делаем до 3 попыток
 # с паузой — иначе ночная выгрузка молча не доезжает (13.08.2026).
@@ -37,7 +60,7 @@ attempt=1
 max_attempts=3
 while true; do
   if rclone copy "$BACKUP_DIR" "${REMOTE}:${DEST_PREFIX}" \
-    --include "dashboard-*.db*" \
+    --files-from "$MANIFEST" \
     --checksum --stats-one-line --stats 30s \
     --transfers 2 --s3-upload-concurrency 1 --multi-thread-streams 1 \
     --retries 5 --retries-sleep 30s --low-level-retries 10; then
@@ -52,4 +75,4 @@ while true; do
   sleep 60
 done
 
-echo "offsite OK: $BACKUP_DIR → ${REMOTE}:${DEST_PREFIX}"
+echo "offsite OK: $(wc -l < "$MANIFEST" | tr -d ' ') файлов $BACKUP_DIR → ${REMOTE}:${DEST_PREFIX}"

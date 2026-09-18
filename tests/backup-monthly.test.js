@@ -60,4 +60,32 @@ describe('D2: rotateMonthlyBackup', () => {
     expect(r.pruned).toBe(0);
     expect(fs.existsSync(path.join(mDir, 'README.txt'))).toBe(true);
   });
+
+  // DEEP-16 (18.09.2026): monthly-копия публикуется атомарно (временный файл
+  // + rename) — обрыв copyFile не портит предыдущий monthly-архив.
+  it('обрыв copyFile → прежний monthly-архив побайтно цел, .tmp убран', () => {
+    const mDir = path.join(tmp, 'monthly');
+    fs.mkdirSync(mDir);
+    const mDest = path.join(mDir, 'dashboard-2026-08-01.db');
+    fs.writeFileSync(mDest, 'previous-monthly-good');
+    const dest = seedBackup('dashboard-2026-08-01.db');
+    // Инъекция: копия обрывается посередине (записали кусок — и ENOSPC).
+    const brokenFs = Object.create(fs);
+    brokenFs.copyFileSync = (src, dst) => {
+      fs.writeFileSync(dst, 'partial-');
+      const e = new Error('no space left on device');
+      e.code = 'ENOSPC';
+      throw e;
+    };
+    expect(() => rotateMonthlyBackup(brokenFs, path, tmp, dest, '2026-08-01')).toThrow(/ENOSPC|no space/);
+    expect(fs.readFileSync(mDest, 'utf8')).toBe('previous-monthly-good');
+    expect(fs.readdirSync(mDir).filter(f => f.endsWith('.tmp'))).toHaveLength(0);
+  });
+
+  it('успешная публикация не оставляет .tmp-файлов', () => {
+    const dest = seedBackup('dashboard-2026-08-01.db');
+    rotateMonthlyBackup(fs, path, tmp, dest, '2026-08-01');
+    const mDir = path.join(tmp, 'monthly');
+    expect(fs.readdirSync(mDir).filter(f => f.includes('.tmp'))).toHaveLength(0);
+  });
 });

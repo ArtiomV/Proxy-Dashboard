@@ -11,8 +11,11 @@
 // (по умолчанию DB_BACKUP_DIR/tmp на диске, НЕ tmpfs /tmp — см. инцидент
 // 30.08) → better-sqlite3 readonly → PRAGMA integrity_check + счётчики ключевых
 // таблиц > 0. Любой фейл → alerts.trigger('backup_restore_failed'),
-// отсутствие дампов — тоже фейл («бэкапов нет»). Регистрация: startup.js,
-// scheduleRepeating 03:10 UTC + проверка воскресенья внутри расписания.
+// отсутствие дампов — тоже фейл («бэкапов нет»). FIX-08 п.7 (18.09.2026):
+// повреждение последнего архива — всегда явный фейл; пригодный предыдущий
+// архив ищется только для оценки восстановимости (recoverableFrom) и не
+// маскирует фейл. Регистрация: startup.js, scheduleRepeating 03:10 UTC +
+// проверка воскресенья внутри расписания.
 //
 // Тесты подсовывают deps.execFile / deps.tmpDir — сеть и rclone не дёргаем.
 
@@ -49,9 +52,7 @@ function create(deps) {
     const prefix = process.env.RCLONE_DEST_PREFIX || 'proxy-dashboard-backups';
     if (remote) {
       try {
-        const out = await _exec('rclone', ['lsf', `${remote}:${prefix}`, '--include', 'dashboard-*.db.gz']);
-        const names = out.split('\n').map(s => s.trim())
-          .filter(s => /^dashboard-\d{4}-\d{2}-\d{2}\.db\.gz$/.test(s)).sort();
+        const names = await _listPublished('s3');
         if (names.length) return { source: 's3', file: names[names.length - 1], remote, prefix };
         logger.warn('[BackupTest] rclone: в облаке дампов не найдено — fallback на локальную копию');
       } catch (e) {
@@ -61,10 +62,7 @@ function create(deps) {
       logger.warn('[BackupTest] RCLONE_REMOTE не задан — тест по локальной копии бэкапа');
     }
     const dir = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
-    let names = [];
-    try {
-      names = fs.readdirSync(dir).filter(f => /^dashboard-\d{4}-\d{2}-\d{2}\.db\.gz$/.test(f)).sort();
-    } catch (_) { /* каталога нет */ }
+    const names = await _listPublished('local');
     if (!names.length) return null;
     const file = names[names.length - 1];
     return { source: 'local', file, localPath: path.join(dir, file) };
@@ -81,6 +79,53 @@ function create(deps) {
       ws.on('finish', () => resolve(dest));
       rs.pipe(gz).pipe(ws);
     });
+  }
+
+  // Список опубликованных архивов (только точные имена dashboard-YYYY-MM-DD.db.gz —
+  // .partial/.tmp сюда не попадают никогда, FIX-08 п.6) для выбранного источника.
+  async function _listPublished(source) {
+    if (source === 's3') {
+      const remote = process.env.RCLONE_REMOTE || '';
+      const prefix = process.env.RCLONE_DEST_PREFIX || 'proxy-dashboard-backups';
+      const out = await _exec('rclone', ['lsf', `${remote}:${prefix}`, '--include', 'dashboard-*.db.gz']);
+      return out.split('\n').map(s => s.trim())
+        .filter(s => /^dashboard-\d{4}-\d{2}-\d{2}\.db\.gz$/.test(s)).sort();
+    }
+    const dir = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
+    try {
+      return fs.readdirSync(dir).filter(f => /^dashboard-\d{4}-\d{2}-\d{2}\.db\.gz$/.test(f)).sort();
+    } catch (_) { return []; }
+  }
+
+  // FIX-08 п.7 (18.09.2026): последний архив повреждён — оцениваем
+  // восстановимость: проверяем до 3 предыдущих опубликованных архивов того же
+  // источника и возвращаем имя ближайшего пригодного. Это НЕ подменяет итог:
+  // повреждение последнего архива всегда остаётся явным фейлом с алертом.
+  async function _findRecoverable(latest) {
+    if (!latest) return null;
+    let names;
+    try { names = await _listPublished(latest.source); } catch (_) { return null; }
+    const older = names.filter(n => n < latest.file).slice(-3).reverse();
+    const stamp = Date.now();
+    for (const name of older) {
+      const tmpGz = path.join(_tmpDir, `backup-test-prev-${stamp}.db.gz`);
+      const tmpDb = path.join(_tmpDir, `backup-test-prev-${stamp}.db`);
+      try {
+        if (latest.source === 's3') {
+          await _exec('rclone', ['copyto', `${latest.remote}:${latest.prefix}/${name}`, tmpGz]);
+        } else {
+          fs.copyFileSync(path.join(process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard', name), tmpGz);
+        }
+        await _gunzip(tmpGz, tmpDb);
+        verifyBackupFile(tmpDb, deps.Database);
+        return name;
+      } catch (_) { /* этот тоже повреждён — смотрим глубже */ } finally {
+        for (const f of [tmpGz, tmpDb, tmpDb + '-shm', tmpDb + '-wal']) {
+          try { fs.unlinkSync(f); } catch (_) { /* temp-файл может не существовать */ }
+        }
+      }
+    }
+    return null;
   }
 
   async function runOnce() {
@@ -107,17 +152,25 @@ function create(deps) {
       return { ok: true, source: latest.source, file: latest.file, counts: info.counts };
     } catch (e) {
       const err = (e && e.message) || String(e);
+      // FIX-08 п.7: повреждение последнего архива не маскируем — итог всегда
+      // ok:false + алерт; пригодный предыдущий архив указываем лишь как
+      // оценку восстановимости (recoverableFrom).
+      const recoverableFrom = latest ? await _findRecoverable(latest) : null;
+      if (recoverableFrom) {
+        logger.warn(`[BackupTest] последний архив повреждён (${latest.file}); ближайший пригодный: ${recoverableFrom}`);
+      }
       logger.error('[BackupTest] FAILED: ' + err);
       try {
         alerts.trigger('backup_restore_failed', {
           source: latest ? latest.source : '?', file: latest ? latest.file : '', error: err,
+          recoverableFrom: recoverableFrom || null,
         });
       } catch (_) { /* alert best-effort */ }
       if (logActivity) {
         logActivity('system', 'critical', 'backup_restore_test_failed', latest && latest.file || null,
-          'Тест восстановления бэкапа не прошёл', { error: err });
+          'Тест восстановления бэкапа не прошёл', { error: err, recoverableFrom: recoverableFrom || null });
       }
-      return { ok: false, error: err };
+      return { ok: false, error: err, recoverableFrom: recoverableFrom || null };
     } finally {
       for (const f of [tmpGz, tmpDb, tmpDb + '-shm', tmpDb + '-wal']) {
         try { fs.unlinkSync(f); } catch (_) { /* temp-файл может не существовать */ }
