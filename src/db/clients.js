@@ -59,6 +59,36 @@ function init(db) {
       debt_restore_ports=excluded.debt_restore_ports,
       updated_at=datetime('now')`);
 
+  // 2026-09-18 · DEEP-25: insert ОДНОГО клиента с явным результатом — без
+  // ON CONFLICT: дубликат нормализованного email/login (миграция 100) —
+  // ошибка UNIQUE, которую маршрут обязан обработать (409), а не глотать
+  // в общем saveClients. Публикация в память — только после успешного commit.
+  S.insert = db.prepare(`INSERT INTO clients (id, login, password, password_hash, port_name, name, contact, notes,
+    billing_type, price, currency, balance, api_key, api_key_prefix, referral_code, referred_by, referral_balance,
+    reset_token, inn, kpp, legal_name, contract_info, address, auto_acts, auto_bills,
+    last_traffic_snapshot, created_at, client_type, billing_paused, allow_debt, max_debt,
+    contract_date, debt_blocked,
+    email, email_verified, tg_chat_id, reg_ip, consent_pd_at, blocked, abuse_strikes,
+    balance_negative_since, tariff_id, price_override, hold_ttl_days, test_used,
+    tg_username, tg_oidc_sub, blocked_since,
+    api_key_created_at, api_key_prev, api_key_prev_expires_at, debt_restore_until,
+    debt_restore_ports)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`);
+
+  // 2026-09-18 · DEEP-27: смена пароля — точечный UPDATE в одной транзакции
+  // с consume токена (reset) / проверкой старого пароля (change). Инкремент
+  // auth_version — маркер для login: compare, начавшийся до смены, не должен
+  // выдать новую сессию по старому паролю.
+  S.updatePasswordHash = db.prepare(
+    "UPDATE clients SET password_hash = ?, auth_version = auth_version + 1, updated_at = datetime('now') WHERE id = ?"
+  );
+  // DEEP-27: verify_email — тот же контур «consume токена + durable-изменение
+  // в одной транзакции», память обновляется только после commit.
+  S.setEmailVerified = db.prepare(
+    "UPDATE clients SET email_verified = 1, updated_at = datetime('now') WHERE id = ?"
+  );
+
   S.deleteById = db.prepare('DELETE FROM clients WHERE id = ?');
   S.allIds = db.prepare('SELECT id FROM clients');
   // Stage 8: full-rows load used at boot to rebuild the in-memory clients
@@ -73,8 +103,8 @@ function init(db) {
   );
 }
 
-function upsertRow(c) {
-  return S.upsert.run(
+function _rowParams(c) {
+  return [
     c.id, c.login, null, c.passwordHash || '', c.portName || '', c.name || '',
     c.contact || '', c.notes || '', c.billingType || 'per_gb', c.price || 0,
     c.currency || 'RUB', c.balance || 0, c.apiKey || '', c.apiKeyPrefix || '', c.referral_code || '',
@@ -105,7 +135,27 @@ function upsertRow(c) {
     c.debtRestoreUntil || null,     // миграция 089: фиксированная цель retry
     // миграция 092: ожидаемые пары server+portID восстановления (JSON)
     Array.isArray(c.debtRestorePorts) && c.debtRestorePorts.length ? JSON.stringify(c.debtRestorePorts) : null
-  );
+  ];
+}
+
+function upsertRow(c) {
+  return S.upsert.run(..._rowParams(c));
+}
+
+// DEEP-25: одиночный INSERT без ON CONFLICT — UNIQUE-конфликт (login /
+// нормализованный email, миграция 100) летит наружу как ошибка, вызывающий
+// маппит её в 409. Возвращает RunResult (.changes) — явный результат commit.
+function insertRow(c) {
+  return S.insert.run(..._rowParams(c));
+}
+
+// DEEP-27: durable-смена пароля (+auth_version) и подтверждение email.
+// Вызываются ВНУТРИ транзакции маршрута вместе с consume токена.
+function updatePasswordHash(id, passwordHash) {
+  return S.updatePasswordHash.run(passwordHash, id);
+}
+function setEmailVerified(id) {
+  return S.setEmailVerified.run(id);
 }
 
 function deleteById(id) { return S.deleteById.run(id); }
@@ -122,6 +172,7 @@ function updateBalanceStmt() { return S.updateBalance; }
 function updateReferralBalanceStmt() { return S.updateReferralBalance; }
 
 module.exports = {
-  init, upsertRow, deleteById, allIds, allRows,
+  init, upsertRow, insertRow, updatePasswordHash, setEmailVerified,
+  deleteById, allIds, allRows,
   getBalanceStmt, updateBalanceStmt, updateReferralBalanceStmt,
 };

@@ -32,7 +32,7 @@ module.exports = function createClientsRouter(deps) {
     clients,
     clientById, clientByLogin, clientByApiKey, clientByInn, clientByResetToken,
     users,
-    _ledgerInsert, _ledgerEntryParams, ledgerDb, documentsDb,
+    _ledgerInsert, _ledgerEntryParams, ledgerDb, documentsDb, clientsDb,
     DOCUMENTS_DIR,
     validateClientInput,
     appSettings,
@@ -139,18 +139,23 @@ r.post('/api/admin/clients', authMiddleware, adminMiddleware, validate(ClientCre
     }
   }
 
-  clients.push(client);
+  // 2026-09-18 · DEEP-25 (аналогичный create-путь): insert ОДНОГО клиента с
+  // явным результатом ДО публикации в память. Прежний push → saveClients →
+  // catch/pop не работал: saveClients с DEEP-10 возвращает false вместо throw,
+  // а pop мог снести чужого конкурентно добавленного клиента.
   try {
-    saveClients(clients);
+    clientsDb.insertRow(client);
   } catch (e) {
-    // Race: two concurrent POSTs hit the in-memory check before either ran saveClients.
-    // SQLite UNIQUE(login) catches it here — roll back the in-memory push.
-    clients.pop();
+    // Race: two concurrent POSTs hit the in-memory check before either committed.
+    // SQLite UNIQUE(login) catches it here.
     if (e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''))) {
       return res.status(409).json({ error: 'Login or API key already exists (race detected)' });
     }
-    throw e;
+    // Express 4 не ловит async-rejection (запрос бы повис) — отвечаем явно.
+    logger.error('[Clients] client insert failed: ' + (e && e.message));
+    return res.status(500).json({ error: 'Internal error' });
   }
+  clients.push(client);
   rebuildClientMaps();
   users[login] = { passwordHash, portNameFilter: portName, source: 'client', clientId: client.id };
   _emitFinanceWrite();
@@ -173,7 +178,6 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
   const { name, portName, login, password, contact, notes, billingType, price, currency, inn, kpp, legalName, contractInfo, contractDate, address, autoActs, autoBills, billingPaused, clientType, allowDebt, maxDebt } = req.body;
   if (login && login !== old.login) {
     if (users[login]) return res.status(400).json({ error: 'Login already exists: ' + login });
-    delete users[old.login];
   }
   
   let newPasswordHash = old.passwordHash;
@@ -208,8 +212,15 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
     clientType: clientType !== undefined ? clientType : (old.clientType || 'legal')
   };
   clients[idx] = updated;
-  saveClients(clients);
+  // DEEP-25 (аналогичный update-путь): saveClients с DEEP-10 возвращает false
+  // при отказе вместо throw — проверяем явно и откатываем память, иначе
+  // процесс держал бы состояние, которого нет в БД (после рестарта — другое).
+  if (!saveClients(clients)) {
+    clients[idx] = old;
+    return res.status(500).json({ error: 'Не удалось сохранить изменения — попробуйте ещё раз' });
+  }
   rebuildClientMaps();
+  if (login && login !== old.login) delete users[old.login];
   users[updated.login] = { passwordHash: updated.passwordHash, portNameFilter: updated.portName, source: 'client', clientId: updated.id };
   _emitFinanceWrite();
 

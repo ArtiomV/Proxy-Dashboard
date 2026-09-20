@@ -494,6 +494,7 @@ function clientFromRow(r) {
     priceOverride: r.price_override != null ? r.price_override : null,
     holdTtlDays: r.hold_ttl_days != null ? r.hold_ttl_days : null,
     testUsed: r.test_used === 1,
+    authVersion: r.auth_version || 0,   // миграция 100 (DEEP-27): маркер смены пароля для login
     last_traffic_snapshot: r.last_traffic_snapshot
       ? (typeof r.last_traffic_snapshot === 'string' ? JSON.parse(r.last_traffic_snapshot) : r.last_traffic_snapshot)
       : { timestamp: null, month_bytes: 0 },
@@ -3142,6 +3143,7 @@ app.use(require('./src/routes/registration')({
   getClientIp, auditLog, logActivity,
   getSetting,
   mailer, authTokensDb, tariffsDb, db,
+  clientsDb,               // DEEP-25/27: одиночный insert / точечные update учётки
   alerts,
   tgBot,   // B2C Э3 (WP5): username бота для ссылки привязки (getMe + kv-кэш)
 }));

@@ -43,6 +43,18 @@ function consume(plainToken, type) {
   return { login: row.login, type: row.type };
 }
 
+// 2026-09-18 · DEEP-27: проверка токена БЕЗ гашения. reset_password сначала
+// делает дорогой bcrypt.hash (токен при этом НЕ сгорает — сбой hash оставляет
+// ссылку рабочей), и только потом в финальной транзакции: повторный consume
+// + UPDATE пароля. peek не заменяет consume — однократность гарантирует
+// markUsed(... AND used = 0) внутри транзакции.
+function peek(plainToken, type) {
+  const row = S.byToken.get(sha256hex(String(plainToken || '')));
+  if (!row || row.used || row.type !== type) return null;
+  if (new Date(row.expires_at).getTime() < Date.now()) return null;
+  return { login: row.login, type: row.type };
+}
+
 function prune() { return S.prune.run(); }
 
-module.exports = { init, issue, consume, prune, TTL_MS };
+module.exports = { init, issue, consume, peek, prune, TTL_MS };

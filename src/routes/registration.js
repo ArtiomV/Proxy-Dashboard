@@ -35,9 +35,16 @@ module.exports = function createRegistrationRouter(deps) {
     getSetting,
     mailer, authTokensDb,
     db,
+    clientsDb,               // DEEP-25/27: одиночный insert / точечные update учётки
     tgBot,                   // B2C Э3 (WP5): getBotUsername для ссылки привязки
   } = deps;
   const r = express.Router();
+
+  // DEEP-25: UNIQUE-конфликт SQLite (login / нормализованный email, миграция
+  // 100) → 409. Прочие ошибки — наверх (route catch / error-handler).
+  function _isUniqueViolation(e) {
+    return e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''));
+  }
 
   // ── helpers ─────────────────────────────────────────────────────────────
   function retailOn(res) {
@@ -166,16 +173,22 @@ module.exports = function createRegistrationRouter(deps) {
         consentPdAt: new Date().toISOString(),  // согласие — чекбоксом на форме перед виджетом
         createdAt: new Date().toISOString(),
       };
-      clients.push(client);
+      // DEEP-25: insert ОДНОГО клиента с явным результатом ДО публикации в
+      // память. Старый порядок (push → saveClients → pop при catch) ломался
+      // дважды: saveClients с DEEP-10 возвращает false вместо throw (catch
+      // мёртв), а pop сносил ЧУЖОГО конкурентно добавленного клиента.
       try {
-        saveClients(clients);
+        clientsDb.insertRow(client);
       } catch (e) {
-        clients.pop();
-        if (e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''))) {
+        if (_isUniqueViolation(e)) {
           throw { status: 409, error: 'Этот Telegram-аккаунт уже привязан' };
         }
-        throw e;
+        // не-UNIQUE: маршруты отвечают 500 по err.status (async-rejection в
+        // Express 4 повис бы) — stack остаётся в логе.
+        logger.error('[TG register] client insert failed: ' + (e && e.message));
+        throw { status: 500, error: 'Internal error' };
       }
+      clients.push(client);
       rebuildClientMaps();
       getUsers()[login] = { passwordHash: '', portNameFilter: login, source: 'client', clientId: id };
       created = true;
@@ -326,16 +339,24 @@ module.exports = function createRegistrationRouter(deps) {
       if (referrer) client.referred_by = referrer.id;
     }
 
-    clients.push(client);
+    // 2026-09-18 · DEEP-25: insert ОДНОГО клиента с явным результатом.
+    // Гонка двух регистраций одного email: обе проходят in-memory проверку
+    // (она — лишь быстрый путь 409), но UNIQUE по lower(email) (миграция 100)
+    // пропускает в БД только одну. Публикация в память, rebuild карт и выдача
+    // токенов/сессии — строго ПОСЛЕ commit; clients.pop для отката не
+    // используется (он сносил чужого конкурентно добавленного клиента, а
+    // поглощённая saveClients ошибка оставляла неперсистентного клиента).
     try {
-      saveClients(clients);
+      clientsDb.insertRow(client);
     } catch (e) {
-      clients.pop();
-      if (e && (e.code === 'SQLITE_CONSTRAINT_UNIQUE' || /UNIQUE constraint/i.test(e.message || ''))) {
+      if (_isUniqueViolation(e)) {
         return res.status(409).json({ error: 'Аккаунт с этим email уже существует' });
       }
-      throw e;
+      // Express 4 не ловит async-rejection (запрос бы повис) — отвечаем явно.
+      logger.error('[Register] client insert failed: ' + (e && e.message));
+      return res.status(500).json({ error: 'Internal error' });
     }
+    clients.push(client);
     rebuildClientMaps();
     getUsers()[login] = { passwordHash, portNameFilter: login, source: 'client', clientId: id };
 
@@ -504,12 +525,24 @@ module.exports = function createRegistrationRouter(deps) {
   // ── Верификация email ───────────────────────────────────────────────────
   r.post('/api/verify_email', (req, res) => {
     if (!retailOn(res)) return;
-    const hit = authTokensDb.consume(req.body && req.body.token, 'verify_email');
-    if (!hit) return res.status(400).json({ error: 'Ссылка недействительна или устарела' });
-    const client = clients.find(c => c.login === hit.login);
+    // 2026-09-18 · DEEP-27: consume токена и durable-изменение — ОДНОЙ
+    // транзакцией. Старый порядок (consume → saveClients) сжигал токен до
+    // записи: провал БД оставлял email неподтверждённым, а ссылку — мёртвой.
+    // consume внутри txn повторно проверяет токен (однократность — markUsed
+    // ... AND used = 0), память обновляется только после commit.
+    const token = req.body && req.body.token;
+    const seen = authTokensDb.peek(token, 'verify_email');
+    if (!seen) return res.status(400).json({ error: 'Ссылка недействительна или устарела' });
+    const client = clients.find(c => c.login === seen.login);
     if (!client) return res.status(404).json({ error: 'Аккаунт не найден' });
+    let consumed = false;
+    db.transaction(() => {
+      if (!authTokensDb.consume(token, 'verify_email')) return; // гонка — уже погашен
+      clientsDb.setEmailVerified(client.id);
+      consumed = true;
+    })();
+    if (!consumed) return res.status(400).json({ error: 'Ссылка недействительна или устарела' });
     client.emailVerified = true;
-    saveClients(clients);
     auditLog(client.login, 'email_verified', {});
     res.json({ ok: true });
   });
@@ -545,15 +578,44 @@ module.exports = function createRegistrationRouter(deps) {
 
   r.post('/api/reset_password', validate(ResetPasswordSchema), async (req, res) => {
     if (!retailOn(res)) return;
-    const hit = authTokensDb.consume(req.body.token, 'reset_password');
-    if (!hit) return res.status(400).json({ error: 'Ссылка недействительна или устарела' });
-    const client = clients.find(c => c.login === hit.login);
+    // 2026-09-18 · DEEP-27: токен НЕ сгорает до durable-смены пароля.
+    // Порядок: peek (без гашения) → дорогой bcrypt.hash → финальная
+    // транзакция [однократный consume + UPDATE пароля + auth_version] →
+    // только после commit — память и отзыв сессий. Сбой hash/UPDATE откатывает
+    // транзакцию: токен остаётся действующим, память и БД не расходятся
+    // (старый код гасил токен первым, а saveClients мог скрыть провал —
+    // после рестарта процесс знал другой пароль).
+    const token = req.body.token;
+    const seen = authTokensDb.peek(token, 'reset_password');
+    if (!seen) return res.status(400).json({ error: 'Ссылка недействительна или устарела' });
+    const client = clients.find(c => c.login === seen.login);
     if (!client) return res.status(404).json({ error: 'Аккаунт не найден' });
-    const passwordHash = await bcrypt.hash(req.body.password, 10);
+    let passwordHash;
+    try {
+      passwordHash = await bcrypt.hash(req.body.password, 10);
+    } catch (e) {
+      // Токен НЕ погашен (consume — дальше, в транзакции) — ссылка остаётся
+      // рабочей. Express 4 не ловит async-rejection — отвечаем явно.
+      logger.error('[Reset] bcrypt.hash failed: ' + (e && e.message));
+      return res.status(500).json({ error: 'Internal error' });
+    }
+    let consumed = false;
+    try {
+      db.transaction(() => {
+        if (!authTokensDb.consume(token, 'reset_password')) return; // гонка — уже погашен
+        clientsDb.updatePasswordHash(client.id, passwordHash);
+        consumed = true;
+      })();
+    } catch (e) {
+      // Откат транзакции: токен действующий, пароль (БД и память) прежний.
+      logger.error('[Reset] password update txn failed: ' + (e && e.message));
+      return res.status(500).json({ error: 'Internal error' });
+    }
+    if (!consumed) return res.status(400).json({ error: 'Ссылка недействительна или устарела' });
     client.passwordHash = passwordHash;
+    client.authVersion = (client.authVersion || 0) + 1;
     const users = getUsers();
     if (users[client.login]) users[client.login].passwordHash = passwordHash;
-    saveClients(clients);
     deleteSessionsByLogin(client.login); // перелогин после сброса
     auditLog(client.login, 'password_reset_done', { ip: getClientIp(req) });
     res.json({ ok: true });
@@ -571,9 +633,20 @@ module.exports = function createRegistrationRouter(deps) {
     const ok = await bcrypt.compare(req.body.old, user.passwordHash);
     if (!ok) return res.status(403).json({ error: 'Текущий пароль неверен' });
     const passwordHash = await bcrypt.hash(req.body.new, 10);
-    user.passwordHash = passwordHash;
     const client = clients.find(c => c.login === login);
-    if (client) { client.passwordHash = passwordHash; saveClients(clients); }
+    if (client) {
+      // DEEP-27: durable-смена ДО публикации в память (см. reset_password);
+      // auth_version++ отсекает login, начавший compare со старым хэшем.
+      try {
+        clientsDb.updatePasswordHash(client.id, passwordHash);
+      } catch (e) {
+        logger.error('[ChangePassword] update failed: ' + (e && e.message));
+        return res.status(500).json({ error: 'Internal error' });
+      }
+      client.passwordHash = passwordHash;
+      client.authVersion = (client.authVersion || 0) + 1;
+    }
+    user.passwordHash = passwordHash;
     deleteSessionsByLogin(login); // перелогин на всех устройствах
     auditLog(login, 'password_changed', { ip: getClientIp(req) });
     res.json({ ok: true, relogin: true });

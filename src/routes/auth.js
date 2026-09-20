@@ -39,11 +39,8 @@ module.exports = function createAuthRouter(deps) {
 
     // B2C (WP1): blocked=1 → 403 + kill сессий (проверка ДО пароля — заблокированному
     // не сообщаем, верен ли пароль: 403 одинаков для любого пароля заблокированного).
-    const blockedClient = getClientById && (() => {
-      const c = user.clientId ? getClientById(user.clientId) : null;
-      return c && c.blocked ? c : null;
-    })();
-    if (blockedClient) {
+    const authClient = getClientById && user.clientId ? getClientById(user.clientId) : null;
+    if (authClient && authClient.blocked) {
       deleteSessionsByLogin(login);
       return res.status(403).json({ error: 'Аккаунт заблокирован' });
     }
@@ -54,8 +51,17 @@ module.exports = function createAuthRouter(deps) {
       logger.error(`[Login] User ${login} has no password_hash — auto-migration must run before they can log in`);
       return res.status(401).json({ error: 'Invalid login or password' });
     }
+    // 2026-09-18 · DEEP-27: фиксируем версию аутентификации ДО compare.
+    // Пока идёт bcrypt.compare со старым хэшем, reset/change может durable-сменить
+    // пароль и отозвать сессии — тогда этот успешный compare по СТАРОМУ паролю
+    // не должен выдать новую сессию: версия уже другая.
+    const authVersionBefore = authClient ? (authClient.authVersion || 0) : null;
     const passwordValid = await bcrypt.compare(password, user.passwordHash);
     if (!passwordValid) return res.status(401).json({ error: 'Invalid login or password' });
+    if (authClient && (authClient.authVersion || 0) !== authVersionBefore) {
+      auditLog(login, 'client_login_stale_auth_version', { ip: getClientIp(req) });
+      return res.status(401).json({ error: 'Invalid login or password' });
+    }
     const token = generateToken();
     const isAdmin = user.portNameFilter === '*';
     createSession(token, login, user.portNameFilter, isAdmin, Date.now() + getSessionTTL());
