@@ -18,6 +18,7 @@
 let db, logger, clientById, getSetting;
 let aiInsights;  // optional — injected via init; if absent, AI section is skipped
 let listDisconnectedModems;  // optional (D3) — async () => fleet.disconnectedList; без него дайджест оффлайна пропускается
+let hasClientPorts;  // optional — (portName) => bool; гейт «Неактивные» (0 прокси) в списке должников
 
 function init(deps) {
   db          = deps.db;
@@ -26,6 +27,7 @@ function init(deps) {
   getSetting  = deps.getSetting;
   aiInsights  = deps.aiInsights || null;
   listDisconnectedModems = deps.listDisconnectedModems || null;
+  hasClientPorts = deps.hasClientPorts || null;
 }
 
 function fmtMoney(v) {
@@ -104,7 +106,14 @@ async function buildDailySummary(date) {
   const debtors = [];
   if (clientById && typeof clientById.values === 'function') {
     for (const c of clientById.values()) {
-      if (c.balance < 0 && !c.billingPaused) debtors.push(c);
+      if (c.balance < 0 && !c.billingPaused) {
+        // 20.09: клиент без единого прокси-порта (вкладка «Неактивные») в
+        // дайджест должников не попадает — списания по нему не идут, долг
+        // исторический; ежедневно напоминать о нём нет смысла. Зависимость
+        // опциональна: без hasClientPorts поведение прежнее.
+        if (hasClientPorts && !hasClientPorts(c.portName)) continue;
+        debtors.push(c);
+      }
     }
     debtors.sort((a, b) => a.balance - b.balance);
   }

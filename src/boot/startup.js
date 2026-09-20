@@ -356,6 +356,20 @@ function runStartup(d) {
     aiInsights,
     // D3: дайджест «Лежат >12 ч» в сводке — тот же источник, что у колокольчика.
     listDisconnectedModems: require('../jobs/notify-collect').scanDisconnected,
+    // 20.09: гейт «0 прокси» для списка должников — ростер known_modems, тот
+    // же критерий, что у счётчика модемов клиента (ops-ext._clientsSection):
+    // любая ростерная запись с portName клиента на сконфигурированном сервере.
+    hasClientPorts: (portName) => {
+      if (!portName) return false;
+      const configured = apiServers && apiServers.length ? new Set(apiServers.map(s => s.name)) : null;
+      for (const [srvName, ports] of Object.entries(knownModems || {})) {
+        if (configured && !configured.has(srvName)) continue;
+        for (const info of Object.values(ports || {})) {
+          if (info && info.portName === portName) return true;
+        }
+      }
+      return false;
+    },
   });
   tgBot.init({
     logger,

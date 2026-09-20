@@ -158,3 +158,49 @@ describe('D3: daily_summary — дайджест модемов, лежащих 
     expect(text).toContain('💰 <b>Финансы</b>');
   });
 });
+
+// 20.09: дайджест «Должники» не показывает клиентов без единого прокси-порта
+// (вкладка «Неактивные»): долг исторический, списания не идут, ежедневное
+// напоминание — шум. Гейт опционален: без hasClientPorts — прежнее поведение.
+describe('daily_summary — должники без прокси не попадают в дайджест', () => {
+  function bootWithDebtors(hasClientPorts) {
+    db = new Database(':memory:');
+    db.exec(SCHEMA);
+    db.exec(MODEM_PING_MIGRATION);
+    db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rebooted_at TEXT NOT NULL, status TEXT
+    )`);
+    warns = [];
+    logger = { warn: (m) => warns.push(m), info() {}, error() {}, debug() {} };
+    tgSummary.init({
+      db, logger,
+      clientById: new Map([
+        ['c1', { id: 'c1', name: 'Активный Должник', portName: 'active_pn', balance: -500 }],
+        ['c2', { id: 'c2', name: 'Неактивный Должник', portName: 'gone_pn', balance: -9000 }],
+        ['c3', { id: 'c3', name: 'Пауза Должник', portName: 'paused_pn', balance: -700, billingPaused: true }],
+      ]),
+      getSetting: (_k, dflt) => dflt,
+      aiInsights: null,
+      hasClientPorts: hasClientPorts === undefined
+        ? undefined
+        : (pn) => (hasClientPorts || []).includes(pn),
+    });
+  }
+
+  it('клиент с 0 прокси исключён из должников, активный должник остаётся', async () => {
+    bootWithDebtors(['active_pn', 'paused_pn']);
+    const { text } = await tgSummary.buildDailySummary(DAY);
+    expect(text).toContain('Должников: 1');
+    expect(text).toContain('Активный Должник');
+    expect(text).not.toContain('Неактивный Должник');
+  });
+
+  it('без hasClientPorts — прежнее поведение (все должники видны)', async () => {
+    bootWithDebtors(undefined);
+    const { text } = await tgSummary.buildDailySummary(DAY);
+    expect(text).toContain('Должников: 2');
+    expect(text).toContain('Активный Должник');
+    expect(text).toContain('Неактивный Должник');
+  });
+});
