@@ -699,8 +699,22 @@ const RULES = {
     priority: 'important',
     defaultOn: true,
     cooldownSec: 86400,
-    dedupeKey: p => 'expire_' + (p.server + '_' + (p.portId || '')),
-    render: p => `⏰ <b>Прокси истекает через ${p.daysLeft} д.</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>, порт: <code>${esc(p.portName || p.portId)}</code>\nДата истечения: ${p.validBefore}`,
+    // 21.09: одно сообщение на клиента со списком портов. Ключ — клиент +
+    // набор портов: тот же набор не дублируется сутки, изменённый (продлили
+    // один порт / истекает ещё один) приходит новым сообщением.
+    dedupeKey: p => 'expire_' + (p.client || '?') + '_' +
+      (Array.isArray(p.ports) ? p.ports.map(pt => pt.portId).sort().join(',') : (p.portId || '')),
+    render: p => {
+      if (Array.isArray(p.ports)) {
+        const lines = p.ports.map(pt =>
+          `• <code>${esc(pt.portId)}</code> (${esc(pt.server)}) — до ${esc(pt.validBefore)}, осталось ${pt.daysLeft} д.`);
+        return `⏰ <b>У клиента ${esc(p.client || '?')} истекают прокси (${p.count || p.ports.length})</b>\n\n` +
+          lines.join('\n') +
+          `\n\nБлижайший срок: ${esc(p.validBefore)} (через ${p.daysLeft} д.).`;
+      }
+      // legacy-форма (одиночный порт) — на случай старых вызывающих мест.
+      return `⏰ <b>Прокси истекает через ${p.daysLeft} д.</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>, порт: <code>${esc(p.portName || p.portId)}</code>\nДата истечения: ${p.validBefore}`;
+    },
   },
   domain_guard_hit: {
     title: 'Доменный контроль: обращения к банкам/платёжкам',
@@ -1048,7 +1062,7 @@ const _entityFor = {
   client_blocked_admin:      p => ({ kind: 'client',  id: p.client_id || null }),
   client_unblocked_debt:     p => ({ kind: 'client',  id: p.client_id || null }),
   client_block_warning:      p => ({ kind: 'client',  id: p.client_id || null }),
-  proxy_expiring_3d:         p => ({ kind: 'modem',   id: p.nick || p.portName || null }),
+  proxy_expiring_3d:         p => ({ kind: 'client',  id: p.client_id || null }),   // 21.09: группа по клиенту
   sim_redirect_imposed:      p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   sim_status_bad:            p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   sim_iccid_changed:         p => ({ kind: 'modem',   id: p.nick || p.imei || null }),

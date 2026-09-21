@@ -69,12 +69,15 @@ function runStartup(d) {
   scheduleRepeating(4, 10, 'SSLMonitor', () => _sslMon.checkOnce());
 
   // Stage 18.13: daily proxy-expiry check at 09:30 МСК (06:30 UTC) — alert
-  // for ports expiring within 3 days. Runs once per day; per-port cooldown
-  // is 24h inside the alert rule.
+  // for ports expiring within 3 days. Runs once per day.
+  // 21.09: ОДНО сообщение на клиента со списком всех истекающих портов
+  // (раньше — по сообщению на порт: у клиента с N портами было до 3N
+  // сообщений за окно). Кулдаун — на связку клиент+набор портов (alerts.js).
   scheduleRepeating(6, 30, 'ProxyExpiryCheck', async () => {
     try {
       const allData = await fetchAllServersDataCached();
       const SOON_MS = 3 * 86400 * 1000;
+      const byGroup = new Map();   // portName клиента (или server_portId для бесхозных) → порты
       for (const data of allData) {
         const ports = data.ports || {};
         for (const [imei, list] of Object.entries(ports)) {
@@ -85,15 +88,30 @@ function runStartup(d) {
             if (isNaN(expMs)) continue;
             const left = expMs - Date.now();
             if (left > 0 && left < SOON_MS) {
-              alerts.trigger('proxy_expiring_3d', {
-                server: data.serverName, portId: p.portID, portName: p.portName || '',
-                client: p.portName || '?',
-                daysLeft: Math.ceil(left / 86400000),
-                validBefore: vb.slice(0, 10),
+              const key = p.portName || (data.serverName + '_' + p.portID);
+              if (!byGroup.has(key)) byGroup.set(key, []);
+              byGroup.get(key).push({
+                server: data.serverName, portId: p.portID,
+                validBefore: vb.slice(0, 10), leftMs: left,
               });
             }
           }
         }
+      }
+      for (const [groupKey, list] of byGroup) {
+        list.sort((a, b) => a.leftMs - b.leftMs);
+        const owner = clients.find(c => c.portName === groupKey);
+        alerts.trigger('proxy_expiring_3d', {
+          client: groupKey,
+          client_id: owner ? owner.id : null,
+          ports: list.map(pt => ({
+            server: pt.server, portId: pt.portId, validBefore: pt.validBefore,
+            daysLeft: Math.ceil(pt.leftMs / 86400000),
+          })),
+          count: list.length,
+          daysLeft: Math.ceil(list[0].leftMs / 86400000),   // ближайший срок — в заголовок
+          validBefore: list[0].validBefore,
+        });
       }
     } catch (e) { logger.warn('[ProxyExpiry] check failed: ' + e.message); }
   });

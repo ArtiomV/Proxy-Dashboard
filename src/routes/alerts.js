@@ -63,7 +63,10 @@ module.exports = function (deps) {
       failover_failed:            { server: 'TEST', client: 'Тестовый клиент', error: 'edit_port HTTP 502' },
       payment_received:           { client: 'Тестовый клиент', amount: 12345, inn: '7707083893', source: 'Точка (тест)', balanceAfter: 50000, natural_key: 'test|12345|2026-05-24|...', date: '2026-05-24' },
       client_balance_negative:    { client: 'Тестовый клиент', balance: -1500 },
-      proxy_expiring_3d:          { server: 'TEST', portId: 'port123', portName: 'TestClient', client: 'TestClient', daysLeft: 2, validBefore: '2026-05-26' },
+      proxy_expiring_3d:          { client: 'TestClient', client_id: null, count: 2, daysLeft: 2, validBefore: '2026-05-26', ports: [
+        { server: 'TEST', portId: 'port123', validBefore: '2026-05-26', daysLeft: 2 },
+        { server: 'TEST', portId: 'port124', validBefore: '2026-05-27', daysLeft: 3 },
+      ] },
       traffic_spike_burst:        { count: 7 },
       dashboard_restarted:        { restartCount: 42 },
       reboot_score_high:          { nick: 'TEST_MODEM', imei: '123', server: 'S1', score: 82 },

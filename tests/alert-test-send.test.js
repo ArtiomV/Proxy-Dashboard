@@ -54,3 +54,35 @@ describe('manual alert diagnostics', () => {
     expect(result.error).toContain('chat not found');
   });
 });
+
+// 21.09: proxy_expiring_3d — одно сообщение на клиента со списком всех
+// истекающих портов (раньше — по сообщению на порт).
+describe('proxy_expiring_3d — групповой рендер по клиенту', () => {
+  const grouped = {
+    client: 'TestClient', client_id: null, count: 2, daysLeft: 2, validBefore: '2026-05-26',
+    ports: [
+      { server: 'S1', portId: 'port123', validBefore: '2026-05-26', daysLeft: 2 },
+      { server: 'S4', portId: 'port124', validBefore: '2026-05-27', daysLeft: 3 },
+    ],
+  };
+
+  it('одно сообщение содержит все порты клиента', async () => {
+    const res = await alerts.testRule('proxy_expiring_3d', grouped);
+    expect(res).toMatchObject({ ok: true });
+    const text = sendMessage.mock.calls[0][2];
+    expect(text).toContain('У клиента TestClient истекают прокси (2)');
+    expect(text).toContain('port123');
+    expect(text).toContain('port124');
+    expect(text).toContain('2026-05-26');
+    expect(text).toContain('2026-05-27');
+  });
+
+  it('legacy-форма (одиночный порт) рендерится по-прежнему', async () => {
+    const res = await alerts.testRule('proxy_expiring_3d', {
+      server: 'S1', portId: 'port123', portName: 'TestClient', client: 'TestClient',
+      daysLeft: 2, validBefore: '2026-05-26',
+    });
+    expect(res).toMatchObject({ ok: true });
+    expect(sendMessage.mock.calls[0][2]).toContain('Прокси истекает через 2 д.');
+  });
+});
