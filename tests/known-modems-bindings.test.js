@@ -97,6 +97,32 @@ describe('updateKnownModems: стабильный total по биндингам 
     expect(deps.knownModems.S2.portA2.portName).toBe('WildBox');
   });
 
+  it('два ЖИВЫХ порта одного модема у одного клиента — оба остаются (22.09, WildBox)', () => {
+    const deps = mkDeps();
+    const svc = create(deps);
+    const feed = {
+      serverName: 'S2',
+      bw: { portA: bwRow('WildBox'), portB: bwRow('WildBox') },
+      ports: { IMEI1: [
+        { portID: 'portA', portName: 'WildBox' },
+        { portID: 'portB', portName: 'WildBox' },
+      ] },
+      status: [],
+    };
+    // Несколько проходов: дедуп не должен съедать второй порт ни в каком порядке.
+    svc.updateKnownModems(feed);
+    svc.updateKnownModems(feed);
+    expect(Object.keys(deps.knownModems.S2).sort()).toEqual(['portA', 'portB']);
+    // Старый дубль, пропавший из фида, по-прежнему вытесняется.
+    svc.updateKnownModems({
+      serverName: 'S2',
+      bw: { portA: bwRow('WildBox') },
+      ports: { IMEI1: [{ portID: 'portA', portName: 'WildBox' }] },
+      status: [],
+    });
+    expect(Object.keys(deps.knownModems.S2)).toEqual(['portA']);
+  });
+
   it('порт soft-deleted модема не ингестится', () => {
     const deps = mkDeps({ deletedModemSet: new Set(['S2|IMEI_DEAD']) });
     const svc = create(deps);

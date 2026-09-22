@@ -17,15 +17,20 @@ function create(deps) {
    */
   // Move-dedupe: тот же модем (imei) под тем же клиентом держит ОДИН порт в
   // ростере — при пере-энумерации с новым portID старый дубль вытесняется,
-  // иначе total клиента раздувается (2026-08-02). В реальной раскладке у
-  // клиентов один порт на модем (проверено по биндингам БА: 31 порт ↔ 31 imei),
-  // поэтому совпадение imei+client = пере-энумерация, а не второй тариф.
+  // иначе total клиента раздувается (2026-08-02). Пере-энумерация отличается
+  // от ВТОРОГО ЖИВОГО порта по feedIds: если старый portID присутствует в
+  // текущем фиде, оба порта реальны (админ двигает порты на один модем —
+  // 22.09, WildBox: два порта на одном IMEI, дедуп съедал один, счётчик
+  // падал 100→98 и флапал в зависимости от порядка обхода фида).
   function _dedupeSameModemClient(km, imei, portName, keepPid, feedIds) {
     if (!imei || !portName) return;
     for (const pid of Object.keys(km)) {
       if (pid === keepPid) continue;
       const info = km[pid];
-      if (info && info.imei === imei && info.portName === portName) delete km[pid];
+      if (info && info.imei === imei && info.portName === portName) {
+        if (feedIds && feedIds.has(pid)) continue;   // второй живой порт — не дубль
+        delete km[pid];
+      }
     }
   }
 
