@@ -11,7 +11,8 @@ const debtBlockMod = require('../src/jobs/debt-block.js');
 
 const NOW = new Date('2026-08-10T10:00:00+03:00');       // МСК
 const TODAY = '2026-08-10';
-const RESTORE_UNTIL = '2026-09-09';                        // +30 дней
+// 22.09: цель восстановления — бессрочно ('' = снятая «дата до»), а не +30 дн.
+const RESTORE_UNTIL = '';
 
 let posted, applied, alertsFired, audited, saved, activity;
 let server;
@@ -165,8 +166,8 @@ describe('debt-block: автоблок после DailyBilling', () => {
 });
 
 describe('debt-block: восстановление после оплаты', () => {
-  it('оплата → balance > 0 → «дата до» = сегодня + 30 дней, флаг снят, аудит+алерт', async () => {
-    // Порт погашен автоблоком (validBefore = сегодня) — продлеваем.
+  it('оплата → balance > 0 → «дата до» снята (бессрочно), флаг снят, аудит+алерт', async () => {
+    // Порт погашен автоблоком (validBefore = сегодня) — снимаем срок.
     const job = debtBlockMod.create(mkDeps([], () => serverResults('clientA', TODAY)));
     const client = mkClient({ balance: 500, debtBlocked: true });
     const ok = await job.restoreAfterCredit(client);
@@ -175,7 +176,7 @@ describe('debt-block: восстановление после оплаты', () 
     expect(lastPostedValidBefore()).toBe(RESTORE_UNTIL);
     expect(applied).toContain('/apix/apply_port?arg=p1');
     expect(client.debtBlocked).toBe(false);
-    expect(saved).toBe(2); // persist fixed target, then clear it after confirmation
+    expect(saved).toBe(2); // persist набора портов, затем очистка после подтверждения
     expect(alertsFired.some(a => a.rule === 'client_unblocked_debt')).toBe(true);
     expect(audited.some(a => a.action === 'debt_unblock')).toBe(true);
   });
@@ -199,7 +200,7 @@ describe('debt-block: восстановление после оплаты', () 
     const job = debtBlockMod.create(mkDeps());
     const client = mkClient({ balance: 500, debtBlocked: true });
     await job.restoreAfterCredit(client);
-    // порт имел 2026-12-31 > restore-until → записи не было, но флаг снят
+    // порт имел 2026-12-31 (будущая дата = ручной override) → записи не было, но флаг снят
     expect(posted.length).toBe(0);
     expect(client.debtBlocked).toBe(false);
   });
@@ -214,7 +215,7 @@ describe('debt-block: восстановление после оплаты', () 
       : ({ ok: true, html: '<form><input name="proxy_password" value="pw1"></form>' });
     const firstJob = debtBlockMod.create(deps);
     expect(await firstJob.restoreAfterCredit(client)).toBe(false);
-    expect(client.debtRestoreUntil).toBe(RESTORE_UNTIL);
+    expect(client.debtRestoreUntil).toBeFalsy();   // цели-даты больше нет (бессрочно)
     down = false;
     const restartedJob = debtBlockMod.create(deps);
     await expect(restartedJob.retryPendingRestores()).resolves.toEqual({ restored: 1, pending: 0 });
@@ -222,7 +223,7 @@ describe('debt-block: восстановление после оплаты', () 
     expect(client.debtRestoreUntil).toBe(null);
   });
 
-  it('сохранённая цель из прошлого пересчитывается от сегодня', async () => {
+  it('legacy-цель-дата игнорируется: порт становится бессрочным, след очищен', async () => {
     const deps = mkDeps([], () => serverResults('clientA', TODAY));
     const client = mkClient({ balance: 500, debtBlocked: true, debtRestoreUntil: '2026-08-01' });
     deps.clients.push(client);

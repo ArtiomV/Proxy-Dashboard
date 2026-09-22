@@ -11,9 +11,11 @@
 //   • прогноз «за 3 дня»: 0 < balance ≤ 3 × среднесуточное списание за 7 дн
 //     → предупреждение (TG-правило client_block_warning + портал-баннер).
 //   • восстановление: оплата (любой atomicCredit-путь: ручной платёж, webhook,
-//     sync) → balance > 0 → продление «дата до» на +30 дней от сегодня
-//     (дефолт; ручной override в UI — произвольная дата, стандартного срока
-//     в коде нет). Задержка до ~30 мин для банковского sync (цикл TochkaSync).
+//     sync) → balance > 0 → «дата до» СНИМАЕТСЯ (бессрочно) со всех портов.
+//     До 22.09 было «сегодня + 30 дней» — срок потом никто не продлевал, и
+//     исправно платящий клиент молча терял порты через месяц (trofimovs).
+//     Повторный минус блокируется активно блок-фазой. Задержка до ~30 мин
+//     для банковского sync (цикл TochkaSync).
 //
 // Запись «дата до» идёт тем же путём, что ручной save_port_config: читаем
 // форму /conf/edit_port целиком (обход логин-стены S2 через proxyConf),
@@ -44,7 +46,6 @@ function create(deps) {
   const avgDailyCharge7d = portValidity.avgDailyCharge7d;
   const _clientPorts = portValidity.clientPorts;
 
-  const RESTORE_DAYS = 30;   // продление при восстановлении: сегодня + 30 дн
   const restoring = new Set();
 
   function _mskDateStr(d) { return d.toLocaleDateString('en-CA'); }   // YYYY-MM-DD
@@ -143,17 +144,16 @@ function create(deps) {
     const livePorts = _clientPorts(client, results);
     const feedServers = new Set((results || []).map(r => r && r.serverName).filter(Boolean));
 
-    let untilStr = client.debtRestoreUntil;
-    // Цель из прошлого (retry после долгого простоя) продлевала бы порт
-    // задним числом — пересчитываем от сегодня и пересохраняем.
-    if (untilStr && untilStr <= _today()) untilStr = null;
+    // 22.09: цель восстановления — БЕССРОЧНО (пустая «дата до»), а не
+    // «сегодня + 30 дней». Прежний RESTORE_DAYS=30 молча гасил исправно
+    // платящего клиента через месяц после выхода из долга: срок после
+    // восстановления больше никто не продлевал (инцидент trofimovs 22.09 —
+    // 7 портов истекли при балансе +25 000 ₽ и пополнении за день до этого).
+    // Повторный уход в минус блокируется АКТИВНО (блок-фаза ставит «дата до»
+    // = сегодня), пассивный предохранитель по дате не нужен.
+    // Legacy-цель-дата (debtRestoreUntil, миграция 089) больше не читается.
+    const untilStr = '';
     let needPersist = false;
-    if (!untilStr) {
-      const until = new Date(getMoscowNow().getTime() + RESTORE_DAYS * 86400000);
-      untilStr = _mskDateStr(until);
-      client.debtRestoreUntil = untilStr;
-      needPersist = true;
-    }
     // DEEP-08: durable-набор ожидаемых пар server+portID (миграция 092).
     // Для клиентов, заблокированных до фикса, набор отсутствует — собираем
     // из текущего фида и сохраняем; дальше отсутствие сервера в фиде
@@ -204,8 +204,11 @@ function create(deps) {
           `Восстановление: порт ${item.ep.server}/${item.ep.portId} не найден на сервере — исключён`, { client_id: client.id, server: item.ep.server, port_id: item.ep.portId });
         continue;
       }
-      // Не укорачиваем более поздний срок (ручной override «продлить до…»).
-      if (pt.validBefore && pt.validBefore > untilStr) { restored++; continue; }
+      // Не трогаем более поздний срок: будущая дата — ручной override
+      // «продлить до…», а пустая — уже бессрочно (действие не нужно).
+      // Гашеные автоблоком порты (дата = сегодня/прошлое) переводим в
+      // бессрочные — см. комментарий у untilStr выше (инцидент 22.09).
+      if (!pt.validBefore || pt.validBefore > _today()) { restored++; continue; }
       try {
         // DEEP-09: владелец перепроверяется свежим чтением до POST и после apply.
         await setPortValidBefore(pt.server, pt.portId, untilStr, { expectedPortName: client.portName });
@@ -231,9 +234,9 @@ function create(deps) {
     client.debtRestorePorts = null;
     if (!client.blocked) client.blockedSince = null;   // долг погашен, ручного блока нет — hold отменяется
     saveClients(clients);
-    logger.info(`[DebtBlock] ${client.name}: баланс восстановлен (${client.balance} ₽) — «дата до» продлена до ${untilStr}, портов: ${restored}`);
+    logger.info(`[DebtBlock] ${client.name}: баланс восстановлен (${client.balance} ₽) — «дата до» снята (бессрочно), портов: ${restored}`);
     logActivity('billing', 'info', 'debt_restore', client.name,
-      `Восстановление после оплаты: «дата до» = ${untilStr}, портов: ${restored}`, { client_id: client.id, balance: client.balance, restored });
+      `Восстановление после оплаты: «дата до» снята (бессрочно), портов: ${restored}`, { client_id: client.id, balance: client.balance, restored });
     try { auditLog('system', 'debt_unblock', { clientId: client.id, clientName: client.name, balance: client.balance, portsRestored: restored, validBefore: untilStr }); } catch (_) { /* audit best-effort */ }
     try {
       alerts.trigger('client_unblocked_debt', {

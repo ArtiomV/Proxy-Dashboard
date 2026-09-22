@@ -363,7 +363,9 @@ describe('DEEP-08: legacy-восстановление не завершаетс
     const fin = clientRow(client.id);
     expect(fin.debt_blocked).toBe(0);
     expect(fin.debt_restore_ports).toBe(null);
-    expect(net.state.S4.p9.PROXY_VALID_BEFORE).toBe('2026-10-11');
+    // 22.09: цель восстановления — бессрочно (''), legacy-цель-дата
+    // '2026-10-11' (миграция 089) больше не используется как срок.
+    expect(net.state.S4.p9.PROXY_VALID_BEFORE).toBe('');
   });
 
   it('порт удалён снаружи, сервер в фиде → исключён из ожидания (не «восстановлен»)', async () => {

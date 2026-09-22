@@ -527,7 +527,7 @@ const RULES = {
     defaultOn: true,
     cooldownSec: 3600,
     dedupeKey: p => 'debt_' + (p.client_id || '') + '_unblocked',   // D4: debt-family
-    render: p => `🔓 <b>Доступ восстановлен</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: баланс <b>${formatRub(p.balance)}</b>.\n«Дата до» продлена до ${p.validBefore || '?'} (портов: ${p.ports ?? '?'}).`,
+    render: p => `🔓 <b>Доступ восстановлен</b>\n\nКлиент <b>${esc(p.client || '?')}</b>: баланс <b>${formatRub(p.balance)}</b>.\n${p.validBefore ? `«Дата до» продлена до ${p.validBefore}` : '«Дата до» снята — порты бессрочные'} (портов: ${p.ports ?? '?'}).`,
   },
   // B3 (Р13): прогноз «за 3 дня» — баланс покрывает ≤ 3 суток списаний.
   // Cooldown 3 суток: одно предупреждение на эпизод, чтобы не спамить ежедневно.
