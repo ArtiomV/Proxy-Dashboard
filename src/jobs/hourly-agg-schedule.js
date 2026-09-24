@@ -11,6 +11,7 @@ function create(deps) {
   const { kvGet, kvSet, logger, logActivity, trafficDb, aggregateHourlyTraffic } = deps;
 
   let _loopTimeout = null;
+  let _retryTimeout = null;   // DEEP-67 (2026-09-24): retry-таймер тоже отменяем
   let _stopped = false;
   let _lastRecordedHour = null;
   try { const r = kvGet.get('hourly_last_recorded'); if (r) _lastRecordedHour = r.value; } catch (_) { /* best-effort: error intentionally swallowed */ }
@@ -46,9 +47,16 @@ function create(deps) {
         // Mark inner block as async-fn whose errors propagate to the outer .catch
         // (was `.then(async () => {...})` whose internal throws produced
         // unhandledRejection instead of being caught).
-        aggregateHourlyTraffic().then(() => {
+        aggregateHourlyTraffic().then((result) => {
+          // DEEP-67: stop во время await — bookkeeping не выполняем.
+          if (_stopped) return;
           try {
-            // Success = no exception, even if cnt=0 (all modems offline)
+            // 2026-09-24 · DEEP-35/round14: failed-результат агрегатора —
+            // это ОШИБКА попытки (retry), а не «успех с 0 строк».
+            if (result && result.status === 'failed') {
+              throw new Error(result.error || 'aggregate failed');
+            }
+            // Success = completed, even if rows=0 (все модемы офлайн — достоверный ноль)
             _lastRecordedHour = targetHourStr;
             try { kvSet.run('hourly_last_recorded', targetHourStr); } catch (_) { /* best-effort: error intentionally swallowed */ }
             const check = trafficDb.hourlyExistsForHourStmt().get(targetHourStr);
@@ -58,11 +66,13 @@ function create(deps) {
             logger.error(`[HourlyAgg] post-success bookkeeping failed: ${e.stack || e.message}`);
           }
         }).catch(e => {
+          if (_stopped) return;   // DEEP-67: stop запрещает новые попытки
           logger.error(`[HourlyAgg] Attempt ${attemptIdx + 1}/5 error: ${e.message}`);
           attemptIdx++;
           if (attemptIdx < ATTEMPT_OFFSETS.length) {
             const delay = (ATTEMPT_OFFSETS[attemptIdx] - ATTEMPT_OFFSETS[attemptIdx - 1]) * 1000;
-            setTimeout(tryRecord, delay);
+            _retryTimeout = setTimeout(() => { _retryTimeout = null; tryRecord(); }, delay);
+            if (_retryTimeout.unref) _retryTimeout.unref();
           } else {
             logger.warn(`[HourlyAgg] All 5 attempts failed for ${targetHourStr} — hour will be empty`);
             logActivity('traffic', 'error', 'hourly_agg_failed', null, `All 5 attempts failed for ${targetHourStr}`, { hour: targetHourStr });
@@ -76,7 +86,11 @@ function create(deps) {
 
   function stop() {
     _stopped = true;
-    if (_loopTimeout) clearTimeout(_loopTimeout);
+    if (_loopTimeout) { clearTimeout(_loopTimeout); _loopTimeout = null; }
+    // DEEP-67: отложенный retry тоже отменяется — раньше stop не трогал
+    // retry-таймер, и попытка выполнялась после остановки (запись маркера
+    // часа в уже закрываемую БД).
+    if (_retryTimeout) { clearTimeout(_retryTimeout); _retryTimeout = null; }
   }
 
   return { start, stop };

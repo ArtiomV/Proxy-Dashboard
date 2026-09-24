@@ -25,7 +25,9 @@ function freshDb() {
     CREATE TABLE server_downtime (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       server_name TEXT NOT NULL, down_from TEXT NOT NULL, down_to TEXT NOT NULL,
-      maintenance INTEGER NOT NULL DEFAULT 0
+      maintenance INTEGER NOT NULL DEFAULT 0,
+      maintenance_sec INTEGER NOT NULL DEFAULT 0,
+      maintenance_windows TEXT NOT NULL DEFAULT ''
     );
     CREATE TABLE uptime_daily (
       key TEXT, date TEXT, online INTEGER, total INTEGER,

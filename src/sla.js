@@ -38,7 +38,7 @@ function serverUptime(db, month) {
   let rows;
   try {
     rows = db.prepare(`
-      SELECT server_name, down_from, down_to, maintenance
+      SELECT server_name, down_from, down_to, maintenance, maintenance_sec
         FROM server_downtime
        WHERE down_from < ? AND down_to > ?
     `).all(b.toIso, b.fromIso);
@@ -57,8 +57,13 @@ function serverUptime(db, month) {
       s.maintenance_sec += sec;
       continue;
     }
+    // DEEP-69 (2026-09-24): частично покрытый эпизод — вычитаем из простоя
+    // только фактически покрытую окнами часть (maintenance_sec, клиппим на
+    // границы месяца пропорционально), остаток — аварийный простой.
+    const mSec = Math.min(Math.max(0, Number(r.maintenance_sec) || 0), sec);
+    if (mSec > 0) s.maintenance_sec += mSec;
     s.episodes++;
-    s.downtime_sec += sec;
+    s.downtime_sec += (sec - mSec);
   }
   return Object.values(byServer).map(s => ({
     server: s.server,

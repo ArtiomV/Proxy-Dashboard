@@ -102,9 +102,12 @@ function _ackRows() {
   const now = Date.now();
   if (now - _ackCache.ts < ACK_CACHE_MS) return _ackCache.rows;
   try {
+    // DEEP-74 (2026-09-24): закрытые эпизоды (closed_at при recovery,
+    // миграция 103) не подавляют — раньше solved с until_ts=NULL глушил
+    // СЛЕДУЮЩИЕ независимые аварии того же объекта навсегда.
     _ackCache.rows = db.prepare(`
       SELECT rule_id, dedup_key, kind, until_ts FROM alert_acks
-       WHERE kind = 'solved' OR (kind = 'ack' AND until_ts > ?)
+       WHERE closed_at IS NULL AND (kind = 'solved' OR (kind = 'ack' AND until_ts > ?))
     `).all(now);
   } catch (_) { _ackCache.rows = []; }   // таблицы ещё нет → ack-ов нет
   _ackCache.ts = now;
@@ -203,8 +206,7 @@ function init(deps) {
   } catch (_) { /* best-effort */ }
 }
 
-function _persistCooldowns() {
-  // Debounced persist — don't write on every send, batch within 5s.
+function _persistCooldowns() {  // Debounced persist — don't write on every send, batch within 5s.
   if (_persistTimer) return;
   _persistTimer = setTimeout(() => {
     _persistTimer = null;
@@ -1267,6 +1269,25 @@ function _triggerNow(ruleId, payload) {
     }
 
     tgBot.sendMessage(token, chatId, text, sendOpts).then(r => {
+      // 2026-09-24 · DEEP-73: ok:false — ЯВНЫЙ отказ API, а не доставка.
+      // tgRequest резолвит Promise распарсенным JSON и для ok:false, поэтому
+      // раньше отказ молча фиксировал cooldown и подавлял повтор на час
+      // (запись в колокольчике есть, но она не доказывает доставку в TG).
+      if (r && r.ok === false) {
+        const code = r.error_code || 0;
+        const desc = r.description || '';
+        const retryAfter = (r.parameters && r.parameters.retry_after) || 0;
+        // Повтор не подавляем: постоянная ошибка настройки (400/403/404)
+        // остаётся видна в warn-логе при каждом событии; 429 — не раньше
+        // retry_after; 5xx Telegram — следующее событие попробует снова.
+        cooldownState.delete(cooldownKey);
+        if (code === 429 && retryAfter > 0) {
+          cooldownState.set(cooldownKey, Date.now() + retryAfter * 1000 - (rule.cooldownSec || 0) * 1000);
+        }
+        _persistCooldowns();
+        logger.warn('[Alerts] tg send rejected (' + ruleId + '): ' + code + ' ' + desc + (retryAfter ? ' retry_after=' + retryAfter : ''));
+        return;
+      }
       // Запоминаем message_id — после ack убираем кнопки editMessageReplyMarkup.
       if (ackHash && r && r.ok && r.result && r.result.message_id) {
         const ent = _ackHashMap.get(ackHash);
@@ -1388,6 +1409,14 @@ function clearCooldown(ruleId, payload) {
   if (!rule) return;
   const dedup = (typeof rule.dedupeKey === 'function') ? rule.dedupeKey(payload || {}) : 'global';
   cooldownState.delete(ruleId + '|' + dedup);
+  // DEEP-74 (2026-09-24): достоверный recovery ЗАВЕРШАЕТ эпизод — «решено»
+  // больше не подавляет следующую независимую аварию того же объекта
+  // (миграция 103; история подтверждений сохраняется).
+  try {
+    db.prepare('UPDATE alert_acks SET closed_at = datetime(\'now\') WHERE rule_id = ? AND dedup_key = ? AND closed_at IS NULL')
+      .run(ruleId, dedup);
+    _ackInvalidate();
+  } catch (_) { /* best-effort */ }
 }
 
 function listRules() {
@@ -1398,6 +1427,15 @@ function listRules() {
     cooldownSec: r.cooldownSec,
     channel: r.channel || 'tg+bell',   // Stage 18.15 — UI badge
   }));
+}
+
+// DEEP-75 (2026-09-24): согласование сохранённых инцидентов со свежими
+// наблюдениями детекторов (см. incidents.reconcile) — модем, восстановившийся
+// во время рестарта, закрывает сохранённый эпизод без recovery-перехода.
+function reconcileIncidents(entries) {
+  try {
+    if (_incidentManager && _incidentManager.reconcile) _incidentManager.reconcile(entries);
+  } catch (_) { /* best-effort */ }
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -1446,6 +1484,7 @@ function _isQuietTime(nowMs, from, to) {
 
 module.exports = { init, trigger, testRule, clearCooldown, listRules, recordBellEvent, isRuleEnabled, RULES,
   onAlertAck,                     // B2: обработчик inline-кнопок (bot.js)
+  reconcileIncidents,             // DEEP-75: согласование инцидентов со свежими наблюдениями
   _ackHash, _ackInvalidate,       // B2: для тестов
   _isQuietTime,                  // ночной digest: pure helper для тестов
   _boxDownState: boxDownState,   // B1: для тестов и диагностики

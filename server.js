@@ -3,6 +3,32 @@
 // by whatever the developer happens to have in .env. Prod path unchanged.
 if (process.env.NODE_ENV !== 'test') require('dotenv').config();
 const express = require('express');
+
+// 2026-09-24 · DEEP-60 (FIX-SPEC §31/32): Express 4 вызывает async handler и
+// НЕ обрабатывает возвращённый Promise — rejection уходил в
+// unhandledRejection, минуя error middleware, и HTTP-запрос оставался без
+// ответа (клиент дожидался таймаута и повторял частично выполненную
+// операцию). Единая точка контракта: Layer оборачивает async fn так, что
+// rejection попадает в next(err) → финальный error middleware отвечает 500.
+// Оборачиваем один раз и только обычные handlers (error-middleware с 4
+// аргументами не трогаем — его сигнатура определяет маршрутизацию ошибок).
+const _ExpressLayer = require('express/lib/router/layer');
+const _origHandleRequest = _ExpressLayer.prototype.handle_request;
+_ExpressLayer.prototype.handle_request = function handle(req, res, next) {
+  const fn = this.handle;
+  if (fn && fn.constructor && fn.constructor.name === 'AsyncFunction' && fn.length <= 3 && !fn.__deep60Wrapped) {
+    const wrapped = (req2, res2, next2) => {
+      try {
+        const r = fn(req2, res2, next2);
+        if (r && typeof r.catch === 'function') r.catch(next2);
+      } catch (e) { next2(e); }
+    };
+    wrapped.__deep60Wrapped = true;
+    this.handle = wrapped;
+  }
+  return _origHandleRequest.call(this, req, res, next);
+};
+
 const path = require('path');
 const http = require('http');
 const https = require('https');
@@ -578,7 +604,15 @@ function saveClients(clientsList) {
         // rows stay visible; new ones won't appear).
         for (const d of (c.documents || []))        documentsDb.insertDoc(d, c.id);
         for (const d of (c.closingDocuments || [])) documentsDb.insertClosing(d, c.id);
-        for (const b of (c.bills || []))            documentsDb.insertBill(b, c.id);
+        for (const b of (c.bills || [])) {
+          const r = documentsDb.insertBill(b, c.id);
+          // DEEP-54 (2026-09-24): changes=0 при несовпадающем ID — конфликт
+          // внешних документов (два счёта на client/period), а не успех.
+          // Молчание прятало расхождение памяти/БД до рестарта.
+          if (r && r.changes === 0) {
+            logger.error(`[SQLite] bills conflict: client=${c.login} period=${b.period} id=${b.id} — в БД уже другой счёт за период; требуется ручной разбор`);
+          }
+        }
       }
     })();
     return true;
@@ -1063,7 +1097,7 @@ const _dtUpsert = trafficDb.dailyUpsertStmt();
 // WP3: единый писатель daily_traffic (SQL + кэш в одной точке, client_name
 // в момент записи). Все писатели идут через recordDailyTraffic.
 const _dailyTrafficWriter = require('./src/traffic/daily');
-_dailyTrafficWriter.init({ dailyUpsertStmt: _dtUpsert, dailyTraffic });
+_dailyTrafficWriter.init({ dailyUpsertStmt: _dtUpsert, dailyTraffic, db });   // DEEP-65/66: replace + cache reload
 const { recordDailyTraffic } = _dailyTrafficWriter;
 const _htUpsert = trafficDb.hourlyUpsertStmt();
 const _snapUpsert = trafficDb.snapshotUpsertStmt();
@@ -3267,6 +3301,8 @@ app.use(require('./src/routes/traffic')({
   dailyTraffic, portKeyToPortName,
   knownModems, SERVER_COUNTRIES,
   recordDailyTraffic,
+  replaceDailyTraffic: _dailyTrafficWriter.replaceDailyTraffic,
+  reloadCacheKeys: _dailyTrafficWriter.reloadCacheKeys,
   refreshPortKeyMapping,
   logActivity,
   kvGet: _kvGet,

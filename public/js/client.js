@@ -1249,6 +1249,7 @@ async function doLogin(){
 }
 
 function doLogout(){
+  _sessionGen++;_loadDataGen++;   // DEEP-59: все запросы прежней сессии инвалидированы
   api('/api/logout',{method:'POST'}).catch(function(){});
   authToken='';authLogin='';
   localStorage.removeItem('pr_token');localStorage.removeItem('pr_login');
@@ -1303,7 +1304,15 @@ function togglePassVis(btn){
 }
 
 // --- Load Data ---
+// 2026-09-24 · DEEP-59: request generation + session generation. После await
+// принимаем только ответ АКТУАЛЬНОГО запроса ТЕКУЩЕЙ сессии: медленный первый
+// запрос больше не откатывает данные быстрого второго, а logout не пускает
+// запоздалый ответ прежней сессии в память.
+var _loadDataGen=0,_sessionGen=0;
 async function loadData(){
+  var gen=++_loadDataGen;
+  var sessGen=_sessionGen;
+  function _stale(){return gen!==_loadDataGen||sessGen!==_sessionGen;}
   var btn=document.getElementById('btnRefresh');
   if(btn)btn.disabled=true;
   setStatus('loading','Загрузка...');
@@ -1311,6 +1320,7 @@ async function loadData(){
 
   try{
     var data=await fetchJSON('/api/dashboard_data');
+    if(_stale())return;   // DEEP-59: устаревший ответ — ничего не меняем
     rawData=data;
     // Populate COUNTRIES from server data
     if(data.servers&&data.servers.length){
@@ -1465,11 +1475,12 @@ async function loadData(){
 
   }catch(err){
     if(err.message==='Сессия истекла') return;
+    if(_stale())return;   // DEEP-59: ошибка старого запроса не заменяет актуальное состояние
     setStatus('error','Ошибка');
     document.getElementById('errorContainer').innerHTML=
       '<div class="error-msg">Не удалось загрузить данные: '+escapeHtml(err.message)+'</div>';
   }finally{
-    if(btn)btn.disabled=false;
+    if(!_stale()&&btn)btn.disabled=false;
   }
 }
 

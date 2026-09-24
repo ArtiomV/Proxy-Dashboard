@@ -739,6 +739,12 @@ r.put('/api/admin/clients/:id/closing_documents/:docId', authMiddleware, adminMi
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const doc = (client.closingDocuments || []).find(d => d.id === req.params.docId);
   if (!doc) return res.status(404).json({ error: 'Document not found' });
+  // DEEP-55 (2026-09-24): содержимое ПОДПИСАННОГО акта неизменно. Раньше PUT
+  // менял items/total, оставляя status/signedAt прежними — локальная печать и
+  // банковский PDF расходились. Исправление — новая версия/отмена подписи.
+  if (doc.status === 'signed') {
+    return res.status(409).json({ error: 'Акт подписан — редактирование запрещено. Снимите подпись или выставьте новый акт.' });
+  }
   const rawItems = Array.isArray(req.body && req.body.items) ? req.body.items : null;
   if (!rawItems || !rawItems.length) return res.status(400).json({ error: 'items[] required (min 1)' });
   const round2 = v => Math.round(v * 100) / 100;
@@ -769,6 +775,11 @@ r.put('/api/admin/clients/:id/bills/:billId', authMiddleware, adminMiddleware, (
   if (!client) return res.status(404).json({ error: 'Client not found' });
   const bill = (client.bills || []).find(b => b.id === req.params.billId);
   if (!bill) return res.status(404).json({ error: 'Bill not found' });
+  // DEEP-55 (2026-09-24): оплаченный счёт не редактируется — сумма менялась
+  // без новой версии и сверки с банком. Коррекция — новый счёт/версия.
+  if (bill.status === 'paid') {
+    return res.status(409).json({ error: 'Счёт оплачен — редактирование суммы запрещено. Выставьте корректировочный счёт.' });
+  }
   const amount = Number(req.body && req.body.amount);
   if (!(amount > 0)) return res.status(400).json({ error: 'amount must be > 0' });
   if (!bill.formula || bill.formula.edited_from == null) {
@@ -892,26 +903,15 @@ r.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (
   const billNumber = documentsDb.nextDocNumber(null, billPeriod, client.id).label;
   const billDate = now.toISOString().slice(0, 10);
 
-  let tochkaBillId = null;
-  if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
-    try {
-      const billData = _buildBillBody(client, amount, billNumber, billDate);
-      const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
-      if (result.status === 200 && result.data?.Data?.documentId) {
-        tochkaBillId = result.data.Data.documentId;
-        logger.info(`[Tochka] Created bill ${tochkaBillId} for ${client.name}, amount ${amount}`);
-      } else {
-        logger.error('[Tochka] Create bill response:', JSON.stringify(result.data));
-      }
-    } catch (err) {
-      logger.error('[Tochka] Create bill error:', err.message);
-    }
-  }
-
   const billId = crypto.randomBytes(8).toString('hex');
+  // 2026-09-24 · DEEP-54: durable-резерв ДО внешнего вызова. Два запроса
+  // раньше проходили in-memory проверку одновременно, создавали ДВА счёта в
+  // банке, а repository второй молча отклонял (changes=0) — после рестарта
+  // документ пропадал из локальной модели. Теперь вторая выдача упирается в
+  // резерв здесь, до вызова банка.
   const bill = {
     id: billId,
-    tochkaBillId,
+    tochkaBillId: null,
     period: billPeriod,
     createdAt: new Date().toISOString(),
     amount: Math.round(amount * 100) / 100,
@@ -919,6 +919,34 @@ r.post('/api/admin/tochka/create_bill', authMiddleware, adminMiddleware, async (
     billNumber,
     formula: manualAmount ? { kind: 'manual' } : (_calc ? _calc.formula : null)
   };
+  const reserved = documentsDb.insertBill(bill, client.id);
+  if (!reserved || reserved.changes === 0) {
+    return res.status(409).json({ error: `Счёт за ${billPeriod} уже выставляется конкурентной операцией — повторите позже.` });
+  }
+
+  let tochkaBillId = null;
+  if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId && client.inn) {
+    try {
+      const billData = _buildBillBody(client, amount, billNumber, billDate);
+      const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
+      if (result.status === 200 && result.data?.Data?.documentId) {
+        tochkaBillId = result.data.Data.documentId;
+        bill.tochkaBillId = tochkaBillId;
+        logger.info(`[Tochka] Created bill ${tochkaBillId} for ${client.name}, amount ${amount}`);
+      } else {
+        // Банк ответил отказом — счёт остаётся локальным (как раньше), но
+        // оператор видит, что в банк он не ушёл.
+        logger.error('[Tochka] Create bill response:', JSON.stringify(result.data));
+      }
+    } catch (err) {
+      // DEEP-54: исход внешней операции НЕИЗВЕСТЕН (timeout/сеть) — банк мог
+      // создать документ. Локальный резерв откатываем: повтор не создаст
+      // второй счёт «вслепую»; сначала reconciliation в банке.
+      logger.error('[Tochka] Create bill error (unknown outcome):', err.message);
+      try { documentsDb.deleteBill(billId); } catch (_) { /* best-effort */ }
+      return res.status(502).json({ error: 'Банк не ответил — исход создания неизвестен. Проверьте банк вручную перед повторной выдачей.', details: err.message });
+    }
+  }
 
   if (!client.bills) client.bills = [];
   client.bills.push(bill);
@@ -949,33 +977,44 @@ r.post('/api/admin/tochka/generate_bills', authMiddleware, adminMiddleware, asyn
 
     // B2 (Р15/Р23): сквозной номер «№ N/MM-YYYY» — серия месяца периода.
     const billNumber = documentsDb.nextDocNumber(null, billPeriod, client.id).label;
-    let tochkaBillId = null;
+    const billId = crypto.randomBytes(8).toString('hex');
+    const bill = {
+      id: billId,
+      tochkaBillId: null,
+      period: billPeriod,
+      createdAt: new Date().toISOString(),
+      amount: Math.round(amount * 100) / 100,
+      status: 'unpaid',
+      billNumber
+    };
+    // 2026-09-24 · DEEP-54: durable-резерв ДО вызова банка (см. create_bill) —
+    // параллельная ручная выдача того же периода упирается в конфликт здесь,
+    // а не после создания второго внешнего документа.
+    const reserved = documentsDb.insertBill(bill, client.id);
+    if (!reserved || reserved.changes === 0) { skipped++; continue; }
 
     if (tochkaConfig.jwt && tochkaConfig.customerCode && tochkaConfig.accountId) {
       try {
         const billData = _buildBillBody(client, amount, billNumber, billDate);
         const result = await tochkaRequest('POST', '/uapi/invoice/v1.0/bills', billData);
         if (result.status === 200 && result.data?.Data?.documentId) {
-          tochkaBillId = result.data.Data.documentId;
+          bill.tochkaBillId = result.data.Data.documentId;
         } else {
           logger.error(`[Tochka] Bill error for ${client.name}:`, JSON.stringify(result.data));
         }
       } catch (err) {
-        logger.error(`[Tochka] Bill error for ${client.name}:`, err.message);
+        // Исход неизвестен — резерв откатываем, клиент уходит в errors,
+        // а не «счёт создан локально при возможном дубле в банке» (DEEP-54).
+        logger.error(`[Tochka] Bill error for ${client.name} (unknown outcome):`, err.message);
+        try { documentsDb.deleteBill(billId); } catch (_) { /* best-effort */ }
+        errors++;
+        results.push({ client: client.name, status: 'bank_unknown_outcome', amount: bill.amount });
+        continue;
       }
     }
 
-    const billId = crypto.randomBytes(8).toString('hex');
     if (!client.bills) client.bills = [];
-    client.bills.push({
-      id: billId,
-      tochkaBillId,
-      period: billPeriod,
-      createdAt: new Date().toISOString(),
-      amount: Math.round(amount * 100) / 100,
-      status: 'unpaid',
-      billNumber
-    });
+    client.bills.push(bill);
 
     generated++;
     results.push({ client: client.name, status: 'created', amount: Math.round(amount * 100) / 100 });
@@ -1057,12 +1096,25 @@ r.delete('/api/admin/clients/:id/bill/:billId', authMiddleware, adminMiddleware,
   if (idx === -1) return res.status(404).json({ error: 'Bill not found' });
 
   const bill = client.bills[idx];
+  // 2026-09-24 · DEEP-57: связь с банком не теряется при неуспехе. Отказ/timeout
+  // или error-status банка → локальный счёт СОХРАНЯЕТСЯ (502), иначе client/period
+  // освобождался для нового счёта при живом старом в банке. 404 банка = счёта
+  // там уже нет — можно удалять локально. Снятие из памяти — по ID (индекс,
+  // сохранённый до await, при конкурентном удалении указывал не на тот элемент).
   if (bill.tochkaBillId && tochkaConfig.jwt) {
     try {
-      await tochkaRequest('DELETE', `/uapi/invoice/v1.0/bills/${tochkaConfig.customerCode}/${bill.tochkaBillId}`);
-    } catch (e) { logger.error('[Tochka] Delete bill error:', e.message); }
+      const resp = await tochkaRequest('DELETE', `/uapi/invoice/v1.0/bills/${tochkaConfig.customerCode}/${bill.tochkaBillId}`);
+      const st = resp && resp.status;
+      if (st && st !== 200 && st !== 204 && st !== 404) {
+        logger.error(`[Tochka] Delete bill ${bill.tochkaBillId}: bank status ${st}`);
+        return res.status(502).json({ error: `Банк не подтвердил удаление (status ${st}) — локальный счёт сохранён, связь не потеряна.` });
+      }
+    } catch (e) {
+      logger.error('[Tochka] Delete bill error (kept locally):', e.message);
+      return res.status(502).json({ error: 'Банк недоступен — счёт НЕ удалён локально. Повторите позже или удалите сначала в банке.', details: e.message });
+    }
   }
-  client.bills.splice(idx, 1);
+  client.bills = (client.bills || []).filter(b => b.id !== bill.id);
   // Stage 13.2: explicit row delete (saveClients no longer wipes the table).
   documentsDb.deleteBill(bill.id);
   // B2 (Р15): дыры в сквозной нумерации не переиспользуются — фиксируем номер.

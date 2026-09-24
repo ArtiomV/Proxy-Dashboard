@@ -1,6 +1,21 @@
 // public/js/admin/settings.js — settings tab (WP6.3 carve-out from admin.js,
 // VERBATIM): pricing tiers, servers list, all settings sections.
 
+// 2026-09-24 · DEEP-58: dirty-флаги снимает ТОЛЬКО успешный save настроек —
+// общая api() этого больше не делает (посторонний POST снимал защиту).
+// Очищаем поля, помеченные ДО начала запроса; правка во время сохранения
+// флаг не теряет (ts в dataset.dirty, admin.js).
+function apiSettingsPut(data){
+  var startedAt = Date.now();
+  return apiSettingsPut(data).then(function(d){
+    if (d && d.ok !== false && typeof window._clearSettingsDirty === 'function') {
+      try { window._clearSettingsDirty(startedAt); } catch(_) {}
+    }
+    return d;
+  });
+}
+
+
 function renderPricingTiers() {
   var area = document.getElementById('pricingTiersArea');
   if (!area) return;   // UI блока тарифов убран из admin.html; вызов из loadSettings остаётся
@@ -21,7 +36,7 @@ function savePricingTiers() {
     if (!minEl) break;
     tiers.push({min_proxies: parseInt(minEl.value)||1, price: parseFloat(priceEl.value)||0, label: labelEl.value||''});
   }
-  api(API+'/api/admin/settings',{method:'PUT',json:{pricing_tiers:tiers}}).then(function(d){
+  apiSettingsPut({pricing_tiers:tiers}).then(function(d){
     if(d.ok) showToast('Тарифы сохранены','success');
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -388,7 +403,7 @@ function tgSaveSettings(){
   if(tok||!tgT.dataset.masked) data.telegram_bot_token=tok;
   // Anthropic key — та же схема маски.
   if(anK){var ak=(anK.value||'').trim();if(ak||!anK.dataset.masked)data.anthropic_api_key=ak;}
-  return api(API+'/api/admin/settings',{method:'PUT',json:data});
+  return apiSettingsPut(data);
 }
 // Розница: общие настройки + алерты/антифрод (секция «Розница»).
 function saveRetailSettings(){
@@ -411,7 +426,7 @@ function saveRetailSettings(){
   };
   var st=document.getElementById('retailSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
+  apiSettingsPut(data).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';showToast('Настройки розницы сохранены','success');loadTariffsAdmin()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -432,7 +447,7 @@ function saveRetailInfraSettings(){
   if(crmD){var cd=(crmD.value||'').trim();if(cd||!crmD.dataset.masked)data.crm_db_url=cd;}
   var st=document.getElementById('retailInfraStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
+  apiSettingsPut(data).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';showToast('Настройки регистрации сохранены','success');showCredVerdict(d)}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -465,7 +480,7 @@ function tgSendTest(){
 function saveProxyCheckSettings(){
   var palErrPct=parseFloat(document.getElementById('proxyAlertErrorPctInput').value)||5;
   var palWindow=parseInt(document.getElementById('proxyAlertWindowInput').value)||60;
-  api(API+'/api/admin/settings',{method:'PUT',json:{proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow}}).then(function(d){
+  apiSettingsPut({proxy_alert_error_pct:palErrPct,proxy_alert_window_min:palWindow}).then(function(d){
     if(d.ok){showToast('Порог сбоев пинга сохранён','success');document.getElementById('proxyCheckSettingsStatus').textContent='Сохранено: потери >'+palErrPct+'% за '+palWindow+' мин';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -501,7 +516,7 @@ function saveSettings(){
   var smRet=parseInt(document.getElementById('retSpeedMonitorInput').value)||60;
   _minSpeedThreshold=minSpeed;
   _errorRateThreshold=errThresh;
-  api(API+'/api/admin/settings',{method:'PUT',json:{speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet}}).then(function(d){
+  apiSettingsPut({speedtest_modems:modems.join(','),min_speed_threshold:minSpeed,error_rate_threshold:errThresh,speedtest_max_history:maxHist,speedmon_retry_dl_threshold:smDl,speedmon_retry_round_min:smRm,speedmon_retry_rounds:smRr,retention_speed_monitor:smRet}).then(function(d){
     if(d.ok){showToast('Настройки сохранены','success');document.getElementById('settingsStatus').textContent='Почасовой замер: '+(modems.join(',')==='auto'?'Авто (по операторам локации)':(modems.join(', ')||'дефолтный список'))+' — применится со следующего часа';renderTable()}
     else showToast(d.error||'Ошибка','error');
   }).catch(function(e){showToast(e.message,'error')});
@@ -516,7 +531,7 @@ function saveAlertThresholds(){
   window._offlineThresholdMin=offThMin;
   var st=document.getElementById('alertThresholdsStatus');
   if(st){st.textContent='Сохраняю...';st.style.color='var(--warning)';}
-  api(API+'/api/admin/settings',{method:'PUT',json:{stale_modem_hours:staleH,modem_offline_threshold_min:offThMin,httpcheck_alert_threshold:httpAlertN}}).then(function(d){
+  apiSettingsPut({stale_modem_hours:staleH,modem_offline_threshold_min:offThMin,httpcheck_alert_threshold:httpAlertN}).then(function(d){
     if(d.ok){if(st){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';}showToast('Пороги доступности сохранены','success');renderTable()}
     else{if(st){st.textContent=d.error||'Ошибка';st.style.color='var(--danger)';}showToast(d.error||'Ошибка','error');}
   }).catch(function(e){if(st){st.textContent=e.message;st.style.color='var(--danger)';}showToast(e.message,'error')});
@@ -562,7 +577,7 @@ function saveRecoverySettings(){
   if(isNaN(rbs))rbs=70;
   var st=document.getElementById('recoverySettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:{recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold,random_modem_reboot_enabled:rndReboot,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,reboot_score_alert_threshold:rbs}}).then(function(d){
+  apiSettingsPut({recovery_enabled:enabled,recovery_offline_sec:offline,recovery_max_attempts:maxAtt,recovery_retry_min:retryMin,recovery_daily_cap:dailyCap,recovery_readd_after:readdAfter,recovery_skip_dead_sim:skipDeadSim,recovery_skip_unsold:skipUnsold,random_modem_reboot_enabled:rndReboot,auto_reboot_enabled:arEnabled,auto_reboot_min_interval_min:arInterval,reboot_score_alert_threshold:rbs}).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -573,7 +588,7 @@ function saveTrackingSettings(){
   var syncInt=parseInt(document.getElementById('rotationSyncIntervalInput').value)||30;
   var st=document.getElementById('trackingSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:{tracking_interval_min:tracking,rotation_cache_ttl_min:cacheTtl,rotation_sync_interval_min:syncInt}}).then(function(d){
+  apiSettingsPut({tracking_interval_min:tracking,rotation_cache_ttl_min:cacheTtl,rotation_sync_interval_min:syncInt}).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -590,7 +605,7 @@ function saveRetentionSettings(){
   };
   var st=document.getElementById('retentionSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
+  apiSettingsPut(data).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)'}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -605,7 +620,7 @@ function saveSessionBillingSettings(){
   };
   var st=document.getElementById('sessionBillingSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
+  apiSettingsPut(data).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';_showRestartBanner()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -620,7 +635,7 @@ function saveSimulatorSettings(){
   };
   var st=document.getElementById('simSettingsStatus');
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
+  apiSettingsPut(data).then(function(d){
     if(d.ok){st.innerHTML='Сохранено '+icon('check',12);st.style.color='var(--success)';if(typeof initSimulator==='function')initSimulator()}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
@@ -781,10 +796,10 @@ function opPkgSave(){
   if(bad){st.textContent='Заполните имя оператора в каждой строке';st.style.color='var(--danger)';return;}
   var seen={};for(var i=0;i<rows.length;i++){var key=rows[i].operator.toLowerCase();if(seen[key]){st.textContent='Оператор «'+rows[i].operator+'» добавлен дважды';st.style.color='var(--danger)';return;}seen[key]=true;}
   st.textContent='Сохраняю...';st.style.color='var(--warning)';
-  api(API+'/api/admin/settings',{method:'PUT',json:{
+  apiSettingsPut({
     operator_packages:JSON.stringify(rows),
     volume_enabled:!!document.getElementById('volumeEnabledInput').checked
-  }}).then(function(d){
+  }).then(function(d){
     if(d.ok){var incomplete=rows.filter(function(p){return !(p.price>0)||(p.type==='shared'&&!(p.max_sims>0))||(p.type!=='unlimited'&&!(p.volume_gb>0));}).length;st.innerHTML='Сохранено '+icon('check',12)+(incomplete?' · нужно дополнить пакетов: '+incomplete:' · оплата пересчитана автоматически');st.style.color=incomplete?'var(--warning)':'var(--success)';if(currentData)currentData.settings=d.settings||currentData.settings;opPkgLoadForecasts();}
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)';}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)';});
@@ -795,7 +810,7 @@ function saveAckTtl(){
   var ttl=parseInt(document.getElementById('ackTtlHoursInput').value)||2;
   if(ttl<1||ttl>72){showToast('TTL: от 1 до 72 часов','error');return}
   var st=document.getElementById('ackTtlSaveHint');
-  api(API+'/api/admin/settings',{method:'PUT',json:{ack_ttl_hours:ttl}}).then(function(d){
+  apiSettingsPut({ack_ttl_hours:ttl}).then(function(d){
     if(d.ok){if(st)st.textContent='Сохранено';setTimeout(function(){if(st)st.textContent=''},2500);showToast('TTL «В работе» сохранён','success')}
     else{if(st)st.textContent=d.error||'Ошибка';showToast(d.error||'Ошибка','error')}
   }).catch(function(e){if(st)st.textContent=e.message;showToast(e.message,'error')});
@@ -806,7 +821,7 @@ function saveSseEnabled(v){
   var seq=++_sseSaveSeq;
   var el=document.getElementById('sseEnabledInput');
   _sseSavePending=true;if(el){el.disabled=true;el.checked=!!v;}
-  api(API+'/api/admin/settings',{method:'PUT',json:{sse_enabled:!!v}}).then(function(d){
+  apiSettingsPut({sse_enabled:!!v}).then(function(d){
     if(seq!==_sseSaveSeq)return;
     _sseSavePending=false;if(el)el.disabled=false;
     if(d&&d.ok){
@@ -884,6 +899,21 @@ function createMaintenanceWindow(){
   var comment=(document.getElementById('maintCommentInput').value||'').trim();
   var st=document.getElementById('maintCreateStatus');
   if(!target){st.textContent='Укажите объект (сервер или ник модема)';st.style.color='var(--danger)';return}
+  // DEEP-80 (2026-09-24): окно модема — устойчивый ключ 'server|nick'.
+  // Голый nick резолвим по флоту: единственный модем — подставляем его
+  // сервер; несколько/ноль — просим указать явно (чужое окно на одноимённые
+  // модемы других серверов больше не создаётся).
+  if(type==='modem'&&target.indexOf('|')<0){
+    var mm=currentData&&currentData._modemMap||{},hits=[];
+    for(var k in mm){if(mm[k]&&mm[k].nick===target)hits.push(mm[k]);}
+    if(hits.length===1){target=hits[0].server+'|'+target;}
+    else{
+      st.textContent=hits.length>1
+        ? 'Ник «'+target+'» есть на нескольких серверах — укажите явно: сервер|ник ('+hits.map(function(m){return m.server;}).join(', ')+')'
+        : 'Модем «'+target+'» не найден во флоте — укажите: сервер|ник';
+      st.style.color='var(--danger)';return;
+    }
+  }
   var fromTs=fromV?new Date(fromV).getTime():NaN;
   var toTs=toV?new Date(toV).getTime():NaN;
   if(!isFinite(fromTs)||!isFinite(toTs)||toTs<=fromTs){st.textContent='Некорректный интервал «с — до»';st.style.color='var(--danger)';return}

@@ -32,8 +32,9 @@ describe('B3: isInMaintenance', () => {
       target_type: 'server', target_id: 'W_SRV',
       from_ts: now - 3600e3, to_ts: now + 3600e3, comment: 'плановые работы', created_by: 't',
     });
+    // DEEP-80 (2026-09-24): окно модема — устойчивый ключ 'server|nick'.
     maintenance.createWindow(db, {
-      target_type: 'modem', target_id: 'W_MDM',
+      target_type: 'modem', target_id: 'W_SRV|W_MDM',
       from_ts: now - 3600e3, to_ts: now + 3600e3, comment: '', created_by: 't',
     });
     // Завершившееся окно — не должно матчиться.
@@ -50,9 +51,14 @@ describe('B3: isInMaintenance', () => {
     expect(w.comment).toBe('плановые работы');
   });
 
-  it('модем матчится по nick', () => {
-    expect(maintenance.isInMaintenance(db, { server: 'WHATEVER', nick: 'W_MDM' }, now)).toBeTruthy();
-    expect(maintenance.isInMaintenance(db, { server: 'WHATEVER', nick: 'OTHER' }, now)).toBeNull();
+  it('модем матчится по server|nick; одноимённый nick другого сервера — НЕТ (DEEP-80)', () => {
+    expect(maintenance.isInMaintenance(db, { server: 'W_SRV', nick: 'W_MDM' }, now)).toBeTruthy();
+    expect(maintenance.isInMaintenance(db, { server: 'WHATEVER', nick: 'W_MDM' }, now)).toBeNull();
+    expect(maintenance.isInMaintenance(db, { server: 'W_OTHER', nick: 'OTHER' }, now)).toBeNull();
+    // Легаси-окно по голому nick больше не совпадает (миграционная политика).
+    maintenance.createWindow(db, { target_type: 'modem', target_id: 'LEGACY_NICK',
+      from_ts: now - 3600e3, to_ts: now + 3600e3, comment: '', created_by: 't' });
+    expect(maintenance.isInMaintenance(db, { server: 'W_OTHER', nick: 'LEGACY_NICK' }, now)).toBeNull();
   });
 
   it('другой сервер / вне окна / завершившееся окно → null', () => {
@@ -106,13 +112,15 @@ describe('B3: alerts.trigger молчит в maintenance-окне', () => {
     expect(sendMessage).not.toHaveBeenCalled();
   });
 
-  it('окно модема глушит модемный алерт по nick', () => {
+  it('окно модема глушит модемный алерт по server|nick; чужой сервер — нет (DEEP-80)', () => {
     const now = Date.now();
     maintenance.createWindow(db, {
-      target_type: 'modem', target_id: 'MNTM1', from_ts: now - 3600e3, to_ts: now + 3600e3, created_by: 't',
+      target_type: 'modem', target_id: 'MNTS|MNTM1', from_ts: now - 3600e3, to_ts: now + 3600e3, created_by: 't',
     });
     expect(alerts.trigger('modem_ping_dead', { server: 'MNTS', nick: 'MNTM1', imei: 'im1', loss: 100 })).toBe(false);
     expect(sendMessage).not.toHaveBeenCalled();
+    // одноимённый nick на ДРУГОМ сервере — не подавлен (окно адресное)
+    expect(alerts.trigger('modem_ping_dead', { server: 'OTHER', nick: 'MNTM1', imei: 'im1x', loss: 100 })).toBe(true);
     // ...но алерт по другому модему того же сервера проходит
     expect(alerts.trigger('modem_ping_dead', { server: 'MNTS', nick: 'MNTM2', imei: 'im2', loss: 100 })).toBe(true);
   });

@@ -37,6 +37,11 @@ function invalidateMaintenanceCache() { _cache.ts = 0; }
 
 // Активное окно для объекта алерта. Совпадение: окно сервера по
 // target.server, окно модема — по target.nick. Границы включительно.
+// 2026-09-24 · DEEP-80: окно модема адресуется КЛЮЧОМ 'server|nick' (см.
+// создание окна в routes/maintenance.js) — одноимённые модемы других
+// серверов больше не попадают под чужое окно. Легаси-окна по голому nick
+// НЕ совпадают (миграционная политика: подавление не расширяем молча —
+// такое окно пересоздаётся с указанием сервера).
 // Возвращает строку окна или null.
 function isInMaintenance(db, target, nowMs) {
   const now = nowMs || Date.now();
@@ -46,7 +51,12 @@ function isInMaintenance(db, target, nowMs) {
   for (const w of _cached(db)) {
     if (now < w.from_ts || now > w.to_ts) continue;
     if (w.target_type === 'server' && server && w.target_id === server) return w;
-    if (w.target_type === 'modem' && nick && w.target_id === nick) return w;
+    if (w.target_type === 'modem' && nick) {
+      const key = String(w.target_id || '');
+      const cut = key.indexOf('|');
+      if (cut < 0) continue;                       // legacy bare nick — не совпадает (DEEP-80)
+      if (server && key.slice(0, cut) === server && key.slice(cut + 1) === nick) return w;
+    }
   }
   return null;
 }
@@ -88,4 +98,41 @@ function deleteWindow(db, id) {
   return info.changes > 0;
 }
 
-module.exports = { isInMaintenance, listWindows, createWindow, deleteWindow, invalidateMaintenanceCache };
+// 2026-09-24 · DEEP-69: пересечение фактического интервала простоя с окнами
+// обслуживания. Раньше весь эпизод классифицировался по моменту
+// ВОССТАНОВЛЕНИЯ (длинный аварийный простой, закончившийся в коротком окне,
+// целиком уходил в maintenance и исключался из SLA — и наоборот).
+// Возвращает объединение пересечений (без двойного счёта перекрывающихся
+// окон) и id применённых окон (версия расчёта).
+function overlapWithWindows(db, target, fromMs, toMs) {
+  const server = target && target.server;
+  const nick = target && target.nick;
+  if ((!server && !nick) || !(toMs > fromMs)) return { coveredSec: 0, windowIds: [] };
+  let rows;
+  try {
+    rows = db.prepare(`
+      SELECT id, target_type, target_id, from_ts, to_ts
+        FROM maintenance_windows
+       WHERE to_ts >= ? AND from_ts <= ?
+       ORDER BY from_ts ASC
+    `).all(Math.round(fromMs), Math.round(toMs));
+  } catch (_) { rows = []; }
+  const segs = [];
+  for (const w of rows) {
+    const match = (server && w.target_type === 'server' && w.target_id === server)
+               || (nick && w.target_type === 'modem' && w.target_id === nick);
+    if (!match) continue;
+    const a = Math.max(fromMs, w.from_ts), b = Math.min(toMs, w.to_ts);
+    if (a < b) segs.push([a, b, w.id]);
+  }
+  segs.sort((x, y) => x[0] - y[0]);
+  let covered = 0, end = -Infinity;
+  const usedIds = new Set();
+  for (const [a, b, id] of segs) {
+    const s = Math.max(a, end);
+    if (b > s) { covered += b - s; end = b; usedIds.add(id); }
+  }
+  return { coveredSec: Math.round(covered / 1000), windowIds: [...usedIds] };
+}
+
+module.exports = { isInMaintenance, listWindows, createWindow, deleteWindow, invalidateMaintenanceCache, overlapWithWindows };

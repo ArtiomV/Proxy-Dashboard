@@ -165,19 +165,24 @@ function create(deps) {
       if (!ok) {
         st.deadStreak++;
         st.slowStreak = 0;
-        if (st.deadStreak >= 2 && !st.down) {
-          st.down = true;
-          alerts.trigger('modem_ping_dead', {
+        // DEEP-77 (2026-09-24): регистрация эпизода отделена от наблюдения.
+        // trigger отклонён (boot grace/maintenance/правило выключено) —
+        // downAlerted НЕ выставляем: актуальный сбой повторит попытку на
+        // следующем цикле после снятия гейта (раньше единственная попытка
+        // сгорала, а последующий ok давал recovery без opening).
+        if (st.deadStreak >= 2 && !st.downAlerted) {
+          const accepted = alerts.trigger('modem_ping_dead', {
             server: serverName, nick, imei,
             operator: nd.CELLOP || '',
             loss: parsed.loss_pct, latency: parsed.latency_ms,
           });
+          if (accepted) st.downAlerted = true;
         }
         continue;
       }
       // Пинг ок
-      if (st.down) {
-        st.down = false;
+      if (st.downAlerted) {
+        st.downAlerted = false;
         alerts.trigger('modem_ping_recovered', { server: serverName, nick, imei, operator: nd.CELLOP || '', latency: parsed.latency_ms });
       }
       st.deadStreak = 0;
@@ -192,6 +197,24 @@ function create(deps) {
           });
         }
       } else { st.slowStreak = 0; st.slow = false; }
+    }
+    // DEEP-75 (2026-09-24): согласование сохранённых инцидентов — модемы с
+    // подтверждённым онлайн+пингом закрывают свои эпизоды без перехода
+    // (восстановление во время рестарта перехода не даёт).
+    if (alerts.reconcileIncidents) {
+      try {
+        const healthy = [];
+        for (const m of statusArr) {
+          const md = m && m.modem_details;
+          const nd = m && m.net_details || {};
+          if (!md || !md.IMEI || nd.IS_ONLINE !== 'yes') continue;
+          const parsed = parsePingStats(nd.ping_stats);
+          if (parsed && parsed.loss_pct < Number(getSetting('ping_loss_dead_pct', 100))) {
+            healthy.push({ server: serverName, imei: md.IMEI, nick: md.NICK || md.IMEI, online: true });
+          }
+        }
+        if (healthy.length) alerts.reconcileIncidents(healthy);
+      } catch (_) { /* best-effort */ }
     }
   }
 

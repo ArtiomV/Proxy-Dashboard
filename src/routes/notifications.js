@@ -23,6 +23,10 @@ module.exports = function (deps) {
 
   // Prepared statements — built once at module load. db is injected, so this
   // runs after migrations have applied the schema.
+  // 2026-09-24 · DEEP-70: фильтр — в SQL ДО LIMIT (раньше LIMIT отсекал старое
+  // критическое/непрочитанное событие ещё до JS-фильтра: 200 свежих info
+  // прятали его из обеих вкладок при живом badge). Продолжение — стабильный
+  // курсор (created_at, id): одинаковые секунды не теряют/не дублируют строки.
   const _list = db.prepare(`
     SELECT n.id, n.dedup_key, n.rule_id, n.priority, n.entity_kind, n.entity_id,
            n.title, n.message, n.payload_json, n.created_at,
@@ -31,7 +35,17 @@ module.exports = function (deps) {
       LEFT JOIN notification_read_state s
         ON s.notif_id = n.id AND s.user_login = ?
      WHERE (s.dismissed_at IS NULL)
-     ORDER BY n.created_at DESC
+       AND (
+         ? = 'all'
+         OR (? = 'unread' AND s.read_at IS NULL)
+         OR (? = 'critical' AND n.priority = 'critical')
+       )
+       AND (
+         ? = ''
+         OR n.created_at < ?
+         OR (n.created_at = ? AND n.id < ?)
+       )
+     ORDER BY n.created_at DESC, n.id DESC
      LIMIT ?
   `);
 
@@ -91,10 +105,14 @@ module.exports = function (deps) {
     try {
       const login = userLogin(req);
       const filter = String(req.query.filter || 'all');
+      if (!['all', 'unread', 'critical'].includes(filter)) {
+        return res.status(400).json({ error: 'filter: all|unread|critical' });
+      }
       const limit = Math.min(Math.max(parseInt(req.query.limit, 10) || 100, 1), 500);
-      let rows = _list.all(login, limit);
-      if (filter === 'unread')   rows = rows.filter(r => !r.read_at);
-      if (filter === 'critical') rows = rows.filter(r => r.priority === 'critical');
+      // DEEP-70: курсор (created_at, id) — параметры необязательны (первая страница).
+      const curCreated = String(req.query.cursor_created || '');
+      const curId = parseInt(req.query.cursor_id, 10) || 0;
+      const rows = _list.all(login, filter, filter, filter, curCreated, curCreated, curCreated, curId, limit);
       // Parse payload_json once on the wire; clients use it for navigation.
       const out = rows.map(r => ({
         id: r.id,
@@ -110,7 +128,11 @@ module.exports = function (deps) {
         read_at: r.read_at,
         dismissed_at: r.dismissed_at,
       }));
-      res.json({ notifications: out, count: out.length });
+      // Продолжение есть, если страница заполнена целиком.
+      const last = out[out.length - 1] || null;
+      const nextCursor = (last && out.length === limit)
+        ? { cursor_created: last.created_at, cursor_id: last.id } : null;
+      res.json({ notifications: out, count: out.length, next_cursor: nextCursor });
     } catch (e) {
       logger.error('[Notifications] list: ' + e.message);
       res.status(500).json({ error: e.message });

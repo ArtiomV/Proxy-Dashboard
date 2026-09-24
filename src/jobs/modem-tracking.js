@@ -94,11 +94,21 @@ async function trackModems() {
         // Persist the outage episode (skip sub-2-min single-poll blips). (mig 035)
         if (downSec >= 120) {
           try {
-            // B3 (23.08): простой в активном окне обслуживания → maintenance=1,
-            // такие эпизоды исключаются из SLA-отчёта (C1).
-            const _maint = (maintenance && maintenance.isInMaintenance(db, { server: server.name }, Date.now())) ? 1 : 0;
-            db.prepare('INSERT INTO server_downtime (server_name, down_from, down_to, duration_sec, alerted, maintenance) VALUES (?,?,?,?,?,?)')
-              .run(server.name, new Date(downStart).toISOString(), new Date().toISOString(), downSec, alerted, _maint);
+            // 2026-09-24 · DEEP-69: maintenance — по ФАКТИЧЕСКОМУ пересечению
+            // интервала простоя с окнами (объединение, без двойного счёта),
+            // а не по моменту восстановления. maintenance=1 — только при
+            // ПОЛНОМ покрытии; частичное — maintenance_sec + id окон.
+            let _maint = 0, _maintSec = 0, _maintWins = '';
+            if (maintenance && maintenance.overlapWithWindows) {
+              const ov = maintenance.overlapWithWindows(db, { server: server.name }, downStart, Date.now());
+              _maintSec = ov.coveredSec || 0;
+              _maintWins = ov.windowIds && ov.windowIds.length ? JSON.stringify(ov.windowIds) : '';
+              if (_maintSec > 0 && _maintSec >= downSec - 5) _maint = 1;   // покрыт полностью (допуск на округление)
+            } else if (maintenance && maintenance.isInMaintenance(db, { server: server.name }, Date.now())) {
+              _maint = 1; _maintSec = downSec;   // legacy-путь без overlap
+            }
+            db.prepare('INSERT INTO server_downtime (server_name, down_from, down_to, duration_sec, alerted, maintenance, maintenance_sec, maintenance_windows) VALUES (?,?,?,?,?,?,?,?)')
+              .run(server.name, new Date(downStart).toISOString(), new Date().toISOString(), downSec, alerted, _maint, _maintSec, _maintWins);
             logActivity('modem', 'info', 'server_downtime_recorded', server.name, `S ${server.name} был недоступен ${Math.round(downSec / 60)} мин`, { downSec, alerted });
           } catch (e) { logger.warn('[Downtime] record failed: ' + e.message); }
         }

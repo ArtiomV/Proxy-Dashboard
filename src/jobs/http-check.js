@@ -294,15 +294,23 @@ function create(deps) {
           st.failing = false;
         } else if (good) {
           ok++;
+          // DEEP-75: успешный чек — тоже свежее подтверждение здоровья для
+          // согласования сохранённых инцидентов (см. reconcile в incidents).
+          if (alerts.reconcileIncidents) {
+            try { alerts.reconcileIncidents([{ server: t.server, imei: t.imei, nick: t.nick, online: true }]); } catch (_) {}
+          }
           if (st.failing) { st.failing = false; alerts.trigger('modem_http_recovered', { server: t.server, nick: t.nick, imei: t.imei, operator: t.operator, clients: t.clients, ms: totalMs }); }
           st.failStreak = 0;
         } else {
           failed++;
           st.failStreak++;
           // Оффлайн-модем — территория modem_offline-алертов, не дублируем.
+          // DEEP-77: failing выставляем только при ПРИНЯТОМ trigger —
+          // отклонённая попытка повторяется на следующих чеках, а не сгорает.
           if (!t.offline && !t.unavailable && st.failStreak >= cfg.alertThreshold && !st.failing) {
-            st.failing = true;
-            alerts.trigger('modem_http_fail', { server: t.server, nick: t.nick, imei: t.imei, operator: t.operator, clients: t.clients, error, status, url: cfg.url });
+            if (alerts.trigger('modem_http_fail', { server: t.server, nick: t.nick, imei: t.imei, operator: t.operator, clients: t.clients, error, status, url: cfg.url })) {
+              st.failing = true;
+            }
           }
         }
       }

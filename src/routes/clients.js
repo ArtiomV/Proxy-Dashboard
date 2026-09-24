@@ -701,12 +701,22 @@ r.delete('/api/admin/clients/:id/document/:docId', authMiddleware, adminMiddlewa
   const docIdx = client.documents.findIndex(d => d.id === req.params.docId);
   if (docIdx === -1) return res.status(404).json({ error: 'Document not found' });
   const doc = client.documents[docIdx];
-  // Delete file (with path traversal protection)
-  const delPath = path.join(DOCUMENTS_DIR, path.basename(doc.fileName));
-  if (delPath.startsWith(DOCUMENTS_DIR)) { try { fs.unlinkSync(delPath); } catch (_) { /* best-effort: error intentionally swallowed */ } }
+  // 2026-09-24 · DEEP-56: durable-состояние сначала, файл — последним.
+  // Раньше unlink шёл первым: отказ SQLite оставлял запись, ведущую на
+  // несуществующий файл. Теперь файл удаляется только после подтверждённого
+  // удаления метаданных; неуспешный unlink — warn с путём (повторим).
+  try {
+    documentsDb.deleteDoc(doc.id);
+  } catch (e) {
+    logger.error(`[Documents] deleteDoc ${doc.id} failed — файл НЕ тронут: ${e.message}`);
+    return res.status(500).json({ error: 'Не удалось удалить запись документа — файл сохранён, повторите позже.' });
+  }
   client.documents.splice(docIdx, 1);
-  // Stage 13.2: explicit delete — saveClients no longer wipes the table.
-  documentsDb.deleteDoc(doc.id);
+  const delPath = path.join(DOCUMENTS_DIR, path.basename(doc.fileName));
+  if (delPath.startsWith(DOCUMENTS_DIR)) {
+    try { fs.unlinkSync(delPath); }
+    catch (e) { logger.warn(`[Documents] файл ${delPath} не удалён (метаданные удалены): ${e.message} — требуется ручная очистка`); }
+  }
   saveClients(clients);
   res.json({ ok: true });
 });

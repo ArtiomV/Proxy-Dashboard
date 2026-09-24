@@ -66,19 +66,40 @@ function rollingTracking(db, baseTracking, days, nowMs) {
 
 function modemRows(db, fromDate, toDate) {
   try {
-    return db.prepare(`
-      SELECT mm.server_name AS server, mm.imei, mm.nick,
-             COALESCE(NULLIF(TRIM(mm.operator), ''), '') AS operator,
+    // 2026-09-24 · DEEP-68: LEFT JOIN + идентичность из ключа измерения.
+    // INNER JOIN с ТЕКУЩЕЙ modem_meta терял историю после retention-удаления
+    // карточки (строки исчезали) и подменял старые nick/operator текущими.
+    // Измерения uptime_daily — первичны: при отсутствии актуальной карточки
+    // nick деградирует до IMEI из ключа, operator — явно пустой (unknown),
+    // а не «нет наблюдений».
+    const rows = db.prepare(`
+      SELECT ud.key AS ukey,
+             mm.server_name AS meta_server, mm.imei AS meta_imei,
+             mm.nick AS meta_nick, mm.operator AS meta_operator,
              SUM(ud.total) AS checks,
              SUM(ud.online) AS online_checks,
              MIN(ud.date) AS observed_from,
              MAX(ud.date) AS observed_to
         FROM uptime_daily ud
-        JOIN modem_meta mm ON ud.key = mm.server_name || '_' || mm.imei
+        LEFT JOIN modem_meta mm ON ud.key = mm.server_name || '_' || mm.imei
        WHERE ud.date >= ? AND ud.date < ?
-       GROUP BY mm.server_name, mm.imei, mm.nick, mm.operator
-       ORDER BY mm.server_name, mm.nick
+       GROUP BY ud.key
+       ORDER BY 1
     `).all(fromDate, toDate);
+    return rows.map(r => {
+      const cut = String(r.ukey).indexOf('_');
+      const keyImei = cut >= 0 ? String(r.ukey).slice(cut + 1) : String(r.ukey);
+      return {
+        server: r.meta_server || (cut >= 0 ? String(r.ukey).slice(0, cut) : ''),
+        imei: r.meta_imei || keyImei,
+        nick: (r.meta_nick && String(r.meta_nick).trim()) || keyImei,
+        operator: (r.meta_operator && String(r.meta_operator).trim()) || '',
+        checks: r.checks,
+        online_checks: r.online_checks,
+        observed_from: r.observed_from,
+        observed_to: r.observed_to,
+      };
+    });
   } catch (_) { return []; }
 }
 
@@ -108,11 +129,13 @@ function clientRows(db, fromDate, toDate, clientName, groupByDay) {
          GROUP BY server_name, nick, day
       ),
       direct AS (
-        SELECT mm.server_name AS server, mm.imei, mm.nick,
+        SELECT COALESCE(mm.server_name, substr(cu.key, 1, instr(cu.key, '_') - 1)) AS server,
+               COALESCE(mm.imei, substr(cu.key, instr(cu.key, '_') + 1)) AS imei,
+               COALESCE(NULLIF(TRIM(mm.nick), ''), substr(cu.key, instr(cu.key, '_') + 1)) AS nick,
                COALESCE(NULLIF(TRIM(mm.operator), ''), '') AS operator,
                cu.date AS day, cu.online, cu.total
           FROM client_uptime_daily cu
-          JOIN modem_meta mm ON cu.key = mm.server_name || '_' || mm.imei
+          LEFT JOIN modem_meta mm ON cu.key = mm.server_name || '_' || mm.imei
          WHERE cu.client_name = ? AND cu.date >= ? AND cu.date < ?
       ),
       legacy AS (

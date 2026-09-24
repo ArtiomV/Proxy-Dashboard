@@ -813,7 +813,7 @@
     "type": "table",
     "name": "alert_acks",
     "tbl_name": "alert_acks",
-    "sql": "CREATE TABLE alert_acks ( id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id TEXT NOT NULL, dedup_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('ack','solved')), acked_by TEXT NOT NULL DEFAULT '', acked_at TEXT NOT NULL, until_ts INTEGER )"
+    "sql": "CREATE TABLE alert_acks ( id INTEGER PRIMARY KEY AUTOINCREMENT, rule_id TEXT NOT NULL, dedup_key TEXT NOT NULL, kind TEXT NOT NULL CHECK (kind IN ('ack','solved')), acked_by TEXT NOT NULL DEFAULT '', acked_at TEXT NOT NULL, until_ts INTEGER , closed_at TEXT DEFAULT NULL)"
   },
   {
     "type": "table",
@@ -1143,7 +1143,7 @@
     "type": "table",
     "name": "server_downtime",
     "tbl_name": "server_downtime",
-    "sql": "CREATE TABLE server_downtime ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, down_from TEXT NOT NULL, down_to TEXT NOT NULL, duration_sec INTEGER NOT NULL, alerted INTEGER NOT NULL DEFAULT 0, -- 1 if a server_unreachable alert fired created_at TEXT NOT NULL DEFAULT (datetime('now')) , maintenance INTEGER NOT NULL DEFAULT 0)"
+    "sql": "CREATE TABLE server_downtime ( id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT NOT NULL, down_from TEXT NOT NULL, down_to TEXT NOT NULL, duration_sec INTEGER NOT NULL, alerted INTEGER NOT NULL DEFAULT 0, -- 1 if a server_unreachable alert fired created_at TEXT NOT NULL DEFAULT (datetime('now')) , maintenance INTEGER NOT NULL DEFAULT 0, maintenance_sec INTEGER NOT NULL DEFAULT 0, maintenance_windows TEXT NOT NULL DEFAULT '')"
   },
   {
     "type": "table",

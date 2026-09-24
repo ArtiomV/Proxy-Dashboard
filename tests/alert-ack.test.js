@@ -30,6 +30,7 @@ beforeAll(() => {
   // Минимальный server_downtime — нужен для ALTER TABLE в миграции 076.
   db.exec('CREATE TABLE server_downtime (id INTEGER PRIMARY KEY, server_name TEXT, down_from TEXT, down_to TEXT)');
   db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '076_monitoring_v2_stage4.sql'), 'utf8'));
+  db.exec(fs.readFileSync(path.join(__dirname, '..', 'migrations', '103_alert_acks_closed_at.sql'), 'utf8'));   // DEEP-74
   sendMessage = vi.fn().mockResolvedValue({ ok: true, result: { message_id: 777 } });
   tgRequest = vi.fn().mockResolvedValue({ ok: true, result: {} });
   alerts.init({
@@ -110,8 +111,7 @@ describe('B2: подавление алертов ack-ами', () => {
     const hash = alerts._ackHash('server_unreachable', 'srv_ACKS1');
     const r = await alerts.onAlertAck('ack', hash, '@tester');
     expect(r).toMatchObject({ ok: true, ttlHours: 2 });   // дефолт ack_ttl_hours=2
-    alerts.clearCooldown('server_unreachable', p);
-    expect(alerts.trigger('server_unreachable', p)).toBe(false);
+    expect(alerts.trigger('server_unreachable', p)).toBe(false);   // ack глушит повтор
     expect(sendMessage).toHaveBeenCalledTimes(1);   // повтор не ушёл
     await flush();
     expect(tgRequest).toHaveBeenCalledWith('tok', 'editMessageReplyMarkup',
@@ -128,11 +128,15 @@ describe('B2: подавление алертов ack-ами', () => {
     const hash = alerts._ackHash('server_unreachable', 'srv_ACKS2');
     const r = await alerts.onAlertAck('solved', hash, '@boss');
     expect(r.ok).toBe(true);
+    expect(alerts.trigger('server_unreachable', p)).toBe(false);   // solved глушит эпизод
+    // DEEP-74 (2026-09-24): достоверный recovery (clearCooldown) ЗАВЕРШАЕТ
+    // эпизод — следующая НЕЗАВИСИМАЯ авария того же объекта снова доходит.
     alerts.clearCooldown('server_unreachable', p);
-    expect(alerts.trigger('server_unreachable', p)).toBe(false);
-    const row = db.prepare('SELECT kind, until_ts FROM alert_acks WHERE rule_id = ? AND dedup_key = ?')
+    expect(alerts.trigger('server_unreachable', p)).toBe(true);
+    const row = db.prepare('SELECT kind, until_ts, closed_at FROM alert_acks WHERE rule_id = ? AND dedup_key = ?')
       .get('server_unreachable', 'srv_ACKS2');
     expect(row.kind).toBe('solved');
+    expect(row.closed_at).toBeTruthy();   // эпизод закрыт, история сохранена
     expect(row.until_ts).toBeNull();
   });
 
@@ -158,15 +162,17 @@ describe('B2: подавление алертов ack-ами', () => {
     expect(rows[0].until_ts).toBe(Date.now() + 2 * 3600 * 1000);   // TTL 2ч по дефолту
   });
 
-  it('«решено» поверх активного ack → solved-строка, алерт заглушен', async () => {
+  it('«решено» поверх активного ack → solved-строка, эпизод заглушен до recovery', async () => {
     const p = { server: 'ACKS5', error: 't' };
     alerts.trigger('server_unreachable', p);
     const hash = alerts._ackHash('server_unreachable', 'srv_ACKS5');
     await alerts.onAlertAck('ack', hash, '@first');
     const r = await alerts.onAlertAck('solved', hash, '@second');
     expect(r.ok).toBe(true);
+    expect(alerts.trigger('server_unreachable', p)).toBe(false);   // solved глушит эпизод
+    // DEEP-74: recovery завершает эпизод — следующая авария доходит.
     alerts.clearCooldown('server_unreachable', p);
-    expect(alerts.trigger('server_unreachable', p)).toBe(false);
+    expect(alerts.trigger('server_unreachable', p)).toBe(true);
   });
 
   it('неизвестный hash (кнопка после рестарта) → stale', async () => {
@@ -185,5 +191,31 @@ describe('B2: подавление алертов ack-ами', () => {
       const row = db.prepare(`SELECT until_ts FROM alert_acks WHERE rule_id = 'server_unreachable' AND dedup_key = 'srv_ACKS6'`).get();
       expect(row.until_ts).toBe(Date.now() + 4 * 3600 * 1000);
     } finally { delete kv.ack_ttl_hours; }
+  });
+});
+
+// 2026-09-24 · DEEP-73: ok:false Telegram — явный отказ, cooldown не
+// подавляет повтор; 429 учитывает retry_after.
+describe('DEEP-73: явный отказ Telegram не подавляет повтор', () => {
+  it('ok:false 400 → warn, cooldown снят (следующее событие попробует снова)', async () => {
+    sendMessage.mockResolvedValueOnce({ ok: false, error_code: 400, description: 'Bad Request: chat not found' });
+    const p = { server: 'TG73_1', error: 't' };
+    expect(alerts.trigger('server_unreachable', p)).toBe(true);   // bell записан
+    await flush();
+    // Повтор того же события НЕ подавлен отказом первой попытки.
+    sendMessage.mockResolvedValueOnce({ ok: true, result: { message_id: 778 } });
+    expect(alerts.trigger('server_unreachable', p)).toBe(true);
+    expect(sendMessage).toHaveBeenCalledTimes(2);
+  });
+
+  it('ok:false 429 → повтор не раньше retry_after', async () => {
+    sendMessage.mockResolvedValue({ ok: false, error_code: 429, description: 'Too Many Requests', parameters: { retry_after: 3600 } });
+    const p = { server: 'TG73_2', error: 't' };
+    expect(alerts.trigger('server_unreachable', p)).toBe(true);
+    await flush();
+    expect(alerts.trigger('server_unreachable', p)).toBe(false);   // retry_after ещё держит
+    vi.setSystemTime(Date.now() + 3700 * 1000);
+    sendMessage.mockResolvedValue({ ok: true, result: { message_id: 779 } });
+    expect(alerts.trigger('server_unreachable', p)).toBe(true);
   });
 });

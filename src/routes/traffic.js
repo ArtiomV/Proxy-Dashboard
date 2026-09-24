@@ -24,7 +24,7 @@ module.exports = function createTrafficRouter(deps) {
     clients, clientByLogin, clientById,
     dailyTraffic, portKeyToPortName,
     knownModems, SERVER_COUNTRIES,
-    recordDailyTraffic,
+    recordDailyTraffic, replaceDailyTraffic, reloadCacheKeys,
     refreshPortKeyMapping,
     logActivity,
     kvGet,
@@ -53,16 +53,7 @@ r.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
 
   // Collect daily traffic for ports matching this client's portName
   for (const [portId, days] of Object.entries(dailyTraffic)) {
-    let match = false;
     if (portNameFilter === '*') {
-      match = true;
-    } else {
-      const firstDay = Object.values(days)[0];
-      const pn = (firstDay && firstDay.portName) || portNameMap[portId] || portId;
-      if (pn === portNameFilter) match = true;
-    }
-    if (match) {
-      // Filter by date range
       const filtered = {};
       for (const [d, entry] of Object.entries(days)) {
         if (fromDate && d < fromDate) continue;
@@ -72,6 +63,21 @@ r.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
       if (Object.keys(filtered).length > 0) {
         result[portId] = filtered;
       }
+      continue;
+    }
+    // 2026-09-24 · DEEP-64: КАЖДЫЙ день фильтруется по СВОЕМУ историческому
+    // владельцу. Раньше право на ВСЕ дни определялось первым днём объекта
+    // (и порядком вставки дат) — после переназначения alice получала дни bob.
+    const filtered = {};
+    for (const [d, entry] of Object.entries(days)) {
+      const owner = (entry && entry.portName) || portNameMap[portId] || '';
+      if (owner !== portNameFilter) continue;
+      if (fromDate && d < fromDate) continue;
+      if (toDate && d > toDate) continue;
+      filtered[d] = entry;
+    }
+    if (Object.keys(filtered).length > 0) {
+      result[portId] = filtered;
     }
   }
 
@@ -95,7 +101,9 @@ r.get('/api/client/daily_traffic', authMiddleware, async (req, res) => {
     `).all();
     for (const hr of hourlyRows) {
       if (hr.date >= today) continue; // сегодня — живой счётчик ниже
-      if (portNameFilter !== '*' && hr.client_name !== portNameFilter && !result[hr.port_id]) continue;
+      // DEEP-64: hourly — строго по историческому владельцу строки; наличие
+      // порта в result не даёт права на чужие дни (см. фильтр daily выше).
+      if (portNameFilter !== '*' && hr.client_name !== portNameFilter) continue;
       if (fromDate && hr.date < fromDate) continue;
       if (toDate && hr.date > toDate) continue;
       if (!result[hr.port_id]) result[hr.port_id] = {};
@@ -160,10 +168,14 @@ r.get('/api/admin/daily_traffic', authMiddleware, adminMiddleware, async (req, r
   const byClient = {};
   // Historical days from dailyTraffic
   for (const [portId, days] of Object.entries(dailyTraffic)) {
-    const pn = pnMap[portId] || 'Не назначен';
     const srv = portIdToServer[portId] || (portId.match(/^(S\d+)_/) ? portId.match(/^(S\d+)_/)[1] : '');
-    if (!byClient[pn]) byClient[pn] = {};
     for (const [date, entry] of Object.entries(days)) {
+      // 2026-09-24 · DEEP-63: история — по владельцу ИНТЕРВАЛА измерения
+      // (entry.portName на момент записи), а не по текущему live-владельцу
+      // порта: после переназначения 100 байт alice больше не дублируются как
+      // 100 у alice (hourly) + 100 у bob (daily через pnMap).
+      const pn = (entry && entry.portName) || pnMap[portId] || 'Не назначен';
+      if (!byClient[pn]) byClient[pn] = {};
       if (!byClient[pn][date]) byClient[pn][date] = { in: 0, out: 0, servers: {} };
       byClient[pn][date].in += entry.in || 0;
       byClient[pn][date].out += entry.out || 0;
@@ -374,7 +386,12 @@ r.post('/api/admin/backfill_daily_traffic', authMiddleware, adminMiddleware, (re
 
     let written = 0, totalBytes = 0, skippedExisting = 0;
     const force = req.body?.force === true;
+    const touchedKeys = [];
 
+    // 2026-09-24 · DEEP-65/66: force — ЯВНАЯ коррекция REPLACE (не MAX,
+    // иначе «замена» не могла уменьшить завышение); при откате транзакции
+    // затронутые ключи кэша перечитываются из БД — память не расходится с
+    // durable-состоянием (writer менял кэш внутри tx).
     const tx = db.transaction(() => {
       for (const r of rows) {
         const bIn  = Number(r.bytes_in  || 0);
@@ -393,12 +410,22 @@ r.post('/api/admin/backfill_daily_traffic', authMiddleware, adminMiddleware, (re
           }
         }
 
-        recordDailyTraffic(r.port_id, date, bIn, bOut, r.client_name || '');
+        touchedKeys.push(r.port_id);
+        if (force) {
+          replaceDailyTraffic(r.port_id, date, bIn, bOut, r.client_name || '');
+        } else {
+          recordDailyTraffic(r.port_id, date, bIn, bOut, r.client_name || '');
+        }
         written++;
         totalBytes += bIn + bOut;
       }
     });
-    tx();
+    try {
+      tx();
+    } catch (e) {
+      try { reloadCacheKeys(touchedKeys); } catch (_) { /* best-effort */ }
+      throw e;
+    }
 
     const totalGb = Math.round(totalBytes / 1e9 * 1000) / 1000;
     logger.info(`[Backfill] daily_traffic for ${date}: ${written} ports, ${totalGb} GB (skipped ${skippedExisting} existing)`);
@@ -410,7 +437,8 @@ r.post('/api/admin/backfill_daily_traffic', authMiddleware, adminMiddleware, (re
       ok: true, date,
       written, skipped_existing: skippedExisting,
       total_bytes: totalBytes, total_gb: totalGb,
-      port_count: rows.length
+      port_count: rows.length,
+      mode: force ? 'replace' : 'max',   // DEEP-65: force = коррекция, не MAX
     });
   } catch (e) {
     logger.error('[Backfill] daily_traffic error:', e.message);

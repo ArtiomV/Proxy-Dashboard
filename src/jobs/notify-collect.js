@@ -110,13 +110,20 @@ async function scanDisconnected() {
 }
 
 async function passOfflineModems() {
-  const { alerts } = deps;
+  const { alerts, db } = deps;
   if (!deps.trackingDb || !deps.fetchAllServersDataCached || !deps.mergeServerData) return;
+  const maintenance = require('../maintenance');
   for (const o of await scanDisconnected()) {
     const lastMs = o.lastOnline || 0;
     const mins = lastMs ? Math.floor((Date.now() - lastMs) / 60000) : 0;
     const lastOnlineLocal = lastMs ? new Date(lastMs).toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' }) : '—';
     const nick = o.nick || o.key;
+    // DEEP-81 (2026-09-24): единая политика maintenance для event-driven и
+    // collector путей — окно сервера/модема глушит и карточку колокольчика
+    // (раньше collector писал её мимо isInMaintenance, как обычное событие).
+    try {
+      if (maintenance.isInMaintenance(db, { server: o.server, nick }, Date.now())) continue;
+    } catch (_) { /* maintenance best-effort */ }
     alerts.recordBellEvent({
       // Exact canonical alert key: if the tracking alert already wrote the
       // bell card, recordBellEvent sees it and does not create a second one.

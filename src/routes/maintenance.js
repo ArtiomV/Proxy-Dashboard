@@ -32,6 +32,11 @@ module.exports = function (deps) {
       if (Number.isFinite(to_ts) && to_ts <= Date.now()) {
         return res.status(400).json({ error: 'окно полностью в прошлом — на алерты оно уже не повлияет' });
       }
+      // DEEP-80 (2026-09-24): окно модема — только устойчивый ключ
+      // 'server|nick' (голый nick подавлял одноимённые модемы чужих серверов).
+      if (body.target_type === 'modem' && String(body.target_id || '').indexOf('|') < 0) {
+        return res.status(400).json({ error: 'Для модема укажите объект как сервер|ник (например S1|MD2_39)' });
+      }
       const out = maintenance.createWindow(db, {
         target_type: body.target_type,
         target_id: body.target_id,

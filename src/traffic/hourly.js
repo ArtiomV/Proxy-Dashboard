@@ -698,8 +698,14 @@ async function aggregateHourlyTraffic() {
     if (clampedSpikes >= 5) {
       try { require('../telegram/alerts').trigger('traffic_spike_burst', { count: clampedSpikes }); } catch (_) {}
     }
+    // 2026-09-24 · DEEP-35/round14: структурированный результат. Достоверный
+    // нулевой объём (весь флот офлайн) — completed с rows=0, а не ошибка.
+    return { status: 'completed', rows: count, hour: hourStart };
   } catch (e) {
     logger.error('[HourlyAgg] Error: ' + (e.stack || e.message));
+    // Ошибка источника (fetch/SQLite) — failed, а не «успех с 0 строк»:
+    // планировщик обязан отличать провал данных и планировать retry.
+    return { status: 'failed', error: e.message };
   }
 }
 

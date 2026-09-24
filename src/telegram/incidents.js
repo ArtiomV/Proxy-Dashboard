@@ -50,8 +50,18 @@ function create(deps) {
     const out={identity:_identity(p),server:String(p.server||''),nick:String(p.nick||p.imei||''),imei:String(p.imei||''),active:true,
       rules:[ruleId],clients:Array.isArray(p.clients)?p.clients.filter(Boolean):[],last_seen:new Date().toISOString()};
     try{
-      const meta=db.prepare('SELECT operator,nick,imei FROM modem_meta WHERE server_name=? AND (imei=? OR nick=?) ORDER BY updated_at DESC LIMIT 1')
-        .get(out.server,out.imei||out.nick,out.nick);
+      // DEEP-78 (2026-09-24): точный поиск server+imei ПЕРВЫМ; nick —
+      // только fallback (один nick у двух IMEI раньше подменял оператора
+      // более новой чужой строкой → группировка по чужому оператору).
+      let meta=null;
+      if(out.imei){
+        meta=db.prepare('SELECT operator,nick,imei FROM modem_meta WHERE server_name=? AND imei=? ORDER BY updated_at DESC LIMIT 1')
+          .get(out.server,out.imei);
+      }
+      if(!meta&&out.nick){
+        meta=db.prepare('SELECT operator,nick,imei FROM modem_meta WHERE server_name=? AND nick=? ORDER BY updated_at DESC LIMIT 1')
+          .get(out.server,out.nick);
+      }
       if(meta){if(!out.nick)out.nick=meta.nick||'';if(!out.imei)out.imei=meta.imei||'';out.operator=meta.operator||'';}
     }catch(_){}
     if(!out.operator)out.operator=p.operator||'';
@@ -71,15 +81,40 @@ function create(deps) {
     return {modems:incident.members.size,clients:clients.size};
   }
   function _persist(incident,closed){
-    if(!updateStmt)return;
+    if(!updateStmt)return true;   // persistence unavailable — degrade молча
     const counts=_counts(incident),now=new Date().toISOString();
     const members=Array.from(incident.members.values());
+    // DEEP-76 (2026-09-24): ошибка записи — ЯВНЫЙ результат, а не warn в
+    // пустоту. Вызывающий код не объявляет инцидент закрытым при отказе.
     try{updateStmt.run(closed?'closed':'open',now,closed?now:null,closed?Math.max(0,Math.round((Date.now()-incident.openedAt)/1000)):null,
-      counts.modems,counts.clients,JSON.stringify(members),JSON.stringify(Array.from(incident.reasons)),incident.id);}catch(e){logger.warn('[Incidents] update: '+e.message);}
+      counts.modems,counts.clients,JSON.stringify(members),JSON.stringify(Array.from(incident.reasons)),incident.id);return true;}
+    catch(e){logger.warn('[Incidents] update: '+e.message);return false;}
   }
   function _openIncident(group,candidates){
     let incident=Array.from(open.values()).find(x=>x.group===group);
     const first=candidates[0],now=Date.now();
+    // DEEP-79 (2026-09-24): участник, открывшийся в НОВОЙ группе, деактивируем
+    // в прежних инцидентах — иначе при смене/уточнении оператора один и тот же
+    // identity оставался active в двух инцидентах, а recovery закрывало только
+    // первый по порядку обхода Map.
+    for(const c of candidates){
+      for(const other of open.values()){
+        if(other.group===group)continue;
+        const m=other.members.get(c.member.identity);
+        if(m&&m.active){
+          m.active=false;m.moved_to=group;
+          const active=Array.from(other.members.values()).filter(x=>x.active);
+          if(active.length){_persist(other,false);}
+          else{
+            const dur=Math.max(0,Math.round((Date.now()-other.openedAt)/1000));
+            const oc=_counts(other);
+            if(_persist(other,true)){open.delete(other.id);
+              emit('fleet_incident_closed',{incident_id:other.id,server:other.server,operator:other.operator,
+                duration_sec:dur,modems:oc.modems,clients:oc.clients});}
+          }
+        }
+      }
+    }
     if(!incident){
       const operator=_normOperator(first.payload.operator||first.member.operator);
       const server=first.member.server;
@@ -143,22 +178,59 @@ function create(deps) {
       if(c.member.rules.length){c.ruleId=c.member.rules[0];return {handled:true,accepted:true};}
       clearTimeout(c.timer);pending.delete(identity);return {handled:true,accepted:true};
     }
-    for(const incident of open.values()){
+    let any=false;
+    // DEEP-79: recovery применяем во ВСЕХ инцидентах с этим identity, а не
+    // только в первом по обходу Map (см. деактивацию при смене группы).
+    for(const incident of Array.from(open.values())){
       const member=incident.members.get(identity);
       if(!member)continue;
+      any=true;
       member.rules=(member.rules||[]).filter(r=>r!==recoveredRule);
       member.active=member.rules.length>0;
       if(!member.active)member.recovered_at=new Date().toISOString();
       incident.lastSeenAt=Date.now();
       const active=Array.from(incident.members.values()).filter(m=>m.active);
-      if(active.length){_persist(incident,false);return {handled:true,accepted:true};}
+      if(active.length){_persist(incident,false);continue;}
       const counts=_counts(incident),durationSec=Math.max(0,Math.round((Date.now()-incident.openedAt)/1000));
-      _persist(incident,true);open.delete(incident.id);
+      // DEEP-76: ошибка persistence — инцидент НЕ объявляем закрытым: emit и
+      // удаление из Map только после подтверждённой записи (иначе SQLite
+      // хранил open, память — closed, после рестарта эпизод воскресал).
+      if(!_persist(incident,true)){
+        const msg='[Incidents] close не сохранён (' + incident.id + ') — инцидент остаётся open, повтор при следующем событии';
+        if(logger.error)logger.error(msg);else logger.warn(msg);
+        continue;
+      }
+      open.delete(incident.id);
       emit('fleet_incident_closed',{incident_id:incident.id,server:incident.server,operator:incident.operator,
         duration_sec:durationSec,modems:counts.modems,clients:counts.clients});
-      return {handled:true,accepted:true};
     }
-    return {handled:false};
+    return any?{handled:true,accepted:true}:{handled:false};
+  }
+
+  // DEEP-75 (2026-09-24): согласование сохранённых инцидентов со свежими
+  // наблюдениями. Детектор шлёт recovery только на ПЕРЕХОДЕ своего локального
+  // состояния — модем, восстановившийся во время рестарта, перехода не даёт,
+  // и загруженный из SQLite инцидент висел открытым вечно. Вызывается из
+  // детекторов после цикла опроса: подтверждённо онлайн-участники закрываются
+  // тем же путём, что recovery (порог — факт онлайна в свежем фиде).
+  function reconcile(entries){
+    for(const e of entries||[]){
+      if(!e||e.online!==true)continue;
+      const identity=String(e.server||'')+'|'+String(e.imei||e.nick||'');
+      for(const incident of Array.from(open.values())){
+        const member=incident.members.get(identity);
+        if(!member||!member.active)continue;
+        member.active=false;member.rules=[];member.recovered_at=new Date().toISOString();
+        incident.lastSeenAt=Date.now();
+        const active=Array.from(incident.members.values()).filter(m=>m.active);
+        if(active.length){_persist(incident,false);continue;}
+        const counts=_counts(incident),durationSec=Math.max(0,Math.round((Date.now()-incident.openedAt)/1000));
+        if(!_persist(incident,true))continue;
+        open.delete(incident.id);
+        emit('fleet_incident_closed',{incident_id:incident.id,server:incident.server,operator:incident.operator,
+          duration_sec:durationSec,modems:counts.modems,clients:counts.clients});
+      }
+    }
   }
   function handle(ruleId,payload){
     if(!_enabled())return {handled:false};
@@ -167,7 +239,7 @@ function create(deps) {
     return {handled:false};
   }
   function shutdown(){for(const c of pending.values())clearTimeout(c.timer);pending.clear();}
-  return {handle,shutdown,_pending:pending,_open:open};
+  return {handle,shutdown,reconcile,_pending:pending,_open:open};
 }
 
 module.exports={create,OPEN_RULES,RECOVERY_RULES};

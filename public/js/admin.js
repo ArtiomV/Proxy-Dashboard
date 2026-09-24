@@ -159,11 +159,13 @@ function switchSettingsSection(name){
 // «Грязные» поля настроек: пока админ редактирует форму (или держит фокус в
 // поле), авторефреш каждые REFRESH_MS не должен перезаписывать значения —
 // switchMainTab('analytics',…,auto=true) пропускает перезагрузку секции.
-// Флаги снимаются после любого успешного сохранения (см. hook в api(), utils.js).
-document.addEventListener('input',function(e){var t=e.target;if(t&&t.dataset&&t.closest&&t.closest('#tab-analytics')&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))t.dataset.dirty='1'});
-document.addEventListener('change',function(e){var t=e.target;if(t&&t.dataset&&t.closest&&t.closest('#tab-analytics')&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))t.dataset.dirty='1'});
-function _analyticsDirty(){var t=document.getElementById('tab-analytics');if(!t)return false;var ae=document.activeElement;if(ae&&t.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return true;return !!t.querySelector('[data-dirty="1"]')}
-function _clearSettingsDirty(){var t=document.getElementById('tab-analytics');if(!t)return;t.querySelectorAll('[data-dirty="1"]').forEach(function(el){el.dataset.dirty=''})}
+// 2026-09-24 · DEEP-58: dirty — момент ИЗМЕНЕНИЯ поля (ts), а не просто '1';
+// снимаются только поля, сохранённые ДО начала save-запроса (см. settings.js
+// apiSettingsPut) — правка во время сохранения флаг не теряет.
+document.addEventListener('input',function(e){var t=e.target;if(t&&t.dataset&&t.closest&&t.closest('#tab-analytics')&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))t.dataset.dirty=String(Date.now())});
+document.addEventListener('change',function(e){var t=e.target;if(t&&t.dataset&&t.closest&&t.closest('#tab-analytics')&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))t.dataset.dirty=String(Date.now())});
+function _analyticsDirty(){var t=document.getElementById('tab-analytics');if(!t)return false;var ae=document.activeElement;if(ae&&t.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return true;return !!t.querySelector('[data-dirty]:not([data-dirty=""])')}
+function _clearSettingsDirty(savedBeforeTs){var t=document.getElementById('tab-analytics');if(!t)return;t.querySelectorAll('[data-dirty]:not([data-dirty=""])').forEach(function(el){if(savedBeforeTs==null||Number(el.dataset.dirty)<=savedBeforeTs)el.dataset.dirty=''})}
 function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});if(el)el.classList.add('active');var tc=document.getElementById('tab-'+name);if(tc)tc.classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'&&!auto){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients'&&!auto)renderClients();if(name==='analytics'&&!auto){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
 
 // Polling/SSE refreshes already rendered blocks in place. Re-entering the tab
@@ -1564,17 +1566,25 @@ function refreshNotifBadge(){
     .catch(function(){});
 }
 // Full fetch, called when the panel opens or after a mutation.
+var _notifReqGen=0;   // DEEP-72 (2026-09-24): generation guard
 function refreshNotifPanel(){
-  var url=API+'/api/admin/notifications?filter='+encodeURIComponent(window._notifFilter)+'&limit=200';
+  var gen=++_notifReqGen;
+  var filter=window._notifFilter;
+  var url=API+'/api/admin/notifications?filter='+encodeURIComponent(filter)+'&limit=200';
   api(url)
     .then(function(d){if(d&&d.__status>=400)throw new Error('HTTP '+d.__status);return d})
     .then(function(d){
+      // DEEP-72: ответ применяется только к АКТУАЛЬНОМУ запросу/фильтру —
+      // медленный all больше не затирает свежий critical (и наоборот).
+      if(gen!==_notifReqGen||filter!==window._notifFilter)return;
       window._notifs=Array.isArray(d.notifications)?d.notifications:[];
       window._notifLastFetchAt=Date.now();
       renderNotifPanel();
       refreshNotifBadge();
     })
     .catch(function(e){
+      // Устаревшая ошибка не заменяет актуальный список сообщением об ошибке.
+      if(gen!==_notifReqGen||filter!==window._notifFilter)return;
       var list=document.getElementById('notifList');
       if(list)list.innerHTML='<div class="notif-empty" style="color:var(--danger)">Ошибка: '+esc(e.message)+'</div>';
     });
@@ -1640,14 +1650,24 @@ function _notifNavigate(n){
   try{
     if(n.entity_kind==='modem'){
       switchMainTab('modems');
-      if(n.entity_id){
-        // Try to find the modem by nick across servers and open its detail.
-        var nick=String(n.entity_id);
-        var found=null;
-        var mm=currentData&&currentData._modemMap||{};
-        for(var k in mm){if(mm[k]&&mm[k].nick===nick){found=mm[k];break;}}
-        if(found&&typeof openDetailAtTab==='function')openDetailAtTab(nick,found.server,'info');
+      var p=n.payload||{};
+      var mm=currentData&&currentData._modemMap||{};
+      var found=null,k;
+      // DEEP-71 (2026-09-24): событие адресуется парой server+imei из
+      // payload — одинаковый nick на S1/S4 больше не открывает чужую
+      // карточку. Fallback по nick — только при ЕДИНСТВЕННОМ совпадении.
+      if(p.server&&p.imei){
+        for(k in mm){if(mm[k]&&mm[k].server===p.server&&(k===p.imei||mm[k].imei===p.imei)){found=mm[k];break;}}
       }
+      if(!found&&p.server&&n.entity_id){
+        for(k in mm){if(mm[k]&&mm[k].server===p.server&&mm[k].nick===String(n.entity_id)){found=mm[k];break;}}
+      }
+      if(!found&&n.entity_id){
+        var nick=String(n.entity_id),hits=[];
+        for(k in mm){if(mm[k]&&mm[k].nick===nick)hits.push(mm[k]);}
+        if(hits.length===1)found=hits[0];   // неоднозначность — не открываем произвольную
+      }
+      if(found&&typeof openDetailAtTab==='function')openDetailAtTab(found.nick,found.server,'info');
     } else if(n.entity_kind==='client'){
       switchMainTab('clients');
       if(n.entity_id&&typeof showClientDetail==='function'){setTimeout(function(){showClientDetail(n.entity_id)},150);}
