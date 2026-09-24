@@ -3,7 +3,7 @@
 const { parseBwToBytes, normalizeOperator } = require('../utils/traffic');
 
 let db, logger, fetchAllServersDataCached, refreshPortKeyMapping, portKeyToPortNameRef;
-let _htUpsert, _htCleanup, _metaOpGet, _pcOpGet, _snapUpsert, _snapGet, _snapGetAll;
+let _htUpsert, _htCleanup, _metaOpGet, _pcOpGet, _snapUpsert, _snapUpsertPreserve, _snapGet, _snapGetAll;
 let SERVER_COUNTRIES = {};
 let logActivity = () => {};   // Stage 18.3: optional dep — writes spike-protection events to system_log
 
@@ -21,6 +21,7 @@ function init(deps) {
   _metaOpGet = deps._metaOpGet;
   _pcOpGet = deps._pcOpGet;   // proxy_checks latest-operator fallback (optional dep)
   _snapUpsert = deps._snapUpsert;
+  _snapUpsertPreserve = deps._snapUpsertPreserve || deps._snapUpsert;   // DEEP-28: refresh без «омоложения» измерения
   _snapGet = deps._snapGet;
   _snapGetAll = deps._snapGetAll;
   SERVER_COUNTRIES = deps.SERVER_COUNTRIES || {};
@@ -71,8 +72,14 @@ function migrateSnapshotsToTable() {
   }
 }
 
-function upsertSnap(portId, fields) {
-  _snapUpsert.run(
+function _utcNowStr() {
+  // Формат SQLite datetime('now') — last_updated_at в кэше совпадает с БД.
+  return new Date().toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function upsertSnap(portId, fields, opts) {
+  const preserveTs = !!(opts && opts.preserveTs);
+  (preserveTs ? _snapUpsertPreserve : _snapUpsert).run(
     portId,
     fields.day_in || 0, fields.day_out || 0,
     fields.month_in || 0, fields.month_out || 0,
@@ -82,8 +89,16 @@ function upsertSnap(portId, fields) {
     fields.mon_at_last_hour_start_in || 0, fields.mon_at_last_hour_start_out || 0,
     fields.pending || 0
   );
-  // Update in-memory cache
-  snapCache.set(portId, { port_id: portId, ...fields });
+  // DEEP-28: кэш обязан отражать то, что реально лежит в БД. Раньше поля
+  // captured_at/last_updated_at в память не писались — snapRecent и
+  // gap-detection (missedHours) после записи работали по устаревшей дате.
+  const prev = snapCache.get(portId);
+  snapCache.set(portId, {
+    port_id: portId, ...fields,
+    last_updated_at: preserveTs
+      ? (prev && prev.last_updated_at) || _utcNowStr()
+      : _utcNowStr(),
+  });
 }
 
 // Startup: refresh snapshots from live data WITHOUT writing to traffic_hourly
@@ -113,6 +128,10 @@ async function refreshSnapshotsOnly() {
             // so the next aggregation computes delta from where it left off.
             // Previously day_in was overwritten with live counter, losing traffic
             // between last aggregation and restart.
+            // DEEP-28 (2026-09-24): preserveTs — refresh НЕ передвигает
+            // last_updated_at: это не новое измерение, а подтягивание счётчиков
+            // при старте; иначе рестарт «омолаживал» baseline и ломал
+            // gap-detection на первые часы после перезапуска.
             upsertSnap(fullPortId, {
               day_in: snap ? snap.day_in : dayIn,
               day_out: snap ? snap.day_out : dayOut,
@@ -125,7 +144,7 @@ async function refreshSnapshotsOnly() {
               mon_at_last_hour_start_in: snap ? snap.mon_at_last_hour_start_in : monIn,
               mon_at_last_hour_start_out: snap ? snap.mon_at_last_hour_start_out : monOut,
               pending: 0,
-            });
+            }, { preserveTs: true });
             updated++;
           } else if (!snap) {
             upsertSnap(fullPortId, {
@@ -174,7 +193,7 @@ async function aggregateHourlyTraffic() {
     const _smoothNeighboursStmt = db.prepare(`
       SELECT bytes_in, bytes_out
       FROM traffic_hourly
-      WHERE nick = ? AND client_name = ? AND uncertain = 0
+      WHERE nick = ? AND client_name = ? AND server_name = ? AND uncertain = 0
         AND hour_start >= datetime(?, '-' || ? || ' hours')
         AND hour_start <  datetime(?, '+' || ? || ' hours')
         AND hour_start != ?
@@ -184,6 +203,26 @@ async function aggregateHourlyTraffic() {
       const s = arr.slice().sort((a, b) => a - b);
       return s[Math.floor(s.length / 2)];
     };
+    // DEEP-31 (2026-09-24): сверхпороговый час — карантин (uncertain=4):
+    // расчётные байты 0 (в суммы и биллинг не попадают), raw-наблюдение
+    // сохранено в raw_bytes_* для пересчёта — не бесследный пропуск с
+    // передвинутым baseline, как раньше.
+    function quarantineHour(srv, fullPortId, nick, operator, clientName, hourStart, rawIn, rawOut) {
+      _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart,
+        0, 0, 4, Math.round(rawIn), Math.round(rawOut));
+      logger.warn(`[HourlyAgg] quarantined: ${nick} raw=${((rawIn + rawOut) / 1e9).toFixed(2)}GB >= cap — bytes=0, uncertain=4`);
+      try {
+        logActivity('billing', 'warn', 'traffic_quarantined', nick,
+          `${nick} (${clientName || 'no-client'}): raw=${((rawIn + rawOut) / 1e9).toFixed(2)}GB >= 20GB cap — час в карантине (uncertain=4, bytes=0)`,
+          {
+            nick, server: srv, port_id: fullPortId, client: clientName, operator,
+            hour_start: hourStart,
+            raw_bytes_in: Math.round(rawIn), raw_bytes_out: Math.round(rawOut),
+            raw_total_gb: +((rawIn + rawOut) / 1e9).toFixed(3),
+            reason: 'max_hourly_bytes_exceeded',
+          });
+      } catch (_) { /* best-effort */ }
+    }
     // Spike protection: per-port average over the last 24 clean hours.
     // Used at TZ-reset detection — see section 3.
     const SPIKE_TRIGGER_MULT = 3;
@@ -221,7 +260,12 @@ async function aggregateHourlyTraffic() {
           if (!imei) continue;
           const modemPorts = portsMap[imei] || [];
           for (const p of modemPorts) {
-            portIdInfo[p.portID] = { nick, operator, clientName: p.portName || '' };
+            // DEEP-33 (2026-09-24): клонированный IMEI встречается у двух
+            // ников — НЕ перезаписываем атрибуцию порта последним модемом
+            // (first wins), иначе трафик порта приписывался чужому нику.
+            if (!portIdInfo[p.portID]) {
+              portIdInfo[p.portID] = { nick, operator, clientName: p.portName || '' };
+            }
           }
           if (modemPorts.length === 0) {
             portIdInfo['_imei_' + imei] = { nick, operator, clientName: '' };
@@ -349,12 +393,13 @@ async function aggregateHourlyTraffic() {
             // If the increment is far above this port's recent average, clamp
             // it and mark uncertain so the UI doesn't show a misleading peak.
             let resetUnc = 0;
+            let clampRawIn = null, clampRawOut = null;   // DEEP-31: raw до clamp
             const portAvg = portAvgBytes[fullPortId] || 0;
             const incTotal = incIn + incOut;
             if (portAvg > SPIKE_FLOOR && incTotal > portAvg * SPIKE_TRIGGER_MULT) {
               const cap = portAvg * SPIKE_CLAMP_MULT;
               const ratio = cap / incTotal;
-              const rawIn = incIn, rawOut = incOut;
+              clampRawIn = incIn; clampRawOut = incOut;
               incIn  = Math.floor(incIn  * ratio);
               incOut = Math.floor(incOut * ratio);
               resetUnc = 2;
@@ -400,8 +445,12 @@ async function aggregateHourlyTraffic() {
               baseIn   = Math.max(0, dayIn);
               baseOut  = Math.max(0, dayOut);
             }
-            if (storeIn + storeOut > 0 && storeIn + storeOut < MAX_HOURLY_BYTES) {
-              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, storeIn, storeOut, resetUnc);
+            if (storeIn + storeOut > 0) {
+              if (storeIn + storeOut >= MAX_HOURLY_BYTES) {
+                quarantineHour(srv, fullPortId, nick, operator, clientName, hourStart, storeIn, storeOut);
+              } else {
+                _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, storeIn, storeOut, resetUnc, clampRawIn, clampRawOut);
+              }
               count++;
             }
             upsertSnap(fullPortId, {
@@ -423,8 +472,12 @@ async function aggregateHourlyTraffic() {
           if (monthReset) {
             const incIn  = Math.max(0, pmIn  - snap.mon_at_last_hour_start_in);
             const incOut = Math.max(0, pmOut - snap.mon_at_last_hour_start_out);
-            if (incIn + incOut > 0 && incIn + incOut < MAX_HOURLY_BYTES) {
-              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut, 0);
+            if (incIn + incOut > 0) {
+              if (incIn + incOut >= MAX_HOURLY_BYTES) {
+                quarantineHour(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut);
+              } else {
+                _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut, 0, null, null);
+              }
               count++;
             }
             // BUG-FIX: set month baseline to 0 so next cross-validation
@@ -525,7 +578,14 @@ async function aggregateHourlyTraffic() {
           }
 
           const totalInc = finalIncIn + finalIncOut;
-          if (totalInc > 0 && totalInc < MAX_HOURLY_BYTES) {
+          if (totalInc >= MAX_HOURLY_BYTES) {
+            // DEEP-31: сверхпороговый час — карантин вместо бесследного
+            // пропуска (baseline при этом передвигается штатно ниже, но
+            // наблюдение сохранено в raw_*, в суммы не попадает).
+            quarantineHour(srv, fullPortId, nick, operator, clientName, hourStart, finalIncIn, finalIncOut);
+            count++;
+            uncertainCount++;
+          } else if (totalInc > 0) {
             if (missedHours > 1) {
               // Split delta evenly across missed hours, keep the current hour row as uncertain=1
               const splitCount = missedHours;
@@ -539,7 +599,7 @@ async function aggregateHourlyTraffic() {
                 const bin  = perHourIn  + (remIn  > 0 ? 1 : 0);  if (remIn  > 0) remIn--;
                 const bout = perHourOut + (remOut > 0 ? 1 : 0);  if (remOut > 0) remOut--;
                 if (bin + bout > 0) {
-                  _htUpsert.run(srv, fullPortId, nick, operator, clientName, bucketHourStart, bin, bout, 1);
+                  _htUpsert.run(srv, fullPortId, nick, operator, clientName, bucketHourStart, bin, bout, 1, null, null);
                 }
               }
               count++;
@@ -550,9 +610,10 @@ async function aggregateHourlyTraffic() {
               // with median of clean neighbours so a counter glitch doesn't
               // inflate the heatmap or billing. Fallback: write as-is when
               // there aren't enough clean neighbours (sparse history).
+              let smoothRawIn = null, smoothRawOut = null;   // DEEP-31: raw до сглаживания
               if (uncertain === 2) {
                 const neigh = _smoothNeighboursStmt.all(
-                  nick, clientName,
+                  nick, clientName, srv,
                   hourStart, SMOOTH_WINDOW_HOURS,
                   hourStart, SMOOTH_WINDOW_HOURS,
                   hourStart
@@ -560,7 +621,7 @@ async function aggregateHourlyTraffic() {
                 if (neigh.length >= SMOOTH_MIN_NEIGHBOURS) {
                   const newIn  = _median(neigh.map(n => n.bytes_in  || 0));
                   const newOut = _median(neigh.map(n => n.bytes_out || 0));
-                  const rawIn = finalIncIn, rawOut = finalIncOut;
+                  smoothRawIn = finalIncIn; smoothRawOut = finalIncOut;
                   logger.info(`[HourlyAgg] smoothed uncertain=2: nick=${nick} client=${clientName} ${(finalIncIn/1e6).toFixed(0)}+${(finalIncOut/1e6).toFixed(0)}MB → ${(newIn/1e6).toFixed(0)}+${(newOut/1e6).toFixed(0)}MB (median of ${neigh.length})`);
                   finalIncIn = newIn;
                   finalIncOut = newOut;
@@ -568,11 +629,11 @@ async function aggregateHourlyTraffic() {
                   smoothedCount++;
                   try {
                     logActivity('billing', 'info', 'traffic_smoothed', nick,
-                      `${nick} (${clientName||'no-client'}): raw=${((rawIn+rawOut)/1e6).toFixed(1)}MB → median=${((newIn+newOut)/1e6).toFixed(1)}MB (${neigh.length} neighbours)`,
+                      `${nick} (${clientName||'no-client'}): raw=${((smoothRawIn+smoothRawOut)/1e6).toFixed(1)}MB → median=${((newIn+newOut)/1e6).toFixed(1)}MB (${neigh.length} neighbours)`,
                       {
                         nick, server: srv, port_id: fullPortId, client: clientName, operator,
                         hour_start: hourStart,
-                        raw_bytes_in: rawIn, raw_bytes_out: rawOut, raw_total_mb: +((rawIn+rawOut)/1e6).toFixed(1),
+                        raw_bytes_in: smoothRawIn, raw_bytes_out: smoothRawOut, raw_total_mb: +((smoothRawIn+smoothRawOut)/1e6).toFixed(1),
                         corrected_bytes_in: newIn, corrected_bytes_out: newOut, corrected_total_mb: +((newIn+newOut)/1e6).toFixed(1),
                         neighbours_used: neigh.length,
                         reason: 'median_smoothing',
@@ -594,7 +655,7 @@ async function aggregateHourlyTraffic() {
                   } catch (_) { /* best-effort */ }
                 }
               }
-              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, finalIncIn, finalIncOut, uncertain);
+              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, finalIncIn, finalIncOut, uncertain, smoothRawIn, smoothRawOut);
               count++;
             }
           }

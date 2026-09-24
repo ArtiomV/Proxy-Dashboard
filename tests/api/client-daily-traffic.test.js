@@ -17,6 +17,10 @@ const noop = () => {};
 const logger = { info: noop, warn: noop, error: noop };
 
 let db, app, dailyTraffic;
+// Даты — динамические: админский override режет traffic_hourly по 31 дню,
+// захардкоженная дата 23.08 «протухла» и тест молча перестал проверять merge.
+const DAY = new Date(Date.now() - 2 * 864e5).toISOString().slice(0, 10);              // позавчера
+const TODAY_MSK = new Date(Date.now() + 3 * 36e5).toISOString().slice(0, 10);
 
 beforeEach(() => {
   db = new Database(':memory:');
@@ -27,21 +31,21 @@ beforeEach(() => {
     uncertain INTEGER DEFAULT 0, UNIQUE(port_id, hour_start))`);
 
   dailyTraffic = {
-    // Заниженное значение за 23.08 (счётчик бокса обнулился рестартом)
-    'S1_portA': { '2026-08-23': { in: 100e9, out: 50e9, portName: 'WildBox' } },
+    // Заниженное значение (счётчик бокса обнулился рестартом)
+    'S1_portA': { [DAY]: { in: 100e9, out: 50e9, portName: 'WildBox' } },
     // Корректное значение: daily_traffic больше почасовой реконструкции
-    'S1_portB': { '2026-08-23': { in: 400e9, out: 100e9, portName: 'WildBox' } },
+    'S1_portB': { [DAY]: { in: 400e9, out: 100e9, portName: 'WildBox' } },
   };
 
   const ins = db.prepare(`INSERT INTO traffic_hourly
     (server_name, port_id, client_name, hour_start, bytes_in, bytes_out) VALUES (?,?,?,?,?,?)`);
-  // 23.08 МСК = 22.08 21:00 UTC .. 23.08 20:59 UTC. 300 GB суммарно по portA.
-  ins.run('S1', 'S1_portA', 'WildBox', '2026-08-23 05:00:00', 200e9, 80e9);
-  ins.run('S1', 'S1_portA', 'WildBox', '2026-08-23 06:00:00', 20e9, 0);
+  // 300 GB суммарно по portA за тот же МСК-день.
+  ins.run('S1', 'S1_portA', 'WildBox', DAY + ' 05:00:00', 200e9, 80e9);
+  ins.run('S1', 'S1_portA', 'WildBox', DAY + ' 06:00:00', 20e9, 0);
   // portB: почасовая реконструкция МЕНЬШЕ daily_traffic — не должна затирать
-  ins.run('S1', 'S1_portB', 'WildBox', '2026-08-23 05:00:00', 100e9, 50e9);
+  ins.run('S1', 'S1_portB', 'WildBox', DAY + ' 05:00:00', 100e9, 50e9);
   // Другой клиент — не должен попасть в выдачу WildBox
-  ins.run('S1', 'S1_portX', 'OtherClient', '2026-08-23 05:00:00', 999e9, 999e9);
+  ins.run('S1', 'S1_portX', 'OtherClient', DAY + ' 05:00:00', 999e9, 999e9);
 
   app = express();
   app.use(express.json());
@@ -52,7 +56,7 @@ beforeEach(() => {
     fetchAllServersDataCached: async () => [],
     mergeServerData: () => ({ bandwidth: {} }),
     fetchApi: async () => ({}), postApi: async () => ({}), findServer: () => null,
-    getMoscowToday: () => '2026-08-24',
+    getMoscowToday: () => TODAY_MSK,
     trafficBytesToGb: (b) => b / 1e9, parseBwToBytes: () => 0, parseTrafficValue: () => 0,
     normalizeOperator: (s) => s,
     clients: [], clientByLogin: new Map([['wildbox', { portName: 'WildBox' }]]), clientById: new Map(),
@@ -67,7 +71,7 @@ describe('GET /api/client/daily_traffic — traffic_hourly MAX-override', () => 
   it('заниженный daily_traffic поднимается до traffic_hourly за прошлый день', async () => {
     const res = await request(app).get('/api/client/daily_traffic');
     expect(res.status).toBe(200);
-    const day = res.body.daily['S1_portA']['2026-08-23'];
+    const day = res.body.daily['S1_portA'][DAY];
     expect(day.in).toBe(220e9);
     expect(day.out).toBe(80e9);
     expect(day.portName).toBe('WildBox');
@@ -75,7 +79,7 @@ describe('GET /api/client/daily_traffic — traffic_hourly MAX-override', () => 
 
   it('корректный daily_traffic НЕ затирается меньшей почасовой реконструкцией', async () => {
     const res = await request(app).get('/api/client/daily_traffic');
-    const day = res.body.daily['S1_portB']['2026-08-23'];
+    const day = res.body.daily['S1_portB'][DAY];
     expect(day.in).toBe(400e9);
     expect(day.out).toBe(100e9);
   });

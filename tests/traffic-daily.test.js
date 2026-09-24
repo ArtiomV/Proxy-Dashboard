@@ -24,7 +24,8 @@ beforeEach(() => {
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     server_name TEXT, port_id TEXT, nick TEXT, operator TEXT, client_name TEXT,
     hour_start TEXT, bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0,
-    uncertain INTEGER DEFAULT 0, UNIQUE(port_id, hour_start))`);
+    uncertain INTEGER DEFAULT 0, raw_bytes_in INTEGER DEFAULT NULL, raw_bytes_out INTEGER DEFAULT NULL,
+    UNIQUE(port_id, hour_start))`);
   db.exec(`CREATE TABLE hourly_snapshots (
     port_id TEXT PRIMARY KEY,
     day_in INTEGER, day_out INTEGER, month_in INTEGER, month_out INTEGER,

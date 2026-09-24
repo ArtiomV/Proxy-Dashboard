@@ -1067,6 +1067,7 @@ _dailyTrafficWriter.init({ dailyUpsertStmt: _dtUpsert, dailyTraffic });
 const { recordDailyTraffic } = _dailyTrafficWriter;
 const _htUpsert = trafficDb.hourlyUpsertStmt();
 const _snapUpsert = trafficDb.snapshotUpsertStmt();
+const _snapUpsertPreserve = trafficDb.snapshotUpsertPreserveStmt();   // DEEP-28
 const _snapGet = trafficDb.snapshotGetStmt();
 const _snapGetAll = trafficDb.snapshotGetAllStmt();
 const _apiUsageInsert = trafficDb.apiUsageInsertStmt();
@@ -2966,6 +2967,7 @@ hourlyTraffic.init({
   _metaOpGet,
   _pcOpGet,
   _snapUpsert,
+  _snapUpsertPreserve,
   _snapGet,
   _snapGetAll,
   SERVER_COUNTRIES,
@@ -2994,6 +2996,7 @@ const modemRate = require('./src/jobs/modem-rate').create({ db, logger });
 // Тикает из startup.js каждые httpcheck_interval_min.
 const httpCheck = require('./src/jobs/http-check').create({
   db, logger, alerts, getSetting, fetchAllServersDataCached, apiServers,
+  knownModems,   // DEEP-33: roster-binding nick→portId (клон IMEI)
   events: eventsBus,   // SSE (23.08): httpcheck_result после прогона
 });
 // A4 (23.08): объёмные алерты с пакетами операторов (трафик из traffic_hourly).

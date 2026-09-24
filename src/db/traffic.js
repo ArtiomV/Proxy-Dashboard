@@ -20,15 +20,22 @@ function init(db) {
     bytes_out = MAX(bytes_out, excluded.bytes_out),
     client_name = CASE WHEN excluded.client_name != '' THEN excluded.client_name ELSE client_name END`);
 
-  // traffic_hourly: keyed by (port_id, hour_start). "If hour already
-  // recorded, don't overwrite" — protects against double-counting if
-  // the aggregator runs twice for the same hour.
-  S.hourlyUpsert = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+  // traffic_hourly: keyed by (port_id, hour_start). 2026-09-24 · DEEP-29:
+  // конфликт — АДДИТИВНАЯ дельта, а не «оставить первую ненулевую запись».
+  // Старый KEEP-контракт терял новую дельту при повторном прогоне агрегатора
+  // внутри часа (записи 100 и 200 в один bucket давали 100, а baseline уже
+  // передвинулся). Аддитивность безопасна дисциплиной baseline: дельта каждый
+  // раз вычисляется от durable-снимка и снимок передвигается в той же
+  // транзакции — повтор идентичного фида даёт дельту 0, а не задвоение.
+  // raw_* (миграция 101): исходное наблюдение до clamp/smoothing/карантина.
+  S.hourlyUpsert = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain, raw_bytes_in, raw_bytes_out)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(port_id, hour_start) DO UPDATE SET
-    bytes_in  = CASE WHEN bytes_in  = 0 THEN excluded.bytes_in  ELSE bytes_in  END,
-    bytes_out = CASE WHEN bytes_out = 0 THEN excluded.bytes_out ELSE bytes_out END,
-    uncertain = CASE WHEN excluded.uncertain > uncertain THEN excluded.uncertain ELSE uncertain END`);
+    bytes_in  = bytes_in  + excluded.bytes_in,
+    bytes_out = bytes_out + excluded.bytes_out,
+    raw_bytes_in  = COALESCE(excluded.raw_bytes_in,  raw_bytes_in),
+    raw_bytes_out = COALESCE(excluded.raw_bytes_out, raw_bytes_out),
+    uncertain = MAX(uncertain, excluded.uncertain)`);
 
   // hourly_snapshots: rolling view of "where were counters at hour boundary"
   // — used for cross-validation between live counters and computed deltas.
@@ -51,6 +58,26 @@ function init(db) {
 
   S.snapshotGet = db.prepare('SELECT * FROM hourly_snapshots WHERE port_id = ?');
   S.snapshotGetAll = db.prepare('SELECT * FROM hourly_snapshots');
+
+  // 2026-09-24 · DEEP-28: refresh при старте обновляет счётчики, но НЕ
+  // «омолаживает» измерение: last_updated_at — время последней АГРЕГАЦИИ
+  // (фактического снятия дельты), а не записи БД. Иначе рестарт сдвигал
+  // gap-detection (missedHours/snapRecent) на старом baseline.
+  S.snapshotUpsertPreserve = db.prepare(`INSERT INTO hourly_snapshots
+    (port_id, day_in, day_out, month_in, month_out, yesterday_in, yesterday_out,
+     prev_month_in, prev_month_out, day_at_last_hour_start_in, day_at_last_hour_start_out,
+     mon_at_last_hour_start_in, mon_at_last_hour_start_out, pending, captured_at, last_updated_at)
+    VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,datetime('now'),datetime('now'))
+    ON CONFLICT(port_id) DO UPDATE SET
+    day_in=excluded.day_in, day_out=excluded.day_out,
+    month_in=excluded.month_in, month_out=excluded.month_out,
+    yesterday_in=excluded.yesterday_in, yesterday_out=excluded.yesterday_out,
+    prev_month_in=excluded.prev_month_in, prev_month_out=excluded.prev_month_out,
+    day_at_last_hour_start_in=excluded.day_at_last_hour_start_in,
+    day_at_last_hour_start_out=excluded.day_at_last_hour_start_out,
+    mon_at_last_hour_start_in=excluded.mon_at_last_hour_start_in,
+    mon_at_last_hour_start_out=excluded.mon_at_last_hour_start_out,
+    pending=excluded.pending, captured_at=excluded.captured_at`);
 
   // api_usage: every /api/v1/* hit gets one row (rate + error tracking).
   // key_via ('header'|'query') — migration 044, feeds the ?apiKey= sunset.
@@ -93,9 +120,11 @@ function init(db) {
   // Auto-smooth uncertain flag for rows that ended up tiny (<150 MB) — the
   // uncertainty flag was set during aggregation but the value is too small
   // to materially change billing, so we clear it after the fact.
+  // 2026-09-24 · DEEP-31: uncertain=4 (карантин сверхпорогового часа) НЕ
+  // снимается — это подозрительное наблюдение, а не мелкий шум.
   S.hourlyAutoSmoothUncertain = db.prepare(
     'UPDATE traffic_hourly SET uncertain = 0 ' +
-    'WHERE uncertain > 0 AND (bytes_in + bytes_out) < ' + (150 * 1e6)
+    'WHERE uncertain > 0 AND uncertain < 4 AND (bytes_in + bytes_out) < ' + (150 * 1e6)
   );
   // Check whether a specific hour_start was recorded (idempotency in the
   // backfill job — skips hours already aggregated).
@@ -139,6 +168,7 @@ module.exports = {
   dailyUpsertStmt:    () => S.dailyUpsert,
   hourlyUpsertStmt:   () => S.hourlyUpsert,
   snapshotUpsertStmt: () => S.snapshotUpsert,
+  snapshotUpsertPreserveStmt: () => S.snapshotUpsertPreserve,
   snapshotGetStmt:    () => S.snapshotGet,
   snapshotGetAllStmt: () => S.snapshotGetAll,
   apiUsageInsertStmt: () => S.apiUsageInsert,

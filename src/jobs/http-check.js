@@ -22,7 +22,7 @@
 
 const http = require('http');
 const tls = require('tls');
-const { pickValidClientHttpPort } = require('../utils/proxy-port');
+const { pickValidClientHttpPort, isValidClientHttpPort } = require('../utils/proxy-port');
 
 const MAX_BODY = 512 * 1024;   // must-contain проверяем по первым 512 КБ
 
@@ -109,9 +109,10 @@ function fetchThroughProxy(proxy, targetUrl, timeoutMs) {
 
 function create(deps) {
   const { db, logger, alerts, getSetting, fetchAllServersDataCached, apiServers, events } = deps;   // events — SSE (23.08): httpcheck_result после прогона
+  const knownModems = deps.knownModems || {};   // DEEP-33: roster- binding nick→portId
   const _fetch = deps.fetchThroughProxy || fetchThroughProxy;
   const _insert = db.prepare(
-    'INSERT INTO modem_httpcheck (ts, server, nick, status, total_ms, content_ok, error) VALUES (?,?,?,?,?,?,?)'
+    'INSERT INTO modem_httpcheck (ts, server, nick, status, total_ms, content_ok, error, port_id, route_reason) VALUES (?,?,?,?,?,?,?,?,?)'
   );
 
   // key `${server}_${nick}` → { failStreak, failing, last: {status,total_ms,content_ok,error,ts} }
@@ -143,6 +144,16 @@ function create(deps) {
       const host = hostByServer[srv];
       if (!host) continue;
       const portsMap = data.ports || {};
+      // DEEP-33 (2026-09-24): IMEI НЕ уникален (клоны на S4) — порт для чека
+      // выбираем по подтверждённой roster-связи nick→portId, а не «первый
+      // валидный порт IMEI». Один порт проверяется ОДИН раз: второй ник,
+      // разрешившийся в тот же portId, получает явный ambiguous, а не
+      // «независимую проверку» через чужой маршрут.
+      const rosterPortByNick = {};
+      for (const [pid, info] of Object.entries(knownModems[srv] || {})) {
+        if (info && info.nick && !rosterPortByNick[info.nick]) rosterPortByNick[info.nick] = pid;
+      }
+      const claimedPort = {};   // portId → nick (первый claimant побеждает)
       for (const m of (Array.isArray(data.status) ? data.status : [])) {
         const md = m.modem_details || {};
         const nd = m.net_details || {};
@@ -152,11 +163,28 @@ function create(deps) {
           targets.push({ server: srv, nick, offline: true });
           continue;
         }
-        const port = pickValidClientHttpPort(portsMap[md.IMEI]);
+        const candidates = portsMap[md.IMEI] || [];
+        let port = null, routeReason = '';
+        const rosterPid = rosterPortByNick[nick];
+        if (rosterPid) {
+          const bound = candidates.find(p => p && p.portID === rosterPid);
+          if (bound && isValidClientHttpPort(bound)) { port = bound; routeReason = 'roster'; }
+        }
+        if (!port) {
+          port = pickValidClientHttpPort(candidates);
+          routeReason = port ? 'first_valid' : '';
+        }
         if (!port) { targets.push({ server: srv, nick, unavailable: true }); continue; }
+        const prevClaimant = claimedPort[port.portID];
+        if (prevClaimant && prevClaimant !== nick) {
+          targets.push({ server: srv, nick, imei: md.IMEI || '', ambiguous: true, portId: port.portID });
+          continue;
+        }
+        claimedPort[port.portID] = nick;
         targets.push({
           server: srv, nick, imei: md.IMEI || '', operator: nd.CELLOP || '',
           clients: port.portName ? [String(port.portName)] : [],
+          portId: port.portID, routeReason,
           proxy: { host, port: parseInt(port.HTTP_PORT, 10), login: port.LOGIN || '', password: port.PASSWORD || '' },
         });
       }
@@ -186,6 +214,11 @@ function create(deps) {
           error = 'offline';
         } else if (t.unavailable) {
           error = 'no_valid_client_credentials';
+        } else if (t.ambiguous) {
+          // DEEP-33: ник разрешился в порт, уже проверенный под другим ником
+          // (клон IMEI). Результат одного маршрута не выдаём за независимую
+          // проверку второго модема — явный маркер вместо чужого статуса.
+          error = 'ambiguous_clone_imei';
         } else {
           try {
             const r = await _fetch(t.proxy, cfg.url, cfg.timeoutMs);
@@ -209,11 +242,11 @@ function create(deps) {
           }
         }
 
-        try { _insert.run(tsIso, t.server, t.nick, status, totalMs, contentOk, error); }
+        try { _insert.run(tsIso, t.server, t.nick, status, totalMs, contentOk, error, t.portId || '', t.routeReason || (t.ambiguous ? 'ambiguous_clone_imei' : '')); }
         catch (e) { logger.warn('[HttpCheck] insert failed: ' + e.message); }
         st.last = { status, total_ms: totalMs, content_ok: contentOk, error, ts: tsIso, offline: !!t.offline };
 
-        const isSkipped = !!(t.offline || t.unavailable);
+        const isSkipped = !!(t.offline || t.unavailable || t.ambiguous);
         const good = !error;
         if (isSkipped) {
           skipped++;

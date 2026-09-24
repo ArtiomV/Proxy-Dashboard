@@ -43,7 +43,8 @@ beforeEach(() => {
   db.exec(`CREATE TABLE modem_httpcheck (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     ts TEXT NOT NULL, server TEXT NOT NULL, nick TEXT NOT NULL,
-    status INTEGER, total_ms INTEGER, content_ok INTEGER, error TEXT
+    status INTEGER, total_ms INTEGER, content_ok INTEGER, error TEXT,
+    port_id TEXT NOT NULL DEFAULT '', route_reason TEXT NOT NULL DEFAULT ''
   )`);
   fetchBehavior = async () => ({ status: 200, totalMs: 300, body: '<html>Example Domain</html>' });
 });
@@ -220,5 +221,71 @@ describe('http-check', () => {
       process.removeListener('uncaughtException', onUncaught);
       proxy.close();
     }
+  });
+});
+
+// 2026-09-24 · DEEP-33: клон IMEI — результат одного маршрута не выдаётся
+// за независимые проверки двух модемов. Порт выбирается по roster-связи
+// nick→portId; второй ник на том же порту — явный ambiguous.
+describe('DEEP-33: клонированный IMEI', () => {
+  function mkClone(knownModems) {
+    alertsFired = [];
+    return hcMod.create({
+      db,
+      logger: { info() {}, warn() {}, error() {} },
+      alerts: { trigger: (rule, payload) => alertsFired.push({ rule, payload }) },
+      getSetting: (k, dflt) => (k in settings ? settings[k] : dflt),
+      apiServers: API_SERVERS,
+      knownModems,
+      fetchAllServersDataCached: async () => [{
+        serverName: 'S1',
+        status: [
+          { modem_details: { IMEI: 'imeiX', NICK: 'MD_A' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'Moldcell' } },
+          { modem_details: { IMEI: 'imeiX', NICK: 'MD_B' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'Moldcell' } },
+        ],
+        ports: { imeiX: [
+          { portID: 'portA', portName: 'client-a', HTTP_PORT: '10001', LOGIN: 'u', PASSWORD: 'p' },
+          { portID: 'portB', portName: 'client-b', HTTP_PORT: '10002', LOGIN: 'u', PASSWORD: 'p' },
+        ] },
+      }],
+      fetchThroughProxy: async (proxy) => fetchBehavior(proxy),
+    });
+  }
+
+  it('roster binding: каждый ник проверяет СВОЙ порт, оба проверены', async () => {
+    const calls = [];
+    fetchBehavior = async (proxy) => { calls.push(proxy.port); return { status: 200, totalMs: 100, body: 'ok' }; };
+    const job = mkClone({ S1: {
+      portA: { portName: 'client-a', imei: 'imeiX', nick: 'MD_A' },
+      portB: { portName: 'client-b', imei: 'imeiX', nick: 'MD_B' },
+    } });
+    const res = await job.runOnce();
+    expect(res.ok).toBe(2);
+    expect(calls.sort()).toEqual([10001, 10002]);
+    const rows = db.prepare('SELECT nick, port_id, route_reason, error FROM modem_httpcheck ORDER BY nick').all();
+    expect(rows).toEqual([
+      { nick: 'MD_A', port_id: 'portA', route_reason: 'roster', error: '' },
+      { nick: 'MD_B', port_id: 'portB', route_reason: 'roster', error: '' },
+    ]);
+  });
+
+  it('без roster: fallback берёт первый валидный порт; второй ник — ambiguous, порт проверен один раз', async () => {
+    const calls = [];
+    fetchBehavior = async (proxy) => { calls.push(proxy.port); return { status: 200, totalMs: 100, body: 'ok' }; };
+    const job = mkClone({ S1: {
+      portA: { portName: 'client-a', imei: 'imeiX', nick: 'MD_A' },   // MD_B в roster нет
+    } });
+    const res = await job.runOnce();
+    expect(res.ok).toBe(1);
+    expect(res.skipped).toBe(1);
+    expect(calls).toEqual([10001]);   // 10002 НЕ проверен через чужую атрибуцию
+    const rows = db.prepare('SELECT nick, error FROM modem_httpcheck ORDER BY nick').all();
+    expect(rows).toEqual([
+      { nick: 'MD_A', error: '' },
+      { nick: 'MD_B', error: 'ambiguous_clone_imei' },
+    ]);
+    // ambiguous — не сбой: стрики и алерты не растут.
+    expect(job.latest()['S1_MD_B']).toMatchObject({ fail_streak: 0, failing: false });
+    expect(alertsFired.length).toBe(0);
   });
 });
