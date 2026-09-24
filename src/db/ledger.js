@@ -38,6 +38,14 @@ function init(db) {
   S.lastChargeDate = db.prepare(
     "SELECT MAX(date) AS d FROM billing_ledger WHERE type = 'charge' AND purchase_id IS NULL"
   );
+  // 2026-09-24 · §17.3.2: семидневное среднее одним SUM по индексу
+  // (client_id/type/date) вместо материализации всей истории клиента.
+  // Семантика совпадает с JS-вариантом: type='charge', полуинтервал
+  // [from; today) московских дат, деление на 7 у вызывающего.
+  S.chargeSumForDates = db.prepare(
+    "SELECT COALESCE(SUM(amount), 0) AS total FROM billing_ledger " +
+    "WHERE client_id = ? AND type = 'charge' AND date >= ? AND date < ?"
+  );
   S.count = db.prepare('SELECT COUNT(*) AS n FROM billing_ledger');
   // 2026-09-18 · FIX-01 п.7 / §14.2/§17.3.1: сверка событий по идентификатору
   // платежа ГЛОБАЛЬНО (без привязки к текущему клиенту — платёж мог быть
@@ -98,6 +106,10 @@ function chargedClientIdsForDate(date) {
   return S.chargedClientIdsForDate.all(date).map(r => r.client_id);
 }
 function rowCount() { return S.count.get().n; }
+// §17.3.2: SUM по диапазону дат без чтения истории (см. avgDailyCharge7d).
+function chargeSumForDates(clientId, fromDate, toDate) {
+  return S.chargeSumForDates.get(clientId, fromDate, toDate).total;
+}
 function listByPayment(paymentId, type) { return S.byPayment.all(String(paymentId), String(type)); }
 function lastChargeDate() { const r = S.lastChargeDate.get(); return r ? r.d : null; }
 
@@ -120,4 +132,5 @@ module.exports = {
   init, deleteByClient, deleteById, insertStmt, listByClient,
   existsChargeOnDate, chargedClientIdsForDate, rowCount,
   paymentsTotal, paymentsTotalByClient, listByPayment, lastChargeDate,
+  chargeSumForDates,
 };

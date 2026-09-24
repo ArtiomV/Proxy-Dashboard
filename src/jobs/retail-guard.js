@@ -104,13 +104,13 @@ function create(deps) {
   }
 
   // ── шаг 2: grace истёк → гасим порты + leased → blocked ──
-  async function _blockClient(client, serverResults, stats) {
+  async function _blockClient(client, portsIndex, stats) {
     const today = _today();
     const holdDays = _holdDays(client);
     const holdUntil = holdDays === -1 ? null : _iso(_nowMs() + holdDays * DAY_MS);
 
     let blockedPorts = 0;
-    for (const pt of portValidity.clientPorts(client, serverResults)) {
+    for (const pt of portValidity.clientPortsFromIndex(client, portsIndex)) {
       // Уже погашен (в т.ч. нами на прошлых циклах) — не перезаписываем.
       const vbMs = Date.parse(pt.validBefore);
       if (!isNaN(vbMs) && pt.validBefore && pt.validBefore <= today) continue;
@@ -160,7 +160,7 @@ function create(deps) {
     return true;
   }
 
-  async function _restoreClient(client, serverResults, blockedRows, stats) {
+  async function _restoreClient(client, portsIndex, blockedRows, stats) {
     // WP7 (Э5): порты, замороженные антифродом (kv-маркер abuse_hold из
     // domain-guard), НЕ воскрешаем автоматически — разблокировка только
     // админом («Реабилитировать порт»). Долговой конвейер такого клиента
@@ -206,7 +206,7 @@ function create(deps) {
       }
     }
 
-    const livePorts = portValidity.clientPorts(client, serverResults);
+    const livePorts = portValidity.clientPortsFromIndex(client, portsIndex);
     // DEEP-14: смешанный набор pool+legacy — порты клиента, не имеющие строки
     // пула, включаем в восстановление как legacy-элементы (раньше при наличии
     // blockedRows они молча пропускались и оставались погашенными).
@@ -294,12 +294,12 @@ function create(deps) {
   }
 
   // ── шаг 3 (legacy): hold прошёл у клиента БЕЗ строк пула → удаляем порт ──
-  async function _deleteLegacyPorts(client, serverResults, stats) {
+  async function _deleteLegacyPorts(client, portsIndex, stats) {
     if (retailPoolDb.byClient(client.id).length) return;   // не legacy — владеет фаза по строкам
     if (_holdDays(client) === -1) return;                  // ∞ hold — НИКОГДА
     const dl = _holdDeadlineMs(client);
     if (!dl || _nowMs() < dl) return;
-    for (const pt of portValidity.clientPorts(client, serverResults)) {
+    for (const pt of portValidity.clientPortsFromIndex(client, portsIndex)) {
       const del = await proxyConf.getConfAction(pt.server, `/conf/delete_port/${encodeURIComponent(pt.portId)}`);
       if (!del.ok) {
         logger.error(`[RetailGuard] ${client.login}: delete_port ${pt.portId} failed: ${del.reason} — повтор в след. цикле`);
@@ -315,19 +315,19 @@ function create(deps) {
   }
 
   // ── пер-клиентский конвейер (шаги 1–6) ──
-  async function _processClient(client, serverResults, stats) {
+  async function _processClient(client, portsIndex, stats) {
     const balance = client.balance || 0;
 
     // Клиент без портов (свежая регистрация, порты удалены по hold) —
     // нечего продлевать/блокировать: grace- и low-balance-уведомления не шлём.
     const ownsPorts = retailPoolDb.byClient(client.id).length > 0
-      || portValidity.clientPorts(client, serverResults).length > 0;
+      || portValidity.clientPortsFromIndex(client, portsIndex).length > 0;
     if (!ownsPorts) return false;
 
     if (balance > 0) {
       const blockedRows = retailPoolDb.byClient(client.id).filter(r => r.status === 'blocked');
       if (client.balanceNegativeSince || blockedRows.length) {
-        return await _restoreClient(client, serverResults, blockedRows, stats);
+        return await _restoreClient(client, portsIndex, blockedRows, stats);
       }
       await _lowBalanceCheck(client);
       return false;
@@ -347,9 +347,9 @@ function create(deps) {
       return false;   // grace ещё идёт
     }
     // grace истёк: блокируем (идемпотентно), дальше — hold-фаза.
-    await _blockClient(client, serverResults, stats);
+    await _blockClient(client, portsIndex, stats);
     await _holdWarnings(client);
-    await _deleteLegacyPorts(client, serverResults, stats);
+    await _deleteLegacyPorts(client, portsIndex, stats);
     return false;
   }
 
@@ -632,6 +632,9 @@ function create(deps) {
     const stats = { grace: [], blocked: [], restored: [], deleted: [], testDayEnded: [], purchaseCharged: [] };
     try {
       const serverResults = await fetchAllServersDataCached();
+      // §17.3.4: индекс portName → порты ОДИН раз на проход (раньше — полный
+      // скан фида на каждого клиента и каждый вызов clientPorts).
+      const portsIndex = portValidity.clientPortsIndex(serverResults);
       let dirty = false;
       for (const client of clients) {
         if (client.clientType === 'legal') continue;   // юрлица — НИКОГДА
@@ -640,7 +643,7 @@ function create(deps) {
         if (client.blocked) continue;                  // WP7: антифрод-блок — конвейер на паузе, разблокировка только админом
         if (!client.portName) continue;
         try {
-          if (await _processClient(client, serverResults, stats)) dirty = true;
+          if (await _processClient(client, portsIndex, stats)) dirty = true;
         } catch (e) {
           logger.error(`[RetailGuard] ${client.login || client.id}: ${e.message}`);
         }

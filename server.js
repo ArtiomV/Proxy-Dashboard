@@ -3273,7 +3273,7 @@ app.use(require('./src/routes/promo-codes')({
 const paymentsRouter = require('./src/routes/payments')({
   logger, authMiddleware, adminMiddleware, validate, TopupSchema,
   topupLimiter, webhookLimiter: acqWebhookLimiter,
-  clients, clientById, saveClients,
+  clients, clientById, saveClients, clientsDb,
   getSetting, tariffsDb, cardPaymentsDb, ledgerDb, promoDb,
   atomicCredit, atomicDebit,
   auditLog, logActivity, getClientIp,

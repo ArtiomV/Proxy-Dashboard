@@ -128,6 +128,11 @@ function create(deps) {
     const d7 = getMoscowNow();
     d7.setDate(d7.getDate() - 7);
     const from = _mskDateStr(d7);
+    // 2026-09-24 · §17.3.2: один SUM по индексу вместо чтения всей истории.
+    // Тот же критерий и границы (charge, [from; today), ÷7, round2).
+    if (ledgerDb && typeof ledgerDb.chargeSumForDates === 'function') {
+      return Math.round((ledgerDb.chargeSumForDates(clientId, from, today) / 7) * 100) / 100;
+    }
     const total = (ledgerDb.listByClient(clientId) || [])
       .filter(e => e.type === 'charge' && e.date && e.date >= from && e.date < today)
       .reduce((s, e) => s + (e.cost || 0), 0);
@@ -153,7 +158,30 @@ function create(deps) {
     return ports.filter(pt => pt.server && pt.portId);
   }
 
-  return { setPortValidBefore, setPortName, avgDailyCharge7d, clientPorts };
+  // 2026-09-24 · §17.3.4: индекс portName → порты ОДИН раз на проход guard —
+  // clientPorts сканировал весь фид на каждого клиента и каждый вызов
+  // (O(клиенты × порты) на проход). Индекс строится за один проход фида,
+  // форма элементов совпадает с clientPorts.
+  function clientPortsIndex(serverResults) {
+    const index = new Map();   // portName → [{server, portId, validBefore}]
+    for (const data of serverResults || []) {
+      const server = findServer(data.serverName);
+      if (!server) continue;
+      for (const list of Object.values(data.ports || {})) {
+        for (const p of list || []) {
+          if (!p || !p.portName || !p.portID) continue;
+          if (!index.has(p.portName)) index.set(p.portName, []);
+          index.get(p.portName).push({ server, portId: p.portID, validBefore: p.PROXY_VALID_BEFORE || '' });
+        }
+      }
+    }
+    return index;
+  }
+  function clientPortsFromIndex(client, index) {
+    return (index && index.get(client && client.portName)) || [];
+  }
+
+  return { setPortValidBefore, setPortName, avgDailyCharge7d, clientPorts, clientPortsIndex, clientPortsFromIndex };
 }
 
 module.exports = { create };

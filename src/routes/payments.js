@@ -28,7 +28,7 @@ module.exports = function createPaymentsRouter(deps) {
   const {
     logger, authMiddleware, adminMiddleware, validate, TopupSchema,
     topupLimiter, webhookLimiter,
-    clients, clientById, saveClients,
+    clients, clientById, saveClients, clientsDb,
     getSetting, tariffsDb, cardPaymentsDb, ledgerDb, promoDb,
     atomicCredit, atomicDebit,
     auditLog, logActivity, getClientIp,
@@ -88,9 +88,15 @@ module.exports = function createPaymentsRouter(deps) {
   function _creditMain(row, finalizeInsideTx) {
     const client = clientById.get(row.client_id);
     if (!client) throw new Error(`client ${row.client_id} not found`);
-    const historical = ledgerDb && typeof ledgerDb.listByClient === 'function'
-      ? (ledgerDb.listByClient(client.id) || []).filter(e => e.type === 'card_payment' && e.paymentId === row.order_id)
-      : [];
+    // 2026-09-24 · §17.3.1: специализированный запрос по payment_id ГЛОБАЛЬНО
+    // (индекс idx_ledger_payment, миграция 091) вместо материализации всей
+    // истории клиента. Платёж, исторически записанный ДРУГОМУ клиенту,
+    // обнаруживается тоже — иначе задвоился бы.
+    const historical = ledgerDb && typeof ledgerDb.listByPayment === 'function'
+      ? ledgerDb.listByPayment(row.order_id, 'card_payment')
+      : (ledgerDb && typeof ledgerDb.listByClient === 'function'
+          ? (ledgerDb.listByClient(client.id) || []).filter(e => e.type === 'card_payment' && e.paymentId === row.order_id)
+          : []);
     if (historical.length > 1) throw new Error(`multiple historical ledger rows for ${row.order_id}`);
     if (historical.length === 1) {
       const recorded = Number(historical[0].amount);
@@ -189,6 +195,23 @@ module.exports = function createPaymentsRouter(deps) {
     }
   }
 
+  // 2026-09-24 · §17.3.3: после атомарного платежа — точечная запись
+  // затронутых клиентов (atomic уже обновил баланс в БД и памяти внутри своей
+  // транзакции), а не полный saveClients со всеми документами/счетами флота.
+  // Ошибка точечной записи — fallback на полное сохранение.
+  function _persistAfterCredit(client) {
+    try {
+      clientsDb.upsertRow(client);
+      if (client.referred_by) {
+        const ref = clientById.get(client.referred_by);
+        if (ref) clientsDb.upsertRow(ref);
+      }
+    } catch (e) {
+      logger.error('[Payments] targeted persist failed, fallback saveClients: ' + e.message);
+      saveClients(clients);
+    }
+  }
+
   function _completeCredit(row) {
     const main = _creditMain(row, !row.promo_code);
     const promo = _creditPromo(row, main.client);
@@ -197,7 +220,7 @@ module.exports = function createPaymentsRouter(deps) {
     if ((main.result.duplicate && !row.promo_code) || (promo && promo.duplicate)) {
       cardPaymentsDb.completeOrder(row.order_id, promo && row.promo_code ? 'applied' : null);
     }
-    saveClients(clients);
+    _persistAfterCredit(main.client);
     return { ...main, promo };
   }
 
@@ -448,8 +471,8 @@ module.exports = function createPaymentsRouter(deps) {
   function _finalizeRefund(row) {
     const client = clientById.get(row.client_id);
     if (!client) throw new Error(`client ${row.client_id} not found`);
-    const ledgerEntry = ledgerDb.listByClient(client.id)
-      .find(e => e.type === 'card_payment' && e.paymentId === row.order_id);
+    // §17.3.1: тот же специализированный запрос по индексу, глобально.
+    const ledgerEntry = (ledgerDb.listByPayment(row.order_id, 'card_payment') || [])[0] || null;
     let referralOpts = null;
     if (client.referred_by) {
       const referrer = clientById.get(client.referred_by);
@@ -467,7 +490,7 @@ module.exports = function createPaymentsRouter(deps) {
       note: `Возврат эквайринга (${row.order_id})`,
       source: 'acquiring',
       paymentId: row.order_id,
-      reversedLedgerId: ledgerEntry ? ledgerEntry.db_id : undefined,
+      reversedLedgerId: ledgerEntry ? (ledgerEntry.db_id || ledgerEntry.id) : undefined,
     }, {
       ...(referralOpts ? { referral: referralOpts } : {}),
       insideTx: () => {
@@ -477,7 +500,7 @@ module.exports = function createPaymentsRouter(deps) {
       },
     });
     if (result.duplicate) throw new Error(`unexpected duplicate reversal for ${row.order_id}`);
-    saveClients(clients);
+    _persistAfterCredit(client);   // §17.3.3: точечная запись вместо полного saveClients
     logActivity('client', 'warning', 'retail_card_refund', client.login,
       `Возврат эквайринга ${row.amount} ₽ (${row.order_id})`, { order_id: row.order_id });
     return { client, result };
