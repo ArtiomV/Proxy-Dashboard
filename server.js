@@ -1553,10 +1553,14 @@ function deleteSession(token) {
   if (!token) return;
   dbStmts.deleteSession.run(sha256hex(token));
   dbStmts.deleteSession.run(token); // legacy plaintext form, if still present
+  // DEEP-32 (2026-09-24): logout закрывает и SSE-поток этой сессии.
+  try { eventsBus && eventsBus.closeSession(sha256hex(token), 'logout'); } catch (_) { /* best-effort */ }
 }
 
 function deleteSessionsByLogin(login) {
   dbStmts.deleteSessionsByLogin.run(login);
+  // DEEP-32: отзыв всех сессий пользователя закрывает и его SSE-потоки.
+  try { eventsBus && eventsBus.closeSession(login, 'logout'); } catch (_) { /* best-effort */ }
 }
 
 function getSessionCount() {
@@ -1567,10 +1571,17 @@ const _intervals = [];
 // _hourlyAggSched — модульный let (виден gracefulShutdown за пределами app.listen)
 let _hourlyAggSched = null;
 _intervals.push(setInterval(() => {
+  // DEEP-32 (2026-09-24): expiry тоже закрывает SSE-потоки — читаем истёкшие
+  // токены ДО удаления и рвём их подписки (иначе поток жил после смерти сессии).
+  let expired = [];
+  try { expired = db.prepare('SELECT token, login FROM sessions WHERE expires_at <= ?').all(Date.now()); } catch (_) { /* best-effort */ }
   const result = dbStmts.cleanExpiredSessions.run(Date.now());
   if (result.changes > 0) {
     logger.info(`[Sessions] Cleaned ${result.changes} expired session(s)`);
     logActivity('system', 'info', 'session_cleanup', null, `Cleaned ${result.changes} expired session(s)`, { removed: result.changes });
+    for (const s of expired) {
+      try { eventsBus && eventsBus.closeSession(s.token, 'session_expired'); } catch (_) { /* best-effort */ }
+    }
   }
 }, 60 * 60 * 1000));
 

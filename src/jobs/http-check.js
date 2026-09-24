@@ -39,13 +39,13 @@ function fetchThroughProxy(proxy, targetUrl, timeoutMs) {
     let settled = false;
     // One deadline includes TCP, CONNECT, TLS and body, even if bytes keep arriving.
     const timer = setTimeout(() => finish(new Error('timeout')), timeoutMs);
-    function finish(error, status, body) {
+    function finish(error, status, body, location) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
       for (const resource of resources) resource.destroy();
       if (error) reject(error);
-      else resolve({ status, totalMs: Date.now() - started, body: body.toString('utf8') });
+      else resolve({ status, totalMs: Date.now() - started, body: body.toString('utf8'), location: location || '' });
     }
     function track(resource) {
       resources.add(resource);
@@ -54,15 +54,19 @@ function fetchThroughProxy(proxy, targetUrl, timeoutMs) {
     }
     const collect = res => {
       track(res);
+      // DEEP-34 (2026-09-24): location отдаём наверх — job следует за
+      // редиректом через тот же прокси в общем deadline и проверяет
+      // КОНЕЧНЫЙ ответ (302 на заглушку оператора больше не «успех»).
+      const location = res.headers && res.headers.location ? String(res.headers.location) : '';
       const chunks = []; let bytes = 0;
       res.on('data', chunk => {
         const remaining = MAX_BODY - bytes;
         chunks.push(chunk.subarray(0, remaining));
         bytes += Math.min(remaining, chunk.length);
         // Content checks intentionally inspect only the first MAX_BODY bytes.
-        if (bytes >= MAX_BODY) finish(null, res.statusCode || 0, Buffer.concat(chunks));
+        if (bytes >= MAX_BODY) finish(null, res.statusCode || 0, Buffer.concat(chunks), location);
       });
-      res.on('end', () => finish(null, res.statusCode || 0, Buffer.concat(chunks)));
+      res.on('end', () => finish(null, res.statusCode || 0, Buffer.concat(chunks), location));
       res.on('aborted', () => finish(new Error('response_aborted')));
       res.on('close', () => {
         if (!res.complete) finish(new Error('response_aborted'));
@@ -221,22 +225,56 @@ function create(deps) {
           error = 'ambiguous_clone_imei';
         } else {
           try {
-            const r = await _fetch(t.proxy, cfg.url, cfg.timeoutMs);
-            status = r.status; totalMs = r.totalMs;
-            if (!(status >= 200 && status < 400)) {
-              error = 'http_status_' + status;
-            } else {
-              const body = r.body || '';
-              if (cfg.mustNotContain && body.includes(cfg.mustNotContain)) {
-                contentOk = 0;
-                error = 'content_blocked (возможен редирект оператора)';
-              } else if (cfg.mustContain && !body.includes(cfg.mustContain)) {
-                contentOk = 0;
-                error = 'content_mismatch';
-              } else if (cfg.mustContain || cfg.mustNotContain) {
-                contentOk = 1;
+            // DEEP-34 (2026-09-24): следуем за HTTP(S)-редиректами через тот
+            // же прокси в ОБЩЕМ deadline (макс 3 перехода) и проверяем конечный
+            // ответ. 302 на заглушку оператора («пополните баланс») или
+            // недоступный адрес больше не засчитывается как успешный чек;
+            // обычный редирект на рабочий сайт — не поломка модема.
+            const MAX_REDIRECTS = 3;
+            const deadline = Date.now() + cfg.timeoutMs;
+            const seenUrls = new Set();
+            let url = cfg.url, redirects = 0, finalOrigin = '';
+            let r = null;
+            for (;;) {
+              const remaining = deadline - Date.now();
+              if (remaining <= 0) { error = 'timeout'; break; }
+              r = await _fetch(t.proxy, url, remaining);
+              status = r.status; totalMs = Date.now() - (deadline - cfg.timeoutMs);
+              if (status >= 300 && status < 400 && r.location) {
+                let next;
+                try { next = new URL(r.location, url); }
+                catch (_) { error = 'redirect_unverified (bad location)'; break; }
+                if (next.protocol !== 'http:' && next.protocol !== 'https:') {
+                  error = 'redirect_unverified (' + next.protocol.replace(':', '') + ')';
+                  break;
+                }
+                if (seenUrls.has(next.href) || redirects >= MAX_REDIRECTS) {
+                  error = 'redirect_cycle (→ ' + next.origin + ')';
+                  break;
+                }
+                seenUrls.add(next.href);
+                url = next.href; finalOrigin = next.origin; redirects++;
+                continue;
+              }
+              break;   // финальный ответ (или редирект без location — принимаем как финальный)
+            }
+            if (!error) {
+              if (!(status >= 200 && status < 400)) {
+                error = 'http_status_' + status;
+              } else {
+                const body = r.body || '';
+                if (cfg.mustNotContain && body.includes(cfg.mustNotContain)) {
+                  contentOk = 0;
+                  error = 'content_blocked (возможен редирект оператора)';
+                } else if (cfg.mustContain && !body.includes(cfg.mustContain)) {
+                  contentOk = 0;
+                  error = 'content_mismatch';
+                } else if (cfg.mustContain || cfg.mustNotContain) {
+                  contentOk = 1;
+                }
               }
             }
+            if (error && redirects > 0 && finalOrigin) error += ' (после редиректа → ' + finalOrigin + ')';
           } catch (e) {
             error = String(e.message || e).slice(0, 200);
           }

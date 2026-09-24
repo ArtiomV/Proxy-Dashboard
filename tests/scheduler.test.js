@@ -72,3 +72,46 @@ describe('interval jobs register in the scheduler registry (C8)', () => {
     nc.stop(); fo.stop();
   });
 });
+
+// 2026-09-24 · DEEP-35: Promise-контракт, lastSuccessAt, running/duration,
+// структурированный результат completed/skipped/partial/failed.
+describe('scheduler — DEEP-35: структурированный результат', () => {
+  it('safeFn возвращает Promise выполнения и результат job', async () => {
+    const { safeFn, job } = wrapJob('TestPromise', '1 min', async () => ({ status: 'skipped', reason: 'disabled' }), silent);
+    const r = await safeFn();
+    expect(r).toEqual({ status: 'skipped', reason: 'disabled' });
+    expect(job.lastResult).toBe('skipped');
+    expect(job.lastSuccessAt).toBeTruthy();
+    expect(job.lastDurationMs).not.toBeNull();
+    expect(job.running).toBe(false);
+    expect(job.errors).toBe(0);
+  });
+
+  it('structured partial — успех с оговоркой, не ошибка', async () => {
+    const { safeFn, job } = wrapJob('TestPartial', '1 min', async () => ({ status: 'partial', done: 3, total: 5 }), silent);
+    await safeFn();
+    expect(job.lastResult).toBe('partial');
+    expect(job.errors).toBe(0);
+    expect(job.lastSuccessAt).toBeTruthy();
+  });
+
+  it('structured failed БЕЗ throw — считается ошибкой (раньше неотличим от успеха)', async () => {
+    const { safeFn, job } = wrapJob('TestStructFail', '1 min', async () => ({ status: 'failed', error: 'no_data' }), silent);
+    await safeFn();
+    expect(job.lastResult).toBe('failed');
+    expect(job.errors).toBe(1);
+    expect(job.lastError).toBe('no_data');
+    expect(job.lastSuccessAt).toBeNull();
+  });
+
+  it('running=true на время выполнения', async () => {
+    let release;
+    const gate = new Promise(r => { release = r; });
+    const { safeFn, job } = wrapJob('TestRunning', '1 min', () => gate, silent);
+    const p = safeFn();
+    expect(job.running).toBe(true);
+    release();
+    await p;
+    expect(job.running).toBe(false);
+  });
+});

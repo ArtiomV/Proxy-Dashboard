@@ -109,3 +109,57 @@ describe('events bus (SSE)', () => {
     expect(res.writes[0]).toContain('data: {}');
   });
 });
+
+// 2026-09-24 · DEEP-30/32: порядок доставки, отзыв сессии, backpressure.
+describe('events bus — DEEP-30/32', () => {
+  it('прямая отправка сносит старый pending: порядок 1,2,3 (не 1,3,2)', async () => {
+    bus = events.create({ heartbeatMs: 60000, throttleMs: 60 });
+    const res = fakeRes();
+    bus.subscribe(res, 's');
+    bus.publish('t', { v: 1 });                 // прямая (окно открыто)
+    bus.publish('t', { v: 2 });                 // коалесцируется в pending
+    await new Promise(r => setTimeout(r, 80));  // окно истекло, pending ещё не флашился? — нет, флаш в ~65мс
+    bus.publish('t', { v: 3 });
+    await new Promise(r => setTimeout(r, 120)); // все таймеры отработали
+    const values = res.writes
+      .filter(w => w.startsWith('event: t'))
+      .map(w => JSON.parse(w.split('data: ')[1]).v);
+    // Монотонно: ни одно старое значение не приходит после нового.
+    expect(values).toEqual([...values].sort((a, b) => a - b));
+    expect(values[values.length - 1]).toBe(3);
+  });
+
+  it('closeSession(token) закрывает потоки сессии, чужие — нет', () => {
+    makeBus();
+    const mine = fakeRes(), other = fakeRes();
+    bus.subscribe(mine, 'tokA', 'admin');
+    bus.subscribe(other, 'tokB', 'root');
+    bus.closeSession('tokA', 'logout');
+    expect(mine.closed).toBe(true);
+    expect(other.closed).toBe(false);
+    expect(bus.clientCount()).toBe(1);
+  });
+
+  it('closeSession(login) закрывает все сессии пользователя', () => {
+    makeBus();
+    const a = fakeRes(), b = fakeRes(), c = fakeRes();
+    bus.subscribe(a, 'tok1', 'admin');
+    bus.subscribe(b, 'tok2', 'admin');
+    bus.subscribe(c, 'tok3', 'root');
+    bus.closeSession('admin', 'logout');
+    expect(a.closed && b.closed).toBe(true);
+    expect(c.closed).toBe(false);
+  });
+
+  it('backpressure: write=false → коалесцирование; за лимитом — отключение', () => {
+    makeBus();
+    const res = fakeRes();
+    let writes = 0;
+    res.write = function (s) { writes++; this.writes.push(s); return false; };   // буфер полон всегда
+    res.once = function () {};   // drain никогда не наступает
+    bus.subscribe(res, 's');
+    for (let i = 0; i < 150; i++) bus.publish('flood', { i });
+    // Клиент отключён как slow_consumer, а не накапливает бесконечный буфер.
+    expect(res.closed).toBe(true);
+  });
+});

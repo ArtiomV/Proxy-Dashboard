@@ -23,7 +23,7 @@ beforeAll(() => {
 });
 afterAll(() => { try { fs.rmSync(path.dirname(cacheFile), { recursive: true, force: true }); } catch (_) {} });
 
-function run(maps) {
+async function run(maps) {
   const { db } = bootApp();
   const job = cleanupJob.create({
     db, logger: { info() {}, warn() {}, error() {}, debug() {} }, fs,
@@ -37,20 +37,20 @@ function run(maps) {
     saveKnownModems: () => {},
     logActivity: () => {},
   });
-  return job.runRetentionCleanup();
+  return job.runRetentionCleanup();   // DEEP-36: async — тесты await'ят
 }
 
 const iso = (msAgo) => new Date(Date.now() - msAgo).toISOString();
 
 describe('retention cleanup — порог 30д для tracking-мап', () => {
-  it('модем выпал из фида НЕДАВНО → uptime/ip записи СОХРАНЯЮТСЯ (регрессия RO2_34)', () => {
+  it('модем выпал из фида НЕДАВНО → uptime/ip записи СОХРАНЯЮТСЯ (регрессия RO2_34)', async () => {
     const up = {
       'S2_LIVE1': { last_check: iso(60e3), last_online_check: iso(60e3) },
       'S2_GONE_1D': { last_check: iso(1 * 86400e3), last_online_check: iso(25 * 3600e3) }, // RO2_34-кейс
     };
     const ip = { 'S2_GONE_2D': { ip: '1.2.3.4', since: iso(2 * 86400e3) } };
     const rot = { 'S2:GONE_1D': 10 };
-    const res = run({ ip, up, rot });
+    const res = await run({ ip, up, rot });
     expect(up['S2_GONE_1D']).toBeTruthy();            // НЕ удалён
     expect(ip['S2_GONE_2D']).toBeTruthy();
     expect(rot['S2:GONE_1D']).toBeUndefined();        // rotation-кэш — как раньше
@@ -58,19 +58,53 @@ describe('retention cleanup — порог 30д для tracking-мап', () => {
     expect(res.tracking_pruned.ipTracking).toBe(0);
   });
 
-  it('отсутствует >30 дней → чистится; бесхозные записи без времени → тоже', () => {
+  it('отсутствует >30 дней → чистится; бесхозные записи без времени → тоже', async () => {
     const up = {
       'S2_GONE_31D': { last_check: iso(31 * 86400e3), last_online_check: iso(31 * 86400e3) },
       'S2_NO_TIME': {},
       'S2_ONLY_ONLINE_40D': { last_online_check: iso(40 * 86400e3) },   // фолбэк на last_online_check
     };
     const ip = { 'S2_GONE_40D': { ip: '1.2.3.4', since: iso(40 * 86400e3) } };
-    const res = run({ ip, up, rot: {} });
+    const res = await run({ ip, up, rot: {} });
     expect(up['S2_GONE_31D']).toBeUndefined();
     expect(up['S2_NO_TIME']).toBeUndefined();
     expect(up['S2_ONLY_ONLINE_40D']).toBeUndefined();
     expect(ip['S2_GONE_40D']).toBeUndefined();
     expect(res.tracking_pruned.uptimeTracking).toBe(3);
     expect(res.tracking_pruned.ipTracking).toBe(1);
+  });
+});
+
+// 2026-09-24 · DEEP-36: пакетные удаления работают, метрики хранения собираются.
+describe('retention cleanup — DEEP-36: пакетные удаления и метрики диска', () => {
+  it('старые строки удаляются чанками, свежие остаются; results.disk присутствует', async () => {
+    const { db } = bootApp();
+    const ins = db.prepare("INSERT INTO system_log (timestamp, category, level, action, target, message) VALUES (?, 't', 'info', 'a', NULL, 'm')");
+    const tx = db.transaction(() => {
+      for (let i = 0; i < 12000; i++) ins.run("datetime('now','-40 days')");
+      for (let i = 0; i < 10; i++) ins.run("datetime('now')");
+    });
+    // Прямые значения, а не SQL-функции в параметрах:
+    db.prepare("DELETE FROM system_log").run();
+    const old = "2020-01-01 00:00:00";
+    const tx2 = db.transaction(() => {
+      for (let i = 0; i < 12000; i++) ins.run(old);
+      for (let i = 0; i < 10; i++) ins.run(new Date().toISOString().slice(0, 19).replace('T', ' '));
+    });
+    tx2();
+
+    const job = cleanupJob.create({
+      db, logger: { info() {}, warn() {}, error() {}, debug() {} }, fs,
+      SERVER_CACHE_FILE: cacheFile,
+      appSettings: {}, dailyTraffic: {},
+      ipTracking: {}, uptimeTracking: {}, modemRotationCache: {},
+      knownModems: {}, saveKnownModems: () => {}, logActivity: () => {},
+    });
+    const res = await job.runRetentionCleanup();
+    expect(res.system_log.changes).toBeGreaterThanOrEqual(12000);
+    expect(db.prepare('SELECT COUNT(*) c FROM system_log').get().c).toBe(10);
+    expect(res.disk).toBeTruthy();
+    expect(typeof res.disk.after.page_count).toBe('number');
+    expect(res.disk).toHaveProperty('checkpoint_busy');
   });
 });

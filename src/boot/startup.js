@@ -277,12 +277,12 @@ function runStartup(d) {
     .catch(e => logger.error('[BlockedPortCleanup] periodic run failed:', e.message)), 30 * 60 * 1000));
 
   // Nightly DB cleanup at 00:30 UTC — remove old data using dynamic retention settings
-  scheduleRepeating(0, 30, 'DbCleanup', () => {
+  scheduleRepeating(0, 30, 'DbCleanup', async () => {
     try {
-      const res = runRetentionCleanup();
-      const total = Object.values(res).reduce((s, r) => s + r.changes, 0);
+      const res = await runRetentionCleanup();   // DEEP-36: пакетные удаления, async
+      const total = Object.values(res).reduce((s, r) => s + (r.changes || 0), 0);
       if (total > 0) logger.info(`[DbCleanup] Removed ${total} old rows (hourly:${res.traffic_hourly.changes} meta:${res.modem_meta.changes} rot:${res.rotation_log.changes} proxy:${res.proxy_checks.changes} audit:${res.audit_log.changes} syslog:${res.system_log.changes})`);
-      logActivity('system', 'info', 'db_cleanup', null, `DB cleanup: ${total} rows removed`, { hourly: res.traffic_hourly.changes, meta: res.modem_meta.changes, rotation: res.rotation_log.changes, proxy_checks: res.proxy_checks.changes, audit: res.audit_log.changes, system_log: res.system_log.changes });
+      logActivity('system', 'info', 'db_cleanup', null, `DB cleanup: ${total} rows removed`, { hourly: res.traffic_hourly.changes, meta: res.modem_meta.changes, rotation: res.rotation_log.changes, proxy_checks: res.proxy_checks.changes, audit: res.audit_log.changes, system_log: res.system_log.changes, disk: res.disk });
       // Refresh query-planner statistics after pruning so the covering indexes
       // stay chosen (the proxy_checks summary on /api/admin/data degrades to a
       // 4s full scan if stats go stale). PRAGMA optimize only re-analyzes tables

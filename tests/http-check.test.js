@@ -289,3 +289,53 @@ describe('DEEP-33: клонированный IMEI', () => {
     expect(alertsFired.length).toBe(0);
   });
 });
+
+// 2026-09-24 · DEEP-34: редирект следуется через тот же прокси в общем
+// deadline, проверяется КОНЕЧНЫЙ ответ. 302 сам по себе — не успех и не
+// поломка модема.
+describe('DEEP-34: обработка редиректов', () => {
+  it('302 → 200 на конечном сайте: чек успешен, запросов два', async () => {
+    const urls = [];
+    fetchBehavior = async (proxy, url) => {
+      urls.push(url);
+      if (url === 'https://example.com') return { status: 302, totalMs: 50, body: '', location: 'https://www.example.com/' };
+      return { status: 200, totalMs: 50, body: 'final ok' };
+    };
+    const job = mk();
+    const res = await job.runOnce();
+    expect(res).toMatchObject({ ok: 1, failed: 0 });
+    expect(urls).toEqual(['https://example.com', 'https://www.example.com/']);
+    expect(job.latest()['S1_MD2_39'].error).toBe('');
+  });
+
+  it('302 → заглушка оператора: конечный must_not_contain срабатывает (не успех)', async () => {
+    fetchBehavior = async (proxy, url) => {
+      if (url === 'https://example.com') return { status: 302, totalMs: 50, body: '', location: 'http://blocked.example/' };
+      return { status: 200, totalMs: 50, body: '<html>пополните баланс</html>' };
+    };
+    const job = mk({ httpcheck_must_not_contain: 'пополните баланс' });
+    const res = await job.runOnce();
+    expect(res).toMatchObject({ ok: 0, failed: 1 });
+    expect(job.latest()['S1_MD2_39'].error).toContain('content_blocked');
+    expect(job.latest()['S1_MD2_39'].error).toContain('blocked.example');
+  });
+
+  it('цикл редиректов: явный redirect_cycle, не «успех»', async () => {
+    fetchBehavior = async (proxy, url) => ({ status: 302, totalMs: 10, body: '', location: 'https://example.com' });
+    const job = mk();
+    const res = await job.runOnce();
+    expect(res).toMatchObject({ ok: 0, failed: 1 });
+    expect(job.latest()['S1_MD2_39'].error).toContain('redirect_cycle');
+  });
+
+  it('недоступный конечный сайт после редиректа: ошибка, не успех', async () => {
+    fetchBehavior = async (proxy, url) => {
+      if (url === 'https://example.com') return { status: 302, totalMs: 50, body: '', location: 'https://dead.example/' };
+      throw new Error('timeout');
+    };
+    const job = mk();
+    const res = await job.runOnce();
+    expect(res).toMatchObject({ ok: 0, failed: 1 });
+    expect(job.latest()['S1_MD2_39'].error).toContain('timeout');
+  });
+});

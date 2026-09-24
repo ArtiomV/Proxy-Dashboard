@@ -34,7 +34,7 @@ module.exports = function (deps) {
       // Лимит клиентов на admin-сессию проверяем ДО открытия потока —
       // так отказ это обычный 429, а не оборванный SSE.
       const sessionId = req.user.token || req.user.login;
-      if (!events.subscribe(res, sessionId)) {
+      if (!events.subscribe(res, sessionId, req.user.login)) {
         return res.status(429).json({ error: 'Слишком много SSE-подключений для сессии (лимит 10)' });
       }
       res.writeHead(200, {

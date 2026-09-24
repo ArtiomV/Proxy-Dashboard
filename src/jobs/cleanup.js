@@ -184,7 +184,44 @@ function create(deps) {
     }
   }
 
-  function runRetentionCleanup() {
+  // 2026-09-24 · DEEP-36 (FIX-SPEC §19.5): пакетные удаления. Монолитный
+  // DELETE по большой таблице надолго занимал event loop и SQLite writer,
+  // раздувал WAL. Теперь: чанки по BATCH с бюджетом времени на таблицу и
+  // уступкой event loop между чанками; метрики page_count/freelist_count и
+  // размер WAL собираются до/после; PASSIVE checkpoint — с наблюдаемым busy.
+  // Усечённый проход (бюджет вышел) добирается следующим запуском джобы.
+  const DELETE_BATCH = 5000;
+  const DELETE_BUDGET_MS = 2000;
+  async function _batchedDelete(table, col, safeDays) {
+    const stmt = db.prepare(
+      `DELETE FROM ${table} WHERE rowid IN (SELECT rowid FROM ${table} WHERE ${col} < datetime('now', '-' || ? || ' days') LIMIT ${DELETE_BATCH})`
+    );
+    let total = 0, truncated = false;
+    const started = Date.now();
+    for (;;) {
+      const res = stmt.run(String(safeDays));
+      total += res.changes;
+      if (res.changes < DELETE_BATCH) break;
+      if (Date.now() - started > DELETE_BUDGET_MS) { truncated = true; break; }
+      await new Promise(r => setImmediate(r));
+    }
+    return { changes: total, truncated };
+  }
+
+  function _storageMetrics() {
+    const m = {};
+    try {
+      m.page_count = db.pragma('page_count', { simple: true });
+      m.freelist_count = db.pragma('freelist_count', { simple: true });
+      const pageSize = db.pragma('page_size', { simple: true }) || 4096;
+      m.db_mb = Math.round(m.page_count * pageSize / 1048576);
+      m.freelist_mb = Math.round(m.freelist_count * pageSize / 1048576);
+      try { m.wal_mb = Math.round(fs.statSync(db.name + '-wal').size / 1048576); } catch (_) { m.wal_mb = 0; }
+    } catch (e) { m.error = e.message; }
+    return m;
+  }
+
+  async function runRetentionCleanup() {
     const retentions = {
       traffic_hourly: { col: 'hour_start', key: 'retention_traffic_hourly', def: 90 },
       modem_meta:     { col: 'updated_at', key: 'retention_modem_meta', def: 30 },
@@ -212,6 +249,7 @@ function create(deps) {
       modem_httpcheck:  { col: 'ts', key: 'retention_modem_httpcheck', def: 30 },
     };
     const results = {};
+    const diskBefore = _storageMetrics();
     for (const [table, { col, key, def }] of Object.entries(retentions)) {
       const raw = appSettings[key];
       const days = Number.isInteger(raw) && raw >= 7 ? raw : def;
@@ -221,9 +259,10 @@ function create(deps) {
       // passed as a bound parameter (not interpolated) as defence-in-depth, so
       // this pattern stays safe if it's ever copied somewhere with a dynamic value.
       const safeDays = Math.max(1, Number(days) | 0);
-      results[table] = db.prepare(
-        `DELETE FROM ${table} WHERE ${col} < datetime('now', '-' || ? || ' days')`
-      ).run(safeDays);
+      results[table] = await _batchedDelete(table, col, safeDays);
+      if (results[table].truncated) {
+        logger.warn(`[Retention] ${table}: бюджет прохода исчерпан (${DELETE_BUDGET_MS}ms) — удалено ${results[table].changes}, остаток доберёт следующий запуск`);
+      }
     }
     // In-memory dailyTraffic cleanup (mirrors daily_traffic table retention)
     try {
@@ -290,6 +329,24 @@ function create(deps) {
       results.tracking_pruned = { ipTracking: ipPruned, uptimeTracking: upPruned, modemRotationCache: rotPruned };
     } catch (e) {
       logger.warn('[Retention] tracking-map pruning error: ' + e.message);
+    }
+    // DEEP-36: метрики хранения до/после + PASSIVE checkpoint с наблюдаемым
+    // busy. Освобождённые страницы — это freelist, а НЕ уменьшение файла:
+    // компакция (VACUUM) — отдельная политика, здесь не выполняется.
+    const diskAfter = _storageMetrics();
+    let checkpoint = null;
+    try {
+      const rows = db.pragma('wal_checkpoint(PASSIVE)');
+      checkpoint = rows && rows[0] ? rows[0] : null;
+    } catch (e) { checkpoint = { error: e.message }; }
+    results.disk = {
+      before: diskBefore, after: diskAfter,
+      checkpoint_busy: checkpoint ? (checkpoint.busy ?? null) : null,
+      checkpoint_log: checkpoint ? (checkpoint.log ?? null) : null,
+      checkpointed: checkpoint ? (checkpoint.checkpointed ?? null) : null,
+    };
+    if (diskAfter.freelist_mb > 0 || (diskBefore.freelist_mb || 0) > 0) {
+      logger.info(`[Retention] storage: db=${diskAfter.db_mb}MB freelist=${diskBefore.freelist_mb}→${diskAfter.freelist_mb}MB wal=${diskAfter.wal_mb}MB checkpoint(busy=${results.disk.checkpoint_busy}, log=${results.disk.checkpoint_log}, done=${results.disk.checkpointed})`);
     }
     return results;
   }
