@@ -90,7 +90,7 @@ function mkNet() {
   };
 }
 
-const SUB_TARIFF = { id: 77, name: 'Подписка', active: 1, duration_hours: null, price: 3100, min_topup_days: 1, server: 'S1', geo: 'TST' };
+const SUB_TARIFF = { id: 77, name: 'Подписка', active: 1, public: 1, duration_hours: null, price: 3100, min_topup_days: 1, server: 'S1', geo: 'TST' };
 
 function mountBuy(client, net, { atomicDebit } = {}) {
   const router = createRetailRouter({

@@ -1880,18 +1880,38 @@ function getSetting(key, def) {
   if (SENSITIVE_SETTINGS.has(key) && typeof v === 'string' && v.startsWith('enc1:')) v = _decryptSettingVal(v);
   return v;
 }
-function setSetting(key, val) {
-  appSettings[key] = (SENSITIVE_SETTINGS.has(key) && typeof val === 'string' && val && !val.startsWith('enc1:'))
+// DEEP-41 (2026-09-24): durable-сохранение ДО публикации в runtime.
+// Раньше память менялась первой — ошибка записи (SQLITE_FULL/READONLY)
+// оставляла процесс с настройкой, которой нет в БД (после рестарта — другая).
+// Теперь: собираем candidate (с шифрованием), сохраняем, и только после
+// успешного commit публикуем в appSettings. Ошибка шифрования/записи —
+// исключение наверх, runtime не тронут.
+function _candidateSettingValue(key, val) {
+  return (SENSITIVE_SETTINGS.has(key) && typeof val === 'string' && val && !val.startsWith('enc1:'))
     ? _encryptSettingVal(val) : val;
-  saveSettings();
+}
+function setSetting(key, val) {
+  const candidate = _candidateSettingValue(key, val);
+  const prev = appSettings[key];
+  appSettings[key] = candidate;   // saveSettings сериализует целый объект
+  try {
+    saveSettings();
+  } catch (e) {
+    if (prev === undefined) delete appSettings[key]; else appSettings[key] = prev;
+    throw e;
+  }
 }
 function setSettings(partial) {
   if (!partial || typeof partial !== 'object') return;
-  for (const [k, v] of Object.entries(partial)) {
-    appSettings[k] = (SENSITIVE_SETTINGS.has(k) && typeof v === 'string' && v && !v.startsWith('enc1:'))
-      ? _encryptSettingVal(v) : v;
+  const entries = Object.entries(partial).map(([k, v]) => [k, _candidateSettingValue(k, v)]);
+  const prevs = entries.map(([k]) => [k, appSettings[k]]);
+  for (const [k, v] of entries) appSettings[k] = v;
+  try {
+    saveSettings();
+  } catch (e) {
+    for (const [k, prev] of prevs) { if (prev === undefined) delete appSettings[k]; else appSettings[k] = prev; }
+    throw e;
   }
-  saveSettings();
 }
 
 function getPriceForProxyCount(count) {
@@ -2232,6 +2252,13 @@ function authMiddleware(req, res, next) {
     if (cl && cl.blocked) {
       deleteSessionsByLogin(sess.login);
       return res.status(403).json({ error: 'Аккаунт заблокирован' });
+    }
+    // DEEP-40 (2026-09-24): сессия без живого клиента и без env-учётной
+    // записи не авторизуется — раньше отсутствие клиента ПРОПУСКАЛОСЬ, и
+    // токен переименованного/удалённого клиента работал со старым scope.
+    if (!cl && !(sess.login && users[sess.login])) {
+      deleteSession(_readSessionToken(req));
+      return res.status(401).json({ error: 'Unauthorized' });
     }
   }
   req.user = sess;
@@ -3123,6 +3150,7 @@ app.use(require('./src/routes/client-portal')({
   mailer: { send: (...args) => mailer.send(...args), renderTemplate: (...args) => mailer.renderTemplate(...args) },
   proxyConf, modemRotationCache, proxySmart,
   retailPoolDb,   // B2C Э2: payload retail-конвейера в /api/dashboard_data
+  tariffsDb,      // DEEP-48: rotation_allowed тарифа в клиентских командах
 }));
 
 // ── B2C retail (ТЗ 10.08) ─────────────────────────────────────────────────
@@ -4387,4 +4415,4 @@ process.on('uncaughtException', (err) => {
 // Expose internals for the supertest harness (NODE_ENV=test). Production
 // code paths don't reach for this — the start-via-`node server.js` flow
 // runs to completion above and never `require()`s its own exports.
-module.exports = { app, db, saveClients, injectOfflineModems, knownModems, saveKnownModems, apiServers, SERVER_COUNTRIES, rebuildServerCountries, updateKnownModems, getPriceForProxyCount, ledgerExpense };
+module.exports = { app, db, saveClients, injectOfflineModems, knownModems, saveKnownModems, apiServers, SERVER_COUNTRIES, rebuildServerCountries, updateKnownModems, getPriceForProxyCount, ledgerExpense, getUsers: () => users };

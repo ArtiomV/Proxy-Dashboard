@@ -37,11 +37,16 @@ function create(deps) {
   //   price_override (индивидуальная цена корпората) → tariffs.price (по tariff_id)
   //   → clients.price (legacy-совместимость).
   // Ни одного источника → 0 (клиент пропускается биллингом + алерт наверху).
+  // DEEP-47 (2026-09-24): active=0 у тарифа закрывает НОВЫЕ продажи, а не
+  // действующие назначения — цена клиента с архивным тарифом читается так же.
+  // Пропавший tariffId — громкий warn один раз на клиента (не молчаливый
+  // fallback на legacy/0, инцидент «3040 → 0 после деактивации»).
   function getClientPrice(client) {
     if (typeof client.priceOverride === 'number' && client.priceOverride > 0) return client.priceOverride;
     if (client.tariffId != null && tariffsDb) {
       const t = tariffsDb.byId(client.tariffId);
-      if (t && t.active && t.price > 0) return t.price;
+      if (t && t.price > 0) return t.price;
+      if (!t) logger.warn(`[Billing] ${client.name}: tariffId=${client.tariffId} не найден — fallback на legacy price ${client.price || 0}`);
     }
     return client.price || 0;
   }

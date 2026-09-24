@@ -224,7 +224,7 @@ describe('buy_proxy: тест-день проставляет test_expires_at (+
       clients,
       user: { login: 'u_t', isAdmin: 0 },
       poolRows: [{ id: 1, server: 'S1', port_id: 'p_test', status: 'free', client_id: null }],
-      tariffs: { 7: { id: 7, name: 'Тест-день', active: 1, duration_hours: 24, price: 100, min_topup_days: 1, server: 'S1', geo: 'TST' } },
+      tariffs: { 7: { id: 7, name: 'Тест-день', active: 1, public: 1, duration_hours: 24, price: 100, min_topup_days: 1, server: 'S1', geo: 'TST' } },
     });
     const res = await request(app)
       .post('/api/client/buy_proxy')
@@ -249,7 +249,7 @@ describe('buy_proxy: тест-день проставляет test_expires_at (+
       clients,
       user: { login: 'u_s', isAdmin: 0 },
       poolRows: [{ id: 1, server: 'S1', port_id: 'p_sub', status: 'free', client_id: null }],
-      tariffs: { 9: { id: 9, name: 'Базовый', active: 1, duration_hours: null, price: 300, min_topup_days: 1, server: 'S1', geo: 'TST' } },
+      tariffs: { 9: { id: 9, name: 'Базовый', active: 1, public: 1, duration_hours: null, price: 300, min_topup_days: 1, server: 'S1', geo: 'TST' } },
     });
     const res = await request(app).post('/api/client/buy_proxy').send({ tariff_id: 9 });
     expect(res.status).toBe(200);

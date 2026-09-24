@@ -65,6 +65,14 @@ describe('D3: verifyBackupFile', () => {
   });
 });
 
+// 2026-09-24 · DEEP-43: имена дампов — динамические (RPO-проверка по дате файла).
+const _d = (daysAgo) => {
+  const t = new Date(Date.now() - daysAgo * 86400000);
+  return t.toISOString().slice(0, 10);
+};
+const FRESH = 'dashboard-' + _d(1) + '.db.gz';   // вчера — проходит RPO
+const OLD = 'dashboard-' + _d(8) + '.db.gz';     // неделя — старше RPO=2
+
 describe('D3: runOnce — локальный fallback', () => {
   const savedEnv = {};
   beforeEach(() => {
@@ -98,8 +106,8 @@ describe('D3: runOnce — локальный fallback', () => {
     const dbFile = path.join(workDir, 'src.db');
     makeValidDbFile(dbFile);
     const gz = zlib.gzipSync(fs.readFileSync(dbFile));
-    fs.writeFileSync(path.join(backupDir, 'dashboard-2026-08-16.db.gz'), gz);
-    fs.writeFileSync(path.join(backupDir, 'dashboard-2026-08-23.db.gz'), gz);   // новее — берётся он
+    fs.writeFileSync(path.join(backupDir, '' + OLD + ''), gz);
+    fs.writeFileSync(path.join(backupDir, '' + FRESH + ''), gz);   // новее — берётся он
     process.env.DB_BACKUP_DIR = backupDir;
 
     const deps = makeDeps({ tmpDir });
@@ -107,11 +115,11 @@ describe('D3: runOnce — локальный fallback', () => {
     const r = await job.runOnce();
     expect(r.ok).toBe(true);
     expect(r.source).toBe('local');
-    expect(r.file).toBe('dashboard-2026-08-23.db.gz');
+    expect(r.file).toBe('' + FRESH + '');
     expect(r.counts.clients).toBe(1);
     expect(deps.alerts.trigger).not.toHaveBeenCalled();
     expect(deps.logActivity).toHaveBeenCalledWith('system', 'info', 'backup_restore_test_ok',
-      'dashboard-2026-08-23.db.gz', expect.stringContaining('OK'), expect.objectContaining({ source: 'local' }));
+      '' + FRESH + '', expect.stringContaining('OK'), expect.objectContaining({ source: 'local' }));
     expect(deps.logger.warn).toHaveBeenCalled();   // warn про локальный fallback
     // temp-файлы прибиты
     expect(fs.readdirSync(tmpDir).filter(f => f.startsWith('backup-test-'))).toHaveLength(0);
@@ -136,7 +144,7 @@ describe('D3: runOnce — локальный fallback', () => {
   it('битый дамп (не sqlite после gunzip) → ok:false + алерт', async () => {
     const backupDir = path.join(workDir, 'backups');
     fs.mkdirSync(backupDir);
-    fs.writeFileSync(path.join(backupDir, 'dashboard-2026-08-23.db.gz'), zlib.gzipSync(Buffer.from('junk junk junk')));
+    fs.writeFileSync(path.join(backupDir, '' + FRESH + ''), zlib.gzipSync(Buffer.from('junk junk junk')));
     process.env.DB_BACKUP_DIR = backupDir;
 
     const deps = makeDeps();
@@ -144,7 +152,7 @@ describe('D3: runOnce — локальный fallback', () => {
     const r = await job.runOnce();
     expect(r.ok).toBe(false);
     expect(deps.alerts.trigger).toHaveBeenCalledWith('backup_restore_failed',
-      expect.objectContaining({ source: 'local', file: 'dashboard-2026-08-23.db.gz' }));
+      expect.objectContaining({ source: 'local', file: '' + FRESH + '' }));
   });
 
   // FIX-08 п.7 (18.09.2026): последний архив повреждён — итог остаётся явным
@@ -157,8 +165,8 @@ describe('D3: runOnce — локальный fallback', () => {
     const dbFile = path.join(workDir, 'src.db');
     makeValidDbFile(dbFile);
     const good = zlib.gzipSync(fs.readFileSync(dbFile));
-    fs.writeFileSync(path.join(backupDir, 'dashboard-2026-08-16.db.gz'), good);
-    fs.writeFileSync(path.join(backupDir, 'dashboard-2026-08-23.db.gz'), zlib.gzipSync(Buffer.from('corrupted')));
+    fs.writeFileSync(path.join(backupDir, '' + OLD + ''), good);
+    fs.writeFileSync(path.join(backupDir, '' + FRESH + ''), zlib.gzipSync(Buffer.from('corrupted')));
     process.env.DB_BACKUP_DIR = backupDir;
 
     const deps = makeDeps({ tmpDir });
@@ -166,13 +174,13 @@ describe('D3: runOnce — локальный fallback', () => {
     const r = await job.runOnce();
     // Повреждение последнего НЕ скрыто: фейл + алерт именно на последний файл.
     expect(r.ok).toBe(false);
-    expect(r.recoverableFrom).toBe('dashboard-2026-08-16.db.gz');
+    expect(r.recoverableFrom).toBe('' + OLD + '');
     expect(deps.alerts.trigger).toHaveBeenCalledWith('backup_restore_failed',
       expect.objectContaining({
-        file: 'dashboard-2026-08-23.db.gz',
-        recoverableFrom: 'dashboard-2026-08-16.db.gz',
+        file: '' + FRESH + '',
+        recoverableFrom: '' + OLD + '',
       }));
-    expect(deps.logger.warn).toHaveBeenCalledWith(expect.stringContaining('dashboard-2026-08-16.db.gz'));
+    expect(deps.logger.warn).toHaveBeenCalledWith(expect.stringContaining('' + OLD + ''));
     // temp-файлы проверки предыдущих архивов прибиты
     expect(fs.readdirSync(tmpDir).filter(f => f.startsWith('backup-test-'))).toHaveLength(0);
   });
@@ -189,5 +197,25 @@ describe('D3: runOnce — локальный fallback', () => {
     const r = await job.runOnce();
     expect(r.ok).toBe(false);
     expect(r.error).toContain('бэкапов нет');
+  });
+});
+
+// 2026-09-24 · DEEP-43: freshness/RPO — отдельная проверка, не часть integrity.
+describe('DEEP-43: RPO и degraded-статус', () => {
+  it('валидный, но СТАРЫЙ дамп (>RPO) — фейл «устарел», не ok', async () => {
+    const backupDir = path.join(workDir, 'backups');
+    fs.mkdirSync(backupDir);
+    const dbFile = path.join(workDir, 'src.db');
+    makeValidDbFile(dbFile);
+    fs.writeFileSync(path.join(backupDir, OLD), zlib.gzipSync(fs.readFileSync(dbFile)));
+    process.env.DB_BACKUP_DIR = backupDir;
+    const job = backupTest.create({
+      logger: { info() {}, warn() {}, error() {} },
+      alerts: { trigger() {} }, logActivity() {}, fs, path,
+      tmpDir: path.join(workDir, 'tmp'),
+    });
+    const r = await job.runOnce();
+    expect(r.ok).toBe(false);
+    expect(r.error).toContain('устарел');
   });
 });

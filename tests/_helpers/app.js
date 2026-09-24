@@ -45,6 +45,14 @@ function asAdmin(login = 'test_admin') {
 }
 
 function asClient(login = 'test_client', portFilter = '*') {
+  // DEEP-40 (2026-09-24): middleware больше не пропускает сессии без живого
+  // клиента И без учётной записи в users. Фабрикованным тестовым логинам даём
+  // stub-учётку env-типа — поведение «валидная сессия, нет прав админа»,
+  // которое эти тесты и проверяют (403 на админских роутах).
+  const mod = bootApp();
+  if (typeof mod.getUsers === 'function' && !mod.getUsers()[login]) {
+    mod.getUsers()[login] = { passwordHash: '', portNameFilter: portFilter, source: 'env' };
+  }
   return mintSession({ login, isAdmin: false, portFilter });
 }
 

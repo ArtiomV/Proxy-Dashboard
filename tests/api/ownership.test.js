@@ -77,12 +77,14 @@ describe('WP2: reset_ip_by_token — unified ownership chain', () => {
     expect(res.status).toBe(404); // 'Modem not found' — tried every (empty) server list
   });
 
-  it('offline modem with traffic history only also passes (not 403)', async () => {
+  // DEEP-38 (2026-09-24): история трафика без действующего назначения — НЕ
+  // право на мутацию (reset). Read-only отчёты её используют, команды — нет.
+  it('offline modem with traffic history only → 403 (история не право на reset)', async () => {
     const res = await request(app)
       .get('/api/client/reset_ip_by_token')
       .query({ nick: HISTORY_NICK, token: resetToken });
-    expect(res.status).not.toBe(403);
-    expect(res.status).toBe(404);
+    expect(res.status).toBe(403);
+    expect(res.body.error).toMatch(/not assigned/i);
   });
 
   it('403 for a modem NOT assigned to the client', async () => {

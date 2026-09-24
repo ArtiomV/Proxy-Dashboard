@@ -414,3 +414,79 @@ describe('failover engine', () => {
     });
   });
 });
+
+// 2026-09-24 · DEEP-50/51/52: claim резерва, проверка владельца, результат apply.
+describe('failover — DEEP-50/51/52', () => {
+  it('DEEP-52: resolved-отказ apply_port → failed, а не ok + cooldown', async () => {
+    const eng = freshEngine();
+    const deps = makeDeps({
+      fetchApi: async (server, path) => {
+        if (path.startsWith('/apix/apply_port')) return { error: 'rejected by box' };
+        if (path === '/apix/list_ports_json') return {};
+        return {};
+      },
+    });
+    eng.init(deps);
+    const res = await eng.manualFailover('S2', 'IMEI_DEAD', 'RO_DEAD');
+    expect(res.ok).toBe(false);
+    expect(res.results[0].result).toBe('failed');
+    expect(res.results[0].error).toContain('apply_port');
+    const log = deps.db.prepare("SELECT result FROM failover_log ORDER BY id DESC LIMIT 1").get();
+    expect(log.result).toBe('failed');
+  });
+
+  it('DEEP-51: порт уже у ДРУГОГО владельца → conflict, мутации нет', async () => {
+    const eng = freshEngine();
+    const deps = makeDeps({
+      fetchApi: async (server, path) => {
+        if (path === '/apix/list_ports_json') return { IMEI_DEAD: [{ portID: 'portDEAD', portName: 'Carol' }] };
+        return {};
+      },
+    });
+    eng.init(deps);
+    const res = await eng.manualFailover('S2', 'IMEI_DEAD', 'RO_DEAD');
+    expect(res.results[0].result).toBe('failed');
+    expect(res.results[0].error).toContain('conflict');
+    expect(deps._calls.editPort.length).toBe(0);   // чужое назначение не тронуто
+    expect(deps._calls.applyPort.length).toBe(0);
+  });
+
+  it('DEEP-50: два параллельных failover не занимают один spare', async () => {
+    const eng = freshEngine();
+    // Два мёртвых модема, ОДИН spare. Барьер удерживает первый перенос
+    // внутри _movePort, пока второй выбирает spare.
+    const gate = (() => { let r; const p = new Promise(res => { r = res; }); p.release = r; return p; })();
+    let firstEntered = false;
+    const deps = makeDeps();
+    deps.knownModems.S2['portDEAD2'] = { imei: 'IMEI_DEAD2', nick: 'RO_DEAD2', portName: 'Second' };
+    deps.fetchAllServersDataCached = async () => [{
+      serverName: 'S2',
+      status: [
+        { modem_details: { IMEI: 'IMEI_SPARE', NICK: 'RO_SPARE' }, net_details: { IS_ONLINE: 'yes' } },
+        { modem_details: { IMEI: 'IMEI_DEAD',  NICK: 'RO_DEAD'  }, net_details: { IS_ONLINE: 'no'  } },
+        { modem_details: { IMEI: 'IMEI_DEAD2', NICK: 'RO_DEAD2' }, net_details: { IS_ONLINE: 'no'  } },
+      ],
+      ports: {
+        IMEI_DEAD: [{ portID: 'portDEAD', portName: 'WildBox' }],
+        IMEI_DEAD2: [{ portID: 'portDEAD2', portName: 'Second' }],
+      },
+    }];
+    deps.proxyConf = {
+      getConfForm: async () => {
+        if (!firstEntered) { firstEntered = true; await gate; }
+        return { ok: true, status: 200, html: '<input name="portName" value="x">', fields: { portName: 'x' } };
+      },
+      postConfForm: async (s, path, fd) => { deps._calls.editPort.push({ path, IMEI: fd.IMEI }); return { ok: true, status: 302 }; },
+    };
+    eng.init(deps);
+    const p1 = eng.manualFailover('S2', 'IMEI_DEAD', 'RO_DEAD');
+    const p2 = eng.manualFailover('S2', 'IMEI_DEAD2', 'RO_DEAD2');
+    gate.release();
+    const [r1, r2] = await Promise.all([p1, p2]);
+    const oks = [r1, r2].filter(r => r.results.some(x => x.result === 'ok'));
+    const spares = [r1, r2].flatMap(r => r.results).filter(x => x.spare).map(x => x.spare);
+    expect(oks.length).toBe(1);                       // spare — один claimant
+    expect(new Set(spares).size).toBe(spares.length <= 1 ? 1 : 2);
+    expect(deps._calls.editPort.length).toBe(1);      // запись — только одна
+  });
+});

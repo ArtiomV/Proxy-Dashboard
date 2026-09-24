@@ -34,6 +34,23 @@ const _rateWindow = [];           // sliding window of recent real-move timestam
 let _interval = null;
 let _scanning = false;            // P0-3: re-entrancy guard for scanAndFailover
 const _movingImeis = new Set();   // P1-4: per-modem lock (serialize auto + manual)
+// DEEP-50 (2026-09-24): общий claim резервного модема. usedSpares общий
+// только внутри одного scan-прохода; два ручных/параллельных failover имели
+// разные Set и успевали выбрать ОДИН spare до await. Резерв ставится ДО
+// первого await мутации и живёт TTL (после успеха его сменяет
+// _recentlyAssignedSpares, после сбоя — снимается).
+const _reservedSpares = new Map();   // 'srv|imei' → ts
+const SPARE_RESERVE_TTL_MS = 10 * 60 * 1000;
+function _spareKey(srv, imei) { return srv + '|' + imei; }
+function _isSpareReserved(srv, imei) {
+  const key = _spareKey(srv, imei);
+  const ts = _reservedSpares.get(key);
+  if (!ts) return false;
+  if (Date.now() - ts > SPARE_RESERVE_TTL_MS) { _reservedSpares.delete(key); return false; }
+  return true;
+}
+function _reserveSpare(srv, imei) { _reservedSpares.set(_spareKey(srv, imei), Date.now()); }
+function _releaseSpare(srv, imei) { _reservedSpares.delete(_spareKey(srv, imei)); }
 
 // Spares we've JUST teleported a client port onto. The live snapshot is cached
 // (fetchAllServersDataCached) and ProxySmart takes a moment to reflect a new
@@ -243,29 +260,58 @@ function _glitchDecision(serverName, nick, imei) {
 }
 
 // ── the actual port teleport (mirrors /api/admin/move_port) ─────
-async function _movePort(server, portId, newImei) {
+async function _movePort(server, portId, newImei, opts) {
+  opts = opts || {};
   // Через proxyConf: на S2 /conf/* за логин-стеной — иначе авто-failover
   // молча падал бы на GET (HTML логина парсился бы как пустая форма).
   const conf = deps.proxyConf || proxyConf;   // deps-override для тестов
   const form = await conf.getConfForm(server, `/conf/edit_port/${portId}`);
   if (!form.ok) throw new Error(`edit_port form: ${form.reason}`);
   const formData = deps.parseHtmlInputFields(form.html);
-  if (!formData.proxy_password) {
-    try {
-      const portsData = await deps.fetchApi(server, '/apix/list_ports_json');
-      for (const [, plist] of Object.entries(portsData)) {
-        for (const port of plist) {
-          if (port.portID === portId && port.PASSWORD) { formData.proxy_password = port.PASSWORD; break; }
+  // DEEP-51 (2026-09-24): свежее назначение порта обязано совпадать с
+  // ожиданием из roster. Старый код менял IMEI в форме, даже если порт уже
+  // передан ДРУГОМУ владельцу — чужое назначение уезжало на spare, а аудит
+  // приписывался прежнему клиенту.
+  let live = null;
+  try {
+    const portsData = await deps.fetchApi(server, '/apix/list_ports_json');
+    for (const [, plist] of Object.entries(portsData)) {
+      for (const port of plist) {
+        if (port.portID === portId) {
+          live = port;
+          if (port.PASSWORD && !formData.proxy_password) formData.proxy_password = port.PASSWORD;
         }
-        if (formData.proxy_password) break;
       }
-    } catch (_) { /* best-effort */ }
+    }
+  } catch (_) { /* best-effort */ }
+  if (opts.expectedPortName && live && String(live.portName || '') !== opts.expectedPortName) {
+    throw new Error(`conflict: port owner is ${live.portName || 'empty'}, expected ${opts.expectedPortName}`);
   }
   formData.IMEI = newImei;                       // ← the teleport
   const posted = await conf.postConfForm(server, `/conf/edit_port/${portId}`, formData);
   if (!posted.ok) throw new Error(`edit_port post: ${posted.reason}`);
-  try { await deps.fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`); }
-  catch (e) { deps.logger.warn(`[Failover] apply_port ${portId}: ${e.message}`); }
+  // DEEP-52 (2026-09-24): resolved-ответ apply_port с error/ok:false —
+  // НЕ успех (раньше исключение глоталось, а resolved-отказ вообще не
+  // проверялся: cooldown, log=ok и alert «перенесено» уходили при отказе).
+  const applied = await deps.fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`);
+  if (applied && (applied.error || applied.ok === false)) {
+    throw new Error(`apply_port: ${applied.error || applied.reason || 'rejected'}`);
+  }
+  // Readback фактической привязки: порт обязан оказаться на newImei.
+  // Сетевая ошибка readback — uncertain (warn), не провал переноса.
+  try {
+    const after = await deps.fetchApi(server, '/apix/list_ports_json');
+    let seenImei = null;
+    for (const [imei, plist] of Object.entries(after)) {
+      for (const port of plist) if (port.portID === portId) seenImei = imei;
+    }
+    if (seenImei && seenImei !== newImei) {
+      throw new Error(`verify: port bound to ${seenImei}, expected ${newImei}`);
+    }
+  } catch (e) {
+    if (String(e.message || '').startsWith('verify:')) throw e;
+    deps.logger.warn(`[Failover] readback ${portId}: ${e.message}`);
+  }
 }
 
 // ── audit log ───────────────────────────────────────────────────
@@ -341,7 +387,14 @@ async function failoverModem(dead, reason, opts) {
   // получает пачку одинаковых пингов за один failover.
   const moved = [], noSpare = [], failed = [];
   for (const dp of deadPorts) {
-    const spare = findSpareFrom(dead.server, allData, usedSpares);
+    // DEEP-50: пропускаем spares, занятые параллельной операцией (claim выше).
+    let spare = null;
+    for (;;) {
+      const cand = findSpareFrom(dead.server, allData, usedSpares);
+      if (!cand) break;
+      if (_isSpareReserved(dead.server, cand.imei)) { usedSpares.add(cand.imei); continue; }
+      spare = cand; break;
+    }
     if (!spare) {
       _record({ server: dead.server, clientPortName: dp.portName, deadImei: dead.imei, deadNick: dead.nick, deadPortId: dp.portId, reason, result: 'skipped_no_spare' });
       noSpare.push(dp.portName);
@@ -356,9 +409,11 @@ async function failoverModem(dead, reason, opts) {
       results.push({ portId: dp.portId, client: dp.portName, result: 'dry_run', spare: spare.nick });
       continue;
     }
-    // Execute the teleport.
+    // Execute the teleport. DEEP-50: claim ДО первого await мутации.
+    _reserveSpare(dead.server, spare.imei);
     try {
-      await _movePort(server, dp.portId, spare.imei);
+      // DEEP-51: перенос только ОЖИДАЕМОГО назначения (свежий owner — внутри).
+      await _movePort(server, dp.portId, spare.imei, { expectedPortName: dp.portName });
       _lastFailoverByImei[dead.imei] = Date.now();
       _rateWindow.push(Date.now());
       usedSpares.add(spare.imei);
@@ -368,6 +423,7 @@ async function failoverModem(dead, reason, opts) {
       moved.push({ client: dp.portName, spareNick: spare.nick });
       results.push({ portId: dp.portId, client: dp.portName, result: 'ok', spare: spare.nick });
     } catch (e) {
+      _releaseSpare(dead.server, spare.imei);   // DEEP-50: неуспех — резерв снят
       _record({ server: dead.server, clientPortName: dp.portName, deadImei: dead.imei, deadNick: dead.nick, deadPortId: dp.portId, spareImei: spare.imei, spareNick: spare.nick, reason, result: 'failed', error: e.message });
       failed.push({ client: dp.portName, error: e.message });
       results.push({ portId: dp.portId, client: dp.portName, result: 'failed', error: e.message });
@@ -386,7 +442,9 @@ async function failoverModem(dead, reason, opts) {
     try { deps.alerts.trigger('failover_failed', { server: dead.server, clients: failed, client: failed[0].client, error: failed[0].error }); } catch (_) { /* alert best-effort */ }
   }
   try { deps.proxySmart.invalidateCache(); } catch (_) {}
-  return { ok: true, results };
+  // DEEP-52: частичный итог не маскируется общим ok=true — потребитель
+  // различает saved/failed по портам и флаг partial.
+  return { ok: failed.length === 0, partial: moved.length > 0 && failed.length > 0, results };
   } finally {
     _movingImeis.delete(dead.imei);
   }

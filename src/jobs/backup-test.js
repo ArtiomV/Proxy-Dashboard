@@ -20,6 +20,7 @@
 // Тесты подсовывают deps.execFile / deps.tmpDir — сеть и rclone не дёргаем.
 
 const zlib = require('zlib');
+const { pipeline } = require('stream/promises');
 
 function create(deps) {
   const { logger, alerts, logActivity, fs, path } = deps;
@@ -28,6 +29,10 @@ function create(deps) {
   // частично занятом tmpfs (ENOSPC на ровном месте). По умолчанию распаковываем
   // на ДИСК рядом с локальными бэкапами; переопределить — BACKUP_TEST_TMPDIR.
   const _tmpDir = deps.tmpDir || process.env.BACKUP_TEST_TMPDIR || _defaultTmpDir();
+  // DEEP-44 (2026-09-24): overlap-guard + уникальный mkdtemp на запуск.
+  let _running = false;
+  // DEEP-43: давность дампа (RPO) — отдельная проверка, не часть integrity.
+  const RPO_DAYS = Math.max(1, parseInt(process.env.BACKUP_TEST_RPO_DAYS || '2', 10) || 2);
 
   function _defaultTmpDir() {
     try {
@@ -47,15 +52,20 @@ function create(deps) {
   }
 
   // Последний дамп: сначала облако (rclone), иначе локальная копия.
+  // DEEP-43: remoteStatus — раздельная оценка доступности независимой копии;
+  // успешный локальный fallback НЕ закрывает offsite-инцидент.
   async function _findLatest() {
     const remote = process.env.RCLONE_REMOTE || '';
     const prefix = process.env.RCLONE_DEST_PREFIX || 'proxy-dashboard-backups';
+    let remoteStatus = 'unconfigured';
     if (remote) {
       try {
         const names = await _listPublished('s3');
-        if (names.length) return { source: 's3', file: names[names.length - 1], remote, prefix };
+        if (names.length) return { source: 's3', file: names[names.length - 1], remote, prefix, remoteStatus: 'ok' };
+        remoteStatus = 'empty';
         logger.warn('[BackupTest] rclone: в облаке дампов не найдено — fallback на локальную копию');
       } catch (e) {
+        remoteStatus = 'unavailable';
         logger.warn('[BackupTest] rclone недоступен (' + e.message + ') — тест по локальной копии');
       }
     } else {
@@ -63,22 +73,51 @@ function create(deps) {
     }
     const dir = process.env.DB_BACKUP_DIR || '/var/backups/proxy-dashboard';
     const names = await _listPublished('local');
-    if (!names.length) return null;
+    if (!names.length) return { source: null, file: null, remoteStatus };
     const file = names[names.length - 1];
-    return { source: 'local', file, localPath: path.join(dir, file) };
+    return { source: 'local', file, localPath: path.join(dir, file), remoteStatus };
   }
 
+  // DEEP-44: stream.pipeline закрывает ВСЕ ресурсы при ошибке (ручной
+  // pipe+on(error) оставлял потоки висеть). Ошибка входа/gzip/диска —
+  // одно отклонение Promise, дескрипторы освобождены.
   function _gunzip(src, dest) {
-    return new Promise((resolve, reject) => {
-      const rs = fs.createReadStream(src);
-      const ws = fs.createWriteStream(dest);
-      const gz = zlib.createGunzip();
-      rs.on('error', reject);
-      ws.on('error', reject);
-      gz.on('error', reject);
-      ws.on('finish', () => resolve(dest));
-      rs.pipe(gz).pipe(ws);
-    });
+    return pipeline(fs.createReadStream(src), zlib.createGunzip(), fs.createWriteStream(dest)).then(() => dest);
+  }
+
+  // DEEP-44: свободного места должно хватить на распаковку с запасом.
+  function _assertFreeSpace(dir, gzBytes) {
+    try {
+      const st = fs.statfsSync(dir);
+      const free = st.bavail * st.bsize;
+      const need = gzBytes * 8 + 100 * 1024 * 1024;   // коэф. распаковки + запас
+      if (free < need) throw new Error(`мало места для теста восстановления: free ${(free / 1e9).toFixed(1)}GB < need ${(need / 1e9).toFixed(1)}GB`);
+    } catch (e) {
+      if (e.code === 'ENOENT' || /мало места/.test(e.message)) throw e;
+      // statfs недоступен — не блокируем проверку
+    }
+  }
+
+  // DEEP-44: осиротевшие каталоги прошлых запусков (kill -9 мимо finally) —
+  // чистим только run-* старше суток (allowlist по имени + возраст).
+  function _cleanOrphanRuns() {
+    try {
+      for (const name of fs.readdirSync(_tmpDir)) {
+        if (!/^run-/.test(name)) continue;
+        const full = path.join(_tmpDir, name);
+        try {
+          const st = fs.statSync(full);
+          if (Date.now() - st.mtimeMs > 24 * 3600 * 1000) fs.rmSync(full, { recursive: true, force: true });
+        } catch (_) { /* файл гонки — пропускаем */ }
+      }
+    } catch (_) { /* best-effort */ }
+  }
+
+  // DEEP-43: давность по имени dashboard-YYYY-MM-DD.db.gz (UTC).
+  function _fileAgeDays(file) {
+    const m = /^dashboard-(\d{4})-(\d{2})-(\d{2})\.db\.gz$/.exec(file || '');
+    if (!m) return null;
+    return (Date.now() - Date.UTC(+m[1], +m[2] - 1, +m[3])) / 86400000;
   }
 
   // Список опубликованных архивов (только точные имена dashboard-YYYY-MM-DD.db.gz —
@@ -129,40 +168,62 @@ function create(deps) {
   }
 
   async function runOnce() {
-    const stamp = Date.now();
-    const tmpGz = path.join(_tmpDir, `backup-test-${stamp}.db.gz`);
-    const tmpDb = path.join(_tmpDir, `backup-test-${stamp}.db`);
+    if (_running) return { ok: false, skipped: 'already_running' };   // DEEP-44
+    _running = true;
+    try { fs.mkdirSync(_tmpDir, { recursive: true }); } catch (_) { /* существует */ }
+    _cleanOrphanRuns();
+    // DEEP-44: уникальный каталог запуска (параллельный запуск/совпадение
+    // Date.now больше не делит пути), finally чистит только его.
+    const runDir = fs.mkdtempSync(path.join(_tmpDir, 'run-'));
+    const tmpGz = path.join(runDir, 'backup.db.gz');
+    const tmpDb = path.join(runDir, 'backup.db');
     let latest = null;
     try {
       latest = await _findLatest();
-      if (!latest) throw new Error('бэкапов нет — ни в облаке (rclone), ни локально');
+      if (!latest || !latest.file) throw new Error('бэкапов нет — ни в облаке (rclone), ни локально');
+      // DEEP-43: freshness/RPO — отдельная проверка. Валидный дамп
+      // двухлетней давности — это НЕ актуальный бэкап.
+      const ageDays = _fileAgeDays(latest.file);
+      if (ageDays != null && ageDays > RPO_DAYS) {
+        throw new Error(`последний дамп устарел: ${latest.file} (${Math.floor(ageDays)} дн. > RPO ${RPO_DAYS} дн.)`);
+      }
       if (latest.source === 's3') {
         await _exec('rclone', ['copyto', `${latest.remote}:${latest.prefix}/${latest.file}`, tmpGz]);
       } else {
         fs.copyFileSync(latest.localPath, tmpGz);
       }
+      _assertFreeSpace(runDir, fs.statSync(tmpGz).size);
       await _gunzip(tmpGz, tmpDb);
       const info = verifyBackupFile(tmpDb, deps.Database);
-      logger.info(`[BackupTest] OK: ${latest.file} (${latest.source}), clients=${info.counts.clients}`);
+      // DEEP-43: раздельные оценки — integrity, freshness, remote. Локальный
+      // fallback при недоступном облаке — degraded, а не чистый ok.
+      const checks = {
+        integrity: true,
+        freshWithinDays: ageDays != null ? Math.floor(ageDays) : null,
+        remote: latest.remoteStatus,
+      };
+      const degraded = latest.source === 'local' && (latest.remoteStatus === 'unavailable' || latest.remoteStatus === 'empty')
+        ? 'remote_unavailable' : null;
+      logger.info(`[BackupTest] OK: ${latest.file} (${latest.source}), clients=${info.counts.clients}${degraded ? ' — DEGRADED: облако недоступно, проверена локальная копия' : ''}`);
       if (logActivity) {
-        logActivity('system', 'info', 'backup_restore_test_ok', latest.file,
-          `Тест восстановления OK: ${latest.file} (${latest.source})`,
-          { source: latest.source, counts: info.counts });
+        logActivity('system', degraded ? 'warn' : 'info', 'backup_restore_test_ok', latest.file,
+          `Тест восстановления OK: ${latest.file} (${latest.source})${degraded ? ' — облако недоступно' : ''}`,
+          { source: latest.source, counts: info.counts, checks, degraded });
       }
-      return { ok: true, source: latest.source, file: latest.file, counts: info.counts };
+      return { ok: true, source: latest.source, file: latest.file, counts: info.counts, checks, degraded };
     } catch (e) {
       const err = (e && e.message) || String(e);
       // FIX-08 п.7: повреждение последнего архива не маскируем — итог всегда
       // ok:false + алерт; пригодный предыдущий архив указываем лишь как
       // оценку восстановимости (recoverableFrom).
-      const recoverableFrom = latest ? await _findRecoverable(latest) : null;
+      const recoverableFrom = latest && latest.file ? await _findRecoverable(latest) : null;
       if (recoverableFrom) {
         logger.warn(`[BackupTest] последний архив повреждён (${latest.file}); ближайший пригодный: ${recoverableFrom}`);
       }
       logger.error('[BackupTest] FAILED: ' + err);
       try {
         alerts.trigger('backup_restore_failed', {
-          source: latest ? latest.source : '?', file: latest ? latest.file : '', error: err,
+          source: latest && latest.source ? latest.source : '?', file: latest ? latest.file : '', error: err,
           recoverableFrom: recoverableFrom || null,
         });
       } catch (_) { /* alert best-effort */ }
@@ -172,9 +233,8 @@ function create(deps) {
       }
       return { ok: false, error: err, recoverableFrom: recoverableFrom || null };
     } finally {
-      for (const f of [tmpGz, tmpDb, tmpDb + '-shm', tmpDb + '-wal']) {
-        try { fs.unlinkSync(f); } catch (_) { /* temp-файл может не существовать */ }
-      }
+      try { fs.rmSync(runDir, { recursive: true, force: true }); } catch (_) { /* best-effort */ }
+      _running = false;
     }
   }
 

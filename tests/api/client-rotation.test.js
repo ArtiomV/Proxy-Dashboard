@@ -49,12 +49,24 @@ afterAll(() => {
 
 describe('POST /api/client/set_rotation — ownership', () => {
   it('passes the ownership gate for an OWNED modem (no 403)', async () => {
-    // Bogus server so the handler stops at findServer() AFTER the ownership
-    // check — proving the gate passed without mutating any real modem.
+    // DEEP-38 (2026-09-24): для мутации нужна действующая привязка — roster
+    // (live в тестах нет). История traffic_hourly права на ротацию не даёт.
+    const ctx = bootApp();
+    ctx.knownModems.TST = ctx.knownModems.TST || {};
+    ctx.knownModems.TST['rot_p1'] = { nick: OWNED_NICK, portName, imei: 'IMEI_ROT', lastClientSeen: Date.now() };
+    // Несуществующий сервер: findServer('TST') падает ПОСЛЕ ownership-гейта
+    // (DEEP-37: резолв с учётом serverName — roster лежит на том же 'TST'),
+    // так гейт доказан без мутации реального модема.
     const res = await request(app).post('/api/client/set_rotation').set('X-Auth-Token', clientToken)
-      .send({ nick: OWNED_NICK, serverName: '__nope__', minutes: 30 });
+      .send({ nick: OWNED_NICK, serverName: 'TST', minutes: 30 });
     expect(res.status).not.toBe(403);
     expect(res.status).toBe(400); // 'Server not found'
+  });
+
+  it('история traffic_hourly БЕЗ назначения → 403 на ротацию (DEEP-38)', async () => {
+    const res2 = await request(app).post('/api/client/set_rotation').set('X-Auth-Token', clientToken)
+      .send({ nick: OWNED_NICK + '_hist', serverName: 'TST', minutes: 30 });
+    expect(res2.status).toBe(403);
   });
 
   it('403 for a modem NOT assigned to the client', async () => {
@@ -64,9 +76,11 @@ describe('POST /api/client/set_rotation — ownership', () => {
     expect(res.body.error).toMatch(/not assigned/i);
   });
 
-  it('400 for out-of-range minutes (validated before ownership)', async () => {
+  it('400 при несуществующем сервере после пройденного ownership-гейта', async () => {
+    // Roster-привязка из первого теста на сервере 'TST' — гейт пройден,
+    // findServer('TST') → 400 'Server not found'.
     const res = await request(app).post('/api/client/set_rotation').set('X-Auth-Token', clientToken)
-      .send({ nick: OWNED_NICK, serverName: 'MD2', minutes: 5000 });
+      .send({ nick: OWNED_NICK, serverName: 'TST', minutes: 5000 });
     expect(res.status).toBe(400);
   });
 

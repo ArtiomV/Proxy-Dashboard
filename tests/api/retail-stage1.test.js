@@ -371,3 +371,90 @@ describe('B2C Э1: фича-флаг', () => {
     setRetail(true);
   });
 });
+
+// 2026-09-24 · DEEP-45/46: purchasable-контракт витрины.
+describe('DEEP-45/46: скрытые и неподдерживаемые тарифы не продаются', () => {
+  let buyerToken, buyerLogin;
+  beforeAll(async () => {
+    const reg = await request(app)
+      .post('/api/register')
+      .send({ email: 'gate@b2c-test.local', password: 'password123', consent: true });
+    buyerLogin = reg.body.login;
+    buyerToken = reg.body.token;
+    db.prepare('UPDATE clients SET email_verified = 1, balance = 100000 WHERE login = ?').run(buyerLogin);
+    const { state } = stateMod;
+    const c = state.clients.find(x => x.login === buyerLogin);
+    if (c) { c.emailVerified = true; c.balance = 100000; }
+  });
+
+  async function mkTariff(body) {
+    const t = await request(app)
+      .post('/api/admin/tariffs')
+      .set('X-Auth-Token', adminToken)
+      .send({ name: 'T-' + Math.random().toString(36).slice(2, 8), geo: 'TST', server: 'S1', price: 3000, ...body });
+    return t.body.tariff.id;
+  }
+  const buy = (token, tariff_id) => request(app).post('/api/client/buy_proxy').set('X-Auth-Token', token).send({ tariff_id });
+
+  it('public=0 → 400, выдачи нет (прямой запрос по ID)', async () => {
+    const id = await mkTariff({ type: 'per_modem', public: false });
+    const res = await buy(buyerToken, id);
+    expect(res.status).toBe(400);
+    expect(res.body.error).toContain('не найден или неактивен');
+  });
+
+  it('per_gb → 400 UNSUPPORTED_TARIFF_TYPE', async () => {
+    const id = await mkTariff({ type: 'per_gb', public: true });
+    const res = await buy(buyerToken, id);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('UNSUPPORTED_TARIFF_TYPE');
+  });
+
+  it('duration_hours=48 → 400 UNSUPPORTED_DURATION', async () => {
+    const id = await mkTariff({ type: 'per_modem', public: true, duration_hours: 48 });
+    const res = await buy(buyerToken, id);
+    expect(res.status).toBe(400);
+    expect(res.body.code).toBe('UNSUPPORTED_DURATION');
+  });
+});
+
+// 2026-09-24 · DEEP-39/53: общий guard блокировки для reset-link и API-key.
+describe('DEEP-39/53: блокировка закрывает reset-link и public API', () => {
+  it('blocked клиент с валидным resetToken → 403, вызова боксу нет', async () => {
+    const reg = await request(app)
+      .post('/api/register')
+      .send({ email: 'blocked-reset@b2c-test.local', password: 'password123', consent: true });
+    const login = reg.body.login;
+    const { state } = stateMod;
+    const c = state.clients.find(x => x.login === login);
+    const plain = 'rt_test_' + Math.random().toString(36).slice(2);
+    const { sha256hex } = require('../../src/utils/secrets.js');
+    c.resetToken = sha256hex(plain);
+    c.blocked = true;
+    stateMod.rebuildMaps();
+    const res = await request(app)
+      .get('/api/client/reset_ip_by_token')
+      .query({ token: plain, nick: 'MD_1' });
+    expect(res.status).toBe(403);
+    c.blocked = false; c.resetToken = ''; stateMod.rebuildMaps();
+  });
+
+  it('blocked клиент по API-key → 403 на обоих public endpoints', async () => {
+    const reg = await request(app)
+      .post('/api/register')
+      .send({ email: 'blocked-api@b2c-test.local', password: 'password123', consent: true });
+    const login = reg.body.login;
+    const { state } = stateMod;
+    const c = state.clients.find(x => x.login === login);
+    const plainKey = 'prx_test_' + Math.random().toString(36).slice(2);
+    const { sha256hex } = require('../../src/utils/secrets.js');
+    c.apiKey = sha256hex(plainKey);
+    c.blocked = true;
+    stateMod.rebuildMaps();
+    const r1 = await request(app).get('/api/v1/proxy').set('X-API-Key', plainKey);
+    const r2 = await request(app).get('/api/v1/proxies').set('X-API-Key', plainKey);
+    expect(r1.status).toBe(403);
+    expect(r2.status).toBe(403);
+    c.blocked = false; stateMod.rebuildMaps();
+  });
+});

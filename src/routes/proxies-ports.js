@@ -12,14 +12,18 @@ function validPortName(value) {
   return { ok: true, name };
 }
 
-function portPersisted(list, portId, imei) {
+function findPortInList(list, portId, imei) {
   const wanted = String(portId || '');
   const wantedImei = String(imei || '');
-  if (!wanted) return false;
+  if (!wanted) return null;
   const entries = wantedImei && list && Array.isArray(list[wantedImei])
     ? list[wantedImei]
     : Object.values(list && typeof list === 'object' ? list : {}).flatMap(value => Array.isArray(value) ? value : []);
-  return entries.some(port => port && String(port.portID || port.PORT_ID || '') === wanted);
+  return entries.find(port => port && String(port.portID || port.PORT_ID || '') === wanted) || null;
+}
+
+function portPersisted(list, portId, imei) {
+  return !!findPortInList(list, portId, imei);
 }
 
 module.exports = function createRouter(deps) {
@@ -106,15 +110,26 @@ r.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res
     // Confirm the port actually landed in the live port list before reporting
     // success — otherwise we'd log a phantom "port_created" and the operator would
     // retry, stacking duplicates (which then collide on the same port-pair).
-    let persisted = false, verifyError = null;
-    for (let attempt = 0; attempt < 3 && !persisted; attempt++) {
+    let persisted = false, verifyError = null, ownerConflict = null;
+    for (let attempt = 0; attempt < 3 && !persisted && ownerConflict === null; attempt++) {
       if (attempt) await new Promise(resolve => setTimeout(resolve, 250));
       try {
         const listRaw = await fetchApi(server, '/apix/list_ports_json');
-        persisted = portPersisted(listRaw, actualPortId, rawImei);
+        const found = findPortInList(listRaw, actualPortId, rawImei);
+        if (found) {
+          // DEEP-49 (2026-09-24): ID без владельца — не подтверждение. Prefilled
+          // portID, уже занятый чужим портом, — conflict, а не «ok, port created».
+          const owner = String(found.portName || '');
+          if (portData.portName && owner !== portData.portName) ownerConflict = owner;
+          else persisted = true;
+        }
       } catch (e) {
         verifyError = e;
       }
+    }
+    if (ownerConflict !== null) {
+      logger.warn(`[store_port] portID ${actualPortId} occupied by «${ownerConflict}», expected «${portData.portName}» — conflict, no retry`);
+      return res.status(409).json({ ok: false, error: `ProxySmart выдал portID, уже занятый портом «${ownerConflict || '∅'}». Создание отменено — сначала разберите конфликт на боксе.` });
     }
     if (!persisted) {
       logger.warn(`[store_port] port ${actualPortId} did NOT persist on ${serverName} — ProxySmart rejected the authoritative form (imei=${rawImei}, portName=${JSON.stringify(portData.portName)}, form=${JSON.stringify({ http_port: formData.http_port, socks_port: formData.socks_port, proxy_login: formData.proxy_login })}, verify=${verifyError ? verifyError.message : 'not_found'})`);
@@ -123,9 +138,13 @@ r.post('/api/admin/store_port', authMiddleware, adminMiddleware, async (req, res
 
     // Применяем только уже подтверждённый порт — прежний порядок мог вызвать
     // apply_port для фантомного ID после молчаливого отказа формы.
+    // DEEP-49: resolved-ответ apply_port с error/ok:false — НЕ applied.
     let applied = false;
     try {
-      await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(actualPortId)}`);
+      const appliedRes = await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(actualPortId)}`);
+      if (appliedRes && (appliedRes.error || appliedRes.ok === false)) {
+        throw new Error(appliedRes.error || appliedRes.reason || 'rejected');
+      }
       applied = true;
     } catch (e) {
       logger.warn(`[store_port] apply_port failed for ${actualPortId}: ${e.message}`);

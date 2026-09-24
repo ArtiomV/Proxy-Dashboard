@@ -108,7 +108,7 @@ function mkNet({ barrier = false, failAssign = false, silentReject = false } = {
   return net;
 }
 
-const TARIFF = { id: 77, name: 'Подписка', active: 1, duration_hours: null, price: 3100, min_topup_days: 1, server: 'S1', geo: 'TST' };
+const TARIFF = { id: 77, name: 'Подписка', active: 1, public: 1, duration_hours: null, price: 3100, min_topup_days: 1, server: 'S1', geo: 'TST' };
 function expectedCharge() {
   const days = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
   return Math.round((TARIFF.price / days) * 100) / 100;

@@ -12,7 +12,7 @@ const fs = require('fs');
 const fsPromises = require('fs/promises');
 const path = require('path');
 const { sha256hex } = require('../utils/secrets');
-const { rotateApiKey } = require('../services/api-keys');   // v2.10.68: grace-ротация
+const { rotateApiKey, resolveGraceHours } = require('../services/api-keys');   // v2.10.68: grace-ротация
 const financeEvents = require('../billing/events');   // WP7.2: cache invalidation on client mutations
 const { referralCommission } = require('../billing/referral');   // A1/Р6: комиссия 10%, единая константа
 function _emitFinanceWrite() {
@@ -222,6 +222,13 @@ r.put('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, res
   rebuildClientMaps();
   if (login && login !== old.login) delete users[old.login];
   users[updated.login] = { passwordHash: updated.passwordHash, portNameFilter: updated.portName, source: 'client', clientId: updated.id };
+  // DEEP-40 (2026-09-24): смена login/portName/пароля отзывает старые сессии —
+  // они хранят login и scope снимком; старый токен не должен работать с
+  // прежним binding после rename/переназначения.
+  if ((login && login !== old.login) || (portName && portName !== old.portName) || (password && password !== old.password)) {
+    try { deleteSessionsByLogin(old.login); } catch (_) { /* best-effort */ }
+    if (login && login !== old.login) { try { deleteSessionsByLogin(updated.login); } catch (_) { /* best-effort */ } }
+  }
   _emitFinanceWrite();
 
   // Политика Б (2026-09-11, grshabl): учёт баланса отключён → портам нечего
@@ -714,7 +721,10 @@ r.post('/api/admin/clients/:id/regenerate_key', authMiddleware, adminMiddleware,
   // rebuildClientMaps обязателен: карты ключей перестраиваются только здесь и
   // на буте — без ребилда новый ключ НЕ заработал бы, а старый продолжил бы
   // работать до рестарта (жилой баг прежнего regenerate).
-  const { plain, prevExpiresAt } = rotateApiKey(client);
+  // DEEP-42 (2026-09-24): admin-путь использует ту же настройку grace, что и
+  // self-service (раньше молча брал дефолт сервиса). 0 = немедленный отзыв.
+  const graceHours = resolveGraceHours(appSettings.api_key_grace_hours);
+  const { plain, prevExpiresAt } = rotateApiKey(client, graceHours);
   saveClients(clients);
   rebuildClientMaps();
   auditLog(req.user.login, 'regenerate_api_key', { clientId: client.id, clientName: client.name, prevExpiresAt, ip: getClientIp(req) });

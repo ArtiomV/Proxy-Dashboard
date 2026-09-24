@@ -292,3 +292,17 @@ describe('DEEP-27: verify_email — consume в одной транзакции �
     expect(clientMem(login).emailVerified).toBe(true);
   });
 });
+
+// 2026-09-24 · DEEP-40: сессия без живого клиента и без env-учётной записи
+// не авторизуется (раньше токен удалённого/переименованного клиента работал
+// со старым scope — отсутствие клиента пропускалось).
+describe('DEEP-40: stale session без клиента', () => {
+  it('сессия несуществующего login → 401, а не доступ со старым portNameFilter', async () => {
+    const ghost = cjsRequire('crypto').randomBytes(32).toString('hex');
+    db.prepare("INSERT INTO sessions (token, login, port_name_filter, is_admin, expires_at) VALUES (?, 'ghost_client', 'WildBox', 0, ?)")
+      .run(ghost, Date.now() + 3600e3);
+    const res = await request(app).get('/api/dashboard_data').set('X-Auth-Token', ghost);
+    expect(res.status).toBe(401);
+    db.prepare("DELETE FROM sessions WHERE token = ?").run(ghost);
+  });
+});

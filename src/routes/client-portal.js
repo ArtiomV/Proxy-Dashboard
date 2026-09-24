@@ -20,9 +20,9 @@ const path = require('path');
 const net = require('net');
 const crypto = require('crypto');
 const { tochkaRequest } = require('../tochka/api');
-const { isModemOwned } = require('../modems/ownership');
+const { isModemOwned, resolveOwnedModem } = require('../modems/ownership');
 const { sha256hex } = require('../utils/secrets');
-const { rotateApiKey } = require('../services/api-keys');   // v2.10.68: grace-ротация
+const { rotateApiKey, resolveGraceHours } = require('../services/api-keys');   // v2.10.68: grace-ротация
 const sla = require('../sla');
 const uptimePeriod = require('../uptime-period');
 
@@ -51,8 +51,18 @@ module.exports = function createClientPortalRouter(deps) {
     retailPoolDb,
     DOCUMENTS_DIR,
     getTochkaConfig,
+    tariffsDb,   // DEEP-48: rotation_allowed тарифа в клиентских командах
   } = deps;
   const r = express.Router();
+
+  // DEEP-48 (2026-09-24): rotation_allowed=0 у тарифа клиента запрещает
+  // ручные команды ротации на СЕРВЕРЕ, а не только в UI. Клиент без тарифа
+  // (B2B/legacy) — как раньше, разрешено.
+  function _rotationAllowed(client) {
+    if (!tariffsDb || !client || client.tariffId == null) return true;
+    const t = tariffsDb.byId(client.tariffId);
+    return !t || t.rotation_allowed !== 0;
+  }
 
   // B3 (Р13): портал-баннер блокировки/предупреждения. Критерий «за 3 дня» —
   // баланс ≤ 3 × среднесуточное списание за 7 дн (тот же, что в джобе
@@ -330,7 +340,7 @@ r.post('/api/client/api_key/regenerate', dashboardLimiter, authMiddleware, async
     if (client.apiKeyPrev && Date.now() - createdAt < 60 * 1000) {
       return res.status(429).json({ error: 'Ключ перевыпущен менее минуты назад. Подождите и попробуйте снова.' });
     }
-    const graceHours = Number(getSetting('api_key_grace_hours', 24)) || 24;
+    const graceHours = resolveGraceHours(getSetting('api_key_grace_hours', 24));   // DEEP-42: 0 легален
     const { plain, prevExpiresAt } = rotateApiKey(client, graceHours);
     saveClients(clients);
     rebuildClientMaps();   // иначе новый ключ заработает только после рестарта
@@ -420,6 +430,10 @@ r.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
     // Verify client owns this modem
     const pnf = req.user.portNameFilter;
     if (pnf !== '*') {
+      // DEEP-48: rotation_allowed=0 у тарифа — reset запрещён и через сессию.
+      if (!_rotationAllowed(clientByLogin.get(req.user.login))) {
+        return res.status(403).json({ error: 'Смена IP отключена для вашего тарифа' });
+      }
       const results = await fetchAllServersDataCached();
       const merged = mergeServerData(results, pnf);
       if (!merged.ports[imei]) return res.status(403).json({ error: 'Modem not assigned to this client' });
@@ -453,18 +467,29 @@ async function _resetIpImpl(req, res) {
   // Tokens are hashed at rest (migration 045) — the map is keyed by hash.
   const client = clientByResetToken.get(sha256hex(String(token)));
   if (!client) return res.status(401).json({ error: 'Invalid token' });
-  // Verify nick belongs to this client (WP2: live → roster → history; a new
-  // client without traffic history passes via the live/roster steps).
-  const owned = await isModemOwned({ nick, portNameFilter: client.portName, deps: _ownershipDeps });
-  if (!owned) return res.status(403).json({ error: 'Modem not assigned to this client' });
-  // Try all servers
-  for (const server of apiServers) {
-    try {
-      const result = await fetchApi(server, `/apix/reset_modem?arg=${encodeURIComponent(nick)}`);
-      if (result) return res.json({ ok: true, result });
-    } catch (e) { /* try next server */ }
+  // DEEP-39 (2026-09-24): reset-link — тот же guard, что и сессия/API-key:
+  // ручная блокировка запрещает команду независимо от валидности токена.
+  if (client.blocked) return res.status(403).json({ error: 'Аккаунт заблокирован' });
+  // DEEP-48: тариф с rotation_allowed=0 — ручной reset запрещён и по ссылке.
+  if (!_rotationAllowed(client)) return res.status(403).json({ error: 'Смена IP отключена для вашего тарифа' });
+  // DEEP-37: резолв конкретной сущности {server, imei} и команда ТОЛЬКО на
+  // её сервер — старый код перебирал ВСЕ серверы мутацией как способом
+  // поиска и принимал первый truthy (duplicate-nick уводил команду чужому
+  // серверу; error-объект тоже truthy). purpose='mutation': история
+  // трафика права на reset не даёт (DEEP-38).
+  const ent = await resolveOwnedModem({ nick, portNameFilter: client.portName, purpose: 'mutation', deps: _ownershipDeps });
+  if (!ent) return res.status(403).json({ error: 'Modem not assigned to this client' });
+  const server = ent.server ? findServer(ent.server) : null;
+  if (!server) return res.status(404).json({ error: 'Modem not found' });
+  try {
+    const result = await fetchApi(server, `/apix/reset_modem?arg=${encodeURIComponent(nick)}`);
+    const success = result && !result.error && result.result !== 'error';
+    auditLog(client.login, 'client_reset_ip_by_token', { nick, serverName: ent.server, success });
+    if (success) return res.json({ ok: true, result });
+    return res.status(502).json({ ok: false, error: (result && (result.error || result.message)) || 'Reset failed' });
+  } catch (e) {
+    return res.status(502).json({ ok: false, error: 'Reset failed', details: e.message });
   }
-  res.status(404).json({ error: 'Modem not found' });
 }
 
 r.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
@@ -483,18 +508,28 @@ r.post('/api/client/set_rotation', authMiddleware, async (req, res) => {
     // anyway, so it denied EVERY real modem → "Modem not assigned to your
     // account". Do not reintroduce portID-based matching here.
     const portNameFilter = req.user.portNameFilter;
+    // DEEP-48: rotation_allowed=0 у тарифа клиента — серверный запрет ротации.
+    if (portNameFilter !== '*' && !_rotationAllowed(clientByLogin.get(req.user.login))) {
+      return res.status(403).json({ error: 'Смена IP отключена для вашего тарифа' });
+    }
+    let ent = null;
     if (portNameFilter !== '*') {
-      const owned = await isModemOwned({ nick, portNameFilter, deps: _ownershipDeps });
-      if (!owned) return res.status(403).json({ error: 'Modem not assigned to your account' });
+      // DEEP-37 (2026-09-24): резолв конкретной сущности с учётом serverName
+      // из запроса; команда идёт ТОЛЬКО в разрешённый {server, imei}.
+      // purpose='mutation' — история трафика права не даёт (DEEP-38).
+      ent = await resolveOwnedModem({ nick, serverName, portNameFilter, purpose: 'mutation', deps: _ownershipDeps });
+      if (!ent) return res.status(403).json({ error: 'Modem not assigned to your account' });
     }
 
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
 
-    // Get current modem IMEI from status
+    // Get current modem IMEI from status — на разрешённом сервере; при
+    // наличии ent.imei матчим конкретное железо (клоны nick/IMEI).
     const statusData = await fetchApi(server, '/apix/show_status_json');
     const modems = Array.isArray(statusData) ? statusData : [];
-    const modem = modems.find(m => m.modem_details && m.modem_details.NICK === nick);
+    const modem = modems.find(m => m.modem_details &&
+      (ent && ent.imei ? m.modem_details.IMEI === ent.imei : m.modem_details.NICK === nick));
     if (!modem) return res.status(404).json({ error: 'Modem not found' });
 
     const rawImei = String(modem.modem_details.IMEI).replace(/^S\d+_/, '');

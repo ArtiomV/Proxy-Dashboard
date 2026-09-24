@@ -82,7 +82,9 @@ function create(deps) {
     if (typeof client.priceOverride === 'number' && client.priceOverride > 0) return client.priceOverride;
     if (client.tariffId != null && tariffsDb) {
       const t = tariffsDb.byId(client.tariffId);
-      if (t && t.active && t.price > 0) return t.price;
+      // DEEP-47 (2026-09-24): архивный тариф (active=0) действует для
+      // существующих назначений — то же решение, что billing.getClientPrice.
+      if (t && t.price > 0) return t.price;
     }
     return client.price || 0;
   }

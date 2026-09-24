@@ -29,6 +29,10 @@ module.exports = function createPublicApiRouter(deps) {
 
     const client = getClientByApiKey(apiKey);
     if (!client) return res.status(401).json({ success: false, error: 'Invalid API key' });
+    // DEEP-53 (2026-09-24): общий guard — заблокированный клиент не получает
+    // реквизиты прокси ни по текущему, ни по prev-ключу в grace (findClientByApiKey
+    // сам blocked не проверяет — в отличие от session middleware).
+    if (client.blocked) return res.status(403).json({ success: false, error: 'Аккаунт заблокирован' });
 
     try {
       const results = await fetchAllServersDataCached();
@@ -111,6 +115,8 @@ module.exports = function createPublicApiRouter(deps) {
 
     const client = getClientByApiKey(apiKey);
     if (!client) return res.status(401).json({ error: 'Invalid API key' });
+    // DEEP-53: заблокированному — 403, как в /api/v1/proxy выше.
+    if (client.blocked) return res.status(403).json({ error: 'Аккаунт заблокирован' });
 
     try {
       const results = await fetchAllServersDataCached();

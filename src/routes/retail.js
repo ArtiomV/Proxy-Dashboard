@@ -117,6 +117,19 @@ module.exports = function createRetailRouter(deps) {
 
     const tariff = tariffsDb.byId(req.body && req.body.tariff_id);
     if (!tariff || !tariff.active) return res.status(400).json({ error: 'Тариф не найден или неактивен' });
+    // DEEP-45 (2026-09-24): скрытый тариф (public=0) — НЕ для самостоятельной
+    // покупки: витрина его фильтрует, а прямой запрос по ID доходил до выдачи.
+    if (!tariff.public) return res.status(400).json({ error: 'Тариф не найден или неактивен' });
+    // DEEP-46 (2026-09-24): конвейер выдачи реализует ТОЛЬКО per_modem-подписку
+    // и тест-день (duration_hours=24, разовая фикс-цена). Остальные комбинации
+    // (per_gb, срочные аренды 48/72ч) раньше принимались и списывались как
+    // price/daysInMonth без deadline и смены billingType — отклоняем явно.
+    if (tariff.type && tariff.type !== 'per_modem') {
+      return res.status(400).json({ error: 'Этот тип тарифа не поддерживается самостоятельной покупкой', code: 'UNSUPPORTED_TARIFF_TYPE' });
+    }
+    if (tariff.duration_hours != null && tariff.duration_hours !== 24) {
+      return res.status(400).json({ error: 'Срочные аренды этого срока не поддерживаются самостоятельной покупкой', code: 'UNSUPPORTED_DURATION' });
+    }
 
     const isTestDay = tariff.duration_hours === 24;
     if (isTestDay && client.testUsed) {

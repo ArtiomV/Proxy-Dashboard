@@ -16,6 +16,15 @@ const { sha256hex } = require('../utils/secrets');
 
 const DEFAULT_GRACE_HOURS = 24;
 
+// DEEP-42 (2026-09-24): единая валидация grace-часов. 0 — легальное значение
+// (немедленный отзыв прежнего ключа): старый `Number(v) || 24` превращал его
+// в сутки. Некорректное/отрицательное → дефолт; потолок — 30 суток.
+function resolveGraceHours(raw, def = DEFAULT_GRACE_HOURS) {
+  const n = Number(raw);
+  if (!Number.isFinite(n) || n < 0) return def;
+  return Math.min(24 * 30, Math.floor(n));
+}
+
 // Новый ключ БЕЗ сохранения прежнего (первичная выдача при создании клиента).
 function issueApiKey() {
   const plain = 'prx_' + crypto.randomBytes(24).toString('hex');
@@ -41,4 +50,4 @@ function rotateApiKey(client, graceHours = DEFAULT_GRACE_HOURS) {
   return { plain: k.plain, prevExpiresAt: client.apiKeyPrevExpiresAt };
 }
 
-module.exports = { issueApiKey, rotateApiKey, DEFAULT_GRACE_HOURS };
+module.exports = { issueApiKey, rotateApiKey, resolveGraceHours, DEFAULT_GRACE_HOURS };
