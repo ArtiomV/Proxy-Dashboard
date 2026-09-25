@@ -25,6 +25,37 @@ function _runSection(logger, name, fn, fallback) {
   catch (e) { logger.warn('[data] section ' + name + ' failed (degraded): ' + e.message); return fallback; }
 }
 
+// 2026-09-25: whitelist-обрезка status-модемов для ответа /api/admin/data.
+// ProxySmart шлёт кучу служебных полей (android, proxy_creds с логином/паролем,
+// Added_EVENT_ID, GENTIME, OWNER, DEV_TYPE, GW/LOCAL_IP и пр.) — фронт их не
+// читает. Секции сервера уже посчитаны по полным данным; режем ТОЛЬКО копию
+// для ответа. Состав whitelist — по инвентарю полей, реально читаемых
+// admin.js/admin/*.
+const _STATUS_TOP_KEEP = new Set(['STATE', 'MSG', 'MSGS', 'IS_LOCKED', 'IS_REBOOTING', 'IS_ROTATED']);
+const _MD_KEEP = new Set(['IMEI', 'NICK', 'MODEL', 'MODEL_SHOWN', 'PHONE_NUMBER', 'NOTES',
+  'REBOOT_SCORE', 'TIME_TO_IP_ROTATION', 'UDEV_UPTIME', 'USB_ID', 'AUTO_IP_ROTATION',
+  'CONTRACT_RENEWAL_DATE', 'TARGET_MODE', 'UPTIME']);
+const _ND_KEEP = new Set(['APN', 'BAND', 'CELLOP', 'ConnectionStatus', 'CurrentNetworkType',
+  'EXT_IP', 'HTTP_REDIRECT_IMPOSED', 'ICCID', 'IS_ONLINE', 'ping_stats',
+  'SIGNAL_STRENGTH', 'SimStatus']);
+function _pick(obj, keep) {
+  const out = {};
+  for (const k in obj) {
+    if (k.startsWith('_') || keep.has(k)) out[k] = obj[k];   // служебные _server/_roster/* сохраняем
+  }
+  return out;
+}
+function _trimMergedForResponse(merged) {
+  if (!merged || !Array.isArray(merged.status)) return merged;
+  const status = merged.status.map(m => {
+    const slim = _pick(m, _STATUS_TOP_KEEP);
+    if (m.modem_details) slim.modem_details = _pick(m.modem_details, _MD_KEEP);
+    if (m.net_details) slim.net_details = _pick(m.net_details, _ND_KEEP);
+    return slim;
+  });
+  return { ...merged, status };
+}
+
 module.exports = function createOpsExtRouter(deps) {
   const {
     db, logger, DB_PATH,
@@ -643,7 +674,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       // Per-client counters use the known_modems roster — total is STABLE
       // (box-authoritative bindings, 2026-08-02); liveness is modemWorking.
       rosterWindowHours: 24,
-      ...merged,
+      ..._trimMergedForResponse(merged),
       servers: meta.servers,
       operatorAliases: meta.operatorAliases,
       clients: clientsSec.sanitizedClients,
