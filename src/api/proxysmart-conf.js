@@ -42,9 +42,10 @@ function _raw(server, { method, path, formBody, cookie, timeout = 12000 }) {
       headers['Content-Length'] = Buffer.byteLength(body);
     }
     if (cookie) headers.Cookie = cookie;
+    headers['Connection'] = 'close';   // agent:false — см. proxy-smart.js (ERR_INTERNAL_ASSERTION keep-alive)
     const req = _lib(url).request({
       hostname: url.hostname, port: url.port,
-      path: url.pathname + url.search, method, headers, timeout,
+      path: url.pathname + url.search, method, headers, timeout, agent: false,
     }, (res) => {
       const chunks = [];
       let bytes = 0;

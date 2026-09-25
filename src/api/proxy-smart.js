@@ -131,8 +131,8 @@ function fetchApi(server, apiPath, timeout = 10000) {
     const req = getHttpLib(url).request({
       hostname: url.hostname, port: url.port,
       path: url.pathname + url.search, method: 'GET',
-      headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json' },
-      timeout
+      headers: { 'Authorization': `Basic ${auth}`, 'Accept': 'application/json', 'Connection': 'close' },
+      timeout, agent: false,
     }, (proxyRes) => {
       let data = '';
       let bytes = 0;
@@ -189,8 +189,8 @@ function fetchApiRaw(server, apiPath, timeout = 10000) {
     const req = getHttpLib(url).request({
       hostname: url.hostname, port: url.port,
       path: url.pathname + url.search, method: 'GET',
-      headers: { 'Authorization': `Basic ${auth}` },
-      timeout
+      headers: { 'Authorization': `Basic ${auth}`, 'Connection': 'close' },
+      timeout, agent: false,
     }, (proxyRes) => {
       const chunks = [];
       let bytes = 0;
@@ -234,9 +234,10 @@ function postApi(server, apiPath, body, timeout = 10000) {
         'Authorization': `Basic ${auth}`,
         'Accept': 'application/json',
         'Content-Type': 'application/json',
-        'Content-Length': Buffer.byteLength(postData)
+        'Content-Length': Buffer.byteLength(postData),
+        'Connection': 'close'
       },
-      timeout
+      timeout, agent: false
     }, (proxyRes) => {
       let data = '';
       let bytes = 0;
@@ -485,8 +486,8 @@ function _panelLogin(server, timeout) {
     const req = getHttpLib(url).request({
       hostname: url.hostname, port: url.port,
       path: url.pathname + url.search, method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData) },
-      timeout
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded', 'Content-Length': Buffer.byteLength(postData), 'Connection': 'close' },
+      timeout, agent: false,
     }, (res) => {
       let data = '';
       res.on('data', c => { if (data.length < 4096) data += c; });
@@ -516,8 +517,8 @@ function _panelGet(server, apiPath, cookie, timeout) {
     const req = getHttpLib(url).request({
       hostname: url.hostname, port: url.port,
       path: url.pathname + url.search, method: 'GET',
-      headers: { 'Authorization': `Basic ${auth}`, 'Cookie': cookie, 'Accept': 'application/json' },
-      timeout
+      headers: { 'Authorization': `Basic ${auth}`, 'Cookie': cookie, 'Accept': 'application/json', 'Connection': 'close' },
+      timeout, agent: false,
     }, (res) => {
       let data = '';
       res.on('data', c => { if (data.length < 1024 * 1024) data += c; });
