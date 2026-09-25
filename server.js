@@ -2076,6 +2076,15 @@ if (!fs.existsSync(DOCUMENTS_DIR)) fs.mkdirSync(DOCUMENTS_DIR, { recursive: true
 
 const app = express();
 app.set('trust proxy', 1); // trust first proxy (nginx) — req.ip uses x-forwarded-for
+// 2026-09-25: gzip/deflate для ответов (главный payload админки 1.2 МБ JSON
+// и ~200 КБ admin.html шли несжатыми). SSE (/api/admin/events) НЕ сжимаем —
+// буферизация ломает realtime-фреймы.
+app.use(require('compression')({
+  filter: (req, res) => {
+    if ((res.getHeader('Content-Type') || '').toString().includes('text/event-stream')) return false;
+    return require('compression').filter(req, res);
+  },
+}));
 // CSP restored after Stage 5 (inline <script> blocks extracted into
 // public/js/admin.js + client.js; B2C auth-страницы register/forgot/reset/verify —
 // в public/js/auth/*.js, 14.08.2026: инлайн там блокировался CSP, страницы

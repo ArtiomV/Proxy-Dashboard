@@ -1546,6 +1546,24 @@ function filterPayments(){_paymentsSearch=(document.getElementById('paymentsSear
 function renderBankPayments() {
   var container = document.getElementById('bankPaymentsSection');
   if (!container) return;
+  // 2026-09-25: bankPayments вынесен из главного payload (~320 КБ) —
+  // подгружаем при первом открытии вкладки «Банк».
+  if (!currentData.bankPaymentsLoaded) {
+    if (!currentData.bankPaymentsLoading) {
+      currentData.bankPaymentsLoading = true;
+      api(API+'/api/admin/bank_payments').then(function(d){
+        currentData.bankPayments = (d && d.bankPayments) || [];
+        currentData.bankPaymentsLoaded = true;
+        currentData.bankPaymentsLoading = false;
+        renderBankPayments();
+      }).catch(function(e){
+        currentData.bankPaymentsLoading = false;
+        container.innerHTML = '<div class="notif-empty" style="color:var(--danger)">Ошибка: '+esc(e.message||e)+'</div>';
+      });
+    }
+    container.innerHTML = '<div class="notif-empty">Загрузка платежей…</div>';
+    return;
+  }
   var bp = currentData.bankPayments || [];
   var tochkaOk = currentData.tochkaConfigured;
   var searchVal=_paymentsSearch.toLowerCase();

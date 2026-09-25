@@ -616,10 +616,6 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
         upcoming: wins.filter(w => w.from_ts > now && w.from_ts <= now + 24 * 3600 * 1000),
       };
     }, { active: [], upcoming: [] });
-    const incidentSec = _runSection(logger, 'incidents', () => ({
-      active: db.prepare("SELECT * FROM monitoring_incidents WHERE state='open' ORDER BY opened_at DESC LIMIT 20").all(),
-      recent: db.prepare("SELECT * FROM monitoring_incidents ORDER BY opened_at DESC LIMIT 20").all(),
-    }), { active: [], recent: [] });
     const speedBaselineSec = _runSection(logger, 'speed-baseline', () => {
       const out = {};
       for (const row of db.prepare('SELECT * FROM modem_speed_baseline_state').all()) out[row.server+'_'+row.nick]=row;
@@ -667,7 +663,10 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
         return last;
       })(),
       settings: appSettings,
-      bankPayments: getAllBankPayments(),
+      // 2026-09-25: bankPayments (~320 КБ) и incidents (~90 КБ) из главного
+      // payload убраны — вкладка «Банк» подтягивает /api/admin/bank_payments
+      // при открытии, инциденты — /api/admin/incidents (фронт их не читает).
+      bankPayments: [],
       tochkaConfigured: !!getTochkaConfig().jwt,
       tochkaConfig: (() => { const tc = getTochkaConfig(); return { jwt: tc.jwt ? '****' + tc.jwt.slice(-8) : '', clientId: tc.clientId, customerCode: tc.customerCode, accountId: tc.accountId, companyName: tc.companyName, companyInn: tc.companyInn, companyKpp: tc.companyKpp, companyAddress: tc.companyAddress, bankAccount: tc.bankAccount, bankName: tc.bankName, bankBic: tc.bankBic, bankCorrAccount: tc.bankCorrAccount }; })(),
       proxyCheckSummary: (() => { const v = getProxyCheckSummary(); _t('proxySummary'); return v; })(),
@@ -681,7 +680,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       modemHttpCheck: (getHttpCheckLatest ? getHttpCheckLatest() : {}),
       // B3 (23.08): окна обслуживания (активные + ближайшие 24ч).
       maintenance: maintSec,
-      incidents: incidentSec,
+      incidents: { active: [], recent: [] },   // лениво: /api/admin/incidents (фронт не читает)
       speedBaseline: speedBaselineSec,
     });
     // Гранулярный тайминг всего эндпоинта (2026-09-25, «сайт долго грузится»):
@@ -691,6 +690,21 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
   }
+});
+
+// 2026-09-25: ленивые секции — тяжёлые блоки подгружаются при открытии
+// соответствующей вкладки, а не при каждой загрузке дашборда.
+r.get('/api/admin/bank_payments', authMiddleware, adminMiddleware, (req, res) => {
+  try { res.json({ bankPayments: getAllBankPayments() }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+r.get('/api/admin/incidents', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    res.json({
+      active: db.prepare("SELECT * FROM monitoring_incidents WHERE state='open' ORDER BY opened_at DESC LIMIT 20").all(),
+      recent: db.prepare("SELECT * FROM monitoring_incidents ORDER BY opened_at DESC LIMIT 20").all(),
+    });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // A1 (23.08): история пингов модема для спарклайна в карточке модема (до 72ч).
