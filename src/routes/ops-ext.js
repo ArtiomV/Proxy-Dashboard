@@ -590,13 +590,21 @@ function _fleetSection(merged, sanitizedClients) {
 r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, async (req, res) => {
   try {
     const _t0 = Date.now();
+    if (process.env.DATA_TIMING_DEBUG === '1') logger.info(`[data] enter ${_t0}`);
+    const _mark = [];
+    const _t = (name) => { _mark.push(name + '=' + (Date.now() - _t0) + 'ms'); };
     const results = await getFetchAllServersDataCached()();
+    _t('fetch');
     const merged = getMergeServerData()(results, '*');
+    _t('merge');
     const meta = _runSection(logger, 'meta', () => _metaSection(merged), { servers: [] });
     const clientsSec = _runSection(logger, 'clients', _clientsSection, _clientsFallback());
+    _t('clients');
     const billingSec = _runSection(logger, 'billing', _billingSection, { clientMonthCharges: {}, clientMonthGb: {}, revenue30d: { byClient: {}, total: 0, windowDays: 30, asOf: getMoscowToday() } });
+    _t('billing');
     const pkgSec = _runSection(logger, 'packages', () => _packagesSection(merged), {});
     const trafficSec = _runSection(logger, 'traffic', () => _trafficSection(merged), { clientLiveMonthGb: {}, clientLastHourGb: {}, clientTodayGb: {}, portTodayBytes: {}, modemTrend: {}, clientTrend: {} });
+    _t('traffic');
     const fleetSec = _runSection(logger, 'fleet', () => _fleetSection(merged, clientsSec.sanitizedClients), { fleet: { total: 0, online: 0, offline: 0, byServer: {} } });
     // B3 (23.08): окна обслуживания — активные и ближайшие 24ч, для бейджа
     // «🔧 Обслуживание до HH:MM» на карточке сервера.
@@ -617,11 +625,12 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       for (const row of db.prepare('SELECT * FROM modem_speed_baseline_state').all()) out[row.server+'_'+row.nick]=row;
       return out;
     }, {});
+    _t('misc');
     const _sectionsMs = Date.now() - _t0;
-    if (_sectionsMs > 800) logger.info(`[data] sections took ${_sectionsMs}ms`);
+    if (_sectionsMs > 800) logger.info(`[data] sections took ${_sectionsMs}ms (${_mark.join(' ')})`);
 
     res.json({
-      connsHistory: (deps.getConnsHistory ? deps.getConnsHistory() : {}),
+      connsHistory: (() => { const v = (deps.getConnsHistory ? deps.getConnsHistory() : {}); _t('conns'); return v; })(),
       clientMonthCharges: billingSec.clientMonthCharges,
       clientMonthGb: billingSec.clientMonthGb,
       clientLiveMonthGb: trafficSec.clientLiveMonthGb,
@@ -643,7 +652,7 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       operatorAliases: meta.operatorAliases,
       clients: clientsSec.sanitizedClients,
       ipTracking: getIpTracking(),
-      uptimeTracking: uptimePeriod.rollingTracking(db, getUptimeTracking(), 30),
+      uptimeTracking: (() => { const v = uptimePeriod.rollingTracking(db, getUptimeTracking(), 30); _t('rolling'); return v; })(),
       speedtestLatest: getSpeedtestLatest(),
       // ipHistory: фронту нужна только ПОСЛЕДНЯЯ запись на модем (детект застоя
       // IP, admin.js processData). Полная история — 17k+ строк / ~1.7 МБ в каждом
@@ -661,8 +670,8 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       bankPayments: getAllBankPayments(),
       tochkaConfigured: !!getTochkaConfig().jwt,
       tochkaConfig: (() => { const tc = getTochkaConfig(); return { jwt: tc.jwt ? '****' + tc.jwt.slice(-8) : '', clientId: tc.clientId, customerCode: tc.customerCode, accountId: tc.accountId, companyName: tc.companyName, companyInn: tc.companyInn, companyKpp: tc.companyKpp, companyAddress: tc.companyAddress, bankAccount: tc.bankAccount, bankName: tc.bankName, bankBic: tc.bankBic, bankCorrAccount: tc.bankCorrAccount }; })(),
-      proxyCheckSummary: getProxyCheckSummary(),
-      proxyIssues: computeProxyIssues(),
+      proxyCheckSummary: (() => { const v = getProxyCheckSummary(); _t('proxySummary'); return v; })(),
+      proxyIssues: (() => { const v = computeProxyIssues(); _t('proxyIssues'); return v; })(),
       // A1 (23.08): последний пинг каждого модема (latency/loss/ok) для UI.
       modemPing: (getModemPingLatest ? getModemPingLatest() : {}),
       // A3 (23.08): текущая скорость модемов + топ-5 грузящих для дашборда.
@@ -675,6 +684,10 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       incidents: incidentSec,
       speedBaseline: speedBaselineSec,
     });
+    // Гранулярный тайминг всего эндпоинта (2026-09-25, «сайт долго грузится»):
+    // лог при медленном ответе — видно, какая секция/сборка доминирует.
+    const _totalMs = Date.now() - _t0;
+    if (_totalMs > 800 || process.env.DATA_TIMING_DEBUG === '1') logger.info(`[data] total ${_totalMs}ms (${_mark.join(' ')})`);
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
   }

@@ -3488,7 +3488,15 @@ const { runAutoReboot } = require('./src/jobs/auto-reboot').create({
 
 // ProxySmart ping failure summary for modem cards. Latency is displayed only
 // in the dedicated native Ping column and is not aggregated/scored separately.
-function getProxyCheckSummary() {
+// 2026-09-25 · «сайт долго грузится»: 7-дневный summary по modem_ping (5M+
+// строк) сканировал ~1.2M строк КАЖДЫЙ запрос /api/admin/data — 3.2 с на
+// запрос. Данные допускают минутную сталость → SWR-кэш: свежее значение
+// отдаём мгновенно, пересчёт — в фоне (первый холодный вызов считает
+// синхронно, дальше — всегда из кэша).
+const _pcsCache = { at: 0, data: null, refreshing: null };
+const PCS_TTL_MS = 60 * 1000;
+
+function _computeProxyCheckSummary() {
   try {
     const since7d = new Date(Date.now() - 7 * 86400000).toISOString();
     const summary = db.prepare(`
@@ -3522,6 +3530,27 @@ function getProxyCheckSummary() {
     } catch (_) { /* no rows */ }
     return { summary, consec, today };
   } catch (e) { return { summary: [], consec: [], today: [] }; }
+}
+
+function getProxyCheckSummary() {
+  const age = Date.now() - _pcsCache.at;
+  if (_pcsCache.data && age < PCS_TTL_MS) return _pcsCache.data;
+  if (_pcsCache.data) {
+    // SWR: отдаём старое мгновенно, пересчёт — один в фоне.
+    if (!_pcsCache.refreshing) {
+      _pcsCache.refreshing = true;
+      setImmediate(() => {
+        try { _pcsCache.data = _computeProxyCheckSummary(); _pcsCache.at = Date.now(); }
+        catch (_) { /* оставляем прежний кэш */ }
+        finally { _pcsCache.refreshing = null; }
+      });
+    }
+    return _pcsCache.data;
+  }
+  // Холодный старт — один синхронный расчёт.
+  _pcsCache.data = _computeProxyCheckSummary();
+  _pcsCache.at = Date.now();
+  return _pcsCache.data;
 }
 
 // Detailed proxy check history API
