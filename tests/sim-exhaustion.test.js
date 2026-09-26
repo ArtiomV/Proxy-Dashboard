@@ -96,26 +96,35 @@ describe('sim-exhaustion', () => {
 });
 
 // ── 2026-09-26 (вторая итерация): состояние «пакет исчерпан» персистентно
-// (миграция 104), переживает рестарт; восстановление — по косвенным признакам
-// (IP + online + пинг), sustained sim_exhaustion_recover_min; до подтверждения
-// восстановления подавление не снимается.
-const MODEM_OK_IMEI1 = {   // тот же модем, что MODEM_EX, но здоров
+// (миграция 104), переживает рестарт. Восстановление подтверждается
+// СПИДТЕСТ-пробой: тарифы «безлимит с троттлингом», возврат IP/пинга сам по
+// себе ничего не значит — трафик идёт и на минимальной скорости.
+const MODEM_OK_IMEI1 = {   // тот же модем, что MODEM_EX, но выглядит здоровым
   modem_details: { IMEI: 'imei1', NICK: 'MD_1' },
   net_details: { SimStatus: 'SIM OK', ConnectionStatus: 'OK, ppp_connected', IS_ONLINE: 'yes', EXT_IP: '94.139.1.5', ping_stats: '150ms, 0% loss', CELLOP: 'Moldcell' },
 };
 
-function bootWithTable(feed, settings = {}) {
+function bootWithTable(feed, settings = {}, speedResult) {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE traffic_hourly (server_name TEXT, nick TEXT, hour_start TEXT, bytes_in INTEGER, bytes_out INTEGER)');
   db.exec(MIGRATION_104);
   const fired = [];
+  const probes = [];
   const mkJob = () => simExhaustion.create({
     db, logger: { info() {}, warn() {}, error() {} },
     alerts: { trigger: (rule, payload) => { fired.push({ rule, payload }); return true; } },
     getSetting: (k, d) => (k in settings ? settings[k] : d),
     fetchAllServersDataCached: async () => feed(),
+    apiServers: [{ name: 'S1' }],
+    fetchApi: async (server, path) => {           // спидтест-проба бокса
+      if (path.startsWith('/apix/speedtest')) {
+        probes.push(path);
+        return typeof speedResult === 'function' ? speedResult() : speedResult;
+      }
+      throw new Error('unexpected ' + path);
+    },
   });
-  return { mkJob, fired, db };
+  return { mkJob, fired, db, probes };
 }
 
 describe('sim-exhaustion: персистентное состояние и восстановление', () => {
@@ -142,9 +151,12 @@ describe('sim-exhaustion: персистентное состояние и во�
     expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(1);
   });
 
-  it('восстановление: healthy sustained ≥ recover_min → строка удалена, sim_package_recovered, флап сбрасывает отсчёт', async () => {
+  it('восстановление подтверждается спидтест-пробой: урезанная скорость держит состояние, нормальная — снимает', async () => {
     let healthy = false;
-    const { mkJob, fired, db } = bootWithTable(() => [{ serverName: 'S1', status: [healthy ? MODEM_OK_IMEI1 : MODEM_EX] }]);
+    let speed = { download: '0.4', upload: '0.1', ping: '999' };   // троттлинг: трафик идёт, скорость минимальная
+    const { mkJob, fired, db, probes } = bootWithTable(
+      () => [{ serverName: 'S1', status: [healthy ? MODEM_OK_IMEI1 : MODEM_EX] }],
+      {}, () => speed);
     const job = mkJob();
 
     // Эпизод подтверждён и заалерчен.
@@ -152,32 +164,53 @@ describe('sim-exhaustion: персистентное состояние и во�
     job._state.get('S1|imei1').since = Date.now() - 30 * 60000;
     await job.runOnce();
     expect(fired.length).toBe(1);
-
-    // Модем стал здоров — первый проход только открывает отсчёт восстановления.
-    healthy = true;
-    await job.runOnce();
-    expect(fired.length).toBe(1);
     expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(1);
 
-    // Флап: симптом вернулся до истечения recover_min — отсчёт сброшен.
-    healthy = false;
-    await job.runOnce();
+    // Модем выглядит здоровым (IP + пинг), но проба показывает троттлинг —
+    // состояние держим, восстановления нет.
     healthy = true;
-    await job.runOnce();   // отсчёт пошёл заново
+    await job.runOnce();
+    expect(probes.length).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(1);
     expect(fired.length).toBe(1);
 
-    // Sustained-здоровье → состояние снято, ограничения отключены, алерт ушёл.
-    job._recovering.set('S1|imei1', Date.now() - 11 * 60000);
+    // Повторный прогон в пределах probe-кулдауна — новых замеров нет.
     await job.runOnce();
+    expect(probes.length).toBe(1);
+
+    // Пакет реактивирован: следующая проба (после кулдауна) даёт нормальный dl.
+    speed = { download: '25.4', upload: '10.2', ping: '48' };
+    job._probes.set('S1|imei1', Date.now() - 31 * 60000);
+    await job.runOnce();
+    expect(probes.length).toBe(2);
     expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(0);
     expect(fired.length).toBe(2);
     expect(fired[1].rule).toBe('sim_package_recovered');
-    expect(fired[1].payload).toMatchObject({ server: 'S1', nick: 'MD_1', imei: 'imei1' });
+    expect(fired[1].payload).toMatchObject({ server: 'S1', nick: 'MD_1', imei: 'imei1', dl: 25.4 });
     expect(fired[1].payload.mins_down).toBeGreaterThanOrEqual(25);
 
-    // Повторный прогон по здоровому модему — ничего не происходит.
+    // Повторный прогон по здоровому модему — ни проб, ни алертов.
     await job.runOnce();
+    expect(probes.length).toBe(2);
     expect(fired.length).toBe(2);
+  });
+
+  it('флап здорового вида без проб не снимает состояние; неудачный замер — просто следующая проба по кулдауну', async () => {
+    let feed = () => [{ serverName: 'S1', status: [MODEM_EX] }];
+    let speed = new Error('speedtest timeout');
+    const { mkJob, fired, db, probes } = bootWithTable(() => feed(), {}, () => { throw speed; });
+    const job = mkJob();
+    await job.runOnce();
+    job._state.get('S1|imei1').since = Date.now() - 20 * 60000;
+    await job.runOnce();
+    expect(fired.length).toBe(1);
+
+    // Модем стал выглядеть здоровым, но замер падает — состояние держим.
+    feed = () => [{ serverName: 'S1', status: [MODEM_OK_IMEI1] }];
+    await job.runOnce();
+    expect(probes.length).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(1);
+    expect(fired.length).toBe(1);
   });
 
   it('модем без здоровых признаков (ушёл в полный оффлайн) НЕ восстанавливается', async () => {

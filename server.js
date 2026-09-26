@@ -3078,6 +3078,9 @@ const modemRate = require('./src/jobs/modem-rate').create({ db, logger });
 // Тикает из startup.js каждые 2 мин по кэшированному фиду (без нагрузки на боксы).
 const simExhaustion = require('./src/jobs/sim-exhaustion').create({
   db, logger, alerts, getSetting, fetchAllServersDataCached,
+  // 2026-09-26 (v3): восстановление подтверждается спидтест-пробой через
+  // бокс — возврат IP/пинга при троттлинге ничего не значит.
+  apiServers, fetchApi,
 });
 // A2 (23.08): HTTP-чек сайта через прокси-порты модемов («глазами клиента»).
 // Тикает из startup.js каждые httpcheck_interval_min.

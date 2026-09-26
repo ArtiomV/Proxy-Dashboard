@@ -20,11 +20,15 @@
 //   * speed-monitor пропускает спидтесты по модему — оператор не блокирует
 //     сеть, а режет скорость до ~0: замер бессмысленен и жрёт трафик симки.
 //
-// Восстановление ловится по косвенным признакам (пополнение пакета у
-// оператора мы не видим): EXT_IP выдан (не IP_RESET) + IS_ONLINE=yes +
-// пинг НЕ 100% loss — непрерывно ≥ sim_exhaustion_recover_min (дефолт 10 мин).
-// Тогда строка удаляется, уходит sim_package_recovered и все ограничения
-// снимаются. Модем ищется по IMEI по ВСЕМ серверам (мог переехать).
+// Восстановление: все тарифы — «безлимит с троттлингом» (N ГБ на максимальной
+// скорости, дальше минимальная), поэтому возврат IP/пинга НЕ означает
+// реактивацию пакета — трафик идёт и на урезанной скорости. Когда модем
+// начинает выглядеть здоровым (EXT_IP не IP_RESET + IS_ONLINE=yes + пинг
+// не 100% loss), делаем СПИДТЕСТ-пробу (не чаще sim_exhaustion_recover_probe_
+// min, дефолт 30 мин; до 3 проб за прогон). dl ≥ sim_exhaustion_recover_dl_mbps
+// (дефолт 5) → строка удаляется, уходит sim_package_recovered, все ограничения
+// сняты. Пока скорость урезана — состояние и подавление держатся.
+// Модем ищется по IMEI по ВСЕМ серверам (мог переехать).
 //
 // Алерт: sim_package_exhausted (important) с расходом симки за текущий период
 // пакета — оператору сразу видно, похоже на квоту или нет.
@@ -72,15 +76,45 @@ function isExhausted(db, target) {
 
 function create(deps) {
   const { db, logger, alerts, getSetting, fetchAllServersDataCached } = deps;
+  const apiServers = deps.apiServers || [];
+  const fetchApi = deps.fetchApi || null;   // нужен для спидтест-пробы восстановления
   const state = new Map();       // server|imei → { since, nick, alerted } — симптом наблюдаем (in-memory)
-  const recovering = new Map();  // server|imei → healthySince (мс) — кандидат на восстановление
+  const probes = new Map();      // server|imei → lastProbeAt (мс) — когда последний раз мерили скорость
 
   function _enabled() { return getSetting('sim_exhaustion_enabled', true) !== false; }
   function _minMs() {
     return Math.max(1, Number(getSetting('sim_exhaustion_min_minutes', 15)) || 15) * 60000;
   }
-  function _recoverMs() {
-    return Math.max(1, Number(getSetting('sim_exhaustion_recover_min', 10)) || 10) * 60000;
+  // Восстановление подтверждается СПИДТЕСТОМ: все тарифы — «безлимит с
+  // троттлингом» (N ГБ на максимальной скорости, дальше минимальная), поэтому
+  // возврат IP/пинга НЕ означает восстановление — трафик идёт и на урезанной
+  // скорости. Пробуем не чаще sim_exhaustion_recover_probe_min (дефолт 30 мин)
+  // и только когда модем выглядит здоровым (IP + online + пинг).
+  function _probeMs() {
+    return Math.max(1, Number(getSetting('sim_exhaustion_recover_probe_min', 30)) || 30) * 60000;
+  }
+  function _recoverDlMbps() {
+    const v = Number(getSetting('sim_exhaustion_recover_dl_mbps', 5));
+    return Number.isFinite(v) && v > 0 ? v : 5;
+  }
+  function _maxProbesPerRun() {
+    return Math.max(1, Number(getSetting('sim_exhaustion_max_probes_per_run', 3)) || 3);
+  }
+
+  // Одна спидтест-проба через бокс (как speed-monitor, но одиночная и без
+  // ретраев: на задушенной симке замер сам по себе медленный). null — замер
+  // не удался (бокс/сеть), объект {dl, ul, ping} — результат.
+  async function _probeSpeed(srvName, nick) {
+    const server = apiServers.find(s => s.name === srvName);
+    if (!server || typeof fetchApi !== 'function') return null;
+    try {
+      const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
+      if (result && result.error) throw new Error(String(result.error));
+      return require('./speed-monitor').parseSpeedtestResult(result);
+    } catch (e) {
+      logger.warn(`[SimExhaustion] спидтест-проба ${nick} (${srvName}) не удалась: ${e.message}`);
+      return null;
+    }
   }
 
   // Prepared statements — lazy, с переносимостью на минимальные тестовые
@@ -135,39 +169,57 @@ function create(deps) {
     } catch (_) { return null; }
   }
 
-  // Подтверждённые эпизоды: проверяем восстановление по живому фиду.
-  // Модем ищем по IMEI по всем серверам (мог переехать на другой бокс).
-  // Нет модема в фиде / нет здоровых признаков — НЕ восстановление: состояние
-  // держим (модем с исчерпанным пакетом может вообще уходить в оффлайн).
-  function _checkRecoveries(byImei, now) {
-    let recovered = 0;
+  // Подтверждённые эпизоды: проверяем восстановление. Модем ищем по IMEI по
+  // всем серверам (мог переехать на другой бокс). Нет модема в фиде / нет
+  // базовых признаков жизни — НЕ восстановление: состояние держим.
+  // Базовые признаки (IP + online + пинг) — только ГЕЙТ для спидтест-пробы:
+  // при троттлинге трафик идёт и на минимальной скорости, поэтому «пакет
+  // реально реактивирован» = замер dl ≥ sim_exhaustion_recover_dl_mbps.
+  async function _checkRecoveries(byImei, now) {
+    let recovered = 0, probed = 0;
     for (const row of _activeRows()) {
       const key = row.server_name + '|' + row.imei;
       const hit = byImei.get(row.imei);
-      if (!hit || !_healthy(hit.m)) { recovering.delete(key); continue; }
-      const since = recovering.get(key) || 0;
-      if (!since) { recovering.set(key, now); continue; }
-      if (now - since < _recoverMs()) continue;
+      if (!hit || !_healthy(hit.m)) continue;
+      if (probed >= _maxProbesPerRun()) continue;               // бюджет прогона: спидтесты последовательны и долгие
+      const lastProbe = probes.get(key) || 0;
+      if (now - lastProbe < _probeMs()) continue;               // недавно мерили — скорость всё ещё урезана
+      probes.set(key, now);
+      probed++;
+      const nick = (hit.m.modem_details || {}).NICK || row.nick;
+      const res = await _probeSpeed(hit.srv, nick);
+      if (!res || !(res.dl > 0 || res.ul > 0)) continue;        // замер не удался — следующая пробы по кулдауну
+      if (res.dl < _recoverDlMbps()) {
+        logger.info(`[SimExhaustion] ${nick} (${hit.srv}): скорость всё ещё урезана (↓${res.dl} Mbps < ${_recoverDlMbps()}) — состояние держим`);
+        continue;
+      }
       // Подтверждённое восстановление: снимаем состояние и все ограничения.
       const st = _stmts();
       if (st) { try { st.del.run(row.server_name, row.imei); } catch (_) {} }
-      recovering.delete(key);
+      probes.delete(key);
       state.delete(key);
-      const nick = (hit.m.modem_details || {}).NICK || row.nick;
       const minsDown = Math.max(0, Math.round((now - Number(row.since_ts || now)) / 60000));
       try {
         alerts.trigger('sim_package_recovered', {
           server: hit.srv, nick, imei: row.imei, operator: row.operator, mins_down: minsDown,
+          dl: Math.round(res.dl * 10) / 10, ul: Math.round(res.ul * 10) / 10,
         });
       } catch (e) { logger.warn('[SimExhaustion] recovery alert failed: ' + e.message); }
       recovered++;
-      logger.info(`[SimExhaustion] ${nick} (${row.server_name}): пакет восстановлен после ~${minsDown} мин — ограничения сняты`);
+      logger.info(`[SimExhaustion] ${nick} (${row.server_name}): пакет восстановлен (↓${res.dl} Mbps) после ~${minsDown} мин — ограничения сняты`);
     }
     return recovered;
   }
 
+  // Re-entrancy: спидтест-пробы длинные (до 180с каждая), а тик — каждые
+  // 2 мин. Второй прогон поверх незавершённого не нужен.
+  let _running = false;
+
   async function runOnce() {
     if (!_enabled()) return { skipped: 'disabled' };
+    if (_running) return { skipped: 'already_running' };
+    _running = true;
+    try {
     let alerted = 0, active = 0;
     const results = await fetchAllServersDataCached();
     const now = Date.now();
@@ -183,7 +235,7 @@ function create(deps) {
         if (imei && !byImei.has(imei)) byImei.set(imei, { srv: data.serverName || '', m });
       }
     }
-    const recovered = _checkRecoveries(byImei, now);
+    const recovered = await _checkRecoveries(byImei, now);
 
     const seenKeys = new Set();
     for (const data of results || []) {
@@ -231,9 +283,10 @@ function create(deps) {
       if (!seenKeys.has(key)) state.delete(key);
     }
     return { symptomatic: active, alerted, recovered, tracked: state.size };
+    } finally { _running = false; }
   }
 
-  return { runOnce, _state: state, _recovering: recovering };
+  return { runOnce, _state: state, _probes: probes };
 }
 
 module.exports = { create, isExhausted };
