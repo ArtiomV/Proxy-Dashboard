@@ -261,7 +261,20 @@ async function buildDailySummary(date) {
         lines.push('📦 <b>Пакеты операторов</b>');
         for (const f of bundleRows) {
           const pct = f.package_gb > 0 ? Math.round(f.used_gb / f.package_gb * 100) : 0;
-          const left = f.days_left != null ? `хватит до ${f.full_date}` : 'расхода нет';
+          // 2026-09-26: прогноз ОТНОСИТЕЛЬНО конца отчётного периода
+          // (reset_date из настроек оператора), а не «хватит до 2027» —
+          // оператору важно: доживёт ли пакет до обнуления.
+          let left;
+          if (f.days_left == null) {
+            left = 'расхода нет';
+          } else if (f.reset_date && f.full_date && f.full_date > f.reset_date) {
+            left = `до обнуления (${f.reset_date}) хватит`;
+          } else if (f.full_date) {
+            const gap = f.reset_date ? Math.max(0, Math.round((Date.parse(f.reset_date) - Date.parse(f.full_date)) / 86400000)) : null;
+            left = `кончится ${f.full_date}` + (gap != null ? ` (за ${gap} дн. до обнуления)` : '');
+          } else {
+            left = 'расхода нет';
+          }
           lines.push(`• ${escHtml(f.operator)}: <b>${Math.round(f.used_gb).toLocaleString('ru-RU')} / ${Math.round(f.package_gb).toLocaleString('ru-RU')} ГБ</b> (${pct}%), темп ${f.gb_day} ГБ/сут — ${left}`);
         }
         if (simRows.length) {
@@ -271,7 +284,8 @@ async function buildDailySummary(date) {
           if (hot.length) {
             lines.push(`• ${escHtml(hot[0].operator)} (на симку): <b>${hot.length} из ${total}</b> симок >80% пакета — ближе всех: ${hot.slice(0, 3).map(s => `${escHtml(s.nick)} (${Math.round(s.used_gb / s.package_gb * 100)}%)`).join(', ')}`);
           } else {
-            lines.push(`• ${escHtml(simRows[0].operator)} (на симку): все ${total} симок &lt;80% пакета`);
+            const resetDate = simRows[0].reset_date;
+            lines.push(`• ${escHtml(simRows[0].operator)} (на симку): все ${total} симок &lt;80% пакета` + (resetDate ? ` (обнуление ${resetDate})` : ''));
           }
         }
       }
