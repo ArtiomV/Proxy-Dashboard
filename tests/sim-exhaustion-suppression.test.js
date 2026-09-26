@@ -89,3 +89,13 @@ describe('sim_package_exhausted: render различает сигнатуры', 
     expect(opText).toContain('4 из 4');
   });
 });
+
+describe('sim_package_exhausted: render для сигнатуры «замороженный трафик»', () => {
+  it('evidence «трафик заморожен N мин» — текст про заморозку', () => {
+    const rule = alerts.RULES.sim_package_exhausted;
+    const text = rule.render({ nick: 'MD_F', server: 'S1', kind: 'throttled', dl: 0.4, operator: 'Moldcell', evidence: 'трафик заморожен 25 мин' });
+    expect(text).toContain('замерз');
+    expect(text).toContain('25 мин');
+    expect(text).toContain('0.4 Mbps');
+  });
+});

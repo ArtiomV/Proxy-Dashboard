@@ -15,8 +15,15 @@
 // < sim_exhaustion_throttle_dl_mbps (дефолт 1) → то же состояние, алерт
 // sim_package_exhausted с kind='throttled'.
 //
-// Симптом должен держаться НЕПРЕРЫВНО ≥ sim_exhaustion_min_minutes (дефолт 15)
-// — короткие IP_RESET при ротации и полминутные флапы не алертим.
+// Сигнатура 3 (замороженный трафик, 26.09): модем жив, но дельта суточных
+// bw-счётчиков < sim_exhaustion_frozen_mb (дефолт 5 МБ) держится
+// sim_exhaustion_frozen_min (дефолт 20 мин). Почасовой монитор меряет лишь
+// пару ников на оператора в час, поэтому массовый троттлинг ловится именно
+// здесь — отбор бесплатный, спидтест только финальный арбитр.
+//
+// Симптом сигнатуры 1 должен держаться НЕПРЕРЫВНО ≥ sim_exhaustion_min_minutes
+// (дефолт 15) — короткие IP_RESET при ротации и полминутные флапы не алертим.
+//
 //
 // Подтверждённый эпизод — СОСТОЯНИЕ (таблица sim_exhaustion_state, миграция
 // 104), а не разовый алерт. Пока строка активна:
@@ -39,7 +46,7 @@
 // пакета — оператору сразу видно, похоже на квоту или нет.
 
 const GB = 1e9;
-const { normalizeOperator } = require('../utils/traffic');
+const { normalizeOperator, parseBwToBytes } = require('../utils/traffic');
 
 function _parseLoss(raw) {
   if (typeof raw !== 'string') return null;
@@ -87,6 +94,8 @@ function create(deps) {
   const state = new Map();       // server|imei → { since, nick, alerted } — симптом наблюдаем (in-memory)
   const probes = new Map();      // server|imei → lastProbeAt (мс) — когда последний раз мерили скорость
   const throttleCandidates = new Map();  // server|imei → { firstAt, server, nick } — плохой замер ждёт 5-мин подтверждения
+  const bwTrack = new Map();     // server|imei → { total, at, frozenSince } — дельты bw-счётчиков (сигнатура 3)
+  const frozenClearedAt = new Map();     // server|imei → ts — проба показала норму, бэкофф от повторных кандидатов
 
   // Оператор из живого фида — нормализованный (Moldcell/Orange RO/…), как в
   // modem_meta и сводках. Храним нормализованным, чтобы операторский уровень
@@ -131,6 +140,22 @@ function create(deps) {
   function _opRatio() {
     const v = Number(getSetting('sim_exhaustion_operator_ratio', 0.8));
     return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0.8;
+  }
+  // Сигнатура 3 — «замороженный трафик»: модем жив, но дельта суточных
+  // bw-счётчиков < sim_exhaustion_frozen_mb (дефолт 5 МБ) держится
+  // sim_exhaustion_frozen_min (дефолт 20 мин). На этом флоте даже полупустая
+  // симка гоняет сотни МБ/час — заморозка = троттлинг (MD_72: 0.5 МБ/час).
+  function _frozenMinMs() {
+    return Math.max(1, Number(getSetting('sim_exhaustion_frozen_min', 20)) || 20) * 60000;
+  }
+  function _frozenBytes() {
+    const v = Number(getSetting('sim_exhaustion_frozen_mb', 5));
+    return (Number.isFinite(v) && v > 0 ? v : 5) * 1e6;
+  }
+  // После пробы «скорость в норме» модем не кандидатствует 6 часов — иначе
+  // свободные (без клиентов) модемы вечно занимали бы бюджет проб.
+  function _frozenClearedMs() {
+    return Math.max(1, Number(getSetting('sim_exhaustion_frozen_backoff_hours', 6)) || 6) * 3600000;
   }
 
   // Одна спидтест-проба через бокс (как speed-monitor, но одиночная и без
@@ -243,6 +268,38 @@ function create(deps) {
     return recovered;
   }
 
+  // Общий финал сигнатур 2/3: контрольная проба и, при подтверждении ~0,
+  // включение состояния + алерт kind='throttled'. Возвращает:
+  //   'flagged' — троттлинг подтверждён, состояние включено;
+  //   'cleared' — проба показала норму (ложная тревога);
+  //   'retry'   — проба не удалась или бюджет/кулдаун не дали мерить.
+  async function _probeAndFlag({ srv, nick, imei, op, now, budget, evidence }) {
+    const key = srv + '|' + imei;
+    if (budget.used >= budget.max) return 'retry';
+    const lastProbe = probes.get(key) || 0;
+    if (now - lastProbe < _probeMs()) return 'retry';
+    probes.set(key, now);
+    budget.used++;
+    const res = await _probeSpeed(srv, nick);
+    if (!res || !(res.dl > 0 || res.ul > 0)) return 'retry';   // замер не удался
+    if (res.dl >= _throttleDlMbps()) return 'cleared';
+    const stmts = _stmts();
+    if (stmts) { try { stmts.upsert.run(srv, imei, nick, op, now); } catch (_) {} }
+    logger.info(`[SimExhaustion] ${nick} (${srv}): подтверждён троттлинг (↓${res.dl} Mbps${evidence ? ', ' + evidence : ''}) — состояние включено`);
+    const alertedAt = stmts ? (stmts.alertedAt.get(srv, imei) || {}).alerted_at : null;
+    if (alertedAt) return 'flagged';
+    const usedGb = _usedGb(srv, nick);
+    try {
+      const sent = alerts.trigger('sim_package_exhausted', {
+        server: srv, nick, imei, operator: op, kind: 'throttled', evidence,
+        dl: Math.round(res.dl * 100) / 100,
+        used_gb: usedGb != null ? Math.round(usedGb * 10) / 10 : null,
+      });
+      if (sent && stmts) { try { stmts.markAlerted.run(now, srv, imei); } catch (_) {} }
+    } catch (e) { logger.warn('[SimExhaustion] throttled alert failed: ' + e.message); }
+    return 'flagged';
+  }
+
   // Сигнатура 2 — троттлинг. Модем жив (IP/пинг в норме — сигнатура 1 его не
   // видит), но почасовой монитор меряет ~0. Кандидат «отдыхает»
   // sim_exhaustion_throttle_confirm_min (дефолт 5 мин), затем подтверждаем
@@ -272,35 +329,10 @@ function create(deps) {
       const cand = throttleCandidates.get(key);
       if (!cand) { throttleCandidates.set(key, { firstAt: now, server: r.server, nick: r.nick }); continue; }  // модем «отдыхает»
       if (now - cand.firstAt < _throttleConfirmMs()) continue;
-      if (budget.used >= budget.max) continue;
-      const lastProbe = probes.get(key) || 0;
-      if (now - lastProbe < _probeMs()) continue;
-      probes.set(key, now);
-      budget.used++;
-      const res = await _probeSpeed(r.server, r.nick);
-      if (!res || !(res.dl > 0 || res.ul > 0)) continue;          // замер не удался — повторим по кулдауну
-      if (res.dl >= _throttleDlMbps()) {                          // ложная тревога — скорость в норме
-        throttleCandidates.delete(key);
-        continue;
-      }
-      // Подтверждённый троттлинг.
       const op = _normOp((hit.m.net_details || {}).CELLOP || '', r.server);
-      const stmts = _stmts();
-      if (stmts) { try { stmts.upsert.run(r.server, imei, r.nick, op, now); } catch (_) {} }
-      throttleCandidates.delete(key);
-      flagged++;
-      const alertedAt = stmts ? (stmts.alertedAt.get(r.server, imei) || {}).alerted_at : null;
-      if (alertedAt) continue;
-      const usedGb = _usedGb(r.server, r.nick);
-      try {
-        const sent = alerts.trigger('sim_package_exhausted', {
-          server: r.server, nick: r.nick, imei, operator: op, kind: 'throttled',
-          dl: Math.round(res.dl * 100) / 100,
-          used_gb: usedGb != null ? Math.round(usedGb * 10) / 10 : null,
-        });
-        if (sent && stmts) { try { stmts.markAlerted.run(now, r.server, imei); } catch (_) {} }
-      } catch (e) { logger.warn('[SimExhaustion] throttled alert failed: ' + e.message); }
-      logger.info(`[SimExhaustion] ${r.nick} (${r.server}): подтверждён троттлинг (↓${res.dl} Mbps после 5-мин паузы) — состояние включено`);
+      const outcome = await _probeAndFlag({ srv: r.server, nick: r.nick, imei, op, now, budget, evidence: 'повтор после 5-мин паузы' });
+      if (outcome === 'cleared' || outcome === 'flagged') throttleCandidates.delete(key);
+      if (outcome === 'flagged') flagged++;
     }
     // Кандидаты, чей замер перестал быть плохим (прошло >3ч или скорость
     // восстановилась сама), вычищаем.
@@ -308,6 +340,58 @@ function create(deps) {
       if (!seenCandidates.has(key)) throttleCandidates.delete(key);
       void cand;
     }
+    return flagged;
+  }
+
+  // Сигнатура 3 — «замороженный трафик» (2026-09-26, флуд MD_72/73). Почасовой
+  // монитор меряет лишь пару ников на оператора в час — массовый троттлинг
+  // ловился бы сутками, а непойманные симки флапают offline/recovered.
+  // Здесь смотрим дельты суточных bw-счётчиков самого фида: дельта
+  // < sim_exhaustion_frozen_mb за sim_exhaustion_frozen_min — кандидат на ту
+  // же подтверждающую пробу. Отбор бесплатный (без спидтестов), спидтест —
+  // только финальный арбитр. Пробуем только здоровых на вид (оффлайн-модемы
+  // бюджет проб не жгут), зафлапавший счётчик/полночь (delta<0) сбрасывает окно.
+  function _bwTotal(m) {
+    let sum = 0;
+    for (const p of (m.ports || [])) {
+      sum += parseBwToBytes(p.bandwidth_bytes_day_in) + parseBwToBytes(p.bandwidth_bytes_day_out);
+    }
+    return sum;
+  }
+
+  async function _detectFrozen(byImei, now, budget) {
+    let flagged = 0;
+    const active = new Set(_activeRows().map(r => r.imei));   // один SELECT на прогон
+    const feedKeys = new Set();
+    for (const [imei, hit] of byImei) {
+      const key = hit.srv + '|' + imei;
+      feedKeys.add(key);
+      const m = hit.m;
+      const total = _bwTotal(m);
+      const prev = bwTrack.get(key);
+      // Уже в состоянии или территория сигнатуры 1 — тут не трогаем.
+      if (active.has(imei) || _symptomatic(m)) { bwTrack.set(key, { total, at: now, frozenSince: null }); continue; }
+      if (!prev) { bwTrack.set(key, { total, at: now, frozenSince: null }); continue; }
+      const delta = total - prev.total;
+      if (delta < 0 || delta >= _frozenBytes()) {   // сброс счётчиков (полночь/ребут) или трафик идёт
+        bwTrack.set(key, { total, at: now, frozenSince: null });
+        continue;
+      }
+      const frozenSince = prev.frozenSince || prev.at;
+      bwTrack.set(key, { total, at: now, frozenSince });
+      if (now - frozenSince < _frozenMinMs()) continue;
+      if (!_healthy(m)) continue;                    // оффлайн/без IP — пробовать бессмысленно
+      const clearedAt = frozenClearedAt.get(key) || 0;
+      if (now - clearedAt < _frozenClearedMs()) continue;   // недавняя проба показала норму — бэкофф
+      const nick = (m.modem_details || {}).NICK || imei;
+      const op = _normOp((m.net_details || {}).CELLOP || '', hit.srv);
+      const frozenMin = Math.round((now - frozenSince) / 60000);
+      const outcome = await _probeAndFlag({ srv: hit.srv, nick, imei, op, now, budget, evidence: `трафик заморожен ${frozenMin} мин` });
+      if (outcome === 'cleared') { frozenClearedAt.set(key, now); bwTrack.set(key, { total, at: now, frozenSince: null }); }
+      if (outcome === 'flagged') flagged++;
+    }
+    // Модемы, пропавшие из фида, вычищаем из трекинга.
+    for (const key of bwTrack.keys()) if (!feedKeys.has(key)) bwTrack.delete(key);
     return flagged;
   }
 
@@ -423,14 +507,15 @@ function create(deps) {
     for (const [key, st] of state) {
       if (!seenKeys.has(key)) state.delete(key);
     }
-    // Сигнатура 2 (троттлинг по замерам) и операторский уровень.
+    // Сигнатуры 2 (троттлинг по замерам) и 3 (замороженный трафик), операторский уровень.
     const throttled = await _detectThrottled(byServerNick, now, budget);
+    const frozen = await _detectFrozen(byImei, now, budget);
     const operatorAlerts = _operatorOverview(byImei);
-    return { symptomatic: active, alerted, recovered, throttled, operatorAlerts, tracked: state.size };
+    return { symptomatic: active, alerted, recovered, throttled, frozen, operatorAlerts, tracked: state.size };
     } finally { _running = false; }
   }
 
-  return { runOnce, _state: state, _probes: probes, _throttleCandidates: throttleCandidates };
+  return { runOnce, _state: state, _probes: probes, _throttleCandidates: throttleCandidates, _bwTrack: bwTrack, _frozenClearedAt: frozenClearedAt };
 }
 
 module.exports = { create, isExhausted };

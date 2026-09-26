@@ -362,3 +362,71 @@ describe('sim-exhaustion v4: операторский уровень', () => {
     expect(fired.filter(f => f.rule === 'operator_package_throttled').length).toBe(0);
   });
 });
+
+// ── 2026-09-26 (v5): сигнатура 3 — «замороженный трафик» по bw-счётчикам
+// живого фида. Почасовой монитор меряет пару ников в час — слишком медленно
+// при массовом троттлинге (флуд MD_72/73). Дельта < 5 МБ за 20 мин → кандидат
+// на ту же подтверждающую пробу. Отбор бесплатный, спидтест — арбитр.
+const frozenModem = (imei, nick, dayIn, dayOut) => ({
+  modem_details: { IMEI: imei, NICK: nick },
+  net_details: { SimStatus: 'SIM OK', ConnectionStatus: 'OK, ppp_connected', IS_ONLINE: 'yes', EXT_IP: '94.139.1.5', ping_stats: '150ms, 0% loss', CELLOP: 'moldcell' },
+  ports: [{ bandwidth_bytes_day_in: String(dayIn), bandwidth_bytes_day_out: String(dayOut) }],
+});
+
+describe('sim-exhaustion v5: замороженный трафик (bw-счётчики)', () => {
+  it('дельта < 5 МБ за 20 мин → проба ~0 → состояние + алерт с evidence про заморозку', async () => {
+    const { mkJob, fired, db, probes } = bootV4(
+      () => [{ serverName: 'S1', status: [frozenModem('imeiF', 'MD_F', 1e9, 5e8)] }],
+      { download: '0.4', upload: '0.1', ping: '900' });
+    const job = mkJob();
+
+    await job.runOnce();   // базовая точка отсчёта
+    await job.runOnce();   // дельта 0 — заморозка началась, окно ещё не вышло
+    expect(probes.length).toBe(0);
+
+    job._bwTrack.get('S1|imeiF').frozenSince = Date.now() - 21 * 60000;
+    await job.runOnce();
+    expect(probes.length).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(1);
+    expect(fired.length).toBe(1);
+    expect(fired[0].payload.kind).toBe('throttled');
+    expect(fired[0].payload.evidence).toContain('трафик заморожен');
+  });
+
+  it('трафик растёт → заморозки нет, проб нет', async () => {
+    let bw = 1e9;
+    const { mkJob, fired, db, probes } = bootV4(
+      () => [{ serverName: 'S1', status: [frozenModem('imeiF', 'MD_F', bw, 5e8)] }],
+      { download: '0.4', upload: '0.1', ping: '900' });
+    const job = mkJob();
+    await job.runOnce();
+    bw = 2e9;   // +1 ГБ — трафик идёт
+    await job.runOnce();
+    job._bwTrack.get('S1|imeiF').frozenSince = Date.now() - 60 * 60000;   // даже если бы окно было
+    bw = 5e9;
+    await job.runOnce();
+    expect(probes.length).toBe(0);
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(0);
+    expect(fired.length).toBe(0);
+  });
+
+  it('проба с нормальной скоростью → cleared + бэкофф 6ч от повторных кандидатов', async () => {
+    const { mkJob, fired, db, probes } = bootV4(
+      () => [{ serverName: 'S1', status: [frozenModem('imeiF', 'MD_F', 1e9, 5e8)] }],
+      { download: '30', upload: '10', ping: '40' });
+    const job = mkJob();
+    await job.runOnce();
+    await job.runOnce();
+    job._bwTrack.get('S1|imeiF').frozenSince = Date.now() - 21 * 60000;
+    await job.runOnce();
+    expect(probes.length).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(0);
+    expect(job._frozenClearedAt.has('S1|imeiF')).toBe(true);
+
+    // Заморозка снова накопилась, но бэкофф — повторной пробы нет.
+    job._bwTrack.get('S1|imeiF').frozenSince = Date.now() - 25 * 60000;
+    await job.runOnce();
+    expect(probes.length).toBe(1);
+    expect(fired.length).toBe(0);
+  });
+});
