@@ -50,15 +50,19 @@ const DAY = '2026-08-09';
 describe('C7: daily_summary — блок «Инфраструктура» против реальной схемы system_log', () => {
   beforeEach(boot);
 
-  it('server_unreachable попадает в сводку (target = имя сервера)', async () => {
-    addSysLog({ level: 'warn', action: 'server_unreachable', target: 'S2', message: 'Server unreachable: timeout', timestamp: '2026-08-09 10:00:00' });
+  it('простой сервера попадает в сводку минутами (server_downtime), ошибки лога — со счётчиком', async () => {
+    // 2026-09-26: простои читаются из server_downtime (фактические минуты),
+    // system_log server_unreachable — только для невосстановившихся.
+    db.exec(`CREATE TABLE IF NOT EXISTS server_downtime (
+      id INTEGER PRIMARY KEY, server_name TEXT, down_from TEXT, down_to TEXT, duration_sec INTEGER)`);
+    db.prepare("INSERT INTO server_downtime (server_name, down_from, down_to, duration_sec) VALUES ('S2', '2026-08-09 06:10:00', '2026-08-09 06:22:00', 720)").run();
     addSysLog({ level: 'error', action: 'billing_failed', target: null, message: 'boom', timestamp: '2026-08-09 11:00:00' });
 
     const { text } = await tgSummary.buildDailySummary(DAY);
 
     expect(text).toContain('⚙️ <b>Инфраструктура</b>');
-    expect(text).toContain('Серверы недоступны: <b>S2</b>');
-    expect(text).toContain('Ошибок в системном логе: 1');
+    expect(text).toContain('Простои серверов: <b>S2 — 12 мин (1×)</b>');
+    expect(text).toContain('Ошибок в системном логе: 1 (чаще всего: billing_failed ×1)');
     // Запрос не падал — warn не вызывался.
     expect(warns).toEqual([]);
   });
@@ -89,7 +93,7 @@ describe('C7: daily_summary — блок «Инфраструктура» про
     ins.run('client_debt','Долг клиента','important','{}','2026-08-09 22:10:00');
     const { text } = await tgSummary.buildDailySummary(DAY);
     expect(text).toContain('Ночью без Telegram: <b>1</b>');
-    expect(text).toContain('Пинг не проходит — 1');
+    expect(text).toContain('модемы моргали ночью');   // флап-правила свёрнуты
     expect(text).not.toContain('Долг клиента — 1');
   });
 });
@@ -173,6 +177,8 @@ describe('daily_summary — должники без прокси не попад
     )`);
     warns = [];
     logger = { warn: (m) => warns.push(m), info() {}, error() {}, debug() {} };
+    db.prepare("INSERT INTO clients (id, login, name) VALUES ('c1', 'u_c1', 'Активный Должник')").run();
+    db.prepare("INSERT INTO billing_ledger (client_id, type, date, timestamp, amount) VALUES ('c1', 'charge', '2026-08-08', datetime('now'), 100)").run();
     tgSummary.init({
       db, logger,
       clientById: new Map([
@@ -196,11 +202,14 @@ describe('daily_summary — должники без прокси не попад
     expect(text).not.toContain('Неактивный Должник');
   });
 
-  it('без hasClientPorts — прежнее поведение (все должники видны)', async () => {
+  it('без hasClientPorts — все должники в счётчике и сумме; старые свёрнуты', async () => {
     bootWithDebtors(undefined);
     const { text } = await tgSummary.buildDailySummary(DAY);
     expect(text).toContain('Должников: 2');
     expect(text).toContain('Активный Должник');
-    expect(text).toContain('Неактивный Должник');
+    // 2026-09-26: должник без движений >7 дн — свёрнут в строку «старые»,
+    // а не повторяется по имени каждый день.
+    expect(text).toContain('старые (>7 дн без движений): 1 шт');
+    expect(text).not.toContain('Неактивный Должник');
   });
 });

@@ -47,6 +47,22 @@ function trunc(s, n) {
   s = String(s || '');
   return s.length > n ? s.slice(0, n - 1) + '…' : s;
 }
+// 2026-09-26: в сводке — отображаемые имена серверов (Настройки → Серверы),
+// не технические S-коды. Кэш на минуту (как в alerts.js).
+let _srvNamesCache = null, _srvNamesCacheAt = 0;
+function srvLabel(name) {
+  if (!name) return name;
+  try {
+    if (!_srvNamesCache || Date.now() - _srvNamesCacheAt > 60e3) {
+      const row = db.prepare("SELECT value FROM kv_store WHERE key = 'api_servers'").get();
+      const list = row && row.value ? JSON.parse(row.value) : [];
+      _srvNamesCache = {};
+      if (Array.isArray(list)) for (const s of list) _srvNamesCache[s.name] = s.displayName || s.name;
+      _srvNamesCacheAt = Date.now();
+    }
+    return _srvNamesCache[name] || name;
+  } catch (_) { return name; }
+}
 function hasTable(name) {
   try {
     return !!db.prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=?").get(name);
@@ -87,19 +103,64 @@ async function buildDailySummary(date) {
     WHERE type IN ('payment','bank_payment','manual_credit') AND date = ?
   `).get(date);
   const totalPaid = (payments && payments.total) || 0;
+  // 2026-09-26: дельта к вчера вместо статичного топ-списка каждый день.
+  const prevDate = new Date(new Date(date + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10);
+  const prevCharged = (db.prepare(`
+    SELECT COALESCE(SUM(amount),0) AS total FROM billing_ledger
+    WHERE type IN ('charge','correction','manual_charge') AND date = ?
+  `).get(prevDate) || {}).total || 0;
+  const revDeltaPct = prevCharged > 0 ? Math.round((totalCharged - prevCharged) / prevCharged * 100) : null;
+  // Полнота биллинга: billing_jobs (миграция 099) — кого не списали и почему.
+  let billingNote = '';
+  if (hasTable('billing_jobs')) {
+    try {
+      const rows = db.prepare(`SELECT status, COUNT(*) n FROM billing_jobs WHERE billing_date = ? GROUP BY status`).all(date);
+      const by = Object.fromEntries(rows.map(r => [r.status, r.n]));
+      const bad = (by.failed || 0) + (by.no_data || 0);
+      if (bad > 0) billingNote = ` · пропущено/ошибок: <b>${bad}</b>`;
+    } catch (_) {}
+  }
+  // Новые клиенты и розничные продажи за день.
+  let newClients = 0, newSales = 0;
+  try { newClients = (db.prepare("SELECT COUNT(*) n FROM clients WHERE substr(created_at,1,10) = ?").get(date) || {}).n || 0; } catch (_) {}
+  try { newSales = (db.prepare("SELECT COUNT(*) n FROM retail_purchases WHERE status='charged' AND substr(created_at,1,10) = ?").get(date) || {}).n || 0; } catch (_) {}
 
   lines.push('');
   lines.push('💰 <b>Финансы</b>');
-  lines.push(`Доход: <b>${fmtMoney(totalCharged)}</b> · списано с ${charges.length} клиентов`);
+  lines.push(`Доход: <b>${fmtMoney(totalCharged)}</b>` +
+    (revDeltaPct != null ? ` (${revDeltaPct >= 0 ? '↑' : '↓'} ${Math.abs(revDeltaPct)}% к вчера)` : '') +
+    ` · списано с ${charges.length} клиентов${billingNote}`);
   if (totalPaid > 0) lines.push(`Поступления: ${fmtMoney(totalPaid)} (${payments.n})`);
+  if (newClients || newSales) {
+    lines.push(`Новых клиентов: ${newClients} · продаж розницы: ${newSales}`);
+  }
+  // Истекающие прокси (<3 дн) — доход под угрозой, лучше увидеть утром.
+  try {
+    if (hasTable('known_modems')) {
+      const today = new Date().toISOString().slice(0, 10);
+      const in3d = new Date(Date.now() + 3 * 86400000).toISOString().slice(0, 10);
+      const rows = db.prepare(`
+        SELECT json_extract(data, '$.portName') AS pn
+        FROM known_modems
+        WHERE json_extract(data, '$.portInfo.PROXY_VALID_BEFORE') != ''
+          AND substr(json_extract(data, '$.portInfo.PROXY_VALID_BEFORE'), 1, 10) BETWEEN ? AND ?
+      `).all(today, in3d);
+      if (rows.length) {
+        const byClient = {};
+        for (const r of rows) { const k = r.pn || '?'; byClient[k] = (byClient[k] || 0) + 1; }
+        const top = Object.entries(byClient).sort((a, b) => b[1] - a[1]).slice(0, 3);
+        lines.push(`Истекают прокси &lt;3 дн: <b>${rows.length}</b> портов (${top.map(([k, n]) => `${escHtml(trunc(k, 24))}: ${n}`).join(', ')})`);
+      }
+    }
+  } catch (_) {}
   if (charges.length > 0) {
-    const top = charges.slice(0, 5);
+    const top = charges.slice(0, 3);
     for (const c of top) {
       const cl = clientById.get(c.client_id);
       const name = cl ? trunc(cl.name || cl.portName || c.client_id, 32) : c.client_id.slice(0, 12);
       lines.push(`  • ${escHtml(name)} — ${fmtMoney(c.total)}`);
     }
-    if (charges.length > 5) lines.push(`  …и ещё ${charges.length - 5}`);
+    if (charges.length > 3) lines.push(`  …и ещё ${charges.length - 3}`);
   }
 
   // Должники (отрицательный баланс прямо сейчас)
@@ -120,9 +181,24 @@ async function buildDailySummary(date) {
   if (debtors.length) {
     const totalDebt = debtors.reduce((s, c) => s + c.balance, 0);
     lines.push(`Должников: ${debtors.length} · долг ${fmtMoney(Math.abs(totalDebt))}`);
-    for (const d of debtors.slice(0, 3)) {
+    // 2026-09-26: вместо ежедневного повтора одного и того же списка —
+    // должники с движениями за неделю (живые) по одному, остальные — свёрнуты.
+    const activeDebtors = [];
+    let staleDebt = 0, staleCount = 0;
+    for (const d of debtors) {
+      let lastMove = null;
+      try {
+        const r = db.prepare("SELECT MAX(timestamp) ts FROM billing_ledger WHERE client_id = ?").get(d.id);
+        lastMove = r && r.ts ? Date.parse(r.ts.replace(' ', 'T') + (r.ts.includes('Z') ? '' : 'Z')) : null;
+      } catch (_) {}
+      const fresh = lastMove && (Date.now() - lastMove) < 7 * 86400000;
+      if (fresh) activeDebtors.push(d);
+      else { staleCount++; staleDebt += d.balance; }
+    }
+    for (const d of activeDebtors.slice(0, 3)) {
       lines.push(`  • ${escHtml(trunc(d.name || d.portName, 32))}: ${fmtMoney(d.balance)}`);
     }
+    if (staleCount) lines.push(`  • старые (>7 дн без движений): ${staleCount} шт, ${fmtMoney(Math.abs(staleDebt))} — свёрнуты`);
   }
 
   // ----- 2) Трафик per_gb -----
@@ -170,6 +246,40 @@ async function buildDailySummary(date) {
     }
   }
 
+  // ----- 2b) Пакеты операторов (2026-09-26): остаток + прогноз — то, ради
+  // чего оператор открывает сводку, когда симки умирают от квоты.
+  try {
+    const pkgsRaw = getSetting('operator_packages', '[]');
+    const pkgs = typeof pkgsRaw === 'string' ? JSON.parse(pkgsRaw || '[]') : pkgsRaw;
+    if (Array.isArray(pkgs) && pkgs.length) {
+      const { buildForecasts } = require('../jobs/volume-guard');
+      const forecasts = buildForecasts(db, pkgs);
+      const bundleRows = forecasts.filter(f => f.scope === 'package' && f.status !== 'unlimited' && f.status !== 'not_configured');
+      const simRows = forecasts.filter(f => f.scope === 'sim');
+      if (bundleRows.length || simRows.length) {
+        lines.push('');
+        lines.push('📦 <b>Пакеты операторов</b>');
+        for (const f of bundleRows) {
+          const pct = f.package_gb > 0 ? Math.round(f.used_gb / f.package_gb * 100) : 0;
+          const left = f.days_left != null ? `хватит до ${f.full_date}` : 'расхода нет';
+          lines.push(`• ${escHtml(f.operator)}: <b>${Math.round(f.used_gb).toLocaleString('ru-RU')} / ${Math.round(f.package_gb).toLocaleString('ru-RU')} ГБ</b> (${pct}%), темп ${f.gb_day} ГБ/сут — ${left}`);
+        }
+        if (simRows.length) {
+          const hot = simRows.filter(s => s.package_gb > 0 && s.used_gb / s.package_gb >= 0.8)
+            .sort((a, b) => (b.used_gb / b.package_gb) - (a.used_gb / a.package_gb));
+          const total = simRows.length;
+          if (hot.length) {
+            lines.push(`• ${escHtml(hot[0].operator)} (на симку): <b>${hot.length} из ${total}</b> симок >80% пакета — ближе всех: ${hot.slice(0, 3).map(s => `${escHtml(s.nick)} (${Math.round(s.used_gb / s.package_gb * 100)}%)`).join(', ')}`);
+          } else {
+            lines.push(`• ${escHtml(simRows[0].operator)} (на симку): все ${total} симок &lt;80% пакета`);
+          }
+        }
+      }
+    }
+  } catch (e) {
+    if (logger && logger.warn) logger.warn('[DailySummary] packages block failed: ' + (e.message || e));
+  }
+
   // ----- 3) Инфраструктура -----
   // server_unreachable events from system_log. C7: query uses the REAL columns
   // (timestamp/category/action/target — the old `source`/`created_at` don't
@@ -188,13 +298,55 @@ async function buildDailySummary(date) {
     if (logger && logger.warn) logger.warn('[DailySummary] system_log query failed (infra block degraded): ' + (e.message || e));
   }
 
-  const serverDownSet = new Set();
-  let errorCount = 0;
+  // 2026-09-26: не «кто хоть раз не ответил», а сколько МИНУТ реально лежал —
+  // микро-столл панели (самолечение бокса) ≠ недоступность. <5 мин суммарно
+  // за день — в сводку не попадает. Имена — отображаемые, не S-коды.
+  let downLines = [];
+  try {
+    if (hasTable('server_downtime')) {
+      const rows = db.prepare(`
+        SELECT server_name, SUM(duration_sec) AS sec, COUNT(*) AS n
+        FROM server_downtime
+        WHERE down_from >= ? AND down_from < ?
+        GROUP BY server_name ORDER BY sec DESC
+      `).all(utcStart.toISOString(), utcEnd.toISOString());
+      for (const r of rows) {
+        const mins = Math.round((r.sec || 0) / 60);
+        if (mins >= 5) downLines.push(`${escHtml(srvLabel(r.server_name))} — ${mins} мин (${r.n}×)`);
+      }
+    }
+  } catch (e) {
+    if (logger && logger.warn) logger.warn('[DailySummary] downtime query failed: ' + (e.message || e));
+  }
+  // Сервер, который «не отвечал» и НЕ восстановился за день (нет записи
+  // downtime — пишется только при recovery): ≥5 событий unreachable за день
+  // (≈5 мин подряд) — попадает в сводку как «не восстановился».
+  const unrecovered = {};
   for (const e of infraEvents) {
-    // server_unreachable rows are written by modem-tracking with the server
-    // name in `target` (category 'modem', level 'warn').
-    if (e.action === 'server_unreachable' && e.target) serverDownSet.add(e.target);
+    if (e.action === 'server_unreachable' && e.target) unrecovered[e.target] = (unrecovered[e.target] || 0) + 1;
+  }
+  try {
+    if (hasTable('server_downtime')) {
+      const withDt = new Set(db.prepare(`
+        SELECT DISTINCT server_name FROM server_downtime WHERE down_from >= ? AND down_from < ?
+      `).all(utcStart.toISOString(), utcEnd.toISOString()).map(r => r.server_name));
+      for (const [srv, n] of Object.entries(unrecovered)) {
+        if (n >= 5 && !withDt.has(srv)) downLines.push(`${escHtml(srvLabel(srv))} — не восстановился (${n} сбоев)`);
+      }
+    }
+  } catch (_) {}
+  // Ошибки системного лога за день — счётчик + топ причин (иначе «3 ошибки»
+  // ни о чём не говорит).
+  let errorCount = 0, topError = null;
+  for (const e of infraEvents) {
     if (e.level === 'error' || e.level === 'critical') errorCount++;
+  }
+  if (errorCount) {
+    const byAction = {};
+    for (const e of infraEvents) {
+      if (e.level === 'error' || e.level === 'critical') byAction[e.action || '?'] = (byAction[e.action || '?'] || 0) + 1;
+    }
+    topError = Object.entries(byAction).sort((a, b) => b[1] - a[1])[0];
   }
 
   // Connectivity issues from ProxySmart's own per-modem ping destination.
@@ -219,8 +371,8 @@ async function buildDailySummary(date) {
 
   lines.push('');
   lines.push('⚙️ <b>Инфраструктура</b>');
-  if (serverDownSet.size) lines.push(`Серверы недоступны: <b>${Array.from(serverDownSet).join(', ')}</b>`);
-  else lines.push('Все серверы доступны');
+  if (downLines.length) lines.push(`Простои серверов: <b>${downLines.join(' · ')}</b>`);
+  else lines.push('Все серверы доступны (простоев ≥5 мин не было)');
   // D3: оффлайн-дайджест. TG-алерты оффлайна глушатся после stale_modem_hours
   // (12 ч) — долголежащие модемы были видны только в колокольчике. Строка в
   // сводке закрывает дыру. Источник тот же, что у колокольчика
@@ -242,19 +394,47 @@ async function buildDailySummary(date) {
       if (logger && logger.warn) logger.warn('[DailySummary] offline digest failed (block degraded): ' + (e.message || e));
     }
   }
-  if (proxyIssues.length) lines.push(`Проблемных прокси: ${proxyIssues.length} (пинг >1500мс или потери >10%)`);
+  // 2026-09-26: дельта к вчера — «35» без контекста ни о чём не говорит.
+  let issuesDelta = '';
+  try {
+    const prevRow = db.prepare(`
+      SELECT COUNT(*) AS n FROM (
+        SELECT server, nick FROM modem_ping
+        WHERE ts >= ? AND ts < ?
+        GROUP BY server, nick
+        HAVING (AVG(latency_ms) FILTER (WHERE ok = 1) > 1500
+                OR AVG(COALESCE(loss_pct, CASE WHEN ok = 1 THEN 0 ELSE 100 END)) > 10)
+      )
+    `).get(
+      new Date(utcStart.getTime() - 86400000).toISOString().slice(0, 16).replace('T', ' '),
+      utcStartStr
+    );
+    if (prevRow) {
+      const d = proxyIssues.length - (prevRow.n || 0);
+      issuesDelta = d === 0 ? ' (= вчера)' : d > 0 ? ` (▲ +${d} к вчера)` : ` (▼ −${-d} к вчера)`;
+    }
+  } catch (_) {}
+  if (proxyIssues.length) lines.push(`Проблемных прокси: ${proxyIssues.length} (пинг >1500мс или потери >10%)${issuesDelta}`);
   if (rebootRow && rebootRow.n > 0) lines.push(`Авто-перезагрузок: ${rebootRow.n} (успешных ${rebootRow.ok}/${rebootRow.n})`);
-  if (errorCount) lines.push(`Ошибок в системном логе: ${errorCount}`);
+  if (errorCount) lines.push(`Ошибок в системном логе: ${errorCount}${topError ? ` (чаще всего: ${escHtml(topError[0])} ×${topError[1]})` : ''}`);
   // Correlated incidents are the useful overnight signal: one operator/server
   // episode instead of dozens of modem cards.
   try {
     const incidents = hasTable('monitoring_incidents') ? db.prepare(`SELECT state,server,operator,opened_at,closed_at,duration_sec,modem_count,client_count
       FROM monitoring_incidents WHERE opened_at >= ? AND opened_at < ? ORDER BY opened_at`).all(utcStart.toISOString(), utcEnd.toISOString()) : [];
     if (incidents.length) {
-      lines.push(`Инцидентов: <b>${incidents.length}</b>`);
-      for (const it of incidents.slice(0, 8)) {
-        const state = it.state === 'closed' ? `закрыт за ${Math.max(1, Math.round((it.duration_sec || 0) / 60))} мин` : 'ещё открыт';
-        lines.push(`  • ${escHtml(it.operator || 'общая связь')} · ${escHtml(it.server)} — ${it.modem_count} мод., ${it.client_count} кл. · ${state}`);
+      // 2026-09-26: микро-эпизоды (<3 мин) — флапы групп, а не инциденты;
+      // в список — только значимые, флапы свёрнуты в счётчик.
+      const flaps = incidents.filter(i => (i.duration_sec || 0) < 180);
+      const real = incidents.filter(i => (i.duration_sec || 0) >= 180);
+      if (real.length) {
+        lines.push(`Инцидентов: <b>${real.length}</b>` + (flaps.length ? ` · ещё ${flaps.length} флапов (&lt;3 мин, скрыты)` : ''));
+        for (const it of real.slice(0, 8)) {
+          const state = it.state === 'closed' ? `закрыт за ${Math.max(1, Math.round((it.duration_sec || 0) / 60))} мин` : 'ещё открыт';
+          lines.push(`  • ${escHtml(it.operator || 'общая связь')} · ${escHtml(srvLabel(it.server))} — ${it.modem_count} мод., ${it.client_count} кл. · ${state}`);
+        }
+      } else if (flaps.length) {
+        lines.push(`Значимых инцидентов не было; групповых флапов (&lt;3 мин): ${flaps.length}`);
       }
     }
   } catch (e) {
@@ -292,8 +472,16 @@ async function buildDailySummary(date) {
         `).all(quietStart, quietEnd);
         const quietTotal = quietRows.reduce((sum, row) => sum + Number(row.n || 0), 0);
         if (quietTotal) {
+          // 2026-09-26: пары «модем оффлайн» + «вернулся» — это флапы, а не
+          // две строки одинакового веса. Сворачиваем их в одну.
+          const FLAP_RULES = new Set(['modem_offline_20m', 'modem_recovered', 'modem_ping_dead', 'modem_ping_recovered', 'modem_http_fail', 'modem_http_recovered']);
+          const flapCount = quietRows.filter(r => FLAP_RULES.has(r.rule_id)).reduce((s, r) => s + Number(r.n || 0), 0);
+          const rest = quietRows.filter(r => !FLAP_RULES.has(r.rule_id));
+          const restTotal = rest.reduce((s, r) => s + Number(r.n || 0), 0);
           lines.push(`Ночью без Telegram: <b>${quietTotal}</b> некритичных событий (они сохранены в колокольчике)`);
-          for (const row of quietRows) lines.push(`  • ${escHtml(row.title || row.rule_id)} — ${row.n}`);
+          if (flapCount) lines.push(`  • модемы моргали ночью (оффлайн/вернулся): ${flapCount} событий`);
+          for (const row of rest) lines.push(`  • ${escHtml(row.title || row.rule_id)} — ${row.n}`);
+          void restTotal;
         }
       }
     } catch (e) {
@@ -317,9 +505,22 @@ async function buildDailySummary(date) {
   }
 
   if (rotRow && rotRow.total > 0) {
+    // 2026-09-26: % неуспешных с дельтой к вчера — рост процента и есть сигнал.
+    let rotDelta = '';
+    try {
+      const prevRot = db.prepare(`
+        SELECT COUNT(*) AS total, SUM(CASE WHEN old_ip = new_ip AND new_ip IS NOT NULL THEN 1 ELSE 0 END) AS failed
+        FROM rotation_log WHERE started_at >= ? AND started_at < ?
+      `).get(new Date(utcStart.getTime() - 86400000).toISOString().slice(0, 16).replace('T', ' '), utcStartStr);
+      if (prevRot && prevRot.total > 0) {
+        const prevPct = (prevRot.failed * 100) / prevRot.total;
+        const d = ((rotRow.failed * 100) / rotRow.total) - prevPct;
+        rotDelta = ` (${d >= 0 ? '▲' : '▼'} ${Math.abs(d).toFixed(1)} п.п. к вчера)`;
+      }
+    } catch (_) {}
     lines.push('');
     lines.push('🔄 <b>Ротации</b>');
-    lines.push(`Всего: ${rotRow.total}, неуспешных: ${rotRow.failed} (${(rotRow.failed*100/rotRow.total).toFixed(1)}%)`);
+    lines.push(`Всего: ${rotRow.total}, неуспешных: ${rotRow.failed} (${(rotRow.failed*100/rotRow.total).toFixed(1)}%)${rotDelta}`);
     if (rotRow.avg_sec) lines.push(`Среднее время: ${rotRow.avg_sec.toFixed(1)} сек`);
   }
 
