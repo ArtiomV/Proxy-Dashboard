@@ -68,6 +68,7 @@ var COLUMNS=[{id:'rail',label:'',visible:true,sortable:false,width:'6px'},
   {id:'uptime',label:'Аптайм 30д',visible:false,sortable:true},
   {id:'conns',label:'TCP-подключения <span class="th-hint" title="Живые TCP-подключения через прокси (HTTP + SOCKS5), суммарно по портам модема&#10;Клик — настройки порта: лимиты Max Conn / Conn Limit">'+icon('info',11)+'</span>',visible:true,sortable:true,width:'152px'},
   {id:'rotation',label:'Ротация',visible:false,sortable:true},
+  {id:'rotFail',label:'Ротации % <span class="th-hint" title="Доля неуспешных ротаций за 7 дней (ротация прошла, но IP не сменился)&#10;Красный: ≥50%, оранжевый: ≥20%&#10;Для Vodafone RO высокий процент — норма (оператор редко меняет адреса)">'+icon('info',11)+'</span>',visible:true,sortable:true},
   {id:'band',label:'Band',visible:false,sortable:true},
   {id:'actions',label:'',visible:true,sortable:false,width:'118px'}
 ];
@@ -1243,6 +1244,8 @@ function processData(){if(!currentData)return;_initServers(currentData.servers);
     m.pcErrToday=td?td.errors:0;
     m.pcErrorPctToday=td&&td.total>0?Math.round((td.errors||0)/td.total*100):null;
     m.pcConsecFails=pcConsecMap[pKey]||0;
+    // 2026-09-26: доля неуспешных ротаций за 7 дней (колонка «Ротации %»).
+    m.rotFail7d=(currentData.rotStats7d||{})[pKey]||null;
     m.pkg=(currentData.modemPackages||{})[pKey]||null;
     var _base=(currentData.speedBaseline||{})[pKey];
     if(_base){m.baselineDegraded=!!_base.degraded;m.speedBaselineDl=Number(_base.baseline_dl||0);m.speedBaselineCurrent=Number(_base.current_dl||0);}

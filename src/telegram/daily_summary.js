@@ -536,6 +536,63 @@ async function buildDailySummary(date) {
     lines.push('🔄 <b>Ротации</b>');
     lines.push(`Всего: ${rotRow.total}, неуспешных: ${rotRow.failed} (${(rotRow.failed*100/rotRow.total).toFixed(1)}%)${rotDelta}`);
     if (rotRow.avg_sec) lines.push(`Среднее время: ${rotRow.avg_sec.toFixed(1)} сек`);
+
+    // 2026-09-26: разбивка по операторам + «застрявшие» симки. Норма —
+    // ≤20% неуспешных; исключения задаются настройкой rotation_fail_norm
+    // (JSON {"default":20,"exceptions":{"Vodafone RO":80}}). Vodafone RO
+    // редко меняет IP — это норма, поэтому у него порог выше.
+    try {
+      const normCfg = { default: 20, exceptions: { 'Vodafone RO': 80 } };
+      const rawNorm = getSetting && getSetting('rotation_fail_norm', null);
+      if (rawNorm) {
+        try {
+          const parsed = typeof rawNorm === 'string' ? JSON.parse(rawNorm) : rawNorm;
+          if (parsed && typeof parsed === 'object') {
+            if (Number.isFinite(+parsed.default)) normCfg.default = +parsed.default;
+            if (parsed.exceptions && typeof parsed.exceptions === 'object') Object.assign(normCfg.exceptions, parsed.exceptions);
+          }
+        } catch (_) {}
+      }
+      const normFor = (op) => {
+        const ex = normCfg.exceptions;
+        for (const k in ex) if (k.toLowerCase() === String(op || '').toLowerCase() && Number.isFinite(+ex[k])) return +ex[k];
+        return normCfg.default;
+      };
+      const rotOps = db.prepare(`
+        SELECT COALESCE(NULLIF(TRIM(m.operator), ''), 'unknown') AS operator,
+               COUNT(*) AS total,
+               SUM(CASE WHEN r.old_ip = r.new_ip AND r.new_ip IS NOT NULL THEN 1 ELSE 0 END) AS failed
+        FROM rotation_log r
+        LEFT JOIN modem_meta m ON m.server_name = r.server_name AND m.nick = r.nick
+        WHERE r.started_at >= ? AND r.started_at < ?
+        GROUP BY operator
+        ORDER BY total DESC
+      `).all(utcStartStr, utcEndStr);
+      const flagged = rotOps.filter(o => o.total >= 10 && (o.failed * 100 / o.total) > normFor(o.operator));
+      if (flagged.length) {
+        lines.push('⚠️ Неуспешные по операторам: ' + flagged.map(o =>
+          `${escHtml(o.operator)} ${(o.failed * 100 / o.total).toFixed(0)}% (${o.failed}/${o.total}, норма ≤${normFor(o.operator)}%)`
+        ).join(', '));
+      }
+      // Симки, у которых IP не меняется всю неделю (≥10 попыток, ≥80% фейлов)
+      // — показываем даже если за день аномалий нет: это хроника, не разовость.
+      const stuckSims = db.prepare(`
+        SELECT r.nick,
+               COUNT(*) AS total,
+               SUM(CASE WHEN r.old_ip = r.new_ip AND r.new_ip IS NOT NULL THEN 1 ELSE 0 END) AS failed
+        FROM rotation_log r
+        WHERE r.started_at >= ? AND r.started_at < ?
+        GROUP BY r.server_name, r.nick
+        HAVING total >= 10 AND failed * 1.0 / total >= 0.8
+        ORDER BY failed DESC
+        LIMIT 5
+      `).all(new Date(utcStart.getTime() - 6 * 86400000).toISOString().slice(0, 16).replace('T', ' '), utcEndStr);
+      if (stuckSims.length) {
+        lines.push('🔴 Симки без смены IP (7 дн): ' + stuckSims.map(s => `${escHtml(s.nick)} — ${s.failed}/${s.total}`).join(', '));
+      }
+    } catch (e) {
+      if (logger && logger.warn) logger.warn('[DailySummary] rotation per-operator block failed (degraded): ' + (e.message || e));
+    }
   }
 
   // ----- 5) AI-driven analysis ("ОС за вчера") -----

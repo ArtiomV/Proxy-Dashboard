@@ -25,6 +25,33 @@ function _runSection(logger, name, fn, fallback) {
   catch (e) { logger.warn('[data] section ' + name + ' failed (degraded): ' + e.message); return fallback; }
 }
 
+// 2026-09-26: доля неуспешных ротаций по модемам за 7 дней — колонка
+// «Ротации %» на странице модемов. rotation_log — ~175k строк/7д, индекса по
+// started_at нет, поэтому GROUP BY кэшируется на 5 минут (как _pcsCache).
+// «Неуспешная» = old_ip == new_ip при обоих заполненных (IP не сменился).
+let _rotStatsCache = { at: 0, data: {} };
+function getRotStats7d(db) {
+  const now = Date.now();
+  if (now - _rotStatsCache.at < 5 * 60e3) return _rotStatsCache.data;
+  const since = new Date(now - 7 * 864e5).toISOString().slice(0, 19).replace('T', ' ');
+  const rows = db.prepare(`
+    SELECT server_name, nick,
+           COUNT(*) AS total,
+           SUM(CASE WHEN old_ip <> '' AND new_ip <> '' AND old_ip = new_ip THEN 1 ELSE 0 END) AS failed
+    FROM rotation_log
+    WHERE started_at >= ?
+    GROUP BY server_name, nick
+  `).all(since);
+  const out = {};
+  for (const row of rows) {
+    const total = Number(row.total || 0);
+    const failed = Number(row.failed || 0);
+    out[row.server_name + '_' + row.nick] = { total, failed, pct: total ? Math.round(failed * 100 / total) : 0 };
+  }
+  _rotStatsCache = { at: now, data: out };
+  return out;
+}
+
 // 2026-09-25: whitelist-обрезка status-модемов для ответа /api/admin/data.
 // ProxySmart шлёт кучу служебных полей (android, proxy_creds с логином/паролем,
 // Added_EVENT_ID, GENTIME, OWNER, DEV_TYPE, GW/LOCAL_IP и пр.) — фронт их не
@@ -704,6 +731,9 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       proxyIssues: (() => { const v = computeProxyIssues(); _t('proxyIssues'); return v; })(),
       // A1 (23.08): последний пинг каждого модема (latency/loss/ok) для UI.
       modemPing: (getModemPingLatest ? getModemPingLatest() : {}),
+      // 2026-09-26: доля неуспешных ротаций по модемам за 7 дней (колонка
+      // «Ротации %»). Кэш 5 мин — см. getRotStats7d выше.
+      rotStats7d: (() => { const v = _runSection(logger, 'rotStats', () => getRotStats7d(db), {}); _t('rotStats'); return v; })(),
       // A3 (23.08): текущая скорость модемов + топ-5 грузящих для дашборда.
       modemRate: (getModemRateLatest ? getModemRateLatest() : {}),
       modemRateTop: (getModemRateTop ? getModemRateTop(5) : []),
@@ -973,3 +1003,6 @@ r.get('/api/admin/system_log', authMiddleware, adminMiddleware, (req, res) => {
 
 // Exported for tests (WP6.2): the degradation wrapper used by /api/admin/data.
 module.exports._runSection = _runSection;
+// Exported for tests (2026-09-26): rotation-fail stats + cache reset hook.
+module.exports._getRotStats7d = getRotStats7d;
+module.exports._resetRotStatsCache = () => { _rotStatsCache = { at: 0, data: {} }; };

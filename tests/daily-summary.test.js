@@ -213,3 +213,95 @@ describe('daily_summary — должники без прокси не попад
     expect(text).not.toContain('Неактивный Должник');
   });
 });
+
+// 2026-09-26: блок «Ротации» — аномалии неуспешных по операторам (норма ≤20%,
+// исключение Vodafone RO ≤80% — оператор редко меняет IP) + «застрявшие»
+// симки, у которых IP не меняется всю неделю.
+describe('daily_summary — ротации: аномалии по операторам и застрявшие симки', () => {
+  function bootRot() {
+    db = new Database(':memory:');
+    db.exec(SCHEMA);
+    db.exec(MODEM_PING_MIGRATION);
+    db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      rebooted_at TEXT NOT NULL, status TEXT
+    )`);
+    warns = [];
+    logger = { warn: (m) => warns.push(m), info() {}, error() {}, debug() {} };
+    tgSummary.init({ db, logger, clientById: new Map(), getSetting: (_k, dflt) => dflt, aiInsights: null });
+  }
+  // МСК-день 2026-08-09 = UTC [2026-08-08 21:00, 2026-08-09 21:00)
+  const T = (hh, mm) => `2026-08-09 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
+  function addRot(server, nick, changed, startedAt) {
+    db.prepare('INSERT INTO rotation_log (server_name, nick, old_ip, new_ip, started_at, ended_at, took_sec) VALUES (?,?,?,?,?,?,5)')
+      .run(server, nick, '1.1.1.1', changed ? '2.2.2.2' : '1.1.1.1', startedAt, startedAt);
+  }
+  function addMeta(server, nick, operator) {
+    db.prepare('INSERT INTO modem_meta (server_name, imei, nick, operator) VALUES (?,?,?,?)')
+      .run(server, `imei_${server}_${nick}`, nick, operator);
+  }
+
+  it('оператор выше нормы флагается; Vodafone RO в пределах своего порога — нет', async () => {
+    bootRot();
+    addMeta('RO1', 'RO1_01', 'Orange RO');
+    addMeta('RO1', 'RO1_02', 'Vodafone RO');
+    addMeta('S1', 'MD_01', 'Moldcell');
+    // Orange RO: 6/12 = 50% > нормы 20% → флаг
+    for (let i = 0; i < 12; i++) addRot('RO1', 'RO1_01', i >= 6, T(10, i));
+    // Vodafone RO: 9/12 = 75% < своего порога 80% → без флага
+    for (let i = 0; i < 12; i++) addRot('RO1', 'RO1_02', i >= 9, T(11, i));
+    // Moldcell: 1/20 = 5% → без флага
+    for (let i = 0; i < 20; i++) addRot('S1', 'MD_01', i !== 0, T(12, i));
+
+    const { text } = await tgSummary.buildDailySummary(DAY);
+    expect(text).toContain('🔄 <b>Ротации</b>');
+    expect(text).toContain('⚠️ Неуспешные по операторам');
+    expect(text).toContain('Orange RO 50% (6/12, норма ≤20%)');
+    expect(text).not.toContain('Vodafone RO 75%');
+    expect(text).not.toContain('Moldcell 5%');
+    expect(warns).toEqual([]);
+  });
+
+  it('настройка rotation_fail_norm переопределяет дефолтные пороги', async () => {
+    bootRot();
+    tgSummary.init({
+      db, logger, clientById: new Map(),
+      getSetting: (k, dflt) => k === 'rotation_fail_norm'
+        ? JSON.stringify({ default: 20, exceptions: { 'Orange RO': 60 } })
+        : dflt,
+      aiInsights: null,
+    });
+    addMeta('RO1', 'RO1_01', 'Orange RO');
+    for (let i = 0; i < 12; i++) addRot('RO1', 'RO1_01', i >= 6, T(10, i));  // 50% < 60%
+
+    const { text } = await tgSummary.buildDailySummary(DAY);
+    expect(text).toContain('🔄 <b>Ротации</b>');
+    expect(text).not.toContain('⚠️ Неуспешные по операторам');
+  });
+
+  it('симка со 100% фейлов за 7 дней попадает в «Симки без смены IP», разовый фейл — нет', async () => {
+    bootRot();
+    // RO1_25: 12 фейлов из 12, часть — в предыдущие дни окна 7д
+    for (let i = 0; i < 6; i++) addRot('RO1', 'RO1_25', false, T(13, i));
+    for (let i = 0; i < 6; i++) addRot('RO1', 'RO1_25', false, `2026-08-05 10:${String(i).padStart(2, '0')}:00`);
+    // MD_47: 10 ротаций, 6 фейлов (60% < 80%) — не «застрявшая»
+    for (let i = 0; i < 10; i++) addRot('S3', 'MD_47', i >= 6, T(14, i));
+
+    const { text } = await tgSummary.buildDailySummary(DAY);
+    expect(text).toContain('🔴 Симки без смены IP (7 дн): RO1_25 — 12/12');
+    expect(text).not.toContain('MD_47 —');
+  });
+
+  it('без аномалий — только базовые строки блока', async () => {
+    bootRot();
+    addMeta('S1', 'MD_01', 'Moldcell');
+    for (let i = 0; i < 10; i++) addRot('S1', 'MD_01', true, T(10, i));
+
+    const { text } = await tgSummary.buildDailySummary(DAY);
+    expect(text).toContain('🔄 <b>Ротации</b>');
+    expect(text).toContain('Всего: 10, неуспешных: 0');
+    expect(text).not.toContain('⚠️ Неуспешные по операторам');
+    expect(text).not.toContain('🔴 Симки без смены IP');
+    expect(warns).toEqual([]);
+  });
+});
