@@ -3073,6 +3073,12 @@ const modemPing = require('./src/jobs/modem-ping').create({ db, logger, alerts, 
 // A3 (23.08): текущая скорость модемов из дельт bw-счётчиков цикла опроса —
 // без новых запросов к боксам. modem-tracking кормит ingest() полным data.
 const modemRate = require('./src/jobs/modem-rate').create({ db, logger });
+// 2026-09-26: детектор «у симки кончился пакет» по симптомам живого фида
+// (SIM OK + сессия есть + IP не выдаётся + пинг 100% ≥15 мин непрерывно).
+// Тикает из startup.js каждые 2 мин по кэшированному фиду (без нагрузки на боксы).
+const simExhaustion = require('./src/jobs/sim-exhaustion').create({
+  db, logger, alerts, getSetting, fetchAllServersDataCached,
+});
 // A2 (23.08): HTTP-чек сайта через прокси-порты модемов («глазами клиента»).
 // Тикает из startup.js каждые httpcheck_interval_min.
 const httpCheck = require('./src/jobs/http-check').create({
@@ -4392,6 +4398,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
     runVolumeGuard: () => volumeGuard.runOnce(),   // A4 (23.08): объёмные алерты
+    runSimExhaustion: () => simExhaustion.runOnce(),   // 2026-09-26: исчерпание пакета симки
     events: eventsBus,   // SSE (23.08): alerts.init публикует событие 'alert'
     ledgerDb, billingRunsDb, getMoscowYesterday,   // 23.08/DEEP-23: catch-up по durable-заданиям
     // B2C Э3 (WP5): привязка TG-аккаунта в боте (tgBot.init в startup.js).

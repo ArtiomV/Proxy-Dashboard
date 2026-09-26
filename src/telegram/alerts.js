@@ -759,6 +759,19 @@ const RULES = {
     dedupeKey: () => 'global',
     render: p => `📈 <b>Спайки трафика: ${p.count} штук за час</b>\n\nЛибо у клиента реальный взлёт нагрузки, либо порча данных в hourly-агрегации. Проверь системный лог по action=traffic_spike_clamp.`,
   },
+  // 2026-09-26: «у симки кончился трафик» — по симптомам (SIM OK + сессия
+  // есть + IP не выдаётся + пинг 100% уже N мин), не по счётчику. Кулдаун
+  // 12 ч на симку: эпизод один, следующий день/эпизод — новый алерт.
+  sim_package_exhausted: {
+    title: 'Похоже, у симки кончился пакет трафика',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 43200,
+    dedupeKey: p => 'simex_' + (p.server || '') + '_' + (p.nick || p.imei || ''),
+    render: p => `🪫 <b>Похоже, у симки кончился трафик: ${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server))})\n\nSIM в сети, сессия поднята, но IP не выдаётся и пинг 100% уже ${p.mins || '?'} мин. — типичная картина исчерпанного пакета${p.operator ? ` (${esc(p.operator)})` : ''}.` +
+      (p.used_gb != null ? `\nРасход с начала месяца: <b>${p.used_gb} ГБ</b>.` : '') +
+      `\nПроверь баланс/пакет у оператора; после пополнения модем вернётся сам.`,
+  },
   dashboard_restarted: {
     title: 'Дашборд перезапущен',
     priority: 'important',
@@ -1049,6 +1062,7 @@ const _entityFor = {
   modem_speed_baseline_degraded: p => ({ kind: 'modem', id: p.nick || p.imei || null }),
   modem_speed_baseline_recovered: p => ({ kind: 'modem', id: p.nick || p.imei || null }),
   volume_modem_hourly:       p => ({ kind: 'modem',   id: p.nick || null }),
+  sim_package_exhausted:     p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   volume_package_pace:       p => ({ kind: 'system',  id: 'volume:' + (p.operator || p.nick || '') }),
   volume_package_exhaustion: p => ({ kind: p.scope === 'sim' ? 'modem' : 'system', id: p.nick || ('volume:' + (p.operator || '')) }),
   server_metric_anomaly:     p => ({ kind: 'system',  id: 'server:' + (p.server || '') }),

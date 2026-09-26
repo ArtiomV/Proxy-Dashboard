@@ -27,6 +27,7 @@ function runStartup(d) {
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runLocationWanSpeed, runServerMetrics, runRetailGuard,
     runBlockedPortCleanup, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
+    runSimExhaustion,   // 2026-09-26: sim-exhaustion
     saveClients, auditLog, authTokensDb,
     events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
     ledgerDb, billingRunsDb, getMoscowYesterday,   // 23.08/DEEP-23: billing catch-up по durable-заданиям
@@ -251,6 +252,18 @@ function runStartup(d) {
       dbAudit.runJobAsync('HttpCheck', 'periodic', () => runHttpCheck())
         .catch(e => logger.error('[HttpCheck] periodic run failed:', e.message));
     }, 60 * 1000));
+  }
+  // 2026-09-26: sim-exhaustion — «у симки кончился пакет» по симптомам
+  // живого фида, каждые 2 мин (данные кэшированные — боксы не дёргаем).
+  if (runSimExhaustion) {
+    setTimeout(() => {
+      dbAudit.runJobAsync('SimExhaustion', 'startup', () => runSimExhaustion())
+        .catch(e => logger.error('[SimExhaustion] startup run failed:', e.message));
+    }, 6 * 60 * 1000);
+    _intervals.push(setInterval(() => {
+      dbAudit.runJobAsync('SimExhaustion', 'periodic', () => runSimExhaustion())
+        .catch(e => logger.error('[SimExhaustion] periodic run failed:', e.message));
+    }, 2 * 60 * 1000));
   }
 
   // A4 (23.08): объёмные алерты с пакетами операторов — почасовой прогон по
