@@ -125,6 +125,14 @@ function parseSqliteUtc(value) {
 
 function create(deps) {
   const { db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting, alerts } = deps;
+  // 2026-09-26: модемы с исчерпанным пакетом (sim_exhaustion_state) не
+  // замеряем — оператор режет скорость до ~0, результат заведомо нулевой,
+  // а замер жрёт трафик симки. Dep опционален (тесты/стенды могут не давать).
+  function _exhausted(f, nick) {
+    if (typeof deps.isSimExhausted !== 'function') return false;
+    try { return !!deps.isSimExhausted(f && f.server && f.server.name, nick, f && f.imei); }
+    catch (_) { return false; }
+  }
   // Пауза инжектируется — тесты подсовывают мгновенный sleep.
   const sleep = typeof deps.sleep === 'function'
     ? deps.sleep
@@ -267,7 +275,9 @@ function create(deps) {
   // локации», конкретные модемы не важны. Приоритет — никам со свежей
   // историей в speed_monitor (не рвётся 56-дневная норма evaluateBaseline).
   function planTargets(fleet) {
-    if (!isAutoMode()) return getTargetNicks().map(nick => ({ nick, f: fleet.get(nick) || null }));
+    if (!isAutoMode()) return getTargetNicks()
+      .map(nick => ({ nick, f: fleet.get(nick) || null }))
+      .filter(t => !_exhausted(t.f, t.nick));   // исчерпанный пакет — замер бессмыслен
     const recent = new Set();
     try {
       for (const r of db.prepare("SELECT server, nick FROM speed_monitor WHERE ts >= datetime('now','-7 days') GROUP BY server, nick").all()) {
@@ -277,6 +287,7 @@ function create(deps) {
     const groups = new Map();   // 'server|operator' → [{ nick, f }]
     for (const [nick, f] of fleet) {
       if (!f.isOnline || !f.operator) continue;
+      if (_exhausted(f, nick)) continue;   // пакет исчерпан — скорость ~0 по определению
       const key = f.server.name + '|' + f.operator;
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key).push({ nick, f });
@@ -305,6 +316,7 @@ function create(deps) {
     const pool = new Map();   // 'server|operator' → [{ nick, f }]
     for (const [nick, f] of fleet) {
       if (!f.isOnline || !f.operator || chosen.has(nick)) continue;
+      if (_exhausted(f, nick)) continue;   // подмена с исчерпанным пакетом даст ~0
       const key = f.server.name + '|' + f.operator;
       if (!pool.has(key)) pool.set(key, []);
       pool.get(key).push({ nick, f });

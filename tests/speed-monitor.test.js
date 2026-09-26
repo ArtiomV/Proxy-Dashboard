@@ -523,3 +523,29 @@ describe('SpeedMonitor: авто-режим, подмена оператора, 
     expect(trigger).toHaveBeenCalledWith('speedtest_box_outage', expect.objectContaining({ server: 'S1' }));
   });
 });
+
+// 2026-09-26: модемы с исчерпанным пакетом (sim_exhaustion_state) не
+// замеряются — оператор режет скорость до ~0, замер бессмысленен и жрёт
+// трафик. Пропуск и в явном списке целей, и в auto-режиме (цели + подмены
+// делят один фильтр через deps.isSimExhausted).
+describe('SpeedMonitor: пропуск модемов с исчерпанным пакетом', () => {
+  const fleet = () => new Map([
+    ['MD_01', { server: { name: 'S1', tz: 'Europe/Moscow' }, imei: 'i1', isOnline: true, operator: 'Moldcell' }],
+    ['MD_02', { server: { name: 'S1', tz: 'Europe/Moscow' }, imei: 'i2', isOnline: true, operator: 'Moldcell' }],
+  ]);
+
+  it('явный список: exhausted-ник выпадает из целей', () => {
+    const job = makeJob(statusFetch({}), { isSimExhausted: (s, n) => n === 'MD_01' });
+    expect(job.planTargets(fleet()).map(t => t.nick)).toEqual(['MD_04', 'MD_10']);
+  });
+
+  it('auto-режим: exhausted-модем не выбирается целью', () => {
+    const job = makeJobWithSetting(statusFetch({}), 'auto', null, { isSimExhausted: (s, n) => n === 'MD_01' });
+    expect(job.planTargets(fleet()).map(t => t.nick)).toEqual(['MD_02']);
+  });
+
+  it('без dep isSimExhausted — поведение прежнее', () => {
+    const job = makeJobWithSetting(statusFetch({}), 'auto');
+    expect(job.planTargets(fleet()).map(t => t.nick).sort()).toEqual(['MD_01', 'MD_02']);
+  });
+});

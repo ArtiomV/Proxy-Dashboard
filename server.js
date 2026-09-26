@@ -3133,6 +3133,9 @@ function pushSpeedtestEntry(key, entry) {
 // env SPEED_MONITOR_NICKS остаётся override'ом для стендов).
 const _speedMonitor = require('./src/jobs/speed-monitor').create({
   db, logger, logActivity, apiServers, fetchApi, normalizeOperator, getSetting, alerts,
+  // 2026-09-26: не мерить модемы с исчерпанным пакетом (sim_exhaustion_state).
+  isSimExhausted: (serverName, nick, imei) =>
+    require('./src/jobs/sim-exhaustion').isExhausted(db, { server: serverName, nick, imei }),
 });
 
 // Один замер проводного канала на физическую локацию. Серверы по одному

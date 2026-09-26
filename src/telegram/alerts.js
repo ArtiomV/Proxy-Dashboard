@@ -73,6 +73,24 @@ const SUPPRESSIBLE_RULES = new Set([
   'sim_iccid_changed', 'sim_status_bad', 'sim_redirect_imposed',
   'reboot_score_high', 'proxy_expiring_3d',
 ]);
+// 2026-09-26: пока модем в состоянии «пакет исчерпан» (sim_exhaustion_state,
+// миграция 104), алерты его нестабильности — заведомый шум: причина известна
+// и лечится пополнением пакета у оператора. Подавляем только правила
+// неработоспособности; само sim_package_exhausted/recovered, SIM-проблемы
+// (redirect/iccid/status — это ДРУГАЯ беда), failover и биллинг не трогаем.
+const simExhaustion = require('../jobs/sim-exhaustion');
+const EXHAUST_SUPPRESSED_RULES = new Set([
+  'modem_offline_20m', 'modem_recovered',
+  'modem_ping_dead', 'modem_ping_recovered', 'modem_ping_slow',
+  'modem_http_fail', 'modem_http_recovered',
+  'modem_speed_baseline_degraded', 'modem_speed_baseline_recovered',
+  'volume_modem_hourly', 'recovery_exhausted',
+]);
+function _exhaustedSuppressed(ruleId, payload) {
+  if (!EXHAUST_SUPPRESSED_RULES.has(ruleId)) return false;
+  if (!payload || (!payload.imei && !(payload.server && payload.nick) && !payload.nick)) return false;
+  try { return simExhaustion.isExhausted(db, payload); } catch (_) { return false; }
+}
 function _depsEnabled() {
   return !appSettings || appSettings.alert_dependencies_enabled !== false;
 }
@@ -770,7 +788,18 @@ const RULES = {
     dedupeKey: p => 'simex_' + (p.server || '') + '_' + (p.nick || p.imei || ''),
     render: p => `🪫 <b>Похоже, у симки кончился трафик: ${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server))})\n\nSIM в сети, сессия поднята, но IP не выдаётся и пинг 100% уже ${p.mins || '?'} мин. — типичная картина исчерпанного пакета${p.operator ? ` (${esc(p.operator)})` : ''}.` +
       (p.used_gb != null ? `\nРасход с начала месяца: <b>${p.used_gb} ГБ</b>.` : '') +
-      `\nПроверь баланс/пакет у оператора; после пополнения модем вернётся сам.`,
+      `\nУведомления о нестабильности этого модема заглушены до восстановления пакета; спидтесты по нему пропускаются.` +
+      `\nПроверь баланс/пакет у оператора; после пополнения модем вернётся сам — я сообщу.`,
+  },
+  // 2026-09-26: пакет реактивирован — модем подтверждённо здоров (IP + пинг
+  // sustained sim_exhaustion_recover_min), подавление нестабильности снято.
+  sim_package_recovered: {
+    title: 'Симка снова в работе',
+    priority: 'info',
+    defaultOn: true,
+    cooldownSec: 3600,
+    dedupeKey: p => 'simex_rec_' + (p.server || '') + '_' + (p.nick || p.imei || ''),
+    render: p => `🔋 <b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server))}) снова в работе — пакет восстановлен\n\nIP выдаётся, пинг проходит${p.mins_down != null ? `; простой составил ~${p.mins_down >= 120 ? Math.round(p.mins_down / 60) + ' ч' : p.mins_down + ' мин'}` : ''}. Все ограничения на уведомления сняты.`,
   },
   dashboard_restarted: {
     title: 'Дашборд перезапущен',
@@ -1063,6 +1092,7 @@ const _entityFor = {
   modem_speed_baseline_recovered: p => ({ kind: 'modem', id: p.nick || p.imei || null }),
   volume_modem_hourly:       p => ({ kind: 'modem',   id: p.nick || null }),
   sim_package_exhausted:     p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
+  sim_package_recovered:     p => ({ kind: 'modem',   id: p.nick || p.imei || null }),
   volume_package_pace:       p => ({ kind: 'system',  id: 'volume:' + (p.operator || p.nick || '') }),
   volume_package_exhaustion: p => ({ kind: p.scope === 'sim' ? 'modem' : 'system', id: p.nick || ('volume:' + (p.operator || '')) }),
   server_metric_anomaly:     p => ({ kind: 'system',  id: 'server:' + (p.server || '') }),
@@ -1202,6 +1232,9 @@ function _triggerNow(ruleId, payload) {
 
     // B3 (23.08): объект в maintenance-окне → алерты по нему молчат.
     if (maintenance.isInMaintenance(db, { server: payload && payload.server, nick: payload && payload.nick }, Date.now())) return false;
+    // 2026-09-26: у модема исчерпан пакет → его алерты нестабильности молчат
+    // до подтверждённого восстановления (sim_package_recovered снимает блок).
+    if (_exhaustedSuppressed(ruleId, payload)) return false;
     // B2 (23.08): активный ack («в работе» до until_ts / «решено») глушит
     // правило по dedup-ключу. Cooldown при ack НЕ трогаем: по истечении TTL
     // алерт повторится сам, если проблема жива.
@@ -1332,6 +1365,7 @@ function trigger(ruleId, payload) {
       && Date.now() - _bootAt >= BOOT_GRACE_MS
       && !(payload && payload.server && _depsEnabled() && boxDownState.has(payload.server) && SUPPRESSIBLE_RULES.has(ruleId))
       && !maintenance.isInMaintenance(db, { server: payload && payload.server, nick: payload && payload.nick }, Date.now())
+      && !_exhaustedSuppressed(ruleId, payload)
       && !_ackActive(ruleId, _idedup)
       && (!_irule || Date.now() - _icooldown >= (_irule.cooldownSec || 0) * 1000);
     if (canCorrelate) {

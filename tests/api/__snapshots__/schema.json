@@ -649,6 +649,12 @@
   },
   {
     "type": "index",
+    "name": "idx_sim_exhaustion_nick",
+    "tbl_name": "sim_exhaustion_state",
+    "sql": "CREATE INDEX idx_sim_exhaustion_nick ON sim_exhaustion_state(server_name, nick)"
+  },
+  {
+    "type": "index",
     "name": "idx_sim_registry_phone",
     "tbl_name": "sim_registry",
     "sql": "CREATE INDEX idx_sim_registry_phone ON sim_registry(phone)"
@@ -1156,6 +1162,12 @@
     "name": "sessions",
     "tbl_name": "sessions",
     "sql": "CREATE TABLE sessions ( token TEXT PRIMARY KEY, login TEXT NOT NULL, port_name_filter TEXT, is_admin INTEGER DEFAULT 0, expires_at INTEGER NOT NULL, created_at TEXT DEFAULT (datetime('now')) )"
+  },
+  {
+    "type": "table",
+    "name": "sim_exhaustion_state",
+    "tbl_name": "sim_exhaustion_state",
+    "sql": "CREATE TABLE sim_exhaustion_state ( server_name TEXT NOT NULL, imei TEXT NOT NULL, nick TEXT NOT NULL DEFAULT '', operator TEXT NOT NULL DEFAULT '', since_ts INTEGER NOT NULL, -- мс epoch: с какого момента симптом держится alerted_at INTEGER, -- мс epoch: когда ушёл алерт sim_package_exhausted PRIMARY KEY (server_name, imei) )"
   },
   {
     "type": "table",
