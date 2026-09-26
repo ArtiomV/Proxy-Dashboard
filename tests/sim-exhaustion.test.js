@@ -243,3 +243,122 @@ describe('sim-exhaustion: isExhausted — гейт подавления', () => 
     expect(simExhaustion.isExhausted(empty, { imei: 'imei9' })).toBe(false);
   });
 });
+
+// ── 2026-09-26 (v4): сигнатура 2 — троттлинг. Модем жив (IP/пинг в норме),
+// но замеры ~0. Подтверждение контрольной пробой после 5-мин «отдыха».
+// Плюс операторский уровень: ≥80% симок оператора в состоянии → групповой алерт.
+const healthyModem = (imei, nick, cellop = 'moldcell') => ({
+  modem_details: { IMEI: imei, NICK: nick },
+  net_details: { SimStatus: 'SIM OK', ConnectionStatus: 'OK, ppp_connected', IS_ONLINE: 'yes', EXT_IP: '94.139.1.5', ping_stats: '150ms, 0% loss', CELLOP: cellop },
+});
+
+function bootV4(feed, speedResult) {
+  const db = new Database(':memory:');
+  db.exec('CREATE TABLE traffic_hourly (server_name TEXT, nick TEXT, hour_start TEXT, bytes_in INTEGER, bytes_out INTEGER)');
+  db.exec(MIGRATION_104);
+  db.exec(`CREATE TABLE speed_monitor (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, server TEXT, nick TEXT, imei TEXT,
+    download REAL, upload REAL, ping REAL, ok INTEGER, error TEXT, operator TEXT,
+    attempts INTEGER, ts TEXT DEFAULT (datetime('now'))
+  )`);
+  const fired = [];
+  const probes = [];
+  const mkJob = () => simExhaustion.create({
+    db, logger: { info() {}, warn() {}, error() {} },
+    alerts: { trigger: (rule, payload) => { fired.push({ rule, payload }); return true; } },
+    getSetting: (k, d) => d,
+    fetchAllServersDataCached: async () => feed(),
+    apiServers: [{ name: 'S1' }, { name: 'S4' }],
+    fetchApi: async (server, path) => {
+      if (path.startsWith('/apix/speedtest')) {
+        probes.push(path);
+        return typeof speedResult === 'function' ? speedResult() : speedResult;
+      }
+      throw new Error('unexpected ' + path);
+    },
+  });
+  return { mkJob, fired, db, probes };
+}
+
+describe('sim-exhaustion v4: троттлинг-сигнатура (модем жив, скорость ~0)', () => {
+  it('плохой замер → 5 мин отдыха → подтверждающая проба ~0 → состояние + алерт kind=throttled', async () => {
+    const { mkJob, fired, db, probes } = bootV4(
+      () => [{ serverName: 'S1', status: [healthyModem('imei5', 'MD_5')] }],
+      { download: '0.5', upload: '0.2', ping: '900' });
+    db.prepare("INSERT INTO speed_monitor (server, nick, download, ok) VALUES ('S1', 'MD_5', 0.3, 1)").run();
+    const job = mkJob();
+
+    await job.runOnce();   // кандидат отмечен, пробы ещё нет — модем «отдыхает»
+    expect(probes.length).toBe(0);
+    expect(job._throttleCandidates.has('S1|imei5')).toBe(true);
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(0);
+
+    // Прошло 5+ минут — подтверждающая проба, скорость снова ~0 → состояние.
+    job._throttleCandidates.get('S1|imei5').firstAt = Date.now() - 6 * 60000;
+    await job.runOnce();
+    expect(probes.length).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(1);
+    expect(fired.length).toBe(1);
+    expect(fired[0].rule).toBe('sim_package_exhausted');
+    expect(fired[0].payload).toMatchObject({ nick: 'MD_5', server: 'S1', kind: 'throttled', dl: 0.5, operator: 'Moldcell' });
+  });
+
+  it('контрольная проба с нормальной скоростью — ложная тревога, состояние не включается', async () => {
+    const { mkJob, fired, db, probes } = bootV4(
+      () => [{ serverName: 'S1', status: [healthyModem('imei5', 'MD_5')] }],
+      { download: '25', upload: '10', ping: '40' });
+    db.prepare("INSERT INTO speed_monitor (server, nick, download, ok) VALUES ('S1', 'MD_5', 0.3, 1)").run();
+    const job = mkJob();
+    await job.runOnce();
+    job._throttleCandidates.get('S1|imei5').firstAt = Date.now() - 6 * 60000;
+    await job.runOnce();
+    expect(probes.length).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(0);
+    expect(fired.length).toBe(0);
+    expect(job._throttleCandidates.size).toBe(0);
+  });
+
+  it('модем уже в состоянии (сигнатура 1) — замеры ~0 не плодят дубли и пробы', async () => {
+    const { mkJob, fired, db, probes } = bootV4(
+      () => [{ serverName: 'S1', status: [MODEM_EX] }],
+      { download: '0.5', upload: '0.2', ping: '900' });
+    db.prepare("INSERT INTO speed_monitor (server, nick, download, ok) VALUES ('S1', 'MD_1', 0.3, 1)").run();
+    db.prepare("INSERT INTO sim_exhaustion_state (server_name, imei, nick, operator, since_ts, alerted_at) VALUES ('S1', 'imei1', 'MD_1', 'Moldcell', 1, 2)").run();
+    const job = mkJob();
+    await job.runOnce();
+    await job.runOnce();
+    expect(probes.length).toBe(0);   // модем не «здоров» → recovery-проб нет; уже в состоянии → throttle-проб нет
+    expect(fired.length).toBe(0);
+  });
+});
+
+describe('sim-exhaustion v4: операторский уровень', () => {
+  it('≥80% симок оператора на площадке в состоянии → один групповой алерт', async () => {
+    const fleet = [
+      healthyModem('imeiA', 'MD_A'), healthyModem('imeiB', 'MD_B'),
+      healthyModem('imeiC', 'MD_C'), healthyModem('imeiD', 'MD_D'),
+    ];
+    const { mkJob, fired, db } = bootV4(() => [{ serverName: 'S1', status: fleet }], null);
+    const ins = db.prepare("INSERT INTO sim_exhaustion_state (server_name, imei, nick, operator, since_ts, alerted_at) VALUES ('S1', ?, ?, 'Moldcell', 1, 2)");
+    ins.run('imeiA', 'MD_A'); ins.run('imeiB', 'MD_B'); ins.run('imeiC', 'MD_C');   // 3/4 = 75% < 80%
+    const job = mkJob();
+    await job.runOnce();
+    expect(fired.filter(f => f.rule === 'operator_package_throttled').length).toBe(0);
+
+    ins.run('imeiD', 'MD_D');   // 4/4 = 100% ≥ 80%
+    await job.runOnce();
+    const opAlerts = fired.filter(f => f.rule === 'operator_package_throttled');
+    expect(opAlerts.length).toBe(1);
+    expect(opAlerts[0].payload).toMatchObject({ server: 'S1', operator: 'Moldcell', exhausted: 4, total: 4 });
+  });
+
+  it('меньше 3 симок оператора — группового алерта нет (шум по мелочи)', async () => {
+    const fleet = [healthyModem('imeiA', 'MD_A'), healthyModem('imeiB', 'MD_B')];
+    const { mkJob, fired, db } = bootV4(() => [{ serverName: 'S1', status: fleet }], null);
+    const ins = db.prepare("INSERT INTO sim_exhaustion_state (server_name, imei, nick, operator, since_ts, alerted_at) VALUES ('S1', ?, ?, 'Moldcell', 1, 2)");
+    ins.run('imeiA', 'MD_A'); ins.run('imeiB', 'MD_B');
+    const job = mkJob();
+    await job.runOnce();
+    expect(fired.filter(f => f.rule === 'operator_package_throttled').length).toBe(0);
+  });
+});

@@ -73,3 +73,19 @@ describe('подавление нестабильности модема с ис
     expect(alerts.trigger('modem_ping_dead', { server: 'S1', nick: 'MD_X', imei: 'imeiX' })).toBe(true);
   });
 });
+
+describe('sim_package_exhausted: render различает сигнатуры', () => {
+  it('kind=throttled — текст про урезанную скорость; без kind — про отсутствие IP', () => {
+    const rule = alerts.RULES.sim_package_exhausted;
+    const throttled = rule.render({ nick: 'MD_5', server: 'S1', kind: 'throttled', dl: 0.5, operator: 'Moldcell', used_gb: 28.4 });
+    expect(throttled).toContain('урезана оператором');
+    expect(throttled).toContain('0.5 Mbps');
+    const classic = rule.render({ nick: 'MD_5', server: 'S1', mins: 20, operator: 'Moldcell' });
+    expect(classic).toContain('кончился трафик');
+    expect(classic).not.toContain('урезана оператором');
+    // Операторский алерт существует и рендерится
+    const opText = alerts.RULES.operator_package_throttled.render({ server: 'S1', operator: 'Moldcell', exhausted: 4, total: 4 });
+    expect(opText).toContain('Moldcell');
+    expect(opText).toContain('4 из 4');
+  });
+});

@@ -3,12 +3,17 @@
 // src/jobs/sim-exhaustion.js — 2026-09-26: детектор «у симки кончился трафик»
 // по СИМПТОМАМ (а не по счётчику — квота оператора нам неизвестна).
 //
-// Сигнатура (подтверждена на живых Moldcell-симках 26.09): SIM зарегистрирована
-// (SimStatus OK), сессия поднята (ppp_connected / DATA:connected), но внешний
-// IP не выдаётся (пусто или IP_RESET) и пинг 100% loss — модем стоит в сети,
-// а данных нет. У Moldcell именно так выглядит исчерпанный пакет: модем
-// «онлайн» для пингов умерших не считается, generic «модем оффлайн» уходит в
-// ту же карточку, а причина была не видна.
+// Сигнатура 1 (подтверждена на живых Moldcell-симках 26.09): SIM
+// зарегистрирована (SimStatus OK), сессия поднята (ppp_connected /
+// DATA:connected), но внешний IP не выдаётся (пусто или IP_RESET) и пинг
+// 100% loss — модем стоит в сети, а данных нет.
+//
+// Сигнатура 2 (троттлинг, 26.09): модем ЖИВ (IP/пинг в норме — сигнатура 1
+// его не видит), но почасовой монитор скорости меряет ~0. Кандидат «отдыхает»
+// sim_exhaustion_throttle_confirm_min (дефолт 5 мин) после плохого замера,
+// затем подтверждается контрольной спидтест-пробой: dl снова
+// < sim_exhaustion_throttle_dl_mbps (дефолт 1) → то же состояние, алерт
+// sim_package_exhausted с kind='throttled'.
 //
 // Симптом должен держаться НЕПРЕРЫВНО ≥ sim_exhaustion_min_minutes (дефолт 15)
 // — короткие IP_RESET при ротации и полминутные флапы не алертим.
@@ -34,6 +39,7 @@
 // пакета — оператору сразу видно, похоже на квоту или нет.
 
 const GB = 1e9;
+const { normalizeOperator } = require('../utils/traffic');
 
 function _parseLoss(raw) {
   if (typeof raw !== 'string') return null;
@@ -80,6 +86,17 @@ function create(deps) {
   const fetchApi = deps.fetchApi || null;   // нужен для спидтест-пробы восстановления
   const state = new Map();       // server|imei → { since, nick, alerted } — симптом наблюдаем (in-memory)
   const probes = new Map();      // server|imei → lastProbeAt (мс) — когда последний раз мерили скорость
+  const throttleCandidates = new Map();  // server|imei → { firstAt, server, nick } — плохой замер ждёт 5-мин подтверждения
+
+  // Оператор из живого фида — нормализованный (Moldcell/Orange RO/…), как в
+  // modem_meta и сводках. Храним нормализованным, чтобы операторский уровень
+  // (≥80% симок в состоянии) не разваливался на варианты написания CELLOP.
+  function _normOp(raw, srvName) {
+    const srv = apiServers.find(s => s.name === srvName);
+    const isRO = !!srv && (srv.country || '') === 'RO';
+    try { return normalizeOperator(raw, isRO) || String(raw || '').trim(); }
+    catch (_) { return String(raw || '').trim(); }
+  }
 
   function _enabled() { return getSetting('sim_exhaustion_enabled', true) !== false; }
   function _minMs() {
@@ -99,6 +116,21 @@ function create(deps) {
   }
   function _maxProbesPerRun() {
     return Math.max(1, Number(getSetting('sim_exhaustion_max_probes_per_run', 3)) || 3);
+  }
+  // Троттлинг-сигнатура: последний почасовой замер dl < порога → кандидат;
+  // подтверждение пробой после confirm-минут «отдыха» модема.
+  function _throttleDlMbps() {
+    const v = Number(getSetting('sim_exhaustion_throttle_dl_mbps', 1));
+    return Number.isFinite(v) && v > 0 ? v : 1;
+  }
+  function _throttleConfirmMs() {
+    return Math.max(1, Number(getSetting('sim_exhaustion_throttle_confirm_min', 5)) || 5) * 60000;
+  }
+  // Операторский уровень: доля симок оператора на площадке в состоянии
+  // «пакет исчерпан», при которой шлём один групповой алерт.
+  function _opRatio() {
+    const v = Number(getSetting('sim_exhaustion_operator_ratio', 0.8));
+    return Number.isFinite(v) && v > 0 && v <= 1 ? v : 0.8;
   }
 
   // Одна спидтест-проба через бокс (как speed-monitor, но одиночная и без
@@ -175,17 +207,17 @@ function create(deps) {
   // Базовые признаки (IP + online + пинг) — только ГЕЙТ для спидтест-пробы:
   // при троттлинге трафик идёт и на минимальной скорости, поэтому «пакет
   // реально реактивирован» = замер dl ≥ sim_exhaustion_recover_dl_mbps.
-  async function _checkRecoveries(byImei, now) {
-    let recovered = 0, probed = 0;
+  async function _checkRecoveries(byImei, now, budget) {
+    let recovered = 0;
     for (const row of _activeRows()) {
       const key = row.server_name + '|' + row.imei;
       const hit = byImei.get(row.imei);
       if (!hit || !_healthy(hit.m)) continue;
-      if (probed >= _maxProbesPerRun()) continue;               // бюджет прогона: спидтесты последовательны и долгие
+      if (budget.used >= budget.max) continue;                  // бюджет прогона: спидтесты последовательны и долгие
       const lastProbe = probes.get(key) || 0;
       if (now - lastProbe < _probeMs()) continue;               // недавно мерили — скорость всё ещё урезана
       probes.set(key, now);
-      probed++;
+      budget.used++;
       const nick = (hit.m.modem_details || {}).NICK || row.nick;
       const res = await _probeSpeed(hit.srv, nick);
       if (!res || !(res.dl > 0 || res.ul > 0)) continue;        // замер не удался — следующая пробы по кулдауну
@@ -211,6 +243,110 @@ function create(deps) {
     return recovered;
   }
 
+  // Сигнатура 2 — троттлинг. Модем жив (IP/пинг в норме — сигнатура 1 его не
+  // видит), но почасовой монитор меряет ~0. Кандидат «отдыхает»
+  // sim_exhaustion_throttle_confirm_min (дефолт 5 мин), затем подтверждаем
+  // контрольной пробой. Подтвердилось → то же sim_exhaustion_state; дальше
+  // восстановление идёт общим путём (спидтест-пробы каждые 30 мин).
+  async function _detectThrottled(byServerNick, now, budget) {
+    let flagged = 0;
+    let rows;
+    try {
+      rows = db.prepare(`
+        SELECT server, nick, download, MAX(ts) AS ts
+        FROM speed_monitor
+        WHERE ok = 1 AND ts >= datetime('now', '-3 hours')
+        GROUP BY server, nick
+      `).all().filter(r => Number(r.download) < _throttleDlMbps());
+    } catch (_) { return 0; }   // нет speed_monitor на минимальной схеме
+    const seenCandidates = new Set();
+    for (const r of rows) {
+      if (isExhausted(db, { server: r.server, nick: r.nick })) continue;   // уже в состоянии
+      const hit = byServerNick.get(r.server + '|' + r.nick);
+      if (!hit) continue;                        // нет в живом фиде — IMEI не подтвердить
+      if (_symptomatic(hit.m)) continue;         // это сигнатура 1 — она сама разберётся
+      const imei = (hit.m.modem_details || {}).IMEI;
+      if (!imei) continue;
+      const key = r.server + '|' + imei;
+      seenCandidates.add(key);
+      const cand = throttleCandidates.get(key);
+      if (!cand) { throttleCandidates.set(key, { firstAt: now, server: r.server, nick: r.nick }); continue; }  // модем «отдыхает»
+      if (now - cand.firstAt < _throttleConfirmMs()) continue;
+      if (budget.used >= budget.max) continue;
+      const lastProbe = probes.get(key) || 0;
+      if (now - lastProbe < _probeMs()) continue;
+      probes.set(key, now);
+      budget.used++;
+      const res = await _probeSpeed(r.server, r.nick);
+      if (!res || !(res.dl > 0 || res.ul > 0)) continue;          // замер не удался — повторим по кулдауну
+      if (res.dl >= _throttleDlMbps()) {                          // ложная тревога — скорость в норме
+        throttleCandidates.delete(key);
+        continue;
+      }
+      // Подтверждённый троттлинг.
+      const op = _normOp((hit.m.net_details || {}).CELLOP || '', r.server);
+      const stmts = _stmts();
+      if (stmts) { try { stmts.upsert.run(r.server, imei, r.nick, op, now); } catch (_) {} }
+      throttleCandidates.delete(key);
+      flagged++;
+      const alertedAt = stmts ? (stmts.alertedAt.get(r.server, imei) || {}).alerted_at : null;
+      if (alertedAt) continue;
+      const usedGb = _usedGb(r.server, r.nick);
+      try {
+        const sent = alerts.trigger('sim_package_exhausted', {
+          server: r.server, nick: r.nick, imei, operator: op, kind: 'throttled',
+          dl: Math.round(res.dl * 100) / 100,
+          used_gb: usedGb != null ? Math.round(usedGb * 10) / 10 : null,
+        });
+        if (sent && stmts) { try { stmts.markAlerted.run(now, r.server, imei); } catch (_) {} }
+      } catch (e) { logger.warn('[SimExhaustion] throttled alert failed: ' + e.message); }
+      logger.info(`[SimExhaustion] ${r.nick} (${r.server}): подтверждён троттлинг (↓${res.dl} Mbps после 5-мин паузы) — состояние включено`);
+    }
+    // Кандидаты, чей замер перестал быть плохим (прошло >3ч или скорость
+    // восстановилась сама), вычищаем.
+    for (const [key, cand] of throttleCandidates) {
+      if (!seenCandidates.has(key)) throttleCandidates.delete(key);
+      void cand;
+    }
+    return flagged;
+  }
+
+  // Операторский уровень: ≥ sim_exhaustion_operator_ratio (дефолт 80%) симок
+  // оператора на площадке в состоянии «пакет исчерпан» → ОДИН групповой алерт
+  // вместо россыпи per-модем. Кулдаун 24ч — в правиле.
+  function _operatorOverview(byImei) {
+    const totals = new Map();     // srv|op → Set(imei) — все симки оператора в фиде
+    for (const [imei, hit] of byImei) {
+      const op = _normOp((hit.m.net_details || {}).CELLOP || (hit.m.modem_details || {}).OPERATOR || '', hit.srv);
+      if (!op) continue;
+      const k = hit.srv + '|' + op;
+      if (!totals.has(k)) totals.set(k, new Set());
+      totals.get(k).add(imei);
+    }
+    const exhausted = new Map();  // srv|op → Set(imei)
+    for (const row of _activeRows()) {
+      const op = _normOp(row.operator, row.server_name);
+      if (!op) continue;
+      const k = row.server_name + '|' + op;
+      if (!exhausted.has(k)) exhausted.set(k, new Set());
+      exhausted.get(k).add(row.imei);
+    }
+    let alertedOps = 0;
+    for (const [k, set] of totals) {
+      const total = set.size;
+      const exN = (exhausted.get(k) || new Set()).size;
+      if (total < 3 || exN / total < _opRatio()) continue;
+      const sep = k.indexOf('|');
+      try {
+        alerts.trigger('operator_package_throttled', {
+          server: k.slice(0, sep), operator: k.slice(sep + 1), exhausted: exN, total,
+        });
+        alertedOps++;
+      } catch (e) { logger.warn('[SimExhaustion] operator alert failed: ' + e.message); }
+    }
+    return alertedOps;
+  }
+
   // Re-entrancy: спидтест-пробы длинные (до 180с каждая), а тик — каждые
   // 2 мин. Второй прогон поверх незавершённого не нужен.
   let _running = false;
@@ -224,18 +360,23 @@ function create(deps) {
     const results = await fetchAllServersDataCached();
     const now = Date.now();
 
-    // Индекс живого фида по IMEI (по всем серверам) — для проверки
-    // восстановления подтверждённых эпизодов.
-    const byImei = new Map();   // imei → { srv, m }
+    // Индексы живого фида: по IMEI (восстановление — модем мог переехать) и
+    // по server|nick (троттлинг-кандидаты из speed_monitor адресуются ником).
+    const byImei = new Map();          // imei → { srv, m }
+    const byServerNick = new Map();    // server|nick → { srv, m }
     for (const data of results || []) {
       if (data._cached) continue;   // устаревший фид ничего не доказывает
       const statusArr = Array.isArray(data.status) ? data.status : [];
       for (const m of statusArr) {
-        const imei = (m.modem_details || {}).IMEI;
-        if (imei && !byImei.has(imei)) byImei.set(imei, { srv: data.serverName || '', m });
+        const md = m.modem_details || {};
+        const imei = md.IMEI;
+        const entry = { srv: data.serverName || '', m };
+        if (imei && !byImei.has(imei)) byImei.set(imei, entry);
+        if (md.NICK) byServerNick.set(entry.srv + '|' + md.NICK, entry);
       }
     }
-    const recovered = await _checkRecoveries(byImei, now);
+    const budget = { used: 0, max: _maxProbesPerRun() };   // пробы восстановления и подтверждения троттлинга делят бюджет
+    const recovered = await _checkRecoveries(byImei, now, budget);
 
     const seenKeys = new Set();
     for (const data of results || []) {
@@ -255,7 +396,7 @@ function create(deps) {
         active++;
         // Подтверждённый эпизод — персистим: подавление в alerts/speed-monitor
         // читает таблицу и обязано переживать рестарт дашборда.
-        const op = String((m.net_details || {}).CELLOP || '').trim();
+        const op = _normOp(String((m.net_details || {}).CELLOP || '').trim(), srv);
         const stmts = _stmts();
         if (stmts) {
           try { stmts.upsert.run(srv, md.IMEI, nick, op, st.since); } catch (_) {}
@@ -282,11 +423,14 @@ function create(deps) {
     for (const [key, st] of state) {
       if (!seenKeys.has(key)) state.delete(key);
     }
-    return { symptomatic: active, alerted, recovered, tracked: state.size };
+    // Сигнатура 2 (троттлинг по замерам) и операторский уровень.
+    const throttled = await _detectThrottled(byServerNick, now, budget);
+    const operatorAlerts = _operatorOverview(byImei);
+    return { symptomatic: active, alerted, recovered, throttled, operatorAlerts, tracked: state.size };
     } finally { _running = false; }
   }
 
-  return { runOnce, _state: state, _probes: probes };
+  return { runOnce, _state: state, _probes: probes, _throttleCandidates: throttleCandidates };
 }
 
 module.exports = { create, isExhausted };
