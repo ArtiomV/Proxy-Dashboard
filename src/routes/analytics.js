@@ -9,10 +9,36 @@
 const express = require('express');
 const analyticsDb = require('../db/analytics');
 const { tzModifier } = require('../utils/time');  // P2-3: shared "+N hours" builder
+const { parseBwToBytes } = require('../utils/traffic');
+
+// 2026-09-27: pure-часть «живой ячейки» текущего часа — частичный трафик
+// незавершённого часа из bw-счётчиков минус baseline часового снапшота.
+// Вынесена на module-уровень для тестов (роут передаёт свои данные).
+function computeLiveCells(results, snapStmt, pnMap, opMap) {
+  const out = [];
+  for (const data of results || []) {
+    const srv = data.serverName || '';
+    if (data._cached || typeof data.bw !== 'object' || !data.bw) continue;   // протухший фид превью не доказывает
+    for (const [portId, b] of Object.entries(data.bw)) {
+      const fullId = srv + '_' + portId;
+      const snap = snapStmt.get(fullId);
+      if (!snap) continue;
+      const cur = parseBwToBytes(b.bandwidth_bytes_day_in) + parseBwToBytes(b.bandwidth_bytes_day_out);
+      const bytes = cur - (Number(snap.i || 0) + Number(snap.o || 0));
+      if (!(bytes > 0)) continue;   // 0 и отрицательное (сброс счётчика внутри часа) — не превью
+      const meta = opMap[fullId] || {};
+      const client = String(pnMap[fullId] || meta.client_name || '').trim();
+      if (!client) continue;   // UNBOUND_FILTER: свободные порты в хитмап не входят
+      out.push({ server: srv, client, operator: meta.operator || '', bytes });
+    }
+  }
+  return out;
+}
 
 module.exports = function createAnalyticsRouter(deps) {
   const {
     db, logger, authMiddleware, adminMiddleware,
+    fetchAllServersDataCached, parseBwToBytes,
     getMoscowToday, getMoscowNow,
     clients, clientByLogin,
     dailyTraffic,
@@ -28,6 +54,58 @@ module.exports = function createAnalyticsRouter(deps) {
   // {data, ts}; TTL keeps the dashboard cheap to refresh.
   const _heatmapCache = new Map();
   const HEATMAP_TTL_MS = 5 * 60 * 1000;
+
+  // ── 2026-09-27: живая ячейка текущего часа ───────────────────────────
+  // traffic_hourly пишется ПО завершении часа — целый час хитмап показывал
+  // ноль, и владельцу было «непонятно, что происходит». Здесь считается
+  // частичный трафик ТЕКУЩЕГО (незавершённого) часа: живые bw-счётчики боксов
+  // минус baseline последнего часового снапшота (hourly_snapshots.
+  // day_at_last_hour_start_*). В 5-минутный SQL-кэш не входит — мержается
+  // в ответ на каждый запрос (fetchAllServersDataCached сам кэширован).
+  let _liveSnapStmt = null;
+  let _liveOpMapCache = { ts: 0, map: {} };
+  async function _liveHour(view, id, idKey, mskNow) {
+    if (typeof fetchAllServersDataCached !== 'function' || typeof parseBwToBytes !== 'function') return null;
+    try {
+      if (!_liveSnapStmt) _liveSnapStmt = db.prepare('SELECT day_at_last_hour_start_in AS i, day_at_last_hour_start_out AS o FROM hourly_snapshots WHERE port_id = ?');
+      if (Date.now() - _liveOpMapCache.ts > 5 * 60e3) {
+        const map = {};
+        try {
+          for (const row of db.prepare("SELECT port_id, operator, client_name FROM traffic_hourly WHERE hour_start >= datetime('now','-7 days') GROUP BY port_id").all()) {
+            map[row.port_id] = row;
+          }
+        } catch (_) {}
+        _liveOpMapCache = { ts: Date.now(), map };
+      }
+      const cells = computeLiveCells(await fetchAllServersDataCached(), _liveSnapStmt, portKeyToPortName || {}, _liveOpMapCache.map);
+      const countryServers = view === 'country' && idKey !== 'all' ? _serversForCountry(idKey) : null;
+      let gb = 0;
+      const ops = {};
+      for (const c of cells) {
+        if (view === 'client' && c.client !== id) continue;
+        if (countryServers && !countryServers.includes(c.server)) continue;
+        if (view === 'operator') {
+          const opKey = String(c.operator || '').toLowerCase().replace(/[\s.]+/g, '_');
+          if (!opKey.includes(idKey)) continue;
+        }
+        gb += c.bytes;
+        const op = c.operator || 'Неизвестный';
+        if (!ops[op]) ops[op] = { gb: 0, ports: 0 };
+        ops[op].gb += c.bytes;
+        ops[op].ports++;
+      }
+      return {
+        day: mskNow.toISOString().slice(0, 10),
+        hour: mskNow.getUTCHours(),
+        gb: gb / 1e9,
+        by_operator: Object.fromEntries(Object.entries(ops).map(([k, v]) => [k, { gb: v.gb / 1e9, ports: v.ports }])),
+        ts: Date.now(),
+      };
+    } catch (e) {
+      logger.warn('[heatmap] live hour degraded: ' + e.message);
+      return null;
+    }
+  }
 
   function _serversForCountry(idKey) {
     const serverCountryMap = {};
@@ -102,16 +180,16 @@ r.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res
   const { view = 'country', id = 'all' } = req.query;
   const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
   try {
+    const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
+    const mskOffset = getTzOffset('Europe/Moscow');
+    const mskNow = new Date(Date.now() + mskOffset * 3600 * 1000);
+    const liveHour = await _liveHour(view, id, idKey, mskNow);   // живая ячейка — вне SQL-кэша
     const cacheKey = `${view}|${id}|${days}`;
     const cached = _heatmapCache.get(cacheKey);
     if (cached && Date.now() - cached.ts < HEATMAP_TTL_MS) {
-      return res.json(cached.data);
+      return res.json({ ...cached.data, live_hour: liveHour });
     }
-    const idKey = id.toLowerCase().replace(/[\s.]+/g, '_');
     // Date list in Moscow time (dynamic offset via getTzOffset)
-    const now2 = new Date();
-    const mskOffset = getTzOffset('Europe/Moscow');
-    const mskNow = new Date(now2.getTime() + mskOffset * 3600 * 1000);
     const dateList = [];
     for (let i = days - 1; i >= 0; i--) {
       const d = new Date(Date.UTC(mskNow.getUTCFullYear(), mskNow.getUTCMonth(), mskNow.getUTCDate() - i));
@@ -163,7 +241,8 @@ r.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res
     });
     const resp = {
       meta: { id, days: dateList, day_meta: dayMeta, has_hourly: hasData, corrected: correctedCells },
-      matrix
+      matrix,
+      live_hour: liveHour,
     };
     if (operator_breakdown) resp.operator_breakdown = operator_breakdown;
     _heatmapCache.set(cacheKey, { ts: Date.now(), data: resp });
@@ -500,3 +579,6 @@ r.get('/api/analytics/traffic_forecast', authMiddleware, adminMiddleware, (req, 
 
   return r;
 };
+
+// Exported for tests (2026-09-27): pure-часть живой ячейки часа.
+module.exports.computeLiveCells = computeLiveCells;

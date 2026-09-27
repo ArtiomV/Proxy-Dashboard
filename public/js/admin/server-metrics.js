@@ -311,7 +311,7 @@ function srvMetRowV2(ic, title, sub, current, absText, average, series, options)
   var tone = options.tone || 'green';
   var val = current == null ? '—' : (options.integer ? String(Math.round(current)) : _fmtP(current)) + unit;
   var avg = average == null ? null : (options.integer ? String(Math.round(average)) : _fmtP(average)) + unit;
-  return '<div class="server-metric-row server-metric-row--' + tone + '">'
+  return '<div class="server-metric-row server-metric-row--' + tone + (avg == null ? ' server-metric-row--noavg' : '') + '">'
     + '<span class="server-icon-box server-metric-icon">' + icon(ic, 18) + '</span>'
     + '<span class="server-metric-copy">'
     + '<span class="server-metric-title">' + esc(title) + '</span>'

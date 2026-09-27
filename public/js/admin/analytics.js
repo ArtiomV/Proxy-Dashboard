@@ -347,12 +347,15 @@ function selectHeatId(id,ctx){ctx=ctx||_hmNew;ctx.id=id;if(ctx===_hmNew)_dashUiS
 function loadHeatmapData(ctx){
   ctx=ctx||_hmNew;
   var key=ctx.view+'|'+ctx.id;
-  if(ctx.cache[key]){renderHeatmap(ctx.cache[key],ctx);return;}
+  ctx.cacheTs=ctx.cacheTs||{};
+  // 27.09: живая ячейка часа — кэш ограничен минутой, иначе «реального
+  // времени» не видно. SQL-кэш на бэке по-прежнему 5 мин (дешёвый refresh).
+  if(ctx.cache[key]&&Date.now()-(ctx.cacheTs[key]||0)<60e3){renderHeatmap(ctx.cache[key],ctx);return;}
   var g=document.getElementById(ctx.grid);
-  if(g)g.innerHTML='<div class="skel" style="height:160px">'+skelHeat(24,3)+'</div>';
+  if(g&&!ctx.cache[key])g.innerHTML='<div class="skel" style="height:160px">'+skelHeat(24,3)+'</div>';
   api(API+'/api/analytics/heatmap?view='+ctx.view+'&id='+encodeURIComponent(ctx.id)+'&days=7')
     .then(function(d){if(d&&d.__status>=400)throw new Error('HTTP '+d.__status);return d})
-    .then(function(data){ctx.cache[key]=data;renderHeatmap(data,ctx);})
+    .then(function(data){ctx.cache[key]=data;ctx.cacheTs[key]=Date.now();renderHeatmap(data,ctx);})
     .catch(function(e){var g=document.getElementById(ctx.grid);if(g)g.innerHTML='<div style="padding:20px;color:var(--danger);font-size:12px">Ошибка: '+(esc(e.message))+'</div>';});
 }
 function lerpCol(a,b,t){
@@ -382,6 +385,13 @@ function renderHeatmap(data,ctx){
   var accent=hmAccent(ctx.view,ctx.id);
   // Build per-modem matrix for coloring and display
   var perModem=mat.map(function(row){return row.map(function(v){return v/mDiv;})});
+  // 27.09: живая ячейка текущего часа — подмешиваем live-значение с бэкенда,
+  // чтобы цвет заполнялся по мере поступления данных, а не по завершении часа.
+  var liveH=data.live_hour||null;
+  if(liveH){
+    var liveDi=days.indexOf(liveH.day);
+    if(liveDi>=0&&liveH.hour>=0&&liveH.hour<24)perModem[liveDi][liveH.hour]=(liveH.gb||0)/mDiv;
+  }
   var maxV=0;perModem.forEach(function(row){row.forEach(function(v){if(v>maxV)maxV=v;})});
   var DAYS_RU=['Вс','Пн','Вт','Ср','Чт','Пт','Сб'];
   var h='<div style="min-width:560px">';
@@ -402,6 +412,7 @@ function renderHeatmap(data,ctx){
     h+='<div style="display:flex;flex:1;gap:2px">';
     row.forEach(function(val,hr){
       var pmVal=perModem[di][hr];
+      var isLive=liveH&&(days[di]===liveH.day)&&hr===liveH.hour;
       var col=heatColor(pmVal,maxV,accent);
       var isCorrected=data.meta&&data.meta.corrected&&data.meta.corrected[di]&&data.meta.corrected[di][hr];
       // Diagonal-stripe overlay marks cells whose underlying hour rows have
@@ -410,9 +421,15 @@ function renderHeatmap(data,ctx){
       var bg = isCorrected
         ? col+';background-image:repeating-linear-gradient(45deg, rgba(255,255,255,0.45) 0 3px, transparent 3px 6px)'
         : col;
+      // 27.09: живая ячейка текущего часа — контур + обратные полосы, чтобы
+      // отличать предварительное значение от завершённых часов.
+      if(isLive){
+        bg = col+';background-image:repeating-linear-gradient(-45deg, rgba(255,255,255,0.4) 0 4px, transparent 4px 9px);box-shadow:inset 0 0 0 1.5px '+accent;
+      }
       h+='<div style="flex:1;height:28px;border-radius:3px;background:'+bg+';cursor:pointer;transition:opacity .1s;position:relative"';
       h+=' data-on-mouseenter="showHeatTT('+di+','+hr+',event,this'+(ctx.self?','+ctx.self:'')+')" data-on-mouseleave="hideFloatTooltip(\''+ctx.ttId+'\')">';
       if(isCorrected)h+='<span style="position:absolute;top:1px;right:2px;font-size:9px;line-height:1;color:rgba(0,0,0,0.55);font-weight:600" title="Час содержит данные восстановленные после сбоя счётчика — значение приблизительное">'+icon('alert',9)+'</span>';
+      if(isLive)h+='<span style="position:absolute;top:2px;right:3px;font-size:8px;line-height:1;color:rgba(0,0,0,0.65);font-weight:700" title="Час ещё идёт — значение в реальном времени, обновление каждую минуту">●</span>';
       h+='</div>';
     });
     h+='</div></div>';
@@ -526,7 +543,23 @@ function showHeatTT(di,hr,event,cell,ctx){
   var tt=document.getElementById(ctx.ttId);
   if(!tt){tt=document.createElement('div');tt.id=ctx.ttId;tt.className='float-tt';tt.style.cssText='position:fixed;z-index:9999;pointer-events:none;background:#fff;border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:170px;box-shadow:0 4px 20px rgba(0,0,0,0.09)';document.body.appendChild(tt);}
 
-  if(val<0.01){
+  // 27.09: живая ячейка — текущий незавершённый час, данные с bw-счётчиков.
+  var liveH=data.live_hour||null;
+  var isLive=liveH&&(days[di]===liveH.day)&&hr===liveH.hour;
+  if(isLive){
+    tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2, '0')+':00–'+hrEnd+':00 <span style="color:var(--accent);font-weight:700" title="Час ещё идёт">● LIVE</span></div>'
+      +'<div style="font-size:20px;font-weight:500;color:#1a1a1a;line-height:1">'+trendFmt(liveH.gb||0)+' <span style="font-size:11px;font-weight:400;color:#9b9b98">уже за час</span></div>';
+    var lops=liveH.by_operator||{};
+    var lopArr=Object.keys(lops).map(function(k){var o=lops[k]||{};return{name:k,gb:o.gb||0,ports:o.ports||0};}).filter(function(o){return o.gb>0.0001;});
+    if(lopArr.length){
+      lopArr.sort(function(a,b){return a.name.localeCompare(b.name,'ru');});
+      tt.innerHTML+='<div style="height:0.5px;background:rgba(0,0,0,0.08);margin:6px 0"></div>';
+      lopArr.forEach(function(o){
+        tt.innerHTML+='<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:2px 0"><span style="font-size:11px;color:#9b9b98">'+esc(o.name)+' <span style="font-size:9px">('+o.ports+')</span></span><span style="font-size:12px;font-weight:500;color:#1a1a1a">'+trendFmt(o.gb)+'</span></div>';
+      });
+    }
+    tt.innerHTML+='<div style="font-size:10px;color:#9b9b98;margin-top:8px">Предварительные данные с живых счётчиков — час ещё идёт. По завершении часа значение заменит точная почасовая запись.</div>';
+  } else if(val<0.01){
     tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2,'0')+':00–'+hrEnd+':00</div>'
       +'<div style="font-size:20px;font-weight:500;color:#1a1a1a;line-height:1">—</div>'
       +'<div style="height:0.5px;background:rgba(0,0,0,0.08);margin:8px 0"></div>'

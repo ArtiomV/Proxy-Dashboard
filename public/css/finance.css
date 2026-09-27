@@ -279,6 +279,8 @@
 
 #tab-dashboard .server-metrics-list{margin-top:6px}
 #tab-dashboard .server-metric-row{height:60px;box-sizing:border-box;display:grid;grid-template-columns:40px 14px 132px 14px minmax(100px,1fr) 18px 62px 12px 92px;align-items:center;border-bottom:1px solid rgba(62,79,105,.11)}
+/* 27.09: пилюля «ср. 24ч» отключена — без неё спарклайн растягивается на всю ширину */
+#tab-dashboard .server-metric-row--noavg{grid-template-columns:40px 14px 132px 14px minmax(100px,1fr) 18px 62px}
 #tab-dashboard .server-metric-icon{grid-column:1}
 #tab-dashboard .server-metric-copy{grid-column:3}
 #tab-dashboard .server-metric-spark{grid-column:5}
@@ -384,6 +386,7 @@
   #tab-dashboard .server-summary-value{font-size:15px;line-height:17px}
   #tab-dashboard .server-metrics-list{margin-top:4px}
   #tab-dashboard .server-metric-row{height:52px;grid-template-columns:32px 10px 112px 10px minmax(50px,1fr) 12px 54px 10px 84px}
+  #tab-dashboard .server-metric-row--noavg{grid-template-columns:32px 10px 112px 10px minmax(50px,1fr) 12px 54px}
   #tab-dashboard .server-metric-icon{width:32px;height:32px;border-radius:8px}
   #tab-dashboard .server-metric-icon svg{width:18px;height:18px}
   #tab-dashboard .server-metric-title{font-size:12.5px;line-height:15px}
