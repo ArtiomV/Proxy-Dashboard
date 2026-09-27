@@ -572,7 +572,6 @@ function showHeatTT(di,hr,event,cell,ctx){
       var _lm=Math.min(liveModems||0,mCnt);
       tt.innerHTML+='<div style="font-size:10px;color:#9b9b98;margin-top:6px">Модемов: <b style="color:#1a1a1a;font-weight:600">'+mCnt+'</b> · с данными за час: <b style="color:#1a1a1a;font-weight:600">'+_lm+'</b></div>';
     }
-    tt.innerHTML+='<div style="font-size:10px;color:var(--accent);margin-top:6px">● Час ещё идёт — данные по '+updHm+', обновление каждую минуту. По завершении часа значение заменит точная почасовая запись.</div>';
   } else if(val<0.01){
     tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2,'0')+':00–'+hrEnd+':00</div>'
       +'<div style="font-size:20px;font-weight:500;color:#1a1a1a;line-height:1">—</div>'
