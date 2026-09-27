@@ -71,3 +71,26 @@ describe('heatmap live hour: оператор порта из живого фи�
     expect(cells[0].operator).toBe('Moldcell');
   });
 });
+
+describe('heatmap live hour: анти-фантом на задушенном модеме (MD2_39)', () => {
+  it('порт на throttled-модеме клампится к 0.4 ГБ, на живом — нет', () => {
+    const mkFeed = (imei, nick, cellop, dayIn, dayOut) => [{
+      serverName: 'S1',
+      status: [{ modem_details: { IMEI: imei, NICK: nick }, net_details: { CELLOP: cellop } }],
+      ports: { [imei]: [{ portID: 'p1', portName: 'WildBox' }] },
+      bw: { p1: bw(dayIn, dayOut) },
+    }];
+    const snaps = snapStmtFor({ S1_p1: { i: 0, o: 0 } });
+    // 2 ГБ/час на задушенном модеме — фантом, кламп к 0.4 ГБ
+    let cells = computeLiveCells(mkFeed('i1', 'MD2_39', 'moldcell', '1.0 GB', '1.0 GB'), snaps, {}, {},
+      (raw) => raw, () => true);
+    expect(cells[0].bytes).toBe(400e6);
+    // тот же объём на живом модеме — без клампа
+    cells = computeLiveCells(mkFeed('i1', 'MD2_39', 'moldcell', '1.0 GB', '1.0 GB'), snaps, {}, {},
+      (raw) => raw, () => false);
+    expect(cells[0].bytes).toBe(2e9);
+    // без isExhaustedFn — прежнее поведение
+    cells = computeLiveCells(mkFeed('i1', 'MD2_39', 'moldcell', '1.0 GB', '1.0 GB'), snaps, {}, {});
+    expect(cells[0].bytes).toBe(2e9);
+  });
+});
