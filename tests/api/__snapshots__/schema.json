@@ -1027,6 +1027,12 @@
   },
   {
     "type": "table",
+    "name": "live_hour_baseline",
+    "tbl_name": "live_hour_baseline",
+    "sql": "CREATE TABLE live_hour_baseline ( port_id TEXT PRIMARY KEY, hour_key TEXT NOT NULL, -- 'YYYY-MM-DD HH' по МСК bytes INTEGER NOT NULL )"
+  },
+  {
+    "type": "table",
     "name": "location_wan_speed",
     "tbl_name": "location_wan_speed",
     "sql": "CREATE TABLE location_wan_speed ( id INTEGER PRIMARY KEY AUTOINCREMENT, location_key TEXT NOT NULL, location_label TEXT NOT NULL, server_name TEXT NOT NULL DEFAULT '', collected_at TEXT NOT NULL, download_mbps REAL, upload_mbps REAL, ping_ms REAL, jitter_ms REAL, packet_loss_pct REAL, provider TEXT NOT NULL DEFAULT '', external_ip TEXT NOT NULL DEFAULT '', method TEXT NOT NULL DEFAULT '', ok INTEGER NOT NULL DEFAULT 0, error TEXT NOT NULL DEFAULT '' )"

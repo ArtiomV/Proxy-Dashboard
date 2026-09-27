@@ -12,11 +12,12 @@ const { tzModifier } = require('../utils/time');  // P2-3: shared "+N hours" bui
 const { parseBwToBytes } = require('../utils/traffic');
 
 // 2026-09-27: pure-часть «живой ячейки» текущего часа — частичный трафик
-// незавершённого часа из bw-счётчиков минус baseline часового снапшота.
-// Вынесена на module-уровень для тестов (роут передаёт свои данные).
-// Оператор резолвится как в hourly-агрегации: живой CELLOP модема (нормализо-
-// ванный normalizeOp), fallback — opMap (последние строки traffic_hourly).
-function computeLiveCells(results, snapStmt, pnMap, opMap, normalizeOp) {
+// незавершённого часа из bw-счётчиков минус СОБСТВЕННЫЙ baseline (таблица
+// live_hour_baseline, миграция 106). Раньше baseline брался из
+// hourly_snapshots.day_at_last_hour_start — он управляется часовой
+// агрегацией и бывает 0/протухшим (RO1 27.09: +226 ГБ фантома за час).
+// Теперь: первое наблюдение порта в МСК-часе = точка отсчёта этого часа.
+function computeLiveCells(results, hourKey, baseGet, baseUpsert, pnMap, opMap, normalizeOp) {
   const out = [];
   for (const data of results || []) {
     const srv = data.serverName || '';
@@ -38,10 +39,20 @@ function computeLiveCells(results, snapStmt, pnMap, opMap, normalizeOp) {
     }
     for (const [portId, b] of Object.entries(data.bw)) {
       const fullId = srv + '_' + portId;
-      const snap = snapStmt.get(fullId);
-      if (!snap) continue;
       const cur = parseBwToBytes(b.bandwidth_bytes_day_in) + parseBwToBytes(b.bandwidth_bytes_day_out);
-      const bytes = cur - (Number(snap.i || 0) + Number(snap.o || 0));
+      let base;
+      try {
+        const row = baseGet.get(fullId);
+        if (!row || row.hour_key !== hourKey) {
+          // Первое наблюдение порта в этом часе — это и есть точка отсчёта.
+          // Дельта 0 в этом наблюдении; недооценка ограничена началом часа.
+          base = cur;
+          if (baseUpsert) { try { baseUpsert.run(fullId, hourKey, cur); } catch (_) {} }
+        } else {
+          base = Number(row.bytes) || 0;
+        }
+      } catch (_) { continue; }   // таблицы нет на старой схеме — превью пропускаем
+      const bytes = cur - base;
       if (!(bytes > 0)) continue;   // 0 и отрицательное (сброс счётчика внутри часа) — не превью
       const info = portIdInfo[portId] || {};
       const meta = opMap[fullId] || {};
@@ -87,7 +98,13 @@ module.exports = function createAnalyticsRouter(deps) {
   async function _liveHour(view, id, idKey, mskNow) {
     if (typeof fetchAllServersDataCached !== 'function' || typeof parseBwToBytes !== 'function') return null;
     try {
-      if (!_liveSnapStmt) _liveSnapStmt = db.prepare('SELECT day_at_last_hour_start_in AS i, day_at_last_hour_start_out AS o FROM hourly_snapshots WHERE port_id = ?');
+      if (!_liveSnapStmt) {
+        _liveSnapStmt = {
+          get: db.prepare('SELECT hour_key, bytes FROM live_hour_baseline WHERE port_id = ?'),
+          upsert: db.prepare(`INSERT INTO live_hour_baseline (port_id, hour_key, bytes) VALUES (?, ?, ?)
+            ON CONFLICT(port_id) DO UPDATE SET hour_key = excluded.hour_key, bytes = excluded.bytes`),
+        };
+      }
       if (Date.now() - _liveOpMapCache.ts > 5 * 60e3) {
         const map = {};
         try {
@@ -101,7 +118,8 @@ module.exports = function createAnalyticsRouter(deps) {
         } catch (_) {}
         _liveOpMapCache = { ts: Date.now(), map };
       }
-      const cells = computeLiveCells(await fetchAllServersDataCached(), _liveSnapStmt, portKeyToPortName || {}, _liveOpMapCache.map,
+      const hourKey = mskNow.toISOString().slice(0, 10) + ' ' + String(mskNow.getUTCHours()).padStart(2, '0');
+      const cells = computeLiveCells(await fetchAllServersDataCached(), hourKey, _liveSnapStmt.get, _liveSnapStmt.upsert, portKeyToPortName || {}, _liveOpMapCache.map,
         (rawOp, srv) => { try { return normalizeOperator(rawOp, ((SERVER_COUNTRIES[srv] || {}).country || '') === 'RO') || rawOp; } catch (_) { return rawOp; } });
       const countryServers = view === 'country' && idKey !== 'all' ? _serversForCountry(idKey) : null;
       let gb = 0;
