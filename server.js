@@ -3738,6 +3738,7 @@ app.use(require('./src/routes/proxies')({
 const _proxiesDeps = {
   db, logger, authMiddleware, adminMiddleware,
   fetchApi, fetchApiRaw, postApi, postFormApi, findServer,
+  getSetting,
   parseHtmlInputFields,
   apiServers, SERVER_COUNTRIES,
   users,
@@ -4426,6 +4427,10 @@ function gracefulShutdown(signal) {
   for (const t of _dailySched.speedtestTimers.concat(_dailySched.cronTimers)) { if (t.timeout) clearTimeout(t.timeout); if (t.interval) clearInterval(t.interval); }
   // Stop the telegram poll loop (avoid hanging in long-poll for 25s after SIGTERM)
   try { if (tgBot && tgBot.stop) tgBot.stop(); } catch (_) { /* best-effort: error intentionally swallowed */ }
+  // Persist alert cooldowns synchronously (better-sqlite3 write is instant) —
+  // otherwise cooldowns recorded within the 5s debounce window are lost on
+  // deploy and the same alert fires again after restart.
+  try { alerts.flushCooldowns(); } catch (_) { /* best-effort */ }
   // SSE (23.08): предупреждаем realtime-клиентов событием 'bye' и закрываем
   // потоки — фронт переподключается с backoff после рестарта процесса.
   try { eventsBus.closeAll(); } catch (_) { /* best-effort */ }

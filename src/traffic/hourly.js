@@ -182,6 +182,7 @@ async function aggregateHourlyTraffic() {
     let smoothedCount = 0;       // rows where uncertain=2 was replaced by median of clean neighbours
     let unsmoothableCount = 0;   // uncertain=2 rows we couldn't smooth (not enough neighbours)
     let clampedSpikes = 0;
+    let wireScaledCount = 0;     // 2026-09-27: строки, масштабированные к проводу (uncertain=6)
     const MAX_HOURLY_BYTES = 20 * 1e9; // 20 GB sanity cap per port (decimal GB)
     const UNCERTAIN_THRESHOLD = 150 * 1e6; // 150 MB minimum for uncertain flag (above month counter granularity)
     const MONTH_COUNTER_STEP = 1e8; // 100 MB — ProxySmart month counter granularity (decimal)
@@ -205,6 +206,14 @@ async function aggregateHourlyTraffic() {
         AND hour_start >= datetime(?, '-' || ? || ' hours')
         AND hour_start <  datetime(?, '+' || ? || ' hours')
         AND hour_start != ?
+    `);
+    // 2026-09-27: фолбэк №3 при записи — последний реальный оператор порта
+    // (или ника) из истории. См. комментарий у места использования.
+    const _lastKnownOpStmt = db.prepare(`
+      SELECT operator FROM traffic_hourly
+      WHERE (port_id = ? OR (server_name = ? AND nick = ?))
+        AND operator IS NOT NULL AND TRIM(operator) != '' AND LOWER(TRIM(operator)) != 'unknown'
+      ORDER BY hour_start DESC LIMIT 1
     `);
     const _median = arr => {
       if (!arr.length) return 0;
@@ -249,6 +258,98 @@ async function aggregateHourlyTraffic() {
       logger.warn('[HourlyAgg] portAvg precompute failed: ' + e.message + ' — clamping disabled this run');
     }
 
+    // 2026-09-27 (миграция 105): проводной учёт. Per-port счётчики ProxySmart
+    // на задушенных/перегруженных модемах завышены в 24–48× (считают спрос
+    // клиента, а не трафик через модем). Проводная правда — семплы
+    // /proc/net/dev интерфейса модема (modem_wire_counters, пишет
+    // server-metrics каждые ~10 мин). Строки текущего часа сначала
+    // буферизуются (queueRow), в конце обработки сервера для каждого ника с
+    // известным iface (net_details.DEV живого фида) считаем проводную дельту
+    // за час: последний семпл ≤ конца часа минус последний семпл ≤ начала
+    // часа (без интерполяции). Если сумма заявленного по портам модема >
+    // wireDelta × 1.3 — масштабируем все порты модема к wireDelta × 1.0
+    // (итог = провод), uncertain=6, заявленное — в raw_bytes_* (как кламп
+    // фантомов). Нет iface или семплов — записываем как заявлено.
+    const WIRE_TOLERANCE = 1.3;
+    const hourEnd = new Date(prevHourStart + 3600000).toISOString().slice(0, 13).replace('T', ' ') + ':00';
+    const hourRows = [];
+    function queueRow(srv, fullPortId, nick, operator, clientName, bytesIn, bytesOut, uncertain, rawIn, rawOut) {
+      hourRows.push({ srv, fullPortId, nick, operator, clientName, bytesIn, bytesOut, uncertain, rawIn, rawOut });
+    }
+    let _wireStmt = null, _wireChecked = false;
+    function _wireSampleStmt() {
+      if (_wireChecked) return _wireStmt;
+      _wireChecked = true;
+      try {
+        const t = db.prepare("SELECT name FROM sqlite_master WHERE type='table' AND name='modem_wire_counters'").get();
+        if (t) {
+          _wireStmt = db.prepare(`SELECT rx_bytes, tx_bytes, ts FROM modem_wire_counters
+            WHERE server_name = ? AND iface = ? AND ts <= ? ORDER BY ts DESC LIMIT 1`);
+        }
+      } catch (_) { _wireStmt = null; }
+      return _wireStmt;
+    }
+    // Проводная дельта (rx+tx) за час; null — семплов нет/мало (границы часа
+    // обязаны быть РАЗНЫМИ семплами, иначе дельта фиктивно нулевая) или
+    // счётчик интерфейса сбросился (reboot модема) → масштабирование пропускаем.
+    function wireDeltaForHour(srv, iface) {
+      const st = _wireSampleStmt();
+      if (!st) return null;
+      const a = st.get(srv, iface, hourStart);
+      const b = st.get(srv, iface, hourEnd);
+      if (!a || !b || b.ts <= a.ts) return null;
+      const d = (Number(b.rx_bytes) + Number(b.tx_bytes)) - (Number(a.rx_bytes) + Number(a.tx_bytes));
+      return d >= 0 ? d : null;
+    }
+    function flushHourRows(srv, ifaceByNick) {
+      if (!hourRows.length) return;
+      const byNick = new Map();
+      for (const r of hourRows) {
+        const arr = byNick.get(r.nick) || [];
+        arr.push(r);
+        byNick.set(r.nick, arr);
+      }
+      for (const [nick, rows] of byNick) {
+        const claimed = rows.reduce((s, r) => s + r.bytesIn + r.bytesOut, 0);
+        const iface = (ifaceByNick && ifaceByNick[nick]) || '';
+        const wireDelta = (iface && claimed > 0) ? wireDeltaForHour(srv, iface) : null;
+        const doScale = wireDelta != null && claimed > wireDelta * WIRE_TOLERANCE;
+        const k = doScale ? wireDelta / claimed : 1;
+        for (const r of rows) {
+          if (doScale) {
+            const preIn = r.bytesIn, preOut = r.bytesOut;
+            r.bytesIn = Math.round(r.bytesIn * k);
+            r.bytesOut = Math.round(r.bytesOut * k);
+            // raw — самое раннее наблюдение: если фантом-кламп уже сохранил
+            // своё raw, не перезаписываем.
+            if (r.rawIn == null) r.rawIn = Math.round(preIn);
+            if (r.rawOut == null) r.rawOut = Math.round(preOut);
+            r.uncertain = 6;
+            wireScaledCount++;
+            uncertainCount++;
+          }
+          _htUpsert.run(srv, r.fullPortId, r.nick, r.operator, r.clientName, hourStart,
+            r.bytesIn, r.bytesOut, r.uncertain, r.rawIn, r.rawOut);
+        }
+        if (doScale) {
+          logger.warn(`[HourlyAgg] wire-scale: ${nick}@${srv} (${iface}): порты заявили ${(claimed / 1e9).toFixed(2)}GB vs провод ${(wireDelta / 1e9).toFixed(2)}GB → ×${k.toFixed(3)} (uncertain=6)`);
+          try {
+            logActivity('billing', 'warn', 'traffic_wire_scale', nick,
+              `${nick} (${rows[0].clientName || 'no-client'}): порты заявили ${(claimed / 1e9).toFixed(2)}GB, провод ${(wireDelta / 1e9).toFixed(2)}GB — масштабировано к проводу (uncertain=6)`,
+              {
+                nick, server: srv, iface, hour_start: hourStart,
+                ports: rows.length,
+                claimed_total_gb: +(claimed / 1e9).toFixed(3),
+                wire_delta_gb: +(wireDelta / 1e9).toFixed(3),
+                scale: +k.toFixed(4),
+                reason: 'port_counters_exceed_wire',
+              });
+          } catch (_) { /* best-effort */ }
+        }
+      }
+      hourRows.length = 0;
+    }
+
     const batch = db.transaction(() => {
       for (const data of results) {
         const srv = data.serverName || '';
@@ -259,12 +360,15 @@ async function aggregateHourlyTraffic() {
         const statusArr = Array.isArray(data.status) ? data.status : [];
         const portsMap = data.ports || {};
         const portIdInfo = {};
+        const ifaceByNick = {};   // 2026-09-27: ник → интерфейс /proc/net/dev (net_details.DEV)
         for (const m of statusArr) {
           const md = m.modem_details || {};
           const imei = md.IMEI || '';
           const nick = md.NICK || imei;
           const nd = m.net_details || {};
           const operator = nd.CELLOP || md.OPERATOR || '';
+          const devIface = String(nd.DEV || '').trim();
+          if (devIface && nick) ifaceByNick[nick] = devIface;
           if (!imei) continue;
           const modemPorts = portsMap[imei] || [];
           for (const p of modemPorts) {
@@ -301,6 +405,19 @@ async function aggregateHourlyTraffic() {
             if (!rawOp && _pcOpGet) {
               const pc = _pcOpGet.get(srv, nick);
               if (pc && pc.operator) rawOp = pc.operator.toLowerCase().trim();
+            }
+            // 3) 2026-09-27: последний известный оператор ЭТОГО порта (или
+            //    ника) из истории traffic_hourly. Покрывает окно после
+            //    переезда SIM / рестарта панели, когда CELLOP ещё «unknown»,
+            //    а modem_meta/proxy_checks пусты: раньше такие часы навсегда
+            //    уходили в БД с operator='' и выпадали из разбивок по
+            //    операторам. Берутся только реальные значения (не '' и не
+            //    'unknown'); если у порта ещё нет истории — остаётся ''.
+            if (!rawOp) {
+              try {
+                const last = _lastKnownOpStmt.get(srv + '_' + portId, srv, nick);
+                if (last && last.operator) rawOp = last.operator.toLowerCase().trim();
+              } catch (_) { /* best-effort: фолбэк не должен ронять агрегацию */ }
             }
           }
           const operator = normalizeOperator(rawOp, isRO);
@@ -424,7 +541,7 @@ async function aggregateHourlyTraffic() {
                   {
                     nick, server: srv, port_id: fullPortId, client: clientName, operator,
                     hour_start: hourStart,
-                    raw_bytes_in: rawIn, raw_bytes_out: rawOut, raw_total_gb: +(incTotal/1e9).toFixed(3),
+                    raw_bytes_in: clampRawIn, raw_bytes_out: clampRawOut, raw_total_gb: +(incTotal/1e9).toFixed(3),
                     corrected_bytes_in: incIn, corrected_bytes_out: incOut, corrected_total_gb: +((incIn+incOut)/1e9).toFixed(3),
                     port_avg_gb: +(portAvg/1e9).toFixed(3),
                     reason: 'day_reset_spike',
@@ -457,7 +574,7 @@ async function aggregateHourlyTraffic() {
               if (storeIn + storeOut >= MAX_HOURLY_BYTES) {
                 quarantineHour(srv, fullPortId, nick, operator, clientName, hourStart, storeIn, storeOut);
               } else {
-                _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, storeIn, storeOut, resetUnc, clampRawIn, clampRawOut);
+                queueRow(srv, fullPortId, nick, operator, clientName, storeIn, storeOut, resetUnc, clampRawIn, clampRawOut);
               }
               count++;
             }
@@ -484,7 +601,7 @@ async function aggregateHourlyTraffic() {
               if (incIn + incOut >= MAX_HOURLY_BYTES) {
                 quarantineHour(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut);
               } else {
-                _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, incIn, incOut, 0, null, null);
+                queueRow(srv, fullPortId, nick, operator, clientName, incIn, incOut, 0, null, null);
               }
               count++;
             }
@@ -696,7 +813,7 @@ async function aggregateHourlyTraffic() {
                   } catch (_) { /* best-effort */ }
                 }
               }
-              _htUpsert.run(srv, fullPortId, nick, operator, clientName, hourStart, finalIncIn, finalIncOut, uncertain,
+              queueRow(srv, fullPortId, nick, operator, clientName, finalIncIn, finalIncOut, uncertain,
                 smoothRawIn !== null ? smoothRawIn : phantomRawIn,
                 smoothRawOut !== null ? smoothRawOut : phantomRawOut);
               count++;
@@ -719,6 +836,9 @@ async function aggregateHourlyTraffic() {
           });
         }
 
+        // Проводное масштабирование (миграция 105): все порты сервера за час
+        // посчитаны — сравниваем суммы по модемам с проводной дельтой и пишем.
+        flushHourRows(srv, ifaceByNick);
       }
       _htCleanup();
     });
@@ -735,7 +855,8 @@ async function aggregateHourlyTraffic() {
     const extra2 = clampedSpikes > 0 ? `, ${clampedSpikes} reset-spikes clamped` : '';
     const extra3 = smoothedCount > 0 ? `, ${smoothedCount} auto-smoothed` : '';
     const extra4 = unsmoothableCount > 0 ? `, ${unsmoothableCount} uncertain-kept` : '';
-    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} port entries, ${snapCache.size} tracked${extra1}${extra2}${extra3}${extra4}`);
+    const extra5 = wireScaledCount > 0 ? `, ${wireScaledCount} wire-scaled` : '';
+    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} port entries, ${snapCache.size} tracked${extra1}${extra2}${extra3}${extra4}${extra5}`);
     // Stage 18.13 — too many spike-clamps in one hour is suspicious
     // (could mean genuine traffic surge, OR aggregator-corruption pattern).
     if (clampedSpikes >= 5) {

@@ -200,9 +200,12 @@ function init(deps) {
   });
 
   // Restore cooldowns persisted from the previous process so a quick restart
-  // doesn't reset all rate-limits.
+  // doesn't reset all rate-limits. kvGet arrives in two shapes: a prepared
+  // statement ({ get(k) }) in tests/embedded harnesses and a plain function
+  // (k) => row in production (src/boot/startup.js) — accept both, otherwise
+  // the restore silently no-ops and a redeploy resets every cooldown.
   try {
-    const row = kvGet.get(COOLDOWN_KV_KEY);
+    const row = kvGet && (typeof kvGet === 'function' ? kvGet(COOLDOWN_KV_KEY) : (kvGet.get ? kvGet.get(COOLDOWN_KV_KEY) : null));
     if (row && row.value) {
       const obj = JSON.parse(row.value);
       for (const [k, v] of Object.entries(obj)) cooldownState.set(k, Number(v) || 0);
@@ -210,21 +213,27 @@ function init(deps) {
   } catch (_) { /* best-effort */ }
 }
 
+// Synchronous write of the in-memory cooldown map to kv_store. better-sqlite3
+// is synchronous, so this is fast enough to run on the shutdown path
+// (gracefulShutdown in server.js) — without it a deploy within the 5s debounce
+// window loses the freshest cooldowns and alerts re-fire after restart.
+function flushCooldowns() {
+  if (_persistTimer) { clearTimeout(_persistTimer); _persistTimer = null; }
+  try {
+    const obj = {};
+    // Drop entries older than 7 days to keep the blob small.
+    const cutoff = Date.now() - 7 * 86400 * 1000;
+    for (const [k, v] of cooldownState) {
+      if (v >= cutoff) obj[k] = v;
+      else cooldownState.delete(k);
+    }
+    kvSetCritical(COOLDOWN_KV_KEY, JSON.stringify(obj), { source: 'alerts' });
+  } catch (e) { logger.warn('[Alerts] persist cooldowns: ' + e.message); }
+}
+
 function _persistCooldowns() {  // Debounced persist — don't write on every send, batch within 5s.
   if (_persistTimer) return;
-  _persistTimer = setTimeout(() => {
-    _persistTimer = null;
-    try {
-      const obj = {};
-      // Drop entries older than 7 days to keep the blob small.
-      const cutoff = Date.now() - 7 * 86400 * 1000;
-      for (const [k, v] of cooldownState) {
-        if (v >= cutoff) obj[k] = v;
-        else cooldownState.delete(k);
-      }
-      kvSetCritical(COOLDOWN_KV_KEY, JSON.stringify(obj), { source: 'alerts' });
-    } catch (e) { logger.warn('[Alerts] persist cooldowns: ' + e.message); }
-  }, 5000);
+  _persistTimer = setTimeout(flushCooldowns, 5000);
 }
 
 // ────────────────────────────────────────────────────────────────
@@ -1532,6 +1541,7 @@ function _isQuietTime(nowMs, from, to) {
 module.exports = { init, trigger, testRule, clearCooldown, listRules, recordBellEvent, isRuleEnabled, RULES,
   onAlertAck,                     // B2: обработчик inline-кнопок (bot.js)
   reconcileIncidents,             // DEEP-75: согласование инцидентов со свежими наблюдениями
+  flushCooldowns,                 // graceful shutdown: синхронный сброс кулдаунов в kv_store
   _ackHash, _ackInvalidate,       // B2: для тестов
   _isQuietTime,                  // ночной digest: pure helper для тестов
   _boxDownState: boxDownState,   // B1: для тестов и диагностики

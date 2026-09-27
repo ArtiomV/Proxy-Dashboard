@@ -308,6 +308,84 @@ describe('ServerMetrics: GET /api/admin/server_metrics', () => {
   });
 });
 
+describe('ServerMetrics: wire-семплы /proc/net/dev (миграция 105)', () => {
+  // Секция 10 SSH-команды: grep '^ *modem' /proc/net/dev.
+  const NET_DEV_SECTION = [
+    '',
+    '---',
+    '    lo: 115292 896 0 0 0 0 0 0 115292 896 0 0 0 0 0 0',
+    '  enp3s0: 987654 1000 0 0 0 0 0 0 123456 900 0 0 0 0 0 0',
+    'modem4470: 4200000 50 0 0 0 0 0 0 2100000 40 0 0 0 0 0 0',
+  ].join('\n');
+
+  it('SSH-прогон пишет семплы modem-интерфейсов в modem_wire_counters', async () => {
+    db.prepare('DELETE FROM modem_wire_counters').run();
+    const job = serverMetrics.create({
+      db,
+      logger: { info() {}, warn() {}, error() {} },
+      apiServers: [{ name: 'S20', url: 'http://box', user: 'u', pass: 'p', osLogin: 'mon', publicIp: '1.2.3.4' }],
+      execFile: (cmd, args, opts, cb) => cb(null, SSH_OUT + NET_DEV_SECTION),
+      proxyConf: { getPage: async () => ({ ok: false, reason: 'TIMEOUT', status: 0 }) },
+    });
+    const r = await job.runServerMetrics();
+    expect(r.wireSamples).toBe(1);
+    const rows = db.prepare("SELECT * FROM modem_wire_counters WHERE server_name = 'S20'").all();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ iface: 'modem4470', rx_bytes: 4200000, tx_bytes: 2100000 });
+    expect(rows[0].ts).toBeTruthy();
+  });
+
+  it('бокс без modem-интерфейсов — warn, семплов нет, метрики пишутся', async () => {
+    db.prepare('DELETE FROM modem_wire_counters').run();
+    const warns = [];
+    const job = serverMetrics.create({
+      db,
+      logger: { info() {}, warn(m) { warns.push(m); }, error() {} },
+      apiServers: [{ name: 'S21', url: 'http://box', user: 'u', pass: 'p', osLogin: 'mon', publicIp: '1.2.3.4' }],
+      execFile: (cmd, args, opts, cb) => cb(null, SSH_OUT),   // секции /proc/net/dev нет
+      proxyConf: { getPage: async () => ({ ok: false, reason: 'TIMEOUT', status: 0 }) },
+    });
+    await job.runServerMetrics();
+    expect(warns.some(w => /modem\*|wire/i.test(w))).toBe(true);
+    expect(db.prepare("SELECT COUNT(*) c FROM modem_wire_counters WHERE server_name = 'S21'").get().c).toBe(0);
+    expect(db.prepare("SELECT source FROM server_metrics WHERE server_name = 'S21'").get().source).toBe('ssh');
+  });
+
+  it('SSH-ошибка — warn и пропуск wire-семплов (fallback на HTTP работает)', async () => {
+    db.prepare('DELETE FROM modem_wire_counters').run();
+    const warns = [];
+    const job = serverMetrics.create({
+      db,
+      logger: { info() {}, warn(m) { warns.push(m); }, error() {} },
+      apiServers: [{ name: 'S22', url: 'http://box', user: 'u', pass: 'p', osLogin: 'root', osPassword: 'x', publicIp: '1.2.3.4' }],
+      execFile: (cmd, args, opts, cb) => cb(new Error('Connection timed out')),
+      proxyConf: { getPage: async () => ({ ok: true, html: STATUS_HTML, status: 200 }) },
+    });
+    const r = await job.runServerMetrics();
+    expect(r).toMatchObject({ partial: 1, wireSamples: 0 });
+    expect(warns.some(w => /wire/i.test(w))).toBe(true);
+    expect(db.prepare("SELECT COUNT(*) c FROM modem_wire_counters WHERE server_name = 'S22'").get().c).toBe(0);
+  });
+
+  it('ретенция: семплы старше 10 дней прунятся при прогоне, свежие остаются', async () => {
+    db.prepare('DELETE FROM modem_wire_counters').run();
+    const ins = db.prepare('INSERT INTO modem_wire_counters (server_name, iface, rx_bytes, tx_bytes, ts) VALUES (?, ?, ?, ?, ?)');
+    ins.run('S20', 'modem4470', 1, 1, new Date(Date.now() - 11 * 86400e3).toISOString().slice(0, 19).replace('T', ' '));
+    ins.run('S20', 'modem4470', 2, 2, new Date(Date.now() - 9 * 86400e3).toISOString().slice(0, 19).replace('T', ' '));
+    const job = serverMetrics.create({
+      db,
+      logger: { info() {}, warn() {}, error() {} },
+      apiServers: [{ name: 'S20', url: 'http://box', user: 'u', pass: 'p', osLogin: 'mon', publicIp: '1.2.3.4' }],
+      execFile: (cmd, args, opts, cb) => cb(null, SSH_OUT + NET_DEV_SECTION),
+      proxyConf: { getPage: async () => ({ ok: false, reason: 'TIMEOUT', status: 0 }) },
+    });
+    const r = await job.runServerMetrics();
+    expect(r.wirePruned).toBe(1);
+    // 9-дневный семпл + свежий из этого прогона
+    expect(db.prepare("SELECT COUNT(*) c FROM modem_wire_counters WHERE server_name = 'S20'").get().c).toBe(2);
+  });
+});
+
 describe('downtime24: незакрытый эпизод (_mergeOngoingDowntime)', () => {
   const { _mergeOngoingDowntime } = require('../src/routes/servers.js');
   it('текущий простой попадает в эпизоды с ongoing:true и нарастающей длительностью', () => {

@@ -32,10 +32,18 @@ function mk(overrides = {}) {
   });
 }
 
-function addRow(server, nick, operator, hourStart, bytes) {
-  db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out)
-    VALUES (?,?,?,?,?,?,?,0)`)
-    .run(server, server + '_p_' + nick + '_' + hourStart.replace(/\D/g, ''), nick, operator, '', hourStart, bytes);
+function addRow(server, nick, operator, hourStart, bytes, uncertain = 0) {
+  db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain)
+    VALUES (?,?,?,?,?,?,?,0,?)`)
+    .run(server, server + '_p_' + nick + '_' + hourStart.replace(/\D/g, ''), nick, operator, '', hourStart, bytes, uncertain);
+}
+
+function addExhausted(server, nick, imei) {
+  db.prepare(`CREATE TABLE IF NOT EXISTS sim_exhaustion_state (
+    server_name TEXT, imei TEXT, nick TEXT, operator TEXT, since_ts INTEGER, alerted_at INTEGER,
+    PRIMARY KEY (server_name, imei))`).run();
+  db.prepare('INSERT INTO sim_exhaustion_state (server_name, imei, nick, operator, since_ts) VALUES (?,?,?,?,?)')
+    .run(server, imei || ('imei-' + nick), nick, 'Orange MD', Date.now());
 }
 
 beforeEach(() => {
@@ -43,7 +51,8 @@ beforeEach(() => {
   db.exec(`CREATE TABLE traffic_hourly (
     id INTEGER PRIMARY KEY AUTOINCREMENT, server_name TEXT, port_id TEXT,
     nick TEXT, operator TEXT, client_name TEXT, hour_start TEXT,
-    bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0
+    bytes_in INTEGER DEFAULT 0, bytes_out INTEGER DEFAULT 0,
+    uncertain INTEGER NOT NULL DEFAULT 0
   )`);
 });
 
@@ -237,5 +246,103 @@ describe('volume-guard', () => {
       rule: 'volume_modem_hourly',
       payload: { operator: 'Digi', pct_of_package: null, threshold_gb: 30 },
     });
+  });
+
+  it('uncertain >= 4 (карантин/фантом-кламп) исключается из прогноза расхода', () => {
+    for (let d = 1; d <= 10; d++) {
+      const day = String(d).padStart(2, '0');
+      addRow('S1', 'MD_01', 'Orange MD', '2026-08-' + day + ' 01:00', 10 * 1e9);          // 100 ГБ чистых
+    }
+    addRow('S1', 'MD_01', 'Orange MD', '2026-08-05 05:00', 300 * 1e9, 4);               // карантин
+    addRow('S1', 'MD_01', 'Orange MD', '2026-08-06 05:00', 400 * 1e6, 5);               // фантом-кламп
+    addRow('S1', 'MD_01', 'Orange MD', '2026-08-07 05:00', 50 * 1e9, 2);                // uncertain=2 — считается
+    const forecasts = vgMod.buildForecasts(db, JSON.parse(PKG), new Date('2026-08-10T12:00:00.000Z'));
+    const sim = forecasts.find(f => f.scope === 'sim' && f.nick === 'MD_01');
+    expect(sim.used_gb).toBe(150);   // 100 чистых + 50 (uncertain=2); карантин и кламп не вошли
+  });
+
+  it('uncertain >= 4 не даёт volume_modem_hourly за последний час', () => {
+    addRow('S1', 'MD_01', 'Orange MD', '2026-08-23 05:00', 25 * 1e9, 5);   // фантом-кламп, «25 ГБ»
+    addRow('S1', 'MD_02', 'Orange MD', '2026-08-23 05:00', 25 * 1e9);      // чистый — алертит
+    const job = mk();
+    const res = job.runOnce();
+    expect(res.hourlyAlerts).toBe(1);
+    const fired = alertsFired.filter(x => x.rule === 'volume_modem_hourly');
+    expect(fired).toHaveLength(1);
+    expect(fired[0].payload.nick).toBe('MD_02');
+  });
+
+  it('модем из sim_exhaustion_state не даёт volume_modem_hourly (фантом счётчиков)', () => {
+    addExhausted('S1', 'MD_01');
+    // Старый фантом (uncertain=0, до введения клампа) — 500 ГБ за час.
+    addRow('S1', 'MD_01', 'Orange MD', '2026-08-23 05:00', 500 * 1e9);
+    addRow('S1', 'MD_02', 'Orange MD', '2026-08-23 05:00', 25 * 1e9);      // здоровый — алертит
+    const job = mk();
+    const res = job.runOnce();
+    expect(res.hourlyAlerts).toBe(1);
+    const fired = alertsFired.filter(x => x.rule === 'volume_modem_hourly');
+    expect(fired.map(x => x.payload.nick)).toEqual(['MD_02']);
+  });
+
+  it('per_sim прогноз: модем из sim_exhaustion_state считается фактически исчерпанным', () => {
+    addExhausted('S1', 'MD_01');
+    for (let d = 1; d <= 10; d++) {
+      const day = String(d).padStart(2, '0');
+      addRow('S1', 'MD_01', 'Orange MD', '2026-08-' + day + ' 01:00', 1 * 1e9);   // всего 10 ГБ из 400
+      addRow('S1', 'MD_02', 'Orange MD', '2026-08-' + day + ' 02:00', 10 * 1e9);
+    }
+    const forecasts = vgMod.buildForecasts(db, JSON.parse(PKG), new Date('2026-08-10T12:00:00.000Z'));
+    const exhausted = forecasts.find(f => f.scope === 'sim' && f.nick === 'MD_01');
+    expect(exhausted).toMatchObject({ status: 'exhausted', days_left: 0, remaining_gb: 0, sim_exhausted: true });
+    // Здоровый модем — прежний прогноз по расходу.
+    const healthy = forecasts.find(f => f.scope === 'sim' && f.nick === 'MD_02');
+    expect(healthy).toMatchObject({ status: 'forecast', used_gb: 100, days_left: 30 });
+    expect(healthy.sim_exhausted).toBeUndefined();
+  });
+
+  // 2026-09-27: оператор «на дату чтения» — пустые/'unknown' строки backfill'ятся
+  // из самой свежей непустой строки того же порта в пределах периода.
+  it('buildForecasts: пустой и unknown оператор backfill из свежей строки того же порта', () => {
+    const ins = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain)
+      VALUES (?,?,?,?,?,?,?,0,0)`);
+    // Первые дни CELLOP не резолвился (пусто и легаси-'unknown'), позже появился.
+    ins.run('S1', 'S1_pX', 'MD_09', '', 'cli', '2026-08-01 01:00', 10 * 1e9);
+    ins.run('S1', 'S1_pX', 'MD_09', 'unknown', 'cli', '2026-08-02 01:00', 10 * 1e9);
+    ins.run('S1', 'S1_pX', 'MD_09', 'Orange MD', 'cli', '2026-08-03 01:00', 10 * 1e9);
+    const forecasts = vgMod.buildForecasts(db, [
+      { operator: 'Orange MD', type: 'per_sim', volume_gb: 400 },
+    ], new Date('2026-08-10T12:00:00Z'));
+    const sim = forecasts.find(f => f.scope === 'sim' && f.nick === 'MD_09');
+    expect(sim).toBeTruthy();
+    expect(sim.used_gb).toBe(30);   // все 3 часа приписаны Orange MD, а не только последний
+  });
+
+  it('buildForecasts: без известного оператора в периоде часы НЕ приписываются чужому пакету', () => {
+    const ins = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain)
+      VALUES (?,?,?,?,?,?,?,0,0)`);
+    ins.run('S1', 'S1_pY', 'MD_10', '', 'cli', '2026-08-01 01:00', 50 * 1e9);
+    ins.run('S1', 'S1_pY', 'MD_10', '', 'cli', '2026-08-02 01:00', 50 * 1e9);
+    const forecasts = vgMod.buildForecasts(db, [
+      { operator: 'Orange MD', type: 'per_sim', volume_gb: 400 },
+    ], new Date('2026-08-10T12:00:00Z'));
+    expect(forecasts.find(f => f.scope === 'sim')).toBeUndefined();
+  });
+
+  it('buildPackageEfficiency: пустой оператор backfill из свежей строки порта за период', () => {
+    db.exec(`CREATE TABLE modem_meta (
+      server_name TEXT, nick TEXT, imei TEXT, iccid TEXT, operator TEXT, deleted INTEGER DEFAULT 0
+    )`);
+    db.prepare("INSERT INTO modem_meta VALUES ('S1','A','1','sim-a','Orange MD',0)").run();
+    const ins = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain)
+      VALUES (?,?,?,?,?,?,?,0,0)`);
+    // Завершённый период — июль: часть часов без оператора, свежий час — с ним.
+    ins.run('S1', 'S1_pA', 'A', '', 'cli', '2026-07-05 01:00', 30 * 1e9);
+    ins.run('S1', 'S1_pA', 'A', 'Orange MD', 'cli', '2026-07-06 01:00', 20 * 1e9);
+    // Строка с оператором ПОСЛЕ периода в backfill не входит.
+    ins.run('S1', 'S1_pA', 'A', 'Moldcell', 'cli', '2026-08-02 01:00', 999 * 1e9);
+    const rows = vgMod.buildPackageEfficiency(db, [
+      { operator: 'Orange MD', type: 'per_sim', volume_gb: 100, price: 40, currency: 'MDL' },
+    ], new Date('2026-08-10T12:00:00Z'));
+    expect(rows[0].used_gb).toBe(50);   // 30 backfill + 20; августовские 999 не вошли
   });
 });

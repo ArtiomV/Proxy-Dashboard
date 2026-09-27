@@ -1,5 +1,6 @@
 'use strict';
 const { parseSpeedToMbps, parsePingMs } = require('../api/proxy-smart');
+const speedtestGate = require('../jobs/speedtest-gate');
 //
 // src/routes/proxies-speedtest.js — speedtest endpoints (WP6.5 carve-out from proxies.js, VERBATIM move).
 //
@@ -41,9 +42,19 @@ function _stCleanup() {
   }
 }
 
+// 2026-09-27: ручной замер тоже идёт через глобальный гейт спидтестов на
+// бокс (src/jobs/speedtest-gate.js) — параллельный почасовой монитор или
+// пробы sim-exhaustion не должны задушить ARM-хаб (панель отвечает HTML
+// вместо JSON). Слот занят >60с → job завершается понятной ошибкой.
+function _stGateOpts() {
+  return speedtestGate.optsFromSettings(deps.getSetting);
+}
+
 async function _runSpeedtest(jobId, server, serverName, nick, imei) {
   try {
-    const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
+    const result = await speedtestGate.runWithGate(serverName,
+      () => fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000),
+      _stGateOpts());
     // Save to history when imei provided and result is valid
     if (imei && result && !result.error) {
       const key = `${serverName}_${imei}`;
@@ -56,7 +67,10 @@ async function _runSpeedtest(jobId, server, serverName, nick, imei) {
     }
     _stJobs.set(jobId, { status: 'done', result, startedAt: _stJobs.get(jobId).startedAt, finishedAt: Date.now() });
   } catch (err) {
-    _stJobs.set(jobId, { status: 'error', error: 'Speedtest failed', details: err.message,
+    const busy = err && err.code === 'GATE_BUSY';
+    _stJobs.set(jobId, { status: 'error',
+      error: busy ? 'Бокс занят другими спидтестами — попробуйте через минуту' : 'Speedtest failed',
+      details: err.message,
       startedAt: (_stJobs.get(jobId) || {}).startedAt || Date.now(), finishedAt: Date.now() });
   }
 }

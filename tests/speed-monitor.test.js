@@ -549,3 +549,81 @@ describe('SpeedMonitor: пропуск модемов с исчерпанным 
     expect(job.planTargets(fleet()).map(t => t.nick).sort()).toEqual(['MD_01', 'MD_02']);
   });
 });
+
+// 2026-09-27: глобальный гейт спидтестов на бокс (src/jobs/speedtest-gate.js).
+// Слоты бокса заняты внешними замерами (sim-exhaustion/UI) → монитор НЕ мерит:
+// строка ok=0/error='gate_busy' (не box_outage!), circuit breaker не кормится,
+// ник уходит в раунды перезамеров и добирается, когда гейт освободился.
+describe('SpeedMonitor: гейт спидтестов на бокс (2026-09-27)', () => {
+  const gate = cjsRequire('../src/jobs/speedtest-gate.js');
+  const gateSettings = csv => (k, d) => (
+    k === 'speedtest_modems' ? csv : k === 'speedtest_gate_wait_sec' ? '1' : d);
+
+  it('гейт занят → gate_busy без замера, без box_outage, circuit breaker не тронут', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    gate._reset();
+    const held = [await gate.acquire('S1'), await gate.acquire('S1')];   // оба слота S1 заняты «снаружи»
+    try {
+      let stCalls = 0;
+      const fetchApi = async (server, path) => {
+        if (path === '/apix/show_status_json') {
+          if (server.name !== 'S1') return [];
+          return ['T1', 'T2', 'T3'].map((n, i) => ({
+            modem_details: { NICK: n, IMEI: String(30 + i) },
+            net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' },
+          }));
+        }
+        if (path.startsWith('/apix/speedtest')) { stCalls++; return { download: '10', upload: '5', ping: '30' }; }
+        throw new Error('unexpected ' + path);
+      };
+      const trigger = vi.fn();
+      const job = makeJobWithSetting(fetchApi, null, undefined,
+        { retryRounds: 0, alerts: { trigger }, getSetting: gateSettings('T1,T2,T3') });
+      const r = await job.runSpeedMonitor();
+      expect(r).toMatchObject({ tested: 0, failed: 3 });
+      expect(stCalls).toBe(0);   // ни одного реального замера — гейт не пустил
+      const rows = db.prepare('SELECT nick, ok, error, attempts FROM speed_monitor ORDER BY nick').all();
+      expect(rows.map(x => x.nick + ':' + x.error + ':' + x.attempts))
+        .toEqual(['T1:gate_busy:0', 'T2:gate_busy:0', 'T3:gate_busy:0']);
+      // 3 подряд gate_busy — это НЕ сбои бокса: алерта speedtest_box_outage нет.
+      expect(trigger).not.toHaveBeenCalledWith('speedtest_box_outage', expect.anything());
+    } finally {
+      held.forEach(release => release());
+      gate._reset();
+    }
+  });
+
+  it('гейт освободился к раунду перезамеров → ник добран, recovered=1', async () => {
+    db.prepare('DELETE FROM speed_monitor').run();
+    gate._reset();
+    const held = [await gate.acquire('S1'), await gate.acquire('S1')];
+    try {
+      let statusCalls = 0, stCalls = 0, released = false;
+      const fetchApi = async (server, path) => {
+        if (path === '/apix/show_status_json') {
+          statusCalls++;
+          if (statusCalls >= 2 && !released) {   // к 1-му раунду перезамеров гейт свободен
+            released = true;
+            held.forEach(release => release());
+          }
+          if (server.name !== 'S1') return [];
+          return [{ modem_details: { NICK: 'MD_01', IMEI: '860000000000001' }, net_details: { IS_ONLINE: 'yes', CELLOP: 'moldcell' } }];
+        }
+        if (path.startsWith('/apix/speedtest')) { stCalls++; return { download: '20', upload: '8', ping: '30' }; }
+        throw new Error('unexpected ' + path);
+      };
+      const job = makeJobWithSetting(fetchApi, null, undefined,
+        { retryRounds: 2, retryRoundMs: 1, getSetting: gateSettings('MD_01') });
+      const r = await job.runSpeedMonitor();
+      expect(r).toMatchObject({ tested: 0, failed: 1, recovered: 1 });
+      expect(stCalls).toBe(1);   // замер состоялся только на раунде перезамеров
+      const rows = db.prepare("SELECT ok, error, download FROM speed_monitor WHERE nick = 'MD_01' ORDER BY ts").all();
+      expect(rows.length).toBe(2);
+      expect(rows[0]).toMatchObject({ ok: 0, error: 'gate_busy' });
+      expect(rows[1]).toMatchObject({ ok: 1, download: 20 });
+    } finally {
+      held.forEach(release => release());
+      gate._reset();
+    }
+  });
+});

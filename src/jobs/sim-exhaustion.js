@@ -47,6 +47,7 @@
 
 const GB = 1e9;
 const { normalizeOperator, parseBwToBytes } = require('../utils/traffic');
+const speedtestGate = require('./speedtest-gate');
 
 function _parseLoss(raw) {
   if (typeof raw !== 'string') return null;
@@ -204,14 +205,23 @@ function create(deps) {
   // Одна спидтест-проба через бокс (как speed-monitor, но одиночная и без
   // ретраев: на задушенной симке замер сам по себе медленный). null — замер
   // не удался (бокс/сеть), объект {dl, ul, ping} — результат.
+  // 2026-09-27: проба идёт через глобальный гейт спидтестов на бокс — слот
+  // занят >60с (монитор/UI меряют) → null: вызывающий трактует как 'retry',
+  // следующая проба по обычному кулдауну.
   async function _probeSpeed(srvName, nick) {
     const server = apiServers.find(s => s.name === srvName);
     if (!server || typeof fetchApi !== 'function') return null;
     try {
-      const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
+      const result = await speedtestGate.runWithGate(srvName,
+        () => fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000),
+        speedtestGate.optsFromSettings(getSetting));
       if (result && result.error) throw new Error(String(result.error));
       return require('./speed-monitor').parseSpeedtestResult(result);
     } catch (e) {
+      if (e && e.code === 'GATE_BUSY') {
+        logger.warn(`[SimExhaustion] спидтест-проба ${nick} (${srvName}): бокс занят другими замерами — следующая проба по кулдауну`);
+        return null;
+      }
       logger.warn(`[SimExhaustion] спидтест-проба ${nick} (${srvName}) не удалась: ${e.message}`);
       return null;
     }

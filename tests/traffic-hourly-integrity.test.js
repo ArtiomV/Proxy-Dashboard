@@ -62,7 +62,7 @@ function feedWith(dayIn, dayOut, monIn, monOut, opts = {}) {
   };
   const statusModem = (nick) => ({
     modem_details: { IMEI: 'imei1', NICK: nick },
-    net_details: { CELLOP: 'Moldcell', IS_ONLINE: 'yes' },
+    net_details: { CELLOP: opts.cellop !== undefined ? opts.cellop : 'Moldcell', IS_ONLINE: 'yes' },
   });
   return [{
     serverName: 'S1',
@@ -215,5 +215,62 @@ describe('DEEP-31: карантин сверхпорогового часа и �
     await hourly.aggregateHourlyTraffic();
     const row = db.prepare(`SELECT * FROM traffic_hourly WHERE port_id='S1_portA' AND hour_start = ${HOUR_SQL}`).get();
     expect(row.nick).toBe('MD_FIRST');
+  });
+});
+
+// 2026-09-27: защита от пустого оператора на пути записи. CELLOP бывает
+// пустым/'unknown' (свежая SIM, переезд между модемами); фолбэки —
+// modem_meta → proxy_checks → последний известный оператор порта/ника из
+// истории traffic_hourly. Плюс upsert при конфликте обновляет пустой
+// оператор непустым (и не затирает непустой пустым).
+describe('Атрибуция оператора при записи (2026-09-27)', () => {
+  it('пустой CELLOP: оператор берётся из свежей строки истории того же порта', async () => {
+    let counters = { day: 1e9, mon: 1e9 };
+    const db = boot(async () => feedWith(counters.day, 0, counters.mon, 0, { cellop: '' }));
+    // «Вчерашняя» строка того же порта с известным оператором.
+    db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain)
+      VALUES ('S1', 'S1_portA', 'MD_1', 'Moldcell', 'cli', strftime('%Y-%m-%d %H:00', datetime('now', '-5 hours')), 1e6, 0, 0)`).run();
+    await hourly.aggregateHourlyTraffic();          // baseline (без записи часа)
+    counters = { day: 2e9, mon: 2e9 };
+    await hourly.aggregateHourlyTraffic();          // запись часа с пустым CELLOP
+    const row = db.prepare(`SELECT * FROM traffic_hourly WHERE port_id='S1_portA' AND hour_start = ${HOUR_SQL}`).get();
+    expect(row.operator).toBe('Moldcell');
+  });
+
+  it("CELLOP='unknown' тоже проваливается в фолбэки (не замирает плейсхолдером)", async () => {
+    let counters = { day: 1e9, mon: 1e9 };
+    const db = boot(async () => feedWith(counters.day, 0, counters.mon, 0, { cellop: 'unknown' }));
+    db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain)
+      VALUES ('S1', 'S1_portA', 'MD_1', 'Moldcell', 'cli', strftime('%Y-%m-%d %H:00', datetime('now', '-5 hours')), 1e6, 0, 0)`).run();
+    await hourly.aggregateHourlyTraffic();
+    counters = { day: 2e9, mon: 2e9 };
+    await hourly.aggregateHourlyTraffic();
+    const row = db.prepare(`SELECT * FROM traffic_hourly WHERE port_id='S1_portA' AND hour_start = ${HOUR_SQL}`).get();
+    expect(row.operator).toBe('Moldcell');
+  });
+
+  it('пустой CELLOP без истории/meta/proxy_checks: оператор остаётся пустым (не выдумывается)', async () => {
+    let counters = { day: 1e9, mon: 1e9 };
+    const db = boot(async () => feedWith(counters.day, 0, counters.mon, 0, { cellop: '' }));
+    await hourly.aggregateHourlyTraffic();
+    counters = { day: 2e9, mon: 2e9 };
+    await hourly.aggregateHourlyTraffic();
+    const row = db.prepare(`SELECT * FROM traffic_hourly WHERE port_id='S1_portA' AND hour_start = ${HOUR_SQL}`).get();
+    expect(row.operator).toBe('');
+  });
+
+  it('upsert-контракт: непустой оператор обновляет пустой, пустой не затирает известный', () => {
+    const db = makeDb();
+    trafficDb.init(db);
+    const up = trafficDb.hourlyUpsertStmt();
+    up.run('S1', 'S1_p', 'n', '', 'c', '2026-09-27 10:00', 100, 0, 0, null, null);
+    up.run('S1', 'S1_p', 'n', 'Moldcell', 'c', '2026-09-27 10:00', 100, 0, 0, null, null);
+    expect(db.prepare('SELECT operator FROM traffic_hourly').get().operator).toBe('Moldcell');
+    up.run('S1', 'S1_p', 'n', '', 'c', '2026-09-27 10:00', 100, 0, 0, null, null);
+    expect(db.prepare('SELECT operator FROM traffic_hourly').get().operator).toBe('Moldcell');
+    up.run('S1', 'S1_p', 'n', 'unknown', 'c', '2026-09-27 10:00', 100, 0, 0, null, null);
+    // 'unknown' сюда доходить не должен (отсекается до upsert), но даже если
+    // дошёл — не затирает нормального оператора.
+    expect(db.prepare('SELECT operator FROM traffic_hourly').get().operator).toBe('Moldcell');
   });
 });

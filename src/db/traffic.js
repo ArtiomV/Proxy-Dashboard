@@ -28,6 +28,11 @@ function init(db) {
   // раз вычисляется от durable-снимка и снимок передвигается в той же
   // транзакции — повтор идентичного фида даёт дельту 0, а не задвоение.
   // raw_* (миграция 101): исходное наблюдение до clamp/smoothing/карантина.
+  // 2026-09-27: при конфликте (повторный прогон агрегатора внутри часа)
+  // оператор ОБНОВЛЯЕТСЯ, если новая запись несёт непустое значение — первая
+  // запись часа могла уйти с '' (CELLOP ещё не резолвился), и раньше она
+  // навсегда оставалась без оператора. Пустым значением существующего
+  // оператора НЕ затираем (тот же контракт, что у daily_traffic.client_name).
   S.hourlyUpsert = db.prepare(`INSERT INTO traffic_hourly (server_name, port_id, nick, operator, client_name, hour_start, bytes_in, bytes_out, uncertain, raw_bytes_in, raw_bytes_out)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(port_id, hour_start) DO UPDATE SET
@@ -35,7 +40,10 @@ function init(db) {
     bytes_out = bytes_out + excluded.bytes_out,
     raw_bytes_in  = COALESCE(excluded.raw_bytes_in,  raw_bytes_in),
     raw_bytes_out = COALESCE(excluded.raw_bytes_out, raw_bytes_out),
-    uncertain = MAX(uncertain, excluded.uncertain)`);
+    uncertain = MAX(uncertain, excluded.uncertain),
+    operator = CASE WHEN excluded.operator IS NOT NULL AND TRIM(excluded.operator) != ''
+                         AND LOWER(TRIM(excluded.operator)) != 'unknown'
+                    THEN excluded.operator ELSE operator END`);
 
   // hourly_snapshots: rolling view of "where were counters at hour boundary"
   // — used for cross-validation between live counters and computed deltas.
@@ -145,6 +153,32 @@ function hourlyPurgeOlderThan(db, days) {
   return _hourlyPurgeStmt.run(String(days));
 }
 
+// 2026-09-27: атрибуция оператора «на дату чтения» для исторических строк.
+// operator в traffic_hourly фиксируется на момент записи; пока CELLOP не
+// резолвится (свежая SIM, переезд симки между модемами, рестарт панели),
+// строка уходит с пустым оператором (или легаси-плейсхолдером 'unknown').
+// Историю силой НЕ переписываем — вместо этого агрегации по операторам
+// подставляют вместо пустого значения оператора из САМОЙ СВЕЖЕЙ непустой
+// строки ТОГО ЖЕ порта в пределах запрошенного периода (correlated subquery
+// по UNIQUE(port_id, hour_start); оконные функции не нужны). Если за период
+// оператор так и не появился — остаётся fallbackSql ('' либо 'Неизвестный'):
+// такие строки молча с реальным оператором не смешиваются.
+// Фрагмент содержит плейсхолдеры ? в ПЕРВОМ по тексту запроса месте (SELECT
+// идёт раньше WHERE): ? = нижняя граница периода, плюс ? = верхняя, если
+// withUpperBound. Порядок биндинга — обязанность вызывающего.
+function operatorAttributionCase(alias, fallbackSql, withUpperBound) {
+  const a = alias || 't';
+  return `CASE WHEN ${a}.operator IS NULL OR TRIM(${a}.operator) = '' OR LOWER(TRIM(${a}.operator)) = 'unknown'
+    THEN COALESCE((
+      SELECT t2.operator FROM traffic_hourly t2
+      WHERE t2.port_id = ${a}.port_id
+        AND t2.hour_start >= ?${withUpperBound ? ' AND t2.hour_start < ?' : ''}
+        AND t2.operator IS NOT NULL AND TRIM(t2.operator) != '' AND LOWER(TRIM(t2.operator)) != 'unknown'
+      ORDER BY t2.hour_start DESC LIMIT 1
+    ), ${fallbackSql})
+    ELSE ${a}.operator END`;
+}
+
 // daily_traffic IN(port_name_list) sum for a date — IN-list size varies,
 // so we prepare per cardinality and cache.
 const _dailySumByDateAndPortsCache = new Map();
@@ -183,4 +217,5 @@ module.exports = {
   hourlyExistsForHourStmt:     () => S.hourlyExistsForHour,
   hourlyPurgeOlderThan,
   dailySumByDateAndPorts,
+  operatorAttributionCase,
 };

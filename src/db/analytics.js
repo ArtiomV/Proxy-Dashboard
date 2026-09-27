@@ -14,6 +14,11 @@
 
 const UNBOUND_FILTER = " AND client_name != '' AND client_name IS NOT NULL";
 
+// 2026-09-27: единый CASE «оператор на дату чтения» (backfill пустых
+// значений из свежей строки того же порта) живёт в src/db/traffic.js —
+// владельце таблицы traffic_hourly. См. operatorAttributionCase там.
+const { operatorAttributionCase } = require('./traffic');
+
 let S = {};
 
 function init(db) {
@@ -241,18 +246,23 @@ function notInClause(column, values) {
 
 // heatmap day×hour matrix query (+ optional per-operator breakdown).
 // servers: resolved server names for country view (already filtered).
+// 2026-09-27: view='operator' фильтрует по оператору «на дату чтения»
+// (operatorAttributionCase): строки, ушедшие в БД с пустым оператором, пока
+// CELLOP не резолвился, попадают в матрицу своего (позже известного)
+// оператора, а не выпадают из неё молча. Порядок параметров: start (WHERE),
+// start (внутренний backfill), затем фильтры.
 function heatmapSql({ tzStr, start, view, idKey, id, servers }) {
-  let sql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes, MAX(uncertain) as corrected FROM traffic_hourly WHERE hour_start >= ?`;
+  let sql = `SELECT strftime('%Y-%m-%d', datetime(t.hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(t.hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(t.bytes_in+t.bytes_out) as bytes, MAX(t.uncertain) as corrected FROM traffic_hourly t WHERE t.hour_start >= ?`;
   const params = [start];
   if (idKey !== 'all') {
     if (view === 'country' && servers && servers.length) {
-      sql += ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
+      sql += ' AND t.server_name IN (' + servers.map(() => '?').join(',') + ')';
       params.push(...servers);
     } else if (view === 'operator') {
-      sql += " AND LOWER(REPLACE(operator, ' ', '_')) LIKE ?";
-      params.push('%' + idKey + '%');
+      sql += ` AND LOWER(REPLACE(${operatorAttributionCase('t', "''")}, ' ', '_')) LIKE ?`;
+      params.push(start, '%' + idKey + '%');
     } else if (view === 'client') {
-      sql += ' AND client_name = ?';
+      sql += ' AND t.client_name = ?';
       params.push(id);
     }
   }
@@ -260,14 +270,24 @@ function heatmapSql({ tzStr, start, view, idKey, id, servers }) {
   return { sql, params };
 }
 
+// 2026-09-27: разбивка по операторам. Два правила атрибуции:
+//   1) пустой и легаси-'unknown' оператор — отдельная группа 'Неизвестный'
+//      (раньше 'unknown' мог зависнуть отдельной группой от старых строк,
+//      написанных до нормализации на пути записи);
+//   2) прежде чем признать строку «неизвестной», оператор backfill'ится из
+//      самой свежей непустой строки того же порта В ПРЕДЕЛАХ периода —
+//      история при этом не переписывается (см. operatorAttributionCase).
+// Порядок параметров: start (внутренний backfill — идёт в SELECT раньше
+// WHERE), start (WHERE), затем фильтры view.
 function heatmapOperatorSql({ tzStr, start, view, id, servers }) {
-  let sql = `SELECT strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, CASE WHEN operator IS NULL OR TRIM(operator) = '' THEN 'Неизвестный' ELSE operator END as op, SUM(bytes_in+bytes_out) as bytes, COUNT(DISTINCT nick) as modems FROM traffic_hourly WHERE hour_start >= ?`;
-  const params = [start];
+  const opExpr = operatorAttributionCase('t', "'Неизвестный'");
+  let sql = `SELECT strftime('%Y-%m-%d', datetime(t.hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(t.hour_start, '${tzStr}')) AS INTEGER) as hour, ${opExpr} as op, SUM(t.bytes_in+t.bytes_out) as bytes, COUNT(DISTINCT t.nick) as modems FROM traffic_hourly t WHERE t.hour_start >= ?`;
+  const params = [start, start];
   if (view === 'client') {
-    sql += ' AND client_name = ?';
+    sql += ' AND t.client_name = ?';
     params.push(id);
   } else if (view === 'country' && servers && servers.length) {
-    sql += ' AND server_name IN (' + servers.map(() => '?').join(',') + ')';
+    sql += ' AND t.server_name IN (' + servers.map(() => '?').join(',') + ')';
     params.push(...servers);
   }
   sql += UNBOUND_FILTER + ' GROUP BY day, hour, op ORDER BY day, hour, op';

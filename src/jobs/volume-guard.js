@@ -31,11 +31,37 @@
 //      пакета — «такими темпами пакет кончится за N дней».
 // Дедуп по модему/оператору, cooldown 6 ч — в правилах alerts.js.
 //
+// 2026-09-27 (MD2_39): связка с sim-exhaustion. Строки traffic_hourly с
+// uncertain >= 4 (карантин/анти-фантом кламп задушенной SIM) из расчётов
+// расхода исключены (CLEAN_ROWS_ONLY), модемы из sim_exhaustion_state не
+// дают volume_modem_hourly (их счётчики завышены фантомом порта), а в
+// per_sim-прогнозе такая SIM считается фактически исчерпанной.
+//
 // Нестыковка часовых поясов: traffic_hourly.hour_start в UTC («YYYY-MM-DD
 // HH:MM»). «Сутки» темпа считаем по UTC — для оценки расхода пакета сдвиг
 // на 2–3 часа несущественен.
 
 const GB = 1e9;
+const { isExhausted } = require('./sim-exhaustion');
+const { operatorAttributionCase } = require('../db/traffic');
+
+// 2026-09-27: оператор «на дату чтения» для сумм расхода. Исторические
+// строки с пустым/'unknown' оператором (CELLOP не резолвился на момент
+// записи, SIM переезжала) раньше молча ВЫПАДАЛИ из учёта пакетов —
+// findPackage('') = null. Теперь оператор backfill'ится из самой свежей
+// непустой строки того же порта в пределах периода (см.
+// operatorAttributionCase в src/db/traffic.js); фолбэк '' — строки без
+// известного оператора по-прежнему не приписываются чужому пакету.
+// Каждый фрагмент несёт свои ? — биндить в порядке следования в SQL.
+const OP_ATTR = operatorAttributionCase('t', "''");
+const OP_ATTR_BOUNDED = operatorAttributionCase('t', "''", true);
+
+// 2026-09-27 (MD2_39): строки traffic_hourly с uncertain >= 4 — недоверенные:
+//   4 = карантин сверхпорогового часа (DEEP-31, bytes уже обнулены),
+//   5 = анти-фантом кламп задушенной SIM (ProxySmart считает байты порта на
+//       стороне бокса, а не интерфейса модема — завышение до ×48).
+// Это не полноценный расход пакета — из всех сумм расхода/темпа исключаем.
+const CLEAN_ROWS_ONLY = 'AND COALESCE(uncertain, 0) < 4';
 
 function findPackage(pkgs, operator) {
   const op = String(operator || '').toLowerCase().trim();
@@ -95,11 +121,20 @@ function buildForecasts(db, pkgs, now = new Date()) {
     const elapsedDays = Math.max(1, Math.floor((date.getTime() - start.getTime()) / 86400e3) + 1);
     let rows = [];
     try {
+      // Подзапрос обязателен: GROUP BY operator в плоском запросе SQLite
+      // резолвит в КОЛОНКУ t.operator, а не в алиас — backfill-группы не
+      // слипались бы. В подзапросе operator — уже вычисленное значение.
       rows = db.prepare(`
-        SELECT server_name, nick, operator, SUM(bytes_in + bytes_out) AS b
-        FROM traffic_hourly WHERE hour_start >= ?
+        SELECT server_name, nick, operator, SUM(b) AS b
+        FROM (
+          SELECT t.server_name AS server_name, t.nick AS nick,
+                 ${OP_ATTR} AS operator,
+                 (t.bytes_in + t.bytes_out) AS b
+          FROM traffic_hourly t WHERE t.hour_start >= ?
+          ${CLEAN_ROWS_ONLY}
+        )
         GROUP BY server_name, nick, operator
-      `).all(periodStart + ' 00:00');
+      `).all(periodStart + ' 00:00', periodStart + ' 00:00');
     } catch (_) { continue; }
 
     const matches = rows.filter(r => findPackage([pkg], r.operator));
@@ -146,11 +181,28 @@ function buildForecasts(db, pkgs, now = new Date()) {
     };
     if (type === 'per_sim') {
       for (const row of matches) {
-        out.push(make('sim', (Number(row.b) || 0) / GB, {
+        const entry = make('sim', (Number(row.b) || 0) / GB, {
           server: row.server_name, nick: row.nick, operator_actual: row.operator, ...periodExtra,
-        }));
+        });
+        // Модем из sim_exhaustion_state фактически уже исчерпан (троттлинг
+        // подтверждён симптомами), даже если учтённый расход меньше пакета —
+        // часть трафика прошла на урезанной скорости и/или фантомные часы
+        // выпали из суммы. Прогноз для него — «пакет кончился»; поведение
+        // здоровых модемов не меняется.
+        if (isExhausted(db, { server: row.server_name, nick: row.nick })) {
+          entry.status = 'exhausted';
+          entry.days_left = 0;
+          entry.remaining_gb = 0;
+          entry.sim_exhausted = true;   // исчерпание по симптомам (для UI)
+        }
+        out.push(entry);
       }
     } else {
+      // NOTE (MD2_39): на уровне общего котла модемы из sim_exhaustion_state
+      // отдельно не вычитаем — их реальный расход на троттлинге мал, а новые
+      // фантомные часы уже отсечены фильтром uncertain выше. Исторический
+      // фантом (uncertain=0, до введения клампа) в used_gb остаётся — это
+      // осознанное ограничение, ретро-пересчёта нет.
       const usedGb = matches.reduce((sum, row) => sum + (Number(row.b) || 0) / GB, 0);
       const simCount = new Set(matches.map(r => r.server_name + '/' + r.nick)).size;
       const maxSims = Math.max(0, Math.floor(Number(pkg.max_sims) || 0));
@@ -209,12 +261,20 @@ function buildPackageEfficiency(db, pkgs, now = new Date()) {
     const periodEnd = current.start.toISOString().slice(0, 10);
     let trafficRows = [];
     try {
+      // Подзапрос — по той же причине, что в buildForecasts (GROUP BY по
+      // вычисленному оператору, а не по сырой колонке).
       trafficRows = db.prepare(`
-        SELECT server_name, nick, operator, SUM(bytes_in + bytes_out) AS b
-        FROM traffic_hourly
-        WHERE hour_start >= ? AND hour_start < ?
+        SELECT server_name, nick, operator, SUM(b) AS b
+        FROM (
+          SELECT t.server_name AS server_name, t.nick AS nick,
+                 ${OP_ATTR_BOUNDED} AS operator,
+                 (t.bytes_in + t.bytes_out) AS b
+          FROM traffic_hourly t
+          WHERE t.hour_start >= ? AND t.hour_start < ?
+          ${CLEAN_ROWS_ONLY}
+        )
         GROUP BY server_name, nick, operator
-      `).all(periodStart + ' 00:00', periodEnd + ' 00:00');
+      `).all(periodStart + ' 00:00', periodEnd + ' 00:00', periodStart + ' 00:00', periodEnd + ' 00:00');
     } catch (_) { trafficRows = []; }
 
     const matchingRoster = roster.filter(r => findPackage([pkg], r.operator));
@@ -299,6 +359,7 @@ function create(deps) {
       SELECT server_name, nick, operator, SUM(bytes_in + bytes_out) AS b
       FROM traffic_hourly
       WHERE hour_start = ?
+      ${CLEAN_ROWS_ONLY}
       GROUP BY server_name, nick
     `).all(lastHour);
 
@@ -306,6 +367,9 @@ function create(deps) {
     for (const r of hourRows) {
       const pkg = _findPkg(pkgs, r.operator);
       if (!pkg) continue;
+      // Модем в sim_exhaustion_state (задушенная SIM): его счётчики завышены
+      // фантомом порта (MD2_39) — «аномально большой расход за час» ложный.
+      if (isExhausted(db, { server: r.server_name, nick: r.nick })) continue;
       const thrGb = _hourlyThresholdGb(pkg);
       const gb = (r.b || 0) / GB;
       if (gb <= thrGb) continue;
@@ -326,6 +390,7 @@ function create(deps) {
       SELECT server_name, nick, operator, SUM(bytes_in + bytes_out) AS b
       FROM traffic_hourly
       WHERE hour_start >= ?
+      ${CLEAN_ROWS_ONLY}
       GROUP BY server_name, nick
     `).all(todayUtc + ' 00:00');
     for (const r of todayRows) {
@@ -352,6 +417,7 @@ function create(deps) {
         SELECT SUM(bytes_in + bytes_out) AS b, COUNT(DISTINCT nick) AS modems
         FROM traffic_hourly
         WHERE hour_start >= ? AND LOWER(operator) LIKE ?
+        ${CLEAN_ROWS_ONLY}
       `).get(periodStart, String(pkg.operator).toLowerCase().trim() + '%');
       const usedGb = ((row && row.b) || 0) / GB;
       const dailyGb = usedGb / elapsedDays;

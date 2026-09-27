@@ -1,5 +1,6 @@
 'use strict';
 const { parseSpeedToMbps, parsePingMs } = require('../api/proxy-smart');
+const speedtestGate = require('./speedtest-gate');
 //
 // src/jobs/speed-monitor.js — почасовой замер скорости выбранных модемов.
 //
@@ -59,6 +60,12 @@ const { parseSpeedToMbps, parsePingMs } = require('../api/proxy-smart');
 // 'box_outage'), в раунды бокс идёт одним пробником, шлём алерт
 // speedtest_box_outage. Прогон ограничен бюджетом speedmon_max_run_min
 // (дефолт 20 мин) — перезамеры никогда не сдвигают следующий часовой тик.
+//
+// 2026-09-27 — глобальный гейт параллелизма спидтестов на бокс
+// (src/jobs/speedtest-gate.js): монитор делит слоты бокса с пробами
+// sim-exhaustion и ручными замерами из UI. Гейт занят >60с → замер не
+// проводится, ник пишется с причиной 'gate_busy' (НЕ box_outage, circuit
+// breaker не кормится) и переносится на раунды перезамеров.
 
 const DEFAULT_NICKS = 'MD2_40,MD2_44,MD_01,MD_04,MD_10';
 const RETRY_DELAY_MS = 25000;    // пауза перед повторным замером (~20–30с)
@@ -325,8 +332,15 @@ function create(deps) {
   }
 
   // Один вызов спидтеста бокса — общий для основного замера и подмены.
+  // 2026-09-27: через глобальный гейт — на бокс не больше speedtest_gate_max_
+  // per_server (дефолт 2) параллельных спидтестов из всех источников (монитор,
+  // sim-exhaustion, ручной замер из UI). Слот занят >speedtest_gate_wait_sec
+  // (дефолт 60с) → GATE_BUSY: это не ошибка замера и не поломка бокса —
+  // вызывающий переносит ник на перезамер.
   async function measureOnceRaw(server, nick) {
-    const result = await fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000);
+    const result = await speedtestGate.runWithGate(server.name,
+      () => fetchApi(server, `/apix/speedtest?arg=${encodeURIComponent(nick)}`, 180000),
+      speedtestGate.optsFromSettings(getSetting));
     if (result && result.error) throw new Error(String(result.error));
     return parseSpeedtestResult(result);
   }
@@ -354,6 +368,9 @@ function create(deps) {
     try {
       best = await measureOnce();
     } catch (e1) {
+      // Гейт занят — замера не было (attempts=0), ретрай через 25с бессмысленен:
+      // слоты держат внешние спидтесты по ~3 мин. Переносим ник на перезамер.
+      if (e1 && e1.code === 'GATE_BUSY') { e1.attempts = 0; attempts = 0; throw e1; }
       logger.warn(`[SpeedMonitor] ${nick}: замер не удался (${e1.message}), повтор через ${RETRY_DELAY_MS / 1000}с`);
       await sleep(RETRY_DELAY_MS);
       best = await measureOnce();   // упадёт — уйдёт наружу
@@ -445,6 +462,12 @@ function create(deps) {
             noteOk(s.f.server.name);
             return true;
           } catch (e) {
+            // Гейт занят — подмены на том же боксе тоже встанут в очередь:
+            // не жжём пул и не кормим circuit breaker чужой занятостью.
+            if (e && e.code === 'GATE_BUSY') {
+              logger.info(`[SpeedMonitor] подмена ${s.nick} за ${t.nick}: гейт занят — подмену пропускаем`);
+              return false;
+            }
             logger.warn(`[SpeedMonitor] подмена ${s.nick} за ${t.nick} не удалась: ${e.message}`);
             noteFail(s.f.server.name);
           }
@@ -487,6 +510,16 @@ function create(deps) {
           noteOk(f.server.name);
           tested++;
         } catch (e) {
+          // Гейт занят (параллельные спидтесты из sim-exhaustion/UI): это не
+          // сбой замера и не поломка бокса — circuit breaker не трогаем,
+          // подмену не жжём, ник просто ждёт перезамера (причина 'gate_busy').
+          if (e && e.code === 'GATE_BUSY') {
+            insertStmt.run(f.server.name, nick, f.imei, 0, 0, 0, 0, 'gate_busy', f.operator, 0);
+            logger.info(`[SpeedMonitor] ${nick} (${f.server.name}): gate_busy — замер перенесён на перезамер`);
+            failed++;
+            pending.set(nick, { f, serverName: f.server.name, lastError: 'gate_busy', attempts: 0 });
+            continue;
+          }
           noteFail(f.server.name);
           // Подмена тем же оператором — пока бокс не признан сломанным.
           if (f.operator && !broken.has(f.server.name) && await trySubstitutes(t, subPool)) { tested++; continue; }
@@ -541,6 +574,13 @@ function create(deps) {
             noteOk(f.server.name);
             broken.delete(f.server.name);   // пробник ожил → бокс снова в строю
           } catch (e) {
+            // Гейт занят — не сбой бокса: streak/attempts не трогаем, подмену
+            // не жжём, ник остаётся в очереди на следующий раунд.
+            if (e && e.code === 'GATE_BUSY') {
+              p.lastError = 'gate_busy';
+              logger.info(`[SpeedMonitor] ${nick}: раунд ${round} — gate_busy, перенос на следующий раунд`);
+              continue;
+            }
             p.lastError = String(e.message || e).slice(0, 200);
             p.attempts += 1;
             noteFail(f.server.name);

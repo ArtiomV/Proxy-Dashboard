@@ -494,3 +494,39 @@ describe('sim-exhaustion v5.1: allowlist операторов и относит�
     expect(fired.length).toBe(0);
   });
 });
+
+// ── 2026-09-27: пробы идут через глобальный гейт спидтестов на бокс
+// (src/jobs/speedtest-gate.js). Гейт занят (монитор/UI меряют) → проба
+// трактуется как 'retry': замер бокса не вызывается, состояние держится,
+// следующая проба по обычному кулдауну.
+describe('sim-exhaustion: гейт спидтестов на бокс (2026-09-27)', () => {
+  it('гейт занят → recovery-проба = retry (замера нет, состояние держим); освободился → обычная проба', async () => {
+    const gate = require('../src/jobs/speedtest-gate.js');
+    gate._reset();
+    const { mkJob, fired, db, probes } = bootWithTable(
+      () => [{ serverName: 'S1', status: [MODEM_OK_IMEI1] }],
+      { speedtest_gate_wait_sec: 1 },
+      { download: '25', upload: '10', ping: '48' });
+    db.prepare("INSERT INTO sim_exhaustion_state (server_name, imei, nick, operator, since_ts, alerted_at) VALUES ('S1', 'imei1', 'MD_1', 'Moldcell', ?, ?)")
+      .run(Date.now() - 3600e3, Date.now() - 3500e3);
+    const held = [await gate.acquire('S1'), await gate.acquire('S1')];   // оба слота S1 заняты «снаружи»
+    try {
+      const job = mkJob();
+      await job.runOnce();   // проба ждёт слот 1с → GATE_BUSY → retry
+      expect(probes.length).toBe(0);   // fetchApi speedtest даже не вызывался
+      expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(1);
+      expect(fired.length).toBe(0);
+
+      held.forEach(release => release());
+      job._probes.set('S1|imei1', 0);   // кулдаун пробы снимаем
+      await job.runOnce();
+      expect(probes.length).toBe(1);
+      expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(0);
+      expect(fired.length).toBe(1);
+      expect(fired[0].rule).toBe('sim_package_recovered');
+    } finally {
+      held.forEach(release => release());
+      gate._reset();
+    }
+  });
+});

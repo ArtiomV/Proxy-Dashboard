@@ -97,7 +97,11 @@ module.exports = function createAnalyticsRouter(deps) {
       if (Date.now() - _liveOpMapCache.ts > 5 * 60e3) {
         const map = {};
         try {
-          for (const row of db.prepare("SELECT port_id, operator, client_name FROM traffic_hourly WHERE hour_start >= datetime('now','-7 days') GROUP BY port_id").all()) {
+          // 2026-09-27: fallback-оператор живой ячейки. Пустые/'unknown'
+          // строки отфильтрованы — иначе GROUP BY port_id мог отдать строку
+          // БЕЗ оператора поверх известного. MAX(hour_start) + bare columns:
+          // SQLite берёт operator/client_name из самой свежей строки порта.
+          for (const row of db.prepare("SELECT port_id, operator, client_name, MAX(hour_start) AS h FROM traffic_hourly WHERE hour_start >= datetime('now','-7 days') AND operator IS NOT NULL AND TRIM(operator) != '' AND LOWER(TRIM(operator)) != 'unknown' GROUP BY port_id").all()) {
             map[row.port_id] = row;
           }
         } catch (_) {}

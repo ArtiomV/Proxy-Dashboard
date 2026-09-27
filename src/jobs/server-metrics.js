@@ -10,8 +10,15 @@
 // ничего, пишется строка с error — отсутствие связи тоже данные.
 // Ретенция 7 дней, прун в конце прогона. Парсеры — чистые экспортируемые
 // функции (module.exports ниже) для юнит-тестов.
+// 2026-09-27 (миграция 105): тем же SSH-запуском читаем /proc/net/dev и
+// пишем семплы счётчиков интерфейсов modem* в modem_wire_counters — это
+// проводная правда трафика модема (per-port счётчики ProxySmart на
+// задушенных модемах завышены в 24–48×), src/traffic/hourly.js масштабирует
+// к ней заявленные портами дельты. Бокс без SSH/без modem-интерфейсов —
+// warn в лог и пропуск. Ретенция семплов 10 дней, прун в конце прогона.
 
 const RETENTION_DAYS = 7;
+const WIRE_RETENTION_DAYS = 10;   // modem_wire_counters (миграция 105)
 const SSH_TIMEOUT_MS = 10000;
 const SSH_PORTS = [2222, 22];
 const predictive = require('../monitoring/predictive');
@@ -34,7 +41,12 @@ const SSH_CMD = "grep '^cpu ' /proc/stat; sleep 1; grep '^cpu ' /proc/stat; " +
   // USB-ошибки ядра за сутки (аналог «Critical USB errors» панели): journalctl,
   // fallback dmesg. mon-пользователю может не хватить прав — тогда секция
   // пустая, что трактуем как «ошибок нет».
-  "echo ---; (journalctl -k --since '24 hours ago' --no-pager 2>/dev/null || dmesg -T 2>/dev/null) | grep -iE 'usb [0-9][0-9.-]*: .*(error|fail|disconnect|reset)' | tail -5";
+  "echo ---; (journalctl -k --since '24 hours ago' --no-pager 2>/dev/null || dmesg -T 2>/dev/null) | grep -iE 'usb [0-9][0-9.-]*: .*(error|fail|disconnect|reset)' | tail -5; " +
+  // Секция 10 (2026-09-27): проводные счётчики модемов /proc/net/dev —
+  // строки интерфейсов modemNNNN (rx_bytes кол. 2, tx_bytes кол. 10).
+  // Завершаем `true`, чтобы grep без совпадений (бокс без модемов) не
+  // возвращал ненулевой exit code и не валил весь SSH-запуск.
+  "echo ---; grep -E '^ *modem[0-9]+:' /proc/net/dev 2>/dev/null; true";
 
 function _pct(used, total) {
   if (!(total > 0)) return null;
@@ -147,6 +159,24 @@ function parseSshMetrics(text, nowMs) {
   // строка», пусто = ошибок нет.
   const usbLines = (sections[9] || '').split('\n').map(l => l.trim()).filter(Boolean);
   if (usbLines.length) out.usb_errors = `${usbLines.length}: ${usbLines[0].slice(0, 120)}`;
+  return out;
+}
+
+// Парсер /proc/net/dev (2026-09-27): строки интерфейсов modem* →
+// [{ iface, rx_bytes, tx_bytes }]. Формат строки:
+// «  modem4470: rx_bytes rx_packets errs drop fifo frame compressed multicast
+//               tx_bytes packets errs drop fifo colls carrier compressed»
+// (rx_bytes — 1-е поле после iface, tx_bytes — 9-е). lo/enp*/wlan* и прочие
+// интерфейсы игнорируются. Чистая функция — покрыта юнит-тестами.
+function parseModemNetDev(text) {
+  const out = [];
+  for (const line of String(text || '').split('\n')) {
+    const m = line.match(/^\s*(modem\w*):\s+(.*)$/);
+    if (!m) continue;
+    const f = m[2].trim().split(/\s+/).map(Number);
+    if (f.length < 9 || !Number.isFinite(f[0]) || !Number.isFinite(f[8]) || f[0] < 0 || f[8] < 0) continue;
+    out.push({ iface: m[1], rx_bytes: f[0], tx_bytes: f[8] });
+  }
   return out;
 }
 
@@ -266,6 +296,45 @@ function create(deps) {
     return { anomalies, disk };
   }
 
+  // modem_wire_counters (миграция 105): ленивая подготовка стейтментов —
+  // на БД без миграции просто отключаем wire-учёт с warn, не валим джоб.
+  let _wireIns = null, _wirePrune = null, _wireDisabled = false;
+  function _wireStmts() {
+    if (_wireDisabled) return null;
+    if (!_wireIns) {
+      try {
+        _wireIns = db.prepare('INSERT INTO modem_wire_counters (server_name, iface, rx_bytes, tx_bytes) VALUES (?, ?, ?, ?)');
+        _wirePrune = db.prepare(`DELETE FROM modem_wire_counters WHERE ts < datetime('now', '-${WIRE_RETENTION_DAYS} days')`);
+      } catch (e) {
+        _wireDisabled = true;
+        logger.warn(`[ServerMetrics] modem_wire_counters недоступна (${e.message}) — wire-учёт выключен`);
+        return null;
+      }
+    }
+    return { ins: _wireIns, prune: _wirePrune };
+  }
+
+  // Семплы /proc/net/dev одного бокса → modem_wire_counters. Нет modem*
+  // интерфейсов — warn и пропуск (бокс без модемов/стартап модемов).
+  function _writeWireSamples(serverName, wire) {
+    if (!wire || !wire.length) {
+      logger.warn(`[ServerMetrics] ${serverName}: в /proc/net/dev нет интерфейсов modem* — wire-семплы пропущены`);
+      return 0;
+    }
+    const st = _wireStmts();
+    if (!st) return 0;
+    try {
+      const tx = db.transaction(rows => {
+        for (const w of rows) st.ins.run(serverName, w.iface, w.rx_bytes, w.tx_bytes);
+      });
+      tx(wire);
+      return wire.length;
+    } catch (e) {
+      logger.warn(`[ServerMetrics] ${serverName}: wire-семплы не записаны (${e.message})`);
+      return 0;
+    }
+  }
+
   // SSH: сначала пробуем ключ из ~/.ssh/id_ed25519 (публичная часть выдана
   // владельцу — добавляется в authorized_keys боксов), если мимо — sshpass
   // с паролем из конфига сервера. Для ключа BatchMode=yes; для sshpass нужен
@@ -313,8 +382,9 @@ function create(deps) {
     let lastErr = null;
     for (const port of _sshPorts(server)) {
       try {
-        const parsed = parseSshMetrics(await _sshOnce(server, port, true), Date.now());
-        if (_sshResultUsable(parsed)) return parsed;
+        const stdout = await _sshOnce(server, port, true);
+        const parsed = parseSshMetrics(stdout, Date.now());
+        if (_sshResultUsable(parsed)) return { metrics: parsed, wire: parseModemNetDev(stdout) };
         lastErr = new Error('empty ssh metrics');
       } catch (e) { lastErr = e; }
     }
@@ -324,8 +394,9 @@ function create(deps) {
     }
     for (const port of _sshPorts(server)) {
       try {
-        const parsed = parseSshMetrics(await _sshOnce(server, port, false), Date.now());
-        if (_sshResultUsable(parsed)) return parsed;
+        const stdout = await _sshOnce(server, port, false);
+        const parsed = parseSshMetrics(stdout, Date.now());
+        if (_sshResultUsable(parsed)) return { metrics: parsed, wire: parseModemNetDev(stdout) };
         lastErr = new Error('empty ssh metrics');
       } catch (e) { lastErr = e; }
     }
@@ -368,10 +439,13 @@ function create(deps) {
     // источников в одной строке.
     const ssh = await collectSsh(server);
     if (ssh) {
-      Object.assign(row, ssh);
+      Object.assign(row, ssh.metrics);
       row.source = 'ssh';
+      wireSamples += _writeWireSamples(server.name, ssh.wire);
       return row;
     }
+    // Нет SSH — нет и проводных счётчиков (HTTP-панель их не отдаёт).
+    logger.warn(`[ServerMetrics] ${server.name}: SSH недоступен — wire-семплы /proc/net/dev пропущены`);
     const http = await collectHttp(server, nowMs);
     if (http) {
       for (const k of Object.keys(http)) {
@@ -392,6 +466,7 @@ function create(deps) {
 
   // Re-entrancy: прогон один за раз (SSH-таймауты до 20с на бокс).
   let running = false;
+  let wireSamples = 0;   // семплов modem_wire_counters записано за прогон
 
   async function runServerMetrics() {
     if (running) {
@@ -399,6 +474,7 @@ function create(deps) {
       return { skipped: 'already_running' };
     }
     running = true;
+    wireSamples = 0;
     try {
       let ok = 0, partial = 0, failed = 0, anomalyAlerts = 0, diskForecastAlerts = 0;
       const _rows = [];   // SSE (23.08): компактный снимок прогона для metrics_update
@@ -431,10 +507,16 @@ function create(deps) {
       // Ретенция 7 дней: ISO-строки сравниваются лексикографически.
       const cutoff = new Date(Date.now() - RETENTION_DAYS * 86400e3).toISOString();
       const pruned = pruneStmt.run(cutoff).changes;
-      logger.info(`[ServerMetrics] Complete: ${ok} full, ${partial} http-only, ${failed} failed (pruned ${pruned})`);
+      // Ретенция проводных семплов — 10 дней (миграция 105), прун каждый прогон.
+      let wirePruned = 0;
+      const wst = _wireStmts();
+      if (wst) {
+        try { wirePruned = wst.prune.run().changes; } catch (_) { /* best-effort */ }
+      }
+      logger.info(`[ServerMetrics] Complete: ${ok} full, ${partial} http-only, ${failed} failed (pruned ${pruned}, wire ${wireSamples} samples, pruned ${wirePruned})`);
       // SSE (23.08): свежие метрики боксов → realtime-обновление карточек админки.
       if (events) { try { events.publish('metrics_update', { servers: _rows }); } catch (_) { /* best-effort */ } }
-      return { ok, partial, failed, pruned, anomalyAlerts, diskForecastAlerts };
+      return { ok, partial, failed, pruned, anomalyAlerts, diskForecastAlerts, wireSamples, wirePruned };
     } finally {
       running = false;
     }
@@ -443,4 +525,4 @@ function create(deps) {
   return { runServerMetrics };
 }
 
-module.exports = { create, parseSshMetrics, parseSystemStatus, SSH_CMD, SSH_PORTS };
+module.exports = { create, parseSshMetrics, parseSystemStatus, parseModemNetDev, SSH_CMD, SSH_PORTS };
