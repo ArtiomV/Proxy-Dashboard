@@ -14,11 +14,28 @@ const { parseBwToBytes } = require('../utils/traffic');
 // 2026-09-27: pure-часть «живой ячейки» текущего часа — частичный трафик
 // незавершённого часа из bw-счётчиков минус baseline часового снапшота.
 // Вынесена на module-уровень для тестов (роут передаёт свои данные).
-function computeLiveCells(results, snapStmt, pnMap, opMap) {
+// Оператор резолвится как в hourly-агрегации: живой CELLOP модема (нормализо-
+// ванный normalizeOp), fallback — opMap (последние строки traffic_hourly).
+function computeLiveCells(results, snapStmt, pnMap, opMap, normalizeOp) {
   const out = [];
   for (const data of results || []) {
     const srv = data.serverName || '';
     if (data._cached || typeof data.bw !== 'object' || !data.bw) continue;   // протухший фид превью не доказывает
+    // portId → {nick, operator, portName} по живому фиду (first wins при
+    // клоне IMEI — как в traffic/hourly.js, DEEP-33).
+    const statusArr = Array.isArray(data.status) ? data.status : [];
+    const portsMap = data.ports || {};
+    const portIdInfo = {};
+    for (const m of statusArr) {
+      const md = m.modem_details || {};
+      const imei = md.IMEI || '';
+      const nick = md.NICK || imei;
+      const liveOp = String((m.net_details || {}).CELLOP || md.OPERATOR || '').trim();
+      if (!imei) continue;
+      for (const p of (portsMap[imei] || [])) {
+        if (!portIdInfo[p.portID]) portIdInfo[p.portID] = { nick, operator: liveOp, portName: p.portName || '' };
+      }
+    }
     for (const [portId, b] of Object.entries(data.bw)) {
       const fullId = srv + '_' + portId;
       const snap = snapStmt.get(fullId);
@@ -26,10 +43,13 @@ function computeLiveCells(results, snapStmt, pnMap, opMap) {
       const cur = parseBwToBytes(b.bandwidth_bytes_day_in) + parseBwToBytes(b.bandwidth_bytes_day_out);
       const bytes = cur - (Number(snap.i || 0) + Number(snap.o || 0));
       if (!(bytes > 0)) continue;   // 0 и отрицательное (сброс счётчика внутри часа) — не превью
+      const info = portIdInfo[portId] || {};
       const meta = opMap[fullId] || {};
-      const client = String(pnMap[fullId] || meta.client_name || '').trim();
+      const client = String(info.portName || pnMap[fullId] || meta.client_name || '').trim();
       if (!client) continue;   // UNBOUND_FILTER: свободные порты в хитмап не входят
-      out.push({ server: srv, client, operator: meta.operator || '', bytes });
+      const rawOp = (info.operator && info.operator.toLowerCase() !== 'unknown') ? info.operator : (meta.operator || '');
+      const operator = typeof normalizeOp === 'function' ? normalizeOp(rawOp, srv) : rawOp;
+      out.push({ server: srv, client, operator: operator || '', bytes });
     }
   }
   return out;
@@ -77,7 +97,8 @@ module.exports = function createAnalyticsRouter(deps) {
         } catch (_) {}
         _liveOpMapCache = { ts: Date.now(), map };
       }
-      const cells = computeLiveCells(await fetchAllServersDataCached(), _liveSnapStmt, portKeyToPortName || {}, _liveOpMapCache.map);
+      const cells = computeLiveCells(await fetchAllServersDataCached(), _liveSnapStmt, portKeyToPortName || {}, _liveOpMapCache.map,
+        (rawOp, srv) => { try { return normalizeOperator(rawOp, ((SERVER_COUNTRIES[srv] || {}).country || '') === 'RO') || rawOp; } catch (_) { return rawOp; } });
       const countryServers = view === 'country' && idKey !== 'all' ? _serversForCountry(idKey) : null;
       let gb = 0;
       const ops = {};

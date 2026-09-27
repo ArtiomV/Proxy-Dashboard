@@ -544,21 +544,35 @@ function showHeatTT(di,hr,event,cell,ctx){
   if(!tt){tt=document.createElement('div');tt.id=ctx.ttId;tt.className='float-tt';tt.style.cssText='position:fixed;z-index:9999;pointer-events:none;background:#fff;border:0.5px solid rgba(0,0,0,0.13);border-radius:10px;padding:12px 14px;min-width:170px;box-shadow:0 4px 20px rgba(0,0,0,0.09)';document.body.appendChild(tt);}
 
   // 27.09: живая ячейка — текущий незавершённый час, данные с bw-счётчиков.
+  // Дизайн повторяет тултип завершённого часа; интервал — до минуты
+  // последнего обновления данных, а не до конца часа.
   var liveH=data.live_hour||null;
   var isLive=liveH&&(days[di]===liveH.day)&&hr===liveH.hour;
   if(isLive){
-    tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2, '0')+':00–'+hrEnd+':00 <span style="color:var(--accent);font-weight:700" title="Час ещё идёт">● LIVE</span></div>'
-      +'<div style="font-size:20px;font-weight:500;color:#1a1a1a;line-height:1">'+trendFmt(liveH.gb||0)+' <span style="font-size:11px;font-weight:400;color:#9b9b98">уже за час</span></div>';
     var lops=liveH.by_operator||{};
-    var lopArr=Object.keys(lops).map(function(k){var o=lops[k]||{};return{name:k,gb:o.gb||0,ports:o.ports||0};}).filter(function(o){return o.gb>0.0001;});
+    var liveModems=0;
+    for(var _lk in lops){liveModems+=((lops[_lk]&&lops[_lk].ports)||0);}
+    var mDivL=liveModems||mDiv;
+    var perModemL=(liveH.gb||0)/mDivL;
+    var _upd=new Date(liveH.ts||Date.now());
+    var updHm=String(_upd.getHours()).padStart(2,'0')+':'+String(_upd.getMinutes()).padStart(2,'0');
+    tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2,'0')+':00–'+updHm+' <span style="color:var(--accent);font-weight:700" title="Час ещё идёт — данные в реальном времени">● LIVE</span></div>'
+      +'<div style="font-size:20px;font-weight:500;color:#1a1a1a;line-height:1">'+trendFmt(perModemL)+' <span style="font-size:11px;font-weight:400;color:#9b9b98">на модем</span></div>';
+    var lopArr=Object.keys(lops).map(function(k){var o=lops[k]||{};var m=o.ports||1;return{name:k,gb:(o.gb||0)/m,modems:o.ports||0,total:o.gb||0};}).filter(function(o){return o.total>0.0001;});
     if(lopArr.length){
       lopArr.sort(function(a,b){return a.name.localeCompare(b.name,'ru');});
       tt.innerHTML+='<div style="height:0.5px;background:rgba(0,0,0,0.08);margin:6px 0"></div>';
       lopArr.forEach(function(o){
-        tt.innerHTML+='<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:2px 0"><span style="font-size:11px;color:#9b9b98">'+esc(o.name)+' <span style="font-size:9px">('+o.ports+')</span></span><span style="font-size:12px;font-weight:500;color:#1a1a1a">'+trendFmt(o.gb)+'</span></div>';
+        tt.innerHTML+='<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:2px 0"><span style="font-size:11px;color:#9b9b98">'+esc(o.name)+' <span style="font-size:9px">('+o.modems+')</span></span><span style="font-size:12px;font-weight:500;color:#1a1a1a">'+trendFmt(o.gb)+'</span></div>';
       });
     }
-    tt.innerHTML+='<div style="font-size:10px;color:#9b9b98;margin-top:8px">Предварительные данные с живых счётчиков — час ещё идёт. По завершении часа значение заменит точная почасовая запись.</div>';
+    tt.innerHTML+='<div style="height:0.5px;background:rgba(0,0,0,0.08);margin:6px 0"></div>'
+      +'<div style="display:flex;justify-content:space-between;align-items:baseline;gap:16px;padding:2px 0"><span style="font-size:11px;color:#9b9b98">Общий трафик</span><span style="font-size:12px;font-weight:500;color:#1a1a1a">'+trendFmt(liveH.gb||0)+'</span></div>';
+    if(mCnt>0){
+      var _lm=Math.min(liveModems||0,mCnt);
+      tt.innerHTML+='<div style="font-size:10px;color:#9b9b98;margin-top:6px">Модемов: <b style="color:#1a1a1a;font-weight:600">'+mCnt+'</b> · с данными за час: <b style="color:#1a1a1a;font-weight:600">'+_lm+'</b></div>';
+    }
+    tt.innerHTML+='<div style="font-size:10px;color:var(--accent);margin-top:6px">● Час ещё идёт — данные по '+updHm+', обновление каждую минуту. По завершении часа значение заменит точная почасовая запись.</div>';
   } else if(val<0.01){
     tt.innerHTML='<div style="font-size:11px;color:#9b9b98;margin-bottom:5px">'+dn+', '+dShort+' · '+String(hr).padStart(2,'0')+':00–'+hrEnd+':00</div>'
       +'<div style="font-size:20px;font-weight:500;color:#1a1a1a;line-height:1">—</div>'

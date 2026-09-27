@@ -44,3 +44,30 @@ describe('heatmap live hour: частичный трафик незавершё�
     expect(cells).toEqual([{ server: 'S1', client: 'WildBox', operator: 'Orange RO', bytes: 1e9 }]);
   });
 });
+
+describe('heatmap live hour: оператор порта из живого фида', () => {
+  it('живой CELLOP (нормализованный) побеждает устаревший opMap; порт маппится по IMEI→portID как в hourly-агрегации', () => {
+    const results = [{
+      serverName: 'RO1',
+      status: [{ modem_details: { IMEI: 'imei1', NICK: 'RO1_12' }, net_details: { CELLOP: 'digi' } }],
+      ports: { imei1: [{ portID: 'p1', portName: 'Brandanalytics' }] },
+      bw: { p1: bw('900 MB', '100 MB') },
+    }];
+    const snaps = snapStmtFor({ RO1_p1: { i: 0, o: 0 } });
+    const opMap = { RO1_p1: { operator: 'Orange RO', client_name: 'Brandanalytics' } };   // устаревший
+    const cells = computeLiveCells(results, snaps, {}, opMap, (raw) => (raw === 'digi' ? 'Digi' : raw));
+    expect(cells).toEqual([{ server: 'RO1', client: 'Brandanalytics', operator: 'Digi', bytes: 1e9 }]);
+  });
+
+  it('CELLOP=unknown → fallback на opMap', () => {
+    const results = [{
+      serverName: 'S1',
+      status: [{ modem_details: { IMEI: 'imei1', NICK: 'MD_1' }, net_details: { CELLOP: 'unknown' } }],
+      ports: { imei1: [{ portID: 'p1', portName: 'Brandanalytics' }] },
+      bw: { p1: bw('1 GB', '0 GB') },
+    }];
+    const snaps = snapStmtFor({ S1_p1: { i: 0, o: 0 } });
+    const cells = computeLiveCells(results, snaps, {}, { S1_p1: { operator: 'Moldcell', client_name: 'Brandanalytics' } }, (raw) => raw);
+    expect(cells[0].operator).toBe('Moldcell');
+  });
+});
