@@ -1,7 +1,6 @@
 'use strict';
 
 const { parseBwToBytes, normalizeOperator } = require('../utils/traffic');
-const simExhaustion = require('../jobs/sim-exhaustion');   // 2026-09-27: анти-фантом на задушенных модемах
 
 let db, logger, fetchAllServersDataCached, refreshPortKeyMapping, portKeyToPortNameRef;
 let _htUpsert, _htCleanup, _metaOpGet, _pcOpGet, _snapUpsert, _snapUpsertPreserve, _snapGet, _snapGetAll;
@@ -186,13 +185,6 @@ async function aggregateHourlyTraffic() {
     const MAX_HOURLY_BYTES = 20 * 1e9; // 20 GB sanity cap per port (decimal GB)
     const UNCERTAIN_THRESHOLD = 150 * 1e6; // 150 MB minimum for uncertain flag (above month counter granularity)
     const MONTH_COUNTER_STEP = 1e8; // 100 MB — ProxySmart month counter granularity (decimal)
-    // 2026-09-27 (инцидент MD2_39): потолок часа для порта на ЗАДУШЕННОМ
-    // модеме. ProxySmart считает байты порта на стороне бокса (клиент→прокси
-    // по быстрой сети), не на интерфейсе модема: когда порт упирается в
-    // троттлинг, клиент долбит на WAN-скорости и дельта раздувается в 10–15×
-    // (WildBox: 20 ГБ/день при реальных ~0.2 Мбит/с). Троттлинг физически
-    // ~0.1–0.7 Мбит/с ⇒ ~300 МБ/ч потолок с запасом.
-    const THROTTLED_PORT_CAP_BYTES = 400 * 1e6;
     // Smoothing of uncertain=2 rows: when day/month counters disagree (counter
     // reset, mid-hour rollover, post-outage catch-up), the raw bytes for the
     // affected hour are unreliable. Replace with median of clean neighbours.
@@ -685,39 +677,6 @@ async function aggregateHourlyTraffic() {
           // NOTE: deltaDay > 0 && deltaMon === 0 is NORMAL — month counter has 0.1GB quantization
           // and won't increment for small traffic bursts. Don't flag this as uncertain.
 
-          // 2026-09-27 (MD2_39): анти-фантом. Модем в состоянии «пакет
-          // исчерпан» физически не пропускает больше ~0.3 ГБ/ч — заявленная
-          // дельта выше потолка = счётчик посчитал клиентский поток на стороне
-          // бокса, а не провод. Клампим с uncertain=5, заявленное сохраняем
-          // в raw_bytes_* (наблюдение не теряем, как в карантине DEEP-31).
-          let phantomRawIn = null, phantomRawOut = null;
-          if (uncertain === 0 && finalIncIn + finalIncOut > THROTTLED_PORT_CAP_BYTES) {
-            try {
-              if (simExhaustion.isExhausted(db, { server: srv, nick })) {
-                const total = finalIncIn + finalIncOut;
-                const k = THROTTLED_PORT_CAP_BYTES / total;
-                phantomRawIn = Math.round(finalIncIn);
-                phantomRawOut = Math.round(finalIncOut);
-                finalIncIn = Math.round(finalIncIn * k);
-                finalIncOut = Math.round(finalIncOut * k);
-                uncertain = 5;
-                uncertainCount++;
-                logger.warn(`[HourlyAgg] phantom-clamp: ${nick} claimed ${(total / 1e6).toFixed(0)}MB on throttled SIM → ${(THROTTLED_PORT_CAP_BYTES / 1e6).toFixed(0)}MB (uncertain=5)`);
-                try {
-                  logActivity('billing', 'warn', 'traffic_phantom_clamp', nick,
-                    `${nick} (${clientName || 'no-client'}): ${(total / 1e6).toFixed(0)}MB за час на задушенной SIM — кламп до ${(THROTTLED_PORT_CAP_BYTES / 1e6).toFixed(0)}MB (фантом счётчика порта)`,
-                    {
-                      nick, server: srv, port_id: fullPortId, client: clientName, operator,
-                      hour_start: hourStart,
-                      claimed_mb: +(total / 1e6).toFixed(1),
-                      cap_mb: +(THROTTLED_PORT_CAP_BYTES / 1e6).toFixed(0),
-                      reason: 'throttled_modem_phantom_traffic',
-                    });
-                } catch (_) { /* best-effort */ }
-              }
-            } catch (_) { /* isExhausted best-effort — таблицы может не быть на старой схеме */ }
-          }
-
           // --- Gap detection: split delta across missed hours ---
           // If last_updated_at is more than ~1.5h in the past, the ProxySmart
           // server was likely offline. Spread the accumulated delta evenly
@@ -813,9 +772,7 @@ async function aggregateHourlyTraffic() {
                   } catch (_) { /* best-effort */ }
                 }
               }
-              queueRow(srv, fullPortId, nick, operator, clientName, finalIncIn, finalIncOut, uncertain,
-                smoothRawIn !== null ? smoothRawIn : phantomRawIn,
-                smoothRawOut !== null ? smoothRawOut : phantomRawOut);
+              queueRow(srv, fullPortId, nick, operator, clientName, finalIncIn, finalIncOut, uncertain, smoothRawIn, smoothRawOut);
               count++;
             }
           }

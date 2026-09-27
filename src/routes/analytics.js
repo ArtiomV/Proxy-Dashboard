@@ -16,9 +16,8 @@ const { parseBwToBytes } = require('../utils/traffic');
 // Вынесена на module-уровень для тестов (роут передаёт свои данные).
 // Оператор резолвится как в hourly-агрегации: живой CELLOP модема (нормализо-
 // ванный normalizeOp), fallback — opMap (последние строки traffic_hourly).
-function computeLiveCells(results, snapStmt, pnMap, opMap, normalizeOp, isExhaustedFn) {
+function computeLiveCells(results, snapStmt, pnMap, opMap, normalizeOp) {
   const out = [];
-  const THROTTLED_PORT_CAP_BYTES = 400 * 1e6;   // тот же потолок, что в traffic/hourly.js (MD2_39)
   for (const data of results || []) {
     const srv = data.serverName || '';
     if (data._cached || typeof data.bw !== 'object' || !data.bw) continue;   // протухший фид превью не доказывает
@@ -42,17 +41,12 @@ function computeLiveCells(results, snapStmt, pnMap, opMap, normalizeOp, isExhaus
       const snap = snapStmt.get(fullId);
       if (!snap) continue;
       const cur = parseBwToBytes(b.bandwidth_bytes_day_in) + parseBwToBytes(b.bandwidth_bytes_day_out);
-      let bytes = cur - (Number(snap.i || 0) + Number(snap.o || 0));
+      const bytes = cur - (Number(snap.i || 0) + Number(snap.o || 0));
       if (!(bytes > 0)) continue;   // 0 и отрицательное (сброс счётчика внутри часа) — не превью
       const info = portIdInfo[portId] || {};
       const meta = opMap[fullId] || {};
       const client = String(info.portName || pnMap[fullId] || meta.client_name || '').trim();
       if (!client) continue;   // UNBOUND_FILTER: свободные порты в хитмап не входят
-      // Анти-фантом (MD2_39): задушенный модем физически не пропускает
-      // больше ~0.3 ГБ/ч — заявленное выше потолка это счётчик бокса, не провод.
-      if (bytes > THROTTLED_PORT_CAP_BYTES && info.nick && typeof isExhaustedFn === 'function') {
-        try { if (isExhaustedFn(srv, info.nick)) bytes = THROTTLED_PORT_CAP_BYTES; } catch (_) {}
-      }
       const rawOp = (info.operator && info.operator.toLowerCase() !== 'unknown') ? info.operator : (meta.operator || '');
       const operator = typeof normalizeOp === 'function' ? normalizeOp(rawOp, srv) : rawOp;
       out.push({ server: srv, client, operator: operator || '', bytes });
@@ -108,8 +102,7 @@ module.exports = function createAnalyticsRouter(deps) {
         _liveOpMapCache = { ts: Date.now(), map };
       }
       const cells = computeLiveCells(await fetchAllServersDataCached(), _liveSnapStmt, portKeyToPortName || {}, _liveOpMapCache.map,
-        (rawOp, srv) => { try { return normalizeOperator(rawOp, ((SERVER_COUNTRIES[srv] || {}).country || '') === 'RO') || rawOp; } catch (_) { return rawOp; } },
-        (srv, nick) => { try { return require('../jobs/sim-exhaustion').isExhausted(db, { server: srv, nick }); } catch (_) { return false; } });
+        (rawOp, srv) => { try { return normalizeOperator(rawOp, ((SERVER_COUNTRIES[srv] || {}).country || '') === 'RO') || rawOp; } catch (_) { return rawOp; } });
       const countryServers = view === 'country' && idKey !== 'all' ? _serversForCountry(idKey) : null;
       let gb = 0;
       const ops = {};
