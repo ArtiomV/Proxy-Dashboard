@@ -323,7 +323,7 @@ function srvMetRowV2(ic, title, sub, current, absText, average, series, options)
     + '</span>'
     + (avg != null
       ? '<span class="server-metric-average">ср. 24ч:&nbsp; ' + esc(avg) + '</span>'
-      : '<span class="server-metric-average server-metric-average--empty">—</span>')
+      : '')   // 27.09: пилюля среднего отключена по запросу владельца — пустышку не рисуем
     + '</div>';
 }
 

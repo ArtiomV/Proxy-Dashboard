@@ -73,24 +73,10 @@ const SUPPRESSIBLE_RULES = new Set([
   'sim_iccid_changed', 'sim_status_bad', 'sim_redirect_imposed',
   'reboot_score_high', 'proxy_expiring_3d',
 ]);
-// 2026-09-26: пока модем в состоянии «пакет исчерпан» (sim_exhaustion_state,
-// миграция 104), алерты его нестабильности — заведомый шум: причина известна
-// и лечится пополнением пакета у оператора. Подавляем только правила
-// неработоспособности; само sim_package_exhausted/recovered, SIM-проблемы
-// (redirect/iccid/status — это ДРУГАЯ беда), failover и биллинг не трогаем.
-const simExhaustion = require('../jobs/sim-exhaustion');
-const EXHAUST_SUPPRESSED_RULES = new Set([
-  'modem_offline_20m', 'modem_recovered',
-  'modem_ping_dead', 'modem_ping_recovered', 'modem_ping_slow',
-  'modem_http_fail', 'modem_http_recovered',
-  'modem_speed_baseline_degraded', 'modem_speed_baseline_recovered',
-  'volume_modem_hourly', 'recovery_exhausted',
-]);
-function _exhaustedSuppressed(ruleId, payload) {
-  if (!EXHAUST_SUPPRESSED_RULES.has(ruleId)) return false;
-  if (!payload || (!payload.imei && !(payload.server && payload.nick) && !payload.nick)) return false;
-  try { return simExhaustion.isExhausted(db, payload); } catch (_) { return false; }
-}
+// 2026-09-27: подавление алертов нестабильности по модемам в состоянии
+// «пакет исчерпан» УБРАНО по решению владельца (пакеты реактивируются сами,
+// штатные алерты должны доходить). Детекция и алерты sim_package_exhausted/
+// recovered остаются.
 function _depsEnabled() {
   return !appSettings || appSettings.alert_dependencies_enabled !== false;
 }
@@ -789,10 +775,10 @@ const RULES = {
     render: p => p.kind === 'throttled'
       ? `🪫 <b>Скорость урезана оператором: ${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server))})\n\nМодем жив (IP/пинг в норме), но ${p.evidence && String(p.evidence).startsWith('трафик заморожен') ? `трафик через него замерз (${esc(String(p.evidence).replace('трафик заморожен ', ''))} почти без движения), а контрольный замер дал ↓${p.dl != null ? p.dl : '?'} Mbps` : `замер скорости дал ↓${p.dl != null ? p.dl : '?'} Mbps, и контрольный замер после 5-мин паузы это подтвердил`} — типичный троттлинг после исчерпания быстрого пакета${p.operator ? ` (${esc(p.operator)})` : ''}.` +
         (p.used_gb != null ? `\nРасход с начала месяца: <b>${p.used_gb} ГБ</b>.` : '') +
-        `\nУведомления о нестабильности этого модема заглушены, почасовые замеры по нему остановлены. После пополнения сообщу — восстановление подтверждаю контрольным спидтестом.`
+        `\nПочасовые замеры по модему остановлены. После пополнения сообщу — восстановление подтверждаю контрольным спидтестом.`
       : `🪫 <b>Похоже, у симки кончился трафик: ${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server))})\n\nSIM в сети, сессия поднята, но IP не выдаётся и пинг 100% уже ${p.mins || '?'} мин. — типичная картина исчерпанного пакета${p.operator ? ` (${esc(p.operator)})` : ''}.` +
         (p.used_gb != null ? `\nРасход с начала месяца: <b>${p.used_gb} ГБ</b>.` : '') +
-        `\nУведомления о нестабильности этого модема заглушены до восстановления пакета; спидтесты по нему пропускаются.` +
+        `\nСпидтесты по модему пропускаются.` +
         `\nПроверь баланс/пакет у оператора; после пополнения модем вернётся сам — я сообщу.`,
   },
   // 2026-09-26: операторский уровень — большая часть симок оператора на
@@ -1249,9 +1235,6 @@ function _triggerNow(ruleId, payload) {
 
     // B3 (23.08): объект в maintenance-окне → алерты по нему молчат.
     if (maintenance.isInMaintenance(db, { server: payload && payload.server, nick: payload && payload.nick }, Date.now())) return false;
-    // 2026-09-26: у модема исчерпан пакет → его алерты нестабильности молчат
-    // до подтверждённого восстановления (sim_package_recovered снимает блок).
-    if (_exhaustedSuppressed(ruleId, payload)) return false;
     // B2 (23.08): активный ack («в работе» до until_ts / «решено») глушит
     // правило по dedup-ключу. Cooldown при ack НЕ трогаем: по истечении TTL
     // алерт повторится сам, если проблема жива.
@@ -1382,7 +1365,6 @@ function trigger(ruleId, payload) {
       && Date.now() - _bootAt >= BOOT_GRACE_MS
       && !(payload && payload.server && _depsEnabled() && boxDownState.has(payload.server) && SUPPRESSIBLE_RULES.has(ruleId))
       && !maintenance.isInMaintenance(db, { server: payload && payload.server, nick: payload && payload.nick }, Date.now())
-      && !_exhaustedSuppressed(ruleId, payload)
       && !_ackActive(ruleId, _idedup)
       && (!_irule || Date.now() - _icooldown >= (_irule.cooldownSec || 0) * 1000);
     if (canCorrelate) {

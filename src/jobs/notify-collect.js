@@ -124,12 +124,6 @@ async function passOfflineModems() {
     try {
       if (maintenance.isInMaintenance(db, { server: o.server, nick }, Date.now())) continue;
     } catch (_) { /* maintenance best-effort */ }
-    // 2026-09-26: у модема исчерпан пакет (sim_exhaustion_state) — оффлайн-
-    // карточка не нужна даже в колокольчике: причина известна, уже алертили.
-    try {
-      const simExhaustion = require('./sim-exhaustion');
-      if (simExhaustion.isExhausted(db, { server: o.server, nick, imei: String(o.key).split('|')[1] || '' })) continue;
-    } catch (_) { /* sim-exhaustion best-effort */ }
     alerts.recordBellEvent({
       // Exact canonical alert key: if the tracking alert already wrote the
       // bell card, recordBellEvent sees it and does not create a second one.

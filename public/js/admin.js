@@ -4055,15 +4055,15 @@ function renderNewFleetServers(){
     // Новый макет: два оперативных графика, затем флапание, системное событие
     // и общий нижний ряд аппаратных показателей (RAM/диск переехали вниз).
     if(met&&typeof srvMetRowV2==='function'){
-      var a24=met.avg24||{}, s24=met.series24||{};
+      var s24=met.series24||{};
       // Ряды для ховер-тултипа: время + все метрики точки (21.08).
       if(s24&&s24.ts&&s24.ts.length) (window._srvFleetSeries=window._srvFleetSeries||{})[srv]={ts:s24.ts,cpu:s24.cpu,mem:s24.mem,conns:s24.conns};
       h+='<div class="server-metrics-list">';
       // Подпись CPU — реальная модель с бокса (SSH, поле cpu_model): «i3-10100 · 8 пот.»
       var cpuSub='Загрузка процессора';
       if(met.cpu_model&&typeof _srvMetCpuModelLabel==='function') cpuSub=_srvMetCpuModelLabel(met.cpu_model,met.cpu_cores)||cpuSub;
-      h+=srvMetRowV2('cpu','CPU',cpuSub,met.cpu_pct,null,a24.cpu_pct,s24.cpu);
-      h+=srvMetRowV2('connections','Соединения','TCP-подключения',met.conns,null,a24.conns,s24.conns,{unit:'',integer:true,tone:'purple',relativeScale:true});
+      h+=srvMetRowV2('cpu','CPU',cpuSub,met.cpu_pct,null,null,s24.cpu);
+      h+=srvMetRowV2('connections','Соединения','TCP-подключения',met.conns,null,null,s24.conns,{unit:'',integer:true,tone:'purple',relativeScale:true});
       h+='</div>';
 
       var down=met.downtime24||{episodes:0,duration_sec:0,events:[]};
