@@ -252,7 +252,7 @@ const healthyModem = (imei, nick, cellop = 'moldcell') => ({
   net_details: { SimStatus: 'SIM OK', ConnectionStatus: 'OK, ppp_connected', IS_ONLINE: 'yes', EXT_IP: '94.139.1.5', ping_stats: '150ms, 0% loss', CELLOP: cellop },
 });
 
-function bootV4(feed, speedResult) {
+function bootV4(feed, speedResult, settings = {}) {
   const db = new Database(':memory:');
   db.exec('CREATE TABLE traffic_hourly (server_name TEXT, nick TEXT, hour_start TEXT, bytes_in INTEGER, bytes_out INTEGER)');
   db.exec(MIGRATION_104);
@@ -266,7 +266,7 @@ function bootV4(feed, speedResult) {
   const mkJob = () => simExhaustion.create({
     db, logger: { info() {}, warn() {}, error() {} },
     alerts: { trigger: (rule, payload) => { fired.push({ rule, payload }); return true; } },
-    getSetting: (k, d) => d,
+    getSetting: (k, d) => (k in settings ? settings[k] : d),
     fetchAllServersDataCached: async () => feed(),
     apiServers: [{ name: 'S1' }, { name: 'S4' }],
     fetchApi: async (server, path) => {
@@ -367,9 +367,9 @@ describe('sim-exhaustion v4: операторский уровень', () => {
 // живого фида. Почасовой монитор меряет пару ников в час — слишком медленно
 // при массовом троттлинге (флуд MD_72/73). Дельта < 5 МБ за 20 мин → кандидат
 // на ту же подтверждающую пробу. Отбор бесплатный, спидтест — арбитр.
-const frozenModem = (imei, nick, dayIn, dayOut) => ({
+const frozenModem = (imei, nick, dayIn, dayOut, cellop = 'moldcell') => ({
   modem_details: { IMEI: imei, NICK: nick },
-  net_details: { SimStatus: 'SIM OK', ConnectionStatus: 'OK, ppp_connected', IS_ONLINE: 'yes', EXT_IP: '94.139.1.5', ping_stats: '150ms, 0% loss', CELLOP: 'moldcell' },
+  net_details: { SimStatus: 'SIM OK', ConnectionStatus: 'OK, ppp_connected', IS_ONLINE: 'yes', EXT_IP: '94.139.1.5', ping_stats: '150ms, 0% loss', CELLOP: cellop },
   ports: [{ bandwidth_bytes_day_in: String(dayIn), bandwidth_bytes_day_out: String(dayOut) }],
 });
 
@@ -427,6 +427,70 @@ describe('sim-exhaustion v5: замороженный трафик (bw-счёт�
     job._bwTrack.get('S1|imeiF').frozenSince = Date.now() - 25 * 60000;
     await job.runOnce();
     expect(probes.length).toBe(1);
+    expect(fired.length).toBe(0);
+  });
+});
+
+// ── 2026-09-27 (v5.1): ложные срабатывания MD2_50-66. Moldtelecom/Orange MD —
+// хронически медленные модемы (норма 1–2 Мбит, трафик 6–8 ГБ/сут), абсолютный
+// порог 1 Мбит их флаганул. Фикс: allowlist операторов для троттлинг-сигнатур
+// (дефолт Moldcell) + относительный порог восстановления от нормы модема.
+describe('sim-exhaustion v5.1: allowlist операторов и относительное восстановление', () => {
+  it('Moldtelecom не кандидатствует в троттлинг по замороженному трафику (дефолтный allowlist)', async () => {
+    const { mkJob, fired, db, probes } = bootV4(
+      () => [{ serverName: 'S1', status: [frozenModem('imeiT', 'MD2_55', 1e9, 5e8, 'unite')] }],
+      { download: '0.5', upload: '0.2', ping: '900' });
+    const job = mkJob();
+    await job.runOnce();
+    await job.runOnce();
+    job._bwTrack.get('S1|imeiT').frozenSince = Date.now() - 60 * 60000;
+    await job.runOnce();
+    expect(probes.length).toBe(0);   // даже пробы нет — оператор вне allowlist
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(0);
+    expect(fired.length).toBe(0);
+  });
+
+  it('allowlist расширяется настройкой: Moldtelecom флагается при включении', async () => {
+    const { mkJob, fired, db, probes } = bootV4(
+      () => [{ serverName: 'S1', status: [frozenModem('imeiT', 'MD2_55', 1e9, 5e8, 'unite')] }],
+      { download: '0.5', upload: '0.2', ping: '900' },
+      { sim_exhaustion_throttle_operators: 'moldcell, moldtelecom' });
+    const job = mkJob();
+    await job.runOnce();
+    await job.runOnce();
+    job._bwTrack.get('S1|imeiT').frozenSince = Date.now() - 60 * 60000;
+    await job.runOnce();
+    expect(probes.length).toBe(1);
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(1);
+    expect(fired[0].payload.operator).toBe('Moldtelecom');
+  });
+
+  it('восстановление относительно нормы модема: медленный-by-design (норма ~1.3) восстанавливается на 1.6 Мбит', async () => {
+    const { mkJob, fired, db } = bootV4(
+      () => [{ serverName: 'S1', status: [healthyModem('imeiT', 'MD2_55', 'unite')] }],
+      { download: '1.6', upload: '0.8', ping: '200' });
+    // 14-дневная норма ~1.3 Мбит (медиана) — как у MD2_52 в проде.
+    const ins = db.prepare("INSERT INTO speed_monitor (server, nick, download, ok) VALUES ('S1', 'MD2_55', ?, 1)");
+    for (const d of [0.9, 1.1, 1.3, 1.3, 1.4, 1.5, 1.8]) ins.run(d);
+    db.prepare("INSERT INTO sim_exhaustion_state (server_name, imei, nick, operator, since_ts, alerted_at) VALUES ('S1', 'imeiT', 'MD2_55', 'Moldtelecom', ?, ?)")
+      .run(Date.now() - 3600e3, Date.now() - 3500e3);
+
+    const job = mkJob();
+    await job.runOnce();   // проба: dl 1.6 ≥ max(1, min(5, 1.3*0.5)) = 1 → восстановлен
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(0);
+    expect(fired.length).toBe(1);
+    expect(fired[0].rule).toBe('sim_package_recovered');
+  });
+
+  it('без истории замеров — абсолютный порог 5 Мбит (прежнее поведение)', async () => {
+    const { mkJob, fired, db } = bootV4(
+      () => [{ serverName: 'S1', status: [healthyModem('imeiM', 'MD_1')] }],
+      { download: '1.6', upload: '0.8', ping: '200' });
+    db.prepare("INSERT INTO sim_exhaustion_state (server_name, imei, nick, operator, since_ts, alerted_at) VALUES ('S1', 'imeiM', 'MD_1', 'Moldcell', ?, ?)")
+      .run(Date.now() - 3600e3, Date.now() - 3500e3);
+    const job = mkJob();
+    await job.runOnce();   // 1.6 < 5 и нормы нет → держим состояние
+    expect(db.prepare('SELECT COUNT(*) c FROM sim_exhaustion_state').get().c).toBe(1);
     expect(fired.length).toBe(0);
   });
 });

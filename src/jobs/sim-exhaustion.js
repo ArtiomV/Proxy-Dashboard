@@ -157,6 +157,49 @@ function create(deps) {
   function _frozenClearedMs() {
     return Math.max(1, Number(getSetting('sim_exhaustion_frozen_backoff_hours', 6)) || 6) * 3600000;
   }
+  // Сигнатуры 2/3 (троттлинг) — только для операторов, у которых пакет
+  // реально исчерпывается в непригодную скорость. Инцидент 26.09: Moldtelecom/
+  // Orange MD на S1 (MD2_50-66) — хронически медленные модемы (их НОРМА
+  // 1–2 Мбит/с по 200+ замерам за 14 дней, трафик 6–8 ГБ/сут идёт) попали в
+  // состояние по абсолютному порогу 1 Мбит. Дефолт — Moldcell; список
+  // расширяется настройкой (CSV, регистр не важен). Пустая строка = все.
+  function _throttleOps() {
+    const raw = getSetting('sim_exhaustion_throttle_operators', 'Moldcell');
+    const list = String(raw == null ? 'Moldcell' : raw).split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+    return new Set(list);   // пустой Set = «все операторы» (explicit opt-in)
+  }
+  function _throttleOpAllowed(op) {
+    const set = _throttleOps();
+    if (set.size === 0) return true;
+    return set.has(String(op || '').toLowerCase());
+  }
+  // Медиана dl модема за 14 дней из speed_monitor — «его нормальная скорость».
+  // Нужна для относительного порога восстановления: медленный-by-design модем
+  // (туннельный APN, 1–2 Мбит в норме) не должен застрять в состоянии из-за
+  // абсолютных 5 Мбит. Кэш на прогон.
+  let _baselineCache = null;
+  function _baselineDl(srv, nick) {
+    if (!_baselineCache) _baselineCache = new Map();
+    const k = srv + '|' + nick;
+    if (_baselineCache.has(k)) return _baselineCache.get(k);
+    let out = null;
+    try {
+      const rows = db.prepare(`SELECT download FROM speed_monitor
+        WHERE server = ? AND nick = ? AND ok = 1 AND download > 0
+          AND ts >= datetime('now', '-14 days') ORDER BY download`).all(srv, nick);
+      if (rows.length >= 5) out = Number(rows[Math.floor(rows.length / 2)].download) || null;
+    } catch (_) { /* минимальная схема */ }
+    _baselineCache.set(k, out);
+    return out;
+  }
+  // Порог восстановления: max(1, min(абсолютный, норма × 0.5)). Moldcell
+  // (норма ~60) → 5 Мбит; туннельный модем (норма 1.3) → 1 Мбит.
+  function _recoverThreshold(srv, nick) {
+    const base = _baselineDl(srv, nick);
+    const abs = _recoverDlMbps();
+    if (!base) return abs;
+    return Math.max(1, Math.min(abs, base * 0.5));
+  }
 
   // Одна спидтест-проба через бокс (как speed-monitor, но одиночная и без
   // ретраев: на задушенной симке замер сам по себе медленный). null — замер
@@ -246,8 +289,11 @@ function create(deps) {
       const nick = (hit.m.modem_details || {}).NICK || row.nick;
       const res = await _probeSpeed(hit.srv, nick);
       if (!res || !(res.dl > 0 || res.ul > 0)) continue;        // замер не удался — следующая пробы по кулдауну
-      if (res.dl < _recoverDlMbps()) {
-        logger.info(`[SimExhaustion] ${nick} (${hit.srv}): скорость всё ещё урезана (↓${res.dl} Mbps < ${_recoverDlMbps()}) — состояние держим`);
+      // Относительный порог: медленный-by-design модем (норма 1–2 Мбит,
+      // инцидент 26.09 с Moldtelecom/Orange MD на S1) не застревает навсегда.
+      const thr = _recoverThreshold(hit.srv, nick);
+      if (res.dl < thr) {
+        logger.info(`[SimExhaustion] ${nick} (${hit.srv}): скорость всё ещё урезана (↓${res.dl} Mbps < ${thr}) — состояние держим`);
         continue;
       }
       // Подтверждённое восстановление: снимаем состояние и все ограничения.
@@ -324,12 +370,13 @@ function create(deps) {
       if (_symptomatic(hit.m)) continue;         // это сигнатура 1 — она сама разберётся
       const imei = (hit.m.modem_details || {}).IMEI;
       if (!imei) continue;
+      const op = _normOp((hit.m.net_details || {}).CELLOP || '', r.server);
+      if (!_throttleOpAllowed(op)) continue;     // оператор без троттлинга (Moldtelecom/Orange MD — инцидент 26.09)
       const key = r.server + '|' + imei;
       seenCandidates.add(key);
       const cand = throttleCandidates.get(key);
       if (!cand) { throttleCandidates.set(key, { firstAt: now, server: r.server, nick: r.nick }); continue; }  // модем «отдыхает»
       if (now - cand.firstAt < _throttleConfirmMs()) continue;
-      const op = _normOp((hit.m.net_details || {}).CELLOP || '', r.server);
       const outcome = await _probeAndFlag({ srv: r.server, nick: r.nick, imei, op, now, budget, evidence: 'повтор после 5-мин паузы' });
       if (outcome === 'cleared' || outcome === 'flagged') throttleCandidates.delete(key);
       if (outcome === 'flagged') flagged++;
@@ -381,10 +428,11 @@ function create(deps) {
       bwTrack.set(key, { total, at: now, frozenSince });
       if (now - frozenSince < _frozenMinMs()) continue;
       if (!_healthy(m)) continue;                    // оффлайн/без IP — пробовать бессмысленно
-      const clearedAt = frozenClearedAt.get(key) || 0;
-      if (now - clearedAt < _frozenClearedMs()) continue;   // недавняя проба показала норму — бэкофф
       const nick = (m.modem_details || {}).NICK || imei;
       const op = _normOp((m.net_details || {}).CELLOP || '', hit.srv);
+      if (!_throttleOpAllowed(op)) { bwTrack.set(key, { total, at: now, frozenSince: null }); continue; }   // оператор без троттлинга
+      const clearedAt = frozenClearedAt.get(key) || 0;
+      if (now - clearedAt < _frozenClearedMs()) continue;   // недавняя проба показала норму — бэкофф
       const frozenMin = Math.round((now - frozenSince) / 60000);
       const outcome = await _probeAndFlag({ srv: hit.srv, nick, imei, op, now, budget, evidence: `трафик заморожен ${frozenMin} мин` });
       if (outcome === 'cleared') { frozenClearedAt.set(key, now); bwTrack.set(key, { total, at: now, frozenSince: null }); }
@@ -443,6 +491,7 @@ function create(deps) {
     let alerted = 0, active = 0;
     const results = await fetchAllServersDataCached();
     const now = Date.now();
+    _baselineCache = null;   // нормы скорости перечитываем на каждый прогон
 
     // Индексы живого фида: по IMEI (восстановление — модем мог переехать) и
     // по server|nick (троттлинг-кандидаты из speed_monitor адресуются ником).
