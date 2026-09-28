@@ -305,3 +305,56 @@ describe('daily_summary — ротации: аномалии по операто
     expect(warns).toEqual([]);
   });
 });
+
+// 2026-09-28: блок per_gb клиентов считает стоимость по ЭФФЕКТИВНОЙ цене
+// (priceOverride → tariff → price), как биллинг — иначе сводка показывала
+// базовую цену 29 ₽ при фактическом списании по override 23 ₽.
+describe('daily_summary — per_gb блок по эффективной цене (priceOverride)', () => {
+  it('стоимость = ГБ × priceOverride, а не × clients.price', async () => {
+    db = new Database(':memory:');
+    db.exec(SCHEMA);
+    db.exec(MODEM_PING_MIGRATION);
+    db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (id INTEGER PRIMARY KEY AUTOINCREMENT, rebooted_at TEXT NOT NULL, status TEXT)`);
+    db.exec(`CREATE TABLE IF NOT EXISTS tariffs (id INTEGER PRIMARY KEY, name TEXT, price REAL)`);
+    warns = [];
+    logger = { warn: (m) => warns.push(m), info() {}, error() {}, debug() {} };
+    db.prepare("INSERT INTO clients (id, login, name) VALUES ('c1', 'u_c1', 'Палитрумлаб')").run();
+    // 10 ГБ вчера (МСК-день 2026-08-09 = UTC [08 21:00, 09 21:00))
+    db.prepare("INSERT INTO traffic_hourly (server_name, port_id, nick, client_name, operator, hour_start, bytes_in, bytes_out, uncertain) VALUES ('S1','S1_p1','MD_1','Brandanalytics','Moldcell','2026-08-09 10:00', 8e9, 2e9, 0)").run();
+    tgSummary.init({
+      db, logger,
+      clientById: new Map([
+        ['c1', { id: 'c1', name: 'Палитрумлаб', portName: 'Brandanalytics', billingType: 'per_gb', price: 29, priceOverride: 23 }],
+      ]),
+      getSetting: (_k, dflt) => dflt,
+      aiInsights: null,
+    });
+    const { text } = await tgSummary.buildDailySummary('2026-08-09');
+    expect(text).toContain('per_gb клиенты:');
+    expect(text).toContain('→ 230 ₽');   // 10 GB × 23 ₽ (override), не ×29 = 290 ₽
+    expect(text).not.toContain('→ 290 ₽');
+  });
+
+  it('без override цена берётся из тарифа, иначе legacy price', async () => {
+    db = new Database(':memory:');
+    db.exec(SCHEMA);
+    db.exec(MODEM_PING_MIGRATION);
+    db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (id INTEGER PRIMARY KEY AUTOINCREMENT, rebooted_at TEXT NOT NULL, status TEXT)`);
+    db.exec(`CREATE TABLE IF NOT EXISTS tariffs (id INTEGER PRIMARY KEY, name TEXT, price REAL)`);
+    db.prepare("INSERT INTO tariffs (id, name, price) VALUES (7, 'Корп', 25)").run();
+    db.prepare("INSERT INTO clients (id, login, name) VALUES ('c1', 'u_c1', 'Палитрумлаб')").run();
+    db.prepare("INSERT INTO traffic_hourly (server_name, port_id, nick, client_name, operator, hour_start, bytes_in, bytes_out, uncertain) VALUES ('S1','S1_p1','MD_1','Brandanalytics','Moldcell','2026-08-09 10:00', 8e9, 2e9, 0)").run();
+    warns = [];
+    logger = { warn: (m) => warns.push(m), info() {}, error() {}, debug() {} };
+    tgSummary.init({
+      db, logger,
+      clientById: new Map([
+        ['c1', { id: 'c1', name: 'Палитрумлаб', portName: 'Brandanalytics', billingType: 'per_gb', price: 29, tariffId: 7 }],
+      ]),
+      getSetting: (_k, dflt) => dflt,
+      aiInsights: null,
+    });
+    const { text } = await tgSummary.buildDailySummary('2026-08-09');
+    expect(text).toContain('→ 250 ₽');   // 10 GB × 25 ₽ (tariff)
+  });
+});

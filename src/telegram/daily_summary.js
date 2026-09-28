@@ -232,6 +232,16 @@ async function buildDailySummary(date) {
   lines.push(`Всего за день: <b>${fmtGb(totalBytes)}</b>` + (peakHourRow ? `, пик в ${peakHourRow.h} (${fmtGb(peakHourRow.bytes)})` : ''));
 
   // Per-client breakdown for per_gb tariff
+  // 2026-09-28: эффективная цена как в биллинге (priceOverride → tariff → price),
+  // иначе сводка показывала список по базовой цене (Палитрумлаб: 29 ₽ в блоке
+  // трафика при фактическом списании по override 23 ₽ — «два разных дохода»).
+  function effectivePrice(cl) {
+    if (cl && typeof cl.priceOverride === 'number' && cl.priceOverride > 0) return cl.priceOverride;
+    if (cl && cl.tariffId != null) {
+      try { const t = db.prepare('SELECT price FROM tariffs WHERE id = ?').get(cl.tariffId); if (t && t.price > 0) return t.price; } catch (_) {}
+    }
+    return cl ? cl.price : 0;
+  }
   const perGbClients = trafficRows.filter(r => {
     const cl = Array.from(clientById.values()).find(c => c.portName === r.client_name);
     return cl && cl.billingType === 'per_gb';
@@ -240,8 +250,7 @@ async function buildDailySummary(date) {
     lines.push('per_gb клиенты:');
     for (const r of perGbClients.slice(0, 5)) {
       const cl = Array.from(clientById.values()).find(c => c.portName === r.client_name);
-      const price = cl ? cl.price : 0;
-      const cost = (r.bytes / 1e9) * price;
+      const cost = (r.bytes / 1e9) * effectivePrice(cl);
       lines.push(`  • ${escHtml(trunc(cl ? cl.name : r.client_name, 32))}: ${fmtGb(r.bytes)} → ${fmtMoney(cost)}`);
     }
   }
