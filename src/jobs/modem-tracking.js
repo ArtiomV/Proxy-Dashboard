@@ -29,6 +29,10 @@ function create(deps) {
   // рестарт = первый цикл без событий — это корректно, данных ещё нет).
   const _prevUp = new Map();
 
+  // 2026-10-01: подряд идущие сбои опроса по серверу — warn в system_log пишем
+  // только со второго подряд (иначе микроблипы панели S4 каждые 5 мин шумят).
+  const _failStreak = {};
+
   // All persisted daily buckets and all period readers use Moscow calendar
   // days. Keeping this explicit avoids a one-day split when the host runs in
   // another timezone or changes DST.
@@ -73,6 +77,7 @@ async function trackModems() {
     let statusArr;
     try {
       const data = await fetchServerData(server);
+      _failStreak[server.name] = 0;   // 2026-10-01: серия сбоев прервана
       statusArr = Array.isArray(data.status) ? data.status : [];
       // A1 (23.08): разбор ping_stats бокса (latency/loss) — история, алерты
       // «online, но без интернета», вход для ping-based аптайма ниже.
@@ -119,13 +124,21 @@ async function trackModems() {
       }
     } catch (e) {
       logger.info(`[Tracking] Server ${server.name} unreachable: ${e.message} — marking all modems as down`);
-      logActivity('modem', 'warn', 'server_unreachable', server.name, `Server unreachable: ${e.message}`);
       if (!_serverDownSince[server.name]) { _serverDownSince[server.name] = Date.now(); if (persistServerDownSince) persistServerDownSince(); }
       _fleetDirty = true;   // SSE (23.08): бокс недоступен → fleet_update
+      // 2026-10-01: warn в system_log — только со ВТОРОГО подряд сбоя или при
+      // простое ≥2 мин. Одно-полльные микроблипы (reset_gently на S4 блочит
+      // панель ~60с каждые 5 мин → ~335 шумных событий/сут) больше не
+      // засоряют ленту; реальные простои логируются со второго полла (~2 мин),
+      // downtime/TG-пороги не меняются.
+      _failStreak[server.name] = (_failStreak[server.name] || 0) + 1;
+      const downMs = Date.now() - _serverDownSince[server.name];
+      if (_failStreak[server.name] >= 2 || downMs >= 120000) {
+        logActivity('modem', 'warn', 'server_unreachable', server.name, `Server unreachable: ${e.message}`);
+      }
       // Stage 18.14: only alert if down ≥10 min — RO server has occasional
       // transient ECONNRESET that recovers within minutes; firing per blip
       // was just noise. Cooldown (1h) still prevents repeat spam after that.
-      const downMs = Date.now() - _serverDownSince[server.name];
       if (downMs >= DISCONNECTED_MS) {   // тот же 10-мин порог, что у модемов (WP1)
         if (alerts.trigger('server_unreachable', { server: server.name, error: e.message, downSec: Math.round(downMs / 1000) })) {
           _serverUnreachableAlertSent[server.name] = true;

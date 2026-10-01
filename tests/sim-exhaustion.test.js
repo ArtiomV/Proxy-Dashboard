@@ -40,7 +40,10 @@ describe('sim-exhaustion', () => {
   it('симптом ≥15 мин непрерывно → один алерт с контекстом расхода', async () => {
     let feed = () => [{ serverName: 'S1', status: [MODEM_EX, MODEM_OK] }];
     const { job, fired, db } = boot(feed);
-    db.prepare("INSERT INTO traffic_hourly VALUES ('S1', 'MD_1', '2026-09-26 08:00', 5e9, 1e9)").run();
+    // 2026-10-01: дата — текущий месяц (иначе тест ломается на границе месяца:
+    // _usedGb считает расход с 1-го числа ТЕКУЩЕГО месяца).
+    const ts = new Date().toISOString().slice(0, 7) + '-01 08:00';
+    db.prepare("INSERT INTO traffic_hourly VALUES ('S1', 'MD_1', ?, 5e9, 1e9)").run(ts);
 
     await job.runOnce();   // t0 — стейт создан, алерта ещё нет
     expect(fired.length).toBe(0);
