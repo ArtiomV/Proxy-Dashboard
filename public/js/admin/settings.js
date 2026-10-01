@@ -5,9 +5,11 @@
 // общая api() этого больше не делает (посторонний POST снимал защиту).
 // Очищаем поля, помеченные ДО начала запроса; правка во время сохранения
 // флаг не теряет (ts в dataset.dirty, admin.js).
+// 2026-10-01 · fix: обёртка рекурсивно вызывала саму себя (stack overflow,
+// вечное «Сохранение…») — внутри должен быть реальный PUT.
 function apiSettingsPut(data){
   var startedAt = Date.now();
-  return apiSettingsPut(data).then(function(d){
+  return api(API+'/api/admin/settings',{method:'PUT',json:data}).then(function(d){
     if (d && d.ok !== false && typeof window._clearSettingsDirty === 'function') {
       try { window._clearSettingsDirty(startedAt); } catch(_) {}
     }
