@@ -304,17 +304,6 @@
           <!-- Сводка метрик — под графиком (была над ним) -->
           <div id="clientHeatmapSummary" style="display:none;align-items:stretch;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)"></div>
         </div>
-
-        <!-- Почасовые замеры скорости — часть аналитики, а не истории IP. -->
-        <div id="clientSpeedCard" style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-            <div>
-              <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Скорость модемов</h3>
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px">почасовые замеры, последние 48 часов · GMT+3</div>
-            </div>
-          </div>
-          <div id="clientSpeedLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;font-size:11px;color:var(--text-2)"></div>
-          <div id="clientSpeedWrap" style="height:280px;position:relative"><canvas id="clientSpeedChart"></canvas><div id="clientSpeedSkel" class="skel" style="position:absolute;inset:0"><div class="skel-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
         </div>
 
         <!-- Скорость по операторам и локациям (витрина флота, без привязки к модему) -->
@@ -793,7 +782,7 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
 <script src="/js/utils.js?v=0820e"></script>
 <script src="/js/delegation.js?v=0813c"></script>
 <script src="/js/auth-utils.js?v=0814a"></script>
-<script src="/js/client.js?v=1003a"></script>
+<script src="/js/client.js?v=1003b"></script>
 
 </body>
 </html>

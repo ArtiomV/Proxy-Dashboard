@@ -443,7 +443,6 @@ document.addEventListener('click',function(e){
 
 function renderAnalytics(){
   loadClientHeatmap();
-  loadClientSpeed();
   loadClientOpSpeed();
   if(!tableData||!tableData.length) return;
 
@@ -598,116 +597,6 @@ function loadClientHeatmap(){
   }).catch(function(){
     box.innerHTML='<div style="padding:30px;text-align:center;color:var(--text-3);font-size:12px">Не удалось загрузить почасовые данные.</div>';
   });
-}
-
-// --- Почасовые замеры скорости модемов клиента (SpeedMonitor) ---
-// GET /api/client/speed_monitor → {rows:[{nick,hour_msk,avg_dl,...}], modems:[{nick,operator,location}]}
-var _clientSpeedChart=null;
-function loadClientSpeed(){
-  var card=document.getElementById('clientSpeedCard');
-  var skel=document.getElementById('clientSpeedSkel');
-  if(!card) return;
-  api('/api/client/speed_monitor?hours=48').then(function(data){
-    if(skel) skel.style.display='none';
-    var rows=(data&&data.rows)||[];
-    if(!rows.length){card.style.display='none';return}
-    card.style.display='';
-    // Ось часов — объединение всех hour_msk
-    var hoursSet={};
-    rows.forEach(function(r){hoursSet[r.hour_msk]=1});
-    var hours=Object.keys(hoursSet).sort();
-    var labels=hours.map(function(h){return h.slice(8,10)+'.'+h.slice(5,7)+' '+h.slice(11,13)+':00'});
-    // Мета по никам: оператор + локация
-    var metaByNick={};
-    ((data&&data.modems)||[]).forEach(function(md){metaByNick[md.nick]=md});
-    var nicks=[];var seen={};
-    rows.forEach(function(r){if(!seen[r.nick]){seen[r.nick]=1;nicks.push(r.nick)}});
-    nicks.sort();
-    var colors=['#1960C9','#34C759','#FFCC00','#9b59b6','#FF383C','#3498db','#e67e22'];
-    var datasets=nicks.map(function(nick,idx){
-      var byHour={};
-      rows.forEach(function(r){if(r.nick===nick)byHour[r.hour_msk]=r.avg_dl});
-      var md=metaByNick[nick]||{};
-      var label=nick+(md.operator?' · '+md.operator:'')+(md.location?' · '+md.location:'');
-      return{
-        label:label,
-        data:hours.map(function(h){return byHour[h]!==undefined?byHour[h]:null}),
-        borderColor:colors[idx%colors.length],
-        backgroundColor:colors[idx%colors.length],
-        borderWidth:2,pointRadius:0,tension:.3,spanGaps:true
-      };
-    });
-    var isDark=document.documentElement.getAttribute('data-theme')!=='light';
-    var textColor=isDark?'#c9d1d9':'#24292f';
-    var gridColor=isDark?'rgba(255,255,255,0.06)':'rgba(0,0,0,0.08)';
-    if(_clientSpeedChart){_clientSpeedChart.destroy();_clientSpeedChart=null}
-    var ctx=document.getElementById('clientSpeedChart').getContext('2d');
-    _clientSpeedChart=new Chart(ctx,{type:'line',data:{labels:labels,datasets:datasets},options:{
-      responsive:true,maintainAspectRatio:false,
-      interaction:{mode:'index',intersect:false},
-      plugins:{
-        legend:{display:true,position:'bottom',labels:{color:textColor,font:{size:10},boxWidth:10}},
-        tooltip:{callbacks:{label:function(c){return ' '+c.dataset.label+': '+(c.parsed.y!==null?c.parsed.y.toFixed(1)+' Мбит/с':'—')}}}
-      },
-      scales:{
-        x:{ticks:{color:textColor,font:{size:9},maxTicksLimit:12},grid:{color:gridColor}},
-        y:{beginAtZero:true,title:{display:true,text:'Мбит/с (скачивание)',color:textColor,font:{size:10}},ticks:{color:textColor,font:{size:10}},grid:{color:gridColor}}
-      }
-    }});
-    var legendBox=document.getElementById('clientSpeedLegend');
-    if(legendBox) legendBox.innerHTML='';
-  }).catch(function(){
-    if(skel) skel.style.display='none';
-    card.style.display='none';
-  });
-}
-
-// 2026-10-02: «Скорость по операторам и локациям» — витрина флота без привязки
-// к модему: клиенту важно, какой оператор на какой площадке быстрый.
-// GET /api/client/operator_speed → {rows:[{server,operator,location,avg_dl,avg_ul,avg_ping,samples,ok_count}]}
-function loadClientOpSpeed(){
-  var card=document.getElementById('clientOpSpeedCard');
-  var body=document.getElementById('clientOpSpeedBody');
-  if(!card||!body) return;
-  api('/api/client/operator_speed?hours=48').then(function(data){
-    var rows=(data&&data.rows)||[];
-    if(!rows.length){card.style.display='none';return}
-    card.style.display='';
-    // Группируем: локация → операторы (по avg_dl убыв.)
-    var byLoc={};
-    rows.forEach(function(r){
-      var loc=r.location||r.server||'—';
-      (byLoc[loc]=byLoc[loc]||{location:loc,address:r.address||'',ops:[]}).ops.push(r);
-    });
-    var locs=Object.values(byLoc);
-    var h='<table style="width:100%;border-collapse:collapse;font-size:12px">'
-      +'<thead><tr style="color:var(--text-3);font-size:10px;text-transform:uppercase;letter-spacing:.04em">'
-      +'<th style="text-align:left;padding:6px 10px 6px 0">Локация</th>'
-      +'<th style="text-align:left;padding:6px 10px">Оператор</th>'
-      +'<th style="text-align:right;padding:6px 10px">↓ Средняя</th>'
-      +'<th style="text-align:right;padding:6px 10px">↓ Мин–Макс</th>'
-      +'<th style="text-align:right;padding:6px 10px">↑ Средняя</th>'
-      +'<th style="text-align:right;padding:6px 10px">Пинг</th>'
-      +'<th style="text-align:right;padding:6px 0 6px 10px">Замеров</th>'
-      +'</tr></thead><tbody>';
-    locs.forEach(function(L){
-      L.ops.sort(function(a,b){return (b.avg_dl||0)-(a.avg_dl||0)});
-      L.ops.forEach(function(r,i){
-        var dl=r.avg_dl!=null?r.avg_dl:'—';
-        var dlCls=r.avg_dl==null?'':r.avg_dl>=30?'var(--success)':r.avg_dl>=10?'var(--accent)':'var(--warning)';
-        h+='<tr style="border-top:1px solid var(--border)">'
-          +(i===0?'<td rowspan="'+L.ops.length+'" style="padding:8px 10px 8px 0;font-weight:600;vertical-align:top;color:var(--text-0)">'+esc(L.location)+(L.address?'<div style="font-size:10px;color:var(--text-3);font-weight:400">'+esc(L.address)+'</div>':'')+'</td>':'')
-          +'<td style="padding:6px 10px;color:var(--text-1)">'+esc(r.operator||'—')+'</td>'
-          +'<td style="padding:6px 10px;text-align:right;font-weight:600;color:'+(dlCls||'var(--text-1)')+'">'+dl+(r.avg_dl!=null?' Мбит/с':'')+'</td>'
-          +'<td style="padding:6px 10px;text-align:right;color:var(--text-2);font-size:11px">'+(r.min_dl!=null?r.min_dl:'—')+'–'+(r.max_dl!=null?r.max_dl:'—')+'</td>'
-          +'<td style="padding:6px 10px;text-align:right;color:var(--text-1)">'+(r.avg_ul!=null?r.avg_ul+' Мбит/с':'—')+'</td>'
-          +'<td style="padding:6px 10px;text-align:right;color:var(--text-2)">'+(r.avg_ping!=null?r.avg_ping+' мс':'—')+'</td>'
-          +'<td style="padding:6px 0 6px 10px;text-align:right;color:var(--text-3);font-size:11px">'+(r.ok_count||0)+'</td>'
-          +'</tr>';
-      });
-    });
-    body.innerHTML=h+'</tbody></table>';
-  }).catch(function(){ card.style.display='none'; });
 }
 
 function reloadDailyChart(){

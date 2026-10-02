@@ -267,32 +267,41 @@ r.get('/api/client/speed_monitor', authMiddleware, (req, res) => {
 // при покупке), а не как у конкретного его ника. Агрегация speed_monitor по
 // (server, operator) за окно; окно по умолчанию 48ч. Отдаём ВСЕ операторы
 // флота (это витрина возможностей, не данные клиента).
+// 2026-10-03: МЕДИАНА вместо средней (по просьбе владельца) — медиана
+// устойчива к выбросам замеров. Адреса площадок клиентам не показываем.
+function _median(vals) {
+  if (!vals.length) return null;
+  const s = vals.slice().sort((a, b) => a - b);
+  return s[Math.floor(s.length / 2)];
+}
 r.get('/api/client/operator_speed', authMiddleware, (req, res) => {
   const hours = Math.min(Math.max(parseInt(req.query.hours, 10) || 48, 1), 24 * 14);
   try {
-    const rows = db.prepare(`
-      SELECT server, operator,
-             COUNT(*)                                                           AS samples,
-             SUM(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN 1 ELSE 0 END) AS ok_count,
-             ROUND(AVG(CASE WHEN ok = 1 AND download > 0 THEN download END), 1) AS avg_dl,
-             ROUND(MIN(CASE WHEN ok = 1 AND download > 0 THEN download END), 1) AS min_dl,
-             ROUND(MAX(CASE WHEN ok = 1 AND download > 0 THEN download END), 1) AS max_dl,
-             ROUND(AVG(CASE WHEN ok = 1 AND upload > 0 THEN upload END), 1)     AS avg_ul,
-             ROUND(AVG(CASE WHEN ok = 1 AND ping > 0 THEN ping END), 0)         AS avg_ping,
-             MAX(ts)                                                            AS last_ts
+    const raw = db.prepare(`
+      SELECT server, operator, download, upload, ping
         FROM speed_monitor
-       WHERE ts >= datetime('now', ?)
-       GROUP BY server, operator
-       ORDER BY server, avg_dl DESC`).all(`-${hours} hours`);
-    const out = rows.map(r => {
-      const srv = r.server ? findServer(r.server) : null;
+       WHERE ts >= datetime('now', ?) AND ok = 1 AND (download > 0 OR upload > 0)`).all(`-${hours} hours`);
+    const groups = new Map();   // server|operator → { dls, uls, pings }
+    for (const r of raw) {
+      const k = (r.server || '') + '|' + (r.operator || '');
+      if (!groups.has(k)) groups.set(k, { server: r.server, operator: r.operator, dls: [], uls: [], pings: [] });
+      const g = groups.get(k);
+      if (r.download > 0) g.dls.push(r.download);
+      if (r.upload > 0) g.uls.push(r.upload);
+      if (r.ping > 0) g.pings.push(r.ping);
+    }
+    const out = [...groups.values()].map(g => {
+      const srv = g.server ? findServer(g.server) : null;
       return {
-        ...r,
-        location: (srv && (srv.displayName || srv.countryName)) || r.server,
-        address: (srv && srv.address) || '',
-        operator: _normMetaOp(r.operator, r.server),
+        server: g.server,
+        operator: _normMetaOp(g.operator, g.server),
+        location: (srv && (srv.displayName || srv.countryName)) || g.server,
+        samples: g.dls.length,
+        median_dl: g.dls.length ? Math.round(_median(g.dls) * 10) / 10 : null,
+        median_ul: g.uls.length ? Math.round(_median(g.uls) * 10) / 10 : null,
+        median_ping: g.pings.length ? Math.round(_median(g.pings)) : null,
       };
-    });
+    }).sort((a, b) => String(a.location).localeCompare(String(b.location)) || (b.median_dl || 0) - (a.median_dl || 0));
     res.json({ hours, rows: out });
   } catch (e) {
     res.status(500).json({ error: e.message });

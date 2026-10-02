@@ -255,7 +255,8 @@ r.get('/api/analytics/heatmap', authMiddleware, adminMiddleware, async (req, res
       const di = dateIdx.get(row.day);
       if (di !== undefined && row.hour >= 0 && row.hour < 24) {
         matrix[di][row.hour] = row.bytes / 1e9;
-        if (row.corrected) correctedCells[di][row.hour] = true;
+        // 2026-10-03: полосы только при >5% скорректированных байтов ячейки
+        if (row.corrected && row.bytes > 0 && (row.corrected_bytes || 0) / row.bytes > 0.05) correctedCells[di][row.hour] = true;
         hasData = true;
       }
     }
@@ -337,7 +338,8 @@ r.get('/api/client/hourly_traffic', authMiddleware, async (req, res) => {
       const di = dateIdx.get(row.day);
       if (di !== undefined && row.hour >= 0 && row.hour < 24) {
         matrix[di][row.hour] = row.bytes / 1e9;
-        if (row.corrected) correctedCells[di][row.hour] = true;
+        // 2026-10-03: полосы только при >5% скорректированных байтов ячейки
+        if (row.corrected && row.bytes > 0 && (row.corrected_bytes || 0) / row.bytes > 0.05) correctedCells[di][row.hour] = true;
         hasData = true;
       }
     }

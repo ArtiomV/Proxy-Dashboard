@@ -252,7 +252,10 @@ function notInClause(column, values) {
 // оператора, а не выпадают из неё молча. Порядок параметров: start (WHERE),
 // start (внутренний backfill), затем фильтры.
 function heatmapSql({ tzStr, start, view, idKey, id, servers }) {
-  let sql = `SELECT strftime('%Y-%m-%d', datetime(t.hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(t.hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(t.bytes_in+t.bytes_out) as bytes, MAX(t.uncertain) as corrected FROM traffic_hourly t WHERE t.hour_start >= ?`;
+  // 2026-10-03: corrected — доля скорректированных байтов ячейки (не просто
+  // «была ли uncertain-строка»): полосы показываем только при значимой доле
+  // (>5%), иначе одна сбойная симка красила весь час «в полоску».
+  let sql = `SELECT strftime('%Y-%m-%d', datetime(t.hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(t.hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(t.bytes_in+t.bytes_out) as bytes, MAX(t.uncertain) as corrected, SUM(CASE WHEN t.uncertain > 0 THEN t.bytes_in+t.bytes_out ELSE 0 END) as corrected_bytes FROM traffic_hourly t WHERE t.hour_start >= ?`;
   const params = [start];
   if (idKey !== 'all') {
     if (view === 'country' && servers && servers.length) {
