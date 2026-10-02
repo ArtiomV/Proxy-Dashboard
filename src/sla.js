@@ -76,10 +76,13 @@ function serverUptime(db, month) {
 }
 
 // Модемы: доля online среди всех периодических проверок за месяц.
+// 2026-10-02: минуты «пакет исчерпан» исключены из знаменателя (это тарифное
+// состояние оператора, не простой инфраструктуры) — см. uptime-period.
 function modemUptime(db, month) {
   const b = monthBounds(month);
+  const wins = uptimePeriod.exhaustionWindows(db, Date.parse(b.fromIso), Date.parse(b.toIso));
   return uptimePeriod.modemRows(db, b.fromIso.slice(0, 10), b.toIso.slice(0, 10))
-    .map(uptimePeriod.mapRow);
+    .map((r) => uptimePeriod.adjustRowForExhaustion(uptimePeriod.mapRow(r), wins));
 }
 
 // Операторы: средний uptime их модемов (модемы без оператора не участвуют).
@@ -127,9 +130,14 @@ function _mapClientRow(r) {
   return uptimePeriod.mapRow(r);
 }
 
+function _mapClientRowAdj(wins) {
+  return (r) => uptimePeriod.adjustRowForExhaustion(uptimePeriod.mapRow(r), wins);
+}
+
 function clientUptime(db, month, clientName) {
   const b = monthBounds(month);
-  return _clientUptimeRange(db, b.fromIso, b.toIso, clientName, false).map(_mapClientRow);
+  const wins = uptimePeriod.exhaustionWindows(db, Date.parse(b.fromIso), Date.parse(b.toIso));
+  return _clientUptimeRange(db, b.fromIso, b.toIso, clientName, false).map(_mapClientRowAdj(wins));
 }
 
 // Валидация day ('YYYY-MM-DD' внутри month). Возвращает null либо границы дня.
@@ -149,14 +157,16 @@ function buildClientReport(db, month, clientName, day) {
   const b = monthBounds(month); // validate even when the client has no assignments
   const dayB = _dayBounds(month, day);
   const period = dayB || b;
-  const modems = _clientUptimeRange(db, period.fromIso, period.toIso, clientName, false).map(_mapClientRow);
+  const wins = uptimePeriod.exhaustionWindows(db, Date.parse(b.fromIso), Date.parse(b.toIso));
+  const adj = _mapClientRowAdj(wins);
+  const modems = _clientUptimeRange(db, period.fromIso, period.toIso, clientName, false).map(adj);
   const checks = modems.reduce((sum, m) => sum + m.checks, 0);
   const onlineChecks = modems.reduce((sum, m) => sum + m.online_checks, 0);
 
   // Per-day breakdown за весь месяц (та же методология) — питает выбор дня в UI.
   // Сворачиваем помодемные дневные строки в один ряд на день.
   const byDay = {};
-  for (const r of _clientUptimeRange(db, b.fromIso, b.toIso, clientName, true)) {
+  for (const r of _clientUptimeRange(db, b.fromIso, b.toIso, clientName, true).map(adj)) {
     const d = byDay[r.day] || (byDay[r.day] = { day: r.day, checks: 0, online_checks: 0 });
     d.checks += Number(r.checks) || 0;
     d.online_checks += Number(r.online_checks) || 0;

@@ -167,8 +167,7 @@ function clientRows(db, fromDate, toDate, clientName, groupByDay) {
   } catch (_) { return []; }
 }
 
-function mapRow(row) {
-  const checks = Number(row.checks) || 0;
+function mapRow(row) {  const checks = Number(row.checks) || 0;
   const onlineChecks = Number(row.online_checks) || 0;
   return {
     server: row.server,
@@ -185,4 +184,78 @@ function mapRow(row) {
   };
 }
 
-module.exports = { rollingBounds, rollingTracking, modemRows, clientRows, mapRow };
+// 2026-10-02: окна «пакет исчерпан» по модемам — для SLA. Минуты, когда модем
+// не мог работать из-за пакета оператора (не наша инфраструктура), исключаются
+// из знаменателя аптайма: метрика отвечает «доступность, когда модем ДОЛЖЕН
+// был работать». Источники: notifications (sim_package_exhausted/recovered)
+// + открытые строки sim_exhaustion_state. Ключ: server|nick.
+function exhaustionWindows(db, fromMs, toMs) {
+  const wins = new Map();
+  const open = new Map();   // key → fromMs
+  try {
+    const rows = db.prepare(`
+      SELECT rule_id, payload_json, created_at FROM notifications
+      WHERE rule_id IN ('sim_package_exhausted', 'sim_package_recovered')
+        AND created_at >= ? ORDER BY created_at
+    `).all(new Date(fromMs).toISOString().slice(0, 19).replace('T', ' '));   // SQLite-формат с пробелом
+    for (const r of rows) {
+      let p = {};
+      try { p = JSON.parse(r.payload_json || '{}'); } catch (_) {}
+      const key = (p.server || '') + '|' + (p.nick || p.imei || '');
+      if (!p.nick && !p.imei) continue;
+      const t = Date.parse(r.created_at.replace(' ', 'T') + (r.created_at.endsWith('Z') ? '' : 'Z'));
+      if (!Number.isFinite(t)) continue;
+      if (r.rule_id === 'sim_package_exhausted') {
+        if (!open.has(key)) open.set(key, t);
+      } else {
+        const o = open.get(key);
+        if (o != null) { wins.set(key, (wins.get(key) || []).concat([{ from: o, to: t }])); open.delete(key); }
+      }
+    }
+  } catch (_) { /* notifications может не быть на минимальной схеме */ }
+  try {
+    for (const r of db.prepare('SELECT server_name, nick, since_ts FROM sim_exhaustion_state').all()) {
+      const key = r.server_name + '|' + r.nick;
+      const from = Number(r.since_ts) || toMs;
+      wins.set(key, (wins.get(key) || []).concat([{ from, to: toMs }]));
+    }
+  } catch (_) { /* старая схема без таблицы */ }
+  // Незакрытые окна из событий (recovered не пришёл) — до конца периода.
+  for (const [key, o] of open) wins.set(key, (wins.get(key) || []).concat([{ from: o, to: toMs }]));
+  void fromMs;
+  return wins;
+}
+
+// Минуты пересечения окон модема с [fromMs, toMs].
+function exhaustionMinutes(wins, key, fromMs, toMs) {
+  const list = (wins && wins.get(key)) || [];
+  let ms = 0;
+  for (const w of list) {
+    const a = Math.max(w.from, fromMs), b = Math.min(w.to, toMs);
+    if (b > a) ms += b - a;
+  }
+  return ms / 60000;
+}
+
+// Скорректированный аптайм строки: знаменатель минус минуты исчерпания.
+// Вернёт { checks, online_checks, uptime_pct } — uptime_pct null, если после
+// исключения не осталось наблюдений (модем весь период был «вне пакета»).
+function adjustRowForExhaustion(row, wins) {
+  const key = (row.server || '') + '|' + (row.nick || '');
+  const fromMs = row.observed_from ? Date.parse(row.observed_from) : 0;
+  const toMs = row.observed_to ? Date.parse(row.observed_to) : Date.now();
+  const exMin = exhaustionMinutes(wins, key, fromMs, toMs);
+  const checks = Number(row.checks) || 0;
+  const online = Number(row.online_checks) || 0;
+  const adjChecks = Math.max(online, checks - exMin);
+  return {
+    ...row,
+    checks: adjChecks,
+    online_checks: online,
+    failed_checks: Math.max(0, adjChecks - online),
+    uptime_pct: adjChecks > 0 ? _pct(online, adjChecks) : null,
+    excluded_exhaustion_min: Math.round(exMin),
+  };
+}
+
+module.exports = { rollingBounds, rollingTracking, modemRows, clientRows, mapRow, exhaustionWindows, exhaustionMinutes, adjustRowForExhaustion };

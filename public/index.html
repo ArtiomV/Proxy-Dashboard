@@ -316,6 +316,15 @@
           <div id="clientSpeedLegend" style="display:flex;flex-wrap:wrap;gap:10px;margin-bottom:10px;font-size:11px;color:var(--text-2)"></div>
           <div id="clientSpeedWrap" style="height:280px;position:relative"><canvas id="clientSpeedChart"></canvas><div id="clientSpeedSkel" class="skel" style="position:absolute;inset:0"><div class="skel-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
         </div>
+
+        <!-- Скорость по операторам и локациям (витрина флота, без привязки к модему) -->
+        <div id="clientOpSpeedCard" style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
+          <div style="margin-bottom:12px">
+            <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Скорость по операторам и локациям</h3>
+            <div style="font-size:11px;color:var(--text-3);margin-top:2px">почасовые замеры всего флота, последние 48 часов · GMT+3</div>
+          </div>
+          <div id="clientOpSpeedBody" style="overflow-x:auto"></div>
+        </div>
       </div>
     </div>
 
@@ -784,7 +793,7 @@ echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"<
 <script src="/js/utils.js?v=0820e"></script>
 <script src="/js/delegation.js?v=0813c"></script>
 <script src="/js/auth-utils.js?v=0814a"></script>
-<script src="/js/client.js?v=1002a"></script>
+<script src="/js/client.js?v=1003a"></script>
 
 </body>
 </html>

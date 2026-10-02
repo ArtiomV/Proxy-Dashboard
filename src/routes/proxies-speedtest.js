@@ -262,6 +262,43 @@ r.get('/api/client/speed_monitor', authMiddleware, (req, res) => {
   res.json({ hours, rows, modems });
 });
 
+// 2026-10-02: «Скорость по операторам и локациям» — без привязки к модему.
+// Клиенту важно, какая скорость у какого оператора на какой площадке (выбор
+// при покупке), а не как у конкретного его ника. Агрегация speed_monitor по
+// (server, operator) за окно; окно по умолчанию 48ч. Отдаём ВСЕ операторы
+// флота (это витрина возможностей, не данные клиента).
+r.get('/api/client/operator_speed', authMiddleware, (req, res) => {
+  const hours = Math.min(Math.max(parseInt(req.query.hours, 10) || 48, 1), 24 * 14);
+  try {
+    const rows = db.prepare(`
+      SELECT server, operator,
+             COUNT(*)                                                           AS samples,
+             SUM(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN 1 ELSE 0 END) AS ok_count,
+             ROUND(AVG(CASE WHEN ok = 1 AND download > 0 THEN download END), 1) AS avg_dl,
+             ROUND(MIN(CASE WHEN ok = 1 AND download > 0 THEN download END), 1) AS min_dl,
+             ROUND(MAX(CASE WHEN ok = 1 AND download > 0 THEN download END), 1) AS max_dl,
+             ROUND(AVG(CASE WHEN ok = 1 AND upload > 0 THEN upload END), 1)     AS avg_ul,
+             ROUND(AVG(CASE WHEN ok = 1 AND ping > 0 THEN ping END), 0)         AS avg_ping,
+             MAX(ts)                                                            AS last_ts
+        FROM speed_monitor
+       WHERE ts >= datetime('now', ?)
+       GROUP BY server, operator
+       ORDER BY server, avg_dl DESC`).all(`-${hours} hours`);
+    const out = rows.map(r => {
+      const srv = r.server ? findServer(r.server) : null;
+      return {
+        ...r,
+        location: (srv && (srv.displayName || srv.countryName)) || r.server,
+        address: (srv && srv.address) || '',
+        operator: _normMetaOp(r.operator, r.server),
+      };
+    });
+    res.json({ hours, rows: out });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 
   return r;
 };

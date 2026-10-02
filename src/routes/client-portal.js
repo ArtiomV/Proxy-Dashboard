@@ -260,6 +260,11 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
       };
       try {
         const bounds = uptimePeriod.rollingBounds(30);
+        // 2026-10-02: аптайм без окон «пакет исчерпан» — модем не мог работать
+        // по тарифной причине оператора, это не простой нашей инфраструктуры.
+        // Без исключения массовый троттлинг Moldcell тянул сводный аптайм
+        // клиента к ~90–93% при исправных модемах.
+        const _exWins = uptimePeriod.exhaustionWindows(db, bounds.fromMs || 0, bounds.toMs || Date.now());
         const rows = uptimePeriod.clientRows(
           db, bounds.fromDate, bounds.toDate,
           clientInfo ? (clientInfo.portName || clientInfo.login) : req.user.portNameFilter,
@@ -275,7 +280,7 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
           fullByCanonical[match ? match[1] + '_' + match[2] : value] = full;
         }
         for (const raw of rows) {
-          const row = uptimePeriod.mapRow(raw);
+          const row = uptimePeriod.adjustRowForExhaustion(uptimePeriod.mapRow(raw), _exWins);
           periodicUptimeSummary.checks += row.checks;
           periodicUptimeSummary.online_checks += row.online_checks;
           const canonical = row.server + '_' + String(row.imei || '').replace(/^S\d+_/, '');

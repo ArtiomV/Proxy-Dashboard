@@ -2383,6 +2383,9 @@ app.use('/api', (req, res, next) => {
   const start = Date.now();
   res.on('finish', () => {
     try {
+      // 2026-10-02: 304 — это браузерная ревалидация кэша, а не обращение:
+      // в ленте «Обращения к API» выглядели дублями (200 + 304 через 1–2 с).
+      if (res.statusCode === 304) return;
       const info = _classifyApiAccess(req);
       if (!info) return;
       _apiAccessInsert.run(

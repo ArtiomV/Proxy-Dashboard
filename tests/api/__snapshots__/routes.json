@@ -129,6 +129,7 @@
   "GET /api/client/documents",
   "GET /api/client/documents/:docId/download",
   "GET /api/client/hourly_traffic",
+  "GET /api/client/operator_speed",
   "GET /api/client/payments",
   "GET /api/client/promo/check",
   "GET /api/client/referral",
