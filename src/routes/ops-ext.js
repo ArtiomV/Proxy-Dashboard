@@ -29,6 +29,11 @@ function _runSection(logger, name, fn, fallback) {
 // «Ротации %» на странице модемов. rotation_log — ~175k строк/7д, индекса по
 // started_at нет, поэтому GROUP BY кэшируется на 5 минут (как _pcsCache).
 // «Неуспешная» = old_ip == new_ip при обоих заполненных (IP не сменился).
+// 2026-10-02: рекомпьют ТОЛЬКО из фонового тика (server.js). Синхронный
+// GROUP BY по 175k строк в request-path при истечении кэша блокировал event
+// loop на 1–3 с → клиенты (Brandanalytics из РФ) ловили pending на
+// /api/dashboard_data каждые ~5 минут. Хендлер читает getRotStats7dCached —
+// запрос никогда не считает сам.
 let _rotStatsCache = { at: 0, data: {} };
 function getRotStats7d(db) {
   const now = Date.now();
@@ -51,6 +56,9 @@ function getRotStats7d(db) {
   _rotStatsCache = { at: now, data: out };
   return out;
 }
+// Только чтение кэша — БЕЗ рекомпьютa. Для request-path: устаревшее значение
+// лучше, чем 3-секундный стоп всего процесса.
+function getRotStats7dCached() { return _rotStatsCache.data; }
 
 // 2026-09-25: whitelist-обрезка status-модемов для ответа /api/admin/data.
 // ProxySmart шлёт кучу служебных полей (android, proxy_creds с логином/паролем,
@@ -732,8 +740,9 @@ r.get('/api/admin/data', dashboardLimiter, authMiddleware, adminMiddleware, asyn
       // A1 (23.08): последний пинг каждого модема (latency/loss/ok) для UI.
       modemPing: (getModemPingLatest ? getModemPingLatest() : {}),
       // 2026-09-26: доля неуспешных ротаций по модемам за 7 дней (колонка
-      // «Ротации %»). Кэш 5 мин — см. getRotStats7d выше.
-      rotStats7d: (() => { const v = _runSection(logger, 'rotStats', () => getRotStats7d(db), {}); _t('rotStats'); return v; })(),
+      // «Ротации %»). Только чтение кэша — рекомпьют в фоновом тике
+      // (server.js), иначе 3-секундный стоп event loop (02.10, БА pending).
+      rotStats7d: (() => { const v = _runSection(logger, 'rotStats', () => getRotStats7dCached(), {}); _t('rotStats'); return v; })(),
       // A3 (23.08): текущая скорость модемов + топ-5 грузящих для дашборда.
       modemRate: (getModemRateLatest ? getModemRateLatest() : {}),
       modemRateTop: (getModemRateTop ? getModemRateTop(5) : []),
@@ -1005,4 +1014,5 @@ r.get('/api/admin/system_log', authMiddleware, adminMiddleware, (req, res) => {
 module.exports._runSection = _runSection;
 // Exported for tests (2026-09-26): rotation-fail stats + cache reset hook.
 module.exports._getRotStats7d = getRotStats7d;
+module.exports._getRotStats7dCached = getRotStats7dCached;
 module.exports._resetRotStatsCache = () => { _rotStatsCache = { at: 0, data: {} }; };

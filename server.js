@@ -4284,6 +4284,18 @@ const balanceReconcile = require('./src/jobs/balance-reconcile').create({
   db, clients, logActivity, logger, alerts,
 });
 
+// 2026-10-02: фоновый прогрев rotStats7d. Раньше GROUP BY по rotation_log
+// (~175k строк/7д, ~1–3 с синхронно) выполнялся в request-path /api/admin/data
+// при истечении 5-минутного кэша — в эти секунды весь процесс вставал, и
+// клиенты портала (Brandanalytics из РФ) ловили pending на /api/dashboard_data.
+// Теперь рекомпьют только здесь, хендлер читает кэш без рекомпьютa.
+const _opsExtRoutes = require('./src/routes/ops-ext');
+_intervals.push(setInterval(() => {
+  try { _opsExtRoutes._getRotStats7d(db); }
+  catch (e) { logger.warn('[rotStats] bg refresh: ' + e.message); }
+}, 5 * 60e3));
+setTimeout(() => { try { _opsExtRoutes._getRotStats7d(db); } catch (_) {} }, 60e3).unref();   // первый прогрев через минуту после старта
+
 app.use(require('./src/routes/ops-ext')({
   db, logger, DB_PATH,
   trackingDb,

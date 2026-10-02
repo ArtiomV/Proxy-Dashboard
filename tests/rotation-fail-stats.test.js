@@ -59,3 +59,27 @@ describe('getRotStats7d — статистика неуспешных ротац
     expect(fresh['S1_A']).toEqual({ total: 2, failed: 1, pct: 50 });
   });
 });
+
+// 2026-10-02: getRotStats7dCached — только чтение кэша, без рекомпьютa в
+// request-path (синхронный GROUP BY 175k строк останавливал event loop на
+// 1–3с → pending у клиентов портала; рекомпьют теперь в фоновом тике server.js).
+describe('getRotStats7dCached — request-path без рекомпьютa', () => {
+  it('при холодном кэше возвращает {} и НЕ дёргает БД', () => {
+    opsExt._resetRotStatsCache();
+    let dbTouched = false;
+    const db = { prepare: () => { dbTouched = true; throw new Error('must not query'); } };
+    const out = opsExt._getRotStats7dCached();
+    expect(out).toEqual({});
+    expect(dbTouched).toBe(false);
+    void db;
+  });
+
+  it('после фонового рекомпьютa отдаёт те же данные', () => {
+    const db = mkDb();
+    opsExt._resetRotStatsCache();
+    db.prepare('INSERT INTO rotation_log (server_name,nick,old_ip,new_ip,started_at,ended_at) VALUES (?,?,?,?,?,?)')
+      .run('S1', 'A', '1.1.1.1', '1.1.1.1', ts(1), ts(1));
+    opsExt._getRotStats7d(db);   // фоновый тик
+    expect(opsExt._getRotStats7dCached()['S1_A']).toEqual({ total: 1, failed: 1, pct: 100 });
+  });
+});
