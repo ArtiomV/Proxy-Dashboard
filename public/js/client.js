@@ -26,6 +26,12 @@ applyTheme(getTheme());
 // --- Auth state ---
 var authToken=localStorage.getItem('pr_token')||'';
 var authLogin=localStorage.getItem('pr_login')||'';
+// 2026-10-02 · fix вечной «Загрузка…»: _loadDataGen/_sessionGen были
+// объявлены (var) НИЖЕ init-IIFE — при первом loadData из init переменная
+// была ещё undefined, ++ давал NaN, NaN!==NaN делало ответ навсегда
+// «устаревшим» (_stale), и loadData молча умирал до рендера. Объявление
+// обязано стоять выше init. (Заведено с stale-гардом DEEP-59, cbddffb.)
+var _loadDataGen=0,_sessionGen=0;
 
 // --- State ---
 var tableData=[];
@@ -1308,7 +1314,8 @@ function togglePassVis(btn){
 // принимаем только ответ АКТУАЛЬНОГО запроса ТЕКУЩЕЙ сессии: медленный первый
 // запрос больше не откатывает данные быстрого второго, а logout не пускает
 // запоздалый ответ прежней сессии в память.
-var _loadDataGen=0,_sessionGen=0;
+// Объявление — вверху файла (см. строку ~34): var-дубль здесь бы перезаписал
+// счётчик ПОСЛЕ первого loadData из init.
 async function loadData(){
   var gen=++_loadDataGen;
   var sessGen=_sessionGen;
@@ -1769,7 +1776,10 @@ function updateSummary(){
   }
 
   // --- Uptime card ---
-  var uptimeSummary=data.uptimeSummary30d||null;
+  // 2026-10-02 · fix: тут было data.uptimeSummary30d, а `data` — локальная
+  // переменная loadData; ReferenceError гасился try/catch в loadData и карточка
+  // аптайма молча не обновлялась. Источник — глобальный rawData.
+  var uptimeSummary=(typeof rawData!=='undefined'&&rawData&&rawData.uptimeSummary30d)||null;
   var uptimePcts=tableData.filter(function(r){return r.uptimePct!==null}).map(function(r){return parseFloat(r.uptimePct)});
   if((uptimeSummary&&uptimeSummary.checks>0)||uptimePcts.length>0){
     // Primary path is the weighted online/total ratio returned by the same
