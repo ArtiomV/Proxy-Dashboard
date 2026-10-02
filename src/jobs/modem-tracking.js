@@ -116,6 +116,22 @@ async function trackModems() {
               .run(server.name, new Date(downStart).toISOString(), new Date().toISOString(), downSec, alerted, _maint, _maintSec, _maintWins);
             logActivity('modem', 'info', 'server_downtime_recorded', server.name, `S ${server.name} был недоступен ${Math.round(downSec / 60)} мин`, { downSec, alerted });
           } catch (e) { logger.warn('[Downtime] record failed: ' + e.message); }
+          try {
+            // 2026-10-03: бэкфилл подтверждённого простоя в аптайм модемов.
+            // Блипы (<2 мин) тиков не пишут вообще (catch-ветка), поэтому
+            // реальные минуты простоя дописываем здесь — иначе аптайм был бы
+            // завышен после снятия «недоступен = все модемы оффлайн».
+            const missedMin = Math.max(1, Math.round(downSec / 60));
+            const _tb = moscowDate(now);
+            for (const k of Object.keys(uptimeTracking)) {
+              if (!k.startsWith(server.name + '_')) continue;
+              uptimeTracking[k].total_checks = (uptimeTracking[k].total_checks || 0) + missedMin;
+              if (!uptimeTracking[k].daily) uptimeTracking[k].daily = {};
+              if (!uptimeTracking[k].daily[_tb]) uptimeTracking[k].daily[_tb] = { online: 0, total: 0 };
+              uptimeTracking[k].daily[_tb].total += missedMin;
+              for (let i = 0; i < missedMin; i++) addClientUptimeTicks(server.name, k.slice(server.name.length + 1), _tb, false);
+            }
+          } catch (e) { logger.warn('[Downtime] uptime backfill failed: ' + e.message); }
         }
         delete _serverDownSince[server.name];
         delete _serverUnreachableAlertSent[server.name];
@@ -144,17 +160,15 @@ async function trackModems() {
           _serverUnreachableAlertSent[server.name] = true;
         }
       }
-      // Server unreachable = all its modems are down
-      const todayBucket = moscowDate(now);
+      // 2026-10-03: НЕ пишем провалы за недоступность бокса. Панель S4
+      // блокируется cron'ом reset_gently ~60с каждые 5 мин — раньше каждый
+      // такой блип писал «модем оффлайн» всем модемам сервера и завышал
+      // failed-проверки (аптайм клиента ~90–93% при живых модемах). Нет
+      // наблюдения ≠ оффлайн: тики вообще не пишем; ПОДТВЕРЖДЁННЫЙ простой
+      // (≥2 мин) бэкфиллится минутами оффлайна в recovery-ветке выше.
       for (const k of Object.keys(uptimeTracking)) {
         if (k.startsWith(server.name + '_')) {
           seenRecoveryKeys.add(k); // preserve autoRecovery state for unreachable servers
-          if (!uptimeTracking[k].daily) uptimeTracking[k].daily = {};
-          if (!uptimeTracking[k].daily[todayBucket]) uptimeTracking[k].daily[todayBucket] = { online: 0, total: 0 };
-          uptimeTracking[k].total_checks++;
-          uptimeTracking[k].daily[todayBucket].total++;
-          // don't increment online = downtime
-          addClientUptimeTicks(server.name, k.slice(server.name.length + 1), todayBucket, false);
         }
       }
       continue;

@@ -67,3 +67,26 @@ describe('server_unreachable: микроблипы не шумят в system_log
     expect(logs.filter(l => l.action === 'server_unreachable').length).toBe(1);
   });
 });
+
+// 2026-10-03: блип недоступности бокса ≠ «все модемы оффлайн». Тики вообще не
+// пишутся на failed poll (нет наблюдения); подтверждённый простой (≥2 мин)
+// бэкфиллится минутами оффлайна при восстановлении.
+describe('аптайм модемов при недоступности бокса', () => {
+  it('блип: total_checks не растёт; восстановление после ≥2 мин: бэкфилл минут как failed', async () => {
+    let fail = true;
+    const { deps } = mkDeps(async () => (fail ? boom() : ok()));
+    deps.uptimeTracking['S4_222'] = { total_checks: 100, online_checks: 100, daily: {}, last_online_check: new Date().toISOString() };
+    deps.knownModems.S4.p2 = { imei: '222', nick: 'MD_REAL', portName: 'Brandanalytics' };
+    const job = create(deps);
+
+    await job.trackModems();   // блип — один failed poll
+    expect(deps.uptimeTracking['S4_222'].total_checks).toBe(100);   // ничего не записано
+
+    // Простой 3 минуты: бокс вернулся — минуты бэкфиллятся как failed.
+    deps._serverDownSince['S4'] = Date.now() - 3 * 60000;
+    fail = false;
+    await job.trackModems();
+    expect(deps.uptimeTracking['S4_222'].total_checks).toBe(104);   // +3 мин бэкфилл + 1 тик цикла
+    expect(deps.uptimeTracking['S4_222'].online_checks).toBe(100);  // онлайн не вырос (всё failed)
+  });
+});
