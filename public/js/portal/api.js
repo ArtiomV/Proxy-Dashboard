@@ -4,6 +4,22 @@
 
 var _apiFresh='';     // полный ключ, выданный в этой сессии
 var _apiLang='curl';
+
+// Хелперы для полной документации (api-docs-data.js, классы api-*).
+// copyText уже определён глобально в client.js.
+var apiBase=window.location.origin;
+function switchLang(el,lang,group){
+  el.parentElement.querySelectorAll('.lang-tab').forEach(function(t){t.classList.remove('active')});
+  el.classList.add('active');
+  document.querySelectorAll('.lang-code[data-group="'+group+'"]').forEach(function(c){
+    c.classList.toggle('active',c.getAttribute('data-lang')===lang);
+  });
+}
+function copyCodeBlock(btn){
+  var block=btn.parentElement;
+  var code=block.textContent.replace('Копировать','').trim();
+  copyText(code,btn);
+}
 function renderApiPage(){
   var info=(billingData&&billingData.apiKeyInfo)||{};
   var key=_apiFresh||(info.prefix?info.prefix+'••••••••':(billingData&&billingData.apiKey)||'');
@@ -33,6 +49,7 @@ function renderApiPage(){
   };
   h+='<div class="v3-card"><div class="v3-codetabs">'+[['curl','cURL'],['python','Python'],['js','JavaScript']].map(function(l){return '<button type="button" class="'+(_apiLang===l[0]?'on':'')+'" data-on-click="apiLang(\''+l[0]+'\')">'+l[1]+'</button>'}).join('')+
     '<button type="button" style="margin-left:auto;color:var(--v3-accent)" data-on-click="apiCopyCode()">Копировать</button></div><pre class="v3-codepre" id="apiCode">'+V3.esc(code[_apiLang])+'</pre></div>';
+  if(typeof API_DOCS_HTML!=='undefined')h+=API_DOCS_HTML;
   document.getElementById('apiBody').innerHTML=h;
 }
 function apiLang(l){_apiLang=l;renderApiPage()}
