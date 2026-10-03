@@ -21,7 +21,8 @@ function _ovRange(){
   if(p==='7d')return {from:V3.ymd(V3.addDays(t,-6)),to:V3.ymd(t)};
   if(p==='quarter'){var q=Math.floor(t.getMonth()/3);return {from:V3.ymd(new Date(t.getFullYear(),q*3,1)),to:V3.ymd(t)}}
   if(p==='custom'&&ovState.from&&ovState.to)return {from:ovState.from,to:ovState.to};
-  return {from:V3.ymd(new Date(t.getFullYear(),t.getMonth(),1)),to:V3.ymd(t)};
+  // 'month' = последние 30 дней (не календарный месяц) — по решению 03.10
+  return {from:V3.ymd(V3.addDays(t,-29)),to:V3.ymd(t)};
 }
 function _ovPrevMonthStart(){var t=V3.parse(V3.today());return V3.ymd(new Date(t.getFullYear(),t.getMonth()-1,1))}
 // байты по странам за день (фильтр страны учтён)
@@ -211,6 +212,18 @@ function _ovTop(){
   box.innerHTML=rows.map(function(r,i){
     return '<div class="v3-top-row"><span class="v3-top-nick" title="'+V3.esc(V3.label(r.modemNick))+'">'+V3.esc(r.modemNick)+'</span><div class="v3-track"><span style="width:'+(V3.month(r)/max*100).toFixed(1)+'%;background:'+OV_TOP[i]+'"></span></div><span class="v3-top-val">'+V3.gb(V3.month(r))+'</span></div>';
   }).join('');
+}
+// попап «Все модемы» — полный список по убыванию трафика за месяц
+function ovTopAll(){
+  var rows=_ovRows().slice().sort(function(a,b){return V3.month(b)-V3.month(a)});
+  if(!rows.length){V3.toast({title:'Модемов пока нет'});return}
+  var total=rows.reduce(function(s,r){return s+V3.month(r)},0);
+  var max=Math.max(1,V3.month(rows[0]));
+  var body=rows.map(function(r,i){
+    var m=V3.month(r),share=total>0?(m/total*100):0;
+    return '<div class="v3-top-row"><span class="v3-top-nick" title="'+V3.esc(V3.label(r.modemNick))+'">'+V3.esc(r.modemNick)+'</span><div class="v3-track"><span style="width:'+(m/max*100).toFixed(1)+'%;background:'+OV_TOP[i%OV_TOP.length]+'"></span></div><span class="v3-top-val">'+V3.gb(m)+'</span><span class="v3-note" style="width:52px;text-align:right;flex:none">'+(share>=0.05?share.toFixed(1):'&lt;0.1')+'%</span></div>';
+  }).join('');
+  V3.modal(V3.mh('Трафик по модемам за месяц')+'<div class="v3-mb"><div class="v3-hint" style="margin-bottom:10px">'+rows.length+' '+V3.plural(rows.length,'модем','модема','модемов')+' · всего '+V3.gb(total)+' · по убыванию'+(ovState.cc!=='all'?' · фильтр: '+V3.esc(V3.ccName(ovState.cc)):'')+'</div><div style="max-height:60vh;overflow:auto">'+body+'</div></div><div class="v3-mf"><button type="button" class="v3-btn primary" data-on-click="v3CloseModal()">Закрыть</button></div>',{width:'w560'});
 }
 
 // строка прокси для «Обзора» (и общая логика бейджей для «Прокси»)

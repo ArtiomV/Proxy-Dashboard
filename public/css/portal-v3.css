@@ -563,3 +563,45 @@ input[type=date].v3-input{color-scheme:light}
   .v3-pulse-v{font-size:18px}
   .v3-tiles.two,.v3-tiles.three{grid-template-columns:1fr 1fr}
 }
+
+/* ============================================================
+   Документация API (разметка api-docs-data.js под .v3-apidocs)
+   — приведена к дизайн-системе v3: карточки, таблицы, код-блоки
+   ============================================================ */
+.v3-apidocs{display:flex;flex-direction:column;gap:12px;margin-top:12px}
+.v3-apidocs .api-toc{display:flex;flex-wrap:wrap;gap:6px}
+.v3-apidocs .api-toc a{display:inline-flex;align-items:center;gap:7px;font-size:10.5px;font-weight:600;padding:4px 12px;border-radius:999px;background:var(--v3-sunken);color:var(--v3-muted);text-decoration:none;line-height:1.35}
+.v3-apidocs .api-toc a:hover{color:var(--v3-text)}
+.v3-apidocs .api-toc a .toc-method{font-family:var(--font-mono);font-size:9.5px;font-weight:700;padding:2px 6px;border-radius:4px}
+.v3-apidocs .api-toc a .toc-method.get{background:var(--v3-green-dim);color:var(--v3-green)}
+.v3-apidocs .api-section{background:var(--v3-surface);border:1px solid var(--v3-line);border-radius:12px;padding:14px 16px;box-shadow:var(--v3-shadow);min-width:0;scroll-margin-top:70px}
+.v3-apidocs .api-section h3{font-size:14px;font-weight:700;color:var(--v3-ink);margin:0 0 10px;display:flex;align-items:center;gap:8px}
+.v3-apidocs .api-section h3 .method{font-family:var(--font-mono);font-size:10px;font-weight:700;padding:2px 8px;border-radius:4px}
+.v3-apidocs .api-section h3 .method.get{background:var(--v3-green-dim);color:var(--v3-green)}
+.v3-apidocs .api-section h3 .method.post{background:var(--v3-accent-dim);color:var(--v3-accent)}
+.v3-apidocs .api-path{display:flex;align-items:center;gap:8px;font-family:var(--font-mono);font-size:12px;color:var(--v3-accent);background:var(--v3-sunken);border:1px solid var(--v3-line);border-radius:8px;padding:8px 12px;margin-bottom:10px}
+.v3-apidocs .api-path > span{flex:1;word-break:break-all;min-width:0}
+.v3-apidocs .copy-btn{flex:none;background:none;border:none;color:var(--v3-accent);cursor:pointer;font-size:11.5px;font-weight:600;font-family:inherit;padding:0}
+.v3-apidocs .copy-btn:hover{text-decoration:underline}
+.v3-apidocs .api-desc{color:var(--v3-muted);font-size:12.5px;margin:0 0 10px;line-height:1.6}
+.v3-apidocs .api-desc code,.v3-apidocs .api-note code,.v3-apidocs .api-params code,.v3-apidocs .api-errors code{font-family:var(--font-mono);font-size:11px;background:var(--v3-sunken);border-radius:4px;padding:1px 5px;color:var(--v3-accent);word-break:break-all;white-space:normal;display:inline}
+.v3-apidocs .resp-label{font-size:10px;color:var(--v3-faint);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin:14px 0 6px}
+.v3-apidocs .api-note{font-size:11.5px;color:var(--v3-muted);background:var(--v3-sunken);border-left:3px solid var(--v3-accent);border-radius:0 8px 8px 0;padding:8px 12px;margin:10px 0;line-height:1.55}
+.v3-apidocs .api-note.warn{border-left-color:var(--v3-amber)}
+.v3-apidocs .api-params,.v3-apidocs .api-errors{width:100%;border-collapse:collapse;font-size:11.5px;margin:6px 0 4px}
+.v3-apidocs .api-params th,.v3-apidocs .api-errors th{font-size:10px;font-weight:600;color:var(--v3-faint);text-transform:uppercase;letter-spacing:.5px;text-align:left;padding:8px 10px;background:var(--v3-track);white-space:nowrap}
+.v3-apidocs .api-params th:first-child{border-radius:8px 0 0 8px}
+.v3-apidocs .api-params th:last-child,.v3-apidocs .api-errors th:last-child{border-radius:0 8px 8px 0}
+.v3-apidocs .api-params td,.v3-apidocs .api-errors td{padding:8px 10px;text-align:left;color:var(--v3-text);border-bottom:1px solid var(--v3-line);vertical-align:top;word-break:break-word;overflow-wrap:anywhere}
+.v3-apidocs .api-params tr:last-child td,.v3-apidocs .api-errors tr:last-child td{border-bottom:none}
+.v3-apidocs .api-params td:first-child{font-family:var(--font-mono);color:var(--v3-accent);font-size:11px;white-space:nowrap}
+.v3-apidocs .api-errors td:first-child{font-family:var(--font-mono);font-weight:600;white-space:nowrap}
+.v3-apidocs .lang-tabs{display:flex;margin-top:4px}
+.v3-apidocs .lang-tab{padding:6px 14px;font-size:12px;color:var(--v3-muted);background:none;border:none;cursor:pointer;font-family:inherit;border-radius:8px 8px 0 0}
+.v3-apidocs .lang-tab.active{font-weight:600;background:var(--v3-dark);color:#fff}
+.v3-apidocs .lang-code{display:none}
+.v3-apidocs .lang-code.active{display:block}
+.v3-apidocs .code-block{position:relative;margin:0;background:var(--v3-dark);color:var(--v3-dark-text);border-radius:10px;padding:14px 16px;font-family:var(--font-mono);font-size:11px;line-height:1.7;overflow-x:auto;white-space:pre}
+.v3-apidocs .lang-code.active .code-block{border-radius:0 10px 10px 10px}
+.v3-apidocs .code-block .cb-copy{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.08);border:none;color:var(--v3-dark-text);cursor:pointer;font-size:10.5px;font-weight:600;font-family:inherit;padding:3px 10px;border-radius:6px}
+.v3-apidocs .code-block .cb-copy:hover{background:var(--v3-accent);color:#fff}

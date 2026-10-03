@@ -49,7 +49,7 @@ function renderApiPage(){
   };
   h+='<div class="v3-card"><div class="v3-codetabs">'+[['curl','cURL'],['python','Python'],['js','JavaScript']].map(function(l){return '<button type="button" class="'+(_apiLang===l[0]?'on':'')+'" data-on-click="apiLang(\''+l[0]+'\')">'+l[1]+'</button>'}).join('')+
     '<button type="button" style="margin-left:auto;color:var(--v3-accent)" data-on-click="apiCopyCode()">Копировать</button></div><pre class="v3-codepre" id="apiCode">'+V3.esc(code[_apiLang])+'</pre></div>';
-  if(typeof API_DOCS_HTML!=='undefined')h+=API_DOCS_HTML;
+  if(typeof API_DOCS_HTML!=='undefined')h+='<div class="v3-apidocs">'+API_DOCS_HTML+'</div>';
   document.getElementById('apiBody').innerHTML=h;
 }
 function apiLang(l){_apiLang=l;renderApiPage()}

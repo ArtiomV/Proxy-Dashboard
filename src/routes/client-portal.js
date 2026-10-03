@@ -441,7 +441,12 @@ r.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
       }
       const results = await fetchAllServersDataCached();
       const merged = mergeServerData(results, pnf);
-      if (!merged.ports[imei]) return res.status(403).json({ error: 'Modem not assigned to this client' });
+      // mergeServerData ключует ports префиксом "<serverName>_", а фронт шлёт
+      // сырой IMEI без префикса (для RO-портов префикс не срезается — там
+      // ключ совпадает как есть). Проверяем обе формы.
+      if (!merged.ports[serverName + '_' + imei] && !merged.ports[imei]) {
+        return res.status(403).json({ error: 'Modem not assigned to this client' });
+      }
     }
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });

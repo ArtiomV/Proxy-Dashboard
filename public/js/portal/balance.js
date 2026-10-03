@@ -60,19 +60,19 @@ function _balRender(){
     {l:'Дней до нуля',v:duz!=null&&bal>0?String(duz):'—',s:'при текущем темпе',c:'amber',top:'amber'}
   ];
   document.getElementById('balPulse').innerHTML=cards.map(function(c){return '<div class="v3-pulse '+(c.top||'')+'"><div class="v3-pulse-l">'+c.l+'</div><div class="v3-pulse-v">'+c.v+'</div><div class="v3-pulse-s '+(c.c||'')+'">'+c.s+'</div></div>'}).join('');
-  // списания по дням текущего месяца
-  var t=V3.parse(V3.today()),n=t.getDate(),days=[];
-  for(var i=1;i<=n;i++){
-    var ymd=V3.ymd(new Date(t.getFullYear(),t.getMonth(),i)),ch=0,gb=0,after=null;
+  // списания по дням — последние 30 дней (не календарный месяц), 03.10
+  var t=V3.parse(V3.today()),days=[];
+  for(var i=29;i>=0;i--){
+    var dd0=V3.addDays(t,-i),ymd=V3.ymd(dd0),ch=0,gb=0,after=null;
     entries.forEach(function(e){if(e.date===ymd&&(e.type==='charge'||e.type==='correction')){ch+=_balCharge(e);if(e.type==='charge')gb+=e.delta_gb||0;if(after==null&&e.balance_after!=null)after=e.balance_after}});
     days.push({ymd:ymd,ch:ch,gb:gb,after:after});
   }
-  document.getElementById('balChartNote').textContent=V3.MONTHS[t.getMonth()]+' '+t.getFullYear()+' · '+cur+' в сутки';
+  document.getElementById('balChartNote').textContent='последние 30 дней · '+cur+' в сутки';
   document.getElementById('balTariff').innerHTML=price?'тариф <span class="v3-pill acc">'+V3.num(price,price%1?2:0)+' '+cur+(perGb?'/ГБ':'/мес')+'</span>':'';
-  V3.bars(document.getElementById('balChart'),{cls:'h170',height:170,empty:'В этом месяце списаний ещё не было',
+  V3.bars(document.getElementById('balChart'),{cls:'h170',height:170,empty:'За последние 30 дней списаний не было',
     bars:days.map(function(x,i){
       var dd=V3.parse(x.ymd);
-      return {parts:[{v:x.ch,color:'var(--v3-accent)'}],label:(i===0||(i+1)%5===0)?String(i+1):'',
+      return {parts:[{v:x.ch,color:'var(--v3-accent)'}],label:(i===0||(i+1)%5===0)?String(dd.getDate()):'',
         tip:{title:dd.getDate()+' '+V3.MONTHS_GEN[dd.getMonth()]+', '+V3.WD[dd.getDay()],rows:[{name:'Списано',val:'−'+V3.money2(x.ch),cls:'neg'},{name:'Трафик',val:V3.gbv(x.gb)},{name:'Баланс после',val:x.after!=null?V3.money2(x.after):'—'}]}};
     })});
   // история по месяцам

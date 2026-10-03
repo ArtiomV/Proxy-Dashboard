@@ -2925,13 +2925,28 @@ try {
 // Load IP history from SQLite (with db_id for incremental updates)
 const ipHistory = stateMod.state.ipHistory; // Stage 14.1
 try {
+  // 03.10: ip_history хранится 90 дней (см. миграцию 107) — раньше таблица
+  // обрезалась до 100 строк на модем и ip_stats занижал уникальные IP.
+  const purged = trackingDb.ihPurgeOldStmt().run();
+  if (purged.changes > 0) logger.info(`[SQLite] Purged ${purged.changes} ip_history rows older than 90d`);
   const rows = trackingDb.ihAllOrderStmt().all();
   for (const r of rows) {
     if (!ipHistory[r.key]) ipHistory[r.key] = [];
     ipHistory[r.key].push({ db_id: r.id, ip: r.ip, from: r.started_at, to: r.ended_at || null });
   }
+  // in-memory кэш — только последние MAX_IP_HISTORY на ключ (для UI
+  // /api/admin/ip_history и логики recordIpChange); полная история — в SQLite.
+  for (const k of Object.keys(ipHistory)) {
+    if (ipHistory[k].length > MAX_IP_HISTORY) ipHistory[k] = ipHistory[k].slice(-MAX_IP_HISTORY);
+  }
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} IP history entries`);
 } catch (e) { logger.error('Failed to load ip_history from SQLite:', e.message); }
+// Раз в сутки — retention-пурга ip_history (90 дней), чтобы таблица не росла
+// бесконечно между рестартами.
+_intervals.push(setInterval(() => {
+  try { trackingDb.ihPurgeOldStmt().run(); }
+  catch (e) { logger.warn('[ip_history] purge: ' + e.message); }
+}, 24 * 3600e3));
 
 // ip_tracking / uptime_tracking / ip_history statements → src/db/tracking.js
 const _ipUpsert = trackingDb.ipUpsertStmt();
@@ -2940,7 +2955,6 @@ const _utDailyUpsert = trackingDb.utDailyUpsertStmt();
 const _clientUtIncrement = trackingDb.clientUtIncrementStmt();
 const _ihInsert = trackingDb.ihInsertStmt();
 const _ihUpdateEnd = trackingDb.ihUpdateEndStmt();
-const _ihDeleteById = trackingDb.ihDeleteByIdStmt();
 
 function saveIpTracking() {
   try {
@@ -3012,12 +3026,11 @@ function recordIpChange(key, oldIp, newIp, timestamp) {
   // Add new entry with direct INSERT
   const result = _ihInsert.run(key, newIp, ts, '');
   entries.push({ db_id: result.lastInsertRowid, ip: newIp, from: ts, to: null });
-  // Trim to MAX_IP_HISTORY
+  // Trim только память: в SQLite история живёт 90 дней (retention-пурга на
+  // старте и раз в сутки). Раньше здесь же DELETE'ом обрезалась и таблица —
+  // из-за этого ip_stats «за 30 дней» видел лишь последние ~100 назначений
+  // модема и занижал уникальные IP (миграция 107).
   if (entries.length > MAX_IP_HISTORY) {
-    const toDelete = entries.slice(0, entries.length - MAX_IP_HISTORY);
-    for (const e of toDelete) {
-      if (e.db_id) _ihDeleteById.run(e.db_id);
-    }
     ipHistory[key] = entries.slice(-MAX_IP_HISTORY);
   }
 }

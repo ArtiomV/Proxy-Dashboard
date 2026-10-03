@@ -221,6 +221,9 @@ function _spPrepare(d, opSpeed){
     });
     return o;
   });
+  // операторы совсем без данных (ни серии замеров, ни медианы флота) не
+  // показываем — иначе в легенде висят «пустые» строки с прочерками
+  list=list.filter(function(o){return o.dlMed!=null||o.ulMed!=null});
   var locs=[];list.forEach(function(o){if(o.loc&&locs.indexOf(o.loc)<0)locs.push(o.loc)});
   // порядок локаций — как у стран кабинета (Молдова, Румыния, …)
   var ord=V3.countries().map(V3.ccName),oi=function(l){var i=ord.indexOf(l);return i<0?99:i};

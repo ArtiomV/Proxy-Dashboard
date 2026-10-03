@@ -278,9 +278,9 @@ r.get('/api/client/operator_speed', authMiddleware, (req, res) => {
   const hours = Math.min(Math.max(parseInt(req.query.hours, 10) || 48, 1), 24 * 14);
   const mine = req.query.mine === '1';
   try {
-    // 2026-10-03: mine=1 — только пары (сервер, оператор), которые есть у
+    // 2026-10-03: mine=1 — только пары (страна, оператор), которые есть у
     // клиента (по привязке его портов), иначе витрина показывала операторов
-    // всего флота. Скорость оператора на площадке не зависит от того, чей
+    // всего флота. Скорость оператора в стране не зависит от того, чей
     // модем её замерил — поэтому берём замеры флота по этим парам.
     let allowed = null;
     if (mine) {
@@ -297,13 +297,20 @@ r.get('/api/client/operator_speed', authMiddleware, (req, res) => {
       if (nicks.size) {
         const nickList = [...nicks];
         const inClause = nickList.map(() => '?').join(',');
+        const addPair = (serverName, rawOp) => {
+          const op = _normMetaOp(rawOp, serverName);
+          if (!op) return;
+          const srv = serverName ? findServer(serverName) : null;
+          const country = (srv && (srv.countryName || srv.country)) || serverName || '';
+          allowed.add(country + '|' + op.toLowerCase());
+        };
         try {
           for (const r of db.prepare(`SELECT DISTINCT server_name, operator FROM modem_meta WHERE nick IN (${inClause}) AND TRIM(COALESCE(operator,'')) <> ''`).all(...nickList)) {
-            allowed.add((r.server_name || '') + '|' + String(r.operator).toLowerCase());
+            addPair(r.server_name, r.operator);
           }
           // фолбэк: последний оператор ника в speed_monitor (modem_meta может не знать новый ник)
           for (const r of db.prepare(`SELECT DISTINCT server, operator FROM speed_monitor WHERE nick IN (${inClause}) AND TRIM(COALESCE(operator,'')) <> ''`).all(...nickList)) {
-            allowed.add((r.server || '') + '|' + String(r.operator).toLowerCase());
+            addPair(r.server, r.operator);
           }
         } catch (_) { /* best-effort */ }
       }
@@ -312,28 +319,37 @@ r.get('/api/client/operator_speed', authMiddleware, (req, res) => {
       SELECT server, operator, download, upload, ping
         FROM speed_monitor
        WHERE ts >= datetime('now', ?) AND ok = 1 AND (download > 0 OR upload > 0)`).all(`-${hours} hours`);
-    const groups = new Map();   // server|operator → { dls, uls, pings }
+    // 2026-10-03: группировка по (страна, оператор), а не (сервер, оператор) —
+    // клиенту нужны «Молдова: Moldtelecom/Moldcell/Orange», а не разбивка по
+    // площадкам внутри страны.
+    const groups = new Map();   // country|operator → { dls, uls, pings, samplesN }
     for (const r of raw) {
-      const k = (r.server || '') + '|' + (r.operator || '');
-      if (allowed && !allowed.has((r.server || '') + '|' + String(r.operator || '').toLowerCase())) continue;
-      if (!groups.has(k)) groups.set(k, { server: r.server, operator: r.operator, dls: [], uls: [], pings: [] });
+      const op = _normMetaOp(r.operator, r.server);
+      if (!op) continue;
+      const srv = r.server ? findServer(r.server) : null;
+      const country = (srv && (srv.countryName || srv.country)) || r.server || '';
+      const k = country + '|' + op;
+      if (allowed && !allowed.has(country + '|' + op.toLowerCase())) continue;
+      if (!groups.has(k)) groups.set(k, { country, operator: op, dls: [], uls: [], pings: [] });
       const g = groups.get(k);
       if (r.download > 0) g.dls.push(r.download);
       if (r.upload > 0) g.uls.push(r.upload);
       if (r.ping > 0) g.pings.push(r.ping);
     }
-    const out = [...groups.values()].map(g => {
-      const srv = g.server ? findServer(g.server) : null;
-      return {
-        server: g.server,
-        operator: _normMetaOp(g.operator, g.server),
-        location: (srv && (srv.displayName || srv.countryName)) || g.server,
-        samples: g.dls.length,
-        median_dl: g.dls.length ? Math.round(_median(g.dls) * 10) / 10 : null,
-        median_ul: g.uls.length ? Math.round(_median(g.uls) * 10) / 10 : null,
-        median_ping: g.pings.length ? Math.round(_median(g.pings)) : null,
-      };
-    }).sort((a, b) => String(a.location).localeCompare(String(b.location)) || (b.median_dl || 0) - (a.median_dl || 0));
+    const out = [...groups.values()]
+      // операторы без единого замера скорости не показываем (были «пустые»
+      // строки, когда у пары были только ping-замеры или совсем ничего)
+      .filter(g => g.dls.length || g.uls.length)
+      .map(g => {
+        return {
+          operator: g.operator,
+          location: g.country,
+          samples: g.dls.length,
+          median_dl: g.dls.length ? Math.round(_median(g.dls) * 10) / 10 : null,
+          median_ul: g.uls.length ? Math.round(_median(g.uls) * 10) / 10 : null,
+          median_ping: g.pings.length ? Math.round(_median(g.pings)) : null,
+        };
+      }).sort((a, b) => String(a.location).localeCompare(String(b.location)) || (b.median_dl || 0) - (a.median_dl || 0));
     res.json({ hours, rows: out });
   } catch (e) {
     res.status(500).json({ error: e.message });

@@ -31,10 +31,11 @@ function _profRender(){
     row('Название',V3.esc(l.name||p.name))+row('ИНН',V3.esc(l.inn),'',true)+row('КПП',V3.esc(l.kpp),'',true)+row('Адрес',V3.esc(l.address))+
     row('Договор',V3.esc([l.contract,l.contractDate?'от '+V3.date(l.contractDate):''].filter(Boolean).join(' ')))+
     '<div class="v3-note" style="margin-top:8px">Изменить реквизиты можно через менеджера — они попадают в акты и счета.</div></div>';
-  var link=V3.resetLinkBase?V3.resetLinkBase.replace(/^https?:\/\/[^/]+/,'…').replace(/token=([0-9a-f]{4})[0-9a-f]+/,'token=$1…'):'действует';
+  var link=V3.resetLinkBase?V3.resetLinkBase.replace(/^https?:\/\/[^/]+/,'…').replace(/token=([0-9a-f]{4})[0-9a-f]+/,'token=$1…'):'активна';
   h+='<div class="v3-card"><h3 style="margin-bottom:10px">Безопасность</h3><div style="display:flex;flex-direction:column;gap:10px">'+
     '<div class="v3-srow"><span class="k">Пароль</span><span class="v">'+(p.pwChangedAt?'Изменён '+V3.esc(V3.date(p.pwChangedAt)):'Задан')+'</span><button type="button" class="v3-btn sm link" data-on-click="profPassword()">Сменить</button></div>'+
-    '<div class="v3-srow"><span class="k">Ссылка смены IP</span><span class="v mono" style="font-size:11.5px">'+V3.esc(link)+'</span><button type="button" class="v3-btn sm link" data-on-click="v3RotateResetLink()">Перевыпустить</button></div>'+
+    '<div class="v3-srow"><span class="k">Ссылки смены IP</span><span class="v mono" style="font-size:11.5px">'+V3.esc(link)+'</span><button type="button" class="v3-btn sm link" data-on-click="v3RotateResetLink()">Перевыпустить</button></div>'+
+    '<div class="v3-note" style="margin-top:-4px">У каждого прокси своя ссылка (лежит в списке прокси), но основа у них общая — токен вашего аккаунта. «Перевыпустить» меняет токен сразу для всех прокси.</div>'+
     '<div class="v3-srow"><span class="k">Telegram</span><span class="v">'+(p.tgLinked?(p.tgUsername?'@'+V3.esc(p.tgUsername):'привязан'):'<span style="color:var(--v3-faint)">не привязан</span>')+'</span>'+
       (p.tgLinked?'<button type="button" class="v3-btn sm" data-on-click="profTgUnlink()">Отвязать</button>':'<button type="button" class="v3-btn sm link" data-on-click="profTgLink()">Привязать</button>')+'</div>'+
     '<div class="v3-note">'+(p.tgLinked?'В Telegram приходят зачисления, предупреждения о балансе и уведомления «прокси офлайн».':'Привяжите Telegram, чтобы получать зачисления, предупреждения о балансе и уведомления «прокси офлайн».')+'</div>'+
@@ -47,19 +48,13 @@ function _profRender(){
 function _profSla(){
   var s=(rawData&&rawData.uptimeSummary30d)||null;
   var up=s&&s.uptime_pct!=null?parseFloat(s.uptime_pct):null;
-  var checks=s?s.checks:null,fail=s&&s.checks!=null?Math.max(0,s.checks-(s.online_checks||0)):null;
-  // средний простой на прокси за 30 дней = доля неуспешных проверок × 30 суток
-  var downMin=up!=null?Math.round((100-up)/100*30*24*60):null;
-  var dt=downMin==null?'—':downMin>=60?Math.floor(downMin/60)+' ч '+(downMin%60)+' м':downMin+' м';
-  var badDays=_sla&&_sla.days?_sla.days.filter(function(d){return d.failed_checks>0}).length:null;
+  var checks=s?s.checks:null;
   var t=[
     {l:'Доступность',v:up!=null?V3.pct(up):'—',c:up==null?'':up>=99?'good':up>=95?'warn':'bad'},
-    {l:'Проверок',v:checks!=null?V3.group(checks):'—'},
-    {l:'Недоступно',v:dt,c:downMin>0?'warn':''},
-    {l:'Дней с простоем',v:badDays!=null?String(badDays):'—'}
+    {l:'Проверок',v:checks!=null?V3.group(checks):'—'}
   ];
   return '<div class="v3-card"><h3 style="margin-bottom:10px">SLA за 30 дней</h3><div class="v3-tiles two">'+t.map(function(x){return '<div class="v3-tile"><div class="v3-tile-l">'+x.l+'</div><div class="v3-tile-v '+(x.c||'')+'">'+x.v+'</div></div>'}).join('')+'</div>'+
-    '<div class="v3-hint" style="margin-top:10px">Отчёт формируется по тем же проверкам доступности, что показаны в колонке «Аптайм». «Недоступно» — в среднем на прокси, «дней с простоем» — в текущем месяце'+(fail!=null?' · неуспешных проверок: '+V3.group(fail):'')+'.</div></div>';
+    '<div class="v3-hint" style="margin-top:10px">Отчёт формируется по тем же проверкам доступности, что показаны в колонке «Аптайм».</div></div>';
 }
 
 // ---------- email ----------

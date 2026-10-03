@@ -343,6 +343,12 @@
   },
   {
     "type": "index",
+    "name": "idx_ip_history_started",
+    "tbl_name": "ip_history",
+    "sql": "CREATE INDEX idx_ip_history_started ON ip_history(started_at)"
+  },
+  {
+    "type": "index",
     "name": "idx_kv_history_key",
     "tbl_name": "kv_store_history",
     "sql": "CREATE INDEX idx_kv_history_key ON kv_store_history(key, written_at DESC)"

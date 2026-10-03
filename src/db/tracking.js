@@ -171,7 +171,13 @@ function init(db) {
   // WP7.1: normalized read (migration 047) — columns, not a JSON blob.
   S.utAll      = db.prepare('SELECT key, total_checks, online_checks, first_check, last_check, last_online_check, offline_alerted FROM uptime_tracking');
   S.utDailyAll = db.prepare('SELECT key, date, online, total FROM uptime_daily');
-  S.ihAllOrder = db.prepare('SELECT id, key, ip, started_at, ended_at FROM ip_history ORDER BY id ASC');
+  // Загрузка в память при старте — только свежие строки: in-memory кэш всё
+  // равно обрезается до MAX_IP_HISTORY на ключ (100), а за 7 дней любой
+  // реальный модем набирает больше 100 ротаций. Полная таблица (90 дней)
+  // нужна только SQL-аналитике ip_stats, память она не грузит.
+  S.ihAllOrder = db.prepare("SELECT id, key, ip, started_at, ended_at FROM ip_history WHERE started_at >= datetime('now', '-7 days') ORDER BY id ASC");
+  // Retention: история нужна аналитике за ≤90 дней (максимум окна ip_stats).
+  S.ihPurgeOld = db.prepare("DELETE FROM ip_history WHERE started_at < datetime('now', '-90 days')");
 }
 
 module.exports = {
@@ -204,4 +210,5 @@ module.exports = {
   utAllStmt:           () => S.utAll,
   utDailyAllStmt:      () => S.utDailyAll,
   ihAllOrderStmt:      () => S.ihAllOrder,
+  ihPurgeOldStmt:      () => S.ihPurgeOld,
 };
