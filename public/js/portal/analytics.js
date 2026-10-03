@@ -60,7 +60,18 @@ function renderAnalytics(){
   _anAll();
   if(!_anHeat){_anHeat={loading:true};api('/api/client/hourly_traffic?days=7').then(function(d){_anHeat=d&&d.matrix?d:{failed:true,error:d&&d.error};_anHeatmap()}).catch(function(){_anHeat={failed:true};_anHeatmap()})}
   _anHeatmap();
-  if(!_anSpeed||Date.now()-_anSpeed.ts>10*60e3){_anSpeed={loading:true,ts:Date.now()};api('/api/client/speed_monitor?hours=48').then(function(d){_anSpeed=_spPrepare(d);_spRender()}).catch(function(){_anSpeed={failed:true,ts:Date.now()};_spRender()})}
+  // 2026-10-03: список операторов — из operator_speed?mine=1 (ВСЕ операторы,
+  // которые есть у клиента, а не только замеренные ники); почасовая серия —
+  // из speed_monitor (замеры самих ников клиента, если есть).
+  if(!_anSpeed||Date.now()-_anSpeed.ts>10*60e3){
+    _anSpeed={loading:true,ts:Date.now()};
+    Promise.all([
+      api('/api/client/speed_monitor?hours=48'),
+      api('/api/client/operator_speed?mine=1&hours=48'),
+    ]).then(function(res){
+      _anSpeed=_spPrepare(res[0],res[1]);_spRender();
+    }).catch(function(){_anSpeed={failed:true,ts:Date.now()};_spRender()});
+  }
   _spRender();
 }
 function _anAll(){_anPulse();_anChart();_anSides()}
@@ -174,20 +185,28 @@ function _anHeatmap(){
   box.querySelector('.v3-heat').addEventListener('mouseleave',function(){tip.style.display='none';box.querySelectorAll('.v3-heat-c.on').forEach(function(x){x.classList.remove('on')})});
 }
 
-// ---------- скорость по операторам (медиана замеров модемов клиента за час) ----------
+// ---------- скорость по операторам (медиана замеров за час) ----------
+// 2026-10-03: список операторов полный (mine=1: все, что есть у клиента),
+// почасовая серия — где speed_monitor реально мерил ники клиента.
 function _median(a){if(!a.length)return null;var s=a.slice().sort(function(x,y){return x-y});return s[Math.floor(s.length/2)]}
-function _spPrepare(d){
-  if(!d||d.error||!Array.isArray(d.rows))return {failed:true,ts:Date.now()};
+function _spPrepare(d, opSpeed){
+  if(!d||d.error||!Array.isArray(d.rows))d={rows:[],modems:[]};
   var meta={};(d.modems||[]).forEach(function(m){meta[m.nick]=m});
   // часы окна (МСК) — последние 48 часов
   var now=new Date(Date.now()+3*3600e3),hours=[];
   for(var i=47;i>=0;i--){var t=new Date(now.getTime()-i*3600e3);hours.push(t.toISOString().slice(0,13).replace('T',' ')+':00')}
   var ops={};
+  // 1) полный список операторов клиента из operator_speed (медиана по флоту)
+  ((opSpeed&&opSpeed.rows)||[]).forEach(function(r){
+    var key=(r.operator||'Оператор не определён')+'|'+(r.location||'');
+    if(!ops[key])ops[key]={name:r.operator||'Оператор не определён',loc:r.location||'',dl:{},ul:{},dlMed:r.median_dl!=null?r.median_dl:null,ulMed:r.median_ul!=null?r.median_ul:null,ping:r.median_ping};
+  });
+  // 2) почасовая серия из замеров ников клиента (если такие есть)
   d.rows.forEach(function(r){
     var m=meta[r.nick]||{},op=m.operator||(V3.byNick(r.nick)||{}).operator||'Оператор не определён';
     var loc=m.location||'';
     var key=op+'|'+loc;
-    if(!ops[key])ops[key]={name:op,loc:loc,dl:{},ul:{}};
+    if(!ops[key])ops[key]={name:op,loc:loc,dl:{},ul:{},dlMed:null,ulMed:null};
     var hi=hours.indexOf(r.hour_msk);if(hi<0)return;
     if(r.avg_dl>0)(ops[key].dl[hi]=ops[key].dl[hi]||[]).push(r.avg_dl);
     if(r.avg_ul>0)(ops[key].ul[hi]=ops[key].ul[hi]||[]).push(r.avg_ul);
@@ -196,7 +215,9 @@ function _spPrepare(d){
     var o=ops[k];o.color=SP_COLORS[i%SP_COLORS.length];
     ['dl','ul'].forEach(function(mode){
       var arr=[],all=[];for(var h=0;h<48;h++){var v=o[mode][h]?_median(o[mode][h]):null;arr.push(v);if(v!=null)all.push(v)}
-      o[mode+'S']=arr;o[mode+'Med']=_median(all);
+      o[mode+'S']=arr;
+      var computed=_median(all);
+      o[mode+'Med']=computed!=null?computed:o[mode+'Med'];   // нет серии клиента — медиана флота по оператору
     });
     return o;
   });

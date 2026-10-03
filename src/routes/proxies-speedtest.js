@@ -276,7 +276,38 @@ function _median(vals) {
 }
 r.get('/api/client/operator_speed', authMiddleware, (req, res) => {
   const hours = Math.min(Math.max(parseInt(req.query.hours, 10) || 48, 1), 24 * 14);
+  const mine = req.query.mine === '1';
   try {
+    // 2026-10-03: mine=1 — только пары (сервер, оператор), которые есть у
+    // клиента (по привязке его портов), иначе витрина показывала операторов
+    // всего флота. Скорость оператора на площадке не зависит от того, чей
+    // модем её замерил — поэтому берём замеры флота по этим парам.
+    let allowed = null;
+    if (mine) {
+      const clientInfo = clientByLogin.get(req.user.login);
+      const portName = (clientInfo && clientInfo.portName) || req.user.portNameFilter || '';
+      const nicks = new Set();
+      for (const portMap of Object.values(knownModems || {})) {
+        for (const info of Object.values(portMap || {})) {
+          if (!info || !info.nick) continue;
+          if (portName === '*' || info.portName === portName) nicks.add(info.nick);
+        }
+      }
+      allowed = new Set();
+      if (nicks.size) {
+        const nickList = [...nicks];
+        const inClause = nickList.map(() => '?').join(',');
+        try {
+          for (const r of db.prepare(`SELECT DISTINCT server_name, operator FROM modem_meta WHERE nick IN (${inClause}) AND TRIM(COALESCE(operator,'')) <> ''`).all(...nickList)) {
+            allowed.add((r.server_name || '') + '|' + String(r.operator).toLowerCase());
+          }
+          // фолбэк: последний оператор ника в speed_monitor (modem_meta может не знать новый ник)
+          for (const r of db.prepare(`SELECT DISTINCT server, operator FROM speed_monitor WHERE nick IN (${inClause}) AND TRIM(COALESCE(operator,'')) <> ''`).all(...nickList)) {
+            allowed.add((r.server || '') + '|' + String(r.operator).toLowerCase());
+          }
+        } catch (_) { /* best-effort */ }
+      }
+    }
     const raw = db.prepare(`
       SELECT server, operator, download, upload, ping
         FROM speed_monitor
@@ -284,6 +315,7 @@ r.get('/api/client/operator_speed', authMiddleware, (req, res) => {
     const groups = new Map();   // server|operator → { dls, uls, pings }
     for (const r of raw) {
       const k = (r.server || '') + '|' + (r.operator || '');
+      if (allowed && !allowed.has((r.server || '') + '|' + String(r.operator || '').toLowerCase())) continue;
       if (!groups.has(k)) groups.set(k, { server: r.server, operator: r.operator, dls: [], uls: [], pings: [] });
       const g = groups.get(k);
       if (r.download > 0) g.dls.push(r.download);
