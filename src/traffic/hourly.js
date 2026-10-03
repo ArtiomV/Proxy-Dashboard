@@ -181,7 +181,7 @@ async function aggregateHourlyTraffic() {
     let smoothedCount = 0;       // rows where uncertain=2 was replaced by median of clean neighbours
     let unsmoothableCount = 0;   // uncertain=2 rows we couldn't smooth (not enough neighbours)
     let clampedSpikes = 0;
-    let wireScaledCount = 0;     // 2026-09-27: строки, масштабированные к проводу (uncertain=6)
+    let wireDivergentCount = 0;     // 2026-10-03: часы с расхождением портов и провода (только детекция, без подмены значений)
     const MAX_HOURLY_BYTES = 20 * 1e9; // 20 GB sanity cap per port (decimal GB)
     const UNCERTAIN_THRESHOLD = 150 * 1e6; // 150 MB minimum for uncertain flag (above month counter granularity)
     const MONTH_COUNTER_STEP = 1e8; // 100 MB — ProxySmart month counter granularity (decimal)
@@ -250,18 +250,14 @@ async function aggregateHourlyTraffic() {
       logger.warn('[HourlyAgg] portAvg precompute failed: ' + e.message + ' — clamping disabled this run');
     }
 
-    // 2026-09-27 (миграция 105): проводной учёт. Per-port счётчики ProxySmart
-    // на задушенных/перегруженных модемах завышены в 24–48× (считают спрос
-    // клиента, а не трафик через модем). Проводная правда — семплы
-    // /proc/net/dev интерфейса модема (modem_wire_counters, пишет
-    // server-metrics каждые ~10 мин). Строки текущего часа сначала
-    // буферизуются (queueRow), в конце обработки сервера для каждого ника с
-    // известным iface (net_details.DEV живого фида) считаем проводную дельту
-    // за час: последний семпл ≤ конца часа минус последний семпл ≤ начала
-    // часа (без интерполяции). Если сумма заявленного по портам модема >
-    // wireDelta × 1.3 — масштабируем все порты модема к wireDelta × 1.0
-    // (итог = провод), uncertain=6, заявленное — в raw_bytes_* (как кламп
-    // фантомов). Нет iface или семплов — записываем как заявлено.
+    // 2026-09-27 (миграция 105) / пересмотрено 2026-10-03: проводной учёт.
+    // КАНОН трафика — счётчики портов ProxySmart (traffic_hourly): их видит
+    // клиент, по ним биллинг. Проводные семплы /proc/net/dev
+    // (modem_wire_counters, server-metrics ~раз в 10 мин) — ТОЛЬКО детектор
+    // расхождений: если порты модема заявили > wireDelta × 1.3, пишем warn в
+    // лог и activity (повод разобраться с конкретным модемом, как MD2_39),
+    // но значения НЕ масштабируем — подмена чисел породила «много
+    // скорректированных ячеек» и расхождения с клиентскими счётчиками.
     const WIRE_TOLERANCE = 1.3;
     const hourEnd = new Date(prevHourStart + 3600000).toISOString().slice(0, 13).replace('T', ' ') + ':00';
     const hourRows = [];
@@ -283,7 +279,7 @@ async function aggregateHourlyTraffic() {
     }
     // Проводная дельта (rx+tx) за час; null — семплов нет/мало (границы часа
     // обязаны быть РАЗНЫМИ семплами, иначе дельта фиктивно нулевая) или
-    // счётчик интерфейса сбросился (reboot модема) → масштабирование пропускаем.
+    // счётчик интерфейса сбросился (reboot модема) → детекция пропускаем.
     function wireDeltaForHour(srv, iface) {
       const st = _wireSampleStmt();
       if (!st) return null;
@@ -305,35 +301,25 @@ async function aggregateHourlyTraffic() {
         const claimed = rows.reduce((s, r) => s + r.bytesIn + r.bytesOut, 0);
         const iface = (ifaceByNick && ifaceByNick[nick]) || '';
         const wireDelta = (iface && claimed > 0) ? wireDeltaForHour(srv, iface) : null;
-        const doScale = wireDelta != null && claimed > wireDelta * WIRE_TOLERANCE;
-        const k = doScale ? wireDelta / claimed : 1;
+        const diverged = wireDelta != null && claimed > wireDelta * WIRE_TOLERANCE;
         for (const r of rows) {
-          if (doScale) {
-            const preIn = r.bytesIn, preOut = r.bytesOut;
-            r.bytesIn = Math.round(r.bytesIn * k);
-            r.bytesOut = Math.round(r.bytesOut * k);
-            // raw — самое раннее наблюдение: если фантом-кламп уже сохранил
-            // своё raw, не перезаписываем.
-            if (r.rawIn == null) r.rawIn = Math.round(preIn);
-            if (r.rawOut == null) r.rawOut = Math.round(preOut);
-            r.uncertain = 6;
-            wireScaledCount++;
-            uncertainCount++;
-          }
+          // значения — как заявил ProxySmart (канон); uncertain из других
+          // детекторов (карантин/сглаживание) сохраняется
           _htUpsert.run(srv, r.fullPortId, r.nick, r.operator, r.clientName, hourStart,
             r.bytesIn, r.bytesOut, r.uncertain, r.rawIn, r.rawOut);
         }
-        if (doScale) {
-          logger.warn(`[HourlyAgg] wire-scale: ${nick}@${srv} (${iface}): порты заявили ${(claimed / 1e9).toFixed(2)}GB vs провод ${(wireDelta / 1e9).toFixed(2)}GB → ×${k.toFixed(3)} (uncertain=6)`);
+        if (diverged) {
+          wireDivergentCount++;
+          logger.warn(`[HourlyAgg] wire-divergence: ${nick}@${srv} (${iface}): порты заявили ${(claimed / 1e9).toFixed(2)}GB vs провод ${(wireDelta / 1e9).toFixed(2)}GB — значения оставлены как есть (канон=ProxySmart)`);
           try {
-            logActivity('billing', 'warn', 'traffic_wire_scale', nick,
-              `${nick} (${rows[0].clientName || 'no-client'}): порты заявили ${(claimed / 1e9).toFixed(2)}GB, провод ${(wireDelta / 1e9).toFixed(2)}GB — масштабировано к проводу (uncertain=6)`,
+            logActivity('billing', 'warn', 'traffic_wire_divergence', nick,
+              `${nick} (${rows[0].clientName || 'no-client'}): порты заявили ${(claimed / 1e9).toFixed(2)}GB, провод ${(wireDelta / 1e9).toFixed(2)}GB — расхождение счётчиков, значения НЕ изменены`,
               {
                 nick, server: srv, iface, hour_start: hourStart,
                 ports: rows.length,
                 claimed_total_gb: +(claimed / 1e9).toFixed(3),
                 wire_delta_gb: +(wireDelta / 1e9).toFixed(3),
-                scale: +k.toFixed(4),
+                ratio: +(claimed / wireDelta).toFixed(2),
                 reason: 'port_counters_exceed_wire',
               });
           } catch (_) { /* best-effort */ }
@@ -812,7 +798,7 @@ async function aggregateHourlyTraffic() {
     const extra2 = clampedSpikes > 0 ? `, ${clampedSpikes} reset-spikes clamped` : '';
     const extra3 = smoothedCount > 0 ? `, ${smoothedCount} auto-smoothed` : '';
     const extra4 = unsmoothableCount > 0 ? `, ${unsmoothableCount} uncertain-kept` : '';
-    const extra5 = wireScaledCount > 0 ? `, ${wireScaledCount} wire-scaled` : '';
+    const extra5 = wireDivergentCount > 0 ? `, ${wireDivergentCount} wire-divergent` : '';
     logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} port entries, ${snapCache.size} tracked${extra1}${extra2}${extra3}${extra4}${extra5}`);
     // Stage 18.13 — too many spike-clamps in one hour is suspicious
     // (could mean genuine traffic surge, OR aggregator-corruption pattern).

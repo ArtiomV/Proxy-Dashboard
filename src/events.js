@@ -116,6 +116,41 @@ function create(opts) {
     }
   }
 
+  // Scoped-вариант для клиентского SSE (03.10): publishTo(login, type, data)
+  // доставляет событие только подписчикам с этим login (у подписчика login
+  // задан при subscribe). Пустой login — никому.
+  function publishTo(login, type, data) {
+    if (!login || !clients.size) return;
+    for (const client of [...clients]) {
+      if (client.login !== login) continue;
+      // та же механика троттлинга/коалесцирования, что в publish
+      try {
+        if (client.backedUp) {
+          client.pending.set(type, data);
+          client.missed = (client.missed || 0) + 1;
+          if (client.missed > MAX_MISSED) { _drop(client, 'slow_consumer'); continue; }
+          if (!client.timer) {
+            client.timer = setTimeout(() => _flush(client), THROTTLE_MS + 5);
+            if (client.timer.unref) client.timer.unref();
+          }
+          continue;
+        }
+        const now = Date.now();
+        const last = client.lastSent.get(type) || 0;
+        if (now - last >= THROTTLE_MS) {
+          client.pending.delete(type);
+          _send(client, type, data);
+        } else {
+          client.pending.set(type, data);
+          if (!client.timer) {
+            client.timer = setTimeout(() => _flush(client), THROTTLE_MS - (now - last) + 5);
+            if (client.timer.unref) client.timer.unref();
+          }
+        }
+      } catch (e) { _drop(client, 'write: ' + e.message); }
+    }
+  }
+
   // Подписка SSE-ответа. false = лимит на сессию исчерпан (роут отвечает 429).
   // Отписка — по 'close' сокета (клиент ушёл / вкладка закрыта).
   function subscribe(res, sessionId, login) {
@@ -161,7 +196,7 @@ function create(opts) {
 
   function clientCount() { return clients.size; }
 
-  return { publish, subscribe, closeAll, closeSession, clientCount };
+  return { publish, publishTo, subscribe, closeAll, closeSession, clientCount };
 }
 
 module.exports = { create };

@@ -53,7 +53,49 @@ function _docsRender(d){
       s.rows.map(function(r,i){
         return '<tr'+(i%2?' class="z"':'')+'><td class="ink b wrap">'+V3.esc(r.name)+'</td><td class="mut">'+V3.esc(r.period)+'</td><td class="r mono ink">'+r.sum+'</td><td><span class="v3-pill '+r.st[1]+'">'+r.st[0]+'</span></td><td class="r">'+(r.dl?'<button type="button" class="v3-btn sm link" data-on-click="'+r.dl+'">Скачать PDF</button>':'<span class="v3-note">PDF нет</span>')+'</td></tr>';
       }).join('')+'</tbody></table></div></div>';
-  }).join('');
+  }).join('')+_docSlaCard();
+}
+// 03.10: SLA-отчёт за месяц — печатная страница (для юрлиц/апселла).
+// Данные — /api/client/sla_report (та же методология, что аптайм в ЛК).
+function _docSlaCard(){
+  var months=[],t=new Date();
+  for(var i=0;i<3;i++){months.push(t.getFullYear()+'-'+String(t.getMonth()+1).padStart(2,'0'));t=new Date(t.getFullYear(),t.getMonth()-1,1)}
+  return '<div class="v3-card mb12"><h3 style="margin-bottom:10px">SLA-отчёт</h3>'+
+    '<div class="v3-note" style="margin-bottom:10px">Доступность ваших прокси по месяцам: доля успешных проверок, простои по дням. Открывается печатной страницей — можно сохранить в PDF.</div>'+
+    '<div class="v3-table-wrap"><table class="v3-table"><thead><tr><th>Отчёт</th><th>Период</th><th class="r">Открыть</th></tr></thead><tbody>'+
+    months.map(function(m,i){
+      return '<tr'+(i%2?' class="z"':'')+'><td class="ink b">SLA-отчёт</td><td class="mut">'+_docPeriod(m)+'</td><td class="r"><button type="button" class="v3-btn sm link" data-on-click="docSla('+V3.q(m)+')">Открыть / Печать</button></td></tr>';
+    }).join('')+'</tbody></table></div></div>';
+}
+function docSla(month){
+  V3.toast({kind:'info',title:'Готовим отчёт…',ms:1500});
+  api('/api/client/sla_report?month='+encodeURIComponent(month)).then(function(d){
+    if(!d||d.error)throw new Error((d&&d.error)||'Нет данных за месяц');
+    var s=d.summary||{},days=(d.days||[]).filter(function(x){return x.failed_checks>0});
+    var rows=days.length?days.map(function(x){
+      return '<tr><td>'+x.day+'</td><td style="text-align:right">'+(x.uptime_pct!=null?x.uptime_pct+'%':'—')+'</td><td style="text-align:right">'+x.failed_checks+'</td></tr>';
+    }).join(''):'<tr><td colspan="3" style="text-align:center;color:#666">Простоев не зафиксировано</td></tr>';
+    var w=window.open('','_blank');
+    if(!w){V3.toast({kind:'err',title:'Разрешите всплывающие окна'});return}
+    w.document.write('<!DOCTYPE html><html lang="ru"><head><meta charset="utf-8"><title>SLA-отчёт — '+_docPeriod(month)+'</title><style>'+
+      'body{font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:720px;margin:40px auto;padding:0 20px;color:#111}'+
+      'h1{font-size:20px;margin-bottom:4px}h2{font-size:14px;margin:24px 0 8px}.muted{color:#666;font-size:12px}'+
+      '.big{font-size:34px;font-weight:700;margin:12px 0}table{width:100%;border-collapse:collapse;font-size:12px}'+
+      'td,th{border-bottom:1px solid #e5e7eb;padding:6px 8px;text-align:left}th{color:#666;text-transform:uppercase;font-size:10px}'+
+      '@media print{.noprint{display:none}}</style></head><body>'+
+      '<div class="muted">arendaproxy.ru · отчёт сформирован '+new Date().toLocaleString('ru-RU')+'</div>'+
+      '<h1>SLA-отчёт — '+_docPeriod(month)+'</h1>'+
+      '<div class="big">'+(s.uptime_pct!=null?s.uptime_pct+'%':'нет данных')+'</div>'+
+      '<div class="muted">доступность прокси ('+(s.modems||0)+' шт.) · проверок: '+(s.checks||0)+', из них неуспешных: '+(s.failed_checks||0)+'</div>'+
+      '<h2>Дни с простоями</h2><table><thead><tr><th>Дата</th><th style="text-align:right">Доступность</th><th style="text-align:right">Неуспешных проверок</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+      '<h2>Методология</h2><div class="muted">Доступность = доля успешных периодических проверок каждого прокси за период его аренды. Плановые окна и периоды исчерпания операторского пакета из расчёта исключены.</div>'+
+      '<p class="noprint" style="margin-top:24px"><button id="slaPrintBtn" style="padding:8px 16px">Печать / Сохранить в PDF</button></p>'+
+      '</body></html>');
+    w.document.close();
+    // delegation-правило: без инлайн-обработчиков даже в сгенерированном окне
+    var pb=w.document.getElementById('slaPrintBtn');
+    if(pb)pb.addEventListener('click',function(){w.print()});
+  }).catch(function(e){V3.toast({kind:'err',title:'Отчёт не готов',text:e.message})});
 }
 // скачивание файла с авторизацией заголовком
 V3.fetchFile=function(url,name){

@@ -103,6 +103,7 @@ module.exports = function createOpsExtRouter(deps) {
     getApiServers, getServerCountries,
     getRunningJobs,
     getLastBillingRunSummary, getLastReconciliationMonth, getIntervals,
+    getEventLoopLag,
     getFetchAllServersDataCached, getMergeServerData, getSetting,
     getIpTracking, getUptimeTracking, getIpHistory, getKnownModems,
     getDailyTraffic, getPortKeyToPortName,
@@ -167,8 +168,43 @@ module.exports = function createOpsExtRouter(deps) {
   // still counted» bug can't silently return via a rewrite here.
   const _fleetMetaStmt = trackingDb.metaFleetRosterStmt();
 
-r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
-  const mem = process.memoryUsage();
+// 03.10: отчёт по хранению — строки и размер по таблицам + действующие
+// retention-сроки из единого реестра src/jobs/cleanup.js. Кэш 5 мин:
+// COUNT(*) по крупным таблицам — полный скан, дергать на каждый показ не надо.
+const { RETENTION_POLICIES } = require('../jobs/cleanup');
+let _storageCache = null;
+r.get('/api/admin/storage', authMiddleware, adminMiddleware, (req, res) => {
+  try {
+    if (_storageCache && Date.now() - _storageCache.ts < 5 * 60e3) return res.json(_storageCache.payload);
+    // dbstat для размеров таблиц (вкомпилирован в better-sqlite3); если нет — только строки.
+    let dbstatOk = false;
+    try { db.prepare("SELECT name FROM dbstat LIMIT 1").get(); dbstatOk = true; } catch (_) { dbstatOk = false; }
+    const sizeStmt = dbstatOk
+      ? db.prepare("SELECT SUM(pgsize) AS bytes FROM dbstat WHERE name = ?")
+      : null;
+    const tables = [];
+    const all = Object.keys(RETENTION_POLICIES);
+    for (const table of all) {
+      const pol = RETENTION_POLICIES[table];
+      const raw = appSettings[pol.key];
+      const days = Number.isInteger(raw) && raw >= 7 ? raw : pol.def;
+      let rowsCount = null, bytes = null;
+      try { rowsCount = db.prepare(`SELECT COUNT(*) AS n FROM ${table}`).get().n; } catch (_) { /* таблицы может не быть */ }
+      if (sizeStmt) { try { bytes = sizeStmt.get(table).bytes; } catch (_) { /* best-effort */ } }
+      let oldest = null;
+      try { oldest = db.prepare(`SELECT MIN(${pol.col}) AS m FROM ${table}`).get().m; } catch (_) { /* best-effort */ }
+      tables.push({ table, rows: rowsCount, mb: bytes != null ? Math.round(bytes / 1048576 * 10) / 10 : null, retention_days: days, oldest });
+    }
+    tables.sort((a, b) => (b.mb || 0) - (a.mb || 0) || (b.rows || 0) - (a.rows || 0));
+    const payload = { tables, dbstat: dbstatOk, generated_at: new Date().toISOString() };
+    _storageCache = { ts: Date.now(), payload };
+    res.json(payload);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {  const mem = process.memoryUsage();
   const ledgerEntryCount = _ledgerCountStmt.get().n;
   const dbSize = fs.existsSync(DB_PATH) ? Math.round(fs.statSync(DB_PATH).size / 1024) : 0;
   res.json({
@@ -183,6 +219,9 @@ r.get('/api/admin/health', authMiddleware, adminMiddleware, (req, res) => {
       heap_total_mb: Math.round(mem.heapTotal / 1024 / 1024)
     },
     database: { size_kb: dbSize, ledger_entries: ledgerEntryCount, wal_mode: true },
+    // 03.10: лаг event loop за последнюю минуту (monitorEventLoopDelay).
+    // Норматив p99 < 500 мс; max > 1 с пишется в system_log.
+    event_loop_lag_ms: (typeof getEventLoopLag === 'function') ? getEventLoopLag() : null,
     billing: getLastBillingRunSummary() || { last_run: null },
     // WP5: balance-vs-ledger drift surfaced by the daily reconcile job.
     balance: (() => { const r = (deps.getBalanceReconcile ? deps.getBalanceReconcile().getLastResult() : {}); return { divergent_clients: r.divergent || 0, checked_at: r.checkedAt || null, total_clients: r.total || 0 }; })(),

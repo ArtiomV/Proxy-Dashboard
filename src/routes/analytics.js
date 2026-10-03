@@ -408,9 +408,17 @@ r.get('/api/analytics/modem_heatmap', authMiddleware, adminMiddleware, async (re
   }
 });
 
+// 03.10: кэш rotations на 5 минут per days — полный пересчёт ~3,5 с по
+// rotation_log (139k+ строк), а страница дёргает эндпоинт на каждое
+// открытие/смену периода; синхронный SQLite блокирует event loop.
+const _rotationsCache = new Map();
+const ROTATIONS_CACHE_TTL = 5 * 60e3;
+
 r.get('/api/analytics/rotations', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const days = Math.min(Math.max(parseInt(req.query.days) || 7, 1), 30);
+    const cachedR = _rotationsCache.get(days);
+    if (cachedR && Date.now() - cachedR.ts < ROTATIONS_CACHE_TTL) return res.json(cachedR.payload);
     const sinceExpr = `datetime('now', '-${days} days')`;
 
     // Stage 18.8: exclude rotations of stale modems (offline > stale_modem_hours).
@@ -425,7 +433,7 @@ r.get('/api/analytics/rotations', authMiddleware, adminMiddleware, (req, res) =>
     const recentFailed = analyticsDb.rotationsRecentFailed(sinceExpr, staleArgs, staleFilter);
 
     const success = totals.total > 0 ? ((totals.total - totals.failed) / totals.total) * 100 : 0;
-    res.json({
+    const payload = {
       days,
       summary: {
         total: totals.total || 0,
@@ -440,7 +448,9 @@ r.get('/api/analytics/rotations', authMiddleware, adminMiddleware, (req, res) =>
       per_modem: perModem,
       per_operator: perOperator,
       recent_failed: recentFailed
-    });
+    };
+    _rotationsCache.set(days, { ts: Date.now(), payload });
+    res.json(payload);
   } catch (e) {
     logger.error('[rotations]', e.message);
     res.status(500).json({ error: e.message });

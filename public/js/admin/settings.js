@@ -595,8 +595,26 @@ function saveTrackingSettings(){
     else{st.textContent=d.error||'Ошибка';st.style.color='var(--danger)'}
   }).catch(function(e){st.textContent=e.message;st.style.color='var(--danger)'});
 }
-function saveRetentionSettings(){
-  var data={
+// 03.10: отчёт «Размер таблиц» — /api/admin/storage (кэш 5 мин на бэке).
+function loadStorageReport(force){
+  var box=document.getElementById('storageTablesBody');
+  if(!box)return;
+  if(force)box.innerHTML='<div style="color:var(--text-3)">Загрузка…</div>';
+  api(API+'/api/admin/storage').then(function(d){
+    if(!d||!Array.isArray(d.tables))throw new Error('bad payload');
+    var rows=d.tables.map(function(t){
+      return '<tr><td style="padding:4px 8px;font-family:var(--font-mono,monospace)">'+esc(t.table)+'</td>'+
+        '<td style="padding:4px 8px;text-align:right">'+(t.rows!=null?Number(t.rows).toLocaleString('ru-RU'):'—')+'</td>'+
+        '<td style="padding:4px 8px;text-align:right">'+(t.mb!=null?t.mb+' МБ':'—')+'</td>'+
+        '<td style="padding:4px 8px;text-align:right">'+t.retention_days+' дн</td>'+
+        '<td style="padding:4px 8px;color:var(--text-3)">'+(t.oldest?esc(String(t.oldest).slice(0,10)):'—')+'</td></tr>';
+    }).join('');
+    box.innerHTML='<table style="width:100%;border-collapse:collapse"><thead><tr style="color:var(--text-3);font-size:10px;text-transform:uppercase;letter-spacing:.5px"><th style="text-align:left;padding:4px 8px">Таблица</th><th style="text-align:right;padding:4px 8px">Строк</th><th style="text-align:right;padding:4px 8px">Объём</th><th style="text-align:right;padding:4px 8px">Хранение</th><th style="text-align:left;padding:4px 8px">Самая старая</th></tr></thead><tbody>'+rows+'</tbody></table>'+
+      '<div style="font-size:11px;color:var(--text-3);margin-top:6px">срез на '+esc(String(d.generated_at||'').replace('T',' ').slice(0,19))+' UTC</div>';
+  }).catch(function(e){box.innerHTML='<div style="color:var(--danger)">Не удалось загрузить: '+esc(e.message)+'</div>'});
+}
+
+function saveRetentionSettings(){  var data={
     retention_traffic_hourly:parseInt(document.getElementById('retTrafficHourlyInput').value)||90,
     retention_audit_log:parseInt(document.getElementById('retAuditLogInput').value)||90,
     retention_system_log:parseInt(document.getElementById('retSystemLogInput').value)||30,

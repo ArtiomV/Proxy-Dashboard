@@ -303,6 +303,49 @@ async function buildDailySummary(date) {
     if (logger && logger.warn) logger.warn('[DailySummary] packages block failed: ' + (e.message || e));
   }
 
+  // ----- 2c) Ревизия пакетов за месяц (03.10): включается в сводку за
+  // ПОСЛЕДНИЙ день месяца — факт потребления vs оплаченный бандл, чтобы
+  // 1-го числа было чем руководствоваться при пересмотре пакетов у операторов.
+  try {
+    const dayD = new Date(date + 'T12:00:00');
+    const nextD = new Date(dayD.getFullYear(), dayD.getMonth(), dayD.getDate() + 1);
+    if (nextD.getDate() === 1) {   // date — последний день месяца
+      const pkgsRaw = getSetting('operator_packages', '[]');
+      const pkgs = typeof pkgsRaw === 'string' ? JSON.parse(pkgsRaw || '[]') : pkgsRaw;
+      const bundles = (Array.isArray(pkgs) ? pkgs : []).filter(p => p && p.package_gb > 0);
+      if (bundles.length) {
+        const monthStart = date.slice(0, 7) + '-01';
+        const usage = db.prepare(`
+          SELECT LOWER(REPLACE(TRIM(operator), ' ', '')) AS op,
+                 SUM(bytes_in + bytes_out) AS bytes
+          FROM traffic_hourly
+          WHERE hour_start >= ? AND hour_start < datetime(?, '+1 month')
+            AND operator IS NOT NULL AND TRIM(operator) != ''
+          GROUP BY op`).all(monthStart, monthStart);
+        const byOp = {};
+        for (const r of usage) byOp[r.op] = (byOp[r.op] || 0) + (r.bytes || 0);
+        const daysInMonth = dayD.getDate();
+        lines.push('');
+        lines.push('💼 <b>Ревизия пакетов за ' + escHtml(fmtDateLong(date).replace(/^\d+ /, '')) + '</b>');
+        for (const p of bundles) {
+          const key = String(p.operator || '').toLowerCase().replace(/\s+/g, '');
+          // пакет «на симку» — оценка по всем симкам оператора не складывается
+          // в бандл: такие пропускаем, они в ежедневном блоке «на симку»
+          if (p.scope === 'sim' || p.per_sim) continue;
+          const used = byOp[key] || 0;
+          const usedGb = used / 1e9;
+          const pct = Math.round(usedGb / p.package_gb * 100);
+          const verdict = pct < 60 ? '⬇️ переплата: можно уменьшить пакет'
+            : pct <= 95 ? '✅ утилизация в норме'
+            : '⚠️ на грани — расширить пакет к следующему периоду';
+          lines.push(`• ${escHtml(p.operator)}: ${Math.round(usedGb).toLocaleString('ru-RU')} / ${Math.round(p.package_gb).toLocaleString('ru-RU')} ГБ (${pct}%), ~${(usedGb / daysInMonth).toFixed(1)} ГБ/сут — ${verdict}`);
+        }
+      }
+    }
+  } catch (e) {
+    if (logger && logger.warn) logger.warn('[DailySummary] monthly package review failed: ' + (e.message || e));
+  }
+
   // ----- 3) Инфраструктура -----
   // server_unreachable events from system_log. C7: query uses the REAL columns
   // (timestamp/category/action/target — the old `source`/`created_at` don't

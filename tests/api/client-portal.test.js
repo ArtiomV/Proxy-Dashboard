@@ -26,6 +26,9 @@ function setRetail(on) {
   db.prepare('INSERT OR REPLACE INTO kv_store (key, value, updated_at) VALUES (?, ?, datetime(\'now\'))')
     .run('app_settings', JSON.stringify(settings));
   stateMod.state.appSettings.retail_enabled = on;
+  // 03.10: смена флага влияет на dashboard_data — сбрасываем SWR-кэш,
+  // иначе следующий вызов отдаст снапшот до переключения.
+  require('../../src/routes/client-portal.js').invalidateDdCache();
 }
 
 beforeAll(async () => {

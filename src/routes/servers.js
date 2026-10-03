@@ -776,6 +776,9 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   }
 
   setSettings(patch);
+  // 03.10: настройки могут менять содержимое dashboard_data (retail и др.) —
+  // сбрасываем SWR-кэш первого экрана у всех клиентов.
+  try { require('./client-portal').invalidateDdCache(); } catch (_) { /* best-effort */ }
   if (Object.prototype.hasOwnProperty.call(patch, 'operator_packages')
       || Object.prototype.hasOwnProperty.call(patch, 'fx_rate_mdl')
       || Object.prototype.hasOwnProperty.call(patch, 'fx_rate_ron')) {

@@ -889,5 +889,41 @@ r.post('/api/admin/clients/:id/unblock', authMiddleware, adminMiddleware, (req, 
   res.json({ ok: true, blocked: false, abuseStrikes: client.abuseStrikes || 0 });
 });
 
+  // 03.10: онбординг-чеклист — ключевые шаги нового клиента одним взглядом
+  // в карточке админки: платёж, API, ротация, порты, email.
+  r.get('/api/admin/clients/:id/onboarding', authMiddleware, adminMiddleware, (req, res) => {
+    const c = clientById.get(req.params.id);
+    if (!c) return res.status(404).json({ error: 'Client not found' });
+    try {
+      const firstPayment = db.prepare(
+        "SELECT MIN(timestamp) AS t FROM billing_ledger WHERE client_id = ? AND type IN ('payment','bank_payment','card_payment')"
+      ).get(c.id).t;
+      let firstApiCall = null;
+      try {
+        firstApiCall = db.prepare('SELECT MIN(timestamp) AS t FROM api_usage WHERE client_id = ?').get(c.id).t;
+      } catch (_) { /* api_usage optional */ }
+      // первые ротации — по никам модемов клиента (portName в knownModems)
+      const nicks = [];
+      for (const portMap of Object.values(knownModems || {})) {
+        for (const info of Object.values(portMap || {})) {
+          if (info && info.nick && info.portName === c.portName) nicks.push(info.nick);
+        }
+      }
+      let firstRotation = null;
+      if (nicks.length) {
+        const inClause = nicks.map(() => '?').join(',');
+        firstRotation = db.prepare(`SELECT MIN(started_at) AS t FROM rotation_log WHERE nick IN (${inClause})`).get(...nicks).t;
+      }
+      res.json({
+        createdAt: c.createdAt || null,
+        emailVerified: !!c.emailVerified,
+        portsAssigned: nicks.length,
+        firstPayment,
+        firstApiCall,
+        firstRotation,
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   return r;
 };

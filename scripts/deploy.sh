@@ -25,6 +25,20 @@ for f in src/api/proxy-smart.js src/billing/atomic.js src/traffic/hourly.js; do
   node --check "$f"
 done
 
+# 03.10: дисциплина changelog — деплой без новой записи за сегодня
+# предупреждает (не блокирует: хотфиксам не нужен релиз-нотес).
+if [ -f public/changelog.html ]; then
+  CL_DAY=$(grep -o 'release-date">[^<]*' public/changelog.html | head -1 | sed -E 's/release-date">([0-9]+).*/\1/')
+  CL_MON=$(grep -o 'release-date">[^<]*' public/changelog.html | head -1 | sed -E 's/release-date">[0-9]+ ([^ ]+).*/\1/')
+  NOW_DAY=$(date '+%-d'); NOW_MON=$(date '+%m')
+  MONTHS_RU="января февраля марта апреля мая июня июля августа сентября октября ноября декабря"
+  NOW_MON_RU=$(echo "$MONTHS_RU" | cut -d' ' -f"$NOW_MON")
+  if [ "$CL_DAY" != "$NOW_DAY" ] || [ "$CL_MON" != "$NOW_MON_RU" ]; then
+    echo "⚠️  changelog: последняя запись «${CL_DAY:-?} ${CL_MON:-?}», сегодня «${NOW_DAY} ${NOW_MON_RU}». Добавь запись, если это фича-деплой (Ctrl+C для отмены, 5 сек)"
+    sleep 5
+  fi
+fi
+
 # D2: pre-deploy снапшот БД на сервере ДО rsync/миграций — точка отката, если
 # деплой (или авторан-миграция при старте) сломает БД. Храним последние 2 —
 # полная история снапшотов есть в облаке (rclone, backup-offsite.sh).

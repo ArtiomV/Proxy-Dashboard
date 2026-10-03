@@ -34,9 +34,66 @@ function _profRender(){
       (p.tgLinked?'<button type="button" class="v3-btn sm" data-on-click="profTgUnlink()">Отвязать</button>':'<button type="button" class="v3-btn sm link" data-on-click="profTgLink()">Привязать</button>')+'</div>'+
     '<div class="v3-note">'+(p.tgLinked?'В Telegram приходят зачисления, предупреждения о балансе и уведомления «прокси офлайн».':'Привяжите Telegram, чтобы получать зачисления, предупреждения о балансе и уведомления «прокси офлайн».')+'</div>'+
   '</div></div>';
+  h+=_profWebhook();
   var body=document.getElementById('profBody');
   body.style.display='grid';body.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,420px),1fr))';body.style.gap='12px';body.style.alignItems='start';
   body.innerHTML=h;
+}
+
+// ---------- вебхук (03.10) ----------
+// Одна запись на клиента: URL + набор событий (GET/POST /api/client/webhook,
+// тест — POST /api/client/webhook/test). Статус последней доставки — в карточке.
+var _wh=null,_whLoaded=false;
+var _WH_EVENTS=[
+  ['proxy_offline','Прокси офлайн'],
+  ['proxy_online','Прокси вернулся'],
+  ['ip_changed','Сменился IP'],
+  ['payment_received','Платёж зачислен'],
+  ['daily_charge','Ежедневное списание']
+];
+function _profWebhook(){
+  if(!_whLoaded){_whLoaded=true;api('/api/client/webhook').then(function(d){_wh=(d&&d.webhook)||null;_profWebhookRender()}).catch(function(){})}
+  return '<div class="v3-card"><h3 style="margin-bottom:10px">Вебхук</h3><div id="whBody"><div class="v3-note">События по вашим прокси и балансу — POST на ваш URL в момент события. Загрузка…</div></div></div>';
+}
+function _profWebhookRender(){
+  var box=document.getElementById('whBody');if(!box)return;
+  var w=_wh,ev=w?w.events:[];
+  var rows=_WH_EVENTS.map(function(e){
+    return '<label style="display:flex;align-items:center;gap:8px;font-size:12.5px;color:var(--v3-text)"><input type="checkbox" id="whEv_'+e[0]+'"'+(ev.indexOf(e[0])>=0?' checked':'')+'> '+e[1]+' <span class="v3-note">'+e[0]+'</span></label>';
+  }).join('');
+  box.innerHTML='<div style="display:flex;flex-direction:column;gap:10px">'+
+    '<div class="v3-field"><span class="v3-label">URL для вебхуков</span><input class="v3-input" id="whUrl" type="url" placeholder="https://ваш-сервер/hook" value="'+V3.esc(w?w.url:'')+'"></div>'+
+    rows+
+    (w&&w.lastOkAt?'<div class="v3-note">Последняя доставка: '+V3.esc(V3.dt(w.lastOkAt,true))+'</div>':'')+
+    (w&&w.lastError?'<div class="v3-banner warn" style="margin:0">Последняя ошибка: '+V3.esc(w.lastError)+'</div>':'')+
+    '<div style="display:flex;gap:8px;flex-wrap:wrap"><button type="button" class="v3-btn primary sm" data-on-click="whSave()">Сохранить</button>'+
+    (w&&w.url?'<button type="button" class="v3-btn sm" data-on-click="whTest()">Тест</button><button type="button" class="v3-btn sm link" data-on-click="whDelete()">Удалить</button>':'')+
+    '</div>'+
+    '<div class="v3-note">Тело: JSON {event, data, ts}, заголовок X-Webhook-Event. Не отвечаете 2xx — покажем ошибку здесь.</div></div>';
+}
+function _whCollect(){
+  var events=_WH_EVENTS.filter(function(e){var c=document.getElementById('whEv_'+e[0]);return c&&c.checked}).map(function(e){return e[0]});
+  return {url:(document.getElementById('whUrl')||{}).value||'',events:events};
+}
+function whSave(){
+  var p=_whCollect();
+  api('/api/client/webhook',{method:'POST',json:{url:p.url.trim(),events:p.events,enabled:true}}).then(function(d){
+    if(!d||!d.ok)throw new Error((d&&d.error)||'Не удалось сохранить');
+    V3.toast({title:p.url.trim()?'Вебхук сохранён':'Вебхук удалён'});
+    api('/api/client/webhook').then(function(d2){_wh=(d2&&d2.webhook)||null;_profWebhookRender()});
+  }).catch(function(e){V3.toast({kind:'err',title:e.message})});
+}
+function whDelete(){
+  V3.confirm({title:'Удалить вебхук?',text:'События перестанут уходить на ваш URL.',cta:'Удалить'}).then(function(ok){
+    if(!ok)return;
+    api('/api/client/webhook',{method:'POST',json:{url:'',events:[]}}).then(function(){_wh=null;_profWebhookRender();V3.toast({title:'Вебхук удалён'})});
+  });
+}
+function whTest(){
+  api('/api/client/webhook/test',{method:'POST',json:{}}).then(function(d){
+    V3.toast({title:'Тест отправлен',text:'Проверьте приёмник; статус доставки обновится в карточке через пару секунд'});
+    setTimeout(function(){api('/api/client/webhook').then(function(d2){_wh=(d2&&d2.webhook)||null;_profWebhookRender()})},4000);
+  }).catch(function(e){V3.toast({kind:'err',title:e.message})});
 }
 
 // ---------- email ----------

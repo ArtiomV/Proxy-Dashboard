@@ -31,6 +31,7 @@ function create(deps) {
     setLastBillingRunSummary,
     debtBlock,   // B3 (Р13): пост-биллинговый автоблок должников-физиков (опционально)
     tariffsDb,   // Р36: единый прайс — getClientPrice (override → tariff → legacy price)
+    clientEventsLogin,   // SSE 03.10: publishTo(login, …) в ЛК (опционально)
   } = deps;
 
   // Р36/В.5: эффективная цена клиента. Приоритет:
@@ -413,6 +414,10 @@ async function _runDailyBillingImpl(retryClientIds, runOpts) {
       charged++;
       logger.info(`[Billing] ${client.name}: ${deltaGb}GB, ${cost} ${client.currency || 'RUB'}, balance=${client.balance}`);
       logActivity('billing', 'info', 'daily_charge', client.name, `Charged ${cost} ${client.currency || 'RUB'} for ${deltaGb}GB`, { client_id: client.id, gb: deltaGb, cost, balance: client.balance });
+      // SSE 03.10: мгновенный пуш баланса в ЛК клиента
+      if (clientEventsLogin && client.login) {
+        try { clientEventsLogin(client.login, 'balance', { balance: debitRes ? debitRes.balanceAfter : client.balance, charged: cost, date: yesterdayStr }); } catch (_) {}
+      }
     } catch (e) {
       logger.error(`[Billing] Error billing ${client.name}:`, e.message);
       logActivity('billing', 'error', 'billing_error', client.name, `Billing error: ${e.message}`, { client_id: client.id });

@@ -167,7 +167,7 @@ document.addEventListener('input',function(e){var t=e.target;if(t&&t.dataset&&t.
 document.addEventListener('change',function(e){var t=e.target;if(t&&t.dataset&&t.closest&&t.closest('#tab-analytics')&&(t.tagName==='INPUT'||t.tagName==='TEXTAREA'||t.tagName==='SELECT'))t.dataset.dirty=String(Date.now())});
 function _analyticsDirty(){var t=document.getElementById('tab-analytics');if(!t)return false;var ae=document.activeElement;if(ae&&t.contains(ae)&&(ae.tagName==='INPUT'||ae.tagName==='TEXTAREA'||ae.tagName==='SELECT'))return true;return !!t.querySelector('[data-dirty]:not([data-dirty=""])')}
 function _clearSettingsDirty(savedBeforeTs){var t=document.getElementById('tab-analytics');if(!t)return;t.querySelectorAll('[data-dirty]:not([data-dirty=""])').forEach(function(el){if(savedBeforeTs==null||Number(el.dataset.dirty)<=savedBeforeTs)el.dataset.dirty=''})}
-function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});if(el)el.classList.add('active');var tc=document.getElementById('tab-'+name);if(tc)tc.classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'&&!auto){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients'&&!auto)renderClients();if(name==='analytics'&&!auto){initAnalyticsSelectors();loadSettings();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
+function switchMainTab(name,el,auto){var nt=document.querySelector('.nav-tabs');if(nt)nt.classList.remove('burger-open');localStorage.setItem('admin_active_tab',name);document.querySelectorAll('.nav-tab').forEach(function(t){t.classList.remove('active')});document.querySelectorAll('.tab-content').forEach(function(t){t.classList.remove('active')});if(el)el.classList.add('active');var tc=document.getElementById('tab-'+name);if(tc)tc.classList.add('active');var sa=document.getElementById('modemSearchArea');if(sa)sa.style.display=name==='modems'?'flex':'none';if(name==='dashboard'&&!auto){try{renderAccNew();}catch(e){console.error(e);}}if(name==='clients'&&!auto)renderClients();if(name==='analytics'&&!auto){initAnalyticsSelectors();loadSettings();loadStorageReport();renderBankConfig();var ss=localStorage.getItem('admin_settings_section')||'serverHealth';switchSettingsSection(ss);if(typeof restoreRestartBanner==='function')restoreRestartBanner();}if(name==='bank'){if(!auto||!_bankEverRendered){_bankEverRendered=true;switchBankNav(_activeBankTab||'acts');}}}
 
 // Polling/SSE refreshes already rendered blocks in place. Re-entering the tab
 // used to reset asynchronous screens to their «Загрузка» skeleton every minute.
@@ -1600,6 +1600,29 @@ function setNotifFilter(name){
   });
   refreshNotifPanel();
 }
+// 03.10: runbook — короткое «что делать» по типовым инцидентам прямо в
+// карточке уведомления. Ключ — rule_id из notifications.
+var NOTIF_RUNBOOK={
+  modem_offline_20m:'Проверь модем в разделе «Модемы». Офлайн >1 ч — перезагрузка из карточки; если лежит группа одного сервера — смотри сервер, а не модемы по одному.',
+  modem_recovered:'Информационно: пара к «оффлайн». Действий не требуется.',
+  modem_http_fail:'Пинг жив, но HTTP через прокси падает. Массово по одному оператору — вероятен троттлинг/блок у оператора; точечно — перезагрузи модем из карточки.',
+  volume_package_exhaustion:'У оператора заканчивается пакет трафика: сверься с прогнозом в утренней сводке и расширь бандл у оператора заранее.',
+  volume_package_pace:'Темп расхода пакета выше нормы к концу периода — проверь прогноз в сводке, при необходимости расширь бандл.',
+  client_balance_negative:'Клиент ушёл в минус. Списания продолжаются — свяжись с клиентом; при договорённости о ручной блокировке — карточка клиента.',
+  sim_package_exhausted:'У симки кончился высокоскоростной пакет — скорость ~0 до реактивации. Реактивируй пакет у оператора; после контрольного спидтеста статус снимется сам.',
+  sim_package_recovered:'Пакет реактивирован, модем снова в строю. Действий не требуется.',
+  modem_speed_baseline_degraded:'Скорость ниже собственной нормы модема. Разово — само восстановится; держится сутки — проверь симку/оператора.',
+  modem_speed_baseline_recovered:'Информационно: скорость вернулась к норме.',
+  sim_status_bad:'SIM не в сети: проверь баланс/блокировку симки у оператора, затем перезагрузи модем.',
+  fleet_incident_opened:'Массовый сбой — смотри раздел инцидентов и общий сервер/оператора группы, не отдельные модемы.',
+  fleet_incident_closed:'Инцидент закрыт. Действий не требуется.',
+  modems_down_bulk:'Группа модемов ушла в оффлайн разом — почти всегда это сервер или оператор, а не железо. Проверь сервер в «Состоянии серверов».',
+  disk_low_warn:'На сервере дашборда <20% диска: Настройки → «Размер таблиц» — смотри, что разрослось, уменьши retention или почисти вручную.',
+  speedtest_box_outage:'Спидтесты на боксе не идут — проверь доступность бокса по SSH; показания скорости в ЛК могут быть протухшими.',
+  proxy_expiring_3d:'У клиента истекает аренда портов через 3 дня — напомни про оплату или продли вручную в карточке клиента.',
+  server_unreachable:'Сервер модемов не отвечает. На S3/S4 это обычно вендорный reset_gently (2-3 мин, само пройдёт); дольше 5 мин — проверяй бокс по SSH.',
+  volume_modem_hourly:'Модем превысил часовой потолок трафика — час в карантине (в суммы не попал). Проверь клиента на аномалию/фантом.',
+};
 function renderNotifPanel(){
   var list=document.getElementById('notifList');if(!list)return;
   var notifs=window._notifs||[];
@@ -1626,6 +1649,7 @@ function renderNotifPanel(){
     h+='<div class="notif-body">';
     h+='<div class="notif-title">'+esc(n.title||'')+'</div>';
     h+='<div class="notif-text">'+(n.message||'').replace(/\n/g,'<br>')+'</div>';
+    if(n.rule_id&&NOTIF_RUNBOOK[n.rule_id])h+='<div class="notif-text" style="color:var(--text-3);font-size:11px;margin-top:2px">💡 '+esc(NOTIF_RUNBOOK[n.rule_id])+'</div>';
     h+='<div class="notif-time">'+timeAgo(n.created_at)+'</div>';
     h+='</div>';
     h+='<button class="notif-dismiss" title="Скрыть" data-on-click="event.stopPropagation();dismissNotif('+n.id+')">×</button>';
@@ -5003,6 +5027,31 @@ function renderClientDetail(id, tab){
   if(mc){mh+='<div style="display:flex;flex-wrap:wrap;gap:5px">'+mds.map(function(m){return '<span class="client-modem-tag">'+esc(m.nick)+' <span style="color:var(--text-3)">('+esc(_serverDisplayLabel(m.server))+')</span></span>';}).join('')+'</div>';}
   else{mh+='<div style="font-size:12px;color:var(--text-3);padding:8px 0">Нет привязанных модемов. Привязка — на странице «Модемы».</div>';}
   ml.innerHTML=mh;
+  // 03.10: онбординг-чеклист для молодых клиентов (до 30 дней) — видно,
+  // где застрял новый клиент: платёж / API / ротация / порты / email.
+  var ob=document.getElementById('cdOnboarding');
+  if(ob){
+    var ageMs=c.createdAt?Date.now()-new Date(c.createdAt).getTime():null;
+    if(ageMs==null||isNaN(ageMs)||ageMs>30*86400e3){ob.innerHTML='';}
+    else{
+      ob.innerHTML='<div style="font-size:12px;color:var(--text-3);padding:4px 0">Онбординг: загрузка…</div>';
+      api(API+'/api/admin/clients/'+encodeURIComponent(id)+'/onboarding').then(function(o){
+        if(!o||o.error){ob.innerHTML='';return}
+        var items=[
+          ['Аккаунт создан', true, o.createdAt],
+          ['Email подтверждён', !!o.emailVerified, null],
+          ['Порты назначены ('+(o.portsAssigned||0)+')', (o.portsAssigned||0)>0, null],
+          ['Первый платёж', !!o.firstPayment, o.firstPayment],
+          ['Первый API-запрос', !!o.firstApiCall, o.firstApiCall],
+          ['Первая смена IP', !!o.firstRotation, o.firstRotation]
+        ];
+        ob.innerHTML='<div style="font-size:12px;font-weight:600;color:var(--text-0);margin:10px 0 6px">Онбординг</div>'+
+          '<div style="display:flex;flex-wrap:wrap;gap:5px">'+items.map(function(it){
+            return '<span class="client-modem-tag" style="'+(it[1]?'':'opacity:.55')+'">'+(it[1]?'✅ ':'⬜ ')+esc(it[0])+(it[1]&&it[2]?' <span style="color:var(--text-3)">'+esc(String(it[2]).slice(0,10))+'</span>':'')+'</span>';
+          }).join('')+'</div>';
+      }).catch(function(){ob.innerHTML=''});
+    }
+  }
   document.getElementById('cdDeleteBtn').style.display='';
   // Блокировка/антифрод — секция видна для любого существующего клиента.
   var ab=document.getElementById('cdAbuseSection');

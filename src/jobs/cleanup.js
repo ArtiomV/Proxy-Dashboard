@@ -56,6 +56,46 @@ function _snapshotInvalidReason(entry, freshnessMs) {
   return null;
 }
 
+// Единый реестр retention-политик: таблица → колонка времени, ключ
+// переопределения в appSettings, срок по умолчанию (дни). Править сроки —
+// ТОЛЬКО здесь (и в настройках админки через retention_*); разрозненных
+// DELETE в джобах быть не должно. Отчёт по размерам — /api/admin/storage.
+const RETENTION_POLICIES = {
+  traffic_hourly: { col: 'hour_start', key: 'retention_traffic_hourly', def: 90 },
+  modem_meta:     { col: 'updated_at', key: 'retention_modem_meta', def: 30 },
+  rotation_log:   { col: 'started_at', key: 'retention_rotation_log', def: 30 }, // grows ~25k/day; 30d default keeps it manageable
+  proxy_checks:   { col: 'checked_at', key: 'retention_proxy_checks', def: 30 },
+  audit_log:      { col: 'timestamp',  key: 'retention_audit_log', def: 90 },
+  system_log:     { col: 'timestamp',  key: 'retention_system_log', def: 30 },
+  api_usage:      { col: 'timestamp',  key: 'retention_api_usage', def: 30 },
+  api_access_log: { col: 'ts',         key: 'retention_api_access_log', def: 30 },
+  // DB-level audit (triggers): keep 365 days by default — financial forensics
+  db_audit:         { col: 'ts', key: 'retention_db_audit', def: 365 },
+  db_audit_context: { col: 'ts', key: 'retention_db_audit', def: 365 },
+  // Auto-reboot log — 90 days
+  auto_reboot_log:  { col: 'rebooted_at', key: 'retention_auto_reboot', def: 90 },
+  // Simulator runs — 30 days; CASCADE on simulator_samples handles the rest.
+  simulator_runs:   { col: 'started_at', key: 'retention_simulator_runs', def: 30 },
+  // A1 (23.08): история пингов модемов (~51k строк/сут на флот 106).
+  modem_ping:       { col: 'ts', key: 'retention_modem_ping', def: 30 },
+  // FIX-05/06 (2026-09-18): текущее состояние наблюдения — строки слотов,
+  // которых давно нет в фиде, подлежат тому же сроку, что и история.
+  modem_ping_state: { col: 'updated_at', key: 'retention_modem_ping', def: 30 },
+  // A3 (23.08): снимки текущей скорости каждые 5 мин (~30k строк/сут).
+  modem_rate:       { col: 'ts', key: 'retention_modem_rate', def: 7 },
+  // A2 (23.08): HTTP-чеки через прокси (~10 ников × 4/час ≈ 1k строк/сут).
+  modem_httpcheck:  { col: 'ts', key: 'retention_modem_httpcheck', def: 30 },
+  // 03.10: таблицы, раньше чистившиеся разрозненно в своих джобах —
+  // перенесены в единый реестр (свои пурги в джобах оставлены безвредными,
+  // но сроки теперь читаются отсюда через те же ключи appSettings).
+  ip_history:       { col: 'started_at', key: 'retention_ip_history', def: 90 },
+  ip_pairs:         { col: 'last_seen',  key: 'retention_ip_history', def: 90 },
+  notifications:    { col: 'created_at', key: 'retention_notifications', def: 30 },
+  server_downtime:  { col: 'down_from',  key: 'retention_server_downtime', def: 90 },
+  speed_monitor:    { col: 'ts',         key: 'retention_speed_monitor', def: 60 },
+  modem_wire_counters: { col: 'ts',      key: 'retention_wire_counters', def: 7 },
+};
+
 function create(deps) {
   const {
     db, logger, fs,
@@ -222,32 +262,7 @@ function create(deps) {
   }
 
   async function runRetentionCleanup() {
-    const retentions = {
-      traffic_hourly: { col: 'hour_start', key: 'retention_traffic_hourly', def: 90 },
-      modem_meta:     { col: 'updated_at', key: 'retention_modem_meta', def: 30 },
-      rotation_log:   { col: 'started_at', key: 'retention_rotation_log', def: 30 }, // grows ~25k/day; 30d default keeps it manageable
-      proxy_checks:   { col: 'checked_at', key: 'retention_proxy_checks', def: 30 },
-      audit_log:      { col: 'timestamp',  key: 'retention_audit_log', def: 90 },
-      system_log:     { col: 'timestamp',  key: 'retention_system_log', def: 30 },
-      api_usage:      { col: 'timestamp',  key: 'retention_api_usage', def: 30 },
-      api_access_log: { col: 'ts',         key: 'retention_api_access_log', def: 30 },
-      // DB-level audit (triggers): keep 365 days by default — financial forensics
-      db_audit:         { col: 'ts', key: 'retention_db_audit', def: 365 },
-      db_audit_context: { col: 'ts', key: 'retention_db_audit', def: 365 },
-      // Auto-reboot log — 90 days
-      auto_reboot_log:  { col: 'rebooted_at', key: 'retention_auto_reboot', def: 90 },
-      // Simulator runs — 30 days; CASCADE on simulator_samples handles the rest.
-      simulator_runs:   { col: 'started_at', key: 'retention_simulator_runs', def: 30 },
-      // A1 (23.08): история пингов модемов (~51k строк/сут на флот 106).
-      modem_ping:       { col: 'ts', key: 'retention_modem_ping', def: 30 },
-      // FIX-05/06 (2026-09-18): текущее состояние наблюдения — строки слотов,
-      // которых давно нет в фиде, подлежат тому же сроку, что и история.
-      modem_ping_state: { col: 'updated_at', key: 'retention_modem_ping', def: 30 },
-      // A3 (23.08): снимки текущей скорости каждые 5 мин (~30k строк/сут).
-      modem_rate:       { col: 'ts', key: 'retention_modem_rate', def: 7 },
-      // A2 (23.08): HTTP-чеки через прокси (~10 ников × 4/час ≈ 1k строк/сут).
-      modem_httpcheck:  { col: 'ts', key: 'retention_modem_httpcheck', def: 30 },
-    };
+    const retentions = RETENTION_POLICIES;
     const results = {};
     const diskBefore = _storageMetrics();
     for (const [table, { col, key, def }] of Object.entries(retentions)) {
@@ -354,4 +369,4 @@ function create(deps) {
   return { runRetentionCleanup, cleanupStalePortMappings };
 }
 
-module.exports = { create };
+module.exports = { create, RETENTION_POLICIES };

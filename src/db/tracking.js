@@ -24,11 +24,11 @@ function init(db) {
   S.ihUpdateEnd = db.prepare('UPDATE ip_history SET ended_at = ? WHERE id = ?');
   S.ihDeleteById = db.prepare('DELETE FROM ip_history WHERE id = ?');
   // Rollup уникальных пар (модем, IP) для быстрой ip_stats (миграция 109).
+  // Пурга — через единый реестр retention (cleanup.js, retention_ip_history).
   S.ipPairUpsert = db.prepare(
     'INSERT INTO ip_pairs (key, ip, first_seen, last_seen) VALUES (?, ?, ?, ?) ' +
     'ON CONFLICT(key, ip) DO UPDATE SET last_seen = excluded.last_seen'
   );
-  S.ipPairsPurge = db.prepare("DELETE FROM ip_pairs WHERE last_seen < datetime('now', '-90 days')");
   // Upsert that PRESERVES the last non-empty value per field. An offline modem
   // reports empty PHONE_NUMBER/MODEL/NICK in the live feed; the old INSERT OR
   // REPLACE wiped the whole row, so a modem going offline erased its saved phone
@@ -182,8 +182,6 @@ function init(db) {
   // реальный модем набирает больше 100 ротаций. Полная таблица (90 дней)
   // нужна только SQL-аналитике ip_stats, память она не грузит.
   S.ihAllOrder = db.prepare("SELECT id, key, ip, started_at, ended_at FROM ip_history WHERE started_at >= datetime('now', '-7 days') ORDER BY id ASC");
-  // Retention: история нужна аналитике за ≤90 дней (максимум окна ip_stats).
-  S.ihPurgeOld = db.prepare("DELETE FROM ip_history WHERE started_at < datetime('now', '-90 days')");
 }
 
 module.exports = {
@@ -216,7 +214,5 @@ module.exports = {
   utAllStmt:           () => S.utAll,
   utDailyAllStmt:      () => S.utDailyAll,
   ihAllOrderStmt:      () => S.ihAllOrder,
-  ihPurgeOldStmt:      () => S.ihPurgeOld,
   ipPairUpsertStmt:    () => S.ipPairUpsert,
-  ipPairsPurgeStmt:    () => S.ipPairsPurge,
 };

@@ -26,6 +26,16 @@ const { rotateApiKey, resolveGraceHours } = require('../services/api-keys');   /
 const sla = require('../sla');
 const uptimePeriod = require('../uptime-period');
 
+// 03.10: кэш первого экрана per login (stale-while-revalidate). Свежий ответ
+// (≤60 с) отдаём сразу; протухший (≤10 мин) — мгновенно + фоновый рекомпьют.
+// Холодная сборка для крупного клиента ~3,5 с — раньше её ждал каждый вход.
+// Состояние — на уровне МОДУЛЯ (не в create()): его читает и роут, и
+// module-level invalidateDdCache. Иначе инвалидация падала бы в ReferenceError
+// (проглоченный try/catch) и кэш никогда не сбрасывался (инцидент 03.10).
+const _ddCache = new Map();      // login → { ts, payload }
+const _ddInflight = new Set();
+const DD_FRESH_MS = 60e3, DD_STALE_MS = 10 * 60e3;
+
 module.exports = function createClientPortalRouter(deps) {
   const {
     db, logger, authMiddleware, dashboardLimiter, resetTokenLimiter,
@@ -112,7 +122,34 @@ r.get('/api/client/sla_report', authMiddleware, (req, res) => {
   }
 });
 
+function _ddBackgroundRefresh(login, portNameFilter) {
+  if (_ddInflight.has(login)) return;
+  _ddInflight.add(login);
+  const stubReq = { user: { login, portNameFilter } };
+  const stubRes = {
+    json(p) { _ddCache.set(login, { ts: Date.now(), payload: p }); _ddInflight.delete(login); },
+    status() { return this; },
+  };
+  Promise.resolve(_dashboardDataHandler(stubReq, stubRes))
+    .catch(() => { _ddInflight.delete(login); });
+}
+
 r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) => {
+  const login = req.user.login;
+  const cached = _ddCache.get(login);
+  if (cached && Date.now() - cached.ts < DD_FRESH_MS) return res.json(cached.payload);
+  if (cached && Date.now() - cached.ts < DD_STALE_MS) {
+    // протухший — отдаём мгновенно, свежее посчитается в фоне
+    res.json(cached.payload);
+    _ddBackgroundRefresh(login, req.user.portNameFilter);
+    return;
+  }
+  const origJson = res.json.bind(res);
+  res.json = (p) => { try { if ((res.statusCode || 200) < 300) _ddCache.set(login, { ts: Date.now(), payload: p }); } catch (_) {} return origJson(p); };
+  return _dashboardDataHandler(req, res);
+});
+
+async function _dashboardDataHandler(req, res) {
   try {
     const results = await fetchAllServersDataCached();
     const merged = mergeServerData(results, req.user.portNameFilter);
@@ -326,7 +363,7 @@ r.get('/api/dashboard_data', dashboardLimiter, authMiddleware, async (req, res) 
   } catch (err) {
     res.status(502).json({ error: 'API request failed', details: err.message });
   }
-});
+}
 
 // ── Self-serve перевыпуск API-ключа (v2.10.68) ─────────────────────────────
 // Grace-ротация: новый ключ работает сразу, прежний — ещё api_key_grace_hours
@@ -847,4 +884,12 @@ r.post('/api/client/email', authMiddleware, validate(ClientEmailSchema), (req, r
 });
 
   return r;
+};
+
+// 03.10: инвалидация SWR-кэша dashboard_data по логину — дергается из
+// SSE-пушей (статус/IP/баланс), чтобы следующий loadData считал свежее,
+// а не откатывал только что пришедшее событие протухшим снапшотом.
+// Без аргумента — полный сброс (тесты: состояние между кейсами).
+module.exports.invalidateDdCache = function (login) {
+  try { if (login) _ddCache.delete(login); else _ddCache.clear(); } catch (_) { /* best-effort */ }
 };

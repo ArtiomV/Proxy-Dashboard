@@ -1,10 +1,10 @@
-// 2026-09-27 (миграция 105): проводной учёт трафика модемов.
+// 2026-09-27 (миграция 105) / пересмотрено 2026-10-03: проводной учёт.
 //   • parseModemNetDev — парсер /proc/net/dev (только интерфейсы modem*);
-//   • wire-scale в aggregateHourlyTraffic: сумма заявленного по портам модема
-//     > проводной дельты × 1.3 → все порты масштабируются к проводу,
-//     uncertain=6, заявленное сохраняется в raw_bytes_*;
+//   • wire-divergence в aggregateHourlyTraffic: сумма заявленного по портам
+//     модема > проводной дельты × 1.3 → ДЕТЕКЦИЯ (warn + logActivity), но
+//     значения НЕ масштабируются — канон трафика = счётчики ProxySmart;
 //   • без wire-данных / без iface (net_details.DEV) — записывается как заявлено;
-//   • заявка ≈ провод (здоровый модем) — без изменений.
+//   • заявка ≈ провод (здоровый модем) — без детекции.
 
 import { describe, it, expect } from 'vitest';
 import { createRequire } from 'module';
@@ -79,7 +79,7 @@ function feed2(counters, opts = {}) {
   }];
 }
 
-function boot(feedFn) {
+function boot(feedFn, extraDeps = {}) {
   const db = makeDb();
   trafficDb.init(db);
   hourly.init({
@@ -95,6 +95,7 @@ function boot(feedFn) {
     _snapUpsertPreserve: trafficDb.snapshotUpsertPreserveStmt(),
     _snapGet: trafficDb.snapshotGetStmt(),
     _snapGetAll: trafficDb.snapshotGetAllStmt(),
+    ...extraDeps,
   });
   return db;
 }
@@ -138,25 +139,26 @@ describe('parseModemNetDev: парсер /proc/net/dev', () => {
   });
 });
 
-describe('wire-scale (uncertain=6): заявка портов против проводной дельты', () => {
-  it('2 порта заявили 1 ГБ + 3 ГБ, провод 0.5 ГБ → записано 0.125 + 0.375, uncertain=6, raw сохранены', async () => {
+describe('wire-divergence (03.10): детекция расхождения портов и провода, БЕЗ подмены значений', () => {
+  it('2 порта заявили 1 ГБ + 3 ГБ, провод 0.5 ГБ → записано как заявлено, uncertain=0, детекция залогирована', async () => {
     let counters = { a: { day: 10e9, mon: 10e9 }, b: { day: 10e9, mon: 10e9 } };
-    const db = boot(async () => feed2(counters));
+    const events = [];
+    const db = boot(async () => feed2(counters), { logActivity: (...a) => events.push(a) });
     await hourly.aggregateHourlyTraffic();          // baseline
     counters = { a: { day: 11e9, mon: 11e9 }, b: { day: 13e9, mon: 13e9 } };
     seedWireSamples(db, 0.5e9);                     // провод: 0.5 ГБ за час
-    await hourly.aggregateHourlyTraffic();          // заявка 1+3 ГБ → масштаб ×0.125
+    await hourly.aggregateHourlyTraffic();          // заявка 1+3 ГБ против 0.5 — расхождение
 
     const a = db.prepare(`SELECT * FROM traffic_hourly WHERE port_id='S1_portA' AND hour_start = ${HOUR_SQL}`).get();
     const b = db.prepare(`SELECT * FROM traffic_hourly WHERE port_id='S1_portB' AND hour_start = ${HOUR_SQL}`).get();
-    expect(Number(a.bytes_in)).toBe(0.125e9);
-    expect(Number(b.bytes_in)).toBe(0.375e9);
-    expect(a.uncertain).toBe(6);
-    expect(b.uncertain).toBe(6);
-    expect(Number(a.raw_bytes_in)).toBe(1e9);       // заявленное не потеряно
-    expect(Number(b.raw_bytes_in)).toBe(3e9);
-    // Итог по модему = провод × 1.0
-    expect(Number(a.bytes_in) + Number(b.bytes_in)).toBe(0.5e9);
+    // канон = ProxySmart: значения не тронуты
+    expect(Number(a.bytes_in)).toBe(1e9);
+    expect(Number(b.bytes_in)).toBe(3e9);
+    expect(a.uncertain).toBe(0);
+    expect(b.uncertain).toBe(0);
+    expect(a.raw_bytes_in).toBeNull();
+    // детекция сработала
+    expect(events.some(e => e[2] === 'traffic_wire_divergence')).toBe(true);
   });
 
   it('без wire-данных — записывается как заявлено (uncertain=0)', async () => {
@@ -191,7 +193,7 @@ describe('wire-scale (uncertain=6): заявка портов против пр�
     expect(b.uncertain).toBe(0);
   });
 
-  it('нет DEV в живом фиде (модем офлайн) — масштабирование пропускаем', async () => {
+  it('нет DEV в живом фиде (модем офлайн) — детекция пропускается', async () => {
     let counters = { a: { day: 10e9, mon: 10e9 }, b: { day: 10e9, mon: 10e9 } };
     const db = boot(async () => feed2(counters, { dev: '' }));
     await hourly.aggregateHourlyTraffic();

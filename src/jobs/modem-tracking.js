@@ -23,6 +23,7 @@ function create(deps) {
     modemPing, modemRate,
     maintenance,   // B3 (23.08): src/maintenance.js — пометка простоев в окне обслуживания
     events,        // SSE (23.08): шина src/events.js — fleet_update/ping_result/modem_rate
+    clientEventsPush,  // SSE 03.10: scoped-пуши в ЛК (server, nick, type, data)
   } = deps;
 
   // SSE (23.08): снимок «up» прошлого цикла для diff'а статусов (в памяти;
@@ -347,6 +348,10 @@ async function trackModems() {
           recordIpChange(key, ipTracking[key].ip, extIp, now);
           logActivity('modem', 'info', 'ip_changed', nick, `IP changed: ${ipTracking[key].ip} → ${extIp}`, { server: server.name, old_ip: ipTracking[key].ip, new_ip: extIp });
           ipTracking[key] = { ip: extIp, since: new Date(now).toISOString() };
+          // SSE 03.10 (клиенты): мгновенный пуш владельцу о смене IP
+          if (clientEventsPush) {
+            try { clientEventsPush(server.name, nick, 'ip_changed', { nick, server: server.name, ip: extIp }); } catch (_) {}
+          }
         }
         // else same IP -- keep existing `since`
       }
@@ -750,6 +755,13 @@ async function trackModems() {
         total: _fleetFlips.length,
       });
     } catch (_) { /* publish не должен ронять tracking */ }
+  }
+  // SSE 03.10 (клиенты): каждый флип — scoped-пуш владельцу модема, чтобы
+  // ЛК сразу обновил статус без часового поллинга.
+  if (clientEventsPush && _fleetFlips.length) {
+    for (const f of _fleetFlips) {
+      try { clientEventsPush(f.server, f.nick, 'modem_status', { nick: f.nick, server: f.server, up: f.up }); } catch (_) {}
+    }
   }
   // BUG-02: saveIpHistory() removed — recordIpChange() now does direct DB writes
   logger.info(`[Tracking] Updated IP & uptime for ${Object.keys(ipTracking).length} modems (${totalTracked} uptime checks)`);

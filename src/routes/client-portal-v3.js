@@ -291,6 +291,54 @@ function create(deps) {
     res.json({ ok: true, amount, email: c.email || '' });
   });
 
+  // ── Вебхук клиента (03.10): одна запись на клиента (миграция 110) ──────
+  // События: proxy_offline, proxy_online, ip_changed, payment_received,
+  // daily_charge. Доставка — src/webhooks.js (дергается из SSE-пушей).
+  const WEBHOOK_EVENTS = ['proxy_offline', 'proxy_online', 'ip_changed', 'payment_received', 'daily_charge'];
+  r.get('/api/client/webhook', authMiddleware, (req, res) => {
+    const c = clientByLogin.get(req.user.login);
+    if (!c) return res.status(404).json({ error: 'Client not found' });
+    try {
+      const row = db.prepare('SELECT url, events, enabled, last_ok_at, last_error FROM client_webhooks WHERE client_id = ?').get(c.id);
+      res.json({
+        webhook: row ? { url: row.url, events: String(row.events).split(',').filter(Boolean), enabled: !!row.enabled, lastOkAt: row.last_ok_at, lastError: row.last_error } : null,
+        availableEvents: WEBHOOK_EVENTS,
+      });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+  r.post('/api/client/webhook', authMiddleware, (req, res) => {
+    const c = clientByLogin.get(req.user.login);
+    if (!c) return res.status(404).json({ error: 'Client not found' });
+    const body = req.body || {};
+    const url = String(body.url || '').trim().slice(0, 500);
+    const events = (Array.isArray(body.events) ? body.events : []).filter(e => WEBHOOK_EVENTS.includes(e));
+    const enabled = body.enabled !== false;
+    try {
+      if (!url) {
+        // пустой URL — удаление вебхука
+        db.prepare('DELETE FROM client_webhooks WHERE client_id = ?').run(c.id);
+        return res.json({ ok: true, webhook: null });
+      }
+      let parsed;
+      try { parsed = new URL(url); } catch (_) { return res.status(400).json({ error: 'Некорректный URL' }); }
+      if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') return res.status(400).json({ error: 'URL должен быть http(s)' });
+      if (!events.length) return res.status(400).json({ error: 'Выберите хотя бы одно событие' });
+      db.prepare(`INSERT INTO client_webhooks (client_id, url, events, enabled) VALUES (?, ?, ?, ?)
+                  ON CONFLICT(client_id) DO UPDATE SET url=excluded.url, events=excluded.events, enabled=excluded.enabled`)
+        .run(c.id, url, events.join(','), enabled ? 1 : 0);
+      auditLog(req.user.login, 'client_webhook_save', { url, events, enabled, ip: getClientIp(req) });
+      res.json({ ok: true });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+  r.post('/api/client/webhook/test', authMiddleware, (req, res) => {
+    const c = clientByLogin.get(req.user.login);
+    if (!c) return res.status(404).json({ error: 'Client not found' });
+    try {
+      if (deps.webhooksDeliver) deps.webhooksDeliver(req.user.login, 'payment_received', { test: true, amount: 0, note: 'Тестовое событие из личного кабинета' }, true);
+      res.json({ ok: true, note: 'Тестовое событие отправлено (payment_received). Статус доставки появится в течение нескольких секунд.' });
+    } catch (e) { res.status(500).json({ error: e.message }); }
+  });
+
   return r;
 }
 

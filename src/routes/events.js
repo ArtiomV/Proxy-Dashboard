@@ -12,7 +12,7 @@
 const express = require('express');
 
 module.exports = function (deps) {
-  const { logger, authMiddleware, adminMiddleware, getSetting, events } = deps;
+  const { logger, authMiddleware, adminMiddleware, getSetting, events, clientEvents } = deps;
   const r = express.Router();
 
   r.get('/api/admin/events',
@@ -46,6 +46,37 @@ module.exports = function (deps) {
       res.write(':ok\n\n');
       logger.info('[SSE] client connected (' + req.user.login + ')');
     });
+
+  // 03.10: клиентский кабинет — scoped SSE (publishTo по логину): статусы
+  // своих модемов, смена IP, баланс. Та же сессия клиента, тот же троттлинг
+  // шины; EventSource шлёт cookie same-origin, ?token= — запасной вариант.
+  if (clientEvents) {
+    r.get('/api/client/events',
+      (req, res, next) => {
+        const hasCookie = /(?:^|;\s*)pr_session=/.test(req.headers.cookie || '');
+        if (!req.headers['x-auth-token'] && !hasCookie && req.query && req.query.token) {
+          req.headers['x-auth-token'] = String(req.query.token);
+        }
+        next();
+      },
+      authMiddleware,
+      (req, res) => {
+        if (!getSetting('sse_enabled', true)) {
+          return res.status(503).json({ error: 'Realtime (SSE) выключен настройкой sse_enabled' });
+        }
+        const sessionId = req.user.token || req.user.login;
+        if (!clientEvents.subscribe(res, sessionId, req.user.login)) {
+          return res.status(429).json({ error: 'Слишком много SSE-подключений для сессии (лимит 10)' });
+        }
+        res.writeHead(200, {
+          'Content-Type': 'text/event-stream; charset=utf-8',
+          'Cache-Control': 'no-cache, no-transform',
+          'Connection': 'keep-alive',
+          'X-Accel-Buffering': 'no',
+        });
+        res.write(':ok\n\n');
+      });
+  }
 
   return r;
 };

@@ -1589,12 +1589,14 @@ function deleteSession(token) {
   dbStmts.deleteSession.run(token); // legacy plaintext form, if still present
   // DEEP-32 (2026-09-24): logout закрывает и SSE-поток этой сессии.
   try { eventsBus && eventsBus.closeSession(sha256hex(token), 'logout'); } catch (_) { /* best-effort */ }
+  try { clientEventsBus && clientEventsBus.closeSession(sha256hex(token), 'logout'); } catch (_) { /* best-effort */ }
 }
 
 function deleteSessionsByLogin(login) {
   dbStmts.deleteSessionsByLogin.run(login);
   // DEEP-32: отзыв всех сессий пользователя закрывает и его SSE-потоки.
   try { eventsBus && eventsBus.closeSession(login, 'logout'); } catch (_) { /* best-effort */ }
+  try { clientEventsBus && clientEventsBus.closeSession(login, 'logout'); } catch (_) { /* best-effort */ }
 }
 
 function getSessionCount() {
@@ -1602,6 +1604,28 @@ function getSessionCount() {
 }
 
 const _intervals = [];
+// 2026-10-03: мониторинг лага event loop. better-sqlite3 синхронный — один
+// тяжёлый запрос морозит всех (инцидент 03.10: ip_stats 22 с). Раз в минуту
+// фиксируем max/p99/mean за интервал; max > 1 с — warn + system_log (попадёт
+// в сводку). Текущее значение читается в /api/admin/health (eventLoop).
+// Норматив: p99 < 500 мс; всё тяжёлое — в фоновый прогрев кэша.
+const { monitorEventLoopDelay } = require('perf_hooks');
+const _elHist = monitorEventLoopDelay({ resolution: 20 });
+_elHist.enable();
+let eventLoopLag = { max: 0, p99: 0, mean: 0, ts: Date.now() };
+let _elLastLogged = 0;
+_intervals.push(setInterval(() => {
+  const maxMs = Math.round(_elHist.max / 1e6);
+  const p99Ms = Math.round(_elHist.percentile(99) / 1e6);
+  const meanMs = Math.round(_elHist.mean / 1e6);
+  _elHist.reset();
+  eventLoopLag = { max: maxMs, p99: p99Ms, mean: meanMs, ts: Date.now() };
+  if (maxMs > 1000 && Date.now() - _elLastLogged > 10 * 60e3) {
+    _elLastLogged = Date.now();
+    logger.warn(`[EventLoop] lag за минуту: max=${maxMs}ms p99=${p99Ms}ms mean=${meanMs}ms`);
+    try { logActivity('system', 'warn', 'eventloop_lag', 'dashboard', `Лаг event loop: max=${maxMs}ms p99=${p99Ms}ms за минуту`, { max_ms: maxMs, p99_ms: p99Ms }); } catch (_) { /* best-effort */ }
+  }
+}, 60e3));
 // _hourlyAggSched — модульный let (виден gracefulShutdown за пределами app.listen)
 let _hourlyAggSched = null;
 _intervals.push(setInterval(() => {
@@ -1615,6 +1639,7 @@ _intervals.push(setInterval(() => {
     logActivity('system', 'info', 'session_cleanup', null, `Cleaned ${result.changes} expired session(s)`, { removed: result.changes });
     for (const s of expired) {
       try { eventsBus && eventsBus.closeSession(s.token, 'session_expired'); } catch (_) { /* best-effort */ }
+      try { clientEventsBus && clientEventsBus.closeSession(s.token, 'session_expired'); } catch (_) { /* best-effort */ }
     }
   }
 }, 60 * 60 * 1000));
@@ -2925,10 +2950,8 @@ try {
 // Load IP history from SQLite (with db_id for incremental updates)
 const ipHistory = stateMod.state.ipHistory; // Stage 14.1
 try {
-  // 03.10: ip_history хранится 90 дней (см. миграцию 107) — раньше таблица
-  // обрезалась до 100 строк на модем и ip_stats занижал уникальные IP.
-  const purged = trackingDb.ihPurgeOldStmt().run();
-  if (purged.changes > 0) logger.info(`[SQLite] Purged ${purged.changes} ip_history rows older than 90d`);
+  // Retention ip_history/ip_pairs — в едином реестре src/jobs/cleanup.js
+  // (ночной DbCleanup 00:30 UTC), отдельных пург здесь больше нет.
   const rows = trackingDb.ihAllOrderStmt().all();
   for (const r of rows) {
     if (!ipHistory[r.key]) ipHistory[r.key] = [];
@@ -2941,12 +2964,6 @@ try {
   }
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} IP history entries`);
 } catch (e) { logger.error('Failed to load ip_history from SQLite:', e.message); }
-// Раз в сутки — retention-пурга ip_history (90 дней), чтобы таблица не росла
-// бесконечно между рестартами. Заодно чистим rollup ip_pairs.
-_intervals.push(setInterval(() => {
-  try { trackingDb.ihPurgeOldStmt().run(); trackingDb.ipPairsPurgeStmt().run(); }
-  catch (e) { logger.warn('[ip_history] purge: ' + e.message); }
-}, 24 * 3600e3));
 
 // ip_tracking / uptime_tracking / ip_history statements → src/db/tracking.js
 const _ipUpsert = trackingDb.ipUpsertStmt();
@@ -3085,6 +3102,36 @@ try {
 // SSE (23.08, этап 5): шина realtime-событий админки — джобы публикуют,
 // роут /api/admin/events раздаёт подписчикам. Без подписчиков publish — no-op.
 const eventsBus = require('./src/events').create({ logger });
+// 03.10: вторая шина — клиентский кабинет (/api/client/events). События
+// scoped по логину (publishTo): клиент видит только свои модемы/баланс.
+const clientEventsBus = require('./src/events').create({ logger });
+// 03.10: клиентские вебхуки (миграция 110) — доставка из тех же пушей.
+const _webhooks = require('./src/webhooks').create({ db, logger, clientByLogin });
+// ник/сервер → логин клиента (для scoped-пушей из джоб)
+function clientLoginByModem(serverName, nick) {
+  try {
+    for (const info of Object.values(knownModems[serverName] || {})) {
+      if (info && info.nick === nick && info.portName) {
+        const c = clients.find(x => x.portName === info.portName);
+        return c ? c.login : null;
+      }
+    }
+  } catch (_) { /* best-effort */ }
+  return null;
+}
+function clientEventsPush(serverName, nick, type, data) {
+  const login = clientLoginByModem(serverName, nick);
+  if (!login) return;
+  clientEventsBus.publishTo(login, type, data);
+  // вебхук клиента: те же события наружу (proxy_offline/proxy_online/ip_changed)
+  try {
+    if (type === 'modem_status') _webhooks.deliver(login, data && data.up ? 'proxy_online' : 'proxy_offline', data);
+    else if (type === 'ip_changed') _webhooks.deliver(login, 'ip_changed', data);
+  } catch (_) {}
+  // событие меняет данные первого экрана — сносим SWR-кэш, чтобы следующий
+  // loadData собрал свежее, а не откатил статус протухшим снапшотом
+  try { require('./src/routes/client-portal').invalidateDdCache(login); } catch (_) {}
+}
 // A1 (23.08): пинг модемов из ping_stats бокса — история + алерты + вход для
 // ping-based аптайма. Создаётся до modem-tracking, которому передаётся в deps.
 const modemPing = require('./src/jobs/modem-ping').create({ db, logger, alerts, getSetting });
@@ -3123,6 +3170,7 @@ const { trackModems } = require('./src/jobs/modem-tracking').create({
   modemPing, modemRate,
   maintenance: require('./src/maintenance'),   // B3 (23.08): пометка простоев в окне обслуживания
   events: eventsBus,                           // SSE (23.08): fleet_update / ping_result / modem_rate
+  clientEventsPush,                            // SSE 03.10: scoped-пуши клиентам (modem_status / ip_changed)
 });
 
 const SPEEDTEST_HISTORY_FILE = path.join(__dirname, 'speedtest_history.json');
@@ -3232,6 +3280,7 @@ app.use(require('./src/routes/client-portal-v3')({
   fetchAllServersDataCached, mergeServerData, fetchApi, postApi, findServer,
   knownModems, clients, clientById, clientByLogin, ledgerDb,
   auditLog, getClientIp, proxySmart, getSetting, logActivity,
+  webhooksDeliver: (login, event, data, force) => _webhooks.deliver(login, event, data, force),
 }));
 
 // ── B2C retail (ТЗ 10.08) ─────────────────────────────────────────────────
@@ -4032,10 +4081,18 @@ const _retailGuard = require('./src/jobs/retail-guard').create({
 });
 const runRetailGuard = _retailGuard.runOnce;
 const runBlockedPortCleanup = _blockedPortCleanup.runOnce;   // 21.08: удаление портов после hold
-financeEvents.on('client-credit', ({ clientId }) => {
+financeEvents.on('client-credit', ({ clientId, amount, balanceAfter }) => {
   const c = clientById.get(clientId);
   if (!c) return;
   _debtBlock.restoreAfterCredit(c).catch(e => logger.error('[DebtBlock] restore error:', e.message));
+  // SSE 03.10: мгновенный пуш зачисления в ЛК клиента + вебхук наружу
+  try {
+    if (c.login) {
+      clientEventsBus.publishTo(c.login, 'balance', { balance: balanceAfter, credited: amount });
+      require('./src/routes/client-portal').invalidateDdCache(c.login);
+      _webhooks.deliver(c.login, 'payment_received', { amount, balance: balanceAfter });
+    }
+  } catch (_) {}
 });
 
 // runDailyBilling extracted to src/jobs/billing.js (WP6.4) — verbatim move.
@@ -4062,6 +4119,14 @@ const { runDailyBilling } = require('./src/jobs/billing').create({
   setLastBillingRunSummary: (s) => { lastBillingRunSummary = s; },
   debtBlock: _debtBlock,
   tariffsDb,   // Р36: getClientPrice (override → tariff → legacy price)
+  // SSE 03.10: пуш «баланс изменился» в ЛК после списания + вебхук наружу
+  clientEventsLogin: (login, type, data) => {
+    try {
+      clientEventsBus.publishTo(login, type, data);
+      require('./src/routes/client-portal').invalidateDdCache(login);
+      if (type === 'balance' && data && data.charged) _webhooks.deliver(login, 'daily_charge', data);
+    } catch (_) {}
+  },
 });
 
 // Фаза 0 (§2 ТЗ): теневой тест тарификации — ежедневное сравнение V1/V2 в
@@ -4273,8 +4338,10 @@ app.use(require('./src/routes/sla')({
 
 // SSE (23.08, этап 5) — realtime-канал админки (GET /api/admin/events)
 // поверх шины src/events.js; auth — admin-сессия (cookie или ?token=).
+// 03.10: и клиентский канал (GET /api/client/events) на clientEventsBus.
 app.use(require('./src/routes/events')({
   logger, authMiddleware, adminMiddleware, getSetting, events: eventsBus,
+  clientEvents: clientEventsBus,
 }));
 
 // Stage 18.15 — bell endpoints (list/badge/read/dismiss). See module header.
@@ -4347,6 +4414,7 @@ app.use(require('./src/routes/ops-ext')({
   getRunningJobs: () => _jobs,
   getLastBillingRunSummary: () => lastBillingRunSummary,
   getLastReconciliationMonth: _monthlyRecon.getLastReconciliationMonth,
+  getEventLoopLag: () => eventLoopLag,
   getIntervals: () => _intervals,
   getFetchAllServersDataCached: () => fetchAllServersDataCached,  getMergeServerData: () => mergeServerData,
   getSetting,
@@ -4482,6 +4550,7 @@ function gracefulShutdown(signal) {
   // SSE (23.08): предупреждаем realtime-клиентов событием 'bye' и закрываем
   // потоки — фронт переподключается с backoff после рестарта процесса.
   try { eventsBus.closeAll(); } catch (_) { /* best-effort */ }
+  try { clientEventsBus.closeAll(); } catch (_) { /* best-effort */ }
 
   // Stop accepting new connections (no-op in test mode where httpServer is null)
   if (httpServer) httpServer.close(() => {
