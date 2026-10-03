@@ -25,6 +25,14 @@ module.exports = function createRouter(deps) {
     const srv = serverName ? findServer(serverName) : null;
     return normalizeOperator(raw, !!(srv && srv.country === 'RO')) || raw;
   }
+  // 03.10: название страны для клиентского кабинета — по-русски
+  // («Молдова»/«Румыния»), как в чипах фильтров v3. countryName в конфиге
+  // серверов английское («Moldova») — для ЛК мапим по коду страны.
+  const _COUNTRY_RU = { MD: 'Молдова', RO: 'Румыния' };
+  function _countryRu(srv, fallback) {
+    if (!srv) return fallback || '';
+    return _COUNTRY_RU[srv.country] || srv.countryName || srv.country || fallback || '';
+  }
 
 // модем), а nginx рвёт соединение на 30 с и отдаёт HTML-страницу 504 —
 // фронт получал «Unexpected token '<'... is not valid JSON». Быстрые модемы
@@ -252,7 +260,7 @@ r.get('/api/client/speed_monitor', authMiddleware, (req, res) => {
       seen.set(x.nick, {
         nick: x.nick,
         server: x.server || '',
-        location: (srv && (srv.countryName || srv.country)) || x.server || '',
+        location: _countryRu(srv, x.server || ''),
         address: (srv && srv.address) || '',
         operator: _normMetaOp(x.operator, x.server),
       });
@@ -301,7 +309,7 @@ r.get('/api/client/operator_speed', authMiddleware, (req, res) => {
           const op = _normMetaOp(rawOp, serverName);
           if (!op) return;
           const srv = serverName ? findServer(serverName) : null;
-          const country = (srv && (srv.countryName || srv.country)) || serverName || '';
+          const country = _countryRu(srv, serverName || '');
           allowed.add(country + '|' + op.toLowerCase());
         };
         try {
@@ -327,7 +335,7 @@ r.get('/api/client/operator_speed', authMiddleware, (req, res) => {
       const op = _normMetaOp(r.operator, r.server);
       if (!op) continue;
       const srv = r.server ? findServer(r.server) : null;
-      const country = (srv && (srv.countryName || srv.country)) || r.server || '';
+      const country = _countryRu(srv, r.server || '');
       const k = country + '|' + op;
       if (allowed && !allowed.has(country + '|' + op.toLowerCase())) continue;
       if (!groups.has(k)) groups.set(k, { country, operator: op, dls: [], uls: [], pings: [] });
