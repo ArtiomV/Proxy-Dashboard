@@ -193,7 +193,6 @@ function _cdSettings(r){
   var proto=(typeof exState!=='undefined'?exState.proto:'http')==='socks5'?'SOCKS5':'HTTP';
   var rows=[
     {t:'Пароль прокси',s:'Новый пароль сразу применится к HTTP и SOCKS5',a:'Сгенерировать',fn:'cdNewPassword()',c:'link'},
-    {t:'Ссылка смены IP',s:'Новая ссылка для всех ваших прокси; старая перестанет работать сразу',a:'Перевыпустить',fn:'cdRotateLink()',c:'link'},
     {t:'Протокол в экспорте',s:'Какой адрес подставлять по умолчанию',a:proto+' ▾',fn:'cdProto()',c:''},
     {t:'Уведомлять, если офлайн',s:V3.tgLinked?'В Telegram, если прокси недоступен больше 5 минут':'Нужен привязанный Telegram — включите в профиле',a:cdState.notify?'Включено':'Выключено',fn:'cdNotify()',c:cdState.notify?'green':''}
   ];
@@ -259,20 +258,5 @@ function cdNewPassword(){
       m.querySelector('[data-a="x"]').addEventListener('click',function(){V3.closeModal(m)});
       setTimeout(function(){loadData()},4000);
     }).catch(function(e){V3.toast({kind:'err',title:'Пароль не изменён',text:e.message})});
-  });
-}
-function cdRotateLink(){v3RotateResetLink()}
-function v3RotateResetLink(){
-  V3.confirm({title:'Перевыпустить ссылку смены IP?',text:'Прежняя ссылка перестанет работать сразу для всех ваших прокси. Новую покажем один раз — сохраните её.',cta:'Перевыпустить'}).then(function(ok){
-    if(!ok)return;
-    api('/api/client/reset_link/rotate',{method:'POST',json:{}}).then(function(d){
-      if(!d||!d.ok)throw new Error((d&&d.error)||'Не удалось перевыпустить ссылку');
-      V3.resetLinkBase=d.url;
-      var ex=tableData[0]?d.url+encodeURIComponent(tableData[0].modemNick):d.url+'<НИК>';
-      var m=V3.modal(V3.mh('Новая ссылка смены IP')+'<div class="v3-mb"><p class="v3-hint" style="margin:0">Подставьте ник прокси в конец ссылки. GET или POST по ней меняет IP у этого прокси.</p><div class="v3-detail">'+V3.esc(ex)+'</div></div><div class="v3-mf"><button type="button" class="v3-btn" data-a="c">Скопировать основу</button><button type="button" class="v3-btn primary" data-a="x">Готово</button></div>',{width:'w460'});
-      m.querySelector('[data-a="c"]').addEventListener('click',function(){V3.copy(d.url,'Ссылка скопирована','добавьте ник прокси в конец')});
-      m.querySelector('[data-a="x"]').addEventListener('click',function(){V3.closeModal(m)});
-      if(typeof renderProfile==='function'&&document.getElementById('tab-profile').classList.contains('active'))renderProfile();
-    }).catch(function(e){V3.toast({kind:'err',title:e.message})});
   });
 }

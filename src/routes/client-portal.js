@@ -450,7 +450,11 @@ r.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
     }
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
-    const result = await fetchApi(server, `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(imei)}`);
+    // 03.10: таймаут 30 с вместо дефолтных 10. Реальная команда reset на
+    // MF289-хабах (S3/S4) занимает >10 с, плюс у S4 бывают ~60-секундные
+    // окна блокировки панели (cron reset_gently) — с 10 с клиент получал
+    // «Reset failed» при фактически выполненной или выполнимой команде.
+    const result = await fetchApi(server, `/apix/reset_modem_by_imei?IMEI=${encodeURIComponent(imei)}`, 30000);
     const success = result && result.result === 'success';
     auditLog(req.user.login, 'client_reset_ip', { imei, serverName, ip: getClientIp(req), success });
     if (success) {
@@ -458,7 +462,16 @@ r.post('/api/client/reset_ip', authMiddleware, async (req, res) => {
     } else {
       res.json({ ok: false, error: result?.message || 'Reset failed', result });
     }
-  } catch (err) { res.status(502).json({ ok: false, error: 'Reset failed', details: err.message }); }
+  } catch (err) {
+    const isTimeout = /Timeout from/.test(err && err.message || '');
+    res.status(502).json({
+      ok: false,
+      error: isTimeout
+        ? 'Сервер модемов не ответил вовремя — попробуйте ещё раз через минуту'
+        : 'Reset failed',
+      details: err.message,
+    });
+  }
 });
 
 const _resetIpHandler = async (req, res) => {

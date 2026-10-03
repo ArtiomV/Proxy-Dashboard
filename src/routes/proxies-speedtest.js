@@ -267,7 +267,54 @@ r.get('/api/client/speed_monitor', authMiddleware, (req, res) => {
     }
     modems.push(...seen.values());
   } catch (_) { /* мета best-effort, строки уже отданы */ }
-  res.json({ hours, rows, modems });
+
+  // 03.10: почасовые серии по (оператор, страна) — по ВСЕМУ флоту, а не
+  // только по никам клиента. Скорость оператора не зависит от того, чей
+  // модем замеряли; иначе у операторов, чьи клиентские модемы SpeedMonitor
+  // не успел замерить за окно, график был пустым («Orange/Moldtelecom — нет
+  // данных»), хотя замеры в админке есть. Состав пар ограничен теми, что
+  // есть у клиента (та же логика, что mine=1 в operator_speed).
+  let fleet = [];
+  try {
+    const allowed = new Set();
+    try {
+      for (const r of db.prepare(`SELECT DISTINCT server_name, operator FROM modem_meta WHERE nick IN (${inClause}) AND TRIM(COALESCE(operator,'')) <> ''`).all(...nickList)) {
+        const op = _normMetaOp(r.operator, r.server_name);
+        if (op) allowed.add(_countryRu(r.server_name ? findServer(r.server_name) : null, r.server_name || '') + '|' + op.toLowerCase());
+      }
+      for (const r of db.prepare(`SELECT DISTINCT server, operator FROM speed_monitor WHERE nick IN (${inClause}) AND TRIM(COALESCE(operator,'')) <> ''`).all(...nickList)) {
+        const op = _normMetaOp(r.operator, r.server);
+        if (op) allowed.add(_countryRu(r.server ? findServer(r.server) : null, r.server || '') + '|' + op.toLowerCase());
+      }
+    } catch (_) { /* allowed best-effort */ }
+    const unrestricted = portName === '*' || allowed.size === 0;
+    const fr = db.prepare(`
+      SELECT server, operator,
+             strftime('%Y-%m-%d %H:00', ts, '+3 hours') AS hour_msk,
+             ROUND(AVG(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN download END), 2) AS avg_dl,
+             ROUND(AVG(CASE WHEN ok = 1 AND (download > 0 OR upload > 0) THEN upload END), 2)   AS avg_ul
+        FROM speed_monitor
+       WHERE ts >= datetime('now', ?)
+       GROUP BY server, operator, hour_msk`).all(`-${hours} hours`);
+    const byKey = new Map();   // op|loc|hour → { dls, uls } (медиана по серверам страны)
+    for (const r of fr) {
+      const op = _normMetaOp(r.operator, r.server);
+      if (!op) continue;
+      const loc = _countryRu(r.server ? findServer(r.server) : null, r.server || '');
+      if (!unrestricted && !allowed.has(loc + '|' + op.toLowerCase())) continue;
+      const k = op + '|' + loc + '|' + r.hour_msk;
+      if (!byKey.has(k)) byKey.set(k, { op, loc, hour_msk: r.hour_msk, dls: [], uls: [] });
+      const g = byKey.get(k);
+      if (r.avg_dl > 0) g.dls.push(r.avg_dl);
+      if (r.avg_ul > 0) g.uls.push(r.avg_ul);
+    }
+    fleet = [...byKey.values()].map(g => ({
+      operator: g.op, location: g.loc, hour_msk: g.hour_msk,
+      avg_dl: g.dls.length ? Math.round(_median(g.dls) * 100) / 100 : null,
+      avg_ul: g.uls.length ? Math.round(_median(g.uls) * 100) / 100 : null,
+    }));
+  } catch (_) { /* серии флота best-effort */ }
+  res.json({ hours, rows, modems, fleet });
 });
 
 // 2026-10-02: «Скорость по операторам и локациям» — без привязки к модему.

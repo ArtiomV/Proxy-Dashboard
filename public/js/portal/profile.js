@@ -31,11 +31,8 @@ function _profRender(){
     row('Название',V3.esc(l.name||p.name))+row('ИНН',V3.esc(l.inn),'',true)+row('КПП',V3.esc(l.kpp),'',true)+row('Адрес',V3.esc(l.address))+
     row('Договор',V3.esc([l.contract,l.contractDate?'от '+V3.date(l.contractDate):''].filter(Boolean).join(' ')))+
     '<div class="v3-note" style="margin-top:8px">Изменить реквизиты можно через менеджера — они попадают в акты и счета.</div></div>';
-  var link=V3.resetLinkBase?V3.resetLinkBase.replace(/^https?:\/\/[^/]+/,'…').replace(/token=([0-9a-f]{4})[0-9a-f]+/,'token=$1…'):'активна';
   h+='<div class="v3-card"><h3 style="margin-bottom:10px">Безопасность</h3><div style="display:flex;flex-direction:column;gap:10px">'+
     '<div class="v3-srow"><span class="k">Пароль</span><span class="v">'+(p.pwChangedAt?'Изменён '+V3.esc(V3.date(p.pwChangedAt)):'Задан')+'</span><button type="button" class="v3-btn sm link" data-on-click="profPassword()">Сменить</button></div>'+
-    '<div class="v3-srow"><span class="k">Ссылки смены IP</span><span class="v mono" style="font-size:11.5px">'+V3.esc(link)+'</span><button type="button" class="v3-btn sm link" data-on-click="v3RotateResetLink()">Перевыпустить</button></div>'+
-    '<div class="v3-note" style="margin-top:-4px">У каждого прокси своя ссылка (лежит в списке прокси), но основа у них общая — токен вашего аккаунта. «Перевыпустить» меняет токен сразу для всех прокси.</div>'+
     '<div class="v3-srow"><span class="k">Telegram</span><span class="v">'+(p.tgLinked?(p.tgUsername?'@'+V3.esc(p.tgUsername):'привязан'):'<span style="color:var(--v3-faint)">не привязан</span>')+'</span>'+
       (p.tgLinked?'<button type="button" class="v3-btn sm" data-on-click="profTgUnlink()">Отвязать</button>':'<button type="button" class="v3-btn sm link" data-on-click="profTgLink()">Привязать</button>')+'</div>'+
     '<div class="v3-note">'+(p.tgLinked?'В Telegram приходят зачисления, предупреждения о балансе и уведомления «прокси офлайн».':'Привяжите Telegram, чтобы получать зачисления, предупреждения о балансе и уведомления «прокси офлайн».')+'</div>'+

@@ -15,7 +15,8 @@ function _anRange(){
   if(p==='week')return {from:V3.ymd(V3.addDays(t,-6)),to:V3.ymd(t)};
   if(p==='quarter'){var q=Math.floor(t.getMonth()/3);return {from:V3.ymd(new Date(t.getFullYear(),q*3,1)),to:V3.ymd(t)}}
   if(p==='custom'&&anState.from)return {from:anState.from,to:anState.to};
-  return {from:V3.ymd(new Date(t.getFullYear(),t.getMonth(),1)),to:V3.ymd(t)};
+  // 'month' = последние 30 дней (не календарный месяц), как на «Обзоре» — 03.10
+  return {from:V3.ymd(V3.addDays(t,-29)),to:V3.ymd(t)};
 }
 function _anPrevRange(r){
   var n=V3.daysBetween(r.from,r.to),end=V3.addDays(V3.parse(r.from),-1);
@@ -201,16 +202,27 @@ function _spPrepare(d, opSpeed){
     var key=(r.operator||'Оператор не определён')+'|'+(r.location||'');
     if(!ops[key])ops[key]={name:r.operator||'Оператор не определён',loc:r.location||'',dl:{},ul:{},dlMed:r.median_dl!=null?r.median_dl:null,ulMed:r.median_ul!=null?r.median_ul:null,ping:r.median_ping};
   });
-  // 2) почасовая серия из замеров ников клиента (если такие есть)
-  d.rows.forEach(function(r){
-    var m=meta[r.nick]||{},op=m.operator||(V3.byNick(r.nick)||{}).operator||'Оператор не определён';
-    var loc=m.location||'';
-    var key=op+'|'+loc;
-    if(!ops[key])ops[key]={name:op,loc:loc,dl:{},ul:{},dlMed:null,ulMed:null};
-    var hi=hours.indexOf(r.hour_msk);if(hi<0)return;
-    if(r.avg_dl>0)(ops[key].dl[hi]=ops[key].dl[hi]||[]).push(r.avg_dl);
-    if(r.avg_ul>0)(ops[key].ul[hi]=ops[key].ul[hi]||[]).push(r.avg_ul);
-  });
+  // 2) почасовая серия: по флоту (оператор+страна), фолбэк — замеры ников клиента
+  var fleetRows=Array.isArray(d.fleet)?d.fleet:null;
+  if(fleetRows){
+    fleetRows.forEach(function(r){
+      var key=(r.operator||'Оператор не определён')+'|'+(r.location||'');
+      if(!ops[key])ops[key]={name:r.operator||'Оператор не определён',loc:r.location||'',dl:{},ul:{},dlMed:null,ulMed:null};
+      var hi=hours.indexOf(r.hour_msk);if(hi<0)return;
+      if(r.avg_dl>0)(ops[key].dl[hi]=ops[key].dl[hi]||[]).push(r.avg_dl);
+      if(r.avg_ul>0)(ops[key].ul[hi]=ops[key].ul[hi]||[]).push(r.avg_ul);
+    });
+  }else{
+    d.rows.forEach(function(r){
+      var m=meta[r.nick]||{},op=m.operator||(V3.byNick(r.nick)||{}).operator||'Оператор не определён';
+      var loc=m.location||'';
+      var key=op+'|'+loc;
+      if(!ops[key])ops[key]={name:op,loc:loc,dl:{},ul:{},dlMed:null,ulMed:null};
+      var hi=hours.indexOf(r.hour_msk);if(hi<0)return;
+      if(r.avg_dl>0)(ops[key].dl[hi]=ops[key].dl[hi]||[]).push(r.avg_dl);
+      if(r.avg_ul>0)(ops[key].ul[hi]=ops[key].ul[hi]||[]).push(r.avg_ul);
+    });
+  }
   var list=Object.keys(ops).sort().map(function(k,i){
     var o=ops[k];o.color=SP_COLORS[i%SP_COLORS.length];
     ['dl','ul'].forEach(function(mode){
