@@ -470,21 +470,34 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
     const reused = analyticsDb.ipReused(sinceExpr, staleArgs, staleFilter);
     const lifetimeAll = analyticsDb.ipLifetime(sinceExpr, staleArgs, staleFilter).avg_sec;
     const poolsRows = analyticsDb.ipPools(sinceExpr, staleArgs, staleFilter);
+    // Операторская разбивка: голые пары (ip, key) из rollup'а, оператор и
+    // сервер достраиваем в JS по modem_meta (417 строк) — join в SQL по 258к
+    // строк стоил ~10 с (конкатенация) / ~2 с (substr), здесь ~0.5 с суммарно.
     const operatorRows = analyticsDb.ipOperatorRows(
       sinceExpr,
       staleArgs,
       staleFilter.replace(/\bkey\b/g, 'h.key')
     );
+    const _nickByKey = {}, _opByKey = {};
+    try {
+      for (const m of analyticsDb.modemNickByKey()) {
+        _nickByKey[m.server_name + '_' + m.imei] = m.nick;
+        _opByKey[m.server_name + '_' + m.imei] = m.operator || '';
+      }
+    } catch (_) { /* modem_meta optional */ }
 
     // Aliases such as "MOLDCELL" and "Moldcell" are collapsed through the
     // same normalizer used by the rest of the dashboard. Sets preserve truly
     // unique IPs even when two raw operator names map to one canonical name.
     const operatorGroups = new Map();
     for (const row of operatorRows) {
-      const isRO = ((SERVER_COUNTRIES[row.server] || {}).country || '') === 'RO';
-      const operator = (typeof normalizeOperator === 'function'
-        ? normalizeOperator(row.operator, isRO)
-        : row.operator) || 'Неизвестный';
+      const us = row.key.indexOf('_');
+      const server = us > 0 ? row.key.slice(0, us) : '';
+      const isRO = ((SERVER_COUNTRIES[server] || {}).country || '') === 'RO';
+      const rawOp = _opByKey[row.key] || '';
+      const operator = (rawOp && typeof normalizeOperator === 'function'
+        ? normalizeOperator(rawOp, isRO)
+        : rawOp) || 'Неизвестный';
       if (!operatorGroups.has(operator)) {
         operatorGroups.set(operator, { ips: new Set(), modems: new Set() });
       }
@@ -500,13 +513,6 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
 
     // Per-modem /24 subnet diversity
     const subRows = analyticsDb.ipSubnets(sinceExpr, staleArgs, staleFilter);
-    const _nickByKey = {}, _opByKey = {};
-    try {
-      for (const m of analyticsDb.modemNickByKey()) {
-        _nickByKey[m.server_name + '_' + m.imei] = m.nick;
-        _opByKey[m.server_name + '_' + m.imei] = m.operator || '';
-      }
-    } catch (_) { /* modem_meta optional */ }
     const subnets = subRows.map(row => {
       const us = row.key.indexOf('_');
       const server = us > 0 ? row.key.slice(0, us) : '';

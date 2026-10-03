@@ -142,13 +142,11 @@ function init(db) {
      GROUP BY key
      ORDER BY subnets DESC
   `);
+  // Голые пары (ip, key) — оператор и сервер достраиваются в JS роута по
+  // modem_meta. SQL-join по 258 тыс. строк стоил ~10 с (миграция 109).
   S.ipOperatorRows = (sinceExpr, staleFilter) => db.prepare(`
-    SELECT DISTINCT h.ip, h.key,
-           substr(h.key, 1, instr(h.key, '_') - 1) as server,
-           COALESCE(m.operator, '') as operator
+    SELECT h.ip, h.key
       FROM ip_pairs h
-      LEFT JOIN modem_meta m
-        ON h.key = m.server_name || '_' || m.imei
      WHERE h.last_seen >= ${sinceExpr}
        AND instr(h.key, '_') > 0${staleFilter}
   `);
