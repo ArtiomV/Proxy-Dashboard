@@ -147,7 +147,7 @@ function init(db) {
      WHERE h.started_at >= ${sinceExpr}
        AND instr(h.key, '_') > 0${staleFilter}
   `);
-  S.modemNickByKey = db.prepare('SELECT server_name, imei, nick FROM modem_meta');
+  S.modemNickByKey = db.prepare('SELECT server_name, imei, nick, operator FROM modem_meta');
 
   // ── traffic_forecast ─────────────────────────────────────────────────
   S.forecastDailyTraffic = db.prepare(`

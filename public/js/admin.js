@@ -4668,6 +4668,11 @@ function reloadNewInfra(){
   var kpiEl=document.getElementById('newInfraKpis'),tblEl=document.getElementById('newInfraTables');
   if(!kpiEl&&!tblEl)return;
   var days=_NEW_INFRA_DAYS;
+  // 03.10: намёк на обновление — приглушаем текущие данные и показываем
+  // штамп справа от чипов периода; после загрузки — время среза.
+  var stamp=document.getElementById('newInfraStamp');
+  [kpiEl,tblEl].forEach(function(e){if(e){e.style.transition='opacity .15s';e.style.opacity='.4';e.style.pointerEvents='none'}});
+  if(stamp)stamp.textContent='Обновляем…';
   Promise.all([
     api(API+'/api/analytics/rotations?days='+days).catch(function(){return {};}),
     api(API+'/api/analytics/ip_stats?days='+days).catch(function(){return {};}),
@@ -4716,9 +4721,9 @@ function reloadNewInfra(){
     var subnetAll=ip.subnets||[],expanded=!!(window._zxOpen&&window._zxOpen.sn),limit=expanded?subnetAll.length:8,maxSubnet=Math.max(1,sn.max||0);
     var subnetRows=subnetAll.slice(0,limit).map(function(x){
       var width=Math.max(4,Math.round((Number(x.subnets)||0)/maxSubnet*100));
-      return '<div class="infra-ip-row"><div class="infra-list-name"><b>'+esc(x.nick)+'</b><small>'+esc(_serverDisplayLabel(x.server))+'</small></div>'
+      return '<div class="infra-ip-row"><div class="infra-list-name"><b>'+esc(x.nick)+'</b><small>'+esc(x.operator||_serverDisplayLabel(x.server))+'</small></div>'
         +'<div class="infra-ip-bar"><i style="width:'+width+'%"></i></div>'
-        +'<div class="infra-list-metric is-accent"><b>'+x.subnets+'</b><small>подсетей · '+x.ips+' IP</small></div></div>';
+        +'<div class="infra-list-metric is-accent"><b>'+Number(x.ips||0).toLocaleString('ru-RU')+' IP</b><small>'+x.subnets+' подсетей</small></div></div>';
     }).join('');
     if(!subnetRows)subnetRows='<div class="infra-empty">Данных об IP пока нет</div>';
     var more=subnetAll.length>8?(expanded
@@ -4730,6 +4735,8 @@ function reloadNewInfra(){
       +'<section class="infra-panel"><div class="infra-panel-head"><div><h4>Уникальные IP по операторам</h4><p>Без повторов внутри каждого оператора</p></div><span>'+days+'д</span></div><div class="infra-list">'+operatorRows+'</div></section>'
       +'<section class="infra-panel is-wide"><div class="infra-panel-head"><div><h4>Разнообразие IP по модемам</h4><p>Модемы с наибольшим числом /24 подсетей</p></div><span>топ</span></div><div class="infra-list">'+subnetRows+more+'</div></section>'
       +'</div>';
+    [kpiEl,tblEl].forEach(function(e){if(e){e.style.opacity='';e.style.pointerEvents=''}});
+    if(stamp){var nw=new Date();stamp.textContent='данные на '+String(nw.getHours()).padStart(2,'0')+':'+String(nw.getMinutes()).padStart(2,'0')+':'+String(nw.getSeconds()).padStart(2,'0')}
   });
 }
 

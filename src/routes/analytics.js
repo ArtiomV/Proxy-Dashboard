@@ -492,17 +492,24 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
 
     // Per-modem /24 subnet diversity
     const subRows = analyticsDb.ipSubnets(sinceExpr, staleArgs, staleFilter);
-    const _nickByKey = {};
+    const _nickByKey = {}, _opByKey = {};
     try {
       for (const m of analyticsDb.modemNickByKey()) {
         _nickByKey[m.server_name + '_' + m.imei] = m.nick;
+        _opByKey[m.server_name + '_' + m.imei] = m.operator || '';
       }
     } catch (_) { /* modem_meta optional */ }
     const subnets = subRows.map(row => {
       const us = row.key.indexOf('_');
+      const server = us > 0 ? row.key.slice(0, us) : '';
+      const isRO = ((SERVER_COUNTRIES[server] || {}).country || '') === 'RO';
+      const rawOp = _opByKey[row.key] || '';
       return {
-        server: us > 0 ? row.key.slice(0, us) : '',
+        server,
         nick: _nickByKey[row.key] || (us > 0 ? row.key.slice(us + 1) : row.key),
+        // 03.10: оператор модема — в списке подсетей показываем его вместо
+        // технического имени сервера (MD2-STEF-MF289 ничего не говорит)
+        operator: (rawOp && typeof normalizeOperator === 'function' ? normalizeOperator(rawOp, isRO) : rawOp) || '',
         subnets: row.subnets,
         ips: row.ips
       };
