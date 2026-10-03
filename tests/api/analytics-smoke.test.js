@@ -70,9 +70,15 @@ describe('analytics endpoints (WP6.1 split) — 200 + basic shape', () => {
       addMeta.run(server, 'op-imei-1', 'IPOP_1', 'MOLDCELL');
       addMeta.run(server, 'op-imei-2', 'IPOP_2', 'moldcell');
       const addIp = db.prepare('INSERT INTO ip_history (key, ip, started_at) VALUES (?, ?, ?)');
+      // 03.10: операторская разбивка ip_stats читает rollup ip_pairs —
+      // дублируем фикстуру туда (боевой recordIpChange делает то же самое).
+      const addPair = db.prepare('INSERT INTO ip_pairs (key, ip, first_seen, last_seen) VALUES (?, ?, ?, ?)');
       addIp.run(server + '_op-imei-1', '198.51.100.10', now);
       addIp.run(server + '_op-imei-1', '198.51.100.11', now);
       addIp.run(server + '_op-imei-2', '198.51.100.10', now);
+      addPair.run(server + '_op-imei-1', '198.51.100.10', now, now);
+      addPair.run(server + '_op-imei-1', '198.51.100.11', now, now);
+      addPair.run(server + '_op-imei-2', '198.51.100.10', now, now);
 
       const res = await GET('/api/analytics/ip_stats?days=7');
       expect(res.body.operators.find(row => row.operator === 'Moldcell')).toMatchObject({
@@ -81,6 +87,7 @@ describe('analytics endpoints (WP6.1 split) — 200 + basic shape', () => {
       });
     } finally {
       db.prepare("DELETE FROM ip_history WHERE key LIKE 'IPOPS_%'").run();
+      db.prepare("DELETE FROM ip_pairs WHERE key LIKE 'IPOPS_%'").run();
       db.prepare('DELETE FROM modem_meta WHERE server_name = ?').run(server);
     }
   });

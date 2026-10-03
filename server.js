@@ -2942,9 +2942,9 @@ try {
   if (rows.length > 0) logger.info(`[SQLite] Loaded ${rows.length} IP history entries`);
 } catch (e) { logger.error('Failed to load ip_history from SQLite:', e.message); }
 // Раз в сутки — retention-пурга ip_history (90 дней), чтобы таблица не росла
-// бесконечно между рестартами.
+// бесконечно между рестартами. Заодно чистим rollup ip_pairs.
 _intervals.push(setInterval(() => {
-  try { trackingDb.ihPurgeOldStmt().run(); }
+  try { trackingDb.ihPurgeOldStmt().run(); trackingDb.ipPairsPurgeStmt().run(); }
   catch (e) { logger.warn('[ip_history] purge: ' + e.message); }
 }, 24 * 3600e3));
 
@@ -3025,6 +3025,8 @@ function recordIpChange(key, oldIp, newIp, timestamp) {
   }
   // Add new entry with direct INSERT
   const result = _ihInsert.run(key, newIp, ts, '');
+  try { trackingDb.ipPairUpsertStmt().run(key, newIp, ts, ts); }
+  catch (e) { logger.warn('[ip_pairs] upsert: ' + e.message); }
   entries.push({ db_id: result.lastInsertRowid, ip: newIp, from: ts, to: null });
   // Trim только память: в SQLite история живёт 90 дней (retention-пурга на
   // старте и раз в сутки). Раньше здесь же DELETE'ом обрезалась и таблица —

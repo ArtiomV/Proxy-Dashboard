@@ -23,6 +23,12 @@ function init(db) {
   S.ihInsert    = db.prepare('INSERT INTO ip_history (key, ip, started_at, ended_at) VALUES (?, ?, ?, ?)');
   S.ihUpdateEnd = db.prepare('UPDATE ip_history SET ended_at = ? WHERE id = ?');
   S.ihDeleteById = db.prepare('DELETE FROM ip_history WHERE id = ?');
+  // Rollup уникальных пар (модем, IP) для быстрой ip_stats (миграция 109).
+  S.ipPairUpsert = db.prepare(
+    'INSERT INTO ip_pairs (key, ip, first_seen, last_seen) VALUES (?, ?, ?, ?) ' +
+    'ON CONFLICT(key, ip) DO UPDATE SET last_seen = excluded.last_seen'
+  );
+  S.ipPairsPurge = db.prepare("DELETE FROM ip_pairs WHERE last_seen < datetime('now', '-90 days')");
   // Upsert that PRESERVES the last non-empty value per field. An offline modem
   // reports empty PHONE_NUMBER/MODEL/NICK in the live feed; the old INSERT OR
   // REPLACE wiped the whole row, so a modem going offline erased its saved phone
@@ -211,4 +217,6 @@ module.exports = {
   utDailyAllStmt:      () => S.utDailyAll,
   ihAllOrderStmt:      () => S.ihAllOrder,
   ihPurgeOldStmt:      () => S.ihPurgeOld,
+  ipPairUpsertStmt:    () => S.ipPairUpsert,
+  ipPairsPurgeStmt:    () => S.ipPairsPurge,
 };

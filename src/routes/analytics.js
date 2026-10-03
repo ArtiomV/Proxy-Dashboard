@@ -447,9 +447,17 @@ r.get('/api/analytics/rotations', authMiddleware, adminMiddleware, (req, res) =>
   }
 });
 
+// 03.10: кэш ответа ip_stats на 5 минут per days — после бэкфилла 108
+// полный пересчёт ~1 с (rollup ip_pairs), но страница «Ротации IP» дёргает
+// эндпоинт при каждом открытии и смене периода; повторы отдаём мгновенно.
+const _ipStatsCache = new Map();   // days → { ts, payload }
+const IP_STATS_CACHE_TTL = 5 * 60e3;
+
 r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => {
   try {
     const days = Math.min(Math.max(parseInt(req.query.days) || 30, 1), 90);
+    const cached = _ipStatsCache.get(days);
+    if (cached && Date.now() - cached.ts < IP_STATS_CACHE_TTL) return res.json(cached.payload);
     const sinceExpr = `datetime('now', '-${days} days')`;
 
     // Stage 18.8: exclude IP history for stale modems. ip_history uses
@@ -520,7 +528,7 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
       max: subnets.length ? subnets[0].subnets : 0
     };
 
-    res.json({
+    const payload = {
       days,
       summary: {
         unique_ips: uniqueIps,
@@ -534,7 +542,9 @@ r.get('/api/analytics/ip_stats', authMiddleware, adminMiddleware, (req, res) => 
       operators,
       subnets: subnets.slice(0, 50),
       subnet_summary: subnetSummary
-    });
+    };
+    _ipStatsCache.set(days, { ts: Date.now(), payload });
+    res.json(payload);
   } catch (e) {
     logger.error('[ip_stats]', e.message);
     res.status(500).json({ error: e.message });

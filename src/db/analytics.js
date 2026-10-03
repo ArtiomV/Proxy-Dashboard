@@ -96,9 +96,14 @@ function init(db) {
   `);
 
   // ── ip_stats (stale filter on key — dynamic, builder below) ──────────
+  // 03.10: тяжёлые «distinct»-метрики читают rollup ip_pairs (миграция 109,
+  // ~80 тыс. строк) вместо полного скана ip_history (~450 тыс. за 30 дней) —
+  // ip_stats ускорился с 22 с до ~1 с и перестал блокировать event loop.
+  // Окно фильтруем по last_seen: пара активна внутри окна. Назначения,
+  // lifetime и reused (нужны количества назначений) — по-прежнему ip_history.
   S.ipUnique = (sinceExpr, staleFilter) => db.prepare(`
-    SELECT COUNT(DISTINCT ip) as c FROM ip_history
-    WHERE started_at >= ${sinceExpr}${staleFilter}
+    SELECT COUNT(DISTINCT ip) as c FROM ip_pairs
+    WHERE last_seen >= ${sinceExpr}${staleFilter}
   `);
   S.ipAssignments = (sinceExpr, staleFilter) => db.prepare(`
     SELECT COUNT(*) as c FROM ip_history WHERE started_at >= ${sinceExpr}${staleFilter}
@@ -132,8 +137,8 @@ function init(db) {
     SELECT key,
            COUNT(DISTINCT rtrim(rtrim(ip,'0123456789'),'.')) as subnets,
            COUNT(DISTINCT ip) as ips
-      FROM ip_history
-     WHERE started_at >= ${sinceExpr}${staleFilter}
+      FROM ip_pairs
+     WHERE last_seen >= ${sinceExpr}${staleFilter}
      GROUP BY key
      ORDER BY subnets DESC
   `);
@@ -141,10 +146,10 @@ function init(db) {
     SELECT DISTINCT h.ip, h.key,
            substr(h.key, 1, instr(h.key, '_') - 1) as server,
            COALESCE(m.operator, '') as operator
-      FROM ip_history h
+      FROM ip_pairs h
       LEFT JOIN modem_meta m
         ON h.key = m.server_name || '_' || m.imei
-     WHERE h.started_at >= ${sinceExpr}
+     WHERE h.last_seen >= ${sinceExpr}
        AND instr(h.key, '_') > 0${staleFilter}
   `);
   S.modemNickByKey = db.prepare('SELECT server_name, imei, nick, operator FROM modem_meta');

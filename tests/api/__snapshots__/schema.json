@@ -349,6 +349,12 @@
   },
   {
     "type": "index",
+    "name": "idx_ip_pairs_last",
+    "tbl_name": "ip_pairs",
+    "sql": "CREATE INDEX idx_ip_pairs_last ON ip_pairs(last_seen)"
+  },
+  {
+    "type": "index",
     "name": "idx_kv_history_key",
     "tbl_name": "kv_store_history",
     "sql": "CREATE INDEX idx_kv_history_key ON kv_store_history(key, written_at DESC)"
@@ -1000,6 +1006,12 @@
     "name": "ip_history",
     "tbl_name": "ip_history",
     "sql": "CREATE TABLE ip_history ( id INTEGER PRIMARY KEY AUTOINCREMENT, key TEXT NOT NULL, ip TEXT NOT NULL, started_at TEXT, ended_at TEXT )"
+  },
+  {
+    "type": "table",
+    "name": "ip_pairs",
+    "tbl_name": "ip_pairs",
+    "sql": "CREATE TABLE ip_pairs ( key TEXT NOT NULL, ip TEXT NOT NULL, first_seen TEXT, last_seen TEXT, PRIMARY KEY (key, ip) )"
   },
   {
     "type": "table",
