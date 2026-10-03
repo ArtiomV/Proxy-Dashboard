@@ -10,11 +10,11 @@
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js" integrity="sha384-9nhczxUqK87bcKHh20fSQcTGD4qq5GhayNYSYWqwBkINBhOfQLg/P5HG5lF1urn4" crossorigin="anonymous"></script>
 <link rel="stylesheet" href="/css/variables.css?v=0813c">
 <link rel="stylesheet" href="/css/base.css?v=0813c">
 <link rel="stylesheet" href="/css/client-portal.css?v=0820g">
 <link rel="stylesheet" href="/css/shell.css?v=0813c">
+<link rel="stylesheet" href="/css/portal-v3.css?v=1003a">
 <!-- Yandex.Metrika counter (инлайн вынесен в /js/metrika.js — CSP) -->
 <script src="/js/metrika.js?v=0814a"></script>
 <noscript><div><img src="https://mc.yandex.ru/watch/107161941" style="position:absolute; left:-9999px;" alt="" /></div></noscript>
@@ -68,721 +68,331 @@
   </div>
 
   <div id="appMain" style="display:none">
+    <!-- Сайдбар — 1в1 с макетом «Клиентский кабинет v3» (на телефоне — верхняя панель, shell.css) -->
     <div class="header">
       <div class="header-left">
         <div class="sb-brand">
           <a class="header-logo" href="/"><img src="/img/brand-logo.webp" alt="Arendaproxy"></a>
-          <span class="header-brand-name">Arendaproxy.ru</span>
+          <span class="header-brand-name">Arendaproxy</span>
         </div>
-        <a class="header-version-badge" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.79</a>
         <span class="header-client-info"><span id="statusText"></span></span>
       </div>
 
       <nav class="nav-tabs">
-        <div class="nav-tab active" data-on-click="switchTab('traffic',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></svg></span>Панель управления</div>
-        <div class="nav-tab" data-on-click="switchTab('analytics',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></span>Аналитика</div>
-        <div class="nav-tab" data-on-click="switchTab('billing',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>Баланс</div>
-        <div class="nav-tab" data-on-click="switchTab('documents',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg></span>Документы</div>
-        <div class="nav-tab" data-on-click="switchTab('api',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l-5 6 5 6"/><path d="M16 6l5 6-5 6"/><path d="M13 4l-2 16"/></svg></span>API</div>
-        <div class="nav-tab" id="navTabShop" style="display:none" data-on-click="switchTab('shop',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16l-1.2 12.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 7z"/><path d="M8.5 10V6a3.5 3.5 0 0 1 7 0v4"/></svg></span>Купить прокси</div>
-        <div class="nav-tab" data-on-click="switchTab('profile',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.3 3-5.5 7-5.5s7 2.2 7 5.5"/></svg></span>Профиль</div>
-        <div class="nav-tab" data-on-click="switchTab('referral',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Партнёрка</div>
+        <div class="nav-tab active" data-on-click="switchTab('overview',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.2"/><rect x="14" y="3" width="7" height="5" rx="1.2"/><rect x="14" y="12" width="7" height="9" rx="1.2"/><rect x="3" y="16" width="7" height="5" rx="1.2"/></svg></span>Обзор</div>
+        <div class="nav-tab" data-on-click="switchTab('traffic',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg></span>Прокси<span class="nav-count" id="navCountProxies"></span></div>
+        <div class="nav-tab" data-on-click="switchTab('analytics',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 3v18h18"/><path d="M7 14l4-4 3 3 5-6"/></svg></span>Аналитика</div>
+        <div class="nav-tab" data-on-click="switchTab('billing',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg></span>Баланс</div>
+        <div class="nav-tab" data-on-click="switchTab('documents',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg></span>Документы<span class="nav-count" id="navCountDocs"></span></div>
+        <div class="nav-tab" data-on-click="switchTab('api',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M8 6l-5 6 5 6"/><path d="M16 6l5 6-5 6"/><path d="M13 4l-2 16"/></svg></span>API</div>
+        <div class="nav-tab" id="navTabShop" style="display:none" data-on-click="switchTab('shop',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 7h16l-1.2 12.2a2 2 0 0 1-2 1.8H7.2a2 2 0 0 1-2-1.8L4 7z"/><path d="M8.5 10V6a3.5 3.5 0 0 1 7 0v4"/></svg></span>Купить прокси</div>
+        <div class="nav-tab" data-on-click="switchTab('referral',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3.5 20c0-3 2.5-5 5.5-5s5.5 2 5.5 5"/><path d="M16 5.5a3 3 0 0 1 0 5.3M20.5 20c0-2.3-1.4-3.9-3.3-4.6"/></svg></span>Партнёрка</div>
+        <div class="nav-tab" data-on-click="switchTab('profile',this)"><span class="nav-ic"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c0-3.3 3-5.5 7-5.5s7 2.2 7 5.5"/></svg></span>Профиль</div>
       </nav>
 
       <div class="header-right">
-        <div class="theme-toggle" id="themeToggle" data-on-click="toggleTheme()" title="Переключить тему"></div>
         <a class="header-version-badge sb-version" href="/changelog.html" title="История изменений" target="_blank" rel="noopener">v2.10.79</a>
-        <button class="btn-logout" data-on-click="doLogout()" title="Выйти">
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none"><path d="M6 2H3a1 1 0 00-1 1v10a1 1 0 001 1h3M10 11l3-3-3-3M13 8H6" stroke="currentColor" stroke-width="1.2" stroke-linecap="round" stroke-linejoin="round"/></svg>
-        </button>
+        <span class="sb-icons">
+          <button class="sb-icon-btn" type="button" data-on-click="toggleTheme()" title="Переключить тему" aria-label="Переключить тему"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg></button>
+          <button class="sb-icon-btn" type="button" data-on-click="doLogout()" title="Выйти" aria-label="Выйти"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><path d="M16 17l5-5-5-5"/><path d="M21 12H9"/></svg></button>
+        </span>
       </div>
     </div>
 
-    <!-- TAB: Traffic (now includes proxy credentials, export, API info below the traffic table) -->
-    <div class="tab-pane active" id="tab-traffic">
-      <div class="container">
-        <!-- Onboarding banner -->
-        <div id="onboardingBanner" style="display:none;border:1.5px solid var(--accent);border-radius:12px;padding:20px 48px 20px 24px;background:var(--accent-dim);margin-bottom:18px;position:relative">
-          <button data-on-click="dismissOnboarding()" style="position:absolute;top:12px;right:14px;background:none;border:none;font-size:16px;color:var(--accent);cursor:pointer;line-height:1;padding:4px;display:flex;align-items:center;justify-content:center"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0"><path d="M6 6l12 12M18 6 6 18"/></svg></button>
-          <div style="font-size:14px;font-weight:600;color:var(--text-0);margin-bottom:4px">Добро пожаловать в Proxies.rent</div>
-          <div id="onboardingDesc" style="font-size:13px;color:var(--accent);line-height:1.6;margin-bottom:12px"></div>
-          <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
-            <div style="flex:1;height:4px;background:var(--accent-dim);border-radius:2px">
-              <div id="onboardingProgress" style="height:100%;background:var(--success);border-radius:2px;transition:width .3s"></div>
-            </div>
-            <span id="onboardingCounter" style="font-size:11px;color:var(--accent);white-space:nowrap"></span>
+    <!-- 3a · Обзор — /js/portal/overview.js -->
+    <div class="tab-pane v3-pane active" id="tab-overview">
+      <div class="v3-head">
+        <div class="v3-head-row">
+          <div class="v3-head-title">Обзор</div>
+          <label class="v3-search"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.4"/><path d="M11 11l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><input type="search" id="ovSearch" placeholder="Поиск по нику, IP, оператору…" autocomplete="off" data-on-input="ovSetSearch(this.value)"></label>
+          <button class="v3-btn primary" type="button" id="ovExportBtn" data-on-click="openExport('all')"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M6.5 8.5 12 3l5.5 5.5"/><path d="M4 20h16"/></svg>Экспорт прокси</button>
+        </div>
+        <div class="v3-filters">
+          <span id="ovChips" style="display:contents"></span>
+          <span class="v3-filters-right">
+            <span class="v3-seg" id="ovSeg">
+              <button type="button" data-p="today" data-on-click="ovSetPeriod('today')">Сегодня</button>
+              <button type="button" data-p="7d" data-on-click="ovSetPeriod('7d')">7 дней</button>
+              <button type="button" data-p="month" class="on" data-on-click="ovSetPeriod('month')">Месяц</button>
+              <button type="button" data-p="quarter" data-on-click="ovSetPeriod('quarter')">Квартал</button>
+              <button type="button" data-p="custom" data-menu-btn="1" data-on-click="ovOpenCustom()">Период…</button>
+            </span>
+            <span class="v3-dd">
+              <button class="v3-range" type="button" id="ovRange" data-menu-btn="1" data-on-click="ovOpenCustom()">—</button>
+              <div class="v3-pop" id="ovPop"></div>
+            </span>
+          </span>
+        </div>
+      </div>
+      <div class="v3-body">
+        <div id="onboardingBanner" style="display:none;border:1px solid var(--v3-accent);border-radius:12px;padding:16px 44px 16px 18px;background:var(--v3-accent-dim);position:relative">
+          <button type="button" data-on-click="dismissOnboarding()" style="position:absolute;top:10px;right:12px;background:none;border:none;font-size:16px;color:var(--v3-accent);cursor:pointer;line-height:1;padding:4px">×</button>
+          <div style="font-size:14px;font-weight:600;color:var(--v3-ink);margin-bottom:4px">Добро пожаловать в Arendaproxy</div>
+          <div id="onboardingDesc" style="font-size:12.5px;color:var(--v3-text);line-height:1.55;margin-bottom:10px"></div>
+          <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px">
+            <div style="flex:1;height:4px;background:var(--v3-track);border-radius:2px"><div id="onboardingProgress" style="height:100%;background:var(--v3-accent);border-radius:2px;transition:width .3s"></div></div>
+            <span id="onboardingCounter" style="font-size:11px;color:var(--v3-muted);white-space:nowrap"></span>
           </div>
-          <div id="onboardingPills" style="display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:14px;scrollbar-width:none"></div>
+          <div id="onboardingPills" style="display:flex;gap:6px;flex-wrap:nowrap;overflow-x:auto;margin-bottom:12px;scrollbar-width:none"></div>
           <div style="display:flex;align-items:center;gap:14px">
-            <button id="onboardingNextBtn" data-on-click="onboardingNext()" style="padding:7px 18px;background:var(--accent);color:#fff;border:none;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer"></button>
-            <button data-on-click="dismissOnboarding()" style="background:none;border:none;font-size:13px;color:var(--accent);cursor:pointer;text-decoration:underline;text-decoration-style:dashed;text-underline-offset:3px">Пропустить тур</button>
+            <button type="button" class="v3-btn primary" id="onboardingNextBtn" data-on-click="onboardingNext()"></button>
+            <button type="button" class="v3-btn link" style="background:none;border:none;padding:0" data-on-click="dismissOnboarding()">Пропустить тур</button>
           </div>
         </div>
-        <div class="summary-cards" id="summaryCards" style="display:none">
-          <div class="card">
-            <div class="card-label">Активных портов</div>
-            <div class="card-value" id="totalPorts">-</div>
-            <div class="card-sub" id="portsCountrySplit"></div>
-          </div>
-          <div class="card">
-            <div class="card-label">Трафик сегодня</div>
-            <div class="card-value" id="totalDayTotal">-</div>
-            <div class="card-sub" id="totalDaySplit"></div>
-          </div>
-          <div class="card">
-            <div class="card-label">Трафик за месяц</div>
-            <div class="card-value" id="totalMonthTotal">-</div>
-            <div class="card-sub" id="totalMonthSplit"></div>
-          </div>
-          <div class="card">
-            <div class="card-label">Баланс</div>
-            <div class="card-value" id="balanceValue">-</div>
-            <div class="card-sub" id="balanceInfo"></div>
-          </div>
-          <div class="card">
-            <div class="card-label">Аптайм</div>
-            <div class="card-value" id="avgUptime">-</div>
-            <div class="card-sub" id="uptimeInfo">За последние 30 дней</div>
-          </div>
-        </div>
-
         <div id="balanceWarning"></div>
         <div id="errorContainer"></div>
 
-        <!-- Traffic table: 8 columns: Модем, Реквизиты, Логин:Пароль, Смена IP, Ротация, Сегодня, Вчера, Месяц -->
-        <div class="table-wrapper">
-          <div class="loading-overlay" id="loading" style="flex-direction:column;align-items:stretch;gap:10px;padding:24px">
-            <div class="skel" style="height:36px"></div>
-            <div class="skel" style="height:36px"></div>
-            <div class="skel" style="height:36px"></div>
-            <div class="skel" style="height:36px"></div>
-            <div class="skel" style="height:36px"></div>
-            <div class="skel" style="height:36px"></div>
-            <div class="skel" style="height:36px"></div>
-            <div class="skel" style="height:36px"></div>
-          </div>
-          <table id="dataTable" style="display:none">
-            <thead>
-              <tr>
-                <th data-on-click="sortTable('modemNick')">Модем <span class="sort-arrow" id="sort_modemNick"></span></th>
-                <th>Реквизиты</th>
-                <th>Логин:Пароль</th>
-                <th>Смена IP</th>
-                <th>Ротация</th>
-                <th data-on-click="sortTable('dayIn')">Сегодня <span class="sort-arrow" id="sort_dayIn"></span></th>
-                <th data-on-click="sortTable('yesterdayIn')">Вчера <span class="sort-arrow" id="sort_yesterdayIn"></span></th>
-                <th data-on-click="sortTable('monthIn')">Месяц <span class="sort-arrow" id="sort_monthIn"></span></th>
-              </tr>
-            </thead>
-            <tbody id="tableBody"></tbody>
-          </table>
+        <div class="v3-section">Потребление</div>
+        <div class="v3-grid4" id="ovPulse">
+          <div class="v3-skel" style="height:86px"></div><div class="v3-skel" style="height:86px"></div><div class="v3-skel" style="height:86px"></div><div class="v3-skel" style="height:86px"></div>
         </div>
-        <div class="modem-cards" id="mobileModemCards"></div>
 
-        <!-- Export buttons (below the table) -->
-        <div id="proxyExportButtons" style="display:none;margin-top:16px;gap:8px;flex-wrap:wrap">
-          <button class="btn btn-accent" data-on-click="openExportModal()" style="display:flex;align-items:center;gap:6px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0"><path d="M12 15V3"/><path d="M6.5 8.5 12 3l5.5 5.5"/><path d="M4 20h16"/></svg> Экспорт прокси</button>
+        <div class="v3-card mb12">
+          <div class="v3-card-head">
+            <h3 id="ovChartTitle">Трафик по дням</h3>
+            <span class="v3-card-note" id="ovChartNote"></span>
+            <span class="v3-legend" id="ovLegend"></span>
+          </div>
+          <div id="ovChart"><div class="v3-skel" style="height:230px"></div></div>
+          <div class="v3-tiles" id="ovTiles" style="margin-top:14px"></div>
         </div>
-      </div>
-    </div>
 
-    <!-- TAB: Analytics -->
-    <div class="tab-pane" id="tab-analytics">
-      <div class="container">
-        <h2 style="font-size:18px;font-weight:600;margin-bottom:16px;color:var(--text-0)">Аналитика потребления трафика</h2>
-
-        <!-- Summary cards -->
-        <div class="summary-cards" id="analyticsSummary" style="display:none">
-          <div class="card">
-            <div class="card-label" id="analyticsMonthLabel">Трафик за период</div>
-            <div class="card-value" id="analyticsMonthTotal">-</div>
-            <div class="card-sub" id="analyticsMonthTrend"></div>
+        <div class="v3-grid2">
+          <div class="v3-card">
+            <h3 style="margin-bottom:10px">Качество связи</h3>
+            <div class="v3-tiles two" id="ovQuality" style="margin-bottom:12px"></div>
+            <div class="v3-hint">Аптайм считается по проверкам за 30 дней и совпадает с отчётом SLA в профиле. Скорость — почасовые замеры через ваш порт.</div>
           </div>
-          <div class="card">
-            <div class="card-label">Прогноз до конца месяца</div>
-            <div class="card-value" id="analyticsMonthForecast">-</div>
-            <div class="card-sub" id="analyticsForecastSub"></div>
-          </div>
-          <div class="card">
-            <div class="card-label">Топ-день периода</div>
-            <div class="card-value" id="analyticsTopDay">-</div>
-            <div class="card-sub" id="analyticsTopDayDate"></div>
-          </div>
-          <div class="card">
-            <div class="card-label">Среднесуточное потребление</div>
-            <div class="card-value" id="analyticsAvgDay">-</div>
-            <div class="card-sub" id="analyticsAvgPerModem" style="margin-top:2px"></div>
-          </div>
-          <div class="card" id="lastHourCard" style="display:none">
-            <div class="card-label">Посл. час</div>
-            <div class="card-value" id="lastHourValue">-</div>
-            <div class="card-sub" id="lastHourSub"></div>
+          <div class="v3-card">
+            <h3 style="margin-bottom:10px">Топ по трафику за месяц</h3>
+            <div class="v3-top" id="ovTop"></div>
           </div>
         </div>
 
-        <!-- Chart: Daily consumption (line chart with per-modem + total) -->
-        <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;flex-wrap:wrap;gap:8px">
-            <div style="display:flex;align-items:center;gap:8px">
-              <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Потребление трафика:</h3>
-              <div style="display:flex;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;overflow:hidden">
-                <button data-on-click="setChartView('location')" id="cvbtn-location" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:var(--accent);color:#fff;font-weight:600">по локациям</button>
-                <button data-on-click="setChartView('all')" id="cvbtn-all" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:transparent;color:var(--text-2)">по модемам</button>
-              </div>
-            </div>
-            <div style="display:flex;align-items:center;gap:4px">
-              <button data-on-click="navigateDailyPeriod(-1)" id="dailyNavLeft" title="Предыдущий период" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);width:28px;height:28px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0"><path d="M8 5.5v13l11-6.5z" transform="rotate(180 12 12)"/></svg></button>
-
-              <div style="position:relative">
-                <button data-on-click="toggleDailyDropdown()" id="dailyPeriodBtn" style="background:var(--bg-2);border:1px solid var(--border);border-radius:8px;color:var(--accent);padding:0 12px;cursor:pointer;font-size:12px;font-weight:600;display:flex;align-items:center;gap:6px;height:28px;white-space:nowrap;min-width:110px;justify-content:center">
-                  <span id="dailyPeriodLabel">Март 2026</span>
-                  <span style="font-size:10px;opacity:0.6">▾</span>
-                </button>
-                <div id="dailyPeriodDropdown" style="display:none;position:absolute;right:0;top:calc(100% + 4px);background:var(--bg-1);border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(0,0,0,0.2);z-index:200;min-width:210px;overflow:hidden">
-                  <div data-on-click="setDailyPeriod('week')" id="dpopt-week" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''"><span>Эта неделя</span><span style="font-size:10px;color:var(--text-3)">пн–вс</span></div>
-                  <div data-on-click="setDailyPeriod('month')" id="dpopt-month" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''"><span>Этот месяц</span><span style="font-size:10px;color:var(--text-3)">1–31</span></div>
-                  <div data-on-click="setDailyPeriod('quarter')" id="dpopt-quarter" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''"><span>Этот квартал</span><span style="font-size:10px;color:var(--text-3)">Q1–Q4</span></div>
-                  <div data-on-click="setDailyPeriod('year')" id="dpopt-year" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0);display:flex;justify-content:space-between;align-items:center" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''"><span>Этот год</span><span style="font-size:10px;color:var(--text-3)">янв–дек</span></div>
-                  <div data-on-click="setDailyPeriod('all')" id="dpopt-all" style="padding:9px 14px;cursor:pointer;font-size:12px;color:var(--text-0)" data-on-mouseover="this.style.background='var(--bg-2)'" data-on-mouseout="this.style.background=''">За все время</div>
-                  <div style="border-top:1px solid var(--border);padding:10px 14px">
-                    <div style="font-size:11px;color:var(--text-2);font-weight:500;margin-bottom:8px">Произвольный период</div>
-                    <div style="display:flex;flex-direction:column;gap:5px">
-                      <div style="display:flex;align-items:center;gap:4px">
-                        <input type="date" id="dailyCustomFrom" style="flex:1;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 6px">
-                        <span style="font-size:11px;color:var(--text-3)">—</span>
-                        <input type="date" id="dailyCustomTo" style="flex:1;background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-0);font-size:11px;padding:4px 6px">
-                      </div>
-                      <button data-on-click="applyDailyCustomRange()" style="margin-top:2px;width:100%;padding:6px;background:var(--accent);color:#fff;border:none;border-radius:6px;font-size:11px;cursor:pointer;font-weight:600">Применить</button>
-                    </div>
-                  </div>
-                </div>
-              </div>
-              <button data-on-click="navigateDailyPeriod(1)" id="dailyNavRight" title="Следующий период" style="background:var(--bg-2);border:1px solid var(--border);border-radius:6px;color:var(--text-1);width:28px;height:28px;cursor:pointer;font-size:11px;display:flex;align-items:center;justify-content:center;flex-shrink:0"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0"><path d="M8 5.5v13l11-6.5z"/></svg></button>
-            </div>
+        <div class="v3-section gap" id="ovProxiesTitle">Прокси</div>
+        <div class="v3-card">
+          <div class="v3-table-wrap">
+            <table class="v3-table">
+              <thead><tr>
+                <th>Модем</th><th>Оператор</th><th>Внешний IP</th>
+                <th class="r">Сегодня</th><th class="r">Вчера</th><th class="r">За месяц</th>
+                <th style="width:170px">% трафика</th><th class="r">Аптайм 30 дн</th>
+              </tr></thead>
+              <tbody id="ovTable"></tbody>
+            </table>
           </div>
-          <div id="dailyChartLoading" class="skel" style="height:360px"><div class="skel-bars"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div>
-          <div id="dailyChartEmpty" style="display:none;align-items:center;justify-content:center;height:360px;color:var(--text-3);font-size:13px;text-align:center">Нет данных за выбранный период.<br>Данные накапливаются каждый день автоматически.</div>
-          <div id="dailyChartWrap" style="height:360px"><canvas id="analyticsDailyChart"></canvas></div>
-        </div>
-
-        <!-- Chart: Traffic per modem (horizontal bar chart) -->
-        <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-            <div>
-              <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Трафик по модемам</h3>
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px">с начала текущего месяца</div>
-            </div>
-            <div style="display:flex;background:var(--bg-2);border:1px solid var(--border);border-radius:8px;overflow:hidden">
-              <button data-on-click="setModemBarLimit(10)" id="mbtn-top10" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:var(--accent);color:#fff;font-weight:600">ТОП-10</button>
-              <button data-on-click="setModemBarLimit(0)" id="mbtn-all" style="padding:4px 10px;font-size:11px;border:none;cursor:pointer;background:transparent;color:var(--text-2)">Все</button>
-            </div>
-          </div>
-          <div id="analyticsModemWrap"><canvas id="analyticsModemChart"></canvas></div>
-        </div>
-
-        <!-- Country + In/Out stat cards -->
-        <div style="display:grid;grid-template-columns:1fr 1fr;gap:16px;margin-bottom:20px">
-          <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;box-shadow:var(--card-shadow)">
-            <h3 style="font-size:14px;font-weight:600;margin-bottom:14px;color:var(--text-0)">Трафик по локациям</h3>
-            <div id="analyticsCountryCards"></div>
-          </div>
-          <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;box-shadow:var(--card-shadow)">
-            <h3 style="font-size:14px;font-weight:600;margin-bottom:14px;color:var(--text-0)">Входящий / Исходящий</h3>
-            <div id="analyticsInOutCards"></div>
-          </div>
-        </div>
-
-        <!-- Heatmap: hourly traffic, last 7 days (MSK) -->
-        <div style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
-          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">
-            <div>
-              <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Почасовой трафик</h3>
-              <div style="font-size:11px;color:var(--text-3);margin-top:2px">GMT+3</div>
-            </div>
-          </div>
-          <div id="clientHeatmap"><div class="skel" style="height:190px"><div class="skel-heat"><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i><i></i></div></div></div>
-          <!-- Сводка метрик — под графиком (была над ним) -->
-          <div id="clientHeatmapSummary" style="display:none;align-items:stretch;flex-wrap:wrap;margin-top:14px;padding-top:12px;border-top:1px solid var(--border)"></div>
-        </div>
-        </div>
-
-        <!-- Скорость по операторам и локациям (витрина флота, без привязки к модему) -->
-        <div id="clientOpSpeedCard" style="background:var(--card-bg);border:1px solid var(--card-border);border-radius:12px;padding:20px;margin-bottom:20px;box-shadow:var(--card-shadow)">
-          <div style="margin-bottom:12px">
-            <h3 style="font-size:14px;font-weight:600;margin:0;color:var(--text-0)">Скорость по операторам и локациям</h3>
-            <div style="font-size:11px;color:var(--text-3);margin-top:2px">почасовые замеры всего флота, последние 48 часов · GMT+3</div>
-          </div>
-          <div id="clientOpSpeedBody" style="overflow-x:auto"></div>
+          <button class="v3-more" type="button" id="ovMore" style="display:none" data-on-click="ovGotoProxies()"></button>
         </div>
       </div>
     </div>
 
-    <!-- TAB: Tools (removed) -->
-    <div class="tab-pane" id="tab-tools" style="display:none!important">
-      <div class="container">
-        <!-- Proxy Checker -->
-        <div class="tools-section">
-          <h3>Проверка прокси</h3>
-          <div class="form-group">
-            <label>Список прокси (по одному на строку, формат: ip:port или ip:port:login:password)</label>
-            <textarea class="form-input mono" id="checkProxyInput" rows="6" placeholder="1.2.3.4:8080&#10;5.6.7.8:1080:user:pass"></textarea>
-          </div>
-          <button class="btn btn-accent" id="btnCheckProxy" data-on-click="checkProxies()">Проверить</button>
-          <div id="checkProxyResults" style="margin-top:14px"></div>
+    <!-- 3b · Прокси — /js/portal/proxies.js -->
+    <div class="tab-pane v3-pane" id="tab-traffic">
+      <div class="v3-head">
+        <div class="v3-head-row">
+          <div class="v3-head-title">Прокси</div>
+          <label class="v3-search"><svg width="13" height="13" viewBox="0 0 16 16" fill="none"><circle cx="7" cy="7" r="5" stroke="currentColor" stroke-width="1.4"/><path d="M11 11l3 3" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></svg><input type="search" id="pxSearch" placeholder="Поиск по нику, IP, оператору…" autocomplete="off" data-on-input="pxSetSearch(this.value)"></label>
+          <button class="v3-btn primary" type="button" data-on-click="openExport('auto')"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 15V3"/><path d="M6.5 8.5 12 3l5.5 5.5"/><path d="M4 20h16"/></svg>Экспорт прокси</button>
         </div>
+        <div class="v3-filters">
+          <span id="pxChips" style="display:contents"></span>
+          <span class="v3-filters-right">
+            <span class="v3-dd">
+              <button class="v3-select" type="button" id="pxGroupBtn" data-menu-btn="1" data-on-click="v3ToggleMenu('pxGroupMenu',this)">Группировка: по стране ▾</button>
+              <div class="v3-menu" id="pxGroupMenu"></div>
+            </span>
+            <span class="v3-dd">
+              <button class="v3-select" type="button" id="pxColsBtn" data-menu-btn="1" data-on-click="v3ToggleMenu('pxColsMenu',this)">Колонки ▾</button>
+              <div class="v3-menu" id="pxColsMenu" style="min-width:240px"></div>
+            </span>
+          </span>
+        </div>
+      </div>
+      <div class="v3-body pad-bottom">
+        <div id="pxBox" class="v3-card">
+          <div class="v3-table-wrap"><table class="v3-table" id="pxTable"><thead id="pxHead"></thead><tbody id="pxBody"><tr><td colspan="9"><div class="v3-skel" style="height:260px"></div></td></tr></tbody></table></div>
+        </div>
+      </div>
+      <div class="v3-selbar" id="pxSelBar">
+        <span class="n" id="pxSelN">0</span>
+        <span class="l" id="pxSelL">прокси выбрано</span>
+        <span class="sep"></span>
+        <button type="button" class="p" data-on-click="openExport('sel')">Экспорт реквизитов</button>
+        <button type="button" data-on-click="pxBulkResetIp()">Сменить IP</button>
+        <button type="button" data-on-click="pxBulkRotation()">Ротация…</button>
+        <button type="button" class="ghost" data-on-click="pxClearSel()">Снять выделение</button>
+      </div>
+    </div>
 
-        <!-- Format Converter -->
-        <div class="tools-section">
-          <h3>Конвертер форматов</h3>
-          <div style="display:flex;gap:12px;margin-bottom:12px;flex-wrap:wrap">
-            <div class="form-group" style="flex:1;min-width:150px">
-              <label>Из формата</label>
-              <select class="form-input" id="convertFrom">
-                <option value="ipportloginpass">ip:port:login:pass</option>
-                <option value="loginpassipport">login:pass@ip:port</option>
-                <option value="loginpassatipport">login:pass:ip:port</option>
-              </select>
-            </div>
-            <div class="form-group" style="flex:1;min-width:150px">
-              <label>В формат</label>
-              <select class="form-input" id="convertTo">
-                <option value="loginpassipport">login:pass@ip:port</option>
-                <option value="ipportloginpass">ip:port:login:pass</option>
-                <option value="loginpassatipport">login:pass:ip:port</option>
-              </select>
-            </div>
+    <!-- 3e · Аналитика — /js/portal/analytics.js -->
+    <div class="tab-pane v3-pane" id="tab-analytics">
+      <div class="v3-head">
+        <div class="v3-head-row" style="position:relative;z-index:5">
+          <div class="v3-head-title">Аналитика</div>
+          <span class="v3-head-right">
+            <span class="v3-seg" id="anSeg">
+              <button type="button" data-p="week" data-on-click="anSetPeriod('week')">Неделя</button>
+              <button type="button" data-p="month" class="on" data-on-click="anSetPeriod('month')">Месяц</button>
+              <button type="button" data-p="quarter" data-on-click="anSetPeriod('quarter')">Квартал</button>
+              <button type="button" data-p="custom" data-menu-btn="1" data-on-click="anOpenCustom()">Период…</button>
+            </span>
+            <span class="v3-dd">
+              <button class="v3-range" type="button" id="anRange" data-menu-btn="1" data-on-click="anOpenCustom()">—</button>
+              <div class="v3-pop" id="anPop"></div>
+            </span>
+          </span>
+        </div>
+      </div>
+      <div class="v3-body">
+        <div class="v3-grid4" id="anPulse">
+          <div class="v3-skel" style="height:86px"></div><div class="v3-skel" style="height:86px"></div><div class="v3-skel" style="height:86px"></div><div class="v3-skel" style="height:86px"></div>
+        </div>
+        <div class="v3-card mb12">
+          <div class="v3-card-head">
+            <h3>Потребление за период</h3>
+            <span class="v3-card-note" id="anChartNote"></span>
+            <span class="v3-seg" style="margin-left:auto" id="anViewSeg">
+              <button type="button" data-v="loc" class="on" data-on-click="anSetView('loc')">По локациям</button>
+              <button type="button" data-v="modem" data-on-click="anSetView('modem')">По модемам</button>
+            </span>
           </div>
-          <div style="display:flex;gap:12px;flex-wrap:wrap">
-            <div class="form-group" style="flex:1;min-width:200px">
-              <label>Входные данные</label>
-              <textarea class="form-input mono" id="convertInput" rows="6" placeholder="Вставьте список прокси"></textarea>
+          <div id="anChart"><div class="v3-skel" style="height:230px"></div></div>
+        </div>
+        <div class="v3-grid-side">
+          <div class="v3-card">
+            <div style="display:flex;align-items:baseline;gap:10px;margin-bottom:12px">
+              <h3>Почасовой трафик</h3>
+              <span class="v3-card-note">последние 7 дней · GMT+3</span>
             </div>
-            <div class="form-group" style="flex:1;min-width:200px">
-              <label>Результат</label>
-              <textarea class="form-input mono" id="convertOutput" rows="6" readonly placeholder="Конвертированный список"></textarea>
-            </div>
+            <div id="anHeat"><div class="v3-skel" style="height:150px"></div></div>
           </div>
-          <div style="display:flex;gap:8px;margin-top:8px">
-            <button class="btn btn-accent" data-on-click="convertFormat()">Конвертировать</button>
-            <button class="btn" data-on-click="copyText(document.getElementById('convertOutput').value,this)">Копировать результат</button>
+          <div class="v3-card">
+            <h3 style="margin-bottom:10px">Входящий / исходящий</h3>
+            <div class="v3-meter" id="anInOut"></div>
+            <h3 style="margin:16px 0 10px">По локациям</h3>
+            <div class="v3-meter" id="anLoc"></div>
           </div>
+        </div>
+        <div class="v3-card">
+          <div class="v3-card-head" style="margin-bottom:14px">
+            <h3>Скорость модемов</h3>
+            <span class="v3-card-note">почасовые замеры по операторам · последние 48 часов</span>
+            <span style="margin-left:auto;display:inline-flex;align-items:center;gap:10px;flex-wrap:wrap">
+              <span style="display:inline-flex;gap:6px" id="spCountries"></span>
+              <span class="v3-seg" id="spModes">
+                <button type="button" data-m="dl" class="on" data-on-click="spSetMode('dl')">Загрузка</button>
+                <button type="button" data-m="ul" data-on-click="spSetMode('ul')">Отдача</button>
+              </span>
+            </span>
+          </div>
+          <div id="spBox"><div class="v3-skel" style="height:240px"></div></div>
         </div>
       </div>
     </div>
 
-    <!-- TAB: Documents -->
-    <div class="tab-pane" id="tab-documents">
-      <div class="container">
-        <div class="tools-section">
-          <h3 style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0"><path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 13h6M9 17h6"/></svg> Закрывающие документы (акты) <span id="unsignedBadge" style="display:none;background:var(--red);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600"></span></h3>
-          <div id="closingDocsList">
-            <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">
-              <div class="skel" style="height:44px"></div>
-              <div class="skel" style="height:44px"></div>
-              <div class="skel" style="height:44px"></div>
-            </div>
-          </div>
+    <!-- 3f · Баланс — /js/portal/balance.js -->
+    <div class="tab-pane v3-pane" id="tab-billing">
+      <div class="v3-head">
+        <div class="v3-head-row">
+          <div class="v3-head-title">Баланс</div>
+          <span class="v3-head-right">
+            <button class="v3-btn" type="button" data-on-click="openStatement()">Скачать выписку</button>
+            <button class="v3-btn primary" type="button" data-on-click="openTopup()">Пополнить</button>
+          </span>
         </div>
-        <div class="tools-section" style="margin-top:20px">
-          <h3 style="display:flex;align-items:center;gap:8px"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px;flex-shrink:0"><rect x="3" y="6" width="18" height="13" rx="2.2"/><path d="M3 10.5h18"/><circle cx="16.5" cy="14.5" r="1"/></svg> Счета на оплату <span id="unpaidBadge" style="display:none;background:var(--red);color:#fff;font-size:11px;padding:2px 8px;border-radius:10px;font-weight:600"></span></h3>
-          <div id="billsList">
-            <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">
-              <div class="skel" style="height:44px"></div>
-              <div class="skel" style="height:44px"></div>
-              <div class="skel" style="height:44px"></div>
-            </div>
-          </div>
+      </div>
+      <div class="v3-body">
+        <div id="balBanner"></div>
+        <div class="v3-grid4" id="balPulse">
+          <div class="v3-skel" style="height:86px"></div><div class="v3-skel" style="height:86px"></div><div class="v3-skel" style="height:86px"></div><div class="v3-skel" style="height:86px"></div>
         </div>
-        <div class="tools-section" style="margin-top:20px">
-          <h3>Загруженные документы</h3>
-          <div id="documentsList">
-            <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">
-              <div class="skel" style="height:44px"></div>
-              <div class="skel" style="height:44px"></div>
-            </div>
+        <div class="v3-card mb12">
+          <div class="v3-card-head">
+            <h3>Списания по дням</h3>
+            <span class="v3-card-note" id="balChartNote"></span>
+            <span style="margin-left:auto;font-size:11px;color:var(--v3-muted)" id="balTariff"></span>
           </div>
+          <div id="balChart"><div class="v3-skel" style="height:170px"></div></div>
         </div>
+        <div class="v3-section gap10">История операций</div>
+        <div id="balMonths"><div class="v3-skel" style="height:52px;margin-bottom:12px"></div><div class="v3-skel" style="height:52px"></div></div>
       </div>
     </div>
 
-    <!-- TAB: API -->
-    <div class="tab-pane" id="tab-api">
-      <div class="container api-docs">
-
-        <!-- API Key -->
-        <div class="api-quick-start">
-          <h3>Ваш API-ключ</h3>
-          <p>API-ключ используется для аутентификации. Передавайте его через заголовок <code>X-API-Key</code> или как параметр <code>?apikey=</code> в URL.</p>
-          <div class="api-key-box">
-            <code id="apiDocKey">—</code>
-          </div>
-          <div id="apiKeyMeta" style="display:none;margin-top:10px;font-size:12.5px;color:var(--text-2);line-height:1.7"></div>
-          <div id="apiKeyGraceWarn" class="api-note warn" style="display:none;margin-top:10px;margin-bottom:0"></div>
-          <!-- Показывается сразу после перевыпуска: полный ключ виден один раз -->
-          <div id="apiNewKeyBox" style="display:none;margin-top:12px">
-            <div class="api-note warn" style="margin-top:0;margin-bottom:8px"><b>Сохраните новый ключ сейчас.</b> Он показывается один раз и больше не будет доступен в панели.</div>
-            <div class="api-key-box" style="margin-top:0">
-              <code id="apiNewKey"></code>
-              <button data-on-click="copyText(document.getElementById('apiNewKey').textContent,this)">Копировать</button>
-            </div>
-          </div>
-          <div style="margin-top:12px">
-            <button class="btn" id="btnRegenKey" data-on-click="regenerateApiKey()">Перевыпустить ключ</button>
-          </div>
-          <div class="api-note" style="margin-top:14px;margin-bottom:0">Никому не сообщайте ваш API-ключ. Ключ хранится в зашифрованном виде — показать текущий невозможно, можно только перевыпустить. При перевыпуске прежний ключ продолжает работать ещё 24 часа, чтобы вы успели обновить интеграцию без обрыва.</div>
-        </div>
-
-        <!-- TOC -->
-        <div class="api-toc">
-          <a href="javascript:void(0)" data-on-click="document.getElementById('api-s-proxy').scrollIntoView({behavior:'smooth',block:'start'})">
-            <span class="toc-method get">GET</span> Получить прокси
-          </a>
-          <a href="javascript:void(0)" data-on-click="document.getElementById('api-s-change-ip').scrollIntoView({behavior:'smooth',block:'start'})">
-            <span class="toc-method get">GET</span> Сменить IP
-          </a>
-          <a href="javascript:void(0)" data-on-click="document.getElementById('api-s-examples').scrollIntoView({behavior:'smooth',block:'start'})">
-            <span class="toc-method" style="background:rgba(124,58,237,.15);color:#7c3aed">CODE</span> Примеры кода
-          </a>
-          <a href="javascript:void(0)" data-on-click="document.getElementById('api-s-errors').scrollIntoView({behavior:'smooth',block:'start'})">
-            <span class="toc-method" style="background:rgba(255,56,60,.12);color:var(--danger)">REF</span> Ошибки
-          </a>
-        </div>
-
-        <!-- ==================== 1. GET PROXY DATA ==================== -->
-        <div class="api-section" id="api-s-proxy">
-          <h3><span class="method get">GET</span> Получить данные прокси</h3>
-          <div class="api-path"><span>/api/v1/proxy</span><button class="copy-btn" data-on-click="copyText(apiBase+'/api/v1/proxy',this)">Копировать URL</button></div>
-          <p class="api-desc">Основной метод API. Возвращает все ваши прокси с реквизитами, ссылками на смену IP и информацию о балансе — одним запросом.</p>
-
-          <div class="resp-label">Аутентификация</div>
-          <p class="api-desc">Передайте API-ключ одним из двух способов:</p>
-          <table class="api-params">
-            <thead><tr><th style="width:160px">Способ</th><th>Пример</th></tr></thead>
-            <tbody>
-              <tr><td>Заголовок<br><code style="color:var(--text-1)">X-API-Key</code></td><td style="font-size:12px"><code style="word-break:break-all">curl -H "X-API-Key: YOUR_API_KEY" https://app.arendaproxy.ru/api/v1/proxy</code></td></tr>
-              <tr><td>Query-параметр<br><code style="color:var(--text-1)">?apikey=</code></td><td style="font-size:12px"><code style="word-break:break-all">curl https://app.arendaproxy.ru/api/v1/proxy?apikey=YOUR_API_KEY</code></td></tr>
-            </tbody>
-          </table>
-
-          <div class="resp-label">Пример запроса</div>
-          <div class="lang-tabs">
-            <div class="lang-tab active" data-on-click="switchLang(this,'curl','proxy')">cURL</div>
-            <div class="lang-tab" data-on-click="switchLang(this,'python','proxy')">Python</div>
-            <div class="lang-tab" data-on-click="switchLang(this,'js','proxy')">JavaScript</div>
-          </div>
-          <div class="lang-code active" data-group="proxy" data-lang="curl"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>curl -H "X-API-Key: YOUR_API_KEY" https://app.arendaproxy.ru/api/v1/proxy</div></div>
-          <div class="lang-code" data-group="proxy" data-lang="python"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>import requests
-
-r = requests.get("https://app.arendaproxy.ru/api/v1/proxy",
-    headers={"X-API-Key": "YOUR_API_KEY"})
-data = r.json()
-
-for proxy in data["proxies"]:
-    print(f"{proxy['host']}:{proxy['ports']['http']}:{proxy['username']}:{proxy['password']}")</div></div>
-          <div class="lang-code" data-group="proxy" data-lang="js"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>const res = await fetch("https://app.arendaproxy.ru/api/v1/proxy", {
-  headers: { "X-API-Key": "YOUR_API_KEY" }
-});
-const data = await res.json();
-
-data.proxies.forEach(p =&gt; {
-  console.log(`${p.host}:${p.ports.http}:${p.username}:${p.password}`);
-});</div></div>
-
-          <div class="resp-label">Ответ</div>
-          <div class="code-block" style="font-size:12px"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>{
-  "success": true,
-  "client": "ClientName",
-  "billing": {
-    "type": "per_gb",
-    "price_per_gb": 23,
-    "currency": "RUB",
-    "balance": 50000,
-    "usage_mb": 2686976
-  },
-  "proxies": [
-    {
-      "id": "MD2_64",
-      "host": "89.149.100.92",
-      "ports": { "http": 8040, "socks5": 5040 },
-      "username": "WUIRzA91",
-      "password": "F9RQcuRw",
-      "country": "MD",
-      "country_name": "Moldova",
-      "operator": "Orange",
-      "online": true,
-      "change_ip_url": "http://89.149.100.92:7002/apix/reset_ip_secure?hash=aes_ecb:..."
-    }
-  ],
-  "proxy_count": 10
-}</div>
-
-          <div class="resp-label">Описание полей</div>
-          <table class="api-params">
-            <thead><tr><th>Поле</th><th>Тип</th><th>Описание</th></tr></thead>
-            <tbody>
-              <tr><td>success</td><td>boolean</td><td>Статус запроса — <code>true</code> если всё ОК</td></tr>
-              <tr><td>client</td><td>string</td><td>Имя вашего аккаунта</td></tr>
-              <tr><td>billing.type</td><td>string</td><td>Тип тарификации (<code>per_gb</code> — за гигабайт)</td></tr>
-              <tr><td>billing.price_per_gb</td><td>number</td><td>Цена за 1 ГБ трафика</td></tr>
-              <tr><td>billing.currency</td><td>string</td><td>Валюта (<code>RUB</code>)</td></tr>
-              <tr><td>billing.balance</td><td>number</td><td>Сумма оплат</td></tr>
-              <tr><td>billing.usage_mb</td><td>number</td><td>Использованный трафик за месяц (МБ)</td></tr>
-              <tr><td>proxies[].id</td><td>string</td><td>Уникальное имя модема</td></tr>
-              <tr><td>proxies[].host</td><td>string</td><td>IP-адрес прокси-сервера</td></tr>
-              <tr><td>proxies[].ports.http</td><td>number</td><td>Порт для HTTP-подключения</td></tr>
-              <tr><td>proxies[].ports.socks5</td><td>number</td><td>Порт для SOCKS5-подключения</td></tr>
-              <tr><td>proxies[].username</td><td>string</td><td>Логин для авторизации на прокси</td></tr>
-              <tr><td>proxies[].password</td><td>string</td><td>Пароль для авторизации на прокси</td></tr>
-              <tr><td>proxies[].country</td><td>string</td><td>Код страны (<code>MD</code>, <code>RO</code>)</td></tr>
-              <tr><td>proxies[].country_name</td><td>string</td><td>Название страны</td></tr>
-              <tr><td>proxies[].operator</td><td>string</td><td>Мобильный оператор</td></tr>
-              <tr><td>proxies[].online</td><td>boolean</td><td>Модем онлайн — <code>true</code> / <code>false</code></td></tr>
-              <tr><td>proxies[].change_ip_url</td><td>string</td><td>Прямая ссылка для смены IP (см. ниже)</td></tr>
-              <tr><td>proxy_count</td><td>number</td><td>Общее количество прокси</td></tr>
-            </tbody>
-          </table>
-
-          <div class="api-note">Готовая строка подключения: <code>host:ports.http:username:password</code> (для HTTP) или <code>host:ports.socks5:username:password</code> (для SOCKS5).</div>
-        </div>
-
-        <!-- ==================== 2. CHANGE IP ==================== -->
-        <div class="api-section" id="api-s-change-ip">
-          <h3><span class="method get">GET</span> Сменить IP</h3>
-          <div class="api-path"><span>change_ip_url из ответа /api/v1/proxy</span></div>
-          <p class="api-desc">Каждый прокси в ответе <code>/api/v1/proxy</code> содержит поле <code>change_ip_url</code> — прямую ссылку для смены IP-адреса. Просто выполните GET-запрос на этот URL.</p>
-
-          <div class="api-note">Это прямая ссылка на сервер модемов — запрос идёт напрямую, без промежуточного сервера. Новый IP выдаётся через 10–15 секунд.</div>
-
-          <div class="resp-label">Как это работает</div>
-          <table class="api-params">
-            <thead><tr><th>Шаг</th><th>Действие</th></tr></thead>
-            <tbody>
-              <tr><td style="color:var(--text-0);white-space:nowrap">1</td><td>Вызовите <code>GET /api/v1/proxy</code> и получите список прокси</td></tr>
-              <tr><td style="color:var(--text-0);white-space:nowrap">2</td><td>Возьмите <code>change_ip_url</code> нужного прокси</td></tr>
-              <tr><td style="color:var(--text-0);white-space:nowrap">3</td><td>Выполните <code>GET</code>-запрос на этот URL — IP сменится</td></tr>
-            </tbody>
-          </table>
-
-          <div class="resp-label">Пример</div>
-          <div class="lang-tabs">
-            <div class="lang-tab active" data-on-click="switchLang(this,'curl','changeip')">cURL</div>
-            <div class="lang-tab" data-on-click="switchLang(this,'python','changeip')">Python</div>
-          </div>
-          <div class="lang-code active" data-group="changeip" data-lang="curl"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button># 1. Получаем прокси
-DATA=$(curl -s -H "X-API-Key: YOUR_API_KEY" https://app.arendaproxy.ru/api/v1/proxy)
-
-# 2. Достаём change_ip_url первого прокси
-URL=$(echo $DATA | python3 -c "import sys,json; print(json.load(sys.stdin)['proxies'][0]['change_ip_url'])")
-
-# 3. Меняем IP
-curl "$URL"</div></div>
-          <div class="lang-code" data-group="changeip" data-lang="python"><div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>import requests
-
-# 1. Получаем прокси
-data = requests.get("https://app.arendaproxy.ru/api/v1/proxy",
-    headers={"X-API-Key": "YOUR_API_KEY"}).json()
-
-# 2. Меняем IP на нужном модеме
-for proxy in data["proxies"]:
-    if proxy["id"] == "MD2_64":
-        requests.get(proxy["change_ip_url"])
-        print(f"IP сменён на {proxy['id']}")
-        break</div></div>
-
-          <div class="api-note warn">Не вызывайте смену IP чаще, чем раз в 30 секунд на один модем. Частые запросы могут быть заблокированы оператором.</div>
-        </div>
-
-        <!-- ==================== 3. CODE EXAMPLES ==================== -->
-        <div class="api-section" id="api-s-examples">
-          <h3><span class="method" style="background:rgba(124,58,237,.15);color:#7c3aed">CODE</span> Примеры интеграции</h3>
-          <p class="api-desc">Готовые примеры для популярных языков и сценариев.</p>
-
-          <div class="resp-label">Python — получить все прокси и использовать для запросов</div>
-          <div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>import requests
-
-API_KEY = "YOUR_API_KEY"
-
-# Получаем прокси
-data = requests.get("https://app.arendaproxy.ru/api/v1/proxy",
-    headers={"X-API-Key": API_KEY}).json()
-
-if not data["success"]:
-    print("Ошибка:", data.get("error"))
-    exit()
-
-print(f"Прокси: {data['proxy_count']} шт.")
-print(f"Баланс: {data['billing']['balance']} {data['billing']['currency']}")
-
-# Используем первый прокси для запроса
-p = data["proxies"][0]
-proxy_url = f"http://{p['username']}:{p['password']}@{p['host']}:{p['ports']['http']}"
-
-r = requests.get("https://api.ipify.org?format=json",
-    proxies={"http": proxy_url, "https": proxy_url},
-    timeout=15)
-print(f"Текущий IP через {p['id']}: {r.json()['ip']}")
-
-# Меняем IP
-requests.get(p["change_ip_url"])
-print(f"IP на {p['id']} сменён")</div>
-
-          <div class="resp-label">JavaScript / Node.js</div>
-          <div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button>const API_KEY = "YOUR_API_KEY";
-
-const res = await fetch("https://app.arendaproxy.ru/api/v1/proxy", {
-  headers: { "X-API-Key": API_KEY }
-});
-const data = await res.json();
-
-console.log(`Прокси: ${data.proxy_count} шт.`);
-
-// Вывести все прокси в формате IP:PORT:LOGIN:PASS
-data.proxies.forEach(p =&gt; {
-  console.log(`HTTP:   ${p.host}:${p.ports.http}:${p.username}:${p.password}`);
-  console.log(`SOCKS5: ${p.host}:${p.ports.socks5}:${p.username}:${p.password}`);
-});
-
-// Сменить IP на первом прокси
-await fetch(data.proxies[0].change_ip_url);
-console.log("IP сменён");</div>
-
-          <div class="resp-label">Bash — экспорт в файл</div>
-          <div class="code-block"><button class="cb-copy" data-on-click="copyCodeBlock(this)">Копировать</button># Сохранить все прокси в файл proxies.txt (формат IP:PORT:LOGIN:PASS)
-curl -s -H "X-API-Key: YOUR_API_KEY" https://app.arendaproxy.ru/api/v1/proxy \
-  | python3 -c "
-import sys, json
-data = json.load(sys.stdin)
-for p in data['proxies']:
-    print(f\"{p['host']}:{p['ports']['http']}:{p['username']}:{p['password']}\")
-" &gt; proxies.txt
-
-echo "Сохранено $(wc -l &lt; proxies.txt) прокси в proxies.txt"</div>
-        </div>
-
-        <!-- ==================== 4. ERRORS ==================== -->
-        <div class="api-section" id="api-s-errors">
-          <h3><span class="method" style="background:rgba(255,56,60,.12);color:var(--danger)">REF</span> Коды ошибок</h3>
-          <p class="api-desc">При ошибке API возвращает JSON с полем <code>success: false</code> и описанием в <code>error</code>.</p>
-
-          <div class="resp-label">Пример ошибки</div>
-          <div class="code-block">{"success": false, "error": "Invalid API key"}</div>
-
-          <table class="api-errors">
-            <colgroup><col style="width:7%"><col style="width:50%"><col style="width:43%"></colgroup>
-            <thead><tr><th>Код</th><th>Причина</th><th>Решение</th></tr></thead>
-            <tbody>
-              <tr><td style="color:var(--warning)">401</td><td>API-ключ не передан или невалиден</td><td>Проверьте заголовок <code>X-API-Key</code> или параметр <code>?apikey=</code></td></tr>
-              <tr><td style="color:var(--danger)">502</td><td>Сервер модемов временно недоступен</td><td>Повторите запрос через 30 секунд</td></tr>
-            </tbody>
-          </table>
-        </div>
-
-      </div>
-    </div>
-
-    <!-- TAB: Referral -->
-    <!-- TAB: BILLING HISTORY -->
-    <div class="tab-pane" id="tab-billing">
-      <div class="container">
-        <div class="tools-section">
-          <h3>История баланса</h3>
-
-          <!-- B2C Э4 (WP3): пополнение баланса эквайрингом (карта/СБП).
-               Блок целиком рисует client.js и только при retail_enabled. -->
-          <div id="topupSection" style="display:none"></div>
-
-          <!-- Summary cards -->
-          <div class="summary-cards" id="billingSummary">
-            <div class="card">
-              <div class="card-label">Баланс</div>
-              <div class="card-value" id="billingBalanceVal">--</div>
-            </div>
-            <div class="card">
-              <div class="card-label">Расход за месяц</div>
-              <div class="card-value" id="billingMonthCharges">--</div>
-            </div>
-            <div class="card">
-              <div class="card-label">Средний расход/день</div>
-              <div class="card-value" id="billingAvgDaily">--</div>
-            </div>
-            <div class="card">
-              <div class="card-label">Дней до нуля</div>
-              <div class="card-value" id="billingDaysUntilZero">--</div>
-            </div>
-          </div>
-
-          <!-- Accordion by months -->
-          <div id="billingAccordion">
-            <div style="display:flex;flex-direction:column;gap:10px;padding:8px 0">
-              <div class="skel" style="height:46px"></div>
-              <div class="skel" style="height:46px"></div>
-              <div class="skel" style="height:46px"></div>
-              <div class="skel" style="height:46px"></div>
-            </div>
-          </div>
-
-          <!-- B2C Э4 (WP3): история карточных платежей (card_payments). -->
-          <div id="cardPaymentsSection" style="display:none"></div>
+    <!-- 3g · Документы — /js/portal/docs.js -->
+    <div class="tab-pane v3-pane" id="tab-documents">
+      <div class="v3-head">
+        <div class="v3-head-row">
+          <div class="v3-head-title">Документы</div>
+          <span class="v3-head-right" id="docHeadChip"></span>
         </div>
       </div>
+      <div class="v3-body" id="docBody"><div class="v3-skel" style="height:160px;margin-bottom:12px"></div><div class="v3-skel" style="height:160px"></div></div>
     </div>
 
-    <!-- TAB: Shop (B2C витрина, видна только при retail_enabled) -->
-    <div class="tab-pane" id="tab-shop">
-      <div class="container">
-        <div class="verify-banner" id="shopVerifyBanner" style="display:none">
+    <!-- 3h · API — /js/portal/api.js -->
+    <div class="tab-pane v3-pane" id="tab-api">
+      <div class="v3-head">
+        <div class="v3-head-row">
+          <div class="v3-head-title">API</div>
+          <span class="v3-head-right"><button class="v3-btn" type="button" data-on-click="apiRegenerate()">Перевыпустить ключ</button></span>
+        </div>
+      </div>
+      <div class="v3-body" id="apiBody"></div>
+    </div>
+
+    <!-- B2C · Купить прокси (вне макета — та же оболочка) -->
+    <div class="tab-pane v3-pane" id="tab-shop">
+      <div class="v3-head"><div class="v3-head-row"><div class="v3-head-title">Купить прокси</div></div></div>
+      <div class="v3-body">
+        <div class="v3-banner warn" id="shopVerifyBanner" style="display:none">
           Подтвердите email — письмо отправлено при регистрации. Без подтверждения покупка недоступна.
-          <button class="btn btn-sm" data-on-click="doResendVerification(this)">Отправить письмо ещё раз</button>
+          <button class="v3-btn white sm" type="button" data-on-click="doResendVerification(this)">Отправить письмо ещё раз</button>
         </div>
         <div id="shopContent">
           <div class="shop-grid">
-            <div class="skel" style="height:190px"></div>
-            <div class="skel" style="height:190px"></div>
-            <div class="skel" style="height:190px"></div>
+            <div class="v3-skel" style="height:190px"></div>
+            <div class="v3-skel" style="height:190px"></div>
+            <div class="v3-skel" style="height:190px"></div>
           </div>
         </div>
       </div>
     </div>
 
-    <!-- TAB: Profile -->
-    <div class="tab-pane" id="tab-profile">
-      <div class="container" style="max-width:720px">
-        <div class="verify-banner" id="profileVerifyBanner" style="display:none">
-          Подтвердите email — письмо отправлено при регистрации.
-          <button class="btn btn-sm" data-on-click="doResendVerification(this)">Отправить письмо ещё раз</button>
-        </div>
-        <div id="profileContent">
-          <div style="display:flex;flex-direction:column;gap:14px;padding:8px 0">
-            <div class="skel" style="height:110px"></div>
-            <div class="skel" style="height:90px"></div>
-          </div>
+    <!-- 3i · Партнёрка — /js/portal/referral.js -->
+    <div class="tab-pane v3-pane" id="tab-referral">
+      <div class="v3-head">
+        <div class="v3-head-row">
+          <div class="v3-head-title">Партнёрская программа</div>
+          <span class="v3-head-right"><button class="v3-btn primary" type="button" id="refWithdrawBtn" data-on-click="openRefWithdraw()">Вывести на баланс</button></span>
         </div>
       </div>
+      <div class="v3-body" id="refBody"></div>
     </div>
 
-    <div class="tab-pane" id="tab-referral">
-      <div class="container">
-        <div id="referralContent">
-          <div style="display:flex;flex-direction:column;gap:14px;padding:8px 0">
-            <div class="skel" style="height:120px"></div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:14px">
-              <div class="skel" style="height:90px"></div>
-              <div class="skel" style="height:90px"></div>
-              <div class="skel" style="height:90px"></div>
-            </div>
-          </div>
-        </div>
-      </div>
+    <!-- 3j · Профиль — /js/portal/profile.js -->
+    <div class="tab-pane v3-pane" id="tab-profile">
+      <div class="v3-head"><div class="v3-head-row"><div class="v3-head-title">Профиль</div></div></div>
+      <div class="v3-body" id="profBody"></div>
     </div>
   </div>
-
-  <div class="toast-container" id="toastContainer"></div>
 
 <script src="/js/icons.js?v=0817a"></script>
 <script src="/js/utils.js?v=0820e"></script>
 <script src="/js/delegation.js?v=0813c"></script>
 <script src="/js/auth-utils.js?v=0814a"></script>
-<script src="/js/client.js?v=1003b"></script>
+<script src="/js/client.js?v=1003c"></script>
+<script src="/js/portal/core.js?v=1003a"></script>
+<script src="/js/portal/overview.js?v=1003a"></script>
+<script src="/js/portal/proxies.js?v=1003a"></script>
+<script src="/js/portal/export.js?v=1003a"></script>
+<script src="/js/portal/card.js?v=1003a"></script>
+<script src="/js/portal/analytics.js?v=1003a"></script>
+<script src="/js/portal/balance.js?v=1003a"></script>
+<script src="/js/portal/docs.js?v=1003a"></script>
+<script src="/js/portal/api.js?v=1003a"></script>
+<script src="/js/portal/referral.js?v=1003a"></script>
+<script src="/js/portal/profile.js?v=1003a"></script>
 
 </body>
 </html>

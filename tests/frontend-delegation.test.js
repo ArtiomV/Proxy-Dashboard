@@ -22,7 +22,7 @@ const FILES = [
   'public/admin.html', 'public/index.html', 'public/js/admin.js',
   'public/js/admin/modems.js', 'public/js/admin/settings.js',
   'public/js/admin/finance.js', 'public/js/admin/analytics.js',
-  'public/js/client.js',
+  'public/js/client.js', 'public/js/portal/core.js', 'public/js/portal/overview.js', 'public/js/portal/proxies.js', 'public/js/portal/export.js', 'public/js/portal/card.js', 'public/js/portal/analytics.js', 'public/js/portal/balance.js', 'public/js/portal/docs.js', 'public/js/portal/api.js', 'public/js/portal/referral.js', 'public/js/portal/profile.js',
 ];
 const EL = { style: {}, dataset: {}, checked: true, closest: () => null, click() {}, focus() {}, blur() {}, remove() {} };
 const EV = { target: { tagName: 'DIV' }, stopPropagation() {}, preventDefault() {} };

@@ -4,7 +4,7 @@
 // зашит в <html>) и дёргается при переключении. CSP режет инлайн-скрипты,
 // поэтому это отдельный файл, подключённый в <head> до стилей.
 (function(){
-  var theme='dark';
-  try{theme=localStorage.getItem('pr_theme')||'dark';}catch(e){}
+  var theme='light';
+  try{theme=localStorage.getItem('pr_theme')||'light';}catch(e){}
   document.documentElement.setAttribute('data-theme',theme);
 })();

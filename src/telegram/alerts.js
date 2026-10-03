@@ -518,6 +518,14 @@ const RULES = {
     dedupeKey: p => 'bill_' + (p.client_id || '') + '_' + (p.period || '') + '_' + (p.amount || 0),
     render: p => `💳 <b>Выставлен счёт: ${formatRub(p.amount)}</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>\nПериод: ${esc(p.period || '?')}\nНомер: ${esc(p.billNumber || '—')}\nВ банке: ${p.tochkaPushed ? 'создан в Точке' : 'только локально'}`,
   },
+  bill_requested: {
+    title: 'Клиент запросил счёт',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 60,
+    dedupeKey: p => 'billreq_' + (p.client_id || '') + '_' + (p.amount || 0),
+    render: p => `🧾 <b>Запрос счёта из ЛК: ${formatRub(p.amount)}</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>\nПлательщик: ${esc(p.payer || '—')}${p.inn ? ' · ИНН ' + esc(p.inn) : ''}\nEmail: ${esc(p.email || '—')}\n\nВыставьте счёт в разделе «Финансы».`,
+  },
   client_balance_negative: {
     title: 'Клиент ушёл в минус',
     priority: 'important',

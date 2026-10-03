@@ -322,6 +322,7 @@ CRUD: `GET/POST /api/admin/clients`, `PUT/DELETE /api/admin/clients/:id` (delete
 
 ### 6.8. Клиентский портал
 `GET /api/dashboard_data`, `GET /api/billing_history`, `POST /api/client/reset_ip` (свой модем), `GET|POST /api/client/reset_ip_by_token` (секретная ссылка), `/rotation_log`, `/set_rotation`, `/ip_history`, `/credentials_export`, `/reset_link/rotate`, `/referral`, документы: `/documents`, `/closing_documents` (+pdf), `/bills` (+pdf), `/daily_traffic`.
+ЛК v3 (src/routes/client-portal-v3.js): `GET /api/client/rotation_log` (журнал ротаций своего модема, причины timer/manual/link/api), `GET|POST /api/client/proxy_prefs` (свои названия прокси, флаг «уведомлять, если офлайн» — джоба client-offline-notify, TG > 5 мин), `POST /api/client/proxy_password` (новый пароль порта: store_port + apply_port), `GET /api/client/profile` (учётная запись + реквизиты), `GET /api/client/referral_stats` (начисления партнёрки), `POST /api/client/bill_request` (запрос счёта → алерт bill_requested).
 
 ### 6.9. Публичное API и вебхуки
 `GET /api/v1/proxy` (креды+change_ip_url+billing-сводка), `GET /api/v1/proxies` (JSON/TXT/CSV). Вебхук: `POST /api/tochka/webhook` — JWT-верификация по JWKS (невериф. → unverified/400 при strict), идемпотентность по natural_key/paymentId, автозачёт только verified+matched по ИНН, иначе дебаунс-ресинк выписки. `POST /api/tools/check_proxy` — чекер (admin+client).

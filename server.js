@@ -3210,6 +3210,14 @@ app.use(require('./src/routes/client-portal')({
   retailPoolDb,   // B2C Э2: payload retail-конвейера в /api/dashboard_data
   tariffsDb,      // DEEP-48: rotation_allowed тарифа в клиентских командах
 }));
+// ЛК v3 (макет «Клиентский кабинет v3»): журнал ротаций, настройки прокси,
+// новый пароль порта, профиль, начисления партнёрки.
+app.use(require('./src/routes/client-portal-v3')({
+  db, logger, authMiddleware,
+  fetchAllServersDataCached, mergeServerData, fetchApi, postApi, findServer,
+  knownModems, clients, clientById, clientByLogin, ledgerDb,
+  auditLog, getClientIp, proxySmart, getSetting, logActivity,
+}));
 
 // ── B2C retail (ТЗ 10.08) ─────────────────────────────────────────────────
 // Mailer (SendPulse; без кредов — очередь mail_outbox, запуск не блокируется).
@@ -3969,6 +3977,16 @@ const _debtBlock = require('./src/jobs/debt-block').create({
 const _clientNotify = require('./src/services/notify').create({
   logger, logActivity, getSetting, tgBot,
 });
+
+// ЛК v3: «Уведомлять, если офлайн» (карточка прокси → Настройки) — клиенту в
+// TG, если его прокси недоступен > 5 мин, и парное «снова работает».
+const _clientOfflineNotify = require('./src/jobs/client-offline-notify').create({
+  db, logger, clientById, uptimeTracking, knownModems,
+  notifyClient: (...args) => _clientNotify.notifyClient(...args),
+});
+_intervals.push(setInterval(() => {
+  _clientOfflineNotify.tick().catch(e => logger.warn('[ClientOfflineNotify] ' + e.message));
+}, 60 * 1000));
 
 // 21.08: автоудаление портов заблокированных клиентов после истечения hold
 // (retail_hold_days дней от blocked_since, миграция 073). Независимо от
