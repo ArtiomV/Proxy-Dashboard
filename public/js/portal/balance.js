@@ -85,10 +85,14 @@ function _balRender(){
     var h='<div class="v3-month'+(_balOpen[k]?' open':'')+'"><div class="v3-month-h" data-on-click="balToggle('+V3.q(k)+')"><span class="chev">›</span>'+name+
       '<span class="sums"><span class="g">'+(m.gb>0?V3.gbv(m.gb):'')+'</span><span class="s">'+(m.spent>0?'−'+V3.money(m.spent):'')+'</span><span class="p">'+(m.paid>0?'+'+V3.money(m.paid):'')+'</span></span></div>';
     if(_balOpen[k]){
-      h+='<div class="v3-month-b"><div class="v3-table-wrap"><table class="v3-table"><thead><tr><th>Дата</th><th>Операция</th><th class="r">Трафик</th><th class="r">Сумма</th><th class="r">Баланс после</th></tr></thead><tbody>'+
+      // 03.10: для per_modem клиентов вместо трафика — число модемов в
+      // списании; colgroup фиксирует ширины, чтобы они не прыгали между
+      // месяцами (auto-layout подстраивался под самый длинный контент).
+      h+='<div class="v3-month-b"><div class="v3-table-wrap"><table class="v3-table" style="table-layout:fixed"><colgroup><col style="width:64px"><col><col style="width:110px"><col style="width:110px"><col style="width:120px"></colgroup><thead><tr><th>Дата</th><th>Операция</th><th class="r">'+(perGb?'Трафик':'Модемы')+'</th><th class="r">Сумма</th><th class="r">Баланс после</th></tr></thead><tbody>'+
         m.rows.map(function(e,i){
           var a=_balAmount(e),dt=e.date?V3.dm(e.date):'—';
-          return '<tr'+(i%2?' class="z"':'')+' title="'+V3.esc(e.note||'')+'"><td class="mono mut">'+dt+'</td><td class="txt">'+V3.esc(_balKind(e))+'</td><td class="r mono mut">'+(e.delta_gb?V3.gbv(e.delta_gb):'—')+'</td><td class="r mono b" style="color:'+(a<0?'var(--v3-red)':'var(--v3-green)')+'">'+(a<0?'−':'+')+V3.money2(Math.abs(a))+'</td><td class="r mono ink">'+(e.balance_after!=null?V3.money2(e.balance_after):'—')+'</td></tr>';
+          var qty=perGb?(e.delta_gb?V3.gbv(e.delta_gb):'—'):(e.modem_count?e.modem_count+' '+V3.plural(e.modem_count,'модем','модема','модемов'):'—');
+          return '<tr'+(i%2?' class="z"':'')+' title="'+V3.esc(e.note||'')+'"><td class="mono mut">'+dt+'</td><td class="txt">'+V3.esc(_balKind(e))+'</td><td class="r mono mut">'+qty+'</td><td class="r mono b" style="color:'+(a<0?'var(--v3-red)':'var(--v3-green)')+'">'+(a<0?'−':'+')+V3.money2(Math.abs(a))+'</td><td class="r mono ink">'+(e.balance_after!=null?V3.money2(e.balance_after):'—')+'</td></tr>';
         }).join('')+'</tbody></table></div></div>';
     }
     return h+'</div>';

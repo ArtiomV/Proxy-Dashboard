@@ -1,16 +1,13 @@
 // public/js/portal/profile.js — 3j «Профиль» + попапы 5e (смена пароля).
-// /api/client/profile — учётная запись и реквизиты; /api/client/sla_report —
-// SLA текущего месяца; email — POST /api/client/email; Telegram —
-// tg_link_code / tg_unlink; пароль — POST /api/client/change_password.
+// /api/client/profile — учётная запись и реквизиты; email — POST /api/client/email;
+// Telegram — tg_link_code / tg_unlink; пароль — POST /api/client/change_password.
+// 03.10: карточка «SLA за 30 дней» убрана по решению владельца — число проверок
+// выглядело сломанным (миллионы), а «Доступность» уже есть на «Обзоре».
 
-var _prof=null,_sla=null;
+var _prof=null;
 function renderProfile(){
-  var month=V3.today().slice(0,7);
-  Promise.all([
-    api('/api/client/profile').catch(function(){return null}),
-    api('/api/client/sla_report?month='+month).catch(function(){return null})
-  ]).then(function(r){
-    _prof=r[0]&&!r[0].error?r[0]:null;_sla=r[1]&&!r[1].error?r[1]:null;
+  api('/api/client/profile').catch(function(){return null}).then(function(p){
+    _prof=p&&!p.error?p:null;
     if(!_prof){document.getElementById('profBody').innerHTML='<div class="v3-emptybox"><div class="t">Не удалось загрузить профиль</div></div>';return}
     _profRender();
   });
@@ -37,21 +34,9 @@ function _profRender(){
       (p.tgLinked?'<button type="button" class="v3-btn sm" data-on-click="profTgUnlink()">Отвязать</button>':'<button type="button" class="v3-btn sm link" data-on-click="profTgLink()">Привязать</button>')+'</div>'+
     '<div class="v3-note">'+(p.tgLinked?'В Telegram приходят зачисления, предупреждения о балансе и уведомления «прокси офлайн».':'Привяжите Telegram, чтобы получать зачисления, предупреждения о балансе и уведомления «прокси офлайн».')+'</div>'+
   '</div></div>';
-  h+=_profSla();
   var body=document.getElementById('profBody');
   body.style.display='grid';body.style.gridTemplateColumns='repeat(auto-fit,minmax(min(100%,420px),1fr))';body.style.gap='12px';body.style.alignItems='start';
   body.innerHTML=h;
-}
-function _profSla(){
-  var s=(rawData&&rawData.uptimeSummary30d)||null;
-  var up=s&&s.uptime_pct!=null?parseFloat(s.uptime_pct):null;
-  var checks=s?s.checks:null;
-  var t=[
-    {l:'Доступность',v:up!=null?V3.pct(up):'—',c:up==null?'':up>=99?'good':up>=95?'warn':'bad'},
-    {l:'Проверок',v:checks!=null?V3.group(checks):'—'}
-  ];
-  return '<div class="v3-card"><h3 style="margin-bottom:10px">SLA за 30 дней</h3><div class="v3-tiles two">'+t.map(function(x){return '<div class="v3-tile"><div class="v3-tile-l">'+x.l+'</div><div class="v3-tile-v '+(x.c||'')+'">'+x.v+'</div></div>'}).join('')+'</div>'+
-    '<div class="v3-hint" style="margin-top:10px">Отчёт формируется по тем же проверкам доступности, что показаны в колонке «Аптайм».</div></div>';
 }
 
 // ---------- email ----------
