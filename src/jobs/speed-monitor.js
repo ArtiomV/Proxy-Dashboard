@@ -218,7 +218,11 @@ function create(deps) {
     if(!baselineGet||!baselineUpsert||!alerts||!(download>0))return null;
     const measuredAt=now(),timezone=(f.server&&f.server.tz)||'Europe/Moscow';
     const bucket=speedBaselineBucket(measuredAt,timezone);
-    const history=db.prepare("SELECT download,ts FROM speed_monitor WHERE server=? AND nick=? AND ok=1 AND download>0 AND ts>=datetime('now','-56 days') ORDER BY ts").all(f.server.name,nick);
+    // 07.10: окно считаем от measuredAt (мокируемого now), а не от SQL-«сейчас» —
+    // иначе тесты с фиксированной датой устаревают календарно (семплы выпадали
+    // из 56-дневного окна по мере хода реального времени).
+    const cutoffIso=new Date(measuredAt.getTime()-baselineWindowDays*86400e3).toISOString().replace('T',' ').slice(0,19);
+    const history=db.prepare("SELECT download,ts FROM speed_monitor WHERE server=? AND nick=? AND ok=1 AND download>0 AND ts>=? ORDER BY ts").all(f.server.name,nick,cutoffIso);
     const rows=history.filter(row=>{const candidate=speedBaselineBucket(parseSqliteUtc(row.ts),timezone);return candidate&&bucket&&candidate.hour===bucket.hour&&candidate.dayType===bucket.dayType;});
     const minSamples=Math.max(6,Math.min(72,Number(getSetting('speed_baseline_min_samples',12))||12));
     const values=rows.map(r=>Number(r.download)).filter(Number.isFinite);

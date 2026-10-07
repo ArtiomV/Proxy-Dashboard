@@ -1984,7 +1984,17 @@ function closeClientModal(){document.getElementById('clientModal').classList.rem
 document.getElementById('clientModal').addEventListener('click',function(e){if(e.target===this)closeClientModal()});
 function editClient(id){var c=(currentData.clients||[]).find(function(x){return x.id===id});if(c)showClientForm(c)}
 function saveClient(){var id=document.getElementById('clientFormId').value;var maxDebtRaw=document.getElementById('cfMaxDebt').value;var d={name:document.getElementById('cfName').value,portName:document.getElementById('cfPortName').value,login:document.getElementById('cfLogin').value,password:document.getElementById('cfPassword').value,contact:document.getElementById('cfContact').value,billingType:document.getElementById('cfBillingType').value,price:document.getElementById('cfPrice').value,notes:document.getElementById('cfNotes').value,clientType:document.getElementById('cfClientType').value,inn:document.getElementById('cfInn').value,kpp:document.getElementById('cfKpp').value,legalName:document.getElementById('cfLegalName').value,address:document.getElementById('cfAddress').value,contractInfo:document.getElementById('cfContractInfo').value,contractDate:document.getElementById('cfContractDate').value,autoActs:document.getElementById('cfAutoActs').checked,autoBills:document.getElementById('cfAutoBills').checked,billingPaused:document.getElementById('cfBillingPaused').checked,allowDebt:document.getElementById('cfAllowDebt').checked,maxDebt:maxDebtRaw!==''?parseFloat(maxDebtRaw):undefined};if(!d.name||!d.portName||!d.login||(!id&&!d.password))return showToast('Заполните обязательные поля','error');api(API+(id?'/api/admin/clients/'+id:'/api/admin/clients'),{method:id?'PUT':'POST',json:d}).then(function(r){if(r.ok||r.client){showToast(id?'Обновлён':'Создан','success');closeClientModal();loadData()}else showToast(r.error,'error')}).catch(function(e){showToast(e.message,'error')})}
-function deleteClient(id,name){confirmDialog('Удалить клиента «'+name+'»? Это действие нельзя отменить.',function(){api(API+'/api/admin/clients/'+id,{method:'DELETE'}).then(function(d){d.ok?showToast('Удалён','success'):showToast(d.error,'error');loadData()}).catch(function(e){showToast(esc(e.message),'error')});},'Удалить','Удалить клиента')}
+function deleteClient(id,name){confirmDialog('Удалить клиента «'+name+'»? Это действие нельзя отменить.',function(){api(API+'/api/admin/clients/'+id,{method:'DELETE'}).then(function(d){
+  if(d.ok){
+    showToast('Удалён','success');
+    // 07.10: закрываем карточку удалённого клиента и перечитываем список —
+    // раньше модалка оставалась открытой с данными удалённого клиента и
+    // выглядело так, будто удаление «не сработало».
+    var cm=document.getElementById('clientModal');if(cm)cm.classList.remove('show');
+    document.getElementById('clientFormId').value='';
+    loadData();
+  }else showToast(d.error,'error');
+}).catch(function(e){showToast(esc(e.message),'error')});},'Удалить','Удалить клиента')}
 // ── WP7 (B2C Э5): антифрод розницы — разблокировка только админом ──
 // «Снять блок»: blocked=0; при подтверждении — strikes тоже обнуляем (иначе
 // следующее нарушение снова доберётся до порога и переблокирует аккаунт).
