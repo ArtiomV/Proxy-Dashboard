@@ -332,9 +332,10 @@ r.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, 
   delete users[removed.login];
   deleteSessionsByLogin(removed.login);
   _emitFinanceWrite();
-  // Политика архивирования: billing_ledger/bank_payments НЕ каскадируются с
-  // строкой clients — финансовая история удалённого клиента сохраняется в БД
-  // (client_id остаётся в записях для сверок и документов прошлых периодов).
+  // Политика архивирования (миграция 111, 07.10): billing_ledger/payments/
+  // документы НЕ каскадируются со строкой clients — финансовая история
+  // удалённого клиента сохраняется в БД (client_id остаётся в записях для
+  // сверок и документов прошлых периодов).
   auditLog(req.user.login, 'delete_client', { clientId: removed.id, clientName: removed.name, ip: getClientIp(req) });
   res.json({ ok: true });
 });

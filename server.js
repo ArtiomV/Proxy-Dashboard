@@ -576,7 +576,10 @@ function saveClients(clientsList) {
   }
   try {
     db.transaction(() => {
-      // Remove deleted clients (ON DELETE CASCADE cleans sub-tables).
+      // Remove deleted clients. С 07.10 (миграция 111) под-таблицы НЕ
+      // каскадируются: финансовая (billing_ledger/payments) и документная
+      // история переживает удаление клиента — нужна для сверок и актов
+      // прошлых периодов. Чистятся только явно удаляемые сущности.
       const liveIds = new Set(clientsList.map(c => c.id));
       for (const r of clientsDb.allIds()) {
         if (!liveIds.has(r.id)) clientsDb.deleteById(r.id);

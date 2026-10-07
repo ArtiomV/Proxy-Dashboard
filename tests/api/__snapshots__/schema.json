@@ -885,7 +885,7 @@
     "type": "table",
     "name": "billing_ledger",
     "tbl_name": "billing_ledger",
-    "sql": "CREATE TABLE billing_ledger ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, type TEXT NOT NULL, date TEXT NOT NULL, timestamp TEXT, amount REAL NOT NULL, currency TEXT DEFAULT 'RUB', balance_before REAL, balance_after REAL, gb_used REAL, modem_count INTEGER, days_in_month INTEGER, note TEXT DEFAULT '', source TEXT, payment_id TEXT, details TEXT, created_at TEXT DEFAULT (datetime('now')) , purchase_id TEXT)"
+    "sql": "CREATE TABLE \"billing_ledger\" ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL, type TEXT NOT NULL, date TEXT NOT NULL, timestamp TEXT, amount REAL NOT NULL, currency TEXT DEFAULT 'RUB', balance_before REAL, balance_after REAL, gb_used REAL, modem_count INTEGER, days_in_month INTEGER, note TEXT DEFAULT '', source TEXT, payment_id TEXT, created_at TEXT DEFAULT (datetime('now')), details TEXT DEFAULT '{}', purchase_id TEXT )"
   },
   {
     "type": "table",
@@ -903,7 +903,7 @@
     "type": "table",
     "name": "bills",
     "tbl_name": "bills",
-    "sql": "CREATE TABLE bills ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, tochka_bill_id TEXT, period TEXT NOT NULL, bill_number TEXT, amount REAL NOT NULL, status TEXT DEFAULT 'unpaid', created_at TEXT DEFAULT (datetime('now')) , formula TEXT NOT NULL DEFAULT '')"
+    "sql": "CREATE TABLE \"bills\" ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL, tochka_bill_id TEXT, period TEXT NOT NULL, bill_number TEXT, amount REAL NOT NULL, status TEXT DEFAULT 'unpaid', created_at TEXT DEFAULT (datetime('now')), formula TEXT NOT NULL DEFAULT '' )"
   },
   {
     "type": "table",
@@ -915,7 +915,7 @@
     "type": "table",
     "name": "client_documents",
     "tbl_name": "client_documents",
-    "sql": "CREATE TABLE client_documents ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, name TEXT NOT NULL, file_name TEXT NOT NULL, mime_type TEXT DEFAULT '', date TEXT DEFAULT (datetime('now')) )"
+    "sql": "CREATE TABLE \"client_documents\" ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL, name TEXT NOT NULL, file_name TEXT NOT NULL, mime_type TEXT DEFAULT '', date TEXT DEFAULT (datetime('now')) )"
   },
   {
     "type": "table",
@@ -939,7 +939,7 @@
     "type": "table",
     "name": "closing_documents",
     "tbl_name": "closing_documents",
-    "sql": "CREATE TABLE closing_documents ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, tochka_doc_id TEXT, period TEXT NOT NULL, type TEXT DEFAULT 'act', act_number TEXT, items TEXT DEFAULT '[]', total_amount REAL DEFAULT 0, status TEXT DEFAULT 'unsigned', contract_info TEXT, signed_at TEXT, created_at TEXT DEFAULT (datetime('now')) )"
+    "sql": "CREATE TABLE \"closing_documents\" ( id TEXT PRIMARY KEY, client_id TEXT NOT NULL, tochka_doc_id TEXT, period TEXT NOT NULL, type TEXT DEFAULT 'act', act_number TEXT, items TEXT DEFAULT '[]', total_amount REAL DEFAULT 0, status TEXT DEFAULT 'unsigned', created_at TEXT DEFAULT (datetime('now')), contract_info TEXT DEFAULT '', signed_at TEXT )"
   },
   {
     "type": "table",
@@ -1149,7 +1149,7 @@
     "type": "table",
     "name": "payments",
     "tbl_name": "payments",
-    "sql": "CREATE TABLE payments ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE, amount REAL NOT NULL, date TEXT NOT NULL, note TEXT DEFAULT '', source TEXT DEFAULT 'manual', payment_id TEXT, created_at TEXT DEFAULT (datetime('now')) )"
+    "sql": "CREATE TABLE \"payments\" ( id INTEGER PRIMARY KEY AUTOINCREMENT, client_id TEXT NOT NULL, amount REAL NOT NULL, date TEXT NOT NULL, note TEXT DEFAULT '', source TEXT DEFAULT 'manual', payment_id TEXT, created_at TEXT DEFAULT (datetime('now')) )"
   },
   {
     "type": "table",
@@ -1303,36 +1303,6 @@
   },
   {
     "type": "trigger",
-    "name": "trg_billing_ledger_ad",
-    "tbl_name": "billing_ledger",
-    "sql": "CREATE TRIGGER trg_billing_ledger_ad AFTER DELETE ON billing_ledger BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('billing_ledger', 'DELETE', CAST(OLD.id AS TEXT), json_object('id', OLD.id, 'client_id', OLD.client_id, 'type', OLD.type, 'date', OLD.date, 'timestamp', OLD.timestamp, 'amount', OLD.amount, 'balance_before', OLD.balance_before, 'balance_after', OLD.balance_after, 'gb_used', OLD.gb_used, 'modem_count', OLD.modem_count, 'note', OLD.note, 'source', OLD.source, 'payment_id', OLD.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
-    "name": "trg_billing_ledger_ai",
-    "tbl_name": "billing_ledger",
-    "sql": "CREATE TRIGGER trg_billing_ledger_ai AFTER INSERT ON billing_ledger BEGIN INSERT INTO db_audit (table_name, operation, row_id, new_values, context_id) VALUES ('billing_ledger', 'INSERT', CAST(NEW.id AS TEXT), json_object('id', NEW.id, 'client_id', NEW.client_id, 'type', NEW.type, 'date', NEW.date, 'timestamp', NEW.timestamp, 'amount', NEW.amount, 'balance_before', NEW.balance_before, 'balance_after', NEW.balance_after, 'gb_used', NEW.gb_used, 'modem_count', NEW.modem_count, 'note', NEW.note, 'source', NEW.source, 'payment_id', NEW.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
-    "name": "trg_billing_ledger_au",
-    "tbl_name": "billing_ledger",
-    "sql": "CREATE TRIGGER trg_billing_ledger_au AFTER UPDATE ON billing_ledger BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, new_values, context_id) VALUES ('billing_ledger', 'UPDATE', CAST(OLD.id AS TEXT), json_object('id', OLD.id, 'client_id', OLD.client_id, 'type', OLD.type, 'date', OLD.date, 'timestamp', OLD.timestamp, 'amount', OLD.amount, 'balance_before', OLD.balance_before, 'balance_after', OLD.balance_after, 'gb_used', OLD.gb_used, 'modem_count', OLD.modem_count, 'note', OLD.note, 'source', OLD.source, 'payment_id', OLD.payment_id), json_object('id', NEW.id, 'client_id', NEW.client_id, 'type', NEW.type, 'date', NEW.date, 'timestamp', NEW.timestamp, 'amount', NEW.amount, 'balance_before', NEW.balance_before, 'balance_after', NEW.balance_after, 'gb_used', NEW.gb_used, 'modem_count', NEW.modem_count, 'note', NEW.note, 'source', NEW.source, 'payment_id', NEW.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
-    "name": "trg_bills_ad",
-    "tbl_name": "bills",
-    "sql": "CREATE TRIGGER trg_bills_ad AFTER DELETE ON bills BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('bills', 'DELETE', OLD.id, json_object('id', OLD.id, 'client_id', OLD.client_id, 'period', OLD.period, 'bill_number', OLD.bill_number, 'amount', OLD.amount, 'status', OLD.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
-    "name": "trg_bills_ai",
-    "tbl_name": "bills",
-    "sql": "CREATE TRIGGER trg_bills_ai AFTER INSERT ON bills BEGIN INSERT INTO db_audit (table_name, operation, row_id, new_values, context_id) VALUES ('bills', 'INSERT', NEW.id, json_object('id', NEW.id, 'client_id', NEW.client_id, 'period', NEW.period, 'bill_number', NEW.bill_number, 'amount', NEW.amount, 'status', NEW.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
     "name": "trg_clients_ad",
     "tbl_name": "clients",
     "sql": "CREATE TRIGGER trg_clients_ad AFTER DELETE ON clients BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('clients', 'DELETE', OLD.id, json_object('id', OLD.id, 'login', OLD.login, 'name', OLD.name, 'balance', OLD.balance, 'billing_type', OLD.billing_type, 'price', OLD.price), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
@@ -1348,35 +1318,5 @@
     "name": "trg_clients_price_au",
     "tbl_name": "clients",
     "sql": "CREATE TRIGGER trg_clients_price_au AFTER UPDATE OF price ON clients WHEN COALESCE(OLD.price, 0) != COALESCE(NEW.price, 0) BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, new_values, context_id) VALUES ('clients.price', 'UPDATE', NEW.id, json_object('price', OLD.price), json_object('price', NEW.price, 'name', NEW.name), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
-    "name": "trg_closing_docs_ad",
-    "tbl_name": "closing_documents",
-    "sql": "CREATE TRIGGER trg_closing_docs_ad AFTER DELETE ON closing_documents BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('closing_documents', 'DELETE', OLD.id, json_object('id', OLD.id, 'client_id', OLD.client_id, 'period', OLD.period, 'act_number', OLD.act_number, 'total_amount', OLD.total_amount, 'tochka_doc_id', OLD.tochka_doc_id, 'status', OLD.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
-    "name": "trg_closing_docs_ai",
-    "tbl_name": "closing_documents",
-    "sql": "CREATE TRIGGER trg_closing_docs_ai AFTER INSERT ON closing_documents BEGIN INSERT INTO db_audit (table_name, operation, row_id, new_values, context_id) VALUES ('closing_documents', 'INSERT', NEW.id, json_object('id', NEW.id, 'client_id', NEW.client_id, 'period', NEW.period, 'act_number', NEW.act_number, 'total_amount', NEW.total_amount, 'tochka_doc_id', NEW.tochka_doc_id, 'status', NEW.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
-    "name": "trg_closing_docs_au",
-    "tbl_name": "closing_documents",
-    "sql": "CREATE TRIGGER trg_closing_docs_au AFTER UPDATE ON closing_documents BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, new_values, context_id) VALUES ('closing_documents', 'UPDATE', NEW.id, json_object('total_amount', OLD.total_amount, 'tochka_doc_id', OLD.tochka_doc_id, 'status', OLD.status), json_object('total_amount', NEW.total_amount, 'tochka_doc_id', NEW.tochka_doc_id, 'status', NEW.status), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
-    "name": "trg_payments_ad",
-    "tbl_name": "payments",
-    "sql": "CREATE TRIGGER trg_payments_ad AFTER DELETE ON payments BEGIN INSERT INTO db_audit (table_name, operation, row_id, old_values, context_id) VALUES ('payments', 'DELETE', CAST(OLD.id AS TEXT), json_object('id', OLD.id, 'client_id', OLD.client_id, 'amount', OLD.amount, 'date', OLD.date, 'note', OLD.note, 'source', OLD.source, 'payment_id', OLD.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
-  },
-  {
-    "type": "trigger",
-    "name": "trg_payments_ai",
-    "tbl_name": "payments",
-    "sql": "CREATE TRIGGER trg_payments_ai AFTER INSERT ON payments BEGIN INSERT INTO db_audit (table_name, operation, row_id, new_values, context_id) VALUES ('payments', 'INSERT', CAST(NEW.id AS TEXT), json_object('id', NEW.id, 'client_id', NEW.client_id, 'amount', NEW.amount, 'date', NEW.date, 'note', NEW.note, 'source', NEW.source, 'payment_id', NEW.payment_id), (SELECT context_id FROM _audit_active_context WHERE id = 1)); END"
   }
 ]

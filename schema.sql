@@ -48,7 +48,7 @@ CREATE INDEX IF NOT EXISTS idx_clients_inn ON clients(inn);
 -- убрать этот блок из baseline).
 CREATE TABLE IF NOT EXISTS payments (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_id   TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  client_id   TEXT NOT NULL,
   amount      REAL NOT NULL,
   date        TEXT NOT NULL,
   note        TEXT DEFAULT '',
@@ -62,7 +62,7 @@ CREATE INDEX IF NOT EXISTS idx_payments_date ON payments(date);
 -- Billing ledger (replaces billing_ledger.json)
 CREATE TABLE IF NOT EXISTS billing_ledger (
   id          INTEGER PRIMARY KEY AUTOINCREMENT,
-  client_id   TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  client_id   TEXT NOT NULL,
   type        TEXT NOT NULL,
   date        TEXT NOT NULL,
   timestamp   TEXT,
@@ -130,7 +130,7 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_bank_payments_tpid_unique
 -- Client documents (replaces client.documents[] array)
 CREATE TABLE IF NOT EXISTS client_documents (
   id          TEXT PRIMARY KEY,
-  client_id   TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  client_id   TEXT NOT NULL,
   name        TEXT NOT NULL,
   file_name   TEXT NOT NULL,
   mime_type   TEXT DEFAULT '',
@@ -141,7 +141,7 @@ CREATE INDEX IF NOT EXISTS idx_docs_client_id ON client_documents(client_id);
 -- Closing documents / Acts (replaces client.closingDocuments[] array)
 CREATE TABLE IF NOT EXISTS closing_documents (
   id              TEXT PRIMARY KEY,
-  client_id       TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  client_id       TEXT NOT NULL,
   tochka_doc_id   TEXT,
   period          TEXT NOT NULL,
   type            TEXT DEFAULT 'act',
@@ -183,7 +183,7 @@ CREATE TABLE IF NOT EXISTS doc_numbering_client (
 -- Bills (replaces client.bills[] array)
 CREATE TABLE IF NOT EXISTS bills (
   id              TEXT PRIMARY KEY,
-  client_id       TEXT NOT NULL REFERENCES clients(id) ON DELETE CASCADE,
+  client_id       TEXT NOT NULL,
   tochka_bill_id  TEXT,
   period          TEXT NOT NULL,
   bill_number     TEXT,
