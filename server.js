@@ -2403,9 +2403,21 @@ function _classifyApiAccess(req) {
     return { type: 'portal', clientId: c && c.id,
              clientName: (c && (c.portName || c.name)) || u.login, identity: u.login, purpose };
   }
+  // 07.10: невалидный портальный токен (401-поллеры) — тегируем, иначе штормы
+  // мёртвых сессий невидимы в «Обращениях к API». Без клиента: токен мёртв.
+  const hdrTok = req.headers && req.headers['x-auth-token'];
+  if (!u && hdrTok && (path.startsWith('/api/client/') || path.startsWith('/api/dashboard_data'))) {
+    const tail = String(hdrTok).slice(-6);
+    return { type: 'portal_401', clientName: '(невалидный токен)',
+             identity: '…' + tail, purpose: 'Портал: отказ (401), мёртвая сессия', throttleKey: 'p401:' + tail + ':' + path };
+  }
   // Admin self-traffic + anonymous noise → not logged
   return null;
 }
+// Троттлинг шумных повторов (401-штормы): один и тот же throttleKey пишем не
+// чаще раза в час — полная картина без тысяч строк в день.
+const _accessLogThrottle = new Map();
+const ACCESS_THROTTLE_MS = 3600e3;
 app.use('/api', (req, res, next) => {
   if (req.method === 'OPTIONS') return next();
   const start = Date.now();
@@ -2416,6 +2428,12 @@ app.use('/api', (req, res, next) => {
       if (res.statusCode === 304) return;
       const info = _classifyApiAccess(req);
       if (!info) return;
+      if (info.throttleKey) {
+        const last = _accessLogThrottle.get(info.throttleKey) || 0;
+        if (Date.now() - last < ACCESS_THROTTLE_MS) return;
+        _accessLogThrottle.set(info.throttleKey, Date.now());
+        if (_accessLogThrottle.size > 5000) _accessLogThrottle.clear();   // кап памяти
+      }
       _apiAccessInsert.run(
         info.type,
         info.clientId || null,

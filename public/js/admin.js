@@ -3777,8 +3777,8 @@ function onNewSectionToggle(ev){
 
 // ── «Обращения к API» — журнал входящих обращений (кто · когда · зачем) ──────
 var _apiAccessState = { hours: _dashUi.apiHours||24, type: _dashUi.apiType||'' };
-function _apiTypeLabel(t){ return ({api_key:'API-ключ',portal:'Портал',reset_link:'Ротация по ссылке',webhook:'Вебхук',auth:'Вход'})[t] || t; }
-function _apiTypeColor(t){ return ({api_key:'var(--accent)',portal:'var(--blue)',reset_link:'var(--success)',webhook:'var(--purple)',auth:'var(--text-2)'})[t] || 'var(--text-2)'; }
+function _apiTypeLabel(t){ return ({api_key:'API-ключ',portal:'Портал',portal_401:'Портал 401',reset_link:'Ротация по ссылке',webhook:'Вебхук',auth:'Вход'})[t] || t; }
+function _apiTypeColor(t){ return ({api_key:'var(--accent)',portal:'var(--blue)',portal_401:'var(--danger)',reset_link:'var(--success)',webhook:'var(--purple)',auth:'var(--text-2)'})[t] || 'var(--text-2)'; }
 function _fmtApiTs(ts){
   if(!ts) return '';
   try{
@@ -3802,7 +3802,7 @@ function loadNewApiAccess(){
       if(!d || d.error){ box.innerHTML = '<div style="color:var(--danger);font-size:12px;padding:8px">'+esc((d&&d.error)||'Ошибка')+'</div>'; return; }
       var typeCounts = {}; (d.by_type||[]).forEach(function(x){ typeCounts[x.caller_type] = x.c; });
       var chips = '';
-      ['api_key','portal','reset_link','webhook'].forEach(function(t){
+      ['api_key','portal','portal_401','reset_link','webhook'].forEach(function(t){
         var on = st.type===t;
         chips += '<button class="qf-chip'+(on?' active':'')+'" data-on-click="setApiAccessType(\''+t+'\')">'+_apiTypeLabel(t)+'</button>';
       });
