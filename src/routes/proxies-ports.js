@@ -168,7 +168,7 @@ r.post('/api/admin/move_port', authMiddleware, adminMiddleware, async (req, res)
     if (!server) return res.status(400).json({ error: 'Server not found' });
     // Read full current port form (через proxyConf — обход логин-стены S2)
     const mvForm = await proxyConf.getConfForm(server, `/conf/edit_port/${portID}`);
-    if (!mvForm.ok) return res.status(502).json({ error: `ProxySmart не отдал форму порта (${mvForm.reason})` });
+    if (!mvForm.ok) return res.status(502).json({ error: mvForm.reason === 'HTTP_404' ? 'Порт не найден на сервере — вероятно, уже удалён. Обновите список.' : `ProxySmart не отдал форму порта (${mvForm.reason})` });
     const formData = parseHtmlInputFields(mvForm.html);
     // Get proxy_password from port API
     if (!formData.proxy_password) {
@@ -220,7 +220,9 @@ r.get('/api/admin/get_port_config', authMiddleware, adminMiddleware, async (req,
     const server = findServer(serverName);
     if (!server) return res.status(400).json({ error: 'Server not found' });
     const cfgForm = await proxyConf.getConfForm(server, `/conf/edit_port/${portId}`);
-    if (!cfgForm.ok) return res.status(502).json({ error: `ProxySmart не отдал форму порта (${cfgForm.reason})` });
+    // 07.10: 404 = порта нет на боксе (уже удалён) — говорим об этом прямо,
+    // а не «не отдал форму» (читалось как сбой панели).
+    if (!cfgForm.ok) return res.status(502).json({ error: cfgForm.reason === 'HTTP_404' ? 'Порт не найден на сервере — вероятно, уже удалён. Обновите список.' : `ProxySmart не отдал форму порта (${cfgForm.reason})` });
     const html = cfgForm.html;
     const extract = (name) => {
       const m = html.match(new RegExp(`name="${name}"[^>]*value="([^"]*)"`));

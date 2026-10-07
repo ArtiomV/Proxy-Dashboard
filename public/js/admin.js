@@ -1993,6 +1993,20 @@ function deleteClient(id,name){confirmDialog('Удалить клиента «'+
     var cm=document.getElementById('clientModal');if(cm)cm.classList.remove('show');
     document.getElementById('clientFormId').value='';
     loadData();
+  }else if(d&&d.code==='HAS_ACTIVE_PORTS'){
+    // 07.10: каскад — сначала порты на боксах, потом клиент. Раньше админ
+    // упирался в «нельзя удалить» и должен был искать кнопку «Удалить порты».
+    confirmDialog('У «'+name+'» есть активные порты — удалить сначала их, затем самого клиента? Порты восстановить нельзя.',function(){
+      showToast('Удаляю порты…','info');
+      api(API+'/api/admin/clients/'+id+'/delete-ports',{method:'POST',json:{}}).then(function(dp){
+        if(!dp||!dp.ok){showToast('Порты не удалены: '+((dp&&dp.error)||'ошибка'),'error');return}
+        if(dp.errors&&dp.errors.length){showToast('Часть портов не удалилась — клиент оставлен: '+dp.errors.slice(0,2).join('; '),'warning');loadData();return}
+        api(API+'/api/admin/clients/'+id,{method:'DELETE'}).then(function(d2){
+          if(d2.ok){showToast('Порты и клиент удалены','success');var cm=document.getElementById('clientModal');if(cm)cm.classList.remove('show');document.getElementById('clientFormId').value='';loadData()}
+          else showToast(d2.error||'Порты удалены, клиент — нет: '+(d2&&d2.error),'error');
+        }).catch(function(e){showToast(esc(e.message),'error')});
+      }).catch(function(e){showToast(esc(e.message),'error')});
+    },'Удалить всё','Порты активны',true);
   }else showToast(d.error,'error');
 }).catch(function(e){showToast(esc(e.message),'error')});},'Удалить','Удалить клиента')}
 // ── WP7 (B2C Э5): антифрод розницы — разблокировка только админом ──

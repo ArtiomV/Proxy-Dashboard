@@ -310,7 +310,8 @@ r.delete('/api/admin/clients/:id', authMiddleware, adminMiddleware, async (req, 
   }
   if (hasActivePorts) {
     return res.status(400).json({
-      error: `Нельзя удалить: у клиента есть активные порты (portName: ${client.portName}). Сначала закройте все порты.`
+      error: `Нельзя удалить: у клиента есть активные порты (portName: ${client.portName}). Сначала закройте все порты.`,
+      code: 'HAS_ACTIVE_PORTS'
     });
   }
 
