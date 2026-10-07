@@ -438,6 +438,23 @@ r.post('/api/admin/purge_port', authMiddleware, adminMiddleware, async (req, res
       logger.warn(`[Admin] Delete port ${portId} on ${serverName} failed: ${del.reason}`);
       return res.status(502).json({ error: `Delete port failed: ${del.reason}` });
     }
+    // 07.10: verify-after-write. ProxySmart на части ошибок отвечает 200
+    // (страница ошибки/логина), а не 302 — «успех» без действия; порт при этом
+    // остаётся жив (инцидент: зомби-порты mlg на RO1 «удалялись» дважды).
+    // Перечитываем реестр: порт должен исчезнуть.
+    try {
+      const listRaw = await fetchApi(server, '/apix/list_ports_json');
+      let alive = false;
+      for (const plist of Object.values(listRaw || {})) {
+        if (Array.isArray(plist) && plist.some(p => p && p.portID === portId)) { alive = true; break; }
+      }
+      if (alive) {
+        logger.warn(`[Admin] Delete port ${portId} on ${serverName}: ProxySmart ответил ok, но порт на месте`);
+        return res.status(502).json({ error: 'ProxySmart подтвердил удаление, но порт остался на сервере — повторите или проверьте бокс' });
+      }
+    } catch (e) {
+      logger.warn(`[Admin] Delete-verify ${portId} on ${serverName} failed: ${e.message} — считаем удалённым по ответу панели`);
+    }
     logger.info(`[Admin] Deleted port ${portId} from ${serverName}`);
     auditLog(req.user.login, 'purge_port', { serverName, portId, ip: getClientIp(req) });
     proxySmart.invalidateCache();

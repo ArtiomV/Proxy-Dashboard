@@ -820,6 +820,10 @@ r.post('/api/admin/clients/:id/delete-ports', authMiddleware, adminMiddleware, a
 
   const result = { deleted: 0, poolRemoved: 0, errors: [] };
   let rosterDirty = false;
+  // 07.10: verify-after-write — после цикла перечитываем реестр каждого
+  // затронутого бокса и считаем «выжившие» порты ошибками (ProxySmart на
+  // части отказов отвечает 200 вместо 302 — «успех» без действия).
+  const deletedByServer = new Map();
   try {
     const serverResults = await fetchAllServersDataCached();
     for (const pt of portValidity.clientPorts(client, serverResults)) {
@@ -829,6 +833,8 @@ r.post('/api/admin/clients/:id/delete-ports', authMiddleware, adminMiddleware, a
           result.errors.push(`${pt.server.name}/${pt.portId}: ${del.reason}`);
           continue;
         }
+        if (!deletedByServer.has(pt.server)) deletedByServer.set(pt.server, []);
+        deletedByServer.get(pt.server).push(pt.portId);
         result.deleted++;
         // Сразу сносим реквизит из ростера knownModems: счётчик модемов
         // клиента читает ростер, а его реконсиляция с боксом шла бы 2 суток.
@@ -839,6 +845,26 @@ r.post('/api/admin/clients/:id/delete-ports', authMiddleware, adminMiddleware, a
         logger.warn(`[Clients] ${client.login}: порт ${pt.server.name}/${pt.portId} удалён вручную админом ${req.user.login}`);
       } catch (e) {
         result.errors.push(`${pt.server && pt.server.name || '?'}/${pt.portId}: ${e.message}`);
+      }
+    }
+    // verify: выжившие порты — ошибка, а не «удалено»
+    for (const [server, pids] of deletedByServer) {
+      try {
+        const listRaw = await fetchApi(server, '/apix/list_ports_json');
+        const aliveSet = new Set();
+        for (const plist of Object.values(listRaw || {})) {
+          if (Array.isArray(plist)) for (const p of plist) { if (p && p.portID) aliveSet.add(p.portID); }
+        }
+        for (const pid of pids) {
+          if (aliveSet.has(pid)) {
+            result.deleted--;
+            result.errors.push(`${server.name}/${pid}: ProxySmart подтвердил, но порт остался`);
+            // вернём реквизит в ростер — порт жив
+            // (knownModems-запись уже удалена выше; реконсиляция с боксом вернёт её)
+          }
+        }
+      } catch (e) {
+        logger.warn(`[Clients] delete-verify ${server.name}: ${e.message} — доверяем ответам панели`);
       }
     }
   } catch (e) {
