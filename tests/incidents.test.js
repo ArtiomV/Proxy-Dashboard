@@ -11,7 +11,7 @@ function harness(){
     CREATE TABLE known_modems(server_name TEXT,port_key TEXT,data TEXT);
   `);
   const emitted=[];
-  const manager=incidents.create({db,logger:{warn:()=>{}},getSetting:(k,d)=>d,emit:(rule,payload)=>emitted.push({rule,payload})});
+  const manager=incidents.create({db,logger:{warn:()=>{}},getSetting:(k,d)=>k==='alert_incident_grace_min'?0:d,emit:(rule,payload)=>emitted.push({rule,payload})});
   return {db,emitted,manager};
 }
 
@@ -90,7 +90,7 @@ describe('incidents — DEEP-75/76/78/79', () => {
     // процесс лежал — recovery-переходов не будет, согласование обязано закрыть.
     const h2 = harness();
     h2.db.exec('ATTACH \':memory:\' AS x');   // no-op, отдельная БД не нужна — используем h.db
-    const mgr2 = incidents.create({ db: h.db, logger: { warn: () => {} }, getSetting: (k, d) => d, emit: (r, p) => h2.emitted.push({ rule: r, payload: p }) });
+    const mgr2 = incidents.create({ db: h.db, logger: { warn: () => {} }, getSetting: (k, d) => k === 'alert_incident_grace_min' ? 0 : d, emit: (r, p) => h2.emitted.push({ rule: r, payload: p }) });
     expect(mgr2._open.size).toBe(1);   // инцидент загружен из SQLite
     mgr2.reconcile([{ server: 'S1', imei: 'i1', online: true }, { server: 'S1', imei: 'i2', online: true }, { server: 'S1', imei: 'i3', online: true }]);
     expect(mgr2._open.size).toBe(0);

@@ -34,7 +34,7 @@ function create(deps) {
       for(const m of _json(row.members_json,[]))members.set(m.identity,m);
       open.set(row.id,{id:row.id,group:row.correlation_key,server:row.server,operator:row.operator,
         hypothesis:row.hypothesis,openedAt:Date.parse(row.opened_at)||Date.now(),lastSeenAt:Date.parse(row.last_seen_at)||Date.now(),
-        members,reasons:new Set(_json(row.reasons_json,[]))});
+        members,reasons:new Set(_json(row.reasons_json,[])),announced:true,_openTimer:null});   // 08.10: пережившие рестарт — анонсированы ранее
     }
   } catch(e){
     logger&&logger.warn&&logger.warn('[Incidents] persistence unavailable: '+e.message);
@@ -44,6 +44,16 @@ function create(deps) {
   function _enabled(){return getSetting('alert_incident_correlation_enabled',true)!==false;}
   function _windowMs(){return Math.max(1,Math.min(15,Number(getSetting('alert_incident_window_min',5))||5))*60000;}
   function _threshold(){return Math.max(3,Math.min(20,Number(getSetting('alert_incident_threshold',3))||3));}
+  // 08.10: грация открытия — микро-инциденты (закрылись за <N мин) не
+  // анонсируются вовсе: открытие уходит по таймеру, закрытие до таймера
+  // отменяет ОБА сообщения (инцидент 08.10: «открыт/закрыт за 55 сек» —
+  // чистый шум). В monitoring_incidents запись остаётся в любом случае.
+  // 0 = откладывание выключено (и для тестов).
+  function _graceMs(){
+    const v=Number(getSetting('alert_incident_grace_min',10));
+    if(v===0)return 0;
+    return Math.max(1,Math.min(60,v||10))*60000;
+  }
   function _identity(p){return String(p.server||'')+'|'+String(p.imei||p.nick||'');}
   function _normOperator(v){return String(v||'').replace(/\s+/g,' ').trim()||'Оператор не определён';}
   function _memberPayload(p,ruleId){
@@ -121,13 +131,28 @@ function create(deps) {
       const hypothesis=operator==='Оператор не определён'
         ? 'Похоже на общую проблему сервера или канала'
         : 'Похоже на проблему оператора '+operator;
-      incident={id:crypto.randomUUID(),group,server,operator,hypothesis,openedAt:now,lastSeenAt:now,members:new Map(),reasons:new Set()};
+      incident={id:crypto.randomUUID(),group,server,operator,hypothesis,openedAt:now,lastSeenAt:now,members:new Map(),reasons:new Set(),announced:false,_openTimer:null};
       for(const c of candidates){incident.members.set(c.member.identity,c.member);incident.reasons.add(_reason(c.ruleId));}
       open.set(incident.id,incident);
       const counts=_counts(incident);
       if(insertStmt){try{insertStmt.run(incident.id,group,server,operator,hypothesis,new Date(now).toISOString(),new Date(now).toISOString(),counts.modems,counts.clients,JSON.stringify(Array.from(incident.members.values())),JSON.stringify(Array.from(incident.reasons)));}catch(e){logger.warn('[Incidents] insert: '+e.message);}}
-      emit('fleet_incident_opened',{incident_id:incident.id,server,operator,hypothesis,modems:counts.modems,clients:counts.clients,
-        modem_list:Array.from(incident.members.values()).map(m=>m.nick).join(', '),reasons:Array.from(incident.reasons).join(', ')});
+      // 08.10: анонс «открыт» откладывается на грацию — микро-инциденты
+      // (закрылись раньше) не уходят в Telegram/колокольчик вовсе.
+      const grace=_graceMs();
+      if(grace===0){
+        incident.announced=true;
+        emit('fleet_incident_opened',{incident_id:incident.id,server,operator,hypothesis,modems:counts.modems,clients:counts.clients,
+          modem_list:Array.from(incident.members.values()).map(m=>m.nick).join(', '),reasons:Array.from(incident.reasons).join(', ')});
+        return incident;
+      }
+      incident._openTimer=setTimeout(()=>{
+        incident._openTimer=null;
+        if(!open.has(incident.id))return;   // закрылся до анонса — молчим
+        incident.announced=true;
+        emit('fleet_incident_opened',{incident_id:incident.id,server,operator,hypothesis,modems:counts.modems,clients:counts.clients,
+          modem_list:Array.from(incident.members.values()).map(m=>m.nick).join(', '),reasons:Array.from(incident.reasons).join(', ')});
+      },_graceMs());
+      if(incident._openTimer&&typeof incident._openTimer.unref==='function')incident._openTimer.unref();
       return incident;
     }
     for(const c of candidates){
@@ -201,6 +226,12 @@ function create(deps) {
         continue;
       }
       open.delete(incident.id);
+      // 08.10: микро-инцидент (закрылся до грации) — «закрыт» тоже не шлём,
+      // анонс отменяем. Запись в monitoring_incidents остаётся.
+      if(!incident.announced){
+        if(incident._openTimer){clearTimeout(incident._openTimer);incident._openTimer=null;}
+        continue;
+      }
       emit('fleet_incident_closed',{incident_id:incident.id,server:incident.server,operator:incident.operator,
         duration_sec:durationSec,modems:counts.modems,clients:counts.clients});
     }
@@ -227,6 +258,10 @@ function create(deps) {
         const counts=_counts(incident),durationSec=Math.max(0,Math.round((Date.now()-incident.openedAt)/1000));
         if(!_persist(incident,true))continue;
         open.delete(incident.id);
+        if(!incident.announced){
+          if(incident._openTimer){clearTimeout(incident._openTimer);incident._openTimer=null;}
+          continue;
+        }
         emit('fleet_incident_closed',{incident_id:incident.id,server:incident.server,operator:incident.operator,
           duration_sec:durationSec,modems:counts.modems,clients:counts.clients});
       }
@@ -238,7 +273,10 @@ function create(deps) {
     if(RECOVERY_RULES.has(ruleId))return _handleRecovery(ruleId,payload||{});
     return {handled:false};
   }
-  function shutdown(){for(const c of pending.values())clearTimeout(c.timer);pending.clear();}
+  function shutdown(){
+    for(const c of pending.values())clearTimeout(c.timer);pending.clear();
+    for(const inc of open.values()){if(inc._openTimer)clearTimeout(inc._openTimer);}
+  }
   return {handle,shutdown,reconcile,_pending:pending,_open:open};
 }
 
