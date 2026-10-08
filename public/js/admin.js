@@ -178,6 +178,11 @@ function refreshActiveTabInPlace(name){
     try{var d=collectTrafficData();if(d)renderNewClientTable(d);}catch(e){}
   }else if(name==='clients'){
     try{renderClients();}catch(e){}
+  }else if(name==='bank'){
+    // 08.10: после мутаций (привязка платежа и т.п.) loadData() обновлял
+    // currentData, но не перерисовывал открытую вкладку «Банк» — выглядело
+    // как «изменения не применились, надо обновить страницу».
+    try{switchBankNav(_activeBankTab||'overview')}catch(e){}
   }
 }
 
