@@ -190,6 +190,14 @@ function create(deps) {
           targets.push({ server: srv, nick, offline: true });
           continue;
         }
+        // 08.10: модем в ротации (IS_ROTATED) — чек пропускаем. В окне
+        // смены IP (13–20 сек) 3proxy отвечает CONNECT 403 — это не поломка,
+        // а штатная фаза; чек, попавший в ротацию, рисовал ложный кластер
+        // «403 по всему оператору» (кейс MD_71/73/74).
+        if (m.IS_ROTATED === 'true' || m.IS_ROTATED === true) {
+          targets.push({ server: srv, nick, rotating: true });
+          continue;
+        }
         const candidates = portsMap[md.IMEI] || [];
         let port = null, routeReason = '';
         const rosterPid = rosterPortByNick[nick];
@@ -240,6 +248,8 @@ function create(deps) {
         let status = null, totalMs = null, contentOk = null, error = '';
         if (t.offline) {
           error = 'offline';
+        } else if (t.rotating) {
+          error = 'rotating';
         } else if (t.unavailable) {
           error = 'no_valid_client_credentials';
         } else if (t.ambiguous) {
@@ -308,7 +318,7 @@ function create(deps) {
         catch (e) { logger.warn('[HttpCheck] insert failed: ' + e.message); }
         st.last = { status, total_ms: totalMs, content_ok: contentOk, error, ts: tsIso, offline: !!t.offline };
 
-        const isSkipped = !!(t.offline || t.unavailable || t.ambiguous);
+        const isSkipped = !!(t.offline || t.rotating || t.unavailable || t.ambiguous);
         const good = !error;
         if (isSkipped) {
           skipped++;
