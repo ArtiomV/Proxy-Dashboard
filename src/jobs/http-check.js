@@ -26,6 +26,7 @@ const { pickValidClientHttpPort, isValidClientHttpPort } = require('../utils/pro
 
 const MAX_BODY = 512 * 1024;   // must-contain проверяем по первым 512 КБ
 
+// Минимальный HTTP(S) GET через HTTP-прокси с Basic-авторизацией.
 // 08.10: живость цели НАПРЯМУЮ (без прокси) — гейт для http_fail.
 // Если httpcheck_url недоступна с самого сервера — падения через модемы не
 // их вина (лежит сайт/геоблок), и алерты по всему парку — ложная тревога.
@@ -49,7 +50,22 @@ function _fetchDirect(url, timeoutMs) {
   });
 }
 
-// Минимальный HTTP(S) GET через HTTP-прокси с Basic-авторизацией.
+// 08.10: подхват ротаций — «модем сменил IP в последние 2 минуты». Живой
+// источник — ip_history (пишется в момент смены IP нашим tracking'ом), а не
+// rotation_log (синкается с боксов с задержкой в минуты). Ключ = server_imei.
+let _recentRotCache = null, _recentRotAt = 0;
+function _recentlyRotatedSet(db) {
+  if (_recentRotCache && Date.now() - _recentRotAt < 30000) return _recentRotCache;
+  let set = new Set();
+  try {
+    for (const r of db.prepare("SELECT key FROM ip_history WHERE started_at >= datetime('now','-2 minutes')").all()) set.add(r.key);
+  } catch (_) { /* нет таблицы на минимальной схеме */ }
+  _recentRotCache = set; _recentRotAt = Date.now();
+  return set;
+}
+function _recentlyRotated(db, srv, imei) {
+  return _recentlyRotatedSet(db).has(srv + '_' + imei);
+}
 // Возвращает { status, totalMs, body } либо бросает Error.
 function fetchThroughProxy(proxy, targetUrl, timeoutMs) {
   return new Promise((resolve, reject) => {
@@ -195,6 +211,13 @@ function create(deps) {
         // а штатная фаза; чек, попавший в ротацию, рисовал ложный кластер
         // «403 по всему оператору» (кейс MD_71/73/74).
         if (m.IS_ROTATED === 'true' || m.IS_ROTATED === true) {
+          targets.push({ server: srv, nick, rotating: true });
+          continue;
+        }
+        // Подхват ротаций: IS_ROTATED снимается с окончанием, а listener
+        // 3proxy перебиндивается ещё ~30–60 сек — чек в этом хвосте ловил
+        // ECONNREFUSED (кейс MD2_43: фейл через 46 сек после конца ротации).
+        if (_recentlyRotated(db, srv, md.IMEI || '')) {
           targets.push({ server: srv, nick, rotating: true });
           continue;
         }
