@@ -9,6 +9,27 @@
 //
 const { DISCONNECTED_MS } = require('../modems/fleet');
 const { stripServerPrefix } = require('../utils/imei');
+const http = require('http');
+
+// 08.10: зонд живости модема через его прокси-порт (верификация «офлайна» по
+// фиду). GET через HTTP-прокси с абсолютным URI — любой ответ (включая 403
+// «неверные креды») означает, что канал бокс→модем→сеть жив: модем НЕ офлайн.
+// null-ответ (таймаут/ECONNREFUSED/reset) — не подтверждено.
+function _probeProxyAlive(host, creds) {
+  return new Promise((resolve) => {
+    const req = http.request({
+      host, port: creds.port, method: 'GET', path: 'http://example.com/',
+      headers: {
+        'Proxy-Authorization': 'Basic ' + Buffer.from(creds.login + ':' + creds.password).toString('base64'),
+        'Host': 'example.com', 'Connection': 'close',
+      },
+      timeout: 6000, agent: false,
+    }, (res) => { res.resume(); res.on('end', () => resolve(true)); });
+    req.on('timeout', () => { req.destroy(); resolve(false); });
+    req.on('error', () => resolve(false));
+    req.end();
+  });
+}
 
 function create(deps) {
   const {
@@ -327,6 +348,55 @@ async function trackModems() {
       metaBatch();
     } catch (e) { /* non-critical */ }
 
+    // 08.10: верификация «офлайна» зондом через прокси-порт модема.
+    // IS_ONLINE у нас одноисточниковый (статус ProxySmart): когда управляющая
+    // сессия бокса с модемом глючит, фид говорит «офлайн», а канал данных жив
+    // (кейс MD_72: ротации быстрые, трафик идёт, а дашборд рисовал простои
+    // по 10–30 мин). Прежде чем считать модем лежащим, прозваниваем его
+    // прокси-порт напрямую: ответил (любой HTTP-код, даже 403) — модем жив,
+    // это глюк фида; не ответил — реальный офлайн.
+    const probeAlive = new Map();
+    try {
+      const kmProbe = knownModems[server.name] || {};
+      const offlineCands = [];
+      for (const m of statusArr) {
+        const md = m.modem_details || {};
+        const imei = md.IMEI;
+        if (!imei) continue;
+        const isOnline = m.net_details && m.net_details.IS_ONLINE === 'yes';
+        const isRotating = m.IS_ROTATED === 'true' || m.IS_ROTATED === true;
+        const isRebooting = m.IS_REBOOTING === 'true' || m.IS_REBOOTING === true;
+        if (isOnline || isRotating || isRebooting || (m.net_details && m.net_details.EXT_IP === 'IP_RESET')) continue;
+        offlineCands.push(imei);
+      }
+      if (offlineCands.length) {
+        const host = server.publicIp || new URL(server.url).hostname;
+        const credsFor = (imei) => {
+          for (const info of Object.values(kmProbe)) {
+            if (info && String(info.imei || '') === String(imei) && info.portInfo) {
+              const pi = info.portInfo;
+              if (pi.HTTP_PORT && pi.LOGIN && pi.PASSWORD) return { port: pi.HTTP_PORT, login: pi.LOGIN, password: pi.PASSWORD };
+            }
+          }
+          return null;
+        };
+        const jobs = offlineCands.map(imei => async () => {
+          const c = credsFor(imei);
+          if (!c) return;   // нет кредов — прозвонить не можем, доверяем фиду
+          try {
+            const ok = await _probeProxyAlive(host, c);
+            if (ok) probeAlive.set(imei, true);
+          } catch (_) { /* best-effort */ }
+        });
+        for (let i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8).map(f => f()));
+        if (probeAlive.size) {
+          logger.info(`[OfflineProbe] ${server.name}: фид «offline» не подтверждён у ${probeAlive.size}/${offlineCands.length} — прокси-порты живы`);
+          logActivity('modem', 'info', 'offline_feed_glitch', server.name,
+            `Фид offline, но прокси живы: ${[...probeAlive.keys()].join(', ')}`, { count: probeAlive.size });
+        }
+      }
+    } catch (e) { logger.warn('[OfflineProbe] ' + server.name + ': ' + e.message); }
+
     for (const m of statusArr) {
       const imei = m.modem_details?.IMEI;
       if (!imei) continue;
@@ -371,7 +441,7 @@ async function trackModems() {
       // loss ≥ ping_loss_dead_pct считается недоступным (инцидент S1 21.08:
       // модемы «up», трафика нет). Ротация/ребут/IP_RESET — штатно «up».
       // alive() === null (нет свежих данных / фича выкл) — старое поведение.
-      let isUp = isOnline || isRotating || isRebooting || extIp === 'IP_RESET';
+      let isUp = isOnline || isRotating || isRebooting || extIp === 'IP_RESET' || probeAlive.has(imei);
       if (isUp && !isRotating && !isRebooting && extIp !== 'IP_RESET' && modemPing) {
         const pa = modemPing.alive(server.name, imei);
         if (pa === false) isUp = false;
