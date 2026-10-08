@@ -312,6 +312,22 @@ function create(deps) {
           } catch (e) {
             error = String(e.message || e).slice(0, 200);
           }
+          // 08.10: CONNECT 403 при свежих кредах — это чаще ACL порта на цель
+          // (deny-list клиента: MD2_40/46 блокируют example.com), чем поломка
+          // модема. Контрольная цель (нейтральный ipify) через тот же прокси:
+          // ответила — порт жив, цель заблокирована конфигом; не ответила —
+          // реальный сбой.
+          if (error === 'CONNECT status 403') {
+            try {
+              const fb = await _fetch(t.proxy, 'https://api.ipify.org', Math.max(5000, cfg.timeoutMs / 2));
+              if (fb && fb.status >= 200 && fb.status < 400) {
+                error = '';            // порт жив — это ACL на цель, не сбой
+                status = fb.status;
+                totalMs = fb.totalMs;
+                contentOk = null;
+              }
+            } catch (_) { /* остаётся 403 — реальный сбой */ }
+          }
         }
 
         try { _insert.run(tsIso, t.server, t.nick, status, totalMs, contentOk, error, t.portId || '', t.routeReason || (t.ambiguous ? 'ambiguous_clone_imei' : '')); }
