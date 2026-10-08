@@ -26,6 +26,29 @@ const { pickValidClientHttpPort, isValidClientHttpPort } = require('../utils/pro
 
 const MAX_BODY = 512 * 1024;   // must-contain проверяем по первым 512 КБ
 
+// 08.10: живость цели НАПРЯМУЮ (без прокси) — гейт для http_fail.
+// Если httpcheck_url недоступна с самого сервера — падения через модемы не
+// их вина (лежит сайт/геоблок), и алерты по всему парку — ложная тревога.
+// Одна проверка на тик, кэшируется.
+function _fetchDirect(url, timeoutMs) {
+  return new Promise((resolve) => {
+    let mod;
+    try { mod = url.startsWith('https:') ? require('https') : require('http'); }
+    catch (_) { return resolve({ ok: false, error: 'bad url' }); }
+    const started = Date.now();
+    let req;
+    try {
+      req = mod.get(url, { timeout: timeoutMs, agent: false }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => { if (Buffer.concat(chunks).length < MAX_BODY) chunks.push(c); });
+        res.on('end', () => resolve({ ok: true, status: res.statusCode, body: Buffer.concat(chunks).toString('utf8'), totalMs: Date.now() - started }));
+      });
+    } catch (e) { return resolve({ ok: false, error: e.message }); }
+    req.on('timeout', () => { req.destroy(); resolve({ ok: false, error: 'timeout' }); });
+    req.on('error', (e) => resolve({ ok: false, error: e.message }));
+  });
+}
+
 // Минимальный HTTP(S) GET через HTTP-прокси с Basic-авторизацией.
 // Возвращает { status, totalMs, body } либо бросает Error.
 function fetchThroughProxy(proxy, targetUrl, timeoutMs) {
@@ -207,6 +230,7 @@ function create(deps) {
     try {
       const targets = await _resolveTargets();
       const tsIso = new Date().toISOString();
+      const tickState = { targetAlive: null };   // 08.10: кэш живости цели на тик
       let ok = 0, failed = 0, skipped = 0;
       async function checkTarget(t) {
         const key = t.server + '_' + t.nick;
@@ -308,7 +332,29 @@ function create(deps) {
           // DEEP-77: failing выставляем только при ПРИНЯТОМ trigger —
           // отклонённая попытка повторяется на следующих чеках, а не сгорает.
           if (!t.offline && !t.unavailable && st.failStreak >= cfg.alertThreshold && !st.failing) {
-            if (alerts.trigger('modem_http_fail', { server: t.server, nick: t.nick, imei: t.imei, operator: t.operator, clients: t.clients, error, status, url: cfg.url })) {
+            // 08.10: алерт только если цель жива НАПРЯМУЮ (кэш на тик).
+            // Упавший сайт ≠ больные модемы — иначе один мёртвый URL
+            // поднимал тревогу по всему парку разом.
+            if (tickState.targetAlive === null) {
+              try {
+                const d = await _fetchDirect(cfg.url, Math.max(5000, cfg.timeoutMs / 2));
+                const contentOk = d.ok && (d.status >= 200 && d.status < 400)
+                  && (!cfg.mustContain || (d.body || '').includes(cfg.mustContain))
+                  && (!cfg.mustNotContain || !(d.body || '').includes(cfg.mustNotContain));
+                tickState.targetAlive = !!contentOk;
+                if (!tickState.targetAlive) {
+                  logger.warn(`[HttpCheck] цель ${cfg.url} недоступна напрямую (${d.ok ? d.status : d.error}) — http_fail по парку подавлен`);
+                  logActivity('system', 'warn', 'httpcheck_target_down', cfg.url,
+                    `Цель недоступна напрямую: ${d.ok ? 'HTTP ' + d.status : d.error}`, {});
+                }
+              } catch (e) {
+                tickState.targetAlive = true;   // ошибка самой проверки — не глушим
+              }
+            }
+            if (!tickState.targetAlive) {
+              // цель лежит — не инкриминируем «модем сбой», стрик просто
+              // заморожен (когда сайт оживёт, стрик продолжит честно)
+            } else if (alerts.trigger('modem_http_fail', { server: t.server, nick: t.nick, imei: t.imei, operator: t.operator, clients: t.clients, error, status, url: cfg.url })) {
               st.failing = true;
             }
           }
