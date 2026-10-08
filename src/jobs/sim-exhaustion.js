@@ -174,6 +174,26 @@ function create(deps) {
     if (set.size === 0) return true;
     return set.has(String(op || '').toLowerCase());
   }
+  // 08.10: shared-бандлы (Moldcell, Moldtelecom — общий пакет на все симки).
+  // У одной симки такого оператора трафик кончиться НЕ может — пакет общий:
+  // одиночный «троттлинг» симки — это локальная проблема SIM/радио, а не
+  // исчерпание. Для них работает только операторский уровень (_operatorOverview
+  // ≥80% симок), per-SIM детекция и алерты выключены. Тип читаем из
+  // operator_packages (Настройки → Пакеты операторов).
+  let _sharedOpsCache = null;
+  function _isSharedOp(op) {
+    if (_sharedOpsCache === null) {
+      _sharedOpsCache = new Set();
+      try {
+        const raw = getSetting('operator_packages', '[]');
+        const pkgs = typeof raw === 'string' ? JSON.parse(raw || '[]') : raw;
+        for (const p of (Array.isArray(pkgs) ? pkgs : [])) {
+          if (p && p.type === 'shared' && p.operator) _sharedOpsCache.add(String(p.operator).toLowerCase());
+        }
+      } catch (_) { /* best-effort */ }
+    }
+    return _sharedOpsCache.has(String(op || '').toLowerCase());
+  }
   // Медиана dl модема за 14 дней из speed_monitor — «его нормальная скорость».
   // Нужна для относительного порога восстановления: медленный-by-design модем
   // (туннельный APN, 1–2 Мбит в норме) не должен застрять в состоянии из-за
@@ -330,6 +350,9 @@ function create(deps) {
   //   'cleared' — проба показала норму (ложная тревога);
   //   'retry'   — проба не удалась или бюджет/кулдаун не дали мерить.
   async function _probeAndFlag({ srv, nick, imei, op, now, budget, evidence }) {
+    // shared-бандл (Moldcell/Moldtelecom): одиночная симка «кончиться» не
+    // может — пропускаем per-SIM детекцию; уровень оператора сработает сам.
+    if (_isSharedOp(op)) return 'cleared';
     const key = srv + '|' + imei;
     if (budget.used >= budget.max) return 'retry';
     const lastProbe = probes.get(key) || 0;
@@ -502,6 +525,7 @@ function create(deps) {
     const results = await fetchAllServersDataCached();
     const now = Date.now();
     _baselineCache = null;   // нормы скорости перечитываем на каждый прогон
+    _sharedOpsCache = null;  // и типы пакетов (shared/per_sim) тоже
 
     // Индексы живого фида: по IMEI (восстановление — модем мог переехать) и
     // по server|nick (троттлинг-кандидаты из speed_monitor адресуются ником).
@@ -532,6 +556,9 @@ function create(deps) {
         const key = srv + '|' + md.IMEI;
         const nick = md.NICK || md.IMEI;
         if (!_symptomatic(m)) continue;
+        // shared-бандл (Moldcell/Moldtelecom): одиночная симка бандла не
+        // «исчерпывается» — пакет общий; уровень оператора смотрит сам.
+        if (_isSharedOp(_normOp(String((m.net_details || {}).CELLOP || '').trim(), srv))) continue;
         seenKeys.add(key);
         let st = state.get(key);
         if (!st) { st = { since: now, nick, alerted: false }; state.set(key, st); }
