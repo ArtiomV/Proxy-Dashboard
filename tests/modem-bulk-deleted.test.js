@@ -35,7 +35,7 @@ function mkDeps() {
     },
     ipTracking: {}, offlineAlertSent: {}, autoRecovery: {},
     appSettings: { modems_down_threshold: 1, modem_offline_threshold_min: 10, stale_modem_hours: 12 },
-    knownModems: { S4: { p1: { imei: '111', nick: 'MD_DEL' }, p2: { imei: '222', nick: 'MD_REAL' } } },
+    knownModems: { S4: { p1: { imei: '111', nick: 'MD_DEL', portName: 'testclient' }, p2: { imei: '222', nick: 'MD_REAL', portName: 'testclient' } } },
     _downSince: { 'S4_111': now - 5000 * 60000 },   // застрявшая запись удалённого модема
     _alertEnabledAt: 0,
     _metaOpGetByImei: () => null, _modemMetaUpsert() {}, _metaIccidGetByImei: () => null,

@@ -637,6 +637,12 @@ async function trackModems() {
             const cn=String(info.portName||'').trim();
             if (cn&&!/^random/i.test(cn)&&!incidentClients.includes(cn)) incidentClients.push(cn);
           }
+          // 08.10: на модеме нет ни одного клиентского порта — уведомления
+          // по нему не нужны (флапы «свободных» модемов спамили колокольчик).
+          // Алерты активируются, как только на модеме появляется клиент —
+          // incidentClients станет непустым на следующем тике. Парный
+          // recovered тоже не уйдёт (offline_alerted не ставится).
+          if (!incidentClients.length) continue;
           // 2026-07-16: раньше слали напрямую tgBot.sendMessage, минуя alerts —
           // алерт не попадал в колокольчик, не уважал вкл/выкл правила и не
           // логировался как остальные. Теперь — через общий alerts.trigger,
