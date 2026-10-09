@@ -1,0 +1,43 @@
+{
+  "generatedAt": "2026-10-09T11:13:19.768Z",
+  "meaning": "Acceptance checks: passed means expected correct behavior",
+  "scope": "isolated actual handlers/SQLite and frontend functions/VM; no full DOM, network or auth middleware test",
+  "sourceHashes": {
+    "src/routes/notifications.js": "399ec2d49fcf30d700f6c3c237fab686c676ae871b8d8b461dd22d7291129c53",
+    "public/js/admin.js": "d0c259d710944d3afff6af1b8839f6a089f40d35c7a8b2a7dde8b337279702ea"
+  },
+  "total": 7,
+  "passed": 5,
+  "checks": [
+    {
+      "name": "DEEP-70: critical filtered before LIMIT",
+      "passed": true
+    },
+    {
+      "name": "DEEP-70: unread filtered before LIMIT",
+      "passed": true
+    },
+    {
+      "name": "DEEP-70: equal-timestamp cursor pages have no gaps or duplicates",
+      "passed": true
+    },
+    {
+      "name": "DEEP-71: same name on two servers opens requested server",
+      "passed": true
+    },
+    {
+      "name": "DEEP-71: missing target must not open same name on another server",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\n1 !== 0\n"
+    },
+    {
+      "name": "DEEP-71: mismatched known IMEI must not fall back to another modem on same server",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\n1 !== 0\n"
+    },
+    {
+      "name": "DEEP-72: stale success and stale error cannot replace current filter",
+      "passed": true
+    }
+  ]
+}

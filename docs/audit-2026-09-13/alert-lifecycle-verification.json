@@ -1,0 +1,36 @@
+{
+  "generatedAt": "2026-10-09T11:16:25.020Z",
+  "meaning": "Acceptance: PASS means correct behavior",
+  "isolation": "real alerts and bot.sendMessage, injected API, SQLite migrations 032/076/103, controlled clock/timers; no network",
+  "total": 6,
+  "passed": 3,
+  "checks": [
+    {
+      "name": "DEEP-73: explicit 400 is logged and next trigger retries",
+      "passed": true
+    },
+    {
+      "name": "DEEP-74: recovery closes prior solved and new outage is accepted",
+      "passed": true
+    },
+    {
+      "name": "DEEP-74: solve on new episode creates a new active acknowledgement",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\n0 !== 1\n"
+    },
+    {
+      "name": "DEEP-74: old message button must not acknowledge a newer episode",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\n1 !== 0\n"
+    },
+    {
+      "name": "DEEP-74: old button must not remove buttons from a newer message",
+      "passed": false,
+      "error": "Expected values to be strictly equal:\n\ntrue !== false\n"
+    },
+    {
+      "name": "Isolation: no unmocked HTTPS requests",
+      "passed": true
+    }
+  ]
+}

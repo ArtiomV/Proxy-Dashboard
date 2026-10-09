@@ -17,7 +17,7 @@ const paths = ['server.js', 'schema.sql', 'package.json', 'package-lock.json', .
 function fingerprint() { return sha(paths.map(p => p + '\0' + sha(fs.readFileSync(path.join(ROOT, p)))).join('\n')); }
 const before = fingerprint();
 const results = [];
-for (let round = 3; round <= 20; round++) {
+for (let round = 3; round <= 21; round++) {
   const file = `reproduce-round${round}.cjs`;
   const full = path.join(__dirname, file);
   const started = Date.now();
@@ -33,7 +33,7 @@ for (let round = 3; round <= 20; round++) {
 const after = fingerprint();
 const report = { generatedAt: new Date().toISOString(), node: process.version,
   meaning: 'Positive assertions reproduce known defects. Not a complete audit or passing product regression suite.',
-  scope: 'round3..round20 only; earlier reproduce.cjs and tests/ not executed by this runner',
+  scope: 'round3..round21 only; earlier reproduce.cjs and tests/ not executed by this runner',
   fingerprintScope: 'server/schema/package manifests/src/public-js/migrations', fingerprintFiles: paths.length,
   sourceSha256Before: before, sourceSha256After: after, sourceUnchanged: before === after,
   total: results.length, confirmed: results.filter(r => r.confirmed).length, results };

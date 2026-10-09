@@ -51,6 +51,10 @@ function create(deps) {
   // рестарт = первый цикл без событий — это корректно, данных ещё нет).
   const _prevUp = new Map();
 
+  // 09.10: OfflineProbe — какие IMEI уже в состоянии «фид offline, прокси жив».
+  // Лог — только при входе новых IMEI в глитч, а не на каждом тике.
+  const _prevProbeGlitch = new Map();
+
   // 2026-10-01: подряд идущие сбои опроса по серверу — warn в system_log пишем
   // только со второго подряд (иначе микроблипы панели S4 каждые 5 мин шумят).
   const _failStreak = {};
@@ -389,10 +393,17 @@ async function trackModems() {
           } catch (_) { /* best-effort */ }
         });
         for (let i = 0; i < jobs.length; i += 8) await Promise.all(jobs.slice(i, i + 8).map(f => f()));
-        if (probeAlive.size) {
-          logger.info(`[OfflineProbe] ${server.name}: фид «offline» не подтверждён у ${probeAlive.size}/${offlineCands.length} — прокси-порты живы`);
+        // 09.10: в system_log пишем только ИЗМЕНЕНИЕ (новые IMEI в глитче) —
+        // хронический кейс (фид врёт сутками, модем при этом ротируется и
+        // работает) раньше спамил запись каждую минуту (800+/сутки).
+        const prevGlitch = _prevProbeGlitch.get(server.name) || new Set();
+        const currGlitch = new Set(probeAlive.keys());
+        const freshGlitch = [...currGlitch].filter(i => !prevGlitch.has(i));
+        _prevProbeGlitch.set(server.name, currGlitch);
+        if (freshGlitch.length) {
+          logger.info(`[OfflineProbe] ${server.name}: фид «offline» не подтверждён у ${freshGlitch.length}/${offlineCands.length} — прокси-порты живы`);
           logActivity('modem', 'info', 'offline_feed_glitch', server.name,
-            `Фид offline, но прокси живы: ${[...probeAlive.keys()].join(', ')}`, { count: probeAlive.size });
+            `Фид offline, но прокси живы: ${freshGlitch.join(', ')}`, { count: freshGlitch.length, total_glitched: currGlitch.size });
         }
       }
     } catch (e) { logger.warn('[OfflineProbe] ' + server.name + ': ' + e.message); }

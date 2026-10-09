@@ -1,329 +1,92 @@
 {
-  "generatedAt": "2026-09-14T19:12:57.759Z",
+  "generatedAt": "2026-10-09T11:11:11.697Z",
   "node": "v25.1.0",
   "meaning": "Positive assertions reproduce known defects. Not a complete audit or passing product regression suite.",
-  "scope": "round3..round20 only; earlier reproduce.cjs and tests/ not executed by this runner",
+  "scope": "round3..round21 only; earlier reproduce.cjs and tests/ not executed by this runner",
   "fingerprintScope": "server/schema/package manifests/src/public-js/migrations",
-  "fingerprintFiles": 271,
-  "sourceSha256Before": "718557cfdc6d922b6fbbe60ae24df185ae2faff07a28a407de7992229d2bb561",
-  "sourceSha256After": "718557cfdc6d922b6fbbe60ae24df185ae2faff07a28a407de7992229d2bb561",
+  "fingerprintFiles": 315,
+  "sourceSha256Before": "94b124cc592a36ca722953fabadd8b1f9ed185458bc949789fafa3f9a64f9026",
+  "sourceSha256After": "94b124cc592a36ca722953fabadd8b1f9ed185458bc949789fafa3f9a64f9026",
   "sourceUnchanged": true,
-  "total": 18,
-  "confirmed": 18,
+  "total": 19,
+  "confirmed": 2,
   "results": [
     {
       "file": "reproduce-round3.cjs",
       "sha256": "723e740fa15436c93f09c4df5d71bb965e5ccf99f79c0b4882ce338c5798de92",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 272,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "in-memory SQLite and local modules only",
-        "results": [
-          {
-            "finding": "DEEP-20/21",
-            "secondPurchaseDuplicate": true,
-            "balance": 900,
-            "chargeRow": {
-              "amount": 0,
-              "balance_before": 1000,
-              "balance_after": 900
-            }
-          },
-          {
-            "finding": "DEEP-19",
-            "bankEntriesForSamePayment": 2,
-            "balance": 1000
-          },
-          {
-            "finding": "DEEP-26",
-            "requestedDelete": [
-              "a",
-              "b"
-            ],
-            "actualDelete": [
-              "a",
-              "c"
-            ],
-            "remaining": [
-              "b"
-            ]
-          },
-          {
-            "finding": "DEEP-30",
-            "deliveredVersions": [
-              1,
-              3,
-              2
-            ]
-          },
-          {
-            "finding": "DEEP-33/34",
-            "probedPorts": [
-              10001,
-              10001
-            ],
-            "ignoredPort": 10002,
-            "redirectAccepted": 2
-          },
-          {
-            "finding": "DEEP-28",
-            "cacheLostTimestamp": true,
-            "sqliteHasTimestamp": true
-          },
-          {
-            "finding": "DEEP-29",
-            "incrementalWrites": [
-              100,
-              200
-            ],
-            "storedBytes": 100,
-            "scope": "actual repository conflict behavior; full aggregator scheduling needs regression test"
-          }
-        ]
-      }
+      "durationMs": 515,
+      "error": "Unexpected end of JSON input",
+      "stderr": "RangeError: Too many parameter values were provided\n    at /Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/src/billing/atomic.js:253:38\n    at sqliteTransaction (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/node_modules/better-sqlite3/lib/methods/transaction.js:65:24)\n    at Object.atomicDebit (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/src/billing/atomic.js:259:7)\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round3.cjs:40:10)\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round3.cjs:145:1)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n    at Module._load (node:internal/modules/cjs/loader:1299:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\n",
+      "payload": null
     },
     {
       "file": "reproduce-round4.cjs",
       "sha256": "1f0a82ef10a10c0434583984bb479992b62297d9368109ee458d5e0b3e609217",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 131,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "in-memory DB, local code, stubbed remote mutations",
-        "results": [
-          {
-            "finding": "DEEP-38",
-            "livePortUnbound": true,
-            "rosterEmpty": true,
-            "historicalOwnershipGranted": true
-          },
-          {
-            "finding": "DEEP-37",
-            "ownershipFeedServer": "S1",
-            "mutated": {
-              "action": "rotation",
-              "server": "S4",
-              "imei": "foreign-imei"
-            }
-          },
-          {
-            "finding": "DEEP-39",
-            "clientBlocked": true,
-            "resetSucceeded": true,
-            "mutated": {
-              "action": "reset",
-              "server": "S4"
-            }
-          },
-          {
-            "finding": "DEEP-41",
-            "writeFailed": true,
-            "runtimeAutoRebootEnabled": true
-          },
-          {
-            "finding": "DEEP-42",
-            "configuredGraceHours": 0,
-            "appliedGraceHours": 24
-          },
-          {
-            "finding": "DEEP-40",
-            "clientMissing": true,
-            "oldSessionAccepted": true,
-            "scope": "old-binding"
-          },
-          {
-            "finding": "DEEP-43",
-            "staleBackup": "dashboard-1999-01-01.db.gz",
-            "restoreTestOk": true
-          }
-        ]
-      }
+      "durationMs": 2549,
+      "error": "Unexpected end of JSON input",
+      "stderr": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- true\n\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round4.cjs:46:10) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: undefined,\n  expected: true,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n",
+      "payload": null
     },
     {
       "file": "reproduce-round5.cjs",
       "sha256": "74c1858d15a09aa08e670b5cacc7ce0b349ecd3210e29bad9dc54465984422c2",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 97,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "local modules with recording adapters",
-        "results": [
-          {
-            "finding": "DEEP-45",
-            "privateTariffPurchased": true
-          },
-          {
-            "finding": "DEEP-46",
-            "tariffType": "per_gb",
-            "clientBillingType": "per_modem",
-            "durationHours": 48,
-            "deadlinesCreated": 0,
-            "chargedAsMonthlyRate": 101.33
-          },
-          {
-            "finding": "DEEP-47",
-            "priceBeforeDeactivation": 3040,
-            "priceAfterDeactivation": 0
-          },
-          {
-            "finding": "DEEP-49",
-            "actualOwner": "alice",
-            "requestedOwner": "bob1",
-            "applyReturnedOk": false,
-            "reportedApplied": true
-          }
-        ]
-      }
+      "durationMs": 2972,
+      "error": "Unexpected end of JSON input",
+      "stderr": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ undefined\n- true\n\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round5.cjs:35:10) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: undefined,\n  expected: true,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n",
+      "payload": null
     },
     {
       "file": "reproduce-round6.cjs",
       "sha256": "4b944d17db71560c16eecd1f0b8fd2e787aa1d79f847fba680287ec9b7ddc8cd",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 125,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "local code, disabled timers, no network",
-        "results": [
-          {
-            "finding": "DEEP-50",
-            "twoConcurrentMovesToSameSpare": [
-              {
-                "port": "p1",
-                "target": "spare",
-                "owner": "carol"
-              },
-              {
-                "port": "p2",
-                "target": "spare",
-                "owner": "carol"
-              }
-            ]
-          },
-          {
-            "finding": "DEEP-51",
-            "rosterOwners": [
-              "alice",
-              "bob"
-            ],
-            "actualOwnerMoved": "carol"
-          },
-          {
-            "finding": "DEEP-52",
-            "applyFailedTwice": true,
-            "reportedResults": [
-              "ok",
-              "ok"
-            ]
-          },
-          {
-            "finding": "DEEP-53",
-            "clientBlocked": true,
-            "credentialsReturned": 1
-          }
-        ]
-      }
+      "durationMs": 984,
+      "error": "Unexpected end of JSON input",
+      "stderr": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n1 !== 2\n\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round6.cjs:30:10)\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round6.cjs:54:1)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n    at Module._load (node:internal/modules/cjs/loader:1299:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 1,\n  expected: 2,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n",
+      "payload": null
     },
     {
       "file": "reproduce-round7.cjs",
       "sha256": "dbf95933ebf15bb522051f1de668a13f2272e7bfaabb317d4fb02a78974f899b",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 99,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "SQLite in memory and local handler; no network",
-        "results": [
-          {
-            "finding": "DEEP-54",
-            "secondDocumentIgnored": true,
-            "durableDocuments": 1,
-            "scope": "repository gate; concurrent bank route requires integration regression"
-          },
-          {
-            "finding": "DEEP-55",
-            "changedSignedAct": true,
-            "statusAfterEdit": "signed",
-            "totalAfterEdit": 200
-          }
-        ]
-      }
+      "durationMs": 2675,
+      "error": "Unexpected end of JSON input",
+      "stderr": "node:assert:149\n  throw new AssertionError(obj);\n  ^\n\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n100 !== 200\n\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round7.cjs:34:8)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n    at Module._load (node:internal/modules/cjs/loader:1299:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 100,\n  expected: 200,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n\nNode.js v25.1.0\n",
+      "payload": null
     },
     {
       "file": "reproduce-round8.cjs",
       "sha256": "a79d27e4adab58f144d2f535563ccda07261a4d5311c1e5f18fe601b7f7a8ee8",
-      "confirmed": true,
-      "exitCode": 0,
-      "signal": null,
-      "durationMs": 123,
-      "error": null,
+      "confirmed": false,
+      "exitCode": null,
+      "signal": "SIGTERM",
+      "durationMs": 10797,
+      "error": "spawnSync /opt/homebrew/Cellar/node/25.1.0/bin/node ETIMEDOUT",
       "stderr": "",
-      "payload": {
-        "isolation": "real handlers, SQLite repositories, temporary files; bank stubbed",
-        "results": [
-          {
-            "finding": "DEEP-54",
-            "bankCreates": 2,
-            "successResponses": 2,
-            "memoryBills": 2,
-            "sqliteBills": 1
-          },
-          {
-            "finding": "DEEP-57/54",
-            "bankDeleteStatus": 500,
-            "responseOk": true,
-            "originalLocalBillDeleted": true,
-            "previouslyIgnoredBillPersistedAfterDeletion": true
-          },
-          {
-            "finding": "DEEP-56",
-            "sqliteDeleteRejected": true,
-            "fileExists": false,
-            "metadataStillExists": true
-          }
-        ]
-      }
+      "payload": null
     },
     {
       "file": "reproduce-round9.cjs",
       "sha256": "8cb9a774714893443e465227b31c7503e3718c07f123e2c794eb67b1b6b2bfc5",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 49,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "browser functions in VM with simulated DOM/fetch",
-        "results": [
-          {
-            "finding": "DEEP-58",
-            "unrelatedMutationClearedUnsavedSettings": true
-          },
-          {
-            "finding": "DEEP-59",
-            "receivedVersions": [
-              2,
-              1
-            ],
-            "finalDisplayedStateVersion": 1
-          }
-        ]
-      }
+      "durationMs": 5531,
+      "error": "Unexpected end of JSON input",
+      "stderr": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n'1' !== ''\n\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round9.cjs:18:10) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: '1',\n  expected: '',\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n",
+      "payload": null
     },
     {
       "file": "reproduce-round10.cjs",
@@ -331,7 +94,7 @@
       "confirmed": true,
       "exitCode": 0,
       "signal": null,
-      "durationMs": 114,
+      "durationMs": 6302,
       "error": null,
       "stderr": "",
       "payload": {
@@ -347,265 +110,148 @@
     {
       "file": "reproduce-round11.cjs",
       "sha256": "5e64f6868442716d42bf4750c083a34c5f58fad39f8771ef5b611f30652f3909",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 107,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "all HTTP/TCP adapters stubbed; no network",
-        "results": [
-          {
-            "finding": "DEEP-61",
-            "privateHostsPassedToNetworkAdapter": [
-              "localhost",
-              "::ffff:127.0.0.1"
-            ]
-          },
-          {
-            "finding": "DEEP-62",
-            "httpStatus": 407,
-            "tcpConnectSucceeded": true,
-            "reportedWorking": true
-          },
-          {
-            "finding": "DEEP-60",
-            "nullProxyElementRejectsHandler": true
-          }
-        ]
-      }
+      "durationMs": 1480,
+      "error": "Unexpected end of JSON input",
+      "stderr": "TypeError: net.isIP is not a function\n    at _resolvePublicHost (evalmachine.<anonymous>:69:11)\n    at checkOneProxy (evalmachine.<anonymous>:109:28)\n    at evalmachine.<anonymous>:187:59\n    at Array.map (<anonymous>)\n    at evalmachine.<anonymous>:187:50\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round11.cjs:35:9)\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round11.cjs:50:1)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n",
+      "payload": null
     },
     {
       "file": "reproduce-round12.cjs",
       "sha256": "ae6c111d2453b113ff35c6946cbdfb05062e825ec60bd878e617e438855297b6",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 110,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "real route handlers and SQLite in memory, no network",
-        "results": [
-          {
-            "finding": "DEEP-63",
-            "actualOlderDayBytes": 100,
-            "adminAliceBytes": 100,
-            "adminBobBytes": 100
-          },
-          {
-            "finding": "DEEP-64",
-            "authenticatedClient": "alice",
-            "returnedLaterDayOwner": "bob"
-          }
-        ]
-      }
+      "durationMs": 1714,
+      "error": "Unexpected end of JSON input",
+      "stderr": "TypeError: Cannot read properties of undefined (reading 'in')\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round12.cjs:29:40)\n",
+      "payload": null
     },
     {
       "file": "reproduce-round13.cjs",
       "sha256": "e112673bf3abf0ecd6ab509fd563278010b491b7aab1bcb1c3ac9dcc872fd224",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 84,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "real route, repositories, SQLite in memory",
-        "results": [
-          {
-            "finding": "DEEP-65",
-            "forceReportedBytes": 100,
-            "actualPersistedBytes": 1000
-          },
-          {
-            "finding": "DEEP-66",
-            "transactionRolledBack": true,
-            "sqliteRows": 0,
-            "memoryBytes": 100
-          }
-        ]
-      }
+      "durationMs": 895,
+      "error": "Unexpected end of JSON input",
+      "stderr": "\n/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/node_modules/better-sqlite3/lib/methods/wrappers.js:5\n\treturn this[cppdb].prepare(sql, this, false);\n\t                   ^\nSqliteError: table traffic_hourly has no column named raw_bytes_in\n    at Database.prepare (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/node_modules/better-sqlite3/lib/methods/wrappers.js:5:21)\n    at Object.init (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/src/db/traffic.js:36:23)\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round13.cjs:12:54)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n    at Module._load (node:internal/modules/cjs/loader:1299:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5) {\n  code: 'SQLITE_ERROR'\n}\n\nNode.js v25.1.0\n",
+      "payload": null
     },
     {
       "file": "reproduce-round14.cjs",
       "sha256": "be0af5d7848833b2fdc46e949167714b2527a3a2a291ed7150c021e8b377f676",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 47,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "isolation": "real aggregator and scheduler, SQLite in memory, controlled timers",
-        "results": [
-          {
-            "finding": "DEEP-35",
-            "feedFailed": true,
-            "markedHourRecorded": true,
-            "retriesScheduled": 0
-          },
-          {
-            "finding": "DEEP-67",
-            "stopCalledBeforeRetry": true,
-            "attemptsAfterStop": 1
-          }
-        ]
-      }
+      "durationMs": 1002,
+      "error": "Unexpected end of JSON input",
+      "stderr": "AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:\n\n  assert.ok(db.prepare(\"SELECT value FROM kv_store WHERE key='hourly_last_recorded'\").get())\n\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round14.cjs:34:12) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: undefined,\n  expected: true,\n  operator: '==',\n  diff: 'simple'\n}\n",
+      "payload": null
     },
     {
       "file": "reproduce-round15.cjs",
       "sha256": "a66b3ae2fecc7fdc197b788c52c586dac81522816382b8e30967783eee1f635c",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 51,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "finding": "DEEP-68",
-        "isolation": "real uptime query, SQLite in memory",
-        "historyChecksBefore": 100,
-        "historicalOperatorAfterMetadataUpdate": "new-operator",
-        "historyRowsAfterMetadataDelete": 0,
-        "originalMeasurementsStillStored": true
-      }
+      "durationMs": 653,
+      "error": "Unexpected end of JSON input",
+      "stderr": "node:assert:149\n  throw new AssertionError(obj);\n  ^\n\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n1 !== 0\n\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round15.cjs:17:10)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n    at Module._load (node:internal/modules/cjs/loader:1299:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 1,\n  expected: 0,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n\nNode.js v25.1.0\n",
+      "payload": null
     },
     {
       "file": "reproduce-round16.cjs",
       "sha256": "2310973525db6780c85607fd6ea7060632d1929c158ab4b511520e95a08e4db2",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 181,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "findings": [
-          "DEEP-70",
-          "DEEP-71",
-          "DEEP-72"
-        ],
-        "isolation": "actual route callbacks with SQLite in memory; actual frontend functions in VM with controlled promises",
-        "unreadCriticalBadge": 1,
-        "criticalListCount": 0,
-        "unreadListCount": 0,
-        "otherAdminUnread": 201,
-        "notificationServer": "S4",
-        "openedServer": "S1",
-        "activeFilter": "critical",
-        "staleResponsePriority": "info"
-      }
+      "durationMs": 3178,
+      "error": "Unexpected end of JSON input",
+      "stderr": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\n1 !== 0\n\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round16.cjs:37:10)\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round16.cjs:71:1)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n    at Module._load (node:internal/modules/cjs/loader:1299:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 1,\n  expected: 0,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n",
+      "payload": null
     },
     {
       "file": "reproduce-round17.cjs",
       "sha256": "223c043f36afd49d92d312137e79ca35bac815434804ec4a97d4f73384bc1ce0",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 62,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "findings": [
-          "DEEP-73",
-          "DEEP-74"
-        ],
-        "isolation": "actual alerts module with controlled clock/timer; actual bot.sendMessage with injected API; SQLite in memory",
-        "rejectedFirstSendReturnedAccepted": true,
-        "rejectionLogged": false,
-        "retrySuppressed": true,
-        "solvedSurvivesRecovery": true,
-        "newOutageAfterTwoHoursSuppressed": true,
-        "limitation": "recovery public calls replayed; full modem-tracking job and live Telegram not executed"
-      }
+      "durationMs": 1056,
+      "error": "Unexpected end of JSON input",
+      "stderr": "AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n\ntrue !== false\n\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round17.cjs:38:10) {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: true,\n  expected: false,\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n",
+      "payload": null
     },
     {
       "file": "reproduce-round18.cjs",
       "sha256": "b7307a3089265674a4e0b3b4212e6d25d271b8c6ca8e0effa785bd6b799c989c",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 55,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "findings": [
-          "DEEP-75",
-          "DEEP-76",
-          "DEEP-77"
-        ],
-        "isolation": "actual incident and ping factories, SQLite in memory, injected SQLite trigger; no network",
-        "restart": {
-          "healthySamples": 9,
-          "recoveryCalls": 0,
-          "incidentStillOpen": true
-        },
-        "failedClose": {
-          "closedEventEmitted": true,
-          "removedFromMemory": true,
-          "durableState": "open",
-          "restoredAsOpen": true
-        },
-        "suppressedFailure": {
-          "badSamples": 10,
-          "openAttempts": 1,
-          "recoveryWithoutAcceptedOpen": true
-        },
-        "limitation": "factory reinitialization models restart; full server boot not executed"
-      }
+      "durationMs": 476,
+      "error": "Unexpected end of JSON input",
+      "stderr": "\n/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/node_modules/better-sqlite3/lib/methods/wrappers.js:5\n\treturn this[cppdb].prepare(sql, this, false);\n\t                   ^\nSqliteError: table modem_ping has no column named measured_at\n    at Database.prepare (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/node_modules/better-sqlite3/lib/methods/wrappers.js:5:21)\n    at Object.create (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/src/jobs/modem-ping.js:38:22)\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round18.cjs:28:24)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n    at Module._load (node:internal/modules/cjs/loader:1299:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5) {\n  code: 'SQLITE_ERROR'\n}\n\nNode.js v25.1.0\n",
+      "payload": null
     },
     {
       "file": "reproduce-round19.cjs",
       "sha256": "f033141f19595875b4944c808d4656eda0ff06fad56ee251b69fd32a69c08461",
-      "confirmed": true,
-      "exitCode": 0,
+      "confirmed": false,
+      "exitCode": 1,
       "signal": null,
-      "durationMs": 94,
-      "error": null,
-      "stderr": "",
-      "payload": {
-        "findings": [
-          "DEEP-78",
-          "DEEP-79"
-        ],
-        "isolation": "real incident manager and SQLite in memory; controlled payloads, no network",
-        "metadata": {
-          "exactImeiProvided": true,
-          "selectedOperator": "wrong-operator"
-        },
-        "regroup": {
-          "incidentsBeforeRecovery": 2,
-          "recoveredModems": 5,
-          "incidentsStillOpen": 1,
-          "stuckMember": "S2|i1",
-          "stuckOperator": "operator-B"
-        },
-        "limitation": "operator-change payload sequence supplied directly; upstream feed change not simulated"
-      }
+      "durationMs": 638,
+      "error": "Unexpected end of JSON input",
+      "stderr": "node:assert:149\n  throw new AssertionError(obj);\n  ^\n\nAssertionError [ERR_ASSERTION]: Expected values to be strictly equal:\n+ actual - expected\n\n+ 'correct-operator'\n- 'wrong-operator'\n\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round19.cjs:18:10)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n    at Module._load (node:internal/modules/cjs/loader:1299:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47 {\n  generatedMessage: true,\n  code: 'ERR_ASSERTION',\n  actual: 'correct-operator',\n  expected: 'wrong-operator',\n  operator: 'strictEqual',\n  diff: 'simple'\n}\n\nNode.js v25.1.0\n",
+      "payload": null
     },
     {
       "file": "reproduce-round20.cjs",
       "sha256": "301fc806da13f2172443c5498f45a76787ccd753cbdf3d831379ebce162a811f",
+      "confirmed": false,
+      "exitCode": 1,
+      "signal": null,
+      "durationMs": 993,
+      "error": "Unexpected end of JSON input",
+      "stderr": "TypeError: Cannot read properties of null (reading 'id')\n    at main (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round20.cjs:17:89)\n    at Object.<anonymous> (/Users/artiom/Работа/Claude-проекты/Proxy-Dashboard/docs/audit-2026-09-13/reproduce-round20.cjs:46:1)\n    at Module._compile (node:internal/modules/cjs/loader:1760:14)\n    at Object..js (node:internal/modules/cjs/loader:1892:10)\n    at Module.load (node:internal/modules/cjs/loader:1480:32)\n    at Module._load (node:internal/modules/cjs/loader:1299:12)\n    at TracingChannel.traceSync (node:diagnostics_channel:328:14)\n    at wrapModuleLoad (node:internal/modules/cjs/loader:245:24)\n    at Module.executeUserEntryPoint [as runMain] (node:internal/modules/run_main:154:5)\n    at node:internal/main/run_main_module:33:47\n",
+      "payload": null
+    },
+    {
+      "file": "reproduce-round21.cjs",
+      "sha256": "2e564256d8e9ec123fae5d080233c5d1977953700d7d4e186e68be09cebbc9cf",
       "confirmed": true,
       "exitCode": 0,
       "signal": null,
-      "durationMs": 136,
+      "durationMs": 757,
       "error": null,
       "stderr": "",
       "payload": {
-        "findings": [
-          "DEEP-80",
-          "DEEP-81"
+        "finding": "DEEP-82",
+        "isolation": "actual pure fleet functions; no database/network",
+        "cases": [
+          {
+            "lastOnline": "missing",
+            "offline": 1,
+            "working": 1,
+            "workingAfterSevenDays": 1,
+            "disconnectedAfterSevenDays": 0,
+            "clientWorking": 1
+          },
+          {
+            "lastOnline": "invalid-date",
+            "offline": 1,
+            "working": 1,
+            "workingAfterSevenDays": 1,
+            "disconnectedAfterSevenDays": 0,
+            "clientWorking": 1
+          }
         ],
-        "isolation": "actual maintenance, collector, fleet and bell persistence; SQLite in memory, timers disabled, no network",
-        "sameNickWindowMatchesServers": [
-          "S1",
-          "S4"
-        ],
-        "serverMaintenanceActive": true,
-        "offlineEventPersistedDuringMaintenance": true
+        "controlWithKnownOldTimestamp": {
+          "working": 0,
+          "disconnected": 1
+        },
+        "limitation": "absence/invalid timestamp supplied directly; production prevalence and full tracking lifecycle not measured"
       }
     }
   ]
