@@ -83,8 +83,8 @@ function buildDayContext(date) {
       ),
       http_checks AS (
         SELECT server AS server_name,
-               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'no_valid_client_credentials') THEN 1 ELSE 0 END) AS total_http,
-               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'no_valid_client_credentials') THEN 1 ELSE 0 END) AS failed_http
+               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS total_http,
+               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS failed_http
         FROM modem_httpcheck
         WHERE ts >= ? AND ts < ?
         GROUP BY server
@@ -155,8 +155,8 @@ function buildDayContext(date) {
       ),
       h AS (
         SELECT server, nick,
-               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'no_valid_client_credentials') THEN 1 ELSE 0 END) AS total,
-               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'no_valid_client_credentials') THEN 1 ELSE 0 END) AS failures
+               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS total,
+               SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS failures
         FROM modem_httpcheck WHERE ts >= ? AND ts < ? GROUP BY server, nick
       )
       SELECT k.server, k.nick,
@@ -194,7 +194,7 @@ function buildDayContext(date) {
     ctx.http_errors = db.prepare(`
       SELECT server, nick, error, COUNT(*) AS count
       FROM modem_httpcheck WHERE ts >= ? AND ts < ?
-        AND TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'no_valid_client_credentials')
+        AND TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei')
       GROUP BY server, nick, error ORDER BY count DESC, server, nick LIMIT 50
     `).all(b.fromIso, b.toIso);
   } catch (e) { logger.warn('[AIInsights] HTTP errors query: ' + e.message); ctx.http_errors = []; }

@@ -415,17 +415,26 @@ async function buildDailySummary(date) {
     topError = Object.entries(byAction).sort((a, b) => b[1] - a[1])[0];
   }
 
-  // Connectivity issues from ProxySmart's own per-modem ping destination.
-  const proxyIssues = db.prepare(`
-    SELECT server AS server_name, nick,
-           AVG(latency_ms) FILTER (WHERE ok = 1) AS avg_ms,
-           COUNT(*) AS total,
-           AVG(COALESCE(loss_pct, CASE WHEN ok = 1 THEN 0 ELSE 100 END)) AS loss_pct
-    FROM modem_ping
-    WHERE ts >= ? AND ts < ?
-    GROUP BY server, nick
-    HAVING (avg_ms > 1500 OR loss_pct > 10)
-  `).all(utcStartStr, utcEndStr);
+  // 09.10: «проблемные прокси» — по HTTP-чекам (реальный сигнал), а не по
+  // ping_stats: канарейка ProxySmart (8.8.8.8) фильтруется мобильными
+  // операторами (86% «потерь» при живом трафике — подтверждено 09.10:
+  // TCP до 8.8.8.8 через модем не проходит, сайты открываются).
+  // Считаем модем проблемным, если доля реальных фейлов чека >20% за день.
+  let proxyIssues = [];
+  try {
+    proxyIssues = db.prepare(`
+      SELECT server AS server_name, nick,
+             SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS failures,
+             SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS total
+      FROM modem_httpcheck
+      WHERE ts >= ? AND ts < ?
+      GROUP BY server, nick
+      HAVING total >= 3 AND failures * 1.0 / total > 0.2
+    `).all(utcStartStr, utcEndStr);
+  } catch (e) {
+    // минимальная схема без modem_httpcheck (тесты) — блок молча пропускаем
+    if (logger && logger.warn) logger.warn('[DailySummary] proxy issues (httpcheck) query failed: ' + (e.message || e));
+  }
 
   // Auto-reboots
   const rebootRow = db.prepare(`
@@ -463,24 +472,27 @@ async function buildDailySummary(date) {
   // 2026-09-26: дельта к вчера — «35» без контекста ни о чём не говорит.
   let issuesDelta = '';
   try {
-    const prevRow = db.prepare(`
-      SELECT COUNT(*) AS n FROM (
-        SELECT server, nick FROM modem_ping
-        WHERE ts >= ? AND ts < ?
-        GROUP BY server, nick
-        HAVING (AVG(latency_ms) FILTER (WHERE ok = 1) > 1500
-                OR AVG(COALESCE(loss_pct, CASE WHEN ok = 1 THEN 0 ELSE 100 END)) > 10)
-      )
-    `).get(
-      new Date(utcStart.getTime() - 86400000).toISOString().slice(0, 16).replace('T', ' '),
-      utcStartStr
-    );
-    if (prevRow) {
-      const d = proxyIssues.length - (prevRow.n || 0);
-      issuesDelta = d === 0 ? ' (= вчера)' : d > 0 ? ` (▲ +${d} к вчера)` : ` (▼ −${-d} к вчера)`;
-    }
+    let prevN = 0;
+    try {
+      const prevRow = db.prepare(`
+        SELECT COUNT(*) AS n FROM (
+          SELECT server, nick FROM modem_httpcheck
+          WHERE ts >= ? AND ts < ?
+            AND TRIM(COALESCE(error, '')) NOT IN ('offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei')
+          GROUP BY server, nick
+          HAVING COUNT(*) >= 3
+             AND SUM(CASE WHEN TRIM(COALESCE(error, '')) != '' THEN 1 ELSE 0 END) * 1.0 / COUNT(*) > 0.2
+        )
+      `).get(
+        new Date(utcStart.getTime() - 86400000).toISOString().slice(0, 16).replace('T', ' '),
+        utcStartStr
+      );
+      prevN = (prevRow && prevRow.n) || 0;
+    } catch (_) { /* минимальная схема без таблицы */ }
+    const d = proxyIssues.length - prevN;
+    issuesDelta = d === 0 ? ' (= вчера)' : d > 0 ? ` (▲ +${d} к вчера)` : ` (▼ −${-d} к вчера)`;
   } catch (_) {}
-  if (proxyIssues.length) lines.push(`Проблемных прокси: ${proxyIssues.length} (пинг >1500мс или потери >10%)${issuesDelta}`);
+  if (proxyIssues.length) lines.push(`Проблемных прокси: ${proxyIssues.length} (доля фейлов http-чека >20%)${issuesDelta}`);
   if (rebootRow && rebootRow.n > 0) lines.push(`Авто-перезагрузок: ${rebootRow.n} (успешных ${rebootRow.ok}/${rebootRow.n})`);
   if (errorCount) lines.push(`Ошибок в системном логе: ${errorCount}${topError ? ` (чаще всего: ${escHtml(topError[0])} ×${topError[1]})` : ''}`);
   // Correlated incidents are the useful overnight signal: one operator/server

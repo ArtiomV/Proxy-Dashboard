@@ -15,6 +15,13 @@ const tgSummary = require('../src/telegram/daily_summary.js');
 
 const SCHEMA = fs.readFileSync(path.join(__dirname, '..', 'schema.sql'), 'utf8');
 const MODEM_PING_MIGRATION = fs.readFileSync(path.join(__dirname, '..', 'migrations', '074_modem_ping.sql'), 'utf8');
+// 09.10: «Проблемных прокси» считается по modem_httpcheck (миграция 075);
+// в фикстурах создаём только нужную таблицу, без modem_rate.
+const HTTPCHECK_DDL = `CREATE TABLE IF NOT EXISTS modem_httpcheck (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, server TEXT NOT NULL,
+  nick TEXT NOT NULL, status INTEGER, total_ms INTEGER, content_ok INTEGER,
+  error TEXT NOT NULL DEFAULT ''
+)`;
 
 let db, warns, logger;
 
@@ -22,6 +29,7 @@ function boot() {
   db = new Database(':memory:');
   db.exec(SCHEMA);
   db.exec(MODEM_PING_MIGRATION);
+  db.exec(HTTPCHECK_DDL);
   // auto_reboot_log создаётся миграцией (не входит в baseline schema.sql);
   // блок инфраструктуры читает его без try/catch.
   db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (
@@ -83,6 +91,28 @@ describe('C7: daily_summary — блок «Инфраструктура» про
     expect(text).toContain('💰 <b>Финансы</b>');
   });
 
+  // 09.10: «Проблемных прокси» — доля реальных фейлов http-чека >20% за день
+  // (≥3 чеков). rotating/offline/acl-скипы не считаются ни фейлами, ни попытками.
+  it('проблемные прокси — по доле фейлов http-чека >20%, скип-категории не в счёте', async () => {
+    const ins = db.prepare('INSERT INTO modem_httpcheck (ts, server, nick, error) VALUES (?,?,?,?)');
+    // MD_bad: 2 фейла из 4 (50%) → проблемный
+    ins.run('2026-08-09 10:00:00', 'S1', 'MD_bad', '');
+    ins.run('2026-08-09 10:05:00', 'S1', 'MD_bad', 'ECONNRESET');
+    ins.run('2026-08-09 10:10:00', 'S1', 'MD_bad', '');
+    ins.run('2026-08-09 10:15:00', 'S1', 'MD_bad', 'timeout');
+    // MD_skip: rotating/offline выкинуты из знаменателя → 0 валидных чеков < 3
+    ins.run('2026-08-09 10:00:00', 'S1', 'MD_skip', 'rotating');
+    ins.run('2026-08-09 10:05:00', 'S1', 'MD_skip', 'offline');
+    ins.run('2026-08-09 10:10:00', 'S1', 'MD_skip', 'rotating');
+    // MD_few: 2 чека — ниже порога ≥3
+    ins.run('2026-08-09 10:00:00', 'S1', 'MD_few', 'boom');
+    ins.run('2026-08-09 10:05:00', 'S1', 'MD_few', 'boom');
+
+    const { text } = await tgSummary.buildDailySummary(DAY);
+    expect(text).toContain('Проблемных прокси: 1 (доля фейлов http-чека >20%)');
+    expect(warns).toEqual([]);
+  });
+
   it('утром считает только реально отложенные ночные Telegram-события', async () => {
     db.exec(`CREATE TABLE notifications (
       id INTEGER PRIMARY KEY, rule_id TEXT, title TEXT, priority TEXT,
@@ -107,6 +137,7 @@ describe('D3: daily_summary — дайджест модемов, лежащих 
     db = new Database(':memory:');
     db.exec(SCHEMA);
     db.exec(MODEM_PING_MIGRATION);
+  db.exec(HTTPCHECK_DDL);
     db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       rebooted_at TEXT NOT NULL, status TEXT
@@ -171,6 +202,7 @@ describe('daily_summary — должники без прокси не попад
     db = new Database(':memory:');
     db.exec(SCHEMA);
     db.exec(MODEM_PING_MIGRATION);
+  db.exec(HTTPCHECK_DDL);
     db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       rebooted_at TEXT NOT NULL, status TEXT
@@ -222,6 +254,7 @@ describe('daily_summary — ротации: аномалии по операто
     db = new Database(':memory:');
     db.exec(SCHEMA);
     db.exec(MODEM_PING_MIGRATION);
+  db.exec(HTTPCHECK_DDL);
     db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       rebooted_at TEXT NOT NULL, status TEXT
@@ -314,6 +347,7 @@ describe('daily_summary — per_gb блок по эффективной цене
     db = new Database(':memory:');
     db.exec(SCHEMA);
     db.exec(MODEM_PING_MIGRATION);
+  db.exec(HTTPCHECK_DDL);
     db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (id INTEGER PRIMARY KEY AUTOINCREMENT, rebooted_at TEXT NOT NULL, status TEXT)`);
     db.exec(`CREATE TABLE IF NOT EXISTS tariffs (id INTEGER PRIMARY KEY, name TEXT, price REAL)`);
     warns = [];
@@ -339,6 +373,7 @@ describe('daily_summary — per_gb блок по эффективной цене
     db = new Database(':memory:');
     db.exec(SCHEMA);
     db.exec(MODEM_PING_MIGRATION);
+  db.exec(HTTPCHECK_DDL);
     db.exec(`CREATE TABLE IF NOT EXISTS auto_reboot_log (id INTEGER PRIMARY KEY AUTOINCREMENT, rebooted_at TEXT NOT NULL, status TEXT)`);
     db.exec(`CREATE TABLE IF NOT EXISTS tariffs (id INTEGER PRIMARY KEY, name TEXT, price REAL)`);
     db.prepare("INSERT INTO tariffs (id, name, price) VALUES (7, 'Корп', 25)").run();
