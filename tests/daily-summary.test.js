@@ -96,17 +96,17 @@ describe('C7: daily_summary — блок «Инфраструктура» про
   it('проблемные прокси — по доле фейлов http-чека >20%, скип-категории не в счёте', async () => {
     const ins = db.prepare('INSERT INTO modem_httpcheck (ts, server, nick, error) VALUES (?,?,?,?)');
     // MD_bad: 2 фейла из 4 (50%) → проблемный
-    ins.run('2026-08-09 10:00:00', 'S1', 'MD_bad', '');
-    ins.run('2026-08-09 10:05:00', 'S1', 'MD_bad', 'ECONNRESET');
-    ins.run('2026-08-09 10:10:00', 'S1', 'MD_bad', '');
-    ins.run('2026-08-09 10:15:00', 'S1', 'MD_bad', 'timeout');
+    ins.run('2026-08-09T10:00:00', 'S1', 'MD_bad', '');
+    ins.run('2026-08-09T10:05:00', 'S1', 'MD_bad', 'ECONNRESET');
+    ins.run('2026-08-09T10:10:00', 'S1', 'MD_bad', '');
+    ins.run('2026-08-09T10:15:00', 'S1', 'MD_bad', 'timeout');
     // MD_skip: rotating/offline выкинуты из знаменателя → 0 валидных чеков < 3
-    ins.run('2026-08-09 10:00:00', 'S1', 'MD_skip', 'rotating');
-    ins.run('2026-08-09 10:05:00', 'S1', 'MD_skip', 'offline');
-    ins.run('2026-08-09 10:10:00', 'S1', 'MD_skip', 'rotating');
+    ins.run('2026-08-09T10:00:00', 'S1', 'MD_skip', 'rotating');
+    ins.run('2026-08-09T10:05:00', 'S1', 'MD_skip', 'offline');
+    ins.run('2026-08-09T10:10:00', 'S1', 'MD_skip', 'rotating');
     // MD_few: 2 чека — ниже порога ≥3
-    ins.run('2026-08-09 10:00:00', 'S1', 'MD_few', 'boom');
-    ins.run('2026-08-09 10:05:00', 'S1', 'MD_few', 'boom');
+    ins.run('2026-08-09T10:00:00', 'S1', 'MD_few', 'boom');
+    ins.run('2026-08-09T10:05:00', 'S1', 'MD_few', 'boom');
 
     const { text } = await tgSummary.buildDailySummary(DAY);
     expect(text).toContain('Проблемных прокси: 1 (доля фейлов http-чека >20%)');
@@ -264,7 +264,8 @@ describe('daily_summary — ротации: аномалии по операто
     tgSummary.init({ db, logger, clientById: new Map(), getSetting: (_k, dflt) => dflt, aiInsights: null });
   }
   // МСК-день 2026-08-09 = UTC [2026-08-08 21:00, 2026-08-09 21:00)
-  const T = (hh, mm) => `2026-08-09 ${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
+  // rotation_log хранит started_at в формате ProxySmart 'YYYY-MM-DD@hh:mm:ss' (МСК).
+  const T = (hh, mm) => `2026-08-09@${String(hh).padStart(2, '0')}:${String(mm).padStart(2, '0')}:00`;
   function addRot(server, nick, changed, startedAt) {
     db.prepare('INSERT INTO rotation_log (server_name, nick, old_ip, new_ip, started_at, ended_at, took_sec) VALUES (?,?,?,?,?,?,5)')
       .run(server, nick, '1.1.1.1', changed ? '2.2.2.2' : '1.1.1.1', startedAt, startedAt);
@@ -316,7 +317,7 @@ describe('daily_summary — ротации: аномалии по операто
     bootRot();
     // RO1_25: 12 фейлов из 12, часть — в предыдущие дни окна 7д
     for (let i = 0; i < 6; i++) addRot('RO1', 'RO1_25', false, T(13, i));
-    for (let i = 0; i < 6; i++) addRot('RO1', 'RO1_25', false, `2026-08-05 10:${String(i).padStart(2, '0')}:00`);
+    for (let i = 0; i < 6; i++) addRot('RO1', 'RO1_25', false, `2026-08-05@10:${String(i).padStart(2, '0')}:00`);
     // MD_47: 10 ротаций, 6 фейлов (60% < 80%) — не «застрявшая»
     for (let i = 0; i < 10; i++) addRot('S3', 'MD_47', i >= 6, T(14, i));
 

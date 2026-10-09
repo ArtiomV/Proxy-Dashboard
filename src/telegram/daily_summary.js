@@ -209,6 +209,16 @@ async function buildDailySummary(date) {
   const utcEnd   = new Date(date + 'T00:00:00Z'); utcEnd.setUTCHours(utcEnd.getUTCHours() + 21);
   const utcStartStr = utcStart.toISOString().slice(0, 16).replace('T', ' ');
   const utcEndStr   = utcEnd.toISOString().slice(0, 16).replace('T', ' ');
+  // 09.10: в БД смешаны три формата дат, строковое сравнение с чужим форматом
+  // даёт неверное окно ('T'/'@' > ' ' — захватывались строки не того дня):
+  //   • traffic_hourly/system_log/notifications — 'YYYY-MM-DD hh:mm' (UTC) → utcStartStr
+  //   • modem_httpcheck/modem_ping/server_downtime — ISO 'T...Z' (UTC) → iso*
+  //   • rotation_log — формат ProxySmart 'YYYY-MM-DD@hh:mm:ss' (МСК боксов) → at*
+  const isoStartStr = utcStart.toISOString();
+  const isoEndStr   = utcEnd.toISOString();
+  const nextDayStr  = new Date(new Date(date + 'T00:00:00Z').getTime() + 86400000).toISOString().slice(0, 10);
+  const atStartStr  = date + '@00:00:00';
+  const atEndStr    = nextDayStr + '@00:00:00';
 
   const trafficRows = db.prepare(`
     SELECT client_name, SUM(bytes_in+bytes_out) as bytes, COUNT(DISTINCT port_id) as ports
@@ -418,9 +428,9 @@ async function buildDailySummary(date) {
   }
 
   // 09.10: «проблемные прокси» — по HTTP-чекам (реальный сигнал), а не по
-  // ping_stats: канарейка ProxySmart (8.8.8.8) фильтруется мобильными
-  // операторами (86% «потерь» при живом трафике — подтверждено 09.10:
-  // TCP до 8.8.8.8 через модем не проходит, сайты открываются).
+  // ping_stats: канарейка ProxySmart (8.8.8.8) не обслуживает TCP:80 by
+  // design, а порог «потери >10%» ловил 1 потерянный ICMP из 7 — штатное
+  // поведение мобильной сети, метрика показывала десятки ложных «проблемных».
   // Считаем модем проблемным, если доля реальных фейлов чека >20% за день.
   let proxyIssues = [];
   try {
@@ -432,7 +442,7 @@ async function buildDailySummary(date) {
       WHERE ts >= ? AND ts < ?
       GROUP BY server, nick
       HAVING total >= 3 AND failures * 1.0 / total > 0.2
-    `).all(utcStartStr, utcEndStr);
+    `).all(isoStartStr, isoEndStr);
   } catch (e) {
     // минимальная схема без modem_httpcheck (тесты) — блок молча пропускаем
     if (logger && logger.warn) logger.warn('[DailySummary] proxy issues (httpcheck) query failed: ' + (e.message || e));
@@ -486,8 +496,8 @@ async function buildDailySummary(date) {
              AND SUM(CASE WHEN TRIM(COALESCE(error, '')) != '' THEN 1 ELSE 0 END) * 1.0 / COUNT(*) > 0.2
         )
       `).get(
-        new Date(utcStart.getTime() - 86400000).toISOString().slice(0, 16).replace('T', ' '),
-        utcStartStr
+        new Date(utcStart.getTime() - 86400000).toISOString(),
+        isoStartStr
       );
       prevN = (prevRow && prevRow.n) || 0;
     } catch (_) { /* минимальная схема без таблицы */ }
@@ -578,7 +588,7 @@ async function buildDailySummary(date) {
              AVG(took_sec) as avg_sec
       FROM rotation_log
       WHERE started_at >= ? AND started_at < ?
-    `).get(utcStartStr, utcEndStr);
+    `).get(atStartStr, atEndStr);
   } catch (e) {
     // Rule (OPERATIONS.md): деградация через catch обязана писать warn.
     if (logger && logger.warn) logger.warn('[DailySummary] rotation_log query failed (rotations block degraded): ' + (e.message || e));
@@ -591,7 +601,7 @@ async function buildDailySummary(date) {
       const prevRot = db.prepare(`
         SELECT COUNT(*) AS total, SUM(CASE WHEN old_ip = new_ip AND new_ip IS NOT NULL THEN 1 ELSE 0 END) AS failed
         FROM rotation_log WHERE started_at >= ? AND started_at < ?
-      `).get(new Date(utcStart.getTime() - 86400000).toISOString().slice(0, 16).replace('T', ' '), utcStartStr);
+      `).get(new Date(new Date(date + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10) + '@00:00:00', atStartStr);
       if (prevRot && prevRot.total > 0) {
         const prevPct = (prevRot.failed * 100) / prevRot.total;
         const d = ((rotRow.failed * 100) / rotRow.total) - prevPct;
@@ -633,7 +643,7 @@ async function buildDailySummary(date) {
         WHERE r.started_at >= ? AND r.started_at < ?
         GROUP BY operator
         ORDER BY total DESC
-      `).all(utcStartStr, utcEndStr);
+      `).all(atStartStr, atEndStr);
       const flagged = rotOps.filter(o => o.total >= 10 && (o.failed * 100 / o.total) > normFor(o.operator));
       if (flagged.length) {
         lines.push('⚠️ Неуспешные по операторам: ' + flagged.map(o =>
@@ -651,7 +661,7 @@ async function buildDailySummary(date) {
         GROUP BY r.server_name, r.nick
         HAVING total >= 10 AND failed * 1.0 / total >= 0.8
         ORDER BY failed DESC
-      `).all(new Date(utcStart.getTime() - 6 * 86400000).toISOString().slice(0, 16).replace('T', ' '), utcEndStr);
+      `).all(new Date(new Date(date + 'T00:00:00Z').getTime() - 6 * 86400000).toISOString().slice(0, 10) + '@00:00:00', atEndStr);
       // 09.10: свободные модемы (без единого клиентского порта) в список не
       // берём — их застрявший IP никому не мешает, а строка путает (MD_17/18/19).
       const stuckSims = (modemHasClient

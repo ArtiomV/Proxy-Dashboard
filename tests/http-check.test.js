@@ -107,6 +107,26 @@ describe('http-check', () => {
     expect(row.content_ok).toBeNull();
   });
 
+  // Регрессия 09.10: грация ротации сравнивала ISO started_at ('T') с
+  // datetime('now') (пробел) — строковое сравнение делало ВСЕ сегодняшние
+  // строки «свежими», и весь парк круглые сутки пропускал чек как 'rotating'.
+  it('грация ротации: свежая смена IP — skip, смена 4 ч назад — обычный чек', async () => {
+    hcMod._clearRecentRotCache();
+    db.exec(`CREATE TABLE ip_history (id INTEGER PRIMARY KEY, key TEXT, ip TEXT, started_at TEXT, ended_at TEXT)`);
+    const ins = db.prepare('INSERT INTO ip_history (key, ip, started_at) VALUES (?,?,?)');
+    // IP сменился 30 секунд назад → чек пропускаем (модем в ротации)
+    ins.run('S1_imei1', '1.2.3.4', new Date(Date.now() - 30000).toISOString());
+    let res = await mk().runOnce();
+    expect(res.skipped).toBe(1);
+    expect(db.prepare('SELECT error FROM modem_httpcheck ORDER BY id DESC').get().error).toBe('rotating');
+    // Утренняя смена IP грацию НЕ создаёт — чек идёт как обычно
+    hcMod._clearRecentRotCache();
+    db.exec('DELETE FROM ip_history');
+    ins.run('S1_imei1', '1.2.3.4', new Date(Date.now() - 4 * 3600000).toISOString());
+    res = await mk().runOnce();
+    expect(res.ok).toBe(1);
+  });
+
   it('выключен настройкой — skip', async () => {
     const job = mk({ httpcheck_enabled: false });
     const res = await job.runOnce();

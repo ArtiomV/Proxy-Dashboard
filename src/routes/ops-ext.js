@@ -625,6 +625,22 @@ function _fleetSection(merged, sanitizedClients) {
   //   modem_offline_threshold_min setting (default 10 min).
   const _discMs = (Number(appSettings.modem_offline_threshold_min) || 10) * 60000;
   const fleet = computeFleet(_fleetMetaStmt.all(), getUptimeTracking(), merged.status || [], { disconnectedMs: _discMs });
+  // 09.10: пометка свободных модемов в карточке «Модем отключен» — модем без
+  // единого клиентского порта (тот же критерий, что у офлайн-алертов)
+  // получает hasClient=false, фронт рисует бейдж «без клиента».
+  try {
+    const _roster = getKnownModems() || {};
+    for (const o of fleet.disconnectedList) {
+      const ports = _roster[o.server] || {};
+      const imei = String(o.key || '').split('|')[1] || '';
+      o.hasClient = Object.values(ports).some(info => {
+        if (!info) return false;
+        const pn = String(info.portName || '').trim();
+        if (!pn || /^random/i.test(pn)) return false;
+        return (imei && String(info.imei || '') === imei) || (o.nick && info.nick === o.nick);
+      });
+    }
+  } catch (_) {}
   // Per-client «в работе» with fleet semantics (active ∩ not-dark-≥10min).
   const _clientWorking = computeClientWorking(getKnownModems(), fleet);
   for (const c of sanitizedClients) {

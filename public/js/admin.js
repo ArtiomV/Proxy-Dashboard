@@ -2220,7 +2220,7 @@ function showProblemPopup(label,key){
     var srv=item.server||'';
     var srvLabel=srv?_serverDisplayLabel(srv):'';
     h+='<div style="padding:8px 12px;background:var(--bg-2);border-radius:8px;border:1px solid var(--border);cursor:pointer" data-on-click="openModemDetailByNick(\''+esc(n).replace(/\x27/g,"\\\x27")+'\',\''+esc(srv).replace(/\x27/g,"\\\x27")+'\')">';
-    h+='<div style="font-size:12px;font-weight:500;color:var(--text-0);margin-bottom:2px">'+esc(n)+(srvLabel?' <span style="font-size:10px;color:var(--text-3);font-weight:400">· '+esc(srvLabel)+'</span>':'')+'</div>';
+    h+='<div style="font-size:12px;font-weight:500;color:var(--text-0);margin-bottom:2px">'+esc(n)+(srvLabel?' <span style="font-size:10px;color:var(--text-3);font-weight:400">· '+esc(srvLabel)+'</span>':'')+(item.noClient?' <span style="font-size:9px;font-weight:600;color:var(--text-3);border:1px solid var(--border);border-radius:4px;padding:1px 5px">без клиента</span>':'')+'</div>';
     if(detail)h+='<div style="font-size:11px;color:var(--text-2)">'+esc(detail)+'</div>';
     h+='</div>';
   });
@@ -4241,7 +4241,7 @@ function renderNewExtWidgets(){
     if(st!=='offline'&&!isFlaky&&!m.lowSpeed&&m.ipStuck)rtStuckIp.push({nick:m.nick,server:m.server,detail:'IP не менялся '+m.ipSinceHours+'ч · '+(m.extIp||'')});
   });
   var _offSrc=(currentData.fleet&&(currentData.fleet.disconnectedList||currentData.fleet.offlineList))||null;
-  if(Array.isArray(_offSrc)){rtOffline=_offSrc.map(function(o){var ag=o.lastOnline?_age(o.lastOnline):'';return{nick:o.nick,server:o.server,detail:ag?('Отключён '+ag):'offline',lastSeenMs:o.lastOnline||0};});}
+  if(Array.isArray(_offSrc)){rtOffline=_offSrc.map(function(o){var ag=o.lastOnline?_age(o.lastOnline):'';return{nick:o.nick,server:o.server,detail:ag?('Отключён '+ag):'offline',lastSeenMs:o.lastOnline||0,noClient:o.hasClient===false};});}
   rtOffline.sort(function(a,b){return (Number(b.lastSeenMs)||0)-(Number(a.lastSeenMs)||0);});
   window._problemData={offline:rtOffline,speed:rtLowSpeed,ipstuck:rtStuckIp,flaky:flakyItems};
   function attTile(label,key,n,extra,dot){
@@ -4253,8 +4253,9 @@ function renderNewExtWidgets(){
       '<span class="att-label">'+label+(extra?'<span class="att-extra">'+extra+'</span>':'')+'</span>'+
       '<span class="att-count" style="color:'+vc+'">'+n+'</span></div>';
   }
+  var _noClientN=rtOffline.filter(function(o){return o.noClient;}).length;
   var probCard='<div class="analytics-card" style="margin:0">'+_dwT('Проблемы инфраструктуры','gear')+'<div class="att-grid" style="flex:1">'+
-    attTile('Модем отключен','offline',rtOffline.length,null,'var(--danger)')+
+    attTile('Модем отключен','offline',rtOffline.length,_noClientN?('· '+_noClientN+' без клиента'):null,'var(--danger)')+
     attTile('Низкая скорость','speed',rtLowSpeed.length,null,'var(--warning)')+
     attTile('Завис IP','ipstuck',rtStuckIp.length,null,'var(--warning)')+
     attTile('Сбоит прокси','flaky',flakyItems.length,null,'var(--danger)')+

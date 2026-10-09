@@ -58,7 +58,12 @@ function _recentlyRotatedSet(db) {
   if (_recentRotCache && Date.now() - _recentRotAt < 30000) return _recentRotCache;
   let set = new Set();
   try {
-    for (const r of db.prepare("SELECT key FROM ip_history WHERE started_at >= datetime('now','-2 minutes')").all()) set.add(r.key);
+    // 09.10: started_at хранится в ISO с 'T'/'Z' (JS toISOString), а
+    // datetime('now') отдаёт формат с пробелом — строковое сравнение 'T' > ' '
+    // делало ВСЕ сегодняшние строки «свежими», и каждый модем круглые сутки
+    // считался «только что ротированным». Сравниваем с ISO из JS.
+    const sinceIso = new Date(Date.now() - 2 * 60000).toISOString();
+    for (const r of db.prepare('SELECT key FROM ip_history WHERE started_at >= ?').all(sinceIso)) set.add(r.key);
   } catch (_) { /* нет таблицы на минимальной схеме */ }
   _recentRotCache = set; _recentRotAt = Date.now();
   return set;
@@ -433,4 +438,4 @@ function create(deps) {
   return { runOnce, latest, _state: state };
 }
 
-module.exports = { create, fetchThroughProxy };
+module.exports = { create, fetchThroughProxy, _clearRecentRotCache: () => { _recentRotCache = null; _recentRotAt = 0; } };

@@ -2973,7 +2973,7 @@ const ipHistory = stateMod.state.ipHistory; // Stage 14.1
 try {
   // Retention ip_history/ip_pairs — в едином реестре src/jobs/cleanup.js
   // (ночной DbCleanup 00:30 UTC), отдельных пург здесь больше нет.
-  const rows = trackingDb.ihAllOrderStmt().all();
+  const rows = trackingDb.ihAllOrderStmt().all(new Date(Date.now() - 7 * 86400000).toISOString());
   for (const r of rows) {
     if (!ipHistory[r.key]) ipHistory[r.key] = [];
     ipHistory[r.key].push({ db_id: r.id, ip: r.ip, from: r.started_at, to: r.ended_at || null });

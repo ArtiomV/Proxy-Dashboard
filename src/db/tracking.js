@@ -181,7 +181,9 @@ function init(db) {
   // равно обрезается до MAX_IP_HISTORY на ключ (100), а за 7 дней любой
   // реальный модем набирает больше 100 ротаций. Полная таблица (90 дней)
   // нужна только SQL-аналитике ip_stats, память она не грузит.
-  S.ihAllOrder = db.prepare("SELECT id, key, ip, started_at, ended_at FROM ip_history WHERE started_at >= datetime('now', '-7 days') ORDER BY id ASC");
+  // 09.10: граница окна — ISO-строка из JS (started_at хранится в ISO с 'T';
+  // datetime('now') со сравнением строк путал формат и захватывал лишнее).
+  S.ihAllOrder = db.prepare("SELECT id, key, ip, started_at, ended_at FROM ip_history WHERE started_at >= ? ORDER BY id ASC");
 }
 
 module.exports = {
