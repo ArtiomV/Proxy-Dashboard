@@ -19,6 +19,7 @@ let db, logger, clientById, getSetting;
 let aiInsights;  // optional — injected via init; if absent, AI section is skipped
 let listDisconnectedModems;  // optional (D3) — async () => fleet.disconnectedList; без него дайджест оффлайна пропускается
 let hasClientPorts;  // optional — (portName) => bool; гейт «Неактивные» (0 прокси) в списке должников
+let modemHasClient;  // optional — (server, nick) => bool; гейт «свободные модемы» в дайджесте застрявших симок
 
 function init(deps) {
   db          = deps.db;
@@ -28,6 +29,7 @@ function init(deps) {
   aiInsights  = deps.aiInsights || null;
   listDisconnectedModems = deps.listDisconnectedModems || null;
   hasClientPorts = deps.hasClientPorts || null;
+  modemHasClient = deps.modemHasClient || null;
 }
 
 function fmtMoney(v) {
@@ -640,8 +642,8 @@ async function buildDailySummary(date) {
       }
       // Симки, у которых IP не меняется всю неделю (≥10 попыток, ≥80% фейлов)
       // — показываем даже если за день аномалий нет: это хроника, не разовость.
-      const stuckSims = db.prepare(`
-        SELECT r.nick,
+      const stuckRows = db.prepare(`
+        SELECT r.server_name, r.nick,
                COUNT(*) AS total,
                SUM(CASE WHEN r.old_ip = r.new_ip AND r.new_ip IS NOT NULL THEN 1 ELSE 0 END) AS failed
         FROM rotation_log r
@@ -649,8 +651,13 @@ async function buildDailySummary(date) {
         GROUP BY r.server_name, r.nick
         HAVING total >= 10 AND failed * 1.0 / total >= 0.8
         ORDER BY failed DESC
-        LIMIT 5
       `).all(new Date(utcStart.getTime() - 6 * 86400000).toISOString().slice(0, 16).replace('T', ' '), utcEndStr);
+      // 09.10: свободные модемы (без единого клиентского порта) в список не
+      // берём — их застрявший IP никому не мешает, а строка путает (MD_17/18/19).
+      const stuckSims = (modemHasClient
+        ? stuckRows.filter(s => modemHasClient(s.server_name, s.nick))
+        : stuckRows
+      ).slice(0, 5);
       if (stuckSims.length) {
         lines.push('🔴 Симки без смены IP (7 дн): ' + stuckSims.map(s => `${escHtml(s.nick)} — ${s.failed}/${s.total}`).join(', '));
       }

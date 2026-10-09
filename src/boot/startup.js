@@ -401,6 +401,20 @@ function runStartup(d) {
       }
       return false;
     },
+    // 09.10: гейт «свободный модем» для дайджеста застрявших симок — у модема
+    // есть клиент, если на нём висит хотя бы один ростерный порт с непустым
+    // portName (тот же критерий, что у офлайн-алертов в modem-tracking).
+    modemHasClient: (serverName, nick) => {
+      const ports = (knownModems || {})[serverName];
+      if (!ports) return false;
+      for (const info of Object.values(ports)) {
+        if (!info) continue;
+        const pn = String(info.portName || '').trim();
+        if (!pn || /^random/i.test(pn)) continue;
+        if (info.nick === nick || info.imei === nick) return true;
+      }
+      return false;
+    },
   });
   tgBot.init({
     logger,

@@ -325,6 +325,26 @@ describe('daily_summary — ротации: аномалии по операто
     expect(text).not.toContain('MD_47 —');
   });
 
+  // 09.10: свободные модемы (без клиентских портов) не попадают в дайджест
+  // застрявших симок — их IP никому не мешает, строка только путает.
+  it('модем без клиента не попадает в «Симки без смены IP», клиентский — попадает', async () => {
+    bootRot();
+    tgSummary.init({
+      db, logger, clientById: new Map(),
+      getSetting: (_k, dflt) => dflt,
+      aiInsights: null,
+      modemHasClient: (_srv, nick) => nick === 'MD_47',
+    });
+    // RO1_25: 12/12 фейлов, но клиента нет → скрыт
+    for (let i = 0; i < 12; i++) addRot('RO1', 'RO1_25', false, T(13, i));
+    // MD_47: 12/12 фейлов, клиент есть → в списке
+    for (let i = 0; i < 12; i++) addRot('S3', 'MD_47', false, T(14, i));
+
+    const { text } = await tgSummary.buildDailySummary(DAY);
+    expect(text).toContain('MD_47 — 12/12');
+    expect(text).not.toContain('RO1_25');
+  });
+
   it('без аномалий — только базовые строки блока', async () => {
     bootRot();
     addMeta('S1', 'MD_01', 'Moldcell');
