@@ -6,9 +6,7 @@
 <title>История изменений — Arendaproxy.ru</title>
 <link rel="icon" type="image/png" href="/img/brand-favicon-96.png" sizes="96x96">
 <link rel="icon" type="image/svg+xml" href="/img/brand-favicon.svg">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+<link href="/vendor/fonts.css" rel="stylesheet">
 <link rel="stylesheet" href="css/variables.css">
 <link rel="stylesheet" href="css/base.css">
 <style>
@@ -73,6 +71,15 @@
     <p>Список доработок дашборда — на человеческом языке. Каждый блок отвечает на вопрос «что это даёт вам как пользователю / администратору».</p>
   </div>
 
+  <!-- v2.10.89 -->
+  <div class="release">
+    <div class="release-header">
+      <span class="release-version"><span class="v-prefix">v</span>2.10.89</span>
+      <span class="release-date">10 октября 2026</span>
+      <span class="release-tag tag-fix">Надёжность</span>
+    </div>
+    <p class="release-tagline">Белый экран на мобильных сетях РФ — второй внешний блокер устранён: шрифты Inter/JetBrains Mono грузились с fonts.googleapis.com как блокирующий стиль; в сетях, где Google Fonts висит, страница не рендерилась совсем (подтверждено эмуляцией WebKit/iPhone). Шрифты теперь на нашем сервере (/vendor/fonts.css), страница рендерится даже при полностью недоступных Google Fonts. Панель не зависит ни от одного внешнего CDN.</p>
+  </div>
   <!-- v2.10.88 -->
   <div class="release">
     <div class="release-header">
