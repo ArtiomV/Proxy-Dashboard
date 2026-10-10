@@ -1051,7 +1051,9 @@ const RULES = {
     cooldownSec: 86400,
     dedupeKey: p => 'volforecast_' + (p.scope === 'sim' ? (p.server || '') + '_' + (p.nick || '') : (p.operator || '')),
     render: p => p.scope === 'sim'
-      ? `🟠 <b>Пакет SIM скоро закончится</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}, ${esc(p.operator || '?')}): использовано ${p.used_gb} из ${p.package_gb} ГБ, темп ${p.gb_day} ГБ/сут. Осталось примерно <b>${p.days_left} дн</b>${p.full_date ? ` — до ${esc(p.full_date)}` : ''}.`
+      ? (p.sim_exhausted
+        ? `🟠 <b>Пакет SIM исчерпан (по симптомам)</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}, ${esc(p.operator || '?')}): скорость урезана оператором, учтено ${p.used_gb} из ${p.package_gb} ГБ. Остаток в учёте может быть неточным — часть трафика прошла на урезанной скорости.`
+        : `🟠 <b>Пакет SIM скоро закончится</b>\n\n<b>${esc(p.nick || '?')}</b> (${esc(_srvLabel(p.server) || '?')}, ${esc(p.operator || '?')}): использовано ${p.used_gb} из ${p.package_gb} ГБ, темп ${p.gb_day} ГБ/сут. Осталось примерно <b>${p.days_left} дн</b>${p.full_date ? ` — до ${esc(p.full_date)}` : ''}.`)
       : `🟠 <b>Бандл ${esc(p.operator || '?')} скоро закончится</b>\n\nИспользовано ${p.used_gb} из ${p.package_gb} ГБ (${p.modems || 0} модемов), темп ${p.gb_day} ГБ/сут. Осталось примерно <b>${p.days_left} дн</b>${p.full_date ? ` — до ${esc(p.full_date)}` : ''}.`,
   },
 

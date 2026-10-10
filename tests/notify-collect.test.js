@@ -70,3 +70,41 @@ describe('notify-collect offline pass == fleet card (WP4.2)', () => {
     expect(bells[0].payload.mins).toBeGreaterThanOrEqual(29);
   });
 });
+
+// 10.10: долговые события колокольчика — только по активным клиентам (есть
+// хотя бы один порт в ростере) и не на паузе. Кейс: СРТ с историческим
+// минусом -623 ₽ без единого порта получал напоминание каждый день.
+describe('notify-collect debt pass — только активные клиенты', () => {
+  const debtBells = [];
+  let job2;
+  beforeAll(() => {
+    job2 = notifyCollect.init({
+      logger: silentLogger, db,
+      alerts: {
+        isRuleEnabled: (r) => r === 'client_balance_negative',   // остальные пассы глушим
+        recordBellEvent: (e) => debtBells.push(e),
+        trigger: () => true,
+      },
+      uptimeTracking: {},
+      clients: [
+        { id: 'c1', name: 'Активный', portName: 'active_pn', balance: -500 },
+        { id: 'c2', name: 'Неактивный СРТ', portName: 'gone_pn', balance: -623 },
+        { id: 'c3', name: 'Пауза', portName: 'paused_pn', balance: -700, billingPaused: true },
+        { id: 'c4', name: 'Без порта', portName: '', balance: -50 },
+      ],
+      knownModems: { S1: { p1: { portName: 'active_pn' }, p2: { portName: 'paused_pn' }, p3: { portName: 'random123' } } },
+      getStaleNicks: () => new Set(),
+      getSetting: (k, d) => d,
+      trackingDb: { metaFleetRosterStmt: () => ({ all: () => [] }) },
+      fetchAllServersDataCached: async () => [],
+      mergeServerData: () => ({ status: [] }),
+    });
+  });
+  afterAll(() => { if (job2 && job2.stop) job2.stop(); });
+
+  it('должник без портов и должник на паузе не попадают в колокольчик, активный — попадает', async () => {
+    await notifyCollect.runOnce();
+    const debt = debtBells.filter(b => b.rule_id === 'client_balance_negative');
+    expect(debt.map(b => b.entity_id)).toEqual(['c1']);
+  });
+});

@@ -193,6 +193,7 @@ function buildForecasts(db, pkgs, now = new Date()) {
           entry.status = 'exhausted';
           entry.days_left = 0;
           entry.remaining_gb = 0;
+          entry.full_date = null;   // 10.10: дата из прогноза (темп) противоречила «0 дн»
           entry.sim_exhausted = true;   // исчерпание по симптомам (для UI)
         }
         out.push(entry);

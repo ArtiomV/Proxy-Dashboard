@@ -192,9 +192,22 @@ function passSimSignals() {
 
 // ── Pass 2: clients in debt ────────────────────────────────────
 function passClientDebts() {
-  const { alerts, clients } = deps;
+  const { alerts, clients, knownModems } = deps;
   if (!Array.isArray(clients)) return;
+  // 10.10: долговые события — только по АКТИВНЫМ клиентам. Неактивный
+  // (ни одного порта в ростере) или клиент на паузе не должен спамить
+  // колокольчик каждый день историческим минусом (кейс СРТ, -623 ₽).
+  // Критерий тот же, что у гейта должников в daily_summary.
+  const livePortNames = new Set();
+  for (const ports of Object.values(knownModems || {})) {
+    for (const info of Object.values(ports || {})) {
+      const pn = info && String(info.portName || '').trim();
+      if (pn && !/^random/i.test(pn)) livePortNames.add(pn);
+    }
+  }
   for (const c of clients) {
+    if (c.billingPaused) continue;
+    if (!c.portName || !livePortNames.has(c.portName)) continue;
     const bal = Number(c.balance) || 0;
     if (bal >= CLIENT_DEBT_THRESHOLD) continue;
     alerts.recordBellEvent({
