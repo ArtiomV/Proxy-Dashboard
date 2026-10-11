@@ -118,8 +118,11 @@ async function getConfForm(server, path) {
 // { ok:true, html, status:200 } | { ok:false, reason, status }.
 // Тот же обход логин-стены, что у getConfForm, но без парсинга формы:
 // ok:true при HTTP 200 и не-логин-стене. Использует джоба ServerMetrics.
-async function getPage(server, path) {
-  let res = await _raw(server, { method: 'GET', path });
+// 11.10: opts.timeoutMs — на нагруженном хабе /system_status рендерится
+// 12.5+ сек (S4), дефолтные 12с давали ложный «unreachable».
+async function getPage(server, path, opts) {
+  const timeoutMs = (opts && opts.timeoutMs) || 12000;
+  let res = await _raw(server, { method: 'GET', path, timeout: timeoutMs });
   for (let attempt = 0; attempt < 2 && _looksLikeLogin(res); attempt++) {
     let cookie;
     try { cookie = await _session(server, attempt > 0); }
@@ -127,7 +130,7 @@ async function getPage(server, path) {
       _logger.warn(`[ProxyConf] ${server.name}: login failed: ${e.message}`);
       return { ok: false, reason: 'AUTH_WALLED', status: res.status };
     }
-    res = await _raw(server, { method: 'GET', path, cookie });
+    res = await _raw(server, { method: 'GET', path, cookie, timeout: timeoutMs });
   }
   if (_looksLikeLogin(res)) {
     _dropSession(server);

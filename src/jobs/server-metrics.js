@@ -405,9 +405,10 @@ function create(deps) {
   }
 
   // HTTP-сбор: /system_status панели бокса (обход логин-стены внутри getPage).
+  // 11.10: таймаут 30с — на нагруженном S4-хабе страница рендерится ~12.5с.
   async function collectHttp(server, nowMs) {
     try {
-      const res = await proxyConf.getPage(server, '/system_status');
+      const res = await proxyConf.getPage(server, '/system_status', { timeoutMs: 30000 });
       if (!res.ok) {
         logger.info(`[ServerMetrics] ${server.name}: /system_status → ${res.reason || res.status}`);
         return null;
