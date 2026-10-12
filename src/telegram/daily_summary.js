@@ -644,7 +644,11 @@ async function buildDailySummary(date) {
         GROUP BY operator
         ORDER BY total DESC
       `).all(atStartStr, atEndStr);
-      const flagged = rotOps.filter(o => o.total >= 10 && (o.failed * 100 / o.total) > normFor(o.operator));
+      // 12.10: модемы без оператора в мете — это свободные/незарегистрированные
+      // SIM (MD_82–88: SIM OK, но сеть не поднимается, 100% фейлов ротаций).
+      // Клиентов на них нет — в аномалиях это шум, ведро 'unknown' пропускаем.
+      const rotOpsKnown = rotOps.filter(o => o.operator !== 'unknown');
+      const flagged = rotOpsKnown.filter(o => o.total >= 10 && (o.failed * 100 / o.total) > normFor(o.operator));
       if (flagged.length) {
         lines.push('⚠️ Неуспешные по операторам: ' + flagged.map(o =>
           `${escHtml(o.operator)} ${(o.failed * 100 / o.total).toFixed(0)}% (${o.failed}/${o.total}, норма ≤${normFor(o.operator)}%)`
