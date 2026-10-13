@@ -35,6 +35,7 @@ let auditLog;          // (login, action, details)
 let kvGet, kvSet;      // кэш username бота (ключ tg_bot_username)
 let _sendImpl = null;  // DI для тестов: подмена исходящих сообщений без сети
 let _tgReqImpl = null; // DI для тестов: подмена сырых вызовов TG API (answerCallbackQuery и т.п.)
+let onCtoDecision = null; // 13.10: решения ИИ-директора (src/cto/agent.js)
 let onAlertAck = null; // B2 (23.08): обработчик ack-кнопок алертов (src/telegram/alerts.js)
 let _lastUpdateId = 0;
 let _pollAbort = false;
@@ -53,6 +54,7 @@ function init(deps) {
   _sendImpl       = deps.sendMessageImpl || null;
   _tgReqImpl      = deps.tgRequestImpl || null;
   onAlertAck      = deps.onAlertAck || null;
+  onCtoDecision   = deps.onCtoDecision || null;
 }
 
 // Внутренние отправители (handleUpdate) идут через _send — в тестах подменяется
@@ -237,6 +239,21 @@ async function _handleAlertCallback(token, cq) {
     catch (e) { logger.warn('[Telegram] answerCallbackQuery: ' + e.message); }
   };
   if (!_isAdminChat(chatId)) { await answer('⛔ Нет доступа'); return; }
+  // 13.10: кнопки ИИ-директора: c:ok|no|later:<id предложения>
+  const cm = String(cq.data || '').match(/^c:(ok|no|later):(\d{1,9})$/);
+  if (cm) {
+    if (typeof onCtoDecision !== 'function') { await answer('ИИ-директор недоступен'); return; }
+    const from = cq.from || {};
+    const who = from.username ? '@' + from.username : (from.first_name || 'admin');
+    const decision = { ok: 'approve', no: 'reject', later: 'later' }[cm[1]];
+    try {
+      const r = await onCtoDecision(decision, parseInt(cm[2], 10), who);
+      if (r && r.ok) await answer(r.text || 'Готово');
+      else if (r && r.error === 'already_decided') await answer('Уже решено: ' + (r.status || ''));
+      else await answer((r && (r.text || r.error)) || 'Не выполнено');
+    } catch (e) { await answer('Ошибка: ' + e.message); }
+    return;
+  }
   const m = String(cq.data || '').match(/^a:(ack|solve):([0-9a-f]{16})$/);
   if (!m) { await answer('Неизвестная кнопка'); return; }
   if (typeof onAlertAck !== 'function') { await answer('Обработчик алертов недоступен'); return; }

@@ -1655,6 +1655,18 @@ function renderNotifPanel(){
     h+='<div class="notif-title">'+esc(n.title||'')+'</div>';
     h+='<div class="notif-text">'+(n.message||'').replace(/\n/g,'<br>')+'</div>';
     if(n.rule_id&&NOTIF_RUNBOOK[n.rule_id])h+='<div class="notif-text" style="color:var(--text-3);font-size:11px;margin-top:2px">💡 '+esc(NOTIF_RUNBOOK[n.rule_id])+'</div>';
+    // 13.10: предложения ИИ-директора — решение прямо из колокольчика.
+    if(n.rule_id==='cto_proposal'&&n.payload&&n.payload.proposal_id){
+      var pid=n.payload.proposal_id;
+      if(n._ctoDone){h+='<div class="notif-text" style="margin-top:6px;font-weight:600">'+esc(n._ctoDone)+'</div>';}
+      else{
+        h+='<div style="display:flex;gap:6px;margin-top:8px;flex-wrap:wrap">';
+        h+='<button class="btn btn-sm" data-on-click="event.stopPropagation();ctoDecide(\''+pid+'\',\'approve\')">'+(n.payload.executable?'✅ Одобрить':'✅ Принято')+'</button>';
+        h+='<button class="btn btn-sm" data-on-click="event.stopPropagation();ctoDecide(\''+pid+'\',\'reject\')">❌ Отклонить</button>';
+        h+='<button class="btn btn-sm" data-on-click="event.stopPropagation();ctoDecide(\''+pid+'\',\'later\')">⏰ Позже</button>';
+        h+='</div>';
+      }
+    }
     h+='<div class="notif-time">'+timeAgo(n.created_at)+'</div>';
     h+='</div>';
     h+='<button class="notif-dismiss" title="Скрыть" data-on-click="event.stopPropagation();dismissNotif('+n.id+')">×</button>';
@@ -1711,6 +1723,21 @@ function _notifNavigate(n){
       if(typeof switchSettingsSection==='function')setTimeout(function(){switchSettingsSection('serverstate')},200);
     }
   } catch(_) { /* navigation is best-effort */ }
+}
+function ctoDecide(pid,decision){
+  var labels={approve:'✅ Выполнено',reject:'❌ Отклонено',later:'⏰ Отложено на сутки'};
+  api(API+'/api/admin/cto/proposals/'+encodeURIComponent(pid)+'/decide',{method:'POST',json:{decision:decision}})
+    .then(function(d){
+      var n=(window._notifs||[]).find(function(x){return x.payload&&String(x.payload.proposal_id)===String(pid)});
+      if(n)n._ctoDone=(d&&d.status==='failed')?('⚠️ '+(d.text||'Не применено')):(labels[decision]+(d&&d.status==='acknowledged'?' (принято)':''));
+      renderNotifPanel();
+    })
+    .catch(function(e){
+      var n=(window._notifs||[]).find(function(x){return x.payload&&String(x.payload.proposal_id)===String(pid)});
+      var msg=(e&&e.message)||'ошибка';
+      if(n)n._ctoDone=/409|already/.test(msg)?'Уже решено (возможно, в Telegram)':('⚠️ '+msg);
+      renderNotifPanel();
+    });
 }
 function dismissNotif(id){
   // Optimistic remove

@@ -26,7 +26,7 @@ function runStartup(d) {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runLocationWanSpeed, runServerMetrics, runRetailGuard,
-    runBlockedPortCleanup, runIdleModemRotation, runClientActivitySync, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
+    runBlockedPortCleanup, runIdleModemRotation, cto, runClientActivitySync, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
     runSimExhaustion,   // 2026-09-26: sim-exhaustion
     saveClients, auditLog, authTokensDb,
     events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
@@ -289,6 +289,15 @@ function runStartup(d) {
   _intervals.push(setInterval(() => dbAudit.runJobAsync('BlockedPortCleanup', 'periodic', () => runBlockedPortCleanup())
     .catch(e => logger.error('[BlockedPortCleanup] periodic run failed:', e.message)), 30 * 60 * 1000));
 
+  // 13.10: ИИ-директор — тик раз в 10 мин (проверка эффекта, срок следующего осмотра;
+  // сам осмотр случается раз в 6–12 ч). Первый тик через 5 мин после старта.
+  if (cto) {
+    setTimeout(() => dbAudit.runJobAsync('CtoTick', 'startup', () => cto.tick())
+      .catch(e => logger.error('[CTO] startup tick failed:', e.message)), 5 * 60 * 1000);
+    _intervals.push(setInterval(() => dbAudit.runJobAsync('CtoTick', 'periodic', () => cto.tick())
+      .catch(e => logger.error('[CTO] tick failed:', e.message)), 10 * 60 * 1000));
+  }
+
   // 13.10: у модемов без клиента авторотация выключается — первый прогон через 4 мин
   // (нужен загруженный ростер), дальше раз в 10 мин.
   setTimeout(() => dbAudit.runJobAsync('IdleModemRotation', 'startup', () => runIdleModemRotation())
@@ -444,6 +453,8 @@ function runStartup(d) {
     // B2 (23.08): inline-кнопки ack под алертами — обработчик из alerts.js
     // (алерты инициализируются ниже; колбэки придут только после tgBot.start()).
     onAlertAck: (kind, hash, user) => alerts.onAlertAck(kind, hash, user),
+    // 13.10: кнопки решений ИИ-директора (одобрить / отклонить / позже).
+    onCtoDecision: (decision, id, user) => cto.decide(id, decision, user),
   });
   // Stage 18.13: alerts framework wires into the same bot/chat.
   // kvGet оборачиваем в функцию: выше по файлу kvGet — prepared statement

@@ -4124,6 +4124,23 @@ const runIdleModemRotation = require('./src/jobs/idle-modem-rotation').create({
   getSetting, knownModems, modemRotationCache, db,
   invalidateCache: () => proxySmart.invalidateCache(),
 }).runOnce;
+
+// 13.10: ИИ-технический директор — осмотр раз в 6–12 ч, предложения в Telegram/колокольчик,
+// исполнение только после «ок» и только из белого списка (src/cto/boundaries.js).
+const cto = (() => {
+  const invalidateCache = () => proxySmart.invalidateCache();
+  const observe = require('./src/cto/observe').create({ db, logger, getSetting, aiInsights, knownModems, kvGet: (k) => _kvGet.get(k) });
+  const executor = require('./src/cto/executor').create({
+    logger, getSetting, setSetting, findServer, proxyConf, fetchAllServersDataCached,
+    modemRotationCache, invalidateCache, knownModems,
+  });
+  return require('./src/cto/agent').create({
+    db, logger, getSetting, kvGet: (k) => _kvGet.get(k), kvSet: (k, v) => _kvSet.run(k, v),
+    observe, executor, tgBot, recordBellEvent: (o) => alerts.recordBellEvent(o), logActivity, auditLog, knownModems,
+    callModel: require('./src/cto/llm').create({ getSetting }).callModel,
+  });
+})();
+app.use(require('./src/routes/cto')({ db, logger, authMiddleware, adminMiddleware, cto }));
 // CRM: снимок «активен/неактивен» (нет портов) для агента продлений tg2twenty.
 const runClientActivitySync = require('./src/jobs/client-activity-sync').create({
   logger, clients, fetchAllServersDataCached,
@@ -4573,6 +4590,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runDebtRestoreRecovery: _debtBlock.retryPendingRestores,
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
     runIdleModemRotation,   // 13.10: авторотация выключена у модемов без клиента
+    cto,   // 13.10: ИИ-директор (tick + решения из Telegram)
     runClientActivitySync,   // снимок неактивных клиентов для CRM-агента
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
     runVolumeGuard: () => volumeGuard.runOnce(),   // A4 (23.08): объёмные алерты
