@@ -26,7 +26,7 @@ function runStartup(d) {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runLocationWanSpeed, runServerMetrics, runRetailGuard,
-    runBlockedPortCleanup, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
+    runBlockedPortCleanup, runClientActivitySync, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
     runSimExhaustion,   // 2026-09-26: sim-exhaustion
     saveClients, auditLog, authTokensDb,
     events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
@@ -288,6 +288,13 @@ function runStartup(d) {
     .catch(e => logger.error('[BlockedPortCleanup] startup run failed:', e.message)), 8 * 60 * 1000);
   _intervals.push(setInterval(() => dbAudit.runJobAsync('BlockedPortCleanup', 'periodic', () => runBlockedPortCleanup())
     .catch(e => logger.error('[BlockedPortCleanup] periodic run failed:', e.message)), 30 * 60 * 1000));
+
+  // Снимок «неактивен» для CRM-агента: первый прогон через 2 мин, дальше раз в 3 мин
+  // (дешёвый проход по кэшу фида; агент реагирует по своему тику).
+  setTimeout(() => dbAudit.runJobAsync('ClientActivitySync', 'startup', () => runClientActivitySync())
+    .catch(e => logger.error('[ClientActivitySync] startup run failed:', e.message)), 2 * 60 * 1000);
+  _intervals.push(setInterval(() => dbAudit.runJobAsync('ClientActivitySync', 'periodic', () => runClientActivitySync())
+    .catch(e => logger.error('[ClientActivitySync] periodic run failed:', e.message)), 3 * 60 * 1000));
 
   // Nightly DB cleanup at 00:30 UTC — remove old data using dynamic retention settings
   scheduleRepeating(0, 30, 'DbCleanup', async () => {

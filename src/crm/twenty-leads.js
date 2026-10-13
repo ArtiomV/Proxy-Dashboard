@@ -13,7 +13,9 @@
  *   - CRM_DB_URL в .env содержал IP контейнера (172.18.0.x) — он МЕНЯЕТСЯ
  *     при пересоздании контейнера. Поэтому используем host-mapped порт
  *     127.0.0.1:5432 (docker-compose twenty-db публикует 127.0.0.1:5432→5432).
- *     Значение можно переопределить настройкой crm_db_url / env CRM_DB_URL.
+ *     Строка подключения (с паролем) задаётся ТОЛЬКО настройкой crm_db_url
+ *     (Настройки → CRM, хранится зашифрованной) или env CRM_DB_URL — в коде
+ *     пароля нет (был зашит до 2026-10-12, из истории git ротирован).
  *   - Имя workspace-схемы (workspace_xxx) тоже нестабильно — после
  *     переустановки Twenty оно другое. Схему авто-определяем: ищем
  *     workspace_* схему, в которой есть таблица person. Кэшируем в память.
@@ -39,7 +41,6 @@
  */
 
 const TAG = 'Сайт arendaproxy.ru';
-const DEFAULT_DB_URL = 'postgresql://twenty:TwentyCRM2026x@127.0.0.1:5432/default';
 
 let _wsSchema = null;   // кэш авто-определённой workspace-схемы
 let _leadStage = null;  // кэш валидной стартовой стадии сделки
@@ -63,7 +64,12 @@ async function _stage(c, ws) {
 }
 
 function _dbUrl(getSetting) {
-  return (getSetting && getSetting('crm_db_url', '')) || process.env.CRM_DB_URL || DEFAULT_DB_URL;
+  const url = (getSetting && getSetting('crm_db_url', '')) || process.env.CRM_DB_URL || '';
+  if (!url) {
+    throw new Error('crm_db_url не задан (Настройки → CRM или env CRM_DB_URL): '
+      + 'postgresql://twenty:<пароль>@127.0.0.1:5432/default');
+  }
+  return url;
 }
 
 async function _connect(getSetting) {

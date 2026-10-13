@@ -4117,6 +4117,16 @@ const _retailGuard = require('./src/jobs/retail-guard').create({
 });
 const runRetailGuard = _retailGuard.runOnce;
 const runBlockedPortCleanup = _blockedPortCleanup.runOnce;   // 21.08: удаление портов после hold
+// CRM: снимок «активен/неактивен» (нет портов) для агента продлений tg2twenty.
+const runClientActivitySync = require('./src/jobs/client-activity-sync').create({
+  logger, clients, fetchAllServersDataCached,
+  kvGet: (k) => _kvGet.get(k),
+  kvSet: (k, v) => _kvSet.run(k, v),
+  portValidity: require('./src/services/port-validity').create({
+    logger, logActivity, auditLog, proxyConf, fetchApi, parseHtmlInputFields, findServer, proxySmart,
+    ledgerDb, saveClients, getMoscowNow, fetchAllServersDataCached, clients, getSetting,
+  }),
+}).runOnce;
 financeEvents.on('client-credit', ({ clientId, amount, balanceAfter }) => {
   const c = clientById.get(clientId);
   if (!c) return;
@@ -4555,6 +4565,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
     runDebtRestoreRecovery: _debtBlock.retryPendingRestores,
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
+    runClientActivitySync,   // снимок неактивных клиентов для CRM-агента
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
     runVolumeGuard: () => volumeGuard.runOnce(),   // A4 (23.08): объёмные алерты
     runSimExhaustion: () => simExhaustion.runOnce(),   // 2026-09-26: исчерпание пакета симки
