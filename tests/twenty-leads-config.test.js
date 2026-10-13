@@ -28,3 +28,17 @@ describe('twenty-leads без crm_db_url', () => {
     expect(src).not.toMatch(/postgresql:\/\/\w+:[^<\s'"]+@/);
   });
 });
+
+describe('tgUsername: контакт заявки → ник для склейки с чатом', () => {
+  it.each([
+    ['@Zukkiofficial777', 'telegram', 'zukkiofficial777'],
+    ['https://t.me/Alenchykk', 'telegram', 'alenchykk'],
+    ['t.me/tainetvpn_help?start=x', 'telegram', 'tainetvpn_help'],
+    ['Dmzind', 'telegram', 'dmzind'],
+    ['+7 965 077 7999', 'phone', ''],
+    ['@ab', 'telegram', ''],
+    ['mikhail@tehnostandart.ru', 'email', ''],
+  ])('%s (%s) → %s', (contact, type, expected) => {
+    expect(leads.tgUsername(contact, type)).toBe(expected);
+  });
+});

@@ -106,6 +106,16 @@ async function ping(getSetting) {
   } finally { if (c) try { await c.end(); } catch { /* ignore */ } }
 }
 
+/** Telegram-ник из контакта заявки: «@name», «t.me/name», «https://t.me/name?x» → name (нижний регистр);
+ *  не ник (телефон, мусор) → ''. Нужен, чтобы заявка и последующий чат склеились в ОДИН контакт. */
+function tgUsername(contact, contactType) {
+  let v = String(contact || '').trim();
+  if (!v) return '';
+  if (contactType !== 'telegram' && !/t\.me\/|^@/i.test(v)) return '';
+  v = v.replace(/^https?:\/\//i, '').replace(/^(www\.)?t\.me\//i, '').replace(/^@/, '').split(/[/?#]/)[0];
+  return /^[A-Za-z0-9_]{4,32}$/.test(v) ? v.toLowerCase() : '';
+}
+
 /**
  * Пуш заявки в Twenty. lead: {contact, contact_type, message, product, offer,
  * page, cta_position, utm}. Возвращает { personId, created } — created=true,
@@ -120,9 +130,17 @@ async function pushLead(getSetting, lead) {
     const contact = String(lead.contact || '').trim();
     const phone = lead.contact_type === 'phone' ? contact.replace(/[^\d+]/g, '') : '';
 
-    // Дедуп: телефон — по phonesPrimaryPhoneNumber, TG — по nameLastName.
+    const username = tgUsername(contact, lead.contact_type);
+
+    // Дедуп: телефон — по phonesPrimaryPhoneNumber, TG — по telegramUsername (контакт мог уже
+    // создать импортёр из чата), затем по nameLastName.
     let personId = null;
-    if (phone) {
+    if (username) {
+      const r = await c.query(
+        `SELECT id FROM ${ws}.person WHERE "deletedAt" IS NULL AND lower("telegramUsername") = $1 LIMIT 1`, [username]);
+      if (r.rows.length) personId = r.rows[0].id;
+    }
+    if (!personId && phone) {
       const r = await c.query(
         `SELECT id FROM ${ws}.person WHERE "deletedAt" IS NULL AND "phonesPrimaryPhoneNumber" = $1 LIMIT 1`, [phone]);
       if (r.rows.length) personId = r.rows[0].id;
@@ -137,9 +155,9 @@ async function pushLead(getSetting, lead) {
     if (!personId) {
       const ins = await c.query(
         `INSERT INTO ${ws}.person
-           ("nameFirstName","nameLastName","phonesPrimaryPhoneNumber","createdBySource","createdByName")
-         VALUES ($1,$2,$3,'IMPORT',$4) RETURNING id`,
-        ['Лид с сайта', contact, phone || null, TAG]);
+           ("nameFirstName","nameLastName","phonesPrimaryPhoneNumber","telegramUsername","importSource","createdBySource","createdByName")
+         VALUES ($1,$2,$3,$4,'site-lead','IMPORT',$5) RETURNING id`,
+        ['Лид с сайта', contact, phone || null, username || null, TAG]);
       personId = ins.rows[0].id;
       created = true;
     }
@@ -151,10 +169,13 @@ async function pushLead(getSetting, lead) {
       `SELECT id FROM ${ws}.opportunity WHERE "deletedAt" IS NULL AND "pointOfContactId" = $1 LIMIT 1`, [personId]);
     if (exOpp.rows.length) {
       opportunityId = exOpp.rows[0].id;
+      // входящая заявка помечает «входящий поток» и у ранее созданной (чатом/вручную) сделки
+      await c.query(`UPDATE ${ws}.opportunity SET "leadSource" = 'INBOUND' WHERE id = $1 AND "leadSource" IS NULL`,
+        [opportunityId]);
     } else {
       const opp = await c.query(
-        `INSERT INTO ${ws}.opportunity ("name","stage","pointOfContactId","createdBySource","createdByName")
-         VALUES ($1,$2,$3,'IMPORT',$4) RETURNING id`,
+        `INSERT INTO ${ws}.opportunity ("name","stage","pointOfContactId","leadSource","createdBySource","createdByName")
+         VALUES ($1,$2,$3,'INBOUND','IMPORT',$4) RETURNING id`,
         [`Заявка: ${contact}`, await _stage(c, ws), personId, TAG]);
       opportunityId = opp.rows[0].id;
     }
@@ -183,4 +204,4 @@ async function pushLead(getSetting, lead) {
   } finally { if (c) try { await c.end(); } catch { /* ignore */ } }
 }
 
-module.exports = { ping, pushLead, resetCache, TAG };
+module.exports = { ping, pushLead, resetCache, tgUsername, TAG };
