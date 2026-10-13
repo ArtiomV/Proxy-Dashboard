@@ -125,6 +125,32 @@ describe('D3: runOnce — локальный fallback', () => {
     expect(fs.readdirSync(tmpDir).filter(f => f.startsWith('backup-test-'))).toHaveLength(0);
   });
 
+  // 13.10: BACKUP_OFFSITE=off — облако выключено владельцем: rclone не
+  // вызывается, локальная копия проверяется без warn и без DEGRADED.
+  it('BACKUP_OFFSITE=off: rclone не трогаем даже при RCLONE_REMOTE, без DEGRADED', async () => {
+    const backupDir = path.join(workDir, 'backups');
+    const tmpDir = path.join(workDir, 'tmp');
+    fs.mkdirSync(backupDir); fs.mkdirSync(tmpDir);
+    const dbFile = path.join(workDir, 'src.db');
+    makeValidDbFile(dbFile);
+    fs.writeFileSync(path.join(backupDir, '' + FRESH + ''), zlib.gzipSync(fs.readFileSync(dbFile)));
+    process.env.DB_BACKUP_DIR = backupDir;
+    process.env.RCLONE_REMOTE = 'remote-that-must-not-be-called';
+    const prev = process.env.BACKUP_OFFSITE;
+    process.env.BACKUP_OFFSITE = 'off';
+    try {
+      const deps = makeDeps({ tmpDir });
+      const r = await backupTest.create(deps).runOnce();
+      expect(r.ok).toBe(true);
+      expect(r.source).toBe('local');
+      expect(r.checks.remote).toBe('disabled');
+      expect(r.degraded).toBe(null);
+      expect(deps.logger.warn).not.toHaveBeenCalled();
+    } finally {
+      if (prev === undefined) delete process.env.BACKUP_OFFSITE; else process.env.BACKUP_OFFSITE = prev;
+    }
+  });
+
   it('дампов нет → ok:false + алерт backup_restore_failed', async () => {
     const backupDir = path.join(workDir, 'backups');
     fs.mkdirSync(backupDir);   // пустой каталог

@@ -58,7 +58,11 @@ function create(deps) {
     const remote = process.env.RCLONE_REMOTE || '';
     const prefix = process.env.RCLONE_DEST_PREFIX || 'proxy-dashboard-backups';
     let remoteStatus = 'unconfigured';
-    if (remote) {
+    if (require('./backup').offsiteDisabled()) {
+      // BACKUP_OFFSITE=off — облака нет намеренно: проверяем локальную копию
+      // без пометки DEGRADED.
+      remoteStatus = 'disabled';
+    } else if (remote) {
       try {
         const names = await _listPublished('s3');
         if (names.length) return { source: 's3', file: names[names.length - 1], remote, prefix, remoteStatus: 'ok' };

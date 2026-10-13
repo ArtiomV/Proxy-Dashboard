@@ -54,6 +54,25 @@ function makeDeps(over = {}) {
 }
 
 describe('FIX-08/DEEP-16: runDbBackup', () => {
+  // 13.10: BACKUP_OFFSITE=off — выгрузку в облако не пытаемся (у владельца
+  // свой автобэкап), warn'ов про rclone нет.
+  it('BACKUP_OFFSITE=off: offsite пропускается без warn', async () => {
+    const dbFile = path.join(workDir, 'dashboard.db');
+    makeTemplateDb(dbFile);
+    process.env.DB_BACKUP_DIR = path.join(workDir, 'backups');
+    const prev = process.env.BACKUP_OFFSITE;
+    process.env.BACKUP_OFFSITE = 'off';
+    try {
+      const deps = makeDeps({ db: new Database(dbFile) });
+      await backup.create(deps).runDbBackup();
+      expect(deps.logger.error).not.toHaveBeenCalled();
+      expect(deps.logger.warn).not.toHaveBeenCalled();
+      expect(deps.logger.info).toHaveBeenCalledWith(expect.stringContaining('offsite upload skipped'));
+    } finally {
+      if (prev === undefined) delete process.env.BACKUP_OFFSITE; else process.env.BACKUP_OFFSITE = prev;
+    }
+  });
+
   it('успешный прогон: снимок → quick_check → gzip → публикация, .gz валиден', async () => {
     const dbFile = path.join(workDir, 'dashboard.db');
     makeTemplateDb(dbFile);

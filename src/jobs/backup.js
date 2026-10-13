@@ -84,7 +84,10 @@ function create(deps) {
       }
       // D2: offsite-выгрузка в облако (rclone, scripts/backup-offsite.sh).
       // Best-effort: сбой не роняет локальный бэкап, но и не молчит (C7).
-      await runOffsiteUpload(logger, logActivity, backupDir);
+      // BACKUP_OFFSITE=off — облачная выгрузка выключена владельцем (свой
+      // автобэкап сервера); не пытаемся и не шумим warn'ами каждую ночь.
+      if (offsiteDisabled()) logger.info('[DbBackup] offsite upload skipped: BACKUP_OFFSITE=off');
+      else await runOffsiteUpload(logger, logActivity, backupDir);
     } catch (e) {
       logger.error('[DbBackup] FAILED: ' + (e.stack || e.message));
       logActivity('system', 'critical', 'db_backup_failed', null, 'DB backup failed', { error: e.message });
@@ -226,6 +229,10 @@ function fsyncDir(fs, dir, logger) {
 // (scripts/backup-offsite.sh, remote из $RCLONE_REMOTE). Best-effort: сбой —
 // warn в лог + system_log (C7), ночной бэкап не роняем. Если rclone/remote не
 // настроены, скрипт падает с понятной ошибкой — сюда она приходит как warn.
+function offsiteDisabled() {
+  return /^(off|0|false|no)$/i.test(String(process.env.BACKUP_OFFSITE || '').trim());
+}
+
 function runOffsiteUpload(logger, logActivity, backupDir) {
   const { execFile } = require('child_process');
   const path = require('path');
@@ -299,4 +306,4 @@ function gzipFile(dest, io = {}) {
   })();
 }
 
-module.exports = { create, rotateMonthlyBackup, runOffsiteUpload, gzipFile, pruneOldBackups, fsyncFile, fsyncDir };
+module.exports = { create, rotateMonthlyBackup, runOffsiteUpload, offsiteDisabled, gzipFile, pruneOldBackups, fsyncFile, fsyncDir };
