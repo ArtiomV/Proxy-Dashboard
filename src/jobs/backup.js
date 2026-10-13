@@ -10,6 +10,40 @@ function create(deps) {
   // снимок → верификация → сжатие → публикация, а не только gzipFile.
   let backupRunning = false;
 
+  function verifyInProcess(dest) {
+    const Database = deps.Database || require('better-sqlite3');
+    let bdb;
+    try {
+      bdb = new Database(dest, { readonly: true });
+      const qc = bdb.pragma('quick_check');
+      const qcFirst = Array.isArray(qc) && qc[0] && Object.values(qc[0])[0];
+      if (qcFirst !== 'ok') throw new Error('backup verification: quick_check: ' + (qcFirst || 'no result'));
+      const ok = bdb.prepare("SELECT count(*) c FROM sqlite_master WHERE name='clients'").get();
+      if (!ok || !ok.c) throw new Error('backup verification: clients table missing');
+    } finally {
+      try { if (bdb) bdb.close(); } catch (_) { /* best-effort: close intentionally swallowed */ }
+    }
+  }
+
+  function verifyInWorker(dest) {
+    const { Worker } = require('worker_threads');
+    return new Promise((resolve, reject) => {
+      const w = new Worker(path.join(__dirname, 'backup-verify-worker.js'), { workerData: { dest } });
+      let done = false;
+      w.once('message', (r) => {
+        done = true;
+        if (r && r.ok) resolve(); else reject(new Error((r && r.error) || 'backup verification failed'));
+      });
+      w.once('error', (e) => { done = true; reject(e); });
+      w.once('exit', (code) => { if (!done) reject(new Error('backup verification worker exited with code ' + code)); });
+    });
+  }
+
+  async function verifySnapshot(dest) {
+    if (deps.Database) return verifyInProcess(dest);
+    return verifyInWorker(dest);
+  }
+
   // Nightly DB backup — SQLite Online Backup API (safe while live).
   // Keeps 7 days of snapshots; older ones pruned (with sidecars).
   async function runDbBackup() {
@@ -24,21 +58,11 @@ function create(deps) {
       await db.backup(dest);
       // DEEP-16 (18.09.2026): наличие таблицы clients само по себе не
       // доказывает целостность SQLite — проверяем quick_check снимка ДО
-      // публикации и ДО удаления старых копий. Проверочная БД закрывается
-      // через finally, иначе ошибка запроса оставляла её открытой.
-      // deps.Database — точка инъекции для тестов.
-      const Database = deps.Database || require('better-sqlite3');
-      let bdb;
-      try {
-        bdb = new Database(dest, { readonly: true });
-        const qc = bdb.pragma('quick_check');
-        const qcFirst = Array.isArray(qc) && qc[0] && Object.values(qc[0])[0];
-        if (qcFirst !== 'ok') throw new Error('backup verification: quick_check: ' + (qcFirst || 'no result'));
-        const ok = bdb.prepare("SELECT count(*) c FROM sqlite_master WHERE name='clients'").get();
-        if (!ok || !ok.c) throw new Error('backup verification: clients table missing');
-      } finally {
-        try { if (bdb) bdb.close(); } catch (_) { /* best-effort: close intentionally swallowed */ }
-      }
+      // публикации и ДО удаления старых копий.
+      // 13.10: проверка — в отдельном потоке (backup-verify-worker.js):
+      // на главном она останавливала дашборд на ~12 с каждую ночь.
+      // deps.Database — точка инъекции для тестов (проверка в процессе).
+      await verifySnapshot(dest);
       // D2: сжимаем снапшот gzip'ом — БД выросла до ~700 MB, 7 дневных копий
       // ели ~5 GB диска (13.08.2026). В облако и monthly/ уезжает .gz;
       // восстановление: gunzip → обычный dashboard.db.

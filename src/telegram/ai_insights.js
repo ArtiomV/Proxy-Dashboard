@@ -69,6 +69,12 @@ function buildDayContext(date) {
   // (src/modems/stat-scope.js); свободные SIM без сети портили проценты.
   const ps = statScope.boundClause('server', 'nick');
   const rs = statScope.boundClause('server_name', 'nick');
+  // 13.10: «сбой пинга» — потери ≥ порога медленного пинга. ok=0 в
+  // modem_ping пишется только при 100% потерь, а модем без связи вообще не
+  // отдаёт ping_stats — по ok сбоев не бывает никогда (0 из 7 млн замеров),
+  // и анализ всегда видел «0% сбоев пинга».
+  const LOSS_FAIL = Math.max(1, Math.min(100, Number(getSetting && getSetting('ping_loss_warn_pct', 30)) || 30));
+  ctx.ping_failure_definition = `потери пакетов ≥ ${LOSS_FAIL}% в замере`;
 
   // ── 1) Per-server health (the headline view)
   try {
@@ -81,7 +87,7 @@ function buildDayContext(date) {
       pings AS (
         SELECT server AS server_name,
                COUNT(*) AS total_pings,
-               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed_pings
+               SUM(CASE WHEN loss_pct >= ${LOSS_FAIL} THEN 1 ELSE 0 END) AS failed_pings
         FROM modem_ping
         WHERE ts >= ? AND ts < ?${ps.clause}
         GROUP BY server
@@ -158,7 +164,7 @@ function buildDayContext(date) {
       ),
       p AS (
         SELECT server, nick, COUNT(*) AS total,
-               SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures
+               SUM(CASE WHEN loss_pct >= ${LOSS_FAIL} THEN 1 ELSE 0 END) AS failures
         FROM modem_ping WHERE ts >= ? AND ts < ?${ps.clause} GROUP BY server, nick
       ),
       h AS (
@@ -270,7 +276,7 @@ function buildDayContext(date) {
     const trend = db.prepare(`
       SELECT
         COUNT(*) AS total,
-        SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures
+        SUM(CASE WHEN loss_pct >= ${LOSS_FAIL} THEN 1 ELSE 0 END) AS failures
       FROM modem_ping
       WHERE ts >= ? AND ts < ?${ps.clause}
     `).get(baselineFrom.toISOString(), b.fromIso, ...ps.params);
@@ -326,13 +332,50 @@ const SYSTEM_PROMPT = `Ты — старший аналитик инфрастр
 - Если данных мало (<100 проверок за день), скажи об этом и не выдумывай выводы.
 - НЕ повторяй сводку из вышестоящего блока — давай ИНТЕРПРЕТАЦИЮ.`;
 
+// Тот же buildDayContext, но в worker-потоке (ai-context-worker.js) — главный
+// поток не блокируется. Для БД в памяти (тесты) или при сбое потока —
+// обычный синхронный вызов.
+const AI_CONTEXT_SETTINGS = ['ping_loss_warn_pct'];
+function buildDayContextOffThread(date) {
+  const dbPath = db && db.name;
+  if (!dbPath || dbPath === ':memory:' || db.memory) return Promise.resolve(buildDayContext(date));
+  const { Worker } = require('worker_threads');
+  const settings = {};
+  for (const k of AI_CONTEXT_SETTINGS) {
+    try { const v = getSetting(k, undefined); if (v !== undefined) settings[k] = v; } catch (_) { /* default */ }
+  }
+  const knownModems = require('../state').state.knownModems || {};
+  return new Promise((resolve) => {
+    let done = false;
+    const fallback = (why) => {
+      if (done) return;
+      done = true;
+      logger.warn('[AIInsights] context worker failed (' + why + ') — building on main thread');
+      resolve(buildDayContext(date));
+    };
+    let w;
+    try {
+      w = new Worker(require('path').join(__dirname, 'ai-context-worker.js'), { workerData: { dbPath, date, knownModems, settings } });
+    } catch (e) { fallback(e.message); return; }
+    w.once('message', (m) => {
+      if (done) return;
+      if (!m || m.error || !m.ctx) { fallback((m && m.error) || 'empty result'); return; }
+      done = true;
+      for (const wmsg of (m.warns || [])) logger.warn(wmsg);
+      resolve(m.ctx);
+    });
+    w.once('error', (e) => fallback(e.message));
+    w.once('exit', (code) => fallback('exit ' + code));
+  });
+}
+
 async function generateInsights(date) {
   const client = _getClient();
   if (!client) {
     logger.info('[AIInsights] Skipped: no ANTHROPIC_API_KEY configured (env or setting "anthropic_api_key")');
     return null;
   }
-  const ctx = buildDayContext(date);
+  const ctx = await buildDayContextOffThread(date);
   if (!ctx.servers || ctx.servers.length === 0) {
     logger.info('[AIInsights] Skipped: no server activity for ' + date);
     return null;
@@ -400,4 +443,4 @@ async function generateInsights(date) {
   }
 }
 
-module.exports = { init, buildDayContext, generateInsights };
+module.exports = { init, buildDayContext, buildDayContextOffThread, generateInsights };
