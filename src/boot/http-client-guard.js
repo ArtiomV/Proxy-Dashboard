@@ -6,25 +6,23 @@
 // Node: ERR_INTERNAL_ASSERTION в _http_client socketOnData —
 // assert(parser && parser.socket === socket). Данные пришли в клиентский
 // сокет, чей HTTP-парсер уже освобождён или отдан другому сокету из пула.
-// Оба раза — посреди прогона http-check (проверки через прокси модемов);
-// стенд с «плохим» прокси на Node 22.23.3 причину не воспроизвёл.
+// Оба раза — посреди прогона http-check (проверки через прокси модемов).
 //
-// Что делает страж:
-//   1. Каждому клиентскому сокету помечает «чей он» (метод, хост:порт, путь
-//      без query) — первым 'data'-листенером запоминает последний сокет,
-//      получивший данные. Если ассерт сработает, в журнале будет конкретный
-//      запрос, а не безымянный стек Node.
-//   2. handleUncaught(err): именно этот ассерт — не повод перезапускать
-//      весь процесс. Он бросается ДО разбора данных (состояние парсера не
-//      тронуто); сломанный сокет закрываем, чужой парсер от него отвязываем
-//      (иначе socketCloseListener освободит парсер соседнего запроса), а
-//      владелец-запрос получает обычный обрыв соединения.
+// Страж ПАССИВЕН: на сокеты не вешается ни одного слушателя данных (первая
+// версия вешала 'data'-слушатель и ломала длинные HTTPS-ответы — «Premature
+// close» у запросов к API Anthropic; убрано в тот же день). Он только ведёт
+// реестр живых клиентских сокетов (снимается по 'close'). Когда ассерт всё же
+// сработал, в uncaughtException:
+//   • в реестре ищутся сокеты с нарушенной связью парсера (parser отсутствует
+//     или принадлежит другому сокету) — виновник и есть такой сокет;
+//   • такие сокеты закрываются, чужой парсер от них отвязывается;
+//   • в журнал пишется запрос виновника (метод, хост:порт, путь без query);
+//   • процесс продолжает работу.
 
 const dc = require('diagnostics_channel');
 
-let _last = null;            // { socket, info, at }
+const _live = new Set();
 let _installed = false;
-const _marked = new WeakSet();
 
 function _describe(req) {
   try {
@@ -38,11 +36,9 @@ function _onCreated({ request }) {
   request.once('socket', (socket) => {
     if (!socket) return;
     socket.__guardReq = request;
-    if (_marked.has(socket)) return;
-    _marked.add(socket);
-    socket.prependListener('data', function guardMark() {
-      _last = { socket: this, at: Date.now() };
-    });
+    if (_live.has(socket)) return;
+    _live.add(socket);
+    socket.once('close', () => _live.delete(socket));
   });
 }
 
@@ -57,24 +53,26 @@ function isParserAssert(err) {
     && /socketOnData/.test(String(err.stack || '')));
 }
 
+function _broken(s) {
+  if (!s || s.destroyed) return false;
+  if (!s._httpMessage) return false;                      // сокет не занят запросом
+  return !s.parser || s.parser.socket !== s;
+}
+
 // true — исключение обработано, процесс продолжает работу.
 function handleUncaught(err, log) {
   if (!isParserAssert(err)) return false;
-  const last = _last;
-  _last = null;
-  let info = 'unknown socket';
-  if (last && last.socket) {
-    const s = last.socket;
+  const culprits = [..._live].filter(_broken);
+  const infos = [];
+  for (const s of culprits) {
     const req = s.__guardReq || s._httpMessage;
-    info = req ? _describe(req) : `${s.remoteAddress || '?'}:${s.remotePort || '?'}`;
-    const parserState = !s.parser ? 'parser=null'
-      : (s.parser.socket === s ? 'parser=own' : 'parser=foreign');
-    info += ` (${parserState}, data ${Date.now() - last.at}ms ago)`;
+    const state = !s.parser ? 'parser=null' : 'parser=foreign';
+    infos.push((req ? _describe(req) : `${s.remoteAddress || '?'}:${s.remotePort || '?'}`) + ` (${state})`);
     try { if (s.parser && s.parser.socket !== s) s.parser = null; } catch (_) { /* best-effort */ }
     try { s.destroy(); } catch (_) { /* best-effort */ }
   }
-  try { if (log) log(info); } catch (_) { /* best-effort */ }
+  try { if (log) log(infos.length ? infos.join('; ') : 'виновный сокет не найден'); } catch (_) { /* best-effort */ }
   return true;
 }
 
-module.exports = { install, handleUncaught, isParserAssert, _peekLast: () => _last };
+module.exports = { install, handleUncaught, isParserAssert, _liveCount: () => _live.size };

@@ -23,7 +23,7 @@ srv.listen(0, '127.0.0.1', () => {
     res.on('data', () => {});
     res.on('error', () => {});
     const sock = req.socket;
-    sock.parser = null;              // имитация освобождённого парсера
+    sock.parser = null;              // имитация освобождённого парсера (guard.__guardReq уже стоит)
     setTimeout(() => {
       out.socketDestroyed = sock.destroyed;
       // процесс жив и другие запросы работают

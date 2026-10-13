@@ -26,6 +26,24 @@ describe('http-client-guard', () => {
     expect(out.info).toContain('GET 127.0.0.1');
     expect(out.info).toContain('/apix/test');
     expect(out.info).not.toContain('secret');
+    expect(out.info).toContain('parser=null');
+  });
+
+  it('пассивность: на сокетах нет слушателей данных от стража (иначе ломаются длинные HTTPS-ответы)', () => {
+    const outRaw = execFileSync(process.execPath, ['-e', `
+      const guard = require(${JSON.stringify(path.join(root, 'src/boot/http-client-guard.js'))});
+      guard.install();
+      const http = require('http');
+      const srv = http.createServer((q, r) => r.end('ok')).listen(0, () => {
+        const req = http.get({ port: srv.address().port, agent: false }, (res) => {
+          const before = req.socket.listenerCount('data');
+          res.resume(); res.on('end', () => { console.log(JSON.stringify({ before, live: guard._liveCount() })); process.exit(0); });
+        });
+      });
+    `], { encoding: 'utf8', timeout: 20000 });
+    const o = JSON.parse(outRaw.trim().split('\n').pop());
+    expect(o.before).toBe(1);        // только парсер Node
+    expect(o.live).toBe(1);
   });
 
   it('прочие исключения не перехватывает', () => {
