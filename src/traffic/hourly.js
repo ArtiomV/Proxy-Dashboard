@@ -132,18 +132,23 @@ async function refreshSnapshotsOnly() {
             // last_updated_at: это не новое измерение, а подтягивание счётчиков
             // при старте; иначе рестарт «омолаживал» baseline и ломал
             // gap-detection на первые часы после перезапуска.
+            // Падение на подтверждении (pending=2) переживает рестарт вместе
+            // с эталонным «вчера» — иначе смена суток во время рестарта
+            // не распознается.
+            const held = !!(snap && snap.pending === 2);
             upsertSnap(fullPortId, {
               day_in: snap ? snap.day_in : dayIn,
               day_out: snap ? snap.day_out : dayOut,
               month_in: snap ? snap.month_in : monIn,
               month_out: snap ? snap.month_out : monOut,
-              yesterday_in: yesIn, yesterday_out: yesOut,
+              yesterday_in: held ? snap.yesterday_in : yesIn,
+              yesterday_out: held ? snap.yesterday_out : yesOut,
               prev_month_in: pmIn, prev_month_out: pmOut,
               day_at_last_hour_start_in: snap ? snap.day_at_last_hour_start_in : dayIn,
               day_at_last_hour_start_out: snap ? snap.day_at_last_hour_start_out : dayOut,
               mon_at_last_hour_start_in: snap ? snap.mon_at_last_hour_start_in : monIn,
               mon_at_last_hour_start_out: snap ? snap.mon_at_last_hour_start_out : monOut,
-              pending: 0,
+              pending: held ? 2 : 0,
             }, { preserveTs: true });
             updated++;
           } else if (!snap) {
@@ -181,6 +186,7 @@ async function aggregateHourlyTraffic() {
     let smoothedCount = 0;       // rows where uncertain=2 was replaced by median of clean neighbours
     let unsmoothableCount = 0;   // uncertain=2 rows we couldn't smooth (not enough neighbours)
     let clampedSpikes = 0;
+    let heldDrops = 0;           // 2026-10-13: падения дневного счётчика на подтверждении (pending=2)
     let wireDivergentCount = 0;     // 2026-10-03: часы с расхождением портов и провода (только детекция, без подмены значений)
     const MAX_HOURLY_BYTES = 20 * 1e9; // 20 GB sanity cap per port (decimal GB)
     const UNCERTAIN_THRESHOLD = 150 * 1e6; // 150 MB minimum for uncertain flag (above month counter granularity)
@@ -428,8 +434,17 @@ async function aggregateHourlyTraffic() {
             continue;
           }
 
+          // Все восемь счётчиков нулевые — у панели нет данных по порту
+          // (модем выпал/порт пересоздаётся), а не «полночь»: снимок не
+          // трогаем, иначе baseline обнулится и при возврате данных весь
+          // день посчитается второй раз. last_updated_at не двигается —
+          // накопленное за паузу разложит gap-detection.
+          if (!dayIn && !dayOut && !monIn && !monOut && !yesIn && !yesOut && !pmIn && !pmOut) continue;
+
           // --- 2. Pending baseline → wait for real data ---
-          if (snap.pending) {
+          // pending=2 — не «ждём baseline», а «падение дневного счётчика на
+          // подтверждении» (раздел 3).
+          if (snap.pending && snap.pending !== 2) {
             if (dayIn > 0 || dayOut > 0 || monIn > 0 || monOut > 0) {
               upsertSnap(fullPortId, {
                 ...snap,
@@ -468,27 +483,68 @@ async function aggregateHourlyTraffic() {
           // nor yesterdayChanged, fell through to "Normal hour" where
           // delta=max(0, small−huge)=0, and so the 00:00 MSK hour was dropped
           // ENTIRELY (both the pre-reset tail AND the post-reset accumulation).
-          // A >50% drop is unambiguously the midnight rollover — counters only
-          // fall at reset — so detecting it here is safe; the spike-clamp below
-          // still guards the tail increment against stale-baseline blowups.
           const dayCounterDropped = snap.day_in > 0 && dayIn < snap.day_in * 0.5;
-          const yesterdayChanged = yesIn > snap.day_in
-                                && yesIn !== snap.yesterday_in;
-          const dayReset = dayDropped || yesterdayChanged || dayCounterDropped;
+          const dayFell = dayDropped || dayCounterDropped;
+          // Счётчик «вчера» сменился с прошлого опроса — подпись настоящего
+          // перехода суток. Только при ней yesIn описывает закончившиеся сутки.
+          const yesterdayFlipped = yesIn > 0 && yesIn !== snap.yesterday_in;
+          const yesterdayChanged = yesIn > snap.day_in && yesterdayFlipped;
+          const dropHeld = snap.pending === 2;
+
+          // 2026-10-13: падение дневного счётчика БЕЗ смены «вчера» — не
+          // доказательство полночи. Панель среди дня отдаёт заниженный
+          // day-счётчик при прежнем «вчера» (RO1_11 10.10 07:00, S1/S3 12.10):
+          // старый код принимал это за сброс, писал хвост yesIn − baseline
+          // (yesIn — позавчерашние сутки целиком) и перебазировал baseline
+          // вниз — когда счётчик возвращался, день считался ещё раз. Такой
+          // опрос откладываем: baseline не трогаем, порт помечаем pending=2.
+          // Следующий опрос решает: счётчик вернулся → сбой, обычная дельта
+          // за оба часа; «вчера» сменилось → штатный сброс; падение держится →
+          // сброс подтверждён, хвост — по месячному счётчику.
+          if (dayFell && !yesterdayFlipped && !dropHeld) {
+            upsertSnap(fullPortId, { ...snap, pending: 2 }, { preserveTs: true });
+            heldDrops++;
+            logger.warn(`[HourlyAgg] day-counter drop held for confirmation: ${nick} day=${(snap.day_in/1e6).toFixed(1)}MB→${(dayIn/1e6).toFixed(1)}MB, yesterday unchanged`);
+            try {
+              logActivity('billing', 'warn', 'traffic_day_drop_held', nick,
+                `${nick} (${clientName||'no-client'}): дневной счётчик ${(snap.day_in/1e6).toFixed(1)}→${(dayIn/1e6).toFixed(1)} MB без смены «вчера» — час отложен до подтверждения`,
+                {
+                  nick, server: srv, port_id: fullPortId, client: clientName, operator,
+                  hour_start: hourStart,
+                  snap_day_in: snap.day_in, day_in: dayIn,
+                  yesterday_in: yesIn, snap_yesterday_in: snap.yesterday_in,
+                  reason: 'day_drop_without_yesterday_flip',
+                });
+            } catch (_) { /* best-effort */ }
+            continue;
+          }
+          if (dropHeld && !dayFell && !yesterdayChanged) {
+            logger.warn(`[HourlyAgg] day-counter drop was a glitch: ${nick} recovered to ${(dayIn/1e6).toFixed(1)}MB`);
+            try {
+              logActivity('billing', 'info', 'traffic_day_drop_glitch', nick,
+                `${nick} (${clientName||'no-client'}): дневной счётчик вернулся (${(dayIn/1e6).toFixed(1)} MB) — падение было сбоем панели, сброс не применён`,
+                { nick, server: srv, port_id: fullPortId, client: clientName, operator, hour_start: hourStart, day_in: dayIn, snap_day_in: snap.day_in, reason: 'day_drop_recovered' });
+            } catch (_) { /* best-effort */ }
+          }
+          const dayReset = dayFell || yesterdayChanged;
 
           if (dayReset) {
             // Last hour of the day delta. Prefer the yesterday counter when
-            // it's populated (precise — single-byte granularity). Fall back
-            // to month-counter delta when ProxySmart hasn't propagated
-            // yesterday yet — the month counter is the only one that doesn't
-            // reset at day boundary, so it gives us a usable estimate.
+            // it flipped since the last poll (precise — single-byte
+            // granularity). An unchanged yesterday is the day BEFORE — using
+            // it here booked a whole stale day into one hour. Otherwise fall
+            // back to the month counter (the only one that doesn't reset at
+            // day boundary). Its delta already contains the post-reset
+            // accumulation (dayIn), which is folded in below — subtract it
+            // here so it isn't counted twice. This branch is only reachable
+            // with dayFell (yesterdayChanged implies yesterdayFlipped).
             let incIn, incOut;
-            if (yesIn > 0) {
+            if (yesterdayFlipped) {
               incIn  = Math.max(0, yesIn  - snap.day_at_last_hour_start_in);
               incOut = Math.max(0, yesOut - snap.day_at_last_hour_start_out);
             } else {
-              incIn  = Math.max(0, monIn  - snap.mon_at_last_hour_start_in);
-              incOut = Math.max(0, monOut - snap.mon_at_last_hour_start_out);
+              incIn  = Math.max(0, monIn  - snap.mon_at_last_hour_start_in  - Math.max(0, dayIn));
+              incOut = Math.max(0, monOut - snap.mon_at_last_hour_start_out - Math.max(0, dayOut));
             }
             // Spike protection: when day_at_last_hour_start is stale (modem
             // briefly offline and snap missed a few hours), `yesIn - baseline`
@@ -799,7 +855,8 @@ async function aggregateHourlyTraffic() {
     const extra3 = smoothedCount > 0 ? `, ${smoothedCount} auto-smoothed` : '';
     const extra4 = unsmoothableCount > 0 ? `, ${unsmoothableCount} uncertain-kept` : '';
     const extra5 = wireDivergentCount > 0 ? `, ${wireDivergentCount} wire-divergent` : '';
-    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} port entries, ${snapCache.size} tracked${extra1}${extra2}${extra3}${extra4}${extra5}`);
+    const extra6 = heldDrops > 0 ? `, ${heldDrops} day-drops held` : '';
+    logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} port entries, ${snapCache.size} tracked${extra1}${extra2}${extra3}${extra4}${extra5}${extra6}`);
     // Stage 18.13 — too many spike-clamps in one hour is suspicious
     // (could mean genuine traffic surge, OR aggregator-corruption pattern).
     if (clampedSpikes >= 5) {

@@ -274,3 +274,83 @@ describe('Атрибуция оператора при записи (2026-09-27)
     expect(db.prepare('SELECT operator FROM traffic_hourly').get().operator).toBe('Moldcell');
   });
 });
+
+// 2026-10-13: падение дневного счётчика среди дня без смены «вчера» —
+// сбой панели, а не полночь (RO1_11 10.10, S1/S3 12.10: в один час
+// записывались позавчерашние сутки целиком, а день затем считался заново).
+describe('day reset: падение дневного счётчика требует подтверждения', () => {
+  const MB = 1e6;
+  function setup() {
+    let c = { day: 2000 * MB, mon: 50000 * MB, yes: 5000 * MB };
+    const db = boot(async () => feedWith(c.day, 0, c.mon, 0, { yesIn: c.yes }));
+    const set = (v) => { c = { ...c, ...v }; };
+    const total = () => {
+      const r = db.prepare("SELECT COALESCE(SUM(bytes_in),0) s FROM traffic_hourly WHERE port_id='S1_portA'").get();
+      return r.s;
+    };
+    const snap = () => db.prepare("SELECT * FROM hourly_snapshots WHERE port_id='S1_portA'").get();
+    return { db, set, total, snap };
+  }
+
+  it('сбой среди дня: счётчик провалился и вернулся — фантома нет, трафик не теряется', async () => {
+    const t = setup();
+    await hourly.aggregateHourlyTraffic();                       // baseline
+    t.set({ day: 2100 * MB, mon: 50100 * MB });
+    await hourly.aggregateHourlyTraffic();                       // +100
+    t.set({ day: 0, mon: 50200 * MB });                          // «вчера» прежнее
+    await hourly.aggregateHourlyTraffic();                       // отложено
+    expect(t.snap().pending).toBe(2);
+    expect(t.snap().day_in).toBe(2100 * MB);                     // baseline не тронут
+    expect(t.total()).toBe(100 * MB);
+    t.set({ day: 2300 * MB, mon: 50300 * MB });
+    await hourly.aggregateHourlyTraffic();                       // +200 за оба часа
+    expect(t.total()).toBe(300 * MB);
+    expect(t.snap().pending).toBe(0);
+  });
+
+  it('полночь со сменой «вчера» — сброс сразу: хвост по «вчера» + накопленное после сброса', async () => {
+    const t = setup();
+    await hourly.aggregateHourlyTraffic();
+    t.set({ day: 50 * MB, yes: 2100 * MB, mon: 50150 * MB });
+    await hourly.aggregateHourlyTraffic();
+    expect(t.total()).toBe(150 * MB);                            // 100 хвост + 50 новых суток
+    t.set({ day: 150 * MB, mon: 50250 * MB });
+    await hourly.aggregateHourlyTraffic();
+    expect(t.total()).toBe(250 * MB);
+  });
+
+  it('полночь, «вчера» пришло опросом позже — точный итог без задвоения', async () => {
+    const t = setup();
+    await hourly.aggregateHourlyTraffic();
+    t.set({ day: 50 * MB, mon: 50150 * MB });                    // «вчера» ещё старое
+    await hourly.aggregateHourlyTraffic();
+    expect(t.total()).toBe(0);
+    t.set({ day: 120 * MB, yes: 2100 * MB, mon: 50220 * MB });
+    await hourly.aggregateHourlyTraffic();
+    expect(t.total()).toBe(220 * MB);                            // 100 хвост + 120 = дельта месяца
+  });
+
+  it('падение держится без смены «вчера» — сброс подтверждён, хвост по месячному счётчику', async () => {
+    const t = setup();
+    await hourly.aggregateHourlyTraffic();
+    t.set({ day: 0, mon: 50100 * MB });
+    await hourly.aggregateHourlyTraffic();
+    t.set({ day: 80 * MB, mon: 50200 * MB });
+    await hourly.aggregateHourlyTraffic();
+    expect(t.total()).toBe(200 * MB);                            // не 5000−2000 «позавчера»
+    expect(t.snap().pending).toBe(0);
+    expect(t.snap().day_in).toBe(80 * MB);
+  });
+
+  it('все счётчики нулевые — снимок не трогается, при возврате данных день не задваивается', async () => {
+    const t = setup();
+    await hourly.aggregateHourlyTraffic();
+    t.set({ day: 0, mon: 0, yes: 0 });
+    await hourly.aggregateHourlyTraffic();
+    await hourly.aggregateHourlyTraffic();
+    expect(t.snap().day_in).toBe(2000 * MB);
+    t.set({ day: 2100 * MB, mon: 50100 * MB, yes: 5000 * MB });
+    await hourly.aggregateHourlyTraffic();
+    expect(t.total()).toBe(100 * MB);
+  });
+});
