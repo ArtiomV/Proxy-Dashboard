@@ -11,7 +11,7 @@ const bot = require('../src/telegram/bot.js');
 
 let sent, buildCalls, settings, clientsArr, audited, saveCalls, linkCodes, apiCalls;
 
-function setup({ settings: s = {}, clients = [], codes = {}, onAlertAck = null } = {}) {
+function setup({ settings: s = {}, clients = [], codes = {}, onAlertAck = null, onCtoDecision = null } = {}) {
   sent = []; buildCalls = []; audited = []; saveCalls = 0; apiCalls = [];
   settings = { telegram_bot_token: 'tok', ...s };
   clientsArr = clients;
@@ -36,6 +36,7 @@ function setup({ settings: s = {}, clients = [], codes = {}, onAlertAck = null }
     // B2: сырые вызовы Bot API (answerCallbackQuery, sendMessage с reply_markup)
     tgRequestImpl: async (token, method, params) => { apiCalls.push({ token, method, params }); return { ok: true, result: {} }; },
     onAlertAck,
+    onCtoDecision,
   });
 }
 
@@ -233,5 +234,29 @@ describe('B2: callback_query (кнопки «в работе»/«решено»)
     const sm = apiCalls.find(c => c.method === 'sendMessage');
     expect(sm.params.chat_id).toBe('123');
     expect(sm.params.reply_markup.inline_keyboard[0][0].callback_data).toBe('a:ack:' + HASH);
+  });
+});
+
+// ── 13.10: кнопки ИИ-директора c:ok|no|later:<id> ──
+describe('ИИ-директор: callback_query c:ok|no|later', () => {
+  it('админ: ok/no/later → decide(approve|reject|later, id, @user), ответ с текстом результата', async () => {
+    const decide = vi.fn().mockResolvedValue({ ok: true, text: 'Применено' });
+    setup({ settings: { telegram_admin_ids: '111' }, onCtoDecision: decide });
+    await bot.handleUpdate('tok', cbUpd(111, 'c:ok:12'));
+    await bot.handleUpdate('tok', cbUpd(111, 'c:no:13'));
+    await bot.handleUpdate('tok', cbUpd(111, 'c:later:14'));
+    expect(decide.mock.calls).toEqual([['approve', 12, '@op'], ['reject', 13, '@op'], ['later', 14, '@op']]);
+    expect(apiCalls.filter(c => c.method === 'answerCallbackQuery')[0].params.text).toBe('Применено');
+  });
+
+  it('чужой чат — отказ, решение не вызывается; повторное решение — «Уже решено»', async () => {
+    const decide = vi.fn().mockResolvedValue({ ok: false, error: 'already_decided', status: 'rejected' });
+    setup({ settings: { telegram_admin_ids: '111' }, onCtoDecision: decide });
+    await bot.handleUpdate('tok', cbUpd(999, 'c:ok:1'));
+    expect(decide).not.toHaveBeenCalled();
+    await bot.handleUpdate('tok', cbUpd(111, 'c:ok:1'));
+    const ans = apiCalls.filter(c => c.method === 'answerCallbackQuery');
+    expect(ans[0].params.text).toContain('Нет доступа');
+    expect(ans[1].params.text).toContain('Уже решено');
   });
 });
