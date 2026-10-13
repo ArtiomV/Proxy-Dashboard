@@ -31,6 +31,9 @@ _ExpressLayer.prototype.handle_request = function handle(req, res, next) {
 
 const path = require('path');
 const http = require('http');
+// 13.10: страж клиентских HTTP-сокетов — см. src/boot/http-client-guard.js.
+const httpClientGuard = require('./src/boot/http-client-guard');
+httpClientGuard.install();
 const https = require('https');
 const crypto = require('crypto');
 const fs = require('fs');
@@ -4646,6 +4649,12 @@ process.on('unhandledRejection', (reason, promise) => {
 });
 
 process.on('uncaughtException', (err) => {
+  // Внутренний ассерт HTTP-клиента Node (socketOnData) — локальный сбой
+  // одного сокета: страж закрывает его и пишет, чей это был запрос.
+  if (httpClientGuard.handleUncaught(err, (info) => {
+    try { logger.error('[HttpClientGuard] parser assertion on ' + info + ' — socket destroyed, process kept'); } catch (_) { /* best-effort */ }
+    try { logActivity('system', 'error', 'http_parser_assert', null, 'Сбой HTTP-парсера Node на исходящем сокете — сокет закрыт, процесс продолжает работу: ' + info, { socket: info }); } catch (_) { /* best-effort */ }
+  })) return;
   const msg = (err && err.stack) || (err && err.message) || String(err);
   try { logger.error('[UncaughtException] ' + msg); } catch (_) { console.error('[UncaughtException]', msg); }
   try { logActivity('system', 'critical', 'uncaught_exception', null, 'Uncaught exception — restarting', { error: String(msg).slice(0, 1000) }); } catch (_) { /* best-effort: error intentionally swallowed */ }

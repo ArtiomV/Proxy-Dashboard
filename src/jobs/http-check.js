@@ -87,7 +87,13 @@ function fetchThroughProxy(proxy, targetUrl, timeoutMs) {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      for (const resource of resources) resource.destroy();
+      // finish() зовётся изнутри обработчиков HTTP-клиента Node (res 'end'/
+      // 'close' во время parser.finish → freeParser). Синхронный destroy
+      // запроса/сокета там же — повторный вход во внутренности, после
+      // которого парсер может вернуться в пул дважды (13.10: падения на
+      // ассерте socketOnData посреди прогона http-check). Рушим на
+      // следующем тике, когда Node закончил свою обработку.
+      setImmediate(() => { for (const resource of resources) resource.destroy(); });
       if (error) reject(error);
       else resolve({ status, totalMs: Date.now() - started, body: body.toString('utf8'), location: location || '' });
     }
