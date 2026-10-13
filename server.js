@@ -2639,6 +2639,7 @@ _intervals.push(setInterval(() => refreshRotationCache(), ROTATION_CACHE_TTL()))
 const ROTATION_LOG_SYNC_INTERVAL = () => (appSettings.rotation_sync_interval_min || 30) * 60000;
 async function syncAllRotationLogs() {
   let totalSynced = 0;
+  let totalReceived = 0;
   for (const server of apiServers) {
     try {
       const statusData = await fetchApi(server, '/apix/show_status_json');
@@ -2650,8 +2651,8 @@ async function syncAllRotationLogs() {
           const result = await fetchApi(server, `/apix/get_rotation_log?arg=${encodeURIComponent(nick)}`);
           const entries = Array.isArray(result) ? result : (result?.log || result?.logs || result?.data || []);
           if (entries.length) {
-            syncRotationLog(server.name, nick, entries);
-            totalSynced += entries.length;
+            totalReceived += entries.length;
+            totalSynced += syncRotationLog(server.name, nick, entries) || 0;
           }
         } catch (e) { /* skip individual modem */ }
       }
@@ -2660,8 +2661,8 @@ async function syncAllRotationLogs() {
       logActivity('rotation', 'error', 'sync_error', server.name, `Rotation log sync failed: ${e.message}`);
     }
   }
-  logger.info(`[RotLogSync] Synced ${totalSynced} rotation entries across all servers`);
-  logActivity('rotation', 'info', 'sync_complete', null, `Synced ${totalSynced} rotation log entries`, { total: totalSynced });
+  logger.info(`[RotLogSync] Wrote ${totalSynced} new/changed rotation entries (received ${totalReceived}) across all servers`);
+  logActivity('rotation', 'info', 'sync_complete', null, `Synced ${totalSynced} rotation log entries (received ${totalReceived})`, { total: totalSynced, received: totalReceived });
 }
 // Initial sync after 30 sec, then every 30 min
 setTimeout(() => syncAllRotationLogs().catch(e => logger.error('[RotLogSync]', e.message)), 30000);
@@ -3350,7 +3351,7 @@ app.use(require('./src/routes/tariffs')({
 // Публичная витрина тарифов для лендинга arendaproxy.ru (без auth, CORS '*'):
 // цены на сайте синхронизируются с админкой автоматически.
 app.use(require('./src/routes/public-tariffs')({ tariffsDb, getSetting }));
-app.use(require('./src/routes/public-status')({ db, apiServers, SERVER_COUNTRIES, appSettings }));
+app.use(require('./src/routes/public-status')({ db, apiServers, SERVER_COUNTRIES, appSettings, logger, knownModems }));
 
 // Публичный приём заявок с лендинга (без auth, CORS '*'): telegram-form.js
 // дублирует заявку сюда параллельно с TG-ботом. Сохраняем в leads, пушим в
@@ -3913,9 +3914,19 @@ function postFormApi(server, apiPath, formData, timeout = 15000) {
 // rotation_log statements → src/db/tracking.js
 const _rlUpsert = trackingDb.rotationUpsertStmt();
 const _rlSelect = trackingDb.rotationSelectStmt();
+const _rlLastStarted = trackingDb.rotationLastStartedStmt();
+const _RL_TS_RE = /^\d{4}-\d\d-\d\d@\d\d:\d\d:\d\d$/;
 
+// Возвращает число реально записанных строк (новые + изменившиеся).
+// Панель отдаёт всю историю модема целиком: всё, что старше последней
+// сохранённой ротации, пропускается без обращения к БД; последняя (она
+// может ещё идти) и более новые проходят через upsert, который пишет
+// только при изменении полей.
 function syncRotationLog(serverName, nick, entries) {
-  if (!Array.isArray(entries) || !entries.length) return;
+  if (!Array.isArray(entries) || !entries.length) return 0;
+  let last = null;
+  try { const r = _rlLastStarted.get(serverName, nick); last = r && r.last; } catch (_) { /* без водяного знака — полный проход */ }
+  const watermark = last && _RL_TS_RE.test(last) ? last : null;
   let inserted = 0;
   const insert = db.transaction((rows) => {
     for (const e of rows) {
@@ -3928,7 +3939,8 @@ function syncRotationLog(serverName, nick, entries) {
       const caller = e.CALLER || e.caller || e.Caller || null;
       const targetMode = e.target_mode || e.TargetMode || e.mode || null;
       if (!start) continue;
-      try { _rlUpsert.run(serverName, nick, oldIp, newIp, start, end, took, attempt, caller, targetMode); inserted++; } catch(dupErr) { if (!dupErr.message.includes('UNIQUE')) logger.error('[SyncRotationLog] Insert error:', dupErr.message); }
+      if (watermark && start < watermark && _RL_TS_RE.test(start)) continue;
+      try { inserted += _rlUpsert.run(serverName, nick, oldIp, newIp, start, end, took, attempt, caller, targetMode).changes; } catch(dupErr) { if (!dupErr.message.includes('UNIQUE')) logger.error('[SyncRotationLog] Insert error:', dupErr.message); }
     }
   });
   insert(entries);

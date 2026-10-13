@@ -131,3 +131,78 @@ describe('GET /api/public/status — качество наблюдений', () 
     expect(md).toMatchObject({ status: 'unknown', currentPct: null, freshChecks: 0 });
   });
 });
+
+// 2026-10-13: история uptime — из инкрементального кэша (раньше каждый
+// визит гнал полный скан modem_ping на event loop, ~45 с остановки), и в
+// статистику идут только модемы с клиентом.
+describe('GET /api/public/status — история из кэша и модемы без клиента', () => {
+  function build(knownModems) {
+    const db3 = new Database(':memory:');
+    db3.exec(`
+      CREATE TABLE modem_meta (server_name TEXT, imei TEXT, nick TEXT, deleted INTEGER DEFAULT 0, is_test_pool INTEGER DEFAULT 0);
+      CREATE TABLE modem_ping (id INTEGER PRIMARY KEY, ts TEXT, server TEXT, nick TEXT, latency_ms INTEGER, loss_pct INTEGER, ok INTEGER, measured_at TEXT);
+      CREATE INDEX idx_modem_ping_nick ON modem_ping(server, nick, ts);
+      CREATE TABLE modem_ping_state (server TEXT, nick TEXT, imei TEXT, quality TEXT, latency_ms INTEGER, loss_pct INTEGER, ok INTEGER, observed_at TEXT, measured_at TEXT, updated_at TEXT, PRIMARY KEY (server, nick));
+    `);
+    const meta = db3.prepare('INSERT INTO modem_meta (server_name, imei, nick, deleted) VALUES (?, ?, ?, ?)');
+    meta.run('S1', 'i1', 'MD_1', 0);     // с клиентом
+    meta.run('S1', 'i2', 'MD_FREE', 0);  // без клиента — 100% падений
+    meta.run('S1', 'i3', 'MD_DEL', 1);   // удалён
+    const ping = db3.prepare('INSERT INTO modem_ping (ts, server, nick, ok) VALUES (?, ?, ?, ?)');
+    const now = Date.now();
+    const yesterday = new Date(now - 86400000).toISOString();
+    const today = new Date(now).toISOString();
+    const old = new Date(now - 70 * 86400000).toISOString();   // за окном 60 дней
+    ping.run(yesterday, 'S1', 'MD_1', 1); ping.run(yesterday, 'S1', 'MD_1', 0);
+    ping.run(today, 'S1', 'MD_1', 1);     ping.run(today, 'S1', 'MD_1', 1);
+    ping.run(old, 'S1', 'MD_1', 0);
+    for (let i = 0; i < 4; i++) { ping.run(today, 'S1', 'MD_FREE', 0); ping.run(today, 'S1', 'MD_DEL', 0); }
+    const st = db3.prepare(`INSERT INTO modem_ping_state (server, nick, imei, quality, ok, observed_at, updated_at) VALUES (?, ?, ?, 'valid', ?, ?, ?)`);
+    st.run('S1', 'MD_1', 'i1', 1, today, today);
+    st.run('S1', 'MD_FREE', 'i2', 0, today, today);
+    const router = createPublicStatusRouter({
+      db: db3, apiServers: [{ name: 'S1' }], SERVER_COUNTRIES: { S1: { country: 'MD' } },
+      knownModems, warmup: false,
+    });
+    const app3 = express();
+    app3.use(router);
+    return { app3, router };
+  }
+
+  it('запрос не считает историю сам — запускает фоновый прогрев кэша', async () => {
+    const { app3, router } = build({});
+    await request(app3).get('/api/public/status');
+    await router._refreshHistory();                      // дожидаемся прогрева, запущенного запросом
+    const res = await request(app3).get('/api/public/status');
+    const md = res.body.components.find(c => c.id === 'mobile-md');
+    expect(md.uptime60d).not.toBe(null);
+  });
+
+  it('после прогрева: окно 60 дней, удалённые и модемы без клиента не учитываются', async () => {
+    const { app3, router } = build({ S1: { p1: { portName: 'client1', nick: 'MD_1', imei: 'i1' } } });
+    await router._refreshHistory();
+    const res = await request(app3).get('/api/public/status');
+    const md = res.body.components.find(c => c.id === 'mobile-md');
+    expect(md.uptime60d).toBe(75);                       // 3 ok из 4 у MD_1
+    expect(md.days.map(d => d.checks)).toEqual([2, 2]);
+    expect(md).toMatchObject({ total: 1, online: 1, currentPct: 100, status: 'operational' });
+  });
+
+  it('пустой ростер — фильтр «с клиентом» не применяется (fail-open)', async () => {
+    const { app3, router } = build({});
+    await router._refreshHistory();
+    const res = await request(app3).get('/api/public/status');
+    const md = res.body.components.find(c => c.id === 'mobile-md');
+    expect(md.uptime60d).toBe(37.5);                     // MD_1 3/4 + MD_FREE 0/4; MD_DEL — нет
+    expect(md.total).toBe(2);
+  });
+
+  it('повторный прогрев не задваивает прошедшие сутки', async () => {
+    const { app3, router } = build({ S1: { p1: { portName: 'client1', nick: 'MD_1', imei: 'i1' } } });
+    await router._refreshHistory();
+    await router._refreshHistory();
+    const res = await request(app3).get('/api/public/status');
+    const md = res.body.components.find(c => c.id === 'mobile-md');
+    expect(md.days.map(d => d.checks)).toEqual([2, 2]);
+  });
+});

@@ -165,7 +165,21 @@ function init(db) {
     'ended_at=excluded.ended_at, took_sec=excluded.took_sec, attempt=excluded.attempt, ' +
     'old_ip=excluded.old_ip, new_ip=excluded.new_ip, ' +
     'caller=COALESCE(excluded.caller, rotation_log.caller), ' +
-    'target_mode=COALESCE(excluded.target_mode, rotation_log.target_mode)'
+    'target_mode=COALESCE(excluded.target_mode, rotation_log.target_mode) ' +
+    // 2026-10-13: панель каждый раз отдаёт всю историю модема — без этого
+    // условия каждый синк переписывал ~143k неизменных строк (лаги 4–5 с).
+    'WHERE rotation_log.ended_at IS NOT excluded.ended_at ' +
+    'OR rotation_log.took_sec IS NOT excluded.took_sec ' +
+    'OR rotation_log.attempt IS NOT excluded.attempt ' +
+    'OR rotation_log.old_ip IS NOT excluded.old_ip ' +
+    'OR rotation_log.new_ip IS NOT excluded.new_ip ' +
+    'OR (excluded.caller IS NOT NULL AND rotation_log.caller IS NOT excluded.caller) ' +
+    'OR (excluded.target_mode IS NOT NULL AND rotation_log.target_mode IS NOT excluded.target_mode)'
+  );
+  // Водяной знак инкрементального синка: последняя сохранённая ротация
+  // модема (поиск по уникальному индексу server_name, nick, started_at).
+  S.rotationLastStarted = db.prepare(
+    'SELECT MAX(started_at) AS last FROM rotation_log WHERE server_name = ? AND nick = ?'
   );
   S.rotationSelect = db.prepare(
     'SELECT * FROM rotation_log WHERE server_name = ? AND nick = ? ' +
@@ -212,6 +226,7 @@ module.exports = {
   metaImeisWideStmt:           () => S.metaImeisWide,               // 041c
   rotationUpsertStmt:  () => S.rotationUpsert,
   rotationSelectStmt:  () => S.rotationSelect,
+  rotationLastStartedStmt: () => S.rotationLastStarted,
   ipAllStmt:           () => S.ipAll,
   utAllStmt:           () => S.utAll,
   utDailyAllStmt:      () => S.utDailyAll,
