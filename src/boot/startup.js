@@ -26,7 +26,7 @@ function runStartup(d) {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runLocationWanSpeed, runServerMetrics, runRetailGuard,
-    runBlockedPortCleanup, runClientActivitySync, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
+    runBlockedPortCleanup, runIdleModemRotation, runClientActivitySync, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
     runSimExhaustion,   // 2026-09-26: sim-exhaustion
     saveClients, auditLog, authTokensDb,
     events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
@@ -288,6 +288,13 @@ function runStartup(d) {
     .catch(e => logger.error('[BlockedPortCleanup] startup run failed:', e.message)), 8 * 60 * 1000);
   _intervals.push(setInterval(() => dbAudit.runJobAsync('BlockedPortCleanup', 'periodic', () => runBlockedPortCleanup())
     .catch(e => logger.error('[BlockedPortCleanup] periodic run failed:', e.message)), 30 * 60 * 1000));
+
+  // 13.10: у модемов без клиента авторотация выключается — первый прогон через 4 мин
+  // (нужен загруженный ростер), дальше раз в 10 мин.
+  setTimeout(() => dbAudit.runJobAsync('IdleModemRotation', 'startup', () => runIdleModemRotation())
+    .catch(e => logger.error('[IdleModemRotation] startup run failed:', e.message)), 4 * 60 * 1000);
+  _intervals.push(setInterval(() => dbAudit.runJobAsync('IdleModemRotation', 'periodic', () => runIdleModemRotation())
+    .catch(e => logger.error('[IdleModemRotation] periodic run failed:', e.message)), 10 * 60 * 1000));
 
   // Снимок «неактивен» для CRM-агента: первый прогон через 2 мин, дальше раз в 3 мин
   // (дешёвый проход по кэшу фида; агент реагирует по своему тику).

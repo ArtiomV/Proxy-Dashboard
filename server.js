@@ -4117,6 +4117,13 @@ const _retailGuard = require('./src/jobs/retail-guard').create({
 });
 const runRetailGuard = _retailGuard.runOnce;
 const runBlockedPortCleanup = _blockedPortCleanup.runOnce;   // 21.08: удаление портов после hold
+// 13.10: модемы без клиента — авторотация выключается (иначе бокс перезагружает их вхолостую).
+const runIdleModemRotation = require('./src/jobs/idle-modem-rotation').create({
+  logger, logActivity, fetchAllServersDataCached, findServer, proxyConf,
+  kvGet: (k) => _kvGet.get(k), kvSet: (k, v) => _kvSet.run(k, v),
+  getSetting, knownModems, modemRotationCache, db,
+  invalidateCache: () => proxySmart.invalidateCache(),
+}).runOnce;
 // CRM: снимок «активен/неактивен» (нет портов) для агента продлений tg2twenty.
 const runClientActivitySync = require('./src/jobs/client-activity-sync').create({
   logger, clients, fetchAllServersDataCached,
@@ -4565,6 +4572,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runRetailGuard,   // B2C Э2: тик 10 мин, внутри — проверка retail_enabled
     runDebtRestoreRecovery: _debtBlock.retryPendingRestores,
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
+    runIdleModemRotation,   // 13.10: авторотация выключена у модемов без клиента
     runClientActivitySync,   // снимок неактивных клиентов для CRM-агента
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси
     runVolumeGuard: () => volumeGuard.runOnce(),   // A4 (23.08): объёмные алерты
