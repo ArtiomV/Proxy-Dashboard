@@ -169,13 +169,13 @@ async function pushLead(getSetting, lead) {
       `SELECT id FROM ${ws}.opportunity WHERE "deletedAt" IS NULL AND "pointOfContactId" = $1 LIMIT 1`, [personId]);
     if (exOpp.rows.length) {
       opportunityId = exOpp.rows[0].id;
-      // входящая заявка помечает «входящий поток» и у ранее созданной (чатом/вручную) сделки
-      await c.query(`UPDATE ${ws}.opportunity SET "leadSource" = 'INBOUND' WHERE id = $1 AND "leadSource" IS NULL`,
+      // заявка с сайта помечает «Сайт» (leadSource=SITE) и у ранее созданной (чатом/вручную) сделки
+      await c.query(`UPDATE ${ws}.opportunity SET "leadSource" = 'SITE' WHERE id = $1 AND "leadSource" IS NULL`,
         [opportunityId]);
     } else {
       const opp = await c.query(
         `INSERT INTO ${ws}.opportunity ("name","stage","pointOfContactId","leadSource","createdBySource","createdByName")
-         VALUES ($1,$2,$3,'INBOUND','IMPORT',$4) RETURNING id`,
+         VALUES ($1,$2,$3,'SITE','IMPORT',$4) RETURNING id`,
         [`Заявка: ${contact}`, await _stage(c, ws), personId, TAG]);
       opportunityId = opp.rows[0].id;
     }
