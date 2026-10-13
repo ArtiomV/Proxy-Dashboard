@@ -186,6 +186,7 @@ async function aggregateHourlyTraffic() {
     let smoothedCount = 0;       // rows where uncertain=2 was replaced by median of clean neighbours
     let unsmoothableCount = 0;   // uncertain=2 rows we couldn't smooth (not enough neighbours)
     let clampedSpikes = 0;
+    let monthBatchSkipped = 0;   // 2026-10-13: часы смены суток, где скачок месячного счётчика = итог «вчера»
     let heldDrops = 0;           // 2026-10-13: падения дневного счётчика на подтверждении (pending=2)
     let wireDivergentCount = 0;     // 2026-10-03: часы с расхождением портов и провода (только детекция, без подмены значений)
     const MAX_HOURLY_BYTES = 20 * 1e9; // 20 GB sanity cap per port (decimal GB)
@@ -667,7 +668,21 @@ async function aggregateHourlyTraffic() {
           let finalIncIn  = incInDay;
           let finalIncOut = incOutDay;
 
-          if (deltaDay > 0 && deltaMon > 0) {
+          // 2026-10-13: месячный счётчик ProxySmart (с ~04.10) обновляется раз в
+          // сутки ПАКЕТОМ — в час смены суток он прыгает на итог всего вчерашнего
+          // дня (проверено на проде: дельта месяца / итог «вчера» = 1,02–1,06 у
+          // 127 из 127 портов). Сверка часовой дельты с этим скачком каждую ночь
+          // давала ~130 ложных «расхождений», а автосглаживание подменяло верные
+          // значения дневного счётчика медианами соседних часов (за неделю
+          // клиентов недосчитано ≈5,5 ГБ). Скачок, равный вчерашнему итогу, —
+          // не доказательство расхождения: доверяем дневному счётчику.
+          const yesTotal = yesIn + yesOut;
+          const monthBatch = deltaMon > UNCERTAIN_THRESHOLD && yesTotal > 0 && deltaMon > deltaDay * 2
+            && (Math.abs(deltaMon - yesTotal) <= Math.max(2 * MONTH_COUNTER_STEP, yesTotal * 0.15)
+             || Math.abs(deltaMon - (yesTotal + deltaDay)) <= Math.max(2 * MONTH_COUNTER_STEP, yesTotal * 0.15));
+          if (monthBatch) {
+            monthBatchSkipped++;
+          } else if (deltaDay > 0 && deltaMon > 0) {
             const absDiff = Math.abs(deltaDay - deltaMon);
             // Tolerance must scale with traffic volume:
             //   - Floor: 2× month counter step (~214 MB) for low-traffic hours
@@ -855,7 +870,7 @@ async function aggregateHourlyTraffic() {
     const extra3 = smoothedCount > 0 ? `, ${smoothedCount} auto-smoothed` : '';
     const extra4 = unsmoothableCount > 0 ? `, ${unsmoothableCount} uncertain-kept` : '';
     const extra5 = wireDivergentCount > 0 ? `, ${wireDivergentCount} wire-divergent` : '';
-    const extra6 = heldDrops > 0 ? `, ${heldDrops} day-drops held` : '';
+    const extra6 = (heldDrops > 0 ? `, ${heldDrops} day-drops held` : '') + (monthBatchSkipped > 0 ? `, ${monthBatchSkipped} month-batch (cross-check skipped)` : '');
     logger.info(`[HourlyAgg] Stored ${hourStart}, ${count} port entries, ${snapCache.size} tracked${extra1}${extra2}${extra3}${extra4}${extra5}${extra6}`);
     // Stage 18.13 — too many spike-clamps in one hour is suspicious
     // (could mean genuine traffic surge, OR aggregator-corruption pattern).

@@ -354,3 +354,42 @@ describe('day reset: падение дневного счётчика требу
     expect(t.total()).toBe(100 * MB);
   });
 });
+
+// 2026-10-13: месячный счётчик ProxySmart обновляется раз в сутки пакетом на
+// итог вчерашнего дня. В час смены суток сверка с ним давала ложное
+// «расхождение» (~130 портов за ночь) и автосглаживание подменяло верные
+// значения дневного счётчика медианами соседей.
+describe('сверка день/месяц: суточный пакет месячного счётчика — не расхождение', () => {
+  const MB = 1e6;
+  const row = (db) => db.prepare(`SELECT * FROM traffic_hourly WHERE port_id='S1_portA' AND hour_start = ${HOUR_SQL}`).get();
+
+  it('скачок месяца = итог «вчера»: час пишется по дневному счётчику, uncertain=0', async () => {
+    let c = { day: 0, mon: 10000 * MB, yes: 5000 * MB };
+    const db = boot(async () => feedWith(c.day, 0, c.mon, 0, { yesIn: c.yes }));
+    await hourly.aggregateHourlyTraffic();                       // baseline сразу после сброса дня
+    c = { day: 225 * MB, mon: 15100 * MB, yes: 5000 * MB };      // месяц прыгнул на вчерашние 5000 МБ (+100 квант)
+    await hourly.aggregateHourlyTraffic();
+    const r = row(db);
+    expect(r.bytes_in).toBe(225 * MB);
+    expect(r.uncertain).toBe(0);
+    expect(r.raw_bytes_in).toBe(null);
+  });
+
+  it('контроль: скачок месяца НЕ равен вчерашнему итогу — расхождение по-прежнему ловится', async () => {
+    let c = { day: 0, mon: 10000 * MB, yes: 5000 * MB };
+    const db = boot(async () => feedWith(c.day, 0, c.mon, 0, { yesIn: c.yes }));
+    await hourly.aggregateHourlyTraffic();
+    c = { day: 225 * MB, mon: 12500 * MB, yes: 5000 * MB };      // +2500 МБ — ни день, ни вчера
+    await hourly.aggregateHourlyTraffic();
+    expect(row(db).uncertain).toBeGreaterThan(0);
+  });
+
+  it('вчерашнего итога нет (yes=0), а месяц прыгнул — это по-прежнему расхождение', async () => {
+    let c = { day: 100 * MB, mon: 10000 * MB };
+    const db = boot(async () => feedWith(c.day, 0, c.mon, 0));
+    await hourly.aggregateHourlyTraffic();
+    c = { day: 325 * MB, mon: 15100 * MB };
+    await hourly.aggregateHourlyTraffic();
+    expect(row(db).uncertain).toBeGreaterThan(0);
+  });
+});

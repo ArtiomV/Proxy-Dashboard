@@ -35,6 +35,7 @@ function mk(overrides = {}) {
     }],
     // Сеть не дёргаем: поведение чека управляет тест.
     fetchThroughProxy: async (proxy, url, timeout) => fetchBehavior(proxy, url, timeout),
+    retryDelayMs: 0,   // повтор на краю ротации без реального ожидания
   });
 }
 
@@ -357,5 +358,41 @@ describe('DEEP-34: обработка редиректов', () => {
     const res = await job.runOnce();
     expect(res).toMatchObject({ ok: 0, failed: 1 });
     expect(job.latest()['S1_MD2_39'].error).toContain('timeout');
+  });
+});
+
+// 2026-10-13: 95% ECONNREFUSED за сутки — края ротации. Отказ соединения/сброс
+// получают один повтор; успех повтора = чек успешен, провал повтора = реальный сбой.
+describe('http-check: повтор на краю ротации', () => {
+  it('ECONNREFUSED → повтор успешен: чек ok, route_reason помечен edge_retry, алертов нет', async () => {
+    let calls = 0;
+    fetchBehavior = async () => {
+      if (++calls === 1) throw new Error('connect ECONNREFUSED 1.2.3.4:8012');
+      return { status: 200, totalMs: 410, body: '<html>Example Domain</html>' };
+    };
+    const job = mk();
+    const res = await job.runOnce();
+    expect(calls).toBe(2);
+    expect(res).toMatchObject({ ok: 1, failed: 0 });
+    const row = db.prepare('SELECT * FROM modem_httpcheck').get();
+    expect(row).toMatchObject({ status: 200, error: '', total_ms: 410 });
+    expect(row.route_reason).toContain('edge_retry');
+  });
+
+  it('ECONNREFUSED и в повторе → настоящий сбой записан, повтор был ровно один', async () => {
+    let calls = 0;
+    fetchBehavior = async () => { calls++; throw new Error('connect ECONNREFUSED 1.2.3.4:8012'); };
+    const job = mk();
+    const res = await job.runOnce();
+    expect(calls).toBe(2);
+    expect(res).toMatchObject({ ok: 0, failed: 1 });
+    expect(db.prepare('SELECT error FROM modem_httpcheck').get().error).toContain('ECONNREFUSED');
+  });
+
+  it('другие ошибки (таймаут, 403) повтора не получают', async () => {
+    let calls = 0;
+    fetchBehavior = async () => { calls++; throw new Error('timeout'); };
+    await mk().runOnce();
+    expect(calls).toBe(1);
   });
 });

@@ -165,6 +165,23 @@ function create(deps) {
   const { db, logger, alerts, getSetting, fetchAllServersDataCached, apiServers, events } = deps;   // events — SSE (23.08): httpcheck_result после прогона
   const knownModems = deps.knownModems || {};   // DEEP-33: roster- binding nick→portId
   const _fetch = deps.fetchThroughProxy || fetchThroughProxy;
+  // 2026-10-13: 95% ECONNREFUSED за сутки (283) — окна ротации: первая минута
+  // после старта (порт перепривязывается) либо момент прямо перед следующей
+  // ротацией, когда она уже началась, а флага IS_ROTATED в фиде ещё нет.
+  // Отказ соединения/сброс — один повтор через RETRY_DELAY_MS: удалось —
+  // чек успешен (это был край ротации), нет — настоящий сбой.
+  const RETRY_DELAY_MS = deps.retryDelayMs != null ? deps.retryDelayMs : 20000;
+  const RETRY_RE = /ECONNREFUSED|ECONNRESET|socket hang up|tunnel_closed/i;
+  async function _fetchWithEdgeRetry(proxy, url, remaining, marks) {
+    try { return await _fetch(proxy, url, remaining); }
+    catch (e) {
+      if (!RETRY_RE.test(String(e && e.message))) throw e;
+      await new Promise(r => setTimeout(r, RETRY_DELAY_MS));
+      const r2 = await _fetch(proxy, url, Math.max(5000, Math.min(remaining, 15000)));
+      marks.retried = true;
+      return r2;
+    }
+  }
   const _insert = db.prepare(
     'INSERT INTO modem_httpcheck (ts, server, nick, status, total_ms, content_ok, error, port_id, route_reason) VALUES (?,?,?,?,?,?,?,?,?)'
   );
@@ -303,11 +320,13 @@ function create(deps) {
             const seenUrls = new Set();
             let url = cfg.url, redirects = 0, finalOrigin = '';
             let r = null;
+            const marks = { retried: false };
             for (;;) {
               const remaining = deadline - Date.now();
               if (remaining <= 0) { error = 'timeout'; break; }
-              r = await _fetch(t.proxy, url, remaining);
-              status = r.status; totalMs = Date.now() - (deadline - cfg.timeoutMs);
+              r = await _fetchWithEdgeRetry(t.proxy, url, remaining, marks);
+              status = r.status; totalMs = marks.retried ? r.totalMs : Date.now() - (deadline - cfg.timeoutMs);
+              if (marks.retried) t.routeReason = (t.routeReason ? t.routeReason + '+' : '') + 'edge_retry';
               if (status >= 300 && status < 400 && r.location) {
                 let next;
                 try { next = new URL(r.location, url); }
