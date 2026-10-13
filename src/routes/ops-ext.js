@@ -10,6 +10,7 @@
 const express = require('express');
 const todayCalc = require('../traffic/today');
 const { computeFleet, annotateTestPool, computeClientWorking } = require('../modems/fleet');
+const statScope = require('../modems/stat-scope');
 const simulatorDb = require('../db/simulator');
 const { computeRevenueWindow } = require('../billing/revenue');   // WP8: canonical revenue
 const scheduler = require('../jobs/scheduler');                  // WP6.4: job registry for /api/admin/health
@@ -38,13 +39,15 @@ let _rotStatsCache = { at: 0, data: {} };
 function getRotStats7d(db) {
   const now = Date.now();
   if (now - _rotStatsCache.at < 5 * 60e3) return _rotStatsCache.data;
-  const since = new Date(now - 7 * 864e5).toISOString().slice(0, 19).replace('T', ' ');
+  // started_at хранится как 'YYYY-MM-DD@hh:mm:ss' — граница в том же формате.
+  // Критерии учёта/неуспеха — общие со сводками (src/modems/stat-scope.js).
+  const since = new Date(now - 7 * 864e5).toISOString().slice(0, 19).replace('T', '@');
   const rows = db.prepare(`
     SELECT server_name, nick,
            COUNT(*) AS total,
-           SUM(CASE WHEN old_ip <> '' AND new_ip <> '' AND old_ip = new_ip THEN 1 ELSE 0 END) AS failed
+           SUM(CASE WHEN ${statScope.rotFailedSql()} THEN 1 ELSE 0 END) AS failed
     FROM rotation_log
-    WHERE started_at >= ?
+    WHERE started_at >= ? AND ${statScope.rotCountedSql()}
     GROUP BY server_name, nick
   `).all(since);
   const out = {};

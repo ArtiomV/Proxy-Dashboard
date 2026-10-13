@@ -15,6 +15,8 @@
  *   { text: string, parse_mode: 'HTML' }
  */
 
+const statScope = require('../modems/stat-scope');
+
 let db, logger, clientById, getSetting;
 let aiInsights;  // optional — injected via init; if absent, AI section is skipped
 let listDisconnectedModems;  // optional (D3) — async () => fleet.disconnectedList; без него дайджест оффлайна пропускается
@@ -433,16 +435,17 @@ async function buildDailySummary(date) {
   // поведение мобильной сети, метрика показывала десятки ложных «проблемных».
   // Считаем модем проблемным, если доля реальных фейлов чека >20% за день.
   let proxyIssues = [];
+  const httpScope = statScope.boundClause('server', 'nick');   // 2026-10-13: только модемы с клиентом
   try {
     proxyIssues = db.prepare(`
       SELECT server AS server_name, nick,
              SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS failures,
              SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS total
       FROM modem_httpcheck
-      WHERE ts >= ? AND ts < ?
+      WHERE ts >= ? AND ts < ?${httpScope.clause}
       GROUP BY server, nick
       HAVING total >= 3 AND failures * 1.0 / total > 0.2
-    `).all(isoStartStr, isoEndStr);
+    `).all(isoStartStr, isoEndStr, ...httpScope.params);
   } catch (e) {
     // минимальная схема без modem_httpcheck (тесты) — блок молча пропускаем
     if (logger && logger.warn) logger.warn('[DailySummary] proxy issues (httpcheck) query failed: ' + (e.message || e));
@@ -490,14 +493,15 @@ async function buildDailySummary(date) {
         SELECT COUNT(*) AS n FROM (
           SELECT server, nick FROM modem_httpcheck
           WHERE ts >= ? AND ts < ?
-            AND TRIM(COALESCE(error, '')) NOT IN ('offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei')
+            AND TRIM(COALESCE(error, '')) NOT IN ('offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei')${httpScope.clause}
           GROUP BY server, nick
           HAVING COUNT(*) >= 3
              AND SUM(CASE WHEN TRIM(COALESCE(error, '')) != '' THEN 1 ELSE 0 END) * 1.0 / COUNT(*) > 0.2
         )
       `).get(
         new Date(utcStart.getTime() - 86400000).toISOString(),
-        isoStartStr
+        isoStartStr,
+        ...httpScope.params
       );
       prevN = (prevRow && prevRow.n) || 0;
     } catch (_) { /* минимальная схема без таблицы */ }
@@ -580,15 +584,22 @@ async function buildDailySummary(date) {
   }
 
   // ----- 4) Ротации -----
+  // 2026-10-13: в сводку ротаций идут только модемы с клиентом (свободные
+  // SIM без сети давали S3 до 2/3 «неуспешных») и только ротации с хотя бы
+  // одним известным IP — критерии общие (src/modems/stat-scope.js).
+  const rotScope = statScope.boundClause('server_name', 'nick');
+  const rotScopeR = statScope.boundClause('r.server_name', 'r.nick');
+  const ROT_COUNTED = statScope.rotCountedSql(), ROT_FAILED = statScope.rotFailedSql();
+  const ROT_COUNTED_R = statScope.rotCountedSql('r.'), ROT_FAILED_R = statScope.rotFailedSql('r.');
   let rotRow = null;
   try {
     rotRow = db.prepare(`
       SELECT COUNT(*) as total,
-             SUM(CASE WHEN old_ip = new_ip AND new_ip IS NOT NULL THEN 1 ELSE 0 END) as failed,
+             SUM(CASE WHEN ${ROT_FAILED} THEN 1 ELSE 0 END) as failed,
              AVG(took_sec) as avg_sec
       FROM rotation_log
-      WHERE started_at >= ? AND started_at < ?
-    `).get(atStartStr, atEndStr);
+      WHERE started_at >= ? AND started_at < ? AND ${ROT_COUNTED}${rotScope.clause}
+    `).get(atStartStr, atEndStr, ...rotScope.params);
   } catch (e) {
     // Rule (OPERATIONS.md): деградация через catch обязана писать warn.
     if (logger && logger.warn) logger.warn('[DailySummary] rotation_log query failed (rotations block degraded): ' + (e.message || e));
@@ -599,9 +610,9 @@ async function buildDailySummary(date) {
     let rotDelta = '';
     try {
       const prevRot = db.prepare(`
-        SELECT COUNT(*) AS total, SUM(CASE WHEN old_ip = new_ip AND new_ip IS NOT NULL THEN 1 ELSE 0 END) AS failed
-        FROM rotation_log WHERE started_at >= ? AND started_at < ?
-      `).get(new Date(new Date(date + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10) + '@00:00:00', atStartStr);
+        SELECT COUNT(*) AS total, SUM(CASE WHEN ${ROT_FAILED} THEN 1 ELSE 0 END) AS failed
+        FROM rotation_log WHERE started_at >= ? AND started_at < ? AND ${ROT_COUNTED}${rotScope.clause}
+      `).get(new Date(new Date(date + 'T00:00:00Z').getTime() - 86400000).toISOString().slice(0, 10) + '@00:00:00', atStartStr, ...rotScope.params);
       if (prevRot && prevRot.total > 0) {
         const prevPct = (prevRot.failed * 100) / prevRot.total;
         const d = ((rotRow.failed * 100) / rotRow.total) - prevPct;
@@ -637,13 +648,13 @@ async function buildDailySummary(date) {
       const rotOps = db.prepare(`
         SELECT COALESCE(NULLIF(TRIM(m.operator), ''), 'unknown') AS operator,
                COUNT(*) AS total,
-               SUM(CASE WHEN r.old_ip = r.new_ip AND r.new_ip IS NOT NULL THEN 1 ELSE 0 END) AS failed
+               SUM(CASE WHEN ${ROT_FAILED_R} THEN 1 ELSE 0 END) AS failed
         FROM rotation_log r
         LEFT JOIN modem_meta m ON m.server_name = r.server_name AND m.nick = r.nick
-        WHERE r.started_at >= ? AND r.started_at < ?
+        WHERE r.started_at >= ? AND r.started_at < ? AND ${ROT_COUNTED_R}${rotScopeR.clause}
         GROUP BY operator
         ORDER BY total DESC
-      `).all(atStartStr, atEndStr);
+      `).all(atStartStr, atEndStr, ...rotScopeR.params);
       // 12.10: модемы без оператора в мете — это свободные/незарегистрированные
       // SIM (MD_82–88: SIM OK, но сеть не поднимается, 100% фейлов ротаций).
       // Клиентов на них нет — в аномалиях это шум, ведро 'unknown' пропускаем.
@@ -659,13 +670,13 @@ async function buildDailySummary(date) {
       const stuckRows = db.prepare(`
         SELECT r.server_name, r.nick,
                COUNT(*) AS total,
-               SUM(CASE WHEN r.old_ip = r.new_ip AND r.new_ip IS NOT NULL THEN 1 ELSE 0 END) AS failed
+               SUM(CASE WHEN ${ROT_FAILED_R} THEN 1 ELSE 0 END) AS failed
         FROM rotation_log r
-        WHERE r.started_at >= ? AND r.started_at < ?
+        WHERE r.started_at >= ? AND r.started_at < ? AND ${ROT_COUNTED_R}${rotScopeR.clause}
         GROUP BY r.server_name, r.nick
         HAVING total >= 10 AND failed * 1.0 / total >= 0.8
         ORDER BY failed DESC
-      `).all(new Date(new Date(date + 'T00:00:00Z').getTime() - 6 * 86400000).toISOString().slice(0, 10) + '@00:00:00', atEndStr);
+      `).all(new Date(new Date(date + 'T00:00:00Z').getTime() - 6 * 86400000).toISOString().slice(0, 10) + '@00:00:00', atEndStr, ...rotScopeR.params);
       // 09.10: свободные модемы (без единого клиентского порта) в список не
       // берём — их застрявший IP никому не мешает, а строка путает (MD_17/18/19).
       const stuckSims = (modemHasClient

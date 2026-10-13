@@ -1,6 +1,6 @@
 // 2026-09-26: getRotStats7d — доля неуспешных ротаций по модемам за 7 дней
-// для колонки «Ротации %» на странице модемов. «Неуспешная» = old_ip==new_ip
-// при обоих заполненных. Результат кэшируется на 5 минут (rotation_log
+// для колонки «Ротации %» на странице модемов. «Неуспешная» — новый IP не
+// получен или совпал со старым; ротации без единого известного IP не считаются. Результат кэшируется на 5 минут (rotation_log
 // ~175k строк/7д, индекса по started_at нет).
 
 import { describe, it, expect } from 'vitest';
@@ -20,7 +20,8 @@ function mkDb() {
   return db;
 }
 
-const ts = (hAgo) => new Date(Date.now() - hAgo * 3600e3).toISOString().slice(0, 19).replace('T', ' ');
+// Формат ProxySmart, как в проде: 'YYYY-MM-DD@hh:mm:ss'.
+const ts = (hAgo) => new Date(Date.now() - hAgo * 3600e3).toISOString().slice(0, 19).replace('T', '@');
 
 describe('getRotStats7d — статистика неуспешных ротаций за 7 дней', () => {
   it('считает total/failed/pct по server_nick; старые и пустые записи не считаются фейлами', () => {
@@ -34,12 +35,17 @@ describe('getRotStats7d — статистика неуспешных ротац
     ins.run('S1', 'A', '4.4.4.4', '4.4.4.4', ts(4), ts(4));
     // старше 7 дней — вне окна, не должна попасть ни в total, ни в failed
     ins.run('S1', 'A', '9.9.9.9', '9.9.9.9', ts(24 * 8), ts(24 * 8));
-    // S1_B: пустые IP — не фейл
+    // S1_B: оба IP пустые — модем был без сети, это не ротация (2026-10-13:
+    // общий критерий src/modems/stat-scope.js) — в статистику не идёт.
     ins.run('S1', 'B', '', '', ts(1), ts(1));
+    // S1_C: IP потерян (новый пустой) — неуспешная.
+    ins.run('S1', 'C', '5.5.5.5', '', ts(1), ts(1));
+    ins.run('S1', 'C', '', '6.6.6.6', ts(2), ts(2));
 
     const out = opsExt._getRotStats7d(db);
     expect(out['S1_A']).toEqual({ total: 4, failed: 2, pct: 50 });
-    expect(out['S1_B']).toEqual({ total: 1, failed: 0, pct: 0 });
+    expect(out['S1_B']).toBeUndefined();
+    expect(out['S1_C']).toEqual({ total: 2, failed: 1, pct: 50 });
   });
 
   it('кэширует результат на 5 минут; _resetRotStatsCache сбрасывает', () => {

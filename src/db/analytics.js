@@ -12,6 +12,8 @@
 // Stage 18.16 note: UNBOUND_FILTER ("production traffic from real clients")
 // is part of most read queries — kept here so every consumer shares it.
 
+const statScope = require('../modems/stat-scope');
+
 const UNBOUND_FILTER = " AND client_name != '' AND client_name IS NOT NULL";
 
 // 2026-09-27: единый CASE «оператор на дату чтения» (backfill пустых
@@ -32,34 +34,39 @@ function init(db) {
     `SELECT CASE WHEN client_name IS NULL OR TRIM(client_name) = '' THEN '' ELSE client_name END as cn, strftime('%Y-%m-%d', datetime(hour_start, '${tzStr}')) as day, CAST(strftime('%H', datetime(hour_start, '${tzStr}')) AS INTEGER) as hour, SUM(bytes_in+bytes_out) as bytes FROM traffic_hourly WHERE nick = ? AND server_name = ? AND hour_start >= ? GROUP BY cn, day, hour`);
 
   // ── rotations (stale filter is dynamic — builder below) ──────────────
+  // 2026-10-13: критерии учёта/неуспеха — общие (src/modems/stat-scope.js):
+  // ротации без единого известного IP не считаются, неуспешная — новый IP
+  // не получен или совпал со старым.
+  const ROT_COUNTED = statScope.rotCountedSql(), ROT_FAILED = statScope.rotFailedSql();
+  const ROT_COUNTED_R = statScope.rotCountedSql('r.'), ROT_FAILED_R = statScope.rotFailedSql('r.');
   S.rotationsTotals = (sinceExpr, staleFilter) => db.prepare(`
     SELECT COUNT(*) as total,
-           SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
+           SUM(CASE WHEN ${ROT_FAILED} THEN 1 ELSE 0 END) as failed,
            AVG(took_sec) as avg_sec,
            MAX(took_sec) as max_sec,
            MIN(took_sec) as min_sec
     FROM rotation_log
-    WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL${staleFilter}
+    WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL AND ${ROT_COUNTED}${staleFilter}
   `);
   S.rotationsPerDay = (sinceExpr, staleFilter) => db.prepare(`
     SELECT substr(started_at, 1, 10) as date,
            COUNT(*) as total,
-           SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
+           SUM(CASE WHEN ${ROT_FAILED} THEN 1 ELSE 0 END) as failed,
            AVG(took_sec) as avg_sec
     FROM rotation_log
-    WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL${staleFilter}
+    WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL AND ${ROT_COUNTED}${staleFilter}
     GROUP BY date
     ORDER BY date
   `);
   S.rotationsPerModem = (sinceExpr, staleFilter) => db.prepare(`
     SELECT r.server_name, r.nick, m.operator,
            COUNT(*) as total,
-           SUM(CASE WHEN r.old_ip = r.new_ip THEN 1 ELSE 0 END) as failed,
+           SUM(CASE WHEN ${ROT_FAILED_R} THEN 1 ELSE 0 END) as failed,
            AVG(r.took_sec) as avg_sec,
            MAX(r.took_sec) as max_sec
     FROM rotation_log r
     LEFT JOIN modem_meta m ON m.nick = r.nick AND m.server_name = r.server_name
-    WHERE r.started_at >= ${sinceExpr} AND r.ended_at IS NOT NULL${staleFilter}
+    WHERE r.started_at >= ${sinceExpr} AND r.ended_at IS NOT NULL AND ${ROT_COUNTED_R}${staleFilter}
     GROUP BY r.server_name, r.nick
     ORDER BY total DESC
     LIMIT 200
@@ -67,29 +74,29 @@ function init(db) {
   S.rotationsPerOperator = (sinceExpr, staleFilter) => db.prepare(`
     SELECT COALESCE(m.operator, 'unknown') as operator,
            COUNT(*) as total,
-           SUM(CASE WHEN r.old_ip = r.new_ip THEN 1 ELSE 0 END) as failed,
+           SUM(CASE WHEN ${ROT_FAILED_R} THEN 1 ELSE 0 END) as failed,
            AVG(r.took_sec) as avg_sec
     FROM rotation_log r
     LEFT JOIN modem_meta m ON m.nick = r.nick AND m.server_name = r.server_name
-    WHERE r.started_at >= ${sinceExpr} AND r.ended_at IS NOT NULL${staleFilter}
+    WHERE r.started_at >= ${sinceExpr} AND r.ended_at IS NOT NULL AND ${ROT_COUNTED_R}${staleFilter}
     GROUP BY operator
     ORDER BY total DESC
   `);
   S.rotationsPerServer = (sinceExpr, staleFilter) => db.prepare(`
     SELECT server_name,
            COUNT(*) as total,
-           SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) as failed,
+           SUM(CASE WHEN ${ROT_FAILED} THEN 1 ELSE 0 END) as failed,
            AVG(took_sec) as avg_sec,
            MAX(took_sec) as max_sec
     FROM rotation_log
-    WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL${staleFilter}
+    WHERE started_at >= ${sinceExpr} AND ended_at IS NOT NULL AND ${ROT_COUNTED}${staleFilter}
     GROUP BY server_name
     ORDER BY total DESC
   `);
   S.rotationsRecentFailed = (sinceExpr, staleFilter) => db.prepare(`
     SELECT server_name, nick, old_ip, new_ip, started_at, took_sec
     FROM rotation_log
-    WHERE old_ip IS NOT NULL AND new_ip IS NOT NULL AND old_ip = new_ip
+    WHERE ${ROT_COUNTED} AND ${ROT_FAILED}
       AND started_at >= ${sinceExpr}${staleFilter}
     ORDER BY started_at DESC
     LIMIT 50

@@ -8,6 +8,7 @@
 
 const express = require('express');
 const analyticsDb = require('../db/analytics');
+const statScope = require('../modems/stat-scope');
 const { tzModifier } = require('../utils/time');  // P2-3: shared "+N hours" builder
 const { parseBwToBytes } = require('../utils/traffic');
 
@@ -425,12 +426,19 @@ r.get('/api/analytics/rotations', authMiddleware, adminMiddleware, (req, res) =>
     const staleNicks = (typeof getStaleNicks === 'function') ? getStaleNicks() : new Set();
     const { clause: staleFilter, params: staleArgs } = analyticsDb.notInClause('nick', staleNicks);
 
-    const totals = analyticsDb.rotationsTotals(sinceExpr, staleArgs, staleFilter);
-    const perDay = analyticsDb.rotationsPerDay(sinceExpr, staleArgs, staleFilter);
-    const perModem = analyticsDb.rotationsPerModem(sinceExpr, staleArgs, staleFilter.replace(/\bnick\b/g, 'r.nick'));
-    const perOperator = analyticsDb.rotationsPerOperator(sinceExpr, staleArgs, staleFilter.replace(/\bnick\b/g, 'r.nick'));
-    const perServer = analyticsDb.rotationsPerServer(sinceExpr, staleArgs, staleFilter);
-    const recentFailed = analyticsDb.rotationsRecentFailed(sinceExpr, staleArgs, staleFilter);
+    // 2026-10-13: и только модемы с клиентом — свободные SIM без сети
+    // давали большую часть «неуспешных» (src/modems/stat-scope.js).
+    const scope = statScope.boundClause('server_name', 'nick');
+    const scopeR = statScope.boundClause('r.server_name', 'r.nick');
+    const flt = staleFilter + scope.clause, args = [...staleArgs, ...scope.params];
+    const fltR = staleFilter.replace(/\bnick\b/g, 'r.nick') + scopeR.clause, argsR = [...staleArgs, ...scopeR.params];
+
+    const totals = analyticsDb.rotationsTotals(sinceExpr, args, flt);
+    const perDay = analyticsDb.rotationsPerDay(sinceExpr, args, flt);
+    const perModem = analyticsDb.rotationsPerModem(sinceExpr, argsR, fltR);
+    const perOperator = analyticsDb.rotationsPerOperator(sinceExpr, argsR, fltR);
+    const perServer = analyticsDb.rotationsPerServer(sinceExpr, args, flt);
+    const recentFailed = analyticsDb.rotationsRecentFailed(sinceExpr, args, flt);
 
     const success = totals.total > 0 ? ((totals.total - totals.failed) / totals.total) * 100 : 0;
     const payload = {

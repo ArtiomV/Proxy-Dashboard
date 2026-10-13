@@ -24,6 +24,7 @@
 let Anthropic;
 try { Anthropic = require('@anthropic-ai/sdk').default; } catch (_) { Anthropic = null; }
 
+const statScope = require('../modems/stat-scope');
 let db, logger, getSetting;
 let _client = null;
 let _clientKey = null; // for hot-reload if key changes via UI
@@ -64,6 +65,10 @@ function _mskBoundaries(date) {
 function buildDayContext(date) {
   const b = _mskBoundaries(date);
   const ctx = { date, period: { from_msk: date + ' 00:00', to_msk: date + ' 24:00 MSK' } };
+  // 2026-10-13: пинги, HTTP-чеки и ротации — только модемы с клиентом
+  // (src/modems/stat-scope.js); свободные SIM без сети портили проценты.
+  const ps = statScope.boundClause('server', 'nick');
+  const rs = statScope.boundClause('server_name', 'nick');
 
   // ── 1) Per-server health (the headline view)
   try {
@@ -78,7 +83,7 @@ function buildDayContext(date) {
                COUNT(*) AS total_pings,
                SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failed_pings
         FROM modem_ping
-        WHERE ts >= ? AND ts < ?
+        WHERE ts >= ? AND ts < ?${ps.clause}
         GROUP BY server
       ),
       http_checks AS (
@@ -86,7 +91,7 @@ function buildDayContext(date) {
                SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS total_http,
                SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS failed_http
         FROM modem_httpcheck
-        WHERE ts >= ? AND ts < ?
+        WHERE ts >= ? AND ts < ?${ps.clause}
         GROUP BY server
       ),
       traffic AS (
@@ -98,10 +103,11 @@ function buildDayContext(date) {
       rotations AS (
         SELECT server_name,
                COUNT(*) AS total,
-               SUM(CASE WHEN old_ip = new_ip THEN 1 ELSE 0 END) AS failed,
+               SUM(CASE WHEN ${statScope.rotFailedSql()} THEN 1 ELSE 0 END) AS failed,
                ROUND(AVG(took_sec), 1) AS avg_sec
         FROM rotation_log
         WHERE started_at >= ? AND started_at < ? AND ended_at IS NOT NULL
+          AND ${statScope.rotCountedSql()}${rs.clause}
         GROUP BY server_name
       )
       SELECT a.server_name,
@@ -117,8 +123,10 @@ function buildDayContext(date) {
       ORDER BY a.server_name
     `).all(
       b.fromIso, b.toIso, b.from, b.to,
-      b.fromIso, b.toIso, b.fromIso, b.toIso,
-      b.from, b.to, b.fromIso, b.toIso
+      b.fromIso, b.toIso, ...ps.params,
+      b.fromIso, b.toIso, ...ps.params,
+      b.from, b.to,
+      b.fromIso, b.toIso, ...rs.params
     ).map(r => ({
       server: r.server_name,
       ping: {
@@ -144,20 +152,20 @@ function buildDayContext(date) {
   try {
     ctx.problem_modems = db.prepare(`
       WITH keys AS (
-        SELECT server, nick FROM modem_ping WHERE ts >= ? AND ts < ?
+        SELECT server, nick FROM modem_ping WHERE ts >= ? AND ts < ?${ps.clause}
         UNION
-        SELECT server, nick FROM modem_httpcheck WHERE ts >= ? AND ts < ?
+        SELECT server, nick FROM modem_httpcheck WHERE ts >= ? AND ts < ?${ps.clause}
       ),
       p AS (
         SELECT server, nick, COUNT(*) AS total,
                SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures
-        FROM modem_ping WHERE ts >= ? AND ts < ? GROUP BY server, nick
+        FROM modem_ping WHERE ts >= ? AND ts < ?${ps.clause} GROUP BY server, nick
       ),
       h AS (
         SELECT server, nick,
                SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS total,
                SUM(CASE WHEN TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei') THEN 1 ELSE 0 END) AS failures
-        FROM modem_httpcheck WHERE ts >= ? AND ts < ? GROUP BY server, nick
+        FROM modem_httpcheck WHERE ts >= ? AND ts < ?${ps.clause} GROUP BY server, nick
       )
       SELECT k.server, k.nick,
              COALESCE(p.total, 0) AS ping_total,
@@ -172,8 +180,8 @@ function buildDayContext(date) {
       ORDER BY ping_failures DESC, http_failures DESC
       LIMIT 15
     `).all(
-      b.fromIso, b.toIso, b.fromIso, b.toIso,
-      b.fromIso, b.toIso, b.fromIso, b.toIso
+      b.fromIso, b.toIso, ...ps.params, b.fromIso, b.toIso, ...ps.params,
+      b.fromIso, b.toIso, ...ps.params, b.fromIso, b.toIso, ...ps.params
     ).map(r => ({
       modem: r.nick, server: r.server,
       ping: {
@@ -194,9 +202,9 @@ function buildDayContext(date) {
     ctx.http_errors = db.prepare(`
       SELECT server, nick, error, COUNT(*) AS count
       FROM modem_httpcheck WHERE ts >= ? AND ts < ?
-        AND TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei')
+        AND TRIM(COALESCE(error, '')) NOT IN ('', 'offline', 'rotating', 'no_valid_client_credentials', 'ambiguous_clone_imei')${ps.clause}
       GROUP BY server, nick, error ORDER BY count DESC, server, nick LIMIT 50
-    `).all(b.fromIso, b.toIso);
+    `).all(b.fromIso, b.toIso, ...ps.params);
   } catch (e) { logger.warn('[AIInsights] HTTP errors query: ' + e.message); ctx.http_errors = []; }
 
   // ── 3) Critical system events
@@ -264,8 +272,8 @@ function buildDayContext(date) {
         COUNT(*) AS total,
         SUM(CASE WHEN ok = 0 THEN 1 ELSE 0 END) AS failures
       FROM modem_ping
-      WHERE ts >= ? AND ts < ?
-    `).get(baselineFrom.toISOString(), b.fromIso);
+      WHERE ts >= ? AND ts < ?${ps.clause}
+    `).get(baselineFrom.toISOString(), b.fromIso, ...ps.params);
     if (trend && trend.total) {
       const days = 7;
       ctx.baseline_7d = {
