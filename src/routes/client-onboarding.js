@@ -20,6 +20,7 @@
 // Прокси РФ выдаёт менеджер: заказ без списания, задача менеджеру.
 
 const express = require('express');
+const contractDoc = require('../documents/contract');
 const { z } = require('zod');
 
 const digits = (n) => z.string().trim().regex(new RegExp(`^\\d{${n}}$`), `должно быть ${n} цифр`);
@@ -86,6 +87,18 @@ module.exports = function createClientOnboardingRouter(deps) {
 
   // Реквизиты можно менять, пока договор не подписан (2026-10-15). Подписан —
   // статус «signed» в анкете, либо у клиента заведён договор вручную (номер/дата).
+  // Номер договора: ЛК-<год>-<NNN>, сквозной по году; присваивается один раз.
+  function _ensureContractNumber(clientId) {
+    const row = _row(clientId);
+    if (row && row.contract_number) return row.contract_number;
+    const year = new Date().getFullYear();
+    const last = db.prepare("SELECT contract_number FROM client_onboarding WHERE contract_number LIKE ? ORDER BY contract_number DESC LIMIT 1").get(`ЛК-${year}-%`);
+    const seq = last ? (parseInt(String(last.contract_number).split('-')[2], 10) || 0) + 1 : 1;
+    const number = `ЛК-${year}-${String(seq).padStart(3, '0')}`;
+    db.prepare('UPDATE client_onboarding SET contract_number = ? WHERE client_id = ?').run(number, clientId);
+    return number;
+  }
+
   function _locked(c, row) {
     if (row) return row.contract_status === 'signed';
     return !!(c.contractInfo || c.contractDate);
@@ -130,9 +143,10 @@ module.exports = function createClientOnboardingRouter(deps) {
     const isUpdate = !!(existing && existing.entity_type === 'legal');
     // Изменение после того, как договор уже подготовлен/отправлен, возвращает его в работу.
     db.prepare(`INSERT INTO client_onboarding (client_id, entity_type, requisites_json, contract_status)
-                VALUES (?, 'legal', ?, 'awaiting_template')
+                VALUES (?, 'legal', ?, 'generated')
                 ON CONFLICT(client_id) DO UPDATE SET entity_type='legal', requisites_json=excluded.requisites_json,
-                  contract_status='awaiting_template', updated_at=datetime('now')`).run(c.id, JSON.stringify(q));
+                  contract_status='generated', updated_at=datetime('now')`).run(c.id, JSON.stringify(q));
+    _ensureContractNumber(c.id);
     // Реквизиты — в карточку клиента (счета, акты, поиск платежей по ИНН).
     c.inn = q.inn; c.kpp = q.kpp || ''; c.legalName = q.legal_name; c.address = q.legal_address;
     if (!c.contact) c.contact = [q.contact_name, q.contact_phone, q.contact_email].filter(Boolean).join(', ');
@@ -146,7 +160,7 @@ module.exports = function createClientOnboardingRouter(deps) {
       `**Контакт:** ${[q.contact_name, q.contact_phone, q.contact_email].filter(Boolean).join(', ')}`,
       `**ЭДО:** ${[q.edo_operator, q.edo_id].filter(Boolean).join(', ') || 'не указано'}`,
       `**Логин в ЛК:** ${c.login}`, '',
-      'Что сделать: подготовить и выслать договор по ЭДО, связаться с клиентом. После подписания договора — перевести клиента в «Юрлицо» в карточке клиента в админке.',
+      'Договор уже сформирован по шаблону: админка → Настройки → Розница → «Заказы и анкеты из ЛК» → «Скачать договор». Что сделать: проверить его, выслать по ЭДО и связаться с клиентом. Когда клиент подпишет — выберите статус «Подписан» в той же таблице (реквизиты клиента закроются для правки, договор попадёт в карточку клиента).',
     ].filter(x => x !== null);
     const taskId = await _managerTask({
       title: `${isUpdate ? 'Реквизиты изменены, договор заново' : 'Договор по ЭДО'}: ${q.legal_name} (ИНН ${q.inn})`,
@@ -163,7 +177,7 @@ module.exports = function createClientOnboardingRouter(deps) {
     } catch (_) { /* best-effort */ }
     auditLog(c.login, 'onboarding_legal', { inn: q.inn, crm_task: taskId || null, ip: getClientIp(req) });
     logActivity('client', 'info', 'onboarding_legal', c.login, `Анкета юрлица: ${q.legal_name} (ИНН ${q.inn})`, { crm_task: taskId || null });
-    res.json({ ok: true, entityType: 'legal', contractStatus: 'awaiting_template' });
+    res.json({ ok: true, entityType: 'legal', contractStatus: 'generated' });
   });
 
   // ── Справочник магазина ──────────────────────────────────────────────────
@@ -250,14 +264,44 @@ module.exports = function createClientOnboardingRouter(deps) {
   });
   r.get('/api/admin/onboarding', authMiddleware, adminMiddleware, (req, res) => {
     const rows = db.prepare("SELECT * FROM client_onboarding WHERE entity_type = 'legal' ORDER BY updated_at DESC LIMIT 200").all();
-    res.json({ items: rows.map(o => ({ client_id: o.client_id, client: _clientName(o.client_id), contract_status: o.contract_status,
+    res.json({ items: rows.map(o => ({ client_id: o.client_id, client: _clientName(o.client_id), contract_status: o.contract_status, contract_number: o.contract_number || null,
       manager_task: o.manager_task, created_at: o.created_at, requisites: JSON.parse(o.requisites_json || '{}') })) });
+  });
+  r.get('/api/admin/onboarding/:clientId/contract.docx', authMiddleware, adminMiddleware, async (req, res) => {
+    const row = _row(req.params.clientId);
+    if (!row || row.entity_type !== 'legal') return res.status(404).json({ error: 'Анкеты юрлица нет' });
+    try {
+      const q = JSON.parse(row.requisites_json || '{}');
+      const number = _ensureContractNumber(row.client_id);
+      // Дата договора — день выгрузки, пока он не подписан; после подписания — зафиксирована.
+      const signed = row.contract_status === 'signed' && row.contract_date;
+      const day = signed ? row.contract_date : new Date().toISOString().slice(0, 10);
+      if (!signed) db.prepare("UPDATE client_onboarding SET contract_date = ? WHERE client_id = ?").run(day, row.client_id);
+      const buf = await contractDoc.buildContract(q, number, new Date(day + 'T12:00:00'));
+      const fname = `Договор ${number} ${q.legal_name || ''}.docx`.replace(/[\\/:*?"<>|]+/g, ' ').replace(/\s+/g, ' ').trim();
+      res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.wordprocessingml.document');
+      res.setHeader('Content-Disposition', `attachment; filename="contract.docx"; filename*=UTF-8''${encodeURIComponent(fname)}`);
+      auditLog(req.user.login, 'onboarding_contract_download', { client_id: row.client_id, number, ip: getClientIp(req) });
+      res.send(buf);
+    } catch (e) {
+      logger.error('[Onboarding] contract: ' + e.message);
+      res.status(500).json({ error: 'Не удалось сформировать договор: ' + e.message });
+    }
   });
   r.post('/api/admin/onboarding/:clientId', authMiddleware, adminMiddleware, (req, res) => {
     const status = String((req.body || {}).contract_status || '');
     if (!['awaiting_template', 'generated', 'sent', 'signed'].includes(status)) return res.status(400).json({ error: 'bad status' });
     const info = db.prepare("UPDATE client_onboarding SET contract_status = ?, updated_at = datetime('now') WHERE client_id = ?").run(status, req.params.clientId);
     if (!info.changes) return res.status(404).json({ error: 'not found' });
+    if (status === 'signed') {
+      // Подписан: фиксируем дату и записываем договор в карточку клиента (основание для счетов и актов).
+      const row = _row(req.params.clientId);
+      const number = _ensureContractNumber(req.params.clientId);
+      const day = row.contract_date || new Date().toISOString().slice(0, 10);
+      db.prepare('UPDATE client_onboarding SET contract_date = ? WHERE client_id = ?').run(day, req.params.clientId);
+      const c = clients.find(x => x.id === req.params.clientId);
+      if (c) { c.contractInfo = `Договор № ${number}`; c.contractDate = day; saveClients(clients); }
+    }
     auditLog(req.user.login, 'onboarding_contract_status', { client_id: req.params.clientId, status, ip: getClientIp(req) });
     res.json({ ok: true });
   });

@@ -1835,7 +1835,7 @@ const SETTINGS_DEFAULTS = {
   retail_pool_min_free: 3,           // свободных портов на боксе < N → алерт «пул на исходе»
   retail_pool_target_free: 5,        // 15.10: автоподпитка — держать столько свободных портов на каждом боксе розницы
   retail_pool_autotopup: true,       // 15.10: создавать свободные порты на пустых рабочих модемах автоматически
-  support_telegram: '',              // 15.10: Telegram для кнопки «Связаться» в ЛК (@user или t.me/user)
+  support_telegram: 'arendaproxy_ru', // 15.10: Telegram поддержки — плавающая кнопка в ЛК (как на лендинге: t.me/arendaproxy_ru)
   // Шаринг (15.08): когда free-порты кончились — создаём новый порт на модеме
   // якорного клиента. max=1 → шаринг выкл. anchor — ЛОГИН клиента (u_…).
   retail_max_clients_per_modem: 1,   // макс клиентских портов на одной SIM
@@ -3351,7 +3351,7 @@ app.use(require('./src/routes/registration')({
 // Единый прайс (Р36): админский CRUD + розничная витрина /api/client/tariffs.
 app.use(require('./src/routes/tariffs')({
   logger, authMiddleware, adminMiddleware, validate,
-  tariffsDb, auditLog, getClientIp, getSetting, db,
+  tariffsDb, auditLog, getClientIp, getSetting, db, SERVER_COUNTRIES,
 }));
 
 // Публичная витрина тарифов для лендинга arendaproxy.ru (без auth, CORS '*'):

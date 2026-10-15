@@ -613,7 +613,6 @@ input[type=date].v3-input{color-scheme:light}
 .nav-tabs .nav-tab.nav-buy:hover{background:var(--accent);color:#fff;filter:brightness(1.08)}
 .nav-tabs .nav-tab.nav-buy.active{background:var(--accent);color:#fff}
 .nav-tabs .nav-tab.nav-buy.active::before{display:none}
-.nav-tab.nav-contact{text-decoration:none;margin-top:auto}
 .v3-shop{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,1fr);gap:12px;align-items:start}
 @media(max-width:900px){.v3-shop{grid-template-columns:1fr}}
 .v3-shop-side{position:sticky;top:12px}
@@ -642,3 +641,9 @@ input[type=date].v3-input{color-scheme:light}
 .v3-sumrows .r b{color:var(--v3-ink);font-feature-settings:'tnum'}
 .v3-sumrows .r.total{border-top:1px solid var(--v3-line);padding-top:9px;font-size:13.5px;color:var(--v3-ink);font-weight:700}
 .v3-shop-cta{width:100%;justify-content:center;padding:11px 14px;font-size:13.5px}
+
+/* Кнопка поддержки — всегда справа снизу, как на лендинге */
+.v3-support-fab{position:fixed;right:20px;bottom:20px;z-index:900;display:inline-flex;align-items:center;gap:8px;padding:12px 18px;border-radius:999px;background:#229ED9;color:#fff;font:600 13.5px/1 var(--font-sans,system-ui,sans-serif);text-decoration:none;box-shadow:0 6px 20px rgba(34,158,217,.45);transition:transform .15s,box-shadow .15s}
+.v3-support-fab:hover{transform:translateY(-2px);box-shadow:0 10px 26px rgba(34,158,217,.55);color:#fff}
+.v3-support-fab svg{flex-shrink:0}
+@media(max-width:640px){.v3-support-fab{right:14px;bottom:14px;padding:13px}.v3-support-fab span{display:none}}

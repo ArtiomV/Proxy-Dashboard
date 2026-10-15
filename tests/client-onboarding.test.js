@@ -43,6 +43,7 @@ function mount(login) {
 beforeEach(() => {
   db = new Database(':memory:');
   db.exec(fs.readFileSync(path.join(root, 'migrations/113_onboarding_and_proxy_orders.sql'), 'utf8'));
+  db.exec(fs.readFileSync(path.join(root, 'migrations/114_onboarding_contract.sql'), 'utf8'));
   clients = [
     { id: 'c1', login: 'retail1', email: 'r1@example.com', clientType: 'individual', consentPdAt: '2026-10-01' },
     { id: 'c2', login: 'b2b', clientType: 'legal', inn: '7700000000' },
@@ -70,12 +71,12 @@ describe('выбор физлицо / юрлицо', () => {
 
   it('юрлицо: реквизиты в карточке, задача руководителю в CRM и Telegram, тип клиента НЕ меняется', async () => {
     const r = await request(app).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: REQ });
-    expect(r.body).toMatchObject({ ok: true, entityType: 'legal', contractStatus: 'awaiting_template' });
+    expect(r.body).toMatchObject({ ok: true, entityType: 'legal', contractStatus: 'generated' });
     expect(clients[0]).toMatchObject({ inn: '7701234567', kpp: '770101001', legalName: 'ООО «Ромашка»', clientType: 'individual' });
     expect(crm.pushTask).toHaveBeenCalledTimes(1);
     const task = crm.pushTask.mock.calls[0][1];
     expect(task.title).toContain('Договор по ЭДО');
-    expect(task.body).toContain('выслать договор по ЭДО');
+    expect(task.body).toContain('выслать по ЭДО');
     expect(task.body).toContain('Диадок');
     expect(alerts.trigger).toHaveBeenCalledWith('legal_onboarding', expect.objectContaining({ inn: '7701234567', crm_task: true }));
     expect(db.prepare('SELECT manager_task FROM client_onboarding').get().manager_task).toBe('task-1');
@@ -85,12 +86,12 @@ describe('выбор физлицо / юрлицо', () => {
   it('реквизиты можно менять сколько угодно, пока договор не подписан; после подписания — 409', async () => {
     await request(app).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: REQ });
     const adm = mount('admin');
-    await request(adm).post('/api/admin/onboarding/c1').send({ contract_status: 'sent' });
+    await request(adm).post('/api/admin/onboarding/' + clients[0].id).send({ contract_status: 'sent' });
     const upd = await request(app).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: { ...REQ, bank_name: 'Другой банк' } });
-    expect(upd.body).toMatchObject({ ok: true, contractStatus: 'awaiting_template' });   // договор снова в работе
+    expect(upd.body).toMatchObject({ ok: true, contractStatus: 'generated' });   // договор снова в работе
     expect(crm.pushTask.mock.calls[1][1].title).toContain('Реквизиты изменены');
     expect((await request(app).get('/api/client/onboarding')).body.requisites.bank_name).toBe('Другой банк');
-    await request(adm).post('/api/admin/onboarding/c1').send({ contract_status: 'signed' });
+    await request(adm).post('/api/admin/onboarding/' + clients[0].id).send({ contract_status: 'signed' });
     const locked = await request(app).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: REQ });
     expect(locked.status).toBe(409);
     expect(locked.body.code).toBe('LOCKED');
@@ -184,8 +185,22 @@ describe('админка: статусы заказов и договоров', 
     expect((await request(adm).post('/api/admin/proxy_orders/' + orders[0].id).send({ status: 'bogus' })).status).toBe(400);
     expect((await request(app).get('/api/client/proxy_orders')).body.orders[0].status).toBe('done');
     const legal = (await request(adm).get('/api/admin/onboarding')).body.items;
-    expect(legal[0]).toMatchObject({ client_id: 'c1', contract_status: 'awaiting_template' });
-    expect((await request(adm).post('/api/admin/onboarding/c1').send({ contract_status: 'sent' })).body.ok).toBe(true);
+    expect(legal[0]).toMatchObject({ client_id: 'c1', contract_status: 'generated' });
+    expect((await request(adm).post('/api/admin/onboarding/' + clients[0].id).send({ contract_status: 'sent' })).body.ok).toBe(true);
     expect((await request(app).get('/api/client/onboarding')).body.contractStatus).toBe('sent');
+  });
+});
+
+describe('договор из анкеты', () => {
+  it('скачивание docx присваивает номер ЛК-год-NNN; «Подписан» пишет договор в карточку клиента', async () => {
+    const a = app;
+    await request(a).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: REQ }).expect(200);
+    const r = await request(a).get('/api/admin/onboarding/' + clients[0].id + '/contract.docx').buffer().parse((res, cb) => { const c = []; res.on('data', d => c.push(d)); res.on('end', () => cb(null, Buffer.concat(c))); });
+    expect(r.status).toBe(200);
+    expect(r.headers['content-type']).toContain('wordprocessingml');
+    const y = new Date().getFullYear();
+    expect(db.prepare('SELECT contract_number n FROM client_onboarding').get().n).toBe(`ЛК-${y}-001`);
+    await request(a).post('/api/admin/onboarding/' + clients[0].id).send({ contract_status: 'signed' }).expect(200);
+    expect(clients[0].contractInfo).toBe(`Договор № ЛК-${y}-001`);
   });
 });

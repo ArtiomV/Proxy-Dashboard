@@ -939,7 +939,7 @@
     "type": "table",
     "name": "client_onboarding",
     "tbl_name": "client_onboarding",
-    "sql": "CREATE TABLE client_onboarding ( client_id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, -- individual | legal requisites_json TEXT NOT NULL DEFAULT '{}', -- анкета юрлица contract_status TEXT NOT NULL DEFAULT 'none', -- none | awaiting_template | generated | sent manager_task TEXT, -- id задачи в CRM (если создана) created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')) )"
+    "sql": "CREATE TABLE client_onboarding ( client_id TEXT PRIMARY KEY, entity_type TEXT NOT NULL, -- individual | legal requisites_json TEXT NOT NULL DEFAULT '{}', -- анкета юрлица contract_status TEXT NOT NULL DEFAULT 'none', -- none | awaiting_template | generated | sent manager_task TEXT, -- id задачи в CRM (если создана) created_at TEXT NOT NULL DEFAULT (datetime('now')), updated_at TEXT NOT NULL DEFAULT (datetime('now')) , contract_number TEXT, contract_date TEXT)"
   },
   {
     "type": "table",

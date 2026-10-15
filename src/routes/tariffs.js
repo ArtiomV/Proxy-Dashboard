@@ -31,10 +31,24 @@ const TariffSchema = z.object({
   sort: z.coerce.number().int().min(0).max(10000).default(0),
 });
 
+// PUT — частичное обновление. В zod 4 TariffSchema.partial() ПОДСТАВЛЯЕТ значения по
+// умолчанию для не переданных полей (server='', public=false, min_proxies=1, …):
+// запрос «поменять только цену» молча сбрасывал серверы и витрину тарифа. Для PATCH
+// схема строится из тех же полей, но без default.
+const _stripDefault = (v) => {
+  if (v && v.def && v.def.type === 'default') return v.def.innerType;
+  // default().transform(...) = pipe(default, transform): убираем default во входе пайпа
+  if (v && v.def && v.def.type === 'pipe' && v.def.in && v.def.in.def && v.def.in.def.type === 'default') return z.pipe(v.def.in.def.innerType, v.def.out);
+  return v;
+};
+const TariffPatchSchema = z.object(
+  Object.fromEntries(Object.entries(TariffSchema.shape).map(([k, v]) => [k, _stripDefault(v)]))
+).partial();
+
 module.exports = function createTariffsRouter(deps) {
   const {
     logger, authMiddleware, adminMiddleware, validate,
-    tariffsDb, auditLog, getClientIp, getSetting,
+    tariffsDb, auditLog, getClientIp, getSetting, SERVER_COUNTRIES,
   } = deps;
   const r = express.Router();
 
@@ -62,18 +76,41 @@ module.exports = function createTariffsRouter(deps) {
     res.json({ tariffs: tariffsDb.all().map(_pub) });
   });
 
+  // 2026-10-15: серверы тарифа выбираются из реальных боксов, и все они должны быть
+  // из СТРАНЫ тарифа (гео): тариф «MD» со списком «S1, S3, S4, RO1» продавал бы
+  // молдавскую цену на румынском боксе. Неизвестное имя сервера — тоже ошибка.
+  function _serversError(geo, serverCsv) {
+    const names = String(serverCsv || '').split(/[\s,;]+/).filter(Boolean);
+    const map = SERVER_COUNTRIES || {};
+    if (!Object.keys(map).length) return null;   // серверы не настроены (тестовая среда) — проверять нечего
+    for (const n of names) {
+      const meta = map[n];
+      if (!meta) return `Сервер «${n}» не найден среди настроенных серверов`;
+      const c = String(meta.country || '').toUpperCase();
+      if (c && String(geo || '').toUpperCase() !== c) return `Сервер «${n}» из страны ${c}, а тариф — ${String(geo).toUpperCase()}: выберите серверы той же страны`;
+    }
+    return null;
+  }
+
   r.post('/api/admin/tariffs', authMiddleware, adminMiddleware, validate(TariffSchema), (req, res) => {
+    const bad = _serversError(req.body.geo, req.body.server);
+    if (bad) return res.status(400).json({ error: bad });
     const result = tariffsDb.insert(req.body);
     const t = tariffsDb.byId(result.lastInsertRowid);
     auditLog(req.user.login, 'tariff_created', { id: t.id, name: t.name, price: t.price, ip: getClientIp(req) });
     res.json({ ok: true, tariff: _pub(t) });
   });
 
-  r.put('/api/admin/tariffs/:id', authMiddleware, adminMiddleware, validate(TariffSchema.partial()), (req, res) => {
+  r.put('/api/admin/tariffs/:id', authMiddleware, adminMiddleware, validate(TariffPatchSchema), (req, res) => {
     const old = tariffsDb.byId(req.params.id);
     if (!old) return res.status(404).json({ error: 'Tariff not found' });
     // merge: PUT-обновление только переданных полей (partial-схема)
     const merged = { ...old, ...req.body };
+    // Проверяем только если менялись гео или серверы — старые тарифы с устаревшим значением можно править дальше.
+    if (req.body.geo !== undefined || req.body.server !== undefined) {
+      const bad = _serversError(merged.geo, merged.server);
+      if (bad) return res.status(400).json({ error: bad });
+    }
     tariffsDb.update(old.id, merged);
     const t = tariffsDb.byId(old.id);
     // Р32: изменение цены действует на привязанных с даты изменения — биллинг

@@ -683,7 +683,7 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
           <input type="hidden" id="tfId">
           <div class="add-form" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
             <div class="form-group"><label class="form-label" style="font-size:10px">Название</label><input class="form-input" id="tfName" placeholder="1-29 прокси" style="width:100%"></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">Гео</label><input class="form-input" id="tfGeo" placeholder="MD" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Гео</label><select class="form-input" id="tfGeo" style="width:100%" data-on-change="tariffGeoChanged()"></select></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Цена, ₽/мес за прокси</label><input class="form-input" id="tfPrice" type="number" min="1" placeholder="4500" style="width:100%"></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">От скольких прокси</label><input class="form-input" id="tfMinProxies" type="number" min="1" value="1" style="width:100%"></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Длительность, часов</label><input class="form-input" id="tfDuration" type="number" min="1" placeholder="пусто = подписка; 24 = тест-день" style="width:100%"></div>
@@ -691,7 +691,7 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
             <div class="form-group"><label class="form-label" style="font-size:10px">На витрине</label><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="tfPublic"> public</label></div>
             <div class="form-group"><label class="form-label" style="font-size:10px">Активен</label><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="tfActive" checked> active</label></div>
           </div>
-          <div class="form-group" style="margin-top:10px"><label class="form-label" style="font-size:10px">Серверы выдачи (по порядку отметки; ни одного — из «Пула розницы»)</label><div id="tfServers" style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px"></div></div>
+          <div class="form-group" style="margin-top:10px"><label class="form-label" style="font-size:10px">Серверы выдачи — только страны тарифа (ни одного — из «Пула розницы»)</label><div id="tfServers" style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px"></div></div>
           <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
             <button class="btn btn-primary" data-on-click="saveTariffAdmin()">Сохранить</button>
             <button class="btn" data-on-click="resetTariffForm()">Сбросить форму</button>
@@ -1673,7 +1673,7 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
 <script src="/js/admin/settings.js?v=1001a"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0927b"></script>
-<script src="/js/admin.js?v=1015c"></script>
+<script src="/js/admin.js?v=1015e"></script>
 <script src="/js/admin/sse.js?v=0823k"></script>
 </body>
 </html>

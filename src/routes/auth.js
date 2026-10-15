@@ -90,8 +90,11 @@ module.exports = function createAuthRouter(deps) {
     const client = getClientById(req.params.id);
     if (!client) return res.status(404).json({ error: 'Client not found' });
     const users = getUsers();
-    const user = users[client.login];
-    if (!user) return res.status(400).json({ error: 'Client user not found' });
+    // 2026-10-15: в users попадают только клиенты с паролем (env/пароль в карточке),
+    // а розничные клиенты, зарегистрированные через Telegram, пароля не имеют —
+    // «Client user not found» при входе в кабинет moonwalk. Привязка портов — из карточки.
+    const user = users[client.login] || (client.portName ? { portNameFilter: client.portName } : null);
+    if (!user) return res.status(400).json({ error: 'У клиента нет привязки портов (portName) — войти в кабинет нельзя' });
     const token = generateToken();
     // Short TTL: the token travels via URL (?impersonate=…) into the client
     // portal, so it can land in nginx access logs / browser history. A 2-hour

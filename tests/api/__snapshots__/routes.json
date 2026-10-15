@@ -69,6 +69,7 @@
   "GET /api/admin/notifications",
   "GET /api/admin/notifications/badge",
   "GET /api/admin/onboarding",
+  "GET /api/admin/onboarding/:clientId/contract.docx",
   "GET /api/admin/operator-package-forecast",
   "GET /api/admin/operators",
   "GET /api/admin/promo-codes",

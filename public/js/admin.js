@@ -196,25 +196,43 @@ function _loadAdminServers(cb){
     cb(_adminServersCache);
   }).catch(function(){cb([])});
 }
-// Серверы выдачи тарифа — чекбоксы реальных боксов (2026-10-15: было одно
-// значение select, а в проде тарифы хранят список «S1, S3»). Значение — CSV в
-// порядке отметки; пусто = «Пул розницы». Имена вне списка сохраняем.
+// Гео и серверы тарифа выбираются из настроенных боксов (2026-10-15: раньше гео и сервер
+// вводились руками — тариф «MD» со списком «S1, S3, S4, RO1» продавал молдавскую цену на
+// румынском боксе). Гео = страны серверов; серверы — только выбранной страны.
 function _tariffServerList(v){return String(v||'').split(/[\s,;]+/).map(function(x){return x.trim()}).filter(Boolean)}
-function _fillTariffServerSelect(selected){
-  var box=document.getElementById('tfServers');
-  if(!box)return;
-  var sel=_tariffServerList(selected);
+function _srvCountry(s){return String((s.country&&s.country.country)||'').toUpperCase()}
+function _fillTariffGeoSelect(selected,cb){
+  var sel=document.getElementById('tfGeo');if(!sel)return;
   _loadAdminServers(function(servers){
-    var names=servers.map(function(s){return s.name});
-    var h='';
+    var codes={},order=[];
+    servers.forEach(function(s){var c=_srvCountry(s);if(c&&!codes[c]){codes[c]=(s.country&&s.country.countryName)||c;order.push(c)}});
+    var cur=String(selected||'').toUpperCase();
+    var h='';order.forEach(function(c){h+='<option value="'+esc(c)+'">'+esc(codes[c])+' ('+esc(c)+')</option>'});
+    if(cur&&!codes[cur])h+='<option value="'+esc(cur)+'">'+esc(cur)+' (нет серверов)</option>';
+    sel.innerHTML=h;
+    sel.value=cur&&(codes[cur]||h.indexOf('value="'+cur+'"')>=0)?cur:(order[0]||'');
+    if(cb)cb();
+  });
+}
+function _fillTariffServerSelect(selected,checkAll){
+  var box=document.getElementById('tfServers'),geoEl=document.getElementById('tfGeo');
+  if(!box)return;
+  var geo=String((geoEl&&geoEl.value)||'').toUpperCase(),sel=_tariffServerList(selected);
+  _loadAdminServers(function(servers){
+    var h='',names=[];
     servers.forEach(function(s){
-      h+='<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" class="tf-srv" value="'+esc(s.name)+'"'+(sel.indexOf(s.name)>=0?' checked':'')+'> '+esc(s.displayName||s.name)+' <span style="color:var(--text-3)">('+esc(s.name)+')</span></label>';
+      if(_srvCountry(s)!==geo)return;
+      names.push(s.name);
+      var on=checkAll?true:sel.indexOf(s.name)>=0;
+      h+='<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" class="tf-srv" value="'+esc(s.name)+'"'+(on?' checked':'')+'> '+esc(s.displayName||s.name)+' <span style="color:var(--text-3)">('+esc(s.name)+')</span></label>';
     });
-    sel.forEach(function(n){if(names.indexOf(n)<0)h+='<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:var(--warning)"><input type="checkbox" class="tf-srv" value="'+esc(n)+'" checked> '+esc(n)+' (нет в списке серверов)</label>'});
-    box.innerHTML=h||'<span style="color:var(--text-3)">Серверов нет</span>';
+    var dropped=sel.filter(function(n){return names.indexOf(n)<0});
+    if(dropped.length)h+='<div style="flex-basis:100%;font-size:11px;color:var(--warning)">Сервер(ы) '+esc(dropped.join(', '))+' — другой страны, при сохранении будут убраны из тарифа.</div>';
+    box.innerHTML=h||'<span style="color:var(--text-3)">Для этой страны серверов нет</span>';
     box.dataset.order=sel.join(',');
   });
 }
+function tariffGeoChanged(){_fillTariffServerSelect('',true)}
 function _tariffServersValue(){
   var box=document.getElementById('tfServers');if(!box)return '';
   var checked=[].slice.call(box.querySelectorAll('.tf-srv')).filter(function(c){return c.checked}).map(function(c){return c.value});
@@ -240,7 +258,7 @@ function loadCabinetRequests(){
     var rows=(d&&d.items)||[];
     if(!rows.length){lb.innerHTML='<div style="font-size:12px;color:var(--text-3)">Анкет юрлиц пока нет</div>';return}
     var h='<div style="font-weight:600;font-size:12px;margin-bottom:6px">Анкеты юрлиц</div><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th '+th+'>Дата</th><th '+th+'>Организация</th><th '+th+'>ИНН / КПП</th><th '+th+'>Контакт</th><th '+th+'>ЭДО</th><th '+th+'>Договор</th></tr></thead><tbody>';
-    rows.forEach(function(o){var q=o.requisites||{};h+='<tr><td '+td+'>'+esc(String(o.created_at||'').slice(0,16))+'</td><td '+td+'>'+esc(q.legal_name||o.client)+'</td><td '+td+'>'+esc(q.inn||'')+' / '+esc(q.kpp||'—')+'</td><td '+td+'>'+esc([q.contact_name,q.contact_phone,q.contact_email].filter(Boolean).join(', '))+'</td><td '+td+'>'+esc([q.edo_operator,q.edo_id].filter(Boolean).join(', ')||'—')+'</td><td '+td+'>'+_cabSel('contract',o.client_id,o.contract_status,CAB_CONTRACT_ST)+'</td></tr>'});
+    rows.forEach(function(o){var q=o.requisites||{};h+='<tr><td '+td+'>'+esc(String(o.created_at||'').slice(0,16))+'</td><td '+td+'>'+esc(q.legal_name||o.client)+'</td><td '+td+'>'+esc(q.inn||'')+' / '+esc(q.kpp||'—')+'</td><td '+td+'>'+esc([q.contact_name,q.contact_phone,q.contact_email].filter(Boolean).join(', '))+'</td><td '+td+'>'+esc([q.edo_operator,q.edo_id].filter(Boolean).join(', ')||'—')+'</td><td '+td+'>'+_cabSel('contract',o.client_id,o.contract_status,CAB_CONTRACT_ST)+' <button class="btn btn-sm" data-on-click="downloadContract(\''+esc(String(o.client_id))+'\')">Скачать договор'+(o.contract_number?' '+esc(o.contract_number):'')+'</button></td></tr>'});
     lb.innerHTML=h+'</tbody></table>';
   }).catch(function(){lb.innerHTML='<div style="font-size:12px;color:var(--danger)">Ошибка загрузки</div>'});
 }
@@ -251,10 +269,20 @@ function setCabinetStatus(kind,id,value){
     if(d&&d.ok)showToast('Статус обновлён','success');else showToast((d&&d.error)||'Не удалось сохранить','error');
   }).catch(function(){showToast('Ошибка соединения','error')});
 }
+function downloadContract(id){
+  fetch(API+'/api/admin/onboarding/'+encodeURIComponent(id)+'/contract.docx',{headers:{'X-Auth-Token':authToken}}).then(function(r){
+    if(!r.ok)return r.json().then(function(j){throw new Error(j&&j.error||('HTTP '+r.status))});
+    var cd=r.headers.get('Content-Disposition')||'',m=/filename\*=UTF-8''([^;]+)/.exec(cd);
+    return r.blob().then(function(b){
+      var a=document.createElement('a');a.href=URL.createObjectURL(b);a.download=m?decodeURIComponent(m[1]):'contract.docx';
+      document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove()},500);
+    });
+  }).then(function(){loadCabinetRequests()}).catch(function(e){showToast(e.message||'Не удалось скачать','error')});
+}
 async function loadTariffsAdmin(){
   var box=document.getElementById('tariffsTable');
   if(!box)return;
-  if(!document.getElementById('tfId').value)_fillTariffServerSelect('');
+  if(!document.getElementById('tfId').value)_fillTariffGeoSelect('',function(){_fillTariffServerSelect('',true)});
   loadRetailPoolAdmin();
   loadRetailPoolPorts();
   loadCabinetRequests();
@@ -726,8 +754,7 @@ function editTariffAdmin(id){
   document.getElementById('tariffFormTitle').textContent='Изменение тарифа #'+t.id+' — '+t.name;
   document.getElementById('tfId').value=t.id;
   document.getElementById('tfName').value=t.name||'';
-  document.getElementById('tfGeo').value=t.geo||'';
-  _fillTariffServerSelect(t.server||'');
+  _fillTariffGeoSelect(t.geo||'',function(){_fillTariffServerSelect(t.server||'')});
   document.getElementById('tfPrice').value=t.price;
   document.getElementById('tfMinProxies').value=t.min_proxies||1;
   document.getElementById('tfDuration').value=t.duration_hours!=null?t.duration_hours:'';
@@ -742,8 +769,8 @@ function editTariffAdmin(id){
 }
 function resetTariffForm(keepStatus){
   document.getElementById('tariffFormTitle').textContent='Новый тариф';
-  ['tfId','tfName','tfGeo','tfPrice','tfDuration'].forEach(function(id){document.getElementById(id).value=''});
-  _fillTariffServerSelect('');
+  ['tfId','tfName','tfPrice','tfDuration'].forEach(function(id){document.getElementById(id).value=''});
+  _fillTariffGeoSelect('',function(){_fillTariffServerSelect('',true)});
   document.getElementById('tfMinProxies').value='1';
   document.getElementById('tfMinTopup').value='1';
   document.getElementById('tfPublic').checked=false;

@@ -14,13 +14,14 @@ import request from 'supertest';
 import crypto from 'crypto';
 import { bootApp, asAdmin } from '../_helpers/app.js';
 
-let app, db, adminToken, testClientLogin;
+let app, db, adminToken, testClientLogin, getUsers;
 const TEST_PASSWORD = 'test_pa55word_' + crypto.randomBytes(4).toString('hex');
 
 beforeAll(async () => {
   const ctx = bootApp();
   app = ctx.app;
   db = ctx.db;
+  getUsers = ctx.getUsers;
   adminToken = asAdmin();
   // Create a client whose credentials we control. Admin route adds them to
   // both the clients table AND the in-memory users{} map that /api/login reads.
@@ -181,6 +182,23 @@ describe('POST /api/admin/impersonate/:id', () => {
     ).get();
     expect(audit).toBeTruthy();
     expect(audit.details).toContain(testClientLogin);
+  });
+
+  // 2026-10-15: розничные клиенты, зарегистрированные через Telegram, пароля не имеют —
+  // их нет в users{} → «Client user not found» при входе из админки (кейс moonwalk).
+  it('клиент без пароля (нет в users{}): вход работает, порт-фильтр берётся из карточки', async () => {
+    const login = 'tg_nopass_' + crypto.randomBytes(3).toString('hex');
+    const create = await request(app).post('/api/admin/clients').set('X-Auth-Token', adminToken)
+      .send({ name: 'TG No Pass', login, password: 'x_pa55word_' + crypto.randomBytes(3).toString('hex'), portName: 'nopassportname' });
+    expect(create.status).toBe(200);
+    delete getUsers()[login];                       // как у клиента из Telegram-регистрации
+    const client = db.prepare('SELECT id FROM clients WHERE login = ?').get(login);
+    const res = await request(app).post(`/api/admin/impersonate/${client.id}`).set('X-Auth-Token', adminToken);
+    expect(res.status).toBe(200);
+    expect(res.body.login).toBe(login);
+    const row = db.prepare('SELECT port_name_filter FROM sessions WHERE login = ? ORDER BY rowid DESC LIMIT 1').get(login);
+    expect(row.port_name_filter).toBe('nopassportname');
+    db.prepare('DELETE FROM clients WHERE login = ?').run(login);
   });
 
   it('returns 403 for a non-admin session', async () => {
