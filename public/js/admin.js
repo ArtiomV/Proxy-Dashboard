@@ -196,27 +196,36 @@ function _loadAdminServers(cb){
     cb(_adminServersCache);
   }).catch(function(){cb([])});
 }
-// Поле «Сервер» тарифа — select из реальных боксов + «по умолчанию» (пусто).
-// Значение вне списка (legacy) добавляем опцией, чтобы не потерять.
+// Серверы выдачи тарифа — чекбоксы реальных боксов (2026-10-15: было одно
+// значение select, а в проде тарифы хранят список «S1, S3»). Значение — CSV в
+// порядке отметки; пусто = «Пул розницы». Имена вне списка сохраняем.
+function _tariffServerList(v){return String(v||'').split(/[\s,;]+/).map(function(x){return x.trim()}).filter(Boolean)}
 function _fillTariffServerSelect(selected){
-  var sel=document.getElementById('tfServer');
-  if(!sel)return;
+  var box=document.getElementById('tfServers');
+  if(!box)return;
+  var sel=_tariffServerList(selected);
   _loadAdminServers(function(servers){
-    var h='<option value="">— по умолчанию (из retail_pool_servers)</option>';
-    var found=!selected;
+    var names=servers.map(function(s){return s.name});
+    var h='';
     servers.forEach(function(s){
-      if(s.name===selected)found=true;
-      h+='<option value="'+esc(s.name)+'">'+esc(s.displayName||s.name)+'</option>';
+      h+='<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer"><input type="checkbox" class="tf-srv" value="'+esc(s.name)+'"'+(sel.indexOf(s.name)>=0?' checked':'')+'> '+esc(s.displayName||s.name)+' <span style="color:var(--text-3)">('+esc(s.name)+')</span></label>';
     });
-    if(!found)h+='<option value="'+esc(selected)+'">'+esc(selected)+' (нет в списке)</option>';
-    sel.innerHTML=h;
-    sel.value=selected||'';
+    sel.forEach(function(n){if(names.indexOf(n)<0)h+='<label style="display:inline-flex;align-items:center;gap:5px;cursor:pointer;color:var(--warning)"><input type="checkbox" class="tf-srv" value="'+esc(n)+'" checked> '+esc(n)+' (нет в списке серверов)</label>'});
+    box.innerHTML=h||'<span style="color:var(--text-3)">Серверов нет</span>';
+    box.dataset.order=sel.join(',');
   });
+}
+function _tariffServersValue(){
+  var box=document.getElementById('tfServers');if(!box)return '';
+  var checked=[].slice.call(box.querySelectorAll('.tf-srv')).filter(function(c){return c.checked}).map(function(c){return c.value});
+  var order=_tariffServerList(box.dataset.order);
+  checked.sort(function(x,y){var ix=order.indexOf(x),iy=order.indexOf(y);return (ix<0?99:ix)-(iy<0?99:iy)});
+  return checked.join(', ');
 }
 async function loadTariffsAdmin(){
   var box=document.getElementById('tariffsTable');
   if(!box)return;
-  _fillTariffServerSelect(document.getElementById('tfServer').value||'');
+  if(!document.getElementById('tfId').value)_fillTariffServerSelect('');
   loadRetailPoolAdmin();
   loadRetailPoolPorts();
   // WP3 (B2C Э4): эквайринг — настройки провайдера + журнал карточных платежей
@@ -313,6 +322,7 @@ function renderRetailPoolPorts(counts){
   };
   var h='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Сервер</th>'+
+    '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)">От, шт</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Порт</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Статус</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Клиент</th>'+
@@ -668,6 +678,7 @@ function renderTariffsAdmin(){
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(t.name)+'</td>'+
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(t.geo||'')+'</td>'+
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+esc(t.server||'—')+'</td>'+
+      '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">'+(t.min_proxies||1)+'</td>'+
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right">'+Math.round(t.price).toLocaleString('ru-RU')+'</td>'+
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border)">'+flags.join(' · ')+'</td>'+
       '<td style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;white-space:nowrap">'+
@@ -682,26 +693,32 @@ function renderTariffsAdmin(){
 function editTariffAdmin(id){
   var t=_tariffsCache.find(function(x){return x.id===id});
   if(!t)return;
-  document.getElementById('tariffFormTitle').textContent='Тариф #'+t.id;
+  document.getElementById('tariffFormTitle').textContent='Изменение тарифа #'+t.id+' — '+t.name;
   document.getElementById('tfId').value=t.id;
   document.getElementById('tfName').value=t.name||'';
   document.getElementById('tfGeo').value=t.geo||'';
   _fillTariffServerSelect(t.server||'');
   document.getElementById('tfPrice').value=t.price;
+  document.getElementById('tfMinProxies').value=t.min_proxies||1;
   document.getElementById('tfDuration').value=t.duration_hours!=null?t.duration_hours:'';
   document.getElementById('tfMinTopup').value=t.min_topup_days||1;
   document.getElementById('tfPublic').checked=!!t.public;
   document.getElementById('tfActive').checked=!!t.active;
   document.getElementById('tariffFormStatus').textContent='';
+  // Форма сразу под таблицей; прокрутка + подсветка — видно, что открыт именно этот тариф.
+  var card=document.getElementById('tariffFormCard');
+  if(card){card.scrollIntoView({behavior:'smooth',block:'center'});card.style.boxShadow='0 0 0 2px var(--accent)';setTimeout(function(){card.style.boxShadow=''},1600)}
+  var nm=document.getElementById('tfName');if(nm)setTimeout(function(){nm.focus()},350);
 }
-function resetTariffForm(){
+function resetTariffForm(keepStatus){
   document.getElementById('tariffFormTitle').textContent='Новый тариф';
-  ['tfId','tfName','tfGeo','tfServer','tfPrice','tfDuration'].forEach(function(id){document.getElementById(id).value=''});
-  _fillTariffServerSelect('');   // select: гарантируем опции + «по умолчанию»
+  ['tfId','tfName','tfGeo','tfPrice','tfDuration'].forEach(function(id){document.getElementById(id).value=''});
+  _fillTariffServerSelect('');
+  document.getElementById('tfMinProxies').value='1';
   document.getElementById('tfMinTopup').value='1';
   document.getElementById('tfPublic').checked=false;
   document.getElementById('tfActive').checked=true;
-  document.getElementById('tariffFormStatus').textContent='';
+  if(!keepStatus)document.getElementById('tariffFormStatus').textContent='';
 }
 async function saveTariffAdmin(){
   var st=document.getElementById('tariffFormStatus');
@@ -709,8 +726,9 @@ async function saveTariffAdmin(){
   var body={
     name:document.getElementById('tfName').value.trim(),
     geo:document.getElementById('tfGeo').value.trim(),
-    server:document.getElementById('tfServer').value.trim(),
+    server:_tariffServersValue(),
     price:parseFloat(document.getElementById('tfPrice').value),
+    min_proxies:parseInt(document.getElementById('tfMinProxies').value)||1,
     min_topup_days:parseInt(document.getElementById('tfMinTopup').value)||1,
     public:document.getElementById('tfPublic').checked,
     active:document.getElementById('tfActive').checked
@@ -722,8 +740,10 @@ async function saveTariffAdmin(){
   try{
     var data=await api(API+'/api/admin/tariffs'+(id?'/'+id:''),{method:id?'PUT':'POST',json:body});
     if(data&&data.ok){
-      st.style.color='var(--success)';st.textContent='Сохранено';
-      resetTariffForm();
+      var savedName=(data.tariff&&data.tariff.name)||body.name;
+      resetTariffForm(true);
+      st.style.color='var(--success)';st.textContent='✓ Сохранено: '+savedName;
+      if(typeof showToast==='function')showToast('Тариф «'+savedName+'» сохранён','success');
       loadTariffsAdmin();
     }else{
       st.style.color='var(--danger)';st.textContent=(data&&data.error)||'Ошибка сохранения';

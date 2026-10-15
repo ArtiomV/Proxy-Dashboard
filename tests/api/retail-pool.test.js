@@ -257,6 +257,27 @@ describe('buy_proxy: тест-день проставляет test_expires_at (+
   });
 });
 
+// 2026-10-15: тариф со списком серверов «S1, S3» — раньше строка целиком
+// считалась одним именем сервера, пул не находился и любая покупка кончалась
+// «прокси закончились» (так стояли все 4 тарифа розницы в проде).
+describe('buy_proxy: тариф со списком серверов', () => {
+  it('«S1, S3»: на S1 пусто, на S3 есть свободный порт → выдача с S3', async () => {
+    const clients = [{
+      id: 'c_m', login: 'u_m', name: 'M', portName: 'u_m', clientType: 'individual',
+      emailVerified: true, blocked: false, balance: 10000, testUsed: true, tariffId: null,
+    }];
+    const { app, poolDb } = mountRetail({
+      clients,
+      user: { login: 'u_m', isAdmin: 0 },
+      poolRows: [{ id: 1, server: 'S3', port_id: 'p_s3', status: 'free', client_id: null }],
+      tariffs: { 11: { id: 11, name: '1-29 прокси', active: 1, public: 1, duration_hours: null, price: 4500, min_topup_days: 1, server: 'S1, S3', geo: 'MD' } },
+    });
+    const res = await request(app).post('/api/client/buy_proxy').send({ tariff_id: 11 });
+    expect(res.status).toBe(200);
+    expect(poolDb.byPort('S3', 'p_s3')).toMatchObject({ status: 'leased', client_id: 'c_m' });
+  });
+});
+
 describe('B6: POST /api/admin/assign_modem — пустой newPortName = отвязка', () => {
   function mountProxies(posted) {
     const router = createProxiesRouter({

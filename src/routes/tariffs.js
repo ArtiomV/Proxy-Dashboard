@@ -15,7 +15,9 @@ const TariffSchema = z.object({
   name: z.string().min(1).max(200),
   type: z.enum(['per_modem', 'per_gb']).default('per_modem'), // flat нет — Р34
   geo: z.string().min(1).max(20),
-  server: z.string().max(50).default(''),
+  // Список серверов выдачи по порядку приоритета: «S1, S3». Пусто — пул розницы.
+  server: z.string().max(200).default('')
+    .transform(v => String(v).split(/[\s,;]+/).map(x => x.trim()).filter(Boolean).join(', ')),
   price: z.coerce.number().positive().max(1_000_000),
   min_proxies: z.coerce.number().int().min(1).max(100000).default(1),
   public: z.boolean().default(false),

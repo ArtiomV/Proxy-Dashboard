@@ -178,7 +178,13 @@ module.exports = function createRetailRouter(deps) {
 
     // Атомарный резерв свободного порта на боксе тарифа (гонки: UPDATE … WHERE status='free')
     const poolServers = String(getSetting('retail_pool_servers', '')).split(',').map(s => s.trim()).filter(Boolean);
-    const serverName = tariff.server || poolServers[0];
+    // tariff.server — список боксов по приоритету («S1, S3»). Раньше строка
+    // целиком считалась ОДНИМ именем сервера: пул «S1, S3» не находился, и
+    // любая покупка по таким тарифам кончалась «прокси закончились»
+    // (2026-10-15). Берём первый бокс списка со свободным портом пула.
+    const tariffServers = String(tariff.server || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+    const serverCandidates = tariffServers.length ? tariffServers : poolServers;
+    const serverName = serverCandidates.find(s => retailPoolDb.nextFree(s)) || serverCandidates[0];
     if (!serverName) {
       retailPurchasesDb.setStatus(purchaseId, 'failed', 'pool_not_configured');
       return res.status(503).json({ error: 'Пул розницы не настроен' });

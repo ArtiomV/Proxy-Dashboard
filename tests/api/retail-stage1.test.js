@@ -256,6 +256,19 @@ describe('B2C Э1: tariffs CRUD (Р36)', () => {
   });
 });
 
+describe('тарифы: список серверов и «от N прокси» (2026-10-15)', () => {
+  it('сервер «S1,S3 ;S4» сохраняется как «S1, S3, S4», min_proxies меняется через PUT', async () => {
+    const c = await request(app).post('/api/admin/tariffs').set('X-Auth-Token', adminToken)
+      .send({ name: 'SRVLIST', geo: 'MD', server: 'S1,S3 ;S4', price: 4500, public: false, active: true });
+    expect(c.status).toBe(200);
+    expect(c.body.tariff.server).toBe('S1, S3, S4');
+    const u = await request(app).put('/api/admin/tariffs/' + c.body.tariff.id).set('X-Auth-Token', adminToken)
+      .send({ min_proxies: 30, server: 'S3' });
+    expect(u.body.tariff).toMatchObject({ min_proxies: 30, server: 'S3', price: 4500 });
+    db.prepare('DELETE FROM tariffs WHERE id = ?').run(c.body.tariff.id);
+  });
+});
+
 describe('B2C Э1: buy_proxy (WP2, тестовый кредит)', () => {
   let sessionToken, login, tariffId;
 

@@ -675,6 +675,26 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
           <div style="font-size:12px;color:var(--text-2);margin-bottom:14px">Единый прайс (Р36). Витрина клиента — тарифы с public=1 и active=1; duration_hours=24 — тест-день.</div>
           <div id="tariffsTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div></div>
         </div>
+        <div class="analytics-card" id="tariffFormCard" style="margin-top:12px">
+          <h3 style="margin:0 0 12px" id="tariffFormTitle">Новый тариф</h3>
+          <input type="hidden" id="tfId">
+          <div class="add-form" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px">
+            <div class="form-group"><label class="form-label" style="font-size:10px">Название</label><input class="form-input" id="tfName" placeholder="1-29 прокси" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Гео</label><input class="form-input" id="tfGeo" placeholder="MD" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Цена, ₽/мес за прокси</label><input class="form-input" id="tfPrice" type="number" min="1" placeholder="4500" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">От скольких прокси</label><input class="form-input" id="tfMinProxies" type="number" min="1" value="1" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Длительность, часов</label><input class="form-input" id="tfDuration" type="number" min="1" placeholder="пусто = подписка; 24 = тест-день" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Мин. пополнение, дней</label><input class="form-input" id="tfMinTopup" type="number" min="1" max="90" value="1" style="width:100%"></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">На витрине</label><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="tfPublic"> public</label></div>
+            <div class="form-group"><label class="form-label" style="font-size:10px">Активен</label><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="tfActive" checked> active</label></div>
+          </div>
+          <div class="form-group" style="margin-top:10px"><label class="form-label" style="font-size:10px">Серверы выдачи (по порядку отметки; ни одного — из «Пула розницы»)</label><div id="tfServers" style="display:flex;flex-wrap:wrap;gap:4px 14px;font-size:12px"></div></div>
+          <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+            <button class="btn btn-primary" data-on-click="saveTariffAdmin()">Сохранить</button>
+            <button class="btn" data-on-click="resetTariffForm()">Сбросить форму</button>
+            <span id="tariffFormStatus" style="font-size:12px;margin-left:4px"></span>
+          </div>
+        </div>
         <!-- Пул розницы: боксы выдачи по умолчанию (retail_pool_servers, CSV) -->
         <div class="analytics-card" style="margin-top:16px">
           <h3 style="margin:0 0 6px">Пул розницы</h3>
@@ -758,25 +778,7 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
           </div>
           <div id="promoCodesTable"><div style="text-align:center;padding:24px;color:var(--text-3);font-size:12px">Загрузка...</div></div>
         </div>
-        <div class="analytics-card" style="margin-top:16px">
-          <h3 style="margin:0 0 12px" id="tariffFormTitle">Новый тариф</h3>
-          <input type="hidden" id="tfId">
-          <div class="add-form">
-            <div class="form-group"><label class="form-label" style="font-size:10px">Название</label><input class="form-input" id="tfName" placeholder="Россия · МТС" style="width:100%"></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">Гео</label><input class="form-input" id="tfGeo" placeholder="RU" style="width:100%"></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">Сервер</label><select class="form-input" id="tfServer" style="width:100%"><option value="">— по умолчанию (из retail_pool_servers)</option></select></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">Цена, ₽/мес</label><input class="form-input" id="tfPrice" type="number" min="1" placeholder="1500" style="width:100%"></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">Длительность, часов</label><input class="form-input" id="tfDuration" type="number" min="1" placeholder="24 = тест-день" style="width:100%"></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">Мин. пополнение, дней</label><input class="form-input" id="tfMinTopup" type="number" min="1" max="90" value="1" style="width:100%"></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">На витрине</label><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="tfPublic"> public</label></div>
-            <div class="form-group"><label class="form-label" style="font-size:10px">Активен</label><label style="display:flex;align-items:center;gap:6px;font-size:12px"><input type="checkbox" id="tfActive" checked> active</label></div>
-          </div>
-          <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
-            <button class="btn btn-primary" data-on-click="saveTariffAdmin()">Сохранить</button>
-            <button class="btn" data-on-click="resetTariffForm()">Сбросить форму</button>
-            <span id="tariffFormStatus" style="font-size:11px;margin-left:4px"></span>
-          </div>
-        </div>
+
       </div>
       <!-- Симулятор нагрузки -->
       <div id="settingsSection_simulator" class="settings-section" style="display:none">
@@ -1658,7 +1660,7 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
 <script src="/js/admin/settings.js?v=1001a"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0927b"></script>
-<script src="/js/admin.js?v=1013a"></script>
+<script src="/js/admin.js?v=1015a"></script>
 <script src="/js/admin/sse.js?v=0823k"></script>
 </body>
 </html>
