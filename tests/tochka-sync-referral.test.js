@@ -7,7 +7,7 @@
 // is the production one, not a reimplementation.
 //
 // Coverage:
-//   • sync auto-credit pays the referrer 10% (Р22: sync used to skip referral)
+//   • sync auto-credit pays the referrer 15% (Р22: sync used to skip referral)
 //   • two identical payments in one statement → BOTH credited (A3 sequence)
 //   • re-sync of the same statement → no double credit (idempotency)
 //   • empty transactionId re-pull → conservative dedup (no re-credit)
@@ -134,7 +134,7 @@ function ctxFor(pair) {
 // ─── Tests ───────────────────────────────────────────────────────────────────
 
 describe('A1/Р22: referral commission in the Tochka sync path', () => {
-  it('auto-credit by INN pays the referrer 10% inside atomicCredit', async () => {
+  it('auto-credit by INN pays the referrer 15% inside atomicCredit', async () => {
     const pair = seedPair('6000000001');
     const run = makeSync([
       tx({ inn: '6000000001', amount: 10000, purpose: 'Оплата по договору', transactionId: 'cbs-t1' }),
@@ -145,8 +145,8 @@ describe('A1/Р22: referral commission in the Tochka sync path', () => {
     expect(res.matched).toBe(1);
 
     expect(dbBalance(pair.referred.id)).toBe(10000);
-    // 10% of 10000 — before the fix the sync credited 0 referral.
-    expect(dbReferral(pair.referrer.id)).toBe(1000);
+    // 15% of 10000 — before the fix the sync credited 0 referral.
+    expect(dbReferral(pair.referrer.id)).toBe(1500);
     expect(ledgerRows(pair.referred.id).filter(e => e.type === 'bank_payment').length).toBe(1);
   }, 15000);
 });
@@ -164,7 +164,7 @@ describe('A3: natural-key sequence anti-collision in sync', () => {
     expect(res.ok).toBe(true);
     // Both real payments credited — the old natural_key gate swallowed the second.
     expect(dbBalance(pair.referred.id)).toBe(10000);
-    expect(dbReferral(pair.referrer.id)).toBe(1000);   // 10% of each 5000
+    expect(dbReferral(pair.referrer.id)).toBe(1500);   // 15% of each 5000
     // ORDER BY rowid, не id: id — текстовый 'bp_<ms>_<random>', и при вставке
     // обеих строк в одну миллисекунду порядок решал случайный суффикс —
     // флейк в CI (keys[1] оказывался базовым ключом вместо '#2').
@@ -179,7 +179,7 @@ describe('A3: natural-key sequence anti-collision in sync', () => {
     expect(res2.ok).toBe(true);
     expect(res2.matched).toBe(0);
     expect(dbBalance(pair.referred.id)).toBe(10000);
-    expect(dbReferral(pair.referrer.id)).toBe(1000);
+    expect(dbReferral(pair.referrer.id)).toBe(1500);
     expect(ledgerRows(pair.referred.id).filter(e => e.type === 'bank_payment').length).toBe(2);
   }, 20000);
 

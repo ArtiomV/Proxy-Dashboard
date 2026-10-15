@@ -5,7 +5,7 @@
 // init/poll, natural-key idempotency, reconcile of uncredited webhook rows,
 // auto-credit + bill settlement + payment alerts. Deps via factory.
 //
-const { referralCommission } = require('../billing/referral');   // A1/Р6+Р22: комиссия 10% и в sync-пути
+const { referralCommission } = require('../billing/referral');   // A1/Р6+Р22: комиссия REFERRAL_PCT и в sync-пути
 
 function create(deps) {
   const {

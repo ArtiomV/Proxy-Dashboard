@@ -14,7 +14,7 @@ const path = require('path');
 const { sha256hex } = require('../utils/secrets');
 const { rotateApiKey, resolveGraceHours } = require('../services/api-keys');   // v2.10.68: grace-ротация
 const financeEvents = require('../billing/events');   // WP7.2: cache invalidation on client mutations
-const { referralCommission } = require('../billing/referral');   // A1/Р6: комиссия 10%, единая константа
+const { referralCommission, REFERRAL_PCT } = require('../billing/referral');   // A1/Р6: комиссия — единая константа REFERRAL_PCT
 function _emitFinanceWrite() {
   try { financeEvents.emit('finance-write'); } catch (_) { /* best-effort */ }
 }
@@ -377,7 +377,7 @@ r.post('/api/admin/clients/:id/payment', authMiddleware, adminMiddleware, valida
 
   if (referral) {
     const referrer = clientById.get(referral.referrerId);
-    if (referrer) logger.info(`[Referral] Credited ${referralOpts.delta.toFixed(2)} to ${referrer.name} (10% of ${parsedAmount}) — atomic with payment`);
+    if (referrer) logger.info(`[Referral] Credited ${referralOpts.delta.toFixed(2)} to ${referrer.name} (${Math.round(REFERRAL_PCT * 100)}% of ${parsedAmount}) — atomic with payment`);
   }
 
   saveClients(clients);

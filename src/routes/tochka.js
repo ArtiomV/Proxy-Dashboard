@@ -24,7 +24,7 @@ const {
 const { tochkaRequest: _rawTochkaRequest } = require('../tochka/api');
 const { buildDocHtml: _buildDocHtml } = require('../documents/generator');
 const { findClientByPayer, buildNaturalKey, resolveNaturalKey } = require('../billing/payer-match');
-const { referralCommission } = require('../billing/referral');   // A1/Р6: комиссия 10%, единая константа
+const { referralCommission } = require('../billing/referral');   // A1/Р6: комиссия — единая константа REFERRAL_PCT
 
 module.exports = function createTochkaRouter(deps) {
   const {

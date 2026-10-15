@@ -9,7 +9,7 @@
 //     • balance in DB updated
 //     • row appears in billing_ledger
 //     • payments table NOT written (Stage 13.3: read-only legacy)
-//     • referrer referral_balance bumped by 10% (DB + in-memory)
+//     • referrer referral_balance bumped by 15% (DB + in-memory)
 //   POST   /api/admin/clients/:id/charge
 //     • balance debited
 //     • row in billing_ledger with type='correction'
@@ -120,7 +120,7 @@ describe('Stage 13.0: characterization — POST /api/admin/clients/:id/payment',
     expect(paymentsAfter.length).toBe(paymentsBefore);
   });
 
-  it('credits referrer with 10% commission (DB + in-memory)', async () => {
+  it('credits referrer with 15% commission (DB + in-memory)', async () => {
     const { referrer, referred } = await createReferralPair();
     expect(dbReferralBalance(referrer.id)).toBe(0);
 
@@ -130,12 +130,12 @@ describe('Stage 13.0: characterization — POST /api/admin/clients/:id/payment',
       .send({ amount: 1000, date: '2026-05-23', note: 'refpay' });
     expect(res.status).toBe(200);
 
-    // A1/Р6: 10% of 1000 = 100 (was 15% before the refactor).
-    expect(dbReferralBalance(referrer.id)).toBe(100);
+    // 15% of 1000 = 150 (2026-10-15: возврат к 15%, как обещано на сайте).
+    expect(dbReferralBalance(referrer.id)).toBe(150);
 
     // In-memory map also updated (same code path: clientById.get(referrer))
     const { state } = require('../../src/state/index.js');
-    expect(state.clientById.get(referrer.id).referral_balance).toBe(100);
+    expect(state.clientById.get(referrer.id).referral_balance).toBe(150);
   });
 });
 
@@ -217,7 +217,7 @@ describe('P0-2: DELETE /api/admin/clients/:id/payment/by-ledger/:ledgerDbId', ()
       .set('X-Auth-Token', adminToken)
       .send({ amount: 200, date: '2026-05-23', note: 'byledger' });
     expect(dbBalance(referred.id)).toBe(200);
-    expect(dbReferralBalance(referrer.id)).toBe(20);   // 10% of 200
+    expect(dbReferralBalance(referrer.id)).toBe(30);   // 15% of 200
 
     // Get the stable ledger id the UI deletes by.
     const list = await request(app).get(`/api/admin/clients/${referred.id}/payments`).set('X-Auth-Token', adminToken);

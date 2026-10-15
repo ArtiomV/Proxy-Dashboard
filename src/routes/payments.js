@@ -21,7 +21,7 @@
 
 const express = require('express');
 const crypto = require('crypto');
-const { referralCommission } = require('../billing/referral');   // Р6: комиссия 10% с любого канала
+const { referralCommission } = require('../billing/referral');   // Р6: комиссия 15% с любого канала
 const { decodeJwtPayload } = require('../tochka/jwt');           // peek webhookType для unified-URL роутинга
 
 module.exports = function createPaymentsRouter(deps) {
@@ -69,7 +69,7 @@ module.exports = function createPaymentsRouter(deps) {
     return Number(getSetting('retail_max_topup', 100000)) || 100000;
   }
 
-  // Р22-паттерн (как tochka-sync.js:31): рефкомиссия 10% в той же транзакции.
+  // Р22-паттерн (как tochka-sync.js:31): рефкомиссия в той же транзакции.
   function _referralOptsFor(client, amount) {
     if (!client.referred_by) return undefined;
     const referrer = clientById.get(client.referred_by);

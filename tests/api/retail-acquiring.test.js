@@ -2,7 +2,7 @@
 //   - POST /api/client/topup: гейты (retail_enabled, email_verified, провайдер),
 //     min/max, создание платежа + строка card_payments;
 //   - POST /api/payments/webhook/tochka: strict-подпись (401), зачёт ТОЛЬКО по
-//     webhook, идемпотентность дублей, рефкомиссия 10% в той же транзакции,
+//     webhook, идемпотентность дублей, рефкомиссия 15% в той же транзакции,
 //     сверка суммы;
 //   - POST /api/admin/card_payments/:orderId/refund: refund провайдера →
 //     payment_reversal + откат рефкомиссии; падение провайдера → 502 без сторно;
@@ -275,7 +275,7 @@ describe('WP3: webhook — зачёт только по подписанному
     expect(res.body.ignored).toBe('unknown_order');
   });
 
-  it('рефкомиссия 10% рефереру в той же транзакции', async () => {
+  it('рефкомиссия 15% рефереру в той же транзакции', async () => {
     const referrer = await registerVerified('ref_parent@wp3-test.local');
     const referred = await registerVerified('ref_child@wp3-test.local');
     db.prepare('UPDATE clients SET referred_by = ? WHERE id = ?').run(referrer.client.id, referred.client.id);
@@ -285,8 +285,8 @@ describe('WP3: webhook — зачёт только по подписанному
     expect((await webhook({ order_id: t.body.order_id, status: 'paid', amount: 1000 })).body.credited).toBe(true);
 
     expect(referred.client.balance).toBe(1000);
-    expect(referrer.client.referral_balance).toBe(100);
-    expect(db.prepare('SELECT referral_balance FROM clients WHERE id = ?').get(referrer.client.id).referral_balance).toBe(100);
+    expect(referrer.client.referral_balance).toBe(150);
+    expect(db.prepare('SELECT referral_balance FROM clients WHERE id = ?').get(referrer.client.id).referral_balance).toBe(150);
   });
 });
 
@@ -310,7 +310,7 @@ describe('WP3: возврат (POST /api/admin/card_payments/:orderId/refund)', 
       { amount: 1000, method: 'card' });
     await webhook({ order_id: t2.body.order_id, status: 'paid', amount: 1000 });
     expect(client.balance).toBe(1800);
-    expect(referrer.client.referral_balance).toBe(100);
+    expect(referrer.client.referral_balance).toBe(150);
 
     const res = await request(app)
       .post(`/api/admin/card_payments/${t2.body.order_id}/refund`)

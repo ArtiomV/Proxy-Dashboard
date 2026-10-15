@@ -134,13 +134,13 @@ describe('DEEP-19: повтор ручной привязки банка иде�
     const r1 = await request(app).post('/api/admin/tochka/match_payment')
       .set('X-Auth-Token', adminToken).send({ paymentId: bankPaymentId, clientId: referredId });
     expect(r1.status).toBe(200);
-    expect(db.prepare('SELECT referral_balance FROM clients WHERE id = ?').get(referrerId).referral_balance).toBe(100);
+    expect(db.prepare('SELECT referral_balance FROM clients WHERE id = ?').get(referrerId).referral_balance).toBe(150);
 
     const r2 = await request(app).post('/api/admin/tochka/match_payment')
       .set('X-Auth-Token', adminToken).send({ paymentId: bankPaymentId, clientId: referredId });
     expect(r2.body.already).toBe(true);
     // комиссия НЕ удвоена
-    expect(db.prepare('SELECT referral_balance FROM clients WHERE id = ?').get(referrerId).referral_balance).toBe(100);
+    expect(db.prepare('SELECT referral_balance FROM clients WHERE id = ?').get(referrerId).referral_balance).toBe(150);
   });
 
   it('matched без ledger-доказательства (legacy) — reconciliation_required, не повторный кредит', async () => {

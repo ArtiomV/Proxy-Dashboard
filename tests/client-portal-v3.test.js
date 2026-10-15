@@ -170,9 +170,9 @@ describe('/api/client/referral_stats', () => {
     expect(r.status).toBe(200);
     expect(r.body.referrals).toBe(1);
     expect(r.body.active).toBe(1);
-    expect(r.body.accruals).toEqual([{ date: '2026-09-10', client: 'bob', pay: 1000, fee: 100 }]);
+    expect(r.body.accruals).toEqual([{ date: '2026-09-10', client: 'bob', pay: 1000, fee: 150 }]);
     expect(r.body.totalEarned).toBe(200);
-    expect(r.body.rate).toBe(0.1);
+    expect(r.body.rate).toBe(0.15);
   });
 });
 
