@@ -80,8 +80,8 @@ module.exports = function createRetailRouter(deps) {
   }
 
   // 2026-09-18 · DEEP-22: компенсация провижининга. Порт переводится в free
-  // ТОЛЬКО после подтверждённой отвязки: postConfForm(portName='') + apply +
-  // СВЕЖЕЕ чтение реестра портов (portName фактически пуст). Любой сбой или
+  // ТОЛЬКО после подтверждённой отвязки: postConfForm(portName=randomport…) + apply +
+  // СВЕЖЕЕ чтение реестра портов (portName стал техническим). Любой сбой или
   // неподтверждённое чтение → false: исход неизвестен, порт НЕ освобождаем
   // (иначе активный порт с живым доступом продавался бы повторно).
   async function _tryUnbindPort(server, portId) {
@@ -89,14 +89,15 @@ module.exports = function createRetailRouter(deps) {
       const form = await proxyConf.getConfForm(server, `/conf/edit_port/${portId}`);
       if (!form.ok) return false;
       const formData = parseHtmlInputFields(form.html);
-      formData.portName = '';
+      // Пустое имя ProxySmart игнорирует (302 на ту же форму) — «отвязка» = техническое имя randomport…
+      formData.portName = 'randomport' + String(Date.now()).slice(-8) + String(Math.floor(Math.random() * 90) + 10);
       const posted = await proxyConf.postConfForm(server, `/conf/edit_port/${portId}`, formData);
       if (!posted.ok) return false;
       try { await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(portId)}`); } catch (_) { /* best-effort */ }
       const portsData = await fetchApi(server, '/apix/list_ports_json');
       for (const plist of Object.values(portsData || {})) {
         for (const p of plist || []) {
-          if (p && p.portID === portId) return !String(p.portName || '').trim();
+          if (p && p.portID === portId) { const nm = String(p.portName || '').trim(); return !nm || /^random/i.test(nm); }
         }
       }
       return false;   // порт не найден в свежем реестре — отвязка не доказана
@@ -534,7 +535,7 @@ module.exports = function createRetailRouter(deps) {
       if (/100\s*%\s*loss/i.test(String(nd.ping_stats || ''))) continue;     // канал не отвечает
       if (m.IS_ROTATED === 'true' || m.IS_ROTATED === true || nd.IS_ROTATED === 'true') continue;
       const ports = (portsData && portsData[imei]) || [];
-      if (ports.some(p => p && (p.portName || '').trim())) continue;        // занят клиентом
+      if (ports.some(p => p && (p.portName || '').trim() && !/^random/i.test(String(p.portName).trim()))) continue;   // занят клиентом (randomport* — технический, не клиент)
       candidates.push({ imei, nick: md.NICK, ports: ports.length });
     }
     candidates.sort((a, b) => a.ports - b.ports);
@@ -548,9 +549,18 @@ module.exports = function createRetailRouter(deps) {
         if (!addForm.ok) throw new Error(`add_port form: ${addForm.reason}`);
         const formData = parseHtmlInputFields(addForm.html);
         if (!formData.portID) throw new Error('add_port form returned no portID');
-        formData.portName = '';   // пустой portName = порт выключен, ждёт выдачи (B6)
+        // 2026-10-15: ProxySmart не создаёт порт с ПУСТЫМ именем — отвечает 302 обратно
+        // на форму, а postConfForm считает это успехом (на проде в пуле появились
+        // 6 «призрачных» портов, покупка падала с HTTP_404 на выдаче). Свободный
+        // порт называется randomport<цифры> — это штатное имя ProxySmart для
+        // неназначенных портов, все проверки проекта уже считают его не клиентским.
+        formData.portName = 'randomport' + String(Date.now()).slice(-8) + String(Math.floor(Math.random() * 90) + 10);
         const posted = await proxyConf.postConfForm(server, `/conf/add_port?imei=${cand.imei}`, formData);
         if (!posted.ok) throw new Error(`add_port post: ${posted.reason}`);
+        // Порт должен реально появиться на боксе, иначе в пул не записываем.
+        const after = await fetchApi(server, '/apix/list_ports_json');
+        const exists = Object.values(after || {}).some(pl => (pl || []).some(p => p && p.portID === formData.portID));
+        if (!exists) throw new Error('ProxySmart не создал порт (форма вернулась без сохранения)');
         try { await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(formData.portID)}`); } catch (e) {
           logger.warn(`[RetailPool] apply_port ${formData.portID}: ${e.message}`);   // best-effort
         }

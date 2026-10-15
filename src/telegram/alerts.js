@@ -519,6 +519,14 @@ const RULES = {
     render: p => `💳 <b>Выставлен счёт: ${formatRub(p.amount)}</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>\nПериод: ${esc(p.period || '?')}\nНомер: ${esc(p.billNumber || '—')}\nВ банке: ${p.tochkaPushed ? 'создан в Точке' : 'только локально'}`,
   },
   // 2026-10-15: задачи руководителю из личного кабинета розницы.
+  retail_purchase_quarantine: {
+    title: 'Покупка розницы в карантине',
+    priority: 'critical',
+    defaultOn: true,
+    cooldownSec: 300,
+    dedupeKey: p => 'retail_quar_' + (p.purchase_id || ''),
+    render: p => `🚨 <b>Покупка прокси в карантине</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>\nСервер/порт: ${esc(p.server || '?')} / ${esc(p.port || '?')}\nПричина: ${esc(p.reason || '—')}\nПокупка: ${esc(p.purchase_id || '—')}\n\nДеньги не списаны. Нужно проверить порт на боксе и выдать вручную или вернуть покупку.`,
+  },
   legal_onboarding: {
     title: 'Новый клиент-юрлицо: договор по ЭДО',
     priority: 'important',

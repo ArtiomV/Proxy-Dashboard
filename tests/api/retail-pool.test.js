@@ -82,7 +82,8 @@ function mkPurchasesDb() {
   };
 }
 
-function mountRetail({ poolRows = [], clients = [], tariffs = {}, settings = {}, fetchApiImpl, fetchAllResults, posted, user } = {}) {
+function mountRetail({ poolRows = [], clients = [], tariffs = {}, settings = {}, fetchApiImpl, fetchAllResults, posted, user, refusePost = false } = {}) {
+  const boxPorts = [];   // порты, реально созданные на «боксе» (видны в list_ports_json)
   const poolDb = mkPoolDb(poolRows);
   const purchasesDb = mkPurchasesDb();
   const cfg = { retail_enabled: true, retail_pool_servers: 'S1', retail_test_day_price: 100, ...settings };
@@ -98,10 +99,23 @@ function mountRetail({ poolRows = [], clients = [], tariffs = {}, settings = {},
     getSetting: (k, d) => (k in cfg ? cfg[k] : d),
     getMoscowNow: () => new Date(),
     findServer: () => SRV,
-    fetchApi: fetchApiImpl || (async () => ({})),
+    fetchApi: async (srv, path) => {
+      const base = fetchApiImpl ? await fetchApiImpl(srv, path) : {};
+      if (path === '/apix/list_ports_json') {
+        const out = { ...(base || {}) };
+        for (const c of boxPorts) out[c.imei] = [...(out[c.imei] || []), { portID: c.portID, portName: c.portName }];
+        return out;
+      }
+      return base;
+    },
     proxyConf: {
       getConfForm: async () => ({ ok: true, html: `<form><input name="portID" value="port_${Math.random().toString(36).slice(2, 8)}"><input name="proxy_password" value="pw"></form>` }),
-      postConfForm: async (_srv, path, formData) => { posted && posted.push({ path, formData }); return { ok: true }; },
+      postConfForm: async (_srv, path, formData) => {
+        posted && posted.push({ path, formData });
+        // ProxySmart не создаёт порт с пустым именем: отвечает 302 на форму, а клиент считает это ok.
+        if (!refusePost && String(formData.portName || '').trim()) boxPorts.push({ imei: (path.match(/imei=([^&]+)/) || [])[1], portID: formData.portID, portName: formData.portName });
+        return { ok: true };
+      },
       getConfAction: async () => ({ ok: true }),
     },
     proxySmart: { invalidateCache() {} },
@@ -166,7 +180,7 @@ describe('POST /api/admin/retail/pool/add', () => {
     expect(res.body.errors).toEqual([]);
     // add_port пошёл на СВОБОДНЫЙ модем, с пустым portName
     expect(posted[0].path).toBe('/conf/add_port?imei=imei_free');
-    expect(posted[0].formData.portName).toBe('');
+    expect(posted[0].formData.portName).toMatch(/^randomport\d+$/);   // не пустое: ProxySmart пустое имя игнорирует
     expect(poolDb._rows.some(r => r.status === 'free' && r.port_id === res.body.created[0])).toBe(true);
   });
 
@@ -194,6 +208,32 @@ describe('POST /api/admin/retail/pool/add', () => {
     expect(poolDb._rows.filter(r => r.status === 'free').length).toBe(3);
     const r2 = await router.topUpPool(3);
     expect(r2.servers.S1).toMatchObject({ free: 3, added: 0 });
+  });
+
+  it('ProxySmart «принял» форму, но порт не создал → в пул ничего не пишем (нет призрачных портов)', async () => {
+    const feed = async (srv, path) => path === '/apix/show_status_json'
+      ? [{ modem_details: { IMEI: 'imei_x', NICK: 'MD_X' }, net_details: HEALTHY }] : {};
+    const { app, poolDb } = mountRetail({ poolRows: [], fetchApiImpl: feed, refusePost: true });
+    const res = await request(app).post('/api/admin/retail/pool/add').send({ server: 'S1', count: 1 });
+    expect(res.body.created).toEqual([]);
+    expect(res.body.errors[0].reason).toMatch(/не создал порт/);
+    expect(poolDb._rows.length).toBe(0);
+  });
+
+  it('модем с техническим randomport-портом (без клиента) остаётся кандидатом; с клиентским — нет', async () => {
+    const feed = async (srv, path) => {
+      if (path === '/apix/show_status_json') return [
+        { modem_details: { IMEI: 'imei_rp', NICK: 'MD_RP' }, net_details: HEALTHY },
+        { modem_details: { IMEI: 'imei_cl', NICK: 'MD_CL' }, net_details: HEALTHY }];
+      if (path === '/apix/list_ports_json') return { imei_rp: [{ portID: 'prp', portName: 'randomport12' }], imei_cl: [{ portID: 'pcl', portName: 'u_client' }] };
+      return {};
+    };
+    const posted = [];
+    const { app } = mountRetail({ poolRows: [], fetchApiImpl: feed, posted });
+    const res = await request(app).post('/api/admin/retail/pool/add').send({ server: 'S1', count: 2 });
+    expect(res.body.created.length).toBe(1);
+    expect(posted[0].path).toBe('/conf/add_port?imei=imei_rp');
+    expect(res.body.errors[0].reason).toMatch(/больше нет/);
   });
 
   it('count вне 1..50 → 400', async () => {
@@ -398,7 +438,7 @@ describe('B6: POST /api/admin/assign_modem — пустой newPortName = отв
     return app;
   }
 
-  it('newPortName: "" → 200, portName ушёл пустым (отвязка, НЕ 400)', async () => {
+  it('newPortName: "" → 200, отвязка техническим именем randomport… (пустое имя ProxySmart игнорирует; НЕ 400)', async () => {
     const posted = [];
     const app = mountProxies(posted);
     const res = await request(app)
@@ -406,7 +446,7 @@ describe('B6: POST /api/admin/assign_modem — пустой newPortName = отв
       .send({ serverName: 'S1', portID: 'p1', newPortName: '' });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
-    expect(posted[0].formData.portName).toBe('');
+    expect(posted[0].formData.portName).toMatch(/^randomport\d+$/);
   });
 
   it('newPortName отсутствует (undefined) → 400', async () => {

@@ -119,8 +119,9 @@ r.post('/api/admin/assign_modem', authMiddleware, adminMiddleware, async (req, r
         }
       } catch (e) { /* ignore */ }
     }
-    // Apply the rename (пустая строка = отвязка, B6)
-    formData.portName = newPortName;
+    // Apply the rename. Пустая строка = отвязка (B6): ProxySmart пустое имя игнорирует
+    // (302 обратно на форму, порт не меняется), поэтому отвязываем техническим именем randomport….
+    formData.portName = newPortName || ('randomport' + String(Date.now()).slice(-8) + String(Math.floor(Math.random() * 90) + 10));
 
     const asPosted = await proxyConf.postConfForm(server, `/conf/edit_port/${portID}`, formData);
     if (!asPosted.ok) return res.status(502).json({ error: `ProxySmart не сохранил привязку (${asPosted.reason})` });
