@@ -352,7 +352,6 @@ function renderRetailPoolPorts(counts){
   };
   var h='<table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Сервер</th>'+
-    '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)">От, шт</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Порт</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Статус</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Клиент</th>'+
@@ -693,6 +692,7 @@ function renderTariffsAdmin(){
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Название</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Гео</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Сервер</th>'+
+    '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)">От, шт</th>'+
     '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)">₽/мес</th>'+
     '<th style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)">Флаги</th>'+
     '<th style="text-align:right;padding:6px 8px;border-bottom:1px solid var(--border)"></th>'+

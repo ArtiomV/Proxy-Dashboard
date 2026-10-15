@@ -79,8 +79,38 @@ describe('выбор физлицо / юрлицо', () => {
     expect(task.body).toContain('Диадок');
     expect(alerts.trigger).toHaveBeenCalledWith('legal_onboarding', expect.objectContaining({ inn: '7701234567', crm_task: true }));
     expect(db.prepare('SELECT manager_task FROM client_onboarding').get().manager_task).toBe('task-1');
-    // вернуться в «физлицо» самостоятельно нельзя
+    expect((await request(app).get('/api/client/onboarding')).body).toMatchObject({ locked: false, requisites: { inn: '7701234567' } });
+  });
+
+  it('реквизиты можно менять сколько угодно, пока договор не подписан; после подписания — 409', async () => {
+    await request(app).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: REQ });
+    const adm = mount('admin');
+    await request(adm).post('/api/admin/onboarding/c1').send({ contract_status: 'sent' });
+    const upd = await request(app).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: { ...REQ, bank_name: 'Другой банк' } });
+    expect(upd.body).toMatchObject({ ok: true, contractStatus: 'awaiting_template' });   // договор снова в работе
+    expect(crm.pushTask.mock.calls[1][1].title).toContain('Реквизиты изменены');
+    expect((await request(app).get('/api/client/onboarding')).body.requisites.bank_name).toBe('Другой банк');
+    await request(adm).post('/api/admin/onboarding/c1').send({ contract_status: 'signed' });
+    const locked = await request(app).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: REQ });
+    expect(locked.status).toBe(409);
+    expect(locked.body.code).toBe('LOCKED');
     expect((await request(app).post('/api/client/onboarding').send({ entity_type: 'individual' })).status).toBe(409);
+    expect((await request(app).get('/api/client/onboarding')).body).toMatchObject({ locked: true, contractStatus: 'signed' });
+  });
+
+  it('клиент, заведённый вручную: без договора реквизиты можно заполнить (в форме — данные из карточки), с договором — заблокированы', async () => {
+    clients[1].legalName = 'ООО Манюал'; clients[1].kpp = '770001001';
+    const b2b = mount('b2b');
+    expect((await request(b2b).get('/api/client/onboarding')).body).toMatchObject({ locked: false, requisites: { legal_name: 'ООО Манюал', inn: '7700000000' } });
+    clients[1].contractInfo = '№ 5';
+    expect((await request(b2b).get('/api/client/onboarding')).body).toMatchObject({ locked: true, contractStatus: 'signed' });
+    expect((await request(b2b).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: REQ })).status).toBe(409);
+  });
+
+  it('физлицо может передумать и стать юрлицом (и наоборот) до подписания', async () => {
+    await request(app).post('/api/client/onboarding').send({ entity_type: 'individual' });
+    expect((await request(app).post('/api/client/onboarding').send({ entity_type: 'legal', requisites: REQ })).body.ok).toBe(true);
+    expect((await request(app).post('/api/client/onboarding').send({ entity_type: 'individual' })).body.ok).toBe(true);
   });
 
   it('проверка реквизитов: ИНН, КПП у организации, р/с и БИК, контакт', async () => {
@@ -128,6 +158,18 @@ describe('справочник магазина', () => {
     expect(r.russia.geos).toEqual(['Москва', 'Казань']);
     expect(r.russia.types.length).toBeGreaterThan(0);
     expect(r.testDay).toMatchObject({ id: 9 });
+  });
+});
+
+describe('справочник магазина: деньги клиента', () => {
+  it('баланс и суточный расход = прокси × цена ступени ÷ дни месяца', async () => {
+    clients[0].balance = 1234.567; clients[0].tariffId = 1; clients[0].emailVerified = true;
+    const r = (await request(app).get('/api/client/shop_catalog')).body;
+    expect(r.balance).toBe(1234.57);
+    expect(r.currentGeo).toBe('MD');
+    expect(r.daysInMonth).toBeGreaterThanOrEqual(28);
+    expect(r.dailyCharge).toBe(0);            // портов пока нет (retailPoolDb не подключён в тесте)
+    expect(r.emailVerified).toBe(true);
   });
 });
 

@@ -206,3 +206,37 @@ describe('GET /api/public/status — история из кэша и модем�
     expect(md.days.map(d => d.checks)).toEqual([2, 2]);
   });
 });
+
+// 2026-10-15: история — один агрегатный запрос в worker-потоке (файловая БД),
+// дальше пересчитываются только вчера и сегодня.
+describe('GET /api/public/status — worker и инкрементальный пересчёт', () => {
+  it('файловая БД: сборка в потоке; новые замеры сегодняшних суток подхватываются, прошлые не пересчитываются', async () => {
+    const fs = require('fs'), os = require('os'), path = require('path');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'pstat-'));
+    const file = path.join(dir, 'd.db');
+    const dbf = new Database(file);
+    dbf.exec(`
+      CREATE TABLE modem_meta (server_name TEXT, imei TEXT, nick TEXT, deleted INTEGER DEFAULT 0, is_test_pool INTEGER DEFAULT 0);
+      CREATE TABLE modem_ping (id INTEGER PRIMARY KEY, ts TEXT, server TEXT, nick TEXT, latency_ms INTEGER, loss_pct INTEGER, ok INTEGER, measured_at TEXT);
+      CREATE INDEX idx_modem_ping_nick ON modem_ping(server, nick, ts);
+      CREATE TABLE modem_ping_state (server TEXT, nick TEXT, imei TEXT, quality TEXT, latency_ms INTEGER, loss_pct INTEGER, ok INTEGER, observed_at TEXT, measured_at TEXT, updated_at TEXT, PRIMARY KEY (server, nick));
+    `);
+    dbf.prepare('INSERT INTO modem_meta (server_name, imei, nick) VALUES (?,?,?)').run('S1', 'i1', 'MD_1');
+    const ins = dbf.prepare('INSERT INTO modem_ping (ts, server, nick, ok) VALUES (?,?,?,?)');
+    const day = (n) => new Date(Date.now() - n * 86400000).toISOString();
+    ins.run(day(5), 'S1', 'MD_1', 1); ins.run(day(5), 'S1', 'MD_1', 0);      // 5 дней назад: 50%
+    ins.run(day(0), 'S1', 'MD_1', 1);                                          // сегодня: 100%
+    const router = createPublicStatusRouter({ db: dbf, apiServers: [{ name: 'S1' }], SERVER_COUNTRIES: { S1: { country: 'MD' } }, warmup: false, knownModems: {} });
+    const a = express(); a.use(router);
+    await router._refreshHistory();
+    let md = (await request(a).get('/api/public/status')).body.components.find(c => c.id === 'mobile-md');
+    expect(md.days.map(d => d.checks)).toEqual([2, 1]);
+    expect(md.uptime60d).toBe(66.667);
+    // новый замер сегодня + «задним числом» замер 5 дней назад: прошлое НЕ пересчитывается (кэш), сегодня — да
+    ins.run(day(0), 'S1', 'MD_1', 0); ins.run(day(5), 'S1', 'MD_1', 1);
+    await router._refreshHistory();
+    md = (await request(a).get('/api/public/status')).body.components.find(c => c.id === 'mobile-md');
+    expect(md.days.map(d => d.checks)).toEqual([2, 2]);
+    dbf.close(); fs.rmSync(dir, { recursive: true, force: true });
+  });
+});

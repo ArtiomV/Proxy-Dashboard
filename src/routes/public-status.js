@@ -43,27 +43,54 @@ module.exports = function createPublicStatusRouter(deps) {
     return bound.has(server + '|' + nick) || (!!imei && bound.has(server + '|' + imei));
   }
 
-  // ── Кэш истории: key 'server|nick' → { finalizedBefore: 'YYYY-MM-DD', days: Map(day → {ok, n, checks}) }
+  // ── Кэш истории: key 'server|nick' → { days: Map(day → {ok, n, checks}) }
+  // 2026-10-15: сборка — ОДНИМ агрегатным запросом (GROUP BY server, nick, day)
+  // в worker-потоке; после первой сборки пересчитываются только вчера и сегодня.
   const _hist = new Map();
   let _histScope = new Set();   // модемы, прошедшие фильтр удалён/тест-пул в последнем проходе
   let _histBuilding = null;
   let _histStartedAt = 0;
-  let _stmtCandidates = null, _stmtRange = null;
+  let _histBuilt = false;
+  let _stmtCandidates = null, _stmtAgg = null;
 
   function _prep() {
-    if (_stmtRange) return;
+    if (_stmtCandidates) return;
     _stmtCandidates = db.prepare(`
       SELECT DISTINCT server_name AS server, nick FROM modem_meta
       WHERE nick IS NOT NULL AND TRIM(nick) <> ''
         AND (deleted IS NULL OR deleted = 0)
         AND (is_test_pool IS NULL OR is_test_pool = 0)
     `);
-    _stmtRange = db.prepare(`
-      SELECT substr(ts, 1, 10) AS day, SUM(ok) AS ok, COUNT(ok) AS n, COUNT(*) AS checks
-      FROM modem_ping
-      WHERE server = ? AND nick = ? AND ts >= ? AND ts < ?
-      GROUP BY substr(ts, 1, 10)
+    _stmtAgg = db.prepare(`
+      SELECT server, nick, substr(ts, 1, 10) AS day, SUM(ok) AS ok, COUNT(ok) AS n, COUNT(*) AS checks
+        FROM modem_ping WHERE ts >= ? AND ts < ? GROUP BY server, nick, day
     `);
+  }
+
+  // Агрегат за [from, to): в потоке; для БД в памяти (тесты) или при сбое потока — в процессе.
+  function _aggregate(from, to) {
+    const dbPath = db && db.name;
+    if (!dbPath || dbPath === ':memory:' || db.memory) return Promise.resolve(_stmtAgg.all(from, to));
+    const { Worker } = require('worker_threads');
+    return new Promise((resolve) => {
+      let done = false;
+      const fallback = (why) => {
+        if (done) return;
+        done = true;
+        if (logger && logger.warn) logger.warn('[PublicStatus] worker failed (' + why + ') — aggregating on main thread');
+        resolve(_stmtAgg.all(from, to));
+      };
+      let w;
+      try { w = new Worker(require('path').join(__dirname, 'public-status-worker.js'), { workerData: { dbPath, from, to } }); }
+      catch (e) { fallback(e.message); return; }
+      w.once('message', (m) => {
+        if (done) return;
+        if (!m || m.error || !Array.isArray(m.rows)) { fallback((m && m.error) || 'empty'); return; }
+        done = true; resolve(m.rows);
+      });
+      w.once('error', (e) => fallback(e.message));
+      w.once('exit', (code) => fallback('exit ' + code));
+    });
   }
 
   async function refreshHistory() {
@@ -72,26 +99,22 @@ module.exports = function createPublicStatusRouter(deps) {
     _histBuilding = (async () => {
       _prep();
       const nowMs = Date.now();
-      const today = _utcDay(nowMs);
       const cutoff = _utcDay(nowMs - HISTORY_DAYS * _dayMs);
       const tomorrowIso = _utcDay(nowMs + _dayMs) + 'T00:00:00.000Z';
+      // Первая сборка — весь период; дальше — вчера и сегодня (прошлые сутки неизменны).
+      const fromDay = _histBuilt ? _utcDay(nowMs - _dayMs) : cutoff;
       const servers = new Set((apiServers || []).map(s => s.name));
       const candidates = _stmtCandidates.all().filter(c => servers.has(c.server));
       _histScope = new Set(candidates.map(c => c.server + '|' + c.nick));
-      for (const c of candidates) {
-        const key = c.server + '|' + c.nick;
+      const rows = await _aggregate(fromDay + 'T00:00:00.000Z', tomorrowIso);
+      for (const row of rows) {
+        const key = row.server + '|' + row.nick;
         let h = _hist.get(key);
-        if (!h) { h = { finalizedBefore: cutoff, days: new Map() }; _hist.set(key, h); }
-        if (h.finalizedBefore < cutoff) h.finalizedBefore = cutoff;
-        // Прошедшие сутки (один раз), затем сегодняшние (каждый проход).
-        const from = h.finalizedBefore + 'T00:00:00.000Z';
-        for (const row of _stmtRange.all(c.server, c.nick, from, tomorrowIso)) {
-          h.days.set(row.day, { ok: Number(row.ok || 0), n: Number(row.n || 0), checks: Number(row.checks || 0) });
-        }
-        h.finalizedBefore = today;
-        for (const d of h.days.keys()) if (d < cutoff) h.days.delete(d);
-        await new Promise(resolve => setImmediate(resolve));
+        if (!h) { h = { days: new Map() }; _hist.set(key, h); }
+        h.days.set(row.day, { ok: Number(row.ok || 0), n: Number(row.n || 0), checks: Number(row.checks || 0) });
       }
+      for (const h of _hist.values()) for (const d of h.days.keys()) if (d < cutoff) h.days.delete(d);
+      _histBuilt = true;
     })().catch((e) => {
       if (logger && logger.warn) logger.warn('[PublicStatus] history refresh failed: ' + (e.message || e));
     }).finally(() => { _histBuilding = null; });

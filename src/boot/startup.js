@@ -26,7 +26,7 @@ function runStartup(d) {
     proxySmart, apiServers, findServer, saveSettings,
     trafficDb, trackingDb, aggregateHourlyTraffic, hourlyTraffic, mergeServerData,
     setHourlyAggSched, runSpeedMonitor, runLocationWanSpeed, runServerMetrics, runRetailGuard,
-    runBlockedPortCleanup, runIdleModemRotation, cto, runClientActivitySync, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
+    runBlockedPortCleanup, runIdleModemRotation, runRetailPoolTopUp, cto, runClientActivitySync, runDebtRestoreRecovery, runHttpCheck, runVolumeGuard, runCardPaymentRecovery,
     runSimExhaustion,   // 2026-09-26: sim-exhaustion
     saveClients, auditLog, authTokensDb,
     events,   // SSE (23.08): шина src/events.js — передаём в alerts.init
@@ -288,6 +288,15 @@ function runStartup(d) {
     .catch(e => logger.error('[BlockedPortCleanup] startup run failed:', e.message)), 8 * 60 * 1000);
   _intervals.push(setInterval(() => dbAudit.runJobAsync('BlockedPortCleanup', 'periodic', () => runBlockedPortCleanup())
     .catch(e => logger.error('[BlockedPortCleanup] periodic run failed:', e.message)), 30 * 60 * 1000));
+
+  // 15.10: подпитка пула розницы — свободные порты на пустых рабочих модемах.
+  // Первый прогон через 3 мин после старта (нужен прогретый фид), дальше раз в 10 мин.
+  if (runRetailPoolTopUp) {
+    setTimeout(() => dbAudit.runJobAsync('RetailPoolTopUp', 'startup', () => runRetailPoolTopUp())
+      .catch(e => logger.error('[RetailPoolTopUp] startup run failed:', e.message)), 3 * 60 * 1000);
+    _intervals.push(setInterval(() => dbAudit.runJobAsync('RetailPoolTopUp', 'periodic', () => runRetailPoolTopUp())
+      .catch(e => logger.error('[RetailPoolTopUp] periodic run failed:', e.message)), 10 * 60 * 1000));
+  }
 
   // 13.10: ИИ-директор — тик раз в 10 мин (проверка эффекта, срок следующего осмотра;
   // сам осмотр случается раз в 6–12 ч). Первый тик через 5 мин после старта.

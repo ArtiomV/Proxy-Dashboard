@@ -67,6 +67,9 @@ var retailConfig=null;
 function initRetailConfig(){
   fetch('/api/public/auth_config').then(function(r){return r.json()}).then(function(cfg){
     retailConfig=cfg||{};
+    // Кнопка «Связаться» — Telegram поддержки (настройка support_telegram), даже если розница выключена.
+    var ct=document.getElementById('navContact');
+    if(ct&&retailConfig.support_telegram){ct.href='https://t.me/'+retailConfig.support_telegram;ct.style.display=''}
     if(!retailConfig.retail_enabled)return;
     var links=document.getElementById('retailAuthLinks');
     if(links)links.style.display='';

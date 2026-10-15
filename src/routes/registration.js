@@ -270,12 +270,19 @@ module.exports = function createRegistrationRouter(deps) {
   // ── Публичный конфиг auth-форм (без auth): фронт прячет/показывает
   // регистрацию, Turnstile и TG-виджет по этим полям. НЕ 404 при выключенной
   // рознице — страницы login/register должны отличать «флаг выкл» от «нет роута».
+  // Контакт для кнопки «Связаться» в ЛК: @user, user или ссылка t.me/user → username.
+  function _supportTg() {
+    const v = String(getSetting('support_telegram', '') || '').trim();
+    const m = v.match(/^(?:https?:\/\/)?(?:t\.me\/|telegram\.me\/)?@?([A-Za-z0-9_]{4,32})\/?$/);
+    return m ? m[1] : '';
+  }
   r.get('/api/public/auth_config', (req, res) => {
     if (!getSetting('retail_enabled', false)) {
-      return res.json({ retail_enabled: false, turnstile_site_key: '', telegram_bot_username: '', telegram_oidc_enabled: false });
+      return res.json({ retail_enabled: false, turnstile_site_key: '', telegram_bot_username: '', telegram_oidc_enabled: false, support_telegram: _supportTg() });
     }
     res.json({
       retail_enabled: true,
+      support_telegram: _supportTg(),
       turnstile_site_key: getSetting('turnstile_site_key', ''),
       telegram_bot_username: getSetting('telegram_bot_username', ''), // нет в SETTINGS_DEFAULTS — default ''
       telegram_oidc_enabled: !!_oidcCreds().clientId, // OIDC Login взамен deprecated embed-виджета

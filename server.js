@@ -1833,6 +1833,9 @@ const SETTINGS_DEFAULTS = {
   // WP5 (B2C Э3): пороги админ-алертов розницы (alerts.js retail_bulk_buy / retail_pool_low)
   retail_bulk_buy_threshold: 3,      // leased-портов у одного аккаунта → алерт «массовая покупка»
   retail_pool_min_free: 3,           // свободных портов на боксе < N → алерт «пул на исходе»
+  retail_pool_target_free: 5,        // 15.10: автоподпитка — держать столько свободных портов на каждом боксе розницы
+  retail_pool_autotopup: true,       // 15.10: создавать свободные порты на пустых рабочих модемах автоматически
+  support_telegram: '',              // 15.10: Telegram для кнопки «Связаться» в ЛК (@user или t.me/user)
   // Шаринг (15.08): когда free-порты кончились — создаём новый порт на модеме
   // якорного клиента. max=1 → шаринг выкл. anchor — ЛОГИН клиента (u_…).
   retail_max_clients_per_modem: 1,   // макс клиентских портов на одной SIM
@@ -3369,7 +3372,7 @@ app.use(require('./src/routes/client-onboarding')({
 }));
 // Покупка прокси розницей (WP2): buy_proxy + тест-день + состояние пула.
 // Э2: fetchAllServersDataCached — legacy_preview пула.
-app.use(require('./src/routes/retail')({
+const retailRouter = require('./src/routes/retail')({
   logger, authMiddleware, adminMiddleware,
   clients, saveClients,
   tariffsDb, retailPoolDb, retailPurchasesDb,
@@ -3387,7 +3390,13 @@ app.use(require('./src/routes/retail')({
   // B2C Э3 (WP5): уведомление клиенту о выдаче прокси. _clientNotify объявлен
   // ниже (const, TDZ) — ленивый шим, как mailer в client-portal выше.
   notifyClient: (...args) => _clientNotify.notifyClient(...args),
-}));
+});
+app.use(retailRouter);
+// 15.10: подпитка пула розницы — держим свободные порты на пустых модемах.
+const runRetailPoolTopUp = async () => {
+  if (!getSetting('retail_enabled', false) || !getSetting('retail_pool_autotopup', true)) return { skipped: true };
+  return retailRouter.topUpPool(Math.max(0, Number(getSetting('retail_pool_target_free', 5)) || 0));
+};
 
 // WP6 (Этап 7): промокоды розницы — проверка для ЛК + админский CRUD.
 app.use(require('./src/routes/promo-codes')({
@@ -4596,6 +4605,7 @@ const httpServer = IS_TEST ? null : app.listen(PORT, () => {
     runDebtRestoreRecovery: _debtBlock.retryPendingRestores,
     runBlockedPortCleanup,   // 21.08: автоудаление портов заблокированных после hold
     runIdleModemRotation,   // 13.10: авторотация выключена у модемов без клиента
+    runRetailPoolTopUp,   // 15.10: подпитка свободных портов пула розницы
     cto,   // 13.10: ИИ-директор (tick + решения из Telegram)
     runClientActivitySync,   // снимок неактивных клиентов для CRM-агента
     runHttpCheck: () => httpCheck.runOnce(),   // A2 (23.08): HTTP-чек через прокси

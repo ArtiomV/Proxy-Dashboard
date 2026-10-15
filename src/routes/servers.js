@@ -645,6 +645,13 @@ r.put('/api/admin/settings', authMiddleware, adminMiddleware, async (req, res) =
   // 0 = антифрод-алерт «массовая покупка» выключен.
   if (req.body.retail_bulk_buy_threshold != null) patch.retail_bulk_buy_threshold = Math.max(0, Math.min(100, parseInt(req.body.retail_bulk_buy_threshold) || 0));
   if (req.body.retail_pool_min_free != null)      patch.retail_pool_min_free      = Math.max(0, Math.min(1000, parseInt(req.body.retail_pool_min_free) || 0));
+  if (req.body.retail_pool_target_free != null)  patch.retail_pool_target_free  = Math.max(0, Math.min(50, parseInt(req.body.retail_pool_target_free) || 0));
+  if (req.body.retail_pool_autotopup != null)     patch.retail_pool_autotopup     = !!req.body.retail_pool_autotopup;
+  if (req.body.support_telegram != null) {
+    const tg = String(req.body.support_telegram).trim();
+    if (tg && !/^(?:https?:\/\/)?(?:t\.me\/|telegram\.me\/)?@?[A-Za-z0-9_]{4,32}\/?$/.test(tg)) return res.status(400).json({ error: 'support_telegram: ожидается @username или ссылка t.me/username' });
+    patch.support_telegram = tg;
+  }
   // Шаринг розницы (15.08): достройка портов на модемах якорного клиента.
   if (req.body.retail_max_clients_per_modem != null) patch.retail_max_clients_per_modem = Math.max(1, Math.min(20, parseInt(req.body.retail_max_clients_per_modem) || 1));
   if (req.body.retail_share_anchor_login != null) {

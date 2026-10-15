@@ -632,6 +632,9 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
           <div class="set-card">
             <div class="set-row"><div><div class="set-row-t">Алерт: массовая покупка</div><div class="set-row-d">Столько арендованных портов у одного аккаунта → алерт «массовая покупка» (антифрод: мультиаккаунт/перепродажа). 0 = выкл</div></div><div class="set-inp"><input id="retailBulkBuyThresholdInput" type="number" min="0" max="100"><span>портов</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Алерт: пул на исходе</div><div class="set-row-d">Свободных портов на боксе розницы меньше N → алерт (0 = выкл)</div></div><div class="set-inp"><input id="retailPoolMinFreeInput" type="number" min="0" max="1000"><span>шт</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Автоподпитка пула</div><div class="set-row-d">Создавать свободные порты на пустых рабочих модемах (есть IP, SIM OK, пинг без потерь), чтобы клиент не упирался в «закончились»</div></div><div class="set-inp"><input id="retailPoolAutotopupInput" type="checkbox"></div></div>
+            <div class="set-row"><div><div class="set-row-t">Цель: свободных портов</div><div class="set-row-d">Сколько свободных портов держать на каждом боксе розницы (подпитка раз в 10 минут)</div></div><div class="set-inp"><input id="retailPoolTargetFreeInput" type="number" min="0" max="50"><span>шт</span></div></div>
+            <div class="set-row"><div><div class="set-row-t">Связаться: Telegram</div><div class="set-row-d">Кнопка «Связаться с нами» в личном кабинете: @username или ссылка t.me/…</div></div><div class="set-inp"><input id="supportTelegramInput" type="text" maxlength="100" placeholder="@username" style="width:160px"></div></div>
             <div class="set-row"><div><div class="set-row-t">Антифрод: хиты до саспенда</div><div class="set-row-d">Обращений к бан-листу на порту розницы → авто-саспенд порта (доменный контроль; 0 = выкл)</div></div><div class="set-inp"><input id="domainGuardSuspendHitsInput" type="number" min="0" max="1000"><span>хитов</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Антифрод: strikes до блока</div><div class="set-row-d">Столько нарушений AUP → аккаунт блокируется (blocked=1), сессии убиваются</div></div><div class="set-inp"><input id="abuseStrikesBlockInput" type="number" min="1" max="100"><span>шт</span></div></div>
             <div class="set-row"><div><div class="set-row-t">Антифрод: аккаунтов с одного IP</div><div class="set-row-d">Больше N розничных аккаунтов с одного IP регистрации → отказ (0 = выкл)</div></div><div class="set-inp"><input id="retailMaxAccountsPerIpInput" type="number" min="0" max="100"><span>шт</span></div></div>
@@ -1670,7 +1673,7 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
 <script src="/js/admin/settings.js?v=1001a"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0927b"></script>
-<script src="/js/admin.js?v=1015b"></script>
+<script src="/js/admin.js?v=1015c"></script>
 <script src="/js/admin/sse.js?v=0823k"></script>
 </body>
 </html>

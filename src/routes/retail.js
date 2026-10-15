@@ -184,7 +184,16 @@ module.exports = function createRetailRouter(deps) {
     // (2026-10-15). Берём первый бокс списка со свободным портом пула.
     const tariffServers = String(tariff.server || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
     const serverCandidates = tariffServers.length ? tariffServers : poolServers;
-    const serverName = serverCandidates.find(s => retailPoolDb.nextFree(s)) || serverCandidates[0];
+    let serverName = serverCandidates.find(s => retailPoolDb.nextFree(s));
+    if (!serverName) {
+      // Пул пуст везде — пробуем поднять порт на свободном модеме (по порядку серверов),
+      // а не отвечать «закончились», пока админ не нажмёт «добавить порты».
+      for (const cand of serverCandidates) {
+        try { const g = await createFreePorts(cand, 1, 'system:buy_on_demand'); if (g.created.length) { serverName = cand; break; } }
+        catch (e) { logger.warn(`[Retail] on-demand порт ${cand}: ${e.message}`); }
+      }
+    }
+    serverName = serverName || serverCandidates[0];
     if (!serverName) {
       retailPurchasesDb.setStatus(purchaseId, 'failed', 'pool_not_configured');
       return res.status(503).json({ error: 'Пул розницы не настроен' });
@@ -434,7 +443,15 @@ module.exports = function createRetailRouter(deps) {
     const tierServers = String(tier.server || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
     const poolServers = String(getSetting('retail_pool_servers', '')).split(',').map(x => x.trim()).filter(Boolean);
     const servers = tierServers.length ? tierServers : poolServers;
-    const free = retailPoolDb.byStatus('free').filter(p => !servers.length || servers.includes(p.server)).length;
+    const countFree = () => retailPoolDb.byStatus('free').filter(p => !servers.length || servers.includes(p.server)).length;
+    let free = countFree();
+    // Не хватает свободных портов — поднимаем недостающие на пустых модемах серверов тарифа.
+    for (const srv of servers) {
+      if (free >= quantity) break;
+      try { await createFreePorts(srv, Math.min(MAX_BATCH, quantity - free), 'system:buy_on_demand'); }
+      catch (e) { logger.warn(`[Retail] on-demand порты ${srv}: ${e.message}`); }
+      free = countFree();
+    }
     if (free < quantity) {
       return res.status(409).json({ error: free ? `Сейчас свободно ${free} прокси этой страны — уменьшите количество` : 'Свободные прокси этой страны закончились — попробуйте позже', code: 'POOL_SHORT', available: free });
     }
@@ -486,73 +503,104 @@ module.exports = function createRetailRouter(deps) {
   // (онлайн-модем без клиентских портов) → add_port с ПУСТЫМ portName
   // (де-факто выключен, B6) → apply_port → строка retail_pool free.
   // Операция длинная (до 2–3 мин на 10 портов) — идём последовательно.
+  // Свободные порты пула на пустых модемах сервера. 2026-10-15: логика вынесена
+  // из админского pool/add — её же зовут автоподпитка (retail-pool-topup) и
+  // покупка при пустом пуле. Кандидат: онлайн-модем БЕЗ портов с клиентом,
+  // реально работающий (есть внешний IP, SIM OK, потери пинга не 100%, не в
+  // ротации) и без free-строки пула. Сначала с меньшим числом портов.
+  async function createFreePorts(serverName, count, actor) {
+    const server = findServer(serverName);
+    if (!server) return { created: [], errors: [{ reason: 'Server not found' }], candidates: 0 };
+    const created = [], errors = [];
+    const statusRaw = await fetchApi(server, '/apix/show_status_json');
+    const portsData = await fetchApi(server, '/apix/list_ports_json');
+    const status = Array.isArray(statusRaw) ? statusRaw : (statusRaw && statusRaw.modems) || [];
+    // portID → IMEI: не стакаем free-порты пула на один модем.
+    const poolFreeImeis = new Set();
+    for (const row of retailPoolDb.byStatus('free')) {
+      if (row.server !== serverName) continue;
+      for (const [imei, plist] of Object.entries(portsData || {})) {
+        if ((plist || []).some(p => p && p.portID === row.port_id)) { poolFreeImeis.add(imei); break; }
+      }
+    }
+    const candidates = [];
+    for (const m of status) {
+      const md = (m && m.modem_details) || {}, nd = (m && m.net_details) || {};
+      const imei = md.IMEI;
+      if (!imei || poolFreeImeis.has(imei)) continue;
+      if (nd.IS_ONLINE !== 'yes') continue;
+      if (!String(nd.EXT_IP || '').trim()) continue;                        // нет внешнего IP — выдавать нечего
+      if (nd.SimStatus && !/ok/i.test(String(nd.SimStatus))) continue;      // SIM не в порядке
+      if (/100\s*%\s*loss/i.test(String(nd.ping_stats || ''))) continue;     // канал не отвечает
+      if (m.IS_ROTATED === 'true' || m.IS_ROTATED === true || nd.IS_ROTATED === 'true') continue;
+      const ports = (portsData && portsData[imei]) || [];
+      if (ports.some(p => p && (p.portName || '').trim())) continue;        // занят клиентом
+      candidates.push({ imei, nick: md.NICK, ports: ports.length });
+    }
+    candidates.sort((a, b) => a.ports - b.ports);
+    for (let i = 0; i < count; i++) {
+      const cand = candidates[i];
+      if (!cand) { errors.push({ reason: `Свободных модемов на ${serverName} больше нет (нужно ${count}, доступно ${candidates.length})` }); break; }
+      try {
+        // Создание порта — та же механика store_port (proxies-ports.js):
+        // форма add_port → portName='' → POST → apply_port.
+        const addForm = await proxyConf.getConfForm(server, `/conf/add_port?imei=${cand.imei}`);
+        if (!addForm.ok) throw new Error(`add_port form: ${addForm.reason}`);
+        const formData = parseHtmlInputFields(addForm.html);
+        if (!formData.portID) throw new Error('add_port form returned no portID');
+        formData.portName = '';   // пустой portName = порт выключен, ждёт выдачи (B6)
+        const posted = await proxyConf.postConfForm(server, `/conf/add_port?imei=${cand.imei}`, formData);
+        if (!posted.ok) throw new Error(`add_port post: ${posted.reason}`);
+        try { await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(formData.portID)}`); } catch (e) {
+          logger.warn(`[RetailPool] apply_port ${formData.portID}: ${e.message}`);   // best-effort
+        }
+        retailPoolDb.insertFree(serverName, formData.portID);
+        created.push(formData.portID);
+        auditLog(actor || 'system', 'retail_pool_add', { server: serverName, imei: cand.imei, nick: cand.nick, portId: formData.portID });
+      } catch (e) {
+        errors.push({ imei: cand.imei, reason: e.message });
+      }
+    }
+    if (created.length) proxySmart.invalidateCache();
+    return { created, errors, candidates: candidates.length };
+  }
+
+  // Подпитка: держим на каждом сервере розницы не меньше `target` свободных портов.
+  // Возвращает { servers: { S1: {free, added, errors} } }. Вызывает фоновая задача.
+  async function topUpPool(target, perRun = 5) {
+    const poolServers = String(getSetting('retail_pool_servers', '')).split(',').map(s => s.trim()).filter(Boolean);
+    const out = {};
+    for (const serverName of poolServers) {
+      const free = retailPoolDb.byStatus('free').filter(p => p.server === serverName).length;
+      if (free >= target) { out[serverName] = { free, added: 0 }; continue; }
+      try {
+        const res = await createFreePorts(serverName, Math.min(perRun, target - free), 'system:pool_topup');
+        out[serverName] = { free, added: res.created.length, candidates: res.candidates, errors: res.errors.length };
+        if (res.created.length) logActivity('modem', 'info', 'retail_pool_topup', serverName, `Подпитка пула: +${res.created.length} портов (было свободно ${free}, цель ${target})`, {});
+      } catch (e) {
+        out[serverName] = { free, added: 0, error: e.message };
+        logger.warn(`[RetailPool] подпитка ${serverName}: ${e.message}`);
+      }
+    }
+    return { servers: out };
+  }
+  r.topUpPool = topUpPool;
+
   r.post('/api/admin/retail/pool/add', authMiddleware, deps.adminMiddleware, async (req, res) => {
     if (!getSetting('retail_enabled', false)) return res.status(404).json({ error: 'Not found' });
     const { server: serverName } = req.body || {};
     const count = Math.floor(Number(req.body && req.body.count));
     if (!serverName) return res.status(400).json({ error: 'server required' });
     if (!Number.isInteger(count) || count < 1 || count > 50) return res.status(400).json({ error: 'count: целое 1..50' });
-    const server = findServer(serverName);
-    if (!server) return res.status(400).json({ error: 'Server not found' });
-
-    const created = [], errors = [];
+    if (!findServer(serverName)) return res.status(400).json({ error: 'Server not found' });
     try {
-      // Живой снимок бокса: все модемы + все порты (spare-эвристика failover.js).
-      const statusRaw = await fetchApi(server, '/apix/show_status_json');
-      const portsData = await fetchApi(server, '/apix/list_ports_json');
-      const status = Array.isArray(statusRaw) ? statusRaw : (statusRaw && statusRaw.modems) || [];
-      // portID → IMEI: не стакаем free-порты пула на один модем.
-      const poolFreeImeis = new Set();
-      for (const row of retailPoolDb.byStatus('free')) {
-        if (row.server !== serverName) continue;
-        for (const [imei, plist] of Object.entries(portsData || {})) {
-          if ((plist || []).some(p => p && p.portID === row.port_id)) { poolFreeImeis.add(imei); break; }
-        }
-      }
-      // Свободный IMEI: онлайн-модем, ни одного порта с непустым portName,
-      // без free-строки пула. Сначала совсем пустые (меньше портов — раньше).
-      const candidates = [];
-      for (const m of status) {
-        const imei = m && m.modem_details && m.modem_details.IMEI;
-        if (!imei || poolFreeImeis.has(imei)) continue;
-        const online = m.net_details && m.net_details.IS_ONLINE === 'yes';
-        if (!online) continue;
-        const ports = (portsData && portsData[imei]) || [];
-        if (ports.some(p => p && (p.portName || '').trim())) continue;   // занят клиентом
-        candidates.push({ imei, ports: ports.length });
-      }
-      candidates.sort((a, b) => a.ports - b.ports);
-
-      for (let i = 0; i < count; i++) {
-        const cand = candidates[i];
-        if (!cand) { errors.push({ reason: `Свободных модемов на ${serverName} больше нет (нужно ${count}, доступно ${candidates.length})` }); break; }
-        try {
-          // Создание порта — та же механика store_port (proxies-ports.js):
-          // форма add_port → portName='' → POST → apply_port.
-          const addForm = await proxyConf.getConfForm(server, `/conf/add_port?imei=${cand.imei}`);
-          if (!addForm.ok) throw new Error(`add_port form: ${addForm.reason}`);
-          const formData = parseHtmlInputFields(addForm.html);
-          if (!formData.portID) throw new Error('add_port form returned no portID');
-          formData.portName = '';   // пустой portName = порт выключен, ждёт выдачи (B6)
-          const posted = await proxyConf.postConfForm(server, `/conf/add_port?imei=${cand.imei}`, formData);
-          if (!posted.ok) throw new Error(`add_port post: ${posted.reason}`);
-          try { await fetchApi(server, `/apix/apply_port?arg=${encodeURIComponent(formData.portID)}`); } catch (e) {
-            logger.warn(`[RetailPool] apply_port ${formData.portID}: ${e.message}`);   // best-effort
-          }
-          retailPoolDb.insertFree(serverName, formData.portID);
-          created.push(formData.portID);
-          auditLog(req.user.login, 'retail_pool_add', { server: serverName, imei: cand.imei, portId: formData.portID, ip: getClientIp(req) });
-        } catch (e) {
-          errors.push({ imei: cand.imei, reason: e.message });
-        }
-      }
-      proxySmart.invalidateCache();
+      const { created, errors } = await createFreePorts(serverName, count, req.user.login);
       logActivity('modem', 'info', 'retail_pool_add', serverName,
         `Пул розницы: создано ${created.length} портов (запрошено ${count})`, { created, errors: errors.length });
       res.json({ ok: true, created, errors });
     } catch (e) {
       logger.error('[RetailPool] add failed: ' + e.message);
-      res.status(502).json({ error: 'Pool add failed', details: e.message, created, errors });
+      res.status(502).json({ error: 'Pool add failed', details: e.message, created: [], errors: [] });
     }
   });
 

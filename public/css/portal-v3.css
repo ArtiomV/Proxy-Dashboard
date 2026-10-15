@@ -606,3 +606,39 @@ input[type=date].v3-input{color-scheme:light}
 .v3-apidocs .lang-code.active .code-block{border-radius:0 10px 10px 10px}
 .v3-apidocs .code-block .cb-copy{position:absolute;top:8px;right:8px;background:rgba(255,255,255,.08);border:none;color:var(--v3-dark-text);cursor:pointer;font-size:10.5px;font-weight:600;font-family:inherit;padding:3px 10px;border-radius:6px}
 .v3-apidocs .code-block .cb-copy:hover{background:var(--v3-accent);color:#fff}
+
+/* 2026-10-15: кнопка «Купить прокси» наверху меню, «Связаться», магазин и баланс */
+.nav-tabs .nav-tab.nav-buy{background:var(--accent);color:#fff;font-weight:600;margin-bottom:6px}
+.nav-tabs .nav-tab.nav-buy .nav-ic{color:#fff}
+.nav-tabs .nav-tab.nav-buy:hover{background:var(--accent);color:#fff;filter:brightness(1.08)}
+.nav-tabs .nav-tab.nav-buy.active{background:var(--accent);color:#fff}
+.nav-tabs .nav-tab.nav-buy.active::before{display:none}
+.nav-tab.nav-contact{text-decoration:none;margin-top:auto}
+.v3-shop{display:grid;grid-template-columns:minmax(0,1.45fr) minmax(300px,1fr);gap:12px;align-items:start}
+@media(max-width:900px){.v3-shop{grid-template-columns:1fr}}
+.v3-shop-side{position:sticky;top:12px}
+@media(max-width:900px){.v3-shop-side{position:static}}
+.v3-bal{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:12px}
+.v3-bal .tiles{flex:1;min-width:260px;display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+.v3-bal .tile{background:var(--v3-sunken);border-radius:10px;padding:10px 12px;min-width:0}
+.v3-bal .tile .l{font-size:10px;color:var(--v3-faint);text-transform:uppercase;letter-spacing:.05em;font-weight:600;margin-bottom:3px}
+.v3-bal .tile .v{font-size:19px;font-weight:700;color:var(--v3-ink);font-feature-settings:'tnum';white-space:nowrap}
+.v3-bal .tile .v.bad{color:var(--v3-red)}.v3-bal .tile .v.warn{color:var(--v3-amber)}.v3-bal .tile .v.good{color:var(--v3-green)}
+.v3-step{display:flex;align-items:center;gap:8px;margin:0 0 10px;font-size:12px;font-weight:700;color:var(--v3-ink)}
+.v3-step .n{width:20px;height:20px;border-radius:50%;background:var(--v3-accent);color:#fff;font-size:11px;display:inline-flex;align-items:center;justify-content:center;flex-shrink:0}
+.v3-geos{display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:10px;margin-bottom:16px}
+.v3-geo{cursor:pointer;border:1.5px solid var(--v3-line-2);background:var(--v3-surface);border-radius:12px;padding:12px 14px;text-align:left;font:inherit;color:var(--v3-text);transition:border-color .12s,background .12s}
+.v3-geo:hover{border-color:var(--v3-accent)}
+.v3-geo.on{border-color:var(--v3-accent);background:var(--v3-band)}
+.v3-geo .t{font-size:14px;font-weight:700;color:var(--v3-ink)}.v3-geo .s{font-size:11.5px;color:var(--v3-muted);margin-top:3px}.v3-geo .p{font-size:12px;margin-top:8px;color:var(--v3-ink);font-weight:600}
+.v3-qty{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px}
+.v3-qty button{cursor:pointer;min-width:46px;padding:7px 12px;border-radius:8px;border:1px solid var(--v3-line-2);background:var(--v3-surface);font:inherit;font-size:12.5px;font-weight:600;color:var(--v3-text)}
+.v3-qty button:hover{border-color:var(--v3-accent)}.v3-qty button.on{background:var(--v3-accent);border-color:var(--v3-accent);color:#fff}
+.v3-ladder{display:grid;gap:3px;margin-top:4px}
+.v3-ladder .r{display:flex;justify-content:space-between;gap:10px;font-size:12px;padding:5px 8px;border-radius:7px;color:var(--v3-muted)}
+.v3-ladder .r.on{background:var(--v3-accent-dim);color:var(--v3-ink);font-weight:600}
+.v3-sumrows{display:grid;gap:7px;margin:6px 0 12px}
+.v3-sumrows .r{display:flex;justify-content:space-between;gap:10px;font-size:12.5px;color:var(--v3-muted)}
+.v3-sumrows .r b{color:var(--v3-ink);font-feature-settings:'tnum'}
+.v3-sumrows .r.total{border-top:1px solid var(--v3-line);padding-top:9px;font-size:13.5px;color:var(--v3-ink);font-weight:700}
+.v3-shop-cta{width:100%;justify-content:center;padding:11px 14px;font-size:13.5px}

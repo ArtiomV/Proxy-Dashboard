@@ -331,6 +331,9 @@ function loadSettings(){
     var rrl=document.getElementById('retailRegLimitInput');if(rrl)rrl.value=s.retail_reg_limit_per_ip_day||10;
     var rbb=document.getElementById('retailBulkBuyThresholdInput');if(rbb)rbb.value=s.retail_bulk_buy_threshold!=null?s.retail_bulk_buy_threshold:3;
     var rpf=document.getElementById('retailPoolMinFreeInput');if(rpf)rpf.value=s.retail_pool_min_free!=null?s.retail_pool_min_free:3;
+    var rat=document.getElementById('retailPoolAutotopupInput');if(rat)rat.checked=s.retail_pool_autotopup!==false;
+    var rtf=document.getElementById('retailPoolTargetFreeInput');if(rtf)rtf.value=s.retail_pool_target_free!=null?s.retail_pool_target_free:5;
+    var stg=document.getElementById('supportTelegramInput');if(stg)stg.value=s.support_telegram||'';
     // Шаринг портов (15.08): лимит на SIM + якорный клиент
     var rmc=document.getElementById('retailMaxClientsPerModemInput');if(rmc)rmc.value=s.retail_max_clients_per_modem!=null?s.retail_max_clients_per_modem:1;
     var rsa=document.getElementById('retailShareAnchorLoginInput');if(rsa)rsa.value=s.retail_share_anchor_login||'';
@@ -418,6 +421,9 @@ function saveRetailSettings(){
     retail_reg_limit_per_ip_day:_num('retailRegLimitInput',10,1,1000),
     retail_bulk_buy_threshold:_num('retailBulkBuyThresholdInput',3,0,100),
     retail_pool_min_free:_num('retailPoolMinFreeInput',0,0,1000),
+    retail_pool_autotopup:!!(document.getElementById('retailPoolAutotopupInput')||{}).checked,
+    retail_pool_target_free:_num('retailPoolTargetFreeInput',5,0,50),
+    support_telegram:((document.getElementById('supportTelegramInput')||{}).value||'').trim(),
     retail_max_clients_per_modem:_num('retailMaxClientsPerModemInput',1,1,20),
     retail_share_anchor_login:((document.getElementById('retailShareAnchorLoginInput')||{}).value||'').trim(),
     domain_guard_suspend_hits:_num('domainGuardSuspendHitsInput',1,0,1000),

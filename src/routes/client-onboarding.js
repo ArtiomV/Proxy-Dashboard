@@ -84,15 +84,25 @@ module.exports = function createClientOnboardingRouter(deps) {
     catch (e) { logger.warn('[Onboarding] задача в CRM не создана: ' + e.message); return null; }
   }
 
+  // Реквизиты можно менять, пока договор не подписан (2026-10-15). Подписан —
+  // статус «signed» в анкете, либо у клиента заведён договор вручную (номер/дата).
+  function _locked(c, row) {
+    if (row) return row.contract_status === 'signed';
+    return !!(c.contractInfo || c.contractDate);
+  }
+
   r.get('/api/client/onboarding', authMiddleware, (req, res) => {
     const c = _clientOf(req);
     if (!c) return res.status(404).json({ error: 'Client not found' });
     const row = _row(c.id);
+    // Анкеты нет, а реквизиты в карточке есть (клиент заведён вручную) — подставляем их в форму.
+    const fromCard = (c.inn || c.legalName) ? { legal_name: c.legalName || '', inn: c.inn || '', kpp: c.kpp || '', legal_address: c.address || '' } : null;
     res.json({
       needsChoice: _needsChoice(c, row),
       entityType: row ? row.entity_type : (c.clientType === 'legal' ? 'legal' : null),
-      contractStatus: row ? row.contract_status : 'none',
-      requisites: row ? JSON.parse(row.requisites_json || '{}') : null,
+      contractStatus: row ? row.contract_status : (c.contractInfo || c.contractDate ? 'signed' : 'none'),
+      locked: _locked(c, row),
+      requisites: row ? JSON.parse(row.requisites_json || '{}') : fromCard,
     });
   });
 
@@ -105,18 +115,20 @@ module.exports = function createClientOnboardingRouter(deps) {
       return res.status(400).json({ error: issue.message, field: (issue.path || []).slice(-1)[0] || null });
     }
     const existing = _row(c.id);
-    if (existing && existing.entity_type === 'legal' && parsed.data.entity_type === 'individual') {
-      return res.status(409).json({ error: 'Анкета юрлица уже отправлена — сменить тип можно через поддержку' });
+    if (_locked(c, existing)) {
+      return res.status(409).json({ error: 'Договор уже подписан — реквизиты меняются через менеджера', code: 'LOCKED' });
     }
     const body = parsed.data;
     if (body.entity_type === 'individual') {
       db.prepare(`INSERT INTO client_onboarding (client_id, entity_type) VALUES (?, 'individual')
-                  ON CONFLICT(client_id) DO UPDATE SET entity_type='individual', updated_at=datetime('now')`).run(c.id);
+                  ON CONFLICT(client_id) DO UPDATE SET entity_type='individual', contract_status='none', updated_at=datetime('now')`).run(c.id);
       auditLog(c.login, 'onboarding_individual', { ip: getClientIp(req) });
       return res.json({ ok: true, entityType: 'individual' });
     }
 
     const q = body.requisites;
+    const isUpdate = !!(existing && existing.entity_type === 'legal');
+    // Изменение после того, как договор уже подготовлен/отправлен, возвращает его в работу.
     db.prepare(`INSERT INTO client_onboarding (client_id, entity_type, requisites_json, contract_status)
                 VALUES (?, 'legal', ?, 'awaiting_template')
                 ON CONFLICT(client_id) DO UPDATE SET entity_type='legal', requisites_json=excluded.requisites_json,
@@ -137,7 +149,7 @@ module.exports = function createClientOnboardingRouter(deps) {
       'Что сделать: подготовить и выслать договор по ЭДО, связаться с клиентом. После подписания договора — перевести клиента в «Юрлицо» в карточке клиента в админке.',
     ].filter(x => x !== null);
     const taskId = await _managerTask({
-      title: `Договор по ЭДО: ${q.legal_name} (ИНН ${q.inn})`,
+      title: `${isUpdate ? 'Реквизиты изменены, договор заново' : 'Договор по ЭДО'}: ${q.legal_name} (ИНН ${q.inn})`,
       body: lines.join('\n'), personName: q.contact_name, email: q.contact_email || c.email, phone: q.contact_phone,
       opportunityName: `Юрлицо из ЛК: ${q.legal_name}`, dueInHours: 24,
     });
@@ -165,8 +177,15 @@ module.exports = function createClientOnboardingRouter(deps) {
     const c = _clientOf(req);
     const owned = c && retailPoolDb ? retailPoolDb.byClient(c.id).filter(p => p.status === 'leased').length : 0;
     const cur = c && c.tariffId != null ? tariffsDb.publicActive().find(t => t.id === c.tariffId) : null;
+    // Деньги клиента: баланс и текущий суточный расход (прокси × цена ступени ÷ дней месяца).
+    const now = new Date();
+    const dim = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+    const dailyCharge = cur && cur.duration_hours == null ? Math.round((cur.price / dim) * owned * 100) / 100 : 0;
     res.json({
       owned, currentGeo: cur ? String(cur.geo || '').toUpperCase() : null,
+      balance: c ? Math.round((c.balance || 0) * 100) / 100 : 0,
+      dailyCharge, daysInMonth: dim,
+      emailVerified: !!(c && c.emailVerified),
       testDayAvailable: !!(c && !c.testUsed),
       europe: geos.map(g => ({
         geo: g, name: GEO_NAMES[g] || g, type: 'Мобильные (4G/LTE)',

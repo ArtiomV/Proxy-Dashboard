@@ -4,13 +4,41 @@
 // 03.10: карточка «SLA за 30 дней» убрана по решению владельца — число проверок
 // выглядело сломанным (миллионы), а «Доступность» уже есть на «Обзоре».
 
-var _prof=null;
+var _prof=null,_profOnb=null;
 function renderProfile(){
-  api('/api/client/profile').catch(function(){return null}).then(function(p){
-    _prof=p&&!p.error?p:null;
+  // Профиль и анкета — параллельно (2026-10-15): раньше шли по очереди.
+  Promise.all([
+    api('/api/client/profile').catch(function(){return null}),
+    api('/api/client/onboarding').catch(function(){return null})
+  ]).then(function(r){
+    var p=r[0];_prof=p&&!p.error?p:null;_profOnb=r[1]&&!r[1].error?r[1]:null;
     if(!_prof){document.getElementById('profBody').innerHTML='<div class="v3-emptybox"><div class="t">Не удалось загрузить профиль</div></div>';return}
     _profRender();
   });
+}
+var _CONTRACT_ST={none:'',awaiting_template:'Договор готовится',generated:'Договор подготовлен',sent:'Договор отправлен по ЭДО',signed:'Договор подписан'};
+function _profRequisites(row){
+  var p=_prof,l=p.legal||{},o=_profOnb||{},q=o.requisites||{},locked=!!o.locked;
+  var legal=o.entityType==='legal'||p.clientType==='legal'||!!l.inn;
+  var act='';
+  if(locked)act='<span class="v3-pill green">договор подписан</span>';
+  else act='<button type="button" class="v3-btn sm" data-on-click="onbOpenLegal()">'+(legal&&(q.inn||l.inn)?'Изменить':'Заполнить')+'</button>';
+  var h='<div class="v3-card"><div style="display:flex;align-items:center;gap:10px;margin-bottom:10px"><h3 style="margin:0;flex:1">Реквизиты для документов</h3>'+act+'</div>';
+  if(!legal&&!locked){
+    h+='<div class="v3-note" style="margin-bottom:10px">Вы работаете как физическое лицо — реквизиты не нужны. Если вы юрлицо или ИП, заполните их: подготовим договор и отправим по ЭДО.</div>'+
+       '<button type="button" class="v3-btn" data-on-click="onbOpenLegal()">Я юрлицо / ИП — заполнить реквизиты</button></div>';
+    return h;
+  }
+  var cs=_CONTRACT_ST[o.contractStatus||'none'];
+  h+=row('Название',V3.esc(q.legal_name||l.name||_prof.name))+row('ИНН',V3.esc(q.inn||l.inn),'',true)+row('КПП',V3.esc(q.kpp||l.kpp),'',true)+row('Адрес',V3.esc(q.legal_address||l.address));
+  if(q.signer_name)h+=row('Подписант',V3.esc([q.signer_position,q.signer_name].filter(Boolean).join(', ')));
+  if(q.bank_name)h+=row('Банк',V3.esc(q.bank_name+(q.bik?', БИК '+q.bik:'')));
+  if(q.account)h+=row('Расчётный счёт',V3.esc(q.account),'',true);
+  if(q.contact_name)h+=row('Контакт',V3.esc([q.contact_name,q.contact_phone,q.contact_email].filter(Boolean).join(', ')));
+  if(q.edo_operator||q.edo_id)h+=row('ЭДО',V3.esc([q.edo_operator,q.edo_id].filter(Boolean).join(', ')));
+  h+=row('Договор',V3.esc([l.contract,l.contractDate?'от '+V3.date(l.contractDate):''].filter(Boolean).join(' ')||cs));
+  h+='<div class="v3-note" style="margin-top:8px">'+(locked?'Договор подписан — изменить реквизиты может менеджер: нажмите «Связаться с нами» в меню.':'Реквизиты можно менять до подписания договора — после изменения мы подготовим договор заново. Они попадают в договор, счета и акты.')+'</div></div>';
+  return h;
 }
 function _profRender(){
   var p=_prof,l=p.legal||{},cur=p.currency==='RUB'?'₽':p.currency;
@@ -24,10 +52,7 @@ function _profRender(){
     row('Тип клиента',V3.esc(p.clientTypeLabel))+
     row('Тариф',V3.esc(tariff))+
     row('Клиент с',p.createdAt?V3.esc(V3.date(p.createdAt)):'')+'</div>';
-  h+='<div class="v3-card"><h3 style="margin-bottom:10px">Реквизиты для документов</h3>'+
-    row('Название',V3.esc(l.name||p.name))+row('ИНН',V3.esc(l.inn),'',true)+row('КПП',V3.esc(l.kpp),'',true)+row('Адрес',V3.esc(l.address))+
-    row('Договор',V3.esc([l.contract,l.contractDate?'от '+V3.date(l.contractDate):''].filter(Boolean).join(' ')))+
-    '<div class="v3-note" style="margin-top:8px">Изменить реквизиты можно через менеджера — они попадают в акты и счета.</div></div>';
+  h+=_profRequisites(row);
   h+='<div class="v3-card"><h3 style="margin-bottom:10px">Безопасность</h3><div style="display:flex;flex-direction:column;gap:10px">'+
     '<div class="v3-srow"><span class="k">Пароль</span><span class="v">'+(p.pwChangedAt?'Изменён '+V3.esc(V3.date(p.pwChangedAt)):'Задан')+'</span><button type="button" class="v3-btn sm link" data-on-click="profPassword()">Сменить</button></div>'+
     '<div class="v3-srow"><span class="k">Telegram</span><span class="v">'+(p.tgLinked?(p.tgUsername?'@'+V3.esc(p.tgUsername):'привязан'):'<span style="color:var(--v3-faint)">не привязан</span>')+'</span>'+

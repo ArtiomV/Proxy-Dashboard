@@ -116,7 +116,7 @@ function mountRetail({ poolRows = [], clients = [], tariffs = {}, settings = {},
   const app = express();
   app.use(express.json());
   app.use(router);
-  return { app, poolDb, purchasesDb };
+  return { app, poolDb, purchasesDb, router };
 }
 
 describe('GET /api/admin/retail/pool — rows', () => {
@@ -135,6 +135,8 @@ describe('GET /api/admin/retail/pool — rows', () => {
   });
 });
 
+const HEALTHY = { IS_ONLINE: 'yes', EXT_IP: '1.2.3.4', SimStatus: 'SIM OK', ping_stats: '160ms, 0% loss' };
+
 describe('POST /api/admin/retail/pool/add', () => {
   it('создаёт free-порты на свободных модемах (пустой portName → apply → insert)', async () => {
     const posted = [];
@@ -143,9 +145,13 @@ describe('POST /api/admin/retail/pool/add', () => {
       fetchApiImpl: async (srv, path) => {
         if (path === '/apix/show_status_json') {
           return [
-            { modem_details: { IMEI: 'imei_free' }, net_details: { IS_ONLINE: 'yes' } },
-            { modem_details: { IMEI: 'imei_busy' }, net_details: { IS_ONLINE: 'yes' } },
-            { modem_details: { IMEI: 'imei_off' }, net_details: { IS_ONLINE: 'no' } },
+            { modem_details: { IMEI: 'imei_free' }, net_details: HEALTHY },
+            { modem_details: { IMEI: 'imei_busy' }, net_details: HEALTHY },
+            { modem_details: { IMEI: 'imei_off' }, net_details: { ...HEALTHY, IS_ONLINE: 'no' } },
+            // 2026-10-15: онлайн, но выдавать нечего — не кандидаты
+            { modem_details: { IMEI: 'imei_noip' }, net_details: { ...HEALTHY, EXT_IP: '' } },
+            { modem_details: { IMEI: 'imei_nosim' }, net_details: { ...HEALTHY, SimStatus: 'SIM NOT INSERTED' } },
+            { modem_details: { IMEI: 'imei_dead' }, net_details: { ...HEALTHY, ping_stats: '0ms, 100% loss' } },
           ];
         }
         if (path === '/apix/list_ports_json') {
@@ -162,6 +168,32 @@ describe('POST /api/admin/retail/pool/add', () => {
     expect(posted[0].path).toBe('/conf/add_port?imei=imei_free');
     expect(posted[0].formData.portName).toBe('');
     expect(poolDb._rows.some(r => r.status === 'free' && r.port_id === res.body.created[0])).toBe(true);
+  });
+
+  it('покупка при пустом пуле сама поднимает порт на свободном модеме (не «закончились»)', async () => {
+    const clients = [{ id: 'c_od', login: 'u_od', name: 'O', portName: 'u_od', clientType: 'individual', emailVerified: true, blocked: false, balance: 10000, testUsed: true, tariffId: null }];
+    const { app, poolDb } = mountRetail({
+      clients, user: { login: 'u_od', isAdmin: 0 }, poolRows: [],
+      tariffs: { 21: { id: 21, name: 'T', active: 1, public: 1, duration_hours: null, price: 3000, min_topup_days: 1, server: 'S1', geo: 'MD' } },
+      fetchApiImpl: async (srv, path) => path === '/apix/show_status_json'
+        ? [{ modem_details: { IMEI: 'imei_e', NICK: 'MD_E' }, net_details: HEALTHY }]
+        : {},
+    });
+    const res = await request(app).post('/api/client/buy_proxy').send({ tariff_id: 21 });
+    expect(res.status).toBe(200);
+    expect(poolDb._rows.filter(r => r.status === 'leased').length).toBe(1);
+  });
+
+  it('подпитка: до цели не хватает → создаёт недостающие, цель достигнута → ничего не делает', async () => {
+    const feed = async (srv, path) => path === '/apix/show_status_json'
+      ? ['a', 'b', 'c', 'd'].map(x => ({ modem_details: { IMEI: 'imei_' + x, NICK: 'MD_' + x }, net_details: HEALTHY }))
+      : {};
+    const { router, poolDb } = mountRetail({ poolRows: [], fetchApiImpl: feed });
+    const r1 = await router.topUpPool(3);
+    expect(r1.servers.S1).toMatchObject({ free: 0, added: 3 });
+    expect(poolDb._rows.filter(r => r.status === 'free').length).toBe(3);
+    const r2 = await router.topUpPool(3);
+    expect(r2.servers.S1).toMatchObject({ free: 3, added: 0 });
   });
 
   it('count вне 1..50 → 400', async () => {
