@@ -91,7 +91,7 @@ function mountRetail({ poolRows = [], clients = [], tariffs = {}, settings = {},
     logger: silent,
     authMiddleware: auth, adminMiddleware: auth,
     clients, saveClients: () => {},
-    tariffsDb: { byId: (id) => tariffs[id] || null },
+    tariffsDb: { byId: (id) => tariffs[id] || null, publicActive: () => Object.values(tariffs).filter(t => t.public && t.active) },
     retailPoolDb: poolDb,
     retailPurchasesDb: purchasesDb,
     atomicDebit: () => {},
@@ -275,6 +275,67 @@ describe('buy_proxy: тариф со списком серверов', () => {
     const res = await request(app).post('/api/client/buy_proxy').send({ tariff_id: 11 });
     expect(res.status).toBe(200);
     expect(poolDb.byPort('S3', 'p_s3')).toMatchObject({ status: 'leased', client_id: 'c_m' });
+  });
+});
+
+// 2026-10-15: покупка пакетом — гео + количество, ступень цены по общему числу прокси.
+describe('buy_proxies: количество, гео и ступени цены', () => {
+  const TIERS = {
+    1: { id: 1, name: '1-29 прокси', active: 1, public: 1, duration_hours: null, price: 4500, min_topup_days: 1, server: 'S1, S3', geo: 'MD', min_proxies: 1 },
+    2: { id: 2, name: '30-49 прокси', active: 1, public: 1, duration_hours: null, price: 4275, min_topup_days: 1, server: 'S1, S3', geo: 'MD', min_proxies: 30 },
+    3: { id: 3, name: 'Румыния', active: 1, public: 1, duration_hours: null, price: 5000, min_topup_days: 1, server: 'RO1', geo: 'RO', min_proxies: 1 },
+  };
+  const pool = (n, server = 'S1', start = 0) => Array.from({ length: n }, (_, i) => ({ id: start + i + 1, server, port_id: `p${start + i}`, status: 'free', client_id: null }));
+  const mk = (over = {}) => [{
+    id: 'c_b', login: 'u_b', name: 'B', portName: 'u_b', clientType: 'individual',
+    emailVerified: true, blocked: false, balance: 100000, testUsed: true, tariffId: null, ...over,
+  }];
+
+  it('3 прокси MD → выдано 3 по ступени «1-29», тариф клиента = ступень', async () => {
+    const clients = mk();
+    const { app, poolDb } = mountRetail({ clients, user: { login: 'u_b', isAdmin: 0 }, poolRows: pool(5), tariffs: TIERS });
+    const res = await request(app).post('/api/client/buy_proxies').send({ geo: 'md', quantity: 3 });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ ok: true, bought: 3, requested: 3, tier: { id: 1 } });
+    expect(poolDb.byStatus('leased').length).toBe(3);
+    expect(clients[0].tariffId).toBe(1);
+  });
+
+  it('у клиента 28 прокси, покупает ещё 2 → итог 30, ступень «30-49» для всех', async () => {
+    const clients = mk({ tariffId: 1 });
+    const owned = Array.from({ length: 28 }, (_, i) => ({ id: 100 + i, server: 'S1', port_id: `own${i}`, status: 'leased', client_id: 'c_b' }));
+    const { app } = mountRetail({ clients, user: { login: 'u_b', isAdmin: 0 }, poolRows: [...owned, ...pool(2, 'S3')], tariffs: TIERS });
+    const res = await request(app).post('/api/client/buy_proxies').send({ geo: 'MD', quantity: 2 });
+    expect(res.status).toBe(200);
+    expect(res.body).toMatchObject({ bought: 2, tier: { id: 2, name: '30-49 прокси' }, total_proxies: 30 });
+    expect(clients[0].tariffId).toBe(2);
+  });
+
+  it('свободных меньше, чем просят → 409 POOL_SHORT без списаний и без смены тарифа', async () => {
+    const clients = mk();
+    const { app, poolDb } = mountRetail({ clients, user: { login: 'u_b', isAdmin: 0 }, poolRows: pool(2), tariffs: TIERS });
+    const res = await request(app).post('/api/client/buy_proxies').send({ geo: 'MD', quantity: 5 });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ code: 'POOL_SHORT', available: 2 });
+    expect(poolDb.byStatus('leased').length).toBe(0);
+    expect(clients[0].tariffId).toBe(null);
+  });
+
+  it('денег не хватает на первые сутки за все прокси → 402 до выдачи', async () => {
+    const clients = mk({ balance: 100 });
+    const { app, poolDb } = mountRetail({ clients, user: { login: 'u_b', isAdmin: 0 }, poolRows: pool(5), tariffs: TIERS });
+    const res = await request(app).post('/api/client/buy_proxies').send({ geo: 'MD', quantity: 3 });
+    expect(res.status).toBe(402);
+    expect(res.body.code).toBe('INSUFFICIENT_BALANCE');
+    expect(poolDb.byStatus('leased').length).toBe(0);
+  });
+
+  it('прокси другой страны при действующем тарифе → 409 GEO_LOCKED; количество вне 1–50 → 400', async () => {
+    const clients = mk({ tariffId: 1 });
+    const { app } = mountRetail({ clients, user: { login: 'u_b', isAdmin: 0 }, poolRows: pool(5, 'RO1'), tariffs: TIERS });
+    expect((await request(app).post('/api/client/buy_proxies').send({ geo: 'RO', quantity: 1 })).body.code).toBe('GEO_LOCKED');
+    expect((await request(app).post('/api/client/buy_proxies').send({ geo: 'MD', quantity: 0 })).status).toBe(400);
+    expect((await request(app).post('/api/client/buy_proxies').send({ geo: 'MD', quantity: 51 })).status).toBe(400);
   });
 });
 

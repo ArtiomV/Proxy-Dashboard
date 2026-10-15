@@ -105,7 +105,7 @@ module.exports = function createRetailRouter(deps) {
     }
   }
 
-  r.post('/api/client/buy_proxy', authMiddleware, async (req, res) => {
+  async function buyProxyHandler(req, res) {
     if (!getSetting('retail_enabled', false)) return res.status(404).json({ error: 'Not found' });
     const client = _clientOf(req);
     if (!client) return res.status(404).json({ error: 'Client not found' });
@@ -395,7 +395,83 @@ module.exports = function createRetailRouter(deps) {
       charge_pending: !!chargeFailed,   // DEEP-22: честный статус списания
       purchase_id: purchaseId,
     });
+  }
+  r.post('/api/client/buy_proxy', authMiddleware, buyProxyHandler);
+
+  // 2026-10-15: покупка пакетом — гео + количество. Ступень цены выбирается
+  // САМА по общему числу прокси клиента после покупки (тарифы гео с
+  // min_proxies ≤ итог; берётся самая крупная ступень). Цена ступени действует
+  // на все прокси клиента: биллинг берёт одну цену на клиента (tariff_id).
+  // Каждая прокси выдаётся тем же buyProxyHandler — все проверки, резерв,
+  // списание первых суток и откаты едины; при сбое на k-й прокси выданные
+  // остаются, ответ сообщает, сколько выдано.
+  const MAX_BATCH = 50;
+  r.post('/api/client/buy_proxies', authMiddleware, async (req, res) => {
+    if (!getSetting('retail_enabled', false)) return res.status(404).json({ error: 'Not found' });
+    const client = _clientOf(req);
+    if (!client) return res.status(404).json({ error: 'Client not found' });
+    if (client.blocked) return res.status(403).json({ error: 'Аккаунт заблокирован' });
+    if (!client.emailVerified) return res.status(403).json({ error: 'Подтвердите email перед покупкой', code: 'EMAIL_NOT_VERIFIED' });
+    const geo = String((req.body && req.body.geo) || '').trim().toUpperCase();
+    const quantity = parseInt(req.body && req.body.quantity, 10);
+    if (!geo) return res.status(400).json({ error: 'Выберите страну' });
+    if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_BATCH) {
+      return res.status(400).json({ error: `Количество — от 1 до ${MAX_BATCH} за один заказ` });
+    }
+    const tiers = tariffsDb.publicActive()
+      .filter(t => (t.type || 'per_modem') === 'per_modem' && t.duration_hours == null && String(t.geo || '').toUpperCase() === geo)
+      .sort((a, b) => (a.min_proxies || 1) - (b.min_proxies || 1));
+    if (!tiers.length) return res.status(400).json({ error: 'Для этой страны нет тарифов' });
+    // Один прайс на клиента: прокси другого гео по ступеням — через поддержку.
+    const current = client.tariffId != null ? tariffsDb.byId(client.tariffId) : null;
+    if (current && String(current.geo || '').toUpperCase() !== geo && current.duration_hours == null) {
+      return res.status(409).json({ error: 'У вас прокси другой страны — для второй страны напишите в поддержку', code: 'GEO_LOCKED' });
+    }
+    const owned = retailPoolDb.byClient(client.id).filter(p => p.status === 'leased').length;
+    const total = owned + quantity;
+    const tier = tiers.filter(t => (t.min_proxies || 1) <= total).pop() || tiers[0];
+    // Хватит ли свободных портов — до первого списания, без частичной выдачи.
+    const tierServers = String(tier.server || '').split(/[\s,;]+/).map(x => x.trim()).filter(Boolean);
+    const poolServers = String(getSetting('retail_pool_servers', '')).split(',').map(x => x.trim()).filter(Boolean);
+    const servers = tierServers.length ? tierServers : poolServers;
+    const free = retailPoolDb.byStatus('free').filter(p => !servers.length || servers.includes(p.server)).length;
+    if (free < quantity) {
+      return res.status(409).json({ error: free ? `Сейчас свободно ${free} прокси этой страны — уменьшите количество` : 'Свободные прокси этой страны закончились — попробуйте позже', code: 'POOL_SHORT', available: free });
+    }
+    const days = new Date(new Date().getFullYear(), new Date().getMonth() + 1, 0).getDate();
+    const perProxy = Math.round((tier.price / days) * 100) / 100;
+    const needed = Math.round(perProxy * quantity * 100) / 100;
+    if ((client.balance || 0) < needed) {
+      return res.status(402).json({ error: `Недостаточно средств: нужно ${needed} ₽ (первые сутки за ${quantity} прокси)`, code: 'INSUFFICIENT_BALANCE', required: needed });
+    }
+    const prevTariffId = client.tariffId;
+    if (client.tariffId !== tier.id) { client.tariffId = tier.id; saveClients(clients); }
+
+    const results = [];
+    let error = null;
+    for (let i = 0; i < quantity; i++) {
+      const out = { statusCode: 200, body: null };
+      const fakeRes = { status(c) { out.statusCode = c; return this; }, json(b) { out.body = b; return this; } };
+      const fakeReq = Object.create(req);
+      fakeReq.body = { tariff_id: tier.id };
+      try { await buyProxyHandler(fakeReq, fakeRes); }
+      catch (e) { out.statusCode = 500; out.body = { error: e.message }; }
+      if (out.statusCode !== 200 || !out.body || !out.body.ok) { error = { status: out.statusCode, ...(out.body || {}) }; break; }
+      results.push({ port_id: out.body.port_id, server: out.body.server, charged: out.body.charged, charge_pending: out.body.charge_pending });
+    }
+    // Ничего не выдано — возвращаем прежний тариф (ступень не должна меняться без покупки).
+    if (!results.length && client.tariffId !== prevTariffId) { client.tariffId = prevTariffId; saveClients(clients); }
+    auditLog(client.login, 'retail_buy_batch', { geo, requested: quantity, bought: results.length, tier: tier.id, ip: getClientIp(req) });
+    const body = {
+      ok: results.length > 0, bought: results.length, requested: quantity,
+      tier: { id: tier.id, name: tier.name, price: tier.price, min_proxies: tier.min_proxies || 1 },
+      total_proxies: owned + results.length, results,
+    };
+    if (error) body.error = results.length ? `Выдано ${results.length} из ${quantity}: ${error.error || 'ошибка'}` : (error.error || 'Покупка не выполнена');
+    if (error && error.code) body.code = error.code;
+    res.status(results.length ? 200 : (error && error.status) || 500).json(body);
   });
+
 
   // Состояние пула (для админки «Розница»; витрина клиента — /api/client/tariffs в tariffs.js)
   r.get('/api/admin/retail/pool', authMiddleware, deps.adminMiddleware, (req, res) => {

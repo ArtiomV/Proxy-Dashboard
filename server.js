@@ -3361,6 +3361,12 @@ app.use(require('./src/routes/public-status')({ db, apiServers, SERVER_COUNTRIES
 // Twenty CRM (src/crm/twenty-leads.js), сбой CRM → алерт crm_lead_failed.
 app.use(require('./src/routes/public-lead')({ logger, db, validate, getSetting, alerts, getClientIp }));
 
+// 2026-10-15: ЛК розницы — физлицо/юрлицо (анкета, задача руководителю),
+// заказы прокси РФ (выдаёт менеджер), справочник магазина.
+app.use(require('./src/routes/client-onboarding')({
+  db, logger, authMiddleware, adminMiddleware, clients, saveClients, alerts, getSetting,
+  crm: require('./src/crm/twenty-leads'), auditLog, getClientIp, logActivity, tariffsDb, retailPoolDb,
+}));
 // Покупка прокси розницей (WP2): buy_proxy + тест-день + состояние пула.
 // Э2: fetchAllServersDataCached — legacy_preview пула.
 app.use(require('./src/routes/retail')({

@@ -222,12 +222,42 @@ function _tariffServersValue(){
   checked.sort(function(x,y){var ix=order.indexOf(x),iy=order.indexOf(y);return (ix<0?99:ix)-(iy<0?99:iy)});
   return checked.join(', ');
 }
+// 2026-10-15: заказы прокси РФ и анкеты юрлиц из ЛК (src/routes/client-onboarding.js).
+var CAB_ORDER_ST={new:'Новый',in_progress:'В работе',done:'Выдано',cancelled:'Отменён'};
+var CAB_CONTRACT_ST={awaiting_template:'Ждёт договора',generated:'Договор готов',sent:'Отправлен по ЭДО',signed:'Подписан'};
+function _cabSel(kind,id,cur,map){var h='<select class="form-input" style="padding:3px 6px;font-size:12px" data-on-change="setCabinetStatus(\''+kind+'\',\''+esc(String(id))+'\',this.value)">';Object.keys(map).forEach(function(k){h+='<option value="'+k+'"'+(k===cur?' selected':'')+'>'+map[k]+'</option>'});return h+'</select>'}
+function loadCabinetRequests(){
+  var ob=document.getElementById('cabinetOrdersTable'),lb=document.getElementById('cabinetLegalTable');if(!ob)return;
+  var th='style="text-align:left;padding:6px 8px;border-bottom:1px solid var(--border)"',td='style="padding:6px 8px;border-bottom:1px solid var(--border)"';
+  api(API+'/api/admin/proxy_orders').then(function(d){
+    var rows=(d&&d.orders)||[];
+    if(!rows.length){ob.innerHTML='<div style="font-size:12px;color:var(--text-3)">Заказов прокси РФ пока нет</div>';return}
+    var h='<div style="font-weight:600;font-size:12px;margin-bottom:6px">Заказы прокси РФ</div><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th '+th+'>№</th><th '+th+'>Дата</th><th '+th+'>Клиент</th><th '+th+'>Тип</th><th '+th+'>Гео</th><th '+th+'>Кол-во</th><th '+th+'>Комментарий</th><th '+th+'>Статус</th></tr></thead><tbody>';
+    rows.forEach(function(o){h+='<tr><td '+td+'>'+o.id+'</td><td '+td+'>'+esc(String(o.created_at||'').slice(0,16))+'</td><td '+td+'>'+esc(o.client)+'</td><td '+td+'>'+esc(o.proxy_type)+'</td><td '+td+'>'+esc(o.geo)+'</td><td '+td+'>'+o.quantity+'</td><td '+td+'>'+esc(o.comment||'')+'</td><td '+td+'>'+_cabSel('order',o.id,o.status,CAB_ORDER_ST)+'</td></tr>'});
+    ob.innerHTML=h+'</tbody></table>';
+  }).catch(function(){ob.innerHTML='<div style="font-size:12px;color:var(--danger)">Ошибка загрузки</div>'});
+  api(API+'/api/admin/onboarding').then(function(d){
+    var rows=(d&&d.items)||[];
+    if(!rows.length){lb.innerHTML='<div style="font-size:12px;color:var(--text-3)">Анкет юрлиц пока нет</div>';return}
+    var h='<div style="font-weight:600;font-size:12px;margin-bottom:6px">Анкеты юрлиц</div><table style="width:100%;border-collapse:collapse;font-size:12px"><thead><tr><th '+th+'>Дата</th><th '+th+'>Организация</th><th '+th+'>ИНН / КПП</th><th '+th+'>Контакт</th><th '+th+'>ЭДО</th><th '+th+'>Договор</th></tr></thead><tbody>';
+    rows.forEach(function(o){var q=o.requisites||{};h+='<tr><td '+td+'>'+esc(String(o.created_at||'').slice(0,16))+'</td><td '+td+'>'+esc(q.legal_name||o.client)+'</td><td '+td+'>'+esc(q.inn||'')+' / '+esc(q.kpp||'—')+'</td><td '+td+'>'+esc([q.contact_name,q.contact_phone,q.contact_email].filter(Boolean).join(', '))+'</td><td '+td+'>'+esc([q.edo_operator,q.edo_id].filter(Boolean).join(', ')||'—')+'</td><td '+td+'>'+_cabSel('contract',o.client_id,o.contract_status,CAB_CONTRACT_ST)+'</td></tr>'});
+    lb.innerHTML=h+'</tbody></table>';
+  }).catch(function(){lb.innerHTML='<div style="font-size:12px;color:var(--danger)">Ошибка загрузки</div>'});
+}
+function setCabinetStatus(kind,id,value){
+  var url=kind==='order'?'/api/admin/proxy_orders/'+encodeURIComponent(id):'/api/admin/onboarding/'+encodeURIComponent(id);
+  var body=kind==='order'?{status:value}:{contract_status:value};
+  api(API+url,{method:'POST',json:body}).then(function(d){
+    if(d&&d.ok)showToast('Статус обновлён','success');else showToast((d&&d.error)||'Не удалось сохранить','error');
+  }).catch(function(){showToast('Ошибка соединения','error')});
+}
 async function loadTariffsAdmin(){
   var box=document.getElementById('tariffsTable');
   if(!box)return;
   if(!document.getElementById('tfId').value)_fillTariffServerSelect('');
   loadRetailPoolAdmin();
   loadRetailPoolPorts();
+  loadCabinetRequests();
   // WP3 (B2C Э4): эквайринг — настройки провайдера + журнал карточных платежей
   loadAcquiringSettings();
   loadCardPaymentsAdmin();

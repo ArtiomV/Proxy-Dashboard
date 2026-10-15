@@ -204,4 +204,61 @@ async function pushLead(getSetting, lead) {
   } finally { if (c) try { await c.end(); } catch { /* ignore */ } }
 }
 
-module.exports = { ping, pushLead, resetCache, tgUsername, TAG };
+/**
+ * 2026-10-15: задача руководителю из личного кабинета (юрлицо — договор по
+ * ЭДО; заказ прокси РФ — выдать вручную). Создаёт/находит персону и сделку
+ * клиента, задачу со статусом TODO и сроком dueInHours, исполнитель —
+ * участник CRM с email из настройки crm_task_assignee_email (иначе первый
+ * участник workspace), привязку задачи к персоне и сделке.
+ * task: {title, body, personName, email, phone, opportunityName, dueInHours}
+ */
+async function pushTask(getSetting, task) {
+  let c;
+  try {
+    c = await _connect(getSetting);
+    const ws = await _workspace(c);
+    const email = String(task.email || '').trim().toLowerCase();
+    const phone = String(task.phone || '').replace(/[^\d+]/g, '');
+    let personId = null;
+    if (email) {
+      const r = await c.query(`SELECT id FROM ${ws}.person WHERE "deletedAt" IS NULL AND lower("emailsPrimaryEmail") = $1 LIMIT 1`, [email]);
+      if (r.rows.length) personId = r.rows[0].id;
+    }
+    if (!personId && phone) {
+      const r = await c.query(`SELECT id FROM ${ws}.person WHERE "deletedAt" IS NULL AND "phonesPrimaryPhoneNumber" = $1 LIMIT 1`, [phone]);
+      if (r.rows.length) personId = r.rows[0].id;
+    }
+    if (!personId) {
+      const ins = await c.query(
+        `INSERT INTO ${ws}.person ("nameFirstName","nameLastName","emailsPrimaryEmail","phonesPrimaryPhoneNumber","importSource","createdBySource","createdByName")
+         VALUES ($1,$2,$3,$4,'cabinet','IMPORT',$5) RETURNING id`,
+        ['Клиент ЛК', String(task.personName || email || phone || 'без имени').slice(0, 200), email || null, phone || null, TAG]);
+      personId = ins.rows[0].id;
+    }
+    let opportunityId = null;
+    const exOpp = await c.query(`SELECT id FROM ${ws}.opportunity WHERE "deletedAt" IS NULL AND "pointOfContactId" = $1 LIMIT 1`, [personId]);
+    if (exOpp.rows.length) opportunityId = exOpp.rows[0].id;
+    else {
+      const opp = await c.query(
+        `INSERT INTO ${ws}.opportunity ("name","stage","pointOfContactId","createdBySource","createdByName")
+         VALUES ($1,$2,$3,'IMPORT',$4) RETURNING id`,
+        [String(task.opportunityName || task.title).slice(0, 200), await _stage(c, ws), personId, TAG]);
+      opportunityId = opp.rows[0].id;
+    }
+    const wantAssignee = String(getSetting('crm_task_assignee_email', '') || '').trim().toLowerCase();
+    const mem = await c.query(
+      `SELECT id FROM ${ws}."workspaceMember" WHERE "deletedAt" IS NULL ORDER BY (lower("userEmail") = $1) DESC, "createdAt" LIMIT 1`, [wantAssignee]);
+    const assigneeId = mem.rows.length ? mem.rows[0].id : null;
+    const due = new Date(Date.now() + (Number(task.dueInHours) || 24) * 3600000).toISOString();
+    const t = await c.query(
+      `INSERT INTO ${ws}.task ("title","bodyV2Markdown","status","dueAt","assigneeId","createdBySource","createdByName")
+       VALUES ($1,$2,'TODO',$3,$4,'IMPORT',$5) RETURNING id`,
+      [String(task.title).slice(0, 300), String(task.body || ''), due, assigneeId, TAG]);
+    await c.query(
+      `INSERT INTO ${ws}."taskTarget" ("taskId","targetPersonId","targetOpportunityId","createdBySource","createdByName")
+       VALUES ($1,$2,$3,'IMPORT',$4)`, [t.rows[0].id, personId, opportunityId, TAG]);
+    return { taskId: String(t.rows[0].id), personId: String(personId), opportunityId: String(opportunityId) };
+  } finally { if (c) try { await c.end(); } catch { /* ignore */ } }
+}
+
+module.exports = { ping, pushLead, pushTask, resetCache, tgUsername, TAG };

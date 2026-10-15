@@ -695,6 +695,16 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
             <span id="tariffFormStatus" style="font-size:12px;margin-left:4px"></span>
           </div>
         </div>
+        <!-- 2026-10-15: заказы прокси РФ (выдаёт менеджер) и анкеты юрлиц из ЛК -->
+        <div class="analytics-card" style="margin-top:16px">
+          <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
+            <h3 style="margin:0">Заказы и анкеты из ЛК</h3>
+            <button class="btn btn-sm" data-on-click="loadCabinetRequests()">Обновить</button>
+          </div>
+          <div style="font-size:12px;color:var(--text-2);margin-bottom:10px">Заказы прокси РФ — выдаёт менеджер. Анкеты юрлиц — договор по ЭДО; после подписания переведите клиента в «Юрлицо» в карточке клиента.</div>
+          <div id="cabinetOrdersTable"><div style="font-size:12px;color:var(--text-3)">Загрузка...</div></div>
+          <div id="cabinetLegalTable" style="margin-top:14px"></div>
+        </div>
         <!-- Пул розницы: боксы выдачи по умолчанию (retail_pool_servers, CSV) -->
         <div class="analytics-card" style="margin-top:16px">
           <h3 style="margin:0 0 6px">Пул розницы</h3>
@@ -1660,7 +1670,7 @@ chmod 440 /etc/sudoers.d/mon-dashboard</pre>
 <script src="/js/admin/settings.js?v=1001a"></script>
 <script src="/js/admin/speed-monitor.js?v=0817c"></script>
 <script src="/js/admin/server-metrics.js?v=0927b"></script>
-<script src="/js/admin.js?v=1015a"></script>
+<script src="/js/admin.js?v=1015b"></script>
 <script src="/js/admin/sse.js?v=0823k"></script>
 </body>
 </html>

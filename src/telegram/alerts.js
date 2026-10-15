@@ -518,6 +518,23 @@ const RULES = {
     dedupeKey: p => 'bill_' + (p.client_id || '') + '_' + (p.period || '') + '_' + (p.amount || 0),
     render: p => `💳 <b>Выставлен счёт: ${formatRub(p.amount)}</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>\nПериод: ${esc(p.period || '?')}\nНомер: ${esc(p.billNumber || '—')}\nВ банке: ${p.tochkaPushed ? 'создан в Точке' : 'только локально'}`,
   },
+  // 2026-10-15: задачи руководителю из личного кабинета розницы.
+  legal_onboarding: {
+    title: 'Новый клиент-юрлицо: договор по ЭДО',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 60,
+    dedupeKey: p => 'legal_onb_' + (p.client_id || ''),
+    render: p => `🏢 <b>Новый клиент-юрлицо — нужен договор</b>\n\nКлиент: <b>${esc(p.legal_name || '?')}</b> (ИНН ${esc(p.inn || '—')})\nЛогин: ${esc(p.login || '?')}\nКонтакт: ${esc(p.contact || '—')}\nЭДО: ${esc(p.edo || '—')}\n\n<b>Задача:</b> выслать договор по ЭДО и связаться с клиентом.${p.crm_task ? '\nЗадача в CRM создана.' : ''}`,
+  },
+  proxy_order_ru: {
+    title: 'Заказ прокси РФ из ЛК',
+    priority: 'important',
+    defaultOn: true,
+    cooldownSec: 30,
+    dedupeKey: p => 'proxy_order_' + (p.order_id || ''),
+    render: p => `🇷🇺 <b>Заказ прокси РФ №${esc(p.order_id)}</b>\n\nКлиент: <b>${esc(p.client || '?')}</b>\nТип: ${esc(p.proxy_type)}\nГео: ${esc(p.geo)}\nКоличество: <b>${esc(p.quantity)}</b>${p.comment ? '\nКомментарий: ' + esc(p.comment) : ''}\n\n<b>Задача:</b> связаться с клиентом и выдать прокси.${p.crm_task ? '\nЗадача в CRM создана.' : ''}`,
+  },
   bill_requested: {
     title: 'Клиент запросил счёт',
     priority: 'important',

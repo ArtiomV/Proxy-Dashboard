@@ -280,6 +280,8 @@ function showApp(){
   document.getElementById('loginOverlay').style.display='none';
   document.getElementById('appMain').style.display='block';
   loadData();
+  // 2026-10-15: «физлицо или юрлицо» — один раз для самостоятельно зарегистрированных.
+  if(typeof v3OnbStart==='function')setTimeout(v3OnbStart,1200);
   if(refreshInterval) clearInterval(refreshInterval);
   refreshInterval=setInterval(loadData,60*60*1000);
 }
@@ -572,6 +574,8 @@ function loadShop(){
     var b=document.getElementById('shopVerifyBanner');
     if(b&&p&&!p.error)b.style.display=p.emailVerified?'none':'';
   }).catch(function(){});
+  // 2026-10-15: магазин v3 — страна + количество (ступени цены), Россия — заявка менеджеру.
+  if(typeof shopLoad==='function'){shopLoad();return}
   if(_shopLoaded)return;
   api('/api/client/tariffs').then(function(data){
     if(!data||data.error||!data.tariffs){
